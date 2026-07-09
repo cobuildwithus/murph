@@ -44,6 +44,76 @@ export type HostedGroupNewsletterParticipantsResult =
 
 type ReadClient = PrismaClient;
 
+interface HostedGroupNewsletterDirectNudgeRoute {
+  channel: "linq" | "telegram";
+  threadId: string;
+}
+
+export async function enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort(input: {
+  groupId: string;
+  memberId: string;
+  prisma?: ReadClient;
+}): Promise<void> {
+  const prisma = input.prisma ?? getPrisma();
+  try {
+    const group = await prisma.hostedGroup.findFirst({
+      where: {
+        id: input.groupId,
+        members: {
+          some: { memberId: input.memberId },
+        },
+      },
+      select: {
+        displayName: true,
+        id: true,
+        runtimeMemberId: true,
+      },
+    });
+    if (!group?.runtimeMemberId) {
+      return;
+    }
+    if (!await hasHostedRuntimeActiveAccess(group.runtimeMemberId, { prisma })) {
+      return;
+    }
+
+    const emailGrant = await prisma.hostedVaultShare.findFirst({
+      where: {
+        destinationMemberId: group.runtimeMemberId,
+        grantorMemberId: input.memberId,
+        projectionKind: "group-email.v0",
+        status: "granted",
+      },
+      select: { grantorMemberId: true },
+    });
+    if (!emailGrant) {
+      return;
+    }
+    if (!await readActiveHostedMemberAccess({ memberId: input.memberId, prisma })) {
+      return;
+    }
+
+    const authorization = await readHostedMemberEmailAuthorization({
+      memberId: input.memberId,
+      prisma,
+    });
+    const address = normalizeHostedEmailAddress(
+      authorization?.verifiedEmail?.address ?? null,
+    );
+    if (address) {
+      return;
+    }
+
+    await appendGroupNewsletterEmailNeededWakeBestEffort({
+      groupDisplayName: group.displayName ?? null,
+      groupId: group.id,
+      memberId: input.memberId,
+      prisma,
+    });
+  } catch {
+    // Joining should not fail because a private missing-email nudge could not be evaluated.
+  }
+}
+
 export async function readHostedGroupNewsletterParticipants(input: {
   groupId: string;
   prisma?: ReadClient;
@@ -210,70 +280,91 @@ async function enqueueMissingNewsletterEmailWakesBestEffort(input: {
   prisma: ReadClient;
 }): Promise<void> {
   for (const memberId of input.missingMemberIds) {
-    const eventId = buildGroupNewsletterEmailNeededEventId({
+    await appendGroupNewsletterEmailNeededWakeBestEffort({
+      groupDisplayName: input.groupDisplayName,
       groupId: input.groupId,
       memberId,
+      prisma: input.prisma,
     });
-    try {
-      if (!await hasHostedMemberDirectNewsletterNudgeRoute({
-        memberId,
-        prisma: input.prisma,
-      })) {
-        continue;
-      }
-
-      const appended = await input.prisma.$transaction(async (tx) =>
-        appendHostedMailboxEnvelopeTx({
-          envelope: buildHostedExecutionGroupNewsletterEmailNeededWake({
-            eventId,
-            groupDisplayName: input.groupDisplayName,
-            groupId: input.groupId,
-            memberId,
-            occurredAt: new Date().toISOString(),
-          }),
-          tx,
-        })
-      );
-      if (!appended.inserted) {
-        continue;
-      }
-      try {
-        await signalHostedMailboxAppendRuntime({
-          expectedUserId: memberId,
-          mailboxItemId: appended.item.id,
-        });
-      } catch {
-        // The mailbox item is durable; the destination runtime will observe it later.
-      }
-    } catch {
-      // Missing-email private nudges are best-effort and must not fail read_stats.
-    }
   }
 }
 
-async function hasHostedMemberDirectNewsletterNudgeRoute(input: {
+async function appendGroupNewsletterEmailNeededWakeBestEffort(input: {
+  groupDisplayName: string | null;
+  groupId: string;
   memberId: string;
   prisma: ReadClient;
-}): Promise<boolean> {
+}): Promise<void> {
+  const eventId = buildGroupNewsletterEmailNeededEventId({
+    groupId: input.groupId,
+    memberId: input.memberId,
+  });
+  try {
+    const directRoute = await readHostedMemberDirectNewsletterNudgeRoute({
+      memberId: input.memberId,
+      prisma: input.prisma,
+    });
+    if (!directRoute) {
+      return;
+    }
+
+    const appended = await input.prisma.$transaction(async (tx) =>
+      appendHostedMailboxEnvelopeTx({
+        envelope: buildHostedExecutionGroupNewsletterEmailNeededWake({
+          directRoute,
+          eventId,
+          groupDisplayName: input.groupDisplayName,
+          groupId: input.groupId,
+          memberId: input.memberId,
+          occurredAt: new Date().toISOString(),
+        }),
+        tx,
+      })
+    );
+    if (!appended.inserted) {
+      return;
+    }
+    try {
+      await signalHostedMailboxAppendRuntime({
+        expectedUserId: input.memberId,
+        mailboxItemId: appended.item.id,
+      });
+    } catch {
+      // The mailbox item is durable; the destination runtime will observe it later.
+    }
+  } catch {
+    // Missing-email private nudges are best-effort and must not fail the caller.
+  }
+}
+
+async function readHostedMemberDirectNewsletterNudgeRoute(input: {
+  memberId: string;
+  prisma: ReadClient;
+}): Promise<HostedGroupNewsletterDirectNudgeRoute | null> {
   const routing = await readHostedMemberRoutingState({
     memberId: input.memberId,
     prisma: input.prisma,
   });
 
-  return hasEstablishedDirectNewsletterNudgeRoute(routing);
+  return readEstablishedDirectNewsletterNudgeRoute(routing);
 }
 
-function hasEstablishedDirectNewsletterNudgeRoute(
+function readEstablishedDirectNewsletterNudgeRoute(
   routing: HostedMemberRoutingStateSnapshot | null,
-): boolean {
-  return (
-    hasNonEmptyHostedRouteId(routing?.linqChatId)
-    || hasNonEmptyHostedRouteId(routing?.telegramThreadId)
-  );
+): HostedGroupNewsletterDirectNudgeRoute | null {
+  const linqThreadId = normalizeHostedRouteId(routing?.linqChatId);
+  if (linqThreadId) {
+    return { channel: "linq", threadId: linqThreadId };
+  }
+  const telegramThreadId = normalizeHostedRouteId(routing?.telegramThreadId);
+  return telegramThreadId
+    ? { channel: "telegram", threadId: telegramThreadId }
+    : null;
 }
 
-function hasNonEmptyHostedRouteId(value: string | null | undefined): boolean {
-  return typeof value === "string" && value.trim().length > 0;
+function normalizeHostedRouteId(value: string | null | undefined): string | null {
+  const normalized = typeof value === "string" ? value.trim() : "";
+  return normalized.length > 0 ? normalized : null;
 }
 
 function buildGroupNewsletterEmailNeededEventId(input: {

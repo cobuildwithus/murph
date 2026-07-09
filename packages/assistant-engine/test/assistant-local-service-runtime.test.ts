@@ -432,6 +432,169 @@ test('sendAssistantMessageLocal delivers pre-steer final answers before the fina
   ).toEqual(['Answer one.', 'Answer two.'])
 })
 
+test('sendAssistantMessageLocal strips reply bubble delimiters from bubble-capable persisted and returned text', async () => {
+  const session = createAssistantSession()
+  const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
+    providerOutcome: {
+      kind: 'succeeded',
+      providerTurn: {
+        onboardingGuidanceInjected: false,
+        codexContinuation: { kind: 'explicit-structured-history' },
+        precedingResponseSegments: [
+          {
+            response: 'Preceding one.\n---\nPreceding two.',
+            media: [],
+          },
+        ],
+        response: 'Final one.\n---\nFinal two?',
+        session,
+      },
+    },
+    session,
+  })
+
+  const result = await sendAssistantMessageLocal({
+    deliverResponse: true,
+    prompt: 'First question',
+    vault: '/vaults/test',
+  })
+
+  expect(mocks.deliverAssistantPrecedingReplies.mock.calls[0]?.[0]?.segments)
+    .toEqual([
+      expect.objectContaining({
+        response: 'Preceding one.\n---\nPreceding two.',
+      }),
+    ])
+  expect(mocks.dispatchAssistantReply.mock.calls[0]?.[0]?.response)
+    .toBe('Final one.\n---\nFinal two?')
+  expect(
+    mocks.finalizeAssistantTurnArtifacts.mock.calls[0]?.[0]
+      ?.precedingAssistantTranscriptTexts,
+  ).toEqual(['Preceding one.\n\nPreceding two.'])
+  expect(
+    mocks.finalizeAssistantTurnArtifacts.mock.calls[0]?.[0]
+      ?.assistantTranscriptText,
+  ).toBe('Final one.\n\nFinal two?')
+  expect(mocks.finalizeDeliveredAssistantTurn.mock.calls[0]?.[0]?.response)
+    .toBe('Final one.\n\nFinal two?')
+  expect(result.response).toBe('Final one.\n\nFinal two?')
+})
+
+test('sendAssistantMessageLocal strips reply bubble delimiters from failed receipt text after provider output', async () => {
+  const usageError = new Error('usage persistence failed')
+  const session = createAssistantSession()
+  const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
+    providerOutcome: {
+      kind: 'succeeded',
+      providerTurn: {
+        onboardingGuidanceInjected: false,
+        codexContinuation: { kind: 'explicit-structured-history' },
+        response: 'Final one.\n---\nFinal two?',
+        session,
+      },
+    },
+    session,
+  })
+  mocks.recordAssistantUsageEvent.mockRejectedValueOnce(usageError)
+
+  await assert.rejects(
+    () =>
+      sendAssistantMessageLocal({
+        deliverResponse: true,
+        prompt: 'First question',
+        vault: '/vaults/test',
+      }),
+    (error) => {
+      assert.equal(error, usageError)
+      return true
+    },
+  )
+
+  expect(mocks.finalizeAssistantTurnReceipt.mock.calls[0]?.[0]).toMatchObject({
+    response: 'Final one.\n\nFinal two?',
+    status: 'failed',
+  })
+})
+
+test('sendAssistantMessageLocal preserves email delimiter lines in delivery, transcript, and receipt text', async () => {
+  const session = createAssistantSession({
+    binding: {
+      actorId: 'email-actor',
+      channel: 'email',
+      conversationKey: 'channel:email|identity:email-identity|thread:email-thread',
+      delivery: {
+        kind: 'thread',
+        target: 'email-thread',
+      },
+      identityId: 'email-identity',
+      threadId: 'email-thread',
+      threadIsDirect: true,
+    },
+  })
+  const plan = createSharedPlan()
+  plan.conversationPolicy.audience = {
+    ...plan.conversationPolicy.audience,
+    actorId: 'email-actor',
+    bindingDelivery: {
+      kind: 'thread',
+      target: 'email-thread',
+    },
+    channel: 'email',
+    effectiveThreadIsDirect: true,
+    explicitTarget: 'email-thread',
+    identityId: 'email-identity',
+    threadId: 'email-thread',
+    threadIsDirect: true,
+  }
+  const finalResponse = 'Final one.\n---\nFinal two?'
+  const precedingResponse = 'Preceding one.\n---\nPreceding two.'
+  const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
+    plan,
+    providerOutcome: {
+      kind: 'succeeded',
+      providerTurn: {
+        onboardingGuidanceInjected: false,
+        codexContinuation: { kind: 'explicit-structured-history' },
+        precedingResponseSegments: [
+          {
+            response: precedingResponse,
+            media: [],
+          },
+        ],
+        response: finalResponse,
+        session,
+      },
+    },
+    session,
+  })
+
+  const result = await sendAssistantMessageLocal({
+    deliverResponse: true,
+    prompt: 'Email question',
+    vault: '/vaults/test',
+  })
+
+  expect(mocks.deliverAssistantPrecedingReplies.mock.calls[0]?.[0]?.segments)
+    .toEqual([
+      expect.objectContaining({
+        response: precedingResponse,
+      }),
+    ])
+  expect(mocks.dispatchAssistantReply.mock.calls[0]?.[0]?.response)
+    .toBe(finalResponse)
+  expect(
+    mocks.finalizeAssistantTurnArtifacts.mock.calls[0]?.[0]
+      ?.precedingAssistantTranscriptTexts,
+  ).toEqual([precedingResponse])
+  expect(
+    mocks.finalizeAssistantTurnArtifacts.mock.calls[0]?.[0]
+      ?.assistantTranscriptText,
+  ).toBe(finalResponse)
+  expect(mocks.finalizeDeliveredAssistantTurn.mock.calls[0]?.[0]?.response)
+    .toBe(finalResponse)
+  expect(result.response).toBe(finalResponse)
+})
+
 test('sendAssistantMessageLocal preserves real same-text preceding answers', async () => {
   const { mocks, sendAssistantMessageLocal, session } = await loadLocalServiceModule()
 
@@ -1154,6 +1317,11 @@ test('sendAssistantMessageLocal surfaces the provider setup sub-split on onProvi
 
   mocks.executeCodexTurnWithRecovery.mockImplementationOnce(async (providerInput) => {
     await providerInput.onProviderRequestStarted?.({
+      codexAppServerInitializeMs: 7,
+      codexAppServerPreProviderMs: 17,
+      codexAppServerSpawnReadyMs: 1,
+      codexAppServerThreadResumeMs: 9,
+      codexAppServerWarmReuseMs: 0,
       providerRequestOrdinal: 0,
       startedAt: '2026-06-09T00:00:00.000Z',
     })
@@ -1179,12 +1347,22 @@ test('sendAssistantMessageLocal surfaces the provider setup sub-split on onProvi
   expect(providerRequestStarted).toHaveBeenCalledTimes(1)
   const event = providerRequestStarted.mock.calls[0]?.[0] as {
     admissionMs: number
+    codexAppServerInitializeMs: number
+    codexAppServerPreProviderMs: number
+    codexAppServerSpawnReadyMs: number
+    codexAppServerThreadResumeMs: number
+    codexAppServerWarmReuseMs: number
     preProviderSetupMs: number
     promptBuildMs: number
     sessionResolveMs: number
     turnLockWaitMs: number
   }
   expect(typeof event.turnLockWaitMs).toBe('number')
+  expect(event.codexAppServerInitializeMs).toBe(7)
+  expect(event.codexAppServerPreProviderMs).toBe(17)
+  expect(event.codexAppServerSpawnReadyMs).toBe(1)
+  expect(event.codexAppServerThreadResumeMs).toBe(9)
+  expect(event.codexAppServerWarmReuseMs).toBe(0)
   expect(typeof event.sessionResolveMs).toBe('number')
   expect(typeof event.promptBuildMs).toBe('number')
   expect(typeof event.admissionMs).toBe('number')

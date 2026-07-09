@@ -479,6 +479,7 @@ describe('channel helper seams', () => {
       },
       dependencies: {},
       identityId: 'identity-typing',
+      replyToMessageId: null,
     })
 
     const typingHandle = createTypingHandle()
@@ -502,7 +503,9 @@ describe('channel helper seams', () => {
       ),
     ).toBe(typingHandle)
     expect(startLinqTyping).toHaveBeenCalledWith({
+      replyToMessageId: null,
       target: 'explicit-chat',
+      targetKind: 'explicit',
     })
     await typingHandle.stop({
       providerStop: false,

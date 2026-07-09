@@ -136,18 +136,21 @@ describe("buildHostedRunnerContainerEnv", () => {
     )).toBe(false);
   });
 
-  it("does not allow runner secrets to override image-pinned assistant asset roots", () => {
+  it("does not allow runner secrets to override image-pinned asset roots", () => {
     const source = {
       HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS: [
+        "MURPH_HEALTH_COMMONS_PACKAGE_ROOT",
         "MURPH_ASSISTANT_CLI_SURFACE_PREBUILT_ARTIFACT_PATH",
         "MURPH_ASSISTANT_SKILLS_ROOT",
       ].join(","),
     };
 
+    expect(isHostedRunnerSecretKeyAllowed("MURPH_HEALTH_COMMONS_PACKAGE_ROOT")).toBe(false);
     expect(isHostedRunnerSecretKeyAllowed("MURPH_ASSISTANT_SKILLS_ROOT")).toBe(false);
     expect(isHostedRunnerSecretKeyAllowed(
       "MURPH_ASSISTANT_CLI_SURFACE_PREBUILT_ARTIFACT_PATH",
     )).toBe(false);
+    expect(isHostedRunnerSecretKeyAllowed("MURPH_HEALTH_COMMONS_PACKAGE_ROOT", source)).toBe(false);
     expect(isHostedRunnerSecretKeyAllowed("MURPH_ASSISTANT_SKILLS_ROOT", source)).toBe(false);
     expect(isHostedRunnerSecretKeyAllowed(
       "MURPH_ASSISTANT_CLI_SURFACE_PREBUILT_ARTIFACT_PATH",
@@ -155,17 +158,20 @@ describe("buildHostedRunnerContainerEnv", () => {
     )).toBe(false);
   });
 
-  it("keeps the worker-side asset-root literals aligned with the engine-owned env names", async () => {
+  it("keeps the worker-side asset-root literals aligned with the owner-package env names", async () => {
     // hosted-env-policy.ts is part of the workerd bundle and must not import
-    // @murphai/assistant-engine (Node-only module graph), so it pins the two
-    // deny-listed names as literals. This node-side test imports only the
-    // zero-dependency env-name contract.
+    // owner package Node-only module graphs, so it pins the deny-listed names
+    // as literals. This node-side test imports only env-name contracts.
     const { MURPH_ASSISTANT_CLI_SURFACE_PREBUILT_ARTIFACT_PATH_ENV, MURPH_ASSISTANT_SKILLS_ROOT_ENV } =
       await import("@murphai/assistant-engine/assistant-skill-env");
+    const { MURPH_HEALTH_COMMONS_PACKAGE_ROOT_ENV } =
+      await import("@murphai/health-commons/runtime");
+    expect(MURPH_HEALTH_COMMONS_PACKAGE_ROOT_ENV).toBe("MURPH_HEALTH_COMMONS_PACKAGE_ROOT");
     expect(MURPH_ASSISTANT_SKILLS_ROOT_ENV).toBe("MURPH_ASSISTANT_SKILLS_ROOT");
     expect(MURPH_ASSISTANT_CLI_SURFACE_PREBUILT_ARTIFACT_PATH_ENV).toBe(
       "MURPH_ASSISTANT_CLI_SURFACE_PREBUILT_ARTIFACT_PATH",
     );
+    expect(isHostedRunnerSecretKeyAllowed(MURPH_HEALTH_COMMONS_PACKAGE_ROOT_ENV)).toBe(false);
     expect(isHostedRunnerSecretKeyAllowed(MURPH_ASSISTANT_SKILLS_ROOT_ENV)).toBe(false);
     expect(isHostedRunnerSecretKeyAllowed(MURPH_ASSISTANT_CLI_SURFACE_PREBUILT_ARTIFACT_PATH_ENV)).toBe(false);
   });

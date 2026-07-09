@@ -24,6 +24,7 @@ import {
   applyAssistantVaultFileSendApprovalResult,
   beginAssistantOutboxIntentMirrorPreparedDispatch,
   buildAssistantVaultFileSendApprovalRequest,
+  compareAssistantOutboxDeliverySequenceOrder,
   deferAssistantVaultFileApprovalCheck,
   dispatchAssistantOutboxIntent,
   findAssistantAutoReplyDeliveryIntentIds,
@@ -73,7 +74,6 @@ import type {
   HostedRuntimeActionApprovalPort,
   HostedRuntimeEffectsPort,
   HostedRuntimeLinqDeliveryOutcomeRequest,
-  HostedRuntimeLinqEngagementKind,
   HostedRuntimeLinqSendResponse,
   HostedRuntimePlatform,
   HostedRuntimeProviderTargetKind,
@@ -93,7 +93,6 @@ import {
 import {
   buildHostedAssistantLinqDeliveryContextFromWake,
   resolveHostedAssistantLinqDeliveryContextFromCandidatesForRequest,
-  resolveHostedAssistantLinqDeliveryContextForRequest,
   resolveHostedAssistantLinqReactionDeliveryContextFromCandidatesForRequest,
   type HostedAssistantLinqDeliveryContext,
 } from "./linq-delivery-context.ts";
@@ -765,78 +764,6 @@ function compareHostedAssistantForegroundDeliveryCandidateIntents(input: {
   return compareHostedAssistantDeliveryCandidateIntents(input.left, input.right);
 }
 
-function compareHostedAssistantSteeredSegmentOrder(
-  left: AssistantOutboxIntent,
-  right: AssistantOutboxIntent,
-): number {
-  const leftKey = left.deliveryIdempotencyKey ?? null;
-  const rightKey = right.deliveryIdempotencyKey ?? null;
-  const leftSegment = readHostedAssistantSteeredSegmentOrder(left);
-  const rightSegment = readHostedAssistantSteeredSegmentOrder(right);
-  if (leftSegment && rightSegment && leftSegment.groupKey === rightSegment.groupKey) {
-    return leftSegment.ordinal - rightSegment.ordinal;
-  }
-  if (
-    leftSegment
-    && !rightSegment
-    && shouldHostedAssistantSegmentPrecedeNonSegment(leftSegment, rightKey)
-  ) {
-    return -1;
-  }
-  if (
-    rightSegment
-    && !leftSegment
-    && shouldHostedAssistantSegmentPrecedeNonSegment(rightSegment, leftKey)
-  ) {
-    return 1;
-  }
-  return 0;
-}
-
-interface HostedAssistantSteeredSegmentOrder {
-  groupKey: string;
-  kind: "fallback" | "generated";
-  ordinal: number;
-}
-
-function readHostedAssistantSteeredSegmentOrder(
-  intent: AssistantOutboxIntent,
-): HostedAssistantSteeredSegmentOrder | null {
-  const deliveryIdempotencyKey = intent.deliveryIdempotencyKey ?? null;
-  if (!deliveryIdempotencyKey) {
-    return null;
-  }
-  const match = /^(.*):segment:([0-9]+)$/.exec(deliveryIdempotencyKey);
-  if (match?.[1] && match[2]) {
-    const ordinal = Number.parseInt(match[2], 10);
-    return Number.isSafeInteger(ordinal)
-      ? { groupKey: match[1], kind: "generated", ordinal }
-      : null;
-  }
-  const fallbackPrefix = `assistant-segment:${intent.turnId}:`;
-  if (!deliveryIdempotencyKey.startsWith(fallbackPrefix)) {
-    return null;
-  }
-  const ordinalText = deliveryIdempotencyKey.slice(fallbackPrefix.length);
-  if (!/^[0-9]+$/.test(ordinalText)) {
-    return null;
-  }
-  const ordinal = Number.parseInt(ordinalText, 10);
-  return Number.isSafeInteger(ordinal)
-    ? { groupKey: `assistant-segment:${intent.turnId}`, kind: "fallback", ordinal }
-    : null;
-}
-
-function shouldHostedAssistantSegmentPrecedeNonSegment(
-  segment: HostedAssistantSteeredSegmentOrder,
-  deliveryIdempotencyKey: string | null,
-): boolean {
-  if (segment.kind === "generated") {
-    return deliveryIdempotencyKey === segment.groupKey;
-  }
-  return deliveryIdempotencyKey === null;
-}
-
 function compareHostedAssistantDeliveryCandidateIntents(
   left: AssistantOutboxIntent,
   right: AssistantOutboxIntent,
@@ -867,7 +794,7 @@ function compareHostedAssistantDeliveryBoundaryIntents(
   right: AssistantOutboxIntent,
 ): number {
   return compareHostedAssistantDeliveryOperationOrder(left, right)
-    || compareHostedAssistantSteeredSegmentOrder(left, right)
+    || compareAssistantOutboxDeliverySequenceOrder(left, right)
     || compareHostedAssistantDeliveryCandidateCreatedAt(left, right)
     || left.intentId.localeCompare(right.intentId);
 }
@@ -1002,17 +929,22 @@ function resolveHostedAssistantOutboxIntentWakeAt(
 export async function prepareHostedAssistantDeliveryEffectsForDispatch(input: {
   assistantDeliveryEffects: HostedAssistantDeliveryEffect[];
   linqDeliveryContext?: HostedAssistantLinqDeliveryContext | null;
+  linqDeliveryContexts?: readonly HostedAssistantLinqDeliveryContext[] | null;
   now?: () => string;
   vaultRoot: string;
 }): Promise<HostedAssistantDeliveryPreparation> {
   const startedAt = (input.now ?? (() => new Date().toISOString()))();
   const preparedDispatches: HostedAssistantDeliveryPreparedDispatch[] = [];
+  const linqDeliveryContexts = resolveHostedAssistantLinqDeliveryContexts({
+    context: input.linqDeliveryContext ?? null,
+    contexts: input.linqDeliveryContexts ?? null,
+  });
   for (const effect of input.assistantDeliveryEffects) {
     if (!shouldPrepareHostedAssistantDeliveryEffectForDispatch(effect)) {
       continue;
     }
     const linqDeliveryContext = resolveHostedAssistantLinqDeliveryContextForEffect({
-      context: input.linqDeliveryContext ?? null,
+      contexts: linqDeliveryContexts,
       effect,
     });
     const prepared = await beginAssistantOutboxIntentMirrorPreparedDispatch({
@@ -1072,12 +1004,12 @@ function hasHostedAssistantVaultFileMedia(
 }
 
 function resolveHostedAssistantLinqDeliveryContextForEffect(input: {
-  context: HostedAssistantLinqDeliveryContext | null;
+  contexts: readonly HostedAssistantLinqDeliveryContext[];
   effect: HostedAssistantDeliveryEffect;
 }): HostedAssistantLinqDeliveryContext | null {
   for (const target of readHostedAssistantDeliveryPayloadTargets(input.effect.payload)) {
-    const context = resolveHostedAssistantLinqDeliveryContextForRequest({
-      context: input.context,
+    const context = resolveHostedAssistantLinqDeliveryContextFromCandidatesForRequest({
+      contexts: input.contexts,
       replyToMessageId: input.effect.payload.replyToMessageId,
       target: target.target,
       targetKind: target.targetKind,
@@ -1128,6 +1060,7 @@ export function createHostedAssistantProgressDeliveryDependencies(input: {
   linqEgressLatencyTrace?: HostedAssistantLinqEgressLatencyTrace | null;
   platformEnv?: Readonly<Record<string, string>>;
   providerFetch?: typeof fetch | null;
+  publicInternetFetch?: typeof fetch | null;
   signal?: AbortSignal | null;
   userEnv?: Readonly<Record<string, string>>;
   wake?: HostedRuntimeEvent | null;
@@ -1164,6 +1097,7 @@ export function createHostedAssistantProgressDeliveryDependencies(input: {
       linqDeliveryContexts,
       linqEgressLatencyTrace: input.linqEgressLatencyTrace ?? null,
       providerFetch: input.providerFetch ?? null,
+      publicInternetFetch: input.publicInternetFetch ?? null,
       signal: input.signal ?? null,
     }),
     sendLinqVoiceMemo: createHostedAssistantLinqVoiceMemoSendDependency({
@@ -1267,6 +1201,7 @@ export async function drainHostedPreparedAssistantDeliveries(input: {
   platformEnv?: Readonly<Record<string, string>>;
   preparedDispatches?: readonly HostedAssistantDeliveryPreparedDispatch[] | null;
   providerFetch?: typeof fetch | null;
+  publicInternetFetch?: typeof fetch | null;
   shouldYieldBackgroundDelivery?: (() => boolean) | null;
   signal?: AbortSignal | null;
   userEnv?: Readonly<Record<string, string>>;
@@ -1378,6 +1313,7 @@ export async function drainHostedPreparedAssistantDeliveries(input: {
           telegramVoiceMemoEnv,
           whatsAppEnv,
           providerFetch: input.providerFetch ?? null,
+          publicInternetFetch: input.publicInternetFetch ?? null,
           userId: input.wake.userId,
           vaultRoot: input.vaultRoot,
           onTerminalLinqTypingStopFailure: (terminalOutcome) => {
@@ -1800,6 +1736,7 @@ async function deliverHostedPreparedAssistantDelivery(input: {
   telegramVoiceMemoEnv: NodeJS.ProcessEnv;
   whatsAppEnv: NodeJS.ProcessEnv;
   providerFetch: typeof fetch | null;
+  publicInternetFetch: typeof fetch | null;
   userId: string;
   vaultRoot: string;
   onTerminalLinqTypingStopFailure?: (
@@ -1955,6 +1892,7 @@ async function deliverHostedPreparedAssistantDelivery(input: {
             providerDispatchEntered = true;
           },
           providerFetch: input.providerFetch,
+          publicInternetFetch: input.publicInternetFetch,
           signal: input.signal,
           vaultRoot: input.vaultRoot,
         }),
@@ -2277,6 +2215,7 @@ function createHostedAssistantLinqSendDependency(input: {
   linqEnv: NodeJS.ProcessEnv;
   onProviderDispatchEntered?: () => void;
   providerFetch: typeof fetch | null;
+  publicInternetFetch?: typeof fetch | null;
   shouldYieldBackgroundDelivery?: (() => boolean) | null;
   signal: AbortSignal | null;
   threadIsDirect?: boolean | null;
@@ -2339,6 +2278,9 @@ function createHostedAssistantLinqSendDependency(input: {
         targetKind: request.targetKind ?? null,
       }, {
         ...dependencies,
+        ...(input.publicInternetFetch
+          ? { publicFetchImplementation: input.publicInternetFetch }
+          : {}),
         ...(verifiedVaultFiles.size > 0
           ? {
               loadVaultFile: async (media) => {
@@ -2365,7 +2307,7 @@ function createHostedAssistantLinqSendDependency(input: {
           deliveryContext,
           failedAt: new Date(),
           failureCode: readHostedAssistantLinqDeliveryFailureCode(error),
-          failureReason: null,
+          failureReason: readTrustedHostedAssistantLinqDeliveryFailureReason(error),
           fromPhoneNumber,
           idempotencyKey: request.idempotencyKey ?? null,
           intentId: input.intentId ?? null,
@@ -2836,6 +2778,16 @@ function readHostedAssistantLinqDeliveryFailureCode(error: unknown): string {
     : "HOSTED_LINQ_PROVIDER_SEND_FAILED";
 }
 
+function readTrustedHostedAssistantLinqDeliveryFailureReason(
+  error: unknown,
+): string | null {
+  if (!(error instanceof VaultCliError)) {
+    return null;
+  }
+  const message = error.message.replace(/\s+/gu, " ").trim();
+  return message ? message.slice(0, 500) : null;
+}
+
 async function assertHostedAssistantLinqRecentInboundEngagementForDelivery(input: {
   deliveryContext: HostedAssistantLinqDeliveryContext | null;
   directRecipientPhoneNumber: string | null;
@@ -2853,7 +2805,7 @@ async function assertHostedAssistantLinqRecentInboundEngagementForDelivery(input
   if (!assertRecentInbound) {
     throw new VaultCliError(
       "ASSISTANT_LINQ_ENGAGEMENT_ASSERT_UNAVAILABLE",
-      "Hosted Linq delivery requires recent-recipient-engagement assertion before provider dispatch.",
+      "Hosted Linq delivery requires an egress authority assertion before provider dispatch.",
       { retryable: true },
     );
   }
@@ -2863,10 +2815,6 @@ async function assertHostedAssistantLinqRecentInboundEngagementForDelivery(input
   await assertRecentInbound({
     ...(currentInbound ? { currentInbound } : {}),
     directRecipientPhoneNumber: input.directRecipientPhoneNumber,
-    engagementKind: readHostedAssistantLinqEngagementKind({
-      idempotencyKey: input.idempotencyKey,
-      targetKind,
-    }),
     fromPhoneNumber: input.fromPhoneNumber,
     idempotencyKey: input.idempotencyKey,
     intentId: input.intentId,
@@ -2922,16 +2870,6 @@ function normalizeHostedAssistantLinqTargetKind(
   return targetKind === "explicit" || targetKind === "participant" || targetKind === "thread"
     ? targetKind
     : null;
-}
-
-function readHostedAssistantLinqEngagementKind(input: {
-  idempotencyKey: string | null,
-  targetKind: HostedRuntimeProviderTargetKind | null,
-}): HostedRuntimeLinqEngagementKind {
-  return input.targetKind === "participant"
-    && isHostedSignupWelcomeDeliveryIdempotencyKey(input.idempotencyKey)
-    ? "first_contact"
-    : "requires_recent_inbound";
 }
 
 function normalizeHostedLinqDirectRecipient(value: string | null | undefined): string | null {

@@ -102,7 +102,7 @@ export function registerAuditCommands(
         .int()
         .positive()
         .max(200)
-        .default(50)
+        .default(10)
         .describe('Maximum number of audit records to return.'),
     }),
     output: auditListResultSchema,
@@ -128,7 +128,7 @@ export function registerAuditCommands(
         .int()
         .positive()
         .max(200)
-        .default(20)
+        .default(10)
         .describe('Maximum number of recent audit records to return.'),
     }),
     output: auditListResultSchema,

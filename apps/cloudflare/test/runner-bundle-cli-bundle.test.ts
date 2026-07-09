@@ -11,6 +11,10 @@ import {
   assertVaultCliBundleWithinBudgets,
   bundleInstalledVaultCliBinary,
 } from "../scripts/runner-bundle/bundle-cli.js";
+import {
+  RUNNER_BUNDLE_SHARED_EXTERNALS,
+  RUNNER_BUNDLE_SHARED_FORBIDDEN_INPUT_MARKERS,
+} from "../scripts/runner-bundle/bundle-shared.js";
 
 const temporaryDirectories: string[] = [];
 
@@ -88,6 +92,18 @@ async function stageFakeInstalledCli(cliSource: string): Promise<string> {
 }
 
 describe("runner bundle vault-cli esbuild step", () => {
+  it("inlines Health Commons while keeping exercise-library external", () => {
+    expect(RUNNER_BUNDLE_SHARED_EXTERNALS).not.toContain("@murphai/health-commons");
+    expect(RUNNER_BUNDLE_SHARED_EXTERNALS).not.toContain("@murphai/health-commons/*");
+    expect(RUNNER_BUNDLE_SHARED_FORBIDDEN_INPUT_MARKERS).not.toContain(
+      "/@murphai/health-commons/",
+    );
+    expect(RUNNER_BUNDLE_SHARED_EXTERNALS).toContain("@murphai/exercise-library");
+    expect(RUNNER_BUNDLE_SHARED_FORBIDDEN_INPUT_MARKERS).toContain(
+      "/@murphai/exercise-library/",
+    );
+  });
+
   it("bundles the installed CLI, passes parity hermetically, and retargets both bin wrappers", async () => {
     const bundleDir = await stageFakeInstalledCli(FAKE_CLI_SOURCE);
 

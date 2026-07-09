@@ -1,8 +1,6 @@
 import { HostedBillingStatus, type HostedLinqDailyState } from "@prisma/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { buildHostedAiUsageGateNoticeIdempotencyKey } from "@/src/lib/hosted-execution/usage-allowance";
-import { renderUserFacingMessage } from "@/src/lib/hosted-messages/user-facing-messages";
 import { getHostedAiUsageMonthlyAllowanceUsdMicros } from "@/src/lib/hosted-onboarding/billing-plans";
 import {
   createHostedPhoneLookupKey,
@@ -16,20 +14,6 @@ const MEMBER_ID = "member_usage_reset";
 const CHAT_ID = "chat_usage_reset";
 const OWNER_PHONE = "+14155550100";
 const SENDER_PHONE = "+14155550101";
-const HOME_URL = "https://withmurph.ai/home";
-
-function buildPulseUpgradeEdgeMessage(input: {
-  memberId: string;
-  periodStart: Date;
-}): string {
-  return renderUserFacingMessage({
-    context: {
-      homeUrl: HOME_URL,
-    },
-    key: "linq.ai_usage.pulse_upgrade_edge",
-    seed: `linq.ai_usage:${input.memberId}:pulse_upgrade_edge:${input.periodStart.toISOString()}`,
-  }).text;
-}
 
 const activeMember = {
   billingStatus: HostedBillingStatus.active,
@@ -426,7 +410,7 @@ describe("hosted Linq usage reset e2e", () => {
     vi.useRealTimers();
   });
 
-  it("blocks an exhausted monthly period, then resumes message wakes after the reset creates a fresh period", async () => {
+  it("preserves exhausted-period messages and later appends fresh-period messages", async () => {
     const monthlyLimit = getHostedAiUsageMonthlyAllowanceUsdMicros("launch_monthly");
     const usage = createUsageResetPrismaFixture({
       initialPeriod: {
@@ -437,7 +421,7 @@ describe("hosted Linq usage reset e2e", () => {
       },
     });
 
-    const deniedResponse = await handleHostedOnboardingLinqWebhook({
+    const exhaustedResponse = await handleHostedOnboardingLinqWebhook({
       prisma: usage.prisma,
       rawBody: buildHostedLinqWebhookBody({
         createdAt: "2026-04-30T12:00:00.000Z",
@@ -457,33 +441,52 @@ describe("hosted Linq usage reset e2e", () => {
       timestamp: null,
     });
 
-    expect(deniedResponse).toMatchObject({
+    expect(exhaustedResponse).toMatchObject({
       ok: true,
-      reason: "sent-ai-usage-quota-reply",
+      reason: "wake-appended-active-member",
     });
-    const expectedUsageLimitIdempotencyKey = buildHostedAiUsageGateNoticeIdempotencyKey({
-      memberId: MEMBER_ID,
-      noticeCode: "pulse_upgrade_edge",
-      periodStart: new Date("2026-04-01T00:00:00.000Z"),
-    });
-    expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledTimes(1);
-    expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith({
-      chatId: CHAT_ID,
-      idempotencyKey: expectedUsageLimitIdempotencyKey,
-      message: buildPulseUpgradeEdgeMessage({
-        memberId: MEMBER_ID,
-        periodStart: new Date("2026-04-01T00:00:00.000Z"),
+    expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
+    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledTimes(1);
+    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenLastCalledWith({
+      envelope: expect.objectContaining({
+        eventId: "evt_before_reset",
+        kind: "conversation.message",
+        message: expect.objectContaining({
+          channel: "linq",
+          linqMessage: expect.objectContaining({
+            chatId: CHAT_ID,
+            messageId: "msg_before_reset",
+            parts: [
+              {
+                type: "text",
+                value: "Can you answer before the reset?",
+              },
+            ],
+          }),
+        }),
+        userId: MEMBER_ID,
       }),
-      replyToMessageId: "msg_before_reset",
-      signal: undefined,
+      tx: usage.prisma,
     });
-    expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
     expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
-    expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
-    expect(mocks.sendHostedLinqReadReceipt).not.toHaveBeenCalled();
+    expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
+      expectedUserId: MEMBER_ID,
+      mailboxItemId: "mailbox_evt_before_reset",
+    });
+    expectHostedLinqReadReceiptSent();
     expect(usage.getPeriod("2026-04-01T00:00:00.000Z")).toMatchObject({
-      limitNoticeSentAt: new Date("2026-04-30T12:00:00.000Z"),
+      limitNoticeSentAt: null,
       spentUsdMicros: monthlyLimit,
+    });
+
+    vi.clearAllMocks();
+    mocks.sendHostedLinqReadReceipt.mockResolvedValue({
+      ok: true,
+      status: 204,
+    });
+    mocks.signalHostedMailboxAppendRuntime.mockResolvedValue({
+      signalAccepted: true,
+      workflowId: "hosted-user-runtime:member_usage_reset",
     });
 
     vi.setSystemTime(new Date("2026-05-01T00:01:00.000Z"));
@@ -512,15 +515,11 @@ describe("hosted Linq usage reset e2e", () => {
       ok: true,
       reason: "wake-appended-active-member",
     });
-    // The webhook gate is read-first: the fresh-month allow decision is served
-    // without creating the May period row. Period bookkeeping is owned by the
-    // mutating turn-admission gate (runtime reconciliation facts), which runs
-    // before any AI spend can land. The only webhook-driven period ensure is
-    // the April escalation that confirmed the exhausted-period denial.
+    // Period bookkeeping is owned by the mutating turn-admission gate (runtime
+    // reconciliation facts), which runs before any AI spend can land. Linq
+    // ingress only preserves the user-authored input as mailbox work.
     expect(usage.periods.has("2026-05-01T00:00:00.000Z")).toBe(false);
-    expect(usage.ensuredPeriodStarts).toEqual([
-      "2026-04-01T00:00:00.000Z",
-    ]);
+    expect(usage.ensuredPeriodStarts).toEqual([]);
     expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledTimes(1);
     expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledWith({
       envelope: expect.objectContaining({
@@ -543,7 +542,7 @@ describe("hosted Linq usage reset e2e", () => {
       }),
       tx: usage.prisma,
     });
-    expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledTimes(1);
+    expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
     expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
     expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
       expectedUserId: MEMBER_ID,
@@ -552,7 +551,7 @@ describe("hosted Linq usage reset e2e", () => {
     expectHostedLinqReadReceiptSent();
   });
 
-  it("suppresses the usage-limit reply when the exhausted period notice was already claimed", async () => {
+  it("preserves exhausted-period messages when the usage-limit notice was already claimed", async () => {
     const monthlyLimit = getHostedAiUsageMonthlyAllowanceUsdMicros("launch_monthly");
     const alreadyClaimedAt = new Date("2026-04-29T16:30:00.000Z");
     const usage = createUsageResetPrismaFixture({
@@ -587,18 +586,35 @@ describe("hosted Linq usage reset e2e", () => {
 
     expect(response).toMatchObject({
       ok: true,
-      reason: "ai-usage-gate-denied",
+      reason: "wake-appended-active-member",
     });
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
-    expect(usage.prisma.hostedAiUsagePeriod.updateMany).toHaveBeenCalledTimes(1);
+    expect(usage.prisma.hostedAiUsagePeriod.updateMany).not.toHaveBeenCalled();
     expect(usage.getPeriod("2026-04-01T00:00:00.000Z")).toMatchObject({
       limitNoticeSentAt: alreadyClaimedAt,
       spentUsdMicros: monthlyLimit,
     });
-    expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledWith({
+      envelope: expect.objectContaining({
+        eventId: "evt_after_notice_claimed",
+        kind: "conversation.message",
+        message: expect.objectContaining({
+          channel: "linq",
+          linqMessage: expect.objectContaining({
+            chatId: CHAT_ID,
+            messageId: "msg_after_notice_claimed",
+          }),
+        }),
+        userId: MEMBER_ID,
+      }),
+      tx: usage.prisma,
+    });
     expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
-    expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
-    expect(mocks.sendHostedLinqReadReceipt).not.toHaveBeenCalled();
+    expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
+      expectedUserId: MEMBER_ID,
+      mailboxItemId: "mailbox_evt_after_notice_claimed",
+    });
+    expectHostedLinqReadReceiptSent();
   });
 });
 

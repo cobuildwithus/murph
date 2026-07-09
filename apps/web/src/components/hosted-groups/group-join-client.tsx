@@ -1,21 +1,28 @@
 "use client";
 
 import { Check } from "lucide-react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
-import type { HostedVaultShareProjectionKind } from "@murphai/hosted-execution/vault-share";
+import {
+  buildHostedVaultShareProjectionScopeKey,
+  type HostedVaultShareProjectionScope,
+} from "@murphai/hosted-execution/vault-share";
 
+import { HostedLegalConsentCard } from "@/src/components/legal/hosted-legal-consent-card";
 import { AuthDialog } from "@/src/components/hosted-onboarding/auth-dialog";
 import { requestHostedOnboardingJson } from "@/src/components/hosted-onboarding/client-api";
 import { navigateHostedAuthRedirect } from "@/src/components/hosted-onboarding/hosted-auth-navigation";
 import { toErrorMessage } from "@/src/components/settings/hosted-settings-sync-helpers";
 import { Button } from "@/src/components/ui/button";
+import type { HostedConsentStatus } from "@/src/lib/legal/consent";
 import { cn } from "@/src/lib/utils";
 
 export interface GroupJoinPermissionDisplay {
   description: string;
   label: string;
-  projectionKind: HostedVaultShareProjectionKind;
+  projectionScope: HostedVaultShareProjectionScope;
+  projectionScopeKey: string;
 }
 
 export function GroupJoinSignInButton() {
@@ -42,33 +49,73 @@ export function GroupJoinSignInButton() {
   );
 }
 
+export function GroupJoinLegalConsentGate({
+  initialStatus,
+}: {
+  initialStatus: HostedConsentStatus | null;
+}) {
+  const router = useRouter();
+
+  function refreshRoute() {
+    router.refresh();
+  }
+
+  return (
+    <div className="flex flex-col gap-4">
+      <HostedLegalConsentCard
+        acceptedPendingLabel="Continuing..."
+        initialStatus={initialStatus}
+        mode="compact"
+        onAccepted={refreshRoute}
+        onRequirementChange={(required) => {
+          if (!required) {
+            refreshRoute();
+          }
+        }}
+        preferredScope="launch.legal"
+        source="group-join"
+      />
+      <Link
+        href="/home"
+        className="inline-flex min-h-10 items-center justify-center text-center text-xs font-medium text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
+      >
+        Not now
+      </Link>
+    </div>
+  );
+}
+
 export function GroupJoinAcceptForm(props: {
-  activeVaultShareProjectionKinds: readonly HostedVaultShareProjectionKind[];
+  activeVaultShareProjectionScopes: readonly HostedVaultShareProjectionScope[];
   alreadyActiveMember: boolean;
   groupName: string;
   joinCode: string;
   permissions: readonly GroupJoinPermissionDisplay[];
 }) {
   const router = useRouter();
-  const [selected, setSelected] = useState<Set<HostedVaultShareProjectionKind>>(
-    () => new Set(props.alreadyActiveMember ? props.activeVaultShareProjectionKinds : []),
+  const [selected, setSelected] = useState<Set<string>>(
+    () => new Set(
+      props.alreadyActiveMember
+        ? props.activeVaultShareProjectionScopes.map(buildHostedVaultShareProjectionScopeKey)
+        : [],
+    ),
   );
   const [status, setStatus] = useState<"idle" | "submitting" | "joined">("idle");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const selectedVaultShareProjectionKinds = useMemo(
+  const selectedVaultShareProjectionScopes = useMemo(
     () => props.permissions
-      .map((permission) => permission.projectionKind)
-      .filter((projectionKind) => selected.has(projectionKind)),
+      .filter((permission) => selected.has(permission.projectionScopeKey))
+      .map((permission) => permission.projectionScope),
     [props.permissions, selected],
   );
 
-  function togglePermission(projectionKind: HostedVaultShareProjectionKind) {
+  function togglePermission(projectionScopeKey: string) {
     setSelected((current) => {
       const next = new Set(current);
-      if (next.has(projectionKind)) {
-        next.delete(projectionKind);
+      if (next.has(projectionScopeKey)) {
+        next.delete(projectionScopeKey);
       } else {
-        next.add(projectionKind);
+        next.add(projectionScopeKey);
       }
       return next;
     });
@@ -80,7 +127,7 @@ export function GroupJoinAcceptForm(props: {
     try {
       await requestHostedOnboardingJson({
         method: "POST",
-        payload: { selectedVaultShareProjectionKinds },
+        payload: { selectedVaultShareProjectionScopes },
         url: `/api/groups/join/${encodeURIComponent(props.joinCode)}/accept`,
       });
       setStatus("joined");
@@ -115,15 +162,15 @@ export function GroupJoinAcceptForm(props: {
               Optional sharing
             </span>
             <p className="text-[13px] leading-5 text-muted-foreground">
-              You can join either way, and change this anytime from this link.
+              Join either way. Change anytime.
             </p>
           </div>
           <div className="flex flex-col gap-2.5">
             {props.permissions.map((permission) => {
-              const checked = selected.has(permission.projectionKind);
+              const checked = selected.has(permission.projectionScopeKey);
               return (
                 <label
-                  key={permission.projectionKind}
+                  key={permission.projectionScopeKey}
                   className={cn(
                     "flex cursor-pointer gap-3 rounded-xl border p-3.5 transition-colors",
                     checked
@@ -135,7 +182,7 @@ export function GroupJoinAcceptForm(props: {
                     type="checkbox"
                     className="sr-only"
                     checked={checked}
-                    onChange={() => togglePermission(permission.projectionKind)}
+                    onChange={() => togglePermission(permission.projectionScopeKey)}
                   />
                   <span
                     aria-hidden
@@ -174,7 +221,7 @@ export function GroupJoinAcceptForm(props: {
               : "Joining..."
             : props.alreadyActiveMember
               ? "Save changes"
-              : `Join ${props.groupName}`}
+              : "Join group"}
         </Button>
         {errorMessage ? (
           <p role="alert" className="text-sm text-destructive [overflow-wrap:anywhere]">

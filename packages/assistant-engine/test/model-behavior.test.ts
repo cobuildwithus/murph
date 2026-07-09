@@ -109,7 +109,7 @@ describe('assistant execution prompt contract', () => {
     )
   })
 
-  it('requires pending vault-file approvals to include the returned handoff link', () => {
+  it('requires pending vault-file approvals to include the returned handoff link and approved sends to avoid stock queue copy', () => {
     const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
 
     expect(prompt).toContain('Vault file sends:')
@@ -124,6 +124,18 @@ describe('assistant execution prompt contract', () => {
     )
     expect(prompt).toContain(
       'When `murph.send_vault_file` returns `status: "approved"`',
+    )
+    expect(prompt).toContain(
+      'write a concise, natural reply using the returned filename when useful',
+    )
+    expect(prompt).toContain(
+      'such as "Here it is: report.pdf."',
+    )
+    expect(prompt).toContain(
+      'Do not quote or paraphrase `deliveryStatus`, approval metadata, queue mechanics, or "delivery is not confirmed" as stock user-facing copy.',
+    )
+    expect(prompt).toContain(
+      'Do not claim the file was delivered or sent successfully unless a later delivery result explicitly confirms `sent`.',
     )
   })
 
@@ -1203,7 +1215,7 @@ Execution context:
       'Current Murph product base URL for user-facing app links: http://localhost:3000',
     )
     expect(promptA.cacheMetadata.staticPromptHash).toBe(
-      '7ca6fd977943768f5c8e6ca40ca01c2418f2d751dcff9f7cbcac81fa9539e807',
+      '0f7cc7aab31fb3287761de872693ab8cb00c3208ee7f8fdc7911354a2e9382f7',
     )
     expect(promptA.cacheMetadata.toolSchemaHash).toBe(
       'assistant-tool-schema-common-codex-test',
@@ -1474,6 +1486,33 @@ describe('assistant experiment onboarding guidance', () => {
     )
     expect(prompt).not.toContain(
       'When a scheduled support automation fires, choose one structured outcome: `skip` or `send_message`.',
+    )
+  })
+
+  it('grounds personal health recommendations before giving advice', () => {
+    const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
+
+    expect(prompt).toContain('Understand before recommending:')
+    expect(prompt).toContain(
+      'do not lead with generic recommendations. Ground first: read the relevant wearable trends, vault records, memory, and visible conversation',
+    )
+    expect(prompt).toContain(
+      'A grounded discovery question is a complete, correct turn, not a failure to answer.',
+    )
+    expect(prompt).toContain(
+      'Save what you learn. Durable, user-useful discovery answers — environment, routines, timing, constraints, preferences, motivation in the user\'s own words — go to the matching canonical vault surface or memory',
+    )
+    expect(prompt).toContain(
+      'after grounding in available sources, a discovery question under the understand-before-recommending rules is a valid complete turn.',
+    )
+    expect(prompt).toContain(
+      'Then close the loop: offer to make it stick through the behavior-change setup below',
+    )
+    expect(prompt.indexOf('Understand before recommending:')).toBeGreaterThan(
+      prompt.indexOf('Goal: Help the user understand their body in context'),
+    )
+    expect(prompt.indexOf('Behavior-change collaboration:')).toBeGreaterThan(
+      prompt.indexOf('Understand before recommending:'),
     )
   })
 

@@ -830,6 +830,41 @@ describe('assistant outbox runtime', () => {
     )
   })
 
+  it('orders same-timestamp bubble intents before the final reply by bubble ordinal', async () => {
+    const { vaultRoot } = await createAssistantVault('assistant-outbox-bubble-order-')
+    const createdAt = '2026-04-08T00:01:00.000Z'
+    const common = {
+      createdAt,
+      sessionId: 'session-bubble-order',
+      turnId: 'turn-bubble-order',
+    }
+
+    await createIntent(vaultRoot, {
+      ...common,
+      dedupeToken: 'dedupe-final',
+      deliveryIdempotencyKey: 'delivery-final',
+      message: 'Final bubble',
+    })
+    await createIntent(vaultRoot, {
+      ...common,
+      dedupeToken: 'dedupe-bubble-1',
+      deliveryIdempotencyKey: 'delivery-final:bubble:1',
+      message: 'Second bubble',
+    })
+    await createIntent(vaultRoot, {
+      ...common,
+      dedupeToken: 'dedupe-bubble-0',
+      deliveryIdempotencyKey: 'delivery-final:bubble:0',
+      message: 'First bubble',
+    })
+
+    await expect(listAssistantOutboxIntentsLocal(vaultRoot)).resolves.toMatchObject([
+      { message: 'First bubble' },
+      { message: 'Second bubble' },
+      { message: 'Final bubble' },
+    ])
+  })
+
   it('quarantines stale outbox intents with removed legacy fields instead of normalizing them', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-04-08T12:05:00.000Z'))

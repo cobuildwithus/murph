@@ -3168,6 +3168,11 @@ describe("runHostedAssistantAutomationLane", () => {
       mocks.runAssistantAutomationPass.mock.calls[0]?.[0] as RunAssistantAutomationPassInput;
     automationPassInput.onProviderRequestStarted?.({
       assistantInputIds: ["input_1"],
+      codexAppServerInitializeMs: 7,
+      codexAppServerPreProviderMs: 17,
+      codexAppServerSpawnReadyMs: 1,
+      codexAppServerThreadResumeMs: 9,
+      codexAppServerWarmReuseMs: 0,
       providerRequestOrdinal: 0,
       source: "linq",
       startedAt: "2026-04-08T00:00:01.000Z",
@@ -3177,6 +3182,16 @@ describe("runHostedAssistantAutomationLane", () => {
       event: {
         assistantInputIds: ["input_1"],
         at: "2026-04-08T00:00:01.000Z",
+        phaseBreakdown: {
+          provider: {
+            codexAppServerInitializeMs: 7,
+            codexAppServerPreProviderMs: 17,
+            codexAppServerSpawnReadyMs: 1,
+            codexAppServerThreadResumeMs: 9,
+            codexAppServerWarmReuseMs: 0,
+          },
+          schemaVersion: 1,
+        },
         providerRequestOrdinal: 0,
         runtimeAttemptId: "attempt_123",
         source: "linq",

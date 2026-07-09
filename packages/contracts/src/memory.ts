@@ -16,6 +16,24 @@ export const memoryDocumentRelativePath = "bank/memory.md";
 export const memoryDocumentDocType = FRONTMATTER_DOC_TYPES.memory;
 export const memoryDocumentSchemaVersion = CONTRACT_SCHEMA_VERSION.memoryFrontmatter;
 
+export const MEMORY_DISPLAY_NAME_MAX_LENGTH = 120;
+export const MEMORY_DISPLAY_NAME_RECORD_PREFIX = "Preferred display name: " as const;
+
+// Mirrors the vault-share profile-name delivery rule: a name accepted into memory
+// must never be rejected later by the delivery parser. Expressed as a regex so
+// generated schemas retain the same no-blank/no-control-character constraint.
+const MEMORY_DISPLAY_NAME_PATTERN =
+  /^[^\s\u0000-\u001f\u007f](?:[^\u0000-\u001f\u007f]*[^\s\u0000-\u001f\u007f])?$/u;
+
+export const memoryDisplayNameSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(MEMORY_DISPLAY_NAME_MAX_LENGTH)
+  .regex(MEMORY_DISPLAY_NAME_PATTERN, {
+    message: "displayName must not be blank or contain control characters",
+  });
+
 export const memorySectionValues = [
   "Identity",
   "Preferences",
@@ -103,9 +121,24 @@ export interface UpsertMemoryRecordInput {
   text: string;
 }
 
+export interface SetMemoryDisplayNameInput {
+  displayName: string;
+  now?: Date;
+}
+
 export interface ForgetMemoryRecordInput {
   recordId: string;
 }
+
+export type MemoryDisplayNameSource = "canonical" | "legacy";
+
+export interface MemoryDisplayNameResolution {
+  displayName: string;
+  record: MemoryRecord;
+  source: MemoryDisplayNameSource;
+}
+
+interface MemoryDisplayNameCandidate extends MemoryDisplayNameResolution {}
 
 const MEMORY_COMMENT_PREFIX = "murph-memory:";
 const MEMORY_ROOT_HEADING = "# Memory";
@@ -209,6 +242,62 @@ export function upsertMemoryRecord(
   };
 }
 
+export function setMemoryDisplayName(
+  input: MemoryDocument,
+  next: SetMemoryDisplayNameInput,
+): {
+  created: boolean;
+  document: MemoryDocument;
+  record: MemoryRecord;
+} {
+  const displayName = memoryDisplayNameSchema.parse(next.displayName);
+  const canonicalCandidates = collectCanonicalMemoryDisplayNameCandidates(input.records);
+  const target = selectMostRecentMemoryDisplayNameCandidate(canonicalCandidates);
+  const existingDuplicateCanonicalRecordIds = new Set(
+    input.records
+      .filter((record) => hasCanonicalMemoryDisplayNameRecordText(record.text))
+      .filter((record) => record.id !== target?.record.id)
+      .map((record) => record.id),
+  );
+  if (
+    target !== null
+    && target.displayName === displayName
+    && existingDuplicateCanonicalRecordIds.size === 0
+  ) {
+    return {
+      created: false,
+      document: input,
+      record: target.record,
+    };
+  }
+
+  const updated = upsertMemoryRecord(input, {
+    now: next.now,
+    recordId: target?.record.id ?? null,
+    section: "Identity",
+    text: formatMemoryDisplayNameRecordText(displayName),
+  });
+  const duplicateCanonicalRecordIds = new Set(
+    input.records
+      .filter((record) => hasCanonicalMemoryDisplayNameRecordText(record.text))
+      .filter((record) => record.id !== updated.record.id)
+      .map((record) => record.id),
+  );
+  if (duplicateCanonicalRecordIds.size === 0) {
+    return updated;
+  }
+
+  return {
+    ...updated,
+    document: {
+      ...updated.document,
+      records: updated.document.records.filter(
+        (record) => !duplicateCanonicalRecordIds.has(record.id),
+      ),
+    },
+  };
+}
+
 export function forgetMemoryRecord(
   input: MemoryDocument,
   next: ForgetMemoryRecordInput,
@@ -263,6 +352,65 @@ export function buildMemoryPromptBlock(input: MemoryDocument): string | null {
     "Memory lives in the canonical vault and is safe to rely on for durable user context.",
     `Memory:\n${sections.join("\n\n")}`,
   ].join("\n\n");
+}
+
+export function formatMemoryDisplayNameRecordText(displayName: string): string {
+  return `${MEMORY_DISPLAY_NAME_RECORD_PREFIX}${memoryDisplayNameSchema.parse(displayName)}`;
+}
+
+export function parseCanonicalMemoryDisplayNameRecordText(text: string): string | null {
+  let normalizedText: string;
+  try {
+    normalizedText = normalizeMemoryText(text);
+  } catch {
+    return null;
+  }
+
+  if (!normalizedText.startsWith(MEMORY_DISPLAY_NAME_RECORD_PREFIX)) {
+    return null;
+  }
+
+  const parsed = memoryDisplayNameSchema.safeParse(
+    normalizedText.slice(MEMORY_DISPLAY_NAME_RECORD_PREFIX.length),
+  );
+  return parsed.success ? parsed.data : null;
+}
+
+export function hasCanonicalMemoryDisplayNameRecordText(text: string): boolean {
+  try {
+    return normalizeMemoryText(text).startsWith(MEMORY_DISPLAY_NAME_RECORD_PREFIX);
+  } catch {
+    return false;
+  }
+}
+
+export function resolveMemoryDisplayName(
+  input: MemoryDocument,
+): MemoryDisplayNameResolution | null {
+  const canonicalCandidates = collectCanonicalMemoryDisplayNameCandidates(input.records);
+  const hasCanonicalEvidence = input.records.some(
+    (record) =>
+      record.section === "Identity"
+      && hasCanonicalMemoryDisplayNameRecordText(record.text),
+  );
+  if (hasCanonicalEvidence) {
+    return selectUniqueMemoryDisplayNameCandidate(canonicalCandidates);
+  }
+
+  return selectUniqueMemoryDisplayNameCandidate(
+    collectLegacyMemoryDisplayNameCandidates(input.records),
+  );
+}
+
+export function hasMemoryDisplayNameEvidence(input: MemoryDocument): boolean {
+  return (
+    input.records.some(
+      (record) =>
+        record.section === "Identity"
+        && hasCanonicalMemoryDisplayNameRecordText(record.text),
+    )
+    || collectLegacyMemoryDisplayNameCandidates(input.records).length > 0
+  );
 }
 
 function parseMemoryDocumentBody(body: string, sourcePath: string): MemoryRecord[] {
@@ -439,4 +587,188 @@ function findMemoryInsertionIndex(
   }
 
   return insertionIndex;
+}
+
+function collectCanonicalMemoryDisplayNameCandidates(
+  records: readonly MemoryRecord[],
+): MemoryDisplayNameCandidate[] {
+  return records.flatMap((record) => {
+    if (record.section !== "Identity") {
+      return [];
+    }
+
+    const displayName = parseCanonicalMemoryDisplayNameRecordText(record.text);
+    if (displayName === null) {
+      return [];
+    }
+
+    return [{
+      displayName,
+      record,
+      source: "canonical" as const,
+    }];
+  });
+}
+
+function collectLegacyMemoryDisplayNameCandidates(
+  records: readonly MemoryRecord[],
+): MemoryDisplayNameCandidate[] {
+  return records.flatMap((record) => {
+    if (record.section !== "Identity") {
+      return [];
+    }
+
+    const displayName = parseLegacyMemoryDisplayNameRecordText(record.text);
+    if (displayName === null) {
+      return [];
+    }
+
+    return [{
+      displayName,
+      record,
+      source: "legacy" as const,
+    }];
+  });
+}
+
+const legacyDisplayNameContextWords = new Set([
+  "about",
+  "around",
+  "at",
+  "for",
+  "from",
+  "home",
+  "in",
+  "near",
+  "of",
+  "on",
+  "work",
+]);
+
+function parseLegacyMemoryDisplayNameRecordText(text: string): string | null {
+  let normalizedText: string;
+  try {
+    normalizedText = normalizeMemoryText(text);
+  } catch {
+    return null;
+  }
+
+  const patterns = [
+    {
+      maxTokens: 5,
+      pattern: /^preferred\s+(?:display\s+)?name:\s*(?<name>.+)$/iu,
+    },
+    {
+      maxTokens: 5,
+      pattern: /^(?:the\s+)?user(?:'s|’s)?\s+(?:preferred\s+)?display\s+name\s+is\s+(?<name>.+)$/iu,
+    },
+    {
+      maxTokens: 5,
+      pattern: /^(?:the\s+)?user(?:'s|’s)?\s+preferred\s+name\s+is\s+(?<name>.+)$/iu,
+    },
+    {
+      maxTokens: 2,
+      pattern: /^(?:the\s+)?user\s+goes\s+by\s+(?<name>.+)$/iu,
+    },
+    {
+      maxTokens: 2,
+      pattern: /^(?:the\s+)?user(?:'s|’s)?\s+name\s+is\s+(?<name>.+)$/iu,
+    },
+  ] as const;
+
+  for (const { maxTokens, pattern } of patterns) {
+    const match = pattern.exec(normalizedText);
+    const candidate = normalizeLegacyMemoryDisplayNameCandidate(match?.groups?.name ?? null, {
+      maxTokens,
+    });
+    if (candidate !== null) {
+      return candidate;
+    }
+  }
+
+  return null;
+}
+
+function normalizeLegacyMemoryDisplayNameCandidate(
+  value: string | null,
+  options: { maxTokens: number },
+): string | null {
+  if (value === null) {
+    return null;
+  }
+
+  let normalized = value.trim();
+  normalized = normalized.replace(/^["'“”]+/u, "").replace(/["'“”]+$/u, "").trim();
+  normalized = normalized.replace(/[.!?]$/u, "").trim();
+  if (
+    normalized.length === 0
+    || /[,;:@()[\]{}]/u.test(normalized)
+    || /\d/u.test(normalized)
+    || /\s+(?:and|but|because|while|with|who|which|that)\s+/iu.test(normalized)
+  ) {
+    return null;
+  }
+
+  const tokens = normalized.split(/\s+/u);
+  if (
+    tokens.length > options.maxTokens
+    || tokens.some((token) => legacyDisplayNameContextWords.has(token.toLowerCase()))
+    || tokens.some((token) => !/^[\p{L}][\p{L}\p{M}'’.-]*$/u.test(token))
+  ) {
+    return null;
+  }
+
+  const parsed = memoryDisplayNameSchema.safeParse(normalized);
+  return parsed.success ? parsed.data : null;
+}
+
+function selectUniqueMemoryDisplayNameCandidate(
+  candidates: readonly MemoryDisplayNameCandidate[],
+): MemoryDisplayNameResolution | null {
+  if (candidates.length === 0) {
+    return null;
+  }
+
+  const uniqueDisplayNames = new Set(candidates.map((candidate) => candidate.displayName));
+  if (uniqueDisplayNames.size !== 1) {
+    return null;
+  }
+
+  return selectMostRecentMemoryDisplayNameCandidate(candidates);
+}
+
+function selectMostRecentMemoryDisplayNameCandidate(
+  candidates: readonly MemoryDisplayNameCandidate[],
+): MemoryDisplayNameCandidate | null {
+  let selected: MemoryDisplayNameCandidate | null = null;
+  for (const candidate of candidates) {
+    if (
+      selected === null
+      || compareMemoryDisplayNameCandidateRecency(candidate, selected) > 0
+    ) {
+      selected = candidate;
+    }
+  }
+
+  return selected;
+}
+
+function compareMemoryDisplayNameCandidateRecency(
+  left: MemoryDisplayNameCandidate,
+  right: MemoryDisplayNameCandidate,
+): number {
+  const leftUpdatedAt = Date.parse(left.record.updatedAt);
+  const rightUpdatedAt = Date.parse(right.record.updatedAt);
+  const leftHasTimestamp = Number.isFinite(leftUpdatedAt);
+  const rightHasTimestamp = Number.isFinite(rightUpdatedAt);
+
+  if (leftHasTimestamp && rightHasTimestamp && leftUpdatedAt !== rightUpdatedAt) {
+    return leftUpdatedAt - rightUpdatedAt;
+  }
+
+  if (leftHasTimestamp !== rightHasTimestamp) {
+    return leftHasTimestamp ? 1 : -1;
+  }
+
+  return left.record.sourceLine - right.record.sourceLine;
 }

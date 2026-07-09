@@ -168,7 +168,7 @@ describe("hosted local runner warm reuse e2e", () => {
     expect(finalStatus.mailboxLag.every((lane) => lane.lag === "0")).toBe(true);
   }, 600_000);
 
-  it("sends typing before replying from pending Linq input restored without initial delivery context", async () => {
+  it("replies from pending Linq input restored without initial delivery context without typing", async () => {
     const memberPhone = buildLinqRecipientPhoneNumber(pendingUserId);
     const homePhone = buildLinqHomePhoneNumber(pendingUserId);
     const replyPath = `/chats/${encodeURIComponent(pendingChatId)}/messages`;
@@ -214,13 +214,10 @@ describe("hosted local runner warm reuse e2e", () => {
     const typingStarts = requestsAfterInvocation.filter((request) =>
       request.method === "POST" && request.url === typingPath
     );
-    expect(typingStarts.length).toBeGreaterThanOrEqual(1);
+    expect(typingStarts).toHaveLength(0);
 
     const replySendIndex = requestsAfterInvocation.indexOf(reply);
-    const typingStartIndex = requestsAfterInvocation.indexOf(typingStarts[0]!);
     expect(replySendIndex).toBeGreaterThanOrEqual(0);
-    expect(typingStartIndex).toBeGreaterThanOrEqual(0);
-    expect(replySendIndex).toBeGreaterThan(typingStartIndex);
 
     const providerRequests = requireScenario().assistantProviderRequests
       .filter((request) => request.url === "/v1/responses");

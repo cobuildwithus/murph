@@ -530,7 +530,7 @@ const vaultFamilyDescriptors = [
   },
   {
     id: VAULT_FAMILY_IDS.integrationIngests,
-    description: "Append-only device-provider ingest evidence journals.",
+    description: "Append-only device-provider ingest evidence journals; closed monthly shards may be compressed.",
     owner: "core",
     storageKind: "jsonl-directory",
     directory: INTEGRATION_INGEST_LEDGER_DIRECTORY,

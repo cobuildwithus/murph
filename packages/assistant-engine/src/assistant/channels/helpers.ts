@@ -61,6 +61,7 @@ export function createAssistantChannelAdapter(
               candidate,
               dependencies,
               identityId: normalizeOptionalText(input.identityId),
+              replyToMessageId: normalizeOptionalText(input.replyToMessageId),
             })
             return isAssistantChannelActivityHandle(handle) ? handle : null
           },

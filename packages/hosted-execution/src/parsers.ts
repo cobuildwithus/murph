@@ -27,6 +27,7 @@ import type {
   HostedExecutionMemberChannels,
   HostedExecutionMemberChannelsUpdatedEvent,
   HostedExecutionDeviceSyncWakeEvent,
+  HostedExecutionGroupNewsletterEmailNeededDirectRoute,
   HostedExecutionGroupNewsletterEmailNeededEvent,
   HostedExecutionWake,
   HostedExecutionWakeKind,
@@ -267,6 +268,16 @@ export function parseHostedExecutionWake(value: unknown): HostedExecutionWake {
       });
     case "group-newsletter.email-needed":
       return buildHostedExecutionGroupNewsletterEmailNeededWake({
+        ...(record.directRoute === undefined
+          ? {}
+          : {
+              directRoute: record.directRoute === null
+                ? null
+                : parseHostedExecutionGroupNewsletterEmailNeededDirectRoute(
+                    record.directRoute,
+                    "Hosted execution wake group-newsletter.email-needed directRoute",
+                  ),
+            }),
         eventId,
         groupDisplayName: readNullableString(
           record.groupDisplayName,
@@ -891,6 +902,16 @@ export function parseHostedExecutionEvent(value: unknown): HostedExecutionEvent 
       } satisfies HostedExecutionDeviceSyncWakeEvent;
     case "group-newsletter.email-needed":
       return {
+        ...(record.directRoute === undefined
+          ? {}
+          : {
+              directRoute: record.directRoute === null
+                ? null
+                : parseHostedExecutionGroupNewsletterEmailNeededDirectRoute(
+                    record.directRoute,
+                    "Hosted execution group-newsletter.email-needed directRoute",
+                  ),
+            }),
         groupDisplayName: readNullableString(
           record.groupDisplayName,
           "Hosted execution group-newsletter.email-needed groupDisplayName",
@@ -1066,6 +1087,22 @@ function parseHostedExecutionAssistantNotificationRoute(
     threadIsDirect: record.threadIsDirect === null
       ? null
       : requireBoolean(record.threadIsDirect, `${label}.threadIsDirect`),
+  };
+}
+
+function parseHostedExecutionGroupNewsletterEmailNeededDirectRoute(
+  value: unknown,
+  label: string,
+): HostedExecutionGroupNewsletterEmailNeededDirectRoute {
+  const record = requireObject(value, label);
+  const channel = requireString(record.channel, `${label}.channel`);
+  if (channel !== "linq" && channel !== "telegram") {
+    throw new TypeError(`${label}.channel is invalid.`);
+  }
+
+  return {
+    channel,
+    threadId: requireString(record.threadId, `${label}.threadId`),
   };
 }
 

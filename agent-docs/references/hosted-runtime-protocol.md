@@ -1,6 +1,6 @@
 # Hosted Mailbox Runtime Protocol
 
-Last verified: 2026-07-03
+Last verified: 2026-07-07
 
 ## Decision
 
@@ -147,6 +147,72 @@ Legacy active-invocation heartbeat and container-stopped methods are inert
 compatibility shims, not lifecycle policy, and must be deleted after
 2026-05-25. Live lifecycle control is the runtime write fence plus explicit
 execution cleanup.
+
+### Vault-Share Selector-Scope Deploy Skew
+
+Selector-scoped vault-share additions span two independent surfaces:
+
+- The runner-facing `murph.group` schema can create/read group join policies
+  containing the new scope keys.
+- The runner reads active vault-share projection scopes through web's signed
+  `/api/internal/hosted-runtime/vault-share/active-kinds` callback.
+
+The group-tool schema is bundled into the runner and parsed by web. Scope
+registry widenings on that path are therefore web-first deploys: web must know
+how to parse the new group-tool request/response scopes before a runner bundle
+exposes them to the model. New runners must also send repeated
+`supportedProjectionScope` query params on the group-tool callback. Web filters
+`requestedVaultShareProjectionScopes`, `grantedVaultShareProjectionScopes`, and
+the legacy projection-kind arrays in group summaries to the declared exact scope
+set. Warm old runners that omit `supportedProjectionScope` receive only the
+pre-distance/count response scope set, so `container_rollout=immediate` is not
+required for parser safety on the group-summary path.
+
+The active-scope delivery callback is separately capability-negotiated. New
+runner bundles must send repeated `supportedProjectionScope` query params for
+every exact projection-scope key they can parse, using the same key format as
+`buildHostedVaultShareProjectionScopeKey`. Web filters returned active scopes
+to that declared exact set before serializing the response.
+
+Warm old runner bundles omit `supportedProjectionScope`; web must treat that as
+support for the pre-distance/count scope set: fixed projection scopes plus
+`activity-minutes-days.v1`. This protects the grantor-facing active-scope read:
+newly granted `activity-distance-days.v1` and
+`activity-session-count-days.v1` scopes are hidden from old grantor runners on
+that callback rather than making active-scope parsing fail or suppressing
+existing vault-share offers.
+
+This omitted-capability fallback is temporary compatibility owned by `apps/web`.
+It may be removed after the selector-scope runner bundle has been deployed with
+`container_rollout=immediate`, production logs show current runners send exact
+`supportedProjectionScope` values on the group-tool and active-scope callbacks,
+and the rollback window to a runner bundle without exact scope support has
+closed. Until removal, the fallback scope set must stay frozen to the
+pre-distance/count protocol and must not derive support for future projection
+kinds from the live registry.
+
+That callback negotiation does not protect the destination mailbox importer.
+Vault-share delivery wakes are appended by web directly into the destination
+member mailbox, and the destination runner does not declare projection-scope
+capability while importing mailbox rows. Therefore the runner bundle that first
+exposes distance/count selector grants must be deployed with
+`container_rollout=immediate` before selector-scoped offers are created or
+accepted. Gradual Cloudflare container rollout is unsafe for this selector
+expansion: a warm old destination runner could import a selector delivery wake
+whose exact scope key it cannot preserve.
+Until that rollout window is closed, production Cloudflare deploy preflight must
+reject explicit `HOSTED_EXECUTION_CONTAINER_ROLLOUT=gradual`, and the manual
+production deploy workflow/default helper path must default missing rollout
+input to `immediate`.
+
+Rollback floor: after web has accepted distance/count grants, rolling web behind
+the projection-scope parser that knows those rows can make old web code unable
+to read or serve the stored scope keys. Roll back web to a build with this
+parser and group-summary filtering or newer, or remove the new grants before
+rolling web behind it. Runner rollback behind the selector-scope bundle is not
+allowed while selector grants or pending selector delivery wakes exist; first
+disable/revert the selector-producing web paths and drain, revoke, or remove the
+new selector grants.
 
 ## Current Protocol
 

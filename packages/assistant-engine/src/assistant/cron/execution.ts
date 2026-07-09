@@ -20,6 +20,7 @@ import {
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
   sendAssistantNotificationLocal,
+  type AssistantNotificationResult,
   type AssistantNotificationTurnPolicy,
 } from '../../assistant-service.js'
 import { ASSISTANT_REQUIRE_SEND_AUTOMATION_TAG } from '../automation-tags.js'
@@ -123,6 +124,7 @@ const ASSISTANT_CRON_ONBOARDING_UNREADABLE_RESEARCH_SKIP_ERROR =
   'Assistant cron research-oriented managed automation skipped because assistant onboarding state could not be read.'
 const MURPH_RESEARCH_ORIENTED_MANAGED_AUTOMATION_TAGS = new Set([
   'murph-managed:weekly-health-insight',
+  'murph-managed:weekly-improvement-coach',
   'murph-managed:weekly-health-research-scout',
 ])
 // Hosted cron turns are off the user hotpath, so clean first runs prefer the
@@ -654,6 +656,12 @@ export async function executeClaimedAssistantCronJob(input: {
               : {}),
             beforeCommit: async (context) => {
               await preemptAssistantCronNotificationCommitForForeground({
+                allowTerminalNoDelivery:
+                  assistantCronDeviceActivitySkipConsumesOccurrence({
+                    decision: context.decision,
+                    deliveryOutcome: context.deliveryOutcome ?? null,
+                    job: input.job,
+                  }),
                 deliveryOutcome: context.deliveryOutcome ?? null,
                 foregroundPreemption,
                 jobName: claimedJob.name,
@@ -712,6 +720,12 @@ export async function executeClaimedAssistantCronJob(input: {
             !maintenanceJob &&
             (foregroundPreemption.wasForegroundYielded() ||
               input.shouldYield?.() === true)
+          const deviceActivitySkipConsumedOccurrence =
+            assistantCronDeviceActivitySkipConsumesOccurrence({
+              decision: result.decision,
+              deliveryOutcome: result.deliveryOutcome ?? null,
+              job: input.job,
+            })
           if (result.deliveryOutcome?.kind === 'queued') {
             pendingDeliveryIntentId = result.deliveryOutcome.intentId
             outcome = 'delivery_pending'
@@ -730,7 +744,8 @@ export async function executeClaimedAssistantCronJob(input: {
             // applies before or during provider work.
             if (
               foregroundYieldedAfterNotification &&
-              result.deliveryOutcome?.kind !== 'sent'
+              result.deliveryOutcome?.kind !== 'sent' &&
+              !deviceActivitySkipConsumedOccurrence
             ) {
               throw buildAssistantCronForegroundYieldedError(claimedJob.name)
             }
@@ -1073,10 +1088,6 @@ function resolveAssistantCronPostTurnDeliveryFailure(input: {
 function resolveAssistantCronNotificationResponsePolicy(
   job: ResolvedAssistantCronJob,
 ): { kind: 'require_send' } | null {
-  if (readAssistantDeviceActivityCronJobMetadata(job.job.name)) {
-    return { kind: 'require_send' }
-  }
-
   return listAssistantCronNotificationTags(job).includes(ASSISTANT_REQUIRE_SEND_AUTOMATION_TAG)
     ? { kind: 'require_send' }
     : null
@@ -1091,6 +1102,18 @@ function resolveAssistantCronNotificationTurnPolicy(
         privateSummary: MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_PRIVATE_SUMMARY,
       }
     : null
+}
+
+function assistantCronDeviceActivitySkipConsumesOccurrence(input: {
+  decision: AssistantNotificationResult['decision']
+  deliveryOutcome: AssistantDeliveryOutcome | null
+  job: ResolvedAssistantCronJob
+}): boolean {
+  return (
+    input.decision?.kind === 'skip' &&
+    input.deliveryOutcome === null &&
+    readAssistantDeviceActivityCronJobMetadata(input.job.job.name) !== null
+  )
 }
 
 function buildAssistantCronDeviceActivityDeliveryIdempotencyKey(input: {
@@ -1555,6 +1578,7 @@ function assertAssistantCronForegroundNotYielded(input: {
 }
 
 async function preemptAssistantCronNotificationCommitForForeground(input: {
+  allowTerminalNoDelivery: boolean
   deliveryOutcome: AssistantDeliveryOutcome | null
   foregroundPreemption: ReturnType<typeof createAssistantCronForegroundPreemption>
   jobName: string
@@ -1565,6 +1589,10 @@ async function preemptAssistantCronNotificationCommitForForeground(input: {
     input.foregroundPreemption.wasForegroundYielded()
     || input.shouldYield?.() === true
   if (!foregroundYielded) {
+    return
+  }
+
+  if (input.allowTerminalNoDelivery) {
     return
   }
 

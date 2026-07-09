@@ -1161,7 +1161,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     }
   });
 
-  test("pre-auto-reply delivery preparation does not reuse an exhausted foreground import budget", async () => {
+  test("pre-auto-reply delivery preparation uses the normal system import path", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
     const fetchRequests: HostedMailboxFetchRequest[] = [];
     const importedRoutes: string[] = [];
@@ -1201,7 +1201,6 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
             status: "deferred",
           };
         },
-        foregroundLimitPerLane: 1,
         async importItem(item) {
           importedRoutes.push(item.route.action);
           return { status: "imported" };

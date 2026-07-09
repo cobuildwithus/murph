@@ -224,7 +224,17 @@ export interface HostedExecutionDeviceSyncWakeEvent extends HostedExecutionBaseE
     | "reconcile_due";
 }
 
+export type HostedExecutionGroupNewsletterEmailNeededDirectRouteChannel =
+  | "linq"
+  | "telegram";
+
+export interface HostedExecutionGroupNewsletterEmailNeededDirectRoute {
+  channel: HostedExecutionGroupNewsletterEmailNeededDirectRouteChannel;
+  threadId: string;
+}
+
 export interface HostedExecutionGroupNewsletterEmailNeededEvent extends HostedExecutionBaseEvent {
+  directRoute?: HostedExecutionGroupNewsletterEmailNeededDirectRoute | null;
   groupDisplayName: string | null;
   groupId: string;
   kind: "group-newsletter.email-needed";
@@ -454,6 +464,7 @@ export interface HostedExecutionDeviceSyncWake extends HostedExecutionBaseWake {
 }
 
 export interface HostedExecutionGroupNewsletterEmailNeededWake extends HostedExecutionBaseWake {
+  directRoute?: HostedExecutionGroupNewsletterEmailNeededDirectRoute | null;
   groupDisplayName: string | null;
   groupId: string;
   kind: "group-newsletter.email-needed";

@@ -279,8 +279,8 @@ describe('monorepo release flow coverage audit', () => {
     expect(existsSync(path.join(repoRoot, 'scripts', 'chatgpt-managed-browser.test.mjs'))).toBe(false)
     expect(existsSync(path.join(repoRoot, 'scripts', 'review-gpt.sh'))).toBe(false)
     expect(existsSync(path.join(repoRoot, 'scripts', 'review-gpt-cli.sh'))).toBe(false)
-    expect(rootPackageJson.devDependencies?.['@cobuild/review-gpt']).toBe('^0.5.95')
-    expect(pnpmWorkspace).toContain('@cobuild/review-gpt@0.5.95')
+    expect(rootPackageJson.devDependencies?.['@cobuild/review-gpt']).toBe('^0.5.97')
+    expect(pnpmWorkspace).toContain('@cobuild/review-gpt@0.5.97')
     expect(pnpmWorkspace.match(/^patchedDependencies:\n((?:  .+\n)+)/mu)?.[1]?.trim()).toBe(
       'incur@0.4.5: patches/incur@0.4.5.patch',
     )
@@ -291,6 +291,7 @@ describe('monorepo release flow coverage audit', () => {
     expect(reviewGptConfig).toContain('attach_artifacts=1')
     expect(reviewGptConfig).toContain('app_connector="current"')
     expect(reviewGptConfig).toContain('model="gpt-5.5-pro"')
+    expect(reviewGptConfig).toContain('thinking="current"')
     expect(reviewGptConfig).toContain('snapshot_attachment_name="repo.snapshot.zip"')
     expect(reviewGptConfig).toContain('repomix_attachment_format="zip"')
     const prDeepReviewPrompt = readFileSync(
@@ -311,12 +312,20 @@ describe('monorepo release flow coverage audit', () => {
     expect(prDeepReviewPrompt).not.toContain('connected repository, PR diff, or touched files')
     expect(prDeepReviewPrompt).toContain('start the final message with a single `Checked:` line')
     expect(prDeepReviewPrompt).toContain('`Checked: PR #123 @ abc1234`')
-    const prDeepReviewLoop = readFileSync(
-      path.join(repoRoot, 'agent-docs', 'operations', 'pr-deep-review-loop.md'),
+    const prReviewGptLoop = readFileSync(
+      path.join(repoRoot, 'agent-docs', 'operations', 'pr-reviewgpt-loop.md'),
       'utf8',
     )
-    expect(prDeepReviewLoop).toContain('local Codex CLI')
-    expect(prDeepReviewLoop).toContain('the earlier ReviewGPT packaging/preflight steps no longer apply')
+    expect(prReviewGptLoop).toContain('Required post-completion ReviewGPT loop')
+    expect(prReviewGptLoop).toContain('pnpm review:gpt pr-review')
+    expect(prReviewGptLoop).toContain('repo-local `pr-review` preset')
+    expect(prReviewGptLoop).toContain('`pnpm review:gpt`')
+    expect(prReviewGptLoop).toContain('managed ReviewGPT browser lanes')
+    expect(prReviewGptLoop).toContain('randomly among usable')
+    expect(prReviewGptLoop).toContain('zero accepted findings')
+    expect(prReviewGptLoop).toContain('`review-gpt-pr-context/pr.diff`')
+    expect(prReviewGptLoop).toContain('It does **not** run the local Codex')
+    expect(prReviewGptLoop).toContain('does **not** run the local Codex')
     expect(existsSync(path.join(repoRoot, 'scripts', 'review-gpt-full.config.sh'))).toBe(false)
     expect(existsSync(path.join(repoRoot, 'scripts', 'review-gpt.data.config.sh'))).toBe(false)
     expect(existsSync(path.join(repoRoot, 'scripts', 'research-run.mjs'))).toBe(false)
@@ -631,6 +640,7 @@ Updated: 2026-04-24
       const fullEntries = listZipEntries(fullBundle.zipPath)
 
       expect(leanEntries).toContain('agent-docs/operations/verification-and-runtime.md')
+      expect(leanEntries).toContain('agent-docs/operations/pr-reviewgpt-loop.md')
       expect(leanEntries).toContain('agent-docs/product-specs/repo.md')
       expect(leanEntries).not.toContain('agent-docs/product-specs/repo-v1.md')
       expect(leanEntries).toContain('docs/architecture.md')

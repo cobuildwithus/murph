@@ -3,7 +3,7 @@ import {
   parseHostedVaultShareDeliverRequest,
   type HostedVaultShareDeliverResponse,
   type HostedVaultShareDeliveryRecord,
-  type HostedVaultShareProjectionKind,
+  type HostedVaultShareProjectionScope,
 } from "@murphai/hosted-execution/vault-share";
 
 import {
@@ -49,7 +49,7 @@ const DELIVERED_RESPONSE: HostedVaultShareDeliverResponse = {
  * signed Cloudflare callback. The grantor runtime first asks web for active projection
  * kinds, then this write seam revalidates the requested kind before fanout. Web remains
  * the sole authority: it delivers only to active HostedVaultShare rows for
- * (grantor, projectionKind), skipping inactive destinations. The response is a function
+ * (grantor, projection scope), skipping inactive destinations. The response is a function
  * of share configuration alone — no grants, or only inactive destinations, resolves to
  * `no-active-share`; everything else resolves to a bare `delivered`, so the grantor
  * runtime learns nothing beyond "an active share exists".
@@ -67,7 +67,7 @@ export const POST = withJsonError(async (request: Request) => {
 
   const shares = await findActiveHostedVaultShares({
     grantorMemberId,
-    projectionKind: body.projectionKind,
+    projectionScope: body.projectionScope,
   });
   const activeShares: ActiveHostedVaultShare[] = [];
   let deliveryFailed = false;
@@ -182,7 +182,7 @@ function createHostedVaultShareDeliveryFailedError(): Error {
  */
 function filterDeliverableRecords(
   records: readonly HostedVaultShareDeliveryRecord[],
-  projectionKind: HostedVaultShareProjectionKind,
+  projectionKind: HostedVaultShareProjectionScope["projectionKind"],
 ): HostedVaultShareDeliveryRecord[] {
   const nowMs = Date.now();
   const minOccurredAtMs = isHostedVaultShareCurrentStateProjectionKind(projectionKind)

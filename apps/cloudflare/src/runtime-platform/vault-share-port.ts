@@ -1,5 +1,7 @@
 import type { HostedRuntimePlatform } from "@murphai/assistant-runtime/hosted-runtime-contracts";
 import {
+  buildHostedVaultShareProjectionScopeKey,
+  HOSTED_VAULT_SHARE_KNOWN_PROJECTION_SCOPES,
   parseHostedVaultShareActiveProjectionKindsResponse,
   parseHostedVaultShareDeliverResponse,
 } from "@murphai/hosted-execution/vault-share";
@@ -10,6 +12,8 @@ import {
 
 import { fetchHostedWebControlPlaneJson, type HostedWebControlTransport } from "./web-control-transport.ts";
 
+const HOSTED_VAULT_SHARE_SUPPORTED_PROJECTION_SCOPE_PARAM = "supportedProjectionScope";
+
 export function createHostedWebVaultSharePort(input: {
   boundUserId: string;
   fetchImpl: typeof fetch;
@@ -17,18 +21,18 @@ export function createHostedWebVaultSharePort(input: {
   transport: HostedWebControlTransport;
 }) {
   return {
-    async listActiveProjectionKinds() {
+    async listActiveProjectionScopes() {
       const payload = await fetchHostedWebControlPlaneJson({
         boundUserId: input.boundUserId,
-        description: "Hosted vault share active projection kinds",
+        description: "Hosted vault share active projection scopes",
         fetchImpl: input.fetchImpl,
         method: "GET",
-        path: HOSTED_RUNTIME_VAULT_SHARE_ACTIVE_KINDS_PATH,
+        path: buildHostedVaultShareActiveKindsPath(),
         timeoutMs: input.timeoutMs,
         transport: input.transport,
       });
 
-      return parseHostedVaultShareActiveProjectionKindsResponse(payload).projectionKinds;
+      return parseHostedVaultShareActiveProjectionKindsResponse(payload).projectionScopes;
     },
     async deliver(request: Parameters<NonNullable<HostedRuntimePlatform["vaultSharePort"]>["deliver"]>[0]) {
       const payload = await fetchHostedWebControlPlaneJson({
@@ -44,4 +48,16 @@ export function createHostedWebVaultSharePort(input: {
       return parseHostedVaultShareDeliverResponse(payload);
     },
   };
+}
+
+function buildHostedVaultShareActiveKindsPath(): string {
+  const params = new URLSearchParams();
+  for (const projectionScope of HOSTED_VAULT_SHARE_KNOWN_PROJECTION_SCOPES) {
+    params.append(
+      HOSTED_VAULT_SHARE_SUPPORTED_PROJECTION_SCOPE_PARAM,
+      buildHostedVaultShareProjectionScopeKey(projectionScope),
+    );
+  }
+
+  return `${HOSTED_RUNTIME_VAULT_SHARE_ACTIVE_KINDS_PATH}?${params.toString()}`;
 }

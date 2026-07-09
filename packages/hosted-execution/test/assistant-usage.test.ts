@@ -11,6 +11,7 @@ import {
   buildAssistantMaintenanceUsageRecord,
   buildHostedElevenLabsTtsUsageRecord,
   buildHostedTranscriptionUsageRecord,
+  classifyAssistantOpenAiImageUsageBasis,
   createAssistantUsageId,
   createAssistantUsageReportingUserId,
   parseAssistantUsageRecord,
@@ -121,6 +122,113 @@ test("usage records default and validate token pricing basis", () => {
     }),
     /tokenPricingBasis must be/u,
   );
+});
+
+test("OpenAI image usage basis classifier returns priceable token buckets", () => {
+  const result = classifyAssistantOpenAiImageUsageBasis({
+    cachedInputTokens: 0,
+    inputTokens: 1_300,
+    outputTokens: 400,
+    rawUsageJson: {
+      input_tokens: 1_300,
+      input_tokens_details: {
+        cached_tokens: 0,
+        image_tokens: 1_000,
+        text_tokens: 300,
+      },
+      output_tokens: 400,
+      output_tokens_details: {
+        image_tokens: 400,
+        reasoning_tokens: 0,
+        text_tokens: 0,
+      },
+      total_tokens: 1_700,
+    },
+    totalTokens: 1_700,
+  });
+
+  assert.equal(result.priceable, true);
+  if (!result.priceable) throw new Error("Expected priceable image usage.");
+  assert.deepEqual(result.tokenBuckets, {
+    billableImageInputTokens: 1_000n,
+    billableTextInputTokens: 300n,
+    cachedImageInputTokens: 0n,
+    cachedInputTokens: 0n,
+    cachedTextInputTokens: 0n,
+    imageInputTokens: 1_000n,
+    outputTokens: 400n,
+    textInputTokens: 300n,
+  });
+
+  const mixedCachedInput = classifyAssistantOpenAiImageUsageBasis({
+    cachedInputTokens: 100,
+    inputTokens: 1_300,
+    outputTokens: 400,
+    rawUsageJson: {
+      input_tokens: 1_300,
+      input_tokens_details: {
+        cached_tokens: 100,
+        image_tokens: 1_000,
+        text_tokens: 300,
+      },
+      output_tokens: 400,
+      total_tokens: 1_700,
+    },
+    totalTokens: 1_700,
+  });
+  assert.equal(mixedCachedInput.priceable, true);
+  if (!mixedCachedInput.priceable) {
+    throw new Error("Expected mixed cached image usage to be priceable.");
+  }
+  assert.deepEqual(mixedCachedInput.tokenBuckets, {
+    billableImageInputTokens: 1_000n,
+    billableTextInputTokens: 200n,
+    cachedImageInputTokens: 0n,
+    cachedInputTokens: 100n,
+    cachedTextInputTokens: 100n,
+    imageInputTokens: 1_000n,
+    outputTokens: 400n,
+    textInputTokens: 300n,
+  });
+});
+
+test("OpenAI image usage basis classifier explains unpriceable usage", () => {
+  assert.deepEqual(
+    classifyAssistantOpenAiImageUsageBasis({
+      cachedInputTokens: 0,
+      inputTokens: 120,
+      outputTokens: 40,
+      rawUsageJson: {
+        input_tokens: 120,
+        output_tokens: 40,
+        total_tokens: 160,
+      },
+      totalTokens: 160,
+    }),
+    {
+      priceable: false,
+      reason: "missing_provider_usage_tokens",
+    },
+  );
+
+  assert.deepEqual(
+    classifyAssistantOpenAiImageUsageBasis({
+      cachedInputTokens: 0,
+      inputTokens: 100,
+      outputTokens: 400,
+      rawUsageJson: {
+        input_tokens: 101,
+        output_tokens: 400,
+        total_tokens: 500,
+      },
+      totalTokens: 500,
+    }),
+    {
+      priceable: false,
+      reason: "inconsistent_provider_usage_tokens",
+    },
+  );
+
 });
 
 test("transcription usage records carry the audio cost basis and dedupe like turn usage", () => {

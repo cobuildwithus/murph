@@ -24,9 +24,6 @@ import {
   jsonOk,
   withJsonError,
 } from "@/src/lib/hosted-onboarding/http";
-import {
-  assertHostedThreadRouteEgressAuthority,
-} from "@/src/lib/hosted-routing/thread-route-store";
 import { readOptionalJsonObject } from "@/src/lib/http";
 import { getPrisma } from "@/src/lib/prisma";
 
@@ -94,7 +91,6 @@ export const POST = withJsonError(async (request: Request) => {
   if (validatedRouteAuthority) {
     routeLineLookupKey = await readHostedLinqDeliveryRouteLineLookupKey({
       memberId: userId,
-      prisma,
       routeAuthority: validatedRouteAuthority,
     });
   } else if (!fromPhoneNumber) {
@@ -132,7 +128,6 @@ export const POST = withJsonError(async (request: Request) => {
 
 async function readHostedLinqDeliveryRouteLineLookupKey(input: {
   memberId: string;
-  prisma: ReturnType<typeof getPrisma>;
   routeAuthority: HostedExecutionLinqExternalThreadRouteAuthority;
 }): Promise<string | null> {
   if (input.routeAuthority.containerMemberId !== input.memberId) {
@@ -144,19 +139,12 @@ async function readHostedLinqDeliveryRouteLineLookupKey(input: {
     });
   }
 
-  await assertHostedThreadRouteEgressAuthority({
-    authority: input.routeAuthority,
-    prisma: input.prisma,
-  });
   // This is a post-send delivery-OUTCOME callback (Cloudflare-runner
-  // authenticated), not a routing decision. Authorization is already bound to
-  // the DB route by channel + chatId + containerMemberId above; the returned
-  // line key is used only to attribute the recorded outcome to a Linq line's
-  // stats. Since a chat-id route is intentionally no longer line-pinned, the DB
-  // route carries no authoritative send line — the runner that performed the
-  // send is the source of truth for which line it used, so we read it from the
-  // (already authority-validated) request. A missing key is benign: the outcome
-  // still records without line attribution.
+  // authenticated), not a routing decision. The cheap channel/chat/member
+  // consistency check already ran before this helper; the returned line key is
+  // used only to attribute the recorded outcome to a Linq line's stats. A stale
+  // route row cannot prevent a send that already happened, so it must not make
+  // outcome recording fail or trigger retries.
   return input.routeAuthority.accountLookupKey?.trim() || null;
 }
 

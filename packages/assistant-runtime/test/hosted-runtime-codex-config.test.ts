@@ -85,7 +85,7 @@ test("hosted Codex provider transport diagnostics expose only safe config metada
   assert.deepEqual(HOSTED_CODEX_PROVIDER_TRANSPORT_DIAGNOSTICS, {
     codexProviderRequestMaxRetries: 4,
     codexProviderStreamIdleTimeoutMs: 90_000,
-    codexProviderStreamMaxRetries: 0,
+    codexProviderStreamMaxRetries: 5,
     codexProviderTransportMode: "codex-native-provider-transport",
   });
 });
@@ -174,7 +174,7 @@ test("hosted Codex runtime config writes OpenAI Responses config without secret 
   assert.match(config, /^stream_idle_timeout_ms = 90000$/mu);
   assert.match(config, /^requires_openai_auth = false$/mu);
   assert.match(config, /^request_max_retries = 4$/mu);
-  assert.match(config, /^stream_max_retries = 0$/mu);
+  assert.match(config, /^stream_max_retries = 5$/mu);
   assert.doesNotMatch(config, /^requires_openai_auth = true$/mu);
   assert.match(config, /\[features\]\nplugins = false\nmulti_agent_v2 = true\nmemories = true/u);
   assert.doesNotMatch(config, /root_agent_usage_hint_text/u);
@@ -401,7 +401,7 @@ test("hosted Codex runtime config accepts a local test-only model provider base 
   assert.doesNotMatch(config, /^supports_websockets = true$/mu);
   assert.match(config, /stream_idle_timeout_ms = 90000/u);
   assert.match(config, /request_max_retries = 4/u);
-  assert.match(config, /stream_max_retries = 0/u);
+  assert.match(config, /stream_max_retries = 5/u);
   assert.doesNotMatch(config, /https:\/\/api\.openai\.com\/v1/u);
 });
 
@@ -459,7 +459,7 @@ test("hosted Codex runtime config uses ChatGPT subscription auth in local dev", 
   assert.match(config, /^stream_idle_timeout_ms = 90000$/mu);
   assert.match(config, /^requires_openai_auth = true$/mu);
   assert.match(config, /^request_max_retries = 4$/mu);
-  assert.match(config, /^stream_max_retries = 0$/mu);
+  assert.match(config, /^stream_max_retries = 5$/mu);
   assert.doesNotMatch(config, /chatgpt-access-token/u);
   assert.match(config, /model_reasoning_effort = "low"/u);
   assert.match(config, /\[history\]\npersistence = "none"/u);
@@ -638,7 +638,7 @@ test("hosted Codex runtime config preserves managed ChatGPT auth", async () => {
   assert.match(config, /^requires_openai_auth = true$/mu);
   assert.match(config, /^stream_idle_timeout_ms = 90000$/mu);
   assert.match(config, /^request_max_retries = 4$/mu);
-  assert.match(config, /^stream_max_retries = 0$/mu);
+  assert.match(config, /^stream_max_retries = 5$/mu);
   assert.doesNotMatch(config, /chatgpt-refresh-token/u);
   assertHostedCodexConfigDisablesLoginShellAtTopLevel(config);
   assertHostedCodexAutoCompactTokenLimit(config);
@@ -801,10 +801,19 @@ testHostedCodexAuthE2e(
         workingDirectory: operatorHomeRoot,
       });
 
-      assert.equal(requests.length, 1);
+      const fixedRequestCount = requests.length;
+      assert.ok(fixedRequestCount >= 1);
       assert.equal(fixedResult.finalMessage, "auth regression ok");
-      assert.equal(authorizationHeaders[0], expectedAuthorization);
-      assert.match(requests[0]!, /hello hosted auth regression/u);
+      assert.ok(
+        authorizationHeaders
+          .slice(0, fixedRequestCount)
+          .every((header) => header === expectedAuthorization),
+      );
+      assert.ok(
+        requests
+          .slice(0, fixedRequestCount)
+          .some((request) => /hello hosted auth regression/u.test(request)),
+      );
 
       const legacyCodexHome = await prepareLegacyBuiltInOpenAiCodexHome({
         baseUrl: `${readServerBaseUrl(server)}/v1`,
@@ -830,7 +839,11 @@ testHostedCodexAuthE2e(
         legacyError = error;
       }
 
-      assert.notEqual(authorizationHeaders[1], expectedAuthorization);
+      const legacyAuthorizationHeaders = authorizationHeaders.slice(fixedRequestCount);
+      assert.ok(legacyAuthorizationHeaders.length >= 1);
+      assert.ok(
+        legacyAuthorizationHeaders.some((header) => header !== expectedAuthorization),
+      );
       assert(legacyError instanceof Error);
     } finally {
       await closeHttpServer(server);
@@ -1301,7 +1314,7 @@ test("hosted Codex config TOML omits credential values and runtime authority hea
       "stream_idle_timeout_ms = 90000",
       "requires_openai_auth = false",
       "request_max_retries = 4",
-      "stream_max_retries = 0",
+      "stream_max_retries = 5",
       "",
       "# Hosted runs should not perform Codex plugin marketplace or remote plugin",
       "# sync work on cold wake; Murph owns the hosted runtime tool surface.",
@@ -1343,7 +1356,7 @@ test("hosted Codex config TOML omits credential values and runtime authority hea
       "[shell_environment_policy]",
       'inherit = "all"',
       "ignore_default_excludes = true",
-      'include_only = ["CI", "CODEX_HOME", "CODEX_CA_CERTIFICATE", "COLORTERM", "CURL_CA_BUNDLE", "FORCE_COLOR", "HOME", "MURPH_HOSTED_CLI_BRIDGE_TOKEN", "MURPH_HOSTED_CLI_BRIDGE_URL", "MURPH_HOSTED_RUNTIME_PROCESS", "MURPH_ASSISTANT_SKILLS_ROOT", "LANG", "LC_ALL", "LC_CTYPE", "EXA_API_KEY", "MAPBOX_ACCESS_TOKEN", "MURPH_DATA_API_KEY", "NODE_EXTRA_CA_CERTS", "NO_COLOR", "PATH", "REQUESTS_CA_BUNDLE", "SSL_CERT_DIR", "SSL_CERT_FILE", "TEMP", "TERM", "TMP", "TMPDIR", "VAULT"]',
+      'include_only = ["CI", "CODEX_HOME", "CODEX_CA_CERTIFICATE", "COLORTERM", "CURL_CA_BUNDLE", "FORCE_COLOR", "HOME", "MURPH_HOSTED_CLI_BRIDGE_TOKEN", "MURPH_HOSTED_CLI_BRIDGE_URL", "MURPH_HOSTED_RUNTIME_PROCESS", "MURPH_ASSISTANT_SKILLS_ROOT", "MURPH_HEALTH_COMMONS_PACKAGE_ROOT", "LANG", "LC_ALL", "LC_CTYPE", "EXA_API_KEY", "MAPBOX_ACCESS_TOKEN", "MURPH_DATA_API_KEY", "NODE_EXTRA_CA_CERTS", "NO_COLOR", "PATH", "REQUESTS_CA_BUNDLE", "SSL_CERT_DIR", "SSL_CERT_FILE", "TEMP", "TERM", "TMP", "TMPDIR", "VAULT"]',
       "",
       "[shell_environment_policy.set]",
       `PATH = "${HOSTED_RUNNER_EXECUTABLE_PATH}"`,
@@ -1359,6 +1372,14 @@ test("hosted Codex shell policy excludes ElevenLabs runtime capability env", () 
       key === "ELEVENLABS_API_KEY" || key.startsWith("MURPH_ELEVENLABS_")
     ),
     [],
+  );
+});
+
+test("hosted Codex shell policy includes the image-pinned Health Commons package root", () => {
+  assert.ok(
+    HOSTED_CODEX_SHELL_ENVIRONMENT_INCLUDE_ONLY.includes(
+      "MURPH_HEALTH_COMMONS_PACKAGE_ROOT",
+    ),
   );
 });
 

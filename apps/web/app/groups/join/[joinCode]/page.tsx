@@ -3,12 +3,18 @@ import Link from "next/link";
 
 import {
   GroupJoinAcceptForm,
+  GroupJoinLegalConsentGate,
   GroupJoinSignInButton,
 } from "@/src/components/hosted-groups/group-join-client";
 import { Button } from "@/src/components/ui/button";
 import { readHostedGroupJoinView } from "@/src/lib/hosted-groups/group-store";
 import { getHostedPageAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
 import { resolveDecodedRouteParam } from "@/src/lib/http";
+import {
+  readHostedConsentStatus,
+  type HostedConsentStatus,
+} from "@/src/lib/legal/consent";
+import { getPrisma } from "@/src/lib/prisma";
 import { createMurphPageMetadata } from "@/src/lib/site-metadata";
 
 export const dynamic = "force-dynamic";
@@ -47,14 +53,27 @@ export default async function GroupJoinPage({
 }) {
   const joinCode = await resolveDecodedRouteParam(params, "joinCode");
   const auth = await getHostedPageAuthSnapshot();
+  const prisma = getPrisma();
   const view = await readHostedGroupJoinView({
     joinCode,
     memberId: auth.authenticatedMember?.id ?? null,
+    prisma,
   });
+  const launchConsentStatus = auth.authenticatedMember
+    ? await readGroupJoinLaunchConsentStatus({
+        memberId: auth.authenticatedMember.id,
+        prisma,
+      })
+    : null;
 
   return (
     <main className="mx-auto flex min-h-screen w-full max-w-md flex-col justify-center gap-8 px-6 py-16">
-      {renderGroupJoin({ authenticated: auth.authenticated, joinCode, view })}
+      {renderGroupJoin({
+        authenticated: auth.authenticated,
+        joinCode,
+        launchConsentStatus,
+        view,
+      })}
     </main>
   );
 }
@@ -62,6 +81,7 @@ export default async function GroupJoinPage({
 function renderGroupJoin(input: {
   authenticated: boolean;
   joinCode: string;
+  launchConsentStatus: HostedConsentStatus | null;
   view: Awaited<ReturnType<typeof readHostedGroupJoinView>>;
 }) {
   const { view } = input;
@@ -101,29 +121,67 @@ function renderGroupJoin(input: {
       </header>
 
       <div className="flex flex-col gap-3">
-        <ClarityRow label="Shared" text="Your name, plus anything you choose below." />
+        <ClarityRow label="Shared" text="Your name, plus what you choose below." />
         <div className="h-px bg-border" />
-        <ClarityRow label="Private" text="Your Murph chats, health data, and vault. Always." />
+        <ClarityRow label="Private" text="Your chats, health data, and vault. Always." />
       </div>
 
-      {input.authenticated ? (
-        <GroupJoinAcceptForm
-          activeVaultShareProjectionKinds={view.activeVaultShareProjectionKinds}
-          alreadyActiveMember={alreadyActiveMember}
-          groupName={groupName}
-          joinCode={input.joinCode}
-          permissions={view.requestedVaultShareProjections}
-        />
-      ) : (
-        <div className="flex flex-col gap-2">
-          <GroupJoinSignInButton />
-          <p className="text-center text-xs leading-5 text-muted-foreground">
-            Sign in or create a private Murph account, and we&apos;ll bring you back here.
-          </p>
-        </div>
-      )}
+      <div
+        id="group-join-action"
+        aria-label="Group join action"
+        aria-live="polite"
+        className="flex flex-col"
+        role="region"
+      >
+        {input.authenticated && !input.launchConsentStatus?.launchGranted ? (
+          <GroupJoinLegalConsentGate initialStatus={input.launchConsentStatus} />
+        ) : input.authenticated ? (
+          <GroupJoinAcceptForm
+            activeVaultShareProjectionScopes={view.activeVaultShareProjectionScopes}
+            alreadyActiveMember={alreadyActiveMember}
+            groupName={groupName}
+            joinCode={input.joinCode}
+            permissions={view.requestedVaultShareProjections}
+          />
+        ) : (
+          <div className="flex flex-col gap-2">
+            <GroupJoinSignInButton />
+            <p className="text-center text-xs leading-5 text-muted-foreground">
+              Sign in or create a private Murph account, and we&apos;ll bring you back here.
+            </p>
+          </div>
+        )}
+      </div>
     </div>
   );
+}
+
+async function readGroupJoinLaunchConsentStatus(input: {
+  memberId: string;
+  prisma: Parameters<typeof readHostedConsentStatus>[0]["prisma"];
+}): Promise<HostedConsentStatus | null> {
+  try {
+    return sanitizeHostedConsentStatusForClient(
+      await readHostedConsentStatus({
+        memberId: input.memberId,
+        prisma: input.prisma,
+      }),
+    );
+  } catch {
+    return null;
+  }
+}
+
+function sanitizeHostedConsentStatusForClient(
+  status: HostedConsentStatus,
+): HostedConsentStatus {
+  return {
+    ...status,
+    scopes: status.scopes.map((scope) => ({
+      ...scope,
+      grant: null,
+    })),
+  };
 }
 
 function ClarityRow(props: { label: string; text: string }) {

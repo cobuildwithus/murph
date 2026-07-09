@@ -44,6 +44,7 @@ vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
 }));
 
 import {
+  enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort,
   readHostedGroupNewsletterEmailRecipients,
   readHostedGroupNewsletterParticipants,
 } from "@/src/lib/hosted-groups/group-newsletter";
@@ -122,6 +123,7 @@ describe("hosted group newsletter participants", () => {
     expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledTimes(1);
     expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledWith({
       envelope: expect.objectContaining({
+        directRoute: { channel: "telegram", threadId: "telegram_thread_123" },
         eventId: "group-newsletter.email-needed:member_active_missing_email:hgrp_123",
         groupDisplayName: "Sunday group",
         groupId: "hgrp_123",
@@ -209,6 +211,7 @@ describe("hosted group newsletter participants", () => {
     expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledTimes(1);
     expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledWith({
       envelope: expect.objectContaining({
+        directRoute: { channel: "linq", threadId: "linq_home_thread_123" },
         eventId: "group-newsletter.email-needed:member_active_missing_email:hgrp_123",
         kind: "group-newsletter.email-needed",
         userId: "member_active_missing_email",
@@ -232,6 +235,7 @@ describe("hosted group newsletter participants", () => {
     expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledTimes(1);
     expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledWith({
       envelope: expect.objectContaining({
+        directRoute: { channel: "telegram", threadId: "telegram_thread_123" },
         eventId: "group-newsletter.email-needed:member_active_missing_email:hgrp_123",
         kind: "group-newsletter.email-needed",
         userId: "member_active_missing_email",
@@ -354,23 +358,128 @@ describe("hosted group newsletter participants", () => {
     }));
     expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
   });
+
+  it("enqueues a private email nudge for a joining member who granted email but has no verified email", async () => {
+    const prisma = createPrismaMock();
+    mocks.getPrisma.mockReturnValue(prisma);
+
+    await enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort({
+      groupId: "hgrp_123",
+      memberId: "member_active_missing_email",
+    });
+
+    expect(prisma.hostedGroup.findFirst).toHaveBeenCalledWith({
+      where: {
+        id: "hgrp_123",
+        members: {
+          some: { memberId: "member_active_missing_email" },
+        },
+      },
+      select: {
+        displayName: true,
+        id: true,
+        runtimeMemberId: true,
+      },
+    });
+    expect(prisma.hostedVaultShare.findFirst).toHaveBeenCalledWith({
+      where: {
+        destinationMemberId: "group_runtime_member",
+        grantorMemberId: "member_active_missing_email",
+        projectionKind: "group-email.v0",
+        status: "granted",
+      },
+      select: { grantorMemberId: true },
+    });
+    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledTimes(1);
+    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledWith({
+      envelope: expect.objectContaining({
+        directRoute: { channel: "telegram", threadId: "telegram_thread_123" },
+        eventId: "group-newsletter.email-needed:member_active_missing_email:hgrp_123",
+        groupDisplayName: "Sunday group",
+        groupId: "hgrp_123",
+        kind: "group-newsletter.email-needed",
+        userId: "member_active_missing_email",
+      }),
+      tx: expect.any(Object),
+    });
+    expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
+      expectedUserId: "member_active_missing_email",
+      mailboxItemId: "mailbox_item_email_needed",
+    });
+  });
+
+  it("does not enqueue a joining-member nudge without the email grant", async () => {
+    const prisma = createPrismaMock({ emailGrant: false });
+    mocks.getPrisma.mockReturnValue(prisma);
+
+    await enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort({
+      groupId: "hgrp_123",
+      memberId: "member_active_missing_email",
+    });
+
+    expect(mocks.readHostedMemberEmailAuthorization).not.toHaveBeenCalled();
+    expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+    expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
+  });
+
+  it("does not enqueue a joining-member nudge when the member already has a verified email", async () => {
+    const prisma = createPrismaMock();
+    mocks.getPrisma.mockReturnValue(prisma);
+
+    await enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort({
+      groupId: "hgrp_123",
+      memberId: "member_active_with_email",
+    });
+
+    expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+    expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
+  });
+
+  it("does not consume the joining-member nudge key before a direct route exists", async () => {
+    const prisma = createPrismaMock();
+    mocks.getPrisma.mockReturnValue(prisma);
+    mocks.readHostedMemberRoutingState.mockResolvedValue(null);
+
+    await enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort({
+      groupId: "hgrp_123",
+      memberId: "member_active_missing_email",
+    });
+
+    expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+    expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
+  });
 });
 
-function createPrismaMock() {
+function createPrismaMock(input?: {
+  emailGrant?: boolean;
+  groupRuntimeMemberId?: string | null;
+}) {
   const prisma = {
     $transaction: vi.fn(async (callback: (tx: unknown) => Promise<unknown>) =>
       callback(prisma)
     ),
     hostedGroup: {
-      findFirst: vi.fn(async () => ({
-        displayName: "Sunday group",
-        id: "hgrp_123",
-        members: [
-          { memberId: "member_active_with_email" },
-          { memberId: "member_suspended" },
-          { memberId: "member_active_missing_email" },
-        ],
-      })),
+      findFirst: vi.fn(async (args?: { select?: { runtimeMemberId?: boolean } }) => {
+        if (args?.select?.runtimeMemberId) {
+          return {
+            displayName: "Sunday group",
+            id: "hgrp_123",
+            runtimeMemberId: input?.groupRuntimeMemberId === undefined
+              ? "group_runtime_member"
+              : input.groupRuntimeMemberId,
+          };
+        }
+
+        return {
+          displayName: "Sunday group",
+          id: "hgrp_123",
+          members: [
+            { memberId: "member_active_with_email" },
+            { memberId: "member_suspended" },
+            { memberId: "member_active_missing_email" },
+          ],
+        };
+      }),
     },
     hostedVaultShare: {
       findMany: vi.fn(async () => [
@@ -378,6 +487,10 @@ function createPrismaMock() {
         { grantorMemberId: "member_suspended" },
         { grantorMemberId: "member_active_missing_email" },
       ]),
+      findFirst: vi.fn(async () =>
+        input?.emailGrant === false
+          ? null
+          : { grantorMemberId: "member_active_missing_email" }),
     },
   };
   return prisma;

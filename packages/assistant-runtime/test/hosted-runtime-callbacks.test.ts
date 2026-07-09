@@ -64,42 +64,48 @@ vi.mock("@murphai/hosted-execution", async () => {
   };
 });
 
-vi.mock("@murphai/assistant-engine", () => ({
-  applyAssistantVaultFileSendApprovalResult:
-    mocks.applyAssistantVaultFileSendApprovalResult,
-  beginAssistantOutboxIntentMirrorDispatch:
-    mocks.beginAssistantOutboxIntentMirrorDispatch,
-  beginAssistantOutboxIntentMirrorPreparedDispatch:
-    mocks.beginAssistantOutboxIntentMirrorPreparedDispatch,
-  buildAssistantVaultFileSendApprovalRequest:
-    mocks.buildAssistantVaultFileSendApprovalRequest,
-  deferAssistantVaultFileApprovalCheck:
-    mocks.deferAssistantVaultFileApprovalCheck,
-  dispatchAssistantOutboxIntent: mocks.dispatchAssistantOutboxIntent,
-  findAssistantAutoReplyDeliveryIntentIds:
-    mocks.findAssistantAutoReplyDeliveryIntentIds,
-  hasAssistantAutoReplyChannel: mocks.hasAssistantAutoReplyChannel,
-  listAssistantOutboxIntents: mocks.listAssistantOutboxIntents,
-  markAssistantOutboxIntentMirrorTerminalById:
-    mocks.markAssistantOutboxIntentMirrorTerminalById,
-  normalizeAssistantDeliveryError: mocks.normalizeAssistantDeliveryError,
-  readAssistantAutomationState: mocks.readAssistantAutomationState,
-  readAssistantOutboxIntent: mocks.readAssistantOutboxIntent,
-  readAssistantOutboxIntentMirrorState:
-    mocks.readAssistantOutboxIntentMirrorState,
-  readAssistantVaultFileMedia: mocks.readAssistantVaultFileMedia,
-  readVerifiedAssistantVaultFileBytes:
-    mocks.readVerifiedAssistantVaultFileBytes,
-  resetAssistantOutboxPreparedDispatchById:
-    mocks.resetAssistantOutboxPreparedDispatchById,
-  saveAssistantOutboxIntentIfUnchanged:
-    mocks.saveAssistantOutboxIntentIfUnchanged,
-  sendLinqMessage: mocks.sendLinqMessage,
-  sendTelegramMessage: mocks.sendTelegramMessage,
-  sendTelegramVoiceMemoMessage: mocks.sendTelegramVoiceMemoMessage,
-  sendWhatsAppMessage: mocks.sendWhatsAppMessage,
-  shouldDispatchAssistantOutboxIntent: mocks.shouldDispatchAssistantOutboxIntent,
-}));
+vi.mock("@murphai/assistant-engine", async () => {
+  const actual = await vi.importActual<typeof import("@murphai/assistant-engine")>(
+    "@murphai/assistant-engine",
+  );
+  return {
+    ...actual,
+    applyAssistantVaultFileSendApprovalResult:
+      mocks.applyAssistantVaultFileSendApprovalResult,
+    beginAssistantOutboxIntentMirrorDispatch:
+      mocks.beginAssistantOutboxIntentMirrorDispatch,
+    beginAssistantOutboxIntentMirrorPreparedDispatch:
+      mocks.beginAssistantOutboxIntentMirrorPreparedDispatch,
+    buildAssistantVaultFileSendApprovalRequest:
+      mocks.buildAssistantVaultFileSendApprovalRequest,
+    deferAssistantVaultFileApprovalCheck:
+      mocks.deferAssistantVaultFileApprovalCheck,
+    dispatchAssistantOutboxIntent: mocks.dispatchAssistantOutboxIntent,
+    findAssistantAutoReplyDeliveryIntentIds:
+      mocks.findAssistantAutoReplyDeliveryIntentIds,
+    hasAssistantAutoReplyChannel: mocks.hasAssistantAutoReplyChannel,
+    listAssistantOutboxIntents: mocks.listAssistantOutboxIntents,
+    markAssistantOutboxIntentMirrorTerminalById:
+      mocks.markAssistantOutboxIntentMirrorTerminalById,
+    normalizeAssistantDeliveryError: mocks.normalizeAssistantDeliveryError,
+    readAssistantAutomationState: mocks.readAssistantAutomationState,
+    readAssistantOutboxIntent: mocks.readAssistantOutboxIntent,
+    readAssistantOutboxIntentMirrorState:
+      mocks.readAssistantOutboxIntentMirrorState,
+    readAssistantVaultFileMedia: mocks.readAssistantVaultFileMedia,
+    readVerifiedAssistantVaultFileBytes:
+      mocks.readVerifiedAssistantVaultFileBytes,
+    resetAssistantOutboxPreparedDispatchById:
+      mocks.resetAssistantOutboxPreparedDispatchById,
+    saveAssistantOutboxIntentIfUnchanged:
+      mocks.saveAssistantOutboxIntentIfUnchanged,
+    sendLinqMessage: mocks.sendLinqMessage,
+    sendTelegramMessage: mocks.sendTelegramMessage,
+    sendTelegramVoiceMemoMessage: mocks.sendTelegramVoiceMemoMessage,
+    sendWhatsAppMessage: mocks.sendWhatsAppMessage,
+    shouldDispatchAssistantOutboxIntent: mocks.shouldDispatchAssistantOutboxIntent,
+  };
+});
 
 vi.mock("@murphai/assistant-engine/assistant-channel-runtime", async () => {
   const actual = await vi.importActual<typeof import("@murphai/assistant-engine/assistant-channel-runtime")>(
@@ -250,6 +256,35 @@ function createDispatchResult(
       ...intentOverrides,
     },
     session: null,
+  };
+}
+
+function createPendingHostedDeliveryIntent(
+  overrides: Record<string, unknown>,
+) {
+  return {
+    actorId: "actor_1",
+    bindingDelivery: null,
+    channel: "telegram",
+    createdAt: "2026-04-08T00:01:00.000Z",
+    dedupeKey: "dedupe_intent",
+    deliveryIdempotencyKey: "delivery-final",
+    deliveryTransportIdempotent: false,
+    explicitTarget: "chat_1",
+    identityId: "identity_1",
+    intentId: "intent_pending",
+    lastError: null,
+    message: "pending reply",
+    nextAttemptAt: "2026-04-08T00:01:00.000Z",
+    replyToMessageId: "message-one",
+    sessionId: "session_1",
+    status: "pending",
+    subject: null,
+    targetFingerprint: "target_chat_1",
+    threadId: "thread_1",
+    threadIsDirect: true,
+    turnId: "turn_1",
+    ...overrides,
   };
 }
 
@@ -440,6 +475,71 @@ describe("hosted runtime callbacks", () => {
     expect(preparation.preparedDispatches[0]).toEqual(expect.objectContaining({
       linqDeliveryContext: expect.objectContaining({
         routeAuthority,
+        service: "iMessage",
+      }),
+    }));
+  });
+
+  it("selects the matching Linq delivery context when preparing from multiple candidates", async () => {
+    const otherRouteAuthority = {
+      accountLookupKey: "hbidx:phone:v1:other",
+      channel: "linq" as const,
+      containerMemberId: "member_other",
+      threadId: "linq_chat_other",
+    };
+    const matchingRouteAuthority = {
+      accountLookupKey: "hbidx:phone:v1:match",
+      channel: "linq" as const,
+      containerMemberId: "member_match",
+      threadId: "linq_chat_match",
+    };
+    const effect = createEffect({
+      bindingDeliveryKind: "thread",
+      bindingDeliveryTarget: "linq_chat_match",
+      channel: "linq",
+      explicitTarget: "ain_hashed_thread",
+      replyToMessageId: "linq_message_match",
+      transportIdempotent: true,
+    });
+
+    const preparation = await prepareHostedAssistantDeliveryEffectsForDispatch({
+      assistantDeliveryEffects: [effect],
+      linqDeliveryContexts: [
+        {
+          directRecipientPhoneNumber: "+15550001",
+          fromPhoneNumber: null,
+          replyToMessageId: "linq_message_other",
+          routeAuthority: otherRouteAuthority,
+          service: "iMessage",
+          target: "linq_chat_other",
+          threadIsDirect: true,
+        },
+        {
+          directRecipientPhoneNumber: "+15550002",
+          fromPhoneNumber: null,
+          replyToMessageId: "linq_message_match",
+          routeAuthority: matchingRouteAuthority,
+          service: "iMessage",
+          target: "linq_chat_match",
+          threadIsDirect: true,
+        },
+      ],
+      now: () => "2026-04-08T00:00:05.000Z",
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+    });
+
+    expect(mocks.beginAssistantOutboxIntentMirrorPreparedDispatch).toHaveBeenCalledWith({
+      deliveryIdempotencyKey: "assistant-outbox:intent_123",
+      deliveryTransportIdempotent: true,
+      externalThreadRouteAuthority: matchingRouteAuthority,
+      externalThreadService: "iMessage",
+      intentId: "intent_123",
+      startedAt: "2026-04-08T00:00:05.000Z",
+      vault: HOSTED_WAKE.vaultRoot,
+    });
+    expect(preparation.preparedDispatches[0]).toEqual(expect.objectContaining({
+      linqDeliveryContext: expect.objectContaining({
+        routeAuthority: matchingRouteAuthority,
         service: "iMessage",
       }),
     }));
@@ -1405,6 +1505,138 @@ describe("hosted runtime callbacks", () => {
       "intent_z_segment_0",
       "intent_a_segment_1",
       "intent_m_final",
+    ]);
+  });
+
+  it("uses bubble ordinals when same-boundary bubble intents share a timestamp", async () => {
+    mocks.listAssistantOutboxIntents.mockResolvedValue([
+      createPendingHostedDeliveryIntent({
+        dedupeKey: "dedupe_base",
+        deliveryIdempotencyKey: "delivery-final",
+        intentId: "intent_m_base",
+        message: "base final reply",
+        replyToMessageId: "message-three",
+        targetFingerprint: "target_chat_1_reply_three",
+        turnId: "turn_bubbles",
+      }),
+      createPendingHostedDeliveryIntent({
+        dedupeKey: "dedupe_bubble_1",
+        deliveryIdempotencyKey: "delivery-final:bubble:1",
+        intentId: "intent_a_bubble_1",
+        message: "second bubble",
+        replyToMessageId: "message-two",
+        targetFingerprint: "target_chat_1_reply_two",
+        turnId: "turn_bubbles",
+      }),
+      createPendingHostedDeliveryIntent({
+        dedupeKey: "dedupe_bubble_0",
+        deliveryIdempotencyKey: "delivery-final:bubble:0",
+        intentId: "intent_z_bubble_0",
+        message: "first bubble",
+        replyToMessageId: "message-one",
+        targetFingerprint: "target_chat_1_reply_one",
+        turnId: "turn_bubbles",
+      }),
+    ]);
+
+    const sideEffects = await collectHostedAssistantDeliverySideEffects({
+      includeBackgroundDueIntents: false,
+      preferredIntentIds: ["intent_m_base"],
+      vaultRoot: "/tmp/vault",
+    });
+
+    expect(sideEffects.map((effect) => effect.effectId)).toEqual([
+      "intent_z_bubble_0",
+      "intent_a_bubble_1",
+      "intent_m_base",
+    ]);
+  });
+
+  it("orders composed segment bubble intents before their segment final reply", async () => {
+    mocks.listAssistantOutboxIntents.mockResolvedValue([
+      createPendingHostedDeliveryIntent({
+        dedupeKey: "dedupe_base",
+        deliveryIdempotencyKey: "delivery-final",
+        intentId: "intent_m_base",
+        message: "base final reply",
+        replyToMessageId: "message-three",
+        targetFingerprint: "target_chat_1_reply_three",
+        turnId: "turn_segment_bubbles",
+      }),
+      createPendingHostedDeliveryIntent({
+        dedupeKey: "dedupe_segment_final",
+        deliveryIdempotencyKey: "delivery-final:segment:0",
+        intentId: "intent_a_segment_final",
+        message: "segment final reply",
+        replyToMessageId: "message-two",
+        targetFingerprint: "target_chat_1_reply_two",
+        turnId: "turn_segment_bubbles",
+      }),
+      createPendingHostedDeliveryIntent({
+        dedupeKey: "dedupe_segment_bubble",
+        deliveryIdempotencyKey: "delivery-final:segment:0:bubble:0",
+        intentId: "intent_z_segment_bubble_0",
+        message: "segment bubble reply",
+        replyToMessageId: "message-one",
+        targetFingerprint: "target_chat_1_reply_one",
+        turnId: "turn_segment_bubbles",
+      }),
+    ]);
+
+    const sideEffects = await collectHostedAssistantDeliverySideEffects({
+      includeBackgroundDueIntents: false,
+      preferredIntentIds: ["intent_m_base"],
+      vaultRoot: "/tmp/vault",
+    });
+
+    expect(sideEffects.map((effect) => effect.effectId)).toEqual([
+      "intent_z_segment_bubble_0",
+      "intent_a_segment_final",
+      "intent_m_base",
+    ]);
+  });
+
+  it("orders fallback bubble intents before their same-turn null-key base reply", async () => {
+    mocks.listAssistantOutboxIntents.mockResolvedValue([
+      createPendingHostedDeliveryIntent({
+        dedupeKey: "dedupe_base",
+        deliveryIdempotencyKey: null,
+        intentId: "intent_m_base",
+        message: "base final reply",
+        replyToMessageId: "message-three",
+        targetFingerprint: "target_chat_1_reply_three",
+        turnId: "turn_fallback_bubbles",
+      }),
+      createPendingHostedDeliveryIntent({
+        dedupeKey: "dedupe_bubble_1",
+        deliveryIdempotencyKey: "assistant-bubble:turn_fallback_bubbles:bubble:1",
+        intentId: "intent_a_bubble_1",
+        message: "second fallback bubble",
+        replyToMessageId: "message-two",
+        targetFingerprint: "target_chat_1_reply_two",
+        turnId: "turn_fallback_bubbles",
+      }),
+      createPendingHostedDeliveryIntent({
+        dedupeKey: "dedupe_bubble_0",
+        deliveryIdempotencyKey: "assistant-bubble:turn_fallback_bubbles:bubble:0",
+        intentId: "intent_z_bubble_0",
+        message: "first fallback bubble",
+        replyToMessageId: "message-one",
+        targetFingerprint: "target_chat_1_reply_one",
+        turnId: "turn_fallback_bubbles",
+      }),
+    ]);
+
+    const sideEffects = await collectHostedAssistantDeliverySideEffects({
+      includeBackgroundDueIntents: false,
+      preferredIntentIds: ["intent_m_base"],
+      vaultRoot: "/tmp/vault",
+    });
+
+    expect(sideEffects.map((effect) => effect.effectId)).toEqual([
+      "intent_z_bubble_0",
+      "intent_a_bubble_1",
+      "intent_m_base",
     ]);
   });
 
@@ -5661,7 +5893,7 @@ describe("hosted runtime callbacks", () => {
         targetMessageId: "linq_message_1",
       });
 
-      throw new Error("unreachable after engagement assertion failure");
+      throw new Error("unreachable after egress authority failure");
     });
 
     await expect(drainHostedPreparedAssistantDeliveries({
@@ -5685,7 +5917,7 @@ describe("hosted runtime callbacks", () => {
     expect(mocks.setLinqMessageReaction).not.toHaveBeenCalled();
   });
 
-  it("blocks Linq reactions when recent inbound engagement is missing", async () => {
+  it("blocks Linq reactions when egress authority is rejected", async () => {
     const effect = createEffect({
       channel: "linq",
       bindingDeliveryTarget: "linq_chat_123",
@@ -5703,7 +5935,7 @@ describe("hosted runtime callbacks", () => {
         targetMessageId: "linq_message_1",
       });
 
-      throw new Error("unreachable after engagement assertion failure");
+      throw new Error("unreachable after egress authority failure");
     });
 
     await expect(drainHostedPreparedAssistantDeliveries({
@@ -5722,7 +5954,6 @@ describe("hosted runtime callbacks", () => {
 
     expect(assertRecentInbound).toHaveBeenCalledWith(
       expect.objectContaining({
-        engagementKind: "requires_recent_inbound",
         idempotencyKey: "assistant-outbox:intent_123",
         intentId: "intent_123",
         target: "linq_chat_123",
@@ -5735,7 +5966,7 @@ describe("hosted runtime callbacks", () => {
     expect(mocks.setLinqMessageReaction).not.toHaveBeenCalled();
   });
 
-  it("marks signup welcome Linq sends as first-contact engagement", async () => {
+  it("sends signup welcome Linq egress authority with participant context", async () => {
     const effect = createEffect({
       actorId: "ain_blinded_member_phone",
       answeredMailboxItemIds: ["mailbox_item_answered_1", "mailbox_item_answered_2"],
@@ -5796,7 +6027,6 @@ describe("hosted runtime callbacks", () => {
     expect(assertRecentInbound).toHaveBeenCalledWith(
       expect.objectContaining({
         directRecipientPhoneNumber: null,
-        engagementKind: "first_contact",
         fromPhoneNumber: "+15550100099",
         idempotencyKey: "signup-welcome:member_123",
         target: "+15550100001",
@@ -6307,7 +6537,7 @@ describe("hosted runtime callbacks", () => {
     expect(recordedOutcome).not.toContain("private reply text");
   });
 
-  it("requires recent inbound proof for signup welcome Linq sends into existing threads", async () => {
+  it("checks egress authority for signup welcome Linq sends into existing threads", async () => {
     const effect = createEffect({
       actorId: "ain_blinded_member_phone",
       bindingDeliveryTarget: "linq_chat_123",
@@ -6364,7 +6594,6 @@ describe("hosted runtime callbacks", () => {
     expect(assertRecentInbound).toHaveBeenCalledWith(
       expect.objectContaining({
         directRecipientPhoneNumber: null,
-        engagementKind: "requires_recent_inbound",
         fromPhoneNumber: "+15550100099",
         idempotencyKey: "signup-welcome:member_123",
         target: "linq_chat_123",
@@ -6460,7 +6689,6 @@ describe("hosted runtime callbacks", () => {
 
     expect(assertRecentInbound).toHaveBeenCalledWith({
       directRecipientPhoneNumber: null,
-      engagementKind: "requires_recent_inbound",
       fromPhoneNumber: null,
       idempotencyKey: "assistant-outbox:intent_123",
       intentId: "intent_123",
@@ -6952,7 +7180,6 @@ describe("hosted runtime callbacks", () => {
 
     expect(assertRecentInbound).toHaveBeenCalledWith({
       directRecipientPhoneNumber: "+15550001",
-      engagementKind: "requires_recent_inbound",
       fromPhoneNumber: null,
       idempotencyKey: "assistant-outbox:intent_hashed_target",
       intentId: "intent_123",
@@ -7176,7 +7403,6 @@ describe("hosted runtime callbacks", () => {
         target: "linq_chat_a",
       },
       directRecipientPhoneNumber: "+15550000001",
-      engagementKind: "requires_recent_inbound",
       fromPhoneNumber: "+15559990000",
       idempotencyKey: "assistant-outbox:intent_hashed_target",
       intentId: "intent_123",
@@ -7279,7 +7505,6 @@ describe("hosted runtime callbacks", () => {
 
     expect(assertRecentInbound).toHaveBeenCalledWith({
       directRecipientPhoneNumber: null,
-      engagementKind: "requires_recent_inbound",
       fromPhoneNumber: null,
       idempotencyKey: "assistant-outbox:intent_hashed_target",
       intentId: "intent_123",
@@ -7374,7 +7599,6 @@ describe("hosted runtime callbacks", () => {
 
     expect(assertRecentInbound).toHaveBeenCalledWith({
       directRecipientPhoneNumber: "+15550001",
-      engagementKind: "requires_recent_inbound",
       fromPhoneNumber: null,
       idempotencyKey: "assistant-outbox:intent_hashed_target",
       intentId: "intent_123",
@@ -7454,7 +7678,7 @@ describe("hosted runtime callbacks", () => {
         targetKind: "thread",
       });
 
-      throw new Error("unreachable after engagement assertion failure");
+      throw new Error("unreachable after egress authority failure");
     });
 
     await expect(drainHostedPreparedAssistantDeliveries({
@@ -7542,7 +7766,7 @@ describe("hosted runtime callbacks", () => {
         targetKind: "thread",
       });
 
-      throw new Error("unreachable after engagement assertion failure");
+      throw new Error("unreachable after egress authority failure");
     });
 
     await expect(drainHostedPreparedAssistantDeliveries({
@@ -7617,6 +7841,12 @@ describe("hosted runtime callbacks", () => {
       target: "chat_123",
       targetKind: "thread",
     });
+    const providerFetch = vi.fn<typeof fetch>(
+      async () => new Response(null, { status: 204 }),
+    );
+    const publicInternetFetch = vi.fn<typeof fetch>(
+      async () => new Response(null, { status: 204 }),
+    );
     mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
       const delivery = await dependencies.sendLinq({
         idempotencyKey: "assistant-outbox:intent_123",
@@ -7643,9 +7873,8 @@ describe("hosted runtime callbacks", () => {
       actionApprovalPort,
       assistantDeliveryEffects: [effect],
       effectsPort: createHostedRuntimeEffectsPortStub(),
-      providerFetch: vi.fn<typeof fetch>(
-        async () => new Response(null, { status: 204 }),
-      ),
+      providerFetch,
+      publicInternetFetch,
       vaultRoot: HOSTED_WAKE.vaultRoot,
       wake: HOSTED_WAKE.wake,
     });
@@ -7667,6 +7896,8 @@ describe("hosted runtime callbacks", () => {
       }),
       expect.objectContaining({
         loadVaultFile: expect.any(Function),
+        fetchImplementation: providerFetch,
+        publicFetchImplementation: publicInternetFetch,
       }),
     );
     expect(outcomes).toEqual([
@@ -8247,7 +8478,7 @@ describe("hosted runtime callbacks", () => {
     ]);
   });
 
-  it("uses recent-inbound engagement for route-scoped Linq timer retries without prepared authority", async () => {
+  it("checks egress authority for route-scoped Linq timer retries without prepared authority", async () => {
     const effect = buildHostedAssistantDeliveryEffect({
       dedupeKey: "dedupe_123",
       deliveryPhase: "background_retry",
@@ -8313,7 +8544,6 @@ describe("hosted runtime callbacks", () => {
 
     expect(assertRecentInbound).toHaveBeenCalledWith({
       directRecipientPhoneNumber: null,
-      engagementKind: "requires_recent_inbound",
       fromPhoneNumber: null,
       idempotencyKey: "assistant-outbox:intent_123",
       intentId: "intent_123",

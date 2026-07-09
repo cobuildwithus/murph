@@ -401,9 +401,16 @@ const LINQ_CHANNEL_ADAPTER = createAssistantChannelAdapter({
   supportedResponseMediaKinds: ['image', 'voice_memo', 'vault_file'],
   targetRequiredMessage:
     'iMessage delivery requires an explicit chat id or a stored thread binding.',
-  async startTypingIndicator({ candidate, dependencies }) {
-    const startTyping = dependencies.startLinqTyping ?? startLinqTypingIndicator
-    return (await startTyping({
+  async startTypingIndicator({ candidate, dependencies, replyToMessageId }) {
+    if (dependencies.startLinqTyping) {
+      return (await dependencies.startLinqTyping({
+        replyToMessageId,
+        target: candidate.target,
+        targetKind: candidate.kind,
+      })) ?? null
+    }
+
+    return (await startLinqTypingIndicator({
       target: candidate.target,
     })) ?? null
   },

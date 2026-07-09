@@ -272,6 +272,31 @@ describe("HostedEmailSettings", () => {
       expect(container.textContent).toContain("Opening secure window");
     });
 
+    it("closes for app reauth instead of opening Privy's modal when the client user is absent", async () => {
+      mocks.useUser.mockReturnValue({
+        refreshUser: mocks.refreshUser,
+        user: null,
+      });
+      const onAborted = vi.fn();
+      const { HostedEmailPrivyLinkHandOff } = await import(
+        "@/src/components/settings/hosted-email-privy-link-hand-off"
+      );
+
+      const { cleanup } = await renderClientComponent(
+        createElement(HostedEmailPrivyLinkHandOff, {
+          onAborted,
+        }),
+        { requireButton: false },
+      );
+      cleanupRender = cleanup;
+
+      await vi.waitFor(() => {
+        expect(onAborted).toHaveBeenCalledTimes(1);
+      });
+      expect(mocks.linkEmail).not.toHaveBeenCalled();
+      expect(mocks.sendCode).not.toHaveBeenCalled();
+    });
+
     it("closes the flow when the member dismisses Privy's modal", async () => {
       mocks.useUser.mockReturnValue({
         refreshUser: mocks.refreshUser,
@@ -331,6 +356,73 @@ describe("HostedEmailSettings", () => {
       newEmailAddress: "payer@example.com",
     });
     expect(mocks.linkEmail).not.toHaveBeenCalled();
+  });
+
+  it("asks the browser to sign in before verifying a server-provided email when the Privy client user is absent", async () => {
+    mocks.useUser.mockReturnValue({
+      refreshUser: mocks.refreshUser,
+      user: null,
+    });
+    const onClientAuthRequired = vi.fn();
+    const { HostedEmailSettings } = await import("@/src/components/settings/hosted-email-settings");
+
+    const { cleanup, container } = await renderClientComponent(
+      createElement(HostedEmailSettings, {
+        authenticated: true,
+        initialEmail: {
+          address: "payer@example.com",
+          verifiedAt: null,
+        },
+        onClientAuthRequired,
+      }),
+    );
+    cleanupRender = cleanup;
+
+    const sendCodeButton = Array.from(container.querySelectorAll("button")).find(
+      (candidate) => candidate.textContent?.includes("Send verification code"),
+    );
+    expect(sendCodeButton).toBeTruthy();
+
+    await act(async () => {
+      sendCodeButton?.dispatchEvent(new Event("click", { bubbles: true }));
+    });
+
+    expect(onClientAuthRequired).toHaveBeenCalledTimes(1);
+    expect(mocks.sendCode).not.toHaveBeenCalled();
+    expect(mocks.linkEmail).not.toHaveBeenCalled();
+    expect(container.textContent).toContain("Sign in on this device to manage email.");
+  });
+
+  it("asks the browser to sign in before opening Privy's link-email modal", async () => {
+    mocks.useUser.mockReturnValue({
+      refreshUser: mocks.refreshUser,
+      user: null,
+    });
+    const onClientAuthRequired = vi.fn();
+    const { HostedEmailSettings } = await import("@/src/components/settings/hosted-email-settings");
+
+    const { cleanup, container } = await renderClientComponent(
+      createElement(HostedEmailSettings, {
+        authenticated: true,
+        initialEmail: null,
+        onClientAuthRequired,
+      }),
+    );
+    cleanupRender = cleanup;
+
+    const linkButton = Array.from(container.querySelectorAll("button")).find(
+      (candidate) => candidate.textContent?.includes("Link email"),
+    );
+    expect(linkButton).toBeTruthy();
+
+    await act(async () => {
+      linkButton?.dispatchEvent(new Event("click", { bubbles: true }));
+    });
+
+    expect(onClientAuthRequired).toHaveBeenCalledTimes(1);
+    expect(mocks.linkEmail).not.toHaveBeenCalled();
+    expect(mocks.sendCode).not.toHaveBeenCalled();
+    expect(container.textContent).toContain("Sign in on this device to manage email.");
   });
 
   it("syncs the verified email returned by Privy's link flow", async () => {

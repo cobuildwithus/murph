@@ -226,11 +226,10 @@ const ALLOWLISTED_WEB_CONTROL_CASES = [
   },
   {
     body: {
-      engagementKind: "requires_recent_inbound",
       target: "chat_123",
       targetKind: "thread",
     },
-    name: "hosted Linq egress engagement",
+    name: "hosted Linq egress authority",
     path: HOSTED_RUNTIME_LINQ_EGRESS_ENGAGEMENT_PATH,
   },
   {
@@ -806,7 +805,7 @@ describe("handleRunnerOutboundRequest", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("rejects Linq egress engagement assertions without the active runtime fence", async () => {
+  it("rejects Linq egress authority assertions without the active runtime fence", async () => {
     const validateRuntimeWriteFence = vi.fn(async () => true);
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
@@ -814,7 +813,6 @@ describe("handleRunnerOutboundRequest", () => {
     const response = await handleRunnerOutboundRequest(
       new Request(`http://web-control.worker${HOSTED_RUNTIME_LINQ_EGRESS_ENGAGEMENT_PATH}`, {
         body: JSON.stringify({
-          engagementKind: "requires_recent_inbound",
           target: "chat_123",
           targetKind: "thread",
         }),

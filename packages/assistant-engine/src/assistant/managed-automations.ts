@@ -74,6 +74,8 @@ export const MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID =
   'automation_01JNW7YJ7MNE7M9Q2QWQK4Z3FY'
 export const MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID =
   'automation_X3GPAWV2CCHNCYHAAJ4CE2M144'
+export const MURPH_WEEKLY_IMPROVEMENT_COACH_AUTOMATION_ID =
+  'automation_01K2WKKY3F8Q4R5S6T7V8W9XAB'
 export const MURPH_WEEKLY_HEALTH_RESEARCH_SCOUT_AUTOMATION_ID =
   'automation_01K0EXA5C0VT9F7X3KG6JMPZ5A'
 export const MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID =
@@ -110,6 +112,12 @@ const MURPH_MANAGED_WEEKLY_SCHEDULE_SPREADS: Partial<Record<
     startMinuteOfDay: 10 * 60,
     slotMinutes: 30,
     slotsPerDay: 14,
+  },
+  [MURPH_WEEKLY_IMPROVEMENT_COACH_AUTOMATION_ID]: {
+    daysOfWeek: [2],
+    startMinuteOfDay: 16 * 60,
+    slotMinutes: 30,
+    slotsPerDay: 10,
   },
   [MURPH_WEEKLY_HEALTH_RESEARCH_SCOUT_AUTOMATION_ID]: {
     daysOfWeek: [3, 4],
@@ -268,6 +276,56 @@ export const MURPH_MANAGED_AUTOMATIONS = [
       '- Name the practical takeaway clearly: watch this context next time, measure one thing, test a hunch, ignore a misleading score, change a low-risk behavior, or ask a clinician. If the short note would be confusing, simplify the framing or choose another candidate.',
       '',
       'Do not give generic health tips, medical diagnosis, causal claims without proof, or alarmist language.',
+    ].join('\n'),
+  },
+  {
+    automationId: MURPH_WEEKLY_IMPROVEMENT_COACH_AUTOMATION_ID,
+    slug: 'weekly-improvement-coach',
+    title: 'Weekly improvement coach',
+    summary: 'A weekly check for one clearly actionable health improvement worth working on.',
+    schedule: {
+      kind: 'cron',
+      expression: '0 17 * * 2',
+    },
+    continuityPolicy: 'fresh',
+    assistantTargetOverride: {
+      reasoningEffort: 'high',
+    },
+    tags: [
+      'murph-managed:weekly-improvement-coach',
+    ],
+    instructions: [
+      'On this scheduled weekly run, find zero or one clearly actionable health improvement opportunity and, only when the evidence is strong, send one short invitation to work on it together. Most weeks the right outcome is silence; an unproven or repeated nudge is worse than no message.',
+      '',
+      'This run is the sibling of the weekly health insight, with the opposite bar: the insight scout hunts for non-obvious findings, while this run looks for obvious-but-tractable deficits the user could realistically start improving this week. Candidate domains include:',
+      '- Deep sleep or total sleep consistently well below typical reference ranges.',
+      '- Low daily activity: few active minutes or consistently low movement.',
+      '- Little or no strength training logged over recent weeks.',
+      '- Little or no cardio logged over recent weeks.',
+      '- Meal logs that skew toward low-quality food, or consistently low fiber or protein, when the user actually logs meals.',
+      '- Similar concrete, evidence-backed gaps in sleep, movement, nutrition, or recovery basics.',
+      '',
+      'Evidence gate. Every claim must survive all three checks before it can be offered:',
+      '- Capability: the metric must be positively captured by a connected, healthy source. Read `vault-cli device account list` and `vault-cli wearables sources list` first. Never infer absence of a behavior from absence of data: if no connected source captures strength workouts, "no strength training" is unknowable, not a deficit. Providers differ in what they report, so confirm the metric actually appears in this user\'s data before judging it.',
+      '- Plausibility: treat exact zeros, sudden cliffs, or values wildly inconsistent with the rest of the data as pipeline or sync bugs, not behavior. If a reading looks broken, suppress; never tell the user they are inactive because a counter reads zero.',
+      '- Sufficiency: require a real pattern window, roughly three or more weeks of reasonably continuous coverage for the metric, before calling anything consistent. One bad week is noise.',
+      '',
+      'Dedupe and pacing:',
+      '- Read `vault-cli knowledge show improvement-opportunities`. If the page is missing, treat that as no prior offers. Use `improvement-opportunities` as the only dedupe ledger; do not create per-week pages.',
+      '- Never re-offer a domain that already has a section in the ledger unless that section is at least eight weeks old and there is meaningfully new evidence, such as the situation regressing after improvement.',
+      '- Skip a domain entirely when an active or recent experiment already covers it, or when recent conversation shows the user is already working on it or has declined it.',
+      '- Read `vault-cli knowledge show weekly-health-insights` as well, and do not send something that repeats a recent weekly insight.',
+      '- Offer at most one domain per run: the one with the strongest evidence and the most realistic path to improvement.',
+      '',
+      'If nothing clears the bar, return `{"kind":"skip","privateSummary":"No improvement opportunity cleared the evidence bar."}`, suppress the scheduled message, and do not append to the ledger. Do not send a process note, a "nothing this week" message, a setup nag, or a request for better logging.',
+      '',
+      'If one domain clears every gate:',
+      '- Append one dated section to the rolling ledger before sending, using the locked append surface, for example: `vault-cli knowledge append-section improvement-opportunities YYYY-MM-DD --title "Improvement opportunities" --body <markdown> --source-path <canonical-vault-path>`. The body records the domain, the compact evidence, and that an offer was sent, so future runs can pace themselves. Cite only canonical vault source paths, never `derived/**` or `.runtime/**` paths.',
+      '- If append-section reports that the section already exists, another run created it first: read the existing section, apply the same evidence gate, and either send from it or return `{"kind":"skip","privateSummary":"Existing improvement opportunity did not clear the current send bar."}`.',
+      '- Then send one short, warm note in plain adult language: name the pattern with its compact evidence (for example, "your deep sleep has averaged about 45 minutes a night over the last month; most adults get 1.5 to 2 hours"), say in one sentence why it is worth caring about, and ask whether they want to work on it together. Population reference points are welcome here when they help the user calibrate.',
+      '- Frame it as an invitation, not a verdict or a lecture. Do not prescribe a plan in this message; if the user says yes, the follow-up conversation is where a plan or a small experiment gets designed.',
+      '',
+      'Do not diagnose, do not alarm, do not shame, and do not pad the note with generic health tips.',
     ].join('\n'),
   },
   {

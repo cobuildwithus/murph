@@ -613,6 +613,111 @@ describe("executeHostedMailboxEvent", () => {
     );
   });
 
+  it("captures hosted Codex fresh-thread fallback diagnostics without raw identifiers", () => {
+    const wake = buildHostedExecutionAssistantNotificationRequestedWake({
+      eventId: "evt_codex_fresh_thread_fallback",
+      memberId: "member_123",
+      notification: {
+        instructions: "Reply in chat.",
+        route: {
+          actorId: "actor_codex_fallback",
+          channel: "linq",
+          delivery: {
+            kind: "thread",
+            target: "thread_123",
+          },
+          identityId: "hbidx:phone:v1:test",
+          threadId: "thread_123",
+          threadIsDirect: true,
+        },
+      },
+      occurredAt: "2026-04-08T00:00:00.000Z",
+    });
+
+    const entry = emitHostedAssistantProviderTraceLog({
+      details: {
+        requestId: "req_123",
+      },
+      event: {
+        codexThreadId: "raw-provider-session-id",
+        rawEvent: {
+          schema: "murph.assistant-codex-fresh-thread-fallback-diagnostics.v1",
+          type: "assistant.codex.fresh_thread_fallback",
+          providerTraceKind: "codex.fresh_thread_fallback",
+          codexFreshThreadFallbackTraceType: "fallback",
+          codexFreshThreadFallbackPhase: "fallback-succeeded",
+          codexFreshThreadFallbackReason: "resume-transport-failure",
+          codexFreshThreadFallbackResult: "succeeded",
+          codexFreshThreadFallbackErrorCode: "ASSISTANT_CODEX_FAILED",
+          codexFreshThreadFallbackErrorKind: "turn-failed",
+          codexFreshThreadFallbackErrorMessageLength: 177,
+          codexFreshThreadFallbackErrorMessagePresent: true,
+          codexFreshThreadFallbackErrorPhrases: [
+            "codex-turn-failed",
+            "status-failed",
+            "raw private phrase",
+          ],
+          codexFreshThreadFallbackFailureEventCount: 2,
+          codexFreshThreadFallbackFailureProviderActionCount: 1,
+          codexFreshThreadFallbackFailureSessionPresent: true,
+          codexFreshThreadFallbackFailureTurnPresent: true,
+          codexFreshThreadFallbackEventCount: 4,
+          codexFreshThreadFallbackProviderActionCount: 0,
+          codexFreshThreadFallbackResumeMatchesFailureSession: true,
+          codexFreshThreadFallbackResumeSessionPresent: true,
+          codexFreshThreadFallbackSessionChanged: true,
+          codexFreshThreadFallbackSessionPresent: true,
+          codexFreshThreadFallbackTurnPresent: true,
+          codexFreshThreadFallbackThreadId: "raw-fresh-thread-id",
+          codexFreshThreadFallbackUrl: "https://api.openai.com/v1/responses",
+        },
+      },
+      wake,
+    });
+
+    expect(entry).toEqual({
+      component: "runtime.provider",
+      eventId: "evt_codex_fresh_thread_fallback",
+      level: "info",
+      message: "Hosted assistant Codex fresh-thread fallback diagnostics captured.",
+      phase: "wake.running",
+      redacted: expect.objectContaining({
+        codexFreshThreadFallbackErrorCode: "ASSISTANT_CODEX_FAILED",
+        codexFreshThreadFallbackErrorKind: "turn-failed",
+        codexFreshThreadFallbackErrorMessageLength: 177,
+        codexFreshThreadFallbackErrorMessagePresent: true,
+        codexFreshThreadFallbackErrorPhrases: [
+          "codex-turn-failed",
+          "status-failed",
+        ],
+        codexFreshThreadFallbackEventCount: 4,
+        codexFreshThreadFallbackFailureEventCount: 2,
+        codexFreshThreadFallbackFailureProviderActionCount: 1,
+        codexFreshThreadFallbackFailureSessionPresent: true,
+        codexFreshThreadFallbackFailureTurnPresent: true,
+        codexFreshThreadFallbackPhase: "fallback-succeeded",
+        codexFreshThreadFallbackProviderActionCount: 0,
+        codexFreshThreadFallbackReason: "resume-transport-failure",
+        codexFreshThreadFallbackResult: "succeeded",
+        codexFreshThreadFallbackResumeMatchesFailureSession: true,
+        codexFreshThreadFallbackResumeSessionPresent: true,
+        codexFreshThreadFallbackSessionChanged: true,
+        codexFreshThreadFallbackSessionPresent: true,
+        codexFreshThreadFallbackTraceType: "fallback",
+        codexFreshThreadFallbackTurnPresent: true,
+        providerTraceKind: "codex.fresh_thread_fallback",
+        requestId: "req_123",
+        schema: "murph.assistant-codex-fresh-thread-fallback-diagnostics.v1",
+      }),
+    });
+    expect(entry?.redacted).not.toHaveProperty("codexFreshThreadFallbackThreadId");
+    expect(entry?.redacted).not.toHaveProperty("codexFreshThreadFallbackUrl");
+    expect(JSON.stringify(entry?.redacted)).not.toContain("raw-provider-session-id");
+    expect(JSON.stringify(entry?.redacted)).not.toContain("raw-fresh-thread-id");
+    expect(JSON.stringify(entry?.redacted)).not.toContain("api.openai.com");
+    expect(JSON.stringify(entry?.redacted)).not.toContain("raw private phrase");
+  });
+
   it("captures hosted Codex app-server timing without raw identifiers", () => {
     const wake = buildHostedExecutionAssistantNotificationRequestedWake({
       eventId: "evt_codex_timing",
@@ -719,9 +824,11 @@ describe("executeHostedMailboxEvent", () => {
           codexTransportIdleTimeout: true,
           codexTransportProviderActionCount: 0,
           codexTransportRetryCount: 2,
+          codexTransportRetryExhausted: false,
           codexTransportRetryMax: 5,
           codexTransportSourceMethod: "error",
           codexTransportStreamDisconnected: true,
+          codexTransportTerminalAfterProviderAction: false,
           codexTransportThreadId: "raw-thread-id",
           codexTransportThreadIdPresent: true,
           codexTransportTransport: "websocket",
@@ -749,9 +856,11 @@ describe("executeHostedMailboxEvent", () => {
         codexTransportIdleTimeout: true,
         codexTransportProviderActionCount: 0,
         codexTransportRetryCount: 2,
+        codexTransportRetryExhausted: false,
         codexTransportRetryMax: 5,
         codexTransportSourceMethod: "error",
         codexTransportStreamDisconnected: true,
+        codexTransportTerminalAfterProviderAction: false,
         codexTransportThreadIdPresent: true,
         codexTransportTraceType: "transport-diagnostics",
         codexTransportTransport: "websocket",

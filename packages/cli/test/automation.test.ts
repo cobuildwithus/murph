@@ -386,6 +386,9 @@ test("automation save and edit schemas expose typed fields while automation impo
   assert.deepEqual(setStatusSchema.args.required, ["lookup"]);
   assert.equal("status" in setStatusSchema.options.properties, true);
   assert.equal(setStatusSchema.options.required?.includes("status") ?? false, true);
+
+  const listSchema = await readCommandSchema(cli, ["automation", "list"]);
+  assert.equal("includeBody" in listSchema.options.properties, false);
 });
 
 test("automation save and edit manage assistant target overrides from typed fields", async () => {
@@ -1910,6 +1913,8 @@ test("automation commands round-trip save, import-json, show, and list through t
       importedPayload.slug,
     ]);
     assert.equal(listedData.items[0]?.automationId, savedData.automationId);
+    assert.equal("instructions" in (listedData.items[0] ?? {}), false);
+    assert.equal("markdown" in (listedData.items[0] ?? {}), false);
   } finally {
     await rm(parentRoot, { force: true, recursive: true });
   }

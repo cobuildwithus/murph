@@ -89,12 +89,22 @@ export function markLocallyDisconnectedSources(
       return source;
     }
 
+    const {
+      connected,
+      connectProvider,
+      disconnectConnectionId,
+      disconnectScope,
+      requiresReconnect,
+      ...locallyDisconnectedSource
+    } = source;
+    void connected;
+    void connectProvider;
+    void disconnectConnectionId;
+    void disconnectScope;
+    void requiresReconnect;
+
     return {
-      description: source.description,
-      id: source.id,
-      logo: source.logo,
-      name: source.name,
-      ...(source.connectTarget ? { connectTarget: source.connectTarget } : {}),
+      ...locallyDisconnectedSource,
     };
   });
 }

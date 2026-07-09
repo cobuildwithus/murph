@@ -28,6 +28,7 @@
     "prisma:generate": "prisma generate && pnpm --dir ../.. exec tsx apps/web/scripts/ensure-prisma-client-link.ts",
     "prisma:migrate:deploy": "pnpm --dir ../.. exec tsx apps/web/scripts/run-prisma-migrate-deploy.ts",
     "prisma:migrate:dev": "prisma migrate dev",
+    "release:production:contract-migrate": "pnpm --dir ../.. exec tsx apps/web/scripts/run-production-contract-migrations.ts",
     "release:production:migrate": "pnpm --dir ../.. exec tsx apps/web/scripts/run-production-migrations.ts",
     "verify": "bash scripts/verify-fast.sh",
     "verify:parallel": "MURPH_VERIFY_STEP_PARALLEL=1 bash scripts/verify-fast.sh"
@@ -48,7 +49,7 @@
     "@privy-io/node": "^0.18.0",
     "@privy-io/react-auth": "^3.24.0",
     "@radix-ui/react-dialog": "^1.1.15",
-    "@temporalio/client": "1.16.2",
+    "@temporalio/client": "~1.16.3",
     "@vercel/analytics": "2.0.1",
     "@vercel/oidc": "^3.4.1",
     "@vercel/speed-insights": "2.0.0",

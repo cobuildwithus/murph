@@ -38,6 +38,10 @@ import {
   applyAssistantReplyDeliveryContext,
   type AssistantReplyDeliveryContext,
 } from './reply-delivery-context.js'
+import {
+  assistantChannelSupportsReplyBubbles,
+  splitAssistantReplyBubbles,
+} from './reply-bubbles.js'
 
 export interface AssistantPrecedingReplySegment {
   deliveryContext?: AssistantReplyDeliveryContext | null
@@ -175,20 +179,99 @@ export async function deliverAssistantReply(input: {
     media: deliveryMedia,
     session: input.session,
   })
+  const baseDedupeToken =
+    input.dedupeToken ?? hostedDelivery.deliveryIdempotencyKey ?? null
+
+  if (!assistantChannelSupportsReplyBubbles(deliveryFields.channel)) {
+    return await deliverAssistantCurrentAudienceMessage({
+      dedupeToken: baseDedupeToken,
+      answeredMailboxItemIds: input.input.answeredMailboxItemIds ?? [],
+      deliveryIdempotencyKey: hostedDelivery.deliveryIdempotencyKey,
+      deliveryTransportIdempotent: hostedDelivery.deliveryTransportIdempotent,
+      input: input.input,
+      media: deliveryMedia,
+      message: input.response,
+      session: input.session,
+      sharedPlan: input.sharedPlan,
+      turnId: input.turnId,
+    })
+  }
+
+  const replyBubbles = splitAssistantReplyBubbles(input.response)
+  if (replyBubbles.length <= 1) {
+    return await deliverAssistantCurrentAudienceMessage({
+      dedupeToken: baseDedupeToken,
+      answeredMailboxItemIds: input.input.answeredMailboxItemIds ?? [],
+      deliveryIdempotencyKey: hostedDelivery.deliveryIdempotencyKey,
+      deliveryTransportIdempotent: hostedDelivery.deliveryTransportIdempotent,
+      input: input.input,
+      media: deliveryMedia,
+      message: replyBubbles[0]!,
+      session: input.session,
+      sharedPlan: input.sharedPlan,
+      turnId: input.turnId,
+    })
+  }
+
+  let session = input.session
+  // Bubbles deliver sequentially with per-bubble idempotency keys. Persisted
+  // intent ordering is owned by the outbox drain comparator
+  // (`compareAssistantOutboxDeliverySequenceOrder`) plus hosted boundary
+  // gating, so hosted queue-only delivery stays strictly ordered across
+  // retries; local immediate retry behavior remains best-effort like steered
+  // segments.
+  for (let bubbleIndex = 0; bubbleIndex < replyBubbles.length - 1; bubbleIndex += 1) {
+    const bubbleIdempotencyKey = buildAssistantReplyBubbleDeliveryIdempotencyKey({
+      deliveryIdempotencyKey: hostedDelivery.deliveryIdempotencyKey,
+      index: bubbleIndex,
+      turnId: input.turnId,
+    })
+    const outcome = await deliverAssistantCurrentAudienceMessage({
+      dedupeToken: bubbleIdempotencyKey,
+      answeredMailboxItemIds: [],
+      deliveryIdempotencyKey: bubbleIdempotencyKey,
+      deliveryTransportIdempotent:
+        resolveHostedAssistantDeliveryTransportIdempotentOverride({
+          channel: deliveryFields.channel,
+          deliveryIdempotencyKey: bubbleIdempotencyKey,
+          executionContext: input.input.executionContext,
+          media: [],
+        }),
+      input: input.input,
+      media: [],
+      message: replyBubbles[bubbleIndex]!,
+      session,
+      sharedPlan: input.sharedPlan,
+      turnId: input.turnId,
+    })
+    session = outcome.session
+    if (outcome.kind === 'failed') {
+      return outcome
+    }
+  }
 
   return await deliverAssistantCurrentAudienceMessage({
-    dedupeToken:
-      input.dedupeToken ?? hostedDelivery.deliveryIdempotencyKey ?? null,
+    dedupeToken: baseDedupeToken,
     answeredMailboxItemIds: input.input.answeredMailboxItemIds ?? [],
     deliveryIdempotencyKey: hostedDelivery.deliveryIdempotencyKey,
     deliveryTransportIdempotent: hostedDelivery.deliveryTransportIdempotent,
     input: input.input,
     media: deliveryMedia,
-    message: input.response,
-    session: input.session,
+    message: replyBubbles[replyBubbles.length - 1]!,
+    session,
     sharedPlan: input.sharedPlan,
     turnId: input.turnId,
   })
+}
+
+export function buildAssistantReplyBubbleDeliveryIdempotencyKey(input: {
+  deliveryIdempotencyKey?: string | null
+  index: number
+  turnId: string
+}): string {
+  const explicitKey = normalizeNullableString(input.deliveryIdempotencyKey)
+  const prefix = explicitKey ?? `assistant-bubble:${input.turnId}`
+  return `${prefix}:bubble:${input.index}`
 }
 
 export async function deliverAssistantReaction(input: {
@@ -900,10 +983,11 @@ export async function finalizeAssistantTurnFromDeliveryOutcome(input: {
   vault: string
 }): Promise<void> {
   const completedAt = new Date().toISOString()
+  const response = input.response
   const plan = buildAssistantTurnDeliveryFinalizationPlan({
     completedAt,
     outcome: input.outcome,
-    response: input.response,
+    response,
     turnId: input.turnId,
   })
   const state = createAssistantRuntimeStateService(input.vault)
@@ -914,7 +998,7 @@ export async function finalizeAssistantTurnFromDeliveryOutcome(input: {
   // here, a queued signup welcome for this route is stale and must skip.
   const firstContactAcceptedForDelivery =
     input.firstContactGuidanceInjected === true &&
-    input.response !== '' &&
+    response !== '' &&
     isAssistantFirstContactAcceptedForDelivery(input.outcome)
   if (firstContactAcceptedForDelivery) {
     await markAssistantFirstContactSeen({
@@ -941,6 +1025,7 @@ export function buildAssistantTurnDeliveryFinalizationPlan(input: {
   response: string
   turnId: string
 }): AssistantTurnDeliveryFinalizationPlan {
+  const response = input.response
   switch (input.outcome.kind) {
     case 'not-requested':
       return {
@@ -948,7 +1033,7 @@ export function buildAssistantTurnDeliveryFinalizationPlan(input: {
           turnId: input.turnId,
           status: 'completed',
           deliveryDisposition: 'not-requested',
-          response: input.response,
+          response,
           completedAt: input.completedAt,
         },
         diagnostic: {
@@ -970,7 +1055,7 @@ export function buildAssistantTurnDeliveryFinalizationPlan(input: {
           status: 'completed',
           deliveryDisposition: 'sent',
           deliveryIntentId: input.outcome.intentId,
-          response: input.response,
+          response,
           completedAt: input.completedAt,
         },
         diagnostic: {
@@ -994,7 +1079,7 @@ export function buildAssistantTurnDeliveryFinalizationPlan(input: {
           deliveryDisposition: input.outcome.error ? 'retryable' : 'queued',
           deliveryIntentId: input.outcome.intentId,
           error: input.outcome.error,
-          response: input.response,
+          response,
           completedAt: input.completedAt,
         },
         diagnostic: {
@@ -1022,7 +1107,7 @@ export function buildAssistantTurnDeliveryFinalizationPlan(input: {
           deliveryDisposition: 'failed',
           deliveryIntentId: input.outcome.intentId,
           error: input.outcome.error,
-          response: input.response,
+          response,
           completedAt: input.completedAt,
         },
         diagnostic: {

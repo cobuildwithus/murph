@@ -82,7 +82,14 @@ If the answer is unknown, do not assume the path is safe. Add the missing guard,
 
 ## Murph Hosted Automation Engagement
 
-Murph pauses model-capable automation wakes for Linq members with no inbound day in the last 28 days, using `hosted_linq_daily_state` as the source of truth. Conversational replies are never gated by this pause because fresh conversation mailbox lag bypasses it. First-contact, participant identity, and route-authority checks remain separate authority checks and still fail closed.
+Murph pauses model-capable automation wakes for Linq members with no inbound day in the last 28 days, using `hosted_linq_daily_state` as the source of truth. Conversational replies are never gated by this pause because fresh conversation mailbox lag bypasses it.
+
+Linq egress should stay small and obvious:
+
+- Participant-target sends are signup-welcome only, tied to `signup-welcome:<memberId>`, the member's verified phone, and the assigned home line.
+- Thread sends use same-user route authority as target context when it matches the requested thread, otherwise they fall back to the member's durable home or pending Linq route.
+- Egress no longer owns a separate "recent inbound" recency check; hosted automation recency belongs to reconciliation/wake selection.
+- Typing indicators do not call web-owned egress assertions. They are locally throttled to one session per chat, capped at five minutes, with a restart cooldown after a max-length session.
 
 ## Prompt and copy guidance
 

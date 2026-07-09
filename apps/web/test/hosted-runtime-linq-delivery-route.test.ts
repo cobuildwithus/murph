@@ -5,7 +5,6 @@ import {
 } from "@/src/lib/hosted-onboarding/contact-privacy";
 
 const mocks = vi.hoisted(() => ({
-  assertHostedThreadRouteEgressAuthority: vi.fn(),
   getPrisma: vi.fn(),
   recordHostedLinqRuntimeDeliveryOutcomeTx: vi.fn(),
   requireHostedCloudflareCallbackRequest: vi.fn(),
@@ -17,10 +16,6 @@ vi.mock("@/src/lib/hosted-execution/cloudflare-callback-auth", () => ({
 
 vi.mock("@/src/lib/hosted-onboarding/linq-delivery-store", () => ({
   recordHostedLinqRuntimeDeliveryOutcomeTx: mocks.recordHostedLinqRuntimeDeliveryOutcomeTx,
-}));
-
-vi.mock("@/src/lib/hosted-routing/thread-route-store", () => ({
-  assertHostedThreadRouteEgressAuthority: mocks.assertHostedThreadRouteEgressAuthority,
 }));
 
 vi.mock("@/src/lib/prisma", () => ({
@@ -169,14 +164,13 @@ describe("hosted runtime Linq delivery route", () => {
     );
   });
 
-  it("uses route authority for routed sends and rejects authority for a different user", async () => {
+  it("uses route authority line attribution and rejects authority for a different user", async () => {
     const routeAuthority = {
       accountLookupKey: "hbidx:phone:v1:account",
       channel: "linq",
       containerMemberId: "member_123",
       threadId: "linq_chat_123",
     };
-    mocks.assertHostedThreadRouteEgressAuthority.mockResolvedValueOnce({});
 
     const response = await route.POST(buildDeliveryRequest({
       acceptedAt: "2026-04-26T00:00:04.000Z",
@@ -191,10 +185,7 @@ describe("hosted runtime Linq delivery route", () => {
     }));
 
     expect(response.status).toBe(200);
-    expect(mocks.assertHostedThreadRouteEgressAuthority).toHaveBeenCalledWith({
-      authority: routeAuthority,
-      prisma,
-    });
+    expect(prisma.hostedMemberRouting.findUnique).not.toHaveBeenCalled();
     expect(mocks.recordHostedLinqRuntimeDeliveryOutcomeTx).toHaveBeenCalledWith(
       expect.objectContaining({
         phoneNumber: null,
@@ -238,7 +229,6 @@ describe("hosted runtime Linq delivery route", () => {
       containerMemberId: "member_123",
       threadId: "linq_chat_123",
     };
-    mocks.assertHostedThreadRouteEgressAuthority.mockResolvedValueOnce({});
 
     const response = await route.POST(buildDeliveryRequest({
       acceptedAt: "2026-04-26T00:00:04.000Z",
@@ -252,10 +242,7 @@ describe("hosted runtime Linq delivery route", () => {
     }));
 
     expect(response.status).toBe(200);
-    expect(mocks.assertHostedThreadRouteEgressAuthority).toHaveBeenCalledWith({
-      authority: routeAuthority,
-      prisma,
-    });
+    expect(prisma.hostedMemberRouting.findUnique).not.toHaveBeenCalled();
     expect(mocks.recordHostedLinqRuntimeDeliveryOutcomeTx).toHaveBeenCalledWith(
       expect.objectContaining({
         phoneNumber: null,

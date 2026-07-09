@@ -101,6 +101,9 @@ export type {
   AssistantOutboxPreparedMirrorDispatch,
 }
 export {
+  compareAssistantOutboxDeliverySequenceOrder,
+} from './outbox/ordering.js'
+export {
   createAssistantDeliveryAmbiguousError,
   errorImpliesAssistantDeliveryMayHaveSucceeded,
   isAssistantOutboxRetryableError,

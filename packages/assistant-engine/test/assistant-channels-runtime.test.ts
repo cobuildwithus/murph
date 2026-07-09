@@ -9,13 +9,12 @@ import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 
 const runtimeMocks = vi.hoisted(() => ({
   createAgentmailApiClient: vi.fn(),
-  createLinqAttachmentUpload: vi.fn(),
   createLinqChat: vi.fn(),
   probeLinqApi: vi.fn(),
   sendLinqChatMessage: vi.fn(),
   startLinqChatTypingIndicator: vi.fn(),
   stopLinqChatTypingIndicator: vi.fn(),
-  uploadLinqAttachmentBytes: vi.fn(),
+  uploadLinqAttachment: vi.fn(),
 }))
 
 const mp3Bytes = new Uint8Array([0xff, 0xfb, 0x90, 0x64])
@@ -34,13 +33,12 @@ vi.mock('@murphai/operator-config/linq-runtime', async (importOriginal) => {
     await importOriginal<typeof import('@murphai/operator-config/linq-runtime')>()
   return {
     ...actual,
-    createLinqAttachmentUpload: runtimeMocks.createLinqAttachmentUpload,
     createLinqChat: runtimeMocks.createLinqChat,
     probeLinqApi: runtimeMocks.probeLinqApi,
     sendLinqChatMessage: runtimeMocks.sendLinqChatMessage,
     startLinqChatTypingIndicator: runtimeMocks.startLinqChatTypingIndicator,
     stopLinqChatTypingIndicator: runtimeMocks.stopLinqChatTypingIndicator,
-    uploadLinqAttachmentBytes: runtimeMocks.uploadLinqAttachmentBytes,
+    uploadLinqAttachment: runtimeMocks.uploadLinqAttachment,
   }
 })
 
@@ -67,13 +65,12 @@ beforeEach(() => {
   vi.useRealTimers()
   vi.restoreAllMocks()
   runtimeMocks.createAgentmailApiClient.mockReset()
-  runtimeMocks.createLinqAttachmentUpload.mockReset()
   runtimeMocks.createLinqChat.mockReset()
   runtimeMocks.probeLinqApi.mockReset()
   runtimeMocks.sendLinqChatMessage.mockReset()
   runtimeMocks.startLinqChatTypingIndicator.mockReset()
   runtimeMocks.stopLinqChatTypingIndicator.mockReset()
-  runtimeMocks.uploadLinqAttachmentBytes.mockReset()
+  runtimeMocks.uploadLinqAttachment.mockReset()
 })
 
 afterEach(() => {
@@ -1135,16 +1132,11 @@ describe('assistant channels runtime seam', () => {
   it('uploads trusted vault-file bytes and sends the resulting Linq attachment id', async () => {
     const bytes = new Uint8Array([1, 2, 3, 4])
     const loadVaultFile = vi.fn().mockResolvedValue(bytes)
-    runtimeMocks.createLinqAttachmentUpload.mockResolvedValue({
+    const providerFetch = vi.fn()
+    const publicFetch = vi.fn()
+    runtimeMocks.uploadLinqAttachment.mockResolvedValue({
       attachmentId: 'attachment_123',
-      downloadUrl: null,
-      expiresAt: '2026-06-24T12:15:00.000Z',
-      requiredHeaders: {
-        'content-type': 'application/pdf',
-      },
-      uploadUrl: 'https://upload.linq.test/attachment_123',
     })
-    runtimeMocks.uploadLinqAttachmentBytes.mockResolvedValue(undefined)
     runtimeMocks.sendLinqChatMessage.mockResolvedValue({
       message: { id: 'message_123' },
     })
@@ -1165,25 +1157,24 @@ describe('assistant channels runtime seam', () => {
       target: 'chat_123',
     }, {
       env: { LINQ_API_TOKEN: 'linq-token' },
+      fetchImplementation: providerFetch,
       loadVaultFile,
+      publicFetchImplementation: publicFetch,
     })).resolves.toMatchObject({
       providerMessageId: 'message_123',
       target: 'chat_123',
     })
 
     expect(loadVaultFile).toHaveBeenCalledTimes(1)
-    expect(runtimeMocks.createLinqAttachmentUpload).toHaveBeenCalledWith({
+    expect(runtimeMocks.uploadLinqAttachment).toHaveBeenCalledWith({
+      bytes,
       contentType: 'application/pdf',
       filename: 'report.pdf',
-      sizeBytes: bytes.byteLength,
     }, expect.objectContaining({
       env: { LINQ_API_TOKEN: 'linq-token' },
+      fetchImplementation: providerFetch,
+      publicFetchImplementation: publicFetch,
     }))
-    expect(runtimeMocks.uploadLinqAttachmentBytes).toHaveBeenCalledWith({
-      bytes,
-      requiredHeaders: { 'content-type': 'application/pdf' },
-      uploadUrl: 'https://upload.linq.test/attachment_123',
-    }, expect.any(Object))
     expect(runtimeMocks.sendLinqChatMessage).toHaveBeenCalledWith({
       chatId: 'chat_123',
       idempotencyKey: 'delivery_123',
@@ -1192,8 +1183,54 @@ describe('assistant channels runtime seam', () => {
       replyToMessageId: null,
     }, expect.any(Object))
     expect(loadVaultFile.mock.invocationCallOrder[0]).toBeLessThan(
-      runtimeMocks.createLinqAttachmentUpload.mock.invocationCallOrder[0]!,
+      runtimeMocks.uploadLinqAttachment.mock.invocationCallOrder[0]!,
     )
+  })
+
+  it('fails Linq delivery atomically when a later vault-file upload fails', async () => {
+    const firstBytes = new Uint8Array([1, 2, 3, 4])
+    const secondBytes = new Uint8Array([5, 6, 7, 8])
+    const loadVaultFile = vi.fn()
+      .mockResolvedValueOnce(firstBytes)
+      .mockResolvedValueOnce(secondBytes)
+    runtimeMocks.uploadLinqAttachment
+      .mockResolvedValueOnce({ attachmentId: 'attachment_first' })
+      .mockRejectedValueOnce(new Error('presigned upload failed'))
+
+    await expect(sendLinqMessage({
+      idempotencyKey: 'delivery_two_files',
+      media: [
+        {
+          approvalGeneration: null,
+          approvalId: null,
+          contentType: 'application/pdf',
+          filename: 'first.pdf',
+          kind: 'vault_file',
+          ref: 'documents/first.pdf',
+          sha256: 'a'.repeat(64),
+          sizeBytes: firstBytes.byteLength,
+        },
+        {
+          approvalGeneration: null,
+          approvalId: null,
+          contentType: 'application/pdf',
+          filename: 'second.pdf',
+          kind: 'vault_file',
+          ref: 'documents/second.pdf',
+          sha256: 'b'.repeat(64),
+          sizeBytes: secondBytes.byteLength,
+        },
+      ],
+      message: 'Attached files',
+      target: 'chat_123',
+    }, {
+      env: { LINQ_API_TOKEN: 'linq-token' },
+      loadVaultFile,
+    })).rejects.toThrow('presigned upload failed')
+
+    expect(loadVaultFile).toHaveBeenCalledTimes(2)
+    expect(runtimeMocks.uploadLinqAttachment).toHaveBeenCalledTimes(2)
+    expect(runtimeMocks.sendLinqChatMessage).not.toHaveBeenCalled()
   })
 
   it('passes the dependency abort signal to Linq typing and removes the listener after stop', async () => {

@@ -1328,7 +1328,6 @@ function buildAuthorizedLinqRouteFixture(input: {
               owner: memberAccessState,
             },
             containerMemberId: input.memberId,
-            lastInboundAt: new Date("2026-03-26T11:59:00.000Z"),
             threadLookupKey,
           },
         ]),

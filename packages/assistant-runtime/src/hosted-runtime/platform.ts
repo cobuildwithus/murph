@@ -51,7 +51,7 @@ import type {
 import type {
   HostedVaultShareDeliverRequest,
   HostedVaultShareDeliverResponse,
-  HostedVaultShareProjectionKind,
+  HostedVaultShareProjectionScope,
 } from "@murphai/hosted-execution/vault-share";
 import type {
   HostedWorkspaceSnapshotV2Aad,
@@ -190,10 +190,6 @@ export interface HostedRuntimeLinqSendResponse {
   targetKind?: HostedRuntimeProviderTargetKind | null;
 }
 
-export type HostedRuntimeLinqEngagementKind =
-  | "first_contact"
-  | "requires_recent_inbound";
-
 export interface HostedRuntimeLinqCurrentInboundProof {
   dedupeKey: string;
   eventId: string;
@@ -206,7 +202,6 @@ export interface HostedRuntimeLinqCurrentInboundProof {
 export interface HostedRuntimeLinqRecentInboundEngagementRequest {
   currentInbound?: HostedRuntimeLinqCurrentInboundProof | null;
   directRecipientPhoneNumber?: string | null;
-  engagementKind?: HostedRuntimeLinqEngagementKind | null;
   fromPhoneNumber?: string | null;
   idempotencyKey?: string | null;
   intentId?: string | null;
@@ -471,7 +466,7 @@ export interface HostedRuntimeActionApprovalPort {
 }
 
 export interface HostedRuntimeVaultSharePort {
-  listActiveProjectionKinds(): Promise<HostedVaultShareProjectionKind[]>;
+  listActiveProjectionScopes(): Promise<HostedVaultShareProjectionScope[]>;
   deliver(
     request: HostedVaultShareDeliverRequest,
   ): Promise<HostedVaultShareDeliverResponse>;

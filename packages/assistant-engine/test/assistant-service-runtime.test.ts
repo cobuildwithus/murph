@@ -999,6 +999,382 @@ describe("assistant delivery orchestration seam", () => {
     );
   });
 
+  it("delivers linq delimiter replies as ordered bubbles with media on the final base-key send", async () => {
+    const session = createAssistantSession({
+      binding: {
+        actorId: "linq-actor",
+        channel: "linq",
+        conversationKey: "linq-conversation",
+        delivery: {
+          kind: "thread",
+          target: "linq-thread",
+        },
+        identityId: "linq-identity",
+        threadId: "linq-thread",
+        threadIsDirect: false,
+      },
+    });
+    const media = [{
+      kind: "image" as const,
+      url: "https://cdn.example.test/reply-image.png",
+      alt: null,
+      source: null,
+    }];
+    runtimeState.outbox.deliverMessage.mockResolvedValue({
+      delivery: {
+        channel: "linq",
+        idempotencyKey: "delivery-bubbles",
+        messageLength: 8,
+        providerMessageId: "provider-bubbles",
+        providerThreadId: null,
+        sentAt: "2026-04-08T11:00:00.000Z",
+        target: "linq-thread",
+        targetKind: "thread",
+      },
+      intent: {
+        intentId: "intent-bubbles",
+      },
+      kind: "sent",
+      session: null,
+    });
+
+    await deliverAssistantReply({
+      input: {
+        deliverResponse: true,
+        deliveryIdempotencyKey: "delivery-base",
+        prompt: "hello",
+        vault: "/vault",
+      },
+      media,
+      response: "First move.\n---\nSecond move.\n---\nFinal question?",
+      session,
+      sharedPlan: createSharedPlan({
+        conversationPolicy: {
+          audience: {
+            channel: "linq",
+            threadIsDirect: false,
+          },
+        },
+      }),
+      turnId: "turn-linq-bubbles",
+    });
+
+    expect(runtimeState.outbox.deliverMessage).toHaveBeenCalledTimes(3);
+    expect(
+      runtimeState.outbox.deliverMessage.mock.calls.map((call) => ({
+        answeredMailboxItemIds: call[0]?.answeredMailboxItemIds,
+        dedupeToken: call[0]?.dedupeToken,
+        deliveryIdempotencyKey: call[0]?.deliveryIdempotencyKey,
+        media: call[0]?.media,
+        message: call[0]?.message,
+      })),
+    ).toEqual([
+      {
+        answeredMailboxItemIds: [],
+        dedupeToken: "delivery-base:bubble:0",
+        deliveryIdempotencyKey: "delivery-base:bubble:0",
+        media: [],
+        message: "First move.",
+      },
+      {
+        answeredMailboxItemIds: [],
+        dedupeToken: "delivery-base:bubble:1",
+        deliveryIdempotencyKey: "delivery-base:bubble:1",
+        media: [],
+        message: "Second move.",
+      },
+      {
+        answeredMailboxItemIds: [],
+        dedupeToken: "delivery-base",
+        deliveryIdempotencyKey: "delivery-base",
+        media,
+        message: "Final question?",
+      },
+    ]);
+  });
+
+  it("delivers linq delimiter-only replies as the original literal text", async () => {
+    const session = createAssistantSession({
+      binding: {
+        actorId: "linq-actor",
+        channel: "linq",
+        conversationKey: "linq-conversation",
+        delivery: {
+          kind: "thread",
+          target: "linq-thread",
+        },
+        identityId: "linq-identity",
+        threadId: "linq-thread",
+        threadIsDirect: false,
+      },
+    });
+    runtimeState.outbox.deliverMessage.mockResolvedValue({
+      delivery: {
+        channel: "linq",
+        idempotencyKey: "delivery-linq-delimiter-only",
+        messageLength: 13,
+        providerMessageId: "provider-linq-delimiter-only",
+        providerThreadId: null,
+        sentAt: "2026-04-08T11:00:00.000Z",
+        target: "linq-thread",
+        targetKind: "thread",
+      },
+      intent: {
+        intentId: "intent-linq-delimiter-only",
+      },
+      kind: "sent",
+      session: null,
+    });
+
+    const response = " \n---\n \n---\n";
+    await deliverAssistantReply({
+      input: {
+        deliverResponse: true,
+        deliveryIdempotencyKey: "linq-delimiter-only",
+        prompt: "hello",
+        vault: "/vault",
+      },
+      response,
+      session,
+      sharedPlan: createSharedPlan({
+        conversationPolicy: {
+          audience: {
+            channel: "linq",
+            threadIsDirect: false,
+          },
+        },
+      }),
+      turnId: "turn-linq-delimiter-only",
+    });
+
+    expect(runtimeState.outbox.deliverMessage).toHaveBeenCalledTimes(1);
+    expect(runtimeState.outbox.deliverMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        dedupeToken: "linq-delimiter-only",
+        deliveryIdempotencyKey: "linq-delimiter-only",
+        message: response,
+      }),
+    );
+  });
+
+  it("delivers email delimiter lines byte-identically", async () => {
+    const session = createAssistantSession({
+      binding: {
+        actorId: "email-actor",
+        channel: "email",
+        conversationKey: "email-conversation",
+        delivery: {
+          kind: "thread",
+          target: "email-thread",
+        },
+        identityId: "email-identity",
+        threadId: "email-thread",
+        threadIsDirect: true,
+      },
+    });
+    runtimeState.outbox.deliverMessage.mockResolvedValue({
+      delivery: {
+        channel: "email",
+        idempotencyKey: "delivery-email-strip",
+        messageLength: 18,
+        providerMessageId: "provider-email-strip",
+        providerThreadId: null,
+        sentAt: "2026-04-08T11:00:00.000Z",
+        target: "email-thread",
+        targetKind: "thread",
+      },
+      intent: {
+        intentId: "intent-email-strip",
+      },
+      kind: "sent",
+      session: null,
+    });
+
+    const response = "First.\n---\nSecond.";
+    await deliverAssistantReply({
+      input: {
+        deliverResponse: true,
+        deliveryIdempotencyKey: "email-base",
+        prompt: "hello",
+        vault: "/vault",
+      },
+      response,
+      session,
+      sharedPlan: createSharedPlan({
+        conversationPolicy: {
+          audience: {
+            channel: "email",
+          },
+        },
+      }),
+      turnId: "turn-email-strip",
+    });
+
+    expect(runtimeState.outbox.deliverMessage).toHaveBeenCalledTimes(1);
+    expect(runtimeState.outbox.deliverMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        dedupeToken: "email-base",
+        deliveryIdempotencyKey: "email-base",
+        message: response,
+      }),
+    );
+  });
+
+  it("stops bubble delivery after an earlier bubble fails", async () => {
+    const session = createAssistantSession({
+      binding: {
+        actorId: "telegram-actor",
+        channel: "telegram",
+        conversationKey: "telegram-conversation",
+        delivery: {
+          kind: "thread",
+          target: "telegram-thread",
+        },
+        identityId: "telegram-identity",
+        threadId: "telegram-thread",
+        threadIsDirect: true,
+      },
+    });
+    const deliveryError = createDeliveryError({
+      code: "CHANNEL_UNAVAILABLE",
+      message: "channel unavailable",
+    });
+    runtimeState.outbox.deliverMessage.mockResolvedValueOnce({
+      deliveryError,
+      intent: {
+        intentId: "intent-bubble-failed",
+      },
+      kind: "failed",
+      session: null,
+    });
+
+    await expect(
+      deliverAssistantReply({
+        input: {
+          deliverResponse: true,
+          deliveryIdempotencyKey: "telegram-base",
+          prompt: "hello",
+          vault: "/vault",
+        },
+        response: "First.\n---\nSecond.\n---\nThird.",
+        session,
+        sharedPlan: createSharedPlan({
+          conversationPolicy: {
+            audience: {
+              channel: "telegram",
+            },
+          },
+        }),
+        turnId: "turn-bubble-failure",
+      }),
+    ).resolves.toEqual({
+      error: deliveryError,
+      intentId: "intent-bubble-failed",
+      kind: "failed",
+      media: [],
+      session,
+    });
+    expect(runtimeState.outbox.deliverMessage).toHaveBeenCalledTimes(1);
+    expect(runtimeState.outbox.deliverMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        deliveryIdempotencyKey: "telegram-base:bubble:0",
+        message: "First.",
+      }),
+    );
+  });
+
+  it("queues bubble intents in message order and returns the final bubble outcome", async () => {
+    const session = createAssistantSession({
+      binding: {
+        actorId: "telegram-actor",
+        channel: "telegram",
+        conversationKey: "telegram-conversation",
+        delivery: {
+          kind: "thread",
+          target: "telegram-thread",
+        },
+        identityId: "telegram-identity",
+        threadId: "telegram-thread",
+        threadIsDirect: true,
+      },
+    });
+    runtimeState.outbox.deliverMessage
+      .mockResolvedValueOnce({
+        deliveryError: null,
+        intent: {
+          intentId: "intent-bubble-one",
+        },
+        kind: "queued",
+        session: null,
+      })
+      .mockResolvedValueOnce({
+        deliveryError: null,
+        intent: {
+          intentId: "intent-bubble-two",
+        },
+        kind: "queued",
+        session: null,
+      })
+      .mockResolvedValueOnce({
+        deliveryError: null,
+        intent: {
+          intentId: "intent-bubble-three",
+        },
+        kind: "queued",
+        session: null,
+      });
+
+    const outcome = await deliverAssistantReply({
+      input: {
+        deliverResponse: true,
+        deliveryDispatchMode: "queue-only",
+        prompt: "hello",
+        vault: "/vault",
+      },
+      response: "First.\n---\nSecond.\n---\nThird.",
+      session,
+      sharedPlan: createSharedPlan({
+        conversationPolicy: {
+          audience: {
+            channel: "telegram",
+          },
+        },
+      }),
+      turnId: "turn-bubble-queue",
+    });
+
+    expect(outcome).toEqual({
+      error: null,
+      intentId: "intent-bubble-three",
+      kind: "queued",
+      media: [],
+      session,
+    });
+    expect(
+      runtimeState.outbox.deliverMessage.mock.calls.map((call) => ({
+        deliveryIdempotencyKey: call[0]?.deliveryIdempotencyKey,
+        dispatchMode: call[0]?.dispatchMode,
+        message: call[0]?.message,
+      })),
+    ).toEqual([
+      {
+        deliveryIdempotencyKey: "assistant-bubble:turn-bubble-queue:bubble:0",
+        dispatchMode: "queue-only",
+        message: "First.",
+      },
+      {
+        deliveryIdempotencyKey: "assistant-bubble:turn-bubble-queue:bubble:1",
+        dispatchMode: "queue-only",
+        message: "Second.",
+      },
+      {
+        deliveryIdempotencyKey: null,
+        dispatchMode: "queue-only",
+        message: "Third.",
+      },
+    ]);
+  });
+
   it("suppresses Telegram auto-reply native reply anchors for final text delivery", async () => {
     const session = createAssistantSession({
       binding: {
@@ -1502,6 +1878,70 @@ describe("assistant delivery orchestration seam", () => {
         (call) => call[0]?.dedupeToken
       )
     ).toEqual(["delivery-base:segment:0", "delivery-base:segment:1"]);
+  });
+
+  it("composes preceding segment and bubble idempotency keys", async () => {
+    const session = createAssistantSession();
+    runtimeState.outbox.deliverMessage.mockResolvedValue({
+      delivery: {
+        channel: "telegram",
+        idempotencyKey: "idem-segment-bubble",
+        messageLength: 10,
+        providerMessageId: "provider-segment-bubble",
+        providerThreadId: null,
+        sentAt: "2026-04-08T11:00:00.000Z",
+        target: "thread-1",
+        targetKind: "thread",
+      },
+      intent: {
+        intentId: "intent-segment-bubble",
+      },
+      kind: "sent",
+      session: null,
+    });
+
+    await deliverAssistantPrecedingReplies({
+      input: {
+        deliverResponse: true,
+        deliveryIdempotencyKey: "delivery-base",
+        prompt: "hello",
+        vault: "/vault",
+      },
+      segments: [
+        {
+          response: "Answer one.\n---\nAnswer two.",
+          media: [],
+        },
+      ],
+      session,
+      sharedPlan: createSharedPlan({
+        conversationPolicy: {
+          audience: {
+            channel: "telegram",
+          },
+        },
+      }),
+      turnId: "turn-segment-bubbles",
+    });
+
+    expect(
+      runtimeState.outbox.deliverMessage.mock.calls.map((call) => ({
+        dedupeToken: call[0]?.dedupeToken,
+        deliveryIdempotencyKey: call[0]?.deliveryIdempotencyKey,
+        message: call[0]?.message,
+      })),
+    ).toEqual([
+      {
+        dedupeToken: "delivery-base:segment:0:bubble:0",
+        deliveryIdempotencyKey: "delivery-base:segment:0:bubble:0",
+        message: "Answer one.",
+      },
+      {
+        dedupeToken: "delivery-base:segment:0",
+        deliveryIdempotencyKey: "delivery-base:segment:0",
+        message: "Answer two.",
+      },
+    ]);
   });
 
   it("delivers preceding segments with their own delivery contexts", async () => {
@@ -2507,6 +2947,39 @@ describe("assistant delivery orchestration seam", () => {
     });
 
     expect(seamMocks.normalizeAssistantDeliveryError).toHaveBeenCalledTimes(1);
+  });
+
+  it("preserves caller-provided response text in turn delivery receipts", () => {
+    const session = createAssistantSession();
+    const response = "First.\n---\nSecond.";
+
+    expect(
+      buildAssistantTurnDeliveryFinalizationPlan({
+        completedAt: "2026-04-08T12:00:00.000Z",
+        outcome: {
+          delivery: {
+            channel: "telegram",
+            idempotencyKey: "receipt-bubbles",
+            messageLength: 10,
+            providerMessageId: "provider-receipt-bubbles",
+            providerThreadId: null,
+            sentAt: "2026-04-08T12:00:00.000Z",
+            target: "thread-1",
+            targetKind: "thread",
+          },
+          intentId: "intent-receipt-bubbles",
+          kind: "sent",
+          media: [],
+          session,
+        },
+        response,
+        turnId: "turn-receipt-bubbles",
+      }).receipt,
+    ).toMatchObject({
+      deliveryDisposition: "sent",
+      response,
+      status: "completed",
+    });
   });
 
   it("builds receipt and diagnostic plans for every delivery disposition", () => {
