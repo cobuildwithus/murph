@@ -101,7 +101,10 @@ export async function upsertHostedMemberAssistantPreferencesTx(input: {
     }),
     memberId: input.memberId,
     occurredAt: input.occurredAt,
-    preferences: changedPreferences,
+    preferences: buildHostedMemberAssistantPreferencesSnapshot({
+      tone: updatedMember.assistantTone,
+      voice: updatedMember.assistantVoice,
+    }),
   });
   const append = await appendHostedMailboxEnvelopeTx({
     envelope: wake,
@@ -183,6 +186,18 @@ function resolveChangedAssistantPreferences(input: {
   return {
     ...(tone === undefined ? {} : { tone }),
     ...(voice === undefined ? {} : { voice }),
+  };
+}
+
+function buildHostedMemberAssistantPreferencesSnapshot(input: {
+  tone: string | null;
+  voice: string | null;
+}): HostedExecutionMemberPreferences {
+  const tone = normalizeStoredAssistantTone(input.tone);
+  const voice = normalizeStoredAssistantVoice(input.voice);
+  return {
+    ...(tone === null ? {} : { tone }),
+    ...(voice === null ? {} : { voice }),
   };
 }
 

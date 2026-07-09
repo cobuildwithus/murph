@@ -62,6 +62,7 @@ export interface AssistantNotificationDecisionSystemPromptInput {
   assistantHostedDeviceConnectAvailable?: boolean;
   assistantHostedDeviceConnectProviders?: readonly AssistantHostedDeviceConnectProvider[];
   assistantToolNameAliases?: Readonly<Record<string, string>> | null;
+  assistantTone?: AssistantTonePreference | null;
   channel: string | null;
   currentLocalDate: string;
   currentTimeZone: string;
@@ -506,6 +507,7 @@ export function buildAssistantNotificationDecisionSystemPromptLayers(
         input.assistantDynamicContextPrompts
       ),
       input.assistantContextSnapshotPrompt ?? null,
+      buildAssistantTonePreferenceText(input.assistantTone ?? null),
       buildAssistantNotificationDecisionGuidanceText(input.channel),
       buildAssistantUserFacingLinkSelfCheckText()
     ),

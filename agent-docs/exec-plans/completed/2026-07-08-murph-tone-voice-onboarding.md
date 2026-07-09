@@ -282,9 +282,13 @@ Inject the member tone deterministically (not model-discretionary):
 ## DEPLOYMENT CONCERNS (carry into the PR body)
 
 Web (Vercel) emits the new `member.preferences.updated` event; the runtime
-(Cloudflare) consumes it. Unsupported route actions defer safely in the
-system mailbox, but deploy Cloudflare before web anyway so no event sits
-deferred. No compatibility window needed beyond that ordering.
+(Cloudflare) consumes it. Deploy Cloudflare before web and use immediate
+runner-container rollout/drain verification before any web build can emit
+`member.preferences.updated`. Do not roll the Cloudflare runtime below this
+change while web can still emit the new mailbox kind; if rollback below this
+runtime floor is required, roll web back or disable the web emitter first.
+After deploy, verify `member.preferences.updated` mailbox rows are imported
+and the system-mailbox retry backlog is clear.
 
 ## Supervisor addendum (2026-07-08, after prod config check)
 

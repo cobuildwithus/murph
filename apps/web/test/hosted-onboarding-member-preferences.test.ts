@@ -149,6 +149,46 @@ describe("hosted member assistant preferences", () => {
     expect(member.assistantVoice).toBe("deep-calm");
   });
 
+  it("emits the full current preference snapshot when one preference changes", async () => {
+    const member = {
+      assistantTone: "casual" as string | null,
+      assistantVoice: "warm" as string | null,
+      id: "member_123",
+    };
+    const prisma = createPreferencesPrismaDouble(member);
+    mocks.appendHostedMailboxEnvelopeTx.mockResolvedValue({
+      dedupeConflict: false,
+      item: {
+        id: "mailbox_item_123",
+      },
+    });
+
+    await expect(upsertHostedMemberAssistantPreferencesTx({
+      memberId: "member_123",
+      occurredAt: "2026-07-08T12:00:00.000Z",
+      preferences: {
+        voice: "deep-calm",
+      },
+      prisma,
+      sourceType: "settings.assistant-style",
+    })).resolves.toMatchObject({
+      assistantTone: "casual",
+      assistantVoice: "deep-calm",
+      updated: true,
+    });
+
+    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledWith({
+      envelope: expect.objectContaining({
+        kind: "member.preferences.updated",
+        preferences: {
+          tone: "casual",
+          voice: "deep-calm",
+        },
+      }),
+      tx: prisma,
+    });
+  });
+
   it("fails retryably when the preference wake identity conflicts", async () => {
     const member = {
       assistantTone: null as string | null,

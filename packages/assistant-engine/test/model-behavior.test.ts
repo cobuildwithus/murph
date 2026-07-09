@@ -1199,6 +1199,33 @@ Execution context:
     )
   })
 
+  it('applies assistant tone preference to notification decision prompts', () => {
+    const prompt =
+      buildAssistantNotificationDecisionSystemPromptWithCacheMetadata(
+        createCommonNotificationPromptInput({
+          assistantTone: 'casual',
+        }),
+      ).prompt
+
+    expect(prompt).toContain('Assistant tone preference:')
+    expect(prompt).toContain('The user chose casual.')
+
+    const defaultPrompt =
+      buildAssistantNotificationDecisionSystemPromptWithCacheMetadata(
+        createCommonNotificationPromptInput(),
+      ).prompt
+    expect(defaultPrompt).not.toContain('Assistant tone preference:')
+
+    const maintenancePrompt =
+      buildAssistantNotificationDecisionSystemPromptWithCacheMetadata(
+        createCommonNotificationPromptInput({
+          assistantTone: 'formal',
+          maintenanceTurn: true,
+        }),
+      ).prompt
+    expect(maintenancePrompt).not.toContain('Assistant tone preference:')
+  })
+
   it('renders current date context with natural user-facing date guidance', () => {
     const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput({
       currentLocalDate: '2026-04-03',

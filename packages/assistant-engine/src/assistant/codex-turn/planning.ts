@@ -539,6 +539,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
             assistantHostedDeviceConnectProviders:
               promptCapabilityAvailability.assistantHostedDeviceConnectProviders,
             assistantToolNameAliases,
+            assistantTone: preferenceContext.assistantTone,
             channel: resolvedChannel,
             currentLocalDate: input.promptTimeContext.currentLocalDate,
             currentTimeZone: input.promptTimeContext.currentTimeZone,
