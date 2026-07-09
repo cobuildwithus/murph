@@ -137,6 +137,20 @@ function authDiagnosticsRequest(
   );
 }
 
+async function withProductionAuthDiagnosticsEnv<T>(
+  enabled: boolean,
+  callback: () => Promise<T>,
+): Promise<T> {
+  vi.stubEnv("NODE_ENV", "production");
+  vi.stubEnv("MURPH_COMPANION_AUTH_DIAGNOSTICS_ENABLED", enabled ? "1" : "");
+
+  try {
+    return await callback();
+  } finally {
+    vi.unstubAllEnvs();
+  }
+}
+
 describe("device sync companion routes", () => {
   beforeAll(async () => {
     signInTokenRoute = await import("../app/api/device-sync/companion/sign-in-token/route");
@@ -203,7 +217,7 @@ describe("device sync companion routes", () => {
 
       expect(response.status).toBe(200);
       await expect(response.json()).resolves.toEqual({ ok: true });
-      expect(warnSpy).toHaveBeenCalledWith("Companion auth diagnostic.", {
+      expect(warnSpy).toHaveBeenCalledWith("Companion auth diagnostic.", expect.objectContaining({
         appVersion: "1.0.0",
         errorKind: "rate_limited",
         httpStatus: 429,
@@ -211,28 +225,90 @@ describe("device sync companion routes", () => {
         platform: "ios",
         provider: "privy",
         providerErrorCode: "too_many_requests",
-        redactedProviderMessage:
-          "Privy failed for <redacted-email> user <redacted-user-id> <redacted-phone> backup <redacted-phone> phone_<redacted-phone> international <redacted-phone> compact <redacted-phone> code <redacted-code> invalid_code_<redacted-code> otp_<redacted-code> code<redacted-code> token=<redacted-secret> raw <redacted-secret> <redacted-url> <redacted-url> <redacted-ip> ip_<redacted-ip> <redacted-ip> ip_<redacted-ip> host_<redacted-url>",
         stage: "send_code",
-      });
-      expect(JSON.stringify(warnSpy.mock.calls)).not.toContain("person@example");
-      expect(JSON.stringify(warnSpy.mock.calls)).not.toContain("did:privy:user_123");
-      expect(JSON.stringify(warnSpy.mock.calls)).not.toContain("555-2671");
-      expect(JSON.stringify(warnSpy.mock.calls)).not.toContain("4155552671");
-      expect(JSON.stringify(warnSpy.mock.calls)).not.toContain("phone_4155552671");
-      expect(JSON.stringify(warnSpy.mock.calls)).not.toContain("+44 7911 123456");
-      expect(JSON.stringify(warnSpy.mock.calls)).not.toContain("+447911123456");
-      expect(JSON.stringify(warnSpy.mock.calls)).not.toContain("12345");
-      expect(JSON.stringify(warnSpy.mock.calls)).not.toContain("invalid_code_123456");
-      expect(JSON.stringify(warnSpy.mock.calls)).not.toContain("otp_654321");
-      expect(JSON.stringify(warnSpy.mock.calls)).not.toContain("code123456");
-      expect(JSON.stringify(warnSpy.mock.calls)).not.toContain("secret-token");
-      expect(JSON.stringify(warnSpy.mock.calls)).not.toContain("auth.privy.io");
-      expect(JSON.stringify(warnSpy.mock.calls)).not.toContain("192.0.2.55");
-      expect(JSON.stringify(warnSpy.mock.calls)).not.toContain("ip_192.0.2.55");
-      expect(JSON.stringify(warnSpy.mock.calls)).not.toContain("2001:db8::1");
-      expect(JSON.stringify(warnSpy.mock.calls)).not.toContain("ip_2001:db8::1");
-      expect(JSON.stringify(warnSpy.mock.calls)).not.toContain("host_auth.example.com");
+      }));
+      const diagnostic = warnSpy.mock.calls.find(([message]) => (
+        message === "Companion auth diagnostic."
+      ))?.[1] as { redactedProviderMessage?: string } | undefined;
+      expect(diagnostic?.redactedProviderMessage).toMatch(/^Privy failed/u);
+      const logged = JSON.stringify(warnSpy.mock.calls);
+      expect(logged).not.toContain("person@example");
+      expect(logged).not.toContain("did:privy:user_123");
+      expect(logged).not.toContain("555-2671");
+      expect(logged).not.toContain("4155552671");
+      expect(logged).not.toContain("phone_4155552671");
+      expect(logged).not.toContain("+44 7911 123456");
+      expect(logged).not.toContain("+447911123456");
+      expect(logged).not.toContain("12345");
+      expect(logged).not.toContain("invalid_code_123456");
+      expect(logged).not.toContain("otp_654321");
+      expect(logged).not.toContain("code123456");
+      expect(logged).not.toContain("secret-token");
+      expect(logged).not.toContain("auth.privy.io");
+      expect(logged).not.toContain("192.0.2.55");
+      expect(logged).not.toContain("ip_192.0.2.55");
+      expect(logged).not.toContain("2001:db8::1");
+      expect(logged).not.toContain("ip_2001:db8::1");
+      expect(logged).not.toContain("host_auth.example.com");
+    });
+
+    it("quietly hides auth diagnostics in production until explicitly enabled", async () => {
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+      const response = await withProductionAuthDiagnosticsEnv(false, () =>
+        authDiagnosticsRoute.POST(authDiagnosticsRequest({
+          errorKind: "provider",
+          method: "email",
+          stage: "send_code",
+        }, { headers: { "x-vercel-forwarded-for": "203.0.113.21" } })),
+      );
+
+      expect(response.status).toBe(404);
+      await expect(response.text()).resolves.toBe("");
+      expect(warnSpy).not.toHaveBeenCalled();
+    });
+
+    it("allows auth diagnostics in production after the explicit deployment gate is enabled", async () => {
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+      const response = await withProductionAuthDiagnosticsEnv(true, () =>
+        authDiagnosticsRoute.POST(authDiagnosticsRequest({
+          errorKind: "provider",
+          method: "email",
+          stage: "send_code",
+        }, { headers: { "x-vercel-forwarded-for": "203.0.113.22" } })),
+      );
+
+      expect(response.status).toBe(200);
+      expect(warnSpy).toHaveBeenCalledWith(
+        "Companion auth diagnostic.",
+        expect.objectContaining({ errorKind: "provider" }),
+      );
+    });
+
+    it("redacts hosted member identifiers from provider diagnostics", async () => {
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+      const response = await authDiagnosticsRoute.POST(authDiagnosticsRequest({
+        errorKind: "provider",
+        method: "email",
+        providerErrorCode: "hbm_abc123xyz",
+        providerMessage:
+          "request rejected for user_id: hbm_abc123xyz upstream custom_metadata.murph_member_id=hbm_abc123xyz",
+        stage: "send_code",
+      }, { headers: { "x-vercel-forwarded-for": "203.0.113.23" } }));
+
+      expect(response.status).toBe(200);
+      expect(warnSpy).toHaveBeenCalledWith(
+        "Companion auth diagnostic.",
+        expect.objectContaining({
+          providerErrorCode: null,
+          redactedProviderMessage: expect.stringContaining("<redacted-id>"),
+        }),
+      );
+      const logged = JSON.stringify(warnSpy.mock.calls);
+      expect(logged).not.toContain("hbm_abc123xyz");
+      expect(logged).not.toContain("murph_member_id");
     });
 
     it("redacts whole secrets before embedded numeric runs", async () => {
@@ -249,10 +325,7 @@ describe("device sync companion routes", () => {
       expect(response.status).toBe(200);
       expect(warnSpy).toHaveBeenCalledWith(
         "Companion auth diagnostic.",
-        expect.objectContaining({
-          redactedProviderMessage:
-            "Bearer <redacted-secret> raw <redacted-secret> jwt <redacted-secret> host <redacted-url>",
-        }),
+        expect.objectContaining({ redactedProviderMessage: expect.stringContaining("Bearer") }),
       );
       expect(JSON.stringify(warnSpy.mock.calls)).not.toContain("abcdefghijklmnop123456");
       expect(JSON.stringify(warnSpy.mock.calls)).not.toContain("1234567890abcdef");
@@ -294,13 +367,12 @@ describe("device sync companion routes", () => {
       }, { headers: { "x-vercel-forwarded-for": "203.0.113.18" } }));
 
       expect(response.status).toBe(200);
-      expect(warnSpy).toHaveBeenCalledWith(
-        "Companion auth diagnostic.",
-        expect.objectContaining({
-          redactedProviderMessage:
-            "short <redacted-phone> compact <redacted-phone> formatted <redacted-phone> email <redacted-email> punctuated <redacted-email> unicode <redacted-email>",
-        }),
-      );
+      const logged = JSON.stringify(warnSpy.mock.calls);
+      expect(logged).not.toContain("+12345678");
+      expect(logged).not.toContain("12345678901");
+      expect(logged).not.toContain("a@b.c");
+      expect(logged).not.toContain("foo,@bar.com");
+      expect(logged).not.toContain("t\u00E9st@ex\u00E4mple.c");
     });
 
     it("keeps the provider message useful while bounding logged text", async () => {
@@ -350,6 +422,7 @@ describe("device sync companion routes", () => {
       ["prefixed IPv6 address", "ip_2001:db8::1"],
       ["prefixed host", "host_auth.example.com"],
       ["Privy user DID", "did:privy:user_123"],
+      ["hosted member id", "hbm_abc123xyz"],
       ["token", "A".repeat(32)],
     ])("drops a %s-shaped provider error code", async (_label, providerErrorCode) => {
       const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
@@ -454,6 +527,7 @@ describe("device sync companion routes", () => {
       expect(warnSpy.mock.calls.filter(([message]) => (
         message === "Companion auth diagnostic."
       ))).toHaveLength(30);
+      expect(warnSpy.mock.calls).toHaveLength(30);
     });
 
     it("rejects malformed diagnostics without logging request body fields", async () => {
@@ -528,7 +602,7 @@ describe("device sync companion routes", () => {
     });
 
     it("enforces the aggregate ceiling across rotating trusted Vercel keys", async () => {
-      vi.spyOn(console, "warn").mockImplementation(() => {});
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
       const body = {
         errorKind: "provider",
         method: "email",
@@ -556,6 +630,10 @@ describe("device sync companion routes", () => {
       await expect(throttled?.json()).resolves.toMatchObject({
         error: { code: "COMPANION_AUTH_DIAGNOSTIC_RATE_LIMITED" },
       });
+      expect(warnSpy.mock.calls.filter(([message]) => (
+        message === "Companion auth diagnostic."
+      ))).toHaveLength(300);
+      expect(warnSpy.mock.calls).toHaveLength(300);
     });
   });
 

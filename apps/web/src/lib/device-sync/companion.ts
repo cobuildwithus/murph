@@ -2,12 +2,16 @@ import "server-only";
 
 import { deviceSyncError } from "@murphai/device-syncd/errors";
 import {
+  isHostedRuntimeIdShapedDiagnosticToken,
+  sanitizeHostedRuntimeDiagnosticText,
+  sanitizeHostedRuntimeErrorCode,
+} from "@murphai/device-syncd/hosted-runtime";
+import {
   normalizeJunctionResourceName,
   readJunctionWebhookResourceName,
 } from "@murphai/device-syncd/junction-resources";
 
 import type { PrismaDeviceSyncControlPlaneStore } from "./prisma-store";
-import { sanitizeJsonLogString } from "../http";
 import { isAvailableConnectionSourceResource } from "./browser-connection-source";
 
 /** The companion app's only device-sync provider. */
@@ -151,7 +155,7 @@ function rejectUnknownAuthDiagnosticKeys(body: Record<string, unknown>): void {
 }
 
 function sanitizeCompanionAuthDiagnosticMessage(message: string | null): string | null {
-  return sanitizeJsonLogString(message, COMPANION_AUTH_DIAGNOSTIC_MESSAGE_MAX_LENGTH * 2)
+  return sanitizeHostedRuntimeDiagnosticText(message)
     ?.replace(COMPANION_AUTH_DIAGNOSTIC_EMAIL_PATTERN, "<redacted-email>")
     ?.replace(COMPANION_AUTH_DIAGNOSTIC_PRIVY_DID_PATTERN, "<redacted-user-id>")
     ?.replace(COMPANION_AUTH_DIAGNOSTIC_TOKEN_PATTERN, "<redacted-secret>")
@@ -183,9 +187,20 @@ function readOptionalSafeAuthDiagnosticCode(
     COMPANION_AUTH_DIAGNOSTIC_SAFE_CODE_PATTERN,
   );
 
-  return value !== null && sanitizeCompanionAuthDiagnosticMessage(value) === value
-    ? value
-    : null;
+  if (value === null) {
+    return null;
+  }
+
+  const sanitizedCode = sanitizeHostedRuntimeErrorCode(value);
+  if (
+    sanitizedCode !== value
+    || isHostedRuntimeIdShapedDiagnosticToken(sanitizedCode)
+    || sanitizeCompanionAuthDiagnosticMessage(value) !== value
+  ) {
+    return null;
+  }
+
+  return value;
 }
 
 export interface CompanionDeviceSyncResourceStatus {
