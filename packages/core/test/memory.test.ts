@@ -18,6 +18,7 @@ import {
   getMemoryRecord,
   readMemoryDocument,
   resolveMemoryDocumentPath,
+  setMemoryDisplayName,
   updateMemory,
   upsertMemory,
 } from "../src/memory.ts";
@@ -172,6 +173,50 @@ describe("core memory package wrapper", () => {
         )
         .map((record) => record.commandName),
     ).toContain("core.updateMemory");
+  });
+
+  test("sets the preferred display name as a canonical memory record", async () => {
+    const vaultRoot = await makeVaultRoot();
+    const createdAt = new Date("2026-07-01T00:00:00.000Z");
+    const updatedAt = new Date("2026-07-01T00:05:00.000Z");
+
+    const first = await setMemoryDisplayName(vaultRoot, {
+      displayName: "Theo",
+      now: createdAt,
+    });
+    expect(first.created).toBe(true);
+    expect(first.record).toMatchObject({
+      section: "Identity",
+      text: "Preferred display name: Theo",
+      updatedAt: createdAt.toISOString(),
+    });
+
+    const second = await setMemoryDisplayName(vaultRoot, {
+      displayName: "Ari",
+      now: updatedAt,
+    });
+    expect(second.created).toBe(false);
+    expect(second.record.id).toBe(first.record.id);
+    expect(second.record).toMatchObject({
+      text: "Preferred display name: Ari",
+      updatedAt: updatedAt.toISOString(),
+    });
+    expect(second.document.records).toHaveLength(1);
+
+    const auditRecords = await readJsonlRecords({
+      vaultRoot,
+      relativePath: resolveAuditShardPath(updatedAt),
+    });
+    expect(
+      auditRecords
+        .filter(
+          (record) =>
+            record.action === "memory_upsert" &&
+            Array.isArray(record.targetIds) &&
+            record.targetIds.includes(first.record.id),
+        )
+        .map((record) => record.commandName),
+    ).toContain("core.setMemoryDisplayName");
   });
 
   test("deduplicates replayed anonymous upserts by normalized section and text", async () => {
