@@ -1,6 +1,9 @@
 import { Prisma, PrismaClient } from "@prisma/client";
 import { deviceSyncError } from "@murphai/device-syncd/errors";
-import { toRedactedPublicDeviceSyncAccount } from "@murphai/device-syncd/public-account";
+import {
+  isEstablishedDeviceSyncConnection,
+  toRedactedPublicDeviceSyncAccount,
+} from "@murphai/device-syncd/public-account";
 import {
   type MarkPublicDeviceSyncConnectionSetupFailedInput,
   type ProviderAuthTokens,
@@ -170,7 +173,7 @@ export class PrismaHostedConnectionStore {
           input.reuseEstablishedConnection === true
           && ownerId
           && existing.userId === ownerId
-          && isHostedEstablishedConnectionRecord(existing)
+          && isEstablishedDeviceSyncConnection(existing)
         ) {
           return {
             record: existing,
@@ -317,7 +320,7 @@ export class PrismaHostedConnectionStore {
       });
     }
 
-    if (input.reuseEstablishedConnection === true && isEstablishedPublicConnection(existing)) {
+    if (input.reuseEstablishedConnection === true && isEstablishedDeviceSyncConnection(existing)) {
       return {
         account: existing,
         previousAccount: existing,
@@ -1070,14 +1073,6 @@ function assertNoActiveHostedConnectionRefreshLease(
     retryable: true,
     httpStatus: 409,
   });
-}
-
-function isHostedEstablishedConnectionRecord(record: HostedConnectionRecord): boolean {
-  return record.status === "active" && record.setupPhase === "source_confirmed";
-}
-
-function isEstablishedPublicConnection(account: PublicDeviceSyncAccount): boolean {
-  return account.status === "active" && account.setupPhase === "source_confirmed";
 }
 
 function requireHostedDeviceSyncSetupPhase(

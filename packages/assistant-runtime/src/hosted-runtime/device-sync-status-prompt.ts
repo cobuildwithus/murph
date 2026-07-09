@@ -1,3 +1,8 @@
+import {
+  isDeviceSyncConnectionSetupConfirmed,
+  isEstablishedDeviceSyncConnection,
+} from "@murphai/device-syncd/public-account";
+
 import type {
   HostedRuntimeDeviceSyncPort,
 } from "./platform.ts";
@@ -28,11 +33,6 @@ interface HostedDeviceSyncReconnectNotice {
   sourceProviderSlug: string | null;
 }
 
-interface HostedDeviceSyncActiveConnectionSummary {
-  hasUnlabeledConnection: boolean;
-  labels: string[];
-}
-
 const HOSTED_DEVICE_SYNC_RECONNECT_REQUIRED_SOURCE_ERROR_CODES = new Set([
   "INVALID_GRANT",
   "OAUTH_REAUTHORIZATION_REQUIRED",
@@ -53,6 +53,7 @@ export async function buildHostedDeviceSyncStatusPrompt(input: {
 
   const snapshot = await fetchHostedDeviceSyncStatusSnapshot({
     deviceSyncPort: input.deviceSyncPort,
+    reconnectTargets: input.reconnectTargets,
     signal: input.signal ?? null,
   });
   if (!snapshot) {
@@ -67,12 +68,111 @@ export async function buildHostedDeviceSyncStatusPrompt(input: {
 
 async function fetchHostedDeviceSyncStatusSnapshot(input: {
   deviceSyncPort: HostedRuntimeDeviceSyncPort;
+  reconnectTargets: readonly HostedDeviceSyncStatusPromptReconnectTarget[];
   signal: AbortSignal | null;
 }): Promise<HostedDeviceSyncRuntimeSnapshot | null> {
-  return await input.deviceSyncPort.fetchSnapshot({
-    includeCredentialMaterial: false,
-    signal: input.signal,
-  }).catch(() => null);
+  if (input.reconnectTargets.length === 0) {
+    return null;
+  }
+
+  const snapshots = await Promise.all(
+    input.reconnectTargets.map(async (target) => {
+      const sourceProviderSlug = normalizeHostedDeviceSyncKey(target.sourceProviderSlug);
+      const provider = normalizeHostedDeviceSyncKey(target.provider);
+      if (!sourceProviderSlug && !provider) {
+        return null;
+      }
+
+      return await input.deviceSyncPort.fetchSnapshot({
+        includeCredentialMaterial: false,
+        limit: HOSTED_DEVICE_SYNC_STATUS_NOTICE_LIMIT,
+        ...(sourceProviderSlug ? { sourceProviderSlug } : { provider }),
+        signal: input.signal,
+      }).catch(() => null);
+    }),
+  );
+
+  return mergeHostedDeviceSyncStatusSnapshots(snapshots);
+}
+
+function mergeHostedDeviceSyncStatusSnapshots(
+  snapshots: readonly (HostedDeviceSyncRuntimeSnapshot | null)[],
+): HostedDeviceSyncRuntimeSnapshot | null {
+  const connections = new Map<string, HostedDeviceSyncRuntimeConnectionSnapshot>();
+  let generatedAt: string | null = null;
+  let userId: string | null = null;
+
+  for (const snapshot of snapshots) {
+    if (!snapshot) {
+      continue;
+    }
+    generatedAt ??= snapshot.generatedAt;
+    userId ??= snapshot.userId;
+    for (const entry of snapshot.connections) {
+      const existing = connections.get(entry.connection.id);
+      connections.set(
+        entry.connection.id,
+        existing
+          ? mergeHostedDeviceSyncStatusConnectionSnapshots(existing, entry)
+          : entry,
+      );
+    }
+  }
+
+  if (connections.size === 0 || !generatedAt || !userId) {
+    return null;
+  }
+
+  return {
+    connections: [...connections.values()],
+    generatedAt,
+    userId,
+  };
+}
+
+function mergeHostedDeviceSyncStatusConnectionSnapshots(
+  existing: HostedDeviceSyncRuntimeConnectionSnapshot,
+  next: HostedDeviceSyncRuntimeConnectionSnapshot,
+): HostedDeviceSyncRuntimeConnectionSnapshot {
+  return {
+    ...existing,
+    sources: mergeHostedDeviceSyncStatusSources(
+      existing.sources ?? [],
+      next.sources ?? [],
+    ),
+  };
+}
+
+function mergeHostedDeviceSyncStatusSources(
+  existingSources: readonly HostedDeviceSyncRuntimeConnectionSourceSnapshot[],
+  nextSources: readonly HostedDeviceSyncRuntimeConnectionSourceSnapshot[],
+): HostedDeviceSyncRuntimeConnectionSourceSnapshot[] {
+  const merged = new Map<string, HostedDeviceSyncRuntimeConnectionSourceSnapshot>();
+
+  for (const source of [...existingSources, ...nextSources]) {
+    const key = buildHostedDeviceSyncSourceMergeKey(source);
+    if (!merged.has(key)) {
+      merged.set(key, source);
+    }
+  }
+
+  return [...merged.values()];
+}
+
+function buildHostedDeviceSyncSourceMergeKey(
+  source: HostedDeviceSyncRuntimeConnectionSourceSnapshot,
+): string {
+  const sourceInstanceKey = normalizeHostedDeviceSyncMergeKey(source.sourceInstanceKey);
+  if (sourceInstanceKey) {
+    return `instance:${sourceInstanceKey}`;
+  }
+
+  return `provider:${normalizeHostedDeviceSyncMergeKey(source.sourceProviderSlug) ?? ""}`;
+}
+
+function normalizeHostedDeviceSyncMergeKey(value: string | null | undefined): string | null {
+  const normalized = value?.trim().toLowerCase();
+  return normalized ? normalized : null;
 }
 
 export function buildHostedDeviceSyncStatusPromptFromSnapshot(input: {
@@ -90,22 +190,16 @@ export function buildHostedDeviceSyncStatusPromptFromSnapshot(input: {
   const reconnectLabels = new Set(
     notices.map((notice) => notice.label.trim().toLowerCase()),
   );
-  const activeConnectionLines = activeConnections.labels
+  const activeConnectionLines = activeConnections
     .filter((label) => !reconnectLabels.has(label.trim().toLowerCase()))
     .slice(0, HOSTED_DEVICE_SYNC_STATUS_NOTICE_LIMIT)
     .map((label) => `- ${label} has an active connection.`);
-  if (
-    activeConnectionLines.length === 0
-    && activeConnections.hasUnlabeledConnection
-  ) {
-    activeConnectionLines.push("- An active wearable connection exists.");
-  }
   const noticeLines = notices
     .slice(0, HOSTED_DEVICE_SYNC_STATUS_NOTICE_LIMIT)
     .map(renderHostedDeviceSyncReconnectNoticeLine);
   const statusLines = [...activeConnectionLines, ...noticeLines];
   if (statusLines.length === 0) {
-    statusLines.push("- No active or reconnect-required wearable connection is present.");
+    return null;
   }
 
   return [
@@ -128,18 +222,17 @@ export function buildHostedDeviceSyncStatusPromptFromSnapshot(input: {
 function collectHostedDeviceSyncActiveConnections(input: {
   reconnectTargets: readonly HostedDeviceSyncStatusPromptReconnectTarget[];
   snapshot: HostedDeviceSyncRuntimeSnapshot;
-}): HostedDeviceSyncActiveConnectionSummary {
+}): string[] {
   const labels = new Map<string, string>();
-  let hasUnlabeledConnection = false;
 
   for (const entry of input.snapshot.connections) {
-    if (entry.connection.status !== "active") {
+    if (!isEstablishedDeviceSyncConnection(entry.connection)) {
       continue;
     }
 
     let hasLabeledSource = false;
     for (const source of entry.sources ?? []) {
-      if (source.status === "disconnected") {
+      if (source.status !== "connected") {
         continue;
       }
 
@@ -170,15 +263,10 @@ function collectHostedDeviceSyncActiveConnections(input: {
         : null);
     if (label) {
       labels.set(label.trim().toLowerCase(), label);
-    } else {
-      hasUnlabeledConnection = true;
     }
   }
 
-  return {
-    hasUnlabeledConnection,
-    labels: [...labels.values()],
-  };
+  return [...labels.values()];
 }
 
 function collectHostedDeviceSyncReconnectNotices(input: {
@@ -189,7 +277,10 @@ function collectHostedDeviceSyncReconnectNotices(input: {
   const seen = new Set<string>();
 
   for (const entry of input.snapshot.connections) {
-    if (entry.connection.status === "disconnected") {
+    if (
+      entry.connection.status === "disconnected"
+      || !isDeviceSyncConnectionSetupConfirmed(entry.connection)
+    ) {
       continue;
     }
 

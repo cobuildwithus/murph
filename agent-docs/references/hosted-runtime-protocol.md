@@ -469,12 +469,16 @@ use coarse device-sync mailbox wakes because they are explicit lifecycle events,
 not high-cardinality freshness hints.
 
 Before due background assistant automation, the runtime may read the existing
-web-owned device snapshot once and project current wearable connection state as
-bounded dynamic context. That projection contains only product labels and
-coarse active, reconnect-required, or absent state; it excludes connection and
+web-owned device snapshot through provider- or source-filtered requests with
+fixed result limits and project positively established active or
+reconnect-required wearable state as bounded dynamic context. That projection
+contains only product labels and coarse state; it excludes connection and
 account identifiers, credential material, provider payloads, raw health values,
-and diagnostic text. A failed or preempted snapshot read produces no device
-context and must not be interpreted as proof that the user has no connection.
+and diagnostic text. Established account state uses the shared device-sync
+lifecycle predicate (`active` plus `source_confirmed`), and source-derived active
+labels require a connected source. Empty, incomplete-setup, failed, or preempted
+reads produce no device context and must not be interpreted as proof that the
+user has no connection.
 
 Hosted Stripe webhook routes keep raw request bodies and Stripe signatures in
 the route/service verification path only. After verification, web stores the

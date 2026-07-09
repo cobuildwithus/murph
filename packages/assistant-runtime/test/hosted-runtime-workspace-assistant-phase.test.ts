@@ -4492,6 +4492,14 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       },
       async fetchSnapshot(request) {
         fetchSnapshotRequests.push(request);
+        if (request?.sourceProviderSlug !== "whoop_v2") {
+          return {
+            connections: [],
+            generatedAt: "2026-04-29T00:00:00.000Z",
+            userId: "member_synthetic_phase",
+          };
+        }
+
         return {
           connections: [
             {
@@ -4505,6 +4513,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
                 metadata: {},
                 provider: "junction",
                 scopes: [],
+                setupPhase: "source_confirmed",
                 status: "active",
               },
               credential: {
@@ -4568,12 +4577,23 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(fetchSnapshotRequests).toEqual([]);
     const dynamicContextPrompt =
       await assistantLaneCall?.buildBackgroundDynamicContextPrompt?.({});
-    expect(fetchSnapshotRequests).toEqual([
-      expect.objectContaining({
-        includeCredentialMaterial: false,
-        signal: expect.any(AbortSignal),
-      }),
+    expect(fetchSnapshotRequests.map((request) => request?.sourceProviderSlug)).toEqual([
+      "fitbit",
+      "garmin",
+      "oura",
+      "withings",
+      "whoop_v2",
     ]);
+    expect(fetchSnapshotRequests).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          includeCredentialMaterial: false,
+          limit: 4,
+          signal: expect.any(AbortSignal),
+          sourceProviderSlug: "whoop_v2",
+        }),
+      ]),
+    );
     expect(assistantLaneCall?.signal).toBeUndefined();
     expect(assistantLaneCall).not.toHaveProperty("suppressActiveTurnInputRefresh");
     expect(assistantLaneCall?.executionContext.hosted?.dynamicContextPrompts)
@@ -4614,6 +4634,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
                 metadata: {},
                 provider: "junction",
                 scopes: [],
+                setupPhase: "source_confirmed",
                 status: "active",
               },
               credential: {
@@ -4859,9 +4880,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     const prompt = await assistantLaneCall?.buildBackgroundDynamicContextPrompt?.({});
     expect(fetchSnapshotCalls).toBe(1);
     expect(fetchSnapshotSignal).toBeInstanceOf(AbortSignal);
-    expect(prompt).toContain(
-      "No active or reconnect-required wearable connection is present",
-    );
+    expect(prompt).toBeNull();
     expect(assistantLaneCall?.executionContext.hosted?.dynamicContextPrompts).toBeUndefined();
   });
 
