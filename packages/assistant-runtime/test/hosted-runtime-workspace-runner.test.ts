@@ -66,6 +66,7 @@ import {
   runHostedWorkspaceUntilIdleOrBudget,
   type HostedMailboxImportCheckpointResult,
   type HostedRuntimeEffectsPort,
+  type HostedWorkspaceRunnerRuntimeStatusCheckpointInput,
 } from "../src/hosted-runtime.ts";
 import {
   collectHostedAssistantDeliverySideEffects,
@@ -2291,6 +2292,11 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
 
     try {
       const result = await runHostedWorkspaceUntilIdleOrBudget({
+        checkpointRuntimeRedactedStatus: createRuntimeRedactedStatusCheckpoint({
+          attemptId: "attempt_synthetic_runner_snapshot_dirty",
+          checkpointRequests,
+          leaseGeneration: "1",
+        }),
         checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
           attemptId: "attempt_synthetic_runner_snapshot_dirty",
           expectedWorkspaceVersion: "0",
@@ -2340,7 +2346,9 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       assert.equal(result.assistantPhaseResult?.nextWakeAt, TEST_NOW);
       assert.equal(result.assistantPhaseResult?.nextWakeReason, "assistant");
       assert.equal(result.runtimeStateDirty, true);
-      assert.deepEqual(checkpointRequests.map((request) => request.reason), []);
+      assert.deepEqual(checkpointRequests.map((request) => request.reason), [
+        "canonical_runtime_commit",
+      ]);
       assert.deepEqual(
         (await readAssistantContextSnapshotState(vaultRoot))?.pendingDirtyDomains,
         ["experiments"],
@@ -2430,6 +2438,11 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
 
     try {
       const result = await runHostedWorkspaceUntilIdleOrBudget({
+        checkpointRuntimeRedactedStatus: createRuntimeRedactedStatusCheckpoint({
+          attemptId: "attempt_synthetic_runner_snapshot_audit_only",
+          checkpointRequests,
+          leaseGeneration: "1",
+        }),
         checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
           attemptId: "attempt_synthetic_runner_snapshot_audit_only",
           expectedWorkspaceVersion: "0",
@@ -2479,7 +2492,9 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
 
       assert.equal(result.assistantPhaseResult?.nextWakeAt ?? null, null);
       assert.equal(result.runtimeStateDirty, true);
-      assert.deepEqual(checkpointRequests.map((request) => request.reason), []);
+      assert.deepEqual(checkpointRequests.map((request) => request.reason), [
+        "canonical_runtime_commit",
+      ]);
       assert.equal(await readAssistantContextSnapshotState(vaultRoot), null);
     } finally {
       await rm(vaultRoot, {
@@ -7225,6 +7240,36 @@ function createWorkspacePort(input: {
       await input.onCheckpoint?.(request, response);
       return response;
     },
+  };
+}
+
+function createRuntimeRedactedStatusCheckpoint(input: {
+  attemptId: string;
+  checkpointRequests: HostedWorkspaceCheckpointRequest[];
+  expectedWorkspaceVersion?: string;
+  leaseGeneration: string;
+}): (request: HostedWorkspaceRunnerRuntimeStatusCheckpointInput) =>
+  Promise<HostedWorkspaceCheckpointResponse> {
+  const workspacePort = createWorkspacePort({
+    checkpointRequests: input.checkpointRequests,
+  });
+  let expectedWorkspaceVersion = input.expectedWorkspaceVersion ?? "0";
+
+  return async (request) => {
+    const response = await workspacePort.checkpoint({
+      attemptId: input.attemptId,
+      expectedWorkspaceVersion,
+      leaseGeneration: input.leaseGeneration,
+      nextWakeAt: request.workspace?.nextWakeAt ?? null,
+      nextWakeReason: request.workspace?.nextWakeReason ?? null,
+      reason: request.reason,
+      redactedStatus: request.redactedStatus,
+      snapshotRef: request.workspace?.snapshotRef ?? null,
+    });
+    if (response.checkpointed) {
+      expectedWorkspaceVersion = response.workspace.version;
+    }
+    return response;
   };
 }
 

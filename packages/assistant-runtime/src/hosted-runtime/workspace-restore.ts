@@ -200,6 +200,11 @@ export async function restoreHostedWorkspaceRuntimeJobWorkspace(input: {
   if (!baseSnapshotRef && !hotSnapshotRef && !deltaSnapshotRef) {
     await clearHostedWorkspaceRuntimeLocalRoots(restored);
     await clearHostedWorkspaceRestoreCachesBestEffort(restored.vaultRoot);
+    await applyHostedCanonicalWriteReceiptsFromWorkspaceState({
+      platform: input.platform,
+      status: input.workspace?.redactedStatus ?? null,
+      vaultRoot: restored.vaultRoot,
+    });
     const restoredMaterializedArtifactPaths = await readHostedMaterializedArtifactPaths({
       vaultRoot: restored.vaultRoot,
     });
@@ -333,7 +338,6 @@ export async function restoreHostedWorkspaceRuntimeJobWorkspace(input: {
 
 interface HostedWorkspaceCleanCheckpointMarker {
   receiptLogByteSize: number | null;
-  receiptLogEntryCount: number;
   receiptLogSha256: string | null;
   schema: typeof HOSTED_WORKSPACE_CLEAN_CHECKPOINT_MARKER_SCHEMA;
   snapshotFingerprintSha256: string;
@@ -343,7 +347,6 @@ interface HostedWorkspaceCleanCheckpointMarker {
 
 interface HostedWorkspaceCleanCheckpointReceiptMarkerFields {
   receiptLogByteSize: number | null;
-  receiptLogEntryCount: number;
   receiptLogSha256: string | null;
 }
 
@@ -477,12 +480,10 @@ function createHostedWorkspaceCleanCheckpointReceiptMarkerFields(
   return fingerprint
     ? {
         receiptLogByteSize: fingerprint.byteSize,
-        receiptLogEntryCount: fingerprint.entryCount,
         receiptLogSha256: fingerprint.sha256,
       }
     : {
         receiptLogByteSize: null,
-        receiptLogEntryCount: 0,
         receiptLogSha256: null,
       };
 }
@@ -518,7 +519,6 @@ function parseHostedWorkspaceCleanCheckpointMarker(
   const snapshotFingerprintSha256 = parsed.snapshotFingerprintSha256;
   const receiptLogSha256 = parsed.receiptLogSha256;
   const receiptLogByteSize = parsed.receiptLogByteSize;
-  const receiptLogEntryCount = parsed.receiptLogEntryCount;
   const writtenAt = parsed.writtenAt;
   if (schema !== HOSTED_WORKSPACE_CLEAN_CHECKPOINT_MARKER_SCHEMA) {
     throw new Error("Hosted workspace clean checkpoint marker schema is invalid.");
@@ -541,12 +541,9 @@ function parseHostedWorkspaceCleanCheckpointMarker(
   ) {
     throw new Error("Hosted workspace clean checkpoint marker receipt size is invalid.");
   }
-  if (!isNonNegativeInteger(receiptLogEntryCount)) {
-    throw new Error("Hosted workspace clean checkpoint marker receipt count is invalid.");
-  }
   if (
     (receiptLogSha256 === null || receiptLogByteSize === null)
-    && (receiptLogSha256 !== null || receiptLogByteSize !== null || receiptLogEntryCount !== 0)
+    && (receiptLogSha256 !== null || receiptLogByteSize !== null)
   ) {
     throw new Error("Hosted workspace clean checkpoint marker receipt fields are inconsistent.");
   }
@@ -559,7 +556,6 @@ function parseHostedWorkspaceCleanCheckpointMarker(
   }
   return {
     receiptLogByteSize,
-    receiptLogEntryCount,
     receiptLogSha256,
     schema,
     snapshotFingerprintSha256,
@@ -576,8 +572,7 @@ function sameHostedWorkspaceCleanCheckpointMarker(
     && actual.workspaceVersion === expected.workspaceVersion
     && actual.snapshotFingerprintSha256 === expected.snapshotFingerprintSha256
     && actual.receiptLogSha256 === expected.receiptLogSha256
-    && actual.receiptLogByteSize === expected.receiptLogByteSize
-    && actual.receiptLogEntryCount === expected.receiptLogEntryCount;
+    && actual.receiptLogByteSize === expected.receiptLogByteSize;
 }
 
 async function writeHostedWorkspaceCleanCheckpointMarker(

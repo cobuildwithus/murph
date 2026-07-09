@@ -1024,10 +1024,9 @@ function selectZippedIntegrationIngestJsonlEntry(
   archive: Buffer,
   source: IntegrationIngestRowSource,
 ): ZipCentralDirectoryEntry {
-  const entries = readZipCentralDirectory(archive, source.sourcePath)
-    .filter((entry) => !entry.name.endsWith("/"));
+  const entries = readZipCentralDirectory(archive, source.sourcePath);
   const expectedName = source.logicalPath.split("/").at(-1) ?? "";
-  if (entries.length === 1 && zipEntryBaseName(entries[0]?.name ?? "") === expectedName) {
+  if (entries.length === 1 && entries[0]?.name === expectedName) {
     return entries[0] as ZipCentralDirectoryEntry;
   }
   throw new VaultError(
@@ -1255,10 +1254,6 @@ function assertZipReadableRange(
       { relativePath },
     );
   }
-}
-
-function zipEntryBaseName(name: string): string {
-  return name.split("/").at(-1) ?? name;
 }
 
 function assertIntegrationIngestArchiveReplacementSize(

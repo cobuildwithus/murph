@@ -15,7 +15,7 @@ import type {
 const HOSTED_CANONICAL_WRITE_RECEIPT_LOG_SCHEMA = "murph.hosted-canonical-write-receipt-log.v1";
 const LOG_SHA_STATUS_KEY = "hostedCanonicalWriteReceiptLogSha256";
 const LOG_SIZE_STATUS_KEY = "hostedCanonicalWriteReceiptLogByteSize";
-const LOG_COUNT_STATUS_KEY = "hostedCanonicalWriteReceiptLogEntryCount";
+const LEGACY_LOG_COUNT_STATUS_KEY = "hostedCanonicalWriteReceiptLogEntryCount";
 
 interface HostedCanonicalWriteReceiptLog {
   entries: HostedCanonicalWriteReceiptContentRef[];
@@ -23,13 +23,11 @@ interface HostedCanonicalWriteReceiptLog {
 }
 
 export interface HostedCanonicalWriteReceiptLogUpdate {
-  entryCount: number;
   logRef: HostedCanonicalWriteReceiptContentRef;
 }
 
 export interface HostedCanonicalWriteReceiptLogStatusFingerprint {
   byteSize: number;
-  entryCount: number;
   sha256: string;
 }
 
@@ -55,7 +53,6 @@ export async function appendHostedCanonicalWriteReceiptToArtifactLog(input: {
     } satisfies HostedCanonicalWriteReceiptLog,
   });
   return {
-    entryCount: entries.length,
     logRef,
   };
 }
@@ -64,7 +61,6 @@ export function hostedCanonicalWriteReceiptLogStatusFields(
   update: HostedCanonicalWriteReceiptLogUpdate,
 ): HostedRuntimeRedactedJson {
   return {
-    [LOG_COUNT_STATUS_KEY]: update.entryCount,
     [LOG_SHA_STATUS_KEY]: update.logRef.sha256,
     [LOG_SIZE_STATUS_KEY]: update.logRef.byteSize,
   };
@@ -77,7 +73,7 @@ export function omitHostedCanonicalWriteReceiptLogStatusFields(
     return null;
   }
   const next = { ...status };
-  delete next[LOG_COUNT_STATUS_KEY];
+  delete next[LEGACY_LOG_COUNT_STATUS_KEY];
   delete next[LOG_SHA_STATUS_KEY];
   delete next[LOG_SIZE_STATUS_KEY];
   return Object.keys(next).length > 0 ? next : null;
@@ -107,8 +103,7 @@ export function readHostedCanonicalWriteReceiptLogStatusFingerprint(
 ): HostedCanonicalWriteReceiptLogStatusFingerprint | null {
   const sha256 = status?.[LOG_SHA_STATUS_KEY];
   const byteSize = status?.[LOG_SIZE_STATUS_KEY];
-  const entryCount = status?.[LOG_COUNT_STATUS_KEY];
-  if (sha256 === undefined && byteSize === undefined && entryCount === undefined) {
+  if (sha256 === undefined && byteSize === undefined) {
     return null;
   }
   if (typeof sha256 !== "string" || !isSha256(sha256)) {
@@ -117,12 +112,8 @@ export function readHostedCanonicalWriteReceiptLogStatusFingerprint(
   if (!isNonNegativeInteger(byteSize)) {
     throw new Error("Hosted canonical write receipt log checkpoint ref has an invalid size.");
   }
-  if (!isNonNegativeInteger(entryCount)) {
-    throw new Error("Hosted canonical write receipt log checkpoint ref has an invalid count.");
-  }
   return {
     byteSize,
-    entryCount,
     sha256,
   };
 }

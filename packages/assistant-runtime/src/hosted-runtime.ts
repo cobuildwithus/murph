@@ -127,6 +127,7 @@ import {
   type HostedWorkspaceRunnerMailboxImportContext,
   type HostedWorkspaceRunnerInput,
   type HostedWorkspaceRunnerResult,
+  type HostedWorkspaceRunnerRuntimeStatusCheckpointInput,
 } from "./hosted-runtime/workspace-runner.ts";
 import {
   restoreHostedWorkspaceRuntimeJobWorkspace,
@@ -298,6 +299,7 @@ export type {
   HostedWorkspaceRunnerInput,
   HostedWorkspaceRunnerPlatform,
   HostedWorkspaceRunnerResult,
+  HostedWorkspaceRunnerRuntimeStatusCheckpointInput,
 } from "./hosted-runtime/workspace-runner.ts";
 export {
   createHostedWorkspaceCheckpointRequestBuilder,
@@ -1009,6 +1011,37 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       metadata: checkpointMetadata,
     });
     const foregroundWorkspacePort = guardedWorkspacePort;
+    const checkpointRuntimeRedactedStatus = async (
+      checkpointInput: HostedWorkspaceRunnerRuntimeStatusCheckpointInput,
+    ): Promise<HostedWorkspaceCheckpointResponse> => {
+      if (!foregroundWorkspacePort) {
+        throw new TypeError("Hosted runtime redacted status checkpoint requires workspace port support.");
+      }
+
+      assertRuntimeNotAborted();
+      const workspace = checkpointInput.workspace;
+      const checkpoint = await raceHostedRuntimeCancellation(
+        foregroundWorkspacePort.checkpoint({
+          attemptId: checkpointMetadata.attemptId,
+          expectedWorkspaceVersion: checkpointMetadata.expectedWorkspaceVersion,
+          inboxMediaRetentionWakeAt: workspace?.inboxMediaRetentionWakeAt ?? null,
+          leaseGeneration: checkpointMetadata.leaseGeneration,
+          nextWakeAt: Object.hasOwn(checkpointInput, "nextWakeAt")
+            ? checkpointInput.nextWakeAt ?? null
+            : workspace?.nextWakeAt ?? null,
+          nextWakeReason: Object.hasOwn(checkpointInput, "nextWakeReason")
+            ? checkpointInput.nextWakeReason ?? null
+            : workspace?.nextWakeReason ?? null,
+          reason: checkpointInput.reason,
+          redactedStatus: checkpointInput.redactedStatus,
+          snapshotRef: workspace?.snapshotRef ?? null,
+        }),
+        runtimeAbortController.signal,
+      );
+      assertRuntimeNotAborted();
+      assertHostedWorkspaceCheckpointAccepted(checkpoint, input.request.userId);
+      return checkpoint;
+    };
     if (input.request.processingMode === "inbox_media_retention") {
       return await runHostedInboxMediaRetentionOnlyCheckpoint({
         assertRuntimeNotAborted,
@@ -1041,6 +1074,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       platform: runnerPlatform,
     };
     const baseRunnerInput: HostedWorkspaceRunnerInput = {
+      checkpointRuntimeRedactedStatus,
       checkpointRequestBuilder,
       expectedUserId: input.request.userId,
       foregroundImportItem: importForegroundMailboxItem,
@@ -3765,7 +3799,7 @@ async function checkpointHostedRuntimeDirtyWorkspace(input: {
       input.runtimeAbortSignal,
     );
   input.assertRuntimeNotAborted();
-  assertIdleShutdownCheckpointAccepted(checkpoint, input.expectedUserId);
+  assertHostedWorkspaceCheckpointAccepted(checkpoint, input.expectedUserId);
   await input.onCheckpointValidated?.(checkpoint);
   await flushAndExportHostedRuntimeIssuesAfterCheckpointBestEffort({
     issueExportPort: input.issueExportPort ?? null,
@@ -3825,7 +3859,7 @@ async function withHostedRuntimeTimeout<T>(
   }
 }
 
-function assertIdleShutdownCheckpointAccepted(
+function assertHostedWorkspaceCheckpointAccepted(
   checkpoint: HostedWorkspaceCheckpointResponse,
   expectedUserId: string,
 ): void {

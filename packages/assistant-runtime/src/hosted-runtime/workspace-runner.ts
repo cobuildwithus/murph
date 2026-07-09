@@ -292,12 +292,23 @@ export interface HostedWorkspaceRunnerDeferredUsageCapture {
   drainForProcessFatal(): Promise<void>;
 }
 
+export interface HostedWorkspaceRunnerRuntimeStatusCheckpointInput {
+  nextWakeAt?: string | null;
+  nextWakeReason?: string | null;
+  reason: Exclude<HostedWorkspaceCheckpointReason, "idle_shutdown">;
+  redactedStatus: HostedRuntimeRedactedJson;
+  workspace: HostedWorkspaceState | null;
+}
+
 export type HostedWorkspaceRunnerMailboxImportItem = (
   item: HostedMailboxResolvedImportItem,
   context?: HostedWorkspaceRunnerMailboxImportContext,
 ) => Promise<HostedMailboxItemImportOutcome>;
 
 export interface HostedWorkspaceRunnerInput {
+  checkpointRuntimeRedactedStatus?: ((
+    input: HostedWorkspaceRunnerRuntimeStatusCheckpointInput,
+  ) => Promise<HostedWorkspaceCheckpointResponse> | HostedWorkspaceCheckpointResponse) | null;
   checkpointRequestBuilder: HostedWorkspaceCheckpointRequestBuilder;
   expectedUserId: string;
   foregroundImportItem?: HostedWorkspaceRunnerMailboxImportItem | null;
@@ -1904,9 +1915,22 @@ function createHostedWorkspaceCanonicalWritePort(input: {
         previousStatus: input.readPreviousRedactedStatus(),
         receipt: writeInput.receipt,
       });
-      input.recordRedactedStatus(
-        hostedCanonicalWriteReceiptLogStatusFields(receiptLogUpdate),
-      );
+      const receiptLogStatus = hostedCanonicalWriteReceiptLogStatusFields(receiptLogUpdate);
+      const checkpointRedactedStatus =
+        mergeHostedRuntimeRedactedStatusValues(
+          input.readPreviousRedactedStatus(),
+          receiptLogStatus,
+        ) ?? receiptLogStatus;
+      input.recordRedactedStatus(receiptLogStatus);
+      if (!input.input.checkpointRuntimeRedactedStatus) {
+        throw new TypeError("Hosted canonical write receipt checkpoint requires runtime status checkpoint support.");
+      }
+      const checkpoint = await input.input.checkpointRuntimeRedactedStatus({
+        reason: "canonical_runtime_commit",
+        redactedStatus: checkpointRedactedStatus,
+        workspace: input.checkpointRequestBuilder.latestWorkspace() ?? input.input.workspace,
+      });
+      input.checkpointRequestBuilder.recordWorkspaceCheckpoint(checkpoint);
       input.checkpointRequestBuilder.markRuntimeStateDirty();
       const snapshotDirtyDomains =
         listAssistantContextSnapshotDirtyDomainsForCanonicalWrite(

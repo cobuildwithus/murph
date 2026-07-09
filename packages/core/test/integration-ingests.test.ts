@@ -323,7 +323,7 @@ test("integration ingest readers load closed-month gzip and zip archives", async
   assert.deepEqual(eventEntries.map((entry) => entry.record.id), ["xfm_ArchivedZip1"]);
 });
 
-test("integration ingest zip archive reader accepts nested stored entries", async () => {
+test("integration ingest zip archive reader accepts exact stored entries", async () => {
   const vaultRoot = await makeTempDirectory("murph-integration-ingest-stored-zip");
   await initializeVault({ vaultRoot, createdAt: "2026-03-01T00:00:00.000Z" });
 
@@ -336,7 +336,6 @@ test("integration ingest zip archive reader accepts nested stored entries", asyn
 
   await writeIntegrationIngestZipArchive(vaultRoot, logicalPath, [archivedRecord], {
     compressionMethod: 0,
-    entryName: `nested/${path.basename(logicalPath)}`,
   });
 
   const entries = await readIntegrationIngestEntries(vaultRoot);
@@ -348,6 +347,27 @@ test("integration ingest zip archive reader accepts nested stored entries", asyn
   const storedZipEntry = await readIntegrationIngestById(vaultRoot, "xfm_ArchivedStoredZip1");
   assert.equal(storedZipEntry?.relativePath, "ledger/integration-ingests/2025/2025-10.jsonl");
   assert.equal(storedZipEntry?.record.id, "xfm_ArchivedStoredZip1");
+});
+
+test("integration ingest zip archive reader rejects path-bearing archive entries", async () => {
+  const vaultRoot = await makeTempDirectory("murph-integration-ingest-path-zip-entry");
+  await initializeVault({ vaultRoot, createdAt: "2026-03-01T00:00:00.000Z" });
+
+  const logicalPath = "ledger/integration-ingests/2025/2025-10.jsonl";
+  const archivedRecord = makeIntegrationIngestRecord({
+    id: "xfm_ArchivedPathZip1",
+    eventId: "evt_ArchivedPathZip1",
+    importedAt: "2025-10-12T09:00:00.000Z",
+  });
+
+  await writeIntegrationIngestZipArchive(vaultRoot, logicalPath, [archivedRecord], {
+    entryName: `../${path.basename(logicalPath)}`,
+  });
+
+  await assert.rejects(
+    readIntegrationIngestEntries(vaultRoot),
+    /must contain exactly one entry named/u,
+  );
 });
 
 test("integration ingest zip archive reader rejects extra archive entries", async () => {
@@ -367,6 +387,37 @@ test("integration ingest zip archive reader rejects extra archive entries", asyn
     createZip([
       { fileName: path.basename(logicalPath), content },
       { fileName: "raw-provider-payload.json", content: "{}\n" },
+    ]),
+  );
+
+  await assert.rejects(
+    readIntegrationIngestEntries(vaultRoot),
+    (error) => {
+      assert.equal(error instanceof VaultError, true);
+      assert.equal((error as VaultError).code, "INTEGRATION_INGEST_ARCHIVE_INVALID");
+      assert.equal((error as VaultError).details.entryCount, 2);
+      return true;
+    },
+  );
+});
+
+test("integration ingest zip archive reader rejects extra archive directory entries", async () => {
+  const vaultRoot = await makeTempDirectory("murph-integration-ingest-extra-zip-directory");
+  await initializeVault({ vaultRoot, createdAt: "2026-03-01T00:00:00.000Z" });
+
+  const logicalPath = "ledger/integration-ingests/2025/2025-10.jsonl";
+  const archivedRecord = makeIntegrationIngestRecord({
+    id: "xfm_ArchivedZipDirectory1",
+    eventId: "evt_ArchivedZipDirectory1",
+    importedAt: "2025-10-12T09:00:00.000Z",
+  });
+  const content = `${JSON.stringify(archivedRecord)}\n`;
+  await fs.mkdir(path.dirname(path.join(vaultRoot, logicalPath)), { recursive: true });
+  await fs.writeFile(
+    path.join(vaultRoot, `${logicalPath}.zip`),
+    createZip([
+      { fileName: path.basename(logicalPath), content },
+      { fileName: "nested/", content: "", compressionMethod: 0 },
     ]),
   );
 
