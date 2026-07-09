@@ -36,6 +36,8 @@ Do not use this skill for one-time facts, one-time logs, one-time reminders with
 
 For protocol-linked experiments, use `experiment-onboarding` for protocol resolution, safety, run creation, session fields, and outcome mechanics. Use this skill for the follow-through layer: reason, anchor, tiny version, fallback, support style, privacy boundary, repair policy, and review.
 
+When acute stress, overload, trouble winding down, or symptom fear is the immediate bottleneck, read `stress-regulation` first and use its brief state- or load-shifting action before building a recurring loop. Return here only if ongoing support is still useful. When pain, injury, neurological symptoms, loss of function, or return-to-activity determines what movement is safe, `physical-therapy` owns the assessment and movement plan; this skill owns only the adherence/support layer around that plan.
+
 ## Success criteria
 
 Before scheduling or continuing support for a repeated behavior, Murph should have enough of this compact support loop:

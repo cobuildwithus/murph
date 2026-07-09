@@ -7,7 +7,7 @@ import { resolveAssistantSkillsRoot } from '../src/assistant-skill-assets.js'
 import { buildAssistantSystemPrompt } from '../src/assistant/system-prompt.js'
 
 describe('assistant PDF skill', () => {
-  it('adds the concise PDF skill route to the system prompt', () => {
+  it('keeps PDF creation discoverable in the compact skill router', () => {
     const prompt = buildAssistantSystemPrompt({
       assistantCliContract: null,
       assistantHostedDeviceConnectAvailable: false,
@@ -27,14 +27,15 @@ describe('assistant PDF skill', () => {
     })
 
     expect(prompt).toContain(
-      'pdf: Use when the user asks for a PDF or when a substantial health-relevant report is best delivered as one.',
+      'Execution/artifacts: computer-use, pdf, music-generation.',
     )
     expect(prompt).toContain(
-      '$MURPH_ASSISTANT_SKILLS_ROOT/pdf/SKILL.md',
+      '$MURPH_ASSISTANT_SKILLS_ROOT/<slug>/SKILL.md',
     )
     expect(prompt).toContain(
-      'Follow the skill and use the installed Typst CLI.',
+      'Computer-use, pdf, and music-generation are execution/output owners and may be secondary to a health-domain skill.',
     )
+    expect(prompt).not.toContain('Follow the skill and use the installed Typst CLI.')
   })
 
   it('ships a bounded Typst authoring and validation workflow', async () => {
