@@ -4,6 +4,9 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 
 import { build, type Metafile } from "esbuild";
+import {
+  MURPH_HEALTH_COMMONS_PACKAGE_ROOT_ENV,
+} from "@murphai/health-commons/runtime";
 
 import {
   RUNNER_BUNDLE_SHARED_EXTERNALS,
@@ -57,7 +60,9 @@ export const RUNNER_ENTRYPOINT_BUNDLE_DIRECTORY_NAME = "dist-bundled";
 // inputs before raising either.
 const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 9_300_000;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 1_319_436;
-const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 6_487_522;
+// 2026-07-08: inlining @murphai/health-commons while keeping generated
+// artifacts under MURPH_HEALTH_COMMONS_PACKAGE_ROOT measured 6,618,001B.
+const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 6_618_001;
 // Noise band above the baseline before the ratchet trips (~2%): absorbs
 // content-hash and minifier jitter without letting real boot-path weight land
 // silently. Keep it tight; it is a tolerance for noise, not feature headroom.
@@ -429,6 +434,12 @@ function assertRunnerEntrypointBundleBoots(input: {
       encoding: "utf8",
       env: {
         ...process.env,
+        [MURPH_HEALTH_COMMONS_PACKAGE_ROOT_ENV]: path.join(
+          input.bundleDir,
+          "node_modules",
+          "@murphai",
+          "health-commons",
+        ),
         RUNNER_ENTRYPOINT_BUNDLE_PROBE_PATH: pathToFileURL(bundledEntryPath).href,
         RUNNER_ENTRYPOINT_BUNDLE_PROBE_LAZY_CHUNKS: JSON.stringify(lazyChunks),
       },
