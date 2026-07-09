@@ -1,8 +1,7 @@
 CREATE TABLE "hosted_group_join_offer" (
   "id" TEXT NOT NULL,
   "group_id" TEXT NOT NULL,
-  "offer_fingerprint" TEXT NOT NULL,
-  "message_lookup_key" TEXT,
+  "message_lookup_key" TEXT NOT NULL,
   "message_id_suffix" TEXT,
   "projection_kinds_json" JSONB NOT NULL,
   "posted_at" TIMESTAMP(3) NOT NULL,
@@ -10,9 +9,6 @@ CREATE TABLE "hosted_group_join_offer" (
 
   CONSTRAINT "hosted_group_join_offer_pkey" PRIMARY KEY ("id")
 );
-
-CREATE UNIQUE INDEX "hosted_group_join_offer_offer_fingerprint_key"
-  ON "hosted_group_join_offer"("offer_fingerprint");
 
 CREATE UNIQUE INDEX "hosted_group_join_offer_message_lookup_key_key"
   ON "hosted_group_join_offer"("message_lookup_key");

@@ -900,6 +900,28 @@ Focused follow-up verification:
 - `pnpm --filter @murphai/hosted-web test:prepared -- apps/web/test/call-circle-connector-call.test.ts apps/web/test/phone-calls-service.test.ts apps/web/test/call-circle-match-store.test.ts apps/web/test/call-circle-notifications.test.ts apps/web/test/call-circle-scheduler.test.ts apps/web/test/hosted-group-join-offer-reaction.test.ts apps/web/test/hosted-onboarding-entitlement.test.ts`
 - `pnpm --filter @murphai/hosted-web typecheck`
 
+## ReviewGPT Follow-Up 32 2026-07-08
+
+Accepted findings from the Phlebas PR-head rerun:
+
+- The existing `20260706130000_hosted_group_join_offer` migration had been
+  rewritten to include the later offer-fingerprint shape. That would cause
+  checksum drift for already-migrated databases or run new code against a
+  table missing `offer_fingerprint`. The original migration is restored and a
+  new forward-only migration adds/backfills `offer_fingerprint`, creates its
+  unique index, and relaxes `message_lookup_key` nullability.
+- Offer-anchored Call Circle setup notifications used the new
+  `:offer:<offerId>` dedupe suffix, but setup reply context still required
+  keys to end exactly with `:<memberId>`. Setup reply resolution now queries
+  by setup prefix and parses both setup key shapes while validating the
+  embedded member id, so multi-group members can reply to an offer-anchored
+  setup DM and still write preferences for the correct group.
+
+Focused follow-up verification:
+
+- `pnpm --filter @murphai/hosted-web test:prepared -- apps/web/test/call-circle-response-service.test.ts apps/web/test/hosted-onboarding-privacy-foundation-migration.test.ts`
+- `pnpm --filter @murphai/hosted-web typecheck`
+
 ## ReviewGPT Follow-Up 4 2026-07-07
 
 Accepted findings from the fourth PR ReviewGPT pass:

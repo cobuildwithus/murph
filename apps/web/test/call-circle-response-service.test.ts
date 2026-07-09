@@ -199,7 +199,6 @@ describe("handleCallCircleRespond", () => {
       select: { dedupeKey: true },
       where: {
         dedupeKey: {
-          endsWith: ":member_123",
           startsWith: "assistant.notification.requested:call-circle:setup:",
         },
         id: { in: ["mailbox_reply", "mailbox_setup"] },
@@ -207,6 +206,46 @@ describe("handleCallCircleRespond", () => {
         userId: "member_123",
       },
     });
+    expect(mocks.writeCallCirclePreferences).toHaveBeenCalledWith({
+      groupId: "hgrp_new",
+      memberId: "member_123",
+      preferences: {
+        excludeMemberIds: [],
+        timeZone: "America/Chicago",
+        windows: [{
+          dayOfWeek: 4,
+          endLocalTime: "12:30",
+          startLocalTime: "12:00",
+        }],
+      },
+      prisma: expect.any(Object),
+    });
+  });
+
+  it("uses offer-anchored setup notification context for multi-group preferences", async () => {
+    const prisma = createResponsePrisma({
+      participantGroups: ["hgrp_old", "hgrp_new"],
+      participantStatus: "enrolled",
+      setupNotificationItems: [
+        { groupId: "hgrp_new", id: "mailbox_offer_setup", offerId: "offer_123" },
+      ],
+    });
+
+    await expect(handleCallCircleRespond({
+      context: { inboundMailboxItemIds: ["mailbox_reply", "mailbox_offer_setup"] },
+      memberId: "member_123",
+      prisma: prisma as never,
+      request: {
+        kind: "preferences",
+        timeZone: "America/Chicago",
+        windows: [{
+          dayOfWeek: 4,
+          endLocalTime: "12:30",
+          startLocalTime: "12:00",
+        }],
+      },
+    })).resolves.toEqual({ status: "ok" });
+
     expect(mocks.writeCallCirclePreferences).toHaveBeenCalledWith({
       groupId: "hgrp_new",
       memberId: "member_123",
@@ -1252,6 +1291,7 @@ function createResponsePrisma(input: {
   setupNotificationItems?: Array<{
     groupId: string;
     id: string;
+    offerId?: string;
   }>;
   setupNotificationOccurredAt?: Date;
 }) {
@@ -1265,7 +1305,11 @@ function createResponsePrisma(input: {
     };
   }) => {
     const requestedIds = new Set(args.where?.id?.in ?? []);
-    const setupNotificationItems = input.setupNotificationItems
+    const setupNotificationItems: Array<{
+      groupId: string;
+      id: string;
+      offerId?: string;
+    }> = input.setupNotificationItems
       ?? (input.setupNotificationGroupIds
         ? input.setupNotificationGroupIds.map((groupId, index) => ({
             groupId,
@@ -1277,8 +1321,10 @@ function createResponsePrisma(input: {
     const setupNotifications = setupNotificationItems
       .filter((item) => requestedIds.has(item.id))
       .map((item) => ({
-        dedupeKey:
+        dedupeKey: [
           `assistant.notification.requested:call-circle:setup:${item.groupId}:member_123`,
+          item.offerId ? `offer:${item.offerId}` : null,
+        ].filter(Boolean).join(":"),
         occurredAt: input.setupNotificationOccurredAt
           ?? new Date("2026-07-06T14:00:00.000Z"),
       }));

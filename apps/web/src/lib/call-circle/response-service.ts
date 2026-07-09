@@ -374,7 +374,6 @@ async function resolveCallCircleSetupGroupIdFromReplyContext(input: {
     select: { dedupeKey: true },
     where: {
       dedupeKey: {
-        endsWith: `:${input.memberId}`,
         startsWith: CALL_CIRCLE_SETUP_NOTIFICATION_DEDUPE_PREFIX,
       },
       id: { in: mailboxItemIds },
@@ -421,13 +420,14 @@ function readCallCircleSetupGroupIdFromDedupeKey(input: {
   if (!input.dedupeKey.startsWith(CALL_CIRCLE_SETUP_NOTIFICATION_DEDUPE_PREFIX)) {
     return null;
   }
-  const suffix = `:${input.memberId}`;
-  if (!input.dedupeKey.endsWith(suffix)) return null;
-  const groupId = input.dedupeKey.slice(
-    CALL_CIRCLE_SETUP_NOTIFICATION_DEDUPE_PREFIX.length,
-    input.dedupeKey.length - suffix.length,
-  );
-  return groupId.trim() || null;
+  const segments = input.dedupeKey
+    .slice(CALL_CIRCLE_SETUP_NOTIFICATION_DEDUPE_PREFIX.length)
+    .split(":");
+  const [groupId, memberId, suffixKind, suffixId] = segments;
+  if (!groupId || memberId !== input.memberId) return null;
+  if (segments.length === 2) return groupId;
+  if (segments.length === 4 && suffixKind === "offer" && suffixId) return groupId;
+  return null;
 }
 
 async function resolveSingleCallCircleParticipantGroupId(input: {
