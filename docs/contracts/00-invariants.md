@@ -97,6 +97,7 @@ rationale, not a live mechanism.
 
 - Any change spanning web, Cloudflare, the runner bundle, or Temporal states its safe deploy order, its behavior under gradual container rollout (warm old-bundle containers), whether `container_rollout=immediate` is required, and its rollback floor.
 - Schema changes are additive-first. Compatibility branches are deleted only after verified production drain, and the removal step is scheduled in the same change that lands the compatibility path.
+- The legacy direct Telegram usage-limit sender retains its period marker after any send exception because the Bot API request may already have started. Configuration and target validation happen before the marker claim. This deployed behavior is a rollback prerequisite for PR 465; do not reintroduce post-dispatch marker release without provider idempotency or equivalent proof that delivery did not start.
 
 ## Executable Invariants
 
