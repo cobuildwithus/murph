@@ -478,6 +478,7 @@ export async function resolveHostedLinqAiUsageLimitNoticeDeliveryClaimTx(input: 
     }
     if (
       canClaimHostedLinqAiUsageLimitLegacyDelivery({
+        allowCrossSourcePreProviderClaim: true,
         delivery: currentCandidate.delivery,
         source: input.source,
       })
@@ -505,6 +506,7 @@ export async function resolveHostedLinqAiUsageLimitNoticeDeliveryClaimTx(input: 
 
   const legacyClaimable = legacyCandidates.find((candidate) =>
     canClaimHostedLinqAiUsageLimitLegacyDelivery({
+      allowCrossSourcePreProviderClaim: false,
       delivery: candidate.delivery,
       source: input.source,
     })
@@ -1617,6 +1619,7 @@ function resolveHostedLinqDeliveryInFlightState(input: {
 }
 
 function canClaimHostedLinqAiUsageLimitLegacyDelivery(input: {
+  allowCrossSourcePreProviderClaim: boolean;
   delivery: {
     acceptedAt: Date | null;
     attemptedAt: Date;
@@ -1631,6 +1634,12 @@ function canClaimHostedLinqAiUsageLimitLegacyDelivery(input: {
   };
   source: string;
 }): boolean {
+  if (
+    input.allowCrossSourcePreProviderClaim
+    && isHostedLinqDeliveryPreProviderClaimableAcrossSources(input.delivery)
+  ) {
+    return true;
+  }
   if (input.delivery.source === HOSTED_AI_USAGE_TELEGRAM_NOTICE_DELIVERY_SOURCE) {
     return true;
   }
@@ -1644,6 +1653,29 @@ function canClaimHostedLinqAiUsageLimitLegacyDelivery(input: {
     return true;
   }
   return isHostedLinqDeliveryPreProvider(input.delivery);
+}
+
+function isHostedLinqDeliveryPreProviderClaimableAcrossSources(input: {
+  acceptedAt: Date | null;
+  deliveredAt: Date | null;
+  failedAt: Date | null;
+  lastReceiptAt: Date | null;
+  messageLookupKey: string | null;
+  skippedAt: Date | null;
+  status: string;
+}): boolean {
+  if (
+    input.acceptedAt !== null
+    || input.deliveredAt !== null
+    || input.lastReceiptAt !== null
+    || input.messageLookupKey !== null
+  ) {
+    return false;
+  }
+
+  return input.status === "attempted"
+    || input.status === "failed"
+    || input.status === "skipped";
 }
 
 function isHostedLinqDeliveryPreProvider(input: {
