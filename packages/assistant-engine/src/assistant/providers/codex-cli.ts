@@ -190,6 +190,7 @@ export async function executeCodexAssistantTurnAttempt(
   const voiceMemoRuntime = createVoiceMemoToolRuntimeFromEnv({
     env: input.env ?? process.env,
     fetchImpl: input.providerFetch ?? fetch,
+    preferredVoiceId: input.assistantPreferredElevenLabsVoiceId ?? null,
     publicFetchImpl: input.publicInternetFetch ?? null,
     voiceMemoDeliveryChannel: input.voiceMemoDeliveryChannel ?? null,
   })

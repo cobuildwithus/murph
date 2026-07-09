@@ -13,6 +13,7 @@ type LinkAccountCallbacks = {
 };
 
 const mocks = vi.hoisted(() => ({
+  openAuthDialog: vi.fn(),
   linkAccountCallbacks: null as LinkAccountCallbacks | null,
   linkTelegram: vi.fn(),
   refreshUser: vi.fn(),
@@ -26,6 +27,13 @@ vi.mock("@privy-io/react-auth", () => ({
   useLinkAccount: mocks.useLinkAccount,
   usePrivy: mocks.usePrivy,
   useUser: mocks.useUser,
+}));
+
+vi.mock("@/src/components/hosted-onboarding/auth-dialog-provider", () => ({
+  useAuth: () => ({
+    authenticated: true,
+    openAuthDialog: mocks.openAuthDialog,
+  }),
 }));
 
 vi.mock("@/src/components/hosted-onboarding/client-api", () => ({
@@ -224,6 +232,37 @@ describe("ConnectTelegram", () => {
 
     expect(container.textContent).toContain("That Telegram account is already linked to a different Murph account.");
     expect(container.textContent).toContain("Contact support");
+  });
+
+  it("opens app auth instead of launching Telegram link when the Privy client user is absent", async () => {
+    const { ConnectTelegram } = await import(
+      "@/src/components/settings/hosted-telegram-settings"
+    );
+    mocks.usePrivy.mockReturnValue({
+      authenticated: false,
+      ready: true,
+    });
+
+    const { cleanup, container } = await renderClientComponent(
+      createElement(ConnectTelegram, {
+        authenticated: true,
+        initialTelegramAccount: null,
+      }),
+    );
+    cleanupRender = cleanup;
+
+    const linkButton = Array.from(container.querySelectorAll("button")).find(
+      (candidate) => candidate.textContent?.includes("Connect Telegram"),
+    );
+    expect(linkButton).toBeTruthy();
+    expect(linkButton?.disabled).toBe(false);
+
+    await act(async () => {
+      linkButton?.dispatchEvent(new Event("click", { bubbles: true }));
+    });
+
+    expect(mocks.openAuthDialog).toHaveBeenCalledTimes(1);
+    expect(mocks.linkTelegram).not.toHaveBeenCalled();
   });
 
   it("uses a sanitized initial Telegram account when Privy user state has not loaded", async () => {
@@ -740,6 +779,37 @@ describe("HostedTelegramCardSettings", () => {
       linkButton?.dispatchEvent(new Event("click", { bubbles: true }));
     });
 
+    expect(mocks.linkTelegram).not.toHaveBeenCalled();
+  });
+
+  it("opens app auth from the card instead of launching Telegram link when the Privy client user is absent", async () => {
+    const { HostedTelegramCardSettings } = await import(
+      "@/src/components/settings/hosted-telegram-card-settings"
+    );
+    mocks.usePrivy.mockReturnValue({
+      authenticated: false,
+      ready: true,
+    });
+
+    const { cleanup, container } = await renderClientComponent(
+      createElement(HostedTelegramCardSettings, {
+        authenticated: true,
+        initialTelegramAccount: null,
+      }),
+    );
+    cleanupRender = cleanup;
+
+    const linkButton = Array.from(container.querySelectorAll("button")).find(
+      (candidate) => candidate.textContent?.includes("Link Telegram"),
+    );
+    expect(linkButton).toBeTruthy();
+    expect(linkButton?.disabled).toBe(false);
+
+    await act(async () => {
+      linkButton?.dispatchEvent(new Event("click", { bubbles: true }));
+    });
+
+    expect(mocks.openAuthDialog).toHaveBeenCalledTimes(1);
     expect(mocks.linkTelegram).not.toHaveBeenCalled();
   });
 

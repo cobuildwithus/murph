@@ -61,6 +61,7 @@ export function createAssistantChannelAdapter(
               candidate,
               dependencies,
               identityId: normalizeOptionalText(input.identityId),
+              replyToMessageId: normalizeOptionalText(input.replyToMessageId),
             })
             return isAssistantChannelActivityHandle(handle) ? handle : null
           },
@@ -89,15 +90,18 @@ export function createAssistantChannelAdapter(
       const delivered = await spec.sendMessage({
         actorId: normalizeOptionalText(input.actorId),
         answeredMailboxItemIds: input.answeredMailboxItemIds ?? [],
+        bindingDelivery: input.bindingDelivery,
         candidate,
         deliverySource: input.deliverySource ?? null,
         dependencies,
+        explicitTarget: normalizeOptionalText(input.explicitTarget),
         idempotencyKey,
         identityId: normalizeOptionalText(input.identityId),
         media,
         message: input.message,
         replyToMessageId: normalizeOptionalText(input.replyToMessageId),
         subject: normalizeOptionalText(input.subject),
+        threadIsDirect: typeof input.threadIsDirect === 'boolean' ? input.threadIsDirect : null,
       })
       const cleanupMessages = readDeliveredCleanupMessages(delivered)
       const providerMessageIds = readDeliveredProviderMessageIds(delivered)

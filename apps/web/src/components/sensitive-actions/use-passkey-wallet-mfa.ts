@@ -17,7 +17,7 @@ import {
   type HostedPrivyEmbeddedEthereumWallet,
 } from "@/src/lib/hosted-onboarding/privy-wallet-mfa";
 
-type SetupStep = "create-passkey" | "create-wallet" | "enroll-mfa";
+type SetupStep = "load-client" | "create-passkey" | "create-wallet" | "enroll-mfa";
 
 export function usePasskeyWalletMfa() {
   const { user, ready } = usePrivy();
@@ -25,9 +25,13 @@ export function usePasskeyWalletMfa() {
   const { createWallet } = useCreateWallet();
   const { initEnrollmentWithPasskey, submitEnrollmentWithPasskey } = useMfaEnrollment();
   const userRef = useRef<User | null>(user);
+  const readyRef = useRef(ready);
   useEffect(() => {
     userRef.current = user;
   }, [user]);
+  useEffect(() => {
+    readyRef.current = ready;
+  }, [ready]);
 
   const [activeStep, setActiveStep] = useState<SetupStep | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -37,8 +41,9 @@ export function usePasskeyWalletMfa() {
   async function ensureConfigured(): Promise<HostedPrivyEmbeddedEthereumWallet> {
     setError(null);
     try {
-      if (!ready || !userRef.current) {
-        throw new Error("Secure approval is still loading. Try again in a moment.");
+      if (!readyRef.current || !userRef.current) {
+        setActiveStep("load-client");
+        await waitForClientReady({ readyRef, userRef });
       }
 
       if (findHostedPrivyPasskeyCredentialIds(userRef.current).length === 0) {
@@ -114,6 +119,8 @@ export function usePasskeyWalletMfa() {
 
 function stepLabel(step: SetupStep): string {
   switch (step) {
+    case "load-client":
+      return "Loading secure approval";
     case "create-passkey":
       return "Creating passkey";
     case "create-wallet":
@@ -121,6 +128,24 @@ function stepLabel(step: SetupStep): string {
     case "enroll-mfa":
       return "Linking your passkey";
   }
+}
+
+async function waitForClientReady(
+  state: {
+    readyRef: { current: boolean };
+    userRef: { current: User | null };
+  },
+  timeoutMs = 10_000,
+  intervalMs = 50,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (state.readyRef.current && state.userRef.current) {
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+  }
+  throw new Error("Secure approval is still loading. Try again in a moment.");
 }
 
 async function waitForUserState(

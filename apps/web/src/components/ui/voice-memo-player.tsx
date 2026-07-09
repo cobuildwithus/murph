@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { PauseIcon, PlayIcon } from "lucide-react";
 
 import { cn } from "@/src/lib/utils";
 
@@ -36,6 +37,9 @@ export function VoiceMemoPlayer({
   trackClassName = "bg-[#5e5530]/25",
   containerClassName = "rounded-full bg-[#f5f0e8] px-3 py-2 ring-1 ring-black/[0.05]",
   bars = DEFAULT_BAR_COUNT,
+  exclusiveGroupId,
+  preload = "metadata",
+  unavailableLabel = "Unavailable",
 }: {
   src: string;
   caption?: string;
@@ -47,16 +51,27 @@ export function VoiceMemoPlayer({
   // Waveform density: scale with the rendered width so wide players do not
   // look sparse and narrow ones do not look granular.
   bars?: number;
+  exclusiveGroupId?: string;
+  preload?: "none" | "metadata" | "auto";
+  unavailableLabel?: string;
 }) {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const probedDurationRef = useRef(false);
   const [playing, setPlaying] = useState(false);
   const [current, setCurrent] = useState(0);
   const [duration, setDuration] = useState(0);
+  const [unavailable, setUnavailable] = useState(false);
 
   useEffect(() => {
     const a = audioRef.current;
     if (!a) return;
+    const onLoadStart = () => {
+      probedDurationRef.current = false;
+      setCurrent(0);
+      setDuration(0);
+      setPlaying(false);
+      setUnavailable(false);
+    };
     const onTime = () => {
       setCurrent(a.currentTime);
       // Some encodes only report a usable duration after playback starts.
@@ -84,23 +99,45 @@ export function VoiceMemoPlayer({
       setPlaying(false);
       setCurrent(0);
     };
+    const onPlay = () => {
+      pauseOtherVoiceMemos(exclusiveGroupId, a);
+      setUnavailable(false);
+      setPlaying(true);
+    };
+    const onPause = () => {
+      setPlaying(false);
+    };
+    const onError = () => {
+      setUnavailable(true);
+      setPlaying(false);
+    };
+    a.addEventListener("loadstart", onLoadStart);
+    a.addEventListener("emptied", onLoadStart);
     a.addEventListener("timeupdate", onTime);
     a.addEventListener("loadedmetadata", onDurationKnown);
     a.addEventListener("durationchange", onDurationKnown);
     a.addEventListener("canplaythrough", onDurationKnown);
     a.addEventListener("ended", onEnd);
+    a.addEventListener("play", onPlay);
+    a.addEventListener("pause", onPause);
+    a.addEventListener("error", onError);
     return () => {
+      a.removeEventListener("loadstart", onLoadStart);
+      a.removeEventListener("emptied", onLoadStart);
       a.removeEventListener("timeupdate", onTime);
       a.removeEventListener("loadedmetadata", onDurationKnown);
       a.removeEventListener("durationchange", onDurationKnown);
       a.removeEventListener("canplaythrough", onDurationKnown);
       a.removeEventListener("ended", onEnd);
+      a.removeEventListener("play", onPlay);
+      a.removeEventListener("pause", onPause);
+      a.removeEventListener("error", onError);
     };
-  }, []);
+  }, [exclusiveGroupId, src]);
 
   const toggle = () => {
     const a = audioRef.current;
-    if (!a) return;
+    if (!a || unavailable) return;
     if (playing) {
       a.pause();
       setPlaying(false);
@@ -121,28 +158,17 @@ export function VoiceMemoPlayer({
         <button
           type="button"
           onClick={toggle}
+          disabled={unavailable}
           aria-label={playing ? "Pause voice memo" : "Play voice memo"}
           className={cn(
-            "flex size-9 shrink-0 items-center justify-center rounded-full text-white transition-transform active:scale-[0.96]",
+            "flex size-9 shrink-0 items-center justify-center rounded-full text-white transition-transform active:scale-[0.96] disabled:cursor-not-allowed disabled:opacity-55",
             accentClassName,
           )}
         >
           {playing ? (
-            <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor" aria-hidden="true">
-              <rect x="2.5" y="2" width="2.5" height="8" rx="0.6" />
-              <rect x="7" y="2" width="2.5" height="8" rx="0.6" />
-            </svg>
+            <PauseIcon className="size-3.5" strokeWidth={3} aria-hidden="true" />
           ) : (
-            <svg
-              width="12"
-              height="12"
-              viewBox="0 0 12 12"
-              fill="currentColor"
-              className="translate-x-[1px]"
-              aria-hidden="true"
-            >
-              <path d="M2.5 1.6 L10 6 L2.5 10.4 Z" />
-            </svg>
+            <PlayIcon className="size-3.5 translate-x-[1px]" fill="currentColor" strokeWidth={0} aria-hidden="true" />
           )}
         </button>
 
@@ -163,7 +189,7 @@ export function VoiceMemoPlayer({
         </div>
 
         <span className="shrink-0 font-mono text-[11px] tabular-nums text-[#736a58]">
-          {formatTime(displayTime)}
+          {unavailable ? unavailableLabel : formatTime(displayTime)}
         </span>
       </div>
 
@@ -173,9 +199,27 @@ export function VoiceMemoPlayer({
         </p>
       ) : null}
 
-      <audio ref={audioRef} src={src} preload="auto" className="hidden" />
+      <audio
+        ref={audioRef}
+        src={src}
+        preload={preload}
+        className="hidden"
+        data-voice-memo-group={exclusiveGroupId}
+      />
     </div>
   );
+}
+
+function pauseOtherVoiceMemos(groupId: string | undefined, currentAudio: HTMLAudioElement): void {
+  if (!groupId || typeof document === "undefined") {
+    return;
+  }
+
+  document.querySelectorAll<HTMLAudioElement>("audio[data-voice-memo-group]").forEach((audio) => {
+    if (audio !== currentAudio && audio.dataset.voiceMemoGroup === groupId) {
+      audio.pause();
+    }
+  });
 }
 
 function formatTime(seconds: number): string {

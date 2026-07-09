@@ -250,10 +250,10 @@ function deriveHostedVaultShareRecordRevision(input: {
 }): string {
   const canonicalRecord = JSON.stringify({
     data: input.record.data,
-    // Current-state kinds hash the content alone: occurredAt is grantor-runtime-controlled
-    // metadata with no age bound for these kinds, so including it would let drifted
-    // timestamps mint unbounded dedupe keys for the same unchanged fact. Time-series kinds
-    // keep occurredAt in the revision (it is parser-pinned to the record identity there).
+    // Current-state kinds exclude occurredAt: it is grantor-runtime metadata
+    // with no age bound for these kinds. sourceRevision remains part of the
+    // identity so a real value change back to a previous payload still replaces
+    // the destination; exact retries must keep sourceRevision stable upstream.
     occurredAt: isHostedVaultShareCurrentStateProjectionKind(input.projectionKind)
       ? null
       : input.record.occurredAt,

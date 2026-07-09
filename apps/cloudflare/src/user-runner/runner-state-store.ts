@@ -34,6 +34,25 @@ export interface RunnerWriteFenceToken {
   workspaceVersion: string | null;
 }
 
+export function runnerWriteFenceTokensMatch(
+  current: RunnerWriteFenceToken | null,
+  expected: RunnerWriteFenceToken,
+): boolean {
+  return runnerWriteFenceIdentityMatches(current, expected)
+    && current?.workspaceVersion === expected.workspaceVersion;
+}
+
+export function runnerWriteFenceIdentityMatches(
+  current: RunnerWriteFenceToken | null,
+  expected: RunnerWriteFenceToken,
+): boolean {
+  return current !== null
+    && current.attemptId === expected.attemptId
+    && current.generation === expected.generation
+    && current.kind === expected.kind
+    && current.userId === expected.userId;
+}
+
 export type RunnerInvocationLease = RunnerWriteFenceToken;
 
 export class RunnerWriteFenceAlreadyActiveError extends Error {

@@ -81,21 +81,24 @@ Last verified: 2026-07-06
   expand/backfill/switch/final-cleanup sequencing; only final cleanup belongs in
   `apps/web/prisma/contract-migrations`. Destructive hosted web contract cleanup
   is applied by `.github/workflows/hosted-web-contract-migrations.yml` after a
-  successful Vercel-originated production deployment status; that workflow
-  checks out the deployed SHA, verifies it is reachable from `origin/main`,
-  waits `HOSTED_WEB_CONTRACT_MIGRATION_DRAIN_SECONDS` seconds for prior
-  production function executions to drain, rechecks that the configured Vercel
-  production alias still points at that SHA before exposing the database secret,
-  does not use GitHub Actions concurrency for this lane so stale events cannot
-  replace valid pending runs, and requires GitHub Actions values for
+  successful Vercel-originated completed production deployment status; that
+  workflow checks out the deployed SHA, verifies it is reachable from
+  `origin/main`, waits `HOSTED_WEB_CONTRACT_MIGRATION_DRAIN_SECONDS` seconds for
+  prior production function executions to drain, rechecks that the configured
+  Vercel production alias still points at that SHA before exposing the database
+  secret, supports manual dispatch with `deployed_sha` for the same current-alias
+  proof path, does not use GitHub Actions concurrency for this lane so stale
+  events cannot replace valid pending runs, and requires GitHub Actions values for
   `HOSTED_WEB_VERCEL_TOKEN`,
   `HOSTED_WEB_VERCEL_PROJECT_ID`, `HOSTED_WEB_PRODUCTION_BASE_URL`, and
-  `HOSTED_WEB_DIRECT_DATABASE_URL`. After contract cleanup applies, the rollback
-  floor is the first deployed Vercel commit that no longer reads or writes the
-  dropped schema shape; rollback below that floor requires DB restore/re-expand
-  or a forward deploy. Cloudflare `container_rollout=immediate` is not
-  applicable to this Vercel-only lane; the bounded drain wait and final alias
-  check own the old-function window.
+  `HOSTED_WEB_DIRECT_DATABASE_URL`. The shared production migration URL resolver
+  removes Prisma-style `sslcert=system`, `sslkey=system`, and
+  `sslrootcert=system` markers before handing Postgres URLs to raw `pg` clients.
+  After contract cleanup applies, the rollback floor is the first deployed Vercel
+  commit that no longer reads or writes the dropped schema shape; rollback below
+  that floor requires DB restore/re-expand or a forward deploy. Cloudflare
+  `container_rollout=immediate` is not applicable to this Vercel-only lane; the
+  bounded drain wait and final alias check own the old-function window.
 
 ## Current Gaps
 
@@ -118,7 +121,7 @@ Last verified: 2026-07-06
   the newly affected path. Routine repo checks still do not validate a live
   Render deploy or a production Temporal Cloud namespace.
 - Hosted-local E2E scenarios launch the real Codex app-server binary by default, pointed at a local deterministic scripted Responses API stub through the test-only `HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL` override with a fake provider key, so default lanes exercise the production app-server protocol (including dynamic-tool `item/tool/call` relay and sandboxed shell execution of scripted vault-cli calls) with zero provider spend. No automated check calls a paid model provider by default. The opt-in `codex-gateway-prefix` hosted-local E2E scenario runs the real Codex app-server against a local Responses API recorder for cache-prefix diagnostics, fingerprints the first cacheable provider prompt prefix across repeated Linq wakes, and fails if those fingerprints diverge; it is excluded from the default `all` scenario set because it can intentionally fail while provider behavior is under investigation. Codex App Server file/PDF inputs are not advertised as natively supported unless the app-server protocol grows a supported file input item.
-- Hosted Codex config must keep native Codex skill instructions disabled (`[skills] include_instructions = false` and `[skills.bundled] enabled = false`) unless the hosted prompt-cache invariant is deliberately redesigned. Re-enabling those instructions can embed per-wake runner-local skill paths in provider prompts, making otherwise resumed hosted turns diverge before the cacheable prefix floor. Murph-managed assistant skill assets are different: `packages/assistant-engine/skills/**` ships with the package, the stable prompt references them symbolically through `$MURPH_ASSISTANT_SKILLS_ROOT/<slug>/SKILL.md`, and hosted/local shell env stamps `MURPH_ASSISTANT_SKILLS_ROOT` to the canonical package-owned root for explicit reads. Keep `packages/assistant-engine/test/assistant-skill-assets.test.ts` and `packages/assistant-runtime/test/hosted-runtime-codex-config.test.ts` as the regression guards for this split.
+- Hosted Codex config must keep native Codex skill instructions disabled (`[skills] include_instructions = false` and `[skills.bundled] enabled = false`) unless the hosted prompt-cache invariant is deliberately redesigned. Re-enabling those instructions can embed per-wake runner-local skill paths in provider prompts, making otherwise resumed hosted turns diverge before the cacheable prefix floor. Murph-managed assistant skill assets are different: `packages/assistant-engine/skills/**` ships with the package, the stable prompt references them symbolically through `$MURPH_ASSISTANT_SKILLS_ROOT/<slug>/SKILL.md`, and hosted/local shell env stamps `MURPH_ASSISTANT_SKILLS_ROOT` to the canonical package-owned root for explicit reads. Health Commons generated catalogs are likewise package-owned runner assets: the runner image pins `MURPH_HEALTH_COMMONS_PACKAGE_ROOT` to the installed `@murphai/health-commons` package so bundled shell commands resolve `generated/**` outside the esbuild chunk directory. Keep `packages/assistant-engine/test/assistant-skill-assets.test.ts`, `packages/assistant-runtime/test/hosted-runtime-codex-config.test.ts`, and the Cloudflare runner-bundle probes as the regression guards for this split.
 - No automated check hits a live Linq endpoint; Linq webhook delivery and outbound reply behavior are currently verified through mocked CLI, inboxd, and hosted `apps/web` tests only.
 - No automated check hits a live AgentMail endpoint; email provisioning, polling, and in-thread reply behavior are currently verified through mocked CLI and inboxd tests only.
 - No automated check hits a live WHOOP or other wearable OAuth provider; device-syncd auth/webhook behavior is currently verified through local service tests, route tests, stubbed control-plane callers, and the hosted-local device-connect smoke that creates a signed WHOOP connect link against synthetic provider config.

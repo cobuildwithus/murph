@@ -11,6 +11,7 @@ import {
   assistantOnboardingCompletionReasonValues,
   assistantOnboardingResultSchema,
   assistantOnboardingResumeContextResultSchema,
+  assistantSessionListResultSchema,
 } from '@murphai/operator-config/assistant-cli-contracts'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import type { InboxServices } from '@murphai/inbox-services'
@@ -1055,7 +1056,7 @@ test('assistant status and session commands reject uninitialized vault roots bef
     () =>
       readCommand(assistant.commands, 'status').run({
         options: {
-          limit: 5,
+          limit: 3,
           vault: '/tmp/not-vault',
         },
       }),
@@ -1316,16 +1317,15 @@ test('session commands return redacted state paths and session payloads', async 
 
   commandMocks.listAssistantSessions.mockResolvedValueOnce([TEST_SESSION])
   commandMocks.getAssistantSession.mockResolvedValueOnce(TEST_SESSION)
-  commandMocks.redactAssistantSessionsForDisplay.mockReturnValueOnce([
-    {
+  commandMocks.redactAssistantSessionForDisplay
+    .mockReturnValueOnce({
       ...TEST_SESSION,
       alias: 'redacted-alias',
-    },
-  ])
-  commandMocks.redactAssistantSessionForDisplay.mockReturnValueOnce({
-    ...TEST_SESSION,
-    alias: 'redacted-single',
-  })
+    })
+    .mockReturnValueOnce({
+      ...TEST_SESSION,
+      alias: 'redacted-single',
+    })
 
   const listResult = await readCommand(session.commands, 'list').run({
     options: {
@@ -1342,15 +1342,40 @@ test('session commands return redacted state paths and session payloads', async 
   })
 
   assert.deepEqual(listResult, {
+    filters: {
+      limit: 5,
+    },
+    count: 1,
     sessions: [
       {
-        ...TEST_SESSION,
+        schema: TEST_SESSION.schema,
+        conversationId: TEST_SESSION.conversationId,
+        sessionId: TEST_SESSION.sessionId,
         alias: 'redacted-alias',
+        binding: TEST_SESSION.binding,
+        createdAt: TEST_SESSION.createdAt,
+        updatedAt: TEST_SESSION.updatedAt,
+        lastTurnAt: TEST_SESSION.lastTurnAt,
+        turnCount: TEST_SESSION.turnCount,
+        provider: TEST_SESSION.provider,
+        model: null,
+        modelProvider: null,
+        reasoningEffort: null,
+        sandbox: null,
+        approvalPolicy: null,
+        profile: null,
+        oss: false,
+        executionDriver: 'codex-app-server',
+        resumeKind: 'codex-thread',
+        resumeThreadId: null,
       },
     ],
     stateRoot: 'redacted:/tmp/vault/.runtime/operations/assistant',
     vault: 'redacted:/tmp/vault',
   })
+  assert.deepEqual(commandMocks.listAssistantSessions.mock.calls, [
+    ['/tmp/vault', { limit: 5 }],
+  ])
   assert.deepEqual(showResult, {
     session: {
       ...TEST_SESSION,
@@ -1359,4 +1384,28 @@ test('session commands return redacted state paths and session payloads', async 
     stateRoot: 'redacted:/tmp/vault/.runtime/operations/assistant',
     vault: 'redacted:/tmp/vault',
   })
+})
+
+test('session list requests a bounded source-of-truth page', async () => {
+  const commands = createAssistantCli()
+  const assistant = readCommandGroup(commands, 'assistant')
+  const session = readCommandGroup(assistant.commands, 'session')
+
+  commandMocks.listAssistantSessions.mockResolvedValueOnce([TEST_SESSION])
+
+  const listResult = assistantSessionListResultSchema.parse(
+    await readCommand(session.commands, 'list').run({
+      options: {
+        vault: '/tmp/vault',
+        limit: 1,
+      },
+    }),
+  )
+
+  assert.equal(listResult.count, 1)
+  assert.equal(listResult.filters.limit, 1)
+  assert.equal(listResult.sessions[0]?.sessionId, TEST_SESSION.sessionId)
+  assert.deepEqual(commandMocks.listAssistantSessions.mock.calls, [
+    ['/tmp/vault', { limit: 1 }],
+  ])
 })

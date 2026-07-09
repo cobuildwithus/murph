@@ -2,6 +2,7 @@
 
 import { useRouter } from "next/navigation";
 
+import { useAuth } from "@/src/components/hosted-onboarding/auth-dialog-provider";
 import { HostedPrivyProvider } from "@/src/components/hosted-onboarding/privy-provider";
 import {
   Dialog,
@@ -30,6 +31,7 @@ export function HostedSettingsIdentityLinkDialog({
   onOpenChange: (open: boolean) => void;
 }) {
   const router = useRouter();
+  const { openAuthDialog } = useAuth();
   const appId = process.env.NEXT_PUBLIC_PRIVY_APP_ID?.trim();
   const clientId = process.env.NEXT_PUBLIC_PRIVY_CLIENT_ID?.trim() || null;
 
@@ -43,6 +45,10 @@ export function HostedSettingsIdentityLinkDialog({
   const closeAndRefresh = () => {
     onOpenChange(false);
     router.refresh();
+  };
+  const promptClientAuth = () => {
+    onOpenChange(false);
+    openAuthDialog();
   };
 
   // The server told us the Privy user has no email linked, which means the
@@ -105,6 +111,7 @@ export function HostedSettingsIdentityLinkDialog({
                 changeFlow={hasExisting}
                 initialEmail={toInitialEmail(account.email)}
                 murphEmailAddress={account.email.murphEmailAddress}
+                onClientAuthRequired={promptClientAuth}
                 onSynced={closeAndRefresh}
               />
             ) : null}

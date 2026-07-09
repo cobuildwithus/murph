@@ -709,7 +709,7 @@ export async function readHostedMailboxPendingSystemItemsNeedAiUsageGate(input: 
   return row !== null;
 }
 
-export async function readHostedMailboxFirstPendingConversationItem(input: {
+export async function readHostedMailboxLatestPendingConversationItem(input: {
   afterSeq: bigint | number | string;
   prisma?: HostedMailboxStoreClient;
   userId: string;
@@ -722,9 +722,10 @@ export async function readHostedMailboxFirstPendingConversationItem(input: {
   );
   const row = await prisma.hostedMailboxItem.findFirst({
     orderBy: {
-      laneSeq: "asc",
+      laneSeq: "desc",
     },
     where: {
+      consumedAt: null,
       kind: "conversation.message",
       ...buildHostedMailboxLiveItemWhere(new Date()),
       lane: "conversation",

@@ -16,6 +16,7 @@ import {
   MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID,
   MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID,
   MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID,
+  MURPH_WEEKLY_IMPROVEMENT_COACH_AUTOMATION_ID,
   MURPH_WEEKLY_HEALTH_RESEARCH_SCOUT_AUTOMATION_ID,
   MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID,
   applyMurphManagedAutomations,
@@ -73,7 +74,7 @@ describe('applyMurphManagedAutomations core integration', () => {
       now: new Date('2026-06-09T12:00:00.000Z'),
       vaultRoot,
     })).resolves.toEqual({
-      created: 4,
+      created: 5,
       skipped: 0,
       updated: 0,
     })
@@ -90,13 +91,19 @@ describe('applyMurphManagedAutomations core integration', () => {
       status: 'active',
       title: 'Weekly health digest',
     })
-    expect(record?.instructions).toContain('A digest with no substance is worse than no message at all')
+    expect(record?.tags).toContain('murph-managed:weekly-health-digest')
+    expect(record?.tags).not.toContain(ASSISTANT_REQUIRE_SEND_AUTOMATION_TAG)
+    expect(record?.instructions).toContain('still remember ten seconds after reading')
     expect(record?.instructions).toContain('vault-cli device account list')
     expect(record?.instructions).toContain('vault-cli wearables sources list')
     expect(record?.instructions).toContain('Wearable connected but not delivering')
     expect(record?.instructions).toContain('vault-cli device connect <provider>')
-    expect(record?.instructions).toContain('No substance and no live wearable')
-    expect(record?.instructions).toContain('Suppress the scheduled message')
+    expect(record?.instructions).toContain('no connected device accounts, no live wearable, no recent manual logs')
+    expect(record?.instructions).toContain('what was probably noise')
+    expect(record?.instructions).toContain('Never restate single-day metric values')
+    expect(record?.instructions).toContain(
+      '{"kind":"skip","privateSummary":"No weekly digest cleared the memorability bar."}',
+    )
 
     const insightRecord = await showAutomation({
       automationId: MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID,
@@ -177,6 +184,35 @@ describe('applyMurphManagedAutomations core integration', () => {
     expect(insightRecord?.instructions).toContain('missing data, messy tags')
     expect(insightRecord?.instructions).toContain('Murph cannot currently see X')
 
+    const improvementCoachRecord = await showAutomation({
+      automationId: MURPH_WEEKLY_IMPROVEMENT_COACH_AUTOMATION_ID,
+      vaultRoot,
+    })
+
+    expect(improvementCoachRecord).toMatchObject({
+      automationId: MURPH_WEEKLY_IMPROVEMENT_COACH_AUTOMATION_ID,
+      route: defaultRoute,
+      slug: 'weekly-improvement-coach',
+      status: 'active',
+      title: 'Weekly improvement coach',
+    })
+    expect(improvementCoachRecord?.assistantTargetOverride).toEqual({
+      reasoningEffort: 'high',
+    })
+    expectCronSchedule(improvementCoachRecord?.schedule)
+    expect(improvementCoachRecord?.tags).toContain('murph-managed:weekly-improvement-coach')
+    expect(improvementCoachRecord?.tags).not.toContain(ASSISTANT_REQUIRE_SEND_AUTOMATION_TAG)
+    expect(improvementCoachRecord?.instructions).toContain('knowledge show improvement-opportunities')
+    expect(improvementCoachRecord?.instructions).toContain(
+      'knowledge append-section improvement-opportunities YYYY-MM-DD',
+    )
+    expect(improvementCoachRecord?.instructions).toContain(
+      '{"kind":"skip","privateSummary":"No improvement opportunity cleared the evidence bar."}',
+    )
+    expect(improvementCoachRecord?.instructions).toContain(
+      'Never infer absence of a behavior from absence of data',
+    )
+
     const researchScoutRecord = await showAutomation({
       automationId: MURPH_WEEKLY_HEALTH_RESEARCH_SCOUT_AUTOMATION_ID,
       vaultRoot,
@@ -204,13 +240,24 @@ describe('applyMurphManagedAutomations core integration', () => {
     expect(researchScoutRecord?.instructions).toContain('Do not send raw lab values')
     expect(researchScoutRecord?.instructions).toContain('lowercase non-identifying category tags')
     expect(researchScoutRecord?.instructions).toContain('vault-cli research scout-batch-payload-schema --format json')
+    expect(researchScoutRecord?.instructions).toContain('If none exists, suppress the scheduled message without calling `vault-cli research scout-batch`')
     expect(researchScoutRecord?.instructions).toContain('do not use a generic `tags` field')
+    expect(researchScoutRecord?.instructions).toContain('late meals and glucose')
+    expect(researchScoutRecord?.instructions).toContain('zone 2 training and resting heart rate')
+    expect(researchScoutRecord?.instructions).toContain('device and measurement meta-commentary')
+    expect(researchScoutRecord?.instructions).toContain('a trend in their own wearable data')
+    expect(researchScoutRecord?.instructions).toContain('ignore a metric their own data shows is noisy for them')
+    expect(researchScoutRecord?.instructions).not.toContain('wearable hrv reliability')
+    expect(researchScoutRecord?.instructions).not.toContain('wearable tracking')
     expect(researchScoutRecord?.instructions).toContain('YYYY-MM-DD dates or full ISO timestamps are accepted')
     expect(researchScoutRecord?.instructions).toContain('Suppress the scheduled message')
     expect(researchScoutRecord?.instructions).toContain('The unit of value is the insight, not the paper')
     expect(researchScoutRecord?.instructions).toContain('The scout-batch call is the retrieval budget')
     expect(researchScoutRecord?.instructions).toContain('Recent conversation and automation/regimen changes are veto context')
     expect(researchScoutRecord?.instructions).toContain('incremental value beyond known basics')
+    expect(researchScoutRecord?.instructions).toContain('still remember the point ten seconds after reading')
+    expect(researchScoutRecord?.instructions).toContain('Hard provenance gate: if the note could have been written without this run\'s retrieved sources')
+    expect(researchScoutRecord?.instructions).toContain('Skipping is the expected outcome')
     expect(researchScoutRecord?.instructions).toContain('Do not reuse the provider candidate\'s `actionOrQuestion` as advice')
 
     const productUpdatesRecord = await showAutomation({
@@ -294,7 +341,7 @@ describe('applyMurphManagedAutomations core integration', () => {
       },
       vaultRoot,
     })).resolves.toEqual({
-      created: 5,
+      created: 6,
       skipped: 0,
       updated: 0,
     })
@@ -359,7 +406,7 @@ describe('applyMurphManagedAutomations core integration', () => {
       routeValidationProfile: 'hosted',
       vaultRoot,
     })).resolves.toEqual({
-      created: 4,
+      created: 5,
       skipped: 0,
       updated: 0,
     })
@@ -399,7 +446,7 @@ describe('applyMurphManagedAutomations core integration', () => {
       now: new Date('2026-06-09T12:00:00.000Z'),
       vaultRoot,
     })).resolves.toEqual({
-      created: 4,
+      created: 5,
       skipped: 0,
       updated: 0,
     })
@@ -436,7 +483,7 @@ describe('applyMurphManagedAutomations core integration', () => {
       vaultRoot,
     })).resolves.toEqual({
       created: 0,
-      skipped: 4,
+      skipped: 5,
       updated: 0,
     })
 
@@ -468,7 +515,7 @@ describe('applyMurphManagedAutomations core integration', () => {
       vaultRoot,
     })).resolves.toEqual({
       created: 0,
-      skipped: 4,
+      skipped: 5,
       updated: 0,
     })
   })
@@ -481,7 +528,7 @@ describe('applyMurphManagedAutomations core integration', () => {
       now: new Date('2026-06-23T12:00:00.000Z'),
       vaultRoot,
     })).resolves.toEqual({
-      created: 4,
+      created: 5,
       skipped: 0,
       updated: 0,
     })
@@ -530,7 +577,7 @@ describe('applyMurphManagedAutomations core integration', () => {
       now: new Date('2026-06-23T13:00:00.000Z'),
       vaultRoot,
     })).resolves.toEqual({
-      created: 4,
+      created: 5,
       skipped: 0,
       updated: 1,
     })
@@ -581,7 +628,7 @@ describe('applyMurphManagedAutomations core integration', () => {
       now: new Date('2026-06-23T13:00:00.000Z'),
       vaultRoot,
     })).resolves.toEqual({
-      created: 4,
+      created: 5,
       skipped: 0,
       updated: 1,
     })
@@ -636,7 +683,7 @@ describe('applyMurphManagedAutomations core integration', () => {
       now: new Date('2026-06-09T13:00:00.000Z'),
       vaultRoot,
     })).resolves.toEqual({
-      created: 3,
+      created: 4,
       skipped: 0,
       updated: 1,
     })
@@ -699,7 +746,7 @@ describe('applyMurphManagedAutomations core integration', () => {
       now: new Date('2026-06-09T13:00:00.000Z'),
       vaultRoot,
     })).resolves.toEqual({
-      created: 3,
+      created: 4,
       skipped: 0,
       updated: 1,
     })
@@ -766,6 +813,23 @@ describe('applyMurphManagedAutomations core integration', () => {
       title: 'My weekly research scout',
       vaultRoot,
     })
+    const userImprovementCoachAutomation = await upsertAutomation({
+      automationId: 'automation_01JNW7YJ7MNE7M9Q2QWQK4Z3FG',
+      continuityPolicy: 'preserve',
+      instructions: 'Keep this user-owned improvement coach prompt.',
+      now: new Date('2026-06-09T12:00:00.000Z'),
+      route: defaultRoute,
+      schedule: {
+        kind: 'cron',
+        expression: '0 17 * * 2',
+      },
+      slug: 'weekly-improvement-coach',
+      status: 'active',
+      summary: 'User-owned improvement coach automation.',
+      tags: ['user'],
+      title: 'My improvement coach',
+      vaultRoot,
+    })
     const userProductUpdatesAutomation = await upsertAutomation({
       automationId: 'automation_01JNW7YJ7MNE7M9Q2QWQK4Z3FB',
       continuityPolicy: 'preserve',
@@ -790,7 +854,7 @@ describe('applyMurphManagedAutomations core integration', () => {
       vaultRoot,
     })).resolves.toEqual({
       created: 0,
-      skipped: 4,
+      skipped: 5,
       updated: 0,
     })
 
@@ -804,6 +868,10 @@ describe('applyMurphManagedAutomations core integration', () => {
     })).resolves.toBeNull()
     await expect(showAutomation({
       automationId: MURPH_WEEKLY_HEALTH_RESEARCH_SCOUT_AUTOMATION_ID,
+      vaultRoot,
+    })).resolves.toBeNull()
+    await expect(showAutomation({
+      automationId: MURPH_WEEKLY_IMPROVEMENT_COACH_AUTOMATION_ID,
       vaultRoot,
     })).resolves.toBeNull()
     await expect(showAutomation({
@@ -839,6 +907,16 @@ describe('applyMurphManagedAutomations core integration', () => {
       slug: 'weekly-health-research-scout',
       tags: ['user'],
       title: 'My weekly research scout',
+    })
+    await expect(showAutomation({
+      automationId: userImprovementCoachAutomation.record.automationId,
+      vaultRoot,
+    })).resolves.toMatchObject({
+      automationId: userImprovementCoachAutomation.record.automationId,
+      instructions: 'Keep this user-owned improvement coach prompt.',
+      slug: 'weekly-improvement-coach',
+      tags: ['user'],
+      title: 'My improvement coach',
     })
     await expect(showAutomation({
       automationId: userProductUpdatesAutomation.record.automationId,

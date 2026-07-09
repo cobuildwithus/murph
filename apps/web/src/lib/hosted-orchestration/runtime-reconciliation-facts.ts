@@ -28,7 +28,7 @@ import {
 import {
   decodeHostedMailboxStoredPayload,
   readHostedMailboxConsumedSeqByLane,
-  readHostedMailboxFirstPendingConversationItem,
+  readHostedMailboxLatestPendingConversationItem,
   readHostedMailboxPendingSystemItemsNeedAiUsageGate,
   readHostedMailboxMaxSeqByLane,
   readHostedMailboxPayload,
@@ -39,6 +39,7 @@ import {
 } from "../hosted-execution/usage-allowance";
 import {
   sendClaimedHostedAiUsageLimitNoticeToLinqChat,
+  sendHostedAiUsageNoticeToLinqChat,
 } from "../hosted-execution/usage-limit-notice";
 import { readActiveHostedMemberAccess } from "../hosted-onboarding/member-access";
 import {
@@ -225,7 +226,7 @@ export async function readHostedRuntimeReconciliationFacts(
         mailboxLag,
         reason: "ai_usage_denied",
         retryAt: resolveHostedRuntimeAiBlockedRetryAt({
-          aiRetryAt: null,
+          aiRetryAt: gate.decision.retryAfter.toISOString(),
           now,
           workspace: projectedWorkspace,
         }),
@@ -375,7 +376,6 @@ async function sendHostedRuntimeAiUsageLimitNoticeForPendingConversation(input: 
 }): Promise<void> {
   const decision = input.gate.decision;
   if (
-    decision.reason !== "ai_usage_limit_exceeded" ||
     !decision.userNotice ||
     !hasHostedFreshConversationMailboxLag({
       consumedSeqByLane: input.consumedSeqByLane,
@@ -385,27 +385,21 @@ async function sendHostedRuntimeAiUsageLimitNoticeForPendingConversation(input: 
     return;
   }
 
-  const pendingItem = await readHostedMailboxFirstPendingConversationItem({
-    afterSeq: readHostedConversationFreshWorkFloor({
-      consumedSeqByLane: input.consumedSeqByLane,
-      mailboxLag: input.mailboxLag,
-    }).toString(),
+  const wake = await readHostedRuntimePendingUsageNoticeWake({
+    consumedSeqByLane: input.consumedSeqByLane,
+    decision,
+    mailboxLag: input.mailboxLag,
     prisma: input.prisma,
     userId: input.userId,
-  });
-  if (!pendingItem) {
-    return;
-  }
-
-  const wake = await readHostedRuntimePendingConversationWake({
-    item: pendingItem,
-    prisma: input.prisma,
   });
   if (!wake) {
     return;
   }
 
   if (isHostedTelegramConversationMessageWake(wake)) {
+    if (decision.reason !== "ai_usage_limit_exceeded") {
+      return;
+    }
     const noticeDelivery = prepareHostedRuntimeTelegramUsageLimitNotice({
       target: wake.message.telegramMessage.threadId,
     });
@@ -446,6 +440,21 @@ async function sendHostedRuntimeAiUsageLimitNoticeForPendingConversation(input: 
     return;
   }
   if (decision.userNotice.code === "trial_conversion_pending") {
+    await sendHostedAiUsageNoticeToLinqChat({
+      chatId: wake.message.linqMessage.chatId,
+      claimToken: null,
+      memberId: input.userId,
+      message: decision.userNotice.message,
+      noticeCode: decision.userNotice.code,
+      occurredAt: wake.occurredAt,
+      prisma: input.prisma,
+      replyToMessageId: wake.message.linqMessage.messageId,
+      routeAuthority: wake.message.routeAuthority ?? null,
+      sourceEventId: wake.eventId,
+    });
+    return;
+  }
+  if (decision.reason !== "ai_usage_limit_exceeded") {
     return;
   }
 
@@ -475,6 +484,64 @@ async function sendHostedRuntimeAiUsageLimitNoticeForPendingConversation(input: 
     routeAuthority: wake.message.routeAuthority ?? null,
     sourceEventId: wake.eventId,
   });
+}
+
+async function readHostedRuntimePendingUsageNoticeWake(input: {
+  consumedSeqByLane: readonly HostedMailboxLaneConsumed[];
+  decision: Extract<HostedRuntimeUsageGateCheck, { status: "denied" }>["decision"];
+  mailboxLag: readonly HostedMailboxLaneLag[];
+  prisma: NonNullable<Parameters<typeof readHostedMailboxPayload>[0]["prisma"]>;
+  userId: string;
+}): Promise<HostedExecutionWake | null> {
+  const afterSeq = readHostedConversationFreshWorkFloor({
+    consumedSeqByLane: input.consumedSeqByLane,
+    mailboxLag: input.mailboxLag,
+  }).toString();
+
+  // Usage notices are best-effort for the current pending input. Older rows stay
+  // pending for replay after allowance returns; do not decode an unbounded backlog here.
+  const pendingItem = await readHostedMailboxLatestPendingConversationItem({
+    afterSeq,
+    prisma: input.prisma,
+    userId: input.userId,
+  });
+  if (!pendingItem) {
+    return null;
+  }
+  const pendingSeq = parseHostedMailboxReconciliationSeq(pendingItem.laneSeq);
+  const cursorSeq = parseHostedMailboxReconciliationSeq(afterSeq);
+  if (pendingSeq === null || cursorSeq === null || pendingSeq <= cursorSeq) {
+    return null;
+  }
+
+  const wake = await readHostedRuntimePendingConversationWake({
+    item: pendingItem,
+    prisma: input.prisma,
+  });
+  if (
+    wake
+    && canSendHostedRuntimeUsageNoticeForConversationWake({
+      decision: input.decision,
+      wake,
+    })
+  ) {
+    return wake;
+  }
+  return null;
+}
+
+function canSendHostedRuntimeUsageNoticeForConversationWake(input: {
+  decision: Extract<HostedRuntimeUsageGateCheck, { status: "denied" }>["decision"];
+  wake: HostedExecutionWake;
+}): boolean {
+  if (isHostedLinqConversationMessageWake(input.wake)) {
+    return true;
+  }
+
+  return (
+    input.decision.reason === "ai_usage_limit_exceeded"
+    && isHostedTelegramConversationMessageWake(input.wake)
+  );
 }
 
 async function sendHostedRuntimeTelegramUsageLimitNotice(input: {
@@ -667,7 +734,7 @@ async function releaseHostedRuntimeAiUsageNoticeClaimBestEffort(input: {
 }
 
 async function readHostedRuntimePendingConversationWake(input: {
-  item: Awaited<ReturnType<typeof readHostedMailboxFirstPendingConversationItem>>;
+  item: Awaited<ReturnType<typeof readHostedMailboxLatestPendingConversationItem>>;
   prisma: NonNullable<Parameters<typeof readHostedMailboxPayload>[0]["prisma"]>;
 }): Promise<HostedExecutionWake | null> {
   if (!input.item) {

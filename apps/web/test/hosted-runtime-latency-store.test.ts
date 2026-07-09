@@ -239,6 +239,50 @@ describe("hosted runtime latency dashboard store", () => {
         directEnsureResponseReceivedAtEpochMs: 1_777_000_000_120,
       },
     });
+    expect(prisma.readTraceInsertSql()).toContain("ON CONFLICT (mailbox_item_id) DO NOTHING");
+  });
+
+  it("merges direct ensure timing when a trace row already won creation", async () => {
+    const prisma = createLatencyWritePrisma({
+      mailboxAcceptedAtEpochMs: BigInt(Date.parse("2026-06-09T10:00:00.000Z")),
+    });
+
+    await recordHostedIngressAcceptedFromMailboxItem({
+      mailboxItemId: "mailbox_latency_1",
+      prisma,
+      source: "linq",
+    });
+
+    await expect(recordHostedIngressDirectEnsureTiming({
+      expectedUserId: "member_latency_1",
+      mailboxItemId: "mailbox_latency_1",
+      phaseBreakdown: {
+        schemaVersion: 1,
+        orchestration: {
+          tokenAcquireStartedAtEpochMs: 1_777_000_000_000,
+          tokenAcquiredAtEpochMs: 1_777_000_000_010,
+          directEnsureRequestStartedAtEpochMs: 1_777_000_000_012,
+          directEnsureResponseReceivedAtEpochMs: 1_777_000_000_120,
+        },
+      },
+      prisma,
+      source: "linq",
+    })).resolves.toEqual({
+      matchedCount: 1,
+      recorded: true,
+      unmatchedCount: 0,
+    });
+
+    expect(prisma.readTrace()?.phaseBreakdownJson).toEqual({
+      schemaVersion: 1,
+      orchestration: {
+        tokenAcquireStartedAtEpochMs: 1_777_000_000_000,
+        tokenAcquiredAtEpochMs: 1_777_000_000_010,
+        directEnsureRequestStartedAtEpochMs: 1_777_000_000_012,
+        directEnsureResponseReceivedAtEpochMs: 1_777_000_000_120,
+      },
+    });
+    expect(prisma.readTraceInsertSql()).toContain("ON CONFLICT (mailbox_item_id) DO NOTHING");
   });
 
   it("records provider start by assistant input even when a later runtime attempt handles it", async () => {
@@ -772,9 +816,11 @@ function createLatencyWritePrisma(input: {
   readMailboxQuerySql: () => string;
   readMailboxQueryValues: () => readonly (readonly unknown[])[];
   readTrace: () => MutableLatencyTrace | null;
+  readTraceInsertSql: () => string;
 } {
   let trace: MutableLatencyTrace | null = null;
   let mailboxQueryTemplate: TemplateStringsArray | null = null;
+  let traceInsertTemplate: TemplateStringsArray | null = null;
   const mailboxQueryValues: unknown[][] = [];
   const queryRaw = vi.fn(
     async (strings: TemplateStringsArray, ...values: readonly unknown[]) => {
@@ -799,25 +845,54 @@ function createLatencyWritePrisma(input: {
       ];
     },
   );
-  const findMany = vi.fn(async () => trace ? [trace] : []);
-  const upsert = vi.fn(async (args: LatencyTraceUpsertInput) => {
-    if (!trace) {
+  const executeRaw = vi.fn(
+    async (strings: TemplateStringsArray, ...values: readonly unknown[]) => {
+      const sql = strings.join("");
+      if (!sql.includes("INSERT INTO hosted_ingress_latency_trace")) {
+        return 0;
+      }
+      traceInsertTemplate = strings;
+      if (trace) {
+        return 0;
+      }
+      const [
+        id,
+        userId,
+        source,
+        mailboxItemId,
+        mailboxLane,
+        mailboxLaneSeq,
+        acceptedAt,
+      ] = values;
       trace = {
-        ...args.create,
+        acceptedAt: acceptedAt as Date,
         assistantInputId: null,
         assistantInputStagedAt: null,
         createdAt: instant("2026-06-02T12:00:00.000Z"),
+        id: id as string,
         mailboxImportDoneAt: null,
+        mailboxItemId: mailboxItemId as string,
+        mailboxLane: mailboxLane as string,
+        mailboxLaneSeq: mailboxLaneSeq as bigint,
         phaseBreakdownJson: null,
         providerRequestOrdinal: null,
         providerStartAt: null,
         runnerJobAcceptedAt: null,
         runtimeAttemptId: null,
         runtimePhaseStartedAt: null,
+        source: source as string,
         temporalSignalAcceptedAt: null,
         updatedAt: instant("2026-06-02T12:00:00.000Z"),
+        userId: userId as string,
         workspaceRestoreDoneAt: null,
       };
+      return 1;
+    },
+  );
+  const findMany = vi.fn(async () => trace ? [trace] : []);
+  const findUnique = vi.fn(async (args: LatencyTraceFindUniqueInput) => {
+    if (!trace || trace.mailboxItemId !== args.where.mailboxItemId) {
+      return null;
     }
     return trace;
   });
@@ -834,7 +909,7 @@ function createLatencyWritePrisma(input: {
   });
   const update = vi.fn(async (args: LatencyTraceUpdateInput) => {
     if (!trace) {
-      throw new Error("Trace update called before upsert.");
+      throw new Error("Trace update called before insert.");
     }
     trace = {
       ...trace,
@@ -844,26 +919,29 @@ function createLatencyWritePrisma(input: {
     return trace;
   });
   type LatencyPrismaFake = {
+    $executeRaw: typeof executeRaw;
     $queryRaw: typeof queryRaw;
     $transaction: <T>(callback: (tx: LatencyPrismaFake) => Promise<T>) => Promise<T>;
     hostedIngressLatencyTrace: {
       findMany: typeof findMany;
+      findUnique: typeof findUnique;
       update: typeof update;
       updateMany: typeof updateMany;
-      upsert: typeof upsert;
     };
     readMailboxQuerySql: () => string;
     readMailboxQueryValues: () => readonly (readonly unknown[])[];
     readTrace: () => MutableLatencyTrace | null;
+    readTraceInsertSql: () => string;
   };
   const prisma: LatencyPrismaFake = {
     $transaction: async <T>(callback: (tx: LatencyPrismaFake) => Promise<T>): Promise<T> =>
       await callback(prisma),
+    $executeRaw: executeRaw,
     $queryRaw: queryRaw,
     hostedIngressLatencyTrace: {
+      findUnique,
       findMany,
       updateMany,
-      upsert,
       update,
     },
     readMailboxQuerySql: () => {
@@ -874,12 +952,19 @@ function createLatencyWritePrisma(input: {
     },
     readMailboxQueryValues: () => mailboxQueryValues,
     readTrace: () => trace,
+    readTraceInsertSql: () => {
+      if (!traceInsertTemplate) {
+        return "";
+      }
+      return traceInsertTemplate.join("");
+    },
   };
 
   return prisma as unknown as LatencyWritePrisma & {
     readMailboxQuerySql: () => string;
     readMailboxQueryValues: () => readonly (readonly unknown[])[];
     readTrace: () => MutableLatencyTrace | null;
+    readTraceInsertSql: () => string;
   };
 }
 
@@ -952,9 +1037,7 @@ type LatencyTraceUpdateManyInput = {
   where: unknown;
 };
 
-type LatencyTraceUpsertInput = {
-  create: LatencyTraceCreateInput;
-  update: Record<string, never>;
+type LatencyTraceFindUniqueInput = {
   where: {
     mailboxItemId: string;
   };

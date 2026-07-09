@@ -129,6 +129,10 @@ const PUBLIC_WEARABLE_PROVENANCE_KEYS = new Set([
 ])
 
 const OMIT_COMPACT_WEARABLE_VALUE = Symbol("omit compact wearable value")
+const COMPACT_WEARABLE_ARRAY_LIMIT = 8
+const COMPACT_WEARABLE_DRIFT_SIGNAL_LIMIT = 8
+const COMPACT_WEARABLE_TREND_POINT_LIMIT = 14
+const COMPACT_WEARABLE_STRING_LENGTH = 160
 
 type CompactWearableValue = JsonValue | typeof OMIT_COMPACT_WEARABLE_VALUE
 
@@ -150,6 +154,13 @@ function compactWearableCommandSummaryArray(value: readonly unknown[]): JsonObje
   }
 
   return compact.filter((entry): entry is JsonObject => isJsonObjectRecord(entry))
+}
+
+function limitedCompactWearableCommandSummaryArray(
+  value: readonly unknown[],
+  limit: number,
+): JsonObject[] {
+  return compactWearableCommandSummaryArray(value).slice(0, limit)
 }
 
 function compactWearableLatestCommandSummary(value: unknown): JsonObject | null {
@@ -195,6 +206,17 @@ function compactWearableValue(value: unknown): CompactWearableValue {
   }
 
   if (!isJsonObjectRecord(value)) {
+    if (typeof value === "string") {
+      const normalized = value.trim()
+      if (normalized.length === 0) {
+        return null
+      }
+
+      return normalized.length <= COMPACT_WEARABLE_STRING_LENGTH
+        ? normalized
+        : `${normalized.slice(0, COMPACT_WEARABLE_STRING_LENGTH - 3).trimEnd()}...`
+    }
+
     return isJsonValue(value) ? value : null
   }
 
@@ -223,13 +245,17 @@ function compactWearableValue(value: unknown): CompactWearableValue {
       continue
     }
 
-    if (
-      Array.isArray(compactChild)
-      && compactChild.length === 0
-      && key !== "providers"
-      && key !== "signals"
-      && key !== "points"
-    ) {
+    if (Array.isArray(compactChild)) {
+      if (
+        compactChild.length === 0
+        && key !== "providers"
+        && key !== "signals"
+        && key !== "points"
+      ) {
+        continue
+      }
+
+      redacted[key] = compactChild.slice(0, compactWearableArrayLimitForKey(key))
       continue
     }
 
@@ -276,10 +302,6 @@ function compactWearableResolvedMetric(metric: Record<string, unknown>): Compact
 
   copyCompactStringField(selection, compact, "unit")
   copyCompactStringField(selection, compact, "provider")
-  copyCompactStringField(selection, compact, "recordedAt")
-  copyCompactStringField(selection, compact, "occurredAt")
-  copyCompactStringField(selection, compact, "title")
-  copyCompactStringField(selection, compact, "sourceKind")
   copyCompactStringField(selection, compact, "fallbackFromMetric")
   copyCompactStringField(selection, compact, "fallbackReason")
 
@@ -296,6 +318,18 @@ function compactWearableResolvedMetric(metric: Record<string, unknown>): Compact
   }
 
   return compact
+}
+
+function compactWearableArrayLimitForKey(key: string): number {
+  if (key === "signals") {
+    return COMPACT_WEARABLE_DRIFT_SIGNAL_LIMIT
+  }
+
+  if (key === "points") {
+    return COMPACT_WEARABLE_TREND_POINT_LIMIT
+  }
+
+  return COMPACT_WEARABLE_ARRAY_LIMIT
 }
 
 function compactWearableMetricConfidence(confidence: Record<string, unknown>): JsonObject {
@@ -964,6 +998,7 @@ function createIntegratedQueryServices(): QueryServices {
     },
     async listDocuments(input: CommandContext & {
       from?: string
+      limit?: number
       to?: string
     }) {
       return listDocumentsUseCase(input)
@@ -1270,11 +1305,12 @@ function createIntegratedQueryServices(): QueryServices {
     }) {
       const normalized = normalizeWearableSummaryInput(input)
       const query = await loadQueryRuntime()
-      const items = await query.summarizeWearableSleepRuntime(input.vault, normalized.queryFilters)
+      const rawItems = await query.summarizeWearableSleepRuntime(input.vault, normalized.queryFilters)
+      const items = limitedCompactWearableCommandSummaryArray(rawItems, normalized.filters.limit)
 
       return {
         filters: normalized.filters,
-        items: compactWearableCommandSummaryArray(items),
+        items,
         count: items.length,
       }
     },
@@ -1287,11 +1323,12 @@ function createIntegratedQueryServices(): QueryServices {
     }) {
       const normalized = normalizeWearableSummaryInput(input)
       const query = await loadQueryRuntime()
-      const items = await query.summarizeWearableActivityRuntime(input.vault, normalized.queryFilters)
+      const rawItems = await query.summarizeWearableActivityRuntime(input.vault, normalized.queryFilters)
+      const items = limitedCompactWearableCommandSummaryArray(rawItems, normalized.filters.limit)
 
       return {
         filters: normalized.filters,
-        items: compactWearableCommandSummaryArray(items),
+        items,
         count: items.length,
       }
     },
@@ -1304,11 +1341,12 @@ function createIntegratedQueryServices(): QueryServices {
     }) {
       const normalized = normalizeWearableSummaryInput(input)
       const query = await loadQueryRuntime()
-      const items = await query.summarizeWearableBodyStateRuntime(input.vault, normalized.queryFilters)
+      const rawItems = await query.summarizeWearableBodyStateRuntime(input.vault, normalized.queryFilters)
+      const items = limitedCompactWearableCommandSummaryArray(rawItems, normalized.filters.limit)
 
       return {
         filters: normalized.filters,
-        items: compactWearableCommandSummaryArray(items),
+        items,
         count: items.length,
       }
     },
@@ -1321,11 +1359,12 @@ function createIntegratedQueryServices(): QueryServices {
     }) {
       const normalized = normalizeWearableSummaryInput(input)
       const query = await loadQueryRuntime()
-      const items = await query.summarizeWearableRecoveryRuntime(input.vault, normalized.queryFilters)
+      const rawItems = await query.summarizeWearableRecoveryRuntime(input.vault, normalized.queryFilters)
+      const items = limitedCompactWearableCommandSummaryArray(rawItems, normalized.filters.limit)
 
       return {
         filters: normalized.filters,
-        items: compactWearableCommandSummaryArray(items),
+        items,
         count: items.length,
       }
     },
@@ -1338,11 +1377,12 @@ function createIntegratedQueryServices(): QueryServices {
     }) {
       const normalized = normalizeWearableSummaryInput(input)
       const query = await loadQueryRuntime()
-      const items = await query.summarizeWearableSourceHealthRuntime(input.vault, normalized.queryFilters)
+      const rawItems = await query.summarizeWearableSourceHealthRuntime(input.vault, normalized.queryFilters)
+      const items = limitedCompactWearableCommandSummaryArray(rawItems, normalized.filters.limit)
 
       return {
         filters: normalized.filters,
-        items: compactWearableCommandSummaryArray(items),
+        items,
         count: items.length,
       }
     },
@@ -1549,7 +1589,7 @@ function normalizeWearableProviderQueryFilter(
 
 function normalizeWearableLimit(limit: number): number {
   if (!Number.isInteger(limit) || limit <= 0) {
-    return 30
+    return 5
   }
 
   return Math.min(limit, 200)

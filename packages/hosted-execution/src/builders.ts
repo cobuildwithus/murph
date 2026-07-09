@@ -17,6 +17,8 @@ import type {
   HostedExecutionMemberActivatedWake,
   HostedExecutionMemberChannels,
   HostedExecutionMemberChannelsUpdatedWake,
+  HostedExecutionMemberPreferences,
+  HostedExecutionMemberPreferencesUpdatedWake,
   HostedExecutionRuntimeTimerWake,
   HostedExecutionRuntimeControlWake,
   HostedExecutionPlainRuntimeControlWakeKind,
@@ -125,6 +127,7 @@ type HostedExecutionMemberOwnedWake =
   | HostedExecutionAssistantNotificationRequestedWake
   | HostedExecutionMemberActivatedWake
   | HostedExecutionMemberChannelsUpdatedWake
+  | HostedExecutionMemberPreferencesUpdatedWake
   | HostedExecutionGroupNewsletterEmailNeededWake
   | HostedExecutionVaultShareDeliveryWake
   | HostedExecutionVaultShareRevokeWake;
@@ -438,6 +441,23 @@ export function buildHostedExecutionMemberChannelsUpdatedWake(input: {
       occurredAt: input.occurredAt,
     }),
     memberChannels: { ...input.memberChannels },
+  };
+}
+
+export function buildHostedExecutionMemberPreferencesUpdatedWake(input: {
+  eventId: string;
+  memberId: string;
+  occurredAt: string;
+  preferences: HostedExecutionMemberPreferences;
+}): HostedExecutionMemberPreferencesUpdatedWake {
+  return {
+    ...buildHostedExecutionMemberOwnedWakeBase({
+      eventId: input.eventId,
+      kind: "member.preferences.updated",
+      memberId: input.memberId,
+      occurredAt: input.occurredAt,
+    }),
+    preferences: { ...input.preferences },
   };
 }
 

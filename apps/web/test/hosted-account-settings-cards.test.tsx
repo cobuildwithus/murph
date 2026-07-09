@@ -23,6 +23,26 @@ vi.mock("next/dynamic", () => ({
   },
 }));
 
+vi.mock("@/src/components/murph/murph-assistant-style-picker", () => ({
+  MurphAssistantStylePicker(props: {
+    initialStep?: string;
+    onOpenChange?: (open: boolean) => void;
+    open?: boolean;
+  }) {
+    return props.open
+      ? React.createElement("div", {
+          "data-assistant-style-step": props.initialStep ?? "",
+        },
+        `assistant style ${props.initialStep ?? ""}`,
+        React.createElement("button", {
+          "data-close-assistant-style": "true",
+          onClick: () => props.onOpenChange?.(false),
+          type: "button",
+        }, "Close"))
+      : null;
+  },
+}));
+
 describe("HostedAccountSettingsCards", () => {
   test("shows the SMS Murph link only after the member has linked a phone", () => {
     const withoutPhone = renderToStaticMarkup(
@@ -152,6 +172,24 @@ describe("HostedAccountSettingsCards", () => {
     expect(markup).not.toContain("Telegram user 456");
   });
 
+  test("shows the saved assistant tone and voice preference", () => {
+    const markup = renderToStaticMarkup(
+      React.createElement(HostedAccountSettingsCards, {
+        account: {
+          ...makeAccountSnapshot({ phoneNumber: null }),
+          assistant: {
+            tone: "formal",
+            voice: "upbeat",
+          },
+        },
+      }),
+    );
+
+    expect(markup).toContain("How Murph talks");
+    expect(markup).toContain("Formal, Upbeat");
+    expect(markup).toContain("Customize");
+  });
+
   test("opens the email link dialog when the add-email deep link is present on first mount", async () => {
     const rendered = await renderClientComponent(
       React.createElement(HostedAccountSettingsCards, {
@@ -215,6 +253,58 @@ describe("HostedAccountSettingsCards", () => {
     );
 
     expect(rendered.container.querySelector("[data-link-mode]")).toBeNull();
+
+    await rendered.cleanup();
+  });
+
+  test("opens the assistant style picker on the voice step when the voice deep link is present", async () => {
+    const rendered = await renderClientComponent(
+      React.createElement(HostedAccountSettingsCards, {
+        account: makeAccountSnapshot({ phoneNumber: null }),
+        openVoiceLink: true,
+      }),
+      {
+        location: {
+          href: "https://app.example.test/settings?voice=true&tab=account",
+        },
+        requireButton: false,
+      },
+    );
+
+    expect(rendered.container.querySelector("[data-assistant-style-step]")?.getAttribute("data-assistant-style-step"))
+      .toBe("voice");
+    expect(rendered.replaceState).toHaveBeenCalledWith({}, "", "/settings?tab=account");
+
+    await rendered.cleanup();
+  });
+
+  test("opens the assistant style picker when the voice deep link appears after mount", async () => {
+    const account = makeAccountSnapshot({ phoneNumber: null });
+    const rendered = await renderClientComponent(
+      React.createElement(HostedAccountSettingsCards, {
+        account,
+        openVoiceLink: false,
+      }),
+      {
+        location: {
+          href: "https://app.example.test/settings?voice=true",
+        },
+        requireButton: false,
+      },
+    );
+
+    expect(rendered.container.querySelector("[data-assistant-style-step]")).toBeNull();
+
+    await rendered.rerender(
+      React.createElement(HostedAccountSettingsCards, {
+        account,
+        openVoiceLink: true,
+      }),
+    );
+
+    expect(rendered.container.querySelector("[data-assistant-style-step]")?.getAttribute("data-assistant-style-step"))
+      .toBe("voice");
+    expect(rendered.replaceState).toHaveBeenCalledWith({}, "", "/settings");
 
     await rendered.cleanup();
   });

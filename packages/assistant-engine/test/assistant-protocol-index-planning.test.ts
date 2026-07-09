@@ -1,8 +1,12 @@
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
+import {
+  preferencesDocumentRelativePath,
+  resolveAssistantVoiceOptionElevenLabsVoiceId,
+} from '@murphai/contracts'
 import { createDefaultLocalAssistantModelTarget } from '@murphai/operator-config/assistant-backend'
 import {
   normalizeAssistantProviderConfig,
@@ -46,6 +50,7 @@ vi.mock('../src/assistant/context-snapshot.js', () => ({
 }))
 
 import {
+  buildCodexTurnAttemptPlan,
   buildCodexTurnExecutionPlan,
   resolveAssistantRouteTurnPlan,
   type AssistantCodexTurnResolvedExecutionProfile,
@@ -293,6 +298,40 @@ describe('assistant protocol index planning', () => {
       'roughly 5-6 short assistant messages',
     )
     expect(plan.turnContextPrompt).not.toContain('Natural first-run flow')
+  })
+
+  it('resolves assistant voice preferences into ElevenLabs planning ids', async () => {
+    planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
+    planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
+    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
+      supportsNativeResume: false,
+    })
+    const vault = await mkdtemp(
+      path.join(os.tmpdir(), 'assistant-route-plan-preferences-'),
+    )
+
+    try {
+      await expect(resolvePlannedElevenLabsVoiceId(vault)).resolves.toBeNull()
+
+      await writeAssistantPreferencesDocument(vault, {
+        voice: 'classic',
+      })
+      await expect(resolvePlannedElevenLabsVoiceId(vault)).resolves.toBeNull()
+
+      await writeAssistantPreferencesDocument(vault, {
+        voice: 'warm',
+      })
+      await expect(resolvePlannedElevenLabsVoiceId(vault)).resolves.toBe(
+        resolveAssistantVoiceOptionElevenLabsVoiceId('warm'),
+      )
+
+      await writeAssistantPreferencesDocument(vault, {
+        voice: 'stale-roster-id',
+      })
+      await expect(resolvePlannedElevenLabsVoiceId(vault)).resolves.toBeNull()
+    } finally {
+      await rm(vault, { force: true, recursive: true })
+    }
   })
 
   it('resumes Codex threads when the stored assistant contract matches', async () => {
@@ -1896,6 +1935,52 @@ function createRoute(): CodexThreadIdentity {
     routeFingerprint: 'route-test',
     routeId: 'route-test',
   }
+}
+
+async function resolvePlannedElevenLabsVoiceId(vault: string): Promise<string | null> {
+  const session = createSession()
+  const route = createRoute()
+  const executionPlan = await buildCodexTurnExecutionPlan({
+    input: {
+      ...createMessageInput(),
+      vault,
+    },
+    plan: createSharedPlan(),
+    resolvedSession: session,
+    route,
+    turnCreatedAt: '2026-05-04T00:00:00.000Z',
+    turnId: 'turn-preferences',
+  })
+  const attemptPlan = await buildCodexTurnAttemptPlan({
+    attemptCount: 1,
+    executionPlan,
+    session,
+  })
+
+  return attemptPlan.routePlan.assistantPreferredElevenLabsVoiceId ?? null
+}
+
+async function writeAssistantPreferencesDocument(
+  vault: string,
+  input: {
+    voice?: string
+  },
+): Promise<void> {
+  const preferencesPath = path.join(vault, preferencesDocumentRelativePath)
+  await mkdir(path.dirname(preferencesPath), { recursive: true })
+  await writeFile(
+    preferencesPath,
+    JSON.stringify({
+      schemaVersion: 1,
+      updatedAt: '2026-07-08T12:00:00.000Z',
+      assistant: input,
+      workoutUnitPreferences: {},
+      wearablePreferences: {
+        desiredProviders: [],
+      },
+    }),
+    'utf8',
+  )
 }
 
 function createHostedToolContext(): AssistantHostedToolContext {

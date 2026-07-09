@@ -126,6 +126,8 @@ rationale, not a live mechanism.
 
 - Agent-primary `add`, `save`, and `edit` commands expose their normal input shape through native Incur args and options so `--help`, `--schema`, `--llms`, MCP, and generated skills stay truthful. Batch or document-derived JSON payloads are explicitly named escape hatches such as `import-json`/`import-jsonl`, never hidden behind canonical typed command names.
 - Every agent-visible command that accepts a complex `--input @file|-` payload provides a paired Incur-discoverable shape path — a sibling `payload-schema` command with `scaffold` as a representative payload — sharing the runtime importer's normalization/schema path where practical. Agents must not have to infer payload shapes from source, tests, or stale docs.
+- Default agent-visible read/status/list/tail surfaces return bounded summaries suitable for a single model tool result. Growing fields such as markdown bodies, assistant timelines, raw provenance, manifest payloads, nested telemetry arrays, and long instruction text stay out of defaults unless the command is an explicit detail/export/schema surface.
+- Any new default CLI read surface that can grow with vault size needs a deterministic output-budget regression. The representative `--full-output --format json` default response should stay under roughly 15k characters on oversized fixtures; callers that need more data must use an explicit `show`, manifest/export/materialize command, or raised `--limit`.
 
 ## Assistant Boundary
 

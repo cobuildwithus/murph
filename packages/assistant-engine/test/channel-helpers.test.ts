@@ -347,18 +347,24 @@ describe('channel helper seams', () => {
     expect(sendMessage).toHaveBeenCalledWith({
       actorId: null,
       answeredMailboxItemIds: [],
+      bindingDelivery: {
+        kind: 'participant',
+        target: 'participant-7',
+      },
       candidate: {
         kind: 'participant',
         target: 'participant-7',
       },
       deliverySource: null,
       dependencies: {},
+      explicitTarget: null,
       idempotencyKey: 'idem-7',
       identityId: 'identity-7',
       media: [],
       message: 'hello there',
       replyToMessageId: 'reply-7',
       subject: null,
+      threadIsDirect: null,
     })
     expect(delivery).toMatchObject({
       channel: 'telegram',
@@ -479,6 +485,7 @@ describe('channel helper seams', () => {
       },
       dependencies: {},
       identityId: 'identity-typing',
+      replyToMessageId: null,
     })
 
     const typingHandle = createTypingHandle()
@@ -502,7 +509,9 @@ describe('channel helper seams', () => {
       ),
     ).toBe(typingHandle)
     expect(startLinqTyping).toHaveBeenCalledWith({
+      replyToMessageId: null,
       target: 'explicit-chat',
+      targetKind: 'explicit',
     })
     await typingHandle.stop({
       providerStop: false,
@@ -667,6 +676,7 @@ describe('channel helper seams', () => {
         identityId: null,
         message: 'linq hello',
         replyToMessageId: '   ',
+        threadIsDirect: true,
       },
       {
         sendLinq,
@@ -676,6 +686,7 @@ describe('channel helper seams', () => {
       answeredMailboxItemIds: [],
       directRecipientPhoneNumber: null,
       fromPhoneNumber: null,
+      homeRouteFallbackAllowed: true,
       idempotencyKey: 'idem-linq',
       message: 'linq hello',
       replyToMessageId: null,
@@ -963,6 +974,7 @@ describe('channel helper seams', () => {
       answeredMailboxItemIds: [],
       directRecipientPhoneNumber: '+15550000001',
       fromPhoneNumber: '+15550000002',
+      homeRouteFallbackAllowed: false,
       idempotencyKey: 'idem-text-first',
       message: 'Listen to this',
       replyToMessageId: 'reply-text',
@@ -972,6 +984,7 @@ describe('channel helper seams', () => {
     expect(sendLinqVoiceMemo).toHaveBeenCalledWith({
       answeredMailboxItemIds: [],
       attachmentId: 'attachment_voice_1',
+      homeRouteFallbackAllowed: false,
       replyToMessageId: 'reply-text',
       target: 'thread-linq-voice',
       targetKind: 'thread',
@@ -981,6 +994,55 @@ describe('channel helper seams', () => {
       providerMessageIds: ['linq-text-message', 'linq-voice-message'],
       providerThreadId: 'thread-linq-voice',
       target: 'thread-linq-voice',
+      targetKind: 'thread',
+    })
+  })
+
+  it('allows Linq home-route fallback for direct thread voice-memo-only sends', async () => {
+    const sendLinq = vi.fn()
+    const sendLinqVoiceMemo = vi.fn().mockResolvedValue({
+      providerMessageId: 'linq-voice-message',
+      providerThreadId: 'stale-home-thread',
+      target: 'stale-home-thread',
+      targetKind: 'thread',
+    })
+
+    const delivery = await ASSISTANT_CHANNEL_ADAPTERS.linq.send(
+      {
+        actorId: '+15550000001',
+        bindingDelivery: createAssistantBindingDelivery('thread', 'stale-home-thread'),
+        deliverySource: {
+          kind: 'linq',
+          fromPhoneNumber: '+15550000002',
+        },
+        explicitTarget: null,
+        idempotencyKey: 'idem-voice-home-fallback',
+        identityId: null,
+        media: [createVoiceMemoMedia()],
+        message: '   ',
+        replyToMessageId: null,
+        threadIsDirect: true,
+      },
+      {
+        sendLinq,
+        sendLinqVoiceMemo,
+      },
+    )
+
+    expect(sendLinq).not.toHaveBeenCalled()
+    expect(sendLinqVoiceMemo).toHaveBeenCalledWith({
+      answeredMailboxItemIds: [],
+      attachmentId: 'attachment_voice_1',
+      homeRouteFallbackAllowed: true,
+      replyToMessageId: null,
+      target: 'stale-home-thread',
+      targetKind: 'thread',
+    })
+    expect(delivery).toMatchObject({
+      providerMessageId: 'linq-voice-message',
+      providerMessageIds: ['linq-voice-message'],
+      providerThreadId: 'stale-home-thread',
+      target: 'stale-home-thread',
       targetKind: 'thread',
     })
   })
@@ -1022,6 +1084,7 @@ describe('channel helper seams', () => {
     expect(sendLinqVoiceMemo).toHaveBeenCalledWith({
       answeredMailboxItemIds: [],
       attachmentId: 'attachment_voice_1',
+      homeRouteFallbackAllowed: false,
       replyToMessageId: 'reply-materialized',
       target: 'thread-linq-materialized',
       targetKind: 'thread',

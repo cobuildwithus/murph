@@ -80,6 +80,57 @@ describe('list summary surfaces', () => {
     expect(item).not.toHaveProperty('excerpt')
   })
 
+  it('keeps list item data to bounded scalar summary fields', () => {
+    const item = toListEntity({
+      id: 'evt_01',
+      kind: 'test',
+      title: 'Large lab payload',
+      occurredAt: '2026-04-08T12:00:00Z',
+      path: 'events/2026-04-08-labs.md',
+      data: {
+        labName: 'Function Health',
+        resultStatus: 'mixed',
+        results: [
+          { biomarker: 'LDL', value: 101 },
+          { biomarker: 'HDL', value: 61 },
+        ],
+        notes: ['first', 'second'],
+        empty: '',
+        longText: 'x'.repeat(240),
+        nested: { value: true },
+      },
+      links: [],
+    })
+
+    expect(item.data).toEqual({
+      labName: 'Function Health',
+      resultStatus: 'mixed',
+      resultsCount: 2,
+      notes: ['first', 'second'],
+      longText: `${'x'.repeat(177)}...`,
+      nested: { value: true },
+    })
+  })
+
+  it('keeps list item links bounded with an explicit count', () => {
+    const item = toListEntity({
+      id: 'exp_01',
+      kind: 'experiment',
+      title: 'Sleep experiment',
+      occurredAt: '2026-04-08T12:00:00Z',
+      path: 'experiments/sleep.md',
+      data: {},
+      links: Array.from({ length: 10 }, (_, index) => ({
+        id: `evt_${index}`,
+        kind: 'event',
+        queryable: true,
+      })),
+    })
+
+    expect(item.links).toHaveLength(8)
+    expect(item.data).toEqual({ linksCount: 10 })
+  })
+
   it('keeps helper-backed command list items aligned with show surfaces', () => {
     const item = toCommandListItem(
       buildRecord({

@@ -89,13 +89,13 @@ export function registerGroupCommands(cli: Cli.Cli) {
         .array(groupSharedProjectionKindSchema)
         .optional()
         .describe(
-          'Optional fixed projection-kind filter. Repeat --kind for fixed metrics such as --kind steps-days.v0. Use --scope for selector-scoped activity minutes.',
+          'Optional fixed projection-kind filter. Repeat --kind for fixed metrics such as --kind steps-days.v0. Use --scope for selector-scoped activity challenge data.',
         ),
       scope: z
         .array(groupSharedProjectionScopeKeySchema)
         .optional()
         .describe(
-          'Optional exact projection-scope filter. Use activity-minutes-days.v1.activityKind.running for a running-minutes leaderboard.',
+          'Optional exact projection-scope filter. Use activity-minutes-days.v1.activityKind.running, activity-distance-days.v1.activityKind.running, or activity-session-count-days.v1.activityKind.running for activity-specific challenge data.',
         ),
     }),
     examples: [
@@ -111,6 +111,20 @@ export function registerGroupCommands(cli: Cli.Cli) {
         description: 'Build a running-minutes leaderboard from shared daily running totals.',
         options: {
           scope: ['activity-minutes-days.v1.activityKind.running'],
+          vault: './vault',
+        },
+      },
+      {
+        description: 'Build a running-distance leaderboard from shared daily running distance totals.',
+        options: {
+          scope: ['activity-distance-days.v1.activityKind.running'],
+          vault: './vault',
+        },
+      },
+      {
+        description: 'Build a running-session-count leaderboard from shared daily running session counts.',
+        options: {
+          scope: ['activity-session-count-days.v1.activityKind.running'],
           vault: './vault',
         },
       },

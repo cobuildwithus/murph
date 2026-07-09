@@ -67,9 +67,7 @@ import {
 } from "./runtime-fence-liveness.js";
 import type { RunnerWriteFenceToken } from "./runner-state-store.js";
 import { RunnerStateStore } from "./runner-state-store.js";
-import type { RunnerStateRecord } from "./types.js";
 import { RunnerStoreCache } from "./runner-store-cache.js";
-import type { RunnerAlarmCoordinator } from "./alarm-coordinator.js";
 
 const RUNTIME_ATTEMPT_LIVENESS_PROBE_TIMEOUT_MS = 5_000;
 const HOSTED_RUNNER_NATIVE_PROVIDER_EGRESS_ENV = {
@@ -135,7 +133,6 @@ export class RuntimeInvocationService {
         userId: string,
         input?: { timeoutMs?: number },
       ): Promise<HostedWorkspaceReadResponse>;
-      alarmCoordinator: RunnerAlarmCoordinator;
     },
   ) {}
 
@@ -196,7 +193,6 @@ export class RuntimeInvocationService {
         finishedAt: new Date().toISOString(),
         token: input.token,
       });
-      await this.input.alarmCoordinator.sync(failed.record);
       emitHostedExecutionStructuredLog({
         component: "hosted.runner",
         details: {
@@ -319,7 +315,6 @@ export class RuntimeInvocationService {
         finishedAt: new Date().toISOString(),
         token,
       });
-      await this.input.alarmCoordinator.sync(failed.record);
       if (input.acceptedProcessingAttempt && failed.failed) {
         await this.recordAcceptedRuntimeAttemptFailureBestEffort({
           error,
@@ -346,14 +341,8 @@ export class RuntimeInvocationService {
       throw error;
     }
 
-    const completion = await this.recordRuntimeCompletionAfterInvoke({
+    await this.recordRuntimeCompletionAfterInvoke({
       input: executionInput,
-      token,
-      workspaceVersion,
-    });
-    await this.syncRunnerAlarmAfterCompletion({
-      executionInput,
-      record: completion.record,
       token,
       workspaceVersion,
     });
@@ -397,14 +386,8 @@ export class RuntimeInvocationService {
       return committedResult;
     }
 
-    const completion = await this.recordRuntimeCompletionAfterInvoke({
+    await this.recordRuntimeCompletionAfterInvoke({
       input: input.executionInput,
-      token: input.token,
-      workspaceVersion: input.workspaceVersion,
-    });
-    await this.syncRunnerAlarmAfterCompletion({
-      executionInput: input.executionInput,
-      record: completion.record,
       token: input.token,
       workspaceVersion: input.workspaceVersion,
     });
@@ -494,7 +477,7 @@ export class RuntimeInvocationService {
     input: RuntimeInvocationInput;
     token: RunnerWriteFenceToken;
     workspaceVersion: string | null;
-  }): Promise<{ record: RunnerStateRecord | null }> {
+  }): Promise<void> {
     try {
       const completed = await this.input.stateStore.clearWriteFenceAfterCompletion({
         finishedAt: new Date().toISOString(),
@@ -514,9 +497,6 @@ export class RuntimeInvocationService {
           userId: input.input.userId,
         });
       }
-      return {
-        record: completed.record,
-      };
     } catch (error) {
       emitHostedExecutionStructuredLog({
         component: "hosted.runner",
@@ -530,64 +510,6 @@ export class RuntimeInvocationService {
         message: "Hosted runner runtime execution completed but completion recording failed; preserving completed result without transport retry.",
         phase: "checkpoint",
         userId: input.input.userId,
-      });
-      return {
-        record: await this.readRunnerStateAfterCompletionRecordFailure(input),
-      };
-    }
-  }
-
-  private async readRunnerStateAfterCompletionRecordFailure(input: {
-    input: RuntimeInvocationInput;
-    token: RunnerWriteFenceToken;
-    workspaceVersion: string | null;
-  }): Promise<RunnerStateRecord | null> {
-    try {
-      return await this.input.stateStore.readState();
-    } catch (error) {
-      emitHostedExecutionStructuredLog({
-        component: "hosted.runner",
-        details: {
-          ...buildHostedRunnerMetadataOnlyErrorDetails(error),
-          orchestrationAttemptId: input.input.orchestrationAttemptId,
-          workspaceAttemptId: input.token.attemptId,
-          workspaceVersion: input.workspaceVersion,
-        },
-        level: "warn",
-        message: "Hosted runner runtime execution completed but state read after completion recording failure also failed.",
-        phase: "checkpoint",
-        userId: input.input.userId,
-      });
-      return null;
-    }
-  }
-
-  private async syncRunnerAlarmAfterCompletion(input: {
-    executionInput: RuntimeInvocationInput;
-    record: RunnerStateRecord | null;
-    token: RunnerWriteFenceToken;
-    workspaceVersion: string | null;
-  }): Promise<void> {
-    if (!input.record) {
-      return;
-    }
-
-    try {
-      await this.input.alarmCoordinator.sync(input.record);
-    } catch (error) {
-      emitHostedExecutionStructuredLog({
-        component: "hosted.runner",
-        details: {
-          ...buildHostedRunnerMetadataOnlyErrorDetails(error),
-          orchestrationAttemptIdPresent:
-            input.executionInput.orchestrationAttemptId.length > 0,
-          workspaceAttemptIdPresent: input.token.attemptId.length > 0,
-          workspaceVersion: input.workspaceVersion,
-        },
-        level: "warn",
-        message: "Hosted runner runtime execution completed but alarm cleanup failed.",
-        phase: "checkpoint",
-        userId: input.executionInput.userId,
       });
     }
   }

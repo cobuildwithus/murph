@@ -20,8 +20,12 @@ import {
   type HostedRuntimeProductFeedbackRecord,
 } from '@murphai/hosted-execution/runtime-control'
 import {
+  HOSTED_VAULT_SHARE_ACTIVITY_DISTANCE_PROJECTION_KIND,
+  HOSTED_VAULT_SHARE_ACTIVITY_DISTANCE_SELECTOR_ACTIVITY_KINDS,
   HOSTED_VAULT_SHARE_ACTIVITY_MINUTES_PROJECTION_KIND,
   HOSTED_VAULT_SHARE_ACTIVITY_MINUTES_SELECTOR_ACTIVITY_KINDS,
+  HOSTED_VAULT_SHARE_ACTIVITY_SESSION_COUNT_PROJECTION_KIND,
+  HOSTED_VAULT_SHARE_ACTIVITY_SESSION_COUNT_SELECTOR_ACTIVITY_KINDS,
   HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS,
   HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES,
   buildHostedVaultShareProjectionScopeKey,
@@ -194,7 +198,7 @@ export const MURPH_GENERATE_IMAGE_TOOL = {
   namespace: 'murph',
   name: 'generate_image',
   description:
-    'Generate one image with GPT Image 2, optionally using ordered vault image references. When referenceImageRefs is provided, describe in the prompt how image 1, image 2, etc. should be used. Hosted runs attach the generated image to the final response; local runs save it under CODEX_HOME/generated_images.',
+    'Generate one image with GPT Image 2, optionally using ordered vault image references. When referenceImageRefs is provided, describe in the prompt how image 1, image 2, etc. should be used. When a vault is available, generated images are saved as canonical capture media under raw/captures/** for later reuse. Hosted runs also attach the generated image to the final response; local runs also save it under CODEX_HOME/generated_images.',
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -339,17 +343,26 @@ export const MURPH_FAMILY_PLAN_TOOL = {
   },
 } as const
 
-const GROUP_VAULT_SHARE_PROJECTION_SCOPE_SCHEMA = {
+const GROUP_VAULT_SHARE_FIXED_PROJECTION_SCOPE_SCHEMA = {
   type: 'object',
   additionalProperties: false,
   required: ['projectionKind'],
   properties: {
     projectionKind: {
       type: 'string',
-      enum: [
-        ...HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS,
-        HOSTED_VAULT_SHARE_ACTIVITY_MINUTES_PROJECTION_KIND,
-      ],
+      enum: [...HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS],
+    },
+  },
+} as const
+
+const GROUP_VAULT_SHARE_ACTIVITY_MINUTES_PROJECTION_SCOPE_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['projectionKind', 'selector'],
+  properties: {
+    projectionKind: {
+      type: 'string',
+      enum: [HOSTED_VAULT_SHARE_ACTIVITY_MINUTES_PROJECTION_KIND],
     },
     selector: {
       type: 'object',
@@ -362,16 +375,75 @@ const GROUP_VAULT_SHARE_PROJECTION_SCOPE_SCHEMA = {
         },
       },
       description:
-        'Required only for activity-minutes-days.v1; omit selector for fixed projection kinds.',
+        'Required for activity-minutes-days.v1.',
     },
   },
+} as const
+
+const GROUP_VAULT_SHARE_ACTIVITY_DISTANCE_PROJECTION_SCOPE_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['projectionKind', 'selector'],
+  properties: {
+    projectionKind: {
+      type: 'string',
+      enum: [HOSTED_VAULT_SHARE_ACTIVITY_DISTANCE_PROJECTION_KIND],
+    },
+    selector: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['activityKind'],
+      properties: {
+        activityKind: {
+          type: 'string',
+          enum: [...HOSTED_VAULT_SHARE_ACTIVITY_DISTANCE_SELECTOR_ACTIVITY_KINDS],
+        },
+      },
+      description:
+        'Required for activity-distance-days.v1.',
+    },
+  },
+} as const
+
+const GROUP_VAULT_SHARE_ACTIVITY_SESSION_COUNT_PROJECTION_SCOPE_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['projectionKind', 'selector'],
+  properties: {
+    projectionKind: {
+      type: 'string',
+      enum: [HOSTED_VAULT_SHARE_ACTIVITY_SESSION_COUNT_PROJECTION_KIND],
+    },
+    selector: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['activityKind'],
+      properties: {
+        activityKind: {
+          type: 'string',
+          enum: [...HOSTED_VAULT_SHARE_ACTIVITY_SESSION_COUNT_SELECTOR_ACTIVITY_KINDS],
+        },
+      },
+      description:
+        'Required for activity-session-count-days.v1.',
+    },
+  },
+} as const
+
+const GROUP_VAULT_SHARE_PROJECTION_SCOPE_SCHEMA = {
+  oneOf: [
+    GROUP_VAULT_SHARE_FIXED_PROJECTION_SCOPE_SCHEMA,
+    GROUP_VAULT_SHARE_ACTIVITY_MINUTES_PROJECTION_SCOPE_SCHEMA,
+    GROUP_VAULT_SHARE_ACTIVITY_DISTANCE_PROJECTION_SCOPE_SCHEMA,
+    GROUP_VAULT_SHARE_ACTIVITY_SESSION_COUNT_PROJECTION_SCOPE_SCHEMA,
+  ],
 } as const
 
 export const MURPH_GROUP_TOOL = {
   namespace: 'murph',
   name: 'group',
   description:
-    'Read the current hosted group and its member roster (member ids, chat handles, and each member\'s granted share kinds) with action="read_current", request an update to both the current hosted group display name and current iMessage group chat title with action="update_display_name", request an update to the current iMessage group avatar with action="set_chat_avatar", mint the shareable group join link with action="create_join_link", or post a server-owned react-to-join offer into the current group chat with action="post_join_offer". update_display_name sends a provider request for the upstream iMessage group chat title on the current route-authorized group chat and stores the same name in Murph after the provider accepts the request. set_chat_avatar sends a provider request for the upstream iMessage group icon on the current route-authorized group chat after the runtime preflights chat authority and prepares a hosted image URL. A join link grants membership and shares the joiner\'s profile display name with this group runtime; optional permissions stay individually selected on the join page. A join offer uses your short natural messageTemplate to state what reacting shares with {{share_scope}} and include the customize link with {{join_url}} so people can share more or less. Pass displayName on create_join_link or post_join_offer only when it is the name the group chose. Reactions grant membership plus only the posted permission snapshot. Do not use a fixed script. Use action="read_chat_participants" to see who is in this group chat and whether each participant already has their own Murph; use action="share_contact_card" to drop your contact card into this chat once so people who do not have you saved can tap it, save you, and text you directly. Use action="revoke_own_email_share" only when the current sender asks to stop receiving group newsletter email; the runtime identifies the current sender and revokes only that sender\'s group-email.v0 grant. This tool does not manage members, grant Family billing access, grant private chat access, grant raw vault access, or grant email sharing except through an explicit group-email.v0 join page or offer.',
+    'Read the current hosted group and its member roster (member ids, chat handles, and each member\'s granted share kinds) with action="read_current", request an update to both the current hosted group display name and current iMessage group chat title with action="update_display_name", request an update to the current iMessage group avatar with action="set_chat_avatar", mint the shareable group join link with action="create_join_link", or post a server-owned react-to-join offer into the current group chat with action="post_join_offer". update_display_name sends a provider request for the upstream iMessage group chat title on the current route-authorized group chat and stores the same name in Murph after the provider accepts the request. set_chat_avatar sends a provider request for the upstream iMessage group icon on the current route-authorized group chat after the runtime preflights chat authority and prepares a hosted image URL; generated avatar images are saved as capture media under raw/captures/** when a vault is available. A join link grants membership and shares the joiner\'s memory-backed preferred display name with this group runtime; optional permissions stay individually selected on the join page. A join offer uses your short natural messageTemplate to state what reacting shares with {{share_scope}} and include the customize link with {{join_url}} so people can share more or less. Pass displayName on create_join_link or post_join_offer only when it is the name the group chose. Reactions grant membership plus only the posted permission snapshot. Do not use a fixed script. Use action="read_chat_participants" to see who is in this group chat and whether each participant already has their own Murph; use action="share_contact_card" to drop your contact card into this chat once so people who do not have you saved can tap it, save you, and text you directly. Use action="revoke_own_email_share" only when the current sender asks to stop receiving group newsletter email; the runtime identifies the current sender and revokes only that sender\'s group-email.v0 grant. This tool does not manage members, grant Family billing access, grant private chat access, grant raw vault access, or grant email sharing except through an explicit group-email.v0 join page or offer.',
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -445,7 +517,7 @@ export const MURPH_GROUP_TOOL = {
         maxItems: 16,
         default: [],
         description:
-          'Optional ordered JPG, PNG, or WebP image refs to use as visual references when action="set_chat_avatar" and avatarSource="generate".',
+          'Optional ordered JPG, PNG, or WebP image refs to use as visual references when action="set_chat_avatar" and avatarSource="generate". Refs must be user-sent media under raw/inbox/** or captured media under raw/captures/**.',
         items: {
           type: 'string',
           minLength: 1,
@@ -462,14 +534,14 @@ export const MURPH_GROUP_TOOL = {
         maxItems: HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES.length,
         items: GROUP_VAULT_SHARE_PROJECTION_SCOPE_SCHEMA,
         description:
-          'Optional bounded health projection scopes the join page may offer joining members. Joining never shares them automatically; each member approves their own selection. Use activity-minutes-days.v1 with selector.activityKind for running, walking, swimming, sauna, or any other recognized activity alias.',
+          'Optional bounded health projection scopes the join page may offer joining members. Joining never shares them automatically; each member approves their own selection. Use activity-minutes-days.v1 with a recognized activity alias, activity-distance-days.v1 with a distance-capable movement alias for daily distance plus session count, or activity-session-count-days.v1 with a recognized activity/intervention alias.',
       },
       projectionScopes: {
         type: 'array',
         maxItems: HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES.length,
         items: GROUP_VAULT_SHARE_PROJECTION_SCOPE_SCHEMA,
         description:
-          'Optional bounded health projections that reacting to the server-owned offer message will grant as a fixed snapshot. The server-filled {{share_scope}} placeholder always states that profile display name is shared too.',
+          'Optional bounded health projections that reacting to the server-owned offer message will grant as a fixed snapshot. The server-filled {{share_scope}} placeholder always states that preferred display name is shared too.',
       },
       messageTemplate: {
         type: 'string',
@@ -1266,6 +1338,7 @@ interface ParsedDynamicToolCallRequest {
   arguments: unknown
   namespace: string | null
   tool: string | null
+  toolCallId: string | null
 }
 
 type MurphGroupToolRequest =
@@ -1293,6 +1366,7 @@ export type MurphDynamicToolRequest =
   | {
       kind: 'generate-image'
       args: GenerateImageToolArgs
+      toolCallId?: string
     }
   | {
       kind: 'generate-voice-memo'
@@ -1386,6 +1460,7 @@ export type MurphDynamicToolRequest =
   | {
       kind: 'group'
       request: MurphGroupToolRequest
+      toolCallId?: string
     }
   | {
       kind: 'newsletter'
@@ -1489,6 +1564,7 @@ export function readMurphDynamicToolRequest(
       return {
         kind: 'generate-image',
         args: parsed.args,
+        ...(request.toolCallId ? { toolCallId: request.toolCallId } : {}),
       }
     }
     case MURPH_GENERATE_VOICE_MEMO_TOOL.name: {
@@ -1569,6 +1645,7 @@ export function readMurphDynamicToolRequest(
       return {
         kind: 'group',
         request: parsed.request,
+        ...(request.toolCallId ? { toolCallId: request.toolCallId } : {}),
       }
     }
     case MURPH_NEWSLETTER_TOOL.name: {
@@ -1731,6 +1808,24 @@ function currentHostedMailboxItemId(
     }
   }
   return null
+}
+
+function buildGeneratedImageCaptureIdempotencyKey(input: {
+  toolCallId: string | null
+  scope: 'generate-image' | 'group-avatar'
+}): string | null {
+  const toolCallId = normalizeNullableString(input.toolCallId)
+  return toolCallId
+    ? `murph.dynamic-tool.${input.scope}:${toolCallId}`
+    : null
+}
+
+function readGeneratedImageToolCallId(
+  request: MurphDynamicToolRequest,
+): string | null {
+  return ('toolCallId' in request)
+    ? normalizeNullableString(request.toolCallId)
+    : null
 }
 
 export async function executeMurphDynamicToolRequest(input: {
@@ -1931,6 +2026,7 @@ export async function executeMurphDynamicToolRequest(input: {
         materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts ?? null,
         nextUsageOrdinal: input.nextUsageOrdinal,
         request: input.request.request,
+        toolCallId: readGeneratedImageToolCallId(input.request),
         vaultRoot: input.vaultRoot ?? null,
       })
     case 'newsletter':
@@ -1967,6 +2063,10 @@ export async function executeMurphDynamicToolRequest(input: {
       const result = await executeGenerateImageTool({
         abortSignal: input.abortSignal ?? null,
         args: input.request.args,
+        captureIdempotencyKey: buildGeneratedImageCaptureIdempotencyKey({
+          toolCallId: readGeneratedImageToolCallId(input.request),
+          scope: 'generate-image',
+        }),
         codexHome: input.codexHome ?? null,
         env: input.env,
         fetchImpl: input.fetchImpl,
@@ -2175,6 +2275,7 @@ async function executeGroupTool(input: {
   materializeWorkspaceArtifacts: AssistantWorkspaceArtifactMaterializer | null
   nextUsageOrdinal: () => number
   request: MurphGroupToolRequest
+  toolCallId: string | null
   vaultRoot: string | null
 }): Promise<MurphDynamicToolExecutionResult> {
   const groupTool = input.hostedToolContext?.groupTool ?? null
@@ -2184,6 +2285,9 @@ async function executeGroupTool(input: {
 
   let request: HostedRuntimeGroupToolRequest
   let usageDraft: AssistantProviderUsageDraft | null = null
+  let generatedAvatarCapture:
+    | { savedCaptureId: string | null; savedImageRef: string | null }
+    | null = null
   if (isPreparedGroupAvatarRequest(input.request)) {
     let preflight: Extract<HostedRuntimeGroupToolResponse, { action: 'preflight_set_chat_avatar' }>
     try {
@@ -2204,6 +2308,7 @@ async function executeGroupTool(input: {
 
     const prepared = await prepareGroupAvatarRuntimeRequest({
       abortSignal: input.abortSignal,
+      toolCallId: input.toolCallId,
       env: input.env,
       fetchImpl: input.fetchImpl,
       hostedGeneratedImageUploader: input.hostedGeneratedImageUploader,
@@ -2223,14 +2328,23 @@ async function executeGroupTool(input: {
     }
     request = prepared.request
     usageDraft = prepared.usageDraft ?? null
+    generatedAvatarCapture = prepared.savedImageRef
+      ? {
+          savedCaptureId: prepared.savedCaptureId ?? null,
+          savedImageRef: prepared.savedImageRef,
+        }
+      : null
   } else {
     request = input.request
   }
 
   try {
     const result = await groupTool.request(request)
+    const payload = generatedAvatarCapture
+      ? { ...result, generatedImage: generatedAvatarCapture }
+      : result
     return {
-      ...toolTextResult(true, safeToolPayloadText(result)),
+      ...toolTextResult(true, safeToolPayloadText(payload)),
       ...(usageDraft ? { usageDraft } : {}),
     }
   } catch {
@@ -2249,6 +2363,7 @@ function isPreparedGroupAvatarRequest(
 
 async function prepareGroupAvatarRuntimeRequest(input: {
   abortSignal: AbortSignal | null
+  toolCallId: string | null
   env: NodeJS.ProcessEnv
   fetchImpl: typeof fetch
   hostedGeneratedImageUploader: AssistantHostedGeneratedImageUploader | null
@@ -2260,6 +2375,8 @@ async function prepareGroupAvatarRuntimeRequest(input: {
   | {
       request: Extract<HostedRuntimeGroupToolRequest, { action: 'set_chat_avatar' }>
       rpcSuccess: true
+      savedCaptureId?: string | null
+      savedImageRef?: string | null
       usageDraft?: AssistantProviderUsageDraft | null
     }
   | {
@@ -2273,6 +2390,10 @@ async function prepareGroupAvatarRuntimeRequest(input: {
     const generated = await executeGenerateImageTool({
       abortSignal: input.abortSignal,
       args: avatar.args,
+      captureIdempotencyKey: buildGeneratedImageCaptureIdempotencyKey({
+        toolCallId: input.toolCallId,
+        scope: 'group-avatar',
+      }),
       env: input.env,
       fetchImpl: input.fetchImpl,
       hostedGeneratedImageUploader: input.hostedGeneratedImageUploader,
@@ -2299,6 +2420,8 @@ async function prepareGroupAvatarRuntimeRequest(input: {
     return {
       request: { action: 'set_chat_avatar', groupChatIconUrl: media.url },
       rpcSuccess: true,
+      savedCaptureId: generated.savedCaptureId ?? null,
+      savedImageRef: generated.savedImageRef ?? null,
       usageDraft: generated.usageDraft ?? null,
     }
   }
@@ -3096,6 +3219,7 @@ function parseDynamicToolCallRequest(
       arguments: null,
       namespace: null,
       tool: null,
+      toolCallId: null,
     }
   }
 
@@ -3103,6 +3227,13 @@ function parseDynamicToolCallRequest(
     arguments: params.arguments,
     namespace: normalizeNullableStringValue(params.namespace),
     tool: normalizeNullableStringValue(params.tool),
+    toolCallId:
+      normalizeNullableStringValue(params.callId) ??
+      normalizeNullableStringValue(params.call_id) ??
+      normalizeNullableStringValue(params.toolCallId) ??
+      normalizeNullableStringValue(params.tool_call_id) ??
+      normalizeNullableStringValue(params.itemId) ??
+      normalizeNullableStringValue(params.item_id),
   }
 }
 

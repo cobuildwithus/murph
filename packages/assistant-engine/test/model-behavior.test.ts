@@ -6,11 +6,12 @@ import {
   resolveAssistantModelBehaviorProfile,
 } from '../src/assistant/model-behavior.js'
 import {
-  buildAssistantNotificationDecisionSystemPromptLayers,
-  buildAssistantNotificationDecisionSystemPromptWithCacheMetadata,
+  buildAssistantStyleSettingsDynamicPrompt,
   buildAssistantSystemPrompt,
   buildAssistantSystemPromptLayers,
   buildAssistantSystemPromptWithCacheMetadata,
+  buildAssistantNotificationDecisionSystemPromptLayers,
+  buildAssistantNotificationDecisionSystemPromptWithCacheMetadata,
   resolveAssistantMurphProductBaseUrl,
   type AssistantNotificationDecisionSystemPromptInput,
   type AssistantSystemPromptInput,
@@ -107,6 +108,86 @@ describe('assistant execution prompt contract', () => {
     expect(prompt).toContain(
       "Work and life context may still be relevant when it affects the user's health, schedule, stress, travel, or routines.",
     )
+  })
+
+  it('adds assistant tone preference only when a saved tone exists', () => {
+    const defaultLayers = buildAssistantSystemPromptLayers(
+      createCommonCodexPromptInput(),
+    )
+    expect(defaultLayers.threadContextPrompt).not.toContain(
+      'Assistant tone preference:',
+    )
+
+    const casualLayers = buildAssistantSystemPromptLayers(
+      createCommonCodexPromptInput({
+        assistantTone: 'casual',
+      }),
+    )
+    expect(casualLayers.threadContextPrompt).toContain(
+      'Assistant tone preference:',
+    )
+    expect(casualLayers.threadContextPrompt).toContain(
+      'relaxed and conversational',
+    )
+    expect(casualLayers.threadContextPrompt).toContain(
+      'lowercase is okay',
+    )
+
+    const formalLayers = buildAssistantSystemPromptLayers(
+      createCommonCodexPromptInput({
+        assistantTone: 'formal',
+      }),
+    )
+    expect(formalLayers.threadContextPrompt).toContain(
+      'Assistant tone preference:',
+    )
+    expect(formalLayers.threadContextPrompt).toContain(
+      'complete sentences',
+    )
+    expect(formalLayers.threadContextPrompt).toContain('no slang')
+  })
+
+  it('keeps the settings voice deep link out of the default stable prompt', () => {
+    const layers = buildAssistantSystemPromptLayers(createCommonCodexPromptInput())
+
+    expect(layers.prompt).not.toContain('/settings?voice=true')
+    expect(layers.stableRouteCapabilityPrompt).not.toContain(
+      '/settings?voice=true',
+    )
+    expect(layers.threadContextPrompt).not.toContain('/settings?voice=true')
+  })
+
+  it('mentions the settings voice deep link through dynamic context for current style-change asks', () => {
+    const stylePrompt = buildAssistantStyleSettingsDynamicPrompt(
+      'Can you change your voice?',
+    )
+    if (!stylePrompt) {
+      throw new Error('Expected assistant style settings prompt.')
+    }
+
+    expect(stylePrompt).toContain('/settings?voice=true')
+    expect(
+      buildAssistantStyleSettingsDynamicPrompt('What happened to my HRV?'),
+    ).toBeNull()
+
+    const baseline = buildAssistantSystemPromptWithCacheMetadata(
+      createCommonCodexPromptInput(),
+    )
+    const withStylePrompt = buildAssistantSystemPromptWithCacheMetadata(
+      createCommonCodexPromptInput({
+        assistantDynamicContextPrompts: [stylePrompt],
+      }),
+    )
+
+    expect(withStylePrompt.layers.dynamicTurnContextPrompt).toContain(
+      '/settings?voice=true',
+    )
+    expect(withStylePrompt.layers.stableRouteCapabilityPrompt).not.toContain(
+      '/settings?voice=true',
+    )
+    expect(
+      withStylePrompt.cacheMetadata.stableRouteCapabilityPromptHash,
+    ).toBe(baseline.cacheMetadata.stableRouteCapabilityPromptHash)
   })
 
   it('requires pending vault-file approvals to include the returned handoff link and approved sends to avoid stock queue copy', () => {
@@ -1118,6 +1199,33 @@ Execution context:
     )
   })
 
+  it('applies assistant tone preference to notification decision prompts', () => {
+    const prompt =
+      buildAssistantNotificationDecisionSystemPromptWithCacheMetadata(
+        createCommonNotificationPromptInput({
+          assistantTone: 'casual',
+        }),
+      ).prompt
+
+    expect(prompt).toContain('Assistant tone preference:')
+    expect(prompt).toContain('The user chose casual.')
+
+    const defaultPrompt =
+      buildAssistantNotificationDecisionSystemPromptWithCacheMetadata(
+        createCommonNotificationPromptInput(),
+      ).prompt
+    expect(defaultPrompt).not.toContain('Assistant tone preference:')
+
+    const maintenancePrompt =
+      buildAssistantNotificationDecisionSystemPromptWithCacheMetadata(
+        createCommonNotificationPromptInput({
+          assistantTone: 'formal',
+          maintenanceTurn: true,
+        }),
+      ).prompt
+    expect(maintenancePrompt).not.toContain('Assistant tone preference:')
+  })
+
   it('renders current date context with natural user-facing date guidance', () => {
     const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput({
       currentLocalDate: '2026-04-03',
@@ -1215,7 +1323,7 @@ Execution context:
       'Current Murph product base URL for user-facing app links: http://localhost:3000',
     )
     expect(promptA.cacheMetadata.staticPromptHash).toBe(
-      '7ca6fd977943768f5c8e6ca40ca01c2418f2d751dcff9f7cbcac81fa9539e807',
+      '0f7cc7aab31fb3287761de872693ab8cb00c3208ee7f8fdc7911354a2e9382f7',
     )
     expect(promptA.cacheMetadata.toolSchemaHash).toBe(
       'assistant-tool-schema-common-codex-test',
@@ -1486,6 +1594,33 @@ describe('assistant experiment onboarding guidance', () => {
     )
     expect(prompt).not.toContain(
       'When a scheduled support automation fires, choose one structured outcome: `skip` or `send_message`.',
+    )
+  })
+
+  it('grounds personal health recommendations before giving advice', () => {
+    const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
+
+    expect(prompt).toContain('Understand before recommending:')
+    expect(prompt).toContain(
+      'do not lead with generic recommendations. Ground first: read the relevant wearable trends, vault records, memory, and visible conversation',
+    )
+    expect(prompt).toContain(
+      'A grounded discovery question is a complete, correct turn, not a failure to answer.',
+    )
+    expect(prompt).toContain(
+      'Save what you learn. Durable, user-useful discovery answers — environment, routines, timing, constraints, preferences, motivation in the user\'s own words — go to the matching canonical vault surface or memory',
+    )
+    expect(prompt).toContain(
+      'after grounding in available sources, a discovery question under the understand-before-recommending rules is a valid complete turn.',
+    )
+    expect(prompt).toContain(
+      'Then close the loop: offer to make it stick through the behavior-change setup below',
+    )
+    expect(prompt.indexOf('Understand before recommending:')).toBeGreaterThan(
+      prompt.indexOf('Goal: Help the user understand their body in context'),
+    )
+    expect(prompt.indexOf('Behavior-change collaboration:')).toBeGreaterThan(
+      prompt.indexOf('Understand before recommending:'),
     )
   })
 

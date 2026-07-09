@@ -623,6 +623,12 @@ function attachHostedAssistantAutomationFailureLogEntries(
 function recordHostedAssistantProviderStartLatencyTraceBestEffort(input: {
   admissionMs?: number;
   assistantInputIds: readonly string[];
+  codexAppServerInitializeMs?: number;
+  codexAppServerPreProviderMs?: number;
+  codexAppServerSpawnReadyMs?: number;
+  codexAppServerThreadResumeMs?: number;
+  codexAppServerThreadStartMs?: number;
+  codexAppServerWarmReuseMs?: number;
   latencyTracePort?: HostedRuntimePlatform["latencyTracePort"] | null;
   preProviderSetupMs?: number;
   promptBuildMs?: number;
@@ -647,6 +653,24 @@ function recordHostedAssistantProviderStartLatencyTraceBestEffort(input: {
   const provider: NonNullable<
     HostedRuntimeLatencyPhaseBreakdown["provider"]
   > = {
+    ...(input.codexAppServerInitializeMs === undefined
+      ? {}
+      : { codexAppServerInitializeMs: input.codexAppServerInitializeMs }),
+    ...(input.codexAppServerPreProviderMs === undefined
+      ? {}
+      : { codexAppServerPreProviderMs: input.codexAppServerPreProviderMs }),
+    ...(input.codexAppServerSpawnReadyMs === undefined
+      ? {}
+      : { codexAppServerSpawnReadyMs: input.codexAppServerSpawnReadyMs }),
+    ...(input.codexAppServerThreadResumeMs === undefined
+      ? {}
+      : { codexAppServerThreadResumeMs: input.codexAppServerThreadResumeMs }),
+    ...(input.codexAppServerThreadStartMs === undefined
+      ? {}
+      : { codexAppServerThreadStartMs: input.codexAppServerThreadStartMs }),
+    ...(input.codexAppServerWarmReuseMs === undefined
+      ? {}
+      : { codexAppServerWarmReuseMs: input.codexAppServerWarmReuseMs }),
     ...(input.turnLockWaitMs === undefined ? {} : { turnLockWaitMs: input.turnLockWaitMs }),
     ...(input.sessionResolveMs === undefined ? {} : { sessionResolveMs: input.sessionResolveMs }),
     ...(input.promptBuildMs === undefined ? {} : { promptBuildMs: input.promptBuildMs }),

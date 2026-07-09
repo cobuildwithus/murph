@@ -40,6 +40,7 @@ export const HOSTED_MAILBOX_KINDS = [
   "conversation.message",
   "member.activated",
   "member.channels.updated",
+  "member.preferences.updated",
   "assistant.notification.requested",
   "device-sync.wake",
   "group-newsletter.email-needed",
@@ -58,17 +59,30 @@ export type HostedRuntimeControlMailboxKind =
 
 export const HOSTED_AI_USAGE_ALLOWANCE_PRICED_MODELS = [
   "gpt-5.5",
+  "gpt-5.6-sol",
+  "gpt-5.6-terra",
+  "gpt-5.6-luna",
 ] as const;
 
 export type HostedAiUsageAllowancePricedModel =
   (typeof HOSTED_AI_USAGE_ALLOWANCE_PRICED_MODELS)[number];
 
-// Add models here only after the provider request path sends `service_tier: flex`.
 export const HOSTED_AI_USAGE_OPENAI_FLEX_TOKEN_PRICING_MODELS =
-  ["gpt-5.5"] as readonly HostedAiUsageAllowancePricedModel[];
+  [
+    ...HOSTED_AI_USAGE_ALLOWANCE_PRICED_MODELS,
+  ] as readonly HostedAiUsageAllowancePricedModel[];
 
 export type HostedAiUsageOpenAiFlexTokenPricingModel =
   (typeof HOSTED_AI_USAGE_OPENAI_FLEX_TOKEN_PRICING_MODELS)[number];
+
+// Image models stay separate from HOSTED_AI_USAGE_ALLOWANCE_PRICED_MODELS
+// because that list validates HOSTED_ASSISTANT_MODEL in deploy preflight.
+export const HOSTED_AI_USAGE_ALLOWANCE_OPENAI_IMAGE_PRICED_MODELS = [
+  "gpt-image-2",
+] as const;
+
+export type HostedAiUsageAllowanceOpenAiImagePricedModel =
+  (typeof HOSTED_AI_USAGE_ALLOWANCE_OPENAI_IMAGE_PRICED_MODELS)[number];
 
 export const HOSTED_AI_USAGE_ALLOWANCE_ELEVENLABS_TTS_PRICED_MODELS = [
   "eleven_flash_v2",
@@ -200,6 +214,43 @@ export function isHostedAiUsageOpenAiFlexTokenPricingModelId(
     : false;
 }
 
+export function isHostedAiUsageAllowanceOpenAiImagePricedModelId(
+  value: string,
+): value is HostedAiUsageAllowanceOpenAiImagePricedModel {
+  return HOSTED_AI_USAGE_ALLOWANCE_OPENAI_IMAGE_PRICED_MODELS.includes(
+    value as HostedAiUsageAllowanceOpenAiImagePricedModel,
+  );
+}
+
+export function normalizeHostedAiUsageAllowanceOpenAiImageModelId(
+  value: string | null | undefined,
+): HostedAiUsageAllowanceOpenAiImagePricedModel | null {
+  const normalized = value?.trim().toLowerCase();
+  if (!normalized) {
+    return null;
+  }
+
+  const exact = normalizeHostedAiUsageAllowanceOpenAiImageModelCandidate(
+    normalized,
+  );
+  if (exact) {
+    return exact;
+  }
+
+  const providerScoped = normalized.split("/").at(-1) ?? normalized;
+  const providerScopedExact =
+    normalizeHostedAiUsageAllowanceOpenAiImageModelCandidate(providerScoped);
+  if (providerScopedExact) {
+    return providerScopedExact;
+  }
+
+  const datedSnapshotBase = providerScoped.replace(/-\d{4}-\d{2}-\d{2}$/u, "");
+
+  return normalizeHostedAiUsageAllowanceOpenAiImageModelCandidate(
+    datedSnapshotBase,
+  );
+}
+
 export function isHostedAiUsageOpenAiTokenPricingProviderName(
   value: unknown,
 ): boolean {
@@ -322,6 +373,12 @@ function normalizeHostedAiUsageAllowancePricedModelCandidate(
   value: string,
 ): HostedAiUsageAllowancePricedModel | null {
   return isHostedAiUsageAllowancePricedModelId(value) ? value : null;
+}
+
+function normalizeHostedAiUsageAllowanceOpenAiImageModelCandidate(
+  value: string,
+): HostedAiUsageAllowanceOpenAiImagePricedModel | null {
+  return isHostedAiUsageAllowanceOpenAiImagePricedModelId(value) ? value : null;
 }
 
 function buildHostedAiUsageAllowDecisionSigningPayload(
@@ -1252,6 +1309,12 @@ export interface HostedRuntimeLatencyPhaseBreakdown {
     stagedAtEpochMs?: number;
   };
   provider?: {
+    codexAppServerInitializeMs?: number;
+    codexAppServerPreProviderMs?: number;
+    codexAppServerSpawnReadyMs?: number;
+    codexAppServerThreadResumeMs?: number;
+    codexAppServerThreadStartMs?: number;
+    codexAppServerWarmReuseMs?: number;
     turnLockWaitMs?: number;
     sessionResolveMs?: number;
     promptBuildMs?: number;
@@ -1342,6 +1405,12 @@ export const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS: Record<
     "stagedAtEpochMs",
   ],
   provider: [
+    "codexAppServerInitializeMs",
+    "codexAppServerPreProviderMs",
+    "codexAppServerSpawnReadyMs",
+    "codexAppServerThreadResumeMs",
+    "codexAppServerThreadStartMs",
+    "codexAppServerWarmReuseMs",
     "turnLockWaitMs",
     "sessionResolveMs",
     "promptBuildMs",
@@ -1711,6 +1780,7 @@ export interface HostedWorkspaceCheckpointRequest {
   nextWakeReason?: string | null;
   reason: HostedWorkspaceCheckpointReason;
   redactedStatus?: HostedRuntimeRedactedJson | null;
+  runtimeWakePendingAtCheckpoint?: boolean;
   snapshotRef: HostedExecutionSnapshotRefState;
 }
 
