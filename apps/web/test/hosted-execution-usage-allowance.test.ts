@@ -1004,7 +1004,7 @@ describe("accountHostedAiUsageForAllowanceTx", () => {
     expect(sqlText).toContain('UPDATE "hosted_ai_usage_period"');
     expect(sqlText).toContain('"spent_usd_micros" = "spent_usd_micros" +');
     expect(sqlText).toContain('"last_usage_at" = GREATEST');
-    expect(sqlText).toContain('"limit_notice_sent_at" = CASE');
+    expect(sqlText).not.toContain('"limit_notice_sent_at"');
     expect(sqlText).toContain('"blocked_at" = CASE');
     expect(sqlText).toContain('OR "blocked_at" IS NULL');
     expect(params).toEqual([
@@ -2012,7 +2012,8 @@ describe("resolveHostedAiUsageGate", () => {
     });
   });
 
-  it("raises the current period limit on upgrade without lowering spend", async () => {
+  it("raises the current period limit without lowering spend or clearing the sent notice", async () => {
+    const priorNoticeSentAt = new Date("2026-03-28T12:00:00.000Z");
     const update = vi.fn(async (args?: unknown) => {
       void args;
       return {
@@ -2025,6 +2026,7 @@ describe("resolveHostedAiUsageGate", () => {
     });
     const prisma = createGatePrisma({
       billingPlanCode: "launch_edge_monthly",
+      limitNoticeSentAt: priorNoticeSentAt,
       limitUsdMicros: 10_000_000n,
       periodEnd: new Date("2026-04-01T00:00:00.000Z"),
       periodStart: new Date("2026-03-01T00:00:00.000Z"),
@@ -2045,7 +2047,7 @@ describe("resolveHostedAiUsageGate", () => {
     expect(update).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({
         blockedAt: null,
-        limitNoticeSentAt: null,
+        limitNoticeSentAt: priorNoticeSentAt,
         limitUsdMicros: 25_000_000n,
       }),
     }));
@@ -2118,7 +2120,7 @@ describe("resolveHostedAiUsageGate", () => {
     expect(updateData).not.toHaveProperty("spentUsdMicros");
   });
 
-  it("clears stale block and notice metadata after a manual period-counter reset", async () => {
+  it("clears stale block metadata without clearing the sent notice marker", async () => {
     const aggregate = vi.fn(async () => ({
       _max: {
         occurredAt: new Date("2026-04-20T12:00:00.000Z"),
@@ -2166,7 +2168,7 @@ describe("resolveHostedAiUsageGate", () => {
     expect(update).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({
         blockedAt: null,
-        limitNoticeSentAt: null,
+        limitNoticeSentAt: new Date("2026-04-20T12:01:00.000Z"),
       }),
     }));
     const updateData = (update.mock.calls[0]?.[0] as { data?: Record<string, unknown> } | undefined)
@@ -2903,6 +2905,7 @@ function createGatePrisma(input: {
     periodStart: Date;
     spentUsdMicros: bigint;
   } | null;
+  limitNoticeSentAt?: Date | null;
   limitUsdMicros?: bigint;
   periodEnd?: Date;
   periodStart?: Date;
@@ -2956,7 +2959,7 @@ function createGatePrisma(input: {
     lastUsageAt: input.spentUsdMicros > 0n
       ? new Date(periodStart.getTime() + 60_000)
       : null,
-    limitNoticeSentAt: null,
+    limitNoticeSentAt: input.limitNoticeSentAt ?? null,
     limitUsdMicros: input.limitUsdMicros ?? 10_000_000n,
     periodEnd,
     periodStart,

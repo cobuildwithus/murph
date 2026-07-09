@@ -1464,7 +1464,6 @@ async function ensureHostedAiUsageAllowancePeriodTx(input: {
     };
   }
 
-  const limitIncreased = current.limitUsdMicros < resolved.limitUsdMicros;
   const metadata = buildHostedAiUsageAllowancePeriodMetadata({
     blockedAt: current.blockedAt,
     limitNoticeSentAt: current.limitNoticeSentAt,
@@ -1483,7 +1482,7 @@ async function ensureHostedAiUsageAllowancePeriodTx(input: {
       billingPlanCode: resolved.billingPlanCode,
       blockedAt: metadata.blockedAt,
       limitUsdMicros: resolved.limitUsdMicros,
-      limitNoticeSentAt: limitIncreased ? null : metadata.limitNoticeSentAt,
+      limitNoticeSentAt: metadata.limitNoticeSentAt,
       periodEnd: resolved.periodEnd,
       updatedAt: input.now,
     },
@@ -1607,10 +1606,6 @@ async function accountHostedAiUsageAllowancePeriodSpendTx(input: {
     SET
       "spent_usd_micros" = "spent_usd_micros" + ${input.costUsdMicros},
       "last_usage_at" = GREATEST(COALESCE("last_usage_at", ${input.recordOccurredAt}), ${input.recordOccurredAt}),
-      "limit_notice_sent_at" = CASE
-        WHEN "spent_usd_micros" < "limit_usd_micros" THEN NULL
-        ELSE "limit_notice_sent_at"
-      END,
       "blocked_at" = CASE
         WHEN "spent_usd_micros" + ${input.costUsdMicros} >= "limit_usd_micros" THEN
           CASE
@@ -1885,7 +1880,7 @@ function buildHostedAiUsageAllowancePeriodMetadata(input: {
   if (input.spentUsdMicros < input.limitUsdMicros) {
     return {
       blockedAt: null,
-      limitNoticeSentAt: null,
+      limitNoticeSentAt: input.limitNoticeSentAt,
     };
   }
 
