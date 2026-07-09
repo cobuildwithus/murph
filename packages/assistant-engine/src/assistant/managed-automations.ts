@@ -41,6 +41,7 @@ export interface MurphManagedAutomationSeed {
   automationId: string
   assistantTargetOverride?: AutomationAssistantTargetOverride | null
   continuityPolicy?: AutomationContinuityPolicy
+  excludeFromGroupChatRoutes?: boolean
   hostedRuntimeOnly?: boolean
   instructions: string
   requiredRuntimeEnvKeys?: readonly string[]
@@ -514,10 +515,10 @@ export async function applyMurphManagedAutomations(
   const now = input.now ?? new Date()
   const rawSeeds =
     input.seeds ??
-    [
+    markPersonalMurphManagedAutomationSeeds([
       ...MURPH_MANAGED_AUTOMATIONS,
       ...(await buildExperimentFinalResultsSeeds({ vaultRoot: input.vaultRoot, now })),
-    ]
+    ])
   const seeds = rawSeeds.filter((seed) =>
     murphManagedAutomationAppliesToRuntime(seed, input.runtimeEnv)
   )
@@ -551,6 +552,25 @@ export async function applyMurphManagedAutomations(
       automationId: rawSeed.automationId,
       vaultRoot: input.vaultRoot,
     })
+
+    if (
+      existing &&
+      isMurphManagedAutomationExcludedFromRoute(rawSeed, existing.route)
+    ) {
+      if (existing.status !== 'active') {
+        result.skipped += 1
+        continue
+      }
+
+      await patchAutomation({
+        lookup: existing.automationId,
+        now,
+        status: 'archived',
+        vaultRoot: input.vaultRoot,
+      })
+      result.updated += 1
+      continue
+    }
 
     if (!existing) {
       let stableKey: string | null = null
@@ -601,6 +621,10 @@ export async function applyMurphManagedAutomations(
 
       const route = await resolveCreateRoute()
       if (!route) {
+        result.skipped += 1
+        continue
+      }
+      if (isMurphManagedAutomationExcludedFromRoute(seed, route)) {
         result.skipped += 1
         continue
       }
@@ -723,6 +747,15 @@ export async function applyMurphManagedAutomations(
   }
 
   return result
+}
+
+function markPersonalMurphManagedAutomationSeeds(
+  seeds: readonly MurphManagedAutomationSeed[],
+): MurphManagedAutomationSeed[] {
+  return seeds.map((seed) => ({
+    ...seed,
+    excludeFromGroupChatRoutes: true,
+  }))
 }
 
 async function resolveMurphManagedScheduleStableKey(input: {
@@ -977,6 +1010,15 @@ function murphManagedAutomationAppliesToRuntime(
 ): boolean {
   return seed.hostedRuntimeOnly !== true ||
     isHostedRuntimeProcessEnv(runtimeEnv ?? {})
+}
+
+function isMurphManagedAutomationExcludedFromRoute(
+  seed: MurphManagedAutomationSeed,
+  route: AutomationRoute | null | undefined,
+): boolean {
+  return seed.excludeFromGroupChatRoutes === true &&
+    route?.channel === 'linq' &&
+    route.threadIsDirect === false
 }
 
 function normalizeMurphManagedAutomationSummary(
