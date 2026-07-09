@@ -56,12 +56,167 @@ export interface ChangelogQuery {
 
 const RAW_CHANGELOG_EDITIONS = [
   {
+    id: "2026-07-08",
+    publishedOn: "2026-07-08",
+    title: "Advice grounded in your own data",
+    summary:
+      "Ask Murph how to improve your deep sleep and it now opens with what your own data says, instead of a tip list you could have gotten anywhere. Weekly automations got quieter and sharper, the images Murph makes are kept for later, and Apple Health finally shows up on the connect page.",
+    items: [
+      {
+        id: "grounded-health-advice",
+        kind: "feature",
+        priority: 5,
+        title: "Advice grounded in your own data",
+        summary:
+          "Ask how to fix your deep sleep and Murph leads with what it found in your wearable trends, vault, and memory, or asks the couple of questions it needs before answering.",
+        details:
+          "When the picture is too thin to beat a generic answer, Murph says so and gathers what's missing rather than guessing at advice that happens to sound personal.",
+        relevanceTags: ["assistant", "health", "wearables"],
+        sourcePullRequests: [480],
+        tryIt: {
+          label: "Ask about your sleep",
+          prompt: "How do I improve my deep sleep?",
+        },
+      },
+      {
+        id: "weekly-improvement-coach",
+        kind: "feature",
+        priority: 4,
+        title: "A Tuesday nudge, only when it's worth one",
+        summary:
+          "Once a week Murph looks for a single clearly fixable thing in your data, like low deep sleep or no strength training, and offers to work on it with you. Most weeks it stays quiet.",
+        relevanceTags: ["automations", "coaching", "health"],
+        sourcePullRequests: [481],
+      },
+      {
+        id: "generated-images-saved-to-vault",
+        kind: "feature",
+        priority: 4,
+        title: "The images Murph makes stick around",
+        summary:
+          "Every image Murph generates, including a group chat photo, is saved to your vault, so you can ask for a variation later instead of starting from scratch.",
+        relevanceTags: ["images", "vault", "groups"],
+        sourcePullRequests: [477],
+      },
+      {
+        id: "quieter-weekly-messages",
+        kind: "improvement",
+        priority: 4,
+        title: "Weekly notes stay quiet unless they have something",
+        summary:
+          "The weekly digest and the research scout used to read your dashboard back to you. Now an ordinary week sends nothing, and a note only goes out when it has something you'd remember.",
+        relevanceTags: ["automations", "newsletter"],
+        sourcePullRequests: [482],
+      },
+      {
+        id: "apple-health-connect-card",
+        kind: "improvement",
+        priority: 3,
+        title: "Apple Health shows up on the connect page",
+        summary:
+          "Apple Health now appears on the connect page with its real status from your iPhone, instead of being left off the list while its data was already flowing in.",
+        relevanceTags: ["wearables", "onboarding", "apple-health"],
+        sourcePullRequests: [449],
+      },
+      {
+        id: "whoop-sleep-beats-empty-copies",
+        kind: "improvement",
+        priority: 3,
+        title: "Real sleep data wins over empty copies",
+        summary:
+          "When Apple Health forwards a hollow copy of a night your WHOOP already recorded, Murph now reads the WHOOP record instead of reporting zero deep and REM sleep.",
+        relevanceTags: ["sleep", "wearables", "whoop"],
+        sourcePullRequests: [471],
+      },
+      {
+        id: "songs-fit-their-length",
+        kind: "improvement",
+        priority: 3,
+        title: "Generated songs fit their length",
+        summary:
+          "A 30-second song used to cram a full verse and chorus into the time and come back sung double-time. Murph now writes to a word budget that matches the duration.",
+        relevanceTags: ["music", "assistant"],
+        sourcePullRequests: [479],
+      },
+      {
+        id: "reminders-follow-your-current-line",
+        kind: "improvement",
+        priority: 3,
+        title: "Scheduled reminders follow your current line",
+        summary:
+          "If the number you text Murph on changes, scheduled reminders now arrive where you actually are instead of failing against the route they were set up on.",
+        relevanceTags: ["reminders", "imessage", "reliability"],
+        sourcePullRequests: [476],
+      },
+      {
+        id: "murph-remembers-your-name",
+        kind: "improvement",
+        priority: 3,
+        title: "Murph remembers the name you gave it",
+        summary:
+          "Your preferred name lives in Murph's memory now, so group chats introduce you by it and existing accounts get it filled in without being asked again.",
+        relevanceTags: ["memory", "groups", "onboarding"],
+        sourcePullRequests: [478],
+      },
+      {
+        id: "group-bursts-reach-murph",
+        kind: "improvement",
+        priority: 3,
+        title: "Busy group chats don't stall your message",
+        summary:
+          "A burst of more than ten messages in a group chat used to leave the later ones waiting for the next wake-up. Every message now reaches Murph while it's already awake.",
+        relevanceTags: ["groups", "messaging", "performance"],
+        sourcePullRequests: [453],
+      },
+      {
+        id: "usage-limit-keeps-your-message",
+        kind: "improvement",
+        priority: 3,
+        title: "Hitting your limit no longer eats your message",
+        summary:
+          "If your AI allowance runs out mid-conversation, the message you sent is held and answered when the limit resets, and the notice about it goes out exactly once.",
+        relevanceTags: ["usage", "messaging"],
+        sourcePullRequests: [],
+      },
+      {
+        id: "shorter-group-join-screen",
+        kind: "improvement",
+        priority: 3,
+        title: "A shorter group join screen",
+        summary:
+          "Joining a group is less reading: trimmed copy throughout, and the consent box only asks for the agreement you haven't already given.",
+        relevanceTags: ["groups", "onboarding", "polish"],
+        sourcePullRequests: [],
+      },
+      {
+        id: "small-fixes-july-eight",
+        kind: "improvement",
+        priority: 3,
+        title: "A handful of small fixes",
+        summary:
+          "Murph stops quote-replying your texts, the typing bubble works in group chats again, image generation waits longer before giving up, and a skipped device sync retries instead of waiting a day.",
+        relevanceTags: ["polish", "imessage", "reliability"],
+        sourcePullRequests: [],
+      },
+    ],
+  },
+  {
     id: "2026-07-07",
     publishedOn: "2026-07-07",
-    title: "Experiments that track themselves",
+    title: "Shorter texts, self-tracking experiments",
     summary:
-      "Experiments now keep their own score: workouts from your watch count automatically with no nagging, and sessions Murph can't sense (sauna, tretinoin, supplements) count as done unless you say otherwise. Plus a weekly health newsletter for your group, faster answers when you interrupt background work, and a simpler family invite.",
+      "Murph now texts in a few short bubbles instead of one wall of text. Experiments keep their own score: workouts from your watch count automatically, and sessions Murph can't sense (sauna, tretinoin, supplements) count as done unless you say otherwise. Plus a weekly health newsletter for your group, group renames and photos, and faster answers when you interrupt background work.",
     items: [
+      {
+        id: "reply-message-bubbles",
+        kind: "feature",
+        priority: 5,
+        title: "Murph texts the way people text",
+        summary:
+          "On iMessage, Telegram, and WhatsApp, a reply now arrives as two or three short bubbles instead of one block of text, with the question last and nothing after it.",
+        relevanceTags: ["messaging", "imessage", "polish"],
+        sourcePullRequests: [447],
+      },
       {
         id: "experiments-track-themselves",
         kind: "feature",
@@ -93,6 +248,82 @@ const RAW_CHANGELOG_EDITIONS = [
           label: "Start a newsletter",
           prompt: "Set up a weekly health newsletter for our group.",
         },
+      },
+      {
+        id: "group-rename-and-avatar",
+        kind: "feature",
+        priority: 4,
+        title: "Rename your group chat and give it a photo",
+        summary:
+          "Ask Murph in a group chat to rename it or set the group photo and it changes the real iMessage chat. It can draw the picture or use one someone already sent.",
+        relevanceTags: ["groups", "imessage", "images"],
+        sourcePullRequests: [452, 457, 460],
+        tryIt: {
+          label: "Name the group",
+          prompt: "Rename this chat to Sunday Crew and make us a group photo.",
+        },
+      },
+      {
+        id: "newsletter-setup-questions",
+        kind: "improvement",
+        priority: 3,
+        title: "The newsletter asks before it starts",
+        summary:
+          "Murph now asks who the group newsletter is for, what belongs in it, and what to call it rather than inventing a name and creating it on the spot.",
+        relevanceTags: ["newsletter", "groups", "onboarding"],
+        sourcePullRequests: [438, 454, 455],
+      },
+      {
+        id: "challenge-score-sharing",
+        kind: "feature",
+        priority: 4,
+        title: "Challenges score steps, distance, or sessions",
+        summary:
+          "A group challenge can now ask for the exact daily number it needs, like running distance or strength sessions, and each person approves that one number before anything is shared.",
+        details:
+          "Murph never sees routes or raw workouts for a challenge, only the bounded daily total the challenge was built on.",
+        relevanceTags: ["groups", "challenges", "privacy"],
+        sourcePullRequests: [445, 459],
+      },
+      {
+        id: "weekly-note-alternates-features",
+        kind: "improvement",
+        priority: 3,
+        title: "Your weekly note alternates news and features",
+        summary:
+          "The weekly note from Murph now carries what shipped every other week, and in the off weeks it surfaces a feature you have not tried yet.",
+        relevanceTags: ["automations", "discovery"],
+        sourcePullRequests: [436],
+      },
+      {
+        id: "homepage-group-chat-morph",
+        kind: "improvement",
+        priority: 3,
+        title: "The homepage tells the group story",
+        summary:
+          "The hero phone on the homepage now morphs from a one-on-one thread into a group chat mid-demo, and the page explains challenges and the group newsletter for anyone who does not watch it.",
+        relevanceTags: ["landing", "design", "groups"],
+        sourcePullRequests: [420],
+      },
+      {
+        id: "vault-files-actually-send",
+        kind: "improvement",
+        priority: 3,
+        title: "Files from your vault actually arrive",
+        summary:
+          "Asking Murph to text you a PDF from your vault used to end with Murph saying it sent one that never showed up. Attachments deliver over iMessage now, and a failed send is reported instead of claimed.",
+        relevanceTags: ["imessage", "vault", "reliability"],
+        sourcePullRequests: [451],
+      },
+      {
+        id: "faster-recovery-from-stalled-replies",
+        kind: "improvement",
+        priority: 3,
+        title: "A stalled reply recovers in seconds, not minutes",
+        summary:
+          "When the connection to the model goes silent mid-reply, Murph gives up and reconnects after 90 seconds instead of sitting there for five minutes.",
+        relevanceTags: ["performance", "reliability"],
+        sourcePullRequests: [442],
       },
       {
         id: "messages-preempt-background-work",
