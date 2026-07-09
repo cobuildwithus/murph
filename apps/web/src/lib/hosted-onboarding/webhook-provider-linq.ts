@@ -1354,13 +1354,18 @@ async function planHostedLinqDailyQuotaAdmissionDenied(input: {
     dailyQuotaReply: string;
   };
 }): Promise<HostedOnboardingLinqDirectPlan | null> {
-  if (input.dailyState.inboundCount > HOSTED_LINQ_DAILY_TEXT_LIMIT) {
-    if (input.dailyState.quotaReplySentAt) {
+  const dailyState = input.dailyState;
+  if (!dailyState) {
+    return null;
+  }
+
+  if (dailyState.inboundCount > HOSTED_LINQ_DAILY_TEXT_LIMIT) {
+    if (dailyState.quotaReplySentAt) {
       return logHostedLinqWebhookPlannerDecisionAndReturn(
         buildIgnoredLinqWebhookPlan("daily-quota-reached"),
         buildHostedLinqWebhookPlannerDetails(input.event, input.context, {
           ...input.logDetails,
-          dailyInboundCount: input.dailyState.inboundCount,
+          dailyInboundCount: dailyState.inboundCount,
           reason: "daily-quota-reached",
           routeStage: input.routeStages.dailyQuotaReached,
         }),
@@ -1378,7 +1383,7 @@ async function planHostedLinqDailyQuotaAdmissionDenied(input: {
       }),
       buildHostedLinqWebhookPlannerDetails(input.event, input.context, {
         ...input.logDetails,
-        dailyInboundCount: input.dailyState.inboundCount,
+        dailyInboundCount: dailyState.inboundCount,
         reason: "sent-daily-quota-reply",
         routeStage: input.routeStages.dailyQuotaReply,
       }),

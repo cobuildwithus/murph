@@ -427,7 +427,7 @@ async function sendHostedRuntimeAiUsageLimitNoticeForPendingConversation(input: 
 
   if (isHostedTelegramConversationMessageWake(wake)) {
     if (decision.reason !== "ai_usage_limit_exceeded") {
-      return;
+      return { status: "not_applicable" };
     }
     const noticeDelivery = prepareHostedRuntimeTelegramUsageLimitNotice({
       target: wake.message.telegramMessage.threadId,
