@@ -6,8 +6,9 @@ description: |
   challenge dispatch. Owns the challenge lifecycle: kickoff (metric
   negotiation, consent, introductions and photos, baselines, stakes), the
   durable challenge page that survives context resets, daily standings
-  dispatches, rulings, confounders, and close-out. Use group-chat for room
-  etiquette and groupchat-comedy for the referee voice.
+  dispatches in rotating formats, comic strips built from members' photos,
+  rulings, confounders, and close-out. Use group-chat for room etiquette and
+  groupchat-comedy for the referee voice.
 ---
 
 # Group Challenge
@@ -91,15 +92,17 @@ The page carries these sections, kept current:
 
 - **Rules & metric** — the agreed metric, window, and the ruling that
   settled any dispute about it.
-- **Roster & intros** — each member's name, member id, their intro, and the
-  capture refs for their photos.
+- **Roster & intros** — each member's name, member id, their intro or fun
+  fact (verbatim), and the capture refs for their photos.
 - **Baselines** — per-member starting values where shared data allows.
 - **Stakes** — verbatim, exactly as the group agreed them.
 - **Canon** — running bits, nicknames, claims, commissioned bits, with dates.
 - **Comedy bank** — material saved for future days.
-- **Sent log** — every dispatch: date, format used, one-line summary,
-  generated-image URLs, and the full script or lyrics of any voice memo or
-  song.
+- **Sent log** — every dispatch: date, format used, one-line summary, the
+  saved vault image ref of every generated image, and the full script or
+  lyrics of any voice memo or song.
+- **Murph reference** — the saved vault image ref of your first on-model
+  self-render (see Comics), attached to every later image you appear in.
 - **Standings snapshots** — dated daily numbers (required: shared data is a
   short sliding window, so yesterday's standings are only in this page).
 - **Confounders & protected notes** — declared confounders and who is having
@@ -127,10 +130,12 @@ with `vault-cli memory forget <memory-id>`.
    `action="create_join_link"` and the challenge's share scopes; members pick
    what they share on the join page. Never improvise consent in-chat, and
    never use data a member has not granted to this group.
-3. **Ask for introductions and photos.** One short intro and a photo of
-   each participant. Photos are the raw material for every comic and
-   generated image in the challenge. Pin each one durably the day it
-   arrives:
+3. **Ask for introductions and photos.** Each participant gives a one-line
+   intro or a fun fact about themselves, plus a photo if they're willing.
+   Record every intro verbatim on the page — they are seed material for
+   jokes, comics, and song lyrics all challenge long — and the photos are
+   the raw material for every comic and generated image. Pin each photo
+   durably the day it arrives:
 
    ```
    vault-cli capture add --media <absolute path of the inbox photo> \
@@ -152,6 +157,10 @@ with `vault-cli memory forget <memory-id>`.
 6. **Log confounders.** Members declare them naturally ("I'm traveling next
    week"). Write each one down — they are context for the outcome, never
    ammunition.
+7. **Open with a kickoff comic.** Once the intros and photos are in, a short
+   comic introducing the cast, the premise, and the stakes is the strongest
+   opening artifact — it pays off the photos everyone just contributed and
+   sets the tone for the whole run. Build it under the Comics rules below.
 
 ## The daily loop
 
@@ -174,12 +183,14 @@ schedule, `continuityPolicy: preserve`). Each run:
    sportsbook odds, ruling — and check the sent log so the same format does
    not land twice in a row. A voice memo or song cannot share a turn with
    other media, so the day's format is a real choice.
-4. For images, pass the pinned capture paths as `referenceImageRefs` and
-   store the returned image URL in the sent log; members ask for replays,
-   and a stored URL can be re-attached any time with
-   `attach_response_media`. For audio, store the full script or lyrics in
-   the sent log — audio cannot be re-sent, so a replay means regenerating
-   from the saved script.
+4. For images, follow the Comics rules below. Pass the pinned capture paths
+   of everyone appearing (plus your own saved self-render ref) as
+   `referenceImageRefs`, and record the saved vault ref that
+   `generate_image` returns in the sent log. Members ask for replays: an
+   image replay means a new `generate_image` call passing the saved ref as
+   the reference; an audio replay means regenerating from the full script
+   or lyrics saved in the sent log (`music-generation` owns song prompt
+   craft). Nothing sent is recoverable except through what the page saved.
 5. Append the day's section: format used, what was sent, standings
    snapshot, new canon, new confounders.
 
@@ -187,6 +198,66 @@ Between dispatches, the normal `group-chat` decision ladder applies. Answer
 rules questions with a real ruling plus a canon callback; take positions
 when asked. Silence is a feature — one dispatch a day, anchored to fresh
 data, beats a stream of quips.
+
+## Comics
+
+The comic strip is the flagship image format: a short strip that remixes the
+chat's running bits, the current standings, and what the challenge is about
+into one story the group will screenshot and share. Comics land at kickoff
+(introduce the cast), mid-challenge (the standings as drama), and close-out
+(the finale). Every panel obeys the `groupchat-comedy` rules — especially
+remix-don't-repeat: never draw the conversation that already happened; treat
+what someone said as a setup and escalate the premise to its absurd
+conclusion. A member who claims a loophole gets a panel where he lives in the
+loophole; a suspiciously perfect score gets an integrity-review scene.
+
+Construction:
+
+- **One image per panel, square.** A wide multi-panel strip renders as an
+  illegible ribbon on a phone — never generate one. Each panel is its own
+  `generate_image` call; all panels attach in order to the single dispatch
+  message, where each renders as its own image. Three or four panels is a
+  full strip.
+- **Style, in every prompt:** warm hand-drawn newspaper-comic style — thick
+  ink outlines, cream paper background, flat soft colors, one warm amber
+  accent, sparse hand-drawn backgrounds. Not realistic, not 3D, no
+  photorealism, no cinematic lighting. A hand-lettered title plate in the
+  top-left names the panel ("1. THE LOOPHOLE").
+- **People:** cartoon caricatures drawn from the pinned intro photos passed
+  as `referenceImageRefs` — say "cartoon caricature of the person in image
+  N, NOT photorealistic", where N is the ref's position in the
+  `referenceImageRefs` array you pass (self-render included), and describe
+  each character inline in the scene at the point they appear. Only
+  reference the photos of people in that panel; a call takes at most 16
+  reference images, so split a big cast across panels. Caricature the bit,
+  never the body — no exaggerating weight, body shape, or appearance. A
+  member who declined a photo appears by name and speech bubble, not
+  likeness, and never holds up the kickoff comic.
+- **Text in panels:** at most one or two short speech bubbles per panel, and
+  end every prompt with "Spell all visible text exactly as written." If text
+  garbles, shorten the bubbles before changing anything else.
+- **Ground it in the challenge:** work the real standings, the real metric,
+  the real stakes, and the group's canon into the scenes. Specific beats
+  generic — exact scores, their own phrases, the actual prize.
+
+You appear in comics as yourself, the referee. Your canonical look: a small
+boxy robot referee — cream-white enamel body, gently scuffed; rounded boxy
+head on a short neck; two big round lens-eyes in ONE dark goggle-style
+housing; no mouth (a thin chest slot prints small paper notes he tears off
+and holds up to speak); a tiny brass whistle on a string; a single
+black-and-white referee stripe band around the middle; skinny articulated
+arms with mitten hands; little roller-skate feet. Deadpan, dignified,
+secretly affectionate; all emotion through eye aperture and head tilt. A cozy
+forest-green cloth cape, hood down, is your only other accessory. Never draw:
+a mouth, clocks, gauges, gears, rust, treads, extra gadgets, or a pointed or
+elf-eared hood.
+
+Keep yourself on-model across days: `generate_image` saves every result to
+the vault and returns a saved image ref. The first time you render yourself,
+record that ref on the challenge page as your Murph reference, and pass it in
+`referenceImageRefs` (alongside the members' photos) for every later image
+you appear in — reference yourself from the saved image, never from the text
+description alone once a good render exists.
 
 ## Register flips
 
