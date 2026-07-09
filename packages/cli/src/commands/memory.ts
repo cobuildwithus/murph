@@ -2,6 +2,7 @@ import { Cli, z } from "incur";
 import { VaultCliError } from "@murphai/operator-config/vault-cli-errors";
 
 import {
+  MEMORY_DISPLAY_NAME_MAX_LENGTH,
   memoryDocumentSnapshotSchema,
   memoryRecordSchema,
   memorySectionSchema,
@@ -11,6 +12,7 @@ import {
   forgetMemory,
   getMemoryRecord,
   readMemoryDocument,
+  setMemoryDisplayName,
   updateMemory,
   upsertMemory,
 } from "@murphai/core";
@@ -38,6 +40,12 @@ const memoryTextArgSchema = z
   .string()
   .min(1)
   .describe("Memory text to store in the canonical memory document.");
+
+const memoryDisplayNameArgSchema = z
+  .string()
+  .min(1)
+  .max(MEMORY_DISPLAY_NAME_MAX_LENGTH)
+  .describe("Preferred display name to store in canonical memory.");
 
 const memoryShowResultSchema = z.object({
   vault: z.string().min(1),
@@ -87,6 +95,26 @@ export function registerMemoryCommands(cli: Cli.Cli) {
         vault: options.vault,
         document,
         memory,
+      };
+    },
+  });
+
+  memory.command("set-name", {
+    description: "Set the user's preferred display name in canonical memory.",
+    args: z.object({
+      displayName: memoryDisplayNameArgSchema,
+    }),
+    options: vaultOptionSchema,
+    output: memoryUpsertResultSchema,
+    async run({ args, options }) {
+      const result = await setMemoryDisplayName(options.vault, {
+        displayName: args.displayName,
+      });
+      return {
+        vault: options.vault,
+        created: result.created,
+        document: result.document,
+        memory: result.record,
       };
     },
   });

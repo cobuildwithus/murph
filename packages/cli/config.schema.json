@@ -4110,6 +4110,10 @@
                   "type": "object",
                   "additionalProperties": false
                 },
+                "set-name": {
+                  "type": "object",
+                  "additionalProperties": false
+                },
                 "upsert": {
                   "type": "object",
                   "additionalProperties": false,
@@ -4155,26 +4159,6 @@
                   }
                 },
                 "forget": {
-                  "type": "object",
-                  "additionalProperties": false
-                }
-              }
-            }
-          }
-        },
-        "profile": {
-          "type": "object",
-          "additionalProperties": false,
-          "properties": {
-            "commands": {
-              "type": "object",
-              "additionalProperties": false,
-              "properties": {
-                "show": {
-                  "type": "object",
-                  "additionalProperties": false
-                },
-                "set-name": {
                   "type": "object",
                   "additionalProperties": false
                 }

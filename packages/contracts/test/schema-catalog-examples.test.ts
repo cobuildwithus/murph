@@ -24,7 +24,6 @@ import {
 } from "../src/integration-ingest.ts";
 import { memoryDocumentFrontmatterSchema as memoryDocumentFrontmatterContract } from "../src/memory.ts";
 import { preferencesDocumentSchema as preferencesDocumentContract } from "../src/preferences.ts";
-import { profileDocumentFrontmatterSchema as profileFrontmatterContract } from "../src/profile.ts";
 import { scheduledLogFrontmatterSchema as scheduledLogFrontmatterContract } from "../src/scheduled-log.ts";
 import {
   conditionImportPayloadSchema as conditionImportPayloadContract,
@@ -86,7 +85,6 @@ import {
   memoryDocumentFrontmatterSchema,
   metricSampleRecordSchema,
   preferencesDocumentSchema,
-  profileFrontmatterSchema,
   protocolFrontmatterSchema,
   providerFrontmatterSchema,
   recipeFrontmatterSchema,
@@ -126,7 +124,6 @@ const schemaFixtures = [
   ["frontmatter-habitat", habitatFrontmatterSchema, habitatFrontmatterContract],
   ["frontmatter-journal-day", journalDayFrontmatterSchema, journalDayFrontmatterContract],
   ["frontmatter-memory", memoryDocumentFrontmatterSchema, memoryDocumentFrontmatterContract],
-  ["frontmatter-profile", profileFrontmatterSchema, profileFrontmatterContract],
   ["frontmatter-provider", providerFrontmatterSchema, providerFrontmatterContract],
   ["frontmatter-protocol", protocolFrontmatterSchema, protocolFrontmatterContract],
   ["frontmatter-regimen", regimenFrontmatterSchema, regimenFrontmatterContract],

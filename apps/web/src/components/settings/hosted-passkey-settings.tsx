@@ -2,8 +2,8 @@
 
 import { Fingerprint } from "lucide-react";
 
-import { useAuth } from "@/src/components/hosted-onboarding/auth-dialog-provider";
 import { usePasskeyWalletMfa } from "@/src/components/sensitive-actions/use-passkey-wallet-mfa";
+import { AuthButton } from "@/src/components/ui/auth-button";
 import { Button } from "@/src/components/ui/button";
 import type { HostedPrivyWalletMfaStatus } from "@/src/lib/hosted-onboarding/privy-wallet-mfa";
 import { cn } from "@/src/lib/utils";
@@ -29,7 +29,6 @@ function PasskeySetup({
 }: {
   secureApprovalStatus: HostedPrivyWalletMfaStatus;
 }) {
-  const { openAuthDialog } = useAuth();
   const {
     clientAuthenticated,
     configured,
@@ -109,15 +108,15 @@ function PasskeySetup({
           : showReauthAction
             ? (
                 <div className="shrink-0">
-                  <Button
+                  <AuthButton
                     type="button"
                     size="default"
                     variant="default"
                     disabled={isRunning}
-                    onClick={openAuthDialog}
+                    authSatisfied={clientAuthenticated}
                   >
                     Sign in
-                  </Button>
+                  </AuthButton>
                 </div>
               )
           : null}

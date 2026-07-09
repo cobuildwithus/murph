@@ -1,6 +1,6 @@
 "use client";
 
-import { useLinkAccount, useUser } from "@privy-io/react-auth";
+import { useLinkAccount, usePrivy, useUser } from "@privy-io/react-auth";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
@@ -29,6 +29,7 @@ export function ConnectTelegram(props: {
   onSynced?: (payload: HostedTelegramSyncResult) => Promise<void> | void;
 }) {
   const { authenticated, initialTelegramAccount, onSynced } = props;
+  const { authenticated: privyAuthenticated, ready: privyReady } = usePrivy();
   const { refreshUser } = useUser();
   const autoSyncedTelegramUserIdRef = useRef<string | null>(null);
   const syncRequestSequenceRef = useRef(0);
@@ -46,6 +47,7 @@ export function ConnectTelegram(props: {
   });
   const currentTelegram = displayState.currentTelegram;
   const canManageTelegram = authenticated;
+  const clientAuthenticated = privyReady && privyAuthenticated;
   const isBusy = isLinkingTelegram || (isSyncingTelegram && !isQuietSyncingTelegram);
 
   const { linkTelegram } = useLinkAccount({
@@ -156,6 +158,16 @@ export function ConnectTelegram(props: {
       return;
     }
 
+    if (!privyReady) {
+      setErrorMessage("Telegram linking is still loading. Try again in a moment.");
+      return;
+    }
+
+    if (!privyAuthenticated) {
+      setErrorMessage("Sign in again before linking Telegram.");
+      return;
+    }
+
     if (typeof linkTelegram !== "function") {
       setErrorMessage("Telegram linking is not available yet.");
       return;
@@ -218,6 +230,8 @@ export function ConnectTelegram(props: {
       ) : (
         <HostedTelegramSettingsContent
           botLink={botLink}
+          clientAuthenticated={clientAuthenticated}
+          clientReady={privyReady}
           currentTelegram={currentTelegram}
           isBusy={isBusy}
           isLinkingTelegram={isLinkingTelegram}

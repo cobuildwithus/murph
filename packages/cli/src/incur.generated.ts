@@ -213,12 +213,11 @@ declare module 'incur' {
       'measurement show': { args: { id: string }; options: { requestId?: string } }
       'medication history add': { args: { title: string }; options: { requestId?: string; id?: string; slug?: string; stoppedOn?: string; schedule?: string; substance?: string; dose?: number; unit?: string; group?: string; note?: string; relatedGoalId?: string[]; relatedConditionId?: string[]; relatedRegimenId?: string[]; startedOn: string } }
       'memory forget': { args: { memoryId: string }; options: {} }
+      'memory set-name': { args: { displayName: string }; options: {} }
       'memory show': { args: { memoryId?: string }; options: {} }
       'memory update': { args: { memoryId: string; text: string }; options: { section?: "Identity" | "Preferences" | "Instructions" | "Context" } }
       'memory upsert': { args: { text: string }; options: { section: "Identity" | "Preferences" | "Instructions" | "Context" } }
       'model': { args: {}; options: { show?: boolean; preset?: "codex"; model?: string; modelProvider?: string; codexCommand?: string; profile?: string; codexHome?: string; reasoningEffort?: "low" | "medium" | "high" | "xhigh"; oss?: boolean } }
-      'profile set-name': { args: { displayName: string }; options: {} }
-      'profile show': { args: {}; options: {} }
       'protocol import-json': { args: {}; options: { requestId?: string; input: string } }
       'protocol list': { args: {}; options: { requestId?: string; status?: string; commonsProtocol?: string; limit: number } }
       'protocol show': { args: { id: string }; options: { requestId?: string } }

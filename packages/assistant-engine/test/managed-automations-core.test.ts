@@ -16,6 +16,7 @@ import {
   MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID,
   MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID,
   MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID,
+  MURPH_WEEKLY_IMPROVEMENT_COACH_AUTOMATION_ID,
   MURPH_WEEKLY_HEALTH_RESEARCH_SCOUT_AUTOMATION_ID,
   MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID,
   applyMurphManagedAutomations,
@@ -73,7 +74,7 @@ describe('applyMurphManagedAutomations core integration', () => {
       now: new Date('2026-06-09T12:00:00.000Z'),
       vaultRoot,
     })).resolves.toEqual({
-      created: 4,
+      created: 5,
       skipped: 0,
       updated: 0,
     })
@@ -176,6 +177,35 @@ describe('applyMurphManagedAutomations core integration', () => {
     expect(insightRecord?.instructions).toContain('Suppress true-but-boring findings')
     expect(insightRecord?.instructions).toContain('missing data, messy tags')
     expect(insightRecord?.instructions).toContain('Murph cannot currently see X')
+
+    const improvementCoachRecord = await showAutomation({
+      automationId: MURPH_WEEKLY_IMPROVEMENT_COACH_AUTOMATION_ID,
+      vaultRoot,
+    })
+
+    expect(improvementCoachRecord).toMatchObject({
+      automationId: MURPH_WEEKLY_IMPROVEMENT_COACH_AUTOMATION_ID,
+      route: defaultRoute,
+      slug: 'weekly-improvement-coach',
+      status: 'active',
+      title: 'Weekly improvement coach',
+    })
+    expect(improvementCoachRecord?.assistantTargetOverride).toEqual({
+      reasoningEffort: 'high',
+    })
+    expectCronSchedule(improvementCoachRecord?.schedule)
+    expect(improvementCoachRecord?.tags).toContain('murph-managed:weekly-improvement-coach')
+    expect(improvementCoachRecord?.tags).not.toContain(ASSISTANT_REQUIRE_SEND_AUTOMATION_TAG)
+    expect(improvementCoachRecord?.instructions).toContain('knowledge show improvement-opportunities')
+    expect(improvementCoachRecord?.instructions).toContain(
+      'knowledge append-section improvement-opportunities YYYY-MM-DD',
+    )
+    expect(improvementCoachRecord?.instructions).toContain(
+      '{"kind":"skip","privateSummary":"No improvement opportunity cleared the evidence bar."}',
+    )
+    expect(improvementCoachRecord?.instructions).toContain(
+      'Never infer absence of a behavior from absence of data',
+    )
 
     const researchScoutRecord = await showAutomation({
       automationId: MURPH_WEEKLY_HEALTH_RESEARCH_SCOUT_AUTOMATION_ID,
@@ -294,7 +324,7 @@ describe('applyMurphManagedAutomations core integration', () => {
       },
       vaultRoot,
     })).resolves.toEqual({
-      created: 5,
+      created: 6,
       skipped: 0,
       updated: 0,
     })
@@ -359,7 +389,7 @@ describe('applyMurphManagedAutomations core integration', () => {
       routeValidationProfile: 'hosted',
       vaultRoot,
     })).resolves.toEqual({
-      created: 4,
+      created: 5,
       skipped: 0,
       updated: 0,
     })
@@ -399,7 +429,7 @@ describe('applyMurphManagedAutomations core integration', () => {
       now: new Date('2026-06-09T12:00:00.000Z'),
       vaultRoot,
     })).resolves.toEqual({
-      created: 4,
+      created: 5,
       skipped: 0,
       updated: 0,
     })
@@ -436,7 +466,7 @@ describe('applyMurphManagedAutomations core integration', () => {
       vaultRoot,
     })).resolves.toEqual({
       created: 0,
-      skipped: 4,
+      skipped: 5,
       updated: 0,
     })
 
@@ -468,7 +498,7 @@ describe('applyMurphManagedAutomations core integration', () => {
       vaultRoot,
     })).resolves.toEqual({
       created: 0,
-      skipped: 4,
+      skipped: 5,
       updated: 0,
     })
   })
@@ -481,7 +511,7 @@ describe('applyMurphManagedAutomations core integration', () => {
       now: new Date('2026-06-23T12:00:00.000Z'),
       vaultRoot,
     })).resolves.toEqual({
-      created: 4,
+      created: 5,
       skipped: 0,
       updated: 0,
     })
@@ -530,7 +560,7 @@ describe('applyMurphManagedAutomations core integration', () => {
       now: new Date('2026-06-23T13:00:00.000Z'),
       vaultRoot,
     })).resolves.toEqual({
-      created: 4,
+      created: 5,
       skipped: 0,
       updated: 1,
     })
@@ -581,7 +611,7 @@ describe('applyMurphManagedAutomations core integration', () => {
       now: new Date('2026-06-23T13:00:00.000Z'),
       vaultRoot,
     })).resolves.toEqual({
-      created: 4,
+      created: 5,
       skipped: 0,
       updated: 1,
     })
@@ -636,7 +666,7 @@ describe('applyMurphManagedAutomations core integration', () => {
       now: new Date('2026-06-09T13:00:00.000Z'),
       vaultRoot,
     })).resolves.toEqual({
-      created: 3,
+      created: 4,
       skipped: 0,
       updated: 1,
     })
@@ -699,7 +729,7 @@ describe('applyMurphManagedAutomations core integration', () => {
       now: new Date('2026-06-09T13:00:00.000Z'),
       vaultRoot,
     })).resolves.toEqual({
-      created: 3,
+      created: 4,
       skipped: 0,
       updated: 1,
     })
@@ -766,6 +796,23 @@ describe('applyMurphManagedAutomations core integration', () => {
       title: 'My weekly research scout',
       vaultRoot,
     })
+    const userImprovementCoachAutomation = await upsertAutomation({
+      automationId: 'automation_01JNW7YJ7MNE7M9Q2QWQK4Z3FG',
+      continuityPolicy: 'preserve',
+      instructions: 'Keep this user-owned improvement coach prompt.',
+      now: new Date('2026-06-09T12:00:00.000Z'),
+      route: defaultRoute,
+      schedule: {
+        kind: 'cron',
+        expression: '0 17 * * 2',
+      },
+      slug: 'weekly-improvement-coach',
+      status: 'active',
+      summary: 'User-owned improvement coach automation.',
+      tags: ['user'],
+      title: 'My improvement coach',
+      vaultRoot,
+    })
     const userProductUpdatesAutomation = await upsertAutomation({
       automationId: 'automation_01JNW7YJ7MNE7M9Q2QWQK4Z3FB',
       continuityPolicy: 'preserve',
@@ -790,7 +837,7 @@ describe('applyMurphManagedAutomations core integration', () => {
       vaultRoot,
     })).resolves.toEqual({
       created: 0,
-      skipped: 4,
+      skipped: 5,
       updated: 0,
     })
 
@@ -804,6 +851,10 @@ describe('applyMurphManagedAutomations core integration', () => {
     })).resolves.toBeNull()
     await expect(showAutomation({
       automationId: MURPH_WEEKLY_HEALTH_RESEARCH_SCOUT_AUTOMATION_ID,
+      vaultRoot,
+    })).resolves.toBeNull()
+    await expect(showAutomation({
+      automationId: MURPH_WEEKLY_IMPROVEMENT_COACH_AUTOMATION_ID,
       vaultRoot,
     })).resolves.toBeNull()
     await expect(showAutomation({
@@ -839,6 +890,16 @@ describe('applyMurphManagedAutomations core integration', () => {
       slug: 'weekly-health-research-scout',
       tags: ['user'],
       title: 'My weekly research scout',
+    })
+    await expect(showAutomation({
+      automationId: userImprovementCoachAutomation.record.automationId,
+      vaultRoot,
+    })).resolves.toMatchObject({
+      automationId: userImprovementCoachAutomation.record.automationId,
+      instructions: 'Keep this user-owned improvement coach prompt.',
+      slug: 'weekly-improvement-coach',
+      tags: ['user'],
+      title: 'My improvement coach',
     })
     await expect(showAutomation({
       automationId: userProductUpdatesAutomation.record.automationId,

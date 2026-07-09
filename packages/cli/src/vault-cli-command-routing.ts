@@ -195,11 +195,6 @@ export async function registerScopedVaultCliCommand(input: {
       registerMemoryCommands(input.cli)
       return
     }
-    case 'profile': {
-      const { registerProfileCommands } = await import('./commands/profile.js')
-      registerProfileCommands(input.cli)
-      return
-    }
     case 'protocol':
     case 'regimen': {
       const [
