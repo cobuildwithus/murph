@@ -28,6 +28,10 @@ import {
   clinicalImportPlanSchema,
   clinicalRawManifestSchema,
   externalRefForFhir,
+  hashClinicalFhirPageUrl,
+  hashClinicalFhirPatientId,
+  isClinicalFhirUrlWithinBase,
+  normalizeClinicalFhirPatientReference,
   rawRefForClinicalManifestFile,
   type ClinicalImportCandidate,
   type ClinicalImportPlan,
@@ -44,16 +48,21 @@ export interface BuildClinicalImportPlanInput {
 }
 
 type FhirResourceContext<TResource extends Resource = Resource> = {
-  hasAllergyConflictEvidence: boolean;
-  hasIncompleteAllergyEvidence: boolean;
   manifest: ClinicalRawManifest;
   rawRef: string;
   resource: TResource;
 };
 
 type FhirResourcePage = {
+  nextPageUrlHash?: string;
   rawRef: string;
+  resourceFile: ClinicalRawManifestResourceFile;
   resources: Resource[];
+};
+
+type AllergyEvidenceSummary = {
+  complete: boolean;
+  hasConflict: boolean;
 };
 
 type MappedFhirResource = {
@@ -180,29 +189,35 @@ export async function buildClinicalImportPlan(input: BuildClinicalImportPlanInpu
   });
   const candidates: ClinicalImportCandidate[] = [];
   const unsupported: ClinicalImportUnsupportedResource[] = [];
-
-  const hasAllergyConflictEvidence = await scanAllergyConflictEvidence({
-    manifest,
-    manifestPath,
-    vaultRoot: input.vaultRoot,
-  });
-  const hasIncompleteAllergyEvidence = hasIncompleteManifestAllergyEvidence(manifest);
+  const resourcePages: FhirResourcePage[] = [];
+  let hasAllergyConflictEvidence = false;
 
   for (const resourceFile of manifest.resourceFiles) {
-    const { rawRef, resources } = await readClinicalResourcePage({
+    const page = await readClinicalResourcePage({
+      manifest,
       manifestPath,
       resourceFile,
       vaultRoot: input.vaultRoot,
     });
-    for (const resource of resources) {
+    resourcePages.push(page);
+    if (page.resources.some(isAllergyConflictEvidence)) {
+      hasAllergyConflictEvidence = true;
+    }
+  }
+  assertResolvedFhirPagination(resourcePages);
+  const allergyEvidence: AllergyEvidenceSummary = {
+    complete: hasCompleteAllergyEvidence(manifest),
+    hasConflict: hasAllergyConflictEvidence,
+  };
+
+  for (const page of resourcePages) {
+    for (const resource of page.resources) {
       const context: FhirResourceContext = {
-        hasAllergyConflictEvidence,
-        hasIncompleteAllergyEvidence,
         manifest,
-        rawRef,
+        rawRef: page.rawRef,
         resource,
       };
-      const mapped = mapFhirResource(context);
+      const mapped = mapFhirResource(context, allergyEvidence);
       appendMappedResource({ candidates, mapped, unsupported });
     }
   }
@@ -221,33 +236,36 @@ export async function buildClinicalImportPlan(input: BuildClinicalImportPlanInpu
   });
 }
 
-async function scanAllergyConflictEvidence(input: {
-  manifest: ClinicalRawManifest;
-  manifestPath: string;
-  vaultRoot: string;
-}): Promise<boolean> {
-  for (const resourceFile of input.manifest.resourceFiles) {
-    const { resources } = await readClinicalResourcePage({
-      manifestPath: input.manifestPath,
-      resourceFile,
-      vaultRoot: input.vaultRoot,
-    });
-    if (resources.some(isAllergyConflictEvidence)) {
-      return true;
+function hasCompleteAllergyEvidence(manifest: ClinicalRawManifest): boolean {
+  const completedResourceTypes = new Set<string>(manifest.completedResourceTypes);
+  return [...ALLERGY_CONFLICT_RESOURCE_TYPES].every((resourceType) =>
+    completedResourceTypes.has(resourceType)
+    && hasGrantedFhirReadScope(manifest, resourceType)
+    && manifest.errors?.some((error) =>
+      error.resourceType === undefined || error.resourceType === resourceType
+    ) !== true
+  );
+}
+
+function hasGrantedFhirReadScope(manifest: ClinicalRawManifest, resourceType: string): boolean {
+  for (const scopeGroup of manifest.grantedScopes) {
+    for (const scope of scopeGroup.split(/\s+/u)) {
+      const match = /^(?:patient|system|user)\/([^\s.]+)\.([a-z]+)$/u.exec(scope);
+      const scopedResourceType = match?.[1];
+      const permissions = match?.[2];
+      if (
+        (scopedResourceType === "*" || scopedResourceType === resourceType)
+        && (
+          permissions === "read"
+          || (/^c?r?u?d?s?$/u.test(permissions ?? "") && permissions?.includes("r") === true)
+        )
+      ) {
+        return true;
+      }
     }
   }
 
   return false;
-}
-
-function hasIncompleteManifestAllergyEvidence(manifest: ClinicalRawManifest): boolean {
-  const retrievedResourceTypes = new Set(manifest.resourceFiles.map((resourceFile) => resourceFile.resourceType));
-  return (
-    [...ALLERGY_CONFLICT_RESOURCE_TYPES].some((resourceType) => !retrievedResourceTypes.has(resourceType))
-    || manifest.errors?.some((error) =>
-      error.resourceType === undefined || ALLERGY_CONFLICT_RESOURCE_TYPES.has(error.resourceType)
-    ) === true
-  );
 }
 
 async function assertRawResourceFileByteBounds(input: {
@@ -275,6 +293,7 @@ async function assertRawResourceFileByteBounds(input: {
 }
 
 async function readClinicalResourcePage(input: {
+  manifest: ClinicalRawManifest;
   manifestPath: string;
   resourceFile: ClinicalRawManifestResourceFile;
   vaultRoot: string;
@@ -293,7 +312,176 @@ async function readClinicalResourcePage(input: {
     rawRef,
   });
   assertRawResourceFileCount({ actualCount: resources.length, rawRef, resourceFile: input.resourceFile });
-  return { rawRef, resources };
+  assertDeclaredResourceFamily({ rawRef, resourceFile: input.resourceFile, resources });
+  assertManifestPatientBinding({ manifest: input.manifest, rawRef, resources });
+  const nextPageUrlHash = readFhirNextPageUrlHash({
+    fhirBaseUrlHash: input.manifest.fhirBaseUrlHash,
+    page,
+    rawRef,
+  });
+  return {
+    ...(nextPageUrlHash ? { nextPageUrlHash } : {}),
+    rawRef,
+    resourceFile: input.resourceFile,
+    resources,
+  };
+}
+
+function assertDeclaredResourceFamily(input: {
+  rawRef: string;
+  resourceFile: ClinicalRawManifestResourceFile;
+  resources: readonly Resource[];
+}): void {
+  if (input.resources.some((resource) => resource.resourceType !== input.resourceFile.resourceType)) {
+    throw new Error(`Clinical FHIR raw resource does not match declared resource type for ${input.rawRef}.`);
+  }
+}
+
+function assertManifestPatientBinding(input: {
+  manifest: ClinicalRawManifest;
+  rawRef: string;
+  resources: readonly Resource[];
+}): void {
+  for (const resource of input.resources) {
+    const patientReferences = patientReferencesForResource(resource);
+    if (patientReferences.length === 0) {
+      throw new Error(`Clinical FHIR raw resource is missing its manifest patient reference for ${input.rawRef}.`);
+    }
+
+    for (const patientReference of patientReferences) {
+      const patientId = resource.resourceType === "Patient"
+        ? patientReference
+        : normalizeClinicalFhirPatientReference({
+            fhirBaseUrlHash: input.manifest.fhirBaseUrlHash,
+            reference: patientReference,
+          });
+      if (!patientId) {
+        throw new Error(`Clinical FHIR raw resource has an invalid manifest patient reference for ${input.rawRef}.`);
+      }
+      const patientIdHash = hashClinicalFhirPatientId(patientId);
+      if (patientIdHash !== input.manifest.patientIdHash) {
+        throw new Error(`Clinical FHIR raw resource does not match manifest patient for ${input.rawRef}.`);
+      }
+    }
+  }
+}
+
+function patientReferencesForResource(resource: Resource): string[] {
+  if (resource.resourceType === "Patient") {
+    const patientId = readResourceId(resource);
+    return patientId ? [patientId] : [];
+  }
+
+  const patientField = resource.resourceType === "AllergyIntolerance" || resource.resourceType === "Immunization"
+    ? "patient"
+    : "subject";
+  if (!isRecord(resource)) {
+    return [];
+  }
+  const record: Record<string, unknown> = resource;
+  const expectedReference = readReferenceValue(record[patientField]);
+  if (!expectedReference) {
+    return [];
+  }
+
+  const alternateField = patientField === "patient" ? "subject" : "patient";
+  const alternateValue = record[alternateField];
+  if (alternateValue === undefined) {
+    return [expectedReference];
+  }
+  const alternateReference = readReferenceValue(alternateValue);
+  return alternateReference ? [expectedReference, alternateReference] : [];
+}
+
+function readReferenceValue(value: unknown): string | undefined {
+  return isRecord(value) ? readString(value.reference) : undefined;
+}
+
+function readFhirNextPageUrlHash(input: {
+  fhirBaseUrlHash: string;
+  page: unknown;
+  rawRef: string;
+}): string | undefined {
+  if (!isFhirBundle(input.page) || input.page.link === undefined) {
+    return undefined;
+  }
+  if (!Array.isArray(input.page.link)) {
+    throw new Error(`Clinical FHIR raw Bundle pagination links are invalid for ${input.rawRef}.`);
+  }
+
+  const nextUrls = new Set<string>();
+  for (const link of input.page.link) {
+    if (readString(link?.relation)?.toLowerCase() !== "next") {
+      continue;
+    }
+    const nextUrl = readString(link.url);
+    if (!nextUrl) {
+      throw new Error(`Clinical FHIR raw Bundle next link is invalid for ${input.rawRef}.`);
+    }
+    if (!isClinicalFhirUrlWithinBase({
+      fhirBaseUrlHash: input.fhirBaseUrlHash,
+      url: nextUrl,
+    })) {
+      throw new Error(`Clinical FHIR raw Bundle next link is outside the manifest FHIR base for ${input.rawRef}.`);
+    }
+    nextUrls.add(nextUrl);
+  }
+  if (nextUrls.size > 1) {
+    throw new Error(`Clinical FHIR raw Bundle has ambiguous next links for ${input.rawRef}.`);
+  }
+
+  const nextUrl = nextUrls.values().next().value;
+  return nextUrl === undefined ? undefined : hashClinicalFhirPageUrl(nextUrl);
+}
+
+function assertResolvedFhirPagination(resourcePages: readonly FhirResourcePage[]): void {
+  const pagesByResourceTypeAndUrl = new Map<string, Map<string, FhirResourcePage>>();
+  for (const page of resourcePages) {
+    const pageUrlHash = page.resourceFile.pageUrlHash;
+    if (!pageUrlHash) {
+      continue;
+    }
+    const pagesByUrl = pagesByResourceTypeAndUrl.get(page.resourceFile.resourceType) ?? new Map();
+    if (pagesByUrl.has(pageUrlHash)) {
+      throw new Error(`Clinical FHIR raw manifest has duplicate page URL hashes for ${page.resourceFile.resourceType}.`);
+    }
+    pagesByUrl.set(pageUrlHash, page);
+    pagesByResourceTypeAndUrl.set(page.resourceFile.resourceType, pagesByUrl);
+  }
+
+  const nextPageByRawRef = new Map<string, FhirResourcePage>();
+  const targetedRawRefs = new Set<string>();
+  for (const page of resourcePages) {
+    if (!page.nextPageUrlHash) {
+      continue;
+    }
+    const nextPage = pagesByResourceTypeAndUrl
+      .get(page.resourceFile.resourceType)
+      ?.get(page.nextPageUrlHash);
+    if (!nextPage) {
+      throw new Error(`Clinical FHIR raw manifest has unresolved pagination for ${page.rawRef}.`);
+    }
+    nextPageByRawRef.set(page.rawRef, nextPage);
+    targetedRawRefs.add(nextPage.rawRef);
+  }
+
+  for (const page of resourcePages) {
+    if (page.resourceFile.pageUrlHash && !targetedRawRefs.has(page.rawRef)) {
+      throw new Error(`Clinical FHIR raw manifest has unreachable pagination for ${page.rawRef}.`);
+    }
+  }
+
+  for (const page of resourcePages) {
+    const seenRawRefs = new Set<string>();
+    let currentPage: FhirResourcePage | undefined = page;
+    while (currentPage) {
+      if (seenRawRefs.has(currentPage.rawRef)) {
+        throw new Error(`Clinical FHIR raw manifest has cyclic pagination for ${currentPage.rawRef}.`);
+      }
+      seenRawRefs.add(currentPage.rawRef);
+      currentPage = nextPageByRawRef.get(currentPage.rawRef);
+    }
+  }
 }
 
 async function readVaultRelativeText(
@@ -359,10 +547,22 @@ function sha256Hex(value: string): string {
   return createHash("sha256").update(value, "utf8").digest("hex");
 }
 
-function mapFhirResource(context: FhirResourceContext): {
+function mapFhirResource(
+  context: FhirResourceContext,
+  allergyEvidence: AllergyEvidenceSummary,
+): {
   candidates: ClinicalImportCandidate[];
   unsupported: ClinicalImportUnsupportedResource[];
 } {
+  if (
+    (isObservation(context.resource)
+      || isDiagnosticReport(context.resource)
+      || isDocumentReference(context.resource)
+      || isAllergyIntolerance(context.resource))
+    && !readResourceUpdatedAt(context.resource)
+  ) {
+    return unsupportedOnly(context, "FHIR resource lastUpdated is missing");
+  }
   if (isObservation(context.resource)) {
     return mapObservation(resourceContext(context, context.resource));
   }
@@ -373,7 +573,7 @@ function mapFhirResource(context: FhirResourceContext): {
     return mapDocumentReference(resourceContext(context, context.resource));
   }
   if (isAllergyIntolerance(context.resource)) {
-    return mapAllergyIntolerance(resourceContext(context, context.resource));
+    return mapAllergyIntolerance(resourceContext(context, context.resource), allergyEvidence);
   }
 
   switch (readString(context.resource.resourceType)) {
@@ -398,8 +598,6 @@ function resourceContext<TResource extends Resource>(
   resource: TResource,
 ): FhirResourceContext<TResource> {
   return {
-    hasAllergyConflictEvidence: context.hasAllergyConflictEvidence,
-    hasIncompleteAllergyEvidence: context.hasIncompleteAllergyEvidence,
     manifest: context.manifest,
     rawRef: context.rawRef,
     resource,
@@ -624,7 +822,7 @@ function mapLaboratoryObservation(
         results,
         rawRefs: [context.rawRef],
         evidence: [evidenceForResource(context, resourceId)],
-        externalRef: externalRefForResource(context, "Observation", resourceId, "lab-observation"),
+        externalRef: externalRefForResource(context, "Observation", resourceId),
       },
     },
     "clinical candidate exceeds supported import bounds",
@@ -677,12 +875,7 @@ function mapDiagnosticReport(context: FhirResourceContext<DiagnosticReport>): Ma
           reportedAt: readIsoDateTime(context.resource.issued),
           rawRefs: [context.rawRef],
           evidence: [evidenceForResource(context, resourceId)],
-          externalRef: externalRefForResource(
-            context,
-            "DiagnosticReport",
-            resourceId,
-            "diagnostic-report-summary",
-          ),
+          externalRef: externalRefForResource(context, "DiagnosticReport", resourceId),
         },
       },
       "clinical candidate exceeds supported import bounds",
@@ -742,14 +935,17 @@ function mapDocumentReference(context: FhirResourceContext<DocumentReference>): 
         authoredAt: readIsoDateTime(context.resource.date),
         rawRefs: [context.rawRef],
         evidence: [evidenceForResource(context, resourceId)],
-        externalRef: externalRefForResource(context, "DocumentReference", resourceId, "document-note"),
+        externalRef: externalRefForResource(context, "DocumentReference", resourceId),
       },
     },
     "clinical candidate exceeds supported import bounds",
   );
 }
 
-function mapAllergyIntolerance(context: FhirResourceContext<AllergyIntolerance>): MappedFhirResource {
+function mapAllergyIntolerance(
+  context: FhirResourceContext<AllergyIntolerance>,
+  allergyEvidence: AllergyEvidenceSummary,
+): MappedFhirResource {
   const resourceId = readResourceId(context.resource);
   if (!resourceId) {
     return unsupportedOnly(context, "FHIR resource id is missing");
@@ -771,10 +967,10 @@ function mapAllergyIntolerance(context: FhirResourceContext<AllergyIntolerance>)
     return unsupportedOnly(context, "allergy status is not importable");
   }
 
-  if (!isImportableGlobalNoKnownAllergyAssertion(context.resource) || context.hasAllergyConflictEvidence) {
+  if (!isImportableGlobalNoKnownAllergyAssertion(context.resource) || allergyEvidence.hasConflict) {
     return unsupportedOnly(context, "no-known allergy conflicts with allergy evidence");
   }
-  if (context.hasIncompleteAllergyEvidence) {
+  if (!allergyEvidence.complete) {
     return unsupportedOnly(context, "no-known allergy conflicts with incomplete allergy evidence");
   }
 
@@ -801,12 +997,7 @@ function mapAllergyIntolerance(context: FhirResourceContext<AllergyIntolerance>)
         sourceLabel: "FHIR AllergyIntolerance",
         rawRefs: [context.rawRef],
         evidence: [evidenceForResource(context, resourceId)],
-        externalRef: externalRefForResource(
-          context,
-          "AllergyIntolerance",
-          resourceId,
-          "no-known-allergies",
-        ),
+        externalRef: externalRefForResource(context, "AllergyIntolerance", resourceId),
       },
     },
     "clinical candidate exceeds supported import bounds",
@@ -834,7 +1025,7 @@ function buildVitalsCandidate(
       measurements: input.measurements,
       rawRefs: [context.rawRef],
       evidence: [evidenceForResource(context, input.resourceId)],
-      externalRef: externalRefForResource(context, "Observation", input.resourceId, input.facet),
+      externalRef: externalRefForResource(context, "Observation", input.resourceId),
     },
   };
 }
@@ -923,7 +1114,6 @@ function externalRefForResource(
   context: FhirResourceContext,
   resourceType: string,
   resourceId: string,
-  facet: string,
 ) {
   return externalRefForFhir({
     fhirBaseUrlHash: context.manifest.fhirBaseUrlHash,
@@ -931,8 +1121,7 @@ function externalRefForResource(
     sourceSystem: context.manifest.sourceSystem,
     resourceType,
     resourceId,
-    version: readResourceVersion(context.resource),
-    facet,
+    version: readResourceUpdatedAt(context.resource),
   });
 }
 
@@ -962,7 +1151,7 @@ function extractFhirResources(
   const resources: Resource[] = [];
   const appendResource = (resource: unknown): void => {
     if (!isFhirResource(resource)) {
-      return;
+      throw new Error(`Clinical FHIR raw page contains an invalid resource for ${input.rawRef}.`);
     }
     resources.push(resource);
     if (resources.length > input.maxResources) {
@@ -981,11 +1170,17 @@ function extractFhirResources(
     return resources;
   }
   if (!isFhirBundle(value)) {
-    return resources;
+    throw new Error(`Clinical FHIR raw page has an invalid shape for ${input.rawRef}.`);
   }
 
-  for (const entry of readUnknownArray(value.entry)) {
-    appendResource(isRecord(entry) ? entry.resource : null);
+  if (value.entry === undefined) {
+    return resources;
+  }
+  if (!Array.isArray(value.entry)) {
+    throw new Error(`Clinical FHIR raw Bundle entries are invalid for ${input.rawRef}.`);
+  }
+  for (const entry of value.entry) {
+    appendResource(isRecord(entry) ? entry.resource : undefined);
   }
 
   return resources;
@@ -1274,6 +1469,10 @@ function readResourceId(resource: Resource): string | undefined {
 
 function readResourceVersion(resource: Resource): string | undefined {
   return readString(resource.meta?.versionId);
+}
+
+function readResourceUpdatedAt(resource: Resource): string | undefined {
+  return readIsoDateTime(resource.meta?.lastUpdated);
 }
 
 function readQuantityValue(

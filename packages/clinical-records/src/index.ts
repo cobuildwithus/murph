@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import {
   BLOOD_TEST_FASTING_STATUSES,
   CLINICAL_ASSERTION_DOMAINS,
@@ -62,6 +64,11 @@ const CLINICAL_FHIR_PATH_ID_PATTERN = /^[A-Za-z0-9._-]+$/u;
 const SHA256_HEX_PATTERN = /^[a-f0-9]{64}$/u;
 const SLUG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/u;
 const UNIT_PATTERN = /^[A-Za-z0-9._/%-]+$/u;
+const FHIR_RESOURCE_ID_PATTERN = /^[A-Za-z0-9.-]{1,64}$/u;
+const FHIR_RELATIVE_PATIENT_REFERENCE_PATTERN =
+  /^Patient\/([A-Za-z0-9.-]{1,64})(?:\/_history\/[A-Za-z0-9.-]{1,64})?$/u;
+const FHIR_ABSOLUTE_PATIENT_PATH_PATTERN =
+  /^(.*)\/Patient\/([A-Za-z0-9.-]{1,64})(?:\/_history\/[A-Za-z0-9.-]{1,64})?$/u;
 const sha256HexSchema = z.string().regex(SHA256_HEX_PATTERN);
 
 export const clinicalSourceSystemSchema = z.enum(CLINICAL_SOURCE_SYSTEMS);
@@ -120,7 +127,7 @@ const slugSchema = z.string().regex(SLUG_PATTERN).max(80);
 
 export const clinicalRawManifestResourceFileSchema = z
   .object({
-    resourceType: z.string().min(1).max(80),
+    resourceType: clinicalFhirResourceTypeSchema,
     relativePath: clinicalRawRelativePathSchema,
     count: z.number().int().min(0).max(CLINICAL_RAW_MANIFEST_MAX_RESOURCES_PER_FILE),
     sha256: sha256HexSchema,
@@ -157,6 +164,18 @@ const clinicalRawManifestResourceFilesSchema = z
     }
   });
 
+const clinicalRawManifestCompletedResourceTypesSchema = z
+  .array(clinicalFhirResourceTypeSchema)
+  .max(CLINICAL_FHIR_RESOURCE_TYPES.length)
+  .superRefine((resourceTypes, context) => {
+    if (new Set(resourceTypes).size !== resourceTypes.length) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Expected completed FHIR resource types to be unique.",
+      });
+    }
+  });
+
 export const clinicalRawManifestErrorSchema = z
   .object({
     resourceType: z.string().min(1).max(80).optional(),
@@ -177,11 +196,24 @@ export const clinicalRawManifestSchema = z
     patientIdHash: sha256HexSchema,
     fetchedAt: isoDateTimeTextSchema,
     resourceFiles: clinicalRawManifestResourceFilesSchema,
+    completedResourceTypes: clinicalRawManifestCompletedResourceTypesSchema,
     requestedScopes: z.array(z.string().min(1).max(200)).max(50),
     grantedScopes: z.array(z.string().min(1).max(200)).max(50),
     errors: z.array(clinicalRawManifestErrorSchema).max(100).optional(),
   })
-  .strict();
+  .strict()
+  .superRefine((manifest, context) => {
+    const declaredResourceTypes = new Set(manifest.resourceFiles.map((resourceFile) => resourceFile.resourceType));
+    for (const resourceType of manifest.completedResourceTypes) {
+      if (!declaredResourceTypes.has(resourceType)) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "A completed FHIR resource type must have a declared raw resource file.",
+          path: ["completedResourceTypes"],
+        });
+      }
+    }
+  });
 
 export const fhirSourceRefSchema = z
   .object({
@@ -345,6 +377,158 @@ export function clinicalFacetSlug(value: string): string {
   return fhirResourceTypeToSlug(value);
 }
 
+export function normalizeClinicalFhirPatientId(value: string): string | null {
+  const trimmed = value.trim();
+  if (FHIR_RESOURCE_ID_PATTERN.test(trimmed)) {
+    return trimmed;
+  }
+
+  return parseClinicalFhirPatientReference(trimmed)?.patientId ?? null;
+}
+
+export function hashClinicalFhirPatientId(value: string): string {
+  const patientId = normalizeClinicalFhirPatientId(value);
+  if (!patientId) {
+    throw new Error("Expected a FHIR Patient id or reference.");
+  }
+
+  return createHash("sha256").update(patientId, "utf8").digest("hex");
+}
+
+export function hashClinicalFhirBaseUrl(value: string): string {
+  const fhirBaseUrl = normalizeClinicalFhirBaseUrl(value);
+  if (!fhirBaseUrl) {
+    throw new Error("Expected an absolute HTTP(S) FHIR base URL without credentials, query, or fragment.");
+  }
+
+  return createHash("sha256").update(fhirBaseUrl, "utf8").digest("hex");
+}
+
+export function normalizeClinicalFhirPatientReference(input: {
+  fhirBaseUrlHash: string;
+  reference: string;
+}): string | null {
+  const expectedFhirBaseUrlHash = sha256HexSchema.safeParse(input.fhirBaseUrlHash);
+  const parsedReference = parseClinicalFhirPatientReference(input.reference.trim());
+  if (!expectedFhirBaseUrlHash.success || !parsedReference) {
+    return null;
+  }
+  if (
+    parsedReference.fhirBaseUrl
+    && hashClinicalFhirBaseUrl(parsedReference.fhirBaseUrl) !== expectedFhirBaseUrlHash.data
+  ) {
+    return null;
+  }
+
+  return parsedReference.patientId;
+}
+
+export function isClinicalFhirUrlWithinBase(input: {
+  fhirBaseUrlHash: string;
+  url: string;
+}): boolean {
+  const expectedFhirBaseUrlHash = sha256HexSchema.safeParse(input.fhirBaseUrlHash);
+  const pageUrlText = input.url.trim();
+  if (!expectedFhirBaseUrlHash.success || pageUrlText.length === 0 || pageUrlText.length > 4_096) {
+    return false;
+  }
+
+  let pageUrl: URL;
+  try {
+    pageUrl = new URL(pageUrlText);
+  } catch {
+    return false;
+  }
+  if (
+    (pageUrl.protocol !== "http:" && pageUrl.protocol !== "https:")
+    || pageUrl.username.length > 0
+    || pageUrl.password.length > 0
+    || pageUrl.hash.length > 0
+  ) {
+    return false;
+  }
+
+  const pathSegments = pageUrl.pathname.split("/");
+  for (let segmentCount = 1; segmentCount <= pathSegments.length; segmentCount += 1) {
+    const pathname = pathSegments.slice(0, segmentCount).join("/");
+    const candidateBaseUrl = `${pageUrl.origin}${pathname}`;
+    if (hashClinicalFhirBaseUrl(candidateBaseUrl) === expectedFhirBaseUrlHash.data) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+export function hashClinicalFhirPageUrl(value: string): string {
+  const pageUrl = value.trim();
+  if (pageUrl.length === 0 || pageUrl.length > 4_096) {
+    throw new Error("Expected a bounded FHIR page URL.");
+  }
+
+  return createHash("sha256").update(pageUrl, "utf8").digest("hex");
+}
+
+function parseClinicalFhirPatientReference(value: string): {
+  fhirBaseUrl?: string;
+  patientId: string;
+} | null {
+  const relativeMatch = FHIR_RELATIVE_PATIENT_REFERENCE_PATTERN.exec(value);
+  if (relativeMatch?.[1]) {
+    return { patientId: relativeMatch[1] };
+  }
+  if (!/^[A-Za-z][A-Za-z0-9+.-]*:\/\//u.test(value)) {
+    return null;
+  }
+
+  let referenceUrl: URL;
+  try {
+    referenceUrl = new URL(value);
+  } catch {
+    return null;
+  }
+  if (
+    (referenceUrl.protocol !== "http:" && referenceUrl.protocol !== "https:")
+    || referenceUrl.username.length > 0
+    || referenceUrl.password.length > 0
+    || referenceUrl.search.length > 0
+    || referenceUrl.hash.length > 0
+  ) {
+    return null;
+  }
+
+  const absoluteMatch = FHIR_ABSOLUTE_PATIENT_PATH_PATTERN.exec(referenceUrl.pathname);
+  const patientId = absoluteMatch?.[2];
+  if (!patientId) {
+    return null;
+  }
+  const fhirBaseUrl = normalizeClinicalFhirBaseUrl(
+    `${referenceUrl.origin}${absoluteMatch[1] ?? ""}`,
+  );
+  return fhirBaseUrl ? { fhirBaseUrl, patientId } : null;
+}
+
+function normalizeClinicalFhirBaseUrl(value: string): string | null {
+  let fhirBaseUrl: URL;
+  try {
+    fhirBaseUrl = new URL(value.trim());
+  } catch {
+    return null;
+  }
+  if (
+    (fhirBaseUrl.protocol !== "http:" && fhirBaseUrl.protocol !== "https:")
+    || fhirBaseUrl.username.length > 0
+    || fhirBaseUrl.password.length > 0
+    || fhirBaseUrl.search.length > 0
+    || fhirBaseUrl.hash.length > 0
+  ) {
+    return null;
+  }
+
+  const pathname = fhirBaseUrl.pathname.replace(/\/+$/u, "");
+  return `${fhirBaseUrl.origin}${pathname}`;
+}
+
 export function externalRefForFhir(input: {
   fhirBaseUrlHash: string;
   patientIdHash: string;
@@ -366,8 +550,8 @@ export function externalRefForFhir(input: {
     system,
     resourceType: fhirResourceTypeToSlug(input.resourceType),
     resourceId: input.resourceId,
-    version: input.version,
-    facet: input.facet ? clinicalFacetSlug(input.facet) : undefined,
+    ...(input.version ? { version: input.version } : {}),
+    ...(input.facet ? { facet: clinicalFacetSlug(input.facet) } : {}),
   });
 }
 

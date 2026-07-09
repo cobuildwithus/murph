@@ -9,15 +9,22 @@ import {
   CLINICAL_RAW_MANIFEST_MAX_RESOURCES_PER_FILE,
   CLINICAL_RAW_MANIFEST_MAX_TOTAL_RESOURCES,
   CLINICAL_RAW_RESOURCE_FILE_MAX_BYTES,
+  hashClinicalFhirBaseUrl,
+  hashClinicalFhirPageUrl,
+  hashClinicalFhirPatientId,
   type ClinicalImportCandidate,
 } from "@murphai/clinical-records";
+import { importEventBatch, initializeVault } from "@murphai/core";
 import { buildClinicalImportPlan } from "../src/clinical-records/index.ts";
 import { afterEach, describe, expect, it } from "vitest";
 
 const BAD_SHA256 = "a".repeat(64);
-const FHIR_BASE_URL_HASH = "b".repeat(64);
-const PATIENT_ID_HASH = "c".repeat(64);
-const OTHER_PATIENT_ID_HASH = "d".repeat(64);
+const FHIR_BASE_URL = "https://ehr.example.test/fhir";
+const FHIR_BASE_URL_HASH = hashClinicalFhirBaseUrl(FHIR_BASE_URL);
+const PATIENT_ID = "patient-1";
+const OTHER_PATIENT_ID = "patient-2";
+const PATIENT_ID_HASH = hashClinicalFhirPatientId(PATIENT_ID);
+const OTHER_PATIENT_ID_HASH = hashClinicalFhirPatientId(OTHER_PATIENT_ID);
 const MANIFEST_PATH = "raw/clinical/fhir/clinical-connection-1/retrieval-job-1/manifest.json";
 
 const tempRoots: string[] = [];
@@ -35,7 +42,12 @@ describe("buildClinicalImportPlan", () => {
         {
           resourceType: "Observation",
           relativePath: "Observation/page-1.json",
-          count: 5,
+          count: 4,
+        },
+        {
+          resourceType: "Condition",
+          relativePath: "Condition/page-1.json",
+          count: 1,
         },
       ],
       pages: {
@@ -136,17 +148,15 @@ describe("buildClinicalImportPlan", () => {
                 valueQuantity: { value: 180, system: "http://unitsofmeasure.org", code: "[lb_av]" },
               },
             },
-            {
-              resource: {
-                resourceType: "Condition",
-                id: "condition-positive-1",
-                code: {
-                  text: "Hypertension",
-                  coding: [{ system: "http://snomed.info/sct", code: "38341003", display: "Hypertension" }],
-                },
-              },
-            },
           ],
+        },
+        "Condition/page-1.json": {
+          resourceType: "Condition",
+          id: "condition-positive-1",
+          code: {
+            text: "Hypertension",
+            coding: [{ system: "http://snomed.info/sct", code: "38341003", display: "Hypertension" }],
+          },
         },
       },
     });
@@ -189,8 +199,7 @@ describe("buildClinicalImportPlan", () => {
       system: `epic-fhir-${FHIR_BASE_URL_HASH}-${PATIENT_ID_HASH}`,
       resourceType: "observation",
       resourceId: "bp-panel-1",
-      version: "7",
-      facet: "vitals-panel",
+      version: "2026-07-01T12:00:00.000Z",
     });
 
     const bodyWeight = plan.candidates.find(
@@ -798,6 +807,118 @@ describe("buildClinicalImportPlan", () => {
           reason: "no-known allergy conflicts with incomplete allergy evidence",
         }),
       ]);
+    }
+  });
+
+  it("requires explicit completed families and read scopes before emitting no-known allergies", async () => {
+    const incompleteManifests = [
+      {
+        completedResourceTypes: ["AllergyIntolerance"],
+        grantedScopes: ["patient/*.read"],
+      },
+      {
+        completedResourceTypes: ["AllergyIntolerance", "Condition"],
+        grantedScopes: ["patient/AllergyIntolerance.read"],
+      },
+    ];
+
+    for (const [index, manifest] of incompleteManifests.entries()) {
+      const resourceId = `allergy-incomplete-contract-${index}`;
+      const vaultRoot = await writeClinicalFixture({
+        manifest,
+        resourceFiles: [
+          {
+            resourceType: "AllergyIntolerance",
+            relativePath: "AllergyIntolerance/page-1.json",
+            count: 1,
+          },
+          {
+            resourceType: "Condition",
+            relativePath: "Condition/page-1.json",
+            count: 0,
+          },
+        ],
+        pages: {
+          "AllergyIntolerance/page-1.json": [noKnownAllergyResource(resourceId)],
+          "Condition/page-1.json": [],
+        },
+      });
+
+      const plan = await buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot });
+      expect(plan.candidates).toEqual([]);
+      expect(plan.unsupported).toEqual([
+        expect.objectContaining({
+          resourceId,
+          reason: "no-known allergy conflicts with incomplete allergy evidence",
+        }),
+      ]);
+    }
+  });
+
+  it("recognizes SMART read grants without treating write-only scopes as complete", async () => {
+    const scopeCases = [
+      {
+        label: "legacy-read",
+        grantedScopes: ["patient/*.read"],
+        complete: true,
+      },
+      {
+        label: "v2-read-search",
+        grantedScopes: ["patient/*.rs"],
+        complete: true,
+      },
+      {
+        label: "legacy-write-only",
+        grantedScopes: ["patient/*.write"],
+        complete: false,
+      },
+      {
+        label: "v2-write-only",
+        grantedScopes: ["patient/*.cud"],
+        complete: false,
+      },
+    ];
+
+    for (const { complete, grantedScopes, label } of scopeCases) {
+      const resourceId = `allergy-scope-${label}`;
+      const vaultRoot = await writeClinicalFixture({
+        manifest: { grantedScopes },
+        resourceFiles: [
+          {
+            resourceType: "AllergyIntolerance",
+            relativePath: "AllergyIntolerance/page-1.json",
+            count: 1,
+          },
+          {
+            resourceType: "Condition",
+            relativePath: "Condition/page-1.json",
+            count: 0,
+          },
+        ],
+        pages: {
+          "AllergyIntolerance/page-1.json": [noKnownAllergyResource(resourceId)],
+          "Condition/page-1.json": [],
+        },
+      });
+
+      const plan = await buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot });
+      if (complete) {
+        expect(plan.candidates).toEqual([
+          expect.objectContaining({
+            kind: "assertion",
+            resource: expect.objectContaining({ resourceId }),
+          }),
+        ]);
+        expect(plan.unsupported).toEqual([]);
+      } else {
+        expect(plan.candidates).toEqual([]);
+        expect(plan.unsupported).toEqual([
+          expect.objectContaining({
+            resourceId,
+            reason: "no-known allergy conflicts with incomplete allergy evidence",
+          }),
+        ]);
+      }
     }
   });
 
@@ -2343,6 +2464,7 @@ describe("buildClinicalImportPlan", () => {
         count: CLINICAL_RAW_MANIFEST_MAX_RESOURCES_PER_FILE,
         sha256: BAD_SHA256,
       })),
+      completedResourceTypes: ["Observation"],
       requestedScopes: ["patient/*.read"],
       grantedScopes: ["patient/*.read"],
     });
@@ -2744,6 +2866,466 @@ describe("buildClinicalImportPlan", () => {
     );
   });
 
+  it("rejects raw FHIR resources that do not belong to the manifest patient", async () => {
+    const vaultRoot = await writeClinicalFixture({
+      manifest: { patientId: "patient-a" },
+      resourceFiles: [{
+        resourceType: "Observation",
+        relativePath: "Observation/page-1.json",
+        count: 1,
+      }],
+      pages: {
+        "Observation/page-1.json": {
+          resourceType: "Observation",
+          id: "other-patient-heart-rate",
+          meta: { lastUpdated: "2026-07-01T12:01:00.000Z" },
+          subject: { reference: "Patient/patient-b" },
+          status: "final",
+          effectiveDateTime: "2026-07-01T12:00:00.000Z",
+          code: {
+            coding: [{ system: "http://loinc.org", code: "8867-4", display: "Heart rate" }],
+          },
+          valueQuantity: { value: 70, unit: "bpm" },
+        },
+      },
+    });
+
+    await expect(buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot }))
+      .rejects.toThrow("manifest patient");
+  });
+
+  it("rejects missing, non-Patient, conflicting, and mixed patient references", async () => {
+    const heartRate = (id: string, subject: unknown, patient?: unknown) => ({
+      resourceType: "Observation",
+      id,
+      subject,
+      ...(patient === undefined ? {} : { patient }),
+      status: "final",
+      effectiveDateTime: "2026-07-01T12:00:00.000Z",
+      code: {
+        coding: [{ system: "http://loinc.org", code: "8867-4", display: "Heart rate" }],
+      },
+      valueQuantity: { value: 70, unit: "bpm" },
+    });
+    const invalidPages = [
+      heartRate("missing-patient", null),
+      heartRate("bare-patient-id", { reference: "patient-1" }),
+      heartRate("non-patient-reference", { reference: "Practitioner/practitioner-1" }),
+      heartRate("nested-patient-reference", { reference: "Observation/obs-1/Patient/patient-1" }),
+      heartRate(
+        "conflicting-patient-reference",
+        { reference: "Patient/patient-1" },
+        { reference: "Patient/patient-2" },
+      ),
+      {
+        resourceType: "Bundle",
+        entry: [
+          { resource: heartRate("mixed-patient-a", { reference: "Patient/patient-1" }) },
+          { resource: heartRate("mixed-patient-b", { reference: "Patient/patient-2" }) },
+        ],
+      },
+    ];
+
+    for (const [index, page] of invalidPages.entries()) {
+      const vaultRoot = await writeClinicalFixture({
+        resourceFiles: [{
+          resourceType: "Observation",
+          relativePath: "Observation/page-1.json",
+          count: index === invalidPages.length - 1 ? 2 : 1,
+        }],
+        pages: { "Observation/page-1.json": page },
+      });
+      await expect(buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot }))
+        .rejects.toThrow(/manifest patient/u);
+    }
+  });
+
+  it("accepts same-base absolute Patient references and rejects foreign bases", async () => {
+    const writeAbsoluteReferenceFixture = (reference: string) => writeClinicalFixture({
+      resourceFiles: [{
+        resourceType: "Observation",
+        relativePath: "Observation/page-1.json",
+        count: 1,
+      }],
+      pages: {
+        "Observation/page-1.json": {
+          resourceType: "Observation",
+          id: "absolute-reference-heart-rate",
+          subject: { reference },
+          status: "final",
+          effectiveDateTime: "2026-07-01T12:00:00.000Z",
+          code: {
+            coding: [{ system: "http://loinc.org", code: "8867-4", display: "Heart rate" }],
+          },
+          valueQuantity: { value: 70, unit: "bpm" },
+        },
+      },
+    });
+
+    const matchingRoot = await writeAbsoluteReferenceFixture(`${FHIR_BASE_URL}/Patient/patient-1`);
+    const matchingPlan = await buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot: matchingRoot });
+    expect(matchingPlan.candidates).toEqual([
+      expect.objectContaining({
+        resource: expect.objectContaining({ resourceId: "absolute-reference-heart-rate" }),
+      }),
+    ]);
+
+    const foreignRoot = await writeAbsoluteReferenceFixture(
+      "https://foreign.example.test/fhir/Patient/patient-1",
+    );
+    await expect(buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot: foreignRoot }))
+      .rejects.toThrow("invalid manifest patient reference");
+  });
+
+  it("rejects resources outside their declared FHIR family", async () => {
+    const mislabeledRoot = await writeClinicalFixture({
+      resourceFiles: [{
+        resourceType: "Condition",
+        relativePath: "Condition/page-1.json",
+        count: 1,
+      }],
+      pages: {
+        "Condition/page-1.json": {
+          resourceType: "Observation",
+          id: "mislabeled-observation",
+          status: "final",
+          effectiveDateTime: "2026-07-01T12:00:00.000Z",
+          code: {
+            coding: [{ system: "http://loinc.org", code: "8867-4", display: "Heart rate" }],
+          },
+          valueQuantity: { value: 70, unit: "bpm" },
+        },
+      },
+    });
+    await expect(buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot: mislabeledRoot }))
+      .rejects.toThrow("declared resource type");
+  });
+
+  it("rejects unresolved FHIR pagination before emitting no-known allergies", async () => {
+    const unresolvedPaginationRoot = await writeClinicalFixture({
+      resourceFiles: [
+        {
+          resourceType: "AllergyIntolerance",
+          relativePath: "AllergyIntolerance/page-1.json",
+          count: 1,
+        },
+        {
+          resourceType: "Condition",
+          relativePath: "Condition/page-1.json",
+          count: 0,
+        },
+      ],
+      pages: {
+        "AllergyIntolerance/page-1.json": {
+          resourceType: "Bundle",
+          link: [{ relation: "next", url: "https://ehr.example.test/fhir/AllergyIntolerance?page=2" }],
+          entry: [{
+            resource: {
+              resourceType: "AllergyIntolerance",
+              id: "incomplete-no-known-allergies",
+              recordedDate: "2026-07-02T09:00:00.000Z",
+              clinicalStatus: {
+                coding: [{
+                  system: "http://terminology.hl7.org/CodeSystem/allergyintolerance-clinical",
+                  code: "active",
+                }],
+              },
+              verificationStatus: {
+                coding: [{
+                  system: "http://terminology.hl7.org/CodeSystem/allergyintolerance-verification",
+                  code: "confirmed",
+                }],
+              },
+              code: {
+                text: "No known allergies",
+                coding: [{
+                  system: "http://snomed.info/sct",
+                  code: "716186003",
+                  display: "No known allergies",
+                }],
+              },
+            },
+          }],
+        },
+        "Condition/page-1.json": [],
+      },
+    });
+    await expect(buildClinicalImportPlan({
+      manifestPath: MANIFEST_PATH,
+      vaultRoot: unresolvedPaginationRoot,
+    })).rejects.toThrow("unresolved pagination");
+  });
+
+  it("rejects FHIR pagination cycles before emitting no-known allergies", async () => {
+    const firstPageUrl = "https://ehr.example.test/fhir/AllergyIntolerance?page=1";
+    const secondPageUrl = "https://ehr.example.test/fhir/AllergyIntolerance?page=2";
+    const vaultRoot = await writeClinicalFixture({
+      resourceFiles: [
+        {
+          resourceType: "AllergyIntolerance",
+          relativePath: "AllergyIntolerance/page-1.json",
+          count: 1,
+          pageUrlHash: hashClinicalFhirPageUrl(firstPageUrl),
+        },
+        {
+          resourceType: "AllergyIntolerance",
+          relativePath: "AllergyIntolerance/page-2.json",
+          count: 0,
+          pageUrlHash: hashClinicalFhirPageUrl(secondPageUrl),
+        },
+        {
+          resourceType: "Condition",
+          relativePath: "Condition/page-1.json",
+          count: 0,
+        },
+      ],
+      pages: {
+        "AllergyIntolerance/page-1.json": {
+          resourceType: "Bundle",
+          link: [{ relation: "next", url: secondPageUrl }],
+          entry: [{ resource: noKnownAllergyResource("cyclic-no-known-allergies") }],
+        },
+        "AllergyIntolerance/page-2.json": {
+          resourceType: "Bundle",
+          link: [{ relation: "next", url: firstPageUrl }],
+          entry: [],
+        },
+        "Condition/page-1.json": [],
+      },
+    });
+
+    await expect(buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot }))
+      .rejects.toThrow("cyclic pagination");
+  });
+
+  it("accepts a declared FHIR pagination chain that reaches a terminal page", async () => {
+    const nextPageUrl = "https://ehr.example.test/fhir/Observation?page=2";
+    const observation = (id: string, value: number) => ({
+      resourceType: "Observation",
+      id,
+      status: "final",
+      effectiveDateTime: "2026-07-01T12:00:00.000Z",
+      code: {
+        coding: [{ system: "http://loinc.org", code: "8867-4", display: "Heart rate" }],
+      },
+      valueQuantity: { value, unit: "bpm" },
+    });
+    const vaultRoot = await writeClinicalFixture({
+      resourceFiles: [
+        {
+          resourceType: "Observation",
+          relativePath: "Observation/page-1.json",
+          count: 1,
+        },
+        {
+          resourceType: "Observation",
+          relativePath: "Observation/page-2.json",
+          count: 1,
+          pageUrlHash: hashClinicalFhirPageUrl(nextPageUrl),
+        },
+      ],
+      pages: {
+        "Observation/page-1.json": {
+          resourceType: "Bundle",
+          link: [{ relation: "next", url: nextPageUrl }],
+          entry: [{ resource: observation("page-1-heart-rate", 70) }],
+        },
+        "Observation/page-2.json": {
+          resourceType: "Bundle",
+          entry: [{ resource: observation("page-2-heart-rate", 72) }],
+        },
+      },
+    });
+
+    const plan = await buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot });
+    expect(plan.candidates.map((candidate) => candidate.resource.resourceId)).toEqual([
+      "page-1-heart-rate",
+      "page-2-heart-rate",
+    ]);
+  });
+
+  it("rejects pagination that leaves the manifest FHIR base", async () => {
+    const foreignPageUrl = "https://foreign.example.test/fhir/Observation?page=2";
+    const vaultRoot = await writeClinicalFixture({
+      resourceFiles: [
+        {
+          resourceType: "Observation",
+          relativePath: "Observation/page-1.json",
+          count: 1,
+        },
+        {
+          resourceType: "Observation",
+          relativePath: "Observation/page-2.json",
+          count: 1,
+          pageUrlHash: hashClinicalFhirPageUrl(foreignPageUrl),
+        },
+      ],
+      pages: {
+        "Observation/page-1.json": {
+          resourceType: "Bundle",
+          link: [{ relation: "next", url: foreignPageUrl }],
+          entry: [{ resource: heartRateResource("expected-base-page") }],
+        },
+        "Observation/page-2.json": {
+          resourceType: "Bundle",
+          entry: [{ resource: heartRateResource("foreign-base-page") }],
+        },
+      },
+    });
+
+    await expect(buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot }))
+      .rejects.toThrow("outside the manifest FHIR base");
+  });
+
+  it("rejects pagination pages that are not reachable from a root page", async () => {
+    const orphanPageUrl = `${FHIR_BASE_URL}/Observation?page=2`;
+    const vaultRoot = await writeClinicalFixture({
+      resourceFiles: [
+        {
+          resourceType: "Observation",
+          relativePath: "Observation/page-1.json",
+          count: 1,
+        },
+        {
+          resourceType: "Observation",
+          relativePath: "Observation/page-2.json",
+          count: 1,
+          pageUrlHash: hashClinicalFhirPageUrl(orphanPageUrl),
+        },
+      ],
+      pages: {
+        "Observation/page-1.json": heartRateResource("root-page"),
+        "Observation/page-2.json": heartRateResource("orphan-page"),
+      },
+    });
+
+    await expect(buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot }))
+      .rejects.toThrow("unreachable pagination");
+  });
+
+  it("keeps one external identity when an Observation changes mapping shape", async () => {
+    const resourceFiles = [{
+      resourceType: "Observation",
+      relativePath: "Observation/page-1.json",
+      count: 1,
+    }];
+    const scalarRoot = await writeClinicalFixture({
+      resourceFiles,
+      pages: {
+        "Observation/page-1.json": {
+          resourceType: "Observation",
+          id: "shape-changing-observation",
+          meta: { lastUpdated: "2026-07-01T12:01:00.000Z" },
+          status: "final",
+          effectiveDateTime: "2026-07-01T12:00:00.000Z",
+          code: {
+            coding: [{ system: "http://loinc.org", code: "8867-4", display: "Heart rate" }],
+          },
+          valueQuantity: { value: 70, unit: "bpm" },
+        },
+      },
+    });
+    const panelRoot = await writeClinicalFixture({
+      resourceFiles,
+      pages: {
+        "Observation/page-1.json": {
+          resourceType: "Observation",
+          id: "shape-changing-observation",
+          meta: { lastUpdated: "2026-07-01T12:02:00.000Z" },
+          status: "final",
+          effectiveDateTime: "2026-07-01T12:00:00.000Z",
+          code: { text: "Vitals panel" },
+          component: [{
+            code: {
+              coding: [{ system: "http://loinc.org", code: "8867-4", display: "Heart rate" }],
+            },
+            valueQuantity: { value: 72, unit: "bpm" },
+          }],
+        },
+      },
+    });
+
+    const scalarPlan = await buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot: scalarRoot });
+    const panelPlan = await buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot: panelRoot });
+    const scalarRef = scalarPlan.candidates[0]?.payload.externalRef;
+    const panelRef = panelPlan.candidates[0]?.payload.externalRef;
+
+    expect(scalarRef).toEqual(expect.objectContaining({
+      resourceType: "observation",
+      resourceId: "shape-changing-observation",
+      version: "2026-07-01T12:01:00.000Z",
+    }));
+    expect(panelRef).toEqual(expect.objectContaining({
+      resourceType: "observation",
+      resourceId: "shape-changing-observation",
+      version: "2026-07-01T12:02:00.000Z",
+    }));
+    expect(scalarRef).not.toHaveProperty("facet");
+    expect(panelRef).not.toHaveProperty("facet");
+
+    const canonicalVaultRoot = await mkdtemp(path.join(tmpdir(), "murph-clinical-records-apply-"));
+    tempRoots.push(canonicalVaultRoot);
+    await initializeVault({
+      vaultRoot: canonicalVaultRoot,
+      createdAt: "2026-07-01T12:00:00.000Z",
+      timezone: "America/New_York",
+    });
+    const scalarCandidate = scalarPlan.candidates[0];
+    const panelCandidate = panelPlan.candidates[0];
+    expect(scalarCandidate).toBeDefined();
+    expect(panelCandidate).toBeDefined();
+    if (!scalarCandidate || !panelCandidate) {
+      throw new Error("Expected scalar and panel clinical import candidates.");
+    }
+
+    const firstImport = await importEventBatch({
+      vaultRoot: canonicalVaultRoot,
+      payloads: [{ kind: "measurement", ...scalarCandidate.payload }],
+      apply: true,
+    });
+    const secondImport = await importEventBatch({
+      vaultRoot: canonicalVaultRoot,
+      payloads: [{ kind: "measurement", ...panelCandidate.payload }],
+      apply: true,
+    });
+    expect(firstImport.createdCount).toBe(1);
+    expect(secondImport.createdCount).toBe(0);
+    expect(secondImport.supersededCount).toBe(1);
+    expect(secondImport.eventIds).toEqual(firstImport.eventIds);
+  });
+
+  it("leaves resources without provider freshness unsupported", async () => {
+    const vaultRoot = await writeClinicalFixture({
+      resourceFiles: [{
+        resourceType: "Observation",
+        relativePath: "Observation/page-1.json",
+        count: 1,
+      }],
+      pages: {
+        "Observation/page-1.json": {
+          resourceType: "Observation",
+          id: "missing-provider-freshness",
+          meta: null,
+          status: "final",
+          effectiveDateTime: "2026-07-01T12:00:00.000Z",
+          code: {
+            coding: [{ system: "http://loinc.org", code: "8867-4", display: "Heart rate" }],
+          },
+          valueQuantity: { value: 70, unit: "bpm" },
+        },
+      },
+    });
+
+    const plan = await buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot });
+    expect(plan.candidates).toEqual([]);
+    expect(plan.unsupported).toEqual([
+      expect.objectContaining({
+        resourceId: "missing-provider-freshness",
+        reason: "FHIR resource lastUpdated is missing",
+      }),
+    ]);
+  });
+
   it("namespaces FHIR external refs by source base and patient", async () => {
     const resourceFiles = [
       {
@@ -2766,7 +3348,7 @@ describe("buildClinicalImportPlan", () => {
     };
     const firstVaultRoot = await writeClinicalFixture({ pages, resourceFiles });
     const secondVaultRoot = await writeClinicalFixture({
-      manifest: { patientIdHash: OTHER_PATIENT_ID_HASH },
+      manifest: { patientId: OTHER_PATIENT_ID },
       pages,
       resourceFiles,
     });
@@ -2781,7 +3363,6 @@ describe("buildClinicalImportPlan", () => {
         system: `epic-fhir-${FHIR_BASE_URL_HASH}-${PATIENT_ID_HASH}`,
         resourceType: "observation",
         resourceId: "shared-bp",
-        facet: "bp-systolic",
       }),
     );
     expect(secondRef).toEqual(
@@ -2789,12 +3370,52 @@ describe("buildClinicalImportPlan", () => {
         system: `epic-fhir-${FHIR_BASE_URL_HASH}-${OTHER_PATIENT_ID_HASH}`,
         resourceType: "observation",
         resourceId: "shared-bp",
-        facet: "bp-systolic",
       }),
     );
     expect(firstRef?.system).not.toBe(secondRef?.system);
   });
 });
+
+function noKnownAllergyResource(resourceId: string) {
+  return {
+    resourceType: "AllergyIntolerance",
+    id: resourceId,
+    recordedDate: "2026-07-02T09:00:00.000Z",
+    clinicalStatus: {
+      coding: [{
+        system: "http://terminology.hl7.org/CodeSystem/allergyintolerance-clinical",
+        code: "active",
+      }],
+    },
+    verificationStatus: {
+      coding: [{
+        system: "http://terminology.hl7.org/CodeSystem/allergyintolerance-verification",
+        code: "confirmed",
+      }],
+    },
+    code: {
+      text: "No known allergies",
+      coding: [{
+        system: "http://snomed.info/sct",
+        code: "716186003",
+        display: "No known allergies",
+      }],
+    },
+  };
+}
+
+function heartRateResource(resourceId: string) {
+  return {
+    resourceType: "Observation",
+    id: resourceId,
+    status: "final",
+    effectiveDateTime: "2026-07-01T12:00:00.000Z",
+    code: {
+      coding: [{ system: "http://loinc.org", code: "8867-4", display: "Heart rate" }],
+    },
+    valueQuantity: { value: 70, unit: "bpm" },
+  };
+}
 
 function bloodPressurePanelObservation(index: number) {
   return {
@@ -2824,10 +3445,14 @@ function bloodPressurePanelObservation(index: number) {
 
 async function writeClinicalFixture(input: {
   manifest?: {
+    completedResourceTypes?: string[];
     connectionId?: string;
     errors?: Array<{ code: string; message: string; resourceType?: string }>;
     fhirBaseUrlHash?: string;
+    grantedScopes?: string[];
+    patientId?: string;
     patientIdHash?: string;
+    requestedScopes?: string[];
     retrievalJobId?: string;
   };
   manifestPath?: string;
@@ -2836,15 +3461,20 @@ async function writeClinicalFixture(input: {
     count: number;
     relativePath: string;
     resourceType: string;
+    pageUrlHash?: string;
     sha256?: string;
   }>;
 }): Promise<string> {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-clinical-records-"));
   tempRoots.push(vaultRoot);
   const manifestPath = input.manifestPath ?? MANIFEST_PATH;
+  const patientId = input.manifest?.patientId ?? PATIENT_ID;
 
   const pageTexts = new Map(
-    Object.entries(input.pages).map(([relativePath, value]) => [relativePath, serializeJson(value)]),
+    Object.entries(input.pages).map(([relativePath, value]) => [
+      relativePath,
+      serializeJson(withClinicalFixtureDefaults(value, patientId)),
+    ]),
   );
   const resourceFiles = input.resourceFiles.map((resourceFile) => ({
     ...resourceFile,
@@ -2858,11 +3488,13 @@ async function writeClinicalFixture(input: {
     retrievalJobId: input.manifest?.retrievalJobId ?? "retrieval-job-1",
     sourceSystem: "epic-fhir",
     fhirBaseUrlHash: input.manifest?.fhirBaseUrlHash ?? FHIR_BASE_URL_HASH,
-    patientIdHash: input.manifest?.patientIdHash ?? PATIENT_ID_HASH,
+    patientIdHash: input.manifest?.patientIdHash ?? hashClinicalFhirPatientId(patientId),
     fetchedAt: "2026-07-01T12:00:00.000Z",
     resourceFiles,
-    requestedScopes: ["patient/*.read"],
-    grantedScopes: ["patient/*.read"],
+    completedResourceTypes: input.manifest?.completedResourceTypes
+      ?? [...new Set(resourceFiles.map((resourceFile) => resourceFile.resourceType))],
+    requestedScopes: input.manifest?.requestedScopes ?? ["patient/*.read"],
+    grantedScopes: input.manifest?.grantedScopes ?? ["patient/*.read"],
     ...(input.manifest?.errors === undefined ? {} : { errors: input.manifest.errors }),
   });
 
@@ -2875,6 +3507,51 @@ async function writeClinicalFixture(input: {
   }
 
   return vaultRoot;
+}
+
+function withClinicalFixtureDefaults(value: unknown, patientId: string): unknown {
+  if (Array.isArray(value)) {
+    return value.map((entry) => withClinicalFixtureDefaults(entry, patientId));
+  }
+  if (!isFixtureRecord(value) || typeof value.resourceType !== "string") {
+    return value;
+  }
+  if (value.resourceType === "Bundle") {
+    return {
+      ...value,
+      ...(Array.isArray(value.entry)
+        ? {
+            entry: value.entry.map((entry) =>
+              isFixtureRecord(entry)
+                ? { ...entry, resource: withClinicalFixtureDefaults(entry.resource, patientId) }
+                : entry
+            ),
+          }
+        : {}),
+    };
+  }
+
+  const resource = { ...value };
+  if (resource.meta === undefined) {
+    resource.meta = { lastUpdated: "2026-07-01T12:00:00.000Z" };
+  } else if (isFixtureRecord(resource.meta) && resource.meta.lastUpdated === undefined) {
+    resource.meta = { ...resource.meta, lastUpdated: "2026-07-01T12:00:00.000Z" };
+  }
+
+  if (resource.resourceType !== "Patient") {
+    const patientField = resource.resourceType === "AllergyIntolerance" || resource.resourceType === "Immunization"
+      ? "patient"
+      : "subject";
+    if (resource[patientField] === undefined) {
+      resource[patientField] = { reference: `Patient/${patientId}` };
+    }
+  }
+
+  return resource;
+}
+
+function isFixtureRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 async function writeJson(root: string, relativePath: string, value: unknown): Promise<void> {

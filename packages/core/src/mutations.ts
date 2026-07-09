@@ -19,11 +19,13 @@ import type {
 } from "@murphai/contracts";
 import {
   assertContractId,
+  compareIsoTimestampsAscending,
   deviceDataOriginSchema,
   experimentFrontmatterSchema,
   externalRefSchema,
   journalDayFrontmatterSchema,
   eventRecordSchema,
+  isStrictIsoDateTime,
   safeParseContract,
   sampleRecordSchema,
 } from "@murphai/contracts";
@@ -1571,6 +1573,24 @@ function eventExternalRefKey(externalRef: ExternalRef): string {
   });
 }
 
+function compareIncomingExternalRefVersion(
+  existing: ExternalRef,
+  incoming: ExternalRef,
+): number | null {
+  const existingVersion = existing.version;
+  const incomingVersion = incoming.version;
+  if (
+    !existingVersion
+    || !incomingVersion
+    || !isStrictIsoDateTime(existingVersion)
+    || !isStrictIsoDateTime(incomingVersion)
+  ) {
+    return null;
+  }
+
+  return compareIsoTimestampsAscending(incomingVersion, existingVersion);
+}
+
 // Device-sync content equality ignores per-import identity (id, lifecycle,
 // recordedAt) AND rawRefs, because device imports mint fresh raw-artifact
 // paths on every sync run.
@@ -2245,6 +2265,23 @@ async function reconcileEventImportEntriesByExternalRef(
       skippedDuplicateCount += 1;
       records.push(latest);
       continue;
+    }
+
+    const sourceVersionComparison = latest.externalRef
+      ? compareIncomingExternalRefVersion(latest.externalRef, externalRef)
+      : null;
+    if (sourceVersionComparison !== null && sourceVersionComparison < 0) {
+      skippedDuplicateCount += 1;
+      records.push(latest);
+      continue;
+    }
+    if (sourceVersionComparison === 0) {
+      throw new VaultError(
+        "EVENT_SOURCE_REVISION_CONFLICT",
+        `Event externalRef "${externalRef.system}/${externalRef.resourceType}/${externalRef.resourceId}` +
+          `${externalRef.facet ? `#${externalRef.facet}` : ""}" has conflicting content for source revision ` +
+          `"${externalRef.version}"; nothing was imported.`,
+      );
     }
 
     if (isDeletedEventSpineRecord(latest)) {

@@ -244,6 +244,57 @@ test("importEventBatch supersedes changed content for an existing externalRef in
   );
 });
 
+test("importEventBatch does not let an older source revision replace a newer event", async () => {
+  const vaultRoot = await makeVault("murph-event-batch-source-revision-order");
+  const newerBase = buildObservationPayload(10, "heart-rate", 72);
+  const newer = {
+    ...newerBase,
+    externalRef: { ...newerBase.externalRef, version: "2026-03-10T08:00:00.000Z" },
+  };
+  const olderBase = buildObservationPayload(10, "heart-rate", 68);
+  const older = {
+    ...olderBase,
+    externalRef: { ...olderBase.externalRef, version: "2026-03-10T07:00:00.000Z" },
+  };
+
+  const first = await importEventBatch({ vaultRoot, payloads: [newer], apply: true });
+  assert.equal(first.createdCount, 1);
+
+  const replay = await importEventBatch({ vaultRoot, payloads: [older], apply: true });
+  assert.equal(replay.applied, false);
+  assert.equal(replay.skippedExistingCount, 1);
+  assert.equal(replay.supersededCount, 0);
+
+  const records = await readEventShard(vaultRoot, first.eventShardPaths[0]!);
+  assert.equal(records.length, 1);
+  assert.equal(records[0]!.kind === "observation" ? records[0]!.value : null, 72);
+
+  const conflictingBase = buildObservationPayload(10, "heart-rate", 71);
+  const conflicting = {
+    ...conflictingBase,
+    externalRef: { ...conflictingBase.externalRef, version: "2026-03-10T08:00:00.000Z" },
+  };
+  await assert.rejects(
+    importEventBatch({ vaultRoot, payloads: [conflicting], apply: true }),
+    (error) => {
+      assert.equal(error instanceof VaultError, true);
+      assert.equal((error as VaultError).code, "EVENT_SOURCE_REVISION_CONFLICT");
+      return true;
+    },
+  );
+
+  const newestBase = buildObservationPayload(10, "heart-rate", 74);
+  const newest = {
+    ...newestBase,
+    externalRef: { ...newestBase.externalRef, version: "2026-03-10T09:00:00.000Z" },
+  };
+  const update = await importEventBatch({ vaultRoot, payloads: [newest], apply: true });
+  assert.equal(update.supersededCount, 1);
+  const updatedRecords = await readEventShard(vaultRoot, first.eventShardPaths[0]!);
+  assert.equal(updatedRecords.length, 2);
+  assert.equal(updatedRecords[1]!.kind === "observation" ? updatedRecords[1]!.value : null, 74);
+});
+
 test("importEventBatch rejects the whole batch when any payload is invalid", async () => {
   const vaultRoot = await makeVault("murph-event-batch-invalid");
   const { title: _title, ...missingTitle } = buildSleepSessionPayload(11);
@@ -535,10 +586,17 @@ test("importEventBatch treats rawRefs changes as content changes", async () => {
 
 test("importEventBatch rejects kind rewrites through a shared externalRef", async () => {
   const vaultRoot = await makeVault("murph-event-batch-kind-stability");
+  const initialPayload = buildSleepSessionPayload(10);
 
   const first = await importEventBatch({
     vaultRoot,
-    payloads: [buildSleepSessionPayload(10)],
+    payloads: [{
+      ...initialPayload,
+      externalRef: {
+        ...initialPayload.externalRef,
+        version: "2026-03-10T08:00:00.000Z",
+      },
+    }],
     apply: true,
   });
   assert.equal(first.createdCount, 1);
@@ -560,6 +618,7 @@ test("importEventBatch rejects kind rewrites through a shared externalRef", asyn
       system: "whoop",
       resourceType: "sleep",
       resourceId: "sleep-2026-03-10",
+      version: "2026-03-10T07:00:00.000Z",
     },
   };
 

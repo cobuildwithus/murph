@@ -10,14 +10,21 @@ import {
   externalRefForFhir,
   fhirResourceTypeToSlug,
   fhirSourceRefSchema,
+  hashClinicalFhirBaseUrl,
+  hashClinicalFhirPageUrl,
+  hashClinicalFhirPatientId,
+  isClinicalFhirUrlWithinBase,
+  normalizeClinicalFhirPatientId,
+  normalizeClinicalFhirPatientReference,
   rawRefForClinicalManifestFile,
 } from "../src/index.ts";
 import { describe, expect, it } from "vitest";
 
 const SHA256 = "0".repeat(64);
-const FHIR_BASE_URL_HASH = "1".repeat(64);
-const PATIENT_ID_HASH = "2".repeat(64);
-const OTHER_PATIENT_ID_HASH = "3".repeat(64);
+const FHIR_BASE_URL = "https://ehr.example.test/fhir";
+const FHIR_BASE_URL_HASH = hashClinicalFhirBaseUrl(FHIR_BASE_URL);
+const PATIENT_ID_HASH = hashClinicalFhirPatientId("patient-1");
+const OTHER_PATIENT_ID_HASH = hashClinicalFhirPatientId("patient-2");
 const RAW_REF = "raw/clinical/fhir/clinical-connection-1/retrieval-job-1/Observation/page-1.json";
 
 const sourceRef = {
@@ -41,7 +48,7 @@ const commonPayload = {
 describe("clinical records contracts", () => {
   it("validates raw manifests and derives raw FHIR refs", () => {
     const resourceFile = {
-      resourceType: "Observation",
+      resourceType: "Observation" as const,
       relativePath: "Observation/page-1.json",
       count: 2,
       sha256: SHA256,
@@ -56,6 +63,7 @@ describe("clinical records contracts", () => {
       patientIdHash: PATIENT_ID_HASH,
       fetchedAt: "2026-07-01T12:00:00.000Z",
       resourceFiles: [resourceFile],
+      completedResourceTypes: ["Observation"],
       requestedScopes: ["patient/Observation.read"],
       grantedScopes: ["patient/Observation.read"],
     });
@@ -73,6 +81,18 @@ describe("clinical records contracts", () => {
         connectionId: "clinical/connection",
       }),
     ).toThrow();
+    expect(() =>
+      clinicalRawManifestSchema.parse({
+        ...manifest,
+        completedResourceTypes: ["Observation", "Observation"],
+      }),
+    ).toThrow("unique");
+    expect(() =>
+      clinicalRawManifestSchema.parse({
+        ...manifest,
+        completedResourceTypes: ["Condition"],
+      }),
+    ).toThrow("declared raw resource file");
     expect(
       rawRefForClinicalManifestFile({
         manifestPath: "raw/clinical/fhir/clinical-connection-1/retrieval-job-1/manifest.json",
@@ -102,6 +122,7 @@ describe("clinical records contracts", () => {
             pageUrlHash: SHA256,
           },
         ],
+        completedResourceTypes: ["Observation"],
         requestedScopes: ["patient/Observation.read"],
         grantedScopes: ["patient/Observation.read"],
         errors: [
@@ -133,6 +154,7 @@ describe("clinical records contracts", () => {
               sha256: SHA256,
             },
           ],
+          completedResourceTypes: ["Observation"],
           requestedScopes: [],
           grantedScopes: [],
         }),
@@ -141,6 +163,46 @@ describe("clinical records contracts", () => {
   });
 
   it("normalizes deterministic FHIR external references", () => {
+    expect(normalizeClinicalFhirPatientId("Patient/patient-1")).toBe("patient-1");
+    expect(normalizeClinicalFhirPatientId("https://ehr.example.test/fhir/Patient/patient-1/_history/2"))
+      .toBe("patient-1");
+    expect(normalizeClinicalFhirPatientId("Practitioner/patient-1")).toBeNull();
+    expect(hashClinicalFhirBaseUrl(`${FHIR_BASE_URL}/`)).toBe(FHIR_BASE_URL_HASH);
+    expect(normalizeClinicalFhirPatientReference({
+      fhirBaseUrlHash: FHIR_BASE_URL_HASH,
+      reference: `${FHIR_BASE_URL}/Patient/patient-1`,
+    })).toBe("patient-1");
+    expect(normalizeClinicalFhirPatientReference({
+      fhirBaseUrlHash: FHIR_BASE_URL_HASH,
+      reference: "https://foreign.example.test/fhir/Patient/patient-1",
+    })).toBeNull();
+    expect(normalizeClinicalFhirPatientReference({
+      fhirBaseUrlHash: FHIR_BASE_URL_HASH,
+      reference: "Observation/obs-1/Patient/patient-1",
+    })).toBeNull();
+    expect(isClinicalFhirUrlWithinBase({
+      fhirBaseUrlHash: FHIR_BASE_URL_HASH,
+      url: `${FHIR_BASE_URL}/Observation?page=2`,
+    })).toBe(true);
+    expect(isClinicalFhirUrlWithinBase({
+      fhirBaseUrlHash: FHIR_BASE_URL_HASH,
+      url: "https://ehr.example.test/fhir2/Observation?page=2",
+    })).toBe(false);
+    expect(isClinicalFhirUrlWithinBase({
+      fhirBaseUrlHash: hashClinicalFhirBaseUrl("https://ehr.example.test/fhir/Observation"),
+      url: "https://ehr.example.test/fhir//Observation?page=2",
+    })).toBe(false);
+    expect(isClinicalFhirUrlWithinBase({
+      fhirBaseUrlHash: FHIR_BASE_URL_HASH,
+      url: "https://foreign.example.test/fhir/Observation?page=2",
+    })).toBe(false);
+    expect(isClinicalFhirUrlWithinBase({
+      fhirBaseUrlHash: FHIR_BASE_URL_HASH,
+      url: "https://user:password@ehr.example.test/fhir/Observation?page=2",
+    })).toBe(false);
+    expect(hashClinicalFhirPatientId("Patient/patient-1")).toBe(PATIENT_ID_HASH);
+    expect(hashClinicalFhirPageUrl("https://ehr.example.test/fhir/Observation?page=2"))
+      .toMatch(/^[a-f0-9]{64}$/u);
     expect(fhirResourceTypeToSlug("DiagnosticReport")).toBe("diagnostic-report");
     expect(clinicalFacetSlug("Systolic BP (mmHg)")).toBe("systolic-bp-mm-hg");
     expect(
