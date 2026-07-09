@@ -304,7 +304,7 @@ describe("hosted AI usage allowance pricing", () => {
     });
   });
 
-  it("prices GPT-5.6 model slugs with official preview standard and flex accounting", () => {
+  it("prices GPT-5.6 model slugs with official standard and flex accounting", () => {
     expect(priceHostedAiUsageForAllowance({
       ...BASE_USAGE_RECORD,
       requestedModel: "gpt-5.6-terra",
@@ -315,7 +315,7 @@ describe("hosted AI usage allowance pricing", () => {
       pricingSnapshot: {
         model: "gpt-5.6-terra",
         modelSource: "served",
-        pricingSource: "https://help.openai.com/en/articles/20001325-a-preview-of-gpt-56-sol-terra-and-luna",
+        pricingSource: "https://developers.openai.com/api/docs/pricing",
         ratesUsdMicrosPerMillionTokens: {
           cachedInput: "250000",
           cacheWrite: "3125000",
@@ -326,7 +326,7 @@ describe("hosted AI usage allowance pricing", () => {
         servedModel: "openai/gpt-5.6-terra-2026-07-08",
         tokenPricingBasis: "standard",
       },
-      pricingVersion: "openai-gpt-5.6-preview-pricing-2026-07-08-standard",
+      pricingVersion: "openai-api-pricing-2026-07-09-gpt-5.6-standard",
     });
 
     expect(priceHostedAiUsageForAllowance({
@@ -340,7 +340,7 @@ describe("hosted AI usage allowance pricing", () => {
       counted: true,
       pricingSnapshot: {
         model: "gpt-5.6-luna",
-        pricingSource: "https://help.openai.com/en/articles/20001325-a-preview-of-gpt-56-sol-terra-and-luna",
+        pricingSource: "https://developers.openai.com/api/docs/pricing",
         ratesUsdMicrosPerMillionTokens: {
           cachedInput: "100000",
           cacheWrite: "1250000",
@@ -353,11 +353,11 @@ describe("hosted AI usage allowance pricing", () => {
         },
         tokenPricingBasis: "openai-flex",
       },
-      pricingVersion: "openai-gpt-5.6-preview-pricing-2026-07-08-openai-flex",
+      pricingVersion: "openai-api-pricing-2026-07-09-gpt-5.6-openai-flex",
     });
   });
 
-  it("prices GPT-5.6 cache-write tokens at the official preview write rate", () => {
+  it("prices GPT-5.6 cache-write tokens at the official write rate", () => {
     expect(priceHostedAiUsageForAllowance({
       ...BASE_USAGE_RECORD,
       cacheWriteTokens: 1_000,
@@ -388,7 +388,7 @@ describe("hosted AI usage allowance pricing", () => {
           output: "0",
         },
       },
-      pricingVersion: "openai-gpt-5.6-preview-pricing-2026-07-08-standard",
+      pricingVersion: "openai-api-pricing-2026-07-09-gpt-5.6-standard",
     });
   });
 
