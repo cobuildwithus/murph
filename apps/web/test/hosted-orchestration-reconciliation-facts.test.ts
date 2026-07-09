@@ -936,7 +936,11 @@ describe("hosted orchestration reconciliation facts", () => {
     const [deliveryClaimOrder] =
       mocks.claimHostedLinqDeliveryProviderDispatchTx.mock.invocationCallOrder;
     expect(deliveryClaimOrder).toBeDefined();
-    expect(mocks.markHostedLinqDeliveryProviderDispatchStartedTx).not.toHaveBeenCalled();
+    expect(mocks.markHostedLinqDeliveryProviderDispatchStartedTx).toHaveBeenCalledWith({
+      idempotencyKey: expectedIdempotencyKey,
+      prisma: expect.objectContaining({ kind: "prisma" }),
+      startedAt: new Date(FIXED_NOW),
+    });
     expect(mocks.readHostedExecutionControlClientIfConfigured)
       .toHaveBeenCalledWith(15_000);
     expect(mocks.sendTelegramUsageLimitNotice).toHaveBeenCalledWith(expect.objectContaining({
@@ -954,6 +958,7 @@ describe("hosted orchestration reconciliation facts", () => {
         target: "telegram_chat_runtime_denied:business:biz-42:dm-topic:9",
         userId: MEMBER_ID,
       }),
+      onRequestAttempted: expect.any(Function),
     }));
     expect(mocks.fetch).not.toHaveBeenCalled();
     expect(mocks.markHostedLinqDeliveryAcceptedTx).toHaveBeenCalledWith({
@@ -1018,7 +1023,11 @@ describe("hosted orchestration reconciliation facts", () => {
         reclaimStalePreProviderAttempt: true,
       }),
     );
-    expect(mocks.markHostedLinqDeliveryProviderDispatchStartedTx).not.toHaveBeenCalled();
+    expect(mocks.markHostedLinqDeliveryProviderDispatchStartedTx).toHaveBeenCalledWith({
+      idempotencyKey: legacyIdempotencyKey,
+      prisma: expect.objectContaining({ kind: "prisma" }),
+      startedAt: new Date(FIXED_NOW),
+    });
     expect(mocks.markHostedLinqDeliveryAcceptedTx).toHaveBeenCalledWith({
       acceptedAt: new Date(FIXED_NOW),
       idempotencyKey: legacyIdempotencyKey,
@@ -1688,7 +1697,7 @@ describe("hosted orchestration reconciliation facts", () => {
     expect(mocks.markHostedAiUsageLimitNoticeSent).not.toHaveBeenCalled();
   });
 
-  it("records raw hosted-control Telegram failures as retryable unavailable rows", async () => {
+  it("records raw hosted-control Telegram failures after request attempt as terminal unknown rows", async () => {
     const deniedDecision = buildDeniedUsageGateDecision();
     mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
       redactedStatusJson: {
@@ -1730,7 +1739,7 @@ describe("hosted orchestration reconciliation facts", () => {
     expect(response.status).toBe(200);
     expect(facts.blocked).toEqual({
       reason: "ai_usage_denied",
-      retryAt: "2026-05-20T12:15:00.000Z",
+      retryAt: "2026-07-01T00:00:00.000Z",
     });
     const expectedIdempotencyKey = buildHostedAiUsageGateNoticeIdempotencyKey({
       memberId: MEMBER_ID,
@@ -1738,14 +1747,72 @@ describe("hosted orchestration reconciliation facts", () => {
     });
     expect(mocks.markHostedLinqDeliverySendFailedTx).toHaveBeenCalledWith({
       failedAt: new Date(FIXED_NOW),
-      failureCode: "HostedRuntimeTelegramUsageLimitNoticeUnavailableError",
-      failureReason: "Hosted Telegram usage-limit notice delivery could not complete through hosted control.",
+      failureCode: "HostedRuntimeTelegramUsageLimitNoticeUnknownError",
+      failureReason: "Hosted Telegram usage-limit notice delivery could not be confirmed after dispatch started.",
       idempotencyKey: expectedIdempotencyKey,
       prisma: expect.objectContaining({ kind: "prisma" }),
     });
     expect(mocks.sendTelegramUsageLimitNotice).toHaveBeenCalledOnce();
     expect(mocks.fetch).not.toHaveBeenCalled();
-    expect(mocks.markHostedLinqDeliveryProviderDispatchStartedTx).not.toHaveBeenCalled();
+    expect(mocks.markHostedLinqDeliveryProviderDispatchStartedTx).toHaveBeenCalledWith({
+      idempotencyKey: expectedIdempotencyKey,
+      prisma: expect.objectContaining({ kind: "prisma" }),
+      startedAt: new Date(FIXED_NOW),
+    });
+    expect(mocks.markHostedLinqDeliveryAcceptedTx).not.toHaveBeenCalled();
+    expect(mocks.markHostedAiUsageLimitNoticeSent).not.toHaveBeenCalled();
+  });
+
+  it("keeps dispatch-start claim failures on the retryable pre-provider side", async () => {
+    const deniedDecision = buildDeniedUsageGateDecision();
+    mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
+      redactedStatusJson: {
+        conversationImportedSeq: "2",
+        systemImportedSeq: "0",
+      },
+    }));
+    mocks.readHostedMailboxMaxSeqByLane.mockResolvedValue([
+      {
+        lane: "conversation",
+        maxSeq: "3",
+      },
+      {
+        lane: "system",
+        maxSeq: "0",
+      },
+    ]);
+    mocks.resolveHostedRuntimeAiUsageGate.mockResolvedValue({
+      decision: deniedDecision,
+      status: "denied",
+    });
+    mocks.readHostedMailboxLatestPendingConversationItem.mockResolvedValue(
+      buildPendingConversationItem(),
+    );
+    mocks.decodeHostedMailboxStoredPayload.mockResolvedValue(buildTelegramConversationWake());
+    mocks.markHostedLinqDeliveryProviderDispatchStartedTx.mockResolvedValueOnce(false);
+
+    const response = await reconciliationRoute.GET(
+      requestForFacts(),
+      routeContext(),
+    );
+    const facts = parseHostedRuntimeReconciliationFacts(await response.json());
+
+    expect(response.status).toBe(200);
+    expect(facts.blocked).toEqual({
+      reason: "ai_usage_denied",
+      retryAt: "2026-05-20T12:15:00.000Z",
+    });
+    const expectedIdempotencyKey = buildHostedAiUsageGateNoticeIdempotencyKey({
+      memberId: MEMBER_ID,
+      periodStart: deniedDecision.periodStart,
+    });
+    expect(mocks.markHostedLinqDeliveryProviderDispatchStartedTx).toHaveBeenCalledWith({
+      idempotencyKey: expectedIdempotencyKey,
+      prisma: expect.objectContaining({ kind: "prisma" }),
+      startedAt: new Date(FIXED_NOW),
+    });
+    expect(mocks.sendTelegramUsageLimitNotice).toHaveBeenCalledOnce();
+    expect(mocks.markHostedLinqDeliverySendFailedTx).not.toHaveBeenCalled();
     expect(mocks.markHostedLinqDeliveryAcceptedTx).not.toHaveBeenCalled();
     expect(mocks.markHostedAiUsageLimitNoticeSent).not.toHaveBeenCalled();
   });
@@ -1807,6 +1874,11 @@ describe("hosted orchestration reconciliation facts", () => {
       prisma: expect.objectContaining({ kind: "prisma" }),
     });
     expect(mocks.fetch).not.toHaveBeenCalled();
+    expect(mocks.markHostedLinqDeliveryProviderDispatchStartedTx).toHaveBeenCalledWith({
+      idempotencyKey: expectedIdempotencyKey,
+      prisma: expect.objectContaining({ kind: "prisma" }),
+      startedAt: new Date(FIXED_NOW),
+    });
     expect(mocks.markHostedLinqDeliveryAcceptedTx).not.toHaveBeenCalled();
     expect(mocks.markHostedAiUsageLimitNoticeSent).not.toHaveBeenCalled();
   });
