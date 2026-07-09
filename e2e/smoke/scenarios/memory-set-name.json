@@ -1,0 +1,10 @@
+{
+  "id": "memory-set-name",
+  "command": "vault-cli memory set-name <displayName> --vault <path>",
+  "vaultFixture": "fixtures/minimal-vault",
+  "inputs": [
+    "fixtures/minimal-vault/CORE.md"
+  ],
+  "goldenOutput": "fixtures/golden-outputs/init",
+  "purpose": "Documents the audited typed write of the preferred display name into bank/memory.md."
+}

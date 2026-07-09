@@ -45,9 +45,11 @@ import {
 } from "../src/hosted-runtime/vault-share-projection.ts";
 import {
   CURRENT_VAULT_FORMAT_VERSION,
-  createEmptyProfileDocument,
-  renderProfileDocument,
-  setProfileDisplayName,
+  createEmptyMemoryDocument,
+  formatMemoryDisplayNameRecordText,
+  renderMemoryDocument,
+  setMemoryDisplayName,
+  upsertMemoryRecord,
 } from "@murphai/contracts";
 
 const NIGHT = {
@@ -209,24 +211,67 @@ async function createActivitySessionVault(
   return vaultRoot;
 }
 
-async function createProfileVault(displayName: string | null): Promise<string> {
-  const vaultRoot = await mkdtemp(join(tmpdir(), "murph-vault-share-profile-"));
+async function createMemoryDisplayNameVault(displayName: string | null): Promise<string> {
+  const vaultRoot = await mkdtemp(join(tmpdir(), "murph-vault-share-memory-name-"));
   if (!displayName) {
     return vaultRoot;
   }
 
+  const document = setMemoryDisplayName(
+    createEmptyMemoryDocument(new Date("2026-07-01T00:00:00.000Z")),
+    {
+      displayName,
+      now: new Date("2026-07-01T00:00:00.000Z"),
+    },
+  ).document;
   await mkdir(join(vaultRoot, "bank"), { recursive: true });
   await writeFile(
-    join(vaultRoot, "bank", "profile.md"),
-    renderProfileDocument(
-      setProfileDisplayName(createEmptyProfileDocument(new Date("2026-07-01T00:00:00.000Z")), {
-        displayName,
-        now: new Date("2026-07-01T00:00:00.000Z"),
-      }),
-    ),
+    join(vaultRoot, "bank", "memory.md"),
+    renderMemoryDocument({ document }),
     "utf8",
   );
 
+  return vaultRoot;
+}
+
+async function createLegacyMemoryDisplayNameVault(...texts: string[]): Promise<string> {
+  const vaultRoot = await mkdtemp(join(tmpdir(), "murph-vault-share-memory-name-"));
+  let document = createEmptyMemoryDocument(new Date("2026-07-01T00:00:00.000Z"));
+  for (const [index, text] of texts.entries()) {
+    document = upsertMemoryRecord(document, {
+      now: new Date(Date.parse("2026-07-01T00:00:00.000Z") + (index + 1) * 1000),
+      section: "Identity",
+      text,
+    }).document;
+  }
+
+  await mkdir(join(vaultRoot, "bank"), { recursive: true });
+  await writeFile(
+    join(vaultRoot, "bank", "memory.md"),
+    renderMemoryDocument({ document }),
+    "utf8",
+  );
+
+  return vaultRoot;
+}
+
+async function createLegacyProfileDisplayNameVault(displayName: string): Promise<string> {
+  const vaultRoot = await mkdtemp(join(tmpdir(), "murph-vault-share-legacy-profile-name-"));
+  await mkdir(join(vaultRoot, "bank"), { recursive: true });
+  await writeFile(
+    join(vaultRoot, "bank", "profile.md"),
+    [
+      "---",
+      "docType: profile",
+      "schemaVersion: 1",
+      `displayName: ${JSON.stringify(displayName)}`,
+      "updatedAt: 2026-07-01T00:00:00.000Z",
+      "---",
+      "# Profile",
+      "",
+    ].join("\n"),
+    "utf8",
+  );
   return vaultRoot;
 }
 
@@ -241,7 +286,7 @@ describe("offerHostedVaultShareProjectionBestEffort", () => {
   });
 
   it("offers projectable records and reports delivery", async () => {
-    const vaultRoot = await createProfileVault("Theo");
+    const vaultRoot = await createMemoryDisplayNameVault("Theo");
     const deliver = vi.fn().mockResolvedValue({ status: "delivered" });
     const result = await offerHostedVaultShareProjectionBestEffort({
       vaultRoot,
@@ -294,7 +339,7 @@ describe("offerHostedVaultShareProjectionBestEffort", () => {
   });
 
   it("sends nothing when the vault has no projectable share data", async () => {
-    const vaultRoot = await createProfileVault(null);
+    const vaultRoot = await createMemoryDisplayNameVault(null);
     const deliver = vi.fn();
     const result = await offerHostedVaultShareProjectionBestEffort({
       vaultRoot,
@@ -1855,8 +1900,8 @@ describe("importHostedVaultShareDeliveryWake", () => {
 });
 
 describe("readProjectableProfileName", () => {
-  it("delivers the typed profile display name and the parser accepts it unchanged", async () => {
-    const vaultRoot = await createProfileVault("Theo");
+  it("delivers the typed memory display name and the parser accepts it unchanged", async () => {
+    const vaultRoot = await createMemoryDisplayNameVault("Theo");
     const records = await readProjectableProfileName(vaultRoot);
     expect(records).toEqual([
       {
@@ -1891,8 +1936,118 @@ describe("readProjectableProfileName", () => {
     });
   });
 
-  it("projects nothing when the typed profile document is absent", async () => {
-    const vaultRoot = await createProfileVault(null);
+  it("backfills the projection from unambiguous legacy Identity memory", async () => {
+    const vaultRoot = await createLegacyMemoryDisplayNameVault("The user's name is Theo.");
+    const records = await readProjectableProfileName(vaultRoot);
+
+    expect(records).toEqual([
+      {
+        data: { displayName: "Theo" },
+        occurredAt: "2026-07-01T00:00:01.000Z",
+        recordKey: "profile-name",
+        sourceRevision: expect.stringMatching(SOURCE_REVISION_PATTERN),
+      },
+    ]);
+  });
+
+  it("falls back to an existing profile-only display name without mutating memory", async () => {
+    const vaultRoot = await createLegacyProfileDisplayNameVault("Theo");
+    const records = await readProjectableProfileName(vaultRoot);
+
+    expect(records).toEqual([
+      {
+        data: { displayName: "Theo" },
+        occurredAt: "2026-07-01T00:00:00.000Z",
+        recordKey: "profile-name",
+        sourceRevision: expect.stringMatching(SOURCE_REVISION_PATTERN),
+      },
+    ]);
+    await expect(readProjectableProfileName(vaultRoot)).resolves.toEqual(records);
+    await expect(readFile(join(vaultRoot, "bank", "memory.md"), "utf8")).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+  });
+
+  it("falls back to legacy profile when memory exists without display-name evidence", async () => {
+    const vaultRoot = await createLegacyProfileDisplayNameVault("Alice");
+    await writeFile(
+      join(vaultRoot, "bank", "memory.md"),
+      renderMemoryDocument({
+        document: createEmptyMemoryDocument(new Date("2026-07-01T00:00:00.000Z")),
+      }),
+      "utf8",
+    );
+
+    await expect(readProjectableProfileName(vaultRoot)).resolves.toEqual([
+      {
+        data: { displayName: "Alice" },
+        occurredAt: "2026-07-01T00:00:00.000Z",
+        recordKey: "profile-name",
+        sourceRevision: expect.stringMatching(SOURCE_REVISION_PATTERN),
+      },
+    ]);
+  });
+
+  it("does not fall back to legacy profile when memory display-name evidence is ambiguous", async () => {
+    const vaultRoot = await createLegacyProfileDisplayNameVault("Alice");
+    let document = createEmptyMemoryDocument(new Date("2026-07-01T00:00:00.000Z"));
+    document = upsertMemoryRecord(document, {
+      now: new Date("2026-07-01T00:00:01.000Z"),
+      section: "Identity",
+      text: formatMemoryDisplayNameRecordText("Ari"),
+    }).document;
+    document = upsertMemoryRecord(document, {
+      now: new Date("2026-07-01T00:00:02.000Z"),
+      section: "Identity",
+      text: formatMemoryDisplayNameRecordText("Riley"),
+    }).document;
+    await writeFile(
+      join(vaultRoot, "bank", "memory.md"),
+      renderMemoryDocument({ document }),
+      "utf8",
+    );
+
+    await expect(readProjectableProfileName(vaultRoot)).resolves.toEqual([]);
+  });
+
+  it("does not fall back to legacy profile when memory has invalid canonical display-name evidence", async () => {
+    const vaultRoot = await createLegacyProfileDisplayNameVault("Alice");
+    const document = upsertMemoryRecord(
+      createEmptyMemoryDocument(new Date("2026-07-01T00:00:00.000Z")),
+      {
+        now: new Date("2026-07-01T00:00:01.000Z"),
+        section: "Identity",
+        text: `Preferred display name: ${"a".repeat(121)}`,
+      },
+    ).document;
+    await writeFile(
+      join(vaultRoot, "bank", "memory.md"),
+      renderMemoryDocument({ document }),
+      "utf8",
+    );
+
+    await expect(readProjectableProfileName(vaultRoot)).resolves.toEqual([]);
+  });
+
+  it("projects nothing for compound legacy Identity memory display-name candidates", async () => {
+    const vaultRoot = await createLegacyMemoryDisplayNameVault(
+      "The user's name is Theo from Seattle.",
+    );
+
+    await expect(readProjectableProfileName(vaultRoot)).resolves.toEqual([]);
+  });
+
+  it("projects nothing when legacy Identity memory names are ambiguous", async () => {
+    const vaultRoot = await createLegacyMemoryDisplayNameVault(
+      "The user's name is Theo.",
+      "The user goes by Ari.",
+    );
+
+    await expect(readProjectableProfileName(vaultRoot)).resolves.toEqual([]);
+  });
+
+  it("projects nothing when the memory display name is absent", async () => {
+    const vaultRoot = await createMemoryDisplayNameVault(null);
     await expect(readProjectableProfileName(vaultRoot)).resolves.toEqual([]);
 
     const deliver = vi.fn();

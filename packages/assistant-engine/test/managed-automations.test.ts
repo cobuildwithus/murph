@@ -110,6 +110,7 @@ import {
   MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID,
   MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID,
   MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID,
+  MURPH_WEEKLY_IMPROVEMENT_COACH_AUTOMATION_ID,
   MURPH_WEEKLY_HEALTH_RESEARCH_SCOUT_AUTOMATION_ID,
   MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID,
   applyMurphManagedAutomations,
@@ -131,6 +132,7 @@ const defaultRoute = {
 const EXPECTED_MANAGED_SPREAD_CRONS = {
   digest: { kind: 'cron', expression: '30 10 * * 2' },
   insight: { kind: 'cron', expression: '0 13 * * 0' },
+  improvementCoach: { kind: 'cron', expression: '30 17 * * 2' },
   researchScout: { kind: 'cron', expression: '0 14 * * 3' },
   productUpdates: { kind: 'cron', expression: '30 12 * * 5' },
 } as const
@@ -300,6 +302,52 @@ describe('applyMurphManagedAutomations', () => {
     )).toBe('2026-06-28T16:00:00.000Z')
   })
 
+  it('keeps the managed weekly improvement coach seed as the baseline Tuesday early-evening recurrence', () => {
+    const seed = MURPH_MANAGED_AUTOMATIONS.find(
+      (entry) => entry.automationId === MURPH_WEEKLY_IMPROVEMENT_COACH_AUTOMATION_ID,
+    )
+    if (!seed || seed.schedule.kind !== 'cron') {
+      throw new Error('Expected the weekly improvement coach to use a cron schedule.')
+    }
+
+    expect(seed.schedule.expression).toBe('0 17 * * 2')
+    expect(seed.slug).toBe('weekly-improvement-coach')
+    expect(seed.title).toBe('Weekly improvement coach')
+    expect(seed.summary).toBe(
+      'A weekly check for one clearly actionable health improvement worth working on.',
+    )
+    expect(seed.assistantTargetOverride).toEqual({
+      reasoningEffort: 'high',
+    })
+    expect(seed.tags).toContain('murph-managed:weekly-improvement-coach')
+    expect(seed.tags).not.toContain(ASSISTANT_REQUIRE_SEND_AUTOMATION_TAG)
+    expect(seed.instructions).toContain('knowledge show improvement-opportunities')
+    expect(seed.instructions).toContain(
+      'knowledge append-section improvement-opportunities YYYY-MM-DD',
+    )
+    expect(seed.instructions).toContain(
+      '{"kind":"skip","privateSummary":"No improvement opportunity cleared the evidence bar."}',
+    )
+    expect(seed.instructions).toContain(
+      'Never infer absence of a behavior from absence of data',
+    )
+
+    const nextRunAt = findNextAssistantCronOccurrence(
+      seed.schedule.expression,
+      new Date('2026-06-18T16:00:00.000Z'),
+      'America/New_York',
+    )
+    expect(nextRunAt).toBe('2026-06-23T21:00:00.000Z')
+    if (!nextRunAt) {
+      throw new Error('Expected the weekly improvement coach cron to have a next run.')
+    }
+    expect(findNextAssistantCronOccurrence(
+      seed.schedule.expression,
+      new Date(nextRunAt),
+      'America/New_York',
+    )).toBe('2026-06-30T21:00:00.000Z')
+  })
+
   it('keeps the managed weekly health research scout seed as the baseline Wednesday evening recurrence', () => {
     const researchScoutSeed = MURPH_MANAGED_AUTOMATIONS.find(
       (seed) => seed.automationId === MURPH_WEEKLY_HEALTH_RESEARCH_SCOUT_AUTOMATION_ID,
@@ -442,11 +490,11 @@ describe('applyMurphManagedAutomations', () => {
     })
 
     expect(result).toEqual({
-      created: 4,
+      created: 5,
       skipped: 0,
       updated: 0,
     })
-    expect(managedAutomationMocks.upsertAutomation).toHaveBeenCalledTimes(4)
+    expect(managedAutomationMocks.upsertAutomation).toHaveBeenCalledTimes(5)
     const digestRecord = managedAutomationMocks.records.get(
       MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID,
     )
@@ -553,6 +601,37 @@ describe('applyMurphManagedAutomations', () => {
     expect(insightRecord?.instructions).toContain('Suppress true-but-boring findings')
     expect(insightRecord?.instructions).toContain('missing data, messy tags')
     expect(insightRecord?.instructions).toContain('Murph cannot currently see X')
+
+    const improvementCoachRecord = managedAutomationMocks.records.get(
+      MURPH_WEEKLY_IMPROVEMENT_COACH_AUTOMATION_ID,
+    )
+    expect(improvementCoachRecord).toMatchObject({
+      automationId: MURPH_WEEKLY_IMPROVEMENT_COACH_AUTOMATION_ID,
+      continuityPolicy: 'fresh',
+      route: defaultRoute,
+      slug: 'weekly-improvement-coach',
+      status: 'active',
+      title: 'Weekly improvement coach',
+    })
+    expect(improvementCoachRecord?.assistantTargetOverride).toEqual({
+      reasoningEffort: 'high',
+    })
+    expect(improvementCoachRecord?.schedule)
+      .toEqual(EXPECTED_MANAGED_SPREAD_CRONS.improvementCoach)
+    expect(improvementCoachRecord?.tags).toContain('murph-managed:weekly-improvement-coach')
+    expect(improvementCoachRecord?.tags).not.toContain(ASSISTANT_REQUIRE_SEND_AUTOMATION_TAG)
+    expect(improvementCoachRecord?.instructions).toContain(
+      'knowledge show improvement-opportunities',
+    )
+    expect(improvementCoachRecord?.instructions).toContain(
+      'knowledge append-section improvement-opportunities YYYY-MM-DD',
+    )
+    expect(improvementCoachRecord?.instructions).toContain(
+      '{"kind":"skip","privateSummary":"No improvement opportunity cleared the evidence bar."}',
+    )
+    expect(improvementCoachRecord?.instructions).toContain(
+      'Never infer absence of a behavior from absence of data',
+    )
 
     const researchScoutRecord = managedAutomationMocks.records.get(
       MURPH_WEEKLY_HEALTH_RESEARCH_SCOUT_AUTOMATION_ID,
@@ -703,7 +782,7 @@ describe('applyMurphManagedAutomations', () => {
     })
 
     expect(result).toEqual({
-      created: 5,
+      created: 6,
       skipped: 0,
       updated: 0,
     })
@@ -781,7 +860,7 @@ describe('applyMurphManagedAutomations', () => {
     })
 
     expect(result).toEqual({
-      created: 2,
+      created: 3,
       skipped: 0,
       updated: 2,
     })
@@ -841,7 +920,7 @@ describe('applyMurphManagedAutomations', () => {
     })
 
     expect(result).toEqual({
-      created: 3,
+      created: 4,
       skipped: 0,
       updated: 1,
     })
@@ -929,7 +1008,7 @@ describe('applyMurphManagedAutomations', () => {
       now: new Date('2026-06-20T12:00:00.000Z'),
       vaultRoot,
     })).resolves.toEqual({
-      created: 3,
+      created: 4,
       skipped: 0,
       updated: 1,
     })
@@ -978,7 +1057,7 @@ describe('applyMurphManagedAutomations', () => {
       now: new Date('2026-06-20T12:00:00.000Z'),
       vaultRoot,
     })).resolves.toEqual({
-      created: 3,
+      created: 4,
       skipped: 1,
       updated: 0,
     })
@@ -1012,6 +1091,8 @@ describe('applyMurphManagedAutomations', () => {
       .toEqual(firstSchedules.get(MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID))
     expect(managedAutomationMocks.records.get(MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID)?.schedule)
       .toEqual(firstSchedules.get(MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID))
+    expect(managedAutomationMocks.records.get(MURPH_WEEKLY_IMPROVEMENT_COACH_AUTOMATION_ID)?.schedule)
+      .toEqual(firstSchedules.get(MURPH_WEEKLY_IMPROVEMENT_COACH_AUTOMATION_ID))
     expect(managedAutomationMocks.records.get(MURPH_WEEKLY_HEALTH_RESEARCH_SCOUT_AUTOMATION_ID)?.schedule)
       .toEqual(firstSchedules.get(MURPH_WEEKLY_HEALTH_RESEARCH_SCOUT_AUTOMATION_ID))
     expect(managedAutomationMocks.records.get(MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID)?.schedule)
@@ -1028,7 +1109,7 @@ describe('applyMurphManagedAutomations', () => {
       vaultRoot,
     })).resolves.toEqual({
       created: 0,
-      skipped: 4,
+      skipped: 5,
       stableKeyFailure: metadataError,
       stableKeyRetryNeeded: true,
       updated: 0,
@@ -1044,7 +1125,7 @@ describe('applyMurphManagedAutomations', () => {
       now: new Date('2026-06-10T12:00:00.000Z'),
       vaultRoot,
     })).resolves.toEqual({
-      created: 4,
+      created: 5,
       skipped: 0,
       updated: 0,
     })
@@ -1053,6 +1134,8 @@ describe('applyMurphManagedAutomations', () => {
       .toEqual(EXPECTED_MANAGED_SPREAD_CRONS.digest)
     expect(managedAutomationMocks.records.get(MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID)?.schedule)
       .toEqual(EXPECTED_MANAGED_SPREAD_CRONS.insight)
+    expect(managedAutomationMocks.records.get(MURPH_WEEKLY_IMPROVEMENT_COACH_AUTOMATION_ID)?.schedule)
+      .toEqual(EXPECTED_MANAGED_SPREAD_CRONS.improvementCoach)
     expect(managedAutomationMocks.records.get(MURPH_WEEKLY_HEALTH_RESEARCH_SCOUT_AUTOMATION_ID)?.schedule)
       .toEqual(EXPECTED_MANAGED_SPREAD_CRONS.researchScout)
     expect(managedAutomationMocks.records.get(MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID)?.schedule)
@@ -1130,13 +1213,15 @@ describe('applyMurphManagedAutomations', () => {
     })
 
     expect(result).toEqual({
-      created: 3,
+      created: 4,
       skipped: 1,
       updated: 0,
     })
     expect(managedAutomationMocks.records.has(MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID))
       .toBe(true)
     expect(managedAutomationMocks.records.has(MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID))
+      .toBe(true)
+    expect(managedAutomationMocks.records.has(MURPH_WEEKLY_IMPROVEMENT_COACH_AUTOMATION_ID))
       .toBe(true)
     expect(managedAutomationMocks.records.has(MURPH_WEEKLY_HEALTH_RESEARCH_SCOUT_AUTOMATION_ID))
       .toBe(false)
@@ -1158,7 +1243,7 @@ describe('applyMurphManagedAutomations', () => {
 
     expect(result).toEqual({
       created: 0,
-      skipped: 4,
+      skipped: 5,
       updated: 0,
     })
     expect(managedAutomationMocks.upsertAutomation).not.toHaveBeenCalled()
@@ -1188,7 +1273,7 @@ describe('applyMurphManagedAutomations', () => {
     })
 
     expect(result).toEqual({
-      created: 3,
+      created: 4,
       skipped: 1,
       updated: 0,
     })
@@ -1232,7 +1317,7 @@ describe('applyMurphManagedAutomations', () => {
       now: new Date('2026-06-23T12:00:00.000Z'),
       vaultRoot,
     })).resolves.toEqual({
-      created: 4,
+      created: 5,
       skipped: 0,
       updated: 1,
     })
@@ -1286,7 +1371,7 @@ describe('applyMurphManagedAutomations', () => {
       now: new Date('2026-06-23T12:00:00.000Z'),
       vaultRoot,
     })).resolves.toEqual({
-      created: 4,
+      created: 5,
       skipped: 0,
       updated: 1,
     })
@@ -1329,7 +1414,7 @@ describe('applyMurphManagedAutomations', () => {
       now: new Date('2026-06-23T12:00:00.000Z'),
       vaultRoot,
     })).resolves.toEqual({
-      created: 4,
+      created: 5,
       skipped: 0,
       updated: 1,
     })
@@ -1371,7 +1456,7 @@ describe('applyMurphManagedAutomations', () => {
       now: new Date('2026-06-23T12:00:00.000Z'),
       vaultRoot,
     })).resolves.toEqual({
-      created: 4,
+      created: 5,
       skipped: 0,
       updated: 0,
     })
@@ -1400,7 +1485,7 @@ describe('applyMurphManagedAutomations', () => {
       now: new Date('2026-06-23T12:00:00.000Z'),
       vaultRoot,
     })).resolves.toEqual({
-      created: 4,
+      created: 5,
       skipped: 0,
       updated: 0,
     })
@@ -1438,7 +1523,7 @@ describe('applyMurphManagedAutomations', () => {
     })
 
     expect(result).toEqual({
-      created: 3,
+      created: 4,
       skipped: 0,
       updated: 1,
     })
@@ -1466,7 +1551,7 @@ describe('applyMurphManagedAutomations', () => {
     })
 
     expect(result).toEqual({
-      created: 4,
+      created: 5,
       skipped: 0,
       updated: 0,
     })
@@ -1493,7 +1578,7 @@ describe('applyMurphManagedAutomations', () => {
 
     expect(result).toEqual({
       created: 0,
-      skipped: 4,
+      skipped: 5,
       updated: 0,
     })
     expect(managedAutomationMocks.upsertAutomation).not.toHaveBeenCalled()
@@ -1514,7 +1599,7 @@ describe('applyMurphManagedAutomations', () => {
 
     expect(result).toEqual({
       created: 0,
-      skipped: 4,
+      skipped: 5,
       updated: 0,
     })
     expect(managedAutomationMocks.upsertAutomation).not.toHaveBeenCalled()
@@ -1566,6 +1651,21 @@ describe('applyMurphManagedAutomations', () => {
       tags: ['user'],
       title: 'My weekly research scout',
     })
+    managedAutomationMocks.records.set('automation_user_improvement_coach', {
+      automationId: 'automation_user_improvement_coach',
+      continuityPolicy: 'preserve',
+      instructions: 'Keep this user improvement coach prompt.',
+      route: defaultRoute,
+      schedule: {
+        kind: 'cron',
+        expression: '0 17 * * 2',
+      },
+      slug: 'weekly-improvement-coach',
+      status: 'active',
+      summary: 'User-owned improvement coach automation.',
+      tags: ['user'],
+      title: 'My improvement coach',
+    })
     managedAutomationMocks.records.set('automation_user_product_updates', {
       automationId: 'automation_user_product_updates',
       continuityPolicy: 'preserve',
@@ -1590,7 +1690,7 @@ describe('applyMurphManagedAutomations', () => {
 
     expect(result).toEqual({
       created: 0,
-      skipped: 4,
+      skipped: 5,
       updated: 0,
     })
     expect(managedAutomationMocks.upsertAutomation).not.toHaveBeenCalled()
@@ -1611,7 +1711,7 @@ describe('applyMurphManagedAutomations', () => {
 
     expect(result).toEqual({
       created: 0,
-      skipped: 4,
+      skipped: 5,
       updated: 0,
     })
     expect(managedAutomationMocks.upsertAutomation).not.toHaveBeenCalled()
