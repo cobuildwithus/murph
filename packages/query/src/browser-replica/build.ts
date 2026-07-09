@@ -391,6 +391,15 @@ function projectEntityAttributes(entity: CanonicalEntity): Record<string, unknow
   if (entity.family === "event") {
     return projectSafeEventAttributes(entity);
   }
+  if (entity.family === "habitat") {
+    return projectSafeAttributeKeys(entity, [
+      "aspect",
+      "domain",
+      "indicators",
+      "indicatorRecordedAt",
+      "note",
+    ]);
+  }
 
   return projectSafeAttributes(entity);
 }

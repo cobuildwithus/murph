@@ -5,6 +5,10 @@ export interface MetricSelectionLike {
   } | null;
 }
 
+// Pinned so SSR and the browser format identically regardless of user locale;
+// a locale-dependent format hydration-mismatches on SSR-ed client components.
+const DISPLAY_LOCALE = "en-US";
+
 export function formatIsoDate(
   value: string | null | undefined,
   options: Intl.DateTimeFormatOptions = { month: "short", day: "numeric", year: "numeric" },
@@ -22,7 +26,7 @@ export function formatIsoDate(
     return value;
   }
 
-  return new Intl.DateTimeFormat(undefined, options).format(parsed);
+  return new Intl.DateTimeFormat(DISPLAY_LOCALE, options).format(parsed);
 }
 
 export function formatIsoDateTime(value: string | null | undefined): string {
@@ -35,7 +39,7 @@ export function formatIsoDateTime(value: string | null | undefined): string {
     return value;
   }
 
-  return new Intl.DateTimeFormat(undefined, {
+  return new Intl.DateTimeFormat(DISPLAY_LOCALE, {
     day: "numeric",
     hour: "numeric",
     minute: "2-digit",
@@ -52,7 +56,7 @@ export function formatNumber(
     return "—";
   }
 
-  return new Intl.NumberFormat(undefined, options).format(value);
+  return new Intl.NumberFormat(DISPLAY_LOCALE, options).format(value);
 }
 
 export function formatMetricValue(
@@ -66,7 +70,7 @@ export function formatMetricValue(
     return fallback;
   }
 
-  const numeric = new Intl.NumberFormat(undefined, {
+  const numeric = new Intl.NumberFormat(DISPLAY_LOCALE, {
     maximumFractionDigits: Math.abs(value) >= 100 ? 0 : 1,
   }).format(value);
 
@@ -78,7 +82,7 @@ export function formatPercent(value: number | null | undefined): string {
     return "—";
   }
 
-  const formatted = new Intl.NumberFormat(undefined, {
+  const formatted = new Intl.NumberFormat(DISPLAY_LOCALE, {
     maximumFractionDigits: Math.abs(value) >= 10 ? 0 : 1,
     signDisplay: "always",
   }).format(value);

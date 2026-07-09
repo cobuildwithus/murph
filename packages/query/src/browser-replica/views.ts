@@ -65,6 +65,7 @@ function vaultViewFromReplica(replica: BrowserVaultReplica): VaultReadModel {
     format: "murph.query.v1",
     geneticVariants: byFamily.genetics ?? [],
     goals: byFamily.goal ?? [],
+    habitatAspects: byFamily.habitat ?? [],
     journalEntries: byFamily.journal ?? [],
     metadata: null,
     protocols: byFamily.protocol ?? [],

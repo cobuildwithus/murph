@@ -6,6 +6,8 @@ export * from "./examples.ts";
 export * from "./exa-research-scout.ts";
 export * from "./experiment-progress-card.ts";
 export * from "./frontmatter.ts";
+export * from "./habitat-catalog.ts";
+export * from "./habitat-coverage.ts";
 export * from "./health-entities.ts";
 export * from "./health-commons.ts";
 export * from "./ids.ts";
