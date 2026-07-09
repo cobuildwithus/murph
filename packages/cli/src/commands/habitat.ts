@@ -253,7 +253,6 @@ export function registerHabitatCommands(cli: Cli.Cli) {
         .describe('ISO date stamped on the saved indicators. Defaults to today.'),
       note: z.string().min(1).max(4000).optional().describe('Replace the aspect note.'),
       body: z.string().optional().describe('Optional Markdown body with prose nuance.'),
-      status: z.string().min(1).max(64).optional().describe('Aspect status: active or archived.'),
     }),
     output: habitatSaveResultSchema,
     async run({ args, options }) {
@@ -264,7 +263,6 @@ export function registerHabitatCommands(cli: Cli.Cli) {
         recordedAt: options.recordedAt ?? new Date().toISOString().slice(0, 10),
         note: options.note,
         body: options.body,
-        status: options.status,
       })
 
       return {

@@ -25,10 +25,7 @@
     },
     "status": {
       "type": "string",
-      "enum": [
-        "active",
-        "archived"
-      ]
+      "const": "active"
     },
     "domain": {
       "type": "string",

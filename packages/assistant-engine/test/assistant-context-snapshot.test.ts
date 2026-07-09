@@ -132,6 +132,65 @@ describe('assistant context snapshot', () => {
     }
   })
 
+  it('omits habitat records stored outside their canonical aspect path', async () => {
+    const parentRoot = await mkdtemp(path.join(tmpdir(), 'assistant-context-snapshot-'))
+    const vaultRoot = path.join(parentRoot, 'vault')
+
+    try {
+      await initializeVault({
+        createdAt: '2026-06-01T00:00:00.000Z',
+        vaultRoot,
+      })
+      await mkdir(path.join(vaultRoot, 'bank/habitat'), {
+        recursive: true,
+      })
+      await writeFile(
+        path.join(vaultRoot, 'bank/habitat/zzz.md'),
+        [
+          '---',
+          'schemaVersion: murph.frontmatter.habitat.v1',
+          'docType: habitat',
+          'habitatId: hab_01JNV422Y2M5ZBV64ZP4N1DRB1',
+          'slug: sleep-environment',
+          'title: Bedroom & sleep',
+          'status: active',
+          'domain: environment',
+          'aspect: sleep-environment',
+          'indicators:',
+          '  night_temp_c: 19',
+          '---',
+          '# Bedroom & sleep',
+          '',
+        ].join('\n'),
+        'utf8',
+      )
+
+      await markAssistantContextSnapshotDirty({
+        domains: ['habitat'],
+        vaultRoot,
+      })
+      await refreshAssistantContextSnapshot({
+        now: () => '2026-06-01T00:05:00.000Z',
+        vaultRoot,
+      })
+
+      await expect(readAssistantContextSnapshotPrompt({ vaultRoot })).resolves.toBeNull()
+      await expect(readAssistantContextSnapshotState(vaultRoot))
+        .resolves.toMatchObject({
+          lastCompleted: {
+            sectionPresence: {
+              habitat: false,
+            },
+          },
+        })
+    } finally {
+      await rm(parentRoot, {
+        force: true,
+        recursive: true,
+      })
+    }
+  })
+
   it('does not refresh missing snapshots without a dirty marker', async () => {
     const parentRoot = await mkdtemp(path.join(tmpdir(), 'assistant-context-snapshot-'))
     const vaultRoot = path.join(parentRoot, 'vault')

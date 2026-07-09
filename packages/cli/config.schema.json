@@ -4033,12 +4033,6 @@
                         "body": {
                           "description": "Optional Markdown body with prose nuance.",
                           "type": "string"
-                        },
-                        "status": {
-                          "description": "Aspect status: active or archived.",
-                          "type": "string",
-                          "minLength": 1,
-                          "maxLength": 64
                         }
                       }
                     }

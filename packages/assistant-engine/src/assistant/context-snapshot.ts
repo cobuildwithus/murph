@@ -9,6 +9,7 @@ import {
   allergyFrontmatterSchema,
   computeHabitatCoverage,
   conditionFrontmatterSchema,
+  isExpectedHabitatAspectRelativePath,
   type ConditionFrontmatter,
   goalFrontmatterSchema,
   type GoalFrontmatter,
@@ -482,6 +483,8 @@ async function buildAssistantSnapshotCoverage(input: {
         input,
         VAULT_LAYOUT.habitatDirectory,
         habitatFrontmatterSchema,
+        (record, relativePath) =>
+          isExpectedHabitatAspectRelativePath(record.aspect, relativePath),
       ),
     ])
   const goals = goalRead.records
@@ -644,6 +647,7 @@ async function listAssistantSnapshotFrontmatterRecords<TRecord>(
   },
   relativeDirectory: string,
   schema: ContractSchema<TRecord>,
+  acceptRecord: ((record: TRecord, relativePath: string) => boolean) | null = null,
 ): Promise<{ complete: boolean; records: TRecord[] }> {
   assertAssistantContextSnapshotCanContinue(input)
   const { relativePaths } = await walkVaultFilesInterruptible(
@@ -674,7 +678,7 @@ async function listAssistantSnapshotFrontmatterRecords<TRecord>(
       )
       assertAssistantContextSnapshotCanContinue(input)
       const result = safeParseContract(schema, document.attributes)
-      if (result.success) {
+      if (result.success && (!acceptRecord || acceptRecord(result.data, relativePath))) {
         records.push(result.data)
       } else {
         parseFailed = true

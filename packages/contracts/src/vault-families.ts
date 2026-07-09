@@ -989,6 +989,17 @@ export const VAULT_LAYOUT = Object.freeze({
   exportPacksDirectory: EXPORT_PACKS_DIRECTORY,
 });
 
+export function expectedHabitatAspectRelativePath(aspect: string): string {
+  return `${VAULT_LAYOUT.habitatDirectory}/${aspect}.md`;
+}
+
+export function isExpectedHabitatAspectRelativePath(
+  aspect: string,
+  relativePath: string,
+): boolean {
+  return relativePath === expectedHabitatAspectRelativePath(aspect);
+}
+
 export const VAULT_SHARDS = Object.freeze({
   assessments: getVaultShardPattern(VAULT_FAMILY_IDS.assessments),
   events: getVaultShardPattern(VAULT_FAMILY_IDS.events),

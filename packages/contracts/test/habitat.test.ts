@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   computeHabitatCoverage,
+  expectedHabitatAspectRelativePath,
   getHabitatAspectDefinition,
   getHabitatIndicatorDefinition,
   HABITAT_CATALOG,
@@ -64,6 +65,12 @@ describe("habitat catalog", () => {
     expect(validateHabitatIndicatorValue(nightTemp!, HABITAT_DECLINED_VALUE)).toBeNull();
     expect(validateHabitatIndicatorValue(nightTemp!, null)).toBeNull();
   });
+
+  it("derives the canonical aspect file path from the catalog aspect id", () => {
+    expect(expectedHabitatAspectRelativePath("sleep-environment")).toBe(
+      "bank/habitat/sleep-environment.md",
+    );
+  });
 });
 
 describe("habitat frontmatter schema", () => {
@@ -111,6 +118,12 @@ describe("habitat frontmatter schema", () => {
           darkness: "2026-07-01",
         },
       }).success,
+    ).toBe(false);
+  });
+
+  it("rejects archived aspect lifecycle state", () => {
+    expect(
+      habitatFrontmatterSchema.safeParse({ ...validFrontmatter, status: "archived" }).success,
     ).toBe(false);
   });
 });

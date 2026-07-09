@@ -1,4 +1,8 @@
-import { VAULT_LAYOUT, type BankEntityKind } from "@murphai/contracts";
+import {
+  VAULT_LAYOUT,
+  isExpectedHabitatAspectRelativePath,
+  type BankEntityKind,
+} from "@murphai/contracts";
 
 import {
   compareCanonicalEntities,
@@ -186,7 +190,7 @@ const REGISTRY_COLLECTORS = [
     "habitatAspects",
     "habitat",
     habitatRegistryDefinition.registry.directory,
-    (document) => toRegistryRecord(document, habitatRegistryDefinition),
+    toHabitatRegistryRecord,
   ),
   createRegistryCollectorConfig(
     "recipes",
@@ -220,6 +224,23 @@ function createRegistryCollectorConfig(
     directory,
     toRecord,
   };
+}
+
+function toHabitatRegistryRecord(
+  document: MarkdownDocumentRecord,
+): RegistryMarkdownRecord | null {
+  const record = toRegistryRecord(document, habitatRegistryDefinition);
+  const aspect = record?.entity.aspect;
+
+  if (
+    !record ||
+    typeof aspect !== "string" ||
+    !isExpectedHabitatAspectRelativePath(aspect, document.relativePath)
+  ) {
+    return null;
+  }
+
+  return record;
 }
 
 export function collectCanonicalEntities(

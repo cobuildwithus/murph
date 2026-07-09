@@ -2576,7 +2576,7 @@ export const habitatFrontmatterSchema = withContractMetadata(
       habitatId: idSchema(ID_PREFIXES.habitat),
       slug: patternedString(SLUG_PATTERN),
       title: boundedString(1, 160),
-      status: z.enum(["active", "archived"]),
+      status: z.literal("active"),
       domain: z.enum(HABITAT_DOMAIN_IDS),
       aspect: patternedString(SLUG_PATTERN),
       indicators: z.record(

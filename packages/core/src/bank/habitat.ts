@@ -1,6 +1,7 @@
 import type { HabitatFrontmatter, HabitatIndicatorValue } from "@murphai/contracts";
 import {
   CONTRACT_SCHEMA_VERSION,
+  expectedHabitatAspectRelativePath,
   habitatFrontmatterSchema,
   requireHabitatAspectDefinition,
 } from "@murphai/contracts";
@@ -52,7 +53,6 @@ export interface UpsertHabitatAspectInput {
   indicators?: Record<string, HabitatIndicatorValue>;
   /** ISO date stamped on every indicator set in this call. */
   recordedAt?: string;
-  status?: string;
   note?: string;
   body?: string;
 }
@@ -78,15 +78,11 @@ function validateHabitatFrontmatter(
   );
 }
 
-function expectedHabitatRelativePath(aspect: string): string {
-  return `${VAULT_LAYOUT.habitatDirectory}/${aspect}.md`;
-}
-
 function assertHabitatPathOwnership(
   frontmatter: HabitatFrontmatter,
   relativePath: string,
 ): void {
-  const expectedRelativePath = expectedHabitatRelativePath(frontmatter.aspect);
+  const expectedRelativePath = expectedHabitatAspectRelativePath(frontmatter.aspect);
 
   if (relativePath !== expectedRelativePath) {
     throw new VaultError(
@@ -211,7 +207,7 @@ async function upsertHabitatAspectLocked(
       habitatId: target.recordId,
       slug: target.slug,
       title: aspectDefinition.title,
-      status: normalizeOptionalText(input.status) ?? existingRecord?.status ?? "active",
+      status: "active",
       domain: aspectDefinition.domain,
       aspect: aspectDefinition.id,
       indicators: merged.indicators,
