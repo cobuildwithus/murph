@@ -234,11 +234,6 @@ Hosted assistant provider and channel secrets:
 Hosted usage-reporting secrets:
 
 - `HOSTED_AI_USAGE_REPORTING_SECRET` when stable anonymized usage attribution should be added by the Worker/web-control proxy before records reach hosted web. This secret must stay Worker-owned and must not be forwarded into the hosted runtime env.
-- `HOSTED_TELEGRAM_USAGE_LIMIT_NOTICE_AUTHORITY_SECRET` in both hosted web and
-  the Worker when Telegram usage-limit notice delivery is enabled. Hosted web
-  signs the claimed delivery tuple; the Worker verifies it before injecting
-  Worker-owned Telegram credentials. Do not forward this secret into the hosted
-  runtime env.
 - Cloudflare runner start authority does not accept signed usage-allowance
   decisions and does not fall back to a live web usage-gate call. Web preserves
   conversation mailbox input before usage gating, Temporal/runtime admission gates

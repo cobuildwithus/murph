@@ -1,8 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import {
-  buildCloudflareHostedControlTelegramUsageLimitNoticeAuthorityBody,
-  signCloudflareHostedControlTelegramUsageLimitNoticeAuthority,
-} from "@murphai/cloudflare-hosted-control/client";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   emitHostedExecutionStructuredLog: vi.fn(),
@@ -25,7 +21,7 @@ vi.mock("@murphai/hosted-execution", async () => {
 });
 
 import {
-  handleTelegramUsageLimitNoticeRoute,
+  telegramUsageLimitNoticeRoutes,
 } from "../src/worker/route-handlers/telegram-send.ts";
 
 function createRouteContext(
@@ -43,7 +39,6 @@ function createRouteContext(
   );
   return {
     env: {
-      HOSTED_TELEGRAM_USAGE_LIMIT_NOTICE_AUTHORITY_SECRET: "authority-secret",
       TELEGRAM_BOT_TOKEN: "telegram-token",
     },
     request,
@@ -51,16 +46,37 @@ function createRouteContext(
   } as never;
 }
 
+function handleTelegramUsageLimitNoticeRoute(
+  context: Parameters<(typeof telegramUsageLimitNoticeRoutes)[number]["handle"]>[0],
+  encodedUserId: string,
+) {
+  const route = telegramUsageLimitNoticeRoutes[0];
+  if (!route) {
+    throw new TypeError("Expected the Telegram usage-limit notice route.");
+  }
+  return route.handle(context, { userId: encodedUserId });
+}
+
 describe("worker Telegram send route", () => {
   beforeEach(() => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date("2026-05-20T12:00:00.000Z"));
     mocks.emitHostedExecutionStructuredLog.mockReset();
     mocks.sendHostedProviderTelegramMessage.mockReset();
   });
 
-  afterEach(() => {
-    vi.useRealTimers();
+  it("requires Vercel OIDC and a bound user before the handler", async () => {
+    const route = telegramUsageLimitNoticeRoutes[0];
+    if (!route?.beforeMethod) {
+      throw new TypeError("Expected the Telegram usage-limit notice route auth guard.");
+    }
+
+    expect(route.authorization).toBe("vercel-oidc");
+    expect(route.authorizeBeforeMethod).toBe(true);
+    const response = await route.beforeMethod(
+      createRouteContext(createTelegramUsageLimitNoticeRequest()),
+      { userId: "member_123" },
+    );
+    expect(response?.status).toBe(401);
+    expect(mocks.sendHostedProviderTelegramMessage).not.toHaveBeenCalled();
   });
 
   it("delegates valid Telegram sends to the Worker-owned provider effect", async () => {
@@ -70,20 +86,17 @@ describe("worker Telegram send route", () => {
       targetKind: "thread",
     });
 
-    const response = await handleTelegramUsageLimitNoticeRoute(createRouteContext({
-      authority: await createTelegramUsageLimitNoticeAuthority(),
-    }), "member_123");
+    const response = await handleTelegramUsageLimitNoticeRoute(
+      createRouteContext(createTelegramUsageLimitNoticeRequest()),
+      "member_123",
+    );
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({
-      providerMessageId: "7001",
       status: "sent",
-      target: "telegram_thread:runtime-denied",
-      targetKind: "thread",
     });
     expect(mocks.sendHostedProviderTelegramMessage).toHaveBeenCalledWith(
       {
-        idempotencyKey: "ai-usage-gate:member_123:2026-05",
         message: "Usage limit reached.",
         replyToMessageId: "7000",
         target: "telegram_thread:runtime-denied",
@@ -108,14 +121,14 @@ describe("worker Telegram send route", () => {
     });
     mocks.sendHostedProviderTelegramMessage.mockRejectedValueOnce(failure);
 
-    const response = await handleTelegramUsageLimitNoticeRoute(createRouteContext({
-      authority: await createTelegramUsageLimitNoticeAuthority(),
-    }), "member_123");
+    const response = await handleTelegramUsageLimitNoticeRoute(
+      createRouteContext(createTelegramUsageLimitNoticeRequest()),
+      "member_123",
+    );
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({
       failureCode: "ASSISTANT_TELEGRAM_RATE_LIMITED",
-      failureReason: "Too Many Requests",
       retryAfterSeconds: 42,
       retryable: true,
       status: "failed",
@@ -141,15 +154,61 @@ describe("worker Telegram send route", () => {
     });
     mocks.sendHostedProviderTelegramMessage.mockRejectedValueOnce(failure);
 
-    const response = await handleTelegramUsageLimitNoticeRoute(createRouteContext({
-      authority: await createTelegramUsageLimitNoticeAuthority(),
-    }), "member_123");
+    const response = await handleTelegramUsageLimitNoticeRoute(
+      createRouteContext(createTelegramUsageLimitNoticeRequest()),
+      "member_123",
+    );
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({
       failureCode: "ASSISTANT_TELEGRAM_DELIVERY_AMBIGUOUS",
-      failureReason: "request outcome is ambiguous",
       retryable: false,
+      status: "failed",
+    });
+  });
+
+  it("does not durably retry Telegram 5xx failures", async () => {
+    const failure = Object.assign(new Error("Telegram unavailable"), {
+      code: "ASSISTANT_TELEGRAM_DELIVERY_FAILED",
+      context: {
+        assistantDeliveryFailureClass: "transient",
+        retryAfterSeconds: 42,
+        status: 503,
+      },
+      retryable: true,
+    });
+    mocks.sendHostedProviderTelegramMessage.mockRejectedValueOnce(failure);
+
+    const response = await handleTelegramUsageLimitNoticeRoute(
+      createRouteContext(createTelegramUsageLimitNoticeRequest()),
+      "member_123",
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      failureCode: "ASSISTANT_TELEGRAM_DELIVERY_FAILED",
+      retryable: false,
+      status: "failed",
+    });
+  });
+
+  it.each([
+    "ASSISTANT_TELEGRAM_TOKEN_REQUIRED",
+    "ASSISTANT_TELEGRAM_UNAVAILABLE",
+  ])("retries the pre-provider Telegram configuration failure %s", async (code) => {
+    mocks.sendHostedProviderTelegramMessage.mockRejectedValueOnce(
+      Object.assign(new Error("Telegram is not configured"), { code }),
+    );
+
+    const response = await handleTelegramUsageLimitNoticeRoute(
+      createRouteContext(createTelegramUsageLimitNoticeRequest()),
+      "member_123",
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      failureCode: code,
+      retryable: true,
       status: "failed",
     });
   });
@@ -167,54 +226,12 @@ describe("worker Telegram send route", () => {
     expect(mocks.sendHostedProviderTelegramMessage).not.toHaveBeenCalled();
   });
 
-  it("rejects tampered Telegram usage-limit notice authority before provider egress", async () => {
-    const authority = await createTelegramUsageLimitNoticeAuthority();
-    const response = await handleTelegramUsageLimitNoticeRoute(createRouteContext({
-      authority: {
-        ...authority,
-        target: "telegram_thread:other",
-      },
-    }), "member_123");
-
-    expect(response.status).toBe(401);
-    await expect(response.json()).resolves.toEqual({
-      code: "authority_invalid",
-      error: "Telegram usage-limit notice authority is invalid.",
-    });
-    expect(mocks.sendHostedProviderTelegramMessage).not.toHaveBeenCalled();
-  });
-
-  it("fails closed when Telegram usage-limit authority verification is unavailable", async () => {
-    const context = createRouteContext({
-      authority: await createTelegramUsageLimitNoticeAuthority(),
-    });
-    context.env.HOSTED_TELEGRAM_USAGE_LIMIT_NOTICE_AUTHORITY_SECRET = undefined;
-
-    const response = await handleTelegramUsageLimitNoticeRoute(context, "member_123");
-
-    expect(response.status).toBe(503);
-    await expect(response.json()).resolves.toEqual({
-      code: "authority_unavailable",
-      error: "Telegram usage-limit notice authority verification is unavailable.",
-    });
-    expect(mocks.sendHostedProviderTelegramMessage).not.toHaveBeenCalled();
-  });
 });
 
-async function createTelegramUsageLimitNoticeAuthority() {
-  return await signCloudflareHostedControlTelegramUsageLimitNoticeAuthority({
-    body: buildCloudflareHostedControlTelegramUsageLimitNoticeAuthorityBody({
-      expiresAt: "2026-05-20T12:15:00.000Z",
-      idempotencyKey: "ai-usage-gate:member_123:2026-05",
-      issuedAt: "2026-05-20T12:00:00.000Z",
-      message: "Usage limit reached.",
-      noticeCode: "edge_usage_limit_reached",
-      periodStart: "2026-05-01T00:00:00.000Z",
-      replyToMessageId: "7000",
-      sourceEventId: "telegram_event_runtime_denied",
-      target: "telegram_thread:runtime-denied",
-      userId: "member_123",
-    }),
-    secret: "authority-secret",
-  });
+function createTelegramUsageLimitNoticeRequest() {
+  return {
+    message: "Usage limit reached.",
+    replyToMessageId: "7000",
+    target: "telegram_thread:runtime-denied",
+  };
 }

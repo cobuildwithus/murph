@@ -327,7 +327,7 @@ describe("recordHostedAiUsageRecords", () => {
     );
   });
 
-  it("still sends the crossing notice when a stale period marker already exists", async () => {
+  it("attempts durable delivery whenever allowance accounting reports a crossing candidate", async () => {
     const hostedAiUsageUpsert = vi.fn(async (args: { create: Record<string, unknown> }) => args.create);
     const prisma = makeUsagePrisma(hostedAiUsageUpsert);
     allowanceMocks.accountHostedAiUsageForAllowanceTx.mockResolvedValue(

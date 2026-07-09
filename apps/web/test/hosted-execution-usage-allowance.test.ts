@@ -13,7 +13,6 @@ import { describe, expect, it, vi } from "vitest";
 import {
   accountHostedAiUsageForAllowanceTx,
   checkHostedAiUsageGate,
-  markHostedAiUsageLimitNoticeSent,
   priceHostedAiUsageForAllowance,
   readHostedAiUsageGate,
   resolveHostedAiUsageGate,
@@ -1076,7 +1075,7 @@ describe("accountHostedAiUsageForAllowanceTx", () => {
     })).resolves.toBeNull();
   });
 
-  it("returns a crossing candidate when the sent marker exists so delivery rows own dedupe", async () => {
+  it("returns a crossing candidate when the marker exists so the delivery claim resolves ownership", async () => {
     const tx = createAllowanceTx({
       executeRaw: vi.fn<AllowanceExecuteRaw>(async () => 1),
       hostedAiUsageUpdateMany: vi.fn(async () => ({ count: 1 })),
@@ -2752,49 +2751,6 @@ describe("checkHostedAiUsageGate", () => {
       ?.data;
     expect(updateData).not.toHaveProperty("lastUsageAt");
     expect(updateData).not.toHaveProperty("spentUsdMicros");
-  });
-});
-
-describe("markHostedAiUsageLimitNoticeSent", () => {
-  it("marks a blocked usage-period limit notice after delivery is confirmed", async () => {
-    const updateMany = vi.fn(async () => ({ count: 1 }));
-    const prisma = {
-      hostedAiUsagePeriod: {
-        updateMany,
-      },
-    };
-
-    await expect(markHostedAiUsageLimitNoticeSent({
-      memberId: "member_123",
-      periodStart: "2026-03-01T00:00:00.000Z",
-      prisma: prisma as never,
-      sentAt: "2026-03-29T12:00:00.000Z",
-    })).resolves.toBe(true);
-
-    expect(updateMany).toHaveBeenCalledWith({
-      data: {
-        limitNoticeSentAt: new Date("2026-03-29T12:00:00.000Z"),
-      },
-      where: {
-        AND: [
-          {
-            periodStart: {
-              lte: new Date("2026-03-29T12:00:00.000Z"),
-            },
-          },
-          {
-            periodEnd: {
-              gt: new Date("2026-03-29T12:00:00.000Z"),
-            },
-          },
-        ],
-        blockedAt: {
-          not: null,
-        },
-        memberId: "member_123",
-        periodStart: new Date("2026-03-01T00:00:00.000Z"),
-      },
-    });
   });
 });
 

@@ -4,22 +4,18 @@ import type {
 } from "@prisma/client";
 
 import {
-  buildHostedAiUsageGateLegacyNoticeIdempotencyKeys,
-  buildHostedAiUsageGateNoticeIdempotencyKey,
-  markHostedAiUsageLimitNoticeSent,
   type HostedAiUsageGateNoticeCode,
 } from "../hosted-execution/usage-allowance";
 import { sha256Hex } from "../primitives";
 import { hostedOnboardingError } from "./errors";
 import {
+  buildHostedAiUsageGateNoticeIdempotencyKey,
+  claimHostedAiUsageLimitNoticeDeliveryTx,
   claimHostedLinqDeliveryProviderDispatchTx,
-  hasHostedLinqProviderCorrelatedDeliveryForIdempotencyKeysTx,
-  hasHostedLinqTerminalTelegramUsageLimitFailureForIdempotencyKeysTx,
   markHostedLinqDeliveryAcceptedTx,
   markHostedLinqDeliveryProviderDispatchStartedTx,
   markHostedLinqDeliverySendFailedTx,
   recordHostedLinqDeliveryAttemptTx,
-  resolveHostedLinqAiUsageLimitNoticeDeliveryClaimTx,
   resolveHostedLinqInviteSignupDispatchEffectIdTx,
 } from "./linq-delivery-store";
 import {
@@ -59,11 +55,6 @@ import {
 
 type HostedLinqTransportPersistenceClient = PrismaClient | Prisma.TransactionClient;
 type HostedLinqTransportPostResponseScheduler = (task: () => Promise<void>) => void;
-
-export type HostedLinqCurrentInboundReplyProof = {
-  chatId: string | null;
-  messageId: string | null;
-};
 
 export type HostedLinqConversationHomeRedirectPayload = {
   chatId: string;
@@ -304,8 +295,6 @@ function buildHostedLinqConversationHomeRedirectEffectId(
 }
 
 type HostedLinqSideEffectDrainInput = {
-  collectResult?: boolean;
-  currentInboundReply?: HostedLinqCurrentInboundReplyProof | null;
   prisma: HostedLinqTransportPersistenceClient;
   scheduleAfterResponse?: HostedLinqTransportPostResponseScheduler;
   sideEffects: readonly HostedLinqMessageSideEffect[];
@@ -313,7 +302,6 @@ type HostedLinqSideEffectDrainInput = {
 };
 
 type HostedLinqSideEffectDrainSkipReason =
-  | "delivery_skipped"
   | "effect_unresolved"
   | "notice_already_claimed"
   | "notice_in_flight";
@@ -342,14 +330,8 @@ export type HostedLinqSideEffectDrainResult = {
 };
 
 export async function drainHostedLinqSideEffectsDirect(
-  input: HostedLinqSideEffectDrainInput & { collectResult: true },
-): Promise<HostedLinqSideEffectDrainResult>;
-export async function drainHostedLinqSideEffectsDirect(
-  input: HostedLinqSideEffectDrainInput & { collectResult?: false },
-): Promise<void>;
-export async function drainHostedLinqSideEffectsDirect(
   input: HostedLinqSideEffectDrainInput,
-): Promise<HostedLinqSideEffectDrainResult | void> {
+): Promise<HostedLinqSideEffectDrainResult> {
   let sentCount = 0;
   const skipped: HostedLinqSideEffectDrainResult["skipped"][number][] = [];
 
@@ -382,28 +364,16 @@ export async function drainHostedLinqSideEffectsDirect(
       : effect;
 
     try {
-      const result = await sendHostedLinqSideEffect(deliveryEffect, {
-        currentInboundReply: input.currentInboundReply ?? null,
+      await sendHostedLinqSideEffect(deliveryEffect, {
         prisma: input.prisma,
         scheduleAfterResponse: input.scheduleAfterResponse,
         signal: input.signal,
       });
-
-      if (result.status === "skipped") {
-        await releaseHostedLinqNoticeClaimForSideEffect(deliveryEffect, input.prisma);
-        skipped.push({
-          effectId: deliveryEffect.effectId,
-          reason: "delivery_skipped",
-          template: deliveryEffect.payload.template,
-        });
-        continue;
-      }
     } catch (error) {
       await releaseHostedLinqNoticeClaimForSideEffect(deliveryEffect, input.prisma);
       throw error;
     }
 
-    await markHostedAiUsageLimitNoticeSentForSideEffectBestEffort(deliveryEffect, input.prisma);
     if (isHostedInviteLinqMessagePayload(deliveryEffect.payload)) {
       await markHostedLinqNoticeSentForSideEffect(deliveryEffect, input.prisma);
       await markHostedInviteSentBestEffort(deliveryEffect.payload.inviteId, input.prisma);
@@ -411,12 +381,10 @@ export async function drainHostedLinqSideEffectsDirect(
     sentCount += 1;
   }
 
-  if (input.collectResult === true) {
-    return {
-      sentCount,
-      skipped,
-    };
-  }
+  return {
+    sentCount,
+    skipped,
+  };
 }
 
 /**
@@ -463,19 +431,23 @@ async function sendHostedLinqSideEffect(
     payload: HostedLinqMessagePayload;
   },
   options: {
-    currentInboundReply: HostedLinqCurrentInboundReplyProof | null;
     prisma: HostedLinqTransportPersistenceClient;
     scheduleAfterResponse?: HostedLinqTransportPostResponseScheduler;
     signal?: AbortSignal;
   },
-): Promise<{ status: "sent" | "skipped" }> {
+): Promise<void> {
   const startedAtMs = Date.now();
-  const deliveryAttemptTask = recordHostedLinqDeliveryAttemptBestEffort({
-    effect,
-    prisma: options.prisma,
-    startedAtMs,
-  });
-  let providerSendCompleted = false;
+  const claimedUsageLimitAttemptedAt =
+    effect.payload.template === "ai_usage_quota" && effect.payload.claimToken
+      ? new Date(effect.payload.claimToken.sentAt)
+      : null;
+  const deliveryAttemptTask = claimedUsageLimitAttemptedAt
+    ? Promise.resolve()
+    : recordHostedLinqDeliveryAttemptBestEffort({
+        effect,
+        prisma: options.prisma,
+        startedAtMs,
+      });
   let providerDispatchStarted = false;
 
   try {
@@ -498,18 +470,19 @@ async function sendHostedLinqSideEffect(
         }),
         scheduleAfterResponse: options.scheduleAfterResponse,
       });
-      return { status: "sent" };
+      return;
     }
 
     await assertHostedLinqSideEffectRouteAuthority(effect, options.prisma);
 
     const message = await buildHostedLinqSideEffectMessage(effect, options.prisma);
-    if (effect.payload.template === "ai_usage_quota") {
+    if (claimedUsageLimitAttemptedAt) {
       await deliveryAttemptTask;
       providerDispatchStarted = await markHostedLinqDeliveryProviderDispatchStartedTx({
+        expectedAttemptedAt: claimedUsageLimitAttemptedAt ?? undefined,
         idempotencyKey: effect.effectId,
         prisma: options.prisma,
-        startedAt: new Date(startedAtMs),
+        startedAt: claimedUsageLimitAttemptedAt ?? new Date(startedAtMs),
       });
       if (!providerDispatchStarted) {
         throw hostedOnboardingError({
@@ -528,7 +501,6 @@ async function sendHostedLinqSideEffect(
       replyToMessageId: effect.payload.replyToMessageId,
       signal: options.signal,
     });
-    providerSendCompleted = true;
     if (effect.payload.template === "invite_signup") {
       queueHostedLinqContactCardSideEffectShare({
         effect: {
@@ -569,7 +541,7 @@ async function sendHostedLinqSideEffect(
       });
     } else if (
       effect.payload.template === "ai_usage_quota"
-      && (providerDispatchStarted || providerSendCompleted)
+      && providerDispatchStarted
     ) {
       console.error(
         "Hosted Linq side-effect delivery failed.",
@@ -582,6 +554,7 @@ async function sendHostedLinqSideEffect(
         milestoneTask: () => markHostedLinqDeliveryFailedBestEffort({
           effect,
           error,
+          expectedAttemptedAt: claimedUsageLimitAttemptedAt ?? undefined,
           prisma: options.prisma,
         }),
         scheduleAfterResponse: options.scheduleAfterResponse,
@@ -594,7 +567,6 @@ async function sendHostedLinqSideEffect(
     throw error;
   }
 
-  return { status: "sent" };
 }
 
 function queueHostedLinqContactCardSideEffectShare(share: {
@@ -782,10 +754,12 @@ async function runHostedLinqTransportTransaction<TResult>(
 async function markHostedLinqDeliveryFailedBestEffort(input: {
   effect: HostedLinqMessageSideEffect;
   error: unknown;
+  expectedAttemptedAt?: Date;
   prisma: HostedLinqTransportPersistenceClient;
 }): Promise<void> {
   try {
     await markHostedLinqDeliverySendFailedTx({
+      expectedAttemptedAt: input.expectedAttemptedAt,
       failureCode: readHostedLinqSideEffectString(readErrorRecord(input.error), "code"),
       failureReason: input.error instanceof Error ? input.error.message : null,
       idempotencyKey: input.effect.effectId,
@@ -1145,52 +1119,26 @@ async function claimHostedLinqNoticeForSideEffect(
       }
       const target = readHostedLinqSideEffectDeliveryTarget(effect.payload);
       const attemptedAt = new Date(effect.payload.claimToken.sentAt);
-      const legacyIdempotencyKeys = buildHostedAiUsageGateLegacyNoticeIdempotencyKeys({
-        memberId: effect.payload.memberId,
-        periodStart: effect.payload.claimToken.periodStart,
-      });
-      const deliveryClaim =
-        await resolveHostedLinqAiUsageLimitNoticeDeliveryClaimTx({
-          attemptedAt,
-          currentIdempotencyKey: effect.effectId,
-          legacyIdempotencyKeys,
-          prisma,
-          source: "hosted_webhook_side_effect",
-        });
-      if (deliveryClaim.status !== "claimable") {
-        return { status: deliveryClaim.status };
-      }
-      const claim = await claimHostedLinqDeliveryProviderDispatchTx({
-        idempotencyKey: deliveryClaim.idempotencyKey,
+      const claim = await claimHostedAiUsageLimitNoticeDeliveryTx({
+        attemptedAt,
         linqChatId: target.linqChatId,
+        memberId: effect.payload.memberId,
+        periodStart: new Date(effect.payload.claimToken.periodStart),
         phoneNumber: target.phoneNumber,
         prisma,
-        reclaimStalePreProviderAttempt: true,
         source: "hosted_webhook_side_effect",
-        sourceRef: deliveryClaim.idempotencyKey,
+        sourceRef: effect.effectId,
         targetKind: target.targetKind,
-        template: effect.payload.template,
       });
-      if (!claim.claimed) {
-        const claimedCurrentDeliverySentNotice =
-          await hasHostedLinqProviderCorrelatedDeliveryForIdempotencyKeysTx({
-            idempotencyKeys: [deliveryClaim.idempotencyKey],
-            prisma,
-          });
-        if (claimedCurrentDeliverySentNotice) {
-          return { status: "already_claimed" };
-        }
-        const claimedCurrentDeliveryTerminalFailure =
-          await hasHostedLinqTerminalTelegramUsageLimitFailureForIdempotencyKeysTx({
-            idempotencyKeys: [deliveryClaim.idempotencyKey],
-            prisma,
-          });
-        return claimedCurrentDeliveryTerminalFailure
-          ? { status: "already_claimed" }
-          : { status: "in_flight" };
+      if (claim.status !== "claimed") {
+        return {
+          status: claim.status === "already_notified"
+            ? "already_claimed"
+            : "in_flight",
+        };
       }
       return {
-        effectId: deliveryClaim.idempotencyKey,
+        effectId: claim.idempotencyKey,
         status: "claimed",
       };
     }
@@ -1240,29 +1188,6 @@ async function releaseHostedLinqNoticeClaimForSideEffect(
   } catch (error) {
     console.error(
       "Hosted Linq side-effect notice claim release failed.",
-      buildHostedLinqSideEffectLogDetails(effect, error, 0),
-    );
-  }
-}
-
-async function markHostedAiUsageLimitNoticeSentForSideEffectBestEffort(
-  effect: HostedLinqMessageSideEffect,
-  prisma: HostedLinqTransportPersistenceClient,
-): Promise<void> {
-  if (effect.payload.template !== "ai_usage_quota" || !effect.payload.claimToken) {
-    return;
-  }
-
-  try {
-    await markHostedAiUsageLimitNoticeSent({
-      memberId: effect.payload.memberId,
-      periodStart: effect.payload.claimToken.periodStart,
-      prisma,
-      sentAt: effect.payload.claimToken.sentAt,
-    });
-  } catch (error) {
-    console.warn(
-      "Hosted Linq AI usage-limit notice sent marker failed.",
       buildHostedLinqSideEffectLogDetails(effect, error, 0),
     );
   }

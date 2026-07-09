@@ -9,7 +9,6 @@ import {
   sendHostedLinqReadReceipt,
   verifyAndParseHostedLinqWebhookRequest,
 } from "./linq";
-import { hostedOnboardingError } from "./errors";
 import { assertHostedTelegramWebhookSecret, parseHostedTelegramWebhookUpdate } from "./telegram";
 import {
   planHostedOnboardingLinqWebhook,
@@ -55,8 +54,6 @@ import {
 } from "./webhook-db-timing";
 import {
   drainHostedLinqSideEffectsDirect,
-  type HostedLinqCurrentInboundReplyProof,
-  type HostedLinqSideEffectDrainResult,
 } from "./webhook-transport";
 import {
   buildHostedLinqFirstContactAdmissionClassifierUnavailableDecision,
@@ -98,6 +95,10 @@ export type {
 } from "./webhook-service-types";
 
 type HostedWebhookPostResponseScheduler = (task: () => Promise<void>) => void;
+type HostedLinqCurrentInboundReplyProof = {
+  chatId: string | null;
+  messageId: string | null;
+};
 
 export async function handleHostedOnboardingLinqWebhook(input: {
   rawBody: string;
@@ -365,19 +366,12 @@ export async function handleHostedOnboardingLinqWebhook(input: {
       scheduleAfterResponse: input.scheduleAfterResponse,
     });
 
-    let response = plan.response;
     if (plan.desiredSideEffects.length > 0) {
-      const drainResult = await drainHostedLinqSideEffectsDirect({
-        collectResult: true,
-        currentInboundReply,
+      await drainHostedLinqSideEffectsDirect({
         prisma,
         scheduleAfterResponse: input.scheduleAfterResponse,
         sideEffects: plan.desiredSideEffects,
         signal: input.signal,
-      });
-      response = resolveHostedLinqWebhookResponseAfterDrain({
-        drainResult,
-        response,
       });
     }
 
@@ -387,10 +381,10 @@ export async function handleHostedOnboardingLinqWebhook(input: {
       scheduleAfterResponse: input.scheduleAfterResponse,
     });
 
-    responseReason = response.reason ?? null;
+    responseReason = plan.response.reason ?? null;
     const wakeHandoff = plan.wakeHandoffs?.[0];
     const wakeHandoffResult = await maybeHandoffHostedExecutionWebhookWake({
-      response,
+      response: plan.response,
       scheduleAfterResponse: input.scheduleAfterResponse,
       wakeHandoff,
     });
@@ -418,7 +412,7 @@ export async function handleHostedOnboardingLinqWebhook(input: {
       wakeHandoffSignalAccepted: wakeHandoffResult?.signalAccepted ?? false,
       wakeHandoffStarted: wakeHandoffResult?.started ?? false,
     });
-    return response;
+    return plan.response;
   } catch (error) {
     finishHostedOnboardingTiming(timing, "failed", {
       errorName: deriveHostedOnboardingTimingErrorName(error),
@@ -429,45 +423,6 @@ export async function handleHostedOnboardingLinqWebhook(input: {
     });
     throw error;
   }
-}
-
-function resolveHostedLinqWebhookResponseAfterDrain(input: {
-  drainResult: HostedLinqSideEffectDrainResult;
-  response: HostedOnboardingLinqWebhookResponse;
-}): HostedOnboardingLinqWebhookResponse {
-  if (
-    input.response.reason !== "sent-ai-usage-quota-reply"
-    || input.drainResult.sentCount > 0
-  ) {
-    return input.response;
-  }
-
-  const inFlightAiUsageNotice = input.drainResult.skipped.some((skip) =>
-    skip.reason === "notice_in_flight"
-    && skip.template === "ai_usage_quota"
-  );
-  if (inFlightAiUsageNotice) {
-    throw hostedOnboardingError({
-      code: "HOSTED_LINQ_AI_USAGE_QUOTA_NOTICE_IN_FLIGHT",
-      httpStatus: 503,
-      message: "Hosted Linq AI usage-limit notice delivery is still in flight.",
-      retryable: true,
-    });
-  }
-
-  const alreadyClaimedAiUsageNotice = input.drainResult.skipped.some((skip) =>
-    skip.reason === "notice_already_claimed"
-    && skip.template === "ai_usage_quota"
-  );
-  if (!alreadyClaimedAiUsageNotice) {
-    return input.response;
-  }
-
-  return {
-    ...input.response,
-    ignored: true,
-    reason: "ai-usage-quota-already-notified",
-  };
 }
 
 async function maybeSendHostedLinqIngressReadReceipt(input: {

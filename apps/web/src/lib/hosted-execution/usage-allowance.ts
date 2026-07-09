@@ -47,12 +47,9 @@ import {
   readActiveHostedMemberAccess,
 } from "../hosted-onboarding/member-access";
 import { getPrisma } from "../prisma";
-import { sha256Hex } from "../primitives";
 import { renderUserFacingMessage } from "../hosted-messages/user-facing-messages";
 
 type HostedAiUsageAllowanceClient = PrismaClient | Prisma.TransactionClient;
-export const HOSTED_AI_USAGE_LIMIT_NOTICE_CLAIM_STALE_MS = 15 * 60 * 1000;
-
 export type HostedAiUsageGateDeniedReason =
   | "ai_usage_limit_exceeded"
   | "hosted_access_inactive"
@@ -1178,90 +1175,6 @@ export async function checkHostedAiUsageGate(input: {
   }
 
   return resolveHostedAiUsageGate(input);
-}
-
-export function buildHostedAiUsageGateNoticeIdempotencyKey(input: {
-  memberId: string;
-  periodStart: Date | string;
-}): string {
-  const periodStart = normalizeHostedAiUsageAllowanceDate(input.periodStart);
-
-  return `ai-usage-gate:${sha256Hex(JSON.stringify({
-    memberId: input.memberId,
-    periodStart: periodStart.toISOString(),
-  })).slice(0, 32)}`;
-}
-
-export function buildHostedAiUsageGateLegacyNoticeIdempotencyKeys(input: {
-  memberId: string;
-  periodStart: Date | string;
-}): string[] {
-  const legacyNoticeCodes = [
-    "edge_usage_limit_reached",
-    "family_usage_limit_reached",
-    "pulse_upgrade_edge",
-    "trial_usage_limit_reached",
-  ] satisfies HostedAiUsageLimitNoticeCode[];
-
-  return legacyNoticeCodes.map((noticeCode) =>
-    buildHostedAiUsageGateLegacyNoticeIdempotencyKey({
-      memberId: input.memberId,
-      noticeCode,
-      periodStart: input.periodStart,
-    }),
-  );
-}
-
-function buildHostedAiUsageGateLegacyNoticeIdempotencyKey(input: {
-  memberId: string;
-  noticeCode: HostedAiUsageLimitNoticeCode;
-  periodStart: Date | string;
-}): string {
-  const periodStart = normalizeHostedAiUsageAllowanceDate(input.periodStart);
-
-  return `ai-usage-gate:${sha256Hex(JSON.stringify({
-    memberId: input.memberId,
-    noticeCode: input.noticeCode,
-    periodStart: periodStart.toISOString(),
-  })).slice(0, 32)}`;
-}
-
-export async function markHostedAiUsageLimitNoticeSent(input: {
-  memberId: string;
-  periodStart: Date | string;
-  prisma?: HostedAiUsageAllowanceClient;
-  sentAt?: Date | string;
-}): Promise<boolean> {
-  const prisma = input.prisma ?? getPrisma();
-  const periodStart = normalizeHostedAiUsageAllowanceDate(input.periodStart);
-  const sentAt = normalizeHostedAiUsageAllowanceDate(input.sentAt ?? new Date());
-
-  const marked = await prisma.hostedAiUsagePeriod.updateMany({
-    where: {
-      AND: [
-        {
-          periodStart: {
-            lte: sentAt,
-          },
-        },
-        {
-          periodEnd: {
-            gt: sentAt,
-          },
-        },
-      ],
-      blockedAt: {
-        not: null,
-      },
-      memberId: input.memberId,
-      periodStart,
-    },
-    data: {
-      limitNoticeSentAt: sentAt,
-    },
-  });
-
-  return marked.count === 1;
 }
 
 function resolveHostedAiUsageInactiveGateDecision(input: {
