@@ -84,6 +84,7 @@ import type {
   HostedWorkspaceArtifactMaterializer,
 } from "./hosted-runtime/models.ts";
 import type {
+  HostedMailboxImportLoopResult,
   HostedMailboxResolvedImportItem,
 } from "./hosted-runtime/mailbox-import.ts";
 import {
@@ -148,6 +149,7 @@ import {
 } from "./hosted-runtime/context.ts";
 import {
   enqueueHostedSystemMailboxItem,
+  resolveHostedSystemMailboxNextWakeCandidate,
 } from "./hosted-runtime/system-mailbox.ts";
 import {
   collectHostedPendingAssistantInputMediaRetentionProtections,
@@ -1185,16 +1187,30 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       const redactedStatus = buildHostedMailboxImportRedactedStatus(
         initialMailboxImport.importResult,
       );
+      const systemMailboxWake = await resolveDeferredMailboxImportSystemMailboxWake(
+        initialMailboxImport.importResult,
+        restored.vaultRoot,
+      );
       const nextWake = resolveHostedWorkspaceRunNextWake({
         assistantPhaseResult: null,
         committedWorkspace: workspaceRead.workspace,
         mailboxImportRetryAt: initialMailboxImport.importResult.nextRetryAt ?? null,
         nowMs: Date.now(),
       });
-      const returnedNextWake = selectEarliestHostedRuntimeWake([
+      const checkpointNextWake = selectEarliestHostedRuntimeWake([
         {
           at: nextWake.nextWakeAt,
           reason: nextWake.nextWakeReason,
+        },
+        {
+          at: systemMailboxWake.at,
+          reason: systemMailboxWake.reason,
+        },
+      ]);
+      const returnedNextWake = selectEarliestHostedRuntimeWake([
+        {
+          at: checkpointNextWake.nextWakeAt,
+          reason: checkpointNextWake.nextWakeReason,
         },
         {
           at: workspaceRead.workspace?.inboxMediaRetentionWakeAt ?? null,
@@ -1210,8 +1226,8 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       if (initialMailboxImportRequiresCheckpoint || hostedVaultFormatMigrationRequiresCheckpoint) {
         emitPhaseLog({
           details: {
-            nextWakeAtPresent: nextWake.nextWakeAt !== null,
-            nextWakeReasonPresent: nextWake.nextWakeReason !== null,
+            nextWakeAtPresent: checkpointNextWake.nextWakeAt !== null,
+            nextWakeReasonPresent: checkpointNextWake.nextWakeReason !== null,
           },
           input,
           phase: "checkpoint",
@@ -1223,8 +1239,8 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           assertRuntimeNotAborted,
           checkpointRequestBuilder,
           expectedUserId: input.request.userId,
-          nextWakeAt: nextWake.nextWakeAt,
-          nextWakeReason: nextWake.nextWakeReason,
+          nextWakeAt: checkpointNextWake.nextWakeAt,
+          nextWakeReason: checkpointNextWake.nextWakeReason,
           inboxMediaRetentionWakeAt: workspaceRead.workspace?.inboxMediaRetentionWakeAt ?? null,
           issueExportPort: runtime.platform.issueExportPort ?? null,
           redactedStatus,
@@ -2068,9 +2084,9 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         shouldRun(initialMailboxImport: HostedMailboxImportCheckpointResult): boolean;
         signal?: AbortSignal;
       }): Promise<boolean> => {
-        const recordDeferredMailboxImportBeforeYield = (
+        const recordDeferredMailboxImportBeforeYield = async (
           mailboxImport: HostedMailboxImportCheckpointResult,
-        ): void => {
+        ): Promise<void> => {
           if (
             mailboxImport.stateChanged
             || mailboxImport.importResult.importedCount > 0
@@ -2096,6 +2112,23 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
               ? "scheduled"
               : invocationStatus;
           }
+          const systemMailboxWake = await resolveDeferredMailboxImportSystemMailboxWake(
+            mailboxImport.importResult,
+            restored.vaultRoot,
+          );
+          pendingWake = selectEarliestHostedRuntimeWake([
+            {
+              at: pendingWake.nextWakeAt,
+              reason: pendingWake.nextWakeReason,
+            },
+            {
+              at: systemMailboxWake.at,
+              reason: systemMailboxWake.reason,
+            },
+          ]);
+          invocationStatus = pendingWake.nextWakeAt !== null
+            ? "scheduled"
+            : invocationStatus;
           if (mailboxImport.checkpointDeferred && mailboxImport.stateChanged) {
             runtimeStateDirty = true;
             markIdleCheckpointTimerAfterDirtyWork();
@@ -2125,7 +2158,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           signal: input.signal ?? runtimeAbortController.signal,
         });
         if (!shouldContinue() || !input.shouldRun(initialMailboxImport)) {
-          recordDeferredMailboxImportBeforeYield(initialMailboxImport);
+          await recordDeferredMailboxImportBeforeYield(initialMailboxImport);
           return false;
         }
         try {
@@ -2138,7 +2171,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           });
         } catch (error) {
           if (!runtimeAbortController.signal.aborted && !shouldContinue()) {
-            recordDeferredMailboxImportBeforeYield(initialMailboxImport);
+            await recordDeferredMailboxImportBeforeYield(initialMailboxImport);
           }
           throw error;
         }
@@ -4059,6 +4092,23 @@ function shouldCheckpointHostedReplayBudgetProgressBeforeForeground(input: {
     && consumedConversationSeq !== null
     && nextConversationSeq > previousConversationSeq
     && nextConversationSeq <= consumedConversationSeq;
+}
+
+async function resolveDeferredMailboxImportSystemMailboxWake(
+  importResult: HostedMailboxImportLoopResult,
+  vaultRoot: string,
+): Promise<{
+  at: string | null;
+  reason: string | null;
+}> {
+  if ((importResult.importedSystemMailboxItemIds?.length ?? 0) === 0) {
+    return {
+      at: null,
+      reason: null,
+    };
+  }
+
+  return await resolveHostedSystemMailboxNextWakeCandidate({ vaultRoot });
 }
 
 function parseHostedMailboxSeqOrNull(value: string | null | undefined): bigint | null {

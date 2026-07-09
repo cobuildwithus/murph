@@ -207,6 +207,9 @@ import {
 import {
   enqueueHostedSystemMailboxItem,
 } from "../src/hosted-runtime/system-mailbox.ts";
+import {
+  readHostedSystemMailboxState,
+} from "../src/hosted-runtime/system-mailbox-state.ts";
 import type {
   HostedRuntimeDeviceSyncPort,
   HostedRuntimeMailboxPort,
@@ -18356,6 +18359,90 @@ describe("hosted workspace runtime entrypoint", () => {
         },
         status: "budget_exhausted",
       });
+    } finally {
+      vi.useRealTimers();
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test("schedules a system-mailbox wake when import checkpoints before assistant phase", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const imported: string[] = [];
+    const systemItem = createMailboxItem({
+      id: "mailbox_item_entrypoint_import_checkpoint_system_wake",
+      kind: "runtime.manual-requested",
+      lane: "system",
+      laneSeq: "1",
+    });
+    const conversationItem = createMailboxItem({
+      id: "mailbox_item_entrypoint_import_checkpoint_deferred_conversation",
+      laneSeq: "1",
+    });
+
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime(new Date(TEST_NOW));
+      const result = await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_import_checkpoint_system_wake",
+            budget: {
+              maxMailboxItems: 1,
+            },
+            leaseGeneration: "7",
+            userId: TEST_USER_ID,
+            workspaceVersion: "0",
+          },
+        }),
+        {
+          async createCheckpointSnapshot(snapshotInput) {
+            events.push(`snapshot:${snapshotInput.reason}`);
+            return {
+              snapshotRef: createBundleRef({
+                hash: "8".repeat(64),
+                key: "users/bundles/member-synthetic/import-checkpoint-system-wake.bundle.json",
+                size: 512,
+              }),
+            };
+          },
+          async importItem(item) {
+            imported.push(`${item.item.lane}:${item.item.laneSeq}`);
+            if (item.item.lane !== "system") {
+              throw new Error("Conversation item should be budget-deferred before import.");
+            }
+            return await importRuntimeControlSystemMailboxItemForTest({
+              item: item.item,
+              vaultRoot,
+            });
+          },
+          platform: createPlatform({
+            mailboxPort: createMailboxPort({
+              events,
+              items: [systemItem, conversationItem],
+            }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              events,
+              workspace: createWorkspaceState({ version: "0" }),
+            }),
+          }),
+          async runAssistantPhase() {
+            throw new Error("Import-only system wake scheduling should not run assistant phase.");
+          },
+          vaultRoot,
+        },
+      );
+
+      const systemMailbox = await readHostedSystemMailboxState(vaultRoot);
+      assert.deepEqual(imported, ["system:1"]);
+      assert.equal(systemMailbox.pending.length, 1);
+      assert.equal(systemMailbox.pending[0]?.attemptCount, 0);
+      assert.equal(checkpointRequests[0]?.nextWakeAt, TEST_NOW);
+      assert.equal(checkpointRequests[0]?.nextWakeReason, "assistant");
+      assert.equal(result.nextWakeAt, TEST_NOW);
+      assert.equal(result.status, "scheduled");
     } finally {
       vi.useRealTimers();
       await removeTempRoot(vaultRoot);
