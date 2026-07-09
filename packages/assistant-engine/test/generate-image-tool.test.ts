@@ -9,6 +9,9 @@ import { describe, expect, it } from 'vitest'
 import {
   executeGenerateImageTool,
 } from '../src/assistant-codex/generate-image-tool.js'
+import {
+  MURPH_ASSISTANT_SKILLS_ROOT_ENV,
+} from '../src/assistant-skill-assets.js'
 
 const PNG_BYTES = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
 
@@ -129,6 +132,64 @@ describe('executeGenerateImageTool reference images', () => {
         referenceImageCount: 1,
         referenceImageTotalBytes: PNG_BYTES.byteLength,
       })
+    })
+  })
+
+  it('passes the assistant skills root through for package skill asset references', async () => {
+    await withTempDir(async (root) => {
+      const vaultRoot = path.join(root, 'vault')
+      const codexHome = path.join(root, 'codex-home')
+      const skillsRoot = path.join(root, 'skills')
+      await initializeVault({ vaultRoot })
+      await mkdir(path.join(skillsRoot, 'shared'), { recursive: true })
+      await writeFile(
+        path.join(skillsRoot, 'shared', 'murph-character-sheet-v1.png'),
+        PNG_BYTES,
+      )
+
+      const originalSkillsRoot = process.env[MURPH_ASSISTANT_SKILLS_ROOT_ENV]
+      let capturedUrl: string | null = null
+      let capturedBody: BodyInit | null | undefined
+      try {
+        process.env[MURPH_ASSISTANT_SKILLS_ROOT_ENV] = skillsRoot
+        const fetchImpl: typeof fetch = async (url, init) => {
+          capturedUrl = String(url)
+          capturedBody = init?.body
+          return openAiPngResponse()
+        }
+
+        const result = await executeGenerateImageTool({
+          args: {
+            alt: 'Generated image',
+            outputFormat: 'png',
+            prompt: 'Use image 1 as the canonical Murph character reference.',
+            quality: 'high',
+            referenceImageRefs: ['skill-assets/murph-character-sheet-v1.png'],
+            size: '1024x1024',
+          },
+          codexHome,
+          env: { OPENAI_API_KEY: 'test-key' },
+          fetchImpl,
+          providerRequestOrdinal: 8,
+          vaultRoot,
+        })
+
+        expect(result.rpcSuccess).toBe(true)
+        expect(capturedUrl).toBe('https://api.openai.com/v1/images/edits')
+        expect(capturedBody).toBeInstanceOf(FormData)
+        expect((capturedBody as FormData).getAll('image[]')).toHaveLength(1)
+        expect(result.usageDraft?.usage.providerMetadataJson).toMatchObject({
+          operation: 'image_generation_with_references',
+          referenceImageCount: 1,
+          referenceImageTotalBytes: PNG_BYTES.byteLength,
+        })
+      } finally {
+        if (originalSkillsRoot === undefined) {
+          delete process.env[MURPH_ASSISTANT_SKILLS_ROOT_ENV]
+        } else {
+          process.env[MURPH_ASSISTANT_SKILLS_ROOT_ENV] = originalSkillsRoot
+        }
+      }
     })
   })
 

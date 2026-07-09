@@ -25,6 +25,7 @@ import type {
   AssistantProviderUsageDraft,
 } from '../assistant/providers/types.js'
 import { normalizeNullableString } from '../assistant/shared.js'
+import { resolveAssistantSkillsRoot } from '../assistant-skill-assets.js'
 import {
   resolveGenerateImageReferences,
   type ResolvedGenerateImageReference,
@@ -178,6 +179,7 @@ export async function executeGenerateImageTool(input: {
         ? await resolveGenerateImageReferences({
             materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts ?? null,
             refs: referenceImageRefs,
+            skillsRoot: resolveAssistantSkillsRoot(),
             vaultRoot: vaultRoot ?? '',
           })
         : []
