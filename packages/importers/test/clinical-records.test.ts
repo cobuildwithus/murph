@@ -834,6 +834,61 @@ describe("buildClinicalImportPlan", () => {
     ]);
   });
 
+  it("classifies trusted laboratory observations before overlapping vital codes", async () => {
+    const laboratoryCategory = [{
+      coding: [{
+        system: "http://terminology.hl7.org/CodeSystem/observation-category",
+        code: "laboratory",
+      }],
+    }];
+    const bodyWeightCode = {
+      coding: [{ system: "http://loinc.org", code: "29463-7", display: "Body weight" }],
+    };
+    const vaultRoot = await writeClinicalFixture({
+      resourceFiles: [{
+        resourceType: "Observation",
+        relativePath: "Observation/page-1.json",
+        count: 2,
+      }],
+      pages: {
+        "Observation/page-1.json": [
+          {
+            resourceType: "Observation",
+            id: "laboratory-weight-scalar",
+            status: "final",
+            effectiveDateTime: "2026-07-01T12:00:00.000Z",
+            category: laboratoryCategory,
+            code: bodyWeightCode,
+            valueQuantity: { value: 70, system: "http://unitsofmeasure.org", code: "kg" },
+          },
+          {
+            resourceType: "Observation",
+            id: "laboratory-weight-component",
+            status: "final",
+            effectiveDateTime: "2026-07-01T12:05:00.000Z",
+            category: laboratoryCategory,
+            code: { text: "Body composition panel" },
+            component: [{
+              code: bodyWeightCode,
+              valueQuantity: { value: 70, system: "http://unitsofmeasure.org", code: "kg" },
+            }],
+          },
+        ],
+      },
+    });
+
+    const plan = await buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot });
+
+    expect(plan.unsupported).toEqual([]);
+    expect(plan.candidates.map((candidate) => ({
+      kind: candidate.kind,
+      resourceId: candidate.resource.resourceId,
+    }))).toEqual([
+      { kind: "diagnostic-test", resourceId: "laboratory-weight-scalar" },
+      { kind: "diagnostic-test", resourceId: "laboratory-weight-component" },
+    ]);
+  });
+
   it("fails closed instead of emitting lossy clinical candidates", async () => {
     const vaultRoot = await writeClinicalFixture({
       resourceFiles: [

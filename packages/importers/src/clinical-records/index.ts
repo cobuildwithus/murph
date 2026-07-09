@@ -409,6 +409,10 @@ function mapObservation(context: FhirResourceContext<Observation>): MappedFhirRe
   }
 
   const occurredAt = readClinicalOccurredAt(context.resource);
+  if (isLaboratoryObservation(context.resource)) {
+    return mapLaboratoryObservation(context, resourceId);
+  }
+
   const components = readFhirArray(context.resource.component);
   const emittedVitalFacets = new Set<string>();
   const vitalMeasurements: VitalMeasurementInput[] = [];
@@ -520,10 +524,15 @@ function mapObservation(context: FhirResourceContext<Observation>): MappedFhirRe
     );
   }
 
-  if (!isLaboratoryObservation(context.resource)) {
-    return unsupportedOnly(context, "observation code is not importable");
-  }
+  return unsupportedOnly(context, "observation code is not importable");
+}
 
+function mapLaboratoryObservation(
+  context: FhirResourceContext<Observation>,
+  resourceId: string,
+): MappedFhirResource {
+  const occurredAt = readClinicalOccurredAt(context.resource);
+  const components = readFhirArray(context.resource.component);
   const results: BloodTestResultRecord[] = [];
   for (const component of components) {
     const componentInterpretation = resultInterpretationFromInterpretation(component.interpretation);
