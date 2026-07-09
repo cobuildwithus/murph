@@ -877,14 +877,22 @@ describe('applyMurphManagedAutomations', () => {
       title: 'Weekly health digest',
     })
 
+    const digestSeed = MURPH_MANAGED_AUTOMATIONS.find((seed) =>
+      seed.automationId === MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID
+    )
+    if (!digestSeed) {
+      throw new Error('Expected weekly health digest managed seed to exist.')
+    }
+
     const result = await applyMurphManagedAutomations({
       defaultRoute,
       now: new Date('2026-06-20T12:00:00.000Z'),
+      seeds: [digestSeed],
       vaultRoot,
     })
 
     expect(result).toEqual({
-      created: 3,
+      created: 0,
       skipped: 0,
       updated: 1,
     })
