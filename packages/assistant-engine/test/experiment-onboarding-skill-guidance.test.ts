@@ -233,6 +233,14 @@ describe('experiment onboarding skill guidance', () => {
   it('keeps assumed-mode repair policy in behavior follow-through', async () => {
     const raw = await readBehaviorFollowthroughSkill()
 
+    expect(raw).toContain('### 3. Capture the reason')
+    expect(raw).toContain(
+      "For a new goal or behavior, get the user's reason in their own words by default.",
+    )
+    expect(raw).toContain(
+      'The reason shapes the plan, the support style, and later reminders; save it into the loop.',
+    )
+    expect(raw).toContain('never re-ask a reason the user already gave')
     expect(raw).toContain('For assumed-mode non-sensable experiments, silence means adherence')
     expect(raw).toContain('sauna, tretinoin, red-light, supplement')
     expect(raw).toContain(

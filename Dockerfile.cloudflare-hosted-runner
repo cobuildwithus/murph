@@ -46,11 +46,12 @@ ENTRYPOINT ["/usr/bin/tini", "-s", "--"]
 
 # The bundled entrypoint evaluates ~27 chunk files at boot instead of the
 # unbundled graph's ~960 module files — the difference between ~2s and
-# sub-second nodeStartupMs on lazily pulled production image layers. Two
-# assistant-engine resolvers derive asset paths from their own module location
-# and would land inside dist-bundled/ when bundled; pin them to the installed
-# package copies instead (both env overrides are first-class in the engine).
+# sub-second nodeStartupMs on lazily pulled production image layers. Package
+# resolvers that derive asset paths from their own module location would land
+# inside dist-bundled/ when bundled; pin them to the installed package copies
+# instead (the env overrides are owned by their respective packages).
 ENV MURPH_ASSISTANT_SKILLS_ROOT="/app/node_modules/@murphai/assistant-engine/skills"
 ENV MURPH_ASSISTANT_CLI_SURFACE_PREBUILT_ARTIFACT_PATH="/app/node_modules/@murphai/assistant-engine/dist/assistant/cli-surface-contract.generated.json"
+ENV MURPH_HEALTH_COMMONS_PACKAGE_ROOT="/app/node_modules/@murphai/health-commons"
 
 CMD ["node", "dist-bundled/container-entrypoint.js"]

@@ -67,6 +67,9 @@ export type {
 
 export type HealthCommonsEntity = HealthCommonsCatalogEntity;
 
+export const MURPH_HEALTH_COMMONS_PACKAGE_ROOT_ENV =
+  "MURPH_HEALTH_COMMONS_PACKAGE_ROOT";
+
 export const HEALTH_COMMONS_PAGE_STATUSES = [
   "draft",
   "field-testing",
@@ -355,9 +358,9 @@ export interface HealthCommonsRouteBundleReader extends HealthCommonsCatalogRead
   route: HealthCommonsWebRouteBundle["route"];
 }
 
-const DEFAULT_GENERATED_PROTOCOL_INDEX_URL = new URL("../generated/protocol-index.json", import.meta.url);
-const DEFAULT_GENERATED_PROTOCOL_RUN_SPECS_URL = new URL("../generated/protocol-run-specs.json", import.meta.url);
-const DEFAULT_GENERATED_PROTOCOL_FAMILY_GRAPH_URL = new URL("../generated/protocol-family-graph.json", import.meta.url);
+const DEFAULT_GENERATED_PROTOCOL_INDEX_PATH = "generated/protocol-index.json";
+const DEFAULT_GENERATED_PROTOCOL_RUN_SPECS_PATH = "generated/protocol-run-specs.json";
+const DEFAULT_GENERATED_PROTOCOL_FAMILY_GRAPH_PATH = "generated/protocol-family-graph.json";
 const DEFAULT_LIST_LIMIT = 25;
 const DEFAULT_RELATION_LIMIT = 12;
 const DEFAULT_SEARCH_LIMIT = 20;
@@ -407,7 +410,10 @@ const cachedGeneratedWebExperimentResultsPublic = new Map<
 export function loadGeneratedHealthCommonsProtocolIndex(
   options: LoadGeneratedHealthCommonsProtocolIndexOptions = {},
 ): HealthCommonsProtocolIndexArtifact {
-  const raw = readFileSync(options.protocolIndexPath ?? DEFAULT_GENERATED_PROTOCOL_INDEX_URL, "utf8");
+  const raw = readFileSync(
+    options.protocolIndexPath ?? defaultGeneratedProtocolIndexUrl(),
+    "utf8",
+  );
   const parsed = parseJsonObject(raw);
   assertGeneratedHealthCommonsProtocolIndex(parsed);
   return parsed;
@@ -431,7 +437,10 @@ export function getGeneratedHealthCommonsProtocolIndexReader(
 export function loadGeneratedHealthCommonsProtocolRunSpecs(
   options: LoadGeneratedHealthCommonsProtocolRunSpecsOptions = {},
 ): HealthCommonsProtocolRunSpecsArtifact {
-  const raw = readFileSync(options.protocolRunSpecsPath ?? DEFAULT_GENERATED_PROTOCOL_RUN_SPECS_URL, "utf8");
+  const raw = readFileSync(
+    options.protocolRunSpecsPath ?? defaultGeneratedProtocolRunSpecsUrl(),
+    "utf8",
+  );
   const parsed = parseJsonObject(raw);
   assertGeneratedHealthCommonsProtocolRunSpecs(parsed);
   return parsed;
@@ -455,7 +464,10 @@ export function getGeneratedHealthCommonsProtocolRunSpecReader(
 export function loadGeneratedHealthCommonsProtocolFamilyGraph(
   options: LoadGeneratedHealthCommonsProtocolFamilyGraphOptions = {},
 ): HealthCommonsProtocolFamilyGraphArtifact {
-  const raw = readFileSync(options.protocolFamilyGraphPath ?? DEFAULT_GENERATED_PROTOCOL_FAMILY_GRAPH_URL, "utf8");
+  const raw = readFileSync(
+    options.protocolFamilyGraphPath ?? defaultGeneratedProtocolFamilyGraphUrl(),
+    "utf8",
+  );
   const parsed = parseJsonObject(raw);
   assertGeneratedHealthCommonsProtocolFamilyGraph(parsed);
   return parsed;
@@ -2176,25 +2188,73 @@ function ensureTrailingSlashUrl(value: URL): URL {
   return value.href.endsWith("/") ? value : new URL(`${value.href}/`);
 }
 
+function defaultGeneratedProtocolIndexUrl(): URL {
+  return new URL(
+    DEFAULT_GENERATED_PROTOCOL_INDEX_PATH,
+    defaultHealthCommonsPackageRootUrl(),
+  );
+}
+
+function defaultGeneratedProtocolRunSpecsUrl(): URL {
+  return new URL(
+    DEFAULT_GENERATED_PROTOCOL_RUN_SPECS_PATH,
+    defaultHealthCommonsPackageRootUrl(),
+  );
+}
+
+function defaultGeneratedProtocolFamilyGraphUrl(): URL {
+  return new URL(
+    DEFAULT_GENERATED_PROTOCOL_FAMILY_GRAPH_PATH,
+    defaultHealthCommonsPackageRootUrl(),
+  );
+}
+
+function defaultHealthCommonsPackageRootUrl(): URL {
+  const envValue = process.env[MURPH_HEALTH_COMMONS_PACKAGE_ROOT_ENV]?.trim();
+  if (envValue) {
+    return ensureTrailingSlashUrl(stringToFileOrUrl(envValue));
+  }
+
+  return ensureTrailingSlashUrl(new URL("..", import.meta.url));
+}
+
 function defaultGeneratedWebRootUrl(): URL {
+  const envPackageRoot = process.env[MURPH_HEALTH_COMMONS_PACKAGE_ROOT_ENV]?.trim();
+  if (envPackageRoot) {
+    return ensureTrailingSlashUrl(
+      new URL("generated/web", defaultHealthCommonsPackageRootUrl()),
+    );
+  }
+
   const runtimeSourceRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-  const candidateRoots = [
-    resolve(process.cwd(), "packages/health-commons/generated/web"),
-    resolve(process.cwd(), "../packages/health-commons/generated/web"),
-    resolve(process.cwd(), "../../packages/health-commons/generated/web"),
-    resolve(runtimeSourceRoot, "generated/web"),
+  const fallbackGeneratedWebRootUrl = pathToFileURL(resolve(
+    process.cwd(),
+    "packages/health-commons/generated/web",
+  ));
+  const candidateRootUrls = [
+    fallbackGeneratedWebRootUrl,
+    pathToFileURL(resolve(process.cwd(), "../packages/health-commons/generated/web")),
+    pathToFileURL(resolve(process.cwd(), "../../packages/health-commons/generated/web")),
+    pathToFileURL(resolve(runtimeSourceRoot, "generated/web")),
   ];
 
-  for (const candidateRoot of candidateRoots) {
-    if (existsSync(resolve(candidateRoot, "routes/index.json"))) {
-      return pathToFileURL(candidateRoot);
+  for (const candidateRootUrl of candidateRootUrls) {
+    const candidateRoot = candidateRootUrl.protocol === "file:"
+      ? fileURLToPath(candidateRootUrl)
+      : null;
+    if (candidateRoot && existsSync(resolve(candidateRoot, "routes/index.json"))) {
+      return ensureTrailingSlashUrl(candidateRootUrl);
     }
   }
 
-  return pathToFileURL(candidateRoots[0]);
+  return ensureTrailingSlashUrl(fallbackGeneratedWebRootUrl);
 }
 
 function stringToGeneratedWebRootUrl(value: string): URL {
+  return stringToFileOrUrl(value);
+}
+
+function stringToFileOrUrl(value: string): URL {
   if (/^[a-z][a-z\d+.-]*:/iu.test(value)) {
     return new URL(value);
   }

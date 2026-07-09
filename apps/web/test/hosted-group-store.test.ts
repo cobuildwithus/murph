@@ -310,7 +310,7 @@ describe("acceptHostedGroupJoinCodeTx", () => {
       "member_group_runtime",
       expect.anything(),
     );
-    // Joining always shares the typed profile display name, so consent gates
+    // Joining always shares the memory-backed preferred display name, so consent gates
     // every join, and the only automatic grant is profile-name.v0.
     expect(mocks.assertHostedLaunchRequiredConsentGranted).toHaveBeenCalledTimes(1);
     expect(mocks.grantHostedVaultShareTx).toHaveBeenCalledTimes(1);

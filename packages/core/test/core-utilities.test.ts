@@ -460,7 +460,7 @@ test("frontmatter helpers round-trip nested values and reject invalid shapes", (
   );
 });
 
-test("registry and profile helpers materialize, read, update, and delete markdown records", async () => {
+test("registry helpers materialize, read, update, and delete markdown records", async () => {
   type RegistryRecord = {
     id: string;
     slug: string;
@@ -618,7 +618,7 @@ test("registry and profile helpers materialize, read, update, and delete markdow
 
 });
 
-test("markdown registry wrappers and profile reads cover the remaining branch seams", async () => {
+test("markdown registry wrappers cover the remaining branch seams", async () => {
   const vaultRoot = await makeTempRoot();
 
   await fs.mkdir(path.join(vaultRoot, "library/records"), {
