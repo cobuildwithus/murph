@@ -33,6 +33,23 @@ import { normalizePhoneNumber } from "./phone";
 import { generateHostedRandomPrefixedId, sha256Hex } from "../primitives";
 
 type HostedLinqDeliveryClient = PrismaClient | Prisma.TransactionClient;
+type HostedLinqDeliveryProviderDispatchData = {
+  attemptedAt: Date;
+  failedAt: null;
+  failureCode: null;
+  failureReason: null;
+  linqChatLookupKey: string | null;
+  phoneNumberHint: string | null;
+  phoneNumberLookupKey: string | null;
+  retryAfterAt: null;
+  skippedAt: null;
+  skipReason: null;
+  source: string;
+  sourceRef: string | null;
+  status: "attempted";
+  targetKind: string | null;
+  template: string | null;
+};
 const HOSTED_LINQ_PROVIDER_DISPATCH_STALE_ATTEMPT_MS = 15 * 60 * 1000;
 const HOSTED_AI_USAGE_TELEGRAM_NOTICE_DELIVERY_SOURCE =
   "hosted_runtime_ai_usage_limit_notice";
@@ -246,6 +263,7 @@ export async function resolveHostedLinqInviteSignupDispatchEffectIdTx(input: {
 
 export async function claimHostedLinqDeliveryProviderDispatchTx(input: {
   attemptedAt?: Date;
+  guardIdempotencyKeys?: readonly string[];
   idempotencyKey?: string | null;
   linqChatId?: string | null;
   phoneNumber?: string | null;
@@ -292,12 +310,24 @@ export async function claimHostedLinqDeliveryProviderDispatchTx(input: {
     status: "attempted",
     targetKind: normalizeNullable(input.targetKind),
     template: normalizeNullable(input.template),
-  };
+  } satisfies HostedLinqDeliveryProviderDispatchData;
   const createData = {
     ...data,
     id: buildHostedLinqDeliveryId(idempotencyKey),
     idempotencyKey,
   };
+  const guardClaim = await reserveHostedLinqDeliveryGuardRowsTx({
+    attemptedAt,
+    data,
+    guardIdempotencyKeys: input.guardIdempotencyKeys,
+    primaryIdempotencyKey: idempotencyKey,
+    prisma: input.prisma,
+    reclaimStalePreProviderAttempt: input.reclaimStalePreProviderAttempt,
+    source: input.source,
+  });
+  if (guardClaim) {
+    return guardClaim;
+  }
 
   const existing = await input.prisma.hostedLinqDelivery.findUnique({
     where: { idempotencyKey },
@@ -343,6 +373,78 @@ export async function claimHostedLinqDeliveryProviderDispatchTx(input: {
       source: input.source,
     });
   }
+}
+
+async function reserveHostedLinqDeliveryGuardRowsTx(input: {
+  attemptedAt: Date;
+  data: HostedLinqDeliveryProviderDispatchData;
+  guardIdempotencyKeys?: readonly string[];
+  primaryIdempotencyKey: string;
+  prisma: HostedLinqDeliveryClient;
+  reclaimStalePreProviderAttempt?: boolean;
+  source: string;
+}): Promise<{ claimed: boolean; id: string | null; retryAt?: Date } | null> {
+  const guardIdempotencyKeys = [
+    ...new Set((input.guardIdempotencyKeys ?? [])
+      .map((key) => createHostedLinqDeliveryIdempotencyLookupKey(key))
+      .filter((key): key is string =>
+        Boolean(key) && key !== input.primaryIdempotencyKey
+      )),
+  ];
+  for (const idempotencyKey of guardIdempotencyKeys) {
+    const existing = await input.prisma.hostedLinqDelivery.findUnique({
+      where: { idempotencyKey },
+      select: hostedLinqDeliveryLifecycleSelect,
+    });
+    if (existing) {
+      const claim = await claimExistingHostedLinqDeliveryProviderDispatchTx({
+        attemptedAt: input.attemptedAt,
+        data: input.data,
+        delivery: existing,
+        prisma: input.prisma,
+        reclaimStalePreProviderAttempt: input.reclaimStalePreProviderAttempt,
+        source: input.source,
+      });
+      if (!claim.claimed) {
+        return claim;
+      }
+      continue;
+    }
+
+    try {
+      await input.prisma.hostedLinqDelivery.create({
+        data: {
+          ...input.data,
+          id: buildHostedLinqDeliveryId(idempotencyKey),
+          idempotencyKey,
+        },
+        select: { id: true },
+      });
+    } catch (error) {
+      if (!isPrismaUniqueConstraintError(error)) {
+        throw error;
+      }
+      const concurrent = await input.prisma.hostedLinqDelivery.findUnique({
+        where: { idempotencyKey },
+        select: hostedLinqDeliveryLifecycleSelect,
+      });
+      if (!concurrent) {
+        throw error;
+      }
+      const claim = await claimExistingHostedLinqDeliveryProviderDispatchTx({
+        attemptedAt: input.attemptedAt,
+        data: input.data,
+        delivery: concurrent,
+        prisma: input.prisma,
+        reclaimStalePreProviderAttempt: input.reclaimStalePreProviderAttempt,
+        source: input.source,
+      });
+      if (!claim.claimed) {
+        return claim;
+      }
+    }
+  }
+  return null;
 }
 
 export async function hasHostedLinqProviderCorrelatedDeliveryForIdempotencyKeysTx(input: {
@@ -1652,7 +1754,7 @@ function readHostedLinqTelegramUsageLimitRetryAt(input: {
 
 async function claimExistingHostedLinqDeliveryProviderDispatchTx(input: {
   attemptedAt: Date;
-  data: Prisma.HostedLinqDeliveryUpdateInput;
+  data: HostedLinqDeliveryProviderDispatchData;
   delivery: {
     acceptedAt: Date | null;
     attemptedAt: Date;

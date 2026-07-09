@@ -1161,6 +1161,7 @@ async function claimHostedLinqNoticeForSideEffect(
         return { status: deliveryClaim.status };
       }
       const claim = await claimHostedLinqDeliveryProviderDispatchTx({
+        guardIdempotencyKeys: legacyIdempotencyKeys,
         idempotencyKey: deliveryClaim.idempotencyKey,
         linqChatId: target.linqChatId,
         phoneNumber: target.phoneNumber,

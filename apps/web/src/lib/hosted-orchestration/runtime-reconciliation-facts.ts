@@ -465,6 +465,7 @@ async function sendHostedRuntimeAiUsageLimitNoticeForPendingConversation(input: 
     }
     const claimed = await claimHostedLinqDeliveryProviderDispatchTx({
       attemptedAt: sentAt,
+      guardIdempotencyKeys: legacyIdempotencyKeys,
       idempotencyKey: deliveryClaim.idempotencyKey,
       prisma: input.prisma,
       reclaimStalePreProviderAttempt: true,
@@ -533,11 +534,11 @@ async function sendHostedRuntimeAiUsageLimitNoticeForPendingConversation(input: 
         userId: input.userId,
       });
     } catch (cause) {
-      const error = isHostedTelegramControlRouteUnavailable(cause)
-        ? new HostedRuntimeTelegramUsageLimitNoticeUnavailableError(
-            "Hosted Telegram usage-limit notice delivery route is unavailable through hosted control.",
-          )
-        : new HostedRuntimeTelegramUsageLimitNoticeUnknownError();
+      const error = new HostedRuntimeTelegramUsageLimitNoticeUnavailableError(
+        isHostedTelegramControlRouteUnavailable(cause)
+          ? "Hosted Telegram usage-limit notice delivery route is unavailable through hosted control."
+          : "Hosted Telegram usage-limit notice delivery could not reach a typed hosted-control response.",
+      );
       await markHostedLinqDeliverySendFailedTx({
         failedAt: sentAt,
         failureCode: error.name,
@@ -545,9 +546,7 @@ async function sendHostedRuntimeAiUsageLimitNoticeForPendingConversation(input: 
         idempotencyKey: deliveryClaim.idempotencyKey,
         prisma: input.prisma,
       });
-      return error instanceof HostedRuntimeTelegramUsageLimitNoticeUnavailableError
-        ? buildHostedRuntimeAiUsageNoticeInFlightResult(input.now)
-        : { status: "already_notified" };
+      return buildHostedRuntimeAiUsageNoticeInFlightResult(input.now);
     }
 
     if (deliveryResult.status === "failed") {
@@ -762,16 +761,6 @@ class HostedRuntimeTelegramUsageLimitNoticeUnavailableError extends Error {
 
 class HostedRuntimeTelegramUsageLimitNoticeRetryAfterError extends Error {
   override name = "HostedRuntimeTelegramUsageLimitNoticeRetryAfterError";
-}
-
-class HostedRuntimeTelegramUsageLimitNoticeUnknownError extends Error {
-  override name = "HostedRuntimeTelegramUsageLimitNoticeUnknownError";
-
-  constructor(
-    message = "Hosted Telegram usage-limit notice delivery could not be confirmed after dispatch started.",
-  ) {
-    super(message);
-  }
 }
 
 async function readHostedRuntimePendingConversationWake(input: {

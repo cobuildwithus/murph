@@ -1165,6 +1165,134 @@ describe("hosted Linq observability stores", () => {
     );
   });
 
+  it("reserves legacy AI usage notice keys before claiming the current period key", async () => {
+    const fixture = createObservabilityPrismaFixture();
+    const attemptedAt = new Date("2026-03-26T12:00:00.000Z");
+    const currentKey = "ai-usage-gate:member_123:2026-03";
+    const legacyKey = "ai-usage-gate:member_123:2026-03:edge_usage_limit_reached";
+    const currentLookupKey = createHostedLinqDeliveryIdempotencyLookupKey(currentKey);
+    const legacyLookupKey = createHostedLinqDeliveryIdempotencyLookupKey(legacyKey);
+
+    await expect(claimHostedLinqDeliveryProviderDispatchTx({
+      attemptedAt,
+      guardIdempotencyKeys: [legacyKey, currentKey, legacyKey],
+      idempotencyKey: currentKey,
+      linqChatId: "chat_123",
+      prisma: fixture.prisma as never,
+      reclaimStalePreProviderAttempt: true,
+      source: "hosted_webhook_side_effect",
+      sourceRef: currentKey,
+      targetKind: "thread",
+      template: "ai_usage_quota",
+    })).resolves.toEqual({
+      claimed: true,
+      id: "hld_random",
+    });
+
+    expect(fixture.hostedLinqDeliveryFindUnique).toHaveBeenNthCalledWith(1, {
+      select: expect.objectContaining({
+        attemptedAt: true,
+      }),
+      where: {
+        idempotencyKey: legacyLookupKey,
+      },
+    });
+    expect(fixture.hostedLinqDeliveryFindUnique).toHaveBeenNthCalledWith(2, {
+      select: expect.objectContaining({
+        attemptedAt: true,
+      }),
+      where: {
+        idempotencyKey: currentLookupKey,
+      },
+    });
+    expect(fixture.hostedLinqDeliveryCreate).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        data: expect.objectContaining({
+          attemptedAt,
+          idempotencyKey: legacyLookupKey,
+          sourceRef: createHostedLinqDeliverySourceRefLookupKey(currentKey),
+          status: "attempted",
+          template: "ai_usage_quota",
+        }),
+      }),
+    );
+    expect(fixture.hostedLinqDeliveryCreate).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        data: expect.objectContaining({
+          attemptedAt,
+          idempotencyKey: currentLookupKey,
+          status: "attempted",
+          template: "ai_usage_quota",
+        }),
+      }),
+    );
+  });
+
+  it("does not claim the current AI usage notice while a legacy guard row is in flight", async () => {
+    const fixture = createObservabilityPrismaFixture();
+    const currentKey = "ai-usage-gate:member_123:2026-03";
+    const legacyKey = "ai-usage-gate:member_123:2026-03:edge_usage_limit_reached";
+    const legacyLookupKey = createHostedLinqDeliveryIdempotencyLookupKey(legacyKey);
+    fixture.hostedLinqDeliveryFindUnique.mockResolvedValueOnce({
+      acceptedAt: null,
+      attemptedAt: new Date("2026-03-26T12:00:00.000Z"),
+      deliveredAt: null,
+      failedAt: null,
+      id: "hld_legacy_in_flight",
+      lastReceiptAt: null,
+      messageLookupKey: null,
+      phoneNumberLookupKey: null,
+      retryAfterAt: null,
+      skippedAt: null,
+      source: "hosted_webhook_side_effect",
+      status: "attempted",
+    });
+    fixture.hostedLinqDeliveryUpdateMany.mockResolvedValueOnce({ count: 0 });
+
+    await expect(claimHostedLinqDeliveryProviderDispatchTx({
+      attemptedAt: new Date("2026-03-26T12:00:30.000Z"),
+      guardIdempotencyKeys: [legacyKey],
+      idempotencyKey: currentKey,
+      linqChatId: "chat_123",
+      prisma: fixture.prisma as never,
+      reclaimStalePreProviderAttempt: true,
+      source: "hosted_webhook_side_effect",
+      sourceRef: currentKey,
+      targetKind: "thread",
+      template: "ai_usage_quota",
+    })).resolves.toEqual({
+      claimed: false,
+      id: "hld_legacy_in_flight",
+    });
+
+    expect(fixture.hostedLinqDeliveryFindUnique).toHaveBeenCalledWith({
+      select: expect.objectContaining({
+        attemptedAt: true,
+      }),
+      where: {
+        idempotencyKey: legacyLookupKey,
+      },
+    });
+    expect(fixture.hostedLinqDeliveryCreate).not.toHaveBeenCalled();
+    expect(fixture.hostedLinqDeliveryUpdateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          id: "hld_legacy_in_flight",
+          OR: expect.arrayContaining([
+            expect.objectContaining({
+              attemptedAt: {
+                lte: new Date("2026-03-26T11:45:30.000Z"),
+              },
+              status: "attempted",
+            }),
+          ]),
+        }),
+      }),
+    );
+  });
+
   it("does not claim provider dispatch while the same idempotency row is already in flight", async () => {
     const fixture = createObservabilityPrismaFixture();
     fixture.hostedLinqDeliveryFindUnique.mockResolvedValueOnce({
