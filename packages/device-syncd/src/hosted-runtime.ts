@@ -6,7 +6,7 @@ import {
   JUNCTION_COMPANION_HEALTH_METADATA_EVENT_TYPE,
   JUNCTION_COMPANION_HEALTH_METADATA_RESOURCE,
   JUNCTION_COMPANION_HEALTH_METADATA_SOURCE_PROVIDER,
-} from "./junction-resources.ts";
+} from "./companion-health-metadata.ts";
 import type {
   DeviceConnectionSourceResourceAvailabilitySummary,
   DeviceConnectionSourceStatus,
