@@ -16,6 +16,7 @@ import {
   hasHostedLinqProviderCorrelatedDeliveryForIdempotencyKeysTx,
   hasHostedLinqTerminalTelegramUsageLimitFailureForIdempotencyKeysTx,
   markHostedLinqDeliveryAcceptedTx,
+  markHostedLinqDeliveryProviderDispatchStartedTx,
   markHostedLinqDeliverySendFailedTx,
   recordHostedLinqDeliveryAttemptTx,
   resolveHostedLinqAiUsageLimitNoticeDeliveryClaimTx,
@@ -475,6 +476,7 @@ async function sendHostedLinqSideEffect(
     startedAtMs,
   });
   let providerSendCompleted = false;
+  let providerDispatchStarted = false;
 
   try {
     if (effect.payload.template === "invite_signup_fallback") {
@@ -501,10 +503,28 @@ async function sendHostedLinqSideEffect(
 
     await assertHostedLinqSideEffectRouteAuthority(effect, options.prisma);
 
+    const message = await buildHostedLinqSideEffectMessage(effect, options.prisma);
+    if (effect.payload.template === "ai_usage_quota") {
+      await deliveryAttemptTask;
+      providerDispatchStarted = await markHostedLinqDeliveryProviderDispatchStartedTx({
+        idempotencyKey: effect.effectId,
+        prisma: options.prisma,
+        startedAt: new Date(startedAtMs),
+      });
+      if (!providerDispatchStarted) {
+        throw hostedOnboardingError({
+          code: "hosted_linq_delivery_dispatch_start_unclaimed",
+          httpStatus: 409,
+          message: "Hosted Linq delivery dispatch start was not claimable before provider send.",
+          retryable: true,
+        });
+      }
+    }
+
     const result = await sendHostedLinqChatMessage({
       chatId: effect.payload.chatId,
       idempotencyKey: effect.effectId,
-      message: await buildHostedLinqSideEffectMessage(effect, options.prisma),
+      message,
       replyToMessageId: effect.payload.replyToMessageId,
       signal: options.signal,
     });
@@ -549,8 +569,12 @@ async function sendHostedLinqSideEffect(
       });
     } else if (
       effect.payload.template === "ai_usage_quota"
-      && providerSendCompleted
+      && (providerDispatchStarted || providerSendCompleted)
     ) {
+      console.error(
+        "Hosted Linq side-effect delivery failed.",
+        buildHostedLinqSideEffectLogDetails(effect, error, Date.now() - startedAtMs),
+      );
       throw error;
     } else {
       scheduleHostedLinqDeliveryMilestoneAfterAttempt({

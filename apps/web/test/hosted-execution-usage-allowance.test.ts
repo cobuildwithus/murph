@@ -1003,7 +1003,7 @@ describe("accountHostedAiUsageForAllowanceTx", () => {
     expect(sqlText).toContain('UPDATE "hosted_ai_usage_period"');
     expect(sqlText).toContain('"spent_usd_micros" = "spent_usd_micros" +');
     expect(sqlText).toContain('"last_usage_at" = GREATEST');
-    expect(sqlText).toContain('"limit_notice_sent_at" = CASE');
+    expect(sqlText).not.toContain('"limit_notice_sent_at"');
     expect(sqlText).toContain('"blocked_at" = CASE');
     expect(sqlText).toContain('OR "blocked_at" IS NULL');
     expect(params).toEqual([
@@ -1074,6 +1074,27 @@ describe("accountHostedAiUsageForAllowanceTx", () => {
       record: BASE_USAGE_RECORD,
       tx: tx as never,
     })).resolves.toBeNull();
+  });
+
+  it("does not reopen a same-period limit notice after the sent marker exists", async () => {
+    const tx = createAllowanceTx({
+      executeRaw: vi.fn<AllowanceExecuteRaw>(async () => 1),
+      hostedAiUsageUpdateMany: vi.fn(async () => ({ count: 1 })),
+      limitNoticeSentAt: new Date("2026-03-28T12:00:00.000Z"),
+      limitUsdMicros: 20_000_000n,
+      spentUsdMicros: 19_999_000n,
+    });
+
+    await expect(accountHostedAiUsageForAllowanceTx({
+      memberId: "member_123",
+      now: new Date("2026-03-29T12:00:05.000Z"),
+      record: BASE_USAGE_RECORD,
+      tx: tx as never,
+    })).resolves.toBeNull();
+
+    const [sql] = tx.$executeRaw.mock.calls[0] ?? [];
+    const sqlText = Array.isArray(sql) ? sql.join("") : String(sql);
+    expect(sqlText).not.toContain('"limit_notice_sent_at"');
   });
 
   it("accounts a worker-built transcription record with duration pricing", async () => {
@@ -2778,6 +2799,7 @@ function createAllowanceTx(input: {
   familyBillingPlanCode?: string | null;
   hostedAiUsageAggregate?: ReturnType<typeof vi.fn>;
   hostedAiUsageUpdateMany: ReturnType<typeof vi.fn>;
+  limitNoticeSentAt?: Date | null;
   limitUsdMicros?: bigint;
   periodEnd?: Date;
   periodStart?: Date;
@@ -2818,6 +2840,7 @@ function createAllowanceTx(input: {
         billingPlanCode: input.billingPlanCode ?? "launch_monthly",
         blockedAt: input.blockedAt ?? null,
         lastUsageAt: null,
+        limitNoticeSentAt: input.limitNoticeSentAt ?? null,
         limitUsdMicros: input.limitUsdMicros ?? 10_000_000n,
         periodEnd: input.periodEnd ?? new Date("2026-04-01T00:00:00.000Z"),
         periodStart: input.periodStart ?? new Date("2026-03-01T00:00:00.000Z"),
@@ -2827,12 +2850,14 @@ function createAllowanceTx(input: {
         data?: {
           billingPlanCode?: string;
           blockedAt?: Date | null;
+          limitNoticeSentAt?: Date | null;
           limitUsdMicros?: bigint;
           periodEnd?: Date;
         };
       }) => ({
         billingPlanCode: args?.data?.billingPlanCode ?? input.billingPlanCode ?? "launch_monthly",
         blockedAt: args?.data?.blockedAt ?? input.blockedAt ?? null,
+        limitNoticeSentAt: args?.data?.limitNoticeSentAt ?? input.limitNoticeSentAt ?? null,
         limitUsdMicros: args?.data?.limitUsdMicros ?? input.limitUsdMicros ?? 10_000_000n,
         periodEnd: args?.data?.periodEnd ?? input.periodEnd ?? new Date("2026-04-01T00:00:00.000Z"),
         periodStart: input.periodStart ?? new Date("2026-03-01T00:00:00.000Z"),

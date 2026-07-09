@@ -69,6 +69,7 @@ vi.mock("@/src/lib/hosted-onboarding/linq-delivery-store", async () => {
       reopenOnboardingLink: null,
       restoreOnboardingLink: null,
     }),
+    markHostedLinqDeliveryProviderDispatchStartedTx: vi.fn().mockResolvedValue(true),
     resolveHostedLinqAiUsageLimitNoticeDeliveryClaimTx: vi.fn(
       async (input: { currentIdempotencyKey: string }) => ({
         idempotencyKey: input.currentIdempotencyKey,
@@ -121,6 +122,7 @@ import {
   hasHostedLinqTerminalTelegramUsageLimitFailureForIdempotencyKeysTx,
   hasHostedLinqProviderCorrelatedDeliveryForIdempotencyKeysTx,
   markHostedLinqDeliveryAcceptedTx,
+  markHostedLinqDeliveryProviderDispatchStartedTx,
   resolveHostedLinqAiUsageLimitNoticeDeliveryClaimTx,
 } from "@/src/lib/hosted-onboarding/linq-delivery-store";
 import {
@@ -155,6 +157,7 @@ describe("hosted Linq webhook transport", () => {
       reopenOnboardingLink: null,
       restoreOnboardingLink: null,
     });
+    vi.mocked(markHostedLinqDeliveryProviderDispatchStartedTx).mockResolvedValue(true);
     vi.mocked(resolveHostedLinqAiUsageLimitNoticeDeliveryClaimTx)
       .mockImplementation(async (input) => ({
         idempotencyKey: input.currentIdempotencyKey,
@@ -633,6 +636,19 @@ describe("hosted Linq webhook transport", () => {
     const [deliveryClaimOrder] = vi.mocked(claimHostedLinqDeliveryProviderDispatchTx)
       .mock.invocationCallOrder;
     expect(deliveryClaimOrder).toBeDefined();
+    expect(markHostedLinqDeliveryProviderDispatchStartedTx).toHaveBeenCalledWith({
+      idempotencyKey: expectedIdempotencyKey,
+      prisma: {},
+      startedAt: expect.any(Date),
+    });
+    const [dispatchStartedOrder] = vi.mocked(markHostedLinqDeliveryProviderDispatchStartedTx)
+      .mock.invocationCallOrder;
+    const [providerSendOrder] = vi.mocked(sendHostedLinqChatMessage)
+      .mock.invocationCallOrder;
+    expect(dispatchStartedOrder).toBeDefined();
+    expect(providerSendOrder).toBeDefined();
+    expect(Number(deliveryClaimOrder)).toBeLessThan(Number(dispatchStartedOrder));
+    expect(Number(dispatchStartedOrder)).toBeLessThan(Number(providerSendOrder));
     expect(markHostedLinqDeliveryAcceptedTx).toHaveBeenCalledWith({
       idempotencyKey: expectedIdempotencyKey,
       linqChatId: "chat-1",
@@ -711,6 +727,64 @@ describe("hosted Linq webhook transport", () => {
       prisma: {},
       sentAt: "2026-03-26T12:00:01.000Z",
     });
+  });
+
+  it("keeps AI usage quota delivery provider-correlated when accepted persistence fails after send", async () => {
+    const acceptedError = new Error("accepted marker failed");
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    vi.mocked(markHostedLinqDeliveryAcceptedTx).mockRejectedValueOnce(acceptedError);
+    const effect = createHostedWebhookLinqMessageSideEffect({
+      chatId: "chat-1",
+      claimToken: {
+        periodStart: "2026-03-01T00:00:00.000Z",
+        sentAt: "2026-03-26T12:00:01.000Z",
+      },
+      memberId: "member-1",
+      message: "usage-limit",
+      noticeCode: "pulse_upgrade_edge",
+      occurredAt: "2026-03-26T12:00:00.000Z",
+      replyToMessageId: "message-1",
+      sourceEventId: "event-ai-usage",
+      template: "ai_usage_quota",
+    });
+    const expectedIdempotencyKey = buildHostedAiUsageGateNoticeIdempotencyKey({
+      memberId: "member-1",
+      periodStart: "2026-03-01T00:00:00.000Z",
+    });
+
+    try {
+      await expect(
+        drainHostedLinqSideEffectsDirect({
+          currentInboundReply,
+          prisma: {} as never,
+          sideEffects: [effect],
+        }),
+      ).rejects.toThrow("accepted marker failed");
+    } finally {
+      warnSpy.mockRestore();
+    }
+
+    expect(markHostedLinqDeliveryProviderDispatchStartedTx).toHaveBeenCalledWith({
+      idempotencyKey: expectedIdempotencyKey,
+      prisma: {},
+      startedAt: expect.any(Date),
+    });
+    expect(sendHostedLinqChatMessage).toHaveBeenCalledTimes(1);
+    expect(markHostedLinqDeliveryAcceptedTx).toHaveBeenCalledWith({
+      idempotencyKey: expectedIdempotencyKey,
+      linqChatId: "chat-1",
+      messageId: "provider-message-1",
+      prisma: expect.anything(),
+    });
+    expect(markHostedAiUsageLimitNoticeSent).not.toHaveBeenCalled();
+    const [dispatchStartedOrder] = vi.mocked(markHostedLinqDeliveryProviderDispatchStartedTx)
+      .mock.invocationCallOrder;
+    const [providerSendOrder] = vi.mocked(sendHostedLinqChatMessage)
+      .mock.invocationCallOrder;
+    const [acceptedOrder] = vi.mocked(markHostedLinqDeliveryAcceptedTx)
+      .mock.invocationCallOrder;
+    expect(Number(dispatchStartedOrder)).toBeLessThan(Number(providerSendOrder));
+    expect(Number(providerSendOrder)).toBeLessThan(Number(acceptedOrder));
   });
 
   it("skips already-claimed AI usage quota replies before provider dispatch", async () => {

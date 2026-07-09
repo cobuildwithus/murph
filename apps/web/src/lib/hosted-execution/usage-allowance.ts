@@ -173,6 +173,7 @@ interface HostedAiUsageAllowancePeriod {
   allowanceSource: HostedAiUsageAllowanceSourceKind;
   billingPlanCode: HostedBillingPlanCode;
   blockedAt: Date | null;
+  limitNoticeSentAt: Date | null;
   limitUsdMicros: bigint;
   periodEnd: Date;
   periodStart: Date;
@@ -191,7 +192,7 @@ type HostedAiUsageAllowancePeriodResolution =
     kind: "period";
     allowanceSource: HostedAiUsageAllowanceSourceKind;
     source: "billing" | "calendar" | "trial";
-  } & Omit<HostedAiUsageAllowancePeriod, "blockedAt" | "spentUsdMicros">)
+  } & Omit<HostedAiUsageAllowancePeriod, "blockedAt" | "limitNoticeSentAt" | "spentUsdMicros">)
   | {
     billingPlanCode: HostedBillingPlanCode;
     kind: "denied";
@@ -1469,6 +1470,7 @@ async function ensureHostedAiUsageAllowancePeriodTx(input: {
       allowanceSource: resolved.allowanceSource,
       billingPlanCode: currentBillingPlanCode,
       limitUsdMicros: current.limitUsdMicros,
+      limitNoticeSentAt: current.limitNoticeSentAt,
       periodEnd: current.periodEnd,
       periodStart: current.periodStart,
       blockedAt: current.blockedAt,
@@ -1501,6 +1503,7 @@ async function ensureHostedAiUsageAllowancePeriodTx(input: {
     select: {
       billingPlanCode: true,
       blockedAt: true,
+      limitNoticeSentAt: true,
       limitUsdMicros: true,
       periodEnd: true,
       periodStart: true,
@@ -1514,6 +1517,7 @@ async function ensureHostedAiUsageAllowancePeriodTx(input: {
     billingPlanCode: parseHostedBillingPlanCode(upgraded.billingPlanCode)
       ?? resolved.billingPlanCode,
     blockedAt: upgraded.blockedAt,
+    limitNoticeSentAt: upgraded.limitNoticeSentAt,
     limitUsdMicros: upgraded.limitUsdMicros,
     periodEnd: upgraded.periodEnd,
     periodStart: upgraded.periodStart,
@@ -1560,6 +1564,7 @@ async function readHostedAiUsageAllowancePeriodTx(input: {
     select: {
       billingPlanCode: true,
       blockedAt: true,
+      limitNoticeSentAt: true,
       limitUsdMicros: true,
       periodEnd: true,
       periodStart: true,
@@ -1581,6 +1586,7 @@ async function readHostedAiUsageAllowancePeriodTx(input: {
       allowanceSource: resolved.allowanceSource,
       billingPlanCode: periodMatches ? currentBillingPlanCode : resolved.billingPlanCode,
       blockedAt: current.blockedAt,
+      limitNoticeSentAt: current.limitNoticeSentAt,
       limitUsdMicros,
       periodEnd: periodMatches ? current.periodEnd : resolved.periodEnd,
       periodStart: periodMatches ? current.periodStart : resolved.periodStart,
@@ -1593,6 +1599,7 @@ async function readHostedAiUsageAllowancePeriodTx(input: {
     allowanceSource: resolved.allowanceSource,
     billingPlanCode: resolved.billingPlanCode,
     blockedAt: null,
+    limitNoticeSentAt: null,
     limitUsdMicros: resolved.limitUsdMicros,
     periodEnd: resolved.periodEnd,
     periodStart: resolved.periodStart,
@@ -1611,6 +1618,7 @@ async function accountHostedAiUsageAllowancePeriodSpendTx(input: {
 }): Promise<HostedAiUsageLimitNoticeCandidate | null> {
   const crossedLimit =
     input.period.blockedAt === null
+    && input.period.limitNoticeSentAt === null
     && input.period.spentUsdMicros + input.costUsdMicros >= input.period.limitUsdMicros;
 
   const updated = await input.tx.$executeRaw`
@@ -1618,10 +1626,6 @@ async function accountHostedAiUsageAllowancePeriodSpendTx(input: {
     SET
       "spent_usd_micros" = "spent_usd_micros" + ${input.costUsdMicros},
       "last_usage_at" = GREATEST(COALESCE("last_usage_at", ${input.recordOccurredAt}), ${input.recordOccurredAt}),
-      "limit_notice_sent_at" = CASE
-        WHEN "spent_usd_micros" < "limit_usd_micros" THEN NULL
-        ELSE "limit_notice_sent_at"
-      END,
       "blocked_at" = CASE
         WHEN "spent_usd_micros" + ${input.costUsdMicros} >= "limit_usd_micros" THEN
           CASE
