@@ -54,6 +54,7 @@ function createEmptyQueryVaultReadModel(vaultRoot: string): QueryVaultReadModel 
     audits: [],
     assessments: [],
     goals: [],
+    habitatAspects: [],
     conditions: [],
     allergies: [],
     protocols: [],

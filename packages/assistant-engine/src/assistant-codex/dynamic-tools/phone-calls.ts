@@ -20,6 +20,7 @@ import { parseDynamicToolArguments } from './dynamic-tool-wrapper.js'
 
 const PHONE_CALL_BRIEF_ROOT_KEYS = [
   'allowTransferToUser',
+  'callerName',
   'goal',
   'instructions',
   'shareableFacts',
@@ -36,6 +37,7 @@ export const MURPH_CREATE_PHONE_CALL_TOOL = {
     'Start one outbound phone call on the user\'s behalf.',
     'Use only when the user asked Murph to call or clearly approved this call.',
     'Resolve relative dates and times before creating the brief.',
+    'Set callerName only to a user-approved name the callee may hear in the opening line.',
     'Put only user-approved, call-relevant, disclosable facts in shareableFacts.',
     'Set allowTransferToUser=true for calls likely to require live user identity verification, personal consent, or in-the-moment judgment unless the user says not to transfer.',
     'Set allowTransferToUser=false for info-only calls, simple status checks, or calls where transfer would surprise the user.',

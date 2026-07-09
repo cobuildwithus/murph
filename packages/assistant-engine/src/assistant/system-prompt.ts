@@ -271,6 +271,7 @@ function buildStableRouteCapabilityPrompt(
     buildAssistantConnectedAppsGuidanceText(),
     buildAssistantProductFeedbackGuidanceText(),
     buildAssistantFamilyPlanGuidanceText(),
+    buildAssistantHabitatGuidanceText(),
     buildAssistantHostedGroupGuidanceText(),
     buildAssistantKnowledgeGuidanceText({
       assistantKnowledgeToolsAvailable:
@@ -333,6 +334,7 @@ function buildAssistantPhoneCallGuidanceText(): string {
     "- Consent rule: place a call only when the user asked for it or clearly approved this specific call. Surfacing the offer is not approval.",
     "- Before the call, tell the user in one line what you will ask for and what you will share so they can correct it.",
     "- Resolve relative dates and times into concrete dates in the brief, and pass the user's timezone.",
+    "- Set `callerName` only when the user has approved disclosing that name to the callee; it is spoken in the opening line.",
     "- Brief-minimization rule: whatever goes in the call brief is sent to the callee's call agent, so Murph must keep it minimal: `shareableFacts` carries only user-approved, call-relevant, disclosable facts. Never put the user's transfer phone number in `shareableFacts`; Murph resolves verified transfer numbers server-side. Facts outside `shareableFacts` require Murph consultation mid-call, so include what the callee will legitimately need and nothing more. Do not put unrelated health detail, identifiers, payment details, or credentials in the brief.",
     "- Set `allowTransferToUser=true` when the call is likely to need live user identity verification, personal consent, or in-the-moment judgment, unless the user said not to transfer. Use `allowTransferToUser=false` for info-only calls, simple status checks, or where a transfer would surprise the user.",
     "- Truthfulness rule: `murph.create_phone_call` returns only a start status (`starting`, `calling`, or `failed`) and a call id. It does not return what was said. Report only that the call request was accepted and the call is being placed, or that it failed to start. Do not claim the call connected, that anyone answered, that an appointment was booked, or summarize a conversation that has not reported back. The call outcome and summary arrive later, asynchronously.",
@@ -362,6 +364,17 @@ function buildAssistantProductFeedbackGuidanceText(): string {
   return [
     "Product feedback:",
     "- When `murph.submit_product_feedback` is available, capture explicit Murph product frustration, feature requests, interest in shipped changelog or feature-catalog items, clear inferred workflow friction, and repeated Murph-observed product or tool friction. Record only the structured kind, a concise product-only summary, and relevant changelog item ids when known, then continue helping. Changelog ids are optional metadata, not required for general product interest. Start inferred summaries with `Speculative:` and assistant-observed summaries with `Murph-observed:`. Do not log vague low-confidence guesses. Never include tags, topics, raw user wording, raw conversation text, health details, identifiers, contact details, secrets, or provider payloads.",
+  ].join("\n");
+}
+
+function buildAssistantHabitatGuidanceText(): string {
+  return [
+    "Habitat life-context:",
+    "- `bank/habitat` stores durable structured facts about the member's living context: bedroom and sleep environment, home air, lighting, water, recovery access (sauna, cold, red light), standalone health devices, home allergens, and desk ergonomics. `vault-cli habitat coverage` shows what is known, declined, stale, or unknown per aspect with the top gaps; `vault-cli habitat catalog` lists every indicator with an example question; `vault-cli habitat show <aspect>` reads one aspect; `vault-cli habitat save <aspect> --indicator id=value` merges answers (value `declined` records a refusal; `null` clears back to unknown).",
+    "- Read before advising: when a topic touches the member's environment or equipment (sleep quality, training options, air, light, desk setup, recovery protocols), read what is already known and ground the advice in it — suggest what the member actually has access to and likes.",
+    "- Ask contextually, never as a survey: inside a relevant topic, ask about the missing indicators that would change your advice (poor sleep → bedroom temperature, window at night, screens). Never open an unprompted habitat interview, never ask outside the current topic, and skip low-priority indicators unless the member brings them up.",
+    "- Capture passively: when the member mentions a habitat fact in passing (\"I have a sauna nearby\", \"I sleep with the window open\"), save it with `vault-cli habitat save` without turning the exchange into a questionnaire. Never re-ask an indicator recorded as declined; the member can reopen it themselves.",
+    "- Photos: never ask the member to send photos. If the member sends a photo of their bedroom, desk, or home gym unprompted, extract the visible indicators (darkness, light sources, screen height, equipment) and save them.",
   ].join("\n");
 }
 

@@ -1,0 +1,94 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "schemaVersion": {
+      "type": "string",
+      "const": "murph.frontmatter.habitat.v1"
+    },
+    "docType": {
+      "type": "string",
+      "const": "habitat"
+    },
+    "habitatId": {
+      "type": "string",
+      "pattern": "^hab_[0-9A-HJKMNP-TV-Z]{26}$"
+    },
+    "slug": {
+      "type": "string",
+      "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 160
+    },
+    "status": {
+      "type": "string",
+      "const": "active"
+    },
+    "domain": {
+      "type": "string",
+      "enum": [
+        "environment",
+        "workspace",
+        "exercise"
+      ]
+    },
+    "aspect": {
+      "type": "string",
+      "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+    },
+    "indicators": {
+      "type": "object",
+      "propertyNames": {
+        "type": "string",
+        "pattern": "^[a-z0-9]+(?:_[a-z0-9]+)*$"
+      },
+      "additionalProperties": {
+        "anyOf": [
+          {
+            "type": "string",
+            "maxLength": 400
+          },
+          {
+            "type": "number"
+          },
+          {
+            "type": "boolean"
+          }
+        ]
+      }
+    },
+    "indicatorRecordedAt": {
+      "type": "object",
+      "propertyNames": {
+        "type": "string",
+        "pattern": "^[a-z0-9]+(?:_[a-z0-9]+)*$"
+      },
+      "additionalProperties": {
+        "type": "string",
+        "format": "date"
+      }
+    },
+    "note": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4000
+    }
+  },
+  "required": [
+    "schemaVersion",
+    "docType",
+    "habitatId",
+    "slug",
+    "title",
+    "status",
+    "domain",
+    "aspect",
+    "indicators"
+  ],
+  "additionalProperties": false,
+  "$id": "@murphai/contracts/frontmatter-habitat.schema.json",
+  "title": "Murph Habitat Frontmatter"
+}
