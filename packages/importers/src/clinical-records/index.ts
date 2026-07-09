@@ -1,6 +1,5 @@
 import { createHash } from "node:crypto";
 import { readFile, stat } from "node:fs/promises";
-import path from "node:path";
 
 import type {
   AllergyIntolerance,
@@ -36,6 +35,7 @@ import {
   type ClinicalRawManifestResourceFile,
 } from "@murphai/clinical-records";
 import { isStrictIsoDateTime, type BloodTestResultRecord } from "@murphai/contracts";
+import { resolveVaultPathOnDisk } from "@murphai/core";
 
 export interface BuildClinicalImportPlanInput {
   vaultRoot: string;
@@ -266,28 +266,21 @@ async function readVaultRelativeText(
   relativePath: string,
   options?: { maxBytes?: number },
 ): Promise<string> {
-  const targetPath = vaultRelativePath(vaultRoot, relativePath);
+  const { absolutePath } = await resolveVaultPathOnDisk(vaultRoot, relativePath);
   if (options?.maxBytes !== undefined) {
-    const byteSize = await readVaultRelativeFileSize(vaultRoot, relativePath);
+    const byteSize = (await stat(absolutePath)).size;
     if (byteSize > options.maxBytes) {
       throw new Error(`Clinical FHIR raw file exceeds ${options.maxBytes} bytes for ${relativePath}.`);
     }
   }
 
-  return readFile(targetPath, "utf8");
+  return readFile(absolutePath, "utf8");
 }
 
 async function readVaultRelativeFileSize(vaultRoot: string, relativePath: string): Promise<number> {
-  const fileStat = await stat(vaultRelativePath(vaultRoot, relativePath));
+  const { absolutePath } = await resolveVaultPathOnDisk(vaultRoot, relativePath);
+  const fileStat = await stat(absolutePath);
   return fileStat.size;
-}
-
-function vaultRelativePath(vaultRoot: string, relativePath: string): string {
-  if (path.isAbsolute(relativePath) || relativePath.split("/").includes("..")) {
-    throw new Error("Clinical FHIR imports read only vault-relative raw paths.");
-  }
-
-  return path.join(vaultRoot, relativePath);
 }
 
 function appendMappedResource(input: {

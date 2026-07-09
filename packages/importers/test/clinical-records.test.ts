@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -1895,6 +1895,59 @@ describe("buildClinicalImportPlan", () => {
     await expect(
       buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot: overDeclaredCountRoot }),
     ).rejects.toThrow("exceeds declared count");
+  });
+
+  it("rejects symlinked raw FHIR manifests and resource pages", async () => {
+    const page = {
+      resourceType: "Observation",
+      id: "shared-bp",
+      status: "final",
+      effectiveDateTime: "2026-07-01T12:00:00.000Z",
+      code: {
+        coding: [{ system: "http://loinc.org", code: "8480-6", display: "Systolic blood pressure" }],
+      },
+      valueQuantity: { value: 128, unit: "mmHg" },
+    };
+    const resourceFile = {
+      resourceType: "Observation",
+      relativePath: "Observation/page-1.json",
+      count: 1,
+    };
+
+    const manifestSymlinkRoot = await writeClinicalFixture({
+      resourceFiles: [resourceFile],
+      pages: { "Observation/page-1.json": page },
+    });
+    const externalManifestRoot = await mkdtemp(path.join(tmpdir(), "murph-clinical-records-outside-"));
+    tempRoots.push(externalManifestRoot);
+    await writeText(externalManifestRoot, "manifest.json", "{}\n");
+    await rm(path.join(manifestSymlinkRoot, MANIFEST_PATH), { force: true });
+    await symlink(
+      path.join(externalManifestRoot, "manifest.json"),
+      path.join(manifestSymlinkRoot, MANIFEST_PATH),
+    );
+    await expect(
+      buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot: manifestSymlinkRoot }),
+    ).rejects.toThrow("symbolic links");
+
+    const pageSymlinkRoot = await writeClinicalFixture({
+      resourceFiles: [resourceFile],
+      pages: { "Observation/page-1.json": page },
+    });
+    const externalPageRoot = await mkdtemp(path.join(tmpdir(), "murph-clinical-records-outside-"));
+    tempRoots.push(externalPageRoot);
+    await writeText(externalPageRoot, "page-1.json", serializeJson(page));
+    await rm(
+      path.join(pageSymlinkRoot, "raw/clinical/fhir/clinical-connection-1/retrieval-job-1/Observation/page-1.json"),
+      { force: true },
+    );
+    await symlink(
+      path.join(externalPageRoot, "page-1.json"),
+      path.join(pageSymlinkRoot, "raw/clinical/fhir/clinical-connection-1/retrieval-job-1/Observation/page-1.json"),
+    );
+    await expect(
+      buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot: pageSymlinkRoot }),
+    ).rejects.toThrow("symbolic links");
   });
 
   it("rejects oversized raw FHIR manifests before parsing them", async () => {
