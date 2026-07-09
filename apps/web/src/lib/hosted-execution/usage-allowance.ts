@@ -1618,7 +1618,6 @@ async function accountHostedAiUsageAllowancePeriodSpendTx(input: {
 }): Promise<HostedAiUsageLimitNoticeCandidate | null> {
   const crossedLimit =
     input.period.blockedAt === null
-    && input.period.limitNoticeSentAt === null
     && input.period.spentUsdMicros + input.costUsdMicros >= input.period.limitUsdMicros;
 
   const updated = await input.tx.$executeRaw`

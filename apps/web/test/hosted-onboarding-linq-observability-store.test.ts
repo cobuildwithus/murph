@@ -1206,9 +1206,14 @@ describe("hosted Linq observability stores", () => {
               attemptedAt: {
                 lte: new Date("2026-03-26T11:45:30.000Z"),
               },
-              status: {
-                in: ["attempted", "provider_dispatch_started"],
+              status: "attempted",
+            }),
+            expect.objectContaining({
+              attemptedAt: {
+                lte: new Date("2026-03-26T11:45:30.000Z"),
               },
+              source: "hosted_webhook_side_effect",
+              status: "provider_dispatch_started",
             }),
           ]),
         }),
@@ -1294,9 +1299,57 @@ describe("hosted Linq observability stores", () => {
               attemptedAt: {
                 lte: new Date("2026-03-26T12:15:00.000Z"),
               },
-              status: {
-                in: ["attempted", "provider_dispatch_started"],
+              source: "hosted_webhook_side_effect",
+              status: "provider_dispatch_started",
+            },
+          ]),
+        }),
+      }),
+    );
+  });
+
+  it("does not let Telegram usage notices reclaim stale webhook dispatch-started rows", async () => {
+    const fixture = createObservabilityPrismaFixture();
+    const attemptedAt = new Date("2026-03-26T12:30:00.000Z");
+    fixture.hostedLinqDeliveryFindUnique.mockResolvedValueOnce({
+      acceptedAt: null,
+      attemptedAt: new Date("2026-03-26T12:00:00.000Z"),
+      deliveredAt: null,
+      failedAt: null,
+      id: "hld_started_webhook_notice",
+      lastReceiptAt: null,
+      messageLookupKey: null,
+      phoneNumberLookupKey: null,
+      skippedAt: null,
+      source: "hosted_webhook_side_effect",
+      status: "provider_dispatch_started",
+    });
+    fixture.hostedLinqDeliveryUpdateMany.mockResolvedValueOnce({ count: 0 });
+
+    await expect(claimHostedLinqDeliveryProviderDispatchTx({
+      attemptedAt,
+      idempotencyKey: "ai-usage-gate:member_123:2026-03",
+      prisma: fixture.prisma as never,
+      source: "hosted_runtime_ai_usage_limit_notice",
+      sourceRef: "telegram_event_runtime_denied",
+      targetKind: "telegram_thread",
+      template: "ai_usage_quota",
+    })).resolves.toEqual({
+      claimed: false,
+      id: "hld_started_webhook_notice",
+    });
+
+    expect(fixture.hostedLinqDeliveryUpdateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          id: "hld_started_webhook_notice",
+          OR: expect.arrayContaining([
+            {
+              attemptedAt: {
+                lte: new Date("2026-03-26T12:15:00.000Z"),
               },
+              source: "hosted_runtime_ai_usage_limit_notice",
+              status: "provider_dispatch_started",
             },
           ]),
         }),

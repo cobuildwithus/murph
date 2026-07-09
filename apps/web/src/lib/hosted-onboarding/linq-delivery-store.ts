@@ -301,6 +301,7 @@ export async function claimHostedLinqDeliveryProviderDispatchTx(input: {
       delivery: existing,
       prisma: input.prisma,
       reclaimStalePreProviderAttempt: input.reclaimStalePreProviderAttempt,
+      source: input.source,
     });
   }
 
@@ -330,6 +331,7 @@ export async function claimHostedLinqDeliveryProviderDispatchTx(input: {
       delivery: concurrent,
       prisma: input.prisma,
       reclaimStalePreProviderAttempt: input.reclaimStalePreProviderAttempt,
+      source: input.source,
     });
   }
 }
@@ -1639,6 +1641,7 @@ async function claimExistingHostedLinqDeliveryProviderDispatchTx(input: {
   };
   prisma: HostedLinqDeliveryClient;
   reclaimStalePreProviderAttempt?: boolean;
+  source: string;
 }): Promise<{ claimed: boolean; id: string | null; retryAt?: Date }> {
   if (isHostedLinqDeliveryProviderCorrelated(input.delivery)) {
     return {
@@ -1703,10 +1706,16 @@ async function claimExistingHostedLinqDeliveryProviderDispatchTx(input: {
   const canReclaimStalePreProviderAttempt =
     input.reclaimStalePreProviderAttempt
     ?? input.delivery.source !== HOSTED_AI_USAGE_TELEGRAM_NOTICE_DELIVERY_SOURCE;
-  const stalePreProviderReclaimStatus =
-    input.delivery.source === HOSTED_AI_USAGE_TELEGRAM_NOTICE_DELIVERY_SOURCE
-      ? "attempted" as const
-      : { in: ["attempted", HOSTED_LINQ_DELIVERY_PROVIDER_DISPATCH_STARTED_STATUS] };
+  const staleDispatchStartedReclaimPredicate =
+    input.delivery.source !== HOSTED_AI_USAGE_TELEGRAM_NOTICE_DELIVERY_SOURCE
+      ? [{
+          attemptedAt: {
+            lte: staleAttemptBefore,
+          },
+          source: input.source,
+          status: HOSTED_LINQ_DELIVERY_PROVIDER_DISPATCH_STARTED_STATUS,
+        }]
+      : [];
   const canReclaimRetryAfterTelegramAttempt =
     telegramRetryAfterAt !== null && telegramRetryAfterAt <= input.attemptedAt;
   const terminalPreProviderReclaimPredicates =
@@ -1747,8 +1756,9 @@ async function claimExistingHostedLinqDeliveryProviderDispatchTx(input: {
                 attemptedAt: {
                   lte: staleAttemptBefore,
                 },
-                status: stalePreProviderReclaimStatus,
+                status: "attempted",
               },
+              ...staleDispatchStartedReclaimPredicate,
             ]
           : []),
       ],

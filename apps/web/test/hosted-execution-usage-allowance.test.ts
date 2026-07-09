@@ -1076,13 +1076,12 @@ describe("accountHostedAiUsageForAllowanceTx", () => {
     })).resolves.toBeNull();
   });
 
-  it("does not reopen a same-period limit notice after the sent marker exists", async () => {
+  it("returns a crossing candidate when the sent marker exists so delivery rows own dedupe", async () => {
     const tx = createAllowanceTx({
       executeRaw: vi.fn<AllowanceExecuteRaw>(async () => 1),
       hostedAiUsageUpdateMany: vi.fn(async () => ({ count: 1 })),
       limitNoticeSentAt: new Date("2026-03-28T12:00:00.000Z"),
-      limitUsdMicros: 20_000_000n,
-      spentUsdMicros: 19_999_000n,
+      spentUsdMicros: 9_999_000n,
     });
 
     await expect(accountHostedAiUsageForAllowanceTx({
@@ -1090,7 +1089,17 @@ describe("accountHostedAiUsageForAllowanceTx", () => {
       now: new Date("2026-03-29T12:00:05.000Z"),
       record: BASE_USAGE_RECORD,
       tx: tx as never,
-    })).resolves.toBeNull();
+    })).resolves.toEqual({
+      crossedAt: new Date("2026-03-29T12:00:05.000Z"),
+      memberId: "member_123",
+      periodEnd: new Date("2026-04-01T00:00:00.000Z"),
+      periodStart: new Date("2026-03-01T00:00:00.000Z"),
+      sourceUsageId: "turn_123.attempt-1",
+      userNotice: expect.objectContaining({
+        code: "pulse_upgrade_edge",
+        message: expect.any(String),
+      }),
+    });
 
     const [sql] = tx.$executeRaw.mock.calls[0] ?? [];
     const sqlText = Array.isArray(sql) ? sql.join("") : String(sql);
