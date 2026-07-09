@@ -542,11 +542,11 @@ recovery truth. When a write-fenced invocation exists, the write fence is commit
 authority and active ownership truth for orchestration; useful runtime progress
 is still proven only by the later durable checkpoint. Local Durable Object
 promises are allowed to coalesce work, but they are not durable work truth. The
-alarm path only syncs/clears write-fence alarm state; it is not semantic wake or mailbox-work
-scheduling. Durable mailbox lag is durable recovery truth; when it is observed
-while Cloudflare still owns an active write fence, Cloudflare may coalesce it
-into the active runner instead of starting duplicate execution. The hosted
-runtime owns the foreground
+alarm path is limited to workspace snapshot orphan cleanup; it is not write-fence
+maintenance, semantic wake, or mailbox-work scheduling. Durable mailbox lag is
+durable recovery truth; when it is observed while Cloudflare still owns an
+active write fence, Cloudflare may coalesce it into the active runner instead of
+starting duplicate execution. The hosted runtime owns the foreground
 conversation-mailbox import loop, imports late rows through the same mailbox
 state/input-store path as the initial import, and then notifies the
 assistant-engine active-turn controller. If the foreground wake path does not
