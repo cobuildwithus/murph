@@ -88,6 +88,10 @@ vi.mock("@/src/lib/call-circle/notifications", () => ({
     groupId: string;
     memberId: string;
   }) => `assistant.notification.requested:call-circle:setup:${groupId}:${memberId}`,
+  buildCallCircleSetupNotificationEventIdPrefix: ({ groupId, memberId }: {
+    groupId: string;
+    memberId: string;
+  }) => `assistant.notification.requested:call-circle:setup:${groupId}:${memberId}`,
   readExistingCallCircleNotificationSignalTx: mocks.readExistingCallCircleNotificationSignalTx,
   readCallCircleNotificationSignal: mocks.readCallCircleNotificationSignal,
   readCallCircleNotificationPreflightTx: mocks.readCallCircleNotificationPreflightTx,
@@ -1096,6 +1100,44 @@ describe("runCallCircleScheduler", () => {
     }]);
   });
 
+  it("does not append a lifetime setup ask after an offer-anchored setup exists", async () => {
+    const now = new Date("2026-07-06T15:00:00.000Z");
+    const tx = {
+      hostedMailboxItem: {
+        findFirst: vi.fn(async () => ({ id: "mailbox_offer_setup" })),
+        findUnique: vi.fn(async () => null),
+      },
+    };
+    const prisma = createSchedulerPrisma({
+      dueMatches: [],
+      groups: [],
+      pendingSetupParticipants: [{
+        groupId: "hgrp_123",
+        memberId: "member_a",
+      }],
+      tx,
+    });
+
+    await expect(runCallCircleScheduler({
+      now,
+      prisma: prisma as never,
+    })).resolves.toMatchObject({
+      setupAsks: 0,
+    });
+
+    expect(tx.hostedMailboxItem.findFirst).toHaveBeenCalledWith({
+      select: { id: true },
+      where: {
+        dedupeKey: {
+          startsWith: "assistant.notification.requested:call-circle:setup:hgrp_123:member_a",
+        },
+        userId: "member_a",
+      },
+    });
+    expect(mocks.canAppendCallCircleSetupNotification).not.toHaveBeenCalled();
+    expect(mocks.appendCallCircleSetupNotificationTx).not.toHaveBeenCalled();
+  });
+
   it("pages setup asks so later eligible members are not starved by blocked rows", async () => {
     const now = new Date("2026-07-06T15:00:00.000Z");
     const firstSetupPage = Array.from({ length: 100 }, (_, index) =>
@@ -1148,6 +1190,7 @@ describe("runCallCircleScheduler", () => {
     const now = new Date("2026-07-06T15:00:00.000Z");
     const tx = {
       hostedMailboxItem: {
+        findFirst: vi.fn(async () => null),
         findUnique: vi.fn(async () => null),
       },
     };
@@ -1851,6 +1894,7 @@ function createSchedulerPrisma(input: {
       count: vi.fn(async () => 1),
     },
     hostedMailboxItem: {
+      findFirst: vi.fn(async () => null),
       findUnique: vi.fn(async () => null),
     },
   };

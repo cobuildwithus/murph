@@ -121,6 +121,7 @@ export interface HostedGroupJoinOfferAcceptanceTxResult
   extends HostedGroupJoinAcceptanceTxResult {
   joinCode: string;
   offerScope: HostedGroupOfferScope;
+  offerId: string;
   messageLookupKey: string;
   offerPostedAt: Date;
   featureActivations: HostedGroupFeatureActivationKind[];
@@ -765,6 +766,7 @@ export async function acceptHostedGroupJoinOfferTx(input: {
     },
     select: {
       groupId: true,
+      id: true,
       messageLookupKey: true,
       offerScopeJson: true,
       postedAt: true,
@@ -848,6 +850,7 @@ export async function acceptHostedGroupJoinOfferTx(input: {
     joinCode: group.joinCode,
     messageLookupKey: offer.messageLookupKey,
     offerScope,
+    offerId: offer.id,
     offerPostedAt: offer.postedAt,
     selectedVaultShareProjectionKinds,
   };

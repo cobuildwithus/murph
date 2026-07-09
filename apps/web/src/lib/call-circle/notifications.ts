@@ -106,12 +106,14 @@ export async function appendCallCircleSetupNotificationTx(input: {
   groupId: string;
   memberId: string;
   now: Date;
+  offerId?: string;
   tx: Prisma.TransactionClient;
 }): Promise<CallCircleNotificationAppendResult> {
   return appendCallCircleNotificationTx({
     eventId: buildCallCircleSetupNotificationEventId({
       groupId: input.groupId,
       memberId: input.memberId,
+      offerId: input.offerId,
     }),
     instructions:
       "Tell the member Call Circle is ready for this group. Ask: Want to take part in short matched calls? Reply yes with days and times that usually work, or no to pause.",
@@ -122,6 +124,17 @@ export async function appendCallCircleSetupNotificationTx(input: {
 }
 
 export function buildCallCircleSetupNotificationEventId(input: {
+  groupId: string;
+  memberId: string;
+  offerId?: string;
+}): string {
+  const prefix = buildCallCircleSetupNotificationEventIdPrefix(input);
+  return input.offerId
+    ? `${prefix}:offer:${input.offerId}`
+    : prefix;
+}
+
+export function buildCallCircleSetupNotificationEventIdPrefix(input: {
   groupId: string;
   memberId: string;
 }): string {

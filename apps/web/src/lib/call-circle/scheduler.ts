@@ -41,7 +41,7 @@ import {
   appendCallCircleSetupNotificationTx,
   buildCallCircleHandoffNotificationEventId,
   buildCallCircleOutcomeNotificationEventId,
-  buildCallCircleSetupNotificationEventId,
+  buildCallCircleSetupNotificationEventIdPrefix,
   type CallCircleNotificationSignal,
   readCallCircleNotificationSignal,
   readExistingCallCircleNotificationSignalTx,
@@ -406,7 +406,7 @@ async function appendCallCircleSetupNotificationIfMissing(input: {
   now: Date;
   prisma: PrismaClient;
 }): Promise<boolean> {
-  const eventId = buildCallCircleSetupNotificationEventId({
+  const eventIdPrefix = buildCallCircleSetupNotificationEventIdPrefix({
     groupId: input.groupId,
     memberId: input.memberId,
   });
@@ -414,13 +414,13 @@ async function appendCallCircleSetupNotificationIfMissing(input: {
     asked: boolean;
     signals: CallCircleNotificationSignal[];
   }> => {
-    const existing = await tx.hostedMailboxItem.findUnique({
+    const existing = await tx.hostedMailboxItem.findFirst({
       select: { id: true },
       where: {
-        userId_dedupeKey: {
-          dedupeKey: eventId,
-          userId: input.memberId,
+        dedupeKey: {
+          startsWith: eventIdPrefix,
         },
+        userId: input.memberId,
       },
     });
     if (existing) return { asked: false, signals: [] };

@@ -152,6 +152,7 @@ async function acceptHostedGroupJoinOfferReactionForMember(input: {
       groupId: offerAcceptance.groupId,
       memberId: input.memberId,
       now: input.now,
+      offerId: offerAcceptance.offerId,
       offerPostedAt: offerAcceptance.offerPostedAt,
       tx,
     });
@@ -170,6 +171,7 @@ async function applyHostedGroupOfferFeatureActivationsTx(input: {
   groupId: string;
   memberId: string;
   now: Date;
+  offerId: string;
   offerPostedAt: Date;
   tx: Prisma.TransactionClient;
 }): Promise<CallCircleNotificationAppendResult | null> {
@@ -194,6 +196,7 @@ async function applyHostedGroupOfferFeatureActivationsTx(input: {
     groupId: input.groupId,
     memberId: input.memberId,
     now: input.now,
+    offerId: input.offerId,
     tx: input.tx,
   });
   return notification;

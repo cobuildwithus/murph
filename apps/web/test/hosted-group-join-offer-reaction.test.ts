@@ -209,6 +209,7 @@ describe("handleHostedGroupJoinOfferReaction", () => {
         groupId: "group_1",
         memberId: "member_reactor",
         now: event.providerCreatedAt,
+        offerId: "offer_1",
       }),
     );
     expect(mocks.readCallCircleNotificationSignal).toHaveBeenCalledWith({
@@ -412,6 +413,7 @@ function buildAcceptedJoinOffer(input: {
     joinCode: "join_1",
     membershipId: "membership_1",
     messageLookupKey: input.messageLookupKey ?? "hbidx:linq-message:v1:offer",
+    offerId: "offer_1",
     offerPostedAt: input.offerPostedAt ?? new Date("2026-03-26T11:59:00.000Z"),
     offerScope: {
       featureActivations,

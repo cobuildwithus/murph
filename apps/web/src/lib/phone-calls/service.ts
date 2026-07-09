@@ -60,15 +60,7 @@ interface HostedPhoneCallStore {
         resultJson?: HostedPhoneCallResult;
         status?: HostedPhoneCall["status"];
       };
-      where: {
-        analyzedAt?: null;
-        endedAt?: null;
-        id: string;
-        provider: "retell";
-        providerCallId: null;
-        providerStartAttemptedAt?: null;
-        status: "starting";
-      };
+      where: Prisma.HostedPhoneCallWhereInput;
     }): Promise<{ count: number }>;
   };
 }
@@ -82,6 +74,7 @@ export async function createHostedPhoneCall(input: {
   memberId: string;
   prisma?: HostedPhoneCallStore;
   requestKey: string;
+  providerStartGuardWhere?: Prisma.HostedPhoneCallWhereInput;
   resultNotificationRouteResolver?: (resolverInput: {
     memberId: string;
   }) => Promise<void>;
@@ -160,6 +153,7 @@ export async function createHostedPhoneCall(input: {
         call: existing,
         memberId: input.memberId,
         prisma,
+        providerStartGuardWhere: input.providerStartGuardWhere,
         requireResultNotificationRoute,
         resolveTransferNumber,
         runtime,
@@ -183,6 +177,7 @@ export async function createHostedPhoneCall(input: {
     call,
     memberId: input.memberId,
     prisma,
+    providerStartGuardWhere: input.providerStartGuardWhere,
     requireResultNotificationRoute,
     resolveTransferNumber,
     runtime,
@@ -196,6 +191,7 @@ async function startHostedPhoneCallReservation(input: {
   call: HostedPhoneCall;
   memberId: string;
   prisma: HostedPhoneCallStore;
+  providerStartGuardWhere?: Prisma.HostedPhoneCallWhereInput;
   requireResultNotificationRoute: (resolverInput: {
     memberId: string;
   }) => Promise<void>;
@@ -242,6 +238,7 @@ async function startHostedPhoneCallReservation(input: {
     const providerStartAttempt = await markHostedPhoneCallProviderStartAttempt({
       call,
       prisma: input.prisma,
+      providerStartGuardWhere: input.providerStartGuardWhere,
     });
     if (!providerStartAttempt.marked) {
       return {
@@ -395,14 +392,18 @@ function hasProviderStartAttemptMarker(call: HostedPhoneCall): boolean {
 async function markHostedPhoneCallProviderStartAttempt(input: {
   call: HostedPhoneCall;
   prisma: HostedPhoneCallStore;
+  providerStartGuardWhere?: Prisma.HostedPhoneCallWhereInput;
 }): Promise<
   | { call: HostedPhoneCall; marked: true }
   | { call: HostedPhoneCall; marked: false }
 > {
   const markedAt = new Date();
+  const baseWhere = hostedPhoneCallUnstartedAndUnattemptedWhere(input.call.id);
   const updated = await input.prisma.hostedPhoneCall.updateMany({
     data: { providerStartAttemptedAt: markedAt },
-    where: hostedPhoneCallUnstartedAndUnattemptedWhere(input.call.id),
+    where: input.providerStartGuardWhere
+      ? { AND: [baseWhere, input.providerStartGuardWhere] }
+      : baseWhere,
   });
   if (updated.count === 0) {
     return {

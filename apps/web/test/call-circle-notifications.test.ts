@@ -26,6 +26,7 @@ import {
   appendCallCircleOutcomeNotificationTx,
   appendCallCircleSetupNotificationTx,
   buildCallCircleConfirmNotificationEventId,
+  buildCallCircleSetupNotificationEventId,
   readCallCircleNotificationPreflightTx,
 } from "@/src/lib/call-circle/notifications";
 
@@ -59,6 +60,20 @@ describe("Call Circle notifications", () => {
       "assistant.notification.requested:call-circle:am:hccm_123:member_b:2026-07-06T15:00:00.000Z",
     );
     expect(countered).not.toBe(first);
+  });
+
+  it("can key setup notifications by a fresh offer anchor", () => {
+    expect(buildCallCircleSetupNotificationEventId({
+      groupId: "hgrp_123",
+      memberId: "member_a",
+    })).toBe("assistant.notification.requested:call-circle:setup:hgrp_123:member_a");
+    expect(buildCallCircleSetupNotificationEventId({
+      groupId: "hgrp_123",
+      memberId: "member_a",
+      offerId: "hgjo_123",
+    })).toBe(
+      "assistant.notification.requested:call-circle:setup:hgrp_123:member_a:offer:hgjo_123",
+    );
   });
 
   it("blocks private Call Circle notifications outside member daytime", async () => {

@@ -20,6 +20,9 @@ import {
   readCallCircleMatchParticipantTimeZones,
 } from "./participant-store";
 import {
+  activeHostedMemberAccessWithParticipantsWhere,
+} from "../hosted-onboarding/member-access";
+import {
   createHostedPhoneCall,
 } from "../phone-calls/service";
 import {
@@ -214,6 +217,13 @@ export async function startCallCircleConnectorCall(input: {
         });
       },
       memberId: match.memberAId,
+      providerStartGuardWhere: buildCallCircleProviderStartGuardWhere({
+        groupId: match.groupId,
+        matchId: match.id,
+        memberAId: match.memberAId,
+        memberBId: match.memberBId,
+        now,
+      }),
       requestKey: buildCallCircleConnectorRequestKey(match.id),
       resultNotificationRouteResolver: async () => undefined,
       runtimeOptions: {
@@ -226,6 +236,21 @@ export async function startCallCircleConnectorCall(input: {
     });
     if (phoneCall.status !== "calling") {
       if (phoneCall.status === "starting") {
+        if (!await canUseActiveCallCircleParticipantPair({
+          groupId: match.groupId,
+          memberAId: match.memberAId,
+          memberBId: match.memberBId,
+          prisma,
+        })) {
+          await markCallCircleMatchOutcome({
+            matchId: match.id,
+            now,
+            outcome: "participant_unavailable",
+            phoneCallId: phoneCall.phoneCallId,
+            prisma,
+            status: "canceled",
+          });
+        }
         return { phoneCallId: phoneCall.phoneCallId, status: "ignored" };
       }
       const handedOff = await markCallCircleConnectorHandoff({
@@ -246,6 +271,71 @@ export async function startCallCircleConnectorCall(input: {
     });
     return { status: handedOff ? "handoff" : "ignored" };
   }
+}
+
+function buildCallCircleProviderStartGuardWhere(input: {
+  groupId: string;
+  matchId: string;
+  memberAId: string;
+  memberBId: string;
+  now: Date;
+}): Prisma.HostedPhoneCallWhereInput {
+  return {
+    callCircleMatches: {
+      some: {
+        AND: [
+          {
+            group: {
+              callCircleParticipants: {
+                some: {
+                  memberId: input.memberAId,
+                  status: "enrolled",
+                },
+              },
+            },
+          },
+          {
+            group: {
+              callCircleParticipants: {
+                some: {
+                  memberId: input.memberBId,
+                  status: "enrolled",
+                },
+              },
+            },
+          },
+          {
+            group: {
+              members: {
+                some: {
+                  memberId: input.memberAId,
+                },
+              },
+            },
+          },
+          {
+            group: {
+              members: {
+                some: {
+                  memberId: input.memberBId,
+                },
+              },
+            },
+          },
+        ],
+        finalAskedAt: { not: null },
+        groupId: input.groupId,
+        id: input.matchId,
+        memberA: activeHostedMemberAccessWithParticipantsWhere(),
+        memberAId: input.memberAId,
+        memberB: activeHostedMemberAccessWithParticipantsWhere(),
+        memberBId: input.memberBId,
+        status: "bridging",
+        windowEndAt: { gt: input.now },
+        windowStartAt: { lte: input.now },
+      },
+    },
+  };
 }
 
 async function canStartAttachedCallCircleBridge(input: {

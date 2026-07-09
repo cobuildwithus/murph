@@ -95,6 +95,60 @@ describe("createHostedPhoneCall", () => {
     });
   });
 
+  it("does not start Retell when the caller-owned provider start guard no longer matches", async () => {
+    const created = buildHostedPhoneCall();
+    const store = createPhoneCallStore({ created });
+    const runtime = createPhoneCallRuntime({ providerCallId: "retell_unused" });
+
+    const response = await createHostedPhoneCall({
+      brief: VALID_BRIEF,
+      memberId: "member_1",
+      prisma: store.prisma,
+      providerStartGuardWhere: {
+        id: "hpc_other",
+      },
+      requestKey: "phone_call_request_1",
+      runtime: runtime.runtime,
+      transferNumberResolver: createTransferNumberResolver("+12125550000"),
+    });
+
+    const createdCallId = store.createCalls[0]!.data.id;
+    expect(response).toEqual({
+      phoneCallId: createdCallId,
+      status: "starting",
+    });
+    expect(runtime.validateCalls).toEqual([expect.objectContaining({
+      id: createdCallId,
+    })]);
+    expect(runtime.startCalls).toEqual([]);
+    expect(store.updateManyCalls[0]).toEqual({
+      data: {
+        providerStartAttemptedAt: expect.any(Date),
+      },
+      where: {
+        AND: [
+          {
+            analyzedAt: null,
+            endedAt: null,
+            id: createdCallId,
+            provider: "retell",
+            providerCallId: null,
+            providerStartAttemptedAt: null,
+            status: "starting",
+          },
+          {
+            id: "hpc_other",
+          },
+        ],
+      },
+    });
+    expect(store.currentCall()).toMatchObject({
+      providerCallId: null,
+      providerStartAttemptedAt: null,
+      status: "starting",
+    });
+  });
+
   it("fails the local reservation without starting Retell when the before-start hook rejects", async () => {
     const created = buildHostedPhoneCall();
     const store = createPhoneCallStore({ created });
@@ -1100,16 +1154,39 @@ function matchesUpdateManyWhere(
   call: HostedPhoneCall,
   where: PhoneCallUpdateManyInput["where"],
 ): boolean {
-  return call.id === where.id
-    && call.provider === where.provider
-    && call.providerCallId === where.providerCallId
-    && call.status === where.status
-    && (where.analyzedAt === undefined || call.analyzedAt === where.analyzedAt)
-    && (where.endedAt === undefined || call.endedAt === where.endedAt)
-    && (
-      where.providerStartAttemptedAt === undefined
-      || call.providerStartAttemptedAt === where.providerStartAttemptedAt
-    );
+  const andFilters = where.AND === undefined
+    ? []
+    : Array.isArray(where.AND)
+      ? where.AND
+      : [where.AND];
+  return andFilters.every((filter) => matchesUpdateManyWhere(call, filter))
+    && matchesWhereScalar(call.id, where.id)
+    && matchesWhereScalar(call.provider, where.provider)
+    && matchesWhereScalar(call.providerCallId, where.providerCallId)
+    && matchesWhereScalar(call.status, where.status)
+    && matchesWhereScalar(call.analyzedAt, where.analyzedAt)
+    && matchesWhereScalar(call.endedAt, where.endedAt)
+    && matchesWhereScalar(call.providerStartAttemptedAt, where.providerStartAttemptedAt);
+}
+
+function matchesWhereScalar(
+  value: Date | string | null,
+  filter: unknown,
+): boolean {
+  if (filter === undefined) return true;
+  if (filter === null) return value === null;
+  if (filter instanceof Date) {
+    return value instanceof Date && value.getTime() === filter.getTime();
+  }
+  if (typeof filter === "string") return value === filter;
+  if (hasEqualsFilter(filter)) {
+    return matchesWhereScalar(value, filter.equals);
+  }
+  return true;
+}
+
+function hasEqualsFilter(filter: unknown): filter is { equals?: unknown } {
+  return typeof filter === "object" && filter !== null && "equals" in filter;
 }
 
 function buildHostedPhoneCall(overrides: Partial<HostedPhoneCall> = {}): HostedPhoneCall {

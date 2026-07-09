@@ -268,6 +268,75 @@ describe("startCallCircleConnectorCall", () => {
     expect(mocks.attachCallCirclePhoneCall).not.toHaveBeenCalled();
   });
 
+  it("cancels an attached bridge when the provider start guard sees a paused pair", async () => {
+    const now = new Date("2026-07-06T15:00:00.000Z");
+    const prisma = createPrisma({
+      finalAskedAt: new Date("2026-07-06T14:45:00.000Z"),
+      phoneCallId: null,
+      status: "both_confirmed",
+      windowEndAt: new Date("2026-07-06T15:30:00.000Z"),
+      windowStartAt: now,
+    });
+    mocks.getPrisma.mockReturnValue(prisma);
+    mocks.canUseActiveCallCircleParticipantPair
+      .mockResolvedValueOnce(true)
+      .mockResolvedValueOnce(true)
+      .mockResolvedValueOnce(true)
+      .mockResolvedValueOnce(false);
+    mocks.createHostedPhoneCall.mockImplementationOnce(async (input) => {
+      expect(await input.beforeStart({
+        memberId: input.memberId,
+        phoneCallId: "hpc_123",
+      })).toBe(true);
+      return {
+        phoneCallId: "hpc_123",
+        status: "starting",
+      };
+    });
+
+    await expect(startCallCircleConnectorCall({
+      matchId: "hccm_123",
+      now,
+    })).resolves.toEqual({
+      phoneCallId: "hpc_123",
+      status: "ignored",
+    });
+
+    expect(mocks.createHostedPhoneCall).toHaveBeenCalledWith(expect.objectContaining({
+      providerStartGuardWhere: {
+        callCircleMatches: {
+          some: expect.objectContaining({
+            finalAskedAt: { not: null },
+            groupId: "hgrp_123",
+            id: "hccm_123",
+            memberA: expect.any(Object),
+            memberAId: "member_a",
+            memberB: expect.any(Object),
+            memberBId: "member_b",
+            status: "bridging",
+            windowEndAt: { gt: now },
+            windowStartAt: { lte: now },
+          }),
+        },
+      },
+      requestKey: buildCallCircleConnectorRequestKey("hccm_123"),
+    }));
+    expect(mocks.attachCallCirclePhoneCall).toHaveBeenCalledWith({
+      matchId: "hccm_123",
+      phoneCallId: "hpc_123",
+      prisma,
+    });
+    expect(mocks.markCallCircleMatchOutcome).toHaveBeenCalledWith({
+      matchId: "hccm_123",
+      now,
+      outcome: "participant_unavailable",
+      phoneCallId: "hpc_123",
+      prisma,
+      status: "canceled",
+    });
+    expect(mocks.appendCallCircleHandoffNotificationTx).not.toHaveBeenCalled();
+  });
+
   it("starts an attached unstarted bridge through the stable phone-call request key", async () => {
     const now = new Date("2026-07-06T15:00:00.000Z");
     const prisma = createPrisma({

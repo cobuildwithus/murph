@@ -181,6 +181,32 @@ export function activeHostedMemberAccessWhere(): Prisma.HostedMemberWhereInput {
   };
 }
 
+/**
+ * Set-based projection for atomic gates that must be expressed in one SQL
+ * mutation. Unlike `activeHostedMemberAccessWhere`, this includes the
+ * participant-backed thread-container branch used by `readActiveHostedMemberAccess`.
+ */
+export function activeHostedMemberAccessWithParticipantsWhere(): Prisma.HostedMemberWhereInput {
+  return {
+    OR: [
+      activeHostedMemberAccessWhere(),
+      {
+        suspendedAt: null,
+        threadContainer: {
+          is: {
+            participants: {
+              some: {
+                participant: activeHostedMemberAccessWhere(),
+                removedAt: null,
+              },
+            },
+          },
+        },
+      },
+    ],
+  };
+}
+
 export async function readActiveHostedMemberAccess(input: {
   memberId: string;
   prisma?: HostedOnboardingReadClient;

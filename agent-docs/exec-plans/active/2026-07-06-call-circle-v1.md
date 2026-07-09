@@ -876,6 +876,30 @@ Focused follow-up verification:
 - `pnpm exec vitest run --config apps/web/vitest.config.ts --no-coverage apps/web/test/call-circle-match-store.test.ts apps/web/test/call-circle-scheduler.test.ts apps/web/test/call-circle-connector-call.test.ts`
 - `pnpm --filter @murphai/hosted-web typecheck`
 
+## ReviewGPT Follow-Up 31 2026-07-08
+
+Accepted findings from the Phlebas PR-head rerun:
+
+- A Call Circle connector call could still start after pause, access loss, or
+  membership loss in the gap after match attachment and before the Retell
+  provider-start marker. `createHostedPhoneCall` now accepts a caller-owned
+  provider-start guard that is ANDed into the existing atomic start-marker
+  update, and Call Circle supplies a guard for the exact match, active window,
+  enrolled participants, active group members, and active hosted access. Pause
+  cancellation now also terminalizes attached pre-provider bridges while
+  leaving provider-attempted calls owned by the phone-call subsystem.
+- A fresh positive reaction to a new group offer could resume a paused Call
+  Circle participant while the lifetime setup notification dedupe key
+  suppressed the new setup ask. Setup asks posted from offer acceptance now use
+  the offer id as the anchor, and the scheduler suppresses pending setup
+  retries by setup-key prefix so a fresh offer asks once without later
+  lifetime-key spam.
+
+Focused follow-up verification:
+
+- `pnpm --filter @murphai/hosted-web test:prepared -- apps/web/test/call-circle-connector-call.test.ts apps/web/test/phone-calls-service.test.ts apps/web/test/call-circle-match-store.test.ts apps/web/test/call-circle-notifications.test.ts apps/web/test/call-circle-scheduler.test.ts apps/web/test/hosted-group-join-offer-reaction.test.ts apps/web/test/hosted-onboarding-entitlement.test.ts`
+- `pnpm --filter @murphai/hosted-web typecheck`
+
 ## ReviewGPT Follow-Up 4 2026-07-07
 
 Accepted findings from the fourth PR ReviewGPT pass:

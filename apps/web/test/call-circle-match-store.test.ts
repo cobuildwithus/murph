@@ -887,6 +887,14 @@ describe("Call Circle conditional mutations", () => {
             OR: [
               { status: { in: ["proposed", "asking", "both_confirmed"] } },
               { phoneCallId: null, status: "bridging" },
+              {
+                phoneCall: {
+                  is: {
+                    providerStartAttemptedAt: null,
+                  },
+                },
+                status: "bridging",
+              },
             ],
           },
         ],
