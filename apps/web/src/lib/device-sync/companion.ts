@@ -19,6 +19,7 @@ const COMPANION_AUTH_DIAGNOSTIC_MESSAGE_MAX_LENGTH = 500;
 const COMPANION_AUTH_DIAGNOSTIC_SAFE_CODE_PATTERN = /^[A-Za-z0-9_.:-]{1,128}$/u;
 const COMPANION_AUTH_DIAGNOSTIC_VERSION_PATTERN = /^[0-9]{1,3}(?:\.[0-9]{1,3}){1,3}$/u;
 const COMPANION_AUTH_DIAGNOSTIC_EMAIL_PATTERN = /[^\s@]+@[^\s@]+/gu;
+const COMPANION_AUTH_DIAGNOSTIC_PRIVY_DID_PATTERN = /\bdid:privy:[A-Za-z0-9._:-]+/giu;
 const COMPANION_AUTH_DIAGNOSTIC_ALLOWED_KEYS = new Set([
   "appVersion",
   "errorKind",
@@ -152,6 +153,7 @@ function rejectUnknownAuthDiagnosticKeys(body: Record<string, unknown>): void {
 function sanitizeCompanionAuthDiagnosticMessage(message: string | null): string | null {
   return sanitizeJsonLogString(message, COMPANION_AUTH_DIAGNOSTIC_MESSAGE_MAX_LENGTH * 2)
     ?.replace(COMPANION_AUTH_DIAGNOSTIC_EMAIL_PATTERN, "<redacted-email>")
+    ?.replace(COMPANION_AUTH_DIAGNOSTIC_PRIVY_DID_PATTERN, "<redacted-user-id>")
     ?.replace(COMPANION_AUTH_DIAGNOSTIC_TOKEN_PATTERN, "<redacted-secret>")
     ?.replace(COMPANION_AUTH_DIAGNOSTIC_HOST_PATTERN, "<redacted-url>")
     ?.replace(COMPANION_AUTH_DIAGNOSTIC_IPV4_PATTERN, "<redacted-ip>")

@@ -197,7 +197,7 @@ describe("device sync companion routes", () => {
         method: "email",
         providerErrorCode: "too_many_requests",
         providerMessage:
-          "Privy failed for person@example.test (415) 555-2671 backup 4155552671 phone_4155552671 international +44 7911 123456 compact +447911123456 code 12345 invalid_code_123456 otp_654321 code123456 token=secret-token raw AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA https://auth.example.test/path auth.privy.io/path 192.0.2.55 ip_192.0.2.55 2001:db8::1 ip_2001:db8::1 host_auth.example.com",
+          "Privy failed for person@example.test user did:privy:user_123 (415) 555-2671 backup 4155552671 phone_4155552671 international +44 7911 123456 compact +447911123456 code 12345 invalid_code_123456 otp_654321 code123456 token=secret-token raw AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA https://auth.example.test/path auth.privy.io/path 192.0.2.55 ip_192.0.2.55 2001:db8::1 ip_2001:db8::1 host_auth.example.com",
         stage: "send_code",
       }, { headers: { "x-vercel-forwarded-for": "203.0.113.10" } }));
 
@@ -212,10 +212,11 @@ describe("device sync companion routes", () => {
         provider: "privy",
         providerErrorCode: "too_many_requests",
         redactedProviderMessage:
-          "Privy failed for <redacted-email> <redacted-phone> backup <redacted-phone> phone_<redacted-phone> international <redacted-phone> compact <redacted-phone> code <redacted-code> invalid_code_<redacted-code> otp_<redacted-code> code<redacted-code> token=<redacted-secret> raw <redacted-secret> <redacted-url> <redacted-url> <redacted-ip> ip_<redacted-ip> <redacted-ip> ip_<redacted-ip> host_<redacted-url>",
+          "Privy failed for <redacted-email> user <redacted-user-id> <redacted-phone> backup <redacted-phone> phone_<redacted-phone> international <redacted-phone> compact <redacted-phone> code <redacted-code> invalid_code_<redacted-code> otp_<redacted-code> code<redacted-code> token=<redacted-secret> raw <redacted-secret> <redacted-url> <redacted-url> <redacted-ip> ip_<redacted-ip> <redacted-ip> ip_<redacted-ip> host_<redacted-url>",
         stage: "send_code",
       });
       expect(JSON.stringify(warnSpy.mock.calls)).not.toContain("person@example");
+      expect(JSON.stringify(warnSpy.mock.calls)).not.toContain("did:privy:user_123");
       expect(JSON.stringify(warnSpy.mock.calls)).not.toContain("555-2671");
       expect(JSON.stringify(warnSpy.mock.calls)).not.toContain("4155552671");
       expect(JSON.stringify(warnSpy.mock.calls)).not.toContain("phone_4155552671");
@@ -348,6 +349,7 @@ describe("device sync companion routes", () => {
       ["prefixed IPv4 address", "ip_192.0.2.55"],
       ["prefixed IPv6 address", "ip_2001:db8::1"],
       ["prefixed host", "host_auth.example.com"],
+      ["Privy user DID", "did:privy:user_123"],
       ["token", "A".repeat(32)],
     ])("drops a %s-shaped provider error code", async (_label, providerErrorCode) => {
       const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
