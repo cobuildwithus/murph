@@ -18,6 +18,11 @@ import {
   collectCanonicalEntities,
 } from "../src/health/canonical-collector.ts";
 import {
+  listHabitatAspects,
+  readHabitatAspect,
+  showHabitatAspect,
+} from "../src/health/habitat.ts";
+import {
   compareByOccurredAtDescThenId,
   compareByRecordedOrImportedAtDescThenId,
 } from "../src/health/comparators.ts";
@@ -929,6 +934,8 @@ test("canonical collector omits habitat records stored outside their aspect path
       "aspect: sleep-environment",
       "indicators:",
       "  night_temp_c: 19",
+      "indicatorRecordedAt:",
+      "  night_temp_c: 2026-07-01",
       "---",
       "# Bedroom & sleep",
       "",
@@ -941,6 +948,9 @@ test("canonical collector omits habitat records stored outside their aspect path
 
   assert.equal(collection.habitatAspects.length, 0);
   assert.equal(collection.entities.some((entity) => entity.family === "habitat"), false);
+  assert.equal((await listHabitatAspects(vaultRoot)).length, 0);
+  assert.equal(await readHabitatAspect(vaultRoot, "hab_01JNV422Y2M5ZBV64ZP4N1DRB1"), null);
+  assert.equal(await showHabitatAspect(vaultRoot, "sleep-environment"), null);
 });
 
 test("supplement queries aggregate active compounds and support flexible lookup paths", async () => {

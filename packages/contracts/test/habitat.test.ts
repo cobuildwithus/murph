@@ -28,6 +28,9 @@ const validFrontmatter = {
   },
   indicatorRecordedAt: {
     night_temp_c: "2026-07-01",
+    temp_control: "2026-07-01",
+    window_at_night: "2026-07-01",
+    co2_meter: "2026-07-01",
   },
 } as const;
 
@@ -115,6 +118,7 @@ describe("habitat frontmatter schema", () => {
       habitatFrontmatterSchema.safeParse({
         ...validFrontmatter,
         indicatorRecordedAt: {
+          ...validFrontmatter.indicatorRecordedAt,
           darkness: "2026-07-01",
         },
       }).success,
@@ -124,6 +128,28 @@ describe("habitat frontmatter schema", () => {
   it("rejects archived aspect lifecycle state", () => {
     expect(
       habitatFrontmatterSchema.safeParse({ ...validFrontmatter, status: "archived" }).success,
+    ).toBe(false);
+  });
+
+  it("rejects stored indicators without recorded dates", () => {
+    expect(
+      habitatFrontmatterSchema.safeParse({
+        ...validFrontmatter,
+        indicatorRecordedAt: {
+          temp_control: "2026-07-01",
+          window_at_night: "2026-07-01",
+          co2_meter: "2026-07-01",
+        },
+      }).success,
+    ).toBe(false);
+    expect(
+      habitatFrontmatterSchema.safeParse({
+        ...validFrontmatter,
+        indicators: {
+          ...validFrontmatter.indicators,
+          darkness: null,
+        },
+      }).success,
     ).toBe(false);
   });
 });

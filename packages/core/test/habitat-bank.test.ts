@@ -89,6 +89,22 @@ test("habitat upsert rejects unknown aspects and foreign indicators", async () =
   );
 });
 
+test("habitat upsert requires recordedAt when storing indicator values", async () => {
+  const vaultRoot = await makeTempDirectory("murph-habitat-recorded-at");
+  await initializeVault({ vaultRoot });
+
+  await assert.rejects(
+    () =>
+      upsertHabitatAspect({
+        vaultRoot,
+        aspect: "sleep-environment",
+        indicators: { night_temp_c: 19 },
+      }),
+    (error: unknown) =>
+      error instanceof VaultError && error.code === "HABITAT_RECORDED_AT_REQUIRED",
+  );
+});
+
 test("habitat upsert rejects aspect records stored at another aspect path", async () => {
   const vaultRoot = await makeTempDirectory("murph-habitat-path-mismatch");
   await initializeVault({ vaultRoot });
@@ -109,6 +125,8 @@ test("habitat upsert rejects aspect records stored at another aspect path", asyn
       "aspect: home-location",
       "indicators:",
       "  location: Boston",
+      "indicatorRecordedAt:",
+      "  location: 2026-07-01",
       "---",
       "# Location & climate",
       "",

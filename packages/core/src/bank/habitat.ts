@@ -2,8 +2,10 @@ import type { HabitatFrontmatter, HabitatIndicatorValue } from "@murphai/contrac
 import {
   CONTRACT_SCHEMA_VERSION,
   expectedHabitatAspectRelativePath,
+  getHabitatIndicatorDefinition,
   habitatFrontmatterSchema,
   requireHabitatAspectDefinition,
+  validateHabitatIndicatorValue,
 } from "@murphai/contracts";
 
 import { ID_PREFIXES, VAULT_LAYOUT } from "../constants.ts";
@@ -159,6 +161,56 @@ function mergeIndicators(
   };
 }
 
+function hasStoredIndicatorUpdates(
+  updates: Record<string, HabitatIndicatorValue> | undefined,
+): boolean {
+  return Object.values(updates ?? {}).some((value) => value !== null);
+}
+
+function assertRecordedAtForStoredIndicatorUpdates(
+  updates: Record<string, HabitatIndicatorValue> | undefined,
+  recordedAt: string | undefined,
+): void {
+  if (!hasStoredIndicatorUpdates(updates)) {
+    return;
+  }
+
+  if (!recordedAt) {
+    throw new VaultError(
+      "HABITAT_RECORDED_AT_REQUIRED",
+      "Habitat indicator writes require recordedAt so coverage can detect stale values.",
+    );
+  }
+}
+
+function assertValidStoredIndicatorUpdates(
+  aspect: string,
+  updates: Record<string, HabitatIndicatorValue> | undefined,
+): void {
+  for (const [indicatorId, value] of Object.entries(updates ?? {})) {
+    if (value === null) {
+      continue;
+    }
+
+    const definition = getHabitatIndicatorDefinition(aspect, indicatorId);
+    if (!definition) {
+      throw new VaultError(
+        "HABITAT_FRONTMATTER_INVALID",
+        `Indicator "${indicatorId}" is not part of habitat aspect "${aspect}".`,
+      );
+    }
+
+    const issue = validateHabitatIndicatorValue(definition, value);
+    if (issue) {
+      throw new VaultError(
+        "HABITAT_FRONTMATTER_INVALID",
+        issue,
+        { aspect, indicatorId },
+      );
+    }
+  }
+}
+
 export async function upsertHabitatAspect(
   input: UpsertHabitatAspectInput,
 ): Promise<UpsertHabitatAspectResult> {
@@ -178,7 +230,10 @@ async function upsertHabitatAspectLocked(
   input: UpsertHabitatAspectInput,
 ): Promise<UpsertHabitatAspectResult> {
   const aspectDefinition = requireHabitatAspectDefinition(input.aspect);
+  const recordedAt = normalizeOptionalText(input.recordedAt) ?? undefined;
   const existingRecords = await loadHabitatRecords(input.vaultRoot);
+  assertValidStoredIndicatorUpdates(aspectDefinition.id, input.indicators);
+  assertRecordedAtForStoredIndicatorUpdates(input.indicators, recordedAt);
   const existingRecord =
     existingRecords.find((record) => record.aspect === aspectDefinition.id) ?? null;
   const target = resolveMarkdownRegistryUpsertTarget({
@@ -197,7 +252,7 @@ async function upsertHabitatAspectLocked(
     existingRecord?.indicators,
     input.indicators,
     existingRecord?.indicatorRecordedAt,
-    input.recordedAt,
+    recordedAt,
   );
   const note = normalizeOptionalText(input.note) ?? existingRecord?.note ?? undefined;
   const nextAttributes = validateHabitatFrontmatter(

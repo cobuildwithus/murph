@@ -56,9 +56,6 @@
           },
           {
             "type": "boolean"
-          },
-          {
-            "type": "null"
           }
         ]
       }

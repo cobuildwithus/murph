@@ -2561,11 +2561,10 @@ export const workoutFormatFrontmatterSchema = withContractMetadata(
 
 const HABITAT_INDICATOR_ID_PATTERN = "^[a-z0-9]+(?:_[a-z0-9]+)*$";
 
-const habitatIndicatorValueSchema = z.union([
+const habitatStoredIndicatorValueSchema = z.union([
   z.string().max(400),
   z.number(),
   z.boolean(),
-  z.null(),
 ]);
 
 export const habitatFrontmatterSchema = withContractMetadata(
@@ -2581,7 +2580,7 @@ export const habitatFrontmatterSchema = withContractMetadata(
       aspect: patternedString(SLUG_PATTERN),
       indicators: z.record(
         patternedString(HABITAT_INDICATOR_ID_PATTERN),
-        habitatIndicatorValueSchema,
+        habitatStoredIndicatorValueSchema,
       ),
       indicatorRecordedAt: z
         .record(patternedString(HABITAT_INDICATOR_ID_PATTERN), isoDateString())
@@ -2627,6 +2626,14 @@ export const habitatFrontmatterSchema = withContractMetadata(
             message: `Indicator "${indicatorId}" is not part of habitat aspect "${value.aspect}".`,
           });
           continue;
+        }
+
+        if (!value.indicatorRecordedAt?.[indicatorId]) {
+          context.addIssue({
+            code: "custom",
+            path: ["indicatorRecordedAt", indicatorId],
+            message: `Indicator "${indicatorId}" requires a recordedAt date.`,
+          });
         }
 
         const issue = validateHabitatIndicatorValue(definition, indicatorValue);
