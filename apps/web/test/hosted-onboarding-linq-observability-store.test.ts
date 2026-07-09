@@ -1465,7 +1465,7 @@ describe("hosted Linq observability stores", () => {
     );
   });
 
-  it("reclaims an existing stale current Telegram usage notice before inspecting legacy guard rows", async () => {
+  it("terminalizes an existing stale current Telegram usage notice before inspecting legacy guard rows", async () => {
     const fixture = createObservabilityPrismaFixture();
     const attemptedAt = new Date("2026-03-26T12:30:00.000Z");
     const currentKey = "ai-usage-gate:member_123:2026-03";
@@ -1498,7 +1498,7 @@ describe("hosted Linq observability stores", () => {
       targetKind: "telegram_thread",
       template: "ai_usage_quota",
     })).resolves.toEqual({
-      claimed: true,
+      claimed: false,
       id: "hld_current_started_telegram_notice",
     });
 
@@ -1512,28 +1512,19 @@ describe("hosted Linq observability stores", () => {
       },
     });
     expect(fixture.hostedLinqDeliveryCreate).not.toHaveBeenCalled();
-    expect(fixture.hostedLinqDeliveryUpdateMany).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({
-          attemptedAt,
-          failedAt: null,
-          retryAfterAt: null,
-          status: "attempted",
-        }),
-        where: expect.objectContaining({
-          id: "hld_current_started_telegram_notice",
-          OR: expect.arrayContaining([
-            {
-              attemptedAt: {
-                lte: new Date("2026-03-26T12:15:00.000Z"),
-              },
-              source: "hosted_runtime_ai_usage_limit_notice",
-              status: "provider_dispatch_started",
-            },
-          ]),
-        }),
+    expect(fixture.hostedLinqDeliveryUpdateMany).toHaveBeenCalledWith({
+      data: {
+        failedAt: attemptedAt,
+        failureCode: "HostedRuntimeTelegramUsageLimitNoticeUnknownError",
+        failureReason: "[redacted]",
+        retryAfterAt: null,
+        status: "failed",
+      },
+      where: expect.objectContaining({
+        id: "hld_current_started_telegram_notice",
+        status: "provider_dispatch_started",
       }),
-    );
+    });
   });
 
   it("does not let Telegram usage notices reclaim stale webhook dispatch-started rows", async () => {
@@ -1585,7 +1576,7 @@ describe("hosted Linq observability stores", () => {
     });
   });
 
-  it("reclaims stale Telegram dispatch-started rows as retryable pre-control attempts", async () => {
+  it("terminalizes stale Telegram dispatch-started rows as unknown outcomes", async () => {
     const fixture = createObservabilityPrismaFixture();
     const attemptedAt = new Date("2026-03-26T12:30:00.000Z");
     fixture.hostedLinqDeliveryFindUnique.mockResolvedValueOnce({
@@ -1613,36 +1604,32 @@ describe("hosted Linq observability stores", () => {
       targetKind: "telegram_thread",
       template: "ai_usage_quota",
     })).resolves.toEqual({
-      claimed: true,
+      claimed: false,
       id: "hld_started_telegram_notice",
     });
 
-    expect(fixture.hostedLinqDeliveryUpdateMany).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({
-          attemptedAt,
-          failedAt: null,
-          retryAfterAt: null,
-          status: "attempted",
-        }),
-        where: expect.objectContaining({
-          acceptedAt: null,
-          deliveredAt: null,
-          id: "hld_started_telegram_notice",
-          lastReceiptAt: null,
-          messageLookupKey: null,
-          OR: expect.arrayContaining([
-            {
-              attemptedAt: {
-                lte: new Date("2026-03-26T12:15:00.000Z"),
-              },
-              source: "hosted_runtime_ai_usage_limit_notice",
-              status: "provider_dispatch_started",
-            },
-          ]),
-        }),
-      }),
-    );
+    expect(fixture.hostedLinqDeliveryUpdateMany).toHaveBeenCalledWith({
+      data: {
+        failedAt: attemptedAt,
+        failureCode: "HostedRuntimeTelegramUsageLimitNoticeUnknownError",
+        failureReason: "[redacted]",
+        retryAfterAt: null,
+        status: "failed",
+      },
+      where: {
+        acceptedAt: null,
+        attemptedAt: {
+          lte: new Date("2026-03-26T12:15:00.000Z"),
+        },
+        deliveredAt: null,
+        failedAt: null,
+        id: "hld_started_telegram_notice",
+        lastReceiptAt: null,
+        messageLookupKey: null,
+        skippedAt: null,
+        status: "provider_dispatch_started",
+      },
+    });
   });
 
   it("does not reclaim stale pre-provider Telegram usage notice rows without opt-in", async () => {

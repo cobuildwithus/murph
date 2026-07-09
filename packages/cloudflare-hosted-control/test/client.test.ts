@@ -293,6 +293,50 @@ describe("createCloudflareHostedControlClient", () => {
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 
+  it("awaits Telegram usage-limit request-boundary callbacks before fetch", async () => {
+    const events: string[] = [];
+    const fetchImpl = vi.fn(async () => {
+      events.push("fetch");
+      return createJsonResponse({ status: "sent" });
+    }) as typeof fetch;
+    const client = createCloudflareHostedControlClient({
+      baseUrl: "https://runner.example.test/root/",
+      fetchImpl,
+      getBearerToken: async () => "Bearer token-123",
+      timeoutMs: 2_500,
+    });
+
+    await expect(client.sendTelegramUsageLimitNotice({
+      authority: await createSignedTelegramUsageLimitNoticeAuthority(),
+      onRequestAttempted: async () => {
+        events.push("attempt-start");
+        await Promise.resolve();
+        events.push("attempt-done");
+      },
+    })).resolves.toEqual({ status: "sent" });
+
+    expect(events).toEqual(["attempt-start", "attempt-done", "fetch"]);
+  });
+
+  it("does not issue Telegram usage-limit notice requests when request-boundary callbacks fail", async () => {
+    const fetchImpl = vi.fn(async () => createJsonResponse({ status: "sent" })) as typeof fetch;
+    const client = createCloudflareHostedControlClient({
+      baseUrl: "https://runner.example.test/root/",
+      fetchImpl,
+      getBearerToken: async () => "Bearer token-123",
+      timeoutMs: 2_500,
+    });
+
+    await expect(client.sendTelegramUsageLimitNotice({
+      authority: await createSignedTelegramUsageLimitNoticeAuthority(),
+      onRequestAttempted: () => {
+        throw new Error("claim unavailable");
+      },
+    })).rejects.toThrow("claim unavailable");
+
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
   it("parses retryable Telegram send failures as typed responses", async () => {
     const client = createCloudflareHostedControlClient({
       baseUrl: "https://runner.example.test/root/",

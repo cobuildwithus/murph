@@ -224,11 +224,16 @@ describe("hosted orchestration reconciliation facts", () => {
       sendTelegramUsageLimitNotice: mocks.sendTelegramUsageLimitNotice,
     });
     mocks.readCloudflareHostedControlHttpErrorStatus.mockReturnValue(null);
-    mocks.sendTelegramUsageLimitNotice.mockResolvedValue({
-      providerMessageId: "7001",
-      status: "sent",
-      target: "telegram_chat_runtime_denied:business:biz-42:dm-topic:9",
-      targetKind: "thread",
+    mocks.sendTelegramUsageLimitNotice.mockImplementation(async (
+      input: { onRequestAttempted?: () => Promise<void> | void },
+    ) => {
+      await input.onRequestAttempted?.();
+      return {
+        providerMessageId: "7001",
+        status: "sent",
+        target: "telegram_chat_runtime_denied:business:biz-42:dm-topic:9",
+        targetKind: "thread",
+      };
     });
     mocks.sendClaimedHostedAiUsageLimitNoticeToLinqChat.mockResolvedValue({ status: "sent" });
     mocks.resolveHostedRuntimeAiUsageGate.mockResolvedValue({ status: "allowed" });
@@ -1426,11 +1431,16 @@ describe("hosted orchestration reconciliation facts", () => {
       buildPendingConversationItem(),
     );
     mocks.decodeHostedMailboxStoredPayload.mockResolvedValue(buildTelegramConversationWake());
-    mocks.sendTelegramUsageLimitNotice.mockResolvedValueOnce({
-      failureCode: "ASSISTANT_TELEGRAM_DELIVERY_FAILED",
-      failureReason: "Forbidden: bot was blocked by the user",
-      retryable: false,
-      status: "failed",
+    mocks.sendTelegramUsageLimitNotice.mockImplementationOnce(async (
+      input: { onRequestAttempted?: () => Promise<void> | void },
+    ) => {
+      await input.onRequestAttempted?.();
+      return {
+        failureCode: "ASSISTANT_TELEGRAM_DELIVERY_FAILED",
+        failureReason: "Forbidden: bot was blocked by the user",
+        retryable: false,
+        status: "failed",
+      };
     });
 
     const response = await reconciliationRoute.GET(
@@ -1532,12 +1542,17 @@ describe("hosted orchestration reconciliation facts", () => {
       buildPendingConversationItem(),
     );
     mocks.decodeHostedMailboxStoredPayload.mockResolvedValue(buildTelegramConversationWake());
-    mocks.sendTelegramUsageLimitNotice.mockResolvedValueOnce({
-      failureCode: "ASSISTANT_TELEGRAM_RATE_LIMITED",
-      failureReason: "Too Many Requests",
-      retryAfterSeconds: 42,
-      retryable: true,
-      status: "failed",
+    mocks.sendTelegramUsageLimitNotice.mockImplementationOnce(async (
+      input: { onRequestAttempted?: () => Promise<void> | void },
+    ) => {
+      await input.onRequestAttempted?.();
+      return {
+        failureCode: "ASSISTANT_TELEGRAM_RATE_LIMITED",
+        failureReason: "Too Many Requests",
+        retryAfterSeconds: 42,
+        retryable: true,
+        status: "failed",
+      };
     });
 
     const response = await reconciliationRoute.GET(
@@ -1595,11 +1610,16 @@ describe("hosted orchestration reconciliation facts", () => {
       buildPendingConversationItem(),
     );
     mocks.decodeHostedMailboxStoredPayload.mockResolvedValue(buildTelegramConversationWake());
-    mocks.sendTelegramUsageLimitNotice.mockResolvedValueOnce({
-      failureCode: "ASSISTANT_TELEGRAM_DELIVERY_FAILED",
-      failureReason: "Telegram provider returned HTTP 500.",
-      retryable: true,
-      status: "failed",
+    mocks.sendTelegramUsageLimitNotice.mockImplementationOnce(async (
+      input: { onRequestAttempted?: () => Promise<void> | void },
+    ) => {
+      await input.onRequestAttempted?.();
+      return {
+        failureCode: "ASSISTANT_TELEGRAM_DELIVERY_FAILED",
+        failureReason: "Telegram provider returned HTTP 500.",
+        retryable: true,
+        status: "failed",
+      };
     });
 
     const response = await reconciliationRoute.GET(
@@ -1711,8 +1731,8 @@ describe("hosted orchestration reconciliation facts", () => {
     );
     mocks.decodeHostedMailboxStoredPayload.mockResolvedValue(buildTelegramConversationWake());
     mocks.sendTelegramUsageLimitNotice.mockImplementationOnce(
-      async (input: { onRequestAttempted?: () => void }) => {
-        input.onRequestAttempted?.();
+      async (input: { onRequestAttempted?: () => Promise<void> | void }) => {
+        await input.onRequestAttempted?.();
         throw new Error("control unavailable");
       },
     );
@@ -1773,8 +1793,8 @@ describe("hosted orchestration reconciliation facts", () => {
     mocks.decodeHostedMailboxStoredPayload.mockResolvedValue(buildTelegramConversationWake());
     mocks.readCloudflareHostedControlHttpErrorStatus.mockReturnValueOnce(404);
     mocks.sendTelegramUsageLimitNotice.mockImplementationOnce(
-      async (input: { onRequestAttempted?: () => void }) => {
-        input.onRequestAttempted?.();
+      async (input: { onRequestAttempted?: () => Promise<void> | void }) => {
+        await input.onRequestAttempted?.();
         throw new Error("route unavailable");
       },
     );
@@ -1832,11 +1852,16 @@ describe("hosted orchestration reconciliation facts", () => {
       buildPendingConversationItem(),
     );
     mocks.decodeHostedMailboxStoredPayload.mockResolvedValue(buildTelegramConversationWake());
-    mocks.sendTelegramUsageLimitNotice.mockResolvedValueOnce({
-      failureCode: "ASSISTANT_TELEGRAM_DELIVERY_FAILED",
-      failureReason: "Telegram target is no longer available",
-      retryable: false,
-      status: "failed",
+    mocks.sendTelegramUsageLimitNotice.mockImplementationOnce(async (
+      input: { onRequestAttempted?: () => Promise<void> | void },
+    ) => {
+      await input.onRequestAttempted?.();
+      return {
+        failureCode: "ASSISTANT_TELEGRAM_DELIVERY_FAILED",
+        failureReason: "Telegram target is no longer available",
+        retryable: false,
+        status: "failed",
+      };
     });
 
     const response = await reconciliationRoute.GET(

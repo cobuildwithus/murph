@@ -524,17 +524,8 @@ async function sendHostedRuntimeAiUsageLimitNoticeForPendingConversation(input: 
       return buildHostedRuntimeAiUsageNoticeInFlightResult(input.now);
     }
 
-    const dispatchStarted =
-      await markHostedLinqDeliveryProviderDispatchStartedTx({
-        idempotencyKey: deliveryClaim.idempotencyKey,
-        prisma: input.prisma,
-        startedAt: sentAt,
-      });
-    if (!dispatchStarted) {
-      return buildHostedRuntimeAiUsageNoticeInFlightResult(input.now);
-    }
-
     let controlRequestAttempted = false;
+    let dispatchStartFailure: unknown = null;
     let deliveryResult: Awaited<ReturnType<typeof controlClient.sendTelegramUsageLimitNotice>>;
     try {
       const authoritySecret =
@@ -562,11 +553,33 @@ async function sendHostedRuntimeAiUsageLimitNoticeForPendingConversation(input: 
           }),
           secret: authoritySecret,
         }),
-        onRequestAttempted: () => {
+        onRequestAttempted: async () => {
+          try {
+            const dispatchStarted =
+              await markHostedLinqDeliveryProviderDispatchStartedTx({
+                idempotencyKey: deliveryClaim.idempotencyKey,
+                prisma: input.prisma,
+                startedAt: sentAt,
+              });
+            if (!dispatchStarted) {
+              throw new HostedRuntimeTelegramUsageLimitNoticeUnavailableError(
+                "Hosted Telegram usage-limit notice delivery claim is no longer available before hosted-control dispatch.",
+              );
+            }
+          } catch (cause) {
+            dispatchStartFailure = cause;
+            throw cause;
+          }
           controlRequestAttempted = true;
         },
       });
     } catch (cause) {
+      if (
+        dispatchStartFailure === cause
+        && !(cause instanceof HostedRuntimeTelegramUsageLimitNoticeUnavailableError)
+      ) {
+        throw cause;
+      }
       const hostedControlHttpStatus =
         readCloudflareHostedControlHttpErrorStatus(cause);
       const retryableUnavailable =

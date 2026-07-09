@@ -152,7 +152,7 @@ export interface CloudflareHostedControlClient {
   getRunnerStatus(userId: string): Promise<HostedRunnerStatusResponse>;
   sendTelegramUsageLimitNotice(input: {
     authority: CloudflareHostedControlTelegramUsageLimitNoticeAuthority;
-    onRequestAttempted?: () => void;
+    onRequestAttempted?: () => Promise<void> | void;
   }): Promise<CloudflareHostedControlTelegramUsageLimitNoticeResponse>;
 }
 
@@ -1292,7 +1292,7 @@ async function requestHostedExecutionAuthorizedJson<TResponse>(input: {
   onRuntimeEnsureProcessingTiming?: (
     timing: CloudflareHostedControlRuntimeEnsureProcessingTiming,
   ) => void;
-  onRequestAttempted?: () => void;
+  onRequestAttempted?: () => Promise<void> | void;
   parse: (value: unknown) => TResponse;
   path: string;
   request: {
@@ -1347,11 +1347,7 @@ async function requestHostedExecutionAuthorizedJson<TResponse>(input: {
     );
   }
 
-  try {
-    input.onRequestAttempted?.();
-  } catch {
-    // Dispatch-attempt callbacks are diagnostics-only and must not affect control requests.
-  }
+  await input.onRequestAttempted?.();
 
   const response = await input.fetchImpl(url.toString(), {
     ...(input.request.body === undefined ? {} : { body: input.request.body }),
