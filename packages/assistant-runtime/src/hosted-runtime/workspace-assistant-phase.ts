@@ -956,6 +956,19 @@ export async function runHostedWorkspaceAssistantPhase(
     const providerCleanupOwnedByPostCheckpointDelivery =
       postCheckpointDeliveryResultOwnsProviderCleanup(continuingSystemMailboxResult);
     if (foregroundAssistantPass) {
+      const assistantCronWakeAfterPass =
+        shouldResolveHostedAssistantCronWakeAfterAssistantPass({
+          assistantMetrics,
+          input,
+        })
+          ? await resolveHostedAssistantCronWakeStateBestEffort(input)
+          : null;
+      const assistantCronWakeAfterPassCandidate = assistantCronWakeAfterPass
+        ? resolveHostedAssistantCronWakeCandidate({
+            phaseInput: input,
+            state: assistantCronWakeAfterPass,
+          })
+        : null;
       writeHostedAssistantTurnTimingRuntimeLog({
         currentTurnDeliveryIntentCount: currentTurnDeliveryIntentIds.length,
         elapsedMs: elapsedSince(assistantPhaseStartedAt),
@@ -976,6 +989,7 @@ export async function runHostedWorkspaceAssistantPhase(
       };
       const foregroundAssistantResult = await runForegroundAssistantReplyPhase({
         assistantMetrics,
+        assistantCronWakeAfterPass: assistantCronWakeAfterPassCandidate,
         currentTurnDeliveryIntentIds,
         foregroundWorkspaceWake: createFutureExistingHostedAssistantWorkspaceWakeCandidate(input),
         input,
@@ -3500,6 +3514,7 @@ async function collectForegroundDeliveryEffects(input: {
 
 async function runForegroundAssistantReplyPhase(input: {
   assistantMetrics: HostedAssistantMetrics;
+  assistantCronWakeAfterPass: HostedRuntimeWakeCandidate | null;
   currentTurnDeliveryIntentIds: readonly string[];
   foregroundWorkspaceWake: HostedRuntimeWakeCandidate | null;
   input: HostedWorkspaceRuntimeAssistantPhaseInput;
@@ -3534,11 +3549,15 @@ async function runForegroundAssistantReplyPhase(input: {
       systemMailboxWake: input.systemMailboxWake,
       systemMailboxWakeAt: input.systemMailboxWakeAt,
     });
+    const fastDispatchNextWake = selectHostedRuntimeWakeCandidate([
+      fastDispatchBaseNextWake,
+      input.assistantCronWakeAfterPass,
+    ]);
     const postDelivery = await drainHostedPostCheckpointDelivery({
       assistantMetrics: input.assistantMetrics,
       assistantDeliveryEffects: deliveryEffects,
       assistantDeliveryPreparation: preparedDeliveryEffects.preparation,
-      baseNextWake: fastDispatchBaseNextWake,
+      baseNextWake: fastDispatchNextWake,
       checkpointReason: "outbox_receipt",
       canConsumeWorkspaceAssistantWake: true,
       input: input.input,
@@ -3619,9 +3638,10 @@ async function runForegroundAssistantReplyPhase(input: {
     await resolveHostedProviderCleanupScheduledWakeAt({
       nowMs: resolveHostedAssistantPhaseNowMs(input.input),
       vaultRoot: input.input.restored.vaultRoot,
-    });
+  });
   const nextWake = selectHostedRuntimeWakeCandidate([
     createHostedRuntimeWakeCandidate(assistantNextWakeAt, assistantNextWakeReason),
+    input.assistantCronWakeAfterPass,
     input.foregroundWorkspaceWake,
     input.skippedDeviceSyncWake,
     createHostedRuntimeWakeCandidate(outboxWakeAt, "assistant"),
@@ -3685,6 +3705,7 @@ async function runForegroundAssistantReplyPhase(input: {
             assertHostedAssistantPhaseLiveness(input.input.signal);
             const baseNextWake = selectHostedRuntimeWakeCandidate([
               createHostedRuntimeWakeCandidate(assistantNextWakeAt, assistantNextWakeReason),
+              input.assistantCronWakeAfterPass,
               input.foregroundWorkspaceWake,
               input.skippedDeviceSyncWake,
               input.systemMailboxWake,

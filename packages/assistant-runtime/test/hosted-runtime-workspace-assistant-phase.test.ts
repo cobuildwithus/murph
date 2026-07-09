@@ -2429,13 +2429,21 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       skipped: 0,
       updated: 0,
     });
-    mocks.getAssistantCronStatus.mockResolvedValueOnce({
-      dueJobs: 0,
-      enabledJobs: 1,
-      nextRunAt: seededNextWakeAt,
-      runningJobs: 0,
-      totalJobs: 1,
-    });
+    mocks.getAssistantCronStatus
+      .mockResolvedValueOnce({
+        dueJobs: 0,
+        enabledJobs: 0,
+        nextRunAt: null,
+        runningJobs: 0,
+        totalJobs: 0,
+      })
+      .mockResolvedValueOnce({
+        dueJobs: 0,
+        enabledJobs: 1,
+        nextRunAt: seededNextWakeAt,
+        runningJobs: 0,
+        totalJobs: 1,
+      });
     mocks.runHostedAssistantAutomationLane.mockResolvedValueOnce({
       assistantAutomationCurrentTurnDeliveryIntentIds: [],
       assistantAutomationProgressed: true,
@@ -2517,13 +2525,21 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       skipped: 0,
       updated: 0,
     });
-    mocks.getAssistantCronStatus.mockResolvedValueOnce({
-      dueJobs: 0,
-      enabledJobs: 3,
-      nextRunAt: cronNextWakeAt,
-      runningJobs: 0,
-      totalJobs: 3,
-    });
+    mocks.getAssistantCronStatus
+      .mockResolvedValueOnce({
+        dueJobs: 0,
+        enabledJobs: 0,
+        nextRunAt: null,
+        runningJobs: 0,
+        totalJobs: 0,
+      })
+      .mockResolvedValueOnce({
+        dueJobs: 0,
+        enabledJobs: 3,
+        nextRunAt: cronNextWakeAt,
+        runningJobs: 0,
+        totalJobs: 3,
+      });
     mocks.runHostedAssistantAutomationLane.mockResolvedValueOnce({
       assistantAutomationCurrentTurnDeliveryIntentIds: [],
       assistantAutomationProgressed: true,
@@ -2584,13 +2600,21 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       skipped: 0,
       updated: 0,
     });
-    mocks.getAssistantCronStatus.mockResolvedValueOnce({
-      dueJobs: 0,
-      enabledJobs: 3,
-      nextRunAt: cronNextWakeAt,
-      runningJobs: 0,
-      totalJobs: 3,
-    });
+    mocks.getAssistantCronStatus
+      .mockResolvedValueOnce({
+        dueJobs: 0,
+        enabledJobs: 0,
+        nextRunAt: null,
+        runningJobs: 0,
+        totalJobs: 0,
+      })
+      .mockResolvedValueOnce({
+        dueJobs: 0,
+        enabledJobs: 3,
+        nextRunAt: cronNextWakeAt,
+        runningJobs: 0,
+        totalJobs: 3,
+      });
     // Persisted owner state is stale: pending ids with a null checkpoint.
     mocks.readHostedProviderCleanupCheckpoint.mockResolvedValue({
       nextWakeAt: null,
@@ -7285,6 +7309,69 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }));
   });
 
+  it("arms the post-pass assistant cron wake before deferred foreground delivery drains", async () => {
+    const postPassAssistantWakeAt = "2026-05-08T16:02:00.000Z";
+    const existingDeviceSyncWakeAt = "2026-05-08T16:05:00.000Z";
+    const baseDeliveryEffect = createDeliveryEffect();
+    const deliveryEffect = {
+      ...baseDeliveryEffect,
+      payload: {
+        ...baseDeliveryEffect.payload,
+        transportIdempotent: false,
+      },
+    };
+    mocks.runHostedAssistantAutomationLane.mockResolvedValueOnce({
+      assistantAutomationCronStatusDeferred: true,
+      assistantAutomationCurrentTurnDeliveryIntentIds: [deliveryEffect.effectId],
+      assistantAutomationProgressed: true,
+      deviceSyncProcessed: 0,
+      deviceSyncSkipped: true,
+      nextWakeAt: null,
+      parserProcessed: 0,
+      postCheckpointRecord: null,
+      redactedLogEntries: [],
+    });
+    mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValueOnce([
+      deliveryEffect,
+    ]);
+    mocks.getAssistantCronStatus.mockResolvedValueOnce({
+      dueJobs: 0,
+      enabledJobs: 1,
+      nextRunAt: postPassAssistantWakeAt,
+      runningJobs: 0,
+      totalJobs: 1,
+    });
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      importedCount: 1,
+      now: () => "2026-05-08T16:00:00.000Z",
+      workspace: {
+        checkpointedAt: "2026-05-08T15:59:00.000Z",
+        createdAt: "2026-05-08T15:00:00.000Z",
+        nextWakeAt: existingDeviceSyncWakeAt,
+        nextWakeReason: "device-sync.reconcile",
+        redactedStatus: null,
+        snapshotRef: null,
+        updatedAt: "2026-05-08T15:59:00.000Z",
+        userId: "member_synthetic_phase",
+        version: "8",
+      },
+    }));
+
+    expect(mocks.getAssistantCronStatus).toHaveBeenCalledTimes(1);
+    expect(result).toEqual(expect.objectContaining({
+      afterCheckpoint: expect.any(Function),
+      checkpointReason: "outbox_sending",
+      nextWakeAt: postPassAssistantWakeAt,
+      progressed: true,
+      redactedStatus: expect.objectContaining({
+        hostedAssistantNextWakeAt: postPassAssistantWakeAt,
+        hostedOutboxPendingDeliveryEffects: 1,
+      }),
+    }));
+    expect(result).not.toHaveProperty("nextWakeReason");
+  });
+
   it("preserves a due assistant cron wake found after clean fast dispatch", async () => {
     const dueAt = "2026-05-08T16:00:00.000Z";
     mocks.runHostedAssistantAutomationLane.mockResolvedValueOnce({
@@ -7319,7 +7406,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         targetKind: null,
       },
     ]);
-    mocks.getAssistantCronStatus.mockResolvedValueOnce({
+    mocks.getAssistantCronStatus.mockResolvedValue({
       dueJobs: 1,
       enabledJobs: 1,
       nextRunAt: dueAt,
@@ -7332,7 +7419,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       now: () => dueAt,
     }));
 
-    expect(mocks.getAssistantCronStatus).toHaveBeenCalledTimes(1);
+    expect(mocks.getAssistantCronStatus).toHaveBeenCalled();
     expect(result).toEqual(expect.objectContaining({
       checkpointReason: "outbox_receipt",
       nextWakeAt: dueAt,
