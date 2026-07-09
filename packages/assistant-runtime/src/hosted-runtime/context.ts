@@ -762,70 +762,29 @@ export async function requireHostedBootstrapForWake(
   );
 }
 
-export async function ensureHostedInboxSidecarReady(input: {
-  bestEffort: boolean;
-  rebuild: boolean;
-  requestId: string;
-  vaultRoot: string;
-}): Promise<boolean> {
-  const startedAt = performance.now();
-  const vaultRoot = path.resolve(input.vaultRoot);
-  const inboxServices = createIntegratedInboxServices();
-  try {
-    await inboxServices.init({
-      rebuild: input.rebuild,
-      rebuildParserJobs: false,
-      requestId: input.requestId,
-      vault: vaultRoot,
-    });
-    emitHostedExecutionStructuredLog({
-      component: "hosted.inbox",
-      details: {
-        elapsedMs: readHostedInboxSidecarElapsedMs(startedAt),
-        ready: true,
-        rebuild: input.rebuild,
-        requestId: input.requestId,
-      },
-      level: "info",
-      message: "Hosted inbox sidecar bootstrap finished.",
-      phase: "wake.running",
-    });
-    return true;
-  } catch (error) {
-    if (!input.bestEffort) {
-      throw error;
-    }
-
-    emitHostedExecutionStructuredLog({
-      component: "hosted.inbox",
-      details: {
-        elapsedMs: readHostedInboxSidecarElapsedMs(startedAt),
-        errorMessage: "hosted_inbox_sidecar_bootstrap_failed",
-        ready: false,
-        rebuild: input.rebuild,
-        requestId: input.requestId,
-      },
-      level: "warn",
-      message: "Hosted inbox sidecar bootstrap failed; continuing best-effort.",
-      phase: "wake.running",
-    });
-    return false;
-  }
-}
-
-function readHostedInboxSidecarElapsedMs(startedAt: number): number {
-  return Math.max(0, Math.round(performance.now() - startedAt));
-}
-
 export async function prepareHostedInboxProjectionRuntime(
   vaultRoot: string,
   requestId: string,
 ): Promise<void> {
+  const startedAt = performance.now();
   const normalizedVaultRoot = path.resolve(vaultRoot);
-  await ensureHostedInboxSidecarReady({
-    bestEffort: false,
+  const inboxServices = createIntegratedInboxServices();
+  await inboxServices.init({
     rebuild: false,
+    rebuildParserJobs: false,
     requestId,
-    vaultRoot: normalizedVaultRoot,
+    vault: normalizedVaultRoot,
+  });
+  emitHostedExecutionStructuredLog({
+    component: "hosted.inbox",
+    details: {
+      elapsedMs: Math.max(0, Math.round(performance.now() - startedAt)),
+      ready: true,
+      rebuild: false,
+      requestId,
+    },
+    level: "info",
+    message: "Hosted inbox projection runtime initialized.",
+    phase: "wake.running",
   });
 }

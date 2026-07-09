@@ -77,7 +77,6 @@ vi.mock("@murphai/operator-config/operator-config", async () => {
 
 import {
   applyHostedMemberPreferences,
-  ensureHostedInboxSidecarReady,
   prepareHostedWakeContext,
   prepareHostedInboxProjectionRuntime,
   readHostedAssistantRuntimeState,
@@ -784,52 +783,6 @@ describe("hosted runtime context coverage", () => {
     }
   });
 
-  it("keeps current-message projection incremental after an explicit sidecar rebuild", async () => {
-    const { cleanup, vaultRoot } = await createWorkspace();
-
-    try {
-      await expect(
-        ensureHostedInboxSidecarReady({
-          bestEffort: false,
-          rebuild: true,
-          requestId: "req_startup_sidecar",
-          vaultRoot,
-        }),
-      ).resolves.toBe(true);
-
-      await prepareHostedInboxProjectionRuntime(vaultRoot, "req_projection_sidecar");
-
-      expect(mocks.createIntegratedInboxServices).toHaveBeenCalledTimes(2);
-      expect(mocks.inboxInit).toHaveBeenNthCalledWith(1, {
-        rebuild: true,
-        rebuildParserJobs: false,
-        requestId: "req_startup_sidecar",
-        vault: vaultRoot,
-      });
-      expect(mocks.inboxInit).toHaveBeenNthCalledWith(2, {
-        rebuild: false,
-        rebuildParserJobs: false,
-        requestId: "req_projection_sidecar",
-        vault: vaultRoot,
-      });
-      expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
-        expect.objectContaining({
-          component: "hosted.inbox",
-          details: expect.objectContaining({
-            ready: true,
-            rebuild: true,
-            requestId: "req_startup_sidecar",
-            elapsedMs: expect.any(Number),
-          }),
-          level: "info",
-          message: "Hosted inbox sidecar bootstrap finished.",
-        }),
-      );
-    } finally {
-      await cleanup();
-    }
-  });
-
   it("initializes cold current-message projection without a historical rebuild", async () => {
     const { cleanup, vaultRoot } = await createWorkspace();
 
@@ -842,45 +795,18 @@ describe("hosted runtime context coverage", () => {
         requestId: "req_projection_without_startup",
         vault: vaultRoot,
       });
-    } finally {
-      await cleanup();
-    }
-  });
-
-  it("logs sanitized best-effort hosted inbox sidecar bootstrap failures", async () => {
-    const { cleanup, vaultRoot } = await createWorkspace();
-    const sensitiveErrorMessage =
-      "failed rebuilding capture cap_private_attachment_001 from raw/inbox/private-labs.pdf";
-    mocks.inboxInit.mockRejectedValueOnce(
-      new Error(sensitiveErrorMessage),
-    );
-
-    try {
-      await expect(
-        ensureHostedInboxSidecarReady({
-          bestEffort: true,
-          rebuild: true,
-          requestId: "req_startup_sidecar_failed",
-          vaultRoot,
-        }),
-      ).resolves.toBe(false);
-
       expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
         expect.objectContaining({
           component: "hosted.inbox",
           details: expect.objectContaining({
-            errorMessage: "hosted_inbox_sidecar_bootstrap_failed",
+            ready: true,
+            rebuild: false,
+            requestId: "req_projection_without_startup",
             elapsedMs: expect.any(Number),
-            ready: false,
-            rebuild: true,
-            requestId: "req_startup_sidecar_failed",
           }),
-          level: "warn",
-          message: "Hosted inbox sidecar bootstrap failed; continuing best-effort.",
+          level: "info",
+          message: "Hosted inbox projection runtime initialized.",
         }),
-      );
-      expect(JSON.stringify(mocks.emitHostedExecutionStructuredLog.mock.calls)).not.toContain(
-        sensitiveErrorMessage,
       );
     } finally {
       await cleanup();

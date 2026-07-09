@@ -48,7 +48,7 @@ import {
   importHostedConversationMessageWakeIntoLocalInbox,
 } from "../src/hosted-runtime/events/conversation.ts";
 import {
-  ensureHostedInboxSidecarReady,
+  prepareHostedInboxProjectionRuntime,
 } from "../src/hosted-runtime/context.ts";
 
 describe("hosted Linq document preservation", () => {
@@ -67,12 +67,10 @@ describe("hosted Linq document preservation", () => {
     });
 
     await initializeVault({ vaultRoot, createdAt: "2026-04-29T00:00:00.000Z" });
-    await ensureHostedInboxSidecarReady({
-      bestEffort: false,
-      rebuild: false,
-      requestId: "req_init_cold_inbox_runtime",
+    await prepareHostedInboxProjectionRuntime(
       vaultRoot,
-    });
+      "req_init_cold_inbox_runtime",
+    );
 
     mocks.createHostedLinqAttachmentDownloadDriver.mockReturnValue({
       downloadPart: vi.fn(async (part: { url?: string | null }) => {
