@@ -360,6 +360,45 @@ describe("buildClinicalImportPlan", () => {
     ]);
   });
 
+  it("rejects scalar vitals that have unhandled components", async () => {
+    const vaultRoot = await writeClinicalFixture({
+      resourceFiles: [{
+        resourceType: "Observation",
+        relativePath: "Observation/page-1.json",
+        count: 1,
+      }],
+      pages: {
+        "Observation/page-1.json": [{
+          resourceType: "Observation",
+          id: "heart-rate-with-component",
+          status: "final",
+          effectiveDateTime: "2026-07-01T12:00:00.000Z",
+          code: {
+            coding: [{ system: "http://loinc.org", code: "8867-4", display: "Heart rate" }],
+          },
+          valueQuantity: { value: 72, unit: "bpm" },
+          component: [{
+            code: {
+              coding: [{ system: "urn:ehr:observation-context", code: "body-position" }],
+              text: "Body position",
+            },
+            valueString: "sitting",
+          }],
+        }],
+      },
+    });
+
+    const plan = await buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot });
+
+    expect(plan.candidates).toEqual([]);
+    expect(plan.unsupported).toEqual([
+      expect.objectContaining({
+        resourceId: "heart-rate-with-component",
+        reason: "vital component code is not importable",
+      }),
+    ]);
+  });
+
   it("requires trusted lab category and result status coding systems", async () => {
     const vaultRoot = await writeClinicalFixture({
       resourceFiles: [
@@ -1977,6 +2016,32 @@ describe("buildClinicalImportPlan", () => {
     ).rejects.toThrow("exceeds declared count");
   });
 
+  it("requires raw FHIR manifest paths to match their clinical retrieval identity", async () => {
+    const resourceFile = {
+      resourceType: "Observation",
+      relativePath: "Observation/page-1.json",
+      count: 0,
+    };
+    const outOfFamilyManifestPath = "raw/tmp/manifest.json";
+    const outOfFamilyRoot = await writeClinicalFixture({
+      manifestPath: outOfFamilyManifestPath,
+      resourceFiles: [resourceFile],
+      pages: { "Observation/page-1.json": [] },
+    });
+    await expect(
+      buildClinicalImportPlan({ manifestPath: outOfFamilyManifestPath, vaultRoot: outOfFamilyRoot }),
+    ).rejects.toThrow();
+
+    const mismatchedIdentityRoot = await writeClinicalFixture({
+      manifest: { connectionId: "different-connection" },
+      resourceFiles: [resourceFile],
+      pages: { "Observation/page-1.json": [] },
+    });
+    await expect(
+      buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot: mismatchedIdentityRoot }),
+    ).rejects.toThrow("does not match manifest identity");
+  });
+
   it("rejects symlinked raw FHIR manifests and resource pages", async () => {
     const page = {
       resourceType: "Observation",
@@ -2500,10 +2565,13 @@ function bloodPressurePanelObservation(index: number) {
 
 async function writeClinicalFixture(input: {
   manifest?: {
+    connectionId?: string;
     errors?: Array<{ code: string; message: string; resourceType?: string }>;
     fhirBaseUrlHash?: string;
     patientIdHash?: string;
+    retrievalJobId?: string;
   };
+  manifestPath?: string;
   pages: Record<string, unknown>;
   resourceFiles: Array<{
     count: number;
@@ -2514,6 +2582,7 @@ async function writeClinicalFixture(input: {
 }): Promise<string> {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-clinical-records-"));
   tempRoots.push(vaultRoot);
+  const manifestPath = input.manifestPath ?? MANIFEST_PATH;
 
   const pageTexts = new Map(
     Object.entries(input.pages).map(([relativePath, value]) => [relativePath, serializeJson(value)]),
@@ -2523,11 +2592,11 @@ async function writeClinicalFixture(input: {
     sha256: resourceFile.sha256 ?? sha256Hex(pageTexts.get(resourceFile.relativePath) ?? ""),
   }));
 
-  await writeJson(vaultRoot, MANIFEST_PATH, {
+  await writeJson(vaultRoot, manifestPath, {
     schemaVersion: "murph.clinical-raw-manifest.v1",
     kind: "clinical_fhir_retrieval",
-    connectionId: "clinical-connection-1",
-    retrievalJobId: "retrieval-job-1",
+    connectionId: input.manifest?.connectionId ?? "clinical-connection-1",
+    retrievalJobId: input.manifest?.retrievalJobId ?? "retrieval-job-1",
     sourceSystem: "epic-fhir",
     fhirBaseUrlHash: input.manifest?.fhirBaseUrlHash ?? FHIR_BASE_URL_HASH,
     patientIdHash: input.manifest?.patientIdHash ?? PATIENT_ID_HASH,
@@ -2541,7 +2610,7 @@ async function writeClinicalFixture(input: {
   for (const [relativePath, text] of pageTexts) {
     await writeText(
       vaultRoot,
-      `raw/clinical/fhir/clinical-connection-1/retrieval-job-1/${relativePath}`,
+      `${path.posix.dirname(manifestPath)}/${relativePath}`,
       text,
     );
   }

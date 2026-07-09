@@ -22,10 +22,10 @@ import {
   CLINICAL_RAW_RESOURCE_FILES_MAX_TOTAL_BYTES,
   CLINICAL_RAW_RESOURCE_FILE_MAX_BYTES,
   clinicalFacetSlug,
+  clinicalFhirManifestPathSchema,
   clinicalImportCandidateSchema,
   clinicalImportPlanSchema,
   clinicalRawManifestSchema,
-  clinicalRawPathSchema,
   externalRefForFhir,
   rawRefForClinicalManifestFile,
   type ClinicalImportCandidate,
@@ -142,12 +142,16 @@ const IMPORTABLE_ALLERGY_VERIFICATION_STATUS_CODES = new Set(["confirmed"]);
 const VITAL_PANEL_FACET = "vitals-panel";
 
 export async function buildClinicalImportPlan(input: BuildClinicalImportPlanInput): Promise<ClinicalImportPlan> {
-  const manifestPath = clinicalRawPathSchema.parse(input.manifestPath);
+  const manifestPath = clinicalFhirManifestPathSchema.parse(input.manifestPath);
   const manifest = clinicalRawManifestSchema.parse(
     JSON.parse(await readVaultRelativeText(input.vaultRoot, manifestPath, {
       maxBytes: CLINICAL_RAW_MANIFEST_MAX_BYTES,
     })),
   );
+  const manifestPathParts = manifestPath.split("/");
+  if (manifestPathParts[3] !== manifest.connectionId || manifestPathParts[4] !== manifest.retrievalJobId) {
+    throw new Error("Clinical FHIR raw manifest path does not match manifest identity.");
+  }
   await assertRawResourceFileByteBounds({
     manifest,
     manifestPath,
@@ -478,6 +482,9 @@ function mapObservation(context: FhirResourceContext<Observation>): MappedFhirRe
   const vital = vitalDecision.status === "matched" ? vitalDecision.vital : null;
   if (!vital && codeableConceptHasCodeWithUnexpectedSystem(context.resource.code, FHIR_SYSTEM_LOINC, VITAL_LOINC_CODES)) {
     return unsupportedOnly(context, "vital coding system is not importable");
+  }
+  if (vital && components.length > 0) {
+    return unsupportedOnly(context, "vital component code is not importable");
   }
 
   const quantity = readQuantityValue(context.resource.valueQuantity);

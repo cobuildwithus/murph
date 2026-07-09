@@ -58,6 +58,7 @@ export const CLINICAL_RAW_RESOURCE_FILES_MAX_TOTAL_BYTES = 32 * 1024 * 1024;
 
 const RAW_PATH_PATTERN = /^raw\/[A-Za-z0-9._/-]+$/u;
 const RELATIVE_PATH_PATTERN = /^(?!\/)(?!.*(?:^|\/)\.\.(?:\/|$))[A-Za-z0-9._/-]+$/u;
+const CLINICAL_FHIR_PATH_ID_PATTERN = /^[A-Za-z0-9._-]+$/u;
 const SHA256_HEX_PATTERN = /^[a-f0-9]{64}$/u;
 const SLUG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/u;
 const UNIT_PATTERN = /^[A-Za-z0-9._/%-]+$/u;
@@ -77,6 +78,26 @@ export const clinicalRawPathSchema = z
     (value) => !value.split("/").includes(".."),
     "Expected a vault-relative raw/* path without parent traversal.",
   );
+
+const clinicalFhirPathIdSchema = z
+  .string()
+  .min(1)
+  .max(120)
+  .regex(CLINICAL_FHIR_PATH_ID_PATTERN, "Expected a path-safe clinical FHIR identifier.")
+  .refine((value) => value !== "." && value !== "..", "Expected a path-safe clinical FHIR identifier.");
+
+export const clinicalFhirManifestPathSchema = clinicalRawPathSchema.refine((value) => {
+  const parts = value.split("/");
+  return (
+    parts.length === 6
+    && parts[0] === "raw"
+    && parts[1] === "clinical"
+    && parts[2] === "fhir"
+    && clinicalFhirPathIdSchema.safeParse(parts[3]).success
+    && clinicalFhirPathIdSchema.safeParse(parts[4]).success
+    && parts[5] === "manifest.json"
+  );
+}, "Expected raw/clinical/fhir/<connectionId>/<retrievalJobId>/manifest.json.");
 
 export const fhirResourceTypeSlugSchema = z.string().regex(SLUG_PATTERN);
 
@@ -132,8 +153,8 @@ export const clinicalRawManifestSchema = z
   .object({
     schemaVersion: z.literal("murph.clinical-raw-manifest.v1"),
     kind: z.literal("clinical_fhir_retrieval"),
-    connectionId: z.string().min(1).max(120),
-    retrievalJobId: z.string().min(1).max(120),
+    connectionId: clinicalFhirPathIdSchema,
+    retrievalJobId: clinicalFhirPathIdSchema,
     providerDirectoryEntryId: z.string().min(1).max(120).optional(),
     sourceSystem: clinicalSourceSystemSchema,
     fhirBaseUrlHash: sha256HexSchema,
@@ -274,10 +295,10 @@ export const clinicalImportPlanSchema = z
     source: z
       .object({
         kind: z.literal("fhir"),
-        rawManifestPath: clinicalRawPathSchema,
+        rawManifestPath: clinicalFhirManifestPathSchema,
         sourceSystem: clinicalSourceSystemSchema,
-        connectionId: z.string().min(1).max(120),
-        retrievalJobId: z.string().min(1).max(120),
+        connectionId: clinicalFhirPathIdSchema,
+        retrievalJobId: clinicalFhirPathIdSchema,
       })
       .strict(),
     candidates: z.array(clinicalImportCandidateSchema).max(CLINICAL_IMPORT_PLAN_MAX_CANDIDATES),
@@ -338,7 +359,7 @@ export function rawRefForClinicalManifestFile(input: {
   manifestPath: string;
   resourceFile: ClinicalRawManifestResourceFile;
 }): string {
-  const manifestParts = input.manifestPath.split("/");
+  const manifestParts = clinicalFhirManifestPathSchema.parse(input.manifestPath).split("/");
   manifestParts.pop();
   const rawRef = [...manifestParts, input.resourceFile.relativePath].join("/");
   return clinicalRawPathSchema.parse(rawRef);

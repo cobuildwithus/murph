@@ -1,5 +1,6 @@
 import {
   CLINICAL_RAW_MANIFEST_MAX_TOTAL_RESOURCES,
+  clinicalFhirManifestPathSchema,
   clinicalImportCandidateSchema,
   clinicalFacetSlug,
   clinicalImportPlanSchema,
@@ -64,6 +65,12 @@ describe("clinical records contracts", () => {
       clinicalRawManifestSchema.parse({
         ...manifest,
         fhirBaseUrlHash: "https-example.test-fhir",
+      }),
+    ).toThrow();
+    expect(() =>
+      clinicalRawManifestSchema.parse({
+        ...manifest,
+        connectionId: "clinical/connection",
       }),
     ).toThrow();
     expect(
@@ -195,8 +202,25 @@ describe("clinical records contracts", () => {
     ).toThrow();
   });
 
-  it("rejects raw path parent traversal at the contract boundary", () => {
+  it("validates raw and clinical manifest paths at the contract boundary", () => {
     expect(() => clinicalRawPathSchema.parse("raw/clinical/fhir/../escape.json")).toThrow();
+    expect(
+      clinicalFhirManifestPathSchema.parse(
+        "raw/clinical/fhir/clinical-connection-1/retrieval-job-1/manifest.json",
+      ),
+    ).toBe("raw/clinical/fhir/clinical-connection-1/retrieval-job-1/manifest.json");
+    expect(() => clinicalFhirManifestPathSchema.parse("raw/tmp/manifest.json")).toThrow();
+    expect(() =>
+      rawRefForClinicalManifestFile({
+        manifestPath: "raw/tmp/manifest.json",
+        resourceFile: {
+          resourceType: "Observation",
+          relativePath: "Observation/page-1.json",
+          count: 1,
+          sha256: SHA256,
+        },
+      })
+    ).toThrow();
   });
 
   it("validates FHIR source refs and unsupported resources", () => {
