@@ -122,35 +122,6 @@ function normalizeAssistantDynamicContextPrompts(
     .filter((prompt) => prompt.length > 0);
 }
 
-const ASSISTANT_STYLE_SETTINGS_TARGET_PATTERN =
-  /\b(?:murph|you|your|assistant)\b/iu;
-const ASSISTANT_STYLE_SETTINGS_CHANGE_PATTERN =
-  /\b(?:adjust|be|change|choose|customize|make|pick|prefer|preference|set|speak|switch|talk|text|tweak|update|write)\b/iu;
-const ASSISTANT_STYLE_SETTINGS_STYLE_PATTERN =
-  /\b(?:casual|direct|formal|sound|sounds|speak|speaks|style|talk|talks|texting|tone|voice|warmer|write|writes|writing)\b/iu;
-
-export function buildAssistantStyleSettingsDynamicPrompt(
-  currentUserPrompt: string | null | undefined,
-): string | null {
-  const prompt = currentUserPrompt?.trim() ?? "";
-  if (!prompt) {
-    return null;
-  }
-
-  if (
-    !ASSISTANT_STYLE_SETTINGS_TARGET_PATTERN.test(prompt)
-    || !ASSISTANT_STYLE_SETTINGS_CHANGE_PATTERN.test(prompt)
-    || !ASSISTANT_STYLE_SETTINGS_STYLE_PATTERN.test(prompt)
-  ) {
-    return null;
-  }
-
-  return [
-    "Assistant style settings:",
-    "- The member is asking about changing Murph's voice, tone, or texting style. Casually mention once that they can change it at `/settings?voice=true` if useful. Do not push the setting beyond answering this request.",
-  ].join("\n");
-}
-
 function renderAssistantToolNameAliases(
   prompt: string,
   aliases: Readonly<Record<string, string>> | null | undefined
@@ -265,6 +236,7 @@ function buildStableRouteCapabilityPrompt(
     buildAssistantPhoneCallGuidanceText(),
     buildAssistantConnectedAppsGuidanceText(),
     buildAssistantProductFeedbackGuidanceText(),
+    buildAssistantStyleSettingsGuidanceText(),
     buildAssistantFamilyPlanGuidanceText(),
     buildAssistantHabitatGuidanceText(),
     buildAssistantHostedGroupGuidanceText(),
@@ -354,6 +326,13 @@ function buildAssistantProductFeedbackGuidanceText(): string {
   return [
     "Product feedback:",
     "- When `murph.submit_product_feedback` is available, capture explicit Murph product frustration, feature requests, interest in shipped changelog or feature-catalog items, clear inferred workflow friction, and repeated Murph-observed product or tool friction. Record only the structured kind, a concise product-only summary, and relevant changelog item ids when known, then continue helping. Changelog ids are optional metadata, not required for general product interest. Start inferred summaries with `Speculative:` and assistant-observed summaries with `Murph-observed:`. Do not log vague low-confidence guesses. Never include tags, topics, raw user wording, raw conversation text, health details, identifiers, contact details, secrets, or provider payloads.",
+  ].join("\n");
+}
+
+function buildAssistantStyleSettingsGuidanceText(): string {
+  return [
+    "Assistant style settings:",
+    "- Members can change Murph's voice, tone, or texting style at `/settings?voice=true`. Mention this casually when they ask how to change how Murph sounds or writes; do not push it otherwise.",
   ].join("\n");
 }
 
