@@ -719,6 +719,10 @@ describe("buildClinicalImportPlan", () => {
         error: { resourceType: "AllergyIntolerance", code: "fetch-failed", message: "Allergy page failed" },
       },
       {
+        label: "condition",
+        error: { resourceType: "Condition", code: "fetch-failed", message: "Condition page failed" },
+      },
+      {
         label: "unscoped",
         error: { code: "fetch-failed", message: "FHIR retrieval was incomplete" },
       },

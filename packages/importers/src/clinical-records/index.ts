@@ -91,6 +91,7 @@ const CANONICAL_BASE64_TEXT = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za
 const DOCUMENT_REFERENCE_TEXT_DECODER = new TextDecoder("utf-8", { fatal: true });
 
 const NO_KNOWN_ALLERGY_CODES = new Set(["716186003"]);
+const ALLERGY_CONFLICT_RESOURCE_TYPES = new Set(["AllergyIntolerance", "Condition"]);
 const ALLERGY_CONDITION_SNOMED_CODES = new Set(["91936005"]);
 const ALLERGY_CONDITION_TEXT_PATTERN = /\b(?:allerg(?:y|ies|ic)|hypersensitiv(?:ity|e))\b/iu;
 const NO_KNOWN_ALLERGY_TEXTS = new Set([
@@ -237,7 +238,7 @@ async function scanAllergyConflictEvidence(input: {
 
 function hasManifestAllergyRetrievalError(manifest: ClinicalRawManifest): boolean {
   return manifest.errors?.some((error) =>
-    error.resourceType === undefined || error.resourceType === "AllergyIntolerance"
+    error.resourceType === undefined || ALLERGY_CONFLICT_RESOURCE_TYPES.has(error.resourceType)
   ) ?? false;
 }
 
@@ -1036,6 +1037,9 @@ function isUnambiguousNoKnownAllergy(resource: AllergyIntolerance): boolean {
 }
 
 function isAllergyConflictEvidence(resource: Resource): boolean {
+  if (!ALLERGY_CONFLICT_RESOURCE_TYPES.has(resource.resourceType)) {
+    return false;
+  }
   if (isAllergyIntolerance(resource)) {
     return !isImportableGlobalNoKnownAllergyAssertion(resource);
   }

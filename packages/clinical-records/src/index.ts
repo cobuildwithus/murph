@@ -126,7 +126,23 @@ export const clinicalRawManifestResourceFileSchema = z
     sha256: sha256HexSchema,
     pageUrlHash: sha256HexSchema.optional(),
   })
-  .strict();
+  .strict()
+  .superRefine((resourceFile, context) => {
+    const pathParts = resourceFile.relativePath.split("/");
+    const hasResourceTypeDirectory = (
+      clinicalFhirPathIdSchema.safeParse(resourceFile.resourceType).success
+      && pathParts.length >= 2
+      && pathParts[0] === resourceFile.resourceType
+      && pathParts.slice(1).every((part) => part.length > 0 && part !== ".")
+    );
+    if (!hasResourceTypeDirectory) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Expected a relative path beneath the declared FHIR resource type directory.",
+        path: ["relativePath"],
+      });
+    }
+  });
 
 const clinicalRawManifestResourceFilesSchema = z
   .array(clinicalRawManifestResourceFileSchema)
@@ -359,8 +375,9 @@ export function rawRefForClinicalManifestFile(input: {
   manifestPath: string;
   resourceFile: ClinicalRawManifestResourceFile;
 }): string {
+  const resourceFile = clinicalRawManifestResourceFileSchema.parse(input.resourceFile);
   const manifestParts = clinicalFhirManifestPathSchema.parse(input.manifestPath).split("/");
   manifestParts.pop();
-  const rawRef = [...manifestParts, input.resourceFile.relativePath].join("/");
+  const rawRef = [...manifestParts, resourceFile.relativePath].join("/");
   return clinicalRawPathSchema.parse(rawRef);
 }

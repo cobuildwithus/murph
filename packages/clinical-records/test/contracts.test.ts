@@ -114,28 +114,30 @@ describe("clinical records contracts", () => {
       }),
     ).toThrow(/total resource count/u);
 
-    expect(() =>
-      clinicalRawManifestSchema.parse({
-        schemaVersion: "murph.clinical-raw-manifest.v1",
-        kind: "clinical_fhir_retrieval",
-        connectionId: "clinical-connection-1",
-        retrievalJobId: "retrieval-job-1",
-        sourceSystem: "cerner-fhir",
-        fhirBaseUrlHash: FHIR_BASE_URL_HASH,
-        patientIdHash: PATIENT_ID_HASH,
-        fetchedAt: "2026-07-01T12:00:00.000Z",
-        resourceFiles: [
-          {
-            resourceType: "Observation",
-            relativePath: "../Observation/page-1.json",
-            count: 1,
-            sha256: SHA256,
-          },
-        ],
-        requestedScopes: [],
-        grantedScopes: [],
-      }),
-    ).toThrow();
+    for (const relativePath of ["../Observation/page-1.json", "misc/page-1.json", "page-1.json"]) {
+      expect(() =>
+        clinicalRawManifestSchema.parse({
+          schemaVersion: "murph.clinical-raw-manifest.v1",
+          kind: "clinical_fhir_retrieval",
+          connectionId: "clinical-connection-1",
+          retrievalJobId: "retrieval-job-1",
+          sourceSystem: "cerner-fhir",
+          fhirBaseUrlHash: FHIR_BASE_URL_HASH,
+          patientIdHash: PATIENT_ID_HASH,
+          fetchedAt: "2026-07-01T12:00:00.000Z",
+          resourceFiles: [
+            {
+              resourceType: "Observation",
+              relativePath,
+              count: 1,
+              sha256: SHA256,
+            },
+          ],
+          requestedScopes: [],
+          grantedScopes: [],
+        }),
+      ).toThrow();
+    }
   });
 
   it("normalizes deterministic FHIR external references", () => {
@@ -216,6 +218,17 @@ describe("clinical records contracts", () => {
         resourceFile: {
           resourceType: "Observation",
           relativePath: "Observation/page-1.json",
+          count: 1,
+          sha256: SHA256,
+        },
+      })
+    ).toThrow();
+    expect(() =>
+      rawRefForClinicalManifestFile({
+        manifestPath: "raw/clinical/fhir/clinical-connection-1/retrieval-job-1/manifest.json",
+        resourceFile: {
+          resourceType: "Observation",
+          relativePath: "misc/page-1.json",
           count: 1,
           sha256: SHA256,
         },
