@@ -286,10 +286,15 @@ test.sequential(
 
     const listed = requireData(
       await runIsolatedCli<{
+        count: number
+        filters: {
+          limit: number
+        }
         stateRoot: string
         sessions: Array<{
           sessionId: string
           alias: string | null
+          target?: unknown
         }>
       }>(['assistant', 'session', 'list', '--vault', vaultRoot], {
         env: {
@@ -297,10 +302,13 @@ test.sequential(
         },
       }),
     )
+    assert.equal(listed.count, 1)
+    assert.equal(listed.filters.limit, 5)
     assert.equal(listed.sessions.length, 1)
     assert.equal(listed.sessions[0]?.sessionId, created.session.sessionId)
     assert.equal(listed.sessions[0]?.alias, 'telegram:bob')
     assert.equal(listed.stateRoot, statePaths.assistantStateRoot)
+    assert.equal('target' in (listed.sessions[0] ?? {}), false)
     assert.equal(
       Object.prototype.hasOwnProperty.call(listed.sessions[0] ?? {}, 'lastAssistantMessage'),
       false,
@@ -329,6 +337,89 @@ test.sequential(
       Object.prototype.hasOwnProperty.call(shown.session, 'lastAssistantMessage'),
       false,
     )
+  },
+  ASSISTANT_CLI_TIMEOUT_MS,
+)
+
+test.sequential(
+  'assistant session list returns an empty compact page for a fresh vault',
+  async () => {
+    const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-cli-empty-'))
+    const homeRoot = path.join(parent, 'home')
+    const vaultRoot = path.join(parent, 'vault')
+    cleanupPaths.push(parent)
+    await mkdir(homeRoot, { recursive: true })
+    await initializeVault({ vaultRoot })
+
+    const listed = requireData(
+      await runIsolatedCli<{
+        count: number
+        filters: {
+          limit: number
+        }
+        sessions: unknown[]
+      }>(['assistant', 'session', 'list', '--vault', vaultRoot], {
+        env: {
+          HOME: homeRoot,
+        },
+      }),
+    )
+
+    assert.equal(listed.count, 0)
+    assert.equal(listed.filters.limit, 5)
+    assert.deepEqual(listed.sessions, [])
+  },
+  ASSISTANT_CLI_TIMEOUT_MS,
+)
+
+test.sequential(
+  'assistant session list reads legacy session files without repair',
+  async () => {
+    const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-cli-legacy-'))
+    const homeRoot = path.join(parent, 'home')
+    const vaultRoot = path.join(parent, 'vault')
+    cleanupPaths.push(parent)
+    await mkdir(homeRoot, { recursive: true })
+    await initializeVault({ vaultRoot })
+
+    await resolveAssistantSession({
+      vault: vaultRoot,
+      alias: 'legacy:older',
+      now: new Date('2026-06-29T21:00:00.000Z'),
+    })
+    const newer = await resolveAssistantSession({
+      vault: vaultRoot,
+      alias: 'legacy:newer',
+      now: new Date('2026-06-29T22:00:00.000Z'),
+    })
+    const statePaths = resolveAssistantStatePaths(vaultRoot)
+    await writeFile(
+      statePaths.indexesPath,
+      JSON.stringify({ version: 1, aliases: {}, conversationKeys: {} }),
+      'utf8',
+    )
+
+    const listed = requireData(
+      await runIsolatedCli<{
+        count: number
+        filters: {
+          limit: number
+        }
+        sessions: Array<{
+          sessionId: string
+          target?: unknown
+        }>
+      }>(['assistant', 'session', 'list', '--limit', '1', '--vault', vaultRoot], {
+        env: {
+          HOME: homeRoot,
+        },
+      }),
+    )
+
+    assert.equal(listed.count, 1)
+    assert.equal(listed.filters.limit, 1)
+    assert.equal(listed.sessions[0]?.sessionId, newer.session.sessionId)
+    assert.equal('target' in (listed.sessions[0] ?? {}), false)
   },
   ASSISTANT_CLI_TIMEOUT_MS,
 )

@@ -138,8 +138,13 @@ import {
   reconcileHostedThreadContainerParticipants,
 } from "@/src/lib/hosted-groups/group-tool";
 import {
+  filterHostedRuntimeGroupToolResponseProjectionScopes,
+} from "@/src/lib/hosted-groups/group-tool-scope-filter";
+import {
   HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES,
+  buildHostedVaultShareActivityDistanceProjectionScope,
   buildHostedVaultShareActivityMinutesProjectionScope,
+  buildHostedVaultShareActivitySessionCountProjectionScope,
   buildHostedVaultShareProjectionScopeKey,
 } from "@murphai/hosted-execution/vault-share";
 import {
@@ -163,6 +168,12 @@ const RENAMED_GROUP_SUMMARY = {
 };
 const SLEEP_SCOPE = { projectionKind: "sleep-times.v0" } as const;
 const RUNNING_SCOPE = buildHostedVaultShareActivityMinutesProjectionScope({
+  activityKind: "running",
+});
+const RUNNING_DISTANCE_SCOPE = buildHostedVaultShareActivityDistanceProjectionScope({
+  activityKind: "running",
+});
+const RUNNING_SESSION_COUNT_SCOPE = buildHostedVaultShareActivitySessionCountProjectionScope({
   activityKind: "running",
 });
 const GROUP_RUNTIME_LINQ_THREAD = {
@@ -698,6 +709,77 @@ describe("handleHostedRuntimeGroupTool", () => {
   });
 });
 
+describe("filterHostedRuntimeGroupToolResponseProjectionScopes", () => {
+  const groupWithSelectorScopes = {
+    ...GROUP_SUMMARY,
+    members: [{
+      grantedVaultShareProjectionKinds: [
+        "sleep-times.v0" as const,
+        RUNNING_DISTANCE_SCOPE.projectionKind,
+      ],
+      grantedVaultShareProjectionScopes: [SLEEP_SCOPE, RUNNING_DISTANCE_SCOPE],
+      handle: "+15551234567",
+      memberId: "member_runner",
+      role: "member",
+    }],
+    requestedVaultShareProjectionKinds: [
+      "sleep-times.v0" as const,
+      RUNNING_DISTANCE_SCOPE.projectionKind,
+    ],
+    requestedVaultShareProjectionScopes: [SLEEP_SCOPE, RUNNING_DISTANCE_SCOPE],
+  };
+
+  it("hides unsupported selector scopes from legacy group-tool callers", () => {
+    const filtered = filterHostedRuntimeGroupToolResponseProjectionScopes({
+      action: "read_current",
+      result: {
+        group: groupWithSelectorScopes,
+        status: "ok",
+      },
+    }, new Set([buildHostedVaultShareProjectionScopeKey(SLEEP_SCOPE)]));
+
+    expect(filtered).toEqual({
+      action: "read_current",
+      result: {
+        group: {
+          ...groupWithSelectorScopes,
+          members: [{
+            ...groupWithSelectorScopes.members[0],
+            grantedVaultShareProjectionKinds: ["sleep-times.v0"],
+            grantedVaultShareProjectionScopes: [SLEEP_SCOPE],
+          }],
+          requestedVaultShareProjectionKinds: ["sleep-times.v0"],
+          requestedVaultShareProjectionScopes: [SLEEP_SCOPE],
+        },
+        status: "ok",
+      },
+    });
+  });
+
+  it("keeps selector scopes for current group-tool callers", () => {
+    const filtered = filterHostedRuntimeGroupToolResponseProjectionScopes({
+      action: "create_join_link",
+      result: {
+        group: groupWithSelectorScopes,
+        joinUrl: "https://www.withmurph.ai/groups/join/abc123",
+        status: "ok",
+      },
+    }, new Set([
+      buildHostedVaultShareProjectionScopeKey(SLEEP_SCOPE),
+      buildHostedVaultShareProjectionScopeKey(RUNNING_DISTANCE_SCOPE),
+    ]));
+
+    expect(filtered).toEqual({
+      action: "create_join_link",
+      result: {
+        group: groupWithSelectorScopes,
+        joinUrl: "https://www.withmurph.ai/groups/join/abc123",
+        status: "ok",
+      },
+    });
+  });
+});
+
 describe("hosted group join policy", () => {
   it("keeps email and optional health sharing on the closed projection registry", () => {
     expect(readHostedGroupJoinPolicy({
@@ -736,47 +818,61 @@ describe("hosted group join policy", () => {
       { projectionKind: "sleep-times.v0" },
       { projectionKind: "activity-days.v0" },
       RUNNING_SCOPE,
+      RUNNING_DISTANCE_SCOPE,
+      RUNNING_SESSION_COUNT_SCOPE,
       { projectionKind: "heart-rate-zones-days.v0" },
     ])).toEqual([
       {
         description:
-          "Share your email so this group's Murph can send the newsletter. Your email is visible to the group.",
+          "Shares your email so the group's Murph can send the newsletter. Visible to the group.",
         label: "Email address",
         projectionKind: "group-email.v0",
         projectionScope: { projectionKind: "group-email.v0" },
         projectionScopeKey: "group-email.v0",
       },
       {
-        description:
-          "Lets this group see your 7 most recent days of sleep start and end times.",
+        description: "Shares your last 7 days of sleep start and end times.",
         label: "Sleep timing",
         projectionKind: "sleep-times.v0",
         projectionScope: { projectionKind: "sleep-times.v0" },
         projectionScopeKey: "sleep-times.v0",
       },
       {
-        description:
-          "Lets this group see your 7 most recent days of daily active minutes.",
+        description: "Shares your last 7 days of active minutes.",
         label: "Activity minutes",
         projectionKind: "activity-days.v0",
         projectionScope: { projectionKind: "activity-days.v0" },
         projectionScopeKey: "activity-days.v0",
       },
       {
-        description:
-          "Lets this group see your 7 most recent days of workout heart-rate zone minutes.",
+        description: "Shares your last 7 days of heart-rate zone minutes.",
         label: "Heart-rate zones",
         projectionKind: "heart-rate-zones-days.v0",
         projectionScope: { projectionKind: "heart-rate-zones-days.v0" },
         projectionScopeKey: "heart-rate-zones-days.v0",
       },
       {
-        description:
-          "Lets this group see your 7 most recent days of daily running minutes.",
+        description: "Shares your last 7 days of running minutes.",
         label: "Running minutes",
         projectionKind: "activity-minutes-days.v1",
         projectionScope: RUNNING_SCOPE,
         projectionScopeKey: buildHostedVaultShareProjectionScopeKey(RUNNING_SCOPE),
+      },
+      {
+        description:
+          "Shares daily total distance and session count for running activities. Does not share routes, GPS, pace, timestamps, heart rate, calories, or individual workouts.",
+        label: "Recent running distance and session count",
+        projectionKind: "activity-distance-days.v1",
+        projectionScope: RUNNING_DISTANCE_SCOPE,
+        projectionScopeKey: buildHostedVaultShareProjectionScopeKey(RUNNING_DISTANCE_SCOPE),
+      },
+      {
+        description:
+          "Shares daily count of running activity sessions. Does not share duration, distance, routes, GPS, timestamps, heart rate, calories, or individual workouts.",
+        label: "Recent running session count",
+        projectionKind: "activity-session-count-days.v1",
+        projectionScope: RUNNING_SESSION_COUNT_SCOPE,
+        projectionScopeKey: buildHostedVaultShareProjectionScopeKey(RUNNING_SESSION_COUNT_SCOPE),
       },
     ]);
 
@@ -1141,6 +1237,40 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     expect(mocks.createHostedGroupJoinLinkForOwnedThreadContainerTx).not.toHaveBeenCalled();
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
     expect(mocks.recordHostedGroupJoinOfferTx).not.toHaveBeenCalled();
+  });
+
+  it("discloses session count in distance-scope join offer copy", async () => {
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_container",
+      request: {
+        action: "post_join_offer",
+        joinOffer: {
+          messageTemplate:
+            "Like this to join. It shares {{share_scope}} with the group. Join page: {{join_url}}.",
+          projectionScopes: [RUNNING_DISTANCE_SCOPE],
+        },
+        linqThread: LINQ_THREAD,
+      },
+    })).resolves.toEqual({
+      action: "post_join_offer",
+      result: {
+        group: GROUP_SUMMARY,
+        joinUrl: "https://www.withmurph.ai/groups/join/abc123",
+        status: "sent",
+      },
+    });
+
+    expect(mocks.createHostedGroupJoinLinkForOwnedThreadContainerTx).toHaveBeenCalledWith(
+      expect.objectContaining({
+        requestedVaultShareProjectionScopes: [RUNNING_DISTANCE_SCOPE],
+      }),
+    );
+    expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message:
+          "Like this to join. It shares your Murph profile name and recent running distance and session count with the group. Join page: https://www.withmurph.ai/groups/join/abc123.",
+      }),
+    );
   });
 
   it("does not create or send a join offer without the required message template", async () => {

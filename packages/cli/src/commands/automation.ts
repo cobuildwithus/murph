@@ -266,6 +266,21 @@ function buildAutomationRouteFromOptions(
     resolveAssistantDeliveryRouteWithCurrentRoute(explicit, currentRoute),
   );
 
+  if (
+    currentRoute &&
+    explicit.deliveryTarget === null &&
+    explicit.identityId === null &&
+    explicit.participantId === null &&
+    explicit.threadId === null &&
+    parsed.deliveryTarget === normalizeAutomationRouteOption(currentRoute.deliveryTarget) &&
+    parsed.channel === normalizeAutomationRouteOption(currentRoute.channel)
+  ) {
+    return {
+      ...parsed,
+      currentRouteSnapshot: true,
+    };
+  }
+
   return parsed;
 }
 
@@ -870,7 +885,7 @@ export function registerAutomationCommands(cli: Cli.Cli) {
         .min(1)
         .optional()
         .describe("Optional lexical filter across title, instructions, route, and metadata."),
-      limit: z.number().int().positive().max(200).default(50),
+      limit: z.number().int().positive().max(200).default(10),
     }),
     output: automationListResultSchema,
     async run(context) {

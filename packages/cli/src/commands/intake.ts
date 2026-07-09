@@ -140,7 +140,7 @@ export function registerIntakeCommands(cli: Cli.Cli, services: VaultServices) {
       options: withBaseOptions({
         from: localDateSchema.optional(),
         to: localDateSchema.optional(),
-        limit: z.number().int().positive().max(200).default(50),
+        limit: z.number().int().positive().max(200).default(10),
       }),
       output: listResultSchema,
       async run({ options }) {

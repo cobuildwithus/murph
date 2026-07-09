@@ -304,6 +304,94 @@ describe("hosted AI usage allowance pricing", () => {
     });
   });
 
+  it("prices GPT-5.6 model slugs with official preview standard and flex accounting", () => {
+    expect(priceHostedAiUsageForAllowance({
+      ...BASE_USAGE_RECORD,
+      requestedModel: "gpt-5.6-terra",
+      servedModel: "openai/gpt-5.6-terra-2026-07-08",
+    })).toMatchObject({
+      costUsdMicros: 948n,
+      counted: true,
+      pricingSnapshot: {
+        model: "gpt-5.6-terra",
+        modelSource: "served",
+        pricingSource: "https://help.openai.com/en/articles/20001325-a-preview-of-gpt-56-sol-terra-and-luna",
+        ratesUsdMicrosPerMillionTokens: {
+          cachedInput: "250000",
+          cacheWrite: "3125000",
+          input: "2500000",
+          output: "15000000",
+        },
+        requestedModel: "gpt-5.6-terra",
+        servedModel: "openai/gpt-5.6-terra-2026-07-08",
+        tokenPricingBasis: "standard",
+      },
+      pricingVersion: "openai-gpt-5.6-preview-pricing-2026-07-08-standard",
+    });
+
+    expect(priceHostedAiUsageForAllowance({
+      ...BASE_USAGE_RECORD,
+      providerName: "hosted-openai",
+      requestedModel: "gpt-5.6-luna",
+      servedModel: "gpt-5.6-luna",
+      tokenPricingBasis: "openai-flex",
+    })).toMatchObject({
+      costUsdMicros: 190n,
+      counted: true,
+      pricingSnapshot: {
+        model: "gpt-5.6-luna",
+        pricingSource: "https://help.openai.com/en/articles/20001325-a-preview-of-gpt-56-sol-terra-and-luna",
+        ratesUsdMicrosPerMillionTokens: {
+          cachedInput: "100000",
+          cacheWrite: "1250000",
+          input: "1000000",
+          output: "6000000",
+        },
+        tokenPricingAdjustment: {
+          denominator: "2",
+          numerator: "1",
+        },
+        tokenPricingBasis: "openai-flex",
+      },
+      pricingVersion: "openai-gpt-5.6-preview-pricing-2026-07-08-openai-flex",
+    });
+  });
+
+  it("prices GPT-5.6 cache-write tokens at the official preview write rate", () => {
+    expect(priceHostedAiUsageForAllowance({
+      ...BASE_USAGE_RECORD,
+      cacheWriteTokens: 1_000,
+      cachedInputTokens: 0,
+      inputTokens: 1_000,
+      outputTokens: 0,
+      requestedModel: "gpt-5.6-sol",
+      servedModel: "gpt-5.6-sol",
+      totalTokens: 1_000,
+    })).toMatchObject({
+      costUsdMicros: 6_250n,
+      counted: true,
+      pricingSnapshot: {
+        model: "gpt-5.6-sol",
+        ratesUsdMicrosPerMillionTokens: {
+          cachedInput: "500000",
+          cacheWrite: "6250000",
+          input: "5000000",
+          output: "30000000",
+        },
+        standardCostUsdMicros: "6250",
+        tokenPricingBasis: "standard",
+        tokens: {
+          billableInput: "0",
+          cacheWrite: "1000",
+          cachedInput: "0",
+          input: "1000",
+          output: "0",
+        },
+      },
+      pricingVersion: "openai-gpt-5.6-preview-pricing-2026-07-08-standard",
+    });
+  });
+
   it("applies OpenAI flex adjustment once to the rounded standard token cost", () => {
     expect(priceHostedAiUsageForAllowance({
       ...BASE_USAGE_RECORD,

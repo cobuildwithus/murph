@@ -97,6 +97,61 @@ test("AuthButton passes authenticated clicks through without loading Privy", asy
   expect(mocks.openAuthDialog).not.toHaveBeenCalled();
 });
 
+test("AuthButton can require a stronger caller-provided auth condition", async () => {
+  const onClick = vi.fn();
+  const onConnect = vi.fn();
+  const { button, cleanup, window } = await renderClientComponent(
+    createElement(
+      AuthButton,
+      {
+        authSatisfied: false,
+        onClick,
+        onConnect,
+        variant: "outline",
+      },
+      "Continue",
+    ),
+  );
+  cleanupRender = cleanup;
+
+  await act(async () => {
+    button.dispatchEvent(new window.Event("click", { bubbles: true }));
+  });
+
+  expect(mocks.openAuthDialog).toHaveBeenCalledTimes(1);
+  expect(onConnect).not.toHaveBeenCalled();
+  expect(onClick).not.toHaveBeenCalled();
+});
+
+test("AuthButton lets callers handle auth-required clicks", async () => {
+  const onAuthRequired = vi.fn();
+  const onClick = vi.fn();
+  const onConnect = vi.fn();
+  const { button, cleanup, window } = await renderClientComponent(
+    createElement(
+      AuthButton,
+      {
+        authSatisfied: false,
+        onAuthRequired,
+        onClick,
+        onConnect,
+        variant: "outline",
+      },
+      "Continue",
+    ),
+  );
+  cleanupRender = cleanup;
+
+  await act(async () => {
+    button.dispatchEvent(new window.Event("click", { bubbles: true }));
+  });
+
+  expect(onAuthRequired).toHaveBeenCalledTimes(1);
+  expect(mocks.openAuthDialog).not.toHaveBeenCalled();
+  expect(onConnect).not.toHaveBeenCalled();
+  expect(onClick).not.toHaveBeenCalled();
+});
+
 test("AuthButton can render a connect label when no children are supplied", async () => {
   const { button, cleanup } = await renderClientComponent(
     createElement(AuthButton, {

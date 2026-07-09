@@ -1817,6 +1817,7 @@ describe('assistant channels runtime seam', () => {
       answeredMailboxItemIds: [],
       directRecipientPhoneNumber: '+15550001',
       fromPhoneNumber: null,
+      homeRouteFallbackAllowed: false,
       idempotencyKey: 'idem-stale-thread',
       message: 'hello again',
       replyToMessageId: null,

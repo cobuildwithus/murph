@@ -131,6 +131,7 @@ function makeSleepWindowCandidate(
 function makeDataset(overrides: Partial<WearableDataset>): WearableDataset {
   return {
     activitySessionAggregates: overrides.activitySessionAggregates ?? [],
+    metricSuppressionEvidence: overrides.metricSuppressionEvidence ?? [],
     metricCandidates: overrides.metricCandidates ?? [],
     provenanceDiagnostics: overrides.provenanceDiagnostics ?? [],
     rawMetricCandidates: overrides.rawMetricCandidates ?? [],

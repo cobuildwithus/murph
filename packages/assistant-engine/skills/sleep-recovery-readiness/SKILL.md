@@ -65,7 +65,7 @@ Only inspect information that could change the route:
 - plausible context such as life stress, travel, shift work, caffeine, alcohol, meals, medication, heat, or altitude;
 - device trend and data quality when wearables matter.
 
-Ask at most one decision-changing question before recommending, unless immediate safety requires more. Do not turn a simple readiness question into a full sleep intake.
+Ask at most one question per message. For acute readiness calls, one decision-changing question before recommending is usually enough. For sleep improvement requests where vault and wearable evidence is thin, follow the understand-before-recommending core rules: reflect what the data shows, then run a short discovery loop — one concrete question per message over a few messages — before naming a lever. Do not turn either path into a full sleep intake.
 
 ## The five modes
 
@@ -109,7 +109,9 @@ Find the dominant bottleneck before giving advice:
 - **Environment or exposure:** light, noise, temperature, caregiving, substances, medication, meals, work, or stimulating content plausibly interferes.
 - **Irregular schedule:** shifts, travel, school, caregiving, or rotating obligations make a conventional routine unrealistic.
 
-Pick one lever that addresses the bottleneck. If there is no meaningful impairment or repeatable problem, leave ordinary variation alone. Do not dump a generic sleep-hygiene checklist.
+Ground the bottleneck hunt in evidence before asking anything: recent sleep timing, duration, and consistency from connected wearable summaries, plus saved routines, environment facts, and prior sleep notes in the vault. Reflect what the data shows in plain language. When the bottleneck is still unclear, discovery is the expected next step, not a checklist: ask for the most useful missing facts — evening routine, bedroom temperature and light, caffeine and alcohol timing, stress, schedule — one question per message, and save the answers to the vault or memory as they arrive. Then pick one lever.
+
+If there is no meaningful impairment or repeatable problem, leave ordinary variation alone. Do not dump a generic sleep-hygiene checklist.
 
 A practical routine usually needs only:
 
@@ -211,14 +213,14 @@ Recovery support should make action easier, not make the user feel monitored or 
 
 ## Response contract
 
-Lead with the recommendation. A useful answer usually has four parts:
+Lead with the recommendation when the evidence supports a call; for a thin-evidence sleep improvement request, lead with the grounded readback and one question instead. A useful answer usually has four parts:
 
 1. **Call:** leave it alone, planned, guarded, easy/recovery, rest, recovery block, one sleep lever, or care route.
 2. **Why:** the one to three facts that actually drove the decision, plus meaningful uncertainty.
 3. **Action:** the exact guardrail, behavior, or handoff.
 4. **Recheck:** what to observe and when to change course.
 
-Ask one question only when the answer could materially change the call. Use plain language rather than exposing internal route labels or a pseudo-clinical object.
+Ask one question per message, and only when the answer could materially change the call or the lever; mode 2's bounded discovery loop counts as materially changing the lever. Use plain language rather than exposing internal route labels or a pseudo-clinical object.
 
 When another skill calls this layer, return a compact handoff:
 

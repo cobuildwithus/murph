@@ -928,10 +928,12 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     };
     const defaultRoute = {
       channel: "linq",
+      currentRouteSnapshot: true,
       deliverySource: null,
       deliveryTarget: "chat_synthetic_seed_route",
       identityId: "identity_synthetic_seed_route",
       participantId: "participant_synthetic_seed_route",
+      threadIsDirect: true,
       threadId: "thread_synthetic_seed_route",
     };
     mocks.readAssistantInputEvent.mockResolvedValueOnce({
@@ -2399,10 +2401,12 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     const seededNextWakeAt = "2026-04-30T17:00:00.000Z";
     const defaultRoute = {
       channel: "linq",
+      currentRouteSnapshot: true,
       deliverySource: null,
       deliveryTarget: "chat_synthetic_seed_route",
       identityId: "identity_synthetic_seed_route",
       participantId: "participant_synthetic_seed_route",
+      threadIsDirect: true,
       threadId: "thread_synthetic_seed_route",
     };
     mocks.readAssistantInputEvent.mockResolvedValueOnce({
@@ -2486,6 +2490,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     );
     const defaultRoute = {
       channel: "linq",
+      currentRouteSnapshot: true,
       deliverySource: null,
       deliveryTarget: "chat_synthetic_seed_route",
       identityId: "identity_synthetic_seed_route",

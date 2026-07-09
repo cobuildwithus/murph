@@ -64,7 +64,7 @@ const wearableResolvedMetricSchema = z.object({
   exactDuplicateCount: z.number().int().nonnegative().optional(),
   fallbackFromMetric: nullableTextSchema.optional(),
   fallbackReason: nullableTextSchema.optional(),
-  metric: z.string().min(1),
+  metric: z.string().min(1).optional(),
   occurredAt: nullableTimestampSchema.optional(),
   provider: nullableTextSchema.optional(),
   recordedAt: nullableTimestampSchema.optional(),
@@ -414,8 +414,8 @@ function withWearableListOptions() {
       .int()
       .positive()
       .max(200)
-      .default(30)
-      .describe('Maximum number of daily summaries to return.'),
+      .default(3)
+      .describe('Maximum number of daily summaries to return. Defaults to 3.'),
   })
 }
 

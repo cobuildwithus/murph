@@ -779,6 +779,7 @@ describe('outbound channel runtime', () => {
         message: 'hello binding',
         replyToMessageId: 'reply-over-binding',
         subject: null,
+        threadIsDirect: true,
       },
       {},
     )

@@ -3,7 +3,7 @@ import { mkdir, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 
 import { inferGatewayReplyRouteForChannel } from '@murphai/gateway-core'
-import type { AutomationSchedule } from '@murphai/contracts'
+import type { AutomationRoute, AutomationSchedule } from '@murphai/contracts'
 import {
   assistantCronJobSchema,
   assistantOutboxIntentSchema,
@@ -24,14 +24,7 @@ type MockAutomationRecord = {
   continuityPolicy: 'fresh' | 'preserve'
   createdAt: string
   instructions: string
-  route: {
-    channel: string
-    deliverySource: { kind: 'linq'; fromPhoneNumber: string } | null
-    deliveryTarget: string | null
-    identityId: string | null
-    participantId: string | null
-    threadId: string | null
-  }
+  route: AutomationRoute
   schedule: AutomationSchedule
   relativePath?: string
   slug?: string
@@ -4014,6 +4007,171 @@ describe('assistant cron runtime orchestration', () => {
     )
   })
 
+  it('consumes non-retryable delivery failures for scheduled canonical reminders', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-08T10:00:00.000Z'))
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-terminal-delivery-failure-',
+    )
+    const paths = resolveAssistantStatePaths(vaultRoot)
+    const canonicalJob = await createCanonicalJob(
+      vaultRoot,
+      'terminal delivery reminder',
+    )
+    const error = Object.assign(
+      new Error('Hosted Linq egress authority assertion request failed.'),
+      {
+        code: 'HOSTED_LINQ_EGRESS_ROUTE_AUTHORITY_MISMATCH',
+        details: {
+          assistantNotificationStage: 'delivery',
+        },
+        retryable: false,
+      },
+    )
+    cronMocks.sendAssistantMessageLocal.mockRejectedValueOnce(error)
+
+    const summary = await processDueAssistantCronJobsLocal({
+      limit: 1,
+      vault: vaultRoot,
+    })
+
+    expect(summary).toEqual({
+      failed: 1,
+      processed: 1,
+      succeeded: 0,
+    })
+    const runtimeStore = await readAssistantCronCanonicalRuntimeStore(paths)
+    const runtimeRecord = runtimeStore.jobs.find((record) =>
+      record.jobId === canonicalJob.jobId
+    )
+    expect(runtimeRecord?.state.pendingOccurrenceAt).toBeNull()
+    expect(runtimeRecord?.state.retryAfterAt).toBeNull()
+    expect(runtimeRecord?.state.lastFailedAt).toBe('2026-04-08T10:00:00.000Z')
+    expect(runtimeRecord?.state.lastError).toBe(
+      'Hosted Linq egress authority assertion request failed.',
+    )
+    expect(runtimeRecord?.state.consecutiveFailures).toBe(0)
+    await expect(
+      listAssistantCronRuns({
+        job: canonicalJob.jobId,
+        vault: vaultRoot,
+      }),
+    ).resolves.toMatchObject({
+      jobId: canonicalJob.jobId,
+      runs: [
+        expect.objectContaining({
+          error: 'Hosted Linq egress authority assertion request failed.',
+          status: 'failed',
+        }),
+      ],
+    })
+  })
+
+  it('keeps hosted control-plane 5xx delivery failures retryable for scheduled canonical reminders', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-08T10:00:00.000Z'))
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-transient-delivery-failure-',
+    )
+    const paths = resolveAssistantStatePaths(vaultRoot)
+    const canonicalJob = await createCanonicalJob(
+      vaultRoot,
+      'transient delivery reminder',
+    )
+    const error = Object.assign(
+      new Error('Hosted Linq egress engagement failed with HTTP 500. Internal error.'),
+      {
+        code: 'INTERNAL_ERROR',
+        details: {
+          assistantNotificationStage: 'delivery',
+        },
+        statusCode: 500,
+      },
+    )
+    cronMocks.sendAssistantMessageLocal.mockRejectedValueOnce(error)
+
+    const summary = await processDueAssistantCronJobsLocal({
+      limit: 1,
+      vault: vaultRoot,
+    })
+
+    expect(summary).toEqual({
+      failed: 1,
+      processed: 1,
+      succeeded: 0,
+    })
+    const runtimeStore = await readAssistantCronCanonicalRuntimeStore(paths)
+    const runtimeRecord = runtimeStore.jobs.find((record) =>
+      record.jobId === canonicalJob.jobId
+    )
+    expect(runtimeRecord?.state.pendingOccurrenceAt).toBe(
+      '2026-04-08T10:00:00.000Z',
+    )
+    expect(runtimeRecord?.state.retryAfterAt).toBe('2026-04-08T10:00:30.000Z')
+    expect(runtimeRecord?.state.lastFailedAt).toBe('2026-04-08T10:00:00.000Z')
+    expect(runtimeRecord?.state.lastError).toBe(
+      'Hosted Linq egress engagement failed with HTTP 500. Internal error.',
+    )
+    expect(runtimeRecord?.state.consecutiveFailures).toBe(1)
+  })
+
+  it('advances consumed canonical delivery failures after an older success', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-09T10:00:00.000Z'))
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-terminal-delivery-after-success-',
+    )
+    const paths = resolveAssistantStatePaths(vaultRoot)
+    const canonicalJob = await createCanonicalJob(
+      vaultRoot,
+      'terminal delivery after success',
+    )
+    await updateCanonicalRuntimeState(vaultRoot, canonicalJob.jobId, (record) => ({
+      ...record,
+      updatedAt: '2026-04-08T10:00:05.000Z',
+      state: {
+        ...record.state,
+        lastRunAt: '2026-04-08T10:00:05.000Z',
+        lastSucceededAt: '2026-04-08T10:00:05.000Z',
+        lastError: null,
+        consecutiveFailures: 0,
+      },
+    }))
+    const error = Object.assign(
+      new Error('Hosted Linq egress authority assertion request failed.'),
+      {
+        code: 'HOSTED_LINQ_EGRESS_ROUTE_AUTHORITY_MISMATCH',
+        details: {
+          assistantNotificationStage: 'delivery',
+        },
+        retryable: false,
+      },
+    )
+    cronMocks.sendAssistantMessageLocal.mockRejectedValueOnce(error)
+
+    const summary = await processDueAssistantCronJobsLocal({
+      limit: 1,
+      vault: vaultRoot,
+    })
+
+    expect(summary).toEqual({
+      failed: 1,
+      processed: 1,
+      succeeded: 0,
+    })
+    const runtimeStore = await readAssistantCronCanonicalRuntimeStore(paths)
+    const runtimeRecord = runtimeStore.jobs.find((record) =>
+      record.jobId === canonicalJob.jobId
+    )
+    expect(runtimeRecord?.state.pendingOccurrenceAt).toBeNull()
+    expect(runtimeRecord?.state.retryAfterAt).toBeNull()
+    expect(runtimeRecord?.state.lastSucceededAt).toBe('2026-04-08T10:00:05.000Z')
+    expect(runtimeRecord?.state.lastFailedAt).toBe('2026-04-09T10:00:00.000Z')
+    expect(runtimeRecord?.state.consecutiveFailures).toBe(0)
+    const projected = await getAssistantCronJob(vaultRoot, canonicalJob.jobId)
+    expect(projected.state.nextRunAt).toBe('2026-04-10T10:00:00.000Z')
+  })
+
   it('skips stale recurring canonical notification cron jobs and advances the schedule', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-04-08T13:00:00.000Z'))
@@ -4971,6 +5129,219 @@ describe('assistant cron runtime orchestration', () => {
     expect(runtimeRecord?.sessionId).toBeNull()
   })
 
+  it('executes hosted Linq current-route snapshots as direct thread binding deliveries', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-08T10:20:00.000Z'))
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-linq-current-route-binding-',
+    )
+    getVaultAutomationStore(vaultRoot).push({
+      automationId: 'automation-linq-current-route-binding',
+      continuityPolicy: 'fresh',
+      createdAt: '2026-04-08T08:00:00.000Z',
+      instructions: 'Send the morning reminder.',
+      route: {
+        channel: 'linq',
+        currentRouteSnapshot: true,
+        deliverySource: null,
+        deliveryTarget: 'old-home-chat',
+        identityId: 'h1_111111111111111111111111',
+        participantId: 'h1_222222222222222222222222',
+        threadId: 'h1_333333333333333333333333',
+        threadIsDirect: true,
+      },
+      schedule: {
+        kind: 'dailyLocal',
+        localTime: '10:00',
+      },
+      slug: 'linq-current-route-binding-reminder',
+      status: 'active',
+      summary: null,
+      tags: ['assistant', 'scheduled'],
+      title: 'Linq current route binding reminder',
+      updatedAt: '2026-04-08T08:00:00.000Z',
+    })
+    const paths = resolveAssistantStatePaths(vaultRoot)
+    const source = (await listCanonicalAssistantCronRecords(vaultRoot))[0]
+
+    if (!source) {
+      throw new Error('Expected canonical source to exist.')
+    }
+
+    const runtimeStore = await readAssistantCronCanonicalRuntimeStore(paths)
+    const runtimeState = resolveCanonicalRuntimeState(source, runtimeStore)
+    const claimed = await claimResolvedAssistantCronJob({
+      job: {
+        kind: 'canonical',
+        source,
+        runtimeState,
+        job: projectCanonicalAssistantCronJob({
+          source,
+          runtimeState,
+        }),
+      },
+      paths,
+    })
+    const result = await executeClaimedAssistantCronJob({
+      job: claimed,
+      paths,
+      trigger: 'scheduled',
+      vault: vaultRoot,
+    })
+
+    expect(result.run.status).toBe('succeeded')
+    expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledWith(
+      expect.objectContaining({
+        bindingDeliveryTarget: 'old-home-chat',
+        deliveryKind: 'thread',
+        deliveryTarget: null,
+        threadId: 'h1_333333333333333333333333',
+        threadIsDirect: true,
+      }),
+    )
+  })
+
+  it('executes tagged hosted Linq current-route snapshots without stored directness', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-08T10:20:00.000Z'))
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-linq-current-route-binding-without-directness-',
+    )
+    getVaultAutomationStore(vaultRoot).push({
+      automationId: 'automation-linq-current-route-without-directness',
+      continuityPolicy: 'fresh',
+      createdAt: '2026-04-08T08:00:00.000Z',
+      instructions: 'Send the morning reminder.',
+      route: {
+        channel: 'linq',
+        currentRouteSnapshot: true,
+        deliverySource: null,
+        deliveryTarget: 'old-home-chat',
+        identityId: 'h1_111111111111111111111111',
+        participantId: 'h1_222222222222222222222222',
+        threadId: 'h1_333333333333333333333333',
+      },
+      schedule: {
+        kind: 'dailyLocal',
+        localTime: '10:00',
+      },
+      slug: 'linq-current-route-without-directness-reminder',
+      status: 'active',
+      summary: null,
+      tags: ['assistant', 'scheduled'],
+      title: 'Linq current route without directness reminder',
+      updatedAt: '2026-04-08T08:00:00.000Z',
+    })
+    const paths = resolveAssistantStatePaths(vaultRoot)
+    const source = (await listCanonicalAssistantCronRecords(vaultRoot))[0]
+
+    if (!source) {
+      throw new Error('Expected canonical source to exist.')
+    }
+
+    const runtimeStore = await readAssistantCronCanonicalRuntimeStore(paths)
+    const runtimeState = resolveCanonicalRuntimeState(source, runtimeStore)
+    const claimed = await claimResolvedAssistantCronJob({
+      job: {
+        kind: 'canonical',
+        source,
+        runtimeState,
+        job: projectCanonicalAssistantCronJob({
+          source,
+          runtimeState,
+        }),
+      },
+      paths,
+    })
+    const result = await executeClaimedAssistantCronJob({
+      job: claimed,
+      paths,
+      trigger: 'scheduled',
+      vault: vaultRoot,
+    })
+
+    expect(result.run.status).toBe('succeeded')
+    expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledWith(
+      expect.objectContaining({
+        bindingDeliveryTarget: 'old-home-chat',
+        deliveryKind: 'thread',
+        deliveryTarget: null,
+        threadId: 'h1_333333333333333333333333',
+        threadIsDirect: true,
+      }),
+    )
+  })
+
+  it('keeps untagged private Linq delivery targets strict without stored directness', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-08T10:20:00.000Z'))
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-linq-untagged-private-target-',
+    )
+    getVaultAutomationStore(vaultRoot).push({
+      automationId: 'automation-linq-untagged-private-target',
+      continuityPolicy: 'fresh',
+      createdAt: '2026-04-08T08:00:00.000Z',
+      instructions: 'Send the morning reminder.',
+      route: {
+        channel: 'linq',
+        deliverySource: null,
+        deliveryTarget: 'old-home-chat',
+        identityId: 'h1_111111111111111111111111',
+        participantId: 'h1_222222222222222222222222',
+        threadId: 'h1_333333333333333333333333',
+      },
+      schedule: {
+        kind: 'dailyLocal',
+        localTime: '10:00',
+      },
+      slug: 'linq-untagged-private-target-reminder',
+      status: 'active',
+      summary: null,
+      tags: ['assistant', 'scheduled'],
+      title: 'Untagged private Linq target reminder',
+      updatedAt: '2026-04-08T08:00:00.000Z',
+    })
+    const paths = resolveAssistantStatePaths(vaultRoot)
+    const source = (await listCanonicalAssistantCronRecords(vaultRoot))[0]
+
+    if (!source) {
+      throw new Error('Expected canonical source to exist.')
+    }
+
+    const runtimeStore = await readAssistantCronCanonicalRuntimeStore(paths)
+    const runtimeState = resolveCanonicalRuntimeState(source, runtimeStore)
+    const claimed = await claimResolvedAssistantCronJob({
+      job: {
+        kind: 'canonical',
+        source,
+        runtimeState,
+        job: projectCanonicalAssistantCronJob({
+          source,
+          runtimeState,
+        }),
+      },
+      paths,
+    })
+    const result = await executeClaimedAssistantCronJob({
+      job: claimed,
+      paths,
+      trigger: 'scheduled',
+      vault: vaultRoot,
+    })
+
+    expect(result.run.status).toBe('succeeded')
+    expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledWith(
+      expect.objectContaining({
+        bindingDeliveryTarget: undefined,
+        deliveryKind: undefined,
+        deliveryTarget: 'old-home-chat',
+        threadId: 'h1_333333333333333333333333',
+        threadIsDirect: null,
+      }),
+    )
+  })
+
   it('executes canonical Telegram cron jobs with a thread-only route', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-04-08T10:20:00.000Z'))
@@ -5617,6 +5988,48 @@ describe('assistant cron runtime orchestration', () => {
     expect(current.state.nextRunAt).toBe('2026-04-09T10:00:00.000Z')
   })
 
+  it('skips managed weekly improvement coach cron before provider work while onboarding is open', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-08T10:20:00.000Z'))
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-managed-improvement-coach-onboarding-open-',
+    )
+    addManagedResearchAutomation({
+      tag: 'murph-managed:weekly-improvement-coach',
+      vaultRoot,
+    })
+    const { claimed, paths } = await claimFirstCanonicalCronJob(vaultRoot)
+
+    const result = await executeClaimedAssistantCronJob({
+      job: claimed,
+      paths,
+      trigger: 'scheduled',
+      vault: vaultRoot,
+    })
+
+    expect(result.run.status).toBe('skipped')
+    expect(result.run.error).toBe(
+      'Assistant cron research-oriented managed automation skipped because assistant onboarding is open.',
+    )
+    expect(cronMocks.sendAssistantMessageLocal).not.toHaveBeenCalled()
+    await expect(
+      listAssistantCronRuns({
+        job: claimed.job.jobId,
+        vault: vaultRoot,
+      }),
+    ).resolves.toMatchObject({
+      runs: [
+        expect.objectContaining({
+          status: 'skipped',
+        }),
+      ],
+    })
+    const current = await getAssistantCronJob(vaultRoot, claimed.job.jobId)
+    expect(current.state.runningAt).toBeNull()
+    expect(current.state.pendingDeliveryIntentId).toBeFalsy()
+    expect(current.state.nextRunAt).toBe('2026-04-09T10:00:00.000Z')
+  })
+
   it('fails closed before provider work when managed research onboarding state is unreadable', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-04-08T10:20:00.000Z'))
@@ -6098,7 +6511,8 @@ describe('assistant cron runtime orchestration', () => {
     expect(failed.state.lastError).toBe(
       'Linq request POST /chats/[chat]/messages failed with HTTP 400.',
     )
-    expect(failed.state.nextRunAt).toBe('2026-05-04T16:00:50.000Z')
+    expect(failed.state.nextRunAt).toBe('2026-05-05T16:00:00.000Z')
+    expect(failed.state.consecutiveFailures).toBe(0)
   })
 
   it('passes an explicit participant delivery target for a source-backed mixed Linq route', async () => {
@@ -6522,7 +6936,8 @@ describe('assistant cron runtime orchestration', () => {
     expect(repaired.state.lastError).toBe(
       'Assistant cron pending delivery outbox intent is no longer available.',
     )
-    expect(repaired.state.nextRunAt).toBe('2026-04-09T10:00:30.000Z')
+    expect(repaired.state.nextRunAt).toBe('2026-04-10T10:00:00.000Z')
+    expect(repaired.state.consecutiveFailures).toBe(0)
   })
 
   it('reconciles pending cron deliveries from terminal outbox transitions', async () => {
@@ -6601,7 +7016,54 @@ describe('assistant cron runtime orchestration', () => {
     expect(abandoned.state.pendingDeliveryIntentId).toBeUndefined()
     expect(abandoned.state.lastFailedAt).toBe('2026-04-08T10:01:00.000Z')
     expect(abandoned.state.lastError).toBe('provider abandoned delivery')
-    expect(abandoned.state.nextRunAt).toBe('2026-04-08T10:01:30.000Z')
+    expect(abandoned.state.nextRunAt).toBe('2026-04-09T10:00:00.000Z')
+    expect(abandoned.state.consecutiveFailures).toBe(0)
+  })
+
+  it('advances reconciled terminal canonical deliveries after an older success', async () => {
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-outbox-terminal-after-success-',
+    )
+    const canonicalJob = await createCanonicalJob(
+      vaultRoot,
+      'outbox terminal after success',
+    )
+    const intentId = 'outbox_terminal_after_success_delivery'
+    await updateCanonicalRuntimeState(vaultRoot, canonicalJob.jobId, (record) => ({
+      ...record,
+      updatedAt: '2026-04-09T10:00:00.000Z',
+      state: {
+        ...record.state,
+        lastRunAt: '2026-04-09T10:00:00.000Z',
+        lastSucceededAt: '2026-04-08T10:00:05.000Z',
+        pendingDeliveryIntentId: intentId,
+        pendingOccurrenceAt: '2026-04-09T10:00:00.000Z',
+      },
+    }))
+    await saveAssistantOutboxIntent(vaultRoot, buildTestLinqOutboxIntent({
+      createdAt: '2026-04-09T10:00:00.000Z',
+      intentId,
+    }))
+
+    await expect(
+      markAssistantOutboxIntentMirrorTerminalById({
+        error: new Error('provider failed delivery after prior success'),
+        failedAt: new Date('2026-04-09T10:01:00.000Z'),
+        intentId,
+        status: 'failed',
+        vault: vaultRoot,
+      }),
+    ).resolves.toMatchObject({
+      status: 'failed',
+    })
+
+    const failed = await getAssistantCronJob(vaultRoot, canonicalJob.jobId)
+    expect(failed.state.pendingDeliveryIntentId).toBeUndefined()
+    expect(failed.state.lastSucceededAt).toBe('2026-04-08T10:00:05.000Z')
+    expect(failed.state.lastFailedAt).toBe('2026-04-09T10:01:00.000Z')
+    expect(failed.state.lastError).toBe('provider failed delivery after prior success')
+    expect(failed.state.nextRunAt).toBe('2026-04-10T10:00:00.000Z')
+    expect(failed.state.consecutiveFailures).toBe(0)
   })
 
   it('drops stale pending canonical occurrences when delivery fails after a schedule edit', async () => {
@@ -6671,7 +7133,7 @@ describe('assistant cron runtime orchestration', () => {
     const runtimeRecord = runtimeStore.jobs.find((record) =>
       record.jobId === editedJob.jobId
     )
-    expect(runtimeRecord?.state.pendingOccurrenceAt).toBe('2026-04-08T12:00:00.000Z')
+    expect(runtimeRecord?.state.pendingOccurrenceAt).toBeNull()
     expect(runtimeRecord?.state.retryAfterAt).toBeNull()
   })
 })
@@ -6849,7 +7311,10 @@ function addManagedResearchAutomation(input: {
   automationId?: string
   instructions?: string
   slug?: string
-  tag: 'murph-managed:weekly-health-insight' | 'murph-managed:weekly-health-research-scout'
+  tag:
+    | 'murph-managed:weekly-health-insight'
+    | 'murph-managed:weekly-improvement-coach'
+    | 'murph-managed:weekly-health-research-scout'
   title?: string
   vaultRoot: string
 }): void {
@@ -6857,7 +7322,9 @@ function addManagedResearchAutomation(input: {
     input.slug ??
     (input.tag === 'murph-managed:weekly-health-insight'
       ? 'weekly-health-insight'
-      : 'weekly-health-research-scout')
+      : input.tag === 'murph-managed:weekly-improvement-coach'
+        ? 'weekly-improvement-coach'
+        : 'weekly-health-research-scout')
   getVaultAutomationStore(input.vaultRoot).push({
     automationId: input.automationId ?? `automation-${slug}`,
     continuityPolicy: 'fresh',

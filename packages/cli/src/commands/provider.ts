@@ -228,7 +228,7 @@ export function registerProviderCommands(
           vault: input.vault,
           requestId: input.requestId,
           status: input.status,
-          limit: input.limit ?? 50,
+          limit: input.limit ?? 10,
         })
       },
     },

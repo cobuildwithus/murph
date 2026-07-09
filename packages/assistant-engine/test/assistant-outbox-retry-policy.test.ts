@@ -119,6 +119,38 @@ describe('assistant outbox retry policy', () => {
         message: 'temporary network timeout',
       }),
     ).toBe(false)
+    expect(
+      isAssistantOutboxRetryableError({
+        code: 'INTERNAL_ERROR',
+        message: 'Internal error.',
+        statusCode: 500,
+      }),
+    ).toBe(true)
+    expect(
+      isAssistantOutboxRetryableError({
+        context: { responseStatus: 503 },
+        message: 'Hosted Linq egress engagement failed.',
+      }),
+    ).toBe(true)
+    expect(
+      isAssistantOutboxRetryableError({
+        context: { statusCode: 404 },
+        message: 'temporary network timeout',
+      }),
+    ).toBe(false)
+    expect(
+      isAssistantOutboxRetryableError({
+        hostedRuntimeControlPlaneFetchFailure: true,
+        message: 'Hosted Linq egress engagement request failed.',
+      }),
+    ).toBe(true)
+    expect(
+      isAssistantOutboxRetryableError({
+        hostedRuntimeControlPlaneFetchFailure: true,
+        retryable: false,
+        message: 'Hosted Linq egress engagement request failed.',
+      }),
+    ).toBe(false)
   })
 
   it('clamps retry delays and preserves optional confirmation details', () => {

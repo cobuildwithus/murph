@@ -21,14 +21,12 @@ import {
 } from './store.js'
 import {
   buildCanonicalAutomationUpsertInput,
-  isCanonicalAssistantCronSourceEnabled,
   listCanonicalAssistantCronRecords,
   resolveCanonicalAssistantCronOccurrenceAt,
   resolveCanonicalAssistantCronJobId,
   type CanonicalAssistantCronJobRecord,
 } from './canonical-jobs.js'
 import {
-  resolveAssistantCronFailureBackoffMs,
   resolveAssistantCronNextRunAfterSuccess,
 } from './finalization.js'
 import { readAssistantOutboxIntent } from '../outbox/store.js'
@@ -105,7 +103,7 @@ async function reconcileAssistantCronTerminalDelivery(input: {
       reconciled += 1
       localChanged = true
       if (
-        input.terminal.kind === 'sent' &&
+        assistantCronTerminalDeliveryConsumesOccurrence(input.terminal) &&
         shouldRemoveAssistantCronJobAfterDelivery(job)
       ) {
         localStore.jobs.splice(index, 1)
@@ -136,8 +134,11 @@ async function reconcileAssistantCronTerminalDelivery(input: {
 
       if (
         source &&
-        input.terminal.kind === 'sent' &&
-        shouldRemoveCanonicalAssistantCronSourceAfterDelivery(source)
+        assistantCronTerminalDeliveryConsumesOccurrence(input.terminal) &&
+        shouldRemoveCanonicalAssistantCronSourceAfterDelivery({
+          runtimeState,
+          source,
+        })
       ) {
         await archiveCanonicalAssistantCronSourceAfterDelivery({
           source,
@@ -330,22 +331,22 @@ function reconcileLocalAssistantCronJobAfterDelivery(input: {
     })
   }
 
-  const failureCount = input.job.state.consecutiveFailures + 1
-  const nextRunAt = input.job.enabled
-    ? new Date(
-        Date.parse(input.terminal.at) + resolveAssistantCronFailureBackoffMs(failureCount),
-      ).toISOString()
-    : stateWithoutPending.nextRunAt
-
   return assistantCronJobSchema.parse({
     ...input.job,
+    enabled:
+      input.job.schedule.kind === 'at' && input.job.keepAfterRun
+        ? false
+        : input.job.enabled,
     updatedAt: input.terminal.at,
     state: {
       ...stateWithoutPending,
-      nextRunAt,
+      nextRunAt: resolveAssistantCronNextRunAfterSuccess(
+        input.job,
+        new Date(input.terminal.at),
+      ),
       lastFailedAt: input.terminal.at,
       lastError: input.terminal.message,
-      consecutiveFailures: failureCount,
+      consecutiveFailures: 0,
     },
   })
 }
@@ -358,6 +359,7 @@ function reconcileCanonicalAssistantCronRuntimeAfterDelivery(input: {
   const runningClearedState: AssistantCronCanonicalRuntimeState =
     omitPendingDeliveryIntentId({
       ...input.runtimeState.state,
+      lastRunAt: input.terminal.at,
       runningAt: null,
       runningClaimId: null,
       runningPid: null,
@@ -378,38 +380,24 @@ function reconcileCanonicalAssistantCronRuntimeAfterDelivery(input: {
     }
   }
 
-  const pendingOccurrenceAt = input.source
-    ? resolveCanonicalAssistantCronOccurrenceAt(input.source, {
-        ...input.runtimeState,
-        state: runningClearedState,
-      })
-    : runningClearedState.pendingOccurrenceAt
-  const isRetryingFailedOccurrence =
-    pendingOccurrenceAt !== null &&
-    pendingOccurrenceAt === runningClearedState.pendingOccurrenceAt
-  const failureCount = input.runtimeState.state.consecutiveFailures + 1
-  const retryAfterAt =
-    isRetryingFailedOccurrence &&
-    input.source &&
-    isCanonicalAssistantCronSourceEnabled(input.source)
-      ? new Date(
-          Date.parse(input.terminal.at) +
-            resolveAssistantCronFailureBackoffMs(failureCount),
-        ).toISOString()
-      : null
-
   return {
     ...input.runtimeState,
     updatedAt: input.terminal.at,
     state: {
       ...runningClearedState,
-      pendingOccurrenceAt,
-      retryAfterAt,
+      pendingOccurrenceAt: null,
+      retryAfterAt: null,
       lastFailedAt: input.terminal.at,
       lastError: input.terminal.message,
-      consecutiveFailures: failureCount,
+      consecutiveFailures: 0,
     },
   }
+}
+
+function assistantCronTerminalDeliveryConsumesOccurrence(
+  terminal: TerminalAssistantCronDeliveryOutcome,
+): boolean {
+  return terminal.kind === 'sent' || terminal.kind === 'failed'
 }
 
 function resolveTerminalAssistantCronDeliveryOutcome(
@@ -441,10 +429,36 @@ function shouldRemoveAssistantCronJobAfterDelivery(job: AssistantCronJob): boole
   return job.schedule.kind === 'at' && !job.keepAfterRun
 }
 
-function shouldRemoveCanonicalAssistantCronSourceAfterDelivery(
-  source: CanonicalAssistantCronJobRecord,
-): boolean {
-  return source.schedule.kind === 'at'
+function shouldRemoveCanonicalAssistantCronSourceAfterDelivery(input: {
+  runtimeState: AssistantCronCanonicalRuntimeRecord
+  source: CanonicalAssistantCronJobRecord
+}): boolean {
+  if (input.source.schedule.kind !== 'at') {
+    return false
+  }
+  if (canonicalAssistantCronSourceChangedAfterRuntimeState(input)) {
+    return false
+  }
+
+  const pendingOccurrenceAt = input.runtimeState.state.pendingOccurrenceAt
+  return (
+    pendingOccurrenceAt !== null &&
+    pendingOccurrenceAt ===
+      resolveCanonicalAssistantCronOccurrenceAt(input.source, input.runtimeState)
+  )
+}
+
+function canonicalAssistantCronSourceChangedAfterRuntimeState(input: {
+  runtimeState: AssistantCronCanonicalRuntimeRecord
+  source: CanonicalAssistantCronJobRecord
+}): boolean {
+  const sourceUpdatedMs = Date.parse(input.source.updatedAt)
+  const runtimeUpdatedMs = Date.parse(input.runtimeState.updatedAt)
+  return (
+    Number.isFinite(sourceUpdatedMs) &&
+    Number.isFinite(runtimeUpdatedMs) &&
+    sourceUpdatedMs > runtimeUpdatedMs
+  )
 }
 
 async function archiveCanonicalAssistantCronSourceAfterDelivery(input: {

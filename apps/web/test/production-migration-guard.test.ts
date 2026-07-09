@@ -587,7 +587,10 @@ describe("hosted web production migration guard", () => {
         environment,
         async (url, init) => {
           requests.push({
-            authorization: init?.headers?.Authorization,
+            authorization:
+              init?.headers === undefined
+                ? undefined
+                : new Headers(init.headers).get("authorization") ?? undefined,
             url,
           });
 
