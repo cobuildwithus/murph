@@ -13,6 +13,7 @@ import {
   HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA,
   HOSTED_MAILBOX_PAYLOAD_SCHEMA,
   readHostedMailboxConsumedSeqByLane,
+  readHostedMailboxLatestPendingConversationItem,
   readHostedMailboxItemCheckpointById,
   readHostedMailboxMaxSeqByLane,
   readHostedMailboxPendingSystemItemsNeedAiUsageGate,
@@ -1142,6 +1143,47 @@ describe("fetchHostedMailboxItemsAfterLaneCursors", () => {
         lane: "system",
         laneSeq: {
           gt: 0n,
+        },
+        userId: "member_mailbox_1",
+      }),
+    });
+  });
+
+  it("reads the latest unconsumed pending conversation item after the replay floor", async () => {
+    const hostedMailboxItem = createHostedMailboxItemDelegate({
+      findFirst: vi.fn<HostedMailboxItemFindFirst>(async () => buildHostedMailboxItemRow({
+        id: "mailbox_conversation_3",
+        kind: "conversation.message",
+        lane: "conversation",
+        laneSeq: 3n,
+      })),
+    });
+    const hostedMailboxPayload = createHostedMailboxPayloadDelegate();
+    const prisma = createHostedMailboxClient({
+      hostedMailboxItem,
+      hostedMailboxPayload,
+    });
+
+    const result = await readHostedMailboxLatestPendingConversationItem({
+      afterSeq: "2",
+      prisma,
+      userId: "member_mailbox_1",
+    });
+
+    expect(result).toMatchObject({
+      id: "mailbox_conversation_3",
+      laneSeq: "3",
+    });
+    expect(hostedMailboxItem.findFirst).toHaveBeenCalledWith({
+      orderBy: {
+        laneSeq: "desc",
+      },
+      where: expectLiveHostedMailboxWhere({
+        consumedAt: null,
+        kind: "conversation.message",
+        lane: "conversation",
+        laneSeq: {
+          gt: 2n,
         },
         userId: "member_mailbox_1",
       }),
