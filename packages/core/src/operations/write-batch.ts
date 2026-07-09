@@ -329,6 +329,7 @@ export interface PruneTerminalWriteOperationRecordsResult {
   prunedByteCount: number;
   prunedCount: number;
   prunedFileCount: number;
+  prunedStageDirectoryCount: number;
   retainedErroredTerminalCount: number;
   retainedNewestTerminalCount: number;
   retainedProtectedCount: number;
@@ -951,6 +952,7 @@ export async function pruneTerminalWriteOperationRecords(
     prunedByteCount: 0,
     prunedCount: 0,
     prunedFileCount: 0,
+    prunedStageDirectoryCount: 0,
     retainedErroredTerminalCount: 0,
     retainedNewestTerminalCount: 0,
     retainedProtectedCount: 0,
@@ -990,6 +992,15 @@ export async function pruneTerminalWriteOperationRecords(
       continue;
     }
 
+    const stageRoot = (await resolveVaultPathOnDisk(
+      input.vaultRoot,
+      path.posix.join(WRITE_OPERATION_DIRECTORY, operationId),
+    )).absolutePath;
+    if (await pathExists(stageRoot)) {
+      await fs.rm(stageRoot, { force: true, recursive: true });
+      result.prunedStageDirectoryCount += 1;
+    }
+
     const updatedAtMs = parsePruneBoundaryMs(operation.updatedAt);
     if (updatedAtMs === null) {
       result.invalidCount += 1;
@@ -1002,14 +1013,6 @@ export async function pruneTerminalWriteOperationRecords(
     }
 
     await resolveVaultPathOnDisk(input.vaultRoot, relativePath);
-    const stageRoot = (await resolveVaultPathOnDisk(
-      input.vaultRoot,
-      path.posix.join(WRITE_OPERATION_DIRECTORY, operationId),
-    )).absolutePath;
-    if (await pathExists(stageRoot)) {
-      result.retainedStageDirectoryCount += 1;
-      continue;
-    }
 
     candidates.push({
       metadataRelativePath: relativePath,
@@ -1036,8 +1039,8 @@ export async function pruneTerminalWriteOperationRecords(
     }
 
     if (await pathExists(candidate.stageRoot)) {
-      result.retainedStageDirectoryCount += 1;
-      continue;
+      await fs.rm(candidate.stageRoot, { force: true, recursive: true });
+      result.prunedStageDirectoryCount += 1;
     }
 
     const metadataPath = (await resolveVaultPathOnDisk(

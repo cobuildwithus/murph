@@ -774,12 +774,27 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
   const hostAbortSignal = options.signal ?? null;
   let hostAbortReason: unknown = null;
   let hostAbortObserved = false;
+  let canonicalWritePersistenceDepth = 0;
+  let hostAbortDuringCanonicalWritePersistence = false;
+  const withCanonicalWritePersistence = async <T>(
+    run: () => Promise<T>,
+  ): Promise<T> => {
+    canonicalWritePersistenceDepth += 1;
+    try {
+      return await run();
+    } finally {
+      canonicalWritePersistenceDepth -= 1;
+    }
+  };
   const abortFromHost = () => {
     if (!hostAbortSignal || runtimeAbortController.signal.aborted) {
       return;
     }
     hostAbortReason = readHostedRuntimeAbortReason(hostAbortSignal);
     hostAbortObserved = true;
+    if (canonicalWritePersistenceDepth > 0) {
+      hostAbortDuringCanonicalWritePersistence = true;
+    }
     runtimeAbortController.abort(hostAbortReason);
   };
   if (hostAbortSignal?.aborted) {
@@ -813,7 +828,9 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
     async (snapshotInput) => {
       assertRuntimeNotAborted();
       const snapshot = await options.createCheckpointSnapshot(snapshotInput);
-      assertRuntimeNotAborted();
+      if (snapshotInput.reason !== "canonical_runtime_commit") {
+        assertRuntimeNotAborted();
+      }
       latestCheckpointSnapshotCleanForWarmReuse =
         snapshot.localWorkspaceCleanForWarmReuse === true;
       return snapshot;
@@ -1039,33 +1056,42 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         reason: "canonical_runtime_commit",
         redactedStatus: checkpointInput.redactedStatus,
       };
-      const checkpoint = await raceHostedRuntimeCancellation(
-        checkpointInput.checkpointSnapshot
-          ? (
-              checkpointRequestBuilder.checkpoint
-                ? Promise.resolve(checkpointRequestBuilder.checkpoint(
-                    canonicalRuntimeCheckpointRequestInput,
-                    foregroundWorkspacePort,
-                  ))
-                : Promise.resolve(checkpointRequestBuilder.createRequest(
-                    canonicalRuntimeCheckpointRequestInput,
-                  ))
-                    .then((request) => foregroundWorkspacePort.checkpoint(request))
-            )
-          : foregroundWorkspacePort.checkpoint({
-              attemptId: checkpointMetadata.attemptId,
-              expectedWorkspaceVersion: checkpointMetadata.expectedWorkspaceVersion,
-              inboxMediaRetentionWakeAt: workspace?.inboxMediaRetentionWakeAt ?? null,
-              leaseGeneration: checkpointMetadata.leaseGeneration,
-              nextWakeAt: checkpointNextWakeAt,
-              nextWakeReason: checkpointNextWakeReason,
-              reason: checkpointInput.reason,
-              redactedStatus: checkpointInput.redactedStatus,
-              snapshotRef: workspace?.snapshotRef ?? null,
-            }),
-        runtimeAbortController.signal,
-      );
-      assertRuntimeNotAborted();
+      const canonicalRuntimeCommit = checkpointInput.reason === "canonical_runtime_commit";
+      const checkpointWorkspacePort = canonicalRuntimeCommit
+        ? workspacePort
+        : foregroundWorkspacePort;
+      const checkpointOperation = checkpointInput.checkpointSnapshot
+        ? (
+            checkpointRequestBuilder.checkpoint
+              ? Promise.resolve(checkpointRequestBuilder.checkpoint(
+                  canonicalRuntimeCheckpointRequestInput,
+                  checkpointWorkspacePort,
+                ))
+              : Promise.resolve(checkpointRequestBuilder.createRequest(
+                  canonicalRuntimeCheckpointRequestInput,
+                ))
+                  .then((request) => checkpointWorkspacePort.checkpoint(request))
+          )
+        : checkpointWorkspacePort.checkpoint({
+            attemptId: checkpointMetadata.attemptId,
+            expectedWorkspaceVersion: checkpointMetadata.expectedWorkspaceVersion,
+            inboxMediaRetentionWakeAt: workspace?.inboxMediaRetentionWakeAt ?? null,
+            leaseGeneration: checkpointMetadata.leaseGeneration,
+            nextWakeAt: checkpointNextWakeAt,
+            nextWakeReason: checkpointNextWakeReason,
+            reason: checkpointInput.reason,
+            redactedStatus: checkpointInput.redactedStatus,
+            snapshotRef: workspace?.snapshotRef ?? null,
+          });
+      const checkpoint = canonicalRuntimeCommit
+        ? await checkpointOperation
+        : await raceHostedRuntimeCancellation(
+            checkpointOperation,
+            runtimeAbortController.signal,
+          );
+      if (!canonicalRuntimeCommit) {
+        assertRuntimeNotAborted();
+      }
       assertHostedWorkspaceCheckpointAccepted(checkpoint, input.request.userId);
       return checkpoint;
     };
@@ -1114,6 +1140,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       runtimeWakeSignal: options.runtimeWakeSignal ?? null,
       signal: runtimeAbortController.signal,
       runtimeLogContext,
+      withCanonicalWritePersistence,
       vaultRoot: restored.vaultRoot,
       workspace: workspaceRead.workspace,
     };
@@ -1502,42 +1529,48 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
             messagingReturnTarget: () => hostedCliBridgeMessagingReturnTarget,
             signal: passSignal,
           },
-          async () =>
-            await raceHostedRuntimeCancellation(
-              runHostedWorkspaceUntilIdleOrBudget({
-                ...baseRunnerInput,
-                initialAssistantInputBatch: passInput.initialAssistantInputBatch ?? null,
-                initialMailboxImport: passInput.initialMailboxImport,
-                initialMailboxImportContext: passInput.initialMailboxImportContext ?? null,
-                requestId: passInput.requestId,
-                runtimePassDiagnostics: {
-                  foreground: passForeground,
-                  ordinal: passOrdinal,
-                  startedAtEpochMs: passStartedAtEpochMs,
-                },
-                runAssistantPhase: async (phaseInput) => {
-                  currentDeliveryRoute = await resolveHostedForegroundCurrentDeliveryRoute({
-                    initialAssistantInputBatch: phaseInput.initialAssistantInputBatch ?? null,
-                    initialMailboxImport: phaseInput.initialMailboxImport,
-                    vaultRoot: restored.vaultRoot,
-                  });
-                  return await (options.runAssistantPhase ?? runHostedWorkspaceAssistantPhase)({
-                    ...phaseInput,
-                    deviceSyncWorkspaceWakeHandled: deviceSyncWorkspaceWakeHandledUntilCheckpoint,
-                    request: input.request,
-                    restored,
-                    runtime: foregroundRuntime,
-                    runtimeEnv,
-                    stagedDirtyAcks: stagedDeviceSyncDirtyAcks,
-                    suppressDirtyPendingFetch: suppressDirtyPendingFetchUntilCheckpoint,
-                    signal: passSignal,
-                  });
-                },
-                signal: passSignal,
-                workspace: passInput.workspace,
-              }),
-              passSignal,
-            ),
+          async () => {
+            const passPromise = runHostedWorkspaceUntilIdleOrBudget({
+              ...baseRunnerInput,
+              initialAssistantInputBatch: passInput.initialAssistantInputBatch ?? null,
+              initialMailboxImport: passInput.initialMailboxImport,
+              initialMailboxImportContext: passInput.initialMailboxImportContext ?? null,
+              requestId: passInput.requestId,
+              runtimePassDiagnostics: {
+                foreground: passForeground,
+                ordinal: passOrdinal,
+                startedAtEpochMs: passStartedAtEpochMs,
+              },
+              runAssistantPhase: async (phaseInput) => {
+                currentDeliveryRoute = await resolveHostedForegroundCurrentDeliveryRoute({
+                  initialAssistantInputBatch: phaseInput.initialAssistantInputBatch ?? null,
+                  initialMailboxImport: phaseInput.initialMailboxImport,
+                  vaultRoot: restored.vaultRoot,
+                });
+                return await (options.runAssistantPhase ?? runHostedWorkspaceAssistantPhase)({
+                  ...phaseInput,
+                  deviceSyncWorkspaceWakeHandled: deviceSyncWorkspaceWakeHandledUntilCheckpoint,
+                  request: input.request,
+                  restored,
+                  runtime: foregroundRuntime,
+                  runtimeEnv,
+                  stagedDirtyAcks: stagedDeviceSyncDirtyAcks,
+                  suppressDirtyPendingFetch: suppressDirtyPendingFetchUntilCheckpoint,
+                  signal: passSignal,
+                });
+              },
+              signal: passSignal,
+              workspace: passInput.workspace,
+            });
+            try {
+              return await raceHostedRuntimeCancellation(passPromise, passSignal);
+            } catch (error) {
+              if (passSignal.aborted && hostAbortDuringCanonicalWritePersistence) {
+                return await passPromise;
+              }
+              throw error;
+            }
+          },
         );
         trackMailboxPostCheckpointEffects(passResult.mailboxPostCheckpointEffectsFinished);
         emitPhaseLog({

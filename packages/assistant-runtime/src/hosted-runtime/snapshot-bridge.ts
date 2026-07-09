@@ -382,7 +382,7 @@ async function createHostedWorkspaceV2Snapshot(
         checkpointedAfter: input.previousWorkspaceCheckpointedAt,
         vaultRoot: input.vaultRoot,
       });
-      if (terminalWriteOperationPruneResult.prunedCount > 0) {
+      if (hasTerminalWriteOperationPrunedFiles(terminalWriteOperationPruneResult)) {
         emitHostedExecutionStructuredLog({
           component: "runner",
           details: {
@@ -561,11 +561,13 @@ async function createHostedWorkspaceV2Snapshot(
       directUploadTimings,
     );
 
-    const directUploadWakeNotification = input.consumePendingRuntimeWake?.() ?? null;
-    if (directUploadWakeNotification) {
-      throw new HostedRuntimeCheckpointInterruptedByWakeError({
-        notification: directUploadWakeNotification,
-      });
+    if (input.request.reason !== "canonical_runtime_commit") {
+      const directUploadWakeNotification = input.consumePendingRuntimeWake?.() ?? null;
+      if (directUploadWakeNotification) {
+        throw new HostedRuntimeCheckpointInterruptedByWakeError({
+          notification: directUploadWakeNotification,
+        });
+      }
     }
 
     leaseCheckCount += 1;
@@ -575,11 +577,13 @@ async function createHostedWorkspaceV2Snapshot(
       stage: "before_web_checkpoint",
       userId: input.userId,
     });
-    const leaseCheckWakeNotification = input.consumePendingRuntimeWake?.() ?? null;
-    if (leaseCheckWakeNotification) {
-      throw new HostedRuntimeCheckpointInterruptedByWakeError({
-        notification: leaseCheckWakeNotification,
-      });
+    if (input.request.reason !== "canonical_runtime_commit") {
+      const leaseCheckWakeNotification = input.consumePendingRuntimeWake?.() ?? null;
+      if (leaseCheckWakeNotification) {
+        throw new HostedRuntimeCheckpointInterruptedByWakeError({
+          notification: leaseCheckWakeNotification,
+        });
+      }
     }
 
     snapshotRef = {
@@ -958,7 +962,7 @@ function createHostedWorkspaceSnapshotSizeDiagnosticLogDetails(
 function createTerminalWriteOperationPruneLogDetails(
   result: PruneTerminalWriteOperationRecordsResult | null,
 ): HostedRuntimeRedactedJson {
-  if (!result || result.prunedCount === 0) {
+  if (!hasTerminalWriteOperationPrunedFiles(result)) {
     return {};
   }
 
@@ -970,8 +974,19 @@ function createTerminalWriteOperationPruneLogDetails(
     terminalWriteOperationPruneInvalidCount: result.invalidCount,
     terminalWriteOperationPruneNewestRetainedCount: result.retainedNewestTerminalCount,
     terminalWriteOperationPruneScannedCount: result.scannedCount,
+    terminalWriteOperationPrunedStageDirectoryCount: result.prunedStageDirectoryCount,
     terminalWriteOperationPruneStageDirectoryCount: result.retainedStageDirectoryCount,
   };
+}
+
+function hasTerminalWriteOperationPrunedFiles(
+  result: PruneTerminalWriteOperationRecordsResult | null,
+): result is PruneTerminalWriteOperationRecordsResult {
+  return !!result
+    && (
+      result.prunedCount > 0
+      || result.prunedStageDirectoryCount > 0
+    );
 }
 
 function hasAssistantRuntimeResiduePrunedFiles(

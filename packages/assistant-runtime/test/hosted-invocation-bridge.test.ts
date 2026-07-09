@@ -255,6 +255,26 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     });
   }
 
+  it("does not consume pending runtime wakes during canonical runtime commit snapshots", async () => {
+    const vaultRoot = await createVaultRoot();
+    const { calls, platform } = createRuntimePlatform();
+    const consumePendingRuntimeWake = vi.fn(() => ({
+      notifiedAtEpochMs: 1_777_010_000_010,
+    }));
+    const options = createBridgeOptions({
+      consumePendingRuntimeWake,
+      platform,
+      vaultRoot,
+    });
+
+    await options.createCheckpointSnapshot(createCheckpointInput("canonical_runtime_commit"));
+
+    expect(consumePendingRuntimeWake).not.toHaveBeenCalled();
+    expect(calls.putSnapshotObjectDirect).toHaveBeenCalledOnce();
+    expect(calls.completeSnapshotSession).toHaveBeenCalledOnce();
+    expect(calls.abortSnapshotSession).not.toHaveBeenCalled();
+  });
+
   it("aborts the snapshot session when archive construction fails before checkpoint", async () => {
     const vaultRoot = await createVaultRoot();
     const { calls, platform } = createRuntimePlatform();
@@ -397,6 +417,23 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
       status: "staged",
       updatedAt: "2026-06-01T00:00:00.000Z",
     });
+    const uncheckpointedCommittedOperationPath = await writeOperationRecord(vaultRoot, {
+      operationId: "op_uncheckpointed_committed",
+      status: "committed",
+      updatedAt: "2026-06-10T00:00:00.000Z",
+    });
+    const uncheckpointedCommittedStageRoot =
+      ".runtime/operations/op_uncheckpointed_committed";
+    const uncheckpointedCommittedPayloadPath =
+      `${uncheckpointedCommittedStageRoot}/payloads/residue.txt`;
+    await mkdir(path.join(vaultRoot, uncheckpointedCommittedStageRoot, "payloads"), {
+      recursive: true,
+    });
+    await writeFile(
+      path.join(vaultRoot, uncheckpointedCommittedPayloadPath),
+      "uncheckpointed residue\n",
+      "utf8",
+    );
     const request = createInvocationRequestWithWorkspaceCheckpoint("2026-06-10T00:00:00.000Z");
     const options = createBridgeOptions({
       platform,
@@ -413,9 +450,13 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     expect(archiveEntries.some((entry) => entry.relativePath === staleOperationPaths.oldest)).toBe(false);
     expect(archiveEntries.some((entry) => entry.relativePath === staleOperationPaths.newest)).toBe(true);
     expect(archiveEntries.some((entry) => entry.relativePath === activeOperationPath)).toBe(true);
+    expect(archiveEntries.some((entry) => entry.relativePath === uncheckpointedCommittedOperationPath)).toBe(true);
+    expect(archiveEntries.some((entry) => entry.relativePath === uncheckpointedCommittedPayloadPath)).toBe(false);
     await expectMissing(path.join(vaultRoot, staleOperationPaths.oldest));
     await expectPresent(path.join(vaultRoot, staleOperationPaths.newest));
     await expectPresent(path.join(vaultRoot, activeOperationPath));
+    await expectPresent(path.join(vaultRoot, uncheckpointedCommittedOperationPath));
+    await expectMissing(path.join(vaultRoot, uncheckpointedCommittedStageRoot));
   });
 
   it("prunes settled assistant runtime residue before v2 snapshot archive planning", async () => {

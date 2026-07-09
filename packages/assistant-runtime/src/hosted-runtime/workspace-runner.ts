@@ -325,6 +325,7 @@ export interface HostedWorkspaceRunnerInput {
   limitPerLane: number;
   materializeWorkspaceArtifacts?: HostedWorkspaceArtifactMaterializer | null;
   trackDeferredUsageCapture?: ((capture: HostedWorkspaceRunnerDeferredUsageCapture) => void) | null;
+  withCanonicalWritePersistence?: (<T>(run: () => Promise<T>) => Promise<T>) | null;
   platform: HostedWorkspaceRunnerPlatform;
   requestId: string;
   runtimePassDiagnostics?: HostedWorkspaceRunnerRuntimePassDiagnostics | null;
@@ -1907,67 +1908,76 @@ function createHostedWorkspaceCanonicalWritePort(input: {
 }): HostedCanonicalWritePort {
   return {
     async persistCanonicalWrite(writeInput) {
-      await Promise.all(writeInput.payloads.map(async (payload) => {
-        if (payload.bytes.byteLength !== payload.byteLength) {
-          throw new TypeError("Hosted canonical write payload length does not match its receipt.");
-        }
-        await input.input.platform.artifactStore.put({
-          bytes: payload.bytes,
-          sha256: payload.sha256,
+      const persist = async () => {
+        await Promise.all(writeInput.payloads.map(async (payload) => {
+          if (payload.bytes.byteLength !== payload.byteLength) {
+            throw new TypeError("Hosted canonical write payload length does not match its receipt.");
+          }
+          await input.input.platform.artifactStore.put({
+            bytes: payload.bytes,
+            sha256: payload.sha256,
+          });
+        }));
+        const receiptLogUpdate = await appendHostedCanonicalWriteReceiptToArtifactLog({
+          artifactStore: input.input.platform.artifactStore,
+          previousStatus: input.readPreviousRedactedStatus(),
+          receipt: writeInput.receipt,
         });
-      }));
-      const receiptLogUpdate = await appendHostedCanonicalWriteReceiptToArtifactLog({
-        artifactStore: input.input.platform.artifactStore,
-        previousStatus: input.readPreviousRedactedStatus(),
-        receipt: writeInput.receipt,
-      });
-      const receiptLogStatus = hostedCanonicalWriteReceiptLogStatusFields(receiptLogUpdate);
-      const checkpointRedactedStatus =
-        mergeHostedRuntimeRedactedStatusValues(
-          input.readPreviousRedactedStatus(),
-          receiptLogStatus,
-        ) ?? receiptLogStatus;
-      if (!input.input.checkpointRuntimeRedactedStatus) {
-        throw new TypeError("Hosted canonical write receipt checkpoint requires runtime status checkpoint support.");
-      }
-      const checkpointSnapshot = input.checkpointRequestBuilder.hasRuntimeStateDirty();
-      const checkpoint = await input.input.checkpointRuntimeRedactedStatus({
-        checkpointSnapshot,
-        reason: "canonical_runtime_commit",
-        redactedStatus: checkpointRedactedStatus,
-        workspace: input.checkpointRequestBuilder.latestWorkspace() ?? input.input.workspace,
-      });
-      input.checkpointRequestBuilder.recordWorkspaceCheckpoint(checkpoint);
-      input.recordRedactedStatus(receiptLogStatus);
-      if (!checkpointSnapshot) {
-        input.checkpointRequestBuilder.markRuntimeStateDirty();
-      }
-      const snapshotDirtyDomains =
-        listAssistantContextSnapshotDirtyDomainsForCanonicalWrite(
-          writeInput.receipt,
-        );
-      if (snapshotDirtyDomains.length > 0) {
-        try {
-          await markAssistantContextSnapshotDirty({
-            domains: snapshotDirtyDomains,
-            vaultRoot: input.input.vaultRoot,
-          });
-          input.checkpointRequestBuilder.markRuntimeStateDirty();
-          input.onAssistantContextSnapshotDirty?.();
-        } catch (error) {
-          warnAssistantBestEffortFailure({
-            error,
-            operation: "mark assistant context snapshot dirty",
-          });
+        const receiptLogStatus = hostedCanonicalWriteReceiptLogStatusFields(receiptLogUpdate);
+        const checkpointRedactedStatus =
+          mergeHostedRuntimeRedactedStatusValues(
+            input.readPreviousRedactedStatus(),
+            receiptLogStatus,
+          ) ?? receiptLogStatus;
+        if (!input.input.checkpointRuntimeRedactedStatus) {
+          throw new TypeError("Hosted canonical write receipt checkpoint requires runtime status checkpoint support.");
         }
+        const checkpointSnapshot = input.checkpointRequestBuilder.hasRuntimeStateDirty();
+        const checkpoint = await input.input.checkpointRuntimeRedactedStatus({
+          checkpointSnapshot,
+          reason: "canonical_runtime_commit",
+          redactedStatus: checkpointRedactedStatus,
+          workspace: input.checkpointRequestBuilder.latestWorkspace() ?? input.input.workspace,
+        });
+        input.checkpointRequestBuilder.recordWorkspaceCheckpoint(checkpoint);
+        input.recordRedactedStatus(receiptLogStatus);
+        if (!checkpointSnapshot) {
+          input.checkpointRequestBuilder.markRuntimeStateDirty();
+        }
+        const snapshotDirtyDomains =
+          listAssistantContextSnapshotDirtyDomainsForCanonicalWrite(
+            writeInput.receipt,
+          );
+        if (snapshotDirtyDomains.length > 0) {
+          try {
+            await markAssistantContextSnapshotDirty({
+              domains: snapshotDirtyDomains,
+              vaultRoot: input.input.vaultRoot,
+            });
+            input.checkpointRequestBuilder.markRuntimeStateDirty();
+            input.onAssistantContextSnapshotDirty?.();
+          } catch (error) {
+            warnAssistantBestEffortFailure({
+              error,
+              operation: "mark assistant context snapshot dirty",
+            });
+          }
+        }
+        await writeHostedForegroundCheckpointDeferredLog({
+          checkpointPhase: "canonical_write",
+          now: input.input.now,
+          platform: input.input.platform,
+          reason: "canonical_runtime_commit",
+          runtimeLogContext: input.input.runtimeLogContext,
+        });
+      };
+      const withPersistence = input.input.withCanonicalWritePersistence;
+      if (withPersistence) {
+        await withPersistence(persist);
+        return;
       }
-      await writeHostedForegroundCheckpointDeferredLog({
-        checkpointPhase: "canonical_write",
-        now: input.input.now,
-        platform: input.input.platform,
-        reason: "canonical_runtime_commit",
-        runtimeLogContext: input.input.runtimeLogContext,
-      });
+
+      await persist();
     },
   };
 }

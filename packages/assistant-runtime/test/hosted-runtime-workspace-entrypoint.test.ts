@@ -15938,6 +15938,115 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
+  test("does not roll back canonical writes when host aborts after receipt checkpoint acceptance", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const abortController = new AbortController();
+    const abortReason = new Error(
+      "Synthetic host abort after canonical receipt checkpoint acceptance.",
+    );
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const artifactBytesByHash = new Map<string, Uint8Array>();
+    let canonicalWriteCompleted = false;
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      const platform = createPlatform({
+        artifactBytesByHash,
+        events,
+        mailboxPort: createMailboxPort({
+          events,
+          items: [],
+        }),
+        workspacePort: createWorkspacePort({
+          checkpointRequests,
+          checkpointWorkspace(request) {
+            const workspace = createWorkspaceState({
+              inboxMediaRetentionWakeAt: request.inboxMediaRetentionWakeAt ?? null,
+              nextWakeAt: request.nextWakeAt ?? null,
+              nextWakeReason: request.nextWakeReason ?? null,
+              redactedStatus: request.redactedStatus ?? null,
+              snapshotRef: request.snapshotRef,
+              version: String(BigInt(request.expectedWorkspaceVersion) + 1n),
+            });
+            if (
+              request.reason === "canonical_runtime_commit"
+              && !abortController.signal.aborted
+            ) {
+              abortController.abort(abortReason);
+            }
+            return workspace;
+          },
+          events,
+          workspace: createWorkspaceState({ version: "0" }),
+        }),
+      });
+
+      let caught: unknown = null;
+      try {
+        await runHostedWorkspaceRuntimeJobInProcess(createWorkspaceRuntimeJobInput({
+          request: {
+            idleCheckpointDelayMs: 200,
+          },
+        }), {
+          async createCheckpointSnapshot() {
+            throw new Error("Canonical receipt abort regression should not need snapshots.");
+          },
+          async importItem() {
+            return { status: "imported" };
+          },
+          platform,
+          async runAssistantPhase(input) {
+            await runCanonicalWrite({
+              vaultRoot: input.restored.vaultRoot,
+              operationType: "hosted_canonical_write_test",
+              summary: "Persist canonical write despite post-checkpoint host abort.",
+              occurredAt: TEST_NOW,
+              mutate: async ({ batch }) => {
+                await batch.stageTextWrite(
+                  "journal/post-checkpoint-abort.md",
+                  "canonical write survived abort\n",
+                );
+              },
+            });
+            canonicalWriteCompleted = true;
+            return {
+              checkpointReason: "canonical_runtime_commit",
+              progressed: true,
+            };
+          },
+          signal: abortController.signal,
+          vaultRoot,
+        });
+      } catch (error) {
+        caught = error;
+      }
+
+      assert.equal(
+        canonicalWriteCompleted,
+        true,
+        JSON.stringify({
+          caught: caught instanceof Error ? caught.stack ?? caught.message : String(caught),
+          checkpointReasons: checkpointRequests.map((request) => request.reason),
+          events,
+        }, null, 2),
+      );
+      assert.equal(
+        await readFile(path.join(vaultRoot, "journal", "post-checkpoint-abort.md"), "utf8"),
+        "canonical write survived abort\n",
+      );
+      assert.equal(checkpointRequests.length, 1);
+      assert.equal(checkpointRequests[0]?.reason, "canonical_runtime_commit");
+      assert.equal(
+        typeof checkpointRequests[0]?.redactedStatus?.hostedCanonicalWriteReceiptLogSha256,
+        "string",
+      );
+      assert.equal(caught, abortReason);
+    } finally {
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
   test("does not run assistant outbox phase when mailbox import fails before checkpoint", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const events: string[] = [];
