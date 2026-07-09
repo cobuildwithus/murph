@@ -91,6 +91,7 @@ export type CloudflareHostedControlTelegramSendResponse =
   | {
     failureCode: string;
     failureReason: string;
+    retryAfterSeconds?: number | null;
     retryable: boolean;
     status: "failed";
   };
@@ -312,6 +313,10 @@ class HostedExecutionHttpResponseError extends Error {
     this.code = input.code;
     this.status = input.status;
   }
+}
+
+export function readCloudflareHostedControlHttpErrorStatus(error: unknown): number | null {
+  return error instanceof HostedExecutionHttpResponseError ? error.status : null;
 }
 
 function isHostedExecutionHttpError(
@@ -604,6 +609,10 @@ function parseCloudflareHostedControlTelegramSendResponse(
         record.failureReason,
         "Cloudflare Telegram send response failureReason",
       ),
+      ...readOptionalPositiveIntegerField(
+        record.retryAfterSeconds,
+        "retryAfterSeconds",
+      ),
       retryable: requireBoolean(
         record.retryable,
         "Cloudflare Telegram send response retryable",
@@ -674,6 +683,22 @@ function readOptionalStringField<Key extends string>(
   return { [key]: requireString(value, `Cloudflare Telegram send response ${key}`) } as {
     [K in Key]?: string | null;
   };
+}
+
+function readOptionalPositiveIntegerField<Key extends string>(
+  value: unknown,
+  key: Key,
+): { [K in Key]?: number | null } {
+  if (value === undefined) {
+    return {};
+  }
+  if (value === null) {
+    return { [key]: null } as { [K in Key]?: number | null };
+  }
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value <= 0) {
+    throw new TypeError(`Cloudflare Telegram send response ${key} must be a positive integer.`);
+  }
+  return { [key]: value } as { [K in Key]?: number | null };
 }
 
 function readOptionalStringArrayField<Key extends string>(

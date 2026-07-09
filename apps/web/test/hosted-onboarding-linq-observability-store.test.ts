@@ -1235,6 +1235,7 @@ describe("hosted Linq observability stores", () => {
     expect(fixture.hostedLinqDeliveryUpdateMany).toHaveBeenCalledWith({
       data: {
         attemptedAt: startedAt,
+        retryAfterAt: null,
         status: "provider_dispatch_started",
       },
       where: {
@@ -1393,6 +1394,7 @@ describe("hosted Linq observability stores", () => {
         failedAt: attemptedAt,
         failureCode: "HostedRuntimeTelegramUsageLimitNoticeUnknownError",
         failureReason: "[redacted]",
+        retryAfterAt: null,
         status: "failed",
       },
       where: {
@@ -1509,6 +1511,7 @@ describe("hosted Linq observability stores", () => {
       lastReceiptAt: null,
       messageLookupKey: null,
       phoneNumberLookupKey: null,
+      retryAfterAt: retryAt,
       skippedAt: null,
       source: "hosted_runtime_ai_usage_limit_notice",
       status: "failed",
@@ -1583,6 +1586,7 @@ describe("hosted Linq observability stores", () => {
       lastReceiptAt: null,
       messageLookupKey: null,
       phoneNumberLookupKey: null,
+      retryAfterAt: attemptedAt,
       skippedAt: null,
       source: "hosted_runtime_ai_usage_limit_notice",
       status: "failed",
@@ -1615,14 +1619,17 @@ describe("hosted Linq observability stores", () => {
           OR: expect.arrayContaining([
             {
               failedAt: {
-                lte: new Date("2026-03-26T12:00:01.000Z"),
+                not: null,
               },
-            },
-            {
-              failedAt: {
-                lte: new Date("2026-03-26T12:00:01.000Z"),
+              failureCode: {
+                in: [
+                  "HostedRuntimeTelegramUsageLimitNoticeRetryAfterError",
+                  "HostedRuntimeTelegramUsageLimitNoticeUnavailableError",
+                ],
               },
-              status: "failed",
+              retryAfterAt: {
+                lte: attemptedAt,
+              },
             },
           ]),
         }),

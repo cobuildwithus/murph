@@ -88,6 +88,7 @@ describe("worker Telegram send route", () => {
     const failure = Object.assign(new Error("Too Many Requests"), {
       code: "ASSISTANT_TELEGRAM_RATE_LIMITED",
       context: {
+        retryAfterSeconds: 42,
         status: 429,
       },
     });
@@ -102,6 +103,7 @@ describe("worker Telegram send route", () => {
     await expect(response.json()).resolves.toEqual({
       failureCode: "ASSISTANT_TELEGRAM_RATE_LIMITED",
       failureReason: "Too Many Requests",
+      retryAfterSeconds: 42,
       retryable: true,
       status: "failed",
     });
@@ -110,12 +112,34 @@ describe("worker Telegram send route", () => {
         component: "worker",
         details: expect.objectContaining({
           failureCode: "ASSISTANT_TELEGRAM_RATE_LIMITED",
+          retryAfterSeconds: 42,
           retryable: true,
           routeName: "telegram-send",
         }),
         message: "Hosted worker Telegram send route returned a provider failure.",
       }),
     );
+  });
+
+  it("does not mark ambiguous Telegram provider failures retryable", async () => {
+    const failure = Object.assign(new Error("request outcome is ambiguous"), {
+      code: "ASSISTANT_TELEGRAM_DELIVERY_AMBIGUOUS",
+      deliveryMayHaveSucceeded: true,
+    });
+    mocks.sendHostedProviderTelegramMessage.mockRejectedValueOnce(failure);
+
+    const response = await handleTelegramSendRoute(createRouteContext({
+      message: "Usage limit reached.",
+      target: "telegram_thread:runtime-denied",
+    }), "member_123");
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      failureCode: "ASSISTANT_TELEGRAM_DELIVERY_AMBIGUOUS",
+      failureReason: "request outcome is ambiguous",
+      retryable: false,
+      status: "failed",
+    });
   });
 
   it("rejects malformed Telegram send bodies", async () => {

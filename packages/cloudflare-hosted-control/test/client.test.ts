@@ -10,6 +10,7 @@ import {
 import {
   type CloudflareHostedControlClientOptions,
   createCloudflareHostedControlClient,
+  readCloudflareHostedControlHttpErrorStatus,
 } from "../src/client.ts";
 import {
   CLOUDFLARE_HOSTED_CONTROL_BROWSER_VAULT_REPLICA_NOT_FOUND_CODE,
@@ -271,6 +272,7 @@ describe("createCloudflareHostedControlClient", () => {
         createJsonResponse({
           failureCode: "ASSISTANT_TELEGRAM_DELIVERY_FAILED",
           failureReason: "Telegram provider returned HTTP 429.",
+          retryAfterSeconds: 42,
           retryable: true,
           status: "failed",
         })) as typeof fetch,
@@ -285,6 +287,7 @@ describe("createCloudflareHostedControlClient", () => {
     })).resolves.toEqual({
       failureCode: "ASSISTANT_TELEGRAM_DELIVERY_FAILED",
       failureReason: "Telegram provider returned HTTP 429.",
+      retryAfterSeconds: 42,
       retryable: true,
       status: "failed",
     });
@@ -301,6 +304,9 @@ describe("createCloudflareHostedControlClient", () => {
 
     await expect(promise).rejects.toThrow("Hosted execution runner status failed with HTTP 500.");
     await expect(promise).rejects.not.toThrow(/provider_token/u);
+    await promise.catch((error: unknown) => {
+      expect(readCloudflareHostedControlHttpErrorStatus(error)).toBe(500);
+    });
   });
 
   it("fetches browser vault sessions with the expected request and parses ready replica responses", async () => {

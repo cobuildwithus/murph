@@ -105,6 +105,7 @@ export async function recordHostedLinqDeliveryAttemptTx(input: {
     linqChatLookupKey: createHostedLinqChatLookupKey(input.linqChatId),
     phoneNumberHint: phoneNumber ? readHostedPhoneHint(phoneNumber) : null,
     phoneNumberLookupKey,
+    retryAfterAt: null,
     source: input.source,
     sourceRef: normalizeHostedLinqDeliverySourceRef({
       sourceRef: input.sourceRef,
@@ -137,6 +138,7 @@ export async function recordHostedLinqDeliveryAttemptTx(input: {
     failedAt: null,
     failureCode: null,
     failureReason: null,
+    retryAfterAt: null,
     skippedAt: null,
     skipReason: null,
     status: "attempted",
@@ -279,6 +281,7 @@ export async function claimHostedLinqDeliveryProviderDispatchTx(input: {
     linqChatLookupKey: createHostedLinqChatLookupKey(input.linqChatId),
     phoneNumberHint: phoneNumber ? readHostedPhoneHint(phoneNumber) : null,
     phoneNumberLookupKey,
+    retryAfterAt: null,
     skippedAt: null,
     skipReason: null,
     source: input.source,
@@ -504,6 +507,7 @@ export async function markHostedLinqDeliveryProviderDispatchStartedTx(input: {
     },
     data: {
       attemptedAt: input.startedAt ?? new Date(),
+      retryAfterAt: null,
       status: HOSTED_LINQ_DELIVERY_PROVIDER_DISPATCH_STARTED_STATUS,
     },
   });
@@ -582,6 +586,7 @@ export async function markHostedLinqDeliveryAcceptedTx(input: {
         failedAt: null,
         failureCode: null,
         failureReason: null,
+        retryAfterAt: null,
         linqChatLookupKey: createHostedLinqChatLookupKey(input.linqChatId),
         messageIdSuffix: toHostedOnboardingLogIdSuffix(input.messageId),
         messageLookupKey,
@@ -693,6 +698,7 @@ export async function recordHostedLinqRuntimeDeliveryOutcomeTx(input: {
     linqChatLookupKey: createHostedLinqChatLookupKey(input.linqChatId),
     phoneNumberHint: line.phoneNumberHint,
     phoneNumberLookupKey: line.phoneNumberLookupKey,
+    retryAfterAt: null,
     source: "hosted_runtime_linq_delivery",
     sourceRef: createHostedLinqDeliverySourceRefLookupKey(normalizeNullable(input.sourceRef)),
     targetKind: normalizeNullable(input.targetKind),
@@ -897,6 +903,7 @@ async function updateHostedLinqRuntimeDeliveryOutcomeIfPreProviderTx(input: {
         failedAt: null,
         failureCode: null,
         failureReason: null,
+        retryAfterAt: null,
         linqChatLookupKey: createHostedLinqChatLookupKey(input.linqChatId),
         messageIdSuffix: toHostedOnboardingLogIdSuffix(input.messageId),
         messageLookupKey: input.messageLookupKey,
@@ -940,6 +947,7 @@ async function updateHostedLinqRuntimeDeliveryOutcomeIfPreProviderTx(input: {
       linqChatLookupKey: createHostedLinqChatLookupKey(input.linqChatId),
       phoneNumberHint: input.line.phoneNumberHint,
       phoneNumberLookupKey: input.line.phoneNumberLookupKey,
+      retryAfterAt: null,
       source: "hosted_runtime_linq_delivery",
       sourceRef: createHostedLinqDeliverySourceRefLookupKey(normalizeNullable(input.sourceRef)),
       skippedAt: null,
@@ -968,6 +976,7 @@ export async function markHostedLinqDeliverySendFailedTx(input: {
   failureReason?: string | null;
   idempotencyKey: string;
   prisma: HostedLinqDeliveryClient;
+  retryAfterAt?: Date | null;
 }): Promise<void> {
   const idempotencyKey = createHostedLinqDeliveryIdempotencyLookupKey(input.idempotencyKey);
   if (!idempotencyKey) {
@@ -989,6 +998,7 @@ export async function markHostedLinqDeliverySendFailedTx(input: {
       failureReason: sanitizeHostedOnboardingPersistedErrorMessage(
         normalizeNullable(input.failureReason),
       ),
+      retryAfterAt: input.retryAfterAt ?? null,
       status: "failed",
     },
   });
@@ -1032,6 +1042,7 @@ export async function markHostedLinqDeliverySkippedTx(input: {
     linqChatLookupKey: createHostedLinqChatLookupKey(input.linqChatId),
     phoneNumberHint: phoneNumber ? readHostedPhoneHint(phoneNumber) : null,
     phoneNumberLookupKey,
+    retryAfterAt: null,
     skipReason: input.reason.slice(0, 160),
     skippedAt,
     source: input.source,
@@ -1226,6 +1237,7 @@ function buildReceiptUpdateFromData(
   const base = {
     lastProviderEventId: progress.eventLookupKey,
     lastReceiptAt: receipt.providerCreatedAt,
+    retryAfterAt: null,
     service: receipt.service,
   } satisfies Prisma.HostedLinqDeliveryUpdateInput;
 
@@ -1464,6 +1476,7 @@ const hostedLinqDeliveryLifecycleSelect = {
   lastReceiptAt: true,
   messageLookupKey: true,
   phoneNumberLookupKey: true,
+  retryAfterAt: true,
   skippedAt: true,
   source: true,
   status: true,
@@ -1539,6 +1552,7 @@ function resolveHostedLinqDeliveryInFlightState(input: {
     failureCode: string | null;
     lastReceiptAt: Date | null;
     messageLookupKey: string | null;
+    retryAfterAt: Date | null;
     skippedAt: Date | null;
     source: string | null;
     status: string;
@@ -1619,15 +1633,21 @@ function isHostedLinqDeliveryPreProvider(input: {
 function readHostedLinqTelegramUsageLimitRetryAt(input: {
   failedAt: Date | null;
   failureCode: string | null;
+  retryAfterAt: Date | null;
   source: string | null;
 }): Date | null {
-  return input.source === HOSTED_AI_USAGE_TELEGRAM_NOTICE_DELIVERY_SOURCE
-    && input.failedAt !== null
-    && HOSTED_TELEGRAM_USAGE_LIMIT_NOTICE_RETRYABLE_FAILURE_CODES.has(
+  if (
+    input.source !== HOSTED_AI_USAGE_TELEGRAM_NOTICE_DELIVERY_SOURCE
+    || input.failedAt === null
+    || !HOSTED_TELEGRAM_USAGE_LIMIT_NOTICE_RETRYABLE_FAILURE_CODES.has(
       input.failureCode ?? "",
     )
-    ? new Date(input.failedAt.getTime() + HOSTED_LINQ_PROVIDER_DISPATCH_STALE_ATTEMPT_MS)
-    : null;
+  ) {
+    return null;
+  }
+
+  return input.retryAfterAt
+    ?? new Date(input.failedAt.getTime() + HOSTED_LINQ_PROVIDER_DISPATCH_STALE_ATTEMPT_MS);
 }
 
 async function claimExistingHostedLinqDeliveryProviderDispatchTx(input: {
@@ -1642,6 +1662,7 @@ async function claimExistingHostedLinqDeliveryProviderDispatchTx(input: {
     id: string;
     lastReceiptAt: Date | null;
     messageLookupKey: string | null;
+    retryAfterAt: Date | null;
     skippedAt: Date | null;
     source: string | null;
     status: string;
@@ -1696,6 +1717,7 @@ async function claimExistingHostedLinqDeliveryProviderDispatchTx(input: {
         failureReason: sanitizeHostedOnboardingPersistedErrorMessage(
           HOSTED_TELEGRAM_USAGE_LIMIT_NOTICE_STALE_DISPATCH_FAILURE_REASON,
         ),
+        retryAfterAt: null,
         status: "failed",
       },
     });
@@ -1719,6 +1741,25 @@ async function claimExistingHostedLinqDeliveryProviderDispatchTx(input: {
       : [];
   const canReclaimRetryAfterTelegramAttempt =
     telegramRetryAfterAt !== null && telegramRetryAfterAt <= input.attemptedAt;
+  const telegramRetryAfterReclaimPredicate = input.delivery.retryAfterAt
+    ? {
+        failedAt: { not: null },
+        failureCode: {
+          in: [...HOSTED_TELEGRAM_USAGE_LIMIT_NOTICE_RETRYABLE_FAILURE_CODES],
+        },
+        retryAfterAt: {
+          lte: input.attemptedAt,
+        },
+      }
+    : {
+        failedAt: {
+          lte: staleAttemptBefore,
+        },
+        failureCode: {
+          in: [...HOSTED_TELEGRAM_USAGE_LIMIT_NOTICE_RETRYABLE_FAILURE_CODES],
+        },
+        retryAfterAt: null,
+      };
   const terminalPreProviderReclaimPredicates =
     input.delivery.source !== HOSTED_AI_USAGE_TELEGRAM_NOTICE_DELIVERY_SOURCE
       ? [
@@ -1727,19 +1768,7 @@ async function claimExistingHostedLinqDeliveryProviderDispatchTx(input: {
           { status: { in: ["failed", "skipped"] } },
         ]
       : canReclaimRetryAfterTelegramAttempt
-        ? [
-            {
-              failedAt: {
-                lte: staleAttemptBefore,
-              },
-            },
-            {
-              failedAt: {
-                lte: staleAttemptBefore,
-              },
-              status: "failed",
-            },
-          ]
+        ? [telegramRetryAfterReclaimPredicate]
         : [];
   const updated = await input.prisma.hostedLinqDelivery.updateMany({
     where: {

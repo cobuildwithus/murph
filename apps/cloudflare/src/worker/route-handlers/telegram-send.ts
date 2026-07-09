@@ -102,6 +102,8 @@ export async function handleTelegramSendRoute(
     });
     return json(readTelegramSendSuccessResponse(delivery));
   } catch (error) {
+    const retryAfterSeconds = readTelegramProviderRetryAfterSeconds(error);
+    const retryable = readTelegramProviderFailureRetryable(error);
     emitHostedExecutionStructuredLog({
       component: "worker",
       details: {
@@ -110,7 +112,8 @@ export async function handleTelegramSendRoute(
           routeName: "telegram-send",
         }, context.request, userId),
         failureCode: readTelegramProviderFailureCode(error),
-        retryable: readTelegramProviderFailureRetryable(error),
+        retryable,
+        ...(retryAfterSeconds === null ? {} : { retryAfterSeconds }),
       },
       error,
       level: "warn",
@@ -121,7 +124,8 @@ export async function handleTelegramSendRoute(
     return json({
       failureCode: readTelegramProviderFailureCode(error),
       failureReason: readTelegramProviderFailureReason(error),
-      retryable: readTelegramProviderFailureRetryable(error),
+      ...(retryAfterSeconds === null ? {} : { retryAfterSeconds }),
+      retryable,
       status: "failed",
     });
   }
@@ -183,6 +187,10 @@ function readTelegramProviderFailureReason(error: unknown): string {
 
 function readTelegramProviderFailureRetryable(error: unknown): boolean {
   const record = readRecord(error);
+  if (record?.deliveryMayHaveSucceeded === true) {
+    return false;
+  }
+
   const context = readRecord(record?.context);
   if (
     record?.retryable === true
@@ -202,6 +210,15 @@ function readTelegramProviderFailureRetryable(error: unknown): boolean {
 
   const status = readHttpStatus(context?.status) ?? readHttpStatus(record?.status);
   return status === 429 || (status !== null && status >= 500);
+}
+
+function readTelegramProviderRetryAfterSeconds(error: unknown): number | null {
+  const record = readRecord(error);
+  const context = readRecord(record?.context);
+  const value = context?.retryAfterSeconds ?? record?.retryAfterSeconds;
+  return typeof value === "number" && Number.isSafeInteger(value) && value > 0
+    ? value
+    : null;
 }
 
 function readRecord(value: unknown): Record<string, unknown> | null {
