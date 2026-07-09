@@ -2055,6 +2055,53 @@ describe("resolveHostedAiUsageGate", () => {
     expect(updateData).not.toHaveProperty("spentUsdMicros");
   });
 
+  it("preserves sent usage-limit notice markers on later same-period normalization", async () => {
+    const priorBlockedAt = new Date("2026-03-28T11:59:00.000Z");
+    const priorNoticeSentAt = new Date("2026-03-28T12:00:00.000Z");
+    const update = vi.fn(async (args?: unknown) => {
+      void args;
+      return undefined;
+    });
+    const prisma = createGatePrisma({
+      billingPlanCode: "launch_edge_monthly",
+      findUniquePeriod: {
+        billingPlanCode: "launch_edge_monthly",
+        blockedAt: priorBlockedAt,
+        limitNoticeSentAt: priorNoticeSentAt,
+        limitUsdMicros: 25_000_000n,
+        periodEnd: new Date("2026-04-01T00:00:00.000Z"),
+        periodStart: new Date("2026-03-01T00:00:00.000Z"),
+        spentUsdMicros: 14_000_000n,
+      },
+      limitUsdMicros: 25_000_000n,
+      periodEnd: new Date("2026-04-01T00:00:00.000Z"),
+      periodStart: new Date("2026-03-01T00:00:00.000Z"),
+      spentUsdMicros: 14_000_000n,
+      update,
+    });
+
+    await expect(resolveHostedAiUsageGate({
+      memberId: "member_123",
+      now: "2026-03-29T12:00:00.000Z",
+      prisma: prisma as never,
+    })).resolves.toMatchObject({
+      allowed: true,
+      billingPlanCode: "launch_edge_monthly",
+      limitUsdMicros: 25_000_000n,
+      remainingUsdMicros: 11_000_000n,
+    });
+
+    expect(update).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        blockedAt: null,
+        limitNoticeSentAt: priorNoticeSentAt,
+      }),
+    }));
+    const updateData = (update.mock.calls[0]?.[0] as { data?: Record<string, unknown> } | undefined)
+      ?.data;
+    expect(updateData).not.toHaveProperty("spentUsdMicros");
+  });
+
   it("uses billing-period counter without aggregating historical usage rows", async () => {
     const queryRaw = vi.fn(async (sql: TemplateStringsArray) => {
       void sql;
@@ -2119,7 +2166,7 @@ describe("resolveHostedAiUsageGate", () => {
     expect(updateData).not.toHaveProperty("spentUsdMicros");
   });
 
-  it("clears stale block and notice metadata after a manual period-counter reset", async () => {
+  it("clears stale block metadata without clearing the sent notice marker", async () => {
     const aggregate = vi.fn(async () => ({
       _max: {
         occurredAt: new Date("2026-04-20T12:00:00.000Z"),
@@ -2167,7 +2214,7 @@ describe("resolveHostedAiUsageGate", () => {
     expect(update).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({
         blockedAt: null,
-        limitNoticeSentAt: null,
+        limitNoticeSentAt: new Date("2026-04-20T12:01:00.000Z"),
       }),
     }));
     const updateData = (update.mock.calls[0]?.[0] as { data?: Record<string, unknown> } | undefined)
