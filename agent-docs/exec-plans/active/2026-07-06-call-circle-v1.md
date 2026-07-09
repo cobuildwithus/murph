@@ -409,6 +409,22 @@ Focused follow-up verification:
 - `pnpm --filter @murphai/hosted-web product-labels:env-check`
 - `pnpm --filter @murphai/hosted-web build`
 
+## ReviewGPT Follow-Up 38 2026-07-09
+
+Accepted finding from the Phlebas PR-head rerun:
+
+- Call Circle response fallback now fails closed when an explicit model-supplied
+  `groupId` or `matchId` conflicts with the durable target resolved from reply
+  context or the single pending fallback. A central post-resolution consistency
+  guard covers match responses and preferences/pause/resume before any mutation
+  handler runs.
+
+Focused follow-up verification:
+
+- `pnpm --filter @murphai/hosted-web test:prepared -- apps/web/test/call-circle-response-service.test.ts`
+- `pnpm --filter @murphai/hosted-web typecheck`
+- `pnpm --filter @murphai/hosted-web build`
+
 ## ReviewGPT Follow-Up 23 2026-07-08
 
 Accepted findings from the Phlebas PR-head rerun:

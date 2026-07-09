@@ -61,6 +61,13 @@ export async function handleCallCircleRespond(input: {
     if (target.status === "unavailable") {
       return { status: "unavailable", unavailableReason: target.unavailableReason };
     }
+    const mismatchReason = readExplicitCallCircleResponseTargetMismatchReason({
+      request: input.request,
+      target,
+    });
+    if (mismatchReason) {
+      return { status: "unavailable", unavailableReason: mismatchReason };
+    }
     const authority = await readCallCircleResponseAuthority({
       groupId: target.groupId,
       memberId: input.memberId,
@@ -273,6 +280,25 @@ type ResolvedCallCircleResponseMatch = {
   windowStartAt: Date;
 };
 
+function readExplicitCallCircleResponseTargetMismatchReason(input: {
+  request: HostedCallCircleRespondRequest;
+  target: Extract<ResolvedCallCircleResponseTarget, { status: "ok" }>;
+}): string | null {
+  if (input.request.groupId && input.request.groupId !== input.target.groupId) {
+    return isCallCircleMatchResponseKind(input.request.kind)
+      ? "call_circle_match_unavailable"
+      : "call_circle_context_unavailable";
+  }
+  if (
+    isCallCircleMatchResponseKind(input.request.kind)
+    && input.request.matchId
+    && input.request.matchId !== input.target.match?.id
+  ) {
+    return "call_circle_match_unavailable";
+  }
+  return null;
+}
+
 async function resolveCallCircleResponseTarget(input: {
   memberId: string;
   now: Date;
@@ -303,12 +329,6 @@ async function resolveCallCircleResponseTarget(input: {
     };
   }
   if (setupContext.status === "exact") {
-    if (input.request.groupId && input.request.groupId !== setupContext.groupId) {
-      return {
-        status: "unavailable",
-        unavailableReason: "call_circle_context_unavailable",
-      };
-    }
     return { groupId: setupContext.groupId, match: null, status: "ok" };
   }
 
@@ -324,12 +344,6 @@ async function resolveCallCircleResponseTarget(input: {
     };
   }
   if (confirmContext.status === "exact") {
-    if (input.request.groupId && input.request.groupId !== confirmContext.groupId) {
-      return {
-        status: "unavailable",
-        unavailableReason: "call_circle_context_unavailable",
-      };
-    }
     return { groupId: confirmContext.groupId, match: null, status: "ok" };
   }
 
@@ -496,13 +510,6 @@ async function resolveCallCircleResponseMatch(input: {
     replyContext: input.replyContext,
   });
   if (confirmContext.status === "ambiguous") return null;
-  if (
-    confirmContext.status === "exact"
-    && input.request.matchId
-    && input.request.matchId !== confirmContext.anchor.matchId
-  ) {
-    return null;
-  }
 
   const match = confirmContext.status === "exact"
     ? await input.prisma.hostedCallCircleMatch.findUnique({
@@ -511,13 +518,6 @@ async function resolveCallCircleResponseMatch(input: {
     })
     : await resolveSinglePendingCallCircleResponseMatch(input);
   if (!match) return null;
-  if (
-    confirmContext.status === "exact"
-    && input.request.groupId
-    && input.request.groupId !== match.groupId
-  ) {
-    return null;
-  }
   const side = match.memberAId === input.memberId
     ? "A"
     : match.memberBId === input.memberId

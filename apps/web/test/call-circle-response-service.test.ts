@@ -173,6 +173,30 @@ describe("handleCallCircleRespond", () => {
     });
   });
 
+  it("fails closed when fallback preferences resolve a different explicit group", async () => {
+    const prisma = createResponsePrisma({ participantStatus: "enrolled" });
+
+    await expect(handleCallCircleRespond({
+      memberId: "member_123",
+      prisma: prisma as never,
+      request: {
+        groupId: "hgrp_other",
+        kind: "preferences",
+        timeZone: "America/New_York",
+        windows: [{
+          dayOfWeek: 1,
+          endLocalTime: "17:30",
+          startLocalTime: "17:00",
+        }],
+      },
+    })).resolves.toEqual({
+      status: "unavailable",
+      unavailableReason: "call_circle_context_unavailable",
+    });
+
+    expect(mocks.writeCallCirclePreferences).not.toHaveBeenCalled();
+  });
+
   it("uses setup notification context for omitted group preferences", async () => {
     const prisma = createResponsePrisma({
       participantGroups: ["hgrp_old", "hgrp_new"],
@@ -549,6 +573,64 @@ describe("handleCallCircleRespond", () => {
       prisma: expect.any(Object),
       side: "B",
     });
+  });
+
+  it("fails closed when fallback confirmation resolves a different explicit match", async () => {
+    const match = callCircleMatch({
+      amAskedAt: new Date("2026-07-06T14:00:00.000Z"),
+      memberAId: "member_other",
+      memberBId: "member_123",
+    });
+    const prisma = createResponsePrisma({
+      match,
+      participantStatus: "enrolled",
+    });
+
+    await expect(handleCallCircleRespond({
+      context: FRESH_CALL_CIRCLE_REPLY_CONTEXT,
+      memberId: "member_123",
+      now: new Date("2026-07-06T15:00:00.000Z"),
+      prisma: prisma as never,
+      request: {
+        kind: "confirm",
+        matchId: "hccm_other",
+      },
+    })).resolves.toEqual({
+      status: "unavailable",
+      unavailableReason: "call_circle_match_unavailable",
+    });
+
+    expect(prisma.tx.hostedCallCircleMatch.findMany).toHaveBeenCalled();
+    expect(mocks.confirmCallCircleMatchSide).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when fallback confirmation resolves a different explicit group", async () => {
+    const match = callCircleMatch({
+      amAskedAt: new Date("2026-07-06T14:00:00.000Z"),
+      memberAId: "member_other",
+      memberBId: "member_123",
+    });
+    const prisma = createResponsePrisma({
+      match,
+      participantStatus: "enrolled",
+    });
+
+    await expect(handleCallCircleRespond({
+      context: FRESH_CALL_CIRCLE_REPLY_CONTEXT,
+      memberId: "member_123",
+      now: new Date("2026-07-06T15:00:00.000Z"),
+      prisma: prisma as never,
+      request: {
+        groupId: "hgrp_other",
+        kind: "confirm",
+      },
+    })).resolves.toEqual({
+      status: "unavailable",
+      unavailableReason: "call_circle_match_unavailable",
+    });
+
+    expect(prisma.tx.hostedCallCircleMatch.findMany).toHaveBeenCalled();
+    expect(mocks.confirmCallCircleMatchSide).not.toHaveBeenCalled();
   });
 
   it("uses the confirmation notification anchor when multiple pending matches exist", async () => {
