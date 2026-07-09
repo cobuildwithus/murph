@@ -13,6 +13,7 @@ import { sha256Hex } from "../primitives";
 import { hostedOnboardingError } from "./errors";
 import {
   claimHostedLinqDeliveryProviderDispatchTx,
+  hasHostedLinqTerminalTelegramUsageLimitFailureForIdempotencyKeysTx,
   hasHostedLinqProviderCorrelatedDeliveryForIdempotencyKeysTx,
   hasHostedLinqProviderCorrelatedOrFreshDeliveryForIdempotencyKeysTx,
   markHostedLinqDeliveryAcceptedTx,
@@ -1139,6 +1140,7 @@ async function claimHostedLinqNoticeForSideEffect(
         linqChatId: target.linqChatId,
         phoneNumber: target.phoneNumber,
         prisma,
+        reclaimStalePreProviderAttempt: true,
         source: "hosted_webhook_side_effect",
         sourceRef: effect.effectId,
         targetKind: target.targetKind,
@@ -1150,7 +1152,15 @@ async function claimHostedLinqNoticeForSideEffect(
             idempotencyKeys: [effect.effectId],
             prisma,
           });
-        return claimedCurrentDeliverySentNotice
+        if (claimedCurrentDeliverySentNotice) {
+          return { status: "already_claimed" };
+        }
+        const claimedCurrentDeliveryTerminalFailure =
+          await hasHostedLinqTerminalTelegramUsageLimitFailureForIdempotencyKeysTx({
+            idempotencyKeys: [effect.effectId],
+            prisma,
+          });
+        return claimedCurrentDeliveryTerminalFailure
           ? { status: "already_claimed" }
           : { status: "in_flight" };
       }

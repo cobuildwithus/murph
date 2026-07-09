@@ -65,6 +65,8 @@ vi.mock("@/src/lib/hosted-onboarding/linq-delivery-store", async () => {
       vi.fn().mockResolvedValue(false),
     hasHostedLinqProviderCorrelatedOrFreshDeliveryForIdempotencyKeysTx:
       vi.fn().mockResolvedValue(false),
+    hasHostedLinqTerminalTelegramUsageLimitFailureForIdempotencyKeysTx:
+      vi.fn().mockResolvedValue(false),
     markHostedLinqDeliveryAcceptedTx: vi.fn().mockResolvedValue({
       reopenOnboardingLink: null,
       restoreOnboardingLink: null,
@@ -112,6 +114,7 @@ import {
 } from "@/src/lib/hosted-onboarding/linq-contact-card-share";
 import {
   claimHostedLinqDeliveryProviderDispatchTx,
+  hasHostedLinqTerminalTelegramUsageLimitFailureForIdempotencyKeysTx,
   hasHostedLinqProviderCorrelatedDeliveryForIdempotencyKeysTx,
   hasHostedLinqProviderCorrelatedOrFreshDeliveryForIdempotencyKeysTx,
   markHostedLinqDeliveryAcceptedTx,
@@ -143,6 +146,8 @@ describe("hosted Linq webhook transport", () => {
     vi.mocked(hasHostedLinqProviderCorrelatedDeliveryForIdempotencyKeysTx)
       .mockResolvedValue(false);
     vi.mocked(hasHostedLinqProviderCorrelatedOrFreshDeliveryForIdempotencyKeysTx)
+      .mockResolvedValue(false);
+    vi.mocked(hasHostedLinqTerminalTelegramUsageLimitFailureForIdempotencyKeysTx)
       .mockResolvedValue(false);
     vi.mocked(markHostedLinqDeliveryAcceptedTx).mockResolvedValue({
       reopenOnboardingLink: null,
@@ -612,6 +617,7 @@ describe("hosted Linq webhook transport", () => {
       linqChatId: "chat-1",
       phoneNumber: undefined,
       prisma: {},
+      reclaimStalePreProviderAttempt: true,
       source: "hosted_webhook_side_effect",
       sourceRef: expectedIdempotencyKey,
       targetKind: "thread",
@@ -718,6 +724,63 @@ describe("hosted Linq webhook transport", () => {
         reclaimFreshPreProviderAttempt: true,
       }),
     );
+    expect(claimHostedLinqDeliveryProviderDispatchTx).toHaveBeenCalledWith(
+      expect.objectContaining({
+        reclaimStalePreProviderAttempt: true,
+      }),
+    );
+    expect(sendHostedLinqChatMessage).not.toHaveBeenCalled();
+    expect(markHostedLinqDeliveryAcceptedTx).not.toHaveBeenCalled();
+    expect(markHostedAiUsageLimitNoticeSent).not.toHaveBeenCalled();
+  });
+
+  it("treats terminal Telegram usage quota failures as already owned", async () => {
+    vi.mocked(claimHostedLinqDeliveryProviderDispatchTx).mockResolvedValueOnce({
+      claimed: false,
+      id: "hld_terminal_telegram_failure",
+    });
+    vi.mocked(hasHostedLinqProviderCorrelatedDeliveryForIdempotencyKeysTx)
+      .mockResolvedValue(false);
+    vi.mocked(hasHostedLinqTerminalTelegramUsageLimitFailureForIdempotencyKeysTx)
+      .mockResolvedValueOnce(true);
+    const effect = createHostedWebhookLinqMessageSideEffect({
+      chatId: "chat-1",
+      claimToken: {
+        periodStart: "2026-03-01T00:00:00.000Z",
+        sentAt: "2026-03-26T12:00:01.000Z",
+      },
+      memberId: "member-1",
+      message: "usage-limit",
+      noticeCode: "pulse_upgrade_edge",
+      occurredAt: "2026-03-26T12:00:00.000Z",
+      replyToMessageId: "message-1",
+      sourceEventId: "event-ai-usage",
+      template: "ai_usage_quota",
+    });
+
+    await expect(
+      drainHostedLinqSideEffectsDirect({
+        collectResult: true,
+        currentInboundReply,
+        prisma: {} as never,
+        sideEffects: [effect],
+      }),
+    ).resolves.toEqual({
+      sentCount: 0,
+      skipped: [
+        {
+          effectId: effect.effectId,
+          reason: "notice_already_claimed",
+          template: "ai_usage_quota",
+        },
+      ],
+    });
+
+    expect(hasHostedLinqTerminalTelegramUsageLimitFailureForIdempotencyKeysTx)
+      .toHaveBeenCalledWith({
+        idempotencyKeys: [effect.effectId],
+        prisma: {},
+      });
     expect(sendHostedLinqChatMessage).not.toHaveBeenCalled();
     expect(markHostedLinqDeliveryAcceptedTx).not.toHaveBeenCalled();
     expect(markHostedAiUsageLimitNoticeSent).not.toHaveBeenCalled();
