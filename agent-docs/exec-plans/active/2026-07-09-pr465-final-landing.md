@@ -13,8 +13,9 @@ duplicate send across Linq, Telegram, retries, or legacy rollout keys.
 - Do not weaken hosted ingress, billing, or usage gating invariants.
 - Default to deletion: one claim operation, one persisted owner row, no new queue,
   manager, table, or lifecycle layer.
-- Land and drain the marker-preservation prerequisite before PR 465 web so no
-  active binary can clear the rollout fence.
+- Land and drain both rollback prerequisites before PR 465 web: PR 495 keeps
+  active binaries from clearing the rollout fence, and PR 501 keeps ambiguous
+  legacy Telegram sends claimed.
 - Keep Vercel OIDC plus bound-user validation as the sole web-to-Worker auth
   boundary; do not add a co-located signing secret or inert provider fields.
 
@@ -42,5 +43,5 @@ duplicate send across Linq, Telegram, retries, or legacy rollout keys.
   hosted-control failure classification.
 - Scoped `pnpm test:diff` over the changed hosted usage and Linq webhook files.
 - Required completion audits for hosted external delivery/retry behavior.
-- Deploy and drain the marker-preservation prerequisite before final PR checks.
+- Deploy and drain PR 495 and PR 501 before final PR checks.
 - Rerun ReviewGPT on the pushed PR head and continue until zero accepted findings.
