@@ -143,6 +143,23 @@ landing; record the chosen posture here so the decision is reviewable.
   at one file for the shared projection family and keeps normal import work
   bounded despite delivery retries or night count.
 
+- `derived/captures/generated-image-lookups.json`
+  (`murph.capture-lookup.v1`) is a compact derived index for generated-image
+  retry identity. It is included in hosted workspace snapshots because replay
+  after restore must know whether a stable generated-image tool identity already
+  saved a capture or was later deleted. One ordinary generated-image request can
+  add at most one small map entry; retries of the same tool identity update no
+  file count and either reuse the saved capture or return the deleted outcome.
+  The index is one file per workspace, not one sidecar per image. Lookup-backed
+  generated-image capture events are immutable after creation except for
+  `deleteEvent`, so each entry can store the original event shard and primary raw
+  media ref without scanning the event ledger. The map grows with user-created
+  generated-image captures, matching the product-owned raw capture history, and
+  deletion intentionally keeps the entry so a retry cannot resurrect deleted
+  media. No rotation is planned while the file stays a single compact owner
+  document; future retention for generated captures must prune the capture event,
+  raw media, and matching lookup entry in one core-owned repair flow.
+
 - `assistant-state/hosted-provider-cleanup.json`
   (`murph.hosted-provider-cleanup.v1`) is compact durable operational-continuity
   state included in hosted snapshots. It is the single owner of the queued

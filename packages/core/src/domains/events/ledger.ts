@@ -36,6 +36,7 @@ import {
   uniqueTrimmedStringList,
   validateContract,
 } from "../shared.ts";
+import { isCaptureLookupBackedEvent } from "./capture-lookup.ts";
 import {
   buildTypedEventRecord,
   normalizeDraftEventId,
@@ -473,6 +474,12 @@ async function upsertEventLocked(
     throw new VaultError(
       "EVENT_KIND_INVALID",
       `Event kind "${kind}" is not supported by generic event upsert.`,
+    );
+  }
+  if (latestMatchedEvent !== null && isCaptureLookupBackedEvent(latestMatchedEvent.record)) {
+    throw new VaultError(
+      "CAPTURE_LOOKUP_IMMUTABLE",
+      `Event "${latestMatchedEvent.record.id}" is a lookup-backed capture and cannot be rewritten.`,
     );
   }
 
