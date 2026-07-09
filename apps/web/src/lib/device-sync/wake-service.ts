@@ -3,6 +3,10 @@ import {
   normalizeJunctionProviderSlug,
 } from "@murphai/device-syncd/connect-config";
 import { deviceSyncError, isDeviceSyncError } from "@murphai/device-syncd/errors";
+import {
+  JUNCTION_COMPANION_HEALTH_METADATA_EVENT_TYPE,
+  JUNCTION_COMPANION_HEALTH_METADATA_SOURCE_PROVIDER,
+} from "@murphai/device-syncd/junction-resources";
 import type {
   DeviceSyncIngressWebhook,
   DeviceSyncJobInput,
@@ -47,6 +51,7 @@ import {
 } from "./shared";
 
 const HOSTED_DEVICE_SYNC_WAKE_EVENT_SCHEMA = "v1";
+const COMPANION_HEALTH_METADATA_MAX_PENDING_PAYLOADS = 16;
 
 export async function disconnectHostedDeviceSyncConnection(input: {
   connectionId: string;
@@ -452,6 +457,119 @@ export async function handleHostedDeviceSyncWebhookAccepted(input: {
   });
 }
 
+/**
+ * Durably stages the companion's closed HealthKit metadata batch on the
+ * member-owned Junction runtime lane. The encrypted dirty payload is the
+ * handoff; health values never enter mailbox hints or signal rows.
+ */
+export async function persistHostedDeviceSyncCompanionMetadata(input: {
+  connectionId: string;
+  occurredAt: string;
+  resource: HostedDeviceSyncDirtyResource;
+  store: PrismaDeviceSyncControlPlaneStore;
+  userId: string;
+}): Promise<void> {
+  const result = await retryHostedDirtyStateContention(async () =>
+    input.store.withConnectionMutationLock(input.connectionId, async (tx) => {
+      const connection = await input.store.getConnectionForUser(
+        input.userId,
+        input.connectionId,
+        tx,
+      );
+      if (!connection || connection.provider !== "junction" || connection.status !== "active") {
+        throw deviceSyncError({
+          code: "COMPANION_HEALTH_CONNECTION_REQUIRED",
+          message: "Connect Apple Health in the companion before syncing supplemental metadata.",
+          retryable: false,
+          httpStatus: 409,
+        });
+      }
+      const sources = await input.store.listConnectionSources(connection.id, tx);
+      const hasConnectedAppleHealthSource = sources.some((source) =>
+        source.status === "connected"
+        && normalizeJunctionProviderSlug(source.sourceProviderSlug)
+          === normalizeJunctionProviderSlug(JUNCTION_COMPANION_HEALTH_METADATA_SOURCE_PROVIDER)
+      );
+      if (!hasConnectedAppleHealthSource) {
+        throw deviceSyncError({
+          code: "COMPANION_HEALTH_CONNECTION_REQUIRED",
+          message: "Connect Apple Health in the companion before syncing supplemental metadata.",
+          retryable: false,
+          httpStatus: 409,
+        });
+      }
+
+      const pendingPayloadCount = await tx.deviceSyncDirtyPayload.count({
+        where: {
+          connectionId: connection.id,
+          userId: input.userId,
+        },
+      });
+      if (pendingPayloadCount >= COMPANION_HEALTH_METADATA_MAX_PENDING_PAYLOADS) {
+        throw deviceSyncError({
+          code: "COMPANION_HEALTH_BACKLOG_FULL",
+          message: "Apple Health sync is still processing. Retry this batch later.",
+          retryable: true,
+          httpStatus: 429,
+        });
+      }
+
+      const dirtyUpdate = await input.store.upsertDirtyConnection({
+        connectionId: connection.id,
+        dirtyAt: input.occurredAt,
+        eventType: JUNCTION_COMPANION_HEALTH_METADATA_EVENT_TYPE,
+        provider: connection.provider,
+        resourceCategory: "summary",
+        resources: [input.resource],
+        tx,
+        userId: input.userId,
+      });
+      if (!dirtyUpdate.shouldRequestWake) {
+        return { wakeMailboxItemId: null };
+      }
+
+      const wake = buildHostedDeviceSyncWake({
+        connectionId: connection.id,
+        eventId: buildHostedDeviceSyncDirtyTransitionWakeEventId({
+          connectionId: connection.id,
+          dirtyRevision: dirtyUpdate.dirty.dirtyRevision,
+          provider: connection.provider,
+          userId: input.userId,
+        }),
+        hint: {
+          eventType: JUNCTION_COMPANION_HEALTH_METADATA_EVENT_TYPE,
+          occurredAt: input.occurredAt,
+          reason: "companion_health_metadata",
+          resourceCategory: "summary",
+        },
+        occurredAt: input.occurredAt,
+        provider: connection.provider,
+        source: "webhook-hint",
+        userId: input.userId,
+      });
+      const mailboxAppend = await appendHostedMailboxEnvelopeTx({
+        envelope: wake,
+        tx,
+      });
+      if (mailboxAppend.dedupeConflict) {
+        throw deviceSyncError({
+          code: "HOSTED_DEVICE_SYNC_DIRTY_WAKE_DEDUPE_CONFLICT",
+          httpStatus: 503,
+          message: "Hosted device-sync dirty wake conflicted with an existing wake identity.",
+          retryable: true,
+        });
+      }
+
+      return { wakeMailboxItemId: mailboxAppend.item.id };
+    }));
+
+  if (result.wakeMailboxItemId) {
+    await startHostedDeviceSyncWakeWorkflow(result.wakeMailboxItemId, {
+      failureMode: "best_effort",
+    });
+  }
+}
+
 export interface HostedDeviceSyncScheduledReconcileWakeResult {
   reason?: string;
   wakeAccepted: boolean;
@@ -641,7 +759,7 @@ async function persistHostedDeviceSyncWebhookAccepted(input: {
   traceId: string | null;
   userId: string;
 }): Promise<void> {
-  const result = await retryHostedWebhookAcceptanceOnDirtyContention(async () =>
+  const result = await retryHostedDirtyStateContention(async () =>
     input.store.prisma.$transaction(async (tx) => {
       // Level webhooks may be coalesced only after committed dirty state exists.
       // Durable webhook work must be persisted or retried; dirty state alone never satisfies it.
@@ -751,27 +869,27 @@ function buildHostedDeviceSyncDirtyTransitionWakeEventId(input: {
   ].join(":");
 }
 
-const HOSTED_WEBHOOK_ACCEPTANCE_DIRTY_RETRY_ATTEMPTS = 12;
+const HOSTED_DIRTY_STATE_RETRY_ATTEMPTS = 12;
 const HOSTED_DEVICE_SYNC_DIRTY_STATE_CONTENTION_CODE = "HOSTED_DEVICE_SYNC_DIRTY_STATE_CONTENTION";
 
-async function retryHostedWebhookAcceptanceOnDirtyContention<T>(
+async function retryHostedDirtyStateContention<T>(
   operation: () => Promise<T>,
 ): Promise<T> {
-  for (let attempt = 0; attempt < HOSTED_WEBHOOK_ACCEPTANCE_DIRTY_RETRY_ATTEMPTS; attempt += 1) {
+  for (let attempt = 0; attempt < HOSTED_DIRTY_STATE_RETRY_ATTEMPTS; attempt += 1) {
     try {
       return await operation();
     } catch (error) {
       if (
         !isHostedDirtyStateContentionError(error)
-        || attempt === HOSTED_WEBHOOK_ACCEPTANCE_DIRTY_RETRY_ATTEMPTS - 1
+        || attempt === HOSTED_DIRTY_STATE_RETRY_ATTEMPTS - 1
       ) {
         throw error;
       }
-      await waitForHostedWebhookAcceptanceRetry(attempt);
+      await waitForHostedDirtyStateRetry(attempt);
     }
   }
 
-  throw new Error("Hosted device-sync webhook acceptance retry loop exhausted unexpectedly.");
+  throw new Error("Hosted device-sync dirty-state retry loop exhausted unexpectedly.");
 }
 
 function isHostedDirtyStateContentionError(error: unknown): boolean {
@@ -783,7 +901,7 @@ function isHostedDirtyStateContentionError(error: unknown): boolean {
   );
 }
 
-async function waitForHostedWebhookAcceptanceRetry(attempt: number): Promise<void> {
+async function waitForHostedDirtyStateRetry(attempt: number): Promise<void> {
   const delayMs = Math.min(25, 2 + attempt * 2 + Math.floor(Math.random() * 3));
   await new Promise<void>((resolve) => {
     setTimeout(resolve, delayMs);

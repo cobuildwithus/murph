@@ -29,6 +29,9 @@ const mocks = vi.hoisted(() => {
     prismaTx: {
       __tx: true,
       $queryRaw: vi.fn(),
+      deviceSyncDirtyPayload: {
+        count: vi.fn(),
+      },
       deviceSyncSignal: {
         create: vi.fn(),
       },
@@ -300,8 +303,11 @@ import {
 import {
   createHostedDeviceSyncPublicIngressService,
 } from "@/src/lib/device-sync/public-ingress-service";
+import { PrismaDeviceSyncControlPlaneStore } from "@/src/lib/device-sync/prisma-store";
+import { getPrisma } from "@/src/lib/prisma";
 import {
   appendHostedDeviceSyncScheduledReconcileWake,
+  persistHostedDeviceSyncCompanionMetadata,
 } from "@/src/lib/device-sync/wake-service";
 import { createHostedBrowserConnectionId } from "@/src/lib/device-sync/public-connection";
 
@@ -318,6 +324,7 @@ describe("hosted device-sync wakes", () => {
       callback(mocks.prismaTx),
     );
     mocks.prismaTx.$queryRaw.mockResolvedValue([{ acquired: true }]);
+    mocks.prismaTx.deviceSyncDirtyPayload.count.mockResolvedValue(0);
     mocks.createDeviceSyncPublicIngress.mockImplementation((input: {
       hooks?: {
         onConnectionEstablished?: (value: unknown) => Promise<void> | void;
@@ -644,6 +651,206 @@ describe("hosted device-sync wakes", () => {
     expect(mocks.signalHostedDeviceSyncMailboxRuntime).toHaveBeenCalledWith({
       mailboxItemId: "mailbox_123",
     });
+  });
+
+  it("stages companion metadata inside encrypted dirty state without copying health data into the wake", async () => {
+    const connection = buildHostedConnection({
+      displayName: "Apple Health",
+      provider: "junction",
+    });
+    const dirty = buildDirtyConnectionRecord({
+      provider: "junction",
+    });
+    mocks.getConnectionForUser.mockResolvedValue(connection);
+    mocks.listConnectionSources.mockResolvedValue([{
+      sourceProviderSlug: "apple_health_kit",
+      status: "connected",
+    }]);
+    mocks.upsertDirtyConnection.mockResolvedValue({
+      dirty,
+      shouldRequestWake: true,
+    });
+    mocks.prismaTx.deviceSyncDirtyPayload.count.mockResolvedValue(15);
+    const webhookDataJson = JSON.stringify({
+      records: [{
+        endAt: "2026-07-08T12:00:00.000Z",
+        kind: "recovery_score",
+        recordId: "a".repeat(64),
+        startAt: "2026-07-08T04:00:00.000Z",
+        value: 80,
+      }],
+      schemaVersion: 1,
+    });
+
+    await persistHostedDeviceSyncCompanionMetadata({
+      connectionId: connection.id,
+      occurredAt: "2026-07-09T12:00:00.000Z",
+      resource: {
+        count: 1,
+        jobKind: "resource",
+        payload: {
+          resource: "companion_health_metadata",
+          webhookDataJson,
+        },
+        resource: "companion_health_metadata",
+        resourceCategory: "summary",
+        sourceProviderSlug: "apple-health-kit",
+        windowEnd: "2026-07-08T12:00:00.000Z",
+        windowStart: "2026-07-08T04:00:00.000Z",
+      },
+      store: new PrismaDeviceSyncControlPlaneStore({
+        prisma: getPrisma(),
+      }),
+      userId: "user-123",
+    });
+
+    expect(mocks.getConnectionForUser).toHaveBeenCalledWith(
+      "user-123",
+      connection.id,
+      mocks.prismaTx,
+    );
+    expect(mocks.withConnectionMutationLock).toHaveBeenCalledWith(
+      connection.id,
+      expect.any(Function),
+    );
+    expect(mocks.prismaTx.deviceSyncDirtyPayload.count).toHaveBeenCalledWith({
+      where: {
+        connectionId: connection.id,
+        userId: "user-123",
+      },
+    });
+    expect(mocks.upsertDirtyConnection).toHaveBeenCalledWith(expect.objectContaining({
+      connectionId: connection.id,
+      eventType: "companion.health_metadata.v1",
+      provider: "junction",
+      resources: [expect.objectContaining({
+        payload: expect.objectContaining({ webhookDataJson }),
+      })],
+      tx: mocks.prismaTx,
+      userId: "user-123",
+    }));
+    const wakeEnvelope = mocks.appendHostedMailboxEnvelope.mock.calls[0]?.[0]?.envelope;
+    expect(wakeEnvelope).toMatchObject({
+      eventId: `device-sync:dirty:v1:user-123:junction:${connection.id}:1`,
+      hint: {
+        eventType: "companion.health_metadata.v1",
+        occurredAt: "2026-07-09T12:00:00.000Z",
+        reason: "companion_health_metadata",
+        resourceCategory: "summary",
+      },
+      provider: "junction",
+      reason: "webhook_hint",
+    });
+    expect(JSON.stringify(wakeEnvelope)).not.toContain(webhookDataJson);
+    expect(mocks.signalHostedDeviceSyncMailboxRuntime).toHaveBeenCalledWith({
+      mailboxItemId: "mailbox_123",
+    });
+  });
+
+  it("does not append a second wake while companion dirty work is already pending", async () => {
+    const connection = buildHostedConnection({ provider: "junction" });
+    mocks.getConnectionForUser.mockResolvedValue(connection);
+    mocks.listConnectionSources.mockResolvedValue([{
+      sourceProviderSlug: "apple_health_kit",
+      status: "connected",
+    }]);
+    mocks.upsertDirtyConnection.mockResolvedValue({
+      dirty: buildDirtyConnectionRecord({ provider: "junction" }),
+      shouldRequestWake: false,
+    });
+
+    await persistHostedDeviceSyncCompanionMetadata({
+      connectionId: connection.id,
+      occurredAt: "2026-07-09T12:00:00.000Z",
+      resource: {
+        count: 1,
+        jobKind: "resource",
+        payload: { webhookDataJson: "{}" },
+        resource: "companion_health_metadata",
+        resourceCategory: "summary",
+        sourceProviderSlug: "apple-health-kit",
+        windowEnd: "2026-07-08T12:00:00.000Z",
+        windowStart: "2026-07-08T04:00:00.000Z",
+      },
+      store: new PrismaDeviceSyncControlPlaneStore({
+        prisma: getPrisma(),
+      }),
+      userId: "user-123",
+    });
+
+    expect(mocks.upsertDirtyConnection).toHaveBeenCalledTimes(1);
+    expect(mocks.appendHostedMailboxEnvelope).not.toHaveBeenCalled();
+    expect(mocks.signalHostedDeviceSyncMailboxRuntime).not.toHaveBeenCalled();
+  });
+
+  it("rejects companion metadata while the connection backlog is full", async () => {
+    const connection = buildHostedConnection({ provider: "junction" });
+    mocks.getConnectionForUser.mockResolvedValue(connection);
+    mocks.listConnectionSources.mockResolvedValue([{
+      sourceProviderSlug: "apple_health_kit",
+      status: "connected",
+    }]);
+    mocks.prismaTx.deviceSyncDirtyPayload.count.mockResolvedValue(16);
+
+    await expect(persistHostedDeviceSyncCompanionMetadata({
+      connectionId: connection.id,
+      occurredAt: "2026-07-09T12:00:00.000Z",
+      resource: {
+        count: 1,
+        jobKind: "resource",
+        payload: { webhookDataJson: "{}" },
+        resource: "companion_health_metadata",
+        resourceCategory: "summary",
+        sourceProviderSlug: "apple-health-kit",
+        windowEnd: "2026-07-08T12:00:00.000Z",
+        windowStart: "2026-07-08T04:00:00.000Z",
+      },
+      store: new PrismaDeviceSyncControlPlaneStore({
+        prisma: getPrisma(),
+      }),
+      userId: "user-123",
+    })).rejects.toMatchObject({
+      code: "COMPANION_HEALTH_BACKLOG_FULL",
+      httpStatus: 429,
+      retryable: true,
+    });
+
+    expect(mocks.upsertDirtyConnection).not.toHaveBeenCalled();
+    expect(mocks.appendHostedMailboxEnvelope).not.toHaveBeenCalled();
+    expect(mocks.signalHostedDeviceSyncMailboxRuntime).not.toHaveBeenCalled();
+  });
+
+  it("rejects companion metadata if the Apple Health source disconnected before staging", async () => {
+    const connection = buildHostedConnection({ provider: "junction" });
+    mocks.getConnectionForUser.mockResolvedValue(connection);
+    mocks.listConnectionSources.mockResolvedValue([{
+      sourceProviderSlug: "apple_health_kit",
+      status: "disconnected",
+    }]);
+
+    await expect(persistHostedDeviceSyncCompanionMetadata({
+      connectionId: connection.id,
+      occurredAt: "2026-07-09T12:00:00.000Z",
+      resource: {
+        count: 1,
+        jobKind: "resource",
+        payload: { webhookDataJson: "{}" },
+        resource: "companion_health_metadata",
+        resourceCategory: "summary",
+        sourceProviderSlug: "apple-health-kit",
+        windowEnd: "2026-07-08T12:00:00.000Z",
+        windowStart: "2026-07-08T04:00:00.000Z",
+      },
+      store: new PrismaDeviceSyncControlPlaneStore({
+        prisma: getPrisma(),
+      }),
+      userId: "user-123",
+    })).rejects.toMatchObject({
+      code: "COMPANION_HEALTH_CONNECTION_REQUIRED",
+    });
+
+    expect(mocks.upsertDirtyConnection).not.toHaveBeenCalled();
+    expect(mocks.appendHostedMailboxEnvelope).not.toHaveBeenCalled();
   });
 
   it("does not append another device-sync wake for level webhooks while dirty work is already pending", async () => {
