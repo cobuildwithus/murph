@@ -2493,15 +2493,20 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       vaultRoot,
     });
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const runtimeCheckpointInputs: HostedWorkspaceRunnerRuntimeStatusCheckpointInput[] = [];
     const { mailboxPort } = createMailboxPort({ items: [] });
+    const checkpointRuntimeRedactedStatus = createRuntimeRedactedStatusCheckpoint({
+      attemptId: "attempt_synthetic_runner_snapshot_dirty",
+      checkpointRequests,
+      leaseGeneration: "1",
+    });
 
     try {
       const result = await runHostedWorkspaceUntilIdleOrBudget({
-        checkpointRuntimeRedactedStatus: createRuntimeRedactedStatusCheckpoint({
-          attemptId: "attempt_synthetic_runner_snapshot_dirty",
-          checkpointRequests,
-          leaseGeneration: "1",
-        }),
+        checkpointRuntimeRedactedStatus: async (checkpointInput) => {
+          runtimeCheckpointInputs.push(checkpointInput);
+          return await checkpointRuntimeRedactedStatus(checkpointInput);
+        },
         checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
           attemptId: "attempt_synthetic_runner_snapshot_dirty",
           expectedWorkspaceVersion: "0",
@@ -2554,6 +2559,10 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       assert.deepEqual(checkpointRequests.map((request) => request.reason), [
         "canonical_runtime_commit",
       ]);
+      assert.deepEqual(
+        runtimeCheckpointInputs.map((checkpointInput) => checkpointInput.checkpointSnapshot),
+        [true],
+      );
       assert.deepEqual(
         (await readAssistantContextSnapshotState(vaultRoot))?.pendingDirtyDomains,
         ["experiments"],

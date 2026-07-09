@@ -1909,6 +1909,26 @@ function createHostedWorkspaceCanonicalWritePort(input: {
   return {
     async persistCanonicalWrite(writeInput) {
       const persist = async () => {
+        const snapshotDirtyDomains =
+          listAssistantContextSnapshotDirtyDomainsForCanonicalWrite(
+            writeInput.receipt,
+          );
+        if (snapshotDirtyDomains.length > 0) {
+          try {
+            await markAssistantContextSnapshotDirty({
+              domains: snapshotDirtyDomains,
+              vaultRoot: input.input.vaultRoot,
+            });
+          } catch (error) {
+            warnAssistantBestEffortFailure({
+              error,
+              operation: "mark assistant context snapshot dirty",
+            });
+            throw error;
+          }
+          input.checkpointRequestBuilder.markRuntimeStateDirty();
+          input.onAssistantContextSnapshotDirty?.();
+        }
         await Promise.all(writeInput.payloads.map(async (payload) => {
           if (payload.bytes.byteLength !== payload.byteLength) {
             throw new TypeError("Hosted canonical write payload length does not match its receipt.");
@@ -1943,25 +1963,6 @@ function createHostedWorkspaceCanonicalWritePort(input: {
         input.recordRedactedStatus(receiptLogStatus);
         if (!checkpointSnapshot) {
           input.checkpointRequestBuilder.markRuntimeStateDirty();
-        }
-        const snapshotDirtyDomains =
-          listAssistantContextSnapshotDirtyDomainsForCanonicalWrite(
-            writeInput.receipt,
-          );
-        if (snapshotDirtyDomains.length > 0) {
-          try {
-            await markAssistantContextSnapshotDirty({
-              domains: snapshotDirtyDomains,
-              vaultRoot: input.input.vaultRoot,
-            });
-            input.checkpointRequestBuilder.markRuntimeStateDirty();
-            input.onAssistantContextSnapshotDirty?.();
-          } catch (error) {
-            warnAssistantBestEffortFailure({
-              error,
-              operation: "mark assistant context snapshot dirty",
-            });
-          }
         }
         await writeHostedForegroundCheckpointDeferredLog({
           checkpointPhase: "canonical_write",

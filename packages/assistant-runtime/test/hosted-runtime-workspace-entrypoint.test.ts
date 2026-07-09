@@ -24,6 +24,9 @@ import {
   VAULT_LAYOUT,
 } from "@murphai/contracts";
 import {
+  readAssistantContextSnapshotState,
+} from "@murphai/assistant-engine";
+import {
   readAssistantInputEvent,
   updateAssistantInputAttachmentEvidence,
   updateAssistantInputProjection,
@@ -15616,7 +15619,7 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
-  test("restores hosted canonical write receipts from a pre-idle checkpoint", async () => {
+  test("restores canonical write receipts and context dirtiness from a pre-idle checkpoint", async () => {
     const firstVaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const restoredVaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const events: string[] = [];
@@ -15625,13 +15628,29 @@ describe("hosted workspace runtime entrypoint", () => {
     const artifactBytesByHash = new Map<string, Uint8Array>();
     const baseSnapshotRef = createWorkspaceSnapshotV2Ref("snapshot-canonical-crash-base");
     const checkpointedWorkspaces: HostedWorkspaceState[] = [];
+    const abortController = new AbortController();
+    const abortReason = new Error("Synthetic stop after canonical receipt checkpoint.");
 
     try {
       await expect(
         runHostedWorkspaceRuntimeJobInProcess(createWorkspaceRuntimeJobInput(), {
           async createCheckpointSnapshot(snapshotInput) {
             events.push(`snapshot:${snapshotInput.reason}`);
-            throw new Error("Synthetic stop before idle snapshot.");
+            if (snapshotInput.reason !== "canonical_runtime_commit") {
+              throw new Error("Canonical crash test should not reach idle snapshotting.");
+            }
+            const hotSnapshot = await snapshotHostedAssistantRuntimeHotState({
+              vaultRoot: firstVaultRoot,
+            });
+            const hotHash = sha256HostedBundleHex(hotSnapshot.bundle);
+            artifactBytesByHash.set(hotHash, hotSnapshot.bundle);
+            return {
+              snapshotRef: createBundleRef({
+                hash: hotHash,
+                key: "users/bundles/member-synthetic/canonical-crash-hot.bundle.json",
+                size: hotSnapshot.bundle.byteLength,
+              }),
+            };
           },
           async importItem() {
             throw new Error("Mailbox import should not run without mailbox items.");
@@ -15655,6 +15674,12 @@ describe("hosted workspace runtime entrypoint", () => {
                   version: String(BigInt(request.expectedWorkspaceVersion) + 1n),
                 });
                 checkpointedWorkspaces.push(workspace);
+                if (
+                  request.reason === "canonical_runtime_commit"
+                  && !abortController.signal.aborted
+                ) {
+                  abortController.abort(abortReason);
+                }
                 return workspace;
               },
               events,
@@ -15681,6 +15706,7 @@ describe("hosted workspace runtime entrypoint", () => {
               },
             },
           }),
+          signal: abortController.signal,
           async runAssistantPhase(input) {
             await runCanonicalWrite({
               vaultRoot: input.restored.vaultRoot,
@@ -15688,14 +15714,17 @@ describe("hosted workspace runtime entrypoint", () => {
               summary: "Persist hosted canonical write receipt before crash.",
               occurredAt: TEST_NOW,
               mutate: async ({ batch }) => {
-                await batch.stageTextWrite("journal/pre-idle-crash.md", "crash durable note\n");
+                await batch.stageTextWrite(
+                  "bank/conditions/pre-idle-crash.md",
+                  "crash durable health context\n",
+                );
               },
             });
             return { progressed: false };
           },
           vaultRoot: firstVaultRoot,
         }),
-      ).rejects.toThrow(/Synthetic stop before idle snapshot/u);
+      ).rejects.toBe(abortReason);
 
       assert.deepEqual(checkpointRequests.map((request) => request.reason), [
         "canonical_runtime_commit",
@@ -15711,8 +15740,15 @@ describe("hosted workspace runtime entrypoint", () => {
         "string",
       );
       assert.equal(
-        await readFile(path.join(firstVaultRoot, "journal", "pre-idle-crash.md"), "utf8"),
-        "crash durable note\n",
+        await readFile(
+          path.join(firstVaultRoot, "bank", "conditions", "pre-idle-crash.md"),
+          "utf8",
+        ),
+        "crash durable health context\n",
+      );
+      assert.deepEqual(
+        (await readAssistantContextSnapshotState(firstVaultRoot))?.pendingDirtyDomains,
+        ["health_context"],
       );
 
       await runHostedWorkspaceRuntimeJobInProcess(createWorkspaceRuntimeJobInput({
@@ -15776,8 +15812,15 @@ describe("hosted workspace runtime entrypoint", () => {
       });
 
       assert.equal(
-        await readFile(path.join(restoredVaultRoot, "journal", "pre-idle-crash.md"), "utf8"),
-        "crash durable note\n",
+        await readFile(
+          path.join(restoredVaultRoot, "bank", "conditions", "pre-idle-crash.md"),
+          "utf8",
+        ),
+        "crash durable health context\n",
+      );
+      assert.deepEqual(
+        (await readAssistantContextSnapshotState(restoredVaultRoot))?.pendingDirtyDomains,
+        ["health_context"],
       );
       if (restoredCheckpointRequests.length > 0) {
         const restoredCheckpointStatus = restoredCheckpointRequests.at(-1)?.redactedStatus ?? {};
