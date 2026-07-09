@@ -751,6 +751,47 @@ test("integration ingest append plans require opt-in before amending archived mo
       return true;
     },
   );
+  await assert.rejects(
+    runCanonicalWrite({
+      vaultRoot,
+      operationType: "generic_integration_ingest_archive_append",
+      summary: "reject generic archived integration ingest append",
+      mutate: async ({ batch }) => {
+        await Reflect.apply(batch.stageJsonlAppend, batch, [
+          logicalPath,
+          `${JSON.stringify(newArchivedMonthRecord)}\n`,
+          { allowArchivedIntegrationIngestAmendment: true },
+        ]);
+      },
+    }),
+    (error) => {
+      assert.equal(error instanceof VaultError, true);
+      assert.equal((error as VaultError).code, "INTEGRATION_INGEST_SHARD_ARCHIVED");
+      return true;
+    },
+  );
+  await assert.rejects(
+    runCanonicalWrite({
+      vaultRoot,
+      operationType: "forged_integration_ingest_archive_plan",
+      summary: "reject forged archived integration ingest plan",
+      mutate: async ({ batch }) => {
+        await Reflect.apply(batch.stageIntegrationIngestAppendPlan, batch, [{
+          archivedAmendmentShardPaths: [logicalPath],
+          appendedIds: [newArchivedMonthRecord.id],
+          payloads: new Map([
+            [logicalPath, `${JSON.stringify(newArchivedMonthRecord)}\n`],
+          ]),
+          targetShardPaths: [logicalPath],
+        }]);
+      },
+    }),
+    (error) => {
+      assert.equal(error instanceof VaultError, true);
+      assert.equal((error as VaultError).code, "INTEGRATION_INGEST_INVALID");
+      return true;
+    },
+  );
 
   const amendmentPlan = await buildIntegrationIngestAppendPlan(
     vaultRoot,
@@ -761,7 +802,19 @@ test("integration ingest append plans require opt-in before amending archived mo
   assert.deepEqual(amendmentPlan.archivedAmendmentShardPaths, [logicalPath]);
   assert.deepEqual([...amendmentPlan.payloads.keys()], [logicalPath]);
 
+  const hostedAmendmentFlags: boolean[] = [];
   await runCanonicalWrite({
+    hostedCanonicalWritePort: {
+      async persistCanonicalWrite(input) {
+        for (const action of input.receipt.actions) {
+          if (action.kind === "jsonl_append") {
+            hostedAmendmentFlags.push(
+              action.allowArchivedIntegrationIngestAmendment === true,
+            );
+          }
+        }
+      },
+    },
     vaultRoot,
     operationType: "integration_ingest_archive_amend",
     summary: "amend archived integration ingest shard",
@@ -769,6 +822,7 @@ test("integration ingest append plans require opt-in before amending archived mo
       await stageIntegrationIngestAppendPlan(batch, amendmentPlan);
     },
   });
+  assert.deepEqual(hostedAmendmentFlags, [true]);
 
   await assert.rejects(fs.access(path.join(vaultRoot, logicalPath)));
   await fs.access(path.join(vaultRoot, `${logicalPath}.zip`));

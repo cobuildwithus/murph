@@ -25,11 +25,13 @@ import {
 import { toIsoTimestamp } from "../time.ts";
 import { isErrnoException, isPlainRecord } from "../types.ts";
 import {
+  assertAuthorizedIntegrationIngestAppendPlan,
   appendArchivedIntegrationIngestShard,
   buildIntegrationIngestAppendPlan,
   parseIntegrationIngestAppendPayload,
   readArchivedIntegrationIngestShardText,
   truncateArchivedIntegrationIngestShard,
+  type IntegrationIngestAppendPlan,
 } from "../integration-ingests.ts";
 import {
   applyImmutableWriteTarget,
@@ -175,10 +177,6 @@ interface StageTextWriteOptions {
   allowAppendOnlyJsonl?: boolean;
   overwrite?: boolean;
   allowExistingMatch?: boolean;
-}
-
-interface StageJsonlAppendOptions {
-  allowArchivedIntegrationIngestAmendment?: boolean;
 }
 
 interface StageRawCopyOptions {
@@ -992,24 +990,27 @@ export async function pruneTerminalWriteOperationRecords(
       continue;
     }
 
-    const stageRoot = (await resolveVaultPathOnDisk(
-      input.vaultRoot,
-      path.posix.join(WRITE_OPERATION_DIRECTORY, operationId),
-    )).absolutePath;
-    if (await pathExists(stageRoot)) {
-      await fs.rm(stageRoot, { force: true, recursive: true });
-      result.prunedStageDirectoryCount += 1;
-    }
-
     const updatedAtMs = parsePruneBoundaryMs(operation.updatedAt);
     if (updatedAtMs === null) {
       result.invalidCount += 1;
       continue;
     }
 
+    const stageRoot = (await resolveVaultPathOnDisk(
+      input.vaultRoot,
+      path.posix.join(WRITE_OPERATION_DIRECTORY, operationId),
+    )).absolutePath;
     if (updatedAtMs >= checkpointedAfterMs) {
+      if (await pathExists(stageRoot)) {
+        result.retainedStageDirectoryCount += 1;
+      }
       result.retainedUncheckpointedTerminalCount += 1;
       continue;
+    }
+
+    if (await pathExists(stageRoot)) {
+      await fs.rm(stageRoot, { force: true, recursive: true });
+      result.prunedStageDirectoryCount += 1;
     }
 
     await resolveVaultPathOnDisk(input.vaultRoot, relativePath);
@@ -1738,7 +1739,32 @@ export class WriteBatch {
   async stageJsonlAppend(
     targetRelativePath: string,
     content: string,
-    options: StageJsonlAppendOptions = {},
+  ): Promise<string> {
+    return await this.stageJsonlAppendAction(targetRelativePath, content, false);
+  }
+
+  async stageIntegrationIngestAppendPlan(
+    plan: IntegrationIngestAppendPlan,
+  ): Promise<void> {
+    this.assertMutable();
+    assertAuthorizedIntegrationIngestAppendPlan(plan);
+    const archivedAmendmentShardPaths = new Set(plan.archivedAmendmentShardPaths);
+    for (const relativePath of [...plan.payloads.keys()].sort()) {
+      const payload = plan.payloads.get(relativePath);
+      if (payload) {
+        await this.stageJsonlAppendAction(
+          relativePath,
+          payload,
+          archivedAmendmentShardPaths.has(relativePath),
+        );
+      }
+    }
+  }
+
+  private async stageJsonlAppendAction(
+    targetRelativePath: string,
+    content: string,
+    allowArchivedIntegrationIngestAmendment: boolean,
   ): Promise<string> {
     this.assertMutable();
     const normalizedTarget = normalizeRelativeVaultPath(targetRelativePath);
@@ -1760,7 +1786,7 @@ export class WriteBatch {
       state: "staged",
       targetRelativePath: normalizedTarget,
       stageRelativePath,
-      allowArchivedIntegrationIngestAmendment: options.allowArchivedIntegrationIngestAmendment === true,
+      allowArchivedIntegrationIngestAmendment,
     });
     await this.persist();
     return normalizedTarget;

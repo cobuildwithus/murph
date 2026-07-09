@@ -1,4 +1,4 @@
-import { access, chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { access, chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -20,6 +20,12 @@ import {
 import {
   upsertAssistantInputEvent,
 } from "@murphai/assistant-engine";
+import {
+  initializeVault,
+  listWriteOperationMetadataPaths,
+  readStoredWriteOperation,
+  runCanonicalWrite,
+} from "@murphai/core";
 
 import {
   type HostedRuntimePlatform,
@@ -451,12 +457,73 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     expect(archiveEntries.some((entry) => entry.relativePath === staleOperationPaths.newest)).toBe(true);
     expect(archiveEntries.some((entry) => entry.relativePath === activeOperationPath)).toBe(true);
     expect(archiveEntries.some((entry) => entry.relativePath === uncheckpointedCommittedOperationPath)).toBe(true);
-    expect(archiveEntries.some((entry) => entry.relativePath === uncheckpointedCommittedPayloadPath)).toBe(false);
+    expect(archiveEntries.some((entry) => entry.relativePath === uncheckpointedCommittedPayloadPath)).toBe(true);
     await expectMissing(path.join(vaultRoot, staleOperationPaths.oldest));
     await expectPresent(path.join(vaultRoot, staleOperationPaths.newest));
     await expectPresent(path.join(vaultRoot, activeOperationPath));
     await expectPresent(path.join(vaultRoot, uncheckpointedCommittedOperationPath));
-    await expectMissing(path.join(vaultRoot, uncheckpointedCommittedStageRoot));
+    await expectPresent(path.join(vaultRoot, uncheckpointedCommittedStageRoot));
+  });
+
+  it("retains rollback backups until a canonical runtime checkpoint is durable", async () => {
+    const vaultRoot = await createVaultRoot();
+    await initializeVault({
+      createdAt: "2026-06-11T00:00:00.000Z",
+      vaultRoot,
+    });
+    const targetRelativePath = "bank/conditions/checkpoint-rollback.md";
+    const targetAbsolutePath = path.join(vaultRoot, targetRelativePath);
+    await mkdir(path.dirname(targetAbsolutePath), { recursive: true });
+    await writeFile(targetAbsolutePath, "original health context\n", "utf8");
+
+    const { calls, platform } = createRuntimePlatform();
+    const snapshotFailure = new Error("Synthetic canonical snapshot upload failure.");
+    calls.putSnapshotObjectDirect.mockRejectedValueOnce(snapshotFailure);
+    const bridgeOptions = createBridgeOptions({
+      platform,
+      request: createInvocationRequestWithWorkspaceCheckpoint("2026-06-10T00:00:00.000Z"),
+      vaultRoot,
+    });
+
+    await expect(runCanonicalWrite({
+      hostedCanonicalWritePort: {
+        async persistCanonicalWrite() {
+          await bridgeOptions.createCheckpointSnapshot(
+            createCheckpointInput("canonical_runtime_commit"),
+          );
+        },
+      },
+      mutate: async ({ batch }) => {
+        await batch.stageTextWrite(
+          targetRelativePath,
+          "replacement health context\n",
+          { overwrite: true },
+        );
+      },
+      operationType: "hosted_checkpoint_rollback_test",
+      summary: "Restore canonical content after checkpoint failure",
+      vaultRoot,
+    })).rejects.toThrow(snapshotFailure.message);
+
+    expect(await readFile(targetAbsolutePath, "utf8")).toBe("original health context\n");
+    const operationRecords = await Promise.all(
+      (await listWriteOperationMetadataPaths(vaultRoot)).map((relativePath) =>
+        readStoredWriteOperation(vaultRoot, relativePath)
+      ),
+    );
+    const rolledBackOperation = operationRecords.find(
+      (operation) => operation.operationType === "hosted_checkpoint_rollback_test",
+    );
+    expect(rolledBackOperation?.status).toBe("rolled_back");
+    expect(rolledBackOperation?.actions).toEqual([
+      expect.objectContaining({
+        kind: "text_write",
+        state: "rolled_back",
+      }),
+    ]);
+    expect(calls.putSnapshotObjectDirect).toHaveBeenCalledOnce();
+    expect(calls.completeSnapshotSession).not.toHaveBeenCalled();
+    expect(calls.abortSnapshotSession).toHaveBeenCalledOnce();
   });
 
   it("prunes settled assistant runtime residue before v2 snapshot archive planning", async () => {

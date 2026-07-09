@@ -27,6 +27,7 @@ export const MAX_INTEGRATION_INGEST_BYTES = 100 * 1024 * 1024;
 export const MAX_INTEGRATION_INGEST_JOURNAL_ROW_BYTES = 128 * 1024 * 1024;
 export const MAX_INTEGRATION_INGEST_ZIP_ARCHIVE_BYTES = 128 * 1024 * 1024;
 export const MAX_INTEGRATION_INGEST_ZIP_ENTRY_BYTES = 256 * 1024 * 1024;
+const INTEGRATION_INGEST_APPEND_PLAN_AUTHORITY = Symbol("integration-ingest-append-plan-authority");
 
 export interface BuildIntegrationEvidencePartInput {
   role: string;
@@ -54,6 +55,7 @@ export interface BuildIntegrationIngestRecordInput {
 }
 
 export interface IntegrationIngestAppendPlan {
+  readonly [INTEGRATION_INGEST_APPEND_PLAN_AUTHORITY]: true;
   archivedAmendmentShardPaths: string[];
   appendedIds: string[];
   payloads: Map<string, string>;
@@ -427,11 +429,27 @@ export async function buildIntegrationIngestAppendPlan(
   }
 
   return {
+    [INTEGRATION_INGEST_APPEND_PLAN_AUTHORITY]: true,
     archivedAmendmentShardPaths: [...archivedAmendmentShardPaths].sort(),
     appendedIds,
     payloads,
     targetShardPaths,
   };
+}
+
+export function assertAuthorizedIntegrationIngestAppendPlan(
+  plan: unknown,
+): asserts plan is IntegrationIngestAppendPlan {
+  if (
+    typeof plan !== "object"
+    || plan === null
+    || Reflect.get(plan, INTEGRATION_INGEST_APPEND_PLAN_AUTHORITY) !== true
+  ) {
+    throw new VaultError(
+      "INTEGRATION_INGEST_INVALID",
+      "Integration ingest append plans must be created by the integration ingest planner.",
+    );
+  }
 }
 
 export async function parseIntegrationIngestAppendPayload(
@@ -460,23 +478,11 @@ export async function parseIntegrationIngestAppendPayload(
 
 export async function stageIntegrationIngestAppendPlan(
   batch: {
-    stageJsonlAppend(
-      relativePath: string,
-      content: string,
-      options?: { allowArchivedIntegrationIngestAmendment?: boolean },
-    ): Promise<string>;
+    stageIntegrationIngestAppendPlan(plan: IntegrationIngestAppendPlan): Promise<void>;
   },
   plan: IntegrationIngestAppendPlan,
 ): Promise<void> {
-  const archivedAmendmentShardPaths = new Set(plan.archivedAmendmentShardPaths);
-  for (const relativePath of [...plan.payloads.keys()].sort()) {
-    const payload = plan.payloads.get(relativePath);
-    if (payload) {
-      await batch.stageJsonlAppend(relativePath, payload, {
-        allowArchivedIntegrationIngestAmendment: archivedAmendmentShardPaths.has(relativePath),
-      });
-    }
-  }
+  await batch.stageIntegrationIngestAppendPlan(plan);
 }
 
 export async function readArchivedIntegrationIngestShardText(

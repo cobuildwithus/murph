@@ -90,12 +90,12 @@ test("pruneTerminalWriteOperationRecords removes only clean committed records co
   assert.equal(result.prunedCount, 2);
   assert.equal(result.prunedFileCount, 2);
   assert.equal(result.prunedByteCount > 0, true);
-  assert.equal(result.prunedStageDirectoryCount, 2);
+  assert.equal(result.prunedStageDirectoryCount, 1);
   assert.equal(result.retainedProtectedCount, 4);
   assert.equal(result.retainedErroredTerminalCount, 1);
   assert.equal(result.retainedNewestTerminalCount, 0);
   assert.equal(result.retainedRecentTerminalCount, 1);
-  assert.equal(result.retainedStageDirectoryCount, 0);
+  assert.equal(result.retainedStageDirectoryCount, 1);
   assert.equal(result.retainedUncheckpointedTerminalCount, 1);
   assert.equal(result.invalidCount, 0);
 
@@ -112,7 +112,17 @@ test("pruneTerminalWriteOperationRecords removes only clean committed records co
   await assertPresent(vaultRoot, failed.metadataRelativePath);
   await assertPresent(vaultRoot, recentCommitted.metadataRelativePath);
   await assertPresent(vaultRoot, uncheckpointedCommitted.metadataRelativePath);
-  await assertMissing(vaultRoot, uncheckpointedCommitted.stageRootRelativePath);
+  await assertPresent(vaultRoot, uncheckpointedCommitted.stageRootRelativePath);
+  assert.equal(
+    await fs.readFile(
+      resolveVaultPath(
+        vaultRoot,
+        `${uncheckpointedCommitted.stageRootRelativePath}/payloads/uncheckpointed-residue.txt`,
+      ).absolutePath,
+      "utf8",
+    ),
+    "uncheckpointed leftover\n",
+  );
   await assertPresent(vaultRoot, erroredCommitted.metadataRelativePath);
   await assertMissing(vaultRoot, stageResidueCommitted.metadataRelativePath);
   await assertMissing(vaultRoot, stageResidueCommitted.stageRootRelativePath);
