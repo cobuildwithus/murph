@@ -17,7 +17,7 @@ export {
   readPreferencesDocument,
   resolvePreferencesDocumentPath,
 } from "./preferences.ts";
-export type { PreferencesDocumentSnapshot } from "./preferences.ts";
+export type { AssistantPreferencesUpdate, PreferencesDocumentSnapshot } from "./preferences.ts";
 export {
   assertPathWithinVault,
   assertPathWithinVaultOnDisk,
@@ -123,6 +123,7 @@ export {
   stopRegimen,
   unlinkJournalEventIds,
   unlinkJournalStreams,
+  updateAssistantPreferences,
   updateWorkoutUnitPreferences,
   updateWearablePreferences,
   updateExperiment,

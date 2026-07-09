@@ -424,6 +424,8 @@ async function executeAssistantCodexAttempt(input: {
     })
     const voiceMemoDeliveryChannel =
       attemptPlan.routePlan.voiceMemoDeliveryChannel ?? null
+    const assistantPreferredElevenLabsVoiceId =
+      attemptPlan.routePlan.assistantPreferredElevenLabsVoiceId ?? null
     const attemptResult = await executeCodexAssistantTurnAttemptFromInput({
       providerConfig: {
         approvalPolicy: attemptPlan.route.providerOptions.approvalPolicy,
@@ -509,6 +511,7 @@ async function executeAssistantCodexAttempt(input: {
           userMessageContent: executionPlan.input.userMessageContent,
         }),
         userPrompt: executionPlan.input.prompt,
+        assistantPreferredElevenLabsVoiceId,
         voiceMemoDeliveryChannel,
         workingDirectory: attemptPlan.routePlan.workingDirectory,
       },

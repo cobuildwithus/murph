@@ -3253,6 +3253,8 @@ function restoreEnvValue(key: string, value: string | undefined): void {
 
 function createHostedMember(overrides: Partial<HostedMember> = {}): HostedMember {
   return {
+    assistantTone: null,
+    assistantVoice: null,
     billingStatus: HostedBillingStatus.not_started,
     createdAt: new Date("2026-04-06T00:00:00.000Z"),
     id: "member_123",

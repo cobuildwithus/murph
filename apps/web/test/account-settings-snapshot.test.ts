@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createHostedEmailUserReplyAliasRoute } from "@murphai/hosted-execution/hosted-email";
 
 const mocks = vi.hoisted(() => ({
+  findUniqueHostedMember: vi.fn(),
   getPrisma: vi.fn(),
   readHostedMemberSnapshot: vi.fn(),
 }));
@@ -39,7 +40,11 @@ describe("hosted account settings snapshot", () => {
     process.env.HOSTED_EMAIL_DOMAIN = "mail.example.test";
     process.env.HOSTED_EMAIL_LOCAL_PART = "murph";
     process.env.HOSTED_EMAIL_SIGNING_SECRET = "test-email-signing-secret";
+    mocks.findUniqueHostedMember.mockResolvedValue(null);
     mocks.getPrisma.mockReturnValue({
+      hostedMember: {
+        findUnique: mocks.findUniqueHostedMember,
+      },
       readonly: true,
     });
   });
@@ -110,6 +115,63 @@ describe("hosted account settings snapshot", () => {
         address: "verified@example.com",
         murphEmailAddress: replyAlias.address,
         verifiedAt: "2026-05-02T00:00:00.000Z",
+      },
+    });
+  });
+
+  it("normalizes assistant preferences for settings display", async () => {
+    mocks.readHostedMemberSnapshot.mockResolvedValue({
+      core: null,
+      emailAuthorization: null,
+      identity: null,
+      routing: null,
+    });
+    mocks.findUniqueHostedMember.mockResolvedValue({
+      assistantTone: "casual",
+      assistantVoice: "warm",
+    });
+
+    await expect(readHostedAccountSettingsSnapshot({
+      memberId: "member_123",
+    })).resolves.toMatchObject({
+      assistant: {
+        tone: "casual",
+        voice: "warm",
+      },
+    });
+
+    // Roster ids can be retired, so stored values that no longer resolve fall
+    // back to the defaults instead of leaking a stale id into the settings UI.
+    mocks.findUniqueHostedMember.mockResolvedValue({
+      assistantTone: "stale-tone",
+      assistantVoice: "stale-voice",
+    });
+
+    await expect(readHostedAccountSettingsSnapshot({
+      memberId: "member_123",
+    })).resolves.toMatchObject({
+      assistant: {
+        tone: null,
+        voice: null,
+      },
+    });
+  });
+
+  it("returns empty assistant preferences when the member row is missing", async () => {
+    mocks.readHostedMemberSnapshot.mockResolvedValue({
+      core: null,
+      emailAuthorization: null,
+      identity: null,
+      routing: null,
+    });
+    mocks.findUniqueHostedMember.mockResolvedValue(null);
+
+    await expect(readHostedAccountSettingsSnapshot({
+      memberId: "member_123",
+    })).resolves.toMatchObject({
+      assistant: {
+        tone: null,
+        voice: null,
       },
     });
   });
