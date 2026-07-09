@@ -47,7 +47,7 @@ export interface AssistantVoiceOption {
 
 export const assistantVoiceOptions = [
   {
-    description: "Murph's default voice from this workspace.",
+    description: "The original. How Murph usually sounds.",
     elevenLabsVoiceId: null,
     gender: "male",
     id: "classic",

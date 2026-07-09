@@ -171,6 +171,97 @@ test("MurphAssistantStylePicker shows each tone as a sample message rather than 
     assert.match(text, /You are up 3 pounds this week/u);
     // Casual is preselected, matching today's default persona.
     assert.equal(findRadioInput(rendered.container, "Casual")?.checked, true);
+    assert.match(
+      rendered.container.querySelector("[data-dialog-content='true']")?.className ?? "",
+      /sm:max-w-xl/u,
+    );
+    assert.match(
+      rendered.container.querySelector("[role='radiogroup'][aria-label='Murph tone']")?.className ?? "",
+      /sm:grid-cols-2/u,
+    );
+  } finally {
+    await rendered.cleanup();
+  }
+});
+
+test("MurphAssistantStylePicker keeps the default tone to voice onboarding chain", async () => {
+  const fetchMock = vi.fn(async () => ({
+    ok: true,
+    json: async () => ({
+      assistantTone: "casual",
+      assistantVoice: null,
+    }),
+  }));
+  vi.stubGlobal("fetch", fetchMock);
+
+  const onComplete = vi.fn();
+  const onOpenChange = vi.fn();
+  const { MurphAssistantStylePicker } = await import(
+    "@/src/components/murph/murph-assistant-style-picker"
+  );
+  const rendered = await renderClientComponent(
+    createElement(MurphAssistantStylePicker, {
+      initialStep: "tone",
+      onComplete,
+      onOpenChange,
+      open: true,
+    }),
+    {
+      requireButton: false,
+    },
+  );
+
+  try {
+    await clickButton(rendered, "Continue");
+
+    assert.equal(fetchMock.mock.calls.length, 1);
+    assert.match(rendered.container.textContent ?? "", /Pick Murph's voice/u);
+    assert.match(rendered.container.textContent ?? "", /22 voices/u);
+    assert.equal(onComplete.mock.calls.length, 0);
+    assert.equal(onOpenChange.mock.calls.length, 0);
+  } finally {
+    await rendered.cleanup();
+  }
+});
+
+test("MurphAssistantStylePicker saves and closes without advancing in single-step mode", async () => {
+  const fetchMock = vi.fn(async () => ({
+    ok: true,
+    json: async () => ({
+      assistantTone: "casual",
+      assistantVoice: null,
+    }),
+  }));
+  vi.stubGlobal("fetch", fetchMock);
+
+  const onComplete = vi.fn();
+  const onOpenChange = vi.fn();
+  const { MurphAssistantStylePicker } = await import(
+    "@/src/components/murph/murph-assistant-style-picker"
+  );
+  const rendered = await renderClientComponent(
+    createElement(MurphAssistantStylePicker, {
+      initialStep: "tone",
+      onComplete,
+      onOpenChange,
+      open: true,
+      singleStep: true,
+    }),
+    {
+      requireButton: false,
+    },
+  );
+
+  try {
+    // Single-step mode relabels the actions as Cancel/Save.
+    assert.equal(findButton(rendered.container, "Continue"), null);
+    assert.ok(findButton(rendered.container, "Cancel"));
+    await clickButton(rendered, "Save");
+
+    assert.equal(fetchMock.mock.calls.length, 1);
+    assert.equal(onComplete.mock.calls.length, 1);
+    assert.deepEqual(onOpenChange.mock.calls, [[false]]);
+    assert.doesNotMatch(rendered.container.textContent ?? "", /22 voices/u);
   } finally {
     await rendered.cleanup();
   }
@@ -194,6 +285,25 @@ test("MurphAssistantStylePicker selects a voice when the row outside the label i
 
   try {
     assert.match(rendered.container.textContent ?? "", /22 voices/u);
+    assert.match(
+      rendered.container.textContent ?? "",
+      /The original\. How Murph usually sounds\./u,
+    );
+    assert.match(
+      rendered.container.querySelector("[data-dialog-content='true']")?.className ?? "",
+      /sm:max-w-2xl/u,
+    );
+    assert.match(
+      rendered.container.querySelector("[data-dialog-content='true']")?.className ?? "",
+      /lg:max-w-3xl/u,
+    );
+
+    const voiceGrid = rendered.container.querySelector(
+      "[role='radiogroup'][aria-label='Murph voice']",
+    );
+    assert.match(voiceGrid?.className ?? "", /grid-cols-2/u);
+    assert.match(voiceGrid?.className ?? "", /md:grid-cols-3/u);
+    assert.match(voiceGrid?.className ?? "", /overflow-y-auto/u);
 
     const grandpaRow = findRadioInput(rendered.container, "Grandpa")?.closest("div");
     assert.ok(grandpaRow, "Missing grandpa row");
@@ -229,6 +339,16 @@ test("MurphAssistantStylePicker renders the voice chooser in the mobile drawer",
   try {
     assert.ok(rendered.container.querySelector("[data-drawer-open='true']"));
     assert.equal(rendered.container.querySelector("[data-dialog-open='true']"), null);
+    const drawerContent = rendered.container.querySelector("[data-drawer-content='true']");
+    assert.match(drawerContent?.className ?? "", /h-dvh/u);
+    assert.match(
+      drawerContent?.className ?? "",
+      /data-\[vaul-drawer-direction=bottom\]:max-h-dvh/u,
+    );
+    assert.match(
+      drawerContent?.className ?? "",
+      /data-\[vaul-drawer-direction=bottom\]:mt-0/u,
+    );
     assert.ok(findRadioInput(rendered.container, "Classic Murph"));
     assert.ok(findRadioInput(rendered.container, "Warm and friendly"));
     assert.ok(
