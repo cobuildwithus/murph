@@ -372,6 +372,20 @@ Focused follow-up verification:
 - `pnpm --filter @murphai/hosted-web test:prepared -- apps/web/test/call-circle-matcher.test.ts apps/web/test/call-circle-scheduler.test.ts apps/web/test/call-circle-connector-call.test.ts apps/web/test/call-circle-match-store.test.ts apps/web/test/call-circle-response-service.test.ts apps/web/test/phone-calls-call-circle-result.test.ts`
 - `pnpm --filter @murphai/hosted-web typecheck`
 
+## ReviewGPT Follow-Up 36 2026-07-09
+
+Accepted finding from the Phlebas PR-head rerun:
+
+- The Call Circle cron route exported `isHostedCallCircleCronEnabled` from an
+  App Router `route.ts` module. The helper is now local to the route file so
+  the module exports only route handlers while tests continue to validate the
+  disabled/enabled behavior through `GET`.
+
+Focused follow-up verification:
+
+- `pnpm --filter @murphai/hosted-web test:prepared -- apps/web/test/call-circle-cron-route.test.ts apps/web/test/production-migration-guard.test.ts`
+- `pnpm --filter @murphai/hosted-web typecheck`
+
 ## ReviewGPT Follow-Up 23 2026-07-08
 
 Accepted findings from the Phlebas PR-head rerun:

@@ -26,7 +26,7 @@ export const GET = withJsonError(async (request: Request) => {
   }, 200);
 });
 
-export function isHostedCallCircleCronEnabled(
+function isHostedCallCircleCronEnabled(
   source: NodeJS.ProcessEnv = process.env,
 ): boolean {
   return source[HOSTED_CALL_CIRCLE_CRON_ENABLED_ENV]?.trim() === "1";
