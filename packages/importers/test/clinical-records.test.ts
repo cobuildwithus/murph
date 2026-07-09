@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 
 import {
+  CLINICAL_IMPORT_PLAN_MAX_CANDIDATES,
   CLINICAL_RAW_MANIFEST_MAX_BYTES,
   CLINICAL_RAW_MANIFEST_MAX_RESOURCES_PER_FILE,
   CLINICAL_RAW_MANIFEST_MAX_TOTAL_RESOURCES,
@@ -154,7 +155,6 @@ describe("buildClinicalImportPlan", () => {
 
     expect(plan.candidates.map((candidate) => candidate.kind)).toEqual([
       "vitals",
-      "vitals",
       "diagnostic-test",
       "vitals",
     ]);
@@ -175,19 +175,22 @@ describe("buildClinicalImportPlan", () => {
       ]),
     );
 
-    const systolic = plan.candidates.find(
+    const bloodPressure = plan.candidates.find(
       (candidate): candidate is ClinicalImportCandidateOfKind<"vitals"> =>
-        candidate.kind === "vitals" && candidate.resource.facet === "bp-systolic",
+        candidate.kind === "vitals" && candidate.resource.resourceId === "bp-panel-1",
     );
-    expect(systolic?.payload.measurements).toEqual([
+    expect(bloodPressure?.resource.facet).toBe("vitals-panel");
+    expect(bloodPressure?.payload.title).toBe("Blood pressure panel");
+    expect(bloodPressure?.payload.measurements).toEqual([
       { metric: "systolic-blood-pressure", unit: "mmHg", value: 128 },
+      { metric: "diastolic-blood-pressure", unit: "mmHg", value: 82 },
     ]);
-    expect(systolic?.payload.externalRef).toEqual({
+    expect(bloodPressure?.payload.externalRef).toEqual({
       system: `epic-fhir-${FHIR_BASE_URL_HASH}-${PATIENT_ID_HASH}`,
       resourceType: "observation",
       resourceId: "bp-panel-1",
       version: "7",
-      facet: "bp-systolic",
+      facet: "vitals-panel",
     });
 
     const bodyWeight = plan.candidates.find(
@@ -215,6 +218,38 @@ describe("buildClinicalImportPlan", () => {
         value: 91,
       },
     ]);
+  });
+
+  it("keeps bounded blood pressure panels under the import-plan candidate cap", async () => {
+    const resourceCount = Math.floor(CLINICAL_IMPORT_PLAN_MAX_CANDIDATES / 2) + 1;
+    expect(resourceCount).toBeLessThanOrEqual(CLINICAL_RAW_MANIFEST_MAX_TOTAL_RESOURCES);
+
+    const resourceFiles: Array<{ count: number; relativePath: string; resourceType: string }> = [];
+    const pages: Record<string, unknown> = {};
+    for (let startIndex = 0; startIndex < resourceCount; startIndex += CLINICAL_RAW_MANIFEST_MAX_RESOURCES_PER_FILE) {
+      const count = Math.min(CLINICAL_RAW_MANIFEST_MAX_RESOURCES_PER_FILE, resourceCount - startIndex);
+      const relativePath = `Observation/blood-pressure-panels-${resourceFiles.length + 1}.json`;
+      resourceFiles.push({ count, relativePath, resourceType: "Observation" });
+      pages[relativePath] = Array.from({ length: count }, (_unused, offset) =>
+        bloodPressurePanelObservation(startIndex + offset + 1)
+      );
+    }
+
+    const vaultRoot = await writeClinicalFixture({ resourceFiles, pages });
+
+    const plan = await buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot });
+
+    expect(plan.candidates).toHaveLength(resourceCount);
+    expect(plan.unsupported).toEqual([]);
+    const firstCandidate = plan.candidates[0];
+    expect(firstCandidate?.kind).toBe("vitals");
+    if (firstCandidate?.kind === "vitals") {
+      expect(firstCandidate.resource.facet).toBe("vitals-panel");
+      expect(firstCandidate.payload.measurements).toEqual([
+        { metric: "systolic-blood-pressure", unit: "mmHg", value: 121 },
+        { metric: "diastolic-blood-pressure", unit: "mmHg", value: 81 },
+      ]);
+    }
   });
 
   it("rejects ambiguous vital CodeableConcepts", async () => {
@@ -2391,6 +2426,32 @@ describe("buildClinicalImportPlan", () => {
     expect(firstRef?.system).not.toBe(secondRef?.system);
   });
 });
+
+function bloodPressurePanelObservation(index: number) {
+  return {
+    resourceType: "Observation",
+    id: `bp-panel-${index}`,
+    status: "final",
+    effectiveDateTime: "2026-07-01T12:00:00.000Z",
+    code: {
+      coding: [{ system: "http://loinc.org", code: "85354-9", display: "Blood pressure panel" }],
+    },
+    component: [
+      {
+        code: {
+          coding: [{ system: "http://loinc.org", code: "8480-6", display: "Systolic blood pressure" }],
+        },
+        valueQuantity: { value: 120 + (index % 5), system: "http://unitsofmeasure.org", code: "mm[Hg]" },
+      },
+      {
+        code: {
+          coding: [{ system: "http://loinc.org", code: "8462-4", display: "Diastolic blood pressure" }],
+        },
+        valueQuantity: { value: 80 + (index % 5), system: "http://unitsofmeasure.org", code: "mm[Hg]" },
+      },
+    ],
+  };
+}
 
 async function writeClinicalFixture(input: {
   manifest?: {

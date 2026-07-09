@@ -66,6 +66,11 @@ type VitalDefinition = {
   title: string;
   unit: string;
 };
+type VitalMeasurementInput = {
+  metric: string;
+  unit: string;
+  value: number;
+};
 type VitalConceptDecision =
   | { status: "ambiguous" }
   | { status: "matched"; vital: VitalDefinition }
@@ -134,6 +139,7 @@ const IMPORTABLE_DOCUMENT_REFERENCE_STATUSES = new Set(["current"]);
 const IMPORTABLE_DOCUMENT_REFERENCE_DOC_STATUSES = new Set(["amended", "appended", "corrected", "final"]);
 const IMPORTABLE_ALLERGY_CLINICAL_STATUS_CODES = new Set(["active"]);
 const IMPORTABLE_ALLERGY_VERIFICATION_STATUS_CODES = new Set(["confirmed"]);
+const VITAL_PANEL_FACET = "vitals-panel";
 
 export async function buildClinicalImportPlan(input: BuildClinicalImportPlanInput): Promise<ClinicalImportPlan> {
   const manifestPath = clinicalRawPathSchema.parse(input.manifestPath);
@@ -388,22 +394,6 @@ function candidateOnly(
   return { candidates: [parsedCandidate.data], unsupported: [] };
 }
 
-function appendValidatedCandidate(input: {
-  candidate: ClinicalImportCandidate;
-  candidates: ClinicalImportCandidate[];
-  context: FhirResourceContext;
-  unsupported: ClinicalImportUnsupportedResource[];
-  unsupportedReason: string;
-}): void {
-  const parsedCandidate = clinicalImportCandidateSchema.safeParse(input.candidate);
-  if (!parsedCandidate.success) {
-    input.unsupported.push(unsupportedResource(input.context, input.unsupportedReason));
-    return;
-  }
-
-  input.candidates.push(parsedCandidate.data);
-}
-
 function mapObservation(context: FhirResourceContext<Observation>): MappedFhirResource {
   const resourceId = readResourceId(context.resource);
   if (!resourceId) {
@@ -415,69 +405,65 @@ function mapObservation(context: FhirResourceContext<Observation>): MappedFhirRe
   }
 
   const occurredAt = readClinicalOccurredAt(context.resource);
-  const candidates: ClinicalImportCandidate[] = [];
-  const unsupported: ClinicalImportUnsupportedResource[] = [];
   const components = readFhirArray(context.resource.component);
   const emittedVitalFacets = new Set<string>();
+  const vitalMeasurements: VitalMeasurementInput[] = [];
 
   for (const component of components) {
     const vitalDecision = vitalDecisionForCodeableConcept(component.code);
     if (vitalDecision.status === "ambiguous") {
-      unsupported.push(unsupportedResource(context, "vital code is ambiguous"));
-      continue;
+      return unsupportedOnly(context, "vital code is ambiguous");
     }
     const vital = vitalDecision.status === "matched" ? vitalDecision.vital : null;
     if (!vital && codeableConceptHasCodeWithUnexpectedSystem(component.code, FHIR_SYSTEM_LOINC, VITAL_LOINC_CODES)) {
-      unsupported.push(unsupportedResource(context, "vital coding system is not importable"));
-      continue;
+      return unsupportedOnly(context, "vital coding system is not importable");
     }
 
     const value = readQuantityValue(component.valueQuantity);
     if (vital && !value) {
-      unsupported.push(unsupportedResource(context, "vital quantity is not importable"));
-      continue;
+      return unsupportedOnly(context, "vital quantity is not importable");
     }
     if (!vital || !value) {
       continue;
     }
 
     if (!occurredAt) {
-      unsupported.push(unsupportedResource(context, "clinical timestamp is missing"));
-      continue;
+      return unsupportedOnly(context, "clinical timestamp is missing");
     }
     if (value.comparator) {
-      unsupported.push(unsupportedResource(context, "vital quantity comparator is not importable"));
-      continue;
+      return unsupportedOnly(context, "vital quantity comparator is not importable");
     }
     const unit = normalizeVitalUnit(value, vital);
     if (!unit) {
-      unsupported.push(unsupportedResource(context, "vital quantity unit is not importable"));
-      continue;
+      return unsupportedOnly(context, "vital quantity unit is not importable");
     }
     if (emittedVitalFacets.has(vital.facet)) {
       return unsupportedOnly(context, "duplicate vital facet in FHIR observation");
     }
     emittedVitalFacets.add(vital.facet);
 
-    appendValidatedCandidate({
-      candidates,
-      context,
-      unsupported,
-      unsupportedReason: "clinical candidate exceeds supported import bounds",
-      candidate: buildVitalsCandidate(context, {
-        occurredAt,
-        resourceId,
-        title: vital.title,
-        facet: vital.facet,
-        metric: vital.metric,
-        unit,
-        value: value.value,
-      }),
+    vitalMeasurements.push({
+      metric: vital.metric,
+      unit,
+      value: value.value,
     });
   }
 
-  if (candidates.length > 0 || unsupported.length > 0) {
-    return { candidates, unsupported };
+  if (vitalMeasurements.length > 0) {
+    if (!occurredAt) {
+      return unsupportedOnly(context, "clinical timestamp is missing");
+    }
+    return candidateOnly(
+      context,
+      buildVitalsCandidate(context, {
+        occurredAt,
+        resourceId,
+        title: textForCodeableConcept(context.resource.code) ?? "FHIR vitals",
+        facet: VITAL_PANEL_FACET,
+        measurements: vitalMeasurements,
+      }),
+      "clinical candidate exceeds supported import bounds",
+    );
   }
 
   const vitalDecision = vitalDecisionForCodeableConcept(context.resource.code);
@@ -512,9 +498,11 @@ function mapObservation(context: FhirResourceContext<Observation>): MappedFhirRe
         resourceId,
         title: vital.title,
         facet: vital.facet,
-        metric: vital.metric,
-        unit,
-        value: quantity.value,
+        measurements: [{
+          metric: vital.metric,
+          unit,
+          value: quantity.value,
+        }],
       }),
       "clinical candidate exceeds supported import bounds",
     );
@@ -779,12 +767,10 @@ function buildVitalsCandidate(
   context: FhirResourceContext<Observation>,
   input: {
     facet: string;
-    metric: string;
+    measurements: VitalMeasurementInput[];
     occurredAt: string;
     resourceId: string;
     title: string;
-    unit: string;
-    value: number;
   },
 ): ClinicalImportCandidate {
   return {
@@ -795,13 +781,7 @@ function buildVitalsCandidate(
       occurredAt: input.occurredAt,
       source: "import",
       title: input.title,
-      measurements: [
-        {
-          metric: input.metric,
-          unit: input.unit,
-          value: input.value,
-        },
-      ],
+      measurements: input.measurements,
       rawRefs: [context.rawRef],
       evidence: [evidenceForResource(context, input.resourceId)],
       externalRef: externalRefForResource(context, "Observation", input.resourceId, input.facet),
