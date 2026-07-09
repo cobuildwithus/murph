@@ -97,6 +97,7 @@ rationale, not a live mechanism.
 
 - Any change spanning web, Cloudflare, the runner bundle, or Temporal states its safe deploy order, its behavior under gradual container rollout (warm old-bundle containers), whether `container_rollout=immediate` is required, and its rollback floor.
 - Schema changes are additive-first. Compatibility branches are deleted only after verified production drain, and the removal step is scheduled in the same change that lands the compatibility path.
+- PR 465 usage-limit Telegram notice rollout: apply the additive web schema migration first, deploy the Cloudflare Worker with the hosted-control `telegram/send` route before deploying hosted web that calls it, then deploy hosted web. During web-before-Worker skew, route-missing 404s record retryable unavailable delivery rows and do not mark the period sent. During mixed old/new hosted-web rollout, the current period key reserves legacy guard keys before send so old notice-code keys and new period keys cannot both send. No runner-container bundle change is required and `container_rollout=immediate` is not required. Roll back web before rolling back the Worker route, and keep the Worker route until new web instances have drained.
 
 ## Executable Invariants
 
