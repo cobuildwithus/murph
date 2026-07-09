@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  buildCompanionAuthDiagnosticsWafInspectCommand,
   COMPANION_AUTH_DIAGNOSTICS_PATH,
   validateCompanionAuthDiagnosticsWafRule,
 } from "../scripts/check-companion-auth-diagnostics-waf";
@@ -9,8 +10,15 @@ describe("companion auth diagnostics WAF preflight", () => {
   it("accepts an exact-path fixed-window rate-limit rule", () => {
     expect(validateCompanionAuthDiagnosticsWafRule({
       action: {
-        status: 429,
         type: "rate_limit",
+        rateLimit: {
+          limit: 30,
+          responseStatus: 429,
+          window: {
+            unit: "seconds",
+            value: 60,
+          },
+        },
       },
       conditions: [
         {
@@ -20,13 +28,6 @@ describe("companion auth diagnostics WAF preflight", () => {
         },
       ],
       enabled: true,
-      rateLimit: {
-        limit: 30,
-        window: {
-          unit: "seconds",
-          value: 60,
-        },
-      },
     })).toEqual([]);
   });
 
@@ -37,10 +38,51 @@ describe("companion auth diagnostics WAF preflight", () => {
       enabled: false,
       rateLimit: { limit: 300, window: { unit: "minutes", value: 1 } },
     })).toEqual([
+      "rule is disabled",
       `missing exact path ${COMPANION_AUTH_DIAGNOSTICS_PATH}`,
-      "missing request limit 30",
-      "missing 60-second fixed window",
-      "rule appears disabled at enabled",
+      "missing rate-limit action 30/60s with 429",
     ]);
+  });
+
+  it("rejects decoys where rule facts are not one exact-path rate-limit rule", () => {
+    expect(validateCompanionAuthDiagnosticsWafRule({
+      action: { type: "log" },
+      conditions: [
+        {
+          op: "pre",
+          type: "path",
+          value: COMPANION_AUTH_DIAGNOSTICS_PATH,
+        },
+      ],
+      description: `${COMPANION_AUTH_DIAGNOSTICS_PATH} rate limit 30 60 429`,
+      enabled: true,
+      metadata: {
+        rateLimit: {
+          limit: 30,
+          responseStatus: 429,
+          window: 60,
+        },
+      },
+      name: COMPANION_AUTH_DIAGNOSTICS_PATH,
+    })).toEqual([
+      `missing exact path ${COMPANION_AUTH_DIAGNOSTICS_PATH}`,
+      "missing rate-limit action 30/60s with 429",
+    ]);
+  });
+
+  it("runs Vercel inspection from the hosted web app directory", () => {
+    const command = buildCompanionAuthDiagnosticsWafInspectCommand("rule_name");
+
+    expect(command.command).toBe("pnpm");
+    expect(command.args).toEqual([
+      "exec",
+      "vercel",
+      "firewall",
+      "rules",
+      "inspect",
+      "rule_name",
+      "--json",
+    ]);
+    expect(command.cwd.endsWith("/apps/web")).toBe(true);
   });
 });
