@@ -59,10 +59,6 @@ const HOSTED_TELEGRAM_USAGE_LIMIT_NOTICE_RETRY_AFTER_FAILURE_CODE =
   "HostedRuntimeTelegramUsageLimitNoticeRetryAfterError";
 const HOSTED_TELEGRAM_USAGE_LIMIT_NOTICE_UNAVAILABLE_FAILURE_CODE =
   "HostedRuntimeTelegramUsageLimitNoticeUnavailableError";
-const HOSTED_TELEGRAM_USAGE_LIMIT_NOTICE_UNKNOWN_FAILURE_CODE =
-  "HostedRuntimeTelegramUsageLimitNoticeUnknownError";
-const HOSTED_TELEGRAM_USAGE_LIMIT_NOTICE_STALE_DISPATCH_FAILURE_REASON =
-  "Hosted Telegram usage-limit notice delivery could not be confirmed after dispatch started.";
 const HOSTED_TELEGRAM_USAGE_LIMIT_NOTICE_RETRYABLE_FAILURE_CODES = new Set([
   HOSTED_TELEGRAM_USAGE_LIMIT_NOTICE_RETRY_AFTER_FAILURE_CODE,
   HOSTED_TELEGRAM_USAGE_LIMIT_NOTICE_UNAVAILABLE_FAILURE_CODE,
@@ -316,6 +312,10 @@ export async function claimHostedLinqDeliveryProviderDispatchTx(input: {
     id: buildHostedLinqDeliveryId(idempotencyKey),
     idempotencyKey,
   };
+  const guardIdempotencyKeys = normalizeHostedLinqDeliveryGuardIdempotencyKeys({
+    guardIdempotencyKeys: input.guardIdempotencyKeys,
+    primaryIdempotencyKey: idempotencyKey,
+  });
   const existing = await input.prisma.hostedLinqDelivery.findUnique({
     where: { idempotencyKey },
     select: hostedLinqDeliveryLifecycleSelect,
@@ -331,17 +331,17 @@ export async function claimHostedLinqDeliveryProviderDispatchTx(input: {
     });
   }
 
-  const guardClaim = await reserveHostedLinqDeliveryGuardRowsTx({
-    attemptedAt,
-    data,
-    guardIdempotencyKeys: input.guardIdempotencyKeys,
-    primaryIdempotencyKey: idempotencyKey,
-    prisma: input.prisma,
-    reclaimStalePreProviderAttempt: input.reclaimStalePreProviderAttempt,
-    source: input.source,
-  });
-  if (guardClaim) {
-    return guardClaim;
+  if (guardIdempotencyKeys.length > 0) {
+    return claimNewHostedLinqDeliveryProviderDispatchWithGuardsTx({
+      attemptedAt,
+      createData,
+      data,
+      guardIdempotencyKeys,
+      idempotencyKey,
+      prisma: input.prisma,
+      reclaimStalePreProviderAttempt: input.reclaimStalePreProviderAttempt,
+      source: input.source,
+    });
   }
 
   try {
@@ -375,23 +375,82 @@ export async function claimHostedLinqDeliveryProviderDispatchTx(input: {
   }
 }
 
+async function claimNewHostedLinqDeliveryProviderDispatchWithGuardsTx(input: {
+  attemptedAt: Date;
+  createData: Prisma.HostedLinqDeliveryCreateManyInput;
+  data: HostedLinqDeliveryProviderDispatchData;
+  guardIdempotencyKeys: readonly string[];
+  idempotencyKey: string;
+  prisma: HostedLinqDeliveryClient;
+  reclaimStalePreProviderAttempt?: boolean;
+  source: string;
+}): Promise<{ claimed: boolean; id: string | null; retryAt?: Date }> {
+  return runHostedLinqDeliveryStoreTransaction(input.prisma, async (prisma) => {
+    const existing = await prisma.hostedLinqDelivery.findUnique({
+      where: { idempotencyKey: input.idempotencyKey },
+      select: hostedLinqDeliveryLifecycleSelect,
+    });
+    if (existing) {
+      return claimExistingHostedLinqDeliveryProviderDispatchTx({
+        attemptedAt: input.attemptedAt,
+        data: input.data,
+        delivery: existing,
+        prisma,
+        reclaimStalePreProviderAttempt: input.reclaimStalePreProviderAttempt,
+        source: input.source,
+      });
+    }
+
+    const guardClaim = await reserveHostedLinqDeliveryGuardRowsTx({
+      attemptedAt: input.attemptedAt,
+      data: input.data,
+      guardIdempotencyKeys: input.guardIdempotencyKeys,
+      prisma,
+      reclaimStalePreProviderAttempt: input.reclaimStalePreProviderAttempt,
+      source: input.source,
+    });
+    if (guardClaim) {
+      return guardClaim;
+    }
+
+    const created = await createHostedLinqDeliveryIfAbsentTx({
+      data: input.createData,
+      prisma,
+    });
+    if (created) {
+      return {
+        claimed: true,
+        id: input.createData.id ?? null,
+      };
+    }
+
+    const concurrent = await prisma.hostedLinqDelivery.findUnique({
+      where: { idempotencyKey: input.idempotencyKey },
+      select: hostedLinqDeliveryLifecycleSelect,
+    });
+    if (!concurrent) {
+      throw new Error("Hosted Linq delivery claim disappeared after duplicate-safe create.");
+    }
+    return claimExistingHostedLinqDeliveryProviderDispatchTx({
+      attemptedAt: input.attemptedAt,
+      data: input.data,
+      delivery: concurrent,
+      prisma,
+      reclaimStalePreProviderAttempt: input.reclaimStalePreProviderAttempt,
+      source: input.source,
+    });
+  });
+}
+
 async function reserveHostedLinqDeliveryGuardRowsTx(input: {
   attemptedAt: Date;
   data: HostedLinqDeliveryProviderDispatchData;
-  guardIdempotencyKeys?: readonly string[];
-  primaryIdempotencyKey: string;
+  guardIdempotencyKeys: readonly string[];
   prisma: HostedLinqDeliveryClient;
   reclaimStalePreProviderAttempt?: boolean;
   source: string;
 }): Promise<{ claimed: boolean; id: string | null; retryAt?: Date } | null> {
-  const guardIdempotencyKeys = [
-    ...new Set((input.guardIdempotencyKeys ?? [])
-      .map((key) => createHostedLinqDeliveryIdempotencyLookupKey(key))
-      .filter((key): key is string =>
-        Boolean(key) && key !== input.primaryIdempotencyKey
-      )),
-  ];
-  for (const idempotencyKey of guardIdempotencyKeys) {
+  for (const idempotencyKey of input.guardIdempotencyKeys) {
     const existing = await input.prisma.hostedLinqDelivery.findUnique({
       where: { idempotencyKey },
       select: hostedLinqDeliveryLifecycleSelect,
@@ -411,25 +470,21 @@ async function reserveHostedLinqDeliveryGuardRowsTx(input: {
       continue;
     }
 
-    try {
-      await input.prisma.hostedLinqDelivery.create({
-        data: {
-          ...input.data,
-          id: buildHostedLinqDeliveryId(idempotencyKey),
-          idempotencyKey,
-        },
-        select: { id: true },
-      });
-    } catch (error) {
-      if (!isPrismaUniqueConstraintError(error)) {
-        throw error;
-      }
+    const created = await createHostedLinqDeliveryIfAbsentTx({
+      data: {
+        ...input.data,
+        id: buildHostedLinqDeliveryId(idempotencyKey),
+        idempotencyKey,
+      },
+      prisma: input.prisma,
+    });
+    if (!created) {
       const concurrent = await input.prisma.hostedLinqDelivery.findUnique({
         where: { idempotencyKey },
         select: hostedLinqDeliveryLifecycleSelect,
       });
       if (!concurrent) {
-        throw error;
+        throw new Error("Hosted Linq guard claim disappeared after duplicate-safe create.");
       }
       const claim = await claimExistingHostedLinqDeliveryProviderDispatchTx({
         attemptedAt: input.attemptedAt,
@@ -445,6 +500,30 @@ async function reserveHostedLinqDeliveryGuardRowsTx(input: {
     }
   }
   return null;
+}
+
+function normalizeHostedLinqDeliveryGuardIdempotencyKeys(input: {
+  guardIdempotencyKeys?: readonly string[];
+  primaryIdempotencyKey: string;
+}): string[] {
+  return [
+    ...new Set((input.guardIdempotencyKeys ?? [])
+      .map((key) => createHostedLinqDeliveryIdempotencyLookupKey(key))
+      .filter((key): key is string =>
+        Boolean(key) && key !== input.primaryIdempotencyKey
+      )),
+  ];
+}
+
+async function createHostedLinqDeliveryIfAbsentTx(input: {
+  data: Prisma.HostedLinqDeliveryCreateManyInput;
+  prisma: HostedLinqDeliveryClient;
+}): Promise<boolean> {
+  const created = await input.prisma.hostedLinqDelivery.createMany({
+    data: [input.data],
+    skipDuplicates: true,
+  });
+  return created.count === 1;
 }
 
 export async function hasHostedLinqProviderCorrelatedDeliveryForIdempotencyKeysTx(input: {
@@ -600,10 +679,6 @@ export async function resolveHostedLinqAiUsageLimitNoticeDeliveryClaimTx(input: 
       idempotencyKey: legacyClaimable.idempotencyKey,
       status: "claimable",
     };
-  }
-
-  if (legacyCandidates.length > 0) {
-    return { status: "already_claimed" };
   }
 
   return {
@@ -1817,47 +1892,11 @@ async function claimExistingHostedLinqDeliveryProviderDispatchTx(input: {
   const staleAttemptBefore = new Date(
     input.attemptedAt.getTime() - HOSTED_LINQ_PROVIDER_DISPATCH_STALE_ATTEMPT_MS,
   );
-  const canTerminalizeStaleTelegramDispatchStarted =
-    input.delivery.source === HOSTED_AI_USAGE_TELEGRAM_NOTICE_DELIVERY_SOURCE
-    && input.delivery.status === HOSTED_LINQ_DELIVERY_PROVIDER_DISPATCH_STARTED_STATUS
-    && input.delivery.attemptedAt <= staleAttemptBefore;
-  if (canTerminalizeStaleTelegramDispatchStarted) {
-    await input.prisma.hostedLinqDelivery.updateMany({
-      where: {
-        acceptedAt: null,
-        attemptedAt: {
-          lte: staleAttemptBefore,
-        },
-        deliveredAt: null,
-        failedAt: null,
-        id: input.delivery.id,
-        lastReceiptAt: null,
-        messageLookupKey: null,
-        skippedAt: null,
-        status: HOSTED_LINQ_DELIVERY_PROVIDER_DISPATCH_STARTED_STATUS,
-      },
-      data: {
-        failedAt: input.attemptedAt,
-        failureCode: sanitizeHostedOnboardingPersistedErrorCode(
-          HOSTED_TELEGRAM_USAGE_LIMIT_NOTICE_UNKNOWN_FAILURE_CODE,
-        ),
-        failureReason: sanitizeHostedOnboardingPersistedErrorMessage(
-          HOSTED_TELEGRAM_USAGE_LIMIT_NOTICE_STALE_DISPATCH_FAILURE_REASON,
-        ),
-        retryAfterAt: null,
-        status: "failed",
-      },
-    });
-    return {
-      claimed: false,
-      id: input.delivery.id,
-    };
-  }
   const canReclaimStalePreProviderAttempt =
     input.reclaimStalePreProviderAttempt
     ?? input.delivery.source !== HOSTED_AI_USAGE_TELEGRAM_NOTICE_DELIVERY_SOURCE;
   const staleDispatchStartedReclaimPredicate =
-    input.delivery.source !== HOSTED_AI_USAGE_TELEGRAM_NOTICE_DELIVERY_SOURCE
+    input.delivery.source === input.source
       ? [{
           attemptedAt: {
             lte: staleAttemptBefore,
@@ -1897,6 +1936,27 @@ async function claimExistingHostedLinqDeliveryProviderDispatchTx(input: {
       : canReclaimRetryAfterTelegramAttempt
         ? [telegramRetryAfterReclaimPredicate]
         : [];
+  const reclaimPredicates = [
+    ...terminalPreProviderReclaimPredicates,
+    ...(canReclaimStalePreProviderAttempt
+      ? [
+          {
+            attemptedAt: {
+              lte: staleAttemptBefore,
+            },
+            status: "attempted",
+          },
+          ...staleDispatchStartedReclaimPredicate,
+        ]
+      : []),
+  ];
+  if (reclaimPredicates.length === 0) {
+    return {
+      claimed: false,
+      id: input.delivery.id,
+    };
+  }
+
   const updated = await input.prisma.hostedLinqDelivery.updateMany({
     where: {
       acceptedAt: null,
@@ -1904,20 +1964,7 @@ async function claimExistingHostedLinqDeliveryProviderDispatchTx(input: {
       id: input.delivery.id,
       lastReceiptAt: null,
       messageLookupKey: null,
-      OR: [
-        ...terminalPreProviderReclaimPredicates,
-        ...(canReclaimStalePreProviderAttempt
-          ? [
-              {
-                attemptedAt: {
-                  lte: staleAttemptBefore,
-                },
-                status: "attempted",
-              },
-              ...staleDispatchStartedReclaimPredicate,
-            ]
-          : []),
-      ],
+      OR: reclaimPredicates,
     },
     data: input.data,
   });
