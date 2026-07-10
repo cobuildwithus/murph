@@ -21,6 +21,10 @@ import {
   type HostedWorkspaceSnapshotV2Aad,
   type HostedWorkspaceSnapshotV2Ref,
 } from "@murphai/hosted-execution/workspace-snapshot-v2";
+import type {
+  HostedWorkspaceCheckpointRequest,
+  HostedWorkspaceState,
+} from "@murphai/hosted-execution/runtime-control";
 import {
   HostedRuntimeBridgeCheckpointLeaseError,
 } from "@murphai/assistant-runtime/hosted-checkpoint-bridge";
@@ -5210,6 +5214,432 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(artifactRequest.headers.get("x-hosted-runtime-attempt-id")).toBe("attempt_1");
     expect(artifactRequest.headers.get("x-hosted-runtime-lease-generation")).toBe("9");
     expect(artifactRequest.headers.get("x-hosted-runtime-workspace-version")).toBe("5");
+  });
+
+  it("reconciles a canonical checkpoint whose committed response is lost", async () => {
+    const redactedStatus = {
+      hostedCanonicalWriteReceiptLogByteSize: 512,
+      hostedCanonicalWriteReceiptLogSha256: "b".repeat(64),
+    };
+    const committedWorkspace = {
+      checkpointedAt: "2026-04-26T00:00:04.000Z",
+      createdAt: "2026-04-26T00:00:00.000Z",
+      inboxMediaRetentionWakeAt: "2026-04-30T00:00:00.000Z",
+      nextWakeAt: "2026-04-27T00:10:00.000Z",
+      nextWakeReason: "assistant",
+      redactedStatus,
+      snapshotRef: null,
+      updatedAt: "2026-04-26T00:00:04.000Z",
+      userId: "member_123",
+      version: "5",
+    };
+    let currentLease = {
+      attemptId: "attempt_1",
+      leaseGeneration: "9",
+      userId: "member_123",
+      workspaceVersion: "4",
+    };
+    const recordCheckpoint = vi.fn(({ workspaceVersion }: { workspaceVersion: string }) => {
+      currentLease = {
+        ...currentLease,
+        workspaceVersion,
+      };
+    });
+    let checkpointCalls = 0;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      if (request.url === "http://web-control.worker/api/internal/hosted-workspace/checkpoint") {
+        checkpointCalls += 1;
+        if (checkpointCalls === 1) {
+          throw new Error("Synthetic response loss after the workspace CAS committed.");
+        }
+        return new Response(JSON.stringify({
+          checkpointConflictReason: "workspace_version",
+          checkpointed: false,
+          workspace: committedWorkspace,
+        }), {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        });
+      }
+      return new Response(null, { status: 200 });
+    });
+    const platform = buildTestHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: fetchMock as typeof fetch,
+      workspaceCheckpointBridge: {
+        readCurrentLease: () => currentLease,
+        recordCheckpoint,
+      },
+    });
+    const checkpointRequest = {
+      attemptId: "attempt_1",
+      expectedWorkspaceVersion: "4",
+      inboxMediaRetentionWakeAt: committedWorkspace.inboxMediaRetentionWakeAt,
+      leaseGeneration: "9",
+      nextWakeAt: committedWorkspace.nextWakeAt,
+      nextWakeReason: committedWorkspace.nextWakeReason,
+      reason: "canonical_runtime_commit" as const,
+      redactedStatus,
+      snapshotRef: null,
+    };
+
+    const result = await platform.workspacePort!.checkpoint(checkpointRequest);
+
+    expect(result).toEqual({
+      checkpointed: true,
+      workspace: committedWorkspace,
+    });
+    expect(recordCheckpoint).toHaveBeenCalledOnce();
+    expect(recordCheckpoint).toHaveBeenCalledWith({ workspaceVersion: "5" });
+    expect(checkpointCalls).toBe(2);
+    expect(currentLease.workspaceVersion).toBe("5");
+    const firstRequest = requireFetchRequest(fetchMock.mock.calls[0], "initial checkpoint");
+    const retryRequest = requireFetchRequest(fetchMock.mock.calls[1], "retried checkpoint");
+    await expect(firstRequest.json()).resolves.toEqual(checkpointRequest);
+    await expect(retryRequest.json()).resolves.toEqual(checkpointRequest);
+  });
+
+  it("rejects ambiguous canonical checkpoints without exact successor proof", async () => {
+    const rejectionCases: Array<{
+      label: string;
+      mutate(input: {
+        request: HostedWorkspaceCheckpointRequest;
+        workspace: HostedWorkspaceState;
+      }): void;
+    }> = [
+      {
+        label: "receipt state mismatch",
+        mutate({ workspace }) {
+          workspace.redactedStatus = {
+            ...workspace.redactedStatus,
+            hostedCanonicalWriteReceiptLogByteSize: 513,
+          };
+        },
+      },
+      {
+        label: "non-successor version",
+        mutate({ workspace }) {
+          workspace.version = "6";
+        },
+      },
+      {
+        label: "invalid receipt authority",
+        mutate({ request, workspace }) {
+          request.redactedStatus = {
+            hostedCanonicalWriteReceiptLogByteSize: 512,
+            hostedCanonicalWriteReceiptLogSha256: "invalid",
+          };
+          workspace.redactedStatus = request.redactedStatus;
+        },
+      },
+      {
+        label: "implicit retention wake",
+        mutate({ request }) {
+          delete request.inboxMediaRetentionWakeAt;
+        },
+      },
+    ];
+
+    for (const rejectionCase of rejectionCases) {
+      const redactedStatus = {
+        hostedCanonicalWriteReceiptLogByteSize: 512,
+        hostedCanonicalWriteReceiptLogSha256: "d".repeat(64),
+      };
+      const request: HostedWorkspaceCheckpointRequest = {
+        attemptId: "attempt_1",
+        expectedWorkspaceVersion: "4",
+        inboxMediaRetentionWakeAt: null,
+        leaseGeneration: "9",
+        nextWakeAt: null,
+        nextWakeReason: null,
+        reason: "canonical_runtime_commit",
+        redactedStatus,
+        snapshotRef: null,
+      };
+      const workspace: HostedWorkspaceState = {
+        checkpointedAt: "2026-04-26T00:00:04.000Z",
+        createdAt: "2026-04-26T00:00:00.000Z",
+        inboxMediaRetentionWakeAt: null,
+        nextWakeAt: null,
+        nextWakeReason: null,
+        redactedStatus,
+        snapshotRef: null,
+        updatedAt: "2026-04-26T00:00:04.000Z",
+        userId: "member_123",
+        version: "5",
+      };
+      rejectionCase.mutate({ request, workspace });
+      const recordCheckpoint = vi.fn();
+      const fetchMock = vi.fn(async () => {
+        if (fetchMock.mock.calls.length === 1) {
+          throw new Error(`Synthetic ambiguous failure: ${rejectionCase.label}.`);
+        }
+        return new Response(JSON.stringify({
+          checkpointConflictReason: "workspace_version",
+          checkpointed: false,
+          workspace,
+        }), {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        });
+      });
+      const platform = buildTestHostedExecutionRuntimePlatform({
+        boundUserId: "member_123",
+        fetchImpl: fetchMock as typeof fetch,
+        workspaceCheckpointBridge: {
+          readCurrentLease: () => ({
+            attemptId: "attempt_1",
+            leaseGeneration: "9",
+            userId: "member_123",
+            workspaceVersion: "4",
+          }),
+          recordCheckpoint,
+        },
+      });
+
+      await expect(platform.workspacePort!.checkpoint(request)).rejects.toThrow(
+        "Hosted workspace checkpoint request failed.",
+      );
+      expect(fetchMock, rejectionCase.label).toHaveBeenCalledTimes(2);
+      expect(recordCheckpoint, rejectionCase.label).not.toHaveBeenCalled();
+    }
+  });
+
+  it("rethrows the first error when canonical checkpoint reconciliation stays ambiguous", async () => {
+    const firstFailure = new Error("Synthetic first ambiguous checkpoint failure.");
+    const retryFailure = new Error("Synthetic retry checkpoint failure.");
+    const recordCheckpoint = vi.fn();
+    const fetchMock = vi.fn(async () => {
+      throw fetchMock.mock.calls.length === 1 ? firstFailure : retryFailure;
+    });
+    const platform = buildTestHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: fetchMock as typeof fetch,
+      workspaceCheckpointBridge: {
+        readCurrentLease: () => ({
+          attemptId: "attempt_1",
+          leaseGeneration: "9",
+          userId: "member_123",
+          workspaceVersion: "4",
+        }),
+        recordCheckpoint,
+      },
+    });
+
+    let rejected: unknown = null;
+    try {
+      await platform.workspacePort!.checkpoint({
+        attemptId: "attempt_1",
+        expectedWorkspaceVersion: "4",
+        inboxMediaRetentionWakeAt: null,
+        leaseGeneration: "9",
+        nextWakeAt: null,
+        nextWakeReason: null,
+        reason: "canonical_runtime_commit",
+        redactedStatus: {
+          hostedCanonicalWriteReceiptLogByteSize: 512,
+          hostedCanonicalWriteReceiptLogSha256: "e".repeat(64),
+        },
+        snapshotRef: null,
+      });
+    } catch (error) {
+      rejected = error;
+    }
+
+    expect(rejected).toBeInstanceOf(Error);
+    if (!(rejected instanceof Error)) {
+      throw new Error("Expected canonical checkpoint failure.");
+    }
+    expect(rejected.cause).toBe(firstFailure);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(recordCheckpoint).not.toHaveBeenCalled();
+  });
+
+  it("does not retry a canonical checkpoint after its active lease changes", async () => {
+    const fetchMock = vi.fn(async () => {
+      throw new Error("Synthetic ambiguous checkpoint failure.");
+    });
+    const recordCheckpoint = vi.fn();
+    let leaseReads = 0;
+    const platform = buildTestHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: fetchMock as typeof fetch,
+      workspaceCheckpointBridge: {
+        readCurrentLease: () => {
+          leaseReads += 1;
+          return {
+            attemptId: "attempt_1",
+            leaseGeneration: "9",
+            userId: "member_123",
+            workspaceVersion: leaseReads <= 2 ? "4" : "5",
+          };
+        },
+        recordCheckpoint,
+      },
+    });
+
+    await expect(platform.workspacePort!.checkpoint({
+      attemptId: "attempt_1",
+      expectedWorkspaceVersion: "4",
+      inboxMediaRetentionWakeAt: null,
+      leaseGeneration: "9",
+      nextWakeAt: null,
+      nextWakeReason: null,
+      reason: "canonical_runtime_commit",
+      redactedStatus: {
+        hostedCanonicalWriteReceiptLogByteSize: 512,
+        hostedCanonicalWriteReceiptLogSha256: "1".repeat(64),
+      },
+      snapshotRef: null,
+    })).rejects.toThrow("Hosted workspace checkpoint request failed.");
+
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(recordCheckpoint).not.toHaveBeenCalled();
+  });
+
+  it("does not retry deterministic canonical checkpoint rejection responses", async () => {
+    const fetchMock = vi.fn(async () => new Response("Unauthorized", { status: 401 }));
+    const recordCheckpoint = vi.fn();
+    const platform = buildTestHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: fetchMock as typeof fetch,
+      workspaceCheckpointBridge: {
+        readCurrentLease: () => ({
+          attemptId: "attempt_1",
+          leaseGeneration: "9",
+          userId: "member_123",
+          workspaceVersion: "4",
+        }),
+        recordCheckpoint,
+      },
+    });
+
+    await expect(platform.workspacePort!.checkpoint({
+      attemptId: "attempt_1",
+      expectedWorkspaceVersion: "4",
+      inboxMediaRetentionWakeAt: null,
+      leaseGeneration: "9",
+      nextWakeAt: null,
+      nextWakeReason: null,
+      reason: "canonical_runtime_commit",
+      redactedStatus: {
+        hostedCanonicalWriteReceiptLogByteSize: 512,
+        hostedCanonicalWriteReceiptLogSha256: "f".repeat(64),
+      },
+      snapshotRef: null,
+    })).rejects.toMatchObject({ status: 401 });
+
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(recordCheckpoint).not.toHaveBeenCalled();
+  });
+
+  it("does not retry ambiguous non-canonical checkpoints", async () => {
+    const transportFailure = new Error("Synthetic import checkpoint transport failure.");
+    const fetchMock = vi.fn(async () => {
+      throw transportFailure;
+    });
+    const recordCheckpoint = vi.fn();
+    const platform = buildTestHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: fetchMock as typeof fetch,
+      workspaceCheckpointBridge: {
+        readCurrentLease: () => ({
+          attemptId: "attempt_1",
+          leaseGeneration: "9",
+          userId: "member_123",
+          workspaceVersion: "4",
+        }),
+        recordCheckpoint,
+      },
+    });
+
+    let rejected: unknown = null;
+    try {
+      await platform.workspacePort!.checkpoint({
+        attemptId: "attempt_1",
+        expectedWorkspaceVersion: "4",
+        leaseGeneration: "9",
+        reason: "import",
+        snapshotRef: null,
+      });
+    } catch (error) {
+      rejected = error;
+    }
+
+    expect(rejected).toBeInstanceOf(Error);
+    if (!(rejected instanceof Error)) {
+      throw new Error("Expected non-canonical checkpoint failure.");
+    }
+    expect(rejected.cause).toBe(transportFailure);
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(recordCheckpoint).not.toHaveBeenCalled();
+  });
+
+  it("retries a server-error canonical checkpoint response once", async () => {
+    const redactedStatus = {
+      hostedCanonicalWriteReceiptLogByteSize: 512,
+      hostedCanonicalWriteReceiptLogSha256: "0".repeat(64),
+    };
+    const recordCheckpoint = vi.fn();
+    const fetchMock = vi.fn(async () => {
+      if (fetchMock.mock.calls.length === 1) {
+        return new Response("Temporarily unavailable", { status: 503 });
+      }
+      return new Response(JSON.stringify({
+        checkpointed: true,
+        workspace: {
+          checkpointedAt: "2026-04-26T00:00:04.000Z",
+          createdAt: "2026-04-26T00:00:00.000Z",
+          inboxMediaRetentionWakeAt: null,
+          nextWakeAt: null,
+          nextWakeReason: null,
+          redactedStatus,
+          snapshotRef: null,
+          updatedAt: "2026-04-26T00:00:04.000Z",
+          userId: "member_123",
+          version: "5",
+        },
+      }), {
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        status: 200,
+      });
+    });
+    const platform = buildTestHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: fetchMock as typeof fetch,
+      workspaceCheckpointBridge: {
+        readCurrentLease: () => ({
+          attemptId: "attempt_1",
+          leaseGeneration: "9",
+          userId: "member_123",
+          workspaceVersion: "4",
+        }),
+        recordCheckpoint,
+      },
+    });
+
+    const result = await platform.workspacePort!.checkpoint({
+      attemptId: "attempt_1",
+      expectedWorkspaceVersion: "4",
+      inboxMediaRetentionWakeAt: null,
+      leaseGeneration: "9",
+      nextWakeAt: null,
+      nextWakeReason: null,
+      reason: "canonical_runtime_commit",
+      redactedStatus,
+      snapshotRef: null,
+    });
+
+    expect(result.checkpointed).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(recordCheckpoint).toHaveBeenCalledOnce();
   });
 
   it("uses the advanced checkpoint version for direct-R2 snapshot start and complete", async () => {
