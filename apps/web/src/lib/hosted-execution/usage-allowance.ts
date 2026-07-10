@@ -1276,6 +1276,53 @@ function buildHostedAiUsageGateDecision(input: {
   };
 }
 
+export async function reconcileHostedAiUsageAllowancePeriodForMemberTx(input: {
+  memberId: string;
+  now: Date;
+  tx: Prisma.TransactionClient;
+}): Promise<void> {
+  const memberState = await input.tx.hostedMember.findUnique({
+    where: {
+      id: input.memberId,
+    },
+    select: {
+      billingRef: {
+        select: {
+          currentBillingPhase: true,
+          currentBillingPlanCode: true,
+          currentCheckoutOffer: true,
+          currentPeriodEnd: true,
+          currentPeriodStart: true,
+          currentTrialEndsAt: true,
+          currentTrialStartedAt: true,
+          pulseTrialPolicyVersion: true,
+          pulseTrialRedeemedAt: true,
+        },
+      },
+      billingStatus: true,
+      suspendedAt: true,
+    },
+  });
+  if (
+    !memberState ||
+    memberState.billingStatus !== HostedBillingStatus.active ||
+    memberState.suspendedAt !== null
+  ) {
+    throw new Error("Hosted AI usage allowance member is not active.");
+  }
+
+  const period = await ensureHostedAiUsageAllowancePeriodTx({
+    at: input.now,
+    billingRef: memberState.billingRef,
+    memberId: input.memberId,
+    now: input.now,
+    tx: input.tx,
+  });
+  if (period.kind === "denied") {
+    throw new Error("Hosted AI usage allowance period could not be reconciled.");
+  }
+}
+
 async function ensureHostedAiUsageAllowancePeriodTx(input: {
   at: Date;
   billingRef: HostedAiUsageAllowanceBillingRef | null;
