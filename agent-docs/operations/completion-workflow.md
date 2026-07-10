@@ -15,6 +15,10 @@ Required workflow audit subagents default to high reasoning. Use xhigh reasoning
 Final review is not a spawned subagent pass. The parent agent runs an explicit local final review (step 11), and for PR-lane work the ReviewGPT loop in `agent-docs/operations/pr-reviewgpt-loop.md` is the required final review gate before merge-readiness (rounds fire on push, in parallel with PR CI).
 Removed 2026-06-12: the `simplify` and `task-finish-review` subagent passes. June 2026 transcript mining across Codex/Claude sessions and `audit-packages/` artifacts showed `simplify` produced no accepted findings, and `task-finish-review` produced mostly low-severity polish while the specialized passes caught the real local bugs and the post-completion PR ReviewGPT loop caught what the entire local stack missed. The parent-owned scope-and-shape check (step 2) owns simplification; `/simplify` remains available on demand.
 
+## Frontend Implementation Routing
+
+For user-facing `apps/web` work, apply the Fable-first routing in `agent-docs/operations/agent-workflow-routing.md` before implementation. The parent must inspect all discoverable local Claude Code homes and safe reusable session/background-agent indexes, avoid signaling or commandeering live processes, and try every usable authenticated Fable lane. When none can run because of CLI, auth, model, credit, or safe-session availability, direct implementation by the parent is an allowed fallback rather than a completion blocker. Record why the fallback was necessary. This changes only who writes the implementation: frontend verification, browser evidence, the required `frontend-review` pass, parent final review, and PR-lane ReviewGPT remain unchanged.
+
 ## Sequence
 
 1. Finish the functional implementation first.

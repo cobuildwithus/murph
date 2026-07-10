@@ -154,8 +154,9 @@ The hosted Prisma schema keeps ownership sharp and nested:
   `awaiting_user` checkpoints. Assistant dynamic tools receive only run handles;
   `apps/web` owns Kernel lifecycle and encrypted browser capabilities. Awaiting
   runs open through `computer_open`, which creates, reuses, resumes, or safely
-  reclaims completed or stale-checkpointed active runs and returns current page
-  state. `apps/web` verifies newer
+  reclaims completed, stale-checkpointed, open, or expired active runs and
+  returns current page state. Open or expired handoffs require a newer hidden
+  user reply before the agent can resume control. `apps/web` verifies newer
   hosted `conversation.message` mailbox items and delivery context when reply
   proof is required; model-supplied run ids or confirmation text are not proof.
   `computer_act` runs bounded raw Playwright code against the current Kernel
@@ -163,10 +164,9 @@ The hosted Prisma schema keeps ownership sharp and nested:
   surfaces that cannot be operated through Playwright. The agent explicitly
   selects `managed_login` for Kernel Hosted UI plus a durable profile/domain
   connection, or `login` for the existing Live View takeover; CAPTCHA,
-  payment, missing-detail, and direct takeover handoffs remain Live View. Authenticated
-  handoffs reuse the current hosted web session's last measured takeover surface
-  as a fast browser-viewport hint, then correct from the live client surface in
-  the background without blocking takeover.
+  payment, missing-detail, and direct takeover handoffs remain Live View. Murph
+  does not resize a running Kernel browser during takeover; the handoff embeds
+  the existing live view and lets Kernel retain the browser viewport it created.
 - `hosted_user_crypto_envelope` stores signed wrapped per-user/per-domain root
   envelopes; plaintext roots are never stored
 - `hosted_user_crypto_audit` records hosted crypto authority events

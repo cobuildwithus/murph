@@ -560,6 +560,19 @@ export function buildCodexAppServerSteerRequest(
   }
 }
 
+function appendRequiredComputerHandoffUrl(
+  message: string,
+  handoffUrl: string,
+): string {
+  const normalizedMessage = normalizeNullableString(message)
+  if (normalizedMessage?.includes(handoffUrl)) {
+    return normalizedMessage
+  }
+  return normalizedMessage
+    ? `${normalizedMessage}\n\nTake over here: ${handoffUrl}`
+    : `Take over here: ${handoffUrl}`
+}
+
 export async function executeCodexAppServerTurn(
   input: CodexAppServerTurnInput,
 ): Promise<CodexAppServerTurnResult> {
@@ -2284,6 +2297,7 @@ async function runCodexAppServerTurnOnProcess(
   const jsonEvents: unknown[] = []
   const runtimeIssueInputs: AssistantRuntimeIssueInput[] = []
   let computerToolsLockedAfterUserPause = false
+  let requiredComputerHandoffUrl: string | null = null
   const actionDiagnostics = input.onTraceEvent
     ? createCodexActionDiagnosticsReducer()
     : null
@@ -3038,6 +3052,25 @@ async function runCodexAppServerTurnOnProcess(
 
     if (
       computerToolsLockedAfterUserPause &&
+      dynamicToolRequest.kind === 'finish-without-reply'
+    ) {
+      void tryWriteRpcMessage({
+        id: requestId,
+        result: {
+          success: false,
+          contentItems: [
+            {
+              type: 'inputText',
+              text: 'finish_without_reply is unavailable after pausing a computer run for the user',
+            },
+          ],
+        },
+      })
+      return
+    }
+
+    if (
+      computerToolsLockedAfterUserPause &&
       isComputerDynamicToolRequest(dynamicToolRequest)
     ) {
       void tryWriteRpcMessage({
@@ -3146,6 +3179,9 @@ async function runCodexAppServerTurnOnProcess(
       }
       if (result.computerRunPausedForUser) {
         computerToolsLockedAfterUserPause = true
+      }
+      if (result.requiredComputerHandoffUrl) {
+        requiredComputerHandoffUrl = result.requiredComputerHandoffUrl
       }
       if (result.responseMediaPatch) {
         try {
@@ -3936,14 +3972,21 @@ async function runCodexAppServerTurnOnProcess(
         : finalTrailingSteerCandidate?.deliveryContextOrdinal ??
           latestDeliveryContextOrdinal
   const finalActionPatch = resolveFinalActionPatch(finalDeliveryContextOrdinal)
-  const noReplySelected = finalActionPatch?.kind === 'none'
+  const noReplySelected =
+    finalActionPatch?.kind === 'none' && !requiredComputerHandoffUrl
   const finalAction: AssistantNoReplyDisposition | null = noReplySelected
     ? { kind: 'none' }
     : null
-  const finalMessage =
+  const modelFinalMessage =
     noReplySelected || suppressTrailingSteerCandidateForEarlierNoReply
       ? ''
       : selectedFinalMessage
+  const finalMessage = requiredComputerHandoffUrl
+    ? appendRequiredComputerHandoffUrl(
+        modelFinalMessage,
+        requiredComputerHandoffUrl,
+      )
+    : modelFinalMessage
   if (
     noReplySelected &&
     normalizeNullableString(extractedFinalMessage) !== null
@@ -3970,10 +4013,11 @@ async function runCodexAppServerTurnOnProcess(
 
   return {
     acceptedNoReplyDeliveryContextOrdinals:
-      listNoReplyFinalActionPatchOrdinals(),
+      requiredComputerHandoffUrl ? [] : listNoReplyFinalActionPatchOrdinals(),
     codexThreadHistoryUnsafe,
     finalAction,
-    finalActionExplicit: finalActionPatch !== null,
+    finalActionExplicit:
+      finalActionPatch !== null && !requiredComputerHandoffUrl,
     finalMessage,
     reactions: reactionPatches.map((entry) => ({
       deliveryContextOrdinal: entry.deliveryContextOrdinal,
