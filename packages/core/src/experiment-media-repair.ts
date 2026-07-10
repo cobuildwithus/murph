@@ -827,45 +827,60 @@ async function createAndVerifyCapture(
     );
   }
 
-  await addCapture({
-    vaultRoot,
-    draft: {
-      externalRef: candidate.externalRef,
-      experimentId: candidate.experiment.attributes.experimentId,
-      experimentSlug: candidate.experiment.attributes.slug,
-      id: candidate.eventId,
-      links: [{
-        type: "related_to",
-        targetId: candidate.experiment.attributes.experimentId,
-      }],
-      note: "Recovered misplaced media through the canonical experiment capture repair.",
-      occurredAt: candidate.modifiedAt,
-      source: "import",
-      tags: [REPAIR_TAG],
-      title: "Recovered experiment media",
-    },
-    attachments: [{
-      allowExistingMatch: true,
-      role: REPAIR_ROLE,
-      sourcePath: candidate.sourcePath,
-      targetName: path.posix.basename(candidate.relativePath),
-    }],
-    rawImport: {
-      importId: candidate.eventId,
-      importedAt: candidate.modifiedAt,
-      importKind: "capture",
-      provenance: {
+  try {
+    await addCapture({
+      vaultRoot,
+      draft: {
+        externalRef: candidate.externalRef,
         experimentId: candidate.experiment.attributes.experimentId,
         experimentSlug: candidate.experiment.attributes.slug,
-        originalRelativePath: candidate.relativePath,
-        schema: REPAIR_SCHEMA,
-        sourceByteSize: candidate.sizeBytes,
-        sourceSha256: candidate.sha256,
-        timestampSource: "file-mtime",
+        id: candidate.eventId,
+        links: [{
+          type: "related_to",
+          targetId: candidate.experiment.attributes.experimentId,
+        }],
+        note: "Recovered misplaced media through the canonical experiment capture repair.",
+        occurredAt: candidate.modifiedAt,
+        source: "import",
+        tags: [REPAIR_TAG],
+        title: "Recovered experiment media",
       },
-      source: REPAIR_EXTERNAL_SYSTEM,
-    },
-  });
+      attachments: [{
+        allowExistingMatch: true,
+        expectedSourceReceipt: {
+          byteLength: candidate.sizeBytes,
+          sha256: candidate.sha256,
+        },
+        role: REPAIR_ROLE,
+        sourcePath: candidate.sourcePath,
+        targetName: path.posix.basename(candidate.relativePath),
+      }],
+      rawImport: {
+        importId: candidate.eventId,
+        importedAt: candidate.modifiedAt,
+        importKind: "capture",
+        provenance: {
+          experimentId: candidate.experiment.attributes.experimentId,
+          experimentSlug: candidate.experiment.attributes.slug,
+          originalRelativePath: candidate.relativePath,
+          schema: REPAIR_SCHEMA,
+          sourceByteSize: candidate.sizeBytes,
+          sourceSha256: candidate.sha256,
+          timestampSource: "file-mtime",
+        },
+        source: REPAIR_EXTERNAL_SYSTEM,
+      },
+    });
+  } catch (error) {
+    if (error instanceof VaultError && error.code === "OPERATION_PRECONDITION_FAILED") {
+      throw new VaultError(
+        "EXPERIMENT_MEDIA_SOURCE_CHANGED",
+        "Source media changed before it could be copied and was left in place.",
+        { relativePath: candidate.relativePath },
+      );
+    }
+    throw error;
+  }
 
   const stored = await findEventByExternalRef({ vaultRoot, ...candidate.externalRef });
   if (!stored) {

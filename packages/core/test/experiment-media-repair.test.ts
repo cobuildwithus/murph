@@ -495,6 +495,78 @@ test("experiment media repair preserves note and source edits that race quaranti
   }
 });
 
+test("experiment media repair rejects source changes during raw staging before capture commit", async () => {
+  const vaultRoot = await createTempVault();
+  const experiment = await createExperiment({
+    slug: "staging-race",
+    title: "Staging Race",
+    vaultRoot,
+  });
+  const sourceRelativePath =
+    `${VAULT_LAYOUT.experimentsDirectory}/staging-race/proof.webp`;
+  const sourceAbsolutePath = path.join(vaultRoot, sourceRelativePath);
+  await mkdir(path.dirname(sourceAbsolutePath), { recursive: true });
+  await writeFile(sourceAbsolutePath, "inspected-source", "utf8");
+
+  const documentAbsolutePath = path.join(
+    vaultRoot,
+    experiment.experiment.relativePath,
+  );
+  const inspectedDocument =
+    `${await readFile(documentAbsolutePath, "utf8")}\nEvidence: ${sourceRelativePath}\n`;
+  await writeFile(documentAbsolutePath, inspectedDocument, "utf8");
+
+  const originalStageRawCopy = WriteBatch.prototype.stageRawCopy;
+  let injectedRace = false;
+  Reflect.set(
+    WriteBatch.prototype,
+    "stageRawCopy",
+    async function stageRawCopyWithSourceRace(this: object, input: unknown) {
+      if (
+        !injectedRace
+        && typeof input === "object"
+        && input !== null
+        && Reflect.get(input, "sourcePath") === sourceAbsolutePath
+      ) {
+        injectedRace = true;
+        await writeFile(sourceAbsolutePath, "source-changed-during-staging", "utf8");
+      }
+      return await Reflect.apply(originalStageRawCopy, this, [input]);
+    },
+  );
+
+  try {
+    await assert.rejects(
+      repairExperimentMedia({ apply: true, vaultRoot }),
+      (error: unknown) =>
+        error instanceof Error
+        && "code" in error
+        && error.code === "EXPERIMENT_MEDIA_SOURCE_CHANGED",
+    );
+  } finally {
+    Reflect.set(WriteBatch.prototype, "stageRawCopy", originalStageRawCopy);
+  }
+
+  assert.equal(injectedRace, true);
+  assert.equal(
+    await readFile(sourceAbsolutePath, "utf8"),
+    "source-changed-during-staging",
+  );
+  assert.equal(await readFile(documentAbsolutePath, "utf8"), inspectedDocument);
+  assert.deepEqual(
+    await walkVaultFiles(vaultRoot, VAULT_LAYOUT.rawCapturesDirectory),
+    [],
+  );
+  const eventLedgerPaths = await walkVaultFiles(
+    vaultRoot,
+    VAULT_LAYOUT.eventLedgerDirectory,
+  );
+  const eventLedgerContents = await Promise.all(
+    eventLedgerPaths.map((relativePath) => readFile(path.join(vaultRoot, relativePath), "utf8")),
+  );
+  assert.equal(eventLedgerContents.some((content) => content.includes("murph-repair")), false);
+});
+
 test("experiment media repair leaves unsupported, unassociated, symlinked, and residual-reference files blocked", async () => {
   const vaultRoot = await createTempVault();
   const experiment = await createExperiment({

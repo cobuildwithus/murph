@@ -155,6 +155,33 @@ export async function writeTextFileAtomicExclusive(
   );
 }
 
+export async function writeBytesFileAtomicExclusive(
+  targetAbsolutePath: string,
+  content: Uint8Array,
+  options: { mode?: number } = {},
+): Promise<void> {
+  await withPreparedAtomicTempFile(
+    targetAbsolutePath,
+    async (tempAbsolutePath) => {
+      await fs.writeFile(tempAbsolutePath, content, {
+        flag: "wx",
+        mode: options.mode,
+      });
+    },
+    async (tempAbsolutePath) => {
+      await linkPreparedTempFileExclusively({
+        targetAbsolutePath,
+        tempAbsolutePath,
+        fallbackCreateTarget: () =>
+          fs.writeFile(targetAbsolutePath, content, {
+            flag: "wx",
+            mode: options.mode,
+          }),
+      });
+    },
+  );
+}
+
 export async function copyFileAtomicExclusive(
   sourceAbsolutePath: string,
   targetAbsolutePath: string,

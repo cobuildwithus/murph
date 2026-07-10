@@ -6,6 +6,7 @@ import { createReadStream, promises as fs } from "node:fs";
 import {
   copyFileAtomic,
   copyFileAtomicExclusive,
+  writeBytesFileAtomicExclusive,
   writeTextFileAtomic,
 } from "../atomic-write.ts";
 import { VaultError } from "../errors.ts";
@@ -170,6 +171,7 @@ interface StageTextWriteOptions {
 
 interface StageRawCopyOptions {
   allowExistingMatch?: boolean;
+  expectedSourceReceipt?: CommittedPayloadReceipt;
 }
 
 interface StageRawCopyInput extends StageRawCopyOptions {
@@ -216,6 +218,7 @@ type StoredWriteAction =
       allowExistingMatch: boolean;
       originalFileName: string;
       mediaType: string;
+      expectedSourceReceipt?: CommittedPayloadReceipt;
       effect?: "copy" | "reuse";
       existedBefore?: boolean;
       appliedAt?: string;
@@ -1091,12 +1094,17 @@ function parseStoredAction(value: unknown): StoredWriteAction | null {
       if (!stageRelativePath) {
         return null;
       }
+      const expectedSourceReceipt = parseCommittedPayloadReceipt(record.expectedSourceReceipt);
+      if (expectedSourceReceipt === null) {
+        return null;
+      }
 
       return {
         kind: "raw_copy",
         ...base,
         allowExistingMatch: record.allowExistingMatch === true,
         effect: record.effect === "copy" || record.effect === "reuse" ? record.effect : undefined,
+        ...(expectedSourceReceipt ? { expectedSourceReceipt } : {}),
         mediaType: typeof record.mediaType === "string" ? record.mediaType : "",
         originalFileName: typeof record.originalFileName === "string" ? record.originalFileName : "",
         stageRelativePath,
@@ -1516,6 +1524,7 @@ export class WriteBatch {
     sourcePath,
     targetRelativePath,
     allowExistingMatch = false,
+    expectedSourceReceipt,
     originalFileName,
     mediaType,
   }: StageRawCopyInput): Promise<StagedRawCopy> {
@@ -1542,6 +1551,17 @@ export class WriteBatch {
     const stageAbsolutePath = resolveVaultPath(this.vaultRoot, stageRelativePath).absolutePath;
     await ensureDirectory(path.dirname(stageAbsolutePath));
     await fs.copyFile(sourceAbsolutePath, stageAbsolutePath);
+    if (expectedSourceReceipt) {
+      const stagedReceipt = await createFileContentReceipt(stageAbsolutePath);
+      if (!receiptsMatch(stagedReceipt, expectedSourceReceipt)) {
+        await safeUnlink(stageAbsolutePath);
+        throw new VaultError(
+          "OPERATION_PRECONDITION_FAILED",
+          `Raw source for "${normalizedTarget}" changed after it was inspected.`,
+          { relativePath: normalizedTarget },
+        );
+      }
+    }
 
     this.record.actions.push({
       kind: "raw_copy",
@@ -1551,6 +1571,9 @@ export class WriteBatch {
       allowExistingMatch,
       originalFileName,
       mediaType,
+      expectedSourceReceipt: expectedSourceReceipt
+        ? { ...expectedSourceReceipt }
+        : undefined,
     });
     await this.persist();
 
@@ -2044,6 +2067,9 @@ export class WriteBatch {
       }
       const bytes = await fs.readFile(resolveVaultPath(this.vaultRoot, action.stageRelativePath).absolutePath);
       const receipt = createCommittedPayloadReceipt(bytes);
+      if (action.kind === "raw_copy") {
+        this.assertExpectedSourceReceipt(action, receipt);
+      }
       const existing = payloadsBySha.get(receipt.sha256);
       if (existing) {
         if (existing.byteLength !== receipt.byteLength) {
@@ -2131,7 +2157,11 @@ export class WriteBatch {
     action: Extract<StoredWriteAction, { kind: "jsonl_append" | "raw_copy" | "text_write" }>,
   ): Promise<CommittedPayloadReceipt> {
     const stageAbsolutePath = resolveVaultPath(this.vaultRoot, action.stageRelativePath).absolutePath;
-    return createCommittedPayloadReceipt(await fs.readFile(stageAbsolutePath));
+    const receipt = createCommittedPayloadReceipt(await fs.readFile(stageAbsolutePath));
+    if (action.kind === "raw_copy") {
+      this.assertExpectedSourceReceipt(action, receipt);
+    }
+    return receipt;
   }
 
   private async applyAction(index: number, action: StoredWriteAction): Promise<void> {
@@ -2206,6 +2236,25 @@ export class WriteBatch {
       operationId: this.operationId,
       relativePath: action.targetRelativePath,
     });
+  }
+
+  private assertExpectedSourceReceipt(
+    action: Extract<StoredWriteAction, { kind: "raw_copy" }>,
+    actualReceipt: CommittedPayloadReceipt,
+  ): void {
+    if (
+      action.expectedSourceReceipt
+      && !receiptsMatch(actualReceipt, action.expectedSourceReceipt)
+    ) {
+      throw new VaultError(
+        "OPERATION_PRECONDITION_FAILED",
+        `Raw source for "${action.targetRelativePath}" changed after it was inspected.`,
+        {
+          operationId: this.operationId,
+          relativePath: action.targetRelativePath,
+        },
+      );
+    }
   }
 
   private async assertExpectedTargetReceipt(
@@ -2430,7 +2479,11 @@ export class WriteBatch {
 
   private async applyRawCopy(action: Extract<StoredWriteAction, { kind: "raw_copy" }>): Promise<void> {
     const stageAbsolutePath = resolveVaultPath(this.vaultRoot, action.stageRelativePath).absolutePath;
-    const stagedContent = await fs.readFile(stageAbsolutePath);
+    const [stagedContent, stagedStats] = await Promise.all([
+      fs.readFile(stageAbsolutePath),
+      fs.stat(stageAbsolutePath),
+    ]);
+    this.assertExpectedSourceReceipt(action, createCommittedPayloadReceipt(stagedContent));
     await this.applyPreparedAction({
       action,
       finalize: (result: Awaited<ReturnType<typeof applyImmutableWriteTarget>>) => {
@@ -2460,7 +2513,10 @@ export class WriteBatch {
         await applyImmutableWriteTarget({
           allowExistingMatch: action.allowExistingMatch,
           createEffect: "copy",
-          createTarget: () => copyFileAtomicExclusive(stageAbsolutePath, target.absolutePath),
+          createTarget: () =>
+            writeBytesFileAtomicExclusive(target.absolutePath, stagedContent, {
+              mode: stagedStats.mode & 0o7777,
+            }),
           existsErrorMessage: "Raw target already exists and may not be overwritten.",
           matchesExistingContent: async () => {
             const existingContent = await fs.readFile(target.absolutePath);

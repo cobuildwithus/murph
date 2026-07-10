@@ -44,6 +44,7 @@ import {
 import {
   copyFileAtomic,
   copyFileAtomicExclusive,
+  writeBytesFileAtomicExclusive,
   writeTextFileAtomic,
   writeTextFileAtomicExclusive,
 } from "../src/atomic-write.ts";
@@ -125,6 +126,7 @@ test("atomic writes preserve existing modes while replacing content", async () =
 test("exclusive atomic writes fall back when hard links are unavailable", async () => {
   const vaultRoot = await makeTempDirectory("murph-core-operations-thresholds-atomic-exclusive");
   const textTargetAbsolutePath = path.join(vaultRoot, "nested", "exclusive.txt");
+  const bytesTargetAbsolutePath = path.join(vaultRoot, "nested", "bytes.bin");
   const copyTargetAbsolutePath = path.join(vaultRoot, "nested", "copied.txt");
   const freshTextTargetAbsolutePath = path.join(vaultRoot, "fresh", "new.txt");
   const sourceAbsolutePath = path.join(vaultRoot, "source.txt");
@@ -144,13 +146,15 @@ test("exclusive atomic writes fall back when hard links are unavailable", async 
   );
 
   await writeTextFileAtomicExclusive(textTargetAbsolutePath, "exclusive text\n");
+  await writeBytesFileAtomicExclusive(bytesTargetAbsolutePath, new Uint8Array([0, 1, 2, 255]));
   await copyFileAtomicExclusive(sourceAbsolutePath, copyTargetAbsolutePath);
 
   assert.equal(await fs.readFile(textTargetAbsolutePath, "utf8"), "exclusive text\n");
+  assert.deepEqual(await fs.readFile(bytesTargetAbsolutePath), Buffer.from([0, 1, 2, 255]));
   assert.equal(await fs.readFile(copyTargetAbsolutePath, "utf8"), "copy me\n");
   await writeTextFileAtomic(freshTextTargetAbsolutePath, "fresh text\n");
   assert.equal(await fs.readFile(freshTextTargetAbsolutePath, "utf8"), "fresh text\n");
-  assert.equal(linkSpy.mock.calls.length >= 2, true);
+  assert.equal(linkSpy.mock.calls.length >= 3, true);
 });
 
 test("atomic writes surface non-ENOENT mode preservation errors", async () => {
@@ -1387,6 +1391,93 @@ test("write batches preserve text and delete targets that changed after staging"
       error instanceof VaultError && error.code === "OPERATION_PRECONDITION_FAILED",
   );
   assert.equal(await fs.readFile(deleteAbsolutePath, "utf8"), "delete-b\n");
+});
+
+test("receipt-guarded raw copies reject changed source and staged bytes before commit", async () => {
+  const vaultRoot = await makeTempDirectory("murph-core-operations-raw-source-receipt");
+  const sourceRoot = await makeTempDirectory("murph-core-operations-raw-source-receipt-input");
+  await initializeVault({ vaultRoot });
+
+  const inspectedContent = "inspected raw bytes\n";
+  const changedContent = "changed raw bytes\n";
+  const expectedSourceReceipt = {
+    byteLength: Buffer.byteLength(inspectedContent),
+    sha256: createHash("sha256").update(inspectedContent).digest("hex"),
+  };
+  const sourcePath = path.join(sourceRoot, "source.bin");
+  const targetRelativePath = "raw/testing/receipt/source.bin";
+  const targetAbsolutePath = resolveVaultPath(vaultRoot, targetRelativePath).absolutePath;
+  await fs.writeFile(sourcePath, changedContent, "utf8");
+
+  const changedSourceBatch = await WriteBatch.create({
+    vaultRoot,
+    operationType: "raw_source_receipt_changed",
+    summary: "reject changed raw source bytes",
+  });
+  await assert.rejects(
+    () =>
+      changedSourceBatch.stageRawCopy({
+        expectedSourceReceipt,
+        mediaType: "application/octet-stream",
+        originalFileName: "source.bin",
+        sourcePath,
+        targetRelativePath,
+      }),
+    (error: unknown) =>
+      error instanceof VaultError && error.code === "OPERATION_PRECONDITION_FAILED",
+  );
+  await changedSourceBatch.rollback();
+  assert.equal(await pathExists(targetAbsolutePath), false);
+
+  await fs.writeFile(sourcePath, inspectedContent, "utf8");
+  const changedStageBatch = await WriteBatch.create({
+    vaultRoot,
+    operationType: "raw_stage_receipt_changed",
+    summary: "reject changed staged raw bytes",
+  });
+  const staged = await changedStageBatch.stageRawCopy({
+    expectedSourceReceipt,
+    mediaType: "application/octet-stream",
+    originalFileName: "source.bin",
+    sourcePath,
+    targetRelativePath,
+  });
+  const stored = await readStoredWriteOperation(vaultRoot, changedStageBatch.metadataRelativePath);
+  const storedAction = stored.actions[0];
+  assert.equal(storedAction?.kind, "raw_copy");
+  if (storedAction?.kind !== "raw_copy") {
+    throw new Error("Expected a stored raw-copy action.");
+  }
+  assert.deepEqual(storedAction.expectedSourceReceipt, expectedSourceReceipt);
+  await fs.writeFile(staged.stagedAbsolutePath, changedContent, "utf8");
+  await assert.rejects(
+    () => changedStageBatch.commit(),
+    (error: unknown) =>
+      error instanceof VaultError && error.code === "OPERATION_PRECONDITION_FAILED",
+  );
+  assert.equal(await pathExists(targetAbsolutePath), false);
+  assert.equal(
+    (await readStoredWriteOperation(vaultRoot, changedStageBatch.metadataRelativePath)).status,
+    "rolled_back",
+  );
+
+  await fs.writeFile(sourcePath, inspectedContent, "utf8");
+  await fs.chmod(sourcePath, 0o600);
+  const successfulBatch = await WriteBatch.create({
+    vaultRoot,
+    operationType: "raw_source_receipt_preserves_mode",
+    summary: "preserve restrictive raw source mode",
+  });
+  await successfulBatch.stageRawCopy({
+    expectedSourceReceipt,
+    mediaType: "application/octet-stream",
+    originalFileName: "source.bin",
+    sourcePath,
+    targetRelativePath,
+  });
+  await successfulBatch.commit();
+  assert.equal(await fs.readFile(targetAbsolutePath, "utf8"), inspectedContent);
+  assert.equal((await fs.stat(targetAbsolutePath)).mode & 0o777, 0o600);
 });
 
 test("receipt-guarded text writes preserve an edit that races the atomic quarantine", async () => {
