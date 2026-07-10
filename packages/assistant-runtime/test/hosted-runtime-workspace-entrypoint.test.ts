@@ -15991,6 +15991,7 @@ describe("hosted workspace runtime entrypoint", () => {
     const checkpointedWorkspaces: HostedWorkspaceState[] = [];
     const abortController = new AbortController();
     const abortReason = new Error("Synthetic stop after canonical receipt checkpoint.");
+    const rawDeleteRelativePath = "raw/inbox/expired/pre-idle-crash.bin";
 
     try {
       await expect(
@@ -16047,6 +16048,9 @@ describe("hosted workspace runtime entrypoint", () => {
               },
               async restoreWorkspaceSnapshot(input) {
                 await initializeVault({ createdAt: TEST_NOW, vaultRoot: input.durableRoot });
+                const rawDeleteAbsolutePath = path.join(input.durableRoot, rawDeleteRelativePath);
+                await mkdir(path.dirname(rawDeleteAbsolutePath), { recursive: true });
+                await writeFile(rawDeleteAbsolutePath, "expired private bytes", "utf8");
               },
               async startSnapshotSession() {
                 throw new Error("Canonical crash test should not start snapshots.");
@@ -16065,6 +16069,7 @@ describe("hosted workspace runtime entrypoint", () => {
                   "bank/conditions/pre-idle-crash.md",
                   "crash durable health context\n",
                 );
+                await batch.stageDelete(rawDeleteRelativePath, { allowRaw: true });
               },
             });
             return { progressed: false };
@@ -16098,6 +16103,9 @@ describe("hosted workspace runtime entrypoint", () => {
         (await readAssistantContextSnapshotState(firstVaultRoot))?.pendingDirtyDomains,
         ["health_context"],
       );
+      await assert.rejects(stat(path.join(firstVaultRoot, rawDeleteRelativePath)), {
+        code: "ENOENT",
+      });
 
       await runHostedWorkspaceRuntimeJobInProcess(createWorkspaceRuntimeJobInput({
         request: {
@@ -16147,6 +16155,9 @@ describe("hosted workspace runtime entrypoint", () => {
             },
             async restoreWorkspaceSnapshot(input) {
               await initializeVault({ createdAt: TEST_NOW, vaultRoot: input.durableRoot });
+              const rawDeleteAbsolutePath = path.join(input.durableRoot, rawDeleteRelativePath);
+              await mkdir(path.dirname(rawDeleteAbsolutePath), { recursive: true });
+              await writeFile(rawDeleteAbsolutePath, "expired private bytes", "utf8");
             },
             async startSnapshotSession() {
               throw new Error("Canonical restore test should not start snapshots.");
@@ -16170,6 +16181,9 @@ describe("hosted workspace runtime entrypoint", () => {
         (await readAssistantContextSnapshotState(restoredVaultRoot))?.pendingDirtyDomains,
         ["health_context"],
       );
+      await assert.rejects(stat(path.join(restoredVaultRoot, rawDeleteRelativePath)), {
+        code: "ENOENT",
+      });
       assert.equal(restoredCheckpointRequests.length, 1);
       assert.equal(restoredCheckpointRequests[0]?.reason, "idle_shutdown");
       const restoredCheckpointStatus = restoredCheckpointRequests[0]?.redactedStatus ?? {};

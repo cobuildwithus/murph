@@ -1142,6 +1142,7 @@ function parseHostedCanonicalWriteReceiptActionForRestore(
         kind: "delete",
         targetRelativePath: raw.targetRelativePath,
         existedBefore: raw.existedBefore,
+        ...(raw.allowRaw === true ? { allowRaw: true as const } : {}),
       };
     }
     default:

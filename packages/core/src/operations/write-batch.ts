@@ -115,6 +115,7 @@ export type HostedCanonicalWriteReceiptAction =
       kind: "delete";
       targetRelativePath: string;
       existedBefore: boolean;
+      allowRaw?: true;
     };
 
 export interface HostedCanonicalWriteReceipt {
@@ -575,6 +576,7 @@ export async function applyHostedCanonicalWriteReceipt(input: {
       }
       case "delete":
         await applyHostedCanonicalDeleteReceiptAction({
+          allowRaw: action.allowRaw === true,
           targetRelativePath: action.targetRelativePath,
           vaultRoot,
         });
@@ -781,11 +783,13 @@ async function applyHostedCanonicalRawReceiptAction(input: {
 }
 
 async function applyHostedCanonicalDeleteReceiptAction(input: {
+  allowRaw: boolean;
   targetRelativePath: string;
   vaultRoot: string;
 }): Promise<void> {
   const target = await prepareVerifiedDeleteTarget(input.vaultRoot, input.targetRelativePath, {
     allowAppendOnlyJsonl: true,
+    allowRaw: input.allowRaw,
     kind: "delete",
   });
   await fs.rm(target.absolutePath, { force: true });
@@ -2199,6 +2203,7 @@ export class WriteBatch {
           kind: "delete",
           targetRelativePath: action.targetRelativePath,
           existedBefore: action.existedBefore ?? false,
+          ...(action.allowRaw ? { allowRaw: true as const } : {}),
         };
     }
   }
