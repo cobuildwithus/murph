@@ -1269,6 +1269,7 @@ model HostedLinqDelivery {
   acceptedAt           DateTime? @map("accepted_at")
   deliveredAt          DateTime? @map("delivered_at")
   failedAt             DateTime? @map("failed_at")
+  retryAfterAt         DateTime? @map("retry_after_at")
   skippedAt            DateTime? @map("skipped_at")
   lastReceiptAt        DateTime? @map("last_receipt_at")
   lastProviderEventId  String?  @map("last_provider_event_id")

@@ -5,6 +5,7 @@ import {
 
 import {
   observeHostedTemporalActivity,
+  readHostedDeviceSyncRecoverySweepTimeoutMs,
   readHostedOrchestratorTemporalWebEnvironment,
   requestHostedOrchestratorJson,
 } from "./http-client.js";
@@ -43,7 +44,7 @@ export async function runHostedDeviceSyncRecoverySweep(): Promise<
       parse: parseHostedDeviceSyncRecoverySweepResult,
       path: HOSTED_DEVICE_SYNC_RECOVERY_SWEEP_PATH,
       signing: environment.hostedWebCallbackSigning,
-      timeoutMs: environment.deviceSyncRecoverySweepTimeoutMs,
+      timeoutMs: readHostedDeviceSyncRecoverySweepTimeoutMs(),
     })
   );
 }

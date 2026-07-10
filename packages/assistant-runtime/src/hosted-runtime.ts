@@ -83,14 +83,17 @@ import type {
   HostedDeviceSyncDirtyProcessedPostCheckpointRecord,
   HostedWorkspaceArtifactMaterializer,
 } from "./hosted-runtime/models.ts";
-import type {
-  HostedMailboxImportLoopResult,
-  HostedMailboxResolvedImportItem,
-} from "./hosted-runtime/mailbox-import.ts";
 import {
   HOSTED_MAILBOX_ITEM_BUDGET_REASON_CODE,
+  prefetchHostedMailboxPrefix,
   type HostedMailboxItemImportOutcome,
+  type HostedMailboxImportLoopResult,
+  type HostedMailboxPrefixPrefetch,
+  type HostedMailboxResolvedImportItem,
 } from "./hosted-runtime/mailbox-import.ts";
+import {
+  readHostedMailboxImportState,
+} from "./hosted-runtime/mailbox-state.ts";
 import {
   offerHostedVaultShareProjectionBestEffort,
 } from "./hosted-runtime/vault-share-projection.ts";
@@ -320,6 +323,7 @@ export {
 
 const HOSTED_INITIAL_CONVERSATION_MAILBOX_IMPORT_LANES = ["conversation"] as const;
 const HOSTED_INITIAL_BOOTSTRAP_MAILBOX_IMPORT_LANES = ["system", "conversation"] as const;
+const HOSTED_FOREGROUND_MAILBOX_PREFETCH_LANES = ["conversation", "system"] as const;
 const HOSTED_INITIAL_BOOTSTRAP_PENDING_REASON_CODE = "bootstrap.pending";
 const HOSTED_RUNTIME_ISSUE_POST_CHECKPOINT_EXPORT_TIMEOUT_MS = 2_500;
 const HOSTED_VAULT_FORMAT_MIGRATION_MAX_BUNDLES = 500;
@@ -331,6 +335,7 @@ interface HostedInitialMailboxImportPlan {
 
 interface HostedInitialMailboxImportResult {
   bootstrapPending: boolean;
+  prefetch: HostedMailboxPrefixPrefetch | null;
   result: HostedMailboxImportCheckpointResult;
 }
 
@@ -423,6 +428,13 @@ async function importHostedInitialMailboxForWorkspaceRunner(input: {
   const plan = resolveHostedInitialMailboxImportPlan({
     vaultRoot: input.runnerInput.vaultRoot,
   });
+  const prefetch = plan.bootstrapRequired
+    ? null
+    : await createHostedForegroundMailboxPrefetch({
+        limitPerLane: input.runnerInput.limitPerLane,
+        requestId: input.requestId,
+        runnerInput: input.runnerInput,
+      });
   const result = await importHostedMailboxForWorkspaceRunner({
     checkpointRequestBuilder: input.checkpointRequestBuilder,
     checkpointReason: "import",
@@ -436,6 +448,7 @@ async function importHostedInitialMailboxForWorkspaceRunner(input: {
         }
       : null,
     lanes: plan.lanes,
+    prefetch,
     requestId: input.requestId,
   });
 
@@ -445,8 +458,26 @@ async function importHostedInitialMailboxForWorkspaceRunner(input: {
       result,
       vaultRoot: input.runnerInput.vaultRoot,
     }),
+    prefetch,
     result,
   };
+}
+
+async function createHostedForegroundMailboxPrefetch(input: {
+  limitPerLane: number;
+  requestId: string;
+  runnerInput: HostedWorkspaceRunnerInput;
+}): Promise<HostedMailboxPrefixPrefetch> {
+  const state = await readHostedMailboxImportState({
+    vaultRoot: input.runnerInput.vaultRoot,
+  });
+  return prefetchHostedMailboxPrefix({
+    lanes: HOSTED_FOREGROUND_MAILBOX_PREFETCH_LANES,
+    limitPerLane: input.limitPerLane,
+    mailboxPort: input.runnerInput.platform.mailboxPort,
+    requestId: input.requestId,
+    state,
+  });
 }
 
 function isHostedInitialBootstrapPending(input: {
@@ -1396,6 +1427,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       initialAssistantInputBatch?: HostedWorkspaceRunnerAssistantInputBatch | null;
       initialMailboxImport?: HostedWorkspaceRunnerInput["initialMailboxImport"];
       initialMailboxImportContext?: HostedWorkspaceRunnerMailboxImportContext | null;
+      initialMailboxPrefetch?: HostedMailboxPrefixPrefetch | null;
       requestId: string;
       signal?: AbortSignal;
       workspace: HostedWorkspaceState | null;
@@ -1444,6 +1476,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
                 initialAssistantInputBatch: passInput.initialAssistantInputBatch ?? null,
                 initialMailboxImport: passInput.initialMailboxImport,
                 initialMailboxImportContext: passInput.initialMailboxImportContext ?? null,
+                initialMailboxPrefetch: passInput.initialMailboxPrefetch ?? null,
                 requestId: passInput.requestId,
                 runtimePassDiagnostics: {
                   foreground: passForeground,
@@ -2010,6 +2043,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         initialAssistantInputBatch?: HostedWorkspaceRunnerAssistantInputBatch | null;
         initialMailboxImport?: HostedWorkspaceRunnerInput["initialMailboxImport"];
         initialMailboxImportContext?: HostedWorkspaceRunnerMailboxImportContext | null;
+        initialMailboxPrefetch?: HostedMailboxPrefixPrefetch | null;
         latencySeed?: HostedRuntimeWakeLatencySeed | null;
         preserveDueAssistantWakeOnNoProgress?: boolean;
         requestIdKind: "checkpoint-interrupt" | "checkpoint-wake" | "idle-wake";
@@ -2035,6 +2069,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
             initialMailboxImport: singleWakeInput.initialMailboxImport ?? null,
             initialMailboxImportContext: singleWakeInput.initialMailboxImportContext
               ?? createHostedRuntimeWakeInitialImportContext(singleWakeInput.latencySeed ?? null),
+            initialMailboxPrefetch: singleWakeInput.initialMailboxPrefetch ?? null,
             requestId: `${requestId}:${singleWakeInput.requestIdKind}:${idleWakeOrdinal}`,
             signal: singleWakeInput.signal,
             workspace: passWorkspace,
@@ -2142,6 +2177,18 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         const initialMailboxImportContext = createHostedRuntimeWakeInitialImportContext(
           input.latencySeed,
         );
+        const mailboxImportRequestId =
+          `${requestId}:${input.requestIdKind}-foreground-import:${idleWakeOrdinal + 1}${
+            input.requestIdLane ? `:${input.requestIdLane}` : ""
+          }`;
+        const initialMailboxPrefetch = input.lanes.length === 1
+            && input.lanes[0] === "conversation"
+          ? await createHostedForegroundMailboxPrefetch({
+              limitPerLane: input.limitPerLane ?? mailboxBudget.fetchLimitPerLane,
+              requestId: mailboxImportRequestId,
+              runnerInput: baseRunnerInput,
+            })
+          : null;
         const initialMailboxImport = await importHostedMailboxForWorkspaceRunner({
           checkpointRequestBuilder,
           checkpointReason: "active_turn_input",
@@ -2151,10 +2198,8 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           input: baseRunnerInput,
           lanes: input.lanes,
           limitPerLane: input.limitPerLane ?? mailboxBudget.fetchLimitPerLane,
-          requestId:
-            `${requestId}:${input.requestIdKind}-foreground-import:${idleWakeOrdinal + 1}${
-              input.requestIdLane ? `:${input.requestIdLane}` : ""
-            }`,
+          prefetch: initialMailboxPrefetch,
+          requestId: mailboxImportRequestId,
           signal: input.signal ?? runtimeAbortController.signal,
         });
         if (!shouldContinue() || !input.shouldRun(initialMailboxImport)) {
@@ -2165,6 +2210,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           await runForegroundPass({
             initialMailboxImport,
             initialMailboxImportContext,
+            initialMailboxPrefetch,
             latencySeed: input.latencySeed,
             requestIdKind: input.requestIdKind,
             signal: input.signal,
@@ -2248,6 +2294,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       result = await runForegroundPass({
         initialMailboxImport,
         initialMailboxImportContext,
+        initialMailboxPrefetch: initialMailboxImportResult.prefetch,
         latencySeed: null,
         requestIdKind: "idle-wake",
       });

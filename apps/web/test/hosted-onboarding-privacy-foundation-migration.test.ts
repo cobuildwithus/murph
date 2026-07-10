@@ -532,6 +532,13 @@ describe("hosted Prisma baseline migration", () => {
       ),
       "utf8",
     );
+    const hostedLinqDeliveryRetryAfterMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/20260709120000_hosted_linq_delivery_retry_after_at/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
     const hostedMemberAssistantModelPreferenceMigrationSql = readFileSync(
       new URL(
         "../prisma/migrations/20260709120000_hosted_member_assistant_model_preference/migration.sql",
@@ -624,6 +631,7 @@ describe("hosted Prisma baseline migration", () => {
       "20260707170000_drop_stale_linq_recency_columns",
       "20260707180000_hosted_vault_share_projection_scopes",
       "20260708120000_hosted_member_assistant_preferences",
+      "20260709120000_hosted_linq_delivery_retry_after_at",
       "20260709120000_hosted_member_assistant_model_preference",
       "migration_lock.toml",
     ]);
@@ -788,6 +796,9 @@ describe("hosted Prisma baseline migration", () => {
     );
     expect(staleLinqRecencyDropMigrationSql).toContain(
       'DROP COLUMN IF EXISTS "last_inbound_at"',
+    );
+    expect(hostedLinqDeliveryRetryAfterMigrationSql).toContain(
+      'ADD COLUMN "retry_after_at" TIMESTAMP(3)',
     );
     expect(hostedMemberAssistantModelPreferenceMigrationSql).toContain(
       'ALTER TABLE "hosted_member"',

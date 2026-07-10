@@ -15,6 +15,10 @@ const mocks = vi.hoisted(() => ({
     user: null as unknown,
   },
   submitEnrollmentWithPasskey: vi.fn(),
+  wallets: {
+    ready: false,
+    wallets: [] as unknown[],
+  },
 }));
 
 vi.mock("@privy-io/react-auth", () => ({
@@ -32,6 +36,10 @@ vi.mock("@privy-io/react-auth", () => ({
     ready: mocks.privy.ready,
     user: mocks.privy.user,
   }),
+  useWallets: () => ({
+    ready: mocks.wallets.ready,
+    wallets: mocks.wallets.wallets,
+  }),
 }));
 
 import { usePasskeyWalletMfa } from "@/src/components/sensitive-actions/use-passkey-wallet-mfa";
@@ -40,6 +48,8 @@ beforeEach(() => {
   vi.clearAllMocks();
   mocks.privy.ready = false;
   mocks.privy.user = null;
+  mocks.wallets.ready = false;
+  mocks.wallets.wallets = [];
 });
 
 test("keeps the first approval setup click alive while Privy finishes loading", async () => {
@@ -54,6 +64,8 @@ test("keeps the first approval setup click alive while Privy finishes loading", 
 
   mocks.privy.ready = true;
   mocks.privy.user = configuredPrivyUser();
+  mocks.wallets.ready = true;
+  mocks.wallets.wallets = [connectedPrivyWallet(PRIMARY_ADDRESS)];
   await rendered.rerender(createElement(PasskeySetupHarness));
 
   await act(async () => {
@@ -62,6 +74,60 @@ test("keeps the first approval setup click alive while Privy finishes loading", 
 
   expect(readResult(rendered.container)).toBe(`resolved:${PRIMARY_ADDRESS}`);
   expect(rendered.container.textContent).not.toContain("still loading");
+  expect(mocks.createWallet).not.toHaveBeenCalled();
+  expect(mocks.linkWithPasskey).not.toHaveBeenCalled();
+
+  await rendered.cleanup();
+});
+
+test("waits for the matching connected embedded wallet before resolving the first click", async () => {
+  mocks.privy.ready = true;
+  mocks.privy.user = configuredPrivyUser();
+  mocks.wallets.ready = false;
+  mocks.wallets.wallets = [connectedPrivyWallet(PRIMARY_ADDRESS)];
+  const rendered = await renderClientComponent(createElement(PasskeySetupHarness));
+
+  await act(async () => {
+    rendered.button.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
+  });
+
+  await act(async () => {
+    await delay(75);
+  });
+
+  expect(rendered.button.textContent).toBe("Loading secure approval…");
+  expect(readResult(rendered.container)).toBe("idle");
+
+  mocks.wallets.ready = true;
+  mocks.wallets.wallets = [
+    {
+      address: PRIMARY_ADDRESS,
+      linked: true,
+      walletClientType: "metamask",
+    },
+    {
+      address: PRIMARY_ADDRESS,
+      linked: false,
+      walletClientType: "privy",
+    },
+    connectedPrivyWallet("0x2222222222222222222222222222222222222222"),
+  ];
+  await rendered.rerender(createElement(PasskeySetupHarness));
+
+  await act(async () => {
+    await delay(75);
+  });
+
+  expect(readResult(rendered.container)).toBe("idle");
+
+  mocks.wallets.wallets = [connectedPrivyWallet(PRIMARY_ADDRESS.toUpperCase())];
+  await rendered.rerender(createElement(PasskeySetupHarness));
+
+  await act(async () => {
+    await delay(75);
+  });
+
+  expect(readResult(rendered.container)).toBe(`resolved:${PRIMARY_ADDRESS}`);
   expect(mocks.createWallet).not.toHaveBeenCalled();
   expect(mocks.linkWithPasskey).not.toHaveBeenCalled();
 
@@ -140,6 +206,14 @@ function configuredPrivyUser() {
       },
     ],
     mfaMethods: ["passkey"],
+  };
+}
+
+function connectedPrivyWallet(address: string) {
+  return {
+    address,
+    linked: true,
+    walletClientType: "privy",
   };
 }
 

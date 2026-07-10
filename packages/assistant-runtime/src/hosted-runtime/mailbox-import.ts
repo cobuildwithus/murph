@@ -191,7 +191,7 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
 }): Promise<HostedMailboxImportLoopResult> {
   const now = input.now ?? (() => new Date().toISOString());
   const lanes = input.lanes ?? HOSTED_MAILBOX_LANES;
-  const fetched = await fetchHostedMailboxPrefix({
+  const fetchedResponse = await fetchHostedMailboxPrefix({
     lanes,
     limitPerLane: input.limitPerLane,
     mailboxPort: input.mailboxPort,
@@ -201,8 +201,9 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
   });
   assertHostedMailboxFetchUser({
     expectedUserId: input.expectedUserId,
-    fetched,
+    fetched: fetchedResponse,
   });
+  const fetched = selectHostedMailboxFetchResponseLanes(fetchedResponse, lanes);
   const itemsByLane = groupMailboxItemsByLane(fetched.items);
   const consumedSeqState = readHostedMailboxFetchConsumedSeqState(fetched);
   const consumedSeqByLane = consumedSeqState.seqByLane;
@@ -678,7 +679,8 @@ function canUseHostedMailboxPrefixPrefetch(input: {
     return false;
   }
 
-  if (!sameHostedMailboxLaneSet(prefetch.lanes, input.lanes)) {
+  const prefetchedLanes = new Set(prefetch.lanes);
+  if (!input.lanes.every((lane) => prefetchedLanes.has(lane))) {
     return false;
   }
 
@@ -687,16 +689,27 @@ function canUseHostedMailboxPrefixPrefetch(input: {
   );
 }
 
-function sameHostedMailboxLaneSet(
-  left: readonly HostedMailboxLane[],
-  right: readonly HostedMailboxLane[],
-): boolean {
-  if (left.length !== right.length) {
-    return false;
+function selectHostedMailboxFetchResponseLanes(
+  fetched: HostedMailboxFetchResponse,
+  lanes: readonly HostedMailboxLane[],
+): HostedMailboxFetchResponse {
+  const requestedLanes = new Set(lanes);
+  const selected = {
+    ...fetched,
+    items: fetched.items.filter((item) => requestedLanes.has(item.lane)),
+    maxSeqByLane: fetched.maxSeqByLane.filter((entry) => requestedLanes.has(entry.lane)),
+  };
+
+  if (fetched.consumedSeqByLane === undefined) {
+    return selected;
   }
 
-  const rightSet = new Set(right);
-  return left.every((lane) => rightSet.has(lane));
+  return {
+    ...selected,
+    consumedSeqByLane: fetched.consumedSeqByLane === null
+      ? null
+      : fetched.consumedSeqByLane.filter((entry) => requestedLanes.has(entry.lane)),
+  };
 }
 
 function assertHostedMailboxFetchUser(input: {

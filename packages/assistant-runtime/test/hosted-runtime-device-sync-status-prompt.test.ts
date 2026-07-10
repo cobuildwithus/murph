@@ -26,6 +26,7 @@ function buildSnapshot(
           metadata: {},
           provider: "junction",
           scopes: [],
+          setupPhase: "source_confirmed",
           status: "active",
         },
         credential: {
@@ -63,7 +64,7 @@ function buildSnapshot(
 }
 
 describe("hosted device sync status prompt", () => {
-  it("merges source-scoped snapshots for the same Junction connection", async () => {
+  it("reads bounded credential-free snapshots and renders active and reconnecting sources", async () => {
     const requests: Array<Parameters<HostedRuntimeDeviceSyncPort["fetchSnapshot"]>[0]> = [];
     const baseSnapshot = buildSnapshot();
     const baseConnection = baseSnapshot.connections[0]!;
@@ -91,6 +92,13 @@ describe("hosted device sync status prompt", () => {
       },
       fetchSnapshot: async (request) => {
         requests.push(request);
+
+        if (request?.provider === "oura") {
+          return {
+            ...baseSnapshot,
+            connections: [],
+          };
+        }
 
         return {
           ...baseSnapshot,
@@ -123,15 +131,38 @@ describe("hosted device sync status prompt", () => {
           provider: "junction",
           sourceProviderSlug: "withings",
         },
+        {
+          connectTarget: "oura",
+          connectTargetCommandSafe: true,
+          label: "Oura",
+          provider: "oura",
+        },
       ],
     });
 
-    expect(requests.map((request) => request?.sourceProviderSlug)).toEqual([
-      "whoop_v2",
-      "withings",
+    expect(requests).toEqual([
+      {
+        includeCredentialMaterial: false,
+        limit: 4,
+        signal: null,
+        sourceProviderSlug: "whoop_v2",
+      },
+      {
+        includeCredentialMaterial: false,
+        limit: 4,
+        signal: null,
+        sourceProviderSlug: "withings",
+      },
+      {
+        includeCredentialMaterial: false,
+        limit: 4,
+        provider: "oura",
+        signal: null,
+      },
     ]);
     expect(prompt).toContain("WHOOP currently needs reconnect");
     expect(prompt).toContain("source `whoop_v2`");
+    expect(prompt).toContain("Withings has an active connection");
     expect(prompt).not.toContain("Withings currently needs reconnect");
   });
 
@@ -148,7 +179,7 @@ describe("hosted device sync status prompt", () => {
       snapshot: buildSnapshot(),
     });
 
-    expect(prompt).toContain("Connected wearable sync status for this turn");
+    expect(prompt).toContain("Wearable connection status for this turn");
     expect(prompt).toContain("WHOOP currently needs reconnect");
     expect(prompt).toContain("source `whoop_v2`");
     expect(prompt).toContain("`TOKEN_REFRESH_FAILED`");
@@ -256,6 +287,7 @@ describe("hosted device sync status prompt", () => {
           metadata: {},
           provider: "whoop",
           scopes: [],
+          setupPhase: "source_confirmed",
           status: "reauthorization_required",
         },
         localState: {
@@ -395,20 +427,13 @@ describe("hosted device sync status prompt", () => {
     expect(prompt).not.toContain("WHOOP currently needs reconnect");
   });
 
-  it("does not render when sources are connected", () => {
+  it("renders connected sources without account identifiers or reconnect guidance", () => {
     const prompt = buildHostedDeviceSyncStatusPromptFromSnapshot({
-      reconnectTargets: [
-        {
-          connectTarget: "whoop",
-          label: "WHOOP",
-          provider: "whoop",
-          sourceProviderSlug: "whoop_v2",
-        },
-      ],
+      reconnectTargets: [],
       snapshot: buildSnapshot({
         sources: [
           {
-            displayName: null,
+            displayName: "private-source-display-name",
             firstSeenAt: "2026-06-01T00:00:00.000Z",
             lastErrorCode: null,
             lastErrorMessage: null,
@@ -421,6 +446,217 @@ describe("hosted device sync status prompt", () => {
       }),
     });
 
+    expect(prompt).toContain("WHOOP has an active connection");
+    expect(prompt).toContain("Treat every active or reconnect-required wearable above as already set up");
+    expect(prompt).not.toContain("needs reconnect");
+    expect(prompt).not.toContain("external-account-id");
+    expect(prompt).not.toContain("connection-id");
+    expect(prompt).not.toContain("private-source-display-name");
+    expect(prompt).not.toContain("user-id");
+  });
+
+  it("projects established source-less direct accounts without display metadata", () => {
+    const snapshot = buildSnapshot();
+    const entry = snapshot.connections[0]!;
+    const prompt = buildHostedDeviceSyncStatusPromptFromSnapshot({
+      reconnectTargets: [
+        {
+          connectTarget: "whoop",
+          label: "WHOOP",
+          provider: "whoop",
+        },
+      ],
+      snapshot: {
+        ...snapshot,
+        connections: [
+          {
+            ...entry,
+            connection: {
+              ...entry.connection,
+              displayName: "private-account-display-name",
+              provider: "whoop",
+            },
+            sources: [],
+          },
+        ],
+      },
+    });
+
+    expect(prompt).toContain("WHOOP has an active connection");
+    expect(prompt).not.toContain("private-account-display-name");
+    expect(prompt).not.toContain("external-account-id");
+  });
+
+  it("keeps a source-less Junction account unknown", () => {
+    const prompt = buildHostedDeviceSyncStatusPromptFromSnapshot({
+      reconnectTargets: [],
+      snapshot: buildSnapshot({
+        sources: [],
+      }),
+    });
+
     expect(prompt).toBeNull();
+  });
+
+  it.each(["pending_link", "link_returned", "failed", null] as const)(
+    "does not treat %s setup as an established connection",
+    (setupPhase) => {
+      const snapshot = buildSnapshot();
+      const entry = snapshot.connections[0]!;
+      const prompt = buildHostedDeviceSyncStatusPromptFromSnapshot({
+        reconnectTargets: [],
+        snapshot: {
+          ...snapshot,
+          connections: [
+            {
+              ...entry,
+              connection: {
+                ...entry.connection,
+                setupPhase,
+              },
+              sources: [
+                {
+                  ...entry.sources![0]!,
+                  lastErrorCode: null,
+                  lastErrorMessage: null,
+                  status: "connected",
+                },
+              ],
+            },
+          ],
+        },
+      });
+
+      expect(prompt).toBeNull();
+    },
+  );
+
+  it("does not treat non-connected sources as active without reconnect evidence", () => {
+    const snapshot = buildSnapshot();
+    const entry = snapshot.connections[0]!;
+    const prompt = buildHostedDeviceSyncStatusPromptFromSnapshot({
+      reconnectTargets: [],
+      snapshot: {
+        ...snapshot,
+        connections: [
+          {
+            ...entry,
+            sources: [
+              {
+                ...entry.sources![0]!,
+                lastErrorCode: null,
+                lastErrorMessage: null,
+                status: "unavailable",
+              },
+            ],
+          },
+        ],
+      },
+    });
+
+    expect(prompt).toBeNull();
+  });
+
+  it("does not render reconnect guidance for incomplete setup", () => {
+    const snapshot = buildSnapshot();
+    const entry = snapshot.connections[0]!;
+    const prompt = buildHostedDeviceSyncStatusPromptFromSnapshot({
+      reconnectTargets: [
+        {
+          connectTarget: "whoop",
+          label: "WHOOP",
+          provider: "junction",
+          sourceProviderSlug: "whoop_v2",
+        },
+      ],
+      snapshot: {
+        ...snapshot,
+        connections: [
+          {
+            ...entry,
+            connection: {
+              ...entry.connection,
+              setupPhase: "pending_link",
+            },
+          },
+        ],
+      },
+    });
+
+    expect(prompt).toBeNull();
+  });
+
+  it("returns no context when a bounded snapshot has no matching connections", () => {
+    const prompt = buildHostedDeviceSyncStatusPromptFromSnapshot({
+      reconnectTargets: [],
+      snapshot: {
+        connections: [],
+        generatedAt: "2026-06-29T12:00:00.000Z",
+        userId: "user-id",
+      },
+    });
+
+    expect(prompt).toBeNull();
+  });
+
+  it("does not treat disconnected accounts as active or reconnect-required", () => {
+    const snapshot = buildSnapshot();
+    const entry = snapshot.connections[0]!;
+    const prompt = buildHostedDeviceSyncStatusPromptFromSnapshot({
+      reconnectTargets: [
+        {
+          connectTarget: "whoop",
+          label: "WHOOP",
+          provider: "junction",
+          sourceProviderSlug: "whoop_v2",
+        },
+      ],
+      snapshot: {
+        ...snapshot,
+        connections: [
+          {
+            ...entry,
+            connection: {
+              ...entry.connection,
+              status: "disconnected",
+            },
+          },
+        ],
+      },
+    });
+
+    expect(prompt).toBeNull();
+  });
+
+  it("returns no context when the authoritative snapshot is unavailable", async () => {
+    const deviceSyncPort: HostedRuntimeDeviceSyncPort = {
+      ackDirtyStateProcessed: async () => {
+        throw new Error("not used");
+      },
+      applyUpdates: async () => {
+        throw new Error("not used");
+      },
+      createConnectLink: async () => {
+        throw new Error("not used");
+      },
+      fetchDirtyStates: async () => {
+        throw new Error("not used");
+      },
+      fetchSnapshot: async () => {
+        throw new Error("unavailable");
+      },
+    };
+
+    await expect(buildHostedDeviceSyncStatusPrompt({
+      deviceSyncPort,
+      reconnectTargets: [
+        {
+          connectTarget: "whoop",
+          label: "WHOOP",
+          provider: "junction",
+          sourceProviderSlug: "whoop_v2",
+        },
+      ],
+    })).resolves.toBeNull();
   });
 });

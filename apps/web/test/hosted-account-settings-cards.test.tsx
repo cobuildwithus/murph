@@ -188,7 +188,7 @@ describe("HostedAccountSettingsCards", () => {
     );
 
     expect(markup).toContain("How Murph talks");
-    expect(markup).toContain("Formal, Upbeat");
+    expect(markup).toContain("Formal, Classic Murph");
     expect(markup).toContain("Customize");
   });
 

@@ -6,6 +6,7 @@ import {
   mergeHostedRuntimeLatencyPhaseBreakdownJson,
   readHostedIngressLatencySource,
   type HostedIngressLatencySource,
+  type HostedRuntimeAssistantMilestone,
   type HostedRuntimeLatencyPhaseBreakdown,
   type HostedRuntimeLatencyPhaseBreakdownPhase,
   type HostedRuntimeLatencyTraceMilestone,
@@ -70,6 +71,11 @@ export interface HostedIngressLatencyDashboardSlowRow {
   stagedToProviderStartMs: number | null;
 }
 
+export interface HostedIngressLatencyObservation {
+  observationCount: number;
+  p50Ms: number | null;
+}
+
 export interface HostedIngressLatencyDashboard {
   completedCount: number;
   invalidNegativeLatencyCount: number;
@@ -83,15 +89,17 @@ export interface HostedIngressLatencyDashboard {
   readLimit: number;
   recentInFlightCount: number;
   recentSlowRows: HostedIngressLatencyDashboardSlowRow[];
+  observedMilestoneLatency: {
+    acceptedToTypingRequest: HostedIngressLatencyObservation;
+    codexStartToFirstOutput: HostedIngressLatencyObservation;
+    codexStartToFirstText: HostedIngressLatencyObservation;
+    typingRequestToAccepted: HostedIngressLatencyObservation;
+  };
   source: HostedIngressLatencySource;
   stageLatencyMs: {
     acceptedToStagedP50: number | null;
     acceptedToTemporalSignalP50: number | null;
     stagedToProviderStartP50: number | null;
-  };
-  linqEgressGuardMs: {
-    p50: number | null;
-    p95: number | null;
   };
   stagedButMissingProviderCount: number;
   totalAcceptedCount: number;
@@ -290,6 +298,9 @@ export async function recordHostedIngressProviderStarted(input: {
   if (assistantInputIds.length === 0) {
     return { matchedCount: 0, recorded: false, unmatchedCount: 0 };
   }
+  if (isLegacyLinqEgressGuardOnlyProviderStart(input.phaseBreakdown)) {
+    return { matchedCount: 0, recorded: false, unmatchedCount: 0 };
+  }
 
   const rows = await prisma.hostedIngressLatencyTrace.findMany({
     select: {
@@ -304,22 +315,84 @@ export async function recordHostedIngressProviderStarted(input: {
       userId: input.authenticatedUserId,
     },
   });
-  const matchedRows = rows;
-  const matchedIds = new Set(matchedRows.map((row) => row.assistantInputId).filter(Boolean));
-
-  await Promise.all(matchedRows.map((row) =>
-    updateHostedIngressProviderStartedLocked(prisma, {
+  const rowMatches = await Promise.all(rows.map(async (row) => ({
+    assistantInputId: row.assistantInputId,
+    matched: await updateHostedIngressProviderStartedLocked(prisma, {
       at,
       phaseBreakdown: input.phaseBreakdown,
       providerRequestOrdinal,
       runtimeAttemptId,
       traceId: row.id,
-    })
-  ));
+    }),
+  })));
+  const matchedIds = new Set(rowMatches
+    .filter((row) => row.matched)
+    .map((row) => row.assistantInputId)
+    .filter((id): id is string => Boolean(id)));
 
   return {
-    matchedCount: matchedRows.length,
-    recorded: matchedRows.length > 0,
+    matchedCount: matchedIds.size,
+    recorded: matchedIds.size > 0,
+    unmatchedCount: assistantInputIds.filter((id) => !matchedIds.has(id)).length,
+  };
+}
+
+export async function recordHostedIngressAssistantMilestone(input: {
+  assistantInputIds: readonly string[];
+  at?: Date | string | null;
+  authenticatedUserId: string;
+  milestone: HostedRuntimeAssistantMilestone;
+  prisma?: HostedIngressLatencyPrismaClient;
+  runtimeAttemptId?: string | null;
+  source: HostedIngressLatencySource | string;
+}): Promise<HostedIngressLatencyWriteResult> {
+  const prisma = input.prisma ?? getPrisma();
+  const source = normalizeHostedIngressLatencySource(input.source);
+  const at = normalizeDate(input.at, "Hosted ingress latency assistant milestone at");
+  const assistantInputIds = [
+    ...new Set(input.assistantInputIds.map((id) =>
+      requireSafeLatencyIdentifier(id, "Hosted ingress latency assistantInputId")
+    )),
+  ];
+  const runtimeAttemptId = normalizeNullableLatencyIdentifier(input.runtimeAttemptId);
+
+  if (assistantInputIds.length === 0 || !runtimeAttemptId) {
+    return { matchedCount: 0, recorded: false, unmatchedCount: assistantInputIds.length };
+  }
+
+  const rows = await prisma.hostedIngressLatencyTrace.findMany({
+    select: {
+      assistantInputId: true,
+      id: true,
+    },
+    where: {
+      assistantInputId: {
+        in: assistantInputIds,
+      },
+      source,
+      userId: input.authenticatedUserId,
+    },
+  });
+  const phaseBreakdown = buildHostedRuntimeAssistantMilestonePhaseBreakdown({
+    at,
+    milestone: input.milestone,
+  });
+  const rowMatches = await Promise.all(rows.map(async (row) => ({
+    assistantInputId: row.assistantInputId,
+    matched: await updateHostedIngressAssistantMilestoneLocked(prisma, {
+      phaseBreakdown,
+      runtimeAttemptId,
+      traceId: row.id,
+    }),
+  })));
+  const matchedIds = new Set(rowMatches
+    .filter((row) => row.matched)
+    .map((row) => row.assistantInputId)
+    .filter((id): id is string => Boolean(id)));
+
+  return {
+    matchedCount: matchedIds.size,
+    recorded: matchedIds.size > 0,
     unmatchedCount: assistantInputIds.filter((id) => !matchedIds.has(id)).length,
   };
 }
@@ -400,8 +473,11 @@ export async function readHostedIngressLatencyDashboard(
   const completedDurations: number[] = [];
   const acceptedToSignalDurations: number[] = [];
   const acceptedToStagedDurations: number[] = [];
-  const linqEgressGuardDurations: number[] = [];
   const stagedToProviderDurations: number[] = [];
+  const acceptedToTypingRequestDurations: number[] = [];
+  const typingRequestToAcceptedDurations: number[] = [];
+  const codexStartToFirstOutputDurations: number[] = [];
+  const codexStartToFirstTextDurations: number[] = [];
   const recentSlowRows: HostedIngressLatencyDashboardSlowRow[] = [];
   let invalidNegativeLatencyCount = 0;
   let missingStagedCount = 0;
@@ -414,20 +490,49 @@ export async function readHostedIngressLatencyDashboard(
     const providerStartMs = row.providerStartAt?.getTime() ?? null;
     const stagedAtMs = row.assistantInputStagedAt?.getTime() ?? null;
     const signalAtMs = row.temporalSignalAcceptedAt?.getTime() ?? null;
-    const linqEgressGuardMs = readHostedIngressLatencyPhaseBreakdownNumber(
+    const typingRequestAtMs = readLatencyPhaseEpochMs(
       row.phaseBreakdownJson,
-      "provider",
-      "linqEgressGuardMs",
+      "assistant",
+      "linqTypingRequestStartedAtEpochMs",
     );
-    if (linqEgressGuardMs !== null) {
-      linqEgressGuardDurations.push(linqEgressGuardMs);
-    }
+    const typingAcceptedAtMs = readLatencyPhaseEpochMs(
+      row.phaseBreakdownJson,
+      "assistant",
+      "linqTypingAcceptedAtEpochMs",
+    );
+    const firstCodexOutputAtMs = readLatencyPhaseEpochMs(
+      row.phaseBreakdownJson,
+      "assistant",
+      "firstCodexOutputObservedAtEpochMs",
+    );
+    const firstCodexTextAtMs = readLatencyPhaseEpochMs(
+      row.phaseBreakdownJson,
+      "assistant",
+      "firstCodexTextObservedAtEpochMs",
+    );
     const mature = row.acceptedAt <= inFlightCutoff;
     const missingStaged = stagedAtMs === null;
     const hasNegativeSignal = signalAtMs !== null && signalAtMs < acceptedAtMs;
     const hasNegativeStaged = stagedAtMs !== null && stagedAtMs < acceptedAtMs;
     const hasNegativeProviderWait =
       stagedAtMs !== null && providerStartMs !== null && providerStartMs < stagedAtMs;
+    const hasNegativeObservedMilestone =
+      (typingRequestAtMs !== null && typingRequestAtMs < acceptedAtMs)
+      || (
+        typingRequestAtMs !== null
+        && typingAcceptedAtMs !== null
+        && typingAcceptedAtMs < typingRequestAtMs
+      )
+      || (
+        providerStartMs !== null
+        && firstCodexOutputAtMs !== null
+        && firstCodexOutputAtMs < providerStartMs
+      )
+      || (
+        providerStartMs !== null
+        && firstCodexTextAtMs !== null
+        && firstCodexTextAtMs < providerStartMs
+      );
 
     if (missingStaged && (mature || providerStartMs !== null)) {
       missingStagedCount += 1;
@@ -447,9 +552,33 @@ export async function readHostedIngressLatencyDashboard(
     ) {
       stagedToProviderDurations.push(providerStartMs - stagedAtMs);
     }
+    if (typingRequestAtMs !== null && typingRequestAtMs >= acceptedAtMs) {
+      acceptedToTypingRequestDurations.push(typingRequestAtMs - acceptedAtMs);
+    }
+    if (
+      typingRequestAtMs !== null
+      && typingAcceptedAtMs !== null
+      && typingAcceptedAtMs >= typingRequestAtMs
+    ) {
+      typingRequestToAcceptedDurations.push(typingAcceptedAtMs - typingRequestAtMs);
+    }
+    if (
+      providerStartMs !== null
+      && firstCodexOutputAtMs !== null
+      && firstCodexOutputAtMs >= providerStartMs
+    ) {
+      codexStartToFirstOutputDurations.push(firstCodexOutputAtMs - providerStartMs);
+    }
+    if (
+      providerStartMs !== null
+      && firstCodexTextAtMs !== null
+      && firstCodexTextAtMs >= providerStartMs
+    ) {
+      codexStartToFirstTextDurations.push(firstCodexTextAtMs - providerStartMs);
+    }
 
     if (providerStartMs === null) {
-      if (hasNegativeSignal || hasNegativeStaged) {
+      if (hasNegativeSignal || hasNegativeStaged || hasNegativeObservedMilestone) {
         invalidNegativeLatencyCount += 1;
       }
       if (mature) {
@@ -469,6 +598,7 @@ export async function readHostedIngressLatencyDashboard(
       hasNegativeSignal
       || hasNegativeStaged
       || hasNegativeProviderWait
+      || hasNegativeObservedMilestone
       || hasNegativeTotal
     ) {
       invalidNegativeLatencyCount += 1;
@@ -514,15 +644,17 @@ export async function readHostedIngressLatencyDashboard(
       ...row,
       rowLabel: `slow-${index + 1}`,
     })),
+    observedMilestoneLatency: {
+      acceptedToTypingRequest: latencyObservation(acceptedToTypingRequestDurations),
+      codexStartToFirstOutput: latencyObservation(codexStartToFirstOutputDurations),
+      codexStartToFirstText: latencyObservation(codexStartToFirstTextDurations),
+      typingRequestToAccepted: latencyObservation(typingRequestToAcceptedDurations),
+    },
     source,
     stageLatencyMs: {
       acceptedToStagedP50: percentile(acceptedToStagedDurations, 0.5),
       acceptedToTemporalSignalP50: percentile(acceptedToSignalDurations, 0.5),
       stagedToProviderStartP50: percentile(stagedToProviderDurations, 0.5),
-    },
-    linqEgressGuardMs: {
-      p50: percentile(linqEgressGuardDurations, 0.5),
-      p95: percentile(linqEgressGuardDurations, 0.95),
     },
     stagedButMissingProviderCount,
     totalAcceptedCount: visibleRows.length,
@@ -535,29 +667,28 @@ export async function readHostedIngressLatencyDashboard(
   };
 }
 
-function readHostedIngressLatencyPhaseBreakdownNumber(
-  phaseBreakdownJson: unknown,
-  phase: HostedRuntimeLatencyPhaseBreakdownPhase,
-  leafKey: string,
+function latencyObservation(durations: readonly number[]): HostedIngressLatencyObservation {
+  return {
+    observationCount: durations.length,
+    p50Ms: percentile(durations, 0.5),
+  };
+}
+
+function readLatencyPhaseEpochMs(
+  value: unknown,
+  phase: string,
+  leaf: string,
 ): number | null {
-  if (
-    !phaseBreakdownJson
-    || typeof phaseBreakdownJson !== "object"
-    || Array.isArray(phaseBreakdownJson)
-  ) {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
     return null;
   }
-  const phaseValue = (phaseBreakdownJson as Record<string, unknown>)[phase];
-  if (
-    !phaseValue
-    || typeof phaseValue !== "object"
-    || Array.isArray(phaseValue)
-  ) {
+  const phaseValue = (value as Record<string, unknown>)[phase];
+  if (typeof phaseValue !== "object" || phaseValue === null || Array.isArray(phaseValue)) {
     return null;
   }
-  const value = (phaseValue as Record<string, unknown>)[leafKey];
-  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0
-    ? value
+  const leafValue = (phaseValue as Record<string, unknown>)[leaf];
+  return typeof leafValue === "number" && Number.isSafeInteger(leafValue) && leafValue >= 0
+    ? leafValue
     : null;
 }
 
@@ -883,6 +1014,7 @@ async function updateHostedIngressAssistantInputStagedLocked(
           "restore",
           "boot",
           "wake",
+          "import",
         ]),
         ...(trace.runtimeAttemptId || !input.runtimeAttemptId
           ? {}
@@ -906,11 +1038,18 @@ async function updateHostedIngressProviderStartedLocked(
     runtimeAttemptId: string | null;
     traceId: string;
   },
-): Promise<void> {
-  await prisma.$transaction(async (tx) => {
+): Promise<boolean> {
+  return await prisma.$transaction(async (tx) => {
     const trace = await readHostedIngressLatencyTraceForUpdate(tx, input.traceId);
     if (!trace) {
-      return;
+      return false;
+    }
+    if (
+      trace.runtimeAttemptId
+      && input.runtimeAttemptId
+      && trace.runtimeAttemptId !== input.runtimeAttemptId
+    ) {
+      return false;
     }
 
     const shouldUpdateProviderStart = !trace.providerStartAt || trace.providerStartAt > input.at;
@@ -918,7 +1057,7 @@ async function updateHostedIngressProviderStartedLocked(
     const phaseBreakdownUpdate = readPhaseBreakdownMergeUpdate(
       trace.phaseBreakdownJson,
       input.phaseBreakdown,
-      ["provider"],
+      ["preProvider", "provider"],
     );
 
     if (
@@ -926,7 +1065,7 @@ async function updateHostedIngressProviderStartedLocked(
       && !shouldUpdateRuntimeAttempt
       && Object.keys(phaseBreakdownUpdate).length === 0
     ) {
-      return;
+      return true;
     }
 
     await tx.hostedIngressLatencyTrace.update({
@@ -944,7 +1083,73 @@ async function updateHostedIngressProviderStartedLocked(
         id: trace.id,
       },
     });
+    return true;
   });
+}
+
+async function updateHostedIngressAssistantMilestoneLocked(
+  prisma: HostedIngressLatencyPrismaClient,
+  input: {
+    phaseBreakdown: HostedRuntimeLatencyPhaseBreakdown;
+    runtimeAttemptId: string;
+    traceId: string;
+  },
+): Promise<boolean> {
+  return await prisma.$transaction(async (tx) => {
+    const trace = await readHostedIngressLatencyTraceForUpdate(tx, input.traceId);
+    if (!trace || trace.runtimeAttemptId !== input.runtimeAttemptId) {
+      return false;
+    }
+
+    const phaseBreakdownUpdate = readPhaseBreakdownMergeUpdate(
+      trace.phaseBreakdownJson,
+      input.phaseBreakdown,
+      ["assistant"],
+    );
+    if (Object.keys(phaseBreakdownUpdate).length === 0) {
+      return true;
+    }
+
+    await tx.hostedIngressLatencyTrace.update({
+      data: phaseBreakdownUpdate,
+      where: {
+        id: trace.id,
+      },
+    });
+    return true;
+  });
+}
+
+function buildHostedRuntimeAssistantMilestonePhaseBreakdown(input: {
+  at: Date;
+  milestone: HostedRuntimeAssistantMilestone;
+}): HostedRuntimeLatencyPhaseBreakdown {
+  const atEpochMs = input.at.getTime();
+  switch (input.milestone) {
+    case "linq_typing_request_started":
+      return { schemaVersion: 1, assistant: { linqTypingRequestStartedAtEpochMs: atEpochMs } };
+    case "linq_typing_accepted":
+      return { schemaVersion: 1, assistant: { linqTypingAcceptedAtEpochMs: atEpochMs } };
+    case "first_codex_output_observed":
+      return { schemaVersion: 1, assistant: { firstCodexOutputObservedAtEpochMs: atEpochMs } };
+    case "first_codex_text_observed":
+      return { schemaVersion: 1, assistant: { firstCodexTextObservedAtEpochMs: atEpochMs } };
+  }
+}
+
+function isLegacyLinqEgressGuardOnlyProviderStart(
+  phaseBreakdown: HostedRuntimeLatencyPhaseBreakdown | null | undefined,
+): boolean {
+  // Rolling deploys can still deliver the old post-generation Linq guard
+  // event. Reject that guard-only shape so it cannot masquerade as turn start.
+  const provider = phaseBreakdown?.provider;
+  if (!provider || provider.linqEgressGuardMs === undefined) {
+    return false;
+  }
+
+  return Object.entries(provider).every(
+    ([key, value]) => key === "linqEgressGuardMs" || value === undefined,
+  );
 }
 
 function normalizeDate(value: Date | string | null | undefined, label: string): Date {
