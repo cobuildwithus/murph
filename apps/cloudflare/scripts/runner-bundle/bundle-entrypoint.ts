@@ -33,7 +33,9 @@ export const RUNNER_ENTRYPOINT_BUNDLE_DIRECTORY_NAME = "dist-bundled";
 // surface fails the assembly instead of silently regressing cold start.
 // Latest ratcheted baselines come from reviewed bundle measurements:
 // - 2026-07-09 local macOS after mailbox-lane sequence preference coalescing:
-//   entry container-entrypoint.js 1,374,586B, static boot closure 6,722,281B.
+//   entry container-entrypoint.js 1,374,586B.
+// - 2026-07-10 local macOS after keeping Codex commentary out of member replies:
+//   static boot closure 6,846,543B.
 // The tolerances below cover local emit jitter.
 //
 // The entry chunk gates cold-start parse, so it is ratcheted, not given
@@ -58,10 +60,10 @@ export const RUNNER_ENTRYPOINT_BUNDLE_DIRECTORY_NAME = "dist-bundled";
 // inputs before raising either.
 const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 9_300_000;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 1_374_586;
-const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 6_722_281;
-// Noise band above the baseline before the ratchet trips (~2%): absorbs
-// content-hash and minifier jitter without letting real boot-path weight land
-// silently. Keep it tight; it is a tolerance for noise, not feature headroom.
+const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 6_846_543;
+// Noise bands above the baselines absorb content-hash and minifier jitter
+// without letting real boot-path weight land silently. Keep them tight; they
+// are tolerances for noise, not feature headroom.
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_TOLERANCE_BYTES = 48_000;
 const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_TOLERANCE_BYTES = 96_000;
 // The @murphai package markers are path suffixes, not node_modules-anchored:
