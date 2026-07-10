@@ -119,7 +119,10 @@ const mocks = vi.hoisted(() => {
       remainingUsdMicros: 100_000n,
       spentUsdMicros: 0n,
     })),
-    getHostedLinqChatSummary: vi.fn(async () => ({
+    getHostedLinqChatSummary: vi.fn(async (): Promise<{
+      handles: string[];
+      isGroup: boolean | null;
+    }> => ({
       handles: [],
       isGroup: false,
     })),

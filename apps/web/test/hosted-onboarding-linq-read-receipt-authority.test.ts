@@ -4,6 +4,7 @@ const mocks = vi.hoisted(() => ({
   assertHostedLinqRouteEgressAuthority: vi.fn(),
   deriveHostedOnboardingTimingErrorName: vi.fn(() => "Error"),
   finishHostedOnboardingTiming: vi.fn(),
+  getHostedLinqChatSummary: vi.fn(),
   maybeHandoffHostedExecutionWebhookWake: vi.fn(),
   planHostedOnboardingLinqWebhook: vi.fn(),
   requireHostedLinqMessageReceivedEvent: vi.fn(),
@@ -22,6 +23,10 @@ vi.mock("@/src/lib/hosted-onboarding/linq", () => ({
   resolveHostedLinqRecipientPhoneNumber: mocks.resolveHostedLinqRecipientPhoneNumber,
   sendHostedLinqReadReceipt: mocks.sendHostedLinqReadReceipt,
   verifyAndParseHostedLinqWebhookRequest: mocks.verifyAndParseHostedLinqWebhookRequest,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/linq-client", () => ({
+  getHostedLinqChatSummary: mocks.getHostedLinqChatSummary,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/webhook-provider-linq", () => ({
@@ -72,6 +77,10 @@ import {
 describe("hosted Linq read receipt route authority", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.getHostedLinqChatSummary.mockResolvedValue({
+      handles: [],
+      isGroup: false,
+    });
     mocks.verifyAndParseHostedLinqWebhookRequest.mockReturnValue({
       event_id: "evt_read_receipt_mismatch",
       event_type: "message.received",
