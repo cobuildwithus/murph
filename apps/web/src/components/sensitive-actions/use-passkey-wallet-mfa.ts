@@ -1,11 +1,13 @@
 "use client";
 
 import {
+  type ConnectedWallet,
   type User,
   useCreateWallet,
   useLinkWithPasskey,
   useMfaEnrollment,
   usePrivy,
+  useWallets,
 } from "@privy-io/react-auth";
 import { useEffect, useRef, useState } from "react";
 
@@ -21,17 +23,20 @@ type SetupStep = "load-client" | "create-passkey" | "create-wallet" | "enroll-mf
 
 export function usePasskeyWalletMfa() {
   const { user, ready } = usePrivy();
+  const { wallets, ready: walletsReady } = useWallets();
   const { linkWithPasskey } = useLinkWithPasskey();
   const { createWallet } = useCreateWallet();
   const { initEnrollmentWithPasskey, submitEnrollmentWithPasskey } = useMfaEnrollment();
   const userRef = useRef<User | null>(user);
   const readyRef = useRef(ready);
+  const walletsRef = useRef<ConnectedWallet[]>(wallets);
+  const walletsReadyRef = useRef(walletsReady);
   useEffect(() => {
     userRef.current = user;
-  }, [user]);
-  useEffect(() => {
     readyRef.current = ready;
-  }, [ready]);
+    walletsRef.current = wallets;
+    walletsReadyRef.current = walletsReady;
+  }, [ready, user, wallets, walletsReady]);
 
   const [activeStep, setActiveStep] = useState<SetupStep | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -96,6 +101,17 @@ export function usePasskeyWalletMfa() {
         );
       }
 
+      if (
+        !walletsReadyRef.current
+        || !hasConnectedEmbeddedWallet(walletsRef.current, currentWallet.wallet.address)
+      ) {
+        setActiveStep("load-client");
+        await waitForConnectedWallet(
+          { walletsReadyRef, walletsRef },
+          currentWallet.wallet.address,
+        );
+      }
+
       return currentWallet.wallet;
     } catch (caught) {
       const message = caught instanceof Error ? caught.message : "Secure approval setup failed. Try again.";
@@ -115,6 +131,18 @@ export function usePasskeyWalletMfa() {
     ready,
     walletAddress: walletSelection.status === "ready" ? walletSelection.wallet.address : null,
   };
+}
+
+function hasConnectedEmbeddedWallet(
+  wallets: ConnectedWallet[],
+  address: string,
+): boolean {
+  const normalizedAddress = address.toLowerCase();
+  return wallets.some((wallet) => (
+    wallet.linked
+    && (wallet.walletClientType === "privy" || wallet.walletClientType === "privy-v2")
+    && wallet.address.toLowerCase() === normalizedAddress
+  ));
 }
 
 function stepLabel(step: SetupStep): string {
@@ -164,4 +192,26 @@ async function waitForUserState(
     await new Promise((resolve) => setTimeout(resolve, intervalMs));
   }
   throw new Error(`${label} took too long. Please try again.`);
+}
+
+async function waitForConnectedWallet(
+  state: {
+    walletsReadyRef: { current: boolean };
+    walletsRef: { current: ConnectedWallet[] };
+  },
+  address: string,
+  timeoutMs = 10_000,
+  intervalMs = 50,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (
+      state.walletsReadyRef.current
+      && hasConnectedEmbeddedWallet(state.walletsRef.current, address)
+    ) {
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+  }
+  throw new Error("Secure approval is still loading. Try again in a moment.");
 }
