@@ -5,6 +5,9 @@ import { beforeEach, expect, test, vi } from "vitest";
 import {
   buildHostedExecutionLinqConversationMessageWake,
 } from "@murphai/hosted-execution";
+import type {
+  HostedRuntimeLatencyTraceRequest,
+} from "@murphai/hosted-execution/runtime-control";
 
 const mocks = vi.hoisted(() => ({
   sendEmail: vi.fn(),
@@ -31,6 +34,9 @@ vi.mock("../src/hosted-provider-effects.ts", () => ({
 import {
   createHostedAssistantProgressDeliveryDependencies,
 } from "../src/hosted-runtime/callbacks.ts";
+import {
+  recordHostedAssistantMilestonesBestEffort,
+} from "../src/hosted-runtime/assistant-latency-trace.ts";
 import {
   buildHostedLinqChannelEnv,
   buildHostedTelegramChannelEnv,
@@ -114,6 +120,128 @@ test("hosted Linq typing uses the hosted env after target context validation", a
   assert.deepEqual(mocks.startLinqTypingIndicator.mock.calls[0]?.[1]?.env, linqEnv);
   assert.equal(mocks.startLinqTypingIndicator.mock.calls[0]?.[1]?.maxSessionMs, 5 * 60_000);
   assert.equal(mocks.startLinqTypingIndicator.mock.calls[0]?.[1]?.refreshMs, 45_000);
+});
+
+test("hosted Linq typing records exact request and acceptance milestones without payload data", async () => {
+  const latencyTraceRecord = vi.fn(async (_request: HostedRuntimeLatencyTraceRequest) => ({
+    matchedCount: 1,
+    recorded: true,
+    unmatchedCount: 0,
+  }));
+  mocks.startLinqTypingIndicator.mockResolvedValue({
+    stop: vi.fn(async () => undefined),
+  });
+  const typing = createHostedAssistantChannelTypingDependencies({
+    forwardedEnv: {
+      LINQ_API_TOKEN: "linq-token",
+    },
+    latencyTraceContext: {
+      assistantInputIds: ["input_typing_trace_1"],
+      latencyTracePort: {
+        record: latencyTraceRecord,
+      },
+      runtimeAttemptId: "attempt_typing_trace_1",
+      source: "linq",
+    },
+    linqDeliveryContexts: [
+      {
+        directRecipientPhoneNumber: "+15551234567",
+        fromPhoneNumber: null,
+        replyToMessageId: "msg_typing_trace_1",
+        routeAuthority: buildLinqRouteAuthority("chat_typing_trace_1"),
+        service: null,
+        target: "chat_typing_trace_1",
+        threadIsDirect: null,
+      },
+    ],
+    providerFetch: vi.fn<typeof fetch>(),
+    userEnv: {},
+  });
+
+  const handle = await typing.startLinqTyping?.({
+    target: "chat_typing_trace_1",
+  });
+  await vi.waitFor(() => {
+    expect(latencyTraceRecord).toHaveBeenCalledTimes(2);
+  });
+
+  expect(latencyTraceRecord.mock.calls.map(([request]) => request.event)).toEqual([
+    expect.objectContaining({
+      assistantInputIds: ["input_typing_trace_1"],
+      milestone: "linq_typing_request_started",
+      runtimeAttemptId: "attempt_typing_trace_1",
+      source: "linq",
+      type: "assistant_milestone",
+    }),
+    expect.objectContaining({
+      assistantInputIds: ["input_typing_trace_1"],
+      milestone: "linq_typing_accepted",
+      runtimeAttemptId: "attempt_typing_trace_1",
+      source: "linq",
+      type: "assistant_milestone",
+    }),
+  ]);
+  expect(JSON.stringify(latencyTraceRecord.mock.calls)).not.toContain("+15551234567");
+  expect(JSON.stringify(latencyTraceRecord.mock.calls)).not.toContain("msg_typing_trace_1");
+  await handle?.stop();
+});
+
+test("hosted assistant milestones retry when staging has not claimed the runtime attempt yet", async () => {
+  vi.useFakeTimers();
+  try {
+    const latencyTraceRecord = vi.fn()
+      .mockResolvedValueOnce({
+        matchedCount: 0,
+        recorded: false,
+        unmatchedCount: 1,
+      })
+      .mockResolvedValueOnce({
+        matchedCount: 1,
+        recorded: true,
+        unmatchedCount: 0,
+      });
+    const request = {
+      event: {
+        assistantInputIds: ["input_staging_race_1"],
+        at: "2026-04-26T00:00:01.500Z",
+        milestone: "first_codex_output_observed" as const,
+        runtimeAttemptId: "attempt_staging_race_1",
+        source: "linq" as const,
+        type: "assistant_milestone" as const,
+      },
+    };
+
+    recordHostedAssistantMilestonesBestEffort({
+      context: {
+        assistantInputIds: request.event.assistantInputIds,
+        latencyTracePort: {
+          record: latencyTraceRecord,
+        },
+        runtimeAttemptId: request.event.runtimeAttemptId,
+        source: request.event.source,
+      },
+      milestones: [{
+        at: request.event.at,
+        milestone: request.event.milestone,
+      }],
+    });
+
+    await vi.advanceTimersByTimeAsync(0);
+    expect(latencyTraceRecord).toHaveBeenCalledTimes(1);
+    expect(latencyTraceRecord).toHaveBeenNthCalledWith(1, request);
+
+    await vi.advanceTimersByTimeAsync(249);
+    expect(latencyTraceRecord).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(1);
+    expect(latencyTraceRecord).toHaveBeenCalledTimes(2);
+    expect(latencyTraceRecord).toHaveBeenNthCalledWith(2, request);
+
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(latencyTraceRecord).toHaveBeenCalledTimes(2);
+  } finally {
+    vi.useRealTimers();
+  }
 });
 
 test("hosted Linq typing starts without route authority when the target context matches", async () => {

@@ -9722,38 +9722,6 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     );
   });
 
-  it("passes foreground Linq egress latency trace into hosted delivery dependencies", async () => {
-    const latencyTraceRequests: HostedRuntimeLatencyTraceRequest[] = [];
-    const effect = createDeliveryEffect();
-    mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValueOnce([effect]);
-    mocks.drainHostedPreparedAssistantDeliveries.mockResolvedValueOnce([]);
-
-    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
-      importedCount: 1,
-      runtimeLatencyTraceRequests: latencyTraceRequests,
-    }));
-    await result.afterCheckpoint?.();
-
-    const expectedTrace = expect.objectContaining({
-      assistantInputIds: ["ain_00000000000000000000000000000001"],
-      latencyTracePort: expect.objectContaining({
-        record: expect.any(Function),
-      }),
-      runtimeAttemptId: "attempt_synthetic_phase",
-    });
-    expect(mocks.createHostedAssistantProgressDeliveryDependencies).toHaveBeenCalledWith(
-      expect.objectContaining({
-        linqEgressLatencyTrace: expectedTrace,
-      }),
-    );
-    expect(mocks.drainHostedPreparedAssistantDeliveries).toHaveBeenCalledWith(
-      expect.objectContaining({
-        assistantDeliveryEffects: [effect],
-        linqEgressLatencyTrace: expectedTrace,
-      }),
-    );
-  });
-
   it("passes restored foreground assistant input ids through as fresh ids", async () => {
     const assistantInputIds = [
       "ain_00000000000000000000000000000001",
