@@ -6,6 +6,10 @@ import {
   OG_CONTENT_TYPE,
   OG_SIZE,
 } from "../../_og/og-shared";
+import {
+  MURPH_TAGLINE_LINE_1,
+  MURPH_TAGLINE_LINE_2,
+} from "@/src/lib/site-metadata";
 
 export const alt = "You’re invited to Murph.";
 export const size = OG_SIZE;
@@ -20,7 +24,7 @@ export default async function JoinInviteOGImage() {
         heroDataUri={heroDataUri}
         eyebrow="MURPH"
         headline="You’re invited."
-        subtext="Everyone’s got a health goal. Almost nobody hits it alone."
+        subtext={`${MURPH_TAGLINE_LINE_1} ${MURPH_TAGLINE_LINE_2}`}
       />
     ),
     { ...OG_SIZE, fonts }

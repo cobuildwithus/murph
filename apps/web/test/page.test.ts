@@ -182,12 +182,12 @@ test("HomePage renders the canonical landing page at the root route", async () =
     markup,
     /font-serif text-\[clamp\(2rem,4vw,3\.25rem\)\][^"]* text-black/,
   );
-  assert.match(markup, /<span class="block">Everyone’s got a health goal\.<\/span>/);
-  assert.match(markup, /Almost nobody hits it alone\./);
+  assert.match(markup, /<span class="block">Everyone has a health goal\.<\/span>/);
+  assert.match(markup, /Almost nobody gets there alone\./);
   assert.equal((markup.match(/<h1\b/g) ?? []).length, 1);
   assert.match(
     markup,
-    /<h1 class="sr-only">Everyone’s got a health goal\. Almost nobody hits it alone\.<\/h1>/,
+    /<h1 class="sr-only">Everyone has a health goal\. Almost nobody gets there alone\.<\/h1>/,
   );
   assert.match(
     markup,

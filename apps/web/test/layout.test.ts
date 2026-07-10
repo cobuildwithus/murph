@@ -128,7 +128,7 @@ test("RootLayout provides default title, description, and preview image metadata
   );
   assert.deepEqual(metadata.openGraph?.images, [
     {
-      alt: "Murph — Everyone’s got a health goal. Almost nobody hits it alone.",
+      alt: "Murph — Everyone has a health goal. Almost nobody gets there alone.",
       height: 630,
       type: "image/png",
       url: "/opengraph-image",
@@ -137,7 +137,7 @@ test("RootLayout provides default title, description, and preview image metadata
   ]);
   assert.deepEqual(metadata.twitter?.images, [
     {
-      alt: "Murph — Everyone’s got a health goal. Almost nobody hits it alone.",
+      alt: "Murph — Everyone has a health goal. Almost nobody gets there alone.",
       height: 630,
       type: "image/png",
       url: "/opengraph-image",
