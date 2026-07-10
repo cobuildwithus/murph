@@ -1,6 +1,9 @@
 import {
   parseHostedWorkspaceReadResponse,
 } from "@murphai/hosted-execution/parsers";
+import {
+  HOSTED_ASSISTANT_TERRA_MODEL,
+} from "@murphai/hosted-execution/assistant-model";
 
 import {
   requireHostedCloudflareCallbackRequest,
@@ -9,6 +12,9 @@ import { getPrisma } from "@/src/lib/prisma";
 import {
   readHostedMemberAssistantModelPreference,
 } from "@/src/lib/hosted-onboarding/assistant-model-preference";
+import {
+  formatHostedExecutionSafeLogErrorDetails,
+} from "@/src/lib/hosted-execution/logging";
 import { readHostedWorkspace } from "@/src/lib/hosted-workspace/store";
 import { jsonOk, withJsonError } from "@/src/lib/hosted-onboarding/http";
 
@@ -28,7 +34,18 @@ export const GET = withJsonError(async (request: Request) => {
     readHostedMemberAssistantModelPreference({
       memberId: userId,
       prisma: getPrisma(),
-    }).catch(() => null),
+    }).catch((error: unknown) => {
+      console.warn(
+        "Hosted workspace assistant model preference read failed; using Terra.",
+        {
+          ...formatHostedExecutionSafeLogErrorDetails(error, {
+            code: "HOSTED_WORKSPACE_ASSISTANT_MODEL_PREFERENCE_READ_FAILED",
+          }),
+          fallbackModel: HOSTED_ASSISTANT_TERRA_MODEL,
+        },
+      );
+      return null;
+    }),
   ]);
 
   return jsonOk(parseHostedWorkspaceReadResponse({

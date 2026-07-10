@@ -1682,25 +1682,39 @@ describe("hosted runtime internal web routes", () => {
     mocks.readHostedMemberAssistantModelPreference.mockRejectedValueOnce(
       new Error("optional model preference read unavailable"),
     );
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
 
-    const response = await workspaceRoute.GET(new Request(
-      "https://example.test/api/internal/hosted-workspace",
-    ));
-    const payload = parseHostedWorkspaceReadResponse(await response.json());
+    try {
+      const response = await workspaceRoute.GET(new Request(
+        "https://example.test/api/internal/hosted-workspace",
+      ));
+      const payload = parseHostedWorkspaceReadResponse(await response.json());
 
-    expect(response.status).toBe(200);
-    expect(payload.workspace).toMatchObject({
-      inboxMediaRetentionWakeAt: "2026-04-25T23:59:00.000Z",
-      userId: "member_routes_1",
-      version: "7",
-    });
-    expect(mocks.readHostedWorkspace).toHaveBeenCalledWith({
-      userId: "member_routes_1",
-    });
-    expect(payload.hostedAssistantModelOverride).toBeUndefined();
-    // The route avoids the unrelated core-state admission read. Model
-    // entitlement is isolated behind the optional preference owner above.
-    expect(mocks.readHostedMemberCoreState).not.toHaveBeenCalled();
+      expect(response.status).toBe(200);
+      expect(payload.workspace).toMatchObject({
+        inboxMediaRetentionWakeAt: "2026-04-25T23:59:00.000Z",
+        userId: "member_routes_1",
+        version: "7",
+      });
+      expect(mocks.readHostedWorkspace).toHaveBeenCalledWith({
+        userId: "member_routes_1",
+      });
+      expect(payload.hostedAssistantModelOverride).toBeUndefined();
+      expect(warnSpy).toHaveBeenCalledExactlyOnceWith(
+        "Hosted workspace assistant model preference read failed; using Terra.",
+        {
+          errorCode: "HOSTED_WORKSPACE_ASSISTANT_MODEL_PREFERENCE_READ_FAILED",
+          errorMessage: "optional model preference read unavailable",
+          errorType: "Error",
+          fallbackModel: "gpt-5.6-terra",
+        },
+      );
+      // The route avoids the unrelated core-state admission read. Model
+      // entitlement is isolated behind the optional preference owner above.
+      expect(mocks.readHostedMemberCoreState).not.toHaveBeenCalled();
+    } finally {
+      warnSpy.mockRestore();
+    }
   });
 
   it("reads workspace state for sponsored Family members", async () => {
