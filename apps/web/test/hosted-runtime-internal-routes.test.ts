@@ -18,6 +18,7 @@ const mocks = vi.hoisted(() => ({
   checkpointHostedWorkspace: vi.fn(),
   fetchHostedMailboxItemsAfterLaneCursors: vi.fn(),
   fetchHostedMailboxPayload: vi.fn(),
+  fetchHostedRuntimeMailboxProjection: vi.fn(),
   hostedRuntimeMailboxMemberFindUnique: vi.fn(),
   hostedThreadContainerParticipantFindFirst: vi.fn(),
   getPrisma: vi.fn(),
@@ -31,6 +32,7 @@ const mocks = vi.hoisted(() => ({
   readHostedMemberCoreState: vi.fn(),
   readHostedWorkspace: vi.fn(),
   recordHostedIngressAssistantInputStaged: vi.fn(),
+  recordHostedIngressAssistantMilestone: vi.fn(),
   recordHostedIngressProviderStarted: vi.fn(),
   recordHostedIngressRuntimeMilestone: vi.fn(),
   recordHostedRuntimeLog: vi.fn(),
@@ -47,6 +49,7 @@ vi.mock("@/src/lib/hosted-mailbox/store", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/src/lib/hosted-mailbox/store")>()),
   fetchHostedMailboxItemsAfterLaneCursors: mocks.fetchHostedMailboxItemsAfterLaneCursors,
   fetchHostedMailboxPayload: mocks.fetchHostedMailboxPayload,
+  fetchHostedRuntimeMailboxProjection: mocks.fetchHostedRuntimeMailboxProjection,
   readHostedMailboxConsumedSeqByLane: mocks.readHostedMailboxConsumedSeqByLane,
   readHostedMailboxItemByDedupeKey: mocks.readHostedMailboxItemByDedupeKey,
   readHostedMailboxMaxSeqByLane: mocks.readHostedMailboxMaxSeqByLane,
@@ -82,6 +85,8 @@ vi.mock("@/src/lib/prisma", () => ({
 vi.mock("@/src/lib/hosted-runtime-latency/store", () => ({
   recordHostedIngressAssistantInputStaged:
     mocks.recordHostedIngressAssistantInputStaged,
+  recordHostedIngressAssistantMilestone:
+    mocks.recordHostedIngressAssistantMilestone,
   recordHostedIngressProviderStarted: mocks.recordHostedIngressProviderStarted,
   recordHostedIngressRuntimeMilestone: mocks.recordHostedIngressRuntimeMilestone,
 }));
@@ -159,6 +164,50 @@ describe("hosted runtime internal web routes", () => {
       consumedSeq: "999",
       lane,
     }))));
+    mocks.fetchHostedRuntimeMailboxProjection.mockImplementation(async (input: {
+      cursorMode?: "imported_seq" | null;
+      lanes: readonly { importedSeq: string; lane: "conversation" | "system" }[];
+      limitPerLane: number;
+      now: Date;
+      userId: string;
+    }) => {
+      const requestedLanes = input.lanes.map((entry) => entry.lane);
+      const consumedSeqByLane = await mocks.readHostedMailboxConsumedSeqByLane({
+        lanes: requestedLanes,
+        userId: input.userId,
+      });
+      const consumedEntries: Array<[string, bigint]> = consumedSeqByLane.map(
+        (entry: { consumedSeq: string; lane: string }) => [
+          entry.lane,
+          BigInt(entry.consumedSeq),
+        ],
+      );
+      const consumedByLane = new Map<string, bigint>(consumedEntries);
+      const itemsResult = await mocks.fetchHostedMailboxItemsAfterLaneCursors({
+        lanes: input.lanes.map((entry) => {
+          const importedSeq = BigInt(entry.importedSeq);
+          const consumedSeq = consumedByLane.get(entry.lane) ?? 0n;
+          return {
+            afterSeq: input.cursorMode === "imported_seq" || entry.lane !== "conversation"
+              ? entry.importedSeq
+              : (consumedSeq < importedSeq ? consumedSeq : importedSeq).toString(),
+            lane: entry.lane,
+          };
+        }),
+        limitPerLane: input.limitPerLane,
+        now: input.now,
+        userId: input.userId,
+      });
+      const maxSeqByLane = await mocks.readHostedMailboxMaxSeqByLane({
+        lanes: requestedLanes,
+        userId: input.userId,
+      });
+      return {
+        consumedSeqByLane,
+        items: itemsResult.items,
+        maxSeqByLane,
+      };
+    });
     mocks.readHostedMailboxItemByDedupeKey.mockResolvedValue(null);
     mocks.readHostedMemberCoreState.mockResolvedValue(buildActiveHostedMemberRecord());
     mocks.readAcceptedRuntimeAttemptFailureSignalOwnerLogId.mockResolvedValue(null);
@@ -251,6 +300,23 @@ describe("hosted runtime internal web routes", () => {
 
     expect(response.status).toBe(200);
     expect(mocks.requireHostedCloudflareCallbackRequest).toHaveBeenCalledTimes(1);
+    expect(mocks.fetchHostedRuntimeMailboxProjection).toHaveBeenCalledTimes(1);
+    expect(mocks.fetchHostedRuntimeMailboxProjection).toHaveBeenCalledWith({
+      cursorMode: "imported_seq",
+      lanes: [
+        {
+          importedSeq: "11",
+          lane: "conversation",
+        },
+        {
+          importedSeq: "2",
+          lane: "system",
+        },
+      ],
+      limitPerLane: 10,
+      now: expect.any(Date),
+      userId: "member_routes_1",
+    });
     expect(mocks.fetchHostedMailboxItemsAfterLaneCursors).toHaveBeenCalledWith({
       lanes: [
         {
@@ -769,6 +835,7 @@ describe("hosted runtime internal web routes", () => {
     ));
 
     expect(response.status).toBe(403);
+    expect(mocks.fetchHostedRuntimeMailboxProjection).not.toHaveBeenCalled();
     expect(mocks.fetchHostedMailboxItemsAfterLaneCursors).not.toHaveBeenCalled();
     expect(mocks.readHostedMailboxMaxSeqByLane).not.toHaveBeenCalled();
   });
@@ -799,6 +866,7 @@ describe("hosted runtime internal web routes", () => {
     ));
 
     expect(response.status).toBe(403);
+    expect(mocks.fetchHostedRuntimeMailboxProjection).not.toHaveBeenCalled();
     expect(mocks.fetchHostedMailboxItemsAfterLaneCursors).not.toHaveBeenCalled();
     expect(mocks.readHostedMailboxMaxSeqByLane).not.toHaveBeenCalled();
   });
@@ -2045,6 +2113,11 @@ describe("hosted runtime internal web routes", () => {
       recorded: true,
       unmatchedCount: 0,
     });
+    mocks.recordHostedIngressAssistantMilestone.mockResolvedValue({
+      matchedCount: 2,
+      recorded: true,
+      unmatchedCount: 0,
+    });
     mocks.recordHostedIngressRuntimeMilestone.mockResolvedValue({
       matchedCount: 1,
       recorded: true,
@@ -2117,6 +2190,38 @@ describe("hosted runtime internal web routes", () => {
       source: "linq",
     });
 
+    const assistantMilestoneResponse = await runtimeLatencyRoute.POST(jsonRequest(
+      "/api/internal/hosted-runtime/latency",
+      {
+        event: {
+          assistantInputIds: ["input_1", "input_2"],
+          at: FIXED_NOW,
+          milestone: "first_codex_output_observed",
+          runtimeAttemptId: "attempt_routes_1",
+          source: "linq",
+          type: "assistant_milestone",
+        },
+      },
+      runtimeWriteFenceHeaders(),
+    ));
+
+    expect(assistantMilestoneResponse.status).toBe(200);
+    expect(parseHostedRuntimeLatencyTraceResponse(
+      await assistantMilestoneResponse.json(),
+    )).toEqual({
+      matchedCount: 2,
+      recorded: true,
+      unmatchedCount: 0,
+    });
+    expect(mocks.recordHostedIngressAssistantMilestone).toHaveBeenCalledWith({
+      assistantInputIds: ["input_1", "input_2"],
+      at: FIXED_NOW,
+      authenticatedUserId: "member_routes_1",
+      milestone: "first_codex_output_observed",
+      runtimeAttemptId: "attempt_routes_1",
+      source: "linq",
+    });
+
     const milestoneResponse = await runtimeLatencyRoute.POST(jsonRequest(
       "/api/internal/hosted-runtime/latency",
       {
@@ -2178,6 +2283,7 @@ describe("hosted runtime internal web routes", () => {
 
     expect(unsafeResponse.status).toBe(400);
     expect(mocks.recordHostedIngressAssistantInputStaged).toHaveBeenCalledTimes(1);
+    expect(mocks.recordHostedIngressAssistantMilestone).toHaveBeenCalledTimes(1);
     expect(mocks.recordHostedIngressProviderStarted).toHaveBeenCalledTimes(1);
     expect(mocks.recordHostedIngressRuntimeMilestone).toHaveBeenCalledTimes(1);
   });

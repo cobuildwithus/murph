@@ -8893,6 +8893,10 @@ describe("hosted workspace runtime entrypoint", () => {
 
       assert.deepEqual(fetchRequests.map(readConversationImportedSeq), ["250"]);
       assert.deepEqual(fetchRequests.map((request) => request.limitPerLane), [3]);
+      assert.deepEqual(fetchRequests.map((request) => request.lanes), [[
+        { importedSeq: "0", lane: "system" },
+        { importedSeq: "250", lane: "conversation" },
+      ]]);
       assert.deepEqual(importedSeqs, ["251"]);
       assert.ok(events.includes("import:251"));
       assert.ok(events.includes("snapshot:idle_shutdown:251"));
@@ -16518,14 +16522,13 @@ describe("hosted workspace runtime entrypoint", () => {
       assert.deepEqual(fetchRequests.map((request) => request.lanes), [
         [
           { importedSeq: "3", lane: "conversation" },
-        ],
-        [
           { importedSeq: "0", lane: "system" },
         ],
       ]);
       assert.equal(readConversationImportedSeqs(fetchRequests).length, 1);
       assert.deepEqual(fetchRequests[0]?.lanes, [
         { importedSeq: "3", lane: "conversation" },
+        { importedSeq: "0", lane: "system" },
       ]);
       assert.equal(readConversationImportedSeq(fetchRequests[0]), "3");
       assert.equal((await readHostedMailboxImportState({ vaultRoot })).watermarks.conversation, "4");
@@ -16533,7 +16536,6 @@ describe("hosted workspace runtime entrypoint", () => {
         "workspace.read",
         "mailbox.fetch",
         "sidecar.ready",
-        "mailbox.fetch",
         "snapshot:4",
         "workspace.checkpoint",
       ]);

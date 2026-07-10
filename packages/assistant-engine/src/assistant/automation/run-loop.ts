@@ -20,6 +20,7 @@ import {
   type AssistantOutboxDispatchMode,
 } from '../outbox.js'
 import type { AssistantProviderTraceEvent } from '../provider-traces.js'
+import type { AssistantProviderProgressEvent } from '../provider-progress.js'
 import type { AssistantTurnEnvironment } from '../service-contracts.js'
 import { buildAssistantOutboxSummary } from '../outbox/summary.js'
 import { maybeRunAssistantRuntimeMaintenance } from '../runtime-budgets.js'
@@ -91,6 +92,7 @@ export interface RunAssistantAutomationInput {
   inboxServices?: InboxServices
   maxPerScan?: number
   onEvent?: (event: AssistantRunEvent) => void
+  onProviderEvent?: ((event: AssistantProviderProgressEvent) => void) | null
   onProviderRequestStarted?: AssistantAutoReplyProviderRequestStartHook | null
   onTraceEvent?: (event: AssistantProviderTraceEvent) => void
   onInboxEvent?: (event: InboxRunEvent) => void
@@ -943,6 +945,7 @@ export async function runAssistantAutomationPass(
     inboxServices,
     maxPerScan: input.maxPerScan,
     onEvent: input.onEvent,
+    onProviderEvent: input.onProviderEvent ?? null,
     onProviderRequestStarted: input.onProviderRequestStarted ?? null,
     onTraceEvent: input.onTraceEvent,
     requestId: input.requestId,

@@ -143,7 +143,6 @@ describe("readHostedUserRuntimeWorkflowOptions", () => {
   it("reads shared workflow timing options", () => {
     expect(readHostedUserRuntimeWorkflowOptions({})).toEqual({
       ensureRuntimeProcessingStartToCloseTimeoutMs: 15_000,
-      readRuntimeReconciliationFactsStartToCloseTimeoutMs: 10_000,
     });
   });
 
