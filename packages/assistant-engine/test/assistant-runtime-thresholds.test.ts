@@ -1,4 +1,4 @@
-import { readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -665,6 +665,119 @@ describe('assistant runtime thresholds', () => {
         staleQuarantinePruned: 1,
       },
     })
+  })
+
+  it('stops between maintenance units when foreground work asks the pass to yield', async () => {
+    const paths = createMockAssistantPaths('assistant-runtime-thresholds-maintenance-yield')
+    mockRuntimeBudgetDependencies(paths)
+
+    const runtimeBudgets = await import('../src/assistant/runtime-budgets.ts')
+    const persistence = await import('../src/assistant/store/persistence.js')
+    const outboxStore = await import('../src/assistant/outbox/store.js')
+
+    // First check happens after the runtime lock is acquired, the second
+    // before the first unit; the third (before transcript retention) yields.
+    const shouldYield = vi.fn()
+      .mockReturnValueOnce(false)
+      .mockReturnValueOnce(false)
+      .mockReturnValue(true)
+
+    const yieldedSnapshot = await runtimeBudgets.maybeRunAssistantRuntimeMaintenance({
+      now: new Date('2026-03-12T00:00:00.000Z'),
+      shouldYield,
+      vault: 'ignored-by-mock',
+    })
+
+    expect(persistence.pruneAssistantTranscriptRetention).not.toHaveBeenCalled()
+    expect(outboxStore.pruneAssistantTerminalOutboxIntents).not.toHaveBeenCalled()
+    // A yielded pass is unfinished: the run marker must stay unset so the
+    // next idle pass retries promptly instead of waiting a full interval.
+    expect(yieldedSnapshot.maintenance.lastRunAt).toBeNull()
+    expect(yieldedSnapshot.maintenance.notes).toContain(
+      'Runtime maintenance yielded to foreground work and will finish in a later pass.',
+    )
+
+    const completedSnapshot = await runtimeBudgets.maybeRunAssistantRuntimeMaintenance({
+      now: new Date('2026-03-12T00:01:00.000Z'),
+      shouldYield: () => false,
+      vault: 'ignored-by-mock',
+    })
+
+    expect(persistence.pruneAssistantTranscriptRetention).toHaveBeenCalledOnce()
+    expect(outboxStore.pruneAssistantTerminalOutboxIntents).toHaveBeenCalledOnce()
+    expect(completedSnapshot.maintenance.lastRunAt).toBe('2026-03-12T00:01:00.000Z')
+  })
+
+  it('preserves the previous non-null run marker when a due pass yields mid-run', async () => {
+    const paths = createMockAssistantPaths(
+      'assistant-runtime-thresholds-maintenance-yield-marker',
+    )
+    mockRuntimeBudgetDependencies(paths)
+    tempRoots.push(paths.assistantStateRoot)
+    await mkdir(paths.assistantStateRoot, {
+      recursive: true,
+    })
+    await writeFile(
+      paths.resourceBudgetPath,
+      JSON.stringify({
+        schema: 'murph.assistant-runtime-budget.v1',
+        updatedAt: '2026-03-12T00:00:00.000Z',
+        caches: [],
+        maintenance: {
+          lastRunAt: '2026-03-12T00:00:00.000Z',
+          staleQuarantinePruned: 0,
+          staleLocksCleared: 0,
+          notes: [],
+        },
+      }),
+      'utf8',
+    )
+
+    const runtimeBudgets = await import('../src/assistant/runtime-budgets.ts')
+    const persistence = await import('../src/assistant/store/persistence.js')
+
+    const shouldYield = vi.fn()
+      .mockReturnValueOnce(false)
+      .mockReturnValueOnce(false)
+      .mockReturnValue(true)
+
+    const snapshot = await runtimeBudgets.maybeRunAssistantRuntimeMaintenance({
+      now: new Date('2026-03-12T00:06:00.000Z'),
+      shouldYield,
+      vault: 'ignored-by-mock',
+    })
+
+    expect(persistence.pruneAssistantTranscriptRetention).not.toHaveBeenCalled()
+    // The pass was due (previous completed run six minutes earlier) and
+    // started, then yielded: the previous non-null marker must survive, not
+    // reset to null or advance to now, so retry timing stays anchored to the
+    // last completed run.
+    expect(snapshot.maintenance.lastRunAt).toBe('2026-03-12T00:00:00.000Z')
+    expect(snapshot.maintenance.notes).toContain(
+      'Runtime maintenance yielded to foreground work and will finish in a later pass.',
+    )
+  })
+
+  it('skips the maintenance pass entirely when the automation signal is already aborted', async () => {
+    const paths = createMockAssistantPaths('assistant-runtime-thresholds-maintenance-abort')
+    mockRuntimeBudgetDependencies(paths)
+
+    const runtimeBudgets = await import('../src/assistant/runtime-budgets.ts')
+    const persistence = await import('../src/assistant/store/persistence.js')
+    const shared = await import('../src/assistant/shared.js')
+
+    const abortController = new AbortController()
+    abortController.abort()
+
+    const snapshot = await runtimeBudgets.maybeRunAssistantRuntimeMaintenance({
+      now: new Date('2026-03-12T00:00:00.000Z'),
+      signal: abortController.signal,
+      vault: 'ignored-by-mock',
+    })
+
+    expect(snapshot.maintenance.lastRunAt).toBeNull()
+    expect(persistence.pruneAssistantTranscriptRetention).not.toHaveBeenCalled()
+    expect(shared.writeJsonFileAtomic).not.toHaveBeenCalled()
   })
 
   it('skips quarantine errors when a malformed outbox inventory file disappears mid-race', async () => {
