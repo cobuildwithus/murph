@@ -25,7 +25,10 @@ import type {
   AssistantProviderUsageDraft,
 } from '../assistant/providers/types.js'
 import { normalizeNullableString } from '../assistant/shared.js'
+import { resolveAssistantSkillsRoot } from '../assistant-skill-assets.js'
 import {
+  isVaultReferenceImageRef,
+  normalizeGenerateImageReferenceRef,
   resolveGenerateImageReferences,
   type ResolvedGenerateImageReference,
 } from './image-reference-resolver.js'
@@ -128,7 +131,11 @@ export async function executeGenerateImageTool(input: {
 
   const referenceImageRefs = input.args.referenceImageRefs ?? []
   const vaultRoot = normalizeNullableString(input.vaultRoot)
-  if (referenceImageRefs.length > 0 && !vaultRoot) {
+  if (
+    referenceImageRefs.length > 0 &&
+    !vaultRoot &&
+    hasVaultReferenceImageRef(referenceImageRefs)
+  ) {
     return {
       rpcSuccess: false,
       rpcText: 'image references are unavailable for this turn',
@@ -178,6 +185,7 @@ export async function executeGenerateImageTool(input: {
         ? await resolveGenerateImageReferences({
             materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts ?? null,
             refs: referenceImageRefs,
+            skillsRoot: resolveAssistantSkillsRoot(),
             vaultRoot: vaultRoot ?? '',
           })
         : []
@@ -363,6 +371,16 @@ export async function executeGenerateImageTool(input: {
         : 'image generated but local save failed',
       usageDraft,
     }
+  }
+}
+
+function hasVaultReferenceImageRef(refs: readonly string[]): boolean {
+  try {
+    return refs
+      .map(normalizeGenerateImageReferenceRef)
+      .some(isVaultReferenceImageRef)
+  } catch {
+    return false
   }
 }
 
