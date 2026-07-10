@@ -250,6 +250,33 @@ function buildConnectionCallbackQuery(input: HandleConnectionCallbackInput): URL
   return query;
 }
 
+function prepareConnectionCallback(input: HandleConnectionCallbackInput): {
+  query: URLSearchParams;
+  receivedAt: string;
+  state: string;
+} {
+  const query = buildConnectionCallbackQuery(input);
+  const state =
+    normalizeString(input.state)
+    ?? normalizeString(query.get("murph_state"))
+    ?? normalizeString(query.get("state"));
+
+  if (!state) {
+    throw deviceSyncError({
+      code: "OAUTH_STATE_MISSING",
+      message: "Device connection callback is missing the state parameter.",
+      retryable: false,
+      httpStatus: 400,
+    });
+  }
+
+  return {
+    query,
+    receivedAt: toIsoTimestamp(new Date()),
+    state,
+  };
+}
+
 function buildConnectionStateMetadata(input: {
   providerMetadata: Record<string, unknown> | undefined;
   connectSourceId?: string | null;
@@ -450,6 +477,15 @@ export class DeviceSyncPublicIngress {
     this.logger = input.log ?? console;
   }
 
+  private async runConnectionMutation<Result>(
+    provider: string,
+    operation: () => Promise<Result>,
+  ): Promise<Result> {
+    return this.hooks.runConnectionMutation
+      ? await this.hooks.runConnectionMutation({ provider }, operation)
+      : await operation();
+  }
+
   describeProviders(): PublicProviderDescriptor[] {
     return this.registry.list().map((provider) => this.describeProvider(provider));
   }
@@ -474,8 +510,17 @@ export class DeviceSyncPublicIngress {
   }
 
   async startConnection(input: StartConnectionInput): Promise<BeginConnectionResult> {
-    const now = toIsoTimestamp(new Date());
     const provider = this.requireProvider(input.provider);
+    return await this.runConnectionMutation(provider.provider, () =>
+      this.startConnectionForProvider(provider, input)
+    );
+  }
+
+  private async startConnectionForProvider(
+    provider: DeviceSyncProvider,
+    input: StartConnectionInput,
+  ): Promise<BeginConnectionResult> {
+    const now = toIsoTimestamp(new Date());
     const descriptor = this.describeProvider(provider);
     const returnTo = this.resolveReturnTo(input.returnTo ?? null);
     const state = generateStateCode();
@@ -586,6 +631,18 @@ export class DeviceSyncPublicIngress {
     ownerId: string;
   }): Promise<SdkSignInSessionResult> {
     const provider = this.requireProvider(input.provider);
+    return await this.runConnectionMutation(provider.provider, () =>
+      this.createSdkSignInSessionForProvider(provider, input)
+    );
+  }
+
+  private async createSdkSignInSessionForProvider(
+    provider: DeviceSyncProvider,
+    input: {
+      provider: string;
+      ownerId: string;
+    },
+  ): Promise<SdkSignInSessionResult> {
     const handler = provider.sdkConnectionHandler;
 
     if (!handler) {
@@ -632,6 +689,7 @@ export class DeviceSyncPublicIngress {
         provider: provider.provider,
         externalAccountId: connection.externalAccountId,
         displayName: connection.displayName ?? null,
+        status: "active",
         setupPhase,
         setupExpiresAt: resolveConnectionSetupExpiresAt({
           connection,
@@ -724,22 +782,21 @@ export class DeviceSyncPublicIngress {
 
   async handleConnectionCallback(input: HandleConnectionCallbackInput): Promise<CompleteConnectionResult> {
     const provider = this.requireProvider(input.provider);
-    const now = toIsoTimestamp(new Date());
-    const descriptor = this.describeProvider(provider);
-    const callbackQuery = buildConnectionCallbackQuery(input);
-    const state =
-      normalizeString(input.state)
-      ?? normalizeString(callbackQuery.get("murph_state"))
-      ?? normalizeString(callbackQuery.get("state"));
+    const callback = prepareConnectionCallback(input);
+    return await this.runConnectionMutation(provider.provider, () =>
+      this.handleConnectionCallbackForProvider(provider, input, callback)
+    );
+  }
 
-    if (!state) {
-      throw deviceSyncError({
-        code: "OAUTH_STATE_MISSING",
-        message: "Device connection callback is missing the state parameter.",
-        retryable: false,
-        httpStatus: 400,
-      });
-    }
+  private async handleConnectionCallbackForProvider(
+    provider: DeviceSyncProvider,
+    input: HandleConnectionCallbackInput,
+    callback: ReturnType<typeof prepareConnectionCallback>,
+  ): Promise<CompleteConnectionResult> {
+    const now = callback.receivedAt;
+    const descriptor = this.describeProvider(provider);
+    const callbackQuery = callback.query;
+    const state = callback.state;
 
     const expectedOwnerId = normalizeString(input.expectedOwnerId);
     const stateResult = await this.store.consumeOAuthState(
@@ -907,6 +964,7 @@ export class DeviceSyncPublicIngress {
         provider: provider.provider,
         externalAccountId: connection.externalAccountId,
         displayName: connection.displayName ?? null,
+        status: "active",
         setupPhase,
         setupExpiresAt: resolveConnectionSetupExpiresAt({
           connection,

@@ -280,8 +280,8 @@ describe('monorepo release flow coverage audit', () => {
     expect(existsSync(path.join(repoRoot, 'scripts', 'chatgpt-managed-browser.test.mjs'))).toBe(false)
     expect(existsSync(path.join(repoRoot, 'scripts', 'review-gpt.sh'))).toBe(false)
     expect(existsSync(path.join(repoRoot, 'scripts', 'review-gpt-cli.sh'))).toBe(false)
-    expect(rootPackageJson.devDependencies?.['@cobuild/review-gpt']).toBe('^0.5.100')
-    expect(pnpmWorkspace).toContain('@cobuild/review-gpt@0.5.100')
+    expect(rootPackageJson.devDependencies?.['@cobuild/review-gpt']).toBe('^0.5.102')
+    expect(pnpmWorkspace).toContain('@cobuild/review-gpt@0.5.102')
     expect(pnpmWorkspace.match(/^patchedDependencies:\n((?:  .+\n)+)/mu)?.[1]?.trim()).toBe(
       'incur@0.4.5: patches/incur@0.4.5.patch',
     )
@@ -293,25 +293,29 @@ describe('monorepo release flow coverage audit', () => {
     expect(reviewGptConfig).toContain('app_connector="current"')
     expect(reviewGptConfig).toContain('model="gpt-5.6-sol"')
     expect(reviewGptConfig).toContain('thinking="current"')
-    expect(reviewGptConfig).toContain('snapshot_attachment_name="repo.snapshot.zip"')
-    expect(reviewGptConfig).toContain('repomix_attachment_format="zip"')
+    expect(reviewGptConfig).toContain('codebase.zip')
+    expect(reviewGptConfig).not.toContain('snapshot_attachment_name=')
+    expect(reviewGptConfig).not.toContain('repomix_attachment_format=')
+    expect(reviewGptConfig).not.toContain('repomix_ignore_patterns=')
     const prDeepReviewPrompt = readFileSync(
       path.join(repoRoot, 'scripts', 'chatgpt-review-presets', 'pr-deep-review.md'),
       'utf8',
     )
-    expect(prDeepReviewPrompt).toContain('Use the attached review artifacts to read the repository context.')
-    expect(prDeepReviewPrompt).toContain('Do not review the diff in isolation.')
-    expect(prDeepReviewPrompt).toContain('Do not use app connectors for this preset.')
+    expect(prDeepReviewPrompt).toContain(
+      'Use `codebase.zip` as the sole repository-content source.',
+    )
+    expect(prDeepReviewPrompt).toMatch(/Do not review the diff in\s+isolation\./u)
+    expect(prDeepReviewPrompt).toContain('Do not use app connectors, memory, pasted context')
     expect(prDeepReviewPrompt).toContain('`review-gpt-pr-context/pr.diff`')
     expect(prDeepReviewPrompt).toContain('`review-gpt-pr-context/changed-files.txt`')
-    expect(prDeepReviewPrompt).toContain('if you cannot read `review-gpt-pr-context/pr.diff`')
-    expect(prDeepReviewPrompt).toContain('cannot read the source snapshot / repomix attachments')
-    expect(prDeepReviewPrompt).toContain('do not review from memory, a connector, pasted context, or the PR')
-    expect(prDeepReviewPrompt).toContain('description alone')
+    expect(prDeepReviewPrompt).toContain('If `codebase.zip` is missing, unreadable,')
+    expect(prDeepReviewPrompt).not.toContain('repo.snapshot.zip')
+    expect(prDeepReviewPrompt).not.toContain('repo.repomix.zip')
+    expect(prDeepReviewPrompt.toLowerCase()).not.toContain('repomix')
     expect(prDeepReviewPrompt).not.toContain('app_connector="github"')
     expect(prDeepReviewPrompt).not.toContain('GitHub connector context')
     expect(prDeepReviewPrompt).not.toContain('connected repository, PR diff, or touched files')
-    expect(prDeepReviewPrompt).toContain('start the final message with a single `Checked:` line')
+    expect(prDeepReviewPrompt).toContain('Start with one line identifying the target')
     expect(prDeepReviewPrompt).toContain('`Checked: PR #123 @ abc1234`')
     const prReviewGptLoop = readFileSync(
       path.join(repoRoot, 'agent-docs', 'operations', 'pr-reviewgpt-loop.md'),

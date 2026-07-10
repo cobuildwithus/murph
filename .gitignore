@@ -51,12 +51,14 @@ apps/web/next-env.d.ts
 /skills/
 /skills-lock.json
 *.log
+.research-run-logs/*.pid
 *.tsbuildinfo
 .test-dist/
 .codex-runs/
 .codex-audit/
 .codex-simplify-audit.txt
 .codex-worktrees/
+.worktrees/
 .codex-worker-prompts/
 **/.clawpatch/
 assistant-state/

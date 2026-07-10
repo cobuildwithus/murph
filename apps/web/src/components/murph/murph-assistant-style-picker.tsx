@@ -1,6 +1,6 @@
 "use client";
 
-import { useId, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { CheckIcon, Loader2Icon, MessageCircleIcon, Mic2Icon } from "lucide-react";
 import {
   assistantVoiceOptions,
@@ -48,6 +48,8 @@ export function MurphAssistantStylePicker({
   onSaved,
   onSkip,
   open,
+  savePreference = saveAssistantStylePreference,
+  singleStep = false,
 }: {
   initialStep?: AssistantStyleStep;
   initialTone?: AssistantTonePreference | null;
@@ -57,6 +59,11 @@ export function MurphAssistantStylePicker({
   onSaved?: (preferences: MurphAssistantStylePreferences) => void;
   onSkip?: (step: AssistantStyleStep) => void;
   open: boolean;
+  // The design showcase injects a non-persisting save; everywhere else the
+  // default posts to the settings endpoint.
+  savePreference?: typeof saveAssistantStylePreference;
+  // Settings rows open one step at a time; onboarding keeps the tone → voice chain.
+  singleStep?: boolean;
 }) {
   const isMobile = useIsMobile();
   const groupId = useId();
@@ -74,14 +81,28 @@ export function MurphAssistantStylePicker({
     });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Dismissing the dialog unmounts this component while a save may still be in
+  // flight; a completion arriving after that must not fire callbacks that the
+  // parent would attribute to a newer picker instance.
+  const mountedRef = useRef(false);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   const handleContinue = async () => {
     setSaving(true);
     setError(null);
     try {
-      const saved = await saveAssistantStylePreference(
+      const saved = await savePreference(
         step === "tone" ? { tone: selectedTone } : { voice: selectedVoice },
       );
+      if (!mountedRef.current) {
+        return;
+      }
       setSavedPreferences(saved);
       onSaved?.(saved);
       advanceAfterStep(saved);
@@ -98,8 +119,18 @@ export function MurphAssistantStylePicker({
     advanceAfterStep(savedPreferences);
   };
 
+  // While a save is in flight, Escape/backdrop/swipe dismissal would unmount
+  // the picker and orphan the request's result; keep the picker open until the
+  // save settles so success stays attributable to this instance.
+  const handleOpenChange = (nextOpen: boolean) => {
+    if (!nextOpen && saving) {
+      return;
+    }
+    onOpenChange(nextOpen);
+  };
+
   const advanceAfterStep = (preferences: MurphAssistantStylePreferences) => {
-    if (step === "tone") {
+    if (!singleStep && step === "tone") {
       setStep("voice");
       return;
     }
@@ -123,13 +154,17 @@ export function MurphAssistantStylePicker({
       )}
     </div>
   );
+  // Save captures the selection when clicked; freezing the choosers while the
+  // request is in flight keeps what persists, what is shown, and what the
+  // post-save chat handoff demonstrates identical.
   const chooser = step === "tone" ? (
-    <ToneChooser value={selectedTone} onChange={setSelectedTone} />
+    <ToneChooser value={selectedTone} onChange={setSelectedTone} disabled={saving} />
   ) : (
     <VoiceChooser
       groupId={`murph-voice-${groupId}`}
       value={selectedVoice}
       onChange={setSelectedVoice}
+      disabled={saving}
     />
   );
   const status = error ? (
@@ -146,7 +181,7 @@ export function MurphAssistantStylePicker({
         onClick={handleSkip}
         disabled={saving}
       >
-        Skip
+        {singleStep ? "Cancel" : "Skip"}
       </Button>
       <Button
         type="button"
@@ -155,16 +190,16 @@ export function MurphAssistantStylePicker({
         disabled={saving}
       >
         {saving ? <Loader2Icon data-icon="inline-start" className="animate-spin" /> : null}
-        Continue
+        {singleStep ? "Save" : "Continue"}
       </Button>
     </div>
   );
 
   if (isMobile) {
     return (
-      <Drawer open={open} onOpenChange={onOpenChange}>
-        <DrawerContent className="h-[92dvh] max-h-[92dvh]">
-          <DrawerHeader className="items-start gap-2 text-left">
+      <Drawer open={open} onOpenChange={handleOpenChange}>
+        <DrawerContent className="h-dvh data-[vaul-drawer-direction=bottom]:mt-0 data-[vaul-drawer-direction=bottom]:max-h-dvh data-[vaul-drawer-direction=bottom]:rounded-t-none">
+          <DrawerHeader className="items-start gap-2 pb-3 text-left">
             {icon}
             <DrawerTitle className="font-serif text-2xl/7 font-semibold tracking-normal text-foreground">
               {title}
@@ -173,13 +208,21 @@ export function MurphAssistantStylePicker({
               {description}
             </DrawerDescription>
           </DrawerHeader>
-          <div className="min-h-0 flex-1 overflow-y-auto px-4 py-1">
-            <div className="grid gap-5">
-              {chooser}
-              {status}
-            </div>
+          {/*
+            The voice chooser owns its own scrolling grid; the tone step has no
+            inner scroller, so the body itself must contain overflow on short
+            or text-zoomed viewports.
+          */}
+          <div
+            className={cn(
+              "flex min-h-0 flex-1 flex-col gap-3 px-4",
+              step === "tone" && "overflow-y-auto",
+            )}
+          >
+            {chooser}
+            {status}
           </div>
-          <DrawerFooter className="border-t border-border px-4 pb-6 pt-3">
+          <DrawerFooter className="border-t border-border px-4 pb-[max(env(safe-area-inset-bottom),1.5rem)] pt-3">
             {actions}
           </DrawerFooter>
         </DrawerContent>
@@ -188,10 +231,17 @@ export function MurphAssistantStylePicker({
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent
         showCloseButton={false}
-        className="max-w-lg gap-5 rounded-lg border border-border bg-popover p-5 text-popover-foreground ring-border sm:p-6"
+        className={cn(
+          "max-h-[calc(100dvh-2rem)] gap-5 rounded-lg border border-border bg-popover p-5 text-popover-foreground ring-border sm:p-6",
+          // The voice grid is the dialog's only scroller; the short tone step
+          // scrolls as a whole on very short viewports instead.
+          step === "voice"
+            ? "flex flex-col overflow-hidden sm:max-w-2xl lg:max-w-3xl"
+            : "overflow-y-auto sm:max-w-xl",
+        )}
       >
         <DialogHeader className="gap-2 text-left">
           {icon}
@@ -212,23 +262,25 @@ export function MurphAssistantStylePicker({
 }
 
 function ToneChooser({
+  disabled = false,
   onChange,
   value,
 }: {
+  disabled?: boolean;
   onChange: (value: AssistantTonePreference) => void;
   value: AssistantTonePreference;
 }) {
   const name = useId();
 
   return (
-    <div className="grid gap-2" role="radiogroup" aria-label="Murph tone">
+    <div className="grid gap-2 sm:grid-cols-2" role="radiogroup" aria-label="Murph tone">
       {TONE_OPTIONS.map((option) => {
         const selected = option.id === value;
         return (
           <label
             key={option.id}
             className={cn(
-              "flex cursor-pointer items-center gap-3 rounded-lg border p-3 text-left transition-colors has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring",
+              "flex cursor-pointer flex-col gap-3 rounded-xl border p-4 text-left transition-colors has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring",
               selected
                 ? "border-primary bg-primary/10"
                 : "border-border bg-background hover:border-primary/45",
@@ -237,25 +289,20 @@ function ToneChooser({
             <input
               checked={selected}
               className="sr-only"
+              disabled={disabled}
               name={name}
               onChange={() => onChange(option.id)}
               type="radio"
               value={option.id}
             />
-            <span
-              className={cn(
-                "flex size-6 shrink-0 items-center justify-center rounded-full border",
-                selected
-                  ? "border-primary bg-primary text-primary-foreground"
-                  : "border-border text-transparent",
-              )}
-              aria-hidden="true"
-            >
-              <CheckIcon className="size-3.5" strokeWidth={2.4} />
+            <span className="flex items-center justify-between gap-3">
+              <span className="font-mono text-[10px] uppercase tracking-[0.11em] text-muted-foreground">
+                {option.label}
+              </span>
+              <SelectedCheck selected={selected} />
             </span>
-            <span className="min-w-0 flex-1">
-              <span className="sr-only">{option.label}</span>
-              <ToneSampleBubble text={option.sample} />
+            <span className="text-[0.9375rem] leading-6 text-foreground">
+              {option.sample}
             </span>
           </label>
         );
@@ -264,22 +311,29 @@ function ToneChooser({
   );
 }
 
-// The homepage phone mock has its own bubble, but it hardcodes the marketing
-// palette and a tail SVG sized for that mock. This dialog needs design-system
-// tokens, so the sample bubble stays local and deliberately tail-free.
-function ToneSampleBubble({ text }: { text: string }) {
+function SelectedCheck({ selected }: { selected: boolean }) {
   return (
-    <span className="block w-fit rounded-2xl rounded-bl-sm bg-muted px-3.5 py-2 text-[0.9375rem] leading-6 text-foreground">
-      {text}
+    <span
+      className={cn(
+        "flex size-5 shrink-0 items-center justify-center rounded-full border",
+        selected
+          ? "border-primary bg-primary text-primary-foreground"
+          : "border-border text-transparent",
+      )}
+      aria-hidden="true"
+    >
+      <CheckIcon className="size-3" strokeWidth={2.4} />
     </span>
   );
 }
 
 function VoiceChooser({
+  disabled = false,
   groupId,
   onChange,
   value,
 }: {
+  disabled?: boolean;
   groupId: string;
   onChange: (value: AssistantVoiceOptionId) => void;
   value: AssistantVoiceOptionId;
@@ -293,10 +347,10 @@ function VoiceChooser({
   const selectedOptionVisible = visibleOptions.some((option) => option.id === value);
 
   return (
-    <div className="grid gap-3">
-      <div className="sticky top-0 z-10 grid gap-2 bg-popover pb-1 md:static md:bg-transparent md:pb-0">
+    <div className="flex min-h-0 flex-1 flex-col gap-3">
+      <div className="flex items-center gap-3">
         <div
-          className="grid grid-cols-3 rounded-lg bg-muted p-1"
+          className="grid flex-1 grid-cols-3 rounded-lg bg-muted p-1"
           role="group"
           aria-label="Filter Murph voices"
         >
@@ -320,7 +374,7 @@ function VoiceChooser({
             );
           })}
         </div>
-        <p aria-live="polite" className="text-xs text-muted-foreground">
+        <p aria-live="polite" className="shrink-0 text-xs text-muted-foreground">
           {visibleOptions.length === 1 ? "1 voice" : `${visibleOptions.length} voices`}
         </p>
       </div>
@@ -341,11 +395,11 @@ function VoiceChooser({
         </div>
       ) : null}
       {/*
-        The mobile drawer body is already the scroll container, so constraining
-        this list only on desktop avoids nesting two scrollers around 22 rows.
+        The grid is the single scroll container: it fills the full-height
+        drawer on mobile and is height-capped inside the desktop dialog.
       */}
       <div
-        className="grid gap-2 md:max-h-[min(52vh,34rem)] md:overflow-y-auto md:pr-1"
+        className="grid min-h-0 flex-1 grid-cols-2 content-start gap-2 overflow-y-auto pb-1 md:max-h-[min(56vh,34rem)] md:grid-cols-3 md:pr-1"
         role="radiogroup"
         aria-label="Murph voice"
       >
@@ -354,11 +408,16 @@ function VoiceChooser({
           return (
             <div
               key={option.id}
-              // The row is a click target so the whole card selects the voice;
-              // the player below stops propagation to keep its controls usable.
-              onClick={() => onChange(option.id)}
+              // The card is a click target so the whole surface selects the
+              // voice; the player below stops propagation to keep its
+              // controls usable.
+              onClick={() => {
+                if (!disabled) {
+                  onChange(option.id);
+                }
+              }}
               className={cn(
-                "grid cursor-pointer gap-3 rounded-lg border p-3 transition-colors",
+                "flex cursor-pointer flex-col gap-2 rounded-lg border p-3 transition-colors",
                 selected
                   ? "border-primary bg-primary/10"
                   : "border-border bg-background hover:border-primary/45",
@@ -367,6 +426,7 @@ function VoiceChooser({
               <input
                 checked={selected}
                 className="peer sr-only"
+                disabled={disabled}
                 id={`${name}-${option.id}`}
                 name={name}
                 onChange={() => onChange(option.id)}
@@ -375,27 +435,17 @@ function VoiceChooser({
               />
               <label
                 htmlFor={`${name}-${option.id}`}
-                className="flex min-h-12 w-full cursor-pointer items-center justify-between gap-3 rounded-md text-left peer-focus-visible:ring-2 peer-focus-visible:ring-ring"
+                className="flex min-w-0 flex-1 cursor-pointer items-start justify-between gap-2 rounded-md text-left peer-focus-visible:ring-2 peer-focus-visible:ring-ring"
               >
                 <span className="min-w-0">
-                  <span className="block font-serif text-lg font-semibold tracking-normal text-foreground">
+                  <span className="block font-serif text-base/5 font-semibold tracking-normal text-foreground">
                     {option.label}
                   </span>
-                  <span className="block text-sm leading-5 text-muted-foreground">
+                  <span className="mt-0.5 block text-xs leading-4 text-muted-foreground">
                     {option.description}
                   </span>
                 </span>
-                <span
-                  className={cn(
-                    "flex size-6 shrink-0 items-center justify-center rounded-full border",
-                    selected
-                      ? "border-primary bg-primary text-primary-foreground"
-                      : "border-border text-transparent",
-                  )}
-                  aria-hidden="true"
-                >
-                  <CheckIcon className="size-3.5" strokeWidth={2.4} />
-                </span>
+                <SelectedCheck selected={selected} />
               </label>
               <div
                 onClick={(event) => event.stopPropagation()}
@@ -403,11 +453,11 @@ function VoiceChooser({
               >
                 <VoiceMemoPlayer
                   src={option.previewPath}
-                  bars={24}
+                  bars={12}
                   exclusiveGroupId={groupId}
                   preload="none"
                   unavailableLabel="Pending"
-                  containerClassName="rounded-lg bg-background px-3 py-2 ring-1 ring-border"
+                  containerClassName="rounded-lg bg-background px-2.5 py-1.5 ring-1 ring-border"
                   accentClassName="bg-primary"
                   fillClassName="bg-primary"
                   trackClassName="bg-primary/20"

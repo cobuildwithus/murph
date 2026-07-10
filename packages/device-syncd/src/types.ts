@@ -591,7 +591,15 @@ export interface DeviceSyncPublicIngressUnknownWebhookInput {
   now: string;
 }
 
+export interface DeviceSyncPublicIngressConnectionMutationInput {
+  provider: string;
+}
+
 export interface DeviceSyncPublicIngressHooks {
+  runConnectionMutation?<Result>(
+    input: DeviceSyncPublicIngressConnectionMutationInput,
+    operation: () => Promise<Result>,
+  ): Promise<Result>;
   onConnectionEstablished?(input: DeviceSyncPublicIngressConnectionEstablishedInput): void | Promise<void>;
   onLevelDirtyWebhookAlreadySatisfied?(
     input: DeviceSyncPublicIngressWebhookAlreadySatisfiedInput,
