@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 
 import {
-  CLINICAL_IMPORT_PLAN_MAX_CANDIDATES,
+  CLINICAL_IMPORT_PLAN_MAX_DECISIONS,
   CLINICAL_RAW_MANIFEST_MAX_BYTES,
   CLINICAL_RAW_MANIFEST_MAX_RESOURCES_PER_FILE,
   CLINICAL_RAW_MANIFEST_MAX_TOTAL_RESOURCES,
@@ -12,7 +12,9 @@ import {
   hashClinicalFhirBaseUrl,
   hashClinicalFhirPageUrl,
   hashClinicalFhirPatientId,
-  type ClinicalImportCandidate,
+  type ClinicalImportDecision,
+  type ClinicalImportPlan,
+  type ClinicalImportUpsertPayload,
 } from "@murphai/clinical-records";
 import { importEventBatch, initializeVault } from "@murphai/core";
 import { buildClinicalImportPlan } from "../src/clinical-records/index.ts";
@@ -28,8 +30,30 @@ const OTHER_PATIENT_ID_HASH = hashClinicalFhirPatientId(OTHER_PATIENT_ID);
 const MANIFEST_PATH = "raw/clinical/fhir/clinical-connection-1/retrieval-job-1/manifest.json";
 
 const tempRoots: string[] = [];
-type ClinicalImportCandidateOfKind<K extends ClinicalImportCandidate["kind"]> =
-  Extract<ClinicalImportCandidate, { kind: K }>;
+type ClinicalImportUpsertOfKind<K extends ClinicalImportUpsertPayload["kind"]> =
+  Extract<ClinicalImportUpsertPayload, { kind: K }>;
+type ClinicalImportReviewDecision = Extract<ClinicalImportDecision, { action: "review" }>;
+type ClinicalImportRetractDecision = Extract<ClinicalImportDecision, { action: "retract" }>;
+
+function upserts(plan: ClinicalImportPlan): ClinicalImportUpsertPayload[] {
+  return plan.decisions.flatMap((decision) => decision.action === "upsert" ? [decision.payload] : []);
+}
+
+function reviews(plan: ClinicalImportPlan): ClinicalImportReviewDecision[] {
+  return plan.decisions.filter(
+    (decision): decision is ClinicalImportReviewDecision => decision.action === "review",
+  );
+}
+
+function retractions(plan: ClinicalImportPlan): ClinicalImportRetractDecision[] {
+  return plan.decisions.filter(
+    (decision): decision is ClinicalImportRetractDecision => decision.action === "retract",
+  );
+}
+
+function executableDecisions(plan: ClinicalImportPlan): Array<Record<string, unknown>> {
+  return plan.decisions.flatMap((decision) => decision.action === "review" ? [] : [{ ...decision }]);
+}
 
 afterEach(async () => {
   await Promise.all(tempRoots.splice(0).map((root) => rm(root, { force: true, recursive: true })));
@@ -163,14 +187,14 @@ describe("buildClinicalImportPlan", () => {
 
     const plan = await buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot });
 
-    expect(plan.candidates.map((candidate) => candidate.kind)).toEqual([
-      "vitals",
-      "diagnostic-test",
-      "vitals",
+    expect(upserts(plan).map((candidate) => candidate.kind)).toEqual([
+      "measurement",
+      "test",
+      "measurement",
     ]);
-    expect(plan.candidates.some((candidate) => candidate.kind === "assertion")).toBe(false);
-    expect(plan.unsupported).toHaveLength(2);
-    expect(plan.unsupported).toEqual(
+    expect(upserts(plan).some((candidate) => candidate.kind === "clinical_assertion")).toBe(false);
+    expect(reviews(plan)).toHaveLength(2);
+    expect(reviews(plan)).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           resourceType: "Observation",
@@ -185,38 +209,37 @@ describe("buildClinicalImportPlan", () => {
       ]),
     );
 
-    const bloodPressure = plan.candidates.find(
-      (candidate): candidate is ClinicalImportCandidateOfKind<"vitals"> =>
-        candidate.kind === "vitals" && candidate.resource.resourceId === "bp-panel-1",
+    const bloodPressure = upserts(plan).find(
+      (candidate): candidate is ClinicalImportUpsertOfKind<"measurement"> =>
+        candidate.kind === "measurement" && candidate.externalRef.resourceId === "bp-panel-1",
     );
-    expect(bloodPressure?.resource.facet).toBe("vitals-panel");
-    expect(bloodPressure?.payload.title).toBe("Blood pressure panel");
-    expect(bloodPressure?.payload.measurements).toEqual([
+    expect(bloodPressure?.title).toBe("Blood pressure panel");
+    expect(bloodPressure?.measurements).toEqual([
       { metric: "systolic-blood-pressure", unit: "mmHg", value: 128 },
       { metric: "diastolic-blood-pressure", unit: "mmHg", value: 82 },
     ]);
-    expect(bloodPressure?.payload.externalRef).toEqual({
+    expect(bloodPressure?.externalRef).toEqual({
       system: `epic-fhir-${FHIR_BASE_URL_HASH}-${PATIENT_ID_HASH}`,
       resourceType: "observation",
       resourceId: "bp-panel-1",
       version: "2026-07-01T12:00:00.000Z",
     });
 
-    const bodyWeight = plan.candidates.find(
-      (candidate): candidate is ClinicalImportCandidateOfKind<"vitals"> =>
-        candidate.kind === "vitals" && candidate.resource.facet === "body-weight",
+    const bodyWeight = upserts(plan).find(
+      (candidate): candidate is ClinicalImportUpsertOfKind<"measurement"> =>
+        candidate.kind === "measurement" && candidate.externalRef.resourceId === "weight-1",
     );
-    expect(bodyWeight?.payload.measurements).toEqual([
+    expect(bodyWeight?.measurements).toEqual([
       { metric: "body-weight", unit: "lb", value: 180 },
     ]);
 
-    const glucose = plan.candidates.find(
-      (candidate): candidate is ClinicalImportCandidateOfKind<"diagnostic-test"> =>
-        candidate.kind === "diagnostic-test",
+    const glucose = upserts(plan).find(
+      (candidate): candidate is ClinicalImportUpsertOfKind<"test"> =>
+        candidate.kind === "test",
     );
-    expect(glucose?.payload.testName).toBe("Glucose");
-    expect(glucose?.payload.resultStatus).toBe("normal");
-    expect(glucose?.payload.results).toEqual([
+    expect(glucose?.testName).toBe("Glucose");
+    expect(glucose?.resultStatus).toBe("normal");
+    expect(glucose?.results).toEqual([
       {
         analyte: "Glucose",
         biomarkerSlug: "glucose",
@@ -273,14 +296,14 @@ describe("buildClinicalImportPlan", () => {
     });
 
     const plan = await buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot });
-    const vitals = plan.candidates.filter(
-      (candidate): candidate is ClinicalImportCandidateOfKind<"vitals"> => candidate.kind === "vitals",
+    const vitals = upserts(plan).filter(
+      (candidate): candidate is ClinicalImportUpsertOfKind<"measurement"> => candidate.kind === "measurement",
     );
 
-    expect(plan.unsupported).toEqual([]);
+    expect(reviews(plan)).toEqual([]);
     expect(vitals.map((candidate) => ({
-      measurements: candidate.payload.measurements,
-      resourceId: candidate.resource.resourceId,
+      measurements: candidate.measurements,
+      resourceId: candidate.externalRef.resourceId,
     }))).toEqual([
       {
         measurements: [{ metric: "heart-rate", unit: "bpm", value: 72 }],
@@ -293,8 +316,8 @@ describe("buildClinicalImportPlan", () => {
     ]);
   });
 
-  it("keeps bounded blood pressure panels under the import-plan candidate cap", async () => {
-    const resourceCount = Math.floor(CLINICAL_IMPORT_PLAN_MAX_CANDIDATES / 2) + 1;
+  it("keeps bounded blood pressure panels under the import-plan decision cap", async () => {
+    const resourceCount = Math.floor(CLINICAL_IMPORT_PLAN_MAX_DECISIONS / 2) + 1;
     expect(resourceCount).toBeLessThanOrEqual(CLINICAL_RAW_MANIFEST_MAX_TOTAL_RESOURCES);
 
     const resourceFiles: Array<{ count: number; relativePath: string; resourceType: string }> = [];
@@ -312,13 +335,12 @@ describe("buildClinicalImportPlan", () => {
 
     const plan = await buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot });
 
-    expect(plan.candidates).toHaveLength(resourceCount);
-    expect(plan.unsupported).toEqual([]);
-    const firstCandidate = plan.candidates[0];
-    expect(firstCandidate?.kind).toBe("vitals");
-    if (firstCandidate?.kind === "vitals") {
-      expect(firstCandidate.resource.facet).toBe("vitals-panel");
-      expect(firstCandidate.payload.measurements).toEqual([
+    expect(upserts(plan)).toHaveLength(resourceCount);
+    expect(reviews(plan)).toEqual([]);
+    const firstCandidate = upserts(plan)[0];
+    expect(firstCandidate?.kind).toBe("measurement");
+    if (firstCandidate?.kind === "measurement") {
+      expect(firstCandidate.measurements).toEqual([
         { metric: "systolic-blood-pressure", unit: "mmHg", value: 121 },
         { metric: "diastolic-blood-pressure", unit: "mmHg", value: 81 },
       ]);
@@ -375,8 +397,8 @@ describe("buildClinicalImportPlan", () => {
 
     const plan = await buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot });
 
-    expect(plan.candidates).toEqual([]);
-    expect(plan.unsupported).toEqual([
+    expect(upserts(plan)).toEqual([]);
+    expect(reviews(plan)).toEqual([
       expect.objectContaining({
         resourceId: "bp-ambiguous-top-level",
         reason: "vital code is ambiguous",
@@ -424,8 +446,8 @@ describe("buildClinicalImportPlan", () => {
 
     const plan = await buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot });
 
-    expect(plan.candidates).toEqual([]);
-    expect(plan.unsupported).toEqual([
+    expect(upserts(plan)).toEqual([]);
+    expect(reviews(plan)).toEqual([
       expect.objectContaining({
         resourceId: "mixed-vital-panel",
         reason: "vital component code is not importable",
@@ -463,8 +485,8 @@ describe("buildClinicalImportPlan", () => {
 
     const plan = await buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot });
 
-    expect(plan.candidates).toEqual([]);
-    expect(plan.unsupported).toEqual([
+    expect(upserts(plan)).toEqual([]);
+    expect(reviews(plan)).toEqual([
       expect.objectContaining({
         resourceId: "heart-rate-with-component",
         reason: "vital component code is not importable",
@@ -548,8 +570,8 @@ describe("buildClinicalImportPlan", () => {
 
     const plan = await buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot });
 
-    expect(plan.unsupported).toHaveLength(2);
-    expect(plan.unsupported).toEqual(
+    expect(reviews(plan)).toHaveLength(2);
+    expect(reviews(plan)).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           resourceId: "lab-local-category",
@@ -561,22 +583,22 @@ describe("buildClinicalImportPlan", () => {
         }),
       ]),
     );
-    expect(plan.candidates).toHaveLength(2);
-    expect(plan.candidates.some((candidate) => candidate.resource.resourceId === "lab-local-category")).toBe(false);
-    expect(plan.candidates.some((candidate) => candidate.resource.resourceId === "lab-canonical-short-code"))
+    expect(upserts(plan)).toHaveLength(2);
+    expect(upserts(plan).some((candidate) => candidate.externalRef.resourceId === "lab-local-category")).toBe(false);
+    expect(upserts(plan).some((candidate) => candidate.externalRef.resourceId === "lab-canonical-short-code"))
       .toBe(false);
 
-    const observation = plan.candidates.find(
-      (candidate): candidate is ClinicalImportCandidateOfKind<"diagnostic-test"> =>
-        candidate.kind === "diagnostic-test" && candidate.resource.resourceId === "lab-local-interpretation",
+    const observation = upserts(plan).find(
+      (candidate): candidate is ClinicalImportUpsertOfKind<"test"> =>
+        candidate.kind === "test" && candidate.externalRef.resourceId === "lab-local-interpretation",
     );
-    expect(observation?.payload.resultStatus).toBe("unknown");
+    expect(observation?.resultStatus).toBe("unknown");
 
-    const report = plan.candidates.find(
-      (candidate): candidate is ClinicalImportCandidateOfKind<"diagnostic-test"> =>
-        candidate.kind === "diagnostic-test" && candidate.resource.resourceId === "report-local-conclusion-code",
+    const report = upserts(plan).find(
+      (candidate): candidate is ClinicalImportUpsertOfKind<"test"> =>
+        candidate.kind === "test" && candidate.externalRef.resourceId === "report-local-conclusion-code",
     );
-    expect(report?.payload.resultStatus).toBe("unknown");
+    expect(report?.resultStatus).toBe("unknown");
   });
 
   it("preserves lab display units when quantity codes are local", async () => {
@@ -620,11 +642,11 @@ describe("buildClinicalImportPlan", () => {
 
     const plan = await buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot });
 
-    const glucose = plan.candidates.find(
-      (candidate): candidate is ClinicalImportCandidateOfKind<"diagnostic-test"> =>
-        candidate.kind === "diagnostic-test",
+    const glucose = upserts(plan).find(
+      (candidate): candidate is ClinicalImportUpsertOfKind<"test"> =>
+        candidate.kind === "test",
     );
-    expect(glucose?.payload.results).toEqual([
+    expect(glucose?.results).toEqual([
       {
         analyte: "Glucose",
         biomarkerSlug: "glucose",
@@ -705,21 +727,21 @@ describe("buildClinicalImportPlan", () => {
 
     const plan = await buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot });
 
-    expect(plan.candidates.map((candidate) => candidate.kind)).toEqual(["clinical-note", "assertion"]);
-    expect(plan.unsupported).toEqual([]);
+    expect(upserts(plan).map((candidate) => candidate.kind)).toEqual(["note", "clinical_assertion"]);
+    expect(reviews(plan)).toEqual([]);
 
-    const note = plan.candidates.find(
-      (candidate): candidate is ClinicalImportCandidateOfKind<"clinical-note"> =>
-        candidate.kind === "clinical-note",
+    const note = upserts(plan).find(
+      (candidate): candidate is ClinicalImportUpsertOfKind<"note"> =>
+        candidate.kind === "note",
     );
-    expect(note?.payload.title).toBe("Discharge instructions");
-    expect(note?.payload.note).toBe("Follow up in two weeks.");
+    expect(note?.title).toBe("Discharge instructions");
+    expect(note?.note).toBe("Follow up in two weeks.");
 
-    const assertion = plan.candidates.find(
-      (candidate): candidate is ClinicalImportCandidateOfKind<"assertion"> =>
-        candidate.kind === "assertion",
+    const assertion = upserts(plan).find(
+      (candidate): candidate is ClinicalImportUpsertOfKind<"clinical_assertion"> =>
+        candidate.kind === "clinical_assertion",
     );
-    expect(assertion?.payload).toEqual(
+    expect(assertion).toEqual(
       expect.objectContaining({
         occurredAt: "2026-07-02T09:00:00.000Z",
         assertion: "no_known_allergies",
@@ -799,8 +821,8 @@ describe("buildClinicalImportPlan", () => {
 
       const plan = await buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot });
 
-      expect(plan.candidates).toEqual([]);
-      expect(plan.unsupported).toEqual([
+      expect(upserts(plan)).toEqual([]);
+      expect(reviews(plan)).toEqual([
         expect.objectContaining({
           resourceType: "AllergyIntolerance",
           resourceId,
@@ -808,6 +830,77 @@ describe("buildClinicalImportPlan", () => {
         }),
       ]);
     }
+  });
+
+  it("rejects non-canonical manifest error resource families", async () => {
+    const vaultRoot = await writeClinicalFixture({
+      manifest: {
+        errors: [{
+          resourceType: "condition",
+          code: "fetch-failed",
+          message: "Condition retrieval failed",
+        }],
+      },
+      resourceFiles: [
+        {
+          resourceType: "AllergyIntolerance",
+          relativePath: "AllergyIntolerance/page-1.json",
+          count: 1,
+        },
+        {
+          resourceType: "Condition",
+          relativePath: "Condition/page-1.json",
+          count: 0,
+        },
+      ],
+      pages: {
+        "AllergyIntolerance/page-1.json": [noKnownAllergyResource("allergy-malformed-error-family")],
+        "Condition/page-1.json": [],
+      },
+    });
+
+    await expect(buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot })).rejects.toThrow();
+  });
+
+  it("treats every returned Condition as conflicting no-known allergy evidence", async () => {
+    const vaultRoot = await writeClinicalFixture({
+      resourceFiles: [
+        {
+          resourceType: "AllergyIntolerance",
+          relativePath: "AllergyIntolerance/page-1.json",
+          count: 1,
+        },
+        {
+          resourceType: "Condition",
+          relativePath: "Condition/page-1.json",
+          count: 1,
+        },
+      ],
+      pages: {
+        "AllergyIntolerance/page-1.json": [noKnownAllergyResource("allergy-code-only-condition")],
+        "Condition/page-1.json": [{
+          resourceType: "Condition",
+          id: "code-only-allergy-condition",
+          code: {
+            coding: [{ system: "http://snomed.info/sct", code: "703902000" }],
+          },
+        }],
+      },
+    });
+
+    const plan = await buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot });
+
+    expect(upserts(plan)).toEqual([]);
+    expect(reviews(plan)).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        resourceId: "allergy-code-only-condition",
+        reason: "no-known allergy conflicts with allergy evidence",
+      }),
+      expect.objectContaining({
+        resourceId: "code-only-allergy-condition",
+        reason: "condition registry import not implemented",
+      }),
+    ]));
   });
 
   it("requires explicit completed families and read scopes before emitting no-known allergies", async () => {
@@ -845,8 +938,8 @@ describe("buildClinicalImportPlan", () => {
       });
 
       const plan = await buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot });
-      expect(plan.candidates).toEqual([]);
-      expect(plan.unsupported).toEqual([
+      expect(upserts(plan)).toEqual([]);
+      expect(reviews(plan)).toEqual([
         expect.objectContaining({
           resourceId,
           reason: "no-known allergy conflicts with incomplete allergy evidence",
@@ -903,16 +996,16 @@ describe("buildClinicalImportPlan", () => {
 
       const plan = await buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot });
       if (complete) {
-        expect(plan.candidates).toEqual([
+        expect(upserts(plan)).toEqual([
           expect.objectContaining({
-            kind: "assertion",
-            resource: expect.objectContaining({ resourceId }),
+            kind: "clinical_assertion",
+            externalRef: expect.objectContaining({ resourceId }),
           }),
         ]);
-        expect(plan.unsupported).toEqual([]);
+        expect(reviews(plan)).toEqual([]);
       } else {
-        expect(plan.candidates).toEqual([]);
-        expect(plan.unsupported).toEqual([
+        expect(upserts(plan)).toEqual([]);
+        expect(reviews(plan)).toEqual([
           expect.objectContaining({
             resourceId,
             reason: "no-known allergy conflicts with incomplete allergy evidence",
@@ -1015,9 +1108,9 @@ describe("buildClinicalImportPlan", () => {
 
     const plan = await buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot });
 
-    expect(plan.candidates).toEqual([]);
-    expect(plan.unsupported).toHaveLength(4);
-    expect(plan.unsupported).toEqual(
+    expect(upserts(plan)).toEqual([]);
+    expect(reviews(plan)).toHaveLength(4);
+    expect(reviews(plan)).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           resourceId: "document-malformed-base64",
@@ -1077,13 +1170,13 @@ describe("buildClinicalImportPlan", () => {
 
     const plan = await buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot });
 
-    expect(plan.unsupported).toEqual([]);
-    expect(plan.candidates).toHaveLength(1);
-    const panel = plan.candidates.find(
-      (candidate): candidate is ClinicalImportCandidateOfKind<"diagnostic-test"> =>
-        candidate.kind === "diagnostic-test",
+    expect(reviews(plan)).toEqual([]);
+    expect(upserts(plan)).toHaveLength(1);
+    const panel = upserts(plan).find(
+      (candidate): candidate is ClinicalImportUpsertOfKind<"test"> =>
+        candidate.kind === "test",
     );
-    expect(panel?.payload.results).toEqual([
+    expect(panel?.results).toEqual([
       {
         analyte: "Glucose",
         biomarkerSlug: "glucose",
@@ -1145,17 +1238,17 @@ describe("buildClinicalImportPlan", () => {
 
     const plan = await buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot });
 
-    expect(plan.unsupported).toEqual([]);
-    expect(plan.candidates.map((candidate) => ({
+    expect(reviews(plan)).toEqual([]);
+    expect(upserts(plan).map((candidate) => ({
       kind: candidate.kind,
-      resourceId: candidate.resource.resourceId,
+      resourceId: candidate.externalRef.resourceId,
     }))).toEqual([
-      { kind: "diagnostic-test", resourceId: "laboratory-weight-scalar" },
-      { kind: "diagnostic-test", resourceId: "laboratory-weight-component" },
+      { kind: "test", resourceId: "laboratory-weight-scalar" },
+      { kind: "test", resourceId: "laboratory-weight-component" },
     ]);
   });
 
-  it("fails closed instead of emitting lossy clinical candidates", async () => {
+  it("fails closed instead of emitting lossy clinical upserts", async () => {
     const vaultRoot = await writeClinicalFixture({
       resourceFiles: [
         {
@@ -1242,8 +1335,8 @@ describe("buildClinicalImportPlan", () => {
 
     const plan = await buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot });
 
-    expect(plan.candidates).toEqual([]);
-    expect(plan.unsupported).toEqual(
+    expect(upserts(plan)).toEqual([]);
+    expect(reviews(plan)).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           resourceId: "lab-partial-panel",
@@ -1255,11 +1348,11 @@ describe("buildClinicalImportPlan", () => {
         }),
         expect.objectContaining({
           resourceId: "report-oversize-summary",
-          reason: "diagnostic report summary exceeds candidate bounds",
+          reason: "diagnostic report summary exceeds supported import bounds",
         }),
         expect.objectContaining({
           resourceId: "document-oversize-note",
-          reason: "document reference text exceeds candidate bounds",
+          reason: "document reference text exceeds supported import bounds",
         }),
       ]),
     );
@@ -1294,14 +1387,14 @@ describe("buildClinicalImportPlan", () => {
 
     const plan = await buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot });
 
-    expect(plan.unsupported).toEqual([]);
-    expect(plan.candidates).toHaveLength(1);
-    const candidate = plan.candidates.find(
-      (item): item is ClinicalImportCandidateOfKind<"diagnostic-test"> =>
-        item.kind === "diagnostic-test",
+    expect(reviews(plan)).toEqual([]);
+    expect(upserts(plan)).toHaveLength(1);
+    const candidate = upserts(plan).find(
+      (item): item is ClinicalImportUpsertOfKind<"test"> =>
+        item.kind === "test",
     );
-    expect(candidate?.payload.testName).toBe("血糖");
-    expect(candidate?.payload.results).toEqual([
+    expect(candidate?.testName).toBe("血糖");
+    expect(candidate?.results).toEqual([
       {
         analyte: "血糖",
         unit: "mg/dL",
@@ -1310,7 +1403,7 @@ describe("buildClinicalImportPlan", () => {
     ]);
   });
 
-  it("keeps candidate-bound FHIR labels resource-local", async () => {
+  it("keeps upsert-bound FHIR labels resource-local", async () => {
     const vaultRoot = await writeClinicalFixture({
       resourceFiles: [
         {
@@ -1402,24 +1495,24 @@ describe("buildClinicalImportPlan", () => {
 
     const plan = await buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot });
 
-    expect(plan.candidates).toHaveLength(2);
-    expect(plan.candidates.map((candidate) => candidate.resource.resourceId).sort()).toEqual([
+    expect(upserts(plan)).toHaveLength(2);
+    expect(upserts(plan).map((candidate) => candidate.externalRef.resourceId).sort()).toEqual([
       "max-report-label",
       "valid-lab-neighbor",
     ]);
-    expect(plan.unsupported).toEqual(
+    expect(reviews(plan)).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           resourceId: "oversize-lab-label",
-          reason: "clinical candidate exceeds supported import bounds",
+          reason: "clinical upsert exceeds supported import bounds",
         }),
         expect.objectContaining({
           resourceId: "oversize-report-label",
-          reason: "clinical candidate exceeds supported import bounds",
+          reason: "clinical upsert exceeds supported import bounds",
         }),
         expect.objectContaining({
           resourceId: "oversize-document-title",
-          reason: "clinical candidate exceeds supported import bounds",
+          reason: "clinical upsert exceeds supported import bounds",
         }),
       ]),
     );
@@ -1495,8 +1588,8 @@ describe("buildClinicalImportPlan", () => {
 
     const plan = await buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot });
 
-    expect(plan.candidates).toEqual([]);
-    expect(plan.unsupported).toEqual(
+    expect(upserts(plan)).toEqual([]);
+    expect(reviews(plan)).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           resourceId: "conflicting-lab-interpretation",
@@ -1729,13 +1822,13 @@ describe("buildClinicalImportPlan", () => {
 
     const plan = await buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot });
 
-    expect(plan.candidates).toHaveLength(5);
-    const abnormalPanel = plan.candidates.find(
-      (candidate): candidate is ClinicalImportCandidateOfKind<"diagnostic-test"> =>
-        candidate.kind === "diagnostic-test" && candidate.resource.resourceId === "component-abnormal-panel",
+    expect(upserts(plan)).toHaveLength(5);
+    const abnormalPanel = upserts(plan).find(
+      (candidate): candidate is ClinicalImportUpsertOfKind<"test"> =>
+        candidate.kind === "test" && candidate.externalRef.resourceId === "component-abnormal-panel",
     );
-    expect(abnormalPanel?.payload.resultStatus).toBe("abnormal");
-    expect(abnormalPanel?.payload.results).toEqual([
+    expect(abnormalPanel?.resultStatus).toBe("abnormal");
+    expect(abnormalPanel?.results).toEqual([
       {
         analyte: "Glucose",
         biomarkerSlug: "glucose",
@@ -1746,12 +1839,12 @@ describe("buildClinicalImportPlan", () => {
       },
     ]);
 
-    const normalPanel = plan.candidates.find(
-      (candidate): candidate is ClinicalImportCandidateOfKind<"diagnostic-test"> =>
-        candidate.kind === "diagnostic-test" && candidate.resource.resourceId === "component-normal-panel",
+    const normalPanel = upserts(plan).find(
+      (candidate): candidate is ClinicalImportUpsertOfKind<"test"> =>
+        candidate.kind === "test" && candidate.externalRef.resourceId === "component-normal-panel",
     );
-    expect(normalPanel?.payload.resultStatus).toBe("normal");
-    expect(normalPanel?.payload.results).toEqual([
+    expect(normalPanel?.resultStatus).toBe("normal");
+    expect(normalPanel?.results).toEqual([
       {
         analyte: "Albumin",
         biomarkerSlug: "albumin",
@@ -1761,34 +1854,12 @@ describe("buildClinicalImportPlan", () => {
       },
     ]);
 
-    const partialNormalPanel = plan.candidates.find(
-      (candidate): candidate is ClinicalImportCandidateOfKind<"diagnostic-test"> =>
-        candidate.kind === "diagnostic-test" && candidate.resource.resourceId === "component-partial-normal-panel",
+    const partialNormalPanel = upserts(plan).find(
+      (candidate): candidate is ClinicalImportUpsertOfKind<"test"> =>
+        candidate.kind === "test" && candidate.externalRef.resourceId === "component-partial-normal-panel",
     );
-    expect(partialNormalPanel?.payload.resultStatus).toBe("unknown");
-    expect(partialNormalPanel?.payload.results).toEqual([
-      {
-        analyte: "Albumin",
-        biomarkerSlug: "albumin",
-        flag: "normal",
-        slug: "albumin",
-        textValue: "Normal",
-      },
-      {
-        analyte: "Potassium",
-        biomarkerSlug: "potassium",
-        slug: "potassium",
-        unit: "mmol/L",
-        value: 4.2,
-      },
-    ]);
-
-    const parentNormalPartialPanel = plan.candidates.find(
-      (candidate): candidate is ClinicalImportCandidateOfKind<"diagnostic-test"> =>
-        candidate.kind === "diagnostic-test" && candidate.resource.resourceId === "parent-normal-partial-component-panel",
-    );
-    expect(parentNormalPartialPanel?.payload.resultStatus).toBe("unknown");
-    expect(parentNormalPartialPanel?.payload.results).toEqual([
+    expect(partialNormalPanel?.resultStatus).toBe("unknown");
+    expect(partialNormalPanel?.results).toEqual([
       {
         analyte: "Albumin",
         biomarkerSlug: "albumin",
@@ -1805,12 +1876,34 @@ describe("buildClinicalImportPlan", () => {
       },
     ]);
 
-    const parentValueNormalComponentPanel = plan.candidates.find(
-      (candidate): candidate is ClinicalImportCandidateOfKind<"diagnostic-test"> =>
-        candidate.kind === "diagnostic-test" && candidate.resource.resourceId === "parent-value-normal-component-panel",
+    const parentNormalPartialPanel = upserts(plan).find(
+      (candidate): candidate is ClinicalImportUpsertOfKind<"test"> =>
+        candidate.kind === "test" && candidate.externalRef.resourceId === "parent-normal-partial-component-panel",
     );
-    expect(parentValueNormalComponentPanel?.payload.resultStatus).toBe("unknown");
-    expect(parentValueNormalComponentPanel?.payload.results).toEqual([
+    expect(parentNormalPartialPanel?.resultStatus).toBe("unknown");
+    expect(parentNormalPartialPanel?.results).toEqual([
+      {
+        analyte: "Albumin",
+        biomarkerSlug: "albumin",
+        flag: "normal",
+        slug: "albumin",
+        textValue: "Normal",
+      },
+      {
+        analyte: "Potassium",
+        biomarkerSlug: "potassium",
+        slug: "potassium",
+        unit: "mmol/L",
+        value: 4.2,
+      },
+    ]);
+
+    const parentValueNormalComponentPanel = upserts(plan).find(
+      (candidate): candidate is ClinicalImportUpsertOfKind<"test"> =>
+        candidate.kind === "test" && candidate.externalRef.resourceId === "parent-value-normal-component-panel",
+    );
+    expect(parentValueNormalComponentPanel?.resultStatus).toBe("unknown");
+    expect(parentValueNormalComponentPanel?.results).toEqual([
       {
         analyte: "Metabolic panel",
         biomarkerSlug: "metabolic-panel",
@@ -1827,7 +1920,7 @@ describe("buildClinicalImportPlan", () => {
       },
     ]);
 
-    expect(plan.unsupported).toEqual(
+    expect(reviews(plan)).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           resourceId: "component-conflicting-panel",
@@ -1841,7 +1934,7 @@ describe("buildClinicalImportPlan", () => {
     );
   });
 
-  it("leaves unsafe clinical resources unsupported instead of importing live candidates", async () => {
+  it("routes unsafe clinical resources to review or authoritative retraction", async () => {
     const vaultRoot = await writeClinicalFixture({
       resourceFiles: [
           {
@@ -2190,17 +2283,13 @@ describe("buildClinicalImportPlan", () => {
 
     const plan = await buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot });
 
-    expect(plan.candidates).toEqual([]);
-    expect(plan.unsupported).toHaveLength(23);
-    expect(plan.unsupported).toEqual(
+    expect(upserts(plan)).toEqual([]);
+    expect(reviews(plan)).toHaveLength(18);
+    expect(reviews(plan)).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           resourceId: "bp-missing-time",
           reason: "clinical timestamp is missing",
-        }),
-        expect.objectContaining({
-          resourceId: "bp-entered-in-error",
-          reason: "observation status is not importable",
         }),
         expect.objectContaining({
           resourceId: "bp-comparator",
@@ -2239,10 +2328,6 @@ describe("buildClinicalImportPlan", () => {
           reason: "clinical timestamp is missing",
         }),
         expect.objectContaining({
-          resourceId: "report-cancelled",
-          reason: "diagnostic report status is not importable",
-        }),
-        expect.objectContaining({
           resourceId: "report-no-summary",
           reason: "diagnostic report summary is not available in raw FHIR page",
         }),
@@ -2251,20 +2336,8 @@ describe("buildClinicalImportPlan", () => {
           reason: "clinical timestamp is missing",
         }),
         expect.objectContaining({
-          resourceId: "document-entered-in-error",
-          reason: "document reference status is not importable",
-        }),
-        expect.objectContaining({
-          resourceId: "document-docstatus-entered-in-error",
-          reason: "document reference docStatus is not importable",
-        }),
-        expect.objectContaining({
           resourceId: "document-metadata-only",
           reason: "document reference text is not available in raw FHIR page",
-        }),
-        expect.objectContaining({
-          resourceId: "allergy-refuted",
-          reason: "allergy status is not importable",
         }),
         expect.objectContaining({
           resourceId: "allergy-missing-status",
@@ -2288,6 +2361,28 @@ describe("buildClinicalImportPlan", () => {
         }),
       ]),
     );
+    expect(retractions(plan)).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        externalRef: expect.objectContaining({ resourceId: "bp-entered-in-error" }),
+        reason: "FHIR Observation status entered-in-error",
+      }),
+      expect.objectContaining({
+        externalRef: expect.objectContaining({ resourceId: "report-cancelled" }),
+        reason: "FHIR DiagnosticReport status cancelled",
+      }),
+      expect.objectContaining({
+        externalRef: expect.objectContaining({ resourceId: "document-entered-in-error" }),
+        reason: "FHIR DocumentReference status entered-in-error",
+      }),
+      expect.objectContaining({
+        externalRef: expect.objectContaining({ resourceId: "document-docstatus-entered-in-error" }),
+        reason: "FHIR DocumentReference docStatus entered-in-error",
+      }),
+      expect.objectContaining({
+        externalRef: expect.objectContaining({ resourceId: "allergy-refuted" }),
+        reason: "FHIR no-known-allergy assertion was refuted or entered in error",
+      }),
+    ]));
   });
 
   it("rejects raw FHIR pages whose manifest integrity does not match", async () => {
@@ -2561,8 +2656,8 @@ describe("buildClinicalImportPlan", () => {
 
     const plan = await buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot });
 
-    expect(plan.candidates).toEqual([]);
-    expect(plan.unsupported).toEqual(
+    expect(upserts(plan)).toEqual([]);
+    expect(reviews(plan)).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           resourceId: "allergy-negative-conflict",
@@ -2626,8 +2721,8 @@ describe("buildClinicalImportPlan", () => {
 
     const plan = await buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot });
 
-    expect(plan.candidates).toEqual([]);
-    expect(plan.unsupported).toEqual(expect.arrayContaining([
+    expect(upserts(plan)).toEqual([]);
+    expect(reviews(plan)).toEqual(expect.arrayContaining([
       expect.objectContaining({
         resourceId: "allergy-negative-with-condition-conflict",
         reason: "no-known allergy conflicts with allergy evidence",
@@ -2717,16 +2812,12 @@ describe("buildClinicalImportPlan", () => {
 
     const plan = await buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot });
 
-    expect(plan.candidates).toEqual([]);
-    expect(plan.unsupported).toEqual(
+    expect(upserts(plan)).toEqual([]);
+    expect(reviews(plan)).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           resourceId: "allergy-negative-safe",
           reason: "no-known allergy conflicts with allergy evidence",
-        }),
-        expect.objectContaining({
-          resourceId: "allergy-negative-refuted",
-          reason: "allergy status is not importable",
         }),
         expect.objectContaining({
           resourceId: "allergy-negative-with-reaction",
@@ -2734,6 +2825,46 @@ describe("buildClinicalImportPlan", () => {
         }),
       ]),
     );
+    expect(retractions(plan)).toEqual([
+      expect.objectContaining({
+        externalRef: expect.objectContaining({ resourceId: "allergy-negative-refuted" }),
+        reason: "FHIR no-known-allergy assertion was refuted or entered in error",
+      }),
+    ]);
+  });
+
+  it("keeps no-known-allergy assertedOn on the source-local date", async () => {
+    const vaultRoot = await writeClinicalFixture({
+      resourceFiles: [
+        {
+          resourceType: "AllergyIntolerance",
+          relativePath: "AllergyIntolerance/page-1.json",
+          count: 1,
+        },
+        {
+          resourceType: "Condition",
+          relativePath: "Condition/page-1.json",
+          count: 0,
+        },
+      ],
+      pages: {
+        "AllergyIntolerance/page-1.json": [{
+          ...noKnownAllergyResource("allergy-negative-offset-boundary"),
+          recordedDate: "2026-07-01T23:30:00-05:00",
+        }],
+        "Condition/page-1.json": [],
+      },
+    });
+
+    const plan = await buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot });
+    const assertion = upserts(plan)[0];
+
+    expect(reviews(plan)).toEqual([]);
+    expect(assertion).toEqual(expect.objectContaining({
+      kind: "clinical_assertion",
+      occurredAt: "2026-07-02T04:30:00.000Z",
+      assertedOn: "2026-07-01",
+    }));
   });
 
   it("does not import global no-known allergies with contradictory or mixed allergy statuses", async () => {
@@ -2843,8 +2974,8 @@ describe("buildClinicalImportPlan", () => {
 
     const plan = await buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot });
 
-    expect(plan.candidates).toEqual([]);
-    expect(plan.unsupported).toEqual(
+    expect(upserts(plan)).toEqual([]);
+    expect(reviews(plan)).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           resourceId: "allergy-negative-confirmed-refuted",
@@ -2964,9 +3095,9 @@ describe("buildClinicalImportPlan", () => {
 
     const matchingRoot = await writeAbsoluteReferenceFixture(`${FHIR_BASE_URL}/Patient/patient-1`);
     const matchingPlan = await buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot: matchingRoot });
-    expect(matchingPlan.candidates).toEqual([
+    expect(upserts(matchingPlan)).toEqual([
       expect.objectContaining({
-        resource: expect.objectContaining({ resourceId: "absolute-reference-heart-rate" }),
+        externalRef: expect.objectContaining({ resourceId: "absolute-reference-heart-rate" }),
       }),
     ]);
 
@@ -3138,7 +3269,7 @@ describe("buildClinicalImportPlan", () => {
     });
 
     const plan = await buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot });
-    expect(plan.candidates.map((candidate) => candidate.resource.resourceId)).toEqual([
+    expect(upserts(plan).map((candidate) => candidate.externalRef.resourceId)).toEqual([
       "page-1-heart-rate",
       "page-2-heart-rate",
     ]);
@@ -3247,8 +3378,8 @@ describe("buildClinicalImportPlan", () => {
 
     const scalarPlan = await buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot: scalarRoot });
     const panelPlan = await buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot: panelRoot });
-    const scalarRef = scalarPlan.candidates[0]?.payload.externalRef;
-    const panelRef = panelPlan.candidates[0]?.payload.externalRef;
+    const scalarRef = upserts(scalarPlan)[0]?.externalRef;
+    const panelRef = upserts(panelPlan)[0]?.externalRef;
 
     expect(scalarRef).toEqual(expect.objectContaining({
       resourceType: "observation",
@@ -3270,22 +3401,22 @@ describe("buildClinicalImportPlan", () => {
       createdAt: "2026-07-01T12:00:00.000Z",
       timezone: "America/New_York",
     });
-    const scalarCandidate = scalarPlan.candidates[0];
-    const panelCandidate = panelPlan.candidates[0];
+    const scalarCandidate = upserts(scalarPlan)[0];
+    const panelCandidate = upserts(panelPlan)[0];
     expect(scalarCandidate).toBeDefined();
     expect(panelCandidate).toBeDefined();
     if (!scalarCandidate || !panelCandidate) {
-      throw new Error("Expected scalar and panel clinical import candidates.");
+      throw new Error("Expected scalar and panel clinical import upserts.");
     }
 
     const firstImport = await importEventBatch({
       vaultRoot: canonicalVaultRoot,
-      payloads: [{ kind: "measurement", ...scalarCandidate.payload }],
+      decisions: [{ action: "upsert", payload: scalarCandidate }],
       apply: true,
     });
     const secondImport = await importEventBatch({
       vaultRoot: canonicalVaultRoot,
-      payloads: [{ kind: "measurement", ...panelCandidate.payload }],
+      decisions: [{ action: "upsert", payload: panelCandidate }],
       apply: true,
     });
     expect(firstImport.createdCount).toBe(1);
@@ -3294,7 +3425,306 @@ describe("buildClinicalImportPlan", () => {
     expect(secondImport.eventIds).toEqual(firstImport.eventIds);
   });
 
-  it("leaves resources without provider freshness unsupported", async () => {
+  it("replays the same source revision across retrieval-local evidence paths", async () => {
+    const resourceFiles = [{
+      resourceType: "Observation",
+      relativePath: "Observation/page-1.json",
+      count: 1,
+    }];
+    const resource = {
+      ...heartRateResource("retrieval-replay-heart-rate"),
+      meta: { lastUpdated: "2026-07-01T12:01:00.123456Z" },
+    };
+    const firstRoot = await writeClinicalFixture({
+      resourceFiles,
+      pages: { "Observation/page-1.json": resource },
+    });
+    const secondManifestPath =
+      "raw/clinical/fhir/clinical-connection-1/retrieval-job-2/manifest.json";
+    const secondRoot = await writeClinicalFixture({
+      manifest: { retrievalJobId: "retrieval-job-2" },
+      manifestPath: secondManifestPath,
+      resourceFiles,
+      pages: { "Observation/page-1.json": resource },
+    });
+    const firstPlan = await buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot: firstRoot });
+    const secondPlan = await buildClinicalImportPlan({
+      manifestPath: secondManifestPath,
+      vaultRoot: secondRoot,
+    });
+    expect(upserts(firstPlan)[0]?.evidence).not.toEqual(upserts(secondPlan)[0]?.evidence);
+
+    const canonicalVaultRoot = await initializeCanonicalFixtureVault();
+    const firstImport = await importEventBatch({
+      vaultRoot: canonicalVaultRoot,
+      decisions: executableDecisions(firstPlan),
+      apply: true,
+    });
+    const replay = await importEventBatch({
+      vaultRoot: canonicalVaultRoot,
+      decisions: executableDecisions(secondPlan),
+      apply: true,
+    });
+
+    expect(firstImport.createdCount).toBe(1);
+    expect(replay.applied).toBe(false);
+    expect(replay.skippedExistingCount).toBe(1);
+    expect(replay.supersededCount).toBe(0);
+  });
+
+  it("tombstones and replaces an Observation whose canonical kind changes", async () => {
+    const resourceFiles = [{
+      resourceType: "Observation",
+      relativePath: "Observation/page-1.json",
+      count: 1,
+    }];
+    const measurementRoot = await writeClinicalFixture({
+      resourceFiles,
+      pages: {
+        "Observation/page-1.json": {
+          ...heartRateResource("kind-changing-observation"),
+          meta: { lastUpdated: "2026-07-01T12:01:00.000Z" },
+        },
+      },
+    });
+    const testRoot = await writeClinicalFixture({
+      resourceFiles,
+      pages: {
+        "Observation/page-1.json": {
+          ...heartRateResource("kind-changing-observation"),
+          meta: { lastUpdated: "2026-07-01T12:02:00.000Z" },
+          category: [{
+            coding: [{
+              system: "http://terminology.hl7.org/CodeSystem/observation-category",
+              code: "laboratory",
+            }],
+          }],
+          code: { text: "Heart rate laboratory result" },
+        },
+      },
+    });
+    const measurementPlan = await buildClinicalImportPlan({
+      manifestPath: MANIFEST_PATH,
+      vaultRoot: measurementRoot,
+    });
+    const testPlan = await buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot: testRoot });
+    expect(upserts(measurementPlan)[0]?.kind).toBe("measurement");
+    expect(upserts(testPlan)[0]?.kind).toBe("test");
+
+    const canonicalVaultRoot = await initializeCanonicalFixtureVault();
+    const firstImport = await importEventBatch({
+      vaultRoot: canonicalVaultRoot,
+      decisions: executableDecisions(measurementPlan),
+      apply: true,
+    });
+    const replacement = await importEventBatch({
+      vaultRoot: canonicalVaultRoot,
+      decisions: executableDecisions(testPlan),
+      apply: true,
+    });
+
+    expect(firstImport.createdCount).toBe(1);
+    expect(replacement.createdCount).toBe(1);
+    expect(replacement.supersededCount).toBe(1);
+    expect(replacement.eventIds).not.toEqual(firstImport.eventIds);
+  });
+
+  it("applies and idempotently replays an authoritative FHIR retraction", async () => {
+    const resourceFiles = [{
+      resourceType: "Observation",
+      relativePath: "Observation/page-1.json",
+      count: 1,
+    }];
+    const liveRoot = await writeClinicalFixture({
+      resourceFiles,
+      pages: {
+        "Observation/page-1.json": {
+          ...heartRateResource("retracted-heart-rate"),
+          meta: { lastUpdated: "2026-07-01T12:01:00.000Z" },
+        },
+      },
+    });
+    const retractedRoot = await writeClinicalFixture({
+      resourceFiles,
+      pages: {
+        "Observation/page-1.json": {
+          ...heartRateResource("retracted-heart-rate"),
+          meta: { lastUpdated: "2026-07-01T12:02:00.000Z" },
+          status: "entered-in-error",
+        },
+      },
+    });
+    const livePlan = await buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot: liveRoot });
+    const retractedPlan = await buildClinicalImportPlan({
+      manifestPath: MANIFEST_PATH,
+      vaultRoot: retractedRoot,
+    });
+    expect(retractions(retractedPlan)).toHaveLength(1);
+
+    const canonicalVaultRoot = await initializeCanonicalFixtureVault();
+    const firstImport = await importEventBatch({
+      vaultRoot: canonicalVaultRoot,
+      decisions: executableDecisions(livePlan),
+      apply: true,
+    });
+    const retraction = await importEventBatch({
+      vaultRoot: canonicalVaultRoot,
+      decisions: executableDecisions(retractedPlan),
+      apply: true,
+    });
+    const replay = await importEventBatch({
+      vaultRoot: canonicalVaultRoot,
+      decisions: executableDecisions(retractedPlan),
+      apply: true,
+    });
+
+    expect(firstImport.createdCount).toBe(1);
+    expect(retraction.retractedCount).toBe(1);
+    expect(retraction.retractedEventIds).toEqual(firstImport.eventIds);
+    expect(replay.applied).toBe(false);
+    expect(replay.skippedExistingCount).toBe(1);
+    expect(replay.retractedCount).toBe(0);
+  });
+
+  it("normalizes high-precision FHIR event times while preserving source revision precision", async () => {
+    const vaultRoot = await writeClinicalFixture({
+      resourceFiles: [{
+        resourceType: "Observation",
+        relativePath: "Observation/page-1.json",
+        count: 1,
+      }],
+      pages: {
+        "Observation/page-1.json": {
+          resourceType: "Observation",
+          id: "high-precision-heart-rate",
+          meta: { lastUpdated: "2026-07-01T12:01:00.123456Z" },
+          status: "final",
+          effectiveDateTime: "2026-07-01T12:00:00.654321Z",
+          code: {
+            coding: [{ system: "http://loinc.org", code: "8867-4", display: "Heart rate" }],
+          },
+          valueQuantity: { value: 70, unit: "bpm" },
+        },
+      },
+    });
+
+    const plan = await buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot });
+
+    expect(reviews(plan)).toEqual([]);
+    expect(upserts(plan)).toEqual([
+      expect.objectContaining({
+        kind: "measurement",
+        occurredAt: "2026-07-01T12:00:00.654Z",
+        externalRef: expect.objectContaining({ version: "2026-07-01T12:01:00.123456Z" }),
+      }),
+    ]);
+  });
+
+  it("rejects FHIR modifiers before mapping supported resources", async () => {
+    const rootModifier = {
+      url: "https://ehr.example.test/fhir/StructureDefinition/negated",
+      valueBoolean: true,
+    };
+    const vaultRoot = await writeClinicalFixture({
+      resourceFiles: [{
+        resourceType: "Observation",
+        relativePath: "Observation/page-1.json",
+        count: 5,
+      }],
+      pages: {
+        "Observation/page-1.json": [
+          {
+            ...heartRateResource("implicit-rules-heart-rate"),
+            implicitRules: "https://ehr.example.test/fhir/rules/custom",
+          },
+          {
+            ...heartRateResource("root-modifier-heart-rate"),
+            modifierExtension: [rootModifier],
+          },
+          {
+            ...bloodPressurePanelObservation(9001),
+            id: "component-modifier-blood-pressure",
+            component: bloodPressurePanelObservation(9001).component.map((component, index) =>
+              index === 0 ? { ...component, modifierExtension: [rootModifier] } : component
+            ),
+          },
+          {
+            ...heartRateResource("ordinary-extension-heart-rate"),
+            extension: [{
+              url: "https://ehr.example.test/fhir/StructureDefinition/device-label",
+              valueString: "home cuff",
+            }],
+          },
+          {
+            ...heartRateResource("modified-retraction-heart-rate"),
+            status: "entered-in-error",
+            modifierExtension: [rootModifier],
+          },
+        ],
+      },
+    });
+
+    const plan = await buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot });
+
+    expect(upserts(plan).map((candidate) => candidate.externalRef.resourceId)).toEqual([
+      "ordinary-extension-heart-rate",
+    ]);
+    expect(reviews(plan)).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        resourceId: "implicit-rules-heart-rate",
+        reason: "FHIR modifier semantics are not importable",
+      }),
+      expect.objectContaining({
+        resourceId: "root-modifier-heart-rate",
+        reason: "FHIR modifier semantics are not importable",
+      }),
+      expect.objectContaining({
+        resourceId: "component-modifier-blood-pressure",
+        reason: "FHIR modifier semantics are not importable",
+      }),
+      expect.objectContaining({
+        resourceId: "modified-retraction-heart-rate",
+        reason: "FHIR modifier semantics are not importable",
+      }),
+    ]));
+    expect(retractions(plan)).toEqual([]);
+  });
+
+  it("rejects modifier semantics on Bundle envelopes and entry wrappers", async () => {
+    const modifierExtension = [{
+      url: "https://ehr.example.test/fhir/StructureDefinition/negated",
+      valueBoolean: true,
+    }];
+    const bundles = [
+      {
+        resourceType: "Bundle",
+        modifierExtension,
+        entry: [{ resource: heartRateResource("bundle-modifier-heart-rate") }],
+      },
+      {
+        resourceType: "Bundle",
+        entry: [{
+          modifierExtension,
+          resource: heartRateResource("entry-modifier-heart-rate"),
+        }],
+      },
+    ];
+
+    for (const bundle of bundles) {
+      const vaultRoot = await writeClinicalFixture({
+        resourceFiles: [{
+          resourceType: "Observation",
+          relativePath: "Observation/page-1.json",
+          count: 1,
+        }],
+        pages: { "Observation/page-1.json": bundle },
+      });
+      await expect(buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot }))
+        .rejects.toThrow("unsupported modifier semantics");
+    }
+  });
+
+  it("routes resources without provider freshness to review", async () => {
     const vaultRoot = await writeClinicalFixture({
       resourceFiles: [{
         resourceType: "Observation",
@@ -3317,8 +3747,8 @@ describe("buildClinicalImportPlan", () => {
     });
 
     const plan = await buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot });
-    expect(plan.candidates).toEqual([]);
-    expect(plan.unsupported).toEqual([
+    expect(upserts(plan)).toEqual([]);
+    expect(reviews(plan)).toEqual([
       expect.objectContaining({
         resourceId: "missing-provider-freshness",
         reason: "FHIR resource lastUpdated is missing",
@@ -3355,8 +3785,8 @@ describe("buildClinicalImportPlan", () => {
 
     const firstPlan = await buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot: firstVaultRoot });
     const secondPlan = await buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot: secondVaultRoot });
-    const firstRef = firstPlan.candidates[0]?.payload.externalRef;
-    const secondRef = secondPlan.candidates[0]?.payload.externalRef;
+    const firstRef = upserts(firstPlan)[0]?.externalRef;
+    const secondRef = upserts(secondPlan)[0]?.externalRef;
 
     expect(firstRef).toEqual(
       expect.objectContaining({
@@ -3441,6 +3871,17 @@ function bloodPressurePanelObservation(index: number) {
       },
     ],
   };
+}
+
+async function initializeCanonicalFixtureVault(): Promise<string> {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-clinical-records-apply-"));
+  tempRoots.push(vaultRoot);
+  await initializeVault({
+    vaultRoot,
+    createdAt: "2026-07-01T12:00:00.000Z",
+    timezone: "America/New_York",
+  });
+  return vaultRoot;
 }
 
 async function writeClinicalFixture(input: {

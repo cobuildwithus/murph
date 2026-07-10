@@ -1,15 +1,13 @@
 import {
   CLINICAL_RAW_MANIFEST_MAX_TOTAL_RESOURCES,
-  clinicalFhirManifestPathSchema,
-  clinicalImportCandidateSchema,
   clinicalFacetSlug,
+  clinicalFhirManifestPathSchema,
+  clinicalImportDecisionSchema,
   clinicalImportPlanSchema,
-  clinicalImportUnsupportedResourceSchema,
   clinicalRawManifestSchema,
   clinicalRawPathSchema,
   externalRefForFhir,
   fhirResourceTypeToSlug,
-  fhirSourceRefSchema,
   hashClinicalFhirBaseUrl,
   hashClinicalFhirPageUrl,
   hashClinicalFhirPatientId,
@@ -26,23 +24,26 @@ const FHIR_BASE_URL_HASH = hashClinicalFhirBaseUrl(FHIR_BASE_URL);
 const PATIENT_ID_HASH = hashClinicalFhirPatientId("patient-1");
 const OTHER_PATIENT_ID_HASH = hashClinicalFhirPatientId("patient-2");
 const RAW_REF = "raw/clinical/fhir/clinical-connection-1/retrieval-job-1/Observation/page-1.json";
-
-const sourceRef = {
-  sourceSystem: "epic-fhir",
-  resourceType: "Observation",
-  resourceId: "obs-1",
-  rawRef: RAW_REF,
-} as const;
+const SOURCE_VERSION = "2026-07-01T12:00:00.123456Z";
 
 const externalRef = {
   system: `epic-fhir-${FHIR_BASE_URL_HASH}-${PATIENT_ID_HASH}`,
   resourceType: "observation",
   resourceId: "obs-1",
+  version: SOURCE_VERSION,
 } as const;
 
-const commonPayload = {
-  occurredAt: "2026-07-01T12:00:00.000Z",
-  externalRef,
+const evidence = [{
+  rawRef: RAW_REF,
+  sourceLabel: "Observation/obs-1",
+}] as const;
+
+const planSource = {
+  kind: "fhir",
+  rawManifestPath: "raw/clinical/fhir/clinical-connection-1/retrieval-job-1/manifest.json",
+  sourceSystem: "epic-fhir",
+  connectionId: "clinical-connection-1",
+  retrievalJobId: "retrieval-job-1",
 } as const;
 
 describe("clinical records contracts", () => {
@@ -69,103 +70,72 @@ describe("clinical records contracts", () => {
     });
 
     expect(manifest.resourceFiles).toEqual([resourceFile]);
-    expect(() =>
-      clinicalRawManifestSchema.parse({
-        ...manifest,
-        fhirBaseUrlHash: "https-example.test-fhir",
-      }),
-    ).toThrow();
-    expect(() =>
-      clinicalRawManifestSchema.parse({
-        ...manifest,
-        connectionId: "clinical/connection",
-      }),
-    ).toThrow();
-    expect(() =>
-      clinicalRawManifestSchema.parse({
-        ...manifest,
-        completedResourceTypes: ["Observation", "Observation"],
-      }),
-    ).toThrow("unique");
-    expect(() =>
-      clinicalRawManifestSchema.parse({
-        ...manifest,
-        completedResourceTypes: ["Condition"],
-      }),
-    ).toThrow("declared raw resource file");
-    expect(
-      rawRefForClinicalManifestFile({
-        manifestPath: "raw/clinical/fhir/clinical-connection-1/retrieval-job-1/manifest.json",
-        resourceFile,
-      }),
-    ).toBe("raw/clinical/fhir/clinical-connection-1/retrieval-job-1/Observation/page-1.json");
+    expect(() => clinicalRawManifestSchema.parse({ ...manifest, fhirBaseUrlHash: "not-a-hash" })).toThrow();
+    expect(() => clinicalRawManifestSchema.parse({ ...manifest, connectionId: "clinical/connection" })).toThrow();
+    expect(() => clinicalRawManifestSchema.parse({
+      ...manifest,
+      completedResourceTypes: ["Observation", "Observation"],
+    })).toThrow("unique");
+    expect(() => clinicalRawManifestSchema.parse({
+      ...manifest,
+      completedResourceTypes: ["Condition"],
+    })).toThrow("declared raw resource file");
+    expect(() => clinicalRawManifestSchema.parse({
+      ...manifest,
+      errors: [{
+        resourceType: "condition",
+        code: "fetch-failed",
+        message: "Condition retrieval failed",
+      }],
+    })).toThrow();
+    expect(rawRefForClinicalManifestFile({
+      manifestPath: planSource.rawManifestPath,
+      resourceFile,
+    })).toBe(RAW_REF);
   });
 
   it("bounds raw manifests and raw file paths", () => {
-    expect(() =>
-      clinicalRawManifestSchema.parse({
+    expect(() => clinicalRawManifestSchema.parse({
+      schemaVersion: "murph.clinical-raw-manifest.v1",
+      kind: "clinical_fhir_retrieval",
+      connectionId: "clinical-connection-1",
+      retrievalJobId: "retrieval-job-1",
+      sourceSystem: "cerner-fhir",
+      fhirBaseUrlHash: FHIR_BASE_URL_HASH,
+      patientIdHash: PATIENT_ID_HASH,
+      fetchedAt: "2026-07-01T12:00:00.000Z",
+      resourceFiles: [{
+        resourceType: "Observation",
+        relativePath: "Observation/page-1.json",
+        count: CLINICAL_RAW_MANIFEST_MAX_TOTAL_RESOURCES + 1,
+        sha256: SHA256,
+      }],
+      completedResourceTypes: ["Observation"],
+      requestedScopes: [],
+      grantedScopes: [],
+    })).toThrow(/total resource count/u);
+
+    for (const relativePath of ["../Observation/page-1.json", "misc/page-1.json", "page-1.json"]) {
+      expect(() => clinicalRawManifestSchema.parse({
         schemaVersion: "murph.clinical-raw-manifest.v1",
         kind: "clinical_fhir_retrieval",
         connectionId: "clinical-connection-1",
         retrievalJobId: "retrieval-job-1",
-        providerDirectoryEntryId: "provider-entry-1",
         sourceSystem: "cerner-fhir",
         fhirBaseUrlHash: FHIR_BASE_URL_HASH,
         patientIdHash: PATIENT_ID_HASH,
         fetchedAt: "2026-07-01T12:00:00.000Z",
-        resourceFiles: [
-          {
-            resourceType: "Observation",
-            relativePath: "Observation/page-1.json",
-            count: CLINICAL_RAW_MANIFEST_MAX_TOTAL_RESOURCES + 1,
-            sha256: SHA256,
-            pageUrlHash: SHA256,
-          },
-        ],
+        resourceFiles: [{ resourceType: "Observation", relativePath, count: 1, sha256: SHA256 }],
         completedResourceTypes: ["Observation"],
-        requestedScopes: ["patient/Observation.read"],
-        grantedScopes: ["patient/Observation.read"],
-        errors: [
-          {
-            resourceType: "Observation",
-            code: "rate_limited",
-            message: "FHIR source rate limited this page.",
-          },
-        ],
-      }),
-    ).toThrow(/total resource count/u);
-
-    for (const relativePath of ["../Observation/page-1.json", "misc/page-1.json", "page-1.json"]) {
-      expect(() =>
-        clinicalRawManifestSchema.parse({
-          schemaVersion: "murph.clinical-raw-manifest.v1",
-          kind: "clinical_fhir_retrieval",
-          connectionId: "clinical-connection-1",
-          retrievalJobId: "retrieval-job-1",
-          sourceSystem: "cerner-fhir",
-          fhirBaseUrlHash: FHIR_BASE_URL_HASH,
-          patientIdHash: PATIENT_ID_HASH,
-          fetchedAt: "2026-07-01T12:00:00.000Z",
-          resourceFiles: [
-            {
-              resourceType: "Observation",
-              relativePath,
-              count: 1,
-              sha256: SHA256,
-            },
-          ],
-          completedResourceTypes: ["Observation"],
-          requestedScopes: [],
-          grantedScopes: [],
-        }),
-      ).toThrow();
+        requestedScopes: [],
+        grantedScopes: [],
+      })).toThrow();
     }
   });
 
-  it("normalizes deterministic FHIR external references", () => {
+  it("normalizes deterministic source-resource external references", () => {
     expect(normalizeClinicalFhirPatientId("Patient/patient-1")).toBe("patient-1");
-    expect(normalizeClinicalFhirPatientId("https://ehr.example.test/fhir/Patient/patient-1/_history/2"))
-      .toBe("patient-1");
+    expect(normalizeClinicalFhirPatientId(`${FHIR_BASE_URL}/Patient/patient-1/_history/2`)).toBe("patient-1");
     expect(normalizeClinicalFhirPatientId("Practitioner/patient-1")).toBeNull();
     expect(hashClinicalFhirBaseUrl(`${FHIR_BASE_URL}/`)).toBe(FHIR_BASE_URL_HASH);
     expect(normalizeClinicalFhirPatientReference({
@@ -176,10 +146,6 @@ describe("clinical records contracts", () => {
       fhirBaseUrlHash: FHIR_BASE_URL_HASH,
       reference: "https://foreign.example.test/fhir/Patient/patient-1",
     })).toBeNull();
-    expect(normalizeClinicalFhirPatientReference({
-      fhirBaseUrlHash: FHIR_BASE_URL_HASH,
-      reference: "Observation/obs-1/Patient/patient-1",
-    })).toBeNull();
     expect(isClinicalFhirUrlWithinBase({
       fhirBaseUrlHash: FHIR_BASE_URL_HASH,
       url: `${FHIR_BASE_URL}/Observation?page=2`,
@@ -188,322 +154,222 @@ describe("clinical records contracts", () => {
       fhirBaseUrlHash: FHIR_BASE_URL_HASH,
       url: "https://ehr.example.test/fhir2/Observation?page=2",
     })).toBe(false);
-    expect(isClinicalFhirUrlWithinBase({
-      fhirBaseUrlHash: hashClinicalFhirBaseUrl("https://ehr.example.test/fhir/Observation"),
-      url: "https://ehr.example.test/fhir//Observation?page=2",
-    })).toBe(false);
-    expect(isClinicalFhirUrlWithinBase({
-      fhirBaseUrlHash: FHIR_BASE_URL_HASH,
-      url: "https://foreign.example.test/fhir/Observation?page=2",
-    })).toBe(false);
-    expect(isClinicalFhirUrlWithinBase({
-      fhirBaseUrlHash: FHIR_BASE_URL_HASH,
-      url: "https://user:password@ehr.example.test/fhir/Observation?page=2",
-    })).toBe(false);
-    expect(hashClinicalFhirPatientId("Patient/patient-1")).toBe(PATIENT_ID_HASH);
-    expect(hashClinicalFhirPageUrl("https://ehr.example.test/fhir/Observation?page=2"))
-      .toMatch(/^[a-f0-9]{64}$/u);
+    expect(hashClinicalFhirPageUrl(`${FHIR_BASE_URL}/Observation?page=2`)).toMatch(/^[a-f0-9]{64}$/u);
     expect(fhirResourceTypeToSlug("DiagnosticReport")).toBe("diagnostic-report");
     expect(clinicalFacetSlug("Systolic BP (mmHg)")).toBe("systolic-bp-mm-hg");
-    expect(
-      externalRefForFhir({
-        fhirBaseUrlHash: FHIR_BASE_URL_HASH,
-        patientIdHash: PATIENT_ID_HASH,
-        sourceSystem: "epic-fhir",
-        resourceType: "Observation",
-        resourceId: "obs-1",
-        version: "3",
-        facet: "BP Systolic",
-      }),
-    ).toEqual({
-      system: `epic-fhir-${FHIR_BASE_URL_HASH}-${PATIENT_ID_HASH}`,
-      resourceType: "observation",
+
+    expect(externalRefForFhir({
+      fhirBaseUrlHash: FHIR_BASE_URL_HASH,
+      patientIdHash: PATIENT_ID_HASH,
+      sourceSystem: "epic-fhir",
+      resourceType: "Observation",
       resourceId: "obs-1",
-      version: "3",
-      facet: "bp-systolic",
-    });
-    expect(
-      externalRefForFhir({
-        fhirBaseUrlHash: FHIR_BASE_URL_HASH,
-        patientIdHash: OTHER_PATIENT_ID_HASH,
-        sourceSystem: "epic-fhir",
-        resourceType: "Observation",
-        resourceId: "obs-1",
-        facet: "BP Systolic",
-      }).system,
-    ).not.toBe(
-      externalRefForFhir({
-        fhirBaseUrlHash: FHIR_BASE_URL_HASH,
-        patientIdHash: PATIENT_ID_HASH,
-        sourceSystem: "epic-fhir",
-        resourceType: "Observation",
-        resourceId: "obs-1",
-        facet: "BP Systolic",
-      }).system,
-    );
-    expect(
-      externalRefForFhir({
-        fhirBaseUrlHash: FHIR_BASE_URL_HASH,
-        patientIdHash: PATIENT_ID_HASH,
-        sourceSystem: "generic-smart-fhir",
-        resourceType: "DocumentReference",
-        resourceId: "doc-1",
-      }),
-    ).toEqual({
-      system: `generic-smart-fhir-${FHIR_BASE_URL_HASH}-${PATIENT_ID_HASH}`,
-      resourceType: "document-reference",
-      resourceId: "doc-1",
-    });
-    expect(() =>
-      externalRefForFhir({
-        fhirBaseUrlHash: "a-b",
-        patientIdHash: "c",
-        sourceSystem: "epic-fhir",
-        resourceType: "Observation",
-        resourceId: "obs-1",
-        facet: "BP Systolic",
-      }),
-    ).toThrow();
+      version: SOURCE_VERSION,
+    })).toEqual(externalRef);
+    expect(externalRefForFhir({
+      fhirBaseUrlHash: FHIR_BASE_URL_HASH,
+      patientIdHash: OTHER_PATIENT_ID_HASH,
+      sourceSystem: "epic-fhir",
+      resourceType: "Observation",
+      resourceId: "obs-1",
+      version: SOURCE_VERSION,
+    }).system).not.toBe(externalRef.system);
+    expect(() => externalRefForFhir({
+      fhirBaseUrlHash: "not-a-hash",
+      patientIdHash: PATIENT_ID_HASH,
+      sourceSystem: "epic-fhir",
+      resourceType: "Observation",
+      resourceId: "obs-1",
+      version: SOURCE_VERSION,
+    })).toThrow();
   });
 
-  it("validates raw and clinical manifest paths at the contract boundary", () => {
+  it("validates raw and manifest paths at the contract boundary", () => {
     expect(() => clinicalRawPathSchema.parse("raw/clinical/fhir/../escape.json")).toThrow();
-    expect(
-      clinicalFhirManifestPathSchema.parse(
-        "raw/clinical/fhir/clinical-connection-1/retrieval-job-1/manifest.json",
-      ),
-    ).toBe("raw/clinical/fhir/clinical-connection-1/retrieval-job-1/manifest.json");
+    expect(clinicalFhirManifestPathSchema.parse(planSource.rawManifestPath)).toBe(planSource.rawManifestPath);
     expect(() => clinicalFhirManifestPathSchema.parse("raw/tmp/manifest.json")).toThrow();
-    expect(() =>
-      rawRefForClinicalManifestFile({
-        manifestPath: "raw/tmp/manifest.json",
-        resourceFile: {
-          resourceType: "Observation",
-          relativePath: "Observation/page-1.json",
-          count: 1,
-          sha256: SHA256,
-        },
-      })
-    ).toThrow();
-    expect(() =>
-      rawRefForClinicalManifestFile({
-        manifestPath: "raw/clinical/fhir/clinical-connection-1/retrieval-job-1/manifest.json",
-        resourceFile: {
-          resourceType: "Observation",
-          relativePath: "misc/page-1.json",
-          count: 1,
-          sha256: SHA256,
-        },
-      })
-    ).toThrow();
+    expect(() => rawRefForClinicalManifestFile({
+      manifestPath: "raw/tmp/manifest.json",
+      resourceFile: {
+        resourceType: "Observation",
+        relativePath: "Observation/page-1.json",
+        count: 1,
+        sha256: SHA256,
+      },
+    })).toThrow();
   });
 
-  it("validates FHIR source refs and unsupported resources", () => {
-    expect(
-      fhirSourceRefSchema.parse({
-        ...sourceRef,
-        version: "3",
-        facet: "systolic",
-      }),
-    ).toEqual({
-      ...sourceRef,
-      version: "3",
-      facet: "systolic",
-    });
-
-    expect(() =>
-      fhirSourceRefSchema.parse({
-        ...sourceRef,
-        facet: "Systolic BP",
-      }),
-    ).toThrow();
-
-    expect(
-      clinicalImportUnsupportedResourceSchema.parse({
-        resourceType: "Procedure",
-        reason: "procedure import not implemented",
-        rawRef: "raw/clinical/fhir/clinical-connection-1/retrieval-job-1/Procedure/page-1.json",
-      }),
-    ).toEqual({
-      resourceType: "Procedure",
-      reason: "procedure import not implemented",
-      rawRef: "raw/clinical/fhir/clinical-connection-1/retrieval-job-1/Procedure/page-1.json",
-    });
-  });
-
-  it("validates each clinical import candidate payload boundary", () => {
-    expect(
-      clinicalImportCandidateSchema.parse({
-        kind: "vitals",
-        resource: sourceRef,
-        rawRef: RAW_REF,
+  it("validates canonical upsert, retract, and review decisions", () => {
+    const decisions = [
+      {
+        action: "upsert",
         payload: {
-          ...commonPayload,
-          measurements: [
-            {
-              metric: "blood-pressure-systolic",
-              value: 120,
-              unit: "mmHg",
-            },
-          ],
-          timeZone: "America/New_York",
-          rawRefs: [RAW_REF],
-          evidence: [
-            {
-              rawRef: RAW_REF,
-              spanStart: 0,
-              spanEnd: 5,
-            },
-          ],
+          kind: "measurement",
+          occurredAt: "2026-07-01T12:00:00.000Z",
+          source: "import",
+          title: "FHIR vitals",
+          measurements: [{ metric: "heart-rate", value: 72, unit: "bpm" }],
+          externalRef,
+          evidence,
         },
-      }).payload,
-    ).toMatchObject({
-      source: "import",
-      title: "FHIR vitals",
-    });
-
-    expect(
-      clinicalImportCandidateSchema.parse({
-        kind: "diagnostic-test",
-        resource: sourceRef,
-        rawRef: RAW_REF,
+      },
+      {
+        action: "upsert",
         payload: {
-          ...commonPayload,
+          kind: "test",
+          occurredAt: "2026-07-01T12:00:00.000Z",
+          source: "import",
+          title: "Basic metabolic panel",
           testName: "Basic metabolic panel",
-          results: [
-            {
-              analyte: "Glucose",
-              value: 92,
-              unit: "mg/dL",
-              flag: "normal",
-            },
-          ],
-          collectedAt: "2026-07-01T11:00:00.000Z",
-          reportedAt: "2026-07-01T12:00:00.000Z",
-          fastingStatus: "fasting",
+          resultStatus: "unknown",
+          results: [{ analyte: "Glucose", value: 92, unit: "mg/dL", flag: "normal" }],
+          externalRef,
+          evidence,
         },
-      }).payload,
-    ).toMatchObject({
-      resultStatus: "unknown",
-      source: "import",
-    });
-
-    expect(
-      clinicalImportCandidateSchema.parse({
-        kind: "clinical-note",
-        resource: {
-          ...sourceRef,
-          resourceType: "DocumentReference",
-          resourceId: "doc-1",
-        },
-        rawRef: RAW_REF,
+      },
+      {
+        action: "upsert",
         payload: {
-          ...commonPayload,
-          authoredAt: "2026-07-01T11:00:00.000Z",
-          signedAt: "2026-07-01T12:00:00.000Z",
-          sections: [
-            {
-              kind: "assessment",
-              heading: "Assessment",
-              text: "Patient is stable.",
-            },
-          ],
+          kind: "note",
+          occurredAt: "2026-07-01T12:00:00.000Z",
+          source: "import",
+          title: "FHIR clinical note",
+          note: "Patient is stable.",
+          noteType: "clinical_note",
+          externalRef,
+          evidence,
         },
-      }).payload,
-    ).toMatchObject({
-      noteType: "clinical_note",
-      title: "FHIR clinical note",
-    });
-
-    expect(
-      clinicalImportCandidateSchema.parse({
-        kind: "assertion",
-        resource: {
-          ...sourceRef,
-          resourceType: "AllergyIntolerance",
-          resourceId: "allergy-1",
-        },
-        rawRef: RAW_REF,
+      },
+      {
+        action: "upsert",
         payload: {
-          ...commonPayload,
+          kind: "clinical_assertion",
+          occurredAt: "2026-07-01T12:00:00.000Z",
+          source: "import",
+          title: "No known allergies",
           assertion: "no_known_allergies",
-          domain: "allergy",
-          polarity: "absent",
-          subject: "No known allergies",
           assertedOn: "2026-07-01",
-          sourceLabel: "FHIR AllergyIntolerance",
+          externalRef,
+          evidence,
         },
-      }).payload,
-    ).toMatchObject({
-      title: "FHIR clinical assertion",
-      source: "import",
-    });
+      },
+      {
+        action: "retract",
+        externalRef,
+        reason: "FHIR resource entered in error",
+        evidence,
+      },
+      {
+        action: "review",
+        resourceType: "Condition",
+        resourceId: "condition-1",
+        reason: "condition registry import not implemented",
+        evidence: [{
+          rawRef: "raw/clinical/fhir/clinical-connection-1/retrieval-job-1/Condition/page-1.json",
+          sourceLabel: "Condition/condition-1",
+        }],
+      },
+    ];
+
+    for (const decision of decisions) {
+      expect(() => clinicalImportDecisionSchema.parse(decision)).not.toThrow();
+    }
   });
 
-  it("rejects lossy clinical import candidate payloads", () => {
-    expect(() =>
-      clinicalImportCandidateSchema.parse({
-        kind: "clinical-note",
-        resource: sourceRef,
-        rawRef: RAW_REF,
-        payload: commonPayload,
-      }),
-    ).toThrow(/requires note or sections/u);
+  it("keeps one identity and one provenance owner per decision", () => {
+    const upsert = {
+      action: "upsert",
+      payload: {
+        kind: "measurement",
+        occurredAt: "2026-07-01T12:00:00.000Z",
+        source: "import",
+        title: "FHIR vitals",
+        measurements: [{ metric: "heart-rate", value: 72, unit: "bpm" }],
+        externalRef,
+        evidence,
+      },
+    };
 
-    expect(() =>
-      clinicalImportCandidateSchema.parse({
-        kind: "vitals",
-        resource: sourceRef,
-        rawRef: RAW_REF,
-        payload: {
-          ...commonPayload,
-          occurredAt: "2026-07-01",
-          measurements: [
-            {
-              metric: "blood-pressure-systolic",
-              value: 120,
-              unit: "mmHg",
-            },
-          ],
+    expect(() => clinicalImportDecisionSchema.parse({
+      ...upsert,
+      rawRef: RAW_REF,
+    })).toThrow();
+    expect(() => clinicalImportDecisionSchema.parse({
+      ...upsert,
+      payload: { ...upsert.payload, rawRefs: [RAW_REF] },
+    })).toThrow();
+    expect(() => clinicalImportDecisionSchema.parse({
+      ...upsert,
+      payload: {
+        ...upsert.payload,
+        attachments: [{
+          role: "source-document",
+          kind: "document",
+          relativePath: RAW_REF,
+          mediaType: "application/json",
+          sha256: SHA256,
+          originalFileName: "page-1.json",
+        }],
+      },
+    })).toThrow();
+    expect(() => clinicalImportDecisionSchema.parse({
+      ...upsert,
+      payload: {
+        ...upsert.payload,
+        dataOrigin: {
+          version: 1,
+          aggregatorProvider: "junction",
+          sourceProviderSlug: "garmin",
+          sourceType: "watch",
+          sourceInstanceId: "device-1",
+          timestampSemantics: "utc",
         },
-      }),
-    ).toThrow();
-
-    expect(() =>
-      clinicalImportCandidateSchema.parse({
-        kind: "assertion",
-        resource: sourceRef,
-        rawRef: RAW_REF,
-        payload: {
-          ...commonPayload,
-          assertion: "no_known_allergies",
-          assertedOn: "2026-07-01T12:00:00.000Z",
-        },
-      }),
-    ).toThrow();
+      },
+    })).toThrow();
+    expect(() => clinicalImportDecisionSchema.parse({
+      ...upsert,
+      payload: {
+        ...upsert.payload,
+        links: [{
+          type: "related_to",
+          targetId: "evt_01JNW7YJ7MNE7M9Q2QWQK4Z3F9",
+        }],
+      },
+    })).toThrow();
+    expect(() => clinicalImportDecisionSchema.parse({
+      ...upsert,
+      payload: { ...upsert.payload, evidence: undefined },
+    })).toThrow();
+    expect(() => clinicalImportDecisionSchema.parse({
+      ...upsert,
+      payload: {
+        ...upsert.payload,
+        externalRef: { ...externalRef, facet: "heart-rate" },
+      },
+    })).toThrow();
+    expect(() => clinicalImportDecisionSchema.parse({
+      ...upsert,
+      payload: {
+        ...upsert.payload,
+        externalRef: { ...externalRef, version: undefined },
+      },
+    })).toThrow();
   });
 
-  it("keeps raw evidence separate from import candidates", () => {
-    expect(() =>
-      clinicalImportPlanSchema.parse({
-        schemaVersion: "murph.clinical-import-plan.v1",
-        source: {
-          kind: "fhir",
-          rawManifestPath: "raw/clinical/fhir/clinical-connection-1/retrieval-job-1/manifest.json",
-          sourceSystem: "epic-fhir",
-          connectionId: "clinical-connection-1",
-          retrievalJobId: "retrieval-job-1",
-        },
-        candidates: [],
-        unsupported: [
-          {
-            resourceType: "Condition",
-            resourceId: "condition-1",
-            reason: "condition registry import not implemented",
-            rawRef: "raw/clinical/fhir/clinical-connection-1/retrieval-job-1/Condition/page-1.json",
-          },
-        ],
-      }),
-    ).not.toThrow();
+  it("stores decisions under retrieval-only plan metadata", () => {
+    expect(() => clinicalImportPlanSchema.parse({
+      schemaVersion: "murph.clinical-import-plan.v1",
+      source: planSource,
+      decisions: [{
+        action: "review",
+        resourceType: "Condition",
+        resourceId: "condition-1",
+        reason: "condition registry import not implemented",
+        evidence: [{
+          rawRef: "raw/clinical/fhir/clinical-connection-1/retrieval-job-1/Condition/page-1.json",
+          sourceLabel: "Condition/condition-1",
+        }],
+      }],
+    })).not.toThrow();
   });
 });

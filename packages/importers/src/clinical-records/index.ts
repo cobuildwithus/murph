@@ -6,7 +6,6 @@ import type {
   Bundle,
   CodeableConcept,
   Coding,
-  Condition,
   DiagnosticReport,
   DocumentReference,
   Narrative,
@@ -17,15 +16,16 @@ import type {
   Resource,
 } from "@medplum/fhirtypes";
 import {
-  CLINICAL_IMPORT_PLAN_MAX_CANDIDATES,
-  CLINICAL_IMPORT_PLAN_MAX_UNSUPPORTED,
+  CLINICAL_IMPORT_PLAN_MAX_DECISIONS,
   CLINICAL_RAW_MANIFEST_MAX_BYTES,
   CLINICAL_RAW_RESOURCE_FILES_MAX_TOTAL_BYTES,
   CLINICAL_RAW_RESOURCE_FILE_MAX_BYTES,
   clinicalFacetSlug,
   clinicalFhirManifestPathSchema,
-  clinicalImportCandidateSchema,
+  clinicalImportRetractDecisionSchema,
   clinicalImportPlanSchema,
+  clinicalImportReviewDecisionSchema,
+  clinicalImportUpsertDecisionSchema,
   clinicalRawManifestSchema,
   externalRefForFhir,
   hashClinicalFhirPageUrl,
@@ -33,13 +33,12 @@ import {
   isClinicalFhirUrlWithinBase,
   normalizeClinicalFhirPatientReference,
   rawRefForClinicalManifestFile,
-  type ClinicalImportCandidate,
+  type ClinicalImportDecision,
   type ClinicalImportPlan,
-  type ClinicalImportUnsupportedResource,
   type ClinicalRawManifest,
   type ClinicalRawManifestResourceFile,
 } from "@murphai/clinical-records";
-import { isStrictIsoDateTime, type BloodTestResultRecord } from "@murphai/contracts";
+import { isWritableIsoDateTime, type BloodTestResultRecord } from "@murphai/contracts";
 import { resolveVaultPathOnDisk } from "@murphai/core";
 
 export interface BuildClinicalImportPlanInput {
@@ -65,10 +64,7 @@ type AllergyEvidenceSummary = {
   hasConflict: boolean;
 };
 
-type MappedFhirResource = {
-  candidates: ClinicalImportCandidate[];
-  unsupported: ClinicalImportUnsupportedResource[];
-};
+type MappedFhirResource = ClinicalImportDecision;
 
 type VitalDefinition = {
   facet: string;
@@ -105,8 +101,6 @@ const DOCUMENT_REFERENCE_TEXT_DECODER = new TextDecoder("utf-8", { fatal: true }
 
 const NO_KNOWN_ALLERGY_CODES = new Set(["716186003"]);
 const ALLERGY_CONFLICT_RESOURCE_TYPES = new Set(["AllergyIntolerance", "Condition"]);
-const ALLERGY_CONDITION_SNOMED_CODES = new Set(["91936005"]);
-const ALLERGY_CONDITION_TEXT_PATTERN = /\b(?:allerg(?:y|ies|ic)|hypersensitiv(?:ity|e))\b/iu;
 const NO_KNOWN_ALLERGY_TEXTS = new Set([
   "no known allergy",
   "no known allergy situation",
@@ -169,7 +163,7 @@ const IMPORTABLE_DOCUMENT_REFERENCE_STATUSES = new Set(["current"]);
 const IMPORTABLE_DOCUMENT_REFERENCE_DOC_STATUSES = new Set(["amended", "appended", "corrected", "final"]);
 const IMPORTABLE_ALLERGY_CLINICAL_STATUS_CODES = new Set(["active"]);
 const IMPORTABLE_ALLERGY_VERIFICATION_STATUS_CODES = new Set(["confirmed"]);
-const VITAL_PANEL_FACET = "vitals-panel";
+const RETRACTED_ALLERGY_VERIFICATION_STATUS_CODES = new Set(["entered-in-error", "refuted"]);
 
 export async function buildClinicalImportPlan(input: BuildClinicalImportPlanInput): Promise<ClinicalImportPlan> {
   const manifestPath = clinicalFhirManifestPathSchema.parse(input.manifestPath);
@@ -187,8 +181,7 @@ export async function buildClinicalImportPlan(input: BuildClinicalImportPlanInpu
     manifestPath,
     vaultRoot: input.vaultRoot,
   });
-  const candidates: ClinicalImportCandidate[] = [];
-  const unsupported: ClinicalImportUnsupportedResource[] = [];
+  const decisions: ClinicalImportDecision[] = [];
   const resourcePages: FhirResourcePage[] = [];
   let hasAllergyConflictEvidence = false;
 
@@ -217,8 +210,10 @@ export async function buildClinicalImportPlan(input: BuildClinicalImportPlanInpu
         rawRef: page.rawRef,
         resource,
       };
-      const mapped = mapFhirResource(context, allergyEvidence);
-      appendMappedResource({ candidates, mapped, unsupported });
+      if (decisions.length >= CLINICAL_IMPORT_PLAN_MAX_DECISIONS) {
+        throw new Error(`Clinical FHIR import plan decision count exceeds ${CLINICAL_IMPORT_PLAN_MAX_DECISIONS}.`);
+      }
+      decisions.push(mapFhirResource(context, allergyEvidence));
     }
   }
 
@@ -231,8 +226,7 @@ export async function buildClinicalImportPlan(input: BuildClinicalImportPlanInpu
       connectionId: manifest.connectionId,
       retrievalJobId: manifest.retrievalJobId,
     },
-    candidates,
-    unsupported,
+    decisions,
   });
 }
 
@@ -506,22 +500,6 @@ async function readVaultRelativeFileSize(vaultRoot: string, relativePath: string
   return fileStat.size;
 }
 
-function appendMappedResource(input: {
-  candidates: ClinicalImportCandidate[];
-  mapped: MappedFhirResource;
-  unsupported: ClinicalImportUnsupportedResource[];
-}): void {
-  if (input.candidates.length + input.mapped.candidates.length > CLINICAL_IMPORT_PLAN_MAX_CANDIDATES) {
-    throw new Error(`Clinical FHIR import plan candidate count exceeds ${CLINICAL_IMPORT_PLAN_MAX_CANDIDATES}.`);
-  }
-  if (input.unsupported.length + input.mapped.unsupported.length > CLINICAL_IMPORT_PLAN_MAX_UNSUPPORTED) {
-    throw new Error(`Clinical FHIR import plan unsupported resource count exceeds ${CLINICAL_IMPORT_PLAN_MAX_UNSUPPORTED}.`);
-  }
-
-  input.candidates.push(...input.mapped.candidates);
-  input.unsupported.push(...input.mapped.unsupported);
-}
-
 function assertRawResourceFileHash(input: {
   rawRef: string;
   resourceFile: ClinicalRawManifestResourceFile;
@@ -550,10 +528,10 @@ function sha256Hex(value: string): string {
 function mapFhirResource(
   context: FhirResourceContext,
   allergyEvidence: AllergyEvidenceSummary,
-): {
-  candidates: ClinicalImportCandidate[];
-  unsupported: ClinicalImportUnsupportedResource[];
-} {
+): MappedFhirResource {
+  if (hasUnsupportedFhirModifier(context.resource)) {
+    return reviewOnly(context, "FHIR modifier semantics are not importable");
+  }
   if (
     (isObservation(context.resource)
       || isDiagnosticReport(context.resource)
@@ -561,7 +539,14 @@ function mapFhirResource(
       || isAllergyIntolerance(context.resource))
     && !readResourceUpdatedAt(context.resource)
   ) {
-    return unsupportedOnly(context, "FHIR resource lastUpdated is missing");
+    return reviewOnly(context, "FHIR resource lastUpdated is missing");
+  }
+  const retractionReason = authoritativeRetractionReason(context.resource);
+  if (retractionReason) {
+    const resourceId = readResourceId(context.resource);
+    return resourceId
+      ? retractionDecision(context, resourceId, retractionReason)
+      : reviewOnly(context, "FHIR resource id is missing");
   }
   if (isObservation(context.resource)) {
     return mapObservation(resourceContext(context, context.resource));
@@ -578,18 +563,18 @@ function mapFhirResource(
 
   switch (readString(context.resource.resourceType)) {
     case "Condition":
-      return { candidates: [], unsupported: [unsupportedResource(context, "condition registry import not implemented")] };
+      return reviewOnly(context, "condition registry import not implemented");
     case "MedicationRequest":
     case "MedicationStatement":
-      return { candidates: [], unsupported: [unsupportedResource(context, "medication history import not implemented")] };
+      return reviewOnly(context, "medication history import not implemented");
     case "Encounter":
-      return { candidates: [], unsupported: [unsupportedResource(context, "externalRef-idempotent encounter import not implemented")] };
+      return reviewOnly(context, "externalRef-idempotent encounter import not implemented");
     case "Procedure":
-      return { candidates: [], unsupported: [unsupportedResource(context, "procedure import not implemented")] };
+      return reviewOnly(context, "procedure import not implemented");
     case "Immunization":
-      return { candidates: [], unsupported: [unsupportedResource(context, "externalRef-idempotent immunization import not implemented")] };
+      return reviewOnly(context, "externalRef-idempotent immunization import not implemented");
     default:
-      return { candidates: [], unsupported: [unsupportedResource(context, "FHIR resource type is raw evidence only in v1")] };
+      return reviewOnly(context, "FHIR resource type is raw evidence only in v1");
   }
 }
 
@@ -604,31 +589,82 @@ function resourceContext<TResource extends Resource>(
   };
 }
 
-function unsupportedOnly(context: FhirResourceContext, reason: string): MappedFhirResource {
-  return { candidates: [], unsupported: [unsupportedResource(context, reason)] };
+function reviewOnly(context: FhirResourceContext, reason: string): MappedFhirResource {
+  return clinicalImportReviewDecisionSchema.parse({
+    action: "review",
+    resourceType: context.resource.resourceType,
+    resourceId: readResourceId(context.resource),
+    reason,
+    evidence: [evidenceForResource(context, readResourceId(context.resource))],
+  });
 }
 
-function candidateOnly(
+function upsertOrReview(
   context: FhirResourceContext,
-  candidate: ClinicalImportCandidate,
-  unsupportedReason: string,
+  payload: Record<string, unknown>,
+  reviewReason: string,
 ): MappedFhirResource {
-  const parsedCandidate = clinicalImportCandidateSchema.safeParse(candidate);
-  if (!parsedCandidate.success) {
-    return unsupportedOnly(context, unsupportedReason);
+  const parsedDecision = clinicalImportUpsertDecisionSchema.safeParse({ action: "upsert", payload });
+  if (!parsedDecision.success) {
+    return reviewOnly(context, reviewReason);
   }
 
-  return { candidates: [parsedCandidate.data], unsupported: [] };
+  return parsedDecision.data;
+}
+
+function retractionDecision(
+  context: FhirResourceContext,
+  resourceId: string,
+  reason: string,
+): MappedFhirResource {
+  return clinicalImportRetractDecisionSchema.parse({
+    action: "retract",
+    externalRef: externalRefForResource(context, context.resource.resourceType, resourceId),
+    reason,
+    evidence: [evidenceForResource(context, resourceId)],
+  });
+}
+
+function authoritativeRetractionReason(resource: Resource): string | null {
+  if (isObservation(resource) || isDiagnosticReport(resource)) {
+    const status = readString(resource.status)?.toLowerCase();
+    if (status === "cancelled" || status === "entered-in-error") {
+      return `FHIR ${resource.resourceType} status ${status}`;
+    }
+  }
+  if (isDocumentReference(resource)) {
+    const status = readString(resource.status)?.toLowerCase();
+    const docStatus = readString(resource.docStatus)?.toLowerCase();
+    if (status === "entered-in-error" || status === "superseded") {
+      return `FHIR DocumentReference status ${status}`;
+    }
+    if (docStatus === "entered-in-error") {
+      return "FHIR DocumentReference docStatus entered-in-error";
+    }
+  }
+  if (
+    isAllergyIntolerance(resource)
+    && isNoKnownAllergy(resource)
+    && codeableConceptHasOnlyImportableCodings(
+      resource.verificationStatus,
+      FHIR_SYSTEM_ALLERGY_VERIFICATION_STATUS,
+      RETRACTED_ALLERGY_VERIFICATION_STATUS_CODES,
+    )
+  ) {
+    return "FHIR no-known-allergy assertion was refuted or entered in error";
+  }
+
+  return null;
 }
 
 function mapObservation(context: FhirResourceContext<Observation>): MappedFhirResource {
   const resourceId = readResourceId(context.resource);
   if (!resourceId) {
-    return unsupportedOnly(context, "FHIR resource id is missing");
+    return reviewOnly(context, "FHIR resource id is missing");
   }
 
   if (!hasImportableStatus(context.resource.status, IMPORTABLE_OBSERVATION_STATUSES)) {
-    return unsupportedOnly(context, "observation status is not importable");
+    return reviewOnly(context, "observation status is not importable");
   }
 
   const occurredAt = readClinicalOccurredAt(context.resource);
@@ -644,11 +680,11 @@ function mapObservation(context: FhirResourceContext<Observation>): MappedFhirRe
   for (const component of components) {
     const vitalDecision = vitalDecisionForCodeableConcept(component.code);
     if (vitalDecision.status === "ambiguous") {
-      return unsupportedOnly(context, "vital code is ambiguous");
+      return reviewOnly(context, "vital code is ambiguous");
     }
     const vital = vitalDecision.status === "matched" ? vitalDecision.vital : null;
     if (!vital && codeableConceptHasCodeWithUnexpectedSystem(component.code, FHIR_SYSTEM_LOINC, VITAL_LOINC_CODES)) {
-      return unsupportedOnly(context, "vital coding system is not importable");
+      return reviewOnly(context, "vital coding system is not importable");
     }
     if (!vital) {
       hasUnmatchedVitalComponent = true;
@@ -657,21 +693,21 @@ function mapObservation(context: FhirResourceContext<Observation>): MappedFhirRe
 
     const value = readQuantityValue(component.valueQuantity);
     if (!value) {
-      return unsupportedOnly(context, "vital quantity is not importable");
+      return reviewOnly(context, "vital quantity is not importable");
     }
 
     if (!occurredAt) {
-      return unsupportedOnly(context, "clinical timestamp is missing");
+      return reviewOnly(context, "clinical timestamp is missing");
     }
     if (value.comparator) {
-      return unsupportedOnly(context, "vital quantity comparator is not importable");
+      return reviewOnly(context, "vital quantity comparator is not importable");
     }
     const unit = normalizeVitalUnit(value, vital);
     if (!unit) {
-      return unsupportedOnly(context, "vital quantity unit is not importable");
+      return reviewOnly(context, "vital quantity unit is not importable");
     }
     if (emittedVitalFacets.has(vital.facet)) {
-      return unsupportedOnly(context, "duplicate vital facet in FHIR observation");
+      return reviewOnly(context, "duplicate vital facet in FHIR observation");
     }
     emittedVitalFacets.add(vital.facet);
 
@@ -684,70 +720,68 @@ function mapObservation(context: FhirResourceContext<Observation>): MappedFhirRe
 
   if (vitalMeasurements.length > 0) {
     if (hasUnmatchedVitalComponent) {
-      return unsupportedOnly(context, "vital component code is not importable");
+      return reviewOnly(context, "vital component code is not importable");
     }
     if (!occurredAt) {
-      return unsupportedOnly(context, "clinical timestamp is missing");
+      return reviewOnly(context, "clinical timestamp is missing");
     }
-    return candidateOnly(
+    return upsertOrReview(
       context,
-      buildVitalsCandidate(context, {
+      buildVitalsPayload(context, {
         occurredAt,
         resourceId,
         title: textForCodeableConcept(context.resource.code) ?? "FHIR vitals",
-        facet: VITAL_PANEL_FACET,
         measurements: vitalMeasurements,
       }),
-      "clinical candidate exceeds supported import bounds",
+      "clinical upsert exceeds supported import bounds",
     );
   }
 
   const vitalDecision = vitalDecisionForCodeableConcept(context.resource.code);
   if (vitalDecision.status === "ambiguous") {
-    return unsupportedOnly(context, "vital code is ambiguous");
+    return reviewOnly(context, "vital code is ambiguous");
   }
   const vital = vitalDecision.status === "matched" ? vitalDecision.vital : null;
   if (!vital && codeableConceptHasCodeWithUnexpectedSystem(context.resource.code, FHIR_SYSTEM_LOINC, VITAL_LOINC_CODES)) {
-    return unsupportedOnly(context, "vital coding system is not importable");
+    return reviewOnly(context, "vital coding system is not importable");
   }
   if (vital && components.length > 0) {
-    return unsupportedOnly(context, "vital component code is not importable");
+    return reviewOnly(context, "vital component code is not importable");
   }
 
   const quantity = readQuantityValue(context.resource.valueQuantity);
   if (vital && !quantity) {
-    return unsupportedOnly(context, "vital quantity is not importable");
+    return reviewOnly(context, "vital quantity is not importable");
   }
   if (vital && quantity) {
     if (!occurredAt) {
-      return unsupportedOnly(context, "clinical timestamp is missing");
+      return reviewOnly(context, "clinical timestamp is missing");
     }
     if (quantity.comparator) {
-      return unsupportedOnly(context, "vital quantity comparator is not importable");
+      return reviewOnly(context, "vital quantity comparator is not importable");
     }
     const unit = normalizeVitalUnit(quantity, vital);
     if (!unit) {
-      return unsupportedOnly(context, "vital quantity unit is not importable");
+      return reviewOnly(context, "vital quantity unit is not importable");
     }
 
-    return candidateOnly(
+    return upsertOrReview(
       context,
-      buildVitalsCandidate(context, {
+      buildVitalsPayload(context, {
         occurredAt,
         resourceId,
         title: vital.title,
-        facet: vital.facet,
         measurements: [{
           metric: vital.metric,
           unit,
           value: quantity.value,
         }],
       }),
-      "clinical candidate exceeds supported import bounds",
+      "clinical upsert exceeds supported import bounds",
     );
   }
 
-  return unsupportedOnly(context, "observation code is not importable");
+  return reviewOnly(context, "observation code is not importable");
 }
 
 function mapLaboratoryObservation(
@@ -760,18 +794,18 @@ function mapLaboratoryObservation(
   for (const component of components) {
     const componentInterpretation = resultInterpretationFromInterpretation(component.interpretation);
     if (componentInterpretation.status === "ambiguous") {
-      return unsupportedOnly(context, "clinical result interpretation is ambiguous");
+      return reviewOnly(context, "clinical result interpretation is ambiguous");
     }
 
     const componentResult = buildBloodTestResult(component, componentInterpretation.flag);
     if (!componentResult) {
-      return unsupportedOnly(context, "laboratory observation component result is not importable");
+      return reviewOnly(context, "laboratory observation component result is not importable");
     }
     results.push(componentResult);
   }
   const topLevelInterpretation = resultInterpretationFromInterpretation(context.resource.interpretation);
   if (topLevelInterpretation.status === "ambiguous") {
-    return unsupportedOnly(context, "clinical result interpretation is ambiguous");
+    return reviewOnly(context, "clinical result interpretation is ambiguous");
   }
 
   const singleResult = buildBloodTestResult(context.resource, topLevelInterpretation.flag);
@@ -780,14 +814,14 @@ function mapLaboratoryObservation(
   }
 
   if (results.length === 0) {
-    return unsupportedOnly(context, "laboratory observation result is not importable");
+    return reviewOnly(context, "laboratory observation result is not importable");
   }
   if (results.length > LAB_RESULT_MAX_COUNT) {
-    return unsupportedOnly(context, "laboratory observation result count exceeds candidate bounds");
+    return reviewOnly(context, "laboratory observation result count exceeds supported import bounds");
   }
 
   if (!occurredAt) {
-    return unsupportedOnly(context, "clinical timestamp is missing");
+    return reviewOnly(context, "clinical timestamp is missing");
   }
 
   const testName = textForCodeableConcept(context.resource.code) ?? "FHIR laboratory observation";
@@ -797,46 +831,41 @@ function mapLaboratoryObservation(
     && emittedResultStatus !== "unknown"
     && topLevelInterpretation.status !== emittedResultStatus
   ) {
-    return unsupportedOnly(context, "clinical result interpretation is ambiguous");
+    return reviewOnly(context, "clinical result interpretation is ambiguous");
   }
   let resultStatus = emittedResultStatus;
   if (topLevelInterpretation.status === "abnormal" && emittedResultStatus === "unknown") {
     resultStatus = "abnormal";
   }
 
-  return candidateOnly(
+  return upsertOrReview(
     context,
     {
-      kind: "diagnostic-test",
-      rawRef: context.rawRef,
-      resource: sourceRef(context, resourceId, "lab-observation"),
-      payload: {
-        occurredAt,
-        source: "import",
-        title: testName,
-        testName,
-        resultStatus,
-        testCategory: "laboratory",
-        collectedAt: occurredAt,
-        reportedAt: readIsoDateTime(context.resource.issued),
-        results,
-        rawRefs: [context.rawRef],
-        evidence: [evidenceForResource(context, resourceId)],
-        externalRef: externalRefForResource(context, "Observation", resourceId),
-      },
+      kind: "test",
+      occurredAt,
+      source: "import",
+      title: testName,
+      testName,
+      resultStatus,
+      testCategory: "laboratory",
+      collectedAt: occurredAt,
+      reportedAt: readIsoDateTime(context.resource.issued),
+      results,
+      evidence: [evidenceForResource(context, resourceId)],
+      externalRef: externalRefForResource(context, "Observation", resourceId),
     },
-    "clinical candidate exceeds supported import bounds",
+    "clinical upsert exceeds supported import bounds",
   );
 }
 
 function mapDiagnosticReport(context: FhirResourceContext<DiagnosticReport>): MappedFhirResource {
   const resourceId = readResourceId(context.resource);
   if (!resourceId) {
-    return unsupportedOnly(context, "FHIR resource id is missing");
+    return reviewOnly(context, "FHIR resource id is missing");
   }
 
   if (!hasImportableStatus(context.resource.status, IMPORTABLE_DIAGNOSTIC_REPORT_STATUSES)) {
-    return unsupportedOnly(context, "diagnostic report status is not importable");
+    return reviewOnly(context, "diagnostic report status is not importable");
   }
 
   const occurredAt = readClinicalOccurredAt(context.resource);
@@ -846,99 +875,89 @@ function mapDiagnosticReport(context: FhirResourceContext<DiagnosticReport>): Ma
 
   if (conclusion || narrativeText) {
     if (!occurredAt) {
-      return unsupportedOnly(context, "clinical timestamp is missing");
+      return reviewOnly(context, "clinical timestamp is missing");
     }
     const summary = conclusion ?? narrativeText ?? "";
     if (summary.length > DIAGNOSTIC_SUMMARY_MAX_LENGTH) {
-      return unsupportedOnly(context, "diagnostic report summary exceeds candidate bounds");
+      return reviewOnly(context, "diagnostic report summary exceeds supported import bounds");
     }
     const resultInterpretation = resultInterpretationFromInterpretation(context.resource.conclusionCode);
     if (resultInterpretation.status === "ambiguous") {
-      return unsupportedOnly(context, "clinical result interpretation is ambiguous");
+      return reviewOnly(context, "clinical result interpretation is ambiguous");
     }
     const resultStatus = resultInterpretation.status;
 
-    return candidateOnly(
+    return upsertOrReview(
       context,
       {
-        kind: "diagnostic-test",
-        rawRef: context.rawRef,
-        resource: sourceRef(context, resourceId, "diagnostic-report-summary"),
-        payload: {
-          occurredAt,
-          source: "import",
-          title: testName,
-          testName,
-          resultStatus,
-          summary,
-          testCategory: "diagnostic-report",
-          reportedAt: readIsoDateTime(context.resource.issued),
-          rawRefs: [context.rawRef],
-          evidence: [evidenceForResource(context, resourceId)],
-          externalRef: externalRefForResource(context, "DiagnosticReport", resourceId),
-        },
+        kind: "test",
+        occurredAt,
+        source: "import",
+        title: testName,
+        testName,
+        resultStatus,
+        summary,
+        testCategory: "diagnostic-report",
+        reportedAt: readIsoDateTime(context.resource.issued),
+        evidence: [evidenceForResource(context, resourceId)],
+        externalRef: externalRefForResource(context, "DiagnosticReport", resourceId),
       },
-      "clinical candidate exceeds supported import bounds",
+      "clinical upsert exceeds supported import bounds",
     );
   }
 
-  return unsupportedOnly(context, "diagnostic report summary is not available in raw FHIR page");
+  return reviewOnly(context, "diagnostic report summary is not available in raw FHIR page");
 }
 
 function mapDocumentReference(context: FhirResourceContext<DocumentReference>): MappedFhirResource {
   const resourceId = readResourceId(context.resource);
   if (!resourceId) {
-    return unsupportedOnly(context, "FHIR resource id is missing");
+    return reviewOnly(context, "FHIR resource id is missing");
   }
 
   if (!hasImportableStatus(context.resource.status, IMPORTABLE_DOCUMENT_REFERENCE_STATUSES)) {
-    return unsupportedOnly(context, "document reference status is not importable");
+    return reviewOnly(context, "document reference status is not importable");
   }
 
   if (!hasImportableOptionalStatus(context.resource.docStatus, IMPORTABLE_DOCUMENT_REFERENCE_DOC_STATUSES)) {
-    return unsupportedOnly(context, "document reference docStatus is not importable");
+    return reviewOnly(context, "document reference docStatus is not importable");
   }
 
   const noteDecision = decideDocumentReferenceText(context.resource);
   if (noteDecision.status === "ambiguous") {
-    return unsupportedOnly(context, "document reference has multiple inline text attachments");
+    return reviewOnly(context, "document reference has multiple inline text attachments");
   }
   if (noteDecision.status === "unavailable") {
-    return unsupportedOnly(context, "document reference text is not available in raw FHIR page");
+    return reviewOnly(context, "document reference text is not available in raw FHIR page");
   }
   const note = noteDecision.text;
   if (note.length > CLINICAL_NOTE_MAX_LENGTH) {
-    return unsupportedOnly(context, "document reference text exceeds candidate bounds");
+    return reviewOnly(context, "document reference text exceeds supported import bounds");
   }
 
   const occurredAt = readClinicalOccurredAt(context.resource);
   if (!occurredAt) {
-    return unsupportedOnly(context, "clinical timestamp is missing");
+    return reviewOnly(context, "clinical timestamp is missing");
   }
 
   const title = readString(context.resource.description)
     ?? textForCodeableConcept(context.resource.type)
     ?? "FHIR document reference";
 
-  return candidateOnly(
+  return upsertOrReview(
     context,
     {
-      kind: "clinical-note",
-      rawRef: context.rawRef,
-      resource: sourceRef(context, resourceId, "document-note"),
-      payload: {
-        occurredAt,
-        source: "import",
-        title,
-        note,
-        noteType: "fhir_document_reference",
-        authoredAt: readIsoDateTime(context.resource.date),
-        rawRefs: [context.rawRef],
-        evidence: [evidenceForResource(context, resourceId)],
-        externalRef: externalRefForResource(context, "DocumentReference", resourceId),
-      },
+      kind: "note",
+      occurredAt,
+      source: "import",
+      title,
+      note,
+      noteType: "fhir_document_reference",
+      authoredAt: readIsoDateTime(context.resource.date),
+      evidence: [evidenceForResource(context, resourceId)],
+      externalRef: externalRefForResource(context, "DocumentReference", resourceId),
     },
-    "clinical candidate exceeds supported import bounds",
+    "clinical upsert exceeds supported import bounds",
   );
 }
 
@@ -948,85 +967,75 @@ function mapAllergyIntolerance(
 ): MappedFhirResource {
   const resourceId = readResourceId(context.resource);
   if (!resourceId) {
-    return unsupportedOnly(context, "FHIR resource id is missing");
+    return reviewOnly(context, "FHIR resource id is missing");
   }
 
   if (codeableConceptHasCodeWithUnexpectedSystem(context.resource.code, FHIR_SYSTEM_SNOMED_CT, NO_KNOWN_ALLERGY_CODES)) {
-    return unsupportedOnly(context, "no-known allergy code system is not importable");
+    return reviewOnly(context, "no-known allergy code system is not importable");
   }
 
   if (hasTrustedNoKnownAllergyCode(context.resource) && !isNoKnownAllergy(context.resource)) {
-    return unsupportedOnly(context, "no-known allergy code is ambiguous");
+    return reviewOnly(context, "no-known allergy code is ambiguous");
   }
 
   if (!isNoKnownAllergy(context.resource)) {
-    return { candidates: [], unsupported: [unsupportedResource(context, "allergy registry import not implemented")] };
+    return reviewOnly(context, "allergy registry import not implemented");
   }
 
   if (!hasImportableAllergyStatus(context.resource)) {
-    return unsupportedOnly(context, "allergy status is not importable");
+    return reviewOnly(context, "allergy status is not importable");
   }
 
   if (!isImportableGlobalNoKnownAllergyAssertion(context.resource) || allergyEvidence.hasConflict) {
-    return unsupportedOnly(context, "no-known allergy conflicts with allergy evidence");
+    return reviewOnly(context, "no-known allergy conflicts with allergy evidence");
   }
   if (!allergyEvidence.complete) {
-    return unsupportedOnly(context, "no-known allergy conflicts with incomplete allergy evidence");
+    return reviewOnly(context, "no-known allergy conflicts with incomplete allergy evidence");
   }
 
-  const occurredAt = readClinicalOccurredAt(context.resource);
-  if (!occurredAt) {
-    return unsupportedOnly(context, "clinical timestamp is missing");
+  const recordedDate = readString(context.resource.recordedDate);
+  const occurredAt = readIsoDateTime(recordedDate);
+  if (!recordedDate || !occurredAt) {
+    return reviewOnly(context, "clinical timestamp is missing");
   }
 
-  return candidateOnly(
+  return upsertOrReview(
     context,
     {
-      kind: "assertion",
-      rawRef: context.rawRef,
-      resource: sourceRef(context, resourceId, "no-known-allergies"),
-      payload: {
-        occurredAt,
-        source: "import",
-        title: "No known allergies",
-        assertion: "no_known_allergies",
-        domain: "allergy",
-        polarity: "absent",
-        subject: "allergies",
-        assertedOn: occurredAt.slice(0, 10),
-        sourceLabel: "FHIR AllergyIntolerance",
-        rawRefs: [context.rawRef],
-        evidence: [evidenceForResource(context, resourceId)],
-        externalRef: externalRefForResource(context, "AllergyIntolerance", resourceId),
-      },
+      kind: "clinical_assertion",
+      occurredAt,
+      source: "import",
+      title: "No known allergies",
+      assertion: "no_known_allergies",
+      domain: "allergy",
+      polarity: "absent",
+      subject: "allergies",
+      assertedOn: recordedDate.slice(0, 10),
+      sourceLabel: "FHIR AllergyIntolerance",
+      evidence: [evidenceForResource(context, resourceId)],
+      externalRef: externalRefForResource(context, "AllergyIntolerance", resourceId),
     },
-    "clinical candidate exceeds supported import bounds",
+    "clinical upsert exceeds supported import bounds",
   );
 }
 
-function buildVitalsCandidate(
+function buildVitalsPayload(
   context: FhirResourceContext<Observation>,
   input: {
-    facet: string;
     measurements: VitalMeasurementInput[];
     occurredAt: string;
     resourceId: string;
     title: string;
   },
-): ClinicalImportCandidate {
+): Record<string, unknown> {
   return {
-    kind: "vitals",
-    rawRef: context.rawRef,
-    resource: sourceRef(context, input.resourceId, input.facet),
-    payload: {
-      occurredAt: input.occurredAt,
-      source: "import",
-      title: input.title,
-      measurements: input.measurements,
-      rawRefs: [context.rawRef],
-      evidence: [evidenceForResource(context, input.resourceId)],
-      externalRef: externalRefForResource(context, "Observation", input.resourceId),
-    },
+    kind: "measurement",
+    occurredAt: input.occurredAt,
+    source: "import",
+    title: input.title,
+    measurements: input.measurements,
+    evidence: [evidenceForResource(context, input.resourceId)],
+    externalRef: externalRefForResource(context, "Observation", input.resourceId),
   };
 }
 
@@ -1099,48 +1108,30 @@ function clinicalSlugFields(value: string): Pick<BloodTestResultRecord, "biomark
   return { biomarkerSlug: slug, slug };
 }
 
-function sourceRef(context: FhirResourceContext, resourceId: string, facet: string) {
-  return {
-    sourceSystem: context.manifest.sourceSystem,
-    resourceType: readString(context.resource.resourceType) ?? "FHIR",
-    resourceId,
-    version: readResourceVersion(context.resource),
-    facet: clinicalFacetSlug(facet),
-    rawRef: context.rawRef,
-  };
-}
-
 function externalRefForResource(
   context: FhirResourceContext,
   resourceType: string,
   resourceId: string,
 ) {
+  const version = readResourceUpdatedAt(context.resource);
+  if (!version) {
+    throw new Error("Clinical FHIR source revision is missing after admission.");
+  }
   return externalRefForFhir({
     fhirBaseUrlHash: context.manifest.fhirBaseUrlHash,
     patientIdHash: context.manifest.patientIdHash,
     sourceSystem: context.manifest.sourceSystem,
     resourceType,
     resourceId,
-    version: readResourceUpdatedAt(context.resource),
+    version,
   });
 }
 
-function evidenceForResource(context: FhirResourceContext, resourceId: string) {
+function evidenceForResource(context: FhirResourceContext, resourceId?: string) {
+  const resourceType = readString(context.resource.resourceType) ?? "FHIR";
   return {
     rawRef: context.rawRef,
-    sourceLabel: `${readString(context.resource.resourceType) ?? "FHIR"}/${resourceId}`,
-  };
-}
-
-function unsupportedResource(
-  context: FhirResourceContext,
-  reason: string,
-): ClinicalImportUnsupportedResource {
-  return {
-    resourceType: readString(context.resource.resourceType) ?? "Unknown",
-    resourceId: readResourceId(context.resource),
-    reason,
-    rawRef: context.rawRef,
+    sourceLabel: resourceId ? `${resourceType}/${resourceId}` : resourceType,
   };
 }
 
@@ -1171,6 +1162,9 @@ function extractFhirResources(
   }
   if (!isFhirBundle(value)) {
     throw new Error(`Clinical FHIR raw page has an invalid shape for ${input.rawRef}.`);
+  }
+  if (hasUnsupportedFhirBundleEnvelopeModifier(value)) {
+    throw new Error(`Clinical FHIR raw Bundle has unsupported modifier semantics for ${input.rawRef}.`);
   }
 
   if (value.entry === undefined) {
@@ -1247,20 +1241,74 @@ function isAllergyConflictEvidence(resource: Resource): boolean {
   if (!ALLERGY_CONFLICT_RESOURCE_TYPES.has(resource.resourceType)) {
     return false;
   }
+  if (hasUnsupportedFhirModifier(resource)) {
+    return true;
+  }
   if (isAllergyIntolerance(resource)) {
     return !isImportableGlobalNoKnownAllergyAssertion(resource);
   }
-  if (!isCondition(resource)) {
-    return false;
-  }
-  if (codeableConceptHasSystemCode(resource.code, FHIR_SYSTEM_SNOMED_CT, ALLERGY_CONDITION_SNOMED_CODES)) {
-    return true;
+  return resource.resourceType === "Condition";
+}
+
+function hasUnsupportedFhirModifier(value: unknown): boolean {
+  const pending: unknown[] = [value];
+  while (pending.length > 0) {
+    const current = pending.pop();
+    if (Array.isArray(current)) {
+      for (const nested of current) {
+        pending.push(nested);
+      }
+      continue;
+    }
+    if (!isRecord(current)) {
+      continue;
+    }
+    if (hasUnsupportedFhirModifierFields(current)) {
+      return true;
+    }
+    for (const nested of Object.values(current)) {
+      pending.push(nested);
+    }
   }
 
-  return [
-    readString(resource.code?.text),
-    ...codingsForCodeableConcept(resource.code).map((coding) => coding.display),
-  ].some((value) => value !== undefined && ALLERGY_CONDITION_TEXT_PATTERN.test(value));
+  return false;
+}
+
+function hasUnsupportedFhirBundleEnvelopeModifier(bundle: Bundle): boolean {
+  const pending: unknown[] = [bundle];
+  while (pending.length > 0) {
+    const current = pending.pop();
+    if (Array.isArray(current)) {
+      for (const nested of current) {
+        pending.push(nested);
+      }
+      continue;
+    }
+    if (!isRecord(current)) {
+      continue;
+    }
+    if (hasUnsupportedFhirModifierFields(current)) {
+      return true;
+    }
+    for (const [key, nested] of Object.entries(current)) {
+      if (key !== "resource") {
+        pending.push(nested);
+      }
+    }
+  }
+
+  return false;
+}
+
+function hasUnsupportedFhirModifierFields(value: Record<string, unknown>): boolean {
+  if (Object.hasOwn(value, "implicitRules")) {
+    return true;
+  }
+  if (!Object.hasOwn(value, "modifierExtension")) {
+    return false;
+  }
+
+  return !Array.isArray(value.modifierExtension) || value.modifierExtension.length > 0;
 }
 
 function isNoKnownAllergyConceptText(value: string | undefined): boolean {
@@ -1456,8 +1504,8 @@ function readIsoDateTime(value: unknown): string | undefined {
   if (!text) {
     return undefined;
   }
-  if (isStrictIsoDateTime(text)) {
-    return text;
+  if (isWritableIsoDateTime(text)) {
+    return new Date(text).toISOString();
   }
 
   return undefined;
@@ -1467,12 +1515,9 @@ function readResourceId(resource: Resource): string | undefined {
   return readString(resource.id);
 }
 
-function readResourceVersion(resource: Resource): string | undefined {
-  return readString(resource.meta?.versionId);
-}
-
 function readResourceUpdatedAt(resource: Resource): string | undefined {
-  return readIsoDateTime(resource.meta?.lastUpdated);
+  const text = readString(resource.meta?.lastUpdated);
+  return text && isWritableIsoDateTime(text) ? text : undefined;
 }
 
 function readQuantityValue(
@@ -1606,10 +1651,6 @@ function textFromNarrative(value: Narrative | undefined): string | null {
 
 function isObservation(resource: Resource): resource is Observation {
   return resource.resourceType === "Observation";
-}
-
-function isCondition(resource: Resource): resource is Condition {
-  return resource.resourceType === "Condition";
 }
 
 function isDiagnosticReport(resource: Resource): resource is DiagnosticReport {

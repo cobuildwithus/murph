@@ -9,7 +9,7 @@ The package boundary is intentionally small:
 - source-system and FHIR resource constants
 - clinical raw FHIR retrieval manifest contracts
 - deterministic FHIR external-reference helpers namespaced by FHIR base and patient hashes
-- clinical import-plan and Tier 1 candidate contracts
+- clinical `upsert | retract | review` import-plan decision contracts
 
 FHIR/MyChart data remains raw evidence. Canonical Murph records stay in the
 vault and must be written through the existing core/import surfaces.
@@ -30,18 +30,28 @@ empty completed family has a declared zero-count raw file.
 
 The clinical importer reads each raw page once, then validates its hash, count,
 resource family, patient binding, and pagination links before mapping any
-candidate. Pagination links must remain under the manifest FHIR base, resolve
+decision. Pagination links must remain under the manifest FHIR base, resolve
 within the declared resource family, form an acyclic chain, and reach every
-declared continuation page from a root page. A no-known-allergies candidate
+declared continuation page from a root page. A no-known-allergies upsert
 additionally requires completed, error-free `AllergyIntolerance` and
 `Condition` retrieval with granted read scope for both families.
 
-## Candidate identity and freshness
+## Decision identity, provenance, and freshness
 
-One FHIR resource maps to one external identity regardless of whether its
-current content maps as a scalar, panel, or another supported shape. Mapping
-facets remain provenance only. Supported candidates require a strict
-`meta.lastUpdated`, stored as `externalRef.version`; core bulk event import
-skips an older ISO source revision, rejects conflicting content at the same
-source revision, and supersedes only with a newer revision. Raw evidence refs
-remain attached to every candidate.
+Each FHIR resource emits exactly one `upsert`, `retract`, or `review` decision.
+Upserts and retractions share one facet-free external identity regardless of
+whether the current resource maps as a scalar, panel, or another supported
+shape. Every decision carries its raw evidence, while retrieval metadata stays
+on the plan. A strict `meta.lastUpdated` is required as the exact
+`externalRef.version`.
+
+Core bulk event import skips older revisions and source-semantically equal
+same-version replays even when retrieval paths differ. It rejects true
+same-version conflicts, supersedes newer same-kind upserts, tombstones and
+replaces a live event when a newer revision changes kind, and tombstones the
+live event for a newer authoritative retraction. Versioned decisions for one
+source identity are applied in source-revision order within a batch. When a
+retraction arrives before any live fact, core writes an invisible deleted source
+marker into the existing event ledger; older or equal revisions cannot later
+resurrect it, while a newer upsert can become live. Review decisions preserve
+raw evidence without mutating canonical records.

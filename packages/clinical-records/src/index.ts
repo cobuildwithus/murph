@@ -1,20 +1,11 @@
 import { createHash } from "node:crypto";
 
 import {
-  BLOOD_TEST_FASTING_STATUSES,
-  CLINICAL_ASSERTION_DOMAINS,
-  CLINICAL_ASSERTION_POLARITIES,
-  CLINICAL_ASSERTION_TYPES,
-  EVENT_SOURCES,
-  TEST_RESULT_STATUSES,
-  bloodTestResultSchema,
   clinicalEvidenceRefSchema,
-  clinicalNoteSectionSchema,
-  externalRefSchema,
-  isStrictIsoDate,
+  eventImportRetractionDecisionSchema,
   isStrictIsoDateTime,
-  isValidIanaTimeZone,
-  measurementEntrySchema,
+  publicEventImportJsonlRowPayloadSchemasByKind,
+  versionedExternalRefSchema,
 } from "@murphai/contracts";
 import { z } from "zod";
 
@@ -42,15 +33,7 @@ export const CLINICAL_FHIR_RESOURCE_TYPES = Object.freeze([
   "Goal",
 ] as const);
 
-export const CLINICAL_IMPORT_CANDIDATE_KINDS = Object.freeze([
-  "assertion",
-  "clinical-note",
-  "diagnostic-test",
-  "vitals",
-] as const);
-
-export const CLINICAL_IMPORT_PLAN_MAX_CANDIDATES = 5_000;
-export const CLINICAL_IMPORT_PLAN_MAX_UNSUPPORTED = 10_000;
+export const CLINICAL_IMPORT_PLAN_MAX_DECISIONS = 5_000;
 export const CLINICAL_RAW_MANIFEST_MAX_RESOURCE_FILES = 500;
 export const CLINICAL_RAW_MANIFEST_MAX_RESOURCES_PER_FILE = 1_000;
 export const CLINICAL_RAW_MANIFEST_MAX_TOTAL_RESOURCES = 5_000;
@@ -113,18 +96,6 @@ const isoDateTimeTextSchema = z.string().refine(
   "Invalid ISO date-time string.",
 );
 
-const isoDateTextSchema = z.string().refine(
-  (value) => isStrictIsoDate(value),
-  "Invalid ISO date string.",
-);
-
-const timeZoneTextSchema = z.string().refine(
-  (value) => isValidIanaTimeZone(value),
-  "Invalid IANA time zone.",
-);
-
-const slugSchema = z.string().regex(SLUG_PATTERN).max(80);
-
 export const clinicalRawManifestResourceFileSchema = z
   .object({
     resourceType: clinicalFhirResourceTypeSchema,
@@ -178,7 +149,7 @@ const clinicalRawManifestCompletedResourceTypesSchema = z
 
 export const clinicalRawManifestErrorSchema = z
   .object({
-    resourceType: z.string().min(1).max(80).optional(),
+    resourceType: clinicalFhirResourceTypeSchema.optional(),
     code: z.string().min(1).max(80),
     message: z.string().min(1).max(500),
   })
@@ -215,127 +186,74 @@ export const clinicalRawManifestSchema = z
     }
   });
 
-export const fhirSourceRefSchema = z
-  .object({
-    sourceSystem: clinicalSourceSystemSchema,
-    resourceType: z.string().min(1).max(80),
-    resourceId: z.string().min(1).max(200),
-    version: z.string().min(1).max(200).optional(),
-    facet: slugSchema.optional(),
-    rawRef: clinicalRawPathSchema,
-  })
-  .strict();
+export const clinicalFhirExternalRefSchema = versionedExternalRefSchema.omit({ facet: true });
 
-const candidateCommonPayloadSchema = z
-  .object({
-    occurredAt: isoDateTimeTextSchema,
-    recordedAt: isoDateTimeTextSchema.optional(),
-    timeZone: timeZoneTextSchema.optional(),
-    source: z.enum(EVENT_SOURCES).default("import"),
-    title: z.string().min(1).max(160).optional(),
-    note: z.string().min(1).max(4000).optional(),
-    tags: z.array(slugSchema).max(25).optional(),
-    rawRefs: z.array(clinicalRawPathSchema).max(50).optional(),
-    evidence: z.array(clinicalEvidenceRefSchema).max(50).optional(),
-    externalRef: externalRefSchema,
-  })
-  .strict();
+const clinicalDecisionEvidenceSchema = z.array(clinicalEvidenceRefSchema).min(1).max(50);
 
-export const clinicalVitalsCandidatePayloadSchema = candidateCommonPayloadSchema
-  .extend({
-    title: z.string().min(1).max(160).default("FHIR vitals"),
-    measurements: z.array(measurementEntrySchema).min(1).max(25),
-  })
-  .strict();
+const clinicalUpsertOwnedShape = {
+  evidence: clinicalDecisionEvidenceSchema,
+  externalRef: clinicalFhirExternalRefSchema,
+  source: z.literal("import"),
+} satisfies z.ZodRawShape;
 
-export const clinicalDiagnosticTestCandidatePayloadSchema = candidateCommonPayloadSchema
-  .extend({
-    testName: z.string().min(1).max(160),
-    resultStatus: z.enum(TEST_RESULT_STATUSES).default("unknown"),
-    summary: z.string().min(1).max(1000).optional(),
-    testCategory: z.string().min(1).max(64).optional(),
-    specimenType: z.string().min(1).max(64).optional(),
-    labName: z.string().min(1).max(160).optional(),
-    labPanelId: z.string().min(1).max(120).optional(),
-    collectedAt: isoDateTimeTextSchema.optional(),
-    reportedAt: isoDateTimeTextSchema.optional(),
-    fastingStatus: z.enum(BLOOD_TEST_FASTING_STATUSES).optional(),
-    results: z.array(bloodTestResultSchema).min(1).max(500).optional(),
-  })
-  .strict();
+const clinicalImportBoundaryFields = {
+  attachments: true,
+  dataOrigin: true,
+  evidence: true,
+  externalRef: true,
+  links: true,
+  rawRefs: true,
+  source: true,
+} as const;
 
-export const clinicalNoteCandidatePayloadSchema = candidateCommonPayloadSchema
-  .extend({
-    title: z.string().min(1).max(160).default("FHIR clinical note"),
-    note: z.string().min(1).max(4000).optional(),
-    noteType: z.string().min(1).max(120).default("clinical_note"),
-    authoredAt: isoDateTimeTextSchema.optional(),
-    signedAt: isoDateTimeTextSchema.optional(),
-    author: z.string().min(1).max(160).optional(),
-    facility: z.string().min(1).max(160).optional(),
-    sections: z.array(clinicalNoteSectionSchema).min(1).max(50).optional(),
-  })
-  .strict()
-  .superRefine((value, context) => {
-    if (!value.note && (!value.sections || value.sections.length === 0)) {
-      context.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: "clinical-note candidate requires note or sections.",
-        path: ["note"],
-      });
-    }
-  });
-
-export const clinicalAssertionCandidatePayloadSchema = candidateCommonPayloadSchema
-  .extend({
-    title: z.string().min(1).max(160).default("FHIR clinical assertion"),
-    assertion: z.enum(CLINICAL_ASSERTION_TYPES),
-    domain: z.enum(CLINICAL_ASSERTION_DOMAINS).optional(),
-    polarity: z.enum(CLINICAL_ASSERTION_POLARITIES).optional(),
-    subject: z.string().min(1).max(240).optional(),
-    assertionText: z.string().min(1).max(1000).optional(),
-    bodySite: z.string().min(1).max(120).optional(),
-    code: z.string().min(1).max(80).optional(),
-    codeSystem: z.string().min(1).max(80).optional(),
-    assertedOn: isoDateTextSchema,
-    sourceLabel: z.string().min(1).max(240).optional(),
-  })
-  .strict();
-
-const clinicalImportCandidateBaseSchema = z
-  .object({
-    resource: fhirSourceRefSchema,
-    rawRef: clinicalRawPathSchema,
-  })
-  .strict();
-
-export const clinicalImportCandidateSchema = z.discriminatedUnion("kind", [
-  clinicalImportCandidateBaseSchema.extend({
-    kind: z.literal("assertion"),
-    payload: clinicalAssertionCandidatePayloadSchema,
-  }),
-  clinicalImportCandidateBaseSchema.extend({
-    kind: z.literal("clinical-note"),
-    payload: clinicalNoteCandidatePayloadSchema,
-  }),
-  clinicalImportCandidateBaseSchema.extend({
-    kind: z.literal("diagnostic-test"),
-    payload: clinicalDiagnosticTestCandidatePayloadSchema,
-  }),
-  clinicalImportCandidateBaseSchema.extend({
-    kind: z.literal("vitals"),
-    payload: clinicalVitalsCandidatePayloadSchema,
-  }),
+export const clinicalImportUpsertPayloadSchema = z.discriminatedUnion("kind", [
+  publicEventImportJsonlRowPayloadSchemasByKind.clinical_assertion
+    .omit(clinicalImportBoundaryFields)
+    .extend(clinicalUpsertOwnedShape)
+    .strict(),
+  publicEventImportJsonlRowPayloadSchemasByKind.measurement
+    .omit(clinicalImportBoundaryFields)
+    .extend(clinicalUpsertOwnedShape)
+    .strict(),
+  publicEventImportJsonlRowPayloadSchemasByKind.note
+    .omit(clinicalImportBoundaryFields)
+    .extend(clinicalUpsertOwnedShape)
+    .strict(),
+  publicEventImportJsonlRowPayloadSchemasByKind.test
+    .omit(clinicalImportBoundaryFields)
+    .extend(clinicalUpsertOwnedShape)
+    .strict(),
 ]);
 
-export const clinicalImportUnsupportedResourceSchema = z
+export const clinicalImportUpsertDecisionSchema = z
   .object({
-    resourceType: z.string().min(1).max(80),
-    resourceId: z.string().min(1).max(200).optional(),
-    reason: z.string().min(1).max(240),
-    rawRef: clinicalRawPathSchema,
+    action: z.literal("upsert"),
+    payload: clinicalImportUpsertPayloadSchema,
   })
   .strict();
+
+export const clinicalImportRetractDecisionSchema = eventImportRetractionDecisionSchema
+  .extend({
+    evidence: clinicalDecisionEvidenceSchema,
+    externalRef: clinicalFhirExternalRefSchema,
+  })
+  .strict();
+
+export const clinicalImportReviewDecisionSchema = z
+  .object({
+    action: z.literal("review"),
+    resourceType: clinicalFhirResourceTypeSchema,
+    resourceId: z.string().min(1).max(200).optional(),
+    reason: z.string().min(1).max(240),
+    evidence: clinicalDecisionEvidenceSchema,
+  })
+  .strict();
+
+export const clinicalImportDecisionSchema = z.discriminatedUnion("action", [
+  clinicalImportUpsertDecisionSchema,
+  clinicalImportRetractDecisionSchema,
+  clinicalImportReviewDecisionSchema,
+]);
 
 export const clinicalImportPlanSchema = z
   .object({
@@ -349,19 +267,17 @@ export const clinicalImportPlanSchema = z
         retrievalJobId: clinicalFhirPathIdSchema,
       })
       .strict(),
-    candidates: z.array(clinicalImportCandidateSchema).max(CLINICAL_IMPORT_PLAN_MAX_CANDIDATES),
-    unsupported: z.array(clinicalImportUnsupportedResourceSchema).max(CLINICAL_IMPORT_PLAN_MAX_UNSUPPORTED),
+    decisions: z.array(clinicalImportDecisionSchema).max(CLINICAL_IMPORT_PLAN_MAX_DECISIONS),
   })
   .strict();
 
 export type ClinicalSourceSystem = z.infer<typeof clinicalSourceSystemSchema>;
 export type ClinicalRawManifest = z.infer<typeof clinicalRawManifestSchema>;
 export type ClinicalRawManifestResourceFile = z.infer<typeof clinicalRawManifestResourceFileSchema>;
-export type FhirSourceRef = z.infer<typeof fhirSourceRefSchema>;
-export type ClinicalImportCandidate = z.infer<typeof clinicalImportCandidateSchema>;
+export type ClinicalFhirExternalRef = z.infer<typeof clinicalFhirExternalRefSchema>;
+export type ClinicalImportUpsertPayload = z.infer<typeof clinicalImportUpsertPayloadSchema>;
+export type ClinicalImportDecision = z.infer<typeof clinicalImportDecisionSchema>;
 export type ClinicalImportPlan = z.infer<typeof clinicalImportPlanSchema>;
-export type ClinicalImportUnsupportedResource = z.infer<typeof clinicalImportUnsupportedResourceSchema>;
-export type ClinicalImportCandidateKind = (typeof CLINICAL_IMPORT_CANDIDATE_KINDS)[number];
 
 export function fhirResourceTypeToSlug(resourceType: string): string {
   return resourceType
@@ -535,8 +451,7 @@ export function externalRefForFhir(input: {
   sourceSystem: ClinicalSourceSystem;
   resourceType: string;
   resourceId: string;
-  version?: string | undefined;
-  facet?: string | undefined;
+  version: string;
 }) {
   const fhirBaseUrlHash = sha256HexSchema.parse(input.fhirBaseUrlHash);
   const patientIdHash = sha256HexSchema.parse(input.patientIdHash);
@@ -546,12 +461,11 @@ export function externalRefForFhir(input: {
     patientIdHash,
   ].join("-");
 
-  return externalRefSchema.parse({
+  return clinicalFhirExternalRefSchema.parse({
     system,
     resourceType: fhirResourceTypeToSlug(input.resourceType),
     resourceId: input.resourceId,
-    ...(input.version ? { version: input.version } : {}),
-    ...(input.facet ? { facet: clinicalFacetSlug(input.facet) } : {}),
+    version: input.version,
   });
 }
 
