@@ -16,15 +16,22 @@ import {
   getGeneratedHealthCommonsWebBiomarkerIndex,
   getGeneratedHealthCommonsWebExperimentIndex,
   getGeneratedHealthCommonsWebRouteIndex,
+  HEALTH_COMMONS_PROTOCOL_FAMILY_GRAPH_SCHEMA_VERSION,
+  HEALTH_COMMONS_PROTOCOL_INDEX_SCHEMA_VERSION,
+  HEALTH_COMMONS_PROTOCOL_RUN_SPECS_SCHEMA_VERSION,
   listGeneratedAssistantProtocolIndexEntries,
   loadGeneratedHealthCommonsProtocolFamilyGraph,
   loadGeneratedHealthCommonsProtocolIndex,
   loadGeneratedHealthCommonsProtocolRunSpecs,
+  loadGeneratedHealthCommonsWebBiomarkerIndex,
+  loadGeneratedHealthCommonsWebExperimentIndex,
   loadGeneratedHealthCommonsWebExperimentProtocolTab,
   loadGeneratedHealthCommonsWebExperimentResearchTab,
   loadGeneratedHealthCommonsWebExperimentResultsPublic,
   loadGeneratedHealthCommonsWebExperimentShell,
   loadGeneratedHealthCommonsWebRouteBundle,
+  loadGeneratedHealthCommonsWebRouteIndex,
+  MURPH_HEALTH_COMMONS_PACKAGE_ROOT_ENV,
 } from "@murphai/health-commons";
 import { healthCommonsCatalogSchema } from "@murphai/contracts";
 
@@ -330,6 +337,120 @@ describe("@murphai/health-commons runtime catalog reader", () => {
         Object.keys(entry).sort().join(",") === "category,routeId,title"
       ),
     ).toBe(true);
+  });
+
+  it("falls back to package-relative generated artifacts when the package root env is unset", () => {
+    const previousPackageRoot =
+      process.env[MURPH_HEALTH_COMMONS_PACKAGE_ROOT_ENV];
+    delete process.env[MURPH_HEALTH_COMMONS_PACKAGE_ROOT_ENV];
+    try {
+      const protocolIndex = loadGeneratedHealthCommonsProtocolIndex();
+      const routeIndex = loadGeneratedHealthCommonsWebRouteIndex();
+
+      expect(protocolIndex.protocols.length).toBeGreaterThan(0);
+      expect(
+        protocolIndex.protocols.some((protocol) => protocol.routeId === "finnish-sauna"),
+      ).toBe(true);
+      expect(routeIndex.routes.length).toBeGreaterThan(0);
+      expect(
+        routeIndex.routes.some((route) => route.routeId === "finnish-sauna"),
+      ).toBe(true);
+    } finally {
+      if (previousPackageRoot === undefined) {
+        delete process.env[MURPH_HEALTH_COMMONS_PACKAGE_ROOT_ENV];
+      } else {
+        process.env[MURPH_HEALTH_COMMONS_PACKAGE_ROOT_ENV] = previousPackageRoot;
+      }
+    }
+  });
+
+  it("uses the env-pinned package root for generated runtime artifacts when present", async () => {
+    const packageRoot = await mkdtemp(
+      path.join(os.tmpdir(), "murph-health-commons-package-root-"),
+    );
+    const generatedRoot = path.join(packageRoot, "generated");
+    await mkdir(path.join(generatedRoot, "web", "routes"), { recursive: true });
+
+    const catalogHash = `sha256:${"2".repeat(64)}`;
+    await writeFile(
+      path.join(generatedRoot, "protocol-index.json"),
+      `${JSON.stringify({
+        catalogHash,
+        protocols: [],
+        schemaVersion: HEALTH_COMMONS_PROTOCOL_INDEX_SCHEMA_VERSION,
+      })}\n`,
+      "utf8",
+    );
+    await writeFile(
+      path.join(generatedRoot, "protocol-run-specs.json"),
+      `${JSON.stringify({
+        catalogHash,
+        protocols: [],
+        schemaVersion: HEALTH_COMMONS_PROTOCOL_RUN_SPECS_SCHEMA_VERSION,
+      })}\n`,
+      "utf8",
+    );
+    await writeFile(
+      path.join(generatedRoot, "protocol-family-graph.json"),
+      `${JSON.stringify({
+        catalogHash,
+        edges: [],
+        families: [],
+        protocols: [],
+        schemaVersion: HEALTH_COMMONS_PROTOCOL_FAMILY_GRAPH_SCHEMA_VERSION,
+      })}\n`,
+      "utf8",
+    );
+    await writeFile(
+      path.join(generatedRoot, "web", "routes", "index.json"),
+      `${JSON.stringify({
+        catalogHash,
+        routes: [],
+        schemaVersion: "murph.commons.web.route-index.v1",
+      })}\n`,
+      "utf8",
+    );
+
+    const previousPackageRoot =
+      process.env[MURPH_HEALTH_COMMONS_PACKAGE_ROOT_ENV];
+    process.env[MURPH_HEALTH_COMMONS_PACKAGE_ROOT_ENV] = packageRoot;
+    try {
+      expect(loadGeneratedHealthCommonsProtocolIndex().catalogHash).toBe(catalogHash);
+      expect(loadGeneratedHealthCommonsProtocolRunSpecs().catalogHash).toBe(catalogHash);
+      expect(loadGeneratedHealthCommonsProtocolFamilyGraph().catalogHash).toBe(catalogHash);
+      expect(loadGeneratedHealthCommonsWebRouteIndex().catalogHash).toBe(catalogHash);
+    } finally {
+      if (previousPackageRoot === undefined) {
+        delete process.env[MURPH_HEALTH_COMMONS_PACKAGE_ROOT_ENV];
+      } else {
+        process.env[MURPH_HEALTH_COMMONS_PACKAGE_ROOT_ENV] = previousPackageRoot;
+      }
+    }
+  });
+
+  it("fails web artifact loads under the env-pinned package root instead of probing cwd fallbacks", async () => {
+    const packageRoot = await mkdtemp(
+      path.join(os.tmpdir(), "murph-health-commons-empty-package-root-"),
+    );
+    const previousPackageRoot =
+      process.env[MURPH_HEALTH_COMMONS_PACKAGE_ROOT_ENV];
+    process.env[MURPH_HEALTH_COMMONS_PACKAGE_ROOT_ENV] = packageRoot;
+    try {
+      const expectedWebRootPath = path.join(packageRoot, "generated", "web");
+
+      expect(() => loadGeneratedHealthCommonsWebRouteIndex())
+        .toThrow(path.join(expectedWebRootPath, "routes", "index.json"));
+      expect(() => loadGeneratedHealthCommonsWebExperimentIndex())
+        .toThrow(path.join(expectedWebRootPath, "browse", "experiments.json"));
+      expect(() => loadGeneratedHealthCommonsWebBiomarkerIndex())
+        .toThrow(path.join(expectedWebRootPath, "browse", "biomarkers.json"));
+    } finally {
+      if (previousPackageRoot === undefined) {
+        delete process.env[MURPH_HEALTH_COMMONS_PACKAGE_ROOT_ENV];
+      } else {
+        process.env[MURPH_HEALTH_COMMONS_PACKAGE_ROOT_ENV] = previousPackageRoot;
+      }
+    }
   });
 
   it("builds assistant protocol entries from the compact protocol index without web artifacts", async () => {

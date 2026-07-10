@@ -32,12 +32,12 @@ import {
   appendTranscriptEntries,
   inspectAssistantSessionStorage,
   loadAndPersistResolvedSession,
+  readAssistantRecentSessionIds,
   readAssistantIndexStore,
   readAssistantSession,
   readAssistantTranscriptEntries,
   readAssistantTranscriptTailEntries,
   readAutomationState,
-  ensureAssistantRecentSessionsProjection,
   writeAutomationState,
   replaceTranscriptEntries,
   synchronizeAssistantIndexes,
@@ -325,8 +325,20 @@ function hasAssistantSessionProviderOverrideInput(
 
 export async function listAssistantSessions(
   vault: string,
+  options?: {
+    limit?: number
+  },
 ): Promise<AssistantSession[]> {
-  return listAssistantSessionsLocal(vault)
+  if (typeof options?.limit !== 'number') {
+    return listAssistantSessionsLocal(vault)
+  }
+
+  const limit = Math.max(0, Math.trunc(options.limit))
+  return withAssistantRuntimeWriteLock(vault, async (paths) => {
+    await ensureAssistantState(paths)
+    const sessionIds = await readAssistantRecentSessionIds(paths, { limit })
+    return (await readAssistantSessionsSorted(paths, sessionIds)).slice(0, limit)
+  })
 }
 
 // Maps a Codex thread back to the Murph assistant session that owns it (via
@@ -349,30 +361,6 @@ export async function listAssistantSessionsLocal(
   return withAssistantRuntimeWriteLock(vault, async (paths) => {
     await ensureAssistantState(paths)
     return readAssistantSessionsSorted(paths, await listAssistantSessionFileIds(paths))
-  })
-}
-
-// Bounded variant for recurring maintenance work: reads the bounded
-// recent-session projection from the assistant index store (maintained on
-// every session save, rebuilt from durable session records when missing) and
-// parses only the newest `limit` sessions by durable last-activity timestamp.
-export async function listRecentAssistantSessions(
-  vault: string,
-  options: { limit: number },
-): Promise<AssistantSession[]> {
-  return withAssistantRuntimeWriteLock(vault, async (paths) => {
-    await ensureAssistantState(paths)
-
-    const recentSessions = await ensureAssistantRecentSessionsProjection(paths)
-    return readAssistantSessionsSorted(
-      paths,
-      Object.entries(recentSessions)
-        .sort(([, left], [, right]) =>
-          compareAssistantTimestampsAscending(right, left),
-        )
-        .slice(0, Math.max(0, options.limit))
-        .map(([sessionId]) => sessionId),
-    )
   })
 }
 

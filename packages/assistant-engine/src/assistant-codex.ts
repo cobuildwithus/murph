@@ -118,6 +118,8 @@ import type {
 import type {
   AssistantNoReplyDisposition,
   AssistantProviderDynamicTool,
+  AssistantProviderRequestStartedEvent,
+  AssistantProviderRequestStartTiming,
   AssistantProviderServiceTier,
   AssistantProviderUsageDraft,
 } from './assistant/providers/types.js'
@@ -431,7 +433,7 @@ export interface CodexAppServerTurnInput {
   onFinishWithoutReplyAccepted?: ((event: {
     deliveryContextOrdinal: number
   }) => Promise<void> | void) | null
-  onProviderRequestStarted?: ((event: { startedAt: string }) => Promise<void> | void) | null
+  onProviderRequestStarted?: ((event: AssistantProviderRequestStartedEvent) => Promise<void> | void) | null
   onTraceEvent?: (event: AssistantProviderTraceEvent) => void
   hostedGeneratedImageUploader?: AssistantHostedGeneratedImageUploader | null
   materializeWorkspaceArtifacts?: AssistantWorkspaceArtifactMaterializer | null
@@ -2317,6 +2319,8 @@ async function runCodexAppServerTurnOnProcess(
     new Map<number, number>()
   let stdinFailure: VaultCliError | null = null
   let lastTimingAt = Date.now()
+  const codexAppServerTurnStartedAt = lastTimingAt
+  const codexAppServerProviderStartTiming: AssistantProviderRequestStartTiming = {}
   let liveInterruptRequested = false
 
   let completeTurn: (() => void) | null = null
@@ -2448,18 +2452,31 @@ async function runCodexAppServerTurnOnProcess(
   }
 
   const emitAppServerTimingTrace = (stage: string) => {
+    const now = Date.now()
+    const elapsedMs = Math.max(0, now - lastTimingAt)
+    if (stage === 'spawn-ready') {
+      codexAppServerProviderStartTiming.codexAppServerSpawnReadyMs = elapsedMs
+    } else if (stage === 'initialized') {
+      codexAppServerProviderStartTiming.codexAppServerInitializeMs = elapsedMs
+    } else if (stage === 'warm-reused') {
+      codexAppServerProviderStartTiming.codexAppServerWarmReuseMs = elapsedMs
+    } else if (stage === 'thread-resumed') {
+      codexAppServerProviderStartTiming.codexAppServerThreadResumeMs = elapsedMs
+    } else if (stage === 'thread-started') {
+      codexAppServerProviderStartTiming.codexAppServerThreadStartMs = elapsedMs
+    }
+    lastTimingAt = now
     if (!input.onTraceEvent) {
       return
     }
 
-    const now = Date.now()
     try {
       input.onTraceEvent({
         codexThreadId,
         rawEvent: {
           schema: CODEX_APP_SERVER_TIMING_TRACE_SCHEMA,
           type: CODEX_APP_SERVER_TIMING_TRACE_TYPE,
-          codexTimingElapsedMs: Math.max(0, now - lastTimingAt),
+          codexTimingElapsedMs: elapsedMs,
           codexTimingProviderActionCount: providerActionCount,
           codexTimingThreadIdPresent: codexThreadId !== null,
           codexTimingStage: stage,
@@ -2468,7 +2485,6 @@ async function runCodexAppServerTurnOnProcess(
         },
         updates: [],
       })
-      lastTimingAt = now
     } catch {
       // Timing traces are diagnostic-only and must not block assistant turns.
     }
@@ -2671,9 +2687,17 @@ async function runCodexAppServerTurnOnProcess(
       return
     }
     providerRequestStartedNotified = true
+    const startedAtMs = Date.now()
     notifyCodexAppServerProviderRequestStartedBestEffort({
       hook: input.onProviderRequestStarted ?? null,
-      startedAt: new Date().toISOString(),
+      startedAt: new Date(startedAtMs).toISOString(),
+      timing: {
+        ...codexAppServerProviderStartTiming,
+        codexAppServerPreProviderMs: Math.max(
+          0,
+          startedAtMs - codexAppServerTurnStartedAt,
+        ),
+      },
     })
   }
 
@@ -3986,15 +4010,19 @@ function emitCodexSuppressedFinalMessageTrace(input: {
 }
 
 function notifyCodexAppServerProviderRequestStartedBestEffort(input: {
-  hook?: ((event: { startedAt: string }) => Promise<void> | void) | null
+  hook?: ((event: AssistantProviderRequestStartedEvent) => Promise<void> | void) | null
   startedAt: string
+  timing?: AssistantProviderRequestStartTiming
 }): void {
   if (!input.hook) {
     return
   }
 
   try {
-    void Promise.resolve(input.hook({ startedAt: input.startedAt })).catch(() => {
+    void Promise.resolve(input.hook({
+      ...(input.timing ?? {}),
+      startedAt: input.startedAt,
+    })).catch(() => {
       // Provider-start hooks are diagnostic-only and must not block turns.
     })
   } catch {

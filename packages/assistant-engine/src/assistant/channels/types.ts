@@ -45,6 +45,7 @@ export interface EmailRuntimeDependencies {
 export interface LinqRuntimeDependencies {
   env?: NodeJS.ProcessEnv
   fetchImplementation?: LinqFetch
+  publicFetchImplementation?: LinqFetch
   loadVaultFile?: (
     media: AssistantVaultFileResponseMedia,
   ) => Promise<Uint8Array>
@@ -63,6 +64,8 @@ export interface AssistantChannelDependencies {
   signal?: AbortSignal
   startLinqTyping?: (input: {
     target: string
+    targetKind?: AssistantChannelDeliveryTargetKind | null
+    replyToMessageId?: string | null
   }) => Promise<AssistantChannelActivityHandle | void>
   startTelegramTyping?: (input: {
     target: string
@@ -137,6 +140,7 @@ export interface AssistantChannelDependencies {
     answeredMailboxItemIds?: readonly string[] | null
     directRecipientPhoneNumber?: string | null
     fromPhoneNumber?: string | null
+    homeRouteFallbackAllowed?: boolean | null
     idempotencyKey?: string | null
     media?: readonly AssistantResponseMedia[] | null
     message: string
@@ -157,6 +161,7 @@ export interface AssistantChannelDependencies {
   sendLinqVoiceMemo?: (input: {
     answeredMailboxItemIds?: readonly string[] | null
     attachmentId: string
+    homeRouteFallbackAllowed?: boolean | null
     replyToMessageId?: string | null
     signal?: AbortSignal
     target: string
@@ -230,6 +235,7 @@ export interface AssistantChannelAdapter {
       bindingDelivery: AssistantBindingDelivery | null
       explicitTarget: string | null
       identityId: string | null
+      replyToMessageId?: string | null
     },
     dependencies: AssistantChannelDependencies,
   ) => Promise<AssistantChannelActivityHandle | null>
@@ -247,6 +253,7 @@ export interface AssistantChannelAdapter {
       message: string
       replyToMessageId?: string | null
       subject?: string | null
+      threadIsDirect?: boolean | null
     },
     dependencies: AssistantChannelDependencies,
   ) => Promise<ReturnType<typeof assistantChannelDeliverySchema.parse>>
@@ -278,6 +285,7 @@ export interface AssistantChannelAdapterSpec {
     candidate: AssistantDeliveryCandidate
     dependencies: AssistantChannelDependencies
     identityId: string | null
+    replyToMessageId: string | null
   }) => Promise<AssistantChannelActivityHandle | null | void>
   supportsIdempotencyKey: boolean
   resolveDeliveryTransportIdempotent?: (input: {
@@ -287,15 +295,18 @@ export interface AssistantChannelAdapterSpec {
   sendMessage: (input: {
     actorId: string | null
     answeredMailboxItemIds?: readonly string[] | null
+    bindingDelivery: AssistantBindingDelivery | null
     candidate: AssistantDeliveryCandidate
     deliverySource?: AssistantDeliverySource | null
     dependencies: AssistantChannelDependencies
+    explicitTarget: string | null
     idempotencyKey?: string | null
     identityId: string | null
     media: readonly AssistantResponseMedia[]
     message: string
     replyToMessageId?: string | null
     subject?: string | null
+    threadIsDirect: boolean | null
   }) => Promise<
     | {
         providerMessageId?: string | null

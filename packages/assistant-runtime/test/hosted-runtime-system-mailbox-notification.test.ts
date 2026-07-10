@@ -8,6 +8,7 @@ import {
   buildHostedExecutionDeviceSyncWake,
   buildHostedExecutionMemberActivatedWake,
   buildHostedExecutionMemberChannelsUpdatedWake,
+  buildHostedExecutionMemberPreferencesUpdatedWake,
   buildHostedExecutionRuntimeControlWake,
 } from "@murphai/hosted-execution";
 import {
@@ -43,6 +44,10 @@ import {
   resolveHostedSystemMailboxNextWakeAt,
   restoreHostedSystemMailboxCheckpointRollbackState,
 } from "../src/hosted-runtime/system-mailbox.ts";
+import {
+  readHostedSystemMailboxState,
+  type HostedSystemMailboxPendingItem,
+} from "../src/hosted-runtime/system-mailbox-state.ts";
 import {
   createHostedRuntimeResolvedConfig,
   createHostedRuntimeWorkspace,
@@ -1354,6 +1359,230 @@ describe("hosted system mailbox notification execution context", () => {
       await workspace.cleanup();
     }
   });
+
+  it("supersedes older pending member preference snapshots when a newer snapshot is queued", async () => {
+    const workspace = await createHostedRuntimeWorkspace("murph-hosted-system-mailbox-");
+    const olderWake = buildHostedExecutionMemberPreferencesUpdatedWake({
+      eventId: "member.preferences.updated:older",
+      memberId: "member_123",
+      occurredAt: FIXED_NOW,
+      preferences: {
+        tone: "casual",
+      },
+    });
+    const newerWake = buildHostedExecutionMemberPreferencesUpdatedWake({
+      eventId: "member.preferences.updated:newer",
+      memberId: "member_123",
+      occurredAt: "2026-04-27T00:00:01.000Z",
+      preferences: {
+        tone: "formal",
+        voice: "warm",
+      },
+    });
+
+    try {
+      await enqueueHostedSystemMailboxItem({
+        item: createResolvedMemberPreferencesItem({
+          id: "mailbox_item_system_member_preferences_001",
+          laneSeq: "1",
+        }),
+        vaultRoot: workspace.vaultRoot,
+        wake: olderWake,
+      });
+      await enqueueHostedSystemMailboxItem({
+        item: createResolvedMemberPreferencesItem({
+          id: "mailbox_item_system_member_preferences_002",
+          laneSeq: "2",
+        }),
+        vaultRoot: workspace.vaultRoot,
+        wake: newerWake,
+      });
+
+      const prepared = await prepareHostedSystemMailboxItemForCheckpoint({
+        allowedRouteActions: ["apply-member-preferences"],
+        executionContext: null,
+        now: () => FIXED_NOW,
+        runtime: createRuntime({}),
+        runtimeEnv: {},
+        vaultRoot: workspace.vaultRoot,
+      });
+
+      assert.equal(prepared?.status, "processed");
+      assert.equal(prepared.itemId, "mailbox_item_system_member_preferences_002");
+      assert.equal(prepared.item.mailboxLaneSeq, "2");
+      expect(mocks.executeHostedMailboxEvent).toHaveBeenCalledTimes(1);
+      expect(mocks.executeHostedMailboxEvent).toHaveBeenCalledWith(
+        expect.objectContaining({
+          wake: expect.objectContaining({
+            eventId: "member.preferences.updated:newer",
+          }),
+        }),
+      );
+      assert.equal(
+        await resolveHostedSystemMailboxNextWakeAt({
+          allowedRouteActions: ["apply-member-preferences"],
+          now: () => FIXED_NOW,
+          vaultRoot: workspace.vaultRoot,
+        }),
+        null,
+      );
+    } finally {
+      await workspace.cleanup();
+    }
+  });
+
+  it("uses mailbox lane sequence when rollback leaves multiple pending member preference snapshots", async () => {
+    const workspace = await createHostedRuntimeWorkspace("murph-hosted-system-mailbox-");
+    const lowerSeqNewerTimestampWake = buildHostedExecutionMemberPreferencesUpdatedWake({
+      eventId: "member.preferences.updated:lower-seq-newer-timestamp",
+      memberId: "member_123",
+      occurredAt: "2026-04-27T00:00:05.000Z",
+      preferences: {
+        tone: "casual",
+      },
+    });
+    const higherSeqOlderTimestampWake = buildHostedExecutionMemberPreferencesUpdatedWake({
+      eventId: "member.preferences.updated:higher-seq-older-timestamp",
+      memberId: "member_123",
+      occurredAt: "2026-04-27T00:00:01.000Z",
+      preferences: {
+        tone: "formal",
+        voice: "warm",
+      },
+    });
+
+    try {
+      await restoreHostedSystemMailboxCheckpointRollbackState({
+        state: {
+          pending: [
+            createPendingMemberPreferencesItem({
+              itemId: "mailbox_item_system_member_preferences_lower_seq",
+              laneSeq: "41",
+              occurredAt: "2026-04-27T00:00:05.000Z",
+              wake: lowerSeqNewerTimestampWake,
+            }),
+            createPendingMemberPreferencesItem({
+              itemId: "mailbox_item_system_member_preferences_higher_seq",
+              laneSeq: "42",
+              occurredAt: "2026-04-27T00:00:01.000Z",
+              wake: higherSeqOlderTimestampWake,
+            }),
+          ],
+        },
+        vaultRoot: workspace.vaultRoot,
+      });
+
+      const prepared = await prepareHostedSystemMailboxItemForCheckpoint({
+        allowedRouteActions: ["apply-member-preferences"],
+        executionContext: null,
+        now: () => FIXED_NOW,
+        runtime: createRuntime({}),
+        runtimeEnv: {},
+        vaultRoot: workspace.vaultRoot,
+      });
+
+      assert.equal(prepared?.status, "processed");
+      assert.equal(prepared.itemId, "mailbox_item_system_member_preferences_higher_seq");
+      assert.equal(prepared.item.mailboxLaneSeq, "42");
+      expect(mocks.executeHostedMailboxEvent).toHaveBeenCalledTimes(1);
+      expect(mocks.executeHostedMailboxEvent).toHaveBeenCalledWith(
+        expect.objectContaining({
+          wake: expect.objectContaining({
+            eventId: "member.preferences.updated:higher-seq-older-timestamp",
+          }),
+        }),
+      );
+      assert.deepEqual(
+        (await readHostedSystemMailboxState(workspace.vaultRoot)).pending,
+        [],
+      );
+    } finally {
+      await workspace.cleanup();
+    }
+  });
+
+  it("runs the latest due member preference snapshot while an older retry waits", async () => {
+    const workspace = await createHostedRuntimeWorkspace("murph-hosted-system-mailbox-");
+    const olderWake = buildHostedExecutionMemberPreferencesUpdatedWake({
+      eventId: "member.preferences.updated:older-retry",
+      memberId: "member_123",
+      occurredAt: FIXED_NOW,
+      preferences: {
+        tone: "casual",
+      },
+    });
+    const newerWake = buildHostedExecutionMemberPreferencesUpdatedWake({
+      eventId: "member.preferences.updated:newer-due",
+      memberId: "member_123",
+      occurredAt: "2026-04-27T00:00:01.000Z",
+      preferences: {
+        tone: "formal",
+      },
+    });
+
+    try {
+      await enqueueHostedSystemMailboxItem({
+        item: createResolvedMemberPreferencesItem({
+          id: "mailbox_item_system_member_preferences_retry_001",
+          laneSeq: "1",
+        }),
+        vaultRoot: workspace.vaultRoot,
+        wake: olderWake,
+      });
+
+      mocks.executeHostedMailboxEvent.mockRejectedValueOnce(
+        Object.assign(new Error("transient preference failure"), {
+          code: "HOSTED_MEMBER_PREFERENCES_TRANSIENT",
+        }),
+      );
+      const failed = await prepareHostedSystemMailboxItemForCheckpoint({
+        allowedRouteActions: ["apply-member-preferences"],
+        executionContext: null,
+        now: () => FIXED_NOW,
+        runtime: createRuntime({}),
+        runtimeEnv: {},
+        vaultRoot: workspace.vaultRoot,
+      });
+      assert.equal(failed?.status, "retryable_failed");
+
+      await enqueueHostedSystemMailboxItem({
+        item: createResolvedMemberPreferencesItem({
+          id: "mailbox_item_system_member_preferences_retry_002",
+          laneSeq: "2",
+        }),
+        vaultRoot: workspace.vaultRoot,
+        wake: newerWake,
+      });
+
+      const prepared = await prepareHostedSystemMailboxItemForCheckpoint({
+        allowedRouteActions: ["apply-member-preferences"],
+        executionContext: null,
+        now: () => FIXED_NOW,
+        runtime: createRuntime({}),
+        runtimeEnv: {},
+        vaultRoot: workspace.vaultRoot,
+      });
+
+      assert.equal(prepared?.status, "processed");
+      assert.equal(prepared.itemId, "mailbox_item_system_member_preferences_retry_002");
+      expect(mocks.executeHostedMailboxEvent.mock.calls.map((call) =>
+        call[0]?.wake?.eventId
+      )).toEqual([
+        "member.preferences.updated:older-retry",
+        "member.preferences.updated:newer-due",
+      ]);
+      assert.equal(
+        await resolveHostedSystemMailboxNextWakeAt({
+          allowedRouteActions: ["apply-member-preferences"],
+          now: () => "2026-04-27T00:01:00.000Z",
+          vaultRoot: workspace.vaultRoot,
+        }),
+        null,
+      );
+    } finally {
+      await workspace.cleanup();
+    }
+  });
 });
 
 function createRuntime(
@@ -1426,6 +1655,74 @@ function createResolvedNotificationItem(overrides: Partial<{
       },
       state: "route",
     },
+  };
+}
+
+function createResolvedMemberPreferencesItem(overrides: Partial<{
+  id: string;
+  laneSeq: string;
+}> = {}): HostedMailboxResolvedImportItem {
+  const item: HostedMailboxItem = {
+    createdAt: FIXED_NOW,
+    dedupeKey: "member.preferences.updated:member_123",
+    expiresAt: null,
+    id: overrides.id ?? "mailbox_item_system_member_preferences",
+    kind: "member.preferences.updated",
+    lane: "system",
+    laneSeq: overrides.laneSeq ?? "1",
+    occurredAt: FIXED_NOW,
+    payloadBytes: 64,
+    payloadInlineCiphertext: "ciphertext",
+    payloadRef: null,
+    payloadSchema: "murph.hosted-mailbox-item.v1",
+    updatedAt: FIXED_NOW,
+    userId: "member_123",
+  };
+
+  return {
+    item,
+    payload: {
+      payloadCiphertext: "ciphertext",
+      payloadSchema: "murph.hosted-mailbox-payload.v1",
+      requestId: null,
+      source: "inline",
+      status: "resolved",
+    },
+    route: {
+      action: "apply-member-preferences",
+      advanceProgress: true,
+      itemRef: {
+        id: item.id,
+        kind: item.kind,
+        lane: item.lane,
+        laneSeq: item.laneSeq,
+      },
+      state: "route",
+    },
+  };
+}
+
+function createPendingMemberPreferencesItem(input: {
+  itemId: string;
+  laneSeq: string;
+  occurredAt: string;
+  wake: HostedSystemMailboxPendingItem["wake"];
+}): HostedSystemMailboxPendingItem {
+  return {
+    attemptCount: 0,
+    itemId: input.itemId,
+    lastAttemptAt: null,
+    lastErrorCode: null,
+    lastErrorMessage: null,
+    mailboxDedupeKey: "member.preferences.updated:member_123",
+    mailboxLaneSeq: input.laneSeq,
+    nextAttemptAt: null,
+    occurredAt: input.occurredAt,
+    postCheckpointRecord: null,
+    requestId: null,
+    routeAction: "apply-member-preferences",
+    status: "pending",
+    wake: input.wake,
   };
 }
 

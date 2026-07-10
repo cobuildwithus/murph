@@ -7,6 +7,7 @@ export const activityKindAliasGroups = [
   ["swim", "swimming"],
   ["hike", "hiking"],
   ["row", "rowing"],
+  ["sauna"],
   ["strength", "strength-training", "weightlifting", "weights"],
   ["sleep", "sleep-session", "sleep-summary", "sleep-cycle"],
 ] as const satisfies readonly (readonly string[])[];

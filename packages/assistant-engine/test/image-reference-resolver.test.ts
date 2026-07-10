@@ -199,11 +199,27 @@ describe('image-reference-resolver', () => {
     })
   })
 
-  it('rejects files larger than the per-file budget proven safe for the hosted Worker proxy', async () => {
-    expect(MAX_GENERATE_IMAGE_REFERENCE_BYTES).toBe(2 * 1024 * 1024)
+  it('rejects files larger than the per-file budget while allowing generated-image-sized refs', async () => {
+    expect(MAX_GENERATE_IMAGE_REFERENCE_BYTES).toBe(10 * 1024 * 1024)
     expect(MAX_GENERATE_IMAGE_REFERENCE_TOTAL_BYTES).toBe(32 * 1024 * 1024)
 
     await withTempVault(async (vaultRoot) => {
+      const generatedSized = new Uint8Array(3 * 1024 * 1024)
+      generatedSized.set(PNG_BYTES, 0)
+      await writeVaultFile(vaultRoot, 'raw/captures/2026/07/generated/ref.png', generatedSized)
+
+      await expect(
+        resolveGenerateImageReferences({
+          refs: ['raw/captures/2026/07/generated/ref.png'],
+          vaultRoot,
+        }),
+      ).resolves.toMatchObject([
+        {
+          mediaType: 'image/png',
+          sourceRef: 'raw/captures/2026/07/generated/ref.png',
+        },
+      ])
+
       const oversize = new Uint8Array(MAX_GENERATE_IMAGE_REFERENCE_BYTES + 1)
       oversize.set(PNG_BYTES, 0)
       await writeVaultFile(vaultRoot, 'raw/inbox/huge.png', oversize)

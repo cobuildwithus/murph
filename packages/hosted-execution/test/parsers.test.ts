@@ -401,11 +401,13 @@ describe("parseHostedExecutionEvent", () => {
 
   it("parses group newsletter email-needed events and wakes", () => {
     expect(parseHostedExecutionEvent({
+      directRoute: { channel: "linq", threadId: "linq_home_thread_123" },
       groupDisplayName: "Tempo Crew",
       groupId: "hgrp_123",
       kind: "group-newsletter.email-needed",
       userId: "member_123",
     })).toEqual({
+      directRoute: { channel: "linq", threadId: "linq_home_thread_123" },
       groupDisplayName: "Tempo Crew",
       groupId: "hgrp_123",
       kind: "group-newsletter.email-needed",
@@ -413,6 +415,7 @@ describe("parseHostedExecutionEvent", () => {
     });
 
     expect(parseHostedExecutionWake({
+      directRoute: { channel: "telegram", threadId: "telegram_thread_123" },
       eventId: "group-newsletter.email-needed:member_123:hgrp_123",
       groupDisplayName: "Tempo Crew",
       groupId: "hgrp_123",
@@ -420,6 +423,7 @@ describe("parseHostedExecutionEvent", () => {
       occurredAt: "2026-04-26T00:00:00.000Z",
       userId: "member_123",
     })).toEqual({
+      directRoute: { channel: "telegram", threadId: "telegram_thread_123" },
       eventId: "group-newsletter.email-needed:member_123:hgrp_123",
       groupDisplayName: "Tempo Crew",
       groupId: "hgrp_123",
@@ -526,6 +530,7 @@ describe("parseHostedRuntimeGroupTool", () => {
     kind: "friends",
     memberCount: 3,
     requestedVaultShareProjectionKinds: ["sleep-times.v0"],
+    requestedVaultShareProjectionScopes: [{ projectionKind: "sleep-times.v0" }],
     status: "active",
   };
   const PARSED_GROUP_SUMMARY = {
@@ -539,6 +544,17 @@ describe("parseHostedRuntimeGroupTool", () => {
     })).toEqual({
       action: "read_current",
     });
+    expect(parseHostedRuntimeGroupToolRequest({
+      action: "update_display_name",
+      updateDisplayName: {
+        displayName: "  Weekly   Health Crew  ",
+      },
+    })).toEqual({
+      action: "update_display_name",
+      updateDisplayName: {
+        displayName: "Weekly Health Crew",
+      },
+    });
 
     expect(parseHostedRuntimeGroupToolRequest({
       action: "create_join_link",
@@ -550,42 +566,87 @@ describe("parseHostedRuntimeGroupTool", () => {
       joinLink: {
         displayName: "Sunday sleep crew",
         kind: "friends",
-        requestedVaultShareProjectionKinds: ["sleep-times.v0", "activity-days.v0"],
+        requestedVaultShareProjectionScopes: [
+          { projectionKind: "sleep-times.v0" },
+          {
+            projectionKind: "activity-minutes-days.v1",
+            selector: { activityKind: "running" },
+          },
+          {
+            projectionKind: "activity-distance-days.v1",
+            selector: { activityKind: "running" },
+          },
+          {
+            projectionKind: "activity-session-count-days.v1",
+            selector: { activityKind: "running" },
+          },
+        ],
       },
     })).toEqual({
       action: "create_join_link",
       joinLink: {
         displayName: "Sunday sleep crew",
         kind: "friends",
-        requestedVaultShareProjectionKinds: ["sleep-times.v0", "activity-days.v0"],
+        requestedVaultShareProjectionKinds: null,
+        requestedVaultShareProjectionScopes: [
+          { projectionKind: "sleep-times.v0" },
+          {
+            projectionKind: "activity-minutes-days.v1",
+            selector: { activityKind: "running" },
+          },
+          {
+            projectionKind: "activity-distance-days.v1",
+            selector: { activityKind: "running" },
+          },
+          {
+            projectionKind: "activity-session-count-days.v1",
+            selector: { activityKind: "running" },
+          },
+        ],
       },
     });
     expect(parseHostedRuntimeGroupToolRequest({
       action: "post_join_offer",
       joinOffer: {
+        displayName: "Sunday Sleep Crew",
         messageTemplate:
           "  React here to join. Shares {{share_scope}}. Page: {{join_url}}.  ",
-        projectionKinds: ["group-email.v0"],
+        projectionScopes: [{ projectionKind: "group-email.v0" }],
       },
     })).toEqual({
       action: "post_join_offer",
       joinOffer: {
+        displayName: "Sunday Sleep Crew",
         messageTemplate: "React here to join. Shares {{share_scope}}. Page: {{join_url}}.",
-        projectionKinds: ["group-email.v0"],
+        projectionKinds: null,
+        projectionScopes: [{ projectionKind: "group-email.v0" }],
       },
     });
     expect(parseHostedRuntimeGroupToolRequest({
-      action: "post_call_circle_offer",
-      callCircleOffer: {
-        message:
-          "Like this to opt into Call Circle for this group. If needed, Murph may add you to the group and share your Murph profile name with the group. Murph will ask you privately for availability. Join page: {{join_url}}",
+      action: "post_join_offer",
+      joinOffer: {
+        messageTemplate: "React here. Shares {{share_scope}}. Customize: {{join_url}}.",
       },
     })).toEqual({
-      action: "post_call_circle_offer",
-      callCircleOffer: {
-        message:
-          "Like this to opt into Call Circle for this group. If needed, Murph may add you to the group and share your Murph profile name with the group. Murph will ask you privately for availability. Join page: {{join_url}}",
+      action: "post_join_offer",
+      joinOffer: {
+        displayName: null,
+        messageTemplate: "React here. Shares {{share_scope}}. Customize: {{join_url}}.",
+        projectionKinds: null,
+        projectionScopes: null,
       },
+    });
+    expect(parseHostedRuntimeGroupToolRequest({
+      action: "set_chat_avatar",
+      groupChatIconUrl: "https://imagedelivery.net/account/avatar/public",
+    })).toEqual({
+      action: "set_chat_avatar",
+      groupChatIconUrl: "https://imagedelivery.net/account/avatar/public",
+    });
+    expect(parseHostedRuntimeGroupToolRequest({
+      action: "preflight_set_chat_avatar",
+    })).toEqual({
+      action: "preflight_set_chat_avatar",
     });
     expect(parseHostedRuntimeGroupToolRequest({
       action: "revoke_own_email_share",
@@ -614,6 +675,24 @@ describe("parseHostedRuntimeGroupTool", () => {
     ).toThrow(/not allowed/u);
     expect(() =>
       parseHostedRuntimeGroupToolRequest({
+        action: "update_display_name",
+        updateDisplayName: { displayName: "   " },
+      })
+    ).toThrow(/must not be blank/u);
+    expect(() =>
+      parseHostedRuntimeGroupToolRequest({
+        action: "update_display_name",
+        updateDisplayName: { displayName: "x".repeat(121) },
+      })
+    ).toThrow(/too long/u);
+    expect(() =>
+      parseHostedRuntimeGroupToolRequest({
+        action: "update_display_name",
+        displayName: "model-supplied shorthand",
+      })
+    ).toThrow(/not allowed/u);
+    expect(() =>
+      parseHostedRuntimeGroupToolRequest({
         action: "create_join_link",
         joinLink: { kind: "everyone" },
       })
@@ -621,17 +700,40 @@ describe("parseHostedRuntimeGroupTool", () => {
     expect(() =>
       parseHostedRuntimeGroupToolRequest({
         action: "create_join_link",
-        joinLink: { requestedVaultShareProjectionKinds: ["all-health-data"] },
+        joinLink: { requestedVaultShareProjectionScopes: [{ projectionKind: "all-health-data" }] },
       })
-    ).toThrow(/unsupported projection kind/u);
-    // Membership-implied, never requestable: the join-link request contract is closed
-    // over the individually selectable kinds.
+    ).toThrow(/unsupported projection scope/u);
     expect(() =>
       parseHostedRuntimeGroupToolRequest({
         action: "create_join_link",
-        joinLink: { requestedVaultShareProjectionKinds: ["profile-name.v0"] },
+        joinLink: { requestedVaultShareProjectionScopes: [{ projectionKind: "activity-minutes-days.v1" }] },
       })
-    ).toThrow(/unsupported projection kind/u);
+    ).toThrow(/unsupported projection scope/u);
+    expect(() =>
+      parseHostedRuntimeGroupToolRequest({
+        action: "create_join_link",
+        joinLink: { requestedVaultShareProjectionScopes: [{ projectionKind: "activity-distance-days.v1" }] },
+      })
+    ).toThrow(/unsupported projection scope/u);
+    expect(() =>
+      parseHostedRuntimeGroupToolRequest({
+        action: "create_join_link",
+        joinLink: {
+          requestedVaultShareProjectionScopes: [{
+            projectionKind: "activity-session-count-days.v1",
+            selector: { activityKind: "running+walking" },
+          }],
+        },
+      })
+    ).toThrow(/unsupported projection scope/u);
+    // Membership-implied, never requestable: the join-link request contract is closed
+    // over the individually selectable scopes.
+    expect(() =>
+      parseHostedRuntimeGroupToolRequest({
+        action: "create_join_link",
+        joinLink: { requestedVaultShareProjectionScopes: [{ projectionKind: "profile-name.v0" }] },
+      })
+    ).toThrow(/unsupported projection scope/u);
     expect(() =>
       parseHostedRuntimeGroupToolRequest({
         action: "create_join_link",
@@ -647,69 +749,64 @@ describe("parseHostedRuntimeGroupTool", () => {
     expect(() =>
       parseHostedRuntimeGroupToolRequest({
         action: "post_join_offer",
+        joinOffer: {
+          displayName: "   ",
+          messageTemplate: "React here. Shares {{share_scope}}. Customize: {{join_url}}.",
+        },
+      })
+    ).toThrow(/displayName must not be blank/u);
+    expect(() =>
+      parseHostedRuntimeGroupToolRequest({
+        action: "post_join_offer",
+        joinOffer: {
+          displayName: "a".repeat(121),
+          messageTemplate: "React here. Shares {{share_scope}}. Customize: {{join_url}}.",
+        },
+      })
+    ).toThrow(/displayName is too long/u);
+    expect(() =>
+      parseHostedRuntimeGroupToolRequest({
+        action: "post_join_offer",
         joinOffer: { messageTemplate: "   " },
       })
     ).toThrow(/messageTemplate must be between/u);
     expect(() =>
       parseHostedRuntimeGroupToolRequest({
         action: "post_join_offer",
-        joinOffer: { projectionKinds: ["profile-name.v0"] },
+        joinOffer: { projectionScopes: [{ projectionKind: "profile-name.v0" }] },
       })
-    ).toThrow(/unsupported projection kind/u);
+    ).toThrow(/unsupported projection scope/u);
     expect(() =>
       parseHostedRuntimeGroupToolRequest({
-        action: "post_call_circle_offer",
-        callCircleOffer: { message: "   " },
+        action: "set_chat_avatar",
+        groupChatIconUrl: "http://example.com/avatar.png",
       })
-    ).toThrow(/must not be blank/u);
+    ).toThrow(/must be HTTPS/u);
     expect(() =>
       parseHostedRuntimeGroupToolRequest({
-        action: "post_call_circle_offer",
-        callCircleOffer: { message: "Like this for a fun Call Circle update." },
+        action: "set_chat_avatar",
+        groupChatIconUrl: "https://user:pass@example.com/avatar.png",
       })
-    ).toThrow(/must contain \{\{join_url\}\} exactly once/u);
+    ).toThrow(/must be HTTPS/u);
     expect(() =>
       parseHostedRuntimeGroupToolRequest({
-        action: "post_call_circle_offer",
-        callCircleOffer: {
-          message:
-            "Like this to opt into Call Circle for this group. If needed, Murph may add you to the group and share your Murph profile name with the group. Murph will ask you privately for availability.",
-        },
+        action: "set_chat_avatar",
+        groupChatIconUrl: "https://example.com/avatar.png",
       })
-    ).toThrow(/must contain \{\{join_url\}\} exactly once/u);
+    ).toThrow(/groupChatIconUrl is invalid/u);
     expect(() =>
       parseHostedRuntimeGroupToolRequest({
-        action: "post_call_circle_offer",
-        callCircleOffer: { message: "Like this for a fun Call Circle update. Join page: {{join_url}}" },
+        action: "set_chat_avatar",
+        groupChatIconUrl: "https://imagedelivery.net/account/avatar",
       })
-    ).toThrow(/must say liking or reacting opts/u);
+    ).toThrow(/groupChatIconUrl is invalid/u);
     expect(() =>
       parseHostedRuntimeGroupToolRequest({
-        action: "post_call_circle_offer",
-        callCircleOffer: {
-          message:
-            "Like this to opt into Call Circle for this group. Murph will ask you privately for availability. Join page: {{join_url}}",
-        },
+        action: "set_chat_avatar",
+        chatId: "chat_hijack",
+        groupChatIconUrl: "https://example.com/avatar.png",
       })
-    ).toThrow(/shares their Murph profile name/u);
-    expect(() =>
-      parseHostedRuntimeGroupToolRequest({
-        action: "post_call_circle_offer",
-        callCircleOffer: {
-          message:
-            "Like this to opt into Call Circle for this group and share your Murph profile name with the group. Murph will ask you privately for availability. Join page: {{join_url}}",
-        },
-      })
-    ).toThrow(/may add them to the group/u);
-    expect(() =>
-      parseHostedRuntimeGroupToolRequest({
-        action: "post_call_circle_offer",
-        callCircleOffer: {
-          message:
-            "Like this if you do not want to join Call Circle for this group and do not want Murph to privately ask about your availability. Join page: {{join_url}}",
-        },
-      })
-    ).toThrow(/must say liking or reacting opts/u);
+    ).toThrow(/not allowed/u);
     expect(() =>
       parseHostedRuntimeGroupToolRequest({
         action: "revoke_own_email_share",
@@ -764,7 +861,134 @@ describe("parseHostedRuntimeGroupTool", () => {
     ).toThrow(/not allowed/u);
   });
 
-  it("parses posted group offer responses", () => {
+  it("parses update_display_name responses", () => {
+    expect(parseHostedRuntimeGroupToolResponse({
+      action: "update_display_name",
+      result: {
+        group: {
+          ...GROUP_SUMMARY,
+          displayName: "Weekly Health Crew",
+        },
+        status: "ok",
+      },
+    })).toEqual({
+      action: "update_display_name",
+      result: {
+        group: {
+          ...PARSED_GROUP_SUMMARY,
+          displayName: "Weekly Health Crew",
+        },
+        status: "ok",
+      },
+    });
+
+    expect(parseHostedRuntimeGroupToolResponse({
+      action: "update_display_name",
+      result: {
+        group: null,
+        status: "unavailable",
+        unavailableReason: "group_not_found",
+      },
+    })).toEqual({
+      action: "update_display_name",
+      result: {
+        group: null,
+        status: "unavailable",
+        unavailableReason: "group_not_found",
+      },
+    });
+
+    expect(() =>
+      parseHostedRuntimeGroupToolResponse({
+        action: "update_display_name",
+        result: {
+          group: GROUP_SUMMARY,
+          status: "ok",
+          updatedAt: "2026-07-07T00:00:00.000Z",
+        },
+      })
+    ).toThrow(/not allowed/u);
+  });
+
+  it("parses set_chat_avatar responses", () => {
+    expect(parseHostedRuntimeGroupToolResponse({
+      action: "set_chat_avatar",
+      result: {
+        status: "requested",
+      },
+    })).toEqual({
+      action: "set_chat_avatar",
+      result: {
+        status: "requested",
+      },
+    });
+
+    expect(parseHostedRuntimeGroupToolResponse({
+      action: "set_chat_avatar",
+      result: {
+        status: "ok",
+      },
+    })).toEqual({
+      action: "set_chat_avatar",
+      result: {
+        status: "ok",
+      },
+    });
+
+    expect(parseHostedRuntimeGroupToolResponse({
+      action: "set_chat_avatar",
+      result: {
+        status: "unavailable",
+        unavailableReason: "provider_unavailable",
+      },
+    })).toEqual({
+      action: "set_chat_avatar",
+      result: {
+        status: "unavailable",
+        unavailableReason: "provider_unavailable",
+      },
+    });
+
+    expect(() =>
+      parseHostedRuntimeGroupToolResponse({
+        action: "set_chat_avatar",
+        result: {
+          status: "ok",
+          url: "https://example.com/avatar.png",
+        },
+      })
+    ).toThrow(/not allowed/u);
+  });
+
+  it("parses preflight_set_chat_avatar responses", () => {
+    expect(parseHostedRuntimeGroupToolResponse({
+      action: "preflight_set_chat_avatar",
+      result: {
+        status: "ok",
+      },
+    })).toEqual({
+      action: "preflight_set_chat_avatar",
+      result: {
+        status: "ok",
+      },
+    });
+
+    expect(parseHostedRuntimeGroupToolResponse({
+      action: "preflight_set_chat_avatar",
+      result: {
+        status: "unavailable",
+        unavailableReason: "linq_thread_unavailable",
+      },
+    })).toEqual({
+      action: "preflight_set_chat_avatar",
+      result: {
+        status: "unavailable",
+        unavailableReason: "linq_thread_unavailable",
+      },
+    });
+  });
+
+  it("parses post_join_offer responses", () => {
     expect(parseHostedRuntimeGroupToolResponse({
       action: "post_join_offer",
       result: {
@@ -790,38 +1014,6 @@ describe("parseHostedRuntimeGroupTool", () => {
       },
     })).toEqual({
       action: "post_join_offer",
-      result: {
-        group: null,
-        status: "unavailable",
-        unavailableReason: "send_failed",
-      },
-    });
-
-    expect(parseHostedRuntimeGroupToolResponse({
-      action: "post_call_circle_offer",
-      result: {
-        group: GROUP_SUMMARY,
-        joinUrl: "https://example.com/groups/join/abc123",
-        status: "sent",
-      },
-    })).toEqual({
-      action: "post_call_circle_offer",
-      result: {
-        group: PARSED_GROUP_SUMMARY,
-        joinUrl: "https://example.com/groups/join/abc123",
-        status: "sent",
-      },
-    });
-
-    expect(parseHostedRuntimeGroupToolResponse({
-      action: "post_call_circle_offer",
-      result: {
-        group: null,
-        status: "unavailable",
-        unavailableReason: "send_failed",
-      },
-    })).toEqual({
-      action: "post_call_circle_offer",
       result: {
         group: null,
         status: "unavailable",
@@ -854,15 +1046,18 @@ describe("parseHostedRuntimeGroupTool", () => {
           ...GROUP_SUMMARY,
           members: [
             {
-              callCircle: { enrolled: true, paused: false },
               grantedVaultShareProjectionKinds: ["profile-name.v0", "sleep-times.v0"],
+              grantedVaultShareProjectionScopes: [
+                { projectionKind: "profile-name.v0" },
+                { projectionKind: "sleep-times.v0" },
+              ],
               handle: "+15551110000",
               memberId: "member_owner_123",
               role: "owner",
             },
             {
-              callCircle: null,
               grantedVaultShareProjectionKinds: [],
+              grantedVaultShareProjectionScopes: [],
               handle: null,
               memberId: "member_joiner_456",
               role: "member",
@@ -878,15 +1073,18 @@ describe("parseHostedRuntimeGroupTool", () => {
           ...GROUP_SUMMARY,
           members: [
             {
-              callCircle: { enrolled: true, paused: false },
               grantedVaultShareProjectionKinds: ["profile-name.v0", "sleep-times.v0"],
+              grantedVaultShareProjectionScopes: [
+                { projectionKind: "profile-name.v0" },
+                { projectionKind: "sleep-times.v0" },
+              ],
               handle: "+15551110000",
               memberId: "member_owner_123",
               role: "owner",
             },
             {
-              callCircle: null,
               grantedVaultShareProjectionKinds: [],
+              grantedVaultShareProjectionScopes: [],
               handle: null,
               memberId: "member_joiner_456",
               role: "member",
@@ -926,6 +1124,19 @@ describe("parseHostedRuntimeGroupTool", () => {
       action: "read_chat_participants",
     })).toEqual({
       action: "read_chat_participants",
+    });
+    expect(parseHostedRuntimeGroupToolRequest({
+      action: "update_display_name",
+      linqThread: LINQ_THREAD,
+      updateDisplayName: {
+        displayName: "  Weekly   Health Crew  ",
+      },
+    })).toEqual({
+      action: "update_display_name",
+      linqThread: LINQ_THREAD,
+      updateDisplayName: {
+        displayName: "Weekly Health Crew",
+      },
     });
     expect(parseHostedRuntimeGroupToolRequest({
       action: "share_contact_card",
@@ -973,6 +1184,13 @@ describe("parseHostedRuntimeGroupTool", () => {
       parseHostedRuntimeGroupToolRequest({
         action: "share_contact_card",
         chatId: "chat_group_1",
+      })
+    ).toThrow(/not allowed/u);
+    expect(() =>
+      parseHostedRuntimeGroupToolRequest({
+        action: "update_display_name",
+        chatId: "chat_group_1",
+        updateDisplayName: { displayName: "Weekly Health Crew" },
       })
     ).toThrow(/not allowed/u);
     expect(() =>

@@ -1175,6 +1175,51 @@ describe("hosted mailbox import loop", () => {
     assert.equal(result.state.watermarks.conversation, "2");
   });
 
+  test("continues the system lane after a skipped best-effort newsletter nudge", async () => {
+    const routeLessNewsletterNudge = createMailboxItem({
+      dedupeKey: "group-newsletter.email-needed:member_synthetic_import:hgrp_123",
+      id: "mailbox_item_system_newsletter_route_less",
+      kind: "group-newsletter.email-needed",
+      lane: "system",
+      laneSeq: "1",
+    });
+    const laterSystemItem = createMailboxItem({
+      id: "mailbox_item_system_after_newsletter_skip",
+      kind: "member.activated",
+      lane: "system",
+      laneSeq: "2",
+    });
+    const { mailboxPort } = createMailboxPort({
+      items: [routeLessNewsletterNudge, laterSystemItem],
+    });
+    const imported: string[] = [];
+
+    const result = await fetchAndProcessHostedMailboxPrefix({
+      expectedUserId: TEST_USER_ID,
+      async importItem(input) {
+        if (input.item.id === "mailbox_item_system_newsletter_route_less") {
+          return {
+            reasonCode: "group-newsletter.email-needed.no-direct-route",
+            status: "skipped",
+          };
+        }
+
+        imported.push(input.item.id);
+        return { status: "imported" };
+      },
+      limitPerLane: 10,
+      mailboxPort,
+      now: () => TEST_NOW,
+      requestId: "request_synthetic_import_newsletter_skip",
+      state: createEmptyHostedMailboxImportState(),
+    });
+
+    assert.deepEqual(imported, ["mailbox_item_system_after_newsletter_skip"]);
+    assert.deepEqual(result.blocked, []);
+    assert.equal(result.importedCount, 1);
+    assert.equal(result.state.watermarks.system, "2");
+  });
+
   test("interleaves mailbox lanes so conversation replies are not starved by system backlogs", async () => {
     const firstSystem = createMailboxItem({
       id: "mailbox_item_system_001",
@@ -1488,7 +1533,7 @@ describe("hosted mailbox import loop", () => {
     assert.equal(serialized.includes("source_cursor"), false);
   });
 
-  test("quarantines unknown future mailbox kinds and advances the lane", async () => {
+  test("defers unknown future mailbox kinds without advancing the lane", async () => {
     const item = createMailboxItem({
       id: "mailbox_item_system_future_kind",
       kind: "future.mailbox.kind" as HostedMailboxItem["kind"],
@@ -1516,11 +1561,12 @@ describe("hosted mailbox import loop", () => {
         itemId: "mailbox_item_system_future_kind",
         lane: "system",
         reasonCode: "route.unsupported_kind",
-        retryable: false,
+        retryable: true,
         seq: "1",
       },
     ]);
-    assert.equal(result.state.watermarks.system, "1");
+    assert.equal(result.nextRetryAt, "2026-04-26T00:00:15.000Z");
+    assert.equal(result.state.watermarks.system, "0");
   });
 
   test("quarantines invalid sequence metadata instead of throwing from prefix checks", async () => {

@@ -8,6 +8,10 @@ import type {
   HostedExecutionDeviceSyncWakeHint as DeviceSyncHostedExecutionDeviceSyncWakeHint,
 } from "@murphai/device-syncd/hosted-runtime";
 import type {
+  AssistantTonePreference,
+  AssistantVoiceOptionId,
+} from "@murphai/contracts";
+import type {
   HostedExecutionBundlePayload,
   HostedExecutionLayeredSnapshotRef as SharedHostedExecutionLayeredSnapshotRef,
   HostedExecutionSnapshotRefState,
@@ -51,6 +55,7 @@ export type HostedExecutionPlainRuntimeControlWakeKind = Exclude<
 export const HOSTED_EXECUTION_EVENT_KINDS = [
   "member.activated",
   "member.channels.updated",
+  "member.preferences.updated",
   "assistant.notification.requested",
   "device-sync.wake",
   "group-newsletter.email-needed",
@@ -69,6 +74,7 @@ export const HOSTED_EXECUTION_WAKE_KINDS = [
   "conversation.message",
   "member.activated",
   "member.channels.updated",
+  "member.preferences.updated",
   "assistant.notification.requested",
   "device-sync.wake",
   "group-newsletter.email-needed",
@@ -136,6 +142,17 @@ export interface HostedExecutionMemberActivatedEvent extends HostedExecutionBase
 export interface HostedExecutionMemberChannelsUpdatedEvent extends HostedExecutionBaseEvent {
   kind: "member.channels.updated";
   memberChannels: HostedExecutionMemberChannels;
+}
+
+export interface HostedExecutionMemberPreferences {
+  tone?: AssistantTonePreference;
+  voice?: AssistantVoiceOptionId;
+}
+
+export interface HostedExecutionMemberPreferencesUpdatedEvent
+  extends HostedExecutionBaseEvent {
+  kind: "member.preferences.updated";
+  preferences: HostedExecutionMemberPreferences;
 }
 
 export type HostedExecutionAssistantNotificationDeliveryDispatchMode =
@@ -224,7 +241,17 @@ export interface HostedExecutionDeviceSyncWakeEvent extends HostedExecutionBaseE
     | "reconcile_due";
 }
 
+export type HostedExecutionGroupNewsletterEmailNeededDirectRouteChannel =
+  | "linq"
+  | "telegram";
+
+export interface HostedExecutionGroupNewsletterEmailNeededDirectRoute {
+  channel: HostedExecutionGroupNewsletterEmailNeededDirectRouteChannel;
+  threadId: string;
+}
+
 export interface HostedExecutionGroupNewsletterEmailNeededEvent extends HostedExecutionBaseEvent {
+  directRoute?: HostedExecutionGroupNewsletterEmailNeededDirectRoute | null;
   groupDisplayName: string | null;
   groupId: string;
   kind: "group-newsletter.email-needed";
@@ -249,6 +276,7 @@ export type HostedExecutionRuntimeControlRequestedEvent =
 export type HostedExecutionEvent =
   | HostedExecutionMemberActivatedEvent
   | HostedExecutionMemberChannelsUpdatedEvent
+  | HostedExecutionMemberPreferencesUpdatedEvent
   | HostedExecutionAssistantNotificationRequestedEvent
   | HostedExecutionDeviceSyncWakeEvent
   | HostedExecutionGroupNewsletterEmailNeededEvent
@@ -435,6 +463,12 @@ export interface HostedExecutionMemberChannelsUpdatedWake extends HostedExecutio
   memberChannels: HostedExecutionMemberChannels;
 }
 
+export interface HostedExecutionMemberPreferencesUpdatedWake
+  extends HostedExecutionBaseWake {
+  kind: "member.preferences.updated";
+  preferences: HostedExecutionMemberPreferences;
+}
+
 export interface HostedExecutionVaultShareDeliveryWake extends HostedExecutionBaseWake {
   delivery: HostedVaultShareDeliveryPayload;
   kind: "vault-share.delivery";
@@ -454,6 +488,7 @@ export interface HostedExecutionDeviceSyncWake extends HostedExecutionBaseWake {
 }
 
 export interface HostedExecutionGroupNewsletterEmailNeededWake extends HostedExecutionBaseWake {
+  directRoute?: HostedExecutionGroupNewsletterEmailNeededDirectRoute | null;
   groupDisplayName: string | null;
   groupId: string;
   kind: "group-newsletter.email-needed";
@@ -482,6 +517,7 @@ export type HostedExecutionWake =
   | HostedExecutionConversationMessageWake
   | HostedExecutionMemberActivatedWake
   | HostedExecutionMemberChannelsUpdatedWake
+  | HostedExecutionMemberPreferencesUpdatedWake
   | HostedExecutionAssistantNotificationRequestedWake
   | HostedExecutionDeviceSyncWake
   | HostedExecutionGroupNewsletterEmailNeededWake

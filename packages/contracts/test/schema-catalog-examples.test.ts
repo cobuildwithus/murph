@@ -24,7 +24,6 @@ import {
 } from "../src/integration-ingest.ts";
 import { memoryDocumentFrontmatterSchema as memoryDocumentFrontmatterContract } from "../src/memory.ts";
 import { preferencesDocumentSchema as preferencesDocumentContract } from "../src/preferences.ts";
-import { profileDocumentFrontmatterSchema as profileFrontmatterContract } from "../src/profile.ts";
 import { scheduledLogFrontmatterSchema as scheduledLogFrontmatterContract } from "../src/scheduled-log.ts";
 import {
   conditionImportPayloadSchema as conditionImportPayloadContract,
@@ -45,6 +44,7 @@ import {
   geneticVariantFrontmatterSchema as geneticVariantFrontmatterContract,
   inboxAttachmentRetentionRecordSchema as inboxAttachmentRetentionRecordContract,
   goalFrontmatterSchema as goalFrontmatterContract,
+  habitatFrontmatterSchema as habitatFrontmatterContract,
   inboxCaptureRecordSchema as inboxCaptureRecordContract,
   journalDayFrontmatterSchema as journalDayFrontmatterContract,
   metricSampleRecordSchema as metricSampleRecordContract,
@@ -77,6 +77,7 @@ import {
   foodFrontmatterSchema,
   geneticVariantFrontmatterSchema,
   goalFrontmatterSchema,
+  habitatFrontmatterSchema,
   inboxAttachmentRetentionRecordSchema,
   inboxCaptureRecordSchema,
   integrationIngestRecordSchema,
@@ -84,7 +85,6 @@ import {
   memoryDocumentFrontmatterSchema,
   metricSampleRecordSchema,
   preferencesDocumentSchema,
-  profileFrontmatterSchema,
   protocolFrontmatterSchema,
   providerFrontmatterSchema,
   recipeFrontmatterSchema,
@@ -121,9 +121,9 @@ const schemaFixtures = [
   ["frontmatter-food", foodFrontmatterSchema, foodFrontmatterContract],
   ["frontmatter-genetic-variant", geneticVariantFrontmatterSchema, geneticVariantFrontmatterContract],
   ["frontmatter-goal", goalFrontmatterSchema, goalFrontmatterContract],
+  ["frontmatter-habitat", habitatFrontmatterSchema, habitatFrontmatterContract],
   ["frontmatter-journal-day", journalDayFrontmatterSchema, journalDayFrontmatterContract],
   ["frontmatter-memory", memoryDocumentFrontmatterSchema, memoryDocumentFrontmatterContract],
-  ["frontmatter-profile", profileFrontmatterSchema, profileFrontmatterContract],
   ["frontmatter-provider", providerFrontmatterSchema, providerFrontmatterContract],
   ["frontmatter-protocol", protocolFrontmatterSchema, protocolFrontmatterContract],
   ["frontmatter-regimen", regimenFrontmatterSchema, regimenFrontmatterContract],

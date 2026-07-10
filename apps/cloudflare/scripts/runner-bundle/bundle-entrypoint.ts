@@ -4,6 +4,9 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 
 import { build, type Metafile } from "esbuild";
+import {
+  MURPH_HEALTH_COMMONS_PACKAGE_ROOT_ENV,
+} from "@murphai/health-commons/runtime";
 
 import {
   RUNNER_BUNDLE_SHARED_EXTERNALS,
@@ -28,10 +31,10 @@ export const RUNNER_ENTRYPOINT_BUNDLE_DIRECTORY_NAME = "dist-bundled";
 
 // Byte budgets over the esbuild metafile so import-graph creep in the boot
 // surface fails the assembly instead of silently regressing cold start.
-// Latest measured from the real assembled bundle on 2026-07-07: total
-// 7,884,530B across 40 chunks, entry container-entrypoint.js 1,270,050B,
-// static boot closure 6,382,690B across 30 chunks. The entry ratchet baseline
-// remains 1,267,937B because the latest entry did not beat the prior baseline.
+// Latest ratcheted baselines come from reviewed bundle measurements:
+// - 2026-07-09 local macOS after mailbox-lane sequence preference coalescing:
+//   entry container-entrypoint.js 1,374,586B, static boot closure 6,722,281B.
+// The tolerances below cover local emit jitter.
 //
 // The entry chunk gates cold-start parse, so it is ratcheted, not given
 // headroom: the guard holds it to the measured baseline plus a tight noise
@@ -54,8 +57,8 @@ export const RUNNER_ENTRYPOINT_BUNDLE_DIRECTORY_NAME = "dist-bundled";
 // too if total creep becomes the concern. Investigate the listed largest
 // inputs before raising either.
 const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 9_300_000;
-const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 1_267_937;
-const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 6_382_690;
+const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 1_374_586;
+const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 6_722_281;
 // Noise band above the baseline before the ratchet trips (~2%): absorbs
 // content-hash and minifier jitter without letting real boot-path weight land
 // silently. Keep it tight; it is a tolerance for noise, not feature headroom.
@@ -427,6 +430,12 @@ function assertRunnerEntrypointBundleBoots(input: {
       encoding: "utf8",
       env: {
         ...process.env,
+        [MURPH_HEALTH_COMMONS_PACKAGE_ROOT_ENV]: path.join(
+          input.bundleDir,
+          "node_modules",
+          "@murphai",
+          "health-commons",
+        ),
         RUNNER_ENTRYPOINT_BUNDLE_PROBE_PATH: pathToFileURL(bundledEntryPath).href,
         RUNNER_ENTRYPOINT_BUNDLE_PROBE_LAZY_CHUNKS: JSON.stringify(lazyChunks),
       },

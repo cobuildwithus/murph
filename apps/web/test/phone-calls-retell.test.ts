@@ -45,6 +45,7 @@ type ProviderStartSweepTx = Parameters<ProviderStartSweepStore["$transaction"]>[
 
 const VALID_BRIEF: HostedPhoneCallBrief = {
   allowTransferToUser: true,
+  callerName: "Alex",
   goal: "Schedule a routine eye examination for Friday, June 26, 2026.",
   instructions: [
     "Only accept an appointment on Friday, June 26, 2026.",
@@ -114,7 +115,7 @@ describe("Retell phone-call runtime", () => {
       retell_llm_dynamic_variables: {
         call_brief: JSON.stringify(VALID_BRIEF),
         murph_timezone: "America/New_York",
-        opening_line: "Hi, this is Murph, an AI assistant calling on the user's behalf. I'm calling Eye doctor's office to Schedule a routine eye examination for Friday, June 26, 2026.",
+        opening_line: "Hi, this is Murph. I'm calling for Alex to schedule a routine eye examination for Friday, June 26, 2026.",
         transfer_number: "+12125550000",
       },
       to_number: "+12125550123",
@@ -235,6 +236,45 @@ describe("Retell phone-call runtime", () => {
     expect(body.retell_llm_dynamic_variables).toMatchObject({
       murph_public_base_url: "https://local-tunnel.example.test",
     });
+  });
+
+  it("does not invent a caller name for the opening line", async () => {
+    vi.stubEnv("RETELL_API_KEY", "retell-api-key");
+    vi.stubEnv("RETELL_FROM_NUMBER", "+12125559999");
+    vi.stubEnv("RETELL_AGENT_ID", "agent_123");
+    vi.stubEnv("RETELL_AGENT_VERSION", "prod");
+    vi.stubEnv("RETELL_AGENT_DATA_STORAGE_SETTING", "basic_attributes_only");
+    const fetchCalls: Array<{
+      init?: RequestInit;
+      url: RequestInfo | URL;
+    }> = [];
+    const fetchImpl: typeof fetch = async (url, init) => {
+      fetchCalls.push({ init, url });
+      return new Response(JSON.stringify({
+        call_id: "retell_call_123",
+        data_storage_setting: "basic_attributes_only",
+      }), {
+        headers: {
+          "content-type": "application/json",
+        },
+        status: 200,
+      });
+    };
+
+    await createRetellPhoneCallRuntime({ fetchImpl }).start({
+      brief: {
+        ...VALID_BRIEF,
+        callerName: undefined,
+      },
+      id: "hpc_123",
+      memberId: "member_123",
+      transferNumber: null,
+    });
+
+    const body = JSON.parse(String(fetchCalls[0]!.init?.body));
+    expect(body.retell_llm_dynamic_variables.opening_line).toBe(
+      "Hi, this is Murph. I'm calling to schedule a routine eye examination for Friday, June 26, 2026.",
+    );
   });
 
   it("rejects malformed Retell webhook public bases before creating a call", async () => {

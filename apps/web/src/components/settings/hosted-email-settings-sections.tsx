@@ -2,6 +2,7 @@
 
 import { useRef, type RefObject } from "react";
 
+import { AuthButton } from "@/src/components/ui/auth-button";
 import { Button } from "@/src/components/ui/button";
 import { HostedVerificationCodeStep } from "@/src/components/hosted-onboarding/hosted-verification-code-step";
 import { Input } from "@/src/components/ui/input";
@@ -20,6 +21,7 @@ export function HostedEmailSettingsContent(props: {
   emailAddress: string;
   emailInputRef: RefObject<HTMLInputElement | null>;
   murphEmailAddress?: string | null;
+  authSatisfied: boolean;
   canSendEmailUpdateCode: boolean;
   isBusy: boolean;
   isSendingCode: boolean;
@@ -28,6 +30,7 @@ export function HostedEmailSettingsContent(props: {
   pendingEmailAddress: string | null;
   onChangeCode: (value: string) => void;
   onChangeEmailAddress: (value: string) => void;
+  onAuthRequired: () => void;
   onResendCode: () => Promise<void>;
   onSendCode: (emailAddress?: string) => Promise<void>;
   onSyncVerifiedEmail: () => Promise<void>;
@@ -40,6 +43,7 @@ export function HostedEmailSettingsContent(props: {
     emailAddress,
     emailInputRef,
     murphEmailAddress,
+    authSatisfied,
     canSendEmailUpdateCode,
     isBusy,
     isSendingCode,
@@ -48,6 +52,7 @@ export function HostedEmailSettingsContent(props: {
     pendingEmailAddress,
     onChangeCode,
     onChangeEmailAddress,
+    onAuthRequired,
     onResendCode,
     onSendCode,
     onSyncVerifiedEmail,
@@ -125,14 +130,16 @@ export function HostedEmailSettingsContent(props: {
           variant="empty"
           action={
             !canSendEmailUpdateCode ? (
-              <Button
+              <AuthButton
+                authSatisfied={authSatisfied}
                 type="button"
+                onAuthRequired={onAuthRequired}
                 onClick={() => void onSendCode()}
                 disabled={isBusy}
                 size="sm"
               >
                 Link email
-              </Button>
+              </AuthButton>
             ) : null
           }
         />
@@ -159,8 +166,10 @@ export function HostedEmailSettingsContent(props: {
             value={emailAddress}
             onChange={(event) => onChangeEmailAddress(event.currentTarget.value)}
           />
-          <Button
+          <AuthButton
+            authSatisfied={authSatisfied}
             type="button"
+            onAuthRequired={onAuthRequired}
             onClick={() => void onSendCode(emailInputRef.current?.value ?? emailAddress)}
             disabled={isBusy}
             size="xl"
@@ -171,7 +180,7 @@ export function HostedEmailSettingsContent(props: {
               : isSendingCode
                 ? "Sending..."
                 : "Send verification code"}
-          </Button>
+          </AuthButton>
         </div>
       ) : null}
     </div>

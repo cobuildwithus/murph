@@ -117,6 +117,122 @@ describe('executeGenerateVoiceMemoTool', () => {
     expect(fetchImpl).not.toHaveBeenCalled()
   })
 
+  it('uses preferred voice before env default while keeping explicit tool voice override', async () => {
+    const fetchImpl = vi.fn<typeof fetch>()
+    const runtime = createRuntime({
+      ELEVENLABS_API_KEY: 'elevenlabs-key',
+      MURPH_ELEVENLABS_MODEL_ID: 'eleven_multilingual_v2',
+      MURPH_ELEVENLABS_VOICE_ID: 'voice_env_default',
+    }, fetchImpl, 'telegram', null, 'voice_preferred')
+
+    const preferredResult = await executeGenerateVoiceMemoTool({
+      args: {
+        text: 'Send a short reminder.',
+        voiceId: null,
+      },
+      runtime,
+    })
+    const explicitResult = await executeGenerateVoiceMemoTool({
+      args: {
+        text: 'Send a short reminder.',
+        voiceId: 'voice_explicit',
+      },
+      runtime,
+    })
+
+    expect(preferredResult).toMatchObject({
+      responseMedia: [
+        {
+          transport: {
+            generation: {
+              voiceId: 'voice_preferred',
+            },
+          },
+        },
+      ],
+      rpcSuccess: true,
+    })
+    expect(explicitResult).toMatchObject({
+      responseMedia: [
+        {
+          transport: {
+            generation: {
+              voiceId: 'voice_explicit',
+            },
+          },
+        },
+      ],
+      rpcSuccess: true,
+    })
+    expect(fetchImpl).not.toHaveBeenCalled()
+  })
+
+  it('uses preferred voice for Linq generation before env default', async () => {
+    const fetchImpl = vi.fn<typeof fetch>(async (input, init) => {
+      const url = String(input)
+      if (url.startsWith('https://api.elevenlabs.io/')) {
+        expect(url).toBe(
+          'https://api.elevenlabs.io/v1/text-to-speech/voice_preferred?output_format=mp3_44100_128',
+        )
+        expect(init?.method).toBe('POST')
+        expect(readHeader(init?.headers, 'xi-api-key')).toBe('elevenlabs-key')
+        expect(JSON.parse(String(init?.body))).toEqual({
+          model_id: 'eleven_multilingual_v2',
+          text: 'Send a short reminder.',
+        })
+        return new Response(mp3Bytes, {
+          headers: {
+            'content-type': 'audio/mpeg',
+          },
+        })
+      }
+
+      if (url === 'https://api.linqapp.com/api/partner/v3/attachments') {
+        return jsonResponse({
+          attachment_id: 'attachment_voice_preferred',
+          download_url: 'https://cdn.example.test/preferred-voice-memo.mp3',
+          expires_at: '2026-04-08T00:05:00.000Z',
+          http_method: 'PUT',
+          required_headers: {
+            'content-type': 'audio/mpeg',
+          },
+          upload_url: 'https://uploads.example.test/preferred-voice-memo',
+        })
+      }
+
+      if (url === 'https://uploads.example.test/preferred-voice-memo') {
+        expect(init?.method).toBe('PUT')
+        expect(init?.body).toBeInstanceOf(Blob)
+        return new Response(null, { status: 204 })
+      }
+
+      throw new Error(`Unexpected request: ${url}`)
+    })
+
+    const result = await executeGenerateVoiceMemoTool({
+      args: {
+        text: 'Send a short reminder.',
+        voiceId: null,
+      },
+      runtime: createRuntime({
+        ELEVENLABS_API_KEY: 'elevenlabs-key',
+        LINQ_API_TOKEN: 'linq-token',
+        MURPH_ELEVENLABS_MODEL_ID: 'eleven_multilingual_v2',
+        MURPH_ELEVENLABS_VOICE_ID: 'voice_env_default',
+      }, fetchImpl, 'linq', null, 'voice_preferred'),
+    })
+
+    expect(result.rpcSuccess).toBe(true)
+    expect(result.responseMedia?.[0]).toMatchObject({
+      kind: 'voice_memo',
+      transport: {
+        attachmentId: 'attachment_voice_preferred',
+        kind: 'linq_attachment',
+      },
+    })
+    expect(fetchImpl).toHaveBeenCalledTimes(3)
+  })
+
   it('reports ElevenLabs provider failures without attempting Linq upload', async () => {
     const fetchImpl = vi.fn<typeof fetch>(async (input) => {
       const url = String(input)
@@ -734,10 +850,12 @@ function createRuntime(
   fetchImpl: typeof fetch,
   voiceMemoDeliveryChannel: 'linq' | 'telegram' | null,
   publicFetchImpl?: typeof fetch | null,
+  preferredVoiceId?: string | null,
 ) {
   return createVoiceMemoToolRuntimeFromEnv({
     env,
     fetchImpl,
+    preferredVoiceId,
     publicFetchImpl,
     voiceMemoDeliveryChannel,
   })

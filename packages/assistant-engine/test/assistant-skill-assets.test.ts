@@ -1,6 +1,10 @@
 import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
+import {
+  HOSTED_VAULT_SHARE_ACTIVITY_MINUTES_PROJECTION_KIND,
+  HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS,
+} from '@murphai/hosted-execution/vault-share'
 
 import {
   ASSISTANT_SKILLS,
@@ -25,6 +29,24 @@ const DELETED_COMMONS_COMMANDS = [
   'vault-cli commons search',
   'vault-cli commons get',
   'vault-cli commons source list',
+] as const
+
+const RESEARCHED_HEALTH_TOPIC_SKILL_SLUGS = [
+  'sleep-improvement',
+  'circadian-rhythm',
+  'energy-fatigue',
+  'substance-load',
+  'cognitive-focus',
+  'hrv-resting-heart-rate',
+  'aerobic-fitness',
+  'recovery-modalities',
+  'daily-activity',
+  'mobility-posture',
+  'cardiometabolic-health',
+  'micronutrients-supplements',
+  'body-composition',
+  'cycle-hormonal-health',
+  'gut-digestion',
 ] as const
 
 type AssistantSkillMetadata = {
@@ -155,13 +177,202 @@ describe('assistant skill assets', () => {
     }
   })
 
+  it('registers researched health topic skills with stable file references', async () => {
+    const registeredSkillSlugs: ReadonlySet<string> = new Set(
+      ASSISTANT_SKILLS.map((skill) => skill.slug),
+    )
+
+    for (const slug of RESEARCHED_HEALTH_TOPIC_SKILL_SLUGS) {
+      expect(registeredSkillSlugs.has(slug)).toBe(true)
+      expect(buildAssistantSkillFileRef(slug)).toBe(
+        `$MURPH_ASSISTANT_SKILLS_ROOT/${slug}/SKILL.md`,
+      )
+
+      const skill = ASSISTANT_SKILLS.find(
+        (candidate) => candidate.slug === slug,
+      )
+      expect(skill).toBeTruthy()
+      if (!skill) {
+        continue
+      }
+
+      expect(skill.triggerHint.length).toBeGreaterThan(0)
+      const raw = await readSkillFile(skill)
+      expect(raw).toContain('Use this as Murph operating guidance')
+      expect(raw).toContain('## Owns')
+      expect(raw).toContain('## Hand Off')
+      expect(raw).toContain('## Data First')
+      expect(raw).toContain('## Answer Shape')
+      expect(raw).not.toContain('MODEL_CONFIRMATION')
+      expect(raw).not.toContain('RESEARCH_COMPLETE')
+      expect(raw).not.toMatch(/^Skill \d+:/mu)
+      expect(raw).not.toMatch(/^\+\d+\s*$/mu)
+    }
+
+    expect(registeredSkillSlugs.has('red-light-therapy')).toBe(true)
+    expect(buildAssistantSkillFileRef('red-light-therapy')).toBe(
+      '$MURPH_ASSISTANT_SKILLS_ROOT/red-light-therapy/SKILL.md',
+    )
+  })
+
+  it('routes red light dose ownership to the dedicated red-light skill', async () => {
+    const recoverySkill = ASSISTANT_SKILLS.find(
+      (skill) => skill.slug === 'recovery-modalities',
+    )
+    expect(recoverySkill).toBeTruthy()
+    if (!recoverySkill) {
+      return
+    }
+
+    expect(recoverySkill.triggerHint).toContain('Use red-light-therapy')
+    expect(recoverySkill.triggerHint).not.toContain('device dosing')
+
+    const recoveryText = await readSkillFile(recoverySkill)
+    expect(recoveryText).toContain('Use red-light-therapy for red/NIR photobiomodulation dose')
+    expect(recoveryText).toContain('does not own PBM device-dose math')
+    expect(recoveryText).not.toContain('device-seeds.json')
+  })
+
+  it('keeps red light therapy registered with device seed data', async () => {
+    const redLightSkill = ASSISTANT_SKILLS.find(
+      (skill) => skill.slug === 'red-light-therapy',
+    )
+    expect(redLightSkill).toBeTruthy()
+    if (!redLightSkill) {
+      return
+    }
+
+    expect(redLightSkill.triggerHint).toContain('red light therapy')
+    expect(redLightSkill.triggerHint).toContain('device irradiance')
+    expect(buildAssistantSkillFileRef('red-light-therapy')).toBe(
+      '$MURPH_ASSISTANT_SKILLS_ROOT/red-light-therapy/SKILL.md',
+    )
+
+    const redLightText = await readSkillFile(redLightSkill)
+    expect(redLightText).toContain('device-seeds.json')
+    expect(redLightText).toContain('activeModeLabel')
+    expect(redLightText).toContain('manufacturer-claim duration estimate')
+
+    const deviceSeedsRaw = await readFile(
+      path.join(
+        resolveAssistantSkillsRoot(),
+        'red-light-therapy',
+        'device-seeds.json',
+      ),
+      'utf8',
+    )
+    const deviceSeeds: unknown = JSON.parse(deviceSeedsRaw)
+    expectRecord(deviceSeeds, 'red-light device seeds')
+    expect(deviceSeeds.schemaVersion).toBe(
+      'murph.assistant.skill.red-light-device-seeds.v1',
+    )
+    const devices = deviceSeeds.devices
+    expect(Array.isArray(devices)).toBe(true)
+    if (!Array.isArray(devices)) {
+      return
+    }
+    expect(devices.length).toBeGreaterThan(0)
+  })
+
+  it('keeps umbrella skills from duplicating focused health topic owners', async () => {
+    const sleepSkill = ASSISTANT_SKILLS.find(
+      (skill) => skill.slug === 'sleep-recovery-readiness',
+    )
+    expect(sleepSkill).toBeTruthy()
+    if (!sleepSkill) {
+      return
+    }
+
+    expect(sleepSkill.triggerHint).toContain(
+      'Use when the user needs an acute readiness decision',
+    )
+    expect(sleepSkill.triggerHint).toContain(
+      'Use sleep-improvement for sleep mechanics',
+    )
+    expect(sleepSkill.triggerHint).toContain(
+      'circadian-rhythm for clock timing',
+    )
+    expect(sleepSkill.triggerHint).toContain(
+      'hrv-resting-heart-rate for HRV/RHR interpretation',
+    )
+    expect(sleepSkill.triggerHint).toContain(
+      'energy-fatigue for persistent tiredness',
+    )
+    expect(sleepSkill.triggerHint).not.toContain('sleep routines')
+    expect(sleepSkill.triggerHint).not.toContain('shift work')
+    expect(sleepSkill.triggerHint).not.toContain('travel or jet lag')
+    expect(sleepSkill.triggerHint).not.toContain('wearable sleep')
+
+    const sleepText = await readSkillFile(sleepSkill)
+    expect(sleepText).toContain(
+      '$MURPH_ASSISTANT_SKILLS_ROOT/sleep-improvement/SKILL.md',
+    )
+    expect(sleepText).toContain(
+      '$MURPH_ASSISTANT_SKILLS_ROOT/circadian-rhythm/SKILL.md',
+    )
+    expect(sleepText).toContain(
+      '$MURPH_ASSISTANT_SKILLS_ROOT/hrv-resting-heart-rate/SKILL.md',
+    )
+    expect(sleepText).toContain(
+      '$MURPH_ASSISTANT_SKILLS_ROOT/energy-fatigue/SKILL.md',
+    )
+    expect(sleepText).not.toContain('### 2. Sleep routine improvement')
+    expect(sleepText).not.toContain('### 4. Wearable trend interpretation')
+
+    const nutritionSkill = ASSISTANT_SKILLS.find(
+      (skill) => skill.slug === 'nutrition-strategy',
+    )
+    expect(nutritionSkill).toBeTruthy()
+    if (!nutritionSkill) {
+      return
+    }
+
+    expect(nutritionSkill.triggerHint).toContain(
+      'meal structure and protein',
+    )
+    expect(nutritionSkill.triggerHint).toContain(
+      'real-life food-system execution',
+    )
+    expect(nutritionSkill.triggerHint).toContain(
+      'body-composition for fat loss/muscle gain/recomposition',
+    )
+    expect(nutritionSkill.triggerHint).toContain(
+      'gut-digestion for digestive symptom strategy',
+    )
+    expect(nutritionSkill.triggerHint).not.toContain('GI comfort')
+    expect(nutritionSkill.triggerHint).not.toContain(
+      'body composition, training fuel',
+    )
+
+    const nutritionText = await readSkillFile(nutritionSkill)
+    expect(nutritionText).toContain(
+      '$MURPH_ASSISTANT_SKILLS_ROOT/body-composition/SKILL.md',
+    )
+    expect(nutritionText).toContain(
+      '$MURPH_ASSISTANT_SKILLS_ROOT/gut-digestion/SKILL.md',
+    )
+    expect(nutritionText).not.toContain('### Body composition')
+    expect(nutritionText).not.toContain('### GI comfort and performance')
+  })
+
   it('keeps group newsletter setup and opt-out behavior in the group-chat skill', async () => {
     const groupChatSkill = ASSISTANT_SKILLS.find((skill) => skill.slug === 'group-chat')
     expect(groupChatSkill).toBeTruthy()
     if (!groupChatSkill) return
 
     const raw = await readSkillFile(groupChatSkill)
+    expect(raw).toContain('do not create it immediately with invented')
+    expect(raw).toContain('group wants to call it')
+    expect(raw).toContain('default reaction-share scope')
+    expect(raw).toContain('sleep timing')
+    expect(raw).toContain('workout summaries, resting heart rate, and HRV')
+    expect(raw).toContain('Let the group widen')
+    expect(raw).toContain('pass that same chosen name as `displayName`')
+    expect(raw).toContain('`murph.group action="post_join_offer"`')
+    expect(raw).toContain('`murph.group action="create_join_link"`')
+    expect(raw).toContain('If the group wants the recurring update in the chat instead of email')
     expect(raw).toContain('vault-cli automation save')
+    expect(raw).toContain("the group's chosen name as the positional `<title>`")
     expect(raw).toContain('Use exactly `--slug group-health-newsletter`')
     expect(raw).toContain('Any other slug will not be able to send')
     expect(raw).toContain('vault-cli automation set-status group-health-newsletter --status archived')
@@ -176,8 +387,47 @@ describe('assistant skill assets', () => {
     expect(raw).toContain('group-email.v0')
     expect(raw).not.toContain('nudge them in the group')
     expect(raw).toContain('post a join offer scoped to')
-    expect(raw).toContain('`group-email.v0` so a like grants it')
+    expect(raw).toContain('`resting-heart-rate-days.v0`, and `hrv-days.v0`')
+    expect(raw).toContain('include `{{join_url}}` exactly once as the customize link')
+    expect(raw).toContain('pass the group\'s')
+    expect(raw).toContain('chosen name as `displayName` on the `post_join_offer` call')
+    expect(raw).toContain('Reacting grants the')
+    expect(raw).toContain('disclosed snapshot')
+    expect(raw).toContain('Never silently')
+    expect(raw).toContain('share health data that the message did not disclose')
+    expect(raw).not.toContain('link-free offer')
     expect(raw).toContain('never repeatedly re-offer')
+  })
+
+  it('keeps group challenge guidance aligned with selectable scoring projections', async () => {
+    const groupChallengeSkill = ASSISTANT_SKILLS.find(
+      (skill) => skill.slug === 'group-challenge',
+    )
+    expect(groupChallengeSkill).toBeTruthy()
+    if (!groupChallengeSkill) return
+
+    const raw = await readSkillFile(groupChallengeSkill)
+    for (const projectionKind of HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS) {
+      if (projectionKind === 'group-email.v0') {
+        continue
+      }
+      expect(raw).toContain(projectionKind)
+    }
+    expect(raw).toContain(HOSTED_VAULT_SHARE_ACTIVITY_MINUTES_PROJECTION_KIND)
+    expect(raw).toContain('"activityKind": "<alias>"')
+    expect(raw).toContain('narrowest matching scope')
+    expect(raw).toContain('unsupported instead of')
+    expect(raw).toContain('vault-cli group shared --kind steps-days.v0')
+    expect(raw).toContain(
+      'vault-cli group shared --scope activity-minutes-days.v1.activityKind.<alias>',
+    )
+    expect(raw).toContain(
+      'vault-cli group shared --scope activity-distance-days.v1.activityKind.<alias>',
+    )
+    expect(raw).toContain(
+      'vault-cli group shared --scope activity-session-count-days.v1.activityKind.<alias>',
+    )
+    expect(raw).toContain('Never pass selector scopes through `--kind`')
   })
 
   it('builds stable symbolic skill file references', () => {
@@ -401,7 +651,7 @@ describe('assistant skill assets', () => {
     expect(raw).not.toContain('.codex-hosted')
   })
 
-  it('keeps red light device seeds parseable and manufacturer-claim scoped', async () => {
+  it('keeps red light therapy registered with dose math and device seeds', async () => {
     const redLightSkill = ASSISTANT_SKILLS.find(
       (skill) => skill.slug === 'red-light-therapy',
     )
@@ -409,6 +659,15 @@ describe('assistant skill assets', () => {
     if (!redLightSkill) {
       return
     }
+
+    const skillText = await readSkillFile(redLightSkill)
+    expect(redLightSkill.triggerHint).toContain('device irradiance')
+    expect(skillText).toContain('seconds = target dose J/cm2 * 1000 / irradiance mW/cm2')
+    expect(skillText).toContain('manufacturer-claim duration estimate')
+    expect(skillText).toContain('matches the user\'s distance or contact setting')
+    expect(skillText).toContain('activeModeLabel')
+    expect(skillText).toContain('vault-cli commons protocol explore "red light therapy" --format json')
+    expect(skillText).toContain('$MURPH_ASSISTANT_SKILLS_ROOT/experiment-onboarding/SKILL.md')
 
     const raw = await readFile(
       path.join(
@@ -1247,7 +1506,10 @@ describe('assistant skill assets', () => {
       'fall back to Identity or Context memory only for facts with no structured home',
     )
     expect(raw).toContain(
-      'preferred name, demographics, lifestyle context, interests, pregnancy or nursing status',
+      '`vault-cli memory set-name` for the preferred name',
+    )
+    expect(raw).toContain(
+      'such as demographics, lifestyle context, interests, pregnancy or nursing status',
     )
     expect(raw).toContain(
       "Save dated facts with the current prompt's local date rather than inferring a birthday or onset",

@@ -51,7 +51,7 @@ import type {
 import type {
   HostedVaultShareDeliverRequest,
   HostedVaultShareDeliverResponse,
-  HostedVaultShareProjectionKind,
+  HostedVaultShareProjectionScope,
 } from "@murphai/hosted-execution/vault-share";
 import type {
   HostedWorkspaceSnapshotV2Aad,
@@ -179,6 +179,7 @@ export function parseHostedRuntimeAssistantResponseMedia(
 export interface HostedRuntimeLinqSendRequest {
   directRecipientPhoneNumber?: string | null;
   fromPhoneNumber?: string | null;
+  homeRouteFallbackAllowed?: boolean | null;
   idempotencyKey?: string | null;
   media?: readonly AssistantResponseMedia[] | null;
   message: string;
@@ -208,11 +209,22 @@ export interface HostedRuntimeLinqRecentInboundEngagementRequest {
   currentInbound?: HostedRuntimeLinqCurrentInboundProof | null;
   directRecipientPhoneNumber?: string | null;
   fromPhoneNumber?: string | null;
+  homeRouteFallbackAllowed?: boolean | null;
   idempotencyKey?: string | null;
   intentId?: string | null;
+  replyToMessageId?: string | null;
   routeAuthority?: HostedExecutionLinqExternalThreadRouteAuthority | null;
   target: string | null;
   targetKind?: HostedRuntimeProviderTargetKind | null;
+}
+
+export interface HostedRuntimeLinqTargetOverride {
+  target: string;
+  targetKind: "thread";
+}
+
+export interface HostedRuntimeLinqRecentInboundEngagementResult {
+  targetOverride?: HostedRuntimeLinqTargetOverride | null;
 }
 
 export interface HostedRuntimeLinqDeliveryOutcomeRequest {
@@ -280,7 +292,7 @@ type HostedRuntimeEffectsPortBase = {
   assertLinqRecentInboundEngagement?(
     request: HostedRuntimeLinqRecentInboundEngagementRequest,
     context?: { signal?: AbortSignal | null },
-  ): Promise<void>;
+  ): Promise<HostedRuntimeLinqRecentInboundEngagementResult | void>;
   recordLinqDeliveryOutcome?(
     request: HostedRuntimeLinqDeliveryOutcomeRequest,
     context?: { signal?: AbortSignal | null },
@@ -481,7 +493,7 @@ export interface HostedRuntimeActionApprovalPort {
 }
 
 export interface HostedRuntimeVaultSharePort {
-  listActiveProjectionKinds(): Promise<HostedVaultShareProjectionKind[]>;
+  listActiveProjectionScopes(): Promise<HostedVaultShareProjectionScope[]>;
   deliver(
     request: HostedVaultShareDeliverRequest,
   ): Promise<HostedVaultShareDeliverResponse>;

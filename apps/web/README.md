@@ -365,8 +365,8 @@ Hosted managed crypto:
 Hosted AI usage metering:
 
 - Hosted AI usage rows are recorded locally for allowance, audit, and future billing analysis. The hosted app no longer attaches Stripe usage prices at checkout or posts Stripe meter events.
-- Hosted AI included-allowance gating is app-owned: web prices recorded `HostedAiUsage` rows into allowance columns, maintains `HostedAiUsagePeriod` spend snapshots from current hosted billing state, and gates hosted runtime work that strongly implies foreground model work. It is a post-task hard stop, not an exact prepaid cap.
-- Homepage reset countdowns come from the same usage-gate period end/retry-after value; a fresh monthly period is created by the next mutating gate resolution after the prior billing or calendar period ends (turn admission owns usage-period bookkeeping; hot-path gate checks are read-first and only escalate to the mutating gate to confirm denials), with no separate reset cron. Spend accounting also ensure-creates the period inside the spend transaction as a backstop.
+- Hosted AI included-allowance gating is app-owned: web prices recorded `HostedAiUsage` rows into allowance columns, maintains `HostedAiUsagePeriod` spend snapshots from current hosted billing state, preserves inbound conversation mailbox input before usage gating, and gates hosted runtime work that strongly implies foreground model work. It is a post-task hard stop, not an exact prepaid cap.
+- Homepage reset countdowns come from the same usage-gate period end/retry-after value; a fresh monthly period is created by the next mutating gate resolution after the prior billing or calendar period ends (turn admission owns usage-period bookkeeping; webhook ingress preserves user-authored conversation input and runtime admission owns usage denials), with no separate reset cron. Spend accounting also ensure-creates the period inside the spend transaction as a backstop.
 - Temporal does not fetch or forward signed usage decisions to Cloudflare ensure-processing, and webhook wake handoff signals Temporal by mailbox pointer only. Runtime/provider code still enforces spend before actual model calls and records usage rows through the hosted runtime platform.
 - Pulse Trial uses the same allowance system with a phase-aware 4.50 USD trial cap. Paid phase is authoritative for the normal Pulse allowance, and stale or malformed trial phase denies before calendar fallback or fallback-usage carryover.
 - Included-allowance accounting starts from the deployment that enables allowance accounting on imports. Existing current-period usage rows are not backfilled by default.
@@ -556,19 +556,57 @@ Generate the client and apply migrations with Prisma:
 pnpm --dir apps/web prisma:generate
 pnpm --dir apps/web prisma:migrate:deploy
 pnpm --dir apps/web release:production:migrate
+pnpm --dir apps/web release:production:contract-migrate
 ```
 
 The checked-in Vercel build command runs
 `pnpm release:production:migrate && pnpm build`, so Vercel deploys still run
 the guarded production migration wrapper automatically before building. The
 generic `pnpm --dir apps/web build` script is intentionally non-mutating and
-only generates artifacts plus validation output. The migration wrapper uses
-`DIRECT_DATABASE_URL` when it is set, requires it in Vercel production, and
-rejects known pooled Postgres ports such as `6432` and `6543`; keep
+only generates artifacts plus validation output. The predeploy migration
+wrapper uses `DIRECT_DATABASE_URL` when it is set, requires it in Vercel
+production, rejects known pooled Postgres ports such as `6432` and `6543`, and
+blocks destructive or incompatible Prisma migration SQL outside the frozen
+historical migration set ending at
+`20260707170000_drop_stale_linq_recency_columns`; keep
 `DATABASE_URL` available for app runtime traffic. Because a successful
-migration cannot roll back automatically if a later deploy step fails,
-production migrations must stay backward compatible with the currently deployed
-app and use expand/contract sequencing for breaking changes.
+predeploy migration cannot roll back automatically if a later deploy step
+fails, normal production Prisma migrations must stay backward compatible with
+the currently deployed app and avoid old-code-breaking changes such as required
+columns, drops, renames, `SET NOT NULL`, or column type changes. Those changes
+need an expand/backfill/switch/final-cleanup sequence: add the new nullable
+shape first, backfill or dual-write as needed, switch application reads/writes
+in a later deploy, then clean up the old shape only after the replacement
+deployment is live and the prior production function window has drained.
+Destructive contract cleanup belongs under
+`apps/web/prisma/contract-migrations` and runs through the
+`Hosted Web Contract Migrations` GitHub workflow after Vercel reports a
+successful production deployment. That workflow only accepts Vercel-originated
+completed production deployment statuses, checks out the exact deployed commit,
+verifies it is reachable from `origin/main`, waits
+`HOSTED_WEB_CONTRACT_MIGRATION_DRAIN_SECONDS` seconds for prior production
+function executions to drain, then verifies the configured Vercel production
+alias still points at that commit before exposing the database secret. It can
+also be manually dispatched with `deployed_sha` set to the current Vercel
+production commit; the same drain and alias proof still apply before SQL runs.
+It requires
+`HOSTED_WEB_VERCEL_TOKEN`, `HOSTED_WEB_VERCEL_PROJECT_ID`,
+`HOSTED_WEB_PRODUCTION_BASE_URL`, and `HOSTED_WEB_DIRECT_DATABASE_URL` in
+GitHub Actions; `HOSTED_WEB_CONTRACT_MIGRATION_DRAIN_SECONDS` defaults to
+`300` and is capped at `600` unless the workflow timeout is raised. The workflow
+does not use GitHub Actions concurrency for this lane; the final alias check and
+the contract migration advisory lock make stale or duplicate runs skip safely
+without letting stale events replace valid pending runs. After those gates, it calls
+`pnpm --dir apps/web release:production:contract-migrate` with explicit opt-in.
+The shared production migration URL resolver strips Prisma-style
+`sslcert=system`, `sslkey=system`, and `sslrootcert=system` markers before
+handing Postgres URLs to raw `pg` clients, while preserving real SSL file paths.
+Rollback floor: after contract cleanup drops an old schema shape, the oldest
+safe Vercel rollback target is the first deployed commit that no longer reads or
+writes that dropped shape. Rolling back below that floor requires restoring or
+re-expanding the database shape first, or deploying a forward fix. Cloudflare
+`container_rollout=immediate` is not applicable to this Vercel-only lane; the
+bounded Vercel drain wait plus final alias check owns the old-function window.
 The `2026062100_hosted_computer_single_member_profile` migration is an explicit
 greenfield computer-use hard cut: deploy it only as part of a coordinated
 hosted web plus Worker cutover with hosted computer-use traffic paused during

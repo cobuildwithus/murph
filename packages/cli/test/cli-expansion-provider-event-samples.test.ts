@@ -527,7 +527,7 @@ test.sequential(
       assert.equal(requireData(recipeList).items[0]?.kind, 'recipe')
       assert.match(
         requireData(recipeList).items[0]?.excerpt ?? '',
-        /Summary A reliable high protein salmon b/u,
+        /Summary A reliable high protein salmon/u,
       )
       assert.equal('markdown' in (requireData(recipeList).items[0] ?? {}), false)
       assert.equal(requireData(recipeList).items[0]?.data.dishType, 'dinner')

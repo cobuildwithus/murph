@@ -180,6 +180,7 @@ export function createWorkspaceSnapshotSessionService(input: {
         ? isWorkspaceSnapshotCleanupCreatedAtEligible(currentSession.createdAt, nowMs)
         : false;
       if (eligibleCandidates.length === 0 && !sessionCleanupEligible) {
+        await service.syncOrphanCandidateAlarm(userId);
         return;
       }
 
@@ -259,7 +260,9 @@ export function createWorkspaceSnapshotSessionService(input: {
         && currentSession.snapshotId === deleteInput.snapshotId
       ) {
         return {
-          deleted: await input.state.storage.delete(workspaceSnapshotUploadSessionCurrentStorageKey()),
+          deleted: await input.state.storage.delete(
+            workspaceSnapshotUploadSessionCurrentStorageKey(),
+          ),
         };
       }
       return { deleted: false };
@@ -413,7 +416,7 @@ async function syncWorkspaceSnapshotOrphanCandidateAlarm(input: {
     return;
   }
   const currentAlarm = await input.state.storage.getAlarm();
-  if (currentAlarm !== null && currentAlarm <= nextAtMs) {
+  if (currentAlarm === nextAtMs) {
     return;
   }
   await input.state.storage.setAlarm(nextAtMs);

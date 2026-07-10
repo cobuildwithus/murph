@@ -23,7 +23,7 @@ on:
       container_rollout:
         description: Container rollout behavior for Worker deploys
         required: true
-        default: gradual
+        default: immediate
         type: choice
         options:
           - gradual
@@ -490,7 +490,7 @@ jobs:
           tar --hard-dereference -czf .artifacts/cloudflare-hosted-deploy/runner-bundle.tar.gz \
             -C apps/cloudflare/.deploy \
             runner-bundle
-          docker save ghcr.io/cobuildwithus/murph-cloudflare-runner-base:node24.14.1-codex0.142.5 \
+          docker save ghcr.io/cobuildwithus/murph-cloudflare-runner-base:node24.14.1-codex0.144.0 \
             | gzip -1 > .artifacts/cloudflare-hosted-deploy/runner-base-image.tar.gz
 
       - name: Upload immediate build handoff
@@ -841,6 +841,7 @@ jobs:
       - name: Validate required deploy environment
         env:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          HOSTED_EXECUTION_CONTAINER_ROLLOUT: ${{ inputs.container_rollout }}
           HOSTED_EXECUTION_DEPLOY_CONTEXT: ${{ inputs.environment }}
           HOSTED_EXECUTION_DEPLOY_WORKER: ${{ inputs.deploy_worker }}
           HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK: ${{ secrets.HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK }}

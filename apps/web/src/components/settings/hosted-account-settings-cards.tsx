@@ -1,9 +1,18 @@
 "use client";
 
-import { Mail, Phone, Send } from "lucide-react";
+import {
+  assistantVoiceOptions,
+  type AssistantTonePreference,
+  type AssistantVoiceOptionId,
+} from "@murphai/contracts";
+import { Mail, MessageSquareText, Phone, Send } from "lucide-react";
 import dynamic from "next/dynamic";
 import { useEffect, useState, type ReactNode } from "react";
 
+import {
+  MurphAssistantStylePicker,
+  type MurphAssistantStylePreferences,
+} from "@/src/components/murph/murph-assistant-style-picker";
 import { MurphContactCardPicker } from "@/src/components/murph/murph-contact-card-picker";
 import { Button } from "@/src/components/ui/button";
 import type { HostedAccountSettingsSnapshot } from "@/src/lib/hosted-onboarding/account-settings-snapshot";
@@ -14,7 +23,13 @@ import { formatMaskedPhoneNumber } from "./hosted-settings-utils";
 import { formatHostedTelegramDisplayValue } from "./hosted-telegram-settings-helpers";
 
 type HostedSettingsIdentityLinkMode = "phone" | "email" | "telegram";
+type AssistantStyleInitialStep = "tone" | "voice";
 const ADD_EMAIL_QUERY_KEY = "addEmail";
+const VOICE_QUERY_KEY = "voice";
+const DEFAULT_ASSISTANT_STYLE: MurphAssistantStylePreferences = {
+  tone: null,
+  voice: null,
+};
 
 const HostedSettingsIdentityLinkDialog = dynamic(
   () => import("./hosted-settings-identity-link-dialog").then((mod) => mod.HostedSettingsIdentityLinkDialog),
@@ -28,16 +43,25 @@ export function HostedAccountSettingsCards({
   account,
   murphPhoneNumber,
   openEmailLink = false,
+  openVoiceLink = false,
 }: {
   account: HostedAccountSettingsSnapshot;
   murphPhoneNumber?: string | null;
   openEmailLink?: boolean;
+  openVoiceLink?: boolean;
 }) {
   const [contactPickerOpen, setContactPickerOpen] = useState(false);
+  const [assistantStyleOpen, setAssistantStyleOpen] = useState(openVoiceLink);
+  const [assistantStyleInitialStep, setAssistantStyleInitialStep] =
+    useState<AssistantStyleInitialStep>(openVoiceLink ? "voice" : "tone");
+  const [assistantStyle, setAssistantStyle] = useState<MurphAssistantStylePreferences>(
+    account.assistant ?? DEFAULT_ASSISTANT_STYLE,
+  );
   const [linkMode, setLinkMode] = useState<HostedSettingsIdentityLinkMode | null>(
     openEmailLink ? "email" : null,
   );
   const [previousOpenEmailLink, setPreviousOpenEmailLink] = useState(openEmailLink);
+  const [previousOpenVoiceLink, setPreviousOpenVoiceLink] = useState(openVoiceLink);
 
   if (previousOpenEmailLink !== openEmailLink) {
     setPreviousOpenEmailLink(openEmailLink);
@@ -46,11 +70,25 @@ export function HostedAccountSettingsCards({
     }
   }
 
+  if (previousOpenVoiceLink !== openVoiceLink) {
+    setPreviousOpenVoiceLink(openVoiceLink);
+    if (openVoiceLink) {
+      setAssistantStyleInitialStep("voice");
+      setAssistantStyleOpen(true);
+    }
+  }
+
   useEffect(() => {
     if (openEmailLink) {
-      stripAddEmailQueryParam();
+      stripSettingsQueryParam(ADD_EMAIL_QUERY_KEY);
     }
   }, [openEmailLink]);
+
+  useEffect(() => {
+    if (openVoiceLink) {
+      stripSettingsQueryParam(VOICE_QUERY_KEY);
+    }
+  }, [openVoiceLink]);
 
   const phoneNumber = account.phone.number;
   const phoneVerified = Boolean(account.phone.verifiedAt);
@@ -60,6 +98,7 @@ export function HostedAccountSettingsCards({
   const emailVerified = Boolean(account.email.verifiedAt);
   const murphEmailAddress = account.email.murphEmailAddress;
   const murphSmsHref = phoneNumber && murphPhoneNumber ? `sms:${murphPhoneNumber}` : null;
+  const assistantStyleValue = formatAssistantStyleValue(assistantStyle);
   const customizeMurphContactAction = murphPhoneNumber ? (
     <SettingsContactAction onClick={() => setContactPickerOpen(true)}>
       Customize contact card
@@ -135,6 +174,25 @@ export function HostedAccountSettingsCards({
             </Button>
           }
         />
+        <SettingsRow
+          icon={<MessageSquareText className="size-[18px] shrink-0 text-muted-foreground" strokeWidth={1.6} aria-hidden="true" />}
+          label="How Murph talks"
+          value={assistantStyleValue}
+          empty={assistantStyleValue === "Default"}
+          action={
+            <Button
+              type="button"
+              size="default"
+              variant="ghost"
+              onClick={() => {
+                setAssistantStyleInitialStep("tone");
+                setAssistantStyleOpen(true);
+              }}
+            >
+              Customize
+            </Button>
+          }
+        />
       </div>
       {linkMode ? (
         <HostedSettingsIdentityLinkDialog
@@ -162,18 +220,49 @@ export function HostedAccountSettingsCards({
           open={contactPickerOpen}
         />
       ) : null}
+      {assistantStyleOpen ? (
+        <MurphAssistantStylePicker
+          initialStep={assistantStyleInitialStep}
+          initialTone={assistantStyle.tone}
+          initialVoice={assistantStyle.voice}
+          onComplete={setAssistantStyle}
+          onOpenChange={setAssistantStyleOpen}
+          onSaved={setAssistantStyle}
+          open={assistantStyleOpen}
+        />
+      ) : null}
     </>
   );
 }
 
-function stripAddEmailQueryParam() {
+function stripSettingsQueryParam(queryKey: string) {
   if (typeof window === "undefined" || typeof window.location.href !== "string") {
     return;
   }
 
   const url = new URL(window.location.href);
-  url.searchParams.delete(ADD_EMAIL_QUERY_KEY);
+  url.searchParams.delete(queryKey);
   window.history?.replaceState?.({}, "", `${url.pathname}${url.search}${url.hash}`);
+}
+
+function formatAssistantStyleValue(preferences: {
+  tone: AssistantTonePreference | null;
+  voice: AssistantVoiceOptionId | null;
+}): string {
+  const labels = [
+    preferences.tone ? formatAssistantTone(preferences.tone) : null,
+    preferences.voice ? formatAssistantVoice(preferences.voice) : null,
+  ].filter((label): label is string => Boolean(label));
+
+  return labels.length > 0 ? labels.join(", ") : "Default";
+}
+
+function formatAssistantTone(tone: AssistantTonePreference): string {
+  return tone === "formal" ? "Formal" : "Casual";
+}
+
+function formatAssistantVoice(voice: AssistantVoiceOptionId): string {
+  return assistantVoiceOptions.find((option) => option.id === voice)?.label ?? "Classic";
 }
 
 function SettingsRow(props: {

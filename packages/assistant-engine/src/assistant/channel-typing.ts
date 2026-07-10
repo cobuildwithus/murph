@@ -51,6 +51,7 @@ export function startAssistantChannelTypingIndicator(input: {
           bindingDelivery: deliveryFields.bindingDelivery,
           explicitTarget: deliveryFields.explicitTarget,
           identityId: deliveryFields.identityId,
+          replyToMessageId: deliveryFields.replyToMessageId,
         },
         input.channelDependencies ?? {},
       ),

@@ -13,12 +13,11 @@ export { deterministicContractId } from "./ids.ts";
 export * from "./automation.ts";
 export * from "./scheduled-logs.ts";
 export * from "./memory.ts";
-export * from "./profile.ts";
 export {
   readPreferencesDocument,
   resolvePreferencesDocumentPath,
 } from "./preferences.ts";
-export type { PreferencesDocumentSnapshot } from "./preferences.ts";
+export type { AssistantPreferencesUpdate, PreferencesDocumentSnapshot } from "./preferences.ts";
 export {
   assertPathWithinVault,
   assertPathWithinVaultOnDisk,
@@ -89,6 +88,7 @@ export {
   addActivitySession,
   addBodyMeasurement,
   addCapture,
+  addCaptureWithLookup,
   addMeasurement,
   addMeal,
   appendImmunization,
@@ -123,6 +123,7 @@ export {
   stopRegimen,
   unlinkJournalEventIds,
   unlinkJournalStreams,
+  updateAssistantPreferences,
   updateWorkoutUnitPreferences,
   updateWearablePreferences,
   updateExperiment,
@@ -135,12 +136,22 @@ export {
   upsertFamilyMember,
   upsertGeneticVariant,
   upsertGoal,
+  upsertHabitatAspect,
   upsertProtocol,
   upsertRegimen,
   upsertRecipe,
   upsertWorkoutFormat,
   validateVault,
 } from "./public-mutations.ts";
+export {
+  listHabitatAspects,
+  readHabitatAspect,
+} from "./bank/habitat.ts";
+export type {
+  HabitatRecord,
+  UpsertHabitatAspectInput,
+  UpsertHabitatAspectResult,
+} from "./bank/habitat.ts";
 export {
   listWorkoutFormats,
   readWorkoutFormat,
@@ -270,6 +281,7 @@ export {
   buildNoteEventDraft,
   buildObservationEventDraft,
   buildPublicEventRecord,
+  findCaptureByLookup,
   findEventByExternalRef,
   buildSleepSessionEventDraft,
   buildSupplementIntakeEventDraft,
@@ -282,9 +294,12 @@ export type {
   AddBodyMeasurementResult,
   AddCaptureInput,
   AddCaptureResult,
+  AddCaptureWithLookupInput,
+  AddCaptureWithLookupResult,
   AddMeasurementInput,
   AddMeasurementResult,
   EventDraftByKind,
+  FindCaptureByLookupResult,
   FindEventByExternalRefInput,
   PublicEventDraft,
   PublicWritableEventKind,

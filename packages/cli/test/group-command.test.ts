@@ -7,6 +7,16 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { buildGroupSharedResult } from '../src/commands/group.ts'
 
 const SHARE_ID = 'share-1'
+const RUNNING_DISTANCE_SCOPE = {
+  projectionKind: 'activity-distance-days.v1',
+  selector: { activityKind: 'running' },
+} as const
+const RUNNING_DISTANCE_SCOPE_KEY = 'activity-distance-days.v1.activityKind.running'
+const RUNNING_SESSION_COUNT_SCOPE = {
+  projectionKind: 'activity-session-count-days.v1',
+  selector: { activityKind: 'running' },
+} as const
+const RUNNING_SESSION_COUNT_SCOPE_KEY = 'activity-session-count-days.v1.activityKind.running'
 
 function record(input: {
   data: Record<string, unknown>
@@ -72,6 +82,49 @@ function fixtureStore() {
           }),
         },
       },
+      [RUNNING_DISTANCE_SCOPE_KEY]: {
+        grantors: {
+          'member-a': grantor({
+            grantorMemberId: 'member-a',
+            projectionKind: 'activity-distance-days.v1',
+            records: [
+              record({
+                data: {
+                  activityKind: 'running',
+                  date: '2026-07-05',
+                  sessionCount: 1,
+                  sessionDistanceMeters: 8400,
+                },
+                occurredAt: '2026-07-05T00:00:00.000Z',
+                recordKey: '2026-07-05',
+              }),
+            ],
+          }),
+        },
+        projectionScope: RUNNING_DISTANCE_SCOPE,
+        projectionScopeKey: RUNNING_DISTANCE_SCOPE_KEY,
+      },
+      [RUNNING_SESSION_COUNT_SCOPE_KEY]: {
+        grantors: {
+          'member-b': grantor({
+            grantorMemberId: 'member-b',
+            projectionKind: 'activity-session-count-days.v1',
+            records: [
+              record({
+                data: {
+                  activityKind: 'running',
+                  date: '2026-07-05',
+                  sessionCount: 2,
+                },
+                occurredAt: '2026-07-05T00:00:00.000Z',
+                recordKey: '2026-07-05',
+              }),
+            ],
+          }),
+        },
+        projectionScope: RUNNING_SESSION_COUNT_SCOPE,
+        projectionScopeKey: RUNNING_SESSION_COUNT_SCOPE_KEY,
+      },
       'sleep-times.v0': {
         grantors: {
           'member-b': grantor({
@@ -125,6 +178,7 @@ describe('buildGroupSharedResult', () => {
     expect(result.members[0]?.displayName).toBe('Alex')
     expect(result.members[0]?.shares.map((share) => share.projectionKind)).toEqual([
       'steps-days.v0',
+      'activity-distance-days.v1',
     ])
     expect(result.members[1]?.displayName).toBeNull()
   })
@@ -137,6 +191,41 @@ describe('buildGroupSharedResult', () => {
     expect(result.members[0]?.shares.map((share) => share.projectionKind)).toEqual([
       'steps-days.v0',
     ])
+  })
+
+  it('filters to exact activity distance and count selector scopes for challenge leaderboards', async () => {
+    await writeStore(fixtureStore())
+
+    const distance = await buildGroupSharedResult({
+      kinds: null,
+      scopeKeys: [RUNNING_DISTANCE_SCOPE_KEY],
+      vault,
+    })
+    expect(distance.members.map((member) => member.memberId)).toEqual(['member-a'])
+    expect(distance.members[0]?.shares.map((share) => share.projectionScopeKey)).toEqual([
+      RUNNING_DISTANCE_SCOPE_KEY,
+    ])
+    expect(distance.members[0]?.shares[0]?.records[0]?.data).toEqual({
+      activityKind: 'running',
+      date: '2026-07-05',
+      sessionCount: 1,
+      sessionDistanceMeters: 8400,
+    })
+
+    const count = await buildGroupSharedResult({
+      kinds: null,
+      scopeKeys: [RUNNING_SESSION_COUNT_SCOPE_KEY],
+      vault,
+    })
+    expect(count.members.map((member) => member.memberId)).toEqual(['member-b'])
+    expect(count.members[0]?.shares.map((share) => share.projectionScopeKey)).toEqual([
+      RUNNING_SESSION_COUNT_SCOPE_KEY,
+    ])
+    expect(count.members[0]?.shares[0]?.records[0]?.data).toEqual({
+      activityKind: 'running',
+      date: '2026-07-05',
+      sessionCount: 2,
+    })
   })
 
   it('reports empty when no store file exists', async () => {

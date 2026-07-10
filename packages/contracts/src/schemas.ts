@@ -18,6 +18,7 @@ import {
   inboxCaptureRecordSchema as inboxCaptureRecordContract,
   inboxAttachmentRetentionRecordSchema as inboxAttachmentRetentionRecordContract,
   goalFrontmatterSchema as goalFrontmatterContract,
+  habitatFrontmatterSchema as habitatFrontmatterContract,
   journalDayFrontmatterSchema as journalDayFrontmatterContract,
   protocolFrontmatterSchema as protocolFrontmatterContract,
   regimenFrontmatterSchema as regimenFrontmatterContract,
@@ -41,9 +42,6 @@ import {
 import {
   preferencesDocumentSchema as preferencesDocumentContract,
 } from "./preferences.ts";
-import {
-  profileDocumentFrontmatterSchema as profileFrontmatterContract,
-} from "./profile.ts";
 import {
   scheduledLogFrontmatterSchema as scheduledLogFrontmatterContract,
 } from "./scheduled-log.ts";
@@ -94,13 +92,13 @@ export const foodFrontmatterSchema = toJsonSchema(foodFrontmatterContract);
 export const assessmentResponseSchema = toJsonSchema(assessmentResponseContract);
 export const memoryDocumentFrontmatterSchema = toJsonSchema(memoryDocumentFrontmatterContract);
 export const preferencesDocumentSchema = toJsonSchema(preferencesDocumentContract);
-export const profileFrontmatterSchema = toJsonSchema(profileFrontmatterContract);
 export const providerFrontmatterSchema = toJsonSchema(providerFrontmatterContract);
 export const recipeFrontmatterSchema = toJsonSchema(recipeFrontmatterContract);
 export const scheduledLogFrontmatterSchema = toJsonSchema(scheduledLogFrontmatterContract);
 export const workoutFormatFrontmatterSchema = toJsonSchema(workoutFormatFrontmatterContract);
 export const workoutImportPayloadSchema = toInputJsonSchema(workoutImportPayloadContract);
 export const goalFrontmatterSchema = toJsonSchema(goalFrontmatterContract);
+export const habitatFrontmatterSchema = toJsonSchema(habitatFrontmatterContract);
 export const conditionFrontmatterSchema = toJsonSchema(conditionFrontmatterContract);
 export const allergyFrontmatterSchema = toJsonSchema(allergyFrontmatterContract);
 export const protocolFrontmatterSchema = toJsonSchema(protocolFrontmatterContract);
@@ -127,9 +125,9 @@ export const schemaCatalog = Object.freeze({
   "frontmatter-food": foodFrontmatterSchema,
   "frontmatter-genetic-variant": geneticVariantFrontmatterSchema,
   "frontmatter-goal": goalFrontmatterSchema,
+  "frontmatter-habitat": habitatFrontmatterSchema,
   "frontmatter-journal-day": journalDayFrontmatterSchema,
   "frontmatter-memory": memoryDocumentFrontmatterSchema,
-  "frontmatter-profile": profileFrontmatterSchema,
   "frontmatter-provider": providerFrontmatterSchema,
   "frontmatter-protocol": protocolFrontmatterSchema,
   "frontmatter-regimen": regimenFrontmatterSchema,

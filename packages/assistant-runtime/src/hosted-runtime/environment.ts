@@ -72,6 +72,9 @@ const HOSTED_RUNTIME_BASE_PROCESS_ENV_NAMES = [
   "LC_ALL",
   "LC_CTYPE",
   HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV,
+  // Image-owned Health Commons package root. Keep the name literal so
+  // assistant-runtime does not depend on @murphai/health-commons.
+  "MURPH_HEALTH_COMMONS_PACKAGE_ROOT",
   "NODE_ENV",
   "NODE_EXTRA_CA_CERTS",
   "PATH",
@@ -156,6 +159,9 @@ const HOSTED_RUNTIME_FORWARDED_ENV_DENYLIST = new Set<string>(
     // producer, not just the Cloudflare runner-secret policy.
     MURPH_ASSISTANT_CLI_SURFACE_PREBUILT_ARTIFACT_PATH_ENV,
     MURPH_ASSISTANT_SKILLS_ROOT_ENV,
+    // Health Commons owns this env-name contract from @murphai/health-commons/runtime.
+    // Keep it literal here so assistant-runtime does not gain that dependency edge.
+    "MURPH_HEALTH_COMMONS_PACKAGE_ROOT",
     "CODEX_HOME",
     "DYLD_INSERT_LIBRARIES",
     "DYLD_LIBRARY_PATH",
@@ -198,6 +204,9 @@ const HOSTED_RUNTIME_USER_ENV_DENYLIST = new Set<string>(
     // deny list note above.
     MURPH_ASSISTANT_CLI_SURFACE_PREBUILT_ARTIFACT_PATH_ENV,
     MURPH_ASSISTANT_SKILLS_ROOT_ENV,
+    // Health Commons owns this env-name contract from @murphai/health-commons/runtime.
+    // Keep it literal here so assistant-runtime does not gain that dependency edge.
+    "MURPH_HEALTH_COMMONS_PACKAGE_ROOT",
     "CODEX_HOME",
     "DYLD_INSERT_LIBRARIES",
     "DYLD_LIBRARY_PATH",

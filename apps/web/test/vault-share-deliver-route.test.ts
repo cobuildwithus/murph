@@ -45,6 +45,10 @@ vi.mock("@/src/lib/prisma", () => ({
 }));
 
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
+import {
+  buildHostedVaultShareProjectionScopeKey,
+  hostedVaultShareProjectionKindToScope,
+} from "@murphai/hosted-execution/vault-share";
 
 type DeliverRouteModule =
   typeof import("../app/api/internal/hosted-runtime/vault-share/deliver/route");
@@ -108,11 +112,20 @@ const VALID_BODY = {
   records: [recentRecord(1)],
 };
 
+const SLEEP_SCOPE = hostedVaultShareProjectionKindToScope("sleep-times.v0");
+const SLEEP_SCOPE_KEY = buildHostedVaultShareProjectionScopeKey(SLEEP_SCOPE);
+const ACTIVITY_SCOPE = hostedVaultShareProjectionKindToScope("activity-days.v0");
+const ACTIVITY_SCOPE_KEY = buildHostedVaultShareProjectionScopeKey(ACTIVITY_SCOPE);
+const PROFILE_SCOPE = hostedVaultShareProjectionKindToScope("profile-name.v0");
+const PROFILE_SCOPE_KEY = buildHostedVaultShareProjectionScopeKey(PROFILE_SCOPE);
+
 const ACTIVE_SHARE = {
   destinationMemberId: "member_referee",
   grantorMemberId: "member_grantor",
   id: "share_1",
   projectionKind: "sleep-times.v0",
+  projectionScope: SLEEP_SCOPE,
+  projectionScopeKey: SLEEP_SCOPE_KEY,
 };
 
 const SECOND_SHARE = {
@@ -120,6 +133,8 @@ const SECOND_SHARE = {
   grantorMemberId: "member_grantor",
   id: "share_2",
   projectionKind: "sleep-times.v0",
+  projectionScope: SLEEP_SCOPE,
+  projectionScopeKey: SLEEP_SCOPE_KEY,
 };
 
 function buildRequest(body: unknown): Request {
@@ -157,7 +172,7 @@ describe("vault-share deliver route", () => {
     expect(await response.json()).toEqual({ status: "delivered" });
     expect(mocks.findActiveHostedVaultShares).toHaveBeenCalledWith({
       grantorMemberId: "member_grantor",
-      projectionKind: "sleep-times.v0",
+      projectionScope: SLEEP_SCOPE,
     });
 		expect(mocks.deliverHostedVaultShareRecords).toHaveBeenCalledWith({
 			records: VALID_BODY.records,
@@ -178,7 +193,12 @@ describe("vault-share deliver route", () => {
   });
 
   it("delivers recent activity-day records through the closed projection kind", async () => {
-    const activityShare = { ...ACTIVE_SHARE, projectionKind: "activity-days.v0" };
+    const activityShare = {
+      ...ACTIVE_SHARE,
+      projectionKind: "activity-days.v0",
+      projectionScope: ACTIVITY_SCOPE,
+      projectionScopeKey: ACTIVITY_SCOPE_KEY,
+    };
     const record = recentActivityRecord(1);
     mocks.findActiveHostedVaultShares.mockResolvedValue([activityShare]);
 
@@ -191,7 +211,7 @@ describe("vault-share deliver route", () => {
     expect(await response.json()).toEqual({ status: "delivered" });
     expect(mocks.findActiveHostedVaultShares).toHaveBeenCalledWith({
       grantorMemberId: "member_grantor",
-      projectionKind: "activity-days.v0",
+      projectionScope: ACTIVITY_SCOPE,
     });
     expect(mocks.deliverHostedVaultShareRecords).toHaveBeenCalledWith({
       records: [record],
@@ -306,7 +326,12 @@ describe("vault-share deliver route", () => {
     // profile-name.v0 is a current-state record with one fixed recordKey, not a
     // time-series: a name set months before the first group join is still the
     // member's current name and must reach the destination.
-    const profileShare = { ...ACTIVE_SHARE, projectionKind: "profile-name.v0" };
+    const profileShare = {
+      ...ACTIVE_SHARE,
+      projectionKind: "profile-name.v0",
+      projectionScope: PROFILE_SCOPE,
+      projectionScopeKey: PROFILE_SCOPE_KEY,
+    };
     mocks.findActiveHostedVaultShares.mockResolvedValue([profileShare]);
     const record = {
       data: { displayName: "Theo" },
@@ -328,7 +353,12 @@ describe("vault-share deliver route", () => {
 
   it("still drops a future-dated profile name", async () => {
     mocks.findActiveHostedVaultShares.mockResolvedValue([
-      { ...ACTIVE_SHARE, projectionKind: "profile-name.v0" },
+      {
+        ...ACTIVE_SHARE,
+        projectionKind: "profile-name.v0",
+        projectionScope: PROFILE_SCOPE,
+        projectionScopeKey: PROFILE_SCOPE_KEY,
+      },
     ]);
 
     const response = await deliverRoute.POST(
@@ -474,7 +504,7 @@ describe("vault-share deliver route", () => {
 
     expect(mocks.findActiveHostedVaultShares).toHaveBeenCalledWith({
       grantorMemberId: "member_other",
-      projectionKind: "sleep-times.v0",
+      projectionScope: SLEEP_SCOPE,
     });
     expect(await response.json()).toEqual({ status: "no-active-share" });
   });

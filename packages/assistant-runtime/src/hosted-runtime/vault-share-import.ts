@@ -9,12 +9,14 @@ import type {
 import {
   compareSharedVaultShareRecords,
   createEmptySharedVaultShareProjectionStore,
+  buildHostedVaultShareProjectionScopeKey,
   HOSTED_VAULT_SHARE_DELIVER_MAX_RECORDS,
   HOSTED_VAULT_SHARE_DELIVERY_PAYLOAD_SCHEMA,
   parseSharedVaultShareProjectionStore,
   SHARED_VAULT_SHARE_PROJECTIONS_RELATIVE_PATH,
   type HostedVaultShareDeliveryRecord,
   type HostedVaultShareProjectionKind,
+  type HostedVaultShareProjectionScope,
   type SharedVaultShareGrantorEntry,
   type SharedVaultShareProjectionsFile,
   type SharedVaultShareRecordEntry,
@@ -49,6 +51,9 @@ export async function importHostedVaultShareDeliveryWake(input: {
   wake: HostedExecutionVaultShareDeliveryWake;
 }): Promise<HostedMailboxItemImportOutcome> {
   const delivery = input.wake.delivery;
+  const projectionScopeKey = buildHostedVaultShareProjectionScopeKey(
+    delivery.projectionScope,
+  );
 
   if (delivery.projectionKind === "group-email.v0") {
     return { status: "imported" };
@@ -59,6 +64,7 @@ export async function importHostedVaultShareDeliveryWake(input: {
   if (!hasSafeVaultShareIdentifiers({
     grantorMemberId: delivery.grantorMemberId,
     projectionKind: delivery.projectionKind,
+    projectionScopeKey,
     recordKey: delivery.record.recordKey,
     shareId: delivery.shareId,
   })) {
@@ -89,6 +95,8 @@ export async function importHostedVaultShareDeliveryWake(input: {
     upsertSharedVaultShareRecord(read.store, {
       grantorMemberId: delivery.grantorMemberId,
       projectionKind: delivery.projectionKind,
+      projectionScope: delivery.projectionScope,
+      projectionScopeKey,
       receivedEventId: input.wake.eventId,
       record: delivery.record,
       shareId: delivery.shareId,
@@ -114,10 +122,14 @@ export async function applyHostedVaultShareRevokeWake(input: {
   wake: HostedExecutionVaultShareRevokeWake;
 }): Promise<HostedMailboxItemImportOutcome> {
   const revoke = input.wake.revoke;
+  const projectionScopeKey = buildHostedVaultShareProjectionScopeKey(
+    revoke.projectionScope,
+  );
 
   if (!hasSafeVaultShareIdentifiers({
     grantorMemberId: revoke.grantorMemberId,
     projectionKind: revoke.projectionKind,
+    projectionScopeKey,
     shareId: revoke.shareId,
   })) {
     return {
@@ -145,7 +157,7 @@ export async function applyHostedVaultShareRevokeWake(input: {
     }
 
     const store = read.store;
-    const projection = store.projections[revoke.projectionKind];
+    const projection = store.projections[projectionScopeKey];
     const grantor = projection?.grantors[revoke.grantorMemberId];
     if (!projection || !grantor) {
       return { status: "imported" };
@@ -157,7 +169,7 @@ export async function applyHostedVaultShareRevokeWake(input: {
 
     delete projection.grantors[revoke.grantorMemberId];
     if (Object.keys(projection.grantors).length === 0) {
-      delete store.projections[revoke.projectionKind];
+      delete store.projections[projectionScopeKey];
     }
     store.updatedAt = revoke.revokedAt;
 
@@ -184,19 +196,27 @@ function upsertSharedVaultShareRecord(
   input: {
     grantorMemberId: string;
     projectionKind: HostedVaultShareProjectionKind;
+    projectionScope: HostedVaultShareProjectionScope;
+    projectionScopeKey: string;
     receivedEventId: string;
     record: HostedVaultShareDeliveryRecord;
     shareId: string;
     updatedAt: string;
   },
 ): void {
-  const projection = store.projections[input.projectionKind] ?? { grantors: {} };
+  const projection = store.projections[input.projectionScopeKey] ?? {
+    grantors: {},
+    projectionScope: input.projectionScope,
+    projectionScopeKey: input.projectionScopeKey,
+  };
   const existingGrantor = projection.grantors[input.grantorMemberId];
   const grantor: SharedVaultShareGrantorEntry = existingGrantor?.shareId === input.shareId
     ? existingGrantor
     : {
         grantorMemberId: input.grantorMemberId,
         projectionKind: input.projectionKind,
+        projectionScope: input.projectionScope,
+        projectionScopeKey: input.projectionScopeKey,
         records: [],
         shareId: input.shareId,
         updatedAt: input.updatedAt,
@@ -220,11 +240,17 @@ function upsertSharedVaultShareRecord(
   projection.grantors[input.grantorMemberId] = {
     grantorMemberId: input.grantorMemberId,
     projectionKind: input.projectionKind,
+    projectionScope: input.projectionScope,
+    projectionScopeKey: input.projectionScopeKey,
     records,
     shareId: input.shareId,
     updatedAt: input.updatedAt,
   };
-  store.projections[input.projectionKind] = projection;
+  store.projections[input.projectionScopeKey] = {
+    ...projection,
+    projectionScope: input.projectionScope,
+    projectionScopeKey: input.projectionScopeKey,
+  };
   store.updatedAt = input.updatedAt;
 }
 
@@ -296,11 +322,13 @@ function resolveSharedVaultShareProjectionStorePath(vaultRoot: string): string {
 function hasSafeVaultShareIdentifiers(input: {
   grantorMemberId: string;
   projectionKind: string;
+  projectionScopeKey: string;
   recordKey?: string;
   shareId: string;
 }): boolean {
   try {
     normalizeOpaquePathSegment(input.projectionKind, "Vault-share projection kind");
+    normalizeOpaquePathSegment(input.projectionScopeKey, "Vault-share projection scope key");
     normalizeOpaquePathSegment(input.grantorMemberId, "Vault-share grantor member id");
     normalizeOpaquePathSegment(input.shareId, "Vault-share share id");
     if (input.recordKey !== undefined) {

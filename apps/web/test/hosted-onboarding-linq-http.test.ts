@@ -8,10 +8,11 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
 }));
 
 import {
-  deleteHostedLinqMessage,
   sendHostedLinqChatMessage,
   sendHostedLinqReadReceipt,
   shareHostedLinqContactCard,
+  updateHostedLinqChatAvatar,
+  updateHostedLinqChatDisplayName,
 } from "@/src/lib/hosted-onboarding/linq";
 
 const originalFetch = globalThis.fetch;
@@ -137,7 +138,7 @@ describe("sendHostedLinqChatMessage", () => {
     });
   });
 
-  it("sends Linq idempotency keys on existing-chat replies", async () => {
+  it("sends existing-chat messages without provider-native reply anchors", async () => {
     const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => {
       void _input;
       void _init;
@@ -154,6 +155,7 @@ describe("sendHostedLinqChatMessage", () => {
       chatId: "chat_123",
       idempotencyKey: "linq-message:evt_123",
       message: "hello",
+      replyToMessageId: "msg_parent_123",
     });
 
     const firstCall = fetchMock.mock.calls[0];
@@ -232,7 +234,7 @@ describe("sendHostedLinqReadReceipt", () => {
   });
 });
 
-describe("deleteHostedLinqMessage", () => {
+describe("updateHostedLinqChatAvatar", () => {
   afterEach(() => {
     if (originalFetch) {
       vi.stubGlobal("fetch", originalFetch);
@@ -242,57 +244,103 @@ describe("deleteHostedLinqMessage", () => {
     Reflect.deleteProperty(globalThis, "fetch");
   });
 
-  it("deletes provider-visible Linq messages by message id", async () => {
+  it("updates a chat with the SDK-backed group icon field", async () => {
     const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => {
       void _input;
       void _init;
-      return new Response(null, { status: 204 });
+      return createJsonResponse({ status: "pending" }, 200);
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(deleteHostedLinqMessage({
-      messageId: "msg_offer_123",
+    await expect(updateHostedLinqChatAvatar({
+      chatId: "chat_123",
+      groupChatIconUrl: "https://imagedelivery.net/account/avatar/public",
     })).resolves.toBeUndefined();
 
-    expect(fetchMock).toHaveBeenCalledWith(
-      new URL("messages/msg_offer_123", "https://linq.example.test/api/partner/v3/"),
-      expect.objectContaining({
-        body: undefined,
-        method: "DELETE",
-        signal: expect.any(AbortSignal),
-      }),
-    );
+    const firstCall = fetchMock.mock.calls[0];
+    expect(firstCall).toBeDefined();
+    if (!firstCall) {
+      throw new Error("Expected fetch to be called");
+    }
+    const [url, init] = firstCall as [RequestInfo | URL, RequestInit?];
+    expect(url).toEqual(new URL("chats/chat_123", "https://linq.example.test/api/partner/v3/"));
+    expect(expectRequestInit(init).method).toBe("PUT");
+    expect(readJsonRequestBody(init)).toEqual({
+      group_chat_icon: "https://imagedelivery.net/account/avatar/public",
+    });
   });
 
-  it("treats missing provider-visible Linq messages as already deleted", async () => {
+  it("rejects non-HTTPS icon URLs before calling Linq", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(updateHostedLinqChatAvatar({
+      chatId: "chat_123",
+      groupChatIconUrl: "http://example.com/avatar.png",
+    })).rejects.toThrow(/HTTPS URL/u);
+
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects non-hosted icon URLs before calling Linq", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(updateHostedLinqChatAvatar({
+      chatId: "chat_123",
+      groupChatIconUrl: "https://example.com/avatar.png",
+    })).rejects.toThrow(/hosted Cloudflare Images URL/u);
+
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("updateHostedLinqChatDisplayName", () => {
+  afterEach(() => {
+    if (originalFetch) {
+      vi.stubGlobal("fetch", originalFetch);
+      return;
+    }
+
+    Reflect.deleteProperty(globalThis, "fetch");
+  });
+
+  it("updates a chat with the SDK-backed display name field", async () => {
     const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => {
       void _input;
       void _init;
-      return createJsonResponse({}, 404);
+      return createJsonResponse({ status: "pending" }, 200);
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(deleteHostedLinqMessage({
-      messageId: "msg_missing",
+    await expect(updateHostedLinqChatDisplayName({
+      chatId: "chat_123",
+      displayName: "  Weekly   Health Crew  ",
     })).resolves.toBeUndefined();
+
+    const firstCall = fetchMock.mock.calls[0];
+    expect(firstCall).toBeDefined();
+    if (!firstCall) {
+      throw new Error("Expected fetch to be called");
+    }
+    const [url, init] = firstCall as [RequestInfo | URL, RequestInit?];
+    expect(url).toEqual(new URL("chats/chat_123", "https://linq.example.test/api/partner/v3/"));
+    expect(expectRequestInit(init).method).toBe("PUT");
+    expect(readJsonRequestBody(init)).toEqual({
+      display_name: "Weekly Health Crew",
+    });
   });
 
-  it("marks transient Linq delete failures as retryable", async () => {
-    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => {
-      void _input;
-      void _init;
-      return createJsonResponse({}, 503);
-    });
+  it("rejects blank display names before calling Linq", async () => {
+    const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(deleteHostedLinqMessage({
-      messageId: "msg_offer_123",
-    })).rejects.toMatchObject({
-      code: "LINQ_SEND_FAILED",
-      httpStatus: 502,
-      message: "Linq message delete failed with HTTP 503.",
-      retryable: true,
-    });
+    await expect(updateHostedLinqChatDisplayName({
+      chatId: "chat_123",
+      displayName: " ",
+    })).rejects.toThrow(/display name is required/u);
+
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });
 

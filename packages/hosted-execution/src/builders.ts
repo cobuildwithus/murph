@@ -17,6 +17,8 @@ import type {
   HostedExecutionMemberActivatedWake,
   HostedExecutionMemberChannels,
   HostedExecutionMemberChannelsUpdatedWake,
+  HostedExecutionMemberPreferences,
+  HostedExecutionMemberPreferencesUpdatedWake,
   HostedExecutionRuntimeTimerWake,
   HostedExecutionRuntimeControlWake,
   HostedExecutionPlainRuntimeControlWakeKind,
@@ -125,6 +127,7 @@ type HostedExecutionMemberOwnedWake =
   | HostedExecutionAssistantNotificationRequestedWake
   | HostedExecutionMemberActivatedWake
   | HostedExecutionMemberChannelsUpdatedWake
+  | HostedExecutionMemberPreferencesUpdatedWake
   | HostedExecutionGroupNewsletterEmailNeededWake
   | HostedExecutionVaultShareDeliveryWake
   | HostedExecutionVaultShareRevokeWake;
@@ -441,6 +444,23 @@ export function buildHostedExecutionMemberChannelsUpdatedWake(input: {
   };
 }
 
+export function buildHostedExecutionMemberPreferencesUpdatedWake(input: {
+  eventId: string;
+  memberId: string;
+  occurredAt: string;
+  preferences: HostedExecutionMemberPreferences;
+}): HostedExecutionMemberPreferencesUpdatedWake {
+  return {
+    ...buildHostedExecutionMemberOwnedWakeBase({
+      eventId: input.eventId,
+      kind: "member.preferences.updated",
+      memberId: input.memberId,
+      occurredAt: input.occurredAt,
+    }),
+    preferences: { ...input.preferences },
+  };
+}
+
 export function buildHostedExecutionRuntimeTimerWake(input: {
   eventId: string;
   occurredAt: string;
@@ -524,6 +544,7 @@ export function buildHostedExecutionDeviceSyncWake(input: {
 }
 
 export function buildHostedExecutionGroupNewsletterEmailNeededWake(input: {
+  directRoute?: HostedExecutionGroupNewsletterEmailNeededWake["directRoute"];
   eventId: string;
   groupDisplayName: string | null;
   groupId: string;
@@ -537,6 +558,7 @@ export function buildHostedExecutionGroupNewsletterEmailNeededWake(input: {
       memberId: input.memberId,
       occurredAt: input.occurredAt,
     }),
+    ...(input.directRoute === undefined ? {} : { directRoute: input.directRoute }),
     groupDisplayName: input.groupDisplayName,
     groupId: input.groupId,
   };

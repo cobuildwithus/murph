@@ -84,13 +84,11 @@ import {
   type HostedRuntimeFamilyPlanToolResponse,
   type HostedRuntimeFamilyPlanToolStartCheckoutResponse,
   type HostedRuntimeFamilyPlanToolStatusResponse,
+  HOSTED_RUNTIME_GROUP_CHAT_ICON_URL_MAX_LENGTH,
   HOSTED_RUNTIME_GROUP_DISPLAY_NAME_MAX_LENGTH,
   HOSTED_RUNTIME_GROUP_JOIN_OFFER_MESSAGE_TEMPLATE_MAX_LENGTH,
   HOSTED_RUNTIME_GROUP_KINDS,
   HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX,
-  HOSTED_RUNTIME_GROUP_CALL_CIRCLE_OFFER_MESSAGE_MAX_LENGTH,
-  hasHostedRuntimeGroupJoinUrlPlaceholderOnce,
-  isHostedRuntimeGroupCallCircleOfferConsentMessage,
   HOSTED_RUNTIME_NEWSLETTER_HTML_MAX_LENGTH,
   HOSTED_RUNTIME_NEWSLETTER_PARTICIPANTS_MAX,
   HOSTED_RUNTIME_NEWSLETTER_SUBJECT_MAX_LENGTH,
@@ -98,8 +96,8 @@ import {
   type HostedRuntimeGroupChatParticipant,
   type HostedRuntimeGroupCreateJoinLinkRequest,
   type HostedRuntimeGroupKind,
-  type HostedRuntimeGroupPostCallCircleOfferRequest,
   type HostedRuntimeGroupPostJoinOfferRequest,
+  type HostedRuntimeGroupUpdateDisplayNameRequest,
   type HostedRuntimeGroupToolLinqThreadContext,
   type HostedRuntimeGroupMemberSummary,
   type HostedRuntimeGroupToolSelfOptOutContext,
@@ -132,7 +130,13 @@ import type {
 import {
   HOSTED_VAULT_SHARE_PROJECTION_KINDS,
   HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS,
+  HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES,
+  buildHostedVaultShareProjectionScopeKey,
+  hostedVaultShareProjectionKindToScope,
+  parseHostedVaultShareProjectionScope,
+  type HostedVaultShareProjectionScope,
   type HostedVaultShareProjectionKind,
+  type HostedVaultShareSelectableProjectionScope,
 } from "../vault-share.ts";
 import {
   rejectLegacyAliases,
@@ -706,6 +710,27 @@ export function parseHostedRuntimeGroupToolRequest(
     );
     return { action };
   }
+  if (action === "update_display_name") {
+    assertAllowedObjectKeys(
+      record,
+      new Set(["action", "updateDisplayName", "linqThread"]),
+      "Hosted runtime group tool update_display_name request",
+    );
+    return {
+      action,
+      ...(record.linqThread === undefined || record.linqThread === null
+        ? {}
+        : {
+            linqThread: parseHostedRuntimeGroupToolLinqThreadContext(
+              record.linqThread,
+              "Hosted runtime group tool update_display_name request linqThread",
+            ),
+          }),
+      updateDisplayName: parseHostedRuntimeGroupUpdateDisplayNameRequest(
+        record.updateDisplayName,
+      ),
+    };
+  }
   if (action === "create_join_link") {
     assertAllowedObjectKeys(
       record,
@@ -741,25 +766,40 @@ export function parseHostedRuntimeGroupToolRequest(
       }),
     };
   }
-  if (action === "post_call_circle_offer") {
+  if (action === "set_chat_avatar") {
     assertAllowedObjectKeys(
       record,
-      new Set(["action", "callCircleOffer", "linqThread"]),
-      "Hosted runtime group tool post_call_circle_offer request",
+      new Set(["action", "groupChatIconUrl", "linqThread"]),
+      "Hosted runtime group tool set_chat_avatar request",
     );
     return {
       action,
-      callCircleOffer: parseHostedRuntimeGroupPostCallCircleOfferRequest(
-        record.callCircleOffer,
-      ),
+      groupChatIconUrl: parseHostedRuntimeGroupChatIconUrl(record.groupChatIconUrl),
       ...(record.linqThread === undefined || record.linqThread === null
         ? {}
         : {
             linqThread: parseHostedRuntimeGroupToolLinqThreadContext(
               record.linqThread,
-              "Hosted runtime group tool post_call_circle_offer request linqThread",
+              "Hosted runtime group tool set_chat_avatar request linqThread",
             ),
-          }),
+      }),
+    };
+  }
+  if (action === "preflight_set_chat_avatar") {
+    assertAllowedObjectKeys(
+      record,
+      new Set(["action", "linqThread"]),
+      "Hosted runtime group tool preflight_set_chat_avatar request",
+    );
+    if (record.linqThread === undefined || record.linqThread === null) {
+      return { action };
+    }
+    return {
+      action,
+      linqThread: parseHostedRuntimeGroupToolLinqThreadContext(
+        record.linqThread,
+        "Hosted runtime group tool preflight_set_chat_avatar request linqThread",
+      ),
     };
   }
   if (action === "read_chat_participants" || action === "share_contact_card") {
@@ -799,6 +839,64 @@ export function parseHostedRuntimeGroupToolRequest(
   throw new TypeError("Hosted runtime group tool action is not supported.");
 }
 
+function parseHostedRuntimeGroupUpdateDisplayNameRequest(
+  value: unknown,
+): HostedRuntimeGroupUpdateDisplayNameRequest {
+  const record = requireObject(
+    value,
+    "Hosted runtime group tool update_display_name updateDisplayName",
+  );
+  assertAllowedObjectKeys(
+    record,
+    new Set(["displayName"]),
+    "Hosted runtime group tool update_display_name updateDisplayName",
+  );
+  const displayName = requireString(
+    record.displayName,
+    "Hosted runtime group tool update_display_name displayName",
+  ).trim().replace(/\s+/gu, " ");
+  if (displayName.length === 0) {
+    throw new TypeError("Hosted runtime group tool update_display_name displayName must not be blank.");
+  }
+  if (displayName.length > HOSTED_RUNTIME_GROUP_DISPLAY_NAME_MAX_LENGTH) {
+    throw new TypeError("Hosted runtime group tool update_display_name displayName is too long.");
+  }
+  return { displayName };
+}
+
+function parseHostedRuntimeGroupChatIconUrl(value: unknown): string {
+  const iconUrl = requireString(
+    value,
+    "Hosted runtime group tool set_chat_avatar groupChatIconUrl",
+  ).trim();
+  if (
+    iconUrl.length === 0 ||
+    iconUrl.length > HOSTED_RUNTIME_GROUP_CHAT_ICON_URL_MAX_LENGTH
+  ) {
+    throw new TypeError("Hosted runtime group tool set_chat_avatar groupChatIconUrl is invalid.");
+  }
+  let parsed: URL;
+  try {
+    parsed = new URL(iconUrl);
+  } catch {
+    throw new TypeError("Hosted runtime group tool set_chat_avatar groupChatIconUrl is invalid.");
+  }
+  if (parsed.protocol !== "https:" || parsed.username || parsed.password) {
+    throw new TypeError("Hosted runtime group tool set_chat_avatar groupChatIconUrl must be HTTPS.");
+  }
+  if (!isHostedRuntimeGroupChatIconDeliveryUrl(parsed)) {
+    throw new TypeError("Hosted runtime group tool set_chat_avatar groupChatIconUrl is invalid.");
+  }
+  return parsed.toString();
+}
+
+function isHostedRuntimeGroupChatIconDeliveryUrl(url: URL): boolean {
+  if (url.hostname !== "imagedelivery.net" || url.search || url.hash) {
+    return false;
+  }
+  return url.pathname.split("/").filter(Boolean).length >= 3;
+}
+
 function parseHostedRuntimeGroupToolLinqThreadContext(
   value: unknown,
   label: string,
@@ -820,18 +918,28 @@ function parseHostedRuntimeGroupPostJoinOfferRequest(
   const record = requireObject(value, "Hosted runtime group tool post_join_offer joinOffer");
   assertAllowedObjectKeys(
     record,
-    new Set(["messageTemplate", "projectionKinds"]),
+    new Set(["displayName", "messageTemplate", "projectionKinds", "projectionScopes"]),
     "Hosted runtime group tool post_join_offer joinOffer",
+  );
+  const displayName = parseHostedRuntimeGroupDisplayName(
+    record.displayName,
+    "Hosted runtime group tool post_join_offer displayName",
   );
   const messageTemplate = record.messageTemplate === undefined || record.messageTemplate === null
     ? null
     : parseHostedRuntimeGroupJoinOfferMessageTemplate(record.messageTemplate);
   return {
+    displayName,
     ...(messageTemplate === null ? {} : { messageTemplate }),
     projectionKinds: parseHostedRuntimeGroupProjectionKindArray(
       record.projectionKinds,
       "Hosted runtime group tool post_join_offer projectionKinds",
       HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS,
+    ),
+    projectionScopes: parseHostedRuntimeGroupSelectableProjectionScopes(
+      record.projectionScopes,
+      record.projectionKinds,
+      "Hosted runtime group tool post_join_offer projectionScopes",
     ),
   };
 }
@@ -850,41 +958,6 @@ function parseHostedRuntimeGroupJoinOfferMessageTemplate(value: unknown): string
     );
   }
   return template;
-}
-
-function parseHostedRuntimeGroupPostCallCircleOfferRequest(
-  value: unknown,
-): HostedRuntimeGroupPostCallCircleOfferRequest {
-  const record = requireObject(
-    value,
-    "Hosted runtime group tool post_call_circle_offer callCircleOffer",
-  );
-  assertAllowedObjectKeys(
-    record,
-    new Set(["message"]),
-    "Hosted runtime group tool post_call_circle_offer callCircleOffer",
-  );
-  const message = requireString(
-    record.message,
-    "Hosted runtime group tool post_call_circle_offer message",
-  ).trim();
-  if (message.length === 0) {
-    throw new TypeError("Hosted runtime group tool post_call_circle_offer message must not be blank.");
-  }
-  if (message.length > HOSTED_RUNTIME_GROUP_CALL_CIRCLE_OFFER_MESSAGE_MAX_LENGTH) {
-    throw new TypeError("Hosted runtime group tool post_call_circle_offer message is too long.");
-  }
-  if (!hasHostedRuntimeGroupJoinUrlPlaceholderOnce(message)) {
-    throw new TypeError(
-      "Hosted runtime group tool post_call_circle_offer message must contain {{join_url}} exactly once.",
-    );
-  }
-  if (!isHostedRuntimeGroupCallCircleOfferConsentMessage(message)) {
-    throw new TypeError(
-      "Hosted runtime group tool post_call_circle_offer message must say liking or reacting opts the member into Call Circle for this group, may add them to the group, shares their Murph profile name with the group, and lets Murph ask privately for availability.",
-    );
-  }
-  return { message };
 }
 
 function parseHostedRuntimeGroupToolSelfOptOutContext(
@@ -909,30 +982,50 @@ function parseHostedRuntimeGroupCreateJoinLinkRequest(
   const record = requireObject(value, "Hosted runtime group tool create_join_link joinLink");
   assertAllowedObjectKeys(
     record,
-    new Set(["displayName", "kind", "requestedVaultShareProjectionKinds"]),
+    new Set([
+      "displayName",
+      "kind",
+      "requestedVaultShareProjectionKinds",
+      "requestedVaultShareProjectionScopes",
+    ]),
     "Hosted runtime group tool create_join_link joinLink",
   );
-  const displayName = readNullableString(
+  const displayName = parseHostedRuntimeGroupDisplayName(
     record.displayName,
     "Hosted runtime group tool create_join_link displayName",
   );
-  if (displayName !== null && displayName.trim().length === 0) {
-    throw new TypeError("Hosted runtime group tool create_join_link displayName must not be blank.");
-  }
-  if (displayName !== null && displayName.length > HOSTED_RUNTIME_GROUP_DISPLAY_NAME_MAX_LENGTH) {
-    throw new TypeError("Hosted runtime group tool create_join_link displayName is too long.");
-  }
+
   return {
     displayName,
     kind: readHostedRuntimeGroupKind(record.kind),
-    // The membership-implied profile-name.v0 kind is never requestable through a join
-    // link: the request contract is closed over the individually selectable kinds.
+    // Compatibility for old fixed-kind callers.
     requestedVaultShareProjectionKinds: parseHostedRuntimeGroupProjectionKindArray(
       record.requestedVaultShareProjectionKinds,
       "Hosted runtime group tool create_join_link requestedVaultShareProjectionKinds",
       HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS,
     ),
+    // The membership-implied profile-name.v0 kind is never requestable through a join
+    // link: the request contract is closed over the individually selectable scopes.
+    requestedVaultShareProjectionScopes: parseHostedRuntimeGroupSelectableProjectionScopes(
+      record.requestedVaultShareProjectionScopes,
+      record.requestedVaultShareProjectionKinds,
+      "Hosted runtime group tool create_join_link requestedVaultShareProjectionScopes",
+    ),
   };
+}
+
+function parseHostedRuntimeGroupDisplayName(
+  value: unknown,
+  label: string,
+): string | null {
+  const displayName = readNullableString(value, label);
+  if (displayName !== null && displayName.trim().length === 0) {
+    throw new TypeError(`${label} must not be blank.`);
+  }
+  if (displayName !== null && displayName.length > HOSTED_RUNTIME_GROUP_DISPLAY_NAME_MAX_LENGTH) {
+    throw new TypeError(`${label} is too long.`);
+  }
+  return displayName;
 }
 
 function readHostedRuntimeGroupKind(value: unknown): HostedRuntimeGroupKind | null {
@@ -1001,23 +1094,42 @@ export function parseHostedRuntimeGroupToolResponse(
     }
   }
 
-  if (action === "post_join_offer" || action === "post_call_circle_offer") {
-    const label = `Hosted runtime group tool ${action}`;
-    const result = requireObject(record.result, `${label} response result`);
-    const status = requireString(result.status, `${label} response status`);
+  if (action === "update_display_name") {
+    const result = requireObject(record.result, "Hosted runtime group tool update_display_name response result");
+    const status = requireString(result.status, "Hosted runtime group tool update_display_name response status");
+    if (status === "ok") {
+      assertAllowedObjectKeys(result, new Set(["status", "group"]), "Hosted runtime group tool update_display_name ok response result");
+      return { action, result: { status, group: parseHostedRuntimeGroupSummary(result.group) } };
+    }
+    if (status === "unavailable") {
+      assertAllowedObjectKeys(result, new Set(["status", "unavailableReason", "group"]), "Hosted runtime group tool update_display_name unavailable response result");
+      return {
+        action,
+        result: {
+          status,
+          unavailableReason: requireString(result.unavailableReason, "Hosted runtime group unavailableReason"),
+          group: null,
+        },
+      };
+    }
+  }
+
+  if (action === "post_join_offer") {
+    const result = requireObject(record.result, "Hosted runtime group tool post_join_offer response result");
+    const status = requireString(result.status, "Hosted runtime group tool post_join_offer response status");
     if (status === "sent") {
-      assertAllowedObjectKeys(result, new Set(["status", "group", "joinUrl"]), `${label} sent response result`);
+      assertAllowedObjectKeys(result, new Set(["status", "group", "joinUrl"]), "Hosted runtime group tool post_join_offer sent response result");
       return {
         action,
         result: {
           status,
           group: parseHostedRuntimeGroupSummary(result.group),
-          joinUrl: requireString(result.joinUrl, `${label} joinUrl`),
+          joinUrl: requireString(result.joinUrl, "Hosted runtime group tool post_join_offer joinUrl"),
         },
       };
     }
     if (status === "unavailable") {
-      assertAllowedObjectKeys(result, new Set(["status", "unavailableReason", "group"]), `${label} unavailable response result`);
+      assertAllowedObjectKeys(result, new Set(["status", "unavailableReason", "group"]), "Hosted runtime group tool post_join_offer unavailable response result");
       return {
         action,
         result: {
@@ -1050,6 +1162,44 @@ export function parseHostedRuntimeGroupToolResponse(
           status,
           unavailableReason: requireString(result.unavailableReason, "Hosted runtime group unavailableReason"),
           participants: null,
+        },
+      };
+    }
+  }
+
+  if (action === "set_chat_avatar") {
+    const result = requireObject(record.result, "Hosted runtime group tool set_chat_avatar response result");
+    const status = requireString(result.status, "Hosted runtime group tool set_chat_avatar response status");
+    if (status === "ok" || status === "requested") {
+      assertAllowedObjectKeys(result, new Set(["status"]), "Hosted runtime group tool set_chat_avatar accepted response result");
+      return { action, result: { status } };
+    }
+    if (status === "unavailable") {
+      assertAllowedObjectKeys(result, new Set(["status", "unavailableReason"]), "Hosted runtime group tool set_chat_avatar unavailable response result");
+      return {
+        action,
+        result: {
+          status,
+          unavailableReason: requireString(result.unavailableReason, "Hosted runtime group unavailableReason"),
+        },
+      };
+    }
+  }
+
+  if (action === "preflight_set_chat_avatar") {
+    const result = requireObject(record.result, "Hosted runtime group tool preflight_set_chat_avatar response result");
+    const status = requireString(result.status, "Hosted runtime group tool preflight_set_chat_avatar response status");
+    if (status === "ok") {
+      assertAllowedObjectKeys(result, new Set(["status"]), "Hosted runtime group tool preflight_set_chat_avatar ok response result");
+      return { action, result: { status } };
+    }
+    if (status === "unavailable") {
+      assertAllowedObjectKeys(result, new Set(["status", "unavailableReason"]), "Hosted runtime group tool preflight_set_chat_avatar unavailable response result");
+      return {
+        action,
+        result: {
+          status,
+          unavailableReason: requireString(result.unavailableReason, "Hosted runtime group unavailableReason"),
         },
       };
     }
@@ -1400,6 +1550,72 @@ function parseHostedRuntimeGroupProjectionKindArray<
   return allowedKinds.filter((kind) => seen.has(kind));
 }
 
+const HOSTED_RUNTIME_GROUP_SUMMARY_PROJECTION_SCOPES = Object.freeze([
+  hostedVaultShareProjectionKindToScope("profile-name.v0"),
+  ...HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES,
+] satisfies readonly HostedVaultShareProjectionScope[]);
+
+function parseHostedRuntimeGroupSelectableProjectionScopes(
+  value: unknown,
+  legacyKindsValue: unknown,
+  label: string,
+): HostedVaultShareSelectableProjectionScope[] | null {
+  const scopes = parseHostedRuntimeGroupProjectionScopeArray(
+    value,
+    label,
+    HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES,
+  );
+  if (scopes !== null) {
+    return scopes;
+  }
+  const legacyKinds = parseHostedRuntimeGroupProjectionKindArray(
+    legacyKindsValue,
+    `${label} legacy projectionKinds`,
+    HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS,
+  );
+  if (legacyKinds === null) {
+    return null;
+  }
+  return legacyKinds.map((projectionKind) => hostedVaultShareProjectionKindToScope(projectionKind));
+}
+
+function parseHostedRuntimeGroupProjectionScopeArray<
+  K extends HostedVaultShareProjectionScope,
+>(
+  value: unknown,
+  label: string,
+  allowedScopes: readonly K[],
+): K[] | null {
+  if (value === undefined || value === null) return null;
+  const requested = requireArray(value, label);
+  if (requested.length > allowedScopes.length) {
+    throw new TypeError(`${label} must contain at most ${allowedScopes.length} entries.`);
+  }
+  const allowedScopeByKey = new Map(
+    allowedScopes.map((scope) => [buildHostedVaultShareProjectionScopeKey(scope), scope]),
+  );
+  const seen = new Set<string>();
+  for (const entry of requested) {
+    let scope: HostedVaultShareProjectionScope;
+    try {
+      scope = parseHostedVaultShareProjectionScope(entry, `${label} entry`);
+    } catch (error) {
+      throw new TypeError(
+        `${label} contains an unsupported projection scope.`,
+        { cause: error },
+      );
+    }
+    const scopeKey = buildHostedVaultShareProjectionScopeKey(scope);
+    if (!allowedScopeByKey.has(scopeKey)) {
+      throw new TypeError(`${label} contains an unsupported projection scope.`);
+    }
+    seen.add(scopeKey);
+  }
+  return allowedScopes.filter((scope) =>
+    seen.has(buildHostedVaultShareProjectionScopeKey(scope))
+  );
+}
+
 function isAllowedProjectionKind<K extends HostedVaultShareProjectionKind>(
   allowedKinds: readonly K[],
   value: unknown,
@@ -1407,24 +1623,54 @@ function isAllowedProjectionKind<K extends HostedVaultShareProjectionKind>(
   return (allowedKinds as readonly unknown[]).includes(value);
 }
 
+function legacyProjectionKindsToScopes(
+  projectionKinds: readonly HostedVaultShareProjectionKind[],
+  label: string,
+): HostedVaultShareProjectionScope[] {
+  return projectionKinds.map((projectionKind) =>
+    parseHostedVaultShareProjectionScope(projectionKind, `${label} ${projectionKind}`)
+  );
+}
+
 function parseHostedRuntimeGroupSummary(value: unknown) {
   const record = requireObject(value, "Hosted runtime group summary");
   assertAllowedObjectKeys(
     record,
-    new Set(["displayName", "id", "kind", "memberCount", "members", "requestedVaultShareProjectionKinds", "status"]),
+    new Set([
+      "displayName",
+      "id",
+      "kind",
+      "memberCount",
+      "members",
+      "requestedVaultShareProjectionKinds",
+      "requestedVaultShareProjectionScopes",
+      "status",
+    ]),
     "Hosted runtime group summary",
   );
+  const requestedVaultShareProjectionKinds =
+    parseHostedRuntimeGroupProjectionKindArray(
+      record.requestedVaultShareProjectionKinds,
+      "Hosted runtime group summary requestedVaultShareProjectionKinds",
+      HOSTED_VAULT_SHARE_PROJECTION_KINDS,
+    ) ?? [];
+  const requestedVaultShareProjectionScopes =
+    parseHostedRuntimeGroupProjectionScopeArray(
+      record.requestedVaultShareProjectionScopes,
+      "Hosted runtime group summary requestedVaultShareProjectionScopes",
+      HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES,
+    ) ?? legacyProjectionKindsToScopes(
+      requestedVaultShareProjectionKinds,
+      "Hosted runtime group summary requestedVaultShareProjectionKinds",
+    );
   return {
     displayName: readNullableString(record.displayName, "Hosted runtime group summary displayName"),
     id: requireString(record.id, "Hosted runtime group summary id"),
     kind: requireString(record.kind, "Hosted runtime group summary kind"),
     memberCount: requireNumber(record.memberCount, "Hosted runtime group summary memberCount"),
     members: parseHostedRuntimeGroupMemberSummaries(record.members),
-    requestedVaultShareProjectionKinds: parseHostedRuntimeGroupProjectionKindArray(
-      record.requestedVaultShareProjectionKinds,
-      "Hosted runtime group summary requestedVaultShareProjectionKinds",
-      HOSTED_VAULT_SHARE_PROJECTION_KINDS,
-    ) ?? [],
+    requestedVaultShareProjectionKinds,
+    requestedVaultShareProjectionScopes,
     status: requireString(record.status, "Hosted runtime group summary status"),
   };
 }
@@ -1448,39 +1694,38 @@ function parseHostedRuntimeGroupMemberSummaries(
     const record = requireObject(entry, "Hosted runtime group summary member");
     assertAllowedObjectKeys(
       record,
-      new Set(["callCircle", "grantedVaultShareProjectionKinds", "handle", "memberId", "role"]),
+      new Set([
+        "grantedVaultShareProjectionKinds",
+        "grantedVaultShareProjectionScopes",
+        "handle",
+        "memberId",
+        "role",
+      ]),
       "Hosted runtime group summary member",
     );
-    return {
-      callCircle: parseHostedRuntimeGroupMemberCallCircle(
-        record.callCircle,
-        "Hosted runtime group summary member callCircle",
-      ),
-      grantedVaultShareProjectionKinds: parseHostedRuntimeGroupProjectionKindArray(
+    const grantedVaultShareProjectionKinds =
+      parseHostedRuntimeGroupProjectionKindArray(
         record.grantedVaultShareProjectionKinds,
         "Hosted runtime group summary member grantedVaultShareProjectionKinds",
         HOSTED_VAULT_SHARE_PROJECTION_KINDS,
-      ) ?? [],
+      ) ?? [];
+    const grantedVaultShareProjectionScopes =
+      parseHostedRuntimeGroupProjectionScopeArray(
+        record.grantedVaultShareProjectionScopes,
+        "Hosted runtime group summary member grantedVaultShareProjectionScopes",
+        HOSTED_RUNTIME_GROUP_SUMMARY_PROJECTION_SCOPES,
+      ) ?? legacyProjectionKindsToScopes(
+        grantedVaultShareProjectionKinds,
+        "Hosted runtime group summary member grantedVaultShareProjectionKinds",
+      );
+    return {
+      grantedVaultShareProjectionKinds,
+      grantedVaultShareProjectionScopes,
       handle: readNullableString(record.handle, "Hosted runtime group summary member handle"),
       memberId: requireString(record.memberId, "Hosted runtime group summary member memberId"),
       role: requireString(record.role, "Hosted runtime group summary member role"),
     };
   });
-}
-
-function parseHostedRuntimeGroupMemberCallCircle(
-  value: unknown,
-  label: string,
-): HostedRuntimeGroupMemberSummary["callCircle"] {
-  if (value === undefined || value === null) {
-    return null;
-  }
-  const record = requireObject(value, label);
-  assertAllowedObjectKeys(record, new Set(["enrolled", "paused"]), label);
-  return {
-    enrolled: requireBoolean(record.enrolled, `${label} enrolled`),
-    paused: requireBoolean(record.paused, `${label} paused`),
-  };
 }
 
 export function parseHostedRuntimeFamilyPlanToolRequest(
@@ -2349,6 +2594,12 @@ function parseHostedRuntimeLatencyPhaseBreakdown(
       providerLabel,
     );
     breakdown.provider = {
+      ...requireOptionalNonNegativeInteger(provider, "codexAppServerInitializeMs", providerLabel),
+      ...requireOptionalNonNegativeInteger(provider, "codexAppServerPreProviderMs", providerLabel),
+      ...requireOptionalNonNegativeInteger(provider, "codexAppServerSpawnReadyMs", providerLabel),
+      ...requireOptionalNonNegativeInteger(provider, "codexAppServerThreadResumeMs", providerLabel),
+      ...requireOptionalNonNegativeInteger(provider, "codexAppServerThreadStartMs", providerLabel),
+      ...requireOptionalNonNegativeInteger(provider, "codexAppServerWarmReuseMs", providerLabel),
       ...requireOptionalNonNegativeInteger(provider, "turnLockWaitMs", providerLabel),
       ...requireOptionalNonNegativeInteger(provider, "sessionResolveMs", providerLabel),
       ...requireOptionalNonNegativeInteger(provider, "promptBuildMs", providerLabel),
@@ -2572,6 +2823,14 @@ export function parseHostedWorkspaceCheckpointRequest(
           redactedStatus: parseHostedRuntimeRedactedJson(
             record.redactedStatus,
             "Hosted workspace checkpoint request redactedStatus",
+          ),
+        }),
+    ...(record.runtimeWakePendingAtCheckpoint === undefined
+      ? {}
+      : {
+          runtimeWakePendingAtCheckpoint: requireBoolean(
+            record.runtimeWakePendingAtCheckpoint,
+            "Hosted workspace checkpoint request runtimeWakePendingAtCheckpoint",
           ),
         }),
     snapshotRef: parseHostedExecutionSnapshotRef(

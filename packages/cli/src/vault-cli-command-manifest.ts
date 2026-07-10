@@ -103,10 +103,10 @@ import {
   immunizationSaveResultSchema,
   registerImmunizationCommands,
 } from './commands/health-immunization-save.js'
+import { registerHabitatCommands } from './commands/habitat.js'
 import { registerIntakeCommands } from './commands/intake.js'
 import { registerJournalCommands } from './commands/journal.js'
 import { registerMemoryCommands } from './commands/memory.js'
-import { registerProfileCommands } from './commands/profile.js'
 import {
   medicationHistoryResultSchema,
   registerMedicationCommands,
@@ -872,19 +872,44 @@ export const vaultCliCommandDescriptors = [
     },
   },
   {
+    id: 'habitat',
+    bindingMode: 'none',
+    rootCommandNames: ['habitat'],
+    leafCommands: [
+      {
+        path: ['habitat', 'save'],
+        description:
+          'Merge indicator values into one habitat aspect record (declined and null are first-class values).',
+      },
+      {
+        path: ['habitat', 'show'],
+        description: 'Show one habitat aspect record by canonical id or aspect slug.',
+      },
+      {
+        path: ['habitat', 'list'],
+        description: 'List habitat aspect records with an optional domain filter.',
+      },
+      {
+        path: ['habitat', 'coverage'],
+        description:
+          'Compute habitat coverage against the domain catalog, including top unanswered gaps.',
+      },
+      {
+        path: ['habitat', 'catalog'],
+        description:
+          'Emit the habitat domain catalog with indicators, priorities, and example questions.',
+      },
+    ],
+    register({ cli }) {
+      registerHabitatCommands(cli)
+    },
+  },
+  {
     id: 'memory',
     bindingMode: 'none',
     rootCommandNames: ['memory'],
     register({ cli }) {
       registerMemoryCommands(cli)
-    },
-  },
-  {
-    id: 'profile',
-    bindingMode: 'none',
-    rootCommandNames: ['profile'],
-    register({ cli }) {
-      registerProfileCommands(cli)
     },
   },
   {

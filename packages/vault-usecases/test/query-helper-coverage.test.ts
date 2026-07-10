@@ -153,6 +153,17 @@ describe("query record command helpers", () => {
         },
       }),
     );
+    const longAuditSummary = "x".repeat(240);
+    const longAudit = toAuditCommandListItem(
+      createQueryRecord({
+        family: "audit",
+        kind: "audit",
+        title: longAuditSummary,
+        attributes: {
+          summary: longAuditSummary,
+        },
+      }),
+    );
 
     expect(sample.quality).toBe("verified");
     expect(sample.stream).toBe("oura");
@@ -166,8 +177,6 @@ describe("query record command helpers", () => {
     expect(sampleWithoutState.stream).toBeNull();
     expect(sampleWithoutState.data).toEqual({
       source: "manual",
-      status: undefined,
-      stream: undefined,
     });
 
     expect(audit.action).toBe("update");
@@ -175,6 +184,9 @@ describe("query record command helpers", () => {
     expect(audit.status).toBe("applied");
     expect(audit.commandName).toBe("query.samples.list");
     expect(audit.summary).toBe("synced records");
+    expect(longAudit.title).toBe(`${"x".repeat(177)}...`);
+    expect(longAudit.summary).toBe(`${"x".repeat(177)}...`);
+    expect(longAudit.data.summary).toBe(`${"x".repeat(177)}...`);
   });
 });
 

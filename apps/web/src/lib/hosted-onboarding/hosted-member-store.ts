@@ -44,6 +44,8 @@ const HOSTED_MEMBER_EMAIL_AUTH_DIRECT_PUBLIC_SENDER_FIELD =
 const HOSTED_MEMBER_EMAIL_AUTH_STRIPE_CHECKOUT_EMAIL_FIELD =
   "hosted-member-email-authorization.stripe-checkout-email";
 
+// Assistant tone/voice are cosmetic preferences owned by `member-preferences.ts`.
+// They stay out of core state so billing, auth, and routing paths never carry them.
 const hostedMemberCoreStateSelect = Prisma.validator<Prisma.HostedMemberSelect>()({
   billingStatus: true,
   createdAt: true,

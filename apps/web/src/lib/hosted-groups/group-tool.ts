@@ -1,15 +1,13 @@
 import "server-only";
 
+import type { PrismaClient } from "@prisma/client";
 import {
+  HOSTED_RUNTIME_GROUP_CHAT_ICON_URL_MAX_LENGTH,
   HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX,
-  HOSTED_RUNTIME_GROUP_CALL_CIRCLE_OFFER_MESSAGE_MAX_LENGTH,
+  HOSTED_RUNTIME_GROUP_DISPLAY_NAME_MAX_LENGTH,
   HOSTED_RUNTIME_GROUP_JOIN_OFFER_MESSAGE_TEMPLATE_MAX_LENGTH,
-  HOSTED_RUNTIME_GROUP_JOIN_URL_PLACEHOLDER,
-  hasHostedRuntimeGroupJoinUrlPlaceholderOnce,
-  isHostedRuntimeGroupCallCircleOfferConsentMessage,
   type HostedRuntimeGroupChatParticipant,
   type HostedRuntimeGroupCreateJoinLinkRequest,
-  type HostedRuntimeGroupPostCallCircleOfferRequest,
   type HostedRuntimeGroupPostJoinOfferRequest,
   type HostedRuntimeGroupToolAction,
   type HostedRuntimeGroupToolLinqThreadContext,
@@ -17,7 +15,10 @@ import {
   type HostedRuntimeGroupToolResponse,
   type HostedRuntimeGroupToolSelfOptOutContext,
 } from "@murphai/hosted-execution/runtime-control";
-import type { HostedVaultShareProjectionKind } from "@murphai/hosted-execution/vault-share";
+import type {
+  HostedVaultShareProjectionKind,
+  HostedVaultShareProjectionScope,
+} from "@murphai/hosted-execution/vault-share";
 
 import { hasHostedRuntimeActiveAccess } from "../hosted-mailbox/runtime-access";
 import {
@@ -27,12 +28,13 @@ import { readActiveHostedMemberAccess } from "../hosted-onboarding/member-access
 import { lookupHostedMemberIdentityByPhoneNumber } from "../hosted-onboarding/hosted-member-identity-store";
 import { lookupHostedMemberByVerifiedEmailAddress } from "../hosted-onboarding/hosted-member-store";
 import {
-  deleteHostedLinqMessage,
   getHostedLinqChatHandles,
   type HostedLinqChatHandleSummary,
   isHostedLinqAttachmentSendPrepareFailure,
   sendHostedLinqAttachmentMessage,
   sendHostedLinqChatMessage,
+  updateHostedLinqChatAvatar,
+  updateHostedLinqChatDisplayName,
 } from "../hosted-onboarding/linq-client";
 import {
   buildMurphHostedLinqContactCardVcf,
@@ -63,26 +65,26 @@ import {
 import { assertHostedLinqRouteEgressAuthority } from "../hosted-routing/thread-route-store";
 import { resolveHostedPublicBaseUrl } from "../hosted-web/public-url";
 import { getPrisma } from "../prisma";
-import { isHostedCallCircleOffersEnabled } from "./call-circle-offer-gate";
 import { buildHostedGroupJoinUrl } from "./group-links";
 import {
-  bindHostedGroupJoinOfferTx,
+  enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort,
+} from "./group-newsletter";
+import {
   createHostedGroupJoinLinkForOwnedThreadContainerTx,
-  createHostedGroupJoinOfferFingerprint,
   readHostedGroupByRuntimeMemberId,
-  reserveHostedGroupJoinOfferTx,
+  recordHostedGroupJoinOfferTx,
   revokeHostedGroupMemberEmailShareTx,
-  revokeUnboundHostedGroupJoinOfferTx,
-  type HostedGroupFeatureActivationKind,
+  updateHostedGroupDisplayNameByRuntimeMemberIdTx,
 } from "./group-store";
 import {
-  normalizeHostedVaultShareProjectionKinds,
+  normalizeHostedVaultShareProjectionScopes,
   projectHostedVaultShareProjectionDisplays,
 } from "./join-policy";
 
 export const HOSTED_THREAD_CONTAINER_PARTICIPANT_RECONCILE_MAX =
   HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX;
 
+const HOSTED_GROUP_JOIN_OFFER_JOIN_URL_PLACEHOLDER = "{{join_url}}";
 const HOSTED_GROUP_JOIN_OFFER_SHARE_SCOPE_PLACEHOLDER = "{{share_scope}}";
 
 export type HostedRuntimeGroupToolAccessClassification =
@@ -91,12 +93,14 @@ export type HostedRuntimeGroupToolAccessClassification =
 
 export const HOSTED_RUNTIME_GROUP_TOOL_ACCESS_CLASSIFICATION = {
   create_join_link: "owner_active",
-  post_call_circle_offer: "owner_active",
   post_join_offer: "owner_active",
+  preflight_set_chat_avatar: "owner_active",
   read_chat_participants: "participant_aware",
   read_current: "participant_aware",
   revoke_own_email_share: "participant_aware",
+  set_chat_avatar: "owner_active",
   share_contact_card: "owner_active",
+  update_display_name: "owner_active",
 } as const satisfies Record<
   HostedRuntimeGroupToolAction,
   HostedRuntimeGroupToolAccessClassification
@@ -110,6 +114,14 @@ export async function handleHostedRuntimeGroupTool(input: {
     return handleHostedRuntimeGroupCreateJoinLink({
       joinLink: input.request.joinLink ?? null,
       memberId: input.memberId,
+    });
+  }
+
+  if (input.request.action === "update_display_name") {
+    return handleHostedRuntimeGroupUpdateDisplayName({
+      linqThread: input.request.linqThread ?? null,
+      memberId: input.memberId,
+      updateDisplayName: input.request.updateDisplayName,
     });
   }
 
@@ -128,9 +140,16 @@ export async function handleHostedRuntimeGroupTool(input: {
     });
   }
 
-  if (input.request.action === "post_call_circle_offer") {
-    return handleHostedRuntimeGroupPostCallCircleOffer({
-      callCircleOffer: input.request.callCircleOffer,
+  if (input.request.action === "set_chat_avatar") {
+    return handleHostedRuntimeGroupSetChatAvatar({
+      groupChatIconUrl: input.request.groupChatIconUrl,
+      linqThread: input.request.linqThread ?? null,
+      memberId: input.memberId,
+    });
+  }
+
+  if (input.request.action === "preflight_set_chat_avatar") {
+    return handleHostedRuntimeGroupSetChatAvatarPreflight({
       linqThread: input.request.linqThread ?? null,
       memberId: input.memberId,
     });
@@ -170,6 +189,63 @@ export async function handleHostedRuntimeGroupTool(input: {
     result: group
       ? { status: "ok", group }
       : { status: "none", group: null },
+  };
+}
+
+async function handleHostedRuntimeGroupUpdateDisplayName(input: {
+  linqThread: HostedRuntimeGroupToolLinqThreadContext | null;
+  memberId: string;
+  updateDisplayName: { displayName: string };
+}): Promise<HostedRuntimeGroupToolResponse> {
+  const unavailable = (unavailableReason: string): HostedRuntimeGroupToolResponse => ({
+    action: "update_display_name",
+    result: { group: null, status: "unavailable", unavailableReason },
+  });
+
+  const access = await checkHostedRuntimeGroupLinqChatMutationAccess({
+    linqThread: input.linqThread,
+    memberId: input.memberId,
+  });
+  if (access.status !== "ok") {
+    return unavailable(access.unavailableReason);
+  }
+
+  const displayName = normalizeHostedGroupDisplayName(
+    input.updateDisplayName.displayName,
+  );
+  if (!displayName) {
+    return unavailable("display_name_unavailable");
+  }
+
+  const existing = await readHostedGroupByRuntimeMemberId({
+    runtimeMemberId: input.memberId,
+  });
+  if (!existing) {
+    return unavailable("group_not_found");
+  }
+
+  try {
+    await updateHostedLinqChatDisplayName({
+      chatId: access.chatId,
+      displayName,
+    });
+  } catch {
+    return unavailable("provider_unavailable");
+  }
+
+  const prisma = getPrisma();
+  const updated = await prisma.$transaction(async (tx) =>
+    updateHostedGroupDisplayNameByRuntimeMemberIdTx({
+      displayName,
+      runtimeMemberId: input.memberId,
+      tx,
+    }), HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+
+  return {
+    action: "update_display_name",
+    result: updated
+      ? { group: updated, status: "ok" }
+      : { group: null, status: "unavailable", unavailableReason: "group_not_found" },
   };
 }
 
@@ -327,14 +403,19 @@ async function handleHostedRuntimeGroupCreateJoinLink(input: {
     if (ownerAccess.status !== "ok") {
       return { kind: ownerAccess.unavailableReason };
     }
+    const requestedVaultShareProjectionScopes =
+      normalizeHostedVaultShareProjectionScopes(
+        input.joinLink?.requestedVaultShareProjectionScopes
+          ?? input.joinLink?.requestedVaultShareProjectionKinds
+          ?? [],
+      );
     const result = await createHostedGroupJoinLinkForOwnedThreadContainerTx({
       actorMemberId: ownerAccess.ownerMemberId,
       containerMemberId: input.memberId,
       displayName: input.joinLink?.displayName ?? null,
       kind: input.joinLink?.kind ?? null,
       now,
-      requestedVaultShareProjectionKinds:
-        input.joinLink?.requestedVaultShareProjectionKinds ?? [],
+      requestedVaultShareProjectionScopes,
       tx,
     });
     return { kind: "ok" as const, ownerMemberId: ownerAccess.ownerMemberId, ...result };
@@ -360,6 +441,11 @@ async function handleHostedRuntimeGroupCreateJoinLink(input: {
     // Durable grant already committed; the owner's runtime offers the
     // projection on a later wake if this best-effort signal fails.
   }
+  await enqueueGroupOwnerNewsletterEmailNeededNudgeIfGrantedBestEffort({
+    group: created.group,
+    ownerMemberId: created.ownerMemberId,
+    prisma,
+  });
 
   return {
     action: "create_join_link",
@@ -374,78 +460,6 @@ async function handleHostedRuntimeGroupPostJoinOffer(input: {
 }): Promise<HostedRuntimeGroupToolResponse> {
   const unavailable = (unavailableReason: string): HostedRuntimeGroupToolResponse => ({
     action: "post_join_offer",
-    result: { group: null, status: "unavailable", unavailableReason },
-  });
-  const projectionKinds = normalizeHostedVaultShareProjectionKinds(
-    input.joinOffer?.projectionKinds ?? [],
-  );
-  const messageTemplate = normalizeHostedGroupJoinOfferMessageTemplate(
-    input.joinOffer?.messageTemplate ?? null,
-  );
-  if (
-    !messageTemplate
-    || !isHostedGroupJoinOfferMessageTemplateUsable(messageTemplate)
-  ) {
-    return unavailable("join_offer_message_template_unavailable");
-  }
-  return postHostedRuntimeGroupOffer({
-    action: "post_join_offer",
-    featureActivations: [],
-    idempotencyKeyPrefix: "group-join-offer",
-    linqThread: input.linqThread,
-    memberId: input.memberId,
-    message: ({ joinUrl }) => buildHostedGroupJoinOfferMessage({
-      joinUrl,
-      messageTemplate,
-      projectionKinds,
-    }),
-    projectionKinds,
-  });
-}
-
-async function handleHostedRuntimeGroupPostCallCircleOffer(input: {
-  callCircleOffer: HostedRuntimeGroupPostCallCircleOfferRequest;
-  linqThread: HostedRuntimeGroupToolLinqThreadContext | null;
-  memberId: string;
-}): Promise<HostedRuntimeGroupToolResponse> {
-  const unavailable = (unavailableReason: string): HostedRuntimeGroupToolResponse => ({
-    action: "post_call_circle_offer",
-    result: { group: null, status: "unavailable", unavailableReason },
-  });
-  if (!isHostedCallCircleOffersEnabled()) {
-    return unavailable("call_circle_offers_disabled");
-  }
-  const messageTemplate = normalizeHostedGroupCallCircleOfferMessageTemplate(
-    input.callCircleOffer.message,
-  );
-  if (!messageTemplate) {
-    return unavailable("call_circle_offer_message_template_unavailable");
-  }
-  return postHostedRuntimeGroupOffer({
-    action: "post_call_circle_offer",
-    featureActivations: ["call-circle.enroll.v0"],
-    idempotencyKeyPrefix: "group-call-circle-offer",
-    linqThread: input.linqThread,
-    memberId: input.memberId,
-    message: ({ joinUrl }) => buildHostedGroupCallCircleOfferMessage({
-      joinUrl,
-      messageTemplate,
-    }),
-    projectionKinds: [],
-  });
-}
-
-async function postHostedRuntimeGroupOffer(input: {
-  action: "post_call_circle_offer" | "post_join_offer";
-  featureActivations: readonly HostedGroupFeatureActivationKind[];
-  idempotencyKeyPrefix: string;
-  linqThread: HostedRuntimeGroupToolLinqThreadContext | null;
-  memberId: string;
-  message: string | ((input: { joinUrl: string }) => string);
-  projectionKinds: readonly HostedVaultShareProjectionKind[];
-}): Promise<HostedRuntimeGroupToolResponse> {
-  const unavailable = (unavailableReason: string): HostedRuntimeGroupToolResponse => ({
-    action: input.action,
     result: { group: null, status: "unavailable", unavailableReason },
   });
 
@@ -463,6 +477,20 @@ async function postHostedRuntimeGroupOffer(input: {
 
   const prisma = getPrisma();
   const now = new Date();
+  const projectionScopes = normalizeHostedVaultShareProjectionScopes(
+    input.joinOffer?.projectionScopes
+      ?? input.joinOffer?.projectionKinds
+      ?? [],
+  );
+  const messageTemplate = normalizeHostedGroupJoinOfferMessageTemplate(
+    input.joinOffer?.messageTemplate ?? null,
+  );
+  if (
+    !messageTemplate
+    || !isHostedGroupJoinOfferMessageTemplateUsable(messageTemplate)
+  ) {
+    return unavailable("join_offer_message_template_unavailable");
+  }
   const created = await prisma.$transaction(async (tx) => {
     const ownerAccess = await readHostedRuntimeGroupOwnerActiveAccess({
       memberId: input.memberId,
@@ -474,8 +502,9 @@ async function postHostedRuntimeGroupOffer(input: {
     const result = await createHostedGroupJoinLinkForOwnedThreadContainerTx({
       actorMemberId: ownerAccess.ownerMemberId,
       containerMemberId: input.memberId,
+      displayName: input.joinOffer?.displayName ?? null,
       now,
-      requestedVaultShareProjectionKinds: input.projectionKinds,
+      requestedVaultShareProjectionScopes: projectionScopes,
       tx,
     });
     return { kind: "ok" as const, ownerMemberId: ownerAccess.ownerMemberId, ...result };
@@ -491,78 +520,37 @@ async function postHostedRuntimeGroupOffer(input: {
   if (!joinUrl) {
     return unavailable("join_links_unavailable");
   }
-  const message = typeof input.message === "string"
-    ? input.message
-    : input.message({ joinUrl });
-  const offerScope = {
-    featureActivations: input.featureActivations,
-    vaultShareProjectionKinds: input.projectionKinds,
-  };
 
-  const offerFingerprint = createHostedGroupJoinOfferFingerprint({
-    groupId: created.group.id,
-    message,
-    offerKind: input.action,
-    offerScope,
+  const message = buildHostedGroupJoinOfferMessage({
+    joinUrl,
+    messageTemplate,
+    projectionScopes,
   });
-  let offerReservation: Awaited<ReturnType<typeof reserveHostedGroupJoinOfferTx>>;
-  try {
-    offerReservation = await prisma.$transaction(async (tx) => {
-      return await reserveHostedGroupJoinOfferTx({
-        groupId: created.group.id,
-        offerFingerprint,
-        offerScope,
-        postedAt: now,
-        tx,
-      });
-    }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
-  } catch {
-    return unavailable("offer_binding_failed");
-  }
-
   let sent: Awaited<ReturnType<typeof sendHostedLinqChatMessage>>;
   try {
     sent = await sendHostedLinqChatMessage({
       chatId: authorized.chatId,
-      idempotencyKey: `${input.idempotencyKeyPrefix}:${offerFingerprint}`,
+      idempotencyKey: `group-join-offer:${created.group.id}:${now.toISOString()}`,
       message,
     });
   } catch {
-    await revokeReservedHostedGroupJoinOfferBestEffort({
-      groupId: created.group.id,
-      now,
-      offerId: offerReservation.id,
-      prisma,
-    });
     return unavailable("send_failed");
   }
   if (!sent.messageId) {
-    await revokeReservedHostedGroupJoinOfferBestEffort({
-      groupId: created.group.id,
-      now,
-      offerId: offerReservation.id,
-      prisma,
-    });
     return unavailable("provider_message_unavailable");
   }
 
   try {
     await prisma.$transaction(async (tx) => {
-      return await bindHostedGroupJoinOfferTx({
+      await recordHostedGroupJoinOfferTx({
         groupId: created.group.id,
         messageId: sent.messageId,
-        offerId: offerReservation.id,
+        postedAt: now,
+        projectionScopes,
         tx,
       });
     }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
   } catch {
-    await retireSentUnboundHostedGroupJoinOfferBestEffort({
-      groupId: created.group.id,
-      messageId: sent.messageId,
-      now,
-      offerId: offerReservation.id,
-      prisma,
-    });
     return unavailable("offer_binding_failed");
   }
 
@@ -572,68 +560,137 @@ async function postHostedRuntimeGroupOffer(input: {
     // The group and offer binding are durable; owner runtime maintenance can
     // catch up on its next organic wake.
   }
+  await enqueueGroupOwnerNewsletterEmailNeededNudgeIfGrantedBestEffort({
+    group: created.group,
+    ownerMemberId: created.ownerMemberId,
+    prisma,
+  });
 
   return {
-    action: input.action,
+    action: "post_join_offer",
     result: { group: created.group, joinUrl, status: "sent" },
   };
 }
 
-async function revokeReservedHostedGroupJoinOfferBestEffort(input: {
-  groupId: string;
-  now: Date;
-  offerId: string;
-  prisma: ReturnType<typeof getPrisma>;
-}): Promise<void> {
-  try {
-    await input.prisma.$transaction(async (tx) => {
-      await revokeUnboundHostedGroupJoinOfferTx({
-        groupId: input.groupId,
-        now: input.now,
-        offerId: input.offerId,
-        tx,
-      });
-    }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
-  } catch {
-    // The post already failed; no user-visible offer acceptance should depend
-    // on this best-effort cleanup.
+async function handleHostedRuntimeGroupSetChatAvatar(input: {
+  groupChatIconUrl: string;
+  linqThread: HostedRuntimeGroupToolLinqThreadContext | null;
+  memberId: string;
+}): Promise<HostedRuntimeGroupToolResponse> {
+  const unavailable = (unavailableReason: string): HostedRuntimeGroupToolResponse => ({
+    action: "set_chat_avatar",
+    result: { status: "unavailable", unavailableReason },
+  });
+
+  const access = await checkHostedRuntimeGroupLinqChatMutationAccess({
+    linqThread: input.linqThread,
+    memberId: input.memberId,
+  });
+  if (access.status !== "ok") {
+    return unavailable(access.unavailableReason);
   }
+
+  const groupChatIconUrl = normalizeHostedGroupChatIconUrl(input.groupChatIconUrl);
+  if (!groupChatIconUrl) {
+    return unavailable("group_chat_icon_url_unavailable");
+  }
+
+  try {
+    await updateHostedLinqChatAvatar({
+      chatId: access.chatId,
+      groupChatIconUrl,
+    });
+  } catch {
+    return unavailable("provider_unavailable");
+  }
+
+  return {
+    action: "set_chat_avatar",
+    result: { status: "requested" },
+  };
 }
 
-async function retireSentUnboundHostedGroupJoinOfferBestEffort(input: {
-  groupId: string;
-  messageId: string;
-  now: Date;
-  offerId: string;
-  prisma: ReturnType<typeof getPrisma>;
-}): Promise<void> {
-  try {
-    await deleteHostedLinqMessage({ messageId: input.messageId });
-  } catch {
-    return;
+async function handleHostedRuntimeGroupSetChatAvatarPreflight(input: {
+  linqThread: HostedRuntimeGroupToolLinqThreadContext | null;
+  memberId: string;
+}): Promise<HostedRuntimeGroupToolResponse> {
+  const access = await checkHostedRuntimeGroupLinqChatMutationAccess(input);
+  if (access.status !== "ok") {
+    return {
+      action: "preflight_set_chat_avatar",
+      result: { status: "unavailable", unavailableReason: access.unavailableReason },
+    };
   }
-  await revokeReservedHostedGroupJoinOfferBestEffort(input);
+
+  return {
+    action: "preflight_set_chat_avatar",
+    result: { status: "ok" },
+  };
+}
+
+type HostedRuntimeGroupLinqChatMutationAccess =
+  | { status: "ok"; chatId: string }
+  | { status: "unavailable"; unavailableReason: string };
+
+async function checkHostedRuntimeGroupLinqChatMutationAccess(input: {
+  linqThread: HostedRuntimeGroupToolLinqThreadContext | null;
+  memberId: string;
+}): Promise<HostedRuntimeGroupLinqChatMutationAccess> {
+  const authorized = await authorizeHostedRuntimeGroupLinqThread({
+    linqThread: input.linqThread,
+    memberId: input.memberId,
+  });
+  if ("unavailableReason" in authorized) {
+    return { status: "unavailable", unavailableReason: authorized.unavailableReason };
+  }
+
+  const ownerAccess = await readHostedRuntimeGroupOwnerActiveAccess({
+    memberId: input.memberId,
+    prisma: getPrisma(),
+  });
+  if (ownerAccess.status !== "ok") {
+    return { status: "unavailable", unavailableReason: ownerAccess.unavailableReason };
+  }
+
+  return { status: "ok", chatId: authorized.chatId };
 }
 
 function buildHostedGroupJoinOfferMessage(input: {
   joinUrl: string;
   messageTemplate: string;
-  projectionKinds: readonly HostedVaultShareProjectionKind[];
+  projectionScopes: readonly HostedVaultShareProjectionScope[];
 }): string {
   return input.messageTemplate
     .replace(
       HOSTED_GROUP_JOIN_OFFER_SHARE_SCOPE_PLACEHOLDER,
-      renderHostedGroupJoinOfferShareScope(input.projectionKinds),
+      renderHostedGroupJoinOfferScopeSentence(input.projectionScopes),
     )
-    .replace(HOSTED_RUNTIME_GROUP_JOIN_URL_PLACEHOLDER, input.joinUrl);
+    .replace(HOSTED_GROUP_JOIN_OFFER_JOIN_URL_PLACEHOLDER, input.joinUrl);
 }
 
-function buildHostedGroupCallCircleOfferMessage(input: {
-  joinUrl: string;
-  messageTemplate: string;
-}): string {
-  return input.messageTemplate
-    .replace(HOSTED_RUNTIME_GROUP_JOIN_URL_PLACEHOLDER, input.joinUrl);
+async function enqueueGroupOwnerNewsletterEmailNeededNudgeIfGrantedBestEffort(input: {
+  group: {
+    id: string;
+    members: readonly {
+      grantedVaultShareProjectionKinds: readonly HostedVaultShareProjectionKind[];
+      memberId: string;
+    }[];
+  };
+  ownerMemberId: string;
+  prisma: PrismaClient;
+}): Promise<void> {
+  if (!input.group.members.some((member) =>
+    member.memberId === input.ownerMemberId
+    && member.grantedVaultShareProjectionKinds.includes("group-email.v0")
+  )) {
+    return;
+  }
+
+  await enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort({
+    groupId: input.group.id,
+    memberId: input.ownerMemberId,
+    prisma: input.prisma,
+  });
 }
 
 function normalizeHostedGroupJoinOfferMessageTemplate(
@@ -650,42 +707,78 @@ function normalizeHostedGroupJoinOfferMessageTemplate(
   return normalized;
 }
 
-function isHostedGroupJoinOfferMessageTemplateUsable(messageTemplate: string): boolean {
-  return (
-    hasHostedRuntimeGroupJoinUrlPlaceholderOnce(messageTemplate)
-    && messageTemplate.includes(HOSTED_GROUP_JOIN_OFFER_SHARE_SCOPE_PLACEHOLDER)
-    && messageTemplate.indexOf(HOSTED_GROUP_JOIN_OFFER_SHARE_SCOPE_PLACEHOLDER)
-      === messageTemplate.lastIndexOf(HOSTED_GROUP_JOIN_OFFER_SHARE_SCOPE_PLACEHOLDER)
-  );
-}
-
-function normalizeHostedGroupCallCircleOfferMessageTemplate(
-  messageTemplate: string,
-): string | null {
-  const normalized = messageTemplate.trim().replace(/\s+/gu, " ");
+function normalizeHostedGroupChatIconUrl(value: string): string | null {
+  const normalized = value.trim();
   if (
-    normalized.length === 0
-    || normalized.length > HOSTED_RUNTIME_GROUP_CALL_CIRCLE_OFFER_MESSAGE_MAX_LENGTH
+    !normalized
+    || normalized.length > HOSTED_RUNTIME_GROUP_CHAT_ICON_URL_MAX_LENGTH
   ) {
     return null;
   }
+  let parsed: URL;
+  try {
+    parsed = new URL(normalized);
+  } catch {
+    return null;
+  }
+  if (parsed.protocol !== "https:" || parsed.username || parsed.password) {
+    return null;
+  }
+  if (!isHostedGroupChatIconDeliveryUrl(parsed)) {
+    return null;
+  }
+  return parsed.toString();
+}
+
+function normalizeHostedGroupDisplayName(value: string): string | null {
+  const normalized = value.trim().replace(/\s+/gu, " ");
   if (
-    !hasHostedRuntimeGroupJoinUrlPlaceholderOnce(normalized)
-    || !isHostedRuntimeGroupCallCircleOfferConsentMessage(normalized)
+    !normalized
+    || normalized.length > HOSTED_RUNTIME_GROUP_DISPLAY_NAME_MAX_LENGTH
   ) {
     return null;
   }
   return normalized;
 }
 
-function renderHostedGroupJoinOfferShareScope(
-  projectionKinds: readonly HostedVaultShareProjectionKind[],
+function isHostedGroupChatIconDeliveryUrl(url: URL): boolean {
+  if (url.hostname !== "imagedelivery.net" || url.search || url.hash) {
+    return false;
+  }
+  return url.pathname.split("/").filter(Boolean).length >= 3;
+}
+
+function isHostedGroupJoinOfferMessageTemplateUsable(messageTemplate: string): boolean {
+  return hasPlaceholderExactlyOnce(
+    messageTemplate,
+    HOSTED_GROUP_JOIN_OFFER_SHARE_SCOPE_PLACEHOLDER,
+  ) && hasPlaceholderExactlyOnce(
+    messageTemplate,
+    HOSTED_GROUP_JOIN_OFFER_JOIN_URL_PLACEHOLDER,
+  );
+}
+
+function hasPlaceholderExactlyOnce(messageTemplate: string, placeholder: string): boolean {
+  return (
+    messageTemplate.includes(placeholder)
+    && messageTemplate.indexOf(placeholder) === messageTemplate.lastIndexOf(placeholder)
+  );
+}
+
+function renderHostedGroupJoinOfferScopeSentence(
+  projectionScopes: readonly HostedVaultShareProjectionScope[],
 ): string {
-  const labels = projectHostedVaultShareProjectionDisplays(projectionKinds)
-    .map((display) => display.label.toLowerCase());
-  return labels.length > 0
-    ? `your Murph profile name and ${formatHumanList(labels)}`
-    : "your Murph profile name";
+  const labels = projectHostedVaultShareProjectionDisplays(projectionScopes)
+    .map((display) => formatHostedGroupJoinOfferShareScopeLabel(display.label));
+  return `your ${formatHumanList(["Murph profile name", ...labels])}`;
+}
+
+function formatHostedGroupJoinOfferShareScopeLabel(label: string): string {
+  const first = label[0];
+  const second = label[1];
+  return first && second && second >= "a" && second <= "z"
+    ? `${first.toLowerCase()}${label.slice(1)}`
+    : label;
 }
 
 function formatHumanList(values: readonly string[]): string {

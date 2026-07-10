@@ -345,7 +345,7 @@ export const JUNCTION_SLEEP_STAGE_VALUE_PATHS = Object.freeze([
   "type",
   "value",
 ] as const);
-export type JunctionSleepStageValue = "awake" | "light" | "deep" | "rem";
+export type JunctionSleepStageValue = "awake" | "light" | "deep" | "rem" | "asleep_unspecified";
 export function normalizeJunctionSleepStageValue(value: unknown): JunctionSleepStageValue | null {
   if (typeof value === "number" && Number.isInteger(value)) {
     switch (value) {
@@ -366,13 +366,22 @@ export function normalizeJunctionSleepStageValue(value: unknown): JunctionSleepS
     return null;
   }
 
-  const normalized = value
-    .trim()
+  const trimmed = value.trim();
+  if (/^[+-]\d+$/u.test(trimmed)) {
+    return null;
+  }
+
+  const normalized = trimmed
     .toLowerCase()
     .replace(/[^a-z0-9]+/gu, "_")
     .replace(/^_+|_+$/gu, "");
 
   switch (normalized) {
+    case "asleep":
+    case "asleep_unspecified":
+    case "sleep":
+    case "sleeping":
+      return "asleep_unspecified";
     case "1":
       return "deep";
     case "2":

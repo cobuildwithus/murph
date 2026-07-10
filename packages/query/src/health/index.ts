@@ -3,6 +3,7 @@ export { listGoals, readGoal, showGoal } from "./goals.ts";
 export { listConditions, readCondition, showCondition } from "./conditions.ts";
 export { listAllergies, readAllergy, showAllergy } from "./allergies.ts";
 export { listFoods, readFood, showFood } from "./foods.ts";
+export { listHabitatAspects, readHabitatAspect, showHabitatAspect } from "./habitat.ts";
 export { listRecipes, readRecipe, showRecipe } from "./recipes.ts";
 export { listProviders, readProvider, showProvider } from "./providers.ts";
 export { listWorkoutFormats, readWorkoutFormat, showWorkoutFormat } from "./workout-formats.ts";

@@ -156,7 +156,7 @@ export function registerKnowledgeCommands(cli: Cli.Cli) {
         .int()
         .positive()
         .max(200)
-        .default(20)
+        .default(10)
         .describe('Maximum number of knowledge pages to return.'),
     }),
     output: knowledgeListResultSchema,
@@ -246,7 +246,7 @@ export function registerKnowledgeCommands(cli: Cli.Cli) {
     description: 'Show the latest derived knowledge write-log entries in descending occurredAt order.',
     args: emptyArgsSchema,
     options: withBaseOptions({
-      limit: z.number().int().positive().max(200).default(20),
+      limit: z.number().int().positive().max(200).default(10),
     }),
     output: knowledgeLogTailResultSchema,
     run({ options }) {

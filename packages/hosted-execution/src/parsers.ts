@@ -7,6 +7,8 @@ import {
   buildHostedExecutionVaultShareRevokeWake,
 } from "./builders.ts";
 import {
+  isAssistantTonePreference,
+  isAssistantVoiceOptionId,
   normalizeIanaTimeZone,
 } from "@murphai/contracts";
 
@@ -26,7 +28,10 @@ import type {
   HostedExecutionMemberActivationSignupWelcome,
   HostedExecutionMemberChannels,
   HostedExecutionMemberChannelsUpdatedEvent,
+  HostedExecutionMemberPreferences,
+  HostedExecutionMemberPreferencesUpdatedEvent,
   HostedExecutionDeviceSyncWakeEvent,
+  HostedExecutionGroupNewsletterEmailNeededDirectRoute,
   HostedExecutionGroupNewsletterEmailNeededEvent,
   HostedExecutionWake,
   HostedExecutionWakeKind,
@@ -53,6 +58,7 @@ import {
   buildHostedExecutionLinqConversationMessageWake,
   buildHostedExecutionMemberActivatedWake,
   buildHostedExecutionMemberChannelsUpdatedWake,
+  buildHostedExecutionMemberPreferencesUpdatedWake,
   buildHostedExecutionConversationMessageWake,
   buildHostedExecutionCodexAuthRequestedWake,
   buildHostedExecutionDeviceSyncWake,
@@ -229,6 +235,16 @@ export function parseHostedExecutionWake(value: unknown): HostedExecutionWake {
         memberId: wireUserId,
         occurredAt,
       });
+    case "member.preferences.updated":
+      return buildHostedExecutionMemberPreferencesUpdatedWake({
+        eventId,
+        memberId: wireUserId,
+        occurredAt,
+        preferences: parseHostedExecutionMemberPreferences(
+          record.preferences,
+          "Hosted execution wake member.preferences.updated preferences",
+        ),
+      });
     case "assistant.notification.requested":
       return buildHostedExecutionAssistantNotificationRequestedWake({
         eventId,
@@ -267,6 +283,16 @@ export function parseHostedExecutionWake(value: unknown): HostedExecutionWake {
       });
     case "group-newsletter.email-needed":
       return buildHostedExecutionGroupNewsletterEmailNeededWake({
+        ...(record.directRoute === undefined
+          ? {}
+          : {
+              directRoute: record.directRoute === null
+                ? null
+                : parseHostedExecutionGroupNewsletterEmailNeededDirectRoute(
+                    record.directRoute,
+                    "Hosted execution wake group-newsletter.email-needed directRoute",
+                  ),
+            }),
         eventId,
         groupDisplayName: readNullableString(
           record.groupDisplayName,
@@ -853,6 +879,15 @@ export function parseHostedExecutionEvent(value: unknown): HostedExecutionEvent 
         ),
         userId,
       } satisfies HostedExecutionMemberChannelsUpdatedEvent;
+    case "member.preferences.updated":
+      return {
+        kind,
+        preferences: parseHostedExecutionMemberPreferences(
+          record.preferences,
+          "Hosted execution member.preferences.updated preferences",
+        ),
+        userId,
+      } satisfies HostedExecutionMemberPreferencesUpdatedEvent;
     case "assistant.notification.requested":
       return {
         kind,
@@ -891,6 +926,16 @@ export function parseHostedExecutionEvent(value: unknown): HostedExecutionEvent 
       } satisfies HostedExecutionDeviceSyncWakeEvent;
     case "group-newsletter.email-needed":
       return {
+        ...(record.directRoute === undefined
+          ? {}
+          : {
+              directRoute: record.directRoute === null
+                ? null
+                : parseHostedExecutionGroupNewsletterEmailNeededDirectRoute(
+                    record.directRoute,
+                    "Hosted execution group-newsletter.email-needed directRoute",
+                  ),
+            }),
         groupDisplayName: readNullableString(
           record.groupDisplayName,
           "Hosted execution group-newsletter.email-needed groupDisplayName",
@@ -1069,6 +1114,22 @@ function parseHostedExecutionAssistantNotificationRoute(
   };
 }
 
+function parseHostedExecutionGroupNewsletterEmailNeededDirectRoute(
+  value: unknown,
+  label: string,
+): HostedExecutionGroupNewsletterEmailNeededDirectRoute {
+  const record = requireObject(value, label);
+  const channel = requireString(record.channel, `${label}.channel`);
+  if (channel !== "linq" && channel !== "telegram") {
+    throw new TypeError(`${label}.channel is invalid.`);
+  }
+
+  return {
+    channel,
+    threadId: requireString(record.threadId, `${label}.threadId`),
+  };
+}
+
 function parseHostedExecutionAssistantNotificationDelivery(
   value: unknown,
   label: string,
@@ -1124,6 +1185,50 @@ function parseHostedExecutionMemberChannels(
     linq: requireBoolean(record.linq, `${label}.linq`),
     telegram: requireBoolean(record.telegram, `${label}.telegram`),
   };
+}
+
+function parseHostedExecutionMemberPreferences(
+  value: unknown,
+  label: string,
+): HostedExecutionMemberPreferences {
+  const record = requireObject(value, label);
+  const tone = record.tone === undefined
+    ? undefined
+    : parseHostedExecutionAssistantTonePreference(record.tone, `${label}.tone`);
+  const voice = record.voice === undefined
+    ? undefined
+    : parseHostedExecutionAssistantVoicePreference(record.voice, `${label}.voice`);
+
+  if (tone === undefined && voice === undefined) {
+    throw new TypeError(`${label} must include tone or voice.`);
+  }
+
+  return {
+    ...(tone === undefined ? {} : { tone }),
+    ...(voice === undefined ? {} : { voice }),
+  };
+}
+
+function parseHostedExecutionAssistantTonePreference(
+  value: unknown,
+  label: string,
+): HostedExecutionMemberPreferences["tone"] {
+  const tone = requireString(value, label);
+  if (!isAssistantTonePreference(tone)) {
+    throw new TypeError(`${label} is invalid.`);
+  }
+  return tone;
+}
+
+function parseHostedExecutionAssistantVoicePreference(
+  value: unknown,
+  label: string,
+): HostedExecutionMemberPreferences["voice"] {
+  const voice = requireString(value, label);
+  if (!isAssistantVoiceOptionId(voice)) {
+    throw new TypeError(`${label} is invalid.`);
+  }
+  return voice;
 }
 
 function parseHostedExecutionWakeKind(value: unknown, label: string): HostedExecutionWakeKind {

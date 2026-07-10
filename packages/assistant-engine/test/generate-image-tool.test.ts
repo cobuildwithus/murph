@@ -3,6 +3,7 @@ import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 
+import { deleteEvent, initializeVault } from '@murphai/core'
 import { describe, expect, it } from 'vitest'
 
 import {
@@ -77,6 +78,7 @@ describe('executeGenerateImageTool reference images', () => {
     await withTempDir(async (root) => {
       const vaultRoot = path.join(root, 'vault')
       const codexHome = path.join(root, 'codex-home')
+      await initializeVault({ vaultRoot })
       const refPath = path.join(vaultRoot, 'raw', 'inbox', 'photo.png')
       await mkdir(path.dirname(refPath), { recursive: true })
       await writeFile(refPath, PNG_BYTES)
@@ -129,14 +131,243 @@ describe('executeGenerateImageTool reference images', () => {
       })
     })
   })
+
+  it('can reuse a generated capture larger than the old per-file reference cap', async () => {
+    await withTempDir(async (root) => {
+      const vaultRoot = path.join(root, 'vault')
+      const codexHome = path.join(root, 'codex-home')
+      await initializeVault({ vaultRoot })
+      const generatedBytes = new Uint8Array(3 * 1024 * 1024)
+      generatedBytes.set(PNG_BYTES, 0)
+
+      const fetchImpl: typeof fetch = async () => openAiPngResponse(generatedBytes)
+      const generated = await executeGenerateImageTool({
+        args: {
+          alt: null,
+          outputFormat: 'png',
+          prompt: 'Draw a reusable large reference.',
+          quality: 'high',
+          size: '1024x1024',
+        },
+        captureIdempotencyKey: 'turn-1:tool-1',
+        codexHome,
+        env: { OPENAI_API_KEY: 'test-key' },
+        fetchImpl,
+        providerRequestOrdinal: 1,
+        vaultRoot,
+      })
+
+      expect(generated.rpcSuccess).toBe(true)
+      expect(generated.savedImageRef).toMatch(/^raw\/captures\/.+\.png$/u)
+
+      let capturedBody: BodyInit | null | undefined
+      const editFetchImpl: typeof fetch = async (url, init) => {
+        expect(String(url)).toBe('https://api.openai.com/v1/images/edits')
+        capturedBody = init?.body
+        return openAiPngResponse()
+      }
+
+      const reused = await executeGenerateImageTool({
+        args: {
+          alt: null,
+          outputFormat: 'png',
+          prompt: 'Use image 1 as the main subject.',
+          quality: 'medium',
+          referenceImageRefs: [generated.savedImageRef!],
+          size: '1024x1024',
+        },
+        codexHome,
+        env: { OPENAI_API_KEY: 'test-key' },
+        fetchImpl: editFetchImpl,
+        providerRequestOrdinal: 2,
+        vaultRoot,
+      })
+
+      expect(reused.rpcSuccess).toBe(true)
+      expect(capturedBody).toBeInstanceOf(FormData)
+      expect(reused.usageDraft?.usage.providerMetadataJson).toMatchObject({
+        operation: 'image_generation_with_references',
+        referenceImageCount: 1,
+        referenceImageTotalBytes: generatedBytes.byteLength,
+      })
+    })
+  })
+
+  it('reuses a saved generated capture before reloading transient references', async () => {
+    await withTempDir(async (root) => {
+      const vaultRoot = path.join(root, 'vault')
+      const codexHome = path.join(root, 'codex-home')
+      const referencePath = path.join(vaultRoot, 'raw/inbox/reference.png')
+      await initializeVault({ vaultRoot })
+      await mkdir(path.dirname(referencePath), { recursive: true })
+      await writeFile(referencePath, PNG_BYTES)
+
+      let fetchCalls = 0
+      const fetchImpl: typeof fetch = async () => {
+        fetchCalls += 1
+        return openAiPngResponse()
+      }
+      const args = {
+        alt: null,
+        outputFormat: 'png' as const,
+        prompt: 'Use image 1 as the reference subject.',
+        quality: 'medium' as const,
+        referenceImageRefs: ['raw/inbox/reference.png'],
+        size: '1024x1024' as const,
+      }
+
+      const first = await executeGenerateImageTool({
+        args,
+        captureIdempotencyKey: 'turn-1:tool-with-transient-ref',
+        codexHome,
+        env: { OPENAI_API_KEY: 'test-key' },
+        fetchImpl,
+        providerRequestOrdinal: 1,
+        vaultRoot,
+      })
+
+      expect(first.rpcSuccess).toBe(true)
+      expect(fetchCalls).toBe(1)
+
+      await rm(referencePath)
+
+      const second = await executeGenerateImageTool({
+        args,
+        captureIdempotencyKey: 'turn-1:tool-with-transient-ref',
+        codexHome,
+        env: { OPENAI_API_KEY: 'test-key' },
+        fetchImpl,
+        providerRequestOrdinal: 2,
+        vaultRoot,
+      })
+
+      expect(second.rpcSuccess).toBe(true)
+      expect(second.savedImageRef).toBe(first.savedImageRef)
+      expect(second.usageDraft).toBeNull()
+      expect(fetchCalls).toBe(1)
+    })
+  })
+
+  it('does not reuse or regenerate a deleted generated capture replay', async () => {
+    await withTempDir(async (root) => {
+      const vaultRoot = path.join(root, 'vault')
+      const codexHome = path.join(root, 'codex-home')
+      await initializeVault({ vaultRoot })
+
+      let fetchCalls = 0
+      const fetchImpl: typeof fetch = async () => {
+        fetchCalls += 1
+        return openAiPngResponse()
+      }
+      const args = {
+        alt: null,
+        outputFormat: 'png' as const,
+        prompt: 'Draw a replay-sensitive generated image.',
+        quality: 'medium' as const,
+        size: '1024x1024' as const,
+      }
+
+      const first = await executeGenerateImageTool({
+        args,
+        captureIdempotencyKey: 'turn-1:deleted-tool-replay',
+        codexHome,
+        env: { OPENAI_API_KEY: 'test-key' },
+        fetchImpl,
+        providerRequestOrdinal: 1,
+        vaultRoot,
+      })
+      expect(first.rpcSuccess).toBe(true)
+      expect(first.savedCaptureId).toMatch(/^evt_/u)
+      expect(fetchCalls).toBe(1)
+
+      await deleteEvent({
+        vaultRoot,
+        eventId: first.savedCaptureId!,
+      })
+
+      const replay = await executeGenerateImageTool({
+        args,
+        captureIdempotencyKey: 'turn-1:deleted-tool-replay',
+        codexHome,
+        env: { OPENAI_API_KEY: 'test-key' },
+        fetchImpl,
+        providerRequestOrdinal: 2,
+        vaultRoot,
+      })
+
+      expect(replay).toMatchObject({
+        rpcSuccess: false,
+        rpcText: 'saved generated image was deleted; make a new image request',
+      })
+      expect(fetchCalls).toBe(1)
+    })
+  })
+
+  it('reuses the winning saved capture when same-key generated image saves overlap', async () => {
+    await withTempDir(async (root) => {
+      const vaultRoot = path.join(root, 'vault')
+      const codexHome = path.join(root, 'codex-home')
+      await initializeVault({ vaultRoot })
+
+      let fetchCalls = 0
+      let releaseFetches!: () => void
+      const bothFetchesStarted = new Promise<void>((resolve) => {
+        releaseFetches = resolve
+      })
+      const fetchImpl: typeof fetch = async () => {
+        fetchCalls += 1
+        if (fetchCalls === 2) {
+          releaseFetches()
+        }
+        await bothFetchesStarted
+        return openAiPngResponse()
+      }
+      const args = {
+        alt: null,
+        outputFormat: 'png' as const,
+        prompt: 'Draw a concurrently replayed generated image.',
+        quality: 'medium' as const,
+        size: '1024x1024' as const,
+      }
+
+      const results = await Promise.all([
+        executeGenerateImageTool({
+          args,
+          captureIdempotencyKey: 'turn-1:overlapping-tool-call',
+          codexHome,
+          env: { OPENAI_API_KEY: 'test-key' },
+          fetchImpl,
+          providerRequestOrdinal: 1,
+          vaultRoot,
+        }),
+        executeGenerateImageTool({
+          args,
+          captureIdempotencyKey: 'turn-1:overlapping-tool-call',
+          codexHome,
+          env: { OPENAI_API_KEY: 'test-key' },
+          fetchImpl,
+          providerRequestOrdinal: 2,
+          vaultRoot,
+        }),
+      ])
+
+      expect(fetchCalls).toBe(2)
+      expect(results).toEqual([
+        expect.objectContaining({ rpcSuccess: true }),
+        expect.objectContaining({ rpcSuccess: true }),
+      ])
+      expect(new Set(results.map((result) => result.savedCaptureId)).size).toBe(1)
+      expect(new Set(results.map((result) => result.savedImageRef)).size).toBe(1)
+    })
+  })
 })
 
-function openAiPngResponse(): Response {
+function openAiPngResponse(bytes: Uint8Array = PNG_BYTES): Response {
   return new Response(
     JSON.stringify({
       data: [
         {
-          b64_json: Buffer.from(PNG_BYTES).toString('base64'),
+          b64_json: Buffer.from(bytes).toString('base64'),
         },
       ],
       usage: {

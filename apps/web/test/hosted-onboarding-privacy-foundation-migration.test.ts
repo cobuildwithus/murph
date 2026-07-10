@@ -41,6 +41,8 @@ const HOSTED_MEMBER_SCHEMA_GUARD = {
   ],
   HostedMember: [
     "id String @id",
+    'assistantTone String? @map("assistant_tone")',
+    'assistantVoice String? @map("assistant_voice")',
     'billingStatus HostedBillingStatus @default(not_started) @map("billing_status")',
     "codexAuthConnection HostedCodexAuthConnection?",
     "linqContactCardShares HostedLinqContactCardShare[]",
@@ -143,8 +145,6 @@ const HOSTED_MEMBER_RELATION_TYPES = new Set([
   // remains explicit through HostedVaultShare grants.
   "HostedGroup",
   "HostedGroupMember",
-  "HostedCallCircleMatch",
-  "HostedCallCircleParticipant",
   // VaultShare v0: consent-grant relation only (grantor/destination back-references).
   // No new scalar member data; share payloads stay on the encrypted mailbox path.
   "HostedVaultShare",
@@ -517,13 +517,6 @@ describe("hosted Prisma baseline migration", () => {
       ),
       "utf8",
     );
-    const hostedGroupJoinOfferFingerprintMigrationSql = readFileSync(
-      new URL(
-        "../prisma/migrations/20260709043000_hosted_group_join_offer_fingerprint/migration.sql",
-        import.meta.url,
-      ),
-      "utf8",
-    );
     const hostedGrowthDailySnapshotMigrationSql = readFileSync(
       new URL(
         "../prisma/migrations/20260706130000_hosted_growth_daily_snapshot/migration.sql",
@@ -618,12 +611,11 @@ describe("hosted Prisma baseline migration", () => {
       "20260703160000_device_oauth_session_consumed_at",
       "20260705120000_hosted_mailbox_item_consumed_at",
       "20260706120000_hosted_thread_container_participant",
-      "20260706130000_call_circle_v1",
       "20260706130000_hosted_group_join_offer",
       "20260706130000_hosted_growth_daily_snapshot",
       "20260707170000_drop_stale_linq_recency_columns",
-      "20260707193000_hosted_phone_call_provider_start_attempt",
-      "20260709043000_hosted_group_join_offer_fingerprint",
+      "20260707180000_hosted_vault_share_projection_scopes",
+      "20260708120000_hosted_member_assistant_preferences",
       "migration_lock.toml",
     ]);
     expect(hostedThreadRoutesMigrationSql).toContain('CREATE TABLE "hosted_thread_container"');
@@ -675,27 +667,11 @@ describe("hosted Prisma baseline migration", () => {
     expect(hostedGroupJoinOfferMigrationSql).toContain(
       'CREATE TABLE "hosted_group_join_offer"',
     );
-    expect(hostedGroupJoinOfferMigrationSql).not.toContain('"offer_fingerprint"');
     expect(hostedGroupJoinOfferMigrationSql).toContain('"message_lookup_key" TEXT NOT NULL');
     expect(hostedGroupJoinOfferMigrationSql).toContain('"projection_kinds_json" JSONB NOT NULL');
     expect(hostedGroupJoinOfferMigrationSql).toContain('"revoked_at" TIMESTAMP(3)');
     expect(hostedGroupJoinOfferMigrationSql).toContain(
       'REFERENCES "hosted_group"("id")',
-    );
-    expect(hostedGroupJoinOfferFingerprintMigrationSql).toContain(
-      'ALTER TABLE "hosted_group_join_offer"\n  ADD COLUMN "offer_fingerprint" TEXT',
-    );
-    expect(hostedGroupJoinOfferFingerprintMigrationSql).toContain(
-      "md5('legacy-hosted-group-join-offer:' || \"id\")",
-    );
-    expect(hostedGroupJoinOfferFingerprintMigrationSql).toContain(
-      'ALTER TABLE "hosted_group_join_offer"\n  ALTER COLUMN "message_lookup_key" DROP NOT NULL',
-    );
-    expect(hostedGroupJoinOfferFingerprintMigrationSql).not.toContain(
-      'ALTER COLUMN "offer_fingerprint" SET NOT NULL',
-    );
-    expect(hostedGroupJoinOfferFingerprintMigrationSql).toContain(
-      'CREATE UNIQUE INDEX "hosted_group_join_offer_offer_fingerprint_key"',
     );
     expect(hostedGroupJoinOfferMigrationSql).not.toContain(
       'ALTER TABLE "hosted_group"',

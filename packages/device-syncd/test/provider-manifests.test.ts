@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { JUNCTION_DEFAULT_TIMESERIES_RESOURCES } from "@murphai/importers/device-providers/junction-resources";
 import {
   cloneConfiguredDeviceSyncRuntimeConfig,
   cloneSerializableConfiguredDeviceSyncProviderConfigs,
@@ -27,6 +28,7 @@ import {
   resolveConfiguredDeviceSyncProviderManifest as rootResolveConfiguredDeviceSyncProviderManifest,
 } from "@murphai/device-syncd";
 import { resolveDeviceProviderConnectionDescriptor } from "@murphai/importers/device-providers/provider-descriptors";
+import { normalizeJunctionDeviceSyncRuntimeConfig } from "../src/config/provider-manifests.ts";
 
 describe("deviceSyncProviderManifests", () => {
   it("keeps provider ids, descriptors, and capabilities aligned", () => {
@@ -102,7 +104,17 @@ describe("deviceSyncProviderManifests", () => {
       JUNCTION_TIMESERIES_RESOURCES: "steps,heart_rate",
     });
 
-    expect(configs.junction?.timeseriesResources).toEqual(["steps", "heart_rate"]);
+    const junctionConfig = configs.junction;
+    expect(junctionConfig?.timeseriesResources).toEqual([
+      ...JUNCTION_DEFAULT_TIMESERIES_RESOURCES,
+      "steps",
+      "heart_rate",
+    ]);
+    if (!junctionConfig) {
+      throw new Error("Expected Junction config to be present.");
+    }
+    expect(normalizeJunctionDeviceSyncRuntimeConfig(junctionConfig).timeseriesResources)
+      .toEqual([...JUNCTION_DEFAULT_TIMESERIES_RESOURCES]);
     expect(() => createConfiguredDeviceSyncProvidersFromConfigs(configs)).not.toThrow();
   });
 

@@ -119,7 +119,7 @@ export const healthListFiltersSchema = z.object({
   to: localDateSchema.optional(),
   kind: z.string().min(1).optional(),
   status: z.string().min(1).optional(),
-  limit: z.number().int().positive().max(200).default(50),
+  limit: z.number().int().positive().max(200).default(10),
 }) satisfies z.ZodType<HealthListFilters>;
 
 export const healthListResultSchema = z.object({

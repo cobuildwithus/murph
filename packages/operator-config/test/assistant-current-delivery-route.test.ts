@@ -22,6 +22,7 @@ describe('assistant current delivery route', () => {
         identityId: LINQ_IDENTITY_ID,
         participantId: LINQ_PARTICIPANT_ID,
         threadId: LINQ_THREAD_ID,
+        threadIsDirect: true,
       },
     )
 
@@ -31,6 +32,7 @@ describe('assistant current delivery route', () => {
       identityId: LINQ_IDENTITY_ID,
       participantId: LINQ_PARTICIPANT_ID,
       threadId: LINQ_THREAD_ID,
+      threadIsDirect: true,
     })
     expect(stripPrivateAssistantRoutePlaceholders(route)).toEqual(route)
   })

@@ -236,6 +236,178 @@ describe("@murphai/contracts public entrypoint", () => {
     expect(
       contracts.normalizeWearablePreferenceProviders(['whoop', 'garmin', 'whoop']),
     ).toEqual(['garmin', 'whoop']);
+    expect(contracts.assistantVoiceOptions.map((option) => ({
+      elevenLabsVoiceId: option.elevenLabsVoiceId,
+      gender: option.gender,
+      id: option.id,
+      label: option.label,
+      previewPath: option.previewPath,
+    }))).toEqual([
+      {
+        elevenLabsVoiceId: null,
+        gender: "male",
+        id: "classic",
+        label: "Classic Murph",
+        previewPath: "/audio/murph-voices/classic.mp3",
+      },
+      {
+        elevenLabsVoiceId: "DGzg6RaUqxGRTHSBjfgF",
+        gender: "male",
+        id: "drill-sergeant",
+        label: "Drill sergeant",
+        previewPath: "/audio/murph-voices/drill-sergeant.mp3",
+      },
+      {
+        elevenLabsVoiceId: "NOpBlnGInO9m6vDvFkFC",
+        gender: "male",
+        id: "grandpa",
+        label: "Grandpa",
+        previewPath: "/audio/murph-voices/grandpa.mp3",
+      },
+      {
+        elevenLabsVoiceId: "Bj9UqZbhQsanLzgalpEG",
+        gender: "male",
+        id: "country",
+        label: "Country",
+        previewPath: "/audio/murph-voices/country.mp3",
+      },
+      {
+        elevenLabsVoiceId: "dhwafD61uVd8h85wAZSE",
+        gender: "male",
+        id: "jamaican",
+        label: "Jamaican, deep",
+        previewPath: "/audio/murph-voices/jamaican.mp3",
+      },
+      {
+        elevenLabsVoiceId: "nrD2uNU2IUYtedZegcGx",
+        gender: "male",
+        id: "radio-host",
+        label: "Radio host",
+        previewPath: "/audio/murph-voices/radio-host.mp3",
+      },
+      {
+        elevenLabsVoiceId: "Gubgw9l4dtIoQA9YZHgx",
+        gender: "male",
+        id: "deep-calm",
+        label: "Deep and calming",
+        previewPath: "/audio/murph-voices/deep-calm.mp3",
+      },
+      {
+        elevenLabsVoiceId: "EST9Ui6982FZPSi7gCHi",
+        gender: "female",
+        id: "warm",
+        label: "Warm and friendly",
+        previewPath: "/audio/murph-voices/warm.mp3",
+      },
+      {
+        elevenLabsVoiceId: "EkK5I93UQWFDigLMpZcX",
+        gender: "male",
+        id: "husky",
+        label: "Husky and bold",
+        previewPath: "/audio/murph-voices/husky.mp3",
+      },
+      {
+        elevenLabsVoiceId: "NNl6r8mD7vthiJatiJt1",
+        gender: "male",
+        id: "storyteller",
+        label: "British storyteller",
+        previewPath: "/audio/murph-voices/storyteller.mp3",
+      },
+      {
+        elevenLabsVoiceId: "exsUS4vynmxd379XN4yO",
+        gender: "female",
+        id: "british-warm",
+        label: "British, warm",
+        previewPath: "/audio/murph-voices/british-warm.mp3",
+      },
+      {
+        elevenLabsVoiceId: "BpjGufoPiobT79j2vtj4",
+        gender: "female",
+        id: "late-night",
+        label: "Late night radio",
+        previewPath: "/audio/murph-voices/late-night.mp3",
+      },
+      {
+        elevenLabsVoiceId: "1SM7GgM6IMuvQlz2BwM3",
+        gender: "male",
+        id: "easygoing",
+        label: "Easygoing",
+        previewPath: "/audio/murph-voices/easygoing.mp3",
+      },
+      {
+        elevenLabsVoiceId: "wo6udizrrtpIxWGp2qJk",
+        gender: "male",
+        id: "northern",
+        label: "Eccentric northerner",
+        previewPath: "/audio/murph-voices/northern.mp3",
+      },
+      {
+        elevenLabsVoiceId: "gU0LNdkMOQCOrPrwtbee",
+        gender: "male",
+        id: "football-announcer",
+        label: "Football announcer",
+        previewPath: "/audio/murph-voices/football-announcer.mp3",
+      },
+      {
+        elevenLabsVoiceId: "OZxMHsGaBmV5pjMIDIn0",
+        gender: "female",
+        id: "sweet",
+        label: "Sweet and natural",
+        previewPath: "/audio/murph-voices/sweet.mp3",
+      },
+      {
+        elevenLabsVoiceId: "Z3R5wn05IrDiVCyEkUrK",
+        gender: "female",
+        id: "mysterious",
+        label: "Mysterious",
+        previewPath: "/audio/murph-voices/mysterious.mp3",
+      },
+      {
+        elevenLabsVoiceId: "tnSpp4vdxKPjI9w0GnoV",
+        gender: "female",
+        id: "upbeat",
+        label: "Upbeat",
+        previewPath: "/audio/murph-voices/upbeat.mp3",
+      },
+      {
+        elevenLabsVoiceId: "RILOU7YmBhvwJGDGjNmP",
+        gender: "female",
+        id: "narrator",
+        label: "Audiobook narrator",
+        previewPath: "/audio/murph-voices/narrator.mp3",
+      },
+      {
+        elevenLabsVoiceId: "rCmVtv8cYU60uhlsOo1M",
+        gender: "female",
+        id: "expressive",
+        label: "Warm and expressive",
+        previewPath: "/audio/murph-voices/expressive.mp3",
+      },
+      {
+        elevenLabsVoiceId: "uYXf8XasLslADfZ2MB4u",
+        gender: "female",
+        id: "bubbly",
+        label: "Bubbly",
+        previewPath: "/audio/murph-voices/bubbly.mp3",
+      },
+      {
+        elevenLabsVoiceId: "aRlmTYIQo6Tlg5SlulGC",
+        gender: "female",
+        id: "smooth",
+        label: "Smooth and sweet",
+        previewPath: "/audio/murph-voices/smooth.mp3",
+      },
+    ]);
+    expect(contracts.isAssistantVoiceOptionId("drill-sergeant")).toBe(true);
+    expect(contracts.isAssistantVoiceOptionId("bright")).toBe(false);
+    expect(contracts.resolveAssistantVoiceOptionElevenLabsVoiceId("classic")).toBeNull();
+    expect(contracts.resolveAssistantVoiceOptionElevenLabsVoiceId("warm")).toBe(
+      "EST9Ui6982FZPSi7gCHi",
+    );
+    // A retired roster id must fall back to the env voice rather than fail the
+    // voice memo, so stale stored preferences stay harmless.
+    expect(contracts.resolveAssistantVoiceOptionElevenLabsVoiceId("retired-voice")).toBeNull();
+    expect(contracts.resolveAssistantVoiceOptionElevenLabsVoiceId(null)).toBeNull();
     expect(contracts.VAULT_LAYOUT.preferencesDocument).toBe("bank/preferences.json");
   });
 });

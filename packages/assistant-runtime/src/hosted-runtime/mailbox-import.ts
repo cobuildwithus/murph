@@ -84,9 +84,11 @@ export interface HostedMailboxResolvedImportItem {
 
 export interface HostedMailboxImportLoopResult {
   assistantInputIds?: string[];
+  assistantInputRecords?: HostedMailboxAssistantInputRecord[];
   blocked: HostedMailboxImportLoopBlockedItem[];
   conversationImportedCount?: number;
   consumedSeqByLane: Record<HostedMailboxLane, string | null>;
+  fetchedLanes?: readonly HostedMailboxLane[];
   fetchedCount: number;
   importedCount: number;
   importedSystemMailboxItemIds?: string[];
@@ -96,6 +98,12 @@ export interface HostedMailboxImportLoopResult {
   conversationImportTiming?: HostedMailboxConversationImportTiming;
   nextRetryAt?: string | null;
   state: HostedMailboxImportState;
+}
+
+export interface HostedMailboxAssistantInputRecord {
+  assistantInputId: string;
+  emailDeliveryContext?: HostedAssistantEmailDeliveryContext;
+  linqDeliveryContext?: HostedAssistantLinqDeliveryContext;
 }
 
 export interface HostedMailboxImportLoopBlockedItem {
@@ -200,6 +208,7 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
   const consumedSeqByLane = consumedSeqState.seqByLane;
   let nextState = input.state;
   const assistantInputIds: string[] = [];
+  const assistantInputRecords: HostedMailboxAssistantInputRecord[] = [];
   let conversationImportedCount = 0;
   let importedCount = 0;
   const importedSystemMailboxItemIds: string[] = [];
@@ -287,17 +296,33 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
     }
 
     if (route.state === "quarantine") {
+      const reasonCode = `route.${route.quarantineCode}`;
+      if (route.quarantineCode === "unsupported_kind") {
+        blocked.push({
+          itemId: item.id,
+          lane,
+          reasonCode,
+          retryable: true,
+          seq: item.laneSeq,
+        });
+        nextRetryAt = earliestHostedMailboxRetryAt(
+          nextRetryAt,
+          computeHostedMailboxRetryAt(now()),
+        );
+        stoppedLanes.add(lane);
+        continue;
+      }
       nextState = recordHostedMailboxImportQuarantine(nextState, {
         itemKind: item.kind,
         lane,
         occurredAt: now(),
-        reasonCode: `route.${route.quarantineCode}`,
+        reasonCode,
         seq: normalizeSeqForStatus(item.laneSeq),
       });
       blocked.push({
         itemId: item.id,
         lane,
-        reasonCode: `route.${route.quarantineCode}`,
+        reasonCode,
         retryable: false,
         seq: item.laneSeq,
       });
@@ -466,6 +491,15 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
       }
       if (foregroundAssistantInput && outcome.assistantInputId) {
         assistantInputIds.push(outcome.assistantInputId);
+        assistantInputRecords.push({
+          assistantInputId: outcome.assistantInputId,
+          ...(outcome.emailDeliveryContext
+            ? { emailDeliveryContext: outcome.emailDeliveryContext }
+            : {}),
+          ...(outcome.linqDeliveryContext
+            ? { linqDeliveryContext: outcome.linqDeliveryContext }
+            : {}),
+        });
       }
     }
     if ((outcome.status === "imported" || outcome.status === "skipped") && outcome.linqDeliveryContext) {
@@ -496,9 +530,11 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
 
   return {
     assistantInputIds,
+    ...(assistantInputRecords.length > 0 ? { assistantInputRecords } : {}),
     blocked,
     conversationImportedCount,
     consumedSeqByLane: serializeHostedMailboxConsumedSeqByLane(consumedSeqState),
+    fetchedLanes: [...lanes],
     fetchedCount: fetched.items.length,
     importedCount,
     ...(importedSystemMailboxItemIds.length > 0 ? { importedSystemMailboxItemIds } : {}),

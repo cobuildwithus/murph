@@ -386,6 +386,9 @@ test("automation save and edit schemas expose typed fields while automation impo
   assert.deepEqual(setStatusSchema.args.required, ["lookup"]);
   assert.equal("status" in setStatusSchema.options.properties, true);
   assert.equal(setStatusSchema.options.required?.includes("status") ?? false, true);
+
+  const listSchema = await readCommandSchema(cli, ["automation", "list"]);
+  assert.equal("includeBody" in listSchema.options.properties, false);
 });
 
 test("automation save and edit manage assistant target overrides from typed fields", async () => {
@@ -643,6 +646,7 @@ test("automation save injects the current private iMessage delivery route", asyn
       automation: {
         route: {
           channel: string;
+          currentRouteSnapshot?: boolean | null;
           deliveryTarget: string | null;
           participantId: string | null;
           threadId: string | null;
@@ -659,6 +663,7 @@ test("automation save injects the current private iMessage delivery route", asyn
     assert.equal(shown.exitCode, null);
     assert.equal(shown.envelope.ok, true);
     assert.equal(shown.envelope.data?.automation?.route.channel, "linq");
+    assert.equal(shown.envelope.data?.automation?.route.currentRouteSnapshot, true);
     assert.equal(shown.envelope.data?.automation?.route.deliveryTarget, "linq_chat_real");
     assert.equal(shown.envelope.data?.automation?.route.participantId, null);
     assert.equal(shown.envelope.data?.automation?.route.threadId, null);
@@ -711,6 +716,7 @@ test("automation save injects a hosted current messaging route without target fl
       automation: {
         route: {
           channel: string;
+          currentRouteSnapshot?: boolean | null;
           deliveryTarget: string | null;
           threadId: string | null;
         };
@@ -726,6 +732,7 @@ test("automation save injects a hosted current messaging route without target fl
     assert.equal(shown.exitCode, null);
     assert.equal(shown.envelope.ok, true);
     assert.equal(shown.envelope.data?.automation?.route.channel, "telegram");
+    assert.equal(shown.envelope.data?.automation?.route.currentRouteSnapshot, true);
     assert.equal(shown.envelope.data?.automation?.route.deliveryTarget, "telegram_thread_real");
     assert.equal(shown.envelope.data?.automation?.route.threadId, null);
   } finally {
@@ -1910,6 +1917,8 @@ test("automation commands round-trip save, import-json, show, and list through t
       importedPayload.slug,
     ]);
     assert.equal(listedData.items[0]?.automationId, savedData.automationId);
+    assert.equal("instructions" in (listedData.items[0] ?? {}), false);
+    assert.equal("markdown" in (listedData.items[0] ?? {}), false);
   } finally {
     await rm(parentRoot, { force: true, recursive: true });
   }

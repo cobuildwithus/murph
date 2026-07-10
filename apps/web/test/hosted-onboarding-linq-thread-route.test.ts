@@ -35,7 +35,6 @@ vi.mock("../src/lib/hosted-execution/usage-allowance", async (importOriginal) =>
   return {
     ...actual,
     checkHostedAiUsageGate: vi.fn(),
-    claimHostedAiUsageLimitNotice: vi.fn(),
   };
 });
 
@@ -149,6 +148,27 @@ beforeEach(() => {
   vi.mocked(prismaModule.getPrisma).mockReset();
   vi.mocked(linqModule.verifyAndParseHostedLinqWebhookRequest).mockReset();
   vi.mocked(linqClient.getHostedLinqChatHandles).mockReset();
+  vi.mocked(mailboxStore.readHostedMailboxItemByDedupeKey).mockReset();
+  vi.mocked(mailboxStore.appendHostedMailboxEnvelopeTx).mockReset();
+  vi.mocked(linqDailyState.incrementHostedLinqInboundDailyState).mockReset();
+  vi.mocked(usageAllowance.checkHostedAiUsageGate).mockReset();
+  vi.mocked(mailboxStore.readHostedMailboxItemByDedupeKey).mockResolvedValue(null);
+  vi.mocked(mailboxStore.appendHostedMailboxEnvelopeTx).mockResolvedValue({
+    dedupeConflict: false,
+    duplicate: false,
+    inserted: true,
+    item: buildHostedMailboxItem({
+      id: "mailbox_group_123",
+      userId: "member_thread_container_123",
+    }),
+  });
+  vi.mocked(linqDailyState.incrementHostedLinqInboundDailyState).mockResolvedValue({
+    dayUtc: new Date("2026-06-24T00:00:00.000Z"),
+    inboundCount: 1,
+    memberId: "member_thread_container_123",
+    outboundCount: 0,
+    quotaReplySentAt: null,
+  } as Awaited<ReturnType<typeof linqDailyState.incrementHostedLinqInboundDailyState>>);
   vi.mocked(linqModule.sendHostedLinqReadReceipt).mockResolvedValue({
     ok: true,
     status: 200,
@@ -1279,11 +1299,13 @@ describe("Linq explicit external-thread routing", () => {
     expect(mailboxStore.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
   });
 
-  it("uses the existing AI usage notice behavior for routed thread traffic", async () => {
+  it("appends routed thread traffic even when the AI usage gate would deny", async () => {
     const prisma = createPrisma({
       routeContainerMemberId: "member_thread_container_123",
     });
-    const periodStart = new Date("2026-06-01T00:00:00.000Z");
+    vi.mocked(usageAllowance.checkHostedAiUsageGate).mockRejectedValueOnce(
+      new Error("webhook usage gate should not run"),
+    );
     vi.mocked(mailboxStore.readHostedMailboxItemByDedupeKey).mockResolvedValueOnce(null);
     vi.mocked(linqDailyState.incrementHostedLinqInboundDailyState).mockResolvedValueOnce({
       dayUtc: new Date("2026-06-24T00:00:00.000Z"),
@@ -1292,23 +1314,15 @@ describe("Linq explicit external-thread routing", () => {
       outboundCount: 0,
       quotaReplySentAt: null,
     } as Awaited<ReturnType<typeof linqDailyState.incrementHostedLinqInboundDailyState>>);
-    vi.mocked(usageAllowance.checkHostedAiUsageGate).mockResolvedValueOnce({
-      allowed: false,
-      billingPlanCode: "launch_monthly",
-      limitUsdMicros: 4_500_000n,
-      memberId: "member_thread_container_123",
-      periodEnd: new Date("2026-07-01T00:00:00.000Z"),
-      periodStart,
-      reason: "ai_usage_limit_exceeded",
-      remainingUsdMicros: 0n,
-      retryAfter: new Date("2026-07-01T00:00:00.000Z"),
-      spentUsdMicros: 4_500_000n,
-      userNotice: {
-        code: "edge_usage_limit_reached",
-        message: "Usage limit reached.",
-      },
+    vi.mocked(mailboxStore.appendHostedMailboxEnvelopeTx).mockResolvedValueOnce({
+      dedupeConflict: false,
+      duplicate: false,
+      inserted: true,
+      item: buildHostedMailboxItem({
+        id: "mailbox_group_usage_denied_123",
+        userId: "member_thread_container_123",
+      }),
     });
-    vi.mocked(usageAllowance.claimHostedAiUsageLimitNotice).mockResolvedValueOnce(true);
 
     const plan = await planHostedOnboardingLinqWebhook({
       event: buildLinqMessageReceivedEvent({}),
@@ -1316,30 +1330,41 @@ describe("Linq explicit external-thread routing", () => {
     });
 
     expect(plan.response).toMatchObject({
+      ignored: false,
       ok: true,
-      reason: "sent-ai-usage-quota-reply",
+      reason: "wake-appended-thread-route",
     });
-    expect(plan.desiredSideEffects).toHaveLength(1);
-    expect(plan.desiredSideEffects[0]?.payload).toMatchObject({
-      chatId: "chat_group_123",
-      memberId: "member_thread_container_123",
-      message: "Usage limit reached.",
-      noticeCode: "edge_usage_limit_reached",
-      routeAuthority: {
-        accountLookupKey: createHostedPhoneLookupKey("+15550000000"),
-        channel: "linq",
-        containerMemberId: "member_thread_container_123",
-        threadId: "chat_group_123",
-      },
-      template: "ai_usage_quota",
+    expect(plan.desiredSideEffects).toHaveLength(0);
+    expect(usageAllowance.checkHostedAiUsageGate).not.toHaveBeenCalled();
+    expect(readSingleWakeHandoff(plan)).toMatchObject({
+      eventId: "evt_group_123",
+      linqChatId: "chat_group_123",
+      mailboxItemId: "mailbox_group_usage_denied_123",
+      source: "linq",
+      userId: "member_thread_container_123",
     });
-    expect(usageAllowance.claimHostedAiUsageLimitNotice).toHaveBeenCalledWith({
-      memberId: "member_thread_container_123",
-      periodStart,
-      prisma,
-      sentAt: expect.any(Date),
+    expect(mailboxStore.appendHostedMailboxEnvelopeTx).toHaveBeenCalledWith({
+      envelope: expect.objectContaining({
+        eventId: "evt_group_123",
+        kind: "conversation.message",
+        message: expect.objectContaining({
+          accountLookupKey: createHostedPhoneLookupKey("+15550000000"),
+          channel: "linq",
+          linqMessage: expect.objectContaining({
+            chatId: "chat_group_123",
+            messageId: "msg_group_123",
+          }),
+          routeAuthority: {
+            accountLookupKey: createHostedPhoneLookupKey("+15550000000"),
+            channel: "linq",
+            containerMemberId: "member_thread_container_123",
+            threadId: "chat_group_123",
+          },
+        }),
+        userId: "member_thread_container_123",
+      }),
+      tx: prisma,
     });
-    expect(mailboxStore.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
   });
 
   it("still ignores unbound Linq group threads when the sender is not a member", async () => {
@@ -1455,10 +1480,7 @@ describe("Linq explicit external-thread routing", () => {
         removedAt: null,
       }),
     });
-    expect(usageAllowance.checkHostedAiUsageGate).toHaveBeenCalledWith({
-      memberId: "member_thread_container_123",
-      prisma,
-    });
+    expect(usageAllowance.checkHostedAiUsageGate).not.toHaveBeenCalled();
     expect(readSingleWakeHandoff(plan)).toMatchObject({
       eventId: "evt_group_123",
       mailboxItemId: "mailbox_active_participant_123",

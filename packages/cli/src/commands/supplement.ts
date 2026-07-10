@@ -141,7 +141,7 @@ export function registerSupplementCommands(
     output: healthListResultSchema,
     async run(context) {
       return services.query.listSupplements({
-        limit: context.options.limit ?? 50,
+        limit: context.options.limit ?? 10,
         requestId: requestIdFromOptions(context.options),
         status: context.options.status,
         vault: context.options.vault,

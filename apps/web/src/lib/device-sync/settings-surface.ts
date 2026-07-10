@@ -230,8 +230,11 @@ function buildConnectedSource(input: {
   const connectedAgeMs = ageInMilliseconds(connection.connectedAt, now);
   const setupPhase = connection.setupPhase ?? null;
   const reconnectSource = findReconnectRequiredUpstreamSource(input.upstreamSources);
+  const sourceReconnectTarget = reconnectSource
+    ? resolveUpstreamSourceReconnectTarget(reconnectSource)
+    : null;
   const sourceReconnectAction = reconnectSource
-    ? buildReconnectAction(input.connectTarget)
+    ? buildReconnectAction(sourceReconnectTarget)
     : null;
 
   if (connection.status === "disconnected") {
@@ -343,8 +346,8 @@ function buildConnectedSource(input: {
     return {
       connectionId: connection.id,
       connectedAt: connection.connectedAt,
-      connectSourceId: input.connectTarget?.connectSourceId ?? null,
-      connectTarget: input.connectTarget?.connectTarget ?? null,
+      connectSourceId: sourceReconnectTarget?.connectSourceId ?? null,
+      connectTarget: sourceReconnectTarget?.connectTarget ?? null,
       detail: `${reconnectSource.providerLabel} needs to be reconnected before Murph can keep syncing it.`,
       displayName,
       guidance: sourceReconnectAction
@@ -516,6 +519,32 @@ function buildReconnectAction(
   return {
     kind: "reconnect",
     label: "Reconnect",
+  };
+}
+
+function resolveUpstreamSourceReconnectTarget(
+  source: HostedDeviceSyncSettingsUpstreamSource,
+): HostedDeviceSyncSettingsConnectTarget | null {
+  const connectTarget = source.connectTarget?.trim();
+  if (!connectTarget) {
+    return null;
+  }
+
+  const connectSourceId = source.connectSourceId?.trim();
+  if (!connectSourceId) {
+    return null;
+  }
+
+  const provider = source.connectProvider ?? null;
+  if (!provider) {
+    return null;
+  }
+
+  return {
+    connectSourceId,
+    connectTarget,
+    provider,
+    sourceProviderSlug: source.sourceProviderSlug,
   };
 }
 

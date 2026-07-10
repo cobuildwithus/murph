@@ -48,6 +48,11 @@ function mergeAgreedRouteLocators(
     identityId: a.identityId === b.identityId ? a.identityId : null,
     participantId: a.participantId === b.participantId ? a.participantId : null,
     threadId: a.threadId === b.threadId ? a.threadId : null,
+    ...(
+      typeof a.threadIsDirect === "boolean" && a.threadIsDirect === b.threadIsDirect
+        ? { threadIsDirect: a.threadIsDirect }
+        : {}
+    ),
   };
 }
 
@@ -80,5 +85,10 @@ export function readHostedAssistantInputCurrentDeliveryRoute(input: {
     threadId: useConversationLocator
       ? normalizeAssistantRouteString(conversationRoute.threadId)
       : null,
+    ...(
+      useConversationLocator && typeof input.conversation?.threadIsDirect === "boolean"
+        ? { threadIsDirect: input.conversation.threadIsDirect }
+        : {}
+    ),
   };
 }

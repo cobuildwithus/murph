@@ -12,26 +12,17 @@ import {
 } from "@/src/lib/hosted-onboarding/contact-privacy";
 
 const mocks = vi.hoisted(() => ({
-  acceptCallCircleOfferEnrollment: vi.fn(),
   acceptHostedGroupJoinOfferTx: vi.fn(),
-  appendCallCircleSetupNotificationTx: vi.fn(),
-  canAppendCallCircleSetupNotification: vi.fn(),
+  enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort: vi.fn(),
   lookupHostedMemberIdentityByPhoneNumber: vi.fn(),
   readActiveHostedMemberAccess: vi.fn(),
-  readCallCircleNotificationSignal: vi.fn(),
-  signalCallCircleNotificationRuntimesBestEffort: vi.fn(),
+  signalHostedMailboxAppendRuntime: vi.fn(),
+  signalHostedRuntimeMaintenanceRuntime: vi.fn(),
 }));
 
-vi.mock("@/src/lib/call-circle/notifications", () => ({
-  appendCallCircleSetupNotificationTx: mocks.appendCallCircleSetupNotificationTx,
-  readCallCircleNotificationSignal: mocks.readCallCircleNotificationSignal,
-  signalCallCircleNotificationRuntimesBestEffort:
-    mocks.signalCallCircleNotificationRuntimesBestEffort,
-}));
-
-vi.mock("@/src/lib/call-circle/participant-store", () => ({
-  acceptCallCircleOfferEnrollment: mocks.acceptCallCircleOfferEnrollment,
-  canAppendCallCircleSetupNotification: mocks.canAppendCallCircleSetupNotification,
+vi.mock("@/src/lib/hosted-groups/group-newsletter", () => ({
+  enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort:
+    mocks.enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort,
 }));
 
 vi.mock("@/src/lib/hosted-groups/group-store", () => ({
@@ -44,6 +35,11 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-identity-store", () => ({
 
 vi.mock("@/src/lib/hosted-onboarding/member-access", () => ({
   readActiveHostedMemberAccess: mocks.readActiveHostedMemberAccess,
+}));
+
+vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
+  signalHostedMailboxAppendRuntime: mocks.signalHostedMailboxAppendRuntime,
+  signalHostedRuntimeMaintenanceRuntime: mocks.signalHostedRuntimeMaintenanceRuntime,
 }));
 
 import {
@@ -63,30 +59,31 @@ let restoreKeyring: (() => void) | null = null;
 describe("handleHostedGroupJoinOfferReaction", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.acceptHostedGroupJoinOfferTx.mockResolvedValue(buildAcceptedJoinOffer());
-    mocks.appendCallCircleSetupNotificationTx.mockResolvedValue({
-      mailboxItemId: "mailbox_call_circle_setup",
-      status: "sent",
-    });
-    mocks.canAppendCallCircleSetupNotification.mockResolvedValue(true);
-    mocks.acceptCallCircleOfferEnrollment.mockResolvedValue({
-      id: "hccp_1",
+    mocks.acceptHostedGroupJoinOfferTx.mockResolvedValue({
+      alreadyMember: false,
+      grantedVaultShareProjectionKinds: ["profile-name.v0", "sleep-times.v0"],
+      groupId: "group_1",
+      joinCode: "join_1",
+      messageLookupKey: "hbidx:linq-message:v1:offer",
+      membershipId: "membership_1",
+      revokedVaultShareProjectionKinds: [],
+      selectedVaultShareProjectionKinds: ["sleep-times.v0"],
+      vaultShareCleanupSignals: [],
     });
     mocks.lookupHostedMemberIdentityByPhoneNumber.mockResolvedValue({
       core: { id: "member_reactor", suspendedAt: null },
     });
+    mocks.enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort.mockResolvedValue(
+      undefined,
+    );
     mocks.readActiveHostedMemberAccess.mockResolvedValue(true);
-    mocks.readCallCircleNotificationSignal.mockImplementation(({ memberId, notification }) =>
-      notification.status === "sent" && notification.mailboxItemId
-        ? { mailboxItemId: notification.mailboxItemId, memberId }
-        : null);
-    mocks.signalCallCircleNotificationRuntimesBestEffort.mockResolvedValue(undefined);
+    mocks.signalHostedMailboxAppendRuntime.mockResolvedValue(undefined);
+    mocks.signalHostedRuntimeMaintenanceRuntime.mockResolvedValue(undefined);
   });
 
   afterEach(() => {
     restoreKeyring?.();
     restoreKeyring = null;
-    vi.unstubAllEnvs();
   });
 
   it("accepts a live liked offer without sending a confirmation reply", async () => {
@@ -114,9 +111,73 @@ describe("handleHostedGroupJoinOfferReaction", () => {
         ]),
       }),
     );
-    expect(mocks.acceptCallCircleOfferEnrollment).not.toHaveBeenCalled();
-    expect(mocks.appendCallCircleSetupNotificationTx).not.toHaveBeenCalled();
-    expect(mocks.signalCallCircleNotificationRuntimesBestEffort).not.toHaveBeenCalled();
+    expect(mocks.enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort)
+      .not.toHaveBeenCalled();
+    expect(mocks.signalHostedRuntimeMaintenanceRuntime).toHaveBeenCalledTimes(1);
+    expect(mocks.signalHostedRuntimeMaintenanceRuntime).toHaveBeenCalledWith({
+      userId: "member_reactor",
+    });
+  });
+
+  it("enqueues private missing-email nudge candidates after accepting an email-sharing offer", async () => {
+    mocks.acceptHostedGroupJoinOfferTx.mockResolvedValueOnce({
+      alreadyMember: false,
+      grantedVaultShareProjectionKinds: ["profile-name.v0", "group-email.v0"],
+      groupId: "group_1",
+      joinCode: "join_1",
+      messageLookupKey: "hbidx:linq-message:v1:offer",
+      membershipId: "membership_1",
+      revokedVaultShareProjectionKinds: [],
+      selectedVaultShareProjectionKinds: ["group-email.v0"],
+      vaultShareCleanupSignals: [],
+    });
+    const event = parseReactionEvent({
+      reactionType: "like",
+    });
+    const prisma = createPrismaStub();
+
+    await expect(handleHostedGroupJoinOfferReaction({
+      event,
+      prisma,
+    })).resolves.toEqual({
+      reason: "accepted",
+      status: "accepted",
+    });
+
+    expect(mocks.enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort)
+      .toHaveBeenCalledWith({
+        groupId: "group_1",
+        memberId: "member_reactor",
+        prisma,
+      });
+    expect(mocks.signalHostedRuntimeMaintenanceRuntime).toHaveBeenCalledTimes(1);
+    expect(mocks.signalHostedRuntimeMaintenanceRuntime).toHaveBeenCalledWith({
+      userId: "member_reactor",
+    });
+  });
+
+  it("accepts the reaction when the best-effort runtime wake fails", async () => {
+    mocks.signalHostedRuntimeMaintenanceRuntime.mockRejectedValueOnce(
+      new Error("runtime unavailable"),
+    );
+    const event = parseReactionEvent({
+      reactionType: "like",
+    });
+    const prisma = createPrismaStub();
+
+    await expect(handleHostedGroupJoinOfferReaction({
+      event,
+      prisma,
+    })).resolves.toEqual({
+      reason: "accepted",
+      status: "accepted",
+    });
+
+    expect(mocks.enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort)
+      .not.toHaveBeenCalled();
+    expect(mocks.signalHostedRuntimeMaintenanceRuntime).toHaveBeenCalledWith({
+      userId: "member_reactor",
+    });
   });
 
   it("uses read candidates for rotated offer lookup", async () => {
@@ -134,9 +195,17 @@ describe("handleHostedGroupJoinOfferReaction", () => {
     }
     process.env.HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION = "v2";
     clearHostedOnboardingEnvCache();
-    mocks.acceptHostedGroupJoinOfferTx.mockResolvedValueOnce(buildAcceptedJoinOffer({
+    mocks.acceptHostedGroupJoinOfferTx.mockResolvedValueOnce({
+      alreadyMember: false,
+      grantedVaultShareProjectionKinds: ["profile-name.v0", "sleep-times.v0"],
+      groupId: "group_1",
+      joinCode: "join_1",
       messageLookupKey: storedMessageLookupKey,
-    }));
+      membershipId: "membership_1",
+      revokedVaultShareProjectionKinds: [],
+      selectedVaultShareProjectionKinds: ["sleep-times.v0"],
+      vaultShareCleanupSignals: [],
+    });
     const event = parseReactionEvent({
       reactionType: "like",
     });
@@ -168,16 +237,23 @@ describe("handleHostedGroupJoinOfferReaction", () => {
         threadIdentityLookupKey: expect.anything(),
       }),
     );
-    expect(mocks.signalCallCircleNotificationRuntimesBestEffort).not.toHaveBeenCalled();
   });
 
-  it("enrolls the liker when the accepted offer activates Call Circle", async () => {
-    vi.stubEnv("HOSTED_CALL_CIRCLE_OFFERS_ENABLED", "1");
-    mocks.acceptHostedGroupJoinOfferTx.mockResolvedValue(buildAcceptedJoinOffer({
-      featureActivations: ["call-circle.enroll.v0"],
-      grantedVaultShareProjectionKinds: ["profile-name.v0"],
+  it("drains cleanup runtime signals after a successful accept", async () => {
+    mocks.acceptHostedGroupJoinOfferTx.mockResolvedValueOnce({
+      alreadyMember: true,
+      grantedVaultShareProjectionKinds: [],
+      groupId: "group_1",
+      joinCode: "join_1",
+      messageLookupKey: "hbidx:linq-message:v1:offer",
+      membershipId: "membership_1",
+      revokedVaultShareProjectionKinds: ["sleep-times.v0"],
       selectedVaultShareProjectionKinds: [],
-    }));
+      vaultShareCleanupSignals: [{
+        mailboxItemId: "mailbox_item_cleanup_1",
+        memberId: "member_group_runtime",
+      }],
+    });
     const event = parseReactionEvent({
       reactionType: "like",
     });
@@ -191,101 +267,15 @@ describe("handleHostedGroupJoinOfferReaction", () => {
       status: "accepted",
     });
 
-    expect(mocks.acceptCallCircleOfferEnrollment).toHaveBeenCalledWith(
-      expect.objectContaining({
-        groupId: "group_1",
-        memberId: "member_reactor",
-        now: event.providerCreatedAt,
-        offerPostedAt: new Date("2026-03-26T11:59:00.000Z"),
-      }),
-    );
-    expect(mocks.canAppendCallCircleSetupNotification).toHaveBeenCalledWith(
-      expect.objectContaining({
-        groupId: "group_1",
-        memberId: "member_reactor",
-        prisma: expect.any(Object),
-      }),
-    );
-    expect(mocks.appendCallCircleSetupNotificationTx).toHaveBeenCalledWith(
-      expect.objectContaining({
-        groupId: "group_1",
-        memberId: "member_reactor",
-        now: event.providerCreatedAt,
-        offerId: "offer_1",
-      }),
-    );
-    expect(mocks.readCallCircleNotificationSignal).toHaveBeenCalledWith({
-      memberId: "member_reactor",
-      notification: {
-        mailboxItemId: "mailbox_call_circle_setup",
-        status: "sent",
-      },
+    expect(mocks.signalHostedRuntimeMaintenanceRuntime).not.toHaveBeenCalled();
+    expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledTimes(1);
+    expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
+      expectedUserId: "member_group_runtime",
+      mailboxItemId: "mailbox_item_cleanup_1",
     });
-    expect(mocks.signalCallCircleNotificationRuntimesBestEffort).toHaveBeenCalledWith([{
-      mailboxItemId: "mailbox_call_circle_setup",
-      memberId: "member_reactor",
-    }]);
   });
 
-  it("skips Call Circle offer activation when the rollout gate is disabled", async () => {
-    mocks.acceptHostedGroupJoinOfferTx.mockResolvedValue(buildAcceptedJoinOffer({
-      featureActivations: ["call-circle.enroll.v0"],
-      grantedVaultShareProjectionKinds: ["profile-name.v0"],
-      selectedVaultShareProjectionKinds: [],
-    }));
-    const event = parseReactionEvent({
-      reactionType: "like",
-    });
-    const prisma = createPrismaStub();
-
-    await expect(handleHostedGroupJoinOfferReaction({
-      event,
-      prisma,
-    })).resolves.toEqual({
-      reason: "accepted",
-      status: "accepted",
-    });
-
-    expect(mocks.acceptHostedGroupJoinOfferTx).toHaveBeenCalled();
-    expect(mocks.acceptCallCircleOfferEnrollment).not.toHaveBeenCalled();
-    expect(mocks.canAppendCallCircleSetupNotification).not.toHaveBeenCalled();
-    expect(mocks.appendCallCircleSetupNotificationTx).not.toHaveBeenCalled();
-    expect(mocks.signalCallCircleNotificationRuntimesBestEffort).not.toHaveBeenCalled();
-  });
-
-  it("does not append Call Circle setup when active authority fails after enrollment", async () => {
-    vi.stubEnv("HOSTED_CALL_CIRCLE_OFFERS_ENABLED", "1");
-    mocks.acceptHostedGroupJoinOfferTx.mockResolvedValue(buildAcceptedJoinOffer({
-      featureActivations: ["call-circle.enroll.v0"],
-      grantedVaultShareProjectionKinds: ["profile-name.v0"],
-      selectedVaultShareProjectionKinds: [],
-    }));
-    mocks.canAppendCallCircleSetupNotification.mockResolvedValueOnce(false);
-    const event = parseReactionEvent({
-      reactionType: "like",
-    });
-    const prisma = createPrismaStub();
-
-    await expect(handleHostedGroupJoinOfferReaction({
-      event,
-      prisma,
-    })).resolves.toEqual({
-      reason: "accepted",
-      status: "accepted",
-    });
-
-    expect(mocks.acceptCallCircleOfferEnrollment).toHaveBeenCalled();
-    expect(mocks.canAppendCallCircleSetupNotification).toHaveBeenCalledWith(
-      expect.objectContaining({
-        groupId: "group_1",
-        memberId: "member_reactor",
-      }),
-    );
-    expect(mocks.appendCallCircleSetupNotificationTx).not.toHaveBeenCalled();
-    expect(mocks.signalCallCircleNotificationRuntimesBestEffort).not.toHaveBeenCalled();
-  });
-
-  it("ignores unsupported reactions without accepting", async () => {
+  it("records unsupported reactions as skipped without accepting or replying", async () => {
     const event = parseReactionEvent({
       customEmoji: "😂",
       reactionType: "custom",
@@ -301,7 +291,10 @@ describe("handleHostedGroupJoinOfferReaction", () => {
     });
 
     expect(mocks.acceptHostedGroupJoinOfferTx).not.toHaveBeenCalled();
-    expect(mocks.signalCallCircleNotificationRuntimesBestEffort).not.toHaveBeenCalled();
+    expect(mocks.enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort)
+      .not.toHaveBeenCalled();
+    expect(mocks.signalHostedRuntimeMaintenanceRuntime).not.toHaveBeenCalled();
+    expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
   });
 
   it("records revoked offers as a distinct skip reason", async () => {
@@ -325,35 +318,10 @@ describe("handleHostedGroupJoinOfferReaction", () => {
     });
 
     expect(mocks.acceptHostedGroupJoinOfferTx).toHaveBeenCalled();
-    expect(mocks.signalCallCircleNotificationRuntimesBestEffort).not.toHaveBeenCalled();
+    expect(mocks.enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort)
+      .not.toHaveBeenCalled();
+    expect(mocks.signalHostedRuntimeMaintenanceRuntime).not.toHaveBeenCalled();
   });
-
-  it("ignores a no-offer match without consulting unbound thread reservations", async () => {
-    mocks.acceptHostedGroupJoinOfferTx.mockRejectedValueOnce(hostedOnboardingError({
-      code: "HOSTED_GROUP_JOIN_OFFER_NOT_FOUND",
-      httpStatus: 404,
-      message: "This group offer is no longer active.",
-      retryable: false,
-    }));
-    const event = parseReactionEvent({
-      reactionType: "like",
-    });
-    const prisma = createPrismaStub();
-
-    await expect(handleHostedGroupJoinOfferReaction({
-      event,
-      prisma,
-    })).resolves.toEqual({
-      reason: "no_offer_match",
-      status: "ignored",
-    });
-
-    expect(mocks.signalCallCircleNotificationRuntimesBestEffort).not.toHaveBeenCalled();
-    expect(prisma.hostedThreadRoute.findFirst).not.toHaveBeenCalled();
-    expect(prisma.hostedGroupJoinOffer.updateMany).not.toHaveBeenCalled();
-    expect(prisma.hostedGroupJoinOffer.findFirst).not.toHaveBeenCalled();
-  });
-
 });
 
 function parseReactionEvent(input: {
@@ -422,85 +390,14 @@ function restoreEnvValue(key: string, value: string | undefined): void {
   process.env[key] = value;
 }
 
-function buildAcceptedJoinOffer(input: {
-  alreadyMember?: boolean;
-  featureActivations?: string[];
-  grantedVaultShareProjectionKinds?: string[];
-  messageLookupKey?: string;
-  offerPostedAt?: Date;
-  selectedVaultShareProjectionKinds?: string[];
-} = {}) {
-  const featureActivations = input.featureActivations ?? [];
-  const selectedVaultShareProjectionKinds =
-    input.selectedVaultShareProjectionKinds ?? ["sleep-times.v0"];
-  return {
-    alreadyMember: input.alreadyMember ?? false,
-    featureActivations,
-    grantedVaultShareProjectionKinds:
-      input.grantedVaultShareProjectionKinds ?? ["profile-name.v0", "sleep-times.v0"],
-    groupId: "group_1",
-    joinCode: "join_1",
-    membershipId: "membership_1",
-    messageLookupKey: input.messageLookupKey ?? "hbidx:linq-message:v1:offer",
-    offerId: "offer_1",
-    offerPostedAt: input.offerPostedAt ?? new Date("2026-03-26T11:59:00.000Z"),
-    offerScope: {
-      featureActivations,
-      schema: "murph.hosted-group.offer-scope.v1",
-      vaultShareProjectionKinds: selectedVaultShareProjectionKinds,
-    },
-    revokedVaultShareProjectionKinds: [],
-    selectedVaultShareProjectionKinds,
-    vaultShareCleanupSignals: [],
-  };
-}
-
-function createPrismaStub(input: {
-  routeContainerMemberId?: string | null;
-  unboundOffer?: boolean;
-} = {}): PrismaClient & {
-  hostedGroupJoinOffer: {
-    findFirst: ReturnType<typeof vi.fn>;
-    updateMany: ReturnType<typeof vi.fn>;
-  };
-  hostedThreadRoute: {
-    findFirst: ReturnType<typeof vi.fn>;
-  };
-} {
+function createPrismaStub(): PrismaClient {
   const prisma = createPrismaClient({
     databaseUrl: "postgresql://test:test@127.0.0.1:1/test",
-  });
-  const hostedThreadRoute = {
-    findFirst: vi.fn(async () =>
-      input.routeContainerMemberId === undefined || input.routeContainerMemberId === null
-        ? null
-        : { containerMemberId: input.routeContainerMemberId }),
-  };
-  const hostedGroupJoinOffer = {
-    findFirst: vi.fn(async () => input.unboundOffer ? { id: "hgrpjo_reserved" } : null),
-    updateMany: vi.fn(async () => ({ count: input.unboundOffer ? 0 : 1 })),
-  };
-  const tx = {} as Prisma.TransactionClient;
-  Object.defineProperty(prisma, "hostedThreadRoute", {
-    configurable: true,
-    value: hostedThreadRoute,
-  });
-  Object.defineProperty(prisma, "hostedGroupJoinOffer", {
-    configurable: true,
-    value: hostedGroupJoinOffer,
   });
   Object.defineProperty(prisma, "$transaction", {
     configurable: true,
     value: vi.fn(async <T>(run: (tx: Prisma.TransactionClient) => Promise<T>) =>
-      run(tx)),
+      run({} as Prisma.TransactionClient)),
   });
-  return prisma as PrismaClient & {
-    hostedGroupJoinOffer: {
-      findFirst: ReturnType<typeof vi.fn>;
-      updateMany: ReturnType<typeof vi.fn>;
-    };
-    hostedThreadRoute: {
-      findFirst: ReturnType<typeof vi.fn>;
-    };
-  };
+  return prisma;
 }

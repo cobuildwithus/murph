@@ -1220,6 +1220,7 @@ export interface QueryServices extends HealthQueryServiceMethods {
   listDocuments(
     input: CommandContext & {
       from?: string
+      limit?: number
       to?: string
     },
   ): Promise<ListResult>

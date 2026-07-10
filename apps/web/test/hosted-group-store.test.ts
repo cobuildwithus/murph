@@ -1,6 +1,11 @@
 import { Prisma, type PrismaClient } from "@prisma/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS } from "@murphai/hosted-execution/vault-share";
+import {
+  buildHostedVaultShareProjectionScopeKey,
+  HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS,
+  hostedVaultShareProjectionKindToScope,
+  type HostedVaultShareFixedProjectionKind,
+} from "@murphai/hosted-execution/vault-share";
 
 import { createPrismaClient } from "@/src/lib/prisma";
 import {
@@ -15,7 +20,7 @@ const mocks = vi.hoisted(() => ({
   readHostedMemberIdentity: vi.fn(),
   grantHostedVaultShareTx: vi.fn(),
   hasHostedRuntimeActiveAccess: vi.fn(),
-  readActiveHostedVaultShareProjectionKinds: vi.fn(),
+  readActiveHostedVaultShareProjectionScopes: vi.fn(),
   revokeHostedVaultSharesWithCleanupTx: vi.fn(),
 }));
 
@@ -29,7 +34,7 @@ vi.mock("@/src/lib/hosted-mailbox/runtime-access", () => ({
 
 vi.mock("@/src/lib/hosted-vault-share/share-grant-store", () => ({
   grantHostedVaultShareTx: mocks.grantHostedVaultShareTx,
-  readActiveHostedVaultShareProjectionKinds: mocks.readActiveHostedVaultShareProjectionKinds,
+  readActiveHostedVaultShareProjectionScopes: mocks.readActiveHostedVaultShareProjectionScopes,
   revokeHostedVaultSharesWithCleanupTx: mocks.revokeHostedVaultSharesWithCleanupTx,
 }));
 
@@ -40,18 +45,20 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-identity-store", () => ({
 import {
   acceptHostedGroupJoinCodeTx,
   acceptHostedGroupJoinOfferTx,
-  bindHostedGroupJoinOfferTx,
   createHostedGroupJoinLinkForOwnedThreadContainerTx,
   HOSTED_GROUP_VAULT_SHARE_DESTINATION_LIMIT_PER_PROJECTION,
   HOSTED_GROUP_VAULT_SHARE_GRANT_LIMIT_PER_GRANTOR_PROJECTION,
-  createHostedGroupJoinOfferFingerprint,
-  normalizeHostedGroupOfferScope,
-  reserveHostedGroupJoinOfferTx,
-  revokeUnboundHostedGroupJoinOfferTx,
+  readHostedGroupJoinView,
+  recordHostedGroupJoinOfferTx,
 } from "@/src/lib/hosted-groups/group-store";
 import {
   normalizeHostedVaultShareProjectionKinds,
 } from "@/src/lib/hosted-groups/join-policy";
+
+const PROFILE_SCOPE = hostedVaultShareProjectionKindToScope("profile-name.v0");
+const GROUP_EMAIL_SCOPE = hostedVaultShareProjectionKindToScope("group-email.v0");
+const SLEEP_SCOPE = hostedVaultShareProjectionKindToScope("sleep-times.v0");
+const ACTIVITY_SCOPE = hostedVaultShareProjectionKindToScope("activity-days.v0");
 
 const JOIN_POLICY = {
   requestedVaultShareProjectionKinds: ["sleep-times.v0"],
@@ -68,27 +75,6 @@ let restoreKeyring: (() => void) | null = null;
 afterEach(() => {
   restoreKeyring?.();
   restoreKeyring = null;
-});
-
-it("normalizes legacy-compatible and scoped group-offer JSON", () => {
-  expect(normalizeHostedGroupOfferScope([
-    "call-circle.enroll.v0",
-    "sleep-times.v0",
-  ])).toEqual({
-    featureActivations: ["call-circle.enroll.v0"],
-    schema: "murph.hosted-group.offer-scope.v1",
-    vaultShareProjectionKinds: ["sleep-times.v0"],
-  });
-
-  expect(normalizeHostedGroupOfferScope({
-    featureActivations: ["call-circle.enroll.v0", "unknown.v0"],
-    schema: "murph.hosted-group.offer-scope.v1",
-    vaultShareProjectionKinds: ["sleep-times.v0", "profile-name.v0"],
-  })).toEqual({
-    featureActivations: ["call-circle.enroll.v0"],
-    schema: "murph.hosted-group.offer-scope.v1",
-    vaultShareProjectionKinds: ["sleep-times.v0"],
-  });
 });
 
 function createPrismaStub<T extends Record<string, unknown>>(delegates: T): PrismaClient & T {
@@ -110,6 +96,8 @@ function buildTx(input?: {
   activeGroupGrantCount?: number;
   existingMembershipId?: string | null;
   offerMessageLookupKey?: string;
+  offerProjectionKinds?: string[];
+  requestedProjectionKinds?: string[];
   revokedOfferAt?: Date | null;
   runtimeMemberId?: string | null;
   threadIdentityLookupKey?: string;
@@ -122,7 +110,6 @@ function buildTx(input?: {
     create: ReturnType<typeof vi.fn>;
     findFirst: ReturnType<typeof vi.fn>;
     findUnique: ReturnType<typeof vi.fn>;
-    update: ReturnType<typeof vi.fn>;
     updateMany: ReturnType<typeof vi.fn>;
   };
   hostedThreadRoute: {
@@ -146,7 +133,12 @@ function buildTx(input?: {
           return {
             id: "group_1",
             joinCode: "join_1",
-            joinPolicyJson: JOIN_POLICY,
+            joinPolicyJson: input?.requestedProjectionKinds
+              ? {
+                  ...JOIN_POLICY,
+                  requestedVaultShareProjectionKinds: input.requestedProjectionKinds,
+                }
+              : JOIN_POLICY,
             runtimeMemberId: input?.runtimeMemberId === undefined
               ? "member_group_runtime"
               : input.runtimeMemberId,
@@ -170,7 +162,7 @@ function buildTx(input?: {
           return {
             groupId: "group_1",
             messageLookupKey,
-            offerScopeJson: ["sleep-times.v0"],
+            projectionKindsJson: input?.offerProjectionKinds ?? ["sleep-times.v0"],
             revokedAt: input?.revokedOfferAt ?? null,
             group: {
               id: "group_1",
@@ -184,16 +176,14 @@ function buildTx(input?: {
         return null;
       }),
       findUnique: vi.fn(async (args: {
-        where: { messageLookupKey?: string; offerFingerprint?: string };
+        where: { messageLookupKey?: string };
       }) => {
         const messageLookupKey = input?.offerMessageLookupKey ?? "hbidx:linq-message:v1:offer";
         if (args.where.messageLookupKey === messageLookupKey) {
           return {
             groupId: "group_1",
-            id: "hgrpjo_1",
             messageLookupKey,
-            offerFingerprint: "0123456789abcdef0123456789abcdef",
-            offerScopeJson: ["sleep-times.v0"],
+            projectionKindsJson: input?.offerProjectionKinds ?? ["sleep-times.v0"],
             revokedAt: input?.revokedOfferAt ?? null,
             group: {
               id: "group_1",
@@ -206,7 +196,6 @@ function buildTx(input?: {
         }
         return null;
       }),
-      update: vi.fn(async () => ({})),
       updateMany: vi.fn(async () => ({ count: 0 })),
     },
     hostedGroupMember: {
@@ -236,9 +225,9 @@ function buildTx(input?: {
     },
     hostedVaultShare: {
       count: vi.fn(async (args: {
-        where: { destinationMemberId?: string; projectionKind?: string };
+        where: { destinationMemberId?: string; projectionScopeKey?: string };
       }) => {
-        if (args.where.projectionKind === "profile-name.v0") {
+        if (args.where.projectionScopeKey === "profile-name.v0") {
           return 0;
         }
         if (args.where.destinationMemberId) {
@@ -321,7 +310,7 @@ describe("acceptHostedGroupJoinCodeTx", () => {
       "member_group_runtime",
       expect.anything(),
     );
-    // Joining always shares the typed profile display name, so consent gates
+    // Joining always shares the memory-backed preferred display name, so consent gates
     // every join, and the only automatic grant is profile-name.v0.
     expect(mocks.assertHostedLaunchRequiredConsentGranted).toHaveBeenCalledTimes(1);
     expect(mocks.grantHostedVaultShareTx).toHaveBeenCalledTimes(1);
@@ -329,7 +318,35 @@ describe("acceptHostedGroupJoinCodeTx", () => {
       destinationMemberId: "member_group_runtime",
       grantorMemberId: "member_joiner",
       now,
-      projectionKind: "profile-name.v0",
+      projectionScope: PROFILE_SCOPE,
+      tx,
+    });
+  });
+
+  it("reports email sharing when a join grants it", async () => {
+    const tx = buildTx({
+      activeGroupGrantCount: 0,
+      requestedProjectionKinds: ["group-email.v0"],
+    });
+    const now = new Date("2026-07-01T00:00:00.000Z");
+
+    await expect(acceptHostedGroupJoinCodeTx({
+      joinCode: "join_1",
+      memberId: "member_grantor",
+      now,
+      selectedVaultShareProjectionKinds: ["group-email.v0"],
+      tx,
+    })).resolves.toMatchObject({
+      alreadyMember: false,
+      grantedVaultShareProjectionKinds: ["profile-name.v0", "group-email.v0"],
+      membershipId: "membership_created",
+    });
+
+    expect(mocks.grantHostedVaultShareTx).toHaveBeenCalledWith({
+      destinationMemberId: "member_group_runtime",
+      grantorMemberId: "member_grantor",
+      now,
+      projectionScope: GROUP_EMAIL_SCOPE,
       tx,
     });
   });
@@ -353,12 +370,12 @@ describe("acceptHostedGroupJoinCodeTx", () => {
     expect(tx.hostedVaultShare.count).toHaveBeenCalledWith({
       where: {
         grantorMemberId: "member_grantor",
-        projectionKind: "sleep-times.v0",
+        projectionScopeKey: "sleep-times.v0",
         status: "granted",
       },
     });
     expect(mocks.grantHostedVaultShareTx).not.toHaveBeenCalledWith(
-      expect.objectContaining({ projectionKind: "sleep-times.v0" }),
+      expect.objectContaining({ projectionScope: SLEEP_SCOPE }),
     );
   });
 
@@ -382,12 +399,12 @@ describe("acceptHostedGroupJoinCodeTx", () => {
     expect(tx.hostedVaultShare.count).toHaveBeenCalledWith({
       where: {
         destinationMemberId: "member_group_runtime",
-        projectionKind: "sleep-times.v0",
+        projectionScopeKey: "sleep-times.v0",
         status: "granted",
       },
     });
     expect(mocks.grantHostedVaultShareTx).not.toHaveBeenCalledWith(
-      expect.objectContaining({ projectionKind: "sleep-times.v0" }),
+      expect.objectContaining({ projectionScope: SLEEP_SCOPE }),
     );
   });
 
@@ -415,7 +432,7 @@ describe("acceptHostedGroupJoinCodeTx", () => {
       destinationMemberId: "member_group_runtime",
       grantorMemberId: "member_grantor",
       now: new Date("2026-07-01T00:00:00.000Z"),
-      projectionKind: "sleep-times.v0",
+      projectionScope: SLEEP_SCOPE,
       tx,
     });
   });
@@ -455,195 +472,38 @@ describe("acceptHostedGroupJoinCodeTx", () => {
       destinationMemberId: "member_group_runtime",
       grantorMemberId: "member_grantor",
       now,
-      projectionKinds: ["sleep-times.v0"],
+      projectionScopes: [SLEEP_SCOPE],
       tx,
     });
   });
 
-  it("reserves and binds join-offer rows as the durable offer owner", async () => {
-    const tx = buildStatefulJoinOfferTx();
+  it("records join-offer bindings as message lookup keys and projection snapshots", async () => {
+    const tx = buildTx();
     const postedAt = new Date("2026-07-01T00:00:00.000Z");
 
-    const reserved = await reserveHostedGroupJoinOfferTx({
-      groupId: "group_1",
-      offerFingerprint: "0123456789abcdef0123456789abcdef",
-      offerScope: {
-        featureActivations: ["call-circle.enroll.v0"],
-        vaultShareProjectionKinds: ["sleep-times.v0", "profile-name.v0"],
-      },
-      postedAt,
-      tx,
-    });
-    await expect(bindHostedGroupJoinOfferTx({
+    await expect(recordHostedGroupJoinOfferTx({
       groupId: "group_1",
       messageId: "msg_offer_123",
-      offerId: reserved.id,
+      postedAt,
+      projectionKinds: ["sleep-times.v0", "profile-name.v0"],
       tx,
     })).resolves.toMatchObject({
       groupId: "group_1",
       messageIdSuffix: expect.stringContaining("123"),
       messageLookupKey: expect.stringMatching(/^hbidx:linq-message:/u),
-      offerFingerprint: "0123456789abcdef0123456789abcdef",
-      offerScope: {
-        featureActivations: ["call-circle.enroll.v0"],
-        vaultShareProjectionKinds: ["sleep-times.v0"],
-      },
+      projectionKinds: ["sleep-times.v0"],
+      projectionScopes: [SLEEP_SCOPE],
     });
 
     expect(tx.hostedGroupJoinOffer.create).toHaveBeenCalledWith({
       data: {
         groupId: "group_1",
         id: expect.stringMatching(/^hgrpjo_/u),
-        offerFingerprint: "0123456789abcdef0123456789abcdef",
-        postedAt,
-        offerScopeJson: ["call-circle.enroll.v0", "sleep-times.v0"],
-      },
-    });
-    expect(tx.hostedGroupJoinOffer.update).toHaveBeenCalledWith({
-      data: {
         messageIdSuffix: expect.stringContaining("123"),
         messageLookupKey: expect.stringMatching(/^hbidx:linq-message:/u),
+        postedAt,
+        projectionKindsJson: [SLEEP_SCOPE],
       },
-      where: { id: reserved.id },
-    });
-  });
-
-  it("builds a stable provider idempotency fingerprint from offer content", () => {
-    const first = createHostedGroupJoinOfferFingerprint({
-      groupId: "group_1",
-      message: "React here: https://www.withmurph.ai/groups/join/join_1",
-      offerKind: "post_call_circle_offer",
-      offerScope: {
-        featureActivations: ["call-circle.enroll.v0"],
-        vaultShareProjectionKinds: [],
-      },
-    });
-    const second = createHostedGroupJoinOfferFingerprint({
-      groupId: "group_1",
-      message: "React here: https://www.withmurph.ai/groups/join/join_1",
-      offerKind: "post_call_circle_offer",
-      offerScope: {
-        featureActivations: ["call-circle.enroll.v0"],
-        vaultShareProjectionKinds: [],
-      },
-    });
-    const differentMessage = createHostedGroupJoinOfferFingerprint({
-      groupId: "group_1",
-      message: "Like this: https://www.withmurph.ai/groups/join/join_1",
-      offerKind: "post_call_circle_offer",
-      offerScope: {
-        featureActivations: ["call-circle.enroll.v0"],
-        vaultShareProjectionKinds: [],
-      },
-    });
-
-    expect(first).toMatch(/^[a-f0-9]{32}$/u);
-    expect(second).toBe(first);
-    expect(differentMessage).not.toBe(first);
-  });
-
-  it("records the same provider-bound join offer idempotently after provider retry recovery", async () => {
-    const tx = buildStatefulJoinOfferTx();
-    const postedAt = new Date("2026-07-01T00:00:00.000Z");
-
-    const firstReserved = await reserveHostedGroupJoinOfferTx({
-      groupId: "group_1",
-      offerFingerprint: "0123456789abcdef0123456789abcdef",
-      offerScope: {
-        vaultShareProjectionKinds: ["sleep-times.v0"],
-      },
-      postedAt,
-      tx,
-    });
-    const first = await bindHostedGroupJoinOfferTx({
-      groupId: "group_1",
-      messageId: "msg_offer_123",
-      offerId: firstReserved.id,
-      tx,
-    });
-    const secondReserved = await reserveHostedGroupJoinOfferTx({
-      groupId: "group_1",
-      offerFingerprint: "0123456789abcdef0123456789abcdef",
-      offerScope: {
-        vaultShareProjectionKinds: ["sleep-times.v0"],
-      },
-      postedAt: new Date("2026-07-01T00:05:00.000Z"),
-      tx,
-    });
-    const second = await bindHostedGroupJoinOfferTx({
-      groupId: "group_1",
-      messageId: "msg_offer_123",
-      offerId: secondReserved.id,
-      tx,
-    });
-
-    expect(second).toEqual(first);
-    expect(first).toMatchObject({
-      groupId: "group_1",
-      messageLookupKey: createHostedLinqMessageLookupKey("msg_offer_123"),
-      offerScope: {
-        featureActivations: [],
-        vaultShareProjectionKinds: ["sleep-times.v0"],
-      },
-    });
-    expect(tx.hostedGroupJoinOffer.create).toHaveBeenCalledTimes(1);
-    expect(tx.hostedGroupJoinOffer.findUnique).toHaveBeenCalledWith({
-      where: { offerFingerprint: "0123456789abcdef0123456789abcdef" },
-      select: expect.objectContaining({
-        messageLookupKey: true,
-        offerFingerprint: true,
-        revokedAt: true,
-      }),
-    });
-  });
-
-  it("reactivates a revoked unbound offer reservation for idempotent post retry", async () => {
-    const tx = buildStatefulJoinOfferTx();
-    const firstPostedAt = new Date("2026-07-01T00:00:00.000Z");
-    const retryPostedAt = new Date("2026-07-01T00:01:00.000Z");
-
-    const reserved = await reserveHostedGroupJoinOfferTx({
-      groupId: "group_1",
-      offerFingerprint: "0123456789abcdef0123456789abcdef",
-      offerScope: {
-        vaultShareProjectionKinds: ["sleep-times.v0"],
-      },
-      postedAt: firstPostedAt,
-      tx,
-    });
-    await expect(revokeUnboundHostedGroupJoinOfferTx({
-      groupId: "group_1",
-      now: new Date("2026-07-01T00:00:30.000Z"),
-      offerId: reserved.id,
-      tx,
-    })).resolves.toBe(true);
-
-    await expect(reserveHostedGroupJoinOfferTx({
-      groupId: "group_1",
-      offerFingerprint: "0123456789abcdef0123456789abcdef",
-      offerScope: {
-        featureActivations: ["call-circle.enroll.v0"],
-        vaultShareProjectionKinds: [],
-      },
-      postedAt: retryPostedAt,
-      tx,
-    })).resolves.toMatchObject({
-      id: reserved.id,
-      messageLookupKey: null,
-      offerScope: {
-        featureActivations: ["call-circle.enroll.v0"],
-        vaultShareProjectionKinds: [],
-      },
-    });
-
-    expect(tx.hostedGroupJoinOffer.create).toHaveBeenCalledTimes(1);
-    expect(tx.hostedGroupJoinOffer.update).toHaveBeenCalledWith({
-      data: {
-        offerScopeJson: ["call-circle.enroll.v0"],
-        postedAt: retryPostedAt,
-        revokedAt: null,
-      },
-      where: { id: reserved.id },
     });
   });
 
@@ -680,6 +540,38 @@ describe("acceptHostedGroupJoinCodeTx", () => {
       },
     });
     expect(mocks.revokeHostedVaultSharesWithCleanupTx).not.toHaveBeenCalled();
+  });
+
+  it("reports email sharing when a join offer grants it", async () => {
+    const tx = buildTx({
+      activeGroupGrantCount: 0,
+      existingMembershipId: "membership_existing",
+      offerProjectionKinds: ["group-email.v0"],
+    });
+    const now = new Date("2026-07-01T00:00:00.000Z");
+
+    await expect(acceptHostedGroupJoinOfferTx({
+      memberId: "member_grantor",
+      messageLookupKeyReadCandidates: ["hbidx:linq-message:v1:offer"],
+      now,
+      threadIdentityLookupKeyReadCandidates: ["hbidx:external-thread-identity:v1:thread"],
+      tx,
+    })).resolves.toMatchObject({
+      alreadyMember: true,
+      grantedVaultShareProjectionKinds: ["profile-name.v0", "group-email.v0"],
+      joinCode: "join_1",
+      membershipId: "membership_existing",
+      revokedVaultShareProjectionKinds: [],
+      selectedVaultShareProjectionKinds: ["group-email.v0"],
+    });
+
+    expect(mocks.grantHostedVaultShareTx).toHaveBeenCalledWith({
+      destinationMemberId: "member_group_runtime",
+      grantorMemberId: "member_grantor",
+      now,
+      projectionScope: GROUP_EMAIL_SCOPE,
+      tx,
+    });
   });
 
   it("accepts a join-offer reaction matched by prior-version message and thread identity lookup candidates", async () => {
@@ -780,34 +672,18 @@ describe("acceptHostedGroupJoinCodeTx", () => {
     const secondPostedAt = new Date("2026-07-01T00:05:00.000Z");
     const now = new Date("2026-07-01T00:06:00.000Z");
 
-    const firstReserved = await reserveHostedGroupJoinOfferTx({
-      groupId: "group_1",
-      offerFingerprint: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-      offerScope: {
-        vaultShareProjectionKinds: ["sleep-times.v0"],
-      },
-      postedAt: firstPostedAt,
-      tx,
-    });
-    const firstOffer = await bindHostedGroupJoinOfferTx({
+    const firstOffer = await recordHostedGroupJoinOfferTx({
       groupId: "group_1",
       messageId: "msg_offer_a",
-      offerId: firstReserved.id,
+      postedAt: firstPostedAt,
+      projectionKinds: ["sleep-times.v0"],
       tx,
     });
-    const secondReserved = await reserveHostedGroupJoinOfferTx({
-      groupId: "group_1",
-      offerFingerprint: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-      offerScope: {
-        vaultShareProjectionKinds: ["activity-days.v0"],
-      },
-      postedAt: secondPostedAt,
-      tx,
-    });
-    await bindHostedGroupJoinOfferTx({
+    await recordHostedGroupJoinOfferTx({
       groupId: "group_1",
       messageId: "msg_offer_b",
-      offerId: secondReserved.id,
+      postedAt: secondPostedAt,
+      projectionKinds: ["activity-days.v0"],
       tx,
     });
 
@@ -830,11 +706,11 @@ describe("acceptHostedGroupJoinCodeTx", () => {
       destinationMemberId: "member_group_runtime",
       grantorMemberId: "member_grantor",
       now,
-      projectionKind: "sleep-times.v0",
+      projectionScope: SLEEP_SCOPE,
       tx,
     });
     expect(mocks.grantHostedVaultShareTx).not.toHaveBeenCalledWith(
-      expect.objectContaining({ projectionKind: "activity-days.v0" }),
+      expect.objectContaining({ projectionScope: ACTIVITY_SCOPE }),
     );
   });
 });
@@ -896,6 +772,7 @@ describe("createHostedGroupJoinLinkForOwnedThreadContainerTx", () => {
       data: expect.objectContaining({
         joinPolicyJson: {
           requestedVaultShareProjectionKinds: ["group-email.v0"],
+          requestedVaultShareProjectionScopes: [GROUP_EMAIL_SCOPE],
           schema: "murph.hosted-group.join-policy.v1",
         },
       }),
@@ -904,13 +781,13 @@ describe("createHostedGroupJoinLinkForOwnedThreadContainerTx", () => {
       destinationMemberId: "member_group_runtime",
       grantorMemberId: "member_owner",
       now,
-      projectionKind: "profile-name.v0",
+      projectionScope: PROFILE_SCOPE,
     }));
     expect(mocks.grantHostedVaultShareTx).toHaveBeenCalledWith(expect.objectContaining({
       destinationMemberId: "member_group_runtime",
       grantorMemberId: "member_owner",
       now,
-      projectionKind: "group-email.v0",
+      projectionScope: GROUP_EMAIL_SCOPE,
     }));
   });
 
@@ -949,10 +826,10 @@ describe("createHostedGroupJoinLinkForOwnedThreadContainerTx", () => {
       destinationMemberId: "member_group_runtime",
       grantorMemberId: "member_owner",
       now,
-      projectionKind: "profile-name.v0",
+      projectionScope: PROFILE_SCOPE,
     }));
     expect(mocks.grantHostedVaultShareTx).not.toHaveBeenCalledWith(expect.objectContaining({
-      projectionKind: "group-email.v0",
+      projectionScope: GROUP_EMAIL_SCOPE,
     }));
   });
 
@@ -979,14 +856,15 @@ describe("createHostedGroupJoinLinkForOwnedThreadContainerTx", () => {
         memberCount: 1,
         members: [
           {
-            callCircle: null,
             grantedVaultShareProjectionKinds: ["profile-name.v0"],
+            grantedVaultShareProjectionScopes: [PROFILE_SCOPE],
             handle: "+15551110000",
             memberId: "member_owner",
             role: "owner",
           },
         ],
         requestedVaultShareProjectionKinds: ["group-email.v0", "sleep-times.v0"],
+        requestedVaultShareProjectionScopes: [GROUP_EMAIL_SCOPE, SLEEP_SCOPE],
         status: "active",
       },
       joinCode: "join_created",
@@ -1008,14 +886,105 @@ describe("createHostedGroupJoinLinkForOwnedThreadContainerTx", () => {
       },
     });
   });
+
+  it("creates a named group through the shared join-link path and exposes it to the join view", async () => {
+    const tx = buildGroupLinkTx({
+      existingGroup: false,
+      joinCode: null,
+      ownerMemberId: "member_owner",
+      requestedProjectionKinds: ["group-email.v0"],
+    });
+    const now = new Date("2026-07-01T00:00:00.000Z");
+
+    const created = await createHostedGroupJoinLinkForOwnedThreadContainerTx({
+      actorMemberId: "member_owner",
+      containerMemberId: "member_group_runtime",
+      displayName: "Sunday Sleep Crew",
+      kind: "friends",
+      now,
+      requestedVaultShareProjectionKinds: ["group-email.v0"],
+      tx,
+    });
+
+    expect(created.group.displayName).toBe("Sunday Sleep Crew");
+    expect(tx.hostedGroup.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        displayName: "Sunday Sleep Crew",
+      }),
+    }));
+
+    await expect(readHostedGroupJoinView({
+      joinCode: created.joinCode,
+      prisma: tx,
+    })).resolves.toMatchObject({
+      displayName: "Sunday Sleep Crew",
+      kind: "friends",
+      requestedVaultShareProjections: [
+        expect.objectContaining({ projectionKind: "group-email.v0" }),
+      ],
+    });
+  });
+
+  it("fills an existing null group display name from a later named request", async () => {
+    const tx = buildGroupLinkTx({
+      existingDisplayName: null,
+      existingGroup: true,
+      joinCode: "join_existing",
+      ownerMemberId: "member_owner",
+      requestedProjectionKinds: ["group-email.v0"],
+    });
+    const now = new Date("2026-07-01T00:00:00.000Z");
+
+    const result = await createHostedGroupJoinLinkForOwnedThreadContainerTx({
+      actorMemberId: "member_owner",
+      containerMemberId: "member_group_runtime",
+      displayName: "Sunday Sleep Crew",
+      now,
+      requestedVaultShareProjectionKinds: ["group-email.v0"],
+      tx,
+    });
+
+    expect(result.group.displayName).toBe("Sunday Sleep Crew");
+    expect(tx.hostedGroup.update).toHaveBeenCalledWith(expect.objectContaining({
+      data: { displayName: "Sunday Sleep Crew" },
+      select: { id: true },
+      where: { id: "group_1" },
+    }));
+  });
+
+  it("does not overwrite an existing non-null group display name", async () => {
+    const tx = buildGroupLinkTx({
+      existingDisplayName: "Original Crew",
+      existingGroup: true,
+      joinCode: "join_existing",
+      ownerMemberId: "member_owner",
+      requestedProjectionKinds: ["group-email.v0"],
+    });
+    const now = new Date("2026-07-01T00:00:00.000Z");
+
+    const result = await createHostedGroupJoinLinkForOwnedThreadContainerTx({
+      actorMemberId: "member_owner",
+      containerMemberId: "member_group_runtime",
+      displayName: "Sunday Sleep Crew",
+      now,
+      requestedVaultShareProjectionKinds: ["group-email.v0"],
+      tx,
+    });
+
+    expect(result.group.displayName).toBe("Original Crew");
+    expect(tx.hostedGroup.update).not.toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ displayName: expect.any(String) }),
+    }));
+  });
 });
 
 function buildGroupLinkTx(input: {
+  existingDisplayName?: string | null;
   existingGroup?: boolean;
-  grantedProjectionKinds?: string[];
+  grantedProjectionKinds?: HostedVaultShareFixedProjectionKind[];
   joinCode?: string | null;
   ownerMemberId: string;
-  requestedProjectionKinds?: string[];
+  requestedProjectionKinds?: HostedVaultShareFixedProjectionKind[];
 }): PrismaClient & {
   hostedGroup: {
     create: ReturnType<typeof vi.fn>;
@@ -1029,17 +998,29 @@ function buildGroupLinkTx(input: {
     upsert: ReturnType<typeof vi.fn>;
   };
 } {
-  let requestedProjectionKinds = input.requestedProjectionKinds ?? ["sleep-times.v0"];
+  let requestedProjectionKinds: HostedVaultShareFixedProjectionKind[] =
+    input.requestedProjectionKinds ?? ["sleep-times.v0"];
+  let groupCreated = input.existingGroup !== false;
+  let groupDisplayName = input.existingDisplayName === undefined
+    ? "Sunday sleep crew"
+    : input.existingDisplayName;
+  let groupJoinCode = input.joinCode ?? null;
+  let groupKind = "friends";
   return createPrismaStub({
     $queryRaw: vi.fn(async () => []),
     hostedGroup: {
       create: vi.fn(async (args: {
         data?: {
+          displayName?: string | null;
+          kind?: string;
           joinPolicyJson?: {
-            requestedVaultShareProjectionKinds?: string[];
+            requestedVaultShareProjectionKinds?: HostedVaultShareFixedProjectionKind[];
           };
         };
       }) => {
+        groupCreated = true;
+        groupDisplayName = args.data?.displayName ?? null;
+        groupKind = args.data?.kind ?? groupKind;
         requestedProjectionKinds =
           args.data?.joinPolicyJson?.requestedVaultShareProjectionKinds
           ?? requestedProjectionKinds;
@@ -1047,27 +1028,44 @@ function buildGroupLinkTx(input: {
       }),
       findUnique: vi.fn(async (args: {
         select?: { joinCode?: boolean; ownerMemberId?: boolean };
-        where: { id?: string; runtimeMemberId?: string };
+        where: { id?: string; joinCode?: string; runtimeMemberId?: string };
       }) => {
         if (args.where.runtimeMemberId) {
-          return input.existingGroup === false ? null : { id: "group_1" };
+          return groupCreated ? { displayName: groupDisplayName, id: "group_1" } : null;
         }
-        if (args.where.id && args.select?.joinCode) {
+        if (args.where.joinCode) {
+          if (!groupCreated || args.where.joinCode !== groupJoinCode) {
+            return null;
+          }
           return {
-            id: "group_1",
-            joinCode: input.joinCode ?? null,
-            ownerMemberId: input.ownerMemberId,
-          };
-        }
-        if (args.where.id) {
-          return {
-            displayName: "Sunday sleep crew",
+            _count: { members: 1 },
+            displayName: groupDisplayName,
             id: "group_1",
             joinPolicyJson: {
               requestedVaultShareProjectionKinds: requestedProjectionKinds,
               schema: "murph.hosted-group.join-policy.v1",
             },
-            kind: "friends",
+            kind: groupKind,
+            members: [],
+            runtimeMemberId: "member_group_runtime",
+          };
+        }
+        if (args.where.id && args.select?.joinCode) {
+          return {
+            id: "group_1",
+            joinCode: groupJoinCode,
+            ownerMemberId: input.ownerMemberId,
+          };
+        }
+        if (args.where.id) {
+          return {
+            displayName: groupDisplayName,
+            id: "group_1",
+            joinPolicyJson: {
+              requestedVaultShareProjectionKinds: requestedProjectionKinds,
+              schema: "murph.hosted-group.join-policy.v1",
+            },
+            kind: groupKind,
             members: [{ memberId: input.ownerMemberId, role: "owner" }],
             runtimeMemberId: "member_group_runtime",
           };
@@ -1076,11 +1074,25 @@ function buildGroupLinkTx(input: {
       }),
       update: vi.fn(async (args: {
         data?: {
+          displayName?: string | null;
+          joinCode?: string;
           joinPolicyJson?: {
-            requestedVaultShareProjectionKinds?: string[];
+            requestedVaultShareProjectionKinds?: HostedVaultShareFixedProjectionKind[];
           };
         };
       }) => {
+        if (
+          args.data
+          && Object.prototype.hasOwnProperty.call(args.data, "displayName")
+        ) {
+          groupDisplayName = args.data.displayName ?? null;
+        }
+        if (
+          args.data
+          && Object.prototype.hasOwnProperty.call(args.data, "joinCode")
+        ) {
+          groupJoinCode = "join_created";
+        }
         requestedProjectionKinds =
           args.data?.joinPolicyJson?.requestedVaultShareProjectionKinds
           ?? requestedProjectionKinds;
@@ -1093,16 +1105,12 @@ function buildGroupLinkTx(input: {
     hostedGroupMember: {
       upsert: vi.fn(async () => undefined),
     },
-    hostedCallCircleParticipant: {
-      findMany: vi.fn(async () => []),
-    },
     hostedVaultShare: {
       count: vi.fn(async () => 0),
       findMany: vi.fn(async () =>
-        (input.grantedProjectionKinds ?? ["profile-name.v0"]).map((projectionKind) => ({
-          grantorMemberId: input.ownerMemberId,
-          projectionKind,
-        })),
+        (input.grantedProjectionKinds ?? ["profile-name.v0"]).map((projectionKind) =>
+          buildHostedVaultShareRow(input.ownerMemberId, projectionKind)
+        ),
       ),
       findUnique: vi.fn(async () => null),
     },
@@ -1115,6 +1123,24 @@ function buildGroupLinkTx(input: {
   });
 }
 
+function buildHostedVaultShareRow(
+  grantorMemberId: string,
+  projectionKind: HostedVaultShareFixedProjectionKind,
+): {
+  grantorMemberId: string;
+  projectionKind: HostedVaultShareFixedProjectionKind;
+  projectionScopeJson: { projectionKind: HostedVaultShareFixedProjectionKind };
+  projectionScopeKey: string;
+} {
+  const projectionScope = hostedVaultShareProjectionKindToScope(projectionKind);
+  return {
+    grantorMemberId,
+    projectionKind,
+    projectionScopeJson: projectionScope,
+    projectionScopeKey: buildHostedVaultShareProjectionScopeKey(projectionScope),
+  };
+}
+
 function buildStatefulJoinOfferTx(): PrismaClient & {
   hostedGroup: {
     findUnique: ReturnType<typeof vi.fn>;
@@ -1123,7 +1149,6 @@ function buildStatefulJoinOfferTx(): PrismaClient & {
     create: ReturnType<typeof vi.fn>;
     findFirst: ReturnType<typeof vi.fn>;
     findUnique: ReturnType<typeof vi.fn>;
-    update: ReturnType<typeof vi.fn>;
     updateMany: ReturnType<typeof vi.fn>;
   };
   hostedThreadRoute: {
@@ -1145,12 +1170,8 @@ function buildStatefulJoinOfferTx(): PrismaClient & {
   };
   const offers: Array<{
     groupId: string;
-    id: string;
-    messageIdSuffix: string | null;
-    messageLookupKey: string | null;
-    offerFingerprint: string;
-    offerScopeJson: Prisma.InputJsonValue;
-    postedAt: Date;
+    messageLookupKey: string;
+    projectionKindsJson: Prisma.InputJsonValue;
     revokedAt: Date | null;
   }> = [];
 
@@ -1170,148 +1191,53 @@ function buildStatefulJoinOfferTx(): PrismaClient & {
       create: vi.fn(async (args: {
         data: {
           groupId: string;
-          id: string;
-          messageIdSuffix?: string | null;
-          messageLookupKey?: string | null;
-          offerFingerprint: string;
-          offerScopeJson: Prisma.InputJsonValue;
-          postedAt?: Date;
+          messageLookupKey: string;
+          projectionKindsJson: Prisma.InputJsonValue;
         };
       }) => {
-        if (offers.some((entry) => entry.offerFingerprint === args.data.offerFingerprint)) {
-          throw Object.assign(new Error("duplicate offer fingerprint"), { code: "P2002" });
-        }
-        if (
-          args.data.messageLookupKey
-          && offers.some((entry) => entry.messageLookupKey === args.data.messageLookupKey)
-        ) {
-          throw Object.assign(new Error("duplicate message lookup key"), { code: "P2002" });
-        }
         offers.push({
           groupId: args.data.groupId,
-          id: args.data.id,
-          messageIdSuffix: args.data.messageIdSuffix ?? null,
-          messageLookupKey: args.data.messageLookupKey ?? null,
-          offerFingerprint: args.data.offerFingerprint,
-          offerScopeJson: args.data.offerScopeJson,
-          postedAt: args.data.postedAt ?? new Date("2026-07-01T00:00:00.000Z"),
+          messageLookupKey: args.data.messageLookupKey,
+          projectionKindsJson: args.data.projectionKindsJson,
           revokedAt: null,
         });
         return {};
       }),
       findUnique: vi.fn(async (args: {
-        where: { id?: string; messageLookupKey?: string; offerFingerprint?: string };
+        where: { messageLookupKey?: string };
       }) => {
         const offer = offers.find((entry) =>
-          entry.id === args.where.id
-          || entry.messageLookupKey === args.where.messageLookupKey
-          || entry.offerFingerprint === args.where.offerFingerprint);
+          entry.messageLookupKey === args.where.messageLookupKey);
         return offer
           ? {
               groupId: offer.groupId,
-              id: offer.id,
-              messageIdSuffix: offer.messageIdSuffix,
               messageLookupKey: offer.messageLookupKey,
-              offerFingerprint: offer.offerFingerprint,
-              offerScopeJson: offer.offerScopeJson,
-              postedAt: offer.postedAt,
+              projectionKindsJson: offer.projectionKindsJson,
               revokedAt: offer.revokedAt,
               group,
             }
           : null;
       }),
       findFirst: vi.fn(async (args: {
-        where: {
-          groupId?: string;
-          messageLookupKey?: string | { in?: string[]; startsWith?: string };
-          revokedAt?: null;
-        };
+        where: { messageLookupKey?: string | { in?: string[] }; revokedAt?: null };
       }) => {
         const lookup = args.where.messageLookupKey;
         const offer = offers.find((entry) =>
-          (args.where.groupId === undefined || entry.groupId === args.where.groupId)
-          && (
-            typeof lookup === "string"
-              ? entry.messageLookupKey === lookup
-              : lookup?.startsWith
-                ? (entry.messageLookupKey?.startsWith(lookup.startsWith) ?? false)
-                : entry.messageLookupKey
-                  ? (lookup?.in?.includes(entry.messageLookupKey) ?? false)
-                  : false
-          ));
+          typeof lookup === "string"
+            ? entry.messageLookupKey === lookup
+            : lookup?.in?.includes(entry.messageLookupKey));
         if (!offer || ("revokedAt" in args.where && offer.revokedAt !== null)) {
           return null;
         }
         return {
           groupId: offer.groupId,
-          id: offer.id,
-          messageIdSuffix: offer.messageIdSuffix,
           messageLookupKey: offer.messageLookupKey,
-          offerFingerprint: offer.offerFingerprint,
-          offerScopeJson: offer.offerScopeJson,
-          postedAt: offer.postedAt,
+          projectionKindsJson: offer.projectionKindsJson,
           revokedAt: offer.revokedAt,
           group,
         };
       }),
-      update: vi.fn(async (args: {
-        data: {
-          messageIdSuffix?: string | null;
-          messageLookupKey?: string;
-          offerScopeJson?: Prisma.InputJsonValue;
-          postedAt?: Date;
-          revokedAt?: Date | null;
-        };
-        where: { id: string };
-      }) => {
-        const offer = offers.find((entry) => entry.id === args.where.id);
-        if (!offer) {
-          throw new Error("offer not found");
-        }
-        if (
-          args.data.messageLookupKey
-          && offers.some((entry) =>
-            entry.id !== offer.id && entry.messageLookupKey === args.data.messageLookupKey)
-        ) {
-          throw Object.assign(new Error("duplicate message lookup key"), { code: "P2002" });
-        }
-        offer.messageIdSuffix = args.data.messageIdSuffix ?? offer.messageIdSuffix;
-        offer.messageLookupKey = args.data.messageLookupKey ?? offer.messageLookupKey;
-        offer.offerScopeJson = args.data.offerScopeJson ?? offer.offerScopeJson;
-        offer.postedAt = args.data.postedAt ?? offer.postedAt;
-        if ("revokedAt" in args.data) {
-          offer.revokedAt = args.data.revokedAt ?? null;
-        }
-        return {};
-      }),
-      updateMany: vi.fn(async (args: {
-        data?: { revokedAt?: Date | null };
-        where?: {
-          groupId?: string;
-          id?: string;
-          messageLookupKey?: string | null;
-          revokedAt?: null;
-        };
-      }) => {
-        let count = 0;
-        for (const offer of offers) {
-          const matches = (args.where?.groupId === undefined || offer.groupId === args.where.groupId)
-            && (args.where?.id === undefined || offer.id === args.where.id)
-            && (
-              args.where?.messageLookupKey === undefined
-              || offer.messageLookupKey === args.where.messageLookupKey
-            )
-            && (!("revokedAt" in (args.where ?? {})) || offer.revokedAt === args.where?.revokedAt);
-          if (!matches) {
-            continue;
-          }
-          if (args.data && "revokedAt" in args.data) {
-            offer.revokedAt = args.data.revokedAt ?? null;
-          }
-          count += 1;
-        }
-        return { count };
-      }),
+      updateMany: vi.fn(async () => ({ count: 0 })),
     },
     hostedGroupMember: {
       create: vi.fn(async () => ({ id: "membership_created" })),

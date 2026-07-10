@@ -48,9 +48,6 @@ import type {
   DurableObjectStorageLike,
 } from "../src/user-runner/types.js";
 import {
-  RunnerAlarmCoordinator,
-} from "../src/user-runner/alarm-coordinator.js";
-import {
   createHostedExecutionTestEnv,
 } from "./hosted-execution-fixtures.js";
 import {
@@ -152,7 +149,6 @@ describe("hosted runner container identity", () => {
       runnerRuntimeEnvSource,
       state: durable.state,
       stateStore,
-      alarmCoordinator: new RunnerAlarmCoordinator(durable.state),
     });
 
     await expect(controller.ensureForUser({
@@ -196,7 +192,6 @@ describe("hosted runner container identity", () => {
       },
       state: durable.state,
       stateStore,
-      alarmCoordinator: new RunnerAlarmCoordinator(durable.state),
     });
 
     await expect(controller.ensureForUser({
@@ -281,7 +276,6 @@ describe("hosted runner container identity", () => {
       },
       state: durable.state,
       stateStore,
-      alarmCoordinator: new RunnerAlarmCoordinator(durable.state),
     });
 
     await expect(controller.ensureForUser({
@@ -357,7 +351,6 @@ class RecordingRuntimeInvocationService extends RuntimeInvocationService {
       runnerRuntimeEnvSource: {},
       runnerStoreCache: new TestRunnerStoreCache({}),
       stateStore,
-      alarmCoordinator: new RunnerAlarmCoordinator(durable.state),
     });
   }
 
@@ -478,7 +471,6 @@ function createRuntimeInvocationService(input: {
     runnerRuntimeEnvSource: input.runnerRuntimeEnvSource,
     runnerStoreCache: new TestRunnerStoreCache(input.runnerRuntimeEnvSource),
     stateStore: input.stateStore,
-    alarmCoordinator: new RunnerAlarmCoordinator(input.state),
   });
 }
 

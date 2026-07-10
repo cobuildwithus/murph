@@ -25,15 +25,42 @@ import {
   HostedRuntimeBridgeCheckpointLeaseError,
 } from "@murphai/assistant-runtime/hosted-checkpoint-bridge";
 import {
+  HOSTED_RUNTIME_GROUP_TOOL_PATH,
   HOSTED_RUNTIME_CODEX_AUTH_PATH,
   HOSTED_RUNTIME_LINQ_EGRESS_DELIVERY_PATH,
   HOSTED_RUNTIME_LINQ_EGRESS_ENGAGEMENT_PATH,
   HOSTED_RUNTIME_VAULT_SHARE_ACTIVE_KINDS_PATH,
 } from "@murphai/hosted-execution/routes";
+import {
+  buildHostedVaultShareProjectionScopeKey,
+  HOSTED_VAULT_SHARE_KNOWN_PROJECTION_SCOPES,
+} from "@murphai/hosted-execution/vault-share";
 
 const mocks = vi.hoisted(() => ({
   emitHostedExecutionStructuredLog: vi.fn(),
 }));
+
+function buildExpectedSupportedProjectionScopePath(path: string): string {
+  const params = new URLSearchParams();
+  for (const projectionScope of HOSTED_VAULT_SHARE_KNOWN_PROJECTION_SCOPES) {
+    params.append(
+      "supportedProjectionScope",
+      buildHostedVaultShareProjectionScopeKey(projectionScope),
+    );
+  }
+
+  return `${path}?${params.toString()}`;
+}
+
+function buildExpectedVaultShareActiveKindsPath(): string {
+  return buildExpectedSupportedProjectionScopePath(
+    HOSTED_RUNTIME_VAULT_SHARE_ACTIVE_KINDS_PATH,
+  );
+}
+
+function buildExpectedGroupToolPath(): string {
+  return buildExpectedSupportedProjectionScopePath(HOSTED_RUNTIME_GROUP_TOOL_PATH);
+}
 
 vi.mock("@murphai/hosted-execution", async () => {
   const actual = await vi.importActual<typeof import("@murphai/hosted-execution")>(
@@ -3647,9 +3674,19 @@ describe("buildHostedExecutionRuntimePlatform", () => {
           status: 200,
         });
       }
+      if (url.pathname.endsWith(HOSTED_RUNTIME_GROUP_TOOL_PATH)) {
+        return new Response(JSON.stringify({
+          action: "read_current",
+          result: { group: null, status: "none" },
+        }), {
+          headers: { "content-type": "application/json; charset=utf-8" },
+          status: 200,
+        });
+      }
       if (url.pathname.endsWith(HOSTED_RUNTIME_VAULT_SHARE_ACTIVE_KINDS_PATH)) {
         return new Response(JSON.stringify({
           projectionKinds: ["activity-days.v0"],
+          projectionScopes: [{ projectionKind: "activity-days.v0" }],
         }), {
           headers: { "content-type": "application/json; charset=utf-8" },
           status: 200,
@@ -3688,6 +3725,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(platform.issueExportPort).toBeDefined();
     expect(platform.usageRecordPort).toBeDefined();
     expect(platform.productFeedbackPort).toBeDefined();
+    expect(platform.groupToolPort).toBeDefined();
     expect(platform.vaultSharePort).toBeDefined();
     expect(platform.deviceSyncPort).toBeDefined();
     await platform.mailboxPort!.fetch({
@@ -3736,14 +3774,19 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       relatedChangelogItemIds: ["native-message-formatting"],
       summary: "Interested in native message formatting.",
     });
-    await expect(platform.vaultSharePort!.listActiveProjectionKinds()).resolves.toEqual([
-      "activity-days.v0",
+    await expect(platform.groupToolPort!.request({ action: "read_current" }))
+      .resolves.toEqual({
+        action: "read_current",
+        result: { group: null, status: "none" },
+      });
+    await expect(platform.vaultSharePort!.listActiveProjectionScopes()).resolves.toEqual([
+      { projectionKind: "activity-days.v0" },
     ]);
     await platform.deviceSyncPort!.fetchSnapshot({
       connectionId: "conn_123",
     });
 
-    expect(fetchMock).toHaveBeenCalledTimes(10);
+    expect(fetchMock).toHaveBeenCalledTimes(11);
     const requests = fetchMock.mock.calls.map((call, index) =>
       requireFetchRequest(call, `callback web-control request ${index}`)
     );
@@ -3756,7 +3799,8 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       "http://web-control.worker/api/internal/hosted-execution/issues/record",
       "http://web-control.worker/api/internal/hosted-execution/usage/record",
       "http://web-control.worker/api/internal/hosted-execution/product-feedback/record",
-      `http://web-control.worker${HOSTED_RUNTIME_VAULT_SHARE_ACTIVE_KINDS_PATH}`,
+      `http://web-control.worker${buildExpectedGroupToolPath()}`,
+      `http://web-control.worker${buildExpectedVaultShareActiveKindsPath()}`,
       "http://web-control.worker/api/internal/device-sync/runtime/snapshot",
     ]);
     for (const request of requests) {

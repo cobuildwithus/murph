@@ -9,6 +9,7 @@ import {
 import { createRuntimeUnavailableError as buildRuntimeUnavailableError } from '../runtime-errors.js'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
+  compactListEntityData,
   inferEntityKind,
   isQueryableRecordId,
   toListEntity,
@@ -16,6 +17,8 @@ import {
 
 type JsonObject = Record<string, unknown>
 export type { QueryReadModel, QueryRecord, QueryRuntimeModule }
+
+const AUDIT_LIST_TEXT_MAX_LENGTH = 180
 
 export interface CommandEntityLink {
   id: string
@@ -156,11 +159,11 @@ export function toSampleCommandListItem(
 ): SampleCommandListItem {
   return {
     ...toCommandListItem(record),
-    data: {
+    data: compactListEntityData({
       ...record.attributes,
       status: record.status ?? undefined,
       stream: record.stream ?? undefined,
-    },
+    }),
     quality: record.status ?? null,
     stream: record.stream ?? null,
   }
@@ -169,14 +172,25 @@ export function toSampleCommandListItem(
 export function toAuditCommandListItem(
   record: QueryRecord,
 ): AuditCommandListItem {
+  const summary = truncateAuditListText(firstString(record.attributes, ['summary']))
+
   return {
     ...toCommandListItem(record),
     action: firstString(record.attributes, ['action']),
     actor: firstString(record.attributes, ['actor']),
     status: record.status ?? null,
     commandName: firstString(record.attributes, ['commandName', 'command_name']),
-    summary: firstString(record.attributes, ['summary']),
+    title: truncateAuditListText(record.title ?? null),
+    summary,
   }
+}
+
+function truncateAuditListText(value: string | null): string | null {
+  if (value === null || value.length <= AUDIT_LIST_TEXT_MAX_LENGTH) {
+    return value
+  }
+
+  return `${value.slice(0, AUDIT_LIST_TEXT_MAX_LENGTH - 3).trimEnd()}...`
 }
 
 export function matchesOptionalString(

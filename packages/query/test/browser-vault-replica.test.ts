@@ -1,5 +1,9 @@
 import assert from "node:assert/strict";
 
+import {
+  computeHabitatCoverage,
+  type HabitatIndicatorValue,
+} from "@murphai/contracts";
 import { test } from "vitest";
 
 import type { MetricPoint } from "../src/metrics/index.ts";
@@ -89,6 +93,78 @@ test("browser vault replicas round-trip and expose the query-client selectors", 
   assert.ok(history.timeline.some((entry) => entry.title === "Travel recovery note"));
   assert.equal(client.entities.get("exp_1")?.title, "Morning walk");
   assert.ok(client.search("steadier").some((row) => row.entityId === "journal_1"));
+});
+
+test("browser vault replicas preserve habitat facts for coverage derivation", async () => {
+  const indicators = {
+    darkness: "blackout",
+    night_temp_c: 19,
+  } satisfies Record<string, HabitatIndicatorValue>;
+  const indicatorRecordedAt = {
+    darkness: "2026-04-20T06:00:00.000Z",
+    night_temp_c: "2026-04-20T06:00:00.000Z",
+  };
+  const replica = await createBrowserVaultReplicaFromVault({
+    generatedAt: "2026-04-20T12:00:00.000Z",
+    sourceBundleHash: "h".repeat(64),
+    vault: createVaultReadModel({
+      entities: [
+        createEntity("habitat", "hab_sleep", {
+          attributes: {
+            aspect: "sleep-environment",
+            domain: "environment",
+            indicators,
+            indicatorRecordedAt,
+            note: "Bedroom runs cool and dark.",
+          },
+          frontmatter: {
+            aspect: "sleep-environment",
+            domain: "environment",
+            indicators,
+            indicatorRecordedAt,
+            note: "Bedroom runs cool and dark.",
+          },
+          kind: "habitat",
+          path: "bank/habitat/sleep-environment.md",
+          status: "active",
+          title: "Bedroom & sleep",
+        }),
+      ],
+      metadata: {
+        title: "Browser vault fixture",
+      },
+      vaultRoot: "browser://vault",
+    }),
+  });
+
+  const client = createBrowserVaultQueryClient(parseBrowserVaultReplica(replica));
+  const habitat = client.entities.get("hab_sleep");
+
+  assert.ok(habitat);
+  assert.equal(habitat.family, "habitat");
+  assert.deepEqual(habitat.attributes.indicators, indicators);
+  assert.deepEqual(habitat.attributes.indicatorRecordedAt, indicatorRecordedAt);
+
+  const coverage = computeHabitatCoverage([{
+    aspect: requireStringAttribute(habitat.attributes.aspect, "habitat aspect"),
+    indicatorRecordedAt: requireStringRecord(
+      habitat.attributes.indicatorRecordedAt,
+      "habitat indicatorRecordedAt",
+    ),
+    indicators: requireHabitatIndicators(habitat.attributes.indicators),
+  }], { now: "2026-04-20T12:00:00.000Z" });
+  const sleepCoverage = coverage.domains
+    .flatMap((domain) => domain.aspects)
+    .find((aspect) => aspect.aspectId === "sleep-environment");
+
+  assert.equal(
+    sleepCoverage?.indicators.find((indicator) => indicator.indicatorId === "night_temp_c")?.status,
+    "known",
+  );
+  assert.equal(
+    sleepCoverage?.indicators.find((indicator) => indicator.indicatorId === "darkness")?.status,
+    "known",
+  );
 });
 
 test("browser vault overview experiment summary is uncapped and completed-status specific", async () => {
@@ -792,6 +868,7 @@ function resolveRecordClass(family: BrowserVaultEntity["family"]): BrowserVaultE
     case "event":
       return "ledger";
     case "experiment":
+    case "habitat":
       return "bank";
     case "journal":
       return "ledger";
@@ -800,4 +877,51 @@ function resolveRecordClass(family: BrowserVaultEntity["family"]): BrowserVaultE
     default:
       throw new Error(`Unsupported browser-vault test family: ${family}`);
   }
+}
+
+function requireStringAttribute(value: unknown, label: string): string {
+  if (typeof value !== "string") {
+    throw new TypeError(`${label} must be a string`);
+  }
+  return value;
+}
+
+function requireStringRecord(value: unknown, label: string): Record<string, string> {
+  const record = requireRecord(value, label);
+  const output: Record<string, string> = {};
+
+  for (const [key, entry] of Object.entries(record)) {
+    if (typeof entry !== "string") {
+      throw new TypeError(`${label}.${key} must be a string`);
+    }
+    output[key] = entry;
+  }
+
+  return output;
+}
+
+function requireHabitatIndicators(value: unknown): Record<string, HabitatIndicatorValue> {
+  const record = requireRecord(value, "habitat indicators");
+  const output: Record<string, HabitatIndicatorValue> = {};
+
+  for (const [key, entry] of Object.entries(record)) {
+    const isHabitatIndicatorValue =
+      entry === null ||
+      typeof entry === "string" ||
+      typeof entry === "boolean" ||
+      (typeof entry === "number" && Number.isFinite(entry));
+    if (!isHabitatIndicatorValue) {
+      throw new TypeError(`habitat indicators.${key} must be a habitat indicator value`);
+    }
+    output[key] = entry;
+  }
+
+  return output;
+}
+
+function requireRecord(value: unknown, label: string): Record<string, unknown> {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new TypeError(`${label} must be an object`);
+  }
+  return value as Record<string, unknown>;
 }

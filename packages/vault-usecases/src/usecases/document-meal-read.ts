@@ -27,7 +27,7 @@ import {
 
 type DocumentMealKind = 'document' | 'meal'
 
-const DEFAULT_LIST_LIMIT = 50
+const DEFAULT_LIST_LIMIT = 10
 const OWNED_EVENT_LINK_KEYS: string[] = []
 
 export const documentLookupSchema = z
@@ -201,12 +201,14 @@ export async function showDocumentRecord(vault: string, lookup: string) {
 export async function listDocumentRecords(input: {
   vault: string
   from?: string
+  limit?: number
   to?: string
 }) {
   return listOwnedRecords({
     vault: input.vault,
     expectedKind: 'document',
     from: input.from,
+    limit: input.limit,
     to: input.to,
   })
 }

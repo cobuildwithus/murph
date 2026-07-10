@@ -14,9 +14,8 @@ import {
   resolveElevenLabsVoiceId,
 } from '@murphai/operator-config/elevenlabs-runtime'
 import {
-  createLinqAttachmentUpload,
   resolveLinqApiToken,
-  uploadLinqAttachmentBytes,
+  uploadLinqAttachment,
 } from '@murphai/operator-config/linq-runtime'
 import {
   normalizeHostedAiUsageAllowanceElevenLabsTtsModelId,
@@ -273,6 +272,7 @@ function unavailableVoiceMemoResult(
 export function createVoiceMemoToolRuntimeFromEnv(input: {
   env: NodeJS.ProcessEnv
   fetchImpl: typeof fetch
+  preferredVoiceId?: string | null
   publicFetchImpl?: typeof fetch | null
   voiceMemoDeliveryChannel?: VoiceMemoDeliveryChannel | null
 }): VoiceMemoToolRuntime | null {
@@ -289,7 +289,9 @@ export function createVoiceMemoToolRuntimeFromEnv(input: {
     modelId: normalizeHostedAiUsageAllowanceElevenLabsTtsModelId(
       resolveElevenLabsModelId(input.env),
     ),
-    voiceId: resolveElevenLabsVoiceId(input.env),
+    voiceId:
+      normalizeNullableString(input.preferredVoiceId) ??
+      resolveElevenLabsVoiceId(input.env),
   }
 
   if (deliveryChannel === 'telegram') {
@@ -346,26 +348,16 @@ export function createVoiceMemoToolRuntimeFromEnv(input: {
       }
 
       const linqFilename = `${request.filenameBase}.${audio.filenameExtension}`
-      const upload = await createLinqAttachmentUpload(
+      const upload = await uploadLinqAttachment(
         {
+          bytes: audio.bytes,
           contentType: audio.contentType,
           filename: linqFilename,
-          sizeBytes: audio.bytes.byteLength,
         },
         {
           env: input.env,
           fetchImplementation,
-          signal: request.signal ?? undefined,
-        },
-      )
-      await uploadLinqAttachmentBytes(
-        {
-          bytes: audio.bytes,
-          requiredHeaders: upload.requiredHeaders,
-          uploadUrl: upload.uploadUrl,
-        },
-        {
-          fetchImplementation: uploadFetchImplementation,
+          publicFetchImplementation: uploadFetchImplementation,
           signal: request.signal ?? undefined,
         },
       )
@@ -406,6 +398,7 @@ function createStringFetchAdapter(fetchImpl: typeof fetch) {
       body?: string | Blob
       headers?: Record<string, string>
       method: string
+      redirect?: RequestRedirect
       signal?: AbortSignal
     },
   ) => fetchImpl(input, init)
@@ -425,4 +418,3 @@ function describeVoiceMemoGeneration(
       return { label: 'song', transcript: null }
   }
 }
-

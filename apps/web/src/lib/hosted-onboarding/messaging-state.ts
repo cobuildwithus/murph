@@ -50,9 +50,7 @@ export function resolveHostedMemberMessagingState(input: {
   const linqContactLookupKey =
     phoneLookupKey
     ?? normalizeMessagingIdentity(input.routing?.pendingLinqParticipantContact?.lookupKey);
-  const telegramThreadId =
-    normalizeMessagingIdentity(input.routing?.telegramThreadId)
-    ?? normalizeMessagingIdentity(input.routing?.telegramUserId);
+  const telegramThreadId = normalizeMessagingIdentity(input.routing?.telegramThreadId);
   const hasPhone = phoneLookupKey !== null;
   const hasLinq = hasPhone || (linqThreadId !== null && linqContactLookupKey !== null);
   const hasTelegram = telegramThreadId !== null;
