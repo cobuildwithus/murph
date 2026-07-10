@@ -73,27 +73,23 @@ export function startAssistantChannelTypingIndicator(input: {
     })
     .catch(() => null)
 
-  const refreshTyping = async (afterMessage: boolean) => {
-    if (stopRequested) {
-      return
-    }
-
-    const indicator = activeIndicator ?? await indicatorReady
-    if (stopRequested || !indicator) {
-      return
-    }
-
-    const refresh = afterMessage
-      ? indicator.refreshAfterMessage ?? indicator.refreshNow
-      : indicator.refreshNow
-    if (refresh) {
-      await runAssistantTypingBestEffort(() => refresh.call(indicator))
-    }
-  }
-
   return {
-    refreshAfterMessage: () => refreshTyping(true),
-    refreshNow: () => refreshTyping(false),
+    async refreshAfterMessage() {
+      await refreshAssistantChannelTypingIndicator({
+        activeIndicator,
+        indicatorReady,
+        preferAfterMessageRefresh: true,
+        stopRequested: () => stopRequested,
+      })
+    },
+    async refreshNow() {
+      await refreshAssistantChannelTypingIndicator({
+        activeIndicator,
+        indicatorReady,
+        preferAfterMessageRefresh: false,
+        stopRequested: () => stopRequested,
+      })
+    },
     async stop(options: AssistantChannelActivityStopOptions = {}) {
       stopRequested = true
       requestedStopOptions = options
@@ -109,6 +105,51 @@ export function startAssistantChannelTypingIndicator(input: {
       return
     },
   }
+}
+
+async function refreshAssistantChannelTypingIndicator(input: {
+  activeIndicator: AssistantChannelActivityHandle | null
+  indicatorReady: Promise<AssistantChannelActivityHandle | null>
+  preferAfterMessageRefresh: boolean
+  stopRequested: () => boolean
+}): Promise<void> {
+  if (input.stopRequested()) {
+    return
+  }
+
+  if (input.activeIndicator) {
+    const indicator = input.activeIndicator
+    const refresh = selectAssistantChannelTypingRefresh(
+      indicator,
+      input.preferAfterMessageRefresh,
+    )
+    if (refresh) {
+      await runAssistantTypingBestEffort(() => refresh.call(indicator))
+    }
+    return
+  }
+
+  await input.indicatorReady.then((indicator) => {
+    if (!indicator || input.stopRequested()) {
+      return undefined
+    }
+    const refresh = selectAssistantChannelTypingRefresh(
+      indicator,
+      input.preferAfterMessageRefresh,
+    )
+    return refresh
+      ? runAssistantTypingBestEffort(() => refresh.call(indicator))
+      : undefined
+  })
+}
+
+function selectAssistantChannelTypingRefresh(
+  indicator: AssistantChannelActivityHandle,
+  preferAfterMessageRefresh: boolean,
+): (() => Promise<void>) | undefined {
+  return preferAfterMessageRefresh
+    ? indicator.refreshAfterMessage ?? indicator.refreshNow
+    : indicator.refreshNow
 }
 
 export async function stopAssistantChannelTypingIndicator(
