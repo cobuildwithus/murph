@@ -32,8 +32,10 @@ export const RUNNER_ENTRYPOINT_BUNDLE_DIRECTORY_NAME = "dist-bundled";
 // Byte budgets over the esbuild metafile so import-graph creep in the boot
 // surface fails the assembly instead of silently regressing cold start.
 // Latest ratcheted baselines come from reviewed bundle measurements:
-// - 2026-07-09 local macOS after mailbox-lane sequence preference coalescing:
-//   entry container-entrypoint.js 1,374,586B, static boot closure 6,722,281B.
+// - entry container-entrypoint.js: 1,374,586B on local macOS after the
+//   2026-07-09 mailbox-lane sequence preference coalescing;
+// - static boot closure: 6,818,632B on CI Linux after the 2026-07-10
+//   clinical-records intake package joined the reviewed runner closure.
 // The tolerances below cover local emit jitter.
 //
 // The entry chunk gates cold-start parse, so it is ratcheted, not given
@@ -48,8 +50,7 @@ export const RUNNER_ENTRYPOINT_BUNDLE_DIRECTORY_NAME = "dist-bundled";
 // baseline discipline as the entry chunk. Its tolerance is wider than the
 // entry tolerance because the closure spans ~5x more bytes and many more
 // chunks, so path comments, content hashes, and platform-specific emit jitter
-// have more surface. CI Linux has measured slightly smaller than local macOS;
-// since this ratchet fails only on growth, the local baseline remains safe.
+// have more surface.
 //
 // The total ceiling stays a fixed backstop at its prior 9,300,000B value (not
 // ratcheted): #397 shrank the bundle, so there is no reason to loosen it, and
@@ -58,7 +59,7 @@ export const RUNNER_ENTRYPOINT_BUNDLE_DIRECTORY_NAME = "dist-bundled";
 // inputs before raising either.
 const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 9_300_000;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 1_374_586;
-const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 6_722_281;
+const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 6_818_632;
 // Noise band above the baseline before the ratchet trips (~2%): absorbs
 // content-hash and minifier jitter without letting real boot-path weight land
 // silently. Keep it tight; it is a tolerance for noise, not feature headroom.
