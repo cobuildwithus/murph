@@ -952,6 +952,8 @@ export async function runAssistantAutomationPass(
     && input.shouldYieldBackgroundMaintenance?.() !== true
   ) {
     await maybeRunAssistantRuntimeMaintenance({
+      shouldYield: input.shouldYieldBackgroundMaintenance ?? null,
+      signal: input.signal ?? null,
       vault: input.vault,
     }).catch((error) => {
       warnAssistantBestEffortFailure({
