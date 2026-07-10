@@ -29,6 +29,9 @@ import {
   hostedOnboardingError,
 } from "../hosted-onboarding/errors";
 import {
+  demoteHostedMemberLinqGroupChatBindingsTx,
+} from "../hosted-onboarding/hosted-member-routing-store";
+import {
   createHostedMember,
   readHostedMemberCoreState,
 } from "../hosted-onboarding/hosted-member-store";
@@ -112,6 +115,15 @@ export async function ensureHostedThreadContainerRouteTx(input: {
     throw new TypeError(
       "Hosted thread route requires a supported channel and non-empty thread id.",
     );
+  }
+  // The route owner is the durable group boundary. Claiming a Linq thread at
+  // this layer prevents any present or future caller from leaving the same
+  // chat attached to a personal home/pending route.
+  if (input.channel === "linq") {
+    await demoteHostedMemberLinqGroupChatBindingsTx({
+      linqChatId: String(input.threadId),
+      prisma: input.prisma,
+    });
   }
   await acquireHostedThreadContainerRouteWriteLockTx({
     channel: input.channel,

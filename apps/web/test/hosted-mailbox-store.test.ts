@@ -1,5 +1,6 @@
 import { Buffer } from "node:buffer";
 
+import { serializeHostedEmailThreadTarget } from "@murphai/runtime-state";
 import { describe, expect, it, vi } from "vitest";
 
 import {
@@ -475,6 +476,199 @@ describe("appendHostedMailboxItemTx", () => {
 });
 
 describe("appendHostedMailboxEnvelopeTx", () => {
+  it("rejects a non-direct Linq envelope whose authority names another workspace", async () => {
+    const hostedMailboxItem = createHostedMailboxItemDelegate();
+    const hostedMailboxPayload = createHostedMailboxPayloadDelegate();
+    const hostedThreadRoute = {
+      findFirst: vi.fn(async () => ({
+        containerMemberId: "member_other_container_123",
+      })),
+    };
+    const tx = createHostedMailboxTx({
+      hostedMailboxItem,
+      hostedMailboxPayload,
+      hostedThreadRoute,
+    });
+    const envelope = buildHostedGroupLinqEnvelope("member_personal_123");
+    envelope.message.routeAuthority.containerMemberId = "member_other_container_123";
+
+    await expect(appendHostedMailboxEnvelopeTx({
+      envelope,
+      tx,
+    })).rejects.toMatchObject({
+      code: "HOSTED_GROUP_WORKSPACE_TARGET_MISMATCH",
+      retryable: true,
+    });
+
+    expect(hostedThreadRoute.findFirst).not.toHaveBeenCalled();
+    expect(tx.hostedWorkspace.upsert).not.toHaveBeenCalled();
+    expect(hostedMailboxItem.create).not.toHaveBeenCalled();
+  });
+
+  it("rejects a non-direct Linq envelope unless a persisted thread route owns the target workspace", async () => {
+    const hostedMailboxItem = createHostedMailboxItemDelegate();
+    const hostedMailboxPayload = createHostedMailboxPayloadDelegate();
+    const hostedThreadRoute = {
+      findFirst: vi.fn(async () => null),
+    };
+    const tx = createHostedMailboxTx({
+      hostedMailboxItem,
+      hostedMailboxPayload,
+      hostedThreadRoute,
+    });
+
+    await expect(appendHostedMailboxEnvelopeTx({
+      envelope: buildHostedGroupLinqEnvelope("member_personal_123"),
+      tx,
+    })).rejects.toMatchObject({
+      code: "HOSTED_GROUP_WORKSPACE_TARGET_MISMATCH",
+      retryable: true,
+    });
+
+    expect(hostedThreadRoute.findFirst).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({
+        channel: "linq",
+        containerMemberId: "member_personal_123",
+        threadIdentityLookupKey: {
+          in: expect.arrayContaining([
+            expect.stringMatching(/^hbidx:external-thread-identity:v\d+:/u),
+          ]),
+        },
+      }),
+    }));
+    expect(tx.hostedWorkspace.upsert).not.toHaveBeenCalled();
+    expect(hostedMailboxItem.create).not.toHaveBeenCalled();
+  });
+
+  it("admits a non-direct Linq envelope only for its persisted thread container", async () => {
+    const hostedMailboxItem = createHostedMailboxItemDelegate();
+    const hostedMailboxPayload = createHostedMailboxPayloadDelegate();
+    const hostedThreadRoute = {
+      findFirst: vi.fn(async () => ({
+        containerMemberId: "member_thread_container_123",
+      })),
+    };
+    const tx = createHostedMailboxTx({
+      hostedMailboxItem,
+      hostedMailboxPayload,
+      hostedThreadRoute,
+    });
+
+    await expect(appendHostedMailboxEnvelopeTx({
+      envelope: buildHostedGroupLinqEnvelope("member_thread_container_123"),
+      tx,
+    })).resolves.toMatchObject({
+      inserted: true,
+      item: {
+        userId: "member_thread_container_123",
+      },
+    });
+
+    expect(tx.hostedWorkspace.upsert).toHaveBeenCalledWith({
+      create: {
+        userId: "member_thread_container_123",
+      },
+      update: {},
+      where: {
+        userId: "member_thread_container_123",
+      },
+    });
+  });
+
+  it("rejects group email when the target group names another runtime workspace", async () => {
+    const hostedMailboxItem = createHostedMailboxItemDelegate();
+    const hostedMailboxPayload = createHostedMailboxPayloadDelegate();
+    const hostedGroup = {
+      findUnique: vi.fn(async () => ({
+        runtimeMemberId: "member_other_container_123",
+      })),
+    };
+    const tx = createHostedMailboxTx({
+      hostedGroup,
+      hostedMailboxItem,
+      hostedMailboxPayload,
+    });
+
+    await expect(appendHostedMailboxEnvelopeTx({
+      envelope: buildHostedGroupEmailEnvelope("member_personal_123"),
+      tx,
+    })).rejects.toMatchObject({
+      code: "HOSTED_GROUP_WORKSPACE_TARGET_MISMATCH",
+      retryable: true,
+    });
+
+    expect(hostedGroup.findUnique).toHaveBeenCalledWith({
+      select: {
+        runtimeMemberId: true,
+      },
+      where: {
+        id: "group_123",
+      },
+    });
+    expect(tx.hostedThreadContainer.findUnique).not.toHaveBeenCalled();
+    expect(tx.hostedWorkspace.upsert).not.toHaveBeenCalled();
+  });
+
+  it("rejects group email when its runtime member is not a thread container", async () => {
+    const hostedMailboxItem = createHostedMailboxItemDelegate();
+    const hostedMailboxPayload = createHostedMailboxPayloadDelegate();
+    const tx = createHostedMailboxTx({
+      hostedGroup: {
+        findUnique: vi.fn(async () => ({
+          runtimeMemberId: "member_group_runtime_123",
+        })),
+      },
+      hostedMailboxItem,
+      hostedMailboxPayload,
+      hostedThreadContainer: {
+        findUnique: vi.fn(async () => null),
+      },
+    });
+
+    await expect(appendHostedMailboxEnvelopeTx({
+      envelope: buildHostedGroupEmailEnvelope("member_group_runtime_123"),
+      tx,
+    })).rejects.toMatchObject({
+      code: "HOSTED_GROUP_WORKSPACE_TARGET_MISMATCH",
+      retryable: true,
+    });
+
+    expect(tx.hostedWorkspace.upsert).not.toHaveBeenCalled();
+    expect(hostedMailboxItem.create).not.toHaveBeenCalled();
+  });
+
+  it("admits group email only when the group runtime is a thread container", async () => {
+    const hostedMailboxItem = createHostedMailboxItemDelegate();
+    const hostedMailboxPayload = createHostedMailboxPayloadDelegate();
+    const tx = createHostedMailboxTx({
+      hostedGroup: {
+        findUnique: vi.fn(async () => ({
+          runtimeMemberId: "member_group_runtime_123",
+        })),
+      },
+      hostedMailboxItem,
+      hostedMailboxPayload,
+      hostedThreadContainer: {
+        findUnique: vi.fn(async () => ({
+          memberId: "member_group_runtime_123",
+        })),
+      },
+    });
+
+    await expect(appendHostedMailboxEnvelopeTx({
+      envelope: buildHostedGroupEmailEnvelope("member_group_runtime_123"),
+      tx,
+    })).resolves.toMatchObject({
+      inserted: true,
+      item: {
+        userId: "member_group_runtime_123",
+      },
+    });
+
+    expect(tx.hostedWorkspace.upsert).toHaveBeenCalledTimes(1);
+    expect(hostedMailboxItem.create).toHaveBeenCalledTimes(1);
+  });
+
   it("maps a member.channels.updated producer envelope to one system mailbox item", async () => {
     const hostedMailboxItem = createHostedMailboxItemDelegate();
     const hostedMailboxPayload = createHostedMailboxPayloadDelegate();
@@ -1675,8 +1869,11 @@ function createHostedMailboxPayloadDelegate(overrides: Partial<{
 }
 
 function createHostedMailboxTx(input: {
+  hostedGroup?: { findUnique: ReturnType<typeof vi.fn> };
   hostedMailboxItem: ReturnType<typeof createHostedMailboxItemDelegate>;
   hostedMailboxPayload: ReturnType<typeof createHostedMailboxPayloadDelegate>;
+  hostedThreadContainer?: { findUnique: ReturnType<typeof vi.fn> };
+  hostedThreadRoute?: { findFirst: ReturnType<typeof vi.fn> };
 }) {
   return Object.assign(Object.create(null), {
     $executeRaw: vi.fn(async () => 1),
@@ -1711,6 +1908,9 @@ function createHostedMailboxTx(input: {
     }),
     hostedMailboxItem: input.hostedMailboxItem,
     hostedMailboxPayload: input.hostedMailboxPayload,
+    hostedGroup: input.hostedGroup ?? {
+      findUnique: vi.fn(async () => null),
+    },
     hostedRuntimeLog: {
       create: vi.fn(async (args: { data: Record<string, unknown> }) => ({
         at: args.data.at as Date,
@@ -1733,10 +1933,61 @@ function createHostedMailboxTx(input: {
         workspaceVersion: args.data.workspaceVersion as bigint | null,
       })),
     },
+    hostedThreadContainer: input.hostedThreadContainer ?? {
+      findUnique: vi.fn(async () => null),
+    },
+    hostedThreadRoute: input.hostedThreadRoute ?? {
+      findFirst: vi.fn(async () => null),
+    },
     hostedWorkspace: {
       upsert: vi.fn(async () => null),
     },
   }) as Parameters<typeof appendHostedMailboxItemTx>[0]["tx"];
+}
+
+function buildHostedGroupLinqEnvelope(userId: string) {
+  return {
+    eventId: "linq-group-envelope-1",
+    kind: "conversation.message" as const,
+    message: {
+      channel: "linq" as const,
+      contactKind: "phone" as const,
+      contactLookupKey: "hbidx:phone:v1:sender",
+      linqMessage: {
+        chatId: "chat_group_123",
+        from: "+15551234567",
+        isFromMe: false,
+        messageId: "msg_group_123",
+        parts: [{ type: "text" as const, value: "hello group" }],
+        threadIsDirect: false,
+      },
+      routeAuthority: {
+        channel: "linq" as const,
+        containerMemberId: userId,
+        threadId: "chat_group_123",
+      },
+    },
+    occurredAt: "2026-04-26T00:00:00.000Z",
+    userId,
+  };
+}
+
+function buildHostedGroupEmailEnvelope(userId: string) {
+  return {
+    eventId: "email-group-envelope-1",
+    kind: "conversation.message" as const,
+    message: {
+      channel: "email" as const,
+      identityId: "identity_123",
+      rawMessageKey: "raw_group_123",
+      threadTarget: serializeHostedEmailThreadTarget({
+        groupId: "group_123",
+        targetKind: "group",
+      }),
+    },
+    occurredAt: "2026-04-26T00:00:00.000Z",
+    userId,
+  };
 }
 
 function readHostedMailboxRawSql(call: unknown[] | undefined): string {

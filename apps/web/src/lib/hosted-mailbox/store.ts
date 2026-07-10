@@ -22,11 +22,16 @@ import type {
 import type {
   HostedExecutionWake,
 } from "@murphai/hosted-execution/contracts";
+import { parseHostedEmailThreadTarget } from "@murphai/runtime-state";
 import { Prisma, type PrismaClient } from "@prisma/client";
 
 import { normalizeNullableString } from "../primitives";
 import { getPrisma } from "../prisma";
 import { recordHostedRuntimeLogTx } from "../hosted-workspace/store";
+import {
+  createHostedExternalThreadIdentityLookupKeyReadCandidates,
+} from "../hosted-onboarding/contact-privacy";
+import { hostedOnboardingError } from "../hosted-onboarding/errors";
 import {
   HOSTED_MAILBOX_SYSTEM_AI_USAGE_GATED_KINDS,
 } from "./ai-usage-gate";
@@ -423,6 +428,10 @@ export async function appendHostedMailboxEnvelopeTx(input: {
   tx: HostedMailboxMutationTx;
 }): Promise<AppendHostedMailboxItemResult> {
   const envelope = input.envelope;
+  await assertHostedMailboxEnvelopeWorkspaceTargetTx({
+    envelope,
+    tx: input.tx,
+  });
   await input.tx.hostedWorkspace.upsert({
     create: {
       userId: envelope.userId,
@@ -442,6 +451,93 @@ export async function appendHostedMailboxEnvelopeTx(input: {
     payloadSerializedJson: encodedPayload.serialized,
     tx: input.tx,
     userId: envelope.userId,
+  });
+}
+
+async function assertHostedMailboxEnvelopeWorkspaceTargetTx(input: {
+  envelope: HostedMailboxProducerEnvelope;
+  tx: HostedMailboxMutationTx;
+}): Promise<void> {
+  if (input.envelope.kind !== "conversation.message") {
+    return;
+  }
+
+  const message = input.envelope.message;
+  if (message.channel === "linq" && message.linqMessage.threadIsDirect === false) {
+    const authority = message.routeAuthority;
+    if (
+      !authority
+      || authority.channel !== "linq"
+      || authority.containerMemberId !== input.envelope.userId
+      || authority.threadId !== message.linqMessage.chatId
+    ) {
+      throwHostedMailboxGroupWorkspaceTargetMismatch();
+    }
+
+    const threadIdentityLookupKeys =
+      createHostedExternalThreadIdentityLookupKeyReadCandidates({
+        channel: "linq",
+        threadId: message.linqMessage.chatId,
+      });
+    const route = await input.tx.hostedThreadRoute.findFirst({
+      select: {
+        containerMemberId: true,
+      },
+      where: {
+        channel: "linq",
+        containerMemberId: input.envelope.userId,
+        threadIdentityLookupKey: {
+          in: threadIdentityLookupKeys,
+        },
+      },
+    });
+    if (!route) {
+      throwHostedMailboxGroupWorkspaceTargetMismatch();
+    }
+    return;
+  }
+
+  if (message.channel !== "email") {
+    return;
+  }
+
+  const threadTarget = parseHostedEmailThreadTarget(message.threadTarget);
+  if (threadTarget?.targetKind !== "group" || !threadTarget.groupId) {
+    return;
+  }
+
+  const group = await input.tx.hostedGroup.findUnique({
+    select: {
+      runtimeMemberId: true,
+    },
+    where: {
+      id: threadTarget.groupId,
+    },
+  });
+  if (group?.runtimeMemberId !== input.envelope.userId) {
+    throwHostedMailboxGroupWorkspaceTargetMismatch();
+  }
+
+  const container = await input.tx.hostedThreadContainer.findUnique({
+    select: {
+      memberId: true,
+    },
+    where: {
+      memberId: input.envelope.userId,
+    },
+  });
+  if (!container) {
+    throwHostedMailboxGroupWorkspaceTargetMismatch();
+  }
+}
+
+function throwHostedMailboxGroupWorkspaceTargetMismatch(): never {
+  throw hostedOnboardingError({
+    code: "HOSTED_GROUP_WORKSPACE_TARGET_MISMATCH",
+    httpStatus: 409,
+    message:
+      "Hosted group conversation mailbox target does not match its persisted runtime container.",
+    retryable: true,
   });
 }
 

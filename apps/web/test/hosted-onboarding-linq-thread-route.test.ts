@@ -80,6 +80,7 @@ vi.mock("../src/lib/hosted-onboarding/hosted-member-routing-store", async (impor
   >();
   return {
     ...actual,
+    demoteHostedMemberLinqGroupChatBindingsTx: vi.fn(),
     readHostedMemberRoutingState: vi.fn(),
   };
 });
@@ -150,6 +151,11 @@ beforeEach(() => {
   vi.mocked(linqModule.verifyAndParseHostedLinqWebhookRequest).mockReset();
   vi.mocked(linqClient.getHostedLinqChatHandles).mockReset();
   vi.mocked(linqClient.getHostedLinqChatSummary).mockReset();
+  vi.mocked(memberRoutingStore.demoteHostedMemberLinqGroupChatBindingsTx).mockReset();
+  vi.mocked(memberRoutingStore.demoteHostedMemberLinqGroupChatBindingsTx).mockResolvedValue({
+    homeBindingCount: 0,
+    pendingBindingCount: 0,
+  });
   vi.mocked(linqClient.getHostedLinqChatSummary).mockResolvedValue({
     handles: [],
     isGroup: null,
@@ -1663,6 +1669,12 @@ describe("Linq group chat auto-provision", () => {
           reason: "wake-appended-thread-route",
         });
         expect(linqClient.getHostedLinqChatSummary).not.toHaveBeenCalled();
+        expect(
+          memberRoutingStore.demoteHostedMemberLinqGroupChatBindingsTx,
+        ).toHaveBeenCalledWith({
+          linqChatId: "chat_group_123",
+          prisma,
+        });
         expect(mailboxStore.appendHostedMailboxEnvelopeTx).toHaveBeenCalledWith({
           envelope: expect.objectContaining({
             message: expect.objectContaining({
@@ -1838,7 +1850,17 @@ describe("Linq group chat auto-provision", () => {
         chatId: "chat_group_123",
         timeoutMs: 1_500,
       });
+      expect(
+        memberRoutingStore.demoteHostedMemberLinqGroupChatBindingsTx,
+      ).toHaveBeenCalledWith({
+        linqChatId: "chat_group_123",
+        prisma,
+      });
       expect(prisma.hostedThreadContainer.create).toHaveBeenCalledTimes(1);
+      expect(
+        vi.mocked(memberRoutingStore.demoteHostedMemberLinqGroupChatBindingsTx)
+          .mock.invocationCallOrder[0],
+      ).toBeLessThan(prisma.hostedThreadRoute.create.mock.invocationCallOrder[0]!);
       expect(mailboxStore.appendHostedMailboxEnvelopeTx).toHaveBeenLastCalledWith({
         envelope: expect.objectContaining({
           kind: "conversation.message",
@@ -2193,6 +2215,12 @@ describe("Linq group chat auto-provision", () => {
       ignored: true,
       ok: true,
       reason: "group-chat",
+    });
+    expect(
+      memberRoutingStore.demoteHostedMemberLinqGroupChatBindingsTx,
+    ).toHaveBeenCalledWith({
+      linqChatId: "chat_group_123",
+      prisma,
     });
     expect(prisma.hostedThreadContainer.create).not.toHaveBeenCalled();
     expect(mailboxStore.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();

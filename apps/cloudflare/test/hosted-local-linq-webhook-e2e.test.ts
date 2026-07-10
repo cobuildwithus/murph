@@ -1,4 +1,5 @@
 import { createHmac } from "node:crypto";
+import { setTimeout as sleep } from "node:timers/promises";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
@@ -31,6 +32,8 @@ const hostedLinqCometRiderAssistantReplyText =
 const hostedLinqImageAssistantReplyText = "Reviewed the image attachment.";
 const hostedLinqPdfAssistantReplyText = "Read the PDF attachment.";
 const linqWebhookRunId = Date.now();
+const hostedLinqGroupIsolationGuestUserId =
+  `member_local_linq_webhook_group_isolation_guest_${linqWebhookRunId}`;
 
 const streamDevLogs = process.env.MURPH_E2E_STREAM_DEV_LOGS === "1";
 const workerPersistDirOverride = process.env.MURPH_E2E_CF_PERSIST_DIR?.trim() || null;
@@ -46,6 +49,34 @@ interface ActiveLinqWebhookMember {
   userId: string;
 }
 
+type HostedLinqWorkspaceIsolationState = Awaited<ReturnType<
+  HostedLocalFullStackScenario["readHostedLinqWorkspaceIsolationState"]
+>>;
+
+async function waitForHostedLinqWorkspaceIsolationState(input: {
+  chatId: string;
+  isReady: (state: HostedLinqWorkspaceIsolationState) => boolean;
+  memberId: string;
+}): Promise<HostedLinqWorkspaceIsolationState> {
+  const startedAt = Date.now();
+  let lastState: HostedLinqWorkspaceIsolationState | null = null;
+
+  while (Date.now() - startedAt < 120_000) {
+    lastState = await requireScenario().readHostedLinqWorkspaceIsolationState({
+      chatId: input.chatId,
+      memberId: input.memberId,
+    });
+    if (input.isReady(lastState)) {
+      return lastState;
+    }
+    await sleep(250);
+  }
+
+  throw new Error(
+    `Timed out waiting for durable Linq workspace isolation state: ${JSON.stringify(lastState)}`,
+  );
+}
+
 it("derives stable numeric suffixes from the full Linq user id", () => {
   expect(buildStableNumericSuffix("member_local_linq_webhook_20260408", 7)).not.toBe(
     buildStableNumericSuffix("member_local_linq_webhook_rapid_20260408", 7),
@@ -55,7 +86,7 @@ it("derives stable numeric suffixes from the full Linq user id", () => {
 describe("hosted local Linq webhook e2e", () => {
   beforeAll(async () => {
     await startLinqScenario(buildLinqWebhookScenarioEnv);
-  }, 300_000);
+  }, 600_000);
 
   afterAll(async () => {
     await scenario?.stop();
@@ -200,6 +231,237 @@ describe("hosted local Linq webhook e2e", () => {
       body.includes(goalsText)
     )).toBe(true);
   }, 300_000);
+
+  it("never routes a canonically grouped chat or an unregistered participant through the personal workspace", async () => {
+    const { chatId, replyChatPath, userId } =
+      await createActiveLinqWebhookMember("group-isolation");
+    const privateContextSentinel =
+      `PRIVATE_DIRECT_CONTEXT_SENTINEL_${linqWebhookRunId}`;
+    const directReplyText = "Saved that private direct-chat context.";
+    const firstGroupText = "GROUP_ISOLATION_OWNER_MESSAGE";
+    const firstGroupReplyText = "The owner group message stayed isolated.";
+    const guestGroupText = "GROUP_ISOLATION_GUEST_MESSAGE";
+    const guestGroupReplyText = "The guest group message stayed isolated.";
+
+    const directSendCountBefore = requireLinqStub().countObservedSends(replyChatPath);
+    requireScenario().queueAssistantResponses([directReplyText], {
+      matchInputContains: privateContextSentinel,
+    });
+    const directResponse = await postSignedLinqWebhook(buildHostedLinqInboundEvent(
+      userId,
+      chatId,
+      {
+        eventId: `evt_group_isolation_private_${userId}`,
+        messageId: `msg_group_isolation_private_${userId}`,
+        text: privateContextSentinel,
+      },
+    ));
+    expect(directResponse.status).toBe(202);
+    await expect(directResponse.json()).resolves.toMatchObject({
+      ok: true,
+      reason: "wake-appended-active-member",
+    });
+    await requireScenario().waitForLatestPendingWake(userId);
+    await requireScenario().waitForHostedCompletion(userId);
+    const directReply = await requireLinqStub().waitForAdditionalSend({
+      baselineCount: directSendCountBefore,
+      expectedPath: replyChatPath,
+      scenario: requireScenario(),
+      userId,
+    });
+    expect(requireLinqStub().readObservedMessageText(directReply)).toBe(directReplyText);
+    await requireScenario().waitForHostedCompletion(userId);
+
+    const baseline = await requireScenario().readHostedLinqWorkspaceIsolationState({
+      chatId,
+      memberId: userId,
+    });
+    expect(baseline.personal).toMatchObject({
+      conversationMailboxCount: 1,
+      homeChatBound: true,
+      pendingChatBound: false,
+      recipientAssigned: true,
+    });
+    expect(baseline.personal.workspaceVersion).not.toBeNull();
+    expect(baseline.thread).toBeNull();
+
+    requireLinqStub().setChatIsGroup(chatId, true);
+    const canonicalChatPath = `/chats/${encodeURIComponent(chatId)}`;
+    const canonicalReadsBefore = requireLinqStub().countObservedRequests({
+      expectedMethod: "GET",
+      expectedPath: canonicalChatPath,
+    });
+    const firstGroupSendCountBefore = requireLinqStub().countObservedSends(replyChatPath);
+    const firstGroupProviderCountBefore = requireScenario().assistantProviderRequests.length;
+    requireScenario().queueAssistantResponses([firstGroupReplyText], {
+      matchInputContains: firstGroupText,
+    });
+    const firstGroupEvent = buildHostedLinqInboundEvent(userId, chatId, {
+      eventId: `evt_group_isolation_owner_${userId}`,
+      messageId: `msg_group_isolation_owner_${userId}`,
+      text: firstGroupText,
+    });
+    expect(
+      ((firstGroupEvent.data as { chat?: { is_group?: boolean } }).chat?.is_group),
+    ).toBe(false);
+
+    const firstGroupResponse = await postSignedLinqWebhook(firstGroupEvent);
+    expect(firstGroupResponse.status).toBe(202);
+    await expect(firstGroupResponse.json()).resolves.toMatchObject({
+      ok: true,
+      reason: "wake-appended-thread-route",
+    });
+    expect(requireLinqStub().countObservedRequests({
+      expectedMethod: "GET",
+      expectedPath: canonicalChatPath,
+    })).toBeGreaterThan(canonicalReadsBefore);
+
+    const routedBeforeFirstRun =
+      await requireScenario().readHostedLinqWorkspaceIsolationState({
+        chatId,
+        memberId: userId,
+      });
+    expect(routedBeforeFirstRun.personal).toMatchObject({
+      conversationMailboxCount: baseline.personal.conversationMailboxCount,
+      homeChatBound: false,
+      homeLineAssigned: baseline.personal.homeLineAssigned,
+      pendingChatBound: false,
+      recipientAssigned: true,
+      workspaceVersion: baseline.personal.workspaceVersion,
+    });
+    expect(routedBeforeFirstRun.thread).toMatchObject({
+      containerExists: true,
+      conversationMailboxCount: 1,
+      ownerMemberId: userId,
+    });
+    const containerMemberId = routedBeforeFirstRun.thread?.containerMemberId;
+    if (!containerMemberId) {
+      throw new Error("Expected canonical group routing to create a thread container.");
+    }
+
+    await requireScenario().waitForLatestPendingWake(containerMemberId);
+    const firstGroupReply = await requireLinqStub().waitForAdditionalSend({
+      baselineCount: firstGroupSendCountBefore,
+      expectedPath: replyChatPath,
+      scenario: requireScenario(),
+      userId: containerMemberId,
+    });
+    expect(requireLinqStub().readObservedMessageText(firstGroupReply)).toBe(
+      firstGroupReplyText,
+    );
+    const afterFirstGroup = await waitForHostedLinqWorkspaceIsolationState({
+      chatId,
+      isReady: (state) =>
+        state.personal.conversationMailboxCount
+          === baseline.personal.conversationMailboxCount
+        && state.personal.workspaceVersion === baseline.personal.workspaceVersion
+        && state.thread?.containerMemberId === containerMemberId
+        && state.thread.conversationMailboxCount === 1
+        && BigInt(state.thread.workspaceVersion ?? "-1")
+          > BigInt(routedBeforeFirstRun.thread?.workspaceVersion ?? "-1"),
+      memberId: userId,
+    });
+    expect(afterFirstGroup.personal.conversationMailboxCount).toBe(
+      baseline.personal.conversationMailboxCount,
+    );
+    expect(afterFirstGroup.personal.workspaceVersion).toBe(
+      baseline.personal.workspaceVersion,
+    );
+    expect(afterFirstGroup.thread).toMatchObject({
+      containerMemberId,
+      conversationMailboxCount: 1,
+    });
+    expect(BigInt(afterFirstGroup.thread?.workspaceVersion ?? "-1")).toBeGreaterThan(
+      BigInt(routedBeforeFirstRun.thread?.workspaceVersion ?? "-1"),
+    );
+    const firstGroupProviderBodies = requireScenario().assistantProviderRequests
+      .slice(firstGroupProviderCountBefore)
+      .map((request) => request.body)
+      .filter((body) => body.includes(firstGroupText));
+    expect(firstGroupProviderBodies.length).toBeGreaterThan(0);
+    expect(firstGroupProviderBodies.every((body) =>
+      !body.includes(privateContextSentinel)
+      && !body.includes("Murph onboarding:")
+      && !body.includes("murph-onboarding/SKILL.md")
+    )).toBe(true);
+
+    const guestSendCountBefore = requireLinqStub().countObservedSends(replyChatPath);
+    const guestProviderCountBefore = requireScenario().assistantProviderRequests.length;
+    requireScenario().queueAssistantResponses([guestGroupReplyText], {
+      matchInputContains: guestGroupText,
+    });
+    const guestEvent = buildHostedLinqInboundEvent(
+      hostedLinqGroupIsolationGuestUserId,
+      chatId,
+      {
+        eventId: `evt_group_isolation_guest_${userId}`,
+        messageId: `msg_group_isolation_guest_${userId}`,
+        recipientUserId: userId,
+        text: guestGroupText,
+      },
+    );
+    expect(
+      ((guestEvent.data as { chat?: { is_group?: boolean } }).chat?.is_group),
+    ).toBe(false);
+    const guestResponse = await postSignedLinqWebhook(guestEvent);
+    expect(guestResponse.status).toBe(202);
+    await expect(guestResponse.json()).resolves.toMatchObject({
+      ok: true,
+      reason: "wake-appended-thread-route",
+    });
+    await requireScenario().waitForLatestPendingWake(containerMemberId);
+    const guestReply = await requireLinqStub().waitForAdditionalSend({
+      baselineCount: guestSendCountBefore,
+      expectedPath: replyChatPath,
+      scenario: requireScenario(),
+      userId: containerMemberId,
+    });
+    expect(requireLinqStub().readObservedMessageText(guestReply)).toBe(
+      guestGroupReplyText,
+    );
+    const afterGuestGroup = await waitForHostedLinqWorkspaceIsolationState({
+      chatId,
+      isReady: (state) =>
+        state.personal.conversationMailboxCount
+          === baseline.personal.conversationMailboxCount
+        && state.personal.workspaceVersion === baseline.personal.workspaceVersion
+        && state.thread?.containerMemberId === containerMemberId
+        && state.thread.conversationMailboxCount === 2
+        && BigInt(state.thread.workspaceVersion ?? "-1")
+          > BigInt(afterFirstGroup.thread?.workspaceVersion ?? "-1"),
+      memberId: userId,
+    });
+    expect(afterGuestGroup.personal.conversationMailboxCount).toBe(
+      baseline.personal.conversationMailboxCount,
+    );
+    expect(afterGuestGroup.personal.workspaceVersion).toBe(
+      baseline.personal.workspaceVersion,
+    );
+    expect(afterGuestGroup.personal).toMatchObject({
+      homeChatBound: false,
+      homeLineAssigned: baseline.personal.homeLineAssigned,
+      pendingChatBound: false,
+      recipientAssigned: true,
+    });
+    expect(afterGuestGroup.thread).toMatchObject({
+      containerMemberId,
+      conversationMailboxCount: 2,
+      ownerMemberId: userId,
+    });
+    expect(BigInt(afterGuestGroup.thread?.workspaceVersion ?? "-1")).toBeGreaterThan(
+      BigInt(afterFirstGroup.thread?.workspaceVersion ?? "-1"),
+    );
+    const guestProviderBodies = requireScenario().assistantProviderRequests
+      .slice(guestProviderCountBefore)
+      .map((request) => request.body)
+      .filter((body) => body.includes(guestGroupText));
+    expect(guestProviderBodies.length).toBeGreaterThan(0);
+    expect(guestProviderBodies.every((body) =>
+      !body.includes(privateContextSentinel)
+      && !body.includes("Murph onboarding:")
+      && !body.includes("murph-onboarding/SKILL.md")
+    )).toBe(true);
+  }, 600_000);
 
   it("keeps PDF-only iMessage media replyable with bounded attachment context", async () => {
     const { chatId: materializedChatId, replyChatPath: expectedReplyChatPath, userId } =
@@ -813,11 +1075,14 @@ function buildLinqWebhookScenarioEnv(linq: HostedLocalLinqStub): NodeJS.ProcessE
 }
 
 function buildLinqWebhookLocalInboundAllowlist(): string {
-  return ["reply", "rapid", "pdf", "image"]
+  const memberPhones = ["reply", "rapid", "group-isolation", "pdf", "image"]
     .map((label) =>
       buildLinqRecipientPhoneNumber(
         `member_local_linq_webhook_${label}_${linqWebhookRunId}_1`,
       )
-    )
-    .join(",");
+    );
+  return [
+    ...memberPhones,
+    buildLinqRecipientPhoneNumber(hostedLinqGroupIsolationGuestUserId),
+  ].join(",");
 }

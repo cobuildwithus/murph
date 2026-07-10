@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { encryptHostedWebNullableString } from "@/src/lib/hosted-web/encryption";
 import {
   createHostedEmailLookupKeyReadCandidates,
+  createHostedExternalThreadIdentityLookupKeyReadCandidates,
   createHostedLinqChatLookupKeyReadCandidates,
   createHostedPhoneLookupKey,
   createHostedPhoneLookupKeyReadCandidates,
@@ -43,6 +44,7 @@ import {
 } from "@/src/lib/hosted-onboarding/hosted-member-identity-store";
 import {
   countHostedMemberHomeLinqBindingsByRecipientPhone,
+  demoteHostedMemberLinqGroupChatBindingsTx,
   lookupHostedMemberRoutingByHomeLinqChatId,
   lookupHostedMemberRoutingByPendingLinqParticipantContact,
   lookupHostedMemberRoutingByTelegramUserId,
@@ -1213,6 +1215,9 @@ describe("hosted-member-store", () => {
     const upsert = vi.fn().mockResolvedValue({});
     const prisma = {
       $executeRaw: executeRaw,
+      hostedThreadRoute: {
+        findFirst: vi.fn().mockResolvedValue(null),
+      },
       hostedMemberRouting: {
         findFirst,
         updateMany,
@@ -1319,6 +1324,127 @@ describe("hosted-member-store", () => {
     });
   });
 
+  it("demotes home and pending Linq bindings for canonical groups without clearing the assigned line", async () => {
+    setHostedContactPrivacyKeyring({
+      currentVersion: "v2",
+      keysByVersion: {
+        v1: TEST_CONTACT_PRIVACY_KEY,
+        v2: TEST_CONTACT_PRIVACY_ROTATED_KEY,
+      },
+    });
+
+    const executeRaw = vi.fn().mockResolvedValue(0);
+    const updateMany = vi.fn()
+      .mockResolvedValueOnce({ count: 1 })
+      .mockResolvedValueOnce({ count: 1 });
+    const prisma = {
+      $executeRaw: executeRaw,
+      hostedMemberRouting: {
+        updateMany,
+      },
+    } as never;
+
+    await expect(demoteHostedMemberLinqGroupChatBindingsTx({
+      linqChatId: "chat_group",
+      prisma,
+    })).resolves.toEqual({
+      homeBindingCount: 1,
+      pendingBindingCount: 1,
+    });
+
+    const lookupKeys = createHostedLinqChatLookupKeyReadCandidates("chat_group");
+    expect(lookupKeys).toHaveLength(2);
+    expect(executeRaw).toHaveBeenCalledTimes(1);
+    expect(updateMany).toHaveBeenNthCalledWith(1, {
+      where: {
+        linqChatLookupKey: {
+          in: lookupKeys,
+        },
+      },
+      data: {
+        linqChatIdEncrypted: null,
+        linqChatLookupKey: null,
+      },
+    });
+    expect(updateMany).toHaveBeenNthCalledWith(2, {
+      where: {
+        pendingLinqChatLookupKey: {
+          in: lookupKeys,
+        },
+      },
+      data: {
+        pendingLinqChatIdEncrypted: null,
+        pendingLinqChatLookupKey: null,
+        pendingLinqParticipantContactEncrypted: null,
+        pendingLinqParticipantContactKind: null,
+        pendingLinqParticipantContactLookupKey: null,
+        pendingLinqParticipantContactObservedAt: null,
+        pendingLinqRecipientPhoneEncrypted: null,
+        pendingLinqRecipientPhoneLookupKey: null,
+      },
+    });
+  });
+
+  it.each([
+    {
+      kind: "home",
+      write: upsertHostedMemberHomeLinqBindingTx,
+    },
+    {
+      kind: "pending",
+      write: upsertHostedMemberPendingLinqBindingTx,
+    },
+  ] as const)("refuses to recreate a $kind Linq binding after a thread route owns the chat", async ({ write }) => {
+    const executeRaw = vi.fn().mockResolvedValue(0);
+    const routeFindFirst = vi.fn().mockResolvedValue({
+      containerMemberId: "thread_container",
+    });
+    const updateMany = vi.fn().mockResolvedValue({ count: 0 });
+    const upsert = vi.fn().mockResolvedValue({});
+    const prisma = {
+      $executeRaw: executeRaw,
+      hostedMemberRouting: {
+        findFirst: vi.fn().mockResolvedValue(null),
+        updateMany,
+        upsert,
+      },
+      hostedThreadRoute: {
+        findFirst: routeFindFirst,
+      },
+    } as never;
+
+    await expect(write({
+      linqChatId: "chat_group",
+      memberId: "member_123",
+      prisma,
+      recipientPhone: "+15550100001",
+    })).rejects.toMatchObject({
+      code: "HOSTED_LINQ_CHAT_THREAD_ROUTE_CONFLICT",
+      retryable: true,
+    });
+
+    expect(executeRaw).toHaveBeenCalledTimes(1);
+    expect(executeRaw.mock.invocationCallOrder[0]).toBeLessThan(
+      routeFindFirst.mock.invocationCallOrder[0]!,
+    );
+    expect(routeFindFirst).toHaveBeenCalledWith({
+      select: {
+        containerMemberId: true,
+      },
+      where: {
+        channel: "linq",
+        threadIdentityLookupKey: {
+          in: createHostedExternalThreadIdentityLookupKeyReadCandidates({
+            channel: "linq",
+            threadId: "chat_group",
+          }),
+        },
+      },
+    });
+    expect(updateMany).not.toHaveBeenCalled();
+    expect(upsert).not.toHaveBeenCalled();
+  });
+
   it("clears pending Linq route state when pending chat binding becomes home", async () => {
     const executeRaw = vi.fn().mockResolvedValue(0);
     const updateMany = vi.fn().mockResolvedValue({ count: 0 });
@@ -1332,6 +1458,9 @@ describe("hosted-member-store", () => {
     const upsert = vi.fn().mockResolvedValue({});
     const prisma = {
       $executeRaw: executeRaw,
+      hostedThreadRoute: {
+        findFirst: vi.fn().mockResolvedValue(null),
+      },
       hostedMemberRouting: {
         findFirst: vi.fn().mockResolvedValue(null),
         findUnique,
@@ -1369,6 +1498,9 @@ describe("hosted-member-store", () => {
     const upsert = vi.fn().mockResolvedValue({});
     const prisma = {
       $executeRaw: executeRaw,
+      hostedThreadRoute: {
+        findFirst: vi.fn().mockResolvedValue(null),
+      },
       hostedMemberRouting: {
         findFirst: vi.fn().mockResolvedValue(null),
         findUnique,
@@ -1403,6 +1535,9 @@ describe("hosted-member-store", () => {
     const upsert = vi.fn().mockResolvedValue({});
     const prisma = {
       $executeRaw: executeRaw,
+      hostedThreadRoute: {
+        findFirst: vi.fn().mockResolvedValue(null),
+      },
       hostedMemberRouting: {
         findFirst: vi.fn().mockResolvedValue(null),
         findUnique,
@@ -1441,6 +1576,9 @@ describe("hosted-member-store", () => {
     const upsert = vi.fn().mockResolvedValue({});
     const prisma = {
       $executeRaw: executeRaw,
+      hostedThreadRoute: {
+        findFirst: vi.fn().mockResolvedValue(null),
+      },
       hostedMemberRouting: {
         findFirst,
         updateMany,
@@ -1604,6 +1742,9 @@ describe("hosted-member-store", () => {
       .mockResolvedValueOnce({});
     const prisma = {
       $executeRaw: executeRaw,
+      hostedThreadRoute: {
+        findFirst: vi.fn().mockResolvedValue(null),
+      },
       hostedMemberRouting: {
         findFirst: vi.fn().mockResolvedValue(null),
         updateMany,

@@ -27,6 +27,7 @@ import {
   lookupHostedMemberByVerifiedEmailAddress,
 } from "./hosted-member-store";
 import {
+  demoteHostedMemberLinqGroupChatBindingsTx,
   lookupHostedMemberRoutingByHomeLinqChatId,
   lookupHostedMemberRoutingByPendingLinqParticipantContact,
   readHostedMemberRoutingState,
@@ -149,6 +150,13 @@ export async function planHostedOnboardingLinqWebhook(input: {
     recipientPhoneNumber,
     summary,
   } = context;
+
+  if (isHostedLinqGroupChat(messageEvent)) {
+    await demoteHostedMemberLinqGroupChatBindingsTx({
+      linqChatId: summary.chatId,
+      prisma: input.prisma,
+    });
+  }
 
   const threadRouteAccountLookupKeys = createHostedPhoneLookupKeyReadCandidates(
     recipientPhoneNumber,

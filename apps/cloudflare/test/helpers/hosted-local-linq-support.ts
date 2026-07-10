@@ -122,6 +122,7 @@ export interface HostedLocalLinqStub {
   requireObservedChatId(userId: string): string;
   requireLatestObservedMessageId(chatId: string): string;
   runnerBaseUrl: string;
+  setChatIsGroup(chatId: string, isGroup: boolean): void;
   stop(): Promise<void>;
   waitForAdditionalRequest(input: {
     baselineCount: number;
@@ -214,6 +215,7 @@ export async function startHostedLocalLinqStub(input: {
     (input.canonicalChats ?? []).map((chat) => [chat.chatId, chat] as const),
   );
   const observedChatIdsByRecipient = new Map<string, string>();
+  const canonicalGroupStateByChatId = new Map<string, boolean>();
   const observedMessageIdsByChat = new Map<string, string[]>();
   const voiceMemoBytes = buildHostedLocalLinqVoiceMemoBytes();
   const pdfBytes = HOSTED_LOCAL_LINQ_PDF_BYTES;
@@ -302,7 +304,8 @@ export async function startHostedLocalLinqStub(input: {
           status: handle.status ?? null,
         })),
         id: chatId,
-        is_group: canonicalChat?.isGroup ?? false,
+        is_group:
+          canonicalGroupStateByChatId.get(chatId) ?? canonicalChat?.isGroup ?? false,
       });
       return;
     }
@@ -581,6 +584,9 @@ export async function startHostedLocalLinqStub(input: {
       return latestMessageId;
     },
     runnerBaseUrl,
+    setChatIsGroup: (chatId, isGroup) => {
+      canonicalGroupStateByChatId.set(chatId, isGroup);
+    },
     stop: async () => {
       await stopHttpStubServer(activeServer);
       server = null;
@@ -669,10 +675,12 @@ export function buildHostedLinqInboundEvent(
     isGroup?: boolean | null;
     messageId?: string;
     parts?: HostedLinqInboundPartInput[];
+    recipientUserId?: string;
     service?: string;
     text?: string;
   } = {},
 ): Record<string, unknown> {
+  const recipientUserId = input.recipientUserId ?? userId;
   const service = input.service ?? "SMS";
   const parts = input.parts?.map(buildHostedLinqInboundPart) ?? [
     {
@@ -689,8 +697,8 @@ export function buildHostedLinqInboundEvent(
         id: chatId,
         ...(input.isGroup === null ? {} : { is_group: input.isGroup ?? false }),
         owner_handle: {
-          handle: buildLinqHomePhoneNumber(userId),
-          id: `handle_owner_${userId}`,
+          handle: buildLinqHomePhoneNumber(recipientUserId),
+          id: `handle_owner_${recipientUserId}`,
           is_me: true,
           service,
         },
@@ -709,12 +717,12 @@ export function buildHostedLinqInboundEvent(
         parts,
       },
       recipient_handle: {
-        handle: buildLinqHomePhoneNumber(userId),
-        id: `handle_owner_${userId}`,
+        handle: buildLinqHomePhoneNumber(recipientUserId),
+        id: `handle_owner_${recipientUserId}`,
         is_me: true,
         service,
       },
-      recipient_phone: buildLinqHomePhoneNumber(userId),
+      recipient_phone: buildLinqHomePhoneNumber(recipientUserId),
       received_at: new Date().toISOString(),
       sender_handle: {
         handle: buildLinqRecipientPhoneNumber(userId),
