@@ -234,8 +234,12 @@ export function MurphAssistantStylePicker({
       <DialogContent
         showCloseButton={false}
         className={cn(
-          "max-h-[calc(100dvh-2rem)] gap-5 overflow-y-auto rounded-lg border border-border bg-popover p-5 text-popover-foreground ring-border sm:p-6",
-          step === "voice" ? "sm:max-w-2xl lg:max-w-3xl" : "sm:max-w-xl",
+          "max-h-[calc(100dvh-2rem)] gap-5 rounded-lg border border-border bg-popover p-5 text-popover-foreground ring-border sm:p-6",
+          // The voice grid is the dialog's only scroller; the short tone step
+          // scrolls as a whole on very short viewports instead.
+          step === "voice"
+            ? "flex flex-col overflow-hidden sm:max-w-2xl lg:max-w-3xl"
+            : "overflow-y-auto sm:max-w-xl",
         )}
       >
         <DialogHeader className="gap-2 text-left">
@@ -394,7 +398,7 @@ function VoiceChooser({
         drawer on mobile and is height-capped inside the desktop dialog.
       */}
       <div
-        className="grid min-h-0 flex-1 grid-cols-2 content-start gap-2 overflow-y-auto pb-1 md:max-h-[min(56vh,34rem)] md:flex-none md:grid-cols-3 md:pr-1"
+        className="grid min-h-0 flex-1 grid-cols-2 content-start gap-2 overflow-y-auto pb-1 md:max-h-[min(56vh,34rem)] md:grid-cols-3 md:pr-1"
         role="radiogroup"
         aria-label="Murph voice"
       >
