@@ -18,6 +18,7 @@ import type { HostedBrowserVaultReplicaRef } from "@murphai/hosted-execution/con
 import type { HostedExecutionSnapshotRef } from "@murphai/hosted-execution/contracts";
 import type { HostedExecutionWake } from "@murphai/hosted-execution/contracts";
 import { parseHostedExecutionWake } from "@murphai/hosted-execution/parsers";
+import type { Prisma } from "@prisma/client";
 
 import { createHostedWebSmokeEnvironment } from "../../next-artifacts";
 import type { HostedRuntimeTemporalSignalClient } from "../../src/lib/hosted-orchestration/temporal-client";
@@ -53,7 +54,19 @@ type HostedTestPrismaClient =
 
 interface HostedTestPrismaFactoryClient {
   $disconnect(): Promise<void>;
-  $transaction<T>(callback: (tx: unknown) => Promise<T>): Promise<T>;
+  $transaction<T>(callback: (tx: Prisma.TransactionClient) => Promise<T>): Promise<T>;
+  hostedMailboxItem: {
+    count(args: unknown): Promise<number>;
+    findUniqueOrThrow(args: unknown): Promise<{
+      dedupeKey: string;
+      kind: string;
+      lane: string;
+      userId: string;
+    }>;
+  };
+  hostedMember: {
+    create(args: unknown): Promise<{ id: string }>;
+  };
 }
 
 interface HostedActionApprovalForTestPrismaClient {

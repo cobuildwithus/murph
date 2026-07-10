@@ -29,6 +29,7 @@ export const HOSTED_EXECUTION_SIGNING_KEY_ID_HEADER =
 
 export const HOSTED_EXECUTION_RUNTIME_CONTROL_WAKE_KINDS = [
   "runtime.manual-requested",
+  "runtime.pending-effects-reconcile-requested",
   "runtime.maintenance-requested",
   "runtime.browser-vault-refresh-requested",
   "runtime.codex-auth-requested",

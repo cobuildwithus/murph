@@ -1,6 +1,6 @@
 # Hosted Mailbox Runtime Protocol
 
-Last verified: 2026-07-09
+Last verified: 2026-07-10
 
 ## Decision
 
@@ -460,6 +460,22 @@ dirty webhook freshness is persisted dirty state plus one clean-to-dirty
 periodic scheduler input. Historical `runtime.mailbox-lag-observed` and
 `runtime.device-sync-recovery-requested` control rows remain importable for
 deploy-skew and drain compatibility, but there is no active producer for them.
+
+`runtime.pending-effects-reconcile-requested` is the payload-free continuation
+for a trusted owner-state change that may unblock an already-persisted runtime
+effect. The owner mutation and control row commit in one transaction; only the
+mailbox pointer is signaled afterward. The runtime records the control receipt
+and performs bounded delivery-effect reconciliation without continuing the
+assistant automation lane. The row is never authorization or outcome truth.
+Secure-action approval and denial use this shape because the exact attachment,
+destination, and delivery identity remain in the runtime-owned parked intent.
+External outcomes that require generated user-facing prose, such as phone-call
+results, continue to use `assistant.notification.requested` instead.
+
+Deploy consumers before the producer for this kind: the Cloudflare runner and
+runtime parser must accept it before web begins appending it. Old web against a
+new runtime is safe; new web against an old runtime would quarantine the system
+row and block system-lane progress.
 
 ### Hosted Runtime Maintenance Wake
 

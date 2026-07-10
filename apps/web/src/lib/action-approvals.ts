@@ -8,6 +8,9 @@ import type {
   PrismaClient,
 } from "@prisma/client";
 import {
+  buildHostedExecutionRuntimeControlWake,
+} from "@murphai/hosted-execution";
+import {
   HOSTED_ACTION_APPROVAL_ID_PREFIX,
   HOSTED_ACTION_APPROVAL_RETURN_CONTACT_KINDS,
   isHostedActionApprovalId,
@@ -25,6 +28,7 @@ import type {
   HostedActionApprovalStatus,
   HostedActionApprovalView,
 } from "./action-approvals-shared";
+import { appendHostedMailboxEnvelopeTx } from "./hosted-mailbox/store";
 import { hostedOnboardingError } from "./hosted-onboarding/errors";
 import { resolveHostedPublicOrigin } from "./hosted-web/public-url";
 import {
@@ -39,6 +43,7 @@ const ACTION_APPROVAL_KEY_VERSION = "murph-action-approval-key-v1";
 const ACTION_APPROVAL_HASH_VERSION = "murph-action-approval-request-hash-v1";
 const ACTION_APPROVAL_BINDING_VERSION = "murph-action-approval-binding-v1";
 const ACTION_APPROVAL_GENERATION_VERSION = "murph-action-approval-generation-v1";
+const ACTION_APPROVAL_OUTCOME_WAKE_VERSION = "murph-action-approval-outcome-wake-v1";
 const ACTION_APPROVAL_PLACEHOLDER_VERSION = "murph-action-approval-placeholder-v1";
 const ACTION_APPROVAL_ID_BYTES = 24;
 const SHA256_HEX_PATTERN = /^[0-9a-f]{64}$/u;
@@ -52,6 +57,16 @@ export interface PendingHostedActionApprovalIdentity {
   presentation: HostedActionApprovalView["presentation"];
   returnContactKind: HostedActionApprovalReturnContactKind | null;
   tokenHash: string;
+}
+
+export interface HostedActionApprovalDecisionTxResult {
+  approval: HostedActionApprovalView;
+  runtimeResume: {
+    lane: "system";
+    laneSeq: string;
+    mailboxItemId: string;
+    userId: string;
+  };
 }
 
 interface HostedActionApprovalReadChallengeDelegate {
@@ -319,7 +334,7 @@ export async function decideHostedActionApprovalTx(input: {
   memberId: string;
   now?: Date;
   tx: Prisma.TransactionClient;
-}): Promise<HostedActionApprovalView> {
+}): Promise<HostedActionApprovalDecisionTxResult> {
   const now = input.now ?? new Date();
   const proof = input.decision === "approved"
     ? requireApprovalChallenge(input.challenge)
@@ -352,12 +367,40 @@ export async function decideHostedActionApprovalTx(input: {
     throw actionApprovalUnavailable();
   }
 
-  return {
+  const approval: HostedActionApprovalView = {
     approvalId: input.approval.approvalId,
     expiresAt: expiresAt.toISOString(),
     presentation: input.approval.presentation,
     returnContactKind: input.approval.returnContactKind,
     status: input.decision,
+  };
+  const mailboxItem = (await appendHostedMailboxEnvelopeTx({
+    envelope: buildHostedExecutionRuntimeControlWake({
+      eventId: buildHostedActionApprovalOutcomeWakeEventId({
+        approval: input.approval,
+        decidedAt: now,
+        decision: input.decision,
+      }),
+      kind: "runtime.pending-effects-reconcile-requested",
+      occurredAt: now.toISOString(),
+      userId: input.memberId,
+    }),
+    tx: input.tx,
+  })).item;
+  if (mailboxItem.lane !== "system") {
+    throw new TypeError(
+      "Hosted action approval outcome wake must use the system mailbox lane.",
+    );
+  }
+
+  return {
+    approval,
+    runtimeResume: {
+      lane: mailboxItem.lane,
+      laneSeq: mailboxItem.laneSeq,
+      mailboxItemId: mailboxItem.id,
+      userId: mailboxItem.userId,
+    },
   };
 }
 
@@ -735,13 +778,34 @@ function buildApprovedHostedActionApprovalResult(
 function buildHostedActionApprovalGeneration(
   approval: HostedSensitiveActionChallenge,
 ): string {
-  const identity = requireHostedActionApprovalIdentity(approval);
+  return buildHostedActionApprovalIdentityGeneration(
+    requireHostedActionApprovalIdentity(approval),
+  );
+}
+
+function buildHostedActionApprovalIdentityGeneration(
+  identity: PendingHostedActionApprovalIdentity,
+): string {
   return sha256Hex([
     ACTION_APPROVAL_GENERATION_VERSION,
     identity.approvalId,
     identity.actionHash,
     identity.tokenHash,
   ].join("\n"));
+}
+
+function buildHostedActionApprovalOutcomeWakeEventId(input: {
+  approval: PendingHostedActionApprovalIdentity;
+  decidedAt: Date;
+  decision: "approved" | "denied";
+}): string {
+  const fingerprint = sha256Hex([
+    ACTION_APPROVAL_OUTCOME_WAKE_VERSION,
+    buildHostedActionApprovalIdentityGeneration(input.approval),
+    input.decidedAt.toISOString(),
+    input.decision,
+  ].join("\n"));
+  return `runtime-control:pending-effects-reconcile:${fingerprint}`;
 }
 
 function normalizeActionApprovalConsumerId(value: string | null | undefined): string | null {

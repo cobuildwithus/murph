@@ -10,10 +10,7 @@ import type {
   HostedSensitiveActionChallengeForTest,
   HostedWebTestkitDeps,
 } from "./support/hosted-web-testkit";
-import {
-  createHostedWebTestkitDeps,
-  seedHostedActiveMember,
-} from "./support/hosted-web-testkit";
+import { createHostedWebTestkitDeps } from "./support/hosted-web-testkit";
 
 const mocks = vi.hoisted(() => ({
   resolveHostedPublicOrigin: vi.fn(),
@@ -26,6 +23,8 @@ vi.mock("@/src/lib/hosted-web/public-url", () => ({
 
 import {
   consumeHostedActionApproval,
+  decideHostedActionApprovalTx,
+  requirePendingHostedActionApproval,
   requestHostedActionApproval,
 } from "@/src/lib/action-approvals";
 
@@ -56,12 +55,151 @@ describe("hosted action approvals", () => {
   async function setup() {
     deps = await createHostedWebTestkitDeps();
     const memberId = `member_action_${randomUUID().replaceAll("-", "")}`;
-    await seedHostedActiveMember({
-      environment: deps.environment,
-      memberId,
+    await deps.prisma.hostedMember.create({
+      data: {
+        billingStatus: "active",
+        id: memberId,
+      },
     });
     return { deps, memberId };
   }
+
+  it("commits a generation-scoped pending-effect wake with each approval decision", async () => {
+    const { deps, memberId } = await setup();
+    const firstRequest = await requestHostedActionApproval({
+      memberId,
+      now: new Date("2026-06-25T16:00:00.000Z"),
+      prisma: deps.prisma,
+      request: REQUEST,
+    });
+    const firstPending = await requirePendingHostedActionApproval({
+      approvalId: firstRequest.approvalId,
+      memberId,
+      now: new Date("2026-06-25T16:01:00.000Z"),
+      prisma: deps.prisma,
+    });
+    const firstDecision = await deps.prisma.$transaction((tx) =>
+      decideHostedActionApprovalTx({
+        approval: firstPending,
+        challenge: verifiedApprovalChallenge(firstPending, memberId),
+        decision: "approved",
+        memberId,
+        now: new Date("2026-06-25T16:01:00.000Z"),
+        tx,
+      }));
+
+    expect(firstDecision.approval.status).toBe("approved");
+    expect(firstDecision.runtimeResume).toEqual({
+      lane: "system",
+      laneSeq: expect.stringMatching(/^[1-9][0-9]*$/u),
+      mailboxItemId: expect.any(String),
+      userId: memberId,
+    });
+    const firstWake = await deps.prisma.hostedMailboxItem.findUniqueOrThrow({
+      where: { id: firstDecision.runtimeResume.mailboxItemId },
+    });
+    expect(firstWake).toMatchObject({
+      dedupeKey: expect.stringMatching(
+        /^runtime-control:pending-effects-reconcile:[0-9a-f]{64}$/u,
+      ),
+      kind: "runtime.pending-effects-reconcile-requested",
+      lane: "system",
+      userId: memberId,
+    });
+
+    const firstApproved = await requestHostedActionApproval({
+      memberId,
+      now: new Date("2026-06-25T16:01:30.000Z"),
+      prisma: deps.prisma,
+      request: REQUEST,
+    });
+    if (firstApproved.status !== "approved") {
+      throw new Error("Expected the first action approval to be approved.");
+    }
+    await consumeHostedActionApproval({
+      memberId,
+      now: new Date("2026-06-25T16:02:00.000Z"),
+      prisma: deps.prisma,
+      request: consumeRequest(firstApproved, "delivery_generation_one"),
+    });
+
+    const secondRequest = await requestHostedActionApproval({
+      memberId,
+      now: new Date("2026-06-25T16:03:00.000Z"),
+      prisma: deps.prisma,
+      request: REQUEST,
+    });
+    expect(secondRequest.status).toBe("pending");
+    const secondPending = await requirePendingHostedActionApproval({
+      approvalId: secondRequest.approvalId,
+      memberId,
+      now: new Date("2026-06-25T16:04:00.000Z"),
+      prisma: deps.prisma,
+    });
+    const secondDecision = await deps.prisma.$transaction((tx) =>
+      decideHostedActionApprovalTx({
+        approval: secondPending,
+        challenge: verifiedApprovalChallenge(secondPending, memberId),
+        decision: "approved",
+        memberId,
+        now: new Date("2026-06-25T16:04:00.000Z"),
+        tx,
+      }));
+
+    const secondWake = await deps.prisma.hostedMailboxItem.findUniqueOrThrow({
+      where: { id: secondDecision.runtimeResume.mailboxItemId },
+    });
+    expect(secondWake.dedupeKey).not.toBe(firstWake.dedupeKey);
+    expect(BigInt(secondDecision.runtimeResume.laneSeq)).toBeGreaterThan(
+      BigInt(firstDecision.runtimeResume.laneSeq),
+    );
+  });
+
+  it("rolls back the approval decision when its durable wake cannot append", async () => {
+    const { deps, memberId } = await setup();
+    const requested = await requestHostedActionApproval({
+      memberId,
+      now: new Date("2026-06-25T17:00:00.000Z"),
+      prisma: deps.prisma,
+      request: REQUEST,
+    });
+    const pending = await requirePendingHostedActionApproval({
+      approvalId: requested.approvalId,
+      memberId,
+      now: new Date("2026-06-25T17:01:00.000Z"),
+      prisma: deps.prisma,
+    });
+
+    await expect(deps.prisma.$transaction(async (tx) => {
+      const failingTx = new Proxy(tx, {
+        get(target, property, receiver) {
+          if (property === "$queryRaw") {
+            return async () => {
+              throw new Error("synthetic mailbox append failure");
+            };
+          }
+          return Reflect.get(target, property, receiver);
+        },
+      });
+      return decideHostedActionApprovalTx({
+        approval: pending,
+        decision: "denied",
+        memberId,
+        now: new Date("2026-06-25T17:01:00.000Z"),
+        tx: failingTx,
+      });
+    })).rejects.toThrow("synthetic mailbox append failure");
+
+    const stored = await requireApprovalRow(deps, requested.approvalId);
+    expect(stored.approvalStatus).toBe("pending");
+    expect(stored.decidedAt).toBeNull();
+    await expect(deps.prisma.hostedMailboxItem.count({
+      where: {
+        kind: "runtime.pending-effects-reconcile-requested",
+        userId: memberId,
+      },
+    })).resolves.toBe(0);
+  });
 
   it("consumes an approved action once per approval generation and refreshes later", async () => {
     const { deps, memberId } = await setup();
@@ -494,6 +632,19 @@ async function approveExistingAction(input: {
     throw new Error("Expected approved hosted action approval.");
   }
   return approved;
+}
+
+function verifiedApprovalChallenge(
+  pending: Awaited<ReturnType<typeof requirePendingHostedActionApproval>>,
+  memberId: string,
+) {
+  return {
+    bindingHash: pending.bindingHash,
+    expiresAt: pending.expiresAt,
+    kind: "assistant.action.approve" as const,
+    memberId,
+    tokenHash: pending.tokenHash,
+  };
 }
 
 function consumeRequest(

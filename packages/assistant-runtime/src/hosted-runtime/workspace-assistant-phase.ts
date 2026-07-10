@@ -6400,6 +6400,10 @@ function shouldCollectSystemMailboxDeliveryEffects(input: {
     return true;
   }
 
+  if (item.routeAction === "apply-runtime-control-request") {
+    return item.wake.kind === "runtime.pending-effects-reconcile-requested";
+  }
+
   return item.routeAction === "apply-member-activation"
     && item.wake.kind === "member.activated"
     && item.wake.signupWelcome != null;

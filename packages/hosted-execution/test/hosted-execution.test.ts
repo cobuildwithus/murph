@@ -470,6 +470,7 @@ describe("hosted execution coverage gaps", () => {
       "device-sync.wake",
       "group-newsletter.email-needed",
       "runtime.manual-requested",
+      "runtime.pending-effects-reconcile-requested",
       "runtime.maintenance-requested",
       "runtime.browser-vault-refresh-requested",
       "runtime.codex-auth-requested",

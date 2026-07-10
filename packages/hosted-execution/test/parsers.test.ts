@@ -16,13 +16,20 @@ describe("parseHostedExecutionEvent", () => {
   it("parses runtime control events", () => {
     expect(
       parseHostedExecutionEvent({
-        kind: "runtime.maintenance-requested",
+        kind: "runtime.pending-effects-reconcile-requested",
         userId: "user-1",
       }),
     ).toEqual({
-      kind: "runtime.maintenance-requested",
+      kind: "runtime.pending-effects-reconcile-requested",
       userId: "user-1",
     });
+    expect(() =>
+      parseHostedExecutionEvent({
+        kind: "runtime.pending-effects-reconcile-requested",
+        payload: {},
+        userId: "user-1",
+      })
+    ).toThrow(/unsupported field/u);
   });
 
   it("parses Codex auth runtime-control events with exact keys", () => {
@@ -1738,16 +1745,25 @@ describe("parseHostedExecutionWake", () => {
     expect(
       parseHostedExecutionWake({
         eventId: "evt_runtime_control",
-        kind: "runtime.maintenance-requested",
+        kind: "runtime.pending-effects-reconcile-requested",
         occurredAt: "2026-04-18T00:00:00.000Z",
         userId: "user-1",
       }),
     ).toEqual({
       eventId: "evt_runtime_control",
-      kind: "runtime.maintenance-requested",
+      kind: "runtime.pending-effects-reconcile-requested",
       occurredAt: "2026-04-18T00:00:00.000Z",
       userId: "user-1",
     });
+    expect(() =>
+      parseHostedExecutionWake({
+        eventId: "evt_runtime_control",
+        kind: "runtime.pending-effects-reconcile-requested",
+        occurredAt: "2026-04-18T00:00:00.000Z",
+        payload: {},
+        userId: "user-1",
+      })
+    ).toThrow(/unsupported field/u);
   });
 
   it("parses member activation wakes with embedded signup welcomes", () => {

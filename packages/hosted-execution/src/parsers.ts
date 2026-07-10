@@ -303,6 +303,19 @@ export function parseHostedExecutionWake(value: unknown): HostedExecutionWake {
         memberId: wireUserId,
         occurredAt,
       });
+    case "runtime.pending-effects-reconcile-requested":
+      assertExactHostedExecutionKeys(record, [
+        "eventId",
+        "kind",
+        "occurredAt",
+        "userId",
+      ], "Hosted execution runtime.pending-effects-reconcile-requested wake");
+      return buildHostedExecutionRuntimeControlWake({
+        eventId,
+        kind,
+        occurredAt,
+        userId: wireUserId,
+      });
     case "runtime.manual-requested":
     case "runtime.maintenance-requested":
     case "runtime.browser-vault-refresh-requested":
@@ -315,7 +328,7 @@ export function parseHostedExecutionWake(value: unknown): HostedExecutionWake {
         userId: wireUserId,
       });
     case "runtime.codex-auth-requested":
-      assertExactHostedCodexAuthKeys(record, [
+      assertExactHostedExecutionKeys(record, [
         "action",
         "attemptId",
         "eventId",
@@ -945,6 +958,15 @@ export function parseHostedExecutionEvent(value: unknown): HostedExecutionEvent 
         kind,
         userId,
       } satisfies HostedExecutionGroupNewsletterEmailNeededEvent;
+    case "runtime.pending-effects-reconcile-requested":
+      assertExactHostedExecutionKeys(record, [
+        "kind",
+        "userId",
+      ], "Hosted execution runtime.pending-effects-reconcile-requested event");
+      return {
+        kind: kind as HostedExecutionPlainRuntimeControlWakeKind,
+        userId,
+      };
     case "runtime.manual-requested":
     case "runtime.maintenance-requested":
     case "runtime.browser-vault-refresh-requested":
@@ -955,7 +977,7 @@ export function parseHostedExecutionEvent(value: unknown): HostedExecutionEvent 
         userId,
       };
     case "runtime.codex-auth-requested":
-      assertExactHostedCodexAuthKeys(record, [
+      assertExactHostedExecutionKeys(record, [
         "action",
         "attemptId",
         "kind",
@@ -1253,7 +1275,7 @@ function parseHostedCodexAuthAttemptId(value: unknown): string {
   return attemptId;
 }
 
-function assertExactHostedCodexAuthKeys(
+function assertExactHostedExecutionKeys(
   record: Record<string, unknown>,
   keys: readonly string[],
   label: string,
