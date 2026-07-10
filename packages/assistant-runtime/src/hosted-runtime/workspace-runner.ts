@@ -120,19 +120,19 @@ export interface HostedWorkspaceSnapshotCheckpointResult {
   snapshotRef: HostedWorkspaceCheckpointRequest["snapshotRef"];
 }
 
+type HostedWorkspaceSnapshotCheckpointMailboxReason = Exclude<
+  HostedWorkspaceCheckpointReason,
+  "canonical_runtime_commit" | "idle_shutdown"
+>;
+
 type HostedWorkspaceSnapshotCheckpointMailboxInput =
   Omit<HostedMailboxImportCheckpointRequestInput, "reason" | "redactedStatus"> & {
-    reason: Exclude<HostedWorkspaceCheckpointReason, "idle_shutdown">;
+    reason: HostedWorkspaceSnapshotCheckpointMailboxReason;
   };
-
-interface HostedWorkspaceSnapshotCheckpointCanonicalRuntimeInput {
-  reason: "canonical_runtime_commit";
-}
 
 export type HostedWorkspaceSnapshotCheckpointRequestBuilderInput =
   (
     | HostedWorkspaceSnapshotCheckpointMailboxInput
-    | HostedWorkspaceSnapshotCheckpointCanonicalRuntimeInput
     | {
       reason: "idle_shutdown";
     }
@@ -175,7 +175,6 @@ interface HostedWorkspaceCheckpointRequestSession
   discardMailboxPostCheckpointEffects(): void;
   hasRuntimeStateDirty(): boolean;
   latestAssistantInputBatch(): HostedWorkspaceRunnerAssistantInputBatch | null;
-  latestMailboxImportCoveredByWorkspace(): boolean;
   latestMailboxImport(): HostedMailboxImportCheckpointResult | null;
   latestWorkspace(): HostedWorkspaceState | null;
   markRuntimeStateDirty(): void;
@@ -186,7 +185,7 @@ interface HostedWorkspaceCheckpointRequestSession
       captureAssistantInputBatch?: boolean;
     },
   ): void;
-  recordWorkspaceCheckpoint(response: HostedWorkspaceCheckpointResponse): void;
+  recordStatusCheckpoint(response: HostedWorkspaceCheckpointResponse): void;
   takeMailboxPostCheckpointEffects(): readonly HostedMailboxPostCheckpointEffect[];
 }
 
@@ -298,11 +297,10 @@ export interface HostedWorkspaceRunnerDeferredUsageCapture {
 }
 
 export interface HostedWorkspaceRunnerRuntimeStatusCheckpointInput {
-  checkpointSnapshot?: boolean;
   nextWakeAt?: string | null;
   nextWakeReason?: string | null;
   reason: Exclude<HostedWorkspaceCheckpointReason, "idle_shutdown">;
-  redactedStatus: HostedRuntimeRedactedJson;
+  redactedStatus: HostedRuntimeRedactedJson | null;
   workspace: HostedWorkspaceState | null;
 }
 
@@ -1581,7 +1579,7 @@ async function notifyHostedActiveTurnInputForMailboxImport(input: {
 
 export async function importHostedMailboxForWorkspaceRunner(input: {
   checkpointRequestBuilder: HostedWorkspaceCheckpointRequestBuilder;
-  checkpointReason: HostedWorkspaceCheckpointReason;
+  checkpointReason: HostedWorkspaceSnapshotCheckpointMailboxReason;
   deferConversationUntil?: HostedMailboxConversationDeferral | null;
   deferCheckpoint?: boolean;
   importItem?: HostedWorkspaceRunnerMailboxImportItem | null;
@@ -1929,17 +1927,23 @@ function createHostedWorkspaceCanonicalWritePort(input: {
           input.checkpointRequestBuilder.markRuntimeStateDirty();
           input.onAssistantContextSnapshotDirty?.();
         }
-        await Promise.all(writeInput.payloads.map(async (payload) => {
-          if (payload.bytes.byteLength !== payload.byteLength) {
-            throw new TypeError("Hosted canonical write payload length does not match its receipt.");
-          }
-          await input.input.platform.artifactStore.put({
-            bytes: payload.bytes,
-            sha256: payload.sha256,
-          });
-        }));
         const receiptLogUpdate = await appendHostedCanonicalWriteReceiptToArtifactLog({
           artifactStore: input.input.platform.artifactStore,
+          beforeReceiptUpload: async () => {
+            for (const payload of writeInput.payloads) {
+              if (payload.bytes.byteLength !== payload.byteLength) {
+                throw new TypeError(
+                  "Hosted canonical write payload length does not match its receipt.",
+                );
+              }
+            }
+            for (const payload of writeInput.payloads) {
+              await input.input.platform.artifactStore.put({
+                bytes: payload.bytes,
+                sha256: payload.sha256,
+              });
+            }
+          },
           previousStatus: input.readPreviousRedactedStatus(),
           receipt: writeInput.receipt,
         });
@@ -1952,18 +1956,14 @@ function createHostedWorkspaceCanonicalWritePort(input: {
         if (!input.input.checkpointRuntimeRedactedStatus) {
           throw new TypeError("Hosted canonical write receipt checkpoint requires runtime status checkpoint support.");
         }
-        const checkpointSnapshot = input.checkpointRequestBuilder.hasRuntimeStateDirty();
         const checkpoint = await input.input.checkpointRuntimeRedactedStatus({
-          checkpointSnapshot,
           reason: "canonical_runtime_commit",
           redactedStatus: checkpointRedactedStatus,
           workspace: input.checkpointRequestBuilder.latestWorkspace() ?? input.input.workspace,
         });
-        input.checkpointRequestBuilder.recordWorkspaceCheckpoint(checkpoint);
+        input.checkpointRequestBuilder.recordStatusCheckpoint(checkpoint);
         input.recordRedactedStatus(receiptLogStatus);
-        if (!checkpointSnapshot) {
-          input.checkpointRequestBuilder.markRuntimeStateDirty();
-        }
+        input.checkpointRequestBuilder.markRuntimeStateDirty();
         await writeHostedForegroundCheckpointDeferredLog({
           checkpointPhase: "canonical_write",
           now: input.input.now,
@@ -2155,8 +2155,6 @@ function createHostedWorkspaceCheckpointRequestSession(
     ),
   );
   let expectedWorkspaceVersion: string | null = null;
-  let latestMailboxImportSequence = 0;
-  let latestWorkspaceMailboxImportSequence = 0;
   const mailboxPostCheckpointEffects: HostedMailboxPostCheckpointEffect[] = [];
   let latestAssistantInputBatch: HostedWorkspaceRunnerAssistantInputBatch | null = null;
   let latestMailboxImport: HostedMailboxImportCheckpointResult | null = null;
@@ -2212,9 +2210,6 @@ function createHostedWorkspaceCheckpointRequestSession(
     latestAssistantInputBatch() {
       return latestAssistantInputBatch;
     },
-    latestMailboxImportCoveredByWorkspace() {
-      return latestMailboxImportSequence === latestWorkspaceMailboxImportSequence;
-    },
     latestWorkspace() {
       return latestWorkspace;
     },
@@ -2225,7 +2220,6 @@ function createHostedWorkspaceCheckpointRequestSession(
       return mailboxRetryAt;
     },
     recordCheckpointResult(result, recordOptions) {
-      latestMailboxImportSequence += 1;
       latestMailboxImport = result;
       const freshBatchLimit = assistantInputFreshBatchLimit();
       if (
@@ -2250,17 +2244,14 @@ function createHostedWorkspaceCheckpointRequestSession(
         checkpointRequestBuilder.recordCheckpoint?.(result.checkpoint);
         expectedWorkspaceVersion = result.checkpoint.workspace.version;
         latestWorkspace = result.checkpoint.workspace;
-        latestWorkspaceMailboxImportSequence = latestMailboxImportSequence;
         runtimeStateDirty = false;
       }
     },
-    recordWorkspaceCheckpoint(response) {
+    recordStatusCheckpoint(response) {
       if (response.checkpointed) {
         checkpointRequestBuilder.recordCheckpoint?.(response);
         expectedWorkspaceVersion = response.workspace.version;
         latestWorkspace = response.workspace;
-        latestWorkspaceMailboxImportSequence = latestMailboxImportSequence;
-        runtimeStateDirty = false;
       }
     },
     takeMailboxPostCheckpointEffects() {

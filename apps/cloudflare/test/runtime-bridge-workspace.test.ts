@@ -146,11 +146,11 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     });
 
     for (const reason of HOSTED_WORKSPACE_CHECKPOINT_REASONS.filter((reason) =>
-      reason !== "idle_shutdown" && reason !== "canonical_runtime_commit"
+      reason !== "canonical_runtime_commit" && reason !== "idle_shutdown"
     )) {
       await expect(createOptions().createCheckpointSnapshot(createCheckpointInput(reason)))
         .rejects.toThrow(
-          "Hosted workspace snapshot construction is idle-shutdown or canonical runtime commit only.",
+          "Hosted workspace snapshot construction is idle-shutdown only.",
         );
     }
 
@@ -2709,9 +2709,9 @@ function createSystemMailboxImportItem(input: {
   };
 }
 
-function createCheckpointInput(
-  reason: (typeof HOSTED_WORKSPACE_CHECKPOINT_REASONS)[number] = "canonical_runtime_commit",
-) {
+function createCheckpointInput<
+  const Reason extends (typeof HOSTED_WORKSPACE_CHECKPOINT_REASONS)[number],
+>(reason: Reason) {
   const state = {
     recentStatuses: [],
     watermarks: {
@@ -2895,7 +2895,7 @@ function createPlatform(input: {
         expectedWorkspaceVersion: string;
         nextWakeAt?: string | null;
         nextWakeReason?: string | null;
-        reason: "canonical_runtime_commit" | "idle_shutdown";
+        reason: "idle_shutdown";
       }) => {
         const snapshotId = `snapshot_test_${++workspaceSnapshotStartOrdinal}`;
         const objectKey = await hostedWorkspaceSnapshotObjectKey({

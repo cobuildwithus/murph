@@ -3610,7 +3610,7 @@ describe("handleRunnerOutboundRequest", () => {
     ))).toBe(true);
   });
 
-  it("starts direct-R2 workspace snapshot upload sessions for canonical runtime commits", async () => {
+  it("rejects direct-R2 workspace snapshot sessions for canonical runtime commits", async () => {
     const fixture = await createHostedRuntimeCryptoContextFixture();
     const runner = createWorkspaceVersionAwareUserRunner();
     const env = createRunnerOutboundEnv({
@@ -3631,12 +3631,13 @@ describe("handleRunnerOutboundRequest", () => {
       "member_123",
     );
 
-    expect(response.status).toBe(200);
-    const body = requireTestObject(await response.json(), "canonical runtime snapshot start");
-    const snapshotId = requireTestString(body.snapshotId, "canonical runtime snapshot id");
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      error: "Hosted workspace snapshot start reason must be idle_shutdown.",
+    });
     expect(runner.ownsActiveInvocationLease).toHaveBeenCalledOnce();
-    expect(runner.createHostedWorkspaceSnapshotUploadSession).toHaveBeenCalledOnce();
-    expect(runner.workspaceSnapshotUploadSessions.has(snapshotId)).toBe(true);
+    expect(runner.createHostedWorkspaceSnapshotUploadSession).not.toHaveBeenCalled();
+    expect(runner.workspaceSnapshotUploadSessions.size).toBe(0);
   });
 
   it("presigns direct-R2 workspace snapshot PUT URLs only after encrypted metadata is known", async () => {
@@ -7320,93 +7321,6 @@ it("returns foreground-pending checkpoint responses from snapshot completion wit
     expect(deleteObject).not.toHaveBeenCalled();
   });
 
-  it("completes canonical runtime commit workspace snapshots", async () => {
-    const runner = createWorkspaceVersionAwareUserRunner();
-    const snapshotId = "snapshot_complete_canonical_runtime_commit";
-    const objectKey = await hostedWorkspaceSnapshotObjectKey({
-      snapshotId,
-      userId: "member_123",
-    });
-    const snapshotRef = createWorkspaceSnapshotV2Ref({
-      encryptedByteSize: 4,
-      encryptedObjectSha256: "a".repeat(64),
-      objectKey,
-      snapshotId,
-      userId: "member_123",
-    });
-    runner.workspaceSnapshotUploadSessions.set(
-      snapshotId,
-      createWorkspaceSnapshotUploadSession(snapshotRef),
-    );
-    const deleteObject = vi.fn(async () => {});
-    const env = createRunnerOutboundEnv({
-      BUNDLES: createWorkspaceSnapshotBucket(
-        async (key) => ({ key, size: 4 }),
-        async (key) => ({
-          checksums: createWorkspaceSnapshotHeadChecksums(snapshotRef),
-          customMetadata: createWorkspaceSnapshotHeadMetadata(snapshotRef),
-          key,
-          size: 4,
-        }),
-        deleteObject,
-      ),
-      USER_RUNNER: {
-        getByName: runner.getByName,
-      },
-    });
-    const fetchMock = createWorkspaceSnapshotCompleteWebFetchMock({
-      onCheckpoint: (args) => {
-        const checkpointRequest = readTestFetchBodyObject(
-          args,
-          "canonical runtime checkpoint request",
-        );
-        expect(checkpointRequest.reason).toBe("canonical_runtime_commit");
-        const publishedRef = requireTestObject(
-          checkpointRequest.snapshotRef,
-          "canonical runtime checkpoint ref",
-        );
-        return new Response(
-          JSON.stringify(createHostedWorkspaceCheckpointResponseWithSnapshotRef(
-            "5",
-            publishedRef,
-          )),
-          {
-            headers: {
-              "content-type": "application/json; charset=utf-8",
-            },
-            status: 200,
-          },
-        );
-      },
-    });
-    vi.stubGlobal("fetch", fetchMock);
-
-    const response = await handleRunnerOutboundRequest(
-      createWorkspaceSnapshotCompleteRequest({
-        reason: "canonical_runtime_commit",
-        snapshotId,
-        snapshotRef,
-        workspaceVersion: "4",
-      }),
-      env,
-      "member_123",
-    );
-
-    expect(response.status).toBe(200);
-    const responseBody = requireTestObject(
-      await response.json(),
-      "canonical runtime snapshot completion response",
-    );
-    expect(responseBody.snapshotRef).toEqual(expect.objectContaining({
-      objectKey,
-      snapshotId,
-    }));
-    expect(fetchMock).toHaveBeenCalledTimes(2);
-    expect(runner.deleteHostedWorkspaceSnapshotUploadSession).toHaveBeenCalledOnce();
-    expect(runner.workspaceSnapshotUploadSessions.has(snapshotId)).toBe(false);
-    expect(deleteObject).not.toHaveBeenCalled();
-  });
-
   it("rejects workspace snapshot completion when checkpoint returns a mutated v2 ref", async () => {
     const runner = createWorkspaceVersionAwareUserRunner();
     const snapshotId = "snapshot_complete_checkpoint_ref_mutated";
@@ -7650,7 +7564,7 @@ it("returns foreground-pending checkpoint responses from snapshot completion wit
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("rejects workspace snapshot completion when checkpoint reason cannot create snapshots", async () => {
+  it("rejects canonical runtime commit workspace snapshot completion", async () => {
     const runner = createWorkspaceVersionAwareUserRunner();
     const snapshotId = "snapshot_complete_non_idle";
     const objectKey = await hostedWorkspaceSnapshotObjectKey({
@@ -7686,7 +7600,7 @@ it("returns foreground-pending checkpoint responses from snapshot completion wit
 
     const response = await handleRunnerOutboundRequest(
       createWorkspaceSnapshotCompleteRequest({
-        reason: "import",
+        reason: "canonical_runtime_commit",
         snapshotId,
         snapshotRef,
         workspaceVersion: "4",
@@ -7697,7 +7611,7 @@ it("returns foreground-pending checkpoint responses from snapshot completion wit
 
     expect(response.status).toBe(400);
     await expect(response.json()).resolves.toEqual({
-      error: "Hosted workspace snapshot checkpoint reason must be idle_shutdown or canonical_runtime_commit.",
+      error: "Hosted workspace snapshot checkpoint reason must be idle_shutdown.",
     });
     expect(runner.deleteHostedWorkspaceSnapshotUploadSession).toHaveBeenCalledOnce();
     expect(runner.workspaceSnapshotUploadSessions.has(snapshotId)).toBe(false);

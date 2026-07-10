@@ -3,6 +3,11 @@ import { chmod, lstat, mkdir, readdir, readFile, rename, rm, writeFile } from "n
 import path from "node:path";
 
 import {
+  listAssistantContextSnapshotDirtyDomainsForCanonicalWrite,
+  markAssistantContextSnapshotDirty,
+  type AssistantContextSnapshotDirtyDomain,
+} from "@murphai/assistant-engine";
+import {
   applyHostedCanonicalWriteReceipt,
   HOSTED_CANONICAL_WRITE_RECEIPT_SCHEMA_VERSION,
   type HostedCanonicalWriteReceiptAction,
@@ -959,6 +964,7 @@ async function applyHostedCanonicalWriteReceiptsFromWorkspaceState(input: {
     status: input.status,
   });
   const appliedReceiptRefs = new Set<string>();
+  const dirtyDomains = new Set<AssistantContextSnapshotDirtyDomain>();
   for (const entry of entries) {
     const receiptRefKey = `${entry.sha256}:${entry.byteSize}`;
     if (appliedReceiptRefs.has(receiptRefKey)) {
@@ -986,7 +992,16 @@ async function applyHostedCanonicalWriteReceiptsFromWorkspaceState(input: {
         receipt: parsed,
         vaultRoot: input.vaultRoot,
       });
+      for (const domain of listAssistantContextSnapshotDirtyDomainsForCanonicalWrite(parsed)) {
+        dirtyDomains.add(domain);
+      }
     }
+  }
+  if (dirtyDomains.size > 0) {
+    await markAssistantContextSnapshotDirty({
+      domains: [...dirtyDomains],
+      vaultRoot: input.vaultRoot,
+    });
   }
 }
 

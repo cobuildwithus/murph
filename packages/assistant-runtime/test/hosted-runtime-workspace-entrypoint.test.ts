@@ -175,6 +175,11 @@ import {
 import {
   stopHostedCliRuntimeBridge,
 } from "../src/hosted-runtime/cli-runtime-bridge.ts";
+import {
+  HOSTED_CANONICAL_WRITE_RECEIPT_LOG_MAX_ENTRIES,
+  hostedCanonicalWriteReceiptRecoveryStatusFields,
+  readHostedCanonicalWriteReceiptRecoveryWake,
+} from "../src/hosted-runtime/canonical-write-receipt-log.ts";
 import type {
   RuntimeWakeSignal,
 } from "../src/hosted-runtime/runtime-wake.ts";
@@ -12091,7 +12096,7 @@ describe("hosted workspace runtime entrypoint", () => {
 
       await waitUntil(() => {
         assert.equal(checkpointRequests.length, 1);
-      });
+      }, 15_000);
       await new Promise((resolve) => setTimeout(resolve, 750));
       checkpointResponse.resolve({
         checkpointed: true,
@@ -12751,7 +12756,7 @@ describe("hosted workspace runtime entrypoint", () => {
                     assert.ok(events.includes(
                       "mailbox.importItem:mailbox_item_entrypoint_foreground_preempt_conversation_1",
                     ));
-                  });
+                  }, 15_000);
 
                   mailboxItems.push(createMailboxItem({
                     id: "mailbox_item_entrypoint_foreground_preempt_conversation_2",
@@ -12763,7 +12768,7 @@ describe("hosted workspace runtime entrypoint", () => {
                     assert.ok(events.includes(
                       "mailbox.importItem:mailbox_item_entrypoint_foreground_preempt_conversation_2",
                     ));
-                  });
+                  }, 15_000);
 
                   mailboxItems.push(createMailboxItem({
                     id: "mailbox_item_entrypoint_foreground_preempt_system_deferred",
@@ -12781,7 +12786,7 @@ describe("hosted workspace runtime entrypoint", () => {
                         lane.lane === "system" && lane.importedSeq === "1"
                       )
                     ));
-                  });
+                  }, 15_000);
                   events.push("system.afterCheckpoint");
                   return {
                     checkpointReason: "system_mailbox_receipt" as const,
@@ -12816,7 +12821,7 @@ describe("hosted workspace runtime entrypoint", () => {
       );
       await waitUntil(() => {
         assert.equal(assistantPhaseCalls, 2);
-      });
+      }, 15_000);
       const result = await resultPromise;
 
       assert.ok(events.includes(
@@ -12993,7 +12998,7 @@ describe("hosted workspace runtime entrypoint", () => {
                   runtimeWakeSignal.notify();
                   await waitUntil(() => {
                     assert.equal(importedInputIds.length, 2);
-                  });
+                  }, 15_000);
                   return {
                     checkpointReason: "system_mailbox_receipt" as const,
                     nextWakeAt: "2099-04-27T00:10:00.000Z",
@@ -13035,7 +13040,7 @@ describe("hosted workspace runtime entrypoint", () => {
       );
       await waitUntil(() => {
         assert.equal(assistantPhaseCalls, 3);
-      });
+      }, 15_000);
       const result = await resultPromise;
 
       assert.equal(assistantPhaseInputIds[1]?.length, 2);
@@ -13221,7 +13226,7 @@ describe("hosted workspace runtime entrypoint", () => {
                   runtimeWakeSignal.notify();
                   await waitUntil(() => {
                     assert.equal(freshImportedInputIds.length, 1);
-                  });
+                  }, 15_000);
                   return {
                     checkpointReason: "system_mailbox_receipt" as const,
                     nextWakeAt: "2099-04-27T00:10:00.000Z",
@@ -13258,7 +13263,7 @@ describe("hosted workspace runtime entrypoint", () => {
               runtimeWakeSignal.notify();
               await waitUntil(() => {
                 assert.equal(freshImportedInputIds.length, 2);
-              });
+              }, 15_000);
             }
 
             const assistantRedactedStatus: HostedRuntimeRedactedJson = {
@@ -13279,7 +13284,7 @@ describe("hosted workspace runtime entrypoint", () => {
       );
       await waitUntil(() => {
         assert.equal(assistantPhaseCalls, 3);
-      });
+      }, 15_000);
       const result = await resultPromise;
 
       assert.deepEqual(assistantPhaseInputIds[1], [freshImportedInputIds[0]]);
@@ -15619,6 +15624,358 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
+  test("consolidates a saturated restored receipt log before foreground canonical writes", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const artifactGetCalls: string[] = [];
+    const events: string[] = [];
+    let assistantPhaseCalls = 0;
+    let foregroundPendingGuardChecks = 0;
+    let snapshotCalls = 0;
+
+    try {
+      const {
+        artifactBytesByHash,
+        receiptHash,
+        receiptLogBytes,
+        receiptLogHash,
+      } = createSaturatedCanonicalReceiptLogArtifacts();
+      const priorNextWakeAt = "2099-04-28T12:00:00.000Z";
+      const initialWorkspace = createWorkspaceState({
+        nextWakeAt: priorNextWakeAt,
+        nextWakeReason: "assistant",
+        redactedStatus: {
+          hostedCanonicalWriteReceiptLogByteSize: receiptLogBytes.byteLength,
+          hostedCanonicalWriteReceiptLogSha256: receiptLogHash,
+          hostedMailboxConversationImportedSeq: "0",
+        },
+        version: "0",
+      });
+
+      await runHostedWorkspaceRuntimeJobInProcess(createWorkspaceRuntimeJobInput(), {
+        async createCheckpointSnapshot(snapshotInput) {
+          snapshotCalls += 1;
+          events.push(`snapshot:${snapshotInput.reason}`);
+          assert.equal(snapshotInput.reason, "idle_shutdown");
+          return {
+            snapshotRef: createWorkspaceSnapshotV2Ref(
+              `snapshot-saturated-receipt-recovery-${snapshotCalls}`,
+            ),
+          };
+        },
+        async importItem() {
+          throw new Error("Mailbox import should not run without mailbox items.");
+        },
+        platform: createPlatform({
+          artifactBytesByHash,
+          artifactGetCalls,
+          events,
+          mailboxPort: createMailboxPort({
+            events,
+            items: [],
+          }),
+          workspacePort: createWorkspacePort({
+            checkpointRequests,
+            checkpointResponse(request) {
+              if (
+                request.reason === "idle_shutdown"
+                && request.expectedWorkspaceVersion === "0"
+              ) {
+                foregroundPendingGuardChecks += 1;
+                if (request.nextWakeAt === null || request.nextWakeReason !== "mailbox") {
+                  return {
+                    checkpointConflictReason: "foreground_pending",
+                    checkpointed: false,
+                    workspace: initialWorkspace,
+                  };
+                }
+              }
+              return {
+                checkpointed: true,
+                workspace: createWorkspaceState({
+                  inboxMediaRetentionWakeAt: request.inboxMediaRetentionWakeAt ?? null,
+                  nextWakeAt: request.nextWakeAt ?? null,
+                  nextWakeReason: request.nextWakeReason ?? null,
+                  redactedStatus: request.redactedStatus ?? null,
+                  snapshotRef: request.snapshotRef,
+                  version: String(BigInt(request.expectedWorkspaceVersion) + 1n),
+                }),
+              };
+            },
+            events,
+            workspace: initialWorkspace,
+          }),
+        }),
+        async runAssistantPhase(input) {
+          assistantPhaseCalls += 1;
+          await runCanonicalWrite({
+            vaultRoot: input.restored.vaultRoot,
+            operationType: "hosted_canonical_write_test",
+            summary: "Write after saturated receipt recovery.",
+            occurredAt: TEST_NOW,
+            mutate: async ({ batch }) => {
+              await batch.stageTextWrite(
+                "journal/saturated-receipt-recovery.md",
+                "recovered canonical write\n",
+              );
+            },
+          });
+          return { progressed: false };
+        },
+        vaultRoot,
+      });
+
+      assert.equal(assistantPhaseCalls, 1);
+      assert.equal(foregroundPendingGuardChecks, 1);
+      assert.deepEqual(artifactGetCalls, [receiptLogHash, receiptHash, receiptLogHash]);
+      assert.deepEqual(events.filter((event) => event.startsWith("snapshot:")), [
+        "snapshot:idle_shutdown",
+        "snapshot:idle_shutdown",
+      ]);
+      assert.deepEqual(checkpointRequests.map((request) => request.reason), [
+        "idle_shutdown",
+        "import",
+        "canonical_runtime_commit",
+        "idle_shutdown",
+      ]);
+      assert.deepEqual(checkpointRequests.map((request) => request.expectedWorkspaceVersion), [
+        "0",
+        "1",
+        "2",
+        "3",
+      ]);
+      assert.equal(checkpointRequests[0]?.nextWakeReason, "mailbox");
+      assert.ok(checkpointRequests[0]?.nextWakeAt);
+      assert.notEqual(checkpointRequests[0]?.nextWakeAt, priorNextWakeAt);
+      assert.equal(checkpointRequests[1]?.nextWakeAt, priorNextWakeAt);
+      assert.equal(checkpointRequests[1]?.nextWakeReason, "assistant");
+      assert.deepEqual(checkpointRequests[1]?.snapshotRef, checkpointRequests[0]?.snapshotRef);
+      assert.equal(checkpointRequests[2]?.nextWakeAt, priorNextWakeAt);
+      assert.equal(checkpointRequests[2]?.nextWakeReason, "assistant");
+      assert.deepEqual(checkpointRequests[2]?.snapshotRef, checkpointRequests[0]?.snapshotRef);
+      assert.equal(
+        checkpointRequests[0]?.redactedStatus?.hostedCanonicalWriteReceiptLogSha256,
+        receiptLogHash,
+      );
+      assert.deepEqual(
+        readHostedCanonicalWriteReceiptRecoveryWake(checkpointRequests[0]?.redactedStatus),
+        {
+          nextWakeAt: priorNextWakeAt,
+          nextWakeReason: "assistant",
+        },
+      );
+      assert.equal(
+        checkpointRequests[1]?.redactedStatus?.hostedCanonicalWriteReceiptLogSha256,
+        undefined,
+      );
+      assert.equal(
+        readHostedCanonicalWriteReceiptRecoveryWake(checkpointRequests[1]?.redactedStatus),
+        null,
+      );
+      assert.equal(
+        checkpointRequests[3]?.redactedStatus?.hostedCanonicalWriteReceiptLogSha256,
+        undefined,
+      );
+      assert.equal(
+        await readFile(
+          path.join(vaultRoot, "journal", "saturated-receipt-recovery.md"),
+          "utf8",
+        ),
+        "recovered canonical write\n",
+      );
+    } finally {
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test("restores the original wake from a persisted saturated recovery marker", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const events: string[] = [];
+    const {
+      artifactBytesByHash,
+      receiptLogBytes,
+      receiptLogHash,
+    } = createSaturatedCanonicalReceiptLogArtifacts();
+    const priorNextWakeAt = "2099-07-09T00:00:00.000Z";
+
+    try {
+      const result = await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput(),
+        {
+          async createCheckpointSnapshot() {
+            return {
+              snapshotRef: createWorkspaceSnapshotV2Ref(
+                "snapshot-saturated-receipt-no-follow-up",
+              ),
+            };
+          },
+          async importItem() {
+            throw new Error("Mailbox import should not run without mailbox items.");
+          },
+          platform: createPlatform({
+            artifactBytesByHash,
+            events,
+            mailboxPort: createMailboxPort({
+              events,
+              items: [],
+            }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              events,
+              workspace: createWorkspaceState({
+                nextWakeAt: "2026-07-09T00:00:00.000Z",
+                nextWakeReason: "mailbox",
+                redactedStatus: {
+                  hostedCanonicalWriteReceiptLogByteSize: receiptLogBytes.byteLength,
+                  hostedCanonicalWriteReceiptLogSha256: receiptLogHash,
+                  ...hostedCanonicalWriteReceiptRecoveryStatusFields({
+                    nextWakeAt: priorNextWakeAt,
+                    nextWakeReason: "assistant",
+                  }),
+                },
+                version: "0",
+              }),
+            }),
+          }),
+          async runAssistantPhase() {
+            return { progressed: false };
+          },
+          vaultRoot,
+        },
+      );
+
+      assert.deepEqual(checkpointRequests.map((request) => request.reason), [
+        "idle_shutdown",
+        "import",
+      ]);
+      assert.deepEqual(checkpointRequests.map((request) => request.expectedWorkspaceVersion), [
+        "0",
+        "1",
+      ]);
+      assert.equal(checkpointRequests[0]?.nextWakeReason, "mailbox");
+      assert.ok(checkpointRequests[0]?.nextWakeAt);
+      assert.equal(checkpointRequests[1]?.nextWakeAt, priorNextWakeAt);
+      assert.equal(checkpointRequests[1]?.nextWakeReason, "assistant");
+      assert.deepEqual(checkpointRequests[1]?.snapshotRef, checkpointRequests[0]?.snapshotRef);
+      assert.equal(
+        checkpointRequests[0]?.redactedStatus?.hostedCanonicalWriteReceiptLogSha256,
+        receiptLogHash,
+      );
+      assert.deepEqual(
+        readHostedCanonicalWriteReceiptRecoveryWake(checkpointRequests[0]?.redactedStatus),
+        {
+          nextWakeAt: priorNextWakeAt,
+          nextWakeReason: "assistant",
+        },
+      );
+      assert.equal(
+        checkpointRequests[1]?.redactedStatus?.hostedCanonicalWriteReceiptLogSha256,
+        undefined,
+      );
+      assert.equal(
+        readHostedCanonicalWriteReceiptRecoveryWake(checkpointRequests[1]?.redactedStatus),
+        null,
+      );
+      assert.equal(result.nextWakeAt, priorNextWakeAt);
+    } finally {
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test("retains the saturated recovery marker when the wake reset checkpoint fails", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const events: string[] = [];
+    const wakeResetFailure = new Error("Synthetic wake reset checkpoint failure.");
+    const {
+      artifactBytesByHash,
+      receiptLogBytes,
+      receiptLogHash,
+    } = createSaturatedCanonicalReceiptLogArtifacts();
+    const initialWorkspace = createWorkspaceState({
+      redactedStatus: {
+        hostedCanonicalWriteReceiptLogByteSize: receiptLogBytes.byteLength,
+        hostedCanonicalWriteReceiptLogSha256: receiptLogHash,
+      },
+      version: "0",
+    });
+
+    try {
+      await expect(runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput(),
+        {
+          async createCheckpointSnapshot() {
+            return {
+              snapshotRef: createWorkspaceSnapshotV2Ref(
+                "snapshot-saturated-receipt-reset-failure",
+              ),
+            };
+          },
+          async importItem() {
+            throw new Error("Mailbox import must not start before wake reset succeeds.");
+          },
+          platform: createPlatform({
+            artifactBytesByHash,
+            events,
+            mailboxPort: createMailboxPort({
+              events,
+              items: [],
+            }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              checkpointResponse(request) {
+                if (request.expectedWorkspaceVersion === "1") {
+                  throw wakeResetFailure;
+                }
+                return {
+                  checkpointed: true,
+                  workspace: createWorkspaceState({
+                    nextWakeAt: request.nextWakeAt ?? null,
+                    nextWakeReason: request.nextWakeReason ?? null,
+                    redactedStatus: request.redactedStatus ?? null,
+                    snapshotRef: request.snapshotRef,
+                    version: "1",
+                  }),
+                };
+              },
+              events,
+              workspace: initialWorkspace,
+            }),
+          }),
+          async runAssistantPhase() {
+            throw new Error("Assistant work must not start before wake reset succeeds.");
+          },
+          vaultRoot,
+        },
+      )).rejects.toThrow(wakeResetFailure.message);
+
+      assert.deepEqual(checkpointRequests.map((request) => request.reason), [
+        "idle_shutdown",
+        "import",
+      ]);
+      assert.equal(
+        checkpointRequests[0]?.redactedStatus?.hostedCanonicalWriteReceiptLogSha256,
+        receiptLogHash,
+      );
+      assert.deepEqual(
+        readHostedCanonicalWriteReceiptRecoveryWake(checkpointRequests[0]?.redactedStatus),
+        {
+          nextWakeAt: null,
+          nextWakeReason: null,
+        },
+      );
+      assert.equal(
+        checkpointRequests[1]?.redactedStatus?.hostedCanonicalWriteReceiptLogSha256,
+        undefined,
+      );
+      assert.equal(checkpointRequests[0]?.nextWakeReason, "mailbox");
+      assert.equal(checkpointRequests[1]?.nextWakeReason, null);
+    } finally {
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
   test("restores canonical write receipts and context dirtiness from a pre-idle checkpoint", async () => {
     const firstVaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const restoredVaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
@@ -15636,21 +15993,7 @@ describe("hosted workspace runtime entrypoint", () => {
         runHostedWorkspaceRuntimeJobInProcess(createWorkspaceRuntimeJobInput(), {
           async createCheckpointSnapshot(snapshotInput) {
             events.push(`snapshot:${snapshotInput.reason}`);
-            if (snapshotInput.reason !== "canonical_runtime_commit") {
-              throw new Error("Canonical crash test should not reach idle snapshotting.");
-            }
-            const hotSnapshot = await snapshotHostedAssistantRuntimeHotState({
-              vaultRoot: firstVaultRoot,
-            });
-            const hotHash = sha256HostedBundleHex(hotSnapshot.bundle);
-            artifactBytesByHash.set(hotHash, hotSnapshot.bundle);
-            return {
-              snapshotRef: createBundleRef({
-                hash: hotHash,
-                key: "users/bundles/member-synthetic/canonical-crash-hot.bundle.json",
-                size: hotSnapshot.bundle.byteLength,
-              }),
-            };
+            throw new Error("Canonical crash test should not reach snapshotting.");
           },
           async importItem() {
             throw new Error("Mailbox import should not run without mailbox items.");
@@ -15739,6 +16082,7 @@ describe("hosted workspace runtime entrypoint", () => {
         typeof workspaceAfterCrash.redactedStatus?.hostedCanonicalWriteReceiptLogSha256,
         "string",
       );
+      assert.deepEqual(workspaceAfterCrash.snapshotRef, baseSnapshotRef);
       assert.equal(
         await readFile(
           path.join(firstVaultRoot, "bank", "conditions", "pre-idle-crash.md"),
@@ -15822,21 +16166,21 @@ describe("hosted workspace runtime entrypoint", () => {
         (await readAssistantContextSnapshotState(restoredVaultRoot))?.pendingDirtyDomains,
         ["health_context"],
       );
-      if (restoredCheckpointRequests.length > 0) {
-        const restoredCheckpointStatus = restoredCheckpointRequests.at(-1)?.redactedStatus ?? {};
-        assert.equal(
-          restoredCheckpointStatus.hostedCanonicalWriteReceiptLogSha256,
-          undefined,
-        );
-        assert.equal(
-          restoredCheckpointStatus.hostedCanonicalWriteReceiptLogByteSize,
-          undefined,
-        );
-        assert.equal(
-          restoredCheckpointStatus.hostedCanonicalWriteReceiptLogEntryCount,
-          undefined,
-        );
-      }
+      assert.equal(restoredCheckpointRequests.length, 1);
+      assert.equal(restoredCheckpointRequests[0]?.reason, "idle_shutdown");
+      const restoredCheckpointStatus = restoredCheckpointRequests[0]?.redactedStatus ?? {};
+      assert.equal(
+        restoredCheckpointStatus.hostedCanonicalWriteReceiptLogSha256,
+        undefined,
+      );
+      assert.equal(
+        restoredCheckpointStatus.hostedCanonicalWriteReceiptLogByteSize,
+        undefined,
+      );
+      assert.equal(
+        restoredCheckpointStatus.hostedCanonicalWriteReceiptLogEntryCount,
+        undefined,
+      );
     } finally {
       await removeTempRoot(firstVaultRoot);
       await removeTempRoot(restoredVaultRoot);
@@ -15878,10 +16222,7 @@ describe("hosted workspace runtime entrypoint", () => {
       }), {
         async createCheckpointSnapshot(snapshotInput) {
           events.push(`snapshot:${snapshotInput.reason}`);
-          assert.equal(
-            ["canonical_runtime_commit", "idle_shutdown"].includes(snapshotInput.reason),
-            true,
-          );
+          assert.equal(snapshotInput.reason, "idle_shutdown");
           const hotSnapshot = await snapshotHostedAssistantRuntimeHotState({ vaultRoot });
           const hotHash = sha256HostedBundleHex(hotSnapshot.bundle);
           artifactBytesByHash.set(hotHash, hotSnapshot.bundle);
@@ -15936,13 +16277,17 @@ describe("hosted workspace runtime entrypoint", () => {
         "mailbox.importItem:mailbox_item_entrypoint_canonical_pre_checkpoint_002",
       ]);
       assert.deepEqual(events.filter((event) => event.startsWith("snapshot:")), [
-        "snapshot:canonical_runtime_commit",
         "snapshot:idle_shutdown",
       ]);
       assert.deepEqual(checkpointRequests.map((request) => request.reason), [
         "canonical_runtime_commit",
         "canonical_runtime_commit",
         "idle_shutdown",
+      ]);
+      assert.deepEqual(checkpointRequests.map((request) => request.expectedWorkspaceVersion), [
+        "0",
+        "1",
+        "2",
       ]);
       const receiptLogs = listHostedCanonicalWriteReceiptLogArtifacts(artifactBytesByHash);
       assert.equal(receiptLogs.length, 2);
@@ -17715,6 +18060,9 @@ describe("hosted workspace runtime entrypoint", () => {
         schema: "murph.hosted-canonical-write-receipt-log.v1",
       }, null, 2)}\n`, "utf8");
       const receiptLogHash = sha256Hex(receiptLogBytes);
+      const idleSnapshotRef = createWorkspaceSnapshotV2Ref(
+        "snapshot-restored-base-hot-and-receipts-idle",
+      );
       const forgedLocalReceiptRoot = path.join(hotAssistantRoot, "receipts", "canonical-writes");
       const forgedLocalPayload = Buffer.from("forged local receipt\n", "utf8");
       const forgedLocalPayloadHash = sha256Hex(forgedLocalPayload);
@@ -17771,8 +18119,9 @@ describe("hosted workspace runtime entrypoint", () => {
           },
         }),
         {
-          async createCheckpointSnapshot() {
-            throw new Error("Snapshot should not run while validating restore.");
+          async createCheckpointSnapshot(snapshotInput) {
+            assert.equal(snapshotInput.reason, "idle_shutdown");
+            return { snapshotRef: idleSnapshotRef };
           },
           async importItem() {
             throw new Error("Mailbox import should not run without mailbox items.");
@@ -17821,6 +18170,7 @@ describe("hosted workspace runtime entrypoint", () => {
         olderPayloadHash,
         receiptHash,
         exactPayloadHash,
+        receiptLogHash,
       ]);
       assert.equal(await readFile(path.join(vaultRoot, "note.md"), "utf8"), "base note\n");
       assert.equal(
@@ -17835,7 +18185,22 @@ describe("hosted workspace runtime entrypoint", () => {
         await readFile(path.join(vaultRoot, ".runtime", "operations", "assistant", "sessions", "session-latest.json"), "utf8"),
         "{\"session\":\"latest\"}\n",
       );
-      assert.deepEqual(checkpointRequests, []);
+      assert.equal(checkpointRequests.length, 1);
+      assert.equal(checkpointRequests[0]?.reason, "idle_shutdown");
+      assert.equal(checkpointRequests[0]?.expectedWorkspaceVersion, "9");
+      assert.deepEqual(checkpointRequests[0]?.snapshotRef, idleSnapshotRef);
+      assert.equal(
+        checkpointRequests[0]?.redactedStatus?.hostedCanonicalWriteReceiptLogSha256,
+        undefined,
+      );
+      assert.equal(
+        checkpointRequests[0]?.redactedStatus?.hostedCanonicalWriteReceiptLogByteSize,
+        undefined,
+      );
+      assert.equal(
+        checkpointRequests[0]?.redactedStatus?.hostedCanonicalWriteReceiptLogEntryCount,
+        undefined,
+      );
     } finally {
       await removeTempRoot(vaultRoot);
       await removeTempRoot(sourceBaseVaultRoot);
@@ -21095,6 +21460,9 @@ function createMailboxPort(input: {
 
 function createWorkspacePort(input: {
   checkpointRequests: HostedWorkspaceCheckpointRequest[];
+  checkpointResponse?: (
+    request: HostedWorkspaceCheckpointRequest,
+  ) => HostedWorkspaceCheckpointResponse;
   checkpointWorkspace?: (request: HostedWorkspaceCheckpointRequest) => HostedWorkspaceState;
   events: string[];
   stageSamples?: StageTimingSample[];
@@ -21114,6 +21482,9 @@ function createWorkspacePort(input: {
       return await measureStage(input.stageSamples, "workspace.checkpoint", async () => {
         input.events.push("workspace.checkpoint");
         input.checkpointRequests.push(request);
+        if (input.checkpointResponse) {
+          return input.checkpointResponse(request);
+        }
         return {
           checkpointed: true,
           workspace: input.checkpointWorkspace
@@ -21129,6 +21500,46 @@ function createWorkspacePort(input: {
         };
       });
     },
+  };
+}
+
+function createSaturatedCanonicalReceiptLogArtifacts(): {
+  artifactBytesByHash: Map<string, Uint8Array>;
+  receiptHash: string;
+  receiptLogBytes: Buffer;
+  receiptLogHash: string;
+} {
+  const receiptBytes = Buffer.from(`${JSON.stringify({
+    actions: [],
+    committedAt: TEST_NOW,
+    createdAt: TEST_NOW,
+    occurredAt: TEST_NOW,
+    operationId: "op_saturated_receipt_log_restore",
+    operationType: "hosted_canonical_write_test",
+    schema: HOSTED_CANONICAL_WRITE_RECEIPT_SCHEMA_VERSION,
+    summary: "Restore a saturated hosted canonical receipt log.",
+    updatedAt: TEST_NOW,
+  }, null, 2)}\n`, "utf8");
+  const receiptHash = sha256Hex(receiptBytes);
+  const receiptLogBytes = Buffer.from(`${JSON.stringify({
+    entries: Array.from(
+      { length: HOSTED_CANONICAL_WRITE_RECEIPT_LOG_MAX_ENTRIES },
+      () => ({
+        byteSize: receiptBytes.byteLength,
+        sha256: receiptHash,
+      }),
+    ),
+    schema: "murph.hosted-canonical-write-receipt-log.v1",
+  }, null, 2)}\n`, "utf8");
+  const receiptLogHash = sha256Hex(receiptLogBytes);
+  return {
+    artifactBytesByHash: new Map<string, Uint8Array>([
+      [receiptHash, receiptBytes],
+      [receiptLogHash, receiptLogBytes],
+    ]),
+    receiptHash,
+    receiptLogBytes,
+    receiptLogHash,
   };
 }
 

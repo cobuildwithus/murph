@@ -3,6 +3,13 @@ import {
   HOSTED_EXECUTION_LAYERED_SNAPSHOT_REF_SCHEMA,
   HOSTED_EXECUTION_WORKING_SNAPSHOT_REF_SCHEMA,
 } from "@murphai/hosted-execution/bundles";
+import {
+  HOSTED_CANONICAL_WRITE_RECEIPT_LOG_BYTE_SIZE_STATUS_KEY,
+  HOSTED_CANONICAL_WRITE_RECEIPT_LOG_SHA_STATUS_KEY,
+  HOSTED_CANONICAL_WRITE_RECEIPT_RECOVERY_PRIOR_WAKE_AT_STATUS_KEY,
+  HOSTED_CANONICAL_WRITE_RECEIPT_RECOVERY_PRIOR_WAKE_REASON_STATUS_KEY,
+  HOSTED_CANONICAL_WRITE_RECEIPT_RECOVERY_STATUS_KEY,
+} from "@murphai/hosted-execution/runtime-control";
 import type {
   HostedRuntimeRedactedJson,
 } from "@murphai/hosted-execution/runtime-control";
@@ -119,6 +126,51 @@ describe("hosted workspace store", () => {
         version: "5",
       },
     });
+  });
+
+  it("reserves canonical receipt protocol fields outside the ordinary status budget", async () => {
+    const hostedWorkspace = createHostedWorkspaceDelegate();
+    const tx = createHostedWorkspaceTx({ hostedWorkspace });
+    const ordinaryStatus = Object.fromEntries(
+      Array.from({ length: 96 }, (_, index) => [`diagnostic${index}Count`, index]),
+    );
+    const receiptStatus = {
+      ...ordinaryStatus,
+      [HOSTED_CANONICAL_WRITE_RECEIPT_LOG_BYTE_SIZE_STATUS_KEY]: 1,
+      [HOSTED_CANONICAL_WRITE_RECEIPT_LOG_SHA_STATUS_KEY]: "a".repeat(64),
+    };
+    const recoveryStatus = {
+      ...receiptStatus,
+      [HOSTED_CANONICAL_WRITE_RECEIPT_RECOVERY_PRIOR_WAKE_AT_STATUS_KEY]:
+        "2099-07-09T00:00:00.000Z",
+      [HOSTED_CANONICAL_WRITE_RECEIPT_RECOVERY_PRIOR_WAKE_REASON_STATUS_KEY]:
+        "assistant",
+      [HOSTED_CANONICAL_WRITE_RECEIPT_RECOVERY_STATUS_KEY]: "pending",
+    };
+    const checkpoint = {
+      expectedVersion: "4",
+      reason: "idle_shutdown",
+      redactedStatusJson: recoveryStatus,
+      snapshotRef: null,
+      tx,
+      userId: "member_workspace_1",
+    };
+
+    await expect(checkpointHostedWorkspaceTx(checkpoint)).resolves.toMatchObject({
+      status: "updated",
+    });
+    expect(hostedWorkspace.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        redactedStatusJson: recoveryStatus,
+      }),
+    }));
+    await expect(checkpointHostedWorkspaceTx({
+      ...checkpoint,
+      redactedStatusJson: {
+        ...recoveryStatus,
+        overflowCount: 1,
+      },
+    })).rejects.toThrow(/at most 96 fields/u);
   });
 
   it("reports CAS conflicts without merging checkpoint refs", async () => {

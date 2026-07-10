@@ -1,4 +1,4 @@
-import { access, chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { access, chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -20,12 +20,6 @@ import {
 import {
   upsertAssistantInputEvent,
 } from "@murphai/assistant-engine";
-import {
-  initializeVault,
-  listWriteOperationMetadataPaths,
-  readStoredWriteOperation,
-  runCanonicalWrite,
-} from "@murphai/core";
 
 import {
   type HostedRuntimePlatform,
@@ -78,30 +72,7 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     })).toThrow("Hosted mailbox payload decoder is required for this invocation.");
   });
 
-  it("allows canonical runtime commit snapshots through the bridge snapshot path", async () => {
-    const vaultRoot = await createVaultRoot();
-    const { calls, platform } = createRuntimePlatform();
-    const options = createBridgeOptions({
-      platform,
-      vaultRoot,
-    });
-
-    await options.createCheckpointSnapshot(createCheckpointInput("canonical_runtime_commit"));
-
-    expect(calls.startSnapshotSession).toHaveBeenCalledWith(
-      expect.objectContaining({
-        reason: "canonical_runtime_commit",
-      }),
-    );
-    const checkpointRequest =
-      calls.completeSnapshotSession.mock.calls[0]?.[0].checkpointRequest;
-    expect(checkpointRequest?.reason).toBe("canonical_runtime_commit");
-    expect(calls.putSnapshotObjectDirect).toHaveBeenCalledOnce();
-    expect(calls.completeSnapshotSession).toHaveBeenCalledOnce();
-    expect(calls.abortSnapshotSession).not.toHaveBeenCalled();
-  });
-
-  it("rejects non-snapshot checkpoints before opening a snapshot session", async () => {
+  it("rejects non-idle checkpoints before opening a snapshot session", async () => {
     const vaultRoot = await createVaultRoot();
     const { calls, platform } = createRuntimePlatform();
     const options = createBridgeOptions({
@@ -112,7 +83,13 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     await expect(options.createCheckpointSnapshot(
       createCheckpointInput("import"),
     )).rejects.toThrow(
-      "Hosted workspace snapshot construction is idle-shutdown or canonical runtime commit only.",
+      "Hosted workspace snapshot construction is idle-shutdown only.",
+    );
+    await expect(options.createCheckpointSnapshot(
+      // @ts-expect-error Intentionally verifies the JavaScript boundary fails closed.
+      createCheckpointInput("canonical_runtime_commit"),
+    )).rejects.toThrow(
+      "Hosted workspace snapshot construction is idle-shutdown only.",
     );
 
     expect(calls.startSnapshotSession).not.toHaveBeenCalled();
@@ -261,11 +238,11 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     });
   }
 
-  it("does not consume pending runtime wakes during canonical runtime commit snapshots", async () => {
+  it("keeps pending wakes queued while publishing a mailbox continuation snapshot", async () => {
     const vaultRoot = await createVaultRoot();
     const { calls, platform } = createRuntimePlatform();
     const consumePendingRuntimeWake = vi.fn(() => ({
-      notifiedAtEpochMs: 1_777_010_000_010,
+      notifiedAtEpochMs: 1_777_010_000_003,
     }));
     const options = createBridgeOptions({
       consumePendingRuntimeWake,
@@ -273,7 +250,11 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
       vaultRoot,
     });
 
-    await options.createCheckpointSnapshot(createCheckpointInput("canonical_runtime_commit"));
+    await expect(options.createCheckpointSnapshot({
+      ...createCheckpointInput("idle_shutdown"),
+      nextWakeAt: "2026-04-27T12:00:00.000Z",
+      nextWakeReason: "mailbox",
+    })).resolves.toBeDefined();
 
     expect(consumePendingRuntimeWake).not.toHaveBeenCalled();
     expect(calls.putSnapshotObjectDirect).toHaveBeenCalledOnce();
@@ -463,67 +444,6 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     await expectPresent(path.join(vaultRoot, activeOperationPath));
     await expectPresent(path.join(vaultRoot, uncheckpointedCommittedOperationPath));
     await expectPresent(path.join(vaultRoot, uncheckpointedCommittedStageRoot));
-  });
-
-  it("retains rollback backups until a canonical runtime checkpoint is durable", async () => {
-    const vaultRoot = await createVaultRoot();
-    await initializeVault({
-      createdAt: "2026-06-11T00:00:00.000Z",
-      vaultRoot,
-    });
-    const targetRelativePath = "bank/conditions/checkpoint-rollback.md";
-    const targetAbsolutePath = path.join(vaultRoot, targetRelativePath);
-    await mkdir(path.dirname(targetAbsolutePath), { recursive: true });
-    await writeFile(targetAbsolutePath, "original health context\n", "utf8");
-
-    const { calls, platform } = createRuntimePlatform();
-    const snapshotFailure = new Error("Synthetic canonical snapshot upload failure.");
-    calls.putSnapshotObjectDirect.mockRejectedValueOnce(snapshotFailure);
-    const bridgeOptions = createBridgeOptions({
-      platform,
-      request: createInvocationRequestWithWorkspaceCheckpoint("2026-06-10T00:00:00.000Z"),
-      vaultRoot,
-    });
-
-    await expect(runCanonicalWrite({
-      hostedCanonicalWritePort: {
-        async persistCanonicalWrite() {
-          await bridgeOptions.createCheckpointSnapshot(
-            createCheckpointInput("canonical_runtime_commit"),
-          );
-        },
-      },
-      mutate: async ({ batch }) => {
-        await batch.stageTextWrite(
-          targetRelativePath,
-          "replacement health context\n",
-          { overwrite: true },
-        );
-      },
-      operationType: "hosted_checkpoint_rollback_test",
-      summary: "Restore canonical content after checkpoint failure",
-      vaultRoot,
-    })).rejects.toThrow(snapshotFailure.message);
-
-    expect(await readFile(targetAbsolutePath, "utf8")).toBe("original health context\n");
-    const operationRecords = await Promise.all(
-      (await listWriteOperationMetadataPaths(vaultRoot)).map((relativePath) =>
-        readStoredWriteOperation(vaultRoot, relativePath)
-      ),
-    );
-    const rolledBackOperation = operationRecords.find(
-      (operation) => operation.operationType === "hosted_checkpoint_rollback_test",
-    );
-    expect(rolledBackOperation?.status).toBe("rolled_back");
-    expect(rolledBackOperation?.actions).toEqual([
-      expect.objectContaining({
-        kind: "text_write",
-        state: "rolled_back",
-      }),
-    ]);
-    expect(calls.putSnapshotObjectDirect).toHaveBeenCalledOnce();
-    expect(calls.completeSnapshotSession).not.toHaveBeenCalled();
-    expect(calls.abortSnapshotSession).toHaveBeenCalledOnce();
   });
 
   it("prunes settled assistant runtime residue before v2 snapshot archive planning", async () => {
@@ -839,8 +759,8 @@ function createLease(
   };
 }
 
-function createCheckpointInput(
-  reason: HostedWorkspaceCheckpointRequest["reason"] = "idle_shutdown",
+function createCheckpointInput<const Reason extends HostedWorkspaceCheckpointRequest["reason"]>(
+  reason: Reason,
 ) {
   const state = {
     recentStatuses: [],

@@ -17,6 +17,11 @@ import {
   HOSTED_MAILBOX_PAYLOAD_SCHEMA,
   HOSTED_MAILBOX_KINDS,
   HOSTED_MAILBOX_LANES,
+  HOSTED_CANONICAL_WRITE_RECEIPT_LOG_BYTE_SIZE_STATUS_KEY,
+  HOSTED_CANONICAL_WRITE_RECEIPT_LOG_SHA_STATUS_KEY,
+  HOSTED_CANONICAL_WRITE_RECEIPT_RECOVERY_PRIOR_WAKE_AT_STATUS_KEY,
+  HOSTED_CANONICAL_WRITE_RECEIPT_RECOVERY_PRIOR_WAKE_REASON_STATUS_KEY,
+  HOSTED_CANONICAL_WRITE_RECEIPT_RECOVERY_STATUS_KEY,
   HOSTED_RUNTIME_LOG_EVENT_CODES,
   HOSTED_RUNTIME_ORCHESTRATION_LATENCY_DIAGNOSTICS_HEADER,
   HOSTED_WORKSPACE_CHECKPOINT_REASONS,
@@ -1490,6 +1495,43 @@ describe("hosted runtime control contracts", () => {
       reason: "canonical_runtime_commit",
       snapshotRef: null,
     });
+  });
+
+  it("reserves canonical receipt protocol fields outside the ordinary status budget", () => {
+    const ordinaryStatus = Object.fromEntries(
+      Array.from({ length: 96 }, (_, index) => [`diagnostic${index}Count`, index]),
+    );
+    const receiptStatus = {
+      ...ordinaryStatus,
+      [HOSTED_CANONICAL_WRITE_RECEIPT_LOG_BYTE_SIZE_STATUS_KEY]: 1,
+      [HOSTED_CANONICAL_WRITE_RECEIPT_LOG_SHA_STATUS_KEY]: "a".repeat(64),
+    };
+    const recoveryStatus = {
+      ...receiptStatus,
+      [HOSTED_CANONICAL_WRITE_RECEIPT_RECOVERY_PRIOR_WAKE_AT_STATUS_KEY]:
+        "2099-07-09T00:00:00.000Z",
+      [HOSTED_CANONICAL_WRITE_RECEIPT_RECOVERY_PRIOR_WAKE_REASON_STATUS_KEY]:
+        "assistant",
+      [HOSTED_CANONICAL_WRITE_RECEIPT_RECOVERY_STATUS_KEY]: "pending",
+    };
+    const request = {
+      attemptId: "attempt_receipt_recovery_status_budget",
+      expectedWorkspaceVersion: "4",
+      leaseGeneration: "9",
+      reason: "idle_shutdown",
+      redactedStatus: recoveryStatus,
+      snapshotRef: null,
+    };
+
+    expect(parseHostedWorkspaceCheckpointRequest(request).redactedStatus)
+      .toEqual(recoveryStatus);
+    expect(() => parseHostedWorkspaceCheckpointRequest({
+      ...request,
+      redactedStatus: {
+        ...recoveryStatus,
+        overflowCount: 1,
+      },
+    })).toThrow(/at most 96 fields/u);
   });
 
   it("keeps runtime logs structured and privacy-bounded", () => {

@@ -1901,6 +1901,27 @@ export type HostedRuntimeLogEventCode =
 
 export const HOSTED_RUNTIME_LOG_REQUEST_MAX_ENTRIES = 50;
 
+export const HOSTED_CANONICAL_WRITE_RECEIPT_LOG_SHA_STATUS_KEY =
+  "hostedCanonicalWriteReceiptLogSha256";
+export const HOSTED_CANONICAL_WRITE_RECEIPT_LOG_BYTE_SIZE_STATUS_KEY =
+  "hostedCanonicalWriteReceiptLogByteSize";
+export const HOSTED_CANONICAL_WRITE_RECEIPT_RECOVERY_STATUS_KEY =
+  "hostedCanonicalWriteReceiptRecoveryStatus";
+export const HOSTED_CANONICAL_WRITE_RECEIPT_RECOVERY_PRIOR_WAKE_AT_STATUS_KEY =
+  "hostedCanonicalWriteReceiptRecoveryPriorNextWakeAt";
+export const HOSTED_CANONICAL_WRITE_RECEIPT_RECOVERY_PRIOR_WAKE_REASON_STATUS_KEY =
+  "hostedCanonicalWriteReceiptRecoveryPriorNextWakeReason";
+export const HOSTED_CANONICAL_WRITE_RECEIPT_RECOVERY_REDACTED_STATUS_KEYS = [
+  HOSTED_CANONICAL_WRITE_RECEIPT_RECOVERY_STATUS_KEY,
+  HOSTED_CANONICAL_WRITE_RECEIPT_RECOVERY_PRIOR_WAKE_AT_STATUS_KEY,
+  HOSTED_CANONICAL_WRITE_RECEIPT_RECOVERY_PRIOR_WAKE_REASON_STATUS_KEY,
+] as const;
+export const HOSTED_CANONICAL_WRITE_RECEIPT_REDACTED_STATUS_KEYS = [
+  HOSTED_CANONICAL_WRITE_RECEIPT_LOG_SHA_STATUS_KEY,
+  HOSTED_CANONICAL_WRITE_RECEIPT_LOG_BYTE_SIZE_STATUS_KEY,
+  ...HOSTED_CANONICAL_WRITE_RECEIPT_RECOVERY_REDACTED_STATUS_KEYS,
+] as const;
+
 export type HostedRuntimeRedactedScalar = boolean | null | number | string;
 export type HostedRuntimeRedactedObject = Record<string, HostedRuntimeRedactedScalar>;
 export type HostedRuntimeRedactedValue =

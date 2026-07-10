@@ -30,7 +30,6 @@ import type {
   HostedRuntimeProductFeedbackRecordResponse,
   HostedCodexAuthUpdate,
   HostedCodexAuthUpdateResponse,
-  HostedWorkspaceCheckpointReason,
   HostedRuntimeUsageRecordResponse as HostedExecutionRuntimeUsageRecordResponse,
   HostedWorkspaceCheckpointRequest,
   HostedWorkspaceCheckpointResponse,
@@ -457,7 +456,7 @@ export interface HostedRuntimeWorkspaceSnapshotPort {
     inboxMediaRetentionWakeAt?: string | null;
     nextWakeAt?: string | null;
     nextWakeReason?: string | null;
-    reason: Extract<HostedWorkspaceCheckpointReason, "canonical_runtime_commit" | "idle_shutdown">;
+    reason: "idle_shutdown";
   }): Promise<HostedRuntimeWorkspaceSnapshotSessionStart>;
 }
 

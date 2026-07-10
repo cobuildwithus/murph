@@ -94,7 +94,7 @@ export type HostedRuntimeBridgeReadCurrentLease = () =>
   | Promise<HostedRuntimeBridgeCheckpointLease | null>;
 type HostedWorkspaceSnapshotCheckpointRequest =
   HostedWorkspaceCheckpointRequest & {
-    reason: "canonical_runtime_commit" | "idle_shutdown";
+    reason: "idle_shutdown";
   };
 
 const HOSTED_WORKSPACE_SNAPSHOT_PATH_HASH_SECRET_PATTERN = /^[a-f0-9]{64}$/u;
@@ -262,10 +262,8 @@ function requireHostedWorkspaceBridgeSnapshotCheckpointRequest(
   request: HostedWorkspaceCheckpointRequest,
 ): HostedWorkspaceSnapshotCheckpointRequest {
   const reason = request.reason;
-  if (reason !== "idle_shutdown" && reason !== "canonical_runtime_commit") {
-    throw new Error(
-      "Hosted workspace snapshot construction is idle-shutdown or canonical runtime commit only.",
-    );
+  if (reason !== "idle_shutdown") {
+    throw new Error("Hosted workspace snapshot construction is idle-shutdown only.");
   }
 
   return {
@@ -561,13 +559,17 @@ async function createHostedWorkspaceV2Snapshot(
       directUploadTimings,
     );
 
-    if (input.request.reason !== "canonical_runtime_commit") {
-      const directUploadWakeNotification = input.consumePendingRuntimeWake?.() ?? null;
-      if (directUploadWakeNotification) {
-        throw new HostedRuntimeCheckpointInterruptedByWakeError({
-          notification: directUploadWakeNotification,
-        });
-      }
+    const mailboxContinuation =
+      input.request.nextWakeAt !== null
+      && input.request.nextWakeAt !== undefined
+      && input.request.nextWakeReason === "mailbox";
+    const directUploadWakeNotification = mailboxContinuation
+      ? null
+      : input.consumePendingRuntimeWake?.() ?? null;
+    if (directUploadWakeNotification) {
+      throw new HostedRuntimeCheckpointInterruptedByWakeError({
+        notification: directUploadWakeNotification,
+      });
     }
 
     leaseCheckCount += 1;
@@ -577,13 +579,13 @@ async function createHostedWorkspaceV2Snapshot(
       stage: "before_web_checkpoint",
       userId: input.userId,
     });
-    if (input.request.reason !== "canonical_runtime_commit") {
-      const leaseCheckWakeNotification = input.consumePendingRuntimeWake?.() ?? null;
-      if (leaseCheckWakeNotification) {
-        throw new HostedRuntimeCheckpointInterruptedByWakeError({
-          notification: leaseCheckWakeNotification,
-        });
-      }
+    const leaseCheckWakeNotification = mailboxContinuation
+      ? null
+      : input.consumePendingRuntimeWake?.() ?? null;
+    if (leaseCheckWakeNotification) {
+      throw new HostedRuntimeCheckpointInterruptedByWakeError({
+        notification: leaseCheckWakeNotification,
+      });
     }
 
     snapshotRef = {
