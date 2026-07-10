@@ -3429,6 +3429,148 @@ test("Junction late historical data queues one connect-window verification after
   assert.equal(currentResult.metadataPatch, undefined);
 });
 
+test("Junction connection-day direct pushes do not prove older historical coverage", async () => {
+  const provider = createJunctionProvider(async (input) => {
+    throw new Error(`Unexpected request: ${readUrl(input)}`);
+  }, {
+    providerFilter: ["garmin"],
+    webhookSecret: "whsec_d2ViaG9vay10ZXN0LXNlY3JldA==",
+  });
+  const webhook = createJunctionSvixWebhook({
+    body: {
+      event_type: "daily.data.activity.created",
+      user_id: "junction-user-1",
+      data: {
+        date: "2026-04-03",
+        id: "connection-day-activity",
+        source: {
+          provider: "garmin",
+          type: "watch",
+        },
+        steps: 1234,
+      },
+    },
+    messageId: "msg_connection_day_activity_1",
+    timestamp: "1775174400",
+  });
+  const parsed = await requireJunctionWebhookHandler(provider).verifyAndParseWebhook({
+    headers: webhook.headers,
+    rawBody: webhook.rawBody,
+    now: "2026-04-03T00:00:00.000Z",
+  });
+
+  assert.equal(parsed.jobs.length, 1);
+
+  let importCount = 0;
+  const result = await executeJunctionJob(
+    provider,
+    createJunctionJobContext({
+      account: createAccount({
+        metadata: {
+          junctionHistoricalBackfillStatus: "coverage_v2_exhausted",
+          junctionHistoricalBackfillEmptyAttempts: 5,
+          junctionHistoricalBackfillLastEmptyAt: "2026-04-03T00:00:00.000Z",
+          junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
+          junctionHistoricalBackfillWindowEnd: "2026-04-03T00:00:00.000Z",
+        },
+      }),
+      importSnapshot: async () => {
+        importCount += 1;
+        return { canonicalEventCount: 1 };
+      },
+    }),
+    createJob("resource", parsed.jobs[0]?.payload ?? {}),
+  );
+
+  assert.equal(importCount, 1);
+  assert.equal(result.metadataPatch, undefined);
+  assert.equal(result.scheduledJobs, undefined);
+});
+
+test("Junction connection-day sleep records do not prove older historical coverage", async () => {
+  const provider = createJunctionProvider(async (input) => {
+    throw new Error(`Unexpected request: ${readUrl(input)}`);
+  }, {
+    providerFilter: ["garmin"],
+    summaryResources: ["sleep", "sleep_cycle"],
+    webhookSecret: "whsec_d2ViaG9vay10ZXN0LXNlY3JldA==",
+  });
+  const cases = [
+    {
+      eventType: "daily.data.sleep.created",
+      messageId: "msg_connection_day_sleep_1",
+      data: {
+        bedtime_start: "2026-04-03T01:00:00.000Z",
+        bedtime_stop: "2026-04-03T08:00:00.000Z",
+        date: "2026-04-03",
+        id: "connection-day-sleep",
+        score: 88,
+        sourceProviderSlug: "garmin",
+      },
+    },
+    {
+      eventType: "daily.data.sleep_cycle.created",
+      messageId: "msg_connection_day_sleep_cycle_1",
+      data: {
+        id: "connection-day-sleep-cycle",
+        sessionEnd: "2026-04-03T08:00:00.000Z",
+        sessionStart: "2026-04-02T23:00:00.000Z",
+        sourceProviderSlug: "garmin",
+        stages: [{
+          endAt: "2026-04-03T08:00:00.000Z",
+          stage: "light",
+          startAt: "2026-04-02T23:00:00.000Z",
+        }],
+      },
+    },
+  ] as const;
+  let importCount = 0;
+
+  for (const fixture of cases) {
+    const webhook = createJunctionSvixWebhook({
+      body: {
+        event_type: fixture.eventType,
+        user_id: "junction-user-1",
+        data: fixture.data,
+      },
+      messageId: fixture.messageId,
+      timestamp: "1775217600",
+    });
+    const parsed = await requireJunctionWebhookHandler(provider).verifyAndParseWebhook({
+      headers: webhook.headers,
+      rawBody: webhook.rawBody,
+      now: "2026-04-03T12:00:00.000Z",
+    });
+    assert.equal(parsed.jobs.length, 1);
+
+    const result = await executeJunctionJob(
+      provider,
+      createJunctionJobContext({
+        account: createAccount({
+          metadata: {
+            junctionHistoricalBackfillStatus: "coverage_v2_exhausted",
+            junctionHistoricalBackfillEmptyAttempts: 5,
+            junctionHistoricalBackfillLastEmptyAt: "2026-04-03T00:00:00.000Z",
+            junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
+            junctionHistoricalBackfillWindowEnd: "2026-04-03T00:00:00.000Z",
+          },
+        }),
+        now: "2026-04-03T12:00:00.000Z",
+        importSnapshot: async () => {
+          importCount += 1;
+          return { canonicalEventCount: 1 };
+        },
+      }),
+      createJob("resource", parsed.jobs[0]?.payload ?? {}),
+    );
+
+    assert.equal(result.metadataPatch, undefined);
+    assert.equal(result.scheduledJobs, undefined);
+  }
+
+  assert.equal(importCount, cases.length);
+});
+
 test("Junction direct pushes without canonical events or from another source do not become history evidence", async () => {
   const provider = createJunctionProvider(async (input) => {
     throw new Error(`Unexpected request: ${readUrl(input)}`);

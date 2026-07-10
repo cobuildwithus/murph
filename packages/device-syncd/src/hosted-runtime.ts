@@ -2,6 +2,7 @@ import { sanitizeStoredDeviceSyncMetadata } from "./metadata.ts";
 import {
   canCurrentRuntimeMutateJunctionHistoricalBackfillProgress,
   JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS,
+  mergeGuardedJunctionHistoricalBackfillMetadata,
   mergeHostedJunctionHistoricalBackfillMetadata,
   readJunctionHistoricalBackfillProgress,
   readJunctionHistoricalBackfillStatus,
@@ -14,6 +15,7 @@ import type {
 export {
   canCurrentRuntimeMutateJunctionHistoricalBackfillProgress,
   JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS,
+  mergeGuardedJunctionHistoricalBackfillMetadata,
   readJunctionHistoricalBackfillProgress,
   readJunctionHistoricalBackfillStatus,
 };
