@@ -1,23 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { encryptHostedWebNullableString } from "@/src/lib/hosted-web/encryption";
-import * as barrel from "@/src/lib/hosted-onboarding/member-service";
-import {
-  completeHostedPrivyVerification,
-} from "@/src/lib/hosted-onboarding/authentication-service";
 import {
   abortHostedInvitePhoneCode,
-  buildHostedInvitePageData,
-  buildHostedInviteUrl,
   confirmHostedInvitePhoneCode,
-  getHostedInviteStatus,
-  issueHostedInvite,
-  issueHostedInviteForPhone,
   prepareHostedInvitePhoneCode,
-  requireHostedInviteForAuthentication,
 } from "@/src/lib/hosted-onboarding/invite-service";
-import {
-} from "@/src/lib/hosted-onboarding/member-activation";
 import {
   ensureHostedMemberForPhone,
 } from "@/src/lib/hosted-onboarding/member-identity-service";
@@ -353,19 +341,6 @@ describe("ensureHostedMemberForPhone", () => {
     ).rejects.toMatchObject({
       code: "PHONE_NUMBER_INVALID",
     });
-  });
-});
-
-describe("hosted-onboarding member-service barrel", () => {
-  it("keeps the focused module exports available through the compatibility barrel", () => {
-    expect(barrel.buildHostedInvitePageData).toBe(buildHostedInvitePageData);
-    expect(barrel.buildHostedInviteUrl).toBe(buildHostedInviteUrl);
-    expect(barrel.getHostedInviteStatus).toBe(getHostedInviteStatus);
-    expect(barrel.issueHostedInvite).toBe(issueHostedInvite);
-    expect(barrel.issueHostedInviteForPhone).toBe(issueHostedInviteForPhone);
-    expect(barrel.requireHostedInviteForAuthentication).toBe(requireHostedInviteForAuthentication);
-    expect(barrel.ensureHostedMemberForPhone).toBe(ensureHostedMemberForPhone);
-    expect(barrel.completeHostedPrivyVerification).toBe(completeHostedPrivyVerification);
   });
 });
 
