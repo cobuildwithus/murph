@@ -1,0 +1,68 @@
+import { createElement } from "react";
+import { act } from "react";
+import { beforeEach, expect, test, vi } from "vitest";
+
+import { renderClientComponent } from "./render-client-component";
+
+const mocks = vi.hoisted(() => ({
+  requestHostedOnboardingJson: vi.fn(),
+  signChallenge: vi.fn(),
+}));
+
+vi.mock("@/src/components/hosted-onboarding/client-api", () => ({
+  requestHostedOnboardingJson: mocks.requestHostedOnboardingJson,
+}));
+
+vi.mock("@/src/components/sensitive-actions/use-sensitive-action-authorization", () => ({
+  useSensitiveActionAuthorization: () => ({
+    setup: {
+      error: null,
+      pendingLabel: null,
+    },
+    signChallenge: mocks.signChallenge,
+  }),
+}));
+
+import { ActionApprovalCard } from "@/src/components/sensitive-actions/action-approval-card";
+
+beforeEach(() => {
+  vi.clearAllMocks();
+});
+
+test("announces the disabled approval controls while approval is pending", async () => {
+  mocks.requestHostedOnboardingJson.mockReturnValue(new Promise(() => {}));
+  const rendered = await renderClientComponent(createElement(ActionApprovalCard, {
+    approval: {
+      approvalId: "approval-test",
+      expiresAt: "2099-01-01T00:00:00.000Z",
+      presentation: {
+        body: "Allow the requested action.",
+        title: "Approve action",
+      },
+      returnContactKind: null,
+      status: "pending",
+    },
+  }));
+
+  try {
+    expect(rendered.container.querySelector("[role='status']")).toBeNull();
+    expect(rendered.container.querySelector("[aria-busy='true']")).toBeNull();
+
+    await act(async () => {
+      rendered.button.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
+      await Promise.resolve();
+    });
+
+    const controls = rendered.container.querySelector("[aria-busy='true']");
+    const status = rendered.container.querySelector("[role='status']");
+    expect(controls).not.toBeNull();
+    expect(
+      Array.from(rendered.container.querySelectorAll("button"))
+        .every((button) => button.disabled),
+    ).toBe(true);
+    expect(status?.getAttribute("aria-live")).toBe("polite");
+    expect(status?.textContent).toBe("Verifying approval…");
+  } finally {
+    await rendered.cleanup();
+  }
+});
