@@ -1,5 +1,14 @@
 import assert from "node:assert/strict";
-import { describe, test, vi } from "vitest";
+import { beforeEach, describe, expect, test, vi } from "vitest";
+
+const mocks = vi.hoisted(() => ({
+  reconcileHostedAiUsageAllowancePeriodForMemberTx: vi.fn(async () => {}),
+}));
+
+vi.mock("../src/lib/hosted-execution/usage-allowance", () => ({
+  reconcileHostedAiUsageAllowancePeriodForMemberTx:
+    mocks.reconcileHostedAiUsageAllowancePeriodForMemberTx,
+}));
 
 import {
   withHostedMemberStripeMutationLock,
@@ -24,6 +33,10 @@ const ORIGINAL_TRIAL_END = new Date("2026-07-12T12:00:00.000Z");
 const EXTENDED_TRIAL_END = new Date("2026-07-19T12:00:00.000Z");
 
 describe("Pulse Trial beta extension", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
   test("holds the member row lock for the serialized Stripe mutation", async () => {
     const events: string[] = [];
     const tx = {
@@ -210,7 +223,6 @@ describe("Pulse Trial beta extension", () => {
       ...makeCandidate(),
       currentPeriodEnd: EXTENDED_TRIAL_END,
       currentTrialEndsAt: EXTENDED_TRIAL_END,
-      usagePeriodEnd: EXTENDED_TRIAL_END,
     });
   });
 
@@ -235,7 +247,7 @@ describe("Pulse Trial beta extension", () => {
     assert.equal(second.stripeTrialsExtended, 0);
     assert.equal(second.alreadyExtended, 1);
     assert.equal(stripe.updateCalls.length, 1);
-    assert.equal(source.updateCalls.length, 1);
+    assert.equal(source.updateCalls.length, 2);
   });
 
   test("a retry repairs local state after Stripe succeeded without extending Stripe again", async () => {
@@ -291,28 +303,11 @@ describe("Pulse Trial beta extension", () => {
     assert.equal(source.updateCalls.length, 0);
   });
 
-  test("does not call Stripe when the matching local usage period is missing", async () => {
-    const source = makeCandidateSource([makeCandidate({ usagePeriodEnd: null })]);
-    const stripe = makeStripeClient();
-
-    const summary = await extendHostedPulseTrials({
-      candidateSource: source,
-      mode: "apply",
-      now: NOW,
-      stripe,
-    });
-
-    assert.equal(summary.skipped.local_usage_period_missing, 1);
-    assert.equal(stripe.retrieveCalls, 0);
-    assert.equal(stripe.updateCalls.length, 0);
-  });
-
   test("uses current Stripe trial status when local end timestamps are stale", async () => {
     const staleLocalEnd = new Date("2026-07-08T12:00:00.000Z");
     const source = makeCandidateSource([makeCandidate({
       currentPeriodEnd: staleLocalEnd,
       currentTrialEndsAt: staleLocalEnd,
-      usagePeriodEnd: staleLocalEnd,
     })]);
     const stripe = makeStripeClient();
 
@@ -403,7 +398,6 @@ describe("Pulse Trial beta extension", () => {
           source.updateCalls.push({ candidate, trialEndsAt });
           candidate.currentPeriodEnd = trialEndsAt;
           candidate.currentTrialEndsAt = trialEndsAt;
-          candidate.usagePeriodEnd = trialEndsAt;
         },
       })
     );
@@ -441,7 +435,6 @@ describe("Pulse Trial beta extension", () => {
       if (candidate) {
         candidate.currentPeriodEnd = null;
         candidate.currentTrialEndsAt = null;
-        candidate.usagePeriodEnd = null;
       }
     });
     allowProviderReturn.resolve();
@@ -459,12 +452,8 @@ describe("Pulse Trial beta extension", () => {
     assert.equal(source.candidates[0]?.currentTrialEndsAt, null);
   });
 
-  test("Prisma reconciliation updates only billing and usage end timestamps in one transaction", async () => {
+  test("Prisma reconciliation updates billing then delegates the usage projection to its owner", async () => {
     const billingUpdate = vi.fn(async (input: unknown) => {
-      void input;
-      return { count: 1 };
-    });
-    const usageUpdate = vi.fn(async (input: unknown) => {
       void input;
       return { count: 1 };
     });
@@ -479,13 +468,8 @@ describe("Pulse Trial beta extension", () => {
         memberId: candidate.memberId,
       };
     });
-    const findUnique = vi.fn(async (input: unknown) => {
-      void input;
-      return { periodEnd: ORIGINAL_TRIAL_END };
-    });
     const tx = {
       $queryRaw: vi.fn(async () => []),
-      hostedAiUsagePeriod: { findUnique, updateMany: usageUpdate },
       hostedMemberBillingRef: { findFirst, updateMany: billingUpdate },
     };
     const prisma = {
@@ -499,13 +483,12 @@ describe("Pulse Trial beta extension", () => {
         candidate,
         run: async (locked) => {
           assert.ok(locked.candidate);
-          await locked.updateTrialEnd(EXTENDED_TRIAL_END);
+          await locked.updateTrialEnd(EXTENDED_TRIAL_END, NOW);
         },
       });
 
     assert.equal(tx.$queryRaw.mock.calls.length, 1);
     assert.equal(findFirst.mock.calls.length, 1);
-    assert.equal(findUnique.mock.calls.length, 1);
     assert.deepEqual(billingUpdate.mock.calls[0]?.[0], {
       data: {
         currentPeriodEnd: EXTENDED_TRIAL_END,
@@ -526,14 +509,10 @@ describe("Pulse Trial beta extension", () => {
         },
       },
     });
-    assert.deepEqual(usageUpdate.mock.calls[0]?.[0], {
-      data: { periodEnd: EXTENDED_TRIAL_END },
-      where: {
-        billingPlanCode: "launch_monthly",
-        memberId: "member_test",
-        periodEnd: ORIGINAL_TRIAL_END,
-        periodStart: new Date("2026-07-02T12:00:00.000Z"),
-      },
+    expect(mocks.reconcileHostedAiUsageAllowancePeriodForMemberTx).toHaveBeenCalledWith({
+      memberId: "member_test",
+      now: NOW,
+      tx,
     });
   });
 
@@ -602,7 +581,6 @@ function makeCandidate(
     memberId: "member_test",
     stripeCustomerId: "cus_test",
     stripeSubscriptionId: "sub_test",
-    usagePeriodEnd: ORIGINAL_TRIAL_END,
     ...overrides,
   };
 }
@@ -696,7 +674,6 @@ function makeCandidateSource(
           }
           candidate.currentPeriodEnd = trialEndsAt;
           candidate.currentTrialEndsAt = trialEndsAt;
-          candidate.usagePeriodEnd = trialEndsAt;
         },
       });
     },

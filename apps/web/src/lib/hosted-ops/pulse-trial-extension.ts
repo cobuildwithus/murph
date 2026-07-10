@@ -23,6 +23,9 @@ import {
 } from "../hosted-onboarding/legacy-usage-price";
 import { requireHostedStripeBillingPlanConfig } from "../hosted-onboarding/runtime";
 import type { HostedOnboardingReadClient } from "../hosted-onboarding/shared";
+import {
+  reconcileHostedAiUsageAllowancePeriodForMemberTx,
+} from "../hosted-execution/usage-allowance";
 import { getPrisma } from "../prisma";
 
 const DEFAULT_BATCH_SIZE = 100;
@@ -46,12 +49,11 @@ export interface HostedPulseTrialExtensionCandidate {
   memberId: string;
   stripeCustomerId: string | null;
   stripeSubscriptionId: string | null;
-  usagePeriodEnd: Date | null;
 }
 
 export interface HostedPulseTrialExtensionLockedCandidate {
   candidate: HostedPulseTrialExtensionCandidate | null;
-  updateTrialEnd(trialEndsAt: Date): Promise<void>;
+  updateTrialEnd(trialEndsAt: Date, now: Date): Promise<void>;
 }
 
 export interface HostedPulseTrialExtensionCandidateSource {
@@ -110,7 +112,6 @@ export interface HostedPulseTrialExtensionStripeClient {
 export type HostedPulseTrialExtensionSkipReason =
   | "local_candidate_changed"
   | "local_trial_window_invalid"
-  | "local_usage_period_missing"
   | "missing_stripe_refs"
   | "stripe_billing_plan_mismatch"
   | "stripe_campaign_marker_conflict"
@@ -261,19 +262,15 @@ export async function extendHostedPulseTrials(input: {
             }
 
             const trialEndsAt = stripeUnixSecondsToDate(providerResult.stripeTrialEnd);
-            if (isHostedPulseTrialExtensionLocallyReconciled({
+            const localAlreadyCurrent = isHostedPulseTrialExtensionLocallyReconciled({
               candidate: locked.candidate,
               trialEndsAt,
-            })) {
-              return {
-                localReconciliation: "already-current",
-                result: providerResult,
-              };
-            }
-
-            await locked.updateTrialEnd(trialEndsAt);
+            });
+            await locked.updateTrialEnd(trialEndsAt, input.now ?? new Date());
             return {
-              localReconciliation: "reconciled",
+              localReconciliation: localAlreadyCurrent
+                ? "already-current"
+                : "reconciled",
               result: providerResult,
             };
           },
@@ -451,12 +448,13 @@ export function createPrismaHostedPulseTrialExtensionCandidateSource(
           });
           return input.run({
             candidate,
-            updateTrialEnd: async (trialEndsAt) => {
+            updateTrialEnd: async (trialEndsAt, now) => {
               if (!candidate) {
                 throw new Error("Pulse Trial extension candidate changed before apply.");
               }
               await updatePrismaHostedPulseTrialExtensionCandidateTrialEnd({
                 candidate,
+                now,
                 trialEndsAt,
                 tx,
               });
@@ -498,9 +496,6 @@ function classifyHostedPulseTrialExtensionCandidate(
   ) {
     return "local_trial_window_invalid";
   }
-  if (!candidate.usagePeriodEnd) {
-    return "local_usage_period_missing";
-  }
   return null;
 }
 
@@ -523,7 +518,6 @@ function buildEmptyHostedPulseTrialExtensionSummary(
     skipped: {
       local_candidate_changed: 0,
       local_trial_window_invalid: 0,
-      local_usage_period_missing: 0,
       missing_stripe_refs: 0,
       stripe_billing_plan_mismatch: 0,
       stripe_campaign_marker_conflict: 0,
@@ -554,8 +548,7 @@ function isHostedPulseTrialExtensionLocallyReconciled(input: {
 }): boolean {
   const targetTime = input.trialEndsAt.getTime();
   return input.candidate.currentTrialEndsAt?.getTime() === targetTime &&
-    input.candidate.currentPeriodEnd?.getTime() === targetTime &&
-    input.candidate.usagePeriodEnd?.getTime() === targetTime;
+    input.candidate.currentPeriodEnd?.getTime() === targetTime;
 }
 
 function isValidHostedPulseTrialExtensionUpdateResult(input: {
@@ -645,17 +638,6 @@ async function projectHostedPulseTrialExtensionCandidate(
   prisma: HostedOnboardingReadClient,
 ): Promise<HostedPulseTrialExtensionCandidate> {
   const snapshot = await projectHostedMemberStripeBillingRefSnapshot(record, prisma);
-  const usagePeriod = snapshot.currentTrialStartedAt
-    ? await prisma.hostedAiUsagePeriod.findUnique({
-        select: { periodEnd: true },
-        where: {
-          memberId_periodStart: {
-            memberId: snapshot.memberId,
-            periodStart: snapshot.currentTrialStartedAt,
-          },
-        },
-      })
-    : null;
 
   return {
     currentPeriodEnd: snapshot.currentPeriodEnd ?? null,
@@ -665,7 +647,6 @@ async function projectHostedPulseTrialExtensionCandidate(
     memberId: snapshot.memberId,
     stripeCustomerId: snapshot.stripeCustomerId,
     stripeSubscriptionId: snapshot.stripeSubscriptionId,
-    usagePeriodEnd: usagePeriod?.periodEnd ?? null,
   };
 }
 
@@ -746,18 +727,6 @@ async function readLockedPrismaHostedPulseTrialExtensionCandidate(input: {
     return null;
   }
 
-  const usagePeriod = record.currentTrialStartedAt
-    ? await input.tx.hostedAiUsagePeriod.findUnique({
-        select: { periodEnd: true },
-        where: {
-          memberId_periodStart: {
-            memberId: record.memberId,
-            periodStart: record.currentTrialStartedAt,
-          },
-        },
-      })
-    : null;
-
   return {
     currentPeriodEnd: record.currentPeriodEnd,
     currentTrialEndsAt: record.currentTrialEndsAt,
@@ -766,18 +735,17 @@ async function readLockedPrismaHostedPulseTrialExtensionCandidate(input: {
     memberId: record.memberId,
     stripeCustomerId: input.expectedCandidate.stripeCustomerId,
     stripeSubscriptionId: input.expectedCandidate.stripeSubscriptionId,
-    usagePeriodEnd: usagePeriod?.periodEnd ?? null,
   };
 }
 
 async function updatePrismaHostedPulseTrialExtensionCandidateTrialEnd(input: {
   candidate: HostedPulseTrialExtensionCandidate;
+  now: Date;
   trialEndsAt: Date;
   tx: Prisma.TransactionClient;
 }): Promise<void> {
   const currentTrialStartedAt = input.candidate.currentTrialStartedAt;
-  const usagePeriodEnd = input.candidate.usagePeriodEnd;
-  if (!currentTrialStartedAt || !usagePeriodEnd) {
+  if (!currentTrialStartedAt) {
     throw new Error("Pulse Trial extension candidate is missing its local window.");
   }
 
@@ -805,20 +773,11 @@ async function updatePrismaHostedPulseTrialExtensionCandidateTrialEnd(input: {
     throw new Error("Pulse Trial billing state changed during extension.");
   }
 
-  const usageUpdate = await input.tx.hostedAiUsagePeriod.updateMany({
-    data: {
-      periodEnd: input.trialEndsAt,
-    },
-    where: {
-      billingPlanCode: "launch_monthly",
-      memberId: input.candidate.memberId,
-      periodEnd: usagePeriodEnd,
-      periodStart: currentTrialStartedAt,
-    },
+  await reconcileHostedAiUsageAllowancePeriodForMemberTx({
+    memberId: input.candidate.memberId,
+    now: input.now,
+    tx: input.tx,
   });
-  if (usageUpdate.count !== 1) {
-    throw new Error("Pulse Trial usage period changed during extension.");
-  }
 }
 
 function isHostedPulseTrialExtensionSubscriptionPriceEligible(input: {

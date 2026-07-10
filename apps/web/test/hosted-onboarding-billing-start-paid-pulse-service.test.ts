@@ -295,6 +295,38 @@ describe("startHostedPulseTrialPaidPlan", () => {
     expect(mocks.stripe.subscriptions.update).toHaveBeenCalledTimes(1);
   });
 
+  test("canonical-reconciles when local invoice reconciliation fails after Stripe succeeds", async () => {
+    const paidSubscription = makeSubscription({
+      latestInvoice: makeInvoice({ status: "paid" }),
+      status: "active",
+      trialEnd: null,
+    });
+    mocks.stripe.subscriptions.retrieve
+      .mockResolvedValueOnce(makeSubscription())
+      .mockResolvedValueOnce(paidSubscription);
+    mocks.stripe.subscriptions.update.mockResolvedValueOnce(paidSubscription);
+    mocks.applyStripeInvoicePaid
+      .mockRejectedValueOnce(new Error("Synthetic local invoice reconciliation failure."))
+      .mockResolvedValueOnce(undefined);
+    mocks.readHostedMemberStripeBillingRef
+      .mockResolvedValueOnce(makeBillingRef())
+      .mockResolvedValueOnce(makeBillingRef({
+        currentBillingPhase: "paid",
+      }));
+
+    await expect(startHostedPulseTrialPaidPlan({
+      memberId: "member_123",
+      now: new Date("2026-05-06T00:00:00.000Z"),
+    })).resolves.toEqual({
+      billingPlanCode: "launch_monthly",
+      status: "started",
+    });
+
+    expect(mocks.stripe.subscriptions.retrieve).toHaveBeenCalledTimes(2);
+    expect(mocks.stripe.subscriptions.update).toHaveBeenCalledTimes(1);
+    expect(mocks.applyStripeInvoicePaid).toHaveBeenCalledTimes(2);
+  });
+
   test("surfaces deterministic Stripe update failures instead of returning billing_pending", async () => {
     mocks.stripe.subscriptions.update.mockRejectedValueOnce({
       requestId: "req_bad_request",
@@ -499,7 +531,7 @@ describe("startHostedPulseTrialPaidPlan", () => {
   });
 
   test("rejects paid invoice recovery when a successful trial-ending update returns unsupported items", async () => {
-    mocks.stripe.subscriptions.update.mockResolvedValueOnce(makeSubscription({
+    const unsupportedSubscription = makeSubscription({
       items: [
         makeSubscriptionItem({
           priceId: "price_pulse_recurring",
@@ -517,7 +549,11 @@ describe("startHostedPulseTrialPaidPlan", () => {
       }),
       status: "active",
       trialEnd: null,
-    }));
+    });
+    mocks.stripe.subscriptions.retrieve
+      .mockResolvedValueOnce(makeSubscription())
+      .mockResolvedValueOnce(unsupportedSubscription);
+    mocks.stripe.subscriptions.update.mockResolvedValueOnce(unsupportedSubscription);
 
     await expect(startHostedPulseTrialPaidPlan({
       memberId: "member_123",
@@ -1092,7 +1128,7 @@ describe("startHostedPulseTrialPaidPlan", () => {
   });
 
   test("rejects payment-required invoices without a hosted payment URL", async () => {
-    mocks.stripe.subscriptions.update.mockResolvedValueOnce(makeSubscription({
+    const paymentRequiredSubscription = makeSubscription({
       latestInvoice: makeInvoice({
         hostedInvoiceUrl: null,
         paymentIntentStatus: "requires_payment_method",
@@ -1100,7 +1136,11 @@ describe("startHostedPulseTrialPaidPlan", () => {
       }),
       status: "active",
       trialEnd: null,
-    }));
+    });
+    mocks.stripe.subscriptions.retrieve
+      .mockResolvedValueOnce(makeSubscription())
+      .mockResolvedValueOnce(paymentRequiredSubscription);
+    mocks.stripe.subscriptions.update.mockResolvedValueOnce(paymentRequiredSubscription);
 
     await expect(startHostedPulseTrialPaidPlan({
       memberId: "member_123",

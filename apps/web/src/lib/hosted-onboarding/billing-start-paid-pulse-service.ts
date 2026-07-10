@@ -643,11 +643,10 @@ async function updateHostedPulseTrialStartPaidSubscription(input: {
   stripeSubscriptionId: string;
   trialEnd: Date | null;
 }): Promise<HostedPulseTrialStartPaidResult | null> {
-  let updatedSubscription: Stripe.Subscription;
   let stripeMutationCompleted = false;
 
   try {
-    updatedSubscription = await withHostedMemberStripeMutationLock({
+    const updatedSubscription = await withHostedMemberStripeMutationLock({
       memberId: input.memberId,
       prisma: input.prisma,
       run: async () => {
@@ -671,6 +670,27 @@ async function updateHostedPulseTrialStartPaidSubscription(input: {
         return subscription;
       },
     });
+
+    assertHostedStripePulseTrialStartPaidPostMutationSubscriptionShape({
+      priceId: input.priceId,
+      subscription: updatedSubscription,
+    });
+
+    const updatedInvoiceResult = await maybeResolveHostedPulseTrialStartPaidPostMutationInvoiceResult({
+      invoice: readExpandedLatestInvoice(updatedSubscription),
+      memberId: input.memberId,
+      now: input.now,
+      priceId: input.priceId,
+      prisma: input.prisma,
+      stripeCustomerId: input.stripeCustomerId,
+      stripeSubscriptionId: input.stripeSubscriptionId,
+      subscription: updatedSubscription,
+    });
+
+    return updatedInvoiceResult ?? {
+      billingPlanCode: START_PAID_PULSE_PLAN,
+      status: "billing_pending",
+    };
   } catch (error) {
     if (
       !stripeMutationCompleted &&
@@ -681,27 +701,6 @@ async function updateHostedPulseTrialStartPaidSubscription(input: {
 
     return null;
   }
-
-  assertHostedStripePulseTrialStartPaidPostMutationSubscriptionShape({
-    priceId: input.priceId,
-    subscription: updatedSubscription,
-  });
-
-  const updatedInvoiceResult = await maybeResolveHostedPulseTrialStartPaidPostMutationInvoiceResult({
-    invoice: readExpandedLatestInvoice(updatedSubscription),
-    memberId: input.memberId,
-    now: input.now,
-    priceId: input.priceId,
-    prisma: input.prisma,
-    stripeCustomerId: input.stripeCustomerId,
-    stripeSubscriptionId: input.stripeSubscriptionId,
-    subscription: updatedSubscription,
-  });
-
-  return updatedInvoiceResult ?? {
-    billingPlanCode: START_PAID_PULSE_PLAN,
-    status: "billing_pending",
-  };
 }
 
 async function reconcileHostedPulseTrialStartPaidSubscriptionAfterStripeFailure(input: {
