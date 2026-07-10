@@ -185,11 +185,25 @@ type CodexAppServerProcessState =
   | 'stopped'
   | 'stopping'
 
+type CodexAppServerColdStartReason =
+  | 'node-process-first-use'
+  | 'previous-explicit-stop'
+  | 'previous-idle-compaction-failure'
+  | 'previous-launch-identity-change'
+  | 'previous-process-exit'
+  | 'previous-process-unhealthy'
+  | 'previous-turn-abort'
+  | 'previous-turn-failure'
+
 type CodexAppServerProcessInput = {
   args: readonly string[]
   codexCommand: string
   env: NodeJS.ProcessEnv
   launchKey: string
+}
+
+type CodexAppServerSpawnInput = CodexAppServerProcessInput & {
+  coldStartReason: CodexAppServerColdStartReason
 }
 
 type CodexAppServerPreparedTurnInput = CodexAppServerTurnInput & {
@@ -703,6 +717,7 @@ export function buildCodexAppServerArgs(
 
 class CodexAppServerProcess {
   readonly child: ChildProcessWithoutNullStreams
+  readonly coldStartReason: CodexAppServerColdStartReason
   readonly launchKey: string
   readonly pendingRequests = new Map<CodexRpcId, PendingCodexRpcRequest>()
   readonly processGroupPid: number | null
@@ -716,6 +731,7 @@ class CodexAppServerProcess {
   private readonly codexCommand: string
   private ignoredResponseIds = new Set<CodexRpcId>()
   private initialized = false
+  private endReason: CodexAppServerColdStartReason | null = null
   private nextRequestId = 1
   private normalShutdown = false
   private poisoned = false
@@ -728,8 +744,9 @@ class CodexAppServerProcess {
   private stdoutBuffer = ''
   private stopPromise: Promise<void> | null = null
 
-  constructor(input: CodexAppServerProcessInput) {
+  constructor(input: CodexAppServerSpawnInput) {
     this.codexCommand = input.codexCommand
+    this.coldStartReason = input.coldStartReason
     this.launchKey = input.launchKey
 
     const useProcessGroup = process.platform !== 'win32'
@@ -772,6 +789,10 @@ class CodexAppServerProcess {
 
   get processLifetimeMs(): number {
     return Math.max(0, Date.now() - this.startedAt)
+  }
+
+  get nextColdStartReason(): CodexAppServerColdStartReason {
+    return this.endReason ?? 'previous-process-unhealthy'
   }
 
   get hasInFlightTurn(): boolean {
@@ -953,7 +974,8 @@ class CodexAppServerProcess {
     await this.stopPromise
   }
 
-  private async runStop(_reason: string): Promise<void> {
+  private async runStop(reason: string): Promise<void> {
+    this.endReason ??= resolveCodexAppServerEndReason(reason)
     this.normalShutdown = true
     this.state = 'stopping'
     let stopped = false
@@ -1207,6 +1229,7 @@ class CodexAppServerProcess {
 
     if (!this.normalShutdown) {
       this.poisoned = true
+      this.endReason ??= 'previous-process-exit'
     }
     this.state = 'stopped'
     this.cleanupProcessExitListener()
@@ -1288,7 +1311,29 @@ class CodexAppServerProcess {
   }
 }
 
+function resolveCodexAppServerEndReason(
+  reason: string,
+): CodexAppServerColdStartReason {
+  switch (reason) {
+    case 'idle-compaction-failed':
+      return 'previous-idle-compaction-failure'
+    case 'launch-identity-changed':
+      return 'previous-launch-identity-change'
+    case 'process-exited':
+      return 'previous-process-exit'
+    case 'process-unhealthy':
+      return 'previous-process-unhealthy'
+    case 'turn-completed-after-abort':
+      return 'previous-turn-abort'
+    case 'turn-failure':
+      return 'previous-turn-failure'
+    default:
+      return 'previous-explicit-stop'
+  }
+}
+
 let warmCodexProcess: CodexAppServerProcess | null = null
+let pendingCodexAppServerColdStartReason: CodexAppServerColdStartReason | null = null
 let warmCodexSlotLock: Promise<void> = Promise.resolve()
 
 async function withWarmCodexSlotLock<T>(
@@ -1317,20 +1362,47 @@ async function getOrStartWarmCodexProcess(
       return warmCodexProcess
     }
 
-    if (warmCodexProcess) {
-      if (warmCodexProcess.hasInFlightTurn) {
-        throw warmCodexProcess.buildBusyError(
+    const previousProcess = warmCodexProcess
+    if (previousProcess) {
+      if (previousProcess.hasInFlightTurn) {
+        throw previousProcess.buildBusyError(
           'Codex app-server process is already serving a turn.',
         )
       }
-      await warmCodexProcess.stop('identity-or-health-mismatch')
-      warmCodexProcess = null
+      const processExited =
+        previousProcess.child.exitCode !== null ||
+        previousProcess.child.signalCode !== null
+      const stopReason = processExited
+        ? 'process-exited'
+        : previousProcess.launchKey !== launchKey
+          ? 'launch-identity-changed'
+          : 'process-unhealthy'
+      await previousProcess.stop(stopReason)
+      retireWarmCodexProcess(previousProcess)
     }
 
-    warmCodexProcess = new CodexAppServerProcess(input)
+    const coldStartReason =
+      pendingCodexAppServerColdStartReason ?? 'node-process-first-use'
+    const processInstance = new CodexAppServerProcess({
+      ...input,
+      coldStartReason,
+    })
+    pendingCodexAppServerColdStartReason = null
+    warmCodexProcess = processInstance
     warmCodexProcess.reserveTurn()
     return warmCodexProcess
   })
+}
+
+function retireWarmCodexProcess(
+  processInstance: CodexAppServerProcess,
+): void {
+  if (warmCodexProcess !== processInstance) {
+    return
+  }
+  pendingCodexAppServerColdStartReason ??=
+    processInstance.nextColdStartReason
+  warmCodexProcess = null
 }
 
 function clearWarmCodexProcessIfUnusable(
@@ -1342,7 +1414,7 @@ function clearWarmCodexProcessIfUnusable(
     !processInstance.isReusableFor(launchKey) &&
     (processInstance.child.exitCode !== null || processInstance.child.signalCode !== null)
   ) {
-    warmCodexProcess = null
+    retireWarmCodexProcess(processInstance)
   }
 }
 
@@ -1362,9 +1434,7 @@ export async function stopWarmCodexAppServer(
     }
 
     await processInstance.stop(reason)
-    if (warmCodexProcess === processInstance) {
-      warmCodexProcess = null
-    }
+    retireWarmCodexProcess(processInstance)
   })
 }
 
@@ -1651,9 +1721,7 @@ export async function executeCodexManagedAccountOperation(
     processInstance.releaseReservation()
     await processInstance.stop('managed-account-operation-complete').catch(() => undefined)
     await withWarmCodexSlotLock(async () => {
-      if (warmCodexProcess === processInstance) {
-        warmCodexProcess = null
-      }
+      retireWarmCodexProcess(processInstance)
     })
   }
 }
@@ -2452,6 +2520,11 @@ async function runCodexAppServerTurnOnProcess(
         rawEvent: {
           schema: CODEX_APP_SERVER_TIMING_TRACE_SCHEMA,
           type: CODEX_APP_SERVER_TIMING_TRACE_TYPE,
+          ...(stage === 'initialized'
+            ? {
+                codexTimingColdStartReason: codexProcess.coldStartReason,
+              }
+            : {}),
           codexTimingElapsedMs: elapsedMs,
           codexTimingProviderActionCount: providerActionCount,
           codexTimingThreadIdPresent: codexThreadId !== null,
@@ -3873,7 +3946,9 @@ async function runCodexAppServerTurnOnProcess(
     closeLiveTurn()
     normalShutdown = true
     lifecycleStage = 'error_cleanup'
-    await codexProcess.poison('turn-failure').catch(() => undefined)
+    await codexProcess.poison(
+      abortRequested ? 'turn-completed-after-abort' : 'turn-failure',
+    ).catch(() => undefined)
     throw error
   } finally {
     closeLiveTurn()
