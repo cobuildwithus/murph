@@ -13720,7 +13720,23 @@ describe('steered final segments', () => {
 
   it('keeps a pre-steer final when only commentary follows the steer', async () => {
     const progressDelivery = createProgressDeliveryMock()
+    const retainedMedia = {
+      url: 'https://cdn.example.test/assistant/retained-final.png',
+      alt: 'Retained final image',
+      source: 'retained-final',
+    }
     const result = await runScriptedSteeredFinalSegmentsTurn([
+      completedItemEvent({
+        id: 'user-1',
+        type: 'user_message',
+        message: 'First question',
+      }),
+      {
+        kind: 'attach-response-media',
+        id: 81,
+        expectedText: '1 response image attached',
+        media: [retainedMedia],
+      },
       completedItemEvent({
         id: 'assistant-1',
         type: 'assistant_message',
@@ -13741,6 +13757,13 @@ describe('steered final segments', () => {
 
     expect(progressDelivery.send).not.toHaveBeenCalled()
     expect(result.finalMessage).toBe('Answer one.')
+    expect(result.responseDeliveryContextOrdinal).toBe(0)
+    expect(result.responseMedia).toEqual([
+      {
+        ...retainedMedia,
+        kind: 'image',
+      },
+    ])
     expect(result.precedingAgentMessageSegments).toEqual([])
   })
 
@@ -13839,6 +13862,11 @@ describe('steered final segments', () => {
   it('does not return a trailing-steer final answer as a preceding segment', async () => {
     const result = await runScriptedSteeredFinalSegmentsTurn([
       completedItemEvent({
+        id: 'user-1',
+        type: 'user_message',
+        message: 'First question',
+      }),
+      completedItemEvent({
         id: 'assistant-1',
         type: 'assistant_message',
         message: 'Answer one.',
@@ -13851,11 +13879,17 @@ describe('steered final segments', () => {
     ])
 
     expect(result.finalMessage).toBe('Answer one.')
+    expect(result.responseDeliveryContextOrdinal).toBe(0)
     expect(result.precedingAgentMessageSegments).toEqual([])
   })
 
   it('promotes a trailing-steer answer when the current segment has fallback text', async () => {
     const result = await runScriptedSteeredFinalSegmentsTurn([
+      completedItemEvent({
+        id: 'user-1',
+        type: 'user_message',
+        message: 'First question',
+      }),
       completedItemEvent({
         id: 'assistant-1',
         type: 'assistant_message',
@@ -13878,6 +13912,7 @@ describe('steered final segments', () => {
     ])
 
     expect(result.finalMessage).toBe('Answer two from fallback.')
+    expect(result.responseDeliveryContextOrdinal).toBe(1)
     expect(result.precedingAgentMessageSegments).toEqual([
       {
         deliveryContextOrdinal: 0,

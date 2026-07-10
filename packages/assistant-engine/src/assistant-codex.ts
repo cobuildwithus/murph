@@ -504,6 +504,8 @@ export interface CodexAppServerTurnResult {
   // in completion order. Empty unless the turn was steered after the model had
   // already finished an answer.
   precedingAgentMessageSegments: readonly CodexAppServerResponseSegment[]
+  /** Accepted-input ordinal whose delivery context owns the selected final reply. */
+  responseDeliveryContextOrdinal?: number
   additionalUsages: AssistantProviderUsageDraft[]
   responseMedia: AssistantResponseMedia[]
   jsonEvents: unknown[]
@@ -3984,6 +3986,7 @@ async function runCodexAppServerTurnOnProcess(
       response: segment.response,
       media: [...segment.media],
     })),
+    responseDeliveryContextOrdinal: finalDeliveryContextOrdinal,
     additionalUsages: [...additionalUsages, ...buildSubagentUsageDrafts()],
     responseMedia: finalHasDeliverableOutput ? [...finalResponseMedia] : [],
     jsonEvents,

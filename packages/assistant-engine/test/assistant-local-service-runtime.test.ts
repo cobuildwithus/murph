@@ -639,7 +639,7 @@ test('sendAssistantMessageLocal preserves real same-text preceding answers', asy
     ])
 })
 
-test('sendAssistantMessageLocal resolves pre-steer delivery contexts from accepted input ordinals', async () => {
+test('sendAssistantMessageLocal resolves preceding and retained final delivery contexts from accepted input ordinals', async () => {
   const session = createAssistantSession({
     binding: {
       actorId: null,
@@ -693,17 +693,21 @@ test('sendAssistantMessageLocal resolves pre-steer delivery contexts from accept
             media: [],
           },
           {
-            deliveryContextOrdinal: 1,
-            response: 'Answer two.',
-            media: [],
-          },
-          {
             deliveryContextOrdinal: 99,
             response: 'Answer fallback.',
             media: [],
           },
         ],
-        response: 'Answer three.',
+        response: 'Retained answer.',
+        responseDeliveryContextOrdinal: 1,
+        responseMedia: [
+          {
+            kind: 'image',
+            url: 'https://cdn.example.test/assistant/retained-final.png',
+            alt: 'Retained final image',
+            source: null,
+          },
+        ],
         route: {
           routeId: 'route-contexts',
         },
@@ -762,15 +766,49 @@ test('sendAssistantMessageLocal resolves pre-steer delivery contexts from accept
   await vi.waitFor(() => {
     expect(liveSteeredPrompts).toEqual(['Late follow up'])
   })
+
+  const secondSteeredResultPromise = sendAssistantMessageLocal({
+    conversation: {
+      channel: 'telegram',
+      identityId: 'identity-1',
+      threadId: 'thread-1',
+    },
+    deliveryDispatchMode: 'queue-only',
+    deliveryIdempotencyKey: 'delivery-three',
+    deliveryReplyToMessageId: 'message-three',
+    deliverySource: {
+      kind: 'linq',
+      fromPhoneNumber: '+15550000003',
+    },
+    deliverySubject: 'subject-three',
+    deliveryTarget: 'thread-three',
+    expectedActiveTurnId: 'turn-1',
+    hostedDeliveryIdempotency: {
+      assistantTurnOrdinal: 'assistant-reply:3',
+      conversationId: 'conversation-three',
+      inboundMailboxItemIds: ['mailbox-three'],
+      recipientKey: 'recipient-three',
+    },
+    prompt: 'Second late follow up',
+    vault: '/vaults/test',
+  })
+  await vi.waitFor(() => {
+    expect(liveSteeredPrompts).toEqual([
+      'Late follow up',
+      'Second late follow up',
+    ])
+  })
   providerRelease.resolve()
 
-  const [initialResult, steeredResult] = await Promise.all([
+  const [initialResult, steeredResult, secondSteeredResult] = await Promise.all([
     initialResultPromise,
     steeredResultPromise,
+    secondSteeredResultPromise,
   ])
 
-  expect(initialResult.response).toBe('Answer three.')
-  expect(steeredResult.response).toBe('Answer three.')
+  expect(initialResult.response).toBe('Retained answer.')
+  expect(steeredResult.response).toBe('Retained answer.')
+  expect(secondSteeredResult.response).toBe('Retained answer.')
   expect(mocks.deliverAssistantPrecedingReplies).toHaveBeenCalledTimes(1)
   const precedingDeliveryInput =
     mocks.deliverAssistantPrecedingReplies.mock.calls[0]?.[0]
@@ -807,33 +845,15 @@ test('sendAssistantMessageLocal resolves pre-steer delivery contexts from accept
         recipientKey: 'recipient-one',
       },
     },
-    {
-      response: 'Answer two.',
-      deliveryDispatchMode: 'immediate',
-      deliveryIdempotencyKey: 'delivery-two',
-      deliveryReplyToMessageId: 'message-two',
-      deliverySource: {
-        kind: 'linq',
-        fromPhoneNumber: '+15550000002',
-      },
-      deliverySubject: 'subject-two',
-      deliveryTarget: 'thread-two',
-      hostedDeliveryIdempotency: {
-        assistantTurnOrdinal: 'assistant-reply:2',
-        conversationId: 'conversation-two',
-        inboundMailboxItemIds: ['mailbox-two'],
-        recipientKey: 'recipient-two',
-      },
-    },
   ])
   expect(mocks.recordAssistantDiagnosticEvent.mock.calls.map((call) => call[0]))
     .toContainEqual(
       expect.objectContaining({
         code: 'ASSISTANT_DELIVERY_CONTEXT_ORDINAL_INVALID',
         data: {
-          contextCount: 2,
+          contextCount: 3,
           deliveryContextOrdinal: 99,
-          segmentOrdinal: 2,
+          segmentOrdinal: 1,
         },
         kind: 'delivery.preceding-reply.delivery-context-ordinal-invalid',
         level: 'warn',
@@ -858,6 +878,40 @@ test('sendAssistantMessageLocal resolves pre-steer delivery contexts from accept
       recipientKey: 'recipient-two',
     },
   })
+  expect(mocks.dispatchAssistantReply.mock.calls[0]?.[0]?.media).toEqual([
+    {
+      kind: 'image',
+      url: 'https://cdn.example.test/assistant/retained-final.png',
+      alt: 'Retained final image',
+      source: null,
+    },
+  ])
+})
+
+test('sendAssistantMessageLocal fails closed for an invalid final delivery context ordinal', async () => {
+  const { mocks, sendAssistantMessageLocal, session } = await loadLocalServiceModule()
+
+  mocks.executeCodexTurnWithRecovery.mockImplementationOnce(async () => ({
+    kind: 'succeeded',
+    providerTurn: {
+      onboardingGuidanceInjected: false,
+      codexContinuation: { kind: 'explicit-structured-history' },
+      response: 'Do not route this through a fallback context.',
+      responseDeliveryContextOrdinal: 99,
+      session,
+    },
+  }))
+
+  await expect(sendAssistantMessageLocal({
+    deliverResponse: true,
+    deliveryTarget: 'thread-one',
+    prompt: 'First question',
+    vault: '/vaults/test',
+  })).rejects.toMatchObject({
+    code: 'ASSISTANT_DELIVERY_CONTEXT_ORDINAL_INVALID',
+  })
+
+  expect(mocks.dispatchAssistantReply).not.toHaveBeenCalled()
 })
 
 test('sendAssistantMessageLocal records a diagnostic when a preceding answer fails and still sends the final reply', async () => {
@@ -4718,6 +4772,20 @@ test('active-turn controller reruns input-available admission after an accepted 
           promptFallbackText: 'Rerun accepted hook input 1',
           source: 'assistant-input',
         },
+      ],
+      kind: 'accepted',
+      prompt: 'Rerun accepted hook input 1',
+      providerAlreadySteered: true,
+      transcriptText: 'Rerun accepted hook transcript 1',
+      userMessageContent: [
+        {
+          text: 'Rerun accepted hook input 1',
+          type: 'text',
+        },
+      ],
+    })
+    assert.deepEqual(await controller.admitLiveSteered(), {
+      acceptedInputs: [
         {
           id: 'hook-2',
           promptFallbackReason: 'missing-content-ref',
@@ -4726,15 +4794,10 @@ test('active-turn controller reruns input-available admission after an accepted 
         },
       ],
       kind: 'accepted',
-      prompt: 'Rerun accepted hook input 1\n\nRerun accepted hook input 2',
+      prompt: 'Rerun accepted hook input 2',
       providerAlreadySteered: true,
-      receiptMetadata: undefined,
-      transcriptText: 'Rerun accepted hook transcript 1\n\nRerun accepted hook transcript 2',
+      transcriptText: 'Rerun accepted hook transcript 2',
       userMessageContent: [
-        {
-          text: 'Rerun accepted hook input 1',
-          type: 'text',
-        },
         {
           text: 'Rerun accepted hook input 2',
           type: 'text',
