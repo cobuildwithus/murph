@@ -1,3 +1,4 @@
+import { DEVICE_SYNC_HISTORICAL_DATA_RECONNECT_REQUIRED_ERROR_CODE } from "@murphai/device-syncd/public-account";
 import { DEFAULT_DEVICE_SYNC_HTTP_BODY_LIMIT_BYTES } from "@murphai/device-syncd/public-ingress";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -835,6 +836,201 @@ describe("hosted device-sync wakes", () => {
     expect(mocks.appendHostedMailboxEnvelope).toHaveBeenCalledTimes(1);
   });
 
+  it("rejects a stale disconnect when OAuth tokens rotate during provider revoke", async () => {
+    const controlPlane = createHostedDeviceSyncPublicIngressService(
+      new Request("https://control.example.test/api/settings/device-sync/connections/dsc_123/disconnect"),
+    );
+    const beforeRefresh = buildHostedConnection({
+      accessTokenExpiresAt: "2026-03-26T12:05:00.000Z",
+    });
+    const afterRefresh = buildHostedConnection({
+      accessTokenExpiresAt: "2026-03-26T13:00:00.000Z",
+      updatedAt: "2026-03-26T12:01:00.000Z",
+    });
+    const beforeRefreshStored = buildStoredConnection({
+      accessTokenExpiresAt: "2026-03-26T12:05:00.000Z",
+    });
+    const afterRefreshStored = {
+      ...buildStoredConnection({
+        accessTokenExpiresAt: "2026-03-26T13:00:00.000Z",
+        updatedAt: "2026-03-26T12:01:00.000Z",
+      }),
+      tokenVersion: 3,
+    };
+    let currentConnection = beforeRefresh;
+    let currentStoredConnection = beforeRefreshStored;
+    let releaseRevoke: (() => void) | undefined;
+    let markRevokeStarted: (() => void) | undefined;
+    const revokeStarted = new Promise<void>((resolve) => {
+      markRevokeStarted = resolve;
+    });
+    const revokeBlocked = new Promise<void>((resolve) => {
+      releaseRevoke = resolve;
+    });
+    const revokeAccess = vi.fn(async () => {
+      markRevokeStarted?.();
+      await revokeBlocked;
+    });
+    mocks.registryGet.mockReturnValue({
+      connectionHandler: {
+        revokeAccess,
+      },
+    });
+    mocks.listConnectionsForUser.mockResolvedValue([beforeRefresh]);
+    mocks.getConnectionForUser.mockImplementation(async () => currentConnection);
+    mocks.getStoredConnectionAccountForUser.mockImplementation(async () => currentStoredConnection);
+    const publicConnectionId = buildPublicConnectionId("dsc_123");
+
+    const disconnect = controlPlane.disconnectConnection("user-123", publicConnectionId);
+    await revokeStarted;
+    currentConnection = afterRefresh;
+    currentStoredConnection = afterRefreshStored;
+    releaseRevoke?.();
+
+    await expect(disconnect).rejects.toMatchObject({
+      code: "CONNECTION_CHANGED_DURING_DISCONNECT",
+      httpStatus: 409,
+      retryable: true,
+    });
+    expect(revokeAccess).toHaveBeenCalledWith(beforeRefreshStored);
+    expect(mocks.syncDurableConnectionState).not.toHaveBeenCalled();
+    expect(mocks.markConnectionSourcesDisconnected).not.toHaveBeenCalled();
+    expect(mocks.persistStoredConnectionTokenBundle).not.toHaveBeenCalled();
+    expect(mocks.clearStoredProviderConfigCredential).not.toHaveBeenCalled();
+    expect(mocks.createSignal).not.toHaveBeenCalled();
+    expect(mocks.appendHostedMailboxEnvelope).not.toHaveBeenCalled();
+    expect(mocks.signalHostedDeviceSyncMailboxRuntime).not.toHaveBeenCalled();
+    expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
+  });
+
+  it("leaves a reconnect alone after atomically observing a disconnected credential-less epoch", async () => {
+    const controlPlane = createHostedDeviceSyncPublicIngressService(
+      new Request("https://control.example.test/api/settings/device-sync/connections/dsc_123/disconnect"),
+    );
+    const beforeReconnect = buildHostedConnection({ status: "disconnected" });
+    const afterReconnect = buildHostedConnection({
+      connectedAt: "2026-03-26T12:01:00.000Z",
+      updatedAt: "2026-03-26T12:01:00.000Z",
+    });
+    const afterReconnectStored = buildStoredConnection({
+      connectedAt: "2026-03-26T12:01:00.000Z",
+      updatedAt: "2026-03-26T12:01:00.000Z",
+    });
+    let currentConnection = beforeReconnect;
+    let currentStoredConnection: ReturnType<typeof buildStoredConnection> | null = null;
+    let lockCount = 0;
+    mocks.listConnectionsForUser.mockResolvedValue([beforeReconnect]);
+    mocks.getConnectionForUser.mockImplementation(async () => currentConnection);
+    mocks.getStoredConnectionAccountForUser.mockImplementation(async () => currentStoredConnection);
+    mocks.withConnectionMutationLock.mockImplementation(async (
+      _connectionId: string,
+      callback: (tx: typeof mocks.prismaTx) => Promise<unknown>,
+    ) => {
+      lockCount += 1;
+      const result = await callback(mocks.prismaTx);
+      if (lockCount === 1) {
+        currentConnection = afterReconnect;
+        currentStoredConnection = afterReconnectStored;
+      }
+      return result;
+    });
+
+    await expect(
+      controlPlane.disconnectConnection("user-123", buildPublicConnectionId("dsc_123")),
+    ).resolves.toMatchObject({
+      connection: {
+        status: "disconnected",
+      },
+    });
+
+    expect(lockCount).toBe(1);
+    expect(mocks.getConnectionForUser.mock.calls[0]?.[2]).toBe(mocks.prismaTx);
+    expect(mocks.getStoredConnectionAccountForUser.mock.calls[0]?.[2]).toBe(mocks.prismaTx);
+    expect(mocks.registryGet).not.toHaveBeenCalled();
+    expect(mocks.syncDurableConnectionState).not.toHaveBeenCalled();
+    expect(mocks.persistStoredConnectionTokenBundle).not.toHaveBeenCalled();
+    expect(mocks.createSignal).not.toHaveBeenCalled();
+    expect(mocks.appendHostedMailboxEnvelope).not.toHaveBeenCalled();
+  });
+
+  it("rejects a stale disconnect when a reconnect epoch lands during provider revoke", async () => {
+    const controlPlane = createHostedDeviceSyncPublicIngressService(
+      new Request("https://control.example.test/api/settings/device-sync/connections/dsc_123/disconnect"),
+    );
+    const beforeReconnect = buildHostedConnection({
+      displayName: "Junction",
+      externalAccountId: "junction-user-123",
+      provider: "junction",
+      scopes: [],
+    });
+    const afterReconnect = buildHostedConnection({
+      connectedAt: "2026-03-26T12:01:00.000Z",
+      displayName: "Junction",
+      externalAccountId: "junction-user-123",
+      provider: "junction",
+      scopes: [],
+      updatedAt: "2026-03-26T12:01:00.000Z",
+    });
+    const beforeReconnectStored = buildProviderConfigStoredConnection({
+      displayName: "Junction",
+      externalAccountId: "junction-user-123",
+      provider: "junction",
+      scopes: [],
+    });
+    const afterReconnectStored = buildProviderConfigStoredConnection({
+      connectedAt: "2026-03-26T12:01:00.000Z",
+      displayName: "Junction",
+      externalAccountId: "junction-user-123",
+      provider: "junction",
+      scopes: [],
+      updatedAt: "2026-03-26T12:01:00.000Z",
+    });
+    let currentConnection = beforeReconnect;
+    let currentStoredConnection = beforeReconnectStored;
+    let releaseRevoke: (() => void) | undefined;
+    let markRevokeStarted: (() => void) | undefined;
+    const revokeStarted = new Promise<void>((resolve) => {
+      markRevokeStarted = resolve;
+    });
+    const revokeBlocked = new Promise<void>((resolve) => {
+      releaseRevoke = resolve;
+    });
+    const revokeAccess = vi.fn(async () => {
+      markRevokeStarted?.();
+      await revokeBlocked;
+    });
+    mocks.registryGet.mockReturnValue({
+      connectionHandler: {
+        revokeAccess,
+      },
+    });
+    mocks.listConnectionsForUser.mockResolvedValue([beforeReconnect]);
+    mocks.getConnectionForUser.mockImplementation(async () => currentConnection);
+    mocks.getStoredConnectionAccountForUser.mockImplementation(async () => currentStoredConnection);
+    const publicConnectionId = buildPublicConnectionId("dsc_123");
+
+    const disconnect = controlPlane.disconnectConnection("user-123", publicConnectionId);
+    await revokeStarted;
+    currentConnection = afterReconnect;
+    currentStoredConnection = afterReconnectStored;
+    releaseRevoke?.();
+
+    await expect(disconnect).rejects.toMatchObject({
+      code: "CONNECTION_CHANGED_DURING_DISCONNECT",
+      httpStatus: 409,
+      retryable: true,
+    });
+    expect(revokeAccess).toHaveBeenCalledWith(beforeReconnectStored);
+    expect(mocks.syncDurableConnectionState).not.toHaveBeenCalled();
+    expect(mocks.markConnectionSourcesDisconnected).not.toHaveBeenCalled();
+    expect(mocks.persistStoredConnectionTokenBundle).not.toHaveBeenCalled();
+    expect(mocks.clearStoredProviderConfigCredential).not.toHaveBeenCalled();
+    expect(mocks.createSignal).not.toHaveBeenCalled();
+    expect(mocks.appendHostedMailboxEnvelope).not.toHaveBeenCalled();
+    expect(mocks.signalHostedDeviceSyncMailboxRuntime).not.toHaveBeenCalled();
+    expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
+  });
+
   it("revokes active provider-config connections during hosted disconnect", async () => {
     const controlPlane = createHostedDeviceSyncPublicIngressService(
       new Request("https://control.example.test/api/settings/device-sync/connections/dsc_123/disconnect"),
@@ -1019,7 +1215,7 @@ describe("hosted device-sync wakes", () => {
     expect(mocks.signalHostedDeviceSyncMailboxRuntime).not.toHaveBeenCalled();
   });
 
-  it("sanitizes revoke failures before they fan out to runtime state, signals, dispatches, and the browser response", async () => {
+  it("uses the locked source snapshot after a historical marker clears while sanitizing revoke failures", async () => {
     const controlPlane = createHostedDeviceSyncPublicIngressService(
       new Request("https://control.example.test/api/settings/device-sync/connections/dsc_123/disconnect"),
     );
@@ -1029,7 +1225,12 @@ describe("hosted device-sync wakes", () => {
       lastErrorMessage: "authorization=[redacted] refresh_token=[redacted]",
       status: "disconnected",
     });
+    let currentSources = [{
+      lastErrorCode: DEVICE_SYNC_HISTORICAL_DATA_RECONNECT_REQUIRED_ERROR_CODE,
+      status: "error",
+    }];
     const revokeAccess = vi.fn(async () => {
+      currentSources = [];
       throw new Error("authorization=Bearer secret-token refresh_token=refresh-secret");
     });
     mocks.registryGet.mockReturnValue({
@@ -1041,20 +1242,25 @@ describe("hosted device-sync wakes", () => {
     mocks.getConnectionForUser
       .mockResolvedValueOnce(activeConnection)
       .mockResolvedValueOnce(disconnectedConnection);
+    mocks.listConnectionSources.mockImplementation(async () => currentSources);
     const publicConnectionId = buildPublicConnectionId("dsc_123");
 
-    await expect(controlPlane.disconnectConnection("user-123", publicConnectionId)).resolves.toMatchObject({
+    const result = await controlPlane.disconnectConnection("user-123", publicConnectionId);
+
+    expect(result).toMatchObject({
       connection: {
         id: publicConnectionId,
         status: "disconnected",
       },
-      warning: {
-        code: "PROVIDER_REVOKE_FAILED",
-        message: "authorization=[redacted] refresh_token=[redacted]",
-      },
+    });
+    // Exact shape: an ordinary revoke failure must not carry the historical-reset flag.
+    expect(result.warning).toEqual({
+      code: "PROVIDER_REVOKE_FAILED",
+      message: "authorization=[redacted] refresh_token=[redacted]",
     });
 
     expect(revokeAccess).toHaveBeenCalledTimes(1);
+    expect(mocks.listConnectionSources).toHaveBeenCalledWith("dsc_123", mocks.prismaTx);
     expect(mocks.createSignal).toHaveBeenCalledWith(
       expect.objectContaining({
         revokeWarning: {
@@ -1077,21 +1283,169 @@ describe("hosted device-sync wakes", () => {
     );
   });
 
+  it("uses a historical-reset marker that appears during provider revoke from the locked source snapshot", async () => {
+    const controlPlane = createHostedDeviceSyncPublicIngressService(
+      new Request("https://control.example.test/api/settings/device-sync/connections/dsc_123/disconnect"),
+    );
+    const activeConnection = buildHostedConnection({
+      provider: "junction",
+    });
+    let currentSources: Array<{ lastErrorCode: string; status: string }> = [];
+    const revokeAccess = vi.fn(async () => {
+      currentSources = [{
+        lastErrorCode: DEVICE_SYNC_HISTORICAL_DATA_RECONNECT_REQUIRED_ERROR_CODE,
+        status: "error",
+      }];
+      throw new Error("junction deregistration failed upstream");
+    });
+    mocks.registryGet.mockReturnValue({
+      connectionHandler: {
+        revokeAccess,
+      },
+    });
+    mocks.listConnectionsForUser.mockResolvedValue([activeConnection]);
+    mocks.getConnectionForUser.mockResolvedValue(activeConnection);
+    mocks.listConnectionSources.mockImplementation(async () => currentSources);
+    const publicConnectionId = buildPublicConnectionId("dsc_123");
+
+    const result = await controlPlane.disconnectConnection("user-123", publicConnectionId);
+
+    expect(result.connection).toMatchObject({
+      id: publicConnectionId,
+      status: "disconnected",
+    });
+    expect(result.warning).toEqual({
+      code: "HISTORICAL_RESET_REVOKE_FAILED",
+      historicalResetIncomplete: true,
+      message: "Provider revoke did not complete while a historical data reset is pending. "
+        + "Remove the connection in the provider account before reconnecting.",
+    });
+    expect(mocks.listConnectionSources).toHaveBeenCalledWith("dsc_123", mocks.prismaTx);
+    expect(mocks.createSignal).toHaveBeenCalledWith(
+      expect.objectContaining({
+        revokeWarning: {
+          code: "HISTORICAL_RESET_REVOKE_FAILED",
+          message: "Provider revoke did not complete while a historical data reset is pending. "
+            + "Remove the connection in the provider account before reconnecting.",
+        },
+      }),
+    );
+    expect(JSON.stringify(result)).not.toContain("deregistration failed upstream");
+  });
+
+  it("keeps the historical-reset warning when a repeated disconnect fails revoke after sources were cleared", async () => {
+    const controlPlane = createHostedDeviceSyncPublicIngressService(
+      new Request("https://control.example.test/api/settings/device-sync/connections/dsc_123/disconnect"),
+    );
+    const disconnectedConnection = buildHostedConnection({
+      lastErrorCode: "HISTORICAL_RESET_REVOKE_FAILED",
+      lastErrorMessage: "Provider revoke did not complete while a historical data reset is pending. "
+        + "Remove the connection in the provider account before reconnecting.",
+      provider: "junction",
+      status: "disconnected",
+    });
+    const revokeAccess = vi.fn(async () => {
+      throw new Error("junction deregistration failed upstream again");
+    });
+    mocks.registryGet.mockReturnValue({
+      connectionHandler: {
+        revokeAccess,
+      },
+    });
+    mocks.listConnectionsForUser.mockResolvedValue([disconnectedConnection]);
+    mocks.getConnectionForUser.mockResolvedValue(disconnectedConnection);
+    mocks.getStoredConnectionAccountForUser.mockResolvedValue(buildProviderConfigStoredConnection({
+      externalAccountId: "junction-user-123",
+      lastErrorCode: "HISTORICAL_RESET_REVOKE_FAILED",
+      provider: "junction",
+      status: "disconnected",
+    }));
+    // The first disconnect attempt already cleared the source recovery markers.
+    mocks.listConnectionSources.mockResolvedValue([]);
+    const publicConnectionId = buildPublicConnectionId("dsc_123");
+
+    const result = await controlPlane.disconnectConnection("user-123", publicConnectionId);
+
+    expect(revokeAccess).toHaveBeenCalledTimes(1);
+    expect(result.connection).toMatchObject({
+      id: publicConnectionId,
+      lastErrorCode: "HISTORICAL_RESET_REVOKE_FAILED",
+      status: "disconnected",
+    });
+    expect(result.warning).toEqual({
+      code: "HISTORICAL_RESET_REVOKE_FAILED",
+      historicalResetIncomplete: true,
+      message: "Provider revoke did not complete while a historical data reset is pending. "
+        + "Remove the connection in the provider account before reconnecting.",
+    });
+    expect(mocks.syncDurableConnectionState).not.toHaveBeenCalled();
+    expect(JSON.stringify(result)).not.toContain("deregistration failed upstream");
+    expect(JSON.stringify(result)).not.toContain("PROVIDER_REVOKE_FAILED");
+  });
+
+  it("clears a historical-reset warning when a repeated disconnect finishes remote revoke", async () => {
+    const controlPlane = createHostedDeviceSyncPublicIngressService(
+      new Request("https://control.example.test/api/settings/device-sync/connections/dsc_123/disconnect"),
+    );
+    const disconnectedConnection = buildHostedConnection({
+      lastErrorCode: "HISTORICAL_RESET_REVOKE_FAILED",
+      lastErrorMessage: "Remove the old provider connection before reconnecting.",
+      provider: "junction",
+      status: "disconnected",
+    });
+    const storedConnection = buildProviderConfigStoredConnection({
+      externalAccountId: "junction-user-123",
+      lastErrorCode: "HISTORICAL_RESET_REVOKE_FAILED",
+      provider: "junction",
+      status: "disconnected",
+    });
+    const revokeAccess = vi.fn(async () => {});
+    mocks.registryGet.mockReturnValue({
+      connectionHandler: {
+        revokeAccess,
+      },
+    });
+    mocks.listConnectionsForUser.mockResolvedValue([disconnectedConnection]);
+    mocks.getConnectionForUser.mockResolvedValue(disconnectedConnection);
+    mocks.getStoredConnectionAccountForUser.mockResolvedValue(storedConnection);
+    const publicConnectionId = buildPublicConnectionId("dsc_123");
+
+    const result = await controlPlane.disconnectConnection("user-123", publicConnectionId);
+
+    expect(revokeAccess).toHaveBeenCalledTimes(1);
+    expect(result).toEqual({
+      connection: expect.objectContaining({
+        id: publicConnectionId,
+        lastErrorCode: null,
+        lastErrorMessage: null,
+        status: "disconnected",
+      }),
+    });
+    expect(mocks.clearStoredProviderConfigCredential).toHaveBeenCalledTimes(1);
+    expect(mocks.syncDurableConnectionState).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: "dsc_123",
+        lastErrorCode: null,
+        lastErrorMessage: null,
+        status: "disconnected",
+      }),
+      mocks.prismaTx,
+    );
+    expect(mocks.createSignal).not.toHaveBeenCalled();
+    expect(mocks.appendHostedMailboxEnvelope).not.toHaveBeenCalled();
+    expect(mocks.signalHostedDeviceSyncMailboxRuntime).not.toHaveBeenCalled();
+  });
+
   it("fails disconnect when the runtime no longer has provider identity to reseed", async () => {
     const controlPlane = createHostedDeviceSyncPublicIngressService(
       new Request("https://control.example.test/api/settings/device-sync/connections/dsc_123/disconnect"),
     );
     const activeConnection = buildHostedConnection();
-    const disconnectedConnection = buildHostedConnection({
-      status: "disconnected",
-    });
     mocks.listConnectionsForUser.mockResolvedValue([activeConnection]);
-    mocks.getConnectionForUser
-      .mockResolvedValueOnce(activeConnection)
-      .mockResolvedValueOnce(disconnectedConnection);
+    mocks.getConnectionForUser.mockResolvedValue(activeConnection);
     const publicConnectionId = buildPublicConnectionId("dsc_123");
 
-    mocks.getStoredConnectionAccountForUser.mockResolvedValueOnce(null);
+    mocks.getStoredConnectionAccountForUser.mockResolvedValue(null);
 
     await expect(controlPlane.disconnectConnection("user-123", publicConnectionId)).resolves.toMatchObject({
       connection: {
@@ -1220,6 +1574,58 @@ describe("hosted device-sync wakes", () => {
     expect(JSON.stringify(result.connectionSources)).not.toContain("TOKEN_REFRESH_FAILED");
   });
 
+  it("projects historical-data reconnect-required source errors as connection-reset recovery", async () => {
+    const controlPlane = createHostedDeviceSyncPublicIngressService(
+      new Request("https://control.example.test/api/settings/device-sync"),
+    );
+    mocks.listConnectionsForUser.mockResolvedValue([
+      buildHostedConnection({
+        id: "dsc_junction_garmin",
+        displayName: "Junction",
+        provider: "junction",
+      }),
+    ]);
+    mocks.listConnectionSources.mockResolvedValueOnce([
+      {
+        id: "src_garmin",
+        connectionId: "dsc_junction_garmin",
+        sourceInstanceKey: "jxn_hidden",
+        sourceProviderSlug: "garmin",
+        displayName: null,
+        status: "error",
+        resourceAvailabilitySummary: {
+          activity: true,
+          sleep: true,
+          workouts: true,
+        },
+        lastErrorCode: DEVICE_SYNC_HISTORICAL_DATA_RECONNECT_REQUIRED_ERROR_CODE,
+        lastErrorMessage: "Historical data requires reconnecting this source.",
+        firstSeenAt: "2026-04-01T08:00:00.000Z",
+        lastSeenAt: "2026-07-09T08:50:48.000Z",
+        createdAt: "2026-04-01T08:00:00.000Z",
+        updatedAt: "2026-07-09T08:50:48.000Z",
+      },
+    ]);
+
+    const result = await controlPlane.listConnections("user-123");
+
+    expect(result.connectionSources).toEqual([
+      {
+        connectionId: buildPublicConnectionId("dsc_junction_garmin"),
+        firstSeenAt: "2026-04-01T08:00:00.000Z",
+        lastSeenAt: "2026-07-09T08:50:48.000Z",
+        recoveryKind: "connection_reset",
+        resourceCount: 3,
+        sourceProviderSlug: "garmin",
+        status: "error",
+      },
+    ]);
+    expect(JSON.stringify(result.connectionSources)).not.toContain("requiresReconnect");
+    expect(JSON.stringify(result.connectionSources)).not.toContain(
+      DEVICE_SYNC_HISTORICAL_DATA_RECONNECT_REQUIRED_ERROR_CODE,
+    );
+  });
+
   it("resolves browser status reads through the opaque browser connection id", async () => {
     const controlPlane = createHostedDeviceSyncPublicIngressService(
       new Request("https://control.example.test/api/settings/device-sync/connections/dspc_demo/status"),
@@ -1263,6 +1669,12 @@ describe("hosted device-sync wakes", () => {
 
     await controlPlane.handleOAuthCallback("oura");
 
+    expect(mocks.withConnectionMutationLock).toHaveBeenCalledWith("dsc_123", expect.any(Function));
+    expect(mocks.getConnectionForUser).toHaveBeenCalledWith(
+      "user-123",
+      "dsc_123",
+      mocks.prismaTx,
+    );
     expect(mocks.createSignal).toHaveBeenCalledWith(
       expect.objectContaining({
         connectionId: "dsc_123",
@@ -1295,9 +1707,38 @@ describe("hosted device-sync wakes", () => {
         tx: mocks.prismaTx,
       }),
     );
+    expect(mocks.signalHostedDeviceSyncMailboxRuntime).toHaveBeenCalledWith({
+      mailboxItemId: "mailbox_123",
+    });
     expect(mocks.ensureWebhookSubscriptions).toHaveBeenCalledWith({
       publicBaseUrl: "https://control.example.test/api/device-sync",
     });
+  });
+
+  it.each([
+    ["a missing account", null],
+    ["a disconnected account", buildHostedConnection({ status: "disconnected" })],
+    ["a newer connection epoch", buildHostedConnection({
+      connectedAt: "2026-03-26T12:01:00.000Z",
+    })],
+  ])("does not persist a late connection-established wake over %s", async (_label, current) => {
+    mocks.getConnectionForUser.mockResolvedValue(current);
+    const controlPlane = createHostedDeviceSyncPublicIngressService(
+      new Request("https://control.example.test/api/device-sync/oauth/oura/callback?code=abc&state=xyz"),
+    );
+
+    await controlPlane.handleOAuthCallback("oura");
+
+    expect(mocks.withConnectionMutationLock).toHaveBeenCalledWith("dsc_123", expect.any(Function));
+    expect(mocks.getConnectionForUser).toHaveBeenCalledWith(
+      "user-123",
+      "dsc_123",
+      mocks.prismaTx,
+    );
+    expect(mocks.upsertConnectionSource).not.toHaveBeenCalled();
+    expect(mocks.createSignal).not.toHaveBeenCalled();
+    expect(mocks.appendHostedMailboxEnvelope).not.toHaveBeenCalled();
+    expect(mocks.signalHostedDeviceSyncMailboxRuntime).not.toHaveBeenCalled();
   });
 
   it("durably upserts a Junction source row from the connected ingress hook", async () => {

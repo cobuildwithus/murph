@@ -1,6 +1,6 @@
 # Device Provider Compatibility Matrix
 
-Last verified: 2026-06-10
+Last verified: 2026-07-09
 
 ## Purpose
 
@@ -70,6 +70,29 @@ For push-primary cells, never remove the inline-import carrier and never let a
 safe: keep both the inline import and the floor. This follows the device-sync
 ingestion invariants — push delivers early, pull guarantees eventually, and
 neither path gates the other.
+
+Junction historical progress is evaluated per advertised high-signal daily
+source/resource pair: activity, sleep, and `sleep_cycle`. Data in another
+family (for example activity) is not evidence that Garmin sleep or
+`sleep_cycle` landed. Availability describes capability, so empty sparse
+resources such as workouts or body measurements are not treated as failed
+exports. Garmin delivers requested history
+asynchronously and incrementally through daily-data webhooks, so Murph observes
+that resource-aware coverage with its existing bounded ladder and accepts late
+webhooks after polling ends. An authenticated old-window webhook that produces
+canonical events records bounded source/resource evidence for the exact connect
+window. The existing deduplicated verification unions that evidence with fresh
+REST rows, so complete late coverage clears the source error even when Garmin's
+REST sleep response stays empty. If coverage remains incomplete, Murph marks
+only the pending source reconnect-required while current ingestion stays active.
+To restart the export, the member explicitly confirms the existing
+connection-wide disconnect and then reconnects Garmin; this can disconnect
+other wearables on the same Junction connection and must be explained before
+confirmation. If remote deregistration fails, the local disconnect still stands
+and the member is told to remove the connection in the wearable provider account
+before reconnecting. Recovery does not depend on an automatic export endpoint,
+operator action, or vendor support.
+Direct sleep webhooks remain the authoritative carrier.
 
 ## Existing canonical shapes to prefer
 
