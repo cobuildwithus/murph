@@ -644,30 +644,38 @@ async function updateHostedPulseTrialStartPaidSubscription(input: {
   trialEnd: Date | null;
 }): Promise<HostedPulseTrialStartPaidResult | null> {
   let updatedSubscription: Stripe.Subscription;
+  let stripeMutationCompleted = false;
 
   try {
     updatedSubscription = await withHostedMemberStripeMutationLock({
       memberId: input.memberId,
       prisma: input.prisma,
-      run: () => callHostedStripeStartPaidPulseOperation(
-        "subscription.update.trial-end-now",
-        () => input.stripe.subscriptions.update(input.stripeSubscriptionId, {
-          expand: [...START_PAID_PULSE_STRIPE_UPDATE_EXPANSIONS],
-          ...(input.legacyMeteredItems.length > 0 ? { items: input.legacyMeteredItems } : {}),
-          payment_behavior: "allow_incomplete",
-          trial_end: "now",
-        }, {
-          idempotencyKey: buildHostedPulseTrialStartPaidIdempotencyKey({
-            memberId: input.memberId,
-            priceId: input.priceId,
-            stripeSubscriptionId: input.stripeSubscriptionId,
-            trialEnd: input.trialEnd,
+      run: async () => {
+        const subscription = await callHostedStripeStartPaidPulseOperation(
+          "subscription.update.trial-end-now",
+          () => input.stripe.subscriptions.update(input.stripeSubscriptionId, {
+            expand: [...START_PAID_PULSE_STRIPE_UPDATE_EXPANSIONS],
+            ...(input.legacyMeteredItems.length > 0 ? { items: input.legacyMeteredItems } : {}),
+            payment_behavior: "allow_incomplete",
+            trial_end: "now",
+          }, {
+            idempotencyKey: buildHostedPulseTrialStartPaidIdempotencyKey({
+              memberId: input.memberId,
+              priceId: input.priceId,
+              stripeSubscriptionId: input.stripeSubscriptionId,
+              trialEnd: input.trialEnd,
+            }),
           }),
-        }),
-      ),
+        );
+        stripeMutationCompleted = true;
+        return subscription;
+      },
     });
   } catch (error) {
-    if (!isHostedPulseTrialStartPaidAmbiguousStripeMutationError(error)) {
+    if (
+      !stripeMutationCompleted &&
+      !isHostedPulseTrialStartPaidAmbiguousStripeMutationError(error)
+    ) {
       throw error;
     }
 

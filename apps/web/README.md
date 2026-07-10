@@ -834,13 +834,19 @@ Current hosted billing assumptions:
   `HOSTED_AUTO_PULSE_TRIAL_ENABLED=0` only to force card checkout fallback.
 - Card-based Pulse Trial checkout fallback is gated by
   `HOSTED_PULSE_TRIAL_CHECKOUT_ENABLED=1`.
-- The protected `/ops/pulse-trial-extension` page owns the fixed
-  `pulse-beta-extension-2026-07` beta campaign. It previews aggregate counts,
-  extends each Stripe-authoritative current trial from its existing end by
+- The one-time `apps/web/scripts/extend-pulse-trials.ts` production script owns
+  the fixed `pulse-beta-extension-2026-07` beta campaign. It defaults to an
+  aggregate-only dry run; Apply additionally requires the exact campaign key.
+  Run it through `vercel env run --environment=production` with
+  `NODE_OPTIONS=--conditions=react-server`, as shown by the script's `--help`.
+  Deploy the updated web app before running the production script so trial
+  extension and “Start paid Pulse” both use the same member lock. Run a dry run
+  first and investigate unexpected failures or skips before Apply.
+  It extends each Stripe-authoritative current trial from its existing end by
   exactly seven days, then reconciles only the matching local billing and
-  usage-period end timestamps. Trial extension and “Start paid Pulse” serialize
-  their Stripe mutations under the same member lock so paid conversion always
-  wins rather than restoring a stale trial. A Stripe metadata marker makes
+  usage-period end timestamps under that lock, so paid conversion cannot be
+  followed by a stale local trial restoration. A Stripe metadata marker makes
   Apply safe to retry without resetting the original trial start or recorded
-  usage. Remove the campaign page, route, service, and focused tests after
-  production Apply reports no pending extensions or reconciliations.
+  usage. After Apply, rerun the dry run; remove the campaign script, service,
+  focused tests, and this note only when `wouldExtend` and `wouldReconcile` are
+  both zero and any unexpected failure or skip counts are resolved.

@@ -5,10 +5,9 @@ import {
   withHostedMemberStripeMutationLock,
 } from "../src/lib/hosted-onboarding/hosted-member-billing-store";
 import {
-  buildHostedPulseTrialExtensionStripeUpdateParams,
-  classifyHostedPulseTrialExtensionSubscription,
+  classifyHostedPulseTrialExtensionSubscription as classifyHostedPulseTrialExtensionSubscriptionWithPrice,
   createPrismaHostedPulseTrialExtensionCandidateSource,
-  extendHostedPulseTrials,
+  extendHostedPulseTrials as extendHostedPulseTrialsWithPrice,
   HOSTED_PULSE_TRIAL_EXTENSION_CAMPAIGN,
   HOSTED_PULSE_TRIAL_EXTENSION_CAMPAIGN_METADATA_KEY,
   HOSTED_PULSE_TRIAL_EXTENSION_DAYS_METADATA_KEY,
@@ -20,6 +19,7 @@ import {
 } from "../src/lib/hosted-ops/pulse-trial-extension";
 
 const NOW = new Date("2026-07-09T12:00:00.000Z");
+const PRICE_ID = "price_pulse_recurring";
 const ORIGINAL_TRIAL_END = new Date("2026-07-12T12:00:00.000Z");
 const EXTENDED_TRIAL_END = new Date("2026-07-19T12:00:00.000Z");
 
@@ -33,7 +33,11 @@ describe("Pulse Trial beta extension", () => {
       }),
     };
     const prisma = {
-      $transaction: vi.fn(async (callback: (transaction: typeof tx) => Promise<string>) => {
+      $transaction: vi.fn(async (
+        callback: (transaction: typeof tx) => Promise<string>,
+        options?: unknown,
+      ) => {
+        void options;
         events.push("transaction");
         const result = await callback(tx);
         events.push("commit");
@@ -44,7 +48,8 @@ describe("Pulse Trial beta extension", () => {
     const result = await withHostedMemberStripeMutationLock({
       memberId: "member_test",
       prisma: prisma as never,
-      run: async () => {
+      run: async (lockedTx) => {
+        assert.equal(lockedTx, tx);
         events.push("stripe");
         return "done";
       },
@@ -53,6 +58,10 @@ describe("Pulse Trial beta extension", () => {
     assert.equal(result, "done");
     assert.deepEqual(events, ["transaction", "lock", "stripe", "commit"]);
     assert.equal(tx.$queryRaw.mock.calls.length, 1);
+    assert.deepEqual(prisma.$transaction.mock.calls[0]?.[1], {
+      maxWait: 5_000,
+      timeout: 780_000,
+    });
   });
 
   test("validates current Stripe trial ownership and campaign state", () => {
@@ -100,6 +109,7 @@ describe("Pulse Trial beta extension", () => {
       expectedReason:
         | "stripe_billing_plan_mismatch"
         | "stripe_checkout_offer_mismatch"
+        | "stripe_price_mismatch"
         | "stripe_subscription_id_mismatch";
       subscription: HostedPulseTrialExtensionStripeSubscription;
     }> = [
@@ -122,6 +132,14 @@ describe("Pulse Trial beta extension", () => {
           metadata: {
             billingPlanCode: "edge_monthly",
             checkoutOffer: "pulse_trial_7d",
+          },
+        }),
+      },
+      {
+        expectedReason: "stripe_price_mismatch",
+        subscription: makeSubscription({
+          items: {
+            data: [makeSubscriptionItem({ priceId: "price_other" })],
           },
         }),
       },
@@ -242,6 +260,7 @@ describe("Pulse Trial beta extension", () => {
     assert.equal(second.stripeTrialsExtended, 0);
     assert.equal(second.localWindowsReconciled, 1);
     assert.equal(stripe.updateCalls.length, 1);
+    assert.equal(source.lockCalls, 2);
     assert.equal(source.updateCalls.length, 2);
     assert.equal(source.candidates[0]?.currentTrialEndsAt?.getTime(), EXTENDED_TRIAL_END.getTime());
   });
@@ -311,7 +330,6 @@ describe("Pulse Trial beta extension", () => {
 
   test("does not restore a trial when paid conversion wins the shared mutation lock", async () => {
     const source = makeCandidateSource([makeCandidate()]);
-    const initialTrial = makeSubscription();
     const convertedSubscription = makeSubscription({
       status: "active",
       trial_end: null,
@@ -321,7 +339,7 @@ describe("Pulse Trial beta extension", () => {
     const stripe: HostedPulseTrialExtensionStripeClient = {
       async retrieveSubscription() {
         retrieveCalls += 1;
-        return retrieveCalls === 1 ? initialTrial : convertedSubscription;
+        return convertedSubscription;
       },
       updateSubscription,
     };
@@ -333,11 +351,112 @@ describe("Pulse Trial beta extension", () => {
       stripe,
     });
 
-    assert.equal(retrieveCalls, 2);
+    assert.equal(retrieveCalls, 1);
     assert.equal(summary.skipped.stripe_subscription_not_trialing, 1);
     assert.equal(summary.stripeTrialsExtended, 0);
     assert.equal(source.updateCalls.length, 0);
     assert.equal(updateSubscription.mock.calls.length, 0);
+  });
+
+  test("does not touch Stripe when the locked local re-read is no longer eligible", async () => {
+    const source = makeCandidateSource([makeCandidate()]);
+    source.withStripeMutationLock = (input) => input.run({
+      candidate: null,
+      async updateTrialEnd() {
+        throw new Error("A changed candidate must not be reconciled.");
+      },
+    });
+    const stripe = makeStripeClient();
+
+    const summary = await extendHostedPulseTrials({
+      candidateSource: source,
+      mode: "apply",
+      now: NOW,
+      stripe,
+    });
+
+    assert.equal(summary.skipped.local_candidate_changed, 1);
+    assert.equal(summary.stripeTrialsExtended, 0);
+    assert.equal(summary.localWindowsReconciled, 0);
+    assert.equal(stripe.retrieveCalls, 0);
+    assert.equal(stripe.updateCalls.length, 0);
+    assert.equal(source.updateCalls.length, 0);
+  });
+
+  test("keeps local reconciliation inside the lock when paid conversion starts after Stripe extension", async () => {
+    const source = makeCandidateSource([makeCandidate()]);
+    const withMemberLock = makeAsyncMutex();
+    const providerUpdated = makeDeferred();
+    const allowProviderReturn = makeDeferred();
+    const events: string[] = [];
+    let subscription = makeSubscription();
+
+    source.withStripeMutationLock = (input) => withMemberLock(async () =>
+      input.run({
+        candidate: source.candidates[0] ?? null,
+        async updateTrialEnd(trialEndsAt) {
+          events.push("extension-local");
+          const candidate = source.candidates[0];
+          if (!candidate) {
+            throw new Error("Synthetic candidate was not found.");
+          }
+          source.updateCalls.push({ candidate, trialEndsAt });
+          candidate.currentPeriodEnd = trialEndsAt;
+          candidate.currentTrialEndsAt = trialEndsAt;
+          candidate.usagePeriodEnd = trialEndsAt;
+        },
+      })
+    );
+
+    const stripe: HostedPulseTrialExtensionStripeClient = {
+      async retrieveSubscription() {
+        return subscription;
+      },
+      async updateSubscription(_subscriptionId, params) {
+        events.push("extension-stripe");
+        subscription = {
+          ...subscription,
+          metadata: params.metadata,
+          trial_end: params.trial_end,
+        };
+        providerUpdated.resolve();
+        await allowProviderReturn.promise;
+        return subscription;
+      },
+    };
+
+    const extension = extendHostedPulseTrials({
+      candidateSource: source,
+      mode: "apply",
+      now: NOW,
+      stripe,
+    });
+    await providerUpdated.promise;
+
+    events.push("paid-attempt");
+    const paidConversion = withMemberLock(async () => {
+      events.push("paid-wins");
+      subscription = makeSubscription({ status: "active", trial_end: null });
+      const candidate = source.candidates[0];
+      if (candidate) {
+        candidate.currentPeriodEnd = null;
+        candidate.currentTrialEndsAt = null;
+        candidate.usagePeriodEnd = null;
+      }
+    });
+    allowProviderReturn.resolve();
+
+    const [summary] = await Promise.all([extension, paidConversion]);
+    assert.equal(summary.stripeTrialsExtended, 1);
+    assert.equal(summary.localWindowsReconciled, 1);
+    assert.deepEqual(events, [
+      "extension-stripe",
+      "paid-attempt",
+      "extension-local",
+      "paid-wins",
+    ]);
+    assert.equal(subscription.status, "active");
+    assert.equal(source.candidates[0]?.currentTrialEndsAt, null);
   });
 
   test("Prisma reconciliation updates only billing and usage end timestamps in one transaction", async () => {
@@ -349,9 +468,25 @@ describe("Pulse Trial beta extension", () => {
       void input;
       return { count: 1 };
     });
+    const candidate = makeCandidate();
+    const findFirst = vi.fn(async (input: unknown) => {
+      void input;
+      return {
+        currentPeriodEnd: ORIGINAL_TRIAL_END,
+        currentTrialEndsAt: ORIGINAL_TRIAL_END,
+        currentTrialStartedAt: candidate.currentTrialStartedAt,
+        lastStripeEventCreatedAt: candidate.lastStripeEventCreatedAt,
+        memberId: candidate.memberId,
+      };
+    });
+    const findUnique = vi.fn(async (input: unknown) => {
+      void input;
+      return { periodEnd: ORIGINAL_TRIAL_END };
+    });
     const tx = {
-      hostedAiUsagePeriod: { updateMany: usageUpdate },
-      hostedMemberBillingRef: { updateMany: billingUpdate },
+      $queryRaw: vi.fn(async () => []),
+      hostedAiUsagePeriod: { findUnique, updateMany: usageUpdate },
+      hostedMemberBillingRef: { findFirst, updateMany: billingUpdate },
     };
     const prisma = {
       $transaction: vi.fn(async (callback: (transaction: typeof tx) => Promise<unknown>) =>
@@ -359,13 +494,18 @@ describe("Pulse Trial beta extension", () => {
       ),
     };
 
-    await createPrismaHostedPulseTrialExtensionCandidateSource(
-      prisma as never,
-    ).updateCandidateTrialEnd({
-      candidate: makeCandidate(),
-      trialEndsAt: EXTENDED_TRIAL_END,
-    });
+    await createPrismaHostedPulseTrialExtensionCandidateSource(prisma as never)
+      .withStripeMutationLock({
+        candidate,
+        run: async (locked) => {
+          assert.ok(locked.candidate);
+          await locked.updateTrialEnd(EXTENDED_TRIAL_END);
+        },
+      });
 
+    assert.equal(tx.$queryRaw.mock.calls.length, 1);
+    assert.equal(findFirst.mock.calls.length, 1);
+    assert.equal(findUnique.mock.calls.length, 1);
     assert.deepEqual(billingUpdate.mock.calls[0]?.[0], {
       data: {
         currentPeriodEnd: EXTENDED_TRIAL_END,
@@ -375,8 +515,15 @@ describe("Pulse Trial beta extension", () => {
         currentBillingPhase: "trial",
         currentBillingPlanCode: "launch_monthly",
         currentCheckoutOffer: "pulse_trial_7d",
+        currentPeriodEnd: ORIGINAL_TRIAL_END,
+        currentTrialEndsAt: ORIGINAL_TRIAL_END,
         currentTrialStartedAt: new Date("2026-07-02T12:00:00.000Z"),
+        lastStripeEventCreatedAt: new Date("2026-07-02T12:00:00.000Z"),
         memberId: "member_test",
+        member: {
+          billingStatus: "active",
+          suspendedAt: null,
+        },
       },
     });
     assert.deepEqual(usageUpdate.mock.calls[0]?.[0], {
@@ -384,6 +531,7 @@ describe("Pulse Trial beta extension", () => {
       where: {
         billingPlanCode: "launch_monthly",
         memberId: "member_test",
+        periodEnd: ORIGINAL_TRIAL_END,
         periodStart: new Date("2026-07-02T12:00:00.000Z"),
       },
     });
@@ -420,27 +568,28 @@ describe("Pulse Trial beta extension", () => {
     });
   });
 
-  test("builds a metadata-preserving, non-prorating Stripe update", () => {
-    assert.deepEqual(
-      buildHostedPulseTrialExtensionStripeUpdateParams({
-        subscription: makeSubscription(),
-        targetTrialEnd: toUnixSeconds(EXTENDED_TRIAL_END),
-      }),
-      {
-        metadata: {
-          billingPlanCode: "launch_monthly",
-          checkoutOffer: "pulse_trial_7d",
-          memberId: "member_test",
-          [HOSTED_PULSE_TRIAL_EXTENSION_CAMPAIGN_METADATA_KEY]:
-            HOSTED_PULSE_TRIAL_EXTENSION_CAMPAIGN,
-          [HOSTED_PULSE_TRIAL_EXTENSION_DAYS_METADATA_KEY]: "7",
-        },
-        proration_behavior: "none",
-        trial_end: toUnixSeconds(EXTENDED_TRIAL_END),
-      },
-    );
-  });
 });
+
+function extendHostedPulseTrials(
+  input: Omit<Parameters<typeof extendHostedPulseTrialsWithPrice>[0], "priceId">,
+) {
+  return extendHostedPulseTrialsWithPrice({
+    ...input,
+    priceId: PRICE_ID,
+  });
+}
+
+function classifyHostedPulseTrialExtensionSubscription(
+  input: Omit<
+    Parameters<typeof classifyHostedPulseTrialExtensionSubscriptionWithPrice>[0],
+    "priceId"
+  >,
+) {
+  return classifyHostedPulseTrialExtensionSubscriptionWithPrice({
+    ...input,
+    priceId: PRICE_ID,
+  });
+}
 
 function makeCandidate(
   overrides: Partial<HostedPulseTrialExtensionCandidate> = {},
@@ -449,6 +598,7 @@ function makeCandidate(
     currentPeriodEnd: ORIGINAL_TRIAL_END,
     currentTrialEndsAt: ORIGINAL_TRIAL_END,
     currentTrialStartedAt: new Date("2026-07-02T12:00:00.000Z"),
+    lastStripeEventCreatedAt: new Date("2026-07-02T12:00:00.000Z"),
     memberId: "member_test",
     stripeCustomerId: "cus_test",
     stripeSubscriptionId: "sub_test",
@@ -463,6 +613,9 @@ function makeSubscription(
   return {
     customer: "cus_test",
     id: "sub_test",
+    items: {
+      data: [makeSubscriptionItem()],
+    },
     metadata: {
       billingPlanCode: "launch_monthly",
       checkoutOffer: "pulse_trial_7d",
@@ -474,6 +627,22 @@ function makeSubscription(
   };
 }
 
+function makeSubscriptionItem(input: { priceId?: string } = {}) {
+  return {
+    id: "si_recurring",
+    price: {
+      id: input.priceId ?? PRICE_ID,
+      metadata: {},
+      recurring: {
+        interval: "month",
+        interval_count: 1,
+        usage_type: "licensed",
+      },
+    },
+    quantity: 1,
+  };
+}
+
 function makeCandidateSource(
   initialCandidates: readonly HostedPulseTrialExtensionCandidate[],
   options: {
@@ -482,6 +651,7 @@ function makeCandidateSource(
   } = {},
 ): HostedPulseTrialExtensionCandidateSource & {
   candidates: HostedPulseTrialExtensionCandidate[];
+  readonly lockCalls: number;
   updateCalls: Array<{
     candidate: HostedPulseTrialExtensionCandidate;
     trialEndsAt: Date;
@@ -492,37 +662,43 @@ function makeCandidateSource(
     candidate: HostedPulseTrialExtensionCandidate;
     trialEndsAt: Date;
   }> = [];
+  let lockCalls = 0;
   let remainingFailures = options.failUpdates ?? 0;
 
   return {
     candidates,
+    get lockCalls() {
+      return lockCalls;
+    },
     async listCandidates(input) {
       const startIndex = input.afterMemberId
         ? candidates.findIndex((candidate) => candidate.memberId === input.afterMemberId) + 1
         : 0;
       return candidates.slice(startIndex, startIndex + input.limit);
     },
-    async updateCandidateTrialEnd(input) {
-      options.events?.push("database");
-      updateCalls.push(input);
-      if (remainingFailures > 0) {
-        remainingFailures -= 1;
-        throw new Error("Synthetic local write failure.");
-      }
-
-      const candidate = candidates.find(
-        (entry) => entry.memberId === input.candidate.memberId,
-      );
-      if (!candidate) {
-        throw new Error("Synthetic candidate was not found.");
-      }
-      candidate.currentPeriodEnd = input.trialEndsAt;
-      candidate.currentTrialEndsAt = input.trialEndsAt;
-      candidate.usagePeriodEnd = input.trialEndsAt;
-    },
     updateCalls,
     async withStripeMutationLock(input) {
-      return input.run();
+      lockCalls += 1;
+      const candidate = candidates.find(
+        (entry) => entry.memberId === input.candidate.memberId,
+      ) ?? null;
+      return input.run({
+        candidate,
+        async updateTrialEnd(trialEndsAt) {
+          options.events?.push("database");
+          if (!candidate) {
+            throw new Error("Synthetic candidate was not found.");
+          }
+          updateCalls.push({ candidate, trialEndsAt });
+          if (remainingFailures > 0) {
+            remainingFailures -= 1;
+            throw new Error("Synthetic local write failure.");
+          }
+          candidate.currentPeriodEnd = trialEndsAt;
+          candidate.currentTrialEndsAt = trialEndsAt;
+          candidate.usagePeriodEnd = trialEndsAt;
+        },
+      });
     },
   };
 }
@@ -569,6 +745,32 @@ function makeStripeClient(
     },
   };
   return client;
+}
+
+function makeAsyncMutex() {
+  let tail = Promise.resolve();
+
+  return async function withLock<TResult>(run: () => Promise<TResult>): Promise<TResult> {
+    const previous = tail;
+    let release = () => {};
+    tail = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await previous;
+    try {
+      return await run();
+    } finally {
+      release();
+    }
+  };
+}
+
+function makeDeferred() {
+  let resolve = () => {};
+  const promise = new Promise<void>((resolvePromise) => {
+    resolve = resolvePromise;
+  });
+  return { promise, resolve };
 }
 
 function toUnixSeconds(value: Date): number {

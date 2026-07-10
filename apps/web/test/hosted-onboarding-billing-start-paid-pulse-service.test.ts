@@ -266,6 +266,35 @@ describe("startHostedPulseTrialPaidPlan", () => {
     expect(mocks.stripe.billingPortal.sessions.create).not.toHaveBeenCalled();
   });
 
+  test("reconciles when the member-lock transaction fails after Stripe succeeds", async () => {
+    const updatedSubscription = makeSubscription({
+      latestInvoice: makeInvoice({ status: "draft" }),
+      status: "active",
+      trialEnd: null,
+    });
+    mocks.stripe.subscriptions.retrieve
+      .mockResolvedValueOnce(makeSubscription())
+      .mockResolvedValueOnce(updatedSubscription);
+    mocks.stripe.subscriptions.update.mockResolvedValueOnce(updatedSubscription);
+    mocks.withHostedMemberStripeMutationLock.mockImplementationOnce(
+      async (input: { run: () => Promise<unknown> }) => {
+        await input.run();
+        throw new Error("Synthetic transaction completion failure.");
+      },
+    );
+
+    await expect(startHostedPulseTrialPaidPlan({
+      memberId: "member_123",
+      now: new Date("2026-05-06T00:00:00.000Z"),
+    })).resolves.toEqual({
+      billingPlanCode: "launch_monthly",
+      status: "billing_pending",
+    });
+
+    expect(mocks.stripe.subscriptions.retrieve).toHaveBeenCalledTimes(2);
+    expect(mocks.stripe.subscriptions.update).toHaveBeenCalledTimes(1);
+  });
+
   test("surfaces deterministic Stripe update failures instead of returning billing_pending", async () => {
     mocks.stripe.subscriptions.update.mockRejectedValueOnce({
       requestId: "req_bad_request",

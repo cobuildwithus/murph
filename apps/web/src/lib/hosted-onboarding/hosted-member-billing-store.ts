@@ -78,15 +78,24 @@ export interface HostedMemberStripeBillingRefWriteInput {
   tx: Prisma.TransactionClient;
 }
 
+// Stripe's pinned SDK permits three 80-second attempts plus two Retry-After
+// waits of up to 60 seconds per call. Extension performs one retrieve and one
+// update under this lock, so 13 minutes covers both 6-minute provider budgets
+// plus one minute for lock acquisition and local database reconciliation.
+const HOSTED_MEMBER_STRIPE_MUTATION_TRANSACTION_OPTIONS = {
+  ...HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
+  timeout: 780_000,
+} as const;
+
 export async function withHostedMemberStripeMutationLock<TResult>(input: {
   memberId: string;
   prisma: PrismaClient;
-  run: () => Promise<TResult>;
+  run: (tx: Prisma.TransactionClient) => Promise<TResult>;
 }): Promise<TResult> {
   return input.prisma.$transaction(async (tx) => {
     await lockHostedMemberRow(tx, input.memberId);
-    return input.run();
-  }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+    return input.run(tx);
+  }, HOSTED_MEMBER_STRIPE_MUTATION_TRANSACTION_OPTIONS);
 }
 
 export async function lookupHostedMemberStripeBillingRefByStripeCustomerId(input: {
