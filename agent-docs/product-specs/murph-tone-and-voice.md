@@ -17,6 +17,7 @@ The Settings account section exposes the same picker as "How Murph talks." Skip 
 Shared contracts live in `packages/contracts/src/preferences.ts`.
 
 - Tone ids: `casual`, `formal`.
+- `formal` is the shared default tone (`defaultAssistantTonePreference`). The picker preselects it and prompt assembly resolves an absent saved tone to it, so skipping the picker does not silently restore casual behavior.
 - Voice ids are vibe-based stable preference ids: `classic`, `drill-sergeant`, `grandpa`, `country`, `jamaican`, `radio-host`, `deep-calm`, `warm`, `husky`, `storyteller`, `british-warm`, `late-night`, `easygoing`, `northern`, `football-announcer`, `sweet`, `mysterious`, `upbeat`, `narrator`, `expressive`, `bubbly`, and `smooth`.
 - `upbeat` is the shared default voice id (`defaultAssistantVoiceOptionId`), sits first in the roster, and is displayed as "Classic Murph".
 - `classic` is displayed as "New York", preserves the previous default sound, and has `elevenLabsVoiceId: null` so it resolves to `MURPH_ELEVENLABS_VOICE_ID`.
@@ -46,10 +47,10 @@ Runtime handling mirrors the member activation shape without creating a vault. I
 
 ## Assistant Behavior
 
-Tone is read from the canonical vault during turn planning. When absent, no tone block is added to the thread-context prompt. When present:
+Tone is read from the canonical vault during turn planning. An absent saved tone resolves to the shared `formal` default. Prompt assembly adds one persistent user-facing writing contract to the thread-context prompt:
 
-- `casual`: relaxed and conversational; lowercase and light slang are okay when natural.
-- `formal`: complete sentences, standard capitalization, and no slang.
+- `casual`: all Murph-authored natural-language prose stays lowercase across progress notes, tool/action confirmations, blockers, questions, notifications, and final answers. Casing-sensitive literals such as URLs, code, identifiers, medical/technical acronyms, and exact quotations retain their original casing. Wording stays relaxed and conversational, with slang only when natural.
+- `formal`: the same user-visible surfaces use complete sentences, standard capitalization and punctuation, and no lowercase sentence starts, casual shorthand, slang, or fragmentary acknowledgements. The register stays warm and direct rather than stiff.
 
 Voice memo default resolution is:
 

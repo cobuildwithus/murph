@@ -1,7 +1,9 @@
-import { readFile } from 'node:fs/promises'
+import type { Dirent } from 'node:fs'
+import { readFile, readdir } from 'node:fs/promises'
 import {
-  type ContractSchema,
+  experimentDocumentRelativePath,
   experimentFrontmatterSchema,
+  isExperimentDocumentRelativePath,
   safeParseContract,
   type CommonsProtocolRef,
   type ExperimentAssistantSupport,
@@ -12,7 +14,6 @@ import {
   parseFrontmatterDocument,
   resolveVaultPath,
   VAULT_LAYOUT,
-  walkVaultFilesInterruptible,
 } from '@murphai/core'
 
 const DEFAULT_ACTIVE_EXPERIMENT_CONTEXT_LIMIT = 3
@@ -74,12 +75,53 @@ export async function listAssistantExperimentFrontmatter(
   vaultRoot: string,
   options: AssistantActiveExperimentContextOptions = {},
 ): Promise<ExperimentFrontmatter[]> {
-  return await listAssistantFrontmatterRecords(
+  assertAssistantActiveExperimentContextCanContinue(options)
+  const experimentDirectory = resolveVaultPath(
     vaultRoot,
     VAULT_LAYOUT.experimentsDirectory,
-    experimentFrontmatterSchema,
-    options,
   )
+  let directoryEntries: Dirent[]
+
+  try {
+    directoryEntries = await readdir(experimentDirectory.absolutePath, {
+      withFileTypes: true,
+    })
+  } catch (error) {
+    if (
+      error
+      && typeof error === 'object'
+      && 'code' in error
+      && error.code === 'ENOENT'
+    ) {
+      return []
+    }
+    throw error
+  }
+
+  const relativePaths = directoryEntries
+    .filter((entry) => entry.isFile())
+    .map((entry) => `${VAULT_LAYOUT.experimentsDirectory}/${entry.name}`)
+    .filter(isExperimentDocumentRelativePath)
+    .sort((left, right) => left.localeCompare(right))
+    .slice(0, MAX_ACTIVE_EXPERIMENT_FRONTMATTER_FILES)
+  const records: ExperimentFrontmatter[] = []
+
+  for (const relativePath of relativePaths) {
+    assertAssistantActiveExperimentContextCanContinue(options)
+    const record = await readAssistantExperimentFrontmatter(
+      vaultRoot,
+      relativePath,
+      options,
+    )
+    if (
+      record
+      && experimentDocumentRelativePath(record.slug) === relativePath
+    ) {
+      records.push(record)
+    }
+  }
+
+  return records
 }
 
 function normalizeLimit(value: number | undefined): number {
@@ -90,56 +132,18 @@ function normalizeLimit(value: number | undefined): number {
   return Math.max(1, Math.floor(value))
 }
 
-async function listAssistantFrontmatterRecords<TRecord>(
-  vaultRoot: string,
-  relativeDirectory: string,
-  schema: ContractSchema<TRecord>,
-  options: AssistantActiveExperimentContextOptions,
-): Promise<TRecord[]> {
-  assertAssistantActiveExperimentContextCanContinue(options)
-  const { relativePaths } = await walkVaultFilesInterruptible(
-    vaultRoot,
-    relativeDirectory,
-    {
-      extension: '.md',
-      maxMatches: MAX_ACTIVE_EXPERIMENT_FRONTMATTER_FILES,
-      shouldContinue: () => {
-        assertAssistantActiveExperimentContextCanContinue(options)
-        return true
-      },
-    },
-  )
-  const records: TRecord[] = []
-
-  for (const relativePath of relativePaths) {
-    assertAssistantActiveExperimentContextCanContinue(options)
-    const record = await readAssistantFrontmatterRecord(
-      vaultRoot,
-      relativePath,
-      schema,
-      options,
-    )
-    if (record) {
-      records.push(record)
-    }
-  }
-
-  return records
-}
-
-async function readAssistantFrontmatterRecord<TRecord>(
+async function readAssistantExperimentFrontmatter(
   vaultRoot: string,
   relativePath: string,
-  schema: ContractSchema<TRecord>,
   options: AssistantActiveExperimentContextOptions,
-): Promise<TRecord | null> {
+): Promise<ExperimentFrontmatter | null> {
   try {
     const resolved = resolveVaultPath(vaultRoot, relativePath)
     const document = parseFrontmatterDocument(
       await readFile(resolved.absolutePath, 'utf8'),
     )
     assertAssistantActiveExperimentContextCanContinue(options)
-    const result = safeParseContract(schema, document.attributes)
+    const result = safeParseContract(experimentFrontmatterSchema, document.attributes)
     return result.success ? result.data : null
   } catch (error) {
     if (isAssistantActiveExperimentContextPreemptionError(error)) {
