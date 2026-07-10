@@ -1,29 +1,47 @@
 import { ImageResponse } from "next/og";
 import { readFile } from "node:fs/promises";
-import { join } from "node:path";
+import {
+  MURPH_DEFAULT_OPEN_GRAPH_IMAGE,
+  MURPH_TAGLINE_LINE_1,
+  MURPH_TAGLINE_LINE_2,
+} from "../src/lib/site-metadata";
 import {
   dmSans400FontPath,
   fraunces400FontPath,
   fraunces600FontPath,
 } from "./font-files";
 
-export const alt = "Murph — Wearable data, made useful.";
+export const alt = MURPH_DEFAULT_OPEN_GRAPH_IMAGE.alt;
 export const size = { width: 1200, height: 630 };
 export const contentType = "image/png";
 
-const HEADLINE = "Your personal,\nhealth assistant.";
-const SUBTEXT = "Health experiments with friends.";
+// Mirrors the homepage hero: floating health-topic labels around the edges,
+// clear of the logo lockup (top-left) and the centered headline block.
+const FLOATERS: ReadonlyArray<{
+  text: string;
+  top?: number;
+  bottom?: number;
+  left?: number;
+  right?: number;
+}> = [
+  { text: "Dentist", top: 56, left: 350 },
+  { text: "Competition", top: 100, left: 630 },
+  { text: "LDL cholesterol", top: 60, right: 64 },
+  { text: "Mammogram", top: 168, right: 120 },
+  { text: "Omega-3", top: 150, left: 96 },
+  { text: "Doctor recap", top: 330, right: 56 },
+  { text: "Bone density", top: 452, right: 96 },
+  { text: "Daily walk", bottom: 64, left: 96 },
+  { text: "Sleep quality", bottom: 92, left: 420 },
+  { text: "Blood pressure", bottom: 60, left: 730 },
+];
 
 export default async function OGImage() {
-  const [heroData, fraunces400Data, fraunces600Data, dmSans400Data] =
-    await Promise.all([
-      readFile(join(process.cwd(), "public", "hero.jpg")).then(
-        (buf) => `data:image/jpeg;base64,${buf.toString("base64")}`
-      ),
-      readFile(fraunces400FontPath).then(toArrayBuffer),
-      readFile(fraunces600FontPath).then(toArrayBuffer),
-      readFile(dmSans400FontPath).then(toArrayBuffer),
-    ]);
+  const [fraunces400Data, fraunces600Data, dmSans400Data] = await Promise.all([
+    readFile(fraunces400FontPath).then(toArrayBuffer),
+    readFile(fraunces600FontPath).then(toArrayBuffer),
+    readFile(dmSans400FontPath).then(toArrayBuffer),
+  ]);
 
   const fonts: { name: string; data: ArrayBuffer; weight: 400 | 600 }[] = [];
   fonts.push({ name: "Fraunces", data: fraunces400Data, weight: 400 });
@@ -38,92 +56,75 @@ export default async function OGImage() {
           height: "100%",
           display: "flex",
           position: "relative",
-          backgroundColor: "#D9C39B",
+          backgroundColor: "#f5f0e8",
         }}
       >
-        {/* Hero background */}
-        <img
-          src={heroData}
-          alt=""
-          style={{
-            position: "absolute",
-            top: 0,
-            left: 0,
-            width: "100%",
-            height: "100%",
-            objectFit: "cover",
-          }}
-        />
+        {/* Floating health-topic labels. Satori crashes on style keys set to
+            undefined, so spread only the offsets each floater defines. */}
+        {FLOATERS.map(({ text, ...offsets }) => (
+          <div
+            key={text}
+            style={{
+              position: "absolute",
+              ...offsets,
+              fontFamily: "DM Sans",
+              fontWeight: 400,
+              fontSize: 17,
+              letterSpacing: "0.18em",
+              color: "rgba(196, 168, 130, 0.75)",
+              whiteSpace: "nowrap",
+            }}
+          >
+            {text.toUpperCase()}
+          </div>
+        ))}
 
-        {/* Dark gradient overlay */}
+        {/* Logo lockup */}
         <div
           style={{
             position: "absolute",
-            top: 0,
-            left: 0,
-            width: "100%",
-            height: "100%",
-            background:
-              "linear-gradient(180deg, rgba(26,31,22,0.12) 0%, rgba(26,31,22,0.50) 100%)",
-          }}
-        />
-
-        {/* Bottom content bar */}
-        <div
-          style={{
-            position: "absolute",
-            left: 48,
-            right: 48,
-            bottom: 44,
+            top: 48,
+            left: 64,
             display: "flex",
-            justifyContent: "space-between",
-            alignItems: "flex-end",
+            alignItems: "center",
+            gap: 14,
           }}
         >
-          {/* Text block */}
-          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            <div
-              style={{
-                fontFamily: "Fraunces",
-                fontWeight: 400,
-                fontSize: 64,
-                lineHeight: 0.96,
-                letterSpacing: "-0.05em",
-                color: "#FAF8F4",
-                whiteSpace: "pre-wrap",
-              }}
-            >
-              {HEADLINE}
-            </div>
-            <div
-              style={{
-                fontFamily: "DM Sans",
-                fontWeight: 400,
-                fontSize: 24,
-                lineHeight: 1.55,
-                color: "rgba(250,248,244,0.82)",
-                maxWidth: 500,
-              }}
-            >
-              {SUBTEXT}
-            </div>
+          <DotGrid />
+          <div
+            style={{
+              fontFamily: "Fraunces",
+              fontWeight: 600,
+              fontSize: 40,
+              lineHeight: 1,
+              letterSpacing: "-0.03em",
+              color: "#1a1a1a",
+            }}
+          >
+            murph
           </div>
+        </div>
 
-          {/* Logo lockup */}
-          <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
-            <DotGrid />
-            <div
-              style={{
-                fontFamily: "Fraunces",
-                fontWeight: 600,
-                fontSize: 48,
-                lineHeight: 1,
-                letterSpacing: "-0.03em",
-                color: "#FAF8F4",
-              }}
-            >
-              murph
-            </div>
+        {/* Headline */}
+        <div
+          style={{
+            position: "absolute",
+            top: 0,
+            bottom: 0,
+            left: 80,
+            display: "flex",
+            flexDirection: "column",
+            justifyContent: "center",
+            fontFamily: "Fraunces",
+            fontWeight: 600,
+            fontSize: 68,
+            lineHeight: 1.1,
+            letterSpacing: "-0.04em",
+          }}
+        >
+          <div style={{ color: "#1a1a1a" }}>{MURPH_TAGLINE_LINE_1}</div>
+          <div style={{ color: "#5a6e32", marginTop: 10 }}>
+            {MURPH_TAGLINE_LINE_2}
           </div>
         </div>
       </div>
