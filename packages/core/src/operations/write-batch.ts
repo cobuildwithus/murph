@@ -2722,9 +2722,17 @@ export class WriteBatch {
             );
           }
 
-          await this.moveExpectedTargetToBackup(action, target.absolutePath);
+          const backupAbsolutePath = await this.moveExpectedTargetToBackup(
+            action,
+            target.absolutePath,
+          );
+          const replacementMode = (await fs.stat(backupAbsolutePath)).mode & 0o7777;
           try {
-            await copyFileAtomicExclusive(stageAbsolutePath, target.absolutePath);
+            await writeBytesFileAtomicExclusive(
+              target.absolutePath,
+              Buffer.from(stagedContent, "utf8"),
+              { mode: replacementMode },
+            );
           } catch (error) {
             if (!isErrnoException(error) || error.code !== "EEXIST") {
               throw error;

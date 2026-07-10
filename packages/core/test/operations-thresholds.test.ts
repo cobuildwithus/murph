@@ -1534,6 +1534,34 @@ test("receipt-guarded raw copies reject changed source and staged bytes before c
   assert.equal((await fs.stat(targetAbsolutePath)).mode & 0o777, 0o600);
 });
 
+test("receipt-guarded text writes preserve restrictive target modes", async () => {
+  const vaultRoot = await makeTempDirectory("murph-core-operations-text-mode");
+  await initializeVault({ vaultRoot });
+  const targetPath = "bank/thresholds/private-note.md";
+  const targetAbsolutePath = resolveVaultPath(vaultRoot, targetPath).absolutePath;
+  const original = "private original\n";
+  await fs.mkdir(path.dirname(targetAbsolutePath), { recursive: true });
+  await fs.writeFile(targetAbsolutePath, original, { encoding: "utf8", mode: 0o600 });
+
+  const batch = await WriteBatch.create({
+    vaultRoot,
+    operationType: "expected_text_preserves_mode",
+    summary: "preserve a restrictive text target mode",
+  });
+  await batch.stageTextWrite(targetPath, "private replacement\n", {
+    expectedTargetReceipt: {
+      byteLength: Buffer.byteLength(original, "utf8"),
+      sha256: createHash("sha256").update(original, "utf8").digest("hex"),
+    },
+    overwrite: true,
+  });
+
+  await batch.commit();
+
+  assert.equal(await fs.readFile(targetAbsolutePath, "utf8"), "private replacement\n");
+  assert.equal((await fs.stat(targetAbsolutePath)).mode & 0o777, 0o600);
+});
+
 test("receipt-guarded text writes preserve an edit that races the atomic quarantine", async () => {
   const vaultRoot = await makeTempDirectory("murph-core-operations-text-quarantine-race");
   await initializeVault({ vaultRoot });
