@@ -5,9 +5,16 @@ import {
 } from "@/src/lib/hosted-onboarding/contact-privacy";
 
 const mocks = vi.hoisted(() => ({
+  after: vi.fn(),
   getPrisma: vi.fn(),
+  linkHostedIngressLatencyTracesToAcceptedLinqDelivery: vi.fn(),
   recordHostedLinqRuntimeDeliveryOutcomeTx: vi.fn(),
   requireHostedCloudflareCallbackRequest: vi.fn(),
+}));
+
+vi.mock("next/server", async (importOriginal) => ({
+  ...await importOriginal<typeof import("next/server")>(),
+  after: mocks.after,
 }));
 
 vi.mock("@/src/lib/hosted-execution/cloudflare-callback-auth", () => ({
@@ -16,6 +23,11 @@ vi.mock("@/src/lib/hosted-execution/cloudflare-callback-auth", () => ({
 
 vi.mock("@/src/lib/hosted-onboarding/linq-delivery-store", () => ({
   recordHostedLinqRuntimeDeliveryOutcomeTx: mocks.recordHostedLinqRuntimeDeliveryOutcomeTx,
+}));
+
+vi.mock("@/src/lib/hosted-runtime-latency/store", () => ({
+  linkHostedIngressLatencyTracesToAcceptedLinqDelivery:
+    mocks.linkHostedIngressLatencyTracesToAcceptedLinqDelivery,
 }));
 
 vi.mock("@/src/lib/prisma", () => ({
@@ -49,6 +61,10 @@ describe("hosted runtime Linq delivery route", () => {
     };
     mocks.requireHostedCloudflareCallbackRequest.mockResolvedValue("member_123");
     mocks.getPrisma.mockReturnValue(prisma);
+    mocks.linkHostedIngressLatencyTracesToAcceptedLinqDelivery.mockResolvedValue({
+      matchedCount: 2,
+      recorded: true,
+    });
     mocks.recordHostedLinqRuntimeDeliveryOutcomeTx.mockResolvedValue({
       deliveryId: "hld_123",
       recorded: true,
@@ -104,6 +120,110 @@ describe("hosted runtime Linq delivery route", () => {
       ok: true,
       recorded: true,
     });
+    expect(mocks.linkHostedIngressLatencyTracesToAcceptedLinqDelivery).not.toHaveBeenCalled();
+    expect(mocks.after).toHaveBeenCalledTimes(1);
+
+    await runScheduledAfterTask();
+
+    expect(mocks.linkHostedIngressLatencyTracesToAcceptedLinqDelivery).toHaveBeenCalledWith({
+      answeredMailboxItemIds: [
+        "mailbox_item_accepted_1",
+        "mailbox_item_accepted_2",
+      ],
+      authenticatedUserId: "member_123",
+      linqDeliveryId: "hld_123",
+      prisma,
+      replyRuntimeAttemptId: "runtime_attempt_123",
+    });
+  });
+
+  it("keeps old-runner delivery callbacks working without latency-link headers", async () => {
+    const response = await route.POST(buildDeliveryRequest({
+      acceptedAt: "2026-04-26T00:00:04.000Z",
+      answeredMailboxItemIds: ["mailbox_item_accepted_1"],
+      attemptedAt: "2026-04-26T00:00:03.000Z",
+      idempotencyKey: "assistant-outbox:intent_123",
+      providerMessageId: "linq_message_sent",
+      providerThreadId: "linq_chat_123",
+      target: "linq_chat_123",
+      targetKind: "thread",
+    }, null));
+
+    expect(response.status).toBe(200);
+    expect(mocks.after).not.toHaveBeenCalled();
+    expect(mocks.linkHostedIngressLatencyTracesToAcceptedLinqDelivery).not.toHaveBeenCalled();
+  });
+
+  it("does not schedule a delivery link when no accepted delivery was recorded", async () => {
+    mocks.recordHostedLinqRuntimeDeliveryOutcomeTx.mockResolvedValueOnce({
+      deliveryId: null,
+      recorded: false,
+    });
+
+    const response = await route.POST(buildDeliveryRequest({
+      acceptedAt: "2026-04-26T00:00:04.000Z",
+      answeredMailboxItemIds: ["mailbox_item_accepted_1"],
+      attemptedAt: "2026-04-26T00:00:03.000Z",
+      providerMessageId: "linq_message_sent",
+      providerThreadId: "linq_chat_123",
+      target: "linq_chat_123",
+      targetKind: "thread",
+    }));
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      ok: true,
+      recorded: false,
+    });
+    expect(mocks.after).not.toHaveBeenCalled();
+    expect(mocks.linkHostedIngressLatencyTracesToAcceptedLinqDelivery).not.toHaveBeenCalled();
+  });
+
+  it("contains best-effort delivery-link failures outside the response path", async () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    mocks.linkHostedIngressLatencyTracesToAcceptedLinqDelivery.mockRejectedValueOnce(
+      new Error("Synthetic link failure."),
+    );
+
+    const response = await route.POST(buildDeliveryRequest({
+      acceptedAt: "2026-04-26T00:00:04.000Z",
+      answeredMailboxItemIds: ["mailbox_item_private_1"],
+      attemptedAt: "2026-04-26T00:00:03.000Z",
+      idempotencyKey: "assistant-outbox:intent_private",
+      providerMessageId: "linq_message_private",
+      providerThreadId: "linq_chat_private",
+      target: "linq_chat_private",
+      targetKind: "thread",
+    }));
+
+    expect(response.status).toBe(200);
+    expect(mocks.linkHostedIngressLatencyTracesToAcceptedLinqDelivery).not.toHaveBeenCalled();
+    await runScheduledAfterTask();
+    expect(consoleError).toHaveBeenCalledTimes(1);
+    expect(JSON.stringify(consoleError.mock.calls)).not.toContain("mailbox_item_private_1");
+    expect(JSON.stringify(consoleError.mock.calls)).not.toContain("runtime_attempt_123");
+
+    consoleError.mockRestore();
+  });
+
+  it("drops latency linking when post-response scheduling is unavailable", async () => {
+    mocks.after.mockImplementationOnce(() => {
+      throw new Error("Synthetic scheduler failure.");
+    });
+
+    const response = await route.POST(buildDeliveryRequest({
+      acceptedAt: "2026-04-26T00:00:04.000Z",
+      answeredMailboxItemIds: ["mailbox_item_accepted_1"],
+      attemptedAt: "2026-04-26T00:00:03.000Z",
+      idempotencyKey: "assistant-outbox:intent_123",
+      providerMessageId: "linq_message_sent",
+      providerThreadId: "linq_chat_123",
+      target: "linq_chat_123",
+      targetKind: "thread",
+    }));
+
+    expect(response.status).toBe(200);
+    expect(mocks.linkHostedIngressLatencyTracesToAcceptedLinqDelivery).not.toHaveBeenCalled();
   });
 
   it("rejects malformed thread directness flags", async () => {
@@ -323,13 +443,29 @@ describe("hosted runtime Linq delivery route", () => {
   });
 });
 
-function buildDeliveryRequest(body: unknown): Request {
+function buildDeliveryRequest(
+  body: unknown,
+  runtimeAttemptId: string | null = "runtime_attempt_123",
+): Request {
   return new Request(
     "https://join.example.test/api/internal/hosted-runtime/linq-egress/delivery",
     {
       body: JSON.stringify(body),
-      headers: { "content-type": "application/json" },
+      headers: {
+        "content-type": "application/json",
+        ...(runtimeAttemptId
+          ? { "x-hosted-runtime-attempt-id": runtimeAttemptId }
+          : {}),
+      },
       method: "POST",
     },
   );
+}
+
+async function runScheduledAfterTask(index = 0): Promise<void> {
+  const task = mocks.after.mock.calls[index]?.[0];
+  if (typeof task !== "function") {
+    throw new Error("Expected a scheduled after() task.");
+  }
+  await task();
 }

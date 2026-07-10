@@ -89,6 +89,11 @@ export function compareIsoTimestampsAscending(left: string, right: string): numb
     return 0;
   }
 
+  const preciseComparison = compareWritableIsoDateTimesAscending(left, right);
+  if (preciseComparison !== null) {
+    return preciseComparison;
+  }
+
   const leftMs = Date.parse(left);
   const rightMs = Date.parse(right);
   const leftValid = Number.isFinite(leftMs);
@@ -360,6 +365,7 @@ function parseWritableIsoDateTime(value: string): {
   hour: number;
   minute: number;
   second: number;
+  fractional: string;
   millisecond: number;
   offsetMinutes: number;
 } | null {
@@ -414,9 +420,53 @@ function parseWritableIsoDateTime(value: string): {
     hour,
     minute,
     second,
+    fractional,
     millisecond,
     offsetMinutes,
   };
+}
+
+function compareWritableIsoDateTimesAscending(left: string, right: string): number | null {
+  const leftParsed = parseWritableIsoDateTime(left);
+  const rightParsed = parseWritableIsoDateTime(right);
+  if (
+    !leftParsed
+    || !rightParsed
+    || !hasMatchingOffsetDateTime(leftParsed)
+    || !hasMatchingOffsetDateTime(rightParsed)
+  ) {
+    return null;
+  }
+
+  const leftMilliseconds = utcMillisecondsFromParts(
+    leftParsed.year,
+    leftParsed.month - 1,
+    leftParsed.day,
+    leftParsed.hour,
+    leftParsed.minute,
+    leftParsed.second,
+    leftParsed.millisecond,
+  ) - leftParsed.offsetMinutes * 60_000;
+  const rightMilliseconds = utcMillisecondsFromParts(
+    rightParsed.year,
+    rightParsed.month - 1,
+    rightParsed.day,
+    rightParsed.hour,
+    rightParsed.minute,
+    rightParsed.second,
+    rightParsed.millisecond,
+  ) - rightParsed.offsetMinutes * 60_000;
+  if (leftMilliseconds !== rightMilliseconds) {
+    return leftMilliseconds < rightMilliseconds ? -1 : 1;
+  }
+
+  const fractionalLength = Math.max(leftParsed.fractional.length, rightParsed.fractional.length);
+  const leftFractional = leftParsed.fractional.padEnd(fractionalLength, "0");
+  const rightFractional = rightParsed.fractional.padEnd(fractionalLength, "0");
+  if (leftFractional === rightFractional) {
+    return 0;
+  }
+  return leftFractional < rightFractional ? -1 : 1;
 }
 
 function hasMatchingOffsetDateTime(parsed: {

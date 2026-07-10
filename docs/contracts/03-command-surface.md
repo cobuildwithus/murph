@@ -261,9 +261,14 @@ The per-command synopses above intentionally omit incur-owned global output and 
 `event import-jsonl` rows must omit caller-supplied `id`, `eventId`, and
 `dayKey`; ids and local-day shards are derived by core. `externalRef` is
 optional for compatibility with append-only import producers. Include it when a
-JSONL row should be retry-safe: rows with the same external identity are skipped
-or superseded in place, while rows without `externalRef` intentionally append a
-fresh event every time the same file is applied.
+JSONL row should be retry-safe: for ISO-versioned rows with the same external
+identity, older revisions are skipped, an equal revision must match the stored
+content apart from the derived `dayKey` and an equivalent
+`externalRef.version` lexeme or the batch is rejected, and a newer revision
+supersedes in place. Explicit retraction decisions exist only on the decisions
+surface, not `event import-jsonl`. Other same-identity rows are skipped when
+identical or superseded in place, while rows without `externalRef` intentionally
+append a fresh event every time the same file is applied.
 
 Read-only vault metadata and audit commands require an initialized vault root and fail with `invalid_vault` before query reads when `vault.json` is missing. Missing default-vault routing failures use `missing_vault`; typed CLI errors include a boolean `retryable` field in the JSON error envelope.
 
