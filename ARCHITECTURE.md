@@ -1,6 +1,10 @@
 # Murph Architecture
 
-Last verified: 2026-07-09
+Last verified: 2026-07-10
+
+## Hosted Group Self-Awareness
+
+`apps/web` owns hosted groups, memberships, join policies, and vault-share grants. A personal hosted runtime may read its callback-authenticated member's current group memberships through the existing signed group-tool control route. The read derives group labels, the member's role, requested scopes, active self-granted scopes, and an existing owner-authorized first-party permission URL directly from web-owned rows; ordinary members never receive the reusable group invite through this read. It does not return another member's identity or sharing state and does not persist a copy in the personal vault, runner, or assistant runtime. Active grants prove permission, not source-data availability or completed projection delivery. Permission mutations remain on the authenticated group join page or the existing route-bound group-chat offer flow.
 
 ## Hosted Connected Apps
 

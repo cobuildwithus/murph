@@ -545,6 +545,11 @@ describe("parseHostedRuntimeGroupTool", () => {
       action: "read_current",
     });
     expect(parseHostedRuntimeGroupToolRequest({
+      action: "list_memberships",
+    })).toEqual({
+      action: "list_memberships",
+    });
+    expect(parseHostedRuntimeGroupToolRequest({
       action: "update_display_name",
       updateDisplayName: {
         displayName: "  Weekly   Health Crew  ",
@@ -813,6 +818,67 @@ describe("parseHostedRuntimeGroupTool", () => {
         selfOptOut: { senderHandle: "person@example.test", source: "sms" },
       })
     ).toThrow(/not supported/u);
+  });
+
+  it("parses bounded self-membership responses without accepting roster fields", () => {
+    const response = {
+      action: "list_memberships",
+      result: {
+        memberships: [{
+          displayName: "Fun-loving runners",
+          grantedVaultShareProjectionKinds: [
+            "group-email.v0",
+            "profile-name.v0",
+            "hrv-days.v0",
+          ],
+          grantedVaultShareProjectionScopes: [
+            { projectionKind: "profile-name.v0" },
+            { projectionKind: "group-email.v0" },
+            { projectionKind: "hrv-days.v0" },
+          ],
+          kind: "friends",
+          memberCount: 7,
+          permissionsUrl: "https://example.com/groups/join/abc123",
+          requestedVaultShareProjectionKinds: ["group-email.v0", "hrv-days.v0"],
+          requestedVaultShareProjectionScopes: [
+            { projectionKind: "group-email.v0" },
+            { projectionKind: "hrv-days.v0" },
+          ],
+          role: "member",
+        }],
+        status: "ok",
+        truncated: false,
+      },
+    };
+
+    expect(parseHostedRuntimeGroupToolResponse(response)).toEqual(response);
+    expect(parseHostedRuntimeGroupToolResponse({
+      action: "list_memberships",
+      result: {
+        memberships: null,
+        status: "unavailable",
+        unavailableReason: "runtime_inactive",
+      },
+    })).toEqual({
+      action: "list_memberships",
+      result: {
+        memberships: null,
+        status: "unavailable",
+        unavailableReason: "runtime_inactive",
+      },
+    });
+
+    expect(() => parseHostedRuntimeGroupToolResponse({
+      action: "list_memberships",
+      result: {
+        memberships: [{
+          ...response.result.memberships[0],
+          memberId: "member_other",
+        }],
+        status: "ok",
+        truncated: false,
+      },
+    })).toThrow(/not allowed/u);
   });
 
   it("parses create_join_link responses", () => {

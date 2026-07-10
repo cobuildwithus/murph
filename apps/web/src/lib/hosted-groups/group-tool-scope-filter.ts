@@ -1,4 +1,5 @@
 import type {
+  HostedRuntimeGroupMembershipSummary,
   HostedRuntimeGroupMemberSummary,
   HostedRuntimeGroupSummary,
   HostedRuntimeGroupToolResponse,
@@ -16,6 +17,20 @@ export function filterHostedRuntimeGroupToolResponseProjectionScopes(
   response: HostedRuntimeGroupToolResponse,
   supportedProjectionScopeKeys: ReadonlySet<string>,
 ): HostedRuntimeGroupToolResponse {
+  if (response.action === "list_memberships" && response.result.status === "ok") {
+    return {
+      ...response,
+      result: {
+        ...response.result,
+        memberships: response.result.memberships.map((membership) =>
+          filterHostedRuntimeGroupMembershipProjectionScopes(
+            membership,
+            supportedProjectionScopeKeys,
+          )
+        ),
+      },
+    };
+  }
   if (response.action === "read_current" && response.result.status === "ok") {
     return {
       ...response,
@@ -65,6 +80,33 @@ export function filterHostedRuntimeGroupToolResponseProjectionScopes(
     };
   }
   return response;
+}
+
+function filterHostedRuntimeGroupMembershipProjectionScopes(
+  membership: HostedRuntimeGroupMembershipSummary,
+  supportedProjectionScopeKeys: ReadonlySet<string>,
+): HostedRuntimeGroupMembershipSummary {
+  const grantedVaultShareProjectionScopes =
+    filterHostedVaultShareProjectionScopesBySupportedKeys(
+      membership.grantedVaultShareProjectionScopes,
+      supportedProjectionScopeKeys,
+    );
+  const requestedVaultShareProjectionScopes =
+    filterHostedVaultShareProjectionScopesBySupportedKeys(
+      membership.requestedVaultShareProjectionScopes,
+      supportedProjectionScopeKeys,
+    );
+  return {
+    ...membership,
+    grantedVaultShareProjectionKinds: projectionKindsFromScopes(
+      grantedVaultShareProjectionScopes,
+    ),
+    grantedVaultShareProjectionScopes,
+    requestedVaultShareProjectionKinds: projectionKindsFromScopes(
+      requestedVaultShareProjectionScopes,
+    ),
+    requestedVaultShareProjectionScopes,
+  };
 }
 
 function filterHostedRuntimeGroupSummaryProjectionScopes(

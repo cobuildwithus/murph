@@ -49,6 +49,7 @@ import {
   HOSTED_GROUP_VAULT_SHARE_DESTINATION_LIMIT_PER_PROJECTION,
   HOSTED_GROUP_VAULT_SHARE_GRANT_LIMIT_PER_GRANTOR_PROJECTION,
   readHostedGroupJoinView,
+  readHostedGroupMembershipsForMember,
   recordHostedGroupJoinOfferTx,
 } from "@/src/lib/hosted-groups/group-store";
 import {
@@ -1295,6 +1296,164 @@ function restoreEnvValue(key: string, value: string | undefined): void {
 
   process.env[key] = value;
 }
+
+describe("readHostedGroupMembershipsForMember", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("returns only the member's groups and active self-grants without reading the roster", async () => {
+    const hostedGroupMemberFindMany = vi.fn(async () => [
+      {
+        id: "membership_running",
+        role: "member",
+        group: {
+          displayName: "Fun-loving runners",
+          joinCode: "join_runners",
+          joinPolicyJson: {
+            requestedVaultShareProjectionScopes: [
+              { projectionKind: "hrv-days.v0" },
+              { projectionKind: "sleep-times.v0" },
+            ],
+            schema: "murph.hosted-group.join-policy.v1",
+          },
+          kind: "friends",
+          runtimeMemberId: "member_group_runners",
+          _count: { members: 7 },
+        },
+      },
+      {
+        id: "membership_family",
+        role: "owner",
+        group: {
+          displayName: "Family check-in",
+          joinCode: "join_family",
+          joinPolicyJson: {
+            requestedVaultShareProjectionScopes: [
+              { projectionKind: "group-email.v0" },
+            ],
+            schema: "murph.hosted-group.join-policy.v1",
+          },
+          kind: "family",
+          runtimeMemberId: "member_group_family",
+          _count: { members: 4 },
+        },
+      },
+    ]);
+    const hostedVaultShareFindMany = vi.fn(async () => [
+      {
+        destinationMemberId: "member_group_runners",
+        projectionKind: "hrv-days.v0",
+        projectionScopeJson: { projectionKind: "hrv-days.v0" },
+        projectionScopeKey: "hrv-days.v0",
+      },
+      {
+        destinationMemberId: "member_group_runners",
+        projectionKind: "profile-name.v0",
+        projectionScopeJson: { projectionKind: "profile-name.v0" },
+        projectionScopeKey: "profile-name.v0",
+      },
+      {
+        destinationMemberId: "member_group_family",
+        projectionKind: "group-email.v0",
+        projectionScopeJson: { projectionKind: "group-email.v0" },
+        projectionScopeKey: "group-email.v0",
+      },
+    ]);
+    const prisma = createPrismaStub({
+      hostedGroupMember: { findMany: hostedGroupMemberFindMany },
+      hostedVaultShare: { findMany: hostedVaultShareFindMany },
+    });
+
+    await expect(readHostedGroupMembershipsForMember({
+      memberId: "member_self",
+      prisma,
+    })).resolves.toEqual({
+      memberships: [
+        {
+          displayName: "Fun-loving runners",
+          grantedVaultShareProjectionKinds: ["hrv-days.v0", "profile-name.v0"],
+          grantedVaultShareProjectionScopes: [
+            { projectionKind: "hrv-days.v0" },
+            { projectionKind: "profile-name.v0" },
+          ],
+          kind: "friends",
+          memberCount: 7,
+          ownerJoinCode: null,
+          requestedVaultShareProjectionKinds: ["sleep-times.v0", "hrv-days.v0"],
+          requestedVaultShareProjectionScopes: [
+            { projectionKind: "sleep-times.v0" },
+            { projectionKind: "hrv-days.v0" },
+          ],
+          role: "member",
+        },
+        {
+          displayName: "Family check-in",
+          grantedVaultShareProjectionKinds: ["group-email.v0"],
+          grantedVaultShareProjectionScopes: [{ projectionKind: "group-email.v0" }],
+          kind: "family",
+          memberCount: 4,
+          ownerJoinCode: "join_family",
+          requestedVaultShareProjectionKinds: ["group-email.v0"],
+          requestedVaultShareProjectionScopes: [{ projectionKind: "group-email.v0" }],
+          role: "owner",
+        },
+      ],
+      truncated: false,
+    });
+    expect(hostedGroupMemberFindMany).toHaveBeenCalledWith(expect.objectContaining({
+      take: 26,
+      where: { memberId: "member_self" },
+    }));
+    expect(hostedVaultShareFindMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: {
+        destinationMemberId: {
+          in: ["member_group_runners", "member_group_family"],
+        },
+        grantorMemberId: "member_self",
+        status: "granted",
+      },
+    }));
+    expect(mocks.readHostedMemberIdentity).not.toHaveBeenCalled();
+  });
+
+  it("returns at most 25 memberships and reports when more exist", async () => {
+    const membershipRows = Array.from({ length: 26 }, (_, index) => ({
+      id: `membership_${index + 1}`,
+      role: "member",
+      group: {
+        displayName: `Group ${index + 1}`,
+        joinCode: `join_${index + 1}`,
+        joinPolicyJson: JOIN_POLICY,
+        kind: "friends",
+        runtimeMemberId: `member_group_${index + 1}`,
+        _count: { members: index + 1 },
+      },
+    }));
+    const hostedVaultShareFindMany = vi.fn(async () => []);
+    const prisma = createPrismaStub({
+      hostedGroupMember: { findMany: vi.fn(async () => membershipRows) },
+      hostedVaultShare: { findMany: hostedVaultShareFindMany },
+    });
+
+    const result = await readHostedGroupMembershipsForMember({
+      memberId: "member_self",
+      prisma,
+    });
+
+    expect(result.memberships).toHaveLength(25);
+    expect(result.memberships.at(0)?.displayName).toBe("Group 1");
+    expect(result.memberships.at(-1)?.displayName).toBe("Group 25");
+    expect(result.truncated).toBe(true);
+    expect(hostedVaultShareFindMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({
+        destinationMemberId: {
+          in: Array.from({ length: 25 }, (_, index) => `member_group_${index + 1}`),
+        },
+      }),
+    }));
+  });
+});
 
 
 describe("normalizeHostedVaultShareProjectionKinds", () => {

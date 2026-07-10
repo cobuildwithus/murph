@@ -23,6 +23,7 @@ Last verified: 2026-07-10
 | `agent-docs/product-specs/murph-contact-card-picker.md` | Post-signup add-Murph-to-contacts step where the member picks the avatar on Murph's vCard; picker components live on `/design`. | Implemented |
 | `agent-docs/product-specs/murph-tone-and-voice.md` | Onboarding and settings preference flow for Murph tone and voice, hosted mailbox handoff, vault preference owner, and ElevenLabs preview assets. | Implemented |
 | `agent-docs/product-specs/group-health-newsletter.md` | Recurring group health newsletter emailed from a group chat: cron automation in the group vault, tone flavors, a reusable default-at-join email-sharing grant, and Cloudflare `HOSTED_EMAIL` delivery with web-side address resolution. | Specified |
+| `agent-docs/product-specs/personal-group-awareness.md` | Personal Murph read access to the member's hosted-group memberships, requested permissions, active self grants, and owner-authorized permission links. | Implemented |
 
 ## Rule
 
