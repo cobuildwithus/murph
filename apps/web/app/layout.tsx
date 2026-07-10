@@ -10,6 +10,7 @@ import {
   createMurphPageMetadata,
   MURPH_DEFAULT_METADATA_DESCRIPTION,
   MURPH_DEFAULT_METADATA_TITLE,
+  MURPH_DEFAULT_OPEN_GRAPH_DESCRIPTION,
 } from "@/src/lib/site-metadata";
 
 import "./globals.css";
@@ -22,12 +23,12 @@ const metadataBase = resolveMetadataBase() ?? new URL(DEFAULT_METADATA_BASE_URL)
 const defaultMetadata = createMurphPageMetadata({
   description: MURPH_DEFAULT_METADATA_DESCRIPTION,
   openGraph: {
+    description: MURPH_DEFAULT_OPEN_GRAPH_DESCRIPTION,
     type: "website",
   },
   title: MURPH_DEFAULT_METADATA_TITLE,
   twitter: {
-    description:
-      "Your personal health assistant. Pick a protocol, see what actually makes you healthier.",
+    description: MURPH_DEFAULT_OPEN_GRAPH_DESCRIPTION,
   },
 });
 
