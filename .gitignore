@@ -57,6 +57,7 @@ apps/web/next-env.d.ts
 .codex-audit/
 .codex-simplify-audit.txt
 .codex-worktrees/
+.worktrees/
 .codex-worker-prompts/
 **/.clawpatch/
 assistant-state/
