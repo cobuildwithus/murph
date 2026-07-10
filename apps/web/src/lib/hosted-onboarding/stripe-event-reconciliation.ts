@@ -22,7 +22,8 @@ import {
   type HostedSubscriptionCancellationEmailCandidate,
 } from "./stripe-billing-events";
 import {
-  findMemberForStripeObject,
+  findMemberForStripeInvoice,
+  findMemberForStripeSubscription,
   resolveStripeCustomerContext,
 } from "./stripe-billing-lookup";
 import {
@@ -376,34 +377,23 @@ async function resolveHostedStripeEventDirectBillingMemberId(
   event: Stripe.Event,
   prisma: PrismaClient,
 ): Promise<string | null> {
-  let customerId: string | null = null;
-  let subscriptionId: string | null = null;
-
   if (isHostedStripeSubscriptionBillingEvent(event.type)) {
     const subscription = event.data.object as Stripe.Subscription;
-    customerId = coerceStripeObjectId(subscription.customer);
-    subscriptionId = subscription.id;
-  } else if (event.type === "invoice.paid" || event.type === "invoice.payment_failed") {
-    const invoice = event.data.object as Stripe.Invoice;
-    customerId = coerceStripeObjectId(invoice.customer);
-    subscriptionId = coerceStripeInvoiceSubscriptionId(invoice);
-  } else {
+    const member = await findMemberForStripeSubscription({
+      prisma,
+      subscription,
+    });
+    return member?.core.id ?? null;
+  }
+
+  if (event.type !== "invoice.paid" && event.type !== "invoice.payment_failed") {
     return null;
   }
 
-  if (!subscriptionId) {
-    return null;
-  }
-
-  const member = await findMemberForStripeObject({
-    clientReferenceId: null,
-    customerId,
-    memberId: null,
+  const member = await findMemberForStripeInvoice({
+    invoice: event.data.object as Stripe.Invoice,
     prisma,
-    requireMatchingSubscription: true,
-    subscriptionId,
   });
-
   return member?.core.id ?? null;
 }
 

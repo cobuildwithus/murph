@@ -13,7 +13,8 @@ const mocks = vi.hoisted(() => ({
   applyStripeRefundCreated: vi.fn(),
   applyStripeSubscriptionUpdated: vi.fn(),
   clearHostedBillingPlanSwitchToPulsePendingFieldsForScheduleTx: vi.fn(),
-  findMemberForStripeObject: vi.fn(),
+  findMemberForStripeInvoice: vi.fn(),
+  findMemberForStripeSubscription: vi.fn(),
   refreshHostedBillingPlanSwitchToPulsePendingFieldsFromScheduleTx: vi.fn(),
   resolveStripeCustomerContext: vi.fn(),
   sendHostedSignupNotificationEmailForMemberBestEffort: vi.fn(),
@@ -53,7 +54,8 @@ vi.mock("@/src/lib/hosted-onboarding/stripe-billing-lookup", async () => {
 
   return {
     ...actual,
-    findMemberForStripeObject: mocks.findMemberForStripeObject,
+    findMemberForStripeInvoice: mocks.findMemberForStripeInvoice,
+    findMemberForStripeSubscription: mocks.findMemberForStripeSubscription,
     resolveStripeCustomerContext: mocks.resolveStripeCustomerContext,
   };
 });
@@ -167,7 +169,8 @@ describe("hosted Stripe event reconciliation", () => {
       welcomeEmailMemberId: null,
     });
     mocks.clearHostedBillingPlanSwitchToPulsePendingFieldsForScheduleTx.mockResolvedValue(undefined);
-    mocks.findMemberForStripeObject.mockResolvedValue(null);
+    mocks.findMemberForStripeInvoice.mockResolvedValue(null);
+    mocks.findMemberForStripeSubscription.mockResolvedValue(null);
     mocks.refreshHostedBillingPlanSwitchToPulsePendingFieldsFromScheduleTx.mockResolvedValue(undefined);
     mocks.resolveStripeCustomerContext.mockResolvedValue({
       customerId: null,
@@ -549,9 +552,13 @@ describe("hosted Stripe event reconciliation", () => {
     const releaseRetrieve = makeDeferred<Stripe.Subscription>();
     const ordering: string[] = [];
     mocks.stripe.events.retrieve.mockResolvedValue(event);
-    mocks.findMemberForStripeObject.mockImplementation(async () => {
+    mocks.findMemberForStripeSubscription.mockImplementation(async (input: {
+      subscription: Stripe.Subscription;
+    }) => {
       ordering.push("member-resolved");
-      return { core: { id: "member_123" } };
+      return input.subscription.metadata.memberId === "member_123"
+        ? { core: { id: "member_123" } }
+        : null;
     });
     vi.mocked(prisma.client.$queryRaw).mockImplementation(async () => {
       ordering.push("member-locked");
@@ -594,6 +601,10 @@ describe("hosted Stripe event reconciliation", () => {
       "subscription-retrieved",
       "billing-written",
     ]);
+    expect(mocks.findMemberForStripeSubscription).toHaveBeenCalledWith({
+      prisma: prisma.client,
+      subscription: event.data.object,
+    });
     expect(prisma.client.$transaction).toHaveBeenCalledWith(
       expect.any(Function),
       {
@@ -612,7 +623,7 @@ describe("hosted Stripe event reconciliation", () => {
     const releaseSecondApply = makeDeferred<void>();
     let applyCount = 0;
     mocks.stripe.events.retrieve.mockResolvedValue(event);
-    mocks.findMemberForStripeObject.mockResolvedValue({ core: { id: "member_123" } });
+    mocks.findMemberForStripeSubscription.mockResolvedValue({ core: { id: "member_123" } });
     mocks.applyStripeSubscriptionUpdated.mockImplementation(async () => {
       applyCount += 1;
       if (applyCount === 1) {
@@ -817,7 +828,7 @@ describe("hosted Stripe event reconciliation", () => {
     const releaseRetrieve = makeDeferred<Stripe.Subscription>();
     const ordering: string[] = [];
     mocks.stripe.events.retrieve.mockResolvedValue(event);
-    mocks.findMemberForStripeObject.mockImplementation(async () => {
+    mocks.findMemberForStripeInvoice.mockImplementation(async () => {
       ordering.push("member-resolved");
       return { core: { id: "member_123" } };
     });
@@ -856,6 +867,69 @@ describe("hosted Stripe event reconciliation", () => {
       "subscription-retrieved",
       "billing-written",
     ]);
+  });
+
+  it("discards invoice identity discovery state and re-retrieves after the member lock", async () => {
+    const prisma = createStripeEventPrismaHarness();
+    const event = makeInvoicePaymentFailedEvent();
+    const identitySubscription = makeCanonicalSubscription({
+      customer: "cus_subscription",
+      id: "sub_123",
+      metadata: {
+        memberId: "member_123",
+      },
+      status: "trialing",
+    });
+    const canonicalSubscription = makeCanonicalSubscription({
+      customer: "cus_subscription",
+      id: "sub_123",
+      metadata: {
+        memberId: "member_123",
+      },
+      status: "past_due",
+    });
+    const ordering: string[] = [];
+    let retrieveCount = 0;
+    mocks.stripe.events.retrieve.mockResolvedValue(event);
+    mocks.findMemberForStripeInvoice.mockImplementation(async () => {
+      await mocks.stripe.subscriptions.retrieve("sub_123");
+      ordering.push("identity-resolved");
+      return { core: { id: "member_123" } };
+    });
+    vi.mocked(prisma.client.$queryRaw).mockImplementation(async () => {
+      ordering.push("member-locked");
+      return [];
+    });
+    mocks.stripe.subscriptions.retrieve.mockImplementation(async () => {
+      retrieveCount += 1;
+      ordering.push(retrieveCount === 1 ? "identity-retrieved" : "canonical-retrieved");
+      return retrieveCount === 1 ? identitySubscription : canonicalSubscription;
+    });
+    mocks.applyStripeInvoicePaymentFailed.mockImplementationOnce(async () => {
+      ordering.push("billing-written");
+    });
+
+    await recordHostedStripeEvent({ event, prisma: prisma.client });
+    await expect(reconcileHostedStripeEventById({
+      eventId: event.id,
+      prisma: prisma.client,
+    })).resolves.toMatchObject({ status: "completed" });
+
+    expect(ordering).toEqual([
+      "identity-retrieved",
+      "identity-resolved",
+      "member-locked",
+      "canonical-retrieved",
+      "billing-written",
+    ]);
+    expect(mocks.stripe.subscriptions.retrieve).toHaveBeenCalledTimes(2);
+    expect(mocks.applyStripeInvoicePaymentFailed).toHaveBeenCalledWith(
+      event.data.object,
+      expect.anything(),
+      expect.anything(),
+      HostedBillingStatus.past_due,
+      canonicalSubscription,
+    );
   });
 
   it.each([

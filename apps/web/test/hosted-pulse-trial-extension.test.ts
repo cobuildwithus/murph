@@ -170,6 +170,62 @@ describe("Pulse Trial beta extension", () => {
     }
   });
 
+  test.each([
+    ["period end", { cancel_at_period_end: true }],
+    ["explicit time", { cancel_at: toUnixSeconds(ORIGINAL_TRIAL_END) }],
+  ] as const)("skips a trial scheduled to cancel at %s", async (_label, cancellation) => {
+    const source = makeCandidateSource([makeCandidate()]);
+    const stripe = makeStripeClient(makeSubscription(cancellation));
+
+    const summary = await extendHostedPulseTrials({
+      candidateSource: source,
+      mode: "apply",
+      now: NOW,
+      stripe,
+    });
+
+    assert.equal(summary.skipped.stripe_subscription_canceling, 1);
+    assert.equal(summary.stripeTrialsExtended, 0);
+    assert.equal(summary.localWindowsReconciled, 0);
+    assert.equal(stripe.updateCalls.length, 0);
+    assert.equal(source.updateCalls.length, 0);
+    expect(mocks.reconcileHostedAiUsageAllowancePeriodForMemberTx).not.toHaveBeenCalled();
+  });
+
+  test.each([
+    ["period end", { cancel_at_period_end: true }],
+    ["explicit time", { cancel_at: toUnixSeconds(ORIGINAL_TRIAL_END) }],
+  ] as const)("does not locally reconcile a marked trial canceled at %s", async (
+    _label,
+    cancellation,
+  ) => {
+    const source = makeCandidateSource([makeCandidate()]);
+    const stripe = makeStripeClient(makeSubscription({
+      ...cancellation,
+      metadata: {
+        billingPlanCode: "launch_monthly",
+        checkoutOffer: "pulse_trial_7d",
+        memberId: "member_test",
+        [HOSTED_PULSE_TRIAL_EXTENSION_CAMPAIGN_METADATA_KEY]:
+          HOSTED_PULSE_TRIAL_EXTENSION_CAMPAIGN,
+        [HOSTED_PULSE_TRIAL_EXTENSION_DAYS_METADATA_KEY]: "7",
+      },
+      trial_end: toUnixSeconds(EXTENDED_TRIAL_END),
+    }));
+
+    const summary = await extendHostedPulseTrials({
+      candidateSource: source,
+      mode: "apply",
+      now: NOW,
+      stripe,
+    });
+
+    assert.equal(summary.skipped.stripe_subscription_canceling, 1);
+    assert.equal(summary.localWindowsReconciled, 0);
+    assert.equal(stripe.updateCalls.length, 0);
+    assert.equal(source.updateCalls.length, 0);
+  });
+
   test("dry-run reports eligible trials without mutating Stripe or local state", async () => {
     const source = makeCandidateSource([makeCandidate()]);
     const stripe = makeStripeClient();
@@ -219,6 +275,8 @@ describe("Pulse Trial beta extension", () => {
       stripe.updateCalls[0]?.options.idempotencyKey ?? "",
       /pulse-beta-extension-2026-07/u,
     );
+    assert.equal(stripe.updateCalls[0]?.options.maxNetworkRetries, 2);
+    assert.equal(stripe.updateCalls[0]?.options.timeout, 80_000);
     assert.deepEqual(source.candidates[0], {
       ...makeCandidate(),
       currentPeriodEnd: EXTENDED_TRIAL_END,
@@ -351,6 +409,145 @@ describe("Pulse Trial beta extension", () => {
     assert.equal(summary.stripeTrialsExtended, 0);
     assert.equal(source.updateCalls.length, 0);
     assert.equal(updateSubscription.mock.calls.length, 0);
+  });
+
+  test("does not update a trial without the full post-retrieve provider runway", async () => {
+    vi.useFakeTimers();
+    try {
+      const safeClock = new Date("2026-07-09T12:05:00.000Z");
+      const nearTrialEnd = new Date(safeClock.getTime() + 361_000);
+      vi.setSystemTime(new Date("2026-07-09T12:00:00.000Z"));
+      const source = makeCandidateSource([makeCandidate({
+        currentPeriodEnd: nearTrialEnd,
+        currentTrialEndsAt: nearTrialEnd,
+      })]);
+      const updateSubscription = vi.fn();
+      const stripe: HostedPulseTrialExtensionStripeClient = {
+        async retrieveSubscription() {
+          vi.setSystemTime(safeClock);
+          return makeSubscription({ trial_end: toUnixSeconds(nearTrialEnd) });
+        },
+        updateSubscription,
+      };
+
+      const summary = await extendHostedPulseTrials({
+        candidateSource: source,
+        mode: "apply",
+        stripe,
+      });
+
+      assert.equal(summary.skipped.stripe_trial_end_invalid, 1);
+      assert.equal(summary.stripeTrialsExtended, 0);
+      assert.equal(summary.localWindowsReconciled, 0);
+      assert.equal(updateSubscription.mock.calls.length, 0);
+      assert.equal(source.updateCalls.length, 0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test("dry-run does not report an extension without the full post-retrieve runway", async () => {
+    vi.useFakeTimers();
+    try {
+      const safeClock = new Date("2026-07-09T12:05:00.000Z");
+      const nearTrialEnd = new Date(safeClock.getTime() + 361_000);
+      vi.setSystemTime(new Date("2026-07-09T12:00:00.000Z"));
+      const source = makeCandidateSource([makeCandidate({
+        currentPeriodEnd: nearTrialEnd,
+        currentTrialEndsAt: nearTrialEnd,
+      })]);
+      const updateSubscription = vi.fn();
+      const stripe: HostedPulseTrialExtensionStripeClient = {
+        async retrieveSubscription() {
+          vi.setSystemTime(safeClock);
+          return makeSubscription({ trial_end: toUnixSeconds(nearTrialEnd) });
+        },
+        updateSubscription,
+      };
+
+      const summary = await extendHostedPulseTrials({
+        candidateSource: source,
+        mode: "dry-run",
+        stripe,
+      });
+
+      assert.equal(summary.skipped.stripe_trial_end_invalid, 1);
+      assert.equal(summary.wouldExtend, 0);
+      assert.equal(updateSubscription.mock.calls.length, 0);
+      assert.equal(source.updateCalls.length, 0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test("dry-run reports an extension above the post-retrieve runway boundary", async () => {
+    vi.useFakeTimers();
+    try {
+      const safeClock = new Date("2026-07-09T12:05:00.000Z");
+      const safeTrialEnd = new Date(safeClock.getTime() + 362_000);
+      vi.setSystemTime(new Date("2026-07-09T12:00:00.000Z"));
+      const source = makeCandidateSource([makeCandidate({
+        currentPeriodEnd: safeTrialEnd,
+        currentTrialEndsAt: safeTrialEnd,
+      })]);
+      const updateSubscription = vi.fn();
+      const stripe: HostedPulseTrialExtensionStripeClient = {
+        async retrieveSubscription() {
+          vi.setSystemTime(safeClock);
+          return makeSubscription({ trial_end: toUnixSeconds(safeTrialEnd) });
+        },
+        updateSubscription,
+      };
+
+      const summary = await extendHostedPulseTrials({
+        candidateSource: source,
+        mode: "dry-run",
+        stripe,
+      });
+
+      assert.equal(summary.skipped.stripe_trial_end_invalid, 0);
+      assert.equal(summary.wouldExtend, 1);
+      assert.equal(updateSubscription.mock.calls.length, 0);
+      assert.equal(source.updateCalls.length, 0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test("updates a trial with more than the full post-retrieve provider runway", async () => {
+    vi.useFakeTimers();
+    try {
+      const safeClock = new Date("2026-07-09T12:05:00.000Z");
+      const safeTrialEnd = new Date(safeClock.getTime() + 362_000);
+      vi.setSystemTime(new Date("2026-07-09T12:00:00.000Z"));
+      const source = makeCandidateSource([makeCandidate({
+        currentPeriodEnd: safeTrialEnd,
+        currentTrialEndsAt: safeTrialEnd,
+      })]);
+      const stripe = makeStripeClient(makeSubscription({
+        trial_end: toUnixSeconds(safeTrialEnd),
+      }));
+      const retrieveSubscription = vi.spyOn(stripe, "retrieveSubscription")
+        .mockImplementationOnce(async () => {
+          vi.setSystemTime(safeClock);
+          return makeSubscription({ trial_end: toUnixSeconds(safeTrialEnd) });
+        });
+
+      const summary = await extendHostedPulseTrials({
+        candidateSource: source,
+        mode: "apply",
+        stripe,
+      });
+
+      assert.equal(retrieveSubscription.mock.calls.length, 1);
+      assert.equal(summary.stripeTrialsExtended, 1);
+      assert.equal(summary.localWindowsReconciled, 1);
+      assert.equal(stripe.updateCalls.length, 1);
+      assert.equal(stripe.updateCalls[0]?.options.maxNetworkRetries, 2);
+      assert.equal(stripe.updateCalls[0]?.options.timeout, 80_000);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   test("does not touch Stripe when the locked local re-read is no longer eligible", async () => {
@@ -589,6 +786,8 @@ function makeSubscription(
   overrides: Partial<HostedPulseTrialExtensionStripeSubscription> = {},
 ): HostedPulseTrialExtensionStripeSubscription {
   return {
+    cancel_at: null,
+    cancel_at_period_end: false,
     customer: "cus_test",
     id: "sub_test",
     items: {
@@ -686,7 +885,11 @@ function makeStripeClient(
 ): HostedPulseTrialExtensionStripeClient & {
   retrieveCalls: number;
   updateCalls: Array<{
-    options: { idempotencyKey: string };
+    options: {
+      idempotencyKey: string;
+      maxNetworkRetries: 2;
+      timeout: 80_000;
+    };
     params: HostedPulseTrialExtensionStripeUpdateParams;
     subscriptionId: string;
   }>;
@@ -698,7 +901,11 @@ function makeStripeClient(
   const client = {
     retrieveCalls: 0,
     updateCalls: [] as Array<{
-      options: { idempotencyKey: string };
+      options: {
+        idempotencyKey: string;
+        maxNetworkRetries: 2;
+        timeout: 80_000;
+      };
       params: HostedPulseTrialExtensionStripeUpdateParams;
       subscriptionId: string;
     }>,
@@ -709,7 +916,11 @@ function makeStripeClient(
     async updateSubscription(
       subscriptionId: string,
       params: HostedPulseTrialExtensionStripeUpdateParams,
-      options: { idempotencyKey: string },
+      options: {
+        idempotencyKey: string;
+        maxNetworkRetries: 2;
+        timeout: 80_000;
+      },
     ) {
       events?.push("stripe");
       client.updateCalls.push({ options, params, subscriptionId });

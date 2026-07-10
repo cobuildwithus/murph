@@ -30,6 +30,9 @@ import { getPrisma } from "../prisma";
 
 const DEFAULT_BATCH_SIZE = 100;
 const SECONDS_PER_DAY = 24 * 60 * 60;
+const STRIPE_UPDATE_MAX_NETWORK_RETRIES = 2;
+const STRIPE_UPDATE_TIMEOUT_MS = 80_000;
+const STRIPE_UPDATE_MINIMUM_RUNWAY_SECONDS = 361;
 
 export const HOSTED_PULSE_TRIAL_EXTENSION_CAMPAIGN =
   "pulse-beta-extension-2026-07" as const;
@@ -67,16 +70,20 @@ export interface HostedPulseTrialExtensionCandidateSource {
   }): Promise<TResult>;
 }
 
-export interface HostedPulseTrialExtensionStripeSubscription {
-  customer: string | { id?: string } | null;
-  id: string;
+export type HostedPulseTrialExtensionStripeSubscription = Pick<
+  Stripe.Subscription,
+  | "cancel_at"
+  | "cancel_at_period_end"
+  | "customer"
+  | "id"
+  | "metadata"
+  | "status"
+  | "trial_end"
+> & {
   items?: {
     data: readonly HostedPulseTrialExtensionStripeSubscriptionItem[];
   };
-  metadata?: Record<string, string> | null;
-  status: string;
-  trial_end: number | null;
-}
+};
 
 export interface HostedPulseTrialExtensionStripeSubscriptionItem {
   id: string;
@@ -105,7 +112,11 @@ export interface HostedPulseTrialExtensionStripeClient {
   updateSubscription(
     subscriptionId: string,
     params: HostedPulseTrialExtensionStripeUpdateParams,
-    options: { idempotencyKey: string },
+    options: {
+      idempotencyKey: string;
+      maxNetworkRetries: typeof STRIPE_UPDATE_MAX_NETWORK_RETRIES;
+      timeout: typeof STRIPE_UPDATE_TIMEOUT_MS;
+    },
   ): Promise<HostedPulseTrialExtensionStripeSubscription>;
 }
 
@@ -118,6 +129,7 @@ export type HostedPulseTrialExtensionSkipReason =
   | "stripe_checkout_offer_mismatch"
   | "stripe_customer_mismatch"
   | "stripe_price_mismatch"
+  | "stripe_subscription_canceling"
   | "stripe_subscription_id_mismatch"
   | "stripe_subscription_not_trialing"
   | "stripe_trial_end_invalid";
@@ -211,7 +223,7 @@ export async function extendHostedPulseTrials(input: {
       if (mode === "dry-run") {
         await previewHostedPulseTrialExtensionCandidate({
           candidate,
-          nowUnixSeconds: resolveHostedPulseTrialExtensionNowUnixSeconds(input.now),
+          now: input.now,
           priceId: input.priceId,
           stripe: input.stripe,
           summary,
@@ -246,7 +258,7 @@ export async function extendHostedPulseTrials(input: {
 
             const providerResult = await applyHostedPulseTrialExtensionUnderLock({
               candidate: locked.candidate,
-              nowUnixSeconds: resolveHostedPulseTrialExtensionNowUnixSeconds(input.now),
+              now: input.now,
               priceId: input.priceId,
               stripe: input.stripe,
             });
@@ -344,6 +356,9 @@ export function classifyHostedPulseTrialExtensionSubscription(input: {
   }
   if (input.subscription.status !== "trialing") {
     return { ok: false, reason: "stripe_subscription_not_trialing" };
+  }
+  if (input.subscription.cancel_at_period_end || input.subscription.cancel_at !== null) {
+    return { ok: false, reason: "stripe_subscription_canceling" };
   }
   if (coerceStripeCustomerId(input.subscription.customer) !== input.candidate.stripeCustomerId) {
     return { ok: false, reason: "stripe_customer_mismatch" };
@@ -524,6 +539,7 @@ function buildEmptyHostedPulseTrialExtensionSummary(
       stripe_checkout_offer_mismatch: 0,
       stripe_customer_mismatch: 0,
       stripe_price_mismatch: 0,
+      stripe_subscription_canceling: 0,
       stripe_subscription_id_mismatch: 0,
       stripe_subscription_not_trialing: 0,
       stripe_trial_end_invalid: 0,
@@ -570,7 +586,7 @@ function isValidHostedPulseTrialExtensionUpdateResult(input: {
 
 async function applyHostedPulseTrialExtensionUnderLock(input: {
   candidate: HostedPulseTrialExtensionCandidate;
-  nowUnixSeconds: number;
+  now?: Date;
   priceId: string;
   stripe: HostedPulseTrialExtensionStripeClient;
 }): Promise<HostedPulseTrialLockedApplyResult> {
@@ -582,9 +598,10 @@ async function applyHostedPulseTrialExtensionUnderLock(input: {
     return { kind: "failure", reason: "stripe_retrieve_failed" };
   }
 
+  const nowUnixSeconds = resolveHostedPulseTrialExtensionNowUnixSeconds(input.now);
   const classification = classifyHostedPulseTrialExtensionSubscription({
     candidate: input.candidate,
-    nowUnixSeconds: input.nowUnixSeconds,
+    nowUnixSeconds,
     priceId: input.priceId,
     subscription,
   });
@@ -596,6 +613,12 @@ async function applyHostedPulseTrialExtensionUnderLock(input: {
       kind: "already-marked",
       stripeTrialEnd: classification.stripeTrialEnd,
     };
+  }
+  if (
+    classification.stripeTrialEnd <=
+      nowUnixSeconds + STRIPE_UPDATE_MINIMUM_RUNWAY_SECONDS
+  ) {
+    return { kind: "skipped", reason: "stripe_trial_end_invalid" };
   }
 
   const targetTrialEnd = classification.stripeTrialEnd +
@@ -612,6 +635,8 @@ async function applyHostedPulseTrialExtensionUnderLock(input: {
         idempotencyKey: buildHostedPulseTrialExtensionIdempotencyKey(
           stripeSubscriptionId,
         ),
+        maxNetworkRetries: STRIPE_UPDATE_MAX_NETWORK_RETRIES,
+        timeout: STRIPE_UPDATE_TIMEOUT_MS,
       },
     );
   } catch {
@@ -652,7 +677,7 @@ async function projectHostedPulseTrialExtensionCandidate(
 
 async function previewHostedPulseTrialExtensionCandidate(input: {
   candidate: HostedPulseTrialExtensionCandidate;
-  nowUnixSeconds: number;
+  now?: Date;
   priceId: string;
   stripe: HostedPulseTrialExtensionStripeClient;
   summary: HostedPulseTrialExtensionSummary;
@@ -667,9 +692,10 @@ async function previewHostedPulseTrialExtensionCandidate(input: {
     return;
   }
 
+  const nowUnixSeconds = resolveHostedPulseTrialExtensionNowUnixSeconds(input.now);
   const classification = classifyHostedPulseTrialExtensionSubscription({
     candidate: input.candidate,
-    nowUnixSeconds: input.nowUnixSeconds,
+    nowUnixSeconds,
     priceId: input.priceId,
     subscription,
   });
@@ -679,6 +705,13 @@ async function previewHostedPulseTrialExtensionCandidate(input: {
   }
 
   if (!classification.alreadyMarked) {
+    if (
+      classification.stripeTrialEnd <=
+        nowUnixSeconds + STRIPE_UPDATE_MINIMUM_RUNWAY_SECONDS
+    ) {
+      input.summary.skipped.stripe_trial_end_invalid += 1;
+      return;
+    }
     input.summary.wouldExtend += 1;
     return;
   }
