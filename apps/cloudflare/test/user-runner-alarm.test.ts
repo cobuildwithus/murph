@@ -11,6 +11,7 @@ import type {
 import {
   HOSTED_RUNTIME_CRYPTO_CONTEXT_PATH,
   HOSTED_RUNTIME_LOG_PATH,
+  HOSTED_RUNTIME_OWNER_RELEASED_PATH,
   HOSTED_RUNTIME_STATUS_PATH,
   HOSTED_RUNTIME_WORKSPACE_PATH,
 } from "@murphai/hosted-execution/routes";
@@ -124,9 +125,15 @@ describe("HostedUserRunner execution coordination", () => {
     const ensureReadyForProcessing = vi.fn<
       NonNullable<HostedExecutionContainerStubLike["ensureReadyForProcessing"]>
     >(async () => await readiness.promise);
+    let callbackFenceAttemptId: string | null | undefined;
+    let callbackSql!: TestSqlStorageLike;
     const { alarms, flushWaitUntil, invoke, runner, sql } = createRunnerHarness({
       ensureReadyForProcessing,
       mailboxLag: [createMailboxLag({ importedSeq: "1", lag: "0", maxSeq: "1" })],
+      onOwnerReleased: ({ timeoutMs }) => {
+        expect(timeoutMs).toBe(2_000);
+        callbackFenceAttemptId = readRunnerMeta(callbackSql).active_attempt_id;
+      },
       onStatusRead,
       workspace: createWorkspaceState({
         nextWakeAt: WORKSPACE_NEXT_WAKE_AT,
@@ -134,6 +141,7 @@ describe("HostedUserRunner execution coordination", () => {
         version: "5",
       }),
     });
+    callbackSql = sql;
     await runner.bindUser(TEST_USER_ID);
 
     const accepted = runner.ensureRuntimeProcessingForUser({
@@ -181,7 +189,181 @@ describe("HostedUserRunner execution coordination", () => {
       last_invocation_at: expect.any(String),
       wake_at: null,
     });
+    expect(callbackFenceAttemptId).toBeNull();
+    const ownerReleaseCalls =
+      mocks.fetchHostedExecutionWebControlPlaneResponse.mock.calls.filter(
+        (call) => call[0].path === HOSTED_RUNTIME_OWNER_RELEASED_PATH,
+      );
+    expect(ownerReleaseCalls).toHaveLength(1);
+    expect(ownerReleaseCalls[0]?.[0]).toMatchObject({
+      boundUserId: TEST_USER_ID,
+      method: "POST",
+      timeoutMs: 2_000,
+    });
+    expect(ownerReleaseCalls[0]?.[0]).not.toHaveProperty("body");
+    expect(ownerReleaseCalls[0]?.[0]).not.toHaveProperty("search");
     expect(alarms).toEqual([]);
+  });
+
+  it("clears the fence without owner release for a future mailbox continuation", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const { flushWaitUntil, runner, sql } = createRunnerHarness({
+      invocationResults: [{
+        nextWakeAt: "2026-04-27T00:00:15.000Z",
+        redactedStatus: {
+          hostedMailboxRetryableBlockedCount: 1,
+        },
+        status: "scheduled",
+      }],
+    });
+    await runner.bindUser(TEST_USER_ID);
+
+    await expect(runner.ensureRuntimeProcessingForUser({
+      orchestrationAttemptId: "test-future-mailbox-continuation",
+      userId: TEST_USER_ID,
+    })).resolves.toMatchObject({
+      action: "started",
+      kind: "runtime_processing_accepted",
+    });
+    await flushWaitUntil();
+
+    expect(readRunnerMeta(sql).active_attempt_id).toBeNull();
+    expect(
+      mocks.fetchHostedExecutionWebControlPlaneResponse.mock.calls.filter(
+        (call) => call[0].path === HOSTED_RUNTIME_OWNER_RELEASED_PATH,
+      ),
+    ).toHaveLength(0);
+  });
+
+  it("sends owner release when a selected wake is already due", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const { flushWaitUntil, runner } = createRunnerHarness({
+      invocationResults: [{
+        nextWakeAt: FIXED_NOW,
+        nextWakeReason: "assistant",
+        redactedStatus: {
+          hostedMailboxRetryableBlockedCount: 1,
+        },
+        status: "scheduled",
+      }],
+    });
+    await runner.bindUser(TEST_USER_ID);
+
+    await expect(runner.ensureRuntimeProcessingForUser({
+      orchestrationAttemptId: "test-due-owner-release",
+      userId: TEST_USER_ID,
+    })).resolves.toMatchObject({
+      action: "started",
+      kind: "runtime_processing_accepted",
+    });
+    await flushWaitUntil();
+
+    const ownerReleaseCalls =
+      mocks.fetchHostedExecutionWebControlPlaneResponse.mock.calls.filter(
+        (call) => call[0].path === HOSTED_RUNTIME_OWNER_RELEASED_PATH,
+      );
+    expect(ownerReleaseCalls).toHaveLength(1);
+    expect(ownerReleaseCalls[0]?.[0]).not.toHaveProperty("search");
+  });
+
+  it("carries an immediate recheck request in the signed owner-release query", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const { flushWaitUntil, runner } = createRunnerHarness({
+      invocationResults: [{
+        immediateRecheckRequested: true,
+        nextWakeAt: "2026-04-27T00:00:15.000Z",
+        nextWakeReason: "mailbox",
+        redactedStatus: {
+          hostedMailboxRetryableBlockedCount: 1,
+        },
+        status: "scheduled",
+      }],
+    });
+    await runner.bindUser(TEST_USER_ID);
+
+    await expect(runner.ensureRuntimeProcessingForUser({
+      orchestrationAttemptId: "test-explicit-owner-release-recheck",
+      userId: TEST_USER_ID,
+    })).resolves.toMatchObject({
+      action: "started",
+      kind: "runtime_processing_accepted",
+    });
+    await flushWaitUntil();
+
+    const ownerReleaseCalls =
+      mocks.fetchHostedExecutionWebControlPlaneResponse.mock.calls.filter(
+        (call) => call[0].path === HOSTED_RUNTIME_OWNER_RELEASED_PATH,
+      );
+    expect(ownerReleaseCalls).toHaveLength(1);
+    expect(ownerReleaseCalls[0]?.[0]).toMatchObject({
+      search: "?immediateRecheckRequested=1",
+    });
+    expect(ownerReleaseCalls[0]?.[0]).not.toHaveProperty("body");
+  });
+
+  it("keeps successful completion when the owner-release callback fails", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const { flushWaitUntil, runner, sql } = createRunnerHarness({
+      ownerReleaseResponse: () => new Response("unavailable", { status: 503 }),
+    });
+    await runner.bindUser(TEST_USER_ID);
+
+    await expect(runner.ensureRuntimeProcessingForUser({
+      orchestrationAttemptId: "test-owner-release-failure",
+      userId: TEST_USER_ID,
+    })).resolves.toMatchObject({
+      action: "started",
+      kind: "runtime_processing_accepted",
+    });
+    await flushWaitUntil();
+
+    expect(readRunnerMeta(sql).active_attempt_id).toBeNull();
+    expect(
+      mocks.fetchHostedExecutionWebControlPlaneResponse.mock.calls.filter(
+        (call) => call[0].path === HOSTED_RUNTIME_OWNER_RELEASED_PATH,
+      ),
+    ).toHaveLength(1);
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message:
+          "Hosted runner runtime owner-release recheck callback failed; preserving completed result.",
+      }),
+    );
+  });
+
+  it("does not send owner release after a stale completion loses the exact fence", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const invocationResult = createDeferred<HostedWorkspaceInvocationResult>();
+    const { flushWaitUntil, invoke, runner, sql } = createRunnerHarness({
+      invocationResults: [invocationResult.promise],
+    });
+    await runner.bindUser(TEST_USER_ID);
+
+    await expect(runner.ensureRuntimeProcessingForUser({
+      orchestrationAttemptId: "test-stale-owner-release",
+      userId: TEST_USER_ID,
+    })).resolves.toMatchObject({
+      action: "started",
+      kind: "runtime_processing_accepted",
+    });
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
+    sql.exec(
+      "UPDATE runner_meta SET active_attempt_id = ? WHERE singleton = 1",
+      "runtime-write-newer-owner",
+    );
+    invocationResult.resolve({ nextWakeAt: null, status: "idle" });
+    await flushWaitUntil();
+
+    expect(
+      mocks.fetchHostedExecutionWebControlPlaneResponse.mock.calls.filter(
+        (call) => call[0].path === HOSTED_RUNTIME_OWNER_RELEASED_PATH,
+      ),
+    ).toHaveLength(0);
   });
 
   it("passes a runner-scoped OpenAI provider credential to hosted runtime jobs", async () => {
@@ -415,7 +597,7 @@ describe("HostedUserRunner execution coordination", () => {
           workspaceVersion: "5",
         }),
         message:
-          "Hosted runner accepted runtime transport failed before committed progress was visible; preserving the write fence for identity-aware wake recovery.",
+          "Hosted runner runtime transport failed without safe fence-clear proof; preserving the write fence.",
       }),
     );
   });
@@ -435,6 +617,10 @@ describe("HostedUserRunner execution coordination", () => {
     const { flushWaitUntil, invoke, runner, sql } = createRunnerHarness({
       invocationResults: [invocationResult.promise],
       mailboxLag: [createMailboxLag({ lag: "0", maxSeq: "0" })],
+      readActiveRuntimeUserFence: async () => ({
+        active: false,
+        reason: "no_active_runtime",
+      }),
       workspace,
     });
     await runner.bindUser(TEST_USER_ID);
@@ -477,6 +663,11 @@ describe("HostedUserRunner execution coordination", () => {
         message: "Hosted runner accepted runtime attempt committed progress despite transport failure.",
       }),
     );
+    expect(
+      mocks.fetchHostedExecutionWebControlPlaneResponse.mock.calls.filter(
+        (call) => call[0].path === HOSTED_RUNTIME_OWNER_RELEASED_PATH,
+      ),
+    ).toHaveLength(1);
   });
 
   it("keeps accepted failure cleanup best-effort when the runtime log callback fails", async () => {
@@ -3880,9 +4071,11 @@ function createRunnerHarness(input: {
   invocationResults?: Array<Error | HostedWorkspaceInvocationResult | Promise<HostedWorkspaceInvocationResult>>;
   mailboxLag?: HostedRuntimeWebStatusResponse["mailboxLag"];
   onStatusRead?: () => Promise<void> | void;
+  onOwnerReleased?: (input: { timeoutMs: number }) => Promise<void> | void;
   onStorageList?: (input: { prefix?: string }) => Promise<void> | void;
   onWorkspaceRead?: (input: { timeoutMs: number }) => Promise<void> | void;
   readActiveRuntimeUserFence?: HostedExecutionContainerStubLike["readActiveRuntimeUserFence"];
+  ownerReleaseResponse?: () => Promise<Response> | Response;
   runtimeLogResponse?: () => Promise<Response> | Response;
   runnerRuntimeEnvSource?: Readonly<Record<string, unknown>>;
   runnerContainerNamespace?: HostedExecutionContainerNamespaceLike | null;
@@ -4004,8 +4197,10 @@ function createRunnerHarness(input: {
   installWebControlResponses(input.workspace ?? createWorkspaceState(), {
     readMailboxLag: () => input.mailboxLag ?? [createMailboxLag()],
     onStatusRead: input.onStatusRead,
+    onOwnerReleased: input.onOwnerReleased,
     onWorkspaceRead: input.onWorkspaceRead,
     runtimeLogResponse: input.runtimeLogResponse,
+    ownerReleaseResponse: input.ownerReleaseResponse,
   });
 
   const runner = new HostedUserRunnerWithTestControls(
@@ -4175,9 +4370,11 @@ function installWebControlResponses(
   workspace: HostedWorkspaceState | null,
   hooks: {
     onWorkspaceRead?: (input: { timeoutMs: number }) => Promise<void> | void;
+    onOwnerReleased?: (input: { timeoutMs: number }) => Promise<void> | void;
     onStatusRead?: () => Promise<void> | void;
     readMailboxLag?: () => HostedRuntimeWebStatusResponse["mailboxLag"];
     runtimeLogResponse?: () => Promise<Response> | Response;
+    ownerReleaseResponse?: () => Promise<Response> | Response;
   } = {},
 ): void {
   mocks.fetchHostedExecutionWebControlPlaneResponse.mockImplementation(
@@ -4212,6 +4409,13 @@ function installWebControlResponses(
       if (input.path === HOSTED_RUNTIME_LOG_PATH) {
         return await hooks.runtimeLogResponse?.() ?? jsonResponse({
           loggedCount: 1,
+        });
+      }
+
+      if (input.path === HOSTED_RUNTIME_OWNER_RELEASED_PATH) {
+        await hooks.onOwnerReleased?.({ timeoutMs: input.timeoutMs });
+        return await hooks.ownerReleaseResponse?.() ?? jsonResponse({
+          signaled: true,
         });
       }
 

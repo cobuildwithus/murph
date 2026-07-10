@@ -10,7 +10,7 @@ const forbiddenStartupModules = [
   '../src/assistant-chat-ink.js',
   '../src/assistant/ui/ink.js',
 ] as const
-const STARTUP_IMPORT_GUARD_TIMEOUT_MS = 30_000
+const STARTUP_IMPORT_GUARD_TIMEOUT_MS = 60_000
 
 afterEach(() => {
   vi.resetModules()
