@@ -38,6 +38,15 @@ authenticated execution intents, restores encrypted runtime state, runs a
 workspace-runtime pass, and checkpoints through the web-owned workspace CAS. It may hold
 opaque encrypted runtime blobs and explicit execution-time callback data, but it is not the
 canonical owner of hosted product facts.
+When a valid `idle_shutdown` checkpoint matches the locked workspace version,
+web commits it even if a newer durable conversation row is pending. The same CAS
+commits the request snapshot, redacted watermarks, and wake projection as one
+prefix, and Web returns the optional transient
+`conversationInputAhead` observation so a live default-mode runtime can import
+immediately; during retention-only work or shutdown, the durable mailbox row
+remains the recovery source. Current
+web does not return `foreground_pending`; that response remains runner/parser
+compatibility for old web deployments only.
 Hosted device-sync provider registration is intentionally shared with
 `@murphai/device-syncd/config`; `apps/web` should reuse that assembly path
 instead of maintaining an app-local provider list or provider-config object.
@@ -490,6 +499,17 @@ Callback auth contract:
 - Hosted member private fields, device-sync credentials, mailbox payloads, and
   runtime execution state use signed hosted domain-root secure-box envelopes;
   lookup fingerprints/indexes use separate HMAC-only keys.
+- `POST /api/internal/hosted-runtime/owner-released` is the payload-free
+  completion handoff. Web accepts a zero-byte body and either no query or the
+  exact signature-bound `immediateRecheckRequested=1` positive edge, binds the
+  user through the signed request plus normal nonce protection, and emits the
+  existing `runtime_recheck_requested` Temporal signal. Without the edge, Web
+  signals only for current runnable mailbox lag; a persisted default or
+  retention wake is not itself signal authority. The edge means the completed
+  invocation newly committed an unserviced schedule and carries no wake data.
+  Known future mailbox retry continuations remain deferred. Cloudflare calls the
+  route at most once, with a timeout capped at two seconds, only after exact
+  write-fence completion; failure is non-fatal and has no callback retry.
 
 When you set `DEVICE_SYNC_PUBLIC_BASE_URL`, point it at the stable production
 project domain or a custom domain. Do not use ephemeral preview deployment URLs
@@ -763,6 +783,7 @@ Internal hosted maintenance and Cloudflare callback routes:
 - `POST /api/internal/hosted-mailbox/email-ingress`
 - `GET /api/internal/hosted-runtime/status`
 - `POST /api/internal/hosted-runtime/log`
+- `POST /api/internal/hosted-runtime/owner-released`
 - `GET /api/internal/hosted-workspace`
 - `POST /api/internal/hosted-workspace/checkpoint`
 - `POST /api/internal/computer/runs`
@@ -777,7 +798,8 @@ are gone. Cloudflare no longer round-trips through broad mirror CRUD routes,
 deleted sharing CRUD, local-vault import callbacks, or an outbox drain route. It
 still uses narrow signed hosted-web callbacks for execution-time device-sync
 runtime snapshot/apply, device connect-link starts, direct hosted usage
-recording, and mailbox/workspace runtime status plus log callbacks.
+recording, mailbox/workspace runtime status plus log callbacks, and the
+payload-free runtime owner-release recheck handoff.
 
 ## Hosted onboarding routes
 
