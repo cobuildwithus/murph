@@ -5,7 +5,7 @@ import {
   finishHostedOnboardingTiming,
   startHostedOnboardingTiming,
 } from "@/src/lib/hosted-onboarding/logging";
-import { completeHostedPrivyVerification } from "@/src/lib/hosted-onboarding/member-service";
+import { completeHostedPrivyVerification } from "@/src/lib/hosted-onboarding/authentication-service";
 import {
   isHostedPrivyAuthMethod,
   type HostedPrivyAuthMethod,

@@ -1,5 +1,8 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
-import type { ForegroundCommandInput } from "../src/process.ts";
+import {
+  ForegroundCommandSignalError,
+  type ForegroundCommandInput,
+} from "../src/process.ts";
 
 const runForegroundCommand = vi.hoisted(() =>
   vi.fn(async (_input: ForegroundCommandInput) => {})
@@ -43,6 +46,7 @@ import { runHostedLocalE2eSuite } from "../src/e2e.ts";
 describe("hosted-local E2E suite preparation", () => {
   afterEach(() => {
     vi.clearAllMocks();
+    runForegroundCommand.mockResolvedValue(undefined);
   });
 
   test("prepares generated web artifacts once for aggregate scenario runs", async () => {
@@ -314,6 +318,90 @@ describe("hosted-local E2E suite preparation", () => {
       }),
     );
     expect(cleanupHostedLocalOrphanedWorkerdProcesses).toHaveBeenCalled();
+  });
+
+  test("cleans up runner artifacts when a focused scenario fails", async () => {
+    runForegroundCommand.mockImplementation(async (input) => {
+      if (input.args.includes("vitest")) {
+        throw new Error("synthetic hosted-local scenario failure");
+      }
+    });
+
+    await expect(runHostedLocalE2eSuite({
+      env: {},
+      prepareRunnerBundle: false,
+      scenario: "checkpoint-baseline",
+    })).rejects.toThrow("synthetic hosted-local scenario failure");
+
+    expect(cleanupHostedRunnerContainers).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        ignoreErrors: true,
+        scope: "current-build",
+        timeoutMs: 60_000,
+      }),
+    );
+    expect(cleanupHostedRunnerImages).toHaveBeenCalledTimes(1);
+    expect(cleanupHostedLocalMinioE2eContainersBestEffort).toHaveBeenCalled();
+  });
+
+  test("preserves SIGINT exit semantics while cleaning up runner artifacts", async () => {
+    const signalHandlers = new Map<NodeJS.Signals, Array<() => void>>();
+    const originalOnceMethod = process.once.bind(process);
+    const originalOffMethod = process.off.bind(process);
+    const originalExitCode = process.exitCode;
+    const onceSpy = vi.spyOn(process, "once").mockImplementation((event, listener) => {
+      if (event === "SIGINT" || event === "SIGTERM") {
+        signalHandlers.set(event, [
+          ...(signalHandlers.get(event) ?? []),
+          listener as () => void,
+        ]);
+        return process;
+      }
+      return originalOnceMethod(event, listener);
+    });
+    const offSpy = vi.spyOn(process, "off").mockImplementation((event, listener) => {
+      if (event === "SIGINT" || event === "SIGTERM") {
+        signalHandlers.set(
+          event,
+          (signalHandlers.get(event) ?? []).filter((handler) => handler !== listener),
+        );
+        return process;
+      }
+      return originalOffMethod(event, listener);
+    });
+    process.exitCode = undefined;
+
+    try {
+      runForegroundCommand.mockImplementation(async (input) => {
+        if (!input.args.includes("vitest")) {
+          return;
+        }
+        for (const handler of signalHandlers.get("SIGINT") ?? []) {
+          handler();
+        }
+        throw new ForegroundCommandSignalError(input.label, "SIGINT");
+      });
+
+      await expect(runHostedLocalE2eSuite({
+        env: {},
+        prepareRunnerBundle: false,
+        scenario: "checkpoint-baseline",
+      })).resolves.toEqual({ terminationSignal: "SIGINT" });
+
+      expect(process.exitCode).toBe(130);
+      expect(cleanupHostedRunnerContainers).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          ignoreErrors: true,
+          scope: "current-build",
+          timeoutMs: 60_000,
+        }),
+      );
+      expect(cleanupHostedRunnerImages).toHaveBeenCalledTimes(1);
+    } finally {
+      process.exitCode = originalExitCode;
+      onceSpy.mockRestore();
+      offSpy.mockRestore();
+    }
   });
 
   test("does not add aggregate-only web preparation for one focused scenario", async () => {

@@ -20,8 +20,8 @@ export const CLOUDFLARE_HOSTED_RUNTIME_INTERNAL_HOSTNAMES = new Set<string>(
   Object.values(CLOUDFLARE_HOSTED_RUNTIME_HOSTS),
 );
 
-// Worker-mediated transcription is provider egress (active-user-fence
-// authorized), not an internal control-plane host, so it stays out of
+// Worker-mediated transcription is signed provider egress, not an internal
+// control-plane host, so it stays out of
 // CLOUDFLARE_HOSTED_RUNTIME_INTERNAL_HOSTNAMES.
 export const CLOUDFLARE_HOSTED_TRANSCRIBE_HOST = "murph-transcribe.worker";
 export const CLOUDFLARE_HOSTED_TRANSCRIBE_PATH = "/v1/transcribe";

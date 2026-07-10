@@ -745,11 +745,6 @@ describe("hosted runner container image contract", () => {
       "pnpm runner:docker:smoke:prepare && pnpm runner:docker:smoke:image && pnpm runner:docker:smoke:built",
     );
     expect(demoVaultMetadata.formatVersion).toBe(CURRENT_VAULT_FORMAT_VERSION);
-    expect(packageJson.scripts?.["worker:deploy"]).toBe(
-      "pnpm deploy:worker",
-    );
-    expect(packageJson.scripts?.["worker:deploy:apply"]).toBe("pnpm deploy:worker:apply");
-    expect(packageJson.scripts?.["worker:deploy:apply"]).not.toContain("wrangler deploy");
     expect(packageJson.scripts?.["worker:dev"]).toBe(
       "pnpm runner:docker:base && pnpm exec wrangler dev",
     );
@@ -840,12 +835,6 @@ describe("hosted runner container image contract", () => {
     expect(hostedRunnerSmokeChild).not.toContain('runTextCommand("/bin/sh", ["-lc"');
     expect(packageJson.scripts?.["test:e2e:local"]).toBe(
       "pnpm test:e2e:hosted-local && pnpm test:e2e:workers:local",
-    );
-    expect(packageJson.scripts?.["test:e2e:full-stack:local"]).toBe(
-      "pnpm test:e2e:hosted-local",
-    );
-    expect(packageJson.scripts?.["test:e2e:smoke:local"]).toBe(
-      "pnpm test:e2e:workers:local",
     );
     expect(packageJson.scripts?.["test:e2e:workers:local"]).toBe("pnpm test:workers");
     expect(packageJson.scripts?.["test:e2e:hosted-local"]).toBe(

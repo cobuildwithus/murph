@@ -19,7 +19,6 @@ import {
   isHostedWorkspaceSnapshotV2Ref,
   parseHostedExecutionSnapshotRef,
   parseHostedWorkspaceSnapshotV2Ref,
-  readHostedBrowserVaultSourceStateHash,
   readHostedExecutionSnapshotBaseRef,
 } from "../src/parsers.ts";
 
@@ -39,7 +38,6 @@ describe("hosted workspace snapshot v2 refs", () => {
     expect(parseHostedExecutionSnapshotRef(ref)).toEqual(ref);
     expect(isHostedWorkspaceSnapshotV2Ref(parseHostedExecutionSnapshotRef(ref))).toBe(true);
     expect(readHostedExecutionSnapshotBaseRef(parseHostedExecutionSnapshotRef(ref))).toBeNull();
-    expect(readHostedBrowserVaultSourceStateHash(parseHostedExecutionSnapshotRef(ref))).toBeNull();
   });
 
   it("builds a deterministic fingerprint for the complete v2 snapshot identity", () => {
