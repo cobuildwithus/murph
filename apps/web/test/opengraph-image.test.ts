@@ -6,6 +6,7 @@ const { imageResponseSpy, readFileMock } = vi.hoisted(() => ({
   imageResponseSpy: vi.fn(),
   readFileMock: vi.fn(async (path: string | URL) => {
     const value = String(path);
+    if (value.includes("logo.svg")) return Buffer.from("<svg/>");
     if (value.includes("Fraunces-400.ttf")) return Buffer.from([1, 2, 3]);
     if (value.includes("Fraunces-600.ttf")) return Buffer.from([4, 5, 6]);
     if (value.includes("DMSans-400.ttf")) return Buffer.from([7, 8, 9]);
@@ -49,9 +50,10 @@ test("OGImage reads bundled font assets without fetching Google Fonts", async ()
   } finally {
     fetchSpy.mockRestore();
   }
-  expect(readFileMock).toHaveBeenCalledTimes(3);
+  expect(readFileMock).toHaveBeenCalledTimes(4);
 
   const readPaths = readFileMock.mock.calls.map(([path]) => String(path));
+  assert.equal(readPaths.some((path) => path.includes("public/logo.svg")), true);
   assert.equal(readPaths.some((path) => path.includes("Fraunces-400.ttf")), true);
   assert.equal(readPaths.some((path) => path.includes("Fraunces-600.ttf")), true);
   assert.equal(readPaths.some((path) => path.includes("DMSans-400.ttf")), true);
