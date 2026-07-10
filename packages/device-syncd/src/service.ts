@@ -18,6 +18,7 @@ import {
   computeRetryDelayMs,
   defaultStateDatabasePath,
   generatePrefixedId,
+  normalizeString,
   normalizeOriginList,
   normalizePublicBaseUrl,
   sha256Text,
@@ -166,7 +167,7 @@ export interface DeviceSyncService {
   handleOAuthCallback(input: HandleOAuthCallbackInput): Promise<CompleteConnectionResult>;
   handleWebhook(providerName: string, headers: Headers, rawBody: Buffer): Promise<HandleWebhookResult>;
   queueManualReconcile(accountId: string): QueueManualReconcileResult;
-  disconnectAccount(accountId: string): Promise<DisconnectAccountResult>;
+  disconnectAccount(accountId: string, expectedConnectedAt: string): Promise<DisconnectAccountResult>;
   getNextWakeAt(now?: string): string | null;
   runSchedulerOnce(): Promise<void>;
   runWorkerOnce(): Promise<DeviceSyncJobRecord | null>;
@@ -526,49 +527,57 @@ class DeviceSyncServiceController {
     };
   }
 
-  async disconnectAccount(accountId: string): Promise<DisconnectAccountResult> {
+  async disconnectAccount(
+    accountId: string,
+    expectedConnectedAt: string,
+  ): Promise<DisconnectAccountResult> {
+    const normalizedExpectedConnectedAt = normalizeString(expectedConnectedAt);
+    if (!normalizedExpectedConnectedAt) {
+      throw connectionGenerationRequiredError();
+    }
+
     const account = this.requireStoredAccount(accountId);
     return await this.runProviderConnectionMutation(account.provider, () =>
-      this.disconnectAccountAfterConnectionMutation(accountId)
+      this.disconnectAccountAfterConnectionMutation(accountId, normalizedExpectedConnectedAt)
     );
   }
 
-  private async disconnectAccountAfterConnectionMutation(accountId: string): Promise<DisconnectAccountResult> {
+  private async disconnectAccountAfterConnectionMutation(
+    accountId: string,
+    expectedConnectedAt: string,
+  ): Promise<DisconnectAccountResult> {
     const account = this.requireStoredAccount(accountId);
+    if (account.connectedAt !== expectedConnectedAt) {
+      throw connectionChangedDuringDisconnectError();
+    }
     const provider = this.requireProvider(account.provider);
     const now = this.nowIso();
 
-    if (account.status === "disconnected") {
-      const currentAccount = this.store.disconnectAccountAndMarkPendingJobsDead({
-        accountId: account.id,
-        code: "ACCOUNT_DISCONNECTED",
-        message: "Device account disconnected.",
-        now,
-      }) ?? this.requireStoredAccount(account.id);
-
-      return {
-        account: this.toPublicAccount(currentAccount),
-      };
+    if (account.status !== "disconnected") {
+      try {
+        const decrypted = this.toDecryptedAccount(account);
+        await provider.connectionHandler?.revokeAccess?.(decrypted);
+      } catch (error) {
+        this.logger.warn?.("Provider revoke access failed during disconnect; continuing local disconnect.", {
+          provider: provider.provider,
+          accountId: account.id,
+          failureCode: "DEVICE_SYNC_DISCONNECT_REVOKE_FAILED",
+          error: summarizeError(error),
+        });
+      }
     }
 
-    try {
-      const decrypted = this.toDecryptedAccount(account);
-      await provider.connectionHandler?.revokeAccess?.(decrypted);
-    } catch (error) {
-      this.logger.warn?.("Provider revoke access failed during disconnect; continuing local disconnect.", {
-        provider: provider.provider,
-        accountId: account.id,
-        failureCode: "DEVICE_SYNC_DISCONNECT_REVOKE_FAILED",
-        error: summarizeError(error),
-      });
-    }
-
-    const disconnected = this.store.disconnectAccountAndMarkPendingJobsDead({
+    const disconnected = this.store.disconnectAccountAndMarkPendingJobsDeadIfConnectedAt({
       accountId: account.id,
       code: "ACCOUNT_DISCONNECTED",
+      expectedConnectedAt,
       message: "Device account disconnected.",
       now,
-    }) ?? this.requireStoredAccount(account.id);
+    });
+
+    if (!disconnected) {
+      throw connectionChangedDuringDisconnectError();
+    }
 
     return {
       account: this.toPublicAccount(disconnected),
@@ -1509,7 +1518,8 @@ export function createDeviceSyncService(input: CreateDeviceSyncServiceInput): De
     handleOAuthCallback: (callbackInput) => controller.handleOAuthCallback(callbackInput),
     handleWebhook: (providerName, headers, rawBody) => controller.handleWebhook(providerName, headers, rawBody),
     queueManualReconcile: (accountId) => controller.queueManualReconcile(accountId),
-    disconnectAccount: (accountId) => controller.disconnectAccount(accountId),
+    disconnectAccount: (accountId, expectedConnectedAt) =>
+      controller.disconnectAccount(accountId, expectedConnectedAt),
     getNextWakeAt: (now) => controller.getNextWakeAt(now),
     runSchedulerOnce: () => controller.runSchedulerOnce(),
     runWorkerOnce: () => controller.runWorkerOnce(),
@@ -1633,6 +1643,24 @@ function connectionMutationBusyError(): DeviceSyncError {
     message: "Another device connection update is still in progress. Retry shortly.",
     retryable: true,
     httpStatus: 503,
+  });
+}
+
+function connectionGenerationRequiredError(): DeviceSyncError {
+  return deviceSyncError({
+    code: "CONNECTION_GENERATION_REQUIRED",
+    message: "Device account disconnect requires the expected connection generation.",
+    retryable: false,
+    httpStatus: 400,
+  });
+}
+
+function connectionChangedDuringDisconnectError(): DeviceSyncError {
+  return deviceSyncError({
+    code: "CONNECTION_CHANGED_DURING_DISCONNECT",
+    message: "Device sync connection changed before disconnect could start. Retry with the current account.",
+    retryable: true,
+    httpStatus: 409,
   });
 }
 

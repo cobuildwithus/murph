@@ -1122,6 +1122,7 @@ export function disconnectAccountIfCurrentInTransaction(
   now: string,
   expectedLocalConnectionRevision: number | null,
   expectedStatus: DeviceSyncAccountStatus | null,
+  expectedConnectedAt: string | null,
 ): StoredDeviceSyncAccount | null {
   const connectionResult = database.prepare(`
     update device_connection
@@ -1132,6 +1133,7 @@ export function disconnectAccountIfCurrentInTransaction(
         updated_at = ?
     where id = ?
       and (? is null or status = ?)
+      and (? is null or connected_at = ?)
       and (? is null or exists (
         select 1
         from device_observation_state
@@ -1143,6 +1145,8 @@ export function disconnectAccountIfCurrentInTransaction(
     accountId,
     expectedStatus,
     expectedStatus,
+    expectedConnectedAt,
+    expectedConnectedAt,
     expectedLocalConnectionRevision,
     expectedLocalConnectionRevision,
   ) as { changes: number };
@@ -1189,6 +1193,6 @@ export function disconnectAccount(
   now: string,
 ): StoredDeviceSyncAccount {
   return withImmediateTransaction(database, () =>
-    disconnectAccountIfCurrentInTransaction(database, accountId, now, null, null)
+    disconnectAccountIfCurrentInTransaction(database, accountId, now, null, null, null)
   )!;
 }

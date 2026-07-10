@@ -196,13 +196,17 @@ export function createDeviceSyncClient(input: DeviceSyncClientOptions = {}) {
         },
       )
     },
-    async disconnectAccount(accountId: string): Promise<{
+    async disconnectAccount(accountId: string, expectedConnectedAt: string): Promise<{
       account: DeviceSyncAccountRecord
     }> {
       return await requestJson(
-        `/accounts/${encodeURIComponent(accountId)}/disconnect`,
+        `/accounts/${encodeURIComponent(accountId)}/disconnect-if-connected-at`,
         {
           method: 'POST',
+          headers: {
+            'Content-Type': 'application/json; charset=utf-8',
+          },
+          body: JSON.stringify({ expectedConnectedAt }),
         },
       )
     },

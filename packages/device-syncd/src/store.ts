@@ -243,15 +243,19 @@ export class SqliteDeviceSyncStore {
     return disconnectStoredAccount(this.database, accountId, now);
   }
 
-  disconnectAccountAndMarkPendingJobsDead(input: {
+  disconnectAccountAndMarkPendingJobsDeadIfConnectedAt(input: {
     accountId: string;
     code: string;
+    expectedConnectedAt: string;
     message: string;
     now: string;
   }): StoredDeviceSyncAccount | null {
     return withImmediateTransaction(this.database, () => {
       const existing = getStoredAccountById(this.database, input.accountId);
       if (!existing) {
+        return null;
+      }
+      if (existing.connectedAt !== input.expectedConnectedAt) {
         return null;
       }
 
@@ -263,6 +267,7 @@ export class SqliteDeviceSyncStore {
             input.now,
             null,
             null,
+            input.expectedConnectedAt,
           );
 
       if (!disconnected) {
@@ -294,6 +299,7 @@ export class SqliteDeviceSyncStore {
         input.now,
         input.expectedLocalConnectionRevision,
         input.expectedStatus,
+        null,
       );
 
       if (!disconnected) {

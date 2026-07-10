@@ -427,7 +427,7 @@ test("device sync service explicit account controls reject missing accounts", as
     /Device sync account acct_missing was not found\./,
   );
   await assert.rejects(
-    () => service.disconnectAccount("acct_missing"),
+    () => service.disconnectAccount("acct_missing", "2026-03-17T00:00:00.000Z"),
     /Device sync account acct_missing was not found\./,
   );
 
@@ -2350,7 +2350,7 @@ test("device sync service treats token refresh races as cancelled work instead o
 
   const workerPromise = service.runWorkerOnce();
   await refreshStarted;
-  await service.disconnectAccount(connected.account.id);
+  await service.disconnectAccount(connected.account.id, connected.account.connectedAt);
   requireCallback(releaseRefreshResolve, "refresh release callback was not initialized")();
   const processedJob = await workerPromise;
 
@@ -3247,7 +3247,7 @@ test("device sync service accepts and dedupes disconnected-account webhooks whil
     code: "xyz",
   });
 
-  await service.disconnectAccount(connected.account.id);
+  await service.disconnectAccount(connected.account.id, connected.account.connectedAt);
 
   assert.throws(
     () => service.queueManualReconcile(connected.account.id),
@@ -4425,7 +4425,10 @@ test("device sync service fences in-flight jobs after disconnect", async () => {
   const workerPromise = service.runWorkerOnce();
   await providerStarted;
 
-  const disconnected = await service.disconnectAccount(connected.account.id);
+  const disconnected = await service.disconnectAccount(
+    connected.account.id,
+    connected.account.connectedAt,
+  );
   assert.equal(disconnected.account.status, "disconnected");
 
   requireCallback(releaseProviderResolve, "provider release callback was not initialized")();
@@ -4506,7 +4509,10 @@ test("device sync service completes local disconnect after scheduler progress du
       nextReconcileAt: new Date(Date.now() - 1_000).toISOString(),
     });
 
-    const disconnectPromise = service.disconnectAccount(connected.account.id);
+    const disconnectPromise = service.disconnectAccount(
+      connected.account.id,
+      connected.account.connectedAt,
+    );
     await revokeStarted;
     await service.runSchedulerOnce();
     requireCallback(releaseRevokeResolve, "revoke release callback was not initialized")();
@@ -4564,7 +4570,10 @@ test("device sync service completes local disconnect after worker progress durin
       code: "worker-progress-during-revoke",
     });
     const beforeWorker = store.getAccountById(connected.account.id);
-    const disconnectPromise = service.disconnectAccount(connected.account.id);
+    const disconnectPromise = service.disconnectAccount(
+      connected.account.id,
+      connected.account.connectedAt,
+    );
 
     await revokeStarted;
     await service.runWorkerOnce();
@@ -4623,7 +4632,10 @@ test("device sync service rejects missing-state callbacks before provider mutati
     state: begin.state,
     code: "callback-pre-admission-validation",
   });
-  const disconnectPromise = service.disconnectAccount(connected.account.id);
+  const disconnectPromise = service.disconnectAccount(
+    connected.account.id,
+    connected.account.connectedAt,
+  );
 
   try {
     await revokeStarted;
@@ -4699,7 +4711,10 @@ test("device sync service bounds callbacks waiting behind provider disconnect", 
   });
   const firstReconnectBegin = await service.startConnection({ provider: "demo" });
   const secondReconnectBegin = await service.startConnection({ provider: "demo" });
-  const disconnectPromise = service.disconnectAccount(initialConnection.account.id);
+  const disconnectPromise = service.disconnectAccount(
+    initialConnection.account.id,
+    initialConnection.account.connectedAt,
+  );
   let firstReconnect: Promise<Awaited<ReturnType<typeof service.handleOAuthCallback>>> | null = null;
 
   try {
@@ -4795,7 +4810,10 @@ test("device sync service times out callback admission without consuming OAuth s
     code: "before-disconnect",
   });
   const reconnectBegin = await service.startConnection({ provider: "demo" });
-  const disconnectPromise = service.disconnectAccount(initialConnection.account.id);
+  const disconnectPromise = service.disconnectAccount(
+    initialConnection.account.id,
+    initialConnection.account.connectedAt,
+  );
 
   try {
     await revokeStarted;
@@ -4894,7 +4912,10 @@ test("device sync service serializes reconnect callbacks behind provider disconn
   const reconnectBegin = await service.startConnection({
     provider: "demo",
   });
-  const disconnectPromise = service.disconnectAccount(firstConnection.account.id);
+  const disconnectPromise = service.disconnectAccount(
+    firstConnection.account.id,
+    firstConnection.account.connectedAt,
+  );
 
   await revokeStarted;
 
@@ -4925,6 +4946,208 @@ test("device sync service serializes reconnect callbacks behind provider disconn
   close();
 });
 
+test("device sync service rejects a disconnect queued behind a newer reconnect", async () => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date("2026-03-18T12:00:00.000Z"));
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-stale-disconnect-behind-reconnect");
+  const externalAccountId = "demo-stale-disconnect-behind-reconnect";
+  let reconnectExchangeStartedResolve: (() => void) | null = null;
+  let releaseReconnectExchangeResolve: (() => void) | null = null;
+  let revokeCalls = 0;
+  const reconnectExchangeStarted = new Promise<void>((resolve) => {
+    reconnectExchangeStartedResolve = resolve;
+  });
+  const releaseReconnectExchange = new Promise<void>((resolve) => {
+    releaseReconnectExchangeResolve = resolve;
+  });
+  const { service, store, close } = createServiceFixture({
+    secret: "secret-for-tests",
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+    },
+    providers: [
+      createFakeProvider({
+        async exchangeAuthorizationCode(_context, code) {
+          if (code === "new-connection") {
+            reconnectExchangeStartedResolve?.();
+            await releaseReconnectExchange;
+          }
+          return {
+            externalAccountId,
+            displayName: `Demo ${code}`,
+            scopes: ["offline", "read:data"],
+            metadata: {
+              connectedBy: code,
+            },
+            tokens: {
+              accessToken: `access-${code}`,
+              refreshToken: `refresh-${code}`,
+            },
+            initialJobs: [
+              {
+                kind: `backfill-${code}`,
+              },
+            ],
+          };
+        },
+        async revokeAccess() {
+          revokeCalls += 1;
+        },
+      }),
+    ],
+  });
+
+  try {
+    const firstBegin = await service.startConnection({ provider: "demo" });
+    const firstConnection = await service.handleOAuthCallback({
+      provider: "demo",
+      state: firstBegin.state,
+      code: "old-connection",
+    });
+    const reconnectBegin = await service.startConnection({ provider: "demo" });
+    vi.setSystemTime(new Date("2026-03-18T12:00:01.000Z"));
+    const reconnectPromise = service.handleOAuthCallback({
+      provider: "demo",
+      state: reconnectBegin.state,
+      code: "new-connection",
+    });
+
+    await reconnectExchangeStarted;
+    const staleDisconnect = service.disconnectAccount(
+      firstConnection.account.id,
+      firstConnection.account.connectedAt,
+    );
+    const staleDisconnectRejection = assert.rejects(
+      staleDisconnect,
+      (error: unknown) =>
+        error instanceof DeviceSyncError
+        && error.code === "CONNECTION_CHANGED_DURING_DISCONNECT"
+        && error.retryable === true
+        && error.httpStatus === 409,
+    );
+    requireCallback(
+      releaseReconnectExchangeResolve,
+      "reconnect exchange release callback was not initialized",
+    )();
+
+    const reconnected = await reconnectPromise;
+    await staleDisconnectRejection;
+    const currentAccount = store.getAccountById(firstConnection.account.id);
+    const jobs = readJobsForAccountForTesting(store, firstConnection.account.id);
+
+    assert.notEqual(reconnected.account.connectedAt, firstConnection.account.connectedAt);
+    assert.equal(revokeCalls, 0);
+    assert.ok(currentAccount);
+    assert.equal(currentAccount.status, "active");
+    assertStoredCredentialKind(currentAccount, "oauth_tokens");
+    assert.deepEqual(currentAccount.metadata, {
+      connectedBy: "new-connection",
+    });
+    assert.equal(jobs.at(-1)?.kind, "backfill-new-connection");
+    assert.equal(jobs.at(-1)?.status, "queued");
+  } finally {
+    requireCallback(
+      releaseReconnectExchangeResolve,
+      "reconnect exchange release callback was not initialized",
+    )();
+    vi.useRealTimers();
+    close();
+  }
+});
+
+test("device sync service rejects a prior disconnect generation retried after reconnect", async () => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date("2026-03-18T13:00:00.000Z"));
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-stale-disconnect-retry");
+  const externalAccountId = "demo-stale-disconnect-retry";
+  let revokeCalls = 0;
+  const { service, store, close } = createServiceFixture({
+    secret: "secret-for-tests",
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+    },
+    providers: [
+      createFakeProvider({
+        async exchangeAuthorizationCode(_context, code) {
+          return {
+            externalAccountId,
+            displayName: `Demo ${code}`,
+            scopes: ["offline", "read:data"],
+            metadata: {
+              connectedBy: code,
+            },
+            tokens: {
+              accessToken: `access-${code}`,
+              refreshToken: `refresh-${code}`,
+            },
+            initialJobs: [
+              {
+                kind: `backfill-${code}`,
+              },
+            ],
+          };
+        },
+        async revokeAccess() {
+          revokeCalls += 1;
+        },
+      }),
+    ],
+  });
+
+  try {
+    const firstBegin = await service.startConnection({ provider: "demo" });
+    const firstConnection = await service.handleOAuthCallback({
+      provider: "demo",
+      state: firstBegin.state,
+      code: "old-connection",
+    });
+    await service.disconnectAccount(
+      firstConnection.account.id,
+      firstConnection.account.connectedAt,
+    );
+
+    vi.setSystemTime(new Date("2026-03-18T13:00:01.000Z"));
+    const reconnectBegin = await service.startConnection({ provider: "demo" });
+    const reconnected = await service.handleOAuthCallback({
+      provider: "demo",
+      state: reconnectBegin.state,
+      code: "new-connection",
+    });
+
+    await assert.rejects(
+      service.disconnectAccount(
+        firstConnection.account.id,
+        firstConnection.account.connectedAt,
+      ),
+      (error: unknown) =>
+        error instanceof DeviceSyncError
+        && error.code === "CONNECTION_CHANGED_DURING_DISCONNECT"
+        && error.retryable === true
+        && error.httpStatus === 409,
+    );
+    const currentAccount = store.getAccountById(firstConnection.account.id);
+    const jobs = readJobsForAccountForTesting(store, firstConnection.account.id);
+
+    assert.notEqual(reconnected.account.connectedAt, firstConnection.account.connectedAt);
+    assert.equal(revokeCalls, 1);
+    assert.ok(currentAccount);
+    assert.equal(currentAccount.status, "active");
+    assertStoredCredentialKind(currentAccount, "oauth_tokens");
+    assert.deepEqual(currentAccount.metadata, {
+      connectedBy: "new-connection",
+    });
+    assert.equal(jobs.at(-1)?.kind, "backfill-new-connection");
+    assert.equal(jobs.at(-1)?.status, "queued");
+  } finally {
+    vi.useRealTimers();
+    close();
+  }
+});
+
 test("device sync service keeps repeated disconnects idempotent", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-syncd-disconnect-idempotent");
   let revokeCalls = 0;
@@ -4952,9 +5175,12 @@ test("device sync service keeps repeated disconnects idempotent", async () => {
     code: "idempotent-disconnect",
   });
 
-  await service.disconnectAccount(connected.account.id);
+  await service.disconnectAccount(connected.account.id, connected.account.connectedAt);
   const afterFirstDisconnect = store.getAccountById(connected.account.id);
-  const repeated = await service.disconnectAccount(connected.account.id);
+  const repeated = await service.disconnectAccount(
+    connected.account.id,
+    connected.account.connectedAt,
+  );
   const afterRepeatedDisconnect = store.getAccountById(connected.account.id);
 
   assert.ok(afterFirstDisconnect);
@@ -6371,7 +6597,10 @@ test("device sync service logs non-error revoke failures but still disconnects l
     code: "disconnect-warning",
   });
 
-  const disconnected = await service.disconnectAccount(connected.account.id);
+  const disconnected = await service.disconnectAccount(
+    connected.account.id,
+    connected.account.connectedAt,
+  );
 
   assert.equal(disconnected.account.status, "disconnected");
   assert.equal(warnEvents.length, 1);

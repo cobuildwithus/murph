@@ -1724,7 +1724,7 @@ test('device sync client covers list, begin, and browser open paths', async () =
         })
       }
 
-      if (url.endsWith('/accounts/acct-1/disconnect')) {
+      if (url.endsWith('/accounts/acct-1/disconnect-if-connected-at')) {
         return createJsonResponse({
           account: { accountId: 'acct-1', disconnected: true },
         })
@@ -1763,7 +1763,7 @@ test('device sync client covers list, begin, and browser open paths', async () =
     account: { accountId: 'acct-1' },
     job: { id: 'job-1' },
   })
-  assert.deepEqual(await client.disconnectAccount('acct-1'), {
+  assert.deepEqual(await client.disconnectAccount('acct-1', '2026-04-08T00:00:00.000Z'), {
     account: { accountId: 'acct-1', disconnected: true },
   })
 
@@ -1775,11 +1775,17 @@ test('device sync client covers list, begin, and browser open paths', async () =
     { method: 'GET', url: 'http://127.0.0.1:8788/accounts?provider=oura' },
     { method: 'GET', url: 'http://127.0.0.1:8788/accounts/acct-1' },
     { method: 'POST', url: 'http://127.0.0.1:8788/accounts/acct-1/reconcile' },
-    { method: 'POST', url: 'http://127.0.0.1:8788/accounts/acct-1/disconnect' },
+    {
+      method: 'POST',
+      url: 'http://127.0.0.1:8788/accounts/acct-1/disconnect-if-connected-at',
+    },
   ])
   assert.deepEqual(JSON.parse(seenRequests[1]?.body ?? '{}'), {
     returnTo: 'https://murph.example.test/return',
     sourceProviderSlug: 'fitbit',
+  })
+  assert.deepEqual(JSON.parse(seenRequests[5]?.body ?? '{}'), {
+    expectedConnectedAt: '2026-04-08T00:00:00.000Z',
   })
 
   const successfulSpawn = vi.fn((_command: string, _args: string[]) => {
