@@ -18,11 +18,11 @@ import {
 import {
   asArray,
   asPlainObject,
-  createRawArtifact,
+  createEvidencePart,
   makeNormalizedDeviceBatch,
   makeProviderExternalRef,
   pushObservationEvent,
-  pushRawArtifact,
+  pushEvidencePart,
   stringId,
   toIso,
 } from "./shared-normalization.ts";
@@ -69,25 +69,25 @@ export function normalizeAcmeSnapshot(
   const importedAt = toIso(request.importedAt) ?? new Date().toISOString();
   const accountId = stringId(request.accountId);
   const events = [];
-  const rawArtifacts = [];
+  const evidenceParts = [];
   const dailySummaries = asArray(request.dailySummaries)
     .map((entry) => asPlainObject(entry))
     .filter((entry): entry is Record<string, unknown> => Boolean(entry));
 
-  pushRawArtifact(
-    rawArtifacts,
-    createRawArtifact("profile", "profile.json", request.profile),
+  pushEvidencePart(
+    evidenceParts,
+    createEvidencePart("profile", "profile.json", request.profile),
   );
 
   for (const summary of dailySummaries) {
-    const summaryId = stringId(summary.id) ?? `daily-${rawArtifacts.length + 1}`;
+    const summaryId = stringId(summary.id) ?? `daily-${evidenceParts.length + 1}`;
     const dayKey = typeof summary.day === "string" ? summary.day : undefined;
     const recordedAt = toIso(summary.recordedAt) ?? importedAt;
-    const rawArtifactRole = `daily-summary:${summaryId}`;
+    const evidenceRole = `daily-summary:${summaryId}`;
 
-    pushRawArtifact(
-      rawArtifacts,
-      createRawArtifact(rawArtifactRole, `daily-summary-${summaryId}.json`, summary),
+    pushEvidencePart(
+      evidenceParts,
+      createEvidencePart(evidenceRole, `daily-summary-${summaryId}.json`, summary),
     );
 
     pushObservationEvent(events, {
@@ -98,7 +98,7 @@ export function normalizeAcmeSnapshot(
       recordedAt,
       dayKey,
       title: "Acme daily steps",
-      rawArtifactRoles: [rawArtifactRole],
+      evidenceRoles: [evidenceRole],
       externalRef: makeAcmeExternalRef("daily-summary", summaryId, "steps"),
     });
 
@@ -110,7 +110,7 @@ export function normalizeAcmeSnapshot(
       recordedAt,
       dayKey,
       title: "Acme resting heart rate",
-      rawArtifactRoles: [rawArtifactRole],
+      evidenceRoles: [evidenceRole],
       externalRef: makeAcmeExternalRef("daily-summary", summaryId, "resting-heart-rate"),
     });
 
@@ -122,7 +122,7 @@ export function normalizeAcmeSnapshot(
       recordedAt,
       dayKey,
       title: "Acme readiness score",
-      rawArtifactRoles: [rawArtifactRole],
+      evidenceRoles: [evidenceRole],
       externalRef: makeAcmeExternalRef("daily-summary", summaryId, "readiness-score"),
     });
 
@@ -133,7 +133,7 @@ export function normalizeAcmeSnapshot(
     accountId,
     importedAt,
     events,
-    rawArtifacts,
+    evidenceParts,
     provenance: {
       importedSections: {
         profile: Boolean(request.profile),
@@ -160,7 +160,7 @@ Do not stop at the adapter file. Wire the provider into:
 - the compatibility matrix when the provider introduces a new family or naming surface
 
 Keep the normalization conservative:
-- retain useful raw artifacts
+- retain useful upstream evidence as bounded integration-ingest evidence parts
 - reuse existing canonical names before creating new ones
 - do not manufacture precision the upstream provider never supplied
 - keep the adapter on the shared descriptor instead of carrying a second metadata surface
