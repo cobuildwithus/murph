@@ -380,6 +380,74 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
+  test("keeps runner ownership until an aborted initial mailbox import settles", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const hostAbortController = new AbortController();
+    const hostAbortReason = new Error("host request aborted during mailbox import");
+    const importStarted = createDeferred<void>();
+    const importRelease = createDeferred<void>();
+    let settled = false;
+    let resultPromise: ReturnType<typeof runHostedWorkspaceRuntimeJobInProcess> | null = null;
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      resultPromise = runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_host_abort_during_mailbox_import",
+            leaseGeneration: "7",
+            userId: TEST_USER_ID,
+            workspaceVersion: "0",
+          },
+        }),
+        {
+          async createCheckpointSnapshot() {
+            throw new Error("Aborted mailbox import should not checkpoint.");
+          },
+          async importItem() {
+            importStarted.resolve();
+            await importRelease.promise;
+            return { status: "imported" };
+          },
+          platform: createPlatform({
+            mailboxPort: createMailboxPort({
+              events: [],
+              items: [createMailboxItem({ laneSeq: "1" })],
+            }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests: [],
+              events: [],
+              workspace: createWorkspaceState({ version: "0" }),
+            }),
+          }),
+          signal: hostAbortController.signal,
+          vaultRoot,
+        },
+      );
+      void resultPromise.then(
+        () => {
+          settled = true;
+        },
+        () => {
+          settled = true;
+        },
+      );
+
+      await importStarted.promise;
+      hostAbortController.abort(hostAbortReason);
+      await new Promise((resolve) => setTimeout(resolve, 25));
+      assert.equal(settled, false);
+
+      importRelease.resolve();
+      await assert.rejects(resultPromise, (error) => error === hostAbortReason);
+      assert.equal(settled, true);
+    } finally {
+      importRelease.resolve();
+      await resultPromise?.catch(() => undefined);
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
   test("emits metadata-only phase boundary logs for runtime startup", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const previousStdIoLogSetting = process.env.MURPH_HOSTED_EXECUTION_STDIO_LOGS;
@@ -8876,6 +8944,10 @@ describe("hosted workspace runtime entrypoint", () => {
 
       assert.deepEqual(fetchRequests.map(readConversationImportedSeq), ["250"]);
       assert.deepEqual(fetchRequests.map((request) => request.limitPerLane), [3]);
+      assert.deepEqual(fetchRequests.map((request) => request.lanes), [[
+        { importedSeq: "0", lane: "system" },
+        { importedSeq: "250", lane: "conversation" },
+      ]]);
       assert.deepEqual(importedSeqs, ["251"]);
       assert.ok(events.includes("import:251"));
       assert.ok(events.includes("snapshot:idle_shutdown:251"));
@@ -16502,14 +16574,13 @@ describe("hosted workspace runtime entrypoint", () => {
       assert.deepEqual(fetchRequests.map((request) => request.lanes), [
         [
           { importedSeq: "3", lane: "conversation" },
-        ],
-        [
           { importedSeq: "0", lane: "system" },
         ],
       ]);
       assert.equal(readConversationImportedSeqs(fetchRequests).length, 1);
       assert.deepEqual(fetchRequests[0]?.lanes, [
         { importedSeq: "3", lane: "conversation" },
+        { importedSeq: "0", lane: "system" },
       ]);
       assert.equal(readConversationImportedSeq(fetchRequests[0]), "3");
       assert.equal((await readHostedMailboxImportState({ vaultRoot })).watermarks.conversation, "4");
@@ -16518,7 +16589,6 @@ describe("hosted workspace runtime entrypoint", () => {
         "workspace.read",
         "mailbox.fetch",
         "projection.ready",
-        "mailbox.fetch",
         "snapshot:4",
         "workspace.checkpoint",
       ]);

@@ -4,7 +4,8 @@
     "composite": false,
     "declaration": false,
     "declarationMap": false,
-    "incremental": false,
+    "incremental": true,
+    "tsBuildInfoFile": "tsconfig.tools.tsbuildinfo",
     "noEmit": true
   },
   "include": [

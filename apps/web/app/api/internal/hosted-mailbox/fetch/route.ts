@@ -16,10 +16,7 @@ import {
   hostedMailboxItemsRequireAiUsageAccess,
 } from "@/src/lib/hosted-mailbox/ai-usage-gate";
 import {
-  fetchHostedMailboxItemsAfterLaneCursors,
-  readHostedMailboxConsumedSeqByLane,
-  readHostedMailboxMaxSeqByLane,
-  resolveHostedMailboxRuntimeFetchLaneCursors,
+  fetchHostedRuntimeMailboxProjection,
 } from "@/src/lib/hosted-mailbox/store";
 import {
   resolveHostedRuntimeAiUsageGate,
@@ -44,42 +41,29 @@ export const POST = withJsonError(async (request: Request) => {
   });
   await requireHostedRuntimeMailboxActiveAccess(userId);
   const body = parseHostedMailboxFetchRequest(await readOptionalJsonObject(request));
-  const requestedLanes = body.lanes.map((laneCursor) => laneCursor.lane);
   const fetchedAt = new Date();
-  const consumedSeqByLane = await readHostedMailboxConsumedSeqByLane({
-    lanes: requestedLanes,
-    userId,
-  });
-  const laneCursors = resolveHostedMailboxRuntimeFetchLaneCursors({
-    consumedSeqByLane,
+  const projection = await fetchHostedRuntimeMailboxProjection({
     cursorMode: body.cursorMode ?? null,
     lanes: body.lanes.map((laneCursor) => ({
       importedSeq: laneCursor.importedSeq,
       lane: laneCursor.lane,
     })),
-  });
-  const itemsResult = await fetchHostedMailboxItemsAfterLaneCursors({
-    lanes: laneCursors,
     limitPerLane: body.limitPerLane,
     now: fetchedAt,
     userId,
   });
   await requireHostedRuntimeMailboxAiUsageAccess({
-    consumedSeqByLane,
-    items: itemsResult.items,
+    consumedSeqByLane: projection.consumedSeqByLane,
+    items: projection.items,
     lanes: body.lanes,
-    userId,
-  });
-  const maxSeqByLane = await readHostedMailboxMaxSeqByLane({
-    lanes: requestedLanes,
     userId,
   });
 
   return jsonOk(parseHostedMailboxFetchResponse({
-    consumedSeqByLane,
+    consumedSeqByLane: projection.consumedSeqByLane,
     fetchedAt: fetchedAt.toISOString(),
-    items: itemsResult.items,
-    maxSeqByLane,
+    items: projection.items,
+    maxSeqByLane: projection.maxSeqByLane,
     userId,
   }));
 });

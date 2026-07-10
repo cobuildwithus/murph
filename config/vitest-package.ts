@@ -7,7 +7,10 @@ import {
   createMurphVitestCoverage,
   resolveMurphVitestCoverageProviderModule,
 } from "./vitest-coverage.js";
-import { resolveMurphVitestConcurrency } from "./vitest-parallelism.js";
+import {
+  resolveMurphVitestConcurrency,
+  resolveMurphVitestMaxWorkers,
+} from "./vitest-parallelism.js";
 import { murphVitestNoTimeouts } from "./vitest-timeouts.js";
 import {
   createVitestAliasesFromTsconfigPaths,
@@ -70,6 +73,7 @@ export function createMurphPackageVitestConfig(input: MurphPackageVitestConfigIn
       name: input.name,
       environment: "node",
       ...(input.useDefaultConcurrency === false ? {} : resolveMurphVitestConcurrency()),
+      maxWorkers: resolveMurphVitestMaxWorkers(),
       include: [...(input.include ?? ["test/**/*.test.ts"])],
       ...(input.test ?? {}),
       coverage:

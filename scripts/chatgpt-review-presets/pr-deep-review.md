@@ -2,35 +2,19 @@ Review the linked pull request for merge-blocking production risk and avoidable
 complexity.
 
 Goal:
-Help us ship clean, simple, production-safe software.
-
-## Default To Deletion And Simplicity
-
-Default to deletion and radical simplicity. Before adding code, abstractions,
-dependencies, services, configuration, state, or process, first challenge the
-requirement itself: is this solving a real, current problem, or are we
-preserving complexity because it already exists or might be useful later?
-Prefer the smallest architecture that satisfies the actual requirement with
-the fewest moving parts, concepts, branches, and hidden behaviors. Delete
-obsolete code aggressively; collapse unnecessary layers; inline premature
-abstractions; remove speculative generality; and make data flow obvious. Only
-after the system has been reduced to what truly must exist should you
-simplify, optimize, speed up, or automate it. Add complexity back only when a
-failing test, measured bottleneck, security requirement, or concrete product
-need proves that the simpler design is insufficient.
+Decide whether the PR is safe to merge against its stated outcome and current
+repository invariants. Report serious reachable failures and materially
+removable complexity with the smallest maintainable correction.
 
 A good review:
 
-- says the PR is safe to ship when no merge-blocking issue remains
 - reports serious reachable bugs with the smallest fix
 - treats repeated bugs around one mechanism as a design signal, not as a list
   of patches to keep stacking
-- proposes the simpler ownership/data-flow shape when that would remove the
-  bug class
-- prefers deletion, single ownership, and existing primitives over new state,
-  queues, lifecycle enums, managers, schedulers, or broad abstractions
-- avoids fixes that make the architecture harder to reason about than the bug
-  itself
+- prefers deletion, single ownership, and existing primitives when they
+  preserve the required behavior
+- rejects fixes or abstractions that are harder to reason about than the
+  demonstrated failure
 
 Treat the PR's stated intent as the requirement, not its current runtime state.
 Code that the diff temporarily disables, gates, fail-closes, scrubs, or stubs
@@ -70,7 +54,7 @@ Report only:
 - Critical/high bugs: incorrect logic, broken invariants, data loss or corruption, auth/privacy/security exposure, race/retry/idempotency failures, deploy/runtime breakage, or user-visible behavior that is likely to fail in a reachable production path or anything else you deem a major issue.
 - High-impact edge cases: unusual but realistic states that would cause serious breakage, not incomplete polish or theoretical coverage gaps
 - Complexity collapse opportunities: places where the same required behavior can be achieved with materially less code, fewer concepts, fewer branches, clearer ownership, or reuse of an existing primitive
-- Fix-loop pattern as design signal: read the PR's commit history, not just the current diff. A long run of small fixes clustering on one protocol/symbol/state means the abstraction may be the problem. When that pattern appears, prefer one Complexity Collapse finding that describes the simpler design over many tactical edge-case fixes.
+- Repeated-fix pattern as design signal: when the supplied diff shows several compensating branches or patches clustered on one protocol, symbol, or state owner, prefer one Complexity Collapse finding that describes the simpler design over many tactical edge-case fixes.
 - Invariant violations: places where the PR diff breaks, weakens, or quietly drifts from a rule in `docs/contracts/00-invariants.md` or a contract file it links. Cite the specific invariant (section heading + the exact rule) and the diff site that violates it. Surface an invariant violation even when no Critical/High bug is yet reachable — the rule itself is the contract. If the violation is also a reachable production bug, report it once under Critical/high bugs and note which invariant it breaks rather than duplicating it here.
 
 Do not report:
@@ -113,12 +97,10 @@ Constraints:
   description alone
 - if you see a ChatGPT rate-limit message, do not assume the review failed immediately; a rate-limit dialog can be overlaid on top of an otherwise active chat, so inspect whether the underlying thread still has accessible PR context or a completed response before reporting context failure
 - rank findings by importance: critical/high production bugs first, then complexity collapse opportunities
-- do not report style, naming, or formatting nits unless they hide a real high-impact problem
 
 Final response contract:
 
 - return one concise plain-text review
 - start the final message with a single `Checked:` line naming the review target, using the PR number from the prompt or PR URL when available and the checked commit hash when it is available from the prompt or attachments; examples: `Checked: PR #123 @ abc1234`, `Checked: PR #123`, or `Checked: commit abc1234`
-- if you find nothing worth changing after a thorough pass, say so explicitly in a short summary rather than inventing low-value findings
 - do all repository reading and analysis silently, then reply with exactly ONE message containing your complete ranked findings; never send a preliminary status or acknowledgment message first, because the response capture treats your first settled message as the final review
 - end your final message with the exact line REVIEW_COMPLETE on its own line; the response capture tooling waits for that marker, and do not write that token anywhere else in any message

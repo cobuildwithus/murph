@@ -50,15 +50,16 @@ describe('assistant running cardio skill', () => {
     expect(skill?.triggerHint).toContain('behavior-followthrough')
   })
 
-  it('surfaces the route and skill path in the system prompt', () => {
+  it('surfaces the route in the compact skill router', () => {
     const prompt = buildPrompt()
 
     expect(prompt).toContain(
-      'running-cardio: Use for running, walking, cycling, aerobic-base or Zone 2 work, cardio conditioning',
+      'Training/movement: daily-activity, aerobic-fitness, running-cardio, strength-training, competition-training, mobility-posture, physical-therapy',
     )
     expect(prompt).toContain(
-      '$MURPH_ASSISTANT_SKILLS_ROOT/running-cardio/SKILL.md',
+      'running-cardio general aerobic programming; competition-training a named event or benchmark.',
     )
+    expect(prompt).toContain('$MURPH_ASSISTANT_SKILLS_ROOT/<slug>/SKILL.md')
   })
 
   it('keeps exactly four modes and four orthogonal session types', async () => {

@@ -62,7 +62,6 @@ import {
   resetHostedPreparedAssistantDeliveryEffects,
   resolveHostedAssistantOutboxNextWakeAt,
   type HostedAssistantDeliveryPreparation,
-  type HostedAssistantLinqEgressLatencyTrace,
 } from "./callbacks.ts";
 import {
   buildHostedLinqChannelEnv,
@@ -500,22 +499,6 @@ function readHostedInitialAssistantInputIds(
     ?? [];
 }
 
-function buildHostedAssistantLinqEgressLatencyTrace(
-  input: HostedWorkspaceRuntimeAssistantPhaseInput,
-): HostedAssistantLinqEgressLatencyTrace | null {
-  const latencyTracePort = input.runtime.platform.latencyTracePort ?? null;
-  const assistantInputIds = readHostedInitialAssistantInputIds(input);
-  if (!latencyTracePort || assistantInputIds.length === 0) {
-    return null;
-  }
-
-  return {
-    assistantInputIds,
-    latencyTracePort,
-    runtimeAttemptId: input.request.attemptId,
-  };
-}
-
 export async function runHostedWorkspaceAssistantPhase(
   input: HostedWorkspaceRuntimeAssistantPhaseInput,
 ): Promise<HostedWorkspaceRunnerAssistantPhaseResult> {
@@ -538,7 +521,7 @@ export async function runHostedWorkspaceAssistantPhase(
   });
   const initialLinqDeliveryContexts = resolveHostedInitialLinqDeliveryContexts(input);
   const initialEmailDeliveryContexts = resolveHostedInitialEmailDeliveryContexts(input);
-  const linqEgressLatencyTrace = buildHostedAssistantLinqEgressLatencyTrace(input);
+  const initialAssistantInputIds = readHostedInitialAssistantInputIds(input);
   const recordDeferredUsage = (record: AssistantUsageRecord): Promise<void> => {
     input.recordDeferredUsage?.(record);
     return Promise.resolve();
@@ -552,6 +535,7 @@ export async function runHostedWorkspaceAssistantPhase(
       status: issueDeviceConnectLink ? "available" : "unavailable",
     }).catch(() => undefined);
   }
+  const executionTargetHydrateStartedAt = Date.now();
   const executionContext: AssistantExecutionContext = await hydrateHostedExecutionDefaultTarget(
     {
       hosted: {
@@ -562,7 +546,6 @@ export async function runHostedWorkspaceAssistantPhase(
           effectsPort: input.runtime.platform.effectsPort,
           forwardedEnv: input.runtime.forwardedEnv,
           linqDeliveryContexts: initialLinqDeliveryContexts,
-          linqEgressLatencyTrace,
           platformEnv: input.runtime.platformEnv,
           providerFetch: input.runtime.platform.providerFetch ?? null,
           publicInternetFetch: input.runtime.platform.publicInternetFetch ?? null,
@@ -572,6 +555,12 @@ export async function runHostedWorkspaceAssistantPhase(
         }),
         channelTypingDependencies: createHostedAssistantChannelTypingDependencies({
           forwardedEnv: input.runtime.forwardedEnv,
+          latencyTraceContext: {
+            assistantInputIds: initialAssistantInputIds,
+            latencyTracePort: input.runtime.platform.latencyTracePort,
+            runtimeAttemptId: input.request.attemptId,
+            source: "linq",
+          },
           linqDeliveryContexts: initialLinqDeliveryContexts,
           platformEnv: input.runtime.platformEnv,
           providerFetch: input.runtime.platform.providerFetch ?? null,
@@ -626,6 +615,7 @@ export async function runHostedWorkspaceAssistantPhase(
       runtimeEnv: input.runtimeEnv,
     },
   );
+  const executionTargetHydrateMs = elapsedSince(executionTargetHydrateStartedAt);
   try {
     const hasFreshConversationInput = hasFreshHostedConversationInput(input);
     const pendingAssistantInputWakeAt = await resolveInitialPendingAssistantInputWakeAt({
@@ -633,6 +623,7 @@ export async function runHostedWorkspaceAssistantPhase(
       input,
     });
     const shouldRunPendingAssistantInputFirst = pendingAssistantInputWakeAt !== null;
+    const systemMailboxMaintenanceStartedAt = Date.now();
     const systemMailboxMaintenance = shouldRunPendingAssistantInputFirst
       ? emptyHostedSystemMailboxMaintenanceResult({
         pendingAssistantInputWakeAt,
@@ -643,6 +634,7 @@ export async function runHostedWorkspaceAssistantPhase(
         input,
         wake,
       });
+    const systemMailboxMaintenanceMs = elapsedSince(systemMailboxMaintenanceStartedAt);
     const preManagedAutomationWakeAt = await resolvePreAutomationLaneAssistantWakeAt({
       hasFreshConversationInput,
       input,
@@ -702,6 +694,7 @@ export async function runHostedWorkspaceAssistantPhase(
         deviceSyncMaintenanceRan,
       );
 
+    const memberPreferencesPrePlanningStartedAt = Date.now();
     const memberPreferencesPrePlanning =
       hasFreshConversationInput
         ? await runPrePlanningMemberPreferencesMailboxPhase({
@@ -712,6 +705,9 @@ export async function runHostedWorkspaceAssistantPhase(
             continueAssistantLane: true,
             result: null,
           };
+    const memberPreferencesPrePlanningMs = elapsedSince(
+      memberPreferencesPrePlanningStartedAt,
+    );
     if (memberPreferencesPrePlanning.result) {
       if (!memberPreferencesPrePlanning.continueAssistantLane) {
         return mergeContinuingSystemMailboxResult(memberPreferencesPrePlanning.result);
@@ -779,6 +775,7 @@ export async function runHostedWorkspaceAssistantPhase(
       systemMailboxMaintenance: Awaited<ReturnType<typeof runSystemMailboxMaintenancePhase>>;
     }) => {
       const automationLaneStartedAt = Date.now();
+      const automationBootstrapStartedAt = Date.now();
       const assistantRuntimeState = await prepareHostedAssistantAutomationForWake(
         input.restored.vaultRoot,
         wake,
@@ -788,6 +785,7 @@ export async function runHostedWorkspaceAssistantPhase(
           operatorHomeRoot: input.restored.operatorHomeRoot,
         },
       );
+      const automationBootstrapMs = elapsedSince(automationBootstrapStartedAt);
       const buildBackgroundDynamicContextPrompt =
         assistantRuntimeState?.assistantConfigured === true
           ? buildBackgroundDeviceSyncStatusPrompt({
@@ -813,6 +811,13 @@ export async function runHostedWorkspaceAssistantPhase(
               resolvedConfig: input.runtime.resolvedConfig,
             },
             operatorHomeRoot: input.restored.operatorHomeRoot,
+            preProviderPhase: {
+              automationBootstrapMs,
+              executionTargetHydrateMs,
+              memberPreferencesPrePlanningMs,
+              systemMailboxMaintenanceMs,
+              workspaceAssistantPreAutomationMs: elapsedSince(assistantPhaseStartedAt),
+            },
             runtimeAttemptId: input.request.attemptId,
             runtimeEnv: input.runtimeEnv,
             shouldYieldBackgroundMaintenance:
@@ -4195,7 +4200,6 @@ async function drainHostedPostCheckpointDelivery(input: {
         effectsPort: input.input.platform.effectsPort,
         forwardedEnv: input.input.runtime.forwardedEnv,
         linqDeliveryContexts: input.linqDeliveryContexts ?? null,
-        linqEgressLatencyTrace: buildHostedAssistantLinqEgressLatencyTrace(input.input),
         onBackgroundDeliveryYield: ({ yieldedEffectCount }) => {
           backgroundDeliveryDrainYielded = true;
           backgroundDeliveryDrainYieldedCount = Math.max(
@@ -5359,8 +5363,6 @@ async function writeHostedAssistantPassRuntimeLog(input: {
         automationLogCount: input.assistantMetrics.redactedLogEntries?.length ?? 0,
         assistantAutomationAfterStateElapsedMs:
           input.assistantMetrics.assistantAutomationAfterStateElapsedMs ?? null,
-        assistantAutomationBeforeStateElapsedMs:
-          input.assistantMetrics.assistantAutomationBeforeStateElapsedMs ?? null,
         assistantAutomationElapsedMs: input.assistantMetrics.assistantAutomationElapsedMs ?? null,
         assistantAutomationPassElapsedMs:
           input.assistantMetrics.assistantAutomationPassElapsedMs ?? null,

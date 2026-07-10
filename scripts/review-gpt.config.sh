@@ -137,7 +137,7 @@ package_script="scripts/package-audit-context-full.sh"
 # composer to have no app connector selected before auto-send because review
 # context must come from the guarded ZIP and repomix attachments.
 app_connector="current"
-model="gpt-5.5-pro"
+model="gpt-5.6-sol"
 thinking="current"
 snapshot_attachment_name="repo.snapshot.zip"
 repomix_attachment_format="zip"

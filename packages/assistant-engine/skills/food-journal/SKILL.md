@@ -40,6 +40,32 @@ Ask at most one question, and only when the missing detail materially changes sa
 - For explicit calorie, macro, energy-balance, performance work where nutrition detail materially affects the question, or clinician work where nutrition detail is relevant, use available label facts or clearly marked estimates with provenance, confidence, and the key assumptions.
 - Structured label facts may remain available when useful, but surface only the details relevant to the user's request.
 
+## Resolve exact labels only when they matter
+
+When nutrition, ingredients, allergens, or exact product identity could change
+the answer or saved record, use `vault-cli food search-labels` for one item or
+`vault-cli food search-labels-batch` for several before estimating from memory
+or searching the web. Use `--generic` for ordinary ingredients where a USDA
+generic row is preferable; use normal lookup for branded, packaged, menu, UPC,
+or exact-FDC searches. Increase the default result limit only when the first
+match is ambiguous or missing a likely variant. If the database is unavailable
+or incomplete, use an official label/manufacturer/menu source or a clearly
+marked estimate with assumptions.
+
+For a fridge or pantry photo, enumerate distinct visible products and resolve
+them in one batch. Summarize only relevant nutrition, ingredient, allergen, and
+uncertainty flags. Do not create recurring food records from a scan unless the
+user asks.
+
+When an exact label matters to a meal, preserve serving size and returned label
+nutrition on the meal with label-based provenance. For a user-approved recurring
+or pantry item, save or update the food record with serving, ingredients,
+nutrition, and the label lookup id in provenance so it can be found again.
+
+Treat contaminant observations as exact-product lab context only. Never infer
+them across similar names, brands, ingredients, categories, or product lines;
+absence of an exact test is not proof that a product is clean or safe.
+
 ## Bounded observation runs
 
 Use a bounded observation run when the user wants Murph to notice before changing behavior.
