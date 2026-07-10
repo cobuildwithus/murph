@@ -1,6 +1,9 @@
 import {
   parseHostedRuntimeReconciliationFacts,
 } from "@murphai/hosted-execution/parsers";
+import {
+  createCloudflareHostedControlClient,
+} from "@murphai/cloudflare-hosted-control/client";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   buildHostedAiUsageGateNoticeIdempotencyKey,
@@ -211,7 +214,7 @@ describe("hosted orchestration reconciliation facts", () => {
   });
 
   afterEach(() => {
-    consoleInfoSpy.mockRestore();
+    vi.restoreAllMocks();
     vi.unstubAllEnvs();
     vi.unstubAllGlobals();
     vi.useRealTimers();
@@ -899,7 +902,7 @@ describe("hosted orchestration reconciliation facts", () => {
       targetKind: "telegram_thread",
     });
     expect(mocks.readHostedExecutionControlClientIfConfigured)
-      .toHaveBeenCalledWith(15_000);
+      .toHaveBeenCalledWith(40_000);
     expect(mocks.sendTelegramUsageLimitNotice).toHaveBeenCalledWith(expect.objectContaining({
       request: {
         message: deniedDecision.userNotice.message,
@@ -1362,22 +1365,50 @@ describe("hosted orchestration reconciliation facts", () => {
       buildPendingConversationItem(),
     );
     mocks.decodeHostedMailboxStoredPayload.mockResolvedValue(buildTelegramConversationWake());
-    mocks.sendTelegramUsageLimitNotice.mockImplementationOnce(async (
-      input: { onRequestAttempted?: () => Promise<void> | void },
-    ) => {
-      await input.onRequestAttempted?.();
-      return {
-        failureCode: "ASSISTANT_TELEGRAM_RATE_LIMITED",
-        retryAfterSeconds: 42,
-        retryable: true,
-        status: "failed",
-      };
+    let resolveFetchStarted: (() => void) | undefined;
+    const fetchStarted = new Promise<void>((resolve) => {
+      resolveFetchStarted = resolve;
     });
+    const fetchImplementation = vi.fn<typeof fetch>(async (_input, init) => {
+      resolveFetchStarted?.();
+      return new Promise<Response>((resolve, reject) => {
+        const timer = setTimeout(() => resolve(new Response(JSON.stringify({
+          failureCode: "ASSISTANT_TELEGRAM_RATE_LIMITED",
+          retryAfterSeconds: 42,
+          retryable: true,
+          status: "failed",
+        }), {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+        })), 20_000);
+        init?.signal?.addEventListener("abort", () => {
+          clearTimeout(timer);
+          reject(init.signal?.reason);
+        }, { once: true });
+      });
+    });
+    vi.spyOn(AbortSignal, "timeout").mockImplementation((timeoutMs) => {
+      const controller = new AbortController();
+      setTimeout(() => controller.abort(new DOMException("Timed out", "TimeoutError")), timeoutMs);
+      return controller.signal;
+    });
+    mocks.readHostedExecutionControlClientIfConfigured.mockImplementationOnce((timeoutMs: number) =>
+      createCloudflareHostedControlClient({
+        baseUrl: "https://runner.example.test",
+        fetchImpl: fetchImplementation,
+        getBearerToken: async () => "Bearer test-token",
+        timeoutMs,
+      })
+    );
 
-    const response = await reconciliationRoute.GET(
+    const responsePromise = reconciliationRoute.GET(
       requestForFacts(),
       routeContext(),
     );
+    await fetchStarted;
+    await vi.advanceTimersByTimeAsync(20_000);
+    const response = await responsePromise;
     const facts = parseHostedRuntimeReconciliationFacts(await response.json());
 
     expect(response.status).toBe(200);
@@ -1389,8 +1420,7 @@ describe("hosted orchestration reconciliation facts", () => {
       memberId: MEMBER_ID,
       periodStart: deniedDecision.periodStart,
     });
-    expect(mocks.sendTelegramUsageLimitNotice).toHaveBeenCalledOnce();
-    expect(mocks.fetch).not.toHaveBeenCalled();
+    expect(fetchImplementation).toHaveBeenCalledOnce();
     expect(mocks.markHostedAiUsageLimitNoticeDeliveryRetryableTx).toHaveBeenCalledWith({
       expectedAttemptedAt: new Date(FIXED_NOW),
       failedAt: new Date(FIXED_NOW),
