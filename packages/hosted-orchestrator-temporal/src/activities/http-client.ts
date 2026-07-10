@@ -25,12 +25,7 @@ import { ApplicationFailure } from "@temporalio/common";
 
 const DEFAULT_HOSTED_WEB_CALLBACK_SIGNING_KEY_ID = "v1";
 const DEFAULT_HOSTED_DEVICE_SYNC_RECOVERY_SWEEP_TIMEOUT_MS = 30_000;
-const DEFAULT_HOSTED_RUNTIME_RECONCILIATION_FACTS_TIMEOUT_MS = 10_000;
-const HOSTED_RUNTIME_RECONCILIATION_FACTS_TIMEOUT_ENV =
-  "HOSTED_RUNTIME_RECONCILIATION_FACTS_TIMEOUT_MS";
-const HOSTED_RUNTIME_DEMAND_TIMEOUT_ENV = "HOSTED_RUNTIME_DEMAND_TIMEOUT_MS";
 const MAX_HOSTED_DEVICE_SYNC_RECOVERY_SWEEP_TIMEOUT_MS = 120_000;
-const MAX_HOSTED_RUNTIME_RECONCILIATION_FACTS_TIMEOUT_MS = 30_000;
 const HOSTED_WEB_CALLBACK_SIGNING_IMPORT_ALGORITHM: EcKeyImportParams = {
   name: "ECDSA",
   namedCurve: "P-256",
@@ -48,16 +43,6 @@ const RESERVED_UNSIGNED_ORCHESTRATOR_HEADERS = new Set([
 ].map((header) => header.toLowerCase()));
 
 type EnvSource = Readonly<Record<string, string | undefined>>;
-
-export interface HostedOrchestratorTemporalActivityEnvironment {
-  cloudflareHostedControlBaseUrl: string;
-  cloudflareHostedControlSigning: HostedWebCallbackSigningEnvironment;
-  deviceSyncRecoverySweepTimeoutMs: number;
-  ensureRuntimeProcessingHttpTimeoutMs: number;
-  hostedWebBaseUrl: string;
-  hostedWebCallbackSigning: HostedWebCallbackSigningEnvironment;
-  readRuntimeReconciliationFactsTimeoutMs: number;
-}
 
 export interface HostedWebCallbackSigningEnvironment {
   keyId: string;
@@ -89,40 +74,9 @@ export interface HostedTemporalActivityObservation {
   userId: string;
 }
 
-export function readHostedOrchestratorTemporalActivityEnvironment(
-  source: EnvSource = process.env,
-): HostedOrchestratorTemporalActivityEnvironment {
-  const ensureRuntimeProcessingTimeouts =
-    readHostedRuntimeEnsureProcessingTimeouts(source);
-
-  return {
-    cloudflareHostedControlBaseUrl: requireControlBaseUrl(
-      source.CLOUDFLARE_HOSTED_CONTROL_BASE_URL,
-      "CLOUDFLARE_HOSTED_CONTROL_BASE_URL",
-    ),
-    cloudflareHostedControlSigning: readHostedWebCallbackSigningEnvironment(source),
-    deviceSyncRecoverySweepTimeoutMs:
-      readHostedDeviceSyncRecoverySweepTimeoutMs(source),
-    ensureRuntimeProcessingHttpTimeoutMs:
-      ensureRuntimeProcessingTimeouts.ensureRuntimeProcessingHttpTimeoutMs,
-    hostedWebBaseUrl: requireWebOriginBaseUrl(
-      source.HOSTED_WEB_BASE_URL,
-      "HOSTED_WEB_BASE_URL",
-    ),
-    hostedWebCallbackSigning: readHostedWebCallbackSigningEnvironment(source),
-    readRuntimeReconciliationFactsTimeoutMs:
-      readRuntimeReconciliationFactsTimeoutMs(source),
-  };
-}
-
 export function readHostedOrchestratorTemporalCloudflareEnvironment(
   source: EnvSource = process.env,
-): Pick<
-  HostedOrchestratorTemporalActivityEnvironment,
-  | "cloudflareHostedControlBaseUrl"
-  | "cloudflareHostedControlSigning"
-  | "ensureRuntimeProcessingHttpTimeoutMs"
-> {
+) {
   const ensureRuntimeProcessingTimeouts =
     readHostedRuntimeEnsureProcessingTimeouts(source);
 
@@ -139,62 +93,16 @@ export function readHostedOrchestratorTemporalCloudflareEnvironment(
 
 export function readHostedOrchestratorTemporalWebEnvironment(
   source: EnvSource = process.env,
-): Pick<
-  HostedOrchestratorTemporalActivityEnvironment,
-  | "deviceSyncRecoverySweepTimeoutMs"
-  | "hostedWebBaseUrl"
-  | "hostedWebCallbackSigning"
-  | "readRuntimeReconciliationFactsTimeoutMs"
-> {
+) {
   const hostedWebBaseUrl = requireWebOriginBaseUrl(
     source.HOSTED_WEB_BASE_URL,
     "HOSTED_WEB_BASE_URL",
   );
 
   return {
-    deviceSyncRecoverySweepTimeoutMs:
-      readHostedDeviceSyncRecoverySweepTimeoutMs(source),
     hostedWebBaseUrl,
     hostedWebCallbackSigning: readHostedWebCallbackSigningEnvironment(source),
-    readRuntimeReconciliationFactsTimeoutMs:
-      readRuntimeReconciliationFactsTimeoutMs(source),
   };
-}
-
-function readRuntimeReconciliationFactsTimeoutMs(source: EnvSource): number {
-  const entry = readRuntimeReconciliationFactsTimeoutEntry(source);
-  return parseBoundedPositiveInteger(
-    entry?.value ?? null,
-    DEFAULT_HOSTED_RUNTIME_RECONCILIATION_FACTS_TIMEOUT_MS,
-    MAX_HOSTED_RUNTIME_RECONCILIATION_FACTS_TIMEOUT_MS,
-    entry?.key ?? HOSTED_RUNTIME_RECONCILIATION_FACTS_TIMEOUT_ENV,
-  );
-}
-
-function readRuntimeReconciliationFactsTimeoutEntry(
-  source: EnvSource,
-): { key: string; value: string } | null {
-  const primary = normalizeHostedExecutionString(
-    source[HOSTED_RUNTIME_RECONCILIATION_FACTS_TIMEOUT_ENV],
-  );
-  if (primary !== null) {
-    return {
-      key: HOSTED_RUNTIME_RECONCILIATION_FACTS_TIMEOUT_ENV,
-      value: primary,
-    };
-  }
-
-  const fallback = normalizeHostedExecutionString(
-    source[HOSTED_RUNTIME_DEMAND_TIMEOUT_ENV],
-  );
-  if (fallback !== null) {
-    return {
-      key: HOSTED_RUNTIME_DEMAND_TIMEOUT_ENV,
-      value: fallback,
-    };
-  }
-
-  return null;
 }
 
 export async function requestHostedOrchestratorJson<TResponse>(
@@ -543,8 +451,8 @@ function readHostedWebCallbackSigningEnvironment(
   };
 }
 
-function readHostedDeviceSyncRecoverySweepTimeoutMs(
-  source: EnvSource,
+export function readHostedDeviceSyncRecoverySweepTimeoutMs(
+  source: EnvSource = process.env,
 ): number {
   return parseBoundedPositiveInteger(
     normalizeHostedExecutionString(
