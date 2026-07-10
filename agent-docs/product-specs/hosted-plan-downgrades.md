@@ -1,6 +1,6 @@
 # Hosted Plan Downgrades
 
-Last verified: 2026-05-13
+Last verified: 2026-07-10
 
 ## Goal
 
@@ -27,6 +27,63 @@ scheduled switch:
 
 The app-owned Edge-to-Pulse path is intentionally narrow; arbitrary plan
 transitions still stay out of scope.
+
+## Edge Assistant Model Choice
+
+The current paid Edge plan also unlocks an explicit assistant-model choice in
+Settings:
+
+- Terra remains the default for every member, including Edge members who do
+  nothing.
+- Only an active, unsuspended member whose own current billing state is paid
+  Edge can opt into Sol. Sponsored Family access, Pulse, trials, and synthetic
+  thread-container members do not qualify.
+- Postgres stores only the nullable Sol intent. Terra is the normal absence of
+  an override; members who do not opt in use the platform-configured model,
+  normally Terra.
+- A scheduled switch to Pulse keeps Sol available until Stripe applies the
+  Pulse phase and reconciliation changes the current billing state. After that
+  boundary, Terra is effective while the stored Sol intent remains available
+  for a later Edge reactivation.
+- The existing signed workspace read projects an eligible Sol intent to the
+  runner at the next hosted invocation boundary. An already-active invocation
+  can retain its model snapshot through its bounded 180-second idle window.
+- Changing the preference does not create a mailbox item, wake, queue, or a
+  second copy in the vault or hosted workspace snapshot.
+
+### Deployment And Compatibility
+
+Deploy this additive path in the following order:
+
+1. Apply the nullable Postgres migration.
+2. Deploy the Cloudflare consumer.
+3. Deploy the web workspace producer and Settings control.
+
+An old web response omits the optional override, so the new consumer preserves
+the fleet model. An old Cloudflare consumer ignores the new response field, so
+a web-first deploy is compatible but a saved Sol choice remains temporarily
+ineffective.
+
+The feature changes only the Worker-side selection of the existing forwarded
+`HOSTED_ASSISTANT_MODEL`; it does not change the runner invocation shape or
+runner-side model-config parser. Warm pre-feature runner bundles from the
+current Terra fleet therefore consume the same environment and already accept
+the Sol slug.
+The feature is safe under gradual container rollout and adds no requirement for
+`container_rollout=immediate`. Production deploys must still honor the existing
+global rollout preflight in `apps/cloudflare/DEPLOY.md`, which currently requires
+immediate rollout for the GPT-5.6 fleet and selector-scope compatibility.
+
+Feature rollback may restore either the pre-feature web producer or the
+pre-feature Cloudflare consumer; the additive nullable column may remain. Old
+web code emits no model field, and old Cloudflare code ignores one, so either
+rollback independently returns every member to the platform-configured model,
+normally Terra. This feature has no model-specific fallback or rollback path.
+
+Focused contract coverage proves old/no-field compatibility, the saved Sol
+choice, and the Terra default. The normal deploy keeps its managed-container
+fingerprint and live Terra smoke. An optional post-deploy canary may select Sol
+for one eligible Edge member and confirm the next new invocation reports Sol.
 
 ## First-Version Scope
 

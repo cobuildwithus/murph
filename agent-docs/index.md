@@ -1,6 +1,6 @@
 # Murph Agent Docs Index
 
-Last verified: 2026-07-09
+Last verified: 2026-07-10
 
 ## Purpose
 
@@ -39,11 +39,11 @@ It intentionally lists live architecture, product, verification, and package-bou
 | `agent-docs/compliance/ftc-hbnr-notice-templates.md` | Counsel-reviewed template starting points for consumer, FTC, media, vendor, and internal incident notices. | Health-data notice workflow | High | 2026-04-29 |
 | `agent-docs/compliance/vendor-health-data-addendum.md` | Vendor clause library and procurement checklist for providers that process identifiable health data or health-context metadata. | Vendor health-data contracting | High | 2026-04-29 |
 | `agent-docs/compliance/health-data-tracking-and-ads-rule.md` | Hard rule and review checklist for analytics, telemetry, ad pixels, attribution, and marketing tools on health-data surfaces. | Health-data tracking policy | High | 2026-04-29 |
-| `agent-docs/product-specs/index.md` | Index for product-spec docs. | Product-spec inventory | High | 2026-05-13 |
+| `agent-docs/product-specs/index.md` | Index for product-spec docs. | Product-spec inventory | High | 2026-07-10 |
 | `agent-docs/product-specs/repo.md` | Canonical repository posture and success criteria. | Current repo product spec | High | 2026-04-06 |
 | `agent-docs/product-specs/pulse-trial-checkout-offer.md` | Implemented Pulse Trial checkout-offer architecture over existing hosted billing and hosted AI usage allowance primitives. | Hosted billing/product spec | High | 2026-05-05 |
 | `agent-docs/product-specs/pulse-trial-start-paid-pulse.md` | Implemented exhausted Pulse Trial conversion to paid Pulse by ending the Stripe trial and billing the existing Pulse subscription. | Hosted billing/product spec | High | 2026-05-13 |
-| `agent-docs/product-specs/hosted-plan-downgrades.md` | Stripe Subscription Schedule plan for Edge-to-Pulse switches at renewal, with hosted billing read-model and settings UX expectations. | Hosted billing/product spec | High | 2026-05-06 |
+| `agent-docs/product-specs/hosted-plan-downgrades.md` | Edge-to-Pulse renewal switches plus the billing-gated Edge assistant-model choice, downgrade behavior, and deployment compatibility contract. | Hosted billing/product spec | High | 2026-07-10 |
 | `agent-docs/product-specs/hosted-family-plan.md` | Hosted Family plan MVP for fixed four-person sponsored access, private member accounts, chat-first invites, and privacy boundaries. | Hosted billing/product spec | High | 2026-06-18 |
 | `agent-docs/product-specs/health-commons.md` | Health Commons product boundary for wiki-like pages, build-time catalog generation, scoped runtime artifacts, future aggregate outcome summaries, revisions, and artifact manifests. | Health Commons behavior | High | 2026-06-05 |
 | `agent-docs/product-specs/protocol-summary-copy.md` | Source-of-truth copy rules for Health Commons protocol `summary:` fields shown on `/experiments` cards. | Health Commons protocol card copy | High | 2026-04-30 |
@@ -80,7 +80,7 @@ It intentionally lists live architecture, product, verification, and package-bou
 | `agent-docs/operations/completion-workflow.md` | Required post-implementation flow, including non-duplicative scoped verification; specialist audits run on GPT-5.6 Codex workers, while the PR-lane ReviewGPT loop replaces only the default local deep-review/final gate. | Completion workflow | High | 2026-07-09 |
 | `agent-docs/operations/imessage-deliverability.md` | iMessage/SMS deliverability guidance for assistant prompts, outbound copy, reminders, notifications, line health, pacing, links, and cold-contact behavior. | Phone-number messaging policy | High | 2026-06-25 |
 | `agent-docs/operations/hosted-local-worktree-dev.md` | Hosted-local worktree dev workflow and helper spec for running `pnpm dev` from secondary worktrees without colliding with the main checkout's ports, database, local hosted crypto state, Wrangler state, Next dist dir, optional MinIO data, and webhook tunnel setup. | Local hosted runtime workflow | Medium | 2026-06-22 |
-| `agent-docs/operations/pr-reviewgpt-loop.md` | Required PR final cross-cutting ReviewGPT gate on guarded pushed-head artifacts; it replaces local deep-review, not specialist prompt/security/frontend/coverage passes, and stops at zero accepted findings or 10 rounds. | PR ReviewGPT loop | Medium | 2026-07-09 |
+| `agent-docs/operations/pr-reviewgpt-loop.md` | Required PR final cross-cutting ReviewGPT gate on guarded pushed-head artifacts; it replaces local deep-review, not specialist prompt/security/frontend/coverage passes, stops at zero accepted findings or 10 rounds, keeps round Markdown artifacts uncommitted, and permits optional PR comments summarizing fixes. | PR ReviewGPT loop | Medium | 2026-07-10 |
 | `agent-docs/operations/device-sync-ingestion-invariants.md` | The five device-sync push/pull ingestion invariants (pull floor, push-early/pull-eventually, degrade-to-fetch-never-silence, idempotent merge, louder-never-quieter) that any webhook/resource-job/reconcile change must preserve. | Device-sync ingestion contract | High | 2026-06-10 |
 | `agent-docs/PLANS.md` | Execution-plan lifecycle and storage rules. | Plan workflow | Medium | 2026-03-31 |
 | `agent-docs/generated/README.md` | Meaning and expectations for generated doc artifacts. | Generated-doc conventions | Low | 2026-04-02 |
