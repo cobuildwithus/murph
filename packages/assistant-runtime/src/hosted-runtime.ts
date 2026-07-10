@@ -1154,15 +1154,16 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       stage: "mailbox.import.initial",
       status: "start",
     });
-    const initialMailboxImportResult = await raceHostedRuntimeCancellation(
-      importHostedInitialMailboxForWorkspaceRunner({
-        checkpointRequestBuilder,
-        importItemContext: initialMailboxImportContext,
-        runnerInput: baseRunnerInput,
-        requestId,
-      }),
-      runtimeAbortController.signal,
-    );
+    // Mailbox import can mutate the restored vault through the inbox sidecar.
+    // Keep the container's single-runner ownership until that work settles so
+    // an aborted invocation cannot write into a newer restore at the same path.
+    const initialMailboxImportResult = await importHostedInitialMailboxForWorkspaceRunner({
+      checkpointRequestBuilder,
+      importItemContext: initialMailboxImportContext,
+      runnerInput: baseRunnerInput,
+      requestId,
+    });
+    assertRuntimeNotAborted();
     const initialMailboxImport = initialMailboxImportResult.result;
     const mailboxImportDoneAt = new Date().toISOString();
     emitPhaseLog({
@@ -1340,15 +1341,14 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       status: "start",
     });
     if (!inboxReady) {
-      await raceHostedRuntimeCancellation(
-        ensureHostedInboxSidecarReady({
-          bestEffort: true,
-          rebuild: inboxRebuild,
-          requestId,
-          vaultRoot: restored.vaultRoot,
-        }),
-        runtimeAbortController.signal,
-      );
+      // A rebuild is not cancellable once it starts replacing the shared
+      // projection. Let it settle before releasing the runner slot.
+      await ensureHostedInboxSidecarReady({
+        bestEffort: true,
+        rebuild: inboxRebuild,
+        requestId,
+        vaultRoot: restored.vaultRoot,
+      });
     }
     emitPhaseLog({
       details: {

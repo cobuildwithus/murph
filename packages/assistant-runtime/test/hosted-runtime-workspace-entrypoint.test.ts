@@ -381,6 +381,142 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
+  test("keeps runner ownership until an aborted initial mailbox import settles", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const hostAbortController = new AbortController();
+    const hostAbortReason = new Error("host request aborted during mailbox import");
+    const importStarted = createDeferred<void>();
+    const importRelease = createDeferred<void>();
+    let settled = false;
+    let resultPromise: ReturnType<typeof runHostedWorkspaceRuntimeJobInProcess> | null = null;
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      resultPromise = runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_host_abort_during_mailbox_import",
+            leaseGeneration: "7",
+            userId: TEST_USER_ID,
+            workspaceVersion: "0",
+          },
+        }),
+        {
+          async createCheckpointSnapshot() {
+            throw new Error("Aborted mailbox import should not checkpoint.");
+          },
+          async importItem() {
+            importStarted.resolve();
+            await importRelease.promise;
+            return { status: "imported" };
+          },
+          platform: createPlatform({
+            mailboxPort: createMailboxPort({
+              events: [],
+              items: [createMailboxItem({ laneSeq: "1" })],
+            }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests: [],
+              events: [],
+              workspace: createWorkspaceState({ version: "0" }),
+            }),
+          }),
+          signal: hostAbortController.signal,
+          vaultRoot,
+        },
+      );
+      void resultPromise.then(
+        () => {
+          settled = true;
+        },
+        () => {
+          settled = true;
+        },
+      );
+
+      await importStarted.promise;
+      hostAbortController.abort(hostAbortReason);
+      await new Promise((resolve) => setTimeout(resolve, 25));
+      assert.equal(settled, false);
+
+      importRelease.resolve();
+      await assert.rejects(resultPromise, (error) => error === hostAbortReason);
+      assert.equal(settled, true);
+    } finally {
+      importRelease.resolve();
+      await resultPromise?.catch(() => undefined);
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test("keeps runner ownership until an aborted inbox rebuild settles", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const hostAbortController = new AbortController();
+    const hostAbortReason = new Error("host request aborted during inbox rebuild");
+    const rebuildStarted = createDeferred<void>();
+    const rebuildRelease = createDeferred<boolean>();
+    let settled = false;
+    let resultPromise: ReturnType<typeof runHostedWorkspaceRuntimeJobInProcess> | null = null;
+
+    mocks.ensureHostedInboxSidecarReady.mockImplementationOnce(async () => {
+      rebuildStarted.resolve();
+      return await rebuildRelease.promise;
+    });
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      resultPromise = runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_host_abort_during_inbox_rebuild",
+            leaseGeneration: "7",
+            userId: TEST_USER_ID,
+            workspaceVersion: "0",
+          },
+        }),
+        {
+          async createCheckpointSnapshot() {
+            throw new Error("Aborted inbox rebuild should not checkpoint.");
+          },
+          async importItem() {
+            throw new Error("Inbox rebuild abort test should not import mailbox items.");
+          },
+          platform: createPlatform({
+            mailboxPort: createMailboxPort({ events: [], items: [] }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests: [],
+              events: [],
+              workspace: createWorkspaceState({ version: "0" }),
+            }),
+          }),
+          signal: hostAbortController.signal,
+          vaultRoot,
+        },
+      );
+      void resultPromise.then(
+        () => {
+          settled = true;
+        },
+        () => {
+          settled = true;
+        },
+      );
+
+      await rebuildStarted.promise;
+      hostAbortController.abort(hostAbortReason);
+      await new Promise((resolve) => setTimeout(resolve, 25));
+      assert.equal(settled, false);
+
+      rebuildRelease.resolve(true);
+      await assert.rejects(resultPromise, (error) => error === hostAbortReason);
+      assert.equal(settled, true);
+    } finally {
+      rebuildRelease.resolve(true);
+      await resultPromise?.catch(() => undefined);
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
   test("emits metadata-only phase boundary logs for runtime startup", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const previousStdIoLogSetting = process.env.MURPH_HOSTED_EXECUTION_STDIO_LOGS;
