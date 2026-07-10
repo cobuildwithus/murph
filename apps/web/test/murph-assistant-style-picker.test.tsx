@@ -150,6 +150,49 @@ test("MurphAssistantStylePicker does not persist the display-only voice filter",
   }
 });
 
+test("MurphAssistantStylePicker preselects Classic Murph and persists the upbeat id when no voice is saved", async () => {
+  const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => ({
+    ok: true,
+    json: async () => ({
+      assistantTone: null,
+      assistantVoice: "upbeat",
+    }),
+    init,
+  }));
+  vi.stubGlobal("fetch", fetchMock);
+
+  const { MurphAssistantStylePicker } = await import(
+    "@/src/components/murph/murph-assistant-style-picker"
+  );
+  const rendered = await renderClientComponent(
+    createElement(MurphAssistantStylePicker, {
+      initialStep: "voice",
+      onOpenChange: () => {},
+      open: true,
+    }),
+    {
+      requireButton: false,
+    },
+  );
+
+  try {
+    assert.equal(
+      findRadioInput(rendered.container, "Classic Murph")?.checked,
+      true,
+    );
+
+    await clickButton(rendered, "Continue");
+
+    assert.equal(fetchMock.mock.calls.length, 1);
+    const init = fetchMock.mock.calls[0]?.[1];
+    assert.deepEqual(JSON.parse(String(init?.body)), {
+      voice: "upbeat",
+    });
+  } finally {
+    await rendered.cleanup();
+  }
+});
+
 test("MurphAssistantStylePicker shows each tone as a sample message rather than a description", async () => {
   const { MurphAssistantStylePicker } = await import(
     "@/src/components/murph/murph-assistant-style-picker"
@@ -202,7 +245,7 @@ test("MurphAssistantStylePicker selects a voice when the row outside the label i
     });
 
     assert.equal(findRadioInput(rendered.container, "Grandpa")?.checked, true);
-    assert.equal(findRadioInput(rendered.container, "Classic Murph")?.checked, false);
+    assert.equal(findRadioInput(rendered.container, "New York")?.checked, false);
   } finally {
     await rendered.cleanup();
   }
@@ -229,13 +272,16 @@ test("MurphAssistantStylePicker renders the voice chooser in the mobile drawer",
   try {
     assert.ok(rendered.container.querySelector("[data-drawer-open='true']"));
     assert.equal(rendered.container.querySelector("[data-dialog-open='true']"), null);
-    assert.ok(findRadioInput(rendered.container, "Classic Murph"));
-    assert.ok(findRadioInput(rendered.container, "Warm and friendly"));
+    const savedClassicVoice = findRadioInput(rendered.container, "New York");
+    assert.equal(savedClassicVoice?.checked, true);
+    const savedClassicVoiceRow = savedClassicVoice?.closest("div");
+    assert.ok(savedClassicVoiceRow, "Missing saved classic voice row");
     assert.ok(
-      rendered.container.querySelector(
+      savedClassicVoiceRow.querySelector(
         "[data-voice-preview='/audio/murph-voices/classic.mp3']",
       ),
     );
+    assert.ok(findRadioInput(rendered.container, "Warm and friendly"));
     assert.match(rendered.container.textContent ?? "", /22 voices/u);
     assert.ok(findButton(rendered.container, "Skip"));
     assert.ok(findButton(rendered.container, "Continue"));

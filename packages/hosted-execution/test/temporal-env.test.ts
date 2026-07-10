@@ -5,8 +5,10 @@ import {
 } from "../src/orchestration-control.ts";
 import {
   HOSTED_RUNTIME_PROCESSING_COMMAND_RESPONSE_MARGIN_MS,
-  HOSTED_TEMPORAL_ENSURE_PROCESSING_REPORTING_SLACK_MS,
+  HOSTED_RUNTIME_RECONCILIATION_FACTS_HTTP_TIMEOUT_MS,
+  HOSTED_RUNTIME_RECONCILIATION_FACTS_START_TO_CLOSE_TIMEOUT_MS,
   HOSTED_RUNTIME_TEMPORAL_DEFAULT_ADDRESS,
+  HOSTED_TEMPORAL_ENSURE_PROCESSING_REPORTING_SLACK_MS,
   readHostedRuntimeEnsureProcessingTimeouts,
   readHostedRuntimeTemporalEnvironment,
   readHostedRuntimeTemporalWorkflowOptions,
@@ -158,37 +160,24 @@ describe("readHostedRuntimeTemporalWorkflowOptions", () => {
     ).toBe(HOSTED_TEMPORAL_ENSURE_PROCESSING_REPORTING_SLACK_MS);
   });
 
-  it("reads shared workflow timing options", () => {
+  it("keeps reconciliation HTTP below its fixed Activity deadline", () => {
+    expect(HOSTED_RUNTIME_RECONCILIATION_FACTS_HTTP_TIMEOUT_MS).toBe(55_000);
+    expect(HOSTED_RUNTIME_RECONCILIATION_FACTS_START_TO_CLOSE_TIMEOUT_MS).toBe(
+      60_000,
+    );
     expect(readHostedRuntimeTemporalWorkflowOptions({
+      HOSTED_RUNTIME_DEMAND_TIMEOUT_MS: "removed",
       HOSTED_RUNTIME_PROCESSING_TIMEOUT_MS: "12000",
-      HOSTED_RUNTIME_RECONCILIATION_FACTS_TIMEOUT_MS: "15000",
-      HOSTED_TEMPORAL_TASK_QUEUE: "hosted-runtime-custom",
+      HOSTED_RUNTIME_RECONCILIATION_FACTS_TIMEOUT_MS: "removed",
     })).toEqual({
       ensureRuntimeProcessingStartToCloseTimeoutMs: 17_000,
-      readRuntimeReconciliationFactsStartToCloseTimeoutMs: 15_000,
+      readRuntimeReconciliationFactsStartToCloseTimeoutMs: 60_000,
     });
-  });
-
-  it("keeps the old demand timeout env as a reconciliation-facts fallback", () => {
-    expect(readHostedRuntimeTemporalWorkflowOptions({
-      HOSTED_RUNTIME_DEMAND_TIMEOUT_MS: "14000",
-    })).toMatchObject({
-      readRuntimeReconciliationFactsStartToCloseTimeoutMs: 14_000,
-    });
-
-    expect(readHostedRuntimeTemporalWorkflowOptions({
-      HOSTED_RUNTIME_DEMAND_TIMEOUT_MS: "14000",
-      HOSTED_RUNTIME_RECONCILIATION_FACTS_TIMEOUT_MS: "15000",
-    })).toMatchObject({
-      readRuntimeReconciliationFactsStartToCloseTimeoutMs: 15_000,
-    });
-  });
-
-  it("bounds runtime reconciliation facts timeout", () => {
-    expect(() => readHostedRuntimeTemporalWorkflowOptions({
-      HOSTED_RUNTIME_RECONCILIATION_FACTS_TIMEOUT_MS: "30001",
-    })).toThrow(
-      "HOSTED_RUNTIME_RECONCILIATION_FACTS_TIMEOUT_MS must be less than or equal to 30000.",
+    expect(
+      HOSTED_RUNTIME_RECONCILIATION_FACTS_START_TO_CLOSE_TIMEOUT_MS
+      - HOSTED_RUNTIME_RECONCILIATION_FACTS_HTTP_TIMEOUT_MS,
+    ).toBe(
+      HOSTED_TEMPORAL_ENSURE_PROCESSING_REPORTING_SLACK_MS,
     );
   });
 

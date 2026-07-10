@@ -48,7 +48,6 @@ const mocks = vi.hoisted(() => {
 
 const defaultWorkflowOptions = {
   ensureRuntimeProcessingStartToCloseTimeoutMs: 15_000,
-  readRuntimeReconciliationFactsStartToCloseTimeoutMs: 10_000,
 };
 
 vi.mock("@/src/lib/hosted-mailbox/store", () => ({
@@ -680,7 +679,6 @@ describe("hosted runtime Temporal signaling", () => {
         args: [{
           options: {
             ensureRuntimeProcessingStartToCloseTimeoutMs: 17_000,
-            readRuntimeReconciliationFactsStartToCloseTimeoutMs: 10_000,
           },
           userId: "member_123",
         }],

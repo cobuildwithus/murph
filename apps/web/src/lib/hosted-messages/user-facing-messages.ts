@@ -9,6 +9,7 @@ const USER_FACING_MESSAGE_TEMPLATE_KEYS = [
   "linq.ai_usage.trial_conversion_pending",
   "linq.ai_usage.trial_limit_reached",
   "linq.ai_usage.edge_limit_reached",
+  "linq.ai_usage.family_limit_reached",
   "linq.ai_usage.pulse_upgrade_edge",
 ] as const
 
@@ -34,6 +35,9 @@ export interface UserFacingMessageContextByKey {
     homeUrl: string
   }
   "linq.ai_usage.edge_limit_reached": {
+    homeUrl: string
+  }
+  "linq.ai_usage.family_limit_reached": {
     homeUrl: string
   }
   "linq.ai_usage.pulse_upgrade_edge": {
@@ -478,6 +482,48 @@ Sound good?`,
     `Spent this month's allowance. I'm back at reset:
 {homeUrl}`,
     `End of this month for me. Reset is when I return:
+{homeUrl}`,
+  ],
+  "linq.ai_usage.family_limit_reached": [
+    `Hit the family plan's monthly allowance. I'll resume when that resets:
+{homeUrl}`,
+    `The family usage allowance is spent for the month. Replies pick back up at reset:
+{homeUrl}`,
+    `Monthly family allowance reached. I come back when the plan resets:
+{homeUrl}`,
+    `That's the family plan's AI allowance for this period. Back at reset:
+{homeUrl}`,
+    `Out of family-plan usage for the month. I'll resume after the reset:
+{homeUrl}`,
+    `Reached the family usage cap. Replies return when the allowance refreshes:
+{homeUrl}`,
+    `The shared allowance is used this month. I'll be back after reset:
+{homeUrl}`,
+    `Family plan usage is maxed for now. Reset brings replies back:
+{homeUrl}`,
+    `This month's family allowance is done. Account details are here:
+{homeUrl}`,
+    `Heads up, the family plan hit its monthly usage cap. I resume at reset:
+{homeUrl}`,
+    `The family allowance is tapped out for the month. I'll pick up after reset:
+{homeUrl}`,
+    `Shared usage is spent this period. Replies restart when it resets:
+{homeUrl}`,
+    `Family usage limit reached. I'll be ready again at the next reset:
+{homeUrl}`,
+    `The family plan is through this month's allowance. Back when it refreshes:
+{homeUrl}`,
+    `Used up the family plan's AI for this period. I return after reset:
+{homeUrl}`,
+    `No more family-plan usage this month. The reset turns replies back on:
+{homeUrl}`,
+    `This period's family allowance is used. I'll resume when it renews:
+{homeUrl}`,
+    `Family cap reached for the month. Check account details here:
+{homeUrl}`,
+    `The shared monthly cap is hit. I'll pick this up after reset:
+{homeUrl}`,
+    `Family usage is done for this month. Reset is when I come back:
 {homeUrl}`,
   ],
   "linq.ai_usage.pulse_upgrade_edge": [
