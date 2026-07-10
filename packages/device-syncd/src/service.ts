@@ -86,6 +86,8 @@ export function resolveDeviceSyncStoreNextWakeAt(input: {
 const DEVICE_SYNC_VALIDATION_ISSUE_LIMIT = 10;
 const DEVICE_SYNC_VALIDATION_CAUSE_DEPTH_LIMIT = 4;
 const DEVICE_SYNC_JOB_YIELD_POLL_MS = 100;
+const DEVICE_SYNC_CONNECTION_MUTATION_MAX_PENDING = 1;
+const DEVICE_SYNC_CONNECTION_MUTATION_WAIT_TIMEOUT_MS = 15_000;
 const DEFAULT_PROVIDER_JOB_BATCH_MAX_JOBS = 50;
 const DEFAULT_PROVIDER_JOB_BATCH_MAX_ESTIMATED_BYTES = 2 * 1024 * 1024;
 const DEFAULT_PROVIDER_JOB_BATCH_CANDIDATE_SCAN_LIMIT = 200;
@@ -222,7 +224,10 @@ class DeviceSyncServiceController {
   private workerTimer: NodeJS.Timeout | null = null;
   private schedulerTimer: NodeJS.Timeout | null = null;
   private readonly jobFailureDiagnostics: DeviceSyncJobFailureDiagnostic[] = [];
-  private readonly connectionMutationLocks = new Map<string, Promise<void>>();
+  private readonly connectionMutationStates = new Map<string, {
+    activeAndWaiting: number;
+    tail: Promise<void>;
+  }>();
 
   constructor(input: CreateDeviceSyncServiceInput) {
     this.vaultRoot = input.config.vaultRoot;
@@ -331,26 +336,59 @@ class DeviceSyncServiceController {
     provider: string,
     operation: () => Promise<Result>,
   ): Promise<Result> {
-    const previous = this.connectionMutationLocks.get(provider) ?? Promise.resolve();
+    const existingState = this.connectionMutationStates.get(provider);
+    if (
+      existingState
+      && existingState.activeAndWaiting >= DEVICE_SYNC_CONNECTION_MUTATION_MAX_PENDING + 1
+    ) {
+      throw connectionMutationBusyError();
+    }
+
+    const state = existingState ?? {
+      activeAndWaiting: 0,
+      tail: Promise.resolve(),
+    };
+    const previous = state.tail;
     let releaseCurrent!: () => void;
     const current = new Promise<void>((resolve) => {
       releaseCurrent = resolve;
     });
-    const tail = previous.then(() => current, () => current);
-    this.connectionMutationLocks.set(provider, tail);
+    const tail = previous.then(() => current);
+    state.activeAndWaiting += 1;
+    state.tail = tail;
+    this.connectionMutationStates.set(provider, state);
+    let waitTimeout: ReturnType<typeof setTimeout> | null = null;
 
     try {
-      try {
-        await previous;
-      } catch {
-        // Previous waiters must not poison the provider queue.
+      await Promise.race([
+        previous,
+        new Promise<never>((_resolve, reject) => {
+          waitTimeout = setTimeout(
+            () => reject(connectionMutationBusyError()),
+            DEVICE_SYNC_CONNECTION_MUTATION_WAIT_TIMEOUT_MS,
+          );
+        }),
+      ]);
+      if (waitTimeout) {
+        clearTimeout(waitTimeout);
+        waitTimeout = null;
       }
       return await operation();
     } finally {
-      releaseCurrent();
-      if (this.connectionMutationLocks.get(provider) === tail) {
-        this.connectionMutationLocks.delete(provider);
+      if (waitTimeout) {
+        clearTimeout(waitTimeout);
       }
+      releaseCurrent();
+      state.activeAndWaiting -= 1;
+      void tail.then(() => {
+        if (
+          state.activeAndWaiting === 0
+          && state.tail === tail
+          && this.connectionMutationStates.get(provider) === state
+        ) {
+          this.connectionMutationStates.delete(provider);
+        }
+      });
     }
   }
 
@@ -501,23 +539,12 @@ class DeviceSyncServiceController {
     const now = this.nowIso();
 
     if (account.status === "disconnected") {
-      this.store.markPendingJobsDeadForAccountIfCurrent({
+      const currentAccount = this.store.disconnectAccountAndMarkPendingJobsDead({
         accountId: account.id,
         code: "ACCOUNT_DISCONNECTED",
-        expectedLocalConnectionRevision: account.localConnectionRevision,
-        expectedStatus: "disconnected",
         message: "Device account disconnected.",
         now,
-      });
-      const currentAccount = this.store.getAccountById(account.id);
-
-      if (
-        !currentAccount
-        || currentAccount.status !== "disconnected"
-        || currentAccount.localConnectionRevision !== account.localConnectionRevision
-      ) {
-        throw connectionChangedDuringDisconnectError();
-      }
+      }) ?? this.requireStoredAccount(account.id);
 
       return {
         account: this.toPublicAccount(currentAccount),
@@ -536,18 +563,12 @@ class DeviceSyncServiceController {
       });
     }
 
-    const disconnected = this.store.disconnectAccountAndMarkPendingJobsDeadIfCurrent({
+    const disconnected = this.store.disconnectAccountAndMarkPendingJobsDead({
       accountId: account.id,
       code: "ACCOUNT_DISCONNECTED",
-      expectedLocalConnectionRevision: account.localConnectionRevision,
-      expectedStatus: account.status,
       message: "Device account disconnected.",
       now,
-    });
-
-    if (!disconnected) {
-      throw connectionChangedDuringDisconnectError();
-    }
+    }) ?? this.requireStoredAccount(account.id);
 
     return {
       account: this.toPublicAccount(disconnected),
@@ -1606,12 +1627,12 @@ function isDeviceSyncJobAbortError(error: unknown, signal: AbortSignal, depth = 
   return cause !== undefined && isDeviceSyncJobAbortError(cause, signal, depth + 1);
 }
 
-function connectionChangedDuringDisconnectError(): DeviceSyncError {
+function connectionMutationBusyError(): DeviceSyncError {
   return deviceSyncError({
-    code: "CONNECTION_CHANGED_DURING_DISCONNECT",
-    message: "Device sync connection changed while disconnect was in progress. Retry disconnect.",
+    code: "CONNECTION_MUTATION_BUSY",
+    message: "Another device connection update is still in progress. Retry shortly.",
     retryable: true,
-    httpStatus: 409,
+    httpStatus: 503,
   });
 }
 

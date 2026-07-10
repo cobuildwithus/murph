@@ -4453,6 +4453,387 @@ test("device sync service fences in-flight jobs after disconnect", async () => {
   close();
 });
 
+test("device sync service completes local disconnect after scheduler progress during provider revoke", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-disconnect-scheduler-progress");
+  let revokeCalls = 0;
+  let revokeStartedResolve: (() => void) | null = null;
+  let releaseRevokeResolve: (() => void) | null = null;
+  const revokeStarted = new Promise<void>((resolve) => {
+    revokeStartedResolve = resolve;
+  });
+  const releaseRevoke = new Promise<void>((resolve) => {
+    releaseRevokeResolve = resolve;
+  });
+  const { service, store, close } = createServiceFixture({
+    secret: "secret-for-tests",
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+    },
+    providers: [
+      createFakeProvider({
+        createScheduledJobs(account) {
+          return {
+            jobs: [
+              {
+                kind: "reconcile-during-revoke",
+                dedupeKey: `reconcile-during-revoke:${account.id}`,
+              },
+            ],
+            nextReconcileAt: new Date(Date.now() + 60_000).toISOString(),
+          };
+        },
+        async revokeAccess() {
+          revokeCalls += 1;
+          revokeStartedResolve?.();
+          await releaseRevoke;
+        },
+      }),
+    ],
+  });
+
+  try {
+    const begin = await service.startConnection({
+      provider: "demo",
+    });
+    const connected = await service.handleOAuthCallback({
+      provider: "demo",
+      state: begin.state,
+      code: "scheduler-progress-during-revoke",
+    });
+    store.patchAccount(connected.account.id, {
+      nextReconcileAt: new Date(Date.now() - 1_000).toISOString(),
+    });
+
+    const disconnectPromise = service.disconnectAccount(connected.account.id);
+    await revokeStarted;
+    await service.runSchedulerOnce();
+    requireCallback(releaseRevokeResolve, "revoke release callback was not initialized")();
+
+    const disconnected = await disconnectPromise;
+    const currentAccount = store.getAccountById(connected.account.id);
+    const jobs = readJobsForAccountForTesting(store, connected.account.id);
+
+    assert.equal(revokeCalls, 1);
+    assert.equal(disconnected.account.status, "disconnected");
+    assert.ok(currentAccount);
+    assert.equal(currentAccount.status, "disconnected");
+    assertStoredCredentialKind(currentAccount, "none");
+    assert.equal(currentAccount.nextReconcileAt, null);
+    assert.equal(jobs.length, 2);
+    assert.deepEqual(jobs.map((job) => job.status), ["dead", "dead"]);
+  } finally {
+    requireCallback(releaseRevokeResolve, "revoke release callback was not initialized")();
+    close();
+  }
+});
+
+test("device sync service completes local disconnect after worker progress during provider revoke", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-disconnect-worker-progress");
+  let revokeStartedResolve: (() => void) | null = null;
+  let releaseRevokeResolve: (() => void) | null = null;
+  const revokeStarted = new Promise<void>((resolve) => {
+    revokeStartedResolve = resolve;
+  });
+  const releaseRevoke = new Promise<void>((resolve) => {
+    releaseRevokeResolve = resolve;
+  });
+  const { service, store, close } = createServiceFixture({
+    secret: "secret-for-tests",
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+    },
+    providers: [
+      createFakeProvider({
+        async revokeAccess() {
+          revokeStartedResolve?.();
+          await releaseRevoke;
+        },
+      }),
+    ],
+  });
+
+  try {
+    const begin = await service.startConnection({ provider: "demo" });
+    const connected = await service.handleOAuthCallback({
+      provider: "demo",
+      state: begin.state,
+      code: "worker-progress-during-revoke",
+    });
+    const beforeWorker = store.getAccountById(connected.account.id);
+    const disconnectPromise = service.disconnectAccount(connected.account.id);
+
+    await revokeStarted;
+    await service.runWorkerOnce();
+    const afterWorker = store.getAccountById(connected.account.id);
+    requireCallback(releaseRevokeResolve, "revoke release callback was not initialized")();
+
+    const disconnected = await disconnectPromise;
+    const currentAccount = store.getAccountById(connected.account.id);
+
+    assert.ok(beforeWorker);
+    assert.ok(afterWorker);
+    assert.ok(afterWorker.localConnectionRevision > beforeWorker.localConnectionRevision);
+    assert.equal(disconnected.account.status, "disconnected");
+    assert.ok(currentAccount);
+    assert.equal(currentAccount.status, "disconnected");
+    assertStoredCredentialKind(currentAccount, "none");
+    assert.equal(currentAccount.nextReconcileAt, null);
+  } finally {
+    requireCallback(releaseRevokeResolve, "revoke release callback was not initialized")();
+    close();
+  }
+});
+
+test("device sync service rejects missing-state callbacks before provider mutation admission", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-callback-pre-admission-validation");
+  let revokeStartedResolve: (() => void) | null = null;
+  let releaseRevokeResolve: (() => void) | null = null;
+  const revokeStarted = new Promise<void>((resolve) => {
+    revokeStartedResolve = resolve;
+  });
+  const releaseRevoke = new Promise<void>((resolve) => {
+    releaseRevokeResolve = resolve;
+  });
+  const { service, close } = createServiceFixture({
+    secret: "secret-for-tests",
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+    },
+    providers: [
+      createFakeProvider({
+        async revokeAccess() {
+          revokeStartedResolve?.();
+          await releaseRevoke;
+        },
+      }),
+    ],
+  });
+
+  const begin = await service.startConnection({
+    provider: "demo",
+  });
+  const connected = await service.handleOAuthCallback({
+    provider: "demo",
+    state: begin.state,
+    code: "callback-pre-admission-validation",
+  });
+  const disconnectPromise = service.disconnectAccount(connected.account.id);
+
+  try {
+    await revokeStarted;
+    let invalidError: unknown;
+    let invalidSettled = false;
+    const invalidCallback = service.handleOAuthCallback({
+      provider: "demo",
+      code: "missing-state",
+    }).catch((error: unknown) => {
+      invalidError = error;
+      invalidSettled = true;
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.equal(invalidSettled, true);
+    assert.ok(invalidError instanceof DeviceSyncError);
+    assert.equal(invalidError.code, "OAUTH_STATE_MISSING");
+    await invalidCallback;
+  } finally {
+    requireCallback(releaseRevokeResolve, "revoke release callback was not initialized")();
+    await disconnectPromise;
+    close();
+  }
+});
+
+test("device sync service bounds callbacks waiting behind provider disconnect", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-callback-admission-bound");
+  const externalAccountId = "demo-callback-admission-bound";
+  let revokeStartedResolve: (() => void) | null = null;
+  let releaseRevokeResolve: (() => void) | null = null;
+  const revokeStarted = new Promise<void>((resolve) => {
+    revokeStartedResolve = resolve;
+  });
+  const releaseRevoke = new Promise<void>((resolve) => {
+    releaseRevokeResolve = resolve;
+  });
+  const { service, store, close } = createServiceFixture({
+    secret: "secret-for-tests",
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+    },
+    providers: [
+      createFakeProvider({
+        async exchangeAuthorizationCode(_context, code) {
+          return {
+            externalAccountId,
+            displayName: `Demo ${code}`,
+            scopes: ["offline", "read:data"],
+            metadata: {
+              connectedBy: code,
+            },
+            tokens: {
+              accessToken: `access-${code}`,
+              refreshToken: `refresh-${code}`,
+            },
+          };
+        },
+        async revokeAccess() {
+          revokeStartedResolve?.();
+          await releaseRevoke;
+        },
+      }),
+    ],
+  });
+
+  const initialBegin = await service.startConnection({ provider: "demo" });
+  const initialConnection = await service.handleOAuthCallback({
+    provider: "demo",
+    state: initialBegin.state,
+    code: "before-disconnect",
+  });
+  const firstReconnectBegin = await service.startConnection({ provider: "demo" });
+  const secondReconnectBegin = await service.startConnection({ provider: "demo" });
+  const disconnectPromise = service.disconnectAccount(initialConnection.account.id);
+  let firstReconnect: Promise<Awaited<ReturnType<typeof service.handleOAuthCallback>>> | null = null;
+
+  try {
+    await revokeStarted;
+    firstReconnect = service.handleOAuthCallback({
+      provider: "demo",
+      state: firstReconnectBegin.state,
+      code: "first-reconnect",
+    });
+    let rejectedError: unknown;
+    let rejectedSettled = false;
+    const rejectedReconnect = service.handleOAuthCallback({
+      provider: "demo",
+      state: secondReconnectBegin.state,
+      code: "capacity-rejected-reconnect",
+    }).catch((error: unknown) => {
+      rejectedError = error;
+      rejectedSettled = true;
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.equal(rejectedSettled, true);
+    assert.ok(rejectedError instanceof DeviceSyncError);
+    assert.equal(rejectedError.code, "CONNECTION_MUTATION_BUSY");
+    assert.equal(rejectedError.retryable, true);
+    assert.equal(rejectedError.httpStatus, 503);
+    await rejectedReconnect;
+  } finally {
+    requireCallback(releaseRevokeResolve, "revoke release callback was not initialized")();
+  }
+
+  await disconnectPromise;
+  await firstReconnect;
+  const retriedReconnect = await service.handleOAuthCallback({
+    provider: "demo",
+    state: secondReconnectBegin.state,
+    code: "capacity-rejected-reconnect",
+  });
+  const storedAccount = store.getAccountById(initialConnection.account.id);
+
+  assert.equal(retriedReconnect.account.id, initialConnection.account.id);
+  assert.ok(storedAccount);
+  assert.deepEqual(storedAccount.metadata, {
+    connectedBy: "capacity-rejected-reconnect",
+  });
+
+  close();
+});
+
+test("device sync service times out callback admission without consuming OAuth state", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-callback-admission-timeout");
+  const externalAccountId = "demo-callback-admission-timeout";
+  let revokeStartedResolve: (() => void) | null = null;
+  let releaseRevokeResolve: (() => void) | null = null;
+  const revokeStarted = new Promise<void>((resolve) => {
+    revokeStartedResolve = resolve;
+  });
+  const releaseRevoke = new Promise<void>((resolve) => {
+    releaseRevokeResolve = resolve;
+  });
+  const { service, close } = createServiceFixture({
+    secret: "secret-for-tests",
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+    },
+    providers: [
+      createFakeProvider({
+        async exchangeAuthorizationCode(_context, code) {
+          return {
+            externalAccountId,
+            displayName: `Demo ${code}`,
+            scopes: ["offline", "read:data"],
+            tokens: {
+              accessToken: `access-${code}`,
+              refreshToken: `refresh-${code}`,
+            },
+          };
+        },
+        async revokeAccess() {
+          revokeStartedResolve?.();
+          await releaseRevoke;
+        },
+      }),
+    ],
+  });
+
+  const initialBegin = await service.startConnection({ provider: "demo" });
+  const initialConnection = await service.handleOAuthCallback({
+    provider: "demo",
+    state: initialBegin.state,
+    code: "before-disconnect",
+  });
+  const reconnectBegin = await service.startConnection({ provider: "demo" });
+  const disconnectPromise = service.disconnectAccount(initialConnection.account.id);
+
+  try {
+    await revokeStarted;
+    vi.useFakeTimers();
+    const timedOutReconnect = service.handleOAuthCallback({
+      provider: "demo",
+      state: reconnectBegin.state,
+      code: "retry-after-admission-timeout",
+    });
+    const timedOutRejection = assert.rejects(
+      timedOutReconnect,
+      (error: unknown) =>
+        error instanceof DeviceSyncError
+        && error.code === "CONNECTION_MUTATION_BUSY"
+        && error.retryable === true
+        && error.httpStatus === 503,
+    );
+
+    await vi.advanceTimersByTimeAsync(15_000);
+    await timedOutRejection;
+  } finally {
+    vi.useRealTimers();
+    requireCallback(releaseRevokeResolve, "revoke release callback was not initialized")();
+  }
+
+  await disconnectPromise;
+  const retriedReconnect = await service.handleOAuthCallback({
+    provider: "demo",
+    state: reconnectBegin.state,
+    code: "retry-after-admission-timeout",
+  });
+
+  assert.equal(retriedReconnect.account.id, initialConnection.account.id);
+  assert.equal(retriedReconnect.account.status, "active");
+
+  close();
+});
+
 test("device sync service serializes reconnect callbacks behind provider disconnect revoke", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-syncd-disconnect-reconnect-serialized");
   const externalAccountId = "demo-disconnect-reconnect-serialized";
@@ -4540,120 +4921,6 @@ test("device sync service serializes reconnect callbacks behind provider disconn
   assert.deepEqual(currentAccount.metadata, {
     connectedBy: "after-disconnect-started",
   });
-
-  close();
-});
-
-test("device sync service does not let a stale disconnect clobber a concurrent reconnect", async () => {
-  const vaultRoot = await makeTempDirectory("murph-device-syncd-disconnect-reconnect-race");
-  const externalAccountId = "demo-disconnect-reconnect-race";
-  let revokeStartedResolve: (() => void) | null = null;
-  let releaseRevokeResolve: (() => void) | null = null;
-  const revokeStarted = new Promise<void>((resolve) => {
-    revokeStartedResolve = resolve;
-  });
-  const releaseRevoke = new Promise<void>((resolve) => {
-    releaseRevokeResolve = resolve;
-  });
-  const { service, store, close } = createServiceFixture({
-    secret: "secret-for-tests",
-    config: {
-      vaultRoot,
-      publicBaseUrl: "https://sync.example.test/device-sync",
-      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
-    },
-    providers: [
-      createFakeProvider({
-        async exchangeAuthorizationCode(_context, code) {
-          return {
-            externalAccountId,
-            displayName: `Demo ${code}`,
-            scopes: ["offline", "read:data"],
-            metadata: {
-              connectedBy: code,
-            },
-            tokens: {
-              accessToken: `access-${code}`,
-              refreshToken: `refresh-${code}`,
-            },
-            initialJobs: [
-              {
-                kind: `backfill-${code}`,
-              },
-            ],
-          };
-        },
-        async revokeAccess() {
-          revokeStartedResolve?.();
-          await releaseRevoke;
-        },
-      }),
-    ],
-  });
-
-  const firstBegin = await service.startConnection({
-    provider: "demo",
-  });
-  const firstConnection = await service.handleOAuthCallback({
-    provider: "demo",
-    state: firstBegin.state,
-    code: "before-disconnect",
-  });
-  const beforeDisconnect = store.getAccountById(firstConnection.account.id);
-
-  assert.ok(beforeDisconnect);
-
-  const disconnectPromise = service.disconnectAccount(firstConnection.account.id);
-  await revokeStarted;
-  const disconnectRejected = assert.rejects(
-    disconnectPromise,
-    (error: unknown) =>
-      error instanceof DeviceSyncError
-      && error.code === "CONNECTION_CHANGED_DURING_DISCONNECT"
-      && error.retryable === true
-      && error.httpStatus === 409,
-  );
-  store.upsertAccount({
-    provider: "demo",
-    externalAccountId,
-    displayName: "Demo after-disconnect-started",
-    status: "active",
-    scopes: ["offline", "read:data"],
-    tokens: {
-      accessToken: "access-after-disconnect-started",
-      accessTokenEncrypted: encryptStoredAccessToken("demo", externalAccountId, "access-after-disconnect-started"),
-      refreshToken: "refresh-after-disconnect-started",
-      refreshTokenEncrypted: "enc:refresh-after-disconnect-started",
-    },
-    metadata: {
-      connectedBy: "after-disconnect-started",
-    },
-    connectedAt: new Date().toISOString(),
-  });
-  const reconnectJob = store.enqueueJob({
-    accountId: firstConnection.account.id,
-    provider: "demo",
-    kind: "backfill-after-disconnect-started",
-    payload: {},
-    availableAt: new Date().toISOString(),
-  });
-
-  requireCallback(releaseRevokeResolve, "revoke release callback was not initialized")();
-  await disconnectRejected;
-
-  const currentAccount = store.getAccountById(firstConnection.account.id);
-  const jobs = readJobsForAccountForTesting(store, firstConnection.account.id);
-
-  assert.equal(reconnectJob.accountId, firstConnection.account.id);
-  assert.ok(currentAccount);
-  assert.equal(currentAccount.status, "active");
-  assert.equal(currentAccount.disconnectGeneration, beforeDisconnect.disconnectGeneration);
-  assertStoredCredentialKind(currentAccount, "oauth_tokens");
-  assert.deepEqual(currentAccount.metadata, {
-    connectedBy: "after-disconnect-started",
-  });
-  assert.equal(jobs.length, 2);
-  assert.deepEqual(jobs.map((job) => job.status), ["queued", "queued"]);
 
   close();
 });

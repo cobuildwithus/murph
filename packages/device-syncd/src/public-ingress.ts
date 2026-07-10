@@ -250,6 +250,33 @@ function buildConnectionCallbackQuery(input: HandleConnectionCallbackInput): URL
   return query;
 }
 
+function prepareConnectionCallback(input: HandleConnectionCallbackInput): {
+  query: URLSearchParams;
+  receivedAt: string;
+  state: string;
+} {
+  const query = buildConnectionCallbackQuery(input);
+  const state =
+    normalizeString(input.state)
+    ?? normalizeString(query.get("murph_state"))
+    ?? normalizeString(query.get("state"));
+
+  if (!state) {
+    throw deviceSyncError({
+      code: "OAUTH_STATE_MISSING",
+      message: "Device connection callback is missing the state parameter.",
+      retryable: false,
+      httpStatus: 400,
+    });
+  }
+
+  return {
+    query,
+    receivedAt: toIsoTimestamp(new Date()),
+    state,
+  };
+}
+
 function buildConnectionStateMetadata(input: {
   providerMetadata: Record<string, unknown> | undefined;
   connectSourceId?: string | null;
@@ -755,31 +782,21 @@ export class DeviceSyncPublicIngress {
 
   async handleConnectionCallback(input: HandleConnectionCallbackInput): Promise<CompleteConnectionResult> {
     const provider = this.requireProvider(input.provider);
+    const callback = prepareConnectionCallback(input);
     return await this.runConnectionMutation(provider.provider, () =>
-      this.handleConnectionCallbackForProvider(provider, input)
+      this.handleConnectionCallbackForProvider(provider, input, callback)
     );
   }
 
   private async handleConnectionCallbackForProvider(
     provider: DeviceSyncProvider,
     input: HandleConnectionCallbackInput,
+    callback: ReturnType<typeof prepareConnectionCallback>,
   ): Promise<CompleteConnectionResult> {
-    const now = toIsoTimestamp(new Date());
+    const now = callback.receivedAt;
     const descriptor = this.describeProvider(provider);
-    const callbackQuery = buildConnectionCallbackQuery(input);
-    const state =
-      normalizeString(input.state)
-      ?? normalizeString(callbackQuery.get("murph_state"))
-      ?? normalizeString(callbackQuery.get("state"));
-
-    if (!state) {
-      throw deviceSyncError({
-        code: "OAUTH_STATE_MISSING",
-        message: "Device connection callback is missing the state parameter.",
-        retryable: false,
-        httpStatus: 400,
-      });
-    }
+    const callbackQuery = callback.query;
+    const state = callback.state;
 
     const expectedOwnerId = normalizeString(input.expectedOwnerId);
     const stateResult = await this.store.consumeOAuthState(
