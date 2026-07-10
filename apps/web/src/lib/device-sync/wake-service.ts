@@ -15,6 +15,11 @@ import {
   shapeHostedDeviceSyncJobHintPayload,
 } from "@murphai/device-syncd/hosted-hints";
 import {
+  DEVICE_SYNC_HISTORICAL_RESET_REVOKE_FAILED_ERROR_CODE,
+  isHistoricalResetIncompleteDeviceSyncAccount,
+  requiresHistoricalResetDeviceSyncSource,
+} from "@murphai/device-syncd/public-account";
+import {
   sanitizeHostedRuntimeErrorCode,
   sanitizeHostedRuntimeErrorText,
   type HostedExecutionDeviceSyncJobHint,
@@ -47,6 +52,10 @@ import {
 } from "./shared";
 
 const HOSTED_DEVICE_SYNC_WAKE_EVENT_SCHEMA = "v1";
+
+const HISTORICAL_RESET_REVOKE_WARNING_MESSAGE =
+  "Provider revoke did not complete while a historical data reset is pending. "
+  + "Remove the connection in the provider account before reconnecting.";
 
 export async function disconnectHostedDeviceSyncConnection(input: {
   connectionId: string;
@@ -100,10 +109,21 @@ export async function disconnectHostedDeviceSyncConnection(input: {
           error instanceof Error ? error.message : "Provider revoke request failed during disconnect.",
         ) ?? "Provider revoke request failed during disconnect.";
 
-        warning = {
-          code,
-          message,
-        };
+        // A retried disconnect runs after the first attempt already cleared the source
+        // markers, so the disconnected account's own error code is the remaining evidence
+        // that this revoke failure belongs to a pending historical reset.
+        warning = (
+          isHistoricalResetIncompleteDeviceSyncAccount(existing)
+          || await connectionHasHistoricalResetSource(input.store, input.connectionId)
+        )
+          ? {
+            code: DEVICE_SYNC_HISTORICAL_RESET_REVOKE_FAILED_ERROR_CODE,
+            message: HISTORICAL_RESET_REVOKE_WARNING_MESSAGE,
+          }
+          : {
+            code,
+            message,
+          };
       }
     }
   }
@@ -148,8 +168,22 @@ export async function disconnectHostedDeviceSyncConnection(input: {
         throw connectionChangedDuringDisconnectError();
       }
 
+      const clearedConnection: PublicDeviceSyncAccount = (
+        freshExisting.lastErrorCode !== null || freshExisting.lastErrorMessage !== null
+      )
+        ? {
+            ...freshExisting,
+            lastErrorCode: null,
+            lastErrorMessage: null,
+            updatedAt: now,
+          }
+        : freshExisting;
+      if (clearedConnection !== freshExisting) {
+        await input.store.syncDurableConnectionState(clearedConnection, tx);
+      }
+
       return {
-        connection: freshExisting,
+        connection: clearedConnection,
         mailboxItemId: null,
       };
     }
@@ -301,6 +335,19 @@ function connectionChangedDuringDisconnectError(): never {
     retryable: true,
     httpStatus: 409,
   });
+}
+
+// A Junction historical reset requires deregistering the provider-side connection, so a
+// failed revoke mid-reset needs a stable warning identity the browser can explain instead
+// of the raw provider error. Sources still carry the recovery error code at this point;
+// the disconnect transaction only clears it afterwards.
+async function connectionHasHistoricalResetSource(
+  store: PrismaDeviceSyncControlPlaneStore,
+  connectionId: string,
+): Promise<boolean> {
+  const sources = await store.listConnectionSources(connectionId);
+
+  return sources.some(requiresHistoricalResetDeviceSyncSource);
 }
 
 export async function handleHostedDeviceSyncConnectionEstablished(input: {

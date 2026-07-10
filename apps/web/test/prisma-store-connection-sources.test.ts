@@ -416,12 +416,14 @@ describe("PrismaDeviceSyncControlPlaneStore connection source projection", () =>
     expect(records.get(sourceMapKey("dsc_parent", "src_oura_a"))).toMatchObject({
       lastErrorCode: null,
       lastErrorMessage: null,
+      lastSeenAt: new Date("2026-03-26T12:00:00.000Z"),
       status: "disconnected",
       updatedAt: new Date("2026-03-26T12:00:00.000Z"),
     });
     expect(records.get(sourceMapKey("dsc_parent", "src_garmin_a"))).toMatchObject({
       lastErrorCode: null,
       lastErrorMessage: null,
+      lastSeenAt: new Date("2026-03-26T12:00:00.000Z"),
       status: "disconnected",
       updatedAt: new Date("2026-03-26T12:00:00.000Z"),
     });
@@ -434,6 +436,7 @@ describe("PrismaDeviceSyncControlPlaneStore connection source projection", () =>
     });
     expect(updateMany).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({
+        lastSeenAt: new Date("2026-03-26T12:00:00.000Z"),
         status: "disconnected",
       }),
       where: {

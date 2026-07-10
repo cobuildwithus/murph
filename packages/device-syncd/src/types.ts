@@ -620,6 +620,10 @@ export interface ProviderScheduleResult {
   nextReconcileAt?: string | null;
 }
 
+export interface ProviderSnapshotImportReceipt {
+  canonicalEventCount: number;
+}
+
 export interface ProviderJobContext {
   account: DeviceSyncAccount;
   now: string;

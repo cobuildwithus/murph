@@ -107,12 +107,6 @@ export interface JunctionRefreshUserDataInput {
   userId: string;
 }
 
-export interface JunctionHistoricalPullTriggerInput {
-  providerSlug: string;
-  signal?: AbortSignal | null;
-  userId: string;
-}
-
 const DEFAULT_TIMEOUT_MS = 15_000;
 const MAX_GET_ATTEMPTS = 3;
 const DEFAULT_RETRY_DELAY_MS = 500;
@@ -394,31 +388,6 @@ export class JunctionClient {
     );
   }
 
-  async triggerHistoricalPull(input: JunctionHistoricalPullTriggerInput): Promise<void> {
-    const providerSlug = normalizeJunctionProviderSlug(input.providerSlug);
-    if (!providerSlug) {
-      throw new TypeError("Junction historical pull requires a provider slug.");
-    }
-    const userId = normalizeString(input.userId);
-    if (!userId) {
-      throw new TypeError("Junction historical pull requires a Junction user id.");
-    }
-
-    await this.requestJson<unknown>(
-      "POST",
-      "/v2/link/bulk_trigger_historical_pull",
-      {
-        user_ids: [userId],
-        provider: providerSlug,
-        wait_for_completion: false,
-      },
-      {
-        endpointKind: "junction_link_bulk_trigger_historical_pull",
-        signal: input.signal ?? null,
-      },
-    );
-  }
-
   private async fetchWindowedCollection(
     path: string,
     input: JunctionWindowInput,
@@ -621,10 +590,6 @@ function resolveJunctionEndpointKind(path: string): string {
 
   if (pathname === "/v2/link/token") {
     return "junction_link_token_create";
-  }
-
-  if (pathname === "/v2/link/bulk_trigger_historical_pull") {
-    return "junction_link_bulk_trigger_historical_pull";
   }
 
   if (pathname.startsWith("/v2/user/refresh/")) {

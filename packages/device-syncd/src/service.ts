@@ -57,6 +57,7 @@ import type {
   ProviderAuthTokens,
   ProviderJobContext,
   ProviderJobBatchDescriptor,
+  ProviderSnapshotImportReceipt,
   PublicDeviceSyncAccount,
   PublicProviderDescriptor,
   QueueManualReconcileResult,
@@ -875,11 +876,15 @@ class DeviceSyncServiceController {
         throwIfAborted: assertJobExecutionNotYielded,
         importSnapshot: async (snapshot: unknown) => {
           ensureExecutionActive();
-          return this.importer.importDeviceProviderSnapshot({
+          const importResult = await this.importer.importDeviceProviderSnapshot({
             provider: provider.provider,
             snapshot,
             vaultRoot: this.vaultRoot,
           });
+          const receipt: ProviderSnapshotImportReceipt = {
+            canonicalEventCount: readCanonicalDeviceImportEventCount(importResult),
+          };
+          return receipt;
         },
         upsertConnectionSource: (input) => {
           ensureExecutionActive();
@@ -1969,6 +1974,11 @@ function toPlainRecord(value: unknown): Record<string, unknown> | null {
   }
 
   return value as Record<string, unknown>;
+}
+
+function readCanonicalDeviceImportEventCount(value: unknown): number {
+  const record = toPlainRecord(value);
+  return record && Array.isArray(record.events) ? record.events.length : 0;
 }
 
 function formatValidationPath(value: unknown): string {

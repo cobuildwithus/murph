@@ -67,15 +67,38 @@ drain/batch service seam in `packages/device-syncd/src/service.ts`.
 6. **Historical completion is source/resource coverage, not account-level
    traffic.** A useful activity record cannot complete an advertised sleep
    obligation, and one connected source cannot satisfy another source's
-   obligation. Junction connect-window backfills derive the current
-   `(source provider, resource)` obligations from fresh availability, persist
-   only a scalar coverage-policy version plus the existing bounded retry
-   progress, and lazily reevaluate terminal results written by older policy.
-   After the initial export has had one pass, an incomplete pass may request
-   one provider-level historical export per pending Junction Link source. It
-   does so only after all job continuations finish, and a trigger failure still
-   advances the existing bounded ladder. `exhausted` ends polling; it never
-   blocks a late push-primary webhook from importing.
+   obligation. Junction connect-window backfills derive high-signal daily
+   `(source provider, resource)` obligations for activity, sleep, and
+   `sleep_cycle` from fresh availability. Availability is capability evidence,
+   not proof that sparse resources such as workouts or body measurements should
+   contain a row, so those resources do not become absence obligations. The
+   coverage-policy version is encoded in the existing status scalar, alongside
+   the existing bounded retry progress; there is no separate policy metadata
+   field or second retry store. Garmin sends requested history asynchronously
+   and incrementally through daily-data webhooks, so the bounded ladder observes
+   for that arrival and late webhooks remain importable after `exhausted` ends
+   polling. After an authenticated old-window webhook produces canonical events,
+   one bounded, window-scoped scalar records exactly that source/resource proof.
+   The existing deduplicated coverage verification unions the proof with fresh
+   REST rows; complete late coverage clears the source error even when Garmin's
+   REST sleep response remains empty. If Garmin coverage is still incomplete,
+   only the pending source is marked reconnect-required while current ingestion
+   remains active. Hosted
+   execution hydrates the control plane's persisted connection-source rows
+   before running provider jobs, so an entirely empty provider response can
+   still be attributed to the source the member connected. Restarting the
+   export is an explicit member choice through the existing settings flow:
+   confirm the connection-wide disconnect, then reconnect Garmin. That reset
+   can disconnect other wearables on the same Junction connection, so the UI and
+   assistant must explain the scope before confirmation. If provider-side
+   deregistration fails, local disconnect still completes, but the member must
+   remove the connection in the wearable provider account before reconnecting.
+   That unfinished-reset state rides the disconnected connection's existing
+   durable error code (`HISTORICAL_RESET_REVOKE_FAILED`), so the settings and
+   connect surfaces keep projecting the manual-removal guidance across refresh
+   until a fresh established connection clears it; there is no separate warning
+   store. Recovery does not use an automatic export endpoint, operator action,
+   or vendor support.
 
 ## Consequences for changes
 

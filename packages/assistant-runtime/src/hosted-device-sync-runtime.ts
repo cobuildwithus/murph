@@ -122,6 +122,42 @@ export async function syncHostedDeviceSyncControlPlaneState(input: {
     }
 
     const terminalStatus = readHostedTerminalDeviceSyncStatus(stored);
+    const localSourcesByKey = new Map(
+      store.listConnectionSources({ connectionId: stored.id }).map(
+        (source) => [source.sourceInstanceKey, source] as const,
+      ),
+    );
+    for (const source of entry.sources ?? []) {
+      if (!source.sourceInstanceKey) {
+        continue;
+      }
+
+      const localSource = localSourcesByKey.get(source.sourceInstanceKey);
+      if (
+        !terminalStatus
+        && localSource
+        && Date.parse(localSource.lastSeenAt) >= Date.parse(source.lastSeenAt)
+      ) {
+        continue;
+      }
+
+      const hydratedSource = store.upsertConnectionSource({
+        connectionId: stored.id,
+        sourceInstanceKey: source.sourceInstanceKey,
+        sourceProviderSlug: source.sourceProviderSlug,
+        displayName: source.displayName,
+        status: source.status,
+        ...(source.resourceAvailabilitySummary === undefined
+          ? {}
+          : { resourceAvailabilitySummary: source.resourceAvailabilitySummary }),
+        lastErrorCode: source.lastErrorCode,
+        lastErrorMessage: source.lastErrorMessage,
+        firstSeenAt: source.firstSeenAt,
+        lastSeenAt: source.lastSeenAt,
+      });
+      localSourcesByKey.set(source.sourceInstanceKey, hydratedSource);
+    }
+
     if (terminalStatus) {
       markHostedTerminalDeviceSyncJobsDead({
         accountId: stored.id,
@@ -660,7 +696,7 @@ function buildHostedDeviceSyncRuntimeConnectionUpdate(input: {
     connectionId: input.hostedConnectionId,
     observedUpdatedAt: baselineConnection?.updatedAt ?? null,
   };
-  const sources = input.sourceApplyEnabled
+  const sources = input.sourceApplyEnabled && input.account.status !== "disconnected"
     ? buildHostedDeviceSyncRuntimeConnectionSourceUpdates(
         input.sources,
         input.baseline?.sources ?? [],
@@ -1129,6 +1165,12 @@ function buildHostedAccountHydrationInput(input: {
     nextObservedTokenVersion: hostedTokenVersion,
     previousObservedTokenVersion: previousHostedObservedTokenVersion,
   });
+  const hostedConnectionEpochChanged = Boolean(
+    input.existing
+      && !hostedConnectionStateStale
+      && !hostedConnectionStateReplayed
+      && input.existing.connectedAt !== hostedConnection.connectedAt,
+  );
   const shouldClearTokens = hostedCredential.kind === "none"
     && !hostedConnectionStateStale
     && !hostedConnectionStateReplayed
@@ -1152,12 +1194,13 @@ function buildHostedAccountHydrationInput(input: {
   );
   const localConnectionStateUnpublished = Boolean(
     input.existing
+      && !hostedConnectionEpochChanged
       && input.existing.localConnectionRevision !== input.existing.hostedObservedConnectionRevision,
   );
   const hydratedMetadata = mergeHostedDeviceSyncConnectionMetadata({
     hostedMetadata: hostedConnection.metadata,
     localConnectionStateUnpublished,
-    localMetadata: input.existing?.metadata,
+    localMetadata: hostedConnectionEpochChanged ? undefined : input.existing?.metadata,
   });
   const preserveUnpublishedLocalProviderProgress = Boolean(
     input.existing
