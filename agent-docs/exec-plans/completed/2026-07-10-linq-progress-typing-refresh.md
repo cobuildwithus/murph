@@ -1,6 +1,6 @@
 # Restore Linq typing after progress updates
 
-Status: active
+Status: completed
 Created: 2026-07-10
 Updated: 2026-07-10
 
@@ -93,7 +93,7 @@ Updated: 2026-07-10
 
 ## Verification
 
-- Passed focused assistant-engine Vitest: 3 files, 159 tests.
+- Passed focused assistant-engine Vitest after rebasing: 3 files, 160 tests.
 - Passed focused live-harness Vitest: 1 file, 9 tests.
 - Passed assistant-engine typecheck and `git diff --check`.
 - Passed exact `pnpm test:diff` coverage, including all affected package checks and
@@ -103,5 +103,19 @@ Updated: 2026-07-10
 - Parent final review found and fixed one stale-scheduler race; the added test
   proves an older in-flight cadence refresh cannot replace the newer one-second
   post-message restart. Follow-up coverage review found no remaining proof gap.
-- Remaining: credentialed recipient-visible Linq E2E, final privacy review, PR CI,
-  and ReviewGPT.
+- PR #537 CI is green. The Linq scheduled-reminder scenario passed on retry after
+  an unrelated timing-only first-attempt failure; the dedicated Linq delivery and
+  Temporal orchestration scenario passed on both attempts.
+- Live Linq proof used the official HTTPS endpoint and the newest configured
+  direct iMessage chat. The progress-style message was accepted with HTTP 202,
+  the one-second post-message typing restart was accepted with HTTP 204, and the
+  recipient visibly confirmed that typing returned after the message. The same
+  run truthfully exited nonzero because its initial control indicator was not
+  observed; this did not affect the confirmed post-message bug path. Raw
+  credentials and recipient/provider identifiers remained out of output.
+- The operator accepted the recipient-visible post-message proof as sufficient
+  for the live scenario and authorized merge. A follow-up control-only run was
+  interrupted without another message and cleaned up typing with HTTP 204.
+- Remaining post-close gates: final-base reconciliation, green CI on the final
+  head, and a policy-valid ReviewGPT round.
+Completed: 2026-07-10
