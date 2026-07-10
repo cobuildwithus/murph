@@ -110,12 +110,21 @@ describe('assistant execution prompt contract', () => {
     )
   })
 
-  it('adds assistant tone preference only when a saved tone exists', () => {
+  it('uses formal by default and applies a saved tone as a strict writing contract', () => {
     const defaultLayers = buildAssistantSystemPromptLayers(
       createCommonCodexPromptInput(),
     )
-    expect(defaultLayers.threadContextPrompt).not.toContain(
+    expect(defaultLayers.threadContextPrompt).toContain(
       'Assistant tone preference:',
+    )
+    expect(defaultLayers.threadContextPrompt).toContain(
+      'Formal is the default',
+    )
+    expect(defaultLayers.threadContextPrompt).toContain(
+      'standard capitalization and punctuation',
+    )
+    expect(defaultLayers.threadContextPrompt).toContain(
+      'progress notes, action or tool confirmations, blockers and errors',
     )
 
     const casualLayers = buildAssistantSystemPromptLayers(
@@ -130,7 +139,22 @@ describe('assistant execution prompt contract', () => {
       'relaxed and conversational',
     )
     expect(casualLayers.threadContextPrompt).toContain(
-      'lowercase is okay',
+      'progress notes, action or tool confirmations, blockers and errors, follow-up questions, notifications, and final answers',
+    )
+    expect(casualLayers.threadContextPrompt).toContain(
+      'Write all Murph-authored natural-language prose in lowercase',
+    )
+    expect(casualLayers.threadContextPrompt).toContain(
+      'Do not drift into sentence case after tool use',
+    )
+    expect(casualLayers.threadContextPrompt).toContain(
+      'medical or technical acronyms',
+    )
+    expect(casualLayers.threadContextPrompt).toContain(
+      'URLs, file paths, commands, code, identifiers, case-sensitive values',
+    )
+    expect(casualLayers.threadContextPrompt).toContain(
+      'exact quotations or source text',
     )
 
     const formalLayers = buildAssistantSystemPromptLayers(
@@ -142,9 +166,14 @@ describe('assistant execution prompt contract', () => {
       'Assistant tone preference:',
     )
     expect(formalLayers.threadContextPrompt).toContain(
-      'complete sentences',
+      'Use complete sentences',
     )
-    expect(formalLayers.threadContextPrompt).toContain('no slang')
+    expect(formalLayers.threadContextPrompt).toContain(
+      'Do not use lowercase sentence starts',
+    )
+    expect(formalLayers.threadContextPrompt).toContain(
+      '`yep`, `wanna`, `on it`, or `mate`',
+    )
   })
 
   it('keeps the assistant style settings fact in the stable route prompt', () => {
@@ -1027,13 +1056,18 @@ Execution context:
       ).prompt
 
     expect(prompt).toContain('Assistant tone preference:')
-    expect(prompt).toContain('The user chose casual.')
+    expect(prompt).toContain('Casual is a persistent user-facing writing invariant.')
+    expect(prompt).toContain(
+      'Write all Murph-authored natural-language prose in lowercase',
+    )
 
     const defaultPrompt =
       buildAssistantNotificationDecisionSystemPromptWithCacheMetadata(
         createCommonNotificationPromptInput(),
       ).prompt
-    expect(defaultPrompt).not.toContain('Assistant tone preference:')
+    expect(defaultPrompt).toContain('Assistant tone preference:')
+    expect(defaultPrompt).toContain('Formal is the default')
+    expect(defaultPrompt).toContain('standard capitalization and punctuation')
 
     const maintenancePrompt =
       buildAssistantNotificationDecisionSystemPromptWithCacheMetadata(
@@ -1142,7 +1176,7 @@ Execution context:
       'Current Murph product base URL for user-facing app links: http://localhost:3000',
     )
     expect(promptA.cacheMetadata.staticPromptHash).toBe(
-      'b674d5f04027ef99facb4fca90c8981ceb77c26fa721863c8f07d55ba80df8c8',
+      '0022bc941fcfb1c43365c563f0a51342b748a7cad69b26625f5a054121fe9736',
     )
     expect(promptA.cacheMetadata.toolSchemaHash).toBe(
       'assistant-tool-schema-common-codex-test',
