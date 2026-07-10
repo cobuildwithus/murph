@@ -228,6 +228,9 @@ import type {
 type RuntimeDeviceSyncPort = NonNullable<
   HostedWorkspaceRuntimeAssistantPhaseInput["runtime"]["platform"]["deviceSyncPort"]
 >;
+type RuntimeCallCirclePort = NonNullable<
+  HostedWorkspaceRuntimeAssistantPhaseInput["runtime"]["platform"]["callCircle"]
+>;
 type RuntimeUsageRecordPort = NonNullable<
   HostedWorkspaceRuntimeAssistantPhaseInput["runtime"]["platform"]["usageRecordPort"]
 >;
@@ -733,6 +736,28 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
           hosted: expect.objectContaining({
             defaultTarget: hostedDefaultTarget,
           }),
+        }),
+      }),
+    );
+  });
+
+  it("forwards the hosted Call Circle port into the assistant context", async () => {
+    const callCircle: RuntimeCallCirclePort = {
+      respond: vi.fn(async () => ({ status: "ok" as const })),
+    };
+
+    await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      runtimeCallCirclePort: callCircle,
+    }));
+
+    expect(mocks.hydrateHostedExecutionDefaultTarget.mock.calls[0]?.[0])
+      .toEqual(expect.objectContaining({
+        hosted: expect.objectContaining({ callCircle }),
+      }));
+    expect(mocks.runHostedAssistantAutomationLane).toHaveBeenCalledWith(
+      expect.objectContaining({
+        executionContext: expect.objectContaining({
+          hosted: expect.objectContaining({ callCircle }),
         }),
       }),
     );
@@ -12171,6 +12196,7 @@ function createPhaseInput(input: {
   runtimeActionApprovalPort?: NonNullable<
     HostedWorkspaceRuntimeAssistantPhaseInput["runtime"]["platform"]["actionApprovalPort"]
   >;
+  runtimeCallCirclePort?: RuntimeCallCirclePort;
   runtimeUsageRecordPort?: RuntimeUsageRecordPort;
   runtimeUserEnv?: Record<string, string>;
   vaultRoot?: string;
@@ -12285,6 +12311,7 @@ function createPhaseInput(input: {
         ...(input.runtimeActionApprovalPort
           ? { actionApprovalPort: input.runtimeActionApprovalPort }
           : {}),
+        ...(input.runtimeCallCirclePort ? { callCircle: input.runtimeCallCirclePort } : {}),
         ...(input.runtimeUsageRecordPort ? { usageRecordPort: input.runtimeUsageRecordPort } : {}),
         ...(input.runtimeLatencyTraceRequests
           ? {

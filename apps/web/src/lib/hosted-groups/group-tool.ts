@@ -74,6 +74,7 @@ import {
   createHostedGroupJoinLinkForOwnedThreadContainerTx,
   bindHostedGroupJoinOfferTx,
   readHostedGroupByRuntimeMemberId,
+  recordLegacyHostedGroupJoinOfferTx,
   reserveHostedGroupJoinOfferTx,
   revokeHostedGroupMemberEmailShareTx,
   updateHostedGroupDisplayNameByRuntimeMemberIdTx,
@@ -474,7 +475,11 @@ async function handleHostedRuntimeGroupPostJoinOffer(input: {
       ?? [],
   );
   const operationId = input.joinOffer?.operationId?.trim() || null;
-  if (!operationId) {
+  const isLegacyWarmRunnerRequest =
+    operationId === null
+    && activation === null
+    && Boolean(input.joinOffer?.messageTemplate);
+  if (!operationId && !isLegacyWarmRunnerRequest) {
     return unavailable("join_offer_operation_id_unavailable");
   }
   const created = await prisma.$transaction(async (tx) => {
@@ -493,15 +498,17 @@ async function handleHostedRuntimeGroupPostJoinOffer(input: {
       requestedVaultShareProjectionScopes: projectionScopes,
       tx,
     });
-    const reservation = await reserveHostedGroupJoinOfferTx({
-      activation,
-      allowNewActivation,
-      groupId: result.group.id,
-      operationId,
-      postedAt: now,
-      projectionScopes,
-      tx,
-    });
+    const reservation = operationId
+      ? await reserveHostedGroupJoinOfferTx({
+          activation,
+          allowNewActivation,
+          groupId: result.group.id,
+          operationId,
+          postedAt: now,
+          projectionScopes,
+          tx,
+        })
+      : null;
     return {
       kind: "ok" as const,
       ownerMemberId: ownerAccess.ownerMemberId,
@@ -527,19 +534,20 @@ async function handleHostedRuntimeGroupPostJoinOffer(input: {
   }
 
   const reservation = created.reservation;
-  if (!reservation.messageLookupKey) {
+  if (!reservation?.messageLookupKey) {
     const message = buildHostedGroupJoinOfferMessage({
-      activation: reservation.offerPayload.activation,
+      activation: reservation?.offerPayload.activation ?? null,
       joinUrl,
-      projectionScopes: reservation.offerPayload.vaultShareProjectionScopes,
+      projectionScopes:
+        reservation?.offerPayload.vaultShareProjectionScopes ?? projectionScopes,
     });
     let sent: Awaited<ReturnType<typeof sendHostedLinqChatMessage>>;
     try {
       sent = await sendHostedLinqChatMessage({
         chatId: authorized.chatId,
-        idempotencyKey: buildHostedGroupJoinOfferProviderIdempotencyKey(
-          reservation.id,
-        ),
+        idempotencyKey: reservation
+          ? buildHostedGroupJoinOfferProviderIdempotencyKey(reservation.id)
+          : `group-join-offer:${created.group.id}:${now.toISOString()}`,
         message,
       });
     } catch {
@@ -551,15 +559,24 @@ async function handleHostedRuntimeGroupPostJoinOffer(input: {
 
     try {
       await prisma.$transaction(async (tx) => {
-        await bindHostedGroupJoinOfferTx({
+        if (reservation) {
+          await bindHostedGroupJoinOfferTx({
+            messageId: sent.messageId,
+            offerId: reservation.id,
+            ...(sent.providerCreatedAt ? { postedAt: sent.providerCreatedAt } : {}),
+            tx,
+          });
+          return;
+        }
+        await recordLegacyHostedGroupJoinOfferTx({
+          groupId: created.group.id,
           messageId: sent.messageId,
-          offerId: reservation.id,
-          ...(sent.providerCreatedAt ? { postedAt: sent.providerCreatedAt } : {}),
+          postedAt: sent.providerCreatedAt ?? now,
+          projectionScopes,
           tx,
         });
       }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
     } catch {
-      // The signed provider echo owns durable repair after the fast-path bind.
       return unavailable("offer_binding_failed");
     }
   }

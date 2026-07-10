@@ -208,8 +208,17 @@ describe("Call Circle conditional mutations", () => {
         groupId: "hgrp_123",
         id: "hccm_123",
         memberBId: "member_b",
-        sideBResponse: "pending",
-        status: { in: ["proposed", "asking"] },
+        OR: [
+          {
+            sideBResponse: "pending",
+            status: { in: ["proposed", "asking"] },
+          },
+          {
+            sideAResponse: "pending",
+            sideBResponse: { in: ["confirmed", "countered"] },
+            status: "asking",
+          },
+        ],
         windowEndAt: {
           equals: expectedWindowEndAt,
           gt: new Date("2026-07-06T15:00:00.000Z"),
@@ -220,6 +229,103 @@ describe("Call Circle conditional mutations", () => {
         },
       },
     });
+  });
+
+  it.each([
+    {
+      affirmativeWhere: {
+        sideAResponse: { in: ["confirmed", "countered"] },
+        sideBResponse: "pending",
+        status: "asking",
+      },
+      memberId: "member_a",
+      pendingWhere: {
+        sideAResponse: "pending",
+        status: { in: ["proposed", "asking"] },
+      },
+      side: "A" as const,
+    },
+    {
+      affirmativeWhere: {
+        sideAResponse: "pending",
+        sideBResponse: { in: ["confirmed", "countered"] },
+        status: "asking",
+      },
+      memberId: "member_b",
+      pendingWhere: {
+        sideBResponse: "pending",
+        status: { in: ["proposed", "asking"] },
+      },
+      side: "B" as const,
+    },
+  ])("allows side $side to counter after its own confirmation", async ({
+    affirmativeWhere,
+    memberId,
+    pendingWhere,
+    side,
+  }) => {
+    const prisma = {
+      hostedCallCircleMatch: { updateMany },
+    };
+    const now = new Date("2026-07-06T15:00:00.000Z");
+    const expectedWindowStartAt = new Date("2026-07-06T15:30:00.000Z");
+    const expectedWindowEndAt = new Date("2026-07-06T15:45:00.000Z");
+
+    await expect(counterMatchSide({
+      expectedAsk: {
+        amAskedAt: new Date("2026-07-06T14:00:00.000Z"),
+        finalAskedAt: null,
+        windowEndAt: expectedWindowEndAt,
+        windowStartAt: expectedWindowStartAt,
+      },
+      groupId: "hgrp_123",
+      matchId: "hccm_123",
+      memberAId: "member_a",
+      memberBId: "member_b",
+      memberId,
+      now,
+      prisma: prisma as never,
+      side,
+      windowEndAt: new Date("2026-07-06T16:30:00.000Z"),
+      windowStartAt: new Date("2026-07-06T16:00:00.000Z"),
+    })).resolves.toBe(true);
+
+    expect(updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({
+        finalAskedAt: null,
+        OR: [pendingWhere, affirmativeWhere],
+      }),
+    }));
+  });
+
+  it("rejects a counter after the final-stage reset", async () => {
+    const prisma = {
+      hostedCallCircleMatch: { updateMany },
+    };
+    updateMany.mockResolvedValueOnce({ count: 0 });
+
+    await expect(counterMatchSide({
+      expectedAsk: {
+        amAskedAt: new Date("2026-07-06T09:00:00.000Z"),
+        finalAskedAt: new Date("2026-07-06T14:45:00.000Z"),
+        windowEndAt: new Date("2026-07-06T15:30:00.000Z"),
+        windowStartAt: new Date("2026-07-06T15:15:00.000Z"),
+      },
+      groupId: "hgrp_123",
+      matchId: "hccm_123",
+      memberAId: "member_a",
+      memberBId: "member_b",
+      memberId: "member_a",
+      now: new Date("2026-07-06T15:00:00.000Z"),
+      prisma: prisma as never,
+      side: "A",
+      windowEndAt: new Date("2026-07-06T16:30:00.000Z"),
+      windowStartAt: new Date("2026-07-06T16:00:00.000Z"),
+    })).resolves.toBe(false);
+
+    expect(updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({ finalAskedAt: null }),
+    }));
   });
 
   it("allows a late no after either a final pair confirmation or this side's earlier yes", async () => {

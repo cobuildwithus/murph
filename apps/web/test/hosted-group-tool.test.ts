@@ -23,6 +23,7 @@ const mocks = vi.hoisted(() => ({
   lookupHostedMemberIdentityByPhoneNumber: vi.fn(),
   readActiveHostedMemberAccess: vi.fn(),
   readHostedGroupByRuntimeMemberId: vi.fn(),
+  recordLegacyHostedGroupJoinOfferTx: vi.fn(),
   reserveHostedGroupJoinOfferTx: vi.fn(),
   releaseHostedLinqContactCardShareAttempt: vi.fn(),
   reserveHostedLinqContactCardShareAttempt: vi.fn(),
@@ -101,6 +102,7 @@ vi.mock("@/src/lib/hosted-groups/group-store", () => ({
   createHostedGroupJoinLinkForOwnedThreadContainerTx:
     mocks.createHostedGroupJoinLinkForOwnedThreadContainerTx,
   readHostedGroupByRuntimeMemberId: mocks.readHostedGroupByRuntimeMemberId,
+  recordLegacyHostedGroupJoinOfferTx: mocks.recordLegacyHostedGroupJoinOfferTx,
   reserveHostedGroupJoinOfferTx: mocks.reserveHostedGroupJoinOfferTx,
   revokeHostedGroupMemberEmailShareTx: mocks.revokeHostedGroupMemberEmailShareTx,
   updateHostedGroupDisplayNameByRuntimeMemberIdTx:
@@ -149,6 +151,7 @@ import {
 import {
   filterHostedRuntimeGroupToolResponseProjectionScopes,
 } from "@/src/lib/hosted-groups/group-tool-scope-filter";
+import { parseHostedRuntimeGroupToolRequest } from "@murphai/hosted-execution/parsers";
 import {
   HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES,
   buildHostedVaultShareActivityDistanceProjectionScope,
@@ -261,6 +264,7 @@ describe("handleHostedRuntimeGroupTool", () => {
       },
     }));
     mocks.bindHostedGroupJoinOfferTx.mockResolvedValue(undefined);
+    mocks.recordLegacyHostedGroupJoinOfferTx.mockResolvedValue(undefined);
   });
 
   it("classifies group-tool actions by access authority", () => {
@@ -1368,7 +1372,67 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     );
   });
 
-  it("does not create or send a join offer without a stable runtime operation id", async () => {
+  it("keeps the explicit legacy warm-runner offer shape on server-owned copy", async () => {
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_container",
+      request: parseHostedRuntimeGroupToolRequest({
+        action: "post_join_offer",
+        joinOffer: {
+          messageTemplate: "Runner-authored copy that must never be rendered {{join_url}}",
+        },
+        linqThread: LINQ_THREAD,
+      }),
+    })).resolves.toMatchObject({
+      action: "post_join_offer",
+      result: { status: "sent" },
+    });
+
+    expect(mocks.createHostedGroupJoinLinkForOwnedThreadContainerTx).toHaveBeenCalledOnce();
+    expect(mocks.reserveHostedGroupJoinOfferTx).not.toHaveBeenCalled();
+    expect(mocks.bindHostedGroupJoinOfferTx).not.toHaveBeenCalled();
+    expect(mocks.recordLegacyHostedGroupJoinOfferTx).toHaveBeenCalledWith({
+      groupId: "hgrp_123",
+      messageId: "msg_offer_1",
+      postedAt: expect.any(Date),
+      projectionScopes: [],
+      tx: fakeTx,
+    });
+    expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith({
+      chatId: "chat_group_1",
+      idempotencyKey: expect.stringMatching(/^group-join-offer:hgrp_123:/u),
+      message: expect.stringContaining(
+        "Reacting to this message joins you to this Murph group",
+      ),
+    });
+    expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: expect.not.stringContaining("Runner-authored copy"),
+      }),
+    );
+  });
+
+  it("does not let the legacy offer shape request Call Circle activation", async () => {
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_container",
+      request: {
+        action: "post_join_offer",
+        joinOffer: {
+          activation: "call-circle.enroll.v0",
+          messageTemplate: "Legacy runner-authored copy {{join_url}}",
+        },
+        linqThread: LINQ_THREAD,
+      },
+    })).resolves.toMatchObject({
+      result: { unavailableReason: "join_offer_operation_id_unavailable" },
+    });
+
+    expect(mocks.createHostedGroupJoinLinkForOwnedThreadContainerTx).not.toHaveBeenCalled();
+    expect(mocks.recordLegacyHostedGroupJoinOfferTx).not.toHaveBeenCalled();
+    expect(mocks.reserveHostedGroupJoinOfferTx).not.toHaveBeenCalled();
+    expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
+  });
+
+  it("does not create or send a new join offer without a stable runtime operation id", async () => {
     await expect(handleHostedRuntimeGroupTool({
       memberId: "member_container",
       request: {

@@ -348,8 +348,17 @@ export async function counterCallCircleMatchSide(input: {
       ...sideMemberWhere(input.side, input.memberId),
       ...(input.side === "A" ? { counterUsedA: false } : { counterUsedB: false }),
       ...callCircleAskSnapshotWhere(input.expectedAsk, input.now),
-      ...sideResponseWhere(input.side, "pending"),
-      status: { in: ["proposed", "asking"] },
+      finalAskedAt: null,
+      OR: [
+        {
+          ...sideResponseWhere(input.side, "pending"),
+          status: { in: ["proposed", "asking"] },
+        },
+        {
+          ...affirmativeSideWithPendingPartnerWhere(input.side),
+          status: "asking",
+        },
+      ],
     },
   });
   return result.count > 0;

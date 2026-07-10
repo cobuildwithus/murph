@@ -52,6 +52,7 @@ import {
   HOSTED_GROUP_VAULT_SHARE_GRANT_LIMIT_PER_GRANTOR_PROJECTION,
   readHostedGroupJoinView,
   readHostedGroupJoinOfferIdFromProviderIdempotencyKey,
+  recordLegacyHostedGroupJoinOfferTx,
   repairHostedGroupJoinOfferBindingFromProviderEchoTx,
   reserveHostedGroupJoinOfferTx,
 } from "@/src/lib/hosted-groups/group-store";
@@ -534,6 +535,34 @@ describe("acceptHostedGroupJoinCodeTx", () => {
       now,
       projectionScopes: [SLEEP_SCOPE],
       tx,
+    });
+  });
+
+  it("records a bound non-activation offer for an exact legacy runner request", async () => {
+    const tx = buildTx();
+    const postedAt = new Date("2026-07-01T00:00:00.000Z");
+
+    await expect(recordLegacyHostedGroupJoinOfferTx({
+      groupId: "group_1",
+      messageId: "msg_legacy_offer_123",
+      postedAt,
+      projectionScopes: [SLEEP_SCOPE],
+      tx,
+    })).resolves.toBeUndefined();
+
+    expect(tx.hostedGroupJoinOffer.create).toHaveBeenCalledWith({
+      data: {
+        bindingAttemptedAt: postedAt,
+        groupId: "group_1",
+        id: expect.stringMatching(/^hgrpjo_/u),
+        messageIdSuffix: expect.stringContaining("123"),
+        messageLookupKey: expect.stringMatching(/^hbidx:linq-message:/u),
+        offerScopeJson: [
+          { schema: "murph.hosted-group.join-offer.v2" },
+          SLEEP_SCOPE,
+        ],
+        postedAt,
+      },
     });
   });
 

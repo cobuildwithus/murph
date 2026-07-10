@@ -644,6 +644,7 @@ describe("parseHostedRuntimeGroupTool", () => {
       action: "post_join_offer",
       joinOffer: {
         displayName: "Sunday Sleep Crew",
+        messageTemplate: "Legacy runner-authored copy {{join_url}}",
         projectionKinds: null,
         projectionScopes: null,
       },

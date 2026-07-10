@@ -145,11 +145,13 @@ requires two fresh final confirmations.
 Each member may decline or make one counter-proposal per match, including
 revoking their own earlier confirmation while the other side is still pending.
 A counter updates the absolute window, resets the other side to pending, and
-returns the next ask to the scheduler. Non-response expires the match; a member
-who had already said yes receives a private terminal note when the expiry lands
-inside their daytime window. The narrow expiry-at-quiet-hours case intentionally
-ends without another message: v1 preserves quiet hours instead of introducing
-delayed-delivery state solely for that terminal note. If a final-stage delivery
+returns the next ask to the scheduler. Countering closes when the final ask is
+sent; that stage accepts only fresh yes or no answers. Non-response expires the
+match; a member who had already said yes receives a private terminal note when
+the expiry lands inside their daytime window. The narrow expiry-at-quiet-hours
+case intentionally ends without another message: v1 preserves quiet hours
+instead of introducing delayed-delivery state solely for that terminal note.
+If a final-stage delivery
 preflight fails, the match drops and every still-reachable member gets a private
 cancellation note. Pause, access loss, or group departure cancels open work
 before the next user-visible effect.
@@ -320,9 +322,11 @@ bundle, assistant tool registration, and Retell configuration.
 This is a coordinated contract cut: new web requires the mailbox-derived join
 offer operation id, while old web rejects that new field. Never deploy the new
 runner before web. During the web-first interval, current web accepts and
-validates the legacy runner's `messageTemplate` key but ignores its copy in
-favor of server-authored text. Remove that narrow legacy parser allowance only
-after every pre-Call-Circle runner bundle has drained.
+validates the legacy runner's template-only request as an explicit compatibility
+marker, then sends a generic join offer with server-authored copy through the
+existing link and egress primitives. The compatibility path cannot request a
+Call Circle activation. Remove it only after every pre-Call-Circle runner
+bundle has drained.
 
 For rollback, disable both gates first. Current web and runner support remain
 the rollback floor while active participants, pending notifications, matches,

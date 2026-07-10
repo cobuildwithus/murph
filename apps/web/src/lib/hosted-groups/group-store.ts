@@ -509,6 +509,60 @@ export async function acceptHostedGroupJoinCodeTx(input: {
   });
 }
 
+export async function recordLegacyHostedGroupJoinOfferTx(input: {
+  groupId: string;
+  messageId: string | null;
+  postedAt: Date;
+  projectionScopes: readonly HostedVaultShareProjectionScope[];
+  tx: Prisma.TransactionClient;
+}): Promise<void> {
+  const messageLookupKey = createHostedLinqMessageLookupKey(input.messageId);
+  if (!messageLookupKey) {
+    throw hostedOnboardingError({
+      code: "HOSTED_GROUP_JOIN_OFFER_MESSAGE_ID_REQUIRED",
+      httpStatus: 502,
+      message: "Could not bind this group offer to a provider message.",
+      retryable: true,
+    });
+  }
+  const offerPayload: HostedGroupJoinOfferPayload = {
+    activation: null,
+    vaultShareProjectionScopes: normalizeHostedVaultShareProjectionScopes(
+      input.projectionScopes,
+    ),
+  };
+  const offerId = `hgrpjo_${sha256Hex([
+    HOSTED_GROUP_JOIN_OFFER_PAYLOAD_SCHEMA,
+    "legacy-provider-message",
+    input.groupId,
+    messageLookupKey,
+  ].join("\n")).slice(0, 32)}`;
+  await lockHostedGroupRow(input.tx, input.groupId);
+  const group = await input.tx.hostedGroup.findUnique({
+    where: { id: input.groupId },
+    select: { joinCode: true },
+  });
+  if (!group?.joinCode) {
+    throw hostedOnboardingError({
+      code: "HOSTED_GROUP_JOIN_OFFER_NOT_FOUND",
+      httpStatus: 404,
+      message: "This group offer is no longer active.",
+      retryable: false,
+    });
+  }
+  await input.tx.hostedGroupJoinOffer.create({
+    data: {
+      bindingAttemptedAt: input.postedAt,
+      groupId: input.groupId,
+      id: offerId,
+      messageIdSuffix: toHostedOnboardingLogIdSuffix(input.messageId),
+      messageLookupKey,
+      offerScopeJson: toHostedGroupJoinOfferPayloadJson(offerPayload),
+      postedAt: input.postedAt,
+    },
+  });
+}
+
 export async function reserveHostedGroupJoinOfferTx(input: {
   activation?: HostedRuntimeGroupJoinOfferActivation | null;
   allowNewActivation?: boolean;

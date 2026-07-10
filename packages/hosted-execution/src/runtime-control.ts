@@ -887,6 +887,12 @@ export interface HostedRuntimeGroupPostJoinOfferRequest {
   // offer. The model may select only this closed value.
   activation?: HostedRuntimeGroupJoinOfferActivation | null;
   displayName?: string | null;
+  /**
+   * Legacy pre-operation-id runner shape. Web validates this value only to
+   * identify the explicit warm-bundle compatibility path and never renders
+   * the runner-authored copy.
+   */
+  messageTemplate?: string | null;
   // Compatibility for old fixed-kind callers. Selector-only projections must
   // use projectionScopes.
   projectionKinds?: HostedVaultShareSelectableProjectionKind[] | null;

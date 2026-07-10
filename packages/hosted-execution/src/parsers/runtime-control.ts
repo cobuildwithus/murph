@@ -958,6 +958,7 @@ function parseHostedRuntimeGroupPostJoinOfferRequest(
   );
   const activation = parseHostedRuntimeGroupJoinOfferActivation(record.activation);
   const operationId = parseHostedRuntimeGroupJoinOfferOperationId(record.operationId);
+  let messageTemplate: string | null = null;
   if (record.messageTemplate !== undefined && record.messageTemplate !== null) {
     const legacyTemplate = requireString(
       record.messageTemplate,
@@ -971,10 +972,12 @@ function parseHostedRuntimeGroupPostJoinOfferRequest(
         `Hosted runtime group tool post_join_offer messageTemplate must be between 1 and ${LEGACY_GROUP_JOIN_OFFER_MESSAGE_TEMPLATE_MAX_LENGTH} characters.`,
       );
     }
+    messageTemplate = legacyTemplate;
   }
   return {
     ...(activation === null ? {} : { activation }),
     displayName,
+    ...(messageTemplate === null ? {} : { messageTemplate }),
     projectionKinds: parseHostedRuntimeGroupProjectionKindArray(
       record.projectionKinds,
       "Hosted runtime group tool post_join_offer projectionKinds",
