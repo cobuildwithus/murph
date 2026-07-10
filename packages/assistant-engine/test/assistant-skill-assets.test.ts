@@ -1021,6 +1021,19 @@ describe('assistant skill assets', () => {
     expect(raw).toContain(
       'A purchase is not proof that a supplement is effective, safe, medically appropriate, or authorized to start or change dose.',
     )
+    expect(raw).toContain('vault-cli blood-test list --format json')
+    expect(raw).toContain(
+      'vault-cli blood-test show <id> --format json',
+    )
+    expect(raw).toContain(
+      'When blood-test records exist, cite the latest relevant markers with dates',
+    )
+    expect(raw).toContain(
+      'For supplements outside the list above (for example NAC, curcumin, ginger, berberine)',
+    )
+    expect(raw).toContain(
+      'Name the personal evidence the classification rests on (latest panel date, current regimen, symptoms, goals).',
+    )
   })
 
   it('keeps Murph onboarding details in the skill file, not the prompt', async () => {

@@ -738,10 +738,7 @@ describe('assistant consumption lookup guidance', () => {
       'When logging meals, supplements, workouts, activities, symptoms, body data, or lab results, recover the useful structure',
     )
     expect(prompt).toContain(
-      'Use the minimum evidence and tool loops sufficient for a correct answer.',
-    )
-    expect(prompt).toContain(
-      'Do not perform extra searches, scans, nudges, or optimization work that does not change the requested outcome.',
+      'Relevant personal records are core evidence. Read them before answering from general knowledge. Do not repeat reads or add work that cannot change the outcome.',
     )
   })
 
@@ -1179,7 +1176,7 @@ Execution context:
       'Current Murph product base URL for user-facing app links: http://localhost:3000',
     )
     expect(promptA.cacheMetadata.staticPromptHash).toBe(
-      '0022bc941fcfb1c43365c563f0a51342b748a7cad69b26625f5a054121fe9736',
+      'a83724f639571f6323d47ad0a7a7debdbf301791787028c921127326fe490820',
     )
     expect(promptA.cacheMetadata.toolSchemaHash).toBe(
       'assistant-tool-schema-common-codex-test',
@@ -1441,10 +1438,7 @@ describe('assistant experiment onboarding guidance', () => {
 
     // Data-first grounding opens with evidence rather than generic advice.
     expect(prompt).toContain(
-      'first read the minimum relevant conversation, vault, wearable, attachment, memory, or connected-source evidence that could change the answer.',
-    )
-    expect(prompt).toContain(
-      'Open with what you actually found; if none exists, say so.',
+      'Before personal improvement or new-goal advice, or whether to take, keep, reorder, or drop a supplement or other intervention, read personal evidence that could change the answer. Open with what it shows (such as the latest panel date and relevant markers), not goals alone; if none exists, say so.',
     )
 
     // Discovery stays bounded across turns: one concrete question per message.

@@ -253,7 +253,9 @@ describe('assistant context snapshot', () => {
       })
       expect(prompt).toContain('Assistant context snapshot for navigation only:')
       expect(prompt).not.toContain('Wearable coverage is present')
-      expect(prompt).toContain('Blood test records are present.')
+      expect(prompt).toContain(
+        'Blood test records are present (latest 2026-05-31). Read them with `vault-cli blood-test list --format json` before supplement, deficiency, or lab-relevant advice.',
+      )
       expect(prompt).toContain('Saved health context includes 1 goal.')
       expect(prompt).toContain('Active goals:')
       expect(prompt).toContain('11 p.m. sleep schedule ramp')
@@ -313,6 +315,101 @@ describe('assistant context snapshot', () => {
         .resolves.toMatchObject({
           pendingDirtyDomains: ['experiments'],
         })
+    } finally {
+      await rm(parentRoot, {
+        force: true,
+        recursive: true,
+      })
+    }
+  })
+
+  it('uses the newest live canonical blood test across ledger shards', async () => {
+    const parentRoot = await mkdtemp(path.join(tmpdir(), 'assistant-context-snapshot-'))
+    const vaultRoot = path.join(parentRoot, 'vault')
+
+    try {
+      await initializeVault({
+        createdAt: '2026-06-01T00:00:00.000Z',
+        vaultRoot,
+      })
+      await mkdir(path.join(vaultRoot, 'ledger/events'), {
+        recursive: true,
+      })
+      const survivingBloodTestId = generateContractId(ID_PREFIXES.event)
+      const deletedBloodTestId = generateContractId(ID_PREFIXES.event)
+      await writeFile(
+        path.join(vaultRoot, 'ledger/events/2026-01.jsonl'),
+        [
+          JSON.stringify({
+            schemaVersion: 'murph.event.v1',
+            id: survivingBloodTestId,
+            kind: 'test',
+            occurredAt: '2026-01-15T08:00:00.000Z',
+            recordedAt: '2026-01-15T08:05:00.000Z',
+            specimenType: 'blood',
+            testCategory: 'blood',
+            lifecycle: { revision: 1 },
+          }),
+          '',
+        ].join('\n'),
+        'utf8',
+      )
+      for (const month of ['02', '03', '04']) {
+        await writeFile(
+          path.join(vaultRoot, `ledger/events/2026-${month}.jsonl`),
+          `${JSON.stringify({
+            schemaVersion: 'murph.event.v1',
+            id: generateContractId(ID_PREFIXES.event),
+            kind: 'note',
+            occurredAt: `2026-${month}-15T08:00:00.000Z`,
+            recordedAt: `2026-${month}-15T08:05:00.000Z`,
+            title: `Month ${month} note`,
+          })}\n`,
+          'utf8',
+        )
+      }
+      await writeFile(
+        path.join(vaultRoot, 'ledger/events/2026-05.jsonl'),
+        [
+          JSON.stringify({
+            schemaVersion: 'murph.event.v1',
+            id: deletedBloodTestId,
+            kind: 'test',
+            occurredAt: '2026-05-31T08:00:00.000Z',
+            recordedAt: '2026-05-31T08:05:00.000Z',
+            specimenType: 'blood',
+            testCategory: 'blood',
+            lifecycle: { revision: 1 },
+          }),
+          JSON.stringify({
+            schemaVersion: 'murph.event.v1',
+            id: deletedBloodTestId,
+            kind: 'test',
+            occurredAt: '2026-05-31T08:00:00.000Z',
+            recordedAt: '2026-05-31T09:00:00.000Z',
+            specimenType: 'blood',
+            testCategory: 'blood',
+            lifecycle: { revision: 2, state: 'deleted' },
+          }),
+          '',
+        ].join('\n'),
+        'utf8',
+      )
+
+      await markAssistantContextSnapshotDirty({
+        domains: ['blood_tests'],
+        vaultRoot,
+      })
+      await refreshAssistantContextSnapshot({
+        now: () => '2026-06-01T00:05:00.000Z',
+        vaultRoot,
+      })
+
+      const prompt = await readAssistantContextSnapshotPrompt({ vaultRoot })
+      expect(prompt).toContain(
+        'Blood test records are present (latest 2026-01-15). Read them with `vault-cli blood-test list --format json` before supplement, deficiency, or lab-relevant advice.',
+      )
+      expect(prompt).not.toContain('latest 2026-05-31')
     } finally {
       await rm(parentRoot, {
         force: true,
@@ -963,19 +1060,39 @@ async function writeTestSnapshotSources(vaultRoot: string): Promise<void> {
   await mkdir(path.join(vaultRoot, 'ledger/events'), {
     recursive: true,
   })
+  const firstBloodTestId = generateContractId(ID_PREFIXES.event)
+  const observationId = generateContractId(ID_PREFIXES.event)
+  const latestBloodTestId = generateContractId(ID_PREFIXES.event)
   await writeFile(
     path.join(vaultRoot, 'ledger/events/2026-06.jsonl'),
     [
       JSON.stringify({
+        schemaVersion: 'murph.event.v1',
+        id: firstBloodTestId,
         kind: 'test',
+        occurredAt: '2026-05-20T08:00:00.000Z',
+        recordedAt: '2026-05-20T08:05:00.000Z',
         specimenType: 'blood',
         testCategory: 'blood',
       }),
       JSON.stringify({
+        schemaVersion: 'murph.event.v1',
+        id: observationId,
         dataOrigin: {
           sourceProviderSlug: 'garmin',
         },
         kind: 'observation',
+        occurredAt: '2026-05-25T08:00:00.000Z',
+        recordedAt: '2026-05-25T08:05:00.000Z',
+      }),
+      JSON.stringify({
+        schemaVersion: 'murph.event.v1',
+        id: latestBloodTestId,
+        kind: 'test',
+        occurredAt: '2026-05-31T08:00:00.000Z',
+        recordedAt: '2026-05-31T08:05:00.000Z',
+        specimenType: 'blood',
+        testCategory: 'blood',
       }),
       '',
     ].join('\n'),
