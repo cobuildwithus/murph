@@ -18,7 +18,7 @@ type StripeLookupResult = Awaited<
 >;
 
 type StripeBillingPolicyMemberInput = Parameters<
-  typeof import("@/src/lib/hosted-onboarding/stripe-billing-policy").updateHostedMemberStripeBillingIfFreshTx
+  typeof import("@/src/lib/hosted-onboarding/stripe-billing-policy").writeHostedMemberStripeBillingTx
 >[0]["member"];
 
 describe("hosted onboarding billing seam", () => {
