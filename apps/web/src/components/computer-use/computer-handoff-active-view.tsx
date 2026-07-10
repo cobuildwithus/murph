@@ -7,11 +7,6 @@ import { useEffect, useRef, useState } from "react";
 import { ComputerHandoffFloatingIsland } from "@/src/components/computer-use/computer-handoff-floating-island";
 import { Button, buttonVariants } from "@/src/components/ui/button";
 import { MurphPulseLoader } from "@/src/components/ui/murph-pulse-loader";
-import {
-  isMateriallyDifferentComputerHandoffViewportSize,
-  normalizeComputerHandoffViewportSize,
-  type ComputerHandoffViewportSize,
-} from "@/src/lib/computer-use/viewport";
 import { cn } from "@/src/lib/utils";
 
 type Phase =
@@ -22,30 +17,21 @@ type Phase =
 interface ComputerHandoffActiveViewProps {
   doneEndpoint: string;
   iframeAllow: string;
-  initialViewportSize: ComputerHandoffViewportSize | null;
   liveViewUrl: string;
-  viewportEndpoint: string;
 }
 
 export function ComputerHandoffActiveView({
   doneEndpoint,
   iframeAllow,
-  initialViewportSize,
   liveViewUrl,
-  viewportEndpoint,
 }: ComputerHandoffActiveViewProps) {
   const [phase, setPhase] = useState<Phase>({ kind: "idle", error: null });
   const [takeoverStarted, setTakeoverStarted] = useState(false);
   const iframeRef = useRef<HTMLIFrameElement>(null);
-  const surfaceRef = useRef<HTMLDivElement>(null);
   const successAnchorRef = useRef<HTMLAnchorElement>(null);
   const phaseRef = useRef(phase);
   const terminalRef = useRef(false);
   const focusReportedRef = useRef(false);
-  const lastSentViewportSizeRef = useRef<ComputerHandoffViewportSize | null>(
-    initialViewportSize,
-  );
-  const lastSentViewportObservedAtMsRef = useRef(0);
 
   useEffect(() => {
     phaseRef.current = phase;
@@ -67,82 +53,6 @@ export function ComputerHandoffActiveView({
     window.addEventListener("pagehide", onPageHide);
     return () => window.removeEventListener("pagehide", onPageHide);
   }, []);
-
-  useEffect(() => {
-    if (phase.kind !== "idle") {
-      return;
-    }
-
-    const surface = surfaceRef.current;
-    if (!surface) {
-      return;
-    }
-
-    let debounceTimer: ReturnType<typeof setTimeout> | null = null;
-
-    const syncViewport = () => {
-      const size = readMeasuredViewportSize(surface);
-      if (
-        !size
-        || !isMateriallyDifferentComputerHandoffViewportSize(
-          lastSentViewportSizeRef.current,
-          size,
-        )
-      ) {
-        return;
-      }
-
-      const previousSentViewportSize = lastSentViewportSizeRef.current;
-      lastSentViewportSizeRef.current = size;
-      void fetch(viewportEndpoint, {
-        body: JSON.stringify({
-          ...size,
-          observedAt: nextViewportObservedAtIso(
-            lastSentViewportObservedAtMsRef,
-          ),
-        }),
-        credentials: "same-origin",
-        headers: {
-          Accept: "application/json",
-          "Content-Type": "application/json",
-        },
-        method: "POST",
-      }).then((response) => {
-        if (!response.ok && lastSentViewportSizeRef.current === size) {
-          lastSentViewportSizeRef.current = previousSentViewportSize;
-        }
-      }).catch(() => {
-        if (lastSentViewportSizeRef.current === size) {
-          lastSentViewportSizeRef.current = previousSentViewportSize;
-        }
-        // Viewport sync is best-effort and must never block handoff control.
-      });
-    };
-
-    const scheduleSync = () => {
-      if (debounceTimer) {
-        clearTimeout(debounceTimer);
-      }
-      debounceTimer = setTimeout(syncViewport, 200);
-    };
-
-    syncViewport();
-
-    const resizeObserver =
-      typeof ResizeObserver === "function"
-        ? new ResizeObserver(scheduleSync)
-        : null;
-    resizeObserver?.observe(surface);
-    window.addEventListener("orientationchange", scheduleSync);
-
-    return () => {
-      if (debounceTimer) {
-        clearTimeout(debounceTimer);
-      }
-      resizeObserver?.disconnect();
-      window.removeEventListener("orientationchange", scheduleSync);
-    };
-  }, [phase.kind, viewportEndpoint]);
 
   const focusLiveView = () => {
     iframeRef.current?.focus({ preventScroll: true });
@@ -191,10 +101,7 @@ export function ComputerHandoffActiveView({
     <>
       {showBrowserSurface ? (
         <>
-          <div
-            ref={surfaceRef}
-            className="fixed left-0 top-0 h-dvh w-full bg-foreground"
-          >
+          <div className="fixed left-0 top-0 h-dvh w-full bg-foreground">
             <iframe
               ref={iframeRef}
               allow={iframeAllow}
@@ -331,23 +238,4 @@ export function ComputerHandoffActiveView({
       ) : null}
     </>
   );
-}
-
-function readMeasuredViewportSize(
-  element: HTMLElement,
-): ComputerHandoffViewportSize | null {
-  const rect = element.getBoundingClientRect();
-
-  return normalizeComputerHandoffViewportSize({
-    height: rect.height,
-    width: rect.width,
-  });
-}
-
-function nextViewportObservedAtIso(
-  lastObservedAtMsRef: { current: number },
-): string {
-  const observedAtMs = Math.max(Date.now(), lastObservedAtMsRef.current + 1);
-  lastObservedAtMsRef.current = observedAtMs;
-  return new Date(observedAtMs).toISOString();
 }

@@ -231,6 +231,7 @@ async function startScenario(): Promise<void> {
     assistantProviderMaxResponsesApiRequestBodies: 12,
     assistantProviderRecorder: true,
     assistantProviderStubModelId: productionLikeAssistantModel,
+    faultInjection: true,
     localDatabaseUrl,
     persistDirOverride: workerPersistDirOverride,
     persistDirPrefix: "murph-hosted-local-codex-container-continuity-",
