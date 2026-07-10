@@ -1,9 +1,9 @@
 import {
+  buildHostedExecutionPrefixedSafeErrorDiagnostics,
+} from "@murphai/hosted-execution";
+import {
   parseHostedWorkspaceReadResponse,
 } from "@murphai/hosted-execution/parsers";
-import {
-  HOSTED_ASSISTANT_TERRA_MODEL,
-} from "@murphai/hosted-execution/assistant-model";
 
 import {
   requireHostedCloudflareCallbackRequest,
@@ -12,9 +12,6 @@ import { getPrisma } from "@/src/lib/prisma";
 import {
   readHostedMemberAssistantModelPreference,
 } from "@/src/lib/hosted-onboarding/assistant-model-preference";
-import {
-  formatHostedExecutionSafeLogErrorDetails,
-} from "@/src/lib/hosted-execution/logging";
 import { readHostedWorkspace } from "@/src/lib/hosted-workspace/store";
 import { jsonOk, withJsonError } from "@/src/lib/hosted-onboarding/http";
 
@@ -36,12 +33,15 @@ export const GET = withJsonError(async (request: Request) => {
       prisma: getPrisma(),
     }).catch((error: unknown) => {
       console.warn(
-        "Hosted workspace assistant model preference read failed; using Terra.",
+        "Hosted workspace assistant model preference read failed; using fleet default.",
         {
-          ...formatHostedExecutionSafeLogErrorDetails(error, {
-            code: "HOSTED_WORKSPACE_ASSISTANT_MODEL_PREFERENCE_READ_FAILED",
+          ...buildHostedExecutionPrefixedSafeErrorDiagnostics({
+            error,
+            prefix: "preferenceRead",
           }),
-          fallbackModel: HOSTED_ASSISTANT_TERRA_MODEL,
+          errorCode: "HOSTED_WORKSPACE_ASSISTANT_MODEL_PREFERENCE_READ_FAILED",
+          fallback: "fleet_default",
+          operation: "read_hosted_member_assistant_model_preference",
         },
       );
       return null;
