@@ -10,13 +10,12 @@ import { sha256Hex } from "../primitives";
 import { hostedOnboardingError } from "./errors";
 import {
   buildHostedAiUsageGateNoticeIdempotencyKey,
-  claimHostedAiUsageLimitNoticeDeliveryTx,
   claimHostedLinqDeliveryProviderDispatchTx,
   markHostedLinqDeliveryAcceptedTx,
-  markHostedLinqDeliveryProviderDispatchStartedTx,
   markHostedLinqDeliverySendFailedTx,
   recordHostedLinqDeliveryAttemptTx,
   resolveHostedLinqInviteSignupDispatchEffectIdTx,
+  startHostedAiUsageLimitNoticeDispatchTx,
 } from "./linq-delivery-store";
 import {
   assertHostedLinqRouteAuthorityMatchesTarget,
@@ -52,6 +51,7 @@ import {
   sanitizeHostedOnboardingStructuredLogDetails,
   toHostedOnboardingLogIdSuffix,
 } from "./logging";
+import { requireHostedOnboardingLinqConfig } from "./runtime";
 
 type HostedLinqTransportPersistenceClient = PrismaClient | Prisma.TransactionClient;
 type HostedLinqTransportPostResponseScheduler = (task: () => Promise<void>) => void;
@@ -306,20 +306,6 @@ type HostedLinqSideEffectDrainSkipReason =
   | "notice_already_claimed"
   | "notice_in_flight";
 
-type HostedLinqNoticeClaimStatus =
-  | "already_claimed"
-  | "claimed"
-  | "in_flight";
-
-type HostedLinqNoticeClaim =
-  | {
-    effectId?: string;
-    status: "claimed";
-  }
-  | {
-    status: Exclude<HostedLinqNoticeClaimStatus, "claimed">;
-  };
-
 export type HostedLinqSideEffectDrainResult = {
   sentCount: number;
   skipped: readonly {
@@ -345,38 +331,41 @@ export async function drainHostedLinqSideEffectsDirect(
       });
       continue;
     }
-    const noticeClaim = await claimHostedLinqNoticeForSideEffect(effect, input.prisma);
-    if (noticeClaim.status !== "claimed") {
+    const noticeClaimed = await claimHostedLinqNoticeForSideEffect(effect, input.prisma);
+    if (!noticeClaimed) {
       skipped.push({
         effectId: effect.effectId,
-        reason: noticeClaim.status === "in_flight"
-          ? "notice_in_flight"
-          : "notice_already_claimed",
+        reason: "notice_already_claimed",
         template: effect.payload.template,
       });
       continue;
     }
-    const deliveryEffect = noticeClaim.effectId && noticeClaim.effectId !== effect.effectId
-      ? {
-          ...effect,
-          effectId: noticeClaim.effectId,
-        }
-      : effect;
-
+    let sendSkipReason: Exclude<
+      HostedLinqSideEffectDrainSkipReason,
+      "effect_unresolved"
+    > | null;
     try {
-      await sendHostedLinqSideEffect(deliveryEffect, {
+      sendSkipReason = await sendHostedLinqSideEffect(effect, {
         prisma: input.prisma,
         scheduleAfterResponse: input.scheduleAfterResponse,
         signal: input.signal,
       });
     } catch (error) {
-      await releaseHostedLinqNoticeClaimForSideEffect(deliveryEffect, input.prisma);
+      await releaseHostedLinqNoticeClaimForSideEffect(effect, input.prisma);
       throw error;
     }
+    if (sendSkipReason) {
+      skipped.push({
+        effectId: effect.effectId,
+        reason: sendSkipReason,
+        template: effect.payload.template,
+      });
+      continue;
+    }
 
-    if (isHostedInviteLinqMessagePayload(deliveryEffect.payload)) {
-      await markHostedLinqNoticeSentForSideEffect(deliveryEffect, input.prisma);
-      await markHostedInviteSentBestEffort(deliveryEffect.payload.inviteId, input.prisma);
+    if (isHostedInviteLinqMessagePayload(effect.payload)) {
+      await markHostedLinqNoticeSentForSideEffect(effect, input.prisma);
+      await markHostedInviteSentBestEffort(effect.payload.inviteId, input.prisma);
     }
     sentCount += 1;
   }
@@ -435,20 +424,20 @@ async function sendHostedLinqSideEffect(
     scheduleAfterResponse?: HostedLinqTransportPostResponseScheduler;
     signal?: AbortSignal;
   },
-): Promise<void> {
+): Promise<Exclude<HostedLinqSideEffectDrainSkipReason, "effect_unresolved"> | null> {
   const startedAtMs = Date.now();
-  const claimedUsageLimitAttemptedAt =
+  const usageLimitPayload =
     effect.payload.template === "ai_usage_quota" && effect.payload.claimToken
-      ? new Date(effect.payload.claimToken.sentAt)
+      ? effect.payload
       : null;
-  const deliveryAttemptTask = claimedUsageLimitAttemptedAt
+  const deliveryAttemptTask = usageLimitPayload
     ? Promise.resolve()
     : recordHostedLinqDeliveryAttemptBestEffort({
         effect,
         prisma: options.prisma,
         startedAtMs,
       });
-  let providerDispatchStarted = false;
+  let deliveryEffect = effect;
 
   try {
     if (effect.payload.template === "invite_signup_fallback") {
@@ -470,42 +459,48 @@ async function sendHostedLinqSideEffect(
         }),
         scheduleAfterResponse: options.scheduleAfterResponse,
       });
-      return;
+      return null;
     }
 
     await assertHostedLinqSideEffectRouteAuthority(effect, options.prisma);
 
     const message = await buildHostedLinqSideEffectMessage(effect, options.prisma);
-    if (claimedUsageLimitAttemptedAt) {
-      await deliveryAttemptTask;
-      providerDispatchStarted = await markHostedLinqDeliveryProviderDispatchStartedTx({
-        expectedAttemptedAt: claimedUsageLimitAttemptedAt ?? undefined,
-        idempotencyKey: effect.effectId,
-        prisma: options.prisma,
-        startedAt: claimedUsageLimitAttemptedAt ?? new Date(startedAtMs),
+    if (usageLimitPayload) {
+      requireHostedOnboardingLinqConfig();
+      options.signal?.throwIfAborted();
+      const attemptedAt = new Date(usageLimitPayload.claimToken.sentAt);
+      const dispatch = await startHostedAiUsageLimitNoticeDispatchTx({
+        attemptedAt,
+        linqChatId: usageLimitPayload.chatId,
+        memberId: usageLimitPayload.memberId,
+        periodStart: new Date(usageLimitPayload.claimToken.periodStart),
+        prisma: requireHostedLinqTransportPrismaClient(options.prisma),
+        source: "hosted_webhook_side_effect",
+        sourceRef: effect.effectId,
+        targetKind: "thread",
       });
-      if (!providerDispatchStarted) {
-        throw hostedOnboardingError({
-          code: "hosted_linq_delivery_dispatch_start_unclaimed",
-          httpStatus: 409,
-          message: "Hosted Linq delivery dispatch start was not claimable before provider send.",
-          retryable: true,
-        });
+      if (dispatch.status !== "claimed") {
+        return dispatch.status === "already_notified"
+          ? "notice_already_claimed"
+          : "notice_in_flight";
       }
+      deliveryEffect = dispatch.idempotencyKey === effect.effectId
+        ? effect
+        : { ...effect, effectId: dispatch.idempotencyKey };
     }
 
     const result = await sendHostedLinqChatMessage({
       chatId: effect.payload.chatId,
-      idempotencyKey: effect.effectId,
+      idempotencyKey: deliveryEffect.effectId,
       message,
       replyToMessageId: effect.payload.replyToMessageId,
       signal: options.signal,
     });
-    if (effect.payload.template === "invite_signup") {
+    if (deliveryEffect.payload.template === "invite_signup") {
       queueHostedLinqContactCardSideEffectShare({
         effect: {
-          effectId: effect.effectId,
-          payload: effect.payload,
+          effectId: deliveryEffect.effectId,
+          payload: deliveryEffect.payload,
         },
         prisma: options.prisma,
         signal: options.signal,
@@ -513,12 +508,12 @@ async function sendHostedLinqSideEffect(
     }
     const acceptedMilestone = () => markHostedLinqDeliveryAcceptedBestEffort({
       chatId: result.chatId ?? effect.payload.chatId,
-      effect,
+      effect: deliveryEffect,
       messageId: result.messageId,
       prisma: options.prisma,
-      throwOnError: effect.payload.template === "ai_usage_quota",
+      throwOnError: deliveryEffect.payload.template === "ai_usage_quota",
     });
-    if (effect.payload.template === "ai_usage_quota") {
+    if (deliveryEffect.payload.template === "ai_usage_quota") {
       await deliveryAttemptTask;
       await acceptedMilestone();
     } else {
@@ -541,11 +536,11 @@ async function sendHostedLinqSideEffect(
       });
     } else if (
       effect.payload.template === "ai_usage_quota"
-      && providerDispatchStarted
+      && usageLimitPayload
     ) {
       console.error(
         "Hosted Linq side-effect delivery failed.",
-        buildHostedLinqSideEffectLogDetails(effect, error, Date.now() - startedAtMs),
+        buildHostedLinqSideEffectLogDetails(deliveryEffect, error, Date.now() - startedAtMs),
       );
       throw error;
     } else {
@@ -554,7 +549,6 @@ async function sendHostedLinqSideEffect(
         milestoneTask: () => markHostedLinqDeliveryFailedBestEffort({
           effect,
           error,
-          expectedAttemptedAt: claimedUsageLimitAttemptedAt ?? undefined,
           prisma: options.prisma,
         }),
         scheduleAfterResponse: options.scheduleAfterResponse,
@@ -562,11 +556,12 @@ async function sendHostedLinqSideEffect(
     }
     console.error(
       "Hosted Linq side-effect delivery failed.",
-      buildHostedLinqSideEffectLogDetails(effect, error, Date.now() - startedAtMs),
+      buildHostedLinqSideEffectLogDetails(deliveryEffect, error, Date.now() - startedAtMs),
     );
     throw error;
   }
 
+  return null;
 }
 
 function queueHostedLinqContactCardSideEffectShare(share: {
@@ -1094,7 +1089,7 @@ function buildHostedLinqAiUsageQuotaPayload(
 async function claimHostedLinqNoticeForSideEffect(
   effect: HostedLinqMessageSideEffect,
   prisma: HostedLinqTransportPersistenceClient,
-): Promise<HostedLinqNoticeClaim> {
+): Promise<boolean> {
   switch (effect.payload.template) {
     case "invite_signup_fallback":
     case "invite_signup": {
@@ -1109,51 +1104,39 @@ async function claimHostedLinqNoticeForSideEffect(
         targetKind: target.targetKind,
         template: effect.payload.template,
       });
-      return claim.claimed ? { status: "claimed" } : { status: "already_claimed" };
+      return claim.claimed;
     }
     case "invite_signin":
-      return { status: "claimed" };
-    case "ai_usage_quota": {
-      if (!effect.payload.claimToken) {
-        return { status: "claimed" };
-      }
-      const target = readHostedLinqSideEffectDeliveryTarget(effect.payload);
-      const attemptedAt = new Date(effect.payload.claimToken.sentAt);
-      const claim = await claimHostedAiUsageLimitNoticeDeliveryTx({
-        attemptedAt,
-        linqChatId: target.linqChatId,
-        memberId: effect.payload.memberId,
-        periodStart: new Date(effect.payload.claimToken.periodStart),
-        phoneNumber: target.phoneNumber,
-        prisma,
-        source: "hosted_webhook_side_effect",
-        sourceRef: effect.effectId,
-        targetKind: target.targetKind,
-      });
-      if (claim.status !== "claimed") {
-        return {
-          status: claim.status === "already_notified"
-            ? "already_claimed"
-            : "in_flight",
-        };
-      }
-      return {
-        effectId: claim.idempotencyKey,
-        status: "claimed",
-      };
-    }
+      return true;
+    case "ai_usage_quota":
+      return true;
     case "daily_quota":
-      return (await claimHostedLinqQuotaReplyNotice({
+      return claimHostedLinqQuotaReplyNotice({
         memberId: effect.payload.memberId,
         occurredAt: effect.payload.occurredAt,
         prisma,
-      }))
-        ? { status: "claimed" }
-        : { status: "already_claimed" };
+      });
     case "conversation_home_redirect":
     case "family_invite_reply":
-      return { status: "claimed" };
+      return true;
   }
+}
+
+function requireHostedLinqTransportPrismaClient(
+  prisma: HostedLinqTransportPersistenceClient,
+): PrismaClient {
+  if (!isHostedLinqTransportPrismaClient(prisma)) {
+    throw new TypeError(
+      "Hosted AI usage-limit notice dispatch must run outside an existing transaction.",
+    );
+  }
+  return prisma;
+}
+
+function isHostedLinqTransportPrismaClient(
+  prisma: HostedLinqTransportPersistenceClient,
+): prisma is PrismaClient {
+  return "$transaction" in prisma;
 }
 
 async function releaseHostedLinqNoticeClaimForSideEffect(

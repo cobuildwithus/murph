@@ -37,6 +37,13 @@ vi.mock("@/src/lib/hosted-onboarding/linq-contact-card-share", () => ({
   }),
 }));
 
+vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
+  requireHostedOnboardingLinqConfig: vi.fn(() => ({
+    apiBaseUrl: "https://linq.example.test/api/partner/v3",
+    apiToken: "linq-token",
+  })),
+}));
+
 vi.mock("@/src/lib/hosted-onboarding/linq-daily-state", async () => {
   const actual = await vi.importActual<
     typeof import("@/src/lib/hosted-onboarding/linq-daily-state")
@@ -57,7 +64,7 @@ vi.mock("@/src/lib/hosted-onboarding/linq-delivery-store", async () => {
   >("@/src/lib/hosted-onboarding/linq-delivery-store");
   return {
     ...actual,
-    claimHostedAiUsageLimitNoticeDeliveryTx: vi.fn(
+    startHostedAiUsageLimitNoticeDispatchTx: vi.fn(
       async (input: { memberId: string; periodStart: Date }) => ({
         idempotencyKey: actual.buildHostedAiUsageGateNoticeIdempotencyKey(input),
         status: "claimed" as const,
@@ -71,7 +78,6 @@ vi.mock("@/src/lib/hosted-onboarding/linq-delivery-store", async () => {
       reopenOnboardingLink: null,
       restoreOnboardingLink: null,
     }),
-    markHostedLinqDeliveryProviderDispatchStartedTx: vi.fn().mockResolvedValue(true),
     markHostedLinqDeliverySendFailedTx: vi.fn(actual.markHostedLinqDeliverySendFailedTx),
     recordHostedLinqDeliveryAttemptTx: vi.fn(actual.recordHostedLinqDeliveryAttemptTx),
     resolveHostedLinqInviteSignupDispatchEffectIdTx: vi.fn(
@@ -103,10 +109,9 @@ import {
 } from "@/src/lib/hosted-onboarding/linq-contact-card-share";
 import {
   buildHostedAiUsageGateNoticeIdempotencyKey,
-  claimHostedAiUsageLimitNoticeDeliveryTx,
+  startHostedAiUsageLimitNoticeDispatchTx,
   claimHostedLinqDeliveryProviderDispatchTx,
   markHostedLinqDeliveryAcceptedTx,
-  markHostedLinqDeliveryProviderDispatchStartedTx,
   markHostedLinqDeliverySendFailedTx,
   recordHostedLinqDeliveryAttemptTx,
 } from "@/src/lib/hosted-onboarding/linq-delivery-store";
@@ -117,6 +122,14 @@ import {
   createHostedWebhookLinqMessageSideEffect,
   drainHostedLinqSideEffectsDirect,
 } from "@/src/lib/hosted-onboarding/webhook-transport";
+import { requireHostedOnboardingLinqConfig } from "@/src/lib/hosted-onboarding/runtime";
+
+const usageTransactionPrisma = {};
+const usagePrisma = {
+  $transaction: vi.fn(async (
+    operation: (prisma: typeof usageTransactionPrisma) => Promise<unknown>,
+  ) => operation(usageTransactionPrisma)),
+};
 
 describe("hosted Linq webhook transport", () => {
   beforeEach(() => {
@@ -129,7 +142,7 @@ describe("hosted Linq webhook transport", () => {
       claimed: true,
       id: "hld_claimed",
     });
-    vi.mocked(claimHostedAiUsageLimitNoticeDeliveryTx)
+    vi.mocked(startHostedAiUsageLimitNoticeDispatchTx)
       .mockImplementation(async (input) => ({
         idempotencyKey: buildHostedAiUsageGateNoticeIdempotencyKey(input),
         status: "claimed",
@@ -138,7 +151,10 @@ describe("hosted Linq webhook transport", () => {
       reopenOnboardingLink: null,
       restoreOnboardingLink: null,
     });
-    vi.mocked(markHostedLinqDeliveryProviderDispatchStartedTx).mockResolvedValue(true);
+    vi.mocked(requireHostedOnboardingLinqConfig).mockReturnValue({
+      apiBaseUrl: "https://linq.example.test/api/partner/v3",
+      apiToken: "linq-token",
+    });
   });
 
   it("sends the planner-chosen home phone with a chat+home-line stable effect id", async () => {
@@ -548,7 +564,7 @@ describe("hosted Linq webhook transport", () => {
     expect(claimHostedLinqOnboardingLinkNotice).not.toHaveBeenCalled();
   });
 
-  it("claims and marks AI usage quota replies through the delivery row", async () => {
+  it("starts AI usage quota replies through the delivery row before provider send", async () => {
     const effect = createHostedWebhookLinqMessageSideEffect({
       chatId: "chat-1",
       claimToken: {
@@ -576,7 +592,7 @@ describe("hosted Linq webhook transport", () => {
 
     await expect(
       drainHostedLinqSideEffectsDirect({
-        prisma: {} as never,
+        prisma: usagePrisma as never,
         sideEffects: [effect],
       }),
     ).resolves.toBeDefined();
@@ -589,30 +605,28 @@ describe("hosted Linq webhook transport", () => {
         replyToMessageId: "message-1",
       }),
     );
-    expect(claimHostedAiUsageLimitNoticeDeliveryTx).toHaveBeenCalledWith({
+    expect(startHostedAiUsageLimitNoticeDispatchTx).toHaveBeenCalledWith({
       attemptedAt: new Date("2026-03-26T12:00:01.000Z"),
       linqChatId: "chat-1",
       memberId: "member-1",
       periodStart: new Date("2026-03-01T00:00:00.000Z"),
       phoneNumber: undefined,
-      prisma: {},
+      prisma: usagePrisma,
       source: "hosted_webhook_side_effect",
       sourceRef: expectedIdempotencyKey,
       targetKind: "thread",
     });
     expect(claimHostedLinqDeliveryProviderDispatchTx).not.toHaveBeenCalled();
-    expect(markHostedLinqDeliveryProviderDispatchStartedTx).toHaveBeenCalledWith({
-      expectedAttemptedAt: new Date("2026-03-26T12:00:01.000Z"),
-      idempotencyKey: expectedIdempotencyKey,
-      prisma: {},
-      startedAt: new Date("2026-03-26T12:00:01.000Z"),
-    });
-    const [dispatchStartedOrder] = vi.mocked(markHostedLinqDeliveryProviderDispatchStartedTx)
+    const [configValidationOrder] = vi.mocked(requireHostedOnboardingLinqConfig)
+      .mock.invocationCallOrder;
+    const [dispatchStartedOrder] = vi.mocked(startHostedAiUsageLimitNoticeDispatchTx)
       .mock.invocationCallOrder;
     const [providerSendOrder] = vi.mocked(sendHostedLinqChatMessage)
       .mock.invocationCallOrder;
+    expect(configValidationOrder).toBeDefined();
     expect(dispatchStartedOrder).toBeDefined();
     expect(providerSendOrder).toBeDefined();
+    expect(Number(configValidationOrder)).toBeLessThan(Number(dispatchStartedOrder));
     expect(Number(dispatchStartedOrder)).toBeLessThan(Number(providerSendOrder));
     expect(markHostedLinqDeliveryAcceptedTx).toHaveBeenCalledWith({
       idempotencyKey: expectedIdempotencyKey,
@@ -624,38 +638,7 @@ describe("hosted Linq webhook transport", () => {
     expect(claimHostedLinqQuotaReplyNotice).not.toHaveBeenCalled();
   });
 
-  it("keeps a claimed usage-limit generation retryable after a pre-provider rejection", async () => {
-    let attemptedAt: Date | null = null;
-    let markerSentAt: Date | null = null;
-    const scheduledTasks: Array<() => Promise<void>> = [];
-
-    vi.mocked(claimHostedAiUsageLimitNoticeDeliveryTx).mockImplementation(async (input) => {
-      if (
-        attemptedAt
-        && markerSentAt
-        && attemptedAt.getTime() !== markerSentAt.getTime()
-      ) {
-        return { status: "already_notified" };
-      }
-      attemptedAt = input.attemptedAt;
-      markerSentAt = input.attemptedAt;
-      return {
-        idempotencyKey: buildHostedAiUsageGateNoticeIdempotencyKey(input),
-        status: "claimed",
-      };
-    });
-    vi.mocked(markHostedLinqDeliveryProviderDispatchStartedTx)
-      .mockImplementation(async (input) => {
-        if (
-          !attemptedAt
-          || input.expectedAttemptedAt?.getTime() !== attemptedAt.getTime()
-        ) {
-          return false;
-        }
-        attemptedAt = input.startedAt ?? attemptedAt;
-        return true;
-      });
-
+  it("validates route authority before starting an AI usage quota dispatch", async () => {
     const firstEffect = createHostedWebhookLinqMessageSideEffect({
       chatId: "chat-1",
       claimToken: {
@@ -678,23 +661,17 @@ describe("hosted Linq webhook transport", () => {
     });
 
     await expect(drainHostedLinqSideEffectsDirect({
-      prisma: {} as never,
-      scheduleAfterResponse: (task) => scheduledTasks.push(task),
+      prisma: usagePrisma as never,
       sideEffects: [firstEffect],
     })).rejects.toMatchObject({
       code: "HOSTED_LINQ_EGRESS_ROUTE_AUTHORITY_MISMATCH",
     });
-    await Promise.all(scheduledTasks.map((task) => task()));
 
+    expect(startHostedAiUsageLimitNoticeDispatchTx).not.toHaveBeenCalled();
+    expect(requireHostedOnboardingLinqConfig).not.toHaveBeenCalled();
     expect(recordHostedLinqDeliveryAttemptTx).not.toHaveBeenCalled();
-    expect(markHostedLinqDeliverySendFailedTx).toHaveBeenCalledWith({
-      expectedAttemptedAt: new Date("2026-03-26T12:00:01.000Z"),
-      failureCode: "HOSTED_LINQ_EGRESS_ROUTE_AUTHORITY_MISMATCH",
-      failureReason: "Linq egress route authority does not match the requested thread.",
-      idempotencyKey: firstEffect.effectId,
-      prisma: {},
-    });
-    expect(attemptedAt).toEqual(markerSentAt);
+    expect(markHostedLinqDeliverySendFailedTx).not.toHaveBeenCalled();
+    expect(sendHostedLinqChatMessage).not.toHaveBeenCalled();
 
     const retryEffect = createHostedWebhookLinqMessageSideEffect({
       chatId: "chat-1",
@@ -712,24 +689,17 @@ describe("hosted Linq webhook transport", () => {
     });
 
     await expect(drainHostedLinqSideEffectsDirect({
-      prisma: {} as never,
+      prisma: usagePrisma as never,
       sideEffects: [retryEffect],
     })).resolves.toBeDefined();
 
-    expect(claimHostedAiUsageLimitNoticeDeliveryTx).toHaveBeenCalledTimes(2);
-    expect(markHostedLinqDeliveryProviderDispatchStartedTx).toHaveBeenCalledWith({
-      expectedAttemptedAt: new Date("2026-03-26T12:16:00.000Z"),
-      idempotencyKey: retryEffect.effectId,
-      prisma: {},
-      startedAt: new Date("2026-03-26T12:16:00.000Z"),
-    });
+    expect(startHostedAiUsageLimitNoticeDispatchTx).toHaveBeenCalledOnce();
     expect(sendHostedLinqChatMessage).toHaveBeenCalledOnce();
-    expect(attemptedAt).toEqual(markerSentAt);
   });
 
   it("sends claimable legacy AI usage quota replies with the legacy delivery key", async () => {
     const legacyIdempotencyKey = "ai-usage-gate:legacy-notice-code-key";
-    vi.mocked(claimHostedAiUsageLimitNoticeDeliveryTx)
+    vi.mocked(startHostedAiUsageLimitNoticeDispatchTx)
       .mockResolvedValueOnce({
         idempotencyKey: legacyIdempotencyKey,
         status: "claimed",
@@ -751,7 +721,7 @@ describe("hosted Linq webhook transport", () => {
 
     await expect(
       drainHostedLinqSideEffectsDirect({
-        prisma: {} as never,
+        prisma: usagePrisma as never,
         sideEffects: [effect],
       }),
     ).resolves.toEqual({
@@ -759,7 +729,7 @@ describe("hosted Linq webhook transport", () => {
       skipped: [],
     });
 
-    expect(claimHostedAiUsageLimitNoticeDeliveryTx).toHaveBeenCalled();
+    expect(startHostedAiUsageLimitNoticeDispatchTx).toHaveBeenCalled();
     expect(claimHostedLinqDeliveryProviderDispatchTx).not.toHaveBeenCalled();
     expect(sendHostedLinqChatMessage).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -801,7 +771,7 @@ describe("hosted Linq webhook transport", () => {
     try {
       await expect(
         drainHostedLinqSideEffectsDirect({
-          prisma: {} as never,
+          prisma: usagePrisma as never,
           sideEffects: [effect],
         }),
       ).rejects.toThrow("acceptance write failed");
@@ -809,12 +779,6 @@ describe("hosted Linq webhook transport", () => {
       warnSpy.mockRestore();
     }
 
-    expect(markHostedLinqDeliveryProviderDispatchStartedTx).toHaveBeenCalledWith({
-      expectedAttemptedAt: new Date("2026-03-26T12:00:01.000Z"),
-      idempotencyKey: expectedIdempotencyKey,
-      prisma: {},
-      startedAt: new Date("2026-03-26T12:00:01.000Z"),
-    });
     expect(sendHostedLinqChatMessage).toHaveBeenCalledTimes(1);
     expect(markHostedLinqDeliveryAcceptedTx).toHaveBeenCalledWith({
       idempotencyKey: expectedIdempotencyKey,
@@ -822,7 +786,7 @@ describe("hosted Linq webhook transport", () => {
       messageId: "provider-message-1",
       prisma: expect.anything(),
     });
-    const [dispatchStartedOrder] = vi.mocked(markHostedLinqDeliveryProviderDispatchStartedTx)
+    const [dispatchStartedOrder] = vi.mocked(startHostedAiUsageLimitNoticeDispatchTx)
       .mock.invocationCallOrder;
     const [providerSendOrder] = vi.mocked(sendHostedLinqChatMessage)
       .mock.invocationCallOrder;
@@ -833,7 +797,7 @@ describe("hosted Linq webhook transport", () => {
   });
 
   it("skips already-claimed AI usage quota replies before provider dispatch", async () => {
-    vi.mocked(claimHostedAiUsageLimitNoticeDeliveryTx)
+    vi.mocked(startHostedAiUsageLimitNoticeDispatchTx)
       .mockResolvedValueOnce({ status: "already_notified" });
     const effect = createHostedWebhookLinqMessageSideEffect({
       chatId: "chat-1",
@@ -852,7 +816,7 @@ describe("hosted Linq webhook transport", () => {
 
     await expect(
       drainHostedLinqSideEffectsDirect({
-        prisma: {} as never,
+        prisma: usagePrisma as never,
         sideEffects: [effect],
       }),
     ).resolves.toBeDefined();
@@ -863,7 +827,7 @@ describe("hosted Linq webhook transport", () => {
   });
 
   it("treats a fresh current AI usage quota delivery row as in-flight", async () => {
-    vi.mocked(claimHostedAiUsageLimitNoticeDeliveryTx)
+    vi.mocked(startHostedAiUsageLimitNoticeDispatchTx)
       .mockResolvedValueOnce({ status: "in_flight" });
     const effect = createHostedWebhookLinqMessageSideEffect({
       chatId: "chat-1",
@@ -882,7 +846,7 @@ describe("hosted Linq webhook transport", () => {
 
     await expect(
       drainHostedLinqSideEffectsDirect({
-        prisma: {} as never,
+        prisma: usagePrisma as never,
         sideEffects: [effect],
       }),
     ).resolves.toEqual({
@@ -896,7 +860,7 @@ describe("hosted Linq webhook transport", () => {
       ],
     });
 
-    expect(claimHostedAiUsageLimitNoticeDeliveryTx).toHaveBeenCalled();
+    expect(startHostedAiUsageLimitNoticeDispatchTx).toHaveBeenCalled();
     expect(claimHostedLinqDeliveryProviderDispatchTx).not.toHaveBeenCalled();
     expect(sendHostedLinqChatMessage).not.toHaveBeenCalled();
     expect(markHostedLinqDeliveryAcceptedTx).not.toHaveBeenCalled();
@@ -904,7 +868,7 @@ describe("hosted Linq webhook transport", () => {
   });
 
   it("treats terminal Telegram usage quota failures as already owned", async () => {
-    vi.mocked(claimHostedAiUsageLimitNoticeDeliveryTx)
+    vi.mocked(startHostedAiUsageLimitNoticeDispatchTx)
       .mockResolvedValueOnce({ status: "already_notified" });
     const effect = createHostedWebhookLinqMessageSideEffect({
       chatId: "chat-1",
@@ -923,7 +887,7 @@ describe("hosted Linq webhook transport", () => {
 
     await expect(
       drainHostedLinqSideEffectsDirect({
-        prisma: {} as never,
+        prisma: usagePrisma as never,
         sideEffects: [effect],
       }),
     ).resolves.toEqual({
@@ -937,7 +901,7 @@ describe("hosted Linq webhook transport", () => {
       ],
     });
 
-    expect(claimHostedAiUsageLimitNoticeDeliveryTx).toHaveBeenCalled();
+    expect(startHostedAiUsageLimitNoticeDispatchTx).toHaveBeenCalled();
     expect(claimHostedLinqDeliveryProviderDispatchTx).not.toHaveBeenCalled();
     expect(sendHostedLinqChatMessage).not.toHaveBeenCalled();
     expect(markHostedLinqDeliveryAcceptedTx).not.toHaveBeenCalled();
@@ -945,7 +909,7 @@ describe("hosted Linq webhook transport", () => {
   });
 
   it("skips AI usage quota replies already delivered under a legacy notice-code key", async () => {
-    vi.mocked(claimHostedAiUsageLimitNoticeDeliveryTx)
+    vi.mocked(startHostedAiUsageLimitNoticeDispatchTx)
       .mockResolvedValueOnce({ status: "already_notified" });
     const effect = createHostedWebhookLinqMessageSideEffect({
       chatId: "chat-1",
@@ -964,7 +928,7 @@ describe("hosted Linq webhook transport", () => {
 
     await expect(
       drainHostedLinqSideEffectsDirect({
-        prisma: {} as never,
+        prisma: usagePrisma as never,
         sideEffects: [effect],
       }),
     ).resolves.toEqual({
@@ -978,14 +942,14 @@ describe("hosted Linq webhook transport", () => {
       ],
     });
 
-    expect(claimHostedAiUsageLimitNoticeDeliveryTx)
+    expect(startHostedAiUsageLimitNoticeDispatchTx)
       .toHaveBeenCalledWith({
         attemptedAt: new Date("2026-03-26T12:00:01.000Z"),
         linqChatId: "chat-1",
         memberId: "member-1",
         periodStart: new Date("2026-03-01T00:00:00.000Z"),
         phoneNumber: undefined,
-        prisma: {},
+        prisma: usagePrisma,
         source: "hosted_webhook_side_effect",
         sourceRef: effect.effectId,
         targetKind: "thread",
@@ -996,7 +960,7 @@ describe("hosted Linq webhook transport", () => {
   });
 
   it("skips AI usage quota replies already delivered under the current delivery key before reading old period claims", async () => {
-    vi.mocked(claimHostedAiUsageLimitNoticeDeliveryTx)
+    vi.mocked(startHostedAiUsageLimitNoticeDispatchTx)
       .mockResolvedValueOnce({ status: "already_notified" });
     const effect = createHostedWebhookLinqMessageSideEffect({
       chatId: "chat-1",
@@ -1015,7 +979,7 @@ describe("hosted Linq webhook transport", () => {
 
     await expect(
       drainHostedLinqSideEffectsDirect({
-        prisma: {} as never,
+        prisma: usagePrisma as never,
         sideEffects: [effect],
       }),
     ).resolves.toEqual({
@@ -1052,7 +1016,7 @@ describe("hosted Linq webhook transport", () => {
 
     await expect(
       drainHostedLinqSideEffectsDirect({
-        prisma: {} as never,
+        prisma: usagePrisma as never,
         sideEffects: [effect],
       }),
     ).resolves.toEqual({
@@ -1060,7 +1024,7 @@ describe("hosted Linq webhook transport", () => {
       skipped: [],
     });
 
-    expect(claimHostedAiUsageLimitNoticeDeliveryTx).toHaveBeenCalled();
+    expect(startHostedAiUsageLimitNoticeDispatchTx).toHaveBeenCalled();
     expect(claimHostedLinqDeliveryProviderDispatchTx).not.toHaveBeenCalled();
     expect(sendHostedLinqChatMessage).toHaveBeenCalled();
     expect(markHostedLinqDeliveryAcceptedTx).toHaveBeenCalled();
@@ -1084,7 +1048,7 @@ describe("hosted Linq webhook transport", () => {
 
     await expect(
       drainHostedLinqSideEffectsDirect({
-        prisma: {} as never,
+        prisma: usagePrisma as never,
         sideEffects: [effect],
       }),
     ).resolves.toEqual({
@@ -1092,7 +1056,7 @@ describe("hosted Linq webhook transport", () => {
       skipped: [],
     });
 
-    expect(claimHostedAiUsageLimitNoticeDeliveryTx).toHaveBeenCalled();
+    expect(startHostedAiUsageLimitNoticeDispatchTx).toHaveBeenCalled();
     expect(claimHostedLinqDeliveryProviderDispatchTx).not.toHaveBeenCalled();
     expect(sendHostedLinqChatMessage).toHaveBeenCalled();
     expect(markHostedLinqDeliveryAcceptedTx).toHaveBeenCalled();
@@ -1254,7 +1218,7 @@ describe("hosted Linq webhook transport", () => {
 
     await expect(
       drainHostedLinqSideEffectsDirect({
-        prisma: {} as never,
+        prisma: usagePrisma as never,
         sideEffects: [effect],
       }),
     ).rejects.toThrow("send failed");
@@ -1288,7 +1252,7 @@ describe("hosted Linq webhook transport", () => {
 
     expect(markHostedLinqDeliveryAcceptedTx).not.toHaveBeenCalled();
     expect(claimHostedLinqDeliveryProviderDispatchTx).not.toHaveBeenCalled();
-    expect(markHostedLinqDeliveryProviderDispatchStartedTx).not.toHaveBeenCalled();
+    expect(startHostedAiUsageLimitNoticeDispatchTx).not.toHaveBeenCalled();
     expect(releaseHostedLinqQuotaReplyNoticeClaim).not.toHaveBeenCalled();
   });
 
@@ -1314,7 +1278,7 @@ describe("hosted Linq webhook transport", () => {
       sideEffects: [effect],
     });
 
-    expect(markHostedLinqDeliveryProviderDispatchStartedTx).not.toHaveBeenCalled();
+    expect(startHostedAiUsageLimitNoticeDispatchTx).not.toHaveBeenCalled();
     expect(sendHostedLinqChatMessage).toHaveBeenCalledTimes(2);
     expect(sendHostedLinqChatMessage).toHaveBeenNthCalledWith(
       2,
@@ -1587,7 +1551,7 @@ describe("hosted Linq webhook transport", () => {
     try {
       await expect(
         drainHostedLinqSideEffectsDirect({
-          prisma: {} as never,
+          prisma: usagePrisma as never,
           sideEffects: [effect],
         }),
       ).rejects.toThrow("send failed");
