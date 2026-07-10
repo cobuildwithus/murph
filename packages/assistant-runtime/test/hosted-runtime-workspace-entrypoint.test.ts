@@ -92,6 +92,7 @@ import { describe, expect, test, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   createHostedWorkspaceSnapshotCheckpointRequestBuilder: vi.fn(),
   ensureHostedInboxSidecarReady: vi.fn(),
+  prepareHostedCodexRuntimeEnvironment: vi.fn(),
   refreshHostedBrowserVaultReplicaFromRuntime: vi.fn(),
   summarizeWearableSleepRuntime: vi.fn(),
   snapshotHostedPortableWorkspaceDelta: vi.fn(),
@@ -140,6 +141,18 @@ vi.mock("../src/hosted-runtime/browser-vault-replica.ts", async (importOriginal)
     refreshHostedBrowserVaultReplicaFromRuntime:
       mocks.refreshHostedBrowserVaultReplicaFromRuntime.mockImplementation(
         actual.refreshHostedBrowserVaultReplicaFromRuntime,
+      ),
+  };
+});
+
+vi.mock("../src/hosted-runtime/codex-config.ts", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../src/hosted-runtime/codex-config.ts")>();
+
+  return {
+    ...actual,
+    prepareHostedCodexRuntimeEnvironment:
+      mocks.prepareHostedCodexRuntimeEnvironment.mockImplementation(
+        actual.prepareHostedCodexRuntimeEnvironment,
       ),
   };
 });
@@ -449,6 +462,78 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
+  test("keeps runner ownership until aborted Codex config preparation settles", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const hostAbortController = new AbortController();
+    const hostAbortReason = new Error("host request aborted during Codex config prep");
+    const prepareStarted = createDeferred<void>();
+    const prepareRelease = createDeferred<void>();
+    const prepareHostedCodexRuntimeEnvironmentImpl =
+      mocks.prepareHostedCodexRuntimeEnvironment.getMockImplementation();
+    let settled = false;
+    let resultPromise: ReturnType<typeof runHostedWorkspaceRuntimeJobInProcess> | null = null;
+
+    assert.ok(prepareHostedCodexRuntimeEnvironmentImpl);
+    mocks.prepareHostedCodexRuntimeEnvironment.mockImplementationOnce(async (input) => {
+      prepareStarted.resolve();
+      await prepareRelease.promise;
+      return await prepareHostedCodexRuntimeEnvironmentImpl(input);
+    });
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      resultPromise = runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_host_abort_during_codex_prepare",
+            leaseGeneration: "7",
+            userId: TEST_USER_ID,
+            workspaceVersion: "0",
+          },
+        }),
+        {
+          async createCheckpointSnapshot() {
+            throw new Error("Aborted Codex preparation should not checkpoint.");
+          },
+          async importItem() {
+            throw new Error("Aborted Codex preparation should not import mailbox items.");
+          },
+          platform: createPlatform({
+            mailboxPort: createMailboxPort({ events: [], items: [] }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests: [],
+              events: [],
+              workspace: createWorkspaceState({ version: "0" }),
+            }),
+          }),
+          signal: hostAbortController.signal,
+          vaultRoot,
+        },
+      );
+      void resultPromise.then(
+        () => {
+          settled = true;
+        },
+        () => {
+          settled = true;
+        },
+      );
+
+      await prepareStarted.promise;
+      hostAbortController.abort(hostAbortReason);
+      await new Promise((resolve) => setTimeout(resolve, 25));
+      assert.equal(settled, false);
+
+      prepareRelease.resolve();
+      await assert.rejects(resultPromise, (error) => error === hostAbortReason);
+      assert.equal(settled, true);
+    } finally {
+      prepareRelease.resolve();
+      await resultPromise?.catch(() => undefined);
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
   test("keeps runner ownership until an aborted inbox rebuild settles", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const hostAbortController = new AbortController();
@@ -512,6 +597,99 @@ describe("hosted workspace runtime entrypoint", () => {
       assert.equal(settled, true);
     } finally {
       rebuildRelease.resolve(true);
+      await resultPromise?.catch(() => undefined);
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test("keeps runner ownership until aborted foreground mailbox projection settles", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const hostAbortController = new AbortController();
+    const hostAbortReason = new Error("host request aborted during foreground projection");
+    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+    const projectionStarted = createDeferred<void>();
+    const projectionRelease = createDeferred<void>();
+    const mailboxItems: HostedMailboxItem[] = [];
+    let assistantPhaseCalls = 0;
+    let settled = false;
+    let resultPromise: ReturnType<typeof runHostedWorkspaceRuntimeJobInProcess> | null = null;
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      resultPromise = runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_host_abort_during_foreground_projection",
+            idleCheckpointDelayMs: 180_000,
+            leaseGeneration: "7",
+            userId: TEST_USER_ID,
+            workspaceVersion: "0",
+          },
+        }),
+        {
+          async createCheckpointSnapshot() {
+            throw new Error("Aborted foreground projection should not checkpoint.");
+          },
+          async importItem(item) {
+            if (item.item.lane !== "conversation") {
+              return { status: "imported" };
+            }
+
+            projectionStarted.resolve();
+            await projectionRelease.promise;
+            return { status: "imported" };
+          },
+          platform: createPlatform({
+            mailboxPort: createMailboxPort({
+              events: [],
+              items: mailboxItems,
+            }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests: [],
+              events: [],
+              workspace: createWorkspaceState({ version: "0" }),
+            }),
+          }),
+          runtimeWakeSignal,
+          async runAssistantPhase() {
+            assistantPhaseCalls += 1;
+            if (assistantPhaseCalls === 1) {
+              mailboxItems.push(createMailboxItem({
+                id: "mailbox_item_entrypoint_host_abort_foreground_projection",
+                laneSeq: "1",
+                occurredAt: "2026-04-27T00:00:01.000Z",
+              }));
+              runtimeWakeSignal.notify();
+              await projectionStarted.promise;
+              hostAbortController.abort(hostAbortReason);
+            }
+            return {
+              checkpointReason: "assistant_runtime_commit" as const,
+              progressed: true,
+            };
+          },
+          signal: hostAbortController.signal,
+          vaultRoot,
+        },
+      );
+      void resultPromise.then(
+        () => {
+          settled = true;
+        },
+        () => {
+          settled = true;
+        },
+      );
+
+      await projectionStarted.promise;
+      await new Promise((resolve) => setTimeout(resolve, 25));
+      assert.equal(settled, false);
+
+      projectionRelease.resolve();
+      await assert.rejects(resultPromise, (error) => error === hostAbortReason);
+      assert.equal(settled, true);
+    } finally {
+      projectionRelease.resolve();
       await resultPromise?.catch(() => undefined);
       await removeTempRoot(vaultRoot);
     }

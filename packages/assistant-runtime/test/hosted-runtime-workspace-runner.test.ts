@@ -212,6 +212,239 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     }
   });
 
+  test("tracks blocked initial mailbox import as local workspace mutation completion", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runner-initial-import-track-"));
+    const abortController = new AbortController();
+    const hostAbortReason = new Error("host request aborted during runner import");
+    const importStarted = createDeferred<void>();
+    const importRelease = createDeferred<void>();
+    const trackedCompletions: Promise<void>[] = [];
+    let trackedCompletionSettled = false;
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      const runnerPromise = runHostedWorkspaceUntilIdleOrBudget({
+        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+          attemptId: "attempt_synthetic_runner_initial_import_track",
+          expectedWorkspaceVersion: "0",
+          leaseGeneration: "1",
+          nextWakeAt: null,
+          nextWakeReason: null,
+          snapshotRef: null,
+        }),
+        expectedUserId: TEST_USER_ID,
+        async importItem() {
+          importStarted.resolve();
+          await importRelease.promise;
+          return { status: "imported" };
+        },
+        limitPerLane: 10,
+        platform: createPlatform({
+          mailboxPort: createMailboxPort({
+            items: [createMailboxItem({
+              id: "mailbox_item_runner_initial_import_track",
+              laneSeq: "1",
+            })],
+          }).mailboxPort,
+          workspacePort: createWorkspacePort({ checkpointRequests: [] }),
+        }),
+        requestId: "request_synthetic_runner_initial_import_track",
+        signal: abortController.signal,
+        trackLocalWorkspaceMutationCompletion(completion) {
+          if (!completion) {
+            return;
+          }
+          trackedCompletions.push(completion);
+          void completion.then(() => {
+            trackedCompletionSettled = true;
+          });
+        },
+        vaultRoot,
+        workspace: createWorkspaceState({ version: "0" }),
+      });
+      const racedRunnerPromise = Promise.race([
+        runnerPromise,
+        new Promise<never>((_resolve, reject) => {
+          abortController.signal.addEventListener(
+            "abort",
+            () => reject(hostAbortReason),
+            { once: true },
+          );
+        }),
+      ]);
+
+      await importStarted.promise;
+      assert.equal(trackedCompletions.length, 1);
+      abortController.abort(hostAbortReason);
+      await assert.rejects(racedRunnerPromise, (error) => error === hostAbortReason);
+      await new Promise((resolve) => setTimeout(resolve, 25));
+      assert.equal(trackedCompletionSettled, false);
+
+      importRelease.resolve();
+      await runnerPromise.catch(() => undefined);
+      await trackedCompletions[0];
+      assert.equal(trackedCompletionSettled, true);
+    } finally {
+      importRelease.resolve();
+      await rm(vaultRoot, { force: true, recursive: true });
+    }
+  });
+
+  test("does not start pre-assistant system import after aborted initial import settles", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runner-aborted-follow-on-import-"));
+    const abortController = new AbortController();
+    const hostAbortReason = new Error("host request aborted before system import");
+    const initialImportStarted = createDeferred<void>();
+    const initialImportRelease = createDeferred<void>();
+    let systemImportStarted = false;
+    let assistantPhaseStarted = false;
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      const runnerPromise = runHostedWorkspaceUntilIdleOrBudget({
+        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+          attemptId: "attempt_synthetic_runner_aborted_follow_on_import",
+          expectedWorkspaceVersion: "0",
+          leaseGeneration: "1",
+          nextWakeAt: null,
+          nextWakeReason: null,
+          snapshotRef: null,
+        }),
+        expectedUserId: TEST_USER_ID,
+        async importItem(item) {
+          if (item.item.lane === "conversation") {
+            initialImportStarted.resolve();
+            await initialImportRelease.promise;
+            return { status: "imported" };
+          }
+          systemImportStarted = true;
+          return { status: "imported" };
+        },
+        limitPerLane: 10,
+        platform: createPlatform({
+          mailboxPort: createMailboxPort({
+            items: [
+              createMailboxItem({
+                id: "mailbox_item_runner_aborted_follow_on_conversation",
+                lane: "conversation",
+                laneSeq: "1",
+              }),
+              createMailboxItem({
+                id: "mailbox_item_runner_aborted_follow_on_system",
+                kind: "member.activated",
+                lane: "system",
+                laneSeq: "1",
+              }),
+            ],
+          }).mailboxPort,
+          workspacePort: createWorkspacePort({ checkpointRequests: [] }),
+        }),
+        requestId: "request_synthetic_runner_aborted_follow_on_import",
+        signal: abortController.signal,
+        async runAssistantPhase() {
+          assistantPhaseStarted = true;
+          return { progressed: false };
+        },
+        vaultRoot,
+        workspace: createWorkspaceState({ version: "0" }),
+      });
+      const racedRunnerPromise = Promise.race([
+        runnerPromise,
+        new Promise<never>((_resolve, reject) => {
+          abortController.signal.addEventListener(
+            "abort",
+            () => reject(hostAbortReason),
+            { once: true },
+          );
+        }),
+      ]);
+
+      await initialImportStarted.promise;
+      abortController.abort(hostAbortReason);
+      await assert.rejects(racedRunnerPromise, (error) => error === hostAbortReason);
+      initialImportRelease.resolve();
+      await runnerPromise.catch(() => undefined);
+
+      assert.equal(systemImportStarted, false);
+      assert.equal(assistantPhaseStarted, false);
+    } finally {
+      initialImportRelease.resolve();
+      await rm(vaultRoot, { force: true, recursive: true });
+    }
+  });
+
+  test("settles foreground mailbox loop completion when signal is already aborted", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runner-aborted-foreground-loop-"));
+    const abortController = new AbortController();
+    const hostAbortReason = new Error("host request already aborted before foreground loop");
+    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+    const assistantPhaseStarted = createDeferred<void>();
+    const releaseAssistantPhase = createDeferred<void>();
+    const trackedCompletions: Promise<void>[] = [];
+    let trackedCompletionSettled = false;
+    let runnerPromise: ReturnType<typeof runHostedWorkspaceUntilIdleOrBudget> | null = null;
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      const initialMailboxImport = createDeferredMailboxImportResult();
+      initialMailboxImport.importResult.conversationImportedCount = 1;
+      initialMailboxImport.importResult.fetchedLanes = ["conversation", "system"];
+      abortController.abort(hostAbortReason);
+
+      runnerPromise = runHostedWorkspaceUntilIdleOrBudget({
+        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+          attemptId: "attempt_synthetic_runner_aborted_foreground_loop",
+          expectedWorkspaceVersion: "0",
+          leaseGeneration: "1",
+          nextWakeAt: null,
+          nextWakeReason: null,
+          snapshotRef: null,
+        }),
+        expectedUserId: TEST_USER_ID,
+        async importItem() {
+          throw new Error("Already-aborted foreground loop should not import mailbox items.");
+        },
+        initialMailboxImport,
+        limitPerLane: 10,
+        platform: createPlatform({
+          mailboxPort: createMailboxPort({ items: [] }).mailboxPort,
+          workspacePort: createWorkspacePort({ checkpointRequests: [] }),
+        }),
+        requestId: "request_synthetic_runner_aborted_foreground_loop",
+        runtimeWakeSignal,
+        signal: abortController.signal,
+        async runAssistantPhase() {
+          assistantPhaseStarted.resolve();
+          await releaseAssistantPhase.promise;
+          throw hostAbortReason;
+        },
+        trackLocalWorkspaceMutationCompletion(completion) {
+          if (!completion) {
+            return;
+          }
+          trackedCompletions.push(completion);
+          void completion.then(() => {
+            trackedCompletionSettled = true;
+          });
+        },
+        vaultRoot,
+        workspace: createWorkspaceState({ version: "0" }),
+      });
+
+      await assistantPhaseStarted.promise;
+      assert.equal(trackedCompletions.length, 1);
+      await withTestTimeout(trackedCompletions[0]);
+      assert.equal(trackedCompletionSettled, true);
+
+      releaseAssistantPhase.resolve();
+      await assert.rejects(runnerPromise, (error) => error === hostAbortReason);
+    } finally {
+      releaseAssistantPhase.resolve();
+      await runnerPromise?.catch(() => undefined);
+      await rm(vaultRoot, { force: true, recursive: true });
+    }
+  });
+
   test("fresh coalesced runtime wake yields background maintenance after foreground stop", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runner-coalesced-runtime-wake-"));
@@ -6967,6 +7200,16 @@ function createPlatform(input: {
     ...(input.usageRecordPort ? { usageRecordPort: input.usageRecordPort } : {}),
     workspacePort: input.workspacePort,
   };
+}
+
+function createDeferred<T>() {
+  let resolve: (value: T | PromiseLike<T>) => void = () => undefined;
+  let reject: (reason?: unknown) => void = () => undefined;
+  const promise = new Promise<T>((innerResolve, innerReject) => {
+    resolve = innerResolve;
+    reject = innerReject;
+  });
+  return { promise, reject, resolve };
 }
 
 function createConversationRuntime(): Pick<

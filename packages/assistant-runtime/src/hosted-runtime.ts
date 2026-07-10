@@ -845,6 +845,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
   const phaseLogger = createHostedRuntimePhaseLogger();
   const emitPhaseLog = phaseLogger.emit;
   const pendingDeferredUsageCaptures = new Set<HostedWorkspaceRunnerDeferredUsageCapture>();
+  const pendingLocalWorkspaceMutationCompletions = new Set<Promise<void>>();
   const pendingMailboxPostCheckpointEffectCompletions = new Set<Promise<void>>();
   const trackCompletion = (
     pendingCompletions: Set<Promise<void>>,
@@ -871,10 +872,16 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
   const trackMailboxPostCheckpointEffects = (completion: Promise<void> | null): void => {
     trackCompletion(pendingMailboxPostCheckpointEffectCompletions, completion);
   };
+  const trackLocalWorkspaceMutationCompletion = (completion: Promise<void> | null): void => {
+    trackCompletion(pendingLocalWorkspaceMutationCompletions, completion);
+  };
   const drainDeferredUsageBestEffort = async (): Promise<void> => {
     await Promise.allSettled(
       [...pendingDeferredUsageCaptures].map((capture) => capture.completion),
     );
+  };
+  const drainLocalWorkspaceMutationsBestEffort = async (): Promise<void> => {
+    await Promise.allSettled([...pendingLocalWorkspaceMutationCompletions]);
   };
 
   try {
@@ -1078,6 +1085,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       limitPerLane: mailboxBudget.fetchLimitPerLane,
       materializeWorkspaceArtifacts: restored.materializeWorkspaceArtifacts,
       trackDeferredUsageCapture,
+      trackLocalWorkspaceMutationCompletion,
       platform: runnerPlatform,
       requestId,
       runtimeWakeSignal: options.runtimeWakeSignal ?? null,
@@ -1136,13 +1144,10 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       stage: "codex.prepare",
       status: "start",
     });
-    const hostedCodexRuntime = await raceHostedRuntimeCancellation(
-      prepareHostedCodexRuntimeEnvironment({
-        operatorHomeRoot: restored.operatorHomeRoot,
-        runtimeEnv: baseRuntimeEnv,
-      }),
-      runtimeAbortController.signal,
-    );
+    const hostedCodexRuntime = await prepareHostedCodexRuntimeEnvironment({
+      operatorHomeRoot: restored.operatorHomeRoot,
+      runtimeEnv: baseRuntimeEnv,
+    });
     emitPhaseLog({
       details: {
         codexEffectiveModelProviderId:
@@ -2902,7 +2907,9 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       stage: "runtime",
       status: "fail",
     });
-    if (!hostAbortObserved || error !== hostAbortReason) {
+    if (hostAbortObserved && error === hostAbortReason) {
+      await drainLocalWorkspaceMutationsBestEffort();
+    } else {
       await drainDeferredUsageBestEffort();
     }
     throw error;
