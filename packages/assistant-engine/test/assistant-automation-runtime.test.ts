@@ -5686,6 +5686,7 @@ describe('assistant auto-reply runtime', () => {
       })
 
       expect(shouldDeferCron).toHaveBeenCalledOnce()
+      expect(runLoopMocks.maybeRunAssistantRuntimeMaintenance).not.toHaveBeenCalled()
       expect(runLoopMocks.processDueAssistantCronJobs).not.toHaveBeenCalled()
       expect(result.cronProcessed).toBe(0)
       expect(result.nextWakeAt).toBe('2026-05-08T16:00:10.000Z')
@@ -9396,15 +9397,8 @@ describe('assistant automation run loop', () => {
       signal: expect.any(AbortSignal),
     })
     expect(runLoopMocks.processDueAssistantCronJobs).toHaveBeenCalledOnce()
-    expect(runLoopMocks.recordAssistantDiagnosticEvent).toHaveBeenCalledOnce()
-    expect(runLoopMocks.maybeRunAssistantRuntimeMaintenance).toHaveBeenCalledWith({
-      vault: '/tmp/assistant-automation-vault',
-    })
-    expect(
-      runLoopMocks.maybeRunAssistantRuntimeMaintenance.mock.invocationCallOrder[0],
-    ).toBeLessThan(
-      runLoopMocks.recordAssistantDiagnosticEvent.mock.invocationCallOrder[0] ?? 0,
-    )
+    expect(runLoopMocks.recordAssistantDiagnosticEvent).not.toHaveBeenCalled()
+    expect(runLoopMocks.maybeRunAssistantRuntimeMaintenance).not.toHaveBeenCalled()
     expect(release).toHaveBeenCalledOnce()
   })
 
@@ -9416,6 +9410,25 @@ describe('assistant automation run loop', () => {
       '../src/assistant/automation/run-loop.ts',
     )
 
+    runLoopMocks.scanAssistantAutomationOnce.mockResolvedValueOnce({
+      currentTurnDeliveryIntentIds: [],
+      routing: {
+        considered: 0,
+        failed: 0,
+        nextWakeAt: null,
+        noAction: 0,
+        routed: 0,
+        skipped: 0,
+      },
+      replies: {
+        considered: 0,
+        failed: 0,
+        nextWakeAt: null,
+        replied: 0,
+        skipped: 0,
+      },
+    })
+
     await runLoop.runAssistantAutomation({
       drainOutbox: true,
       inboxServices,
@@ -9425,12 +9438,56 @@ describe('assistant automation run loop', () => {
     })
 
     expect(runLoopMocks.scanAssistantAutomationOnce).toHaveBeenCalledOnce()
+    expect(runLoopMocks.maybeRunAssistantRuntimeMaintenance).toHaveBeenCalledOnce()
     expect(runLoopMocks.processDueAssistantCronJobs).toHaveBeenCalledOnce()
     expect(
       runLoopMocks.scanAssistantAutomationOnce.mock.invocationCallOrder[0],
     ).toBeLessThan(
       runLoopMocks.processDueAssistantCronJobs.mock.invocationCallOrder[0] ?? 0,
     )
+    expect(
+      runLoopMocks.scanAssistantAutomationOnce.mock.invocationCallOrder[0],
+    ).toBeLessThan(
+      runLoopMocks.maybeRunAssistantRuntimeMaintenance.mock.invocationCallOrder[0] ?? 0,
+    )
+  })
+
+  it('skips idle maintenance when foreground work asks background tasks to yield', async () => {
+    const inboxServices = createInboxServices({
+      run: vi.fn().mockResolvedValue(undefined),
+    })
+    runLoopMocks.scanAssistantAutomationOnce.mockResolvedValueOnce({
+      currentTurnDeliveryIntentIds: [],
+      routing: {
+        considered: 0,
+        failed: 0,
+        nextWakeAt: null,
+        noAction: 0,
+        routed: 0,
+        skipped: 0,
+      },
+      replies: {
+        considered: 0,
+        failed: 0,
+        nextWakeAt: null,
+        replied: 0,
+        skipped: 0,
+      },
+    })
+    const runLoop = await vi.importActual<typeof import('../src/assistant/automation/run-loop.ts')>(
+      '../src/assistant/automation/run-loop.ts',
+    )
+
+    await runLoop.runAssistantAutomation({
+      drainOutbox: true,
+      inboxServices,
+      once: true,
+      shouldYieldBackgroundMaintenance: () => true,
+      startDaemon: false,
+      vault: '/tmp/assistant-automation-vault',
+    })
+
+    expect(runLoopMocks.maybeRunAssistantRuntimeMaintenance).not.toHaveBeenCalled()
   })
 
   it('passes hosted turn environment into due cron processing', async () => {
@@ -10743,9 +10800,6 @@ describe('assistant automation run loop', () => {
       .mockRejectedValueOnce(new Error('status start failed'))
       .mockResolvedValueOnce(undefined)
       .mockRejectedValueOnce(new Error('status end failed'))
-    runLoopMocks.maybeRunAssistantRuntimeMaintenance.mockRejectedValueOnce(
-      new Error('maintenance failed'),
-    )
     runLoopMocks.scanAssistantAutomationOnce.mockImplementationOnce(
       async (input: {
         onStateProgress: (next: {
@@ -10809,12 +10863,7 @@ describe('assistant automation run loop', () => {
       }),
       operation: 'status snapshot refresh',
     })
-    expect(runLoopMocks.warnAssistantBestEffortFailure).toHaveBeenCalledWith({
-      error: expect.objectContaining({
-        message: 'maintenance failed',
-      }),
-      operation: 'runtime maintenance',
-    })
+    expect(runLoopMocks.maybeRunAssistantRuntimeMaintenance).not.toHaveBeenCalled()
     expect(runLoopMocks.warnAssistantBestEffortFailure).toHaveBeenCalledWith({
       error: expect.objectContaining({
         message: 'release failed',
