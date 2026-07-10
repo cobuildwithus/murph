@@ -313,7 +313,7 @@ function buildHostedSignupWelcomeEmailText(input: {
   return [
     "Hey, welcome to Murph!",
     "",
-    `I'm ${input.founderName}, the founder. I built Murph because I wanted my own personal health assistant. I owned a WHOOP, checked my scores every morning, and never really used the data to build healthier habits.`,
+    `I'm ${input.founderName}, the founder. I built Murph because getting healthier on my own wasn't working. I owned a WHOOP, checked my scores every morning, and never really changed anything.`,
     "",
     "What I really wanted was to try a fun health experiment and see if it worked. Stuff like saunas, cold plunges, sprint routines, supplements, and measure how they changed my biomarkers and made me feel (without having to build a spreadsheet to track it all).",
     "",

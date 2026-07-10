@@ -75,7 +75,7 @@ test("HeroClocksIn renders the reduced-motion group seed", async () => {
   assert.match(text, /Weekly newsletter · Sunday 8:02 AM/);
   assert.match(text, /Your crew: week 3 in health/);
   assert.match(text, /4 People/);
-  assert.match(text, /Murph keeps score\./);
+  assert.match(text, /referees the week/);
   assert.equal(
     view.container.querySelector(
       'button[aria-label="Start a group chat with Theo"]',
@@ -143,7 +143,7 @@ test("group start clears the private 1:1 thread and topic clicks during group mo
     /How are my steps this week\?/,
   );
   assert.match(view.container.textContent ?? "", /4 People/);
-  assert.match(view.container.textContent ?? "", /Murph keeps score\./);
+  assert.match(view.container.textContent ?? "", /referees the week/);
 
   // While the sheet covers the thread, every floater is inert so no topic
   // exchange can pollute the fresh conversation before the reveal.
