@@ -5,6 +5,9 @@ import {
   buildHostedExecutionMemberActivatedWake,
 } from "@murphai/hosted-execution";
 import {
+  listHostedAiUsageForTest,
+} from "#hosted-web-testing";
+import {
   buildAssistantProviderMurphToolCall,
   expectAdvertisedMurphDynamicTools,
   type HostedLocalAssistantProviderScriptedResponse,
@@ -27,6 +30,8 @@ const linqApiToken = "linq-local-test-token";
 const linqWebhookSecret = "linq-local-webhook-secret";
 const assistantReplyText = "Here is the setup image.";
 const assistantMediaUrl = "https://assets.example.test/assistant-media/dead-bug-setup.png";
+const generatedImageReplyText = "Here is the generated setup image.";
+const generatedImageUrl = "https://imagedelivery.net/hosted-local/generated-image/public";
 const productionLikeAssistantModel = "gpt-5.5";
 const localRunnerIdleTtlMs = "300000";
 
@@ -142,6 +147,108 @@ describe("hosted local Codex image media delivery e2e", () => {
       vaultFileSendAvailable: true,
     });
   }, 300_000);
+
+  it("generates a hosted image, saves its canonical capture, and reuses it on a later turn", async () => {
+    const materializedChatId = `chat_local_codex_media_${userId}`;
+    const replyPath = `/chats/${encodeURIComponent(materializedChatId)}/messages`;
+    const outboundCountBeforeGeneration = requireLinqStub().countObservedSends(replyPath);
+    requireScenario().queueAssistantResponses([
+      buildAssistantProviderMurphToolCall("generate_image", {
+        alt: "Generated mobility setup",
+        prompt: "Render a simple synthetic mobility setup diagram.",
+      }),
+      generatedImageReplyText,
+    ], {
+      matchInputContains: "Generate a fresh mobility setup image",
+    });
+
+    const generationResponse = await postSignedLinqWebhook(buildHostedLinqInboundEvent(
+      userId,
+      materializedChatId,
+      {
+        eventId: `evt_codex_generated_media_${userId}`,
+        messageId: `msg_codex_generated_media_${userId}`,
+        text: "Generate a fresh mobility setup image and save it for later reuse.",
+      },
+    ));
+    expect(generationResponse.status).toBe(202);
+    await requireScenario().waitForLatestPendingWake(userId);
+    const generationSend = await requireLinqStub().waitForAdditionalSend({
+      baselineCount: outboundCountBeforeGeneration,
+      expectedPath: replyPath,
+      scenario: requireScenario(),
+      userId,
+    });
+    expect(readObservedLinqMessageParts(generationSend)).toEqual([
+      {
+        type: "text",
+        value: generatedImageReplyText,
+      },
+      {
+        type: "media",
+        url: generatedImageUrl,
+      },
+    ]);
+    await requireScenario().waitForHostedCompletion(userId);
+
+    const savedImageRef = readLatestSavedGeneratedImageRef();
+    expect(savedImageRef).toMatch(/^raw\/captures\/.+\.webp$/u);
+    const usage = await listHostedAiUsageForTest({
+      environment: requireScenario().runtimeEnv,
+      memberId: userId,
+    });
+    expect(usage).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        providerName: "OpenAI Images",
+        requestedModel: "gpt-image-2",
+        totalTokens: 46,
+      }),
+    ]));
+
+    const reuseReplyText = "I reused the saved setup image as the edit reference.";
+    const outboundCountBeforeReuse = requireLinqStub().countObservedSends(replyPath);
+    requireScenario().queueAssistantResponses([
+      buildAssistantProviderMurphToolCall("generate_image", {
+        alt: "Reused mobility setup",
+        prompt: "Create a synthetic variation that preserves the reference layout.",
+        referenceImageRefs: [savedImageRef],
+      }),
+      reuseReplyText,
+    ], {
+      matchInputContains: savedImageRef,
+    });
+
+    const reuseResponse = await postSignedLinqWebhook(buildHostedLinqInboundEvent(
+      userId,
+      materializedChatId,
+      {
+        eventId: `evt_codex_generated_media_reuse_${userId}`,
+        messageId: `msg_codex_generated_media_reuse_${userId}`,
+        text: `Reuse the saved image ${savedImageRef} as a reference for one variation.`,
+      },
+    ));
+    expect(reuseResponse.status).toBe(202);
+    await requireScenario().waitForLatestPendingWake(userId);
+    const reuseSend = await requireLinqStub().waitForAdditionalSend({
+      baselineCount: outboundCountBeforeReuse,
+      expectedPath: replyPath,
+      scenario: requireScenario(),
+      userId,
+    });
+    expect(readObservedLinqMessageParts(reuseSend)).toEqual([
+      {
+        type: "text",
+        value: reuseReplyText,
+      },
+      {
+        type: "media",
+        url: generatedImageUrl,
+      },
+    ]);
+    const finalStatus = await requireScenario().waitForHostedCompletion(userId);
+    expect(finalStatus.lastErrorCode ?? null).toBeNull();
+    expect(finalStatus.mailboxLag.every((lane) => lane.lag === "0")).toBe(true);
+  }, 360_000);
 });
 
 async function ensureScenario(): Promise<void> {
@@ -156,6 +263,8 @@ async function ensureScenario(): Promise<void> {
     additionalEnv: {
       HOSTED_ASSISTANT_MODEL: productionLikeAssistantModel,
       HOSTED_ASSISTANT_PROVIDER: "openai",
+      CLOUDFLARE_IMAGES_ACCOUNT_ID: "hosted-local-images-account",
+      CLOUDFLARE_IMAGES_API_KEY: "hosted-local-images-key",
       HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS: "1",
       HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: localRunnerIdleTtlMs,
       HOSTED_ONBOARDING_LINQ_LOCAL_ALLOWED_INBOUND_PHONE_NUMBERS:
@@ -173,7 +282,21 @@ async function ensureScenario(): Promise<void> {
     requiredRunnerEnvProfile: "linq",
     scenarioLabel: "Local hosted Codex image media e2e",
     streamLogs: streamDevLogs,
+    testControls: true,
   });
+}
+
+function readLatestSavedGeneratedImageRef(): string {
+  const requests = requireScenario().assistantProviderRequests
+    .filter((request) => request.url === "/v1/responses")
+    .map((request) => request.body);
+  for (const body of [...requests].reverse()) {
+    const match = body.match(/raw\/captures\/[A-Za-z0-9_./-]+\.webp/u);
+    if (match?.[0]) {
+      return match[0];
+    }
+  }
+  throw new Error("Expected the generated-image tool output to expose a saved vault ref.");
 }
 
 function buildActivationWake(memberId: string) {

@@ -46,8 +46,63 @@ interface HostedLocalTestUserRunnerStubLike extends UserRunnerDurableObjectStubL
 }
 
 interface HostedLocalTestRunnerContainerStubLike {
+  armCanonicalCheckpointLostAckForTest?(
+    input: { userId: string },
+  ): Promise<{ ok: true }>;
+  armSnapshotPublicationCorruptionForTest?(
+    input: { userId: string },
+  ): Promise<{ ok: true }>;
+  armShutdownCheckpointPublicationBarrierForTest?(
+    input: { userId: string },
+  ): Promise<{ ok: true }>;
+  beginShutdownCheckpointGracefulStopForTest?(
+    input: { userId: string },
+  ): Promise<{ ok: true }>;
   dropActiveOperationForTest?(input: { userId: string }): Promise<{ ok: true }>;
   expireActivityForTest?(input: { userId: string }): Promise<{ ok: true }>;
+  readShutdownCheckpointPublicationBarrierForTest?(
+    input: { userId: string },
+  ): Promise<{ state: "armed" | "entered" | "unarmed" }>;
+  releaseShutdownCheckpointPublicationBarrierForTest?(
+    input: { userId: string },
+  ): Promise<{ ok: true; released: boolean }>;
+}
+
+function hasHostedLocalTestRunnerContainerCanonicalCheckpointLostAckControl(
+  stub: object,
+): stub is HostedLocalTestRunnerContainerStubLike & {
+  armCanonicalCheckpointLostAckForTest(input: { userId: string }): Promise<{ ok: true }>;
+} {
+  return "armCanonicalCheckpointLostAckForTest" in stub
+    && typeof stub.armCanonicalCheckpointLostAckForTest === "function";
+}
+
+function hasHostedLocalTestRunnerContainerSnapshotPublicationCorruptionControl(
+  stub: object,
+): stub is HostedLocalTestRunnerContainerStubLike & {
+  armSnapshotPublicationCorruptionForTest(input: { userId: string }): Promise<{ ok: true }>;
+} {
+  return "armSnapshotPublicationCorruptionForTest" in stub
+    && typeof stub.armSnapshotPublicationCorruptionForTest === "function";
+}
+
+function hasHostedLocalTestRunnerContainerShutdownCheckpointPublicationBarrierControl(
+  stub: object,
+): stub is HostedLocalTestRunnerContainerStubLike & Required<Pick<
+  HostedLocalTestRunnerContainerStubLike,
+  | "armShutdownCheckpointPublicationBarrierForTest"
+  | "beginShutdownCheckpointGracefulStopForTest"
+  | "readShutdownCheckpointPublicationBarrierForTest"
+  | "releaseShutdownCheckpointPublicationBarrierForTest"
+>> {
+  return "armShutdownCheckpointPublicationBarrierForTest" in stub
+    && typeof stub.armShutdownCheckpointPublicationBarrierForTest === "function"
+    && "beginShutdownCheckpointGracefulStopForTest" in stub
+    && typeof stub.beginShutdownCheckpointGracefulStopForTest === "function"
+    && "readShutdownCheckpointPublicationBarrierForTest" in stub
+    && typeof stub.readShutdownCheckpointPublicationBarrierForTest === "function"
+    && "releaseShutdownCheckpointPublicationBarrierForTest" in stub
+    && typeof stub.releaseShutdownCheckpointPublicationBarrierForTest === "function";
 }
 
 function hasHostedLocalTestRunnerContainerActiveOperationControl(
@@ -93,6 +148,54 @@ export const testRunnerRoutes: readonly DeclarativeRoute<WorkerRouteContext>[] =
     match: matchHostedLocalTestUserRoute("/__test/users/", "/alarm"),
     methods: ["POST"],
     name: "test-run-alarm",
+    wrongMethodResponse: "not-found",
+  },
+  {
+    authorization: "vercel-oidc",
+    beforeMethod(context) {
+      return requireHostedWorkerTestEnvironment(context);
+    },
+    async handle(context, params) {
+      return handleTestCanonicalCheckpointLostAckRoute(context, params.userId);
+    },
+    match: matchHostedLocalTestUserRoute(
+      "/__test/users/",
+      "/canonical-checkpoint-lost-ack",
+    ),
+    methods: ["POST"],
+    name: "test-canonical-checkpoint-lost-ack",
+    wrongMethodResponse: "not-found",
+  },
+  {
+    authorization: "vercel-oidc",
+    beforeMethod(context) {
+      return requireHostedWorkerTestEnvironment(context);
+    },
+    async handle(context, params) {
+      return handleTestSnapshotPublicationCorruptionRoute(context, params.userId);
+    },
+    match: matchHostedLocalTestUserRoute(
+      "/__test/users/",
+      "/snapshot-publication-corruption",
+    ),
+    methods: ["POST"],
+    name: "test-snapshot-publication-corruption",
+    wrongMethodResponse: "not-found",
+  },
+  {
+    authorization: "vercel-oidc",
+    beforeMethod(context) {
+      return requireHostedWorkerTestEnvironment(context);
+    },
+    async handle(context, params) {
+      return handleTestShutdownCheckpointPublicationBarrierRoute(context, params.userId);
+    },
+    match: matchHostedLocalTestUserRoute(
+      "/__test/users/",
+      "/shutdown-checkpoint-publication-barrier",
+    ),
+    methods: ["POST"],
+    name: "test-shutdown-checkpoint-publication-barrier",
     wrongMethodResponse: "not-found",
   },
   {
@@ -220,6 +323,136 @@ export async function handleTestContainerActivityExpiredRoute(
     throw new Error("Hosted runner container test activity-expiry RPC is unavailable.");
   }
   return json(await stub.expireActivityForTest({ userId }));
+}
+
+export async function handleTestCanonicalCheckpointLostAckRoute(
+  context: WorkerRouteContext,
+  encodedUserId: string,
+): Promise<Response> {
+  if (!isHostedWorkerTestEnvironment(context.env)) {
+    return notFound();
+  }
+
+  const userId = decodeRouteParam(encodedUserId);
+  const boundUserResponse = requireHostedExecutionBoundUserResponse(
+    context.request,
+    userId,
+    "Hosted execution bound user does not match the test runner user.",
+    "test-runner-bound-user-mismatch",
+    "test-canonical-checkpoint-lost-ack",
+  );
+  if (boundUserResponse) {
+    return boundUserResponse;
+  }
+
+  const runnerContainerName = resolveHostedExecutionRunnerContainerName({
+    source: context.env,
+    userId,
+  });
+  const stub = context.env.RUNNER_CONTAINER.getByName(
+    runnerContainerName,
+  );
+  if (!hasHostedLocalTestRunnerContainerCanonicalCheckpointLostAckControl(stub)) {
+    throw new Error(
+      "Hosted runner container canonical checkpoint lost-ack test RPC is unavailable.",
+    );
+  }
+  return json(await stub.armCanonicalCheckpointLostAckForTest({ userId }));
+}
+
+export async function handleTestSnapshotPublicationCorruptionRoute(
+  context: WorkerRouteContext,
+  encodedUserId: string,
+): Promise<Response> {
+  if (!isHostedWorkerTestEnvironment(context.env)) {
+    return notFound();
+  }
+
+  const userId = decodeRouteParam(encodedUserId);
+  const boundUserResponse = requireHostedExecutionBoundUserResponse(
+    context.request,
+    userId,
+    "Hosted execution bound user does not match the test runner user.",
+    "test-runner-bound-user-mismatch",
+    "test-snapshot-publication-corruption",
+  );
+  if (boundUserResponse) {
+    return boundUserResponse;
+  }
+
+  const runnerContainerName = resolveHostedExecutionRunnerContainerName({
+    source: context.env,
+    userId,
+  });
+  const stub = context.env.RUNNER_CONTAINER.getByName(
+    runnerContainerName,
+  );
+  if (!hasHostedLocalTestRunnerContainerSnapshotPublicationCorruptionControl(stub)) {
+    throw new Error(
+      "Hosted runner container snapshot publication corruption test RPC is unavailable.",
+    );
+  }
+  return json(await stub.armSnapshotPublicationCorruptionForTest({ userId }));
+}
+
+export async function handleTestShutdownCheckpointPublicationBarrierRoute(
+  context: WorkerRouteContext,
+  encodedUserId: string,
+): Promise<Response> {
+  if (!isHostedWorkerTestEnvironment(context.env)) {
+    return notFound();
+  }
+
+  const userId = decodeRouteParam(encodedUserId);
+  const boundUserResponse = requireHostedExecutionBoundUserResponse(
+    context.request,
+    userId,
+    "Hosted execution bound user does not match the test runner user.",
+    "test-runner-bound-user-mismatch",
+    "test-shutdown-checkpoint-publication-barrier",
+  );
+  if (boundUserResponse) {
+    return boundUserResponse;
+  }
+
+  const actions = context.url.searchParams.getAll("action");
+  const action = actions.length === 1 ? actions[0] : null;
+  if (
+    context.url.searchParams.size !== 1
+    || (
+      action !== "arm"
+      && action !== "shutdown"
+      && action !== "status"
+      && action !== "release"
+    )
+  ) {
+    return jsonError(
+      "Shutdown checkpoint publication barrier action must be arm, shutdown, status, or release.",
+      400,
+    );
+  }
+
+  const runnerContainerName = resolveHostedExecutionRunnerContainerName({
+    source: context.env,
+    userId,
+  });
+  const stub = context.env.RUNNER_CONTAINER.getByName(runnerContainerName);
+  if (!hasHostedLocalTestRunnerContainerShutdownCheckpointPublicationBarrierControl(stub)) {
+    throw new Error(
+      "Hosted runner container shutdown checkpoint publication barrier test RPC is unavailable.",
+    );
+  }
+
+  switch (action) {
+    case "arm":
+      return json(await stub.armShutdownCheckpointPublicationBarrierForTest({ userId }));
+    case "shutdown":
+      return json(await stub.beginShutdownCheckpointGracefulStopForTest({ userId }));
+    case "status":
+      return json(await stub.readShutdownCheckpointPublicationBarrierForTest({ userId }));
+    case "release":
+      return json(await stub.releaseShutdownCheckpointPublicationBarrierForTest({ userId }));
+  }
 }
 
 export async function handleTestContainerActiveOperationDropRoute(

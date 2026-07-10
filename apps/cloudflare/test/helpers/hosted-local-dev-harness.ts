@@ -31,6 +31,7 @@ const hostedLocalStatusTimeoutMs = 180_000;
 const hostedLocalStatusRequestTimeoutMs = 10_000;
 const hostedLocalStatusPollIntervalMs = 250;
 const hostedLocalActivityExpiryTimeoutMs = 15_000;
+const hostedLocalShutdownCheckpointControlTimeoutMs = 120_000;
 const hostedLocalRunUntilIdleTimeoutMs = 30_000;
 
 export interface HostedLocalDevHarness {
@@ -42,8 +43,18 @@ export interface HostedLocalDevHarness {
   request(pathname: string, init?: RequestInit): Promise<Response>;
   requestJson<T>(pathname: string, init?: RequestInit): Promise<T>;
   readUserStatus(userId: string): Promise<HostedRunnerStatusResponse>;
+  armCanonicalCheckpointLostAckForTest(userId: string): Promise<{ ok: true }>;
+  armSnapshotPublicationCorruptionForTest(userId: string): Promise<{ ok: true }>;
+  armShutdownCheckpointPublicationBarrierForTest(userId: string): Promise<{ ok: true }>;
+  beginShutdownCheckpointGracefulStopForTest(userId: string): Promise<{ ok: true }>;
   expireRunnerActivityForTest(userId: string): Promise<{ ok: true }>;
   dropRunnerActiveOperationForTest(userId: string): Promise<{ ok: true }>;
+  readShutdownCheckpointPublicationBarrierForTest(
+    userId: string,
+  ): Promise<{ state: "armed" | "entered" | "unarmed" }>;
+  releaseShutdownCheckpointPublicationBarrierForTest(
+    userId: string,
+  ): Promise<{ ok: true; released: boolean }>;
   runHostedAlarmInvocationForTest(userId: string): Promise<HostedWorkspaceInvocationResult>;
   runHostedManualInvocationForTest(userId: string): Promise<HostedWorkspaceInvocationResult>;
   runHostedAlarmForTest(userId: string): Promise<{ ok: true }>;
@@ -201,8 +212,14 @@ export async function startHostedLocalDevHarness(input: {
           userId,
         });
       },
+      armCanonicalCheckpointLostAckForTest,
+      armSnapshotPublicationCorruptionForTest,
+      armShutdownCheckpointPublicationBarrierForTest,
+      beginShutdownCheckpointGracefulStopForTest,
       dropRunnerActiveOperationForTest,
       expireRunnerActivityForTest,
+      readShutdownCheckpointPublicationBarrierForTest,
+      releaseShutdownCheckpointPublicationBarrierForTest,
       runHostedAlarmInvocationForTest: requireTestControls(runHostedAlarmInvocationForTest),
       runHostedManualInvocationForTest: requireTestControls(runHostedManualInvocationForTest),
       request: requestForRuntime,
@@ -515,6 +532,97 @@ export async function startHostedLocalDevHarness(input: {
         },
         method: "POST",
         signal: AbortSignal.timeout(hostedLocalActivityExpiryTimeoutMs),
+      },
+    );
+  }
+
+  async function armCanonicalCheckpointLostAckForTest(
+    userId: string,
+  ): Promise<{ ok: true }> {
+    assertHostedLocalTestControlsAvailable("armCanonicalCheckpointLostAckForTest");
+    return await requestJsonForRuntime<{ ok: true }>(
+      `/__test/users/${encodeURIComponent(userId)}/canonical-checkpoint-lost-ack`,
+      {
+        headers: {
+          [HOSTED_EXECUTION_USER_ID_HEADER]: userId,
+          ...statusHeaders(userId),
+        },
+        method: "POST",
+        signal: AbortSignal.timeout(hostedLocalActivityExpiryTimeoutMs),
+      },
+    );
+  }
+
+  async function armSnapshotPublicationCorruptionForTest(
+    userId: string,
+  ): Promise<{ ok: true }> {
+    assertHostedLocalTestControlsAvailable("armSnapshotPublicationCorruptionForTest");
+    return await requestJsonForRuntime<{ ok: true }>(
+      `/__test/users/${encodeURIComponent(userId)}/snapshot-publication-corruption`,
+      {
+        headers: {
+          [HOSTED_EXECUTION_USER_ID_HEADER]: userId,
+          ...statusHeaders(userId),
+        },
+        method: "POST",
+        signal: AbortSignal.timeout(hostedLocalActivityExpiryTimeoutMs),
+      },
+    );
+  }
+
+  async function armShutdownCheckpointPublicationBarrierForTest(
+    userId: string,
+  ): Promise<{ ok: true }> {
+    assertHostedLocalTestControlsAvailable("armShutdownCheckpointPublicationBarrierForTest");
+    return await requestShutdownCheckpointPublicationBarrierForTest<{ ok: true }>(
+      userId,
+      "arm",
+    );
+  }
+
+  async function beginShutdownCheckpointGracefulStopForTest(
+    userId: string,
+  ): Promise<{ ok: true }> {
+    assertHostedLocalTestControlsAvailable("beginShutdownCheckpointGracefulStopForTest");
+    return await requestShutdownCheckpointPublicationBarrierForTest<{ ok: true }>(
+      userId,
+      "shutdown",
+    );
+  }
+
+  async function readShutdownCheckpointPublicationBarrierForTest(
+    userId: string,
+  ): Promise<{ state: "armed" | "entered" | "unarmed" }> {
+    assertHostedLocalTestControlsAvailable("readShutdownCheckpointPublicationBarrierForTest");
+    return await requestShutdownCheckpointPublicationBarrierForTest<{
+      state: "armed" | "entered" | "unarmed";
+    }>(userId, "status");
+  }
+
+  async function releaseShutdownCheckpointPublicationBarrierForTest(
+    userId: string,
+  ): Promise<{ ok: true; released: boolean }> {
+    assertHostedLocalTestControlsAvailable("releaseShutdownCheckpointPublicationBarrierForTest");
+    return await requestShutdownCheckpointPublicationBarrierForTest<{
+      ok: true;
+      released: boolean;
+    }>(userId, "release");
+  }
+
+  async function requestShutdownCheckpointPublicationBarrierForTest<T>(
+    userId: string,
+    action: "arm" | "release" | "shutdown" | "status",
+  ): Promise<T> {
+    return await requestJsonForRuntime<T>(
+      `/__test/users/${encodeURIComponent(userId)}`
+        + `/shutdown-checkpoint-publication-barrier?action=${action}`,
+      {
+        headers: {
+          [HOSTED_EXECUTION_USER_ID_HEADER]: userId,
+          ...statusHeaders(userId),
+        },
+        method: "POST",
+        signal: AbortSignal.timeout(hostedLocalShutdownCheckpointControlTimeoutMs),
       },
     );
   }
