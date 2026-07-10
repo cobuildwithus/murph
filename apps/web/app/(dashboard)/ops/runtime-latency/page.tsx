@@ -181,11 +181,11 @@ export default async function RuntimeLatencyOpsPage({
               label={metricLabel("Linq attempt to accepted", metricScope)}
             />
             <DistributionMetric
-              distribution={dashboard.replyLatencyMs.linqAcceptedToDelivered}
+              distribution={dashboard.replyLatencyMs.linqAcceptedToReceipt}
               label={metricLabel("Linq accepted to receipt", metricScope)}
             />
             <DistributionMetric
-              distribution={dashboard.replyLatencyMs.acceptedToLinqDelivered}
+              distribution={dashboard.replyLatencyMs.acceptedToLinqReceipt}
               label={metricLabel("accepted to receipt", metricScope)}
             />
           </div>

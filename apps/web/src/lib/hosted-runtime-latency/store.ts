@@ -51,6 +51,8 @@ const HOSTED_INGRESS_LATENCY_IN_FLIGHT_GRACE_MS = 2 * 60_000;
 const HOSTED_INGRESS_LATENCY_READ_ROW_LIMIT = 20_000;
 const HOSTED_INGRESS_LATENCY_TIMING_LOG_READ_LIMIT = 100_000;
 const HOSTED_INGRESS_LATENCY_TIMING_LOG_WINDOW_PADDING_MS = 5 * 60_000;
+const HOSTED_ASSISTANT_TURN_TIMING_SCHEMA = "murph.assistant-turn-timing.v1";
+const HOSTED_ASSISTANT_TURN_TIMING_TYPE = "assistant.turn.timing";
 
 export interface HostedIngressLatencyWriteResult {
   matchedCount: number;
@@ -112,9 +114,9 @@ export interface HostedIngressLatencyDashboard {
   };
   replyLatencyMs: {
     acceptedToLinqAccepted: HostedIngressLatencyDistribution;
-    acceptedToLinqDelivered: HostedIngressLatencyDistribution;
+    acceptedToLinqReceipt: HostedIngressLatencyDistribution;
     coldAcceptedToLinqAccepted: HostedIngressLatencyDistribution;
-    linqAcceptedToDelivered: HostedIngressLatencyDistribution;
+    linqAcceptedToReceipt: HostedIngressLatencyDistribution;
     linqAttemptedToAccepted: HostedIngressLatencyDistribution;
     providerRequest: HostedIngressLatencyDistribution;
     providerResultToReplyIntent: HostedIngressLatencyDistribution;
@@ -518,8 +520,9 @@ export async function readHostedIngressLatencyDashboard(
         select: {
           acceptedAt: true,
           attemptedAt: true,
-          deliveredAt: true,
+          lastReceiptAt: true,
           sourceRef: true,
+          status: true,
         },
       },
       phaseBreakdownJson: true,
@@ -542,6 +545,13 @@ export async function readHostedIngressLatencyDashboard(
   const visibleRows = truncated ? rows.slice(0, HOSTED_INGRESS_LATENCY_READ_ROW_LIMIT) : rows;
   const runtimeAttemptIds = source === "linq"
     ? [...new Set(visibleRows
+        .filter((row) =>
+          row.linqDeliveryId
+          && row.linqDelivery
+          && row.replyRuntimeAttemptId
+          && row.providerStartAt
+          && typeof row.providerRequestOrdinal === "number"
+        )
         .map((row) => row.runtimeAttemptId)
         .filter((id): id is string => Boolean(id)))]
     : [];
@@ -565,6 +575,26 @@ export async function readHostedIngressLatencyDashboard(
           },
           attemptId: { in: runtimeAttemptIds },
           eventCode: "assistant.automation_detail",
+          AND: [
+            {
+              redactedJson: {
+                equals: HOSTED_ASSISTANT_TURN_TIMING_SCHEMA,
+                path: ["schema"],
+              },
+            },
+            {
+              redactedJson: {
+                equals: HOSTED_ASSISTANT_TURN_TIMING_TYPE,
+                path: ["type"],
+              },
+            },
+            {
+              redactedJson: {
+                equals: "reply-dispatched",
+                path: ["turnTimingStage"],
+              },
+            },
+          ],
         },
       });
   const timingLogTruncated =
@@ -683,9 +713,9 @@ export async function readHostedIngressLatencyDashboard(
   );
 
   const acceptedToLinqAcceptedDurations: number[] = [];
-  const acceptedToLinqDeliveredDurations: number[] = [];
+  const acceptedToLinqReceiptDurations: number[] = [];
   const coldAcceptedToLinqAcceptedDurations: number[] = [];
-  const linqAcceptedToDeliveredDurations: number[] = [];
+  const linqAcceptedToReceiptDurations: number[] = [];
   const linqAttemptedToAcceptedDurations: number[] = [];
   const providerRequestDurations: number[] = [];
   const providerResultToReplyIntentDurations: number[] = [];
@@ -760,7 +790,12 @@ export async function readHostedIngressLatencyDashboard(
 
     const deliveryAcceptedAtMs = row.linqDelivery.acceptedAt?.getTime() ?? null;
     const deliveryAttemptedAtMs = row.linqDelivery.attemptedAt.getTime();
-    const deliveryDeliveredAtMs = row.linqDelivery.deliveredAt?.getTime() ?? null;
+    const deliveryReceiptAtMs = (
+      row.linqDelivery.status === "delivered"
+      || row.linqDelivery.status === "failed"
+    )
+      ? row.linqDelivery.lastReceiptAt?.getTime() ?? null
+      : null;
     const ingressAcceptedAtMs = row.acceptedAt.getTime();
     const providerStartAtMs = providerRow?.providerStartAt?.getTime() ?? null;
 
@@ -774,18 +809,18 @@ export async function readHostedIngressLatencyDashboard(
     const providerStartToLinqAttemptedMs = providerStartAtMs === null
       ? null
       : deliveryAttemptedAtMs - providerStartAtMs;
-    const linqAcceptedToDeliveredMs = deliveryDeliveredAtMs === null
+    const linqAcceptedToReceiptMs = deliveryReceiptAtMs === null
       ? null
-      : deliveryDeliveredAtMs - deliveryAcceptedAtMs;
-    const acceptedToLinqDeliveredMs = deliveryDeliveredAtMs === null
+      : deliveryReceiptAtMs - deliveryAcceptedAtMs;
+    const acceptedToLinqReceiptMs = deliveryReceiptAtMs === null
       ? null
-      : deliveryDeliveredAtMs - ingressAcceptedAtMs;
+      : deliveryReceiptAtMs - ingressAcceptedAtMs;
     const replyDurations = [
       acceptedToLinqAcceptedMs,
       linqAttemptedToAcceptedMs,
       providerStartToLinqAttemptedMs,
-      linqAcceptedToDeliveredMs,
-      acceptedToLinqDeliveredMs,
+      linqAcceptedToReceiptMs,
+      acceptedToLinqReceiptMs,
     ].filter((value): value is number => value !== null);
 
     if (replyDurations.some((value) => value < 0)) {
@@ -798,10 +833,13 @@ export async function readHostedIngressLatencyDashboard(
     if (providerStartToLinqAttemptedMs !== null) {
       providerStartToLinqAttemptedDurations.push(providerStartToLinqAttemptedMs);
     }
-    if (linqAcceptedToDeliveredMs !== null && acceptedToLinqDeliveredMs !== null) {
-      linqAcceptedToDeliveredDurations.push(linqAcceptedToDeliveredMs);
-      acceptedToLinqDeliveredDurations.push(acceptedToLinqDeliveredMs);
-    } else if (deliveryAcceptedAtMs <= inFlightCutoff.getTime()) {
+    if (linqAcceptedToReceiptMs !== null && acceptedToLinqReceiptMs !== null) {
+      linqAcceptedToReceiptDurations.push(linqAcceptedToReceiptMs);
+      acceptedToLinqReceiptDurations.push(acceptedToLinqReceiptMs);
+    } else if (
+      row.linqDelivery.status === "accepted"
+      && deliveryAcceptedAtMs <= inFlightCutoff.getTime()
+    ) {
       acceptedMissingReceiptCount += 1;
     }
 
@@ -879,14 +917,14 @@ export async function readHostedIngressLatencyDashboard(
       acceptedToLinqAccepted: summarizeLatencyDistribution(
         acceptedToLinqAcceptedDurations,
       ),
-      acceptedToLinqDelivered: summarizeLatencyDistribution(
-        acceptedToLinqDeliveredDurations,
+      acceptedToLinqReceipt: summarizeLatencyDistribution(
+        acceptedToLinqReceiptDurations,
       ),
       coldAcceptedToLinqAccepted: summarizeLatencyDistribution(
         coldAcceptedToLinqAcceptedDurations,
       ),
-      linqAcceptedToDelivered: summarizeLatencyDistribution(
-        linqAcceptedToDeliveredDurations,
+      linqAcceptedToReceipt: summarizeLatencyDistribution(
+        linqAcceptedToReceiptDurations,
       ),
       linqAttemptedToAccepted: summarizeLatencyDistribution(
         linqAttemptedToAcceptedDurations,
@@ -999,8 +1037,8 @@ function readHostedTurnTimingLog(value: unknown): {
   }
   const record = value as Record<string, unknown>;
   if (
-    record.schema !== "murph.assistant-turn-timing.v1"
-    || record.type !== "assistant.turn.timing"
+    record.schema !== HOSTED_ASSISTANT_TURN_TIMING_SCHEMA
+    || record.type !== HOSTED_ASSISTANT_TURN_TIMING_TYPE
   ) {
     return null;
   }

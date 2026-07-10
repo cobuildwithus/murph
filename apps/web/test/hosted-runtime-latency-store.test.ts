@@ -24,8 +24,9 @@ type LatencyDashboardRow = {
   linqDelivery?: {
     acceptedAt: Date | null;
     attemptedAt: Date;
-    deliveredAt: Date | null;
+    lastReceiptAt: Date | null;
     sourceRef: string | null;
+    status: string;
   } | null;
   linqDeliveryId?: string | null;
   phaseBreakdownJson?: unknown;
@@ -156,8 +157,9 @@ describe("hosted runtime latency dashboard store", () => {
     const coldDelivery = {
       acceptedAt: instant("2026-05-27T12:00:11.000Z"),
       attemptedAt: instant("2026-05-27T12:00:10.000Z"),
-      deliveredAt: instant("2026-05-27T12:00:12.000Z"),
+      lastReceiptAt: instant("2026-05-27T12:00:12.000Z"),
       sourceRef: deliverySourceRef("intent_cold"),
+      status: "delivered",
     };
     const prisma = createLatencyDashboardPrisma([
       {
@@ -195,8 +197,9 @@ describe("hosted runtime latency dashboard store", () => {
         linqDelivery: {
           acceptedAt: instant("2026-05-27T12:01:09.000Z"),
           attemptedAt: instant("2026-05-27T12:01:08.000Z"),
-          deliveredAt: null,
+          lastReceiptAt: null,
           sourceRef: deliverySourceRef("intent_warm"),
+          status: "accepted",
         },
         linqDeliveryId: "delivery_warm",
         phaseBreakdownJson: {
@@ -215,8 +218,9 @@ describe("hosted runtime latency dashboard store", () => {
         linqDelivery: {
           acceptedAt: instant("2026-05-27T12:02:05.000Z"),
           attemptedAt: instant("2026-05-27T12:02:04.000Z"),
-          deliveredAt: instant("2026-05-27T12:02:06.000Z"),
+          lastReceiptAt: instant("2026-05-27T12:02:06.000Z"),
           sourceRef: deliverySourceRef("intent_unknown"),
+          status: "delivered",
         },
         linqDeliveryId: "delivery_unknown_cold_state",
         phaseBreakdownJson: { schemaVersion: 1 },
@@ -232,8 +236,9 @@ describe("hosted runtime latency dashboard store", () => {
         linqDelivery: {
           acceptedAt: instant("2026-05-27T12:03:05.000Z"),
           attemptedAt: instant("2026-05-27T12:03:04.000Z"),
-          deliveredAt: null,
+          lastReceiptAt: null,
           sourceRef: deliverySourceRef("intent_handoff"),
+          status: "accepted",
         },
         linqDeliveryId: "delivery_attempt_handoff",
         providerStartAt: instant("2026-05-27T12:03:03.000Z"),
@@ -246,6 +251,8 @@ describe("hosted runtime latency dashboard store", () => {
         acceptedAt: instant("2026-05-27T12:04:00.000Z"),
         assistantInputStagedAt: instant("2026-05-27T12:04:01.000Z"),
         providerStartAt: instant("2026-05-27T12:04:03.000Z"),
+        providerRequestOrdinal: 0,
+        runtimeAttemptId: "attempt_without_delivery",
         temporalSignalAcceptedAt: null,
       },
     ], [
@@ -308,7 +315,7 @@ describe("hosted runtime latency dashboard store", () => {
       p50: 1_000,
       p95: 1_000,
     });
-    expect(dashboard.replyLatencyMs.linqAcceptedToDelivered).toEqual({
+    expect(dashboard.replyLatencyMs.linqAcceptedToReceipt).toEqual({
       count: 2,
       p50: 1_000,
       p95: 1_000,
@@ -339,6 +346,86 @@ describe("hosted runtime latency dashboard store", () => {
       timingLogTruncated: false,
       unknownColdStateCount: 2,
     });
+    expect(prisma.hostedRuntimeLog.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          attemptId: {
+            in: [
+              "attempt_cold",
+              "attempt_warm",
+              "attempt_unknown",
+              "attempt_staged",
+            ],
+          },
+        }),
+      }),
+    );
+  });
+
+  it("uses terminal receipt truth and excludes group and skipped sends without receipts", async () => {
+    const prisma = createLatencyDashboardPrisma([
+      createLinkedDashboardRow({
+        acceptedAt: "2026-05-27T12:00:00.000Z",
+        attemptedAt: "2026-05-27T12:00:04.000Z",
+        deliveryId: "delivery_failed_receipt",
+        deliveryStatus: "failed",
+        intentId: "intent_failed_receipt",
+        providerStartAt: "2026-05-27T12:00:01.000Z",
+        receiptAt: "2026-05-27T12:00:07.000Z",
+        runtimeAttemptId: "attempt_failed_receipt",
+      }),
+      createLinkedDashboardRow({
+        acceptedAt: "2026-05-27T12:01:00.000Z",
+        attemptedAt: "2026-05-27T12:01:04.000Z",
+        deliveryId: "delivery_group",
+        deliveryStatus: "sent_no_receipt_expected",
+        intentId: "intent_group",
+        providerStartAt: "2026-05-27T12:01:01.000Z",
+        receiptAt: null,
+        runtimeAttemptId: "attempt_group",
+      }),
+      createLinkedDashboardRow({
+        acceptedAt: "2026-05-27T12:02:00.000Z",
+        attemptedAt: "2026-05-27T12:02:04.000Z",
+        deliveryId: "delivery_pending_direct",
+        deliveryStatus: "accepted",
+        intentId: "intent_pending_direct",
+        providerStartAt: "2026-05-27T12:02:01.000Z",
+        receiptAt: null,
+        runtimeAttemptId: "attempt_pending_direct",
+      }),
+      createLinkedDashboardRow({
+        acceptedAt: "2026-05-27T12:03:00.000Z",
+        attemptedAt: "2026-05-27T12:03:04.000Z",
+        deliveryAcceptedAt: null,
+        deliveryId: "delivery_skipped",
+        deliveryStatus: "skipped",
+        intentId: "intent_skipped",
+        providerStartAt: "2026-05-27T12:03:01.000Z",
+        receiptAt: null,
+        runtimeAttemptId: "attempt_skipped",
+      }),
+    ]);
+
+    const dashboard = await readHostedIngressLatencyDashboard({
+      inFlightGraceMs: 0,
+      now: instant("2026-05-27T12:05:00.000Z"),
+      prisma,
+      source: "linq",
+      windowHours: 1,
+    });
+
+    expect(dashboard.replyLatencyMs.acceptedToLinqReceipt).toEqual({
+      count: 1,
+      p50: 7_000,
+      p95: 7_000,
+    });
+    expect(dashboard.replyLatencyMs.linqAcceptedToReceipt).toEqual({
+      count: 1,
+      p50: 2_500,
+      p95: 2_500,
+    });
+    expect(dashboard.replyTraceQuality.acceptedMissingReceiptCount).toBe(1);
   });
 
   it("keeps Linq reply delivery metrics out of Telegram dashboards", async () => {
@@ -349,8 +436,9 @@ describe("hosted runtime latency dashboard store", () => {
         linqDelivery: {
           acceptedAt: instant("2026-05-27T12:00:05.000Z"),
           attemptedAt: instant("2026-05-27T12:00:04.000Z"),
-          deliveredAt: instant("2026-05-27T12:00:06.000Z"),
+          lastReceiptAt: instant("2026-05-27T12:00:06.000Z"),
           sourceRef: deliverySourceRef("intent_telegram"),
+          status: "delivered",
         },
         linqDeliveryId: "delivery_wrong_channel",
         phaseBreakdownJson: {
@@ -390,8 +478,9 @@ describe("hosted runtime latency dashboard store", () => {
     const handoffDelivery = {
       acceptedAt: instant("2026-05-27T12:00:06.000Z"),
       attemptedAt: instant("2026-05-27T12:00:05.000Z"),
-      deliveredAt: instant("2026-05-27T12:00:07.000Z"),
+      lastReceiptAt: instant("2026-05-27T12:00:07.000Z"),
       sourceRef: deliverySourceRef("intent_handoff_grouped"),
+      status: "delivered",
     };
     const prisma = createLatencyDashboardPrisma([
       {
@@ -422,8 +511,9 @@ describe("hosted runtime latency dashboard store", () => {
         linqDelivery: {
           acceptedAt: instant("2026-05-27T12:01:05.000Z"),
           attemptedAt: instant("2026-05-27T12:01:04.000Z"),
-          deliveredAt: instant("2026-05-27T12:01:06.000Z"),
+          lastReceiptAt: instant("2026-05-27T12:01:06.000Z"),
           sourceRef: deliverySourceRef("intent_without_generation_diagnostics"),
+          status: "delivered",
         },
         linqDeliveryId: "delivery_without_generation_diagnostics",
         providerStartAt: null,
@@ -518,7 +608,7 @@ describe("hosted runtime latency dashboard store", () => {
     expect(dashboard.replyTraceQuality.ambiguousTimingCount).toBe(1);
   });
 
-  it("bounds timing-log reads and suppresses biased spans when that read truncates", async () => {
+  it("bounds targeted reply-timing reads and suppresses biased spans when they truncate", async () => {
     const row = createLinkedDashboardRow({
       acceptedAt: "2026-05-27T12:00:00.000Z",
       attemptedAt: "2026-05-27T12:00:05.000Z",
@@ -549,10 +639,31 @@ describe("hosted runtime latency dashboard store", () => {
     expect(prisma.hostedRuntimeLog.findMany).toHaveBeenCalledWith(expect.objectContaining({
       orderBy: { at: "desc" },
       where: expect.objectContaining({
+        AND: [
+          {
+            redactedJson: {
+              equals: "murph.assistant-turn-timing.v1",
+              path: ["schema"],
+            },
+          },
+          {
+            redactedJson: {
+              equals: "assistant.turn.timing",
+              path: ["type"],
+            },
+          },
+          {
+            redactedJson: {
+              equals: "reply-dispatched",
+              path: ["turnTimingStage"],
+            },
+          },
+        ],
         at: {
           gte: instant("2026-05-27T11:00:00.000Z"),
           lte: instant("2026-05-27T12:10:00.000Z"),
         },
+        eventCode: "assistant.automation_detail",
       }),
     }));
     expect(dashboard.replyTraceQuality.timingLogTruncated).toBe(true);
@@ -1372,9 +1483,12 @@ function createLatencyDashboardPrisma(
 function createLinkedDashboardRow(input: {
   acceptedAt: string;
   attemptedAt: string;
+  deliveryAcceptedAt?: string | null;
   deliveryId: string;
+  deliveryStatus?: string;
   intentId: string;
   providerStartAt: string;
+  receiptAt?: string | null;
   runtimeAttemptId: string;
 }): LatencyDashboardRow {
   const acceptedAt = instant(input.acceptedAt);
@@ -1383,10 +1497,19 @@ function createLinkedDashboardRow(input: {
     acceptedAt,
     assistantInputStagedAt: new Date(acceptedAt.getTime() + 500),
     linqDelivery: {
-      acceptedAt: new Date(attemptedAt.getTime() + 500),
+      acceptedAt: input.deliveryAcceptedAt === null
+        ? null
+        : input.deliveryAcceptedAt
+          ? instant(input.deliveryAcceptedAt)
+          : new Date(attemptedAt.getTime() + 500),
       attemptedAt,
-      deliveredAt: new Date(attemptedAt.getTime() + 1_000),
+      lastReceiptAt: input.receiptAt === null
+        ? null
+        : input.receiptAt
+          ? instant(input.receiptAt)
+          : new Date(attemptedAt.getTime() + 1_000),
       sourceRef: deliverySourceRef(input.intentId),
+      status: input.deliveryStatus ?? "delivered",
     },
     linqDeliveryId: input.deliveryId,
     phaseBreakdownJson: {
