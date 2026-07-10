@@ -4,6 +4,7 @@
   "errorKind": "rate_limited",
   "httpStatus": 429,
   "method": "email",
+  "providerErrorCode": "too_many_requests",
   "retryable": true,
   "stage": "send_code"
 }

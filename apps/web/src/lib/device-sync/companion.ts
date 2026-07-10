@@ -15,12 +15,14 @@ export const COMPANION_DEVICE_SYNC_PROVIDER = "junction";
 const COMPANION_METADATA_STRING_MAX_LENGTH = 200;
 const COMPANION_SDK_VERSION_MAX_ENTRIES = 10;
 const COMPANION_AUTH_DIAGNOSTIC_VERSION_PATTERN = /^[0-9]{1,3}(?:\.[0-9]{1,3}){1,3}$/u;
+const COMPANION_AUTH_DIAGNOSTIC_PROVIDER_CODE_PATTERN = /^[a-z0-9_]{1,64}$/u;
 const COMPANION_AUTH_DIAGNOSTIC_ALLOWED_KEYS = new Set([
   "appVersion",
   "diagnosticCode",
   "errorKind",
   "httpStatus",
   "method",
+  "providerErrorCode",
   "retryable",
   "stage",
 ]);
@@ -45,6 +47,7 @@ const COMPANION_AUTH_DIAGNOSTIC_CODE_DESCRIPTIONS = {
   network_unknown: "Network request failed.",
   privy_bad_email: "Privy rejected the email address.",
   privy_bad_request: "Privy rejected the auth request.",
+  privy_authentication_failed: "Privy authentication failed.",
   privy_could_not_construct_request: "Privy request construction failed.",
   privy_decoding_error: "Privy response decoding failed.",
   privy_expired_code: "Privy OTP expired.",
@@ -53,6 +56,7 @@ const COMPANION_AUTH_DIAGNOSTIC_CODE_DESCRIPTIONS = {
   privy_invalid_email: "Privy rejected the email address.",
   privy_invalid_native_app_id: "Privy rejected the native app configuration.",
   privy_invalid_phone: "Privy rejected the phone number.",
+  privy_initialization_failed: "Privy initialization failed.",
   privy_malformed_response: "Privy returned a malformed response.",
   privy_network_error: "Privy request failed at the network layer.",
   privy_not_found: "Privy resource was not found.",
@@ -72,6 +76,7 @@ interface CompanionAuthDiagnosticLog {
   method: string;
   platform: "ios";
   provider: "privy";
+  providerErrorCode: string | null;
   retryable: boolean;
   stage: string;
   appVersion: string | null;
@@ -116,8 +121,9 @@ export function validateCompanionSignInRequestBody(body: Record<string, unknown>
 
 /**
  * Validates pre-login companion auth diagnostics. The allowlisted envelope uses
- * app-owned diagnostic codes only: raw provider prose, contacts, identifiers,
- * credentials, and health fields never cross the server boundary.
+ * app-owned diagnostic codes and strict provider machine identifiers only: raw
+ * provider prose, contacts, credentials, and health fields never cross the
+ * server boundary.
  */
 export function validateCompanionAuthDiagnosticRequestBody(
   body: Record<string, unknown>,
@@ -141,10 +147,22 @@ export function validateCompanionAuthDiagnosticRequestBody(
     method,
     platform: "ios",
     provider: "privy",
+    providerErrorCode: readOptionalProviderErrorCode(body),
     retryable: readRequiredBoolean(body, "retryable"),
     stage,
     appVersion: readOptionalAuthDiagnosticAppVersion(body),
   };
+}
+
+function readOptionalProviderErrorCode(body: Record<string, unknown>): string | null {
+  const value = body.providerErrorCode;
+  if (value === undefined || value === null) {
+    return null;
+  }
+  if (typeof value !== "string" || !COMPANION_AUTH_DIAGNOSTIC_PROVIDER_CODE_PATTERN.test(value)) {
+    throw companionRequestInvalid("providerErrorCode must be a safe machine identifier.");
+  }
+  return value;
 }
 
 function rejectUnknownAuthDiagnosticKeys(body: Record<string, unknown>): void {

@@ -42,16 +42,12 @@ export function validateCompanionAuthDiagnosticsWafOverview(
     return ["overview payload must be an object"];
   }
 
-  if (readBooleanProperty(overview, ["enabled", "firewallEnabled"]) === false) {
-    issues.push("firewall is disabled");
-  }
-
   const active = readRecord(overview, "active");
   if (active === null) {
     return ["overview missing active firewall configuration"];
   }
 
-  if (readBooleanProperty(active, ["enabled", "firewallEnabled"]) === false) {
+  if (active.firewallEnabled !== true) {
     issues.push("active firewall configuration is disabled");
   }
 
@@ -61,10 +57,10 @@ export function validateCompanionAuthDiagnosticsWafOverview(
     return issues;
   }
 
-  if (readBooleanProperty(rule, ["enabled"]) === false) {
+  if (rule.active !== true) {
     issues.push("rule is disabled");
   }
-  if (readBooleanProperty(rule, ["valid"]) === false) {
+  if (rule.valid !== true) {
     issues.push("rule is invalid");
   }
   if (!hasOnlyExactDiagnosticsPathCondition(rule)) {
@@ -82,140 +78,59 @@ export function validateCompanionAuthDiagnosticsWafOverview(
 function findActiveRule(active: JsonRecord, ruleRef: string): JsonRecord | null {
   const rules = readRules(active);
   return rules.find((rule) => (
-    readOwnStrings(rule, ["id", "name"]).includes(ruleRef)
+    rule.id === ruleRef || rule.name === ruleRef
   )) ?? null;
 }
 
 function readRules(active: JsonRecord): JsonRecord[] {
-  const rules = active.rules ?? active.customRules ?? active.firewallRules;
+  const rules = active.rules;
   return Array.isArray(rules)
     ? rules.filter(isRecord)
     : [];
 }
 
 function hasOnlyExactDiagnosticsPathCondition(rule: JsonRecord): boolean {
-  const conditions = readRuleConditions(rule);
-  return conditions.length === 1 && isExactDiagnosticsPathCondition(conditions[0]);
+  const conditionGroups = rule.conditionGroup;
+  if (!Array.isArray(conditionGroups) || conditionGroups.length !== 1) {
+    return false;
+  }
+  const group = conditionGroups[0];
+  if (!isRecord(group) || !Array.isArray(group.conditions) || group.conditions.length !== 1) {
+    return false;
+  }
+  return isExactDiagnosticsPathCondition(group.conditions[0]);
 }
 
-function readRuleConditions(rule: JsonRecord): JsonRecord[] {
-  const conditionGroup = readRecord(rule, "conditionGroup")
-    ?? readRecord(rule, "conditionsGroup")
-    ?? readRecord(rule, "condition_group");
-  const groupConditions = conditionGroup === null ? [] : readConditionArray(conditionGroup);
-  const directConditions = readConditionArray(rule);
-
-  return groupConditions.length > 0 ? groupConditions : directConditions;
-}
-
-function readConditionArray(record: JsonRecord): JsonRecord[] {
-  const conditions = record.conditions;
-  return Array.isArray(conditions)
-    ? conditions.filter(isRecord)
-    : [];
-}
-
-function isExactDiagnosticsPathCondition(record: JsonRecord): boolean {
-  return readBooleanProperty(record, ["negated", "negate", "not"]) !== true
-    && hasPathField(record)
-    && hasExactOperator(record)
-    && readOwnStrings(record, ["value", "values"]).includes(COMPANION_AUTH_DIAGNOSTICS_PATH);
-}
-
-function hasPathField(record: JsonRecord): boolean {
-  return readOwnStrings(record, ["field", "key", "name", "source", "type"])
-    .some((value) => normalizeToken(value) === "path");
-}
-
-function hasExactOperator(record: JsonRecord): boolean {
-  return readOwnStrings(record, ["match", "op", "operator", "operation"])
-    .some((value) => ["eq", "equal", "equals", "exact", "is"].includes(normalizeToken(value)));
+function isExactDiagnosticsPathCondition(value: unknown): boolean {
+  return isRecord(value)
+    && value.neg !== true
+    && value.type === "path"
+    && value.op === "eq"
+    && value.value === COMPANION_AUTH_DIAGNOSTICS_PATH;
 }
 
 function hasRequiredRateLimitAction(rule: JsonRecord): boolean {
   const action = readRecord(rule, "action");
   const mitigate = action === null ? null : readRecord(action, "mitigate");
-  const actionSource = mitigate ?? action;
-  if (actionSource === null) {
+  if (mitigate === null || mitigate.action !== "rate_limit") {
     return false;
   }
 
-  const actionType = readOwnStrings(actionSource, ["action", "kind", "mode", "type"])
-    .some((value) => normalizeToken(value) === "ratelimit");
-  const rateLimit = readRecord(actionSource, "rateLimit")
-    ?? readRecord(actionSource, "rate_limit")
-    ?? readRecord(rule, "rateLimit")
-    ?? readRecord(rule, "rate_limit");
+  const rateLimit = readRecord(mitigate, "rateLimit");
 
-  return actionType
-    && rateLimit !== null
-    && readNumber(rateLimit, ["limit", "requests", "requestsPerWindow"]) === REQUIRED_RATE_LIMIT
-    && readRateLimitWindowSeconds(rateLimit) === REQUIRED_WINDOW_SECONDS
-    && readOwnStrings(rateLimit, ["algo", "algorithm"]).some((value) =>
-      normalizeToken(value) === normalizeToken(REQUIRED_ALGORITHM)
-    )
-    && readOwnStrings(rateLimit, ["key", "keys"]).some((value) =>
-      normalizeToken(value) === REQUIRED_RATE_LIMIT_KEY
-    );
-}
-
-function readRateLimitWindowSeconds(rateLimit: JsonRecord): number | null {
-  const direct = readNumber(rateLimit, ["window", "duration", "period", "seconds"]);
-  if (direct !== null) {
-    return direct;
-  }
-
-  const window = readRecord(rateLimit, "window");
-  return window === null ? null : readNumber(window, ["value", "seconds"]);
-}
-
-function readNumber(record: JsonRecord, keys: string[]): number | null {
-  for (const key of keys) {
-    const value = record[key];
-    if (typeof value === "number") {
-      return value;
-    }
-    if (typeof value === "string" && value.trim() !== "") {
-      const parsed = Number(value);
-      if (Number.isFinite(parsed)) {
-        return parsed;
-      }
-    }
-  }
-  return null;
-}
-
-function readBooleanProperty(record: JsonRecord, keys: string[]): boolean | null {
-  for (const key of keys) {
-    const value = record[key];
-    if (typeof value === "boolean") {
-      return value;
-    }
-  }
-  return null;
+  return rateLimit !== null
+    && rateLimit.action === "rate_limit"
+    && rateLimit.algo === REQUIRED_ALGORITHM
+    && rateLimit.limit === REQUIRED_RATE_LIMIT
+    && rateLimit.window === REQUIRED_WINDOW_SECONDS
+    && Array.isArray(rateLimit.keys)
+    && rateLimit.keys.length === 1
+    && rateLimit.keys[0] === REQUIRED_RATE_LIMIT_KEY;
 }
 
 function readRecord(record: JsonRecord, key: string): JsonRecord | null {
   const value = record[key];
   return isRecord(value) ? value : null;
-}
-
-function readOwnStrings(record: JsonRecord, keys: string[]): string[] {
-  return keys.flatMap((key) => readOwnStringValues(record[key]));
-}
-
-function readOwnStringValues(value: unknown): string[] {
-  if (typeof value === "string") {
-    return [value];
-  }
-  if (Array.isArray(value)) {
-    return value.filter((entry): entry is string => typeof entry === "string");
-  }
-  return [];
-}
-
-function normalizeToken(value: string): string {
-  return value.toLowerCase().replace(/[\s_-]+/gu, "");
 }
 
 function isRecord(value: unknown): value is JsonRecord {

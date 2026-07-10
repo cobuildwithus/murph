@@ -203,6 +203,7 @@ describe("device sync companion routes", () => {
         errorKind: "rate_limited",
         httpStatus: 429,
         method: "email",
+        providerErrorCode: "too_many_requests",
         retryable: true,
         stage: "send_code",
       }));
@@ -218,6 +219,7 @@ describe("device sync companion routes", () => {
         method: "email",
         platform: "ios",
         provider: "privy",
+        providerErrorCode: "too_many_requests",
         retryable: true,
         stage: "send_code",
       }));
@@ -230,6 +232,7 @@ describe("device sync companion routes", () => {
         diagnosticCode: "privy_invalid_native_app_id",
         errorKind: "configuration",
         method: "email",
+        providerErrorCode: null,
         retryable: false,
         stage: "send_code",
       }));
@@ -240,6 +243,7 @@ describe("device sync companion routes", () => {
         expect.objectContaining({
           diagnosticCode: "privy_invalid_native_app_id",
           diagnosticDescription: "Privy rejected the native app configuration.",
+          providerErrorCode: null,
           retryable: false,
         }),
       );
@@ -264,6 +268,7 @@ describe("device sync companion routes", () => {
           diagnosticCode: "privy_rate_limited",
           errorKind: "rate_limited",
           method: "email",
+          providerErrorCode: "too_many_requests",
           retryable: true,
           stage: "send_code",
         }),
@@ -315,7 +320,6 @@ describe("device sync companion routes", () => {
       ["memberId", "hbm_abc123xyz"],
       ["phone", "+14155552671"],
       ["provider", "privy"],
-      ["providerErrorCode", "invalid_native_app_id"],
       ["providerMessage", "Privy failed for person@example.test code 123456"],
       ["token", "secret-token"],
     ])("rejects the unknown %s field without logging it", async (field, value) => {
@@ -339,6 +343,31 @@ describe("device sync companion routes", () => {
         expect.anything(),
       );
       expect(JSON.stringify(warnSpy.mock.calls)).not.toContain(value);
+    });
+
+    it.each([
+      "UPPERCASE",
+      "contains-hyphens",
+      "contains spaces",
+      "x".repeat(65),
+    ])("rejects unsafe provider machine code %s without logging it", async (providerErrorCode) => {
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+      const response = await authDiagnosticsRoute.POST(authDiagnosticsRequest({
+        diagnosticCode: "privy_unknown",
+        errorKind: "provider",
+        method: "email",
+        providerErrorCode,
+        retryable: true,
+        stage: "send_code",
+      }));
+
+      expect(response.status).toBe(400);
+      expect(warnSpy).not.toHaveBeenCalledWith(
+        "Companion auth diagnostic.",
+        expect.anything(),
+      );
+      expect(JSON.stringify(warnSpy.mock.calls)).not.toContain(providerErrorCode);
     });
 
     it("drops an unsafe app version without losing the diagnostic", async () => {
