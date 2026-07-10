@@ -20,6 +20,7 @@ import type {
   AssistantHostedFamilyPlanTool,
   AssistantHostedGroupTool,
   AssistantHostedNewsletterTool,
+  AssistantHostedPersonalizationTool,
   AssistantPhoneCallPort,
 } from './execution-context.js'
 import {
@@ -56,6 +57,7 @@ export type AssistantHostedVaultFileSendResult =
     }
 
 export interface AssistantHostedToolContext {
+  readonly assistantPersonalizationTool?: AssistantHostedPersonalizationTool | null
   readonly connectedApps?: AssistantConnectedAppsPort | null
   readonly familyPlanTool?: AssistantHostedFamilyPlanTool | null
   readonly groupTool?: AssistantHostedGroupTool | null
@@ -79,6 +81,7 @@ type AssistantHostedToolDeliveryContext = {
 }
 
 export function createAssistantHostedToolContext(input: {
+  assistantPersonalizationTool?: AssistantHostedPersonalizationTool | null
   connectedApps?: AssistantConnectedAppsPort | null
   familyPlanTool?: AssistantHostedFamilyPlanTool | null
   groupTool?: AssistantHostedGroupTool | null
@@ -112,6 +115,7 @@ export function createAssistantHostedToolContext(input: {
   }
 
   return {
+    assistantPersonalizationTool: input.assistantPersonalizationTool ?? null,
     connectedApps: input.connectedApps ?? null,
     familyPlanTool: input.familyPlanTool ?? null,
     groupTool: input.groupTool ?? null,

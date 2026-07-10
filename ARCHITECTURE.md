@@ -1,6 +1,6 @@
 # Murph Architecture
 
-Last verified: 2026-07-09
+Last verified: 2026-07-10
 
 ## Hosted Connected Apps
 
@@ -38,6 +38,27 @@ and final analysis. Retell reaches `apps/web` only through signed raw-body
 function/webhook routes for `ask_murph`, `call_ended`, and `call_analyzed`;
 Murph does not persist raw Retell transcripts, request bodies, recordings, or
 call audio.
+
+## Hosted Assistant Personalization
+
+`apps/web` remains the canonical owner of hosted tone, voice, and Terra/Sol
+preferences. Browser Settings and the assistant-accessible
+`murph.personalization` tool call the same existing web mutation owners; the
+tool reaches them only through one active-runtime-write-fenced, member-bound,
+signed `web-control.worker` callback with strict read/update contracts. The
+validated fence identity is the only member identity forwarded and signed for
+the web callback. Tone and voice changes continue to
+append the existing `member.preferences.updated` mailbox event inside the web
+transaction and converge into canonical vault preferences through normal
+runtime handling. Model changes continue to write only the nullable,
+billing-gated hosted-member Sol intent and apply at the next hosted invocation,
+without a mailbox event or vault copy. A combined request is one transaction,
+and an ineligible Sol choice rejects before any style change. The response
+returns only the effective enum values (normalizing absent stored style to the
+shared `formal`/`upbeat` presentation defaults), availability, and truthful
+saved/unchanged/rejected state so the assistant can confirm what actually
+happened. No vault-only setter or second personalization store exists; Settings
+is the fallback only when the hosted tool port is unavailable.
 
 ## Module Map
 

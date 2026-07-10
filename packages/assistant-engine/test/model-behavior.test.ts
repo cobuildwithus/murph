@@ -275,7 +275,7 @@ describe('assistant execution prompt contract', () => {
     }
   })
 
-  it('keeps the assistant style settings fact in the stable route prompt', () => {
+  it('keeps conversation-first personalization guidance and private dial controls in the stable route prompt', () => {
     const layers = buildAssistantSystemPromptLayers(createCommonCodexPromptInput())
 
     expect(layers.prompt).toContain('/settings?voice=true')
@@ -320,6 +320,30 @@ describe('assistant execution prompt contract', () => {
     )
     expect(layers.stableRouteCapabilityPrompt).toContain(
       'Group prompts never receive dial values or expose, mutate, or apply private dials',
+    )
+    expect(layers.stableRouteCapabilityPrompt).toContain(
+      'When `murph.personalization` is available',
+    )
+    expect(layers.stableRouteCapabilityPrompt).toContain(
+      'whole compound update was rejected and no requested field changed',
+    )
+    expect(layers.stableRouteCapabilityPrompt).toContain(
+      '`unchanged` means they already matched',
+    )
+    expect(layers.stableRouteCapabilityPrompt).toContain(
+      'Map voice or model display labels through the corresponding tool field schema',
+    )
+    expect(layers.stableRouteCapabilityPrompt).toContain(
+      'use `/settings?voice=true` only for voice or sound changes',
+    )
+    expect(layers.stableRouteCapabilityPrompt).toContain(
+      'Use `/settings` for tone or model changes',
+    )
+    expect(layers.stableRouteCapabilityPrompt).toContain(
+      'never use a same-turn voice demo as activation proof',
+    )
+    expect(layers.stableRouteCapabilityPrompt).toContain(
+      'a new hosted invocation after the active run closes, which can take up to three minutes when idle',
     )
     expect(layers.threadContextPrompt).not.toContain('/settings?voice=true')
     expect(layers.dynamicTurnContextPrompt).not.toContain('/settings?voice=true')

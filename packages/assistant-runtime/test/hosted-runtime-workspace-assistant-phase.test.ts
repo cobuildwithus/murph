@@ -738,6 +738,34 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     );
   });
 
+  it("exposes the hosted personalization port to the assistant turn context", async () => {
+    const assistantPersonalizationToolPort = {
+      request: vi.fn(),
+    };
+
+    await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      runtimeAssistantPersonalizationToolPort: assistantPersonalizationToolPort,
+    }));
+
+    expect(mocks.hydrateHostedExecutionDefaultTarget).toHaveBeenCalledWith(
+      {
+        hosted: expect.objectContaining({
+          assistantPersonalizationTool: assistantPersonalizationToolPort,
+        }),
+      },
+      expect.any(Object),
+    );
+    expect(mocks.runHostedAssistantAutomationLane).toHaveBeenCalledWith(
+      expect.objectContaining({
+        executionContext: expect.objectContaining({
+          hosted: expect.objectContaining({
+            assistantPersonalizationTool: assistantPersonalizationToolPort,
+          }),
+        }),
+      }),
+    );
+  });
+
   it("prepares hosted assistant automation state before running scheduled automation", async () => {
     const runtimeEnv = {};
     const runtimeForwardedEnv = {
@@ -12177,6 +12205,9 @@ function createPhaseInput(input: {
   runtimeActionApprovalPort?: NonNullable<
     HostedWorkspaceRuntimeAssistantPhaseInput["runtime"]["platform"]["actionApprovalPort"]
   >;
+  runtimeAssistantPersonalizationToolPort?: NonNullable<
+    HostedWorkspaceRuntimeAssistantPhaseInput["runtime"]["platform"]["assistantPersonalizationToolPort"]
+  >;
   runtimeUsageRecordPort?: RuntimeUsageRecordPort;
   runtimeUserEnv?: Record<string, string>;
   vaultRoot?: string;
@@ -12290,6 +12321,12 @@ function createPhaseInput(input: {
         ...(input.runtimeDeviceSyncPort ? { deviceSyncPort: input.runtimeDeviceSyncPort } : {}),
         ...(input.runtimeActionApprovalPort
           ? { actionApprovalPort: input.runtimeActionApprovalPort }
+          : {}),
+        ...(input.runtimeAssistantPersonalizationToolPort
+          ? {
+              assistantPersonalizationToolPort:
+                input.runtimeAssistantPersonalizationToolPort,
+            }
           : {}),
         ...(input.runtimeUsageRecordPort ? { usageRecordPort: input.runtimeUsageRecordPort } : {}),
         ...(input.runtimeLatencyTraceRequests

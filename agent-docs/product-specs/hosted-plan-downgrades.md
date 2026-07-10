@@ -31,7 +31,7 @@ transitions still stay out of scope.
 ## Edge Assistant Model Choice
 
 The current paid Edge plan also unlocks an explicit assistant-model choice in
-Settings:
+Settings and through the hosted `murph.personalization` operation:
 
 - Terra remains the default for every member, including Edge members who do
   nothing.
@@ -56,6 +56,11 @@ Settings:
   member does not mistake that bounded delay for a failed save.
 - Changing the preference does not create a mailbox item, wake, queue, or a
   second copy in the vault or hosted workspace snapshot.
+- Settings and conversation use the same billing-gated model preference owner.
+  The conversation result reports the effective model and whether a real
+  change starts on the next hosted invocation; a no-op reports `unchanged`, and
+  an ineligible Sol request reports a safe rejection without applying any
+  accompanying tone or voice change.
 
 ### Deployment And Compatibility
 

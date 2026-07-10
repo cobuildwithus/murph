@@ -540,6 +540,12 @@ export async function runHostedWorkspaceAssistantPhase(
     {
       hosted: {
         actionApprovalPort: input.runtime.platform.actionApprovalPort ?? null,
+        ...(input.runtime.platform.assistantPersonalizationToolPort
+          ? {
+              assistantPersonalizationTool:
+                input.runtime.platform.assistantPersonalizationToolPort,
+            }
+          : {}),
         connectedApps: input.runtime.platform.connectedApps ?? null,
         phoneCalls: input.runtime.platform.phoneCalls ?? null,
         progressDeliveryDependencies: createHostedAssistantProgressDeliveryDependencies({

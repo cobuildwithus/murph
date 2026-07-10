@@ -62,11 +62,55 @@ The effective defaults are:
 | Push | 3 |
 | Detail | 5 |
 
+`hosted_member.assistant_tone` and `hosted_member.assistant_voice` capture the latest web-side choices for settings display and mailbox handoff. The session-authenticated route `POST /api/settings/assistant-style` and the member-bound signed assistant personalization callback use the same mutation owner. That owner validates the request, updates changed columns, appends a `member.preferences.updated` hosted mailbox event, and best-effort signals the runtime.
+
 `assistant style show` resolves missing values to these defaults and labels them `source: "default"`. A successful explicit set remains `source: "custom"` even when the chosen score equals the product default. Reset removes the override and restores the effective default. Resetting the last override removes the empty personality object.
 
 No prompt text, inferred psychological profile, or conversation excerpt is stored. Prompt behavior stays code-owned.
 
-## Conversational Surface
+## Hosted Conversation Control
+
+Hosted conversations expose one typed `murph.personalization` operation when
+the runtime has its web-owned port:
+
+- `action: "read"` returns the effective tone, voice, model, and Sol
+  availability. Nullable hosted storage is presentation-only normalized to the
+  canonical `formal` tone and `upbeat` ("Classic Murph") voice defaults; a read
+  does not persist those defaults.
+- `action: "update"` accepts at least one validated tone, voice, or Terra/Sol
+  field and saves only the fields the member asked to change.
+- Style and model changes in one request use one web transaction. The existing
+  billing owner checks a requested model before the style owner can append its
+  mailbox event, so an ineligible Sol request cannot partially change tone or
+  voice. Any later style failure rolls the model write back.
+- The result distinguishes `saved`, `unchanged`, and `rejected`, returns the
+  effective values after the operation, and marks a changed model as applying
+  on the next hosted invocation. The current run keeps the model with which it
+  started and can take up to three idle minutes to close. A saved tone or voice
+  converges through the existing mailbox owner for a later turn; it does not
+  retroactively change the reply running the tool, so a same-turn voice demo is
+  not activation proof.
+- Sol rejection exposes only the safe `sol_requires_edge` reason. Generic tool
+  failure is not evidence about the member's plan or eligibility. A compound
+  Sol plus style request is rejected atomically: no requested field changes,
+  and the assistant must not silently split or retry it.
+
+Voice labels shown to members map to tool ids from the shared
+`assistantVoiceOptions` roster; voice guidance derives the complete mapping
+from that roster, including "Classic Murph" -> `upbeat` and "New York" ->
+`classic`, rather than maintaining a second label table. Model guidance maps
+the Terra and Sol display labels to the canonical `gpt-5.6-terra` and
+`gpt-5.6-sol` constants respectively.
+
+This path deliberately does not write `bank/preferences.json` directly. Tone
+and voice still flow from the hosted-member capture through
+`member.preferences.updated` to `core.updateAssistantPreferences`, preserving
+Settings/runtime convergence. The model remains a web-owned nullable intent
+with no vault peer. When the typed operation is unavailable,
+`/settings?voice=true` is the narrow voice/sound fallback, while `/settings` is
+the fallback for tone or model changes.
+
+## Personality Dial Conversation Control
 
 The canonical commands are:
 

@@ -157,6 +157,9 @@ export async function handleRunnerWebControlRequest(input: {
     && input.request.method === "POST";
   const isPhoneCallStartRequest = policy.operation === "phone_call_start"
     && input.request.method === "POST";
+  const isAssistantPersonalizationToolRequest =
+    policy.operation === "assistant_personalization_tool"
+    && input.request.method === "POST";
   let writeAuthority: RunnerRuntimeWriteFenceWriteAuthority | null =
     null;
   if (
@@ -175,6 +178,7 @@ export async function handleRunnerWebControlRequest(input: {
     || isConnectedAppsRequest
     || isCodexAuthUpdateRequest
     || isPhoneCallStartRequest
+    || isAssistantPersonalizationToolRequest
   ) {
     try {
       writeAuthority = await (

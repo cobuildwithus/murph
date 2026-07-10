@@ -34,6 +34,10 @@
       "types": "./dist/assistant-model.d.ts",
       "default": "./dist/assistant-model.js"
     },
+    "./assistant-personalization": {
+      "types": "./dist/assistant-personalization.d.ts",
+      "default": "./dist/assistant-personalization.js"
+    },
     "./assistant-capabilities": {
       "types": "./dist/assistant-capabilities.d.ts",
       "default": "./dist/assistant-capabilities.js"

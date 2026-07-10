@@ -46,6 +46,9 @@ import {
   createAssistantUsageReportingUserId,
 } from "@murphai/hosted-execution/assistant-usage";
 import {
+  HOSTED_RUNTIME_ASSISTANT_PERSONALIZATION_TOOL_PATH,
+} from "@murphai/hosted-execution/assistant-personalization";
+import {
   buildHostedComputerRunOperationPath,
   HOSTED_COMPUTER_RUNS_PATH,
   isHostedComputerWebControlRequest,
@@ -127,6 +130,9 @@ import {
 import {
   asWorkerStringEnvironment,
 } from "../src/worker-contracts.ts";
+import {
+  verifyHostedWebCallbackSignatureHeaders,
+} from "../src/web-callback-auth.ts";
 import type {
   WorkerBindUserRunnerStubLike,
   WorkerUserRunnerNamespaceLike,
@@ -213,6 +219,11 @@ const ALLOWLISTED_WEB_CONTROL_CASES = [
     },
     name: "hosted product feedback recording",
     path: HOSTED_RUNTIME_PRODUCT_FEEDBACK_RECORD_PATH,
+  },
+  {
+    body: { action: "read" },
+    name: "hosted assistant personalization tool",
+    path: HOSTED_RUNTIME_ASSISTANT_PERSONALIZATION_TOOL_PATH,
   },
   {
     body: {
@@ -641,6 +652,7 @@ describe("handleRunnerOutboundRequest", () => {
                     || path === HOSTED_RUNTIME_LINQ_EGRESS_DELIVERY_PATH
                     || path === HOSTED_RUNTIME_LINQ_EGRESS_ENGAGEMENT_PATH
                     || path === HOSTED_RUNTIME_CODEX_AUTH_PATH
+                    || path === HOSTED_RUNTIME_ASSISTANT_PERSONALIZATION_TOOL_PATH
                     || isHostedComputerWebControlRequest({ method: "POST", path })
                     ? {
                         "x-hosted-runtime-attempt-id": "attempt_1",
@@ -711,6 +723,221 @@ describe("handleRunnerOutboundRequest", () => {
       expect(timeoutSpy).toHaveBeenCalledWith(45_000);
     },
   );
+
+  it("rejects assistant personalization without the active runtime fence", async () => {
+    const validateRuntimeWriteFence = vi.fn(async () => true);
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await handleRunnerOutboundRequest(
+      createAssistantPersonalizationRunnerRequest(),
+      createRunnerOutboundEnv({
+        USER_RUNNER: {
+          getByName() {
+            return { validateRuntimeWriteFence };
+          },
+        },
+      }),
+      "member_personalization_target",
+    );
+
+    expect(response.status).toBe(401);
+    expect(validateRuntimeWriteFence).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    {
+      attemptId: "attempt_stale",
+      generation: "9",
+      name: "stale attempt",
+    },
+    {
+      attemptId: "attempt_active",
+      generation: "8",
+      name: "wrong generation",
+    },
+  ])("rejects assistant personalization with a $name fence", async ({
+    attemptId,
+    generation,
+  }) => {
+    const validateRuntimeWriteFence = vi.fn(async (input: {
+      attemptId: string;
+      generation: string;
+      userId: string;
+    }) =>
+      input.attemptId === "attempt_active"
+      && input.generation === "9"
+      && input.userId === "member_personalization_target"
+    );
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await handleRunnerOutboundRequest(
+      createAssistantPersonalizationRunnerRequest({
+        "x-hosted-runtime-attempt-id": attemptId,
+        "x-hosted-runtime-lease-generation": generation,
+      }),
+      createRunnerOutboundEnv({
+        USER_RUNNER: {
+          getByName() {
+            return { validateRuntimeWriteFence };
+          },
+        },
+      }),
+      "member_personalization_target",
+    );
+
+    expect(response.status).toBe(401);
+    expect(validateRuntimeWriteFence).toHaveBeenCalledWith({
+      attemptId,
+      generation,
+      userId: "member_personalization_target",
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects assistant personalization when the fence belongs to another user", async () => {
+    const validateRuntimeWriteFence = vi.fn(async (input: {
+      attemptId: string;
+      generation: string;
+      userId: string;
+    }) =>
+      input.attemptId === "attempt_fence_owner"
+      && input.generation === "9"
+      && input.userId === "member_fence_owner"
+    );
+    const getByName = vi.fn(() => ({ validateRuntimeWriteFence }));
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await handleRunnerOutboundRequest(
+      createAssistantPersonalizationRunnerRequest({
+        "x-hosted-runtime-attempt-id": "attempt_fence_owner",
+        "x-hosted-runtime-lease-generation": "9",
+      }),
+      createRunnerOutboundEnv({
+        USER_RUNNER: { getByName },
+      }),
+      "member_personalization_target",
+    );
+
+    expect(response.status).toBe(401);
+    expect(getByName).toHaveBeenCalledWith("member_personalization_target");
+    expect(validateRuntimeWriteFence).toHaveBeenCalledWith({
+      attemptId: "attempt_fence_owner",
+      generation: "9",
+      userId: "member_personalization_target",
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("forwards and signs assistant personalization only for the fence-bound user", async () => {
+    const boundUserId = "member_personalization_bound";
+    const payload = JSON.stringify({ action: "read" });
+    const validateRuntimeWriteFence = vi.fn(async (input: {
+      attemptId: string;
+      generation: string;
+      userId: string;
+    }) =>
+      input.attemptId === "attempt_active"
+      && input.generation === "9"
+      && input.userId === boundUserId
+    );
+    const fetchMock = vi.fn(async (
+      ..._args: Parameters<typeof fetch>
+    ): Promise<Response> => new Response(JSON.stringify({
+      action: "read",
+      result: {
+        model: "gpt-5.6-terra",
+        solAvailable: false,
+        tone: "formal",
+        voice: "warm",
+      },
+    }), {
+      headers: { "content-type": "application/json; charset=utf-8" },
+      status: 200,
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    const env = createRunnerOutboundEnv({
+      USER_RUNNER: {
+        getByName() {
+          return { validateRuntimeWriteFence };
+        },
+      },
+    });
+
+    const response = await handleRunnerOutboundRequest(
+      createAssistantPersonalizationRunnerRequest({
+        "x-hosted-execution-signature": "child-supplied-signature",
+        "x-hosted-execution-user-id": "member_spoofed",
+        "x-hosted-runner-bound-user-id": "member_spoofed",
+        "x-hosted-runtime-attempt-id": "attempt_active",
+        "x-hosted-runtime-lease-generation": "9",
+      }),
+      env,
+      boundUserId,
+    );
+
+    expect(response.status).toBe(200);
+    expect(validateRuntimeWriteFence).toHaveBeenCalledWith({
+      attemptId: "attempt_active",
+      generation: "9",
+      userId: boundUserId,
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const firstCall = fetchMock.mock.calls[0];
+    if (!firstCall) {
+      throw new Error("Expected the personalization callback to be forwarded.");
+    }
+    const [url, init] = firstCall;
+    const headers = new Headers(init?.headers);
+    expect(String(url)).toBe(
+      `https://web.example.test${HOSTED_RUNTIME_ASSISTANT_PERSONALIZATION_TOOL_PATH}`,
+    );
+    expect(init?.body).toBe(payload);
+    expect(headers.get("x-hosted-runtime-attempt-id")).toBe("attempt_active");
+    expect(headers.get("x-hosted-runtime-lease-generation")).toBe("9");
+    expect(headers.get("x-hosted-execution-user-id")).toBe(boundUserId);
+    expect(headers.get("x-hosted-runner-bound-user-id")).toBeNull();
+    expect(headers.get("x-hosted-execution-signature")).not.toBe(
+      "child-supplied-signature",
+    );
+
+    const privateKeyJwkJson = env.HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK;
+    if (typeof privateKeyJwkJson !== "string") {
+      throw new Error("Expected the callback signing fixture.");
+    }
+    const forwardedRequest = new Request(String(url), {
+      headers,
+      method: "POST",
+    });
+    const nonceStore = { consume: vi.fn(async () => true) };
+    const signatureInput = {
+      environment: {
+        keyId: "v1",
+        privateKeyJwkJson,
+      },
+      method: "POST",
+      nonceStore,
+      path: HOSTED_RUNTIME_ASSISTANT_PERSONALIZATION_TOOL_PATH,
+      payload,
+      request: forwardedRequest,
+      search: "",
+    };
+    await expect(verifyHostedWebCallbackSignatureHeaders({
+      ...signatureInput,
+      userId: "member_spoofed",
+    })).resolves.toBe(false);
+    await expect(verifyHostedWebCallbackSignatureHeaders({
+      ...signatureInput,
+      userId: boundUserId,
+    })).resolves.toBe(true);
+    expect(nonceStore.consume).toHaveBeenCalledTimes(1);
+    expect(nonceStore.consume).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: boundUserId }),
+    );
+  });
 
   it("rejects device-sync runtime snapshots without the active runtime fence", async () => {
     const validateRuntimeWriteFence = vi.fn(async () => true);
@@ -8387,6 +8614,22 @@ function createRunnerProxyHeaders(headers: Record<string, string> = {}) {
     [RUNNER_PROXY_TOKEN_HEADER]: RUNNER_PROXY_TOKEN,
     ...headers,
   };
+}
+
+function createAssistantPersonalizationRunnerRequest(
+  headers: Record<string, string> = {},
+): Request {
+  return new Request(
+    `http://web-control.worker${HOSTED_RUNTIME_ASSISTANT_PERSONALIZATION_TOOL_PATH}`,
+    {
+      body: JSON.stringify({ action: "read" }),
+      headers: createRunnerProxyHeaders({
+        "content-type": "application/json; charset=utf-8",
+        ...headers,
+      }),
+      method: "POST",
+    },
+  );
 }
 
 function createMailboxPayloadDecodeHeaders(headers: Record<string, string> = {}) {

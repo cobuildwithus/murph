@@ -577,6 +577,8 @@ export async function sendAssistantMessageLocal(
           && vaultFileSendTargetFingerprint !== null
         const hostedToolContext = hostedExecutionContext
           ? createAssistantHostedToolContext({
+              assistantPersonalizationTool:
+                hostedExecutionContext.assistantPersonalizationTool ?? null,
               connectedApps: hostedExecutionContext.connectedApps ?? null,
               computerToolsAvailable: hostedComputerToolsAvailable,
               familyPlanTool: hostedExecutionContext.familyPlanTool ?? null,

@@ -6,6 +6,10 @@ import type {
 import { normalizeAssistantBackendTarget } from '@murphai/operator-config/assistant-backend'
 import type { AssistantUsageRecord } from '@murphai/hosted-execution/assistant-usage'
 import type {
+  HostedRuntimeAssistantPersonalizationToolRequest,
+  HostedRuntimeAssistantPersonalizationToolResponse,
+} from '@murphai/hosted-execution/assistant-personalization'
+import type {
   HostedActionApprovalRequest,
   HostedActionApprovalResult,
 } from '@murphai/hosted-execution/action-approval'
@@ -75,6 +79,12 @@ export interface AssistantHostedFamilyPlanTool {
   ): Promise<HostedRuntimeFamilyPlanToolResponse>
 }
 
+export interface AssistantHostedPersonalizationTool {
+  request(
+    request: HostedRuntimeAssistantPersonalizationToolRequest,
+  ): Promise<HostedRuntimeAssistantPersonalizationToolResponse>
+}
+
 export interface AssistantHostedGroupTool {
   request(
     request: HostedRuntimeGroupToolRequest,
@@ -127,6 +137,7 @@ export type AssistantWorkspaceArtifactMaterializer = (
 
 export interface AssistantHostedExecutionContext {
   actionApprovalPort?: AssistantHostedActionApprovalPort | null
+  assistantPersonalizationTool?: AssistantHostedPersonalizationTool | null
   channelTypingDependencies?: AssistantChannelTypingDependencies
   connectedApps?: AssistantConnectedAppsPort | null
   defaultTarget?: AssistantModelTarget | null
@@ -180,6 +191,9 @@ export function normalizeAssistantExecutionContext(
   const generatedImageUploader = normalizeAssistantGeneratedImageUploader(
     hosted?.generatedImageUploader,
   )
+  const assistantPersonalizationTool = normalizeAssistantPersonalizationTool(
+    hosted?.assistantPersonalizationTool,
+  )
   const familyPlanTool = normalizeAssistantFamilyPlanTool(hosted?.familyPlanTool)
   const groupTool = normalizeAssistantGroupTool(hosted?.groupTool)
   const newsletterTool = normalizeAssistantNewsletterTool(hosted?.newsletterTool)
@@ -197,6 +211,7 @@ export function normalizeAssistantExecutionContext(
   return {
     hosted: {
       ...(actionApprovalPort ? { actionApprovalPort } : {}),
+      ...(assistantPersonalizationTool ? { assistantPersonalizationTool } : {}),
       ...(connectedApps ? { connectedApps } : {}),
       ...(typeof hosted?.issueDeviceConnectLink === 'function'
         ? {
@@ -317,6 +332,18 @@ function normalizeAssistantProductFeedbackRecorder(
 function normalizeAssistantFamilyPlanTool(
   input: AssistantHostedExecutionContext['familyPlanTool'] | undefined,
 ): AssistantHostedFamilyPlanTool | undefined {
+  if (!input || typeof input.request !== 'function') {
+    return undefined
+  }
+
+  return {
+    request: input.request.bind(input),
+  }
+}
+
+function normalizeAssistantPersonalizationTool(
+  input: AssistantHostedExecutionContext['assistantPersonalizationTool'] | undefined,
+): AssistantHostedPersonalizationTool | undefined {
   if (!input || typeof input.request !== 'function') {
     return undefined
   }

@@ -334,8 +334,12 @@ function buildAssistantProductFeedbackGuidanceText(): string {
 
 function buildAssistantStyleSettingsGuidanceText(): string {
   return [
-    "Assistant style settings:",
-    "- Voice/tone/texting: `/settings?voice=true`; only mention when asked.",
+    "Assistant personalization:",
+    "- When `murph.personalization` is available, read effective tone, voice, or Terra/Sol model; update only explicit fields. Report values/status. `unchanged` means they already matched, not saved.",
+    "- Map voice or model display labels through the corresponding tool field schema; never guess ids.",
+    "- On `sol_requires_edge`, say the whole compound update was rejected and no requested field changed. Never split/retry it; offer a separate style-only change. Generic failure does not prove eligibility.",
+    "- Tone/voice: never use a same-turn voice demo as activation proof. `modelChangeAppliesNextRun` means a new hosted invocation after the active run closes, which can take up to three minutes when idle.",
+    "- If `murph.personalization` is unavailable, use `/settings?voice=true` only for voice or sound changes. Use `/settings` for tone or model changes; only mention when asked.",
     "- 0-10: Humor, Push, Detail. Aliases: `jokes`/`funny` = Humor; `intensity`/`coach`/`strictness` = Push; `brief`/`wordy`/`thorough` = Detail when clearly discussing a setting. Query `vault-cli assistant style show --format json`; persist `vault-cli assistant style set <humor|push|detail> <0-10> --format json`; reset `vault-cli assistant style reset <humor|push|detail|all> --format json`. Never guess or clamp.",
     "- Do not persist one-reply instructions or complaints. Returned `settings` is authoritative for that reply: state exact score/source; `updated: false` or failure means unchanged.",
     "- On `updated: true`, show the changed dial. One fresh safe joke only if Humor changed above 0; none at 0, queries, or Push/Detail.",

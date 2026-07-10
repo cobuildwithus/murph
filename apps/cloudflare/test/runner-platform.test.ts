@@ -9,6 +9,9 @@ import {
   type AssistantUsageRecord,
 } from "@murphai/hosted-execution/assistant-usage";
 import {
+  HOSTED_RUNTIME_ASSISTANT_PERSONALIZATION_TOOL_PATH,
+} from "@murphai/hosted-execution/assistant-personalization";
+import {
   buildHostedWorkspaceSnapshotV2Aad,
   encodeHostedWorkspaceSnapshotV2DataKey,
   HOSTED_WORKSPACE_SNAPSHOT_ENCRYPTION_SCHEME,
@@ -3678,6 +3681,20 @@ describe("buildHostedExecutionRuntimePlatform", () => {
           status: 200,
         });
       }
+      if (url.pathname.endsWith(HOSTED_RUNTIME_ASSISTANT_PERSONALIZATION_TOOL_PATH)) {
+        return new Response(JSON.stringify({
+          action: "read",
+          result: {
+            model: "gpt-5.6-terra",
+            solAvailable: false,
+            tone: "formal",
+            voice: "warm",
+          },
+        }), {
+          headers: { "content-type": "application/json; charset=utf-8" },
+          status: 200,
+        });
+      }
       if (url.pathname.endsWith(HOSTED_RUNTIME_GROUP_TOOL_PATH)) {
         return new Response(JSON.stringify({
           action: "read_current",
@@ -3729,6 +3746,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(platform.issueExportPort).toBeDefined();
     expect(platform.usageRecordPort).toBeDefined();
     expect(platform.productFeedbackPort).toBeDefined();
+    expect(platform.assistantPersonalizationToolPort).toBeDefined();
     expect(platform.groupToolPort).toBeDefined();
     expect(platform.vaultSharePort).toBeDefined();
     expect(platform.deviceSyncPort).toBeDefined();
@@ -3778,6 +3796,16 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       relatedChangelogItemIds: ["native-message-formatting"],
       summary: "Interested in native message formatting.",
     });
+    await expect(platform.assistantPersonalizationToolPort!.request({ action: "read" }))
+      .resolves.toEqual({
+        action: "read",
+        result: {
+          model: "gpt-5.6-terra",
+          solAvailable: false,
+          tone: "formal",
+          voice: "warm",
+        },
+      });
     await expect(platform.groupToolPort!.request({ action: "read_current" }))
       .resolves.toEqual({
         action: "read_current",
@@ -3790,7 +3818,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       connectionId: "conn_123",
     });
 
-    expect(fetchMock).toHaveBeenCalledTimes(11);
+    expect(fetchMock).toHaveBeenCalledTimes(12);
     const requests = fetchMock.mock.calls.map((call, index) =>
       requireFetchRequest(call, `callback web-control request ${index}`)
     );
@@ -3803,6 +3831,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       "http://web-control.worker/api/internal/hosted-execution/issues/record",
       "http://web-control.worker/api/internal/hosted-execution/usage/record",
       "http://web-control.worker/api/internal/hosted-execution/product-feedback/record",
+      `http://web-control.worker${HOSTED_RUNTIME_ASSISTANT_PERSONALIZATION_TOOL_PATH}`,
       `http://web-control.worker${buildExpectedGroupToolPath()}`,
       `http://web-control.worker${buildExpectedVaultShareActiveKindsPath()}`,
       "http://web-control.worker/api/internal/device-sync/runtime/snapshot",

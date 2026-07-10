@@ -1,6 +1,20 @@
 import { z } from 'zod'
 import { loadVault } from '@murphai/core'
 import {
+  assistantTonePreferenceValues,
+  assistantVoiceOptionIdValues,
+  assistantVoiceOptions,
+} from '@murphai/contracts'
+import {
+  HOSTED_ASSISTANT_PRODUCT_MODELS,
+  HOSTED_ASSISTANT_SOL_MODEL,
+  HOSTED_ASSISTANT_TERRA_MODEL,
+} from '@murphai/hosted-execution/assistant-model'
+import {
+  hostedRuntimeAssistantPersonalizationToolRequestSchema,
+  type HostedRuntimeAssistantPersonalizationToolRequest,
+} from '@murphai/hosted-execution/assistant-personalization'
+import {
   HOSTED_PRODUCT_FEEDBACK_KINDS,
   HOSTED_PRODUCT_FEEDBACK_SUMMARY_MAX_LENGTH,
   HOSTED_RUNTIME_GROUP_DISPLAY_NAME_MAX_LENGTH,
@@ -346,6 +360,78 @@ export const MURPH_FAMILY_PLAN_TOOL = {
       },
     },
     required: ['action'],
+  },
+} as const
+
+const ASSISTANT_VOICE_LABEL_ID_MAPPING = assistantVoiceOptions
+  .map((option) => `${JSON.stringify(option.label)} -> \`${option.id}\``)
+  .join('; ')
+const ASSISTANT_MODEL_LABEL_ID_MAPPING = [
+  { id: HOSTED_ASSISTANT_TERRA_MODEL, label: 'Terra' },
+  { id: HOSTED_ASSISTANT_SOL_MODEL, label: 'Sol' },
+]
+  .map((option) => `${option.label} -> \`${option.id}\``)
+  .join('; ')
+
+export const MURPH_ASSISTANT_PERSONALIZATION_TOOL = {
+  namespace: 'murph',
+  name: 'personalization',
+  description:
+    'Read the current hosted user\'s effective Murph tone, voice, and Terra/Sol model preference, or save an explicit change. Use this instead of sending the user to Settings when available.',
+  inputSchema: {
+    type: 'object',
+    oneOf: [
+      {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          action: {
+            type: 'string',
+            const: 'read',
+          },
+        },
+        required: ['action'],
+      },
+      {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          action: {
+            type: 'string',
+            const: 'update',
+          },
+          model: {
+            type: 'string',
+            enum: [...HOSTED_ASSISTANT_PRODUCT_MODELS],
+            description: [
+              'Optional hosted model id for update.',
+              `Canonical display label -> id mapping: ${ASSISTANT_MODEL_LABEL_ID_MAPPING}.`,
+              'Translate the member\'s display-label choice with this mapping; Sol remains Edge-gated.',
+            ].join(' '),
+          },
+          tone: {
+            type: 'string',
+            enum: [...assistantTonePreferenceValues],
+            description: 'Optional saved writing tone for update.',
+          },
+          voice: {
+            type: 'string',
+            enum: [...assistantVoiceOptionIdValues],
+            description: [
+              'Optional saved voice id for update.',
+              `Canonical display label -> id mapping: ${ASSISTANT_VOICE_LABEL_ID_MAPPING}.`,
+              'Translate the member\'s display-label choice with this mapping; do not invent or guess voice ids.',
+            ].join(' '),
+          },
+        },
+        required: ['action'],
+        anyOf: [
+          { required: ['model'] },
+          { required: ['tone'] },
+          { required: ['voice'] },
+        ],
+      },
+    ],
   },
 } as const
 
@@ -806,6 +892,7 @@ const MURPH_BASE_DYNAMIC_TOOLS = [
   MURPH_ATTACH_RESPONSE_MEDIA_TOOL,
   MURPH_GENERATE_IMAGE_TOOL,
   MURPH_GENERATE_VOICE_MEMO_TOOL,
+  MURPH_ASSISTANT_PERSONALIZATION_TOOL,
   MURPH_FAMILY_PLAN_TOOL,
   MURPH_GROUP_TOOL,
   MURPH_NEWSLETTER_TOOL,
@@ -842,6 +929,7 @@ export interface MurphDynamicToolAvailability {
   familyPlanAvailable?: boolean | null
   groupAvailable?: boolean | null
   newsletterAvailable?: boolean | null
+  personalizationAvailable?: boolean | null
   productFeedbackAvailable?: boolean | null
   phoneCallsAvailable?: boolean | null
   voiceMemoGenerationAvailable?: boolean | null
@@ -870,6 +958,7 @@ const TOOL_AVAILABILITY: ReadonlyMap<MurphDynamicTool, AvailabilityPredicate> =
     [MURPH_FINISH_WITHOUT_REPLY_TOOL, defaultOn((a) => a.allowFinishWithoutReply)],
     [MURPH_REACT_TO_MESSAGE_TOOL, defaultOff((a) => a.allowMessageReactions)],
     [MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL, defaultOff((a) => a.productFeedbackAvailable)],
+    [MURPH_ASSISTANT_PERSONALIZATION_TOOL, defaultOff((a) => a.personalizationAvailable)],
     [MURPH_FAMILY_PLAN_TOOL, defaultOff((a) => a.familyPlanAvailable)],
     [MURPH_GROUP_TOOL, defaultOff((a) => a.groupAvailable)],
     [MURPH_NEWSLETTER_TOOL, defaultOff((a) => a.newsletterAvailable)],
@@ -1454,6 +1543,10 @@ export type MurphDynamicToolRequest =
       validationDigest: SafeToolCallValidationDigest
     }
   | {
+      kind: 'invalid-personalization-arguments'
+      validationDigest: SafeToolCallValidationDigest
+    }
+  | {
       kind: 'invalid-group-arguments'
       validationDigest: SafeToolCallValidationDigest
     }
@@ -1464,6 +1557,10 @@ export type MurphDynamicToolRequest =
   | {
       kind: 'family-plan'
       request: HostedRuntimeFamilyPlanToolRequest
+    }
+  | {
+      kind: 'assistant-personalization'
+      request: HostedRuntimeAssistantPersonalizationToolRequest
     }
   | {
       kind: 'group'
@@ -1639,6 +1736,19 @@ export function readMurphDynamicToolRequest(
       }
       return {
         kind: 'family-plan',
+        request: parsed.request,
+      }
+    }
+    case MURPH_ASSISTANT_PERSONALIZATION_TOOL.name: {
+      const parsed = parseAssistantPersonalizationArguments(request.arguments)
+      if (!parsed.ok) {
+        return {
+          kind: 'invalid-personalization-arguments',
+          validationDigest: parsed.validationDigest,
+        }
+      }
+      return {
+        kind: 'assistant-personalization',
         request: parsed.request,
       }
     }
@@ -1883,6 +1993,8 @@ export async function executeMurphDynamicToolRequest(input: {
       return toolTextResult(false, 'invalid product feedback arguments')
     case 'invalid-family-plan-arguments':
       return toolTextResult(false, 'invalid family plan arguments')
+    case 'invalid-personalization-arguments':
+      return toolTextResult(false, 'invalid assistant personalization arguments')
     case 'invalid-group-arguments':
       return toolTextResult(false, 'invalid group arguments')
     case 'invalid-newsletter-arguments':
@@ -2021,6 +2133,11 @@ export async function executeMurphDynamicToolRequest(input: {
       })
     case 'family-plan':
       return await executeFamilyPlanTool({
+        hostedToolContext: input.hostedToolContext ?? null,
+        request: input.request.request,
+      })
+    case 'assistant-personalization':
+      return await executeAssistantPersonalizationTool({
         hostedToolContext: input.hostedToolContext ?? null,
         request: input.request.request,
       })
@@ -2259,6 +2376,22 @@ async function executeFamilyPlanTool(input: {
     return toolTextResult(true, safeToolPayloadText(result))
   } catch {
     return toolTextResult(false, 'family plan tool request failed')
+  }
+}
+
+async function executeAssistantPersonalizationTool(input: {
+  hostedToolContext: AssistantHostedToolContext | null
+  request: HostedRuntimeAssistantPersonalizationToolRequest
+}): Promise<MurphDynamicToolExecutionResult> {
+  const tool = input.hostedToolContext?.assistantPersonalizationTool ?? null
+  if (!tool) {
+    return toolTextResult(false, 'assistant personalization is unavailable for this turn')
+  }
+
+  try {
+    return toolTextResult(true, safeToolPayloadText(await tool.request(input.request)))
+  } catch {
+    return toolTextResult(false, 'assistant personalization request failed')
   }
 }
 
@@ -3421,6 +3554,28 @@ function parseFamilyPlanArguments(
       },
     },
   }
+}
+
+function parseAssistantPersonalizationArguments(
+  value: unknown,
+):
+  | { ok: true; request: HostedRuntimeAssistantPersonalizationToolRequest }
+  | { ok: false; validationDigest: SafeToolCallValidationDigest } {
+  const parsed = hostedRuntimeAssistantPersonalizationToolRequestSchema.safeParse(value)
+  if (!parsed.success) {
+    return {
+      ok: false,
+      validationDigest: buildDynamicToolValidationDigest({
+        error: parsed.error,
+        rawInput: value,
+        schemaName: 'murph.personalization.input',
+        schemaRootKeys: ['action', 'model', 'tone', 'voice'],
+        toolName: 'murph.personalization',
+      }),
+    }
+  }
+
+  return { ok: true, request: parsed.data }
 }
 
 function parseGroupArguments(
