@@ -5,10 +5,31 @@ import type {
 } from "@murphai/hosted-execution/runtime-control";
 
 import {
+  startHostedLocalLinqStub,
   shouldExpireHostedLocalLinqWaitInFlightForStatus,
   shouldNudgeHostedLocalLinqWaitForStatus,
   shouldRunHostedLocalLinqWaitAlarmInvocationForStatus,
 } from "./hosted-local-linq-support.js";
+
+describe("hosted local Linq provider stub", () => {
+  it("serves canonical direct-chat summaries through its shared runtime URL", async () => {
+    const stub = await startHostedLocalLinqStub();
+
+    try {
+      expect(new URL(stub.runnerBaseUrl).hostname).toBe("host.docker.internal");
+      const response = await fetch(`${stub.baseUrl}/chats/chat_direct`);
+
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toEqual({
+        handles: [],
+        id: "chat_direct",
+        is_group: false,
+      });
+    } finally {
+      await stub.stop();
+    }
+  });
+});
 
 describe("hosted local Linq wait recovery policy", () => {
   it("does not nudge active, errored, or caught-up runner status", () => {

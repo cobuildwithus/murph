@@ -93,7 +93,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-it("passes the harness process pid to hosted web dev for orphan cleanup", async () => {
+it("passes host-only web overrides with the harness process pid", async () => {
   const { startHostedLocalDevHarness } = await import("./hosted-local-dev-harness.js");
 
   const harness = await startHostedLocalDevHarness({
@@ -102,6 +102,9 @@ it("passes the harness process pid to hosted web dev for orphan cleanup", async 
       NEXT_DIST_DIR_MODE: "smoke",
     },
     persistDirPrefix: "murph-hosted-local-test-",
+    webProcessEnvOverrides: {
+      LINQ_API_BASE_URL: "http://127.0.0.1:4011",
+    },
   });
 
   await harness.stop();
@@ -113,6 +116,9 @@ it("passes the harness process pid to hosted web dev for orphan cleanup", async 
       NEXT_DIST_DIR_SUFFIX: expect.stringMatching(/^e2e-[a-f0-9-]+$/),
     }),
     pipeOutput: false,
+    webProcessEnvOverrides: {
+      LINQ_API_BASE_URL: "http://127.0.0.1:4011",
+    },
   });
 });
 

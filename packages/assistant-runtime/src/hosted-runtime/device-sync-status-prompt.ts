@@ -1,4 +1,5 @@
 import {
+  DEVICE_SYNC_HISTORICAL_DATA_RECONNECT_REQUIRED_ERROR_CODE,
   isDeviceSyncConnectionSetupConfirmed,
   isEstablishedDeviceSyncConnection,
 } from "@murphai/device-syncd/public-account";
@@ -34,6 +35,7 @@ interface HostedDeviceSyncReconnectNotice {
 }
 
 const HOSTED_DEVICE_SYNC_RECONNECT_REQUIRED_SOURCE_ERROR_CODES = new Set([
+  DEVICE_SYNC_HISTORICAL_DATA_RECONNECT_REQUIRED_ERROR_CODE,
   "INVALID_GRANT",
   "OAUTH_REAUTHORIZATION_REQUIRED",
   "PROVIDER_CREDENTIAL_ERROR",
@@ -396,6 +398,11 @@ function addHostedDeviceSyncReconnectNotice(
 function renderHostedDeviceSyncReconnectNoticeLine(
   notice: HostedDeviceSyncReconnectNotice,
 ): string {
+  if (notice.errorCode === DEVICE_SYNC_HISTORICAL_DATA_RECONNECT_REQUIRED_ERROR_CODE) {
+    const recoveryLabel = notice.sourceProviderSlug === "garmin" ? "Garmin" : notice.label;
+    return `- ${notice.label} historical data remained incomplete after bounded sync checks (error \`${notice.errorCode}\`). Current data may still arrive. Do not send a connect-only link because it cannot restart the historical export. Guide the member to wearable settings, explain that the existing connection reset may also disconnect other wearables on that shared connection, and ask them to explicitly confirm the disconnect before reconnecting ${recoveryLabel}.`;
+  }
+
   const subjectText = notice.sourceProviderSlug
     ? `source \`${notice.sourceProviderSlug}\` is`
     : "account is";

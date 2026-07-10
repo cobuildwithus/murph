@@ -1,6 +1,10 @@
 import { sanitizeStoredDeviceSyncMetadata } from "./metadata.ts";
 import {
+  canCurrentRuntimeMutateJunctionHistoricalBackfillProgress,
+  JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS,
   mergeHostedJunctionHistoricalBackfillMetadata,
+  readJunctionHistoricalBackfillProgress,
+  readJunctionHistoricalBackfillStatus,
 } from "./junction-historical-backfill-progress.ts";
 import {
   JUNCTION_COMPANION_HEALTH_METADATA_EVENT_TYPE,
@@ -11,6 +15,13 @@ import type {
   DeviceConnectionSourceResourceAvailabilitySummary,
   DeviceConnectionSourceStatus,
 } from "./client.ts";
+
+export {
+  canCurrentRuntimeMutateJunctionHistoricalBackfillProgress,
+  JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS,
+  readJunctionHistoricalBackfillProgress,
+  readJunctionHistoricalBackfillStatus,
+};
 
 export const HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PATH =
   "/api/internal/device-sync/runtime/snapshot";

@@ -198,15 +198,20 @@ export function markSyncFailed(
 export function markConnectionSetupFailed(
   database: DatabaseSync,
   accountId: string,
+  expectedConnectedAt: string | null,
   now: string,
   code: string,
   message: string,
 ) {
-  if (!getAccountById(database, accountId)) {
-    return null;
-  }
-
   return withImmediateTransaction(database, () => {
+    const existing = getAccountById(database, accountId);
+    if (!existing) {
+      return { account: null, applied: false };
+    }
+    if (expectedConnectedAt === null || existing.connectedAt !== expectedConnectedAt) {
+      return { account: existing, applied: false };
+    }
+
     const connectionResult = database.prepare(`
       update device_connection
       set status = 'reauthorization_required',
@@ -218,7 +223,7 @@ export function markConnectionSetupFailed(
     `).run(now, accountId) as { changes: number };
 
     if ((connectionResult.changes ?? 0) === 0) {
-      return getAccountById(database, accountId);
+      return { account: getAccountById(database, accountId), applied: false };
     }
 
     database.prepare(`
@@ -256,7 +261,7 @@ export function markConnectionSetupFailed(
       accountId,
     );
 
-    return getAccountById(database, accountId);
+    return { account: getAccountById(database, accountId), applied: true };
   });
 }
 

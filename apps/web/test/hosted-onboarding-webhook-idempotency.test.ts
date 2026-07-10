@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   releaseHostedLinqQuotaReplyNoticeClaim: vi.fn(),
   claimHostedLinqDeliveryProviderDispatchTx: vi.fn(),
   ensureHostedMemberForPhoneTx: vi.fn(),
+  getHostedLinqChatSummary: vi.fn(),
   getPrisma: vi.fn(),
   handleHostedGroupJoinOfferReaction: vi.fn(),
   incrementHostedLinqInboundDailyState: vi.fn(),
@@ -147,6 +148,10 @@ vi.mock("@/src/lib/hosted-onboarding/linq", async () => {
   };
 });
 
+vi.mock("@/src/lib/hosted-onboarding/linq-client", () => ({
+  getHostedLinqChatSummary: mocks.getHostedLinqChatSummary,
+}));
+
 vi.mock("@/src/lib/hosted-onboarding/linq-delivery-store", async () => {
   const actual = await vi.importActual<
     typeof import("@/src/lib/hosted-onboarding/linq-delivery-store")
@@ -178,6 +183,10 @@ import { handleHostedOnboardingLinqWebhook } from "@/src/lib/hosted-onboarding/w
 describe("hosted onboarding Linq webhook hard-cut flows", () => {
   beforeEach(async () => {
     vi.clearAllMocks();
+    mocks.getHostedLinqChatSummary.mockResolvedValue({
+      handles: [],
+      isGroup: false,
+    });
     const linq = await vi.importActual<typeof import("@/src/lib/hosted-onboarding/linq")>(
       "@/src/lib/hosted-onboarding/linq",
     );

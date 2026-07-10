@@ -97,6 +97,7 @@ export async function startHostedLocalDevHarness(input: {
   statusPath?: (userId: string) => string;
   streamLogs?: boolean;
   testControls?: boolean;
+  webProcessEnvOverrides?: NodeJS.ProcessEnv;
 }): Promise<HostedLocalDevHarness> {
   const config = resolveHostedLocalDevConfig(input.env);
   const workerBaseUrl =
@@ -155,6 +156,9 @@ export async function startHostedLocalDevHarness(input: {
     stack = await startHostedLocalDevStack({
       env: runtimeEnv,
       pipeOutput: streamLogs,
+      ...(input.webProcessEnvOverrides
+        ? { webProcessEnvOverrides: input.webProcessEnvOverrides }
+        : {}),
     });
 
     try {
