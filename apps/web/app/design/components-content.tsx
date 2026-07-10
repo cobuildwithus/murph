@@ -541,6 +541,11 @@ export function ComponentsContent() {
                 }
               }}
               open
+              // Preview only: never persist a real preference from the showcase.
+              savePreference={async (preferences) => ({
+                tone: "tone" in preferences ? preferences.tone : null,
+                voice: "voice" in preferences ? preferences.voice : null,
+              })}
             />
           ) : null}
         </Section>

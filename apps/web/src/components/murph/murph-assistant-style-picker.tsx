@@ -47,6 +47,7 @@ export function MurphAssistantStylePicker({
   onSaved,
   onSkip,
   open,
+  savePreference = saveAssistantStylePreference,
   singleStep = false,
 }: {
   initialStep?: AssistantStyleStep;
@@ -57,6 +58,9 @@ export function MurphAssistantStylePicker({
   onSaved?: (preferences: MurphAssistantStylePreferences) => void;
   onSkip?: (step: AssistantStyleStep) => void;
   open: boolean;
+  // The design showcase injects a non-persisting save; everywhere else the
+  // default posts to the settings endpoint.
+  savePreference?: typeof saveAssistantStylePreference;
   // Settings rows open one step at a time; onboarding keeps the tone → voice chain.
   singleStep?: boolean;
 }) {
@@ -92,7 +96,7 @@ export function MurphAssistantStylePicker({
     setSaving(true);
     setError(null);
     try {
-      const saved = await saveAssistantStylePreference(
+      const saved = await savePreference(
         step === "tone" ? { tone: selectedTone } : { voice: selectedVoice },
       );
       if (!mountedRef.current) {
@@ -149,13 +153,17 @@ export function MurphAssistantStylePicker({
       )}
     </div>
   );
+  // Save captures the selection when clicked; freezing the choosers while the
+  // request is in flight keeps what persists, what is shown, and what the
+  // post-save chat handoff demonstrates identical.
   const chooser = step === "tone" ? (
-    <ToneChooser value={selectedTone} onChange={setSelectedTone} />
+    <ToneChooser value={selectedTone} onChange={setSelectedTone} disabled={saving} />
   ) : (
     <VoiceChooser
       groupId={`murph-voice-${groupId}`}
       value={selectedVoice}
       onChange={setSelectedVoice}
+      disabled={saving}
     />
   );
   const status = error ? (
@@ -249,9 +257,11 @@ export function MurphAssistantStylePicker({
 }
 
 function ToneChooser({
+  disabled = false,
   onChange,
   value,
 }: {
+  disabled?: boolean;
   onChange: (value: AssistantTonePreference) => void;
   value: AssistantTonePreference;
 }) {
@@ -274,6 +284,7 @@ function ToneChooser({
             <input
               checked={selected}
               className="sr-only"
+              disabled={disabled}
               name={name}
               onChange={() => onChange(option.id)}
               type="radio"
@@ -312,10 +323,12 @@ function SelectedCheck({ selected }: { selected: boolean }) {
 }
 
 function VoiceChooser({
+  disabled = false,
   groupId,
   onChange,
   value,
 }: {
+  disabled?: boolean;
   groupId: string;
   onChange: (value: AssistantVoiceOptionId) => void;
   value: AssistantVoiceOptionId;
@@ -393,7 +406,11 @@ function VoiceChooser({
               // The card is a click target so the whole surface selects the
               // voice; the player below stops propagation to keep its
               // controls usable.
-              onClick={() => onChange(option.id)}
+              onClick={() => {
+                if (!disabled) {
+                  onChange(option.id);
+                }
+              }}
               className={cn(
                 "flex cursor-pointer flex-col gap-2 rounded-lg border p-3 transition-colors",
                 selected
@@ -404,6 +421,7 @@ function VoiceChooser({
               <input
                 checked={selected}
                 className="peer sr-only"
+                disabled={disabled}
                 id={`${name}-${option.id}`}
                 name={name}
                 onChange={() => onChange(option.id)}

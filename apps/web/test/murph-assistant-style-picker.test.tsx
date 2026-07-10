@@ -236,6 +236,90 @@ test("MurphAssistantStylePicker keeps the default tone to voice onboarding chain
   }
 });
 
+test("MurphAssistantStylePicker uses an injected save without touching the network", async () => {
+  const fetchMock = vi.fn(async () => {
+    throw new Error("network must not be called");
+  });
+  vi.stubGlobal("fetch", fetchMock);
+
+  const savePreference = vi.fn(async (_preferences: { tone: string } | { voice: string }) => ({
+    tone: "casual" as const,
+    voice: null,
+  }));
+  const onComplete = vi.fn();
+  const { MurphAssistantStylePicker } = await import(
+    "@/src/components/murph/murph-assistant-style-picker"
+  );
+  const rendered = await renderClientComponent(
+    createElement(MurphAssistantStylePicker, {
+      initialStep: "tone",
+      onComplete,
+      onOpenChange: () => {},
+      open: true,
+      savePreference,
+      singleStep: true,
+    }),
+    {
+      requireButton: false,
+    },
+  );
+
+  try {
+    await clickButton(rendered, "Save");
+
+    assert.equal(savePreference.mock.calls.length, 1);
+    assert.deepEqual(savePreference.mock.calls[0]?.[0], { tone: "casual" });
+    assert.equal(fetchMock.mock.calls.length, 0);
+    assert.equal(onComplete.mock.calls.length, 1);
+  } finally {
+    await rendered.cleanup();
+  }
+});
+
+test("MurphAssistantStylePicker freezes the selection while a save is in flight", async () => {
+  let resolveSave: (() => void) | null = null;
+  const savePreference = vi.fn(
+    () =>
+      new Promise<{ tone: "formal"; voice: null }>((resolve) => {
+        resolveSave = () => resolve({ tone: "formal", voice: null });
+      }),
+  );
+  const { MurphAssistantStylePicker } = await import(
+    "@/src/components/murph/murph-assistant-style-picker"
+  );
+  const rendered = await renderClientComponent(
+    createElement(MurphAssistantStylePicker, {
+      initialStep: "tone",
+      initialTone: "formal",
+      onOpenChange: () => {},
+      open: true,
+      savePreference,
+      singleStep: true,
+    }),
+    {
+      requireButton: false,
+    },
+  );
+
+  try {
+    await clickButton(rendered, "Save");
+    assert.equal(savePreference.mock.calls.length, 1);
+
+    // A selection change after Save would make the persisted value, the
+    // visible selection, and the post-save handoff disagree.
+    const casualInput = findRadioInput(rendered.container, "Casual");
+    assert.ok(casualInput);
+    assert.equal(casualInput.disabled, true);
+    assert.equal(findRadioInput(rendered.container, "Formal")?.checked, true);
+
+    await act(async () => {
+      resolveSave?.();
+    });
+  } finally {
+    await rendered.cleanup();
+  }
+});
+
 test("MurphAssistantStylePicker ignores dismissal while a save is in flight", async () => {
   let resolveSave: (() => void) | null = null;
   const fetchMock = vi.fn(
