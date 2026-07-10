@@ -1,29 +1,56 @@
 import { ImageResponse } from "next/og";
 import { readFile } from "node:fs/promises";
-import { join } from "node:path";
+import {
+  MURPH_DEFAULT_OPEN_GRAPH_IMAGE,
+  MURPH_TAGLINE_LINE_1,
+  MURPH_TAGLINE_LINE_2,
+} from "../src/lib/site-metadata";
 import {
   dmSans400FontPath,
   fraunces400FontPath,
   fraunces600FontPath,
+  logoSvgPath,
 } from "./font-files";
 
-export const alt = "Murph — Wearable data, made useful.";
+export const alt = MURPH_DEFAULT_OPEN_GRAPH_IMAGE.alt;
 export const size = { width: 1200, height: 630 };
 export const contentType = "image/png";
 
-const HEADLINE = "Your personal,\nhealth assistant.";
-const SUBTEXT = "Health experiments with friends.";
+const INK = "#2d3436";
+const GREEN = "#5a6e32";
+const MUTED = "#736a58";
+const RING = "rgba(196, 168, 130, 0.25)";
+
+// Mirrors the homepage hero: floating health-topic labels on the open side of
+// the canvas, clear of the headline column and the chat panel.
+const FLOATERS: ReadonlyArray<{
+  text: string;
+  top?: number;
+  bottom?: number;
+  left?: number;
+  right?: number;
+}> = [
+  { text: "Dentist", top: 64, left: 330 },
+  { text: "Omega-3", top: 150, left: 84 },
+  { text: "Daily walk", bottom: 64, left: 84 },
+  { text: "Sleep quality", bottom: 96, left: 350 },
+];
+
+const STANDINGS = [
+  { name: "Theo", steps: "41,204 steps", fill: 292 },
+  { name: "You", steps: "38,977 steps", fill: 262 },
+  { name: "Maya", steps: "36,412 steps", fill: 233 },
+];
 
 export default async function OGImage() {
-  const [heroData, fraunces400Data, fraunces600Data, dmSans400Data] =
+  const [fraunces400Data, fraunces600Data, dmSans400Data, logoBuffer] =
     await Promise.all([
-      readFile(join(process.cwd(), "public", "hero.jpg")).then(
-        (buf) => `data:image/jpeg;base64,${buf.toString("base64")}`
-      ),
       readFile(fraunces400FontPath).then(toArrayBuffer),
       readFile(fraunces600FontPath).then(toArrayBuffer),
       readFile(dmSans400FontPath).then(toArrayBuffer),
+      readFile(logoSvgPath),
     ]);
+  const logoDataUri = `data:image/svg+xml;base64,${logoBuffer.toString("base64")}`;
 
   const fonts: { name: string; data: ArrayBuffer; weight: 400 | 600 }[] = [];
   fonts.push({ name: "Fraunces", data: fraunces400Data, weight: 400 });
@@ -38,92 +65,280 @@ export default async function OGImage() {
           height: "100%",
           display: "flex",
           position: "relative",
-          backgroundColor: "#D9C39B",
+          overflow: "hidden",
+          background:
+            "radial-gradient(circle at 85% 10%, #ece3d1 0%, #f5f0e8 55%)",
         }}
       >
-        {/* Hero background */}
+        {/* Floating health-topic labels. Satori crashes on style keys set to
+            undefined, so spread only the offsets each floater defines. */}
+        {FLOATERS.map(({ text, ...offsets }) => (
+          <div
+            key={text}
+            style={{
+              position: "absolute",
+              ...offsets,
+              fontFamily: "DM Sans",
+              fontWeight: 400,
+              fontSize: 16,
+              letterSpacing: "0.18em",
+              color: "rgba(196, 168, 130, 0.8)",
+              whiteSpace: "nowrap",
+            }}
+          >
+            {text.toUpperCase()}
+          </div>
+        ))}
+
+        {/* Logo */}
         <img
-          src={heroData}
+          src={logoDataUri}
           alt=""
-          style={{
-            position: "absolute",
-            top: 0,
-            left: 0,
-            width: "100%",
-            height: "100%",
-            objectFit: "cover",
-          }}
+          width={170}
+          height={38}
+          style={{ position: "absolute", top: 56, left: 64, display: "flex" }}
         />
 
-        {/* Dark gradient overlay */}
+        {/* Headline */}
         <div
           style={{
             position: "absolute",
             top: 0,
-            left: 0,
-            width: "100%",
-            height: "100%",
-            background:
-              "linear-gradient(180deg, rgba(26,31,22,0.12) 0%, rgba(26,31,22,0.50) 100%)",
-          }}
-        />
-
-        {/* Bottom content bar */}
-        <div
-          style={{
-            position: "absolute",
-            left: 48,
-            right: 48,
-            bottom: 44,
+            bottom: 0,
+            left: 64,
+            width: 500,
             display: "flex",
-            justifyContent: "space-between",
-            alignItems: "flex-end",
+            flexDirection: "column",
+            justifyContent: "center",
+            fontFamily: "Fraunces",
+            fontWeight: 600,
+            fontSize: 58,
+            lineHeight: 1.12,
+            letterSpacing: "-0.04em",
           }}
         >
-          {/* Text block */}
-          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            <div
-              style={{
-                fontFamily: "Fraunces",
-                fontWeight: 400,
-                fontSize: 64,
-                lineHeight: 0.96,
-                letterSpacing: "-0.05em",
-                color: "#FAF8F4",
-                whiteSpace: "pre-wrap",
-              }}
-            >
-              {HEADLINE}
+          <div style={{ color: "#1a1a1a" }}>{MURPH_TAGLINE_LINE_1}</div>
+          <div style={{ color: GREEN, marginTop: 8 }}>
+            {MURPH_TAGLINE_LINE_2}
+          </div>
+        </div>
+
+        {/* Group-chat panel, bleeding off the bottom edge */}
+        <div
+          style={{
+            position: "absolute",
+            top: 88,
+            right: 56,
+            width: 440,
+            height: 600,
+            display: "flex",
+            flexDirection: "column",
+            gap: 16,
+            padding: "26px 26px 0",
+            backgroundColor: "#faf6ee",
+            borderRadius: 28,
+            border: `1px solid ${RING}`,
+            boxShadow: "0 30px 60px -20px rgba(45, 52, 54, 0.28)",
+          }}
+        >
+          {/* Header: avatars + group label */}
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            <div style={{ display: "flex" }}>
+              {[
+                { initial: "T", bg: "#c9a06b" },
+                { initial: "M", bg: "#8ba173" },
+                { initial: "S", bg: "#b8845f" },
+              ].map((avatar, i) => (
+                <div
+                  key={avatar.initial}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    width: 30,
+                    height: 30,
+                    borderRadius: "50%",
+                    backgroundColor: avatar.bg,
+                    border: "2px solid #faf6ee",
+                    marginLeft: i === 0 ? 0 : -9,
+                    color: "#fff",
+                    fontFamily: "DM Sans",
+                    fontSize: 14,
+                  }}
+                >
+                  {avatar.initial}
+                </div>
+              ))}
             </div>
             <div
               style={{
                 fontFamily: "DM Sans",
-                fontWeight: 400,
-                fontSize: 24,
-                lineHeight: 1.55,
-                color: "rgba(250,248,244,0.82)",
-                maxWidth: 500,
+                fontSize: 15,
+                color: MUTED,
               }}
             >
-              {SUBTEXT}
+              Walk challenge · 4 people
             </div>
           </div>
 
-          {/* Logo lockup */}
-          <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
-            <DotGrid />
+          {/* Outgoing kickoff bubble */}
+          <div
+            style={{
+              alignSelf: "flex-end",
+              maxWidth: 310,
+              padding: "12px 16px",
+              backgroundColor: GREEN,
+              borderRadius: 20,
+              color: "#fff",
+              fontFamily: "DM Sans",
+              fontSize: 18,
+              lineHeight: 1.35,
+            }}
+          >
+            walk challenge starts tomorrow. loser buys steak dinner
+          </div>
+
+          {/* Murph reply */}
+          <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
             <div
               style={{
-                fontFamily: "Fraunces",
-                fontWeight: 600,
-                fontSize: 48,
-                lineHeight: 1,
-                letterSpacing: "-0.03em",
-                color: "#FAF8F4",
+                paddingLeft: 6,
+                fontFamily: "DM Sans",
+                fontSize: 13,
+                letterSpacing: "0.08em",
+                color: MUTED,
               }}
             >
-              murph
+              MURPH
             </div>
+            <div
+              style={{
+                alignSelf: "flex-start",
+                maxWidth: 330,
+                padding: "12px 16px",
+                backgroundColor: "#fff",
+                borderRadius: 20,
+                border: `1px solid ${RING}`,
+                color: INK,
+                fontFamily: "DM Sans",
+                fontSize: 18,
+                lineHeight: 1.35,
+              }}
+            >
+              Baselines are set from everyone&rsquo;s wearables. I keep score,
+              standings drop daily.
+            </div>
+          </div>
+
+        </div>
+
+        {/* Standings card overlapping the chat panel */}
+        <div
+          style={{
+            position: "absolute",
+            left: 640,
+            top: 392,
+            width: 372,
+            display: "flex",
+            flexDirection: "column",
+            padding: "18px 22px 20px",
+            backgroundColor: "#fff",
+            borderRadius: 22,
+            border: `1px solid ${RING}`,
+            boxShadow: "0 24px 48px -16px rgba(45, 52, 54, 0.3)",
+          }}
+        >
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+            }}
+          >
+            <div
+              style={{
+                fontFamily: "DM Sans",
+                fontSize: 13,
+                letterSpacing: "0.14em",
+                color: GREEN,
+              }}
+            >
+              WALK CHALLENGE · DAY 5
+            </div>
+            <div
+              style={{
+                padding: "3px 10px",
+                borderRadius: 999,
+                backgroundColor: "rgba(90, 110, 50, 0.14)",
+                fontFamily: "DM Sans",
+                fontSize: 12,
+                letterSpacing: "0.1em",
+                color: "#3d5028",
+              }}
+            >
+              LIVE
+            </div>
+          </div>
+          <div
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              gap: 12,
+              marginTop: 16,
+            }}
+          >
+            {STANDINGS.map((row, i) => (
+              <div
+                key={row.name}
+                style={{ display: "flex", flexDirection: "column", gap: 6 }}
+              >
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "baseline",
+                  }}
+                >
+                  <div
+                    style={{
+                      fontFamily: "Fraunces",
+                      fontWeight: 600,
+                      fontSize: 17,
+                      color: INK,
+                    }}
+                  >
+                    {row.name}
+                  </div>
+                  <div
+                    style={{
+                      fontFamily: "DM Sans",
+                      fontSize: 14,
+                      color: MUTED,
+                    }}
+                  >
+                    {row.steps}
+                  </div>
+                </div>
+                <div
+                  style={{
+                    display: "flex",
+                    width: 328,
+                    height: 7,
+                    borderRadius: 4,
+                    backgroundColor: "#ece4d4",
+                  }}
+                >
+                  <div
+                    style={{
+                      width: row.fill,
+                      height: 7,
+                      borderRadius: 4,
+                      backgroundColor: i === 0 ? GREEN : "#c4a882",
+                    }}
+                  />
+                </div>
+              </div>
+            ))}
           </div>
         </div>
       </div>
@@ -137,45 +352,4 @@ export default async function OGImage() {
 
 function toArrayBuffer(buffer: Buffer) {
   return Uint8Array.from(buffer).buffer;
-}
-
-function DotGrid() {
-  const rows = [
-    { sizes: [4, 4, 5, 5, 4, 4], y: 0 },
-    { sizes: [4, 4, 7, 7, 4, 4], y: 9 },
-    { sizes: [4, 5, 8, 9, 5, 4], y: 20 },
-    { sizes: [4, 4, 5, 5, 4, 4], y: 33 },
-  ];
-
-  const dotColor = (size: number) => {
-    if (size <= 4) return { bg: "#5C6B4F", opacity: 0.35 };
-    if (size <= 5) return { bg: "#C4956A", opacity: 0.55 };
-    if (size <= 7) return { bg: "#A07A4E", opacity: 1 };
-    return { bg: "#C4956A", opacity: 1 };
-  };
-
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-      {rows.map((row, ri) => (
-        <div key={ri} style={{ display: "flex", alignItems: "center", gap: 6 }}>
-          {row.sizes.map((s, ci) => {
-            const c = dotColor(s);
-            return (
-              <div
-                key={ci}
-                style={{
-                  width: s,
-                  height: s,
-                  borderRadius: "50%",
-                  backgroundColor: c.bg,
-                  opacity: c.opacity,
-                  flexShrink: 0,
-                }}
-              />
-            );
-          })}
-        </div>
-      ))}
-    </div>
-  );
 }

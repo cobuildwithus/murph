@@ -191,7 +191,7 @@ test("HomePage renders the canonical landing page at the root route", async () =
   );
   assert.match(
     markup,
-    /Murph is your personal health assistant\. Wearables, bloodwork/,
+    /Wearables, bloodwork, doctor visits, supplements, blood pressure, sleep\. Murph reads it all/,
   );
   assert.match(markup, /Get healthy with your people\./);
   assert.match(markup, /Murph keeps score\./);
@@ -264,10 +264,14 @@ test("SecurityPage splits the shared sticky nav into Log in + Signup when logged
 test("HomePage metadata keeps the root route as the canonical landing URL", async () => {
   const { metadata } = await import("../app/page");
 
-  expect(metadata.title).toBe("Murph — Discover what actually makes you healthier");
-  expect(metadata.description).toBe(
-    "Your health assistant for you and your people. Run health challenges with friends, get a weekly family health newsletter, and discover what actually makes you healthier.",
-  );
+  const {
+    MURPH_DEFAULT_METADATA_DESCRIPTION,
+    MURPH_DEFAULT_METADATA_TITLE,
+    MURPH_DEFAULT_OPEN_GRAPH_DESCRIPTION,
+  } = await import("../src/lib/site-metadata");
+
+  expect(metadata.title).toBe(MURPH_DEFAULT_METADATA_TITLE);
+  expect(metadata.description).toBe(MURPH_DEFAULT_METADATA_DESCRIPTION);
   expect(metadata.alternates?.canonical).toBe("/");
   expect(metadata.openGraph?.images).toEqual([
     expect.objectContaining({
@@ -284,10 +288,10 @@ test("HomePage metadata keeps the root route as the canonical landing URL", asyn
     }),
   ]);
   expect(metadata.openGraph?.description).toBe(
-    "Text Murph over iMessage. Run health challenges with friends, get a weekly family health newsletter, and see what actually makes you healthier.",
+    MURPH_DEFAULT_OPEN_GRAPH_DESCRIPTION,
   );
   expect(metadata.twitter?.description).toBe(
-    "Text Murph over iMessage. Run health challenges with friends, get a weekly family health newsletter, and see what actually makes you healthier.",
+    MURPH_DEFAULT_OPEN_GRAPH_DESCRIPTION,
   );
 });
 

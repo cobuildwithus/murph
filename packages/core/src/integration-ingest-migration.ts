@@ -224,6 +224,7 @@ export async function runIntegrationIngestMigration(
     const appendPlan = await buildIntegrationIngestAppendPlan(
       input.vaultRoot,
       candidates.map((bundle) => bundle.row),
+      { allowArchivedShardAmendments: true },
     );
     const rewritten = rewriteEventShardsForBundles(
       fresh.eventShards,

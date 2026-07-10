@@ -4,21 +4,13 @@ import {
 } from '../codex-thread-route.js'
 import { recordAssistantDiagnosticEvent } from '../diagnostics.js'
 import {
-  fingerprintHostedAssistantContextValue,
-  resolveHostedAssistantContextFingerprintSecret,
-} from '../hosted-context-diagnostics.js'
-import { HOSTED_STABLE_PROVIDER_WORKING_DIRECTORY } from '../turn-plan.js'
-import {
   appendAssistantTurnReceiptEvent,
 } from '../turns.js'
 
 export async function recordCodexAttemptStarted(input: {
   attemptCount: number
   at: string
-  hasResumeCodexThreadId: boolean
-  codexContinuationKind: string
   route: CodexThreadIdentity
-  sessionId: string
   turnId: string
   vault: string
 }): Promise<void> {
@@ -36,100 +28,6 @@ export async function recordCodexAttemptStarted(input: {
     },
     at: input.at,
   })
-  await recordAssistantDiagnosticEvent({
-    vault: input.vault,
-    component: 'provider',
-    kind: 'provider.attempt.started',
-    message: `Assistant provider attempt ${input.attemptCount} started with ${input.route.label}.`,
-    sessionId: input.sessionId,
-    turnId: input.turnId,
-    data: {
-      attempt: input.attemptCount,
-      routeFingerprint,
-      provider: input.route.provider,
-      model: input.route.providerOptions.model,
-      modelProvider: input.route.providerOptions.modelProvider,
-      reasoningEffort: input.route.providerOptions.reasoningEffort,
-      codexContinuationKind: input.codexContinuationKind,
-      hasResumeCodexThreadId: input.hasResumeCodexThreadId,
-    },
-    counterDeltas: {
-      providerAttempts: 1,
-    },
-    at: input.at,
-  })
-}
-
-export async function recordCodexPlan(input: {
-  at: string
-  codexContinuation: string
-  providerRequestOrdinal: number | null
-  resumeCodexThreadIdPresent: boolean
-  route: CodexThreadIdentity
-  sessionId: string
-  turnId: string
-  vault: string
-  vaultRoot: string
-  workingDirectory: string
-}): Promise<void> {
-  const routeFingerprint = readCodexThreadRouteFingerprint(input.route)
-  const pathDiagnostics = buildProviderPlanPathDiagnostics({
-    codexHome: input.route.providerOptions.codexHome ?? null,
-    vaultRoot: input.vaultRoot,
-    workingDirectory: input.workingDirectory,
-  })
-  await recordAssistantDiagnosticEvent({
-    vault: input.vault,
-    component: 'provider',
-    kind: 'provider.plan',
-    message: 'Assistant provider plan resolved.',
-    sessionId: input.sessionId,
-    turnId: input.turnId,
-    data: {
-      sessionId: input.sessionId,
-      routeFingerprint,
-      providerRequestOrdinal: input.providerRequestOrdinal,
-      codexContinuation: input.codexContinuation,
-      resumeCodexThreadIdPresent: input.resumeCodexThreadIdPresent,
-      ...pathDiagnostics,
-    },
-    at: input.at,
-  })
-}
-
-function buildProviderPlanPathDiagnostics(input: {
-  codexHome: string | null
-  vaultRoot: string
-  workingDirectory: string
-}): {
-  codexHomeHash: string | null
-  vaultRootHash: string | null
-  workingDirectoryHash: string | null
-  workingDirectoryKind: 'hosted-stable-proc-cwd' | 'raw'
-} {
-  const secret = resolveHostedAssistantContextFingerprintSecret()
-  return {
-    codexHomeHash:
-      secret
-        ? fingerprintHostedAssistantContextValue(secret, 'codex_home', input.codexHome)
-        : null,
-    vaultRootHash:
-      secret
-        ? fingerprintHostedAssistantContextValue(secret, 'vault_root', input.vaultRoot)
-        : null,
-    workingDirectoryHash:
-      secret
-        ? fingerprintHostedAssistantContextValue(
-            secret,
-            'working_directory',
-            input.workingDirectory,
-          )
-        : null,
-    workingDirectoryKind:
-      input.workingDirectory === HOSTED_STABLE_PROVIDER_WORKING_DIRECTORY
-        ? 'hosted-stable-proc-cwd'
-        : 'raw',
-  }
 }
 
 export async function recordCodexAttemptSucceeded(input: {

@@ -29,7 +29,9 @@ const mocks = vi.hoisted(() => ({
   readHostedMailboxConsumedSeqByLane: vi.fn(),
   readHostedMailboxItemByDedupeKey: vi.fn(),
   readHostedMailboxMaxSeqByLane: vi.fn(),
+  readHostedMemberAssistantModelPreference: vi.fn(),
   readHostedMemberCoreState: vi.fn(),
+  readHostedRuntimeOwnerReleaseMailboxLagActionable: vi.fn(),
   readHostedWorkspace: vi.fn(),
   recordHostedIngressAssistantInputStaged: vi.fn(),
   recordHostedIngressAssistantMilestone: vi.fn(),
@@ -57,6 +59,11 @@ vi.mock("@/src/lib/hosted-mailbox/store", async (importOriginal) => ({
 
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", () => ({
   readHostedMemberCoreState: mocks.readHostedMemberCoreState,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/assistant-model-preference", () => ({
+  readHostedMemberAssistantModelPreference:
+    mocks.readHostedMemberAssistantModelPreference,
 }));
 
 vi.mock("@/src/lib/hosted-orchestration/runtime-usage-decision", async (importOriginal) => ({
@@ -95,6 +102,11 @@ vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
   signalHostedRuntimeRecheckRuntime: mocks.signalHostedRuntimeRecheckRuntime,
 }));
 
+vi.mock("@/src/lib/hosted-orchestration/runtime-reconciliation-facts", () => ({
+  readHostedRuntimeOwnerReleaseMailboxLagActionable:
+    mocks.readHostedRuntimeOwnerReleaseMailboxLagActionable,
+}));
+
 vi.mock("@/src/lib/hosted-workspace/legacy-source-hash-browser-vault", () => ({
   publishLegacySourceHashBrowserVaultReplicaRef:
     mocks.publishLegacySourceHashBrowserVaultReplicaRef,
@@ -120,6 +132,8 @@ type WorkspaceCheckpointRoute =
 type BrowserVaultReplicaRoute =
   typeof import("../app/api/internal/hosted-workspace/browser-vault-replica/route");
 type RuntimeLogRoute = typeof import("../app/api/internal/hosted-runtime/log/route");
+type RuntimeOwnerReleasedRoute =
+  typeof import("../app/api/internal/hosted-runtime/owner-released/route");
 type RuntimeLatencyRoute = typeof import("../app/api/internal/hosted-runtime/latency/route");
 type RuntimeStatusRoute = typeof import("../app/api/internal/hosted-runtime/status/route");
 
@@ -129,6 +143,7 @@ let workspaceRoute: WorkspaceRoute;
 let workspaceCheckpointRoute: WorkspaceCheckpointRoute;
 let browserVaultReplicaRoute: BrowserVaultReplicaRoute;
 let runtimeLogRoute: RuntimeLogRoute;
+let runtimeOwnerReleasedRoute: RuntimeOwnerReleasedRoute;
 let runtimeLatencyRoute: RuntimeLatencyRoute;
 let runtimeStatusRoute: RuntimeStatusRoute;
 
@@ -146,6 +161,9 @@ describe("hosted runtime internal web routes", () => {
       "../app/api/internal/hosted-workspace/browser-vault-replica/route"
     );
     runtimeLogRoute = await import("../app/api/internal/hosted-runtime/log/route");
+    runtimeOwnerReleasedRoute = await import(
+      "../app/api/internal/hosted-runtime/owner-released/route"
+    );
     runtimeLatencyRoute = await import("../app/api/internal/hosted-runtime/latency/route");
     runtimeStatusRoute = await import("../app/api/internal/hosted-runtime/status/route");
   });
@@ -209,7 +227,12 @@ describe("hosted runtime internal web routes", () => {
       };
     });
     mocks.readHostedMailboxItemByDedupeKey.mockResolvedValue(null);
+    mocks.readHostedMemberAssistantModelPreference.mockResolvedValue({
+      model: "gpt-5.6-terra",
+      solAvailable: false,
+    });
     mocks.readHostedMemberCoreState.mockResolvedValue(buildActiveHostedMemberRecord());
+    mocks.readHostedRuntimeOwnerReleaseMailboxLagActionable.mockResolvedValue(true);
     mocks.readAcceptedRuntimeAttemptFailureSignalOwnerLogId.mockResolvedValue(null);
     mocks.resolveHostedRuntimeAiUsageGate.mockResolvedValue({
       status: "allowed",
@@ -218,6 +241,93 @@ describe("hosted runtime internal web routes", () => {
       signalAccepted: true,
       workflowId: "hosted-user-runtime:member_routes_1",
     });
+  });
+
+  it("signals a facts recheck after an authenticated runtime owner release", async () => {
+    const request = new Request(
+      "https://join.example.test/api/internal/hosted-runtime/owner-released",
+      { method: "POST" },
+    );
+
+    const response = await runtimeOwnerReleasedRoute.POST(request);
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ signaled: true });
+    expect(mocks.requireHostedCloudflareCallbackRequest).toHaveBeenCalledWith(
+      request,
+      { maxBodyBytes: 0 },
+    );
+    expect(mocks.readHostedRuntimeOwnerReleaseMailboxLagActionable).toHaveBeenCalledWith({
+      userId: "member_routes_1",
+    });
+    expect(mocks.signalHostedRuntimeRecheckRuntime).toHaveBeenCalledWith({
+      userId: "member_routes_1",
+    });
+  });
+
+  it("signals an authenticated explicit immediate recheck without a mailbox read", async () => {
+    mocks.readHostedRuntimeOwnerReleaseMailboxLagActionable.mockResolvedValue(false);
+    const request = new Request(
+      "https://join.example.test/api/internal/hosted-runtime/owner-released"
+        + "?immediateRecheckRequested=1",
+      { method: "POST" },
+    );
+
+    const response = await runtimeOwnerReleasedRoute.POST(request);
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ signaled: true });
+    expect(mocks.requireHostedCloudflareCallbackRequest).toHaveBeenCalledWith(
+      request,
+      { maxBodyBytes: 0 },
+    );
+    expect(mocks.readHostedRuntimeOwnerReleaseMailboxLagActionable).not.toHaveBeenCalled();
+    expect(mocks.signalHostedRuntimeRecheckRuntime).toHaveBeenCalledWith({
+      userId: "member_routes_1",
+    });
+  });
+
+  it("rejects noncanonical owner-release queries after authentication", async () => {
+    const request = new Request(
+      "https://join.example.test/api/internal/hosted-runtime/owner-released"
+        + "?immediateRecheckRequested=1&immediateRecheckRequested=1",
+      { method: "POST" },
+    );
+
+    const response = await runtimeOwnerReleasedRoute.POST(request);
+
+    expect(response.status).toBe(400);
+    expect(mocks.requireHostedCloudflareCallbackRequest).toHaveBeenCalledWith(
+      request,
+      { maxBodyBytes: 0 },
+    );
+    expect(mocks.signalHostedRuntimeRecheckRuntime).not.toHaveBeenCalled();
+  });
+
+  it("preserves the owner horizon when no durable work is visible", async () => {
+    mocks.readHostedRuntimeOwnerReleaseMailboxLagActionable.mockResolvedValue(false);
+
+    const response = await runtimeOwnerReleasedRoute.POST(new Request(
+      "https://join.example.test/api/internal/hosted-runtime/owner-released",
+      { method: "POST" },
+    ));
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ signaled: false });
+    expect(mocks.signalHostedRuntimeRecheckRuntime).not.toHaveBeenCalled();
+  });
+
+  it("surfaces runtime owner-release signal failures to Cloudflare", async () => {
+    mocks.signalHostedRuntimeRecheckRuntime.mockRejectedValueOnce(
+      new Error("Temporal unavailable"),
+    );
+
+    const response = await runtimeOwnerReleasedRoute.POST(new Request(
+      "https://join.example.test/api/internal/hosted-runtime/owner-released",
+      { method: "POST" },
+    ));
+
+    expect(response.status).toBe(500);
   });
 
   it("fetches mailbox DTOs by lane cursor without hydrating sidecar payload bodies", async () => {
@@ -1380,6 +1490,11 @@ describe("hosted runtime internal web routes", () => {
 
   it("reads workspace state and checkpoints with the workspace CAS fence", async () => {
     mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({ version: "4" }));
+    mocks.readHostedMemberAssistantModelPreference.mockResolvedValueOnce({
+      hostedAssistantModelOverride: "gpt-5.6-sol",
+      model: "gpt-5.6-sol",
+      solAvailable: true,
+    });
     mocks.checkpointHostedWorkspace
       .mockResolvedValueOnce({
         replacedSnapshotRef: createBundleRef("snapshot_1"),
@@ -1406,11 +1521,18 @@ describe("hosted runtime internal web routes", () => {
       "https://join.example.test/api/internal/hosted-workspace",
       { method: "GET" },
     ));
-    expect(parseHostedWorkspaceReadResponse(await readResponse.json()).workspace)
+    expect(parseHostedWorkspaceReadResponse(await readResponse.json()))
       .toMatchObject({
+        hostedAssistantModelOverride: "gpt-5.6-sol",
+        workspace: {
         userId: "member_routes_1",
         version: "4",
+        },
       });
+    expect(mocks.readHostedMemberAssistantModelPreference).toHaveBeenCalledWith({
+      memberId: "member_routes_1",
+      prisma: expect.any(Object),
+    });
 
     const checkpointResponse = await workspaceCheckpointRoute.POST(jsonRequest(
       "/api/internal/hosted-workspace/checkpoint",
@@ -1481,12 +1603,14 @@ describe("hosted runtime internal web routes", () => {
     expect(JSON.stringify(conflictPayload)).not.toMatch(/runId|committedSeq|finalizeRequired|source_cursor/u);
   });
 
-  it("returns a typed foreground-pending checkpoint conflict for idle shutdown races", async () => {
+  it("returns an ahead-input observation while committing an idle shutdown checkpoint", async () => {
     mocks.checkpointHostedWorkspace.mockResolvedValue({
-      status: "foreground_pending",
+      conversationInputAhead: true,
+      replacedSnapshotRef: createBundleRef("snapshot_current"),
+      status: "updated",
       workspace: buildWorkspaceRecord({
-        snapshotRef: createBundleRef("snapshot_current"),
-        version: "4",
+        snapshotRef: createBundleRef("snapshot_idle_shutdown"),
+        version: "5",
       }),
     });
 
@@ -1507,11 +1631,12 @@ describe("hosted runtime internal web routes", () => {
 
     expect(response.status).toBe(200);
     expect(payload).toMatchObject({
-      checkpointed: false,
-      checkpointConflictReason: "foreground_pending",
+      checkpointed: true,
+      conversationInputAhead: true,
+      replacedSnapshotRef: createBundleRef("snapshot_current"),
       workspace: {
-        snapshotRef: createBundleRef("snapshot_current"),
-        version: "4",
+        snapshotRef: createBundleRef("snapshot_idle_shutdown"),
+        version: "5",
       },
     });
     expect(mocks.checkpointHostedWorkspace).toHaveBeenCalledWith({
@@ -1528,10 +1653,12 @@ describe("hosted runtime internal web routes", () => {
 
   it("keeps old idle checkpoint callers compatible with the redacted mailbox imported seq", async () => {
     mocks.checkpointHostedWorkspace.mockResolvedValue({
-      status: "foreground_pending",
+      conversationInputAhead: true,
+      replacedSnapshotRef: createBundleRef("snapshot_current"),
+      status: "updated",
       workspace: buildWorkspaceRecord({
-        snapshotRef: createBundleRef("snapshot_current"),
-        version: "4",
+        snapshotRef: createBundleRef("snapshot_idle_shutdown"),
+        version: "5",
       }),
     });
 
@@ -1553,11 +1680,12 @@ describe("hosted runtime internal web routes", () => {
 
     expect(response.status).toBe(200);
     expect(payload).toMatchObject({
-      checkpointed: false,
-      checkpointConflictReason: "foreground_pending",
+      checkpointed: true,
+      conversationInputAhead: true,
+      replacedSnapshotRef: createBundleRef("snapshot_current"),
       workspace: {
-        snapshotRef: createBundleRef("snapshot_current"),
-        version: "4",
+        snapshotRef: createBundleRef("snapshot_idle_shutdown"),
+        version: "5",
       },
     });
     expect(mocks.checkpointHostedWorkspace).toHaveBeenCalledWith({
@@ -1712,38 +1840,70 @@ describe("hosted runtime internal web routes", () => {
     }
   });
 
-  it("serves workspace reads for inactive members so the mode-aware runtime owner can run due inbox media retention", async () => {
-    // Admission policy is owned by `runtime-reconciliation-facts` and the
-    // Temporal runtime workflow: inactive members are confined to
-    // `inbox_media_retention` dispatch. Repeating the active-entitlement
-    // check on this route would also block the retention run, leaving raw
-    // inbox media past the 14-day retention window.
-    mocks.readHostedMemberCoreState.mockResolvedValueOnce(buildActiveHostedMemberRecord({
-      billingStatus: "canceled",
-    }));
-    mocks.readHostedWorkspace.mockResolvedValueOnce(buildWorkspaceRecord({
-      inboxMediaRetentionWakeAt: "2026-04-25T23:59:00.000Z",
-      version: "7",
-    }));
+  it.each(["P1001", "P2022"] as const)(
+    "serves workspace reads for inactive members when the selective model read fails with %s",
+    async (preferenceReadErrorCodeDetail) => {
+      // Admission policy is owned by `runtime-reconciliation-facts` and the
+      // Temporal runtime workflow: inactive members are confined to
+      // `inbox_media_retention` dispatch. Repeating the active-entitlement
+      // check on this route would also block the retention run, leaving raw
+      // inbox media past the 14-day retention window.
+      mocks.readHostedMemberCoreState.mockResolvedValueOnce(buildActiveHostedMemberRecord({
+        billingStatus: "canceled",
+      }));
+      mocks.readHostedWorkspace.mockResolvedValueOnce(buildWorkspaceRecord({
+        inboxMediaRetentionWakeAt: "2026-04-25T23:59:00.000Z",
+        version: "7",
+      }));
+      mocks.readHostedMemberAssistantModelPreference.mockRejectedValueOnce(
+        Object.assign(
+          new Error("optional model preference read unavailable"),
+          {
+            code: preferenceReadErrorCodeDetail,
+            status: 503,
+          },
+        ),
+      );
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
 
-    const response = await workspaceRoute.GET(new Request(
-      "https://example.test/api/internal/hosted-workspace",
-    ));
-    const payload = parseHostedWorkspaceReadResponse(await response.json());
+      try {
+        const response = await workspaceRoute.GET(new Request(
+          "https://example.test/api/internal/hosted-workspace",
+        ));
+        const payload = parseHostedWorkspaceReadResponse(await response.json());
 
-    expect(response.status).toBe(200);
-    expect(payload.workspace).toMatchObject({
-      inboxMediaRetentionWakeAt: "2026-04-25T23:59:00.000Z",
-      userId: "member_routes_1",
-      version: "7",
-    });
-    expect(mocks.readHostedWorkspace).toHaveBeenCalledWith({
-      userId: "member_routes_1",
-    });
-    // The route no longer consults member entitlement; that owner lives in
-    // reconciliation/runtime invocation.
-    expect(mocks.readHostedMemberCoreState).not.toHaveBeenCalled();
-  });
+        expect(response.status).toBe(200);
+        expect(payload.workspace).toMatchObject({
+          inboxMediaRetentionWakeAt: "2026-04-25T23:59:00.000Z",
+          userId: "member_routes_1",
+          version: "7",
+        });
+        expect(mocks.readHostedWorkspace).toHaveBeenCalledWith({
+          userId: "member_routes_1",
+        });
+        expect(payload.hostedAssistantModelOverride).toBeUndefined();
+        expect(warnSpy).toHaveBeenCalledExactlyOnceWith(
+          "Hosted workspace assistant model preference read failed; using fleet default.",
+          {
+            errorCode: "HOSTED_WORKSPACE_ASSISTANT_MODEL_PREFERENCE_READ_FAILED",
+            fallback: "fleet_default",
+            preferenceReadErrorCode: "runtime_error",
+            preferenceReadErrorCodeDetail,
+            preferenceReadErrorDetail: "optional model preference read unavailable",
+            preferenceReadErrorMessage: "Hosted execution runtime failed.",
+            preferenceReadErrorName: "Error",
+            preferenceReadErrorStatus: 503,
+            operation: "read_hosted_member_assistant_model_preference",
+          },
+        );
+        // The route avoids the unrelated core-state admission read. Model
+        // entitlement is isolated behind the optional preference owner above.
+        expect(mocks.readHostedMemberCoreState).not.toHaveBeenCalled();
+      } finally {
+        warnSpy.mockRestore();
+      }
+    },
+  );
 
   it("reads workspace state for sponsored Family members", async () => {
     const prisma = createPrismaClientStub();

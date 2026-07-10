@@ -11282,7 +11282,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
 
     expect(result.checkpointReason).toBe("system_mailbox_receipt");
     expect(result.afterCheckpoint).toEqual(expect.any(Function));
-    // Hosted Foreground Priority: a cleanup-capable post-checkpoint step must
+    // Foreground Reply Critical Path: a cleanup-capable post-checkpoint step must
     // keep the foreground import loop alive so a message arriving mid-drain
     // is imported and preempts via the yield hook.
     expect(result.afterCheckpointKeepsForegroundImportLoop).toBe(true);

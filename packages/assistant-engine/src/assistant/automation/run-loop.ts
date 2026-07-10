@@ -8,7 +8,6 @@ import {
   getAssistantCronStatus,
   processDueAssistantCronJobsLocal as processDueAssistantCronJobs,
 } from '../cron.js'
-import { recordAssistantDiagnosticEvent } from '../diagnostics.js'
 import {
   normalizeAssistantExecutionContext,
   type AssistantExecutionContext,
@@ -880,24 +879,6 @@ export async function runAssistantAutomationPass(
     postScanTailElapsedMs: 0,
     scanElapsedMs: 0,
   }
-  await maybeRunAssistantRuntimeMaintenance({
-    vault: input.vault,
-  }).catch((error) => {
-    warnAssistantBestEffortFailure({
-      error,
-      operation: 'runtime maintenance',
-    })
-  })
-  await recordAssistantDiagnosticEvent({
-    vault: input.vault,
-    component: 'automation',
-    kind: 'automation.scan.started',
-    message: `Assistant automation scan ${input.scanNumber ?? 1} started.`,
-    counterDeltas: {
-      automationScans: 1,
-    },
-  })
-
   const outboxResult = input.drainOutbox ?? true
     ? await drainAssistantOutbox({
         vault: input.vault,
@@ -965,6 +946,20 @@ export async function runAssistantAutomationPass(
     },
   })
   passTiming.scanElapsedMs = Date.now() - scanStartedAt
+  if (
+    scanResult.replies.considered === 0
+    && input.signal?.aborted !== true
+    && input.shouldYieldBackgroundMaintenance?.() !== true
+  ) {
+    await maybeRunAssistantRuntimeMaintenance({
+      vault: input.vault,
+    }).catch((error) => {
+      warnAssistantBestEffortFailure({
+        error,
+        operation: 'runtime maintenance',
+      })
+    })
+  }
   const postScanTailStartedAt = Date.now()
   const shouldDrainOutboxAfterScan =
     applyCanonicalWrites

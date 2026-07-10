@@ -14,6 +14,9 @@ import type {
   AssistantUsageTokenPricingBasis,
 } from "./assistant-usage.ts";
 import type {
+  HostedAssistantModelOverride,
+} from "./assistant-model.ts";
+import type {
   HostedBrowserVaultReplicaCursorRef,
   HostedBrowserVaultReplicaRef,
   HostedExecutionLinqExternalThreadRouteAuthority,
@@ -1319,14 +1322,21 @@ export interface HostedRuntimeLatencyPhaseBreakdown {
     stagedAtEpochMs?: number;
   };
   // Runtime-owned work between mailbox staging and the assistant engine's
-  // local Codex turn/start write. These are duration-only diagnostics and are
-  // attached to that existing milestone rather than emitted synchronously.
+  // local Codex turn/start write. These metadata-only diagnostics are attached
+  // to that existing milestone rather than emitted synchronously.
   preProvider?: {
     workspaceAssistantPreAutomationMs?: number;
     executionTargetHydrateMs?: number;
     systemMailboxMaintenanceMs?: number;
     memberPreferencesPrePlanningMs?: number;
     automationBootstrapMs?: number;
+    outboxScanElapsedMs?: number;
+    outboxScanPerformed?: boolean;
+    receiptScanBytesRead?: number;
+    receiptScanElapsedMs?: number;
+    receiptScanFilesRead?: number;
+    receiptScanLockWaitMs?: number;
+    receiptScanPerformed?: boolean;
   };
   // Exact runtime-observed epoch timestamps. These deliberately distinguish
   // visible channel activity and local Codex output from an upstream provider
@@ -1441,6 +1451,13 @@ export const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS: Record<
     "systemMailboxMaintenanceMs",
     "memberPreferencesPrePlanningMs",
     "automationBootstrapMs",
+    "outboxScanElapsedMs",
+    "outboxScanPerformed",
+    "receiptScanBytesRead",
+    "receiptScanElapsedMs",
+    "receiptScanFilesRead",
+    "receiptScanLockWaitMs",
+    "receiptScanPerformed",
   ],
   assistant: [
     "linqTypingRequestStartedAtEpochMs",
@@ -1471,6 +1488,8 @@ export const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_BOOLEAN_LEAF_KEYS =
     "orchestration.triggeredByWebDirect",
     "wake.activeRuntimePassForeground",
     "boot.restoreWasCold",
+    "preProvider.outboxScanPerformed",
+    "preProvider.receiptScanPerformed",
   ] as const;
 
 export type HostedRuntimeLatencyPhaseBreakdownJsonLeaf = number | boolean;
@@ -1790,6 +1809,7 @@ export interface HostedWorkspaceState {
 
 export interface HostedWorkspaceReadResponse {
   fetchedAt: string;
+  hostedAssistantModelOverride?: HostedAssistantModelOverride;
   workspace: HostedWorkspaceState | null;
 }
 
@@ -1845,6 +1865,7 @@ export interface HostedWorkspaceCheckpointRequest {
 export interface HostedWorkspaceCheckpointResponse {
   checkpointed: boolean;
   checkpointConflictReason?: HostedWorkspaceCheckpointConflictReason | null;
+  conversationInputAhead?: boolean;
   replacedSnapshotRef?: HostedExecutionSnapshotRefState;
   workspace: HostedWorkspaceState;
 }
@@ -1959,6 +1980,27 @@ export type HostedRuntimeLogEventCode =
 
 export const HOSTED_RUNTIME_LOG_REQUEST_MAX_ENTRIES = 50;
 
+export const HOSTED_CANONICAL_WRITE_RECEIPT_LOG_SHA_STATUS_KEY =
+  "hostedCanonicalWriteReceiptLogSha256";
+export const HOSTED_CANONICAL_WRITE_RECEIPT_LOG_BYTE_SIZE_STATUS_KEY =
+  "hostedCanonicalWriteReceiptLogByteSize";
+export const HOSTED_CANONICAL_WRITE_RECEIPT_RECOVERY_STATUS_KEY =
+  "hostedCanonicalWriteReceiptRecoveryStatus";
+export const HOSTED_CANONICAL_WRITE_RECEIPT_RECOVERY_PRIOR_WAKE_AT_STATUS_KEY =
+  "hostedCanonicalWriteReceiptRecoveryPriorNextWakeAt";
+export const HOSTED_CANONICAL_WRITE_RECEIPT_RECOVERY_PRIOR_WAKE_REASON_STATUS_KEY =
+  "hostedCanonicalWriteReceiptRecoveryPriorNextWakeReason";
+export const HOSTED_CANONICAL_WRITE_RECEIPT_RECOVERY_REDACTED_STATUS_KEYS = [
+  HOSTED_CANONICAL_WRITE_RECEIPT_RECOVERY_STATUS_KEY,
+  HOSTED_CANONICAL_WRITE_RECEIPT_RECOVERY_PRIOR_WAKE_AT_STATUS_KEY,
+  HOSTED_CANONICAL_WRITE_RECEIPT_RECOVERY_PRIOR_WAKE_REASON_STATUS_KEY,
+] as const;
+export const HOSTED_CANONICAL_WRITE_RECEIPT_REDACTED_STATUS_KEYS = [
+  HOSTED_CANONICAL_WRITE_RECEIPT_LOG_SHA_STATUS_KEY,
+  HOSTED_CANONICAL_WRITE_RECEIPT_LOG_BYTE_SIZE_STATUS_KEY,
+  ...HOSTED_CANONICAL_WRITE_RECEIPT_RECOVERY_REDACTED_STATUS_KEYS,
+] as const;
+
 export type HostedRuntimeRedactedScalar = boolean | null | number | string;
 export type HostedRuntimeRedactedObject = Record<string, HostedRuntimeRedactedScalar>;
 export type HostedRuntimeRedactedValue =
@@ -2065,10 +2107,72 @@ export interface HostedWorkspaceInvocationRequest {
 }
 
 export interface HostedWorkspaceInvocationResult {
+  immediateRecheckRequested?: true;
   nextWakeAt?: string | null;
   nextWakeReason?: string | null;
   redactedStatus?: HostedRuntimeRedactedJson | null;
   status: HostedWorkspaceInvocationStatus;
+}
+
+export function isHostedRuntimeMailboxContinuation(input: {
+  nextWakeAt?: Date | string | null;
+  nextWakeReason?: string | null;
+  redactedStatus?: unknown;
+}): boolean {
+  if (readHostedRuntimeRetryableMailboxBlockedCount(input.redactedStatus) > 0n) {
+    return true;
+  }
+
+  return input.nextWakeAt !== undefined
+    && input.nextWakeAt !== null
+    && input.nextWakeReason?.trim() === "mailbox";
+}
+
+export function isHostedRuntimeFutureMailboxContinuation(
+  input: {
+    nextWakeAt?: Date | string | null;
+    nextWakeReason?: string | null;
+    redactedStatus?: unknown;
+  },
+  nowMs: number = Date.now(),
+): boolean {
+  const nextWakeAtMs = input.nextWakeAt instanceof Date
+    ? input.nextWakeAt.getTime()
+    : input.nextWakeAt
+      ? Date.parse(input.nextWakeAt)
+      : Number.NaN;
+
+  return Number.isFinite(nextWakeAtMs)
+    && nextWakeAtMs > nowMs
+    && isHostedRuntimeMailboxContinuation(input);
+}
+
+function readHostedRuntimeRetryableMailboxBlockedCount(value: unknown): bigint {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return 0n;
+  }
+  const rawCount = (value as Record<string, unknown>)[
+    "hostedMailboxRetryableBlockedCount"
+  ];
+  if (rawCount === undefined || rawCount === null) {
+    return 0n;
+  }
+  if (typeof rawCount === "bigint") {
+    if (rawCount >= 0n) {
+      return rawCount;
+    }
+  }
+  if (typeof rawCount === "number") {
+    if (Number.isSafeInteger(rawCount) && rawCount >= 0) {
+      return BigInt(rawCount);
+    }
+  }
+  if (typeof rawCount === "string" && /^[0-9]+$/u.test(rawCount)) {
+    return BigInt(rawCount);
+  }
+  throw new TypeError(
+    "Hosted runtime retryable mailbox blocked count must be a non-negative integer.",
+  );
 }
 
 export function isHostedMailboxLane(value: string): value is HostedMailboxLane {

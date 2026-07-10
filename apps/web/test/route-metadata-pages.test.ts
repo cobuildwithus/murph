@@ -17,7 +17,7 @@ test("DesignPage metadata keeps the shared preview image and product copy", () =
   );
   assert.deepEqual(designMetadata.openGraph?.images, [
     {
-      alt: "Murph — Wearable data, made useful.",
+      alt: "Murph — Everyone’s got a health goal. Almost nobody hits it alone.",
       height: 630,
       type: "image/png",
       url: "/opengraph-image",
@@ -26,7 +26,7 @@ test("DesignPage metadata keeps the shared preview image and product copy", () =
   ]);
   assert.deepEqual(designMetadata.twitter?.images, [
     {
-      alt: "Murph — Wearable data, made useful.",
+      alt: "Murph — Everyone’s got a health goal. Almost nobody hits it alone.",
       height: 630,
       type: "image/png",
       url: "/opengraph-image",
@@ -70,7 +70,7 @@ test("SubprocessorsPage metadata and table expose the provider list", () => {
   assert.equal(subprocessorsMetadata.alternates?.canonical, "/subprocessors");
   assert.deepEqual(subprocessorsMetadata.openGraph?.images, [
     {
-      alt: "Murph — Wearable data, made useful.",
+      alt: "Murph — Everyone’s got a health goal. Almost nobody hits it alone.",
       height: 630,
       type: "image/png",
       url: "/opengraph-image",

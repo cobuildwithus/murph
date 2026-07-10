@@ -20,7 +20,7 @@ export default async function JoinInviteOGImage() {
         heroDataUri={heroDataUri}
         eyebrow="MURPH"
         headline="You’re invited."
-        subtext="Your personal health assistant. See what actually makes you healthier."
+        subtext="Everyone’s got a health goal. Almost nobody hits it alone."
       />
     ),
     { ...OG_SIZE, fonts }

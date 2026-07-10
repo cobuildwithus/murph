@@ -333,6 +333,7 @@ enum HostedPhoneCallStatus {
 model HostedMember {
   id                             String                          @id
   billingStatus                  HostedBillingStatus             @default(not_started) @map("billing_status")
+  assistantModelPreference       String?                         @map("assistant_model_preference")
   assistantTone                  String?                         @map("assistant_tone")
   assistantVoice                 String?                         @map("assistant_voice")
   pendingActivationTimeZone      String?                         @map("pending_activation_time_zone")

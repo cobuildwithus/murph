@@ -187,10 +187,16 @@ jobs:
         run: pnpm exec tsx packages/cli/scripts/verify-package-shape.ts
 
       - name: Run package coverage shard
+        env:
+          NODE_OPTIONS: ${{ matrix.shard == 'assistant' && '--max-old-space-size=6144' || '' }}
         run: |
           for package_dir in ${{ matrix.packages }}; do
             if [[ "$package_dir" == "packages/cli" ]]; then
               env MURPH_PREPARED_CLI_RUNTIME_ARTIFACTS=1 MURPH_VITEST_MAX_WORKERS=50% pnpm exec vitest run --config packages/cli/vitest.workspace.ts --coverage
+            elif [[ "$package_dir" == "packages/assistant-engine" ]]; then
+              # The serialized coverage worker exceeds V8's default heap near
+              # the end of this package's 2,000-test suite.
+              env NODE_OPTIONS=--max-old-space-size=6144 MURPH_VITEST_MAX_WORKERS=50% pnpm --dir "$package_dir" test:coverage
             else
               env MURPH_VITEST_MAX_WORKERS=50% pnpm --dir "$package_dir" test:coverage
             fi

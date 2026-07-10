@@ -94,7 +94,6 @@ import {
   recordAdditionalAssistantUsageEvents,
   recordAssistantUsageEvent,
 } from './service-usage.js'
-import { maybeRunAssistantRuntimeMaintenance } from './runtime-budgets.js'
 import {
   type AssistantActiveTurnInputAdmissionResult,
 } from './turn-input.js'
@@ -359,16 +358,6 @@ export async function sendAssistantMessageLocal(
     }
   }
 
-  // The automation pass already runs maintenance before scanning auto-replies.
-  // Keep this boundary for every independently-started turn.
-  if (input.turnTrigger !== 'automation-auto-reply') {
-    await runAssistantTurnBestEffort(() =>
-      maybeRunAssistantRuntimeMaintenance({
-        vault: input.vault,
-      })
-    )
-  }
-
   const executionContext = normalizeAssistantExecutionContext(input.executionContext)
   const boundaryDefaultTarget = resolveAssistantExecutionDefaultTarget({
     executionContext,
@@ -443,18 +432,6 @@ export async function sendAssistantMessageLocal(
       let deliverySupersededTypingIndicator = false
 
       try {
-        await recordAssistantDiagnosticEvent({
-          vault: input.vault,
-          component: 'assistant',
-          kind: 'turn.started',
-          message: `Started assistant turn for session ${resolved.session.sessionId}.`,
-          sessionId: resolved.session.sessionId,
-          turnId: receipt.turnId,
-          counterDeltas: {
-            turnsStarted: 1,
-          },
-        })
-
         const turnInputController = createAssistantActiveTurnInputController({
           acceptedInputValidator: async ({ acceptedInputs }) => {
             await assertAssistantAcceptedTurnInputItemInputsAssistantInputEventsExist({
