@@ -222,6 +222,7 @@ class DeviceSyncServiceController {
   private workerTimer: NodeJS.Timeout | null = null;
   private schedulerTimer: NodeJS.Timeout | null = null;
   private readonly jobFailureDiagnostics: DeviceSyncJobFailureDiagnostic[] = [];
+  private readonly connectionMutationLocks = new Map<string, Promise<void>>();
 
   constructor(input: CreateDeviceSyncServiceInput) {
     this.vaultRoot = input.config.vaultRoot;
@@ -305,6 +306,8 @@ class DeviceSyncServiceController {
         markWebhookReceived: (accountId, now) => this.store.markWebhookReceived(accountId, now),
       },
       hooks: {
+        runConnectionMutation: ({ provider }, operation) =>
+          this.runProviderConnectionMutation(provider, operation),
         onConnectionEstablished: async ({ account, connection, provider }) => {
           this.enqueueJobs(account, connection.initialJobs ?? []);
           await this.ensureWebhookAdminUpkeepAfterConnectionEstablished(provider);
@@ -322,6 +325,33 @@ class DeviceSyncServiceController {
       },
       log: this.logger,
     });
+  }
+
+  private async runProviderConnectionMutation<Result>(
+    provider: string,
+    operation: () => Promise<Result>,
+  ): Promise<Result> {
+    const previous = this.connectionMutationLocks.get(provider) ?? Promise.resolve();
+    let releaseCurrent!: () => void;
+    const current = new Promise<void>((resolve) => {
+      releaseCurrent = resolve;
+    });
+    const tail = previous.then(() => current, () => current);
+    this.connectionMutationLocks.set(provider, tail);
+
+    try {
+      try {
+        await previous;
+      } catch {
+        // Previous waiters must not poison the provider queue.
+      }
+      return await operation();
+    } finally {
+      releaseCurrent();
+      if (this.connectionMutationLocks.get(provider) === tail) {
+        this.connectionMutationLocks.delete(provider);
+      }
+    }
   }
 
   describeProviders(): PublicProviderDescriptor[] {
@@ -460,25 +490,65 @@ class DeviceSyncServiceController {
 
   async disconnectAccount(accountId: string): Promise<DisconnectAccountResult> {
     const account = this.requireStoredAccount(accountId);
+    return await this.runProviderConnectionMutation(account.provider, () =>
+      this.disconnectAccountAfterConnectionMutation(accountId)
+    );
+  }
+
+  private async disconnectAccountAfterConnectionMutation(accountId: string): Promise<DisconnectAccountResult> {
+    const account = this.requireStoredAccount(accountId);
     const provider = this.requireProvider(account.provider);
     const now = this.nowIso();
 
-    if (account.status !== "disconnected") {
-      try {
-        const decrypted = this.toDecryptedAccount(account);
-        await provider.connectionHandler?.revokeAccess?.(decrypted);
-      } catch (error) {
-        this.logger.warn?.("Provider revoke access failed during disconnect; continuing local disconnect.", {
-          provider: provider.provider,
-          accountId: account.id,
-          failureCode: "DEVICE_SYNC_DISCONNECT_REVOKE_FAILED",
-          error: summarizeError(error),
-        });
+    if (account.status === "disconnected") {
+      this.store.markPendingJobsDeadForAccountIfCurrent({
+        accountId: account.id,
+        code: "ACCOUNT_DISCONNECTED",
+        expectedLocalConnectionRevision: account.localConnectionRevision,
+        expectedStatus: "disconnected",
+        message: "Device account disconnected.",
+        now,
+      });
+      const currentAccount = this.store.getAccountById(account.id);
+
+      if (
+        !currentAccount
+        || currentAccount.status !== "disconnected"
+        || currentAccount.localConnectionRevision !== account.localConnectionRevision
+      ) {
+        throw connectionChangedDuringDisconnectError();
       }
+
+      return {
+        account: this.toPublicAccount(currentAccount),
+      };
     }
 
-    this.store.markPendingJobsDeadForAccount(account.id, now, "ACCOUNT_DISCONNECTED", "Device account disconnected.");
-    const disconnected = this.store.disconnectAccount(account.id, now);
+    try {
+      const decrypted = this.toDecryptedAccount(account);
+      await provider.connectionHandler?.revokeAccess?.(decrypted);
+    } catch (error) {
+      this.logger.warn?.("Provider revoke access failed during disconnect; continuing local disconnect.", {
+        provider: provider.provider,
+        accountId: account.id,
+        failureCode: "DEVICE_SYNC_DISCONNECT_REVOKE_FAILED",
+        error: summarizeError(error),
+      });
+    }
+
+    const disconnected = this.store.disconnectAccountAndMarkPendingJobsDeadIfCurrent({
+      accountId: account.id,
+      code: "ACCOUNT_DISCONNECTED",
+      expectedLocalConnectionRevision: account.localConnectionRevision,
+      expectedStatus: account.status,
+      message: "Device account disconnected.",
+      now,
+    });
+
+    if (!disconnected) {
+      throw connectionChangedDuringDisconnectError();
+    }
+
     return {
       account: this.toPublicAccount(disconnected),
     };
@@ -627,23 +697,35 @@ class DeviceSyncServiceController {
     }
 
     if (storedAccount.status === "disconnected") {
-      this.store.completeJob(job.id, now);
+      const completed = this.store.completeJobIfOwned(job.id, this.workerId, currentNow());
+
+      if (!completed) {
+        this.logger.debug?.("Device sync job side effects skipped because execution was cancelled.", {
+          provider: job.provider,
+          accountId: job.accountId,
+          jobId: job.id,
+        });
+      }
       return finishPass();
     }
 
     if (storedAccount.status === "reauthorization_required") {
-      failClaimedJob(
+      const failed = failClaimedJob(
         "ACCOUNT_REAUTHORIZATION_REQUIRED",
         "Device sync account requires reconnection before queued jobs can run.",
         null,
         false,
       );
-      this.store.markPendingJobsDeadForAccount(
-        storedAccount.id,
-        now,
-        "ACCOUNT_REAUTHORIZATION_REQUIRED",
-        "Device sync account requires reconnection before queued jobs can run.",
-      );
+      if (failed) {
+        this.store.markPendingJobsDeadForAccountIfCurrent({
+          accountId: storedAccount.id,
+          code: "ACCOUNT_REAUTHORIZATION_REQUIRED",
+          expectedLocalConnectionRevision: storedAccount.localConnectionRevision,
+          expectedStatus: "reauthorization_required",
+          message: "Device sync account requires reconnection before queued jobs can run.",
+          now: currentNow(),
+        });
+      }
       return finishPass();
     }
 
@@ -823,13 +905,19 @@ class DeviceSyncServiceController {
         },
         disconnectAccount: async () => {
           ensureExecutionActive();
-          this.store.markPendingJobsDeadForAccount(
-            currentAccount.id,
-            now,
-            "ACCOUNT_DISCONNECTED",
-            "Device account disconnected.",
-          );
-          const disconnected = this.store.disconnectAccount(currentAccount.id, now);
+          const disconnected = this.store.disconnectAccountAndMarkPendingJobsDeadIfCurrent({
+            accountId: currentAccount.id,
+            code: "ACCOUNT_DISCONNECTED",
+            expectedLocalConnectionRevision: localConnectionRevision,
+            expectedStatus: "active",
+            message: "Device account disconnected.",
+            now: currentNow(),
+          });
+
+          if (!disconnected) {
+            throw new DeviceSyncJobExecutionCancelledError(storedAccount.id, job.id);
+          }
+
           currentAccount = this.toDecryptedAccount(disconnected);
         },
         logger: this.logger,
@@ -974,12 +1062,14 @@ class DeviceSyncServiceController {
       }
 
       if (failure.accountStatus === "reauthorization_required") {
-        this.store.markPendingJobsDeadForAccount(
-          storedAccount.id,
-          failureNow,
-          "ACCOUNT_REAUTHORIZATION_REQUIRED",
-          "Device sync account requires reconnection before queued jobs can run.",
-        );
+        this.store.markPendingJobsDeadForAccountIfCurrent({
+          accountId: storedAccount.id,
+          code: "ACCOUNT_REAUTHORIZATION_REQUIRED",
+          expectedLocalConnectionRevision: localConnectionRevision + 1,
+          expectedStatus: "reauthorization_required",
+          message: "Device sync account requires reconnection before queued jobs can run.",
+          now: failureNow,
+        });
       }
       this.logger.warn?.("Device sync job failed.", {
         provider: provider.provider,
@@ -1514,6 +1604,15 @@ function isDeviceSyncJobAbortError(error: unknown, signal: AbortSignal, depth = 
 
   const cause = "cause" in error ? (error as { cause?: unknown }).cause : undefined;
   return cause !== undefined && isDeviceSyncJobAbortError(cause, signal, depth + 1);
+}
+
+function connectionChangedDuringDisconnectError(): DeviceSyncError {
+  return deviceSyncError({
+    code: "CONNECTION_CHANGED_DURING_DISCONNECT",
+    message: "Device sync connection changed while disconnect was in progress. Retry disconnect.",
+    retryable: true,
+    httpStatus: 409,
+  });
 }
 
 function normalizeExecutionError(error: unknown): {

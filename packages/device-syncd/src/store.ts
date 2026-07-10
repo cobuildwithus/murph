@@ -9,6 +9,7 @@ import {
 import {
   decodeDeviceSyncSummaryRow,
   disconnectAccount as disconnectStoredAccount,
+  disconnectAccountIfCurrentInTransaction as disconnectStoredAccountIfCurrentInTransaction,
   getAccountByExternalAccount as getStoredAccountByExternalAccount,
   getAccountById as getStoredAccountById,
   listAccounts as listStoredAccounts,
@@ -40,6 +41,7 @@ import {
   getDeviceSyncJobById,
   listDueDeviceSyncJobBatchCandidates,
   markPendingDeviceSyncJobsDeadForAccount,
+  markPendingDeviceSyncJobsDeadForAccountIfCurrent,
   readNextDeviceSyncJobWakeAt,
   readNextDeviceSyncJobWakeAtForAccount,
   releaseDeviceSyncJobIfOwned,
@@ -239,6 +241,37 @@ export class SqliteDeviceSyncStore {
 
   disconnectAccount(accountId: string, now: string): StoredDeviceSyncAccount {
     return disconnectStoredAccount(this.database, accountId, now);
+  }
+
+  disconnectAccountAndMarkPendingJobsDeadIfCurrent(input: {
+    accountId: string;
+    code: string;
+    expectedLocalConnectionRevision: number;
+    expectedStatus: Exclude<DeviceSyncAccountStatus, "disconnected">;
+    message: string;
+    now: string;
+  }): StoredDeviceSyncAccount | null {
+    return withImmediateTransaction(this.database, () => {
+      const disconnected = disconnectStoredAccountIfCurrentInTransaction(
+        this.database,
+        input.accountId,
+        input.now,
+        input.expectedLocalConnectionRevision,
+        input.expectedStatus,
+      );
+
+      if (!disconnected) {
+        return null;
+      }
+
+      markPendingDeviceSyncJobsDeadForAccount(this.database, {
+        accountId: input.accountId,
+        code: input.code,
+        message: input.message,
+        now: input.now,
+      });
+      return disconnected;
+    });
   }
 
   markWebhookReceived(accountId: string, now: string): void {
@@ -500,6 +533,17 @@ export class SqliteDeviceSyncStore {
       message,
       now,
     });
+  }
+
+  markPendingJobsDeadForAccountIfCurrent(input: {
+    accountId: string;
+    code: string;
+    expectedLocalConnectionRevision: number;
+    expectedStatus: Extract<DeviceSyncAccountStatus, "disconnected" | "reauthorization_required">;
+    message: string;
+    now: string;
+  }): number {
+    return markPendingDeviceSyncJobsDeadForAccountIfCurrent(this.database, input);
   }
 
   claimWebhookTrace(input: ClaimDeviceSyncWebhookTraceInput): DeviceSyncWebhookTraceClaimResult {

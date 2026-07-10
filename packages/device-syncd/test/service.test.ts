@@ -1307,6 +1307,310 @@ test("device sync service worker handles missing providers, disconnected jobs, a
   close();
 });
 
+test("device sync service does not complete a disconnected-account job after another worker reclaims it", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-disconnected-reclaimed-job");
+  const { service, store, close } = createServiceFixture({
+    secret: "secret-for-tests",
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+    },
+    providers: [createFakeProvider()],
+  });
+  const account = store.upsertAccount({
+    provider: "demo",
+    externalAccountId: "demo-disconnected-reclaimed-job",
+    displayName: "Demo",
+    status: "disconnected",
+    scopes: ["offline"],
+    tokens: {
+      accessToken: "disconnected-access",
+      accessTokenEncrypted: "enc:disconnected-access",
+    },
+    connectedAt: new Date(Date.now() - 10_000).toISOString(),
+  });
+  const job = store.enqueueJob({
+    accountId: account.id,
+    provider: "demo",
+    kind: "sync",
+    payload: {},
+    priority: 100,
+    availableAt: new Date(Date.now() - 5_000).toISOString(),
+  });
+  const readAccount = store.getAccountById.bind(store);
+  let reclaimedJob: DeviceSyncJobRecord | null = null;
+  const getAccountSpy = vi.spyOn(store, "getAccountById").mockImplementation((accountId: string) => {
+    if (!reclaimedJob) {
+      expireJobLeaseForTesting(store, job.id, new Date(Date.now() - 1_000).toISOString());
+      reclaimedJob = store.claimDueJob("worker-b", new Date().toISOString(), 60_000);
+    }
+
+    return readAccount(accountId);
+  });
+
+  try {
+    const processed = await service.runWorkerOnce();
+    const persistedJob = store.getJobById(job.id);
+    const reclaimed = reclaimedJob as DeviceSyncJobRecord | null;
+
+    assert.equal(processed?.id, job.id);
+    assert.ok(reclaimed);
+    assert.equal(reclaimed.id, job.id);
+    assert.equal(persistedJob?.status, "running");
+    assert.equal(persistedJob?.leaseOwner, "worker-b");
+  } finally {
+    getAccountSpy.mockRestore();
+    close();
+  }
+});
+
+test("device sync service does not dead-letter jobs queued by a concurrent reconnect", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-reauth-reconnect-race");
+  const { service, store, close } = createServiceFixture({
+    secret: "secret-for-tests",
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+    },
+    providers: [createFakeProvider()],
+  });
+  const externalAccountId = "demo-reauth-reconnect-race";
+  const account = store.upsertAccount({
+    provider: "demo",
+    externalAccountId,
+    displayName: "Demo",
+    status: "reauthorization_required",
+    scopes: ["offline"],
+    tokens: {
+      accessToken: "stale-access",
+      accessTokenEncrypted: encryptStoredAccessToken("demo", externalAccountId, "stale-access"),
+    },
+    connectedAt: new Date(Date.now() - 10_000).toISOString(),
+  });
+  const staleJob = store.enqueueJob({
+    accountId: account.id,
+    provider: "demo",
+    kind: "sync",
+    payload: {},
+    availableAt: new Date(Date.now() - 5_000).toISOString(),
+  });
+  const failJobIfOwned = store.failJobIfOwned.bind(store);
+  let reconnectJob: DeviceSyncJobRecord | null = null;
+  const failJobSpy = vi.spyOn(store, "failJobIfOwned").mockImplementation((
+    jobId: string,
+    workerId: string,
+    now: string,
+    code: string,
+    message: string,
+    retryAt: string | null,
+    retryable: boolean,
+  ) => {
+    const failed = failJobIfOwned(jobId, workerId, now, code, message, retryAt, retryable);
+
+    if (failed && !reconnectJob) {
+      store.upsertAccount({
+        provider: "demo",
+        externalAccountId,
+        displayName: "Demo reconnected",
+        status: "active",
+        scopes: ["offline"],
+        tokens: {
+          accessToken: "reconnected-access",
+          accessTokenEncrypted: encryptStoredAccessToken("demo", externalAccountId, "reconnected-access"),
+        },
+        metadata: {
+          connectedBy: "concurrent-reconnect",
+        },
+        connectedAt: new Date().toISOString(),
+      });
+      reconnectJob = store.enqueueJob({
+        accountId: account.id,
+        provider: "demo",
+        kind: "backfill-after-reconnect",
+        payload: {},
+        availableAt: new Date().toISOString(),
+      });
+    }
+
+    return failed;
+  });
+
+  try {
+    const processed = await service.runWorkerOnce();
+    const currentAccount = store.getAccountById(account.id);
+    const queuedAfterReconnect = reconnectJob as DeviceSyncJobRecord | null;
+
+    assert.equal(processed?.id, staleJob.id);
+    assert.equal(store.getJobById(staleJob.id)?.status, "dead");
+    assert.ok(queuedAfterReconnect);
+    assert.equal(store.getJobById(queuedAfterReconnect.id)?.status, "queued");
+    assert.equal(currentAccount?.status, "active");
+    assert.deepEqual(currentAccount?.metadata, {
+      connectedBy: "concurrent-reconnect",
+    });
+  } finally {
+    failJobSpy.mockRestore();
+    close();
+  }
+});
+
+test("device sync service reactivates accounts after OAuth reconnect succeeds", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-reauth-oauth-reconnect");
+  const externalAccountId = "demo-reauth-oauth-reconnect";
+  const { service, store, close } = createServiceFixture({
+    secret: "secret-for-tests",
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+    },
+    providers: [
+      createFakeProvider({
+        async exchangeAuthorizationCode(_context, code) {
+          return {
+            externalAccountId,
+            displayName: `Demo ${code}`,
+            scopes: ["offline", "read:data"],
+            metadata: {
+              connectedBy: code,
+            },
+            tokens: {
+              accessToken: `access-${code}`,
+              refreshToken: `refresh-${code}`,
+            },
+            initialJobs: [
+              {
+                kind: `backfill-${code}`,
+              },
+            ],
+          };
+        },
+      }),
+    ],
+  });
+
+  const begin = await service.startConnection({
+    provider: "demo",
+  });
+  const connected = await service.handleOAuthCallback({
+    provider: "demo",
+    state: begin.state,
+    code: "before-reauth",
+  });
+  const marked = store.markSyncFailed(
+    connected.account.id,
+    new Date().toISOString(),
+    "TOKEN_REFRESH_FAILED",
+    "Reconnect required.",
+    "reauthorization_required",
+  );
+
+  assert.equal(marked, true);
+  assert.equal(store.getAccountById(connected.account.id)?.status, "reauthorization_required");
+
+  const reconnect = await service.startConnection({
+    provider: "demo",
+  });
+  const reconnected = await service.handleOAuthCallback({
+    provider: "demo",
+    state: reconnect.state,
+    code: "after-reauth",
+  });
+  const currentAccount = store.getAccountById(connected.account.id);
+  const jobs = readJobsForAccountForTesting(store, connected.account.id);
+
+  assert.equal(reconnected.account.id, connected.account.id);
+  assert.ok(currentAccount);
+  assert.equal(currentAccount.status, "active");
+  assert.equal(currentAccount.lastErrorCode, null);
+  assert.equal(currentAccount.lastErrorMessage, null);
+  assert.deepEqual(currentAccount.metadata, {
+    connectedBy: "after-reauth",
+  });
+  assert.ok(jobs.length > 0);
+  assert.ok(jobs.every((job) => job.status === "queued"));
+
+  close();
+});
+
+test("device sync service does not dead-letter account jobs after losing a reauthorization-required job lease", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-reauth-reclaimed-job");
+  const { service, store, close } = createServiceFixture({
+    secret: "secret-for-tests",
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+    },
+    providers: [createFakeProvider()],
+  });
+  const account = store.upsertAccount({
+    provider: "demo",
+    externalAccountId: "demo-reauth-reclaimed-job",
+    displayName: "Demo",
+    status: "reauthorization_required",
+    scopes: ["offline"],
+    tokens: {
+      accessToken: "stale-access",
+      accessTokenEncrypted: encryptStoredAccessToken("demo", "demo-reauth-reclaimed-job", "stale-access"),
+    },
+    connectedAt: new Date(Date.now() - 10_000).toISOString(),
+  });
+  const staleJob = store.enqueueJob({
+    accountId: account.id,
+    provider: "demo",
+    kind: "sync",
+    payload: {},
+    priority: 100,
+    availableAt: new Date(Date.now() - 5_000).toISOString(),
+  });
+  const siblingJob = store.enqueueJob({
+    accountId: account.id,
+    provider: "demo",
+    kind: "backfill-after-reconnect",
+    payload: {},
+    priority: 0,
+    availableAt: new Date(Date.now() - 5_000).toISOString(),
+  });
+  const failJobIfOwned = store.failJobIfOwned.bind(store);
+  let reclaimedJob: DeviceSyncJobRecord | null = null;
+  const failJobSpy = vi.spyOn(store, "failJobIfOwned").mockImplementation((
+    jobId: string,
+    workerId: string,
+    now: string,
+    code: string,
+    message: string,
+    retryAt: string | null,
+    retryable: boolean,
+  ) => {
+    if (!reclaimedJob) {
+      expireJobLeaseForTesting(store, staleJob.id, new Date(Date.now() - 1_000).toISOString());
+      reclaimedJob = store.claimDueJob("worker-b", new Date().toISOString(), 60_000);
+    }
+
+    return failJobIfOwned(jobId, workerId, now, code, message, retryAt, retryable);
+  });
+
+  try {
+    const processed = await service.runWorkerOnce();
+    const reclaimed = reclaimedJob as DeviceSyncJobRecord | null;
+    const persistedStaleJob = store.getJobById(staleJob.id);
+    const persistedSiblingJob = store.getJobById(siblingJob.id);
+
+    assert.equal(processed?.id, staleJob.id);
+    assert.ok(reclaimed);
+    assert.equal(reclaimed.id, staleJob.id);
+    assert.equal(persistedStaleJob?.status, "running");
+    assert.equal(persistedStaleJob?.leaseOwner, "worker-b");
+    assert.equal(persistedSiblingJob?.status, "queued");
+  } finally {
+    failJobSpy.mockRestore();
+    close();
+  }
+});
+
 test("device sync service preserves scheduler-owned reconcile cursor when job result omits it", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-syncd-preserve-reconcile");
   const { service, store, close } = createServiceFixture({
@@ -4145,6 +4449,253 @@ test("device sync service fences in-flight jobs after disconnect", async () => {
   assert.equal(jobs[0]?.kind, "backfill");
   assert.equal(jobs[0]?.status, "dead");
   assert.equal(jobs[0]?.last_error_code, "ACCOUNT_DISCONNECTED");
+
+  close();
+});
+
+test("device sync service serializes reconnect callbacks behind provider disconnect revoke", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-disconnect-reconnect-serialized");
+  const externalAccountId = "demo-disconnect-reconnect-serialized";
+  const exchangedCodes: string[] = [];
+  let revokeStartedResolve: (() => void) | null = null;
+  let releaseRevokeResolve: (() => void) | null = null;
+  const revokeStarted = new Promise<void>((resolve) => {
+    revokeStartedResolve = resolve;
+  });
+  const releaseRevoke = new Promise<void>((resolve) => {
+    releaseRevokeResolve = resolve;
+  });
+  const { service, store, close } = createServiceFixture({
+    secret: "secret-for-tests",
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+    },
+    providers: [
+      createFakeProvider({
+        async exchangeAuthorizationCode(_context, code) {
+          exchangedCodes.push(code);
+          return {
+            externalAccountId,
+            displayName: `Demo ${code}`,
+            scopes: ["offline", "read:data"],
+            metadata: {
+              connectedBy: code,
+            },
+            tokens: {
+              accessToken: `access-${code}`,
+              refreshToken: `refresh-${code}`,
+            },
+            initialJobs: [
+              {
+                kind: `backfill-${code}`,
+              },
+            ],
+          };
+        },
+        async revokeAccess() {
+          revokeStartedResolve?.();
+          await releaseRevoke;
+        },
+      }),
+    ],
+  });
+
+  const firstBegin = await service.startConnection({
+    provider: "demo",
+  });
+  const firstConnection = await service.handleOAuthCallback({
+    provider: "demo",
+    state: firstBegin.state,
+    code: "before-disconnect",
+  });
+  const reconnectBegin = await service.startConnection({
+    provider: "demo",
+  });
+  const disconnectPromise = service.disconnectAccount(firstConnection.account.id);
+
+  await revokeStarted;
+
+  const reconnectPromise = service.handleOAuthCallback({
+    provider: "demo",
+    state: reconnectBegin.state,
+    code: "after-disconnect-started",
+  });
+
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.deepEqual(exchangedCodes, ["before-disconnect"]);
+
+  requireCallback(releaseRevokeResolve, "revoke release callback was not initialized")();
+  const disconnected = await disconnectPromise;
+  const reconnected = await reconnectPromise;
+  const currentAccount = store.getAccountById(firstConnection.account.id);
+
+  assert.equal(disconnected.account.status, "disconnected");
+  assert.equal(reconnected.account.id, firstConnection.account.id);
+  assert.ok(currentAccount);
+  assert.equal(currentAccount.status, "active");
+  assertStoredCredentialKind(currentAccount, "oauth_tokens");
+  assert.deepEqual(exchangedCodes, ["before-disconnect", "after-disconnect-started"]);
+  assert.deepEqual(currentAccount.metadata, {
+    connectedBy: "after-disconnect-started",
+  });
+
+  close();
+});
+
+test("device sync service does not let a stale disconnect clobber a concurrent reconnect", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-disconnect-reconnect-race");
+  const externalAccountId = "demo-disconnect-reconnect-race";
+  let revokeStartedResolve: (() => void) | null = null;
+  let releaseRevokeResolve: (() => void) | null = null;
+  const revokeStarted = new Promise<void>((resolve) => {
+    revokeStartedResolve = resolve;
+  });
+  const releaseRevoke = new Promise<void>((resolve) => {
+    releaseRevokeResolve = resolve;
+  });
+  const { service, store, close } = createServiceFixture({
+    secret: "secret-for-tests",
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+    },
+    providers: [
+      createFakeProvider({
+        async exchangeAuthorizationCode(_context, code) {
+          return {
+            externalAccountId,
+            displayName: `Demo ${code}`,
+            scopes: ["offline", "read:data"],
+            metadata: {
+              connectedBy: code,
+            },
+            tokens: {
+              accessToken: `access-${code}`,
+              refreshToken: `refresh-${code}`,
+            },
+            initialJobs: [
+              {
+                kind: `backfill-${code}`,
+              },
+            ],
+          };
+        },
+        async revokeAccess() {
+          revokeStartedResolve?.();
+          await releaseRevoke;
+        },
+      }),
+    ],
+  });
+
+  const firstBegin = await service.startConnection({
+    provider: "demo",
+  });
+  const firstConnection = await service.handleOAuthCallback({
+    provider: "demo",
+    state: firstBegin.state,
+    code: "before-disconnect",
+  });
+  const beforeDisconnect = store.getAccountById(firstConnection.account.id);
+
+  assert.ok(beforeDisconnect);
+
+  const disconnectPromise = service.disconnectAccount(firstConnection.account.id);
+  await revokeStarted;
+  const disconnectRejected = assert.rejects(
+    disconnectPromise,
+    (error: unknown) =>
+      error instanceof DeviceSyncError
+      && error.code === "CONNECTION_CHANGED_DURING_DISCONNECT"
+      && error.retryable === true
+      && error.httpStatus === 409,
+  );
+  store.upsertAccount({
+    provider: "demo",
+    externalAccountId,
+    displayName: "Demo after-disconnect-started",
+    status: "active",
+    scopes: ["offline", "read:data"],
+    tokens: {
+      accessToken: "access-after-disconnect-started",
+      accessTokenEncrypted: encryptStoredAccessToken("demo", externalAccountId, "access-after-disconnect-started"),
+      refreshToken: "refresh-after-disconnect-started",
+      refreshTokenEncrypted: "enc:refresh-after-disconnect-started",
+    },
+    metadata: {
+      connectedBy: "after-disconnect-started",
+    },
+    connectedAt: new Date().toISOString(),
+  });
+  const reconnectJob = store.enqueueJob({
+    accountId: firstConnection.account.id,
+    provider: "demo",
+    kind: "backfill-after-disconnect-started",
+    payload: {},
+    availableAt: new Date().toISOString(),
+  });
+
+  requireCallback(releaseRevokeResolve, "revoke release callback was not initialized")();
+  await disconnectRejected;
+
+  const currentAccount = store.getAccountById(firstConnection.account.id);
+  const jobs = readJobsForAccountForTesting(store, firstConnection.account.id);
+
+  assert.equal(reconnectJob.accountId, firstConnection.account.id);
+  assert.ok(currentAccount);
+  assert.equal(currentAccount.status, "active");
+  assert.equal(currentAccount.disconnectGeneration, beforeDisconnect.disconnectGeneration);
+  assertStoredCredentialKind(currentAccount, "oauth_tokens");
+  assert.deepEqual(currentAccount.metadata, {
+    connectedBy: "after-disconnect-started",
+  });
+  assert.equal(jobs.length, 2);
+  assert.deepEqual(jobs.map((job) => job.status), ["queued", "queued"]);
+
+  close();
+});
+
+test("device sync service keeps repeated disconnects idempotent", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-disconnect-idempotent");
+  let revokeCalls = 0;
+  const { service, store, close } = createServiceFixture({
+    secret: "secret-for-tests",
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+    },
+    providers: [
+      createFakeProvider({
+        async revokeAccess() {
+          revokeCalls += 1;
+        },
+      }),
+    ],
+  });
+  const begin = await service.startConnection({
+    provider: "demo",
+  });
+  const connected = await service.handleOAuthCallback({
+    provider: "demo",
+    state: begin.state,
+    code: "idempotent-disconnect",
+  });
+
+  await service.disconnectAccount(connected.account.id);
+  const afterFirstDisconnect = store.getAccountById(connected.account.id);
+  const repeated = await service.disconnectAccount(connected.account.id);
+  const afterRepeatedDisconnect = store.getAccountById(connected.account.id);
+
+  assert.ok(afterFirstDisconnect);
+  assert.ok(afterRepeatedDisconnect);
+  assert.equal(repeated.account.status, "disconnected");
+  assert.equal(afterRepeatedDisconnect.disconnectGeneration, afterFirstDisconnect.disconnectGeneration);
+  assert.equal(afterRepeatedDisconnect.localConnectionRevision, afterFirstDisconnect.localConnectionRevision);
+  assert.equal(revokeCalls, 1);
 
   close();
 });
