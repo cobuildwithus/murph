@@ -184,6 +184,7 @@ export class PrismaHostedConnectionSourceStore {
       data: {
         lastErrorCode: null,
         lastErrorMessage: null,
+        lastSeenAt: updatedAt,
         status: "disconnected",
         updatedAt,
       },

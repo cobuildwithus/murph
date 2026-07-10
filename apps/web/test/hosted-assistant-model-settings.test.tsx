@@ -41,6 +41,12 @@ vi.mock("@/src/components/ui/badge", () => ({
   },
 }));
 
+vi.mock("@/src/components/settings/hosted-plan-upgrade-button", () => ({
+  UpgradeToEdgeButton({ children }: { children?: ReactNode }) {
+    return createElement("button", { type: "button" }, children ?? "Upgrade to Edge");
+  },
+}));
+
 const activeCleanups = new Set<() => void>();
 const requireFromAssistantModelSettingsTest = createRequire(import.meta.url);
 const { parseHTML } = loadLinkedom();
@@ -53,17 +59,37 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
-test("non-Edge members see Terra without an editable model choice", () => {
+test("eligible Pulse members see Sol with an Edge upgrade action", () => {
   const markup = renderToStaticMarkup(
     createElement(HostedAssistantModelSettings, {
+      canUpgradeToEdge: true,
       initialModel: HOSTED_ASSISTANT_TERRA_MODEL,
       solAvailable: false,
     }),
   );
 
-  assert.match(markup, /Default model/);
+  assert.match(markup, /Available models/);
   assert.match(markup, /GPT-5\.6 Terra/);
-  assert.match(markup, /GPT-5\.6 Sol requires an active Edge plan\./);
+  assert.match(markup, /GPT-5\.6 Sol/);
+  assert.match(markup, /Upgrade to Edge to unlock GPT-5\.6 Sol\./);
+  assert.match(markup, />Upgrade to Edge<\/button>/);
+  assert.doesNotMatch(markup, /type="radio"/);
+  assert.doesNotMatch(markup, /Save model/);
+});
+
+test("other non-Edge members can discover Sol without an invalid upgrade action", () => {
+  const markup = renderToStaticMarkup(
+    createElement(HostedAssistantModelSettings, {
+      canUpgradeToEdge: false,
+      initialModel: HOSTED_ASSISTANT_TERRA_MODEL,
+      solAvailable: false,
+    }),
+  );
+
+  assert.match(markup, /GPT-5\.6 Terra/);
+  assert.match(markup, /GPT-5\.6 Sol/);
+  assert.match(markup, /Available with an active Edge plan\./);
+  assert.doesNotMatch(markup, />Upgrade to Edge<\/button>/);
   assert.doesNotMatch(markup, /type="radio"/);
   assert.doesNotMatch(markup, /Save model/);
 });
@@ -77,13 +103,14 @@ test("Edge members can explicitly save Sol as their default model", async () => 
   });
   const view = await renderClient(
     createElement(HostedAssistantModelSettings, {
+      canUpgradeToEdge: false,
       initialModel: HOSTED_ASSISTANT_TERRA_MODEL,
       solAvailable: true,
     }),
   );
   assert.match(
     view.container.textContent ?? "",
-    /New work uses the change after any current run finishes\./,
+    /An idle run can take up to three minutes to close\./,
   );
   const terraInput = view.container.querySelector<HTMLInputElement>(
     `input[value="${HOSTED_ASSISTANT_TERRA_MODEL}"]`,
@@ -135,6 +162,7 @@ test("a generic save failure keeps the selected model available to retry", async
     });
   const view = await renderClient(
     createElement(HostedAssistantModelSettings, {
+      canUpgradeToEdge: false,
       initialModel: HOSTED_ASSISTANT_TERRA_MODEL,
       solAvailable: true,
     }),
@@ -191,6 +219,7 @@ test("model radios stay labeled and the form becomes busy while saving", async (
   mocks.requestHostedOnboardingJson.mockReturnValue(request);
   const view = await renderClient(
     createElement(HostedAssistantModelSettings, {
+      canUpgradeToEdge: false,
       initialModel: HOSTED_ASSISTANT_TERRA_MODEL,
       solAvailable: true,
     }),
@@ -276,6 +305,7 @@ test("a stale Edge page becomes read-only when Sol is no longer available", asyn
   );
   const view = await renderClient(
     createElement(HostedAssistantModelSettings, {
+      canUpgradeToEdge: false,
       initialModel: HOSTED_ASSISTANT_TERRA_MODEL,
       solAvailable: true,
     }),
@@ -311,6 +341,7 @@ test("a stale Edge page becomes read-only when Sol is no longer available", asyn
 test("refreshed eligibility resets the client state after an Edge upgrade", async () => {
   const view = await renderClient(
     createElement(HostedAssistantModelSettings, {
+      canUpgradeToEdge: true,
       initialModel: HOSTED_ASSISTANT_TERRA_MODEL,
       solAvailable: false,
     }),
@@ -320,6 +351,7 @@ test("refreshed eligibility resets the client state after an Edge upgrade", asyn
 
   await view.rerender(
     createElement(HostedAssistantModelSettings, {
+      canUpgradeToEdge: false,
       initialModel: HOSTED_ASSISTANT_TERRA_MODEL,
       solAvailable: true,
     }),
@@ -347,6 +379,7 @@ test("the canonical save response removes Sol after an Edge downgrade", async ()
   });
   const view = await renderClient(
     createElement(HostedAssistantModelSettings, {
+      canUpgradeToEdge: false,
       initialModel: HOSTED_ASSISTANT_SOL_MODEL,
       solAvailable: true,
     }),

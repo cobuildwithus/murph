@@ -390,6 +390,9 @@ describe('assistant execution prompt contract', () => {
       '$MURPH_ASSISTANT_SKILLS_ROOT/computer-use/SKILL.md',
     )
     expect(prompt).toContain(
+      "default to the marketplace where the user is already signed in, usually Amazon, over a brand's own storefront",
+    )
+    expect(prompt).toContain(
       'booking, rescheduling, or canceling health and dental care',
     )
     expect(prompt).toContain(

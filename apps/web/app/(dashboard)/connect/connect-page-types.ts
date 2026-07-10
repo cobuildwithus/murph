@@ -12,9 +12,11 @@ export type ConnectSource = {
   description: string;
   disconnectConnectionId?: string;
   disconnectScope?: "junction_account";
+  historicalResetIncomplete?: boolean;
   id: string;
   logo: LogoAsset;
   name: string;
+  recoveryKind?: "connection_reset";
   requiresReconnect?: boolean;
   unavailableActionLabel?: string;
   unavailableMessage?: string;

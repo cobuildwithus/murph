@@ -213,6 +213,7 @@ export async function startHostedLocalDevStack(input: {
   pipeOutput?: boolean;
   stderrTarget?: NodeJS.WritableStream;
   stdoutTarget?: NodeJS.WritableStream;
+  webProcessEnvOverrides?: NodeJS.ProcessEnv;
 }): Promise<HostedLocalDevStack> {
   throwIfAbortSignalAborted(input.abortSignal);
   const initialEnv = { ...input.env } satisfies NodeJS.ProcessEnv;
@@ -862,7 +863,10 @@ export async function startHostedLocalDevStack(input: {
       : spawnChildProcess("web", "pnpm", buildHostedWebProcessArgs({
         config,
         shouldUseProductionStart: shouldUseWebProductionStart,
-      }), buildHostedWebProcessEnv(runtimeEnv, shouldUseWebProductionStart), {
+      }), buildHostedWebProcessEnv({
+        ...runtimeEnv,
+        ...(input.webProcessEnvOverrides ?? {}),
+      }, shouldUseWebProductionStart), {
         pipeOutput: input.pipeOutput,
         stderrTarget: input.stderrTarget,
         stdoutTarget: input.stdoutTarget,
