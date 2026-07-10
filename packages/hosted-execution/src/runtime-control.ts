@@ -1849,6 +1849,7 @@ export interface HostedWorkspaceCheckpointRequest {
 export interface HostedWorkspaceCheckpointResponse {
   checkpointed: boolean;
   checkpointConflictReason?: HostedWorkspaceCheckpointConflictReason | null;
+  conversationInputAhead?: boolean;
   replacedSnapshotRef?: HostedExecutionSnapshotRefState;
   workspace: HostedWorkspaceState;
 }
@@ -2090,10 +2091,72 @@ export interface HostedWorkspaceInvocationRequest {
 }
 
 export interface HostedWorkspaceInvocationResult {
+  immediateRecheckRequested?: true;
   nextWakeAt?: string | null;
   nextWakeReason?: string | null;
   redactedStatus?: HostedRuntimeRedactedJson | null;
   status: HostedWorkspaceInvocationStatus;
+}
+
+export function isHostedRuntimeMailboxContinuation(input: {
+  nextWakeAt?: Date | string | null;
+  nextWakeReason?: string | null;
+  redactedStatus?: unknown;
+}): boolean {
+  if (readHostedRuntimeRetryableMailboxBlockedCount(input.redactedStatus) > 0n) {
+    return true;
+  }
+
+  return input.nextWakeAt !== undefined
+    && input.nextWakeAt !== null
+    && input.nextWakeReason?.trim() === "mailbox";
+}
+
+export function isHostedRuntimeFutureMailboxContinuation(
+  input: {
+    nextWakeAt?: Date | string | null;
+    nextWakeReason?: string | null;
+    redactedStatus?: unknown;
+  },
+  nowMs: number = Date.now(),
+): boolean {
+  const nextWakeAtMs = input.nextWakeAt instanceof Date
+    ? input.nextWakeAt.getTime()
+    : input.nextWakeAt
+      ? Date.parse(input.nextWakeAt)
+      : Number.NaN;
+
+  return Number.isFinite(nextWakeAtMs)
+    && nextWakeAtMs > nowMs
+    && isHostedRuntimeMailboxContinuation(input);
+}
+
+function readHostedRuntimeRetryableMailboxBlockedCount(value: unknown): bigint {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return 0n;
+  }
+  const rawCount = (value as Record<string, unknown>)[
+    "hostedMailboxRetryableBlockedCount"
+  ];
+  if (rawCount === undefined || rawCount === null) {
+    return 0n;
+  }
+  if (typeof rawCount === "bigint") {
+    if (rawCount >= 0n) {
+      return rawCount;
+    }
+  }
+  if (typeof rawCount === "number") {
+    if (Number.isSafeInteger(rawCount) && rawCount >= 0) {
+      return BigInt(rawCount);
+    }
+  }
+  if (typeof rawCount === "string" && /^[0-9]+$/u.test(rawCount)) {
+    return BigInt(rawCount);
+  }
+  throw new TypeError(
+    "Hosted runtime retryable mailbox blocked count must be a non-negative integer.",
+  );
 }
 
 export function isHostedMailboxLane(value: string): value is HostedMailboxLane {

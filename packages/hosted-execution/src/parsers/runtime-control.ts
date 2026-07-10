@@ -2962,6 +2962,14 @@ export function parseHostedWorkspaceCheckpointResponse(
             HOSTED_WORKSPACE_CHECKPOINT_CONFLICT_REASONS,
           ),
         }),
+    ...(record.conversationInputAhead === undefined
+      ? {}
+      : {
+          conversationInputAhead: requireBoolean(
+            record.conversationInputAhead,
+            "Hosted workspace checkpoint response conversationInputAhead",
+          ),
+        }),
     ...(record.replacedSnapshotRef === undefined
       ? {}
       : {
@@ -3409,9 +3417,20 @@ export function parseHostedWorkspaceInvocationResult(value: unknown): HostedWork
         record.nextWakeReason,
         "Hosted workspace invocation result nextWakeReason",
       );
+  if (
+    record.immediateRecheckRequested !== undefined
+    && record.immediateRecheckRequested !== true
+  ) {
+    throw new TypeError(
+      "Hosted workspace invocation result immediateRecheckRequested must be true when present.",
+    );
+  }
   const status = parseHostedWorkspaceInvocationStatus(record.status);
 
   return {
+    ...(record.immediateRecheckRequested === true
+      ? { immediateRecheckRequested: true as const }
+      : {}),
     ...(nextWakeAt === undefined ? {} : { nextWakeAt }),
     ...(nextWakeReason === undefined ? {} : { nextWakeReason }),
     ...(record.redactedStatus === undefined

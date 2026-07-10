@@ -8,6 +8,7 @@ import {
   HOSTED_RUNTIME_LOG_LEVELS,
   HOSTED_RUNTIME_LOG_PHASES,
   HOSTED_WORKSPACE_CHECKPOINT_REASONS,
+  isHostedRuntimeMailboxContinuation,
   isHostedMailboxLane,
 } from "@murphai/hosted-execution/runtime-control";
 import type {
@@ -205,8 +206,9 @@ export interface HostedWorkspaceRecord {
 }
 
 export interface HostedWorkspaceCheckpointResult {
+  conversationInputAhead?: boolean;
   replacedSnapshotRef: HostedExecutionSnapshotRefState;
-  status: "updated" | "conflict" | "foreground_pending";
+  status: "updated" | "conflict";
   workspace: HostedWorkspaceRecord | null;
 }
 
@@ -376,13 +378,15 @@ export async function checkpointHostedWorkspaceTx(input: {
       ));
   }
 
+  let conversationInputAhead: boolean | undefined;
+  let lockedWorkspace: HostedWorkspaceRow | null = null;
   const conversationImportedSeq = readCheckpointConversationImportedSeq(input.redactedStatusJson);
   if (reason === "idle_shutdown" && conversationImportedSeq !== null) {
     await lockHostedWorkspaceForCheckpointTx({
       tx: input.tx,
       userId,
     });
-    const lockedWorkspace = await input.tx.hostedWorkspace.findUnique({
+    lockedWorkspace = await input.tx.hostedWorkspace.findUnique({
       where: {
         userId,
       },
@@ -394,23 +398,23 @@ export async function checkpointHostedWorkspaceTx(input: {
         workspace: lockedWorkspace ? projectHostedWorkspace(lockedWorkspace) : null,
       };
     }
-    if (!isMailboxContinuationCheckpoint(input)) {
+    if (!isHostedRuntimeMailboxContinuation({
+      nextWakeAt: input.nextWakeAt,
+      nextWakeReason: input.nextWakeReason,
+      redactedStatus: input.redactedStatusJson,
+    })) {
       const pendingConversationSeq = await readForegroundPendingConversationSeqTx({
         conversationImportedSeq,
         tx: input.tx,
         userId,
       });
       if (pendingConversationSeq !== null) {
-        return {
-          replacedSnapshotRef: null,
-          status: "foreground_pending",
-          workspace: projectHostedWorkspace(lockedWorkspace),
-        };
+        conversationInputAhead = true;
       }
     }
   }
 
-  const currentWorkspace = await input.tx.hostedWorkspace.findUnique({
+  const currentWorkspace = lockedWorkspace ?? await input.tx.hostedWorkspace.findUnique({
     where: {
       userId,
     },
@@ -436,6 +440,9 @@ export async function checkpointHostedWorkspaceTx(input: {
   });
 
   return {
+    ...(updated.count === 1 && conversationInputAhead !== undefined
+      ? { conversationInputAhead }
+      : {}),
     replacedSnapshotRef: updated.count === 1 ? replacedSnapshotRef : null,
     status: updated.count === 1 ? "updated" : "conflict",
     workspace: row ? projectHostedWorkspace(row) : null,
@@ -452,44 +459,6 @@ function readCheckpointConversationImportedSeq(
         value,
         "Hosted workspace checkpoint redactedStatus hostedMailboxConversationImportedSeq",
       );
-}
-
-function isMailboxContinuationCheckpoint(input: {
-  nextWakeAt?: Date | string | null;
-  nextWakeReason?: string | null;
-  redactedStatusJson?: Record<string, unknown> | null;
-}): boolean {
-  if (readCheckpointRetryableBlockedCount(input.redactedStatusJson) > 0n) {
-    return true;
-  }
-  return input.nextWakeAt !== undefined
-    && input.nextWakeAt !== null
-    && normalizeNullableString(input.nextWakeReason) === "mailbox";
-}
-
-function readCheckpointRetryableBlockedCount(
-  redactedStatusJson: Record<string, unknown> | null | undefined,
-): bigint {
-  if (!redactedStatusJson || typeof redactedStatusJson !== "object" || Array.isArray(redactedStatusJson)) {
-    return 0n;
-  }
-  const value = redactedStatusJson["hostedMailboxRetryableBlockedCount"];
-  if (value === undefined || value === null) {
-    return 0n;
-  }
-  if (
-    typeof value === "bigint"
-    || typeof value === "number"
-    || typeof value === "string"
-  ) {
-    return normalizeBigInt(
-      value,
-      "Hosted workspace checkpoint redactedStatus hostedMailboxRetryableBlockedCount",
-    );
-  }
-  throw new TypeError(
-    "Hosted workspace checkpoint redactedStatus hostedMailboxRetryableBlockedCount must be a non-negative integer.",
-  );
 }
 
 async function lockHostedWorkspaceForCheckpointTx(input: {

@@ -1,6 +1,6 @@
 # Murph Architecture
 
-Last verified: 2026-06-28
+Last verified: 2026-07-09
 
 ## Hosted Connected Apps
 
@@ -188,6 +188,36 @@ the alarm. New v2 foreground leases restore from durable workspace snapshots and
 legacy refs also cold-restore from durable bundles instead of trusting dirty
 warm local runtime markers across leases. The detailed contract lives in
 `agent-docs/references/hosted-runtime-protocol.md`.
+
+A valid `idle_shutdown` snapshot whose workspace-version compare-and-swap still
+matches is committed even when web observes newer durable conversation input.
+Web commits the checkpoint request's wake projection as part of that same CAS
+prefix and returns the optional, transient `conversationInputAhead` observation. A live
+default-mode runtime imports that input through the existing foreground path
+immediately after checkpoint publication; a retention-only or shutting-down
+runtime leaves the mailbox row to the durable web/Temporal reconciliation path.
+The runner does not discard the
+uploaded snapshot or create a second metadata-only shutdown snapshot. The old
+`foreground_pending` checkpoint response remains parser/runtime compatibility
+for an older web deployment only. If a shutdown-time import has already staged
+new assistant input locally, that real dirty state is checkpointed with a due
+`assistant` wake so the restored runtime cannot strand it. This is an ordinary
+dirty-state checkpoint, not a synthetic wake-handoff snapshot.
+
+After an exact successful runtime completion clears its write fence, Cloudflare
+makes at most one signed, payload-free, best-effort callback to web with a timeout
+of at most two seconds; a known future mailbox retry continuation skips it. A
+completed invocation may attach one exact positive, signature-bound query when
+it newly committed an unserviced default or retention schedule. Web otherwise
+signals the existing payload-free `runtime_recheck_requested` Temporal workflow
+only for runnable mailbox lag and never converts a persisted due wake into a
+repeating level-triggered signal. The positive edge contains no wake data and is
+not persisted; it asks Temporal to re-read durable facts and own either due work
+or the exact future timer. Callback failure is non-fatal and is not retried by
+Cloudflare. Active, unsupported, error, and timeout liveness
+outcomes preserve the fence; only explicit inactive or mismatch proof, or exact
+successful completion, may enter the corresponding identity-safe recovery or
+clear path.
 
 The hosted Temporal hard-cut target is documented in
 `agent-docs/references/hosted-temporal-orchestration.md`. That ADR is the

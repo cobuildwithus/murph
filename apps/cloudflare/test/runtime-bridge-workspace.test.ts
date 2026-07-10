@@ -31,7 +31,6 @@ import {
   buildHostedExecutionTelegramConversationMessageWake,
 } from "@murphai/hosted-execution";
 import {
-  HostedRuntimeCheckpointInterruptedByWakeError,
   recordHostedMaterializedArtifactPaths,
   type HostedWorkspaceRuntimeJobOptions,
 } from "@murphai/assistant-runtime";
@@ -1511,7 +1510,7 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     expect(putArtifact).not.toHaveBeenCalled();
   });
 
-  it("aborts an in-flight direct R2 snapshot when a foreground message wakes the runtime", async () => {
+  it("completes direct R2 snapshot publication after upload when the lease stays current", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-workspace-"));
     cleanupPaths.push(vaultRoot);
     await writeFile(path.join(vaultRoot, "note.md"), "workspace snapshot\n", "utf8");
@@ -1521,18 +1520,9 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     }));
     const workspaceSnapshotAborts: Array<{ objectKey: string; snapshotId: string }> = [];
     let leaseReadCount = 0;
-    let runtimeWakePending = false;
-    const consumePendingRuntimeWake = vi.fn(() => {
-      const pending = runtimeWakePending;
-      runtimeWakePending = false;
-      return pending ? { notifiedAtEpochMs: 1_777_030_000_000 } : null;
-    });
-    const workspaceSnapshotDirectPuts = vi.fn(() => {
-      runtimeWakePending = true;
-    });
+    const workspaceSnapshotDirectPuts = vi.fn();
     const workspaceSnapshotUploads = new Map<string, WorkspaceSnapshotUpload>();
     const options = createHostedWorkspaceRuntimeBridgeJobOptions({
-      consumePendingRuntimeWake,
       platform: createPlatform({
         onWorkspaceSnapshotDirectPut: workspaceSnapshotDirectPuts,
         putArtifact,
@@ -1563,47 +1553,26 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
       vaultRoot,
     });
 
-    await expect(options.createCheckpointSnapshot(createCheckpointInput("idle_shutdown")))
-      .rejects.toBeInstanceOf(HostedRuntimeCheckpointInterruptedByWakeError);
+    const result = await options.createCheckpointSnapshot(
+      createCheckpointInput("idle_shutdown"),
+    );
 
-    expect(consumePendingRuntimeWake).toHaveBeenCalledOnce();
-    expect(leaseReadCount).toBe(2);
+    expect(result.snapshotRef).not.toBeNull();
+    expect(leaseReadCount).toBe(3);
     expect(workspaceSnapshotDirectPuts).toHaveBeenCalledOnce();
-    expect(workspaceSnapshotUploads.size).toBe(0);
-    expect(workspaceSnapshotAborts).toEqual([
-      expect.objectContaining({
-        snapshotId: expect.stringMatching(/^snapshot_test_/u),
-      }),
-    ]);
+    expect(workspaceSnapshotUploads.size).toBe(1);
+    expect(workspaceSnapshotAborts).toEqual([]);
     expect(putArtifact).not.toHaveBeenCalled();
     const entries = writeLog.mock.calls.flatMap(([request]) => request.entries);
-    expect(entries).not.toContainEqual(expect.objectContaining({
+    expect(entries).toContainEqual(expect.objectContaining({
       eventCode: "checkpoint.snapshot_finished",
     }));
-    expect(entries).toContainEqual(expect.objectContaining({
+    expect(entries).not.toContainEqual(expect.objectContaining({
       eventCode: "checkpoint.snapshot_failed",
-      redactedJson: expect.objectContaining({
-        errorCode: "checkpoint_error",
-        errorCodeDetail: "runtime_wake_during_checkpoint",
-        leaseCheckCount: 2,
-        safeErrorDetail:
-          "Hosted runtime checkpoint was interrupted by a pending runtime wake.",
-        safeErrorMessage: "Hosted execution failed while recording a checkpoint.",
-        snapshotArchiveBuildElapsedMs: expect.any(Number),
-        snapshotDirectR2PresignElapsedMs: expect.any(Number),
-        snapshotDirectR2PutElapsedMs: expect.any(Number),
-        snapshotDirectR2UploadElapsedMs: expect.any(Number),
-        snapshotMode: "workspace_snapshot_v2",
-        workspaceSnapshotFileCount: expect.any(Number),
-        workspaceSnapshotPlainBytes: expect.any(Number),
-      }),
     }));
-    expect(JSON.stringify(writeLog.mock.calls)).not.toContain("snapshot_test_");
-    expect(JSON.stringify(writeLog.mock.calls)).not.toContain("workspace-snapshots");
-    expect(JSON.stringify(writeLog.mock.calls)).not.toContain("encryptedObjectSha256");
   });
 
-  it("aborts an in-flight direct R2 snapshot when a foreground message wakes after lease revalidation", async () => {
+  it("aborts an uploaded direct R2 snapshot when the lease changes before web checkpoint", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-workspace-"));
     cleanupPaths.push(vaultRoot);
     await writeFile(path.join(vaultRoot, "note.md"), "workspace snapshot\n", "utf8");
@@ -1613,23 +1582,9 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     }));
     const workspaceSnapshotAborts: Array<{ objectKey: string; snapshotId: string }> = [];
     let leaseReadCount = 0;
-    let wakeCheckCount = 0;
-    let runtimeWakePending = false;
-    const consumePendingRuntimeWake = vi.fn(() => {
-      wakeCheckCount += 1;
-      if (wakeCheckCount === 1) {
-        return null;
-      }
-      const pending = runtimeWakePending;
-      runtimeWakePending = false;
-      return pending ? { notifiedAtEpochMs: 1_777_030_000_000 } : null;
-    });
-    const workspaceSnapshotDirectPuts = vi.fn(() => {
-      runtimeWakePending = true;
-    });
+    const workspaceSnapshotDirectPuts = vi.fn();
     const workspaceSnapshotUploads = new Map<string, WorkspaceSnapshotUpload>();
     const options = createHostedWorkspaceRuntimeBridgeJobOptions({
-      consumePendingRuntimeWake,
       platform: createPlatform({
         onWorkspaceSnapshotDirectPut: workspaceSnapshotDirectPuts,
         putArtifact,
@@ -1644,7 +1599,7 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
       readCurrentLease: () => {
         leaseReadCount += 1;
         return {
-          attemptId: "attempt_1",
+          attemptId: leaseReadCount === 3 ? "attempt_stale" : "attempt_1",
           leaseGeneration: "4",
           userId: "member_1",
           workspaceVersion: "7",
@@ -1661,9 +1616,10 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     });
 
     await expect(options.createCheckpointSnapshot(createCheckpointInput("idle_shutdown")))
-      .rejects.toBeInstanceOf(HostedRuntimeCheckpointInterruptedByWakeError);
+      .rejects.toThrow(
+        "Hosted runtime bridge checkpoint lease validation failed before_web_checkpoint.",
+      );
 
-    expect(consumePendingRuntimeWake).toHaveBeenCalledTimes(2);
     expect(leaseReadCount).toBe(3);
     expect(workspaceSnapshotDirectPuts).toHaveBeenCalledOnce();
     expect(workspaceSnapshotUploads.size).toBe(0);
@@ -1681,7 +1637,6 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
       eventCode: "checkpoint.snapshot_failed",
       redactedJson: expect.objectContaining({
         errorCode: "checkpoint_error",
-        errorCodeDetail: "runtime_wake_during_checkpoint",
         leaseCheckCount: 3,
         snapshotDirectR2PresignElapsedMs: expect.any(Number),
         snapshotDirectR2PutElapsedMs: expect.any(Number),

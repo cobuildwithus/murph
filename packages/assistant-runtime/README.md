@@ -13,6 +13,7 @@ Current responsibilities:
   forwarded env profiles, platform-only runtime config, typed resolved config,
   typed parser toolchain validation, commit timeout, and child-env projection helpers
 - keep hosted execution local-runtime-first: normal hosted turns write mailbox and assistant input state into the warm container, may defer intermediate foreground checkpoints, and keep dirty state dirty until the runtime-owned idle/scheduled-wake `idle_shutdown` checkpoint succeeds
+- accept a committed valid checkpoint's optional `conversationInputAhead` observation, import that durable conversation input immediately while the invocation remains live, and avoid post-upload snapshot discard or metadata-only shutdown resnapshot
 - collect and deliver due hosted side effects from live container state without waiting for foreground hosted workspace checkpointing
 - seed the hosted signup onboarding follow-up automation after successful signup welcome delivery; its first run is deferred until the next local day, then the scheduled assistant checks onboarding resume context and archives the automation once onboarding is complete
 - export sanitized pending assistant-runtime issue records through the injected host platform after commit instead of persisting raw hosted diagnostics in the worker
@@ -42,6 +43,32 @@ they are not a hidden runtime-only admission path for Codex. Prompt construction
 reads the staged assistant input event and its sanitized vault-relative
 attachment evidence refs;
 it does not call inbox projection at prompt time.
+
+The checkpoint response's `conversationInputAhead` field is transient
+coordination, not durable runtime state. Web has already committed the valid
+workspace snapshot, redacted watermarks, and requested wake projection as one
+workspace-version CAS prefix.
+If shutdown has begun, this package leaves the newer mailbox row to the durable
+web/Temporal reconciliation path instead of consuming a local wake and creating
+a second metadata-only snapshot. If input was already imported and staged before
+the shutdown yield, its real dirty checkpoint carries a due `assistant` wake so
+restore cannot strand the staged turn. Bare wake notifications and no-work
+imports do not create that wake or another checkpoint. Runtime/parser handling
+for an old web deployment's `foreground_pending` response remains rollout
+compatibility only.
+
+Invocation results may include the positive-only
+`immediateRecheckRequested: true` edge when this invocation produced a default
+or retention schedule, committed it, and did not service it. The runtime tracks
+only invocation-local exact wake keys: presenting a wake removes its key, while
+a same-key continuation adds it again. Inherited or attempted no-progress wakes
+do not emit the edge on the ordinary runtime result path, and known future
+mailbox retry continuations stay deferred until their retry time. If the
+Cloudflare caller loses that result after explicit inactive-container proof, it
+may conservatively reconstruct the edge for a recovered due committed wake
+because invocation-local provenance is no longer available. The edge is never
+checkpointed; Temporal re-reads the durable workspace and mailbox facts before
+acting.
 
 Current non-goals:
 
