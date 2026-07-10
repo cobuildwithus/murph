@@ -1323,6 +1323,33 @@ export async function sendAssistantMessageLocal(
           sessionId: providerResult.session.sessionId,
         })
 
+        const resolvedFinalReplyDeliveryContext =
+          typeof providerResult.responseDeliveryContextOrdinal === 'number'
+            ? resolveAssistantReplyDeliveryContextForSegment({
+                contexts: replyDeliveryContexts,
+                deliveryContextOrdinal:
+                  providerResult.responseDeliveryContextOrdinal,
+              })
+            : {
+                context: null,
+                invalidDeliveryContextOrdinal: null,
+              }
+        if (
+          resolvedFinalReplyDeliveryContext.invalidDeliveryContextOrdinal !==
+          null
+        ) {
+          throw new VaultCliError(
+            'ASSISTANT_DELIVERY_CONTEXT_ORDINAL_INVALID',
+            'Assistant final reply referenced an invalid delivery context ordinal.',
+          )
+        }
+        const finalReplyInput = resolvedFinalReplyDeliveryContext.context
+          ? applyAssistantReplyDeliveryContext({
+              context: resolvedFinalReplyDeliveryContext.context,
+              input: currentInput,
+            })
+          : currentInput
+
         turnInputController.close()
         await runtimeState.turns.acceptedInputs.updateAdmissionState({
           admissionState: 'commit-started',
@@ -1399,7 +1426,7 @@ export async function sendAssistantMessageLocal(
           rawFinalResponseText === null
             ? null
             : resolveAssistantPersistedReplyText({
-                messageInput: currentInput,
+                messageInput: finalReplyInput,
                 rawResponse: rawFinalResponseText,
                 session: currentSession,
                 sharedPlan,
@@ -1517,7 +1544,7 @@ export async function sendAssistantMessageLocal(
         const deliveryOutcome =
           finalResponseText !== null
             ? await dispatchAssistantReply({
-                input: currentInput,
+                input: finalReplyInput,
                 media: providerResult.responseMedia ?? [],
                 response: rawFinalResponseText ?? '',
                 session: deliverySession,
@@ -1531,7 +1558,7 @@ export async function sendAssistantMessageLocal(
         const finalReplyDeliveryFields =
           finalResponseText !== null
             ? resolveAssistantCurrentAudienceDeliveryFields({
-                input: currentInput,
+                input: finalReplyInput,
                 session: deliveryOutcome.session,
                 sharedPlan,
               })

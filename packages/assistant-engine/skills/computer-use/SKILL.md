@@ -212,6 +212,14 @@ bounded action at a time and re-read page state whenever the result affects the
 next step. Verify the requested result on the site; a click is not completion.
 Finish the run with the correct outcome.
 
+Treat browser capability as something to test, not guess. For an authorized
+task, try the normal Playwright interaction and one safe locator or keyboard
+alternative before declaring an ordinary control or expected, user-requested
+document retrieval impossible. For reversible, same-shape retrievals, continue
+only across the bounded requested set and verify each result; use OS-control only
+under its fallback rule. This does not authorize bypassing a CAPTCHA, access
+control, rate limit, route guard, private-input boundary, or unexpected download.
+
 Do not repeat a click because a page seems slow. Wait for a specific state or
 inspect current page state first. For side-effecting clicks such as add-to-cart, booking, checkout,
 or final submit buttons, prefer one click followed by a specific confirmation,
@@ -334,7 +342,9 @@ clinical decision.
 
 - **Expired login or one-time code:** pause for secure handoff; do not ask for
   secrets in chat. Resume the same run with `computer_open`.
-- **CAPTCHA or bot check:** pause for takeover. Do not bypass it.
+- **CAPTCHA or bot check:** first verify it is a real challenge rather than an
+  ordinary cookie banner, modal, or unfamiliar control. If it is real, pause
+  for takeover. Do not bypass it.
 - **Wrong account or family member:** stop before exposing or changing data;
   ask the user to select the correct account privately.
 - **Location or timezone drift:** verify the displayed location and timezone
