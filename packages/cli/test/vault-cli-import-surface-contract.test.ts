@@ -110,6 +110,12 @@ const scopedImportSurfaceProbes: readonly ScopedImportSurfaceProbe[] = [
     // Measured 280 resolved modules on 2026-06-11.
     maxResolvedModules: 365,
   },
+  {
+    args: ['condition', 'list', '--format', 'json'],
+    // Measured 222 resolved modules on 2026-07-10 after scoping the family
+    // and deferring its typed-save core import. Ceiling = measured + 30%.
+    maxResolvedModules: 289,
+  },
 ]
 
 const lazyOptionalDependencyPackageNames = [
@@ -308,6 +314,27 @@ async function normalizeResolvedPackageNames(
   return resolvedPackageNames
 }
 
+function assertResolvedModuleFilesAbsent(
+  resolvedModuleUrls: readonly string[],
+  forbiddenBaseNames: readonly string[],
+  probeLabel: string,
+): void {
+  const resolvedBaseNames = new Set(
+    resolvedModuleUrls
+      .filter((url) => url.startsWith('file:'))
+      .map((url) => path.basename(fileURLToPath(url))),
+  )
+  const eagerlyResolvedFiles = forbiddenBaseNames.filter((baseName) =>
+    resolvedBaseNames.has(baseName),
+  )
+
+  assert.deepEqual(
+    eagerlyResolvedFiles,
+    [],
+    `probe \`${probeLabel}\` must not eagerly resolve these implementation files: ${forbiddenBaseNames.join(', ')}`,
+  )
+}
+
 test(
   'scoped vault-cli invocations resolve only contract-approved packages',
   async () => {
@@ -355,6 +382,11 @@ test(
         result.resolvedModuleUrls.length > 0,
         true,
         `expected the probe \`${probeLabel}\` to record resolved modules`,
+      )
+      assertResolvedModuleFilesAbsent(
+        result.resolvedModuleUrls,
+        ['assistant-codex.js'],
+        probeLabel,
       )
 
       // Normalize before the ceiling assertion so a ceiling failure can say
@@ -422,6 +454,47 @@ test(
 )
 
 test(
+  'built --version stays off the full CLI and Incur graphs',
+  async () => {
+    await ensureCliRuntimeArtifacts()
+
+    const result = await runScopedImportSurfaceProbe(['--version'])
+    assert.equal(result.exitCode, 0, `expected --version to succeed, got:\n${result.output}`)
+    assert.match(result.output, /^\d+\.\d+\.\d+\n$/u)
+    assertResolvedModuleFilesAbsent(
+      result.resolvedModuleUrls,
+      [
+        'assistant-codex.js',
+        'vault-cli.js',
+        'vault-cli-command-manifest.js',
+        'vault-cli-command-routing.js',
+        'vault-cli-shell.js',
+        'vault-cli-vault-context.js',
+      ],
+      '--version',
+    )
+
+    const resolvedPackageNames = await normalizeResolvedPackageNames(
+      result.resolvedModuleUrls,
+    )
+    assert.equal(
+      resolvedPackageNames.has('incur'),
+      false,
+      'built --version must not resolve Incur',
+    )
+    // Measured 15 resolved modules on 2026-07-10. The small fixed ceiling
+    // leaves roughly 30% headroom while still catching a command-graph leak.
+    assert.equal(
+      result.resolvedModuleUrls.length <= 20,
+      true,
+      `built --version resolved ${result.resolvedModuleUrls.length} modules, above its ceiling of 20. ` +
+        'Keep the exact version path off the full CLI, command routing, and formatting graphs.',
+    )
+  },
+  IMPORT_SURFACE_PROBE_TIMEOUT_MS,
+)
+
+test(
   'ordinary built JSON commands do not resolve lazy optional incur dependencies',
   async () => {
     await ensureCliRuntimeArtifacts()
@@ -445,6 +518,11 @@ test(
 
     const jsonResolvedPackages = await normalizeResolvedPackageNames(
       jsonResult.resolvedModuleUrls,
+    )
+    assertResolvedModuleFilesAbsent(
+      jsonResult.resolvedModuleUrls,
+      ['assistant-codex.js'],
+      '--no-config exercise facets --format json',
     )
     const eagerlyResolvedLazyPackages = lazyOptionalDependencyPackageNames.filter(
       (packageName) => jsonResolvedPackages.has(packageName),

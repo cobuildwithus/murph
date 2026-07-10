@@ -46,6 +46,10 @@ function mockCliActionModules(input: {
     serve: ReturnType<typeof vi.fn>;
   };
   installVaultCliLlmsNormalizer?: ReturnType<typeof vi.fn>;
+  onCreateVaultCliShell?: (
+    commandName: string,
+    options: { expectedSkillHash?: string } | undefined,
+  ) => void;
   onInstallVaultCliVaultContext?: (context: Record<string, unknown>) => void;
   onCreateVaultCliWithOptions?: (input: Record<string, unknown>) => void;
   operatorConfigModule: Record<string, unknown>;
@@ -61,7 +65,15 @@ function mockCliActionModules(input: {
     }),
   }));
   vi.doMock("../src/vault-cli-shell.js", () => ({
-    createVaultCliShell: vi.fn(() => input.cli),
+    createVaultCliShell: vi.fn(
+      (
+        commandName: string,
+        options: { expectedSkillHash?: string } | undefined,
+      ) => {
+        input.onCreateVaultCliShell?.(commandName, options);
+        return input.cli;
+      },
+    ),
   }));
   vi.doMock("../src/vault-cli-command-routing.js", () => ({
     registerScopedVaultCliCommand:
@@ -222,41 +234,24 @@ test("installSqliteExperimentalWarningFilter is idempotent", () => {
   assert.equal(process.emitWarning, wrappedEmitWarning);
 });
 
-test("runMurphCliAction lets Incur handle --version on the full CLI", async () => {
-  const serve = vi.fn(async () => undefined);
-  let createdFullCli = false;
-
-  mockCliActionModules({
-    cli: { serve },
-    onCreateVaultCliWithOptions: () => {
-      createdFullCli = true;
-    },
-    operatorConfigModule: {
-      expandConfiguredVaultPath: vi.fn(),
-      resolveDefaultVault: vi.fn(async () => "/vaults/default"),
-      resolveEffectiveTopLevelToken: vi.fn(() => null),
-      resolveOperatorHomeDirectory: vi.fn(() => "/operator-home"),
-    },
-    setupCliModule: {
-      createSetupCli: vi.fn(),
-      formatSetupWearableLabel: vi.fn((value: string) => value),
-      listSetupPendingWearables: vi.fn(() => []),
-      listSetupReadyWearables: vi.fn(() => []),
-      resolveSetupPostLaunchAction: vi.fn(() => null),
-    },
+test("runMurphCliAction prints --version through the requested stdout without importing command graphs", async () => {
+  const stdout = vi.fn();
+  const exit = vi.fn();
+  vi.doMock("../src/vault-cli.js", () => {
+    throw new Error("vault CLI graph should not be imported for --version");
+  });
+  vi.doMock("@murphai/setup-cli/setup-cli", () => {
+    throw new Error("setup CLI should not be imported for --version");
+  });
+  vi.doMock("@murphai/operator-config/operator-config", () => {
+    throw new Error("operator config should not be imported for --version");
   });
 
-  await runMurphCliAction(["--version"]);
+  await runMurphCliAction(["--version"], { exit, stdout });
 
-  assert.equal(createdFullCli, true);
-  assert.deepEqual(serve.mock.calls, [
-    [
-      ["--version"],
-      {
-        env: process.env,
-      },
-    ],
-  ]);
+  assert.equal(stdout.mock.calls.length, 1);
+  assert.match(stdout.mock.calls[0]?.[0] ?? "", /^\d+\.\d+\.\d+\n$/u);
+  assert.equal(exit.mock.calls.length, 0);
 });
 
 test("runMurphCliAction scopes known root commands without creating the full CLI", async () => {
@@ -325,17 +320,15 @@ test("runMurphCliAction scopes known root commands without creating the full CLI
   ]);
 });
 
-test("runMurphCliAction uses the full CLI when Incur skills are installed", async () => {
+test("runMurphCliAction keeps scoped routing when Incur skills are installed", async () => {
   const tempRoot = await mkdtemp(path.join(tmpdir(), "murph-cli-entry-"));
   const previousXdgDataHome = process.env.XDG_DATA_HOME;
   const dataHome = path.join(tempRoot, "data");
   const skillPath = path.join(tempRoot, "skills", "murph-device");
   const serve = vi.fn(async () => undefined);
-  const registerScopedVaultCliCommand = vi.fn(async () => {
-    throw new Error("scoped command registration should not run with installed Incur skills");
-  });
+  const registerScopedVaultCliCommand = vi.fn(async () => undefined);
   const resolveDefaultVault = vi.fn(async () => "/vaults/default");
-  let createdFullCli = false;
+  let scopedSkillHash: string | undefined;
 
   try {
     process.env.XDG_DATA_HOME = dataHome;
@@ -354,7 +347,11 @@ test("runMurphCliAction uses the full CLI when Incur skills are installed", asyn
     mockCliActionModules({
       cli: { serve },
       onCreateVaultCliWithOptions: () => {
-        createdFullCli = true;
+        throw new Error("installed Incur skills should not force the full CLI graph");
+      },
+      onCreateVaultCliShell: (commandName, options) => {
+        assert.equal(commandName, "vault-cli");
+        scopedSkillHash = options?.expectedSkillHash;
       },
       operatorConfigModule: {
         expandConfiguredVaultPath: vi.fn(),
@@ -373,8 +370,15 @@ test("runMurphCliAction uses the full CLI when Incur skills are installed", asyn
 
     await runMurphCliAction(["device", "account", "list"]);
 
-    assert.equal(createdFullCli, true);
-    assert.equal(registerScopedVaultCliCommand.mock.calls.length, 0);
+    assert.match(scopedSkillHash ?? "", /^[a-f0-9]{16}$/u);
+    assert.deepEqual(registerScopedVaultCliCommand.mock.calls, [
+      [
+        {
+          cli: { serve },
+          root: "device",
+        },
+      ],
+    ]);
     assert.deepEqual(resolveDefaultVault.mock.calls, [["/operator-home"]]);
     assert.deepEqual(serve.mock.calls, [
       [
@@ -602,8 +606,8 @@ test("runMurphCliAction records the active-vault message when murph has no confi
 
   mockCliActionModules({
     cli: { serve },
-    onCreateVaultCliWithOptions: (options) => {
-      vaultContextRef.value = options.vaultContext as {
+    onInstallVaultCliVaultContext: (context) => {
+      vaultContextRef.value = context as {
         current: string | null;
         missingVaultMessage: string | null;
       };
