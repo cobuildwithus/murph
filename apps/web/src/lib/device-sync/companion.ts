@@ -15,7 +15,49 @@ export const COMPANION_DEVICE_SYNC_PROVIDER = "junction";
 const COMPANION_METADATA_STRING_MAX_LENGTH = 200;
 const COMPANION_SDK_VERSION_MAX_ENTRIES = 10;
 const COMPANION_AUTH_DIAGNOSTIC_VERSION_PATTERN = /^[0-9]{1,3}(?:\.[0-9]{1,3}){1,3}$/u;
-const COMPANION_AUTH_DIAGNOSTIC_PROVIDER_CODE_PATTERN = /^[a-z0-9_]{1,64}$/u;
+const COMPANION_AUTH_DIAGNOSTIC_PROVIDER_CODES = new Set([
+  "authentication_failure",
+  "bad_email",
+  "bad_request",
+  "custom_auth_provider_returned_no_token",
+  "email_not_found",
+  "embedded_wallet_failure",
+  "expired_code",
+  "failure_during_authentication",
+  "forbidden",
+  "incorrect_credentials_custom_access_token",
+  "incorrect_credentials_email",
+  "incorrect_credentials_oauth",
+  "incorrect_credentials_passkey",
+  "incorrect_credentials_phone",
+  "incorrect_credentials_siwe",
+  "incorrect_credentials_siws",
+  "incorrect_credentials_unknown",
+  "initialization_failed",
+  "invalid_code",
+  "invalid_email",
+  "invalid_jwt",
+  "invalid_native_app_id",
+  "invalid_native_app_identifier",
+  "invalid_native_client",
+  "invalid_phone",
+  "invalid_request",
+  "no_custom_auth_provider_configured",
+  "not_found",
+  "not_logged_in",
+  "passkey_authentication_failed",
+  "passkey_creation_failed",
+  "passkey_no_credentials",
+  "passkey_user_cancelled",
+  "phone_not_found",
+  "rate_limit_exceeded",
+  "rate_limited",
+  "service_unavailable",
+  "timeout",
+  "too_many_requests",
+  "unauthorized",
+  "unavailable",
+]);
 const COMPANION_AUTH_DIAGNOSTIC_ALLOWED_KEYS = new Set([
   "appVersion",
   "diagnosticCode",
@@ -156,13 +198,9 @@ export function validateCompanionAuthDiagnosticRequestBody(
 
 function readOptionalProviderErrorCode(body: Record<string, unknown>): string | null {
   const value = body.providerErrorCode;
-  if (value === undefined || value === null) {
-    return null;
-  }
-  if (typeof value !== "string" || !COMPANION_AUTH_DIAGNOSTIC_PROVIDER_CODE_PATTERN.test(value)) {
-    throw companionRequestInvalid("providerErrorCode must be a safe machine identifier.");
-  }
-  return value;
+  return typeof value === "string" && COMPANION_AUTH_DIAGNOSTIC_PROVIDER_CODES.has(value)
+    ? value
+    : null;
 }
 
 function rejectUnknownAuthDiagnosticKeys(body: Record<string, unknown>): void {

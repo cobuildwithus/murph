@@ -350,7 +350,13 @@ describe("device sync companion routes", () => {
       "contains-hyphens",
       "contains spaces",
       "x".repeat(65),
-    ])("rejects unsafe provider machine code %s without logging it", async (providerErrorCode) => {
+      "123456",
+      "otp_654321",
+      "hbm_abc123xyz",
+      "14155552671",
+      "hiv_positive",
+      "unexpected_provider_error",
+    ])("drops unsupported provider machine code %s without logging it", async (providerErrorCode) => {
       const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
 
       const response = await authDiagnosticsRoute.POST(authDiagnosticsRequest({
@@ -362,12 +368,37 @@ describe("device sync companion routes", () => {
         stage: "send_code",
       }));
 
-      expect(response.status).toBe(400);
-      expect(warnSpy).not.toHaveBeenCalledWith(
+      expect(response.status).toBe(200);
+      expect(warnSpy).toHaveBeenCalledWith(
         "Companion auth diagnostic.",
-        expect.anything(),
+        expect.objectContaining({ providerErrorCode: null }),
       );
       expect(JSON.stringify(warnSpy.mock.calls)).not.toContain(providerErrorCode);
+    });
+
+    it.each([
+      ["absent", undefined],
+      ["null", null],
+      ["number", 123456],
+      ["object", { code: "invalid_code" }],
+      ["array", ["invalid_code"]],
+    ])("drops %s provider error code values", async (_label, providerErrorCode) => {
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+      const response = await authDiagnosticsRoute.POST(authDiagnosticsRequest({
+        diagnosticCode: "privy_unknown",
+        errorKind: "provider",
+        method: "email",
+        providerErrorCode,
+        retryable: true,
+        stage: "send_code",
+      }));
+
+      expect(response.status).toBe(200);
+      expect(warnSpy).toHaveBeenCalledWith(
+        "Companion auth diagnostic.",
+        expect.objectContaining({ providerErrorCode: null }),
+      );
     });
 
     it("drops an unsafe app version without losing the diagnostic", async () => {

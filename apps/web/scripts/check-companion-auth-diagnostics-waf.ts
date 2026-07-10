@@ -1,5 +1,3 @@
-import { spawnSync } from "node:child_process";
-import { dirname, resolve } from "node:path";
 import { argv, env, exit } from "node:process";
 import { fileURLToPath } from "node:url";
 
@@ -9,28 +7,28 @@ export const COMPANION_AUTH_DIAGNOSTICS_ENABLED_ENV =
   "MURPH_COMPANION_AUTH_DIAGNOSTICS_ENABLED";
 export const COMPANION_AUTH_DIAGNOSTICS_WAF_RULE_ENV =
   "MURPH_COMPANION_AUTH_DIAGNOSTICS_WAF_RULE_ID";
+const VERCEL_PROJECT_ID_ENV = "HOSTED_WEB_VERCEL_PROJECT_ID";
+const VERCEL_TEAM_ID_ENV = "HOSTED_WEB_VERCEL_TEAM_ID";
+const VERCEL_TOKEN_ENV = "HOSTED_WEB_VERCEL_TOKEN";
+const VERCEL_FIREWALL_CONFIG_URL = "https://api.vercel.com/v1/security/firewall/config";
 
 const REQUIRED_RATE_LIMIT = 30;
 const REQUIRED_WINDOW_SECONDS = 60;
 const REQUIRED_ALGORITHM = "fixed_window";
 const REQUIRED_RATE_LIMIT_KEY = "ip";
 
-interface WafOverviewCommand {
-  args: string[];
-  command: string;
-  cwd: string;
-}
-
 type JsonRecord = Record<string, unknown>;
 
-export function buildCompanionAuthDiagnosticsWafOverviewCommand(
-  appDir = resolve(dirname(fileURLToPath(import.meta.url)), ".."),
-): WafOverviewCommand {
-  return {
-    args: ["exec", "vercel", "firewall", "overview", "--json"],
-    command: "pnpm",
-    cwd: appDir,
-  };
+export function buildCompanionAuthDiagnosticsWafConfigUrl(
+  projectId: string,
+  teamId: string | undefined,
+): string {
+  const url = new URL(VERCEL_FIREWALL_CONFIG_URL);
+  url.searchParams.set("projectId", projectId);
+  if (teamId) {
+    url.searchParams.set("teamId", teamId);
+  }
+  return url.toString();
 }
 
 export function validateCompanionAuthDiagnosticsWafOverview(
@@ -51,10 +49,18 @@ export function validateCompanionAuthDiagnosticsWafOverview(
     issues.push("active firewall configuration is disabled");
   }
 
-  const rule = findActiveRule(active, ruleRef);
+  const rules = readRules(active);
+  const ruleIndex = rules.findIndex((rule) => (
+    rule.id === ruleRef || rule.name === ruleRef
+  ));
+  const rule = ruleIndex < 0 ? null : rules[ruleIndex];
   if (rule === null) {
     issues.push(`missing active rule ${ruleRef}`);
     return issues;
+  }
+  const firstActiveRuleIndex = rules.findIndex((candidate) => candidate.active === true);
+  if (rule.active === true && ruleIndex !== firstActiveRuleIndex) {
+    issues.push("rule must be the first active custom rule");
   }
 
   if (rule.active !== true) {
@@ -73,13 +79,6 @@ export function validateCompanionAuthDiagnosticsWafOverview(
   }
 
   return issues;
-}
-
-function findActiveRule(active: JsonRecord, ruleRef: string): JsonRecord | null {
-  const rules = readRules(active);
-  return rules.find((rule) => (
-    rule.id === ruleRef || rule.name === ruleRef
-  )) ?? null;
 }
 
 function readRules(active: JsonRecord): JsonRecord[] {
@@ -137,7 +136,7 @@ function isRecord(value: unknown): value is JsonRecord {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function main(): void {
+async function main(): Promise<void> {
   if (env[COMPANION_AUTH_DIAGNOSTICS_ENABLED_ENV] !== "1") {
     console.log("Companion auth diagnostics WAF preflight skipped: route not enabled.");
     return;
@@ -150,20 +149,26 @@ function main(): void {
     );
   }
 
-  const command = buildCompanionAuthDiagnosticsWafOverviewCommand();
-  const result = spawnSync(command.command, command.args, {
-    cwd: command.cwd,
-    encoding: "utf8",
-    stdio: ["ignore", "pipe", "pipe"],
+  const projectId = requireEnvironmentVariable(VERCEL_PROJECT_ID_ENV);
+  const token = requireEnvironmentVariable(VERCEL_TOKEN_ENV);
+  const response = await fetch(buildCompanionAuthDiagnosticsWafConfigUrl(
+    projectId,
+    env[VERCEL_TEAM_ID_ENV]?.trim() || undefined,
+  ), {
+    cache: "no-store",
+    headers: {
+      Accept: "application/json",
+      Authorization: `Bearer ${token}`,
+    },
   });
 
-  if (result.status !== 0) {
+  if (!response.ok) {
     throw new Error(
-      `Unable to inspect Vercel WAF rule ${ruleRef}: ${result.stderr || result.stdout || "command failed"}`,
+      `Unable to inspect Vercel WAF rule ${ruleRef}: Vercel API returned ${response.status}.`,
     );
   }
 
-  const parsed = JSON.parse(result.stdout) as unknown;
+  const parsed = await response.json() as unknown;
   const issues = validateCompanionAuthDiagnosticsWafOverview(parsed, ruleRef);
   if (issues.length > 0) {
     throw new Error(
@@ -174,11 +179,17 @@ function main(): void {
   console.log("Companion auth diagnostics WAF preflight passed.");
 }
 
+function requireEnvironmentVariable(name: string): string {
+  const value = env[name]?.trim();
+  if (!value) {
+    throw new Error(`${name} is required when ${COMPANION_AUTH_DIAGNOSTICS_ENABLED_ENV}=1.`);
+  }
+  return value;
+}
+
 if (argv[1] && fileURLToPath(import.meta.url) === argv[1]) {
-  try {
-    main();
-  } catch (error) {
+  void main().catch((error: unknown) => {
     console.error(error instanceof Error ? error.message : error);
     exit(1);
-  }
+  });
 }

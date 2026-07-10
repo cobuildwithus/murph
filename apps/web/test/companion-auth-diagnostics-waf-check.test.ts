@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  buildCompanionAuthDiagnosticsWafOverviewCommand,
+  buildCompanionAuthDiagnosticsWafConfigUrl,
   COMPANION_AUTH_DIAGNOSTICS_PATH,
   validateCompanionAuthDiagnosticsWafOverview,
 } from "../scripts/check-companion-auth-diagnostics-waf";
@@ -108,6 +108,36 @@ describe("companion auth diagnostics WAF preflight", () => {
     expect(validateCompanionAuthDiagnosticsWafOverview(missingRuleValidity, RULE_REF)).toContain(
       "rule is invalid",
     );
+  });
+
+  it("rejects a diagnostics rule that is not the first custom rule", () => {
+    const overview = validOverview();
+    (overview.active as { rules: unknown[] }).rules.unshift({
+      action: { mitigate: { action: "bypass" } },
+      active: true,
+      conditionGroup: [{ conditions: [] }],
+      id: "bypass_before_diagnostics",
+      name: "Broad bypass",
+      valid: true,
+    });
+
+    expect(validateCompanionAuthDiagnosticsWafOverview(overview, RULE_REF)).toContain(
+      "rule must be the first active custom rule",
+    );
+  });
+
+  it("ignores disabled rules before the diagnostics rule", () => {
+    const overview = validOverview();
+    (overview.active as { rules: unknown[] }).rules.unshift({
+      action: { mitigate: { action: "bypass" } },
+      active: false,
+      conditionGroup: [{ conditions: [] }],
+      id: "disabled_bypass_before_diagnostics",
+      name: "Disabled bypass",
+      valid: true,
+    });
+
+    expect(validateCompanionAuthDiagnosticsWafOverview(overview, RULE_REF)).toEqual([]);
   });
 
   it("rejects legacy, extra, or non-exact condition groups", () => {
@@ -256,17 +286,18 @@ describe("companion auth diagnostics WAF preflight", () => {
     );
   });
 
-  it("runs Vercel overview from the hosted web app directory", () => {
-    const command = buildCompanionAuthDiagnosticsWafOverviewCommand();
-
-    expect(command.command).toBe("pnpm");
-    expect(command.args).toEqual([
-      "exec",
-      "vercel",
-      "firewall",
-      "overview",
-      "--json",
-    ]);
-    expect(command.cwd.endsWith("/apps/web")).toBe(true);
+  it("builds the project-scoped Vercel firewall configuration URL", () => {
+    expect(buildCompanionAuthDiagnosticsWafConfigUrl(
+      "project_test",
+      "team_test",
+    )).toBe(
+      "https://api.vercel.com/v1/security/firewall/config?projectId=project_test&teamId=team_test",
+    );
+    expect(buildCompanionAuthDiagnosticsWafConfigUrl(
+      "project with spaces",
+      undefined,
+    )).toBe(
+      "https://api.vercel.com/v1/security/firewall/config?projectId=project+with+spaces",
+    );
   });
 });

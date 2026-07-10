@@ -2299,7 +2299,32 @@ describe("sanitizeHostedRuntimeDiagnosticText", () => {
       sanitizeHostedRuntimeErrorText(
         `${proxyAuthorizationHeader} ${digestScheme} username="user", response="token" rejected`,
       ),
-    ).toBe(`${proxyAuthorizationHeader} [redacted] rejected`);
+    ).toBe(`${proxyAuthorizationHeader} [redacted]`);
+    expect(
+      sanitizeHostedRuntimeErrorText(
+        `${authorizationHeader} ${digestScheme} username = "user", response = "token" rejected`,
+      ),
+    ).toBe(`${authorizationHeader} [redacted]`);
+    expect(
+      sanitizeHostedRuntimeErrorText(
+        `${authorizationHeader} AWS4-HMAC-SHA256 Credential=test; SignedHeaders=host;x-test; Signature=abcdef rejected`,
+      ),
+    ).toBe(`${authorizationHeader} [redacted]`);
+    expect(
+      sanitizeHostedRuntimeErrorText(
+        `Request failed\n${authorizationHeader} Basic ${basicCredential}\nRetryable`,
+      ),
+    ).toBe(`Request failed ${authorizationHeader} [redacted] Retryable`);
+    expect(
+      sanitizeHostedRuntimeErrorText(
+        `Request failed\r${authorizationHeader} Basic ${basicCredential}\rRetryable`,
+      ),
+    ).toBe(`Request failed ${authorizationHeader} [redacted] Retryable`);
+    expect(
+      sanitizeHostedRuntimeErrorText(
+        `Proxy-${"Author"}ization=${basicCredential} refresh_token=refresh-secret`,
+      ),
+    ).toBe("Proxy-Authorization=[redacted] refresh_token=[redacted]");
     expect(
       sanitizeHostedRuntimeDiagnosticText(
         `Privy request failed: ${authorizationHeader} Basic ${basicCredential}`,
