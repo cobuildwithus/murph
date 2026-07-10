@@ -117,6 +117,11 @@ Use this priority order:
 2. A saved user preference or an existing relationship corroborated by canonical
    memory, connected Gmail or Google Calendar evidence, or an authenticated
    provider, pharmacy, optical, retailer, grocery, or meal-service account.
+   For retail products, the strongest such relationship is the marketplace
+   where the user is already signed in, usually Amazon. A brand-site account,
+   saved cart, or prior brand-direct order on its own identifies the product and
+   relationship, not the storefront; it does not outrank that signed-in
+   marketplace.
 3. The official provider, health-system, insurer, pharmacy, manufacturer,
    restaurant, or service website.
 4. An authorized retailer or reputable marketplace, scheduling service, or
@@ -128,15 +133,19 @@ leads, not authority. Verify the domain and final destination before entering
 personal information. Prefer the official portal for clinical, prescription,
 insurance, records, and billing tasks.
 
-Naming a brand or product picks what to buy, not where to buy it. "Order the
-BrandX magnesium" identifies the product; it is not a request to check out on
-BrandX's website. For retail products, buy through a retailer where the user is
-already signed in (often Amazon) instead of a one-off brand or product site
-that needs a fresh checkout. Go to the brand's own store when the user
-explicitly asks for that storefront, when the exact product is not sold there
-by the brand or a verified seller, or when authenticity, subscription terms,
-returns, or total cost materially favor buying direct — and ask one narrow
-preference question when that tradeoff is real.
+Naming a brand or product picks what to buy, not where to buy it. For retail
+products such as supplements, OTC products, equipment, groceries, and meal
+products, buy through a retailer where the user is already signed in: the
+marketplace, usually Amazon, not a brand's own storefront. Keep this default
+even when the brand runs its own store or a prior order or saved cart lives
+there. For retail products, task-specific shopping guidance that starts from a
+supplier or manufacturer is product or specification evidence, not a storefront
+override. Deviate only when the user clearly chooses another storefront in the
+current request, a stored user preference names another storefront, or the exact
+product is not sold on the marketplace by the brand or a verified seller. When
+authenticity, subscription terms, returns, or total cost materially favor buying
+direct, keep the signed-in marketplace as the default and ask one narrow
+preference question; never silently switch storefronts.
 
 On a marketplace, verify the exact product and variant, seller, fulfillment
 party, quantity, one-time versus recurring purchase, total cost, delivery date,

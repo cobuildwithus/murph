@@ -18,6 +18,7 @@ import { Button } from "@/src/components/ui/button";
 import { cn } from "@/src/lib/utils";
 
 import { SettingsStatusLine } from "./connected-account-card";
+import { UpgradeToEdgeButton } from "./hosted-plan-upgrade-button";
 
 const ASSISTANT_MODEL_SETTINGS_URL = "/api/settings/assistant-model";
 const SOL_REQUIRES_EDGE_ERROR_CODE = "ASSISTANT_MODEL_SOL_REQUIRES_EDGE";
@@ -48,6 +49,7 @@ interface AssistantModelSettingsResponse {
 }
 
 interface HostedAssistantModelSettingsProps {
+  canUpgradeToEdge: boolean;
   initialModel: HostedAssistantProductModel;
   solAvailable: boolean;
 }
@@ -57,7 +59,7 @@ export function HostedAssistantModelSettings(
 ) {
   return (
     <HostedAssistantModelSettingsForm
-      key={`${props.initialModel}:${String(props.solAvailable)}`}
+      key={`${props.initialModel}:${String(props.solAvailable)}:${String(props.canUpgradeToEdge)}`}
       {...props}
     />
   );
@@ -77,18 +79,70 @@ function HostedAssistantModelSettingsForm(
 
   if (!solAvailable) {
     return (
-      <div className="flex flex-col gap-2">
-        <div className="rounded-xl border border-border bg-background p-5">
-          <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
-            Default model
-          </p>
-          <p className="mt-1 font-serif text-xl font-semibold tracking-tight text-foreground">
-            GPT-5.6 Terra
-          </p>
-          <p className="mt-1 text-sm text-pretty text-muted-foreground">
-            GPT-5.6 Sol requires an active Edge plan.
-          </p>
+      <div className="flex flex-col gap-4">
+        <p className="text-sm text-pretty text-muted-foreground">
+          Terra is your current model. Edge unlocks GPT-5.6 Sol for harder work.
+        </p>
+
+        <div
+          className="w-full overflow-hidden rounded-xl border border-border bg-background"
+          role="list"
+          aria-label="Available models"
+        >
+          {MODEL_OPTIONS.map((option, index) => {
+            const current = option.model === HOSTED_ASSISTANT_TERRA_MODEL;
+
+            return (
+              <div
+                key={option.model}
+                role="listitem"
+                className={cn(
+                  "flex min-h-24 flex-col items-start gap-4 px-4 py-4 sm:flex-row sm:items-center sm:justify-between",
+                  index > 0 && "border-t border-border",
+                  current && "bg-primary/10",
+                )}
+              >
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="font-serif text-lg font-semibold tracking-tight text-foreground">
+                      {option.name}
+                    </span>
+                    {current ? (
+                      <Badge
+                        variant="outline"
+                        className="h-5 rounded-md px-1.5 font-mono text-[9px] uppercase tracking-[0.12em] text-muted-foreground"
+                      >
+                        Current
+                      </Badge>
+                    ) : (
+                      <Badge
+                        variant="outline"
+                        className="h-5 rounded-md px-1.5 font-mono text-[9px] uppercase tracking-[0.12em] text-muted-foreground"
+                      >
+                        Edge
+                      </Badge>
+                    )}
+                  </div>
+                  <p className="mt-0.5 max-w-2xl text-sm text-pretty text-muted-foreground">
+                    {option.description}
+                  </p>
+                  {!current ? (
+                    <p className="mt-2 text-sm font-medium text-foreground">
+                      {props.canUpgradeToEdge
+                        ? "Upgrade to Edge to unlock GPT-5.6 Sol."
+                        : "Available with an active Edge plan."}
+                    </p>
+                  ) : null}
+                </div>
+
+                {!current && props.canUpgradeToEdge ? (
+                  <UpgradeToEdgeButton>Upgrade to Edge</UpgradeToEdgeButton>
+                ) : null}
+              </div>
+            );
+          })}
         </div>
+
         {status ? (
           <SettingsStatusLine message={status.message} tone={status.tone} />
         ) : null}
@@ -149,7 +203,8 @@ function HostedAssistantModelSettingsForm(
     >
       <p className="text-sm text-pretty text-muted-foreground">
         Choose Murph’s default model. You can switch back at any time. New work
-        uses the change after any current run finishes.
+        uses the change after the current run closes. An idle run can take up
+        to three minutes to close.
       </p>
 
       <fieldset

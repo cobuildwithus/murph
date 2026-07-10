@@ -304,7 +304,11 @@ async function runCodexResponseMediaToolTurn(
   })
 }
 
-async function runCodexTelegramVoiceMemoOnlyTurn() {
+async function runCodexTelegramVoiceMemoOnlyTurn(input: {
+  commentaryText?: string
+  precedingFinalText?: string
+  progressDelivery?: CodexAppServerTurnInput['progressDelivery']
+} = {}) {
   const workingDirectory = await createTempDir('assistant-codex-voice-memo-only-work-')
   const codexHome = await createTempDir('assistant-codex-voice-memo-only-home-')
   const voiceMemoText = 'Voice-only reply.'
@@ -357,6 +361,62 @@ async function runCodexTelegramVoiceMemoOnlyTurn() {
             },
           },
         }))
+
+        if (input.precedingFinalText) {
+          child.stdout.write(jsonLine({
+            method: 'item/completed',
+            params: {
+              item: {
+                id: 'user-before-voice-memo-steer',
+                type: 'user_message',
+                message: 'Answer this first',
+              },
+            },
+          }))
+          child.stdout.write(jsonLine({
+            method: 'item/completed',
+            params: {
+              item: {
+                id: 'assistant-before-voice-memo-steer',
+                type: 'assistant_message',
+                message: input.precedingFinalText,
+              },
+            },
+          }))
+          child.stdout.write(jsonLine({
+            method: 'item/completed',
+            params: {
+              item: {
+                id: 'user-voice-memo-steer',
+                type: 'user_message',
+                message: 'Send that as a voice memo instead',
+              },
+            },
+          }))
+        }
+
+        if (input.commentaryText) {
+          child.stdout.write(jsonLine({
+            method: 'item/agentMessage/delta',
+            params: {
+              delta: input.commentaryText,
+              itemId: 'assistant-voice-memo-commentary',
+              threadId: 'thread-voice-memo-only',
+              turnId: 'turn-voice-memo-only',
+            },
+          }))
+          child.stdout.write(jsonLine({
+            method: 'item/completed',
+            params: {
+              item: {
+                id: 'assistant-voice-memo-commentary',
+                type: 'assistant_message',
+                phase: 'commentary',
+                message: input.commentaryText,
+              },
+            },
+          }))
+        }
 
         child.stdout.write(jsonLine({
           id: 61,
@@ -420,6 +480,7 @@ async function runCodexTelegramVoiceMemoOnlyTurn() {
     codexCommand: 'codex',
     codexHome,
     env,
+    progressDelivery: input.progressDelivery,
     prompt: 'Send only a voice memo',
     sandbox: 'workspace-write',
     voiceMemoRuntime: createVoiceMemoToolRuntimeFromEnv({
@@ -1182,6 +1243,51 @@ describe('assistant codex runtime', () => {
         },
       ],
     })
+  })
+
+  it('keeps commentary internal for a voice-only response', async () => {
+    const commentaryText = 'I’ll record that now.'
+    const progressDelivery = createProgressDeliveryMock()
+
+    const result = await runCodexTelegramVoiceMemoOnlyTurn({
+      commentaryText,
+      progressDelivery,
+    })
+
+    expect(progressDelivery.send).not.toHaveBeenCalled()
+    expect(result.finalMessage).toBe('')
+    expect(result.responseMedia).toEqual([
+      expect.objectContaining({
+        kind: 'voice_memo',
+      }),
+    ])
+  })
+
+  it('keeps a steered voice-only response in the current response segment', async () => {
+    const commentaryText = 'I’ll record that now.'
+    const precedingFinalText = 'Earlier answer.'
+    const progressDelivery = createProgressDeliveryMock()
+
+    const result = await runCodexTelegramVoiceMemoOnlyTurn({
+      commentaryText,
+      precedingFinalText,
+      progressDelivery,
+    })
+
+    expect(progressDelivery.send).not.toHaveBeenCalled()
+    expect(result.finalMessage).toBe('')
+    expect(result.precedingAgentMessageSegments).toEqual([
+      {
+        deliveryContextOrdinal: 0,
+        response: precedingFinalText,
+        media: [],
+      },
+    ])
+    expect(result.responseMedia).toEqual([
+      expect.objectContaining({
+        kind: 'voice_memo',
+      }),
+    ])
   })
 
   it('applies overlapping dynamic media tools in request order', async () => {
@@ -9695,25 +9801,10 @@ describe('assistant codex runtime', () => {
     )
   })
 
-  it('counts commentary progress and progress tool calls against the same model budget', async () => {
+  it('keeps commentary internal and reserves outbound progress for the explicit tool', async () => {
     const workingDirectory = await createTempDir('assistant-codex-commentary-progress-')
-    let sendCount = 0
-    const progressDelivery = {
-      send: vi.fn(async (_text: string, options?: { source?: 'model' | 'system' }) => {
-        sendCount += 1
-        const source = options?.source ?? 'model'
-        return sendCount === 1
-          ? {
-              kind: 'sent' as const,
-              source,
-            }
-          : {
-              kind: 'skipped' as const,
-              reason: 'limit' as const,
-              source,
-            }
-      }),
-    }
+    const onProgress = vi.fn()
+    const progressDelivery = createProgressDeliveryMock()
 
     codexMocks.spawn.mockImplementation(() => {
       const child = new MockChildProcess()
@@ -9775,11 +9866,11 @@ describe('assistant codex runtime', () => {
           expect(messages[4]).toEqual({
             id: 99,
             result: {
-              success: false,
+              success: true,
               contentItems: [
                 {
                   type: 'inputText',
-                  text: 'progress update skipped: progress update limit reached',
+                  text: 'progress update sent',
                 },
               ],
             },
@@ -9817,6 +9908,7 @@ describe('assistant codex runtime', () => {
 
     await expect(
       executeCodexAppServerTurn({
+        onProgress,
         prompt: 'answer with commentary progress',
         progressDelivery,
         workingDirectory,
@@ -9825,16 +9917,20 @@ describe('assistant codex runtime', () => {
       finalMessage: 'Final answer after commentary.',
       sessionId: 'thread-commentary-progress',
     })
-    expect(progressDelivery.send).toHaveBeenNthCalledWith(
-      1,
-      'Reading the report now.',
-      { source: 'model' },
-    )
-    expect(progressDelivery.send).toHaveBeenNthCalledWith(
-      2,
+    expect(progressDelivery.send).toHaveBeenCalledTimes(1)
+    expect(progressDelivery.send).toHaveBeenCalledWith(
       'Checking the saved context now.',
       { source: 'model' },
     )
+    expect(progressDelivery.send).not.toHaveBeenCalledWith(
+      'Reading the report now.',
+      { source: 'model' },
+    )
+    expect(onProgress).toHaveBeenCalledWith(expect.objectContaining({
+      kind: 'message',
+      state: 'completed',
+      text: 'Reading the report now.',
+    }))
   })
 
   it('waits for in-flight current-channel progress before returning the final turn result', async () => {
@@ -9876,19 +9972,11 @@ describe('assistant codex runtime', () => {
               },
             }),
           )
-          child.stdout.write(
-            jsonLine({
-              method: 'item/completed',
-              params: {
-                item: {
-                  id: 'assistant-progress-drain',
-                  type: 'assistant_message',
-                  phase: 'commentary',
-                  message: 'Checking the thread now.',
-                },
-              },
-            }),
-          )
+          writeContextCompactionStarted({
+            child,
+            itemId: 'context-progress-drain',
+            threadId: 'thread-progress-drain',
+          })
           child.stdout.write(
             jsonLine({
               method: 'item/completed',
@@ -9936,14 +10024,14 @@ describe('assistant codex runtime', () => {
       await new Promise((resolve) => setTimeout(resolve, 0))
     }
     expect(progressDelivery.send).toHaveBeenCalledWith(
-      'Checking the thread now.',
-      { source: 'model' },
+      expect.any(String),
+      { required: true, source: 'system' },
     )
 
     await new Promise((resolve) => setTimeout(resolve, 0))
     expect(settled).toBe(false)
 
-    progressSent.resolve(sentProgressResult())
+    progressSent.resolve(sentProgressResult('system'))
     await expect(turnPromise).resolves.toMatchObject({
       finalMessage: 'Final answer after progress.',
       sessionId: 'thread-progress-drain',
@@ -9993,19 +10081,11 @@ describe('assistant codex runtime', () => {
               },
             }),
           )
-          child.stdout.write(
-            jsonLine({
-              method: 'item/completed',
-              params: {
-                item: {
-                  id: 'assistant-progress-drain-failure',
-                  type: 'assistant_message',
-                  phase: 'commentary',
-                  message: 'Checking the thread now.',
-                },
-              },
-            }),
-          )
+          writeContextCompactionStarted({
+            child,
+            itemId: 'context-progress-drain-failure',
+            threadId: 'thread-progress-drain-failure',
+          })
           child.stdout.write(
             jsonLine({
               method: 'turn/completed',
@@ -10042,14 +10122,14 @@ describe('assistant codex runtime', () => {
       await new Promise((resolve) => setTimeout(resolve, 0))
     }
     expect(progressDelivery.send).toHaveBeenCalledWith(
-      'Checking the thread now.',
-      { source: 'model' },
+      expect.any(String),
+      { required: true, source: 'system' },
     )
 
     await new Promise((resolve) => setTimeout(resolve, 0))
     expect(settled).toBe(false)
 
-    progressSent.resolve(sentProgressResult())
+    progressSent.resolve(sentProgressResult('system'))
     const error: unknown = await turnPromise.then(
       () => {
         throw new Error('expected the Codex turn to fail')
@@ -10106,19 +10186,11 @@ describe('assistant codex runtime', () => {
               },
             }),
           )
-          child.stdout.write(
-            jsonLine({
-              method: 'item/completed',
-              params: {
-                item: {
-                  id: 'assistant-progress-drain-timeout',
-                  type: 'assistant_message',
-                  phase: 'commentary',
-                  message: 'Checking the thread now.',
-                },
-              },
-            }),
-          )
+          writeContextCompactionStarted({
+            child,
+            itemId: 'context-progress-drain-timeout',
+            threadId: 'thread-progress-drain-timeout',
+          })
           child.stdout.write(
             jsonLine({
               method: 'item/completed',
@@ -10166,14 +10238,14 @@ describe('assistant codex runtime', () => {
       await new Promise((resolve) => setTimeout(resolve, 0))
     }
     expect(progressDelivery.send).toHaveBeenCalledWith(
-      'Checking the thread now.',
-      { source: 'model' },
+      expect.any(String),
+      { required: true, source: 'system' },
     )
 
     await new Promise((resolve) => setTimeout(resolve, 2_100))
     expect(settled).toBe(false)
 
-    stalledProgress.resolve(sentProgressResult())
+    stalledProgress.resolve(sentProgressResult('system'))
     await expect(turnPromise).resolves.toMatchObject({
       finalMessage: 'Final answer after stalled progress.',
       sessionId: 'thread-progress-drain-timeout',
@@ -13490,6 +13562,11 @@ describe('steered final segments', () => {
 
   async function runScriptedSteeredFinalSegmentsTurn(
     steps: Array<Record<string, unknown> | ScriptedSteeredFinalStep>,
+    input: {
+      onProgress?: CodexAppServerTurnInput['onProgress']
+      onTraceEvent?: CodexAppServerTurnInput['onTraceEvent']
+      progressDelivery?: CodexAppServerTurnInput['progressDelivery']
+    } = {},
   ) {
     const workingDirectory = await createTempDir('assistant-codex-steered-finals-work-')
     const codexHome = await createTempDir('assistant-codex-steered-finals-home-')
@@ -13607,6 +13684,9 @@ describe('steered final segments', () => {
       approvalPolicy: 'never',
       codexCommand: 'codex',
       codexHome,
+      onProgress: input.onProgress,
+      onTraceEvent: input.onTraceEvent,
+      progressDelivery: input.progressDelivery,
       prompt: 'First question',
       sandbox: 'workspace-write',
       workingDirectory,
@@ -13622,7 +13702,73 @@ describe('steered final segments', () => {
     }
   }
 
-  it('keeps final answers completed before a steered user message as preceding messages', async () => {
+  it('returns no final text or outbound progress for a commentary-only turn', async () => {
+    const progressDelivery = createProgressDeliveryMock()
+    const result = await runScriptedSteeredFinalSegmentsTurn([
+      completedItemEvent({
+        id: 'assistant-commentary-only',
+        type: 'assistant_message',
+        message: 'Internal status only.',
+        phase: 'commentary',
+      }),
+    ], { progressDelivery })
+
+    expect(progressDelivery.send).not.toHaveBeenCalled()
+    expect(result.finalMessage).toBe('')
+    expect(result.precedingAgentMessageSegments).toEqual([])
+  })
+
+  it('keeps a pre-steer final when only commentary follows the steer', async () => {
+    const progressDelivery = createProgressDeliveryMock()
+    const retainedMedia = {
+      url: 'https://cdn.example.test/assistant/retained-final.png',
+      alt: 'Retained final image',
+      source: 'retained-final',
+    }
+    const result = await runScriptedSteeredFinalSegmentsTurn([
+      completedItemEvent({
+        id: 'user-1',
+        type: 'user_message',
+        message: 'First question',
+      }),
+      {
+        kind: 'attach-response-media',
+        id: 81,
+        expectedText: '1 response image attached',
+        media: [retainedMedia],
+      },
+      completedItemEvent({
+        id: 'assistant-1',
+        type: 'assistant_message',
+        message: 'Answer one.',
+      }),
+      completedItemEvent({
+        id: 'user-2',
+        type: 'user_message',
+        message: 'One more thought',
+      }),
+      completedItemEvent({
+        id: 'assistant-2-commentary',
+        type: 'assistant_message',
+        message: 'Considering that.',
+        phase: 'commentary',
+      }),
+    ], { progressDelivery })
+
+    expect(progressDelivery.send).not.toHaveBeenCalled()
+    expect(result.finalMessage).toBe('Answer one.')
+    expect(result.responseDeliveryContextOrdinal).toBe(0)
+    expect(result.responseMedia).toEqual([
+      {
+        ...retainedMedia,
+        kind: 'image',
+      },
+    ])
+    expect(result.precedingAgentMessageSegments).toEqual([])
+  })
+
+  it('keeps steered final answers while commentary remains internal', async () => {
+    const progressDelivery = createProgressDeliveryMock()
     const result = await runScriptedSteeredFinalSegmentsTurn([
       completedItemEvent({
         id: 'user-1',
@@ -13640,12 +13786,19 @@ describe('steered final segments', () => {
         message: 'Thanks mate I appreciate all this',
       }),
       completedItemEvent({
+        id: 'assistant-2-commentary',
+        type: 'assistant_message',
+        message: 'Reworking that now.',
+        phase: 'commentary',
+      }),
+      completedItemEvent({
         id: 'assistant-2',
         type: 'assistant_message',
         message: 'Answer two.',
       }),
-    ])
+    ], { progressDelivery })
 
+    expect(progressDelivery.send).not.toHaveBeenCalled()
     expect(result.finalMessage).toBe('Answer two.')
     expect(result.precedingAgentMessageSegments).toEqual([
       {
@@ -13709,6 +13862,11 @@ describe('steered final segments', () => {
   it('does not return a trailing-steer final answer as a preceding segment', async () => {
     const result = await runScriptedSteeredFinalSegmentsTurn([
       completedItemEvent({
+        id: 'user-1',
+        type: 'user_message',
+        message: 'First question',
+      }),
+      completedItemEvent({
         id: 'assistant-1',
         type: 'assistant_message',
         message: 'Answer one.',
@@ -13721,7 +13879,47 @@ describe('steered final segments', () => {
     ])
 
     expect(result.finalMessage).toBe('Answer one.')
+    expect(result.responseDeliveryContextOrdinal).toBe(0)
     expect(result.precedingAgentMessageSegments).toEqual([])
+  })
+
+  it('promotes a trailing-steer answer when the current segment has fallback text', async () => {
+    const result = await runScriptedSteeredFinalSegmentsTurn([
+      completedItemEvent({
+        id: 'user-1',
+        type: 'user_message',
+        message: 'First question',
+      }),
+      completedItemEvent({
+        id: 'assistant-1',
+        type: 'assistant_message',
+        message: 'Answer one.',
+      }),
+      completedItemEvent({
+        id: 'user-2',
+        type: 'user_message',
+        message: 'Answer this differently',
+      }),
+      {
+        method: 'item/agentMessage/delta',
+        params: {
+          delta: 'Answer two from fallback.',
+          itemId: 'assistant-2',
+          threadId: 'thread-steered-finals',
+          turnId: 'turn-steered-finals',
+        },
+      },
+    ])
+
+    expect(result.finalMessage).toBe('Answer two from fallback.')
+    expect(result.responseDeliveryContextOrdinal).toBe(1)
+    expect(result.precedingAgentMessageSegments).toEqual([
+      {
+        deliveryContextOrdinal: 0,
+        response: 'Answer one.',
+        media: [],
+      },
+    ])
   })
 
   it('keeps repeated same-text final answers when they are distinct steered segments', async () => {
@@ -13871,6 +14069,7 @@ describe('steered final segments', () => {
   })
 
   it('ignores commentary messages and steers that arrive before any final answer', async () => {
+    const progressDelivery = createProgressDeliveryMock()
     const result = await runScriptedSteeredFinalSegmentsTurn([
       completedItemEvent({
         id: 'user-1',
@@ -13893,8 +14092,9 @@ describe('steered final segments', () => {
         type: 'assistant_message',
         message: 'Consolidated answer.',
       }),
-    ])
+    ], { progressDelivery })
 
+    expect(progressDelivery.send).not.toHaveBeenCalled()
     expect(result.finalMessage).toBe('Consolidated answer.')
     expect(result.precedingAgentMessageSegments).toEqual([])
   })
