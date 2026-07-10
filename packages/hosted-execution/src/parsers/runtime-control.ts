@@ -161,6 +161,11 @@ import {
   parseHostedExecutionSnapshotRef,
 } from "./cursor.ts";
 
+// Remove after all pre-Call-Circle runner bundles have drained. The server no
+// longer uses model-authored offer copy, but accepting the old field preserves
+// ordinary join offers during a staggered web/runner deploy.
+const LEGACY_GROUP_JOIN_OFFER_MESSAGE_TEMPLATE_MAX_LENGTH = 1000;
+
 const FORBIDDEN_RAW_REDACTED_KEY_NAMES = [
   "address",
   "authorization",
@@ -940,6 +945,7 @@ function parseHostedRuntimeGroupPostJoinOfferRequest(
     new Set([
       "activation",
       "displayName",
+      "messageTemplate",
       "operationId",
       "projectionKinds",
       "projectionScopes",
@@ -952,6 +958,20 @@ function parseHostedRuntimeGroupPostJoinOfferRequest(
   );
   const activation = parseHostedRuntimeGroupJoinOfferActivation(record.activation);
   const operationId = parseHostedRuntimeGroupJoinOfferOperationId(record.operationId);
+  if (record.messageTemplate !== undefined && record.messageTemplate !== null) {
+    const legacyTemplate = requireString(
+      record.messageTemplate,
+      "Hosted runtime group tool post_join_offer messageTemplate",
+    ).trim();
+    if (
+      legacyTemplate.length === 0
+      || legacyTemplate.length > LEGACY_GROUP_JOIN_OFFER_MESSAGE_TEMPLATE_MAX_LENGTH
+    ) {
+      throw new TypeError(
+        `Hosted runtime group tool post_join_offer messageTemplate must be between 1 and ${LEGACY_GROUP_JOIN_OFFER_MESSAGE_TEMPLATE_MAX_LENGTH} characters.`,
+      );
+    }
+  }
   return {
     ...(activation === null ? {} : { activation }),
     displayName,

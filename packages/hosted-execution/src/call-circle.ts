@@ -1,6 +1,8 @@
 import { isValidIanaTimeZone } from "@murphai/contracts";
 import { z } from "zod";
 
+import { HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX } from "./runtime-control.ts";
+
 const hostedCallCircleMailboxItemIdSchema = z.string().trim().min(1).max(200);
 const hostedCallCircleLocalTimeSchema = z
   .string()
@@ -13,6 +15,27 @@ const hostedCallCircleTimeZoneSchema = z
   .min(1)
   .max(100)
   .refine(isValidIanaTimeZone, "Call Circle timeZone must be a valid IANA time zone.");
+const hostedCallCircleMemberIdSchema = z.string().trim().min(1).max(200);
+
+export const hostedCallCircleCadenceSchema = z.enum([
+  "weekly",
+  "biweekly",
+  "monthly",
+]);
+
+export const hostedCallCircleMemberCadenceSchema = z
+  .object({
+    cadence: z.enum(["weekly", "biweekly", "monthly", "never"]),
+    memberId: hostedCallCircleMemberIdSchema,
+  })
+  .strict();
+
+export const hostedCallCircleMemberCadenceUpdateSchema = z
+  .object({
+    cadence: z.enum(["weekly", "biweekly", "monthly", "never", "default"]),
+    memberId: hostedCallCircleMemberIdSchema,
+  })
+  .strict();
 
 export const hostedCallCircleAvailabilityWindowSchema = z
   .object({
@@ -29,10 +52,41 @@ export const hostedCallCircleAvailabilityWindowSchema = z
 
 export const hostedCallCirclePreferencesSchema = z
   .object({
+    cadence: hostedCallCircleCadenceSchema.default("weekly"),
+    memberCadences: z
+      .array(hostedCallCircleMemberCadenceSchema)
+      .max(HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX)
+      .default([]),
     timeZone: hostedCallCircleTimeZoneSchema,
     windows: z.array(hostedCallCircleAvailabilityWindowSchema).max(28).default([]),
   })
-  .strict();
+  .strict()
+  .refine(
+    (preferences) => hasUniqueMemberIds(preferences.memberCadences),
+    "Call Circle member cadence preferences must name each member at most once.",
+  );
+
+const hostedCallCirclePreferencesPatchFields = {
+  cadence: hostedCallCircleCadenceSchema.optional(),
+  memberCadenceUpdates: z
+    .array(hostedCallCircleMemberCadenceUpdateSchema)
+    .max(HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX)
+    .optional(),
+  timeZone: hostedCallCircleTimeZoneSchema.optional(),
+  windows: z.array(hostedCallCircleAvailabilityWindowSchema).max(28).optional(),
+} as const;
+
+export const hostedCallCirclePreferencesPatchSchema = z
+  .object(hostedCallCirclePreferencesPatchFields)
+  .strict()
+  .refine(
+    (patch) => Object.values(patch).some((value) => value !== undefined),
+    "Call Circle preference updates must change at least one setting.",
+  )
+  .refine(
+    (patch) => hasUniqueMemberIds(patch.memberCadenceUpdates ?? []),
+    "Call Circle member cadence updates must name each member at most once.",
+  );
 
 export const hostedCallCircleCounterWindowSchema = z
   .object({
@@ -48,11 +102,19 @@ export const hostedCallCircleCounterWindowSchema = z
 export const hostedCallCircleRespondRequestSchema = z.discriminatedUnion("kind", [
   z
     .object({
+      ...hostedCallCirclePreferencesPatchFields,
       kind: z.literal("preferences"),
-      timeZone: hostedCallCircleTimeZoneSchema,
-      windows: z.array(hostedCallCircleAvailabilityWindowSchema).max(28),
     })
-    .strict(),
+    .strict()
+    .refine(
+      ({ kind: _kind, ...patch }) =>
+        Object.values(patch).some((value) => value !== undefined),
+      "Call Circle preference updates must change at least one setting.",
+    )
+    .refine(
+      (request) => hasUniqueMemberIds(request.memberCadenceUpdates ?? []),
+      "Call Circle member cadence updates must name each member at most once.",
+    ),
   z
     .object({
       kind: z.literal("confirm"),
@@ -114,6 +176,15 @@ export type HostedCallCircleAvailabilityWindow = z.infer<
 export type HostedCallCirclePreferences = z.infer<
   typeof hostedCallCirclePreferencesSchema
 >;
+export type HostedCallCircleCadence = z.infer<
+  typeof hostedCallCircleCadenceSchema
+>;
+export type HostedCallCircleMemberCadence = z.infer<
+  typeof hostedCallCircleMemberCadenceSchema
+>;
+export type HostedCallCirclePreferencesPatch = z.infer<
+  typeof hostedCallCirclePreferencesPatchSchema
+>;
 export type HostedCallCircleRespondRequest = z.infer<
   typeof hostedCallCircleRespondRequestSchema
 >;
@@ -126,4 +197,10 @@ export type HostedCallCircleRespondResponse = z.infer<
 
 export function isHostedCallCircleTimeZone(value: string): boolean {
   return isValidIanaTimeZone(value);
+}
+
+function hasUniqueMemberIds(
+  entries: readonly { memberId: string }[],
+): boolean {
+  return new Set(entries.map((entry) => entry.memberId)).size === entries.length;
 }

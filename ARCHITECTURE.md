@@ -1,6 +1,6 @@
 # Murph Architecture
 
-Last verified: 2026-07-09
+Last verified: 2026-07-10
 
 ## Hosted Connected Apps
 
@@ -35,9 +35,25 @@ resolved server-side from verified hosted member identity when the brief allows 
 live transfer. `apps/web` stores one member-bound `HostedPhoneCall` row per real
 call for request-key idempotency, provider call id, status, bounded call brief,
 and final analysis. Retell reaches `apps/web` only through signed raw-body
-function/webhook routes for `ask_murph`, `call_ended`, and `call_analyzed`;
+function/webhook routes for `ask_murph`, `call_ended`, `call_analyzed`,
+`transfer_bridged`, and `transfer_cancelled`;
 Murph does not persist raw Retell transcripts, request bodies, recordings, or
 call audio.
+
+## Call Circle Coordinator
+
+Call Circle is a web-owned coordinator over existing group offers, private
+assistant notifications, and hosted phone calls. Postgres owns enrollment,
+pause state, coarse availability, a default cadence plus private same-group
+member cadence overrides, deterministic match history, confirmation stages,
+and the unique phone-call relation. `nextMatchingAt` is only a weekly cursor;
+effective weekly, biweekly, monthly, or never eligibility is derived from match
+history and rechecked under stable member locks. The hosted assistant can submit
+only the current member's strict `call_circle_respond` union through the signed
+`web-control.worker` boundary; web derives group, match, and side from durable
+mailbox authority. The Vercel Call Circle cron is only a bounded transition
+driver and owns no product truth or queue. Phone numbers, availability, private
+cadence overrides, and Retell configuration never enter group runtime state.
 
 ## Module Map
 

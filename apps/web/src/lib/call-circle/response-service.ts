@@ -2,6 +2,7 @@ import "server-only";
 
 import type { Prisma, PrismaClient } from "@prisma/client";
 import type {
+  HostedCallCirclePreferencesPatch,
   HostedCallCircleRespondContext,
   HostedCallCircleRespondRequest,
   HostedCallCircleRespondResponse,
@@ -83,17 +84,27 @@ export async function handleCallCircleRespond(input: {
         if (authority.participantStatus === null) {
           return { status: "unavailable", unavailableReason: "call_circle_not_enrolled" };
         }
-        const changed = await writeCallCirclePreferences({
+        const writeResult = await writeCallCirclePreferences({
           groupId: target.groupId,
           memberId: input.memberId,
           now,
-          preferences: {
-            timeZone: input.request.timeZone,
-            windows: input.request.windows,
-          },
+          patch: readCallCirclePreferencesPatch(input.request),
           prisma: tx,
         });
-        return { status: changed ? "ok" : "ignored" };
+        if (writeResult === "invalid_member_cadences") {
+          return {
+            status: "unavailable",
+            unavailableReason: "call_circle_member_cadences_invalid",
+          };
+        }
+        if (writeResult === "incomplete") {
+          return {
+            status: "unavailable",
+            unavailableReason: "call_circle_preferences_incomplete",
+          };
+        }
+        if (writeResult === "missing") return { status: "ignored" };
+        return { status: "ok" };
       }
       case "pause": {
         if (authority.participantStatus === null) {
@@ -259,6 +270,16 @@ export async function handleCallCircleRespond(input: {
       }
     }
   });
+}
+
+function readCallCirclePreferencesPatch(
+  request: Extract<HostedCallCircleRespondRequest, { kind: "preferences" }>,
+): HostedCallCirclePreferencesPatch {
+  const { kind, ...patch } = request;
+  if (kind !== "preferences") {
+    throw new Error("Expected a Call Circle preference request.");
+  }
+  return patch;
 }
 
 type ResolvedCallCircleResponseTarget =

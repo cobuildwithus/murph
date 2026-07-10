@@ -186,31 +186,6 @@ export async function sendHostedLinqReadReceipt(input: {
   };
 }
 
-export async function deleteHostedLinqMessage(input: {
-  messageId: string;
-  signal?: AbortSignal;
-}): Promise<void> {
-  const response = await fetchHostedLinqApiOrThrow({
-    method: "DELETE",
-    operation: "message delete",
-    path: `messages/${
-      encodeURIComponent(normalizeRequiredString(input.messageId, "message id"))
-    }`,
-    signal: input.signal,
-    timeoutMessage: "Linq message delete timed out.",
-  });
-
-  if (response.ok || response.status === 404) {
-    return;
-  }
-
-  throw buildHostedLinqRequestFailedError({
-    operation: "message delete",
-    retryable: isRetryableHostedLinqStatus(response.status),
-    status: response.status,
-  });
-}
-
 const HOSTED_LINQ_ATTACHMENT_UPLOAD_TIMEOUT_MS = 30_000;
 
 export type HostedLinqChatHandleSummary = {

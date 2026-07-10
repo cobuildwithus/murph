@@ -38,7 +38,11 @@ type CallCircleNotificationAppendResult =
       status: "blocked";
     };
 
-type CallCircleTerminalNotificationKind = "handoff" | "outcome";
+type CallCircleTerminalNotificationKind =
+  | "canceled"
+  | "expired"
+  | "handoff"
+  | "outcome";
 
 interface ExistingCallCircleNotificationSignal {
   exists: boolean;
@@ -102,6 +106,8 @@ export async function appendCallCircleSetupNotificationTx(input: {
   memberId: string;
   now: Date;
   offerId?: string;
+  requireDaytime?: boolean;
+  timeZone?: string | null;
   tx: Prisma.TransactionClient;
 }): Promise<CallCircleNotificationAppendResult | null> {
   const participantCount = await input.tx.hostedCallCircleParticipant.count({
@@ -117,7 +123,8 @@ export async function appendCallCircleSetupNotificationTx(input: {
   const preflight = await readCallCircleNotificationPreflightTx({
     memberId: input.memberId,
     now: input.now,
-    requireDaytime: false,
+    requireDaytime: input.requireDaytime ?? false,
+    timeZone: input.timeZone,
     tx: input.tx,
   });
   if (preflight.status !== "ok") return preflight;
@@ -263,15 +270,14 @@ export async function appendCallCircleTerminalNotificationIfReachableTx(input: {
   const preflight = await readCallCircleNotificationPreflightTx({
     memberId: input.memberId,
     now: input.now,
+    requireDaytime: input.kind !== "handoff",
     timeZone: input.timeZone,
     tx: input.tx,
   });
   if (preflight.status !== "ok") return null;
   return appendCallCircleNotificationTx({
     eventId: buildCallCircleTerminalNotificationEventId(input),
-    instructions: input.kind === "outcome"
-      ? "Tell the member the Call Circle call is complete."
-      : "Tell the member the Call Circle bridge could not start. Ask: Want help sending a quick text to continue instead? Reply yes or no.",
+    instructions: readCallCircleTerminalNotificationInstructions(input.kind),
     memberId: input.memberId,
     now: input.now,
     preflight,
@@ -285,6 +291,7 @@ export async function appendCallCircleTerminalNotificationsTx(input: {
   matchId: string;
   memberAId: string;
   memberBId: string;
+  memberIds?: readonly string[];
   now: Date;
   tx: Prisma.TransactionClient;
 }): Promise<HostedAssistantNotificationSignal[]> {
@@ -295,34 +302,48 @@ export async function appendCallCircleTerminalNotificationsTx(input: {
     prisma: input.tx,
   });
   if (!timeZones) return [];
-  const notifications = await Promise.all([
+  const requestedMemberIds = new Set(
+    input.memberIds ?? [input.memberAId, input.memberBId],
+  );
+  const recipients = [
+    { memberId: input.memberAId, timeZone: timeZones.memberATimeZone },
+    { memberId: input.memberBId, timeZone: timeZones.memberBTimeZone },
+  ].filter((recipient) => requestedMemberIds.has(recipient.memberId));
+  const notifications = await Promise.all(recipients.map((recipient) =>
     appendCallCircleTerminalNotificationIfReachableTx({
       groupId: input.groupId,
       kind: input.kind,
       matchId: input.matchId,
-      memberId: input.memberAId,
+      memberId: recipient.memberId,
       now: input.now,
-      timeZone: timeZones.memberATimeZone,
+      timeZone: recipient.timeZone,
       tx: input.tx,
-    }),
-    appendCallCircleTerminalNotificationIfReachableTx({
-      groupId: input.groupId,
-      kind: input.kind,
-      matchId: input.matchId,
-      memberId: input.memberBId,
-      now: input.now,
-      timeZone: timeZones.memberBTimeZone,
-      tx: input.tx,
-    }),
-  ]);
+    })
+  ));
   return notifications.flatMap((notification, index) => {
-    if (!notification) return [];
+    const recipient = recipients[index];
+    if (!notification || !recipient) return [];
     const signal = readCallCircleNotificationSignal({
-      memberId: index === 0 ? input.memberAId : input.memberBId,
+      memberId: recipient.memberId,
       notification,
     });
     return signal ? [signal] : [];
   });
+}
+
+function readCallCircleTerminalNotificationInstructions(
+  kind: CallCircleTerminalNotificationKind,
+): string {
+  switch (kind) {
+    case "canceled":
+      return "Tell the member this Call Circle match could not go ahead, so no call will start.";
+    case "expired":
+      return "Tell the member this Call Circle match expired before both people could confirm, so no call will start.";
+    case "handoff":
+      return "Tell the member the Call Circle bridge could not start. Ask: Want help sending a quick text to continue instead? Reply yes or no.";
+    case "outcome":
+      return "Tell the member the Call Circle call is complete.";
+  }
 }
 
 export async function readCallCircleNotificationPreflightTx(input: {

@@ -4,6 +4,7 @@ vi.mock("server-only", () => ({}));
 
 import {
   proposeCallCircleMatches,
+  type CallCircleMatcherParticipant,
 } from "@/src/lib/call-circle/matcher";
 import {
   isWithinCallCircleDaytime,
@@ -57,6 +58,27 @@ describe("Call Circle matching and time windows", () => {
     ]);
   });
 
+  it("canonicalizes opaque ids with code-unit order", () => {
+    const now = new Date("2026-07-06T13:00:00.000Z");
+    const sharedWindow = {
+      dayOfWeek: 1 as const,
+      endLocalTime: "16:00",
+      startLocalTime: "14:00",
+    };
+
+    expect(proposeCallCircleMatches({
+      now,
+      participants: [
+        participant("member_a", sharedWindow),
+        participant("member_Z", sharedWindow),
+      ],
+      recentMatches: [],
+    })[0]).toMatchObject({
+      memberAId: "member_Z",
+      memberBId: "member_a",
+    });
+  });
+
   it("narrows broad availability blocks to the authorized call window", () => {
     const now = new Date("2026-07-06T07:00:00.000Z");
 
@@ -83,7 +105,7 @@ describe("Call Circle matching and time windows", () => {
     }]);
   });
 
-  it("excludes pairs that matched during the seven-day lookback", () => {
+  it("excludes pairs that matched during the weekly lookback", () => {
     const now = new Date("2026-07-06T13:00:00.000Z");
 
     expect(proposeCallCircleMatches({
@@ -106,6 +128,140 @@ describe("Call Circle matching and time windows", () => {
         memberBId: "member_alice",
       }],
     })).toEqual([]);
+  });
+
+  it("always blocks a participant with an open match even past the cadence window", () => {
+    const now = new Date("2026-07-06T13:00:00.000Z");
+    const sharedWindow = {
+      dayOfWeek: 1 as const,
+      endLocalTime: "16:00",
+      startLocalTime: "14:00",
+    };
+
+    expect(proposeCallCircleMatches({
+      now,
+      participants: [
+        participant("member_alice", sharedWindow),
+        participant("member_bob", sharedWindow),
+      ],
+      recentMatches: [{
+        createdAt: new Date("2026-04-01T13:00:00.000Z"),
+        memberAId: "member_alice",
+        memberBId: "member_other",
+        open: true,
+      }],
+    })).toEqual([]);
+  });
+
+  it("uses cadence slack so the next weekly run is not decided by cron jitter", () => {
+    const now = new Date("2026-07-06T13:00:00.000Z");
+    const sharedWindow = {
+      dayOfWeek: 1 as const,
+      endLocalTime: "16:00",
+      startLocalTime: "14:00",
+    };
+
+    expect(proposeCallCircleMatches({
+      now,
+      participants: [
+        participant("member_alice", sharedWindow),
+        participant("member_bob", sharedWindow),
+      ],
+      recentMatches: [{
+        createdAt: new Date("2026-06-30T00:00:00.000Z"),
+        memberAId: "member_alice",
+        memberBId: "member_bob",
+      }],
+    })).toHaveLength(1);
+  });
+
+  it("uses the slower private cadence and lets default clear back to rotation", () => {
+    const now = new Date("2026-07-06T13:00:00.000Z");
+    const sharedWindow = {
+      dayOfWeek: 1 as const,
+      endLocalTime: "16:00",
+      startLocalTime: "14:00",
+    };
+    const alice = participant("member_alice", sharedWindow);
+    alice.preferences.memberCadences = [{
+      cadence: "monthly",
+      memberId: "member_bob",
+    }];
+    const recentMatches = [{
+      createdAt: new Date("2026-06-15T13:00:00.000Z"),
+      memberAId: "member_alice",
+      memberBId: "member_bob",
+    }];
+
+    expect(proposeCallCircleMatches({
+      now,
+      participants: [alice, participant("member_bob", sharedWindow)],
+      recentMatches,
+    })).toEqual([]);
+
+    alice.preferences.memberCadences = [];
+    expect(proposeCallCircleMatches({
+      now,
+      participants: [alice, participant("member_bob", sharedWindow)],
+      recentMatches,
+    })).toHaveLength(1);
+  });
+
+  it("lets a weekly person override opt into a faster pair than the default", () => {
+    const now = new Date("2026-07-06T13:00:00.000Z");
+    const sharedWindow = {
+      dayOfWeek: 1 as const,
+      endLocalTime: "16:00",
+      startLocalTime: "14:00",
+    };
+    const alice = participant("member_alice", sharedWindow);
+    alice.preferences.cadence = "monthly";
+    alice.preferences.memberCadences = [{
+      cadence: "weekly",
+      memberId: "member_bob",
+    }];
+
+    expect(proposeCallCircleMatches({
+      now,
+      participants: [alice, participant("member_bob", sharedWindow)],
+      recentMatches: [{
+        createdAt: new Date("2026-06-29T13:00:00.000Z"),
+        memberAId: "member_alice",
+        memberBId: "member_bob",
+      }],
+    })).toHaveLength(1);
+  });
+
+  it("enforces every-other-week cadence with the same jitter margin", () => {
+    const now = new Date("2026-07-06T13:00:00.000Z");
+    const sharedWindow = {
+      dayOfWeek: 1 as const,
+      endLocalTime: "16:00",
+      startLocalTime: "14:00",
+    };
+    const alice = participant("member_alice", sharedWindow);
+    alice.preferences.cadence = "biweekly";
+    const bob = participant("member_bob", sharedWindow);
+    bob.preferences.cadence = "biweekly";
+
+    expect(proposeCallCircleMatches({
+      now,
+      participants: [alice, bob],
+      recentMatches: [{
+        createdAt: new Date("2026-06-24T13:00:00.000Z"),
+        memberAId: "member_alice",
+        memberBId: "member_bob",
+      }],
+    })).toEqual([]);
+    expect(proposeCallCircleMatches({
+      now,
+      participants: [alice, bob],
+      recentMatches: [{
+        createdAt: new Date("2026-06-23T00:00:00.000Z"),
+        memberAId: "member_alice",
+        memberBId: "member_bob",
+      }],
+    })).toHaveLength(1);
   });
 
   it("rotates away from each participant's last partner even after the weekly cooldown", () => {
@@ -151,6 +307,64 @@ describe("Call Circle matching and time windows", () => {
         windowStartAt: new Date("2026-07-06T14:00:00.000Z"),
       },
     ]);
+  });
+
+  it("treats either member's private never cadence as a pair veto and keeps matching", () => {
+    const now = new Date("2026-07-06T13:00:00.000Z");
+    const sharedWindow = {
+      dayOfWeek: 1 as const,
+      endLocalTime: "16:00",
+      startLocalTime: "14:00",
+    };
+    const alice = participant("member_alice", sharedWindow);
+    alice.preferences.memberCadences = [{
+      cadence: "never",
+      memberId: "member_bob",
+    }];
+
+    expect(proposeCallCircleMatches({
+      now,
+      participants: [
+        alice,
+        participant("member_bob", sharedWindow),
+        participant("member_cara", sharedWindow),
+        participant("member_dan", sharedWindow),
+      ],
+      recentMatches: [],
+    })).toEqual([
+      {
+        memberAId: "member_alice",
+        memberBId: "member_cara",
+        windowEndAt: new Date("2026-07-06T14:15:00.000Z"),
+        windowStartAt: new Date("2026-07-06T14:00:00.000Z"),
+      },
+      {
+        memberAId: "member_bob",
+        memberBId: "member_dan",
+        windowEndAt: new Date("2026-07-06T14:15:00.000Z"),
+        windowStartAt: new Date("2026-07-06T14:00:00.000Z"),
+      },
+    ]);
+  });
+
+  it("honors a private never veto from the second member in canonical pair order", () => {
+    const now = new Date("2026-07-06T13:00:00.000Z");
+    const sharedWindow = {
+      dayOfWeek: 1 as const,
+      endLocalTime: "16:00",
+      startLocalTime: "14:00",
+    };
+    const bob = participant("member_bob", sharedWindow);
+    bob.preferences.memberCadences = [{
+      cadence: "never",
+      memberId: "member_alice",
+    }];
+
+    expect(proposeCallCircleMatches({
+      now,
+      participants: [participant("member_alice", sharedWindow), bob],
+      recentMatches: [],
+    })).toEqual([]);
   });
 
   it("shifts early local windows until the confirmation flow has a morning ask slot", () => {
@@ -371,10 +585,12 @@ interface CallCircleTestWindow {
 function participant(
   memberId: string,
   windowOrWindows: CallCircleTestWindow | readonly CallCircleTestWindow[],
-) {
+): CallCircleMatcherParticipant {
   return {
     memberId,
     preferences: {
+      cadence: "weekly",
+      memberCadences: [],
       timeZone: "UTC",
       windows: Array.isArray(windowOrWindows) ? windowOrWindows : [windowOrWindows],
     },

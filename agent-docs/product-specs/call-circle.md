@@ -1,6 +1,6 @@
 # Call Circle
 
-Last verified: 2026-07-09
+Last verified: 2026-07-10
 
 Status: In review on the Call Circle v1 PR. This document describes the
 implemented target architecture.
@@ -8,9 +8,11 @@ implemented target architecture.
 ## Purpose
 
 Call Circle helps friends in an existing Murph group talk on the phone. Each
-member privately tells their own Murph when they are usually free. Murph then
-matches pairs on a weekly cadence, confirms the time in each member's private
-thread, and connects a confirmed pair.
+member privately tells their own Murph when they are usually free, whether they
+want matches weekly, every other week, or monthly by default, and whether that
+cadence should be weekly, every other week, monthly, or never with a particular
+group member. Murph confirms the time in each member's private thread and
+connects a confirmed pair.
 
 This is a health feature because social connection is part of health. It also
 fits the product constitution: help people participate in life without adding
@@ -21,7 +23,7 @@ scores, streaks, or another feed.
 `apps/web` owns the product truth and every decision that can authorize a
 message or phone call:
 
-- enrollment, pause state, coarse preferences, and matching cadence;
+- enrollment, pause state, member-owned preferences, and matching cadence;
 - match history, windows, confirmations, outcomes, and phone-call binding;
 - member access, group membership, notification routing, and call authority.
 
@@ -34,9 +36,9 @@ call service.
 
 Call Circle reuses the generic group join-offer primitive. The group Murph uses
 `post_join_offer` with the optional activation
-`call-circle.enroll.v0`. The model may author the surrounding group-chat
-message, but web fills the join link and adds the complete Call Circle
-disclosure.
+`call-circle.enroll.v0`. The model may select that closed activation, but web
+authors the visible offer copy, fills the join link, and includes the complete
+Call Circle disclosure. There is no model-authored disclosure validator.
 
 A supported positive reaction to the exact provider-bound offer is explicit
 consent to the disclosed activation. The existing reaction path resolves the
@@ -54,18 +56,29 @@ and reaction lookup all stay in the shared join-offer path.
 activation remains authoritative after posting, so a later gate change cannot
 break consent already disclosed in a visible offer.
 
+Removing the reaction does not revoke enrollment. Enrollment is an accepted,
+one-way consent fact; the member can pause in their private thread, which
+cancels open work. This avoids making ongoing authorization depend on mutable
+provider reaction state.
+
 ## Setup And Preferences
 
 After consent, the member's Murph immediately explains the feature, offers a
-clear pause off-ramp, and asks for coarse availability. Setup does not wait for
-quiet hours, but it still requires active access, current group membership, an
-enrolled participant, a deliverable route, and the normal Linq engagement and
-line checks.
+clear pause off-ramp, and asks for coarse availability. That direct follow-up
+does not wait for quiet hours. A scheduler retry does require the member's
+stored signup timezone and local daytime; a blocked retry defers its due cursor
+by one hour instead of returning to the same midnight boundary each week. Both
+paths still require active access, current group membership, an enrolled
+participant, a deliverable route, and the normal Linq engagement and line
+checks.
 
 Preferences contain only:
 
 - coarse recurring day and local-time windows;
-- an explicit valid IANA timezone.
+- an explicit valid IANA timezone;
+- a weekly, every-other-week, or monthly default cadence;
+- bounded private same-group member cadence overrides: weekly, every other
+  week, monthly, or never.
 
 Full conversational context stays in the member's private runtime and vault.
 Web stores only the coordinator inputs. Call Circle does not read calendars or
@@ -75,22 +88,44 @@ Members can update preferences, pause, or resume in their own thread. Preference
 writes never resume a paused member. A fresh accepted offer may resume a member
 only when that offer was posted after the pause.
 
+A member cadence override is stored only in the setter's participant
+preferences. It is not returned to the group runtime, copied to another
+participant, named in a match record, or included in a notification. `never`
+is the exclusion value rather than a second primitive. An override affects
+future proposals only; it does not cancel or alter a proposal that already
+exists. Setting it back to `default` removes the stored override.
+
 ## Matching
 
-Matching is deterministic server code on a fixed weekly cadence.
+Matching is deterministic server code. The scheduler wakes weekly; eligibility
+comes from durable match history and the effective cadence for each candidate
+pair.
 
 - Match rows are the source of truth for history, cooldowns, and partner
   rotation.
-- `nextMatchingAt` is only a due cursor. New or updated preferences make the
-  participant due; every considered participant advances to the next shared
-  weekly boundary.
-- A member can receive at most one proposal in a rolling seven-day window,
-  including proposals from another group. The match-store claim enforces this
-  under stable member-row locks.
+- `nextMatchingAt` is only a weekly due cursor. New or updated preferences make
+  the participant due; every considered participant advances to the next
+  Monday boundary. Cadence is not encoded in scheduler state.
+- Each side's effective cadence is its override for the candidate or its
+  default. That cadence gates how recently the member matched anyone. The
+  slower of the two sides also gates exact-pair recurrence. Match history is
+  global across Call Circle groups, and proposal creation rechecks it under
+  stable member-row locks.
+- Any open match blocks another proposal regardless of age; cadence applies
+  only after the previous match is terminal.
+- Weekly, biweekly, and monthly mean one, two, and four matching weeks. Each
+  lookback is shortened by twelve hours so a Monday run is not accepted or
+  rejected based on last week's cron jitter.
+- One scheduler run captures one `runNow` value for every phase, so phase order
+  cannot move a match across the final-ask or expiry boundary. Opaque member ids
+  use code-unit order for both canonical pair identity and lock order.
 - The matcher prefers someone other than each member's most recent partner.
   It permits the repeat only when no other viable pairing remains, so partner
   avoidance cannot starve a small group.
-- An exact pair is not proposed again within the seven-day lookback.
+- A pair is never proposed when either member set the other to `never`. The
+  pure matcher applies this veto, and proposal creation rechecks it under the
+  existing member-row locks so a concurrent preference update cannot create a
+  stale proposal. The matcher continues looking for other viable partners.
 - Stated-window intersection, active access, group membership, notification
   reachability, and valid timezones are hard eligibility gates.
 - Odd groups leave one member unmatched for that cycle. History ordering gives
@@ -107,14 +142,23 @@ no, and scheduled only when the ask and call start fall within both members'
 local daytime window. The final ask resets both response slots, so the bridge
 requires two fresh final confirmations.
 
-Each member may decline or make one counter-proposal per match. A counter
-updates the absolute window, resets the other side to pending, and returns the
-next ask to the scheduler. Non-response expires quietly. Pause, access loss, or
-group departure cancels open work before the next user-visible effect.
+Each member may decline or make one counter-proposal per match, including
+revoking their own earlier confirmation while the other side is still pending.
+A counter updates the absolute window, resets the other side to pending, and
+returns the next ask to the scheduler. Non-response expires the match; a member
+who had already said yes receives a private terminal note when the expiry lands
+inside their daytime window. The narrow expiry-at-quiet-hours case intentionally
+ends without another message: v1 preserves quiet hours instead of introducing
+delayed-delivery state solely for that terminal note. If a final-stage delivery
+preflight fails, the match drops and every still-reachable member gets a private
+cancellation note. Pause, access loss, or group departure cancels open work
+before the next user-visible effect.
 
 The assistant request is a strict discriminated union. It contains only the
 member's action-specific data. It never contains `groupId`, `matchId`, `side`,
-another member's answer, or a phone number.
+another member's answer, or a phone number. Per-member cadence ids are inert
+preference values from trusted group context: web validates current same-group
+membership and never treats them as authority.
 
 Web derives the target from durable mailbox context:
 
@@ -137,15 +181,20 @@ checks it at decision time.
 For Linq, delivery requires an established thread, the exact routed source
 line, an enabled and usable line, and a recent inbound message under the shared
 engagement policy. Participant-only routes are not enough. Scheduled confirms
-and results also require the participant's valid timezone and daytime
-check. Setup is immediate but keeps the other route, line, engagement, access,
-membership, and enrollment checks.
+and ordinary results also require the participant's valid timezone and daytime
+check. The terminal handoff note is exempt because the match has already ended
+and otherwise disappears silently. Direct setup is immediate;
+scheduler-retried setup requires daytime. Both keep the other route, line,
+engagement, access, membership, and enrollment checks.
 
-Event ids make every setup, confirm, handoff, and outcome append idempotent.
+Event ids make every setup, confirm, cancellation, expiry, handoff, and outcome
+append idempotent.
 Signals are best effort because the mailbox item is durable. The generic hosted
-retention sweep retries a bounded batch of the oldest unconsumed assistant
-notification per member; Call Circle does not own a feature-specific wake
-queue or recovery worker.
+retention sweep retries a bounded batch of unconsumed assistant notifications
+at most 24 hours old, choosing the oldest eligible item per member. Older rows
+remain subject to normal mailbox retention and are never revived into stale
+outreach. Call Circle does not own a feature-specific wake queue or recovery
+worker.
 
 ## Phone Bridge And Outcomes
 
@@ -191,12 +240,21 @@ does not complete, the match ends as a text handoff. Each member gets a low-key
 private note so they can coordinate directly. Notification failure never
 reopens or strands the terminal match.
 
+A pause that races after the bridge claim but before provider egress may still
+allow that already-authorized call attempt to start. Eliminating that
+sub-second window would require holding database authority across the external
+provider call or adding another lifecycle owner, so v1 treats it as a bounded
+residual. Every pre-claim pause still cancels the match, and provider-start
+idempotency prevents duplicate calls.
+
 ## Data Model
 
 Call Circle adds two product tables:
 
 1. `HostedCallCircleParticipant`: group/member identity, enrollment status,
-   coarse preferences, and the `nextMatchingAt` due cursor.
+   private coarse preferences, and the `nextMatchingAt` due cursor. Availability,
+   default cadence, and per-member overrides compose inside the existing
+   preferences JSON; they do not add another table or column.
 2. `HostedCallCircleMatch`: pair and window, confirmation state, counter caps,
    stage timestamps, terminal outcome, and the unique `phoneCallId` relation.
 
@@ -216,12 +274,15 @@ feature notification table, or scheduler-owned recovery state.
   user-visible side effect.
 - Phone numbers, private-thread content, availability, and line-health facts
   never enter the group vault or group chat.
+- A member's cadence overrides remain private to that member. Other members and
+  the group runtime receive neither the list nor a reason when the matcher
+  chooses a different pair.
 - No raw Retell transcript, recording, audio, or webhook body is persisted.
 
 ## Non-Goals
 
-- Matching across groups, conference calls, mystery calls, per-group cadence,
-  or group-visible call scores and streaks.
+- Pairing members across groups, conference calls, mystery calls, administrator-set or
+  group-wide cadence, or group-visible call scores and streaks.
 - Calendar or free/busy integration.
 - A generic notification state machine, Call Circle queue, bridge-session
   table, consent table, or dedicated assistant skill.
@@ -243,15 +304,25 @@ bundle, assistant tool registration, and Retell configuration.
 3. Confirm the production Linq webhook subscription includes signed
    `message.sent` events and that one reaches the hosted webhook. Outbound
    `message.received` echoes remain a legacy fallback, not readiness proof.
-4. Smoke the signed group-tool contract, Call Circle response port, and Retell
-   connector and webhook handling.
-5. Enable offers. After that path is healthy, enable the cron gate last.
+4. Confirm the Retell connector agent transfers only to
+   `{{transfer_number}}`, never reads that value aloud, and has the required
+   transfer webhooks enabled.
+5. Smoke offer → reaction → private setup → proposal → both confirmation stages
+   → Retell bridge → `transfer_bridged` and `transfer_cancelled`. Include one
+   signed group-tool call, one `call_circle_respond` call, and the Linq
+   `message.sent` offer-bind repair shape. Do not enable the feature if this
+   live proof has not run.
+6. Confirm the deployed recovery query excludes assistant notifications older
+   than 24 hours before the first retention run. Existing older unconsumed rows
+   may age out normally; do not manually signal them.
+7. Enable offers. After that path is healthy, enable the cron gate last.
 
 This is a coordinated contract cut: new web requires the mailbox-derived join
 offer operation id, while old web rejects that new field. Never deploy the new
-runner before web. During the web-first interval, stale runners may briefly
-return a generic join-offer unavailable result; use an immediate low-traffic
-rollout and monitor it instead of adding a compatibility layer.
+runner before web. During the web-first interval, current web accepts and
+validates the legacy runner's `messageTemplate` key but ignores its copy in
+favor of server-authored text. Remove that narrow legacy parser allowance only
+after every pre-Call-Circle runner bundle has drained.
 
 For rollback, disable both gates first. Current web and runner support remain
 the rollback floor while active participants, pending notifications, matches,

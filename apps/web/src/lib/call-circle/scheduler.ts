@@ -10,9 +10,11 @@ import {
 } from "@murphai/hosted-execution/call-circle";
 
 import {
+  advanceCallCircleParticipantMatchingCursors,
   canUseActiveCallCircleParticipantPair,
+  type CallCircleDueParticipant,
   type CallCircleEligibleParticipant,
-  listCallCircleEligibleParticipants,
+  listCallCircleDueParticipants,
   readCallCircleMatchParticipantTimeZones,
 } from "./participant-store";
 import {
@@ -20,7 +22,6 @@ import {
   callCircleExpiredResponseWhere,
   dropCallCircleMatchForNotificationBlocked,
   expirePastCallCircleMatches,
-  listCallCircleMemberIdsWithRecentMatch,
   listRecentCallCircleMatches,
   markCallCircleMatchAmAsked,
   markCallCircleMatchFinalAsked,
@@ -30,6 +31,7 @@ import { proposeCallCircleMatches } from "./matcher";
 import {
   appendCallCircleConfirmNotificationTx,
   appendCallCircleSetupNotificationTx,
+  appendCallCircleTerminalNotificationsTx,
   buildCallCircleSetupNotificationEventIdPrefix,
   readCallCircleNotificationPreflightTx,
   readCallCircleNotificationSignal,
@@ -76,6 +78,7 @@ const EMPTY_RESULT: RunCallCircleSchedulerResult = {
 
 const CALL_CIRCLE_PHASE_LIMIT = 100;
 const CALL_CIRCLE_PROPOSAL_DUE_PARTICIPANT_LIMIT = 32;
+const CALL_CIRCLE_SETUP_RETRY_MS = 60 * 60 * 1000;
 const CALL_CIRCLE_UPCOMING_CONFIRMATION_LOOKAHEAD_MS = 24 * 60 * 60 * 1000;
 const CALL_CIRCLE_RECOVERABLE_BRIDGE_WHERE = {
   OR: [
@@ -125,7 +128,9 @@ export async function runCallCircleScheduler(input: {
   prisma?: PrismaClient;
 } = {}): Promise<RunCallCircleSchedulerResult> {
   const prisma = input.prisma ?? getPrisma();
-  const clock = resolveCallCircleSchedulerClock(input);
+  const sourceClock = resolveCallCircleSchedulerClock(input);
+  const runNowMs = sourceClock().getTime();
+  const clock = () => new Date(runNowMs);
   const result = { ...EMPTY_RESULT };
 
   result.handoffs += await handoffElapsedCallCircleBridges({
@@ -139,7 +144,7 @@ export async function runCallCircleScheduler(input: {
     stage: "final",
   });
   result.expired += await expireDueCallCircleMatches({ clock, prisma });
-  result.proposals += await createWeeklyCallCircleProposals({ clock, prisma });
+  result.proposals += await createDueCallCircleProposals({ clock, prisma });
   result.askedMorning += await advanceCallCircleConfirmationStage({
     clock,
     prisma,
@@ -180,21 +185,57 @@ async function expireDueCallCircleMatches(input: {
       { windowEndAt: "asc" },
       { id: "asc" },
     ],
-    select: { id: true },
+    select: {
+      groupId: true,
+      id: true,
+      memberAId: true,
+      memberBId: true,
+      sideAResponse: true,
+      sideBResponse: true,
+    },
     take: CALL_CIRCLE_PHASE_LIMIT,
     where: {
       ...callCircleExpiredResponseWhere(queryNow),
     },
   });
-  if (matches.length === 0) return 0;
-  return expirePastCallCircleMatches({
-    matchIds: matches.map((match) => match.id),
-    now: input.clock(),
-    prisma: input.prisma,
-  });
+  let expired = 0;
+  for (const match of matches) {
+    const transaction = await input.prisma.$transaction(async (tx) => {
+      const count = await expirePastCallCircleMatches({
+        matchIds: [match.id],
+        now: input.clock(),
+        prisma: tx,
+      });
+      if (count === 0) return { count, signals: [] };
+      const memberIds = [
+        ...(isAffirmativeCallCircleResponse(match.sideAResponse)
+          ? [match.memberAId]
+          : []),
+        ...(isAffirmativeCallCircleResponse(match.sideBResponse)
+          ? [match.memberBId]
+          : []),
+      ];
+      const signals = memberIds.length === 0
+        ? []
+        : await appendCallCircleTerminalNotificationsTx({
+            groupId: match.groupId,
+            kind: "expired",
+            matchId: match.id,
+            memberAId: match.memberAId,
+            memberBId: match.memberBId,
+            memberIds,
+            now: input.clock(),
+            tx,
+          });
+      return { count, signals };
+    });
+    expired += transaction.count;
+    await signalHostedAssistantNotificationsBestEffort(transaction.signals);
+  }
+  return expired;
 }
 
-async function createWeeklyCallCircleProposals(input: {
+async function createDueCallCircleProposals(input: {
   clock: CallCircleSchedulerClock;
   prisma: PrismaClient;
 }): Promise<number> {
@@ -220,28 +261,22 @@ async function createWeeklyCallCircleProposals(input: {
 
   for (const groupId of groupIds) {
     const proposalNow = input.clock();
-    const [participants, recentMatches] = await Promise.all([
-      listCallCircleEligibleParticipants({
-        groupId,
-        prisma: input.prisma,
-      }),
-      listRecentCallCircleMatches({
-        groupId,
-        prisma: input.prisma,
-      }),
-    ]);
-    const recentlyMatchedMemberIds = new Set(
-      await listCallCircleMemberIdsWithRecentMatch({
-        memberIds: participants.map((participant) => participant.memberId),
-        now: proposalNow,
-        prisma: input.prisma,
-      }),
+    const dueGroupParticipants = await listCallCircleDueParticipants({
+      groupId,
+      now: proposalNow,
+      prisma: input.prisma,
+    });
+    const participants = dueGroupParticipants.filter(
+      isCallCircleEligibleParticipant,
     );
+    const recentMatches = await listRecentCallCircleMatches({
+      memberIds: participants.map((participant) => participant.memberId),
+      now: proposalNow,
+      prisma: input.prisma,
+    });
     const reachableParticipants = await listCallCircleReachableParticipants({
       clock: input.clock,
-      participants: participants.filter((participant) =>
-        !recentlyMatchedMemberIds.has(participant.memberId)
-      ),
+      participants,
       prisma: input.prisma,
     });
     const proposals = proposeCallCircleMatches({
@@ -264,16 +299,10 @@ async function createWeeklyCallCircleProposals(input: {
       if (match) created += 1;
     }
 
-    await input.prisma.hostedCallCircleParticipant.updateMany({
-      data: {
-        nextMatchingAt: readNextCallCircleMatchingAt(proposalNow),
-      },
-      where: {
-        groupId,
-        nextMatchingAt: { lte: proposalNow },
-        preferencesJson: { not: Prisma.DbNull },
-        status: "enrolled",
-      },
+    await advanceCallCircleParticipantMatchingCursors({
+      now: proposalNow,
+      participants: dueGroupParticipants,
+      prisma: input.prisma,
     });
   }
 
@@ -282,6 +311,12 @@ async function createWeeklyCallCircleProposals(input: {
 
 interface CallCircleProposalDueParticipant {
   groupId: string;
+}
+
+function isCallCircleEligibleParticipant(
+  participant: CallCircleDueParticipant,
+): participant is CallCircleEligibleParticipant {
+  return participant.preferences !== null;
 }
 
 async function listCallCircleReachableParticipants(input: {
@@ -488,7 +523,7 @@ async function askCallCircleConfirmations(input: {
       })
     ));
     if (preflights.some((preflight) => preflight.status !== "ok")) {
-      await dropCallCircleMatchForNotificationBlocked({
+      const dropped = await dropCallCircleMatchForNotificationBlocked({
         groupId: input.match.groupId,
         matchId: input.match.id,
         prisma: tx,
@@ -498,7 +533,18 @@ async function askCallCircleConfirmations(input: {
         windowEndAt: input.match.windowEndAt,
         windowStartAt: input.match.windowStartAt,
       });
-      return { asked: false, signals: [] };
+      const signals = dropped && input.stage === "final"
+        ? await appendCallCircleTerminalNotificationsTx({
+            groupId: input.match.groupId,
+            kind: "canceled",
+            matchId: input.match.id,
+            memberAId: input.match.memberAId,
+            memberBId: input.match.memberBId,
+            now,
+            tx,
+          })
+        : [];
+      return { asked: false, signals };
     }
 
     const pendingNotifications: PendingConfirmationNotification[] = [];
@@ -706,6 +752,9 @@ async function appendPendingCallCircleSetupNotifications(input: {
       ],
       select: {
         groupId: true,
+        member: {
+          select: { pendingActivationTimeZone: true },
+        },
         memberId: true,
       },
       take: CALL_CIRCLE_PHASE_LIMIT,
@@ -718,16 +767,19 @@ async function appendPendingCallCircleSetupNotifications(input: {
   let asked = 0;
 
   for (const participant of participants) {
-    const appended = await appendCallCircleSetupNotificationIfMissing({
+    const setupResult = await appendCallCircleSetupNotificationIfMissing({
       groupId: participant.groupId,
       memberId: participant.memberId,
       now: input.clock(),
       prisma: input.prisma,
+      timeZone: participant.member.pendingActivationTimeZone,
     });
-    if (appended) asked += 1;
+    if (setupResult === "appended") asked += 1;
     await input.prisma.hostedCallCircleParticipant.updateMany({
       data: {
-        nextMatchingAt: readNextCallCircleMatchingAt(input.clock()),
+        nextMatchingAt: setupResult === "blocked"
+          ? new Date(input.clock().getTime() + CALL_CIRCLE_SETUP_RETRY_MS)
+          : readNextCallCircleMatchingAt(input.clock()),
       },
       where: {
         groupId: participant.groupId,
@@ -743,6 +795,7 @@ async function appendPendingCallCircleSetupNotifications(input: {
 
 interface PendingCallCircleSetupParticipant {
   groupId: string;
+  member: { pendingActivationTimeZone: string | null };
   memberId: string;
 }
 
@@ -751,13 +804,14 @@ async function appendCallCircleSetupNotificationIfMissing(input: {
   memberId: string;
   now: Date;
   prisma: PrismaClient;
-}): Promise<boolean> {
+  timeZone: string | null;
+}): Promise<"appended" | "blocked" | "existing"> {
   const eventIdPrefix = buildCallCircleSetupNotificationEventIdPrefix({
     groupId: input.groupId,
     memberId: input.memberId,
   });
   const transaction = await input.prisma.$transaction(async (tx): Promise<{
-    asked: boolean;
+    result: "appended" | "blocked" | "existing";
     signals: HostedAssistantNotificationSignal[];
   }> => {
     const existing = await tx.hostedMailboxItem.findFirst({
@@ -767,12 +821,14 @@ async function appendCallCircleSetupNotificationIfMissing(input: {
         userId: input.memberId,
       },
     });
-    if (existing) return { asked: false, signals: [] };
+    if (existing) return { result: "existing", signals: [] };
 
     const notification = await appendCallCircleSetupNotificationTx({
       groupId: input.groupId,
       memberId: input.memberId,
       now: input.now,
+      requireDaytime: true,
+      timeZone: input.timeZone,
       tx,
     });
     const signal = notification ? readCallCircleNotificationSignal({
@@ -780,14 +836,14 @@ async function appendCallCircleSetupNotificationIfMissing(input: {
       notification,
     }) : null;
     return {
-      asked: signal !== null,
+      result: notification?.status === "sent" ? "appended" : "blocked",
       signals: signal ? [signal] : [],
     };
   });
   if (transaction.signals.length > 0) {
     await signalHostedAssistantNotificationsBestEffort(transaction.signals);
   }
-  return transaction.asked;
+  return transaction.result;
 }
 
 async function cancelCallCircleMatchIfParticipantsInactive(input: {
@@ -858,4 +914,10 @@ function formatCallCircleWindowLabel(input: {
     timeZone: input.timeZone,
     weekday: "short",
   }).format(input.startAt);
+}
+
+function isAffirmativeCallCircleResponse(
+  response: HostedCallCircleMatchResponse,
+): boolean {
+  return response === "confirmed" || response === "countered";
 }

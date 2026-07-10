@@ -1,6 +1,6 @@
 # Testing And CI Map
 
-Last verified: 2026-07-09
+Last verified: 2026-07-10
 
 ## Current Repo Checks
 
@@ -103,6 +103,15 @@ Last verified: 2026-07-09
 
 ## Current Gaps
 
+- Call Circle has contract, parser writer-to-reader round-trip, pure matcher,
+  conditional store, scheduler, routing, Retell payload/webhook, and privacy
+  coverage, but its Prisma predicates still run through typed mocks rather than
+  a database-backed integration test. No routine lane executes the live offer
+  → reaction → setup → match → confirm → Retell transfer flow, proves the
+  connector agent transfers only to `{{transfer_number}}` without reading it
+  aloud, or captures the production Linq `message.sent` echo shape. The
+  pre-enable checklist in `agent-docs/product-specs/call-circle.md` is therefore
+  a mandatory release gate rather than optional confidence work.
 - Repo-level automation still does not run full end-to-end CLI scenario flows; it typechecks/builds the published shell plus the extracted `assistant-cli` and `setup-cli` packages, now includes inbox service/runtime tests plus parser-worker/runtime tests, and the `test:scenario-integrity` lane still covers fixture/scenario-manifest integrity separately.
 - The current fixture/scenario lane still validates manifests and command-surface coverage, not end-to-end package orchestration.
 - Hosted Temporal orchestration has package, route, focused web/Cloudflare

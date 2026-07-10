@@ -635,6 +635,20 @@ describe("parseHostedRuntimeGroupTool", () => {
       },
     });
     expect(parseHostedRuntimeGroupToolRequest({
+      action: "post_join_offer",
+      joinOffer: {
+        displayName: "Sunday Sleep Crew",
+        messageTemplate: "Legacy runner-authored copy {{join_url}}",
+      },
+    })).toEqual({
+      action: "post_join_offer",
+      joinOffer: {
+        displayName: "Sunday Sleep Crew",
+        projectionKinds: null,
+        projectionScopes: null,
+      },
+    });
+    expect(parseHostedRuntimeGroupToolRequest({
       action: "set_chat_avatar",
       groupChatIconUrl: "https://imagedelivery.net/account/avatar/public",
     })).toEqual({

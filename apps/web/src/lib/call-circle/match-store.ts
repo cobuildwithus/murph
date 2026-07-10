@@ -13,11 +13,12 @@ import {
 import { getPrisma } from "../prisma";
 import {
   activeCallCircleParticipantPairMatchWhere,
-  canUseActiveCallCircleParticipantPair,
+  readActiveCallCircleParticipantPair,
 } from "./participant-store";
+import { canMatchCallCircleParticipantPair } from "./matcher";
 import {
   CALL_CIRCLE_FINAL_ASK_LEAD_MS,
-  CALL_CIRCLE_MATCH_LOOKBACK_MS,
+  CALL_CIRCLE_MAX_MATCH_LOOKBACK_MS,
   readCallCircleBridgeWindowStartCutoff,
 } from "./time";
 import type {
@@ -40,6 +41,12 @@ const AFFIRMATIVE_MATCH_RESPONSES: HostedCallCircleMatchResponse[] = [
   "confirmed",
   "countered",
 ];
+const CALL_CIRCLE_OPEN_MATCH_STATUSES = new Set([
+  "proposed",
+  "asking",
+  "both_confirmed",
+  "bridging",
+]);
 const CALL_CIRCLE_BLOCKING_RECENT_MATCH_WHERE = {
   NOT: [
     {
@@ -88,18 +95,23 @@ async function createCallCircleMatchProposalTx(input: {
   for (const memberId of [memberAId, memberBId]) {
     await lockHostedMemberRow(prisma, memberId);
   }
-  if (!await canUseActiveCallCircleParticipantPair({
+  const participants = await readActiveCallCircleParticipantPair({
     groupId: input.proposal.groupId,
     memberAId,
     memberBId,
     prisma,
-  })) {
-    return null;
-  }
-  if (await hasRecentCallCircleMatchForMembers({
+  });
+  if (!participants) return null;
+  const recentMatches = await listRecentCallCircleMatches({
     memberIds: [memberAId, memberBId],
     now: input.proposal.now,
     prisma,
+  });
+  if (!canMatchCallCircleParticipantPair({
+    first: participants.memberA,
+    now: input.proposal.now,
+    recentMatches,
+    second: participants.memberB,
   })) {
     return null;
   }
@@ -119,53 +131,6 @@ async function createCallCircleMatchProposalTx(input: {
   });
 }
 
-async function hasRecentCallCircleMatchForMembers(input: {
-  memberIds: readonly string[];
-  now: Date;
-  prisma: CallCirclePrismaClient;
-}): Promise<boolean> {
-  const memberIds = Array.from(input.memberIds);
-  const match = await input.prisma.hostedCallCircleMatch.findFirst({
-    select: { id: true },
-    where: {
-      AND: [
-        recentBlockingCallCircleMatchWhere(input.now),
-        {
-          OR: [
-            { memberAId: { in: memberIds } },
-            { memberBId: { in: memberIds } },
-          ],
-        },
-      ],
-    },
-  });
-  return match !== null;
-}
-
-export async function listCallCircleMemberIdsWithRecentMatch(input: {
-  memberIds: readonly string[];
-  now: Date;
-  prisma?: CallCirclePrismaClient;
-}): Promise<string[]> {
-  const memberIds = [...new Set(input.memberIds)];
-  if (memberIds.length === 0) return [];
-  const prisma = input.prisma ?? getPrisma();
-  const recentMatchWhere = recentBlockingCallCircleMatchWhere(input.now);
-  const members = await prisma.hostedMember.findMany({
-    orderBy: { id: "asc" },
-    select: { id: true },
-    take: memberIds.length,
-    where: {
-      id: { in: memberIds },
-      OR: [
-        { callCircleMatchesAsA: { some: recentMatchWhere } },
-        { callCircleMatchesAsB: { some: recentMatchWhere } },
-      ],
-    },
-  });
-  return members.map((member) => member.id);
-}
-
 function recentBlockingCallCircleMatchWhere(
   now: Date,
 ): Prisma.HostedCallCircleMatchWhereInput {
@@ -178,7 +143,7 @@ function recentBlockingCallCircleMatchWhere(
       },
       {
         createdAt: {
-          gte: new Date(now.getTime() - CALL_CIRCLE_MATCH_LOOKBACK_MS),
+          gte: new Date(now.getTime() - CALL_CIRCLE_MAX_MATCH_LOOKBACK_MS),
         },
         ...CALL_CIRCLE_BLOCKING_RECENT_MATCH_WHERE,
       },
@@ -193,15 +158,19 @@ function hasPrismaTransaction(
 }
 
 export async function listRecentCallCircleMatches(input: {
-  groupId: string;
+  memberIds: readonly string[];
+  now: Date;
   prisma?: CallCirclePrismaClient;
 }): Promise<Array<{
   createdAt: Date;
   memberAId: string;
   memberBId: string;
+  open: boolean;
 }>> {
   const prisma = input.prisma ?? getPrisma();
-  return prisma.hostedCallCircleMatch.findMany({
+  const memberIds = [...new Set(input.memberIds)];
+  if (memberIds.length === 0) return [];
+  const matches = await prisma.hostedCallCircleMatch.findMany({
     orderBy: [
       { createdAt: "desc" },
       { id: "desc" },
@@ -211,12 +180,26 @@ export async function listRecentCallCircleMatches(input: {
       createdAt: true,
       memberAId: true,
       memberBId: true,
+      status: true,
     },
     where: {
-      groupId: input.groupId,
-      ...CALL_CIRCLE_BLOCKING_RECENT_MATCH_WHERE,
+      AND: [
+        recentBlockingCallCircleMatchWhere(input.now),
+        {
+          OR: [
+            { memberAId: { in: memberIds } },
+            { memberBId: { in: memberIds } },
+          ],
+        },
+      ],
     },
   });
+  return matches.map((match) => ({
+    createdAt: match.createdAt,
+    memberAId: match.memberAId,
+    memberBId: match.memberBId,
+    open: CALL_CIRCLE_OPEN_MATCH_STATUSES.has(match.status),
+  }));
 }
 
 export async function confirmCallCircleMatchSide(input: {
@@ -306,6 +289,10 @@ export async function declineCallCircleMatchSide(input: {
         {
           ...sideResponseWhere(input.side, "pending"),
           status: { in: ["proposed", "asking"] },
+        },
+        {
+          ...affirmativeSideWithPendingPartnerWhere(input.side),
+          status: "asking",
         },
         { status: "both_confirmed" },
       ],
@@ -696,6 +683,20 @@ function sideResponseWhere(
   return side === "A" ? { sideAResponse: response } : { sideBResponse: response };
 }
 
+function affirmativeSideWithPendingPartnerWhere(
+  side: CallCircleSide,
+): Prisma.HostedCallCircleMatchWhereInput {
+  return side === "A"
+    ? {
+        sideAResponse: { in: AFFIRMATIVE_MATCH_RESPONSES },
+        sideBResponse: "pending",
+      }
+    : {
+        sideAResponse: "pending",
+        sideBResponse: { in: AFFIRMATIVE_MATCH_RESPONSES },
+      };
+}
+
 function callCircleAskSnapshotWhere(
   expectedAsk: Pick<
     CallCircleMatchRow,
@@ -720,7 +721,7 @@ function callCircleAskSnapshotWhere(
 }
 
 function sortPair(firstMemberId: string, secondMemberId: string): [string, string] {
-  return firstMemberId.localeCompare(secondMemberId) <= 0
+  return firstMemberId <= secondMemberId
     ? [firstMemberId, secondMemberId]
     : [secondMemberId, firstMemberId];
 }

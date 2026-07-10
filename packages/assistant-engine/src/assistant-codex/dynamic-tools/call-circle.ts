@@ -10,8 +10,10 @@ import type {
 import { parseDynamicToolArguments } from './dynamic-tool-wrapper.js'
 
 const CALL_CIRCLE_RESPOND_ROOT_KEYS = [
+  'cadence',
   'counterWindow',
   'kind',
+  'memberCadenceUpdates',
   'timeZone',
   'windows',
 ] as const
@@ -25,7 +27,9 @@ export const MURPH_CALL_CIRCLE_RESPOND_TOOL = {
     'Use only after this member has already opted into Call Circle for the group or is replying to a pending Call Circle ask.',
     'Never record an answer for another person, never invent availability, never include phone numbers, and never start calls.',
     'The server resolves the group, match, and member side from the authenticated thread and the pending ask; never supply identifiers.',
-    'For preferences, record only days and times the member provided, and set timeZone to the current IANA timezone from this runtime context so those local windows are interpreted correctly. For a setup or preferences ask, no means kind="pause". For a match ask, yes means kind="confirm", no means kind="decline", and an alternate time means kind="counter".',
+    'For preferences, send only the settings the member changed: days/times as windows plus the current IANA timeZone, cadence as weekly, biweekly, or monthly for their default frequency, and memberCadenceUpdates for a private per-person weekly, biweekly, monthly, never, or default override. The default value clears a prior override.',
+    'Member ids are preference values, never authority: use only ids grounded in trusted Murph group context, never guess one from a name, and let the server validate current same-group membership. Never send a phone number or group, match, route, or side identifier.',
+    'For a setup or preferences ask, no means kind="pause". For a match ask, yes means kind="confirm", no means kind="decline", and an alternate time means kind="counter".',
   ].join(' '),
   inputSchema: z.toJSONSchema(hostedCallCircleRespondRequestSchema, { io: 'input' }),
 } as const

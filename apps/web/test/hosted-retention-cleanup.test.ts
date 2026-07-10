@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   HOSTED_ASSISTANT_NOTIFICATION_RECOVERY_BATCH_SIZE,
+  HOSTED_ASSISTANT_NOTIFICATION_RECOVERY_MAX_AGE_MS,
   HOSTED_INBOX_MEDIA_RETENTION_SIGNAL_BATCH_SIZE,
   HOSTED_INBOX_MEDIA_RETENTION_SIGNAL_TIMEOUT_MS,
   HOSTED_MAILBOX_RETENTION_MS,
@@ -130,8 +131,10 @@ describe("hosted retention cleanup", () => {
     expect(notificationSql).toContain(
       'item."lane_seq" > COALESCE(counter."consumed_seq", 0)',
     );
+    expect(notificationSql).toContain('item."created_at" >= ?');
     expect(notificationSql).toContain("item.\"consumed_at\" IS NULL");
     expect(notificationCall?.slice(1)).toEqual([
+      new Date(now.getTime() - HOSTED_ASSISTANT_NOTIFICATION_RECOVERY_MAX_AGE_MS),
       now,
       now,
       HOSTED_ASSISTANT_NOTIFICATION_RECOVERY_BATCH_SIZE,

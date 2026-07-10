@@ -63,7 +63,7 @@ describe("handleCallCircleRespond", () => {
       memberBTimeZone: "UTC",
     });
     mocks.resumeCallCircleParticipant.mockResolvedValue(true);
-    mocks.writeCallCirclePreferences.mockResolvedValue(true);
+    mocks.writeCallCirclePreferences.mockResolvedValue("updated");
   });
 
   it("records preferences only for an enrolled member in the exact setup context", async () => {
@@ -90,11 +90,64 @@ describe("handleCallCircleRespond", () => {
       groupId: "group_1",
       memberId: "member_a",
       now: NOW,
-      preferences: {
+      patch: {
         timeZone: "UTC",
         windows,
       },
       prisma: prisma.tx,
+    });
+  });
+
+  it("stores a private per-member cadence without canceling open work", async () => {
+    const prisma = createResponsePrisma();
+
+    await expect(handleCallCircleRespond({
+      context: SETUP_CONTEXT,
+      memberId: "member_a",
+      now: NOW,
+      prisma: prisma as never,
+      request: {
+        kind: "preferences",
+        memberCadenceUpdates: [{
+          cadence: "never",
+          memberId: "member_housemate",
+        }],
+      },
+    })).resolves.toEqual({ status: "ok" });
+
+    expect(mocks.writeCallCirclePreferences).toHaveBeenCalledWith({
+      groupId: "group_1",
+      memberId: "member_a",
+      now: NOW,
+      patch: {
+        memberCadenceUpdates: [{
+          cadence: "never",
+          memberId: "member_housemate",
+        }],
+      },
+      prisma: prisma.tx,
+    });
+    expect(mocks.cancelOpenCallCircleMatchesForParticipant).not.toHaveBeenCalled();
+  });
+
+  it("returns a generic failure for invalid member cadence targets", async () => {
+    mocks.writeCallCirclePreferences.mockResolvedValue("invalid_member_cadences");
+
+    await expect(handleCallCircleRespond({
+      context: SETUP_CONTEXT,
+      memberId: "member_a",
+      now: NOW,
+      prisma: createResponsePrisma() as never,
+      request: {
+        kind: "preferences",
+        memberCadenceUpdates: [{
+          cadence: "never",
+          memberId: "member_unknown",
+        }],
+      },
+    })).resolves.toEqual({
+      status: "unavailable",
+      unavailableReason: "call_circle_member_cadences_invalid",
     });
   });
 

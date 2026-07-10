@@ -3,15 +3,16 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("server-only", () => ({}));
 
 const mocks = vi.hoisted(() => ({
+  advanceCallCircleParticipantMatchingCursors: vi.fn(),
   appendCallCircleConfirmNotificationTx: vi.fn(),
   appendCallCircleSetupNotificationTx: vi.fn(),
+  appendCallCircleTerminalNotificationsTx: vi.fn(),
   callCircleExpiredResponseWhere: vi.fn(() => ({ responseExpired: true })),
   canUseActiveCallCircleParticipantPair: vi.fn(),
   createCallCircleMatchProposal: vi.fn(),
   dropCallCircleMatchForNotificationBlocked: vi.fn(),
   expirePastCallCircleMatches: vi.fn(),
-  listCallCircleEligibleParticipants: vi.fn(),
-  listCallCircleMemberIdsWithRecentMatch: vi.fn(),
+  listCallCircleDueParticipants: vi.fn(),
   listRecentCallCircleMatches: vi.fn(),
   markCallCircleMatchAmAsked: vi.fn(),
   markCallCircleMatchFinalAsked: vi.fn(),
@@ -25,8 +26,10 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("@/src/lib/call-circle/participant-store", () => ({
+  advanceCallCircleParticipantMatchingCursors:
+    mocks.advanceCallCircleParticipantMatchingCursors,
   canUseActiveCallCircleParticipantPair: mocks.canUseActiveCallCircleParticipantPair,
-  listCallCircleEligibleParticipants: mocks.listCallCircleEligibleParticipants,
+  listCallCircleDueParticipants: mocks.listCallCircleDueParticipants,
   readCallCircleMatchParticipantTimeZones: mocks.readCallCircleMatchParticipantTimeZones,
 }));
 
@@ -36,8 +39,6 @@ vi.mock("@/src/lib/call-circle/match-store", () => ({
   dropCallCircleMatchForNotificationBlocked:
     mocks.dropCallCircleMatchForNotificationBlocked,
   expirePastCallCircleMatches: mocks.expirePastCallCircleMatches,
-  listCallCircleMemberIdsWithRecentMatch:
-    mocks.listCallCircleMemberIdsWithRecentMatch,
   listRecentCallCircleMatches: mocks.listRecentCallCircleMatches,
   markCallCircleMatchAmAsked: mocks.markCallCircleMatchAmAsked,
   markCallCircleMatchFinalAsked: mocks.markCallCircleMatchFinalAsked,
@@ -51,6 +52,8 @@ vi.mock("@/src/lib/call-circle/matcher", () => ({
 vi.mock("@/src/lib/call-circle/notifications", () => ({
   appendCallCircleConfirmNotificationTx: mocks.appendCallCircleConfirmNotificationTx,
   appendCallCircleSetupNotificationTx: mocks.appendCallCircleSetupNotificationTx,
+  appendCallCircleTerminalNotificationsTx:
+    mocks.appendCallCircleTerminalNotificationsTx,
   buildCallCircleSetupNotificationEventIdPrefix: ({ groupId, memberId }: {
     groupId: string;
     memberId: string;
@@ -73,6 +76,7 @@ import { runCallCircleScheduler } from "@/src/lib/call-circle/scheduler";
 describe("runCallCircleScheduler", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.advanceCallCircleParticipantMatchingCursors.mockResolvedValue(undefined);
     mocks.appendCallCircleConfirmNotificationTx.mockResolvedValue({
       mailboxItemId: "mailbox_confirm",
       status: "sent",
@@ -81,12 +85,12 @@ describe("runCallCircleScheduler", () => {
       mailboxItemId: "mailbox_setup",
       status: "sent",
     });
+    mocks.appendCallCircleTerminalNotificationsTx.mockResolvedValue([]);
     mocks.canUseActiveCallCircleParticipantPair.mockResolvedValue(true);
     mocks.createCallCircleMatchProposal.mockResolvedValue(null);
     mocks.dropCallCircleMatchForNotificationBlocked.mockResolvedValue(true);
     mocks.expirePastCallCircleMatches.mockResolvedValue(0);
-    mocks.listCallCircleEligibleParticipants.mockResolvedValue([]);
-    mocks.listCallCircleMemberIdsWithRecentMatch.mockResolvedValue([]);
+    mocks.listCallCircleDueParticipants.mockResolvedValue([]);
     mocks.listRecentCallCircleMatches.mockResolvedValue([]);
     mocks.markCallCircleMatchAmAsked.mockResolvedValue(true);
     mocks.markCallCircleMatchFinalAsked.mockResolvedValue(true);
@@ -108,7 +112,7 @@ describe("runCallCircleScheduler", () => {
     });
   });
 
-  it("matches one bounded due page and advances every considered group to the fixed epoch", async () => {
+  it("matches one bounded due page and advances each considered participant", async () => {
     const now = new Date("2026-07-06T09:30:00.000Z");
     const recentMatches = [{
       createdAt: new Date("2026-06-20T09:30:00.000Z"),
@@ -122,7 +126,7 @@ describe("runCallCircleScheduler", () => {
     const prisma = createSchedulerPrisma({
       dueParticipants: [{ groupId: "hgrp_123", id: "hccp_a" }],
     });
-    mocks.listCallCircleEligibleParticipants.mockResolvedValue(participants);
+    mocks.listCallCircleDueParticipants.mockResolvedValue(participants);
     mocks.listRecentCallCircleMatches.mockResolvedValue(recentMatches);
     mocks.proposeCallCircleMatches.mockReturnValue([{
       memberAId: "member_a",
@@ -156,7 +160,7 @@ describe("runCallCircleScheduler", () => {
       participants,
       recentMatches,
     });
-    expect(mocks.listCallCircleMemberIdsWithRecentMatch).toHaveBeenCalledWith({
+    expect(mocks.listRecentCallCircleMatches).toHaveBeenCalledWith({
       memberIds: ["member_a", "member_b"],
       now,
       prisma: expect.any(Object),
@@ -168,28 +172,29 @@ describe("runCallCircleScheduler", () => {
       timeZone: "UTC",
       tx: expect.any(Object),
     });
-    expect(prisma.hostedCallCircleParticipant.updateMany).toHaveBeenCalledWith({
-      data: { nextMatchingAt: new Date("2026-07-13T00:00:00.000Z") },
-      where: {
-        groupId: "hgrp_123",
-        nextMatchingAt: { lte: now },
-        preferencesJson: { not: expect.anything() },
-        status: "enrolled",
-      },
+    expect(mocks.advanceCallCircleParticipantMatchingCursors).toHaveBeenCalledWith({
+      now,
+      participants,
+      prisma: expect.any(Object),
     });
   });
 
-  it("removes globally recent members before matching the remaining group", async () => {
+  it("passes global recent history to the matcher for cadence decisions", async () => {
     const now = new Date("2026-07-06T09:30:00.000Z");
     const prisma = createSchedulerPrisma({
       dueParticipants: [{ groupId: "hgrp_123", id: "hccp_a" }],
     });
-    mocks.listCallCircleEligibleParticipants.mockResolvedValue([
+    mocks.listCallCircleDueParticipants.mockResolvedValue([
       eligibleParticipant("member_a"),
       eligibleParticipant("member_b"),
       eligibleParticipant("member_c"),
     ]);
-    mocks.listCallCircleMemberIdsWithRecentMatch.mockResolvedValue(["member_a"]);
+    const recentMatches = [{
+      createdAt: new Date("2026-07-01T09:30:00.000Z"),
+      memberAId: "member_a",
+      memberBId: "member_other",
+    }];
+    mocks.listRecentCallCircleMatches.mockResolvedValue(recentMatches);
     mocks.proposeCallCircleMatches.mockReturnValue([{
       memberAId: "member_b",
       memberBId: "member_c",
@@ -201,7 +206,7 @@ describe("runCallCircleScheduler", () => {
     await expect(runCallCircleScheduler({ now, prisma: prisma as never }))
       .resolves.toMatchObject({ proposals: 1 });
 
-    expect(mocks.listCallCircleMemberIdsWithRecentMatch).toHaveBeenCalledWith({
+    expect(mocks.listRecentCallCircleMatches).toHaveBeenCalledWith({
       memberIds: ["member_a", "member_b", "member_c"],
       now,
       prisma: expect.any(Object),
@@ -209,10 +214,11 @@ describe("runCallCircleScheduler", () => {
     expect(mocks.proposeCallCircleMatches).toHaveBeenCalledWith({
       now,
       participants: [
+        eligibleParticipant("member_a"),
         eligibleParticipant("member_b"),
         eligibleParticipant("member_c"),
       ],
-      recentMatches: [],
+      recentMatches,
     });
     expect(mocks.createCallCircleMatchProposal).toHaveBeenCalledWith({
       proposal: {
@@ -235,7 +241,7 @@ describe("runCallCircleScheduler", () => {
         { groupId: "hgrp_single", id: "hccp_single" },
       ],
     });
-    mocks.listCallCircleEligibleParticipants.mockImplementation(async ({ groupId }) =>
+    mocks.listCallCircleDueParticipants.mockImplementation(async ({ groupId }) =>
       groupId === "hgrp_blocked"
         ? [eligibleParticipant("member_blocked", groupId)]
         : [eligibleParticipant("member_single", groupId)]);
@@ -247,37 +253,98 @@ describe("runCallCircleScheduler", () => {
     await expect(runCallCircleScheduler({ now, prisma: prisma as never }))
       .resolves.toMatchObject({ proposals: 0 });
 
-    expect(prisma.hostedCallCircleParticipant.updateMany).toHaveBeenCalledTimes(2);
-    expect(prisma.hostedCallCircleParticipant.updateMany).toHaveBeenCalledWith({
-      data: { nextMatchingAt: new Date("2026-07-13T00:00:00.000Z") },
-      where: expect.objectContaining({ groupId: "hgrp_blocked" }),
+    expect(mocks.advanceCallCircleParticipantMatchingCursors).toHaveBeenCalledTimes(2);
+    expect(mocks.advanceCallCircleParticipantMatchingCursors).toHaveBeenCalledWith({
+      now,
+      participants: [eligibleParticipant("member_blocked", "hgrp_blocked")],
+      prisma: expect.any(Object),
     });
-    expect(prisma.hostedCallCircleParticipant.updateMany).toHaveBeenCalledWith({
-      data: { nextMatchingAt: new Date("2026-07-13T00:00:00.000Z") },
-      where: expect.objectContaining({ groupId: "hgrp_single" }),
+    expect(mocks.advanceCallCircleParticipantMatchingCursors).toHaveBeenCalledWith({
+      now,
+      participants: [eligibleParticipant("member_single", "hgrp_single")],
+      prisma: expect.any(Object),
     });
   });
 
   it("expires only the selected bounded match ids through the match-store predicate", async () => {
     const now = new Date("2026-07-06T15:00:00.000Z");
     const prisma = createSchedulerPrisma({
-      expiredMatches: [{ id: "hccm_1" }, { id: "hccm_2" }],
+      expiredMatches: [
+        schedulerMatch({
+          id: "hccm_1",
+          status: "asking",
+          windowEndAt: now,
+          windowStartAt: now,
+        }),
+        schedulerMatch({
+          id: "hccm_2",
+          status: "asking",
+          windowEndAt: now,
+          windowStartAt: now,
+        }),
+      ],
     });
-    mocks.expirePastCallCircleMatches.mockResolvedValue(2);
+    mocks.expirePastCallCircleMatches.mockResolvedValue(1);
 
     await expect(runCallCircleScheduler({ now, prisma: prisma as never }))
       .resolves.toMatchObject({ expired: 2 });
 
-    expect(mocks.expirePastCallCircleMatches).toHaveBeenCalledWith({
-      matchIds: ["hccm_1", "hccm_2"],
+    expect(mocks.expirePastCallCircleMatches).toHaveBeenNthCalledWith(1, {
+      matchIds: ["hccm_1"],
       now,
-      prisma,
+      prisma: expect.any(Object),
+    });
+    expect(mocks.expirePastCallCircleMatches).toHaveBeenNthCalledWith(2, {
+      matchIds: ["hccm_2"],
+      now,
+      prisma: expect.any(Object),
     });
     const expiryQuery = findMatchQuery(prisma, "expiry");
     expect(expiryQuery).toMatchObject({
-      select: { id: true },
+      select: {
+        groupId: true,
+        id: true,
+        memberAId: true,
+        memberBId: true,
+        sideAResponse: true,
+        sideBResponse: true,
+      },
       take: 100,
     });
+  });
+
+  it("notifies the member who already said yes when a match expires", async () => {
+    const now = new Date("2026-07-06T15:00:00.000Z");
+    const match = schedulerMatch({
+      sideAResponse: "confirmed",
+      sideBResponse: "pending",
+      status: "asking",
+      windowEndAt: now,
+      windowStartAt: now,
+    });
+    const prisma = createSchedulerPrisma({ expiredMatches: [match] });
+    mocks.expirePastCallCircleMatches.mockResolvedValue(1);
+    mocks.appendCallCircleTerminalNotificationsTx.mockResolvedValue([{
+      mailboxItemId: "mailbox_expired",
+      memberId: match.memberAId,
+    }]);
+
+    await runCallCircleScheduler({ now, prisma: prisma as never });
+
+    expect(mocks.appendCallCircleTerminalNotificationsTx).toHaveBeenCalledWith({
+      groupId: match.groupId,
+      kind: "expired",
+      matchId: match.id,
+      memberAId: match.memberAId,
+      memberBId: match.memberBId,
+      memberIds: [match.memberAId],
+      now,
+      tx: expect.any(Object),
+    });
+    expect(mocks.signalHostedAssistantNotificationsBestEffort).toHaveBeenCalledWith([{
+      mailboxItemId: "mailbox_expired",
+      memberId: match.memberAId,
+    }]);
   });
 
   it("uses one confirmation implementation for a morning ask and only notifies pending sides", async () => {
@@ -350,7 +417,7 @@ describe("runCallCircleScheduler", () => {
       windowStartAt: new Date("2026-07-06T15:00:00.000Z"),
     });
     const prisma = createSchedulerPrisma({
-      expiredMatches: [{ id: match.id }],
+      expiredMatches: [match],
       finalMatches: [match],
     });
     mocks.expirePastCallCircleMatches.mockImplementationOnce(async () => {
@@ -376,6 +443,10 @@ describe("runCallCircleScheduler", () => {
     mocks.readCallCircleNotificationPreflightTx
       .mockResolvedValueOnce({ status: "ok" })
       .mockResolvedValueOnce({ reason: "line_unavailable", status: "blocked" });
+    mocks.appendCallCircleTerminalNotificationsTx.mockResolvedValue([{
+      mailboxItemId: "mailbox_canceled",
+      memberId: match.memberAId,
+    }]);
 
     await expect(runCallCircleScheduler({ now, prisma: prisma as never }))
       .resolves.toMatchObject({ askedFinal: 0 });
@@ -392,6 +463,19 @@ describe("runCallCircleScheduler", () => {
     });
     expect(mocks.markCallCircleMatchFinalAsked).not.toHaveBeenCalled();
     expect(mocks.appendCallCircleConfirmNotificationTx).not.toHaveBeenCalled();
+    expect(mocks.appendCallCircleTerminalNotificationsTx).toHaveBeenCalledWith({
+      groupId: match.groupId,
+      kind: "canceled",
+      matchId: match.id,
+      memberAId: match.memberAId,
+      memberBId: match.memberBId,
+      now,
+      tx: expect.any(Object),
+    });
+    expect(mocks.signalHostedAssistantNotificationsBestEffort).toHaveBeenCalledWith([{
+      mailboxItemId: "mailbox_canceled",
+      memberId: match.memberAId,
+    }]);
   });
 
   it("fails closed instead of sending a scheduled ask with an invalid stored timezone", async () => {
@@ -419,7 +503,7 @@ describe("runCallCircleScheduler", () => {
     expect(mocks.appendCallCircleConfirmNotificationTx).not.toHaveBeenCalled();
   });
 
-  it("selects every recoverable bridge shape and reads a fresh clock before the call", async () => {
+  it("selects every recoverable bridge shape with one stable run clock", async () => {
     const baseMs = new Date("2026-07-06T15:00:00.000Z").getTime();
     let tick = 0;
     const clock = () => new Date(baseMs + tick++ * 1_000);
@@ -477,10 +561,10 @@ describe("runCallCircleScheduler", () => {
     expect(bridgeQuery).not.toHaveProperty("include");
     const starterNow = mocks.startCallCircleConnectorCall.mock.calls[0]?.[0]?.now;
     expect(starterNow).toBeInstanceOf(Date);
-    expect(starterNow.getTime()).toBeGreaterThan(baseMs);
+    expect(starterNow.getTime()).toBe(baseMs);
   });
 
-  it("delegates selected bridge rows even when the fresh clock crosses the deadline", async () => {
+  it("does not drift a selected bridge row past the deadline between phases", async () => {
     const baseMs = new Date("2026-07-06T15:00:00.000Z").getTime();
     let tick = 0;
     const clock = () => new Date(baseMs + tick++ * 16 * 60 * 1000);
@@ -499,7 +583,7 @@ describe("runCallCircleScheduler", () => {
 
     expect(mocks.startCallCircleConnectorCall).toHaveBeenCalledWith({
       matchId: match.id,
-      now: expect.any(Date),
+      now: new Date(baseMs),
       prisma: expect.any(Object),
     });
   });
@@ -535,6 +619,7 @@ describe("runCallCircleScheduler", () => {
     const setupParticipants = Array.from({ length: 100 }, (_, index) => ({
       groupId: "hgrp_123",
       id: `hccp_${index}`,
+      member: { pendingActivationTimeZone: "UTC" },
       memberId: `member_${index}`,
     }));
     const prisma = createSchedulerPrisma({ setupParticipants });
@@ -557,6 +642,24 @@ describe("runCallCircleScheduler", () => {
       },
     });
     expect(prisma.hostedCallCircleParticipant.updateMany).toHaveBeenCalledTimes(100);
+    expect(prisma.hostedCallCircleParticipant.updateMany).toHaveBeenNthCalledWith(1, {
+      data: { nextMatchingAt: new Date("2026-07-06T16:00:00.000Z") },
+      where: {
+        groupId: "hgrp_123",
+        memberId: "member_0",
+        nextMatchingAt: { lte: now },
+        preferencesJson: { equals: expect.anything() },
+        status: "enrolled",
+      },
+    });
+    expect(mocks.appendCallCircleSetupNotificationTx).toHaveBeenCalledWith({
+      groupId: "hgrp_123",
+      memberId: "member_0",
+      now,
+      requireDaytime: true,
+      timeZone: "UTC",
+      tx: expect.any(Object),
+    });
   });
 
   it("keeps every growing scheduler phase hard-bounded", async () => {
@@ -609,11 +712,16 @@ type SchedulerMatch = ReturnType<typeof schedulerMatch>;
 function createSchedulerPrisma(input: {
   bridgeMatches?: SchedulerMatch[];
   dueParticipants?: Array<{ groupId: string; id: string }>;
-  expiredMatches?: Array<{ id: string }>;
+  expiredMatches?: SchedulerMatch[];
   finalMatches?: SchedulerMatch[];
   handoffMatches?: SchedulerMatch[];
   morningMatches?: SchedulerMatch[];
-  setupParticipants?: Array<{ groupId: string; id: string; memberId: string }>;
+  setupParticipants?: Array<{
+    groupId: string;
+    id: string;
+    member: { pendingActivationTimeZone: string | null };
+    memberId: string;
+  }>;
 } = {}) {
   const matchFindMany = vi.fn(async (args: MatchFindManyArgs) => {
     if (isMatchPhase(args, "expiry")) return input.expiredMatches ?? [];
@@ -730,17 +838,21 @@ function findMatchQuery(
 }
 
 function eligibleParticipant(memberId: string, groupId = "hgrp_123") {
+  const storedPreferencesJson = {
+    cadence: "weekly" as const,
+    memberCadences: [],
+    timeZone: "UTC",
+    windows: [{
+      dayOfWeek: 1 as const,
+      endLocalTime: "15:30",
+      startLocalTime: "15:00",
+    }],
+  };
   return {
     groupId,
     memberId,
-    preferences: {
-      timeZone: "UTC",
-      windows: [{
-        dayOfWeek: 1 as const,
-        endLocalTime: "15:30",
-        startLocalTime: "15:00",
-      }],
-    },
+    preferences: storedPreferencesJson,
+    storedPreferencesJson,
   };
 }
 

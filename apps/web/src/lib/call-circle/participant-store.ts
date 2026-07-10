@@ -4,6 +4,7 @@ import { Prisma, type PrismaClient } from "@prisma/client";
 import {
   hostedCallCirclePreferencesSchema,
   type HostedCallCirclePreferences,
+  type HostedCallCirclePreferencesPatch,
 } from "@murphai/hosted-execution/call-circle";
 import {
   HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX,
@@ -23,12 +24,24 @@ import type {
   CallCircleParticipantRow,
   CallCirclePrismaClient,
 } from "./types";
+import { readNextCallCircleMatchingAt } from "./time";
 
-export interface CallCircleEligibleParticipant {
+export interface CallCircleDueParticipant {
   groupId: string;
   memberId: string;
+  preferences: HostedCallCirclePreferences | null;
+  storedPreferencesJson: Prisma.JsonValue;
+}
+
+export interface CallCircleEligibleParticipant extends CallCircleDueParticipant {
   preferences: HostedCallCirclePreferences;
 }
+
+export type CallCirclePreferenceWriteResult =
+  | "updated"
+  | "missing"
+  | "incomplete"
+  | "invalid_member_cadences";
 
 export const HOSTED_CALL_CIRCLE_PARTICIPANTS_MAX =
   HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX;
@@ -160,11 +173,61 @@ export async function writeCallCirclePreferences(input: {
   groupId: string;
   memberId: string;
   now?: Date;
-  preferences: HostedCallCirclePreferences;
-  prisma?: CallCirclePrismaClient;
-}): Promise<boolean> {
-  const prisma = input.prisma ?? getPrisma();
-  const preferences = hostedCallCirclePreferencesSchema.parse(input.preferences);
+  patch: HostedCallCirclePreferencesPatch;
+  prisma: Prisma.TransactionClient;
+}): Promise<CallCirclePreferenceWriteResult> {
+  const prisma = input.prisma;
+  await lockHostedMemberRow(prisma, input.memberId);
+  const participant = await prisma.hostedCallCircleParticipant.findUnique({
+    select: { preferencesJson: true },
+    where: {
+      groupId_memberId: {
+        groupId: input.groupId,
+        memberId: input.memberId,
+      },
+    },
+  });
+  if (!participant) return "missing";
+
+  const current = participant.preferencesJson === null
+    ? null
+    : parseCallCirclePreferencesOrNull(participant.preferencesJson);
+  if (participant.preferencesJson !== null && !current) return "incomplete";
+  if (!current && (input.patch.timeZone === undefined || input.patch.windows === undefined)) {
+    return "incomplete";
+  }
+
+  const memberCadenceUpdates = input.patch.memberCadenceUpdates ?? [];
+  const memberIds = memberCadenceUpdates.map((update) => update.memberId);
+  if (
+    memberIds.includes(input.memberId)
+    || !await areCurrentCallCircleGroupMembers({
+      groupId: input.groupId,
+      memberIds,
+      prisma,
+    })
+  ) {
+    return "invalid_member_cadences";
+  }
+
+  const memberCadences = new Map(
+    (current?.memberCadences ?? []).map((entry) => [entry.memberId, entry.cadence]),
+  );
+  for (const update of memberCadenceUpdates) {
+    if (update.cadence === "default") {
+      memberCadences.delete(update.memberId);
+    } else {
+      memberCadences.set(update.memberId, update.cadence);
+    }
+  }
+  const preferences = hostedCallCirclePreferencesSchema.parse({
+    cadence: input.patch.cadence ?? current?.cadence,
+    memberCadences: [...memberCadences]
+      .sort(([first], [second]) => first < second ? -1 : first > second ? 1 : 0)
+      .map(([memberId, cadence]) => ({ cadence, memberId })),
+    timeZone: input.patch.timeZone ?? current?.timeZone,
+    windows: input.patch.windows ?? current?.windows,
+  });
   const result = await prisma.hostedCallCircleParticipant.updateMany({
     data: {
       nextMatchingAt: input.now ?? new Date(),
@@ -175,7 +238,22 @@ export async function writeCallCirclePreferences(input: {
       memberId: input.memberId,
     },
   });
-  return result.count > 0;
+  return result.count > 0 ? "updated" : "missing";
+}
+
+async function areCurrentCallCircleGroupMembers(input: {
+  groupId: string;
+  memberIds: readonly string[];
+  prisma: Prisma.TransactionClient;
+}): Promise<boolean> {
+  if (input.memberIds.length === 0) return true;
+  const count = await input.prisma.hostedGroupMember.count({
+    where: {
+      groupId: input.groupId,
+      memberId: { in: [...input.memberIds] },
+    },
+  });
+  return count === input.memberIds.length;
 }
 
 export async function pauseCallCircleParticipant(input: {
@@ -221,10 +299,11 @@ export async function resumeCallCircleParticipant(input: {
   return result.count > 0;
 }
 
-export async function listCallCircleEligibleParticipants(input: {
+export async function listCallCircleDueParticipants(input: {
   groupId: string;
+  now: Date;
   prisma?: CallCirclePrismaClient;
-}): Promise<CallCircleEligibleParticipant[]> {
+}): Promise<CallCircleDueParticipant[]> {
   const prisma = input.prisma ?? getPrisma();
   const participants = await prisma.hostedCallCircleParticipant.findMany({
     orderBy: [
@@ -239,24 +318,43 @@ export async function listCallCircleEligibleParticipants(input: {
     take: HOSTED_CALL_CIRCLE_PARTICIPANTS_MAX,
     where: {
       ...activeCallCircleParticipantWhere({ groupId: input.groupId }),
+      nextMatchingAt: { lte: input.now },
       preferencesJson: { not: Prisma.DbNull },
     },
   });
 
   return participants.flatMap((participant) => {
     const preferences = parseCallCirclePreferencesOrNull(participant.preferencesJson);
-    if (
-      !preferences
-      || preferences.windows.length === 0
-    ) {
-      return [];
-    }
+    if (participant.preferencesJson === null) return [];
     return [{
       groupId: participant.groupId,
       memberId: participant.memberId,
       preferences,
+      storedPreferencesJson: participant.preferencesJson,
     }];
   });
+}
+
+export async function advanceCallCircleParticipantMatchingCursors(input: {
+  now: Date;
+  participants: readonly CallCircleDueParticipant[];
+  prisma?: CallCirclePrismaClient;
+}): Promise<void> {
+  const prisma = input.prisma ?? getPrisma();
+  await Promise.all(input.participants.map(async (participant) => {
+    await prisma.hostedCallCircleParticipant.updateMany({
+      data: {
+        nextMatchingAt: readNextCallCircleMatchingAt(input.now),
+      },
+      where: {
+        groupId: participant.groupId,
+        memberId: participant.memberId,
+        nextMatchingAt: { lte: input.now },
+        preferencesJson: { equals: toPrismaJsonValue(participant.storedPreferencesJson) },
+        status: "enrolled",
+      },
+    });
+  }));
 }
 
 async function readCallCircleParticipantTimeZones(input: {
@@ -324,6 +422,50 @@ export async function canUseActiveCallCircleParticipantPair(input: {
     },
   });
   return participantCount === 2;
+}
+
+export async function readActiveCallCircleParticipantPair(input: {
+  groupId: string;
+  memberAId: string;
+  memberBId: string;
+  prisma?: CallCirclePrismaClient;
+}): Promise<{
+  memberA: { memberId: string; preferences: HostedCallCirclePreferences };
+  memberB: { memberId: string; preferences: HostedCallCirclePreferences };
+} | null> {
+  if (input.memberAId === input.memberBId) return null;
+  const prisma = input.prisma ?? getPrisma();
+  const participants = await prisma.hostedCallCircleParticipant.findMany({
+    select: {
+      memberId: true,
+      preferencesJson: true,
+    },
+    take: 2,
+    where: {
+      ...activeCallCircleParticipantWhere({ groupId: input.groupId }),
+      memberId: { in: [input.memberAId, input.memberBId] },
+    },
+  });
+  if (participants.length !== 2) return null;
+  const byMemberId = new Map(participants.map((participant) => [
+    participant.memberId,
+    participant.preferencesJson === null
+      ? null
+      : parseCallCirclePreferencesOrNull(participant.preferencesJson),
+  ]));
+  const memberAPreferences = byMemberId.get(input.memberAId);
+  const memberBPreferences = byMemberId.get(input.memberBId);
+  if (!memberAPreferences || !memberBPreferences) return null;
+  return {
+    memberA: {
+      memberId: input.memberAId,
+      preferences: memberAPreferences,
+    },
+    memberB: {
+      memberId: input.memberBId,
+      preferences: memberBPreferences,
+    },
+  };
 }
 
 export function activeCallCircleParticipantWhere(input: {
@@ -399,6 +541,10 @@ function parseCallCirclePreferencesOrNull(
 }
 
 function toPrismaJson(value: HostedCallCirclePreferences): Prisma.InputJsonValue {
+  return JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue;
+}
+
+function toPrismaJsonValue(value: Prisma.JsonValue): Prisma.InputJsonValue {
   return JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue;
 }
 

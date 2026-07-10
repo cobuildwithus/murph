@@ -36,6 +36,7 @@ vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
 }));
 
 import {
+  appendCallCircleConfirmNotificationTx,
   appendCallCircleSetupNotificationTx,
   appendCallCircleTerminalNotificationIfReachableTx,
   appendCallCircleTerminalNotificationsTx,
@@ -73,17 +74,35 @@ describe("Call Circle notifications", () => {
     });
   });
 
-  it("keys confirmation notifications by the proposed window", () => {
-    const first =
-      "assistant.notification.requested:call-circle:am:hccm_123:member_b:2026-07-06T15:00:00.000Z";
-    const countered =
-      "assistant.notification.requested:call-circle:am:hccm_123:member_b:2026-07-06T16:00:00.000Z";
+  it("round-trips the writer's confirmation anchor through the response parser", async () => {
+    const windowStartAt = new Date("2026-07-06T15:00:00.000Z");
+    await appendCallCircleConfirmNotificationTx({
+      matchId: "hccm_123",
+      memberId: "member_b",
+      now: new Date("2026-07-06T09:00:00.000Z"),
+      preflight: {
+        route: {
+          actorId: "+15550002222",
+          channel: "linq",
+          delivery: { kind: "thread", target: "chat_123" },
+          identityId: "hbidx:phone:v1:test",
+          threadId: "chat_123",
+          threadIsDirect: true,
+        },
+        status: "ok",
+      },
+      stage: "am",
+      tx: createNotificationTx() as never,
+      windowLabel: "Mon at 11:00 AM",
+      windowStartAt,
+    });
+    const eventId = mocks.appendHostedAssistantNotificationTx.mock.calls[0]?.[0]?.eventId;
 
-    expect(first).toBe(
+    expect(eventId).toBe(
       "assistant.notification.requested:call-circle:am:hccm_123:member_b:2026-07-06T15:00:00.000Z",
     );
     expect(readCallCircleConfirmNotificationAnchor({
-      eventId: first,
+      eventId,
       memberId: "member_b",
     })).toEqual({
       key: "am:hccm_123:2026-07-06T15:00:00.000Z",
@@ -91,7 +110,6 @@ describe("Call Circle notifications", () => {
       stage: "am",
       windowStartAt: new Date("2026-07-06T15:00:00.000Z"),
     });
-    expect(countered).not.toBe(first);
   });
 
   it("can key setup notifications by a fresh offer anchor", () => {
@@ -149,12 +167,12 @@ describe("Call Circle notifications", () => {
     expect(mocks.appendHostedAssistantNotificationTx).not.toHaveBeenCalled();
   });
 
-  it("fails closed on an invalid stored timezone", async () => {
+  it("fails closed on an invalid stored timezone for non-handoff terminal copy", async () => {
     const tx = createNotificationTx();
 
     await expect(appendCallCircleTerminalNotificationIfReachableTx({
       groupId: "hgrp_123",
-      kind: "handoff",
+      kind: "outcome",
       matchId: "hccm_123",
       memberId: "member_a",
       now: new Date("2026-07-06T15:30:00.000Z"),
@@ -163,6 +181,21 @@ describe("Call Circle notifications", () => {
     })).resolves.toBeNull();
 
     expect(mocks.appendHostedAssistantNotificationTx).not.toHaveBeenCalled();
+  });
+
+  it("delivers terminal handoff copy even when the bridge ends during quiet hours", async () => {
+    await expect(appendCallCircleTerminalNotificationIfReachableTx({
+      groupId: "hgrp_123",
+      kind: "handoff",
+      matchId: "hccm_123",
+      memberId: "member_a",
+      now: new Date("2026-07-06T06:30:00.000Z"),
+      timeZone: "America/New_York",
+      tx: createNotificationTx() as never,
+    })).resolves.toEqual({
+      mailboxItemId: "hmi_123",
+      status: "sent",
+    });
   });
 
   it("treats setup as an immediate follow-up while retaining route gates", async () => {
@@ -185,6 +218,21 @@ describe("Call Circle notifications", () => {
         status: "enrolled",
       },
     });
+  });
+
+  it("defers scheduler-retried setup asks outside member daytime", async () => {
+    await expect(appendCallCircleSetupNotificationTx({
+      groupId: "hgrp_123",
+      memberId: "member_a",
+      now: new Date("2026-07-06T06:30:00.000Z"),
+      requireDaytime: true,
+      timeZone: "America/New_York",
+      tx: createNotificationTx() as never,
+    })).resolves.toEqual({
+      reason: "quiet_hours",
+      status: "blocked",
+    });
+    expect(mocks.appendHostedAssistantNotificationTx).not.toHaveBeenCalled();
   });
 
   it("does not append setup after participant authority is lost", async () => {

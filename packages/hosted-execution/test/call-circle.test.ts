@@ -38,6 +38,18 @@ describe("hosted Call Circle contracts", () => {
     });
   });
 
+  it("defaults old stored preferences to weekly cadence with no member overrides", () => {
+    expect(hostedCallCirclePreferencesSchema.parse({
+      timeZone: "America/New_York",
+      windows: [],
+    })).toEqual({
+      cadence: "weekly",
+      memberCadences: [],
+      timeZone: "America/New_York",
+      windows: [],
+    });
+  });
+
   it("uses one contextual control-plane envelope", () => {
     expect(hostedCallCircleRespondControlRequestSchema.parse({
       request: { kind: "confirm" },
@@ -47,22 +59,40 @@ describe("hosted Call Circle contracts", () => {
     })).toThrow(/request/u);
   });
 
-  it("requires a timezone for preference responses", () => {
+  it("allows independent default and per-member cadence updates", () => {
+    expect(hostedCallCircleRespondRequestSchema.parse({
+      cadence: "monthly",
+      kind: "preferences",
+      memberCadenceUpdates: [
+        { cadence: "never", memberId: "member_housemate" },
+        { cadence: "weekly", memberId: "member_friend" },
+      ],
+    })).toEqual({
+      cadence: "monthly",
+      kind: "preferences",
+      memberCadenceUpdates: [
+        { cadence: "never", memberId: "member_housemate" },
+        { cadence: "weekly", memberId: "member_friend" },
+      ],
+    });
+  });
+
+  it("rejects empty or duplicate per-member preference updates", () => {
     expect(() => hostedCallCircleRespondRequestSchema.parse({
       kind: "preferences",
-      windows: [
-        {
-          dayOfWeek: 2,
-          endLocalTime: "18:00",
-          startLocalTime: "17:00",
-        },
+    })).toThrow(/change at least one setting/u);
+    expect(() => hostedCallCircleRespondRequestSchema.parse({
+      kind: "preferences",
+      memberCadenceUpdates: [
+        { cadence: "never", memberId: "member_housemate" },
+        { cadence: "default", memberId: "member_housemate" },
       ],
-    })).toThrow(/timeZone/u);
+    })).toThrow(/at most once/u);
   });
 
   it("rejects unknown stored preference fields", () => {
     expect(() => hostedCallCirclePreferencesSchema.parse({
-      excludeMemberIds: ["member_legacy"],
+      excludedMemberIds: ["member_legacy"],
       timeZone: "America/New_York",
       windows: [],
     })).toThrow(/Unrecognized key/u);

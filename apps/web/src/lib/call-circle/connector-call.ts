@@ -346,6 +346,7 @@ function buildCallCircleConnectorBrief(input: {
     instructions: [
       "Transfer the call immediately after the opening line.",
       "Do not ask for another confirmation; web already recorded both final confirmations before this connector call started.",
+      "Use only the server-supplied transfer target. Never say, spell, or repeat its phone number.",
     ],
     shareableFacts: {},
     successCriteria: "The call transfers to the matched group member.",

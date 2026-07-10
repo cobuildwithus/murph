@@ -51,7 +51,7 @@ export function sha256Hex(value: string): string {
 }
 
 export function containsUrlLikeText(value: string): boolean {
-  if (/(?:^|[\s([<{])(?:[a-z][a-z\d+.-]*):[^\s<>)\]}]+/iu.test(value)) {
+  if (/(?:^|[\s([<{])(?:[a-z][a-z\d+.-]*):\/\/[^\s<>)\]}]+/iu.test(value)) {
     return true;
   }
   if (/(?:^|[\s([<{])\/\/[^\s<>)\]}]+/u.test(value)) {

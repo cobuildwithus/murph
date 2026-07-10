@@ -24,6 +24,7 @@ export const HOSTED_INBOX_MEDIA_RETENTION_SIGNAL_BATCH_SIZE = 25;
 export const HOSTED_INBOX_MEDIA_RETENTION_SIGNAL_CONCURRENCY = 5;
 export const HOSTED_INBOX_MEDIA_RETENTION_SIGNAL_TIMEOUT_MS = 10_000;
 export const HOSTED_ASSISTANT_NOTIFICATION_RECOVERY_BATCH_SIZE = 100;
+export const HOSTED_ASSISTANT_NOTIFICATION_RECOVERY_MAX_AGE_MS = DAY_MS;
 const HOSTED_ASSISTANT_NOTIFICATION_RECOVERY_CONCURRENCY = 10;
 
 type HostedRuntimeRecheckSignal = (input: {
@@ -166,6 +167,9 @@ async function listPendingAssistantNotificationSignals(input: {
   now: Date;
   prisma: PrismaClient;
 }): Promise<PendingAssistantNotificationSignal[]> {
+  const createdAfter = new Date(
+    input.now.getTime() - HOSTED_ASSISTANT_NOTIFICATION_RECOVERY_MAX_AGE_MS,
+  );
   return input.prisma.$queryRaw<PendingAssistantNotificationSignal[]>`
     SELECT
       pending."mailboxItemId",
@@ -184,6 +188,7 @@ async function listPendingAssistantNotificationSignals(input: {
         AND item."lane" = 'system'
         AND item."consumed_at" IS NULL
         AND item."lane_seq" > COALESCE(counter."consumed_seq", 0)
+        AND item."created_at" >= ${createdAfter}
         AND item."created_at" <= ${input.now}
         AND (item."expires_at" IS NULL OR item."expires_at" > ${input.now})
       ORDER BY item."user_id" ASC, item."lane_seq" ASC

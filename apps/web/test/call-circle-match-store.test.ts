@@ -21,7 +21,6 @@ import {
   declineCallCircleMatchSide as declineMatchSide,
   dropCallCircleMatchForNotificationBlocked,
   expirePastCallCircleMatches,
-  listCallCircleMemberIdsWithRecentMatch,
   listRecentCallCircleMatches,
   markCallCircleMatchAmAsked,
   markCallCircleMatchFinalAsked,
@@ -30,10 +29,12 @@ import {
 import {
   acceptCallCircleOfferEnrollment,
   activeCallCircleParticipantPairMatchWhere,
+  advanceCallCircleParticipantMatchingCursors,
   canUseActiveCallCircleParticipant,
   canUseActiveCallCircleParticipantPair,
   HOSTED_CALL_CIRCLE_PARTICIPANTS_MAX,
   pauseCallCircleParticipant,
+  readActiveCallCircleParticipantPair,
   readCallCircleMatchParticipantTimeZones,
   resumeCallCircleParticipant,
   writeCallCirclePreferences,
@@ -221,7 +222,7 @@ describe("Call Circle conditional mutations", () => {
     });
   });
 
-  it("declines a final confirmed match so a late no can stop the bridge", async () => {
+  it("allows a late no after either a final pair confirmation or this side's earlier yes", async () => {
     const prisma = {
       hostedCallCircleMatch: { updateMany },
     };
@@ -268,6 +269,11 @@ describe("Call Circle conditional mutations", () => {
           {
             sideAResponse: "pending",
             status: { in: ["proposed", "asking"] },
+          },
+          {
+            sideAResponse: { in: ["confirmed", "countered"] },
+            sideBResponse: "pending",
+            status: "asking",
           },
           { status: "both_confirmed" },
         ],
@@ -672,10 +678,10 @@ describe("Call Circle conditional mutations", () => {
       $queryRaw: vi.fn(),
       hostedCallCircleMatch: { create },
       hostedCallCircleParticipant: {
-        count: vi.fn(async () => 1),
-      },
-      hostedGroupMember: {
-        count: vi.fn(async () => 1),
+        findMany: vi.fn(async () => [{
+          memberId: "member_a",
+          preferencesJson: storedPreferences(),
+        }]),
       },
     };
 
@@ -694,7 +700,7 @@ describe("Call Circle conditional mutations", () => {
     expect(create).not.toHaveBeenCalled();
   });
 
-  it("locks and rechecks both participants before creating a weekly proposal", async () => {
+  it("locks and rechecks both participants before creating a proposal", async () => {
     const now = new Date("2026-07-06T15:00:00.000Z");
     const create = vi.fn(async () => ({
       id: "hccm_123",
@@ -703,13 +709,13 @@ describe("Call Circle conditional mutations", () => {
       $queryRaw: vi.fn(),
       hostedCallCircleMatch: {
         create,
-        findFirst: vi.fn(async () => null),
+        findMany: vi.fn(async () => []),
       },
       hostedCallCircleParticipant: {
-        count: vi.fn(async () => 2),
-      },
-      hostedGroupMember: {
-        count: vi.fn(async () => 2),
+        findMany: vi.fn(async () => [
+          { memberId: "member_a", preferencesJson: storedPreferences() },
+          { memberId: "member_b", preferencesJson: storedPreferences() },
+        ]),
       },
     };
     const transaction = vi.fn(async (callback: (transaction: unknown) => Promise<unknown>) =>
@@ -730,8 +736,18 @@ describe("Call Circle conditional mutations", () => {
       prisma: prisma as never,
     })).resolves.toEqual({ id: "hccm_123" });
 
-    expect(tx.hostedCallCircleMatch.findFirst).toHaveBeenCalledWith({
-      select: { id: true },
+    expect(tx.hostedCallCircleMatch.findMany).toHaveBeenCalledWith({
+      orderBy: [
+        { createdAt: "desc" },
+        { id: "desc" },
+      ],
+      take: 200,
+      select: {
+        createdAt: true,
+        memberAId: true,
+        memberBId: true,
+        status: true,
+      },
       where: {
         AND: [
           {
@@ -743,7 +759,7 @@ describe("Call Circle conditional mutations", () => {
               },
               {
                 createdAt: {
-                  gte: new Date("2026-06-29T15:00:00.000Z"),
+                  gte: new Date("2026-06-09T03:00:00.000Z"),
                 },
                 NOT: [
                   {
@@ -793,14 +809,18 @@ describe("Call Circle conditional mutations", () => {
       $queryRaw: vi.fn(),
       hostedCallCircleMatch: {
         create,
-        findFirst: vi.fn(async () => ({ id: "hccm_recent_other_group" })),
+        findMany: vi.fn(async () => [{
+          createdAt: new Date("2026-07-01T15:00:00.000Z"),
+          memberAId: "member_a",
+          memberBId: "member_other",
+        }]),
       },
       hostedCallCircleParticipant: {
-        count: vi.fn(async () => 2),
+        findMany: vi.fn(async () => [
+          { memberId: "member_a", preferencesJson: storedPreferences() },
+          { memberId: "member_b", preferencesJson: storedPreferences() },
+        ]),
         updateMany: participantUpdateMany,
-      },
-      hostedGroupMember: {
-        count: vi.fn(async () => 2),
       },
     };
     const prisma = {
@@ -820,19 +840,58 @@ describe("Call Circle conditional mutations", () => {
       prisma: prisma as never,
     })).resolves.toBeNull();
 
-    expect(tx.hostedCallCircleMatch.findFirst).toHaveBeenCalled();
+    expect(tx.hostedCallCircleMatch.findMany).toHaveBeenCalled();
     expect(participantUpdateMany).not.toHaveBeenCalled();
     expect(create).not.toHaveBeenCalled();
   });
 
+  it("rechecks private never preferences after locking and rejects only the future proposal", async () => {
+    const create = vi.fn();
+    const findMany = vi.fn(async () => []);
+    const prisma = {
+      $queryRaw: vi.fn(),
+      hostedCallCircleMatch: { create, findMany },
+      hostedCallCircleParticipant: {
+        findMany: vi.fn(async () => [
+          {
+            memberId: "member_a",
+            preferencesJson: storedPreferences([{
+              cadence: "never",
+              memberId: "member_b",
+            }]),
+          },
+          { memberId: "member_b", preferencesJson: storedPreferences() },
+        ]),
+      },
+    };
+
+    await expect(createCallCircleMatchProposal({
+      proposal: {
+        groupId: "hgrp_123",
+        memberAId: "member_a",
+        memberBId: "member_b",
+        now: new Date("2026-07-06T15:00:00.000Z"),
+        windowEndAt: new Date("2026-07-06T15:30:00.000Z"),
+        windowStartAt: new Date("2026-07-06T15:00:00.000Z"),
+      },
+      prisma: prisma as never,
+    })).resolves.toBeNull();
+
+    expect(prisma.$queryRaw).toHaveBeenCalledTimes(2);
+    expect(findMany).toHaveBeenCalledOnce();
+    expect(create).not.toHaveBeenCalled();
+  });
+
   it("ignores notification-blocked dropped rows when reading recent match history", async () => {
+    const now = new Date("2026-07-06T15:00:00.000Z");
     const findMany = vi.fn(async () => []);
     const prisma = {
       hostedCallCircleMatch: { findMany },
     };
 
     await expect(listRecentCallCircleMatches({
-      groupId: "hgrp_123",
+      memberIds: ["member_b", "member_a", "member_a"],
+      now,
       prisma: prisma as never,
     })).resolves.toEqual([]);
 
@@ -846,69 +905,39 @@ describe("Call Circle conditional mutations", () => {
         createdAt: true,
         memberAId: true,
         memberBId: true,
+        status: true,
       },
       where: {
-        groupId: "hgrp_123",
-        NOT: [
+        AND: [
           {
-            amAskedAt: null,
-            finalAskedAt: null,
-            status: "canceled",
+            OR: [
+              {
+                status: {
+                  in: ["proposed", "asking", "both_confirmed", "bridging"],
+                },
+              },
+              {
+                createdAt: { gte: new Date("2026-06-09T03:00:00.000Z") },
+                NOT: [
+                  {
+                    amAskedAt: null,
+                    finalAskedAt: null,
+                    status: "canceled",
+                  },
+                  {
+                    outcome: "notification_blocked",
+                    status: "dropped",
+                  },
+                ],
+              },
+            ],
           },
           {
-            outcome: "notification_blocked",
-            status: "dropped",
+            OR: [
+              { memberAId: { in: ["member_b", "member_a"] } },
+              { memberBId: { in: ["member_b", "member_a"] } },
+            ],
           },
-        ],
-      },
-    });
-  });
-
-  it("lists globally recent members with the same bounded blocking predicate", async () => {
-    const now = new Date("2026-07-06T15:00:00.000Z");
-    const findMany = vi.fn(async () => [{ id: "member_a" }]);
-    const prisma = {
-      hostedMember: { findMany },
-    };
-    const recentMatchWhere = {
-      OR: [
-        {
-          status: {
-            in: ["proposed", "asking", "both_confirmed", "bridging"],
-          },
-        },
-        {
-          createdAt: { gte: new Date("2026-06-29T15:00:00.000Z") },
-          NOT: [
-            {
-              amAskedAt: null,
-              finalAskedAt: null,
-              status: "canceled",
-            },
-            {
-              outcome: "notification_blocked",
-              status: "dropped",
-            },
-          ],
-        },
-      ],
-    };
-
-    await expect(listCallCircleMemberIdsWithRecentMatch({
-      memberIds: ["member_b", "member_a", "member_a"],
-      now,
-      prisma: prisma as never,
-    })).resolves.toEqual(["member_a"]);
-
-    expect(findMany).toHaveBeenCalledWith({
-      orderBy: { id: "asc" },
-      select: { id: true },
-      take: 2,
-      where: {
-        id: { in: ["member_b", "member_a"] },
-        OR: [
-          { callCircleMatchesAsA: { some: recentMatchWhere } },
-          { callCircleMatchesAsB: { some: recentMatchWhere } },
         ],
       },
     });
@@ -1221,17 +1250,26 @@ describe("Call Circle conditional mutations", () => {
     expect(create).not.toHaveBeenCalled();
   });
 
-  it("writes preferences only to an existing participant without changing enrollment", async () => {
+  it("patches private preferences without changing enrollment", async () => {
+    const findUnique = vi.fn(async (): Promise<{
+      preferencesJson: ReturnType<typeof storedPreferences>;
+    } | null> => ({
+      preferencesJson: {
+        cadence: "weekly" as const,
+        memberCadences: [{ cadence: "monthly" as const, memberId: "member_old" }],
+        timeZone: "UTC",
+        windows: [{
+          dayOfWeek: 1,
+          endLocalTime: "17:30",
+          startLocalTime: "17:00",
+        }],
+      },
+    }));
+    const groupMemberCount = vi.fn(async () => 2);
     const prisma = {
-      hostedCallCircleParticipant: { updateMany },
-    };
-    const preferences = {
-      timeZone: "UTC",
-      windows: [{
-        dayOfWeek: 1,
-        endLocalTime: "17:30",
-        startLocalTime: "17:00",
-      }],
+      $queryRaw: vi.fn(),
+      hostedCallCircleParticipant: { findUnique, updateMany },
+      hostedGroupMember: { count: groupMemberCount },
     };
     const now = new Date("2026-07-06T15:00:00.000Z");
 
@@ -1239,29 +1277,146 @@ describe("Call Circle conditional mutations", () => {
       groupId: "hgrp_123",
       memberId: "member_123",
       now,
-      preferences,
+      patch: {
+        cadence: "biweekly",
+        memberCadenceUpdates: [
+          { cadence: "never", memberId: "member_housemate" },
+          { cadence: "default", memberId: "member_old" },
+        ],
+      },
       prisma: prisma as never,
-    })).resolves.toBe(true);
+    })).resolves.toBe("updated");
 
     expect(updateMany).toHaveBeenCalledWith({
       data: {
         nextMatchingAt: now,
-        preferencesJson: preferences,
+        preferencesJson: {
+          cadence: "biweekly",
+          memberCadences: [{ cadence: "never", memberId: "member_housemate" }],
+          timeZone: "UTC",
+          windows: [{
+            dayOfWeek: 1,
+            endLocalTime: "17:30",
+            startLocalTime: "17:00",
+          }],
+        },
       },
       where: {
         groupId: "hgrp_123",
         memberId: "member_123",
       },
     });
+    expect(groupMemberCount).toHaveBeenCalledWith({
+      where: {
+        groupId: "hgrp_123",
+        memberId: { in: ["member_housemate", "member_old"] },
+      },
+    });
 
-    updateMany.mockResolvedValueOnce({ count: 0 });
+    findUnique.mockResolvedValueOnce(null);
     await expect(writeCallCirclePreferences({
       groupId: "hgrp_missing",
       memberId: "member_123",
       now,
-      preferences,
+      patch: { cadence: "weekly" },
       prisma: prisma as never,
-    })).resolves.toBe(false);
+    })).resolves.toBe("missing");
+  });
+
+  it("rejects self and non-member cadence overrides without exposing which check failed", async () => {
+    const update = vi.fn();
+    const prisma = {
+      $queryRaw: vi.fn(),
+      hostedCallCircleParticipant: {
+        findUnique: vi.fn(async () => ({ preferencesJson: storedPreferences() })),
+        updateMany: update,
+      },
+      hostedGroupMember: { count: vi.fn(async () => 0) },
+    };
+
+    await expect(writeCallCirclePreferences({
+      groupId: "hgrp_123",
+      memberId: "member_a",
+      patch: {
+        memberCadenceUpdates: [{ cadence: "never", memberId: "member_a" }],
+      },
+      prisma: prisma as never,
+    })).resolves.toBe("invalid_member_cadences");
+    await expect(writeCallCirclePreferences({
+      groupId: "hgrp_123",
+      memberId: "member_a",
+      patch: {
+        memberCadenceUpdates: [{ cadence: "never", memberId: "member_unknown" }],
+      },
+      prisma: prisma as never,
+    })).resolves.toBe("invalid_member_cadences");
+    expect(update).not.toHaveBeenCalled();
+  });
+
+  it("advances weekly matching cursors and preserves concurrent edits", async () => {
+    const update = vi.fn(async () => ({ count: 1 }));
+    const now = new Date("2026-07-06T09:30:00.000Z");
+    const weeklyPreferences = storedPreferences();
+    const monthlyPreferences = { ...storedPreferences(), cadence: "monthly" as const };
+    const invalidPreferences = { invalid: true };
+
+    await advanceCallCircleParticipantMatchingCursors({
+      now,
+      participants: [
+        {
+          groupId: "hgrp_123",
+          memberId: "member_weekly",
+          preferences: weeklyPreferences,
+          storedPreferencesJson: weeklyPreferences,
+        },
+        {
+          groupId: "hgrp_123",
+          memberId: "member_monthly",
+          preferences: monthlyPreferences,
+          storedPreferencesJson: monthlyPreferences,
+        },
+        {
+          groupId: "hgrp_123",
+          memberId: "member_invalid",
+          preferences: null,
+          storedPreferencesJson: invalidPreferences,
+        },
+      ],
+      prisma: {
+        hostedCallCircleParticipant: { updateMany: update },
+      } as never,
+    });
+
+    expect(update).toHaveBeenCalledWith({
+      data: { nextMatchingAt: new Date("2026-07-13T00:00:00.000Z") },
+      where: {
+        groupId: "hgrp_123",
+        memberId: "member_weekly",
+        nextMatchingAt: { lte: now },
+        preferencesJson: { equals: weeklyPreferences },
+        status: "enrolled",
+      },
+    });
+    expect(update).toHaveBeenCalledWith({
+      data: { nextMatchingAt: new Date("2026-07-13T00:00:00.000Z") },
+      where: {
+        groupId: "hgrp_123",
+        memberId: "member_monthly",
+        nextMatchingAt: { lte: now },
+        preferencesJson: { equals: monthlyPreferences },
+        status: "enrolled",
+      },
+    });
+    expect(update).toHaveBeenCalledWith({
+      data: { nextMatchingAt: new Date("2026-07-13T00:00:00.000Z") },
+      where: {
+        groupId: "hgrp_123",
+        memberId: "member_invalid",
+        nextMatchingAt: { lte: now },
+        preferencesJson: { equals: invalidPreferences },
+        status: "enrolled",
+      },
+    });
   });
 
   it("does not expose an invalid stored timezone to scheduled notification work", async () => {
@@ -1345,6 +1500,52 @@ describe("Call Circle conditional mutations", () => {
     })).resolves.toBe(false);
   });
 
+  it("reads both active participants and their private preferences for proposal checks", async () => {
+    const findMany = vi.fn(async () => [
+      {
+        memberId: "member_a",
+        preferencesJson: storedPreferences([{
+          cadence: "never",
+          memberId: "member_b",
+        }]),
+      },
+      { memberId: "member_b", preferencesJson: storedPreferences() },
+    ]);
+
+    await expect(readActiveCallCircleParticipantPair({
+      groupId: "hgrp_123",
+      memberAId: "member_a",
+      memberBId: "member_b",
+      prisma: { hostedCallCircleParticipant: { findMany } } as never,
+    })).resolves.toEqual({
+      memberA: {
+        memberId: "member_a",
+        preferences: storedPreferences([{
+          cadence: "never",
+          memberId: "member_b",
+        }]),
+      },
+      memberB: {
+        memberId: "member_b",
+        preferences: storedPreferences(),
+      },
+    });
+
+    findMany.mockResolvedValueOnce([
+      { memberId: "member_a", preferencesJson: storedPreferences() },
+      { memberId: "member_b", preferencesJson: storedPreferences() },
+    ]);
+    await expect(readActiveCallCircleParticipantPair({
+      groupId: "hgrp_123",
+      memberAId: "member_a",
+      memberBId: "member_b",
+      prisma: { hostedCallCircleParticipant: { findMany } } as never,
+    })).resolves.toEqual({
+      memberA: { memberId: "member_a", preferences: storedPreferences() },
+      memberB: { memberId: "member_b", preferences: storedPreferences() },
+    });
+  });
+
   it("requires access, membership, and enrollment for a single active participant", async () => {
     const prisma = {
       hostedCallCircleParticipant: {
@@ -1388,4 +1589,20 @@ function activePairMatchWhere() {
     memberAId: "member_a",
     memberBId: "member_b",
   });
+}
+
+function storedPreferences(memberCadences: Array<{
+  cadence: "weekly" | "biweekly" | "monthly" | "never";
+  memberId: string;
+}> = []) {
+  return {
+    cadence: "weekly" as const,
+    memberCadences,
+    timeZone: "UTC",
+    windows: [{
+      dayOfWeek: 1 as const,
+      endLocalTime: "17:30",
+      startLocalTime: "17:00",
+    }],
+  };
 }

@@ -30,6 +30,12 @@ describe("assistant Call Circle dynamic tool", () => {
     expect(MURPH_CALL_CIRCLE_RESPOND_TOOL.description).toContain(
       'For a match ask, yes means kind="confirm", no means kind="decline"',
     );
+    expect(MURPH_CALL_CIRCLE_RESPOND_TOOL.description).toContain(
+      "cadence as weekly, biweekly, or monthly",
+    );
+    expect(MURPH_CALL_CIRCLE_RESPOND_TOOL.description).toContain(
+      "never guess one from a name",
+    );
   });
 
   it("parses and executes member-owned responses through the hosted transport", async () => {
@@ -58,6 +64,32 @@ describe("assistant Call Circle dynamic tool", () => {
 
     expect(respond).toHaveBeenCalledTimes(1);
     expect(result.rpcResult).toMatchObject({ success: true });
+  });
+
+  it("parses private partial preference updates", () => {
+    const request = readMurphDynamicToolRequest(dynamicToolCall({
+      argumentsValue: {
+        cadence: "monthly",
+        kind: "preferences",
+        memberCadenceUpdates: [{
+          cadence: "never",
+          memberId: "member_housemate",
+        }],
+      },
+      tool: MURPH_CALL_CIRCLE_RESPOND_TOOL.name,
+    }));
+
+    expect(request).toEqual({
+      kind: "call-circle-respond",
+      request: {
+        cadence: "monthly",
+        kind: "preferences",
+        memberCadenceUpdates: [{
+          cadence: "never",
+          memberId: "member_housemate",
+        }],
+      },
+    });
   });
 });
 

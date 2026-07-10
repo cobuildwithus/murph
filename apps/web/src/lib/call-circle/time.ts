@@ -1,4 +1,5 @@
 import {
+  type HostedCallCircleCadence,
   type HostedCallCircleAvailabilityWindow,
   isHostedCallCircleTimeZone,
 } from "@murphai/hosted-execution/call-circle";
@@ -18,7 +19,6 @@ interface ZonedCallCircleAvailability {
 }
 
 export const CALL_CIRCLE_FINAL_ASK_LEAD_MS = 20 * 60 * 1000;
-export const CALL_CIRCLE_MATCH_LOOKBACK_MS = 7 * 24 * 60 * 60 * 1000;
 export const CALL_CIRCLE_MINIMUM_WINDOW_MS = 15 * 60 * 1000;
 
 export const CALL_CIRCLE_BRIDGE_WINDOW_MS = CALL_CIRCLE_MINIMUM_WINDOW_MS;
@@ -26,8 +26,21 @@ export const CALL_CIRCLE_BRIDGE_WINDOW_MS = CALL_CIRCLE_MINIMUM_WINDOW_MS;
 // final ask. A single-tick gap can miss the morning stage at the exact boundary.
 const CALL_CIRCLE_MORNING_TO_FINAL_MIN_MS = 20 * 60 * 1000;
 const CALL_CIRCLE_WINDOW_SCAN_STEP_MS = 60 * 1000;
-const CALL_CIRCLE_WEEK_MS = CALL_CIRCLE_MATCH_LOOKBACK_MS;
+const CALL_CIRCLE_WEEK_MS = 7 * 24 * 60 * 60 * 1000;
+const CALL_CIRCLE_CADENCE_SLACK_MS = 12 * 60 * 60 * 1000;
 const CALL_CIRCLE_MATCHING_EPOCH_DAY = 1;
+
+export const CALL_CIRCLE_MATCH_LOOKBACK_MS =
+  CALL_CIRCLE_WEEK_MS - CALL_CIRCLE_CADENCE_SLACK_MS;
+export const CALL_CIRCLE_MAX_MATCH_LOOKBACK_MS =
+  4 * CALL_CIRCLE_WEEK_MS - CALL_CIRCLE_CADENCE_SLACK_MS;
+
+export function readCallCircleCadenceLookbackMs(
+  cadence: HostedCallCircleCadence,
+): number {
+  const weeks = cadence === "weekly" ? 1 : cadence === "biweekly" ? 2 : 4;
+  return weeks * CALL_CIRCLE_WEEK_MS - CALL_CIRCLE_CADENCE_SLACK_MS;
+}
 
 interface LocalDateParts {
   day: number;
@@ -210,9 +223,9 @@ export function readCallCircleBridgeWindowStartCutoff(now: Date): Date {
 }
 
 /**
- * Returns the next Monday 00:00 UTC cadence boundary, always strictly after
- * `now`. Matching may run immediately for newly eligible participants, but
- * every considered participant advances to this shared weekly boundary.
+ * Returns the next Monday 00:00 UTC boundary, always strictly after `now`.
+ * Matching wakes weekly; participant and pair cadence eligibility is derived
+ * from match history rather than encoded in the scheduler cursor.
  */
 export function readNextCallCircleMatchingAt(now: Date): Date {
   if (!Number.isFinite(now.getTime())) {
