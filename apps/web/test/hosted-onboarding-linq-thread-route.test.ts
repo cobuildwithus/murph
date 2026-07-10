@@ -193,9 +193,11 @@ function buildLinqMessageReceivedEvent(input: {
   messageId?: string;
   recipient?: string;
   sender?: string;
+  service?: string;
   text?: string;
 }) {
   const recipient = input.recipient ?? "+15550000000";
+  const service = input.service ?? "iMessage";
   return {
     api_version: "2026-01-01",
     created_at: "2026-06-24T12:00:00.000Z",
@@ -207,7 +209,7 @@ function buildLinqMessageReceivedEvent(input: {
           handle: recipient,
           id: "owner_handle_123",
           is_me: true,
-          service: "iMessage",
+          service,
         },
       },
       chat_id: input.chatId ?? "chat_group_123",
@@ -225,16 +227,16 @@ function buildLinqMessageReceivedEvent(input: {
               },
             ],
       },
-      preferred_service: "iMessage",
+      preferred_service: service,
       recipient_phone: recipient,
       received_at: "2026-06-24T12:00:00.000Z",
       sender_handle: {
         handle: input.sender ?? "+15551112222",
         id: "sender_handle_123",
         is_me: false,
-        service: "iMessage",
+        service,
       },
-      service: "iMessage",
+      service,
     },
     event_id: input.eventId ?? "evt_group_123",
     event_type: "message.received",
@@ -1545,6 +1547,44 @@ describe("Linq group chat auto-provision", () => {
     );
   }
 
+  function mockAllowedThreadUsage(): void {
+    vi.mocked(usageAllowance.checkHostedAiUsageGate).mockResolvedValue({
+      allowed: true,
+      billingPlanCode: "launch_monthly",
+      limitUsdMicros: 4_500_000n,
+      memberId: "member_thread_container_123",
+      periodEnd: new Date("2026-07-01T00:00:00.000Z"),
+      periodStart: new Date("2026-06-01T00:00:00.000Z"),
+      remainingUsdMicros: 4_500_000n,
+      spentUsdMicros: 0n,
+    });
+  }
+
+  function seedExistingGroupRoute(
+    prisma: ReturnType<typeof createStatefulThreadRoutePrisma>,
+  ): void {
+    const accountLookupKey = createHostedPhoneLookupKey("+15550000000");
+    const threadLookupKey = createHostedExternalThreadLookupKey({
+      accountLookupKey,
+      channel: "linq",
+      threadId: "chat_group_123",
+    });
+    const threadIdentityLookupKey = createHostedExternalThreadIdentityLookupKey({
+      channel: "linq",
+      threadId: "chat_group_123",
+    });
+    if (!accountLookupKey || !threadLookupKey || !threadIdentityLookupKey) {
+      throw new Error("Expected test route lookup keys.");
+    }
+    prisma.seedThreadRoute({
+      channel: "linq",
+      containerMemberId: "member_thread_container_123",
+      ownerMemberId: "member_owner_123",
+      threadIdentityLookupKey,
+      threadLookupKey,
+    });
+  }
+
   function mockSuccessfulGroupProvision(input: {
     prisma: ReturnType<typeof createStatefulThreadRoutePrisma>;
     senderCore: typeof senderCore;
@@ -1584,35 +1624,196 @@ describe("Linq group chat auto-provision", () => {
       outboundCount: 0,
       quotaReplySentAt: null,
     } as Awaited<ReturnType<typeof linqDailyState.incrementHostedLinqInboundDailyState>>);
-    vi.mocked(usageAllowance.checkHostedAiUsageGate).mockResolvedValue({
-      allowed: true,
-      billingPlanCode: "launch_monthly",
-      limitUsdMicros: 4_500_000n,
-      memberId: "member_thread_container_123",
-      periodEnd: new Date("2026-07-01T00:00:00.000Z"),
-      periodStart: new Date("2026-06-01T00:00:00.000Z"),
-      remainingUsdMicros: 4_500_000n,
-      spentUsdMicros: 0n,
-    });
+    mockAllowedThreadUsage();
   }
 
   it.each([
     {
+      description: "reported direct",
+      webhookIsGroup: false,
+    },
+    {
+      description: "omitted",
+      webhookIsGroup: null,
+    },
+  ] as const)(
+    "routes an existing durable thread as group when webhook directness is $description",
+    async ({ webhookIsGroup }) => {
+      const info = vi.spyOn(console, "info").mockImplementation(() => undefined);
+      const prisma = createStatefulThreadRoutePrisma();
+      seedExistingGroupRoute(prisma);
+      mockAllowedThreadUsage();
+      vi.mocked(prismaModule.getPrisma).mockReturnValue(prisma as never);
+      vi.mocked(linqModule.verifyAndParseHostedLinqWebhookRequest)
+        .mockReturnValue(buildLinqMessageReceivedEvent({ isGroup: webhookIsGroup }) as never);
+      vi.mocked(linqClient.getHostedLinqChatSummary)
+        .mockRejectedValue(new Error("Linq chat read unavailable"));
+      vi.mocked(linqClient.getHostedLinqChatHandles).mockResolvedValue([]);
+
+      try {
+        const response = await handleHostedOnboardingLinqWebhook({
+          rawBody: "{}",
+          signature: null,
+          timestamp: null,
+        });
+
+        expect(response).toMatchObject({
+          ignored: false,
+          ok: true,
+          reason: "wake-appended-thread-route",
+        });
+        expect(linqClient.getHostedLinqChatSummary).not.toHaveBeenCalled();
+        expect(mailboxStore.appendHostedMailboxEnvelopeTx).toHaveBeenCalledWith({
+          envelope: expect.objectContaining({
+            message: expect.objectContaining({
+              linqMessage: expect.objectContaining({
+                chatId: "chat_group_123",
+                threadIsDirect: false,
+              }),
+            }),
+          }),
+          tx: prisma,
+        });
+        expect(prisma.hostedThreadContainer.create).not.toHaveBeenCalled();
+        expect(memberIdentityStore.lookupHostedMemberIdentityByPhoneNumber).not.toHaveBeenCalled();
+        expect(info).toHaveBeenCalledWith(
+          "Hosted onboarding diagnostic: hosted-onboarding.webhook.linq.chat-classification.",
+          {
+            diagnostic: "hosted-onboarding.webhook.linq.chat-classification",
+            outcome: "thread-route-group",
+          },
+        );
+      } finally {
+        info.mockRestore();
+      }
+    },
+  );
+
+  it("fails closed as group when the pre-read route disappears before planning", async () => {
+    const prisma = createStatefulThreadRoutePrisma();
+    seedExistingGroupRoute(prisma);
+    const seededFindMany = prisma.hostedThreadRoute.findMany.getMockImplementation();
+    if (!seededFindMany) {
+      throw new Error("Expected the stateful route lookup implementation.");
+    }
+    let routeReadCount = 0;
+    prisma.hostedThreadRoute.findMany.mockImplementation(async (args: never) => {
+      routeReadCount += 1;
+      return routeReadCount === 1 ? seededFindMany(args) : [];
+    });
+    mockSenderLookup(null);
+    vi.mocked(prismaModule.getPrisma).mockReturnValue(prisma as never);
+    vi.mocked(linqModule.verifyAndParseHostedLinqWebhookRequest)
+      .mockReturnValue(buildLinqMessageReceivedEvent({ isGroup: false }) as never);
+    vi.mocked(linqClient.getHostedLinqChatSummary)
+      .mockRejectedValue(new Error("Linq chat read unavailable"));
+
+    const response = await handleHostedOnboardingLinqWebhook({
+      rawBody: "{}",
+      signature: null,
+      timestamp: null,
+    });
+
+    expect(response).toMatchObject({
+      ignored: true,
+      ok: true,
+      reason: "group-chat",
+    });
+    expect(linqClient.getHostedLinqChatSummary).not.toHaveBeenCalled();
+    expect(memberIdentityStore.lookupHostedMemberIdentityByPhoneNumber).toHaveBeenCalled();
+    expect(prisma.hostedMemberRouting.upsert).not.toHaveBeenCalled();
+    expect(prisma.hostedMemberRouting.updateMany).not.toHaveBeenCalled();
+    expect(prisma.hostedThreadContainer.create).not.toHaveBeenCalled();
+    expect(hostedMemberStore.createHostedMember).not.toHaveBeenCalled();
+    expect(linqDailyState.incrementHostedLinqInboundDailyState).not.toHaveBeenCalled();
+    expect(mailboxStore.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+    expect(signalRuntime.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
+  });
+
+  it("uses a route created after the pre-read instead of personal direct planning", async () => {
+    const prisma = createStatefulThreadRoutePrisma();
+    seedExistingGroupRoute(prisma);
+    const seededFindMany = prisma.hostedThreadRoute.findMany.getMockImplementation();
+    if (!seededFindMany) {
+      throw new Error("Expected the stateful route lookup implementation.");
+    }
+    let routeReadCount = 0;
+    prisma.hostedThreadRoute.findMany.mockImplementation(async (args: never) => {
+      routeReadCount += 1;
+      return routeReadCount === 1 ? [] : seededFindMany(args);
+    });
+    mockAllowedThreadUsage();
+    vi.mocked(prismaModule.getPrisma).mockReturnValue(prisma as never);
+    vi.mocked(linqModule.verifyAndParseHostedLinqWebhookRequest)
+      .mockReturnValue(buildLinqMessageReceivedEvent({ isGroup: false }) as never);
+    vi.mocked(linqClient.getHostedLinqChatSummary).mockResolvedValue({
+      handles: [],
+      isGroup: false,
+    });
+    vi.mocked(linqClient.getHostedLinqChatHandles).mockResolvedValue([]);
+
+    const response = await handleHostedOnboardingLinqWebhook({
+      rawBody: "{}",
+      signature: null,
+      timestamp: null,
+    });
+
+    expect(response).toMatchObject({
+      ignored: false,
+      ok: true,
+      reason: "wake-appended-thread-route",
+    });
+    expect(linqClient.getHostedLinqChatSummary).toHaveBeenCalledWith({
+      chatId: "chat_group_123",
+      timeoutMs: 1_500,
+    });
+    expect(mailboxStore.appendHostedMailboxEnvelopeTx).toHaveBeenCalledWith({
+      envelope: expect.objectContaining({
+        message: expect.objectContaining({
+          linqMessage: expect.objectContaining({
+            chatId: "chat_group_123",
+            threadIsDirect: false,
+          }),
+        }),
+      }),
+      tx: prisma,
+    });
+    expect(memberIdentityStore.lookupHostedMemberIdentityByPhoneNumber).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    {
       description: "incorrectly says direct",
+      service: "iMessage",
       webhookIsGroup: false,
     },
     {
       description: "omits group directness",
+      service: "iMessage",
       webhookIsGroup: null,
     },
-  ] as const)("uses canonical chat metadata when an iMessage webhook $description", async ({
+    {
+      description: "incorrectly says direct",
+      service: "sms",
+      webhookIsGroup: false,
+    },
+    {
+      description: "omits group directness",
+      service: "RCS",
+      webhookIsGroup: null,
+    },
+  ] as const)("uses canonical chat metadata when a $service webhook $description", async ({
+    service,
     webhookIsGroup,
   }) => {
     const info = vi.spyOn(console, "info").mockImplementation(() => undefined);
     const prisma = createStatefulThreadRoutePrisma();
     vi.mocked(prismaModule.getPrisma).mockReturnValue(prisma as never);
     vi.mocked(linqModule.verifyAndParseHostedLinqWebhookRequest)
-      .mockReturnValue(buildLinqMessageReceivedEvent({ isGroup: webhookIsGroup }) as never);
+      .mockReturnValue(buildLinqMessageReceivedEvent({
+        isGroup: webhookIsGroup,
+        service,
+      }) as never);
     mockSenderLookup(senderCore);
     mockSuccessfulGroupProvision({ prisma, senderCore });
     vi.mocked(linqClient.getHostedLinqChatSummary).mockResolvedValue({

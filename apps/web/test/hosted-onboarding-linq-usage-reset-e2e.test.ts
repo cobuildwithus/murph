@@ -43,6 +43,7 @@ const mocks = vi.hoisted(() => {
     }),
     deriveHostedOnboardingTimingErrorName: vi.fn(() => "Error"),
     finishHostedOnboardingTiming: vi.fn(),
+    getHostedLinqChatSummary: vi.fn(),
     hostedOnboardingEnvironment: {
       contactPrivacyKeyring: {
         currentVersion: "v1",
@@ -214,6 +215,17 @@ vi.mock("../src/lib/hosted-onboarding/linq", async () => {
   };
 });
 
+vi.mock("@/src/lib/hosted-onboarding/linq-client", async () => {
+  const actual = await vi.importActual<typeof import("@/src/lib/hosted-onboarding/linq-client")>(
+    "@/src/lib/hosted-onboarding/linq-client",
+  );
+
+  return {
+    ...actual,
+    getHostedLinqChatSummary: mocks.getHostedLinqChatSummary,
+  };
+});
+
 vi.mock("@/src/lib/hosted-onboarding/runtime", async () => {
   const actual = await vi.importActual<typeof import("@/src/lib/hosted-onboarding/runtime")>(
     "@/src/lib/hosted-onboarding/runtime",
@@ -340,6 +352,11 @@ describe("hosted Linq usage reset e2e", () => {
     vi.setSystemTime(new Date("2026-04-30T12:00:00.000Z"));
     vi.clearAllMocks();
 
+    mocks.getHostedLinqChatSummary.mockResolvedValue({
+      handles: [],
+      isGroup: false,
+    });
+
     mocks.lookupHostedMemberByVerifiedEmailAddress.mockResolvedValue(null);
     mocks.lookupHostedMemberIdentityByPhoneNumber.mockResolvedValue({
       core: activeMember,
@@ -462,6 +479,7 @@ describe("hosted Linq usage reset e2e", () => {
                 value: "Can you answer before the reset?",
               },
             ],
+            threadIsDirect: true,
           }),
         }),
         userId: MEMBER_ID,
@@ -474,6 +492,10 @@ describe("hosted Linq usage reset e2e", () => {
       mailboxItemId: "mailbox_evt_before_reset",
     });
     expectHostedLinqReadReceiptSent();
+    expect(mocks.getHostedLinqChatSummary).toHaveBeenCalledWith({
+      chatId: CHAT_ID,
+      timeoutMs: 1_500,
+    });
     expect(usage.getPeriod("2026-04-01T00:00:00.000Z")).toMatchObject({
       limitNoticeSentAt: null,
       spentUsdMicros: monthlyLimit,
@@ -536,6 +558,7 @@ describe("hosted Linq usage reset e2e", () => {
                 value: "Can you answer after the reset?",
               },
             ],
+            threadIsDirect: true,
           }),
         }),
         userId: MEMBER_ID,
@@ -549,6 +572,10 @@ describe("hosted Linq usage reset e2e", () => {
       mailboxItemId: "mailbox_evt_after_reset",
     });
     expectHostedLinqReadReceiptSent();
+    expect(mocks.getHostedLinqChatSummary).toHaveBeenCalledWith({
+      chatId: CHAT_ID,
+      timeoutMs: 1_500,
+    });
   });
 
   it("preserves exhausted-period messages when the usage-limit notice was already claimed", async () => {
@@ -603,6 +630,7 @@ describe("hosted Linq usage reset e2e", () => {
           linqMessage: expect.objectContaining({
             chatId: CHAT_ID,
             messageId: "msg_after_notice_claimed",
+            threadIsDirect: true,
           }),
         }),
         userId: MEMBER_ID,
@@ -615,6 +643,10 @@ describe("hosted Linq usage reset e2e", () => {
       mailboxItemId: "mailbox_evt_after_notice_claimed",
     });
     expectHostedLinqReadReceiptSent();
+    expect(mocks.getHostedLinqChatSummary).toHaveBeenCalledWith({
+      chatId: CHAT_ID,
+      timeoutMs: 1_500,
+    });
   });
 });
 

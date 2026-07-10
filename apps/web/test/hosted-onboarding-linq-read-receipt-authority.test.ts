@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   getHostedLinqChatSummary: vi.fn(),
   maybeHandoffHostedExecutionWebhookWake: vi.fn(),
   planHostedOnboardingLinqWebhook: vi.fn(),
+  readHostedThreadRouteByThreadIdentity: vi.fn(),
   requireHostedLinqMessageReceivedEvent: vi.fn(),
   resolveHostedLinqRecipientPhoneNumber: vi.fn(() => "+15555550123"),
   sendHostedLinqReadReceipt: vi.fn(),
@@ -39,6 +40,7 @@ vi.mock("@/src/lib/hosted-onboarding/webhook-service-wake", () => ({
 
 vi.mock("@/src/lib/hosted-routing/thread-route-store", () => ({
   assertHostedLinqRouteEgressAuthority: mocks.assertHostedLinqRouteEgressAuthority,
+  readHostedThreadRouteByThreadIdentity: mocks.readHostedThreadRouteByThreadIdentity,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/logging", () => ({
@@ -81,6 +83,7 @@ describe("hosted Linq read receipt route authority", () => {
       handles: [],
       isGroup: false,
     });
+    mocks.readHostedThreadRouteByThreadIdentity.mockResolvedValue(null);
     mocks.verifyAndParseHostedLinqWebhookRequest.mockReturnValue({
       event_id: "evt_read_receipt_mismatch",
       event_type: "message.received",
@@ -150,6 +153,15 @@ describe("hosted Linq read receipt route authority", () => {
     });
 
     expect(mocks.assertHostedLinqRouteEgressAuthority).not.toHaveBeenCalled();
+    expect(mocks.readHostedThreadRouteByThreadIdentity).toHaveBeenCalledWith({
+      channel: "linq",
+      prisma: {},
+      threadId: "chat_123",
+    });
+    expect(mocks.getHostedLinqChatSummary).toHaveBeenCalledWith({
+      chatId: "chat_123",
+      timeoutMs: 1_500,
+    });
     expect(mocks.sendHostedLinqReadReceipt).not.toHaveBeenCalled();
     expect(mocks.finishHostedOnboardingTiming).toHaveBeenCalledWith(
       expect.objectContaining({

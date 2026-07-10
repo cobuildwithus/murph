@@ -629,8 +629,12 @@ describe("handleHostedOnboardingLinqWebhook", () => {
   });
 
   it.each(["sms", "RCS"] as const)(
-    "uses parser-owned Linq %s service when preferred-service metadata conflicts",
+    "canonically classifies route-less inbound Linq %s direct chats despite conflicting preferred-service metadata",
     async (service) => {
+      mocks.getHostedLinqChatSummary.mockResolvedValueOnce({
+        handles: [],
+        isGroup: false,
+      });
       const prisma = asPrismaTransactionClient({
         hostedWebhookReceipt: {
           create: vi.fn().mockResolvedValue({}),
@@ -684,14 +688,21 @@ describe("handleHostedOnboardingLinqWebhook", () => {
                 messageId: "msg_123",
                 reactionEligible: false,
                 service,
-                threadIsDirect: null,
+                threadIsDirect: true,
               }),
             }),
             userId: "member_123",
           }),
         }),
       );
-      expect(mocks.getHostedLinqChatSummary).not.toHaveBeenCalled();
+      expect(mocks.getHostedLinqChatSummary).toHaveBeenCalledWith({
+        chatId: "chat_123",
+        timeoutMs: 1_500,
+      });
+      expect(mocks.logHostedOnboardingDiagnostic).toHaveBeenCalledWith(
+        "hosted-onboarding.webhook.linq.chat-classification",
+        { outcome: "canonical-direct" },
+      );
       expect(mocks.nudgeHostedRunnerUserBestEffort).not.toHaveBeenCalled();
       expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
       expectHostedLinqPointerSignalAccepted();
@@ -896,11 +907,58 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
   });
 
+  it.each(["sms", "RCS"] as const)(
+    "fails before planning when canonical %s classification is unavailable",
+    async (service) => {
+      const lookupError = new TypeError("Linq chat read unavailable");
+      mocks.getHostedLinqChatSummary.mockRejectedValueOnce(lookupError);
+      const prisma = asPrismaTransactionClient({
+        $transaction: vi.fn(),
+        hostedMember: {
+          findUnique: vi.fn(),
+        },
+        hostedWebhookReceipt: {
+          create: vi.fn(),
+          findUnique: vi.fn(),
+          updateMany: vi.fn(),
+        },
+      });
+
+      await expect(handleHostedOnboardingLinqWebhook({
+        prisma,
+        rawBody: buildHostedLinqWebhookBody({
+          chatIsGroup: false,
+          service,
+        }),
+        signature: null,
+        timestamp: null,
+      })).rejects.toMatchObject({
+        cause: lookupError,
+        code: "LINQ_CHAT_CLASSIFICATION_UNAVAILABLE",
+        httpStatus: 502,
+        retryable: true,
+      });
+
+      expect(mocks.getHostedLinqChatSummary).toHaveBeenCalledWith({
+        chatId: "chat_123",
+        timeoutMs: 1_500,
+      });
+      expect(prisma.hostedThreadRoute?.findMany).toHaveBeenCalledTimes(1);
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+      expect(prisma.hostedWebhookReceipt?.create).not.toHaveBeenCalled();
+      expect(prisma.hostedMember?.findUnique).not.toHaveBeenCalled();
+      expect(mocks.incrementHostedLinqInboundDailyState).not.toHaveBeenCalled();
+      expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+      expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
+      expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
+      expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
+    },
+  );
+
   it("propagates caller cancellation before Linq planning", async () => {
     const controller = new AbortController();
     const abortReason = new Error("caller cancelled");
     controller.abort(abortReason);
-    mocks.getHostedLinqChatSummary.mockRejectedValueOnce(abortReason);
 
     await expect(handleHostedOnboardingLinqWebhook({
       rawBody: buildHostedLinqWebhookBody({
@@ -912,11 +970,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       timestamp: null,
     })).rejects.toBe(abortReason);
 
-    expect(mocks.getHostedLinqChatSummary).toHaveBeenCalledWith({
-      chatId: "chat_123",
-      signal: controller.signal,
-      timeoutMs: 1_500,
-    });
+    expect(mocks.getHostedLinqChatSummary).not.toHaveBeenCalled();
     expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
     expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
   });
@@ -1912,6 +1966,23 @@ describe("handleHostedOnboardingLinqWebhook", () => {
               threadLookupKey: routeLookupKey,
             },
           ])
+          .mockResolvedValueOnce([
+            {
+              channel: "linq",
+              container: {
+                member: {
+                  billingStatus: HostedBillingStatus.active,
+                  createdAt: new Date("2026-03-26T00:00:00.000Z"),
+                  id: "member_thread_container_123",
+                  suspendedAt: null,
+                  updatedAt: new Date("2026-03-26T00:00:00.000Z"),
+                },
+                owner: ownerAccessRecord,
+              },
+              containerMemberId: "member_thread_container_123",
+              threadLookupKey: routeLookupKey,
+            },
+          ])
           .mockResolvedValue([]),
       },
       hostedMember: {
@@ -1955,7 +2026,8 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       mailboxItemId: "mailbox_evt_routed_read_receipt_stale",
     });
     expect(mocks.sendHostedLinqReadReceipt).not.toHaveBeenCalled();
-    expect(prisma.hostedThreadRoute?.findMany).toHaveBeenCalledTimes(2);
+    expect(mocks.getHostedLinqChatSummary).not.toHaveBeenCalled();
+    expect(prisma.hostedThreadRoute?.findMany).toHaveBeenCalledTimes(3);
     expect(prisma.hostedThreadRoute?.findMany).toHaveBeenNthCalledWith(
       1,
       expect.objectContaining({
@@ -1968,6 +2040,16 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     );
     expect(prisma.hostedThreadRoute?.findMany).toHaveBeenNthCalledWith(
       2,
+      expect.objectContaining({
+        where: expect.objectContaining({
+          threadIdentityLookupKey: {
+            in: expect.arrayContaining([routeIdentityLookupKey]),
+          },
+        }),
+      }),
+    );
+    expect(prisma.hostedThreadRoute?.findMany).toHaveBeenNthCalledWith(
+      3,
       expect.objectContaining({
         where: expect.objectContaining({
           threadIdentityLookupKey: {
