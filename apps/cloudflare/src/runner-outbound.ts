@@ -105,12 +105,14 @@ import {
 import {
   fetchHostedExecutionWebControlPlaneResponse,
 } from "./web-control-plane.ts";
+import {
+  HOSTED_WORKSPACE_SNAPSHOT_RESTORE_GET_EXPIRES_SECONDS,
+} from "./workspace-snapshot-restore-preparation.ts";
 
 export type { RunnerOutboundEnvironmentSource } from "./runner-outbound/shared.ts";
 
 const HOSTED_WORKSPACE_SNAPSHOT_UPLOAD_SESSION_EXPIRES_MS = 60 * 60 * 1000;
 const HOSTED_WORKSPACE_SNAPSHOT_PRESIGNED_PUT_EXPIRES_SECONDS = 10 * 60;
-const HOSTED_WORKSPACE_SNAPSHOT_PRESIGNED_GET_EXPIRES_SECONDS = 60 * 60;
 const HOSTED_WORKSPACE_SNAPSHOT_PRESIGN_MIN_REMAINING_SECONDS = 30;
 const HOSTED_RUNNER_DIAGNOSTIC_FINGERPRINT_BYTES = 12;
 const hostedRunnerDiagnosticTextEncoder = new TextEncoder();
@@ -854,7 +856,7 @@ async function handleRunnerWorkspaceSnapshotPresignGetRequest(input: {
 
   const presigned = await createHostedR2PresignedGetUrl({
     environment: readHostedR2PresignEnvironment(asWorkerStringEnvironment(input.env)),
-    expiresSeconds: HOSTED_WORKSPACE_SNAPSHOT_PRESIGNED_GET_EXPIRES_SECONDS,
+    expiresSeconds: HOSTED_WORKSPACE_SNAPSHOT_RESTORE_GET_EXPIRES_SECONDS,
     key: requestedObjectKey,
   });
   emitPresignGetDiagnostic(
