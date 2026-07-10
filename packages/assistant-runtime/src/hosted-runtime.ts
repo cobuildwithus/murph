@@ -158,11 +158,6 @@ import {
   createHostedConversationMailboxImportItem,
 } from "./hosted-runtime/mailbox-conversation-import.ts";
 import {
-  ensureHostedInboxSidecarReady,
-  invalidateHostedInboxSidecarReady,
-  isHostedInboxSidecarReady,
-} from "./hosted-runtime/context.ts";
-import {
   enqueueHostedSystemMailboxItem,
   resolveHostedSystemMailboxNextWakeCandidate,
 } from "./hosted-runtime/system-mailbox.ts";
@@ -1033,9 +1028,6 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       workspace: workspaceRead.workspace,
     });
     assertRuntimeNotAborted();
-    if (restored.inboxSidecarNeedsRebuild) {
-      invalidateHostedInboxSidecarReady(restored.vaultRoot);
-    }
     const workspaceRestoreDoneAt = new Date().toISOString();
     initialAssistantInputLatencyMilestones.workspaceRestoreDoneAt = workspaceRestoreDoneAt;
     // Attach the in-memory cold-start phase breakdown to the SAME staged-milestone
@@ -1556,39 +1548,6 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
     ) {
       return await returnInitialMailboxImportBeforeForeground();
     }
-    const inboxReady = isHostedInboxSidecarReady(restored.vaultRoot);
-    const inboxRebuild = !inboxReady && restored.inboxSidecarNeedsRebuild;
-    emitPhaseLog({
-      details: {
-        inboxReady,
-        rebuild: inboxRebuild,
-        restoreWasCold: restored.restoreWasCold,
-      },
-      input,
-      requestId,
-      stage: "inbox.sidecar",
-      status: "start",
-    });
-    if (!inboxReady) {
-      // A rebuild is not cancellable once it starts replacing the shared
-      // projection. Let it settle before releasing the runner slot.
-      await ensureHostedInboxSidecarReady({
-        bestEffort: true,
-        rebuild: inboxRebuild,
-        requestId,
-        vaultRoot: restored.vaultRoot,
-      });
-    }
-    emitPhaseLog({
-      details: {
-        rebuild: inboxRebuild,
-      },
-      input,
-      requestId,
-      stage: "inbox.sidecar",
-      status: "done",
-    });
-    assertRuntimeNotAborted();
     const runtimeEnv = hostedCodexRuntime.runtimeEnv;
     let stagedDeviceSyncDirtyAcks: HostedDeviceSyncDirtyProcessedPostCheckpointRecord[] = [];
     let suppressDirtyPendingFetchUntilCheckpoint = false;
@@ -3152,7 +3111,6 @@ const HOSTED_RUNTIME_PHASE_NAMES = [
   "cli.bridge",
   "codex.prepare",
   "foreground.pass",
-  "inbox.sidecar",
   "mailbox.import.initial",
   "runtime",
   "runtime.return",

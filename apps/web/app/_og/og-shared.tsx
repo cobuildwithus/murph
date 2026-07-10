@@ -1,32 +1,39 @@
 import { readFile } from "node:fs/promises";
-import { join } from "node:path";
 
-import { dmSans400FontPath, fraunces600FontPath } from "../font-files";
+import {
+  dmSans400FontPath,
+  fraunces600FontPath,
+  logoSvgPath,
+} from "../font-files";
 
 export const OG_SIZE = { width: 1200, height: 630 } as const;
 export const OG_CONTENT_TYPE = "image/png";
 
 type OgFont = { name: string; data: ArrayBuffer; weight: 400 | 600 };
 
+// Palette shared with the default homepage OG image (app/opengraph-image.tsx)
+// so every Murph share card reads as one system.
+const INK = "#1f2422";
+const GREEN = "#5a6e32";
+const MUTED = "#736a58";
+
 /**
  * Loads the shared assets every Murph hero OG image needs: the Fraunces 600 +
- * DM Sans 400 fonts and the canonical hero photo as a data URI. Kept in one
- * place so route-level opengraph-image files stay thin.
+ * DM Sans 400 fonts and the murph lockup as a data URI. Kept in one place so
+ * route-level opengraph-image files stay thin.
  */
 export async function loadMurphHeroOgAssets(): Promise<{
   fonts: OgFont[];
-  heroDataUri: string;
+  logoDataUri: string;
 }> {
-  const [heroDataUri, fraunces600Data, dmSans400Data] = await Promise.all([
-    readFile(join(process.cwd(), "public", "hero.jpg")).then(
-      (buf) => `data:image/jpeg;base64,${buf.toString("base64")}`
-    ),
+  const [logoBuffer, fraunces600Data, dmSans400Data] = await Promise.all([
+    readFile(logoSvgPath),
     readFile(fraunces600FontPath).then(toArrayBuffer),
     readFile(dmSans400FontPath).then(toArrayBuffer),
   ]);
 
   return {
-    heroDataUri,
+    logoDataUri: `data:image/svg+xml;base64,${logoBuffer.toString("base64")}`,
     fonts: [
       { name: "Fraunces", data: fraunces600Data, weight: 600 },
       { name: "DM Sans", data: dmSans400Data, weight: 400 },
@@ -39,20 +46,21 @@ function toArrayBuffer(buffer: Buffer) {
 }
 
 /**
- * The shared 1200x630 hero frame: warm hero photo, dark gradient for legibility,
- * and a bottom bar with a mono eyebrow, Fraunces headline, DM Sans subtext, and
- * the dot-grid murph lockup. Used by every shareable Murph surface so previews
- * read as one system (see DESIGN.md).
+ * The shared 1200x630 Murph share frame: warm cream backdrop with the dot-grid
+ * texture, the murph lockup top-left, a green eyebrow, a Fraunces headline, and
+ * a DM Sans subtext, balanced by an oversized brand mark on the right. Matches
+ * the default homepage OG image so every shareable surface reads as one system
+ * (see DESIGN.md).
  */
 export function MurphHeroOg(props: {
-  heroDataUri: string;
+  logoDataUri: string;
   eyebrow: string;
   headline: string;
   subtext: string;
   /** Lower this for long dynamic headlines (experiment/biomarker titles). */
   headlineFontSize?: number;
 }) {
-  const headlineFontSize = props.headlineFontSize ?? 82;
+  const headlineFontSize = props.headlineFontSize ?? 78;
 
   return (
     <div
@@ -61,22 +69,13 @@ export function MurphHeroOg(props: {
         height: "100%",
         display: "flex",
         position: "relative",
-        backgroundColor: "#D9C39B",
+        overflow: "hidden",
+        background:
+          "radial-gradient(circle at 90% 0%, #e7ddc8 0%, #f0e9db 40%, #f5f0e8 70%)",
       }}
     >
-      {/* eslint-disable-next-line @next/next/no-img-element -- next/og (Satori) renders raw <img>; next/image is unsupported here */}
-      <img
-        src={props.heroDataUri}
-        alt=""
-        style={{
-          position: "absolute",
-          top: 0,
-          left: 0,
-          width: "100%",
-          height: "100%",
-          objectFit: "cover",
-        }}
-      />
+      <DotTexture />
+      {/* Light wash keeping the left-side text crisp over the texture */}
       <div
         style={{
           position: "absolute",
@@ -85,124 +84,167 @@ export function MurphHeroOg(props: {
           width: "100%",
           height: "100%",
           background:
-            "linear-gradient(180deg, rgba(26,31,22,0.15) 0%, rgba(26,31,22,0.60) 100%)",
+            "radial-gradient(circle at 28% 45%, rgba(245, 240, 232, 0.92) 0%, rgba(245, 240, 232, 0.55) 40%, rgba(245, 240, 232, 0) 70%)",
         }}
       />
+      {/* Warm corner tone, bottom-left */}
       <div
         style={{
           position: "absolute",
-          left: 48,
-          right: 48,
-          bottom: 44,
+          top: 0,
+          left: 0,
+          width: "100%",
+          height: "100%",
+          background:
+            "radial-gradient(circle at 5% 100%, rgba(224, 210, 183, 0.6) 0%, rgba(224, 210, 183, 0) 45%)",
+        }}
+      />
+
+      {/* Oversized brand mark balancing the right side */}
+      <BrandMark />
+
+      {/* Logo */}
+      {/* eslint-disable-next-line @next/next/no-img-element -- next/og (Satori) renders raw <img>; next/image is unsupported here */}
+      <img
+        src={props.logoDataUri}
+        alt=""
+        width={152}
+        height={34}
+        style={{ position: "absolute", top: 64, left: 72, display: "flex" }}
+      />
+
+      {/* Eyebrow + headline + subtext */}
+      <div
+        style={{
+          position: "absolute",
+          top: 0,
+          bottom: 0,
+          left: 72,
+          width: 620,
           display: "flex",
-          justifyContent: "space-between",
-          alignItems: "flex-end",
+          flexDirection: "column",
+          justifyContent: "center",
         }}
       >
         <div
           style={{
-            display: "flex",
-            flexDirection: "column",
-            gap: 14,
-            maxWidth: 820,
+            fontFamily: "DM Sans",
+            fontWeight: 400,
+            fontSize: 20,
+            lineHeight: 1,
+            letterSpacing: "0.2em",
+            textTransform: "uppercase",
+            color: GREEN,
           }}
         >
-          <div
-            style={{
-              fontFamily: "DM Sans",
-              fontWeight: 400,
-              fontSize: 20,
-              lineHeight: 1,
-              letterSpacing: "0.2em",
-              textTransform: "uppercase",
-              color: "#DCC199",
-            }}
-          >
-            {props.eyebrow}
-          </div>
-          <div
-            style={{
-              fontFamily: "Fraunces",
-              fontWeight: 600,
-              fontSize: headlineFontSize,
-              lineHeight: 0.98,
-              letterSpacing: "-0.04em",
-              color: "#FAF8F4",
-              whiteSpace: "pre-wrap",
-            }}
-          >
-            {props.headline}
-          </div>
-          <div
-            style={{
-              fontFamily: "DM Sans",
-              fontWeight: 400,
-              fontSize: 26,
-              lineHeight: 1.4,
-              color: "rgba(250,248,244,0.85)",
-              maxWidth: 660,
-            }}
-          >
-            {props.subtext}
-          </div>
+          {props.eyebrow}
         </div>
-
-        <MurphLockup />
+        <div
+          style={{
+            marginTop: 22,
+            fontFamily: "Fraunces",
+            fontWeight: 600,
+            fontSize: headlineFontSize,
+            lineHeight: 1.0,
+            letterSpacing: "-0.035em",
+            color: INK,
+            whiteSpace: "pre-wrap",
+          }}
+        >
+          {props.headline}
+        </div>
+        <div
+          style={{
+            marginTop: 26,
+            maxWidth: 540,
+            fontFamily: "DM Sans",
+            fontSize: 24,
+            lineHeight: 1.45,
+            color: MUTED,
+          }}
+        >
+          {props.subtext}
+        </div>
       </div>
     </div>
   );
 }
 
-function MurphLockup() {
+/** Full-bleed dot-grid echoing the logo motif, quieted behind the content. */
+function DotTexture() {
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
-      <DotGrid />
-      <div
-        style={{
-          fontFamily: "Fraunces",
-          fontWeight: 600,
-          fontSize: 48,
-          lineHeight: 1,
-          letterSpacing: "-0.03em",
-          color: "#FAF8F4",
-        }}
-      >
-        murph
-      </div>
+    <div
+      style={{
+        position: "absolute",
+        top: -8,
+        left: -8,
+        display: "flex",
+        flexDirection: "column",
+        gap: 24,
+      }}
+    >
+      {Array.from({ length: 24 }, (_, rowIndex) => (
+        <div key={rowIndex} style={{ display: "flex", gap: 24 }}>
+          {Array.from({ length: 44 }, (_, colIndex) => (
+            <div
+              key={colIndex}
+              style={{
+                width: 3.5,
+                height: 3.5,
+                borderRadius: "50%",
+                backgroundColor: "rgba(160, 122, 78, 0.32)",
+              }}
+            />
+          ))}
+        </div>
+      ))}
     </div>
   );
 }
 
-function DotGrid() {
+/** Oversized murph dot-glyph, anchoring the right side in place of the phone. */
+function BrandMark() {
   const rows = [
-    { sizes: [4, 4, 5, 5, 4, 4] },
-    { sizes: [4, 4, 7, 7, 4, 4] },
-    { sizes: [4, 5, 8, 9, 5, 4] },
-    { sizes: [4, 4, 5, 5, 4, 4] },
+    [4, 4, 5, 5, 4, 4],
+    [4, 4, 7, 7, 4, 4],
+    [4, 5, 8, 9, 5, 4],
+    [4, 4, 5, 5, 4, 4],
   ];
-
-  const dotColor = (size: number) => {
-    if (size <= 4) return { bg: "#5C6B4F", opacity: 0.35 };
-    if (size <= 5) return { bg: "#C4956A", opacity: 0.55 };
-    if (size <= 7) return { bg: "#A07A4E", opacity: 1 };
-    return { bg: "#C4956A", opacity: 1 };
-  };
+  const scale = 6;
+  const gap = 26;
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-      {rows.map((row, ri) => (
-        <div key={ri} style={{ display: "flex", alignItems: "center", gap: 6 }}>
-          {row.sizes.map((s, ci) => {
-            const c = dotColor(s);
+    <div
+      style={{
+        position: "absolute",
+        top: 0,
+        bottom: 0,
+        right: 132,
+        display: "flex",
+        flexDirection: "column",
+        justifyContent: "center",
+        alignItems: "center",
+        gap,
+        opacity: 0.85,
+      }}
+    >
+      {rows.map((row, rowIndex) => (
+        <div
+          key={rowIndex}
+          style={{ display: "flex", alignItems: "center", gap }}
+        >
+          {row.map((dotSize, colIndex) => {
+            const color = dotColor(dotSize);
             return (
               <div
-                key={ci}
+                key={colIndex}
                 style={{
-                  width: s,
-                  height: s,
+                  display: "flex",
+                  width: dotSize * scale,
+                  height: dotSize * scale,
                   borderRadius: "50%",
-                  backgroundColor: c.bg,
-                  opacity: c.opacity,
+                  backgroundColor: color.bg,
+                  opacity: color.opacity,
                   flexShrink: 0,
                 }}
               />
@@ -212,4 +254,11 @@ function DotGrid() {
       ))}
     </div>
   );
+}
+
+function dotColor(size: number): { bg: string; opacity: number } {
+  if (size <= 4) return { bg: "#5C6B4F", opacity: 0.22 };
+  if (size <= 5) return { bg: "#C4956A", opacity: 0.34 };
+  if (size <= 7) return { bg: "#A07A4E", opacity: 0.5 };
+  return { bg: "#C4956A", opacity: 0.6 };
 }

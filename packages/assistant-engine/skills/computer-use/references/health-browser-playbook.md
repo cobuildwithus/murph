@@ -210,18 +210,23 @@ before asking the user to restate those facts:
   label evidence; it is not the storefront choice.
 - Resolve exact brand, product, formula, flavor or form, serving, bottle count,
   seller, one-time versus subscription, budget, and delivery.
-- Buy through the user's signed-in retailer (often Amazon) unless they asked
-  for the brand store or the exact product is not sold there by the brand or a
-  verified seller; verify sold-by and fulfilled-by details, and when
-  authenticity, returns, subscription discount, or total cost materially favor
-  buying direct, ask one narrow preference question instead of silently
-  switching storefronts. Do not select a supplement or dose as part of browser
-  execution.
+- Buy through the user's signed-in marketplace (usually Amazon) unless they
+  clearly chose another storefront in the current request, a stored user
+  preference names another storefront, or the exact product is not sold there
+  by the brand or a verified seller. Verify sold-by and fulfilled-by details.
+  When authenticity, returns,
+  subscription terms, or total cost materially favor buying direct, keep the
+  signed-in marketplace as the default and ask one narrow preference question
+  instead of silently switching storefronts. Do not select a supplement or dose
+  as part of browser execution.
 
 ### 17. Reorder or replenish an existing supplement regimen
 
-- Start with the user's saved product, prior exact order, or current regimen,
-  then the preferred retailer.
+- Start with the user's saved product, prior exact order, or current regimen to
+  identify the product. A prior order does not choose the storefront on its own.
+  Default to the signed-in marketplace (usually Amazon) even when the prior
+  order was placed on the brand's own site; use the same narrow storefront
+  exceptions and tradeoff question as above.
 - Match the exact formula, size, serving, flavor or form, quantity, and seller.
   Estimate supply only from the known regimen and label; do not alter the
   regimen.

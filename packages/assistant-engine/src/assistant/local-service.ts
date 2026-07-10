@@ -1322,6 +1322,33 @@ export async function sendAssistantMessageLocal(
           sessionId: providerResult.session.sessionId,
         })
 
+        const resolvedFinalReplyDeliveryContext =
+          typeof providerResult.responseDeliveryContextOrdinal === 'number'
+            ? resolveAssistantReplyDeliveryContextForSegment({
+                contexts: replyDeliveryContexts,
+                deliveryContextOrdinal:
+                  providerResult.responseDeliveryContextOrdinal,
+              })
+            : {
+                context: null,
+                invalidDeliveryContextOrdinal: null,
+              }
+        if (
+          resolvedFinalReplyDeliveryContext.invalidDeliveryContextOrdinal !==
+          null
+        ) {
+          throw new VaultCliError(
+            'ASSISTANT_DELIVERY_CONTEXT_ORDINAL_INVALID',
+            'Assistant final reply referenced an invalid delivery context ordinal.',
+          )
+        }
+        const finalReplyInput = resolvedFinalReplyDeliveryContext.context
+          ? applyAssistantReplyDeliveryContext({
+              context: resolvedFinalReplyDeliveryContext.context,
+              input: currentInput,
+            })
+          : currentInput
+
         turnInputController.close()
         await runtimeState.turns.acceptedInputs.updateAdmissionState({
           admissionState: 'commit-started',
@@ -1398,7 +1425,7 @@ export async function sendAssistantMessageLocal(
           rawFinalResponseText === null
             ? null
             : resolveAssistantPersistedReplyText({
-                messageInput: currentInput,
+                messageInput: finalReplyInput,
                 rawResponse: rawFinalResponseText,
                 session: currentSession,
                 sharedPlan,
@@ -1516,7 +1543,7 @@ export async function sendAssistantMessageLocal(
         const deliveryOutcome =
           finalResponseText !== null
             ? await dispatchAssistantReply({
-                input: currentInput,
+                input: finalReplyInput,
                 media: providerResult.responseMedia ?? [],
                 response: rawFinalResponseText ?? '',
                 session: deliverySession,
@@ -1527,10 +1554,11 @@ export async function sendAssistantMessageLocal(
                 precedingDeliveryOutcomes,
                 session: deliverySession,
               })
+        const replyIntentReadyAt = finalResponseText === null ? null : Date.now()
         const finalReplyDeliveryFields =
           finalResponseText !== null
             ? resolveAssistantCurrentAudienceDeliveryFields({
-                input: currentInput,
+                input: finalReplyInput,
                 session: deliveryOutcome.session,
                 sharedPlan,
               })
@@ -1579,16 +1607,24 @@ export async function sendAssistantMessageLocal(
         emitTurnTiming({
           deliveryAttempted:
             finalResponseText !== null || reactionDeliveryOutcomes.length > 0,
+          deliveryIntentId: 'intentId' in finalDeliveryOutcome
+            ? finalDeliveryOutcome.intentId
+            : null,
           deliveryIntentPresent: 'intentId' in finalDeliveryOutcome
             ? finalDeliveryOutcome.intentId !== null
             : false,
           deliveryOutcomeKind: finalDeliveryOutcome.kind,
           elapsedMs: elapsedSince(turnTimingStartedAt),
           finalReplySelected: finalResponseText !== null,
+          providerRequestElapsedMs:
+            providerRequestStartedAtMs === null || providerResultReturnedAt === null
+              ? null
+              : Math.max(0, providerResultReturnedAt - providerRequestStartedAtMs),
           providerRequestOrdinal,
-          sinceProviderResultMs: providerResultReturnedAt === null
-            ? null
-            : elapsedSince(providerResultReturnedAt),
+          sinceProviderResultMs:
+            providerResultReturnedAt === null || replyIntentReadyAt === null
+              ? null
+              : Math.max(0, replyIntentReadyAt - providerResultReturnedAt),
           stage: 'reply-dispatched',
           stepElapsedMs: elapsedSince(replyDispatchStartedAt),
         })

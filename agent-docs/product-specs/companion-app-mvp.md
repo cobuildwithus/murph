@@ -1,6 +1,6 @@
 # iOS Companion App — MVP Build Spec
 
-Last verified: 2026-07-09
+Last verified: 2026-07-10
 
 Parent spec: `agent-docs/product-specs/companion-app.md` (strategy, phases,
 review posture). This doc is the concrete build plan for the first shippable
@@ -212,14 +212,13 @@ verification (existing `@privy-io/node`):
 
 ### Deployment order and rollback floor
 
-Current companion volume is low, so runner-first operational ordering is the
-proportionate deploy-skew control for this slice; do not add a runtime feature
-flag or capability handshake. Deploy the Cloudflare/device-syncd bundle first
-with `container_rollout=immediate` and verify the managed-container smoke is
-running the feature-aware bundle. Then deploy the Vercel/web ingestion route,
-and release the iOS app last. Once web accepts companion metadata, do not roll
-the runner below the feature-aware bundle unless web ingestion is first
-disabled or reverted and all pending companion payloads are drained.
+Current companion volume is low, so the iOS release is the rollout gate. Do not
+add a runtime feature flag or capability handshake, and do not require an
+immediate container rollout, queue drain, or tandem deploy. Deploy the
+Cloudflare/device-syncd and Vercel/web changes through their normal backend
+release paths, verify both, and release the iOS app last. After the iOS release,
+keep both backend surfaces on feature-aware versions while supported clients
+can upload companion metadata.
 
 ### Why the account-ensure step is load-bearing (verified in repo)
 

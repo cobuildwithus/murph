@@ -5,6 +5,7 @@ import { test } from "vitest";
 import {
   PUBLIC_EVENT_WRITE_KINDS,
   bloodTestImportPayloadSchema,
+  eventImportDecisionSchema,
   healthEntityDefinitionByKind,
   publicEventImportJsonlRowPayloadSchemasByKind,
 } from "../src/index.ts";
@@ -396,6 +397,49 @@ test("event JSONL row payload schemas match public write kinds and reject explic
     }
     assert.match(result.errors.join("\n"), new RegExp(forbiddenKey, "u"));
   }
+});
+
+test("event import decisions require an ordered retraction identity", () => {
+  const retraction = {
+    action: "retract",
+    externalRef: {
+      system: "generic-smart-fhir-base-patient",
+      resourceType: "observation",
+      resourceId: "observation-1",
+      version: "2026-03-12T11:15:00.123456Z",
+    },
+    reason: "FHIR resource entered in error",
+    evidence: [{
+      rawRef: "raw/clinical/fhir/connection-1/retrieval-2/Observation/page-1.json",
+      sourceLabel: "Observation/observation-1",
+    }],
+  };
+
+  assert.equal(safeParseContract(eventImportDecisionSchema, retraction).success, true);
+  assert.equal(
+    safeParseContract(eventImportDecisionSchema, {
+      ...retraction,
+      externalRef: { ...retraction.externalRef, version: undefined },
+    }).success,
+    false,
+  );
+  assert.equal(
+    safeParseContract(eventImportDecisionSchema, {
+      ...retraction,
+      externalRef: { ...retraction.externalRef, version: "not-a-timestamp" },
+    }).success,
+    false,
+  );
+  assert.equal(
+    safeParseContract(eventImportDecisionSchema, {
+      ...retraction,
+      externalRef: {
+        ...retraction.externalRef,
+        version: `2026-03-12T11:15:00.${"1".repeat(201)}Z`,
+      },
+    }).success,
+    false,
+  );
 });
 
 test("event JSONL row payload schema accepts writable timestamp shapes", () => {

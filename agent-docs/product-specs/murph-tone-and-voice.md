@@ -1,7 +1,7 @@
 # Murph Tone And Voice
 
 Last verified: 2026-07-10
-Status: Implemented for onboarding, settings, hosted mailbox handoff, prompt tone, voice memo default resolution, and supervisor-run preview generation script
+Status: Partial — onboarding, Settings, hosted mailbox handoff, prompt tone, voice memo default resolution, and preview generation are implemented; assistant-callable inspection and updates remain open
 
 ## Product Contract
 
@@ -44,6 +44,23 @@ Vault reads tolerate stale voice strings so old choices do not break turns. Web 
 `hosted_member.assistant_tone` and `hosted_member.assistant_voice` capture the latest web-side choices for settings display and mailbox handoff. The session-authenticated route `POST /api/settings/assistant-style` validates the request, updates changed columns, appends a `member.preferences.updated` hosted mailbox event, and best-effort signals the runtime.
 
 Runtime handling mirrors the member activation shape without creating a vault. If the vault is missing, the system wake fails and retries until `member.activated` bootstrap has run. When the vault exists, hosted runtime applies the preferences through `core.updateAssistantPreferences`.
+
+## Conversation Control Gap
+
+Members cannot inspect or persistently change their saved tone or voice through
+an assistant-accessible typed CLI command or headless product operation. Current
+assistant guidance sends them to `/settings?voice=true`. This feature is
+therefore not conversation-complete under
+`docs/contracts/00-invariants.md`.
+
+A direct vault-only setter would leave the Settings copy stale: assistant
+behavior reads canonical `bank/preferences.json`, while Settings reads the
+`hosted_member` capture. Follow-up must route web and conversation through one
+owning mutation contract. Any additional stored copy must be downstream-only
+derived state, never an independently writable peer. The operation must also
+return the saved result to the assistant for confirmation. Until then, the
+browser picker during onboarding or in Settings is the only supported
+persistent change path.
 
 ## Assistant Behavior
 

@@ -57,7 +57,7 @@ function readMergedTsConfig(configPath: string, seen = new Set<string>()): Minim
   };
 }
 
-test("package manifest exposes the sample-series summary subpath used by query", async () => {
+test("package manifest exposes only focused importer subpaths", async () => {
   const packageManifest = JSON.parse(
     await readFile(new URL("../package.json", import.meta.url), "utf8"),
   ) as {
@@ -70,6 +70,12 @@ test("package manifest exposes the sample-series summary subpath used by query",
     import: "./dist/sample-series-summary.js",
     default: "./dist/sample-series-summary.js",
   });
+  assert.deepEqual(packageManifest.exports?.["./clinical-records"], {
+    types: "./dist/clinical-records/index.d.ts",
+    import: "./dist/clinical-records/index.js",
+    default: "./dist/clinical-records/index.js",
+  });
+  assert.doesNotMatch(readFileSync(path.join(packageDir, "src", "index.ts"), "utf8"), /clinical-records/u);
 });
 
 test("build script preserves the last good dist until TypeScript succeeds", async () => {

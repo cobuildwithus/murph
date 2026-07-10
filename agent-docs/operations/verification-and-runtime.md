@@ -1,6 +1,6 @@
 # Verification And Runtime
 
-Last verified: 2026-07-10
+Last verified: 2026-07-09
 
 ## Verification Matrix
 
@@ -19,7 +19,7 @@ with the named owner coverage or verification command.
 | Docs/process-only with mechanics beyond text-only Markdown | `pnpm verify:acceptance` | Applies when docs/process work touches anything beyond text-only `.md` edits/deletions and does not qualify for the low-risk repo-internal workflow/tooling fast path above, including broader scripts, config, tests, generated docs, tracked artifact inventories, or workflow-enforcement files. `pnpm verify:acceptance` is the canonical repo acceptance entrypoint and runs `pnpm typecheck` plus the explicit coverage-heavy acceptance lane. When those repo-wide commands are already known red for unrelated reasons, the scoped verification mode below may be used instead. |
 | Fixture/e2e/package-doc changes | `pnpm verify:acceptance` | Verifies fixture corpus integrity, scenario-manifest wiring, package-runtime health, built CLI checks, command-surface coverage, and the source-artifact guard for handwritten JS-like files plus tracked `.env` / `.env.*` private files and generated residue such as `dist/`, `.next/`, `.next-dev/`, `.next-smoke/`, `.test-dist/`, and `*.tsbuildinfo`. |
 | Changes under `packages/hosted-local-harness` | Either `pnpm test:diff <path ...>`, or `pnpm typecheck` plus `pnpm --dir packages/hosted-local-harness test:coverage` plus `pnpm --dir packages/hosted-local-harness verify:package-boundary` | Prefer `pnpm test:diff <path ...>` when it truthfully covers the touched harness files; that lane also runs the hosted-local-harness package-boundary check after the source-first package tests. If the diff changes launch/profile/runtime behavior, add a direct hosted-local command smoke that exercises the changed entrypoint without printing secrets, such as `pnpm hosted-local worktree env <slug>` and `pnpm hosted-local worktree doctor <slug> --json` for worktree helper changes. Full `pnpm hosted-local worktree up <slug>` proof is only required when the task depends on child process startup or provider/webhook behavior. |
-| Changes under `packages/contracts`, `packages/hosted-execution`, `packages/hosted-orchestrator-temporal`, `packages/runtime-state`, `packages/core`, `packages/importers`, `packages/inboxd`, `packages/parsers`, `packages/health-metrics`, `packages/query`, or `packages/openclaw-plugin` | Either `pnpm test:diff <path ...>`, or `pnpm typecheck` plus the edited package's `pnpm --dir packages/<name> test:coverage`; also run `pnpm test:scenario-integrity` | Prefer `pnpm test:diff <path ...>` when it truthfully covers the touched package owner and reverse dependents. If there is no truthful diff-aware lane for the task, run the edited package's coverage-capable command directly before handoff. `pnpm verify:acceptance` remains the canonical full-repo acceptance entrypoint, but the scoped package fallback should stay coverage-bearing rather than dropping to the no-coverage package lane. The root package-coverage lane bounds its local outer fanout by CPU (up to six processes), drops to `MURPH_PACKAGE_COVERAGE_CLI_ACTIVE_CONCURRENCY=4` while CLI coverage is active, and derives each package's default Vitest worker cap from the remaining CPU budget instead of multiplying percentage-based worker pools. The OpenClaw package is intentionally skill-first and vault-first: it ships an OpenClaw-compatible bundle rooted at `skills/**` and teaches OpenClaw to use the existing `vault-cli` surface rather than introducing a second Murph assistant runtime. |
+| Changes under `packages/contracts`, `packages/clinical-records`, `packages/hosted-execution`, `packages/hosted-orchestrator-temporal`, `packages/runtime-state`, `packages/core`, `packages/importers`, `packages/inboxd`, `packages/parsers`, `packages/health-metrics`, `packages/query`, or `packages/openclaw-plugin` | Either `pnpm test:diff <path ...>`, or `pnpm typecheck` plus the edited package's `pnpm --dir packages/<name> test:coverage`; also run `pnpm test:scenario-integrity` | Prefer `pnpm test:diff <path ...>` when it truthfully covers the touched package owner and reverse dependents. If there is no truthful diff-aware lane for the task, run the edited package's coverage-capable command directly before handoff. `pnpm verify:acceptance` remains the canonical full-repo acceptance entrypoint, but the scoped package fallback should stay coverage-bearing rather than dropping to the no-coverage package lane. The root package-coverage lane bounds its local outer fanout by CPU (up to six processes), drops to `MURPH_PACKAGE_COVERAGE_CLI_ACTIVE_CONCURRENCY=4` while CLI coverage is active, and derives each package's default Vitest worker cap from the remaining CPU budget instead of multiplying percentage-based worker pools. The OpenClaw package is intentionally skill-first and vault-first: it ships an OpenClaw-compatible bundle rooted at `skills/**` and teaches OpenClaw to use the existing `vault-cli` surface rather than introducing a second Murph assistant runtime. |
 | Changes under `packages/health-commons` | `pnpm --dir packages/health-commons verify` | Use the package-local verify lane for authored content, generator, schema, or package test changes. Root acceptance regenerates the ignored catalog for app/typecheck consumers, but it is not a replacement for the package-local Health Commons verification surface. |
 | Changes under `packages/assistant-engine`, `packages/assistant-cli`, `packages/setup-cli`, `packages/gateway-core`, `packages/vault-usecases`, `packages/cloudflare-hosted-control`, `packages/messaging-ingress`, or `packages/inbox-services` | Either `pnpm test:diff <path ...>`, or `pnpm typecheck` plus the edited package's `pnpm --dir packages/<name> test:coverage` | Prefer `pnpm test:diff <path ...>` when it truthfully covers the touched package owner and reverse dependents. If there is no truthful diff-aware lane for the task, run the edited package's package-local `test:coverage` command directly before handoff. Keep the scoped fallback coverage-bearing instead of dropping to a no-coverage package loop. |
 | Changes under `packages/device-syncd` | Either `pnpm test:diff <path ...>`, or `pnpm typecheck` plus `pnpm --dir packages/device-syncd test:coverage` | Prefer `pnpm test:diff <path ...>` when it truthfully covers the touched device-syncd files. Otherwise run the package-local coverage command directly before handoff. Repo-wide acceptance is still appropriate when the task broadens beyond a narrow package slice. |
@@ -102,24 +102,6 @@ When that fast path applies:
 - `pnpm test:diff <path ...>` remains required and replaces a separate root `pnpm typecheck` for this fast path.
 - Direct checks on the touched tooling files remain required.
 - `pnpm test`, `pnpm verify:acceptance`, and the explicit acceptance-only lanes such as `pnpm test:coverage` are optional and should be skipped unless the touched files really need broader proof.
-
-## Hosted Runner Bundle Size Ratchet
-
-`pnpm --dir apps/cloudflare runner:bundle` measures the entry chunk, its full
-static boot closure, and the total bundle from the esbuild metafile. The
-ratcheted baselines and tolerances live beside that assembly code, and an exact
-regression test locks every budget. When intended boot-path growth trips the
-guard, measure the final head on CI Linux and one local host, record those
-measurements in the baseline comment, and update the locked budget test in the
-same change. Do not loosen the fixed total ceiling or carry stale accumulated
-headroom forward in the explicit noise tolerance.
-
-The 2026-07-10 companion-metadata plus Junction-recovery head measured a
-6,859,426-byte static closure on macOS and 6,819,834 bytes on CI Linux. Its
-ratchet uses the larger measurement as the baseline plus a 40,000-byte noise
-band, producing one 6,899,426-byte cross-platform ceiling. That leaves 79,592
-bytes above the Linux measurement; the locked sub-6,900,000-byte assertion
-bounds the combined platform delta and emit jitter.
 
 ## Current Command Meaning
 

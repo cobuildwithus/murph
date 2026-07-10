@@ -62,6 +62,7 @@ describe("hosted local Linq lost active-operation e2e", () => {
         OPENAI_API_KEY: "stub-local-openai-key",
       },
       assistantProviderStubModelId: assistantModel,
+      faultInjection: true,
       localDatabaseUrl,
       persistDirOverride: workerPersistDirOverride,
       persistDirPrefix: "murph-hosted-local-linq-lost-active-operation-",

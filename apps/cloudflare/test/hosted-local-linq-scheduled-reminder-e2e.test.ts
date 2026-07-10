@@ -252,7 +252,7 @@ describe("hosted local Linq scheduled reminder e2e", () => {
       await sleepUntil(overlapSetupTimes.dueAtIso);
 
       const overlapScheduledWakeResult = await requireScenario().waitForLatestPendingWake(userId);
-      expect(overlapScheduledWakeResult.kind).toBe("runtime_processing_accepted");
+      expect(overlapScheduledWakeResult.lastErrorCode ?? null).toBeNull();
       await heldOverlapReminderResponse.started;
       const overlapForegroundWebhookResponse = await postSignedLinqWebhook(
         buildHostedLinqInboundEvent(

@@ -326,7 +326,6 @@ describe("hosted workspace restore Codex continuity", () => {
       assert.equal(restored.mode, "snapshot");
       assert.equal(restored.restoreWasCold, false);
       assert.equal(restored.restoreTiming, null);
-      assert.equal(restored.inboxSidecarNeedsRebuild, true);
       assert.equal(restoreCallCount, 0);
       assert.equal(
         await readFile(path.join(restoredVaultRoot, "note.md"), "utf8"),

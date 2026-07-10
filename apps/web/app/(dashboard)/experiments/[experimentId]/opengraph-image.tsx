@@ -27,13 +27,13 @@ export default async function ExperimentOGImage({
 }) {
   const { experimentId } = await params;
   const shell = resolveHealthCommonsExperimentShell(experimentId);
-  const { fonts, heroDataUri } = await loadMurphHeroOgAssets();
+  const { fonts, logoDataUri } = await loadMurphHeroOgAssets();
   const headline = shell?.title ?? "Run an experiment.";
 
   return new ImageResponse(
     (
       <MurphHeroOg
-        heroDataUri={heroDataUri}
+        logoDataUri={logoDataUri}
         eyebrow="MURPH EXPERIMENT"
         headline={headline}
         headlineFontSize={resolveHeadlineFontSize(headline)}

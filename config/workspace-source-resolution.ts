@@ -8,6 +8,7 @@ export type WorkspaceSourceEntries<T extends WorkspaceSourceEntryRelativePaths> 
 >;
 
 export const HOSTED_WEB_WORKSPACE_SOURCE_ENTRY_RELATIVE_PATHS = {
+  "@murphai/clinical-records": "../../packages/clinical-records/src/index.ts",
   "@murphai/cloudflare-hosted-control": "../../packages/cloudflare-hosted-control/package.json",
   "@murphai/contracts": "../../packages/contracts/src/index.ts",
   "@murphai/health-commons": "../../packages/health-commons/src/index.ts",

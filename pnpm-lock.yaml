@@ -194,8 +194,8 @@ importers:
         specifier: workspace:*
         version: link:../../packages/runtime-state
       '@onkernel/sdk':
-        specifier: ^0.68.0
-        version: 0.68.0
+        specifier: ^0.76.0
+        version: 0.76.0
       '@prisma/adapter-pg':
         specifier: ^7.8.0
         version: 7.8.0
@@ -481,6 +481,9 @@ importers:
       '@murphai/assistantd':
         specifier: workspace:*
         version: link:../assistantd
+      '@murphai/clinical-records':
+        specifier: workspace:*
+        version: link:../clinical-records
       '@murphai/contracts':
         specifier: workspace:*
         version: link:../contracts
@@ -572,6 +575,15 @@ importers:
       typescript:
         specifier: ^5.9.3
         version: 5.9.3
+
+  packages/clinical-records:
+    dependencies:
+      '@murphai/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+      zod:
+        specifier: ^4.4.3
+        version: 4.4.3
 
   packages/cloudflare-hosted-control:
     dependencies:
@@ -666,6 +678,9 @@ importers:
       '@junction-api/sdk':
         specifier: 1.2.0
         version: 1.2.0
+      '@murphai/clinical-records':
+        specifier: workspace:*
+        version: link:../clinical-records
       '@murphai/contracts':
         specifier: workspace:*
         version: link:../contracts
@@ -726,6 +741,9 @@ importers:
 
   packages/importers:
     dependencies:
+      '@murphai/clinical-records':
+        specifier: workspace:*
+        version: link:../clinical-records
       '@murphai/contracts':
         specifier: workspace:*
         version: link:../contracts
@@ -738,6 +756,10 @@ importers:
       zod:
         specifier: ^4.4.3
         version: 4.4.3
+    devDependencies:
+      '@medplum/fhirtypes':
+        specifier: ^5.1.24
+        version: 5.1.24
 
   packages/inbox-services:
     dependencies:
@@ -2034,6 +2056,10 @@ packages:
       react: ^17.0.2 || ^18.0.0 || ^19.0
       react-dom: ^17.0.2 || ^18.0.0 || ^19.0
 
+  '@medplum/fhirtypes@5.1.24':
+    resolution: {integrity: sha512-22TsFeSJOzchtAZdqfKBV12hvgari477BnHI6Lx9ZrX3kgnCjH79MKrfS5B8SchEKDQ8iVjow1Px9RZihKX5AQ==}
+    engines: {node: ^22.18.0 || >=24.2.0}
+
   '@metamask/eth-json-rpc-provider@1.0.1':
     resolution: {integrity: sha512-whiUMPlAOrVGmX8aKYVPvlKyG4CpQXiNNyt74vE1xb5sPvmx5oA7B/kOi/JdBvhGQq97U1/AVdXEdk2zkP8qyA==}
     engines: {node: '>=14.0.0'}
@@ -2439,8 +2465,8 @@ packages:
     resolution: {integrity: sha512-5N/X/FzlJaYfpaHwDC0YHzOzKDWa41s9t+4FpCDu4f9OMReds4JeNBaaWk9rlIzdKjh2M6AC5Q18ORfECRkHGA==}
     engines: {node: '>=18.0.0'}
 
-  '@onkernel/sdk@0.68.0':
-    resolution: {integrity: sha512-mTB/WX6eGem1Hv3/qCY9NhwzzEY1xN78YoM49RkdHelVeQoh5JVg15JD2rBjtIQ9hAe2Z7iz3edLn9ruMk7pMw==}
+  '@onkernel/sdk@0.76.0':
+    resolution: {integrity: sha512-jswopogv6wJEyvhPgZu+XJZgN87Heuo8nO+gpxsdvJtWFhUbAZME/oLjpIdtS57CRqHQLEf+p0+bavXCMYi72w==}
 
   '@open-draft/deferred-promise@2.2.0':
     resolution: {integrity: sha512-CecwLWx3rhxVQF6V4bAgPS5t+So2sTbPgAzafKkVizyi7tlwpcFpdFqq+wqF2OwNBmqFuu6tOyouTuxgpMfzmA==}
@@ -11160,6 +11186,8 @@ snapshots:
       react: 19.2.6
       react-dom: 19.2.6(react@19.2.6)
 
+  '@medplum/fhirtypes@5.1.24': {}
+
   '@metamask/eth-json-rpc-provider@1.0.1':
     dependencies:
       '@metamask/json-rpc-engine': 7.3.3
@@ -11656,7 +11684,7 @@ snapshots:
     dependencies:
       '@oclif/core': 4.8.1
 
-  '@onkernel/sdk@0.68.0': {}
+  '@onkernel/sdk@0.76.0': {}
 
   '@open-draft/deferred-promise@2.2.0': {}
 
