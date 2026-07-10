@@ -24,6 +24,10 @@ const FAQ_ITEMS = [
     "Yes. Start a group with Murph and invite your people. Murph referees the challenge: fair baselines across different devices, scoring, reminders, and a winner at the end. Scoring is adherence and change against your own baseline, never raw body stats.",
   ],
   [
+    "Do I need friends on Murph?",
+    "No. Group challenges are the most fun way to stay motivated, but Murph works solo too: it keeps you honest, watches your data, and calls what’s working. Either way you’re not doing it alone.",
+  ],
+  [
     "What does the group actually see?",
     "Only what each person agrees to share when they join a challenge or newsletter. The weekly newsletter is a short recap of how everyone's week went. Everything else stays private by default.",
   ],

@@ -1,3 +1,2 @@
-// Legacy source wrapper only. Active code must use `./browser-vault.ts`; new
-// compatibility imports should use `./legacy-dashboard-replica.ts`.
+// Published legacy wrapper. Remove only in a coordinated major release.
 export * from "./legacy-dashboard-replica.ts";

@@ -1335,14 +1335,21 @@ export interface HostedRuntimeLatencyPhaseBreakdown {
     stagedAtEpochMs?: number;
   };
   // Runtime-owned work between mailbox staging and the assistant engine's
-  // local Codex turn/start write. These are duration-only diagnostics and are
-  // attached to that existing milestone rather than emitted synchronously.
+  // local Codex turn/start write. These metadata-only diagnostics are attached
+  // to that existing milestone rather than emitted synchronously.
   preProvider?: {
     workspaceAssistantPreAutomationMs?: number;
     executionTargetHydrateMs?: number;
     systemMailboxMaintenanceMs?: number;
     memberPreferencesPrePlanningMs?: number;
     automationBootstrapMs?: number;
+    outboxScanElapsedMs?: number;
+    outboxScanPerformed?: boolean;
+    receiptScanBytesRead?: number;
+    receiptScanElapsedMs?: number;
+    receiptScanFilesRead?: number;
+    receiptScanLockWaitMs?: number;
+    receiptScanPerformed?: boolean;
   };
   // Exact runtime-observed epoch timestamps. These deliberately distinguish
   // visible channel activity and local Codex output from an upstream provider
@@ -1457,6 +1464,13 @@ export const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS: Record<
     "systemMailboxMaintenanceMs",
     "memberPreferencesPrePlanningMs",
     "automationBootstrapMs",
+    "outboxScanElapsedMs",
+    "outboxScanPerformed",
+    "receiptScanBytesRead",
+    "receiptScanElapsedMs",
+    "receiptScanFilesRead",
+    "receiptScanLockWaitMs",
+    "receiptScanPerformed",
   ],
   assistant: [
     "linqTypingRequestStartedAtEpochMs",
@@ -1487,6 +1501,8 @@ export const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_BOOLEAN_LEAF_KEYS =
     "orchestration.triggeredByWebDirect",
     "wake.activeRuntimePassForeground",
     "boot.restoreWasCold",
+    "preProvider.outboxScanPerformed",
+    "preProvider.receiptScanPerformed",
   ] as const;
 
 export type HostedRuntimeLatencyPhaseBreakdownJsonLeaf = number | boolean;
@@ -1868,11 +1884,6 @@ export interface HostedWorkspaceCheckpointResponse {
 }
 
 export interface HostedBrowserVaultReplicaPublishRequest {
-  /**
-   * @deprecated Compatibility-only source-hash guard for older refresh callers.
-   * Active browser-vault publishes should omit this and update the latest ref.
-   */
-  expectedSourceStateHash?: string;
   replicaRef: HostedBrowserVaultReplicaRef;
 }
 
@@ -1932,8 +1943,6 @@ export const HOSTED_RUNTIME_LOG_EVENT_CODES = [
   "checkpoint.snapshot_plan",
   "checkpoint.snapshot_size_progress",
   "checkpoint.snapshot_started",
-  // Legacy input only: older runners may post this during deploy skew.
-  "workspace.codex_continuity_repaired",
   "workspace.codex_home_snapshot_failed",
   "assistant.device_connect",
   "assistant.codex_auth_failed",
@@ -1945,10 +1954,6 @@ export const HOSTED_RUNTIME_LOG_EVENT_CODES = [
   "device-sync.legacy_platform_env_present",
   "device-sync.module_load_failed",
   "device-sync.wake_projection_failed",
-  // Legacy read compatibility only; reconnect notices are no longer produced.
-  "device-sync.reconnect_notice_created",
-  "device-sync.reconnect_notice_duplicate",
-  "device-sync.reconnect_notice_skipped",
   "mailbox.appended",
   "mailbox.dedupe_conflict",
   "mailbox.imported",
@@ -1976,6 +1981,27 @@ export type HostedRuntimeLogEventCode =
   (typeof HOSTED_RUNTIME_LOG_EVENT_CODES)[number];
 
 export const HOSTED_RUNTIME_LOG_REQUEST_MAX_ENTRIES = 50;
+
+export const HOSTED_CANONICAL_WRITE_RECEIPT_LOG_SHA_STATUS_KEY =
+  "hostedCanonicalWriteReceiptLogSha256";
+export const HOSTED_CANONICAL_WRITE_RECEIPT_LOG_BYTE_SIZE_STATUS_KEY =
+  "hostedCanonicalWriteReceiptLogByteSize";
+export const HOSTED_CANONICAL_WRITE_RECEIPT_RECOVERY_STATUS_KEY =
+  "hostedCanonicalWriteReceiptRecoveryStatus";
+export const HOSTED_CANONICAL_WRITE_RECEIPT_RECOVERY_PRIOR_WAKE_AT_STATUS_KEY =
+  "hostedCanonicalWriteReceiptRecoveryPriorNextWakeAt";
+export const HOSTED_CANONICAL_WRITE_RECEIPT_RECOVERY_PRIOR_WAKE_REASON_STATUS_KEY =
+  "hostedCanonicalWriteReceiptRecoveryPriorNextWakeReason";
+export const HOSTED_CANONICAL_WRITE_RECEIPT_RECOVERY_REDACTED_STATUS_KEYS = [
+  HOSTED_CANONICAL_WRITE_RECEIPT_RECOVERY_STATUS_KEY,
+  HOSTED_CANONICAL_WRITE_RECEIPT_RECOVERY_PRIOR_WAKE_AT_STATUS_KEY,
+  HOSTED_CANONICAL_WRITE_RECEIPT_RECOVERY_PRIOR_WAKE_REASON_STATUS_KEY,
+] as const;
+export const HOSTED_CANONICAL_WRITE_RECEIPT_REDACTED_STATUS_KEYS = [
+  HOSTED_CANONICAL_WRITE_RECEIPT_LOG_SHA_STATUS_KEY,
+  HOSTED_CANONICAL_WRITE_RECEIPT_LOG_BYTE_SIZE_STATUS_KEY,
+  ...HOSTED_CANONICAL_WRITE_RECEIPT_RECOVERY_REDACTED_STATUS_KEYS,
+] as const;
 
 export type HostedRuntimeRedactedScalar = boolean | null | number | string;
 export type HostedRuntimeRedactedObject = Record<string, HostedRuntimeRedactedScalar>;

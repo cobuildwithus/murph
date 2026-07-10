@@ -502,7 +502,7 @@ export function AsksGridSection() {
             Just you and Murph
           </p>
           <h2 className="mt-4 font-serif text-[clamp(2rem,4vw,3.25rem)] font-semibold leading-[1.08] tracking-[-0.03em] text-[#2d3436]">
-            Your personal health assistant, too.
+            No group? You’re still not doing this alone.
           </h2>
           <p className="mt-5 max-w-[62ch] text-[1rem] leading-[1.7] text-[#3a322a]">
             Outside the group chat, Murph is all yours. Experiments, bloodwork,

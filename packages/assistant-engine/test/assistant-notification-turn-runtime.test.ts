@@ -921,6 +921,188 @@ test('sendAssistantNotificationLocal rejects deferred immediate exact-text deliv
   })
 })
 
+test('sendAssistantNotificationLocal keeps a queued exact-text welcome when the terminal diagnostic write fails', async () => {
+  const initialSession = createAssistantSession({
+    binding: {
+      actorId: 'actor-exact',
+      channel: 'telegram',
+      conversationKey: null,
+      delivery: {
+        kind: 'thread',
+        target: 'thread-exact',
+      },
+      identityId: 'identity-exact',
+      threadId: 'thread-exact',
+      threadIsDirect: true,
+    },
+  })
+  const sharedPlan = createSharedPlan()
+  sharedPlan.conversationPolicy.audience.channel = 'telegram'
+  sharedPlan.conversationPolicy.audience.threadId = 'thread-exact'
+  sharedPlan.conversationPolicy.audience.threadIsDirect = true
+  const deliverMessage = vi.fn(async () => ({
+    delivery: null,
+    deliveryError: null,
+    intent: {
+      intentId: 'intent-exact-diagnostic-failure',
+    },
+    kind: 'queued',
+    session: null,
+  }))
+  const runtimeState = {
+    outbox: {
+      deliverMessage,
+    },
+    status: {
+      refreshSnapshot: vi.fn(async () => undefined),
+    },
+    transcripts: {
+      append: vi.fn(async () => []),
+    },
+    sessions: {
+      save: vi.fn(async () => initialSession),
+    },
+    turns: {
+      createReceipt: vi.fn(async () => undefined),
+      finalizeReceipt: vi.fn(async () => undefined),
+    },
+    diagnostics: {
+      recordEvent: vi.fn(async () => {
+        throw new Error('diagnostic sink unavailable')
+      }),
+    },
+  }
+  const mocks = {
+    createAssistantRuntimeStateService: vi.fn(() => runtimeState),
+    executeCodexTurnWithRecovery: vi.fn(async () => {
+      throw new Error('provider should not run for exact text')
+    }),
+    hasAssistantSeenFirstContact: vi.fn(async () => false),
+    markAssistantFirstContactSeen: vi.fn(async () => undefined),
+    markAssistantOutboxIntentMirrorTerminalById: vi.fn(async () => null),
+    normalizeAssistantExecutionContext: vi.fn((value) => value),
+    resolveAssistantExecutionDefaultTarget: vi.fn((input) => input.fallbackTarget),
+    resolveAssistantExecutionOperatorDefaults: vi.fn((input) => input.defaults ?? null),
+    persistAssistantTurnAndSession: vi.fn(async () => {
+      throw new Error('provider finalizer should not run for exact text')
+    }),
+    recordAdditionalAssistantUsageEvents: vi.fn(async () => undefined),
+    recordAssistantUsageEvent: vi.fn(async () => undefined),
+    resolveAssistantOperatorDefaults: vi.fn(async () => null),
+    resolveAssistantSessionForMessage: vi.fn(async () => ({
+      created: false,
+      session: initialSession,
+    })),
+    resolveAssistantTurnRoute: vi.fn(() => createRoute()),
+    resolveAssistantTurnSharedPlan: vi.fn(async () => sharedPlan),
+    withAssistantTurnLock: vi.fn(async (input: { run(): Promise<unknown> }) => await input.run()),
+  }
+
+  vi.doMock('@murphai/operator-config/operator-config', () => ({
+    resolveAssistantOperatorDefaults: mocks.resolveAssistantOperatorDefaults,
+  }))
+  vi.doMock('@murphai/operator-config/assistant-backend', () => ({
+    createDefaultLocalAssistantModelTarget: () => createCodexTarget(),
+  }))
+  vi.doMock('../src/assistant/runtime-state-service.js', () => ({
+    createAssistantRuntimeStateService: mocks.createAssistantRuntimeStateService,
+  }))
+  vi.doMock('../src/assistant/outbox.js', async (importOriginal) => {
+    const actual = await importOriginal<typeof import('../src/assistant/outbox.js')>()
+    return {
+      ...actual,
+      markAssistantOutboxIntentMirrorTerminalById:
+        mocks.markAssistantOutboxIntentMirrorTerminalById,
+    }
+  })
+  vi.doMock('../src/assistant/execution-context.js', () => ({
+    normalizeAssistantExecutionContext: mocks.normalizeAssistantExecutionContext,
+    resolveAssistantExecutionDefaultTarget:
+      mocks.resolveAssistantExecutionDefaultTarget,
+    resolveAssistantExecutionOperatorDefaults:
+      mocks.resolveAssistantExecutionOperatorDefaults,
+  }))
+  vi.doMock('../src/assistant/session-resolution.js', () => ({
+    resolveAssistantSessionForMessage: mocks.resolveAssistantSessionForMessage,
+    resolveAssistantSessionTarget: vi.fn(() => createCodexTarget()),
+  }))
+  vi.doMock('../src/assistant/turn-plan.js', () => ({
+    resolveAssistantTurnSharedPlan: mocks.resolveAssistantTurnSharedPlan,
+  }))
+  vi.doMock('../src/assistant/codex-turn-runner.js', () => ({
+    executeCodexTurnWithRecovery: mocks.executeCodexTurnWithRecovery,
+  }))
+  vi.doMock('../src/assistant/service-usage.js', () => ({
+    recordAdditionalAssistantUsageEvents: mocks.recordAdditionalAssistantUsageEvents,
+    recordAssistantUsageEvent: mocks.recordAssistantUsageEvent,
+  }))
+  vi.doMock('../src/assistant/turn-finalizer.js', () => ({
+    clearAssistantSessionCodexResumeState: vi.fn(async (input: { session: AssistantSession }) => input.session),
+    persistAssistantTurnAndSession: mocks.persistAssistantTurnAndSession,
+  }))
+  vi.doMock('../src/assistant/service-turn-routes.js', () => ({
+    resolveAssistantTurnRoute: mocks.resolveAssistantTurnRoute,
+  }))
+  vi.doMock('../src/assistant/turns.js', () => ({
+    createAssistantTurnId: () => 'turn-exact-diagnostic-failure',
+  }))
+  vi.doMock('../src/assistant/channel-adapters.js', async () => {
+    const actual = await vi.importActual<
+      typeof import('../src/assistant/channel-adapters.ts')
+    >('../src/assistant/channel-adapters.js')
+
+    return {
+      ...actual,
+      getAssistantChannelAdapter: vi.fn(() => null),
+    }
+  })
+  vi.doMock('../src/assistant/turn-lock.js', () => ({
+    withAssistantTurnLock: mocks.withAssistantTurnLock,
+  }))
+  vi.doMock('../src/assistant/first-contact.js', async () => {
+    const actual = await vi.importActual<
+      typeof import('../src/assistant/first-contact.ts')
+    >('../src/assistant/first-contact.js')
+
+    return {
+      ...actual,
+      hasAssistantSeenFirstContact: mocks.hasAssistantSeenFirstContact,
+      markAssistantFirstContactSeen: mocks.markAssistantFirstContactSeen,
+    }
+  })
+
+  const { sendAssistantNotificationLocal } = await import(
+    '../src/assistant/notification-turn.ts'
+  )
+
+  const result = await sendAssistantNotificationLocal({
+    deferCommitUntilDeliveryAccepted: true,
+    deliveryDedupeToken: 'signup-welcome:member_exact_diag',
+    deliveryDispatchMode: 'queue-only',
+    deliveryIdempotencyKey: 'signup-welcome:member_exact_diag',
+    firstContactPolicy: {
+      markSeenOnDeliveryAccepted: true,
+    },
+    instructions: 'Send the fixed hosted signup welcome.',
+    responsePolicy: {
+      kind: 'require_send_exact_text',
+      text: 'Fixed welcome text',
+    },
+    vault: '/vaults/exact-diagnostic-failure',
+  })
+
+  // Receipt finalization is the commit; a failed diagnostic write afterwards
+  // must not abandon the already-pending outbox intent or fail the turn.
+  expect(result.deliveryOutcome).toEqual(expect.objectContaining({
+    intentId: 'intent-exact-diagnostic-failure',
+    kind: 'queued',
+  }))
+  expect(runtimeState.turns.finalizeReceipt).toHaveBeenCalledOnce()
+  expect(runtimeState.diagnostics.recordEvent).toHaveBeenCalledOnce()
+  expect(runtimeState.sessions.save).toHaveBeenCalledOnce()
+  expect(mocks.markAssistantOutboxIntentMirrorTerminalById).not.toHaveBeenCalled()
+})
+
 test('an organic same-route reply supersedes the exact-text signup welcome through the real first-contact state', async () => {
   const vault = await mkdtemp(path.join(tmpdir(), 'murph-first-contact-supersede-'))
   const routeBinding = {
@@ -2129,6 +2311,71 @@ test('sendAssistantNotificationLocal abandons queued delivery when deferred comm
       providerStop: true,
     },
   )
+})
+
+test('sendAssistantNotificationLocal keeps a queued model reply when the terminal diagnostic write fails', async () => {
+  const providerSession = createAssistantSession()
+  const providerResult = createProviderResult({
+    response: JSON.stringify({
+      kind: 'send_message',
+      privateSummary: 'Queued scheduled reminder.',
+      text: 'Remember to sleep.',
+    }),
+    session: providerSession,
+  })
+  const { deliverMessage, mocks, sendAssistantNotificationLocal } =
+    await loadNotificationTurnHarness({
+      providerResult,
+      turnId: 'turn-notification-diagnostic-failure',
+    })
+  deliverMessage.mockResolvedValueOnce({
+    delivery: null,
+    deliveryError: null,
+    intent: {
+      intentId: 'intent-queued-diagnostic-failure',
+    },
+    kind: 'queued',
+    session: providerSession,
+  })
+  const finalizeReceipt = vi.fn(async () => undefined)
+  const recordEvent = vi.fn(async () => {
+    throw new Error('diagnostic sink unavailable')
+  })
+  mocks.createAssistantRuntimeStateService.mockImplementation(() => ({
+    outbox: {
+      deliverMessage,
+    },
+    status: {
+      refreshSnapshot: vi.fn(async () => undefined),
+    },
+    turns: {
+      createReceipt: vi.fn(async () => undefined),
+      finalizeReceipt,
+    },
+    diagnostics: {
+      recordEvent,
+    },
+  }))
+
+  const result = await sendAssistantNotificationLocal({
+    deferCommitUntilDeliveryAccepted: true,
+    deliveryDispatchMode: 'queue-only',
+    executionContext: {
+      hosted: null,
+    },
+    instructions: 'Queue this scheduled reminder.',
+    vault: '/vaults/deferred-queue-diagnostic-failure',
+  })
+
+  // Receipt finalization is the commit; a failed diagnostic write afterwards
+  // must not abandon the already-pending outbox intent or fail the turn.
+  expect(result.deliveryOutcome).toEqual(expect.objectContaining({
+    intentId: 'intent-queued-diagnostic-failure',
+    kind: 'queued',
+  }))
+  expect(finalizeReceipt).toHaveBeenCalledOnce()
+  expect(recordEvent).toHaveBeenCalledOnce()
+  expect(mocks.markAssistantOutboxIntentMirrorTerminalById).not.toHaveBeenCalled()
 })
 
 test('sendAssistantNotificationLocal preserves queued typing continuity when first-contact marking throws after commit', async () => {

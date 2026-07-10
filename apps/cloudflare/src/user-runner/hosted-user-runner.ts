@@ -22,7 +22,6 @@ import type { R2BucketLike } from "../bundle-store.js";
 import type { HostedExecutionEnvironment } from "../env.js";
 import type { HostedExecutionContainerNamespaceLike } from "../runner-container.js";
 import type {
-  WorkerActiveRuntimeWriteFenceValidationResult,
   WorkerProviderEgressCredentialValidationResult,
   WorkerProviderEgressTokenValidationResult,
 } from "../worker-contracts.js";
@@ -206,39 +205,6 @@ export class HostedUserRunner {
       });
     }
     return validation.owns;
-  }
-
-  async validateActiveRuntimeWriteFence(input: {
-    userId: string;
-  }): Promise<WorkerActiveRuntimeWriteFenceValidationResult> {
-    const validation = await this.stateStore.validateActiveWriteFence(input);
-    if (!validation.owns) {
-      const record = validation.record ?? null;
-      const writeFence = record?.writeFence ?? null;
-      emitHostedExecutionStructuredLog({
-        component: "hosted.runner",
-        details: {
-          activeWriteFencePresent: writeFence !== null,
-          activeWriteFenceRejectReason: validation.reason,
-          activeWriteFenceUserMatches: record?.userId === input.userId,
-        },
-        level: "warn",
-        message: "Hosted runner active runtime write fence validation rejected.",
-        phase: "wake.running",
-        userId: input.userId,
-      });
-      return {
-        owns: false,
-        reason: validation.reason,
-      };
-    }
-    return {
-      attemptId: validation.attemptId,
-      leaseGeneration: validation.leaseGeneration,
-      owns: true,
-      userId: validation.userId,
-      workspaceVersion: validation.workspaceVersion,
-    };
   }
 
   async validateRuntimeProviderEgressToken(input: {

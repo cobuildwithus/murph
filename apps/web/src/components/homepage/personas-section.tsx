@@ -170,10 +170,10 @@ export function PersonasSection({
     <section className="bg-[#f5f0e8] px-4 pb-16 sm:px-6 lg:px-8 lg:pb-24">
       <div className="mx-auto max-w-[1280px] overflow-hidden rounded-[2rem] bg-[#1f1c18] px-6 py-16 shadow-[0_30px_80px_-40px_rgba(31,28,24,0.55)] sm:rounded-[2.5rem] sm:px-10 sm:py-20 lg:px-16 lg:py-28">
         <span className="font-mono text-[10px] font-medium uppercase tracking-[0.18em] text-[#c4a882]">
-          Your health, decoded
+          Pick your goal
         </span>
         <h2 className="mt-5 max-w-[18ch] font-serif text-[clamp(2rem,4vw,3.25rem)] font-semibold leading-[1.05] tracking-[-0.03em] text-[#f5f0e8]">
-          Discover what actually makes you healthier.
+          Everyone’s working on something.
         </h2>
         <p className="mt-5 max-w-[52ch] text-base leading-[1.7] text-pretty text-[#f5f0e8]/55">
           Ask Murph any health question. It designs an experiment for your

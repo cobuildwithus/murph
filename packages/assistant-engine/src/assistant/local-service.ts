@@ -359,16 +359,6 @@ export async function sendAssistantMessageLocal(
     }
   }
 
-  // The automation pass already runs maintenance before scanning auto-replies.
-  // Keep this boundary for every independently-started turn.
-  if (input.turnTrigger !== 'automation-auto-reply') {
-    await runAssistantTurnBestEffort(() =>
-      maybeRunAssistantRuntimeMaintenance({
-        vault: input.vault,
-      })
-    )
-  }
-
   const executionContext = normalizeAssistantExecutionContext(input.executionContext)
   const boundaryDefaultTarget = resolveAssistantExecutionDefaultTarget({
     executionContext,
@@ -379,7 +369,7 @@ export async function sendAssistantMessageLocal(
     executionContext,
   })
   const turnLockWaitStartedAt = Date.now()
-  return withAssistantTurnLock({
+  const runLockedTurn = () => withAssistantTurnLock({
     abortSignal: input.abortSignal,
     vault: input.vault,
     run: async () => {
@@ -443,18 +433,6 @@ export async function sendAssistantMessageLocal(
       let deliverySupersededTypingIndicator = false
 
       try {
-        await recordAssistantDiagnosticEvent({
-          vault: input.vault,
-          component: 'assistant',
-          kind: 'turn.started',
-          message: `Started assistant turn for session ${resolved.session.sessionId}.`,
-          sessionId: resolved.session.sessionId,
-          turnId: receipt.turnId,
-          counterDeltas: {
-            turnsStarted: 1,
-          },
-        })
-
         const turnInputController = createAssistantActiveTurnInputController({
           acceptedInputValidator: async ({ acceptedInputs }) => {
             await assertAssistantAcceptedTurnInputItemInputsAssistantInputEventsExist({
@@ -1733,6 +1711,23 @@ export async function sendAssistantMessageLocal(
       }
     },
   })
+
+  try {
+    return await runLockedTurn()
+  } finally {
+    // The automation pass owns maintenance for auto-reply turns; every
+    // independently-started turn keeps a post-turn owner so direct ask/chat/
+    // assistantd use cannot grow runtime state (transcripts, event logs)
+    // without bound. Post-turn keeps it off the foreground reply path.
+    if (input.turnTrigger !== 'automation-auto-reply') {
+      await runAssistantTurnBestEffort(() =>
+        maybeRunAssistantRuntimeMaintenance({
+          signal: input.abortSignal ?? null,
+          vault: input.vault,
+        })
+      )
+    }
+  }
 }
 
 function assistantDeliveryOutcomeSupersedesTypingIndicatorForTarget(input: {

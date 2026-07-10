@@ -627,9 +627,8 @@ function printHelp(stdout: NodeJS.WritableStream): void {
       "  hosted-local doctor [--profile dev] [--json]",
       "  hosted-local profiles",
       "",
-      "Compatibility:",
+      "Shortcut:",
       "  pnpm dev is a shortcut for pnpm hosted-local up.",
-      "  scripts/dev-hosted-local.ts remains a compatibility wrapper.",
       "",
     ].join("\n"),
   );
