@@ -14,6 +14,7 @@ import {
 
 import { describeRawArtifact, stageRawImportManifest } from "./operations/raw-manifests.ts";
 import {
+  type CommittedPayloadReceipt,
   readStoredWriteOperation,
   WriteBatch,
   WRITE_OPERATION_DIRECTORY,
@@ -33,6 +34,7 @@ export interface EventAttachmentSourceInput {
   sourcePath: string;
   targetName?: string;
   allowExistingMatch?: boolean;
+  expectedSourceReceipt?: CommittedPayloadReceipt;
 }
 
 export interface PreparedEventAttachment extends EventAttachmentSourceInput {
@@ -272,6 +274,7 @@ export async function stagePreparedEventAttachmentsInBatch(
         originalFileName: attachment.raw.originalFileName,
         mediaType: attachment.raw.mediaType,
         allowExistingMatch: attachment.allowExistingMatch ?? false,
+        expectedSourceReceipt: attachment.expectedSourceReceipt,
       }),
     })),
   );
