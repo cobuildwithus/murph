@@ -11,19 +11,21 @@ import {
   type BrowserVaultReplicaFreshness,
 } from "./browser-vault.ts";
 import {
-  readHostedBrowserVaultSourceStateHash,
+  readHostedExecutionSnapshotBaseRef,
+  readHostedExecutionSnapshotDeltaRef,
 } from "./parsers/cursor.ts";
 
-// Compatibility-only dashboard-replica names for deploy skew.
-// Deletion target: 2026-05-23, after web and Cloudflare have both cleared the
-// browser-vault refresh compatibility window.
+// Published legacy names. Active code uses `./browser-vault.ts`; remove this
+// compatibility surface only in a coordinated major release.
 export type DashboardReplicaFreshness = BrowserVaultReplicaFreshness;
 export type DashboardReplicaRefreshDecision = BrowserVaultRefreshDecision;
 
 export function readDashboardReplicaSourceStateHash(
   snapshotRef: HostedExecutionSnapshotRefState,
 ): string | null {
-  return readHostedBrowserVaultSourceStateHash(snapshotRef);
+  return readHostedExecutionSnapshotDeltaRef(snapshotRef)?.hash
+    ?? readHostedExecutionSnapshotBaseRef(snapshotRef)?.hash
+    ?? null;
 }
 
 export function getDashboardReplicaFreshness(input: {

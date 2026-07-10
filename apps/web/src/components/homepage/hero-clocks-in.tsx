@@ -12,6 +12,10 @@ import {
   LandingAuthDialogButton,
 } from "@/app/auth-controls";
 import { cn } from "@/src/lib/utils";
+import {
+  MURPH_TAGLINE_LINE_1,
+  MURPH_TAGLINE_LINE_2,
+} from "@/src/lib/site-metadata";
 import { type HeroContactInfo } from "@/src/lib/hero-contact-info";
 import {
   buildMurphSmsHref,
@@ -324,16 +328,20 @@ const AUTO_RUN_TOPICS = [
 // Murph plus the three joined members.
 const GROUP_HEADER_LABEL = `${GROUP_MEMBERS.length + 1} People`;
 
+// One headline, two answers to "alone": act 1 shows Murph in your corner,
+// act 2 shows your people in the group chat. The tagline lines come from the
+// shared brand-copy source in site-metadata.
+const HERO_HEADLINE = {
+  line1: MURPH_TAGLINE_LINE_1,
+  line2: MURPH_TAGLINE_LINE_2,
+} as const;
+
 const HERO_COPY = {
   act1: {
-    line1: "Health is overwhelming.",
-    line2: "Murph makes it easy.",
     paragraph:
       "Wearables, bloodwork, doctor visits, supplements, blood pressure, sleep. Murph reads it all, figures out what actually works, and helps you build habits that stick.",
   },
   act2: {
-    line1: "Get healthy with your people.",
-    line2: "Murph keeps score.",
     paragraph:
       "Start a health challenge with your friends, right in your group chat. Murph sets fair baselines, referees the week, calls the winner, and keeps everyone in the loop.",
   },
@@ -1311,7 +1319,16 @@ export function HeroClocksIn({
 
       <div className="relative z-10 mx-auto grid min-h-svh max-w-[1280px] grid-cols-1 items-center gap-6 px-5 pt-20 pb-10 sm:gap-10 sm:px-10 sm:pb-16 lg:grid-cols-12 lg:gap-20 lg:px-16 lg:pt-24">
         <div className="relative z-10 lg:col-span-7">
-          <h1 className="sr-only">{`${HERO_COPY.act1.line1} ${HERO_COPY.act1.line2}`}</h1>
+          <h1 className="sr-only">{`${HERO_HEADLINE.line1} ${HERO_HEADLINE.line2}`}</h1>
+          <div
+            aria-hidden="true"
+            className="font-serif text-[clamp(2rem,4vw,3.25rem)] font-semibold leading-[1.08] tracking-[-0.03em] text-black [text-wrap:balance]"
+          >
+            <span className="block">{HERO_HEADLINE.line1}</span>
+            <span className="mt-2 block text-[#5a6e32]">
+              {HERO_HEADLINE.line2}
+            </span>
+          </div>
           <div className="grid">
             <HeroCopyLayer
               active={!groupMode}
@@ -1523,8 +1540,9 @@ export function HeroClocksIn({
   );
 }
 
-// Visual layers are stacked in one grid cell so height is the max of both
-// variants. The document's single h1 stays stable outside the roll.
+// Paragraph layers are stacked in one grid cell so height is the max of both
+// variants. The shared headline and the document's single h1 stay stable
+// outside the roll.
 function HeroCopyLayer({
   active,
   ariaHidden,
@@ -1534,8 +1552,6 @@ function HeroCopyLayer({
   active: boolean;
   ariaHidden: boolean;
   copy: {
-    line1: string;
-    line2: string;
     paragraph: string;
   };
   inactiveClassName: string;
@@ -1550,13 +1566,6 @@ function HeroCopyLayer({
           : cn("pointer-events-none opacity-0", inactiveClassName),
       )}
     >
-      <div className="font-serif text-[clamp(2.25rem,4.8vw,4.25rem)] font-semibold leading-[1.05] tracking-[-0.04em] text-black">
-        <span className="block">{copy.line1}</span>
-        <span className="mt-3 block text-[#5a6e32] lg:whitespace-nowrap">
-          {copy.line2}
-        </span>
-      </div>
-
       <p className="mt-6 max-w-[52ch] text-[1.0625rem] leading-[1.7] text-pretty text-[#3a322a] lg:mt-10">
         {copy.paragraph}
       </p>

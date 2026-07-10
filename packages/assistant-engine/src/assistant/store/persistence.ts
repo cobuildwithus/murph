@@ -581,13 +581,7 @@ export function isAssistantSessionExpired(
 
 export async function readAssistantIndexStore(
   paths: AssistantStatePaths,
-  options?: {
-    fresh?: boolean
-  },
 ): Promise<AssistantAliasStore> {
-  // Keep the option for API compatibility; the routing index must observe cross-process writes.
-  void options
-
   let raw: string
   try {
     raw = await readFile(paths.indexesPath, 'utf8')
@@ -626,7 +620,7 @@ export async function readAssistantIndexStore(
       paths,
     })
     if (!quarantine) {
-      return await readAssistantIndexStore(paths, { fresh: true })
+      return await readAssistantIndexStore(paths)
     }
     return await rebuildAssistantIndexStore(paths)
   }
@@ -637,7 +631,7 @@ export async function synchronizeAssistantIndexes(
   session: AssistantSession,
   previous: AssistantSession | null,
 ): Promise<void> {
-  const store = await readAssistantIndexStore(paths, { fresh: true })
+  const store = await readAssistantIndexStore(paths)
   const aliases = {
     ...store.aliases,
   }
@@ -685,7 +679,7 @@ export async function readAssistantRecentSessionIds(
     return []
   }
 
-  const store = await readAssistantIndexStore(paths, { fresh: true })
+  const store = await readAssistantIndexStore(paths)
   return sortRecentSessionIds(store.recentSessions ?? {}).slice(0, limit)
 }
 

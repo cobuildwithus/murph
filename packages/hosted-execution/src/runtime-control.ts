@@ -1871,11 +1871,6 @@ export interface HostedWorkspaceCheckpointResponse {
 }
 
 export interface HostedBrowserVaultReplicaPublishRequest {
-  /**
-   * @deprecated Compatibility-only source-hash guard for older refresh callers.
-   * Active browser-vault publishes should omit this and update the latest ref.
-   */
-  expectedSourceStateHash?: string;
   replicaRef: HostedBrowserVaultReplicaRef;
 }
 
@@ -1935,8 +1930,6 @@ export const HOSTED_RUNTIME_LOG_EVENT_CODES = [
   "checkpoint.snapshot_plan",
   "checkpoint.snapshot_size_progress",
   "checkpoint.snapshot_started",
-  // Legacy input only: older runners may post this during deploy skew.
-  "workspace.codex_continuity_repaired",
   "workspace.codex_home_snapshot_failed",
   "assistant.device_connect",
   "assistant.codex_auth_failed",
@@ -1948,10 +1941,6 @@ export const HOSTED_RUNTIME_LOG_EVENT_CODES = [
   "device-sync.legacy_platform_env_present",
   "device-sync.module_load_failed",
   "device-sync.wake_projection_failed",
-  // Legacy read compatibility only; reconnect notices are no longer produced.
-  "device-sync.reconnect_notice_created",
-  "device-sync.reconnect_notice_duplicate",
-  "device-sync.reconnect_notice_skipped",
   "mailbox.appended",
   "mailbox.dedupe_conflict",
   "mailbox.imported",

@@ -70,11 +70,6 @@ export interface RunnerWriteFenceValidationResult {
   record: RunnerStateRecord | null;
 }
 
-export type RunnerActiveWriteFenceValidationRejectReason =
-  | "missing_runner_state"
-  | "missing_write_fence"
-  | "write_fence_mismatch";
-
 export type RunnerProviderEgressTokenValidationRejectReason =
   | "missing_provider_egress_token"
   | "missing_runner_state"
@@ -88,21 +83,6 @@ export type RunnerProviderEgressCredentialValidationRejectReason =
   | "provider_egress_not_allowed"
   | "runner_container_mismatch"
   | "write_fence_mismatch";
-
-export type RunnerActiveWriteFenceValidationResult =
-  | {
-      owns: false;
-      reason: RunnerActiveWriteFenceValidationRejectReason;
-      record?: RunnerStateRecord;
-    }
-  | {
-      attemptId: string;
-      leaseGeneration: string;
-      owns: true;
-      record: RunnerStateRecord;
-      userId: string;
-      workspaceVersion: string | null;
-    };
 
 export type RunnerProviderEgressTokenValidationResult =
   | {
@@ -470,45 +450,6 @@ export class RunnerStateStore {
     return {
       owns: true,
       record: this.readStateFromMetaSync(meta),
-    };
-  }
-
-  async validateActiveWriteFence(input: {
-    userId: string;
-  }): Promise<RunnerActiveWriteFenceValidationResult> {
-    const meta = this.selectMetaRowSync();
-    if (!meta) {
-      return {
-        owns: false,
-        reason: "missing_runner_state",
-      };
-    }
-    const token = this.readWriteFenceTokenSync(meta);
-    if (!token) {
-      return {
-        owns: false,
-        reason: "missing_write_fence",
-        record: this.readStateFromMetaSync(meta),
-      };
-    }
-    if (
-      token.kind !== "runtime"
-      || token.userId !== input.userId
-    ) {
-      return {
-        owns: false,
-        reason: "write_fence_mismatch",
-        record: this.readStateFromMetaSync(meta),
-      };
-    }
-
-    return {
-      attemptId: token.attemptId,
-      leaseGeneration: token.leaseGeneration,
-      owns: true,
-      record: this.readStateFromMetaSync(meta),
-      userId: token.userId,
-      workspaceVersion: token.workspaceVersion,
     };
   }
 

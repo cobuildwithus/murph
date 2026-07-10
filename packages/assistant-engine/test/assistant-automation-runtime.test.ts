@@ -9490,6 +9490,54 @@ describe('assistant automation run loop', () => {
     expect(runLoopMocks.maybeRunAssistantRuntimeMaintenance).not.toHaveBeenCalled()
   })
 
+  it('threads the foreground yield check into an in-flight maintenance pass', async () => {
+    const inboxServices = createInboxServices({
+      run: vi.fn().mockResolvedValue(undefined),
+    })
+    runLoopMocks.scanAssistantAutomationOnce.mockResolvedValueOnce({
+      currentTurnDeliveryIntentIds: [],
+      routing: {
+        considered: 0,
+        failed: 0,
+        nextWakeAt: null,
+        noAction: 0,
+        routed: 0,
+        skipped: 0,
+      },
+      replies: {
+        considered: 0,
+        failed: 0,
+        nextWakeAt: null,
+        replied: 0,
+        skipped: 0,
+      },
+    })
+    const runLoop = await vi.importActual<typeof import('../src/assistant/automation/run-loop.ts')>(
+      '../src/assistant/automation/run-loop.ts',
+    )
+    const shouldYieldBackgroundMaintenance = vi.fn(() => false)
+
+    await runLoop.runAssistantAutomation({
+      drainOutbox: true,
+      inboxServices,
+      once: true,
+      shouldYieldBackgroundMaintenance,
+      startDaemon: false,
+      vault: '/tmp/assistant-automation-vault',
+    })
+
+    // A wake arriving after maintenance starts must be able to stop it: the
+    // pass receives the same yield predicate the pre-start gate consulted,
+    // plus the run's abort signal.
+    expect(runLoopMocks.maybeRunAssistantRuntimeMaintenance).toHaveBeenCalledWith(
+      expect.objectContaining({
+        shouldYield: shouldYieldBackgroundMaintenance,
+        signal: expect.any(AbortSignal),
+        vault: '/tmp/assistant-automation-vault',
+      }),
+    )
+  })
+
   it('passes hosted turn environment into due cron processing', async () => {
     const inboxServices = createInboxServices({
       run: vi.fn().mockResolvedValue(undefined),

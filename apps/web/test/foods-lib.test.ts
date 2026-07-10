@@ -2,9 +2,6 @@ import { describe, expect, it } from "vitest";
 
 import { createFoodsQueries } from "../src/lib/foods";
 import {
-  createFoodsQueries as createFoodsQueriesFromSupplements,
-} from "../src/lib/supplements";
-import {
   createProductLabelsQueries,
   normalizeProductLabelsConnectionString,
 } from "../src/lib/product-labels";
@@ -644,30 +641,6 @@ describe("foods query helpers", () => {
       contaminants: emptyContaminants,
     });
     expect(calls).toHaveLength(2);
-  });
-
-  it("preserves the legacy supplements export for food query creation", async () => {
-    const calls: Array<{ text: string; values: unknown[] }> = [];
-    const queries = createFoodsQueriesFromSupplements({
-      async query<T>(text: string, values: unknown[]) {
-        calls.push({ text, values });
-        if (isProductTestsQuery(text)) {
-          return { rows: [] as T[] };
-        }
-        return { rows: [] as T[] };
-      },
-    });
-
-    await queries.searchFoods({
-      q: "banana",
-      limit: 1,
-      includeOffMarket: false,
-    });
-
-    expect(calls).toHaveLength(1);
-    expect(calls[0]?.text).toContain("FROM foods");
-    expect(calls[0]?.text).not.toContain("FROM supplements");
-    expect(calls[0]?.values).toEqual(["banana", false, 1, null]);
   });
 
   it("skips invalid food ids before querying", async () => {

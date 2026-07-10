@@ -59,7 +59,6 @@ import type {
   RunnerOutboundEnvironmentSource,
 } from "../src/runner-outbound.ts";
 import type {
-  WorkerActiveRuntimeWriteFenceValidationResult,
   WorkerActiveRuntimeUserFenceResult,
   WorkerProviderEgressCredentialValidationResult,
   WorkerProviderEgressTokenValidationResult,
@@ -189,18 +188,6 @@ async function createProviderCredentialAuthorizationHeader(
     authorization: `Bearer ${await createTestProviderEgressCredential({
       providerKind,
     })}`,
-  };
-}
-
-function createActiveRuntimeWriteFenceValidationResult(input: {
-  userId: string;
-}): WorkerActiveRuntimeWriteFenceValidationResult {
-  return {
-    attemptId: "attempt_active_runtime",
-    leaseGeneration: "7",
-    owns: true,
-    userId: input.userId,
-    workspaceVersion: "4",
   };
 }
 
@@ -735,9 +722,6 @@ describe("hostedRunnerIntercept", () => {
   it("keeps other hosted web paths on open-internet passthrough", async () => {
     const fetchMock = vi.fn<typeof fetch>(async () => new Response("ok"));
     vi.stubGlobal("fetch", fetchMock);
-    const validateActiveRuntimeWriteFence = vi.fn(async (input: {
-      userId: string;
-    }) => createActiveRuntimeWriteFenceValidationResult(input));
 
     const response = await hostedRunnerIntercept(
       new Request("https://web.example.test/api/other", {
@@ -750,13 +734,11 @@ describe("hostedRunnerIntercept", () => {
         HOSTED_WEB_BASE_URL: "https://web.example.test",
         MURPH_DATA_API_KEY: "data-api-worker-secret",
         readActiveRuntimeUserFence: async () => ({ active: true, attemptId: "attempt-1", leaseGeneration: "1", userId: "member_123" }),
-        validateActiveRuntimeWriteFence,
       }),
       { containerId: "opaque-container-id" },
     );
 
     expect(response.status).toBe(200);
-    expect(validateActiveRuntimeWriteFence).not.toHaveBeenCalled();
     const forwarded = readForwardedRequest(fetchMock);
     expect(forwarded.url).toBe("https://web.example.test/api/other");
     expect(forwarded.headers.get("authorization")).toBe("Bearer user-supplied-token");
@@ -1654,16 +1636,12 @@ describe("hostedRunnerIntercept", () => {
       runnerContainerName: string;
       userId: string;
     }) => createProviderEgressCredentialValidationResult(input));
-    const validateActiveRuntimeWriteFence = vi.fn(async () => {
-      throw new Error("OpenAI runner credentials must not use active-user-fence fallback.");
-    });
     const validateRuntimeProviderEgressToken = vi.fn(async () =>
       createProviderEgressTokenValidationResult({ userId: "unexpected" })
     );
     const credential = await createTestProviderEgressCredential();
     const env = createInterceptEnv({
       OPENAI_API_KEY: "openai-worker-secret",
-      validateActiveRuntimeWriteFence,
       validateRuntimeProviderEgressCredential,
       validateRuntimeProviderEgressToken,
     });
@@ -1681,7 +1659,6 @@ describe("hostedRunnerIntercept", () => {
 
     expect(response.status).toBe(200);
     expect(validateRuntimeProviderEgressToken).not.toHaveBeenCalled();
-    expect(validateActiveRuntimeWriteFence).not.toHaveBeenCalled();
     expect(validateRuntimeProviderEgressCredential).toHaveBeenCalledWith({
       providerKind: "openai",
       runnerContainerName: RUNNER_CONTAINER_NAME,
@@ -1966,16 +1943,12 @@ describe("hostedRunnerIntercept", () => {
     expect(readDeploySmokeLiveModelTurnFence).not.toHaveBeenCalled();
   });
 
-  it("rejects sentinel-only OpenAI egress with only a bound user instead of active-user fallback", async () => {
+  it("rejects sentinel-only OpenAI egress with only a bound user", async () => {
     const fetchMock = vi.fn<typeof fetch>(async () => new Response("unexpected"));
     vi.stubGlobal("fetch", fetchMock);
-    const validateActiveRuntimeWriteFence = vi.fn(async () => {
-      throw new Error("OpenAI sentinel-only egress must not use active-user fallback.");
-    });
     const env = createInterceptEnv({
       OPENAI_API_KEY: "openai-worker-secret",
       readActiveRuntimeUserFence: async () => ({ active: true, attemptId: "attempt-1", leaseGeneration: "1", userId: "member_123" }),
-      validateActiveRuntimeWriteFence,
     });
 
     const response = await hostedRunnerIntercept(
@@ -1991,7 +1964,6 @@ describe("hostedRunnerIntercept", () => {
     );
 
     expect(response.status).toBe(401);
-    expect(validateActiveRuntimeWriteFence).not.toHaveBeenCalled();
     expect(fetchMock).not.toHaveBeenCalled();
     expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -2017,13 +1989,9 @@ describe("hostedRunnerIntercept", () => {
       leaseGeneration: "1",
       userId: "member_123",
     }));
-    const validateActiveRuntimeWriteFence = vi.fn(async () => {
-      throw new Error("OpenAI sentinel-only egress must not use active-user fallback.");
-    });
     const env = createInterceptEnv({
       OPENAI_API_KEY: "openai-worker-secret",
       readActiveRuntimeUserFence,
-      validateActiveRuntimeWriteFence,
     });
 
     const response = await hostedRunnerIntercept(
@@ -2039,7 +2007,6 @@ describe("hostedRunnerIntercept", () => {
 
     expect(response.status).toBe(401);
     expect(readActiveRuntimeUserFence).not.toHaveBeenCalled();
-    expect(validateActiveRuntimeWriteFence).not.toHaveBeenCalled();
     expect(fetchMock).not.toHaveBeenCalled();
     expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -2245,12 +2212,9 @@ describe("hostedRunnerIntercept", () => {
     );
   });
 
-  it("does not use active-user-fence proof for tokenless Linq provider egress", async () => {
+  it("rejects tokenless Linq provider egress", async () => {
     const fetchMock = vi.fn<typeof fetch>(async () => new Response("unexpected"));
     vi.stubGlobal("fetch", fetchMock);
-    const validateActiveRuntimeWriteFence = vi.fn(async () => {
-      throw new Error("Linq should require provider-token proof when authority headers are absent.");
-    });
     const env = createInterceptEnv({
       LINQ_API_TOKEN: "linq-worker-secret",
       readActiveRuntimeUserFence: async () => ({
@@ -2259,7 +2223,6 @@ describe("hostedRunnerIntercept", () => {
         leaseGeneration: "1",
         userId: "member_123",
       }),
-      validateActiveRuntimeWriteFence,
     });
     env.CF_VERSION_METADATA = { id: "version_1" };
 
@@ -2276,7 +2239,6 @@ describe("hostedRunnerIntercept", () => {
     );
 
     expect(response.status).toBe(401);
-    expect(validateActiveRuntimeWriteFence).not.toHaveBeenCalled();
     expect(fetchMock).not.toHaveBeenCalled();
     expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -2297,11 +2259,6 @@ describe("hostedRunnerIntercept", () => {
   ): Promise<void> {
     const fetchMock = vi.fn<typeof fetch>(async () => new Response("unexpected"));
     vi.stubGlobal("fetch", fetchMock);
-    const validateActiveRuntimeWriteFence = vi.fn(async () => {
-      throw new Error(
-        "Delivery providers must require provider-token proof when authority headers are absent.",
-      );
-    });
     const env = createInterceptEnv({
       ...envOverrides,
       readActiveRuntimeUserFence: async () => ({
@@ -2310,7 +2267,6 @@ describe("hostedRunnerIntercept", () => {
         leaseGeneration: "1",
         userId: "member_123",
       }),
-      validateActiveRuntimeWriteFence,
     });
     env.CF_VERSION_METADATA = { id: "version_1" };
 
@@ -2321,11 +2277,10 @@ describe("hostedRunnerIntercept", () => {
     );
 
     expect(response.status).toBe(401);
-    expect(validateActiveRuntimeWriteFence).not.toHaveBeenCalled();
     expect(fetchMock).not.toHaveBeenCalled();
   }
 
-  it("does not use active-user-fence proof for tokenless Telegram provider egress", async () => {
+  it("rejects tokenless Telegram provider egress", async () => {
     await expectTokenlessDeliveryProviderRejected(
       new Request(
         `https://api.telegram.org/bot${HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL}/sendMessage`,
@@ -2342,7 +2297,7 @@ describe("hostedRunnerIntercept", () => {
     );
   });
 
-  it("does not use active-user-fence proof for tokenless WhatsApp provider egress", async () => {
+  it("rejects tokenless WhatsApp provider egress", async () => {
     await expectTokenlessDeliveryProviderRejected(
       new Request(
         `https://graph.facebook.com/v22.0/${HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL}/messages`,
@@ -2367,7 +2322,7 @@ describe("hostedRunnerIntercept", () => {
     );
   });
 
-  it("does not use active-user-fence proof for tokenless ElevenLabs provider egress", async () => {
+  it("rejects tokenless ElevenLabs provider egress", async () => {
     await expectTokenlessDeliveryProviderRejected(
       new Request(
         "https://api.elevenlabs.io/v1/text-to-speech/voice_123?output_format=mp3_44100_128",
@@ -7041,9 +6996,6 @@ function createInterceptEnv(input: {
     generation: string;
     userId: string;
   }) => Promise<boolean>;
-  validateActiveRuntimeWriteFence?: (input: {
-    userId: string;
-  }) => Promise<WorkerActiveRuntimeWriteFenceValidationResult>;
   validateRuntimeProviderEgressToken?: (input: {
     providerEgressToken: string;
     userId: string;
@@ -7114,8 +7066,6 @@ function createInterceptEnv(input: {
     WHATSAPP_PHONE_NUMBER_ID: input.WHATSAPP_PHONE_NUMBER_ID,
     USER_RUNNER: {
       getByName: () => ({
-        validateActiveRuntimeWriteFence:
-          input.validateActiveRuntimeWriteFence ?? (async () => ({ owns: false })),
         validateRuntimeProviderEgressCredential:
           input.validateRuntimeProviderEgressCredential ?? (async () => ({ owns: false })),
         validateRuntimeProviderEgressToken:

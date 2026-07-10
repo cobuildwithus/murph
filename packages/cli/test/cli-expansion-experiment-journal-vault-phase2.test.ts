@@ -3131,6 +3131,70 @@ test.sequential(
 )
 
 test.sequential(
+  'vault repair-experiment-media is dry-run first and requires explicit apply',
+  async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-experiment-media-repair-'))
+
+    try {
+      await runSliceCli(['init', '--vault', vaultRoot])
+
+      const dryRun = await runSliceCli<{
+        mode: 'dry-run' | 'apply'
+        hasWork: boolean
+        candidateCount: number
+        blockerCount: number
+        mutated: boolean
+      }>([
+        'vault',
+        'repair-experiment-media',
+        '--vault',
+        vaultRoot,
+      ])
+
+      assert.equal(dryRun.ok, true)
+      assert.equal(dryRun.meta?.command, 'vault repair-experiment-media')
+      assert.equal(requireData(dryRun).mode, 'dry-run')
+      assert.equal(requireData(dryRun).hasWork, false)
+      assert.equal(requireData(dryRun).candidateCount, 0)
+      assert.equal(requireData(dryRun).blockerCount, 0)
+      assert.equal(requireData(dryRun).mutated, false)
+
+      const applied = await runSliceCli<{
+        mode: 'dry-run' | 'apply'
+        hasWork: boolean
+        mutated: boolean
+      }>([
+        'vault',
+        'repair-experiment-media',
+        '--vault',
+        vaultRoot,
+        '--apply',
+      ])
+
+      assert.equal(applied.ok, true)
+      assert.equal(requireData(applied).mode, 'apply')
+      assert.equal(requireData(applied).hasWork, false)
+      assert.equal(requireData(applied).mutated, false)
+
+      const contradictory = await runSliceCli([
+        'vault',
+        'repair-experiment-media',
+        '--vault',
+        vaultRoot,
+        '--apply',
+        '--dry-run',
+      ])
+      assert.equal(contradictory.ok, false)
+      if (!contradictory.ok) {
+        assert.equal(contradictory.error.code, 'invalid_options')
+      }
+    } finally {
+      await rm(vaultRoot, { recursive: true, force: true })
+    }
+  },
+)
+
+test.sequential(
   'vault repair-wearable-storage exposes dry-run and explicit dense raw apply controls',
   async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-wearable-storage-repair-'))
@@ -3450,6 +3514,52 @@ test.sequential(
       const result = await runSliceCli([
         'vault',
         'repair-junction-hr-zones',
+        '--vault',
+        vaultRoot,
+        '--config',
+        configPath,
+      ], { config: true })
+
+      assert.equal(result.ok, false)
+      if (!result.ok) {
+        assert.equal(result.error.code, 'invalid_options')
+        assert.match(result.error.message ?? '', /--apply/u)
+      }
+    } finally {
+      await rm(vaultRoot, { recursive: true, force: true })
+    }
+  },
+)
+
+test.sequential(
+  'vault repair-experiment-media rejects apply loaded only from config',
+  async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-experiment-media-repair-config-'))
+    const configPath = path.join(vaultRoot, 'config.json')
+
+    try {
+      await runSliceCli(['init', '--vault', vaultRoot])
+      await writeFile(
+        configPath,
+        `${JSON.stringify({
+          commands: {
+            vault: {
+              commands: {
+                'repair-experiment-media': {
+                  options: {
+                    apply: true,
+                  },
+                },
+              },
+            },
+          },
+        }, null, 2)}\n`,
+        'utf8',
+      )
+
+      const result = await runSliceCli([
+        'vault',
+        'repair-experiment-media',
         '--vault',
         vaultRoot,
         '--config',

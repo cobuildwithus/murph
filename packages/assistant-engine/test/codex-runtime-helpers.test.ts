@@ -50,7 +50,6 @@ import {
 } from '../src/assistant/providers/helpers.ts'
 import {
   recordCodexAttemptFailed,
-  recordCodexAttemptStarted,
 } from '../src/assistant/codex-turn/attempt-observability.ts'
 import {
   executeCodexAssistantTurnFromInput,
@@ -732,45 +731,6 @@ describe('Codex assistant registry helpers', () => {
     ])
   })
 
-  it('records provider-attempt-started receipt evidence', async () => {
-    const providerConfig = normalizeAssistantProviderConfig({
-      provider: 'codex-cli',
-      model: 'gpt-5.4',
-      modelProvider: 'vercel-ai-gateway',
-      oss: false,
-      profile: 'prod',
-      reasoningEffort: 'high',
-    })
-    const route: CodexThreadIdentity = {
-      codexCommand: '/opt/murph/bin/codex',
-      label: 'primary:Codex app-server:gpt-5.4:prod',
-      provider: 'codex-cli',
-      providerOptions: serializeAssistantProviderSessionOptions(providerConfig),
-      routeId: 'route-1',
-    }
-
-    await recordCodexAttemptStarted({
-      attemptCount: 2,
-      at: '2026-05-04T00:00:00.000Z',
-      route,
-      turnId: 'turn-1',
-      vault: '/vaults/test',
-    })
-
-    expect(turnsMocks.appendAssistantTurnReceiptEvent).toHaveBeenCalledWith(
-      expect.objectContaining({
-        kind: 'provider.attempt.started',
-        metadata: {
-          attempt: '2',
-          model: 'gpt-5.4',
-          provider: 'codex-cli',
-          routeFingerprint: 'route-1',
-        },
-      }),
-    )
-    expect(diagnosticsMocks.recordAssistantDiagnosticEvent).not.toHaveBeenCalled()
-  })
-
   it('counts a failed provider attempt in its terminal diagnostic', async () => {
     const route: CodexThreadIdentity = {
       codexCommand: null,
@@ -803,6 +763,41 @@ describe('Codex assistant registry helpers', () => {
         kind: 'provider.attempt.failed',
       }),
     )
+  })
+
+  it('keeps failed-attempt recording best-effort when observability writes reject', async () => {
+    const route: CodexThreadIdentity = {
+      codexCommand: null,
+      label: 'primary:Codex app-server:gpt-5.4',
+      provider: 'codex-cli',
+      providerOptions: serializeAssistantProviderSessionOptions(
+        normalizeAssistantProviderConfig({
+          model: 'gpt-5.4',
+          provider: 'codex-cli',
+        }),
+      ),
+      routeId: 'route-failed',
+    }
+    turnsMocks.appendAssistantTurnReceiptEvent.mockRejectedValueOnce(
+      new Error('receipt store unavailable'),
+    )
+    diagnosticsMocks.recordAssistantDiagnosticEvent.mockRejectedValueOnce(
+      new Error('diagnostic sink unavailable'),
+    )
+
+    // A thrown observability write here would replace the structured
+    // failed-attempt outcome in the provider catch with an unclassified error.
+    await expect(
+      recordCodexAttemptFailed({
+        attemptCount: 1,
+        detail: 'Provider attempt failed.',
+        errorCode: 'PROVIDER_FAILED',
+        route,
+        sessionId: 'session-failed',
+        turnId: 'turn-failed',
+        vault: '/vaults/test',
+      }),
+    ).resolves.toBeUndefined()
   })
 
   it.each([

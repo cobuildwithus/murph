@@ -5538,6 +5538,48 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(recordCheckpoint).not.toHaveBeenCalled();
   });
 
+  it("does not retry ambiguous non-canonical checkpoints", async () => {
+    const transportFailure = new Error("Synthetic import checkpoint transport failure.");
+    const fetchMock = vi.fn(async () => {
+      throw transportFailure;
+    });
+    const recordCheckpoint = vi.fn();
+    const platform = buildTestHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: fetchMock as typeof fetch,
+      workspaceCheckpointBridge: {
+        readCurrentLease: () => ({
+          attemptId: "attempt_1",
+          leaseGeneration: "9",
+          userId: "member_123",
+          workspaceVersion: "4",
+        }),
+        recordCheckpoint,
+      },
+    });
+
+    let rejected: unknown = null;
+    try {
+      await platform.workspacePort!.checkpoint({
+        attemptId: "attempt_1",
+        expectedWorkspaceVersion: "4",
+        leaseGeneration: "9",
+        reason: "import",
+        snapshotRef: null,
+      });
+    } catch (error) {
+      rejected = error;
+    }
+
+    expect(rejected).toBeInstanceOf(Error);
+    if (!(rejected instanceof Error)) {
+      throw new Error("Expected non-canonical checkpoint failure.");
+    }
+    expect(rejected.cause).toBe(transportFailure);
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(recordCheckpoint).not.toHaveBeenCalled();
+  });
+
   it("retries a server-error canonical checkpoint response once", async () => {
     const redactedStatus = {
       hostedCanonicalWriteReceiptLogByteSize: 512,
