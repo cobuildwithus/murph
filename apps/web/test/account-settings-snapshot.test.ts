@@ -4,6 +4,7 @@ import { createHostedEmailUserReplyAliasRoute } from "@murphai/hosted-execution/
 const mocks = vi.hoisted(() => ({
   findUniqueHostedMember: vi.fn(),
   getPrisma: vi.fn(),
+  readHostedMemberAssistantModelPreference: vi.fn(),
   readHostedMemberSnapshot: vi.fn(),
 }));
 
@@ -24,6 +25,11 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", async () => {
   };
 });
 
+vi.mock("@/src/lib/hosted-onboarding/assistant-model-preference", () => ({
+  readHostedMemberAssistantModelPreference:
+    mocks.readHostedMemberAssistantModelPreference,
+}));
+
 import {
   readHostedAccountSettingsSnapshot,
   withServerApprovedPrivyAccountHints,
@@ -41,6 +47,10 @@ describe("hosted account settings snapshot", () => {
     process.env.HOSTED_EMAIL_LOCAL_PART = "murph";
     process.env.HOSTED_EMAIL_SIGNING_SECRET = "test-email-signing-secret";
     mocks.findUniqueHostedMember.mockResolvedValue(null);
+    mocks.readHostedMemberAssistantModelPreference.mockResolvedValue({
+      model: "gpt-5.6-terra",
+      solAvailable: false,
+    });
     mocks.getPrisma.mockReturnValue({
       hostedMember: {
         findUnique: mocks.findUniqueHostedMember,
@@ -135,6 +145,8 @@ describe("hosted account settings snapshot", () => {
       memberId: "member_123",
     })).resolves.toMatchObject({
       assistant: {
+        model: "gpt-5.6-terra",
+        solAvailable: false,
         tone: "casual",
         voice: "warm",
       },
@@ -151,6 +163,8 @@ describe("hosted account settings snapshot", () => {
       memberId: "member_123",
     })).resolves.toMatchObject({
       assistant: {
+        model: "gpt-5.6-terra",
+        solAvailable: false,
         tone: null,
         voice: null,
       },
@@ -170,9 +184,38 @@ describe("hosted account settings snapshot", () => {
       memberId: "member_123",
     })).resolves.toMatchObject({
       assistant: {
+        model: "gpt-5.6-terra",
+        solAvailable: false,
         tone: null,
         voice: null,
       },
+    });
+  });
+
+  it("includes the canonical effective model and Sol availability", async () => {
+    mocks.readHostedMemberSnapshot.mockResolvedValue({
+      core: null,
+      emailAuthorization: null,
+      identity: null,
+      routing: null,
+    });
+    mocks.readHostedMemberAssistantModelPreference.mockResolvedValue({
+      hostedAssistantModelOverride: "gpt-5.6-sol",
+      model: "gpt-5.6-sol",
+      solAvailable: true,
+    });
+
+    await expect(readHostedAccountSettingsSnapshot({
+      memberId: "member_123",
+    })).resolves.toMatchObject({
+      assistant: {
+        model: "gpt-5.6-sol",
+        solAvailable: true,
+      },
+    });
+    expect(mocks.readHostedMemberAssistantModelPreference).toHaveBeenCalledWith({
+      memberId: "member_123",
+      prisma: expect.objectContaining({ readonly: true }),
     });
   });
 

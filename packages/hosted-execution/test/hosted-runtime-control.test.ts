@@ -11,6 +11,14 @@ import {
   ASSISTANT_USAGE_SCHEMA,
   type AssistantUsageRecord,
 } from "../src/assistant-usage.ts";
+import {
+  HOSTED_ASSISTANT_MODEL_OVERRIDES,
+  HOSTED_ASSISTANT_PRODUCT_MODELS,
+  HOSTED_ASSISTANT_SOL_MODEL,
+  HOSTED_ASSISTANT_TERRA_MODEL,
+  isHostedAssistantProductModel,
+  parseHostedAssistantModelOverride,
+} from "../src/assistant-model.ts";
 
 import {
   HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA,
@@ -232,6 +240,24 @@ describe("hosted runtime control contracts", () => {
     expect(normalizeHostedAiUsageAllowancePricedModelId("gpt-image-2")).toBeNull();
     expect(normalizeHostedAiUsageAllowancePricedModelId("gpt-5.4-mini")).toBeNull();
     expect(normalizeHostedAiUsageAllowancePricedModelId("gpt-4.1-mini-2026-04-23")).toBeNull();
+  });
+
+  it("keeps the hosted assistant product models narrower than deploy pricing support", () => {
+    expect(HOSTED_ASSISTANT_PRODUCT_MODELS).toEqual([
+      HOSTED_ASSISTANT_TERRA_MODEL,
+      HOSTED_ASSISTANT_SOL_MODEL,
+    ]);
+    expect(HOSTED_ASSISTANT_MODEL_OVERRIDES).toEqual([
+      HOSTED_ASSISTANT_SOL_MODEL,
+    ]);
+    expect(isHostedAssistantProductModel(HOSTED_ASSISTANT_TERRA_MODEL)).toBe(true);
+    expect(isHostedAssistantProductModel(HOSTED_ASSISTANT_SOL_MODEL)).toBe(true);
+    expect(isHostedAssistantProductModel("gpt-5.6-luna")).toBe(false);
+    expect(parseHostedAssistantModelOverride(HOSTED_ASSISTANT_SOL_MODEL))
+      .toBe(HOSTED_ASSISTANT_SOL_MODEL);
+    expect(parseHostedAssistantModelOverride(HOSTED_ASSISTANT_TERRA_MODEL))
+      .toBeNull();
+    expect(parseHostedAssistantModelOverride(" gpt-5.6-sol ")).toBeNull();
   });
 
   it("normalizes OpenAI image usage priced model aliases separately", () => {
@@ -1371,11 +1397,29 @@ describe("hosted runtime control contracts", () => {
     });
     expect(parseHostedWorkspaceReadResponse({
       fetchedAt: "2026-04-26T00:00:02.000Z",
+      hostedAssistantModelOverride: HOSTED_ASSISTANT_SOL_MODEL,
       workspace: null,
     })).toEqual({
       fetchedAt: "2026-04-26T00:00:02.000Z",
+      hostedAssistantModelOverride: HOSTED_ASSISTANT_SOL_MODEL,
       workspace: null,
     });
+    for (const invalidOverride of [
+      null,
+      HOSTED_ASSISTANT_TERRA_MODEL,
+      "gpt-5.6-luna",
+      " gpt-5.6-sol ",
+      56,
+    ]) {
+      expect(parseHostedWorkspaceReadResponse({
+        fetchedAt: "2026-04-26T00:00:02.000Z",
+        hostedAssistantModelOverride: invalidOverride,
+        workspace: null,
+      })).toEqual({
+        fetchedAt: "2026-04-26T00:00:02.000Z",
+        workspace: null,
+      });
+    }
     expect(parseHostedWorkspaceCheckpointRequest({
       attemptId: "attempt_1",
       expectedWorkspaceVersion: "4",
