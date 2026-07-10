@@ -1,12 +1,14 @@
 import { randomUUID } from "node:crypto";
 
 import {
+  HOSTED_CANONICAL_WRITE_RECEIPT_REDACTED_STATUS_KEYS,
   HOSTED_MAILBOX_LANES,
   HOSTED_RUNTIME_LOG_COMPONENTS,
   HOSTED_RUNTIME_LOG_EVENT_CODES,
   HOSTED_RUNTIME_LOG_LEVELS,
   HOSTED_RUNTIME_LOG_PHASES,
   HOSTED_WORKSPACE_CHECKPOINT_REASONS,
+  isHostedRuntimeMailboxContinuation,
   isHostedMailboxLane,
 } from "@murphai/hosted-execution/runtime-control";
 import type {
@@ -155,6 +157,8 @@ const SAFE_HOSTED_RUNTIME_REDACTED_METADATA_KEY_SUFFIXES = [
   "Types",
 ] as const;
 const HOSTED_RUNTIME_REDACTED_JSON_MAX_KEYS = 96;
+const HOSTED_CANONICAL_WRITE_RECEIPT_REDACTED_STATUS_KEY_SET =
+  new Set<string>(HOSTED_CANONICAL_WRITE_RECEIPT_REDACTED_STATUS_KEYS);
 const HOSTED_RUNTIME_REDACTED_ARRAY_MAX_LENGTH = 16;
 const HOSTED_RUNTIME_REDACTED_OBJECT_MAX_KEYS = 16;
 const HOSTED_WORKSPACE_CHECKPOINT_MAILBOX_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
@@ -202,8 +206,9 @@ export interface HostedWorkspaceRecord {
 }
 
 export interface HostedWorkspaceCheckpointResult {
+  conversationInputAhead?: boolean;
   replacedSnapshotRef: HostedExecutionSnapshotRefState;
-  status: "updated" | "conflict" | "foreground_pending";
+  status: "updated" | "conflict";
   workspace: HostedWorkspaceRecord | null;
 }
 
@@ -369,16 +374,19 @@ export async function checkpointHostedWorkspaceTx(input: {
       : toNullablePrismaJson(sanitizeHostedRuntimeRedactedJson(
         input.redactedStatusJson,
         "Hosted workspace redactedStatusJson",
+        HOSTED_CANONICAL_WRITE_RECEIPT_REDACTED_STATUS_KEY_SET,
       ));
   }
 
+  let conversationInputAhead: boolean | undefined;
+  let lockedWorkspace: HostedWorkspaceRow | null = null;
   const conversationImportedSeq = readCheckpointConversationImportedSeq(input.redactedStatusJson);
   if (reason === "idle_shutdown" && conversationImportedSeq !== null) {
     await lockHostedWorkspaceForCheckpointTx({
       tx: input.tx,
       userId,
     });
-    const lockedWorkspace = await input.tx.hostedWorkspace.findUnique({
+    lockedWorkspace = await input.tx.hostedWorkspace.findUnique({
       where: {
         userId,
       },
@@ -390,23 +398,23 @@ export async function checkpointHostedWorkspaceTx(input: {
         workspace: lockedWorkspace ? projectHostedWorkspace(lockedWorkspace) : null,
       };
     }
-    if (!isMailboxContinuationCheckpoint(input)) {
+    if (!isHostedRuntimeMailboxContinuation({
+      nextWakeAt: input.nextWakeAt,
+      nextWakeReason: input.nextWakeReason,
+      redactedStatus: input.redactedStatusJson,
+    })) {
       const pendingConversationSeq = await readForegroundPendingConversationSeqTx({
         conversationImportedSeq,
         tx: input.tx,
         userId,
       });
       if (pendingConversationSeq !== null) {
-        return {
-          replacedSnapshotRef: null,
-          status: "foreground_pending",
-          workspace: projectHostedWorkspace(lockedWorkspace),
-        };
+        conversationInputAhead = true;
       }
     }
   }
 
-  const currentWorkspace = await input.tx.hostedWorkspace.findUnique({
+  const currentWorkspace = lockedWorkspace ?? await input.tx.hostedWorkspace.findUnique({
     where: {
       userId,
     },
@@ -432,6 +440,9 @@ export async function checkpointHostedWorkspaceTx(input: {
   });
 
   return {
+    ...(updated.count === 1 && conversationInputAhead !== undefined
+      ? { conversationInputAhead }
+      : {}),
     replacedSnapshotRef: updated.count === 1 ? replacedSnapshotRef : null,
     status: updated.count === 1 ? "updated" : "conflict",
     workspace: row ? projectHostedWorkspace(row) : null,
@@ -448,44 +459,6 @@ function readCheckpointConversationImportedSeq(
         value,
         "Hosted workspace checkpoint redactedStatus hostedMailboxConversationImportedSeq",
       );
-}
-
-function isMailboxContinuationCheckpoint(input: {
-  nextWakeAt?: Date | string | null;
-  nextWakeReason?: string | null;
-  redactedStatusJson?: Record<string, unknown> | null;
-}): boolean {
-  if (readCheckpointRetryableBlockedCount(input.redactedStatusJson) > 0n) {
-    return true;
-  }
-  return input.nextWakeAt !== undefined
-    && input.nextWakeAt !== null
-    && normalizeNullableString(input.nextWakeReason) === "mailbox";
-}
-
-function readCheckpointRetryableBlockedCount(
-  redactedStatusJson: Record<string, unknown> | null | undefined,
-): bigint {
-  if (!redactedStatusJson || typeof redactedStatusJson !== "object" || Array.isArray(redactedStatusJson)) {
-    return 0n;
-  }
-  const value = redactedStatusJson["hostedMailboxRetryableBlockedCount"];
-  if (value === undefined || value === null) {
-    return 0n;
-  }
-  if (
-    typeof value === "bigint"
-    || typeof value === "number"
-    || typeof value === "string"
-  ) {
-    return normalizeBigInt(
-      value,
-      "Hosted workspace checkpoint redactedStatus hostedMailboxRetryableBlockedCount",
-    );
-  }
-  throw new TypeError(
-    "Hosted workspace checkpoint redactedStatus hostedMailboxRetryableBlockedCount must be a non-negative integer.",
-  );
 }
 
 async function lockHostedWorkspaceForCheckpointTx(input: {
@@ -1129,6 +1102,7 @@ function sanitizeHostedRuntimeLogRedactedJson(
 function sanitizeHostedRuntimeRedactedJson(
   value: Record<string, unknown> | null | undefined,
   label: string,
+  reservedKeys?: ReadonlySet<string>,
 ): HostedRuntimeRedactedJson | null {
   if (!value) {
     return null;
@@ -1137,7 +1111,10 @@ function sanitizeHostedRuntimeRedactedJson(
   const output: HostedRuntimeRedactedJson = {};
   const entries = Object.entries(value);
 
-  if (entries.length > HOSTED_RUNTIME_REDACTED_JSON_MAX_KEYS) {
+  const ordinaryEntryCount = reservedKeys
+    ? entries.filter(([key]) => !reservedKeys.has(key)).length
+    : entries.length;
+  if (ordinaryEntryCount > HOSTED_RUNTIME_REDACTED_JSON_MAX_KEYS) {
     throw new TypeError(
       `${label} must contain at most ${HOSTED_RUNTIME_REDACTED_JSON_MAX_KEYS} fields.`,
     );

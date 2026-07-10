@@ -67,8 +67,8 @@ importers:
         specifier: ^0.1.15
         version: 0.1.15
       '@cobuild/review-gpt':
-        specifier: ^0.5.100
-        version: 0.5.100(@cfworker/json-schema@4.1.1)(typescript@5.9.3)
+        specifier: ^0.5.102
+        version: 0.5.102(@cfworker/json-schema@4.1.1)(typescript@5.9.3)
       '@murphai/health-metrics':
         specifier: workspace:*
         version: link:packages/health-metrics
@@ -208,9 +208,6 @@ importers:
       '@privy-io/react-auth':
         specifier: ^3.24.0
         version: 3.24.0(@solana-program/system@0.10.0(@solana/kit@5.5.1(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@5.0.10)))(@solana-program/token@0.9.0(@solana/kit@5.5.1(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@5.0.10)))(@solana/kit@5.5.1(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@5.0.10))(@solana/sysvars@5.5.1(typescript@5.9.3))(@tanstack/query-core@5.95.2)(@tanstack/react-query@5.95.2(react@19.2.6))(@types/react@19.2.14)(@vercel/functions@3.4.6(@aws-sdk/credential-provider-web-identity@3.972.13))(bufferutil@4.1.0)(css-to-react-native@3.2.0)(immer@11.1.8)(react-dom@19.2.6(react@19.2.6))(react@19.2.6)(typescript@5.9.3)(use-sync-external-store@1.4.0(react@19.2.6))(utf-8-validate@5.0.10)(zod@4.4.3)
-      '@radix-ui/react-dialog':
-        specifier: ^1.1.15
-        version: 1.1.15(@types/react-dom@19.2.3(@types/react@19.2.14))(@types/react@19.2.14)(react-dom@19.2.6(react@19.2.6))(react@19.2.6)
       '@temporalio/client':
         specifier: ~1.16.3
         version: 1.16.3
@@ -1289,8 +1286,8 @@ packages:
     resolution: {integrity: sha512-CjzP5OHu6RhOOjmPl/1djZNVEbjttt62rBSzvuPK7u9NrZ37F2lkHT+QmZ4Lb+ZDmMhPTqlwdyqnzwD0Gkhm1Q==}
     hasBin: true
 
-  '@cobuild/review-gpt@0.5.100':
-    resolution: {integrity: sha512-ZAjr6hkTkaXSCO5N4tl2kZ1fX2SMdoLlo8F4mG35ymyJ2GHb+io7VrVWmYccoWqZeSY6w9ZlMs9HIKZ4cC8sjg==}
+  '@cobuild/review-gpt@0.5.102':
+    resolution: {integrity: sha512-VmuiWx4Pzmy0w/45FYLm5hk9+OmzSiO0EpDC9/uiD/tUGNBmJbMeDEuu56IsKd816CrwPSJlddwqb6+SWWsvOw==}
     hasBin: true
 
   '@coinbase/cdp-sdk@1.48.3':
@@ -10443,7 +10440,7 @@ snapshots:
 
   '@cobuild/repo-tools@0.1.15': {}
 
-  '@cobuild/review-gpt@0.5.100(@cfworker/json-schema@4.1.1)(typescript@5.9.3)':
+  '@cobuild/review-gpt@0.5.102(@cfworker/json-schema@4.1.1)(typescript@5.9.3)':
     dependencies:
       '@cobuild/repo-tools': 0.1.15
       incur: 0.4.5(patch_hash=a4a70545bebf677aebb5ab89bf04d130ba1469d166e0e08e00096f4158f73a2e)

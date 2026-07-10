@@ -1,8 +1,12 @@
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
+import { HOSTED_ASSISTANT_TERRA_MODEL } from "@murphai/hosted-execution/assistant-model";
 
 import { HostedPrivyProvider } from "@/src/components/hosted-onboarding/privy-provider";
+import { resolveHostedMurphContactOption } from "@/src/components/murph/hosted-murph-contact-action";
+import { CustomizeMurphSettings } from "@/src/components/settings/customize-murph-settings";
 import { HostedAccountSettingsCards } from "@/src/components/settings/hosted-account-settings-cards";
+import { HostedAssistantModelSettings } from "@/src/components/settings/hosted-assistant-model-settings";
 import { HostedBillingSettings } from "@/src/components/settings/hosted-billing-settings";
 import { HostedDataPrivacySettings } from "@/src/components/settings/hosted-data-privacy-settings";
 import { HostedFamilySettings } from "@/src/components/settings/hosted-family-settings";
@@ -115,13 +119,30 @@ export default async function SettingsPage({
     : account;
   const privyAppId = process.env.NEXT_PUBLIC_PRIVY_APP_ID?.trim() || null;
   const privyClientId = process.env.NEXT_PUBLIC_PRIVY_CLIENT_ID?.trim() || null;
+  const murphPhoneNumber =
+    routing?.linqRecipientPhone ?? routing?.pendingLinqRecipientPhone ?? null;
+  // The member sends this to Murph right after picking a voice, so the reply
+  // comes back as a voice memo in the new voice. Voice memos only deliver over
+  // text and Telegram, so an email-only member gets no redirect.
+  const resolvedVoiceTestOption = authenticatedMember
+    ? await resolveHostedMurphContactOption({
+        message: {
+          body: "just picked a new voice for you! send me a voice memo so I can hear it",
+        },
+        preferredKind: "text",
+      })
+    : null;
+  const voiceTestContactOption =
+    resolvedVoiceTestOption && resolvedVoiceTestOption.kind !== "email"
+      ? resolvedVoiceTestOption
+      : null;
 
   return (
     <div className="flex flex-col gap-12">
       <PageHeader
         eyebrow="Settings"
         title="Your account"
-        description="Subscription, connected accounts, and data privacy."
+        description="Plan, model, connected accounts, and data privacy."
       />
 
       <section className="flex flex-col gap-4">
@@ -164,6 +185,16 @@ export default async function SettingsPage({
         />
       </section>
 
+      <section className="flex flex-col gap-4">
+        <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+          AI model
+        </div>
+        <HostedAssistantModelSettings
+          initialModel={account?.assistant?.model ?? HOSTED_ASSISTANT_TERRA_MODEL}
+          solAvailable={account?.assistant?.solAvailable === true}
+        />
+      </section>
+
       {familyOwner ? (
         <section className="flex flex-col gap-4">
           <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
@@ -180,12 +211,25 @@ export default async function SettingsPage({
         {accountWithPrivyDisplay ? (
           <HostedAccountSettingsCards
             account={accountWithPrivyDisplay}
-            murphPhoneNumber={routing?.linqRecipientPhone ?? routing?.pendingLinqRecipientPhone ?? null}
+            murphPhoneNumber={murphPhoneNumber}
             openEmailLink={openEmailLink}
-            openVoiceLink={openVoiceLink}
           />
         ) : null}
       </section>
+
+      {accountWithPrivyDisplay ? (
+        <section className="flex flex-col gap-4">
+          <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+            Customize your Murph
+          </div>
+          <CustomizeMurphSettings
+            assistant={accountWithPrivyDisplay.assistant ?? null}
+            murphPhoneNumber={murphPhoneNumber}
+            openVoiceLink={openVoiceLink}
+            voiceTestContactOption={voiceTestContactOption}
+          />
+        </section>
+      ) : null}
 
       <section className="flex flex-col gap-4">
         <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">

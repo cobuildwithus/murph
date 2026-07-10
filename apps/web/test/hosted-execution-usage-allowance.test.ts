@@ -15,6 +15,7 @@ import {
   checkHostedAiUsageGate,
   priceHostedAiUsageForAllowance,
   readHostedAiUsageGate,
+  reconcileHostedAiUsageAllowancePeriodForMemberTx,
   resolveHostedAiUsageGate,
 } from "@/src/lib/hosted-execution/usage-allowance";
 
@@ -1481,6 +1482,105 @@ function countPeriodMetadataUpdateCalls(tx: { $executeRaw: ReturnType<typeof vi.
       && sqlText.includes('"last_usage_at"');
   }).length;
 }
+
+describe("reconcileHostedAiUsageAllowancePeriodForMemberTx", () => {
+  const trialStartedAt = new Date("2026-07-02T12:00:00.000Z");
+  const extendedTrialEnd = new Date("2026-07-16T12:00:00.000Z");
+  const now = new Date("2026-07-09T12:00:00.000Z");
+
+  it("creates a missing lazy trial usage period from current billing", async () => {
+    const tx = createGatePrisma({
+      billingPhase: "trial",
+      checkoutOffer: "pulse_trial_7d",
+      findUniquePeriod: null,
+      limitUsdMicros: 4_500_000n,
+      periodEnd: extendedTrialEnd,
+      periodStart: trialStartedAt,
+      pulseTrialPolicyVersion: "pulse-trial-2026-06-30-v2",
+      spentUsdMicros: 0n,
+      trialEndsAt: extendedTrialEnd,
+      trialStartedAt,
+    });
+
+    await expect(reconcileHostedAiUsageAllowancePeriodForMemberTx({
+      memberId: "member_123",
+      now,
+      tx: tx as never,
+    })).resolves.toBeUndefined();
+
+    expect(tx.hostedAiUsagePeriod.createMany).toHaveBeenCalledWith({
+      data: {
+        billingPlanCode: "launch_monthly",
+        limitUsdMicros: 4_500_000n,
+        memberId: "member_123",
+        periodEnd: extendedTrialEnd,
+        periodStart: trialStartedAt,
+        spentUsdMicros: 0n,
+      },
+      skipDuplicates: true,
+    });
+    expect(tx.hostedAiUsagePeriod.update).not.toHaveBeenCalled();
+  });
+
+  it("repairs only owner-controlled fields while preserving spend and block state", async () => {
+    const originalTrialEnd = new Date("2026-07-09T12:00:00.000Z");
+    const blockedAt = new Date("2026-07-08T12:00:00.000Z");
+    const update = vi.fn(async (args: {
+      data: {
+        billingPlanCode: string;
+        blockedAt: Date | null;
+        limitUsdMicros: bigint;
+        periodEnd: Date;
+      };
+    }) => ({
+      billingPlanCode: args.data.billingPlanCode,
+      blockedAt: args.data.blockedAt,
+      limitUsdMicros: args.data.limitUsdMicros,
+      periodEnd: args.data.periodEnd,
+      periodStart: trialStartedAt,
+      spentUsdMicros: 4_500_000n,
+    }));
+    const tx = createGatePrisma({
+      billingPhase: "trial",
+      checkoutOffer: "pulse_trial_7d",
+      findUniquePeriod: {
+        billingPlanCode: "launch_monthly",
+        blockedAt,
+        limitUsdMicros: 4_500_000n,
+        periodEnd: originalTrialEnd,
+        periodStart: trialStartedAt,
+        spentUsdMicros: 4_500_000n,
+      },
+      limitUsdMicros: 4_500_000n,
+      periodEnd: extendedTrialEnd,
+      periodStart: trialStartedAt,
+      pulseTrialPolicyVersion: "pulse-trial-2026-06-30-v2",
+      spentUsdMicros: 4_500_000n,
+      trialEndsAt: extendedTrialEnd,
+      trialStartedAt,
+      update,
+    });
+
+    await expect(reconcileHostedAiUsageAllowancePeriodForMemberTx({
+      memberId: "member_123",
+      now,
+      tx: tx as never,
+    })).resolves.toBeUndefined();
+
+    expect(update).toHaveBeenCalledWith(expect.objectContaining({
+      data: {
+        billingPlanCode: "launch_monthly",
+        blockedAt,
+        limitUsdMicros: 4_500_000n,
+        periodEnd: extendedTrialEnd,
+        updatedAt: now,
+      },
+    }));
+    const data = update.mock.calls[0]?.[0].data;
+    expect(data).not.toHaveProperty("spentUsdMicros");
+    expect(data).not.toHaveProperty("periodStart");
+  });
+});
 
 describe("resolveHostedAiUsageGate", () => {
   it("allows active members while recorded spend is below the period limit", async () => {

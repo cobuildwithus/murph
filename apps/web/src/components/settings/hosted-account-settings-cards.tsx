@@ -1,35 +1,20 @@
 "use client";
 
-import {
-  assistantVoiceOptions,
-  type AssistantTonePreference,
-  type AssistantVoiceOptionId,
-} from "@murphai/contracts";
-import { Mail, MessageSquareText, Phone, Send } from "lucide-react";
+import { Mail, Phone, Send } from "lucide-react";
 import dynamic from "next/dynamic";
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useState } from "react";
 
-import {
-  MurphAssistantStylePicker,
-  type MurphAssistantStylePreferences,
-} from "@/src/components/murph/murph-assistant-style-picker";
-import { MurphContactCardPicker } from "@/src/components/murph/murph-contact-card-picker";
 import { Button } from "@/src/components/ui/button";
 import type { HostedAccountSettingsSnapshot } from "@/src/lib/hosted-onboarding/account-settings-snapshot";
 import { MURPH_TELEGRAM_URL } from "@/src/lib/murph-contact-routing";
 
-import { SettingsContactAction, SettingsContactLink } from "./connected-account-card";
-import { formatMaskedPhoneNumber } from "./hosted-settings-utils";
+import { SettingsContactLink } from "./connected-account-card";
+import { formatMaskedPhoneNumber, stripSettingsQueryParam } from "./hosted-settings-utils";
 import { formatHostedTelegramDisplayValue } from "./hosted-telegram-settings-helpers";
+import { SettingsRow, SettingsRowList } from "./settings-row";
 
 type HostedSettingsIdentityLinkMode = "phone" | "email" | "telegram";
-type AssistantStyleInitialStep = "tone" | "voice";
 const ADD_EMAIL_QUERY_KEY = "addEmail";
-const VOICE_QUERY_KEY = "voice";
-const DEFAULT_ASSISTANT_STYLE: MurphAssistantStylePreferences = {
-  tone: null,
-  voice: null,
-};
 
 const HostedSettingsIdentityLinkDialog = dynamic(
   () => import("./hosted-settings-identity-link-dialog").then((mod) => mod.HostedSettingsIdentityLinkDialog),
@@ -43,38 +28,20 @@ export function HostedAccountSettingsCards({
   account,
   murphPhoneNumber,
   openEmailLink = false,
-  openVoiceLink = false,
 }: {
   account: HostedAccountSettingsSnapshot;
   murphPhoneNumber?: string | null;
   openEmailLink?: boolean;
-  openVoiceLink?: boolean;
 }) {
-  const [contactPickerOpen, setContactPickerOpen] = useState(false);
-  const [assistantStyleOpen, setAssistantStyleOpen] = useState(openVoiceLink);
-  const [assistantStyleInitialStep, setAssistantStyleInitialStep] =
-    useState<AssistantStyleInitialStep>(openVoiceLink ? "voice" : "tone");
-  const [assistantStyle, setAssistantStyle] = useState<MurphAssistantStylePreferences>(
-    account.assistant ?? DEFAULT_ASSISTANT_STYLE,
-  );
   const [linkMode, setLinkMode] = useState<HostedSettingsIdentityLinkMode | null>(
     openEmailLink ? "email" : null,
   );
   const [previousOpenEmailLink, setPreviousOpenEmailLink] = useState(openEmailLink);
-  const [previousOpenVoiceLink, setPreviousOpenVoiceLink] = useState(openVoiceLink);
 
   if (previousOpenEmailLink !== openEmailLink) {
     setPreviousOpenEmailLink(openEmailLink);
     if (openEmailLink) {
       setLinkMode("email");
-    }
-  }
-
-  if (previousOpenVoiceLink !== openVoiceLink) {
-    setPreviousOpenVoiceLink(openVoiceLink);
-    if (openVoiceLink) {
-      setAssistantStyleInitialStep("voice");
-      setAssistantStyleOpen(true);
     }
   }
 
@@ -84,12 +51,6 @@ export function HostedAccountSettingsCards({
     }
   }, [openEmailLink]);
 
-  useEffect(() => {
-    if (openVoiceLink) {
-      stripSettingsQueryParam(VOICE_QUERY_KEY);
-    }
-  }, [openVoiceLink]);
-
   const phoneNumber = account.phone.number;
   const phoneVerified = Boolean(account.phone.verifiedAt);
   const telegramUserId = account.telegram.telegramUserId;
@@ -98,37 +59,20 @@ export function HostedAccountSettingsCards({
   const emailVerified = Boolean(account.email.verifiedAt);
   const murphEmailAddress = account.email.murphEmailAddress;
   const murphSmsHref = phoneNumber && murphPhoneNumber ? `sms:${murphPhoneNumber}` : null;
-  const assistantStyleValue = formatAssistantStyleValue(assistantStyle);
-  const customizeMurphContactAction = murphPhoneNumber ? (
-    <SettingsContactAction onClick={() => setContactPickerOpen(true)}>
-      Customize contact card
-    </SettingsContactAction>
-  ) : null;
-  const phoneMeta =
-    murphSmsHref && customizeMurphContactAction ? (
-      <div className="flex flex-wrap items-center gap-x-3">
-        <SettingsContactLink href={murphSmsHref} label="Text Murph">
-          Text Murph
-        </SettingsContactLink>
-        {customizeMurphContactAction}
-      </div>
-    ) : murphSmsHref ? (
-      <SettingsContactLink href={murphSmsHref} label="Text Murph">
-        Text Murph
-      </SettingsContactLink>
-    ) : (
-      customizeMurphContactAction
-    );
 
   return (
     <>
-      <div className="divide-y divide-[rgba(196,168,130,0.25)]">
+      <SettingsRowList>
         <SettingsRow
           icon={<Phone className="size-[18px] shrink-0 text-muted-foreground" strokeWidth={1.6} aria-hidden="true" />}
           label="Phone"
           value={phoneNumber ? formatMaskedPhoneNumber(phoneNumber) : "Not connected"}
           empty={!phoneNumber}
-          meta={phoneMeta}
+          meta={murphSmsHref ? (
+            <SettingsContactLink href={murphSmsHref} label="Text Murph">
+              Text Murph
+            </SettingsContactLink>
+          ) : null}
           action={
             <Button type="button" size="default" variant={phoneNumber ? "ghost" : "default"} onClick={() => setLinkMode("phone")}>
               {phoneNumber ? (phoneVerified ? "Change" : "Verify") : "Link phone"}
@@ -174,26 +118,7 @@ export function HostedAccountSettingsCards({
             </Button>
           }
         />
-        <SettingsRow
-          icon={<MessageSquareText className="size-[18px] shrink-0 text-muted-foreground" strokeWidth={1.6} aria-hidden="true" />}
-          label="How Murph talks"
-          value={assistantStyleValue}
-          empty={assistantStyleValue === "Default"}
-          action={
-            <Button
-              type="button"
-              size="default"
-              variant="ghost"
-              onClick={() => {
-                setAssistantStyleInitialStep("tone");
-                setAssistantStyleOpen(true);
-              }}
-            >
-              Customize
-            </Button>
-          }
-        />
-      </div>
+      </SettingsRowList>
       {linkMode ? (
         <HostedSettingsIdentityLinkDialog
           account={account}
@@ -205,87 +130,6 @@ export function HostedAccountSettingsCards({
           }}
         />
       ) : null}
-      {contactPickerOpen ? (
-        <MurphContactCardPicker
-          copy={{
-            description:
-              "iPhone only applies the photo when the card is saved as a new contact. Delete your current Murph contact first, then save this one fresh.",
-            primaryAction: "Save new card",
-            secondaryAction: "Close",
-            title: "Pick a new look",
-          }}
-          onAddToContacts={() => setContactPickerOpen(false)}
-          onOpenChange={setContactPickerOpen}
-          onSkip={() => setContactPickerOpen(false)}
-          open={contactPickerOpen}
-        />
-      ) : null}
-      {assistantStyleOpen ? (
-        <MurphAssistantStylePicker
-          initialStep={assistantStyleInitialStep}
-          initialTone={assistantStyle.tone}
-          initialVoice={assistantStyle.voice}
-          onComplete={setAssistantStyle}
-          onOpenChange={setAssistantStyleOpen}
-          onSaved={setAssistantStyle}
-          open={assistantStyleOpen}
-        />
-      ) : null}
     </>
-  );
-}
-
-function stripSettingsQueryParam(queryKey: string) {
-  if (typeof window === "undefined" || typeof window.location.href !== "string") {
-    return;
-  }
-
-  const url = new URL(window.location.href);
-  url.searchParams.delete(queryKey);
-  window.history?.replaceState?.({}, "", `${url.pathname}${url.search}${url.hash}`);
-}
-
-function formatAssistantStyleValue(preferences: {
-  tone: AssistantTonePreference | null;
-  voice: AssistantVoiceOptionId | null;
-}): string {
-  const labels = [
-    preferences.tone ? formatAssistantTone(preferences.tone) : null,
-    preferences.voice ? formatAssistantVoice(preferences.voice) : null,
-  ].filter((label): label is string => Boolean(label));
-
-  return labels.length > 0 ? labels.join(", ") : "Default";
-}
-
-function formatAssistantTone(tone: AssistantTonePreference): string {
-  return tone === "formal" ? "Formal" : "Casual";
-}
-
-function formatAssistantVoice(voice: AssistantVoiceOptionId): string {
-  return assistantVoiceOptions.find((option) => option.id === voice)?.label ?? "Classic";
-}
-
-function SettingsRow(props: {
-  action?: ReactNode;
-  empty?: boolean;
-  icon?: ReactNode;
-  label: string;
-  meta?: ReactNode;
-  value: string;
-}) {
-  return (
-    <div className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 py-4 first:pt-0 last:pb-0">
-      {props.icon ?? <span className="block size-[18px]" aria-hidden="true" />}
-      <div className="min-w-0">
-        <span className="font-mono text-[10px] uppercase tracking-[0.11em] text-muted-foreground">
-          {props.label}
-        </span>
-        <p className={`break-words font-serif text-base tracking-tight ${props.empty ? "text-muted-foreground" : "text-foreground"}`}>
-          {props.value}
-        </p>
-        {props.meta ? <div className="mt-1 [overflow-wrap:anywhere]">{props.meta}</div> : null}
-      </div>
-      {props.action ? <div className="shrink-0">{props.action}</div> : null}
-    </div>
   );
 }

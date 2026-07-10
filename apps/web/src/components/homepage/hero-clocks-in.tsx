@@ -329,7 +329,7 @@ const HERO_COPY = {
     line1: "Health is overwhelming.",
     line2: "Murph makes it easy.",
     paragraph:
-      "Murph is your personal health assistant. Wearables, bloodwork, doctor visits, supplements, blood pressure, sleep. Murph runs it all and helps you figure out what actually makes you healthier, then build habits that stick.",
+      "Wearables, bloodwork, doctor visits, supplements, blood pressure, sleep. Murph reads it all, figures out what actually works, and helps you build habits that stick.",
   },
   act2: {
     line1: "Get healthy with your people.",
