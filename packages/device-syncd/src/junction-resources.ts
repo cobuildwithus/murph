@@ -12,6 +12,13 @@ export {
   JUNCTION_COMPANION_HEALTH_METADATA_SOURCE_PROVIDER,
   JUNCTION_COMPANION_HEALTH_METADATA_SOURCE_TYPE,
 } from "./companion-health-metadata.ts";
+export {
+  JunctionCompanionHealthMetadataParseError,
+  parseJunctionCompanionHealthMetadataBatch,
+  type JunctionCompanionHealthMetadataBatch,
+  type JunctionCompanionHealthMetadataKind,
+  type JunctionCompanionHealthMetadataRecord,
+} from "./companion-health-metadata-parser.ts";
 
 /**
  * Resolves the normalized Junction resource name carried by a webhook event

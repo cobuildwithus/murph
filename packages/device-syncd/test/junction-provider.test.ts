@@ -8414,11 +8414,15 @@ test("Junction companion health metadata jobs import one closed unverified Healt
   assert.deepEqual(requests, []);
   assert.equal(importedSnapshots.length, 1);
   const snapshot = importedSnapshots[0] as {
+    connectionId?: string;
+    importedAt?: string;
     windowStart?: string;
     windowEnd?: string;
     summaries?: Record<string, Array<Record<string, unknown>>>;
     timeseries?: Record<string, unknown[]>;
   };
+  assert.equal(snapshot.connectionId, undefined);
+  assert.equal(snapshot.importedAt, undefined);
   assert.equal(snapshot.windowStart, "2026-04-02T08:00:00.000Z");
   assert.equal(snapshot.windowEnd, "2026-04-02T21:45:00.000Z");
   assert.deepEqual(snapshot.summaries?.sleep, [{
@@ -8690,7 +8694,8 @@ test("Junction companion health metadata jobs reject malformed or broadened batc
         createJob("resource", payload),
       ),
       (error: unknown) => error instanceof DeviceSyncError
-        && error.code === "DEVICE_SYNC_JOB_PAYLOAD_INVALID",
+        && error.code === "DEVICE_SYNC_JOB_PAYLOAD_INVALID"
+        && error.retryable === false,
       testCase.label,
     );
     assert.equal(imported, false, testCase.label);

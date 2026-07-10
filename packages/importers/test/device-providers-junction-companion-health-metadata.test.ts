@@ -14,14 +14,14 @@ const RECOVERY_RECORD_ID = "a".repeat(64);
 const WORKOUT_STRAIN_RECORD_ID = "b".repeat(64);
 
 function buildSnapshot(input: {
-  importedAt: string;
+  importedAt?: string;
   recoveryScore: number;
   syncVersion?: number;
   workoutStrain: number;
 }) {
   return {
     accountId: "junction-companion-account",
-    importedAt: input.importedAt,
+    ...(input.importedAt ? { importedAt: input.importedAt } : {}),
     summaries: {
       sleep: [{
         id: RECOVERY_RECORD_ID,
@@ -84,6 +84,43 @@ test("Junction companion health metadata normalizes into recovery and workout-st
   assert.equal(workoutStrain?.externalRef?.resourceType, "junction-apple-health-kit-activity");
   assert.equal(workoutStrain?.externalRef?.version, "1");
   assert.equal(workoutStrain?.externalRef?.facet, "workout-strain");
+});
+
+test("Junction companion health metadata exact replay reuses one integration ingest", async () => {
+  const vaultRoot = await mkdtemp(join(tmpdir(), "murph-junction-companion-replay-"));
+  try {
+    await coreRuntime.initializeVault({
+      vaultRoot,
+      createdAt: "2026-04-01T00:00:00.000Z",
+      timezone: "America/New_York",
+    });
+
+    const snapshot = buildSnapshot({
+      recoveryScore: 72,
+      syncVersion: 1,
+      workoutStrain: 11.3,
+    });
+    const importSnapshot = () =>
+      importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
+        {
+          provider: "junction",
+          snapshot,
+          vaultRoot,
+        },
+        { corePort: coreRuntime },
+      );
+
+    const first = await importSnapshot();
+    const replay = await importSnapshot();
+    const ingests = await coreRuntime.readIntegrationIngestEntries(vaultRoot);
+
+    assert.equal(replay.ingestId, first.ingestId);
+    assert.equal(ingests.length, 1);
+    assert.equal(ingests[0]?.record.id, first.ingestId);
+    assert.equal(ingests[0]?.record.importedAt, "2026-04-02T12:00:00.000Z");
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
 });
 
 test("Junction companion workout strain coexists with the provider workout as one session plus one observation", async () => {

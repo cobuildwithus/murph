@@ -4,15 +4,16 @@ import { deviceSyncError } from "@murphai/device-syncd/errors";
 import { normalizeJunctionProviderSlug } from "@murphai/device-syncd/connect-config";
 import {
   JUNCTION_COMPANION_HEALTH_METADATA_EVENT_TYPE,
-  JUNCTION_COMPANION_HEALTH_METADATA_MAX_FUTURE_SKEW_MS,
-  JUNCTION_COMPANION_HEALTH_METADATA_MAX_HISTORY_MS,
   JUNCTION_COMPANION_HEALTH_METADATA_MAX_BATCH_BYTES,
-  JUNCTION_COMPANION_HEALTH_METADATA_MAX_RECORDS,
   JUNCTION_COMPANION_HEALTH_METADATA_RESOURCE,
-  JUNCTION_COMPANION_HEALTH_METADATA_SCHEMA_VERSION,
   JUNCTION_COMPANION_HEALTH_METADATA_SOURCE_PROVIDER,
+  JunctionCompanionHealthMetadataParseError,
   normalizeJunctionResourceName,
+  parseJunctionCompanionHealthMetadataBatch,
   readJunctionWebhookResourceName,
+  type JunctionCompanionHealthMetadataBatch,
+  type JunctionCompanionHealthMetadataKind,
+  type JunctionCompanionHealthMetadataRecord,
 } from "@murphai/device-syncd/junction-resources";
 
 import type {
@@ -26,10 +27,6 @@ export const COMPANION_DEVICE_SYNC_PROVIDER = "junction";
 
 const COMPANION_METADATA_STRING_MAX_LENGTH = 200;
 const COMPANION_SDK_VERSION_MAX_ENTRIES = 10;
-const COMPANION_HEALTH_METADATA_MAX_SYNC_VERSION = Number.MAX_SAFE_INTEGER;
-const COMPANION_HEALTH_METADATA_RECORD_ID_PATTERN = /^[a-f0-9]{64}$/u;
-const COMPANION_HEALTH_METADATA_TIMESTAMP_PATTERN =
-  /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})$/u;
 const COMPANION_HEALTH_METADATA_JUNCTION_SOURCE_PROVIDER =
   normalizeJunctionProviderSlug(JUNCTION_COMPANION_HEALTH_METADATA_SOURCE_PROVIDER);
 
@@ -37,21 +34,9 @@ export const COMPANION_HEALTH_METADATA_RESOURCE = JUNCTION_COMPANION_HEALTH_META
 export const COMPANION_HEALTH_METADATA_BODY_LIMIT_BYTES =
   JUNCTION_COMPANION_HEALTH_METADATA_MAX_BATCH_BYTES;
 
-export type CompanionHealthMetadataKind = "recovery_score" | "workout_strain";
-
-export interface CompanionHealthMetadataRecord {
-  endAt: string;
-  kind: CompanionHealthMetadataKind;
-  recordId: string;
-  startAt: string;
-  syncVersion?: number;
-  value: number;
-}
-
-export interface CompanionHealthMetadataBatch {
-  records: CompanionHealthMetadataRecord[];
-  schemaVersion: 1;
-}
+export type CompanionHealthMetadataKind = JunctionCompanionHealthMetadataKind;
+export type CompanionHealthMetadataRecord = JunctionCompanionHealthMetadataRecord;
+export type CompanionHealthMetadataBatch = JunctionCompanionHealthMetadataBatch;
 
 /**
  * Validates the optional companion sign-in request metadata and discards it.
@@ -106,89 +91,14 @@ export function parseCompanionHealthMetadataBatch(
     throw companionRequestInvalid("receivedAt must be a valid timestamp.");
   }
 
-  assertExactObjectKeys(body, ["records", "schemaVersion"], "request");
-
-  if (body.schemaVersion !== JUNCTION_COMPANION_HEALTH_METADATA_SCHEMA_VERSION) {
-    throw companionRequestInvalid("schemaVersion must be 1.");
+  try {
+    return parseJunctionCompanionHealthMetadataBatch(body, receivedAtMs);
+  } catch (error) {
+    if (error instanceof JunctionCompanionHealthMetadataParseError) {
+      throw companionRequestInvalid(`${error.message}.`);
+    }
+    throw error;
   }
-
-  if (!Array.isArray(body.records)) {
-    throw companionRequestInvalid("records must be an array.");
-  }
-  if (
-    body.records.length < 1
-    || body.records.length > JUNCTION_COMPANION_HEALTH_METADATA_MAX_RECORDS
-  ) {
-    throw companionRequestInvalid(
-      `records must contain between 1 and ${JUNCTION_COMPANION_HEALTH_METADATA_MAX_RECORDS} entries.`,
-    );
-  }
-
-  const seenRecordIds = new Set<string>();
-  const records = body.records.map((value, index) => {
-    if (!value || typeof value !== "object" || Array.isArray(value)) {
-      throw companionRequestInvalid(`records[${index}] must be an object.`);
-    }
-
-    const record = value as Record<string, unknown>;
-    assertExactObjectKeys(
-      record,
-      ["endAt", "kind", "recordId", "startAt", "syncVersion", "value"],
-      `records[${index}]`,
-    );
-
-    const recordId = record.recordId;
-    if (typeof recordId !== "string" || !COMPANION_HEALTH_METADATA_RECORD_ID_PATTERN.test(recordId)) {
-      throw companionRequestInvalid(`records[${index}].recordId must be a lowercase SHA-256 digest.`);
-    }
-    if (seenRecordIds.has(recordId)) {
-      throw companionRequestInvalid(`records[${index}].recordId is duplicated.`);
-    }
-    seenRecordIds.add(recordId);
-
-    const kind = readCompanionHealthMetadataKind(record.kind, index);
-    const valueNumber = readCompanionHealthMetadataValue(record.value, kind, index);
-    const startAt = readCompanionHealthMetadataTimestamp(record.startAt, `records[${index}].startAt`);
-    const endAt = readCompanionHealthMetadataTimestamp(record.endAt, `records[${index}].endAt`);
-    const startAtMs = Date.parse(startAt);
-    const endAtMs = Date.parse(endAt);
-    if (endAtMs <= startAtMs) {
-      throw companionRequestInvalid(`records[${index}].endAt must follow startAt.`);
-    }
-    if (startAtMs < receivedAtMs - JUNCTION_COMPANION_HEALTH_METADATA_MAX_HISTORY_MS) {
-      throw companionRequestInvalid(`records[${index}].startAt is outside the supported history window.`);
-    }
-    if (endAtMs > receivedAtMs + JUNCTION_COMPANION_HEALTH_METADATA_MAX_FUTURE_SKEW_MS) {
-      throw companionRequestInvalid(`records[${index}].endAt is too far in the future.`);
-    }
-
-    const syncVersion = readCompanionHealthMetadataSyncVersion(record.syncVersion, index);
-    return {
-      endAt,
-      kind,
-      recordId,
-      startAt,
-      ...(syncVersion === undefined ? {} : { syncVersion }),
-      value: valueNumber,
-    } satisfies CompanionHealthMetadataRecord;
-  });
-
-  records.sort((left, right) =>
-    left.recordId.localeCompare(right.recordId) || left.kind.localeCompare(right.kind)
-  );
-  const batch = {
-    records,
-    schemaVersion: 1,
-  } satisfies CompanionHealthMetadataBatch;
-
-  if (
-    new TextEncoder().encode(JSON.stringify(batch)).byteLength
-      > COMPANION_HEALTH_METADATA_BODY_LIMIT_BYTES
-  ) {
-    throw companionRequestInvalid("records exceed the companion metadata payload limit.");
-  }
-
-  return batch;
 }
 
 export function buildCompanionHealthMetadataDirtyResource(input: {
@@ -396,69 +306,6 @@ function readOptionalBoundedString(body: Record<string, unknown>, key: string): 
   }
 
   return value;
-}
-
-function readCompanionHealthMetadataKind(value: unknown, index: number): CompanionHealthMetadataKind {
-  if (value === "recovery_score" || value === "workout_strain") {
-    return value;
-  }
-
-  throw companionRequestInvalid(
-    `records[${index}].kind must be recovery_score or workout_strain.`,
-  );
-}
-
-function readCompanionHealthMetadataValue(
-  value: unknown,
-  kind: CompanionHealthMetadataKind,
-  index: number,
-): number {
-  const maximum = kind === "recovery_score" ? 100 : 21;
-  if (typeof value !== "number" || !Number.isFinite(value) || value < 0 || value > maximum) {
-    throw companionRequestInvalid(
-      `records[${index}].value is outside the allowed range for ${kind}.`,
-    );
-  }
-  return value;
-}
-
-function readCompanionHealthMetadataTimestamp(value: unknown, path: string): string {
-  if (
-    typeof value !== "string"
-    || value.length > 64
-    || !COMPANION_HEALTH_METADATA_TIMESTAMP_PATTERN.test(value)
-    || !Number.isFinite(Date.parse(value))
-  ) {
-    throw companionRequestInvalid(`${path} must be an ISO timestamp.`);
-  }
-  return new Date(value).toISOString();
-}
-
-function readCompanionHealthMetadataSyncVersion(value: unknown, index: number): number | undefined {
-  if (value === undefined) {
-    return undefined;
-  }
-  if (
-    typeof value !== "number"
-    || !Number.isSafeInteger(value)
-    || value < 0
-    || value > COMPANION_HEALTH_METADATA_MAX_SYNC_VERSION
-  ) {
-    throw companionRequestInvalid(`records[${index}].syncVersion must be a nonnegative safe integer.`);
-  }
-  return value;
-}
-
-function assertExactObjectKeys(
-  value: Record<string, unknown>,
-  allowedKeys: readonly string[],
-  path: string,
-): void {
-  const allowed = new Set(allowedKeys);
-  const unexpected = Object.keys(value).find((key) => !allowed.has(key));
-  if (unexpected) {
-    throw companionRequestInvalid(`${path} contains unsupported field ${unexpected}.`);
-  }
 }
 
 function companionRequestInvalid(message: string) {

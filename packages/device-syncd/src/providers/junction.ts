@@ -47,14 +47,13 @@ import {
 } from "../shared.ts";
 import {
   JUNCTION_COMPANION_HEALTH_METADATA_EVENT_TYPE,
-  JUNCTION_COMPANION_HEALTH_METADATA_MAX_FUTURE_SKEW_MS,
-  JUNCTION_COMPANION_HEALTH_METADATA_MAX_HISTORY_MS,
   JUNCTION_COMPANION_HEALTH_METADATA_MAX_BATCH_BYTES,
-  JUNCTION_COMPANION_HEALTH_METADATA_MAX_RECORDS,
   JUNCTION_COMPANION_HEALTH_METADATA_RESOURCE,
-  JUNCTION_COMPANION_HEALTH_METADATA_SCHEMA_VERSION,
   JUNCTION_COMPANION_HEALTH_METADATA_SOURCE_PROVIDER,
   JUNCTION_COMPANION_HEALTH_METADATA_SOURCE_TYPE,
+  JunctionCompanionHealthMetadataParseError,
+  parseJunctionCompanionHealthMetadataBatch,
+  type JunctionCompanionHealthMetadataRecord,
 } from "../junction-resources.ts";
 import {
   JunctionClient,
@@ -128,17 +127,6 @@ interface JunctionDirectResourceJobInput {
   sourceProviderSlug: string;
   windowEnd: string;
   windowStart: string;
-}
-
-type JunctionCompanionHealthMetadataKind = "recovery_score" | "workout_strain";
-
-interface JunctionCompanionHealthMetadataRecord {
-  recordId: string;
-  kind: JunctionCompanionHealthMetadataKind;
-  value: number;
-  startAt: string;
-  endAt: string;
-  syncVersion?: number;
 }
 
 type JunctionSdkHistoricalPullCompleted = Junction.HistoricalPullCompleted;
@@ -1860,8 +1848,6 @@ export function createJunctionDeviceSyncProvider(
     await context.importSnapshot({
       provider: "junction",
       accountId: buildJunctionImportAccountId(context.account.externalAccountId),
-      connectionId: context.account.id,
-      importedAt: context.now,
       windowStart: records.reduce(
         (earliest, record) => minIsoTimestamp(earliest, record.startAt),
         records[0]!.startAt,
@@ -4903,16 +4889,6 @@ function parseJunctionWebhookDataJobRecord(value: unknown): Record<string, unkno
   }
 }
 
-const JUNCTION_COMPANION_HEALTH_METADATA_BATCH_KEYS = new Set(["schemaVersion", "records"]);
-const JUNCTION_COMPANION_HEALTH_METADATA_RECORD_KEYS = new Set([
-  "recordId",
-  "kind",
-  "value",
-  "startAt",
-  "endAt",
-  "syncVersion",
-]);
-const JUNCTION_COMPANION_HEALTH_METADATA_RECORD_ID_PATTERN = /^[a-f0-9]{64}$/u;
 const JUNCTION_COMPANION_HEALTH_METADATA_TIMESTAMP_PATTERN =
   /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})$/u;
 
@@ -4951,93 +4927,14 @@ function parseJunctionCompanionHealthMetadataJob(
     throw invalidJunctionCompanionHealthMetadataJob("batch JSON is invalid");
   }
 
-  const batch = readPlainObject(parsed);
-  if (!batch || hasUnexpectedObjectKeys(batch, JUNCTION_COMPANION_HEALTH_METADATA_BATCH_KEYS)) {
-    throw invalidJunctionCompanionHealthMetadataJob("batch shape is invalid");
+  try {
+    return parseJunctionCompanionHealthMetadataBatch(parsed, receivedAtMs).records;
+  } catch (error) {
+    if (error instanceof JunctionCompanionHealthMetadataParseError) {
+      throw invalidJunctionCompanionHealthMetadataJob(error.message);
+    }
+    throw error;
   }
-  if (batch.schemaVersion !== JUNCTION_COMPANION_HEALTH_METADATA_SCHEMA_VERSION) {
-    throw invalidJunctionCompanionHealthMetadataJob("schemaVersion is unsupported");
-  }
-  if (
-    !Array.isArray(batch.records)
-    || batch.records.length < 1
-    || batch.records.length > JUNCTION_COMPANION_HEALTH_METADATA_MAX_RECORDS
-  ) {
-    throw invalidJunctionCompanionHealthMetadataJob("record count is invalid");
-  }
-
-  const recordIds = new Set<string>();
-  return batch.records.map((value, index) => {
-    const record = readPlainObject(value);
-    if (!record || hasUnexpectedObjectKeys(record, JUNCTION_COMPANION_HEALTH_METADATA_RECORD_KEYS)) {
-      throw invalidJunctionCompanionHealthMetadataJob(`record ${index + 1} shape is invalid`);
-    }
-
-    const recordId = record.recordId;
-    if (typeof recordId !== "string" || !JUNCTION_COMPANION_HEALTH_METADATA_RECORD_ID_PATTERN.test(recordId)) {
-      throw invalidJunctionCompanionHealthMetadataJob(`record ${index + 1} recordId is invalid`);
-    }
-    if (recordIds.has(recordId)) {
-      throw invalidJunctionCompanionHealthMetadataJob(`record ${index + 1} recordId is duplicated`);
-    }
-    recordIds.add(recordId);
-
-    const kind = record.kind;
-    if (kind !== "recovery_score" && kind !== "workout_strain") {
-      throw invalidJunctionCompanionHealthMetadataJob(`record ${index + 1} kind is invalid`);
-    }
-
-    const numericValue = record.value;
-    const valueLimit = kind === "recovery_score" ? 100 : 21;
-    if (
-      typeof numericValue !== "number"
-      || !Number.isFinite(numericValue)
-      || numericValue < 0
-      || numericValue > valueLimit
-    ) {
-      throw invalidJunctionCompanionHealthMetadataJob(`record ${index + 1} value is invalid`);
-    }
-
-    const startAt = toJunctionCompanionHealthMetadataIsoTimestamp(record.startAt);
-    const endAt = toJunctionCompanionHealthMetadataIsoTimestamp(record.endAt);
-    if (!startAt || !endAt || Date.parse(endAt) <= Date.parse(startAt)) {
-      throw invalidJunctionCompanionHealthMetadataJob(`record ${index + 1} interval is invalid`);
-    }
-    if (Date.parse(startAt) < receivedAtMs - JUNCTION_COMPANION_HEALTH_METADATA_MAX_HISTORY_MS) {
-      throw invalidJunctionCompanionHealthMetadataJob(`record ${index + 1} history is too old`);
-    }
-    if (Date.parse(endAt) > receivedAtMs + JUNCTION_COMPANION_HEALTH_METADATA_MAX_FUTURE_SKEW_MS) {
-      throw invalidJunctionCompanionHealthMetadataJob(`record ${index + 1} endAt is too far in the future`);
-    }
-
-    const syncVersion = record.syncVersion;
-    if (
-      syncVersion !== undefined
-      && (
-        typeof syncVersion !== "number"
-        || !Number.isSafeInteger(syncVersion)
-        || syncVersion < 0
-      )
-    ) {
-      throw invalidJunctionCompanionHealthMetadataJob(`record ${index + 1} syncVersion is invalid`);
-    }
-
-    return {
-      recordId,
-      kind,
-      value: numericValue,
-      startAt,
-      endAt,
-      ...(typeof syncVersion === "number" ? { syncVersion } : {}),
-    };
-  });
-}
-
-function hasUnexpectedObjectKeys(
-  value: Record<string, unknown>,
-  allowedKeys: ReadonlySet<string>,
-): boolean {
-  return Object.keys(value).some((key) => !allowedKeys.has(key));
 }
 
 function invalidJunctionCompanionHealthMetadataJob(reason: string): DeviceSyncError {

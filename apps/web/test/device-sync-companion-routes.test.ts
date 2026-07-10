@@ -777,6 +777,40 @@ describe("device sync companion routes", () => {
       expect(mocks.persistHostedDeviceSyncCompanionMetadata).not.toHaveBeenCalled();
     });
 
+    it("keeps malformed health JSON fragments out of logs", async () => {
+      mockVerifiedPrivyUser();
+      const rawHealthMarker = "raw-health-value-do-not-log";
+      const consoleSpies = (["debug", "error", "info", "log", "warn"] as const).map((level) =>
+        vi.spyOn(console, level).mockImplementation(() => {}),
+      );
+      const response = await healthMetadataRoute.POST(new Request(
+        "https://app.example.test/api/device-sync/companion/health-metadata",
+        {
+          body: `{"value":${rawHealthMarker}}`,
+          headers: {
+            authorization: "Bearer privy-identity-token",
+            "content-type": "application/json",
+          },
+          method: "POST",
+        },
+      ));
+
+      expect(response.status).toBe(400);
+      expect(await response.json()).toEqual({
+        error: {
+          code: "COMPANION_REQUEST_INVALID",
+          message: "Companion health metadata must be valid JSON.",
+          retryable: false,
+        },
+      });
+      expect(mocks.persistHostedDeviceSyncCompanionMetadata).not.toHaveBeenCalled();
+      for (const spy of consoleSpies) {
+        for (const callArgs of spy.mock.calls) {
+          expect(JSON.stringify(callArgs)).not.toContain(rawHealthMarker);
+        }
+      }
+    });
+
     it("uses source projection to disambiguate multiple active Junction connections", async () => {
       mockVerifiedPrivyUser();
       mocks.listConnectionsForUser.mockResolvedValue([

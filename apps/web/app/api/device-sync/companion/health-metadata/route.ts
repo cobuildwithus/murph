@@ -4,6 +4,7 @@ import {
   parseCompanionHealthMetadataBatch,
   resolveCompanionHealthMetadataConnection,
 } from "@/src/lib/device-sync/companion";
+import { deviceSyncError } from "@murphai/device-syncd/errors";
 import { createHostedDeviceSyncControlPlane } from "@/src/lib/device-sync/control-plane";
 import { persistHostedDeviceSyncCompanionMetadata } from "@/src/lib/device-sync/wake-service";
 import { jsonOk, withJsonError } from "@/src/lib/device-sync/settings-http";
@@ -28,9 +29,7 @@ export const POST = withJsonError(async (request: Request) => {
 
   const occurredAt = new Date().toISOString();
   const batch = parseCompanionHealthMetadataBatch(
-    await readJsonObject(request, {
-      limitBytes: COMPANION_HEALTH_METADATA_BODY_LIMIT_BYTES,
-    }),
+    await readCompanionHealthMetadataBody(request),
     occurredAt,
   );
   const controlPlane = createHostedDeviceSyncControlPlane(request);
@@ -48,3 +47,21 @@ export const POST = withJsonError(async (request: Request) => {
 
   return jsonOk({ acceptedCount: batch.records.length });
 });
+
+async function readCompanionHealthMetadataBody(request: Request): Promise<Record<string, unknown>> {
+  try {
+    return await readJsonObject(request, {
+      limitBytes: COMPANION_HEALTH_METADATA_BODY_LIMIT_BYTES,
+    });
+  } catch (error) {
+    if (error instanceof SyntaxError) {
+      throw deviceSyncError({
+        code: "COMPANION_REQUEST_INVALID",
+        httpStatus: 400,
+        message: "Companion health metadata must be valid JSON.",
+        retryable: false,
+      });
+    }
+    throw error;
+  }
+}
