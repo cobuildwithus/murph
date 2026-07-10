@@ -6,6 +6,7 @@ import {
 } from "@murphai/device-syncd/public-account";
 import {
   type MarkPublicDeviceSyncConnectionSetupFailedInput,
+  type MarkPublicDeviceSyncConnectionSetupFailedResult,
   type ProviderAuthTokens,
   type PublicDeviceSyncAccount,
   type UpsertPublicDeviceSyncConnectionInput,
@@ -391,8 +392,8 @@ export class PrismaHostedConnectionStore {
 
   async markConnectionSetupFailed(
     input: MarkPublicDeviceSyncConnectionSetupFailedInput,
-  ): Promise<PublicDeviceSyncAccount | null> {
-    const record = await this.prisma.$transaction(async (tx) => {
+  ): Promise<MarkPublicDeviceSyncConnectionSetupFailedResult> {
+    const result = await this.prisma.$transaction(async (tx) => {
       await tx.$executeRaw`select pg_advisory_xact_lock(hashtext(${input.accountId}))`;
       const existing = await tx.deviceConnection.findUnique({
         where: {
@@ -402,17 +403,17 @@ export class PrismaHostedConnectionStore {
       });
 
       if (!existing) {
-        return null;
+        return { applied: false, record: null };
       }
       if (
-        input.expectedUpdatedAt === null
-        || existing.updatedAt.toISOString() !== input.expectedUpdatedAt
+        input.expectedConnectedAt === null
+        || existing.connectedAt.toISOString() !== input.expectedConnectedAt
         || existing.status === "disconnected"
       ) {
-        return existing;
+        return { applied: false, record: existing };
       }
 
-      return tx.deviceConnection.update({
+      const record = await tx.deviceConnection.update({
         where: {
           id: input.accountId,
         },
@@ -435,9 +436,13 @@ export class PrismaHostedConnectionStore {
         },
         ...hostedConnectionRecordArgs,
       });
+      return { applied: true, record };
     });
 
-    return record ? await this.buildDurableConnectionRecord(record) : null;
+    return {
+      account: result.record ? await this.buildDurableConnectionRecord(result.record) : null,
+      applied: result.applied,
+    };
   }
 
   async syncDurableConnectionState(
@@ -1071,7 +1076,7 @@ function assertHostedUpsertExistingConnectionGuard(
     });
   }
 
-  if (existing.updatedAt.toISOString() !== guard.expectedUpdatedAt) {
+  if (existing.connectedAt.toISOString() !== guard.expectedConnectedAt) {
     throw deviceSyncError({
       code: "CONNECTION_SEEDED_ACCOUNT_CHANGED",
       message: "Device sync connection changed after this connection flow started.",

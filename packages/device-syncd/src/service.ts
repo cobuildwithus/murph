@@ -289,14 +289,17 @@ class DeviceSyncServiceController {
             }),
           ),
         markConnectionSetupFailed: (record) => {
-          const account = this.store.markConnectionSetupFailed(
+          const result = this.store.markConnectionSetupFailed(
             record.accountId,
-            record.expectedUpdatedAt,
+            record.expectedConnectedAt,
             record.now,
             record.code,
             record.message,
           );
-          return account ? this.toPublicAccount(account) : null;
+          return {
+            account: result.account ? this.toPublicAccount(result.account) : null,
+            applied: result.applied,
+          };
         },
         getConnectionById: (accountId) => {
           const account = this.store.getAccountById(accountId);

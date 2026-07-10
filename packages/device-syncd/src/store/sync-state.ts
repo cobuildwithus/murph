@@ -198,7 +198,7 @@ export function markSyncFailed(
 export function markConnectionSetupFailed(
   database: DatabaseSync,
   accountId: string,
-  expectedUpdatedAt: string | null,
+  expectedConnectedAt: string | null,
   now: string,
   code: string,
   message: string,
@@ -206,10 +206,10 @@ export function markConnectionSetupFailed(
   return withImmediateTransaction(database, () => {
     const existing = getAccountById(database, accountId);
     if (!existing) {
-      return null;
+      return { account: null, applied: false };
     }
-    if (expectedUpdatedAt === null || existing.updatedAt !== expectedUpdatedAt) {
-      return existing;
+    if (expectedConnectedAt === null || existing.connectedAt !== expectedConnectedAt) {
+      return { account: existing, applied: false };
     }
 
     const connectionResult = database.prepare(`
@@ -223,7 +223,7 @@ export function markConnectionSetupFailed(
     `).run(now, accountId) as { changes: number };
 
     if ((connectionResult.changes ?? 0) === 0) {
-      return getAccountById(database, accountId);
+      return { account: getAccountById(database, accountId), applied: false };
     }
 
     database.prepare(`
@@ -261,7 +261,7 @@ export function markConnectionSetupFailed(
       accountId,
     );
 
-    return getAccountById(database, accountId);
+    return { account: getAccountById(database, accountId), applied: true };
   });
 }
 

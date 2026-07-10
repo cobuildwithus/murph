@@ -570,11 +570,12 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
     expect(createCalled).toBe(false);
   });
 
-  it("updates an existing connection without writing a Prisma secret row", async () => {
+  it("accepts a guarded callback after mutable connection observations change", async () => {
     const existing = createConnection({
       id: "dsc_123",
       provider: "oura",
       status: "active",
+      updatedAt: new Date("2026-03-25T00:30:00.000Z"),
       userId: "user-123",
     });
     const updated = createConnection({
@@ -623,6 +624,11 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
       },
       metadata: {
         region: "ca",
+      },
+      existingAccountGuard: {
+        expectedAccountId: "dsc_123",
+        expectedConnectedAt: "2026-03-25T00:00:00.000Z",
+        rejectIfDisconnected: true,
       },
       connectedAt: "2026-03-25T00:00:00.000Z",
       nextReconcileAt: "2026-03-25T05:00:00.000Z",
@@ -900,7 +906,7 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
       metadata: {},
       existingAccountGuard: {
         expectedAccountId: "dsc_123",
-        expectedUpdatedAt: existing.updatedAt.toISOString(),
+        expectedConnectedAt: existing.connectedAt.toISOString(),
         rejectIfDisconnected: true,
       },
       connectedAt: "2026-03-26T03:00:00.000Z",
@@ -912,7 +918,7 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
     expect(tx.deviceConnection.update).not.toHaveBeenCalled();
   });
 
-  it("rejects guarded hosted callback upserts after the seeded connection revision changes", async () => {
+  it("rejects guarded hosted callback upserts after the seeded connection epoch changes", async () => {
     const existing = createConnection({
       accessTokenEncrypted: null,
       id: "dsc_123",
@@ -922,6 +928,7 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
       setupPhase: "source_confirmed",
       status: "active",
       tokenVersion: null,
+      connectedAt: new Date("2026-03-26T03:30:00.000Z"),
       updatedAt: new Date("2026-03-26T03:30:00.000Z"),
       userId: "user-123",
     });
@@ -955,7 +962,7 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
       metadata: {},
       existingAccountGuard: {
         expectedAccountId: "dsc_123",
-        expectedUpdatedAt: "2026-03-26T03:00:00.000Z",
+        expectedConnectedAt: "2026-03-26T03:00:00.000Z",
         rejectIfDisconnected: true,
       },
       connectedAt: "2026-03-26T04:00:00.000Z",
@@ -979,6 +986,7 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
       refreshTokenEncrypted: "enc:refresh-token",
       status: "active",
       tokenVersion: 3,
+      updatedAt: new Date("2026-03-25T00:30:00.000Z"),
     });
 
     const lockConnectionMutation = vi.fn(async () => 0);
@@ -1007,7 +1015,7 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
 
     const result = await store.markConnectionSetupFailed({
       accountId: "dsc_123",
-      expectedUpdatedAt: "2026-03-25T00:00:00.000Z",
+      expectedConnectedAt: "2026-03-25T00:00:00.000Z",
       now: "2026-03-26T06:00:00.000Z",
       code: "OAUTH_SETUP_FAILED",
       message: "post-connect setup failed",
@@ -1038,13 +1046,16 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
     expect(lockConnectionMutation.mock.invocationCallOrder[0]).toBeLessThan(
       tx.deviceConnection.findUnique.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY,
     );
-    expect(result).toEqual(expect.objectContaining({
+    expect(result).toEqual({
+      applied: true,
+      account: expect.objectContaining({
       accessTokenExpiresAt: null,
       lastErrorCode: "OAUTH_SETUP_FAILED",
       lastErrorMessage: "post-connect setup failed",
       nextReconcileAt: null,
       status: "reauthorization_required",
-    }));
+      }),
+    });
     expect(stored.accessTokenEncrypted).toBeNull();
     expect(stored.refreshTokenEncrypted).toBeNull();
     expect(stored.refreshLeaseOwner).toBeNull();
@@ -1086,7 +1097,7 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
 
     const result = await store.markConnectionSetupFailed({
       accountId: "dsc_123",
-      expectedUpdatedAt: "2026-03-25T00:00:00.000Z",
+      expectedConnectedAt: "2026-03-25T00:00:00.000Z",
       now: "2026-03-26T06:00:00.000Z",
       code: "OAUTH_SETUP_FAILED",
       message:
@@ -1098,7 +1109,7 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
         lastErrorMessage: null,
       }),
     }));
-    expect(result?.lastErrorMessage).toBeNull();
+    expect(result.account?.lastErrorMessage).toBeNull();
     const serialized = JSON.stringify(result);
     expect(serialized).not.toContain("api.example.test");
     expect(serialized).not.toContain("owner@example.test");
@@ -1133,18 +1144,21 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
 
     const result = await store.markConnectionSetupFailed({
       accountId: stored.id,
-      expectedUpdatedAt: "2026-03-26T06:00:00.000Z",
+      expectedConnectedAt: "2026-03-26T06:00:00.000Z",
       now: "2026-03-26T07:05:00.000Z",
       code: "OAUTH_SETUP_FAILED",
       message: "stale setup failure",
     });
 
     expect(update).not.toHaveBeenCalled();
-    expect(result).toEqual(expect.objectContaining({
-      accessTokenExpiresAt: "2026-03-26T08:00:00.000Z",
-      lastErrorCode: null,
-      status: "active",
-    }));
+    expect(result).toEqual({
+      applied: false,
+      account: expect.objectContaining({
+        accessTokenExpiresAt: "2026-03-26T08:00:00.000Z",
+        lastErrorCode: null,
+        status: "active",
+      }),
+    });
   });
 
   it("leaves a disconnected connection unchanged when setup cleanup has the same timestamp", async () => {
@@ -1174,17 +1188,20 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
 
     const result = await store.markConnectionSetupFailed({
       accountId: stored.id,
-      expectedUpdatedAt: stored.updatedAt.toISOString(),
+      expectedConnectedAt: stored.connectedAt.toISOString(),
       now: "2026-03-26T07:05:00.000Z",
       code: "OAUTH_SETUP_FAILED",
       message: "late setup failure",
     });
 
     expect(update).not.toHaveBeenCalled();
-    expect(result).toEqual(expect.objectContaining({
-      lastErrorCode: null,
-      status: "disconnected",
-    }));
+    expect(result).toEqual({
+      applied: false,
+      account: expect.objectContaining({
+        lastErrorCode: null,
+        status: "disconnected",
+      }),
+    });
   });
 
   it("serves ordinary hosted connection lists from durable Prisma metadata without live runtime reads", async () => {

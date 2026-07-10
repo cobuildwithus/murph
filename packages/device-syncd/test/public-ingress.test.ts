@@ -204,20 +204,20 @@ class InMemoryPublicIngressStore implements DeviceSyncPublicIngressStore {
   markConnectionSetupFailed(input: {
     accountId: string;
     code: string;
-    expectedUpdatedAt: string | null;
+    expectedConnectedAt: string | null;
     message: string;
     now: string;
-  }): PublicDeviceSyncAccount | null {
+  }): { account: PublicDeviceSyncAccount | null; applied: boolean } {
     if (this.markConnectionSetupFailedError) {
       throw this.markConnectionSetupFailedError;
     }
 
     const existing = this.accounts.get(input.accountId) ?? null;
     if (!existing) {
-      return null;
+      return { account: null, applied: false };
     }
-    if (input.expectedUpdatedAt === null || existing.updatedAt !== input.expectedUpdatedAt) {
-      return existing;
+    if (input.expectedConnectedAt === null || existing.connectedAt !== input.expectedConnectedAt) {
+      return { account: existing, applied: false };
     }
 
     const record: PublicDeviceSyncAccount = {
@@ -233,7 +233,7 @@ class InMemoryPublicIngressStore implements DeviceSyncPublicIngressStore {
       updatedAt: input.now,
     };
     this.accounts.set(input.accountId, record);
-    return record;
+    return { account: record, applied: true };
   }
 
   getConnectionByExternalAccount(provider: string, externalAccountId: string): PublicDeviceSyncAccount | null {
@@ -385,7 +385,7 @@ function assertExistingAccountGuard(
     });
   }
 
-  if (existing.updatedAt !== guard.expectedUpdatedAt) {
+  if (existing.connectedAt !== guard.expectedConnectedAt) {
     throw deviceSyncError({
       code: "CONNECTION_SEEDED_ACCOUNT_CHANGED",
       message: "Device sync connection changed after this connection flow started.",
@@ -907,7 +907,15 @@ test("public ingress persists validated provider-config connection seeds before 
   });
   const stateRecord = store.peekOAuthState(begin.state);
   assert.equal(stateRecord?.ownerId, "<REDACTED_OWNER_ID>");
+  assert.equal(stateRecord?.createdAt, account?.connectedAt);
   assert.equal(Object.prototype.hasOwnProperty.call(stateRecord?.metadata ?? {}, "ownerId"), false);
+  assert.equal(
+    Object.prototype.hasOwnProperty.call(
+      stateRecord?.metadata ?? {},
+      "__murphSeededConnectionUpdatedAt",
+    ),
+    false,
+  );
   assert.equal(
     account ? Object.values(stateRecord?.metadata ?? {}).includes(account.id) : false,
     true,
@@ -915,7 +923,7 @@ test("public ingress persists validated provider-config connection seeds before 
   assert.equal(Object.values(stateRecord?.metadata ?? {}).includes("external-account-1"), false);
 });
 
-test("public ingress completes external-link callbacks with sanitized state metadata and setup phase", async () => {
+test("public ingress completes seeded external-link callbacks after mutable webhook observations", async () => {
   const store = new InMemoryPublicIngressStore();
   let callbackStateMetadata: Record<string, unknown> | undefined;
   let callbackSeededExternalAccountId: string | null | undefined;
@@ -978,6 +986,7 @@ test("public ingress completes external-link callbacks with sanitized state meta
           kind: "provider_config",
           providerConfigKey: "junction",
         },
+        metadata: { ...input.stateMetadata },
       };
     },
   });
@@ -994,6 +1003,20 @@ test("public ingress completes external-link callbacks with sanitized state meta
   });
   const seeded = store.getConnectionByExternalAccount("junction", "external-account-1");
   assert.ok(seeded?.setupExpiresAt);
+  const stateRecord = store.peekOAuthState(begin.state);
+  assert.ok(stateRecord);
+  store.createOAuthState({
+    ...stateRecord,
+    metadata: {
+      ...stateRecord.metadata,
+      __murphSeededConnectionUpdatedAt: seeded.updatedAt,
+    },
+  });
+  const seededConnectedAt = seeded.connectedAt;
+  store.markWebhookReceived(seeded.id, "2099-04-26T23:59:59.000Z");
+  const observed = store.getConnectionById(seeded.id);
+  assert.equal(observed?.connectedAt, seededConnectedAt);
+  assert.notEqual(observed?.updatedAt, seeded.updatedAt);
   const completed = await ingress.handleConnectionCallback({
     provider: "junction",
     query: new URLSearchParams({
@@ -1007,9 +1030,24 @@ test("public ingress completes external-link callbacks with sanitized state meta
   });
   assert.equal(callbackSeededExternalAccountId, "external-account-1");
   assert.equal(Object.prototype.hasOwnProperty.call(callbackStateMetadata ?? {}, "ownerId"), false);
+  assert.equal(
+    Object.prototype.hasOwnProperty.call(
+      callbackStateMetadata ?? {},
+      "__murphSeededConnectionUpdatedAt",
+    ),
+    false,
+  );
   assert.equal(completed.account.setupPhase, "source_confirmed");
   assert.equal(completed.account.setupExpiresAt, null);
   assert.equal(completed.account.externalAccountId, "external-account-1");
+  assert.equal(completed.account.id, seeded.id);
+  assert.equal(
+    Object.prototype.hasOwnProperty.call(
+      completed.account.metadata,
+      "__murphSeededConnectionUpdatedAt",
+    ),
+    false,
+  );
   assert.equal(Object.values(callbackStateMetadata ?? {}).includes(completed.account.id), false);
 });
 
@@ -3261,13 +3299,16 @@ test("public ingress revokes and marks setup failure after post-persistence OAut
     registry: createDeviceSyncRegistry([
       createFakeProvider({
         async revokeAccess(account) {
+          const failed = store.getConnectionByExternalAccount("demo", account.externalAccountId);
+          assert.equal(failed?.status, "reauthorization_required");
           revokeCalls.push(account.externalAccountId);
         },
       }),
     ]),
     store,
     hooks: {
-      onConnectionEstablished() {
+      onConnectionEstablished({ account }) {
+        store.markWebhookReceived(account.id, "2099-04-26T23:59:59.000Z");
         throw hookError;
       },
     },
@@ -3291,6 +3332,7 @@ test("public ingress revokes and marks setup failure after post-persistence OAut
   assert.ok(storedAccount);
   assert.equal(storedAccount.id, "acct_01");
   assert.equal(storedAccount.status, "reauthorization_required");
+  assert.equal(storedAccount.lastWebhookAt, "2099-04-26T23:59:59.000Z");
   assert.equal(storedAccount.accessTokenExpiresAt, null);
   assert.equal(storedAccount.lastErrorCode, "OAUTH_SETUP_FAILED");
   assert.equal(
@@ -3301,7 +3343,7 @@ test("public ingress revokes and marks setup failure after post-persistence OAut
   assert.equal(storedAccount.nextReconcileAt, null);
 });
 
-test("public ingress surfaces persisted OAuth cleanup failures after post-persistence hook failures", async () => {
+test("public ingress surfaces persisted OAuth cleanup failures before provider revocation", async () => {
   const store = new InMemoryPublicIngressStore();
   const revokeCalls: string[] = [];
   const hookError = new Error("post-persist hook failure");
@@ -3349,8 +3391,62 @@ test("public ingress surfaces persisted OAuth cleanup failures after post-persis
     },
   );
 
-  assert.deepEqual(revokeCalls, ["demo-persisted"]);
+  assert.deepEqual(revokeCalls, []);
   assert.equal(store.hasOAuthState(begin.state), false);
+});
+
+test("public ingress skips provider revocation when post-persistence setup cleanup loses its epoch", async () => {
+  const store = new InMemoryPublicIngressStore();
+  const revokeCalls: string[] = [];
+  const hookError = new Error("post-persist hook failure");
+  const ingress = createDeviceSyncPublicIngress({
+    publicBaseUrl: "https://sync.example.test/device-sync",
+    registry: createDeviceSyncRegistry([
+      createFakeProvider({
+        async revokeAccess(account) {
+          revokeCalls.push(account.externalAccountId);
+        },
+      }),
+    ]),
+    store,
+    hooks: {
+      onConnectionEstablished({ account }) {
+        store.upsertConnection({
+          provider: account.provider,
+          externalAccountId: account.externalAccountId,
+          displayName: "New connection epoch",
+          scopes: account.scopes,
+          tokens: {
+            accessToken: "<REDACTED_NEW_ACCESS_TOKEN>",
+            refreshToken: "<REDACTED_NEW_REFRESH_TOKEN>",
+          },
+          metadata: { connectionEpoch: "new" },
+          connectedAt: "2099-04-27T00:00:00.000Z",
+          nextReconcileAt: null,
+        });
+        throw hookError;
+      },
+    },
+  });
+
+  const begin = await ingress.startConnection({ provider: "demo" });
+
+  await assert.rejects(
+    () =>
+      ingress.handleOAuthCallback({
+        provider: "demo",
+        state: begin.state,
+        code: "persisted",
+      }),
+    (error: unknown) => error === hookError,
+  );
+
+  assert.deepEqual(revokeCalls, []);
+  assert.equal(store.hasOAuthState(begin.state), false);
+  const storedAccount = store.getConnectionByExternalAccount("demo", "demo-persisted");
+  assert.equal(storedAccount?.status, "active");
+  assert.equal(storedAccount?.connectedAt, "2099-04-27T00:00:00.000Z");
+  assert.deepEqual(storedAccount?.metadata, { connectionEpoch: "new" });
 });
 
 test("public ingress does not burn valid oauth state on provider mismatch", async () => {

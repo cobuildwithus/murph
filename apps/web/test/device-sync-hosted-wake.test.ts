@@ -1215,7 +1215,7 @@ describe("hosted device-sync wakes", () => {
     expect(mocks.signalHostedDeviceSyncMailboxRuntime).not.toHaveBeenCalled();
   });
 
-  it("sanitizes revoke failures before they fan out to runtime state, signals, dispatches, and the browser response", async () => {
+  it("uses the locked source snapshot after a historical marker clears while sanitizing revoke failures", async () => {
     const controlPlane = createHostedDeviceSyncPublicIngressService(
       new Request("https://control.example.test/api/settings/device-sync/connections/dsc_123/disconnect"),
     );
@@ -1225,7 +1225,12 @@ describe("hosted device-sync wakes", () => {
       lastErrorMessage: "authorization=[redacted] refresh_token=[redacted]",
       status: "disconnected",
     });
+    let currentSources = [{
+      lastErrorCode: DEVICE_SYNC_HISTORICAL_DATA_RECONNECT_REQUIRED_ERROR_CODE,
+      status: "error",
+    }];
     const revokeAccess = vi.fn(async () => {
+      currentSources = [];
       throw new Error("authorization=Bearer secret-token refresh_token=refresh-secret");
     });
     mocks.registryGet.mockReturnValue({
@@ -1237,6 +1242,7 @@ describe("hosted device-sync wakes", () => {
     mocks.getConnectionForUser
       .mockResolvedValueOnce(activeConnection)
       .mockResolvedValueOnce(disconnectedConnection);
+    mocks.listConnectionSources.mockImplementation(async () => currentSources);
     const publicConnectionId = buildPublicConnectionId("dsc_123");
 
     const result = await controlPlane.disconnectConnection("user-123", publicConnectionId);
@@ -1254,6 +1260,7 @@ describe("hosted device-sync wakes", () => {
     });
 
     expect(revokeAccess).toHaveBeenCalledTimes(1);
+    expect(mocks.listConnectionSources).toHaveBeenCalledWith("dsc_123", mocks.prismaTx);
     expect(mocks.createSignal).toHaveBeenCalledWith(
       expect.objectContaining({
         revokeWarning: {
@@ -1276,14 +1283,19 @@ describe("hosted device-sync wakes", () => {
     );
   });
 
-  it("returns a stable historical-reset warning when revoke fails during Junction historical recovery", async () => {
+  it("uses a historical-reset marker that appears during provider revoke from the locked source snapshot", async () => {
     const controlPlane = createHostedDeviceSyncPublicIngressService(
       new Request("https://control.example.test/api/settings/device-sync/connections/dsc_123/disconnect"),
     );
     const activeConnection = buildHostedConnection({
       provider: "junction",
     });
+    let currentSources: Array<{ lastErrorCode: string; status: string }> = [];
     const revokeAccess = vi.fn(async () => {
+      currentSources = [{
+        lastErrorCode: DEVICE_SYNC_HISTORICAL_DATA_RECONNECT_REQUIRED_ERROR_CODE,
+        status: "error",
+      }];
       throw new Error("junction deregistration failed upstream");
     });
     mocks.registryGet.mockReturnValue({
@@ -1293,23 +1305,7 @@ describe("hosted device-sync wakes", () => {
     });
     mocks.listConnectionsForUser.mockResolvedValue([activeConnection]);
     mocks.getConnectionForUser.mockResolvedValue(activeConnection);
-    mocks.listConnectionSources.mockResolvedValueOnce([
-      {
-        id: "src_garmin",
-        connectionId: "dsc_123",
-        sourceInstanceKey: "jxn_hidden",
-        sourceProviderSlug: "garmin",
-        displayName: null,
-        status: "error",
-        resourceAvailabilitySummary: null,
-        lastErrorCode: DEVICE_SYNC_HISTORICAL_DATA_RECONNECT_REQUIRED_ERROR_CODE,
-        lastErrorMessage: "Historical data requires reconnecting this source.",
-        firstSeenAt: "2026-04-01T08:00:00.000Z",
-        lastSeenAt: "2026-07-09T08:50:48.000Z",
-        createdAt: "2026-04-01T08:00:00.000Z",
-        updatedAt: "2026-07-09T08:50:48.000Z",
-      },
-    ]);
+    mocks.listConnectionSources.mockImplementation(async () => currentSources);
     const publicConnectionId = buildPublicConnectionId("dsc_123");
 
     const result = await controlPlane.disconnectConnection("user-123", publicConnectionId);
@@ -1324,7 +1320,7 @@ describe("hosted device-sync wakes", () => {
       message: "Provider revoke did not complete while a historical data reset is pending. "
         + "Remove the connection in the provider account before reconnecting.",
     });
-    expect(mocks.listConnectionSources).toHaveBeenCalledWith("dsc_123");
+    expect(mocks.listConnectionSources).toHaveBeenCalledWith("dsc_123", mocks.prismaTx);
     expect(mocks.createSignal).toHaveBeenCalledWith(
       expect.objectContaining({
         revokeWarning: {
@@ -1673,6 +1669,12 @@ describe("hosted device-sync wakes", () => {
 
     await controlPlane.handleOAuthCallback("oura");
 
+    expect(mocks.withConnectionMutationLock).toHaveBeenCalledWith("dsc_123", expect.any(Function));
+    expect(mocks.getConnectionForUser).toHaveBeenCalledWith(
+      "user-123",
+      "dsc_123",
+      mocks.prismaTx,
+    );
     expect(mocks.createSignal).toHaveBeenCalledWith(
       expect.objectContaining({
         connectionId: "dsc_123",
@@ -1705,9 +1707,38 @@ describe("hosted device-sync wakes", () => {
         tx: mocks.prismaTx,
       }),
     );
+    expect(mocks.signalHostedDeviceSyncMailboxRuntime).toHaveBeenCalledWith({
+      mailboxItemId: "mailbox_123",
+    });
     expect(mocks.ensureWebhookSubscriptions).toHaveBeenCalledWith({
       publicBaseUrl: "https://control.example.test/api/device-sync",
     });
+  });
+
+  it.each([
+    ["a missing account", null],
+    ["a disconnected account", buildHostedConnection({ status: "disconnected" })],
+    ["a newer connection epoch", buildHostedConnection({
+      connectedAt: "2026-03-26T12:01:00.000Z",
+    })],
+  ])("does not persist a late connection-established wake over %s", async (_label, current) => {
+    mocks.getConnectionForUser.mockResolvedValue(current);
+    const controlPlane = createHostedDeviceSyncPublicIngressService(
+      new Request("https://control.example.test/api/device-sync/oauth/oura/callback?code=abc&state=xyz"),
+    );
+
+    await controlPlane.handleOAuthCallback("oura");
+
+    expect(mocks.withConnectionMutationLock).toHaveBeenCalledWith("dsc_123", expect.any(Function));
+    expect(mocks.getConnectionForUser).toHaveBeenCalledWith(
+      "user-123",
+      "dsc_123",
+      mocks.prismaTx,
+    );
+    expect(mocks.upsertConnectionSource).not.toHaveBeenCalled();
+    expect(mocks.createSignal).not.toHaveBeenCalled();
+    expect(mocks.appendHostedMailboxEnvelope).not.toHaveBeenCalled();
+    expect(mocks.signalHostedDeviceSyncMailboxRuntime).not.toHaveBeenCalled();
   });
 
   it("durably upserts a Junction source row from the connected ingress hook", async () => {

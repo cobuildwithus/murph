@@ -354,15 +354,15 @@ export class SqliteDeviceSyncStore {
 
   markConnectionSetupFailed(
     accountId: string,
-    expectedUpdatedAt: string | null,
+    expectedConnectedAt: string | null,
     now: string,
     code: string,
     message: string,
-  ): StoredDeviceSyncAccount | null {
+  ): { account: StoredDeviceSyncAccount | null; applied: boolean } {
     return markStoredConnectionSetupFailed(
       this.database,
       accountId,
-      expectedUpdatedAt,
+      expectedConnectedAt,
       now,
       code,
       message,

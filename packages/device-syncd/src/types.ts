@@ -264,7 +264,7 @@ export interface ProviderConnectionSeed {
 
 export interface UpsertPublicDeviceSyncExistingAccountGuard {
   expectedAccountId: string;
-  expectedUpdatedAt: string;
+  expectedConnectedAt: string;
   rejectIfDisconnected?: boolean;
 }
 
@@ -288,10 +288,15 @@ export interface UpsertPublicDeviceSyncConnectionInput {
 
 export interface MarkPublicDeviceSyncConnectionSetupFailedInput {
   accountId: string;
-  expectedUpdatedAt: string | null;
+  expectedConnectedAt: string | null;
   now: string;
   code: string;
   message: string;
+}
+
+export interface MarkPublicDeviceSyncConnectionSetupFailedResult {
+  account: PublicDeviceSyncAccount | null;
+  applied: boolean;
 }
 
 export interface UpsertPublicDeviceSyncConnectionResult {
@@ -358,7 +363,8 @@ export interface DeviceSyncPublicIngressStore {
   ): UpsertPublicDeviceSyncConnectionResult | Promise<UpsertPublicDeviceSyncConnectionResult>;
   markConnectionSetupFailed(
     input: MarkPublicDeviceSyncConnectionSetupFailedInput,
-  ): PublicDeviceSyncAccount | null | Promise<PublicDeviceSyncAccount | null>;
+  ): MarkPublicDeviceSyncConnectionSetupFailedResult
+    | Promise<MarkPublicDeviceSyncConnectionSetupFailedResult>;
   getConnectionById(
     accountId: string,
   ): PublicDeviceSyncAccount | null | Promise<PublicDeviceSyncAccount | null>;

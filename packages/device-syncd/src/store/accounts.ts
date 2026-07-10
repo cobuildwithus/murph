@@ -981,7 +981,7 @@ function assertAccountUpsertExistingGuard(
     });
   }
 
-  if (existing.updatedAt !== guard.expectedUpdatedAt) {
+  if (existing.connectedAt !== guard.expectedConnectedAt) {
     throw deviceSyncError({
       code: "CONNECTION_SEEDED_ACCOUNT_CHANGED",
       message: "Device sync connection changed after this connection flow started.",

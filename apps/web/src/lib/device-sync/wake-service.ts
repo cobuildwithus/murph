@@ -94,7 +94,7 @@ export async function disconnectHostedDeviceSyncConnection(input: {
   }
 
   let providerConfigRevokeSucceeded = false;
-  let warning: { code: string; message: string } | undefined;
+  let revokeFailure: { code: string; message: string } | undefined;
 
   if (storedAccount) {
     const provider = input.registry.get(existing.provider);
@@ -117,21 +117,7 @@ export async function disconnectHostedDeviceSyncConnection(input: {
           error instanceof Error ? error.message : "Provider revoke request failed during disconnect.",
         ) ?? "Provider revoke request failed during disconnect.";
 
-        // A retried disconnect runs after the first attempt already cleared the source
-        // markers, so the disconnected account's own error code is the remaining evidence
-        // that this revoke failure belongs to a pending historical reset.
-        warning = (
-          isHistoricalResetIncompleteDeviceSyncAccount(existing)
-          || await connectionHasHistoricalResetSource(input.store, input.connectionId)
-        )
-          ? {
-            code: DEVICE_SYNC_HISTORICAL_RESET_REVOKE_FAILED_ERROR_CODE,
-            message: HISTORICAL_RESET_REVOKE_WARNING_MESSAGE,
-          }
-          : {
-            code,
-            message,
-          };
+        revokeFailure = { code, message };
       }
     }
   }
@@ -161,6 +147,19 @@ export async function disconnectHostedDeviceSyncConnection(input: {
     ) {
       connectionChangedDuringDisconnectError();
     }
+
+    const warning = revokeFailure
+      ? (
+          isHistoricalResetIncompleteDeviceSyncAccount(freshExisting)
+          || (await input.store.listConnectionSources(input.connectionId, tx))
+            .some(requiresHistoricalResetDeviceSyncSource)
+        )
+        ? {
+            code: DEVICE_SYNC_HISTORICAL_RESET_REVOKE_FAILED_ERROR_CODE,
+            message: HISTORICAL_RESET_REVOKE_WARNING_MESSAGE,
+          }
+        : revokeFailure
+      : undefined;
 
     if (
       freshExisting.status === "disconnected"
@@ -196,6 +195,7 @@ export async function disconnectHostedDeviceSyncConnection(input: {
       return {
         connection: clearedConnection,
         mailboxItemId: null,
+        warning: undefined,
       };
     }
 
@@ -206,6 +206,7 @@ export async function disconnectHostedDeviceSyncConnection(input: {
       return {
         connection: freshExisting,
         mailboxItemId: null,
+        warning,
       };
     }
 
@@ -280,6 +281,7 @@ export async function disconnectHostedDeviceSyncConnection(input: {
     return {
       connection: disconnectedConnection,
       mailboxItemId: mailboxAppend.item.id,
+      warning,
     };
   });
 
@@ -289,7 +291,7 @@ export async function disconnectHostedDeviceSyncConnection(input: {
 
   return {
     connection: disconnectResult.connection,
-    ...(warning ? { warning } : {}),
+    ...(disconnectResult.warning ? { warning: disconnectResult.warning } : {}),
   };
 }
 
@@ -358,24 +360,13 @@ function connectionChangedDuringDisconnectError(): never {
   });
 }
 
-// A Junction historical reset requires deregistering the provider-side connection, so a
-// failed revoke mid-reset needs a stable warning identity the browser can explain instead
-// of the raw provider error. Sources still carry the recovery error code at this point;
-// the disconnect transaction only clears it afterwards.
-async function connectionHasHistoricalResetSource(
-  store: PrismaDeviceSyncControlPlaneStore,
-  connectionId: string,
-): Promise<boolean> {
-  const sources = await store.listConnectionSources(connectionId);
-
-  return sources.some(requiresHistoricalResetDeviceSyncSource);
-}
-
 export async function handleHostedDeviceSyncConnectionEstablished(input: {
   account: {
+    connectedAt: string;
     id: string;
     provider: string;
     scopes: string[];
+    status: PublicDeviceSyncAccount["status"];
   };
   sourceProviderSlug?: string | null;
   connection: Pick<ProviderConnectionResult, "initialJobs" | "nextReconcileAt">;
@@ -408,10 +399,18 @@ export async function handleHostedDeviceSyncConnectionEstablished(input: {
     source: "connection-established",
     userId: ownerId,
   });
-  await persistHostedDeviceSyncWake({
-    wake,
-    store: input.store,
-    persist: async (tx) => {
+  const mailboxAppend = await input.store.withConnectionMutationLock(
+    input.account.id,
+    async (tx) => {
+      const current = await input.store.getConnectionForUser(ownerId, input.account.id, tx);
+      if (
+        !current
+        || current.status !== input.account.status
+        || current.connectedAt !== input.account.connectedAt
+      ) {
+        return null;
+      }
+
       const linkedSource = resolveHostedJunctionLinkedSource({
         account: input.account,
         sourceProviderSlug: input.sourceProviderSlug ?? null,
@@ -438,8 +437,23 @@ export async function handleHostedDeviceSyncConnectionEstablished(input: {
         createdAt: input.now,
         tx,
       });
+
+      return appendHostedMailboxEnvelopeTx({
+        envelope: wake,
+        tx,
+      });
     },
-  });
+  );
+
+  if (
+    mailboxAppend
+    && (
+      mailboxAppend.inserted
+      || (mailboxAppend.duplicate && !mailboxAppend.dedupeConflict)
+    )
+  ) {
+    await startHostedDeviceSyncWakeWorkflow(mailboxAppend.item.id);
+  }
 }
 
 function resolveHostedJunctionLinkedSource(input: {
