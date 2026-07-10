@@ -2362,6 +2362,7 @@ test("Junction meal import writes canonical nutrition into a vault", async () =>
       },
       { corePort: coreRuntime },
     );
+    assert.ok(result.applied);
     const mealEvent = result.events.find((event) => event.kind === "meal");
 
     assert.ok(mealEvent);

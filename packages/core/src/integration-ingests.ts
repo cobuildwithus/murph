@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { createReadStream } from "node:fs";
-import { readFile, stat } from "node:fs/promises";
+import { open as openFile, readFile, stat } from "node:fs/promises";
 import { createInterface } from "node:readline";
 import { Readable } from "node:stream";
 import { createGunzip, inflateRawSync } from "node:zlib";
@@ -26,6 +26,9 @@ export const MAX_INTEGRATION_INGEST_BYTES = 100 * 1024 * 1024;
 export const MAX_INTEGRATION_INGEST_JOURNAL_ROW_BYTES = 128 * 1024 * 1024;
 export const MAX_INTEGRATION_INGEST_ZIP_ARCHIVE_BYTES = 128 * 1024 * 1024;
 export const MAX_INTEGRATION_INGEST_ZIP_ENTRY_BYTES = 256 * 1024 * 1024;
+const INTEGRATION_INGEST_NOVELTY_MAX_SCAN_BYTES = 8 * 1024 * 1024;
+const INTEGRATION_INGEST_NOVELTY_MAX_SCAN_ROWS = 64;
+const INTEGRATION_INGEST_NOVELTY_SCAN_CHUNK_BYTES = 64 * 1024;
 
 export interface BuildIntegrationEvidencePartInput {
   role: string;
@@ -63,6 +66,22 @@ export interface StoredIntegrationIngestEntry {
   record: IntegrationIngestRecord;
 }
 
+export interface SelectNovelIntegrationIngestEvidenceInput {
+  vaultRoot: string;
+  provider: string;
+  accountId?: string;
+  importedAt: string;
+  parts: readonly IntegrationEvidencePart[];
+  receipt?: IntegrationIngestReceipt;
+  eventIdsByRole?: ReadonlyMap<string, ReadonlySet<string>>;
+  sampleIds?: ReadonlySet<string>;
+}
+
+export interface NovelIntegrationIngestEvidenceSelection {
+  parts: IntegrationEvidencePart[];
+  receiptIsNovel: boolean;
+}
+
 interface RawIntegrationIngestJsonlRow {
   lineNumber: number;
   raw: unknown;
@@ -85,6 +104,14 @@ interface ZipCentralDirectoryEntry {
   localHeaderOffset: number;
   name: string;
   uncompressedSize: number;
+}
+
+type IntegrationIngestNoveltyTailDecision = "continue" | "complete" | "unsafe";
+
+interface IntegrationIngestNoveltyTailScanResult {
+  historyComplete: boolean;
+  selectionComplete: boolean;
+  unsafe: boolean;
 }
 
 const INTEGRATION_INGEST_ARCHIVE_SUFFIXES = [".gz", ".zip"] as const;
@@ -258,6 +285,434 @@ export async function readIntegrationIngestEntries(
     vaultRoot,
     await listIntegrationIngestRowSources(vaultRoot),
   );
+}
+
+function integrationEvidenceFingerprint(
+  part: Pick<IntegrationEvidencePart, "role" | "sha256" | "mediaType" | "metadata">,
+): string {
+  return JSON.stringify([
+    part.role,
+    part.sha256,
+    part.mediaType,
+    stableSortJson(part.metadata ?? null),
+  ]);
+}
+
+function integrationIngestAccountMatches(
+  record: Pick<IntegrationIngestRecord, "accountId">,
+  accountId: string | undefined,
+): boolean {
+  return (record.accountId ?? null) === (accountId ?? null);
+}
+
+function integrationIngestReceiptFingerprint(
+  receipt: IntegrationIngestReceipt,
+  includePayloadIdentity: boolean,
+): string {
+  return JSON.stringify([
+    ...(includePayloadIdentity ? [receipt.id, receipt.payloadHash] : []),
+    receipt.sourceKind,
+    receipt.deliveryMode,
+    receipt.resourceType ?? null,
+    receipt.resourceId ?? null,
+    receipt.providerEventId ?? null,
+    receipt.eventType ?? null,
+    receipt.occurredAt ?? null,
+    receipt.signatureVerified ?? null,
+  ]);
+}
+
+function rawIntegrationEvidenceFingerprint(value: unknown): string | null {
+  if (
+    !isRecord(value)
+    || typeof value.role !== "string"
+    || typeof value.sha256 !== "string"
+    || typeof value.mediaType !== "string"
+  ) {
+    return null;
+  }
+
+  return JSON.stringify([
+    value.role,
+    value.sha256,
+    value.mediaType,
+    stableSortJson(value.metadata ?? null),
+  ]);
+}
+
+function rawIntegrationIngestReceiptFingerprint(
+  value: unknown,
+  includePayloadIdentity: boolean,
+): string | null {
+  if (
+    !isRecord(value)
+    || typeof value.sourceKind !== "string"
+    || typeof value.deliveryMode !== "string"
+    || (includePayloadIdentity
+      && (typeof value.id !== "string" || typeof value.payloadHash !== "string"))
+  ) {
+    return null;
+  }
+
+  return JSON.stringify([
+    ...(includePayloadIdentity ? [value.id, value.payloadHash] : []),
+    value.sourceKind,
+    value.deliveryMode,
+    value.resourceType ?? null,
+    value.resourceId ?? null,
+    value.providerEventId ?? null,
+    value.eventType ?? null,
+    value.occurredAt ?? null,
+    value.signatureVerified ?? null,
+  ]);
+}
+
+function rawIntegrationIngestCouldProveNovelty(input: {
+  raw: Record<string, unknown>;
+  receiptRequiresPayloadIdentity: boolean;
+  requestedFingerprints: ReadonlySet<string>;
+  requestedReceiptFingerprint: string | null;
+}): boolean {
+  if (
+    Array.isArray(input.raw.parts)
+    && input.raw.parts.some((part) => {
+      const fingerprint = rawIntegrationEvidenceFingerprint(part);
+      return fingerprint !== null && input.requestedFingerprints.has(fingerprint);
+    })
+  ) {
+    return true;
+  }
+
+  return input.requestedReceiptFingerprint !== null
+    && rawIntegrationIngestReceiptFingerprint(
+      input.raw.receipt,
+      input.receiptRequiresPayloadIdentity,
+    ) === input.requestedReceiptFingerprint;
+}
+
+async function scanIntegrationIngestNoveltyTail(
+  absolutePath: string,
+  maxScanBytes: number,
+  visitLine: (line: string) => IntegrationIngestNoveltyTailDecision,
+): Promise<IntegrationIngestNoveltyTailScanResult> {
+  const handle = await openFile(absolutePath, "r");
+
+  try {
+    const fileStat = await handle.stat();
+    if (fileStat.size === 0) {
+      return {
+        historyComplete: true,
+        selectionComplete: false,
+        unsafe: false,
+      };
+    }
+
+    let bytesReadTotal = 0;
+    let lineSuffixChunks: Buffer[] = [];
+    let position = fileStat.size;
+    let rowsVisited = 0;
+    let strippedTrailingNewline = false;
+
+    const visit = (lineBytes: Buffer): IntegrationIngestNoveltyTailScanResult | null => {
+      rowsVisited += 1;
+      if (lineBytes.length === 0) {
+        return null;
+      }
+      const decision = visitLine(lineBytes.toString("utf8"));
+      if (decision === "complete") {
+        return {
+          historyComplete: false,
+          selectionComplete: true,
+          unsafe: false,
+        };
+      }
+      if (decision === "unsafe") {
+        return {
+          historyComplete: false,
+          selectionComplete: false,
+          unsafe: true,
+        };
+      }
+      return null;
+    };
+
+    while (
+      position > 0
+      && bytesReadTotal < maxScanBytes
+      && rowsVisited < INTEGRATION_INGEST_NOVELTY_MAX_SCAN_ROWS
+    ) {
+      const readSize = Math.min(
+        position,
+        INTEGRATION_INGEST_NOVELTY_SCAN_CHUNK_BYTES,
+        maxScanBytes - bytesReadTotal,
+      );
+      const chunk = Buffer.allocUnsafe(readSize);
+      const readPosition = position - readSize;
+      const result = await handle.read(chunk, 0, readSize, readPosition);
+      if (result.bytesRead !== readSize) {
+        return {
+          historyComplete: false,
+          selectionComplete: false,
+          unsafe: true,
+        };
+      }
+
+      position = readPosition;
+      bytesReadTotal += result.bytesRead;
+      let segmentEnd = chunk.length;
+      if (!strippedTrailingNewline) {
+        if (chunk[chunk.length - 1] !== 0x0a) {
+          return {
+            historyComplete: false,
+            selectionComplete: false,
+            unsafe: true,
+          };
+        }
+        segmentEnd -= 1;
+        strippedTrailingNewline = true;
+      }
+
+      while (
+        segmentEnd > 0
+        && rowsVisited < INTEGRATION_INGEST_NOVELTY_MAX_SCAN_ROWS
+      ) {
+        const newlineIndex = chunk.lastIndexOf(0x0a, segmentEnd - 1);
+        if (newlineIndex < 0) {
+          break;
+        }
+        const leadingSegment = chunk.subarray(newlineIndex + 1, segmentEnd);
+        const lineChunks = leadingSegment.length > 0
+          ? [leadingSegment, ...lineSuffixChunks]
+          : lineSuffixChunks;
+        const firstLineChunk = lineChunks[0];
+        const lineBytes = lineChunks.length === 1 && firstLineChunk
+          ? firstLineChunk
+          : Buffer.concat(lineChunks);
+        const visitResult = visit(lineBytes);
+        if (visitResult) {
+          return visitResult;
+        }
+        lineSuffixChunks = [];
+        segmentEnd = newlineIndex;
+      }
+
+      if (rowsVisited >= INTEGRATION_INGEST_NOVELTY_MAX_SCAN_ROWS) {
+        return {
+          historyComplete: position === 0 && segmentEnd === 0 && lineSuffixChunks.length === 0,
+          selectionComplete: false,
+          unsafe: false,
+        };
+      }
+      if (segmentEnd > 0) {
+        lineSuffixChunks.unshift(chunk.subarray(0, segmentEnd));
+      }
+    }
+
+    if (
+      position === 0
+      && lineSuffixChunks.length > 0
+      && rowsVisited < INTEGRATION_INGEST_NOVELTY_MAX_SCAN_ROWS
+    ) {
+      const firstLineChunk = lineSuffixChunks[0];
+      const lineBytes = lineSuffixChunks.length === 1 && firstLineChunk
+        ? firstLineChunk
+        : Buffer.concat(lineSuffixChunks);
+      const visitResult = visit(lineBytes);
+      if (visitResult) {
+        return visitResult;
+      }
+      lineSuffixChunks = [];
+    }
+
+    return {
+      historyComplete: position === 0 && lineSuffixChunks.length === 0,
+      selectionComplete: false,
+      unsafe: false,
+    };
+  } finally {
+    await handle.close();
+  }
+}
+
+/**
+ * Selects evidence whose provider/account/role/content identity has not already
+ * been retained. This is a storage optimization, so damaged historical rows
+ * fail open: only a valid, integrity-checked row may prove that incoming
+ * evidence is redundant.
+ */
+export async function selectNovelIntegrationIngestEvidence(
+  input: SelectNovelIntegrationIngestEvidenceInput,
+): Promise<NovelIntegrationIngestEvidenceSelection> {
+  if (!input.accountId) {
+    return {
+      parts: [...input.parts],
+      receiptIsNovel: input.receipt !== undefined,
+    };
+  }
+
+  const requestedFingerprints = new Set(input.parts.map(integrationEvidenceFingerprint));
+  const existingFingerprints = new Set<string>();
+  const requestedEventIdsByFingerprint = new Map<string, ReadonlySet<string>>(
+    input.parts.map((part) => [
+      integrationEvidenceFingerprint(part),
+      input.eventIdsByRole?.get(part.role) ?? new Set<string>(),
+    ]),
+  );
+  const existingEventLinks = new Set<string>();
+  const existingSampleLinks = new Set<string>();
+  const receiptRequiresPayloadIdentity = input.parts.length === 0;
+  const requestedReceiptFingerprint = input.receipt
+    ? integrationIngestReceiptFingerprint(input.receipt, receiptRequiresPayloadIdentity)
+    : null;
+  let receiptIsNovel = requestedReceiptFingerprint !== null;
+  const failOpenSelection = (): NovelIntegrationIngestEvidenceSelection => ({
+    parts: [...input.parts],
+    receiptIsNovel: requestedReceiptFingerprint !== null,
+  });
+
+  if (requestedFingerprints.size === 0 && !receiptIsNovel) {
+    return { parts: [], receiptIsNovel: false };
+  }
+
+  let sources: IntegrationIngestRowSource[];
+  try {
+    sources = await listIntegrationIngestRowSourcesForLogicalPaths(
+      input.vaultRoot,
+      [integrationIngestShardPath(input.importedAt)],
+    );
+  } catch {
+    return failOpenSelection();
+  }
+
+  // Novelty is an optimization, not a historical query. Inspect only a
+  // bounded tail of the live shard a new row would enter. Closed archives,
+  // older months, oversized rows, and unreadable tails all retain the incoming
+  // evidence. A fail-open append puts one complete proof at the live tail, so
+  // the next replay can dedupe without an index or archive inflate.
+  const source = sources.length === 1 ? sources[0] : undefined;
+  if (!source || source.kind !== "jsonl") {
+    return failOpenSelection();
+  }
+
+  const absolutePath = resolveVaultPath(input.vaultRoot, source.sourcePath).absolutePath;
+  if (!(await pathExists(absolutePath))) {
+    return failOpenSelection();
+  }
+
+  const requestedEvidenceBytes = input.parts.reduce(
+    (total, part) => total + part.byteSize,
+    0,
+  );
+  const maxScanBytes = requestedEvidenceBytes > INTEGRATION_INGEST_NOVELTY_MAX_SCAN_BYTES
+    ? MAX_INTEGRATION_INGEST_JOURNAL_ROW_BYTES
+    : INTEGRATION_INGEST_NOVELTY_MAX_SCAN_BYTES;
+
+  let scan: IntegrationIngestNoveltyTailScanResult;
+  try {
+    scan = await scanIntegrationIngestNoveltyTail(absolutePath, maxScanBytes, (line) => {
+      let raw: unknown;
+      try {
+        raw = JSON.parse(line);
+      } catch {
+        return "unsafe";
+      }
+      if (!isRecord(raw) || raw.provider !== input.provider) {
+        return "continue";
+      }
+      const rawAccountId = typeof raw.accountId === "string" ? raw.accountId : undefined;
+      if ((rawAccountId ?? null) !== (input.accountId ?? null)) {
+        return "continue";
+      }
+      if (!rawIntegrationIngestCouldProveNovelty({
+        raw,
+        receiptRequiresPayloadIdentity,
+        requestedFingerprints,
+        requestedReceiptFingerprint,
+      })) {
+        return "continue";
+      }
+
+      let record: IntegrationIngestRecord;
+      try {
+        record = parseIntegrationIngestRecord(raw, source.sourcePath);
+        assertIntegrationIngestShard(record.id, record.importedAt, source.logicalPath);
+        assertIntegrationIngestRecordIntegrity(record);
+      } catch {
+        return "unsafe";
+      }
+      if (!integrationIngestAccountMatches(record, input.accountId)) {
+        return "continue";
+      }
+
+      for (const part of record.parts) {
+        const fingerprint = integrationEvidenceFingerprint(part);
+        if (!requestedFingerprints.has(fingerprint)) {
+          continue;
+        }
+        existingFingerprints.add(fingerprint);
+        const requestedEventIds = requestedEventIdsByFingerprint.get(fingerprint);
+        if (requestedEventIds && requestedEventIds.size > 0) {
+          for (const output of record.outputs.events) {
+            if (
+              requestedEventIds.has(output.id)
+              && output.roles.includes(part.role)
+            ) {
+              existingEventLinks.add(`${fingerprint}\u0000${output.id}`);
+            }
+          }
+        }
+        for (const sampleId of record.outputs.sampleIds) {
+          if (input.sampleIds?.has(sampleId)) {
+            existingSampleLinks.add(`${fingerprint}\u0000${sampleId}`);
+          }
+        }
+      }
+      if (
+        requestedReceiptFingerprint
+        && record.receipt
+        && integrationIngestReceiptFingerprint(
+          record.receipt,
+          receiptRequiresPayloadIdentity,
+        ) === requestedReceiptFingerprint
+      ) {
+        receiptIsNovel = false;
+      }
+
+      const selectionComplete = existingFingerprints.size === requestedFingerprints.size
+        && [...requestedEventIdsByFingerprint.entries()].every(([fingerprint, eventIds]) =>
+          [...eventIds].every((eventId) => existingEventLinks.has(`${fingerprint}\u0000${eventId}`))
+        )
+        && [...requestedFingerprints].every((fingerprint) =>
+          [...(input.sampleIds ?? [])].every((sampleId) =>
+            existingSampleLinks.has(`${fingerprint}\u0000${sampleId}`)
+          )
+        )
+        && !receiptIsNovel;
+      return selectionComplete ? "complete" : "continue";
+    });
+  } catch {
+    return failOpenSelection();
+  }
+
+  if (scan.selectionComplete) {
+    return { parts: [], receiptIsNovel: false };
+  }
+  if (scan.unsafe || !scan.historyComplete) {
+    return failOpenSelection();
+  }
+
+  return {
+    parts: input.parts.filter((part) =>
+      !existingFingerprints.has(integrationEvidenceFingerprint(part))
+      || [...(input.eventIdsByRole?.get(part.role) ?? [])].some((eventId) =>
+        !existingEventLinks.has(`${integrationEvidenceFingerprint(part)}\u0000${eventId}`)
+      )
+      || [...(input.sampleIds ?? [])].some((sampleId) =>
+        !existingSampleLinks.has(`${integrationEvidenceFingerprint(part)}\u0000${sampleId}`)
+      )
+    ),
+    receiptIsNovel,
+  };
 }
 
 async function readIntegrationIngestEntriesFromSources(

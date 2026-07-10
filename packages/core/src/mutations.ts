@@ -16,6 +16,7 @@ import type {
   SampleRecord,
   SampleSource,
   SampleStream,
+  IntegrationIngestReceipt,
 } from "@murphai/contracts";
 import {
   assertContractId,
@@ -84,6 +85,7 @@ import {
   buildIntegrationIngestRecord,
   stageIntegrationIngestAppendPlan,
   compactIntegrationIngestReceipt,
+  selectNovelIntegrationIngestEvidence,
   type IntegrationIngestAppendPlan,
 } from "./integration-ingests.ts";
 import type { IntegrationEvidencePart, IntegrationIngestEventOutput } from "@murphai/contracts";
@@ -300,9 +302,11 @@ interface ImportDeviceBatchInput {
   provenance?: Record<string, unknown>;
 }
 
-export interface ImportDeviceBatchResult {
-  ingestId: string;
-  ingestShardPath: string;
+interface ImportDeviceBatchResultBase {
+  applied: boolean;
+  ingestId: string | null;
+  ingestShardPath: string | null;
+  auditPath: string | null;
   provider: string;
   accountId?: string;
   importedAt: string;
@@ -311,8 +315,26 @@ export interface ImportDeviceBatchResult {
   eventShardPaths: string[];
   sampleShardPaths: string[];
   evidencePartCount: number;
+  persistedEvidencePartCount: number;
+}
+
+export interface AppliedDeviceBatchImportResult extends ImportDeviceBatchResultBase {
+  applied: true;
+  ingestId: string;
+  ingestShardPath: string;
   auditPath: string;
 }
+
+export interface NoopDeviceBatchImportResult extends ImportDeviceBatchResultBase {
+  applied: false;
+  ingestId: null;
+  ingestShardPath: null;
+  auditPath: null;
+}
+
+export type ImportDeviceBatchResult =
+  | AppliedDeviceBatchImportResult
+  | NoopDeviceBatchImportResult;
 
 
 interface NormalizedDeviceEvent {
@@ -344,7 +366,7 @@ interface NormalizedDeviceBatchInputs {
   source: EventSource;
   defaultTimeZone?: string;
   provenance: LooseRecord;
-  ingestReceipt?: LooseRecord;
+  ingestReceipt?: IntegrationIngestReceipt;
   events: NormalizedDeviceEvent[];
   samples: NormalizedDeviceSample[];
   evidenceParts: NormalizedDeviceEvidencePart[];
@@ -373,7 +395,7 @@ interface DeviceBatchPlan {
   importedAt: string;
   source: EventSource;
   provenance: LooseRecord;
-  ingestReceipt?: LooseRecord;
+  ingestReceipt?: IntegrationIngestReceipt;
   effectiveOccurredAt: string;
   preparedEvents: PreparedDeviceEventEntry[];
   evidenceRolesByPreparedRecordId: ReadonlyMap<string, readonly string[]>;
@@ -1423,11 +1445,7 @@ function normalizeDeviceBatchInputs({
     "VAULT_INVALID_DEVICE_PROVENANCE",
     "Device import provenance must be a plain object.",
   ) ?? {};
-  const normalizedIngestReceipt = normalizeLooseRecord(
-    ingestReceipt,
-    "INTEGRATION_INGEST_RECEIPT_INVALID",
-    "Device ingest receipt must be a plain object.",
-  );
+  const normalizedIngestReceipt = compactIntegrationIngestReceipt(ingestReceipt);
   const eventInputs = normalizeDeviceBatchObjectArray<DeviceEventInput>({
     value: events,
     code: "VAULT_INVALID_DEVICE_EVENTS",
@@ -1550,6 +1568,7 @@ function isImplicitDeviceEvidenceFallbackRole(role: string): boolean {
 
 interface EventExternalRefReconciliation {
   appendEntries: PreparedJsonlEntry<EventRecord>[];
+  appendRecordIdByPreparedRecordId: ReadonlyMap<string, string>;
   records: EventRecord[];
   forceAppendIds: ReadonlySet<string>;
   skippedDuplicateCount: number;
@@ -2011,6 +2030,7 @@ async function reconcileDeviceEventEntriesByExternalRef(
   });
   const index = await indexLatestEventsByExternalRef(vaultRoot, shardPaths);
   const appendEntries: PreparedJsonlEntry<EventRecord>[] = [];
+  const appendRecordIdByPreparedRecordId = new Map<string, string>();
   const records: EventRecord[] = [];
   const forceAppendIds = new Set<string>();
   const legacyReservations = buildLegacyExternalRefReservations(entries, index);
@@ -2022,6 +2042,7 @@ async function reconcileDeviceEventEntriesByExternalRef(
 
     if (!externalRef) {
       appendEntries.push(entry);
+      appendRecordIdByPreparedRecordId.set(entry.record.id, entry.record.id);
       records.push(entry.record);
       continue;
     }
@@ -2070,6 +2091,7 @@ async function reconcileDeviceEventEntriesByExternalRef(
     if (!latest) {
       index.latestByRefKey.set(refKey, toIndexedExternalRefMatch(entry.record, externalRef));
       appendEntries.push(entry);
+      appendRecordIdByPreparedRecordId.set(entry.record.id, entry.record.id);
       records.push(entry.record);
       continue;
     }
@@ -2128,6 +2150,7 @@ async function reconcileDeviceEventEntriesByExternalRef(
     if (isDeletedEventSpineRecord(latest)) {
       index.latestByRefKey.set(refKey, toIndexedExternalRefMatch(entry.record, externalRef));
       appendEntries.push(entry);
+      appendRecordIdByPreparedRecordId.set(entry.record.id, entry.record.id);
       records.push(entry.record);
       continue;
     }
@@ -2173,12 +2196,14 @@ async function reconcileDeviceEventEntriesByExternalRef(
     }
     index.maxRevisionById.set(latest.id, revision);
     appendEntries.push({ relativePath: entry.relativePath, record: superseding });
+    appendRecordIdByPreparedRecordId.set(entry.record.id, superseding.id);
     records.push(superseding);
     supersededCount += 1;
   }
 
   return {
     appendEntries,
+    appendRecordIdByPreparedRecordId,
     records,
     forceAppendIds,
     skippedDuplicateCount,
@@ -2203,6 +2228,7 @@ async function reconcileEventImportEntriesByExternalRef(
   });
   const index = await indexLatestEventsByExternalRef(vaultRoot, shardPaths);
   const appendEntries: PreparedJsonlEntry<EventRecord>[] = [];
+  const appendRecordIdByPreparedRecordId = new Map<string, string>();
   const records: EventRecord[] = [];
   const forceAppendIds = new Set<string>();
   let skippedDuplicateCount = 0;
@@ -2213,6 +2239,7 @@ async function reconcileEventImportEntriesByExternalRef(
 
     if (!externalRef) {
       appendEntries.push(entry);
+      appendRecordIdByPreparedRecordId.set(entry.record.id, entry.record.id);
       records.push(entry.record);
       continue;
     }
@@ -2223,6 +2250,7 @@ async function reconcileEventImportEntriesByExternalRef(
     if (!latest) {
       index.latestByRefKey.set(refKey, toIndexedExternalRefMatch(entry.record, externalRef));
       appendEntries.push(entry);
+      appendRecordIdByPreparedRecordId.set(entry.record.id, entry.record.id);
       records.push(entry.record);
       continue;
     }
@@ -2250,6 +2278,7 @@ async function reconcileEventImportEntriesByExternalRef(
     if (isDeletedEventSpineRecord(latest)) {
       index.latestByRefKey.set(refKey, toIndexedExternalRefMatch(entry.record, externalRef));
       appendEntries.push(entry);
+      appendRecordIdByPreparedRecordId.set(entry.record.id, entry.record.id);
       records.push(entry.record);
       continue;
     }
@@ -2268,12 +2297,14 @@ async function reconcileEventImportEntriesByExternalRef(
     index.latestByRefKey.set(refKey, toIndexedExternalRefMatch(superseding, externalRef));
     index.maxRevisionById.set(latest.id, revision);
     appendEntries.push({ relativePath: entry.relativePath, record: superseding });
+    appendRecordIdByPreparedRecordId.set(entry.record.id, superseding.id);
     records.push(superseding);
     supersededCount += 1;
   }
 
   return {
     appendEntries,
+    appendRecordIdByPreparedRecordId,
     records,
     forceAppendIds,
     skippedDuplicateCount,
@@ -2656,7 +2687,7 @@ function prepareDeviceBatchPlan({
     importedAt: normalizedInputs.importedAt,
     source: normalizedInputs.source,
     provenance: normalizedInputs.provenance,
-    ingestReceipt: normalizedInputs.ingestReceipt,
+    ingestReceipt: compactedIngestReceipt,
     effectiveOccurredAt,
     preparedEvents: eventPlan.entries,
     evidenceRolesByPreparedRecordId: eventPlan.evidenceRolesByPreparedRecordId,
@@ -3185,11 +3216,108 @@ export async function importDeviceBatch({
     deviceBatchPlan.preparedEvents,
     eventRecords,
   );
-  const eventOutputs = buildIntegrationEventOutputs(
-    deviceBatchPlan.preparedEvents,
-    canonicalIdByPreparedId,
-    deviceBatchPlan.evidenceRolesByPreparedRecordId,
+  const appendedEventRecordIds = new Set(eventAppendPlan.appendedRecordIds);
+  const appendedPreparedEventIds = new Set(
+    [...eventReconciliation.appendRecordIdByPreparedRecordId.entries()]
+      .filter(([, recordId]) => appendedEventRecordIds.has(recordId))
+      .map(([preparedRecordId]) => preparedRecordId),
   );
+  const appendedSampleIds = new Set(sampleAppendPlan.appendedRecordIds);
+  const outputRequiredEvidenceRoles = new Set<string>();
+  for (const entry of deviceBatchPlan.preparedEvents) {
+    if (!appendedPreparedEventIds.has(entry.record.id)) {
+      continue;
+    }
+    for (const role of deviceBatchPlan.evidenceRolesByPreparedRecordId.get(entry.record.id) ?? []) {
+      outputRequiredEvidenceRoles.add(role);
+    }
+  }
+  const evidenceRequiredByOutputs = new Set(
+    deviceBatchPlan.preparedEvidenceParts.filter((part) =>
+      appendedSampleIds.size > 0 || outputRequiredEvidenceRoles.has(part.role)
+    ),
+  );
+  const optionalEvidenceParts = deviceBatchPlan.preparedEvidenceParts.filter((part) =>
+    !evidenceRequiredByOutputs.has(part)
+  );
+  const optionalEvidenceRoles = new Set(optionalEvidenceParts.map((part) => part.role));
+  const eventIdsByOptionalEvidenceRole = new Map<string, Set<string>>();
+  for (const entry of deviceBatchPlan.preparedEvents) {
+    const canonicalEventId = canonicalIdByPreparedId.get(entry.record.id);
+    if (!canonicalEventId) {
+      continue;
+    }
+    for (const role of deviceBatchPlan.evidenceRolesByPreparedRecordId.get(entry.record.id) ?? []) {
+      if (!optionalEvidenceRoles.has(role)) {
+        continue;
+      }
+      const eventIds = eventIdsByOptionalEvidenceRole.get(role) ?? new Set<string>();
+      eventIds.add(canonicalEventId);
+      eventIdsByOptionalEvidenceRole.set(role, eventIds);
+    }
+  }
+  const hasAppendedOutputs = appendedPreparedEventIds.size > 0
+    || appendedSampleIds.size > 0;
+  const shouldCheckReceiptNovelty = !hasAppendedOutputs;
+  const novelty = optionalEvidenceParts.length > 0 || (
+      shouldCheckReceiptNovelty && deviceBatchPlan.ingestReceipt
+    )
+    ? await selectNovelIntegrationIngestEvidence({
+        vaultRoot,
+        provider: deviceBatchPlan.provider,
+        accountId: deviceBatchPlan.accountId,
+        importedAt: deviceBatchPlan.importedAt,
+        parts: optionalEvidenceParts,
+        receipt: shouldCheckReceiptNovelty ? deviceBatchPlan.ingestReceipt : undefined,
+        eventIdsByRole: eventIdsByOptionalEvidenceRole,
+        sampleIds: new Set(sampleRecords.map((record) => record.id)),
+      })
+    : { parts: [], receiptIsNovel: false };
+  const novelEvidenceParts = new Set(novelty.parts);
+  const retainedEvidenceParts = deviceBatchPlan.preparedEvidenceParts.filter((part) =>
+    evidenceRequiredByOutputs.has(part) || novelEvidenceParts.has(part)
+  );
+  const retainedEvidenceRoles = new Set(retainedEvidenceParts.map((part) => part.role));
+  const retainedEvidenceRolesByPreparedRecordId = new Map<string, readonly string[]>();
+  for (const entry of deviceBatchPlan.preparedEvents) {
+    retainedEvidenceRolesByPreparedRecordId.set(
+      entry.record.id,
+      (deviceBatchPlan.evidenceRolesByPreparedRecordId.get(entry.record.id) ?? []).filter((role) =>
+        retainedEvidenceRoles.has(role)
+      ),
+    );
+  }
+  const outputEventEntries = deviceBatchPlan.preparedEvents.filter((entry) =>
+    appendedPreparedEventIds.has(entry.record.id)
+    || (retainedEvidenceRolesByPreparedRecordId.get(entry.record.id)?.length ?? 0) > 0
+  );
+  const eventOutputs = buildIntegrationEventOutputs(
+    outputEventEntries,
+    canonicalIdByPreparedId,
+    retainedEvidenceRolesByPreparedRecordId,
+  );
+  if (
+    !hasAppendedOutputs
+    && retainedEvidenceParts.length === 0
+    && !novelty.receiptIsNovel
+  ) {
+    return {
+      applied: false,
+      ingestId: null,
+      ingestShardPath: null,
+      provider: deviceBatchPlan.provider,
+      accountId: deviceBatchPlan.accountId,
+      importedAt: deviceBatchPlan.importedAt,
+      events: eventRecords,
+      samples: sampleRecords,
+      eventShardPaths: eventTargetShardPaths,
+      sampleShardPaths: sampleAppendPlan.targetShardPaths,
+      evidencePartCount: deviceBatchPlan.preparedEvidenceParts.length,
+      persistedEvidencePartCount: 0,
+      auditPath: null,
+    };
+  }
+
   const ingestRecord = buildIntegrationIngestRecord({
     id: deviceBatchPlan.importId,
     provider: deviceBatchPlan.provider,
@@ -3197,7 +3325,7 @@ export async function importDeviceBatch({
     source: deviceBatchPlan.source,
     importedAt: deviceBatchPlan.importedAt,
     receipt: deviceBatchPlan.ingestReceipt,
-    parts: deviceBatchPlan.preparedEvidenceParts,
+    parts: retainedEvidenceParts,
     eventOutputs,
     eventIdsComplete: true,
     sampleIds: sampleRecords.map((record) => record.id),
@@ -3237,7 +3365,7 @@ export async function importDeviceBatch({
         commandName: "core.importDeviceBatch",
         summary: buildDeviceBatchAuditSummary({
           provider: deviceBatchPlan.provider,
-          eventCount: eventRecords.length,
+          eventCount: eventOutputs.length,
           sampleCount: sampleRecords.length,
           skippedDuplicateCount: eventReconciliation.skippedDuplicateCount,
           supersededCount: eventReconciliation.supersededCount,
@@ -3248,6 +3376,7 @@ export async function importDeviceBatch({
       });
 
       return {
+        applied: true,
         ingestId: deviceBatchPlan.importId,
         ingestShardPath,
         provider: deviceBatchPlan.provider,
@@ -3258,6 +3387,7 @@ export async function importDeviceBatch({
         eventShardPaths: eventTargetShardPaths,
         sampleShardPaths: sampleAppendPlan.targetShardPaths,
         evidencePartCount: deviceBatchPlan.preparedEvidenceParts.length,
+        persistedEvidencePartCount: retainedEvidenceParts.length,
         auditPath: audit.relativePath,
       };
     },

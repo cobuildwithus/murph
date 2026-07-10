@@ -1243,6 +1243,7 @@ test("importDeviceProviderSnapshot ignores legacy Oura heart-rate raw samples", 
     },
   );
 
+  assert.ok(result.applied);
   const ingest = await readRequiredIntegrationIngest(vaultRoot, result.ingestId);
   assert.equal(
     ingest.parts.some((part) => part.role === "heartrate" || part.fileName.endsWith("/01-heartrate.json")),
@@ -1494,6 +1495,7 @@ test("importDeviceProviderSnapshot keeps new Junction timeseries imports out of 
     },
   );
 
+  assert.ok(result.applied);
   const ingest = await readRequiredIntegrationIngest(vaultRoot, result.ingestId);
   const ingestParts = ingest.parts;
   const compactBloodOxygenPart = ingestParts.find(
@@ -2271,6 +2273,45 @@ test("importDeviceProviderSnapshot replays date-only WHOOP body measurements ide
     assert.equal(weightRecords.length, 1);
     assert.equal(weightRecords[0]?.occurredAt, "2026-06-24T00:00:00.000Z");
     assert.equal(weightRecords[0]?.recordedAt, "2026-06-25T12:00:00.000Z");
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
+test("importDeviceProviderSnapshot makes operational WHOOP snapshot timestamp churn a storage no-op", async () => {
+  const vaultRoot = await makeTempDirectory("murph-whoop-operational-snapshot-replay");
+  try {
+    await coreRuntime.initializeVault({
+      vaultRoot,
+      createdAt: "2026-06-25T00:00:00.000Z",
+      timezone: "America/New_York",
+    });
+    const importAt = (importedAt: string) =>
+      importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
+        {
+          provider: "whoop",
+          vaultRoot,
+          snapshot: {
+            accountId: "whoop-user-1",
+            importedAt,
+            bodyMeasurements: {
+              date: "2026-06-24",
+              updated_at: "2026-06-25T12:00:00.000Z",
+              weight_kilogram: 78.2,
+            },
+          },
+        },
+        { corePort: coreRuntime },
+      );
+
+    const first = await importAt("2026-07-01T12:00:00.000Z");
+    const replay = await importAt("2026-07-02T12:00:00.000Z");
+
+    assert.ok(first.applied);
+    assert.equal(replay.applied, false);
+    assert.equal(replay.ingestId, null);
+    assert.equal(replay.auditPath, null);
+    assert.equal(replay.persistedEvidencePartCount, 0);
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
   }

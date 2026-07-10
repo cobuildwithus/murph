@@ -1,6 +1,6 @@
 # Device Sync Ingestion Invariants
 
-Last verified: 2026-06-10
+Last verified: 2026-07-09
 
 ## Purpose
 
@@ -47,15 +47,28 @@ drain/batch service seam in `packages/device-syncd/src/service.ts`.
    harmless, since invariant 4 makes the extra fetch idempotent and Junction
    reads are unmetered.)
 
-4. **Merge is idempotent on `externalRef.resourceId`.** Core reconciles on the
+4. **Merge and storage are idempotent on `externalRef.resourceId`.** Core reconciles on the
    record's own resource id (the explicit Junction id for summaries;
    resource/source/timestamp for timeseries). Push-then-pull re-imports of
    identical content are skipped, and changed content appends an event-spine
    revision of the same event id (read-side revision collapse keeps one live
-   record), so importing a record more than once — or via a different path —
-   is overlap-free. This is what makes invariants 2 and 3 safe, and it is why an
-   import-vs-skip optimization is unnecessary: re-fetching is cheap and correct,
-   not a correctness risk.
+   record). Core also suppresses a repeated integration-ingest row and audit
+   when the same provider account has no new canonical output, receipt state,
+   or evidence identity. The storage check reads the current live ingest shard
+   backward from its append tail and ordinarily stops after 8 MiB or 64
+   complete rows. When the requested evidence itself exceeds 8 MiB, the byte
+   budget expands only as far as the 128 MiB journal-row limit so a valid proof
+   just appended at the tail can be recognized on replay. Novelty never opens a
+   closed gzip/ZIP shard. Missing, archived, corrupt, oversized, or
+   out-of-budget history fails open by retaining one copy, which becomes the
+   next tail proof. A replay that first crosses a month boundary is likewise
+   retained once and then dedupes in that new month. Changed and raw-only
+   evidence remains durable. Thus
+   importing a record more than once — or via a different path — is overlap-free
+   without making polling responsible for deciding what to discard. This is
+   what makes invariants 2 and 3 safe, and it is why an import-vs-skip
+   optimization is unnecessary: re-fetching is cheap and correct, not a
+   correctness risk.
 
 5. **Louder, never quieter.** Drops and skips surface as persisted
    `device-sync.job_failed`/skip metadata. But observability is not recovery:
