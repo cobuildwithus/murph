@@ -10,6 +10,7 @@ import {
 import {
   type CloudflareHostedControlClientOptions,
   createCloudflareHostedControlClient,
+  readCloudflareHostedControlHttpError,
 } from "../src/client.ts";
 import {
   CLOUDFLARE_HOSTED_CONTROL_BROWSER_VAULT_REPLICA_NOT_FOUND_CODE,
@@ -29,6 +30,7 @@ describe("createCloudflareHostedControlClient", () => {
       "deleteUserData",
       "ensureRuntimeProcessing",
       "getRunnerStatus",
+      "sendTelegramUsageLimitNotice",
     ]);
   });
 
@@ -132,7 +134,7 @@ describe("createCloudflareHostedControlClient", () => {
   });
 
   it("rejects blank user identifiers for runtime ensure-processing before issuing requests", () => {
-    const fetchImpl = vi.fn() as unknown as typeof fetch;
+    const fetchImpl = vi.fn<typeof fetch>();
     const client = createCloudflareHostedControlClient({
       baseUrl: "https://runner.example.test",
       fetchImpl,
@@ -201,6 +203,12 @@ describe("createCloudflareHostedControlClient", () => {
       "Cloudflare hosted control userId must not be blank.",
     );
     expect(() =>
+      client.sendTelegramUsageLimitNotice({
+        request: createTelegramUsageLimitNoticeRequest(),
+        userId: "",
+      })
+    ).toThrow("Cloudflare hosted control userId must not be blank.");
+    expect(() =>
       client.createBrowserVaultSession({
         browserPublicKeyJwk: {
           crv: "P-256",
@@ -215,6 +223,137 @@ describe("createCloudflareHostedControlClient", () => {
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 
+  it("posts Telegram usage-limit notices to the user route and parses sent responses", async () => {
+    let observedRequest: ObservedRequest | null = null;
+    const events: string[] = [];
+    const result = { status: "sent" as const };
+    const client = createCloudflareHostedControlClient({
+      baseUrl: "https://runner.example.test/root/",
+      fetchImpl: vi.fn(async (url, init) => {
+        events.push("fetch");
+        observedRequest = { init, url: String(url) };
+        return createJsonResponse(result);
+      }) as typeof fetch,
+      getBearerToken: async () => {
+        events.push("token");
+        return "Bearer token-123";
+      },
+      timeoutMs: 2_500,
+    });
+    const telegramRequest = createTelegramUsageLimitNoticeRequest();
+
+    await expect(client.sendTelegramUsageLimitNotice({
+      onRequestAttempted: () => {
+        events.push("attempt");
+      },
+      request: telegramRequest,
+      userId: "user_123",
+    })).resolves.toEqual(result);
+
+    expect(events).toEqual(["token", "attempt", "fetch"]);
+    const request = requireObservedRequest(observedRequest);
+    expect(request.url).toBe(
+      "https://runner.example.test/root/internal/users/user_123/telegram/usage-limit-notice",
+    );
+    expect(request.init?.method).toBe("POST");
+    expect(new Headers(request.init?.headers).get("authorization")).toBe("Bearer token-123");
+    expect(new Headers(request.init?.headers).get(HOSTED_EXECUTION_USER_ID_HEADER)).toBe("user_123");
+    expect(request.init?.body).toBe(JSON.stringify(telegramRequest));
+  });
+
+  it("does not issue Telegram usage-limit notice requests when authorization fails before fetch", async () => {
+    const fetchImpl = vi.fn(async () => createJsonResponse({ status: "sent" })) as typeof fetch;
+    const client = createCloudflareHostedControlClient({
+      baseUrl: "https://runner.example.test/root/",
+      fetchImpl,
+      getBearerToken: async () => {
+        throw new Error("token unavailable");
+      },
+      timeoutMs: 2_500,
+    });
+    const onRequestAttempted = vi.fn();
+
+    await expect(client.sendTelegramUsageLimitNotice({
+      onRequestAttempted,
+      request: createTelegramUsageLimitNoticeRequest(),
+      userId: "user_123",
+    })).rejects.toThrow("token unavailable");
+
+    expect(onRequestAttempted).not.toHaveBeenCalled();
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("awaits Telegram usage-limit request-boundary callbacks before fetch", async () => {
+    const events: string[] = [];
+    const fetchImpl = vi.fn(async () => {
+      events.push("fetch");
+      return createJsonResponse({ status: "sent" });
+    }) as typeof fetch;
+    const client = createCloudflareHostedControlClient({
+      baseUrl: "https://runner.example.test/root/",
+      fetchImpl,
+      getBearerToken: async () => "Bearer token-123",
+      timeoutMs: 2_500,
+    });
+
+    await expect(client.sendTelegramUsageLimitNotice({
+      onRequestAttempted: async () => {
+        events.push("attempt-start");
+        await Promise.resolve();
+        events.push("attempt-done");
+      },
+      request: createTelegramUsageLimitNoticeRequest(),
+      userId: "user_123",
+    })).resolves.toEqual({ status: "sent" });
+
+    expect(events).toEqual(["attempt-start", "attempt-done", "fetch"]);
+  });
+
+  it("does not issue Telegram usage-limit notice requests when request-boundary callbacks fail", async () => {
+    const fetchImpl = vi.fn(async () => createJsonResponse({ status: "sent" })) as typeof fetch;
+    const client = createCloudflareHostedControlClient({
+      baseUrl: "https://runner.example.test/root/",
+      fetchImpl,
+      getBearerToken: async () => "Bearer token-123",
+      timeoutMs: 2_500,
+    });
+
+    await expect(client.sendTelegramUsageLimitNotice({
+      onRequestAttempted: () => {
+        throw new Error("claim unavailable");
+      },
+      request: createTelegramUsageLimitNoticeRequest(),
+      userId: "user_123",
+    })).rejects.toThrow("claim unavailable");
+
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("parses retryable Telegram send failures as typed responses", async () => {
+    const client = createCloudflareHostedControlClient({
+      baseUrl: "https://runner.example.test/root/",
+      fetchImpl: vi.fn(async () =>
+        createJsonResponse({
+          failureCode: "ASSISTANT_TELEGRAM_DELIVERY_FAILED",
+          retryAfterSeconds: 42,
+          retryable: true,
+          status: "failed",
+        })) as typeof fetch,
+      getBearerToken: async () => "Bearer token-123",
+      timeoutMs: 2_500,
+    });
+
+    await expect(client.sendTelegramUsageLimitNotice({
+      request: createTelegramUsageLimitNoticeRequest(),
+      userId: "user_123",
+    })).resolves.toEqual({
+      failureCode: "ASSISTANT_TELEGRAM_DELIVERY_FAILED",
+      retryAfterSeconds: 42,
+      retryable: true,
+      status: "failed",
+    });
+  });
+
   it("does not echo HTTP response bodies in thrown errors", async () => {
     const client = createCloudflareHostedControlClient({
       baseUrl: "https://runner.example.test",
@@ -226,6 +365,36 @@ describe("createCloudflareHostedControlClient", () => {
 
     await expect(promise).rejects.toThrow("Hosted execution runner status failed with HTTP 500.");
     await expect(promise).rejects.not.toThrow(/provider_token/u);
+    await promise.catch((error: unknown) => {
+      expect(readCloudflareHostedControlHttpError(error)).toEqual({
+        code: undefined,
+        status: 500,
+      });
+    });
+  });
+
+  it("exposes structured HTTP error codes without response bodies", async () => {
+    const client = createCloudflareHostedControlClient({
+      baseUrl: "https://runner.example.test",
+      fetchImpl: vi.fn(async () =>
+        createJsonResponse({
+          code: "route_unavailable",
+          error: "secret detail",
+        }, { status: 503 })) as typeof fetch,
+      getBearerToken: async () => "Bearer token-123",
+    });
+
+    const promise = client.getRunnerStatus("user_123");
+    await expect(promise).rejects.toThrow(
+      "Hosted execution runner status failed with HTTP 503.",
+    );
+    await promise.catch((error: unknown) => {
+      expect(readCloudflareHostedControlHttpError(error)).toEqual({
+        code: "route_unavailable",
+        status: 503,
+      });
+      expect(String(error)).not.toContain("secret detail");
+    });
   });
 
   it("fetches browser vault sessions with the expected request and parses ready replica responses", async () => {
@@ -700,6 +869,14 @@ function createJsonResponse(value: unknown, init: ResponseInit = {}): Response {
     headers,
     status: init.status ?? 200,
   });
+}
+
+function createTelegramUsageLimitNoticeRequest() {
+  return {
+    message: "quota reached",
+    replyToMessageId: "7000",
+    target: "telegram_thread:123",
+  };
 }
 
 function requireObservedRequest(request: ObservedRequest | null): ObservedRequest {

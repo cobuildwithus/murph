@@ -321,6 +321,7 @@ type UsageResetPrismaFixture = {
   };
   hostedLinqProviderEvent: {
     createMany: MockedFunction;
+    findMany: MockedFunction;
   };
   hostedMember: {
     findUnique: MockedFunction;
@@ -554,10 +555,10 @@ describe("hosted Linq usage reset e2e", () => {
 
   it("preserves exhausted-period messages when the usage-limit notice was already claimed", async () => {
     const monthlyLimit = getHostedAiUsageMonthlyAllowanceUsdMicros("launch_monthly");
-    const alreadyClaimedAt = new Date("2026-04-29T16:30:00.000Z");
+    const staleClaimedAt = new Date("2026-04-29T16:30:00.000Z");
     const usage = createUsageResetPrismaFixture({
       initialPeriod: {
-        limitNoticeSentAt: alreadyClaimedAt,
+        limitNoticeSentAt: staleClaimedAt,
         limitUsdMicros: monthlyLimit,
         periodEnd: new Date("2026-05-01T00:00:00.000Z"),
         periodStart: new Date("2026-04-01T00:00:00.000Z"),
@@ -592,7 +593,7 @@ describe("hosted Linq usage reset e2e", () => {
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
     expect(usage.prisma.hostedAiUsagePeriod.updateMany).not.toHaveBeenCalled();
     expect(usage.getPeriod("2026-04-01T00:00:00.000Z")).toMatchObject({
-      limitNoticeSentAt: alreadyClaimedAt,
+      limitNoticeSentAt: staleClaimedAt,
       spentUsdMicros: monthlyLimit,
     });
     expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledWith({
@@ -758,10 +759,13 @@ function createUsageResetPrismaFixture(input: {
       }),
       updateMany: vi.fn(async (periodInput: {
         data: {
-          limitNoticeSentAt?: Date;
+          limitNoticeSentAt?: Date | null;
         };
         where: {
-          limitNoticeSentAt?: null;
+          blockedAt?: {
+            not: null;
+          };
+          limitNoticeSentAt?: Date | null;
           memberId: string;
           periodStart: Date;
         };
@@ -769,13 +773,29 @@ function createUsageResetPrismaFixture(input: {
         const period = periods.get(periodKey(periodInput.where.periodStart));
         if (
           !period ||
-          period.memberId !== periodInput.where.memberId ||
-          period.limitNoticeSentAt !== null
+          period.memberId !== periodInput.where.memberId
         ) {
           return { count: 0 };
         }
+        if (periodInput.where.blockedAt?.not === null && period.blockedAt === null) {
+          return { count: 0 };
+        }
+        if ("limitNoticeSentAt" in periodInput.where) {
+          const expected = periodInput.where.limitNoticeSentAt;
+          if (expected === null && period.limitNoticeSentAt !== null) {
+            return { count: 0 };
+          }
+          if (
+            expected instanceof Date
+            && period.limitNoticeSentAt?.getTime() !== expected.getTime()
+          ) {
+            return { count: 0 };
+          }
+        }
 
-        period.limitNoticeSentAt = periodInput.data.limitNoticeSentAt ?? null;
+        if ("limitNoticeSentAt" in periodInput.data) {
+          period.limitNoticeSentAt = periodInput.data.limitNoticeSentAt ?? null;
+        }
         periods.set(periodKey(period.periodStart), period);
         return { count: 1 };
       }),
@@ -827,6 +847,7 @@ function createUsageResetPrismaFixture(input: {
     },
     hostedLinqProviderEvent: {
       createMany: vi.fn().mockResolvedValue({ count: 1 }),
+      findMany: vi.fn().mockResolvedValue([]),
     },
     hostedMember: {
       findUnique: vi.fn(async () => ({

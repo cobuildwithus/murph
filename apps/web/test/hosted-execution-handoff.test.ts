@@ -486,6 +486,7 @@ describe("deleteHostedRunnerUserDataBestEffort", () => {
       deleteUserData,
       ensureRuntimeProcessing: vi.fn(),
       getRunnerStatus: vi.fn(),
+      sendTelegramUsageLimitNotice: vi.fn(),
     } as ReturnType<typeof readHostedExecutionControlClientIfConfigured>);
 
     await expect(deleteHostedRunnerUserDataBestEffort({
@@ -516,6 +517,7 @@ describe("deleteHostedRunnerUserDataBestEffort", () => {
       deleteUserData,
       ensureRuntimeProcessing: vi.fn(),
       getRunnerStatus: vi.fn(),
+      sendTelegramUsageLimitNotice: vi.fn(),
     } as ReturnType<typeof readHostedExecutionControlClientIfConfigured>);
 
     await expect(deleteHostedRunnerUserDataBestEffort({

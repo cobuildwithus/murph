@@ -437,6 +437,90 @@ describe('assistant channels runtime seam', () => {
     expect(fetchImplementation).toHaveBeenCalledTimes(1)
   })
 
+  it('keeps the Telegram provider deadline active through response body consumption', async () => {
+    vi.useFakeTimers()
+    const fetchImplementation = vi.fn<typeof fetch>((_input, init) => {
+      if (fetchImplementation.mock.calls.length > 1) {
+        return Promise.resolve(new Response(JSON.stringify({
+          ok: true,
+          result: {
+            message_id: 1001,
+          },
+        }), {
+          headers: {
+            'content-type': 'application/json',
+          },
+          status: 200,
+        }))
+      }
+      const signal = init?.signal
+      if (!signal) {
+        throw new Error('expected Telegram request abort signal')
+      }
+
+      return new Promise((resolve) => {
+        setTimeout(() => {
+          const body = new ReadableStream<Uint8Array>({
+            start(controller) {
+              const bodyTimer = setTimeout(() => {
+                controller.enqueue(new TextEncoder().encode(JSON.stringify({
+                  description: 'retry later',
+                  error_code: 429,
+                  ok: false,
+                  parameters: {
+                    retry_after: 0,
+                  },
+                })))
+                controller.close()
+              }, 2_000)
+              signal.addEventListener('abort', () => {
+                clearTimeout(bodyTimer)
+                controller.error(new Error('Telegram response body aborted'))
+              }, { once: true })
+            },
+          })
+          resolve(new Response(body, {
+            headers: {
+              'content-type': 'application/json',
+            },
+            status: 429,
+          }))
+        }, 29_000)
+      })
+    })
+
+    const delivery = sendTelegramMessage(
+      {
+        message: 'hello',
+        target: '123',
+      },
+      {
+        env: {
+          TELEGRAM_API_BASE_URL: 'https://telegram.test/',
+          TELEGRAM_BOT_TOKEN: 'bot-token',
+        },
+        fetchImplementation,
+      },
+    )
+    const outcome = delivery.then(
+      (value) => ({ status: 'resolved' as const, value }),
+      (error: unknown) => ({ error, status: 'rejected' as const }),
+    )
+
+    await vi.advanceTimersByTimeAsync(31_010)
+    await expect(outcome).resolves.toMatchObject({
+      error: {
+        code: 'ASSISTANT_TELEGRAM_DELIVERY_AMBIGUOUS',
+        deliveryMayHaveSucceeded: true,
+        providerMessageId: null,
+        providerMessageIds: [],
+        target: '123',
+      },
+      status: 'rejected',
+    })
+    expect(fetchImplementation).toHaveBeenCalledTimes(1)
+  })
+
   it('rolls back Telegram partial sends against the migrated target when a later chunk fails', async () => {
     const fetchImplementation = createQueuedFetch([
       createTelegramResponse(400, {

@@ -17,6 +17,7 @@ const TEST_TEMPLATE_KEYS = [
   "linq.ai_usage.trial_conversion_pending",
   "linq.ai_usage.trial_limit_reached",
   "linq.ai_usage.edge_limit_reached",
+  "linq.ai_usage.family_limit_reached",
   "linq.ai_usage.pulse_upgrade_edge",
 ] as const satisfies readonly UserFacingMessageTemplateKey[];
 
@@ -39,6 +40,9 @@ const TEST_CONTEXT_BY_KEY = {
     homeUrl: "https://withmurph.ai/home",
   },
   "linq.ai_usage.edge_limit_reached": {
+    homeUrl: "https://withmurph.ai/home",
+  },
+  "linq.ai_usage.family_limit_reached": {
     homeUrl: "https://withmurph.ai/home",
   },
   "linq.ai_usage.pulse_upgrade_edge": {
@@ -96,6 +100,7 @@ describe("user-facing message variants", () => {
     expectEveryVariantContains("linq.ai_usage.trial_conversion_pending", "https://withmurph.ai/home");
     expectEveryVariantContains("linq.ai_usage.trial_limit_reached", "https://withmurph.ai/home");
     expectEveryVariantContains("linq.ai_usage.edge_limit_reached", "https://withmurph.ai/home");
+    expectEveryVariantContains("linq.ai_usage.family_limit_reached", "https://withmurph.ai/home");
     expectEveryVariantContains("linq.ai_usage.pulse_upgrade_edge", "https://withmurph.ai/home");
   });
 
