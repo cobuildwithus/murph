@@ -1,7 +1,7 @@
 # PR 444 ReviewGPT Fixes
 
 Date: 2026-07-10
-Status: active
+Status: completed
 Spec: `agent-docs/product-specs/call-circle.md`
 Branch: `feat/call-circle-v1-f5`
 
@@ -62,3 +62,4 @@ round, and final PR CI must pass on the pushed head.
 - Scoped finish commit, push, ReviewGPT round 2, and final PR CI remain.
 
 Updated: 2026-07-10
+Completed: 2026-07-10
