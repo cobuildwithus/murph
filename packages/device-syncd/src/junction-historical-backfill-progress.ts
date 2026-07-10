@@ -1,6 +1,9 @@
 export type JunctionHistoricalBackfillStatus = "complete" | "exhausted" | "retrying";
 
+export const JUNCTION_HISTORICAL_BACKFILL_COVERAGE_VERSION = 1;
+
 export interface JunctionHistoricalBackfillProgress {
+  coverageVersion: number;
   emptyAttempts: number;
   lastEmptyAt: string | null;
   status: JunctionHistoricalBackfillStatus;
@@ -9,6 +12,7 @@ export interface JunctionHistoricalBackfillProgress {
 }
 
 export const JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS = Object.freeze({
+  coverageVersion: "junctionHistoricalBackfillCoverageVersion",
   status: "junctionHistoricalBackfillStatus",
   emptyAttempts: "junctionHistoricalBackfillEmptyAttempts",
   lastEmptyAt: "junctionHistoricalBackfillLastEmptyAt",
@@ -38,6 +42,9 @@ export function readJunctionHistoricalBackfillProgress(
   }
 
   return {
+    coverageVersion: readMetadataNumber(
+      metadata[JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS.coverageVersion],
+    ),
     emptyAttempts: readMetadataNumber(metadata[JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS.emptyAttempts]),
     lastEmptyAt: readMetadataString(metadata[JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS.lastEmptyAt]),
     status,
@@ -70,6 +77,10 @@ export function shouldPreserveLocalJunctionHistoricalBackfillProgress(input: {
     || localProgress.windowEnd !== hostedProgress.windowEnd
   ) {
     return false;
+  }
+
+  if (localProgress.coverageVersion !== hostedProgress.coverageVersion) {
+    return localProgress.coverageVersion > hostedProgress.coverageVersion;
   }
 
   if (localProgress.status === "retrying") {

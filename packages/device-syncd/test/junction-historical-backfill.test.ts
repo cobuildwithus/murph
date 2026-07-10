@@ -171,6 +171,7 @@ test("Junction sleep-cycle historical backfill marks staged records complete", a
   });
 
   assert.deepEqual(result.metadataPatch, {
+    junctionHistoricalBackfillCoverageVersion: 1,
     junctionHistoricalBackfillStatus: "complete",
     junctionHistoricalBackfillEmptyAttempts: 0,
     junctionHistoricalBackfillLastEmptyAt: null,
@@ -220,6 +221,7 @@ test("Junction sleep-cycle id-only historical backfill keeps retrying", async ()
   });
 
   assert.deepEqual(result.metadataPatch, {
+    junctionHistoricalBackfillCoverageVersion: 1,
     junctionHistoricalBackfillStatus: "retrying",
     junctionHistoricalBackfillEmptyAttempts: 1,
     junctionHistoricalBackfillLastEmptyAt: "2026-04-03T00:00:00.000Z",
@@ -239,6 +241,7 @@ for (const stageCount of [0, -1]) {
     });
 
     assert.deepEqual(result.metadataPatch, {
+      junctionHistoricalBackfillCoverageVersion: 1,
       junctionHistoricalBackfillStatus: "retrying",
       junctionHistoricalBackfillEmptyAttempts: 1,
       junctionHistoricalBackfillLastEmptyAt: "2026-04-03T00:00:00.000Z",

@@ -71,6 +71,13 @@ safe: keep both the inline import and the floor. This follows the device-sync
 ingestion invariants — push delivers early, pull guarantees eventually, and
 neither path gates the other.
 
+Junction historical progress is evaluated per advertised source/resource
+pair. Data in another family (for example activity) is not evidence that
+Garmin sleep or `sleep_cycle` landed. After the initial connect export, an
+incomplete delayed backfill can re-request that source's historical export
+through Junction's provider API; the existing bounded ladder owns those
+attempts, while direct sleep webhooks remain the authoritative carrier.
+
 ## Existing canonical shapes to prefer
 
 When adding a provider, prefer these existing shapes before inventing new ones.

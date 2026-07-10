@@ -3696,6 +3696,7 @@ test("manual reconcile preserves delayed Junction retry metadata timing", async 
       },
       connectedAt: ownerWindowEnd,
       metadata: {
+        junctionHistoricalBackfillCoverageVersion: 1,
         junctionHistoricalBackfillStatus: "retrying",
         junctionHistoricalBackfillEmptyAttempts: 1,
         junctionHistoricalBackfillLastEmptyAt: "2026-04-04T00:00:00.000Z",
@@ -3945,6 +3946,7 @@ test("device sync scheduler materializes Junction metadata retry when it is due"
       },
       connectedAt: ownerWindowEnd,
       metadata: {
+        junctionHistoricalBackfillCoverageVersion: 1,
         junctionHistoricalBackfillStatus: "retrying",
         junctionHistoricalBackfillEmptyAttempts: 1,
         junctionHistoricalBackfillLastEmptyAt: "2026-04-04T00:00:00.000Z",
@@ -4053,6 +4055,7 @@ test("device sync scheduler rematerializes dead Junction metadata retries", asyn
       },
       connectedAt: ownerWindowEnd,
       metadata: {
+        junctionHistoricalBackfillCoverageVersion: 1,
         junctionHistoricalBackfillStatus: "retrying",
         junctionHistoricalBackfillEmptyAttempts: 1,
         junctionHistoricalBackfillLastEmptyAt: "2026-04-04T00:00:00.000Z",
@@ -6868,6 +6871,7 @@ test("sqlite store prioritizes metadataPatch entries when capped metadata is ful
   assert.equal(
     store.markSyncSucceeded(created.id, "2026-03-20T12:00:00.000Z", null, {
       metadataPatch: {
+        junctionHistoricalBackfillCoverageVersion: 1,
         junctionHistoricalBackfillEmptyAttempts: 1,
         junctionHistoricalBackfillLastEmptyAt: "2026-03-20T12:00:00.000Z",
         junctionHistoricalBackfillStatus: "retrying",
@@ -6881,6 +6885,7 @@ test("sqlite store prioritizes metadataPatch entries when capped metadata is ful
   const metadata = store.getAccountById(created.id)?.metadata ?? {};
   assert.deepEqual(
     {
+      junctionHistoricalBackfillCoverageVersion: metadata.junctionHistoricalBackfillCoverageVersion,
       junctionHistoricalBackfillEmptyAttempts: metadata.junctionHistoricalBackfillEmptyAttempts,
       junctionHistoricalBackfillLastEmptyAt: metadata.junctionHistoricalBackfillLastEmptyAt,
       junctionHistoricalBackfillStatus: metadata.junctionHistoricalBackfillStatus,
@@ -6888,6 +6893,7 @@ test("sqlite store prioritizes metadataPatch entries when capped metadata is ful
       junctionHistoricalBackfillWindowStart: metadata.junctionHistoricalBackfillWindowStart,
     },
     {
+      junctionHistoricalBackfillCoverageVersion: 1,
       junctionHistoricalBackfillEmptyAttempts: 1,
       junctionHistoricalBackfillLastEmptyAt: "2026-03-20T12:00:00.000Z",
       junctionHistoricalBackfillStatus: "retrying",

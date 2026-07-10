@@ -1,6 +1,6 @@
 # Device Sync Ingestion Invariants
 
-Last verified: 2026-06-10
+Last verified: 2026-07-09
 
 ## Purpose
 
@@ -12,7 +12,7 @@ quietly completed without importing or fetching anything.
 
 The ingestion model is now additive: push and pull are complementary, neither
 gates the other, and no branch can complete without import-or-fetch. Treat the
-five invariants below as constraints that any change to webhook construction,
+six invariants below as constraints that any change to webhook construction,
 resource-job execution, or scheduled reconcile must preserve.
 
 These are durable behavioral invariants. The current owning code lives in
@@ -64,6 +64,19 @@ drain/batch service seam in `packages/device-syncd/src/service.ts`.
    (more imports, more visible skips); it must never make it quieter (a new
    silent skip, a deferred floor, a gated import).
 
+6. **Historical completion is source/resource coverage, not account-level
+   traffic.** A useful activity record cannot complete an advertised sleep
+   obligation, and one connected source cannot satisfy another source's
+   obligation. Junction connect-window backfills derive the current
+   `(source provider, resource)` obligations from fresh availability, persist
+   only a scalar coverage-policy version plus the existing bounded retry
+   progress, and lazily reevaluate terminal results written by older policy.
+   After the initial export has had one pass, an incomplete pass may request
+   one provider-level historical export per pending Junction Link source. It
+   does so only after all job continuations finish, and a trigger failure still
+   advances the existing bounded ladder. `exhausted` ends polling; it never
+   blocks a late push-primary webhook from importing.
+
 ## Consequences for changes
 
 - Do not reintroduce a usefulness/import-vs-skip gate on the webhook path. The
@@ -79,6 +92,10 @@ drain/batch service seam in `packages/device-syncd/src/service.ts`.
 - Per-resource webhook recovery must coalesce on the shared dirty-state key
   (one floor wake per clean→dirty transition), not emit a unique-window job per
   webhook, so bursts do not fight storm-coalescing.
+- Do not replace historical coverage with a single `has any records` flag, a
+  per-resource job fan-out, or another retry store. The exact-window job,
+  scalar connection metadata, and provider-owned bounded ladder are the one
+  recovery path.
 
 ## Related docs
 

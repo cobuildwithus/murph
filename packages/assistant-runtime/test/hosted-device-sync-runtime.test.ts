@@ -4839,6 +4839,8 @@ describe("hosted device-sync runtime", () => {
       assert.equal(retryJobsAfterEmptyBackfill.length, 0);
       assert.deepEqual(
         {
+          junctionHistoricalBackfillCoverageVersion:
+            afterEmptyBackfill?.metadata.junctionHistoricalBackfillCoverageVersion,
           junctionHistoricalBackfillEmptyAttempts:
             afterEmptyBackfill?.metadata.junctionHistoricalBackfillEmptyAttempts,
           junctionHistoricalBackfillLastEmptyAt:
@@ -4853,6 +4855,7 @@ describe("hosted device-sync runtime", () => {
         {
           junctionHistoricalBackfillEmptyAttempts: 1,
           junctionHistoricalBackfillLastEmptyAt: executedAt,
+          junctionHistoricalBackfillCoverageVersion: 1,
           junctionHistoricalBackfillStatus: "retrying",
           junctionHistoricalBackfillWindowEnd: "2026-04-03T00:00:00.000Z",
           junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
@@ -4894,6 +4897,7 @@ describe("hosted device-sync runtime", () => {
         hosted: true,
         junctionHistoricalBackfillEmptyAttempts: 1,
         junctionHistoricalBackfillLastEmptyAt: executedAt,
+        junctionHistoricalBackfillCoverageVersion: 1,
         junctionHistoricalBackfillStatus: "retrying",
         junctionHistoricalBackfillWindowEnd: "2026-04-03T00:00:00.000Z",
         junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
@@ -4913,6 +4917,7 @@ describe("hosted device-sync runtime", () => {
         hosted: true,
         junctionHistoricalBackfillEmptyAttempts: 1,
         junctionHistoricalBackfillLastEmptyAt: executedAt,
+        junctionHistoricalBackfillCoverageVersion: 1,
         junctionHistoricalBackfillStatus: "retrying",
         junctionHistoricalBackfillWindowEnd: "2026-04-03T00:00:00.000Z",
         junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
@@ -4955,12 +4960,13 @@ describe("hosted device-sync runtime", () => {
     const localRetryMetadata = {
       junctionHistoricalBackfillEmptyAttempts: 1,
       junctionHistoricalBackfillLastEmptyAt: "2026-04-04T00:00:00.000Z",
+      junctionHistoricalBackfillCoverageVersion: 1,
       junctionHistoricalBackfillStatus: "retrying",
       junctionHistoricalBackfillWindowEnd: "2026-04-03T00:00:00.000Z",
       junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
     };
     const expectedCappedHostedMetadata = Object.fromEntries(
-      Array.from({ length: 11 }, (_, index) => [`hostedKey${index}`, `hosted-value-${index}`]),
+      Array.from({ length: 10 }, (_, index) => [`hostedKey${index}`, `hosted-value-${index}`]),
     );
     const expectedMergedMetadata = {
       ...localRetryMetadata,
@@ -5077,6 +5083,7 @@ describe("hosted device-sync runtime", () => {
     const localCompleteMetadata = {
       junctionHistoricalBackfillEmptyAttempts: 0,
       junctionHistoricalBackfillLastEmptyAt: null,
+      junctionHistoricalBackfillCoverageVersion: 1,
       junctionHistoricalBackfillStatus: "complete",
       junctionHistoricalBackfillWindowEnd: "2026-04-03T00:00:00.000Z",
       junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
@@ -5085,6 +5092,7 @@ describe("hosted device-sync runtime", () => {
       hosted: true,
       junctionHistoricalBackfillEmptyAttempts: 5,
       junctionHistoricalBackfillLastEmptyAt: "2026-04-04T00:00:00.000Z",
+      junctionHistoricalBackfillCoverageVersion: 1,
       junctionHistoricalBackfillStatus: "exhausted",
       junctionHistoricalBackfillWindowEnd: "2026-04-03T00:00:00.000Z",
       junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
@@ -5206,6 +5214,7 @@ describe("hosted device-sync runtime", () => {
     const localBackfillMetadata = {
       junctionHistoricalBackfillEmptyAttempts: 1,
       junctionHistoricalBackfillLastEmptyAt: "2026-04-04T00:00:00.000Z",
+      junctionHistoricalBackfillCoverageVersion: 1,
       junctionHistoricalBackfillStatus: "retrying",
       junctionHistoricalBackfillWindowEnd: "2026-04-03T00:00:00.000Z",
       junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
@@ -5214,6 +5223,7 @@ describe("hosted device-sync runtime", () => {
       hosted: true,
       junctionHistoricalBackfillEmptyAttempts: 2,
       junctionHistoricalBackfillLastEmptyAt: "2026-04-04T00:10:00.000Z",
+      junctionHistoricalBackfillCoverageVersion: 1,
       junctionHistoricalBackfillStatus: "retrying",
       junctionHistoricalBackfillWindowEnd: "2026-04-03T00:00:00.000Z",
       junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",

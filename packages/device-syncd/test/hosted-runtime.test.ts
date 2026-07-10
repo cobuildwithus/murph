@@ -20,6 +20,65 @@ import {
 } from "../src/hosted-runtime.ts";
 
 describe("mergeHostedDeviceSyncConnectionMetadata", () => {
+  it("preserves current local Junction retry progress over hosted legacy completion", () => {
+    const result = mergeHostedDeviceSyncConnectionMetadata({
+      hostedMetadata: {
+        hostedOnly: true,
+        junctionHistoricalBackfillStatus: "complete",
+        junctionHistoricalBackfillEmptyAttempts: 0,
+        junctionHistoricalBackfillLastEmptyAt: null,
+        junctionHistoricalBackfillWindowStart: "2025-12-20T00:00:00.000Z",
+        junctionHistoricalBackfillWindowEnd: "2026-03-20T00:00:00.000Z",
+      },
+      localConnectionStateUnpublished: true,
+      localMetadata: {
+        junctionHistoricalBackfillStatus: "retrying",
+        junctionHistoricalBackfillEmptyAttempts: 1,
+        junctionHistoricalBackfillLastEmptyAt: "2026-03-20T12:00:00.000Z",
+        junctionHistoricalBackfillWindowStart: "2025-12-20T00:00:00.000Z",
+        junctionHistoricalBackfillWindowEnd: "2026-03-20T00:00:00.000Z",
+        junctionHistoricalBackfillCoverageVersion: 1,
+      },
+    });
+
+    expect(result.preservedLocalProgress).toBe(true);
+    expect(result.metadata).toEqual({
+      hostedOnly: true,
+      junctionHistoricalBackfillStatus: "retrying",
+      junctionHistoricalBackfillEmptyAttempts: 1,
+      junctionHistoricalBackfillLastEmptyAt: "2026-03-20T12:00:00.000Z",
+      junctionHistoricalBackfillWindowStart: "2025-12-20T00:00:00.000Z",
+      junctionHistoricalBackfillWindowEnd: "2026-03-20T00:00:00.000Z",
+      junctionHistoricalBackfillCoverageVersion: 1,
+    });
+  });
+
+  it("accepts current hosted Junction completion over local legacy retry progress", () => {
+    const hostedMetadata = {
+      hostedOnly: true,
+      junctionHistoricalBackfillStatus: "complete",
+      junctionHistoricalBackfillEmptyAttempts: 0,
+      junctionHistoricalBackfillLastEmptyAt: null,
+      junctionHistoricalBackfillWindowStart: "2025-12-20T00:00:00.000Z",
+      junctionHistoricalBackfillWindowEnd: "2026-03-20T00:00:00.000Z",
+      junctionHistoricalBackfillCoverageVersion: 1,
+    };
+    const result = mergeHostedDeviceSyncConnectionMetadata({
+      hostedMetadata,
+      localConnectionStateUnpublished: true,
+      localMetadata: {
+        junctionHistoricalBackfillStatus: "retrying",
+        junctionHistoricalBackfillEmptyAttempts: 3,
+        junctionHistoricalBackfillLastEmptyAt: "2026-03-20T12:00:00.000Z",
+        junctionHistoricalBackfillWindowStart: "2025-12-20T00:00:00.000Z",
+        junctionHistoricalBackfillWindowEnd: "2026-03-20T00:00:00.000Z",
+      },
+    });
+
+    expect(result.preservedLocalProgress).toBe(false);
+    expect(result.metadata).toEqual(hostedMetadata);
+  });
+
   it("preserves newer unpublished local Junction retry metadata", () => {
     const result = mergeHostedDeviceSyncConnectionMetadata({
       hostedMetadata: {

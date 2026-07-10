@@ -69,6 +69,14 @@ HTTP/env shapes.
 
 Garmin and the hosted `/connect` catalog connect through Junction Link when Junction credentials are configured. Leave `JUNCTION_PROVIDER_FILTER` unset or empty to use the shared default list that matches `/connect`; set it only to narrow the enabled Junction targets for an environment.
 
+Junction connect-time history is tracked per advertised source/resource pair,
+not by a single account-level "has data" flag. An activity row therefore
+cannot close a missing sleep obligation. Incomplete delayed passes reuse the
+existing bounded backfill ladder to request one provider-level historical
+export for each pending Junction Link source; no operator or support action is
+part of the recovery path. Legacy terminal metadata is reevaluated lazily, and
+late webhooks remain importable even after the polling budget is exhausted.
+
 WHOOP uses OAuth plus webhooks.
 Strava uses OAuth, polling, and optional app-global webhooks.
 

@@ -31,6 +31,7 @@ import {
   sanitizeHostedRuntimeDiagnosticText,
 } from "../hosted-runtime.ts";
 import {
+  JUNCTION_HISTORICAL_BACKFILL_COVERAGE_VERSION,
   JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS,
   type JunctionHistoricalBackfillStatus,
 } from "../junction-historical-backfill-progress.ts";
@@ -54,6 +55,7 @@ import {
 import {
   buildJunctionProviderSourceInstanceKey,
   JUNCTION_DEFAULT_PROVIDER_FILTER,
+  JUNCTION_LINK_PROVIDER_SLUGS,
   normalizeJunctionProviderFilter,
 } from "../config/junction-connect-sources.ts";
 import type {
@@ -104,6 +106,11 @@ export {
 
 interface JunctionTimeseriesImportResult {
   yieldedAt: string | null;
+}
+
+interface JunctionHistoricalBackfillCoverage {
+  complete: boolean;
+  pendingProviderSlugs: string[];
 }
 
 type JunctionHistoricalBackfillFollowUp = Pick<ProviderJobResult, "metadataPatch" | "nextReconcileAt" | "scheduledJobs">;
@@ -688,12 +695,19 @@ export function createJunctionDeviceSyncProvider(
     const metadataMatchesConnectWindow =
       metadataWindowStart === connectWindow.windowStart
       && metadataWindowEnd === connectWindow.windowEnd;
+    const coverageVersion = readHistoricalBackfillCoverageVersion(metadata);
+    const hasCurrentCoverageSemantics =
+      coverageVersion >= JUNCTION_HISTORICAL_BACKFILL_COVERAGE_VERSION;
 
-    if ((status === "complete" || status === "exhausted") && metadataMatchesConnectWindow) {
+    if (
+      hasCurrentCoverageSemantics
+      && (status === "complete" || status === "exhausted")
+      && metadataMatchesConnectWindow
+    ) {
       return [];
     }
 
-    if (status === "retrying" && metadataMatchesConnectWindow) {
+    if (hasCurrentCoverageSemantics && status === "retrying" && metadataMatchesConnectWindow) {
       const retryAt = readPendingConnectHistoricalBackfillRetryAt(account);
       const retryAtMs = retryAt ? Date.parse(retryAt) : NaN;
       if (retryAt && Number.isFinite(retryAtMs) && Date.parse(now) < retryAtMs) {
@@ -807,7 +821,15 @@ export function createJunctionDeviceSyncProvider(
     if (profileSummaryResult.records.length > 0) {
       summaries[JUNCTION_PROFILE_SUMMARY_RESOURCE] = profileSummaryResult.records;
     }
-    const historicalSummaryHasRecords = hasJunctionHistoricalBackfillSummaryRecords(summaries, sourceProviders);
+    const historicalSummaryCoverage = evaluateJunctionHistoricalBackfillCoverage(
+      summaries,
+      sourceProviders,
+      summaryResources,
+    );
+    const historicalSummaryHasRecords = hasJunctionHistoricalBackfillSummaryRecords(
+      summaries,
+      sourceProviders,
+    );
     const summaryHasFetchedRecords = hasJunctionSnapshotRecords(summaries);
     const baseTimeseriesWindowStart = job.kind === "backfill"
       ? maxIsoTimestamp(window.windowStart, subtractDays(window.windowEnd, timeseriesBackfillDays))
@@ -861,10 +883,18 @@ export function createJunctionDeviceSyncProvider(
     }
 
     const isConnectHistoricalBackfill = isConnectHistoricalBackfillWindow(context.account, window);
+    if (
+      job.kind === "backfill"
+      && isConnectHistoricalBackfill
+      && !historicalSummaryCoverage.complete
+      && shouldTriggerJunctionHistoricalPull(context.account.metadata, window)
+    ) {
+      await triggerPendingJunctionHistoricalPulls(context, historicalSummaryCoverage.pendingProviderSlugs);
+    }
     const backfillFollowUp = job.kind === "backfill"
       ? isConnectHistoricalBackfill
         ? buildHistoricalBackfillFollowUp({
-            hasRecords: historicalSummaryHasRecords,
+            coverageComplete: historicalSummaryCoverage.complete,
             metadata: context.account.metadata,
             now: context.now,
             windowStart: window.windowStart,
@@ -894,6 +924,40 @@ export function createJunctionDeviceSyncProvider(
       ),
       skippedOptionalResources,
     );
+  }
+
+  async function triggerPendingJunctionHistoricalPulls(
+    context: ProviderJobContext,
+    pendingProviderSlugs: readonly string[],
+  ): Promise<void> {
+    const eligibleProviderSlugs = new Set(JUNCTION_LINK_PROVIDER_SLUGS);
+
+    for (const providerSlug of pendingProviderSlugs) {
+      if (!providerFilter.includes(providerSlug) || !eligibleProviderSlugs.has(providerSlug)) {
+        continue;
+      }
+
+      try {
+        await client.triggerHistoricalPull({
+          providerSlug,
+          signal: context.signal ?? null,
+          userId: context.account.externalAccountId,
+        });
+      } catch (error) {
+        if (context.signal?.aborted) {
+          throw error;
+        }
+
+        context.logger.warn?.("Junction historical pull trigger failed; bounded recovery will retry later.", {
+          endpointKind: "junction_link_bulk_trigger_historical_pull",
+          errorCode: isDeviceSyncError(error) ? error.code : "JUNCTION_HISTORICAL_PULL_TRIGGER_FAILED",
+          provider: "junction",
+          responseStatus: readJunctionDiagnosticResponseStatus(error),
+          retryable: isDeviceSyncError(error) ? error.retryable : false,
+          sourceProviderSlug: providerSlug,
+        });
+      }
+    }
   }
 
   function readJunctionDirectResourceJobInput(
@@ -3184,7 +3248,7 @@ function listJunctionDiagnosticAvailableResourcesForSlug(
     }
 
     for (const [key, value] of Object.entries(provider.resourceAvailability)) {
-      if (normalizeProviderSlug(key) && value !== false && value !== null && value !== undefined) {
+      if (normalizeProviderSlug(key) && isJunctionResourceAdvertisedAvailable(value)) {
         resourceNames.add(key);
       }
     }
@@ -3199,6 +3263,7 @@ function readJunctionHistoricalBackfillMetadata(
   metadata: Record<string, unknown>,
 ): Record<string, unknown> {
   return {
+    coverageVersion: readHistoricalBackfillCoverageVersion(metadata),
     status: normalizeString(metadata[JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS.status]) ?? null,
     emptyAttempts: typeof metadata[JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS.emptyAttempts] === "number"
       ? metadata[JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS.emptyAttempts]
@@ -3950,6 +4015,102 @@ function hasJunctionHistoricalBackfillSummaryRecords(
   );
 }
 
+function evaluateJunctionHistoricalBackfillCoverage(
+  snapshot: Record<string, unknown[]>,
+  sourceProviders: readonly JunctionProviderConnection[],
+  configuredSummaryResources: readonly string[],
+): JunctionHistoricalBackfillCoverage {
+  const configuredResources = new Set<string>(
+    configuredSummaryResources.filter(isJunctionHistoricalBackfillCompletionSummaryResource),
+  );
+  const requiredResourcesByProvider = new Map<string, Set<string>>();
+
+  for (const provider of sourceProviders) {
+    if (mapJunctionSourceStatus(provider.status) === "disconnected") {
+      continue;
+    }
+
+    const providerSlug = normalizeProviderSlug(provider.origin.sourceProviderSlug ?? provider.slug);
+    if (!providerSlug) {
+      continue;
+    }
+
+    for (const [rawResource, availability] of Object.entries(provider.resourceAvailability)) {
+      const resource = normalizeJunctionResourceName(rawResource);
+      if (
+        !resource
+        || !configuredResources.has(resource)
+        || !isJunctionResourceAdvertisedAvailable(availability)
+      ) {
+        continue;
+      }
+
+      const requiredResources = requiredResourcesByProvider.get(providerSlug) ?? new Set<string>();
+      requiredResources.add(resource);
+      requiredResourcesByProvider.set(providerSlug, requiredResources);
+    }
+  }
+
+  const coveredResourcesByProvider = new Map<string, Set<string>>();
+  const sourceReferences = buildJunctionSourceReferenceMap(sourceProviders);
+
+  for (const [resource, records] of Object.entries(snapshot)) {
+    if (!isJunctionHistoricalBackfillCompletionSummaryResource(resource)) {
+      continue;
+    }
+
+    for (const record of records) {
+      for (const { entry, originFallback } of expandJunctionHistoricalBackfillSummaryRecord(record)) {
+        const providerSlug = normalizeProviderSlug(
+          resolveJunctionSummarySourceProviderSlug(entry, originFallback, sourceReferences),
+        );
+        if (
+          !providerSlug
+          || !requiredResourcesByProvider.get(providerSlug)?.has(resource)
+          || !hasUsefulJunctionHistoricalBackfillSummaryRecord(resource, entry, providerSlug)
+        ) {
+          continue;
+        }
+
+        const coveredResources = coveredResourcesByProvider.get(providerSlug) ?? new Set<string>();
+        coveredResources.add(resource);
+        coveredResourcesByProvider.set(providerSlug, coveredResources);
+      }
+    }
+  }
+
+  const pendingProviderSlugs = [...requiredResourcesByProvider.entries()]
+    .filter(([providerSlug, requiredResources]) => {
+      const coveredResources = coveredResourcesByProvider.get(providerSlug);
+      return [...requiredResources].some((resource) => !coveredResources?.has(resource));
+    })
+    .map(([providerSlug]) => providerSlug)
+    .sort((left, right) => left.localeCompare(right));
+
+  return {
+    complete: requiredResourcesByProvider.size > 0 && pendingProviderSlugs.length === 0,
+    pendingProviderSlugs,
+  };
+}
+
+function isJunctionResourceAdvertisedAvailable(value: unknown): boolean {
+  if (value === true) {
+    return true;
+  }
+
+  if (typeof value === "string") {
+    return value.trim().toLowerCase() === "available";
+  }
+
+  const record = readPlainObject(value);
+  if (!record) {
+    return false;
+  }
+
+  return record.available === true
+    || normalizeString(record.status)?.toLowerCase() === "available";
+}
+
 function isJunctionHistoricalBackfillCompletionSummaryResource(
   resource: string,
 ): resource is JunctionHistoricalBackfillCompletionSummaryResource {
@@ -4348,13 +4509,13 @@ function isJunctionSourceSpecificFloatingTimestampProvider(sourceProviderSlug: s
 }
 
 function buildHistoricalBackfillFollowUp(input: {
-  hasRecords: boolean;
+  coverageComplete: boolean;
   metadata: Record<string, unknown>;
   now: string;
   windowStart: string;
   windowEnd: string;
 }): JunctionHistoricalBackfillFollowUp {
-  if (input.hasRecords) {
+  if (input.coverageComplete) {
     return {
       metadataPatch: buildHistoricalBackfillMetadataPatch({
         status: "complete",
@@ -4416,6 +4577,13 @@ function readPendingHistoricalBackfillRetryAt(
   windowStart: string,
   windowEnd: string,
 ): string | null {
+  if (
+    readHistoricalBackfillCoverageVersion(metadata)
+      < JUNCTION_HISTORICAL_BACKFILL_COVERAGE_VERSION
+  ) {
+    return null;
+  }
+
   const status = normalizeString(metadata[JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS.status]);
 
   if (status !== "retrying") {
@@ -4490,6 +4658,8 @@ function buildHistoricalBackfillMetadataPatch(input: {
   windowEnd: string;
 }): Record<string, unknown> {
   return {
+    [JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS.coverageVersion]:
+      JUNCTION_HISTORICAL_BACKFILL_COVERAGE_VERSION,
     [JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS.status]: input.status,
     [JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS.emptyAttempts]: input.emptyAttempts,
     [JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS.lastEmptyAt]: input.lastEmptyAt,
@@ -4504,7 +4674,9 @@ function hasHistoricalBackfillWindowStatus(
   windowStart: string,
   windowEnd: string,
 ): boolean {
-  return normalizeString(metadata[JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS.status]) === status
+  return readHistoricalBackfillCoverageVersion(metadata)
+      >= JUNCTION_HISTORICAL_BACKFILL_COVERAGE_VERSION
+    && normalizeString(metadata[JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS.status]) === status
     && normalizeString(metadata[JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS.windowStart]) === windowStart
     && normalizeString(metadata[JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS.windowEnd]) === windowEnd;
 }
@@ -4515,7 +4687,9 @@ function readHistoricalBackfillEmptyAttempts(
   windowEnd: string,
 ): number {
   if (
-    normalizeString(metadata[JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS.windowStart]) !== windowStart
+    readHistoricalBackfillCoverageVersion(metadata)
+      < JUNCTION_HISTORICAL_BACKFILL_COVERAGE_VERSION
+    || normalizeString(metadata[JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS.windowStart]) !== windowStart
     || normalizeString(metadata[JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS.windowEnd]) !== windowEnd
   ) {
     return 0;
@@ -4524,6 +4698,37 @@ function readHistoricalBackfillEmptyAttempts(
   const rawAttempts = metadata[JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS.emptyAttempts];
   return typeof rawAttempts === "number" && Number.isInteger(rawAttempts) && rawAttempts >= 0
     ? rawAttempts
+    : 0;
+}
+
+function shouldTriggerJunctionHistoricalPull(
+  metadata: Record<string, unknown>,
+  window: { windowEnd: string; windowStart: string },
+): boolean {
+  const metadataWindowStart = normalizeString(
+    metadata[JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS.windowStart],
+  );
+  const metadataWindowEnd = normalizeString(
+    metadata[JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS.windowEnd],
+  );
+  if (metadataWindowStart !== window.windowStart || metadataWindowEnd !== window.windowEnd) {
+    return false;
+  }
+
+  const status = normalizeString(metadata[JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS.status]);
+  if (status !== "complete" && status !== "exhausted" && status !== "retrying") {
+    return false;
+  }
+
+  return readHistoricalBackfillCoverageVersion(metadata)
+      < JUNCTION_HISTORICAL_BACKFILL_COVERAGE_VERSION
+    || readHistoricalBackfillEmptyAttempts(metadata, window.windowStart, window.windowEnd) > 0;
+}
+
+function readHistoricalBackfillCoverageVersion(metadata: Record<string, unknown>): number {
+  const rawVersion = metadata[JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS.coverageVersion];
+  return typeof rawVersion === "number" && Number.isInteger(rawVersion) && rawVersion >= 0
+    ? rawVersion
     : 0;
 }
 
