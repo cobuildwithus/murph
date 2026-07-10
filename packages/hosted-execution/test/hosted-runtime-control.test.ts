@@ -214,9 +214,6 @@ describe("hosted runtime control contracts", () => {
     expect(HOSTED_RUNTIME_LOG_EVENT_CODES).toContain("device-sync.legacy_platform_env_present");
     expect(HOSTED_RUNTIME_LOG_EVENT_CODES).toContain("device-sync.module_load_failed");
     expect(HOSTED_RUNTIME_LOG_EVENT_CODES).toContain("device-sync.wake_projection_failed");
-    expect(HOSTED_RUNTIME_LOG_EVENT_CODES).toContain("device-sync.reconnect_notice_created");
-    expect(HOSTED_RUNTIME_LOG_EVENT_CODES).toContain("device-sync.reconnect_notice_duplicate");
-    expect(HOSTED_RUNTIME_LOG_EVENT_CODES).toContain("device-sync.reconnect_notice_skipped");
     expect(HOSTED_RUNTIME_LOG_EVENT_CODES).toContain("checkpoint.cas_conflict");
     expect(HOSTED_RUNTIME_LOG_EVENT_CODES).toContain("checkpoint.optional_sidecar_degraded");
     expect(HOSTED_RUNTIME_LOG_EVENT_CODES).toContain("checkpoint.idle_shutdown_snapshot_skipped");
@@ -1645,13 +1642,17 @@ describe("hosted runtime control contracts", () => {
       schema: "murph.hosted-browser-vault-replica-ref.v1",
       sourceBundleHash: "snapshot_1_hash",
     };
-    expect(parseHostedBrowserVaultReplicaPublishRequest({
-      expectedSourceStateHash: "legacy_source_hash",
-      replicaRef,
-    })).toEqual({
-      expectedSourceStateHash: "legacy_source_hash",
+    expect(parseHostedBrowserVaultReplicaPublishRequest({ replicaRef })).toEqual({
       replicaRef,
     });
+    expect(() => parseHostedBrowserVaultReplicaPublishRequest({
+      replicaRef,
+      unexpectedField: true,
+    })).toThrow(/not allowed/u);
+    expect(() => parseHostedBrowserVaultReplicaPublishRequest({
+      expectedSourceStateHash: "snapshot_1_hash",
+      replicaRef,
+    })).toThrow(/expectedSourceStateHash is not allowed/u);
     expect(() => parseHostedBrowserVaultReplicaPublishRequest({
       replicaRef: {
         ...replicaRef,
@@ -1872,17 +1873,7 @@ describe("hosted runtime control contracts", () => {
         nestedErrorCode: "runtime_error",
       },
     }).errorCode).toBe("post_checkpoint_failed");
-    expect(parseHostedRuntimeLogEntry({
-      ...entry,
-      component: "runner",
-      errorCode: "runner_child_failed",
-      eventCode: "runner.accepted_attempt_failed",
-      level: "warn",
-      phase: "error",
-      redactedJson: {
-        attemptStillActive: true,
-      },
-    })).toEqual({
+    const acceptedAttemptFailureEntry = {
       ...entry,
       component: "runner",
       errorCode: "runner_child_failed",
@@ -1893,7 +1884,16 @@ describe("hosted runtime control contracts", () => {
         attemptStillActive: true,
         safeErrorMessage: "Hosted runtime accepted attempt failed.",
       },
-    });
+    };
+    expect(parseHostedRuntimeLogEntry(acceptedAttemptFailureEntry)).toEqual(
+      acceptedAttemptFailureEntry,
+    );
+    expect(() => parseHostedRuntimeLogEntry({
+      ...acceptedAttemptFailureEntry,
+      redactedJson: {
+        attemptStillActive: true,
+      },
+    })).toThrow(/redacted safe error message/u);
     const computerToolFailureEntry = {
       ...entry,
       component: "assistant",
@@ -2390,13 +2390,17 @@ describe("hosted runtime control contracts", () => {
       level: "info",
       phase: "outbox",
     }).eventCode).toBe("outbox.delivery_finished");
-    expect(parseHostedRuntimeLogEntry({
-      at: "2026-04-26T00:00:07.000Z",
-      component: "workspace",
-      eventCode: "workspace.codex_continuity_repaired",
-      level: "warn",
-      phase: "restore",
-    }).eventCode).toBe("workspace.codex_continuity_repaired");
+    for (const retiredEventCode of [
+      "workspace.codex_continuity_repaired",
+      "device-sync.reconnect_notice_created",
+      "device-sync.reconnect_notice_duplicate",
+      "device-sync.reconnect_notice_skipped",
+    ]) {
+      expect(() => parseHostedRuntimeLogEntry({
+        ...entry,
+        eventCode: retiredEventCode,
+      })).toThrow(/Hosted runtime log eventCode/u);
+    }
   });
 
   it("parses runner nudge and status without run identifiers or committed sequence targets", () => {

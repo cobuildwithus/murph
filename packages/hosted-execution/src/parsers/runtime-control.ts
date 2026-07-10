@@ -2993,6 +2993,11 @@ export function parseHostedBrowserVaultReplicaPublishRequest(
   value: unknown,
 ): HostedBrowserVaultReplicaPublishRequest {
   const record = requireObject(value, "Hosted browser-vault replica publish request");
+  assertAllowedObjectKeys(
+    record,
+    new Set(["replicaRef"]),
+    "Hosted browser-vault replica publish request",
+  );
   const replicaRef = parseHostedBrowserVaultReplicaRef(
     record.replicaRef,
     "Hosted browser-vault replica publish request replicaRef",
@@ -3004,15 +3009,7 @@ export function parseHostedBrowserVaultReplicaPublishRequest(
     );
   }
 
-  const expectedSourceStateHash = Object.hasOwn(record, "expectedSourceStateHash")
-    ? requireString(
-        record.expectedSourceStateHash,
-        "Hosted browser-vault replica publish request expectedSourceStateHash",
-      )
-    : undefined;
-
   return {
-    ...(expectedSourceStateHash === undefined ? {} : { expectedSourceStateHash }),
     replicaRef,
   };
 }
@@ -3926,43 +3923,23 @@ function normalizeHostedRuntimeFailureLogEntry(
   const normalized = errorCode && entry.errorCode !== errorCode
     ? { ...entry, errorCode }
     : entry;
-  const compatible = normalizeHostedRuntimeLegacyFailureLogEntry(normalized);
 
-  if (!isHostedRuntimeFailureLogEntry(compatible)) {
-    return compatible;
+  if (!isHostedRuntimeFailureLogEntry(normalized)) {
+    return normalized;
   }
 
-  if (!compatible.errorCode) {
+  if (!normalized.errorCode) {
     throw new TypeError(
       "Hosted runtime warn/error failure log entries must include a machine-readable errorCode.",
     );
   }
-  if (!hasHostedRuntimeFailureSummary(compatible.redactedJson ?? null)) {
+  if (!hasHostedRuntimeFailureSummary(normalized.redactedJson ?? null)) {
     throw new TypeError(
       "Hosted runtime warn/error failure log entries must include a redacted safe error message, detail, cause, or summary.",
     );
   }
 
-  return compatible;
-}
-
-function normalizeHostedRuntimeLegacyFailureLogEntry(
-  entry: HostedRuntimeLogEntry,
-): HostedRuntimeLogEntry {
-  if (
-    entry.eventCode !== "runner.accepted_attempt_failed"
-    || hasHostedRuntimeFailureSummary(entry.redactedJson ?? null)
-  ) {
-    return entry;
-  }
-
-  return {
-    ...entry,
-    redactedJson: {
-      ...(entry.redactedJson ?? {}),
-      safeErrorMessage: "Hosted runtime accepted attempt failed.",
-    },
-  };
+  return normalized;
 }
 
 function isHostedRuntimeFailureLogEntry(entry: HostedRuntimeLogEntry): boolean {

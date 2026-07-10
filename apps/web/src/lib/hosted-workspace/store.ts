@@ -541,7 +541,6 @@ export async function publishLatestBrowserVaultReplicaRef(input: {
 
   return prisma.$transaction((tx: HostedWorkspaceMutationTx) => publishBrowserVaultReplicaRefTx({
     ...input,
-    legacyExpectedSourceStateHash: null,
     tx,
   }));
 }
@@ -554,100 +553,16 @@ export async function publishLatestBrowserVaultReplicaRefTx(input: {
 }): Promise<HostedBrowserVaultReplicaPublishResult> {
   return publishBrowserVaultReplicaRefTx({
     ...input,
-    legacyExpectedSourceStateHash: null,
-  });
-}
-
-export async function publishHostedBrowserVaultReplicaRef(input: {
-  expectedSourceStateHash?: string | null;
-  expectedWorkspaceVersion?: bigint | number | string | null;
-  prisma?: HostedWorkspaceTransactionRunner;
-  replicaRef: unknown;
-  userId: string;
-}): Promise<HostedBrowserVaultReplicaPublishResult> {
-  // Compatibility-only wrapper for older hosted browser-vault publish callers.
-  // Deletion target: 2026-05-23. Active callers should use
-  // `publishLatestBrowserVaultReplicaRef`.
-  if (input.expectedSourceStateHash === undefined || input.expectedSourceStateHash === null) {
-    return await publishLatestBrowserVaultReplicaRef(input);
-  }
-
-  return await publishLegacySourceHashBrowserVaultReplicaRef({
-    expectedSourceStateHash: input.expectedSourceStateHash,
-    expectedWorkspaceVersion: input.expectedWorkspaceVersion,
-    prisma: input.prisma,
-    replicaRef: input.replicaRef,
-    userId: input.userId,
-  });
-}
-
-export async function publishHostedBrowserVaultReplicaRefTx(input: {
-  expectedSourceStateHash?: string | null;
-  expectedWorkspaceVersion?: bigint | number | string | null;
-  replicaRef: unknown;
-  tx: HostedWorkspaceMutationTx;
-  userId: string;
-}): Promise<HostedBrowserVaultReplicaPublishResult> {
-  // Compatibility-only wrapper for older hosted browser-vault publish callers.
-  // Deletion target: 2026-05-23. Active callers should use
-  // `publishLatestBrowserVaultReplicaRefTx`.
-  if (input.expectedSourceStateHash === undefined || input.expectedSourceStateHash === null) {
-    return publishLatestBrowserVaultReplicaRefTx(input);
-  }
-
-  return publishLegacySourceHashBrowserVaultReplicaRefTx({
-    expectedSourceStateHash: input.expectedSourceStateHash,
-    expectedWorkspaceVersion: input.expectedWorkspaceVersion,
-    replicaRef: input.replicaRef,
-    tx: input.tx,
-    userId: input.userId,
-  });
-}
-
-async function publishLegacySourceHashBrowserVaultReplicaRef(input: {
-  expectedSourceStateHash: string;
-  expectedWorkspaceVersion?: bigint | number | string | null;
-  prisma?: HostedWorkspaceTransactionRunner;
-  replicaRef: unknown;
-  userId: string;
-}): Promise<HostedBrowserVaultReplicaPublishResult> {
-  const prisma: HostedWorkspaceTransactionRunner = input.prisma ?? getPrisma();
-
-  return prisma.$transaction((tx: HostedWorkspaceMutationTx) =>
-    publishLegacySourceHashBrowserVaultReplicaRefTx({
-      ...input,
-      tx,
-    })
-  );
-}
-
-async function publishLegacySourceHashBrowserVaultReplicaRefTx(input: {
-  expectedSourceStateHash: string;
-  expectedWorkspaceVersion?: bigint | number | string | null;
-  replicaRef: unknown;
-  tx: HostedWorkspaceMutationTx;
-  userId: string;
-}): Promise<HostedBrowserVaultReplicaPublishResult> {
-  return publishBrowserVaultReplicaRefTx({
-    ...input,
-    legacyExpectedSourceStateHash: input.expectedSourceStateHash,
   });
 }
 
 async function publishBrowserVaultReplicaRefTx(input: {
   expectedWorkspaceVersion?: bigint | number | string | null;
-  legacyExpectedSourceStateHash: string | null;
   replicaRef: unknown;
   tx: HostedWorkspaceMutationTx;
   userId: string;
 }): Promise<HostedBrowserVaultReplicaPublishResult> {
   const userId = requireNonEmptyString(input.userId, "Hosted browser-vault replica publish userId");
-  const legacyExpectedSourceStateHash = input.legacyExpectedSourceStateHash === null
-    ? null
-    : requireNonEmptyString(
-        input.legacyExpectedSourceStateHash,
-        "Legacy hosted browser-vault replica publish expectedSourceStateHash",
-      );
   const expectedWorkspaceVersion = input.expectedWorkspaceVersion === undefined
     || input.expectedWorkspaceVersion === null
     ? null
@@ -662,12 +577,6 @@ async function publishBrowserVaultReplicaRefTx(input: {
 
   if (!replicaRef) {
     throw new TypeError("Hosted browser-vault replica publish replicaRef must not be null.");
-  }
-
-  if (legacyExpectedSourceStateHash && replicaRef.sourceBundleHash !== legacyExpectedSourceStateHash) {
-    throw new TypeError(
-      "Legacy hosted browser-vault replica publish sourceBundleHash must match expectedSourceStateHash.",
-    );
   }
 
   let current = await input.tx.hostedWorkspace.findUnique({
@@ -687,7 +596,6 @@ async function publishBrowserVaultReplicaRefTx(input: {
     const publish = await publishBrowserVaultReplicaRefAgainstCurrentWorkspace({
       current,
       expectedWorkspaceVersion,
-      legacyExpectedSourceStateHash,
       replicaRef,
       tx: input.tx,
       userId,
@@ -730,7 +638,6 @@ async function publishBrowserVaultReplicaRefTx(input: {
 async function publishBrowserVaultReplicaRefAgainstCurrentWorkspace(input: {
   current: HostedWorkspaceRow;
   expectedWorkspaceVersion: bigint | null;
-  legacyExpectedSourceStateHash: string | null;
   replicaRef: HostedBrowserVaultReplicaRef;
   tx: HostedWorkspaceMutationTx;
   userId: string;
@@ -740,15 +647,6 @@ async function publishBrowserVaultReplicaRefAgainstCurrentWorkspace(input: {
   if (
     input.expectedWorkspaceVersion !== null
     && input.current.version !== input.expectedWorkspaceVersion
-  ) {
-    return {
-      status: "conflict",
-    };
-  }
-
-  if (
-    input.legacyExpectedSourceStateHash
-    && readHostedWorkspaceBrowserVaultSourceStateHash(input.current.snapshotRef) !== input.legacyExpectedSourceStateHash
   ) {
     return {
       status: "conflict",
