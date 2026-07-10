@@ -35,7 +35,8 @@ export const RUNNER_ENTRYPOINT_BUNDLE_DIRECTORY_NAME = "dist-bundled";
 // - entry container-entrypoint.js: 1,374,586B on local macOS after the
 //   2026-07-09 mailbox-lane sequence preference coalescing;
 // - static boot closure: 6,818,632B on CI Linux after the 2026-07-10
-//   clinical-records intake package joined the reviewed runner closure.
+//   mainline integration. The forbidden-input guard below keeps clinical
+//   intake and other turn-scoped importer code out of this closure.
 // The tolerances below cover local emit jitter.
 //
 // The entry chunk gates cold-start parse, so it is ratcheted, not given
@@ -78,6 +79,7 @@ const RUNNER_ENTRYPOINT_FORBIDDEN_BOOT_INPUT_MARKERS = [
   "/device-syncd/dist/registry.js",
   "/device-syncd/dist/providers/",
   "/importers/dist/",
+  "/clinical-records/dist/",
   "node_modules/@junction-api/sdk/",
   "/health-metrics/dist/murph-age.js",
   "/health-metrics/dist/murph-age-source-routes.js",

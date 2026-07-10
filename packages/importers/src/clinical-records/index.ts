@@ -38,7 +38,13 @@ import {
   type ClinicalRawManifest,
   type ClinicalRawManifestResourceFile,
 } from "@murphai/clinical-records";
-import { isWritableIsoDateTime, type BloodTestResultRecord } from "@murphai/contracts";
+import {
+  eventImportDecisionSchema,
+  eventImportRetractionDecisionSchema,
+  isWritableIsoDateTime,
+  type BloodTestResultRecord,
+  type EventImportDecision,
+} from "@murphai/contracts";
 import { resolveVaultPathOnDisk } from "@murphai/core";
 
 export interface BuildClinicalImportPlanInput {
@@ -57,11 +63,6 @@ type FhirResourcePage = {
   rawRef: string;
   resourceFile: ClinicalRawManifestResourceFile;
   resources: Resource[];
-};
-
-type AllergyEvidenceSummary = {
-  complete: boolean;
-  hasConflict: boolean;
 };
 
 type MappedFhirResource = ClinicalImportDecision;
@@ -164,6 +165,11 @@ const IMPORTABLE_DOCUMENT_REFERENCE_DOC_STATUSES = new Set(["amended", "appended
 const IMPORTABLE_ALLERGY_CLINICAL_STATUS_CODES = new Set(["active"]);
 const IMPORTABLE_ALLERGY_VERIFICATION_STATUS_CODES = new Set(["confirmed"]);
 const RETRACTED_ALLERGY_VERIFICATION_STATUS_CODES = new Set(["entered-in-error", "refuted"]);
+const REVIEW_HOLD_RESOURCE_TYPES = new Set([
+  "DiagnosticReport",
+  "DocumentReference",
+  "Observation",
+]);
 
 export async function buildClinicalImportPlan(input: BuildClinicalImportPlanInput): Promise<ClinicalImportPlan> {
   const manifestPath = clinicalFhirManifestPathSchema.parse(input.manifestPath);
@@ -183,7 +189,6 @@ export async function buildClinicalImportPlan(input: BuildClinicalImportPlanInpu
   });
   const decisions: ClinicalImportDecision[] = [];
   const resourcePages: FhirResourcePage[] = [];
-  let hasAllergyConflictEvidence = false;
 
   for (const resourceFile of manifest.resourceFiles) {
     const page = await readClinicalResourcePage({
@@ -193,28 +198,33 @@ export async function buildClinicalImportPlan(input: BuildClinicalImportPlanInpu
       vaultRoot: input.vaultRoot,
     });
     resourcePages.push(page);
-    if (page.resources.some(isAllergyConflictEvidence)) {
-      hasAllergyConflictEvidence = true;
-    }
   }
   assertResolvedFhirPagination(resourcePages);
-  const allergyEvidence: AllergyEvidenceSummary = {
-    complete: hasCompleteAllergyEvidence(manifest),
-    hasConflict: hasAllergyConflictEvidence,
-  };
+  const resourceContexts = resourcePages.flatMap((page) =>
+    page.resources.map((resource): FhirResourceContext => ({
+      manifest,
+      rawRef: page.rawRef,
+      resource,
+    }))
+  );
 
-  for (const page of resourcePages) {
-    for (const resource of page.resources) {
-      const context: FhirResourceContext = {
-        manifest,
-        rawRef: page.rawRef,
-        resource,
-      };
-      if (decisions.length >= CLINICAL_IMPORT_PLAN_MAX_DECISIONS) {
-        throw new Error(`Clinical FHIR import plan decision count exceeds ${CLINICAL_IMPORT_PLAN_MAX_DECISIONS}.`);
-      }
-      decisions.push(mapFhirResource(context, allergyEvidence));
+  for (const context of resourceContexts) {
+    if (decisions.length >= CLINICAL_IMPORT_PLAN_MAX_DECISIONS) {
+      throw new Error(`Clinical FHIR import plan decision count exceeds ${CLINICAL_IMPORT_PLAN_MAX_DECISIONS}.`);
     }
+    decisions.push(mapFhirResource(context));
+  }
+
+  const allergySnapshotDecision = buildAllergySnapshotDecision({
+    manifest,
+    manifestPath,
+    resourceContexts,
+  });
+  if (allergySnapshotDecision) {
+    if (decisions.length >= CLINICAL_IMPORT_PLAN_MAX_DECISIONS) {
+      throw new Error(`Clinical FHIR import plan decision count exceeds ${CLINICAL_IMPORT_PLAN_MAX_DECISIONS}.`);
+    }
+    decisions.push(allergySnapshotDecision);
   }
 
   return clinicalImportPlanSchema.parse({
@@ -228,6 +238,121 @@ export async function buildClinicalImportPlan(input: BuildClinicalImportPlanInpu
     },
     decisions,
   });
+}
+
+export function clinicalPlanToEventImportDecisions(
+  input: ClinicalImportPlan,
+): EventImportDecision[] {
+  const plan = clinicalImportPlanSchema.parse(input);
+  return plan.decisions.flatMap((decision): EventImportDecision[] => {
+    if (decision.action !== "review") {
+      return [eventImportDecisionSchema.parse(decision)];
+    }
+    if (!REVIEW_HOLD_RESOURCE_TYPES.has(decision.resourceType)) {
+      return [];
+    }
+    if (!decision.externalRef) {
+      if (decision.resourceId) {
+        throw new Error(
+          `Clinical review for ${decision.resourceType}/${decision.resourceId} has no comparable source revision.`,
+        );
+      }
+      return [];
+    }
+
+    return [eventImportRetractionDecisionSchema.parse({
+      action: "retract",
+      externalRef: decision.externalRef,
+      reason: decision.reason,
+      evidence: decision.evidence,
+    })];
+  });
+}
+
+function buildAllergySnapshotDecision(input: {
+  manifest: ClinicalRawManifest;
+  manifestPath: string;
+  resourceContexts: readonly FhirResourceContext[];
+}): ClinicalImportDecision | null {
+  if (
+    !hasCompleteAllergyEvidence(input.manifest)
+    || input.resourceContexts.some(({ resource }) => isAllergyEvidenceUncertain(resource))
+  ) {
+    return null;
+  }
+
+  const noKnownAllergyContexts = input.resourceContexts.filter(
+    (context): context is FhirResourceContext<AllergyIntolerance> =>
+      isAllergyIntolerance(context.resource)
+      && isImportableNoKnownAllergySnapshotEvidence(context.resource),
+  );
+  const hasConflict = input.resourceContexts.some(({ resource }) =>
+    isAllergyConflictEvidence(resource)
+  );
+  const evidence = allergySnapshotEvidence(input);
+  const externalRef = externalRefForFhir({
+    fhirBaseUrlHash: input.manifest.fhirBaseUrlHash,
+    patientIdHash: input.manifest.patientIdHash,
+    sourceSystem: input.manifest.sourceSystem,
+    resourceType: "AllergyEvidenceSummary",
+    resourceId: "global",
+    version: input.manifest.fetchedAt,
+  });
+
+  const assertionContext = [...noKnownAllergyContexts].sort((left, right) =>
+    (readResourceId(left.resource) ?? "").localeCompare(readResourceId(right.resource) ?? "")
+    || left.rawRef.localeCompare(right.rawRef)
+  )[0];
+  if (assertionContext && !hasConflict) {
+    const recordedDate = readString(assertionContext.resource.recordedDate);
+    const occurredAt = readIsoDateTime(recordedDate);
+    if (!recordedDate || !occurredAt) {
+      throw new Error("Clinical no-known-allergy snapshot evidence lost its admitted timestamp.");
+    }
+    return clinicalImportUpsertDecisionSchema.parse({
+      action: "upsert",
+      payload: {
+        kind: "clinical_assertion",
+        occurredAt,
+        source: "import",
+        title: "No known allergies",
+        assertion: "no_known_allergies",
+        domain: "allergy",
+        polarity: "absent",
+        subject: "allergies",
+        assertedOn: recordedDate.slice(0, 10),
+        sourceLabel: "FHIR allergy evidence snapshot",
+        evidence,
+        externalRef,
+      },
+    });
+  }
+
+  return clinicalImportRetractDecisionSchema.parse({
+    action: "retract",
+    externalRef,
+    reason: hasConflict
+      ? "FHIR allergy snapshot conflicts with no-known-allergies"
+      : "FHIR allergy snapshot has no explicit no-known-allergies assertion",
+    evidence,
+  });
+}
+
+function allergySnapshotEvidence(input: {
+  manifestPath: string;
+  resourceContexts: readonly FhirResourceContext[];
+}) {
+  const resourceEvidence = input.resourceContexts
+    .filter(({ resource }) => ALLERGY_CONFLICT_RESOURCE_TYPES.has(resource.resourceType))
+    .map((context) => evidenceForResource(context, readResourceId(context.resource)))
+    .sort((left, right) =>
+      left.rawRef.localeCompare(right.rawRef)
+      || left.sourceLabel.localeCompare(right.sourceLabel)
+    );
+  return [
+    { rawRef: input.manifestPath, sourceLabel: "FHIR allergy snapshot manifest" },
+    ...resourceEvidence.slice(0, 49),
+  ];
 }
 
 function hasCompleteAllergyEvidence(manifest: ClinicalRawManifest): boolean {
@@ -528,10 +653,7 @@ function sha256Hex(value: string): string {
   return createHash("sha256").update(value, "utf8").digest("hex");
 }
 
-function mapFhirResource(
-  context: FhirResourceContext,
-  allergyEvidence: AllergyEvidenceSummary,
-): MappedFhirResource {
+function mapFhirResource(context: FhirResourceContext): MappedFhirResource {
   if (hasMalformedFhirContained(context.resource)) {
     return reviewOnly(context, "FHIR contained resources are invalid");
   }
@@ -564,7 +686,7 @@ function mapFhirResource(
     return mapDocumentReference(resourceContext(context, context.resource));
   }
   if (isAllergyIntolerance(context.resource)) {
-    return mapAllergyIntolerance(resourceContext(context, context.resource), allergyEvidence);
+    return mapAllergyIntolerance(resourceContext(context, context.resource));
   }
 
   switch (readString(context.resource.resourceType)) {
@@ -596,12 +718,17 @@ function resourceContext<TResource extends Resource>(
 }
 
 function reviewOnly(context: FhirResourceContext, reason: string): MappedFhirResource {
+  const resourceId = readResourceId(context.resource);
+  const externalRef = resourceId && readResourceUpdatedAt(context.resource)
+    ? externalRefForResource(context, context.resource.resourceType, resourceId)
+    : undefined;
   return clinicalImportReviewDecisionSchema.parse({
     action: "review",
     resourceType: context.resource.resourceType,
-    resourceId: readResourceId(context.resource),
+    resourceId,
+    ...(externalRef ? { externalRef } : {}),
     reason,
-    evidence: [evidenceForResource(context, readResourceId(context.resource))],
+    evidence: [evidenceForResource(context, resourceId)],
   });
 }
 
@@ -648,18 +775,6 @@ function authoritativeRetractionReason(resource: Resource): string | null {
       return "FHIR DocumentReference docStatus entered-in-error";
     }
   }
-  if (
-    isAllergyIntolerance(resource)
-    && isNoKnownAllergy(resource)
-    && codeableConceptHasOnlyImportableCodings(
-      resource.verificationStatus,
-      FHIR_SYSTEM_ALLERGY_VERIFICATION_STATUS,
-      RETRACTED_ALLERGY_VERIFICATION_STATUS_CODES,
-    )
-  ) {
-    return "FHIR no-known-allergy assertion was refuted or entered in error";
-  }
-
   return null;
 }
 
@@ -980,7 +1095,6 @@ function mapDocumentReference(context: FhirResourceContext<DocumentReference>): 
 
 function mapAllergyIntolerance(
   context: FhirResourceContext<AllergyIntolerance>,
-  allergyEvidence: AllergyEvidenceSummary,
 ): MappedFhirResource {
   const resourceId = readResourceId(context.resource);
   if (!resourceId) {
@@ -1003,37 +1117,16 @@ function mapAllergyIntolerance(
     return reviewOnly(context, "allergy status is not importable");
   }
 
-  if (!isImportableGlobalNoKnownAllergyAssertion(context.resource) || allergyEvidence.hasConflict) {
+  if (!isImportableGlobalNoKnownAllergyAssertion(context.resource)) {
     return reviewOnly(context, "no-known allergy conflicts with allergy evidence");
-  }
-  if (!allergyEvidence.complete) {
-    return reviewOnly(context, "no-known allergy conflicts with incomplete allergy evidence");
   }
 
   const recordedDate = readString(context.resource.recordedDate);
-  const occurredAt = readIsoDateTime(recordedDate);
-  if (!recordedDate || !occurredAt) {
+  if (!recordedDate || !readIsoDateTime(recordedDate)) {
     return reviewOnly(context, "clinical timestamp is missing");
   }
 
-  return upsertOrReview(
-    context,
-    {
-      kind: "clinical_assertion",
-      occurredAt,
-      source: "import",
-      title: "No known allergies",
-      assertion: "no_known_allergies",
-      domain: "allergy",
-      polarity: "absent",
-      subject: "allergies",
-      assertedOn: recordedDate.slice(0, 10),
-      sourceLabel: "FHIR AllergyIntolerance",
-      evidence: [evidenceForResource(context, resourceId)],
-      externalRef: externalRefForResource(context, "AllergyIntolerance", resourceId),
-    },
-    "clinical upsert exceeds supported import bounds",
-  );
+  return reviewOnly(context, "no-known allergy evidence is resolved at snapshot scope");
 }
 
 function buildVitalsPayload(
@@ -1240,6 +1333,24 @@ function isImportableGlobalNoKnownAllergyAssertion(resource: AllergyIntolerance)
   );
 }
 
+function isImportableNoKnownAllergySnapshotEvidence(resource: AllergyIntolerance): boolean {
+  const recordedDate = readString(resource.recordedDate);
+  return isImportableGlobalNoKnownAllergyAssertion(resource)
+    && readResourceId(resource) !== undefined
+    && readResourceUpdatedAt(resource) !== undefined
+    && recordedDate !== undefined
+    && readIsoDateTime(recordedDate) !== undefined;
+}
+
+function isRetractedNoKnownAllergy(resource: AllergyIntolerance): boolean {
+  return isNoKnownAllergy(resource)
+    && codeableConceptHasOnlyImportableCodings(
+      resource.verificationStatus,
+      FHIR_SYSTEM_ALLERGY_VERIFICATION_STATUS,
+      RETRACTED_ALLERGY_VERIFICATION_STATUS_CODES,
+    );
+}
+
 function hasTrustedNoKnownAllergyCode(resource: AllergyIntolerance): boolean {
   return codeableConceptHasSystemCode(resource.code, FHIR_SYSTEM_SNOMED_CT, NO_KNOWN_ALLERGY_CODES);
 }
@@ -1258,7 +1369,7 @@ function isUnambiguousNoKnownAllergy(resource: AllergyIntolerance): boolean {
   return isNoKnownAllergyConceptText(resource.code?.text);
 }
 
-function isAllergyConflictEvidence(resource: Resource): boolean {
+function isAllergyEvidenceUncertain(resource: Resource): boolean {
   if (hasMalformedFhirContained(resource)) {
     return true;
   }
@@ -1274,6 +1385,32 @@ function isAllergyConflictEvidence(resource: Resource): boolean {
   }
   if (hasUnsupportedFhirModifier(resource)) {
     return true;
+  }
+  if (!isAllergyIntolerance(resource)) {
+    return false;
+  }
+  if (
+    codeableConceptHasCodeWithUnexpectedSystem(
+      resource.code,
+      FHIR_SYSTEM_SNOMED_CT,
+      NO_KNOWN_ALLERGY_CODES,
+    )
+    || (hasTrustedNoKnownAllergyCode(resource) && !isNoKnownAllergy(resource))
+  ) {
+    return true;
+  }
+  if (isNoKnownAllergy(resource) && !isRetractedNoKnownAllergy(resource)) {
+    return !isImportableNoKnownAllergySnapshotEvidence(resource);
+  }
+  return false;
+}
+
+function isAllergyConflictEvidence(resource: Resource): boolean {
+  if (
+    !ALLERGY_CONFLICT_RESOURCE_TYPES.has(resource.resourceType)
+    || isAllergyEvidenceUncertain(resource)
+  ) {
+    return false;
   }
   if (isAllergyIntolerance(resource)) {
     return !isImportableGlobalNoKnownAllergyAssertion(resource);

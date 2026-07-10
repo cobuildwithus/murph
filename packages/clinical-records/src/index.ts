@@ -33,10 +33,11 @@ export const CLINICAL_FHIR_RESOURCE_TYPES = Object.freeze([
   "Goal",
 ] as const);
 
-export const CLINICAL_IMPORT_PLAN_MAX_DECISIONS = 5_000;
 export const CLINICAL_RAW_MANIFEST_MAX_RESOURCE_FILES = 500;
 export const CLINICAL_RAW_MANIFEST_MAX_RESOURCES_PER_FILE = 1_000;
 export const CLINICAL_RAW_MANIFEST_MAX_TOTAL_RESOURCES = 5_000;
+export const CLINICAL_IMPORT_PLAN_MAX_DECISIONS =
+  CLINICAL_RAW_MANIFEST_MAX_TOTAL_RESOURCES + 1;
 export const CLINICAL_RAW_MANIFEST_MAX_BYTES = 1024 * 1024;
 export const CLINICAL_RAW_RESOURCE_FILE_MAX_BYTES = 5 * 1024 * 1024;
 export const CLINICAL_RAW_RESOURCE_FILES_MAX_TOTAL_BYTES = 32 * 1024 * 1024;
@@ -256,6 +257,7 @@ export const clinicalImportReviewDecisionSchema = z
     action: z.literal("review"),
     resourceType: clinicalFhirResourceTypeSchema,
     resourceId: z.string().min(1).max(200).optional(),
+    externalRef: clinicalFhirExternalRefSchema.optional(),
     reason: z.string().min(1).max(240),
     evidence: clinicalDecisionEvidenceSchema,
   })

@@ -17,7 +17,10 @@ import {
   type ClinicalImportUpsertPayload,
 } from "@murphai/clinical-records";
 import { findEventByExternalRef, importEventBatch, initializeVault } from "@murphai/core";
-import { buildClinicalImportPlan } from "../src/clinical-records/index.ts";
+import {
+  buildClinicalImportPlan,
+  clinicalPlanToEventImportDecisions,
+} from "../src/clinical-records/index.ts";
 import { afterEach, describe, expect, it } from "vitest";
 
 const BAD_SHA256 = "a".repeat(64);
@@ -51,8 +54,8 @@ function retractions(plan: ClinicalImportPlan): ClinicalImportRetractDecision[] 
   );
 }
 
-function executableDecisions(plan: ClinicalImportPlan): Array<Record<string, unknown>> {
-  return plan.decisions.flatMap((decision) => decision.action === "review" ? [] : [{ ...decision }]);
+function executableDecisions(plan: ClinicalImportPlan) {
+  return clinicalPlanToEventImportDecisions(plan);
 }
 
 afterEach(async () => {
@@ -849,7 +852,12 @@ describe("buildClinicalImportPlan", () => {
     const plan = await buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot });
 
     expect(upserts(plan).map((candidate) => candidate.kind)).toEqual(["note", "clinical_assertion"]);
-    expect(reviews(plan)).toEqual([]);
+    expect(reviews(plan)).toEqual([
+      expect.objectContaining({
+        resourceId: "allergy-negative-1",
+        reason: "no-known allergy evidence is resolved at snapshot scope",
+      }),
+    ]);
 
     const note = upserts(plan).find(
       (candidate): candidate is ClinicalImportUpsertOfKind<"note"> =>
@@ -968,7 +976,7 @@ describe("buildClinicalImportPlan", () => {
         expect.objectContaining({
           resourceType: "AllergyIntolerance",
           resourceId,
-          reason: "no-known allergy conflicts with incomplete allergy evidence",
+          reason: "no-known allergy evidence is resolved at snapshot scope",
         }),
       ]);
     }
@@ -1036,7 +1044,7 @@ describe("buildClinicalImportPlan", () => {
     expect(reviews(plan)).toEqual(expect.arrayContaining([
       expect.objectContaining({
         resourceId: "allergy-code-only-condition",
-        reason: "no-known allergy conflicts with allergy evidence",
+        reason: "no-known allergy evidence is resolved at snapshot scope",
       }),
       expect.objectContaining({
         resourceId: "code-only-allergy-condition",
@@ -1084,7 +1092,7 @@ describe("buildClinicalImportPlan", () => {
       expect(reviews(plan)).toEqual([
         expect.objectContaining({
           resourceId,
-          reason: "no-known allergy conflicts with incomplete allergy evidence",
+          reason: "no-known allergy evidence is resolved at snapshot scope",
         }),
       ]);
     }
@@ -1141,16 +1149,24 @@ describe("buildClinicalImportPlan", () => {
         expect(upserts(plan)).toEqual([
           expect.objectContaining({
             kind: "clinical_assertion",
-            externalRef: expect.objectContaining({ resourceId }),
+            externalRef: expect.objectContaining({
+              resourceId: "global",
+              resourceType: "allergy-evidence-summary",
+            }),
           }),
         ]);
-        expect(reviews(plan)).toEqual([]);
+        expect(reviews(plan)).toEqual([
+          expect.objectContaining({
+            resourceId,
+            reason: "no-known allergy evidence is resolved at snapshot scope",
+          }),
+        ]);
       } else {
         expect(upserts(plan)).toEqual([]);
         expect(reviews(plan)).toEqual([
           expect.objectContaining({
             resourceId,
-            reason: "no-known allergy conflicts with incomplete allergy evidence",
+            reason: "no-known allergy evidence is resolved at snapshot scope",
           }),
         ]);
       }
@@ -2567,7 +2583,7 @@ describe("buildClinicalImportPlan", () => {
     const plan = await buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot });
 
     expect(upserts(plan)).toEqual([]);
-    expect(reviews(plan)).toHaveLength(18);
+    expect(reviews(plan)).toHaveLength(19);
     expect(reviews(plan)).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -2642,6 +2658,10 @@ describe("buildClinicalImportPlan", () => {
           resourceId: "allergy-local-status-system",
           reason: "allergy status is not importable",
         }),
+        expect.objectContaining({
+          resourceId: "allergy-refuted",
+          reason: "allergy status is not importable",
+        }),
       ]),
     );
     expect(retractions(plan)).toEqual(expect.arrayContaining([
@@ -2660,10 +2680,6 @@ describe("buildClinicalImportPlan", () => {
       expect.objectContaining({
         externalRef: expect.objectContaining({ resourceId: "document-docstatus-entered-in-error" }),
         reason: "FHIR DocumentReference docStatus entered-in-error",
-      }),
-      expect.objectContaining({
-        externalRef: expect.objectContaining({ resourceId: "allergy-refuted" }),
-        reason: "FHIR no-known-allergy assertion was refuted or entered in error",
       }),
     ]));
   });
@@ -2944,7 +2960,7 @@ describe("buildClinicalImportPlan", () => {
       expect.arrayContaining([
         expect.objectContaining({
           resourceId: "allergy-negative-conflict",
-          reason: "no-known allergy conflicts with allergy evidence",
+          reason: "no-known allergy evidence is resolved at snapshot scope",
         }),
         expect.objectContaining({
           resourceId: "allergy-positive-conflict",
@@ -3008,7 +3024,7 @@ describe("buildClinicalImportPlan", () => {
     expect(reviews(plan)).toEqual(expect.arrayContaining([
       expect.objectContaining({
         resourceId: "allergy-negative-with-condition-conflict",
-        reason: "no-known allergy conflicts with allergy evidence",
+        reason: "no-known allergy evidence is resolved at snapshot scope",
       }),
       expect.objectContaining({
         resourceId: "penicillin-allergy-condition",
@@ -3070,7 +3086,7 @@ describe("buildClinicalImportPlan", () => {
     expect(reviews(plan)).toEqual(expect.arrayContaining([
       expect.objectContaining({
         resourceId: "allergy-negative-with-contained-conflict",
-        reason: "no-known allergy conflicts with allergy evidence",
+        reason: "no-known allergy evidence is resolved at snapshot scope",
       }),
     ]));
   });
@@ -3130,7 +3146,7 @@ describe("buildClinicalImportPlan", () => {
       expect(reviews(plan)).toEqual(expect.arrayContaining([
         expect.objectContaining({
           resourceId: `allergy-negative-with-malformed-contained-${testCase.suffix}`,
-          reason: "no-known allergy conflicts with allergy evidence",
+          reason: "no-known allergy evidence is resolved at snapshot scope",
         }),
         expect.objectContaining({
           resourceId: `observation-with-malformed-contained-${testCase.suffix}`,
@@ -3223,7 +3239,7 @@ describe("buildClinicalImportPlan", () => {
       expect.arrayContaining([
         expect.objectContaining({
           resourceId: "allergy-negative-safe",
-          reason: "no-known allergy conflicts with allergy evidence",
+          reason: "no-known allergy evidence is resolved at snapshot scope",
         }),
         expect.objectContaining({
           resourceId: "allergy-negative-with-reaction",
@@ -3231,12 +3247,8 @@ describe("buildClinicalImportPlan", () => {
         }),
       ]),
     );
-    expect(retractions(plan)).toEqual([
-      expect.objectContaining({
-        externalRef: expect.objectContaining({ resourceId: "allergy-negative-refuted" }),
-        reason: "FHIR no-known-allergy assertion was refuted or entered in error",
-      }),
-    ]);
+    expect(retractions(plan)).toEqual([]);
+    expect(executableDecisions(plan)).toEqual([]);
   });
 
   it("rejects no-known allergies with contradictory note detail", async () => {
@@ -3310,7 +3322,12 @@ describe("buildClinicalImportPlan", () => {
     const plan = await buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot });
     const assertion = upserts(plan)[0];
 
-    expect(reviews(plan)).toEqual([]);
+    expect(reviews(plan)).toEqual([
+      expect.objectContaining({
+        resourceId: "allergy-negative-offset-boundary",
+        reason: "no-known allergy evidence is resolved at snapshot scope",
+      }),
+    ]);
     expect(assertion).toEqual(expect.objectContaining({
       kind: "clinical_assertion",
       occurredAt: "2026-07-02T04:30:00.000Z",
@@ -3946,6 +3963,345 @@ describe("buildClinicalImportPlan", () => {
     expect(replay.supersededCount).toBe(0);
   });
 
+  it("retracts snapshot-scoped no-known-allergy truth before an older snapshot can resurrect it", async () => {
+    const firstManifestPath = MANIFEST_PATH;
+    const conflictManifestPath =
+      "raw/clinical/fhir/clinical-connection-1/retrieval-job-2/manifest.json";
+    const restoredManifestPath =
+      "raw/clinical/fhir/clinical-connection-1/retrieval-job-3/manifest.json";
+    const incompleteManifestPath =
+      "raw/clinical/fhir/clinical-connection-1/retrieval-job-4/manifest.json";
+    const allergyFile = {
+      resourceType: "AllergyIntolerance",
+      relativePath: "AllergyIntolerance/page-1.json",
+      count: 1,
+    };
+    const conditionFile = {
+      resourceType: "Condition",
+      relativePath: "Condition/page-1.json",
+      count: 0,
+    };
+    const noKnownAllergy = noKnownAllergyResource("snapshot-no-known-allergy");
+    const firstRoot = await writeClinicalFixture({
+      manifest: { fetchedAt: "2026-07-01T12:00:00.000Z" },
+      resourceFiles: [allergyFile, conditionFile],
+      pages: {
+        "AllergyIntolerance/page-1.json": [noKnownAllergy],
+        "Condition/page-1.json": [],
+      },
+    });
+    const conflictRoot = await writeClinicalFixture({
+      manifest: {
+        fetchedAt: "2026-07-01T13:00:00.000Z",
+        retrievalJobId: "retrieval-job-2",
+      },
+      manifestPath: conflictManifestPath,
+      resourceFiles: [{ ...allergyFile, count: 2 }, conditionFile],
+      pages: {
+        "AllergyIntolerance/page-1.json": [
+          noKnownAllergy,
+          {
+            resourceType: "AllergyIntolerance",
+            id: "snapshot-positive-allergy",
+            recordedDate: "2026-07-01T12:30:00.000Z",
+            clinicalStatus: {
+              coding: [{
+                system: "http://terminology.hl7.org/CodeSystem/allergyintolerance-clinical",
+                code: "active",
+              }],
+            },
+            verificationStatus: {
+              coding: [{
+                system: "http://terminology.hl7.org/CodeSystem/allergyintolerance-verification",
+                code: "confirmed",
+              }],
+            },
+            code: {
+              text: "Penicillin allergy",
+              coding: [{
+                system: "http://snomed.info/sct",
+                code: "91936005",
+                display: "Penicillin allergy",
+              }],
+            },
+          },
+        ],
+        "Condition/page-1.json": [],
+      },
+    });
+    const restoredRoot = await writeClinicalFixture({
+      manifest: {
+        fetchedAt: "2026-07-01T14:00:00.000Z",
+        retrievalJobId: "retrieval-job-3",
+      },
+      manifestPath: restoredManifestPath,
+      resourceFiles: [allergyFile, conditionFile],
+      pages: {
+        "AllergyIntolerance/page-1.json": [noKnownAllergy],
+        "Condition/page-1.json": [],
+      },
+    });
+    const incompleteRoot = await writeClinicalFixture({
+      manifest: {
+        completedResourceTypes: ["AllergyIntolerance"],
+        fetchedAt: "2026-07-01T15:00:00.000Z",
+        retrievalJobId: "retrieval-job-4",
+      },
+      manifestPath: incompleteManifestPath,
+      resourceFiles: [allergyFile],
+      pages: { "AllergyIntolerance/page-1.json": [noKnownAllergy] },
+    });
+    const firstPlan = await buildClinicalImportPlan({
+      manifestPath: firstManifestPath,
+      vaultRoot: firstRoot,
+    });
+    const conflictPlan = await buildClinicalImportPlan({
+      manifestPath: conflictManifestPath,
+      vaultRoot: conflictRoot,
+    });
+    const restoredPlan = await buildClinicalImportPlan({
+      manifestPath: restoredManifestPath,
+      vaultRoot: restoredRoot,
+    });
+    const incompletePlan = await buildClinicalImportPlan({
+      manifestPath: incompleteManifestPath,
+      vaultRoot: incompleteRoot,
+    });
+    const firstAssertion = upserts(firstPlan).find(
+      (payload): payload is ClinicalImportUpsertOfKind<"clinical_assertion"> =>
+        payload.kind === "clinical_assertion",
+    );
+    expect(firstAssertion).toBeDefined();
+    expect(retractions(conflictPlan)).toEqual([
+      expect.objectContaining({
+        externalRef: expect.objectContaining({
+          resourceId: "global",
+          resourceType: "allergy-evidence-summary",
+        }),
+      }),
+    ]);
+    expect(upserts(restoredPlan).filter((payload) => payload.kind === "clinical_assertion")).toHaveLength(1);
+    expect(upserts(incompletePlan).filter((payload) => payload.kind === "clinical_assertion")).toEqual([]);
+    expect(retractions(incompletePlan)).toEqual([]);
+    expect(executableDecisions(incompletePlan)).toEqual([]);
+    if (!firstAssertion) {
+      throw new Error("Expected snapshot-scoped no-known-allergy assertion.");
+    }
+
+    const canonicalVaultRoot = await initializeCanonicalFixtureVault();
+    const firstImport = await importEventBatch({
+      vaultRoot: canonicalVaultRoot,
+      decisions: executableDecisions(firstPlan),
+      apply: true,
+    });
+    const conflictImport = await importEventBatch({
+      vaultRoot: canonicalVaultRoot,
+      decisions: executableDecisions(conflictPlan),
+      apply: true,
+    });
+    const conflictReplay = await importEventBatch({
+      vaultRoot: canonicalVaultRoot,
+      decisions: executableDecisions(conflictPlan),
+      apply: true,
+    });
+    const delayedOlderSnapshot = await importEventBatch({
+      vaultRoot: canonicalVaultRoot,
+      decisions: executableDecisions(firstPlan),
+      apply: true,
+    });
+    const restoredImport = await importEventBatch({
+      vaultRoot: canonicalVaultRoot,
+      decisions: executableDecisions(restoredPlan),
+      apply: true,
+    });
+
+    expect(firstImport.createdCount).toBe(1);
+    expect(conflictImport.retractedCount).toBe(1);
+    expect(conflictReplay.applied).toBe(false);
+    expect(delayedOlderSnapshot.applied).toBe(false);
+    expect(delayedOlderSnapshot.skippedExistingCount).toBeGreaterThan(0);
+    expect(restoredImport.createdCount).toBe(1);
+    expect(await findEventByExternalRef({
+      vaultRoot: canonicalVaultRoot,
+      system: firstAssertion.externalRef.system,
+      resourceType: firstAssertion.externalRef.resourceType,
+      resourceId: firstAssertion.externalRef.resourceId,
+    })).toEqual(expect.objectContaining({
+      externalRef: expect.objectContaining({ version: "2026-07-01T14:00:00.000Z" }),
+    }));
+  });
+
+  it("uses a newer comparable review as a hold against delayed older revisions", async () => {
+    const reviewManifestPath =
+      "raw/clinical/fhir/clinical-connection-1/retrieval-job-2/manifest.json";
+    const delayedManifestPath =
+      "raw/clinical/fhir/clinical-connection-1/retrieval-job-3/manifest.json";
+    const recoveryManifestPath =
+      "raw/clinical/fhir/clinical-connection-1/retrieval-job-4/manifest.json";
+    const resourceFile = {
+      resourceType: "Observation",
+      relativePath: "Observation/page-1.json",
+      count: 1,
+    };
+    const firstRoot = await writeClinicalFixture({
+      resourceFiles: [resourceFile],
+      pages: {
+        "Observation/page-1.json": {
+          ...heartRateResource("review-held-heart-rate"),
+          meta: { lastUpdated: "2026-07-01T12:01:00.000Z" },
+        },
+      },
+    });
+    const reviewRoot = await writeClinicalFixture({
+      manifest: { retrievalJobId: "retrieval-job-2" },
+      manifestPath: reviewManifestPath,
+      resourceFiles: [{ ...resourceFile, count: 2 }],
+      pages: {
+        "Observation/page-1.json": [
+          {
+            ...heartRateResource("review-held-heart-rate"),
+            meta: { lastUpdated: "2026-07-01T12:03:00.000Z" },
+            modifierExtension: [{
+              url: "https://ehr.example.test/fhir/StructureDefinition/negated",
+              valueBoolean: true,
+            }],
+          },
+          {
+            ...heartRateResource("review-hold-batch-companion"),
+            meta: { lastUpdated: "2026-07-01T12:03:00.000Z" },
+          },
+        ],
+      },
+    });
+    const delayedRoot = await writeClinicalFixture({
+      manifest: { retrievalJobId: "retrieval-job-3" },
+      manifestPath: delayedManifestPath,
+      resourceFiles: [resourceFile],
+      pages: {
+        "Observation/page-1.json": {
+          ...heartRateResource("review-held-heart-rate"),
+          meta: { lastUpdated: "2026-07-01T12:02:00.000Z" },
+        },
+      },
+    });
+    const recoveryRoot = await writeClinicalFixture({
+      manifest: { retrievalJobId: "retrieval-job-4" },
+      manifestPath: recoveryManifestPath,
+      resourceFiles: [resourceFile],
+      pages: {
+        "Observation/page-1.json": {
+          ...heartRateResource("review-held-heart-rate"),
+          meta: { lastUpdated: "2026-07-01T12:04:00.000Z" },
+        },
+      },
+    });
+    const firstPlan = await buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot: firstRoot });
+    const reviewPlan = await buildClinicalImportPlan({
+      manifestPath: reviewManifestPath,
+      vaultRoot: reviewRoot,
+    });
+    const delayedPlan = await buildClinicalImportPlan({
+      manifestPath: delayedManifestPath,
+      vaultRoot: delayedRoot,
+    });
+    const recoveryPlan = await buildClinicalImportPlan({
+      manifestPath: recoveryManifestPath,
+      vaultRoot: recoveryRoot,
+    });
+    const firstPayload = upserts(firstPlan)[0];
+    expect(firstPayload).toBeDefined();
+    if (!firstPayload) {
+      throw new Error("Expected initial clinical observation upsert.");
+    }
+
+    const canonicalVaultRoot = await initializeCanonicalFixtureVault();
+    await importEventBatch({
+      vaultRoot: canonicalVaultRoot,
+      decisions: executableDecisions(firstPlan),
+      apply: true,
+    });
+    const hold = await importEventBatch({
+      vaultRoot: canonicalVaultRoot,
+      decisions: executableDecisions(reviewPlan),
+      apply: true,
+    });
+    const holdReplay = await importEventBatch({
+      vaultRoot: canonicalVaultRoot,
+      decisions: executableDecisions(reviewPlan),
+      apply: true,
+    });
+    const delayed = await importEventBatch({
+      vaultRoot: canonicalVaultRoot,
+      decisions: executableDecisions(delayedPlan),
+      apply: true,
+    });
+    expect(hold.retractedCount).toBe(1);
+    expect(holdReplay.applied).toBe(false);
+    expect(delayed.applied).toBe(false);
+    expect(await findEventByExternalRef({
+      vaultRoot: canonicalVaultRoot,
+      system: firstPayload.externalRef.system,
+      resourceType: firstPayload.externalRef.resourceType,
+      resourceId: firstPayload.externalRef.resourceId,
+    })).toBeNull();
+
+    const recovery = await importEventBatch({
+      vaultRoot: canonicalVaultRoot,
+      decisions: executableDecisions(recoveryPlan),
+      apply: true,
+    });
+    expect(recovery.createdCount).toBe(1);
+    expect(await findEventByExternalRef({
+      vaultRoot: canonicalVaultRoot,
+      system: firstPayload.externalRef.system,
+      resourceType: firstPayload.externalRef.resourceType,
+      resourceId: firstPayload.externalRef.resourceId,
+    })).toEqual(expect.objectContaining({
+      externalRef: expect.objectContaining({ version: "2026-07-01T12:04:00.000Z" }),
+    }));
+  });
+
+  it.each([
+    ["Observation", "observation"],
+    ["DiagnosticReport", "diagnostic-report"],
+    ["DocumentReference", "document-reference"],
+  ] as const)("turns a comparable %s review into an event-ledger retraction hold", (resourceType, resourceTypeSlug) => {
+    const externalRef = {
+      system: "epic-fhir-review-hold",
+      resourceType: resourceTypeSlug,
+      resourceId: "review-held-resource",
+      version: "2026-07-01T12:03:00.000Z",
+    };
+    const evidence = [{
+      rawRef: `raw/clinical/fhir/clinical-connection-1/retrieval-job-1/${resourceType}/page-1.json`,
+      sourceLabel: `${resourceType}/review-held-resource`,
+    }];
+
+    expect(clinicalPlanToEventImportDecisions({
+      schemaVersion: "murph.clinical-import-plan.v1",
+      source: {
+        kind: "fhir",
+        rawManifestPath: MANIFEST_PATH,
+        sourceSystem: "epic-fhir",
+        connectionId: "clinical-connection-1",
+        retrievalJobId: "retrieval-job-1",
+      },
+      decisions: [{
+        action: "review",
+        resourceType,
+        resourceId: "review-held-resource",
+        externalRef,
+        reason: "unsupported modifier semantics",
+        evidence,
+      }],
+    })).toEqual([{
+      action: "retract",
+      externalRef,
+      reason: "unsupported modifier semantics",
+      evidence,
+    }]);
+  });
+
   it("tombstones and replaces an Observation whose canonical kind changes", async () => {
     const resourceFiles = [{
       resourceType: "Observation",
@@ -4228,6 +4584,9 @@ describe("buildClinicalImportPlan", () => {
         reason: "FHIR resource lastUpdated is missing",
       }),
     ]);
+    expect(() => executableDecisions(plan)).toThrow(
+      "Clinical review for Observation/missing-provider-freshness has no comparable source revision.",
+    );
   });
 
   it("routes oversized FHIR ids and source revisions to review without aborting the plan", async () => {
@@ -4411,6 +4770,7 @@ async function writeClinicalFixture(input: {
     completedResourceTypes?: string[];
     connectionId?: string;
     errors?: Array<{ code: string; message: string; resourceType?: string }>;
+    fetchedAt?: string;
     fhirBaseUrlHash?: string;
     grantedScopes?: string[];
     patientId?: string;
@@ -4452,7 +4812,7 @@ async function writeClinicalFixture(input: {
     sourceSystem: "epic-fhir",
     fhirBaseUrlHash: input.manifest?.fhirBaseUrlHash ?? FHIR_BASE_URL_HASH,
     patientIdHash: input.manifest?.patientIdHash ?? hashClinicalFhirPatientId(patientId),
-    fetchedAt: "2026-07-01T12:00:00.000Z",
+    fetchedAt: input.manifest?.fetchedAt ?? "2026-07-01T12:00:00.000Z",
     resourceFiles,
     completedResourceTypes: input.manifest?.completedResourceTypes
       ?? [...new Set(resourceFiles.map((resourceFile) => resourceFile.resourceType))],

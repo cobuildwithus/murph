@@ -32,18 +32,23 @@ The clinical importer reads each raw page once, then validates its hash, count,
 resource family, patient binding, and pagination links before mapping any
 decision. Pagination links must remain under the manifest FHIR base, resolve
 within the declared resource family, form an acyclic chain, and reach every
-declared continuation page from a root page. A no-known-allergies upsert
-additionally requires completed, error-free `AllergyIntolerance` and
-`Condition` retrieval with granted read scope for both families.
+declared continuation page from a root page. A no-known-allergies snapshot
+decision additionally requires completed, error-free `AllergyIntolerance` and
+`Condition` retrieval with granted read scope for both families. Its manifest
+`fetchedAt` is the ordered revision for that patient-and-FHIR-base aggregate;
+retrieval producers must assign later complete snapshots a later timestamp.
 
 ## Decision identity, provenance, and freshness
 
 Each FHIR resource emits exactly one `upsert`, `retract`, or `review` decision.
-Upserts and retractions share one facet-free external identity regardless of
-whether the current resource maps as a scalar, panel, or another supported
-shape. Every decision carries its raw evidence, while retrieval metadata stays
-on the plan. A strict `meta.lastUpdated` is required as the exact
-`externalRef.version`.
+A complete allergy evidence family may additionally emit one aggregate
+no-known-allergies decision, keyed to one patient snapshot identity rather
+than an individual FHIR resource. Upserts and retractions share one facet-free
+external identity regardless of whether the current resource maps as a scalar,
+panel, or another supported shape. Every decision carries its raw evidence,
+while retrieval metadata stays on the plan. A strict `meta.lastUpdated` is
+required as the exact resource-local `externalRef.version`; the aggregate
+allergy identity uses manifest `fetchedAt`.
 
 Core bulk event import skips older revisions and source-semantically equal
 same-version replays even when retrieval paths differ. It rejects true
@@ -53,5 +58,9 @@ live event for a newer authoritative retraction. Versioned decisions for one
 source identity are applied in source-revision order within a batch. When a
 retraction arrives before any live fact, core writes an invisible deleted source
 marker into the existing event ledger; older or equal revisions cannot later
-resurrect it, while a newer upsert can become live. Review decisions preserve
-raw evidence without mutating canonical records.
+resurrect it, while a newer upsert can become live. At the explicit clinical
+execution seam, a comparable review for a resource family that could have
+previously produced a canonical event becomes the same retraction marker, so
+delayed older revisions remain held. A supported resource with an id but no
+comparable source revision fails closed instead of silently discarding that
+ordering information. Other review decisions remain plan-only raw evidence.
