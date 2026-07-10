@@ -4,6 +4,9 @@ import {
 } from "@murphai/device-syncd/public-ingress";
 import { deviceSyncError } from "@murphai/device-syncd/errors";
 import {
+  DEVICE_SYNC_HISTORICAL_RESET_REVOKE_FAILED_ERROR_CODE,
+} from "@murphai/device-syncd/public-account";
+import {
   DEFAULT_DEVICE_SYNC_HTTP_BODY_LIMIT_BYTES,
   DEVICE_SYNC_WEBHOOK_TRACE_COMPLETED,
   type BeginConnectionResult,
@@ -237,7 +240,7 @@ export class HostedDeviceSyncPublicIngressService {
 
   async disconnectConnection(userId: string, connectionId: string): Promise<{
     connection: HostedBrowserDeviceSyncConnection;
-    warning?: { code: string; message: string };
+    warning?: { code: string; historicalResetIncomplete?: true; message: string };
   }> {
     const connection = await this.requireOwnedBrowserConnection(userId, connectionId);
     const disconnected = await disconnectHostedDeviceSyncConnection({
@@ -248,8 +251,19 @@ export class HostedDeviceSyncPublicIngressService {
     });
 
     return {
-      ...disconnected,
       connection: this.toBrowserConnection(disconnected.connection),
+      // The browser chooses the manual-removal-before-reconnect guidance from this
+      // semantic flag instead of matching internal warning codes.
+      ...(disconnected.warning
+        ? {
+            warning: {
+              ...disconnected.warning,
+              ...(disconnected.warning.code === DEVICE_SYNC_HISTORICAL_RESET_REVOKE_FAILED_ERROR_CODE
+                ? { historicalResetIncomplete: true as const }
+                : {}),
+            },
+          }
+        : {}),
     };
   }
 

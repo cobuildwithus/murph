@@ -256,7 +256,18 @@ describe('assistant protocol index planning', () => {
     expect(plan.systemPrompt).not.toContain('Supported experiment protocols:')
   })
 
-  it('injects Murph onboarding skill activation through route planning', async () => {
+  it.each([
+    {
+      effectiveThreadIsDirect: true,
+      label: 'direct',
+    },
+    {
+      effectiveThreadIsDirect: null,
+      label: 'unknown-directness',
+    },
+  ] as const)('injects Murph onboarding skill activation for a $label conversation through route planning', async ({
+    effectiveThreadIsDirect,
+  }) => {
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
     planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
     planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
@@ -268,6 +279,11 @@ describe('assistant protocol index planning', () => {
       toolProfile: 'provider-turn',
     }
 
+    const sharedPlan = createSharedPlan({
+      onboardingGuidanceOpen: true,
+    })
+    sharedPlan.conversationPolicy.audience.effectiveThreadIsDirect = effectiveThreadIsDirect
+
     const plan = await resolveAssistantRouteTurnPlan({
       executionContext: null,
       input: createMessageInput(),
@@ -278,9 +294,7 @@ describe('assistant protocol index planning', () => {
       },
       route: createRoute(),
       session: createSession(),
-      sharedPlan: createSharedPlan({
-        onboardingGuidanceOpen: true,
-      }),
+      sharedPlan,
     })
 
     const skillRef = buildAssistantSkillFileRef('murph-onboarding')
@@ -299,6 +313,45 @@ describe('assistant protocol index planning', () => {
       'roughly 5-6 short assistant messages',
     )
     expect(plan.turnContextPrompt).not.toContain('Natural first-run flow')
+  })
+
+  it('does not inject personal onboarding guidance into a group conversation', async () => {
+    planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
+    planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
+    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
+      supportsNativeResume: false,
+    })
+    const executionProfile: AssistantCodexTurnResolvedExecutionProfile = {
+      promptProfile: 'conversation',
+      threadScope: 'session-thread',
+      toolProfile: 'provider-turn',
+    }
+    const sharedPlan = createSharedPlan({
+      onboardingGuidanceOpen: true,
+    })
+    sharedPlan.conversationPolicy.audience.effectiveThreadIsDirect = false
+
+    const plan = await resolveAssistantRouteTurnPlan({
+      executionContext: null,
+      input: createMessageInput(),
+      profile: executionProfile,
+      promptTimeContext: {
+        currentLocalDate: '2026-05-04',
+        currentTimeZone: 'Asia/Kuala_Lumpur',
+      },
+      route: createRoute(),
+      session: createSession(),
+      sharedPlan,
+    })
+
+    const skillRef = buildAssistantSkillFileRef('murph-onboarding')
+
+    expect(plan.onboardingGuidanceInjected).toBe(false)
+    expect(plan.systemPrompt).not.toContain(skillRef)
+    expect(plan.developerInstructions).not.toContain('Murph onboarding:')
+    expect(plan.developerInstructions).not.toContain(
+      'Before ending a normal reply while onboarding is open, keep onboarding moving unless a skip condition applies',
+    )
   })
 
   it('resolves assistant voice preferences into ElevenLabs planning ids', async () => {

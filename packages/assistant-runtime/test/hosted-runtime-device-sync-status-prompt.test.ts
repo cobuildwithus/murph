@@ -188,6 +188,42 @@ describe("hosted device sync status prompt", () => {
     expect(prompt).toContain("verify it with `vault-cli wearables sources list --format json`");
   });
 
+  it("guides Garmin historical recovery through the confirmed connection reset", () => {
+    const prompt = buildHostedDeviceSyncStatusPromptFromSnapshot({
+      reconnectTargets: [
+        {
+          connectTarget: "garmin",
+          label: "Garmin",
+          provider: "junction",
+          sourceProviderSlug: "garmin",
+        },
+      ],
+      snapshot: buildSnapshot({
+        sources: [
+          {
+            displayName: null,
+            firstSeenAt: "2026-06-01T00:00:00.000Z",
+            lastErrorCode: "HISTORICAL_DATA_RECONNECT_REQUIRED",
+            lastErrorMessage: "Historical data remained incomplete.",
+            lastSeenAt: "2026-06-29T00:00:00.000Z",
+            resourceCount: 0,
+            sourceProviderSlug: "garmin",
+            status: "error",
+          },
+        ],
+      }),
+    });
+
+    expect(prompt).toContain("Garmin historical data remained incomplete after bounded sync checks");
+    expect(prompt).toContain("Current data may still arrive");
+    expect(prompt).toContain("Do not send a connect-only link");
+    expect(prompt).toContain("wearable settings");
+    expect(prompt).toContain("may also disconnect other wearables on that shared connection");
+    expect(prompt).toContain("explicitly confirm the disconnect before reconnecting Garmin");
+    expect(prompt).not.toContain("vault-cli device connect garmin --format json");
+    expect(prompt).not.toContain("deregisters only Garmin");
+  });
+
   it("normalizes lowercase reconnect error codes", () => {
     const prompt = buildHostedDeviceSyncStatusPromptFromSnapshot({
       reconnectTargets: [

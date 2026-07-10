@@ -158,11 +158,6 @@ import {
   createHostedConversationMailboxImportItem,
 } from "./hosted-runtime/mailbox-conversation-import.ts";
 import {
-  ensureHostedInboxSidecarReady,
-  invalidateHostedInboxSidecarReady,
-  isHostedInboxSidecarReady,
-} from "./hosted-runtime/context.ts";
-import {
   enqueueHostedSystemMailboxItem,
   resolveHostedSystemMailboxNextWakeCandidate,
 } from "./hosted-runtime/system-mailbox.ts";
@@ -892,6 +887,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
   const phaseLogger = createHostedRuntimePhaseLogger();
   const emitPhaseLog = phaseLogger.emit;
   const pendingDeferredUsageCaptures = new Set<HostedWorkspaceRunnerDeferredUsageCapture>();
+  const pendingLocalWorkspaceMutationCompletions = new Set<Promise<void>>();
   const pendingMailboxPostCheckpointEffectCompletions = new Set<Promise<void>>();
   const trackCompletion = (
     pendingCompletions: Set<Promise<void>>,
@@ -918,10 +914,16 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
   const trackMailboxPostCheckpointEffects = (completion: Promise<void> | null): void => {
     trackCompletion(pendingMailboxPostCheckpointEffectCompletions, completion);
   };
+  const trackLocalWorkspaceMutationCompletion = (completion: Promise<void> | null): void => {
+    trackCompletion(pendingLocalWorkspaceMutationCompletions, completion);
+  };
   const drainDeferredUsageBestEffort = async (): Promise<void> => {
     await Promise.allSettled(
       [...pendingDeferredUsageCaptures].map((capture) => capture.completion),
     );
+  };
+  const drainLocalWorkspaceMutationsBestEffort = async (): Promise<void> => {
+    await Promise.allSettled([...pendingLocalWorkspaceMutationCompletions]);
   };
 
   try {
@@ -1232,6 +1234,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       limitPerLane: mailboxBudget.fetchLimitPerLane,
       materializeWorkspaceArtifacts: restored.materializeWorkspaceArtifacts,
       trackDeferredUsageCapture,
+      trackLocalWorkspaceMutationCompletion,
       platform: runnerPlatform,
       requestId,
       runtimeWakeSignal: options.runtimeWakeSignal ?? null,
@@ -1291,13 +1294,10 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       stage: "codex.prepare",
       status: "start",
     });
-    const hostedCodexRuntime = await raceHostedRuntimeCancellation(
-      prepareHostedCodexRuntimeEnvironment({
-        operatorHomeRoot: restored.operatorHomeRoot,
-        runtimeEnv: baseRuntimeEnv,
-      }),
-      runtimeAbortController.signal,
-    );
+    const hostedCodexRuntime = await prepareHostedCodexRuntimeEnvironment({
+      operatorHomeRoot: restored.operatorHomeRoot,
+      runtimeEnv: baseRuntimeEnv,
+    });
     emitPhaseLog({
       details: {
         codexEffectiveModelProviderId:
@@ -1340,15 +1340,16 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       stage: "mailbox.import.initial",
       status: "start",
     });
-    const initialMailboxImportResult = await raceHostedRuntimeCancellation(
-      importHostedInitialMailboxForWorkspaceRunner({
-        checkpointRequestBuilder,
-        importItemContext: initialMailboxImportContext,
-        runnerInput: baseRunnerInput,
-        requestId,
-      }),
-      runtimeAbortController.signal,
-    );
+    // Mailbox import can mutate the restored vault through the inbox sidecar.
+    // Keep the container's single-runner ownership until that work settles so
+    // an aborted invocation cannot write into a newer restore at the same path.
+    const initialMailboxImportResult = await importHostedInitialMailboxForWorkspaceRunner({
+      checkpointRequestBuilder,
+      importItemContext: initialMailboxImportContext,
+      runnerInput: baseRunnerInput,
+      requestId,
+    });
+    assertRuntimeNotAborted();
     const initialMailboxImport = initialMailboxImportResult.result;
     const mailboxImportDoneAt = new Date().toISOString();
     emitPhaseLog({
@@ -1547,40 +1548,6 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
     ) {
       return await returnInitialMailboxImportBeforeForeground();
     }
-    if (restored.inboxSidecarNeedsRebuild) {
-      invalidateHostedInboxSidecarReady(restored.vaultRoot);
-    }
-    const inboxReady = isHostedInboxSidecarReady(restored.vaultRoot);
-    emitPhaseLog({
-      details: {
-        inboxReady,
-        rebuild: !inboxReady && restored.inboxSidecarNeedsRebuild,
-        restoreWasCold: restored.restoreWasCold,
-      },
-      input,
-      requestId,
-      stage: "inbox.sidecar",
-      status: "start",
-    });
-    await raceHostedRuntimeCancellation(
-      ensureHostedInboxSidecarReady({
-        bestEffort: true,
-        rebuild: !inboxReady && restored.inboxSidecarNeedsRebuild,
-        requestId,
-        vaultRoot: restored.vaultRoot,
-      }),
-      runtimeAbortController.signal,
-    );
-    emitPhaseLog({
-      details: {
-        rebuild: !inboxReady && restored.inboxSidecarNeedsRebuild,
-      },
-      input,
-      requestId,
-      stage: "inbox.sidecar",
-      status: "done",
-    });
-    assertRuntimeNotAborted();
     const runtimeEnv = hostedCodexRuntime.runtimeEnv;
     let stagedDeviceSyncDirtyAcks: HostedDeviceSyncDirtyProcessedPostCheckpointRecord[] = [];
     let suppressDirtyPendingFetchUntilCheckpoint = false;
@@ -3126,9 +3093,11 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       stage: "runtime",
       status: "fail",
     });
-    if (!hostAbortObserved || error !== hostAbortReason) {
-      await drainDeferredUsageBestEffort();
+    if (hostAbortObserved) {
+      await drainLocalWorkspaceMutationsBestEffort();
+      throw hostAbortReason;
     }
+    await drainDeferredUsageBestEffort();
     throw error;
   } finally {
     hostAbortSignal?.removeEventListener("abort", abortFromHost);
@@ -3142,7 +3111,6 @@ const HOSTED_RUNTIME_PHASE_NAMES = [
   "cli.bridge",
   "codex.prepare",
   "foreground.pass",
-  "inbox.sidecar",
   "mailbox.import.initial",
   "runtime",
   "runtime.return",
