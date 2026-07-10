@@ -1,6 +1,6 @@
 # Hosted Plan Downgrades
 
-Last verified: 2026-05-13
+Last verified: 2026-07-09
 
 ## Goal
 
@@ -50,6 +50,42 @@ Settings:
   can retain its model snapshot through its bounded 180-second idle window.
 - Changing the preference does not create a mailbox item, wake, queue, or a
   second copy in the vault or hosted workspace snapshot.
+
+### Deployment And Rollback
+
+Deploy this additive path in the following order:
+
+1. Apply the nullable Postgres migration.
+2. Deploy the Cloudflare consumer.
+3. Deploy the web workspace producer and Settings control.
+
+An old web response omits the optional override, so the new consumer preserves
+the fleet model. An old Cloudflare consumer ignores the new response field, so
+a web-first deploy is compatible but a saved Sol choice remains temporarily
+ineffective.
+
+The feature changes only the Worker-side selection of the existing forwarded
+`HOSTED_ASSISTANT_MODEL`; it does not change the runner invocation shape or
+runner-side model-config parser. Warm pre-feature runner bundles from the
+current Terra fleet therefore consume the same environment and already accept
+the Sol slug.
+The feature is safe under gradual container rollout and adds no requirement for
+`container_rollout=immediate`. Production deploys must still honor the existing
+global rollout preflight in `apps/cloudflare/DEPLOY.md`, which currently requires
+immediate rollout for the GPT-5.6 fleet and selector-scope compatibility.
+
+The rollback action is to set `HOSTED_ASSISTANT_MODEL=gpt-5.5` and redeploy
+Cloudflare. The new Worker applies the stored Sol intent only when the fleet
+value is exactly Terra, so the GPT-5.5 floor wins without clearing the member
+preference. An old Worker does not consume the preference and likewise
+preserves that floor.
+
+Focused contract coverage proves old/no-field compatibility, Sol over Terra,
+the Terra default, and the GPT-5.5 rollback floor. The normal deploy keeps its
+managed-container fingerprint and live Terra smoke. An optional post-deploy
+canary may select Sol for one eligible Edge member and confirm the next new
+invocation reports Sol; if rollback is exercised, confirm the next invocation
+reports GPT-5.5 while the stored preference remains intact.
 
 ## First-Version Scope
 
