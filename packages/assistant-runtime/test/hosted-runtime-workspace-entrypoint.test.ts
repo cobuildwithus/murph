@@ -470,6 +470,63 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
+  test("preserves the host abort reason when an awaited local mutation rejects", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const hostAbortController = new AbortController();
+    const hostAbortReason = new Error("host request aborted during mailbox import");
+    const importFailure = new Error("mailbox import failed after host abort");
+    const importStarted = createDeferred<void>();
+    const importRelease = createDeferred<void>();
+    let resultPromise: ReturnType<typeof runHostedWorkspaceRuntimeJobInProcess> | null = null;
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      resultPromise = runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_host_abort_before_mailbox_import_failure",
+            leaseGeneration: "7",
+            userId: TEST_USER_ID,
+            workspaceVersion: "0",
+          },
+        }),
+        {
+          async createCheckpointSnapshot() {
+            throw new Error("Aborted mailbox import should not checkpoint.");
+          },
+          async importItem() {
+            importStarted.resolve();
+            await importRelease.promise;
+            return { status: "imported" };
+          },
+          platform: createPlatform({
+            mailboxPort: createMailboxPort({
+              events: [],
+              items: [createMailboxItem({ laneSeq: "1" })],
+            }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests: [],
+              events: [],
+              workspace: createWorkspaceState({ version: "0" }),
+            }),
+          }),
+          signal: hostAbortController.signal,
+          vaultRoot,
+        },
+      );
+
+      await importStarted.promise;
+      hostAbortController.abort(hostAbortReason);
+      importRelease.reject(importFailure);
+
+      await assert.rejects(resultPromise, (error) => error === hostAbortReason);
+    } finally {
+      importRelease.resolve();
+      await resultPromise?.catch(() => undefined);
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
   test("keeps runner ownership until aborted Codex config preparation settles", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const hostAbortController = new AbortController();
@@ -17026,6 +17083,78 @@ describe("hosted workspace runtime entrypoint", () => {
       );
       assert.equal(caught, abortReason);
       assert.equal(artifactPutCount >= 1, true);
+    } finally {
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test("preserves host abort when receipt artifact upload fails after abort", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const abortController = new AbortController();
+    const abortReason = new Error("Synthetic host abort during failed receipt upload.");
+    const uploadFailure = new Error("Synthetic receipt artifact upload failure.");
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const artifactBytesByHash = new Map<string, Uint8Array>();
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      const platform = createPlatform({
+        artifactBytesByHash,
+        events,
+        mailboxPort: createMailboxPort({
+          events,
+          items: [],
+        }),
+        workspacePort: createWorkspacePort({
+          checkpointRequests,
+          events,
+          workspace: createWorkspaceState({ version: "0" }),
+        }),
+      });
+      const putArtifact = platform.artifactStore.put;
+      platform.artifactStore.put = async (artifact) => {
+        await putArtifact(artifact);
+        abortController.abort(abortReason);
+        throw uploadFailure;
+      };
+
+      const outcome = await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            idleCheckpointDelayMs: 200,
+          },
+        }),
+        {
+          async createCheckpointSnapshot() {
+            throw new Error("Failed receipt upload regression should not need snapshots.");
+          },
+          async importItem() {
+            return { status: "imported" };
+          },
+          platform,
+          async runAssistantPhase(input) {
+            await runCanonicalWrite({
+              vaultRoot: input.restored.vaultRoot,
+              operationType: "hosted_canonical_write_test",
+              summary: "Fail a canonical receipt upload after host abort.",
+              occurredAt: TEST_NOW,
+              mutate: async ({ batch }) => {
+                await batch.stageTextWrite(
+                  "journal/failed-artifact-upload-abort.md",
+                  "canonical write before failed receipt upload\n",
+                );
+              },
+            });
+            return { progressed: false };
+          },
+          signal: abortController.signal,
+          vaultRoot,
+        },
+      ).catch((error: unknown) => error);
+
+      assert.equal(outcome, abortReason);
+      assert.equal(checkpointRequests.length, 0);
     } finally {
       await removeTempRoot(vaultRoot);
     }
