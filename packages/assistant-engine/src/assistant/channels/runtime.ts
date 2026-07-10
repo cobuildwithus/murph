@@ -727,9 +727,9 @@ export async function startAssistantChannelActivitySession(input: {
   }
 
   const refreshMs = Math.max(1, Math.trunc(input.refreshMs))
-  const afterMessageRefreshMs = normalizeAssistantChannelActivityDelayMs(
-    input.afterMessageRefreshMs ?? null,
-  )
+  const afterMessageRefreshMs = input.afterMessageRefreshMs == null
+    ? null
+    : Math.max(0, Math.trunc(input.afterMessageRefreshMs))
   const maxSessionMs = normalizeAssistantChannelActivityMaxSessionMs(
     input.maxSessionMs ?? null,
   )
@@ -742,7 +742,7 @@ export async function startAssistantChannelActivitySession(input: {
   let stopped = false
   let stopPromise: Promise<void> | null = null
 
-  scheduleNextRefresh()
+  scheduleRefresh(refreshMs)
   if (maxSessionMs !== null) {
     maxSessionTimer = setTimeout(() => {
       void stopActivity({
@@ -756,23 +756,17 @@ export async function startAssistantChannelActivitySession(input: {
     ...(afterMessageRefreshMs === null
       ? {}
       : {
-          refreshAfterMessage: async () => {
-            scheduleRefresh(afterMessageRefreshMs)
-          },
+          refreshAfterMessage: async () => scheduleRefresh(afterMessageRefreshMs),
         }),
     refreshNow: async () => {
       clearRefreshTimer()
       const scheduleVersion = ++refreshScheduleVersion
       await enqueueRefresh()
       if (scheduleVersion === refreshScheduleVersion) {
-        scheduleNextRefresh()
+        scheduleRefresh(refreshMs)
       }
     },
     stop: stopActivity,
-  }
-
-  function scheduleNextRefresh(): void {
-    scheduleRefresh(refreshMs)
   }
 
   function scheduleRefresh(delayMs: number): void {
@@ -786,7 +780,7 @@ export async function startAssistantChannelActivitySession(input: {
       refreshTimer = null
       void enqueueRefresh().then(() => {
         if (scheduleVersion === refreshScheduleVersion) {
-          scheduleNextRefresh()
+          scheduleRefresh(refreshMs)
         }
       })
     }, delayMs)
@@ -954,16 +948,6 @@ function normalizeAssistantChannelActivityMaxSessionMs(
 
   const normalized = Math.trunc(value)
   return normalized > 0 ? normalized : null
-}
-
-function normalizeAssistantChannelActivityDelayMs(
-  value: number | null,
-): number | null {
-  if (value === null) {
-    return null
-  }
-
-  return Math.max(0, Math.trunc(value))
 }
 
 function unrefAssistantChannelActivityTimer(
