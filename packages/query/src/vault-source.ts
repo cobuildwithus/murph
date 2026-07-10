@@ -5,6 +5,8 @@ import path from "node:path";
 import { createInterface } from "node:readline";
 
 import {
+  experimentDocumentRelativePath,
+  isExperimentDocumentRelativePath,
   validateCurrentVaultMetadata,
   VAULT_LAYOUT,
   VAULT_QUERY_SOURCE,
@@ -138,7 +140,10 @@ export async function listCanonicalSourceManifest(
   }
 
   for (const root of CANONICAL_MARKDOWN_ROOTS) {
-    for (const relativePath of await walkRelativeFiles(vaultRoot, root, ".md")) {
+    const paths = root === VAULT_LAYOUT.experimentsDirectory
+      ? await listCanonicalExperimentMarkdownPaths(vaultRoot)
+      : await walkRelativeFiles(vaultRoot, root, ".md");
+    for (const relativePath of paths) {
       relativePaths.add(relativePath);
     }
   }
@@ -174,6 +179,12 @@ export function isCanonicalQuerySourcePath(relativePath: string): boolean {
   }
 
   for (const root of CANONICAL_MARKDOWN_ROOTS) {
+    if (root === VAULT_LAYOUT.experimentsDirectory) {
+      if (isExperimentDocumentRelativePath(normalized)) {
+        return true;
+      }
+      continue;
+    }
     if (isCanonicalPathUnderRoot(normalized, root, ".md")) {
       return true;
     }
@@ -380,7 +391,7 @@ async function readOptionalCoreEntity(
 }
 
 async function readExperimentEntities(vaultRoot: string): Promise<CanonicalEntity[]> {
-  const relativePaths = await walkRelativeFiles(vaultRoot, VAULT_LAYOUT.experimentsDirectory, ".md");
+  const relativePaths = await listCanonicalExperimentMarkdownPaths(vaultRoot);
 
   const pages = await Promise.all(
     relativePaths.map(async (relativePath) => {
@@ -404,6 +415,19 @@ async function readExperimentEntities(vaultRoot: string): Promise<CanonicalEntit
         "slug",
         `experiment frontmatter at ${relativePath}`,
       );
+      let expectedPath: string | null = null;
+      try {
+        expectedPath = experimentDocumentRelativePath(slug);
+      } catch {
+        expectedPath = null;
+      }
+      if (expectedPath !== relativePath) {
+        throw new QueryVaultSourceError(
+          "EXPERIMENT_DOCUMENT_PATH_MISMATCH",
+          `Experiment frontmatter at ${relativePath} must use a filename matching its slug.`,
+          { relativePath },
+        );
+      }
       const startedOn = pickString(attributes, ["startedOn"]);
       const title =
         pickString(attributes, ["title"]) ??
@@ -440,6 +464,27 @@ async function readExperimentEntities(vaultRoot: string): Promise<CanonicalEntit
   );
 
   return pages.sort(compareCanonicalEntities);
+}
+
+async function listCanonicalExperimentMarkdownPaths(
+  vaultRoot: string,
+): Promise<string[]> {
+  const directoryPath = path.join(vaultRoot, VAULT_LAYOUT.experimentsDirectory);
+
+  try {
+    const entries = await readdir(directoryPath, { withFileTypes: true });
+    return entries
+      .filter((entry) => entry.isFile())
+      .map((entry) => path.posix.join(VAULT_LAYOUT.experimentsDirectory, entry.name))
+      .filter(isExperimentDocumentRelativePath)
+      .sort((left, right) => left.localeCompare(right));
+  } catch (error) {
+    if (isMissingFileError(error)) {
+      return [];
+    }
+
+    throw error;
+  }
 }
 
 async function readProtocolEntities(vaultRoot: string): Promise<CanonicalEntity[]> {
