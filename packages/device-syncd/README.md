@@ -69,6 +69,37 @@ HTTP/env shapes.
 
 Garmin and the hosted `/connect` catalog connect through Junction Link when Junction credentials are configured. Leave `JUNCTION_PROVIDER_FILTER` unset or empty to use the shared default list that matches `/connect`; set it only to narrow the enabled Junction targets for an environment.
 
+Junction connect-time history is tracked per advertised high-signal daily
+source/resource pair (activity, sleep, and `sleep_cycle`), not by a single
+account-level "has data" flag. An activity row therefore cannot close a missing
+sleep obligation. Availability describes capability, so empty sparse resources
+such as workouts or body measurements do not become failed-export signals.
+Garmin history arrives asynchronously
+and incrementally through daily-data webhooks, so incomplete delayed passes use
+the existing bounded backfill ladder to observe resource-aware coverage rather
+than call a separate export endpoint. The coverage-policy version is encoded in
+the existing status scalar instead of adding another metadata field or retry
+store. Legacy terminal metadata is reevaluated lazily, and late webhooks remain
+importable even after the polling budget is exhausted. Authenticated old-window
+webhooks that produce canonical events add bounded source/resource evidence for
+the exact connect window. The existing deduplicated verification unions that
+evidence with fresh REST rows, and complete late coverage clears the source
+error even when Garmin's REST sleep response remains empty. If Garmin coverage
+is still incomplete, only the pending source is marked reconnect-required while
+current ingestion remains active. Hosted apply treats that progress and source
+signal as one monotonic transition: stale or legacy writers cannot clear either
+half, a reset signal exists exactly while progress is exhausted, source-only
+writes stay in their observed connection epoch, future versions stay opaque,
+and hosted/local source keys collapse to one semantic provider source. To
+restart the export, the member explicitly confirms the existing connection-wide
+disconnect and then reconnects Garmin.
+That reset can disconnect other wearables on the same Junction connection, so
+its scope must be explained before confirmation. A failed provider-side
+deregistration still completes the local disconnect, but the member must remove
+the connection in the wearable provider account before reconnecting. Recovery
+does not depend on an automatic export endpoint, operator action, or vendor
+support.
+
 WHOOP uses OAuth plus webhooks.
 Strava uses OAuth, polling, and optional app-global webhooks.
 

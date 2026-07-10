@@ -15,6 +15,11 @@ import {
   shapeHostedDeviceSyncJobHintPayload,
 } from "@murphai/device-syncd/hosted-hints";
 import {
+  DEVICE_SYNC_HISTORICAL_RESET_REVOKE_FAILED_ERROR_CODE,
+  isHistoricalResetIncompleteDeviceSyncAccount,
+  requiresHistoricalResetDeviceSyncSource,
+} from "@murphai/device-syncd/public-account";
+import {
   sanitizeHostedRuntimeErrorCode,
   sanitizeHostedRuntimeErrorText,
   type HostedExecutionDeviceSyncJobHint,
@@ -48,6 +53,10 @@ import {
 
 const HOSTED_DEVICE_SYNC_WAKE_EVENT_SCHEMA = "v1";
 
+const HISTORICAL_RESET_REVOKE_WARNING_MESSAGE =
+  "Provider revoke did not complete while a historical data reset is pending. "
+  + "Remove the connection in the provider account before reconnecting.";
+
 export async function disconnectHostedDeviceSyncConnection(input: {
   connectionId: string;
   registry: DeviceSyncRegistry;
@@ -57,18 +66,26 @@ export async function disconnectHostedDeviceSyncConnection(input: {
   connection: PublicDeviceSyncAccount;
   warning?: { code: string; message: string };
 }> {
-  const existing = await input.store.getConnectionForUser(input.userId, input.connectionId);
+  const target = await input.store.withConnectionMutationLock(input.connectionId, async (tx) => {
+    const connection = await input.store.getConnectionForUser(input.userId, input.connectionId, tx);
+    if (!connection) {
+      throw deviceSyncError({
+        code: "CONNECTION_NOT_FOUND",
+        message: "Hosted device-sync connection was not found for the current user.",
+        retryable: false,
+        httpStatus: 404,
+      });
+    }
 
-  if (!existing) {
-    throw deviceSyncError({
-      code: "CONNECTION_NOT_FOUND",
-      message: "Hosted device-sync connection was not found for the current user.",
-      retryable: false,
-      httpStatus: 404,
-    });
-  }
-
-  const storedAccount = await input.store.getStoredConnectionAccountForUser(input.userId, input.connectionId);
+    const storedAccount = await input.store.getStoredConnectionAccountForUser(
+      input.userId,
+      input.connectionId,
+      tx,
+    );
+    return { connection, storedAccount };
+  });
+  const existing = target.connection;
+  const storedAccount = target.storedAccount;
 
   if (existing.status === "disconnected" && !storedAccount) {
     return {
@@ -77,7 +94,7 @@ export async function disconnectHostedDeviceSyncConnection(input: {
   }
 
   let providerConfigRevokeSucceeded = false;
-  let warning: { code: string; message: string } | undefined;
+  let revokeFailure: { code: string; message: string } | undefined;
 
   if (storedAccount) {
     const provider = input.registry.get(existing.provider);
@@ -100,10 +117,7 @@ export async function disconnectHostedDeviceSyncConnection(input: {
           error instanceof Error ? error.message : "Provider revoke request failed during disconnect.",
         ) ?? "Provider revoke request failed during disconnect.";
 
-        warning = {
-          code,
-          message,
-        };
+        revokeFailure = { code, message };
       }
     }
   }
@@ -127,9 +141,25 @@ export async function disconnectHostedDeviceSyncConnection(input: {
       tx,
     );
 
-    if (storedAccount && !storedAccountMatchesDisconnectTarget(storedAccount, freshStoredAccount)) {
+    if (
+      !publicAccountMatchesDisconnectTarget(existing, freshExisting)
+      || !storedAccountMatchesDisconnectTarget(storedAccount, freshStoredAccount)
+    ) {
       connectionChangedDuringDisconnectError();
     }
+
+    const warning = revokeFailure
+      ? (
+          isHistoricalResetIncompleteDeviceSyncAccount(freshExisting)
+          || (await input.store.listConnectionSources(input.connectionId, tx))
+            .some(requiresHistoricalResetDeviceSyncSource)
+        )
+        ? {
+            code: DEVICE_SYNC_HISTORICAL_RESET_REVOKE_FAILED_ERROR_CODE,
+            message: HISTORICAL_RESET_REVOKE_WARNING_MESSAGE,
+          }
+        : revokeFailure
+      : undefined;
 
     if (
       freshExisting.status === "disconnected"
@@ -148,9 +178,24 @@ export async function disconnectHostedDeviceSyncConnection(input: {
         throw connectionChangedDuringDisconnectError();
       }
 
+      const clearedConnection: PublicDeviceSyncAccount = (
+        freshExisting.lastErrorCode !== null || freshExisting.lastErrorMessage !== null
+      )
+        ? {
+            ...freshExisting,
+            lastErrorCode: null,
+            lastErrorMessage: null,
+            updatedAt: now,
+          }
+        : freshExisting;
+      if (clearedConnection !== freshExisting) {
+        await input.store.syncDurableConnectionState(clearedConnection, tx);
+      }
+
       return {
-        connection: freshExisting,
+        connection: clearedConnection,
         mailboxItemId: null,
+        warning: undefined,
       };
     }
 
@@ -161,6 +206,7 @@ export async function disconnectHostedDeviceSyncConnection(input: {
       return {
         connection: freshExisting,
         mailboxItemId: null,
+        warning,
       };
     }
 
@@ -235,6 +281,7 @@ export async function disconnectHostedDeviceSyncConnection(input: {
     return {
       connection: disconnectedConnection,
       mailboxItemId: mailboxAppend.item.id,
+      warning,
     };
   });
 
@@ -244,7 +291,7 @@ export async function disconnectHostedDeviceSyncConnection(input: {
 
   return {
     connection: disconnectResult.connection,
-    ...(warning ? { warning } : {}),
+    ...(disconnectResult.warning ? { warning: disconnectResult.warning } : {}),
   };
 }
 
@@ -280,6 +327,7 @@ function storedAccountMatchesDisconnectTarget(
   if (
     expected.provider !== current.provider
     || expected.externalAccountId !== current.externalAccountId
+    || expected.connectedAt !== current.connectedAt
     || expected.credential.kind !== current.credential.kind
   ) {
     return false;
@@ -291,7 +339,16 @@ function storedAccountMatchesDisconnectTarget(
       && expected.credential.providerConfigKey === current.credential.providerConfigKey;
   }
 
-  return true;
+  return expected.tokenVersion === current.tokenVersion;
+}
+
+function publicAccountMatchesDisconnectTarget(
+  expected: PublicDeviceSyncAccount,
+  current: PublicDeviceSyncAccount,
+): boolean {
+  return expected.provider === current.provider
+    && expected.externalAccountId === current.externalAccountId
+    && expected.connectedAt === current.connectedAt;
 }
 
 function connectionChangedDuringDisconnectError(): never {
@@ -305,9 +362,11 @@ function connectionChangedDuringDisconnectError(): never {
 
 export async function handleHostedDeviceSyncConnectionEstablished(input: {
   account: {
+    connectedAt: string;
     id: string;
     provider: string;
     scopes: string[];
+    status: PublicDeviceSyncAccount["status"];
   };
   sourceProviderSlug?: string | null;
   connection: Pick<ProviderConnectionResult, "initialJobs" | "nextReconcileAt">;
@@ -340,10 +399,18 @@ export async function handleHostedDeviceSyncConnectionEstablished(input: {
     source: "connection-established",
     userId: ownerId,
   });
-  await persistHostedDeviceSyncWake({
-    wake,
-    store: input.store,
-    persist: async (tx) => {
+  const mailboxAppend = await input.store.withConnectionMutationLock(
+    input.account.id,
+    async (tx) => {
+      const current = await input.store.getConnectionForUser(ownerId, input.account.id, tx);
+      if (
+        !current
+        || current.status !== input.account.status
+        || current.connectedAt !== input.account.connectedAt
+      ) {
+        return null;
+      }
+
       const linkedSource = resolveHostedJunctionLinkedSource({
         account: input.account,
         sourceProviderSlug: input.sourceProviderSlug ?? null,
@@ -370,8 +437,23 @@ export async function handleHostedDeviceSyncConnectionEstablished(input: {
         createdAt: input.now,
         tx,
       });
+
+      return appendHostedMailboxEnvelopeTx({
+        envelope: wake,
+        tx,
+      });
     },
-  });
+  );
+
+  if (
+    mailboxAppend
+    && (
+      mailboxAppend.inserted
+      || (mailboxAppend.duplicate && !mailboxAppend.dedupeConflict)
+    )
+  ) {
+    await startHostedDeviceSyncWakeWorkflow(mailboxAppend.item.id);
+  }
 }
 
 function resolveHostedJunctionLinkedSource(input: {

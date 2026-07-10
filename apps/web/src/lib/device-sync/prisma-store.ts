@@ -6,6 +6,7 @@ import type {
   DeviceSyncPublicIngressStore,
   DeviceSyncWebhookTraceClaimResult,
   MarkPublicDeviceSyncConnectionSetupFailedInput,
+  MarkPublicDeviceSyncConnectionSetupFailedResult,
   OAuthStateRecord,
   PublicDeviceSyncAccount,
   UpsertPublicDeviceSyncConnectionInput,
@@ -154,7 +155,7 @@ export class PrismaDeviceSyncControlPlaneStore
 
   async markConnectionSetupFailed(
     input: MarkPublicDeviceSyncConnectionSetupFailedInput,
-  ): Promise<PublicDeviceSyncAccount | null> {
+  ): Promise<MarkPublicDeviceSyncConnectionSetupFailedResult> {
     return this.connections.markConnectionSetupFailed(input);
   }
 
