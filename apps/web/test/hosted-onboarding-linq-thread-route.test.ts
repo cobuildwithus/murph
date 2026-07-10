@@ -102,6 +102,7 @@ vi.mock("../src/lib/hosted-onboarding/linq-client", async (importOriginal) => {
   return {
     ...actual,
     getHostedLinqChatHandles: vi.fn(),
+    getHostedLinqChatSummary: vi.fn(),
   };
 });
 
@@ -148,6 +149,11 @@ beforeEach(() => {
   vi.mocked(prismaModule.getPrisma).mockReset();
   vi.mocked(linqModule.verifyAndParseHostedLinqWebhookRequest).mockReset();
   vi.mocked(linqClient.getHostedLinqChatHandles).mockReset();
+  vi.mocked(linqClient.getHostedLinqChatSummary).mockReset();
+  vi.mocked(linqClient.getHostedLinqChatSummary).mockResolvedValue({
+    handles: [],
+    isGroup: null,
+  });
   vi.mocked(mailboxStore.readHostedMailboxItemByDedupeKey).mockReset();
   vi.mocked(mailboxStore.appendHostedMailboxEnvelopeTx).mockReset();
   vi.mocked(linqDailyState.incrementHostedLinqInboundDailyState).mockReset();
@@ -1640,6 +1646,72 @@ describe("Linq group chat auto-provision", () => {
 
   it.each([
     {
+      description: "incorrectly says direct",
+      webhookIsGroup: false,
+    },
+    {
+      description: "omits group directness",
+      webhookIsGroup: null,
+    },
+  ] as const)("uses canonical chat metadata when an iMessage webhook $description", async ({
+    webhookIsGroup,
+  }) => {
+    const info = vi.spyOn(console, "info").mockImplementation(() => undefined);
+    const prisma = createStatefulThreadRoutePrisma();
+    vi.mocked(prismaModule.getPrisma).mockReturnValue(prisma as never);
+    vi.mocked(linqModule.verifyAndParseHostedLinqWebhookRequest)
+      .mockReturnValue(buildLinqMessageReceivedEvent({ isGroup: webhookIsGroup }) as never);
+    mockSenderLookup(senderCore);
+    mockSuccessfulGroupProvision({ prisma, senderCore });
+    vi.mocked(linqClient.getHostedLinqChatSummary).mockResolvedValue({
+      handles: [],
+      isGroup: true,
+    });
+    vi.mocked(linqClient.getHostedLinqChatHandles).mockResolvedValue([]);
+
+    try {
+      const response = await handleHostedOnboardingLinqWebhook({
+        rawBody: "{}",
+        signature: null,
+        timestamp: null,
+      });
+
+      expect(response).toMatchObject({
+        ignored: false,
+        ok: true,
+        reason: "wake-appended-thread-route",
+      });
+      expect(linqClient.getHostedLinqChatSummary).toHaveBeenCalledWith({
+        chatId: "chat_group_123",
+        timeoutMs: 1_500,
+      });
+      expect(prisma.hostedThreadContainer.create).toHaveBeenCalledTimes(1);
+      expect(mailboxStore.appendHostedMailboxEnvelopeTx).toHaveBeenLastCalledWith({
+        envelope: expect.objectContaining({
+          kind: "conversation.message",
+          message: expect.objectContaining({
+            linqMessage: expect.objectContaining({
+              chatId: "chat_group_123",
+              threadIsDirect: false,
+            }),
+          }),
+        }),
+        tx: prisma,
+      });
+      expect(info).toHaveBeenCalledWith(
+        "Hosted onboarding diagnostic: hosted-onboarding.webhook.linq.chat-classification.",
+        {
+          diagnostic: "hosted-onboarding.webhook.linq.chat-classification",
+          outcome: "canonical-group",
+        },
+      );
+    } finally {
+      info.mockRestore();
+    }
+  });
+
+  it.each([
+    {
       kind: "direct-paid",
       senderAccess: {
         accountGroupMemberships: [],
@@ -1833,6 +1905,7 @@ describe("Linq group chat auto-provision", () => {
     expect(linqClient.getHostedLinqChatHandles).toHaveBeenCalledWith({
       chatId: "chat_group_123",
     });
+    expect(linqClient.getHostedLinqChatSummary).not.toHaveBeenCalled();
     expect(prisma.hostedThreadContainerParticipant.upsert).toHaveBeenCalledWith(
       expect.objectContaining({
         create: expect.objectContaining({

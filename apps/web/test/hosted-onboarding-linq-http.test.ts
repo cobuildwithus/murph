@@ -14,6 +14,9 @@ import {
   updateHostedLinqChatAvatar,
   updateHostedLinqChatDisplayName,
 } from "@/src/lib/hosted-onboarding/linq";
+import {
+  getHostedLinqChatSummary,
+} from "@/src/lib/hosted-onboarding/linq-client";
 
 const originalFetch = globalThis.fetch;
 const describe = baseDescribe.sequential;
@@ -48,6 +51,56 @@ function readJsonRequestBody(init: RequestInit | undefined): unknown {
 
   return JSON.parse(body);
 }
+
+describe("getHostedLinqChatSummary", () => {
+  afterEach(() => {
+    if (originalFetch) {
+      vi.stubGlobal("fetch", originalFetch);
+      return;
+    }
+
+    Reflect.deleteProperty(globalThis, "fetch");
+  });
+
+  it("reads top-level canonical group directness from the chat endpoint", async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => {
+      void _input;
+      void _init;
+      return createJsonResponse({
+        handles: [
+          {
+            handle: "+15550000000",
+            is_me: true,
+            status: "active",
+          },
+        ],
+        is_group: true,
+      }, 200);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(getHostedLinqChatSummary({
+      chatId: "chat_123",
+      timeoutMs: 1_500,
+    })).resolves.toEqual({
+      handles: [
+        {
+          handle: "+15550000000",
+          isMe: true,
+          status: "active",
+        },
+      ],
+      isGroup: true,
+    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      new URL("chats/chat_123", "https://linq.example.test/api/partner/v3/"),
+      expect.objectContaining({
+        method: "GET",
+        signal: expect.any(AbortSignal),
+      }),
+    );
+  });
+});
 
 describe("sendHostedLinqChatMessage", () => {
   beforeEach(() => {

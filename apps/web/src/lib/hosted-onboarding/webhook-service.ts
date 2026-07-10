@@ -9,6 +9,10 @@ import {
   sendHostedLinqReadReceipt,
   verifyAndParseHostedLinqWebhookRequest,
 } from "./linq";
+import {
+  getHostedLinqChatSummary,
+} from "./linq-client";
+import { hostedOnboardingError } from "./errors";
 import { assertHostedTelegramWebhookSecret, parseHostedTelegramWebhookUpdate } from "./telegram";
 import {
   planHostedOnboardingLinqWebhook,
@@ -96,6 +100,8 @@ export type {
 } from "./webhook-service-types";
 
 type HostedWebhookPostResponseScheduler = (task: () => Promise<void>) => void;
+
+const HOSTED_LINQ_CHAT_CLASSIFICATION_TIMEOUT_MS = 1_500;
 
 export async function handleHostedOnboardingLinqWebhook(input: {
   rawBody: string;
@@ -216,6 +222,11 @@ export async function handleHostedOnboardingLinqWebhook(input: {
       return response;
     }
 
+    const planningEvent = await resolveHostedLinqPlanningEvent({
+      event,
+      signal: input.signal,
+    });
+
     const currentInboundReply: HostedLinqCurrentInboundReplyProof | null =
       event.event_type === "message.received"
         ? buildHostedLinqCurrentInboundReplyProof(event)
@@ -248,7 +259,7 @@ export async function handleHostedOnboardingLinqWebhook(input: {
           prisma,
           (transaction) =>
             planHostedOnboardingLinqWebhook({
-              event,
+              event: planningEvent,
               firstContactAdmitted: recordedAdmission?.kind === "allow",
               requireFirstContactAdmission,
               prisma: transaction,
@@ -276,7 +287,7 @@ export async function handleHostedOnboardingLinqWebhook(input: {
               prisma,
               (transaction) =>
                 planHostedOnboardingLinqWebhook({
-                  event,
+                  event: planningEvent,
                   firstContactAdmitted: true,
                   requireFirstContactAdmission,
                   prisma: transaction,
@@ -329,7 +340,7 @@ export async function handleHostedOnboardingLinqWebhook(input: {
                 prisma,
                 (transaction) =>
                   planHostedOnboardingLinqWebhook({
-                    event,
+                    event: planningEvent,
                     firstContactAdmitted: true,
                     requireFirstContactAdmission,
                     prisma: transaction,
@@ -421,6 +432,98 @@ export async function handleHostedOnboardingLinqWebhook(input: {
     });
     throw error;
   }
+}
+
+async function resolveHostedLinqPlanningEvent(input: {
+  event: Parameters<typeof requireHostedLinqMessageReceivedEvent>[0];
+  signal?: AbortSignal;
+}): Promise<Parameters<typeof requireHostedLinqMessageReceivedEvent>[0]> {
+  if (input.event.event_type !== "message.received") {
+    return input.event;
+  }
+
+  const messageEvent = requireHostedLinqMessageReceivedEvent(input.event);
+  const webhookIsGroup = messageEvent.data.chat?.is_group;
+  if (webhookIsGroup === true) {
+    logHostedLinqChatClassification("webhook-group");
+    return messageEvent;
+  }
+
+  if (messageEvent.data.is_from_me || !isHostedLinqIMessage(messageEvent)) {
+    if (webhookIsGroup === false) {
+      logHostedLinqChatClassification("webhook-direct");
+    }
+    return messageEvent;
+  }
+
+  let canonicalIsGroup: boolean | null;
+  try {
+    const summary = await getHostedLinqChatSummary({
+      chatId: messageEvent.data.chat_id,
+      timeoutMs: HOSTED_LINQ_CHAT_CLASSIFICATION_TIMEOUT_MS,
+      ...(input.signal ? { signal: input.signal } : {}),
+    });
+    canonicalIsGroup = summary.isGroup;
+  } catch (error) {
+    logHostedLinqChatClassification("canonical-unavailable");
+    if (input.signal?.aborted) {
+      throw error;
+    }
+    throw hostedOnboardingError({
+      cause: error,
+      code: "LINQ_CHAT_CLASSIFICATION_UNAVAILABLE",
+      httpStatus: 502,
+      message: "Linq chat classification is unavailable.",
+      retryable: true,
+    });
+  }
+
+  if (canonicalIsGroup === null) {
+    logHostedLinqChatClassification("canonical-unavailable");
+    throw hostedOnboardingError({
+      code: "LINQ_CHAT_CLASSIFICATION_UNAVAILABLE",
+      httpStatus: 502,
+      message: "Linq chat classification is unavailable.",
+      retryable: true,
+    });
+  }
+
+  logHostedLinqChatClassification(canonicalIsGroup ? "canonical-group" : "canonical-direct");
+  return {
+    ...messageEvent,
+    data: {
+      ...messageEvent.data,
+      chat: {
+        id: messageEvent.data.chat_id,
+        ...(messageEvent.data.chat ?? {}),
+        is_group: canonicalIsGroup,
+      },
+    },
+  };
+}
+
+function isHostedLinqIMessage(
+  event: ReturnType<typeof requireHostedLinqMessageReceivedEvent>,
+): boolean {
+  return [
+    event.data.preferred_service,
+    event.data.service,
+    event.data.sender_handle?.service,
+    event.data.chat?.owner_handle?.service,
+  ].some((service) => service?.trim().toLowerCase() === "imessage");
+}
+
+function logHostedLinqChatClassification(
+  outcome:
+    | "canonical-direct"
+    | "canonical-group"
+    | "canonical-unavailable"
+    | "webhook-direct"
+    | "webhook-group",
+): void {
+  logHostedOnboardingDiagnostic("hosted-onboarding.webhook.linq.chat-classification", {
+    outcome,
+  });
 }
 
 async function maybeSendHostedLinqIngressReadReceipt(input: {

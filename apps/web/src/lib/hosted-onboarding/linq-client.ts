@@ -192,16 +192,23 @@ export type HostedLinqChatHandleSummary = {
   status: string | null;
 };
 
-export async function getHostedLinqChatHandles(input: {
+export type HostedLinqChatSummary = {
+  handles: HostedLinqChatHandleSummary[];
+  isGroup: boolean | null;
+};
+
+export async function getHostedLinqChatSummary(input: {
   chatId: string;
   signal?: AbortSignal;
-}): Promise<HostedLinqChatHandleSummary[]> {
+  timeoutMs?: number;
+}): Promise<HostedLinqChatSummary> {
   const response = await fetchHostedLinqApiOrThrow({
     method: "GET",
     operation: "chat read",
     path: `chats/${encodeURIComponent(normalizeRequiredString(input.chatId, "chat id"))}`,
     signal: input.signal,
     timeoutMessage: "Linq chat read timed out.",
+    timeoutMs: input.timeoutMs,
   });
 
   if (!response.ok) {
@@ -213,18 +220,34 @@ export async function getHostedLinqChatHandles(input: {
   }
 
   const payload = await readHostedLinqOptionalJsonResponse<{
-    chat?: { handles?: unknown } | null;
+    chat?: { handles?: unknown; is_group?: unknown } | null;
     handles?: unknown;
+    is_group?: unknown;
   }>(response);
   const handles = Array.isArray(payload?.handles)
     ? payload.handles
     : Array.isArray(payload?.chat?.handles)
       ? payload.chat.handles
       : [];
+  const isGroup = typeof payload?.is_group === "boolean"
+    ? payload.is_group
+    : typeof payload?.chat?.is_group === "boolean"
+      ? payload.chat.is_group
+      : null;
 
-  return handles
-    .map(parseHostedLinqChatHandleSummary)
-    .filter((handle): handle is HostedLinqChatHandleSummary => handle !== null);
+  return {
+    handles: handles
+      .map(parseHostedLinqChatHandleSummary)
+      .filter((handle): handle is HostedLinqChatHandleSummary => handle !== null),
+    isGroup,
+  };
+}
+
+export async function getHostedLinqChatHandles(input: {
+  chatId: string;
+  signal?: AbortSignal;
+}): Promise<HostedLinqChatHandleSummary[]> {
+  return (await getHostedLinqChatSummary(input)).handles;
 }
 
 function parseHostedLinqChatHandleSummary(value: unknown): HostedLinqChatHandleSummary | null {
@@ -411,6 +434,7 @@ async function fetchHostedLinqApiOrThrow(input: {
   path: string;
   signal?: AbortSignal;
   timeoutMessage: string;
+  timeoutMs?: number;
 }): Promise<Response> {
   const { apiBaseUrl, apiToken } = requireHostedOnboardingLinqConfig();
 
@@ -422,6 +446,7 @@ async function fetchHostedLinqApiOrThrow(input: {
       method: input.method,
       path: input.path,
       signal: input.signal,
+      timeoutMs: input.timeoutMs,
     });
   } catch (error) {
     if (error instanceof LinqApiTimeoutError) {
