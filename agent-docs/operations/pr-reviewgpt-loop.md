@@ -57,9 +57,9 @@ current-task user opt-out.
    browser lane. Pass the PR ref through `REVIEW_GPT_PR_URL` so
    `scripts/package-audit-context-full.sh` adds
    `review-gpt-pr-context/pr.diff` and `changed-files.txt` to the guarded
-   source snapshot. Capture the response in an uncommitted `audit-packages/`
-   artifact and require the preset's `REVIEW_COMPLETE` marker before treating
-   the round as complete:
+   `codebase.zip` source snapshot. Capture the response in an uncommitted
+   `audit-packages/` artifact and require the preset's `REVIEW_COMPLETE` marker
+   before treating the round as complete:
 
    ```bash
    REVIEW_GPT_PR_URL=<pr-url-or-number> \
@@ -75,7 +75,8 @@ current-task user opt-out.
    `Eragon.app` on CDP port `9448`, `Phlebas.app` on `9442`, or
    `Mountain.app` on `9450`, always with profile `Default` and
    `app_connector=current` so review context comes from the guarded ZIP and
-   repomix attachments, not a ChatGPT connector.
+   not a ChatGPT connector. ReviewGPT attaches that snapshot as
+   `codebase.zip`; Repomix is disabled by default and is not part of this flow.
 
    A lane is considered usable when its managed profile is unlocked, or when its
    configured CDP endpoint is already alive. The default random path skips a
@@ -95,9 +96,9 @@ current-task user opt-out.
 
 3. Confirm the captured output is an actual completed review before triaging
    it. If the run dies, times out, leaves an empty/preliminary file, lacks
-   `REVIEW_COMPLETE`, or reports missing/unreadable ZIP or repomix artifacts,
-   the round does not count. Rerun it against the same pushed head after fixing
-   the concrete tooling/profile problem.
+   `REVIEW_COMPLETE`, or reports a missing/unreadable `codebase.zip`, the round
+   does not count. Rerun it against the same pushed head after fixing the
+   concrete tooling/profile problem.
 
    Treat a suspiciously fast turnaround as the same kind of invalid round. A
    genuine `pr-review` sweep on the intended reasoning model takes several
