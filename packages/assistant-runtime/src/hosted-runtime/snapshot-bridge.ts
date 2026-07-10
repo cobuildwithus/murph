@@ -1,9 +1,8 @@
 import { rm } from "node:fs/promises";
 import path from "node:path";
 
-import {
-  HostedRuntimeCheckpointInterruptedByWakeError,
-  type HostedWorkspaceRuntimeJobOptions,
+import type {
+  HostedWorkspaceRuntimeJobOptions,
 } from "../hosted-runtime.ts";
 import {
   pruneTerminalWriteOperationRecords,
@@ -20,9 +19,6 @@ import {
   type HostedWorkspaceSnapshotArchiveExtraPath,
   type HostedWorkspaceSnapshotSizeDiagnostics,
 } from "@murphai/runtime-state/node";
-import type {
-  RuntimeWakeNotification,
-} from "./runtime-wake.ts";
 import {
   compactHostedPendingAssistantInputIds,
 } from "./pending-input-index.ts";
@@ -128,7 +124,6 @@ export interface HostedWorkspaceSnapshotArchiveBuilder {
 }
 
 export interface HostedWorkspaceRuntimeBridgeOptionsInput {
-  consumePendingRuntimeWake?: () => RuntimeWakeNotification | null;
   decodeMailboxPayload?: HostedWorkspaceMailboxPayloadDecoder;
   platform: HostedWorkspaceRuntimeJobOptions["platform"];
   readCurrentLease?: HostedRuntimeBridgeReadCurrentLease;
@@ -155,7 +150,6 @@ export function createHostedWorkspaceRuntimeBridgeJobOptions(
     createCheckpointSnapshot: async (checkpointInput) => {
       return await createHostedWorkspaceBridgeCheckpointSnapshot({
         platform: input.platform,
-        consumePendingRuntimeWake: input.consumePendingRuntimeWake,
         readCurrentLease,
         request: {
           attemptId: input.request.attemptId,
@@ -217,7 +211,6 @@ export function createHostedRuntimeBridgeLeaseFromWorkspaceRequest(
 }
 
 async function createHostedWorkspaceBridgeCheckpointSnapshot(input: {
-  consumePendingRuntimeWake?: () => RuntimeWakeNotification | null;
   platform: HostedWorkspaceRuntimeJobOptions["platform"];
   previousWorkspaceCheckpointedAt: string | null;
   readCurrentLease: HostedRuntimeBridgeReadCurrentLease;
@@ -278,7 +271,6 @@ interface HostedWorkspaceSnapshotTimingDetails
 }
 
 interface HostedWorkspaceBridgeV2SnapshotInput {
-  consumePendingRuntimeWake?: () => RuntimeWakeNotification | null;
   legacyMaterialization: Awaited<
     ReturnType<typeof prepareLegacyWorkspaceRefsForV2SnapshotMaterialization>
   >;
@@ -556,13 +548,6 @@ async function createHostedWorkspaceV2Snapshot(
       directUploadTimings,
     );
 
-    const directUploadWakeNotification = input.consumePendingRuntimeWake?.() ?? null;
-    if (directUploadWakeNotification) {
-      throw new HostedRuntimeCheckpointInterruptedByWakeError({
-        notification: directUploadWakeNotification,
-      });
-    }
-
     leaseCheckCount += 1;
     assertHostedWorkspaceBridgeCheckpointLease({
       lease: await input.readCurrentLease(),
@@ -570,13 +555,6 @@ async function createHostedWorkspaceV2Snapshot(
       stage: "before_web_checkpoint",
       userId: input.userId,
     });
-    const leaseCheckWakeNotification = input.consumePendingRuntimeWake?.() ?? null;
-    if (leaseCheckWakeNotification) {
-      throw new HostedRuntimeCheckpointInterruptedByWakeError({
-        notification: leaseCheckWakeNotification,
-      });
-    }
-
     snapshotRef = {
       archive: {
         compression: encrypted.compression,

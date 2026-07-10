@@ -10,14 +10,17 @@ import type {
 } from "@murphai/hosted-execution/assistant-model";
 import {
   HOSTED_RUNTIME_LOG_PATH,
+  HOSTED_RUNTIME_OWNER_RELEASE_IMMEDIATE_RECHECK_QUERY,
+  HOSTED_RUNTIME_OWNER_RELEASED_PATH,
 } from "@murphai/hosted-execution/routes";
-import type {
-  HostedRuntimeLatencyPhaseBreakdown,
-  HostedRuntimeLogRequest,
-  HostedRuntimeWebStatusResponse,
-  HostedWorkspaceInvocationResult,
-  HostedWorkspaceReadResponse,
-  HostedWorkspaceState,
+import {
+  isHostedRuntimeFutureMailboxContinuation,
+  type HostedRuntimeLatencyPhaseBreakdown,
+  type HostedRuntimeLogRequest,
+  type HostedRuntimeWebStatusResponse,
+  type HostedWorkspaceInvocationResult,
+  type HostedWorkspaceReadResponse,
+  type HostedWorkspaceState,
 } from "@murphai/hosted-execution/runtime-control";
 
 import type { HostedExecutionEnvironment } from "../env.js";
@@ -73,6 +76,7 @@ import { RunnerStateStore } from "./runner-state-store.js";
 import { RunnerStoreCache } from "./runner-store-cache.js";
 
 const RUNTIME_ATTEMPT_LIVENESS_PROBE_TIMEOUT_MS = 5_000;
+const RUNTIME_OWNER_RELEASE_CALLBACK_TIMEOUT_MS = 2_000;
 const HOSTED_RUNNER_NATIVE_PROVIDER_EGRESS_ENV = {
   EXA_API_KEY: "exa",
   MAPBOX_ACCESS_TOKEN: "mapbox",
@@ -80,6 +84,24 @@ const HOSTED_RUNNER_NATIVE_PROVIDER_EGRESS_ENV = {
   OPENAI_API_KEY: "openai",
 } as const;
 const HOSTED_RUNNER_WORKERS_AI_TRANSCRIBE_PROVIDER_KIND = "workers_ai_transcribe";
+
+function shouldDeferHostedRuntimeOwnerReleaseCallback(
+  result: HostedWorkspaceInvocationResult,
+): boolean {
+  if (result.immediateRecheckRequested === true) {
+    return false;
+  }
+
+  try {
+    return isHostedRuntimeFutureMailboxContinuation({
+      nextWakeAt: result.nextWakeAt,
+      nextWakeReason: result.nextWakeReason,
+      redactedStatus: result.redactedStatus,
+    });
+  } catch {
+    return true;
+  }
+}
 
 type HostedRunnerNativeProviderCredentialEnvName =
   keyof typeof HOSTED_RUNNER_NATIVE_PROVIDER_EGRESS_ENV;
@@ -267,12 +289,9 @@ export class RuntimeInvocationService {
         throw error;
       }
 
-      const livenessIndeterminate =
-        probeOutcome === "error" || probeOutcome === "timeout";
       if (
         input.acceptedProcessingAttempt
-        && !livenessIndeterminate
-        && probeOutcome !== "mismatch"
+        && probeOutcome === "inactive"
       ) {
         const committedResult =
           await this.recoverAcceptedRuntimeCompletionFromCommittedProgress({
@@ -288,15 +307,22 @@ export class RuntimeInvocationService {
           throw error;
         }
       }
-      if (input.acceptedProcessingAttempt && probeOutcome !== "mismatch") {
-        await this.recordAcceptedRuntimeAttemptFailureBestEffort({
-          error,
-          executionInput,
-          fenceCleared: false,
-          probeOutcome,
-          token,
-          workspaceVersion,
-        });
+      const preserveFence =
+        probeOutcome === "error"
+        || probeOutcome === "timeout"
+        || probeOutcome === "unsupported"
+        || (input.acceptedProcessingAttempt && probeOutcome === "inactive");
+      if (preserveFence) {
+        if (input.acceptedProcessingAttempt) {
+          await this.recordAcceptedRuntimeAttemptFailureBestEffort({
+            error,
+            executionInput,
+            fenceCleared: false,
+            probeOutcome,
+            token,
+            workspaceVersion,
+          });
+        }
         emitHostedExecutionStructuredLog({
           component: "hosted.runner",
           details: {
@@ -308,7 +334,7 @@ export class RuntimeInvocationService {
           },
           level: "warn",
           message:
-          "Hosted runner accepted runtime transport failed before committed progress was visible; preserving the write fence for identity-aware wake recovery.",
+            "Hosted runner runtime transport failed without safe fence-clear proof; preserving the write fence.",
           phase: "failed",
           userId: executionInput.userId,
         });
@@ -348,6 +374,7 @@ export class RuntimeInvocationService {
 
     await this.recordRuntimeCompletionAfterInvoke({
       input: executionInput,
+      result,
       token,
       workspaceVersion,
     });
@@ -355,6 +382,8 @@ export class RuntimeInvocationService {
     emitHostedExecutionStructuredLog({
       component: "hosted.runner",
       details: {
+        runtimeResultImmediateRecheckRequested:
+          result.immediateRecheckRequested === true,
         orchestrationAttemptId: executionInput.orchestrationAttemptId,
         runtimeExecutionDurationMs: Date.now() - input.runtimeWakeStartedAt,
         runtimeResultNextWakeAtPresent: result.nextWakeAt != null,
@@ -393,6 +422,7 @@ export class RuntimeInvocationService {
 
     await this.recordRuntimeCompletionAfterInvoke({
       input: input.executionInput,
+      result: committedResult.result,
       token: input.token,
       workspaceVersion: input.workspaceVersion,
     });
@@ -456,30 +486,46 @@ export class RuntimeInvocationService {
       return { kind: "unknown" };
     }
 
+    // A newer workspace version is the durable commit proof. Newer mailbox
+    // input may intentionally remain ahead of that committed prefix.
     if (
       !status.workspace
       || !isHostedRuntimeWorkspaceVersionAfter(
         status.workspace.version,
         input.workspaceVersion,
       )
-      || !hostedRuntimeMailboxLagDrained(status.mailboxLag)
     ) {
       return { kind: "not_completed" };
     }
 
+    const recoveredResult: HostedWorkspaceInvocationResult = {
+      nextWakeAt: status.workspace.nextWakeAt,
+      nextWakeReason: status.workspace.nextWakeReason,
+      redactedStatus: status.workspace.redactedStatus,
+      status: "idle",
+    };
+    const recoveredNextWakeAtMs = status.workspace.nextWakeAt
+      ? Date.parse(status.workspace.nextWakeAt)
+      : Number.NaN;
+
     return {
       kind: "completed",
       result: {
-        nextWakeAt: status.workspace.nextWakeAt,
-        nextWakeReason: status.workspace.nextWakeReason,
-        redactedStatus: status.workspace.redactedStatus,
-        status: "idle",
+        // Transport loss erased attempt-local wake provenance. A recovered due
+        // wake gets one conservative fact re-read; future wakes retain their
+        // authoritative timer, and normal no-progress completions omit the edge.
+        ...(Number.isFinite(recoveredNextWakeAtMs)
+            && recoveredNextWakeAtMs <= Date.now()
+          ? { immediateRecheckRequested: true as const }
+          : {}),
+        ...recoveredResult,
       },
     };
   }
 
   private async recordRuntimeCompletionAfterInvoke(input: {
     input: RuntimeInvocationInput;
+    result: HostedWorkspaceInvocationResult;
     token: RunnerWriteFenceToken;
     workspaceVersion: string | null;
   }): Promise<void> {
@@ -501,6 +547,7 @@ export class RuntimeInvocationService {
           phase: "checkpoint",
           userId: input.input.userId,
         });
+        return;
       }
     } catch (error) {
       emitHostedExecutionStructuredLog({
@@ -513,6 +560,62 @@ export class RuntimeInvocationService {
         },
         level: "warn",
         message: "Hosted runner runtime execution completed but completion recording failed; preserving completed result without transport retry.",
+        phase: "checkpoint",
+        userId: input.input.userId,
+      });
+      return;
+    }
+
+    if (!shouldDeferHostedRuntimeOwnerReleaseCallback(input.result)) {
+      await this.notifyRuntimeOwnerReleasedBestEffort(input);
+    }
+  }
+
+  private async notifyRuntimeOwnerReleasedBestEffort(input: {
+    input: RuntimeInvocationInput;
+    result: HostedWorkspaceInvocationResult;
+    token: RunnerWriteFenceToken;
+    workspaceVersion: string | null;
+  }): Promise<void> {
+    try {
+      const response = await fetchHostedExecutionWebControlPlaneResponse({
+        ...(this.input.env.hostedWebAllowHttpHosts
+          ? { allowHttpHosts: this.input.env.hostedWebAllowHttpHosts }
+          : {}),
+        baseUrl: this.input.readHostedWebControlBaseUrl(),
+        boundUserId: input.input.userId,
+        callbackSigning: this.input.env.webCallbackSigning,
+        method: "POST",
+        path: HOSTED_RUNTIME_OWNER_RELEASED_PATH,
+        ...(input.result.immediateRecheckRequested === true
+          ? {
+              search:
+                `?${HOSTED_RUNTIME_OWNER_RELEASE_IMMEDIATE_RECHECK_QUERY}=1`,
+            }
+          : {}),
+        timeoutMs: Math.min(
+          this.input.env.webControlTimeoutMs,
+          RUNTIME_OWNER_RELEASE_CALLBACK_TIMEOUT_MS,
+        ),
+      });
+
+      if (!response.ok) {
+        throw new Error(
+          `Hosted runtime owner-release callback failed with HTTP ${response.status}.`,
+        );
+      }
+    } catch (error) {
+      emitHostedExecutionStructuredLog({
+        component: "hosted.runner",
+        details: {
+          ...buildHostedRunnerMetadataOnlyErrorDetails(error),
+          orchestrationAttemptId: input.input.orchestrationAttemptId,
+          workspaceAttemptId: input.token.attemptId,
+          workspaceVersion: input.workspaceVersion,
+        },
+        level: "warn",
+        message:
+          "Hosted runner runtime owner-release recheck callback failed; preserving completed result.",
         phase: "checkpoint",
         userId: input.input.userId,
       });
@@ -967,16 +1070,4 @@ export function isHostedRuntimeWorkspaceVersionAfter(
   } catch {
     return false;
   }
-}
-
-export function hostedRuntimeMailboxLagDrained(
-  mailboxLag: HostedRuntimeWebStatusResponse["mailboxLag"],
-): boolean {
-  return mailboxLag.every((lane) => {
-    try {
-      return BigInt(lane.lag) === 0n;
-    } catch {
-      return lane.lag === "0";
-    }
-  });
 }

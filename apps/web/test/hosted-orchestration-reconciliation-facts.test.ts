@@ -220,6 +220,121 @@ describe("hosted orchestration reconciliation facts", () => {
     vi.useRealTimers();
   });
 
+  describe("runtime owner release actionability", () => {
+    it("preserves the owner horizon when no workspace exists", async () => {
+      mocks.readHostedWorkspace.mockResolvedValue(null);
+
+      await expect(readOwnerReleaseActionable()).resolves.toBe(false);
+    });
+
+    it("signals for visible mailbox lag without a deferred continuation", async () => {
+      mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
+        redactedStatusJson: {
+          conversationImportedSeq: "1",
+          systemImportedSeq: "0",
+        },
+      }));
+      mocks.readHostedMailboxMaxSeqByLane.mockResolvedValue([
+        { lane: "conversation", maxSeq: "2" },
+      ]);
+
+      await expect(readOwnerReleaseActionable()).resolves.toBe(true);
+    });
+
+    it("preserves the owner horizon when no work is currently due", async () => {
+      mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
+        nextWakeAt: "2026-05-20T12:05:00.000Z",
+        nextWakeReason: "assistant",
+      }));
+
+      await expect(readOwnerReleaseActionable()).resolves.toBe(false);
+    });
+
+    it("preserves the owner horizon for a due default wake without mailbox lag", async () => {
+      mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
+        nextWakeAt: FIXED_NOW,
+        nextWakeReason: "assistant",
+      }));
+
+      await expect(readOwnerReleaseActionable()).resolves.toBe(false);
+    });
+
+    it("does not hot-loop lag with a future mailbox continuation", async () => {
+      mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
+        nextWakeAt: "2026-05-20T12:00:15.000Z",
+        nextWakeReason: "mailbox",
+        redactedStatusJson: {
+          conversationImportedSeq: "1",
+          systemImportedSeq: "0",
+        },
+      }));
+      mocks.readHostedMailboxMaxSeqByLane.mockResolvedValue([
+        { lane: "conversation", maxSeq: "2" },
+      ]);
+
+      await expect(readOwnerReleaseActionable()).resolves.toBe(false);
+    });
+
+    it("does not let a due retention wake bypass deferred foreground lag", async () => {
+      mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
+        inboxMediaRetentionWakeAt: FIXED_NOW,
+        nextWakeAt: "2026-05-20T12:00:15.000Z",
+        nextWakeReason: "mailbox",
+        redactedStatusJson: {
+          conversationImportedSeq: "1",
+          systemImportedSeq: "0",
+        },
+      }));
+      mocks.readHostedMailboxMaxSeqByLane.mockResolvedValue([
+        { lane: "conversation", maxSeq: "2" },
+      ]);
+
+      await expect(readOwnerReleaseActionable()).resolves.toBe(false);
+    });
+
+    it("does not hot-loop a retryable block when an earlier future wake wins", async () => {
+      mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
+        nextWakeAt: "2026-05-20T12:00:05.000Z",
+        nextWakeReason: "assistant",
+        redactedStatusJson: {
+          conversationImportedSeq: "1",
+          hostedMailboxRetryableBlockedCount: 1,
+          systemImportedSeq: "0",
+        },
+      }));
+      mocks.readHostedMailboxMaxSeqByLane.mockResolvedValue([
+        { lane: "conversation", maxSeq: "2" },
+      ]);
+
+      await expect(readOwnerReleaseActionable()).resolves.toBe(false);
+    });
+
+    it("signals a due wake even when retryable mailbox lag remains", async () => {
+      mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
+        nextWakeAt: "2026-05-20T12:00:00.000Z",
+        nextWakeReason: "assistant",
+        redactedStatusJson: {
+          conversationImportedSeq: "1",
+          hostedMailboxRetryableBlockedCount: 1,
+          systemImportedSeq: "0",
+        },
+      }));
+      mocks.readHostedMailboxMaxSeqByLane.mockResolvedValue([
+        { lane: "conversation", maxSeq: "2" },
+      ]);
+
+      await expect(readOwnerReleaseActionable()).resolves.toBe(true);
+    });
+
+    it("preserves the owner horizon for a due retention wake without mailbox lag", async () => {
+      mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
+        inboxMediaRetentionWakeAt: "2026-05-20T12:00:00.000Z",
+      }));
+
+      await expect(readOwnerReleaseActionable()).resolves.toBe(false);
+    });
+  });
+
   it("returns source-less reconciliation facts for mailbox lag", async () => {
     mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
       redactedStatusJson: {
@@ -2465,6 +2580,16 @@ function routeContext(): { params: Promise<{ userId: string }> } {
       userId: MEMBER_ID,
     }),
   };
+}
+
+async function readOwnerReleaseActionable(): Promise<boolean> {
+  const {
+    readHostedRuntimeOwnerReleaseMailboxLagActionable,
+  } = await import("../src/lib/hosted-orchestration/runtime-reconciliation-facts");
+
+  return await readHostedRuntimeOwnerReleaseMailboxLagActionable({
+    userId: MEMBER_ID,
+  });
 }
 
 function noMailboxBacklog() {
