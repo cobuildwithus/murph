@@ -3093,11 +3093,11 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       stage: "runtime",
       status: "fail",
     });
-    if (hostAbortObserved && error === hostAbortReason) {
+    if (hostAbortObserved) {
       await drainLocalWorkspaceMutationsBestEffort();
-    } else {
-      await drainDeferredUsageBestEffort();
+      throw hostAbortReason;
     }
+    await drainDeferredUsageBestEffort();
     throw error;
   } finally {
     hostAbortSignal?.removeEventListener("abort", abortFromHost);
