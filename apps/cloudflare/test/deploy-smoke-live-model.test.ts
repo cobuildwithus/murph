@@ -7,8 +7,8 @@ import {
 } from "../src/deploy-smoke-live-model.ts";
 
 describe("deploy live model turn smoke", () => {
-  it("uses the nano model for the bounded live deploy smoke", () => {
-    expect(DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL).toBe("gpt-5.4-nano");
+  it("uses Terra for the bounded live deploy smoke", () => {
+    expect(DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL).toBe("gpt-5.6-terra");
   });
 
   it("reads only the top-level OpenAI Responses model", () => {

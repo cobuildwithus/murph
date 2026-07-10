@@ -17,11 +17,6 @@ Mode:
 - Do not claim to have implemented, landed, or committed changes. Report findings only.
 - Do not use `review:gpt`, `pnpm review:gpt`, `cobuild-review-gpt`, external ChatGPT autosends, or `thread wake` to satisfy this pass.
 
-Runtime expectation:
-- This audit may take 5 to 10 minutes on a non-trivial diff.
-- Work methodically instead of rushing to a shallow answer.
-- Parent agent: run this pass before coverage and final review.
-
 Preflight (required):
 - Read `agent-docs/exec-plans/active/COORDINATION_LEDGER.md` before review.
 - Read `agent-docs/SECURITY.md` before reviewing the diff.
@@ -38,6 +33,10 @@ Review for:
 - injection, request-smuggling, SSRF/open-redirect, path traversal, cache-key, idempotency, race, or retry behavior that can cross authority boundaries
 - exposure regressions only when they create concrete medium-or-higher unnecessary disclosure of personal data, health data, contact identifiers, account identifiers, private paths outside the privileged local/container Codex boundary, secrets, credentials, or attacker-useful diagnostic text
 
+Evidence gate:
+- Before reporting, trace the changed source to its sink or authority boundary, establish a reachable execution path, inspect existing validation or mitigation, and explain the concrete attacker capability and impact.
+- Prompt policy is not runtime authority. Verify identity, arguments, approvals, and side effects at the application-owned boundary when the finding depends on them.
+
 Do not report:
 - low-severity findings, defense-in-depth ideas, style issues, naming issues, broad cleanup opportunities, maintainability concerns, or speculative hardening ideas
 - generic privacy preferences, consent analysis, product-policy analysis, data-use philosophy, or minimization suggestions that do not meet the medium-or-higher security severity bar
@@ -49,13 +48,11 @@ Output requirements:
 - For each finding include: `severity`, `file:line`, `issue`, `impact`, `recommended fix`.
 - Omit anything below `medium`; do not include a low-severity section.
 - Include `Open questions / assumptions` when uncertainty remains.
-- If no medium-or-higher findings exist, state that explicitly and list only residual medium-or-higher security risks or concrete checks still left to human verification.
+- If no evidence-backed medium-or-higher findings exist, state that explicitly and list only residual medium-or-higher security risks or concrete checks still left to human verification.
 
 Response format:
 - Return a normal text review, not patch attachments and not follow-on prompts for more agents.
 - Keep the focus on concrete vulnerabilities. Raise exposure/minimization findings only when they meet the medium-or-higher severity gate, and recommend the smallest fix that closes the risk.
 
-Thoroughness bias:
-- Assume there is at least one real medium-or-higher security issue in scope until you have tried hard to disprove it.
-- Hunt for all such issues, not the first one; for every credible issue, give the exact fix the parent should make.
-- If you still return no findings, explain why the risky paths are actually safe, not merely unmodified.
+Stop rule:
+- Stop after every changed trust-boundary path in scope has an evidence-backed disposition. Zero findings is valid; do not lower the severity bar or invent speculative hardening work.

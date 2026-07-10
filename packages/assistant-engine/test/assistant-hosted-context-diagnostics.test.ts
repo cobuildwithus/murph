@@ -1,6 +1,3 @@
-import path from 'node:path'
-import { mkdtemp } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
 import { describe, expect, it } from 'vitest'
 import { createAssistantModelTarget } from '@murphai/operator-config/assistant-backend'
 import { serializeAssistantProviderSessionOptions } from '@murphai/operator-config/assistant/provider-config'
@@ -12,9 +9,7 @@ import {
   fingerprintHostedAssistantContextValue,
   resolveHostedAssistantContextFingerprintSecret,
 } from '../src/assistant/hosted-context-diagnostics.js'
-import { ASSISTANT_FIRST_CONTACT_WELCOME_MESSAGE } from '../src/assistant/first-contact-welcome.js'
 import {
-  appendAssistantTranscriptEntries,
   resolveAssistantStatePaths,
   type ResolvedAssistantSession,
 } from '../src/assistant/store.js'
@@ -212,22 +207,9 @@ describe('hosted assistant context diagnostics', () => {
     })
   })
 
-  it('emits session-resolution trace metrics from existing transcript entries', async () => {
-    const vault = await mkdtemp(path.join(tmpdir(), 'murph-context-diagnostics-'))
+  it('emits session-resolution trace metrics without transcript-derived fields', async () => {
+    const vault = '/vaults/context-diagnostics'
     const sessionId = 'session-context-diagnostics'
-    await appendAssistantTranscriptEntries(vault, sessionId, [
-      {
-        createdAt: '2026-04-25T09:00:00.000Z',
-        kind: 'assistant',
-        text: ASSISTANT_FIRST_CONTACT_WELCOME_MESSAGE,
-      },
-      {
-        createdAt: '2026-04-25T09:01:00.000Z',
-        kind: 'user',
-        text: 'Continue setup.',
-      },
-    ])
-
     const providerOptions = serializeAssistantProviderSessionOptions({
       approvalPolicy: 'never',
       model: 'gpt-5.5',
@@ -295,7 +277,6 @@ describe('hosted assistant context diagnostics', () => {
         },
         threadId: null,
         threadIsDirect: undefined,
-        vault,
       },
       resolved,
       source: 'assistant-message',
@@ -303,8 +284,6 @@ describe('hosted assistant context diagnostics', () => {
 
     expect(traceEvents).toHaveLength(1)
     expect(traceEvents[0]).toMatchObject({
-      existingTranscriptEntryCount: 2,
-      existingTranscriptWelcomeVisible: true,
       actorFallbackConversationIndexed: false,
       conversationLookupIndexedCandidateCount: 1,
       conversationLookupKeyCount: 2,
@@ -316,6 +295,8 @@ describe('hosted assistant context diagnostics', () => {
       sessionTurnCount: 2,
       source: 'assistant-message',
     })
+    expect(traceEvents[0]).not.toHaveProperty('existingTranscriptEntryCount')
+    expect(traceEvents[0]).not.toHaveProperty('existingTranscriptWelcomeVisible')
     expect(JSON.stringify(traceEvents[0])).not.toContain('actor-alpha')
     expect(JSON.stringify(traceEvents[0])).not.toContain('identity-alpha')
     expect(JSON.stringify(traceEvents[0])).not.toContain('thread-one')

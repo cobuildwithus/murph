@@ -16,6 +16,7 @@ Use this as Murph operating guidance, not as a consumer article. Ground the answ
 ## Hand Off
 
 - Use food-journal for meal capture and retrospective pattern finding from photos/notes.
+- When exact product ingredients or allergens could change the digestive plan, read food-journal's exact-label section and use its lookup/provenance workflow before inferring from a product name.
 - Use nutrition-strategy for broad diet planning once the digestion constraint is understood.
 - Use cardiometabolic-health when glucose/labs are primary.
 - Route blood in stool, black stool, unintentional weight loss, persistent vomiting, trouble swallowing, severe pain, fever, dehydration, nocturnal diarrhea, new symptoms after age 50, pregnancy, or inflammatory bowel disease concerns to clinician support.

@@ -42,5 +42,9 @@ export function readHostedRuntimeTemporalEnvironment(
 export function readHostedUserRuntimeWorkflowOptions(
   source: HostedRuntimeTemporalEnvSource = process.env,
 ): HostedUserRuntimeWorkflowOptions {
-  return readHostedRuntimeTemporalWorkflowOptions(source);
+  const options = readHostedRuntimeTemporalWorkflowOptions(source);
+  return {
+    ensureRuntimeProcessingStartToCloseTimeoutMs:
+      options.ensureRuntimeProcessingStartToCloseTimeoutMs,
+  };
 }

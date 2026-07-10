@@ -83,7 +83,7 @@ describe("hostedUserRuntimeWorkflow entrypoint", () => {
     expect(handlerOrders[1]).toBeLessThan(firstFactsReadOrder);
     expect(condition).toHaveBeenCalledWith(expect.any(Function));
     expect(proxyActivities).toHaveBeenCalledWith(expect.objectContaining({
-      startToCloseTimeout: 10_000,
+      startToCloseTimeout: 60_000,
     }));
     expect(proxyActivities).toHaveBeenCalledWith(expect.objectContaining({
       startToCloseTimeout: 15_000,

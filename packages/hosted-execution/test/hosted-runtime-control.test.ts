@@ -835,6 +835,25 @@ describe("hosted runtime control contracts", () => {
     });
     expect(parseHostedRuntimeLatencyTraceRequest({
       event: {
+        assistantInputIds: ["input_1", "input_2"],
+        at: "2026-04-26T00:00:01.500Z",
+        milestone: "first_codex_text_observed",
+        runtimeAttemptId: "attempt_1",
+        source: "linq",
+        type: "assistant_milestone",
+      },
+    })).toEqual({
+      event: {
+        assistantInputIds: ["input_1", "input_2"],
+        at: "2026-04-26T00:00:01.500Z",
+        milestone: "first_codex_text_observed",
+        runtimeAttemptId: "attempt_1",
+        source: "linq",
+        type: "assistant_milestone",
+      },
+    });
+    expect(parseHostedRuntimeLatencyTraceRequest({
+      event: {
         at: "2026-04-26T00:00:02.000Z",
         milestone: "mailbox_import_done",
         runtimeAttemptId: "attempt_1",
@@ -887,6 +906,17 @@ describe("hosted runtime control contracts", () => {
         providerRequestOrdinal: 0,
         source: "linq",
         type: "provider_started",
+      },
+    })).toThrow(/message is not allowed/u);
+    expect(() => parseHostedRuntimeLatencyTraceRequest({
+      event: {
+        assistantInputIds: ["input_1"],
+        at: "2026-04-26T00:00:01.500Z",
+        message: "raw text",
+        milestone: "first_codex_output_observed",
+        runtimeAttemptId: "attempt_1",
+        source: "linq",
+        type: "assistant_milestone",
       },
     })).toThrow(/message is not allowed/u);
     expect(() => parseHostedRuntimeLatencyTraceRequest({
@@ -977,6 +1007,13 @@ describe("hosted runtime control contracts", () => {
       schemaVersion: 1,
       dispatch: {
         invokeReceivedAtEpochMs: 1_777_000_000_000,
+      },
+      preProvider: {
+        workspaceAssistantPreAutomationMs: 11,
+        executionTargetHydrateMs: 2,
+        systemMailboxMaintenanceMs: 3,
+        memberPreferencesPrePlanningMs: 4,
+        automationBootstrapMs: 5,
       },
       provider: {
         codexAppServerInitializeMs: 7,

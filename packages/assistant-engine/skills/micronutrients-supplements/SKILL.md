@@ -44,6 +44,26 @@ Ask: "Are you trying to correct a known low lab, improve a symptom/performance t
 - Symptoms like fatigue are nonspecific; do not infer deficiency from symptoms alone when testing is accessible and risk matters.
 - Normal labs reduce the case for repletion, but do not answer every performance or symptom claim.
 - A product label is not proof of third-party testing or effective dose.
+- A purchase is not proof that a supplement is effective, safe, medically appropriate, or authorized to start or change dose.
+
+## Resolve and preserve supplement labels
+
+Use `vault-cli supplement search-labels` for one product or `vault-cli
+supplement search-labels-batch` for several before web lookup. Increase the
+default result limit only when the first result is ambiguous, generic, or
+missing a likely variant. Use a returned serving, dose, or amount instead of
+asking the user to restate it. If the database is unavailable or incomplete,
+prefer an official manufacturer label or another primary source and state the
+gap.
+
+When saving known label facts, preserve the full active ingredient panel with
+repeated `vault-cli supplement save --ingredient` JSON-object flags and save the
+label serving with `--serving-size`; never collapse a multi-ingredient product
+to one headline ingredient.
+
+Treat contaminant observations as exact-product lab context only. Never infer
+them across similar names, brands, ingredients, categories, or product lines;
+absence of an exact test is not proof that a product is clean or safe.
 
 ## Safety Boundaries
 

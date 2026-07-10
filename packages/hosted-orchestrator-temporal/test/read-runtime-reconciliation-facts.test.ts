@@ -5,6 +5,9 @@ import {
   HOSTED_EXECUTION_SIGNING_KEY_ID_HEADER,
   HOSTED_EXECUTION_USER_ID_HEADER,
 } from "@murphai/hosted-execution/contracts";
+import {
+  HOSTED_RUNTIME_RECONCILIATION_FACTS_HTTP_TIMEOUT_MS,
+} from "@murphai/hosted-execution/temporal-env";
 import type {
   HostedRuntimeReconciliationFacts,
 } from "@murphai/hosted-execution/orchestration-control";
@@ -22,6 +25,12 @@ describe("readRuntimeReconciliationFacts", () => {
 
   it("calls the hosted web reconciliation endpoint with signed user scope", async () => {
     await stubHostedWebEnvironment();
+    vi.stubEnv("HOSTED_DEVICE_SYNC_RECOVERY_SWEEP_TIMEOUT_MS", "removed");
+    vi.stubEnv("HOSTED_RUNTIME_DEMAND_TIMEOUT_MS", "removed");
+    vi.stubEnv("HOSTED_RUNTIME_RECONCILIATION_FACTS_TIMEOUT_MS", "removed");
+    const timeoutSignal = new AbortController().signal;
+    const timeoutSpy = vi.spyOn(AbortSignal, "timeout")
+      .mockReturnValue(timeoutSignal);
 
     const facts: HostedRuntimeReconciliationFacts = {
       blocked: null,
@@ -54,6 +63,10 @@ describe("readRuntimeReconciliationFacts", () => {
     );
     expect(url.search).toBe("");
     expect(request.init?.method).toBe("GET");
+    expect(request.init?.signal).toBe(timeoutSignal);
+    expect(timeoutSpy).toHaveBeenCalledWith(
+      HOSTED_RUNTIME_RECONCILIATION_FACTS_HTTP_TIMEOUT_MS,
+    );
     expect(headers.get(HOSTED_EXECUTION_USER_ID_HEADER)).toBe("member_test");
     expect(headers.get(HOSTED_EXECUTION_SIGNING_KEY_ID_HEADER)).toBe("test-key");
     expect(headers.has(HOSTED_EXECUTION_SIGNATURE_HEADER)).toBe(true);
@@ -81,16 +94,6 @@ describe("readRuntimeReconciliationFacts", () => {
     );
   });
 
-  it("rejects malformed reconciliation timeout values with numeric suffixes", async () => {
-    await stubHostedWebEnvironment();
-    vi.stubEnv("HOSTED_RUNTIME_RECONCILIATION_FACTS_TIMEOUT_MS", "10000ms");
-
-    await expect(readRuntimeReconciliationFacts({
-      userId: "member_test",
-    })).rejects.toThrow(
-      "HOSTED_RUNTIME_RECONCILIATION_FACTS_TIMEOUT_MS must be a positive integer.",
-    );
-  });
 });
 
 interface ObservedRequest {

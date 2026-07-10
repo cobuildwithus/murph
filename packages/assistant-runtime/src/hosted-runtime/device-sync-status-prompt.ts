@@ -1,3 +1,8 @@
+import {
+  isDeviceSyncConnectionSetupConfirmed,
+  isEstablishedDeviceSyncConnection,
+} from "@murphai/device-syncd/public-account";
+
 import type {
   HostedRuntimeDeviceSyncPort,
 } from "./platform.ts";
@@ -35,7 +40,7 @@ const HOSTED_DEVICE_SYNC_RECONNECT_REQUIRED_SOURCE_ERROR_CODES = new Set([
   "TOKEN_REFRESH_EXPIRED",
   "TOKEN_REFRESH_FAILED",
 ]);
-const HOSTED_DEVICE_SYNC_RECONNECT_NOTICE_LIMIT = 4;
+const HOSTED_DEVICE_SYNC_STATUS_NOTICE_LIMIT = 4;
 
 export async function buildHostedDeviceSyncStatusPrompt(input: {
   deviceSyncPort: HostedRuntimeDeviceSyncPort | null | undefined;
@@ -46,7 +51,7 @@ export async function buildHostedDeviceSyncStatusPrompt(input: {
     return null;
   }
 
-  const snapshot = await fetchHostedDeviceSyncReconnectStatusSnapshot({
+  const snapshot = await fetchHostedDeviceSyncStatusSnapshot({
     deviceSyncPort: input.deviceSyncPort,
     reconnectTargets: input.reconnectTargets,
     signal: input.signal ?? null,
@@ -61,7 +66,7 @@ export async function buildHostedDeviceSyncStatusPrompt(input: {
   });
 }
 
-async function fetchHostedDeviceSyncReconnectStatusSnapshot(input: {
+async function fetchHostedDeviceSyncStatusSnapshot(input: {
   deviceSyncPort: HostedRuntimeDeviceSyncPort;
   reconnectTargets: readonly HostedDeviceSyncStatusPromptReconnectTarget[];
   signal: AbortSignal | null;
@@ -80,7 +85,7 @@ async function fetchHostedDeviceSyncReconnectStatusSnapshot(input: {
 
       return await input.deviceSyncPort.fetchSnapshot({
         includeCredentialMaterial: false,
-        limit: HOSTED_DEVICE_SYNC_RECONNECT_NOTICE_LIMIT,
+        limit: HOSTED_DEVICE_SYNC_STATUS_NOTICE_LIMIT,
         ...(sourceProviderSlug ? { sourceProviderSlug } : { provider }),
         signal: input.signal,
       }).catch(() => null);
@@ -174,28 +179,94 @@ export function buildHostedDeviceSyncStatusPromptFromSnapshot(input: {
   reconnectTargets: readonly HostedDeviceSyncStatusPromptReconnectTarget[];
   snapshot: HostedDeviceSyncRuntimeSnapshot;
 }): string | null {
+  const activeConnections = collectHostedDeviceSyncActiveConnections({
+    reconnectTargets: input.reconnectTargets,
+    snapshot: input.snapshot,
+  });
   const notices = collectHostedDeviceSyncReconnectNotices({
     reconnectTargets: input.reconnectTargets,
     snapshot: input.snapshot,
   });
-  if (notices.length === 0) {
+  const reconnectLabels = new Set(
+    notices.map((notice) => notice.label.trim().toLowerCase()),
+  );
+  const activeConnectionLines = activeConnections
+    .filter((label) => !reconnectLabels.has(label.trim().toLowerCase()))
+    .slice(0, HOSTED_DEVICE_SYNC_STATUS_NOTICE_LIMIT)
+    .map((label) => `- ${label} has an active connection.`);
+  const noticeLines = notices
+    .slice(0, HOSTED_DEVICE_SYNC_STATUS_NOTICE_LIMIT)
+    .map(renderHostedDeviceSyncReconnectNoticeLine);
+  const statusLines = [...activeConnectionLines, ...noticeLines];
+  if (statusLines.length === 0) {
     return null;
   }
 
-  const noticeLines = notices
-    .slice(0, HOSTED_DEVICE_SYNC_RECONNECT_NOTICE_LIMIT)
-    .map(renderHostedDeviceSyncReconnectNoticeLine);
-
   return [
-    "Connected wearable sync status for this turn:",
-    ...noticeLines,
+    "Wearable connection status for this turn:",
+    ...statusLines,
     "",
     "Use this operational context when answering:",
-    "- For sleep, recovery, activity, workout, health digest, stale wearable data, or missing-device questions, say the affected wearable needs reconnect before interpreting gaps.",
-    "- Do not treat missing wearable data after the latest imported day as no sleep, no workouts, no activity, or failed adherence.",
+    "- Treat every active or reconnect-required wearable above as already set up. Do not offer initial wearable connection; offer reconnect only when the status explicitly says it is required.",
+    ...(notices.length > 0
+      ? [
+          "- For sleep, recovery, activity, workout, health digest, stale wearable data, or missing-device questions, say the affected wearable needs reconnect before interpreting gaps.",
+          "- Do not treat missing wearable data after the latest imported day as no sleep, no workouts, no activity, or failed adherence.",
+        ]
+      : []),
     "- When the exact latest imported data day matters, verify it with `vault-cli wearables sources list --format json` or the relevant normalized `vault-cli wearables ... --format json` command before naming a date.",
     "- In user-facing replies, use product labels such as WHOOP. Mention Junction only when debugging low-level sync plumbing.",
   ].join("\n");
+}
+
+function collectHostedDeviceSyncActiveConnections(input: {
+  reconnectTargets: readonly HostedDeviceSyncStatusPromptReconnectTarget[];
+  snapshot: HostedDeviceSyncRuntimeSnapshot;
+}): string[] {
+  const labels = new Map<string, string>();
+
+  for (const entry of input.snapshot.connections) {
+    if (!isEstablishedDeviceSyncConnection(entry.connection)) {
+      continue;
+    }
+
+    let hasLabeledSource = false;
+    for (const source of entry.sources ?? []) {
+      if (source.status !== "connected") {
+        continue;
+      }
+
+      const reconnectTarget = resolveHostedDeviceSyncReconnectTargetForSource({
+        reconnectTargets: input.reconnectTargets,
+        sourceProviderSlug: source.sourceProviderSlug,
+      });
+      const label = reconnectTarget?.label
+        ?? formatHostedDeviceSyncProviderLabel(source.sourceProviderSlug);
+      labels.set(label.trim().toLowerCase(), label);
+      hasLabeledSource = true;
+    }
+
+    if (hasLabeledSource) {
+      continue;
+    }
+
+    const provider = normalizeHostedDeviceSyncKey(entry.connection.provider);
+    const reconnectTarget = provider
+      ? resolveHostedDeviceSyncReconnectTargetForProvider({
+          provider,
+          reconnectTargets: input.reconnectTargets,
+        })
+      : null;
+    const label = reconnectTarget?.label
+      ?? (provider && provider !== "junction"
+        ? formatHostedDeviceSyncProviderLabel(provider)
+        : null);
+    if (label) {
+      labels.set(label.trim().toLowerCase(), label);
+    }
+  }
+
+  return [...labels.values()];
 }
 
 function collectHostedDeviceSyncReconnectNotices(input: {
@@ -206,6 +277,13 @@ function collectHostedDeviceSyncReconnectNotices(input: {
   const seen = new Set<string>();
 
   for (const entry of input.snapshot.connections) {
+    if (
+      entry.connection.status === "disconnected"
+      || !isDeviceSyncConnectionSetupConfirmed(entry.connection)
+    ) {
+      continue;
+    }
+
     for (const source of entry.sources ?? []) {
       const sourceNotice = buildHostedDeviceSyncSourceReconnectNotice({
         reconnectTargets: input.reconnectTargets,
@@ -255,7 +333,6 @@ function buildHostedDeviceSyncSourceReconnectNotice(input: {
     commandConnectTargetSafe: isHostedDeviceSyncReconnectCommandSafe(reconnectTarget),
     errorCode,
     label: reconnectTarget?.label
-      ?? input.source.displayName
       ?? formatHostedDeviceSyncProviderLabel(input.source.sourceProviderSlug),
     sourceProviderSlug,
   };
@@ -290,8 +367,9 @@ function buildHostedDeviceSyncAccountReconnectNotice(input: {
     commandConnectTargetSafe: isHostedDeviceSyncReconnectCommandSafe(reconnectTarget),
     errorCode,
     label: reconnectTarget?.label
-      ?? input.connection.connection.displayName
-      ?? formatHostedDeviceSyncProviderLabel(provider),
+      ?? (provider === "junction"
+        ? "Wearable connection"
+        : formatHostedDeviceSyncProviderLabel(provider)),
     sourceProviderSlug: null,
   };
 }

@@ -266,7 +266,7 @@ run_timed_step "legal pdf" pnpm legal:pdf
 
 run_prisma_generate() {
   if [[ "${MURPH_HOSTED_WEB_PRISMA_GENERATED_PREPARED:-0}" == "1" ]]; then
-    verify_log "skip prisma generate; root acceptance typecheck already prepared it"
+    verify_log "skip prisma generate; already prepared"
     return 0
   fi
 
