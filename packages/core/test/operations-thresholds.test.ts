@@ -621,6 +621,60 @@ test("write batches emit exact hosted canonical write receipts", async () => {
   });
 });
 
+test("hosted canonical receipts preserve raw delete authority during replay", async () => {
+  const vaultRoot = await makeTempDirectory("murph-core-hosted-raw-delete-replay");
+  await initializeVault({ vaultRoot });
+
+  const targetRelativePath = "raw/inbox/expired/attachment.bin";
+  const targetAbsolutePath = resolveVaultPath(vaultRoot, targetRelativePath).absolutePath;
+  await fs.mkdir(path.dirname(targetAbsolutePath), { recursive: true });
+  await fs.writeFile(targetAbsolutePath, "expired private bytes", "utf8");
+
+  const batch = await WriteBatch.create({
+    vaultRoot,
+    operationType: "hosted_raw_delete_replay",
+    summary: "preserve raw delete authority",
+    hostedCanonicalWritePort: {
+      async persistCanonicalWrite() {},
+    },
+  });
+  await batch.stageDelete(targetRelativePath, { allowRaw: true });
+  const receipt = await batch.commit();
+  assert.ok(receipt);
+  assert.deepEqual(receipt.actions, [{
+    allowRaw: true,
+    existedBefore: true,
+    kind: "delete",
+    targetRelativePath,
+  }]);
+
+  await fs.writeFile(targetAbsolutePath, "expired private bytes", "utf8");
+  await applyHostedCanonicalWriteReceipt({
+    readPayload: async () => null,
+    receipt,
+    vaultRoot,
+  });
+  await assert.rejects(fs.stat(targetAbsolutePath), { code: "ENOENT" });
+
+  await fs.writeFile(targetAbsolutePath, "expired private bytes", "utf8");
+  await assert.rejects(
+    applyHostedCanonicalWriteReceipt({
+      readPayload: async () => null,
+      receipt: {
+        ...receipt,
+        actions: [{
+          existedBefore: true,
+          kind: "delete",
+          targetRelativePath,
+        }],
+      },
+      vaultRoot,
+    }),
+    /Use copyRawArtifact for raw writes/u,
+  );
+  assert.equal(await fs.readFile(targetAbsolutePath, "utf8"), "expired private bytes");
+});
+
 test("WriteBatch reserves unique stage artifacts under concurrent raw staging", async () => {
   const vaultRoot = await makeTempDirectory("murph-core-concurrent-raw-stage");
   await initializeVault({ vaultRoot });

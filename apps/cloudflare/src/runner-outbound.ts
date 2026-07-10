@@ -1437,7 +1437,10 @@ async function handleRunnerWorkspaceSnapshotCompleteRequest(input: {
       snapshotId: input.snapshotId,
       userId: input.userId,
     });
-    return jsonError("Hosted workspace snapshot checkpoint reason must be idle_shutdown.", 400);
+    return jsonError(
+      "Hosted workspace snapshot checkpoint reason must be idle_shutdown.",
+      400,
+    );
   }
   if (
     checkpointRequest.attemptId !== writeFence.attemptId

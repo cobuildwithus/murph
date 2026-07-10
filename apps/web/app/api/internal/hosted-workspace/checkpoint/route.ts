@@ -48,9 +48,10 @@ export const POST = withJsonError(async (request: Request) => {
     checkpointed: result.status === "updated",
     ...(result.status === "conflict"
       ? { checkpointConflictReason: "workspace_version" }
-      : result.status === "foreground_pending"
-        ? { checkpointConflictReason: "foreground_pending" }
-        : {}),
+      : {}),
+    ...(result.conversationInputAhead === undefined
+      ? {}
+      : { conversationInputAhead: result.conversationInputAhead }),
     ...(result.status === "updated"
       ? { replacedSnapshotRef: result.replacedSnapshotRef }
       : {}),

@@ -117,6 +117,20 @@ export async function writeTextFileAtomic(targetAbsolutePath: string, content: s
   );
 }
 
+export async function writeFileAtomic(targetAbsolutePath: string, content: Uint8Array): Promise<void> {
+  await withPreparedAtomicTempFile(
+    targetAbsolutePath,
+    async (tempAbsolutePath) => {
+      await fs.writeFile(tempAbsolutePath, content, {
+        flag: "wx",
+      });
+    },
+    async (tempAbsolutePath) => {
+      await replaceTargetWithPreparedTempFile(targetAbsolutePath, tempAbsolutePath);
+    },
+  );
+}
+
 export async function copyFileAtomic(sourceAbsolutePath: string, targetAbsolutePath: string): Promise<void> {
   await withPreparedAtomicTempFile(
     targetAbsolutePath,

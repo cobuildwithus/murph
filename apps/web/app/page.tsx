@@ -24,25 +24,27 @@ import { formatHostedLandingPricingLongSummary } from "@/src/lib/hosted-onboardi
 import { resolveHostedInstallScriptUrl } from "@/src/lib/hosted-onboarding/landing";
 import { getHostedPageAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
 import { getMurphGithubStarCount } from "@/src/lib/github-stars";
-import { createMurphPageMetadata } from "@/src/lib/site-metadata";
+import {
+  createMurphPageMetadata,
+  MURPH_DEFAULT_METADATA_DESCRIPTION,
+  MURPH_DEFAULT_METADATA_TITLE,
+  MURPH_DEFAULT_OPEN_GRAPH_DESCRIPTION,
+} from "@/src/lib/site-metadata";
 
 import { StickyNav } from "./sticky-nav";
 
 export const metadata: Metadata = createMurphPageMetadata({
-  title: "Murph — Discover what actually makes you healthier",
-  description:
-    "Your health assistant for you and your people. Run health challenges with friends, get a weekly family health newsletter, and discover what actually makes you healthier.",
+  title: MURPH_DEFAULT_METADATA_TITLE,
+  description: MURPH_DEFAULT_METADATA_DESCRIPTION,
   alternates: {
     canonical: "/",
   },
   openGraph: {
-    description:
-      "Text Murph over iMessage. Run health challenges with friends, get a weekly family health newsletter, and see what actually makes you healthier.",
+    description: MURPH_DEFAULT_OPEN_GRAPH_DESCRIPTION,
     type: "website",
   },
   twitter: {
-    description:
-      "Text Murph over iMessage. Run health challenges with friends, get a weekly family health newsletter, and see what actually makes you healthier.",
+    description: MURPH_DEFAULT_OPEN_GRAPH_DESCRIPTION,
   },
 });
 

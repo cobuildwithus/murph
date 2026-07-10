@@ -73,7 +73,11 @@ pull pending device-sync dirty rows
 run best-effort local inbox projection plus audio/video transcript enrichment without checkpointing it
 run local runtime work until idle or budget
 wait for the runtime idle window, a coalesced wake, or a projected runtime wake
-checkpoint final dirty runtime state with checkpoint reason idle_shutdown
+checkpoint final dirty runtime state with checkpoint reason idle_shutdown; commit
+  the valid workspace-CAS snapshot even when web observes newer conversation input
+if the default-mode runtime remains live, import that ahead input immediately;
+  during retention-only work or shutdown, leave the durable mailbox row for
+  web/Temporal reconciliation
 project redacted status/logs
 ```
 
@@ -223,14 +227,18 @@ runtime work. Device sync, provider cleanup, browser-vault refresh, system
 maintenance, and idle checkpointing are idle-only lanes; they must not make a
 user message wait for background work to finish.
 
-When a foreground wake arrives while idle maintenance is running, the
-maintenance lane must yield, abort, or reschedule. This includes
-idle-shutdown checkpointing: an in-progress idle checkpoint must not keep a
-fresh user message behind snapshot or checkpoint completion. The runtime may
-carry forward the maintenance wake, dirty state, or retry metadata needed to
-finish later, but assistant admission, assistant automation, outbox intent
-creation, and reply delivery must stay independent of device-sync and
-maintenance completion.
+When a foreground wake arrives before idle maintenance commits to a snapshot,
+the maintenance lane must yield, abort, or reschedule. Once a direct-R2 snapshot
+has been built and its workspace-version compare-and-swap is still valid, web
+commits that snapshot and its requested wake projection even if it observes
+newer durable conversation input. It returns `conversationInputAhead` so a
+still-live default-mode runtime can import the row immediately after publication.
+A retention-only runtime or a runtime already shutting down returns and leaves
+the mailbox row to durable web/Temporal reconciliation. The runner must not
+discard a valid uploaded
+snapshot or create a second metadata-only shutdown snapshot. Assistant
+admission, assistant automation, outbox intent creation, and reply delivery
+remain independent of device-sync and other maintenance completion.
 If an `inbox_media_retention` invocation is the active write-fenced child when
 foreground/default work arrives, the runner preempts that exact child through
 the existing container abort seam, clears the old fence by identity, and starts
@@ -277,6 +285,23 @@ order:
 Do not add a deploy orchestrator or generic capability system by default. Use
 this compatibility invariant first, and only introduce heavier machinery when a
 specific protocol change cannot be made safe with the sequence above.
+For the `conversationInputAhead` checkpoint and owner-release callback rollout,
+deploy Cloudflare Worker plus runner first with immediate container rollout,
+wait for the managed-container smoke to prove the new bundle, then deploy web.
+During the first phase the new runtime continues to understand an old web
+deployment's `foreground_pending` response, and owner-release calls to an old
+web deployment may fail without affecting completed work. After web deploys,
+checkpoint responses may add `conversationInputAhead` and the callback can emit
+the existing Temporal recheck signal. The new producer may also attach the
+positive `immediateRecheckRequested` query for invocation-local schedule edges;
+old producers omit it and retain owner-horizon latency. Web must therefore be
+the last deploy when removing due-wake level triggering, and the first rollback.
+An old runner ignores the additive checkpoint field;
+durable mailbox lag and the existing owner horizon still recover the input,
+although its old post-upload wake interruption may retain the extra-snapshot
+latency. The versions are correctness-compatible in either direction, so either
+side may be rolled back independently during this compatibility window; the
+recommended order minimizes the time spent on the old latency path.
 Because the Temporal worker can deploy automatically before the manual
 Cloudflare worker rollout, new Temporal-to-Cloudflare `ensure-processing` fields
 must either be accepted by the currently deployed worker or keep processing
@@ -386,6 +411,29 @@ immediate recheck and cannot all suppress each other.
 Cloudflare only reports the accepted-attempt failure through the existing
 signed runtime-log callback; it does not schedule retries or become a recovery
 orchestrator.
+Separately, after an exact successful completion clears the matching write
+fence, Cloudflare makes at most one signed `POST` to
+`/api/internal/hosted-runtime/owner-released`. The request has no body, uses a
+timeout capped at two seconds, and is not retried. A known strictly future
+mailbox retry continuation skips the callback unless the invocation carries the
+positive `immediateRecheckRequested` edge. The callback accepts only no query or
+the exact signature-bound `immediateRecheckRequested=1` query. That transient
+edge means this invocation produced a default or retention schedule which it
+committed but did not service; inherited and already-attempted wakes do not emit
+it on the ordinary result path. Transport-loss recovery is the narrow exception:
+after explicit inactive-container proof and durable workspace-version advance,
+Cloudflare has lost attempt-local provenance and may conservatively emit the
+edge for a recovered due default wake, causing one facts re-read. It does not do
+so for a future wake. Web binds the user through the signed request. Without the edge, it
+re-derives runnable mailbox lag and never treats a persisted due wake as
+level-triggered signal authority. With the edge, it emits the same payload-free
+`runtime_recheck_requested` signal so Temporal immediately re-reads durable
+facts and either runs due work or owns the exact future timer. Future mailbox
+retry continuations remain deferred to their retry time. A callback timeout,
+transport failure, non-success response, or Temporal signal failure is logged
+as metadata-only degradation and cannot change the completed runtime result.
+This is a prompt recheck hint over the existing durable reconciliation path,
+not a new work owner, queue, alarm, or signal kind.
 Duplicate provider retries, duplicate email delivery attempts, or duplicate
 workflow attempts are safe because mailbox append dedupes by event id and
 Temporal signals only coalesce pending work.
@@ -545,10 +593,15 @@ replaces that fence directly instead of asking web status to complete it first.
 For the active-wake probe, a verifiably stopped container shell
 (`ctx.container.running === false`) is the same explicit no-active-child proof.
 Committed-progress recovery stays in the transport-failure adapter, where the
-transport outcome is the thing being reconciled. Mismatched liveness probes
-clear the fence because they prove the active child is not the fenced attempt;
-unsupported, error, and timeout probe outcomes preserve the accepted fence when
-durable progress is not visible yet.
+transport outcome is the thing being reconciled. Only explicit inactive proof
+may enter accepted committed-progress recovery. A workspace version advance is
+committed prefix progress even when newer durable mailbox lag remains; recovery
+clears the exact fence and the owner-release callback asks Temporal to process
+actionable remaining lag. Mismatch may clear a transport-failure fence because it
+proves that the active child is not the fenced attempt. Active, unsupported,
+error, and timeout probe outcomes preserve the fence regardless of whether a
+status read appears to show progress. Exact successful completion clears the
+fence only by the matching attempt identity.
 This prevents duplicate replacement while a live child may still be running and
 leaves replacement ownership in the exact identity-aware wake path.
 When the outer RunnerContainer active-operation pointer is missing, a container
@@ -688,15 +741,39 @@ abort, and data-key unwrap metadata, stores a short-lived upload session without
 the URL or data key, verifies the object by `HEAD` on completion, and never
 receives the snapshot body. The v2 format is a greenfield zstd hard cut, so
 gzip v2 refs are intentionally unsupported; legacy restore compatibility stays
-limited to pre-v2 workspace refs. The bridge no longer writes foreground working
-commits. Mailbox import, active-turn acceptance, `canonical_runtime_commit`,
-assistant-runtime commits, provider cleanup, system-mailbox receipts, and
-pre-delivery outbox state must not enter workspace snapshot construction; the
-foreground caller tripwire fails those paths before the bridge. Bootstrap or
-live foreground paths must not fall back to broad foreground full snapshots,
-path-scoped working deltas, legacy hot
-producers, Worker-body snapshot uploads, or artifact-sidecar v2 producers.
-`idle_shutdown` is the only new checkpoint snapshot producer.
+limited to pre-v2 workspace refs. The bridge no longer writes foreground
+working commits. Mailbox import, active-turn acceptance, assistant-runtime
+commits, canonical-runtime commits, provider cleanup, system-mailbox receipts,
+and pre-delivery outbox state must not enter workspace snapshot construction;
+the foreground caller tripwire fails those paths before the bridge. Bootstrap
+or live foreground paths must not fall back to broad foreground full snapshots,
+path-scoped working deltas, legacy hot producers, Worker-body snapshot uploads,
+or artifact-sidecar v2 producers. `idle_shutdown` is the only new checkpoint
+snapshot producer. `canonical_runtime_commit` instead uploads exact canonical
+write receipts and publishes a receipt-log ref, bounded to 64 pending entries
+and 64 KiB, through a status-only workspace checkpoint that retains the prior
+snapshot ref. Capacity and log shape are validated before referenced payloads
+are uploaded. Cold restore replays that log over the prior snapshot and marks
+affected context domains dirty; when the restored log is at the hard entry
+bound, the runtime consolidates it through an idle snapshot before foreground
+mailbox or assistant work. That recovery snapshot publishes an immediate
+mailbox-continuation wake so web accepts it even when foreground conversation
+rows are already pending; immediately after that snapshot, a status-only
+checkpoint durably restores the prior wake projection before foreground work
+or any early return, and the runner then drains any queued runtime wake. The
+recovery snapshot retains the receipt-log pointer and the original prior wake
+as its retry marker; only the wake-reset status checkpoint clears them, so a
+crash or ambiguous failure between those checkpoints safely repeats idempotent
+receipt replay and consolidation without losing or replacing that prior wake.
+The two receipt-log pointer fields and three recovery-marker fields are
+reserved outside the ordinary 96-field redacted-status budget at both
+transport parsing and workspace persistence boundaries; ordinary status
+remains capped at 96 fields.
+Later idle snapshots omit the receipt-log status. The pending-log
+limits bound replay work, not object
+retention: encrypted owner-scoped receipt, log, and payload artifacts are not
+eagerly deleted after consolidation until the artifact store has a
+reference-safe owner-scoped retention primitive.
 `idle_shutdown` is the snapshot boundary for warm-runner wind-down: it maps to
 a direct-R2 v2 snapshot from the effective restored state, runs through the
 ordinary invocation lease shortly before container sleep, and checks the lease
@@ -725,10 +802,11 @@ restorable during migration, but new bridge snapshots are idle-shutdown direct
 R2 v2 refs only.
 
 Foreground assistant turns do not publish a separate Codex continuity artifact
-or workspace pointer. Provider-native continuity remains a workspace snapshot
-concern: if a container dies before the next idle-shutdown direct-R2 v2 snapshot,
-restore must still be correct from durable mailbox, transcript, and assistant
-runtime state even if provider-native resume optimization is unavailable.
+or snapshot pointer. Provider-native continuity remains an idle workspace
+snapshot concern: if a container dies before the next idle-shutdown direct-R2
+v2 snapshot, restore must still be correct from durable mailbox, exact canonical
+write receipts, transcript, and assistant runtime state even if provider-native
+resume optimization is unavailable.
 Fresh-thread starts and stale native-resume fallback may include bounded recent
 committed transcript history; primary native-resume attempts do not replay that
 history into the provider prompt. Active-turn input is not serialized as
@@ -745,8 +823,9 @@ replica, but they must mark it stale and request refresh after the HTTP response
 Web represents that request as ordinary low-priority runtime work only when its
 freshness policy explicitly asks for it; normal nudges do not become browser-vault
 refresh sweeps just because a workspace has no replica yet. Foreground work may
-schedule refresh as ordinary runtime work, but `idle_shutdown` v2 checkpoints write only
-the workspace snapshot ref; they do not publish browser-vault replicas.
+schedule refresh as ordinary runtime work, but workspace snapshot checkpoints
+write only the workspace snapshot ref; they do not publish browser-vault
+replicas.
 Browser-vault replica writes require the active runtime write fence and publish
 the latest replica ref separately, without changing the workspace checkpoint
 version.
@@ -776,25 +855,45 @@ checkpoint fields that are not required to answer user messages must follow the
 same compatibility rule: old deployed runners may omit them without blocking
 assistant progress, and any stricter lockstep contract needs an explicit
 capability/version rollout plan before it can be required in production.
-The direct-R2 snapshot-complete bridge must preserve semantic checkpoint
-responses from web. In particular, `checkpointed: false` with
-`checkpointConflictReason: "foreground_pending"` is a successful transport
-response that interrupts idle checkpointing so the same invocation can import
-fresh foreground mailbox input; Cloudflare may retire the upload session as an
-orphan candidate, but it must not collapse that response into a generic HTTP
-conflict before `packages/assistant-runtime` handles it.
+The web checkpoint transaction evaluates workspace-version compare-and-swap
+before conversation lag. If the version still matches, it commits the valid
+snapshot even when a conversation row exists above the checkpoint's imported
+sequence. The matching workspace-version CAS makes the request snapshot,
+redacted watermarks, and wake projection one authoritative prefix; conversation
+append does not mutate workspace wake state. Web therefore returns optional
+`conversationInputAhead: true` without splicing an older wake pair into that
+prefix. The flag is a transient observation, not a
+persisted work fact or another checkpoint conflict.
+
+A live default-mode runtime that receives `conversationInputAhead: true`
+immediately runs the existing conversation import/active-turn path after
+checkpoint publication. A retention-only runtime keeps its bounded lane
+separation. If shutdown has started, the runtime does not consume a local wake
+merely to manufacture a replacement wake, does not create a metadata-only
+follow-up snapshot, and does not discard the uploaded snapshot. In both cases
+the durable mailbox row remains visible to web/Temporal reconciliation, and the
+post-fence owner-release callback asks the existing workflow to re-read runnable
+facts promptly; deferred mailbox continuations retain their future wake. If the
+runtime imported conversation input before observing shutdown and therefore
+staged assistant input plus an advanced mailbox watermark, it records a due
+`assistant` wake in the already-required dirty checkpoint. That wake makes the
+restored staged input runnable; it is not a metadata-only handoff checkpoint.
+
+The direct-R2 snapshot-complete bridge and runtime parser retain support for an
+old web deployment's `checkpointed: false` plus
+`checkpointConflictReason: "foreground_pending"` response during rollout. That
+response remains a successful transport-level compatibility result and must not
+be collapsed into a generic HTTP conflict. Current web no longer produces it;
+post-upload local wake checks must not discard a valid snapshot on its behalf.
 Checkpoint-required wake metadata must still respect the configured idle
 checkpoint delay. Due or projected assistant wakes, mailbox budget exhaustion,
 and deferred durable checkpoint follow-ups preserve their invocation-local wake
 candidate for the next `idle_shutdown`, but they do not pull checkpointing
-earlier than the idle timer. If fresh foreground input interrupts checkpoint
-publication with `foreground_pending`, the runtime imports that input in the
-same invocation and then retries the checkpoint so the follow-up wake is durably
-preserved before it is serviced; this does not create another snapshot reason or
-foreground-bypass flag.
-Web must evaluate the workspace-version CAS before returning
-`foreground_pending`: pending conversation input may interrupt only a checkpoint
-whose locked workspace version still equals the request's expected version.
+earlier than the idle timer. A durable checkpoint-effect follow-up still carries
+its real typed wake. Conversation input actually imported and staged before a
+shutdown yield carries a due assistant wake on its real dirty-state checkpoint;
+a bare runtime wake or no-work mailbox notification observed during shutdown
+does not become a metadata-only assistant handoff.
 Retryable mailbox import blocks are mailbox-continuation checkpoints even when
 an earlier assistant or device wake wins the projected `nextWakeReason`; web
 uses the redacted `hostedMailboxRetryableBlockedCount` as the explicit signal.

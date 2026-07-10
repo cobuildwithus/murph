@@ -6,6 +6,7 @@ import {
   EXPERIMENTS_DIRECTORY,
 } from "@murphai/contracts";
 
+import { VAULT_LAYOUT } from "./constants.ts";
 import { VaultError } from "./errors.ts";
 import {
   assertPathWithinVaultOnDisk,
@@ -13,6 +14,7 @@ import {
   isJsonlRelativePath,
   isRawRelativePath,
   isVaultFilesystemCaseInsensitive,
+  normalizeRelativeVaultPathForComparison,
   resolveVaultPath,
   type VaultPathComparisonOptions,
 } from "./path-safety.ts";
@@ -72,6 +74,8 @@ interface PrepareVerifiedTargetOptions {
   createParentDirectory: boolean;
 }
 
+const INTEGRATION_INGEST_ARCHIVE_SUFFIXES = [".gz", ".zip"] as const;
+
 async function pathExists(absolutePath: string): Promise<boolean> {
   try {
     await fs.access(absolutePath);
@@ -82,6 +86,65 @@ async function pathExists(absolutePath: string): Promise<boolean> {
     }
 
     throw error;
+  }
+}
+
+export function isIntegrationIngestJsonlAppendTarget(
+  relativePath: string,
+  options: VaultPathComparisonOptions = {},
+): boolean {
+  const normalized = normalizeRelativeVaultPathForComparison(relativePath, options);
+  const ingestDirectory = normalizeRelativeVaultPathForComparison(
+    VAULT_LAYOUT.integrationIngestLedgerDirectory,
+    options,
+  );
+  return normalized.startsWith(`${ingestDirectory}/`) && normalized.endsWith(".jsonl");
+}
+
+export function isIntegrationIngestArchiveTarget(
+  relativePath: string,
+  options: VaultPathComparisonOptions = {},
+): boolean {
+  const normalized = normalizeRelativeVaultPathForComparison(relativePath, options);
+  const ingestDirectory = normalizeRelativeVaultPathForComparison(
+    VAULT_LAYOUT.integrationIngestLedgerDirectory,
+    options,
+  );
+  return normalized.startsWith(`${ingestDirectory}/`)
+    && INTEGRATION_INGEST_ARCHIVE_SUFFIXES.some((suffix) => normalized.endsWith(`.jsonl${suffix}`));
+}
+
+export async function assertJsonlAppendTargetCanAppend(
+  target: ResolvedVaultPath,
+  options?: VaultPathComparisonOptions,
+): Promise<void> {
+  const comparisonOptions = options ?? {
+    caseInsensitive: await isVaultFilesystemCaseInsensitive(target.vaultRoot),
+  };
+  await assertIntegrationIngestTargetHasNoArchiveSibling(
+    target,
+    comparisonOptions,
+    `Integration ingest shard "${target.relativePath}" is archived and cannot be appended.`,
+  );
+}
+
+async function assertIntegrationIngestTargetHasNoArchiveSibling(
+  target: ResolvedVaultPath,
+  options: VaultPathComparisonOptions,
+  message: string,
+): Promise<void> {
+  if (!isIntegrationIngestJsonlAppendTarget(target.relativePath, options)) {
+    return;
+  }
+  for (const suffix of INTEGRATION_INGEST_ARCHIVE_SUFFIXES) {
+    const archivedAbsolutePath = `${target.absolutePath}${suffix}`;
+    if (await pathExists(archivedAbsolutePath)) {
+      throw new VaultError(
+        "INTEGRATION_INGEST_SHARD_ARCHIVED",
+        message,
+        { relativePath: target.relativePath },
+      );
+    }
   }
 }
 
@@ -144,6 +207,14 @@ export function assertWriteTargetPolicy(
     return;
   }
 
+  if (isIntegrationIngestArchiveTarget(relativePath, options)) {
+    throw new VaultError(
+      "VAULT_APPEND_ONLY_PATH",
+      "Integration ingest archives are immutable append-only shard representations.",
+      { relativePath },
+    );
+  }
+
   if (
     isAppendOnlyRelativePath(relativePath, options) &&
     isJsonlRelativePath(relativePath, options) &&
@@ -170,9 +241,17 @@ export async function assertWriteTargetPolicyForVault(
   relativePath: string,
   policy: WriteTargetPolicy,
 ): Promise<void> {
-  assertWriteTargetPolicy(relativePath, policy, {
+  const comparisonOptions = {
     caseInsensitive: await isVaultFilesystemCaseInsensitive(vaultRoot),
-  });
+  };
+  assertWriteTargetPolicy(relativePath, policy, comparisonOptions);
+  if (policy.kind !== "jsonl_append" && isIntegrationIngestJsonlAppendTarget(relativePath, comparisonOptions)) {
+    await assertIntegrationIngestTargetHasNoArchiveSibling(
+      resolveVaultPath(vaultRoot, relativePath),
+      comparisonOptions,
+      `Integration ingest shard "${relativePath}" is archived and cannot be mutated by generic write paths.`,
+    );
+  }
 }
 
 async function prepareVerifiedTarget(
@@ -343,6 +422,7 @@ export async function applyJsonlAppendTarget({
   existedBefore: boolean;
   originalSize: number;
 }> {
+  await assertJsonlAppendTargetCanAppend(target);
   const existedBefore = await pathExists(target.absolutePath);
   const originalSize = existedBefore ? (await fs.stat(target.absolutePath)).size : 0;
   const payload = await readPayload();

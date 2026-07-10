@@ -3033,6 +3033,9 @@ describe("assistant delivery orchestration seam", () => {
       })
     ).toEqual({
       diagnostic: expect.objectContaining({
+        counterDeltas: {
+          turnsCompleted: 1,
+        },
         intentId: "intent-sent",
         kind: "turn.completed",
       }),
@@ -3063,6 +3066,9 @@ describe("assistant delivery orchestration seam", () => {
     ).toEqual({
       diagnostic: expect.objectContaining({
         code: "RETRYABLE",
+        counterDeltas: {
+          turnsDeferred: 1,
+        },
         kind: "turn.deferred",
         level: "warn",
       }),
@@ -3091,6 +3097,9 @@ describe("assistant delivery orchestration seam", () => {
     ).toEqual({
       diagnostic: expect.objectContaining({
         code: "DELIVERY_FAILED",
+        counterDeltas: {
+          turnsFailed: 1,
+        },
         kind: "turn.failed",
         level: "error",
       }),

@@ -315,5 +315,34 @@ export type {
   UpsertEventResult,
 } from "./domains/events.ts";
 
-export * from "./integration-ingests.ts";
+export {
+  MAX_INTEGRATION_EVIDENCE_PART_BYTES,
+  MAX_INTEGRATION_INGEST_BYTES,
+  MAX_INTEGRATION_INGEST_JOURNAL_ROW_BYTES,
+  MAX_INTEGRATION_INGEST_PARTS,
+  MAX_INTEGRATION_INGEST_ZIP_ARCHIVE_BYTES,
+  MAX_INTEGRATION_INGEST_ZIP_ENTRY_BYTES,
+  assertIntegrationIngestRecordIntegrity,
+  buildIntegrationEvidencePart,
+  buildIntegrationIngestAppendPlan,
+  buildIntegrationIngestRecord,
+  compactIntegrationIngestReceipt,
+  integrationIngestShardPath,
+  listIntegrationIngestsForEvent,
+  parseIntegrationIngestAppendPayload,
+  readArchivedIntegrationIngestShardText,
+  readIntegrationEvidencePart,
+  readIntegrationIngestById,
+  readIntegrationIngestEntries,
+  stableSerializeIntegrationIngest,
+  stageIntegrationIngestAppendPlan,
+} from "./integration-ingests.ts";
+export type {
+  ArchivedIntegrationIngestShardText,
+  BuildIntegrationEvidencePartInput,
+  BuildIntegrationIngestAppendPlanOptions,
+  BuildIntegrationIngestRecordInput,
+  IntegrationIngestAppendPlan,
+  StoredIntegrationIngestEntry,
+} from "./integration-ingests.ts";
 export * from "./integration-ingest-migration.ts";

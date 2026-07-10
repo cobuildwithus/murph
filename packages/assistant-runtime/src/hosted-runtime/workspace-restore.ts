@@ -3,6 +3,11 @@ import { chmod, lstat, mkdir, readdir, readFile, rename, rm, writeFile } from "n
 import path from "node:path";
 
 import {
+  listAssistantContextSnapshotDirtyDomainsForCanonicalWrite,
+  markAssistantContextSnapshotDirty,
+  type AssistantContextSnapshotDirtyDomain,
+} from "@murphai/assistant-engine";
+import {
   applyHostedCanonicalWriteReceipt,
   HOSTED_CANONICAL_WRITE_RECEIPT_SCHEMA_VERSION,
   type HostedCanonicalWriteReceiptAction,
@@ -10,7 +15,6 @@ import {
   type HostedCanonicalWriteReceipt,
 } from "@murphai/core";
 import {
-  compareIsoTimestampsAscending as compareHostedIsoTimestampsAscending,
   VAULT_LAYOUT,
 } from "@murphai/contracts";
 import type {
@@ -201,6 +205,11 @@ export async function restoreHostedWorkspaceRuntimeJobWorkspace(input: {
   if (!baseSnapshotRef && !hotSnapshotRef && !deltaSnapshotRef) {
     await clearHostedWorkspaceRuntimeLocalRoots(restored);
     await clearHostedWorkspaceRestoreCachesBestEffort(restored.vaultRoot);
+    await applyHostedCanonicalWriteReceiptsFromWorkspaceState({
+      platform: input.platform,
+      status: input.workspace?.redactedStatus ?? null,
+      vaultRoot: restored.vaultRoot,
+    });
     const restoredMaterializedArtifactPaths = await readHostedMaterializedArtifactPaths({
       vaultRoot: restored.vaultRoot,
     });
@@ -334,7 +343,6 @@ export async function restoreHostedWorkspaceRuntimeJobWorkspace(input: {
 
 interface HostedWorkspaceCleanCheckpointMarker {
   receiptLogByteSize: number | null;
-  receiptLogEntryCount: number;
   receiptLogSha256: string | null;
   schema: typeof HOSTED_WORKSPACE_CLEAN_CHECKPOINT_MARKER_SCHEMA;
   snapshotFingerprintSha256: string;
@@ -344,7 +352,6 @@ interface HostedWorkspaceCleanCheckpointMarker {
 
 interface HostedWorkspaceCleanCheckpointReceiptMarkerFields {
   receiptLogByteSize: number | null;
-  receiptLogEntryCount: number;
   receiptLogSha256: string | null;
 }
 
@@ -478,12 +485,10 @@ function createHostedWorkspaceCleanCheckpointReceiptMarkerFields(
   return fingerprint
     ? {
         receiptLogByteSize: fingerprint.byteSize,
-        receiptLogEntryCount: fingerprint.entryCount,
         receiptLogSha256: fingerprint.sha256,
       }
     : {
         receiptLogByteSize: null,
-        receiptLogEntryCount: 0,
         receiptLogSha256: null,
       };
 }
@@ -519,7 +524,6 @@ function parseHostedWorkspaceCleanCheckpointMarker(
   const snapshotFingerprintSha256 = parsed.snapshotFingerprintSha256;
   const receiptLogSha256 = parsed.receiptLogSha256;
   const receiptLogByteSize = parsed.receiptLogByteSize;
-  const receiptLogEntryCount = parsed.receiptLogEntryCount;
   const writtenAt = parsed.writtenAt;
   if (schema !== HOSTED_WORKSPACE_CLEAN_CHECKPOINT_MARKER_SCHEMA) {
     throw new Error("Hosted workspace clean checkpoint marker schema is invalid.");
@@ -542,12 +546,9 @@ function parseHostedWorkspaceCleanCheckpointMarker(
   ) {
     throw new Error("Hosted workspace clean checkpoint marker receipt size is invalid.");
   }
-  if (!isNonNegativeInteger(receiptLogEntryCount)) {
-    throw new Error("Hosted workspace clean checkpoint marker receipt count is invalid.");
-  }
   if (
     (receiptLogSha256 === null || receiptLogByteSize === null)
-    && (receiptLogSha256 !== null || receiptLogByteSize !== null || receiptLogEntryCount !== 0)
+    && (receiptLogSha256 !== null || receiptLogByteSize !== null)
   ) {
     throw new Error("Hosted workspace clean checkpoint marker receipt fields are inconsistent.");
   }
@@ -560,7 +561,6 @@ function parseHostedWorkspaceCleanCheckpointMarker(
   }
   return {
     receiptLogByteSize,
-    receiptLogEntryCount,
     receiptLogSha256,
     schema,
     snapshotFingerprintSha256,
@@ -577,8 +577,7 @@ function sameHostedWorkspaceCleanCheckpointMarker(
     && actual.workspaceVersion === expected.workspaceVersion
     && actual.snapshotFingerprintSha256 === expected.snapshotFingerprintSha256
     && actual.receiptLogSha256 === expected.receiptLogSha256
-    && actual.receiptLogByteSize === expected.receiptLogByteSize
-    && actual.receiptLogEntryCount === expected.receiptLogEntryCount;
+    && actual.receiptLogByteSize === expected.receiptLogByteSize;
 }
 
 async function writeHostedWorkspaceCleanCheckpointMarker(
@@ -964,8 +963,15 @@ async function applyHostedCanonicalWriteReceiptsFromWorkspaceState(input: {
     artifactStore: input.platform.artifactStore,
     status: input.status,
   });
-  const receipts: HostedCanonicalWriteReceipt[] = [];
+  const appliedReceiptRefs = new Set<string>();
+  const dirtyDomains = new Set<AssistantContextSnapshotDirtyDomain>();
   for (const entry of entries) {
+    const receiptRefKey = `${entry.sha256}:${entry.byteSize}`;
+    if (appliedReceiptRefs.has(receiptRefKey)) {
+      continue;
+    }
+    appliedReceiptRefs.add(receiptRefKey);
+
     const bytes = await input.platform.artifactStore.get(entry.sha256);
     if (!bytes) {
       throw new Error("Hosted canonical write receipt artifact is unavailable.");
@@ -977,23 +983,23 @@ async function applyHostedCanonicalWriteReceiptsFromWorkspaceState(input: {
       Buffer.from(bytes).toString("utf8"),
     );
     if (parsed) {
-      receipts.push(parsed);
+      await applyHostedCanonicalWriteReceipt({
+        readPayload: async (ref) =>
+          await readHostedCanonicalWritePayloadForRestore({
+            platform: input.platform,
+            ref,
+          }),
+        receipt: parsed,
+        vaultRoot: input.vaultRoot,
+      });
+      for (const domain of listAssistantContextSnapshotDirtyDomainsForCanonicalWrite(parsed)) {
+        dirtyDomains.add(domain);
+      }
     }
   }
-
-  receipts.sort((left, right) =>
-    compareHostedIsoTimestampsAscending(left.committedAt, right.committedAt)
-    || left.operationId.localeCompare(right.operationId)
-  );
-
-  for (const receipt of receipts) {
-    await applyHostedCanonicalWriteReceipt({
-      readPayload: async (ref) =>
-        await readHostedCanonicalWritePayloadForRestore({
-          platform: input.platform,
-          ref,
-        }),
-      receipt,
+  if (dirtyDomains.size > 0) {
+    await markAssistantContextSnapshotDirty({
+      domains: [...dirtyDomains],
       vaultRoot: input.vaultRoot,
     });
   }
@@ -1097,6 +1103,9 @@ function parseHostedCanonicalWriteReceiptActionForRestore(
         baseSha256: raw.baseSha256,
         baseByteLength: raw.baseByteLength,
         originalSize: raw.originalSize,
+        ...(raw.allowArchivedIntegrationIngestAmendment === true
+          ? { allowArchivedIntegrationIngestAmendment: true as const }
+          : {}),
         ...(contentRef ? { contentRef } : {}),
       };
     }
@@ -1133,6 +1142,7 @@ function parseHostedCanonicalWriteReceiptActionForRestore(
         kind: "delete",
         targetRelativePath: raw.targetRelativePath,
         existedBefore: raw.existedBefore,
+        ...(raw.allowRaw === true ? { allowRaw: true as const } : {}),
       };
     }
     default:

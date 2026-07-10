@@ -19,9 +19,10 @@ import type {
   HostedRuntimeReconciliationFactsRequest,
   HostedRuntimeReconciliationFactsWorkspace,
 } from "@murphai/hosted-execution/orchestration-control";
-import type {
-  HostedMailboxLaneConsumed,
-  HostedMailboxLaneLag,
+import {
+  isHostedRuntimeFutureMailboxContinuation,
+  type HostedMailboxLaneConsumed,
+  type HostedMailboxLaneLag,
 } from "@murphai/hosted-execution/runtime-control";
 import type { PrismaClient } from "@prisma/client";
 
@@ -92,6 +93,43 @@ const HOSTED_RUNTIME_RECONCILIATION_FACTS_LOG_SCHEMA =
 const HOSTED_TELEGRAM_USAGE_LIMIT_NOTICE_TIMEOUT_MS = 40_000;
 const HOSTED_RUNTIME_RECONCILIATION_ENGAGEMENT_PAUSE_RETRY_MS =
   24 * 60 * 60 * 1000;
+
+export async function readHostedRuntimeOwnerReleaseMailboxLagActionable(input: {
+  now?: Date | string;
+  userId: string;
+}): Promise<boolean> {
+  const prisma = getPrisma();
+  const now = normalizeHostedRuntimeReconciliationDate(input.now);
+  const [workspace, maxSeqByLane] = await Promise.all([
+    readHostedWorkspace({ prisma, userId: input.userId }),
+    readHostedMailboxMaxSeqByLane({ prisma, userId: input.userId }),
+  ]);
+  if (!workspace) {
+    return false;
+  }
+
+  const redactedStatus = readHostedMailboxRedactedStatusRecord(
+    workspace.redactedStatusJson,
+  );
+  const mailboxLag = maxSeqByLane.map((highWater) =>
+    computeHostedMailboxLaneLag({
+      highWater,
+      redactedStatusJson: redactedStatus,
+    })
+  );
+  if (!hasHostedMailboxLag(mailboxLag)) {
+    return false;
+  }
+
+  const deferredMailboxContinuation =
+    isHostedRuntimeFutureMailboxContinuation({
+      nextWakeAt: workspace.nextWakeAt,
+      nextWakeReason: workspace.nextWakeReason,
+      redactedStatus,
+    }, now.getTime());
+
+  return !deferredMailboxContinuation;
+}
 
 export async function readHostedRuntimeReconciliationFacts(
   input: HostedRuntimeReconciliationFactsRequest & {
