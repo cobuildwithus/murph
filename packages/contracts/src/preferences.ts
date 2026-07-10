@@ -7,6 +7,8 @@ export const preferencesDocumentSchemaVersion = 1;
 
 export const assistantTonePreferenceValues = ["casual", "formal"] as const;
 export const assistantTonePreferenceSchema = z.enum(assistantTonePreferenceValues);
+export const defaultAssistantTonePreference = "formal" satisfies
+  (typeof assistantTonePreferenceValues)[number];
 
 export const assistantVoiceOptionIdValues = [
   "classic",
