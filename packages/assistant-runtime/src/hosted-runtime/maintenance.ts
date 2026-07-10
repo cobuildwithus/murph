@@ -54,6 +54,10 @@ import {
 import { emitHostedAssistantContextTraceLog } from "./context-diagnostics.ts";
 import { emitHostedAssistantTurnTimingTraceLog } from "./turn-timing-diagnostics.ts";
 import { normalizeHostedFutureWakeAt } from "./wake-time.ts";
+import {
+  recordHostedAssistantMilestonesBestEffort,
+  type HostedAssistantMilestoneTraceContext,
+} from "./assistant-latency-trace.ts";
 
 const HOSTED_ASSISTANT_BACKGROUND_AUTOMATION_SCAN_LIMIT = 1;
 
@@ -140,6 +144,7 @@ export async function runHostedAssistantAutomationLane(input: {
   freshAssistantInputIds?: readonly string[] | null;
   operatorHomeRoot?: string | null;
   runtimeAttemptId?: string | null;
+  preProviderPhase?: HostedRuntimeLatencyPhaseBreakdown["preProvider"] | null;
   assistantRuntimeState?: HostedAssistantRuntimeReadinessState | null;
   buildBackgroundDynamicContextPrompt?: HostedBackgroundDynamicContextPromptBuilder;
   runtimeEnv?: Readonly<Record<string, string>>;
@@ -182,6 +187,7 @@ export async function runHostedAssistantAutomationLane(input: {
           buildBackgroundDynamicContextPrompt:
             input.buildBackgroundDynamicContextPrompt,
           latencyTracePort: input.runtime.platform.latencyTracePort ?? null,
+          preProviderPhase: input.preProviderPhase ?? null,
           runtimeAttemptId: input.runtimeAttemptId ?? null,
           ...(input.shouldYieldBackgroundMaintenance
             ? {
@@ -209,8 +215,6 @@ export async function runHostedAssistantAutomationLane(input: {
       assistantResult.timings?.activeTurnInputIngested ?? false,
     assistantAutomationAfterStateElapsedMs:
       assistantResult.timings?.afterStateElapsedMs ?? null,
-    assistantAutomationBeforeStateElapsedMs:
-      assistantResult.timings?.beforeStateElapsedMs ?? null,
     assistantAutomationCurrentTurnDeliveryIntentIds:
       assistantResult.currentTurnDeliveryIntentIds ?? [],
     assistantAutomationElapsedMs,
@@ -249,6 +253,7 @@ export async function runHostedAssistantAutomation(
   options?: {
     buildBackgroundDynamicContextPrompt?: HostedBackgroundDynamicContextPromptBuilder;
     latencyTracePort?: HostedRuntimePlatform["latencyTracePort"] | null;
+    preProviderPhase?: HostedRuntimeLatencyPhaseBreakdown["preProvider"] | null;
     runtimeAttemptId?: string | null;
     shouldYieldBackgroundMaintenance?: (() => boolean) | null;
   },
@@ -263,7 +268,6 @@ export async function runHostedAssistantAutomation(
   timings?: {
     activeTurnInputIngested?: boolean | null;
     afterStateElapsedMs: number;
-    beforeStateElapsedMs: number;
     cronStatusDeferred?: boolean | null;
     cronStatusElapsedMs?: number | null;
     inputCandidateListed?: boolean | null;
@@ -284,6 +288,8 @@ export async function runHostedAssistantAutomation(
   let activeTurnInputIngested = false;
   let inputCandidateListed = false;
   let inputCandidateQueryCount = 0;
+  let activeProviderMilestoneTraceContext: HostedAssistantMilestoneTraceContext | null = null;
+  const recordedProviderMilestones = new Set<string>();
   const freshAssistantInputIdCount = new Set(freshAssistantInputIds).size;
   const selectedInputIds = await selectHostedAssistantInputIds(
     freshAssistantInputIdCount > 0
@@ -373,16 +379,9 @@ export async function runHostedAssistantAutomation(
       return result;
     },
   };
-  const beforeStateStartedAt = Date.now();
-  const beforeState = await readAssistantAutomationState(vaultRoot);
-  const beforeStateElapsedMs = elapsedSince(beforeStateStartedAt);
   redactedLogEntries.push(emitHostedRuntimeRedactedLog({
     component: "runtime",
     details: {
-      autoReplyChannels: beforeState.autoReply.map((entry) => entry.channel).join(","),
-      autoReplyEligibleAfterSummary: summarizeHostedAssistantAutoReplyEligibleAfter(
-        beforeState.autoReply,
-      ),
       freshAssistantInputCount: freshAssistantInputIdCount,
       pendingAssistantInputCount: selectedInputIds.pendingInputIds.length,
       requestId,
@@ -438,10 +437,54 @@ export async function runHostedAssistantAutomation(
           }
         }
       },
+      onProviderEvent: (event) => {
+        const context = activeProviderMilestoneTraceContext;
+        if (!context) {
+          return;
+        }
+
+        const inputKey = JSON.stringify([...context.assistantInputIds].sort());
+        const milestones: Array<{
+          at: string;
+          milestone: "first_codex_output_observed" | "first_codex_text_observed";
+        }> = [];
+        const outputKey = `${inputKey}:first_codex_output_observed`;
+        if (event.kind !== "status" && !recordedProviderMilestones.has(outputKey)) {
+          recordedProviderMilestones.add(outputKey);
+          milestones.push({
+            at: new Date().toISOString(),
+            milestone: "first_codex_output_observed",
+          });
+        }
+        const textKey = `${inputKey}:first_codex_text_observed`;
+        if (
+          event.kind === "message"
+          && event.text.trim().length > 0
+          && !recordedProviderMilestones.has(textKey)
+        ) {
+          recordedProviderMilestones.add(textKey);
+          milestones.push({
+            at: new Date().toISOString(),
+            milestone: "first_codex_text_observed",
+          });
+        }
+        recordHostedAssistantMilestonesBestEffort({ context, milestones });
+      },
       onProviderRequestStarted: (event) => {
+        const source = readHostedIngressLatencySource(event.source);
+        const runtimeAttemptId = options?.runtimeAttemptId?.trim() ?? "";
+        activeProviderMilestoneTraceContext = source && runtimeAttemptId
+          ? {
+              assistantInputIds: event.assistantInputIds,
+              latencyTracePort: options?.latencyTracePort ?? null,
+              runtimeAttemptId,
+              source,
+            }
+          : null;
         recordHostedAssistantProviderStartLatencyTraceBestEffort({
           ...event,
           latencyTracePort: options?.latencyTracePort ?? null,
+          preProviderPhase: options?.preProviderPhase ?? null,
           runtimeAttemptId: options?.runtimeAttemptId ?? null,
         });
       },
@@ -549,7 +592,6 @@ export async function runHostedAssistantAutomation(
       timings: {
         activeTurnInputIngested,
         afterStateElapsedMs,
-        beforeStateElapsedMs,
         cronStatusDeferred: result.passTiming?.cronStatusDeferred ?? null,
         cronStatusElapsedMs: result.passTiming?.cronStatusElapsedMs ?? null,
         inputCandidateListed,
@@ -630,6 +672,7 @@ function recordHostedAssistantProviderStartLatencyTraceBestEffort(input: {
   codexAppServerThreadStartMs?: number;
   codexAppServerWarmReuseMs?: number;
   latencyTracePort?: HostedRuntimePlatform["latencyTracePort"] | null;
+  preProviderPhase?: HostedRuntimeLatencyPhaseBreakdown["preProvider"] | null;
   preProviderSetupMs?: number;
   promptBuildMs?: number;
   providerRequestOrdinal: number;
@@ -684,8 +727,16 @@ function recordHostedAssistantProviderStartLatencyTraceBestEffort(input: {
     event: {
       assistantInputIds: [...input.assistantInputIds],
       at: input.startedAt,
-      ...(Object.keys(provider).length > 0
-        ? { phaseBreakdown: { schemaVersion: 1, provider } }
+      ...(Object.keys(provider).length > 0 || input.preProviderPhase
+        ? {
+            phaseBreakdown: {
+              schemaVersion: 1,
+              ...(input.preProviderPhase
+                ? { preProvider: input.preProviderPhase }
+                : {}),
+              ...(Object.keys(provider).length > 0 ? { provider } : {}),
+            },
+          }
         : {}),
       providerRequestOrdinal: input.providerRequestOrdinal,
       runtimeAttemptId: input.runtimeAttemptId ?? null,

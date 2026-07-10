@@ -54,7 +54,6 @@ import {
 } from "./webhook-db-timing";
 import {
   drainHostedLinqSideEffectsDirect,
-  type HostedLinqCurrentInboundReplyProof,
 } from "./webhook-transport";
 import {
   buildHostedLinqFirstContactAdmissionClassifierUnavailableDecision,
@@ -96,6 +95,10 @@ export type {
 } from "./webhook-service-types";
 
 type HostedWebhookPostResponseScheduler = (task: () => Promise<void>) => void;
+type HostedLinqCurrentInboundReplyProof = {
+  chatId: string | null;
+  messageId: string | null;
+};
 
 export async function handleHostedOnboardingLinqWebhook(input: {
   rawBody: string;
@@ -365,7 +368,6 @@ export async function handleHostedOnboardingLinqWebhook(input: {
 
     if (plan.desiredSideEffects.length > 0) {
       await drainHostedLinqSideEffectsDirect({
-        currentInboundReply,
         prisma,
         scheduleAfterResponse: input.scheduleAfterResponse,
         sideEffects: plan.desiredSideEffects,

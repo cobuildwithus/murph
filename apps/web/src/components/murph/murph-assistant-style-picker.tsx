@@ -4,6 +4,7 @@ import { useId, useState } from "react";
 import { CheckIcon, Loader2Icon, MessageCircleIcon, Mic2Icon } from "lucide-react";
 import {
   assistantVoiceOptions,
+  defaultAssistantVoiceOptionId,
   isAssistantTonePreference,
   isAssistantVoiceOptionId,
   type AssistantTonePreference,
@@ -64,7 +65,7 @@ export function MurphAssistantStylePicker({
     initialTone ?? "casual",
   );
   const [selectedVoice, setSelectedVoice] = useState<AssistantVoiceOptionId>(
-    initialVoice ?? "classic",
+    initialVoice ?? defaultAssistantVoiceOptionId,
   );
   const [savedPreferences, setSavedPreferences] =
     useState<MurphAssistantStylePreferences>({

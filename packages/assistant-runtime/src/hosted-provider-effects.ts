@@ -50,6 +50,7 @@ export interface HostedProviderEffectDependencies {
   publicFetchImplementation?: typeof fetch | null;
   onProviderDispatchEntered?: (() => void) | null;
   signal?: AbortSignal;
+  telegramMaxDeliveryAttempts?: number;
 }
 
 interface HostedProviderEffectContext {
@@ -71,6 +72,7 @@ export async function sendHostedProviderTelegramMessage(
   return await sendTelegramMessage(request, {
     env: context.env,
     fetchImplementation: context.fetchImplementation,
+    maxDeliveryAttempts: dependencies.telegramMaxDeliveryAttempts,
     signal: context.signal,
   });
 }

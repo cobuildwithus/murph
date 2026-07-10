@@ -6,6 +6,9 @@ import {
   parseHostedRuntimeReconciliationFacts,
   parseHostedRuntimeReconciliationFactsRequest,
 } from "@murphai/hosted-execution/parsers";
+import {
+  HOSTED_RUNTIME_RECONCILIATION_FACTS_HTTP_TIMEOUT_MS,
+} from "@murphai/hosted-execution/temporal-env";
 
 import {
   observeHostedTemporalActivity,
@@ -36,7 +39,7 @@ export async function readRuntimeReconciliationFacts(
       parse: parseHostedRuntimeReconciliationFacts,
       path: buildHostedRuntimeReconciliationFactsPath(parsedRequest.userId),
       signing: environment.hostedWebCallbackSigning,
-      timeoutMs: environment.readRuntimeReconciliationFactsTimeoutMs,
+      timeoutMs: HOSTED_RUNTIME_RECONCILIATION_FACTS_HTTP_TIMEOUT_MS,
     })
   );
 }

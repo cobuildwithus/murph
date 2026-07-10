@@ -1,6 +1,7 @@
 import {
   recordHostedIngressAcceptedFromMailboxItem,
   recordHostedIngressAssistantInputStaged,
+  recordHostedIngressAssistantMilestone,
   recordHostedIngressDirectEnsureTiming,
   recordHostedIngressProviderStarted,
   recordHostedIngressRuntimeMilestone,
@@ -89,36 +90,21 @@ describe("hosted runtime latency dashboard store", () => {
     expect(dashboard.stageLatencyMs.stagedToProviderStartP50).toBe(1_000);
   });
 
-  it("reports Linq egress guard latency from provider phaseBreakdown", async () => {
+  it("reports exact typing and local Codex output boundaries separately", async () => {
     const prisma = createLatencyDashboardPrisma([
       {
         acceptedAt: instant("2026-05-27T12:00:00.000Z"),
-        assistantInputStagedAt: instant("2026-05-27T12:00:01.000Z"),
+        assistantInputStagedAt: instant("2026-05-27T12:00:02.000Z"),
         phaseBreakdownJson: {
+          assistant: {
+            linqTypingRequestStartedAtEpochMs: Date.parse("2026-05-27T12:00:01.000Z"),
+            linqTypingAcceptedAtEpochMs: Date.parse("2026-05-27T12:00:01.200Z"),
+            firstCodexOutputObservedAtEpochMs: Date.parse("2026-05-27T12:00:03.400Z"),
+            firstCodexTextObservedAtEpochMs: Date.parse("2026-05-27T12:00:03.800Z"),
+          },
           schemaVersion: 1,
-          provider: { linqEgressGuardMs: 10 },
         },
-        providerStartAt: instant("2026-05-27T12:00:02.000Z"),
-        temporalSignalAcceptedAt: null,
-      },
-      {
-        acceptedAt: instant("2026-05-27T12:01:00.000Z"),
-        assistantInputStagedAt: instant("2026-05-27T12:01:01.000Z"),
-        phaseBreakdownJson: {
-          schemaVersion: 1,
-          provider: { linqEgressGuardMs: 30 },
-        },
-        providerStartAt: instant("2026-05-27T12:01:02.000Z"),
-        temporalSignalAcceptedAt: null,
-      },
-      {
-        acceptedAt: instant("2026-05-27T12:02:00.000Z"),
-        assistantInputStagedAt: instant("2026-05-27T12:02:01.000Z"),
-        phaseBreakdownJson: {
-          schemaVersion: 1,
-          provider: { linqEgressGuardMs: "not-a-number" },
-        },
-        providerStartAt: instant("2026-05-27T12:02:02.000Z"),
+        providerStartAt: instant("2026-05-27T12:00:03.000Z"),
         temporalSignalAcceptedAt: null,
       },
     ]);
@@ -131,9 +117,59 @@ describe("hosted runtime latency dashboard store", () => {
       windowHours: 1,
     });
 
-    expect(dashboard.linqEgressGuardMs).toEqual({
-      p50: 20,
-      p95: 29,
+    expect(dashboard.observedMilestoneLatency).toEqual({
+      acceptedToTypingRequest: {
+        observationCount: 1,
+        p50Ms: 1_000,
+      },
+      codexStartToFirstOutput: {
+        observationCount: 1,
+        p50Ms: 400,
+      },
+      codexStartToFirstText: {
+        observationCount: 1,
+        p50Ms: 800,
+      },
+      typingRequestToAccepted: {
+        observationCount: 1,
+        p50Ms: 200,
+      },
+    });
+  });
+
+  it("counts invalid observed milestone chronology once and excludes it from p50s", async () => {
+    const prisma = createLatencyDashboardPrisma([
+      {
+        acceptedAt: instant("2026-05-27T12:00:00.000Z"),
+        assistantInputStagedAt: instant("2026-05-27T12:00:01.000Z"),
+        phaseBreakdownJson: {
+          assistant: {
+            linqTypingRequestStartedAtEpochMs: Date.parse("2026-05-27T11:59:59.000Z"),
+            linqTypingAcceptedAtEpochMs: Date.parse("2026-05-27T11:59:58.000Z"),
+            firstCodexOutputObservedAtEpochMs: Date.parse("2026-05-27T12:00:01.500Z"),
+            firstCodexTextObservedAtEpochMs: Date.parse("2026-05-27T12:00:01.700Z"),
+          },
+          schemaVersion: 1,
+        },
+        providerStartAt: instant("2026-05-27T12:00:02.000Z"),
+        temporalSignalAcceptedAt: null,
+      },
+    ]);
+
+    const dashboard = await readHostedIngressLatencyDashboard({
+      inFlightGraceMs: 0,
+      now: instant("2026-05-27T12:05:00.000Z"),
+      prisma,
+      source: "linq",
+      windowHours: 1,
+    });
+
+    expect(dashboard.invalidNegativeLatencyCount).toBe(1);
+    expect(dashboard.observedMilestoneLatency).toEqual({
+      acceptedToTypingRequest: { observationCount: 0, p50Ms: null },
+      codexStartToFirstOutput: { observationCount: 0, p50Ms: null },
+      codexStartToFirstText: { observationCount: 0, p50Ms: null },
+      typingRequestToAccepted: { observationCount: 0, p50Ms: null },
     });
   });
 
@@ -285,7 +321,7 @@ describe("hosted runtime latency dashboard store", () => {
     expect(prisma.readTraceInsertSql()).toContain("ON CONFLICT (mailbox_item_id) DO NOTHING");
   });
 
-  it("records provider start by assistant input even when a later runtime attempt handles it", async () => {
+  it("rejects provider start from a different runtime attempt", async () => {
     const prisma = createLatencyWritePrisma({
       mailboxAcceptedAtEpochMs: BigInt(Date.parse("2026-06-02T19:10:20.000Z")),
     });
@@ -311,13 +347,138 @@ describe("hosted runtime latency dashboard store", () => {
 
     const trace = prisma.readTrace();
     expect(result).toEqual({
+      matchedCount: 0,
+      recorded: false,
+      unmatchedCount: 1,
+    });
+    expect(trace?.runtimeAttemptId).toBe("attempt_staged_1");
+    expect(trace?.providerStartAt).toBeNull();
+    expect(trace?.providerRequestOrdinal).toBeNull();
+  });
+
+  it("stores exact assistant milestones only on the staged runtime attempt", async () => {
+    const prisma = createLatencyWritePrisma({
+      mailboxAcceptedAtEpochMs: BigInt(Date.parse("2026-06-02T19:12:20.000Z")),
+    });
+
+    await recordHostedIngressAssistantInputStaged({
+      assistantInputId: "input_assistant_milestone_1",
+      at: instant("2026-06-02T19:12:21.000Z"),
+      authenticatedUserId: "member_latency_1",
+      mailboxItemId: "mailbox_latency_1",
+      prisma,
+      runtimeAttemptId: "attempt_assistant_milestone_1",
+      source: "linq",
+    });
+    await expect(recordHostedIngressAssistantMilestone({
+      assistantInputIds: ["input_assistant_milestone_1"],
+      at: instant("2026-06-02T19:12:21.250Z"),
+      authenticatedUserId: "member_latency_1",
+      milestone: "linq_typing_accepted",
+      prisma,
+      runtimeAttemptId: "attempt_assistant_milestone_1",
+      source: "linq",
+    })).resolves.toEqual({
       matchedCount: 1,
       recorded: true,
       unmatchedCount: 0,
     });
-    expect(trace?.runtimeAttemptId).toBe("attempt_staged_1");
-    expect(trace?.providerStartAt?.toISOString()).toBe("2026-06-02T19:10:22.000Z");
-    expect(trace?.providerRequestOrdinal).toBe(0);
+    await expect(recordHostedIngressAssistantMilestone({
+      assistantInputIds: ["input_assistant_milestone_1"],
+      at: instant("2026-06-02T19:12:21.500Z"),
+      authenticatedUserId: "member_latency_1",
+      milestone: "first_codex_output_observed",
+      prisma,
+      runtimeAttemptId: "attempt_other_2",
+      source: "linq",
+    })).resolves.toEqual({
+      matchedCount: 0,
+      recorded: false,
+      unmatchedCount: 1,
+    });
+
+    expect(prisma.readTrace()?.phaseBreakdownJson).toEqual({
+      assistant: {
+        linqTypingAcceptedAtEpochMs: Date.parse("2026-06-02T19:12:21.250Z"),
+      },
+      schemaVersion: 1,
+    });
+  });
+
+  it("ignores legacy Linq egress guard-only provider events", async () => {
+    const prisma = createLatencyWritePrisma({
+      mailboxAcceptedAtEpochMs: BigInt(Date.parse("2026-06-02T19:20:20.000Z")),
+    });
+
+    await recordHostedIngressAssistantInputStaged({
+      assistantInputId: "input_legacy_guard_1",
+      at: instant("2026-06-02T19:20:21.000Z"),
+      authenticatedUserId: "member_latency_1",
+      mailboxItemId: "mailbox_latency_1",
+      prisma,
+      runtimeAttemptId: "attempt_legacy_guard_1",
+      source: "linq",
+    });
+    const result = await recordHostedIngressProviderStarted({
+      assistantInputIds: ["input_legacy_guard_1"],
+      at: instant("2026-06-02T19:20:22.000Z"),
+      authenticatedUserId: "member_latency_1",
+      phaseBreakdown: {
+        provider: {
+          linqEgressGuardMs: 17,
+        },
+        schemaVersion: 1,
+      },
+      prisma,
+      providerRequestOrdinal: 0,
+      runtimeAttemptId: "attempt_legacy_guard_1",
+      source: "linq",
+    });
+
+    expect(result).toEqual({
+      matchedCount: 0,
+      recorded: false,
+      unmatchedCount: 0,
+    });
+    expect(prisma.readTrace()?.providerStartAt).toBeNull();
+    expect(prisma.readTrace()?.providerRequestOrdinal).toBeNull();
+    expect(prisma.readTrace()?.phaseBreakdownJson).toBeNull();
+  });
+
+  it("persists conversation import phase timing with the staged input", async () => {
+    const prisma = createLatencyWritePrisma({
+      mailboxAcceptedAtEpochMs: BigInt(Date.parse("2026-06-02T19:30:20.000Z")),
+    });
+    const importPhase = {
+      autoReplyPreparedAtEpochMs: 1_777_000_000_030,
+      decodeDoneAtEpochMs: 1_777_000_000_020,
+      decodeStartedAtEpochMs: 1_777_000_000_010,
+      pendingIndexEnsuredAtEpochMs: 1_777_000_000_040,
+      stagedAtEpochMs: 1_777_000_000_050,
+    };
+
+    await expect(recordHostedIngressAssistantInputStaged({
+      assistantInputId: "input_import_phase_1",
+      at: instant("2026-06-02T19:30:21.000Z"),
+      authenticatedUserId: "member_latency_1",
+      mailboxItemId: "mailbox_latency_1",
+      phaseBreakdown: {
+        import: importPhase,
+        schemaVersion: 1,
+      },
+      prisma,
+      runtimeAttemptId: "attempt_import_phase_1",
+      source: "linq",
+    })).resolves.toEqual({
+      matchedCount: 1,
+      recorded: true,
+      unmatchedCount: 0,
+    });
+
+    expect(prisma.readTrace()?.phaseBreakdownJson).toEqual({
+      import: importPhase,
+      schemaVersion: 1,
+    });
   });
 
   it("records runtime milestones only after the staged row owns the exact attempt", async () => {

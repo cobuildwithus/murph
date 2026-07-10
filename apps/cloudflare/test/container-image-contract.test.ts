@@ -759,12 +759,6 @@ describe("hosted runner container image contract", () => {
     expect(packageJson.scripts?.["runner:bundle:hosted-local"]).toBe(
       "pnpm --dir ../.. exec tsx --tsconfig apps/cloudflare/tsconfig.scripts.json apps/cloudflare/scripts/assemble-runner-bundle.ts",
     );
-    expect(packageJson.scripts?.["runner:bundle:manifest:refresh"]).toBe(
-      "pnpm --dir ../.. exec tsx --tsconfig apps/cloudflare/tsconfig.scripts.json apps/cloudflare/scripts/refresh-runner-bundle-manifest.ts",
-    );
-    expect(packageJson.scripts?.["runner:bundle:manifest:validate"]).toBe(
-      "pnpm --dir ../.. exec tsx --tsconfig apps/cloudflare/tsconfig.scripts.json apps/cloudflare/scripts/validate-runner-bundle-manifest.ts",
-    );
     expect(packageJson.scripts?.["runner:bundle:hosted-local"]).not.toContain(
       "--skip-bundle-only-dependencies",
     );
