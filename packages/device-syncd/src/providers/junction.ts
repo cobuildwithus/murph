@@ -190,6 +190,39 @@ const JUNCTION_HISTORICAL_BACKFILL_REQUIRED_SUMMARY_RESOURCES = Object.freeze([
 const JUNCTION_HISTORICAL_BACKFILL_REQUIRED_SUMMARY_RESOURCE_SET = new Set<string>(
   JUNCTION_HISTORICAL_BACKFILL_REQUIRED_SUMMARY_RESOURCES,
 );
+const JUNCTION_HISTORICAL_EVIDENCE_ACTIVITY_TIMESTAMP_PATHS = Object.freeze([
+  "observedAtRaw",
+  "observed_at_raw",
+  "observedAt",
+  "observed_at",
+  "timestamp",
+  "time",
+  "date",
+  "day",
+  "calendarDate",
+  "calendar_date",
+  "localDate",
+  "local_date",
+  "end",
+  "endAt",
+  "end_at",
+  "timeEnd",
+  "time_end",
+  "start",
+  "startAt",
+  "start_at",
+  "timeStart",
+  "time_start",
+] as const);
+const JUNCTION_HISTORICAL_EVIDENCE_SLEEP_TIMESTAMP_PATHS = Object.freeze([
+  "sessionEnd",
+  "session_end",
+  ...JUNCTION_SLEEP_END_TIMESTAMP_PATHS,
+  ...JUNCTION_SLEEP_START_TIMESTAMP_PATHS,
+  "sessionStart",
+  "session_start",
+  ...JUNCTION_HISTORICAL_EVIDENCE_ACTIVITY_TIMESTAMP_PATHS,
+] as const);
 
 type JunctionOptionalResourceFailureReason = "not_found" | "unavailable" | "unsupported" | "ambiguous";
 
@@ -1489,6 +1522,14 @@ export function createJunctionDeviceSyncProvider(
 
       const directInput = readJunctionDirectResourceJobInput(job, window);
       if (directInput) {
+        const directHistoricalWindow = isJunctionHistoricalBackfillRequiredSummaryResource(
+          directInput.resource,
+        )
+          ? readJunctionDirectHistoricalEvidenceWindow(
+              directInput,
+              buildConnectHistoricalBackfillWindow(context.account, summaryBackfillDays),
+            )
+          : window;
         const sourceProviders = shouldLoadJunctionDirectResourceSourceProviders(directInput)
           ? await loadSourceProviders()
           : [];
@@ -1503,11 +1544,12 @@ export function createJunctionDeviceSyncProvider(
         return withJunctionHistoricalCoverageVerification(
           context,
           job,
-          window,
+          directHistoricalWindow,
           withJunctionDirectHistoricalBackfillEvidence(
             context,
             job,
             directInput,
+            directHistoricalWindow,
             canonicalEventCount,
             { nextReconcileAt: clampWebhookJobNextReconcileAt(context) },
           ),
@@ -1651,13 +1693,14 @@ export function createJunctionDeviceSyncProvider(
   function withJunctionHistoricalCoverageVerification(
     context: ProviderJobContext,
     job: DeviceSyncJobRecord,
-    resourceWindow: { windowEnd: string; windowStart: string },
+    resourceWindow: { windowEnd: string; windowStart: string } | null,
     result: ProviderJobResult,
   ): ProviderJobResult {
     const historicalState = readHistoricalBackfillStatus(context.account.metadata);
     const eventType = normalizeString(job.payload.eventType);
     if (
       !historicalState
+      || !resourceWindow
       || historicalState.coverageVersion > JUNCTION_HISTORICAL_BACKFILL_COVERAGE_VERSION
       || historicalState.status !== "exhausted"
       || !eventType
@@ -1696,12 +1739,14 @@ export function createJunctionDeviceSyncProvider(
     context: ProviderJobContext,
     job: DeviceSyncJobRecord,
     directInput: JunctionDirectResourceJobInput,
+    directHistoricalWindow: { windowEnd: string; windowStart: string } | null,
     canonicalEventCount: number,
     result: ProviderJobResult,
   ): ProviderJobResult {
     const eventType = normalizeString(job.payload.eventType);
     if (
       !canCurrentRuntimeMutateJunctionHistoricalBackfillProgress(context.account.metadata)
+      || !directHistoricalWindow
       || canonicalEventCount <= 0
       || !eventType
       || !isJunctionDataEvent(eventType)
@@ -1715,13 +1760,6 @@ export function createJunctionDeviceSyncProvider(
       context.account,
       summaryBackfillDays,
     );
-    if (
-      Date.parse(directInput.windowStart) >= Date.parse(connectWindow.windowEnd)
-      || Date.parse(directInput.windowEnd) <= Date.parse(connectWindow.windowStart)
-    ) {
-      return result;
-    }
-
     const evidence = addJunctionHistoricalBackfillEvidence({
       existingValue:
         context.account.metadata[JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS.evidence],
@@ -4365,6 +4403,74 @@ function isJunctionHistoricalBackfillRequiredSummaryResource(
   resource: string,
 ): resource is JunctionHistoricalBackfillEvidenceResource {
   return JUNCTION_HISTORICAL_BACKFILL_REQUIRED_SUMMARY_RESOURCE_SET.has(resource);
+}
+
+function readJunctionDirectHistoricalEvidenceWindow(
+  input: JunctionDirectResourceJobInput,
+  connectWindow: { windowEnd: string; windowStart: string },
+): { windowEnd: string; windowStart: string } | null {
+  if (!isJunctionHistoricalBackfillRequiredSummaryResource(input.resource)) {
+    return null;
+  }
+
+  const connectWindowStartMs = Date.parse(connectWindow.windowStart);
+  const connectWindowEndMs = Date.parse(connectWindow.windowEnd);
+  if (
+    !Number.isFinite(connectWindowStartMs)
+    || !Number.isFinite(connectWindowEndMs)
+    || connectWindowStartMs >= connectWindowEndMs
+  ) {
+    return null;
+  }
+
+  for (const { entry, originFallback } of expandJunctionHistoricalBackfillSummaryRecord(input.record)) {
+    const record = originFallback ? { ...originFallback, ...entry } : entry;
+    if (!hasUsefulJunctionHistoricalBackfillSummaryRecord(
+      input.resource,
+      record,
+      input.sourceProviderSlug,
+    )) {
+      continue;
+    }
+
+    const timestampPaths = input.resource === "activity"
+      ? JUNCTION_HISTORICAL_EVIDENCE_ACTIVITY_TIMESTAMP_PATHS
+      : JUNCTION_HISTORICAL_EVIDENCE_SLEEP_TIMESTAMP_PATHS;
+
+    for (const path of timestampPaths) {
+      const timestampMs = junctionHistoricalEvidenceTimestampMillis(
+        readJunctionRecordPath(record, path),
+        input.sourceProviderSlug,
+      );
+      if (timestampMs === null) {
+        continue;
+      }
+      if (timestampMs >= connectWindowStartMs && timestampMs < connectWindowEndMs) {
+        const windowStart = new Date(timestampMs).toISOString();
+        return {
+          windowStart,
+          windowEnd: addMilliseconds(windowStart, 1),
+        };
+      }
+
+      break;
+    }
+  }
+
+  return null;
+}
+
+function junctionHistoricalEvidenceTimestampMillis(
+  value: unknown,
+  sourceProviderSlug: string,
+): number | null {
+  const normalized = normalizeString(value);
+  if (normalized && /^\d{4}-\d{2}-\d{2}$/u.test(normalized)) {
+    const timestamp = toJunctionWebhookWindowBoundaryTimestampIfValid(normalized, "start");
+    return timestamp ? Date.parse(timestamp) : null;
+  }
+
+  return junctionTimestampMillis(value, sourceProviderSlug);
 }
 
 function isJunctionResourceAdvertisedAvailable(value: unknown): boolean {
