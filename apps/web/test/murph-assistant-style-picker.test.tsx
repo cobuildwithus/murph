@@ -224,8 +224,8 @@ test("MurphAssistantStylePicker shows each tone as a sample message rather than 
     const text = rendered.container.textContent ?? "";
     assert.match(text, /you're up 3 lbs this week/u);
     assert.match(text, /You are up 3 pounds this week/u);
-    // Casual is preselected, matching today's default persona.
-    assert.equal(findRadioInput(rendered.container, "Casual")?.checked, true);
+    assert.equal(findRadioInput(rendered.container, "Formal")?.checked, true);
+    assert.equal(findRadioInput(rendered.container, "Casual")?.checked, false);
     assert.match(
       rendered.container.querySelector("[data-dialog-content='true']")?.className ?? "",
       /sm:max-w-xl/u,
@@ -240,13 +240,17 @@ test("MurphAssistantStylePicker shows each tone as a sample message rather than 
 });
 
 test("MurphAssistantStylePicker keeps the default tone to voice onboarding chain", async () => {
-  const fetchMock = vi.fn(async () => ({
-    ok: true,
-    json: async () => ({
-      assistantTone: "casual",
-      assistantVoice: null,
-    }),
-  }));
+  const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    void input;
+    void init;
+    return {
+      ok: true,
+      json: async () => ({
+        assistantTone: "formal",
+        assistantVoice: null,
+      }),
+    };
+  });
   vi.stubGlobal("fetch", fetchMock);
 
   const onComplete = vi.fn();
@@ -270,6 +274,9 @@ test("MurphAssistantStylePicker keeps the default tone to voice onboarding chain
     await clickButton(rendered, "Continue");
 
     assert.equal(fetchMock.mock.calls.length, 1);
+    assert.deepEqual(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)), {
+      tone: "formal",
+    });
     assert.match(rendered.container.textContent ?? "", /Pick Murph's voice/u);
     assert.match(rendered.container.textContent ?? "", /22 voices/u);
     assert.equal(onComplete.mock.calls.length, 0);
@@ -285,10 +292,15 @@ test("MurphAssistantStylePicker uses an injected save without touching the netwo
   });
   vi.stubGlobal("fetch", fetchMock);
 
-  const savePreference = vi.fn(async (_preferences: { tone: string } | { voice: string }) => ({
-    tone: "casual" as const,
-    voice: null,
-  }));
+  const savePreference = vi.fn(
+    async (preferences: { tone: string } | { voice: string }) => {
+      void preferences;
+      return {
+        tone: "formal" as const,
+        voice: null,
+      };
+    },
+  );
   const onComplete = vi.fn();
   const { MurphAssistantStylePicker } = await import(
     "@/src/components/murph/murph-assistant-style-picker"
@@ -311,9 +323,48 @@ test("MurphAssistantStylePicker uses an injected save without touching the netwo
     await clickButton(rendered, "Save");
 
     assert.equal(savePreference.mock.calls.length, 1);
-    assert.deepEqual(savePreference.mock.calls[0]?.[0], { tone: "casual" });
+    assert.deepEqual(savePreference.mock.calls[0]?.[0], { tone: "formal" });
     assert.equal(fetchMock.mock.calls.length, 0);
     assert.equal(onComplete.mock.calls.length, 1);
+  } finally {
+    await rendered.cleanup();
+  }
+});
+
+test("MurphAssistantStylePicker preserves an explicitly saved casual tone", async () => {
+  const savePreference = vi.fn(
+    async (preferences: { tone: string } | { voice: string }) => {
+      void preferences;
+      return {
+        tone: "casual" as const,
+        voice: null,
+      };
+    },
+  );
+  const { MurphAssistantStylePicker } = await import(
+    "@/src/components/murph/murph-assistant-style-picker"
+  );
+  const rendered = await renderClientComponent(
+    createElement(MurphAssistantStylePicker, {
+      initialStep: "tone",
+      initialTone: "casual",
+      onOpenChange: () => {},
+      open: true,
+      savePreference,
+      singleStep: true,
+    }),
+    {
+      requireButton: false,
+    },
+  );
+
+  try {
+    assert.equal(findRadioInput(rendered.container, "Casual")?.checked, true);
+    assert.equal(findRadioInput(rendered.container, "Formal")?.checked, false);
+
+    await clickButton(rendered, "Save");
+
+    assert.deepEqual(savePreference.mock.calls[0]?.[0], { tone: "casual" });
   } finally {
     await rendered.cleanup();
   }
@@ -372,7 +423,7 @@ test("MurphAssistantStylePicker ignores dismissal while a save is in flight", as
           resolve({
             ok: true,
             json: async () => ({
-              assistantTone: "casual",
+              assistantTone: "formal",
               assistantVoice: null,
             }),
           });
@@ -422,13 +473,17 @@ test("MurphAssistantStylePicker ignores dismissal while a save is in flight", as
 });
 
 test("MurphAssistantStylePicker saves and closes without advancing in single-step mode", async () => {
-  const fetchMock = vi.fn(async () => ({
-    ok: true,
-    json: async () => ({
-      assistantTone: "casual",
-      assistantVoice: null,
-    }),
-  }));
+  const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    void input;
+    void init;
+    return {
+      ok: true,
+      json: async () => ({
+        assistantTone: "formal",
+        assistantVoice: null,
+      }),
+    };
+  });
   vi.stubGlobal("fetch", fetchMock);
 
   const onComplete = vi.fn();
@@ -456,6 +511,9 @@ test("MurphAssistantStylePicker saves and closes without advancing in single-ste
     await clickButton(rendered, "Save");
 
     assert.equal(fetchMock.mock.calls.length, 1);
+    assert.deepEqual(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)), {
+      tone: "formal",
+    });
     assert.equal(onComplete.mock.calls.length, 1);
     assert.deepEqual(onOpenChange.mock.calls, [[false]]);
     assert.doesNotMatch(rendered.container.textContent ?? "", /22 voices/u);
