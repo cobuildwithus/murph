@@ -1,8 +1,10 @@
 import { requireHostedOpsRequestAccess } from "@/src/lib/hosted-ops/access";
 import {
-  deriveHostedPulseTrialExtensionCampaign,
   extendHostedPulseTrialsForCampaign,
+  HOSTED_PULSE_TRIAL_EXTENSION_CAMPAIGN,
+  HostedPulseTrialExtensionCandidateLimitError,
   type HostedPulseTrialExtensionMode,
+  type HostedPulseTrialExtensionSummary,
 } from "@/src/lib/hosted-ops/pulse-trial-extension";
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import {
@@ -13,12 +15,14 @@ import {
 
 export const dynamic = "force-dynamic";
 export const fetchCache = "force-no-store";
+export const maxDuration = 800;
 export const revalidate = 0;
 
 const HOSTED_OPS_PULSE_TRIAL_EXTENSION_BODY_LIMIT_BYTES = 4 * 1024;
+const HOSTED_OPS_PULSE_TRIAL_EXTENSION_MAX_CANDIDATES = 4;
 
 export const POST = withJsonError(async (request: Request) => {
-  const session = await requireHostedOpsRequestAccess(request, {
+  await requireHostedOpsRequestAccess(request, {
     requireMutationOrigin: true,
   });
   const body = await readHostedOnboardingJsonObject(request, {
@@ -28,9 +32,11 @@ export const POST = withJsonError(async (request: Request) => {
   });
 
   const mode = readMode(body);
-  const memberId = readOptionalString(body.memberId);
-  const campaign = deriveHostedPulseTrialExtensionCampaign();
-  if (mode === "apply" && readOptionalString(body.campaign) !== campaign) {
+  const memberId = readMemberId(body);
+  if (
+    mode === "apply" &&
+    readOptionalString(body.campaign) !== HOSTED_PULSE_TRIAL_EXTENSION_CAMPAIGN
+  ) {
     throw hostedOnboardingError({
       code: "HOSTED_OPS_PULSE_TRIAL_EXTENSION_CAMPAIGN_CONFIRMATION_INVALID",
       httpStatus: 400,
@@ -40,18 +46,32 @@ export const POST = withJsonError(async (request: Request) => {
     });
   }
 
-  const summary = await extendHostedPulseTrialsForCampaign({
-    campaign,
-    memberId: memberId ?? undefined,
-    mode,
-  });
+  let summary: HostedPulseTrialExtensionSummary;
+  try {
+    summary = await extendHostedPulseTrialsForCampaign({
+      maxCandidates: HOSTED_OPS_PULSE_TRIAL_EXTENSION_MAX_CANDIDATES,
+      memberId,
+      mode,
+    });
+  } catch (error) {
+    if (error instanceof HostedPulseTrialExtensionCandidateLimitError) {
+      throw hostedOnboardingError({
+        code: "HOSTED_OPS_PULSE_TRIAL_EXTENSION_CANDIDATE_LIMIT_EXCEEDED",
+        httpStatus: 409,
+        message:
+          `This run found at least ${error.candidateCount} active trials, above the ` +
+          `${error.maxCandidates}-member safety limit. Use the one-member tool instead.`,
+        retryable: false,
+      });
+    }
+    throw error;
+  }
   if (mode === "apply") {
     console.info("Hosted ops Pulse Trial extension applied.", {
-      campaign,
+      campaign: HOSTED_PULSE_TRIAL_EXTENSION_CAMPAIGN,
       localWindowsReconciled: summary.localWindowsReconciled,
-      operatorMemberId: session.member.id,
+      scope: memberId ? "member" : "all",
       stripeTrialsExtended: summary.stripeTrialsExtended,
-      targetMemberId: memberId,
       timestamp: new Date().toISOString(),
     });
   }
@@ -72,6 +92,23 @@ function readMode(body: Record<string, unknown>): HostedPulseTrialExtensionMode 
     code: "HOSTED_OPS_PULSE_TRIAL_EXTENSION_MODE_INVALID",
     httpStatus: 400,
     message: "Trial extension mode must be dry-run or apply.",
+    retryable: false,
+  });
+}
+
+function readMemberId(body: Record<string, unknown>): string | undefined {
+  if (!Object.hasOwn(body, "memberId")) {
+    return undefined;
+  }
+  const memberId = readOptionalString(body.memberId);
+  if (memberId) {
+    return memberId;
+  }
+
+  throw hostedOnboardingError({
+    code: "HOSTED_OPS_PULSE_TRIAL_EXTENSION_MEMBER_ID_INVALID",
+    httpStatus: 400,
+    message: "Member id must be a non-empty string when provided.",
     retryable: false,
   });
 }

@@ -1,7 +1,7 @@
 "use client";
 
 import { AlertCircleIcon, CalendarPlusIcon, SearchIcon } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { Alert, AlertDescription } from "@/src/components/ui/alert";
 import { Badge } from "@/src/components/ui/badge";
@@ -12,6 +12,10 @@ import type { HostedPulseTrialExtensionSummary } from "@/src/lib/hosted-ops/puls
 
 type TrialExtensionScope = "all" | "member";
 type TrialExtensionPendingAction = "apply" | "preview" | null;
+type TrialExtensionPreview = {
+  summary: HostedPulseTrialExtensionSummary;
+  targetMemberId: string | null;
+};
 
 export function TrialExtensionClient() {
   return (
@@ -27,14 +31,14 @@ export function TrialExtensionClient() {
           <p className="mt-3 max-w-2xl text-sm leading-6 text-muted-foreground">
             Give Pulse Trial members 7 more days. Preview shows what would change
             without touching anything; applying asks you to type the run key from
-            the preview. Running the same day twice is safe and changes nothing
-            the second time.
+            the preview. Retries are safe: already extended trials are not
+            extended again, and unfinished local records can still be reconciled.
           </p>
         </div>
       </header>
 
       <TrialExtensionSection
-        description="Adds 7 days to every active Pulse Trial. Paid, canceled, and suspended members are skipped automatically."
+        description="Adds 7 days to active Pulse Trials. Each run is capped at four candidates; if more qualify, preview stops before changing anything so you can use one-member runs below."
         scope="all"
         title="Every active trial"
       />
@@ -57,40 +61,70 @@ function TrialExtensionSection({
   title: string;
 }) {
   const [memberId, setMemberId] = useState("");
-  const [preview, setPreview] = useState<HostedPulseTrialExtensionSummary | null>(null);
+  const [preview, setPreview] = useState<TrialExtensionPreview | null>(null);
   const [applied, setApplied] = useState<HostedPulseTrialExtensionSummary | null>(null);
   const [confirmation, setConfirmation] = useState("");
   const [pending, setPending] = useState<TrialExtensionPendingAction>(null);
   const [error, setError] = useState<string | null>(null);
+  const appliedResultRef = useRef<HTMLDivElement>(null);
 
   const targetMemberId = scope === "member" ? memberId.trim() : null;
   const missingMemberId = scope === "member" && targetMemberId === "";
-  const confirmationMatches = preview !== null && confirmation.trim() === preview.campaign;
+  const confirmationMatches =
+    preview !== null && confirmation.trim() === preview.summary.campaign;
   const sectionId = `trial-extension-${scope}`;
 
-  async function runExtension(mode: "apply" | "dry-run"): Promise<void> {
-    setPending(mode === "apply" ? "apply" : "preview");
+  useEffect(() => {
+    if (applied) {
+      appliedResultRef.current?.focus();
+    }
+  }, [applied]);
+
+  async function previewExtension(): Promise<void> {
+    const requestedMemberId = scope === "member" ? memberId.trim() : null;
+    if (scope === "member" && !requestedMemberId) {
+      return;
+    }
+
+    setPending("preview");
+    setError(null);
+    setPreview(null);
+    setApplied(null);
+    setConfirmation("");
+    try {
+      const summary = await requestTrialExtension({
+        campaign: null,
+        memberId: requestedMemberId,
+        mode: "dry-run",
+      });
+      setPreview({ summary, targetMemberId: requestedMemberId });
+    } catch (requestError) {
+      setError(readRequestErrorMessage(requestError));
+    } finally {
+      setPending(null);
+    }
+  }
+
+  async function applyExtension(): Promise<void> {
+    if (!preview || confirmation.trim() !== preview.summary.campaign) {
+      return;
+    }
+
+    setPending("apply");
     setError(null);
     try {
       const summary = await requestTrialExtension({
-        campaign: mode === "apply" ? confirmation.trim() : null,
-        memberId: targetMemberId,
-        mode,
+        campaign: preview.summary.campaign,
+        memberId: preview.targetMemberId,
+        mode: "apply",
       });
-      if (mode === "apply") {
-        setApplied(summary);
+      setApplied(summary);
+      if (!hasTrialExtensionFailures(summary)) {
         setPreview(null);
         setConfirmation("");
-      } else {
-        setPreview(summary);
-        setApplied(null);
       }
     } catch (requestError) {
-      setError(
-        requestError instanceof Error
-          ? requestError.message
-          : "The trial extension request failed.",
-      );
+      setError(readRequestErrorMessage(requestError));
     } finally {
       setPending(null);
     }
@@ -136,7 +170,9 @@ function TrialExtensionSection({
                 setPreview(null);
                 setApplied(null);
                 setConfirmation("");
+                setError(null);
               }}
+              disabled={pending !== null}
               placeholder="member_..."
               spellCheck={false}
               value={memberId}
@@ -147,7 +183,7 @@ function TrialExtensionSection({
         <div className="flex flex-wrap items-center gap-2">
           <Button
             disabled={pending !== null || missingMemberId}
-            onClick={() => void runExtension("dry-run")}
+            onClick={() => void previewExtension()}
             size="sm"
             type="button"
             variant="outline"
@@ -159,29 +195,32 @@ function TrialExtensionSection({
 
         {preview ? (
           <div className="flex flex-col gap-3 rounded-lg border border-border/70 bg-muted/20 p-4">
-            <TrialExtensionSummaryPanel scope={scope} summary={preview} />
-            {preview.wouldExtend > 0 || preview.wouldReconcile > 0 ? (
+            <div aria-live="polite" role="status">
+              <TrialExtensionSummaryPanel scope={scope} summary={preview.summary} />
+            </div>
+            {preview.summary.wouldExtend > 0 || preview.summary.wouldReconcile > 0 ? (
               <div className="flex flex-col gap-3 border-t border-border/70 pt-4">
                 <div className="flex max-w-sm flex-col gap-2">
                   <Label
                     className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground"
                     htmlFor={`${sectionId}-confirmation`}
                   >
-                    Type {preview.campaign} to confirm
+                    Type {preview.summary.campaign} to confirm
                   </Label>
                   <Input
                     autoComplete="off"
+                    disabled={pending !== null}
                     id={`${sectionId}-confirmation`}
                     onChange={(event) => setConfirmation(event.target.value)}
-                    placeholder={preview.campaign}
+                    placeholder={preview.summary.campaign}
                     spellCheck={false}
                     value={confirmation}
                   />
                 </div>
                 <div>
                   <Button
-                    disabled={pending !== null || !confirmationMatches || missingMemberId}
-                    onClick={() => void runExtension("apply")}
+                    disabled={pending !== null || !confirmationMatches}
+                    onClick={() => void applyExtension()}
                     size="sm"
                     type="button"
                   >
@@ -199,7 +238,13 @@ function TrialExtensionSection({
         ) : null}
 
         {applied ? (
-          <div className="flex flex-col gap-3 rounded-lg border border-border/70 bg-muted/20 p-4">
+          <div
+            aria-live="polite"
+            className="flex flex-col gap-3 rounded-lg border border-border/70 bg-muted/20 p-4"
+            ref={appliedResultRef}
+            role="status"
+            tabIndex={-1}
+          >
             <TrialExtensionSummaryPanel scope={scope} summary={applied} />
           </div>
         ) : null}
@@ -225,13 +270,17 @@ function TrialExtensionSummaryPanel({
   const isPreview = summary.mode === "dry-run";
   const skippedEntries = Object.entries(summary.skipped).filter(([, count]) => count > 0);
   const failureEntries = Object.entries(summary.failures).filter(([, count]) => count > 0);
+  const hasFailures = failureEntries.length > 0;
+  const defaultBadgeLabel = isPreview ? "Preview" : "Applied";
+  const defaultBadgeVariant = isPreview ? "outline" : "secondary";
+  const failureBadgeLabel = isPreview ? "Preview incomplete" : "Needs retry";
+  const badgeLabel = hasFailures ? failureBadgeLabel : defaultBadgeLabel;
+  const badgeVariant = hasFailures ? "destructive" : defaultBadgeVariant;
 
   return (
     <div className="flex flex-col gap-4">
       <div className="flex flex-wrap items-center gap-2">
-        <Badge variant={isPreview ? "outline" : "secondary"}>
-          {isPreview ? "Preview" : "Applied"}
-        </Badge>
+        <Badge variant={badgeVariant}>{badgeLabel}</Badge>
         <span className="font-mono text-[11px] text-muted-foreground">
           Run key {summary.campaign}
         </span>
@@ -256,7 +305,7 @@ function TrialExtensionSummaryPanel({
             </>
           )}
           <TrialExtensionMetricTile
-            label="Already done today"
+            label="Already extended"
             value={summary.alreadyExtended}
           />
         </div>
@@ -322,6 +371,18 @@ function TrialExtensionReasonList({
       </div>
     </div>
   );
+}
+
+function hasTrialExtensionFailures(
+  summary: HostedPulseTrialExtensionSummary,
+): boolean {
+  return Object.values(summary.failures).some((count) => count > 0);
+}
+
+function readRequestErrorMessage(requestError: unknown): string {
+  return requestError instanceof Error
+    ? requestError.message
+    : "The trial extension request failed.";
 }
 
 async function requestTrialExtension(input: {

@@ -16,14 +16,15 @@ import {
 import {
   classifyHostedPulseTrialExtensionSubscription as classifyHostedPulseTrialExtensionSubscriptionWithPrice,
   createPrismaHostedPulseTrialExtensionCandidateSource,
-  deriveHostedPulseTrialExtensionCampaign,
   extendHostedPulseTrials as extendHostedPulseTrialsWithPrice,
   HOSTED_PULSE_TRIAL_EXTENSION_CAMPAIGN,
   HOSTED_PULSE_TRIAL_EXTENSION_CAMPAIGN_METADATA_KEY,
   HOSTED_PULSE_TRIAL_EXTENSION_DAYS_METADATA_KEY,
+  HostedPulseTrialExtensionCandidateLimitError,
   type HostedPulseTrialExtensionCandidate,
   type HostedPulseTrialExtensionCandidateSource,
   type HostedPulseTrialExtensionStripeClient,
+  type HostedPulseTrialExtensionStripeRequestOptions,
   type HostedPulseTrialExtensionStripeSubscription,
   type HostedPulseTrialExtensionStripeUpdateParams,
 } from "../src/lib/hosted-ops/pulse-trial-extension";
@@ -276,7 +277,11 @@ describe("Pulse Trial beta extension", () => {
       stripe.updateCalls[0]?.options.idempotencyKey ?? "",
       /pulse-beta-extension-2026-07/u,
     );
-    assert.equal(stripe.updateCalls[0]?.options.maxNetworkRetries, 2);
+    assert.deepEqual(stripe.retrieveOptions[0], {
+      maxNetworkRetries: 0,
+      timeout: 80_000,
+    });
+    assert.equal(stripe.updateCalls[0]?.options.maxNetworkRetries, 0);
     assert.equal(stripe.updateCalls[0]?.options.timeout, 80_000);
     assert.deepEqual(source.candidates[0], {
       ...makeCandidate(),
@@ -544,7 +549,7 @@ describe("Pulse Trial beta extension", () => {
       assert.equal(summary.stripeTrialsExtended, 1);
       assert.equal(summary.localWindowsReconciled, 1);
       assert.equal(stripe.updateCalls.length, 1);
-      assert.equal(stripe.updateCalls[0]?.options.maxNetworkRetries, 2);
+      assert.equal(stripe.updateCalls[0]?.options.maxNetworkRetries, 0);
       assert.equal(stripe.updateCalls[0]?.options.timeout, 80_000);
     } finally {
       vi.useRealTimers();
@@ -754,10 +759,11 @@ describe("Pulse Trial beta extension", () => {
       hostedMemberBillingRef: { findMany },
     };
 
-    await createPrismaHostedPulseTrialExtensionCandidateSource(
+    const source = createPrismaHostedPulseTrialExtensionCandidateSource(
       prisma as never,
       { memberId: "member_only" },
-    ).listCandidates({
+    );
+    await source.listCandidates({
       afterMemberId: null,
       limit: 100,
     });
@@ -778,135 +784,37 @@ describe("Pulse Trial beta extension", () => {
     });
   });
 
-});
+  test("candidate safety limit fails before Stripe or local mutation work starts", async () => {
+    const source = makeCandidateSource([
+      makeCandidate({ memberId: "member_1" }),
+      makeCandidate({ memberId: "member_2" }),
+      makeCandidate({ memberId: "member_3" }),
+      makeCandidate({ memberId: "member_4" }),
+      makeCandidate({ memberId: "member_5" }),
+    ]);
+    const stripe = makeStripeClient();
 
-describe("Pulse Trial extension campaign occasions", () => {
-  const DATED_CAMPAIGN = "pulse-beta-extension-2026-07-10";
-
-  test("derives the campaign key from the UTC day", () => {
-    assert.equal(
-      deriveHostedPulseTrialExtensionCampaign(new Date("2026-07-10T23:59:59.000Z")),
-      DATED_CAMPAIGN,
-    );
-    assert.equal(
-      deriveHostedPulseTrialExtensionCampaign(new Date("2026-07-11T00:00:00.000Z")),
-      "pulse-beta-extension-2026-07-11",
-    );
-  });
-
-  test("rejects campaign keys outside the extension family", async () => {
     await assert.rejects(
       extendHostedPulseTrials({
-        campaign: "not-a-trial-campaign",
-        candidateSource: makeCandidateSource([]),
-        mode: "dry-run",
+        candidateSource: source,
+        maxCandidates: 4,
+        mode: "apply",
         now: NOW,
-        stripe: makeStripeClient(),
+        stripe,
       }),
-      /campaign key is invalid/,
-    );
-  });
-
-  test("treats an earlier extension campaign marker as extendable, not a conflict", () => {
-    const candidate = makeCandidate();
-    const markedByEarlierCampaign = makeSubscription({
-      metadata: {
-        billingPlanCode: "launch_monthly",
-        checkoutOffer: "pulse_trial_7d",
-        [HOSTED_PULSE_TRIAL_EXTENSION_CAMPAIGN_METADATA_KEY]:
-          HOSTED_PULSE_TRIAL_EXTENSION_CAMPAIGN,
-        [HOSTED_PULSE_TRIAL_EXTENSION_DAYS_METADATA_KEY]: "7",
-      },
-    });
-
-    assert.deepEqual(
-      classifyHostedPulseTrialExtensionSubscription({
-        campaign: DATED_CAMPAIGN,
-        candidate,
-        nowUnixSeconds: toUnixSeconds(NOW),
-        subscription: markedByEarlierCampaign,
-      }),
-      {
-        alreadyMarked: false,
-        ok: true,
-        stripeTrialEnd: toUnixSeconds(ORIGINAL_TRIAL_END),
+      (error: unknown) => {
+        assert.ok(error instanceof HostedPulseTrialExtensionCandidateLimitError);
+        assert.equal(error.candidateCount, 5);
+        assert.equal(error.maxCandidates, 4);
+        return true;
       },
     );
-    assert.deepEqual(
-      classifyHostedPulseTrialExtensionSubscription({
-        campaign: HOSTED_PULSE_TRIAL_EXTENSION_CAMPAIGN,
-        candidate,
-        nowUnixSeconds: toUnixSeconds(NOW),
-        subscription: markedByEarlierCampaign,
-      }),
-      {
-        alreadyMarked: true,
-        ok: true,
-        stripeTrialEnd: toUnixSeconds(ORIGINAL_TRIAL_END),
-      },
-    );
-  });
-
-  test("a later campaign extends again and overwrites the earlier marker", async () => {
-    const source = makeCandidateSource([makeCandidate()]);
-    const stripe = makeStripeClient(makeSubscription({
-      metadata: {
-        billingPlanCode: "launch_monthly",
-        checkoutOffer: "pulse_trial_7d",
-        [HOSTED_PULSE_TRIAL_EXTENSION_CAMPAIGN_METADATA_KEY]:
-          HOSTED_PULSE_TRIAL_EXTENSION_CAMPAIGN,
-        [HOSTED_PULSE_TRIAL_EXTENSION_DAYS_METADATA_KEY]: "7",
-      },
-    }));
-
-    const summary = await extendHostedPulseTrials({
-      campaign: DATED_CAMPAIGN,
-      candidateSource: source,
-      mode: "apply",
-      now: NOW,
-      stripe,
-    });
-
-    assert.equal(summary.campaign, DATED_CAMPAIGN);
-    assert.equal(summary.stripeTrialsExtended, 1);
-    assert.equal(summary.localWindowsReconciled, 1);
-    const update = stripe.updateCalls[0];
-    assert.equal(
-      update?.params.metadata[HOSTED_PULSE_TRIAL_EXTENSION_CAMPAIGN_METADATA_KEY],
-      DATED_CAMPAIGN,
-    );
-    assert.equal(update?.params.trial_end, toUnixSeconds(EXTENDED_TRIAL_END));
-    assert.equal(
-      update?.options.idempotencyKey,
-      `hosted-pulse-trial-extension:${DATED_CAMPAIGN}:sub_test`,
-    );
-  });
-
-  test("the same campaign stays idempotent under its marker", async () => {
-    const source = makeCandidateSource([makeCandidate({
-      currentPeriodEnd: EXTENDED_TRIAL_END,
-      currentTrialEndsAt: EXTENDED_TRIAL_END,
-    })]);
-    const stripe = makeStripeClient(makeSubscription({
-      metadata: {
-        billingPlanCode: "launch_monthly",
-        checkoutOffer: "pulse_trial_7d",
-        [HOSTED_PULSE_TRIAL_EXTENSION_CAMPAIGN_METADATA_KEY]: DATED_CAMPAIGN,
-        [HOSTED_PULSE_TRIAL_EXTENSION_DAYS_METADATA_KEY]: "7",
-      },
-      trial_end: toUnixSeconds(EXTENDED_TRIAL_END),
-    }));
-
-    const summary = await extendHostedPulseTrials({
-      campaign: DATED_CAMPAIGN,
-      candidateSource: source,
-      mode: "apply",
-      now: NOW,
-      stripe,
-    });
-
-    assert.equal(summary.stripeTrialsExtended, 0);
-    assert.equal(summary.alreadyExtended, 1);
+    assert.deepEqual(source.listInputs, [{
+      afterMemberId: null,
+      limit: 5,
+    }]);
+    assert.equal(source.lockCalls, 0);
+    assert.equal(stripe.retrieveCalls, 0);
     assert.equal(stripe.updateCalls.length, 0);
   });
 });
@@ -993,6 +901,10 @@ function makeCandidateSource(
   } = {},
 ): HostedPulseTrialExtensionCandidateSource & {
   candidates: HostedPulseTrialExtensionCandidate[];
+  listInputs: Array<{
+    afterMemberId: string | null;
+    limit: number;
+  }>;
   readonly lockCalls: number;
   updateCalls: Array<{
     candidate: HostedPulseTrialExtensionCandidate;
@@ -1004,6 +916,10 @@ function makeCandidateSource(
     candidate: HostedPulseTrialExtensionCandidate;
     trialEndsAt: Date;
   }> = [];
+  const listInputs: Array<{
+    afterMemberId: string | null;
+    limit: number;
+  }> = [];
   let lockCalls = 0;
   let remainingFailures = options.failUpdates ?? 0;
 
@@ -1012,7 +928,9 @@ function makeCandidateSource(
     get lockCalls() {
       return lockCalls;
     },
+    listInputs,
     async listCandidates(input) {
+      listInputs.push(input);
       const startIndex = input.afterMemberId
         ? candidates.findIndex((candidate) => candidate.memberId === input.afterMemberId) + 1
         : 0;
@@ -1049,10 +967,11 @@ function makeStripeClient(
   events?: string[],
 ): HostedPulseTrialExtensionStripeClient & {
   retrieveCalls: number;
+  retrieveOptions: HostedPulseTrialExtensionStripeRequestOptions[];
   updateCalls: Array<{
     options: {
       idempotencyKey: string;
-      maxNetworkRetries: 2;
+      maxNetworkRetries: 0;
       timeout: 80_000;
     };
     params: HostedPulseTrialExtensionStripeUpdateParams;
@@ -1065,17 +984,22 @@ function makeStripeClient(
   };
   const client = {
     retrieveCalls: 0,
+    retrieveOptions: [] as HostedPulseTrialExtensionStripeRequestOptions[],
     updateCalls: [] as Array<{
       options: {
         idempotencyKey: string;
-        maxNetworkRetries: 2;
+        maxNetworkRetries: 0;
         timeout: 80_000;
       };
       params: HostedPulseTrialExtensionStripeUpdateParams;
       subscriptionId: string;
     }>,
-    async retrieveSubscription() {
+    async retrieveSubscription(
+      _subscriptionId: string,
+      options: HostedPulseTrialExtensionStripeRequestOptions,
+    ) {
       client.retrieveCalls += 1;
+      client.retrieveOptions.push(options);
       return subscription;
     },
     async updateSubscription(
@@ -1083,7 +1007,7 @@ function makeStripeClient(
       params: HostedPulseTrialExtensionStripeUpdateParams,
       options: {
         idempotencyKey: string;
-        maxNetworkRetries: 2;
+        maxNetworkRetries: 0;
         timeout: 80_000;
       },
     ) {

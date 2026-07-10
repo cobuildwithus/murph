@@ -54,7 +54,7 @@ export default async function HostedOpsPage() {
             Ops
           </h1>
           <p className="mt-3 max-w-2xl text-sm leading-6 text-muted-foreground">
-            Internal controls for hosted runtime maintenance and latency.
+            Internal controls for hosted growth, billing, and runtime operations.
           </p>
         </div>
       </header>

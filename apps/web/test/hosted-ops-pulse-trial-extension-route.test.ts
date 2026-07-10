@@ -28,7 +28,11 @@ vi.mock("@/src/lib/hosted-ops/pulse-trial-extension", async () => {
   };
 });
 
-import type { HostedPulseTrialExtensionSummary } from "@/src/lib/hosted-ops/pulse-trial-extension";
+import {
+  HOSTED_PULSE_TRIAL_EXTENSION_CAMPAIGN,
+  HostedPulseTrialExtensionCandidateLimitError,
+  type HostedPulseTrialExtensionSummary,
+} from "@/src/lib/hosted-ops/pulse-trial-extension";
 
 type PulseTrialExtensionRouteModule =
   typeof import("../app/api/ops/pulse-trial-extension/route");
@@ -37,7 +41,6 @@ let route: PulseTrialExtensionRouteModule;
 
 const originalHostedOpsMemberIds = process.env.HOSTED_OPS_MEMBER_IDS;
 const NOW = new Date("2026-07-10T12:00:00.000Z");
-const DERIVED_CAMPAIGN = "pulse-beta-extension-2026-07-10";
 const OPERATOR_MEMBER_ID = "member_operator";
 
 let consoleInfoSpy: ReturnType<typeof vi.spyOn>;
@@ -57,7 +60,7 @@ describe("hosted ops Pulse Trial extension route", () => {
       member: { id: OPERATOR_MEMBER_ID },
     });
     mocks.extendHostedPulseTrialsForCampaign.mockResolvedValue(
-      makeSummary({ campaign: DERIVED_CAMPAIGN }),
+      makeSummary({}),
     );
   });
 
@@ -82,18 +85,19 @@ describe("hosted ops Pulse Trial extension route", () => {
     assert.equal(mocks.extendHostedPulseTrialsForCampaign.mock.calls.length, 0);
   });
 
-  test("defaults to a preview with the UTC-dated campaign and no member filter", async () => {
+  test("defaults to a bounded preview with the fixed campaign and no member filter", async () => {
     const response = await route.POST(makeRequest({}));
 
     assert.equal(response.status, 200);
+    assert.equal(route.maxDuration, 800);
     assert.equal(mocks.assertHostedOnboardingMutationOrigin.mock.calls.length, 1);
     expect(mocks.extendHostedPulseTrialsForCampaign).toHaveBeenCalledWith({
-      campaign: DERIVED_CAMPAIGN,
+      maxCandidates: 4,
       memberId: undefined,
       mode: "dry-run",
     });
     const payload = await response.json() as HostedPulseTrialExtensionSummary;
-    assert.equal(payload.campaign, DERIVED_CAMPAIGN);
+    assert.equal(payload.campaign, HOSTED_PULSE_TRIAL_EXTENSION_CAMPAIGN);
     assert.equal(consoleInfoSpy.mock.calls.length, 0);
   });
 
@@ -101,16 +105,31 @@ describe("hosted ops Pulse Trial extension route", () => {
     await route.POST(makeRequest({ memberId: "  member_target  " }));
 
     expect(mocks.extendHostedPulseTrialsForCampaign).toHaveBeenCalledWith({
-      campaign: DERIVED_CAMPAIGN,
+      maxCandidates: 4,
       memberId: "member_target",
       mode: "dry-run",
     });
   });
 
+  test.each([
+    ["blank", "   "],
+    ["null", null],
+    ["number", 42],
+    ["object", { id: "member_target" }],
+  ])("rejects a present invalid %s member scope instead of widening to all", async (
+    _label,
+    memberId,
+  ) => {
+    const response = await route.POST(makeRequest({ memberId }));
+
+    assert.equal(response.status, 400);
+    assert.equal(mocks.extendHostedPulseTrialsForCampaign.mock.calls.length, 0);
+  });
+
   test("refuses to apply without the exact current campaign key", async () => {
     const missing = await route.POST(makeRequest({ mode: "apply" }));
     const stale = await route.POST(makeRequest({
-      campaign: "pulse-beta-extension-2026-07-09",
+      campaign: "pulse-beta-extension-another-occasion",
       mode: "apply",
     }));
 
@@ -119,28 +138,49 @@ describe("hosted ops Pulse Trial extension route", () => {
     assert.equal(mocks.extendHostedPulseTrialsForCampaign.mock.calls.length, 0);
   });
 
-  test("applies with the exact campaign key and logs the operator", async () => {
+  test("applies with the exact campaign key and logs only aggregate results", async () => {
     const response = await route.POST(makeRequest({
-      campaign: DERIVED_CAMPAIGN,
+      campaign: HOSTED_PULSE_TRIAL_EXTENSION_CAMPAIGN,
       memberId: "member_target",
       mode: "apply",
     }));
 
     assert.equal(response.status, 200);
     expect(mocks.extendHostedPulseTrialsForCampaign).toHaveBeenCalledWith({
-      campaign: DERIVED_CAMPAIGN,
+      maxCandidates: 4,
       memberId: "member_target",
       mode: "apply",
     });
     assert.equal(consoleInfoSpy.mock.calls.length, 1);
     assert.deepEqual(consoleInfoSpy.mock.calls[0]?.[1], {
-      campaign: DERIVED_CAMPAIGN,
+      campaign: HOSTED_PULSE_TRIAL_EXTENSION_CAMPAIGN,
       localWindowsReconciled: 0,
-      operatorMemberId: OPERATOR_MEMBER_ID,
+      scope: "member",
       stripeTrialsExtended: 0,
-      targetMemberId: "member_target",
       timestamp: NOW.toISOString(),
     });
+  });
+
+  test("returns a bounded conflict before a campaign can exceed the request limit", async () => {
+    mocks.extendHostedPulseTrialsForCampaign.mockRejectedValueOnce(
+      new HostedPulseTrialExtensionCandidateLimitError({
+        candidateCount: 5,
+        maxCandidates: 4,
+      }),
+    );
+
+    const response = await route.POST(makeRequest({}));
+    const payload = await response.json() as {
+      error?: { code?: string; message?: string };
+    };
+
+    assert.equal(response.status, 409);
+    assert.equal(
+      payload.error?.code,
+      "HOSTED_OPS_PULSE_TRIAL_EXTENSION_CANDIDATE_LIMIT_EXCEEDED",
+    );
+    assert.match(payload.error?.message ?? "", /Use the one-member tool instead/);
+    assert.equal(consoleInfoSpy.mock.calls.length, 0);
   });
 
   test("rejects unknown modes", async () => {
@@ -166,7 +206,7 @@ function makeSummary(
 ): HostedPulseTrialExtensionSummary {
   return {
     alreadyExtended: 0,
-    campaign: DERIVED_CAMPAIGN,
+    campaign: HOSTED_PULSE_TRIAL_EXTENSION_CAMPAIGN,
     candidates: 0,
     extensionDays: 7,
     failures: {

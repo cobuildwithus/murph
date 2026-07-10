@@ -856,22 +856,30 @@ Current hosted billing assumptions:
   `HOSTED_AUTO_PULSE_TRIAL_ENABLED=0` only to force card checkout fallback.
 - Card-based Pulse Trial checkout fallback is gated by
   `HOSTED_PULSE_TRIAL_CHECKOUT_ENABLED=1`.
-- `/ops/trials` is the canonical Pulse Trial extension surface. It runs
-  `extendHostedPulseTrialsForCampaign` in-process through
-  `POST /api/ops/pulse-trial-extension` (allowlist + mutation-origin gated),
-  extending each Stripe-authoritative current trial by exactly seven days from
-  its existing end and reconciling only the matching local billing and
+- `/ops/trials` is the only Pulse Trial beta-extension surface. It runs the
+  fixed `pulse-beta-extension-2026-07` campaign in-process through
+  `POST /api/ops/pulse-trial-extension` (operator allowlist + mutation-origin
+  gated), so operators do not need production secrets on a local machine. The
+  route extends each Stripe-authoritative current trial by exactly seven days
+  from its existing end and reconciles only the matching local billing and
   usage-period end timestamps under the shared hosted-member Stripe mutation
-  lock. Preview (dry-run) is the default and is aggregate-only; Apply requires
-  echoing the exact server-derived campaign key
-  (`pulse-beta-extension-<UTC date>`) returned by the preview. The Stripe
-  metadata marker makes a same-campaign Apply retry safe: it cannot re-extend,
-  it can only repair incomplete local reconciliation. A later occasion uses
-  that day's fresh campaign key and extends again; markers from earlier
-  `pulse-beta-extension-*` campaigns are overwritten, while foreign marker
-  values still skip as conflicts. Because the route executes on the deployed
-  SHA and every production deployment since the Start-paid locking change is
-  lock-capable, the retired local-script alias-proof and drain gate does not
-  apply to in-app runs. The legacy one-time script
-  `apps/web/scripts/extend-pulse-trials.ts` remains only for environments
-  where an operator can inject production env locally; prefer `/ops/trials`.
+  lock. Preview is aggregate-only and does not mutate; Apply requires echoing
+  the exact fixed campaign key returned by Preview. The Stripe metadata marker
+  makes every Apply retry safe: an already marked subscription cannot receive a
+  second extension, while a Stripe-success/local-failure retry can still repair
+  local reconciliation. Foreign campaign markers fail closed.
+- The deployed route has an 800-second duration and a four-candidate safety
+  limit. A bounded run preflights at most five candidates in one query and then
+  acts only on that captured set, so eligibility changes cannot widen the run
+  after preflight. If an all-member Preview finds more than four active trials,
+  it fails before any Stripe call and the operator must use the one-member tool
+  for each target. Trial-extension Stripe reads and writes use one 80-second
+  attempt; the fixed idempotency key and operator-driven retry preserve safe
+  recovery while keeping four sequential candidates inside the route budget.
+  Before the first production Apply, keep a deployment containing the
+  shared Start-paid-Pulse mutation lock live for at least 1,140 seconds (19
+  minutes) so any older unlocked invocation drains; do not roll back below that
+  lock-capable version during the campaign. Preview immediately before Apply,
+  investigate every unexpected skip/failure, Apply the returned key, then
+  Preview again and require `wouldExtend = 0` and `wouldReconcile = 0` before
+  calling the campaign done.
