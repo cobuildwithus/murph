@@ -1298,14 +1298,21 @@ export class RunnerContainer extends Container {
     leaseGeneration: string;
     userId: string;
   }): Promise<RunnerWorkspaceInvocationAbortStatus> {
-    const status = await readRunnerContainerStatus(this);
-    if (isRunnerContainerStopped(status)) {
-      return "inactive";
-    }
-    const abortStatus = await this.postWorkspaceInvocationAbort(input);
-    return abortStatus === "accepted" || abortStatus === "queued"
-      ? "requested"
-      : abortStatus;
+    return await this.withLifecycleLock(async () => {
+      const status = await readRunnerContainerStatus(this);
+      if (isRunnerContainerStopped(status)) {
+        return "inactive";
+      }
+      const abortStatus = await this.postWorkspaceInvocationAbort(input);
+      if (abortStatus === "stale") {
+        return "stale";
+      }
+      await this.stopWarmContainer({
+        failClosed: true,
+        reason: "invoke-failure",
+      });
+      return "accepted";
+    });
   }
 
   private async postWorkspaceInvocationAbort(input: {
