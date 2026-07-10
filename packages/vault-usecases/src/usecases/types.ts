@@ -734,6 +734,36 @@ export interface JunctionWorkoutHeartRateZoneRepairInput extends CommandContext 
   apply?: boolean
 }
 
+export interface ExperimentMediaRepairInput extends CommandContext {
+  apply?: boolean
+}
+
+export interface ExperimentMediaRepairResult {
+  mode: "dry-run" | "apply"
+  hasWork: boolean
+  candidateCount: number
+  candidateBytes: number
+  candidateExamples: Array<{
+    experimentSlug: string
+    relativePath: string
+    sizeBytes: number
+  }>
+  blockerCount: number
+  blockersByCode: Record<string, number>
+  blockerExamples: Array<{
+    code: string
+    relativePath?: string
+    message: string
+  }>
+  mutated: boolean
+  createdCaptureCount: number
+  reusedCaptureCount: number
+  deletedFileCount: number
+  removedLegacyBytes: number
+  rewrittenDocumentCount: number
+  auditPaths: string[]
+}
+
 export interface JunctionWorkoutHeartRateZoneRepairResult {
   mode: "dry-run" | "apply"
   hasWork: boolean
@@ -1122,6 +1152,7 @@ export interface CoreWriteServices extends HealthCoreServiceMethods {
   repairJunctionWorkoutHeartRateZones(
     input: JunctionWorkoutHeartRateZoneRepairInput,
   ): Promise<JunctionWorkoutHeartRateZoneRepairResult>
+  repairExperimentMedia(input: ExperimentMediaRepairInput): Promise<ExperimentMediaRepairResult>
   repairIntegrationIngests(input: IntegrationIngestRepairInput): Promise<IntegrationIngestRepairResult>
   repairWearableStorage(input: WearableStorageRepairInput): Promise<WearableStorageRepairResult>
   projectAssessment(
@@ -1513,6 +1544,10 @@ export interface CoreRuntimeModule extends HealthCoreRuntimeMethods {
     touchedPaths: string[]
     auditPath: string | null
   }>
+  repairExperimentMedia(input: {
+    apply?: boolean
+    vaultRoot: string
+  }): Promise<ExperimentMediaRepairResult>
   runIntegrationIngestMigration(input: {
     vaultRoot: string
     apply?: boolean

@@ -51,6 +51,7 @@ export const CORE_DOCUMENT_RELATIVE_PATH = "CORE.md" as const;
 export const AUTOMATIONS_DIRECTORY = "bank/automations" as const;
 export const SCHEDULED_LOGS_DIRECTORY = "bank/scheduled-logs" as const;
 export const EXPERIMENTS_DIRECTORY = "bank/experiments" as const;
+export const EXPERIMENT_OUTCOMES_DIRECTORY = "bank/experiments/outcomes" as const;
 export const PROTOCOLS_DIRECTORY = "bank/protocols" as const;
 export const HEALTH_LIBRARY_DIRECTORY = "bank/library" as const;
 export const JOURNAL_DIRECTORY = "journal" as const;
@@ -951,6 +952,7 @@ export const VAULT_LAYOUT = Object.freeze({
   allergiesDirectory: allergyBankEntityDefinition.registry.directory,
   conditionsDirectory: conditionBankEntityDefinition.registry.directory,
   experimentsDirectory: EXPERIMENTS_DIRECTORY,
+  experimentOutcomesDirectory: EXPERIMENT_OUTCOMES_DIRECTORY,
   protocolsDirectory: PROTOCOLS_DIRECTORY,
   familyDirectory: familyBankEntityDefinition.registry.directory,
   foodsDirectory: foodBankEntityDefinition.registry.directory,

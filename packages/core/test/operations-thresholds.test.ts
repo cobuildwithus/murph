@@ -1339,6 +1339,223 @@ test("applyCanonicalWriteBatch reports resume conflicts when delete backups are 
   assert.equal(deleteBackupMissingOperation?.operation.error?.code, "OPERATION_RESUME_CONFLICT");
 });
 
+test("write batches preserve text and delete targets that changed after staging", async () => {
+  const vaultRoot = await makeTempDirectory("murph-core-operations-target-preconditions");
+  await initializeVault({ vaultRoot });
+
+  const receipt = (content: string) => ({
+    byteLength: Buffer.byteLength(content, "utf8"),
+    sha256: createHash("sha256").update(content, "utf8").digest("hex"),
+  });
+  const textPath = "bank/thresholds/precondition-text.md";
+  const deletePath = "bank/thresholds/precondition-delete.md";
+  const textAbsolutePath = resolveVaultPath(vaultRoot, textPath).absolutePath;
+  const deleteAbsolutePath = resolveVaultPath(vaultRoot, deletePath).absolutePath;
+  await fs.mkdir(path.dirname(textAbsolutePath), { recursive: true });
+  await fs.writeFile(textAbsolutePath, "text-a\n", "utf8");
+  await fs.writeFile(deleteAbsolutePath, "delete-a\n", "utf8");
+
+  const textBatch = await WriteBatch.create({
+    vaultRoot,
+    operationType: "text_target_precondition",
+    summary: "preserve a changed text target",
+  });
+  await textBatch.stageTextWrite(textPath, "replacement\n", {
+    expectedTargetReceipt: receipt("text-a\n"),
+    overwrite: true,
+  });
+  await fs.writeFile(textAbsolutePath, "text-b\n", "utf8");
+  await assert.rejects(
+    () => textBatch.commit(),
+    (error: unknown) =>
+      error instanceof VaultError && error.code === "OPERATION_PRECONDITION_FAILED",
+  );
+  assert.equal(await fs.readFile(textAbsolutePath, "utf8"), "text-b\n");
+
+  const deleteBatch = await WriteBatch.create({
+    vaultRoot,
+    operationType: "delete_target_precondition",
+    summary: "preserve a changed delete target",
+  });
+  await deleteBatch.stageDelete(deletePath, {
+    expectedTargetReceipt: receipt("delete-a\n"),
+  });
+  await fs.writeFile(deleteAbsolutePath, "delete-b\n", "utf8");
+  await assert.rejects(
+    () => deleteBatch.commit(),
+    (error: unknown) =>
+      error instanceof VaultError && error.code === "OPERATION_PRECONDITION_FAILED",
+  );
+  assert.equal(await fs.readFile(deleteAbsolutePath, "utf8"), "delete-b\n");
+});
+
+test("receipt-guarded text writes preserve an edit that races the atomic quarantine", async () => {
+  const vaultRoot = await makeTempDirectory("murph-core-operations-text-quarantine-race");
+  await initializeVault({ vaultRoot });
+  const targetPath = "bank/thresholds/quarantined-text-race.md";
+  const targetAbsolutePath = resolveVaultPath(vaultRoot, targetPath).absolutePath;
+  const original = "inspected text\n";
+  const racingEdit = "racing edit\n";
+  await fs.mkdir(path.dirname(targetAbsolutePath), { recursive: true });
+  await fs.writeFile(targetAbsolutePath, original, "utf8");
+
+  const batch = await WriteBatch.create({
+    vaultRoot,
+    operationType: "expected_text_race",
+    summary: "preserve a racing text edit",
+  });
+  await batch.stageTextWrite(targetPath, "replacement\n", {
+    expectedTargetReceipt: {
+      byteLength: Buffer.byteLength(original, "utf8"),
+      sha256: createHash("sha256").update(original, "utf8").digest("hex"),
+    },
+    overwrite: true,
+  });
+
+  const moveExpectedTargetToBackup = Reflect.get(
+    Object.getPrototypeOf(batch),
+    "moveExpectedTargetToBackup",
+  );
+  if (typeof moveExpectedTargetToBackup !== "function") {
+    throw new Error("Expected WriteBatch quarantine support.");
+  }
+
+  let injectedRace = false;
+  Reflect.set(batch, "moveExpectedTargetToBackup", async (...args: unknown[]) => {
+    if (!injectedRace) {
+      injectedRace = true;
+      await fs.writeFile(targetAbsolutePath, racingEdit, "utf8");
+    }
+    return await Reflect.apply(moveExpectedTargetToBackup, batch, args);
+  });
+
+  await assert.rejects(
+    () => batch.commit(),
+    (error: unknown) =>
+      error instanceof VaultError && error.code === "OPERATION_PRECONDITION_FAILED",
+  );
+  assert.equal(injectedRace, true);
+  assert.equal(await fs.readFile(targetAbsolutePath, "utf8"), racingEdit);
+});
+
+test("receipt-guarded text writes restore inspected bytes after interrupted finalization", async () => {
+  const vaultRoot = await makeTempDirectory("murph-core-operations-text-quarantine-interruption");
+  await initializeVault({ vaultRoot });
+  const targetPath = "bank/thresholds/quarantined-text-interruption.md";
+  const targetAbsolutePath = resolveVaultPath(vaultRoot, targetPath).absolutePath;
+  const original = "restore through interruption\n";
+  await fs.mkdir(path.dirname(targetAbsolutePath), { recursive: true });
+  await fs.writeFile(targetAbsolutePath, original, "utf8");
+
+  const batch = await WriteBatch.create({
+    vaultRoot,
+    operationType: "expected_text_interruption",
+    summary: "restore an interrupted text replacement",
+  });
+  await batch.stageTextWrite(targetPath, "replacement\n", {
+    expectedTargetReceipt: {
+      byteLength: Buffer.byteLength(original, "utf8"),
+      sha256: createHash("sha256").update(original, "utf8").digest("hex"),
+    },
+    overwrite: true,
+  });
+
+  const record = Reflect.get(batch, "record");
+  const actions = typeof record === "object" && record !== null
+    ? Reflect.get(record, "actions")
+    : null;
+  const action = Array.isArray(actions) ? actions[0] : null;
+  const persist = Reflect.get(batch, "persist");
+  if (!action || typeof persist !== "function") {
+    throw new Error("Expected a staged text action and WriteBatch persistence.");
+  }
+
+  let injectedFailure = false;
+  Reflect.set(batch, "persist", async () => {
+    if (!injectedFailure && Reflect.get(action, "state") === "applied") {
+      injectedFailure = true;
+      throw new Error("injected text finalization interruption");
+    }
+    return await Reflect.apply(persist, batch, []);
+  });
+
+  await assert.rejects(
+    () => batch.commit(),
+    /injected text finalization interruption/u,
+  );
+  assert.equal(injectedFailure, true);
+  assert.equal(await fs.readFile(targetAbsolutePath, "utf8"), original);
+});
+
+test("expected deletes retain quarantined bytes across an interrupted finalization", async () => {
+  const vaultRoot = await makeTempDirectory("murph-core-operations-delete-quarantine");
+  await initializeVault({ vaultRoot });
+  const targetPath = "bank/thresholds/quarantined-delete.md";
+  const targetAbsolutePath = resolveVaultPath(vaultRoot, targetPath).absolutePath;
+  const content = "preserve through interruption\n";
+  await fs.mkdir(path.dirname(targetAbsolutePath), { recursive: true });
+  await fs.writeFile(targetAbsolutePath, content, "utf8");
+
+  const batch = await WriteBatch.create({
+    vaultRoot,
+    operationType: "expected_delete_interruption",
+    summary: "retain quarantined delete bytes",
+  });
+  await batch.stageDelete(targetPath, {
+    expectedTargetReceipt: {
+      byteLength: Buffer.byteLength(content, "utf8"),
+      sha256: createHash("sha256").update(content, "utf8").digest("hex"),
+    },
+  });
+
+  const record = Reflect.get(batch, "record");
+  const actions = typeof record === "object" && record !== null
+    ? Reflect.get(record, "actions")
+    : null;
+  const action = Array.isArray(actions) ? actions[0] : null;
+  const applyDelete = Reflect.get(Object.getPrototypeOf(batch), "applyDelete");
+  const persist = Reflect.get(batch, "persist");
+  if (!action || typeof applyDelete !== "function" || typeof persist !== "function") {
+    throw new Error("Expected a staged delete action and WriteBatch internals.");
+  }
+
+  let injectedFailure = false;
+  Reflect.set(batch, "persist", async () => {
+    if (!injectedFailure && Reflect.get(action, "state") === "applied") {
+      injectedFailure = true;
+      throw new Error("injected delete finalization interruption");
+    }
+    return await Reflect.apply(persist, batch, []);
+  });
+  await assert.rejects(
+    () => Reflect.apply(applyDelete, batch, [0, action]),
+    /injected delete finalization interruption/u,
+  );
+  Reflect.set(batch, "persist", persist);
+
+  assert.equal(injectedFailure, true);
+  assert.equal(await fs.access(targetAbsolutePath).then(() => true, () => false), false);
+  const recoverable = await readRecoverableStoredWriteOperation(
+    vaultRoot,
+    batch.metadataRelativePath,
+  );
+  const recoverableAction = recoverable?.actions[0];
+  assert.equal(recoverableAction?.kind, "delete");
+  assert.equal(recoverableAction?.state, "staged");
+  assert.equal(
+    recoverableAction?.kind === "delete" && recoverableAction.backupRelativePath
+      ? await fs.readFile(
+        resolveVaultPath(vaultRoot, recoverableAction.backupRelativePath).absolutePath,
+        "utf8",
+      )
+      : null,
+    content,
+  );
+
+  await batch.rollback();
+  assert.equal(await fs.readFile(targetAbsolutePath, "utf8"), content);
+});
+
 test("validateVault reports missing metadata and missing required directories", async () => {
   const missingMetadataVaultRoot = await makeTempDirectory(
     "murph-core-operations-thresholds-vault-metadata-missing",

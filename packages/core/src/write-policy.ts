@@ -1,6 +1,11 @@
 import path from "node:path";
 import { promises as fs } from "node:fs";
 
+import {
+  classifyExperimentStorageFile,
+  EXPERIMENTS_DIRECTORY,
+} from "@murphai/contracts";
+
 import { VaultError } from "./errors.ts";
 import {
   assertPathWithinVaultOnDisk,
@@ -85,6 +90,27 @@ export function assertWriteTargetPolicy(
   policy: WriteTargetPolicy,
   options: VaultPathComparisonOptions = {},
 ): void {
+  const comparablePath = options.caseInsensitive
+    ? relativePath.toLowerCase()
+    : relativePath;
+  const comparableExperimentsDirectory = options.caseInsensitive
+    ? EXPERIMENTS_DIRECTORY.toLowerCase()
+    : EXPERIMENTS_DIRECTORY;
+  if (
+    policy.kind === "text"
+    && (
+      comparablePath === comparableExperimentsDirectory
+      || comparablePath.startsWith(`${comparableExperimentsDirectory}/`)
+    )
+    && classifyExperimentStorageFile(relativePath) === "unsupported"
+  ) {
+    throw new VaultError(
+      "EXPERIMENT_STORAGE_INVALID",
+      "Experiment storage accepts only direct slug-named Markdown documents and direct JSON outcome records under the reserved outcomes directory.",
+      { relativePath },
+    );
+  }
+
   if (policy.kind === "raw") {
     if (!isRawRelativePath(relativePath, options)) {
       throw new VaultError(

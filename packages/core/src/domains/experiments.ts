@@ -12,6 +12,7 @@ import type {
 } from "@murphai/contracts";
 import {
   EXPERIMENT_STATUSES,
+  experimentDocumentRelativePath,
   experimentFrontmatterSchema,
   safeParseContract,
 } from "@murphai/contracts";
@@ -20,6 +21,7 @@ import { FRONTMATTER_SCHEMA_VERSIONS, ID_PREFIXES, VAULT_LAYOUT } from "../const
 import { emitAuditRecord } from "../audit.ts";
 import { commitAuditedCanonicalWrite } from "../audited-write.ts";
 import { VaultError } from "../errors.ts";
+import { assertExperimentDocumentRelativePath } from "../experiment-storage.ts";
 import { parseFrontmatterDocument, stringifyFrontmatterDocument } from "../frontmatter.ts";
 import { stageMarkdownDocumentWrite } from "../markdown-documents.ts";
 import { readUtf8File } from "../fs.ts";
@@ -189,13 +191,22 @@ export async function readExperimentFrontmatterDocument(
     body: string;
   };
 }> {
+  assertExperimentDocumentRelativePath(relativePath);
   const rawDocument = await readUtf8File(vaultRoot, relativePath);
   const parsed = parseFrontmatterDocument(rawDocument);
+  const attributes = validateExperimentFrontmatter(parsed.attributes, relativePath);
+  if (experimentDocumentRelativePath(attributes.slug) !== relativePath) {
+    throw new VaultError(
+      "EXPERIMENT_DOCUMENT_PATH_MISMATCH",
+      "An experiment document filename must match its frontmatter slug.",
+      { relativePath },
+    );
+  }
 
   return {
     rawDocument,
     document: {
-      attributes: validateExperimentFrontmatter(parsed.attributes, relativePath),
+      attributes,
       body: parsed.body,
     },
   };
@@ -241,7 +252,7 @@ export async function createExperiment({
   const safeSlug = sanitizePathSegment(slug, "experiment");
   const startedTimestamp = toIsoTimestamp(startedOn, "startedOn");
   const startedDay = toLocalDayKey(startedOn, vault.metadata.timezone ?? defaultTimeZone(), "startedOn");
-  const relativePath = `${VAULT_LAYOUT.experimentsDirectory}/${safeSlug}.md`;
+  const relativePath = experimentDocumentRelativePath(safeSlug);
   const normalizedTitle = String(title ?? safeSlug).trim();
   const normalizedStatus = requireExperimentStatus(status);
   const normalizedHypothesis = normalizeExperimentHypothesis(hypothesis);
