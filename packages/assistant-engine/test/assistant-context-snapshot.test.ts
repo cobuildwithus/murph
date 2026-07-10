@@ -10,6 +10,8 @@ import {
   ID_PREFIXES,
 } from '@murphai/contracts'
 import {
+  appendBloodTest,
+  deleteEvent,
   initializeVault,
   stringifyFrontmatterDocument,
   VAULT_LAYOUT,
@@ -332,69 +334,40 @@ describe('assistant context snapshot', () => {
         createdAt: '2026-06-01T00:00:00.000Z',
         vaultRoot,
       })
-      await mkdir(path.join(vaultRoot, 'ledger/events'), {
-        recursive: true,
+      await appendBloodTest({
+        occurredAt: '2026-01-15T08:00:00.000Z',
+        testName: 'surviving_panel',
+        title: 'Surviving panel',
+        vaultRoot,
       })
-      const survivingBloodTestId = generateContractId(ID_PREFIXES.event)
-      const deletedBloodTestId = generateContractId(ID_PREFIXES.event)
-      await writeFile(
-        path.join(vaultRoot, 'ledger/events/2026-01.jsonl'),
-        [
-          JSON.stringify({
-            schemaVersion: 'murph.event.v1',
-            id: survivingBloodTestId,
-            kind: 'test',
-            occurredAt: '2026-01-15T08:00:00.000Z',
-            recordedAt: '2026-01-15T08:05:00.000Z',
-            specimenType: 'blood',
-            testCategory: 'blood',
-            lifecycle: { revision: 1 },
-          }),
-          '',
-        ].join('\n'),
-        'utf8',
-      )
+      const relativeDirectory = path.join(vaultRoot, 'ledger/events/2026')
+      await mkdir(relativeDirectory, { recursive: true })
       for (const month of ['02', '03', '04']) {
         await writeFile(
-          path.join(vaultRoot, `ledger/events/2026-${month}.jsonl`),
+          path.join(relativeDirectory, `2026-${month}.jsonl`),
           `${JSON.stringify({
             schemaVersion: 'murph.event.v1',
             id: generateContractId(ID_PREFIXES.event),
             kind: 'note',
             occurredAt: `2026-${month}-15T08:00:00.000Z`,
             recordedAt: `2026-${month}-15T08:05:00.000Z`,
+            dayKey: `2026-${month}-15`,
+            source: 'manual',
             title: `Month ${month} note`,
           })}\n`,
           'utf8',
         )
       }
-      await writeFile(
-        path.join(vaultRoot, 'ledger/events/2026-05.jsonl'),
-        [
-          JSON.stringify({
-            schemaVersion: 'murph.event.v1',
-            id: deletedBloodTestId,
-            kind: 'test',
-            occurredAt: '2026-05-31T08:00:00.000Z',
-            recordedAt: '2026-05-31T08:05:00.000Z',
-            specimenType: 'blood',
-            testCategory: 'blood',
-            lifecycle: { revision: 1 },
-          }),
-          JSON.stringify({
-            schemaVersion: 'murph.event.v1',
-            id: deletedBloodTestId,
-            kind: 'test',
-            occurredAt: '2026-05-31T08:00:00.000Z',
-            recordedAt: '2026-05-31T09:00:00.000Z',
-            specimenType: 'blood',
-            testCategory: 'blood',
-            lifecycle: { revision: 2, state: 'deleted' },
-          }),
-          '',
-        ].join('\n'),
-        'utf8',
-      )
+      const deleted = await appendBloodTest({
+        occurredAt: '2026-05-31T08:00:00.000Z',
+        testName: 'deleted_newer_panel',
+        title: 'Deleted newer panel',
+        vaultRoot,
+      })
+      await deleteEvent({
+        eventId: deleted.record.id,
+        vaultRoot,
+      })
 
       await markAssistantContextSnapshotDirty({
         domains: ['blood_tests'],
@@ -1057,45 +1030,16 @@ async function writeTestSnapshotSources(vaultRoot: string): Promise<void> {
     'utf8',
   )
 
-  await mkdir(path.join(vaultRoot, 'ledger/events'), {
-    recursive: true,
+  await appendBloodTest({
+    occurredAt: '2026-05-20T08:00:00.000Z',
+    testName: 'first_panel',
+    title: 'First panel',
+    vaultRoot,
   })
-  const firstBloodTestId = generateContractId(ID_PREFIXES.event)
-  const observationId = generateContractId(ID_PREFIXES.event)
-  const latestBloodTestId = generateContractId(ID_PREFIXES.event)
-  await writeFile(
-    path.join(vaultRoot, 'ledger/events/2026-06.jsonl'),
-    [
-      JSON.stringify({
-        schemaVersion: 'murph.event.v1',
-        id: firstBloodTestId,
-        kind: 'test',
-        occurredAt: '2026-05-20T08:00:00.000Z',
-        recordedAt: '2026-05-20T08:05:00.000Z',
-        specimenType: 'blood',
-        testCategory: 'blood',
-      }),
-      JSON.stringify({
-        schemaVersion: 'murph.event.v1',
-        id: observationId,
-        dataOrigin: {
-          sourceProviderSlug: 'garmin',
-        },
-        kind: 'observation',
-        occurredAt: '2026-05-25T08:00:00.000Z',
-        recordedAt: '2026-05-25T08:05:00.000Z',
-      }),
-      JSON.stringify({
-        schemaVersion: 'murph.event.v1',
-        id: latestBloodTestId,
-        kind: 'test',
-        occurredAt: '2026-05-31T08:00:00.000Z',
-        recordedAt: '2026-05-31T08:05:00.000Z',
-        specimenType: 'blood',
-        testCategory: 'blood',
-      }),
-      '',
-    ].join('\n'),
-    'utf8',
-  )
+  await appendBloodTest({
+    occurredAt: '2026-05-31T08:00:00.000Z',
+    testName: 'latest_panel',
+    title: 'Latest panel',
+    vaultRoot,
+  })
 }

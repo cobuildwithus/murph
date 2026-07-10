@@ -6,12 +6,15 @@ import { test } from "vitest";
 
 import {
   appendJsonlRecord,
+  deleteEvent,
   initializeVault,
   readJsonlRecords,
+  readLatestBloodTestHistorySummaryInterruptible,
   stringifyFrontmatterDocument,
   toMonthlyShardRelativePath,
   VAULT_LAYOUT,
   VaultError,
+  walkVaultFilesInterruptible,
 } from "../src/index.ts";
 import {
   appendBloodTest,
@@ -1122,6 +1125,85 @@ test("blood-test writes infer result status and persist structured analytes cano
   assert.equal((stored[0] as { resultStatus?: string }).resultStatus, "mixed");
   assert.equal((stored[0] as { testCategory?: string }).testCategory, "blood");
   assert.equal((stored[0] as { specimenType?: string }).specimenType, "blood");
+});
+
+test("latest blood-test summary collapses tombstones", async () => {
+  const vaultRoot = await makeTempDirectory("murph-blood-test-summary");
+  await initializeVault({ vaultRoot });
+
+  const older = await appendBloodTest({
+    vaultRoot,
+    occurredAt: "2026-01-15T08:30:00.000Z",
+    title: "Older live panel",
+    testName: "older_live_panel",
+  });
+  const newer = await appendBloodTest({
+    vaultRoot,
+    occurredAt: "2026-05-31T08:30:00.000Z",
+    title: "Deleted newer panel",
+    testName: "deleted_newer_panel",
+  });
+  await deleteEvent({
+    eventId: newer.record.id,
+    vaultRoot,
+  });
+
+  const summary = await readLatestBloodTestHistorySummaryInterruptible({
+    vaultRoot,
+  });
+  assert.deepEqual(summary, {
+    interrupted: false,
+    latestOccurredAt: older.record.occurredAt,
+    present: true,
+  });
+});
+
+test("latest blood-test summary stops between JSONL records", async () => {
+  const vaultRoot = await makeTempDirectory("murph-blood-test-summary-interrupt");
+  await initializeVault({ vaultRoot });
+
+  const appended = await appendBloodTest({
+    vaultRoot,
+    occurredAt: "2026-01-15T08:30:00.000Z",
+    title: "Blood panel",
+    testName: "blood_panel",
+  });
+  await fs.appendFile(
+    path.join(vaultRoot, appended.relativePath),
+    "invalid later record\n",
+    "utf8",
+  );
+
+  let walkContinuationChecks = 0;
+  const walked = await walkVaultFilesInterruptible(
+    vaultRoot,
+    VAULT_LAYOUT.eventLedgerDirectory,
+    {
+      extension: ".jsonl",
+      shouldContinue: () => {
+        walkContinuationChecks += 1;
+        return true;
+      },
+    },
+  );
+  assert.equal(walked.interrupted, false);
+  assert.deepEqual(walked.relativePaths, [appended.relativePath]);
+
+  let continuationChecks = 0;
+  const interrupted = await readLatestBloodTestHistorySummaryInterruptible({
+    shouldContinue: () => {
+      continuationChecks += 1;
+      return continuationChecks <= walkContinuationChecks + 2;
+    },
+    vaultRoot,
+  });
+
+  assert.deepEqual(interrupted, {
+    interrupted: true,
+    latestOccurredAt: null,
+    present: false,
+  });
+  assert.equal(continuationChecks, walkContinuationChecks + 3);
 });
 
 test("immunization writes persist vaccine metadata as event-ledger history", async () => {

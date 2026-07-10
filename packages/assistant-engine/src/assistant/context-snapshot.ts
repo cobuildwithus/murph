@@ -21,12 +21,12 @@ import {
 } from '@murphai/contracts'
 import {
   parseFrontmatterDocument,
+  readLatestBloodTestHistorySummaryInterruptible,
   resolveVaultPath,
   VAULT_LAYOUT,
   walkVaultFilesInterruptible,
   type HostedCanonicalWriteReceipt,
 } from '@murphai/core'
-import { listBloodTests } from '@murphai/query'
 import {
   readVersionedJsonStateFile,
   writeAssistantStateVersionedJson,
@@ -703,17 +703,25 @@ async function collectAssistantSnapshotBloodTestCoverage(input: {
   present: boolean
 }> {
   assertAssistantContextSnapshotCanContinue(input)
-  const [latestBloodTest] = await listBloodTests(
-    input.vaultRoot,
-    { limit: 1 },
-  )
+  const summary = await readLatestBloodTestHistorySummaryInterruptible({
+    shouldContinue: () =>
+      !input.signal?.aborted && input.shouldYield?.() !== true,
+    signal: input.signal,
+    vaultRoot: input.vaultRoot,
+  })
+  if (summary.interrupted) {
+    throw new DOMException(
+      'Assistant context snapshot refresh yielded to foreground input.',
+      'AbortError',
+    )
+  }
   assertAssistantContextSnapshotCanContinue(input)
-  const datePrefix = extractIsoDatePrefix(latestBloodTest?.occurredAt)
+  const datePrefix = extractIsoDatePrefix(summary.latestOccurredAt)
 
   return {
     latestBloodTestDate:
       datePrefix && isStrictIsoDate(datePrefix) ? datePrefix : null,
-    present: latestBloodTest !== undefined,
+    present: summary.present,
   }
 }
 
