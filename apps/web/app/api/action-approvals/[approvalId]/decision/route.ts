@@ -90,7 +90,7 @@ export const POST = withJsonError(async (
     : await resolveHostedMurphContactOption({
         message: null,
         preferredKind: approval.returnContactKind,
-      });
+      }).catch(() => null);
   const response: HostedActionApprovalDecisionResponse = {
     ...result.approval,
     redirectTo: contactOption?.href ?? null,

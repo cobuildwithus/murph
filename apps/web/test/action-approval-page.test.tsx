@@ -107,8 +107,10 @@ describe("action approval page", () => {
     });
   });
 
-  it("shows the recovery reply when no contact option is available", async () => {
-    mocks.resolveHostedMurphContactOptions.mockResolvedValueOnce([]);
+  it("shows the recovery reply when contact resolution is unavailable", async () => {
+    mocks.resolveHostedMurphContactOptions.mockRejectedValueOnce(
+      new Error("Contact resolution unavailable"),
+    );
 
     const view = await actionApprovalPage.default({
       params: Promise.resolve({ approvalId: "haa_test" }),
@@ -127,5 +129,88 @@ describe("action approval page", () => {
     );
     assert.equal(markup.includes("Request a new link"), false);
     assert.equal(markup.includes('href="'), false);
+  });
+
+  it("returns approved revisits without drafting a confirmation reply", async () => {
+    mocks.readHostedActionApproval.mockResolvedValueOnce({
+      approvalId: "haa_test",
+      expiresAt: "2026-07-09T16:00:00.000Z",
+      presentation: {
+        body: "Share the requested file.",
+        title: "Share this file?",
+      },
+      returnContactKind: "text",
+      status: "approved",
+    });
+    mocks.resolveHostedMurphContactOptions.mockResolvedValueOnce([
+      {
+        href: "sms:+15550100001",
+        kind: "text",
+        label: "Messages",
+      },
+    ]);
+
+    const view = await actionApprovalPage.default({
+      params: Promise.resolve({ approvalId: "haa_test" }),
+    });
+    const stream = await renderToReadableStream(view);
+    await stream.allReady;
+    await new Response(stream).text();
+
+    expect(mocks.resolveHostedMurphContactOptions).toHaveBeenCalledWith({
+      message: null,
+      preferredKind: "text",
+    });
+    expect(mocks.redirect).toHaveBeenCalledWith("sms:+15550100001");
+  });
+
+  it("does not redirect a group approval revisit into another conversation", async () => {
+    mocks.readHostedActionApproval.mockResolvedValueOnce({
+      approvalId: "haa_test",
+      expiresAt: "2026-07-09T16:00:00.000Z",
+      presentation: {
+        body: "Share the requested file.",
+        title: "Share this file?",
+      },
+      returnContactKind: null,
+      status: "approved",
+    });
+
+    const view = await actionApprovalPage.default({
+      params: Promise.resolve({ approvalId: "haa_test" }),
+    });
+    const stream = await renderToReadableStream(view);
+    await stream.allReady;
+    const markup = await new Response(stream).text();
+
+    expect(mocks.resolveHostedMurphContactOptions).not.toHaveBeenCalled();
+    expect(mocks.redirect).not.toHaveBeenCalled();
+    assert.match(markup, /Murph will continue automatically\./);
+    assert.match(markup, /Murph received this decision\. You can close this page\./);
+  });
+
+  it("does not request a manual reply when a decided action has no contact option", async () => {
+    mocks.readHostedActionApproval.mockResolvedValueOnce({
+      approvalId: "haa_test",
+      expiresAt: "2026-07-09T16:00:00.000Z",
+      presentation: {
+        body: "Share the requested file.",
+        title: "Share this file?",
+      },
+      returnContactKind: "text",
+      status: "denied",
+    });
+    mocks.resolveHostedMurphContactOptions.mockResolvedValueOnce([]);
+
+    const view = await actionApprovalPage.default({
+      params: Promise.resolve({ approvalId: "haa_test" }),
+    });
+    const stream = await renderToReadableStream(view);
+    await stream.allReady;
+    const markup = await new Response(stream).text();
+
+    assert.match(markup, /Murph received this decision\. You can close this page\./);
+    assert.equal(markup.includes("and send:"), false);
+    assert.equal(markup.includes("I denied the request."), false);
   });
 });

@@ -78,14 +78,16 @@ async function ActionApprovalTerminalState({
   approval: TerminalActionApprovalView;
 }) {
   const content = terminalContent(approval.status);
-  const contactOptions = await resolveHostedMurphContactOptions({
-    message: { body: content.replyBody },
-    preferredKind: approval.returnContactKind,
-  });
+  const contactOptions = approval.returnContactKind === null
+    ? []
+    : await resolveHostedMurphContactOptions({
+        message: content.replyBody ? { body: content.replyBody } : null,
+        preferredKind: approval.returnContactKind,
+      }).catch(() => []);
 
-  // Already-approved revisits bounce the member straight back to the
-  // conversation they came from. Denied/expired stay on-screen so the
-  // member can read what happened before navigating away.
+  // Already-approved revisits with a known return channel bounce the member
+  // straight back there. Denied/expired stay on-screen so the member can read
+  // what happened before navigating away.
   if (approval.status === "approved" && contactOptions[0]?.href) {
     redirect(contactOptions[0].href);
   }
@@ -110,7 +112,7 @@ async function ActionApprovalTerminalState({
             {content.actionLabel}
             <ArrowRight aria-hidden="true" data-icon="inline-end" />
           </MurphContactLink>
-        ) : (
+        ) : content.replyBody ? (
           <div>
             <p className="text-sm text-muted-foreground">
               Return to the Murph conversation where this request started and
@@ -120,6 +122,10 @@ async function ActionApprovalTerminalState({
               {content.replyBody}
             </p>
           </div>
+        ) : (
+          <p className="text-sm text-muted-foreground">
+            Murph received this decision. You can close this page.
+          </p>
         )}
       </div>
     </ActionApprovalScreen>
@@ -141,7 +147,7 @@ interface TerminalContent {
   actionLabel: string;
   description: string;
   icon: LucideIcon;
-  replyBody: string;
+  replyBody: string | null;
   title: string;
 }
 
@@ -152,9 +158,10 @@ function terminalContent(
     case "approved":
       return {
         actionLabel: "Return to Murph",
-        description: "You approved this action. Head back to Murph to continue.",
+        description:
+          "You approved this action. Murph will continue automatically.",
         icon: CheckCircle2,
-        replyBody: "I approved the request.",
+        replyBody: null,
         title: "Approved",
       };
     case "denied":
@@ -162,7 +169,7 @@ function terminalContent(
         actionLabel: "Return to Murph",
         description: "Murph will not continue with this action.",
         icon: XCircle,
-        replyBody: "I denied the request.",
+        replyBody: null,
         title: "Denied",
       };
     case "expired":

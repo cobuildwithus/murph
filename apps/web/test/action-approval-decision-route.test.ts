@@ -223,6 +223,25 @@ describe("hosted action approval decision route", () => {
     }));
     expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledTimes(1);
   });
+
+  it("keeps a committed decision successful when optional contact resolution fails", async () => {
+    mocks.resolveHostedMurphContactOption.mockRejectedValueOnce(
+      new Error("Contact resolution unavailable"),
+    );
+
+    const response = await route.POST(
+      jsonRequest({ decision: "denied" }),
+      routeContext(),
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual(expect.objectContaining({
+      redirectTo: null,
+      status: "denied",
+    }));
+    expect(mocks.decideHostedActionApprovalTx).toHaveBeenCalledTimes(1);
+    expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledTimes(1);
+  });
 });
 
 function jsonRequest(body: Record<string, unknown>): Request {
