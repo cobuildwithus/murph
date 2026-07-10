@@ -214,15 +214,6 @@ export function buildCompanionHealthMetadataDirtyResource(input: {
   batch: CompanionHealthMetadataBatch;
   occurredAt: string;
 }): HostedDeviceSyncDirtyResource {
-  const windowStart = input.batch.records.reduce(
-    (earliest, record) => Date.parse(record.startAt) < Date.parse(earliest) ? record.startAt : earliest,
-    input.batch.records[0]!.startAt,
-  );
-  const windowEnd = input.batch.records.reduce(
-    (latest, record) => Date.parse(record.endAt) > Date.parse(latest) ? record.endAt : latest,
-    input.batch.records[0]!.endAt,
-  );
-
   return {
     count: input.batch.records.length,
     jobKind: "resource",
@@ -237,8 +228,8 @@ export function buildCompanionHealthMetadataDirtyResource(input: {
     resource: COMPANION_HEALTH_METADATA_RESOURCE,
     resourceCategory: "summary",
     sourceProviderSlug: JUNCTION_COMPANION_HEALTH_METADATA_SOURCE_PROVIDER,
-    windowEnd,
-    windowStart,
+    windowEnd: null,
+    windowStart: null,
   };
 }
 

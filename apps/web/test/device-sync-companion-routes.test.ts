@@ -973,8 +973,8 @@ describe("device sync companion routes", () => {
           resource: "companion_health_metadata",
           resourceCategory: "summary",
           sourceProviderSlug: "apple-health-kit",
-          windowEnd: "2026-07-08T14:00:00.000Z",
-          windowStart: "2026-07-08T04:00:00.000Z",
+          windowEnd: null,
+          windowStart: null,
         },
         userId: "member_1",
       });
