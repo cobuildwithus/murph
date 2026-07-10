@@ -8405,6 +8405,7 @@ test("Junction companion health metadata jobs import one closed unverified Healt
             value: 11.3,
             startAt: "2026-04-02T17:00:00-04:00",
             endAt: "2026-04-02T17:45:00-04:00",
+            syncVersion: 4,
           },
         ],
       }),
@@ -8440,6 +8441,7 @@ test("Junction companion health metadata jobs import one closed unverified Healt
     date: "2026-04-02T21:45:00.000Z",
     companionStartAt: "2026-04-02T21:00:00.000Z",
     companionEndAt: "2026-04-02T21:45:00.000Z",
+    companionSyncVersion: 4,
     workout_strain: 11.3,
     sourceProviderSlug: "apple_health_kit",
     sourceType: "companion-whoop-metadata-unverified",
@@ -8493,6 +8495,7 @@ test("Junction companion health metadata jobs accept exact closed parser boundar
             endAt: new Date(
               receivedAt.getTime() + JUNCTION_COMPANION_HEALTH_METADATA_MAX_FUTURE_SKEW_MS,
             ).toISOString(),
+            syncVersion: 0,
           },
         ],
       }),
@@ -8509,6 +8512,7 @@ test("Junction companion health metadata jobs reject malformed or broadened batc
     value: 72,
     startAt: "2026-04-02T08:00:00.000Z",
     endAt: "2026-04-02T16:00:00.000Z",
+    syncVersion: 1,
   };
   const cases: Array<{ label: string; payload: Record<string, unknown> }> = [
     {
@@ -8638,6 +8642,15 @@ test("Junction companion health metadata jobs reject malformed or broadened batc
             startAt: "2026-04-04T12:30:00.000Z",
             endAt: "2026-04-04T13:00:00.001Z",
           }],
+        }),
+      },
+    },
+    {
+      label: "missing sync version",
+      payload: {
+        webhookDataJson: JSON.stringify({
+          schemaVersion: 1,
+          records: [{ ...record, syncVersion: undefined }],
         }),
       },
     },

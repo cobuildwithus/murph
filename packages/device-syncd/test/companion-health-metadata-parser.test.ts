@@ -33,7 +33,7 @@ test("companion health metadata parser canonicalizes and sorts the closed batch"
         kind: "workout_strain",
         recordId: "b".repeat(64),
         startAt: "2026-04-02T17:00:00-04:00",
-        syncVersion: undefined,
+        syncVersion: 2,
         value: 11.3,
       }),
       healthMetadataRecord({
@@ -62,6 +62,7 @@ test("companion health metadata parser canonicalizes and sorts the closed batch"
         kind: "workout_strain",
         recordId: "b".repeat(64),
         startAt: "2026-04-02T21:00:00.000Z",
+        syncVersion: 2,
         value: 11.3,
       },
     ],
@@ -97,7 +98,7 @@ test("companion health metadata parser accepts exact value, clock, and version b
         kind: "workout_strain",
         recordId: "d".repeat(64),
         startAt: futureStart,
-        syncVersion: undefined,
+        syncVersion: 0,
         value: 21,
       }),
     ],
@@ -106,6 +107,7 @@ test("companion health metadata parser accepts exact value, clock, and version b
 
   assert.equal(batch.records.length, 2);
   assert.equal(batch.records[0]?.syncVersion, Number.MAX_SAFE_INTEGER);
+  assert.equal(batch.records[1]?.syncVersion, 0);
   assert.equal(batch.records[1]?.value, 21);
 });
 
@@ -191,6 +193,10 @@ test("companion health metadata parser rejects malformed or broadened decoded ba
         records: [healthMetadataRecord({ endAt: tooFutureEnd, startAt: tooFutureStart })],
         schemaVersion: 1,
       },
+    },
+    {
+      label: "missing sync version",
+      value: { records: [healthMetadataRecord({ syncVersion: undefined })], schemaVersion: 1 },
     },
     {
       label: "negative sync version",

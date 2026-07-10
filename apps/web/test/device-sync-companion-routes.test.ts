@@ -952,7 +952,7 @@ describe("device sync companion routes", () => {
         kind: "workout_strain",
         recordId: "b".repeat(64),
         startAt: "2026-07-08T13:00:00.000Z",
-        syncVersion: undefined,
+        syncVersion: 2,
         value: 12.5,
       });
 
@@ -1084,6 +1084,10 @@ describe("device sync companion routes", () => {
         },
         {
           records: [healthMetadataRecord(), healthMetadataRecord()],
+          schemaVersion: 1,
+        },
+        {
+          records: [healthMetadataRecord({ syncVersion: undefined })],
           schemaVersion: 1,
         },
         {

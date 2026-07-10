@@ -196,7 +196,8 @@ verification (existing `@privy-io/node`):
    Connect screen renders.
 3. `POST /api/device-sync/companion/health-metadata`
    — accepts schema version 1 with 1–200 records, exact lower-case SHA-256
-   record identities, and only `recovery_score` / `workout_strain`. It
+   record identities, required non-negative safe-integer sync versions, and
+   only `recovery_score` / `workout_strain`. It
    validates finite ranges and timestamps against a 366-day history horizon
    and 24-hour future-clock allowance, then stores one bounded encrypted dirty
    payload on the member's active Junction runtime lane. That active

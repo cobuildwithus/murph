@@ -26,7 +26,7 @@ export interface JunctionCompanionHealthMetadataRecord {
   kind: JunctionCompanionHealthMetadataKind;
   recordId: string;
   startAt: string;
-  syncVersion?: number;
+  syncVersion: number;
   value: number;
 }
 
@@ -123,12 +123,9 @@ export function parseJunctionCompanionHealthMetadataBatch(
 
     const syncVersion = record.syncVersion;
     if (
-      syncVersion !== undefined
-      && (
-        typeof syncVersion !== "number"
-        || !Number.isSafeInteger(syncVersion)
-        || syncVersion < 0
-      )
+      typeof syncVersion !== "number"
+      || !Number.isSafeInteger(syncVersion)
+      || syncVersion < 0
     ) {
       throw invalidCompanionHealthMetadata(`record ${index + 1} syncVersion is invalid`);
     }
@@ -138,7 +135,7 @@ export function parseJunctionCompanionHealthMetadataBatch(
       kind,
       recordId,
       startAt,
-      ...(typeof syncVersion === "number" ? { syncVersion } : {}),
+      syncVersion,
       value: numericValue,
     } satisfies JunctionCompanionHealthMetadataRecord;
   });
