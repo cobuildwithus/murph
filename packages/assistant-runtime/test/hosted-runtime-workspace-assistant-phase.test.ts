@@ -5065,7 +5065,10 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         redacted: {
           schema: "murph.assistant-turn-timing.v1",
           type: "assistant.turn.timing",
+          turnTimingDeliveryIntentId: "intent_timing_failure",
           turnTimingElapsedMs: 41,
+          turnTimingProviderRequestElapsedMs: 31,
+          turnTimingSinceProviderResultMs: 10,
           turnTimingStage: "reply-dispatched",
         },
       }],
@@ -5082,7 +5085,10 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       redactedJson: expect.objectContaining({
         detailComponent: "runtime.provider",
         schema: "murph.assistant-turn-timing.v1",
+        turnTimingDeliveryIntentId: "intent_timing_failure",
         turnTimingElapsedMs: 41,
+        turnTimingProviderRequestElapsedMs: 31,
+        turnTimingSinceProviderResultMs: 10,
         turnTimingStage: "reply-dispatched",
       }),
     }));

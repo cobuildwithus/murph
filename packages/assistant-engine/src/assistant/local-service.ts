@@ -1555,6 +1555,7 @@ export async function sendAssistantMessageLocal(
                 precedingDeliveryOutcomes,
                 session: deliverySession,
               })
+        const replyIntentReadyAt = finalResponseText === null ? null : Date.now()
         const finalReplyDeliveryFields =
           finalResponseText !== null
             ? resolveAssistantCurrentAudienceDeliveryFields({
@@ -1607,16 +1608,24 @@ export async function sendAssistantMessageLocal(
         emitTurnTiming({
           deliveryAttempted:
             finalResponseText !== null || reactionDeliveryOutcomes.length > 0,
+          deliveryIntentId: 'intentId' in finalDeliveryOutcome
+            ? finalDeliveryOutcome.intentId
+            : null,
           deliveryIntentPresent: 'intentId' in finalDeliveryOutcome
             ? finalDeliveryOutcome.intentId !== null
             : false,
           deliveryOutcomeKind: finalDeliveryOutcome.kind,
           elapsedMs: elapsedSince(turnTimingStartedAt),
           finalReplySelected: finalResponseText !== null,
+          providerRequestElapsedMs:
+            providerRequestStartedAtMs === null || providerResultReturnedAt === null
+              ? null
+              : Math.max(0, providerResultReturnedAt - providerRequestStartedAtMs),
           providerRequestOrdinal,
-          sinceProviderResultMs: providerResultReturnedAt === null
-            ? null
-            : elapsedSince(providerResultReturnedAt),
+          sinceProviderResultMs:
+            providerResultReturnedAt === null || replyIntentReadyAt === null
+              ? null
+              : Math.max(0, replyIntentReadyAt - providerResultReturnedAt),
           stage: 'reply-dispatched',
           stepElapsedMs: elapsedSince(replyDispatchStartedAt),
         })

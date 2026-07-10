@@ -36,6 +36,8 @@ export const RUNNER_ENTRYPOINT_BUNDLE_DIRECTORY_NAME = "dist-bundled";
 //   entry container-entrypoint.js 1,374,586B.
 // - 2026-07-10 Linux CI after adding the Call Circle response contract and
 //   web-control port: static boot closure 6,830,249B.
+// The forbidden-input guard below keeps clinical intake and other
+// turn-scoped importer code out of this closure.
 // The tolerances below cover local emit jitter.
 //
 // The entry chunk gates cold-start parse, so it is ratcheted, not given
@@ -50,8 +52,7 @@ export const RUNNER_ENTRYPOINT_BUNDLE_DIRECTORY_NAME = "dist-bundled";
 // baseline discipline as the entry chunk. Its tolerance is wider than the
 // entry tolerance because the closure spans ~5x more bytes and many more
 // chunks, so path comments, content hashes, and platform-specific emit jitter
-// have more surface. CI Linux has measured slightly smaller than local macOS;
-// since this ratchet fails only on growth, the local baseline remains safe.
+// have more surface.
 //
 // The total ceiling stays a fixed backstop at its prior 9,300,000B value (not
 // ratcheted): #397 shrank the bundle, so there is no reason to loosen it, and
@@ -79,6 +80,7 @@ const RUNNER_ENTRYPOINT_FORBIDDEN_BOOT_INPUT_MARKERS = [
   "/device-syncd/dist/registry.js",
   "/device-syncd/dist/providers/",
   "/importers/dist/",
+  "/clinical-records/dist/",
   "node_modules/@junction-api/sdk/",
   "/health-metrics/dist/murph-age.js",
   "/health-metrics/dist/murph-age-source-routes.js",

@@ -353,6 +353,11 @@ describe("runner bundle container-entrypoint esbuild step", () => {
       /node_modules\/@murphai\/importers\/dist\/index\.js/,
     ],
     [
+      "clinical-records",
+      ".deploy/runner-bundle/node_modules/@murphai/clinical-records/dist/index.js",
+      /node_modules\/@murphai\/clinical-records\/dist\/index\.js/,
+    ],
+    [
       "Junction SDK",
       ".deploy/runner-bundle/node_modules/@junction-api/sdk/index.js",
       /node_modules\/@junction-api\/sdk\/index\.js/,

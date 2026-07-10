@@ -25,6 +25,9 @@
       "@murphai/contracts/schemas": [
         "packages/contracts/src/schemas.ts"
       ],
+      "@murphai/clinical-records": [
+        "packages/clinical-records/src/index.ts"
+      ],
       "@murphai/health-commons": [
         "packages/health-commons/src/index.ts"
       ],
