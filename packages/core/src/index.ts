@@ -17,7 +17,11 @@ export {
   readPreferencesDocument,
   resolvePreferencesDocumentPath,
 } from "./preferences.ts";
-export type { AssistantPreferencesUpdate, PreferencesDocumentSnapshot } from "./preferences.ts";
+export type {
+  AssistantPersonalityPreferencesUpdate,
+  AssistantPreferencesUpdate,
+  PreferencesDocumentSnapshot,
+} from "./preferences.ts";
 export {
   assertPathWithinVault,
   assertPathWithinVaultOnDisk,

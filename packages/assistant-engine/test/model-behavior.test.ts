@@ -147,6 +147,105 @@ describe('assistant execution prompt contract', () => {
     expect(formalLayers.threadContextPrompt).toContain('no slang')
   })
 
+  it('adds only saved personality dials to private thread context', () => {
+    const defaultLayers = buildAssistantSystemPromptLayers(
+      createCommonCodexPromptInput(),
+    )
+    expect(defaultLayers.threadContextPrompt).not.toContain(
+      'Assistant personality preferences',
+    )
+    expect(defaultLayers.staticCacheableCorePrompt).toContain(
+      'Defaults: light dry humor when fitting, supportive teammate energy with small reversible steps, and balanced useful detail.',
+    )
+    expect(defaultLayers.staticCacheableCorePrompt).toContain(
+      'Be a peer, not an authority',
+    )
+
+    const layers = buildAssistantSystemPromptLayers(
+      createCommonCodexPromptInput({
+        assistantPersonality: {
+          humor: 9,
+        },
+      }),
+    )
+
+    expect(layers.threadContextPrompt).toContain(
+      'Assistant personality preferences for this private conversation:',
+    )
+    expect(layers.threadContextPrompt).toContain(
+      'Humor 9/10: use prominent, bold, dry humor',
+    )
+    expect(layers.threadContextPrompt).not.toContain('Push 3/10')
+    expect(layers.threadContextPrompt).not.toContain('Detail 5/10')
+    expect(layers.threadContextPrompt).toContain(
+      "the user's explicit current-turn instruction always win",
+    )
+    expect(layers.stableRouteCapabilityPrompt).not.toContain('Humor 9/10')
+    expect(layers.dynamicTurnContextPrompt).not.toContain('Humor 9/10')
+  })
+
+  it('maps exact personality scores into the reviewed behavior bands', () => {
+    const humorCases = [
+      [0, 'use no intentional jokes'],
+      [1, 'use occasional light, dry humor'],
+      [3, 'use occasional light, dry humor'],
+      [4, 'use regular wit when it helps'],
+      [6, 'use regular wit when it helps'],
+      [7, 'use prominent, bold, dry humor'],
+      [9, 'use prominent, bold, dry humor'],
+      [10, 'use maximum safe comedic ambition'],
+    ] as const
+    for (const [score, expected] of humorCases) {
+      const prompt = buildAssistantSystemPrompt(
+        createCommonCodexPromptInput({
+          assistantPersonality: { humor: score },
+        }),
+      )
+      expect(prompt).toContain(`Humor ${score}/10`)
+      expect(prompt).toContain(expected)
+    }
+
+    const pushCases = [
+      [0, 'use no motivational pressure'],
+      [1, 'use supportive teammate energy'],
+      [3, 'use supportive teammate energy'],
+      [4, 'use focused high-school-coach energy'],
+      [6, 'use focused high-school-coach energy'],
+      [7, 'use strict college-coach energy'],
+      [9, 'use strict college-coach energy'],
+      [10, 'use terse, theatrical drill-sergeant energy'],
+    ] as const
+    for (const [score, expected] of pushCases) {
+      const prompt = buildAssistantSystemPrompt(
+        createCommonCodexPromptInput({
+          assistantPersonality: { push: score },
+        }),
+      )
+      expect(prompt).toContain(`Push ${score}/10`)
+      expect(prompt).toContain(expected)
+    }
+
+    const detailCases = [
+      [0, 'give the shortest complete answer'],
+      [1, 'stay concise and include only the essential reason'],
+      [3, 'stay concise and include only the essential reason'],
+      [4, 'give a balanced explanation'],
+      [6, 'give a balanced explanation'],
+      [7, 'cover relevant context, tradeoffs, uncertainty'],
+      [9, 'cover relevant context, tradeoffs, uncertainty'],
+      [10, 'be comprehensive when warranted'],
+    ] as const
+    for (const [score, expected] of detailCases) {
+      const prompt = buildAssistantSystemPrompt(
+        createCommonCodexPromptInput({
+          assistantPersonality: { detail: score },
+        }),
+      )
+      expect(prompt).toContain(`Detail ${score}/10`)
+      expect(prompt).toContain(expected)
+    }
+  })
+
   it('keeps the assistant style settings fact in the stable route prompt', () => {
     const layers = buildAssistantSystemPromptLayers(createCommonCodexPromptInput())
 
@@ -155,7 +254,43 @@ describe('assistant execution prompt contract', () => {
       '/settings?voice=true',
     )
     expect(layers.stableRouteCapabilityPrompt).toContain(
-      'when they ask how to change how Murph sounds or writes',
+      'only mention when asked',
+    )
+    expect(layers.stableRouteCapabilityPrompt).toContain(
+      '`vault-cli assistant style show --format json`',
+    )
+    expect(layers.stableRouteCapabilityPrompt).toContain(
+      '`vault-cli assistant style set <humor|push|detail> <0-10> --format json`',
+    )
+    expect(layers.stableRouteCapabilityPrompt).toContain(
+      '`vault-cli assistant style reset <humor|push|detail|all> --format json`',
+    )
+    expect(layers.stableRouteCapabilityPrompt).toContain(
+      '`intensity`/`coach`/`strictness` = Push',
+    )
+    expect(layers.stableRouteCapabilityPrompt).toContain(
+      '`brief`/`wordy`/`thorough` = Detail when clearly discussing a setting',
+    )
+    expect(layers.stableRouteCapabilityPrompt).toContain(
+      '`jokes`/`funny` = Humor',
+    )
+    expect(layers.stableRouteCapabilityPrompt).toContain(
+      'Returned `settings` is authoritative for that reply',
+    )
+    expect(layers.stableRouteCapabilityPrompt).toContain(
+      'One fresh safe joke only if Humor changed above 0',
+    )
+    expect(layers.stableRouteCapabilityPrompt).toContain(
+      'none at 0, queries, or Push/Detail',
+    )
+    expect(layers.stableRouteCapabilityPrompt).toContain(
+      'Do not persist one-reply instructions or complaints',
+    )
+    expect(layers.stableRouteCapabilityPrompt).toContain(
+      'no shame, threats, coercion, false urgency',
+    )
+    expect(layers.stableRouteCapabilityPrompt).toContain(
+      'Group prompts never receive dial values or expose, mutate, or apply private dials',
     )
     expect(layers.threadContextPrompt).not.toContain('/settings?voice=true')
     expect(layers.dynamicTurnContextPrompt).not.toContain('/settings?voice=true')
@@ -1142,7 +1277,7 @@ Execution context:
       'Current Murph product base URL for user-facing app links: http://localhost:3000',
     )
     expect(promptA.cacheMetadata.staticPromptHash).toBe(
-      'b674d5f04027ef99facb4fca90c8981ceb77c26fa721863c8f07d55ba80df8c8',
+      '85bd86d08e227df835ffa425451874a17efad8492616979d8bdefe6d7dad6cda',
     )
     expect(promptA.cacheMetadata.toolSchemaHash).toBe(
       'assistant-tool-schema-common-codex-test',

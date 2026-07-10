@@ -36,6 +36,9 @@ declare module 'incur' {
       'assistant session show': { args: { sessionId: string }; options: { requestId?: string } }
       'assistant status': { args: {}; options: { requestId?: string; session?: string; limit: number } }
       'assistant stop': { args: {}; options: { requestId?: string } }
+      'assistant style reset': { args: { setting: "humor" | "push" | "detail" | "all" }; options: { requestId?: string } }
+      'assistant style set': { args: { setting: "humor" | "push" | "detail"; value: number }; options: { requestId?: string } }
+      'assistant style show': { args: {}; options: { requestId?: string } }
       'audit list': { args: {}; options: { requestId?: string; action?: string; actor?: string; status?: string; from?: string; to?: string; sort: "asc" | "desc"; limit: number } }
       'audit show': { args: { id: string }; options: { requestId?: string } }
       'audit tail': { args: {}; options: { requestId?: string; limit: number } }

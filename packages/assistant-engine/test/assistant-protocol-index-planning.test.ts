@@ -165,10 +165,20 @@ describe('assistant protocol index planning', () => {
         userEnvKeys: [],
       },
     }
+    const preferenceContext = {
+      assistantPersonality: {
+        detail: 10,
+        humor: 10,
+        push: 10,
+      },
+      assistantTone: null,
+      assistantVoice: null,
+    }
 
     const maintenancePlan = await resolveAssistantRouteTurnPlan({
       executionContext,
       input: createMessageInput(),
+      preferenceContext,
       profile: {
         promptProfile: 'notification-decision',
         threadScope: 'isolated-thread',
@@ -194,6 +204,10 @@ describe('assistant protocol index planning', () => {
     expect(maintenancePlan.systemPrompt).not.toContain('same full read and write tools')
     expect(maintenancePlan.systemPrompt).not.toContain('meals')
     expect(maintenancePlan.systemPrompt).not.toContain('Health Commons')
+    expect(maintenancePlan.systemPrompt).not.toContain(
+      'Assistant personality preferences',
+    )
+    expect(maintenancePlan.systemPrompt).not.toContain('Humor 10/10')
     // Binding context becomes identity/actor/thread/delivery prompt lines at
     // the provider boundary; maintenance turns must never carry it.
     expect(maintenancePlan.sessionContext).toBeUndefined()
@@ -201,6 +215,7 @@ describe('assistant protocol index planning', () => {
     const notificationPlan = await resolveAssistantRouteTurnPlan({
       executionContext,
       input: createMessageInput(),
+      preferenceContext,
       profile: {
         promptProfile: 'notification-decision',
         threadScope: 'session-thread',
@@ -220,9 +235,34 @@ describe('assistant protocol index planning', () => {
     expect(notificationPlan.systemPrompt).toContain('device sync pending')
     expect(notificationPlan.systemPrompt).toContain('Notification execution rules:')
     expect(notificationPlan.systemPrompt).not.toContain('Maintenance execution rules:')
+    expect(notificationPlan.systemPrompt).not.toContain(
+      'Assistant personality preferences',
+    )
+    expect(notificationPlan.systemPrompt).not.toContain('Humor 10/10')
     expect(notificationPlan.sessionContext).toEqual({
       binding: expect.anything(),
     })
+
+    const conversationNotificationPlan = await resolveAssistantRouteTurnPlan({
+      executionContext,
+      input: createMessageInput(),
+      preferenceContext,
+      profile: {
+        promptProfile: 'conversation',
+        threadScope: 'isolated-thread',
+        toolProfile: 'notification-turn',
+      },
+      promptTimeContext,
+      route: createRoute(),
+      session: createSession(),
+      sharedPlan: createSharedPlan(),
+    })
+    expect(conversationNotificationPlan.systemPrompt).not.toContain(
+      'Assistant personality preferences for this private conversation',
+    )
+    expect(conversationNotificationPlan.systemPrompt).not.toContain(
+      'Humor 10/10',
+    )
   })
 
   it('soft-fails to an empty assistant protocol index when generated artifacts are unavailable', async () => {
@@ -332,6 +372,195 @@ describe('assistant protocol index planning', () => {
         voice: 'stale-roster-id',
       })
       await expect(resolvePlannedElevenLabsVoiceId(vault)).resolves.toBeNull()
+    } finally {
+      await rm(vault, { force: true, recursive: true })
+    }
+  })
+
+  it('reads sparse personality preferences and rotates the interactive thread contract', async () => {
+    planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
+    planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
+    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
+      supportsNativeResume: true,
+    })
+    const vault = await mkdtemp(
+      path.join(os.tmpdir(), 'assistant-route-plan-personality-'),
+    )
+    const route = createRoute()
+    const session = createSession()
+    const privateTelegramAudience = {
+      channel: 'telegram',
+      effectiveThreadIsDirect: true,
+      threadId: 'thread-test',
+      threadIsDirect: true,
+    } as const
+
+    try {
+      const initialExecutionPlan = await buildCodexTurnExecutionPlan({
+        input: {
+          ...createMessageInput(),
+          vault,
+        },
+        plan: createSharedPlan({}, privateTelegramAudience),
+        resolvedSession: session,
+        route,
+        turnCreatedAt: '2026-05-04T00:00:00.000Z',
+        turnId: 'turn-personality-default',
+      })
+      expect(initialExecutionPlan.preferenceContext).toEqual({
+        assistantPersonality: null,
+        assistantTone: null,
+        assistantVoice: null,
+      })
+      const initialAttemptPlan = await buildCodexTurnAttemptPlan({
+        attemptCount: 1,
+        executionPlan: initialExecutionPlan,
+        session,
+      })
+
+      await writeAssistantPreferencesDocument(vault, {
+        personality: {
+          detail: 0,
+          humor: 9,
+        },
+      })
+      const resumedSession = createSession({
+        resumeState: {
+          assistantContractFingerprint:
+            initialAttemptPlan.routePlan.assistantContractFingerprint,
+          routeFingerprint: route.routeFingerprint ?? route.routeId,
+          threadId: 'thread-before-personality-change',
+        },
+      })
+      const updatedExecutionPlan = await buildCodexTurnExecutionPlan({
+        input: {
+          ...createMessageInput(),
+          vault,
+        },
+        plan: createSharedPlan({}, privateTelegramAudience),
+        resolvedSession: resumedSession,
+        route,
+        turnCreatedAt: '2026-05-04T00:01:00.000Z',
+        turnId: 'turn-personality-updated',
+      })
+      expect(updatedExecutionPlan.preferenceContext).toEqual({
+        assistantPersonality: {
+          detail: 0,
+          humor: 9,
+        },
+        assistantTone: null,
+        assistantVoice: null,
+      })
+      const updatedAttemptPlan = await buildCodexTurnAttemptPlan({
+        attemptCount: 1,
+        executionPlan: updatedExecutionPlan,
+        session: resumedSession,
+      })
+
+      expect(updatedAttemptPlan.routePlan.resume).toBeNull()
+      expect(updatedAttemptPlan.routePlan.assistantContractFingerprint).not.toBe(
+        initialAttemptPlan.routePlan.assistantContractFingerprint,
+      )
+      expect(updatedAttemptPlan.routePlan.developerInstructions).toContain(
+        'Humor 9/10: use prominent, bold, dry humor',
+      )
+      expect(updatedAttemptPlan.routePlan.developerInstructions).toContain(
+        'Detail 0/10: give the shortest complete answer',
+      )
+      expect(updatedAttemptPlan.routePlan.developerInstructions).not.toContain(
+        'Push 3/10',
+      )
+
+      const groupSession = createSession()
+      const groupExecutionPlan = await buildCodexTurnExecutionPlan({
+        input: {
+          ...createMessageInput(),
+          threadIsDirect: false,
+          vault,
+        },
+        plan: createSharedPlan({}, {
+          channel: 'telegram',
+          effectiveThreadIsDirect: false,
+          threadId: 'thread-test',
+          threadIsDirect: false,
+        }),
+        resolvedSession: groupSession,
+        route,
+        turnCreatedAt: '2026-05-04T00:02:00.000Z',
+        turnId: 'turn-personality-group',
+      })
+      const groupAttemptPlan = await buildCodexTurnAttemptPlan({
+        attemptCount: 1,
+        executionPlan: groupExecutionPlan,
+        session: groupSession,
+      })
+      expect(groupExecutionPlan.preferenceContext?.assistantPersonality).toEqual({
+        detail: 0,
+        humor: 9,
+      })
+      expect(groupAttemptPlan.routePlan.developerInstructions).not.toContain(
+        'Assistant personality preferences for this private conversation',
+      )
+      expect(groupAttemptPlan.routePlan.developerInstructions).not.toContain(
+        'Humor 9/10',
+      )
+
+      const unknownExternalSession = createSession()
+      const unknownExternalExecutionPlan = await buildCodexTurnExecutionPlan({
+        input: {
+          ...createMessageInput(),
+          threadIsDirect: null,
+          vault,
+        },
+        plan: createSharedPlan({}, {
+          channel: 'telegram',
+          effectiveThreadIsDirect: null,
+          threadId: 'thread-test',
+          threadIsDirect: null,
+        }),
+        resolvedSession: unknownExternalSession,
+        route,
+        turnCreatedAt: '2026-05-04T00:03:00.000Z',
+        turnId: 'turn-personality-unknown-external',
+      })
+      const unknownExternalAttemptPlan = await buildCodexTurnAttemptPlan({
+        attemptCount: 1,
+        executionPlan: unknownExternalExecutionPlan,
+        session: unknownExternalSession,
+      })
+      expect(
+        unknownExternalExecutionPlan.sharedPlan.conversationPolicy.audience
+          .effectiveThreadIsDirect,
+      ).toBeNull()
+      expect(
+        unknownExternalAttemptPlan.routePlan.developerInstructions,
+      ).not.toContain(
+        'Assistant personality preferences for this private conversation',
+      )
+
+      const localSession = createSession()
+      const localExecutionPlan = await buildCodexTurnExecutionPlan({
+        input: {
+          ...createMessageInput(),
+          channel: null,
+          threadId: null,
+          threadIsDirect: null,
+          vault,
+        },
+        plan: createSharedPlan(),
+        resolvedSession: localSession,
+        route,
+        turnCreatedAt: '2026-05-04T00:04:00.000Z',
+        turnId: 'turn-personality-local',
+      })
+      const localAttemptPlan = await buildCodexTurnAttemptPlan({
+        attemptCount: 1,
+        executionPlan: localExecutionPlan,
+        session: localSession,
+      })
+      expect(
+        localAttemptPlan.routePlan.developerInstructions,
+      ).toContain('Humor 9/10: use prominent, bold, dry humor')
     } finally {
       await rm(vault, { force: true, recursive: true })
     }
@@ -1966,6 +2195,11 @@ async function resolvePlannedElevenLabsVoiceId(vault: string): Promise<string | 
 async function writeAssistantPreferencesDocument(
   vault: string,
   input: {
+    personality?: {
+      detail?: number
+      humor?: number
+      push?: number
+    }
     voice?: string
   },
 ): Promise<void> {
@@ -2040,6 +2274,9 @@ function createSession(input?: {
 
 function createSharedPlan(
   overrides: Partial<AssistantTurnSharedPlan> = {},
+  audienceOverrides: Partial<
+    AssistantTurnSharedPlan['conversationPolicy']['audience']
+  > = {},
 ): AssistantTurnSharedPlan {
   return {
     cliAccess: {
@@ -2059,6 +2296,7 @@ function createSharedPlan(
         replyToMessageId: null,
         threadId: null,
         threadIsDirect: null,
+        ...audienceOverrides,
       },
       operatorAuthority: 'direct-operator',
     },
