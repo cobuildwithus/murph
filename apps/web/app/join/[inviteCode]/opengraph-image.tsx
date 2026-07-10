@@ -16,12 +16,12 @@ export const size = OG_SIZE;
 export const contentType = OG_CONTENT_TYPE;
 
 export default async function JoinInviteOGImage() {
-  const { fonts, heroDataUri } = await loadMurphHeroOgAssets();
+  const { fonts, logoDataUri } = await loadMurphHeroOgAssets();
 
   return new ImageResponse(
     (
       <MurphHeroOg
-        heroDataUri={heroDataUri}
+        logoDataUri={logoDataUri}
         eyebrow="MURPH"
         headline="You’re invited."
         subtext={`${MURPH_TAGLINE_LINE_1} ${MURPH_TAGLINE_LINE_2}`}
