@@ -16,6 +16,7 @@ describe("runner bundle package closure", () => {
       "@murphai/assistant-engine",
       "@murphai/assistant-runtime",
       "@murphai/assistantd",
+      "@murphai/clinical-records",
       "@murphai/cloudflare-hosted-control",
       "@murphai/contracts",
       "@murphai/core",
@@ -47,6 +48,7 @@ describe("runner bundle package closure", () => {
       "@murphai/assistant-engine",
       "@murphai/assistant-runtime",
       "@murphai/assistantd",
+      "@murphai/clinical-records",
       "@murphai/cloudflare-hosted-control",
       "@murphai/contracts",
       "@murphai/core",
@@ -78,6 +80,7 @@ describe("runner bundle package closure", () => {
     ).toEqual([
       "@murphai/assistant-engine",
       "@murphai/assistant-runtime",
+      "@murphai/clinical-records",
       "@murphai/cloudflare-hosted-control",
       "@murphai/contracts",
       "@murphai/core",

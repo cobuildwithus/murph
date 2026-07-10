@@ -237,9 +237,13 @@ function isoDateTimeString(): z.ZodType<string> {
     .refine((value) => isStrictIsoDateTime(value), "Invalid ISO date-time string.");
 }
 
-function writableIsoDateTimeString(): z.ZodType<string> {
-  return z
-    .string()
+function writableIsoDateTimeString(maxLength?: number): z.ZodType<string> {
+  let schema = z.string();
+  if (maxLength !== undefined) {
+    schema = schema.max(maxLength);
+  }
+
+  return schema
     .regex(WRITABLE_ISO_DATE_TIME_PATTERN)
     .meta({ format: "date-time" })
     .refine((value) => isWritableIsoDateTime(value), "Invalid ISO date-time string.");
@@ -1365,6 +1369,48 @@ export const publicEventImportJsonlRowPayloadSchemasByKind = Object.freeze({
   intervention_session: interventionSessionEventImportJsonlRowPayloadSchema,
   experiment_context: experimentContextEventImportJsonlRowPayloadSchema,
 });
+
+export const publicEventImportJsonlRowPayloadSchema = z.discriminatedUnion("kind", [
+  symptomEventImportJsonlRowPayloadSchema,
+  noteEventImportJsonlRowPayloadSchema,
+  observationEventImportJsonlRowPayloadSchema,
+  clinicalAssertionEventImportJsonlRowPayloadSchema,
+  exposureEventImportJsonlRowPayloadSchema,
+  measurementEventImportJsonlRowPayloadSchema,
+  testEventImportJsonlRowPayloadSchema,
+  medicationIntakeEventImportJsonlRowPayloadSchema,
+  supplementIntakeEventImportJsonlRowPayloadSchema,
+  activitySessionEventImportJsonlRowPayloadSchema,
+  bodyMeasurementEventImportJsonlRowPayloadSchema,
+  sleepSessionEventImportJsonlRowPayloadSchema,
+  interventionSessionEventImportJsonlRowPayloadSchema,
+  experimentContextEventImportJsonlRowPayloadSchema,
+]);
+
+export const versionedExternalRefSchema = externalRefSchema.extend({
+  version: writableIsoDateTimeString(200),
+});
+
+export const eventImportUpsertDecisionSchema = z
+  .object({
+    action: z.literal("upsert"),
+    payload: publicEventImportJsonlRowPayloadSchema,
+  })
+  .strict();
+
+export const eventImportRetractionDecisionSchema = z
+  .object({
+    action: z.literal("retract"),
+    externalRef: versionedExternalRefSchema,
+    reason: boundedString(1, 240),
+    evidence: z.array(clinicalEvidenceRefSchema).max(50).optional(),
+  })
+  .strict();
+
+export const eventImportDecisionSchema = z.discriminatedUnion("action", [
+  eventImportUpsertDecisionSchema,
+  eventImportRetractionDecisionSchema,
+]);
 
 const baseSampleShape = {
   schemaVersion: z.literal(CONTRACT_SCHEMA_VERSION.sample),
@@ -2944,6 +2990,11 @@ export const geneticVariantFrontmatterSchema = withContractMetadata(
 );
 
 export type ExternalRef = z.infer<typeof externalRefSchema>;
+export type VersionedExternalRef = z.infer<typeof versionedExternalRefSchema>;
+export type PublicEventImportJsonlRowPayload = z.infer<typeof publicEventImportJsonlRowPayloadSchema>;
+export type EventImportUpsertDecision = z.infer<typeof eventImportUpsertDecisionSchema>;
+export type EventImportRetractionDecision = z.infer<typeof eventImportRetractionDecisionSchema>;
+export type EventImportDecision = z.infer<typeof eventImportDecisionSchema>;
 export type DeviceDataOrigin = z.infer<typeof deviceDataOriginSchema>;
 export type NutritionData = z.infer<typeof nutritionDataSchema>;
 export type NutritionProvenance = z.infer<typeof nutritionProvenanceSchema>;
