@@ -499,6 +499,44 @@ test("device sync service connects, imports, and deduplicates webhook traces", a
   close();
 });
 
+test("device sync service reports canonical imported event counts to provider jobs", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-import-receipt");
+  let importReceipt: unknown = null;
+  const { service, close } = createServiceFixture({
+    secret: "secret-for-tests",
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+    },
+    importer: {
+      async importDeviceProviderSnapshot() {
+        return { events: [{ kind: "activity" }, { kind: "sleep" }] };
+      },
+    },
+    providers: [createFakeProvider({
+      async executeJob(context) {
+        importReceipt = await context.importSnapshot({ provider: "demo" });
+        return {};
+      },
+    })],
+  });
+
+  try {
+    const begin = await service.startConnection({ provider: "demo" });
+    await service.handleOAuthCallback({
+      provider: "demo",
+      state: begin.state,
+      code: "import-receipt",
+    });
+    await service.runWorkerOnce();
+
+    assert.deepEqual(importReceipt, { canonicalEventCount: 2 });
+  } finally {
+    close();
+  }
+});
+
 test("device sync job context lets providers update source projections", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-syncd-source-projection-context");
   let listedInsideJob = 0;
@@ -3696,7 +3734,7 @@ test("manual reconcile preserves delayed Junction retry metadata timing", async 
       },
       connectedAt: ownerWindowEnd,
       metadata: {
-        junctionHistoricalBackfillStatus: "retrying",
+        junctionHistoricalBackfillStatus: "coverage_v2_retrying",
         junctionHistoricalBackfillEmptyAttempts: 1,
         junctionHistoricalBackfillLastEmptyAt: "2026-04-04T00:00:00.000Z",
         junctionHistoricalBackfillWindowStart: ownerWindowStart,
@@ -3808,7 +3846,7 @@ test("device sync service wakes Junction retrying historical backfill at the ret
     assert.equal(processedJob?.kind, "backfill");
 
     const afterEmptyBackfill = store.getAccountById(account.id);
-    assert.equal(afterEmptyBackfill?.metadata.junctionHistoricalBackfillStatus, "retrying");
+    assert.equal(afterEmptyBackfill?.metadata.junctionHistoricalBackfillStatus, "coverage_v2_retrying");
     assert.equal(afterEmptyBackfill?.metadata.junctionHistoricalBackfillEmptyAttempts, 1);
     assert.equal(afterEmptyBackfill?.metadata.junctionHistoricalBackfillLastEmptyAt, executedAt);
     assert.equal(afterEmptyBackfill?.nextReconcileAt, retryDueAt);
@@ -3945,7 +3983,7 @@ test("device sync scheduler materializes Junction metadata retry when it is due"
       },
       connectedAt: ownerWindowEnd,
       metadata: {
-        junctionHistoricalBackfillStatus: "retrying",
+        junctionHistoricalBackfillStatus: "coverage_v2_retrying",
         junctionHistoricalBackfillEmptyAttempts: 1,
         junctionHistoricalBackfillLastEmptyAt: "2026-04-04T00:00:00.000Z",
         junctionHistoricalBackfillWindowStart: ownerWindowStart,
@@ -4053,7 +4091,7 @@ test("device sync scheduler rematerializes dead Junction metadata retries", asyn
       },
       connectedAt: ownerWindowEnd,
       metadata: {
-        junctionHistoricalBackfillStatus: "retrying",
+        junctionHistoricalBackfillStatus: "coverage_v2_retrying",
         junctionHistoricalBackfillEmptyAttempts: 1,
         junctionHistoricalBackfillLastEmptyAt: "2026-04-04T00:00:00.000Z",
         junctionHistoricalBackfillWindowStart: ownerWindowStart,
@@ -6870,7 +6908,7 @@ test("sqlite store prioritizes metadataPatch entries when capped metadata is ful
       metadataPatch: {
         junctionHistoricalBackfillEmptyAttempts: 1,
         junctionHistoricalBackfillLastEmptyAt: "2026-03-20T12:00:00.000Z",
-        junctionHistoricalBackfillStatus: "retrying",
+        junctionHistoricalBackfillStatus: "coverage_v2_retrying",
         junctionHistoricalBackfillWindowEnd: "2026-03-20T00:00:00.000Z",
         junctionHistoricalBackfillWindowStart: "2025-12-20T00:00:00.000Z",
       },
@@ -6890,7 +6928,7 @@ test("sqlite store prioritizes metadataPatch entries when capped metadata is ful
     {
       junctionHistoricalBackfillEmptyAttempts: 1,
       junctionHistoricalBackfillLastEmptyAt: "2026-03-20T12:00:00.000Z",
-      junctionHistoricalBackfillStatus: "retrying",
+      junctionHistoricalBackfillStatus: "coverage_v2_retrying",
       junctionHistoricalBackfillWindowEnd: "2026-03-20T00:00:00.000Z",
       junctionHistoricalBackfillWindowStart: "2025-12-20T00:00:00.000Z",
     },

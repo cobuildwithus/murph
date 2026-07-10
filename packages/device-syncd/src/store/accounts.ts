@@ -980,6 +980,15 @@ function assertAccountUpsertExistingGuard(
       httpStatus: 409,
     });
   }
+
+  if (existing.connectedAt !== guard.expectedConnectedAt) {
+    throw deviceSyncError({
+      code: "CONNECTION_SEEDED_ACCOUNT_CHANGED",
+      message: "Device sync connection changed after this connection flow started.",
+      retryable: false,
+      httpStatus: 409,
+    });
+  }
 }
 
 export function patchAccount(
