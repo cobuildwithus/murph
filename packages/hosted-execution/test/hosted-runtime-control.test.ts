@@ -1107,6 +1107,13 @@ describe("hosted runtime control contracts", () => {
         systemMailboxMaintenanceMs: 3,
         memberPreferencesPrePlanningMs: 4,
         automationBootstrapMs: 5,
+        outboxScanElapsedMs: 23,
+        outboxScanPerformed: true,
+        receiptScanBytesRead: 4_096,
+        receiptScanElapsedMs: 19,
+        receiptScanFilesRead: 12,
+        receiptScanLockWaitMs: 3,
+        receiptScanPerformed: false,
       },
       provider: {
         codexAppServerInitializeMs: 7,
@@ -1160,6 +1167,26 @@ describe("hosted runtime control contracts", () => {
           assistantInputIds: ["input_1"],
           at: "2026-04-26T00:00:01.000Z",
           phaseBreakdown: { schemaVersion: 1, provider: unsafeProvider },
+          providerRequestOrdinal: 0,
+          source: "linq",
+          type: "provider_started",
+        },
+      });
+      expect(parsed.event.type).toBe("provider_started");
+      expect("phaseBreakdown" in parsed.event).toBe(false);
+    }
+
+    for (const unsafePreProvider of [
+      { receiptScanPerformed: 1 }, // boolean leaf must stay boolean
+      { receiptScanBytesRead: -1 }, // counts must be non-negative
+      { outboxScanElapsedMs: "23" }, // durations must stay numeric
+      { receiptScanFilesRead: 12, receiptScanPath: 1 }, // arbitrary metadata is forbidden
+    ]) {
+      const parsed = parseHostedRuntimeLatencyTraceRequest({
+        event: {
+          assistantInputIds: ["input_1"],
+          at: "2026-04-26T00:00:01.000Z",
+          phaseBreakdown: { schemaVersion: 1, preProvider: unsafePreProvider },
           providerRequestOrdinal: 0,
           source: "linq",
           type: "provider_started",
@@ -1376,6 +1403,35 @@ describe("hosted runtime control contracts", () => {
       codexAppServerThreadResumeMs: 9,
       codexAppServerWarmReuseMs: 0,
       turnLockWaitMs: 2,
+    });
+
+    const historyMerged = mergeHostedRuntimeLatencyPhaseBreakdownJson({
+      existing: {
+        schemaVersion: 1,
+        preProvider: {
+          outboxScanPerformed: true,
+          receiptScanBytesRead: -1,
+          receiptScanPath: 1,
+          receiptScanPerformed: "false",
+        },
+      },
+      incoming: {
+        schemaVersion: 1,
+        preProvider: {
+          outboxScanPerformed: false,
+          receiptScanBytesRead: 4_096,
+          receiptScanFilesRead: 12,
+          receiptScanPerformed: false,
+        },
+      },
+      phases: ["preProvider"],
+    });
+
+    expect(historyMerged.value.preProvider).toEqual({
+      outboxScanPerformed: true,
+      receiptScanBytesRead: 4_096,
+      receiptScanFilesRead: 12,
+      receiptScanPerformed: false,
     });
   });
 

@@ -9,3 +9,5 @@ export {
   saveAssistantTurnReceipt,
   updateAssistantTurnReceipt,
 } from './turns.js'
+
+export type { AssistantTurnReceiptScanMetrics } from './turns.js'
