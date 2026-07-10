@@ -111,16 +111,12 @@ describe("createHostedGroupToolWithLinqThreadContext", () => {
     await groupTool.request({
       action: "post_join_offer",
       joinOffer: {
-        messageTemplate:
-          "React here to join. This shares {{share_scope}} with the group. Details: {{join_url}}.",
         projectionKinds: ["sleep-times.v0"],
       },
     });
     expect(request).toHaveBeenLastCalledWith({
       action: "post_join_offer",
       joinOffer: {
-        messageTemplate:
-          "React here to join. This shares {{share_scope}} with the group. Details: {{join_url}}.",
         projectionKinds: ["sleep-times.v0"],
       },
       linqThread: {
@@ -154,17 +150,11 @@ describe("createHostedGroupToolWithLinqThreadContext", () => {
 
     await groupTool.request({
       action: "post_join_offer",
-      joinOffer: {
-        messageTemplate:
-          "React here to join. This shares {{share_scope}} with the group. Details: {{join_url}}.",
-      },
+      joinOffer: {},
     });
     expect(request).toHaveBeenLastCalledWith({
       action: "post_join_offer",
-      joinOffer: {
-        messageTemplate:
-          "React here to join. This shares {{share_scope}} with the group. Details: {{join_url}}.",
-      },
+      joinOffer: {},
     });
   });
 
@@ -246,16 +236,12 @@ describe("createHostedGroupToolWithLinqThreadContext", () => {
     await groupTool.request({
       action: "post_join_offer",
       joinOffer: {
-        messageTemplate:
-          "React here to join. This shares {{share_scope}} with the group. Details: {{join_url}}.",
         projectionKinds: ["sleep-times.v0"],
       },
     });
     expect(request).toHaveBeenLastCalledWith({
       action: "post_join_offer",
       joinOffer: {
-        messageTemplate:
-          "React here to join. This shares {{share_scope}} with the group. Details: {{join_url}}.",
         projectionKinds: ["sleep-times.v0"],
       },
     });

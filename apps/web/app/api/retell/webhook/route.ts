@@ -4,9 +4,12 @@ import { retellWebhookPayloadSchema } from "@/src/lib/phone-calls/retell-payload
 import {
   handleRetellCallAnalyzed,
   handleRetellCallEnded,
+  handleRetellTransferOutcome,
 } from "@/src/lib/phone-calls/result";
 import { verifyRetellSignature } from "@/src/lib/phone-calls/retell-signature";
-import { signalHostedMailboxAppendRuntime } from "@/src/lib/hosted-orchestration/signal-runtime";
+import {
+  signalHostedAssistantNotificationsBestEffort,
+} from "@/src/lib/hosted-execution/assistant-notifications";
 
 const RETELL_WEBHOOK_MAX_BODY_BYTES = 4 * 1024 * 1024;
 
@@ -22,26 +25,23 @@ export const POST = withJsonError(async (request: Request) => {
 
   const payload = retellWebhookPayloadSchema.parse(JSON.parse(rawBody));
   switch (payload.event) {
-    case "call_ended":
-      await handleRetellCallEnded({ call: payload.call });
+    case "call_ended": {
+      const result = await handleRetellCallEnded({ call: payload.call });
+      await signalHostedAssistantNotificationsBestEffort(result.notificationSignals);
       break;
+    }
     case "call_analyzed": {
       const result = await handleRetellCallAnalyzed({ call: payload.call });
-      const resultSignals = result.notificationSignals ?? [];
-      const notificationSignals = resultSignals.length > 0
-        ? resultSignals
-        : result.notificationMailboxItemId
-          ? [{
-              notificationMailboxItemId: result.notificationMailboxItemId,
-              notificationUserId: result.notificationUserId,
-            }]
-          : [];
-      await Promise.all(notificationSignals.map((signal) =>
-        signalHostedMailboxAppendRuntime({
-          expectedUserId: signal.notificationUserId,
-          mailboxItemId: signal.notificationMailboxItemId,
-        })
-      ));
+      await signalHostedAssistantNotificationsBestEffort(result.notificationSignals);
+      break;
+    }
+    case "transfer_bridged":
+    case "transfer_cancelled": {
+      const result = await handleRetellTransferOutcome({
+        call: payload.call,
+        event: payload.event,
+      });
+      await signalHostedAssistantNotificationsBestEffort(result.notificationSignals);
       break;
     }
   }

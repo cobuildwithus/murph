@@ -40,10 +40,7 @@ describe("createHostedWebCallCirclePort", () => {
     });
 
     await expect(port.respond({
-      groupId: "hgrp_123",
       kind: "confirm",
-      matchId: "hccm_123",
-      side: "A",
     }, {
       inboundMailboxItemIds: ["mailbox_reply"],
       signal,
@@ -55,10 +52,7 @@ describe("createHostedWebCallCirclePort", () => {
           inboundMailboxItemIds: ["mailbox_reply"],
         },
         request: {
-          groupId: "hgrp_123",
           kind: "confirm",
-          matchId: "hccm_123",
-          side: "A",
         },
       },
       boundUserId: "member_123",

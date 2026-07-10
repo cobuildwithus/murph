@@ -10,7 +10,8 @@ CREATE TABLE "hosted_call_circle_participant" (
     "member_id" TEXT NOT NULL,
     "status" "HostedCallCircleParticipantStatus" NOT NULL DEFAULT 'enrolled',
     "preferences_json" JSONB,
-    "last_matched_at" TIMESTAMP(3),
+    "next_matching_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "paused_at" TIMESTAMP(3),
     "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updated_at" TIMESTAMP(3) NOT NULL,
     CONSTRAINT "hosted_call_circle_participant_pkey" PRIMARY KEY ("id")
@@ -30,8 +31,6 @@ CREATE TABLE "hosted_call_circle_match" (
     "counter_used_b" BOOLEAN NOT NULL DEFAULT false,
     "am_asked_at" TIMESTAMP(3),
     "final_asked_at" TIMESTAMP(3),
-    "claimed_at" TIMESTAMP(3),
-    "ended_at" TIMESTAMP(3),
     "outcome" TEXT,
     "phone_call_id" TEXT,
     "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -41,12 +40,13 @@ CREATE TABLE "hosted_call_circle_match" (
 
 CREATE UNIQUE INDEX "hosted_call_circle_participant_group_id_member_id_key" ON "hosted_call_circle_participant"("group_id", "member_id");
 CREATE INDEX "hosted_call_circle_participant_member_id_idx" ON "hosted_call_circle_participant"("member_id");
+CREATE INDEX "hosted_call_circle_participant_status_next_matching_at_idx" ON "hosted_call_circle_participant"("status", "next_matching_at");
 CREATE UNIQUE INDEX "hosted_call_circle_match_group_id_member_a_id_member_b_id_window_start_at_key" ON "hosted_call_circle_match"("group_id", "member_a_id", "member_b_id", "window_start_at");
 CREATE INDEX "hosted_call_circle_match_group_id_created_at_idx" ON "hosted_call_circle_match"("group_id", "created_at");
 CREATE INDEX "hosted_call_circle_match_status_window_start_at_idx" ON "hosted_call_circle_match"("status", "window_start_at");
 CREATE INDEX "hosted_call_circle_match_member_a_id_idx" ON "hosted_call_circle_match"("member_a_id");
 CREATE INDEX "hosted_call_circle_match_member_b_id_idx" ON "hosted_call_circle_match"("member_b_id");
-CREATE INDEX "hosted_call_circle_match_phone_call_id_idx" ON "hosted_call_circle_match"("phone_call_id");
+CREATE UNIQUE INDEX "hosted_call_circle_match_phone_call_id_key" ON "hosted_call_circle_match"("phone_call_id");
 
 ALTER TABLE "hosted_call_circle_participant" ADD CONSTRAINT "hosted_call_circle_participant_group_id_fkey" FOREIGN KEY ("group_id") REFERENCES "hosted_group"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 ALTER TABLE "hosted_call_circle_participant" ADD CONSTRAINT "hosted_call_circle_participant_member_id_fkey" FOREIGN KEY ("member_id") REFERENCES "hosted_member"("id") ON DELETE CASCADE ON UPDATE CASCADE;

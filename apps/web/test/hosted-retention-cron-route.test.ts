@@ -26,14 +26,15 @@ describe("hosted retention cron route", () => {
     vi.clearAllMocks();
     mocks.requireVercelCronRequest.mockReturnValue(undefined);
     mocks.runHostedRetentionCleanup.mockResolvedValue({
+      assistantNotificationRecoverySignalFailures: 1,
+      assistantNotificationRecoverySignalsSent: 1,
       expiredComputerRunsCleanedUp: 4,
       expiredMailboxItemsDeleted: 7,
       inboxMediaRetentionRuntimeSignalFailures: 1,
       inboxMediaRetentionRuntimeSignalsSent: 3,
       oldRuntimeLogsDeleted: 6,
+      stalePhoneCallAnalysesTerminalized: 2,
       stalePhoneCallProviderStartsFailed: 2,
-      stalePhoneCallResultNotificationSignalFailures: 1,
-      stalePhoneCallResultNotificationSignalsSent: 1,
       staleWebSessionsDeleted: 5,
     });
   });
@@ -49,14 +50,15 @@ describe("hosted retention cron route", () => {
     expect(mocks.runHostedRetentionCleanup).toHaveBeenCalledTimes(1);
     await expect(response.json()).resolves.toEqual({
       cleanup: {
+        assistantNotificationRecoverySignalFailures: 1,
+        assistantNotificationRecoverySignalsSent: 1,
         expiredComputerRunsCleanedUp: 4,
         expiredMailboxItemsDeleted: 7,
         inboxMediaRetentionRuntimeSignalFailures: 1,
         inboxMediaRetentionRuntimeSignalsSent: 3,
         oldRuntimeLogsDeleted: 6,
+        stalePhoneCallAnalysesTerminalized: 2,
         stalePhoneCallProviderStartsFailed: 2,
-        stalePhoneCallResultNotificationSignalFailures: 1,
-        stalePhoneCallResultNotificationSignalsSent: 1,
         staleWebSessionsDeleted: 5,
       },
     });

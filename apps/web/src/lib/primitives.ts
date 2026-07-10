@@ -50,6 +50,23 @@ export function sha256Hex(value: string): string {
   return createHash("sha256").update(value).digest("hex");
 }
 
+export function containsUrlLikeText(value: string): boolean {
+  if (/(?:^|[\s([<{])(?:[a-z][a-z\d+.-]*):[^\s<>)\]}]+/iu.test(value)) {
+    return true;
+  }
+  if (/(?:^|[\s([<{])\/\/[^\s<>)\]}]+/u.test(value)) {
+    return true;
+  }
+  if (/(?:^|[\s([<{])(?:\d{1,3}\.){3}\d{1,3}(?::\d{2,5})?(?:[/?#][^\s<>)\]}]*)?(?=$|[\s).,!?;:>\]}])/u.test(value)) {
+    return true;
+  }
+  if (/(?:^|[\s([<{])(?=[0-9a-f:]*::)[0-9a-f:]{3,}(?=$|[\s).,!?;:>\]}])/iu.test(value)) {
+    return true;
+  }
+  return /(?:^|[\s([<{])(?:[a-z\d](?:[a-z\d-]{0,61}[a-z\d])?\.)+(?:[a-z]{2,63}|xn--[a-z\d-]{2,59})(?::\d{2,5})?(?:[/?#][^\s<>)\]}]*)?(?=$|[\s).,!?;:>\]}])/iu
+    .test(value);
+}
+
 export function asRecord(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return {};
@@ -75,4 +92,21 @@ export function parseInteger(value: string | null | undefined): number | null {
 
 export function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+export async function runWithConcurrency<T>(
+  items: readonly T[],
+  concurrency: number,
+  worker: (item: T) => Promise<void>,
+): Promise<void> {
+  let nextIndex = 0;
+  const workerCount = Math.min(concurrency, items.length);
+
+  await Promise.all(Array.from({ length: workerCount }, async () => {
+    while (nextIndex < items.length) {
+      const item = items[nextIndex];
+      nextIndex += 1;
+      await worker(item);
+    }
+  }));
 }

@@ -8,6 +8,7 @@ export {
   summarizeHostedLinqMessage,
   shouldIgnoreHostedLinqForLocalInboundGuard,
   parseHostedLinqWebhookEvent,
+  readHostedLinqOutboundMessageIdentity,
   verifyAndParseHostedLinqWebhookRequest,
 } from "./linq-webhook";
 export type {

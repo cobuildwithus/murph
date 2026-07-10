@@ -13,6 +13,7 @@ import type {
   MessageSendResponse,
 } from "@linqapp/sdk/resources/chats";
 
+import { maybeDate } from "../primitives";
 import { fetchLinqApi, LinqApiTimeoutError } from "../linq/api";
 import { hostedOnboardingError, isHostedOnboardingError } from "./errors";
 import { requireHostedOnboardingLinqConfig } from "./runtime";
@@ -70,7 +71,7 @@ export async function sendHostedLinqChatMessage(input: {
   message: string;
   replyToMessageId?: string | null;
   signal?: AbortSignal;
-}): Promise<HostedLinqSendResult> {
+}): Promise<HostedLinqSendResult & { providerCreatedAt?: Date | null }> {
   const replyToMessageId = normalizeNullableString(input.replyToMessageId);
 
   const response = await fetchHostedLinqApiOrThrow({
@@ -98,6 +99,7 @@ export async function sendHostedLinqChatMessage(input: {
   return {
     chatId: normalizeNullableString(payload?.chat_id),
     messageId: normalizeNullableString(payload?.message?.id),
+    providerCreatedAt: maybeDate(payload?.message?.created_at),
   };
 }
 

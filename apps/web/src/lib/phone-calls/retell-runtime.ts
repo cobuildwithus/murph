@@ -24,7 +24,12 @@ const RETELL_START_TIMEOUT_MS = 15_000;
 const RETELL_BASIC_ATTRIBUTES_ONLY_STORAGE_SETTING = "basic_attributes_only";
 const RETELL_WEBHOOK_PATH = "/api/retell/webhook";
 const RETELL_PUBLIC_BASE_DYNAMIC_VARIABLE = "murph_public_base_url";
-const RETELL_WEBHOOK_EVENTS = ["call_ended", "call_analyzed"] as const;
+const RETELL_WEBHOOK_EVENTS = [
+  "call_ended",
+  "call_analyzed",
+  "transfer_bridged",
+  "transfer_cancelled",
+] as const;
 
 export function createRetellPhoneCallRuntime(input: {
   fetchImpl?: typeof fetch;
@@ -32,17 +37,28 @@ export function createRetellPhoneCallRuntime(input: {
   return new RetellPhoneCallRuntime(input.fetchImpl);
 }
 
+export async function stopRetellPhoneCall(
+  providerCallId: string,
+  input: { fetchImpl?: typeof fetch } = {},
+): Promise<void> {
+  const normalizedProviderCallId = readRetellProviderCallId(providerCallId);
+  if (!normalizedProviderCallId) {
+    throw new TypeError("Retell provider call id is required.");
+  }
+  await stopRetellCall(buildRetellClient(input.fetchImpl), normalizedProviderCallId);
+}
+
 class RetellPhoneCallRuntime implements PhoneCallRuntime {
   constructor(private readonly fetchImpl: typeof fetch | undefined) {}
 
   validateStart(call: HostedPhoneCallRuntimeRecord): void {
     buildRetellCreatePhoneCallRequest(call);
-    this.buildClient();
+    buildRetellClient(this.fetchImpl);
   }
 
   async start(call: HostedPhoneCallRuntimeRecord): Promise<PhoneCallRuntimeStartResult> {
     const params = buildRetellCreatePhoneCallRequest(call);
-    const client = this.buildClient();
+    const client = buildRetellClient(this.fetchImpl);
     let response: Awaited<ReturnType<Retell["call"]["createPhoneCall"]>>;
     try {
       response = await client.call.createPhoneCall(params);
@@ -52,33 +68,37 @@ class RetellPhoneCallRuntime implements PhoneCallRuntime {
 
     const providerCallId = readRetellProviderCallId(response.call_id);
     if (!providerCallId) {
-      throw new PhoneCallRuntimeStartRejectedError(
-        "Retell create phone call returned no call_id.",
-      );
+      // A successful response can arrive after Retell created the call even when
+      // its body is incomplete. Keep the local reservation recoverable by the
+      // metadata callback or stale-start sweep instead of declaring rejection.
+      throw new Error("Retell create phone call returned no call_id.");
     }
     const storageSetting = readRetellDataStorageSetting(response.data_storage_setting);
     if (storageSetting !== RETELL_BASIC_ATTRIBUTES_ONLY_STORAGE_SETTING) {
-      throw buildRetellStorageModeMismatchError({
+      const stopFailure = await this.stopCallBestEffort(client, providerCallId);
+      const mismatchError = buildRetellStorageModeMismatchError({
         storageSetting,
-        stopFailure: await this.stopCallBestEffort(client, providerCallId),
+        stopFailure,
+      });
+      if (stopFailure) {
+        throw new PhoneCallRuntimeStartRejectedError(mismatchError.message, {
+          cause: mismatchError,
+          providerCallId,
+        });
+      }
+      throw new PhoneCallRuntimeStartRejectedError(mismatchError.message, {
+        cause: mismatchError,
       });
     }
 
     return { providerCallId };
   }
 
-  private buildClient(): Retell {
-    const options: ClientOptions = {
-      apiKey: requireEnv("RETELL_API_KEY"),
-      baseURL: RETELL_API_BASE_URL,
-      fetchOptions: { redirect: "error" },
-      maxRetries: 0,
-      timeout: RETELL_START_TIMEOUT_MS,
-    };
-    if (this.fetchImpl) {
-      options.fetch = this.fetchImpl as ClientOptions["fetch"];
-    }
-    return new Retell(options);
+  stop(providerCallId: string): Promise<void> {
+    return stopRetellPhoneCall(
+      providerCallId,
+      this.fetchImpl ? { fetchImpl: this.fetchImpl } : {},
+    );
   }
 
   private async stopCallBestEffort(
@@ -86,7 +106,7 @@ class RetellPhoneCallRuntime implements PhoneCallRuntime {
     providerCallId: string,
   ): Promise<RetellStopCallFailure | null> {
     try {
-      await client.call.stop(providerCallId);
+      await stopRetellCall(client, providerCallId);
       return null;
     } catch (error) {
       if (error instanceof APIConnectionError) {
@@ -105,6 +125,24 @@ class RetellPhoneCallRuntime implements PhoneCallRuntime {
       };
     }
   }
+}
+
+function buildRetellClient(fetchImpl: typeof fetch | undefined): Retell {
+  const options: ClientOptions = {
+    apiKey: requireEnv("RETELL_API_KEY"),
+    baseURL: RETELL_API_BASE_URL,
+    fetchOptions: { redirect: "error" },
+    maxRetries: 0,
+    timeout: RETELL_START_TIMEOUT_MS,
+  };
+  if (fetchImpl) {
+    options.fetch = fetchImpl as ClientOptions["fetch"];
+  }
+  return new Retell(options);
+}
+
+async function stopRetellCall(client: Retell, providerCallId: string): Promise<void> {
+  await client.call.stop(providerCallId);
 }
 
 function classifyRetellCreatePhoneCallError(error: unknown): unknown {
@@ -161,7 +199,6 @@ function buildRetellStorageModeMismatchError(input: {
 function buildRetellCreatePhoneCallRequest(call: HostedPhoneCallRuntimeRecord): CallCreatePhoneCallParams {
   assertRetellAgentDataStorageSetting();
   const publicBaseOrigin = readRetellPublicBaseOrigin();
-  const agentOverride = buildRetellAgentOverride(publicBaseOrigin);
 
   return {
     from_number: requireEnv("RETELL_FROM_NUMBER"),
@@ -170,7 +207,7 @@ function buildRetellCreatePhoneCallRequest(call: HostedPhoneCallRuntimeRecord): 
     override_agent_version: call.retellAgentVersion?.trim()
       || process.env.RETELL_AGENT_VERSION?.trim()
       || "prod",
-    ...(agentOverride ? { agent_override: agentOverride } : {}),
+    agent_override: buildRetellAgentOverride(publicBaseOrigin),
     metadata: {
       murph_phone_call_id: call.id,
     },
@@ -180,15 +217,13 @@ function buildRetellCreatePhoneCallRequest(call: HostedPhoneCallRuntimeRecord): 
 
 type RetellAgentOverride = NonNullable<CallCreatePhoneCallParams["agent_override"]>;
 
-function buildRetellAgentOverride(publicBaseOrigin: string | null): RetellAgentOverride | null {
-  if (!publicBaseOrigin) {
-    return null;
-  }
-
+function buildRetellAgentOverride(publicBaseOrigin: string | null): RetellAgentOverride {
   return {
     agent: {
       webhook_events: [...RETELL_WEBHOOK_EVENTS],
-      webhook_url: buildRetellCallbackUrl(publicBaseOrigin, RETELL_WEBHOOK_PATH),
+      ...(publicBaseOrigin
+        ? { webhook_url: buildRetellCallbackUrl(publicBaseOrigin, RETELL_WEBHOOK_PATH) }
+        : {}),
     },
   };
 }

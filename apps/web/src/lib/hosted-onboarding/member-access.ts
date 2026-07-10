@@ -13,7 +13,10 @@ import {
   isHostedMemberSuspended,
 } from "./entitlement";
 import { hostedOnboardingError } from "./errors";
-import type { HostedOnboardingReadClient } from "./shared";
+import {
+  lockHostedMemberRow,
+  type HostedOnboardingReadClient,
+} from "./shared";
 
 /**
  * The one place hosted access is derived.
@@ -85,11 +88,19 @@ function hasActiveHostedPersonAccess(person: HostedMemberPersonAccessState): boo
     return true;
   }
 
-  return person.accountGroupMemberships.some((membership) =>
-    membership.status === "active"
-    && membership.group.billingStatus === HostedBillingStatus.active
-    && !isHostedMemberSuspended(membership.group.suspendedAt)
-  );
+  return person.accountGroupMemberships.some(hasActiveHostedSponsorAccess);
+}
+
+function hasActiveHostedSponsorAccess(input: {
+  group: {
+    billingStatus: HostedBillingStatus;
+    suspendedAt: Date | null;
+  };
+  status: string;
+}): boolean {
+  return input.status === "active"
+    && input.group.billingStatus === HostedBillingStatus.active
+    && !isHostedMemberSuspended(input.group.suspendedAt);
 }
 
 export function hasActiveHostedMemberAccess(member: HostedMemberAccessState): boolean {
@@ -276,11 +287,63 @@ export async function assertActiveHostedMemberAccessAllowed(input: {
     }
   }
 
+  throwHostedMemberAccessRequired(member?.billingStatus);
+}
+
+/**
+ * Transactional access gate for concrete hosted people.
+ *
+ * Lock the person first, then at most one qualifying sponsorship edge and its
+ * account group. Concurrent sponsorship removal or billing changes must wait
+ * for those locks, while historical removed edges stay off this user path.
+ */
+export async function assertActiveHostedPersonAccessAllowedTx(input: {
+  memberId: string;
+  tx: Prisma.TransactionClient;
+}): Promise<void> {
+  await lockHostedMemberRow(input.tx, input.memberId);
+  const member = await input.tx.hostedMember.findUnique({
+    select: {
+      billingStatus: true,
+      suspendedAt: true,
+      threadContainer: { select: { memberId: true } },
+    },
+    where: { id: input.memberId },
+  });
+  if (!member || member.threadContainer) {
+    throwHostedMemberAccessRequired();
+  }
+  assertHostedMemberNotSuspended(member);
+  if (hasHostedMemberOwnActiveBilling(member)) {
+    return;
+  }
+
+  const sponsorships = await input.tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+    SELECT membership."id"
+    FROM "hosted_account_group_membership" AS membership
+    INNER JOIN "hosted_account_group" AS account_group
+      ON account_group."id" = membership."group_id"
+    WHERE membership."member_id" = ${input.memberId}
+      AND membership."status" = 'active'
+      AND account_group."billing_status" = 'active'
+      AND account_group."suspended_at" IS NULL
+    ORDER BY membership."id", account_group."id"
+    LIMIT 1
+    FOR UPDATE OF membership, account_group
+  `);
+  if (sponsorships.length > 0) {
+    return;
+  }
+
+  throwHostedMemberAccessRequired(member.billingStatus);
+}
+
+function throwHostedMemberAccessRequired(
+  billingStatus: HostedBillingStatus = HostedBillingStatus.not_started,
+): never {
   throw hostedOnboardingError({
     code: "HOSTED_ACCESS_REQUIRED",
     httpStatus: 403,
-    message: describeHostedMemberActiveAccessRequirement(
-      member?.billingStatus ?? HostedBillingStatus.not_started,
-    ),
+    message: describeHostedMemberActiveAccessRequirement(billingStatus),
   });
 }

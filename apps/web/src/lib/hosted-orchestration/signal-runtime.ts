@@ -79,6 +79,11 @@ export interface SignalHostedMailboxAppendInput {
   prisma?: PrismaClient;
 }
 
+export interface HostedMailboxAppendSignal {
+  mailboxItemId: string;
+  memberId: string;
+}
+
 export interface SignalHostedBrowserVaultRefreshInput {
   client?: HostedRuntimeTemporalSignalClient | null;
   environment?: NodeJS.ProcessEnv;
@@ -159,6 +164,22 @@ export async function signalHostedMailboxAppendRuntime(
     }),
     userId: mailboxItem.userId,
   });
+}
+
+export async function signalHostedMailboxAppendsBestEffort(
+  signals: readonly (HostedMailboxAppendSignal | null | undefined)[],
+): Promise<void> {
+  await Promise.all(signals.map(async (signal) => {
+    if (!signal) return;
+    try {
+      await signalHostedMailboxAppendRuntime({
+        expectedUserId: signal.memberId,
+        mailboxItemId: signal.mailboxItemId,
+      });
+    } catch {
+      // Mailbox rows are durable; the recovery sweep or a later wake imports them.
+    }
+  }));
 }
 
 export async function signalHostedBrowserVaultRefreshRuntime(

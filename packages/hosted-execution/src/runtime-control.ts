@@ -840,7 +840,14 @@ export type HostedRuntimeGroupKind = (typeof HOSTED_RUNTIME_GROUP_KINDS)[number]
 
 export const HOSTED_RUNTIME_GROUP_DISPLAY_NAME_MAX_LENGTH = 120;
 export const HOSTED_RUNTIME_GROUP_CHAT_ICON_URL_MAX_LENGTH = 2000;
-export const HOSTED_RUNTIME_GROUP_JOIN_OFFER_MESSAGE_TEMPLATE_MAX_LENGTH = 1000;
+export const HOSTED_RUNTIME_GROUP_JOIN_OFFER_OPERATION_ID_MAX_LENGTH = 256;
+
+export const HOSTED_RUNTIME_GROUP_JOIN_OFFER_ACTIVATIONS = [
+  "call-circle.enroll.v0",
+] as const;
+
+export type HostedRuntimeGroupJoinOfferActivation =
+  (typeof HOSTED_RUNTIME_GROUP_JOIN_OFFER_ACTIVATIONS)[number];
 
 export interface HostedRuntimeGroupMemberSummary {
   grantedVaultShareProjectionKinds: HostedVaultShareProjectionKind[];
@@ -873,16 +880,22 @@ export interface HostedRuntimeGroupCreateJoinLinkRequest {
 }
 
 export interface HostedRuntimeGroupPostJoinOfferRequest {
+  // Optional product activation disclosed by server-owned copy in the posted
+  // offer. The model may select only this closed value.
+  activation?: HostedRuntimeGroupJoinOfferActivation | null;
   displayName?: string | null;
-  // Model-authored natural group-chat message with server-filled
-  // {{share_scope}} and {{join_url}} placeholders.
-  messageTemplate?: string | null;
   // Compatibility for old fixed-kind callers. Selector-only projections must
   // use projectionScopes.
   projectionKinds?: HostedVaultShareSelectableProjectionKind[] | null;
   // Closed over the individually selectable scopes; the offer always includes
   // the membership-implied profile-name.v0 share in its deterministic copy.
   projectionScopes?: HostedVaultShareSelectableProjectionScope[] | null;
+  /**
+   * Runtime-supplied current-wake mailbox identity. It is not model input.
+   * Web derives the durable offer row id from it so whole-turn retries reuse
+   * one provider idempotency identity without conflating later user requests.
+   */
+  operationId?: string | null;
 }
 
 export interface HostedRuntimeGroupUpdateDisplayNameRequest {

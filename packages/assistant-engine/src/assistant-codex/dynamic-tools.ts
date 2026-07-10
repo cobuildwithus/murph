@@ -4,7 +4,7 @@ import {
   HOSTED_PRODUCT_FEEDBACK_KINDS,
   HOSTED_PRODUCT_FEEDBACK_SUMMARY_MAX_LENGTH,
   HOSTED_RUNTIME_GROUP_DISPLAY_NAME_MAX_LENGTH,
-  HOSTED_RUNTIME_GROUP_JOIN_OFFER_MESSAGE_TEMPLATE_MAX_LENGTH,
+  HOSTED_RUNTIME_GROUP_JOIN_OFFER_ACTIVATIONS,
   HOSTED_RUNTIME_GROUP_KINDS,
   HOSTED_RUNTIME_NEWSLETTER_HTML_MAX_LENGTH,
   HOSTED_RUNTIME_NEWSLETTER_SUBJECT_MAX_LENGTH,
@@ -97,6 +97,11 @@ import {
   readConnectedAppsDynamicToolRequest,
   type ConnectedAppsDynamicToolRequest,
 } from './dynamic-tools/connected-apps.js'
+import {
+  MURPH_CALL_CIRCLE_RESPOND_TOOL,
+  readCallCircleDynamicToolRequest,
+  type CallCircleDynamicToolRequest,
+} from './dynamic-tools/call-circle.js'
 import {
   executeGenerateVoiceMemoDynamicTool,
   MURPH_GENERATE_VOICE_MEMO_TOOL,
@@ -443,7 +448,7 @@ export const MURPH_GROUP_TOOL = {
   namespace: 'murph',
   name: 'group',
   description:
-    'Read the current hosted group and its member roster (member ids, chat handles, and each member\'s granted share kinds) with action="read_current", request an update to both the current hosted group display name and current iMessage group chat title with action="update_display_name", request an update to the current iMessage group avatar with action="set_chat_avatar", mint the shareable group join link with action="create_join_link", or post a server-owned react-to-join offer into the current group chat with action="post_join_offer". update_display_name sends a provider request for the upstream iMessage group chat title on the current route-authorized group chat and stores the same name in Murph after the provider accepts the request. set_chat_avatar sends a provider request for the upstream iMessage group icon on the current route-authorized group chat after the runtime preflights chat authority and prepares a hosted image URL; generated avatar images are saved as capture media under raw/captures/** when a vault is available. A join link grants membership and shares the joiner\'s memory-backed preferred display name with this group runtime; optional permissions stay individually selected on the join page. A join offer uses your short natural messageTemplate to state what reacting shares with {{share_scope}} and include the customize link with {{join_url}} so people can share more or less. Pass displayName on create_join_link or post_join_offer only when it is the name the group chose. Reactions grant membership plus only the posted permission snapshot. Do not use a fixed script. Use action="read_chat_participants" to see who is in this group chat and whether each participant already has their own Murph; use action="share_contact_card" to drop your contact card into this chat once so people who do not have you saved can tap it, save you, and text you directly. Use action="revoke_own_email_share" only when the current sender asks to stop receiving group newsletter email; the runtime identifies the current sender and revokes only that sender\'s group-email.v0 grant. This tool does not manage members, grant Family billing access, grant private chat access, grant raw vault access, or grant email sharing except through an explicit group-email.v0 join page or offer.',
+    'Read the current hosted group and its member roster (member ids, chat handles, and each member\'s granted share kinds) with action="read_current", request an update to both the current hosted group display name and current iMessage group chat title with action="update_display_name", request an update to the current iMessage group avatar with action="set_chat_avatar", mint the shareable group join link with action="create_join_link", or post a server-owned react-to-join offer into the current group chat with action="post_join_offer". update_display_name sends a provider request for the upstream iMessage group chat title on the current route-authorized group chat and stores the same name in Murph after the provider accepts the request. set_chat_avatar sends a provider request for the upstream iMessage group icon on the current route-authorized group chat after the runtime preflights chat authority and prepares a hosted image URL; generated avatar images are saved as capture media under raw/captures/** when a vault is available. A join link grants membership and shares the joiner\'s memory-backed preferred display name with this group runtime; optional permissions stay individually selected on the join page. For post_join_offer, supply only the optional group-chosen displayName, bounded projectionScopes, and activation="call-circle.enroll.v0" when the group explicitly asked to start Call Circle. The server owns the complete offer, permission, link, and activation copy. Reactions grant membership plus only the posted permission snapshot and optional disclosed activation. Use action="read_chat_participants" to see who is in this group chat and whether each participant already has their own Murph; use action="share_contact_card" to drop your contact card into this chat once so people who do not have you saved can tap it, save you, and text you directly. Use action="revoke_own_email_share" only when the current sender asks to stop receiving group newsletter email; the runtime identifies the current sender and revokes only that sender\'s group-email.v0 grant. This tool does not manage members, grant Family billing access, grant private chat access, grant raw vault access, or grant email sharing except through an explicit group-email.v0 join page or offer.',
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -541,14 +546,13 @@ export const MURPH_GROUP_TOOL = {
         maxItems: HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES.length,
         items: GROUP_VAULT_SHARE_PROJECTION_SCOPE_SCHEMA,
         description:
-          'Optional bounded health projections that reacting to the server-owned offer message will grant as a fixed snapshot. The server-filled {{share_scope}} placeholder always states that preferred display name is shared too.',
+          'Optional bounded health projections that reacting to the server-owned offer message will grant as a fixed snapshot. Server-owned copy also states that preferred display name is shared.',
       },
-      messageTemplate: {
+      activation: {
         type: 'string',
-        minLength: 1,
-        maxLength: HOSTED_RUNTIME_GROUP_JOIN_OFFER_MESSAGE_TEMPLATE_MAX_LENGTH,
+        enum: [...HOSTED_RUNTIME_GROUP_JOIN_OFFER_ACTIVATIONS],
         description:
-          'Required for action="post_join_offer". Write one short natural group-chat message, not a fixed script. Lead with reacting to this message to join. Include {{share_scope}} exactly once where the server inserts the exact shared-scope phrase. Include {{join_url}} exactly once as the customize link so members can share more or less. Do not include any other URL.',
+          'Optional for action="post_join_offer" only when the group explicitly asked to start Call Circle. The server appends the complete enrollment disclosure.',
       },
     },
     required: ['action'],
@@ -810,6 +814,7 @@ const MURPH_BASE_DYNAMIC_TOOLS = [
   MURPH_FINISH_WITHOUT_REPLY_TOOL,
   MURPH_REACT_TO_MESSAGE_TOOL,
   MURPH_CREATE_PHONE_CALL_TOOL,
+  MURPH_CALL_CIRCLE_RESPOND_TOOL,
 ] as const
 
 const MURPH_COMPUTER_DYNAMIC_TOOLS = [
@@ -831,6 +836,7 @@ export type MurphDynamicTool = (typeof MURPH_DYNAMIC_TOOLS)[number]
 export interface MurphDynamicToolAvailability {
   allowFinishWithoutReply?: boolean | null
   allowMessageReactions?: boolean | null
+  callCircleAvailable?: boolean | null
   computerToolsAvailable?: boolean | null
   progressUpdatesAvailable?: boolean | null
   connectedAppsAvailable?: boolean | null
@@ -872,6 +878,7 @@ const TOOL_AVAILABILITY: ReadonlyMap<MurphDynamicTool, AvailabilityPredicate> =
     [MURPH_GENERATE_SONG_TOOL, defaultOff((a) => a.voiceMemoGenerationAvailable)],
     [MURPH_SEND_VAULT_FILE_TOOL, defaultOff((a) => a.vaultFileSendAvailable)],
     [MURPH_CREATE_PHONE_CALL_TOOL, defaultOff((a) => a.phoneCallsAvailable)],
+    [MURPH_CALL_CIRCLE_RESPOND_TOOL, defaultOff((a) => a.callCircleAvailable)],
     ...MURPH_COMPUTER_DYNAMIC_TOOLS.map(
       (tool) =>
         [tool, defaultOff((a) => a.computerToolsAvailable)] as const,
@@ -921,26 +928,6 @@ const generateImageArgumentsSchema = z
     size: z.enum(['1024x1024', '1024x1536', '1536x1024']).default('1024x1024'),
   })
   .strict()
-
-const GROUP_JOIN_OFFER_JOIN_URL_PLACEHOLDER = '{{join_url}}'
-const GROUP_JOIN_OFFER_SHARE_SCOPE_PLACEHOLDER = '{{share_scope}}'
-
-function hasUsableGroupJoinOfferPlaceholders(messageTemplate: string): boolean {
-  return hasPlaceholderExactlyOnce(
-    messageTemplate,
-    GROUP_JOIN_OFFER_SHARE_SCOPE_PLACEHOLDER,
-  ) && hasPlaceholderExactlyOnce(
-    messageTemplate,
-    GROUP_JOIN_OFFER_JOIN_URL_PLACEHOLDER,
-  )
-}
-
-function hasPlaceholderExactlyOnce(messageTemplate: string, placeholder: string): boolean {
-  return (
-    messageTemplate.includes(placeholder)
-    && messageTemplate.indexOf(placeholder) === messageTemplate.lastIndexOf(placeholder)
-  )
-}
 
 const selectableVaultShareProjectionScopeByKey =
   new Map<string, HostedVaultShareSelectableProjectionScope>(
@@ -1024,21 +1011,13 @@ const groupArgumentsSchema = z.discriminatedUnion('action', [
   z
     .object({
       action: z.literal('post_join_offer'),
+      activation: z.literal('call-circle.enroll.v0').optional(),
       displayName: z
         .string()
         .trim()
         .min(1)
         .max(HOSTED_RUNTIME_GROUP_DISPLAY_NAME_MAX_LENGTH)
         .optional(),
-      messageTemplate: z
-        .string()
-        .trim()
-        .min(1)
-        .max(HOSTED_RUNTIME_GROUP_JOIN_OFFER_MESSAGE_TEMPLATE_MAX_LENGTH)
-        .refine(hasUsableGroupJoinOfferPlaceholders, {
-          message:
-            'post_join_offer messageTemplate must contain {{share_scope}} exactly once and {{join_url}} exactly once',
-        }),
       projectionScopes: z
         .array(groupVaultShareProjectionScopeSchema)
         .max(HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES.length)
@@ -1359,6 +1338,7 @@ type MurphGroupToolRequest =
 
 export type MurphDynamicToolRequest =
   | ConnectedAppsDynamicToolRequest
+  | CallCircleDynamicToolRequest
   | {
       kind: 'attach-response-media'
       media: AssistantResponseMedia[]
@@ -1521,6 +1501,14 @@ export function readMurphDynamicToolRequest(
   })
   if (phoneCallRequest) {
     return phoneCallRequest
+  }
+
+  const callCircleRequest = readCallCircleDynamicToolRequest({
+    arguments: request.arguments,
+    tool: request.tool,
+  })
+  if (callCircleRequest) {
+    return callCircleRequest
   }
 
   switch (request.tool) {
@@ -1810,6 +1798,19 @@ function currentHostedMailboxItemId(
   return null
 }
 
+function currentHostedTurnMailboxItemId(
+  hostedToolContext: AssistantHostedToolContext | null,
+): string | null {
+  const itemIds = hostedToolContext?.currentHostedMailboxItemIds() ?? []
+  for (const itemId of itemIds) {
+    const normalized = normalizeNullableString(itemId)
+    if (normalized) {
+      return normalized
+    }
+  }
+  return null
+}
+
 function buildGeneratedImageCaptureIdempotencyKey(input: {
   toolCallId: string | null
   scope: 'generate-image' | 'group-avatar'
@@ -1820,7 +1821,7 @@ function buildGeneratedImageCaptureIdempotencyKey(input: {
     : null
 }
 
-function readGeneratedImageToolCallId(
+function readDynamicToolCallId(
   request: MurphDynamicToolRequest,
 ): string | null {
   return ('toolCallId' in request)
@@ -1887,6 +1888,8 @@ export async function executeMurphDynamicToolRequest(input: {
       return toolTextResult(false, 'invalid vault file arguments')
     case 'invalid-phone-call-arguments':
       return toolTextResult(false, 'invalid phone-call arguments')
+    case 'invalid-call-circle-arguments':
+      return toolTextResult(false, 'invalid call circle arguments')
     case 'unsupported-dynamic-tool':
       return toolTextResult(false, 'unsupported dynamic tool')
     case 'attach-response-media': {
@@ -2006,6 +2009,27 @@ export async function executeMurphDynamicToolRequest(input: {
         return toolTextResult(false, 'phone call could not be started')
       }
     }
+    case 'call-circle-respond': {
+      const hostedToolContext = input.hostedToolContext ?? null
+      const callCircle = hostedToolContext?.callCircle ?? null
+      if (!hostedToolContext || !callCircle) {
+        return toolTextResult(
+          false,
+          'call circle response is unavailable without hosted call circle transport',
+        )
+      }
+      try {
+        const response = await callCircle.respond(input.request.request, {
+          inboundMailboxItemIds: [
+            ...hostedToolContext.currentHostedMailboxItemIds(),
+          ],
+          signal: input.abortSignal ?? null,
+        })
+        return toolTextResult(true, safeToolPayloadText(response))
+      } catch {
+        return toolTextResult(false, 'call circle response could not be recorded')
+      }
+    }
     case 'submit-product-feedback':
       return await executeSubmitProductFeedbackTool({
         feedback: input.request.feedback,
@@ -2026,7 +2050,7 @@ export async function executeMurphDynamicToolRequest(input: {
         materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts ?? null,
         nextUsageOrdinal: input.nextUsageOrdinal,
         request: input.request.request,
-        toolCallId: readGeneratedImageToolCallId(input.request),
+        toolCallId: readDynamicToolCallId(input.request),
         vaultRoot: input.vaultRoot ?? null,
       })
     case 'newsletter':
@@ -2064,7 +2088,7 @@ export async function executeMurphDynamicToolRequest(input: {
         abortSignal: input.abortSignal ?? null,
         args: input.request.args,
         captureIdempotencyKey: buildGeneratedImageCaptureIdempotencyKey({
-          toolCallId: readGeneratedImageToolCallId(input.request),
+          toolCallId: readDynamicToolCallId(input.request),
           scope: 'generate-image',
         }),
         codexHome: input.codexHome ?? null,
@@ -2335,7 +2359,16 @@ async function executeGroupTool(input: {
         }
       : null
   } else {
-    request = input.request
+    const operationId = currentHostedTurnMailboxItemId(input.hostedToolContext)
+    request = input.request.action === 'post_join_offer' && operationId
+      ? {
+          ...input.request,
+          joinOffer: {
+            ...(input.request.joinOffer ?? {}),
+            operationId,
+          },
+        }
+      : input.request
   }
 
   try {
@@ -3527,10 +3560,12 @@ function parseGroupArguments(
   }
   if (parsed.data.action === 'post_join_offer') {
     const joinOffer = {
+      ...(parsed.data.activation !== undefined
+        ? { activation: parsed.data.activation }
+        : {}),
       ...(parsed.data.displayName !== undefined
         ? { displayName: parsed.data.displayName }
         : {}),
-      messageTemplate: parsed.data.messageTemplate,
       ...(parsed.data.projectionScopes !== undefined
         ? { projectionScopes: parsed.data.projectionScopes }
         : {}),

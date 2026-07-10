@@ -1,6 +1,5 @@
 import {
   hostedCallCircleRespondControlRequestSchema,
-  hostedCallCircleRespondRequestSchema,
 } from "@murphai/hosted-execution/call-circle";
 
 import {
@@ -23,13 +22,10 @@ export const POST = withJsonError(async (request: Request) => {
     payloadText: rawBody,
   });
   const payload = hostedCallCircleRespondControlRequestSchema.parse(JSON.parse(rawBody));
-  const callCircleRequest = "request" in payload
-    ? payload.request
-    : hostedCallCircleRespondRequestSchema.parse(payload);
   const response = await handleCallCircleRespond({
-    context: "request" in payload ? payload.context : undefined,
+    context: payload.context,
     memberId,
-    request: callCircleRequest,
+    request: payload.request,
   });
 
   return jsonOk(response, 202);

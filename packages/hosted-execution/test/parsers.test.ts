@@ -608,30 +608,28 @@ describe("parseHostedRuntimeGroupTool", () => {
     expect(parseHostedRuntimeGroupToolRequest({
       action: "post_join_offer",
       joinOffer: {
+        activation: "call-circle.enroll.v0",
         displayName: "Sunday Sleep Crew",
-        messageTemplate:
-          "  React here to join. Shares {{share_scope}}. Page: {{join_url}}.  ",
+        operationId: "tool_call_join_offer_1",
         projectionScopes: [{ projectionKind: "group-email.v0" }],
       },
     })).toEqual({
       action: "post_join_offer",
       joinOffer: {
+        activation: "call-circle.enroll.v0",
         displayName: "Sunday Sleep Crew",
-        messageTemplate: "React here to join. Shares {{share_scope}}. Page: {{join_url}}.",
+        operationId: "tool_call_join_offer_1",
         projectionKinds: null,
         projectionScopes: [{ projectionKind: "group-email.v0" }],
       },
     });
     expect(parseHostedRuntimeGroupToolRequest({
       action: "post_join_offer",
-      joinOffer: {
-        messageTemplate: "React here. Shares {{share_scope}}. Customize: {{join_url}}.",
-      },
+      joinOffer: {},
     })).toEqual({
       action: "post_join_offer",
       joinOffer: {
         displayName: null,
-        messageTemplate: "React here. Shares {{share_scope}}. Customize: {{join_url}}.",
         projectionKinds: null,
         projectionScopes: null,
       },
@@ -751,7 +749,6 @@ describe("parseHostedRuntimeGroupTool", () => {
         action: "post_join_offer",
         joinOffer: {
           displayName: "   ",
-          messageTemplate: "React here. Shares {{share_scope}}. Customize: {{join_url}}.",
         },
       })
     ).toThrow(/displayName must not be blank/u);
@@ -760,22 +757,27 @@ describe("parseHostedRuntimeGroupTool", () => {
         action: "post_join_offer",
         joinOffer: {
           displayName: "a".repeat(121),
-          messageTemplate: "React here. Shares {{share_scope}}. Customize: {{join_url}}.",
         },
       })
     ).toThrow(/displayName is too long/u);
     expect(() =>
       parseHostedRuntimeGroupToolRequest({
         action: "post_join_offer",
-        joinOffer: { messageTemplate: "   " },
-      })
-    ).toThrow(/messageTemplate must be between/u);
-    expect(() =>
-      parseHostedRuntimeGroupToolRequest({
-        action: "post_join_offer",
         joinOffer: { projectionScopes: [{ projectionKind: "profile-name.v0" }] },
       })
     ).toThrow(/unsupported projection scope/u);
+    expect(() =>
+      parseHostedRuntimeGroupToolRequest({
+        action: "post_join_offer",
+        joinOffer: { activation: "call-circle.unsupported.v0" },
+      })
+    ).toThrow(/activation is not supported/u);
+    expect(() =>
+      parseHostedRuntimeGroupToolRequest({
+        action: "post_join_offer",
+        joinOffer: { operationId: "   " },
+      })
+    ).toThrow(/operationId is invalid/u);
     expect(() =>
       parseHostedRuntimeGroupToolRequest({
         action: "set_chat_avatar",

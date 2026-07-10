@@ -8,6 +8,7 @@ import {
   createHostedExternalThreadIdentityLookupKey,
   createHostedExternalThreadLookupKey,
   createHostedLinqChatLookupKey,
+  createHostedLinqMessageLookupKey,
   createHostedPhoneLookupKey,
   createHostedPhoneLookupKeyReadCandidates,
 } from "@/src/lib/hosted-onboarding/contact-privacy";
@@ -258,6 +259,7 @@ vi.mock("@/src/lib/hosted-onboarding/linq-first-contact-admission", async () => 
 });
 
 vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
+  signalHostedMailboxAppendsBestEffort: vi.fn(),
   signalHostedMailboxAppendRuntime: mocks.signalHostedMailboxAppendRuntime,
 }));
 
@@ -398,6 +400,11 @@ type HostedLinqProviderEventFixture = {
   createMany?: MockedFunction;
 };
 
+type HostedGroupJoinOfferFixture = {
+  findUnique?: MockedFunction;
+  update?: MockedFunction;
+};
+
 type HostedLinqFirstContactAdmissionDecisionFixture = {
   createMany?: MockedFunction;
   findUnique?: MockedFunction;
@@ -477,6 +484,7 @@ type PrismaFixtureBase = {
   $transaction?: MockedFunction;
   hostedAccountGroupMembership?: HostedAccountGroupMembershipFixture;
   hostedInvite?: HostedInviteFixture;
+  hostedGroupJoinOffer?: HostedGroupJoinOfferFixture;
   hostedLinqAlert?: HostedLinqAlertFixture;
   hostedLinqDailyState?: HostedLinqDailyStateFixture;
   hostedLinqDelivery?: HostedLinqDeliveryFixture;
@@ -616,6 +624,58 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     });
     expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
     expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+  });
+
+  it("repairs a sent join offer from the later canonical message.sent echo without resending", async () => {
+    const offerId = "hgrpjo_0123456789abcdef0123456789abcdef";
+    let messageLookupKey: string | null = null;
+    let postedAt: Date | null = null;
+    const hostedGroupJoinOffer = {
+      findUnique: vi.fn(async ({ where }: { where: { id?: string } }) =>
+        where.id === offerId
+          ? {
+              groupId: "group_1",
+              id: offerId,
+              messageLookupKey,
+              revokedAt: null,
+            }
+          : null),
+      update: vi.fn(async ({ data }: {
+        data: { messageLookupKey: string; postedAt: Date };
+      }) => {
+        messageLookupKey = data.messageLookupKey;
+        postedAt = data.postedAt;
+        return { id: offerId };
+      }),
+    };
+    const prisma = asPrismaTransactionClient({ hostedGroupJoinOffer });
+
+    const response = await handleHostedOnboardingLinqWebhook({
+      prisma,
+      rawBody: buildHostedLinqWebhookBody({
+        data: {
+          direction: "outbound",
+          id: "msg_join_offer_echo",
+          idempotency_key: `group-join-offer:${offerId}`,
+        },
+        createdAt: "2026-07-09T15:30:00.000Z",
+        eventType: "message.sent",
+      }),
+      signature: null,
+      timestamp: null,
+    });
+
+    expect(response).toEqual({
+      ignored: true,
+      ok: true,
+      reason: "message.sent",
+    });
+    expect(messageLookupKey).toBe(
+      createHostedLinqMessageLookupKey("msg_join_offer_echo"),
+    );
+    expect(postedAt).toEqual(new Date("2026-07-09T15:30:00.000Z"));
+    expect(hostedGroupJoinOffer.update).toHaveBeenCalledOnce();
+    expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
   });
 
   it.each(["sms", "RCS"] as const)(
@@ -8706,6 +8766,7 @@ function buildHostedLinqWebhookBody(input: {
   createdAt?: string;
   data?: Record<string, unknown>;
   eventId?: string;
+  eventType?: "message.received" | "message.sent";
   service?: string;
 } = {}): string {
   const service = input.service ?? "sms";
@@ -8743,7 +8804,7 @@ function buildHostedLinqWebhookBody(input: {
       ...(input.data ?? {}),
     },
     event_id: input.eventId ?? "evt_123",
-    event_type: "message.received",
+    event_type: input.eventType ?? "message.received",
   });
 }
 

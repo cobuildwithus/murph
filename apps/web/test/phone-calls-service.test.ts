@@ -99,13 +99,15 @@ describe("createHostedPhoneCall", () => {
     const created = buildHostedPhoneCall();
     const store = createPhoneCallStore({ created });
     const runtime = createPhoneCallRuntime({ providerCallId: "retell_unused" });
+    let guardedAt: Date | null = null;
 
     const response = await createHostedPhoneCall({
       brief: VALID_BRIEF,
       memberId: "member_1",
       prisma: store.prisma,
-      providerStartGuardWhere: {
-        id: "hpc_other",
+      providerStartGuardWhere: (attemptedAt) => {
+        guardedAt = attemptedAt;
+        return { id: "hpc_other" };
       },
       requestKey: "phone_call_request_1",
       runtime: runtime.runtime,
@@ -115,12 +117,15 @@ describe("createHostedPhoneCall", () => {
     const createdCallId = store.createCalls[0]!.data.id;
     expect(response).toEqual({
       phoneCallId: createdCallId,
-      status: "starting",
+      status: "failed",
     });
     expect(runtime.validateCalls).toEqual([expect.objectContaining({
       id: createdCallId,
     })]);
     expect(runtime.startCalls).toEqual([]);
+    expect(guardedAt).toEqual(
+      store.updateManyCalls[0]?.data.providerStartAttemptedAt,
+    );
     expect(store.updateManyCalls[0]).toEqual({
       data: {
         providerStartAttemptedAt: expect.any(Date),
@@ -137,15 +142,65 @@ describe("createHostedPhoneCall", () => {
             status: "starting",
           },
           {
+            member: {
+              is: expect.any(Object),
+            },
+          },
+          {
             id: "hpc_other",
           },
         ],
       },
     });
+    expect(store.updateManyCalls[1]).toEqual({
+      data: {
+        resultJson: {
+          outcome: "not_completed",
+          summary: "Murph could not start the phone call.",
+        },
+        status: "failed",
+      },
+      where: {
+        analyzedAt: null,
+        endedAt: null,
+        id: createdCallId,
+        provider: "retell",
+        providerCallId: null,
+        providerStartAttemptedAt: null,
+        status: "starting",
+      },
+    });
     expect(store.currentCall()).toMatchObject({
       providerCallId: null,
       providerStartAttemptedAt: null,
-      status: "starting",
+      resultJson: {
+        outcome: "not_completed",
+        summary: "Murph could not start the phone call.",
+      },
+      status: "failed",
+    });
+  });
+
+  it("does not start Retell after the member loses active access", async () => {
+    const created = buildHostedPhoneCall();
+    const store = createPhoneCallStore({ activeAccess: false, created });
+    const runtime = createPhoneCallRuntime({ providerCallId: "retell_unused" });
+
+    await expect(createHostedPhoneCall({
+      brief: VALID_BRIEF,
+      memberId: "member_1",
+      prisma: store.prisma,
+      requestKey: "phone_call_request_1",
+      runtime: runtime.runtime,
+      transferNumberResolver: createTransferNumberResolver("+12125550000"),
+    })).resolves.toMatchObject({ status: "failed" });
+
+    expect(runtime.validateCalls).toHaveLength(1);
+    expect(runtime.startCalls).toEqual([]);
+    expect(store.updateManyCalls[0]?.where).toMatchObject({
+      AND: expect.arrayContaining([
+        { member: { is: expect.any(Object) } },
+      ]),
     });
   });
 
@@ -498,8 +553,7 @@ describe("createHostedPhoneCall", () => {
       status: "starting",
       updatedAt: new Date(0),
     });
-    let store!: ReturnType<typeof createPhoneCallStore>;
-    store = createPhoneCallStore({
+    const store = createPhoneCallStore({
       beforeUpdateMany: () => {
         store.advanceCurrentCall({
           providerStartAttemptedAt: markedAt,
@@ -688,8 +742,7 @@ describe("createHostedPhoneCall", () => {
   it("does not fail local start errors after another actor marks provider ownership", async () => {
     const markedAt = new Date("2026-06-25T12:00:00.000Z");
     const created = buildHostedPhoneCall();
-    let store!: ReturnType<typeof createPhoneCallStore>;
-    store = createPhoneCallStore({
+    const store = createPhoneCallStore({
       beforeUpdateMany: () => {
         store.advanceCurrentCall({
           providerStartAttemptedAt: markedAt,
@@ -844,6 +897,38 @@ describe("createHostedPhoneCall", () => {
       },
       status: "completed",
     });
+    expect(runtime.stopCalls).toEqual([]);
+  });
+
+  it("stops a provider call when another call identity wins the attach race", async () => {
+    const created = buildHostedPhoneCall();
+    const store = createPhoneCallStore({ created });
+    const runtime = createPhoneCallRuntime({
+      onStart: async (call) => {
+        store.advanceCurrentCall({
+          id: call.id,
+          providerCallId: "retell_other",
+          status: "calling",
+        });
+      },
+      providerCallId: "retell_started",
+    });
+
+    const response = await createHostedPhoneCall({
+      brief: VALID_BRIEF,
+      memberId: created.memberId,
+      prisma: store.prisma,
+      requestKey: created.requestKey,
+      runtime: runtime.runtime,
+      transferNumberResolver: createTransferNumberResolver("+12125550000"),
+    });
+
+    expect(response).toEqual({
+      phoneCallId: store.currentCall().id,
+      status: "calling",
+    });
+    expect(runtime.stopCalls).toEqual(["retell_started"]);
+    expect(store.currentCall().providerCallId).toBe("retell_other");
   });
 
   it("does not overwrite webhook-final state when start failure loses the race", async () => {
@@ -945,6 +1030,43 @@ describe("createHostedPhoneCall", () => {
     });
   });
 
+  it("retains a created provider call for cleanup when a safety rejection cannot stop it", async () => {
+    const created = buildHostedPhoneCall();
+    const store = createPhoneCallStore({ created });
+    const mismatch = new Error("Retell storage mode mismatch.");
+    const runtime = createPhoneCallRuntime({
+      error: new PhoneCallRuntimeStartRejectedError(mismatch.message, {
+        cause: mismatch,
+        providerCallId: "retell_cleanup",
+      }),
+      providerCallId: "retell_unused",
+    });
+
+    await expect(createHostedPhoneCall({
+      brief: VALID_BRIEF,
+      memberId: created.memberId,
+      prisma: store.prisma,
+      requestKey: created.requestKey,
+      runtime: runtime.runtime,
+      transferNumberResolver: createTransferNumberResolver("+12125550000"),
+    })).rejects.toBe(mismatch);
+
+    expect(store.updateManyCalls[1]).toEqual({
+      data: { providerCallId: "retell_cleanup" },
+      where: {
+        analyzedAt: null,
+        id: store.currentCall().id,
+        provider: "retell",
+        providerCallId: null,
+        status: "starting",
+      },
+    });
+    expect(store.currentCall()).toMatchObject({
+      providerCallId: "retell_cleanup",
+      status: "starting",
+    });
+  });
+
   it("does not resolve a transfer destination when the brief disallows transfer", async () => {
     const created = buildHostedPhoneCall();
     const store = createPhoneCallStore({ created });
@@ -1020,6 +1142,7 @@ function createHostedPhoneCall(input: CreateHostedPhoneCallInput) {
 }
 
 function createPhoneCallStore(input: {
+  activeAccess?: boolean;
   beforeUpdateMany?: (args: PhoneCallUpdateManyInput) => Promise<void> | void;
   createError?: unknown;
   created?: HostedPhoneCall;
@@ -1060,6 +1183,9 @@ function createPhoneCallStore(input: {
       updateMany: async (args) => {
         updateManyCalls.push(args);
         await input.beforeUpdateMany?.(args);
+        if (input.activeAccess === false && includesMemberAuthority(args.where)) {
+          return { count: 0 };
+        }
         if (!matchesUpdateManyWhere(current, args.where)) {
           return { count: 0 };
         }
@@ -1100,6 +1226,7 @@ function createPhoneCallRuntime(input: {
 }) {
   const validateCalls: Array<Parameters<NonNullable<PhoneCallRuntime["validateStart"]>>[0]> = [];
   const startCalls: Array<Parameters<PhoneCallRuntime["start"]>[0]> = [];
+  const stopCalls: string[] = [];
   const runtime: PhoneCallRuntime = {
     validateStart: async (call) => {
       validateCalls.push(call);
@@ -1115,11 +1242,15 @@ function createPhoneCallRuntime(input: {
       }
       return { providerCallId: input.providerCallId };
     },
+    stop: async (providerCallId) => {
+      stopCalls.push(providerCallId);
+    },
   };
 
   return {
     runtime,
     startCalls,
+    stopCalls,
     validateCalls,
   };
 }
@@ -1139,15 +1270,38 @@ function expectProviderStartAttemptUpdate(
       providerStartAttemptedAt: expect.any(Date),
     },
     where: {
-      analyzedAt: null,
-      endedAt: null,
-      id: input.callId,
-      provider: "retell",
-      providerCallId: null,
-      providerStartAttemptedAt: null,
-      status: "starting",
+      AND: [
+        {
+          analyzedAt: null,
+          endedAt: null,
+          id: input.callId,
+          provider: "retell",
+          providerCallId: null,
+          providerStartAttemptedAt: null,
+          status: "starting",
+        },
+        {
+          member: {
+            is: expect.any(Object),
+          },
+        },
+      ],
     },
   });
+}
+
+function includesMemberAuthority(where: PhoneCallUpdateManyInput["where"]): boolean {
+  const filters = where.AND === undefined
+    ? []
+    : Array.isArray(where.AND)
+      ? where.AND
+      : [where.AND];
+  return where.member !== undefined
+    || filters.some((filter) =>
+      typeof filter === "object"
+      && filter !== null
+      && includesMemberAuthority(filter)
+    );
 }
 
 function matchesUpdateManyWhere(
@@ -1204,6 +1358,7 @@ function buildHostedPhoneCall(overrides: Partial<HostedPhoneCall> = {}): HostedP
     requestKey: "phone_call_request_1",
     resultJson: null,
     status: "starting",
+    transferOutcome: null,
     updatedAt: now,
     ...overrides,
   };

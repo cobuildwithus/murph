@@ -1,6 +1,18 @@
 import "server-only";
 
-import type { PrismaClient } from "@prisma/client";
+import type { Prisma, PrismaClient } from "@prisma/client";
+
+import {
+  appendCallCircleSetupNotificationTx,
+  readCallCircleNotificationSignal,
+} from "../call-circle/notifications";
+import {
+  signalHostedAssistantNotificationsBestEffort,
+  type HostedAssistantNotificationSignal,
+} from "../hosted-execution/assistant-notifications";
+import {
+  acceptCallCircleOfferEnrollment,
+} from "../call-circle/participant-store";
 
 import { isHostedOnboardingError } from "../hosted-onboarding/errors";
 import { lookupHostedMemberIdentityByPhoneNumber } from "../hosted-onboarding/hosted-member-identity-store";
@@ -9,12 +21,11 @@ import {
   normalizeHostedLinqGroupJoinOfferReaction,
   type ParsedHostedLinqProviderEvent,
 } from "../hosted-onboarding/linq-provider-events";
-import { readActiveHostedMemberAccess } from "../hosted-onboarding/member-access";
 import { normalizePhoneNumber } from "../hosted-onboarding/phone";
 import { HOSTED_ONBOARDING_TRANSACTION_OPTIONS } from "../hosted-onboarding/shared";
 import { createHostedExternalThreadIdentityLookupKeyReadCandidates } from "../hosted-onboarding/contact-privacy";
 import {
-  signalHostedMailboxAppendRuntime,
+  signalHostedMailboxAppendsBestEffort,
   signalHostedRuntimeMaintenanceRuntime,
 } from "../hosted-orchestration/signal-runtime";
 import {
@@ -23,6 +34,7 @@ import {
 import { acceptHostedGroupJoinOfferTx } from "./group-store";
 
 type HostedGroupJoinOfferReactionSkipReason =
+  | "call_circle_full"
   | "launch_consent_missing"
   | "member_inactive"
   | "missing_reaction_context"
@@ -76,35 +88,41 @@ export async function handleHostedGroupJoinOfferReaction(input: {
       reason: "not_a_member",
     });
   }
-  if (
-    member.suspendedAt
-    || !(await readActiveHostedMemberAccess({ memberId: member.id, prisma: input.prisma }))
-  ) {
-    return skipHostedGroupJoinOfferReaction({
-      reason: "member_inactive",
-    });
-  }
-
-  const messageLookupKeyReadCandidates = normalizeLookupKeyCandidates(
+  const messageLookupKeyReadCandidates =
     input.event.messageLookupKeyReadCandidates.length > 0
       ? input.event.messageLookupKeyReadCandidates
-      : [input.event.messageLookupKey],
-  );
+      : [input.event.messageLookupKey];
   const threadIdentityLookupKeyReadCandidates = createHostedExternalThreadIdentityLookupKeyReadCandidates({
     channel: "linq",
     threadId: input.event.linqChatId,
   });
 
-  let result: Awaited<ReturnType<typeof acceptHostedGroupJoinOfferTx>>;
+  let accepted: {
+    callCircleSetupSignal: HostedAssistantNotificationSignal | null;
+    offer: Awaited<ReturnType<typeof acceptHostedGroupJoinOfferTx>>;
+  };
+  const receivedAt = new Date();
   try {
-    result = await input.prisma.$transaction(async (tx) =>
-      acceptHostedGroupJoinOfferTx({
+    accepted = await input.prisma.$transaction(async (tx) => {
+      const offer = await acceptHostedGroupJoinOfferTx({
+        bindingPendingAt: receivedAt,
         memberId: member.id,
         messageLookupKeyReadCandidates,
         now: input.event.providerCreatedAt,
         threadIdentityLookupKeyReadCandidates,
         tx,
-      }), HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+      });
+      const callCircleSetupSignal = await applyHostedGroupJoinOfferActivationTx({
+        activation: offer.activation,
+        groupId: offer.groupId,
+        memberId: member.id,
+        now: input.event.providerCreatedAt,
+        offerId: offer.offerId,
+        offerPostedAt: offer.offerPostedAt,
+        tx,
+      });
+      return { callCircleSetupSignal, offer };
+    }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
   } catch (error) {
     const reason = readHostedGroupJoinOfferReactionSkipReason(error);
     if (!reason) {
@@ -114,6 +132,7 @@ export async function handleHostedGroupJoinOfferReaction(input: {
       reason,
     });
   }
+  const result = accepted.offer;
 
   if (result.grantedVaultShareProjectionKinds.includes("group-email.v0")) {
     await enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort({
@@ -131,31 +150,46 @@ export async function handleHostedGroupJoinOfferReaction(input: {
     }
   }
 
-  await signalVaultShareCleanupRuntimesBestEffort(result.vaultShareCleanupSignals);
+  await signalHostedMailboxAppendsBestEffort(result.vaultShareCleanupSignals);
+  await signalHostedAssistantNotificationsBestEffort([
+    accepted.callCircleSetupSignal,
+  ]);
 
   return { status: "accepted", reason: "accepted" };
 }
 
-async function signalVaultShareCleanupRuntimesBestEffort(
-  signals: readonly { mailboxItemId: string; memberId: string }[],
-): Promise<void> {
-  await Promise.all(signals.map(async (signal) => {
-    try {
-      await signalHostedMailboxAppendRuntime({
-        expectedUserId: signal.memberId,
-        mailboxItemId: signal.mailboxItemId,
-      });
-    } catch {
-      // The revoke mailbox item is durable; the destination runtime will import it on a
-      // later wake if this best-effort signal fails.
-    }
-  }));
-}
-
-function normalizeLookupKeyCandidates(values: readonly (string | null | undefined)[]): string[] {
-  return [...new Set(values
-    .map((value) => value?.trim() ?? "")
-    .filter((value) => value.length > 0))];
+async function applyHostedGroupJoinOfferActivationTx(input: {
+  activation: Awaited<ReturnType<typeof acceptHostedGroupJoinOfferTx>>["activation"];
+  groupId: string;
+  memberId: string;
+  now: Date;
+  offerId: string;
+  offerPostedAt: Date;
+  tx: Prisma.TransactionClient;
+}): Promise<HostedAssistantNotificationSignal | null> {
+  if (
+    input.activation !== "call-circle.enroll.v0"
+  ) {
+    return null;
+  }
+  await acceptCallCircleOfferEnrollment({
+    groupId: input.groupId,
+    memberId: input.memberId,
+    now: input.now,
+    offerPostedAt: input.offerPostedAt,
+    prisma: input.tx,
+  });
+  const notification = await appendCallCircleSetupNotificationTx({
+    groupId: input.groupId,
+    memberId: input.memberId,
+    now: input.now,
+    offerId: input.offerId,
+    tx: input.tx,
+  });
+  return notification ? readCallCircleNotificationSignal({
+    memberId: input.memberId,
+    notification,
+  }) : null;
 }
 
 function readHostedGroupJoinOfferReactionSkipReason(
@@ -167,8 +201,17 @@ function readHostedGroupJoinOfferReactionSkipReason(
   if (error.code === "HOSTED_CONSENT_REQUIRED") {
     return "launch_consent_missing";
   }
+  if (
+    error.code === "HOSTED_ACCESS_REQUIRED"
+    || error.code === "HOSTED_MEMBER_SUSPENDED"
+  ) {
+    return "member_inactive";
+  }
   if (error.code === "HOSTED_GROUP_JOIN_OFFER_REVOKED") {
     return "offer_revoked";
+  }
+  if (error.code === "HOSTED_CALL_CIRCLE_PARTICIPANT_LIMIT_REACHED") {
+    return "call_circle_full";
   }
   if (
     error.code === "HOSTED_GROUP_JOIN_OFFER_NOT_FOUND"
@@ -183,7 +226,7 @@ function readHostedGroupJoinOfferReactionSkipReason(
 async function resolveHostedGroupJoinOfferReactionMember(input: {
   handle: string;
   prisma: PrismaClient;
-}): Promise<{ id: string; suspendedAt: Date | null } | null> {
+}): Promise<{ id: string } | null> {
   const emailAddress = input.handle.includes("@") ? input.handle : null;
   const lookup = emailAddress
     ? await lookupHostedMemberByVerifiedEmailAddress({
@@ -198,7 +241,7 @@ async function resolveHostedGroupJoinOfferReactionMember(input: {
   if (!member) {
     return null;
   }
-  return { id: member.id, suspendedAt: member.suspendedAt };
+  return { id: member.id };
 }
 
 function skipHostedGroupJoinOfferReaction(input: {

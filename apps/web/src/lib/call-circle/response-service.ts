@@ -18,6 +18,11 @@ import {
   markCallCircleMatchOutcome,
 } from "./match-store";
 import {
+  readCallCircleConfirmNotificationAnchor,
+  readCallCircleSetupNotificationGroupId,
+  type CallCircleConfirmNotificationAnchor,
+} from "./notifications";
+import {
   canUseActiveCallCircleParticipantPair,
   pauseCallCircleParticipant,
   readCallCircleMatchParticipantTimeZones,
@@ -25,8 +30,10 @@ import {
   writeCallCirclePreferences,
 } from "./participant-store";
 import {
+  CALL_CIRCLE_MINIMUM_WINDOW_MS,
   canScheduleCallCircleConfirmationFlow,
   hasCallCircleBridgeWindowElapsed,
+  readCallCircleFinalAskAt,
 } from "./time";
 import {
   readActiveHostedMemberAccess,
@@ -34,10 +41,6 @@ import {
 import { getPrisma } from "../prisma";
 
 const CALL_CIRCLE_COUNTER_WINDOW_MAX_MS = 7 * 24 * 60 * 60 * 1000;
-const CALL_CIRCLE_CONFIRM_NOTIFICATION_DEDUPE_PREFIX =
-  "assistant.notification.requested:call-circle:";
-const CALL_CIRCLE_SETUP_NOTIFICATION_DEDUPE_PREFIX =
-  "assistant.notification.requested:call-circle:setup:";
 const CALL_CIRCLE_REPLY_CONTEXT_MAILBOX_ITEM_LIMIT = 20;
 
 export async function handleCallCircleRespond(input: {
@@ -51,22 +54,20 @@ export async function handleCallCircleRespond(input: {
   const now = input.now ?? new Date();
 
   return await prisma.$transaction<HostedCallCircleRespondResponse>(async (tx) => {
+    const replyItems = await readCallCircleReplyContextItems({
+      memberId: input.memberId,
+      prisma: tx,
+      replyContext: input.context ?? null,
+    });
     const target = await resolveCallCircleResponseTarget({
       memberId: input.memberId,
       now,
       prisma: tx,
-      replyContext: input.context ?? null,
+      replyItems,
       request: input.request,
     });
     if (target.status === "unavailable") {
       return { status: "unavailable", unavailableReason: target.unavailableReason };
-    }
-    const mismatchReason = readExplicitCallCircleResponseTargetMismatchReason({
-      request: input.request,
-      target,
-    });
-    if (mismatchReason) {
-      return { status: "unavailable", unavailableReason: mismatchReason };
     }
     const authority = await readCallCircleResponseAuthority({
       groupId: target.groupId,
@@ -82,17 +83,13 @@ export async function handleCallCircleRespond(input: {
         if (authority.participantStatus === null) {
           return { status: "unavailable", unavailableReason: "call_circle_not_enrolled" };
         }
-        if (!input.request.timeZone) {
-          return { status: "unavailable", unavailableReason: "call_circle_timezone_required" };
-        }
-        const windows = input.request.windows ?? [];
         const changed = await writeCallCirclePreferences({
           groupId: target.groupId,
           memberId: input.memberId,
+          now,
           preferences: {
-            excludeMemberIds: input.request.excludeMemberIds ?? [],
             timeZone: input.request.timeZone,
-            windows,
+            windows: input.request.windows,
           },
           prisma: tx,
         });
@@ -102,29 +99,18 @@ export async function handleCallCircleRespond(input: {
         if (authority.participantStatus === null) {
           return { status: "unavailable", unavailableReason: "call_circle_not_enrolled" };
         }
-        if (authority.participantStatus === "paused") {
-          await cancelOpenCallCircleMatchesForParticipant({
-            groupId: target.groupId,
-            memberId: input.memberId,
-            now,
-            prisma: tx,
-          });
-          return { status: "ok" };
-        }
-        const changed = await pauseCallCircleParticipant({
+        await pauseCallCircleParticipant({
+          groupId: target.groupId,
+          memberId: input.memberId,
+          now,
+          prisma: tx,
+        });
+        await cancelOpenCallCircleMatchesForParticipant({
           groupId: target.groupId,
           memberId: input.memberId,
           prisma: tx,
         });
-        if (changed) {
-          await cancelOpenCallCircleMatchesForParticipant({
-            groupId: target.groupId,
-            memberId: input.memberId,
-            now,
-            prisma: tx,
-          });
-        }
-        return { status: changed ? "ok" : "ignored" };
+        return { status: "ok" };
       }
       case "resume": {
         if (authority.participantStatus === null) {
@@ -134,6 +120,7 @@ export async function handleCallCircleRespond(input: {
         const changed = await resumeCallCircleParticipant({
           groupId: target.groupId,
           memberId: input.memberId,
+          now,
           prisma: tx,
         });
         return { status: changed ? "ok" : "ignored" };
@@ -150,7 +137,6 @@ export async function handleCallCircleRespond(input: {
         }
         if (!await ensureActiveCallCircleMatchPair({
           match: target.match,
-          now,
           tx,
         })) {
           return {
@@ -158,21 +144,30 @@ export async function handleCallCircleRespond(input: {
             unavailableReason: "call_circle_match_unavailable",
           };
         }
-        if (target.match.status === "both_confirmed") return { status: "ok" };
-        const result = await confirmCallCircleMatchSide({
+        if (
+          target.match.status === "both_confirmed"
+          || readCallCircleMatchSideResponse(target.match) === "confirmed"
+        ) {
+          return { status: "ok" };
+        }
+        const changed = await confirmCallCircleMatchSide({
+          expectedAsk: readCallCircleAskSnapshot(target.match),
           groupId: target.groupId,
           matchId: target.match.id,
+          memberAId: target.match.memberAId,
+          memberBId: target.match.memberBId,
           memberId: input.memberId,
           now,
           prisma: tx,
           side: target.match.side,
         });
-        return { status: result.changed ? "ok" : "ignored" };
+        return { status: changed ? "ok" : "ignored" };
       }
       case "decline": {
         const unavailable = readActiveCallCircleUnavailableReason(authority.participantStatus);
         if (unavailable) return { status: "unavailable", unavailableReason: unavailable };
         if (!target.match) return { status: "ignored" };
+        if (hasAppliedCallCircleDecline(target.match)) return { status: "ok" };
         if (target.match.expired) {
           return {
             status: "unavailable",
@@ -181,7 +176,6 @@ export async function handleCallCircleRespond(input: {
         }
         if (!await ensureActiveCallCircleMatchPair({
           match: target.match,
-          now,
           tx,
         })) {
           return {
@@ -189,20 +183,23 @@ export async function handleCallCircleRespond(input: {
             unavailableReason: "call_circle_match_unavailable",
           };
         }
-        const result = await declineCallCircleMatchSide({
+        const changed = await declineCallCircleMatchSide({
+          expectedAsk: readCallCircleAskSnapshot(target.match),
           groupId: target.groupId,
           matchId: target.match.id,
+          memberAId: target.match.memberAId,
+          memberBId: target.match.memberBId,
           memberId: input.memberId,
           now,
           prisma: tx,
           side: target.match.side,
         });
-        return { status: result.changed ? "ok" : "ignored" };
+        return { status: changed ? "ok" : "ignored" };
       }
       case "counter": {
         const unavailable = readActiveCallCircleUnavailableReason(authority.participantStatus);
         if (unavailable) return { status: "unavailable", unavailableReason: unavailable };
-        if (!target.match || !input.request.counterWindow) {
+        if (!target.match) {
           return { status: "ignored" };
         }
         if (target.match.expired) {
@@ -213,7 +210,6 @@ export async function handleCallCircleRespond(input: {
         }
         if (!await ensureActiveCallCircleMatchPair({
           match: target.match,
-          now,
           tx,
         })) {
           return {
@@ -228,17 +224,29 @@ export async function handleCallCircleRespond(input: {
         if (!isValidCounterWindow({ now, ...counterWindow })) {
           return { status: "unavailable", unavailableReason: "counter_window_invalid" };
         }
+        const timeZones = await readCallCircleMatchParticipantTimeZones({
+          groupId: target.match.groupId,
+          memberAId: target.match.memberAId,
+          memberBId: target.match.memberBId,
+          prisma: tx,
+        });
+        if (!timeZones) {
+          return { status: "unavailable", unavailableReason: "counter_window_invalid" };
+        }
         if (!canScheduleCallCircleConfirmationFlow({
-          memberATimeZone: target.match.memberATimeZone,
-          memberBTimeZone: target.match.memberBTimeZone,
+          memberATimeZone: timeZones.memberATimeZone,
+          memberBTimeZone: timeZones.memberBTimeZone,
           now,
           windowStartAt: counterWindow.startAt,
         })) {
           return { status: "unavailable", unavailableReason: "counter_window_invalid" };
         }
-        const result = await counterCallCircleMatchSide({
+        const changed = await counterCallCircleMatchSide({
+          expectedAsk: readCallCircleAskSnapshot(target.match),
           groupId: target.groupId,
           matchId: target.match.id,
+          memberAId: target.match.memberAId,
+          memberBId: target.match.memberBId,
           memberId: input.memberId,
           now,
           prisma: tx,
@@ -246,7 +254,7 @@ export async function handleCallCircleRespond(input: {
           windowEndAt: counterWindow.endAt,
           windowStartAt: counterWindow.startAt,
         });
-        if (!result.changed) return { status: "ignored" };
+        if (!changed) return { status: "ignored" };
         return { status: "ok" };
       }
     }
@@ -264,87 +272,70 @@ type ResolvedCallCircleResponseTarget =
       unavailableReason: string;
     };
 
-type ResolvedCallCircleResponseMatch = {
-  groupId: string;
-  id: string;
-  amAskedAt: Date | null;
+type ResolvedCallCircleResponseMatch = CurrentCallCircleResponseMatch & {
   expired: boolean;
-  finalAskedAt: Date | null;
-  memberAId: string;
-  memberATimeZone: string;
-  memberBId: string;
-  memberBTimeZone: string;
-  side: "A" | "B";
-  status: string;
-  windowEndAt: Date;
-  windowStartAt: Date;
 };
-
-function readExplicitCallCircleResponseTargetMismatchReason(input: {
-  request: HostedCallCircleRespondRequest;
-  target: Extract<ResolvedCallCircleResponseTarget, { status: "ok" }>;
-}): string | null {
-  if (input.request.groupId && input.request.groupId !== input.target.groupId) {
-    return isCallCircleMatchResponseKind(input.request.kind)
-      ? "call_circle_match_unavailable"
-      : "call_circle_context_unavailable";
-  }
-  if (
-    isCallCircleMatchResponseKind(input.request.kind)
-    && input.request.matchId
-    && input.request.matchId !== input.target.match?.id
-  ) {
-    return "call_circle_match_unavailable";
-  }
-  return null;
-}
 
 async function resolveCallCircleResponseTarget(input: {
   memberId: string;
   now: Date;
   prisma: Prisma.TransactionClient;
-  replyContext: HostedCallCircleRespondContext | null;
+  replyItems: readonly CallCircleReplyContextItem[];
   request: HostedCallCircleRespondRequest;
 }): Promise<ResolvedCallCircleResponseTarget> {
-  if (isCallCircleMatchResponseKind(input.request.kind)) {
-    const match = await resolveCallCircleResponseMatch(input);
-    if (!match) {
-      return {
-        status: "unavailable",
-        unavailableReason: "call_circle_match_unavailable",
-      };
+  const isMatchResponse = isCallCircleMatchResponseKind(input.request.kind);
+  const setupContext = isMatchResponse
+    ? { status: "none" as const }
+    : resolveCallCircleSetupGroupIdFromReplyContext({
+        memberId: input.memberId,
+        replyItems: input.replyItems,
+      });
+  const confirmContext = await resolveCurrentCallCircleMatchContext({
+    memberId: input.memberId,
+    prisma: input.prisma,
+    replyItems: input.replyItems,
+  });
+  if (
+    setupContext.status === "ambiguous"
+    || confirmContext.status === "ambiguous"
+  ) {
+    return {
+      status: "unavailable",
+      unavailableReason: isMatchResponse
+        ? "call_circle_match_unavailable"
+        : "call_circle_context_unavailable",
+    };
+  }
+  if (isMatchResponse) {
+    if (confirmContext.status === "exact") {
+      const match = resolveCallCircleResponseMatch({
+        match: confirmContext.match,
+        now: input.now,
+      });
+      return { groupId: match.groupId, match, status: "ok" };
     }
-    return { groupId: match.groupId, match, status: "ok" };
-  }
-
-  const setupContext = await resolveCallCircleSetupGroupIdFromReplyContext({
-    memberId: input.memberId,
-    prisma: input.prisma,
-    replyContext: input.replyContext,
-  });
-  if (setupContext.status === "ambiguous") {
     return {
       status: "unavailable",
-      unavailableReason: "call_circle_context_unavailable",
+      unavailableReason: "call_circle_match_unavailable",
     };
   }
+
+  const anchoredGroupIds = new Set<string>();
   if (setupContext.status === "exact") {
-    return { groupId: setupContext.groupId, match: null, status: "ok" };
-  }
-
-  const confirmContext = await resolveCallCircleConfirmGroupIdFromReplyContext({
-    memberId: input.memberId,
-    prisma: input.prisma,
-    replyContext: input.replyContext,
-  });
-  if (confirmContext.status === "ambiguous") {
-    return {
-      status: "unavailable",
-      unavailableReason: "call_circle_context_unavailable",
-    };
+    anchoredGroupIds.add(setupContext.groupId);
   }
   if (confirmContext.status === "exact") {
-    return { groupId: confirmContext.groupId, match: null, status: "ok" };
+    anchoredGroupIds.add(confirmContext.match.groupId);
+  }
+  if (anchoredGroupIds.size > 1) {
+    return {
+      status: "unavailable",
+      unavailableReason: "call_circle_context_unavailable",
+    };
+  }
+  const [anchoredGroupId] = anchoredGroupIds;
+  if (anchoredGroupId) {
+    return { groupId: anchoredGroupId, match: null, status: "ok" };
   }
 
   const groupId = await resolveSingleCallCircleParticipantGroupId({
@@ -365,44 +356,38 @@ type CallCircleGroupContextResolution =
   | { status: "ambiguous" }
   | { groupId: string; status: "exact" };
 
-type CallCircleConfirmContextResolution =
+type CallCircleConfirmAnchorResolution =
   | { status: "none" }
   | { status: "ambiguous" }
-  | { anchor: CallCircleConfirmAnchor; status: "exact" };
+  | { anchor: CallCircleConfirmNotificationAnchor; status: "exact" };
 
-type CallCircleConfirmAnchor = {
-  key: string;
-  matchId: string;
-  stage: "am" | "final";
-  windowStartAt: Date;
-};
+type CallCircleMatchContextResolution =
+  | { status: "none" }
+  | { status: "ambiguous" }
+  | { match: CurrentCallCircleResponseMatch; status: "exact" };
 
-async function resolveCallCircleSetupGroupIdFromReplyContext(input: {
+type CurrentCallCircleResponseMatch = Prisma.HostedCallCircleMatchGetPayload<{
+  select: typeof callCircleResponseMatchSelect;
+}> & { side: "A" | "B" };
+
+type CallCircleAskSnapshot = Pick<
+  CurrentCallCircleResponseMatch,
+  "amAskedAt" | "finalAskedAt" | "windowEndAt" | "windowStartAt"
+>;
+
+type CallCircleReplyContextItem = Prisma.HostedMailboxItemGetPayload<{
+  select: typeof callCircleReplyContextItemSelect;
+}>;
+
+function resolveCallCircleSetupGroupIdFromReplyContext(input: {
   memberId: string;
-  prisma: Prisma.TransactionClient;
-  replyContext: HostedCallCircleRespondContext | null;
-}): Promise<CallCircleGroupContextResolution> {
-  const mailboxItemIds = normalizeReplyContextMailboxItemIds(
-    input.replyContext?.inboundMailboxItemIds,
-  );
-  if (mailboxItemIds.length === 0) return { status: "none" };
-
-  const setupNotifications = await input.prisma.hostedMailboxItem.findMany({
-    select: { dedupeKey: true },
-    where: {
-      dedupeKey: {
-        startsWith: CALL_CIRCLE_SETUP_NOTIFICATION_DEDUPE_PREFIX,
-      },
-      id: { in: mailboxItemIds },
-      kind: "assistant.notification.requested",
-      userId: input.memberId,
-    },
-  });
-
+  replyItems: readonly CallCircleReplyContextItem[];
+}): CallCircleGroupContextResolution {
   const groupIds: string[] = [];
-  for (const notification of setupNotifications) {
-    const groupId = readCallCircleSetupGroupIdFromDedupeKey({
-      dedupeKey: notification.dedupeKey,
+  for (const item of input.replyItems) {
+    if (item.kind !== "assistant.notification.requested") continue;
+    const groupId = readCallCircleSetupNotificationGroupId({
+      eventId: item.dedupeKey,
       memberId: input.memberId,
     });
     if (groupId && !groupIds.includes(groupId)) {
@@ -430,21 +415,23 @@ function normalizeReplyContextMailboxItemIds(
   return result;
 }
 
-function readCallCircleSetupGroupIdFromDedupeKey(input: {
-  dedupeKey: string;
+async function readCallCircleReplyContextItems(input: {
   memberId: string;
-}): string | null {
-  if (!input.dedupeKey.startsWith(CALL_CIRCLE_SETUP_NOTIFICATION_DEDUPE_PREFIX)) {
-    return null;
-  }
-  const segments = input.dedupeKey
-    .slice(CALL_CIRCLE_SETUP_NOTIFICATION_DEDUPE_PREFIX.length)
-    .split(":");
-  const [groupId, memberId, suffixKind, suffixId] = segments;
-  if (!groupId || memberId !== input.memberId) return null;
-  if (segments.length === 2) return groupId;
-  if (segments.length === 4 && suffixKind === "offer" && suffixId) return groupId;
-  return null;
+  prisma: Prisma.TransactionClient;
+  replyContext: HostedCallCircleRespondContext | null;
+}): Promise<CallCircleReplyContextItem[]> {
+  const mailboxItemIds = normalizeReplyContextMailboxItemIds(
+    input.replyContext?.inboundMailboxItemIds,
+  );
+  if (mailboxItemIds.length === 0) return [];
+  return await input.prisma.hostedMailboxItem.findMany({
+    select: callCircleReplyContextItemSelect,
+    take: CALL_CIRCLE_REPLY_CONTEXT_MAILBOX_ITEM_LIMIT,
+    where: {
+      id: { in: mailboxItemIds },
+      userId: input.memberId,
+    },
+  });
 }
 
 async function resolveSingleCallCircleParticipantGroupId(input: {
@@ -458,17 +445,25 @@ async function resolveSingleCallCircleParticipantGroupId(input: {
     ],
     select: { groupId: true },
     take: 2,
-    where: { memberId: input.memberId },
+    where: {
+      group: {
+        members: { some: { memberId: input.memberId } },
+      },
+      memberId: input.memberId,
+    },
   });
   return participants.length === 1 ? participants[0]?.groupId ?? null : null;
 }
 
-async function resolveCallCircleConfirmGroupIdFromReplyContext(input: {
+async function resolveCurrentCallCircleMatchContext(input: {
   memberId: string;
   prisma: Prisma.TransactionClient;
-  replyContext: HostedCallCircleRespondContext | null;
-}): Promise<CallCircleGroupContextResolution> {
-  const confirmContext = await resolveCallCircleConfirmMatchIdFromReplyContext(input);
+  replyItems: readonly CallCircleReplyContextItem[];
+}): Promise<CallCircleMatchContextResolution> {
+  const confirmContext = resolveCallCircleConfirmMatchIdFromReplyContext({
+    memberId: input.memberId,
+    replyItems: input.replyItems,
+  });
   if (confirmContext.status !== "exact") return confirmContext;
 
   const match = await input.prisma.hostedCallCircleMatch.findUnique({
@@ -476,104 +471,48 @@ async function resolveCallCircleConfirmGroupIdFromReplyContext(input: {
     where: { id: confirmContext.anchor.matchId },
   });
   if (!match) return { status: "none" };
-  if (match.memberAId !== input.memberId && match.memberBId !== input.memberId) {
-    return { status: "none" };
-  }
+  const side = match.memberAId === input.memberId
+    ? "A"
+    : match.memberBId === input.memberId
+      ? "B"
+      : null;
+  if (!side) return { status: "none" };
   if (!isCallCircleConfirmAnchorCurrentForMatch({
     anchor: confirmContext.anchor,
     match,
   })) {
     return { status: "none" };
   }
-  const askAt = readCurrentCallCircleMatchAskAt(match);
-  if (!askAt || !await hasFreshCallCircleReplyContext({
-    askAt,
-    memberId: input.memberId,
-    prisma: input.prisma,
-    replyContext: input.replyContext,
-  })) {
-    return { status: "none" };
-  }
-  return { groupId: match.groupId, status: "exact" };
-}
-
-async function resolveCallCircleResponseMatch(input: {
-  memberId: string;
-  now: Date;
-  prisma: Prisma.TransactionClient;
-  replyContext: HostedCallCircleRespondContext | null;
-  request: HostedCallCircleRespondRequest;
-}): Promise<ResolvedCallCircleResponseMatch | null> {
-  const confirmContext = await resolveCallCircleConfirmMatchIdFromReplyContext({
-    memberId: input.memberId,
-    prisma: input.prisma,
-    replyContext: input.replyContext,
-  });
-  if (confirmContext.status === "ambiguous") return null;
-
-  const match = confirmContext.status === "exact"
-    ? await input.prisma.hostedCallCircleMatch.findUnique({
-      select: callCircleResponseMatchSelect,
-      where: { id: confirmContext.anchor.matchId },
-    })
-    : await resolveSinglePendingCallCircleResponseMatch(input);
-  if (!match) return null;
-  const side = match.memberAId === input.memberId
-    ? "A"
-    : match.memberBId === input.memberId
-      ? "B"
-      : null;
-  if (!side) return null;
-  if (input.request.side && input.request.side !== side) return null;
-  if (
-    confirmContext.status === "exact"
-    && !isCallCircleConfirmAnchorCurrentForMatch({
-      anchor: confirmContext.anchor,
-      match,
-    })
-  ) {
-    return null;
-  }
   if (
     match.status !== "both_confirmed"
     && match.amAskedAt === null
     && match.finalAskedAt === null
   ) {
-    return null;
+    return { status: "none" };
   }
   const askAt = readCurrentCallCircleMatchAskAt(match);
-  if (!askAt || !await hasFreshCallCircleReplyContext({
+  if (!askAt || !hasFreshCallCircleReplyContext({
     askAt,
-    memberId: input.memberId,
-    prisma: input.prisma,
-    replyContext: input.replyContext,
+    replyItems: input.replyItems,
   })) {
-    return null;
+    return { status: "none" };
   }
-  const timeZones = await readCallCircleMatchParticipantTimeZones({
-    groupId: match.groupId,
-    memberAId: match.memberAId,
-    memberBId: match.memberBId,
-    prisma: input.prisma,
-  });
-  if (!timeZones) return null;
   return {
-    amAskedAt: match.amAskedAt,
+    match: { ...match, side },
+    status: "exact",
+  };
+}
+
+function resolveCallCircleResponseMatch(input: {
+  match: CurrentCallCircleResponseMatch;
+  now: Date;
+}): ResolvedCallCircleResponseMatch {
+  return {
+    ...input.match,
     expired: hasCallCircleResponseWindowExpired({
-      match,
+      match: input.match,
       now: input.now,
     }),
-    finalAskedAt: match.finalAskedAt,
-    groupId: match.groupId,
-    id: match.id,
-    memberAId: match.memberAId,
-    memberATimeZone: timeZones.memberATimeZone,
-    memberBId: match.memberBId,
-    memberBTimeZone: timeZones.memberBTimeZone,
-    side,
-    status: match.status,
-    windowEndAt: match.windowEndAt,
-    windowStartAt: match.windowStartAt,
   };
 }
 
@@ -592,35 +531,18 @@ function hasCallCircleResponseWindowExpired(input: {
       windowStartAt: input.match.windowStartAt,
     });
   }
-  return input.match.windowEndAt.getTime() <= input.now.getTime();
+  return input.now >= readCallCircleFinalAskAt(input.match.windowStartAt);
 }
 
-async function resolveCallCircleConfirmMatchIdFromReplyContext(input: {
+function resolveCallCircleConfirmMatchIdFromReplyContext(input: {
   memberId: string;
-  prisma: Prisma.TransactionClient;
-  replyContext: HostedCallCircleRespondContext | null;
-}): Promise<CallCircleConfirmContextResolution> {
-  const mailboxItemIds = normalizeReplyContextMailboxItemIds(
-    input.replyContext?.inboundMailboxItemIds,
-  );
-  if (mailboxItemIds.length === 0) return { status: "none" };
-
-  const confirmNotifications = await input.prisma.hostedMailboxItem.findMany({
-    select: { dedupeKey: true },
-    where: {
-      dedupeKey: {
-        startsWith: CALL_CIRCLE_CONFIRM_NOTIFICATION_DEDUPE_PREFIX,
-      },
-      id: { in: mailboxItemIds },
-      kind: "assistant.notification.requested",
-      userId: input.memberId,
-    },
-  });
-
-  const anchors: CallCircleConfirmAnchor[] = [];
-  for (const notification of confirmNotifications) {
-    const anchor = readCallCircleConfirmAnchorFromDedupeKey({
-      dedupeKey: notification.dedupeKey,
+  replyItems: readonly CallCircleReplyContextItem[];
+}): CallCircleConfirmAnchorResolution {
+  const anchors: CallCircleConfirmNotificationAnchor[] = [];
+  for (const item of input.replyItems) {
+    if (item.kind !== "assistant.notification.requested") continue;
+    const anchor = readCallCircleConfirmNotificationAnchor({
+      eventId: item.dedupeKey,
       memberId: input.memberId,
     });
     if (anchor && !anchors.some((entry) => entry.key === anchor.key)) {
@@ -633,35 +555,8 @@ async function resolveCallCircleConfirmMatchIdFromReplyContext(input: {
     : { status: "ambiguous" };
 }
 
-function readCallCircleConfirmAnchorFromDedupeKey(input: {
-  dedupeKey: string;
-  memberId: string;
-}): CallCircleConfirmAnchor | null {
-  for (const stage of ["am", "final"] as const) {
-    const prefix = `${CALL_CIRCLE_CONFIRM_NOTIFICATION_DEDUPE_PREFIX}${stage}:`;
-    if (!input.dedupeKey.startsWith(prefix)) continue;
-    const remainder = input.dedupeKey.slice(prefix.length);
-    const memberMarker = `:${input.memberId}:`;
-    const memberIndex = remainder.indexOf(memberMarker);
-    if (memberIndex <= 0) return null;
-    const matchId = remainder.slice(0, memberIndex).trim();
-    const windowStartAt = remainder.slice(memberIndex + memberMarker.length).trim();
-    const parsedWindowStartAt = new Date(windowStartAt);
-    if (!matchId || Number.isNaN(parsedWindowStartAt.getTime())) {
-      return null;
-    }
-    return {
-      key: `${stage}:${matchId}:${windowStartAt}`,
-      matchId,
-      stage,
-      windowStartAt: parsedWindowStartAt,
-    };
-  }
-  return null;
-}
-
 function isCallCircleConfirmAnchorCurrentForMatch(input: {
-  anchor: CallCircleConfirmAnchor;
+  anchor: CallCircleConfirmNotificationAnchor;
   match: {
     amAskedAt: Date | null;
     finalAskedAt: Date | null;
@@ -680,85 +575,39 @@ const callCircleResponseMatchSelect = {
   id: true,
   memberAId: true,
   memberBId: true,
+  outcome: true,
+  sideAResponse: true,
+  sideBResponse: true,
   status: true,
   windowEndAt: true,
   windowStartAt: true,
 } satisfies Prisma.HostedCallCircleMatchSelect;
 
-async function resolveSinglePendingCallCircleResponseMatch(input: {
-  memberId: string;
-  now: Date;
-  prisma: Prisma.TransactionClient;
-  request: HostedCallCircleRespondRequest;
-}) {
-  const matches = await input.prisma.hostedCallCircleMatch.findMany({
-    orderBy: [
-      { windowStartAt: "asc" },
-      { createdAt: "desc" },
-    ],
-    select: callCircleResponseMatchSelect,
-    take: 2,
-    where: {
-      OR: [
-        {
-          memberAId: input.memberId,
-          sideAResponse: "pending",
-          status: { in: ["proposed", "asking"] },
-        },
-        {
-          memberBId: input.memberId,
-          sideBResponse: "pending",
-          status: { in: ["proposed", "asking"] },
-        },
-        {
-          finalAskedAt: { not: null },
-          memberAId: input.memberId,
-          status: "both_confirmed",
-        },
-        {
-          finalAskedAt: { not: null },
-          memberBId: input.memberId,
-          status: "both_confirmed",
-        },
-      ],
-      windowEndAt: { gt: input.now },
-    },
-  });
-  return matches.length === 1 ? matches[0] ?? null : null;
-}
+const callCircleReplyContextItemSelect = {
+  dedupeKey: true,
+  kind: true,
+  occurredAt: true,
+} satisfies Prisma.HostedMailboxItemSelect;
 
-async function hasFreshCallCircleReplyContext(input: {
+function hasFreshCallCircleReplyContext(input: {
   askAt: Date;
-  memberId: string;
-  prisma: Prisma.TransactionClient;
-  replyContext: HostedCallCircleRespondContext | null;
-}): Promise<boolean> {
-  const replyOccurredAt = await readLatestCallCircleReplyOccurredAt(input);
+  replyItems: readonly CallCircleReplyContextItem[];
+}): boolean {
+  const replyOccurredAt = readLatestCallCircleReplyOccurredAt(input.replyItems);
   return replyOccurredAt !== null
     && replyOccurredAt.getTime() >= input.askAt.getTime();
 }
 
-async function readLatestCallCircleReplyOccurredAt(input: {
-  memberId: string;
-  prisma: Prisma.TransactionClient;
-  replyContext: HostedCallCircleRespondContext | null;
-}): Promise<Date | null> {
-  const mailboxItemIds = normalizeReplyContextMailboxItemIds(
-    input.replyContext?.inboundMailboxItemIds,
-  );
-  if (mailboxItemIds.length === 0) return null;
-
-  const inbound = await input.prisma.hostedMailboxItem.findMany({
-    orderBy: { occurredAt: "desc" },
-    select: { occurredAt: true },
-    take: 1,
-    where: {
-      id: { in: mailboxItemIds },
-      kind: "conversation.message",
-      userId: input.memberId,
-    },
-  });
-  return inbound[0]?.occurredAt ?? null;
+function readLatestCallCircleReplyOccurredAt(
+  replyItems: readonly CallCircleReplyContextItem[],
+): Date | null {
+  let latest: Date | null = null;
+  for (const item of replyItems) {
+    if (item.kind === "conversation.message" && (!latest || item.occurredAt > latest)) {
+      latest = item.occurredAt;
+    }
+  }
+  return latest;
 }
 
 function readCurrentCallCircleMatchAskAt(input: Pick<
@@ -768,15 +617,42 @@ function readCurrentCallCircleMatchAskAt(input: Pick<
   return input.finalAskedAt ?? input.amAskedAt;
 }
 
+function readCallCircleAskSnapshot(
+  match: CallCircleAskSnapshot,
+): CallCircleAskSnapshot {
+  return {
+    amAskedAt: match.amAskedAt,
+    finalAskedAt: match.finalAskedAt,
+    windowEndAt: match.windowEndAt,
+    windowStartAt: match.windowStartAt,
+  };
+}
+
 function isCallCircleMatchResponseKind(
   kind: HostedCallCircleRespondRequest["kind"],
 ): boolean {
   return kind === "confirm" || kind === "counter" || kind === "decline";
 }
 
+function readCallCircleMatchSideResponse(
+  match: Pick<ResolvedCallCircleResponseMatch, "side" | "sideAResponse" | "sideBResponse">,
+): string {
+  return match.side === "A" ? match.sideAResponse : match.sideBResponse;
+}
+
+function hasAppliedCallCircleDecline(
+  match: Pick<
+    ResolvedCallCircleResponseMatch,
+    "outcome" | "side" | "sideAResponse" | "sideBResponse" | "status"
+  >,
+): boolean {
+  return match.status === "dropped"
+    && readCallCircleMatchSideResponse(match) === "declined"
+    && match.outcome === (match.side === "A" ? "declined_by_a" : "declined_by_b");
+}
+
 async function ensureActiveCallCircleMatchPair(input: {
   match: Pick<ResolvedCallCircleResponseMatch, "groupId" | "id" | "memberAId" | "memberBId">;
-  now: Date;
   tx: Prisma.TransactionClient;
 }): Promise<boolean> {
   if (await canUseActiveCallCircleParticipantPair({
@@ -789,7 +665,6 @@ async function ensureActiveCallCircleMatchPair(input: {
   }
   await markCallCircleMatchOutcome({
     matchId: input.match.id,
-    now: input.now,
     outcome: "participant_unavailable",
     prisma: input.tx,
     status: "canceled",
@@ -851,6 +726,7 @@ function isValidCounterWindow(input: {
   return Number.isFinite(input.startAt.getTime())
     && Number.isFinite(input.endAt.getTime())
     && input.startAt > input.now
-    && input.endAt > input.startAt
+    && input.endAt.getTime() - input.startAt.getTime()
+      >= CALL_CIRCLE_MINIMUM_WINDOW_MS
     && input.endAt.getTime() <= input.now.getTime() + CALL_CIRCLE_COUNTER_WINDOW_MAX_MS;
 }

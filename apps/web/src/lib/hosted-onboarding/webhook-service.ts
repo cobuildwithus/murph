@@ -4,7 +4,13 @@ import type {
 } from "@prisma/client";
 
 import { getPrisma } from "../prisma";
+import { maybeDate } from "../primitives";
 import {
+  readHostedGroupJoinOfferIdFromProviderIdempotencyKey,
+  repairHostedGroupJoinOfferBindingFromProviderEchoTx,
+} from "../hosted-groups/group-store";
+import {
+  readHostedLinqOutboundMessageIdentity,
   requireHostedLinqMessageReceivedEvent,
   sendHostedLinqReadReceipt,
   verifyAndParseHostedLinqWebhookRequest,
@@ -152,15 +158,19 @@ export async function handleHostedOnboardingLinqWebhook(input: {
       return response;
     }
 
+    const prisma = input.prisma ?? getPrisma();
     const providerEvent = parseHostedLinqProviderEvent({
       event,
       rawBody: input.rawBody,
+    });
+    await repairHostedGroupJoinOfferProviderEcho({
+      event,
+      prisma,
     });
     if (
       providerEvent
       && (event.event_type === "reaction.added" || event.event_type === "reaction.removed")
     ) {
-      const prisma = input.prisma ?? getPrisma();
       const providerResult = await ingestHostedLinqProviderEventDirect({
         event: providerEvent,
         prisma,
@@ -187,7 +197,6 @@ export async function handleHostedOnboardingLinqWebhook(input: {
       return response;
     }
     if (providerEvent && event.event_type !== "message.received") {
-      const prisma = input.prisma ?? getPrisma();
       const providerResult = await ingestHostedLinqProviderEventDirect({
         event: providerEvent,
         prisma,
@@ -221,7 +230,6 @@ export async function handleHostedOnboardingLinqWebhook(input: {
         ? buildHostedLinqCurrentInboundReplyProof(event)
         : null;
 
-    const prisma = input.prisma ?? getPrisma();
     const planTiming = startHostedOnboardingTiming(
       "hosted-onboarding.webhook.linq.plan",
       {
@@ -570,6 +578,26 @@ function buildHostedLinqCurrentInboundReplyProof(
     chatId: messageEvent.data.chat_id,
     messageId: messageEvent.data.message.id,
   };
+}
+
+async function repairHostedGroupJoinOfferProviderEcho(input: {
+  event: Parameters<typeof requireHostedLinqMessageReceivedEvent>[0];
+  prisma: PrismaClient;
+}): Promise<void> {
+  const messageIdentity = readHostedLinqOutboundMessageIdentity(input.event);
+  if (!messageIdentity) return;
+  const offerId = readHostedGroupJoinOfferIdFromProviderIdempotencyKey(
+    messageIdentity.idempotencyKey,
+  );
+  if (!offerId) return;
+  const postedAt = maybeDate(messageIdentity.createdAt);
+  await runHostedOnboardingWebhookTransaction(input.prisma, (transaction) =>
+    repairHostedGroupJoinOfferBindingFromProviderEchoTx({
+      messageId: messageIdentity.messageId,
+      offerId,
+      ...(postedAt ? { postedAt } : {}),
+      tx: transaction,
+    }));
 }
 
 async function ingestHostedLinqProviderEventDirect(input: {

@@ -11,7 +11,7 @@ const mocks = vi.hoisted(() => ({
   enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort: vi.fn(),
   getPrisma: vi.fn(),
   requireHostedAppSessionFromRequest: vi.fn(),
-  signalHostedMailboxAppendRuntime: vi.fn(),
+  signalHostedMailboxAppendsBestEffort: vi.fn(),
   signalHostedRuntimeMaintenanceRuntime: vi.fn(),
 }));
 
@@ -37,7 +37,7 @@ vi.mock("@/src/lib/hosted-onboarding/entitlement", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
-  signalHostedMailboxAppendRuntime: mocks.signalHostedMailboxAppendRuntime,
+  signalHostedMailboxAppendsBestEffort: mocks.signalHostedMailboxAppendsBestEffort,
   signalHostedRuntimeMaintenanceRuntime: mocks.signalHostedRuntimeMaintenanceRuntime,
 }));
 
@@ -73,7 +73,7 @@ beforeEach(async () => {
   mocks.enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort.mockResolvedValue(
     undefined,
   );
-  mocks.signalHostedMailboxAppendRuntime.mockResolvedValue(undefined);
+  mocks.signalHostedMailboxAppendsBestEffort.mockResolvedValue(undefined);
   mocks.signalHostedRuntimeMaintenanceRuntime.mockResolvedValue(undefined);
 
   route = await import("../app/api/groups/join/[joinCode]/accept/route");
@@ -114,10 +114,10 @@ test("signals destination cleanup wakes after a group permission revoke without 
   expect(mocks.signalHostedRuntimeMaintenanceRuntime).not.toHaveBeenCalled();
   expect(mocks.enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort)
     .not.toHaveBeenCalled();
-  expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
-    expectedUserId: "member_group_runtime",
+  expect(mocks.signalHostedMailboxAppendsBestEffort).toHaveBeenCalledWith([{
     mailboxItemId: "mailbox_item_revoke_1",
-  });
+    memberId: "member_group_runtime",
+  }]);
 });
 
 test("enqueues a private missing-email nudge after accepting an email-sharing grant", async () => {

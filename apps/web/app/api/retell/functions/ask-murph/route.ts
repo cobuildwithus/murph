@@ -46,7 +46,6 @@ export const POST = withJsonError(async (request: Request) => {
     call,
     memberId: call.memberId,
     question: payload.args.question,
-    transcript: payload.call.transcript ?? "",
   });
 
   return NextResponse.json(advice);

@@ -11,11 +11,7 @@ import { parseDynamicToolArguments } from './dynamic-tool-wrapper.js'
 
 const CALL_CIRCLE_RESPOND_ROOT_KEYS = [
   'counterWindow',
-  'excludeMemberIds',
-  'groupId',
   'kind',
-  'matchId',
-  'side',
   'timeZone',
   'windows',
 ] as const
@@ -28,9 +24,8 @@ export const MURPH_CALL_CIRCLE_RESPOND_TOOL = {
     'Use only for replies from this member\'s own Murph thread.',
     'Use only after this member has already opted into Call Circle for the group or is replying to a pending Call Circle ask.',
     'Never record an answer for another person, never invent availability, never include phone numbers, and never start calls.',
-    'For confirm, decline, and counter, omit matchId and side unless the pending ask explicitly supplied them; the server resolves the current member\'s active ask when it is unambiguous.',
-    'For preferences, omit groupId unless the reply names a specific group; the server resolves the member\'s active Call Circle enrollment when it is unambiguous.',
-    'For preferences, record only days and times the member provided, and set timeZone to the current IANA timezone from this runtime context so those local windows are interpreted correctly. If they say no or pause, use kind="pause".',
+    'The server resolves the group, match, and member side from the authenticated thread and the pending ask; never supply identifiers.',
+    'For preferences, record only days and times the member provided, and set timeZone to the current IANA timezone from this runtime context so those local windows are interpreted correctly. For a setup or preferences ask, no means kind="pause". For a match ask, yes means kind="confirm", no means kind="decline", and an alternate time means kind="counter".',
   ].join(' '),
   inputSchema: z.toJSONSchema(hostedCallCircleRespondRequestSchema, { io: 'input' }),
 } as const

@@ -20,6 +20,7 @@ type LinqWebhookSubscriptionResult = {
 
 const HOSTED_LOCAL_LINQ_WEBHOOK_EVENTS = [
   "message.received",
+  "message.sent",
   "reaction.added",
   "reaction.removed",
 ] as const;
@@ -827,7 +828,10 @@ describe("registerHostedLocalLinqWebhookSubscription", () => {
             id: "subscription-broader",
             is_active: true,
             phone_numbers: null,
-            subscribed_events: ["message.received", "message.sent"],
+            subscribed_events: [
+              ...HOSTED_LOCAL_LINQ_WEBHOOK_EVENTS,
+              "message.delivered",
+            ],
             target_url: "https://tunnel.example.test/api/hosted-onboarding/linq/webhook",
           },
         ],

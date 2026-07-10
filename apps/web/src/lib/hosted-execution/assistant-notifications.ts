@@ -14,6 +14,12 @@ import {
   resolveHostedMemberAssistantNotificationRoute,
   resolveHostedMemberMessagingState,
 } from "../hosted-onboarding/messaging-state";
+import {
+  signalHostedMailboxAppendsBestEffort,
+  type HostedMailboxAppendSignal,
+} from "../hosted-orchestration/signal-runtime";
+
+export type HostedAssistantNotificationSignal = HostedMailboxAppendSignal;
 
 export async function appendHostedAssistantNotificationTx(input: {
   deliveryDispatchMode?: "queue-only";
@@ -51,12 +57,29 @@ export async function appendHostedAssistantNotificationTx(input: {
   };
 }
 
+export const signalHostedAssistantNotificationsBestEffort =
+  signalHostedMailboxAppendsBestEffort;
+
 export async function resolveHostedAssistantNotificationRouteTx(input: {
   fallbackTelegramThreadId?: string | null;
   fallbackTelegramUserId?: string | null;
   memberId: string;
   tx: Prisma.TransactionClient;
 }): Promise<HostedExecutionAssistantNotificationRoute | null> {
+  return (await resolveHostedAssistantNotificationTargetTx(input)).route;
+}
+
+export interface HostedAssistantNotificationTarget {
+  linqSourceLineLookupKey: string | null;
+  route: HostedExecutionAssistantNotificationRoute | null;
+}
+
+export async function resolveHostedAssistantNotificationTargetTx(input: {
+  fallbackTelegramThreadId?: string | null;
+  fallbackTelegramUserId?: string | null;
+  memberId: string;
+  tx: Prisma.TransactionClient;
+}): Promise<HostedAssistantNotificationTarget> {
   const [identity, routing] = await Promise.all([
     readHostedMemberIdentity({
       memberId: input.memberId,
@@ -68,7 +91,7 @@ export async function resolveHostedAssistantNotificationRouteTx(input: {
     }),
   ]);
 
-  return resolveHostedMemberAssistantNotificationRoute({
+  const route = resolveHostedMemberAssistantNotificationRoute({
     linqChatId: routing?.linqChatId ?? routing?.pendingLinqChatId ?? null,
     linqContactLookupKey:
       routing?.pendingLinqParticipantContact?.lookupKey
@@ -96,4 +119,12 @@ export async function resolveHostedAssistantNotificationRouteTx(input: {
       },
     }),
   });
+  const linqSourceLineLookupKey = route?.channel === "linq"
+    ? routing?.linqChatId
+      ? routing.linqRecipientPhoneLookupKey ?? null
+      : routing?.pendingLinqChatId
+        ? routing.pendingLinqRecipientPhoneLookupKey ?? null
+        : routing?.linqRecipientPhoneLookupKey ?? null
+    : null;
+  return { linqSourceLineLookupKey, route };
 }

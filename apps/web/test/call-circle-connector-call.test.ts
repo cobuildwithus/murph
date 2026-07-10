@@ -3,18 +3,17 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("server-only", () => ({}));
 
 const mocks = vi.hoisted(() => ({
-  appendCallCircleHandoffNotificationTx: vi.fn(),
+  appendCallCircleTerminalNotificationsTx: vi.fn(),
   attachCallCirclePhoneCall: vi.fn(),
   canUseActiveCallCircleParticipantPair: vi.fn(),
   claimCallCircleMatchForConnector: vi.fn(),
   createHostedPhoneCall: vi.fn(),
   getPrisma: vi.fn(),
   markCallCircleMatchOutcome: vi.fn(),
-  readCallCircleNotificationSignal: vi.fn(),
-  readCallCircleNotificationPreflightTx: vi.fn(),
   readCallCircleMatchParticipantTimeZones: vi.fn(),
   resolveVerifiedMemberTransferNumber: vi.fn(),
-  signalCallCircleNotificationRuntimesBestEffort: vi.fn(),
+  signalHostedAssistantNotificationsBestEffort: vi.fn(),
+  terminalizeUnstartedHostedPhoneCall: vi.fn(),
 }));
 
 vi.mock("@/src/lib/prisma", () => ({
@@ -84,24 +83,26 @@ vi.mock("@/src/lib/call-circle/participant-store", () => ({
 }));
 
 vi.mock("@/src/lib/call-circle/notifications", () => ({
-  appendCallCircleHandoffNotificationTx: mocks.appendCallCircleHandoffNotificationTx,
-  readCallCircleNotificationSignal: mocks.readCallCircleNotificationSignal,
-  readCallCircleNotificationPreflightTx: mocks.readCallCircleNotificationPreflightTx,
-  signalCallCircleNotificationRuntimesBestEffort: mocks.signalCallCircleNotificationRuntimesBestEffort,
+  appendCallCircleTerminalNotificationsTx:
+    mocks.appendCallCircleTerminalNotificationsTx,
+}));
+
+vi.mock("@/src/lib/hosted-execution/assistant-notifications", () => ({
+  signalHostedAssistantNotificationsBestEffort:
+    mocks.signalHostedAssistantNotificationsBestEffort,
 }));
 
 vi.mock("@/src/lib/phone-calls/service", () => ({
   createHostedPhoneCall: mocks.createHostedPhoneCall,
+  terminalizeUnstartedHostedPhoneCall:
+    mocks.terminalizeUnstartedHostedPhoneCall,
 }));
 
 vi.mock("@/src/lib/phone-calls/transfer", () => ({
   resolveVerifiedMemberTransferNumber: mocks.resolveVerifiedMemberTransferNumber,
 }));
 
-import {
-  buildCallCircleConnectorRequestKey,
-  startCallCircleConnectorCall,
-} from "@/src/lib/call-circle/connector-call";
+import { startCallCircleConnectorCall } from "@/src/lib/call-circle/connector-call";
 
 describe("startCallCircleConnectorCall", () => {
   beforeEach(() => {
@@ -125,23 +126,16 @@ describe("startCallCircleConnectorCall", () => {
       };
     });
     mocks.markCallCircleMatchOutcome.mockResolvedValue(true);
-    mocks.appendCallCircleHandoffNotificationTx.mockResolvedValue({
-      mailboxItemId: "mailbox_handoff",
-      status: "sent",
-    });
-    mocks.readCallCircleNotificationSignal.mockImplementation(({ memberId, notification }) =>
-      notification.status === "sent" && notification.mailboxItemId
-        ? { mailboxItemId: notification.mailboxItemId, memberId }
-        : null);
-    mocks.readCallCircleNotificationPreflightTx.mockResolvedValue({
-      route: { channel: "linq" },
-      status: "ok",
-    });
+    mocks.appendCallCircleTerminalNotificationsTx.mockResolvedValue([
+      { mailboxItemId: "mailbox_handoff_a", memberId: "member_a" },
+      { mailboxItemId: "mailbox_handoff_b", memberId: "member_b" },
+    ]);
     mocks.readCallCircleMatchParticipantTimeZones.mockResolvedValue({
       memberATimeZone: "UTC",
       memberBTimeZone: "UTC",
     });
-    mocks.signalCallCircleNotificationRuntimesBestEffort.mockResolvedValue(undefined);
+    mocks.signalHostedAssistantNotificationsBestEffort.mockResolvedValue(undefined);
+    mocks.terminalizeUnstartedHostedPhoneCall.mockResolvedValue(true);
     mocks.resolveVerifiedMemberTransferNumber
       .mockResolvedValueOnce("+15551110000")
       .mockResolvedValueOnce("+15552220000");
@@ -173,13 +167,15 @@ describe("startCallCircleConnectorCall", () => {
     expect(mocks.claimCallCircleMatchForConnector).not.toHaveBeenCalled();
     expect(mocks.createHostedPhoneCall).toHaveBeenCalledWith(expect.objectContaining({
       brief: expect.objectContaining({
-        instructions: expect.arrayContaining([
+        instructions: [
           "Transfer the call immediately after the opening line.",
-        ]),
+          "Do not ask for another confirmation; web already recorded both final confirmations before this connector call started.",
+        ],
+        shareableFacts: {},
         successCriteria: "The call transfers to the matched group member.",
       }),
       memberId: "member_a",
-      requestKey: buildCallCircleConnectorRequestKey("hccm_123"),
+      requestKey: "call-circle:hccm_123",
       runtimeOptions: expect.objectContaining({
         openingLine:
           "This is Murph. Connecting you with a friend from your group, one moment.",
@@ -212,17 +208,16 @@ describe("startCallCircleConnectorCall", () => {
 
     expect(mocks.createHostedPhoneCall).toHaveBeenCalledWith(expect.objectContaining({
       beforeStart: expect.any(Function),
-      requestKey: buildCallCircleConnectorRequestKey("hccm_123"),
+      requestKey: "call-circle:hccm_123",
     }));
     expect(mocks.markCallCircleMatchOutcome).toHaveBeenCalledWith({
       matchId: "hccm_123",
-      now,
       outcome: "connector_start_failed",
       phoneCallId: null,
       prisma: expect.any(Object),
       status: "dropped",
     });
-    expect(mocks.appendCallCircleHandoffNotificationTx).not.toHaveBeenCalled();
+    expect(mocks.appendCallCircleTerminalNotificationsTx).not.toHaveBeenCalled();
   });
 
   it("cancels inactive pairs before connector configuration fallback can hand off", async () => {
@@ -245,13 +240,12 @@ describe("startCallCircleConnectorCall", () => {
 
     expect(mocks.markCallCircleMatchOutcome).toHaveBeenCalledWith({
       matchId: "hccm_123",
-      now,
       outcome: "participant_unavailable",
       phoneCallId: null,
       prisma: expect.any(Object),
       status: "canceled",
     });
-    expect(mocks.appendCallCircleHandoffNotificationTx).not.toHaveBeenCalled();
+    expect(mocks.appendCallCircleTerminalNotificationsTx).not.toHaveBeenCalled();
     expect(mocks.createHostedPhoneCall).not.toHaveBeenCalled();
   });
 
@@ -276,7 +270,6 @@ describe("startCallCircleConnectorCall", () => {
 
     expect(mocks.markCallCircleMatchOutcome).toHaveBeenCalledWith({
       matchId: "hccm_123",
-      now,
       outcome: "participant_unavailable",
       phoneCallId: null,
       prisma: tx,
@@ -287,7 +280,7 @@ describe("startCallCircleConnectorCall", () => {
         outcome: "connector_agent_unconfigured",
       }),
     );
-    expect(mocks.appendCallCircleHandoffNotificationTx).not.toHaveBeenCalled();
+    expect(mocks.appendCallCircleTerminalNotificationsTx).not.toHaveBeenCalled();
   });
 
   it("keeps a recovered bridge retryable while the duplicate phone-call row is still starting", async () => {
@@ -314,7 +307,7 @@ describe("startCallCircleConnectorCall", () => {
     });
 
     expect(mocks.markCallCircleMatchOutcome).not.toHaveBeenCalled();
-    expect(mocks.appendCallCircleHandoffNotificationTx).not.toHaveBeenCalled();
+    expect(mocks.appendCallCircleTerminalNotificationsTx).not.toHaveBeenCalled();
     expect(mocks.attachCallCirclePhoneCall).not.toHaveBeenCalled();
   });
 
@@ -351,41 +344,48 @@ describe("startCallCircleConnectorCall", () => {
     });
 
     expect(mocks.createHostedPhoneCall).toHaveBeenCalledWith(expect.objectContaining({
-      providerStartGuardWhere: {
-        callCircleMatches: {
-          some: expect.objectContaining({
-            finalAskedAt: { not: null },
-            groupId: "hgrp_123",
-            id: "hccm_123",
-            memberA: expect.any(Object),
-            memberAId: "member_a",
-            memberB: expect.any(Object),
-            memberBId: "member_b",
-            status: "bridging",
-            windowEndAt: { gt: now },
-            windowStartAt: {
-              gt: new Date("2026-07-06T14:45:00.000Z"),
-              lte: now,
-            },
-          }),
-        },
-      },
-      requestKey: buildCallCircleConnectorRequestKey("hccm_123"),
+      providerStartGuardWhere: expect.any(Function),
+      requestKey: "call-circle:hccm_123",
     }));
+    const attemptedAt = new Date("2026-07-06T15:05:00.000Z");
+    const providerStartGuardWhere = mocks.createHostedPhoneCall.mock.calls[0]?.[0]
+      .providerStartGuardWhere;
+    expect(providerStartGuardWhere?.(attemptedAt)).toEqual({
+      callCircleMatch: {
+        is: expect.objectContaining({
+          finalAskedAt: { not: null },
+          groupId: "hgrp_123",
+          id: "hccm_123",
+          memberA: expect.any(Object),
+          memberAId: "member_a",
+          memberB: expect.any(Object),
+          memberBId: "member_b",
+          status: "bridging",
+          windowEndAt: { gt: attemptedAt },
+          windowStartAt: {
+            gt: new Date("2026-07-06T14:50:00.000Z"),
+            lte: attemptedAt,
+          },
+        }),
+      },
+    });
     expect(mocks.attachCallCirclePhoneCall).toHaveBeenCalledWith({
       matchId: "hccm_123",
       phoneCallId: "hpc_123",
       prisma,
     });
+    expect(mocks.terminalizeUnstartedHostedPhoneCall).toHaveBeenCalledWith({
+      phoneCallId: "hpc_123",
+      prisma: expect.any(Object),
+    });
     expect(mocks.markCallCircleMatchOutcome).toHaveBeenCalledWith({
       matchId: "hccm_123",
-      now,
       outcome: "participant_unavailable",
       phoneCallId: "hpc_123",
-      prisma,
+      prisma: expect.any(Object),
       status: "canceled",
     });
-    expect(mocks.appendCallCircleHandoffNotificationTx).not.toHaveBeenCalled();
+    expect(mocks.appendCallCircleTerminalNotificationsTx).not.toHaveBeenCalled();
   });
 
   it("starts an attached unstarted bridge through the stable phone-call request key", async () => {
@@ -424,7 +424,7 @@ describe("startCallCircleConnectorCall", () => {
 
     expect(mocks.claimCallCircleMatchForConnector).not.toHaveBeenCalled();
     expect(mocks.createHostedPhoneCall).toHaveBeenCalledWith(expect.objectContaining({
-      requestKey: buildCallCircleConnectorRequestKey("hccm_123"),
+      requestKey: "call-circle:hccm_123",
     }));
     expect(mocks.attachCallCirclePhoneCall).not.toHaveBeenCalled();
     expect(prisma.hostedCallCircleMatch.count).toHaveBeenCalledWith({
@@ -481,10 +481,10 @@ describe("startCallCircleConnectorCall", () => {
         },
       },
     });
-    expect(mocks.appendCallCircleHandoffNotificationTx).not.toHaveBeenCalled();
+    expect(mocks.appendCallCircleTerminalNotificationsTx).not.toHaveBeenCalled();
   });
 
-  it("does not start after a broad stored window has missed the narrow bridge deadline", async () => {
+  it("hands off after a broad stored window has missed the narrow bridge deadline", async () => {
     const now = new Date("2026-07-06T12:00:00.000Z");
     const prisma = createPrisma({
       finalAskedAt: new Date("2026-07-06T08:45:00.000Z"),
@@ -498,9 +498,36 @@ describe("startCallCircleConnectorCall", () => {
     await expect(startCallCircleConnectorCall({
       matchId: "hccm_123",
       now,
-    })).resolves.toEqual({ status: "ignored" });
+    })).resolves.toEqual({ status: "handoff" });
 
     expect(mocks.claimCallCircleMatchForConnector).not.toHaveBeenCalled();
+    expect(mocks.createHostedPhoneCall).not.toHaveBeenCalled();
+    expect(mocks.markCallCircleMatchOutcome).toHaveBeenCalledWith({
+      matchId: "hccm_123",
+      outcome: "text_handoff",
+      phoneCallId: null,
+      prisma: expect.any(Object),
+      status: "dropped",
+    });
+  });
+
+  it("leaves a confirmed bridge pending before its window", async () => {
+    const now = new Date("2026-07-06T14:30:00.000Z");
+    const prisma = createPrisma({
+      finalAskedAt: new Date("2026-07-06T14:20:00.000Z"),
+      phoneCallId: null,
+      status: "both_confirmed",
+      windowEndAt: new Date("2026-07-06T15:30:00.000Z"),
+      windowStartAt: new Date("2026-07-06T15:00:00.000Z"),
+    });
+    mocks.getPrisma.mockReturnValue(prisma);
+
+    await expect(startCallCircleConnectorCall({
+      matchId: "hccm_123",
+      now,
+    })).resolves.toEqual({ status: "ignored" });
+
+    expect(mocks.markCallCircleMatchOutcome).not.toHaveBeenCalled();
     expect(mocks.createHostedPhoneCall).not.toHaveBeenCalled();
   });
 
@@ -533,6 +560,41 @@ describe("startCallCircleConnectorCall", () => {
     expect(mocks.attachCallCirclePhoneCall).not.toHaveBeenCalled();
   });
 
+  it("recovers an attached pre-provider failure without replaying create", async () => {
+    const now = new Date("2026-07-06T15:00:00.000Z");
+    const prisma = createPrisma({
+      finalAskedAt: new Date("2026-07-06T14:45:00.000Z"),
+      phoneCall: {
+        analyzedAt: null,
+        providerCallId: null,
+        providerStartAttemptedAt: new Date("2026-07-06T15:00:01.000Z"),
+        status: "failed",
+      },
+      phoneCallId: "hpc_failed",
+      status: "bridging",
+      windowEndAt: new Date("2026-07-06T15:30:00.000Z"),
+      windowStartAt: now,
+    });
+    mocks.getPrisma.mockReturnValue(prisma);
+
+    await expect(startCallCircleConnectorCall({
+      matchId: "hccm_123",
+      now,
+    })).resolves.toEqual({
+      phoneCallId: "hpc_failed",
+      status: "handoff",
+    });
+
+    expect(mocks.createHostedPhoneCall).not.toHaveBeenCalled();
+    expect(mocks.markCallCircleMatchOutcome).toHaveBeenCalledWith({
+      matchId: "hccm_123",
+      outcome: "connector_start_failed",
+      phoneCallId: "hpc_failed",
+      prisma: expect.any(Object),
+      status: "dropped",
+    });
+  });
+
   it("does not notify handoff when the outcome transition no longer applies", async () => {
     const now = new Date("2026-07-06T15:00:00.000Z");
     const prisma = createPrisma({
@@ -556,13 +618,12 @@ describe("startCallCircleConnectorCall", () => {
 
     expect(mocks.markCallCircleMatchOutcome).toHaveBeenCalledWith({
       matchId: "hccm_123",
-      now,
       outcome: "verified_phone_missing",
       phoneCallId: null,
       prisma: expect.any(Object),
       status: "dropped",
     });
-    expect(mocks.appendCallCircleHandoffNotificationTx).not.toHaveBeenCalled();
+    expect(mocks.appendCallCircleTerminalNotificationsTx).not.toHaveBeenCalled();
   });
 
   it("does not hand off from a stale no-call view after another worker attaches a bridge call", async () => {
@@ -596,7 +657,7 @@ describe("startCallCircleConnectorCall", () => {
         outcome: "connector_agent_unconfigured",
       }),
     );
-    expect(mocks.appendCallCircleHandoffNotificationTx).not.toHaveBeenCalled();
+    expect(mocks.appendCallCircleTerminalNotificationsTx).not.toHaveBeenCalled();
   });
 
   it("hands off an attached local pre-provider connector failure", async () => {
@@ -644,13 +705,12 @@ describe("startCallCircleConnectorCall", () => {
     });
     expect(mocks.markCallCircleMatchOutcome).toHaveBeenCalledWith({
       matchId: "hccm_123",
-      now,
       outcome: "connector_start_failed",
       phoneCallId: "hpc_failed",
       prisma: tx,
       status: "dropped",
     });
-    expect(mocks.appendCallCircleHandoffNotificationTx).toHaveBeenCalledTimes(2);
+    expect(mocks.appendCallCircleTerminalNotificationsTx).toHaveBeenCalledTimes(1);
   });
 
   it("hands off an attached definite provider rejection without provider identity", async () => {
@@ -693,13 +753,12 @@ describe("startCallCircleConnectorCall", () => {
 
     expect(mocks.markCallCircleMatchOutcome).toHaveBeenCalledWith({
       matchId: "hccm_123",
-      now,
       outcome: "connector_start_failed",
       phoneCallId: "hpc_failed",
       prisma: tx,
       status: "dropped",
     });
-    expect(mocks.appendCallCircleHandoffNotificationTx).toHaveBeenCalledTimes(2);
+    expect(mocks.appendCallCircleTerminalNotificationsTx).toHaveBeenCalledTimes(1);
   });
 
   it("terminalizes connector handoff even when one notification preflight is blocked", async () => {
@@ -716,9 +775,9 @@ describe("startCallCircleConnectorCall", () => {
     mocks.resolveVerifiedMemberTransferNumber
       .mockResolvedValueOnce(null)
       .mockResolvedValueOnce("+15552220000");
-    mocks.readCallCircleNotificationPreflightTx
-      .mockResolvedValueOnce({ reason: "quiet_hours", status: "blocked" })
-      .mockResolvedValueOnce({ route: { channel: "linq" }, status: "ok" });
+    mocks.appendCallCircleTerminalNotificationsTx.mockResolvedValueOnce([
+      { mailboxItemId: "mailbox_handoff", memberId: "member_b" },
+    ]);
 
     await expect(startCallCircleConnectorCall({
       matchId: "hccm_123",
@@ -727,19 +786,83 @@ describe("startCallCircleConnectorCall", () => {
 
     expect(mocks.markCallCircleMatchOutcome).toHaveBeenCalledWith({
       matchId: "hccm_123",
-      now,
       outcome: "verified_phone_missing",
       phoneCallId: null,
       prisma: expect.any(Object),
       status: "dropped",
     });
-    expect(mocks.appendCallCircleHandoffNotificationTx).toHaveBeenCalledTimes(1);
-    expect(mocks.appendCallCircleHandoffNotificationTx).toHaveBeenCalledWith(
-      expect.objectContaining({ memberId: "member_b" }),
+    expect(mocks.appendCallCircleTerminalNotificationsTx).toHaveBeenCalledWith(
+      expect.objectContaining({
+        memberAId: "member_a",
+        memberBId: "member_b",
+      }),
     );
-    expect(mocks.signalCallCircleNotificationRuntimesBestEffort).toHaveBeenCalledWith([
+    expect(mocks.signalHostedAssistantNotificationsBestEffort).toHaveBeenCalledWith([
       { mailboxItemId: "mailbox_handoff", memberId: "member_b" },
     ]);
+  });
+
+  it("terminalizes an attached unstarted phone reservation after the bridge window", async () => {
+    const now = new Date("2026-07-06T15:16:00.000Z");
+    const prisma = createPrisma({
+      finalAskedAt: new Date("2026-07-06T14:45:00.000Z"),
+      phoneCall: {
+        analyzedAt: null,
+        providerCallId: null,
+        providerStartAttemptedAt: null,
+        status: "starting",
+      },
+      phoneCallId: "hpc_unstarted",
+      status: "bridging",
+      windowEndAt: new Date("2026-07-06T17:00:00.000Z"),
+      windowStartAt: new Date("2026-07-06T15:00:00.000Z"),
+    });
+    mocks.getPrisma.mockReturnValue(prisma);
+
+    await expect(startCallCircleConnectorCall({
+      matchId: "hccm_123",
+      now,
+    })).resolves.toEqual({ status: "handoff" });
+
+    expect(mocks.terminalizeUnstartedHostedPhoneCall).toHaveBeenCalledWith({
+      phoneCallId: "hpc_unstarted",
+      prisma: expect.any(Object),
+    });
+    expect(mocks.markCallCircleMatchOutcome).toHaveBeenCalledWith({
+      matchId: "hccm_123",
+      outcome: "text_handoff",
+      phoneCallId: "hpc_unstarted",
+      prisma: expect.any(Object),
+      status: "dropped",
+    });
+    expect(mocks.createHostedPhoneCall).not.toHaveBeenCalled();
+  });
+
+  it("terminalizes an elapsed bridge even when timezone data blocks notification", async () => {
+    const now = new Date("2026-07-06T15:16:00.000Z");
+    const prisma = createPrisma({
+      finalAskedAt: new Date("2026-07-06T14:45:00.000Z"),
+      phoneCallId: null,
+      status: "both_confirmed",
+      windowEndAt: new Date("2026-07-06T17:00:00.000Z"),
+      windowStartAt: new Date("2026-07-06T15:00:00.000Z"),
+    });
+    mocks.getPrisma.mockReturnValue(prisma);
+    mocks.appendCallCircleTerminalNotificationsTx.mockResolvedValueOnce([]);
+
+    await expect(startCallCircleConnectorCall({
+      matchId: "hccm_123",
+      now,
+    })).resolves.toEqual({ status: "handoff" });
+
+    expect(mocks.markCallCircleMatchOutcome).toHaveBeenCalledWith({
+      matchId: "hccm_123",
+      outcome: "text_handoff",
+      phoneCallId: null,
+      prisma: expect.any(Object),
+      status: "dropped",
+    });
+    expect(mocks.appendCallCircleTerminalNotificationsTx).toHaveBeenCalledOnce();
   });
 });
 
@@ -747,6 +870,7 @@ function createPrisma(input: {
   finalAskedAt: Date | null;
   phoneCall?: {
     analyzedAt: Date | null;
+    endedAt?: Date | null;
     providerCallId: string | null;
     providerStartAttemptedAt?: Date | null;
     status: string;
@@ -765,6 +889,7 @@ function createPrisma(input: {
     phoneCall: input.phoneCall
       ? {
           ...input.phoneCall,
+          endedAt: input.phoneCall.endedAt ?? null,
           providerStartAttemptedAt: input.phoneCall.providerStartAttemptedAt ?? null,
         }
       : null,
@@ -792,7 +917,6 @@ function createPrisma(input: {
         (args.where?.memberId?.in ?? []).map((memberId) => ({
           memberId,
           preferencesJson: {
-            excludeMemberIds: [],
             timeZone: "UTC",
             windows: [{
               dayOfWeek: 1,

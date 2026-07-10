@@ -1,5 +1,6 @@
 import type { Prisma } from "@prisma/client";
 
+import { containsUrlLikeText } from "../primitives";
 import {
   buildHostedInviteUrl,
 } from "./invite-service";
@@ -401,15 +402,6 @@ function normalizeHostedLinqService(value: string | null | undefined): string | 
   const normalized = value.trim().toLowerCase();
 
   return normalized.length > 0 ? normalized : null;
-}
-
-function containsUrlLikeText(value: string): boolean {
-  if (/\b(?:[a-z][a-z\d+.-]*:\/\/|www\.)\S+/iu.test(value)) {
-    return true;
-  }
-
-  return /(?:^|[\s([<{])(?:[a-z\d](?:[a-z\d-]{0,61}[a-z\d])?\.)+(?:[a-z]{2,63}|xn--[a-z\d-]{2,59})(?::\d{2,5})?(?:[/?#][^\s<>)\]}]*)?(?=$|[\s).,!?;:>\]}])/iu
-    .test(value);
 }
 
 function containsSmsOptOutBoilerplate(value: string): boolean {

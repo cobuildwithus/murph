@@ -143,7 +143,6 @@ export async function consultPhoneCall(input: {
   call: HostedPhoneCallForConsultation;
   memberId: string;
   question: string;
-  transcript: string;
   transferNumberResolver?: (resolverInput: {
     memberId: string;
   }) => Promise<string | null>;

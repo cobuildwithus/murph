@@ -330,6 +330,11 @@ enum HostedPhoneCallStatus {
   failed
 }
 
+enum HostedPhoneCallTransferOutcome {
+  cancelled
+  bridged
+}
+
 enum HostedCallCircleParticipantStatus {
   enrolled
   paused
@@ -574,21 +579,22 @@ model HostedComputerHandoff {
 }
 
 model HostedPhoneCall {
-  id                       String                @id
-  memberId                 String                @map("member_id")
-  requestKey               String                @map("request_key")
-  provider                 String                @default("retell")
-  providerCallId           String?               @unique @map("provider_call_id")
-  providerStartAttemptedAt DateTime?             @map("provider_start_attempted_at")
-  status                   HostedPhoneCallStatus @default(starting)
-  briefJson                Json                  @map("brief_json")
-  resultJson               Json?                 @map("result_json")
-  endedAt                  DateTime?             @map("ended_at")
-  analyzedAt               DateTime?             @map("analyzed_at")
-  createdAt                DateTime              @default(now()) @map("created_at")
-  updatedAt                DateTime              @updatedAt @map("updated_at")
-  member                   HostedMember          @relation(fields: [memberId], references: [id], onDelete: Cascade)
-  callCircleMatches        HostedCallCircleMatch[]
+  id                       String                          @id
+  memberId                 String                          @map("member_id")
+  requestKey               String                          @map("request_key")
+  provider                 String                          @default("retell")
+  providerCallId           String?                         @unique @map("provider_call_id")
+  providerStartAttemptedAt DateTime?                       @map("provider_start_attempted_at")
+  status                   HostedPhoneCallStatus           @default(starting)
+  transferOutcome          HostedPhoneCallTransferOutcome? @map("transfer_outcome")
+  briefJson                Json                            @map("brief_json")
+  resultJson               Json?                           @map("result_json")
+  endedAt                  DateTime?                       @map("ended_at")
+  analyzedAt               DateTime?                       @map("analyzed_at")
+  createdAt                DateTime                        @default(now()) @map("created_at")
+  updatedAt                DateTime                        @updatedAt @map("updated_at")
+  member                   HostedMember                    @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  callCircleMatch          HostedCallCircleMatch?
 
   @@unique([memberId, requestKey])
   @@index([memberId, createdAt])
@@ -602,7 +608,8 @@ model HostedCallCircleParticipant {
   memberId        String                            @map("member_id")
   status          HostedCallCircleParticipantStatus @default(enrolled)
   preferencesJson Json?                             @map("preferences_json")
-  lastMatchedAt   DateTime?                         @map("last_matched_at")
+  nextMatchingAt  DateTime                          @default(now()) @map("next_matching_at")
+  pausedAt        DateTime?                         @map("paused_at")
   createdAt       DateTime                          @default(now()) @map("created_at")
   updatedAt       DateTime                          @updatedAt @map("updated_at")
   group           HostedGroup                       @relation(fields: [groupId], references: [id], onDelete: Cascade)
@@ -610,6 +617,7 @@ model HostedCallCircleParticipant {
 
   @@unique([groupId, memberId])
   @@index([memberId])
+  @@index([status, nextMatchingAt])
   @@map("hosted_call_circle_participant")
 }
 
@@ -627,10 +635,8 @@ model HostedCallCircleMatch {
   counterUsedB  Boolean                       @default(false) @map("counter_used_b")
   amAskedAt     DateTime?                     @map("am_asked_at")
   finalAskedAt  DateTime?                     @map("final_asked_at")
-  claimedAt     DateTime?                     @map("claimed_at")
-  endedAt       DateTime?                     @map("ended_at")
   outcome       String?
-  phoneCallId   String?                       @map("phone_call_id")
+  phoneCallId   String?                       @unique @map("phone_call_id")
   createdAt     DateTime                      @default(now()) @map("created_at")
   updatedAt     DateTime                      @updatedAt @map("updated_at")
   group         HostedGroup                   @relation(fields: [groupId], references: [id], onDelete: Cascade)
@@ -643,7 +649,6 @@ model HostedCallCircleMatch {
   @@index([status, windowStartAt])
   @@index([memberAId])
   @@index([memberBId])
-  @@index([phoneCallId])
   @@map("hosted_call_circle_match")
 }
 
@@ -1148,15 +1153,15 @@ model HostedGroup {
 }
 
 model HostedGroupJoinOffer {
-  id                  String      @id
-  groupId             String      @map("group_id")
-  offerFingerprint    String?     @unique @map("offer_fingerprint")
-  messageLookupKey    String?     @unique @map("message_lookup_key")
-  messageIdSuffix     String?     @map("message_id_suffix")
-  offerScopeJson      Json        @map("projection_kinds_json")
-  postedAt            DateTime    @map("posted_at")
-  revokedAt           DateTime?   @map("revoked_at")
-  group               HostedGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  id                 String      @id
+  groupId            String      @map("group_id")
+  messageLookupKey   String?     @unique @map("message_lookup_key")
+  messageIdSuffix    String?     @map("message_id_suffix")
+  offerScopeJson     Json        @map("projection_kinds_json")
+  postedAt           DateTime    @map("posted_at")
+  bindingAttemptedAt DateTime?   @map("binding_attempted_at")
+  revokedAt          DateTime?   @map("revoked_at")
+  group              HostedGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
 
   @@index([groupId, revokedAt, postedAt])
   @@map("hosted_group_join_offer")

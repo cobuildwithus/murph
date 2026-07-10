@@ -13,10 +13,7 @@ import type {
 } from "../src/assistant/hosted-tool-context.js";
 
 const REQUEST = {
-  groupId: "hgrp_123",
   kind: "confirm",
-  matchId: "hccm_123",
-  side: "A",
 } as const;
 
 describe("assistant Call Circle dynamic tool", () => {
@@ -29,6 +26,9 @@ describe("assistant Call Circle dynamic tool", () => {
     })).not.toContain(MURPH_CALL_CIRCLE_RESPOND_TOOL);
     expect(MURPH_CALL_CIRCLE_RESPOND_TOOL.description).toContain(
       "Never record an answer for another person",
+    );
+    expect(MURPH_CALL_CIRCLE_RESPOND_TOOL.description).toContain(
+      'For a match ask, yes means kind="confirm", no means kind="decline"',
     );
   });
 

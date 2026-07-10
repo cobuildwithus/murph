@@ -1,7 +1,15 @@
-export interface RetellCallAnalysisPayload {
-  call_summary?: string | null;
-  custom_analysis_data?: Record<string, unknown> | null;
-  [key: string]: unknown;
+interface RetellCallAnalysisPayload {
+  custom_analysis_data?: RetellCustomAnalysisPayload | null;
+}
+
+interface RetellCustomAnalysisPayload {
+  follow_up?: unknown;
+  outcome?: unknown;
+  result?: unknown;
+}
+
+interface RetellCallMetadataPayload {
+  murph_phone_call_id?: string | null;
 }
 
 export interface RetellCallPayload {
@@ -10,26 +18,24 @@ export interface RetellCallPayload {
   data_storage_setting?: string | null;
   disconnection_reason?: string | null;
   end_timestamp?: number | string | null;
-  metadata?: Record<string, unknown> | null;
-  transcript?: string | null;
-  [key: string]: unknown;
+  metadata?: RetellCallMetadataPayload | null;
 }
 
-export interface RetellAskMurphPayload {
+interface RetellAskMurphPayload {
   args: {
     question: string;
-    [key: string]: unknown;
   };
   call: RetellCallPayload;
-  name?: string;
-  [key: string]: unknown;
 }
 
-export interface RetellWebhookPayload {
+interface RetellWebhookPayload {
   call: RetellCallPayload;
   event: string;
-  [key: string]: unknown;
 }
+
+export type RetellTransferWebhookEvent =
+  | "transfer_bridged"
+  | "transfer_cancelled";
 
 export const retellCallPayloadSchema = {
   parse: parseRetellCallPayload,
@@ -54,15 +60,8 @@ function parseRetellAskMurphPayload(value: unknown): RetellAskMurphPayload {
   const question = requireTrimmedString(args.question, "Retell function question", 1_500);
 
   return {
-    ...record,
-    args: {
-      ...args,
-      question,
-    },
+    args: { question },
     call: parseRetellCallPayload(record.call),
-    ...(record.name === undefined
-      ? {}
-      : { name: readOptionalString(record.name, "Retell function name") ?? undefined }),
   };
 }
 
@@ -70,7 +69,6 @@ function parseRetellWebhookPayload(value: unknown): RetellWebhookPayload {
   const record = requireRecord(value, "Retell webhook payload");
 
   return {
-    ...record,
     call: parseRetellCallPayload(record.call),
     event: requireTrimmedString(record.event, "Retell webhook event", 200),
   };
@@ -79,22 +77,28 @@ function parseRetellWebhookPayload(value: unknown): RetellWebhookPayload {
 function parseRetellCallPayload(value: unknown): RetellCallPayload {
   const record = requireRecord(value, "Retell call payload");
   const callAnalysis = readOptionalCallAnalysis(record.call_analysis);
+  const dataStorageSetting = readOptionalString(
+    record.data_storage_setting,
+    "Retell data storage setting",
+  );
+  const disconnectionReason = readOptionalString(
+    record.disconnection_reason,
+    "Retell disconnection reason",
+  );
+  const endTimestamp = readOptionalTimestamp(record.end_timestamp);
+  const metadata = readOptionalCallMetadata(record.metadata);
 
   return {
-    ...record,
     call_id: requireTrimmedString(record.call_id, "Retell call id", 200),
     ...(callAnalysis === undefined ? {} : { call_analysis: callAnalysis }),
-    data_storage_setting: readOptionalString(
-      record.data_storage_setting,
-      "Retell data storage setting",
-    ),
-    disconnection_reason: readOptionalString(
-      record.disconnection_reason,
-      "Retell disconnection reason",
-    ),
-    end_timestamp: readOptionalTimestamp(record.end_timestamp),
-    metadata: readOptionalRecord(record.metadata, "Retell call metadata"),
-    transcript: readOptionalString(record.transcript, "Retell transcript"),
+    ...(dataStorageSetting === undefined
+      ? {}
+      : { data_storage_setting: dataStorageSetting }),
+    ...(disconnectionReason === undefined
+      ? {}
+      : { disconnection_reason: disconnectionReason }),
+    ...(endTimestamp === undefined ? {} : { end_timestamp: endTimestamp }),
+    ...(metadata === undefined ? {} : { metadata }),
   };
 }
 
@@ -107,14 +111,42 @@ function readOptionalCallAnalysis(value: unknown): RetellCallAnalysisPayload | n
     return record;
   }
 
+  const customAnalysisData = readOptionalCustomAnalysisData(
+    record.custom_analysis_data,
+  );
   return {
-    ...record,
-    call_summary: readOptionalString(record.call_summary, "Retell call summary"),
-    custom_analysis_data: readOptionalRecord(
-      record.custom_analysis_data,
-      "Retell custom analysis data",
-    ),
+    ...(customAnalysisData === undefined
+      ? {}
+      : { custom_analysis_data: customAnalysisData }),
   };
+}
+
+function readOptionalCustomAnalysisData(
+  value: unknown,
+): RetellCustomAnalysisPayload | null | undefined {
+  const record = readOptionalRecord(value, "Retell custom analysis data");
+  if (!record) return record;
+
+  return {
+    ...(record.follow_up === undefined ? {} : { follow_up: record.follow_up }),
+    ...(record.outcome === undefined ? {} : { outcome: record.outcome }),
+    ...(record.result === undefined ? {} : { result: record.result }),
+  };
+}
+
+function readOptionalCallMetadata(
+  value: unknown,
+): RetellCallMetadataPayload | null | undefined {
+  const record = readOptionalRecord(value, "Retell call metadata");
+  if (!record) return record;
+
+  const murphPhoneCallId = readOptionalString(
+    record.murph_phone_call_id,
+    "Retell Murph phone call id",
+  );
+  return murphPhoneCallId === undefined
+    ? {}
+    : { murph_phone_call_id: murphPhoneCallId };
 }
 
 function requireRecord(value: unknown, label: string): Record<string, unknown> {

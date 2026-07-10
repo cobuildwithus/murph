@@ -69,6 +69,7 @@ import {
   createHostedFamilyBillingCheckout,
   hasHostedAccountGroupMembershipAccess,
   hostedFamilyInviteHasReusableTarget,
+  HOSTED_FAMILY_MAX_SEATS,
   issueHostedFamilyInviteFromOwnerTx,
   issueHostedFamilyInviteTx,
   readHostedFamilyCheckoutSessionIdFromUrl,
@@ -2058,6 +2059,51 @@ describe("hosted Family plan", () => {
         id: "hbag_family",
       },
     });
+  });
+
+  it("locks active Family members before activating group billing", async () => {
+    const tx = createTxMock();
+
+    await writeHostedAccountGroupStripeBillingTx({
+      billingStatus: HostedBillingStatus.active,
+      groupId: "hbag_family",
+      tx,
+    });
+
+    expect(tx.$queryRaw.mock.calls.map((call) => call[1])).toEqual([
+      "member_mom",
+      "member_owner",
+    ]);
+    expect(tx.$queryRaw.mock.invocationCallOrder.at(-1)).toBeLessThan(
+      tx.hostedAccountGroup.update.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY,
+    );
+    expect(tx.hostedAccountGroupMembership.findMany).toHaveBeenCalledWith({
+      orderBy: { memberId: "asc" },
+      select: { memberId: true },
+      take: HOSTED_FAMILY_MAX_SEATS,
+      where: {
+        groupId: "hbag_family",
+        status: "active",
+      },
+    });
+  });
+
+  it("locks active Family members before removing sponsored access", async () => {
+    const tx = createTxMock();
+
+    await writeHostedAccountGroupStripeBillingTx({
+      billingStatus: HostedBillingStatus.unpaid,
+      groupId: "hbag_family",
+      tx,
+    });
+
+    expect(tx.$queryRaw.mock.calls.map((call) => call[1])).toEqual([
+      "member_mom",
+      "member_owner",
+    ]);
+    expect(tx.$queryRaw.mock.invocationCallOrder.at(-1)).toBeLessThan(
+      tx.hostedAccountGroup.update.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY,
+    );
   });
 
   it("creates a fresh Stripe Checkout Session for each billing start", async () => {

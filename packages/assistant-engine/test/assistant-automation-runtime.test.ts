@@ -7572,6 +7572,106 @@ describe('assistant auto-reply runtime', () => {
       'mailbox_call_circle_reply',
       'mailbox_setup_notification',
     ])
+    expect(sendInput?.answeredMailboxItemIds).toEqual([
+      'mailbox_call_circle_reply',
+      'mailbox_setup_notification',
+    ])
+  })
+
+  it('consumes every current mailbox item when a hosted reply burst exceeds the tool-context cap', async () => {
+    const reply = await vi.importActual<typeof import('../src/assistant/automation/reply.ts')>(
+      '../src/assistant/automation/reply.ts',
+    )
+    replyMocks.resolveAssistantSession.mockResolvedValue({
+      created: false,
+      session: {
+        lastTurnAt: '2026-04-08T00:03:00.000Z',
+        sessionId: 'session-burst',
+      },
+    })
+    replyMocks.listAssistantOutboxIntents.mockResolvedValue([
+      createSentOutboxIntent({
+        answeredMailboxItemIds: [
+          'mailbox_burst_05',
+          'mailbox_carried_context',
+        ],
+        channel: 'linq',
+        intentId: 'intent-burst-context',
+        message: 'earlier reply',
+        providerMessageId: 'linq-msg-burst-context',
+        providerThreadId: 'real_thread_burst',
+        sentAt: '2026-04-08T00:02:00.000Z',
+        sessionId: 'session-earlier-burst',
+        target: 'real_thread_burst',
+        threadId: null,
+      }),
+    ])
+    const currentMailboxItemIds = Array.from(
+      { length: 25 },
+      (_, index) => `mailbox_burst_${String(index).padStart(2, '0')}`,
+    )
+    const candidates = currentMailboxItemIds.map((itemId, index) =>
+      createCapturelessAssistantInputCandidate({
+        conversationThreadId: 'safe_thread_burst',
+        inputId: `ain_burst_${String(index).padStart(24, '0')}`,
+        mailboxRow: {
+          dedupeKey: `dedupe_burst_${index}`,
+          eventId: `event_burst_${index}`,
+          itemId,
+          laneSeq: String(100 + index),
+          sourceRefItemId: `blinded_burst_${index}`,
+        },
+        occurredAt: new Date(Date.UTC(2026, 3, 8, 0, 4, index)).toISOString(),
+        receivedAt: new Date(Date.UTC(2026, 3, 8, 0, 5, index)).toISOString(),
+        replyTarget: {
+          channel: 'linq',
+          messageId: 'linq-msg-burst-context',
+          threadId: 'real_thread_burst',
+        },
+        source: 'linq',
+        sourceMetadata: {
+          kind: 'linq',
+          partCount: 1,
+          reactionEligible: false,
+          replyToMessageId: 'linq-msg-burst-context',
+          service: null,
+        },
+        text: `burst message ${index}`,
+      })
+    )
+    const context = reply.createAssistantAutoReplyGroupContext(
+      candidates.map(createCapturelessReplyGroupItem),
+    )
+    if (!context) {
+      throw new Error('expected hosted burst reply context')
+    }
+
+    await reply.processAssistantAutoReplyGroup({
+      allowSelfAuthored: false,
+      context,
+      enabledChannels: ['linq'],
+      executionContext: {
+        hosted: {
+          memberId: 'member_burst',
+          userEnvKeys: [],
+        },
+      },
+      inboxServices: createInboxServices({
+        show: vi.fn(),
+      }),
+      requestId: null,
+      sessionMaxAgeMs: null,
+      vault: '/tmp/assistant-automation-vault',
+    })
+
+    const sendInput = replyMocks.sendAssistantMessage.mock.calls[0]?.[0]
+    expect(sendInput?.hostedDeliveryIdempotency?.contextMailboxItemIds).toEqual(
+      currentMailboxItemIds.slice(0, 20),
+    )
+    expect(sendInput?.answeredMailboxItemIds).toEqual([
+      ...currentMailboxItemIds,
+      'mailbox_carried_context',
+    ])
   })
 
   it('changes hosted delivery idempotency keys when route dimensions change', async () => {

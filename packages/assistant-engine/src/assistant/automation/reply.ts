@@ -2,8 +2,9 @@ import type { InboxServices } from '@murphai/inbox-services'
 import {
   readAssistantDeliveryFailureClass,
 } from '@murphai/operator-config/assistant/delivery-failure'
-import type {
-  AssistantSession,
+import {
+  ASSISTANT_ANSWERED_MAILBOX_ITEM_ID_LIMIT,
+  type AssistantSession,
 } from '@murphai/operator-config/assistant-cli-contracts'
 import type { AssistantUserMessageContentPart } from '../content-types.js'
 import type { AssistantAcceptedTurnInputItemInput } from '../active-turn-input-journal.js'
@@ -1351,6 +1352,8 @@ interface HostedAutoReplyDeliveryIdempotency {
   hostedDeliveryIdempotency: AssistantHostedDeliveryIdempotencyContext | null
 }
 
+const HOSTED_AUTO_REPLY_CONTEXT_MAILBOX_ITEM_LIMIT = 20
+
 function createHostedAutoReplyDeliveryIdempotency(input: {
   contextMailboxItemIds?: readonly string[] | null
   context: AssistantAutoReplyGroupContext
@@ -1418,10 +1421,18 @@ function createHostedAutoReplyDeliveryIdempotency(input: {
     input.context.firstItem.summary.conversation.actorId,
     input.context.firstItem.summary.conversation.threadId,
   ])
-  const contextMailboxItemIds = mergeUniqueHostedMailboxItemIds([
+  const orderedMailboxItemIds = mergeUniqueHostedMailboxItemIds([
     hostedMailboxItemIds,
     input.contextMailboxItemIds ?? [],
   ])
+  const contextMailboxItemIds = orderedMailboxItemIds.slice(
+    0,
+    HOSTED_AUTO_REPLY_CONTEXT_MAILBOX_ITEM_LIMIT,
+  )
+  const answeredMailboxItemIds = orderedMailboxItemIds.slice(
+    0,
+    ASSISTANT_ANSWERED_MAILBOX_ITEM_ID_LIMIT,
+  )
   const hostedDeliveryIdempotency = hostedMailboxItemIds.length === candidates.length
     ? {
         assistantTurnOrdinal,
@@ -1433,7 +1444,7 @@ function createHostedAutoReplyDeliveryIdempotency(input: {
     : null
 
   return {
-    answeredMailboxItemIds: hostedMailboxItemIds,
+    answeredMailboxItemIds,
     deliveryIdempotencyKey: createHostedDeliveryId({
       assistantTurnOrdinal,
       channel,

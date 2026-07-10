@@ -16,7 +16,7 @@ import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import { jsonOk, readOptionalJsonObject, withJsonError } from "@/src/lib/hosted-onboarding/http";
 import { HOSTED_ONBOARDING_TRANSACTION_OPTIONS } from "@/src/lib/hosted-onboarding/shared";
 import {
-  signalHostedMailboxAppendRuntime,
+  signalHostedMailboxAppendsBestEffort,
   signalHostedRuntimeMaintenanceRuntime,
 } from "@/src/lib/hosted-orchestration/signal-runtime";
 import { resolveDecodedRouteParam } from "@/src/lib/http";
@@ -78,26 +78,10 @@ export const POST = withJsonError(async (
     });
   }
 
-  await signalVaultShareCleanupRuntimesBestEffort(vaultShareCleanupSignals);
+  await signalHostedMailboxAppendsBestEffort(vaultShareCleanupSignals);
 
   return jsonOk({ ok: true, ...responseResult });
 });
-
-async function signalVaultShareCleanupRuntimesBestEffort(
-  signals: readonly { mailboxItemId: string; memberId: string }[],
-): Promise<void> {
-  await Promise.all(signals.map(async (signal) => {
-    try {
-      await signalHostedMailboxAppendRuntime({
-        expectedUserId: signal.memberId,
-        mailboxItemId: signal.mailboxItemId,
-      });
-    } catch {
-      // The revoke mailbox item is durable; the destination runtime will import it on a
-      // later wake if this best-effort signal fails.
-    }
-  }));
-}
 
 function parseSelectedVaultShareProjectionScopes(value: unknown): HostedVaultShareProjectionScope[] {
   if (value === undefined || value === null) return [];

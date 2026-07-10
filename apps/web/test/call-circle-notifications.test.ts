@@ -1,21 +1,34 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { Prisma } from "@prisma/client";
 
 vi.mock("server-only", () => ({}));
 
 const mocks = vi.hoisted(() => ({
   appendHostedAssistantNotificationTx: vi.fn(),
+  canUseActiveCallCircleParticipant: vi.fn(),
   hasHostedLinqInboundWithinDays: vi.fn(),
-  resolveHostedAssistantNotificationRouteTx: vi.fn(),
+  readCallCircleMatchParticipantTimeZones: vi.fn(),
+  resolveHostedAssistantNotificationTargetTx: vi.fn(),
   signalHostedMailboxAppendRuntime: vi.fn(),
 }));
 
 vi.mock("@/src/lib/hosted-execution/assistant-notifications", () => ({
   appendHostedAssistantNotificationTx: mocks.appendHostedAssistantNotificationTx,
-  resolveHostedAssistantNotificationRouteTx: mocks.resolveHostedAssistantNotificationRouteTx,
+  resolveHostedAssistantNotificationTargetTx: mocks.resolveHostedAssistantNotificationTargetTx,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/linq-daily-state", () => ({
   hasHostedLinqInboundWithinDays: mocks.hasHostedLinqInboundWithinDays,
+}));
+
+vi.mock("@/src/lib/call-circle/participant-store", () => ({
+  activeCallCircleParticipantWhere: ({ groupId, memberId }: {
+    groupId: string;
+    memberId: string;
+  }) => ({ groupId, memberId, status: "enrolled" }),
+  canUseActiveCallCircleParticipant: mocks.canUseActiveCallCircleParticipant,
+  readCallCircleMatchParticipantTimeZones:
+    mocks.readCallCircleMatchParticipantTimeZones,
 }));
 
 vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
@@ -23,11 +36,13 @@ vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
 }));
 
 import {
-  appendCallCircleOutcomeNotificationTx,
   appendCallCircleSetupNotificationTx,
-  buildCallCircleConfirmNotificationEventId,
-  buildCallCircleSetupNotificationEventId,
+  appendCallCircleTerminalNotificationIfReachableTx,
+  appendCallCircleTerminalNotificationsTx,
+  buildCallCircleTerminalNotificationEventId,
+  readCallCircleConfirmNotificationAnchor,
   readCallCircleNotificationPreflightTx,
+  readCallCircleSetupNotificationGroupId,
 } from "@/src/lib/call-circle/notifications";
 
 describe("Call Circle notifications", () => {
@@ -36,68 +51,122 @@ describe("Call Circle notifications", () => {
     mocks.appendHostedAssistantNotificationTx.mockResolvedValue({
       mailboxItemId: "hmi_123",
     });
+    mocks.canUseActiveCallCircleParticipant.mockResolvedValue(true);
     mocks.hasHostedLinqInboundWithinDays.mockResolvedValue(true);
-    mocks.resolveHostedAssistantNotificationRouteTx.mockResolvedValue({
-      actorId: "+15550002222",
-      channel: "linq",
-      delivery: {
-        kind: "thread",
-        target: "chat_123",
+    mocks.readCallCircleMatchParticipantTimeZones.mockResolvedValue({
+      memberATimeZone: "America/Los_Angeles",
+      memberBTimeZone: "America/New_York",
+    });
+    mocks.resolveHostedAssistantNotificationTargetTx.mockResolvedValue({
+      linqSourceLineLookupKey: "line_1",
+      route: {
+        actorId: "+15550002222",
+        channel: "linq",
+        delivery: {
+          kind: "thread",
+          target: "chat_123",
+        },
+        identityId: "hbidx:phone:v1:test",
+        threadId: "chat_123",
+        threadIsDirect: true,
       },
-      identityId: "hbidx:phone:v1:test",
-      threadId: "chat_123",
-      threadIsDirect: true,
     });
   });
 
   it("keys confirmation notifications by the proposed window", () => {
-    const first = buildCallCircleConfirmNotificationEventId({
-      matchId: "hccm_123",
-      memberId: "member_b",
-      stage: "am",
-      windowStartAt: new Date("2026-07-06T15:00:00.000Z"),
-    });
-    const countered = buildCallCircleConfirmNotificationEventId({
-      matchId: "hccm_123",
-      memberId: "member_b",
-      stage: "am",
-      windowStartAt: new Date("2026-07-06T16:00:00.000Z"),
-    });
+    const first =
+      "assistant.notification.requested:call-circle:am:hccm_123:member_b:2026-07-06T15:00:00.000Z";
+    const countered =
+      "assistant.notification.requested:call-circle:am:hccm_123:member_b:2026-07-06T16:00:00.000Z";
 
     expect(first).toBe(
       "assistant.notification.requested:call-circle:am:hccm_123:member_b:2026-07-06T15:00:00.000Z",
     );
+    expect(readCallCircleConfirmNotificationAnchor({
+      eventId: first,
+      memberId: "member_b",
+    })).toEqual({
+      key: "am:hccm_123:2026-07-06T15:00:00.000Z",
+      matchId: "hccm_123",
+      stage: "am",
+      windowStartAt: new Date("2026-07-06T15:00:00.000Z"),
+    });
     expect(countered).not.toBe(first);
   });
 
   it("can key setup notifications by a fresh offer anchor", () => {
-    expect(buildCallCircleSetupNotificationEventId({
-      groupId: "hgrp_123",
+    const offerEventId =
+      "assistant.notification.requested:call-circle:setup:hgrp_123:member_a:offer:hgjo_123";
+    expect(readCallCircleSetupNotificationGroupId({
+      eventId: offerEventId,
       memberId: "member_a",
-    })).toBe("assistant.notification.requested:call-circle:setup:hgrp_123:member_a");
-    expect(buildCallCircleSetupNotificationEventId({
-      groupId: "hgrp_123",
+    })).toBe("hgrp_123");
+  });
+
+  it("owns terminal notification identity and reachable append in one primitive", async () => {
+    const tx = createNotificationTx();
+
+    expect(buildCallCircleTerminalNotificationEventId({
+      kind: "handoff",
+      matchId: "hccm_123",
       memberId: "member_a",
-      offerId: "hgjo_123",
     })).toBe(
-      "assistant.notification.requested:call-circle:setup:hgrp_123:member_a:offer:hgjo_123",
+      "assistant.notification.requested:call-circle:handoff:hccm_123:member_a",
+    );
+    await expect(appendCallCircleTerminalNotificationIfReachableTx({
+      groupId: "hgrp_123",
+      kind: "outcome",
+      matchId: "hccm_123",
+      memberId: "member_a",
+      now: new Date("2026-07-06T15:30:00.000Z"),
+      timeZone: "America/New_York",
+      tx: tx as never,
+    })).resolves.toEqual({
+      mailboxItemId: "hmi_123",
+      status: "sent",
+    });
+    expect(mocks.appendHostedAssistantNotificationTx).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventId:
+          "assistant.notification.requested:call-circle:outcome:hccm_123:member_a",
+      }),
     );
   });
 
-  it("blocks private Call Circle notifications outside member daytime", async () => {
-    const tx = createNotificationTx({
-      memberTimeZone: "America/New_York",
-      now: new Date("2026-07-06T06:30:00.000Z"),
-    });
+  it("blocks scheduled Call Circle notifications outside member daytime", async () => {
+    const tx = createNotificationTx();
 
     await expect(readCallCircleNotificationPreflightTx({
       memberId: "member_a",
       now: new Date("2026-07-06T06:30:00.000Z"),
+      timeZone: "America/New_York",
       tx: tx as never,
     })).resolves.toEqual({
       reason: "quiet_hours",
       status: "blocked",
     });
+
+    expect(mocks.appendHostedAssistantNotificationTx).not.toHaveBeenCalled();
+  });
+
+  it("fails closed on an invalid stored timezone", async () => {
+    const tx = createNotificationTx();
+
+    await expect(appendCallCircleTerminalNotificationIfReachableTx({
+      groupId: "hgrp_123",
+      kind: "handoff",
+      matchId: "hccm_123",
+      memberId: "member_a",
+      now: new Date("2026-07-06T15:30:00.000Z"),
+      timeZone: "Not/A_Time_Zone",
+      tx: tx as never,
+    })).resolves.toBeNull();
+
+    expect(mocks.appendHostedAssistantNotificationTx).not.toHaveBeenCalled();
+  });
+
+  it("treats setup as an immediate follow-up while retaining route gates", async () => {
+    const tx = createNotificationTx();
 
     await expect(appendCallCircleSetupNotificationTx({
       groupId: "hgrp_123",
@@ -105,22 +174,89 @@ describe("Call Circle notifications", () => {
       now: new Date("2026-07-06T06:30:00.000Z"),
       tx: tx as never,
     })).resolves.toEqual({
-      reason: "quiet_hours",
-      status: "blocked",
+      mailboxItemId: "hmi_123",
+      status: "sent",
     });
+    expect(tx.hostedCallCircleParticipant.count).toHaveBeenCalledWith({
+      where: {
+        groupId: "hgrp_123",
+        memberId: "member_a",
+        preferencesJson: { equals: Prisma.DbNull },
+        status: "enrolled",
+      },
+    });
+  });
+
+  it("does not append setup after participant authority is lost", async () => {
+    const tx = createNotificationTx();
+    tx.hostedCallCircleParticipant.count.mockResolvedValueOnce(0);
+
+    await expect(appendCallCircleSetupNotificationTx({
+      groupId: "hgrp_123",
+      memberId: "member_a",
+      now: new Date("2026-07-06T06:30:00.000Z"),
+      tx: tx as never,
+    })).resolves.toBeNull();
+
+    expect(mocks.resolveHostedAssistantNotificationTargetTx).not.toHaveBeenCalled();
     expect(mocks.appendHostedAssistantNotificationTx).not.toHaveBeenCalled();
+  });
+
+  it("does not notify a member after current Call Circle authority is lost", async () => {
+    mocks.canUseActiveCallCircleParticipant.mockResolvedValue(false);
+
+    await expect(appendCallCircleTerminalNotificationIfReachableTx({
+      groupId: "hgrp_123",
+      kind: "outcome",
+      matchId: "hccm_123",
+      memberId: "member_a",
+      now: new Date("2026-07-06T15:30:00.000Z"),
+      timeZone: "America/New_York",
+      tx: createNotificationTx() as never,
+    })).resolves.toBeNull();
+
+    expect(mocks.canUseActiveCallCircleParticipant).toHaveBeenCalledWith({
+      groupId: "hgrp_123",
+      memberId: "member_a",
+      prisma: expect.any(Object),
+    });
+    expect(mocks.resolveHostedAssistantNotificationTargetTx).not.toHaveBeenCalled();
+    expect(mocks.appendHostedAssistantNotificationTx).not.toHaveBeenCalled();
+  });
+
+  it("owns both terminal notifications and their timezone lookup in one transaction", async () => {
+    const tx = createNotificationTx();
+
+    await expect(appendCallCircleTerminalNotificationsTx({
+      groupId: "hgrp_123",
+      kind: "outcome",
+      matchId: "hccm_123",
+      memberAId: "member_a",
+      memberBId: "member_b",
+      now: new Date("2026-07-06T18:00:00.000Z"),
+      tx: tx as never,
+    })).resolves.toEqual([
+      { mailboxItemId: "hmi_123", memberId: "member_a" },
+      { mailboxItemId: "hmi_123", memberId: "member_b" },
+    ]);
+
+    expect(mocks.readCallCircleMatchParticipantTimeZones).toHaveBeenCalledWith({
+      groupId: "hgrp_123",
+      memberAId: "member_a",
+      memberBId: "member_b",
+      prisma: tx,
+    });
+    expect(mocks.appendHostedAssistantNotificationTx).toHaveBeenCalledTimes(2);
   });
 
   it("blocks Linq Call Circle notifications without a recent inbound day", async () => {
     mocks.hasHostedLinqInboundWithinDays.mockResolvedValue(false);
-    const tx = createNotificationTx({
-      memberTimeZone: "America/New_York",
-      now: new Date("2026-07-06T15:30:00.000Z"),
-    });
+    const tx = createNotificationTx();
 
     await expect(readCallCircleNotificationPreflightTx({
       memberId: "member_a",
       now: new Date("2026-07-06T15:30:00.000Z"),
+      timeZone: "America/New_York",
       tx: tx as never,
     })).resolves.toEqual({
       reason: "missing_recent_inbound",
@@ -129,29 +265,30 @@ describe("Call Circle notifications", () => {
   });
 
   it("blocks Linq participant routes that runtime egress cannot send for Call Circle", async () => {
-    mocks.resolveHostedAssistantNotificationRouteTx.mockResolvedValue({
-      actorId: "+15550001111",
-      channel: "linq",
-      delivery: {
-        kind: "participant",
-        source: {
-          fromPhoneNumber: "+15550002222",
-          kind: "linq",
+    mocks.resolveHostedAssistantNotificationTargetTx.mockResolvedValue({
+      linqSourceLineLookupKey: "line_1",
+      route: {
+        actorId: "+15550001111",
+        channel: "linq",
+        delivery: {
+          kind: "participant",
+          source: {
+            fromPhoneNumber: "+15550002222",
+            kind: "linq",
+          },
+          target: "+15550001111",
         },
-        target: "+15550001111",
+        identityId: "hbidx:phone:v1:test",
+        threadId: null,
+        threadIsDirect: true,
       },
-      identityId: "hbidx:phone:v1:test",
-      threadId: null,
-      threadIsDirect: true,
     });
-    const tx = createNotificationTx({
-      memberTimeZone: "America/New_York",
-      now: new Date("2026-07-06T15:30:00.000Z"),
-    });
+    const tx = createNotificationTx();
 
     await expect(readCallCircleNotificationPreflightTx({
       memberId: "member_a",
       now: new Date("2026-07-06T15:30:00.000Z"),
+      timeZone: "America/New_York",
       tx: tx as never,
     })).resolves.toEqual({
       reason: "missing_route",
@@ -159,33 +296,38 @@ describe("Call Circle notifications", () => {
     });
 
     expect(mocks.hasHostedLinqInboundWithinDays).not.toHaveBeenCalled();
-    expect(tx.hostedLinqLine.count).not.toHaveBeenCalled();
+    expect(tx.hostedLinqLine.findUnique).not.toHaveBeenCalled();
+  });
+
+  it("checks the exact routed Linq line instead of any healthy line", async () => {
+    const tx = createNotificationTx(false);
+
+    await expect(readCallCircleNotificationPreflightTx({
+      memberId: "member_a",
+      now: new Date("2026-07-06T15:30:00.000Z"),
+      timeZone: "America/New_York",
+      tx: tx as never,
+    })).resolves.toEqual({
+      reason: "line_unavailable",
+      status: "blocked",
+    });
+
+    expect(tx.hostedLinqLine.findUnique).toHaveBeenCalledWith({
+      select: { phoneNumberLookupKey: true },
+      where: expect.objectContaining({ phoneNumberLookupKey: "line_1" }),
+    });
   });
 
   it("keeps completed-call notifications informational without a renewal yes/no prompt", async () => {
-    const tx = createNotificationTx({
-      memberTimeZone: "America/New_York",
-      now: new Date("2026-07-06T15:30:00.000Z"),
-    });
+    const tx = createNotificationTx();
 
-    await expect(appendCallCircleOutcomeNotificationTx({
+    await expect(appendCallCircleTerminalNotificationIfReachableTx({
+      groupId: "hgrp_123",
+      kind: "outcome",
       matchId: "hccm_123",
       memberId: "member_a",
       now: new Date("2026-07-06T15:30:00.000Z"),
-      preflight: {
-        route: {
-          actorId: "+15550002222",
-          channel: "linq",
-          delivery: {
-            kind: "thread",
-            target: "chat_123",
-          },
-          identityId: "hbidx:phone:v1:test",
-          threadId: "chat_123",
-          threadIsDirect: true,
-        },
-        status: "ok",
-      },
+      timeZone: "America/New_York",
       tx: tx as never,
     })).resolves.toEqual({
       mailboxItemId: "hmi_123",
@@ -202,18 +344,15 @@ describe("Call Circle notifications", () => {
   });
 });
 
-function createNotificationTx(input: {
-  memberTimeZone: string | null;
-  now: Date;
-}) {
+function createNotificationTx(lineAvailable = true) {
   return {
-    hostedLinqLine: {
+    hostedCallCircleParticipant: {
       count: vi.fn(async () => 1),
     },
-    hostedMember: {
-      findUnique: vi.fn(async () => ({
-        pendingActivationTimeZone: input.memberTimeZone,
-      })),
+    hostedLinqLine: {
+      findUnique: vi.fn(async () => lineAvailable
+        ? { phoneNumberLookupKey: "line_1" }
+        : null),
     },
   };
 }

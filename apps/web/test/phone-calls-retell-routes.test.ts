@@ -7,7 +7,8 @@ const mocks = vi.hoisted(() => ({
   getHostedPhoneCallForConsultation: vi.fn(),
   handleRetellCallAnalyzed: vi.fn(),
   handleRetellCallEnded: vi.fn(),
-  signalHostedMailboxAppendRuntime: vi.fn(),
+  handleRetellTransferOutcome: vi.fn(),
+  signalHostedAssistantNotificationsBestEffort: vi.fn(),
 }));
 
 vi.mock("@/src/lib/phone-calls/consult", () => ({
@@ -18,10 +19,12 @@ vi.mock("@/src/lib/phone-calls/consult", () => ({
 vi.mock("@/src/lib/phone-calls/result", () => ({
   handleRetellCallAnalyzed: mocks.handleRetellCallAnalyzed,
   handleRetellCallEnded: mocks.handleRetellCallEnded,
+  handleRetellTransferOutcome: mocks.handleRetellTransferOutcome,
 }));
 
-vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
-  signalHostedMailboxAppendRuntime: mocks.signalHostedMailboxAppendRuntime,
+vi.mock("@/src/lib/hosted-execution/assistant-notifications", () => ({
+  signalHostedAssistantNotificationsBestEffort:
+    mocks.signalHostedAssistantNotificationsBestEffort,
 }));
 
 type AskMurphRouteModule = typeof import("../app/api/retell/functions/ask-murph/route");
@@ -53,14 +56,18 @@ describe("Retell ask_murph route", () => {
       directive: "continue",
     });
     mocks.handleRetellCallAnalyzed.mockResolvedValue({
-      notificationMailboxItemId: "mailbox_item_123",
-      notificationUserId: "member_123",
+      notificationSignals: [{
+        mailboxItemId: "mailbox_item_123",
+        memberId: "member_123",
+      }],
     });
-    mocks.handleRetellCallEnded.mockResolvedValue(undefined);
-    mocks.signalHostedMailboxAppendRuntime.mockResolvedValue({
-      signalAccepted: true,
-      workflowId: "hosted-user-runtime:member_123",
+    mocks.handleRetellCallEnded.mockResolvedValue({
+      notificationSignals: [],
     });
+    mocks.handleRetellTransferOutcome.mockResolvedValue({
+      notificationSignals: [],
+    });
+    mocks.signalHostedAssistantNotificationsBestEffort.mockResolvedValue(undefined);
   });
 
   it("verifies the signed raw Retell function body and returns Murph advice", async () => {
@@ -98,11 +105,10 @@ describe("Retell ask_murph route", () => {
       }),
       memberId: "member_123",
       question: "The office has 11:15 AM and 3:45 PM. Which should I choose?",
-      transcript: "Retell transcript so far.",
     });
   });
 
-  it("accepts signed ask_murph payloads with long Retell transcripts", async () => {
+  it("drops unneeded Retell transcript fields before ask_murph consultation", async () => {
     const longTranscript = "caller ".repeat(50 * 1024);
     const response = await askMurphRoute.POST(signedRetellRequest({
       payload: {
@@ -124,7 +130,7 @@ describe("Retell ask_murph route", () => {
     expect(response.status).toBe(200);
     const consultInput = mocks.consultPhoneCall.mock.calls.at(-1)?.[0];
     expect(consultInput?.question).toBe("The office needs guidance. What should I do?");
-    expect(consultInput?.transcript).toHaveLength(longTranscript.length);
+    expect(consultInput).not.toHaveProperty("transcript");
   });
 
   it("rejects ask_murph calls that do not carry the Murph call id", async () => {
@@ -153,6 +159,14 @@ describe("Retell ask_murph route", () => {
   });
 
   it("routes only Retell call lifecycle webhook events Murph consumes", async () => {
+    mocks.handleRetellTransferOutcome
+      .mockResolvedValueOnce({
+        notificationSignals: [{
+          mailboxItemId: "mailbox_item_bridge",
+          memberId: "member_bridge",
+        }],
+      })
+      .mockResolvedValueOnce({ notificationSignals: [] });
     const endedPayload = {
       call: {
         call_id: "retell_call_123",
@@ -178,6 +192,20 @@ describe("Retell ask_murph route", () => {
       },
       event: "call_started",
     };
+    const bridgedPayload = {
+      call: {
+        call_id: "retell_call_123",
+      },
+      event: "transfer_bridged",
+      transfer_destination: "+12125550123",
+      transfer_option: { type: "warm_transfer" },
+    };
+    const cancelledPayload = {
+      call: {
+        call_id: "retell_call_123",
+      },
+      event: "transfer_cancelled",
+    };
 
     await expect(retellWebhookRoute.POST(signedRetellRequest({
       payload: endedPayload,
@@ -189,6 +217,14 @@ describe("Retell ask_murph route", () => {
     }))).resolves.toMatchObject({ status: 204 });
     await expect(retellWebhookRoute.POST(signedRetellRequest({
       payload: ignoredPayload,
+      url: "https://join.example.test/api/retell/webhook",
+    }))).resolves.toMatchObject({ status: 204 });
+    await expect(retellWebhookRoute.POST(signedRetellRequest({
+      payload: bridgedPayload,
+      url: "https://join.example.test/api/retell/webhook",
+    }))).resolves.toMatchObject({ status: 204 });
+    await expect(retellWebhookRoute.POST(signedRetellRequest({
+      payload: cancelledPayload,
       url: "https://join.example.test/api/retell/webhook",
     }))).resolves.toMatchObject({ status: 204 });
 
@@ -204,14 +240,31 @@ describe("Retell ask_murph route", () => {
     });
     expect(mocks.handleRetellCallEnded).toHaveBeenCalledTimes(1);
     expect(mocks.handleRetellCallAnalyzed).toHaveBeenCalledTimes(1);
-    expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledTimes(1);
-    expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
-      expectedUserId: "member_123",
-      mailboxItemId: "mailbox_item_123",
+    expect(mocks.handleRetellTransferOutcome).toHaveBeenNthCalledWith(1, {
+      call: expect.objectContaining({
+        call_id: "retell_call_123",
+      }),
+      event: "transfer_bridged",
     });
+    expect(mocks.handleRetellTransferOutcome).toHaveBeenNthCalledWith(2, {
+      call: expect.objectContaining({
+        call_id: "retell_call_123",
+      }),
+      event: "transfer_cancelled",
+    });
+    expect(mocks.handleRetellTransferOutcome).toHaveBeenCalledTimes(2);
+    expect(mocks.signalHostedAssistantNotificationsBestEffort).toHaveBeenCalledTimes(4);
+    expect(mocks.signalHostedAssistantNotificationsBestEffort).toHaveBeenCalledWith([{
+      mailboxItemId: "mailbox_item_123",
+      memberId: "member_123",
+    }]);
+    expect(mocks.signalHostedAssistantNotificationsBestEffort).toHaveBeenCalledWith([{
+      mailboxItemId: "mailbox_item_bridge",
+      memberId: "member_bridge",
+    }]);
   });
 
-  it("accepts signed call_analyzed webhooks with long Retell transcripts", async () => {
+  it("drops unneeded Retell transcript fields before call analysis handling", async () => {
     const longTranscript = "agent ".repeat(120 * 1024);
 
     const response = await retellWebhookRoute.POST(signedRetellRequest({
@@ -238,20 +291,19 @@ describe("Retell ask_murph route", () => {
     expect(mocks.handleRetellCallAnalyzed).toHaveBeenCalledWith({
       call: expect.objectContaining({
         call_id: "retell_call_123",
-        transcript: expect.stringMatching(/^agent /u),
       }),
     });
-    expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
-      expectedUserId: "member_123",
+    expect(mocks.handleRetellCallAnalyzed.mock.calls.at(-1)?.[0]?.call)
+      .not.toHaveProperty("transcript");
+    expect(mocks.signalHostedAssistantNotificationsBestEffort).toHaveBeenCalledWith([{
       mailboxItemId: "mailbox_item_123",
-    });
+      memberId: "member_123",
+    }]);
   });
 
   it("does not wake the runtime when call_analyzed did not append a notification", async () => {
     mocks.handleRetellCallAnalyzed.mockResolvedValueOnce({
-      notificationMailboxItemId: null,
       notificationSignals: [],
-      notificationUserId: null,
     });
 
     const response = await retellWebhookRoute.POST(signedRetellRequest({
@@ -266,23 +318,21 @@ describe("Retell ask_murph route", () => {
     }));
 
     expect(response.status).toBe(204);
-    expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
+    expect(mocks.signalHostedAssistantNotificationsBestEffort).toHaveBeenCalledWith([]);
   });
 
   it("wakes every returned call_analyzed notification signal", async () => {
     mocks.handleRetellCallAnalyzed.mockResolvedValueOnce({
-      notificationMailboxItemId: "mailbox_item_a",
       notificationSignals: [
         {
-          notificationMailboxItemId: "mailbox_item_a",
-          notificationUserId: "member_a",
+          mailboxItemId: "mailbox_item_a",
+          memberId: "member_a",
         },
         {
-          notificationMailboxItemId: "mailbox_item_b",
-          notificationUserId: "member_b",
+          mailboxItemId: "mailbox_item_b",
+          memberId: "member_b",
         },
       ],
-      notificationUserId: "member_a",
     });
 
     const response = await retellWebhookRoute.POST(signedRetellRequest({
@@ -297,15 +347,13 @@ describe("Retell ask_murph route", () => {
     }));
 
     expect(response.status).toBe(204);
-    expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledTimes(2);
-    expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
-      expectedUserId: "member_a",
+    expect(mocks.signalHostedAssistantNotificationsBestEffort).toHaveBeenCalledWith([{
       mailboxItemId: "mailbox_item_a",
-    });
-    expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
-      expectedUserId: "member_b",
+      memberId: "member_a",
+    }, {
       mailboxItemId: "mailbox_item_b",
-    });
+      memberId: "member_b",
+    }]);
   });
 });
 

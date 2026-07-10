@@ -145,17 +145,22 @@ describe("sendHostedLinqChatMessage", () => {
       return createJsonResponse({
         chat_id: "chat_123",
         message: {
+          created_at: "2026-07-01T12:34:56.000Z",
           id: "msg_123",
         },
       }, 200);
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    await sendHostedLinqChatMessage({
+    await expect(sendHostedLinqChatMessage({
       chatId: "chat_123",
       idempotencyKey: "linq-message:evt_123",
       message: "hello",
       replyToMessageId: "msg_parent_123",
+    })).resolves.toEqual({
+      chatId: "chat_123",
+      messageId: "msg_123",
+      providerCreatedAt: new Date("2026-07-01T12:34:56.000Z"),
     });
 
     const firstCall = fetchMock.mock.calls[0];
@@ -192,6 +197,7 @@ describe("sendHostedLinqChatMessage", () => {
     })).resolves.toEqual({
       chatId: null,
       messageId: null,
+      providerCreatedAt: null,
     });
 
     expect(fetchMock).toHaveBeenCalledTimes(1);

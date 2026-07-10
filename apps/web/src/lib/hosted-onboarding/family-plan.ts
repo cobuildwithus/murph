@@ -873,7 +873,22 @@ export async function writeHostedAccountGroupStripeBillingTx(input: {
     return null;
   }
 
-  await lockHostedMemberRow(input.tx, group.ownerMemberId);
+  const activeMemberIds = (await input.tx.hostedAccountGroupMembership.findMany({
+    orderBy: { memberId: "asc" },
+    select: { memberId: true },
+    take: HOSTED_FAMILY_MAX_SEATS,
+    where: {
+      groupId: input.groupId,
+      status: "active",
+    },
+  })).map((membership) => membership.memberId);
+  const memberIdsToLock = [...new Set([
+    group.ownerMemberId,
+    ...activeMemberIds,
+  ])].sort();
+  for (const memberId of memberIdsToLock) {
+    await lockHostedMemberRow(input.tx, memberId);
+  }
 
   const currentBillingRef = await input.tx.hostedAccountGroupBillingRef.findUnique({
     select: hostedAccountGroupBillingRefSelect,

@@ -31,10 +31,7 @@ describe("Call Circle internal response route", () => {
 
   it("authenticates the raw Cloudflare callback body before handling the response", async () => {
     const payload = {
-      groupId: "hgrp_123",
-      kind: "confirm",
-      matchId: "hccm_123",
-      side: "A",
+      request: { kind: "confirm" },
     };
     const rawBody = JSON.stringify(payload);
     const request = new Request("https://web.example.test/api/internal/call-circle/respond", {
@@ -56,7 +53,7 @@ describe("Call Circle internal response route", () => {
     expect(mocks.handleCallCircleRespond).toHaveBeenCalledWith({
       context: undefined,
       memberId: "member_123",
-      request: payload,
+      request: payload.request,
     });
   });
 

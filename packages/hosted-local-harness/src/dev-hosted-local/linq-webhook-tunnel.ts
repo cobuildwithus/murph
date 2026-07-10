@@ -14,6 +14,7 @@ export const HOSTED_LOCAL_LINQ_WEBHOOK_PATH =
   "/api/hosted-onboarding/linq/webhook";
 const HOSTED_LOCAL_LINQ_WEBHOOK_EVENTS = [
   "message.received",
+  "message.sent",
   "reaction.added",
   "reaction.removed",
 ] as const;

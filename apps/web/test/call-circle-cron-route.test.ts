@@ -33,7 +33,6 @@ describe("Call Circle cron route", () => {
       expired: 4,
       handoffs: 5,
       proposals: 6,
-      resultNotifications: 7,
       setupAsks: 8,
     });
   });
@@ -78,7 +77,6 @@ describe("Call Circle cron route", () => {
           expired: 4,
           handoffs: 5,
           proposals: 6,
-          resultNotifications: 7,
           setupAsks: 8,
         },
         status: "ran",

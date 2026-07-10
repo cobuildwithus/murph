@@ -1,8 +1,6 @@
+import { isValidIanaTimeZone } from "@murphai/contracts";
 import { z } from "zod";
 
-const hostedCallCircleMemberIdSchema = z.string().trim().min(1).max(200);
-const hostedCallCircleGroupIdSchema = z.string().trim().min(1).max(200);
-const hostedCallCircleMatchIdSchema = z.string().trim().min(1).max(200);
 const hostedCallCircleMailboxItemIdSchema = z.string().trim().min(1).max(200);
 const hostedCallCircleLocalTimeSchema = z
   .string()
@@ -14,11 +12,12 @@ const hostedCallCircleTimeZoneSchema = z
   .trim()
   .min(1)
   .max(100)
-  .refine(isHostedCallCircleTimeZone, "Call Circle timeZone must be a valid IANA time zone.");
+  .refine(isValidIanaTimeZone, "Call Circle timeZone must be a valid IANA time zone.");
 
 export const hostedCallCircleAvailabilityWindowSchema = z
   .object({
-    dayOfWeek: z.number().int().min(0).max(6),
+    dayOfWeek: z.number().int().min(0).max(6)
+      .describe("Day of week: 0 = Sunday through 6 = Saturday."),
     endLocalTime: hostedCallCircleLocalTimeSchema,
     startLocalTime: hostedCallCircleLocalTimeSchema,
   })
@@ -30,7 +29,6 @@ export const hostedCallCircleAvailabilityWindowSchema = z
 
 export const hostedCallCirclePreferencesSchema = z
   .object({
-    excludeMemberIds: z.array(hostedCallCircleMemberIdSchema).max(100).default([]),
     timeZone: hostedCallCircleTimeZoneSchema,
     windows: z.array(hostedCallCircleAvailabilityWindowSchema).max(28).default([]),
   })
@@ -47,48 +45,52 @@ export const hostedCallCircleCounterWindowSchema = z
     "Call Circle counter windows must start before they end.",
   );
 
-export const hostedCallCircleRespondRequestSchema = z
-  .object({
-    counterWindow: hostedCallCircleCounterWindowSchema.optional(),
-    excludeMemberIds: z.array(hostedCallCircleMemberIdSchema).max(100).optional(),
-    groupId: hostedCallCircleGroupIdSchema.optional(),
-    kind: z.enum(["preferences", "confirm", "counter", "decline", "pause", "resume"]),
-    matchId: hostedCallCircleMatchIdSchema.optional(),
-    side: z.enum(["A", "B"]).optional(),
-    timeZone: hostedCallCircleTimeZoneSchema.optional(),
-    windows: z.array(hostedCallCircleAvailabilityWindowSchema).max(28).optional(),
-  })
-  .strict()
-  .superRefine((request, context) => {
-    if (request.kind === "preferences" && request.windows === undefined) {
-      context.addIssue({
-        code: "custom",
-        message: "Call Circle preferences require availability windows.",
-        path: ["windows"],
-      });
-    }
-    if (request.kind === "preferences" && request.timeZone === undefined) {
-      context.addIssue({
-        code: "custom",
-        message: "Call Circle preferences require a timeZone.",
-        path: ["timeZone"],
-      });
-    }
-    if (request.kind === "counter" && request.counterWindow === undefined) {
-      context.addIssue({
-        code: "custom",
-        message: "Call Circle counter responses require a counter window.",
-        path: ["counterWindow"],
-      });
-    }
-  });
+export const hostedCallCircleRespondRequestSchema = z.discriminatedUnion("kind", [
+  z
+    .object({
+      kind: z.literal("preferences"),
+      timeZone: hostedCallCircleTimeZoneSchema,
+      windows: z.array(hostedCallCircleAvailabilityWindowSchema).max(28),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("confirm"),
+    })
+    .strict(),
+  z
+    .object({
+      counterWindow: hostedCallCircleCounterWindowSchema,
+      kind: z.literal("counter"),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("decline"),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("pause"),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("resume"),
+    })
+    .strict(),
+]);
 
-export const hostedCallCircleRespondResponseSchema = z
-  .object({
-    status: z.enum(["ok", "ignored", "unavailable"]),
-    unavailableReason: z.string().trim().min(1).max(500).optional(),
-  })
-  .strict();
+export const hostedCallCircleRespondResponseSchema = z.discriminatedUnion("status", [
+  z.object({ status: z.literal("ok") }).strict(),
+  z.object({ status: z.literal("ignored") }).strict(),
+  z
+    .object({
+      status: z.literal("unavailable"),
+      unavailableReason: z.string().trim().min(1).max(500),
+    })
+    .strict(),
+]);
 
 export const hostedCallCircleRespondContextSchema = z
   .object({
@@ -96,15 +98,12 @@ export const hostedCallCircleRespondContextSchema = z
   })
   .strict();
 
-export const hostedCallCircleRespondControlRequestSchema = z.union([
-  hostedCallCircleRespondRequestSchema,
-  z
-    .object({
-      context: hostedCallCircleRespondContextSchema.optional(),
-      request: hostedCallCircleRespondRequestSchema,
-    })
-    .strict(),
-]);
+export const hostedCallCircleRespondControlRequestSchema = z
+  .object({
+    context: hostedCallCircleRespondContextSchema.optional(),
+    request: hostedCallCircleRespondRequestSchema,
+  })
+  .strict();
 
 export const HOSTED_CALL_CIRCLE_RESPOND_PATH =
   "/api/internal/call-circle/respond" as const;
@@ -115,45 +114,16 @@ export type HostedCallCircleAvailabilityWindow = z.infer<
 export type HostedCallCirclePreferences = z.infer<
   typeof hostedCallCirclePreferencesSchema
 >;
-export type HostedCallCircleCounterWindow = z.infer<
-  typeof hostedCallCircleCounterWindowSchema
->;
 export type HostedCallCircleRespondRequest = z.infer<
   typeof hostedCallCircleRespondRequestSchema
 >;
 export type HostedCallCircleRespondContext = z.infer<
   typeof hostedCallCircleRespondContextSchema
 >;
-export type HostedCallCircleRespondControlRequest = z.infer<
-  typeof hostedCallCircleRespondControlRequestSchema
->;
 export type HostedCallCircleRespondResponse = z.infer<
   typeof hostedCallCircleRespondResponseSchema
 >;
 
-export function parseHostedCallCircleRespondRequest(
-  value: unknown,
-): HostedCallCircleRespondRequest {
-  return hostedCallCircleRespondRequestSchema.parse(value);
-}
-
-export function parseHostedCallCircleRespondControlRequest(
-  value: unknown,
-): HostedCallCircleRespondControlRequest {
-  return hostedCallCircleRespondControlRequestSchema.parse(value);
-}
-
-export function parseHostedCallCircleRespondResponse(
-  value: unknown,
-): HostedCallCircleRespondResponse {
-  return hostedCallCircleRespondResponseSchema.parse(value);
-}
-
-function isHostedCallCircleTimeZone(value: string): boolean {
-  try {
-    new Intl.DateTimeFormat("en-US", { timeZone: value }).format(new Date(0));
-    return true;
-  } catch {
-    return false;
-  }
+export function isHostedCallCircleTimeZone(value: string): boolean {
+  return isValidIanaTimeZone(value);
 }

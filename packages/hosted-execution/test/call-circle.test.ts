@@ -1,15 +1,21 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  hostedCallCirclePreferencesSchema,
+  hostedCallCircleRespondControlRequestSchema,
   hostedCallCircleRespondRequestSchema,
   hostedCallCircleRespondResponseSchema,
+  isHostedCallCircleTimeZone,
 } from "../src/call-circle.js";
 
 describe("hosted Call Circle contracts", () => {
+  it("exposes the shared IANA timezone validator", () => {
+    expect(isHostedCallCircleTimeZone("America/New_York")).toBe(true);
+    expect(isHostedCallCircleTimeZone("not/a-timezone")).toBe(false);
+  });
+
   it("parses member preference responses", () => {
     expect(hostedCallCircleRespondRequestSchema.parse({
-      excludeMemberIds: ["member_2"],
-      groupId: "hgrp_123",
       kind: "preferences",
       timeZone: "America/New_York",
       windows: [
@@ -20,8 +26,6 @@ describe("hosted Call Circle contracts", () => {
         },
       ],
     })).toEqual({
-      excludeMemberIds: ["member_2"],
-      groupId: "hgrp_123",
       kind: "preferences",
       timeZone: "America/New_York",
       windows: [
@@ -34,9 +38,17 @@ describe("hosted Call Circle contracts", () => {
     });
   });
 
+  it("uses one contextual control-plane envelope", () => {
+    expect(hostedCallCircleRespondControlRequestSchema.parse({
+      request: { kind: "confirm" },
+    })).toEqual({ request: { kind: "confirm" } });
+    expect(() => hostedCallCircleRespondControlRequestSchema.parse({
+      kind: "confirm",
+    })).toThrow(/request/u);
+  });
+
   it("requires a timezone for preference responses", () => {
     expect(() => hostedCallCircleRespondRequestSchema.parse({
-      groupId: "hgrp_123",
       kind: "preferences",
       windows: [
         {
@@ -46,6 +58,14 @@ describe("hosted Call Circle contracts", () => {
         },
       ],
     })).toThrow(/timeZone/u);
+  });
+
+  it("rejects unknown stored preference fields", () => {
+    expect(() => hostedCallCirclePreferencesSchema.parse({
+      excludeMemberIds: ["member_legacy"],
+      timeZone: "America/New_York",
+      windows: [],
+    })).toThrow(/Unrecognized key/u);
   });
 
   it("allows lifecycle replies without explicit match identity", () => {
@@ -62,14 +82,32 @@ describe("hosted Call Circle contracts", () => {
         endAt: "2026-07-08T22:30:00.000Z",
         startAt: "2026-07-08T22:00:00.000Z",
       },
-      groupId: "hgrp_123",
       kind: "counter",
-      matchId: "hccm_123",
-      side: "A",
     }).kind).toBe("counter");
 
     expect(hostedCallCircleRespondResponseSchema.parse({
       status: "ok",
     })).toEqual({ status: "ok" });
+    expect(hostedCallCircleRespondResponseSchema.parse({
+      status: "unavailable",
+      unavailableReason: "call_circle_match_unavailable",
+    })).toEqual({
+      status: "unavailable",
+      unavailableReason: "call_circle_match_unavailable",
+    });
+    expect(() => hostedCallCircleRespondResponseSchema.parse({
+      status: "unavailable",
+    })).toThrow(/unavailableReason/u);
+    expect(() => hostedCallCircleRespondResponseSchema.parse({
+      status: "ok",
+      unavailableReason: "not allowed",
+    })).toThrow(/Unrecognized key/u);
+  });
+
+  it("rejects model-supplied response targets", () => {
+    expect(() => hostedCallCircleRespondRequestSchema.parse({
+      kind: "confirm",
+      matchId: "hccm_123",
+    })).toThrow(/Unrecognized key/u);
   });
 });

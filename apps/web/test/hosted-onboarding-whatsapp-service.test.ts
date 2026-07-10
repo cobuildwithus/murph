@@ -83,6 +83,7 @@ vi.mock("@/src/lib/hosted-runner/assistant-nudge", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
+  signalHostedMailboxAppendsBestEffort: vi.fn(),
   signalHostedMailboxAppendRuntime: mocks.signalHostedMailboxAppendRuntime,
 }));
 

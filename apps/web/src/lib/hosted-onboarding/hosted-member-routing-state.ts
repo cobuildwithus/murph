@@ -90,6 +90,7 @@ export interface HostedMemberRoutingStateSnapshot {
   pendingLinqChatId: string | null;
   pendingLinqParticipantContact: HostedLinqParticipantContactClaim | null;
   pendingLinqRecipientPhone: string | null;
+  pendingLinqRecipientPhoneLookupKey?: string | null;
   replyAliasLookupKey?: string | null;
   telegramThreadId: string | null;
   telegramUserId: string | null;
@@ -152,6 +153,8 @@ export async function projectHostedMemberRoutingState(
       value: privateState.pendingLinqParticipantContact,
     }),
     pendingLinqRecipientPhone: privateState.pendingLinqRecipientPhone,
+    pendingLinqRecipientPhoneLookupKey:
+      routing.pendingLinqRecipientPhoneLookupKey ?? null,
     replyAliasLookupKey: routing.replyAliasLookupKey ?? null,
     telegramThreadId: privateState.telegramThreadId,
     telegramUserId: privateState.telegramUserId,

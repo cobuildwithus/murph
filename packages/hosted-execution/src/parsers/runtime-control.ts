@@ -86,7 +86,7 @@ import {
   type HostedRuntimeFamilyPlanToolStatusResponse,
   HOSTED_RUNTIME_GROUP_CHAT_ICON_URL_MAX_LENGTH,
   HOSTED_RUNTIME_GROUP_DISPLAY_NAME_MAX_LENGTH,
-  HOSTED_RUNTIME_GROUP_JOIN_OFFER_MESSAGE_TEMPLATE_MAX_LENGTH,
+  HOSTED_RUNTIME_GROUP_JOIN_OFFER_OPERATION_ID_MAX_LENGTH,
   HOSTED_RUNTIME_GROUP_KINDS,
   HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX,
   HOSTED_RUNTIME_NEWSLETTER_HTML_MAX_LENGTH,
@@ -918,19 +918,24 @@ function parseHostedRuntimeGroupPostJoinOfferRequest(
   const record = requireObject(value, "Hosted runtime group tool post_join_offer joinOffer");
   assertAllowedObjectKeys(
     record,
-    new Set(["displayName", "messageTemplate", "projectionKinds", "projectionScopes"]),
+    new Set([
+      "activation",
+      "displayName",
+      "operationId",
+      "projectionKinds",
+      "projectionScopes",
+    ]),
     "Hosted runtime group tool post_join_offer joinOffer",
   );
   const displayName = parseHostedRuntimeGroupDisplayName(
     record.displayName,
     "Hosted runtime group tool post_join_offer displayName",
   );
-  const messageTemplate = record.messageTemplate === undefined || record.messageTemplate === null
-    ? null
-    : parseHostedRuntimeGroupJoinOfferMessageTemplate(record.messageTemplate);
+  const activation = parseHostedRuntimeGroupJoinOfferActivation(record.activation);
+  const operationId = parseHostedRuntimeGroupJoinOfferOperationId(record.operationId);
   return {
+    ...(activation === null ? {} : { activation }),
     displayName,
-    ...(messageTemplate === null ? {} : { messageTemplate }),
     projectionKinds: parseHostedRuntimeGroupProjectionKindArray(
       record.projectionKinds,
       "Hosted runtime group tool post_join_offer projectionKinds",
@@ -941,23 +946,41 @@ function parseHostedRuntimeGroupPostJoinOfferRequest(
       record.projectionKinds,
       "Hosted runtime group tool post_join_offer projectionScopes",
     ),
+    ...(operationId === null ? {} : { operationId }),
   };
 }
 
-function parseHostedRuntimeGroupJoinOfferMessageTemplate(value: unknown): string {
-  const template = requireString(
+function parseHostedRuntimeGroupJoinOfferActivation(
+  value: unknown,
+): HostedRuntimeGroupPostJoinOfferRequest["activation"] {
+  if (value === undefined || value === null) return null;
+  const activation = requireString(
     value,
-    "Hosted runtime group tool post_join_offer messageTemplate",
-  ).trim().replace(/\s+/gu, " ");
-  if (
-    template.length === 0
-    || template.length > HOSTED_RUNTIME_GROUP_JOIN_OFFER_MESSAGE_TEMPLATE_MAX_LENGTH
-  ) {
+    "Hosted runtime group tool post_join_offer activation",
+  );
+  if (activation !== "call-circle.enroll.v0") {
     throw new TypeError(
-      `Hosted runtime group tool post_join_offer messageTemplate must be between 1 and ${HOSTED_RUNTIME_GROUP_JOIN_OFFER_MESSAGE_TEMPLATE_MAX_LENGTH} characters.`,
+      "Hosted runtime group tool post_join_offer activation is not supported.",
     );
   }
-  return template;
+  return activation;
+}
+
+function parseHostedRuntimeGroupJoinOfferOperationId(value: unknown): string | null {
+  if (value === undefined || value === null) return null;
+  const operationId = requireString(
+    value,
+    "Hosted runtime group tool post_join_offer operationId",
+  ).trim();
+  if (
+    operationId.length === 0
+    || operationId.length > HOSTED_RUNTIME_GROUP_JOIN_OFFER_OPERATION_ID_MAX_LENGTH
+  ) {
+    throw new TypeError(
+      "Hosted runtime group tool post_join_offer operationId is invalid.",
+    );
+  }
+  return operationId;
 }
 
 function parseHostedRuntimeGroupToolSelfOptOutContext(

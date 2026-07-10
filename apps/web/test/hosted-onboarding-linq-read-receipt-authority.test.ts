@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   finishHostedOnboardingTiming: vi.fn(),
   maybeHandoffHostedExecutionWebhookWake: vi.fn(),
   planHostedOnboardingLinqWebhook: vi.fn(),
+  readHostedLinqOutboundMessageIdentity: vi.fn(() => null),
   requireHostedLinqMessageReceivedEvent: vi.fn(),
   resolveHostedLinqRecipientPhoneNumber: vi.fn(() => "+15555550123"),
   sendHostedLinqReadReceipt: vi.fn(),
@@ -18,6 +19,7 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/linq", () => ({
+  readHostedLinqOutboundMessageIdentity: mocks.readHostedLinqOutboundMessageIdentity,
   requireHostedLinqMessageReceivedEvent: mocks.requireHostedLinqMessageReceivedEvent,
   resolveHostedLinqRecipientPhoneNumber: mocks.resolveHostedLinqRecipientPhoneNumber,
   sendHostedLinqReadReceipt: mocks.sendHostedLinqReadReceipt,

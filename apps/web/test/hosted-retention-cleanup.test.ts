@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  HOSTED_ASSISTANT_NOTIFICATION_RECOVERY_BATCH_SIZE,
   HOSTED_INBOX_MEDIA_RETENTION_SIGNAL_BATCH_SIZE,
   HOSTED_INBOX_MEDIA_RETENTION_SIGNAL_TIMEOUT_MS,
   HOSTED_MAILBOX_RETENTION_MS,
@@ -18,16 +19,30 @@ describe("hosted retention cleanup", () => {
     const hostedRuntimeLogDeleteMany = vi.fn().mockResolvedValue({ count: 8 });
     const hostedWebSessionDeleteMany = vi.fn().mockResolvedValue({ count: 9 });
     const hostedComputerRunFindMany = vi.fn().mockResolvedValue([]);
-    const queryRaw = vi.fn().mockResolvedValue([
-      { userId: "member_due_1" },
-      { userId: "member_due_2" },
-    ]);
+    const queryRaw = vi.fn((sql: TemplateStringsArray) => {
+      const query = String(sql.join("?"));
+      return Promise.resolve(query.includes('FROM "hosted_mailbox_item" AS item')
+        ? [
+            { mailboxItemId: "mailbox_1", memberId: "member_notification_1" },
+            { mailboxItemId: "mailbox_2", memberId: "member_notification_2" },
+          ]
+        : [
+            { userId: "member_due_1" },
+            { userId: "member_due_2" },
+          ]);
+    });
+    const signalMailboxAppend = vi.fn()
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new Error("Temporal unavailable"));
     const signalRuntimeRecheck = vi.fn()
       .mockResolvedValueOnce(undefined)
       .mockRejectedValueOnce(new Error("Temporal unavailable"));
     const prisma = {
       $executeRaw: executeRaw,
       $queryRaw: queryRaw,
+      hostedMailboxItem: {
+        updateMany: vi.fn(async () => ({ count: 2 })),
+      },
       hostedComputerRun: {
         findMany: hostedComputerRunFindMany,
       },
@@ -45,16 +60,18 @@ describe("hosted retention cleanup", () => {
     await expect(runHostedRetentionCleanup({
       now,
       prisma: prisma as never,
+      signalMailboxAppend,
       signalRuntimeRecheck,
     })).resolves.toEqual({
+      assistantNotificationRecoverySignalFailures: 1,
+      assistantNotificationRecoverySignalsSent: 1,
       expiredComputerRunsCleanedUp: 0,
       expiredMailboxItemsDeleted: 7,
       inboxMediaRetentionRuntimeSignalFailures: 1,
       inboxMediaRetentionRuntimeSignalsSent: 1,
       oldRuntimeLogsDeleted: 8,
+      stalePhoneCallAnalysesTerminalized: 0,
       stalePhoneCallProviderStartsFailed: 0,
-      stalePhoneCallResultNotificationSignalFailures: 0,
-      stalePhoneCallResultNotificationSignalsSent: 0,
       staleWebSessionsDeleted: 9,
     });
 
@@ -104,8 +121,25 @@ describe("hosted retention cleanup", () => {
         ],
       },
     });
-    expect(queryRaw).toHaveBeenCalledTimes(1);
-    const dueSql = String(queryRaw.mock.calls[0]?.[0].join("?"));
+    expect(queryRaw).toHaveBeenCalledTimes(2);
+    const notificationCall = queryRaw.mock.calls.find(([sql]) =>
+      String(sql.join("?")).includes('FROM "hosted_mailbox_item" AS item'));
+    expect(notificationCall).toBeDefined();
+    const notificationSql = String(notificationCall?.[0].join("?"));
+    expect(notificationSql).toContain("SELECT DISTINCT ON (item.\"user_id\")");
+    expect(notificationSql).toContain(
+      'item."lane_seq" > COALESCE(counter."consumed_seq", 0)',
+    );
+    expect(notificationSql).toContain("item.\"consumed_at\" IS NULL");
+    expect(notificationCall?.slice(1)).toEqual([
+      now,
+      now,
+      HOSTED_ASSISTANT_NOTIFICATION_RECOVERY_BATCH_SIZE,
+    ]);
+    const mediaCall = queryRaw.mock.calls.find(([sql]) =>
+      String(sql.join("?")).includes('FROM "hosted_workspace"'));
+    expect(mediaCall).toBeDefined();
+    const dueSql = String(mediaCall?.[0].join("?"));
     expect(dueSql).toContain("WITH due AS");
     expect(dueSql).toContain('FROM "hosted_workspace"');
     expect(dueSql).toContain('"inbox_media_retention_wake_at" <=');
@@ -117,7 +151,7 @@ describe("hosted retention cleanup", () => {
     expect(dueSql).toContain('RETURNING "hosted_workspace"."user_id" AS "userId"');
     expect(dueSql).toContain(`LIMIT ?`);
     expect(dueSql).not.toContain("FOR UPDATE");
-    expect(queryRaw.mock.calls[0]?.slice(1)).toEqual([
+    expect(mediaCall?.slice(1)).toEqual([
       now,
       HOSTED_INBOX_MEDIA_RETENTION_SIGNAL_BATCH_SIZE,
       now,
@@ -143,23 +177,55 @@ describe("hosted retention cleanup", () => {
       where: {
         analyzedAt: null,
         endedAt: null,
+        OR: [
+          {
+            providerStartAttemptedAt: {
+              lt: new Date("2026-04-25T10:00:00.000Z"),
+            },
+          },
+          {
+            providerStartAttemptedAt: null,
+            requestKey: { startsWith: "call-circle:" },
+          },
+        ],
         provider: "retell",
-        providerCallId: null,
-        providerStartAttemptedAt: {
-          lt: new Date("2026-04-25T10:00:00.000Z"),
-        },
+        resultJson: { equals: expect.anything() },
         status: "starting",
         updatedAt: {
           lt: new Date("2026-04-25T10:00:00.000Z"),
         },
       },
     });
+    expect(hostedPhoneCallFindMany).toHaveBeenCalledWith({
+      orderBy: [
+        { updatedAt: "asc" },
+        { id: "asc" },
+      ],
+      take: 100,
+      where: {
+        analyzedAt: null,
+        endedAt: { lt: new Date("2026-04-25T10:00:00.000Z") },
+        provider: "retell",
+        resultJson: { equals: expect.anything() },
+        status: { in: ["ended", "failed"] },
+      },
+    });
+    expect(hostedPhoneCallFindMany).toHaveBeenCalledTimes(2);
     expect(signalRuntimeRecheck).toHaveBeenCalledTimes(2);
     expect(signalRuntimeRecheck).toHaveBeenNthCalledWith(1, {
       userId: "member_due_1",
     });
     expect(signalRuntimeRecheck).toHaveBeenNthCalledWith(2, {
       userId: "member_due_2",
+    });
+    expect(signalMailboxAppend).toHaveBeenCalledTimes(2);
+    expect(signalMailboxAppend).toHaveBeenCalledWith({
+      expectedUserId: "member_notification_1",
+      mailboxItemId: "mailbox_1",
+    });
+    expect(signalMailboxAppend).toHaveBeenCalledWith({
+      expectedUserId: "member_notification_2",
+      mailboxItemId: "mailbox_2",
     });
     expect(hostedComputerRunFindMany).toHaveBeenCalledWith({
       orderBy: {
@@ -181,6 +247,77 @@ describe("hosted retention cleanup", () => {
     });
   });
 
+  it("rotates unconsumed notification signals past the oldest batch", async () => {
+    const now = new Date("2026-04-25T12:00:00.000Z");
+    const nextHour = new Date("2026-04-25T13:00:00.000Z");
+    const notifications = Array.from(
+      { length: HOSTED_ASSISTANT_NOTIFICATION_RECOVERY_BATCH_SIZE + 1 },
+      (_, index) => ({
+        createdAt: new Date("2026-04-25T10:00:00.000Z"),
+        mailboxItemId: `mailbox_${String(index + 1).padStart(3, "0")}`,
+        memberId: `member_${String(index + 1).padStart(3, "0")}`,
+        updatedAt: new Date("2026-04-25T10:00:00.000Z"),
+      }),
+    );
+    const queryRaw = vi.fn(async (
+      sql: TemplateStringsArray,
+      ...values: unknown[]
+    ) => {
+      if (!String(sql.join("?")).includes('FROM "hosted_mailbox_item" AS item')) {
+        return [];
+      }
+      const limit = Number(values.at(-1));
+      return [...notifications]
+        .sort((left, right) =>
+          left.updatedAt.getTime() - right.updatedAt.getTime()
+          || left.createdAt.getTime() - right.createdAt.getTime()
+          || left.memberId.localeCompare(right.memberId))
+        .slice(0, limit)
+        .map(({ mailboxItemId, memberId }) => ({ mailboxItemId, memberId }));
+    });
+    const hostedMailboxItemUpdateMany = vi.fn(async (args: {
+      data: { updatedAt: Date };
+      where: { id: { in: string[] } };
+    }) => {
+      const ids = new Set(args.where.id.in);
+      for (const notification of notifications) {
+        if (ids.has(notification.mailboxItemId)) {
+          notification.updatedAt = args.data.updatedAt;
+        }
+      }
+      return { count: ids.size };
+    });
+    const signalMailboxAppend = vi.fn(async (_input: {
+      expectedUserId: string;
+      mailboxItemId: string;
+    }) => undefined);
+    const prisma = {
+      $executeRaw: vi.fn(async () => 0),
+      $queryRaw: queryRaw,
+      hostedComputerRun: { findMany: vi.fn(async () => []) },
+      hostedMailboxItem: { updateMany: hostedMailboxItemUpdateMany },
+      hostedPhoneCall: { findMany: vi.fn(async () => []) },
+      hostedRuntimeLog: { deleteMany: vi.fn(async () => ({ count: 0 })) },
+      hostedWebSession: { deleteMany: vi.fn(async () => ({ count: 0 })) },
+    };
+
+    await runHostedRetentionCleanup({
+      now,
+      prisma: prisma as never,
+      signalMailboxAppend,
+    });
+    await runHostedRetentionCleanup({
+      now: nextHour,
+      prisma: prisma as never,
+      signalMailboxAppend,
+    });
+
+    const secondRunMemberIds = signalMailboxAppend.mock.calls
+      .slice(HOSTED_ASSISTANT_NOTIFICATION_RECOVERY_BATCH_SIZE)
+      .map(([input]) => input.expectedUserId);
+    expect(secondRunMemberIds).toContain("member_101");
+  });
+
   it("finishes database cleanup before timing out stuck media-retention signals", async () => {
     vi.useFakeTimers();
     try {
@@ -190,7 +327,11 @@ describe("hosted retention cleanup", () => {
       const hostedRuntimeLogDeleteMany = vi.fn().mockResolvedValue({ count: 2 });
       const hostedWebSessionDeleteMany = vi.fn().mockResolvedValue({ count: 3 });
       const hostedComputerRunFindMany = vi.fn().mockResolvedValue([]);
-      const queryRaw = vi.fn().mockResolvedValue([{ userId: "member_due_stuck" }]);
+      const queryRaw = vi.fn((sql: TemplateStringsArray) =>
+        Promise.resolve(String(sql.join("?")).includes('FROM "hosted_mailbox_item" AS item')
+          ? []
+          : [{ userId: "member_due_stuck" }])
+      );
       const signalRuntimeRecheck = vi.fn(() => new Promise(() => undefined));
       const prisma = {
         $executeRaw: executeRaw,
@@ -215,20 +356,21 @@ describe("hosted retention cleanup", () => {
         signalRuntimeRecheck,
       });
 
-      for (let index = 0; index < 20 && queryRaw.mock.calls.length === 0; index += 1) {
-        await Promise.resolve();
+      for (let index = 0; index < 100 && queryRaw.mock.calls.length < 2; index += 1) {
+        await vi.advanceTimersByTimeAsync(0);
       }
-      expect(queryRaw).toHaveBeenCalledTimes(1);
+      expect(queryRaw).toHaveBeenCalledTimes(2);
       await vi.advanceTimersByTimeAsync(HOSTED_INBOX_MEDIA_RETENTION_SIGNAL_TIMEOUT_MS);
       await expect(cleanup).resolves.toEqual({
+        assistantNotificationRecoverySignalFailures: 0,
+        assistantNotificationRecoverySignalsSent: 0,
         expiredComputerRunsCleanedUp: 0,
         expiredMailboxItemsDeleted: 1,
         inboxMediaRetentionRuntimeSignalFailures: 1,
         inboxMediaRetentionRuntimeSignalsSent: 0,
         oldRuntimeLogsDeleted: 2,
+        stalePhoneCallAnalysesTerminalized: 0,
         stalePhoneCallProviderStartsFailed: 0,
-        stalePhoneCallResultNotificationSignalFailures: 0,
-        stalePhoneCallResultNotificationSignalsSent: 0,
         staleWebSessionsDeleted: 3,
       });
       expect(executeRaw.mock.invocationCallOrder[0]).toBeLessThan(
@@ -268,11 +410,14 @@ describe("hosted retention cleanup", () => {
     const hostedWebSessionDeleteMany = vi.fn().mockResolvedValue({ count: 0 });
     const hostedComputerRunFindMany = vi.fn().mockResolvedValue([]);
     const queryRaw = vi.fn(async (
-      _sql: TemplateStringsArray,
+      sql: TemplateStringsArray,
       dueAt: Date,
       limit: number,
       attemptedAt: Date,
     ) => {
+      if (String(sql.join("?")).includes('FROM "hosted_mailbox_item" AS item')) {
+        return [];
+      }
       const selected = workspaces
         .filter((workspace) => workspace.wakeAt <= dueAt)
         .sort((left, right) => {
@@ -337,6 +482,6 @@ describe("hosted retention cleanup", () => {
       .map(([input]) => input.userId);
     expect(firstRunUserIds).not.toContain("member_due_26");
     expect(secondRunUserIds).toContain("member_due_26");
-    expect(queryRaw).toHaveBeenCalledTimes(2);
+    expect(queryRaw).toHaveBeenCalledTimes(4);
   });
 });

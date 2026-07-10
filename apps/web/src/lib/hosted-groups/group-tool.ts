@@ -5,7 +5,6 @@ import {
   HOSTED_RUNTIME_GROUP_CHAT_ICON_URL_MAX_LENGTH,
   HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX,
   HOSTED_RUNTIME_GROUP_DISPLAY_NAME_MAX_LENGTH,
-  HOSTED_RUNTIME_GROUP_JOIN_OFFER_MESSAGE_TEMPLATE_MAX_LENGTH,
   type HostedRuntimeGroupChatParticipant,
   type HostedRuntimeGroupCreateJoinLinkRequest,
   type HostedRuntimeGroupPostJoinOfferRequest,
@@ -24,6 +23,7 @@ import { hasHostedRuntimeActiveAccess } from "../hosted-mailbox/runtime-access";
 import {
   assertHostedMemberNotSuspended,
 } from "../hosted-onboarding/entitlement";
+import { isHostedOnboardingError } from "../hosted-onboarding/errors";
 import { readActiveHostedMemberAccess } from "../hosted-onboarding/member-access";
 import { lookupHostedMemberIdentityByPhoneNumber } from "../hosted-onboarding/hosted-member-identity-store";
 import { lookupHostedMemberByVerifiedEmailAddress } from "../hosted-onboarding/hosted-member-store";
@@ -59,7 +59,7 @@ import {
   type HostedOnboardingReadClient,
 } from "../hosted-onboarding/shared";
 import {
-  signalHostedMailboxAppendRuntime,
+  signalHostedMailboxAppendsBestEffort,
   signalHostedRuntimeMaintenanceRuntime,
 } from "../hosted-orchestration/signal-runtime";
 import { assertHostedLinqRouteEgressAuthority } from "../hosted-routing/thread-route-store";
@@ -70,9 +70,11 @@ import {
   enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort,
 } from "./group-newsletter";
 import {
+  buildHostedGroupJoinOfferProviderIdempotencyKey,
   createHostedGroupJoinLinkForOwnedThreadContainerTx,
+  bindHostedGroupJoinOfferTx,
   readHostedGroupByRuntimeMemberId,
-  recordHostedGroupJoinOfferTx,
+  reserveHostedGroupJoinOfferTx,
   revokeHostedGroupMemberEmailShareTx,
   updateHostedGroupDisplayNameByRuntimeMemberIdTx,
 } from "./group-store";
@@ -84,8 +86,9 @@ import {
 export const HOSTED_THREAD_CONTAINER_PARTICIPANT_RECONCILE_MAX =
   HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX;
 
-const HOSTED_GROUP_JOIN_OFFER_JOIN_URL_PLACEHOLDER = "{{join_url}}";
-const HOSTED_GROUP_JOIN_OFFER_SHARE_SCOPE_PLACEHOLDER = "{{share_scope}}";
+const HOSTED_CALL_CIRCLE_OFFERS_ENABLED_ENV = "HOSTED_CALL_CIRCLE_OFFERS_ENABLED";
+const HOSTED_GROUP_CALL_CIRCLE_CONSENT_DISCLOSURE =
+  "Reacting also enrolls you in Call Circle for this group, so Murph can privately ask when you're free for short matched calls. You can pause anytime.";
 
 export type HostedRuntimeGroupToolAccessClassification =
   | "owner_active"
@@ -340,7 +343,7 @@ async function handleHostedRuntimeGroupRevokeOwnEmailShare(input: {
     return unavailable(revoked.kind);
   }
 
-  await signalVaultShareCleanupRuntimesBestEffort(revoked.vaultShareCleanupSignals);
+  await signalHostedMailboxAppendsBestEffort(revoked.vaultShareCleanupSignals);
 
   return {
     action: "revoke_own_email_share",
@@ -362,21 +365,6 @@ async function lookupSelfOptOutParticipantMember(input: {
     handle: input.context.senderHandle,
     prisma: input.prisma,
   });
-}
-
-async function signalVaultShareCleanupRuntimesBestEffort(
-  signals: readonly { mailboxItemId: string; memberId: string }[],
-): Promise<void> {
-  await Promise.all(signals.map(async (signal) => {
-    try {
-      await signalHostedMailboxAppendRuntime({
-        expectedUserId: signal.memberId,
-        mailboxItemId: signal.mailboxItemId,
-      });
-    } catch {
-      // The revoke mailbox item is durable; the destination runtime will observe it later.
-    }
-  }));
 }
 
 async function handleHostedRuntimeGroupCreateJoinLink(input: {
@@ -477,19 +465,17 @@ async function handleHostedRuntimeGroupPostJoinOffer(input: {
 
   const prisma = getPrisma();
   const now = new Date();
+  const activation = input.joinOffer?.activation ?? null;
+  const allowNewActivation =
+    process.env[HOSTED_CALL_CIRCLE_OFFERS_ENABLED_ENV]?.trim() === "1";
   const projectionScopes = normalizeHostedVaultShareProjectionScopes(
     input.joinOffer?.projectionScopes
       ?? input.joinOffer?.projectionKinds
       ?? [],
   );
-  const messageTemplate = normalizeHostedGroupJoinOfferMessageTemplate(
-    input.joinOffer?.messageTemplate ?? null,
-  );
-  if (
-    !messageTemplate
-    || !isHostedGroupJoinOfferMessageTemplateUsable(messageTemplate)
-  ) {
-    return unavailable("join_offer_message_template_unavailable");
+  const operationId = input.joinOffer?.operationId?.trim() || null;
+  if (!operationId) {
+    return unavailable("join_offer_operation_id_unavailable");
   }
   const created = await prisma.$transaction(async (tx) => {
     const ownerAccess = await readHostedRuntimeGroupOwnerActiveAccess({
@@ -507,8 +493,27 @@ async function handleHostedRuntimeGroupPostJoinOffer(input: {
       requestedVaultShareProjectionScopes: projectionScopes,
       tx,
     });
-    return { kind: "ok" as const, ownerMemberId: ownerAccess.ownerMemberId, ...result };
-  }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+    const reservation = await reserveHostedGroupJoinOfferTx({
+      activation,
+      allowNewActivation,
+      groupId: result.group.id,
+      operationId,
+      postedAt: now,
+      projectionScopes,
+      tx,
+    });
+    return {
+      kind: "ok" as const,
+      ownerMemberId: ownerAccess.ownerMemberId,
+      reservation,
+      ...result,
+    };
+  }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS).catch((error: unknown) => ({
+    kind: isHostedOnboardingError(error)
+        && error.code === "HOSTED_GROUP_JOIN_OFFER_ACTIVATION_DISABLED"
+      ? "call_circle_offers_disabled" as const
+      : "offer_reservation_failed" as const,
+  }));
   if (created.kind !== "ok") {
     return unavailable(created.kind);
   }
@@ -521,37 +526,42 @@ async function handleHostedRuntimeGroupPostJoinOffer(input: {
     return unavailable("join_links_unavailable");
   }
 
-  const message = buildHostedGroupJoinOfferMessage({
-    joinUrl,
-    messageTemplate,
-    projectionScopes,
-  });
-  let sent: Awaited<ReturnType<typeof sendHostedLinqChatMessage>>;
-  try {
-    sent = await sendHostedLinqChatMessage({
-      chatId: authorized.chatId,
-      idempotencyKey: `group-join-offer:${created.group.id}:${now.toISOString()}`,
-      message,
+  const reservation = created.reservation;
+  if (!reservation.messageLookupKey) {
+    const message = buildHostedGroupJoinOfferMessage({
+      activation: reservation.offerPayload.activation,
+      joinUrl,
+      projectionScopes: reservation.offerPayload.vaultShareProjectionScopes,
     });
-  } catch {
-    return unavailable("send_failed");
-  }
-  if (!sent.messageId) {
-    return unavailable("provider_message_unavailable");
-  }
-
-  try {
-    await prisma.$transaction(async (tx) => {
-      await recordHostedGroupJoinOfferTx({
-        groupId: created.group.id,
-        messageId: sent.messageId,
-        postedAt: now,
-        projectionScopes,
-        tx,
+    let sent: Awaited<ReturnType<typeof sendHostedLinqChatMessage>>;
+    try {
+      sent = await sendHostedLinqChatMessage({
+        chatId: authorized.chatId,
+        idempotencyKey: buildHostedGroupJoinOfferProviderIdempotencyKey(
+          reservation.id,
+        ),
+        message,
       });
-    }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
-  } catch {
-    return unavailable("offer_binding_failed");
+    } catch {
+      return unavailable("send_failed");
+    }
+    if (!sent.messageId) {
+      return unavailable("provider_message_unavailable");
+    }
+
+    try {
+      await prisma.$transaction(async (tx) => {
+        await bindHostedGroupJoinOfferTx({
+          messageId: sent.messageId,
+          offerId: reservation.id,
+          ...(sent.providerCreatedAt ? { postedAt: sent.providerCreatedAt } : {}),
+          tx,
+        });
+      }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+    } catch {
+      // The signed provider echo owns durable repair after the fast-path bind.
+      return unavailable("offer_binding_failed");
+    }
   }
 
   try {
@@ -656,16 +666,17 @@ async function checkHostedRuntimeGroupLinqChatMutationAccess(input: {
 }
 
 function buildHostedGroupJoinOfferMessage(input: {
+  activation: HostedRuntimeGroupPostJoinOfferRequest["activation"];
   joinUrl: string;
-  messageTemplate: string;
   projectionScopes: readonly HostedVaultShareProjectionScope[];
 }): string {
-  return input.messageTemplate
-    .replace(
-      HOSTED_GROUP_JOIN_OFFER_SHARE_SCOPE_PLACEHOLDER,
-      renderHostedGroupJoinOfferScopeSentence(input.projectionScopes),
-    )
-    .replace(HOSTED_GROUP_JOIN_OFFER_JOIN_URL_PLACEHOLDER, input.joinUrl);
+  const baseMessage =
+    `Reacting to this message joins you to this Murph group and shares ${
+      renderHostedGroupJoinOfferScopeSentence(input.projectionScopes)
+    } with the group. Before reacting, review or customize what you share: ${input.joinUrl}.`;
+  return input.activation
+    ? `${baseMessage}\n\n${HOSTED_GROUP_CALL_CIRCLE_CONSENT_DISCLOSURE}`
+    : baseMessage;
 }
 
 async function enqueueGroupOwnerNewsletterEmailNeededNudgeIfGrantedBestEffort(input: {
@@ -691,20 +702,6 @@ async function enqueueGroupOwnerNewsletterEmailNeededNudgeIfGrantedBestEffort(in
     memberId: input.ownerMemberId,
     prisma: input.prisma,
   });
-}
-
-function normalizeHostedGroupJoinOfferMessageTemplate(
-  messageTemplate: string | null,
-): string | null {
-  if (messageTemplate === null) return null;
-  const normalized = messageTemplate.trim().replace(/\s+/gu, " ");
-  if (
-    normalized.length === 0
-    || normalized.length > HOSTED_RUNTIME_GROUP_JOIN_OFFER_MESSAGE_TEMPLATE_MAX_LENGTH
-  ) {
-    return null;
-  }
-  return normalized;
 }
 
 function normalizeHostedGroupChatIconUrl(value: string): string | null {
@@ -746,23 +743,6 @@ function isHostedGroupChatIconDeliveryUrl(url: URL): boolean {
     return false;
   }
   return url.pathname.split("/").filter(Boolean).length >= 3;
-}
-
-function isHostedGroupJoinOfferMessageTemplateUsable(messageTemplate: string): boolean {
-  return hasPlaceholderExactlyOnce(
-    messageTemplate,
-    HOSTED_GROUP_JOIN_OFFER_SHARE_SCOPE_PLACEHOLDER,
-  ) && hasPlaceholderExactlyOnce(
-    messageTemplate,
-    HOSTED_GROUP_JOIN_OFFER_JOIN_URL_PLACEHOLDER,
-  );
-}
-
-function hasPlaceholderExactlyOnce(messageTemplate: string, placeholder: string): boolean {
-  return (
-    messageTemplate.includes(placeholder)
-    && messageTemplate.indexOf(placeholder) === messageTemplate.lastIndexOf(placeholder)
-  );
 }
 
 function renderHostedGroupJoinOfferScopeSentence(

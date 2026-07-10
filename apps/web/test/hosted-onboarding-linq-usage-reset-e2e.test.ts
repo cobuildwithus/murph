@@ -193,6 +193,7 @@ vi.mock("@/src/lib/hosted-runner/control", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
+  signalHostedMailboxAppendsBestEffort: vi.fn(),
   signalHostedMailboxAppendRuntime: mocks.signalHostedMailboxAppendRuntime,
 }));
 

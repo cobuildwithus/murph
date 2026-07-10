@@ -203,14 +203,12 @@ If a member never granted email sharing and expresses interest, or the group
 asks how someone can join the newsletter, post a join offer scoped to
 `group-email.v0`, `sleep-times.v0`, `activity-days.v0`, `workout-days.v0`,
 `resting-heart-rate-days.v0`, and `hrv-days.v0` unless the group chose a
-different set. Every join offer must lead with "react to this message to join,"
-plainly say what reacting shares, include `{{share_scope}}` exactly once, and
-include `{{join_url}}` exactly once as the customize link so a member can share
-more or less. When this offer names the newsletter group, pass the group's
-chosen name as `displayName` on the `post_join_offer` call. Reacting grants the
-disclosed snapshot; the link lets a member pick a different set. Never silently
-share health data that the message did not disclose, never include any other
-URL, and never repeatedly re-offer to someone who declined.
+different set. The server authors the complete reaction, permission, and
+customize-link copy from that fixed scope. When this offer names the newsletter
+group, pass the group's chosen name as `displayName` on the `post_join_offer`
+call. Reacting grants the disclosed snapshot; the server-provided link lets a
+member pick a different set. Never silently share health data outside that
+snapshot, and never repeatedly re-offer to someone who declined.
 
 If a member asks to be removed from the newsletter in the group chat, call
 `murph.group` with `action="revoke_own_email_share"`. That revokes only the

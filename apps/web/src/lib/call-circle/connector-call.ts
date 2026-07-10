@@ -9,34 +9,38 @@ import {
   markCallCircleMatchOutcome,
 } from "./match-store";
 import {
-  appendCallCircleHandoffNotificationTx,
-  type CallCircleNotificationSignal,
-  readCallCircleNotificationSignal,
-  readCallCircleNotificationPreflightTx,
-  signalCallCircleNotificationRuntimesBestEffort,
+  appendCallCircleTerminalNotificationsTx,
 } from "./notifications";
+import {
+  signalHostedAssistantNotificationsBestEffort,
+  type HostedAssistantNotificationSignal,
+} from "../hosted-execution/assistant-notifications";
 import {
   activeCallCircleParticipantPairMatchWhere,
   canUseActiveCallCircleParticipantPair,
   readCallCircleMatchParticipantTimeZones,
 } from "./participant-store";
 import {
+  CALL_CIRCLE_PHONE_CALL_REQUEST_KEY_PREFIX,
   isPreProviderFailedCallCircleBridgePhoneCall,
   isUnstartedCallCircleBridgePhoneCall,
 } from "./phone-call-state";
+import type { CallCircleMatchOutcome } from "./types";
 import {
+  hasCallCircleBridgeWindowElapsed,
   isWithinCallCircleBridgeWindow,
   readCallCircleBridgeWindowStartCutoff,
 } from "./time";
 import {
   createHostedPhoneCall,
+  terminalizeUnstartedHostedPhoneCall,
 } from "../phone-calls/service";
 import {
   resolveVerifiedMemberTransferNumber,
 } from "../phone-calls/transfer";
 import { getPrisma } from "../prisma";
 
-export type CallCircleConnectorStartStatus =
+type CallCircleConnectorStartStatus =
   | "calling"
   | "handoff"
   | "ignored";
@@ -47,7 +51,6 @@ export type CallCircleConnectorStarter = (input: {
   prisma: PrismaClient;
 }) => Promise<{ phoneCallId?: string; status: CallCircleConnectorStartStatus }>;
 
-const CALL_CIRCLE_CONNECTOR_REQUEST_KEY_PREFIX = "call-circle:";
 const RETELL_CONNECTOR_AGENT_ID_ENV = "RETELL_CONNECTOR_AGENT_ID";
 const RETELL_CONNECTOR_AGENT_VERSION_ENV = "RETELL_CONNECTOR_AGENT_VERSION";
 
@@ -63,6 +66,7 @@ export async function startCallCircleConnectorCall(input: {
       phoneCall: {
         select: {
           analyzedAt: true,
+          endedAt: true,
           providerCallId: true,
           providerStartAttemptedAt: true,
           status: true,
@@ -76,6 +80,10 @@ export async function startCallCircleConnectorCall(input: {
   }
   const isRecoverableClaimedBridge =
     match.status === "bridging" && match.phoneCallId === null;
+  const isRecoverableFailedBridge =
+    match.status === "bridging"
+    && match.phoneCallId !== null
+    && isPreProviderFailedCallCircleBridgePhoneCall(match.phoneCall);
   const isRecoverableAttachedBridge =
     match.status === "bridging"
     && match.phoneCallId !== null
@@ -83,19 +91,45 @@ export async function startCallCircleConnectorCall(input: {
   if (
     match.status !== "both_confirmed"
     && !isRecoverableClaimedBridge
+    && !isRecoverableFailedBridge
     && !isRecoverableAttachedBridge
   ) {
     return { status: "ignored" };
   }
-  if (
-    match.finalAskedAt === null
-    || !isWithinCallCircleBridgeWindow({
+  if (match.finalAskedAt === null) {
+    return { status: "ignored" };
+  }
+  if (isRecoverableFailedBridge) {
+    const handedOff = await markCallCircleConnectorHandoff({
+      match,
+      now,
+      outcome: "connector_start_failed",
+      prisma,
+    });
+    return {
+      ...(match.phoneCallId ? { phoneCallId: match.phoneCallId } : {}),
+      status: handedOff ? "handoff" : "ignored",
+    };
+  }
+  if (!isWithinCallCircleBridgeWindow({
+    now,
+    windowEndAt: match.windowEndAt,
+    windowStartAt: match.windowStartAt,
+  })) {
+    if (!hasCallCircleBridgeWindowElapsed({
       now,
       windowEndAt: match.windowEndAt,
       windowStartAt: match.windowStartAt,
-    })
-  ) {
-    return { status: "ignored" };
+    })) {
+      return { status: "ignored" };
+    }
+    const handedOff = await markCallCircleConnectorHandoff({
+      match,
+      now,
+      outcome: "text_handoff",
+      prisma,
+    });
+    return { status: handedOff ? "handoff" : "ignored" };
   }
 
   const connectorConfig = readCallCircleConnectorConfig();
@@ -150,7 +184,6 @@ export async function startCallCircleConnectorCall(input: {
     const phoneCall = await createHostedPhoneCall({
       brief: buildCallCircleConnectorBrief({
         memberAPhone,
-        matchId: match.id,
         timeZone: timeZones.memberATimeZone,
       }),
       beforeStart: async ({ phoneCallId }) => {
@@ -180,13 +213,14 @@ export async function startCallCircleConnectorCall(input: {
         });
       },
       memberId: match.memberAId,
-      providerStartGuardWhere: buildCallCircleProviderStartGuardWhere({
-        groupId: match.groupId,
-        matchId: match.id,
-        memberAId: match.memberAId,
-        memberBId: match.memberBId,
-        now,
-      }),
+      providerStartGuardWhere: (attemptedAt) =>
+        buildCallCircleProviderStartGuardWhere({
+          groupId: match.groupId,
+          matchId: match.id,
+          memberAId: match.memberAId,
+          memberBId: match.memberBId,
+          now: attemptedAt,
+        }),
       requestKey: buildCallCircleConnectorRequestKey(match.id),
       resultNotificationRouteResolver: async () => undefined,
       runtimeOptions: {
@@ -199,21 +233,25 @@ export async function startCallCircleConnectorCall(input: {
     });
     if (phoneCall.status !== "calling") {
       if (phoneCall.status === "starting") {
-        if (!await canUseActiveCallCircleParticipantPair({
-          groupId: match.groupId,
-          memberAId: match.memberAId,
-          memberBId: match.memberBId,
-          prisma,
-        })) {
+        await prisma.$transaction(async (tx) => {
+          if (await canUseActiveCallCircleParticipantPair({
+            groupId: match.groupId,
+            memberAId: match.memberAId,
+            memberBId: match.memberBId,
+            prisma: tx,
+          })) return;
+          if (!await terminalizeUnstartedHostedPhoneCall({
+            phoneCallId: phoneCall.phoneCallId,
+            prisma: tx,
+          })) return;
           await markCallCircleMatchOutcome({
             matchId: match.id,
-            now,
             outcome: "participant_unavailable",
             phoneCallId: phoneCall.phoneCallId,
-            prisma,
+            prisma: tx,
             status: "canceled",
           });
-        }
+        });
         return { phoneCallId: phoneCall.phoneCallId, status: "ignored" };
       }
       const handedOff = await markCallCircleConnectorHandoff({
@@ -244,8 +282,8 @@ function buildCallCircleProviderStartGuardWhere(input: {
   now: Date;
 }): Prisma.HostedPhoneCallWhereInput {
   return {
-    callCircleMatches: {
-      some: {
+    callCircleMatch: {
+      is: {
         ...activeCallCircleParticipantPairMatchWhere({
           groupId: input.groupId,
           memberAId: input.memberAId,
@@ -294,20 +332,11 @@ async function canStartAttachedCallCircleBridge(input: {
   return count === 1;
 }
 
-export function buildCallCircleConnectorRequestKey(matchId: string): string {
-  return `${CALL_CIRCLE_CONNECTOR_REQUEST_KEY_PREFIX}${matchId}`;
-}
-
-export function readCallCircleMatchIdFromPhoneCallRequestKey(
-  requestKey: string,
-): string | null {
-  return requestKey.startsWith(CALL_CIRCLE_CONNECTOR_REQUEST_KEY_PREFIX)
-    ? requestKey.slice(CALL_CIRCLE_CONNECTOR_REQUEST_KEY_PREFIX.length)
-    : null;
+function buildCallCircleConnectorRequestKey(matchId: string): string {
+  return `${CALL_CIRCLE_PHONE_CALL_REQUEST_KEY_PREFIX}${matchId}`;
 }
 
 function buildCallCircleConnectorBrief(input: {
-  matchId: string;
   memberAPhone: string;
   timeZone: string;
 }): HostedPhoneCallBrief {
@@ -315,13 +344,10 @@ function buildCallCircleConnectorBrief(input: {
     allowTransferToUser: true,
     goal: "Connect two group members for a short Call Circle call.",
     instructions: [
-      "Say: This is Murph. Connecting you with a friend from your group, one moment.",
       "Transfer the call immediately after the opening line.",
       "Do not ask for another confirmation; web already recorded both final confirmations before this connector call started.",
     ],
-    shareableFacts: {
-      call_circle_match_id: input.matchId,
-    },
+    shareableFacts: {},
     successCriteria: "The call transfers to the matched group member.",
     timeZone: input.timeZone,
     to: {
@@ -339,19 +365,12 @@ async function markCallCircleConnectorHandoff(input: {
     memberBId: string;
   };
   now: Date;
-  outcome: string;
+  outcome: CallCircleMatchOutcome;
   prisma: PrismaClient;
 }): Promise<boolean> {
-  const timeZones = await readCallCircleMatchParticipantTimeZones({
-    groupId: input.match.groupId,
-    memberAId: input.match.memberAId,
-    memberBId: input.match.memberBId,
-    prisma: input.prisma,
-  });
-  if (!timeZones) return false;
   const transaction = await input.prisma.$transaction(async (tx): Promise<{
     handedOff: boolean;
-    signals: CallCircleNotificationSignal[];
+    signals: HostedAssistantNotificationSignal[];
   }> => {
     const current = await tx.hostedCallCircleMatch.findUnique({
       select: {
@@ -370,13 +389,27 @@ async function markCallCircleConnectorHandoff(input: {
       where: { id: input.match.id },
     });
     const expectedPhoneCallId = current?.phoneCallId ?? null;
+    const unstartedPhoneCall = isUnstartedCallCircleBridgePhoneCall(
+      current?.phoneCall ?? null,
+    );
     if (
       !current
       || (
         current.phoneCallId !== null
         && !isPreProviderFailedCallCircleBridgePhoneCall(current.phoneCall)
+        && !unstartedPhoneCall
       )
       || !["both_confirmed", "bridging"].includes(current.status)
+    ) {
+      return { handedOff: false, signals: [] };
+    }
+    if (
+      unstartedPhoneCall
+      && current.phoneCallId
+      && !await terminalizeUnstartedHostedPhoneCall({
+        phoneCallId: current.phoneCallId,
+        prisma: tx,
+      })
     ) {
       return { handedOff: false, signals: [] };
     }
@@ -388,7 +421,6 @@ async function markCallCircleConnectorHandoff(input: {
     })) {
       await markCallCircleMatchOutcome({
         matchId: input.match.id,
-        now: input.now,
         outcome: "participant_unavailable",
         phoneCallId: expectedPhoneCallId,
         prisma: tx,
@@ -398,67 +430,27 @@ async function markCallCircleConnectorHandoff(input: {
     }
     const marked = await markCallCircleMatchOutcome({
       matchId: input.match.id,
-      now: input.now,
       outcome: input.outcome,
       phoneCallId: expectedPhoneCallId,
       prisma: tx,
       status: "dropped",
     });
     if (!marked) return { handedOff: false, signals: [] };
-    const notifications = await Promise.all([
-      appendConnectorHandoffNotificationIfReachableTx({
-        matchId: input.match.id,
-        memberId: input.match.memberAId,
-        now: input.now,
-        timeZone: timeZones.memberATimeZone,
-        tx,
-      }),
-      appendConnectorHandoffNotificationIfReachableTx({
-        matchId: input.match.id,
-        memberId: input.match.memberBId,
-        now: input.now,
-        timeZone: timeZones.memberBTimeZone,
-        tx,
-      }),
-    ]);
     return {
       handedOff: true,
-      signals: notifications.flatMap((notification, index) => {
-        const memberId = index === 0
-          ? input.match.memberAId
-          : input.match.memberBId;
-        const signal = notification
-          ? readCallCircleNotificationSignal({ memberId, notification })
-          : null;
-        return signal ? [signal] : [];
+      signals: await appendCallCircleTerminalNotificationsTx({
+        groupId: input.match.groupId,
+        kind: "handoff",
+        matchId: input.match.id,
+        memberAId: input.match.memberAId,
+        memberBId: input.match.memberBId,
+        now: input.now,
+        tx,
       }),
     };
   });
-  await signalCallCircleNotificationRuntimesBestEffort(transaction.signals);
+  await signalHostedAssistantNotificationsBestEffort(transaction.signals);
   return transaction.handedOff;
-}
-
-async function appendConnectorHandoffNotificationIfReachableTx(input: {
-  matchId: string;
-  memberId: string;
-  now: Date;
-  timeZone: string;
-  tx: Prisma.TransactionClient;
-}) {
-  const preflight = await readCallCircleNotificationPreflightTx({
-    memberId: input.memberId,
-    now: input.now,
-    timeZone: input.timeZone,
-    tx: input.tx,
-  });
-  if (preflight.status !== "ok") return null;
-  return await appendCallCircleHandoffNotificationTx({
-    matchId: input.matchId,
-    memberId: input.memberId,
-    now: input.now,
-    preflight,
-    tx: input.tx,
-  });
 }
 
 function readCallCircleConnectorConfig(): {

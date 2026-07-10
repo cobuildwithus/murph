@@ -1,22 +1,33 @@
-import type { HostedCallCircleAvailabilityWindow } from "@murphai/hosted-execution/call-circle";
+import {
+  type HostedCallCircleAvailabilityWindow,
+  isHostedCallCircleTimeZone,
+} from "@murphai/hosted-execution/call-circle";
+import {
+  formatTimeZoneDateTimeParts,
+  parseDailyTime,
+} from "@murphai/contracts";
 
-export interface AbsoluteCallCircleWindow {
+interface AbsoluteCallCircleWindow {
   endAt: Date;
   startAt: Date;
 }
 
-export interface ZonedCallCircleAvailability {
+interface ZonedCallCircleAvailability {
   timeZone: string;
   windows: readonly HostedCallCircleAvailabilityWindow[];
 }
 
 export const CALL_CIRCLE_FINAL_ASK_LEAD_MS = 20 * 60 * 1000;
+export const CALL_CIRCLE_MATCH_LOOKBACK_MS = 7 * 24 * 60 * 60 * 1000;
+export const CALL_CIRCLE_MINIMUM_WINDOW_MS = 15 * 60 * 1000;
 
-const DEFAULT_TIME_ZONE = "UTC";
-const CALL_CIRCLE_MINIMUM_WINDOW_MS = 15 * 60 * 1000;
 export const CALL_CIRCLE_BRIDGE_WINDOW_MS = CALL_CIRCLE_MINIMUM_WINDOW_MS;
-const CALL_CIRCLE_MORNING_TO_FINAL_MIN_MS = 10 * 60 * 1000;
+// Leave one ten-minute scheduler tick for the morning ask and the next for the
+// final ask. A single-tick gap can miss the morning stage at the exact boundary.
+const CALL_CIRCLE_MORNING_TO_FINAL_MIN_MS = 20 * 60 * 1000;
 const CALL_CIRCLE_WINDOW_SCAN_STEP_MS = 60 * 1000;
+const CALL_CIRCLE_WEEK_MS = CALL_CIRCLE_MATCH_LOOKBACK_MS;
+const CALL_CIRCLE_MATCHING_EPOCH_DAY = 1;
 
 interface LocalDateParts {
   day: number;
@@ -26,23 +37,16 @@ interface LocalDateParts {
   year: number;
 }
 
-export function normalizeCallCircleTimeZone(value: string | null | undefined): string {
-  if (!value) return DEFAULT_TIME_ZONE;
-  try {
-    new Intl.DateTimeFormat("en-US", { timeZone: value }).format(new Date(0));
-    return value;
-  } catch {
-    return DEFAULT_TIME_ZONE;
-  }
-}
-
 export function listUpcomingCallCircleWindows(input: {
   availability: ZonedCallCircleAvailability;
   daysAhead?: number;
   now: Date;
 }): AbsoluteCallCircleWindow[] {
-  const daysAhead = input.daysAhead ?? 7;
-  const timeZone = normalizeCallCircleTimeZone(input.availability.timeZone);
+  // Include today plus the same local weekday next week. Otherwise a weekly
+  // cadence that runs after today's window can skip that weekday forever.
+  const daysAhead = input.daysAhead ?? 8;
+  const timeZone = input.availability.timeZone;
+  if (!isHostedCallCircleTimeZone(timeZone)) return [];
   const base = readLocalDateParts(input.now, timeZone);
   const baseUtcDay = Date.UTC(base.year, base.month - 1, base.day);
   const windows: AbsoluteCallCircleWindow[] = [];
@@ -67,7 +71,11 @@ export function listUpcomingCallCircleWindows(input: {
         month,
         year,
       }, timeZone);
-      if (end <= input.now || start >= end) continue;
+      // A local time inside the spring-forward gap does not identify a real
+      // instant, so the whole availability window is skipped. During a
+      // fall-back fold, localDateTimeToUtc deliberately selects the earlier
+      // occurrence for deterministic matching.
+      if (!start || !end || end <= input.now || start >= end) continue;
       windows.push({ startAt: start > input.now ? start : input.now, endAt: end });
     }
   }
@@ -75,9 +83,12 @@ export function listUpcomingCallCircleWindows(input: {
   return windows.sort((a, b) => a.startAt.getTime() - b.startAt.getTime());
 }
 
-export function intersectCallCircleWindows(input: {
+export function findCallCircleAskableWindow(input: {
   first: readonly AbsoluteCallCircleWindow[];
+  memberATimeZone: string;
+  memberBTimeZone: string;
   minimumDurationMs?: number;
+  now: Date;
   second: readonly AbsoluteCallCircleWindow[];
 }): AbsoluteCallCircleWindow | null {
   const minimumDurationMs = input.minimumDurationMs ?? CALL_CIRCLE_MINIMUM_WINDOW_MS;
@@ -85,15 +96,21 @@ export function intersectCallCircleWindows(input: {
     for (const second of input.second) {
       const startAt = new Date(Math.max(first.startAt.getTime(), second.startAt.getTime()));
       const endAt = new Date(Math.min(first.endAt.getTime(), second.endAt.getTime()));
-      if (endAt.getTime() - startAt.getTime() >= minimumDurationMs) {
-        return { startAt, endAt };
-      }
+      if (endAt.getTime() - startAt.getTime() < minimumDurationMs) continue;
+      const askable = findCallCircleFinalAskableWindow({
+        memberATimeZone: input.memberATimeZone,
+        memberBTimeZone: input.memberBTimeZone,
+        minimumDurationMs,
+        now: input.now,
+        window: { endAt, startAt },
+      });
+      if (askable) return askable;
     }
   }
   return null;
 }
 
-export function findCallCircleFinalAskableWindow(input: {
+function findCallCircleFinalAskableWindow(input: {
   memberATimeZone: string;
   memberBTimeZone: string;
   minimumDurationMs?: number;
@@ -147,27 +164,43 @@ export function canScheduleCallCircleConfirmationFlow(input: {
     first: latestMorningAskAt,
     second: input.windowStartAt,
     timeZone: input.memberBTimeZone,
-  }) && isWithinCallCircleQuietHours({
+  }) && isWithinCallCircleDaytime({
     now: latestMorningAskAt,
     timeZone: input.memberATimeZone,
-  }) && isWithinCallCircleQuietHours({
+  }) && isWithinCallCircleDaytime({
     now: latestMorningAskAt,
     timeZone: input.memberBTimeZone,
   });
 }
 
-export function canScheduleCallCircleFinalAsk(input: {
+function canScheduleCallCircleFinalAsk(input: {
   memberATimeZone: string;
   memberBTimeZone: string;
   windowStartAt: Date;
 }): boolean {
   if (!Number.isFinite(input.windowStartAt.getTime())) return false;
   const askAt = readCallCircleFinalAskAt(input.windowStartAt);
-  return isWithinCallCircleQuietHours({
-    now: askAt,
+  return isWithinCallCircleDaytimeForBoth({
+    at: askAt,
+    memberATimeZone: input.memberATimeZone,
+    memberBTimeZone: input.memberBTimeZone,
+  }) && isWithinCallCircleDaytimeForBoth({
+    at: input.windowStartAt,
+    memberATimeZone: input.memberATimeZone,
+    memberBTimeZone: input.memberBTimeZone,
+  });
+}
+
+function isWithinCallCircleDaytimeForBoth(input: {
+  at: Date;
+  memberATimeZone: string;
+  memberBTimeZone: string;
+}): boolean {
+  return isWithinCallCircleDaytime({
+    now: input.at,
     timeZone: input.memberATimeZone,
-  }) && isWithinCallCircleQuietHours({
-    now: askAt,
+  }) && isWithinCallCircleDaytime({
+    now: input.at,
     timeZone: input.memberBTimeZone,
   });
 }
@@ -176,7 +209,29 @@ export function readCallCircleBridgeWindowStartCutoff(now: Date): Date {
   return new Date(now.getTime() - CALL_CIRCLE_BRIDGE_WINDOW_MS);
 }
 
-export function readCallCircleBridgeDeadlineAt(input: {
+/**
+ * Returns the next Monday 00:00 UTC cadence boundary, always strictly after
+ * `now`. Matching may run immediately for newly eligible participants, but
+ * every considered participant advances to this shared weekly boundary.
+ */
+export function readNextCallCircleMatchingAt(now: Date): Date {
+  if (!Number.isFinite(now.getTime())) {
+    throw new Error("Call Circle matching cadence requires a valid date.");
+  }
+  const startOfDay = Date.UTC(
+    now.getUTCFullYear(),
+    now.getUTCMonth(),
+    now.getUTCDate(),
+  );
+  const daysUntilEpoch = (
+    CALL_CIRCLE_MATCHING_EPOCH_DAY - now.getUTCDay() + 7
+  ) % 7;
+  let nextAtMs = startOfDay + daysUntilEpoch * 24 * 60 * 60 * 1000;
+  if (nextAtMs <= now.getTime()) nextAtMs += CALL_CIRCLE_WEEK_MS;
+  return new Date(nextAtMs);
+}
+
+function readCallCircleBridgeDeadlineAt(input: {
   windowEndAt: Date;
   windowStartAt: Date;
 }): Date {
@@ -203,15 +258,16 @@ export function hasCallCircleBridgeWindowElapsed(input: {
   return input.now >= readCallCircleBridgeDeadlineAt(input);
 }
 
-function readCallCircleFinalAskAt(windowStartAt: Date): Date {
+export function readCallCircleFinalAskAt(windowStartAt: Date): Date {
   return new Date(windowStartAt.getTime() - CALL_CIRCLE_FINAL_ASK_LEAD_MS);
 }
 
-export function isWithinCallCircleQuietHours(input: {
+export function isWithinCallCircleDaytime(input: {
   now: Date;
   timeZone: string;
 }): boolean {
-  const parts = readLocalDateParts(input.now, normalizeCallCircleTimeZone(input.timeZone));
+  if (!isHostedCallCircleTimeZone(input.timeZone)) return false;
+  const parts = readLocalDateParts(input.now, input.timeZone);
   return parts.hour >= 8 && parts.hour < 21;
 }
 
@@ -220,7 +276,8 @@ export function isSameCallCircleLocalDate(input: {
   second: Date;
   timeZone: string;
 }): boolean {
-  const timeZone = normalizeCallCircleTimeZone(input.timeZone);
+  const timeZone = input.timeZone;
+  if (!isHostedCallCircleTimeZone(timeZone)) return false;
   const first = readLocalDateParts(input.first, timeZone);
   const second = readLocalDateParts(input.second, timeZone);
   return first.year === second.year
@@ -231,7 +288,7 @@ export function isSameCallCircleLocalDate(input: {
 export function localDateTimeToUtc(
   parts: LocalDateParts,
   timeZone: string,
-): Date {
+): Date | null {
   const targetMs = Date.UTC(
     parts.year,
     parts.month - 1,
@@ -239,55 +296,66 @@ export function localDateTimeToUtc(
     parts.hour,
     parts.minute,
   );
-  let utcMs = targetMs;
-  for (let attempt = 0; attempt < 3; attempt += 1) {
-    const actual = readLocalDateParts(new Date(utcMs), timeZone);
-    const actualMs = Date.UTC(
-      actual.year,
-      actual.month - 1,
-      actual.day,
-      actual.hour,
-      actual.minute,
-    );
-    const delta = targetMs - actualMs;
-    if (delta === 0) break;
-    utcMs += delta;
+  const offsets = new Set<number>();
+  for (const sampleDeltaMs of [-48, -24, 0, 24, 48].map((hours) =>
+    hours * 60 * 60 * 1000
+  )) {
+    offsets.add(readTimeZoneOffsetMs(new Date(targetMs + sampleDeltaMs), timeZone));
   }
-  return new Date(utcMs);
+
+  const candidates = [...offsets]
+    .map((offsetMs) => new Date(targetMs - offsetMs))
+    .filter((candidate) => localDatePartsEqual(
+      readLocalDateParts(candidate, timeZone),
+      parts,
+    ))
+    .sort((first, second) => first.getTime() - second.getTime());
+
+  // No candidate means this wall-clock minute is inside a DST gap. Multiple
+  // candidates mean a fold; consistently choosing the earlier instant keeps
+  // matching deterministic across runtimes and retries.
+  return candidates[0] ?? null;
+}
+
+function readTimeZoneOffsetMs(date: Date, timeZone: string): number {
+  const local = readLocalDateParts(date, timeZone);
+  const localAsUtcMs = Date.UTC(
+    local.year,
+    local.month - 1,
+    local.day,
+    local.hour,
+    local.minute,
+  );
+  const instantAtMinuteMs = Math.floor(date.getTime() / 60_000) * 60_000;
+  return localAsUtcMs - instantAtMinuteMs;
+}
+
+function localDatePartsEqual(
+  first: LocalDateParts,
+  second: LocalDateParts,
+): boolean {
+  return first.year === second.year
+    && first.month === second.month
+    && first.day === second.day
+    && first.hour === second.hour
+    && first.minute === second.minute;
 }
 
 function readLocalTimeParts(value: string): Pick<LocalDateParts, "hour" | "minute"> {
-  const [hour, minute] = value.split(":").map((part) => Number.parseInt(part, 10));
-  return { hour, minute };
+  const parsed = parseDailyTime(value);
+  if (!parsed) {
+    throw new RangeError(`Invalid Call Circle local time: ${value}`);
+  }
+  return parsed;
 }
 
 function readLocalDateParts(date: Date, timeZone: string): LocalDateParts {
-  const formatter = new Intl.DateTimeFormat("en-US", {
-    day: "2-digit",
-    hour: "2-digit",
-    hourCycle: "h23",
-    minute: "2-digit",
-    month: "2-digit",
-    timeZone,
-    year: "numeric",
-  });
-  const parts = new Map(
-    formatter.formatToParts(date)
-      .map((part) => [part.type, part.value]),
-  );
+  const parts = formatTimeZoneDateTimeParts(date, timeZone);
   return {
-    day: readDatePart(parts, "day"),
-    hour: readDatePart(parts, "hour"),
-    minute: readDatePart(parts, "minute"),
-    month: readDatePart(parts, "month"),
-    year: readDatePart(parts, "year"),
+    day: parts.day,
+    hour: parts.hour,
+    minute: parts.minute,
+    month: parts.month,
+    year: parts.year,
   };
-}
-
-function readDatePart(parts: Map<string, string>, name: string): number {
-  const value = parts.get(name);
-  if (!value) {
-    throw new Error(`Missing ${name} from formatted local date.`);
-  }
-  return Number.parseInt(value, 10);
 }

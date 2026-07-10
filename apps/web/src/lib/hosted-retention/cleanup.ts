@@ -10,8 +10,8 @@ import {
   signalHostedMailboxAppendRuntime,
 } from "../hosted-orchestration/signal-runtime";
 import {
+  terminalizeStaleHostedPhoneCallAnalyses,
   terminalizeStaleHostedPhoneCallProviderStarts,
-  type HostedPhoneCallResultNotificationSignal,
 } from "../phone-calls/result";
 
 const DAY_MS = 86_400_000;
@@ -23,6 +23,8 @@ export const HOSTED_WEB_SESSION_RETENTION_MS = 30 * DAY_MS;
 export const HOSTED_INBOX_MEDIA_RETENTION_SIGNAL_BATCH_SIZE = 25;
 export const HOSTED_INBOX_MEDIA_RETENTION_SIGNAL_CONCURRENCY = 5;
 export const HOSTED_INBOX_MEDIA_RETENTION_SIGNAL_TIMEOUT_MS = 10_000;
+export const HOSTED_ASSISTANT_NOTIFICATION_RECOVERY_BATCH_SIZE = 100;
+const HOSTED_ASSISTANT_NOTIFICATION_RECOVERY_CONCURRENCY = 10;
 
 type HostedRuntimeRecheckSignal = (input: {
   userId: string;
@@ -34,14 +36,15 @@ type HostedMailboxAppendSignal = (input: {
 }) => Promise<unknown>;
 
 export interface HostedRetentionCleanupResult {
+  assistantNotificationRecoverySignalFailures: number;
+  assistantNotificationRecoverySignalsSent: number;
   expiredComputerRunsCleanedUp: number;
   expiredMailboxItemsDeleted: number;
   inboxMediaRetentionRuntimeSignalFailures: number;
   inboxMediaRetentionRuntimeSignalsSent: number;
   oldRuntimeLogsDeleted: number;
+  stalePhoneCallAnalysesTerminalized: number;
   stalePhoneCallProviderStartsFailed: number;
-  stalePhoneCallResultNotificationSignalFailures: number;
-  stalePhoneCallResultNotificationSignalsSent: number;
   staleWebSessionsDeleted: number;
 }
 
@@ -73,9 +76,14 @@ export async function runHostedRetentionCleanup(input: {
     now,
     prisma,
   });
-  const stalePhoneCallSignals = await signalHostedPhoneCallResultNotifications({
+  const stalePhoneCallAnalyses = await terminalizeStaleHostedPhoneCallAnalyses({
+    now,
+    prisma,
+  });
+  const assistantNotificationSignals = await signalPendingAssistantNotifications({
+    now,
+    prisma,
     signalMailboxAppend: input.signalMailboxAppend,
-    signals: stalePhoneCallStarts.notificationSignals,
   });
   const mediaRetentionSignals = await signalDueInboxMediaRetentionRuntimes({
     now,
@@ -84,43 +92,108 @@ export async function runHostedRetentionCleanup(input: {
   });
 
   return {
+    assistantNotificationRecoverySignalFailures:
+      assistantNotificationSignals.failures,
+    assistantNotificationRecoverySignalsSent: assistantNotificationSignals.sent,
     expiredComputerRunsCleanedUp,
     expiredMailboxItemsDeleted,
     inboxMediaRetentionRuntimeSignalFailures: mediaRetentionSignals.failures,
     inboxMediaRetentionRuntimeSignalsSent: mediaRetentionSignals.sent,
     oldRuntimeLogsDeleted,
+    stalePhoneCallAnalysesTerminalized:
+      stalePhoneCallAnalyses.terminalizedPhoneCalls,
     stalePhoneCallProviderStartsFailed: stalePhoneCallStarts.failedPhoneCalls,
-    stalePhoneCallResultNotificationSignalFailures: stalePhoneCallSignals.failures,
-    stalePhoneCallResultNotificationSignalsSent: stalePhoneCallSignals.sent,
     staleWebSessionsDeleted,
   };
 }
 
-async function signalHostedPhoneCallResultNotifications(input: {
+interface PendingAssistantNotificationSignal {
+  mailboxItemId: string;
+  memberId: string;
+}
+
+async function signalPendingAssistantNotifications(input: {
+  now: Date;
+  prisma: PrismaClient;
   signalMailboxAppend?: HostedMailboxAppendSignal;
-  signals: readonly HostedPhoneCallResultNotificationSignal[];
 }): Promise<{ failures: number; sent: number }> {
+  const signals = await listPendingAssistantNotificationSignals(input);
   const signalMailboxAppend =
     input.signalMailboxAppend ?? signalHostedMailboxAppendRuntime;
   let failures = 0;
   let sent = 0;
-  await Promise.all(input.signals.map(async (signal) => {
-    try {
-      await signalMailboxAppend({
-        expectedUserId: signal.notificationUserId,
-        mailboxItemId: signal.notificationMailboxItemId,
-      });
-      sent += 1;
-    } catch (error) {
-      failures += 1;
-      console.error("Hosted phone-call result notification signal failed.", {
-        ...formatHostedExecutionSafeLogErrorDetails(error, {
-          code: "hosted_phone_call_result_notification_signal_failed",
-        }),
-      });
+  let nextIndex = 0;
+  const workerCount = Math.min(
+    HOSTED_ASSISTANT_NOTIFICATION_RECOVERY_CONCURRENCY,
+    signals.length,
+  );
+  await Promise.all(Array.from({ length: workerCount }, async () => {
+    while (true) {
+      const signal = signals[nextIndex];
+      nextIndex += 1;
+      if (!signal) return;
+      try {
+        await signalMailboxAppend({
+          expectedUserId: signal.memberId,
+          mailboxItemId: signal.mailboxItemId,
+        });
+        sent += 1;
+      } catch (error) {
+        failures += 1;
+        console.error("Hosted assistant-notification recovery signal failed.", {
+          ...formatHostedExecutionSafeLogErrorDetails(error, {
+            code: "hosted_assistant_notification_recovery_signal_failed",
+          }),
+        });
+      }
     }
   }));
+  if (signals.length > 0) {
+    await input.prisma.hostedMailboxItem.updateMany({
+      data: { updatedAt: input.now },
+      where: {
+        consumedAt: null,
+        id: { in: signals.map((signal) => signal.mailboxItemId) },
+        kind: "assistant.notification.requested",
+        lane: "system",
+      },
+    });
+  }
   return { failures, sent };
+}
+
+async function listPendingAssistantNotificationSignals(input: {
+  now: Date;
+  prisma: PrismaClient;
+}): Promise<PendingAssistantNotificationSignal[]> {
+  return input.prisma.$queryRaw<PendingAssistantNotificationSignal[]>`
+    SELECT
+      pending."mailboxItemId",
+      pending."memberId"
+    FROM (
+      SELECT DISTINCT ON (item."user_id")
+        item."id" AS "mailboxItemId",
+        item."user_id" AS "memberId",
+        item."created_at" AS "createdAt",
+        item."updated_at" AS "updatedAt"
+      FROM "hosted_mailbox_item" AS item
+      LEFT JOIN "hosted_mailbox_lane_counter" AS counter
+        ON counter."user_id" = item."user_id"
+        AND counter."lane" = item."lane"
+      WHERE item."kind" = 'assistant.notification.requested'
+        AND item."lane" = 'system'
+        AND item."consumed_at" IS NULL
+        AND item."lane_seq" > COALESCE(counter."consumed_seq", 0)
+        AND item."created_at" <= ${input.now}
+        AND (item."expires_at" IS NULL OR item."expires_at" > ${input.now})
+      ORDER BY item."user_id" ASC, item."lane_seq" ASC
+    ) AS pending
+    ORDER BY
+      pending."updatedAt" ASC,
+      pending."createdAt" ASC,
+      pending."memberId" ASC
+    LIMIT ${HOSTED_ASSISTANT_NOTIFICATION_RECOVERY_BATCH_SIZE}
+  `;
 }
 
 async function signalDueInboxMediaRetentionRuntimes(input: {

@@ -14,7 +14,8 @@ const serviceMocks = vi.hoisted(() => ({
   getHostedOnboardingStripe: vi.fn(),
   readHostedConnectedAppsConfig: vi.fn(),
   revokeOutgoingHostedVaultSharesForMemberDeletionTx: vi.fn(),
-  signalHostedMailboxAppendRuntime: vi.fn(),
+  signalHostedMailboxAppendsBestEffort: vi.fn(),
+  stopRetellPhoneCall: vi.fn(),
   terminateHostedUserRuntimeWorkflowBestEffort: vi.fn(),
 }));
 
@@ -56,7 +57,11 @@ vi.mock("@/src/lib/hosted-orchestration/workflow-termination", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
-  signalHostedMailboxAppendRuntime: serviceMocks.signalHostedMailboxAppendRuntime,
+  signalHostedMailboxAppendsBestEffort: serviceMocks.signalHostedMailboxAppendsBestEffort,
+}));
+
+vi.mock("@/src/lib/phone-calls/retell-runtime", () => ({
+  stopRetellPhoneCall: serviceMocks.stopRetellPhoneCall,
 }));
 
 vi.mock("@/src/lib/hosted-vault-share/share-grant-store", () => ({
@@ -94,6 +99,11 @@ const REQUIRED_STORE_SLUGS = [
   "prisma.hosted_account_group_membership",
   "prisma.hosted_account_group_invite",
   "prisma.hosted_account_group_billing_ref",
+  "prisma.hosted_group",
+  "prisma.hosted_group_member",
+  "prisma.hosted_call_circle_participant",
+  "prisma.hosted_call_circle_match",
+  "prisma.hosted_phone_call",
   "prisma.hosted_mailbox_item",
   "prisma.hosted_mailbox_payload",
   "prisma.hosted_mailbox_lane_counter",
@@ -171,8 +181,10 @@ beforeEach(() => {
     cleanupSignals: [],
     revokedCount: 0,
   });
-  serviceMocks.signalHostedMailboxAppendRuntime.mockReset();
-  serviceMocks.signalHostedMailboxAppendRuntime.mockResolvedValue(undefined);
+  serviceMocks.signalHostedMailboxAppendsBestEffort.mockReset();
+  serviceMocks.signalHostedMailboxAppendsBestEffort.mockResolvedValue(undefined);
+  serviceMocks.stopRetellPhoneCall.mockReset();
+  serviceMocks.stopRetellPhoneCall.mockResolvedValue(undefined);
   serviceMocks.terminateHostedUserRuntimeWorkflowBestEffort.mockReset();
   serviceMocks.terminateHostedUserRuntimeWorkflowBestEffort.mockResolvedValue({
     configured: true,
@@ -392,6 +404,147 @@ describe("deleteHostedAccountData", () => {
     ]));
   });
 
+  it("explicitly deletes Call Circle rows before group and member cascades", async () => {
+    const deleteCalls: HostedAccountDeletionPrismaDeleteCall[] = [];
+    const operationOrder: string[] = [];
+    const prisma = createHostedAccountDeletionPrismaForTest({
+      deleteCalls,
+      onTransaction: () => operationOrder.push("transaction"),
+      operationOrder,
+    });
+
+    const result = await deleteHostedAccountData({
+      memberId: "member_123",
+      prisma,
+      request: new Request("https://join.example.test/settings"),
+    });
+
+    expect(result.deletedCounts["prisma.hosted_phone_call"]).toBe(1);
+    expect(result.deletedCounts["prisma.hosted_call_circle_match"]).toBe(1);
+    expect(result.deletedCounts["prisma.hosted_call_circle_participant"]).toBe(1);
+    expect(deleteCalls).toContainEqual({
+      model: "hostedPhoneCall",
+      where: {
+        OR: [
+          { memberId: "member_123" },
+          {
+            callCircleMatch: {
+              is: {
+                OR: [
+                  { memberAId: "member_123" },
+                  { memberBId: "member_123" },
+                  {
+                    group: {
+                      OR: [
+                        { ownerMemberId: "member_123" },
+                        { runtimeMemberId: "member_123" },
+                      ],
+                    },
+                  },
+                ],
+              },
+            },
+          },
+        ],
+      },
+    });
+    expect(deleteCalls).toContainEqual({
+      model: "hostedCallCircleMatch",
+      where: {
+        OR: [
+          { memberAId: "member_123" },
+          { memberBId: "member_123" },
+          {
+            group: {
+              OR: [
+                { ownerMemberId: "member_123" },
+                { runtimeMemberId: "member_123" },
+              ],
+            },
+          },
+        ],
+      },
+    });
+    expect(deleteCalls).toContainEqual({
+      model: "hostedCallCircleParticipant",
+      where: {
+        OR: [
+          { memberId: "member_123" },
+          {
+            group: {
+              OR: [
+                { ownerMemberId: "member_123" },
+                { runtimeMemberId: "member_123" },
+              ],
+            },
+          },
+        ],
+      },
+    });
+    expect(operationOrder.indexOf("delete:hostedPhoneCall")).toBeLessThan(
+      operationOrder.indexOf("delete:hostedCallCircleMatch"),
+    );
+    expect(operationOrder.indexOf("delete:hostedCallCircleMatch")).toBeLessThan(
+      operationOrder.indexOf("delete:hostedGroup"),
+    );
+    expect(operationOrder.indexOf("delete:hostedCallCircleParticipant")).toBeLessThan(
+      operationOrder.indexOf("delete:hostedGroup"),
+    );
+    expect(operationOrder.indexOf("delete:hostedPhoneCall")).toBeLessThan(
+      operationOrder.indexOf("delete:hostedMember"),
+    );
+  });
+
+  it("stops live Retell calls before deleting their local authority", async () => {
+    const operationOrder: string[] = [];
+    serviceMocks.stopRetellPhoneCall.mockImplementation(async () => {
+      operationOrder.push("retell:stop");
+    });
+    const prisma = createHostedAccountDeletionPrismaForTest({
+      onTransaction: () => operationOrder.push("transaction"),
+      operationOrder,
+      phoneCalls: [{
+        providerCallId: "retell_call_live",
+        providerStartAttemptedAt: new Date("2026-07-09T12:00:00.000Z"),
+      }],
+    });
+
+    await expect(deleteHostedAccountData({
+      memberId: "member_123",
+      prisma,
+      request: new Request("https://join.example.test/settings"),
+    })).resolves.toMatchObject({ memberId: "member_123" });
+
+    expect(serviceMocks.stopRetellPhoneCall).toHaveBeenCalledWith("retell_call_live");
+    expect(operationOrder.indexOf("retell:stop")).toBeLessThan(
+      operationOrder.indexOf("delete:hostedPhoneCall"),
+    );
+  });
+
+  it("keeps local authority while a provider call start is unresolved", async () => {
+    const operationOrder: string[] = [];
+    const prisma = createHostedAccountDeletionPrismaForTest({
+      onTransaction: () => operationOrder.push("transaction"),
+      operationOrder,
+      phoneCalls: [{
+        providerCallId: null,
+        providerStartAttemptedAt: new Date("2026-07-09T12:00:00.000Z"),
+      }],
+    });
+
+    await expect(deleteHostedAccountData({
+      memberId: "member_123",
+      prisma,
+      request: new Request("https://join.example.test/settings"),
+    })).rejects.toMatchObject({
+      code: "ACCOUNT_DELETION_PHONE_CALL_START_IN_PROGRESS",
+      retryable: true,
+    });
+
+    expect(serviceMocks.stopRetellPhoneCall).not.toHaveBeenCalled();
+    expect(operationOrder).not.toContain("delete:hostedPhoneCall");
+  });
+
   it("deletes delivery-time consume stamps with hosted mailbox item rows", async () => {
     const deleteCalls: HostedAccountDeletionPrismaDeleteCall[] = [];
     const prisma = createHostedAccountDeletionPrismaForTest({
@@ -431,7 +584,7 @@ describe("deleteHostedAccountData", () => {
         };
       },
     );
-    serviceMocks.signalHostedMailboxAppendRuntime.mockImplementation(async () => {
+    serviceMocks.signalHostedMailboxAppendsBestEffort.mockImplementation(async () => {
       operationOrder.push("vault-share:signal");
     });
     const prisma = createHostedAccountDeletionPrismaForTest({
@@ -452,10 +605,10 @@ describe("deleteHostedAccountData", () => {
         now: expect.any(Date),
         tx: expect.any(Object),
       });
-    expect(serviceMocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
-      expectedUserId: "member_surviving_destination",
+    expect(serviceMocks.signalHostedMailboxAppendsBestEffort).toHaveBeenCalledWith([{
       mailboxItemId: "mailbox_item_revoke_1",
-    });
+      memberId: "member_surviving_destination",
+    }]);
     expect(result.deletedCounts["prisma.hosted_vault_share"]).toBe(1);
     expect(operationOrder.indexOf("vault-share:revoke")).toBeLessThan(
       operationOrder.indexOf("count:hostedVaultShare"),
@@ -1613,6 +1766,10 @@ function createHostedAccountDeletionPrismaForTest(input: {
   familyBillingRefRecords?: Record<string, unknown>[];
   familyGroups?: Array<{ id: string }>;
   ownedThreadContainerMemberIds?: string[];
+  phoneCalls?: Array<{
+    providerCallId: string | null;
+    providerStartAttemptedAt: Date | null;
+  }>;
   identityRecord?: Record<string, unknown> | null;
   onTransaction: () => void;
   operationOrder?: string[];
@@ -1711,6 +1868,9 @@ function createHostedAccountDeletionPrismaForTest(input: {
     },
     hostedMemberIdentity: {
       findUnique: async () => input.identityRecord ?? null,
+    },
+    hostedPhoneCall: {
+      findMany: async () => input.phoneCalls ?? [],
     },
     hostedConnectedAppsSession: {
       findUnique: async () => input.connectedAppsSession

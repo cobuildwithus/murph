@@ -2,9 +2,7 @@ import type { HostedPhoneCall } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
-  appendCallCircleHandoffNotificationTx: vi.fn(),
-  appendCallCircleOutcomeNotificationTx: vi.fn(),
-  attachCallCirclePhoneCall: vi.fn(),
+  appendCallCircleTerminalNotificationsTx: vi.fn(),
   hostedCallCircleMatchFindUnique: vi.fn(),
   hostedMailboxItemFindUnique: vi.fn(),
   hostedPhoneCallFindUnique: vi.fn(),
@@ -13,9 +11,6 @@ const mocks = vi.hoisted(() => ({
   markCallCircleMatchOutcome: vi.fn(),
   prismaTransaction: vi.fn(),
   readExistingCallCircleNotificationSignalTx: vi.fn(),
-  readCallCircleNotificationSignal: vi.fn(),
-  readCallCircleNotificationPreflightTx: vi.fn(),
-  readCallCircleMatchParticipantTimeZones: vi.fn(),
 }));
 
 vi.mock("@/src/lib/prisma", () => ({
@@ -25,32 +20,23 @@ vi.mock("@/src/lib/prisma", () => ({
 }));
 
 vi.mock("@/src/lib/call-circle/match-store", () => ({
-  attachCallCirclePhoneCall: mocks.attachCallCirclePhoneCall,
   markCallCircleMatchOutcome: mocks.markCallCircleMatchOutcome,
 }));
 
 vi.mock("@/src/lib/call-circle/notifications", () => ({
-  appendCallCircleHandoffNotificationTx: mocks.appendCallCircleHandoffNotificationTx,
-  appendCallCircleOutcomeNotificationTx: mocks.appendCallCircleOutcomeNotificationTx,
-  buildCallCircleHandoffNotificationEventId: ({ matchId, memberId }: {
+  appendCallCircleTerminalNotificationsTx:
+    mocks.appendCallCircleTerminalNotificationsTx,
+  buildCallCircleTerminalNotificationEventId: ({ kind, matchId, memberId }: {
+    kind: "handoff" | "outcome";
     matchId: string;
     memberId: string;
-  }) => `assistant.notification.requested:call-circle:handoff:${matchId}:${memberId}`,
-  buildCallCircleOutcomeNotificationEventId: ({ matchId, memberId }: {
-    matchId: string;
-    memberId: string;
-  }) => `assistant.notification.requested:call-circle:outcome:${matchId}:${memberId}`,
+  }) => `assistant.notification.requested:call-circle:${kind}:${matchId}:${memberId}`,
   readExistingCallCircleNotificationSignalTx: mocks.readExistingCallCircleNotificationSignalTx,
-  readCallCircleNotificationSignal: mocks.readCallCircleNotificationSignal,
-  readCallCircleNotificationPreflightTx: mocks.readCallCircleNotificationPreflightTx,
-}));
-
-vi.mock("@/src/lib/call-circle/participant-store", () => ({
-  readCallCircleMatchParticipantTimeZones: mocks.readCallCircleMatchParticipantTimeZones,
 }));
 
 import {
   handleRetellCallAnalyzed,
+  handleRetellTransferOutcome,
 } from "@/src/lib/phone-calls/result";
 
 describe("Retell call analysis for Call Circle connector calls", () => {
@@ -85,24 +71,16 @@ describe("Retell call analysis for Call Circle connector calls", () => {
     });
     mocks.hostedCallCircleMatchFindUnique.mockResolvedValue({
       groupId: "hgrp_123",
+      id: "hccm_123",
       memberAId: "member_a",
       memberBId: "member_b",
     });
     mocks.hostedMailboxItemFindUnique.mockResolvedValue(null);
-    mocks.attachCallCirclePhoneCall.mockResolvedValue(true);
     mocks.markCallCircleMatchOutcome.mockResolvedValue(true);
-    mocks.appendCallCircleOutcomeNotificationTx.mockResolvedValue({
-      mailboxItemId: "mailbox_123",
-      status: "sent",
-    });
-    mocks.appendCallCircleHandoffNotificationTx.mockResolvedValue({
-      mailboxItemId: "mailbox_123",
-      status: "sent",
-    });
-    mocks.readCallCircleNotificationSignal.mockImplementation(({ memberId, notification }) =>
-      notification?.status === "sent" && notification.mailboxItemId
-        ? { mailboxItemId: notification.mailboxItemId, memberId }
-        : null);
+    mocks.appendCallCircleTerminalNotificationsTx.mockResolvedValue([
+      { mailboxItemId: "mailbox_123", memberId: "member_a" },
+      { mailboxItemId: "mailbox_123", memberId: "member_b" },
+    ]);
     mocks.readExistingCallCircleNotificationSignalTx.mockImplementation(async ({
       eventId,
       memberId,
@@ -138,14 +116,6 @@ describe("Retell call analysis for Call Circle connector calls", () => {
         },
       };
     });
-    mocks.readCallCircleNotificationPreflightTx.mockResolvedValue({
-      route: { channel: "linq" },
-      status: "ok",
-    });
-    mocks.readCallCircleMatchParticipantTimeZones.mockResolvedValue({
-      memberATimeZone: "America/Los_Angeles",
-      memberBTimeZone: "America/New_York",
-    });
   });
 
   it("updates the match and suppresses standard phone-call result notifications", async () => {
@@ -153,81 +123,79 @@ describe("Retell call analysis for Call Circle connector calls", () => {
       call: {
         call_analysis: {
           custom_analysis_data: {
-            outcome: "completed",
-            result: "The Call Circle bridge completed.",
+            outcome: "not_completed",
+            result: "The model incorrectly said the bridge failed.",
           },
         },
         call_id: "retell_call_123",
         data_storage_setting: "basic_attributes_only",
       },
     })).resolves.toEqual({
-      notificationMailboxItemId: "mailbox_123",
       notificationSignals: [
         {
-          notificationMailboxItemId: "mailbox_123",
-          notificationUserId: "member_a",
+          mailboxItemId: "mailbox_123",
+          memberId: "member_a",
         },
         {
-          notificationMailboxItemId: "mailbox_123",
-          notificationUserId: "member_b",
+          mailboxItemId: "mailbox_123",
+          memberId: "member_b",
         },
       ],
-      notificationUserId: "member_a",
     });
 
     expect(mocks.markCallCircleMatchOutcome).toHaveBeenCalledWith({
       matchId: "hccm_123",
-      now: expect.any(Date),
       outcome: "completed",
       phoneCallId: "hpc_123",
       prisma: expect.any(Object),
       status: "completed",
     });
-    expect(mocks.attachCallCirclePhoneCall).toHaveBeenCalledWith({
-      matchId: "hccm_123",
-      phoneCallId: "hpc_123",
-      prisma: expect.any(Object),
-    });
-    expect(mocks.attachCallCirclePhoneCall.mock.invocationCallOrder[0]).toBeLessThan(
-      mocks.markCallCircleMatchOutcome.mock.invocationCallOrder[0],
-    );
-    expect(mocks.appendCallCircleOutcomeNotificationTx).toHaveBeenCalledTimes(2);
-    expect(mocks.appendCallCircleOutcomeNotificationTx).toHaveBeenCalledWith(
-      expect.objectContaining({
-        matchId: "hccm_123",
-        memberId: "member_a",
-      }),
-    );
-    expect(mocks.appendCallCircleOutcomeNotificationTx).toHaveBeenCalledWith(
-      expect.objectContaining({
-        matchId: "hccm_123",
-        memberId: "member_b",
-      }),
-    );
-    expect(mocks.readCallCircleMatchParticipantTimeZones).toHaveBeenCalledWith({
+    expect(mocks.appendCallCircleTerminalNotificationsTx).toHaveBeenCalledWith({
       groupId: "hgrp_123",
+      kind: "outcome",
+      matchId: "hccm_123",
       memberAId: "member_a",
       memberBId: "member_b",
+      now: expect.any(Date),
+      tx: expect.any(Object),
+    });
+  });
+
+  it("hands off a cancelled transfer even when model analysis claims success", async () => {
+    mocks.hostedPhoneCallFindUnique.mockResolvedValueOnce({
+      ...buildCallCirclePhoneCall(),
+      transferOutcome: "cancelled",
+    });
+
+    await handleRetellCallAnalyzed({
+      call: {
+        call_analysis: {
+          custom_analysis_data: {
+            outcome: "completed",
+            result: "The model incorrectly said the bridge completed.",
+          },
+        },
+        call_id: "retell_call_123",
+        data_storage_setting: "basic_attributes_only",
+      },
+    });
+
+    expect(mocks.markCallCircleMatchOutcome).toHaveBeenCalledWith({
+      matchId: "hccm_123",
+      outcome: "text_handoff",
+      phoneCallId: "hpc_123",
       prisma: expect.any(Object),
+      status: "dropped",
     });
-    expect(mocks.readCallCircleNotificationPreflightTx).toHaveBeenNthCalledWith(1, {
-      memberId: "member_a",
-      now: expect.any(Date),
-      timeZone: "America/Los_Angeles",
-      tx: expect.any(Object),
-    });
-    expect(mocks.readCallCircleNotificationPreflightTx).toHaveBeenNthCalledWith(2, {
-      memberId: "member_b",
-      now: expect.any(Date),
-      timeZone: "America/New_York",
-      tx: expect.any(Object),
-    });
+    expect(mocks.appendCallCircleTerminalNotificationsTx).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: "handoff" }),
+    );
   });
 
   it("uses preference timezone preflight before Retell result notifications", async () => {
-    mocks.readCallCircleNotificationPreflightTx
-      .mockResolvedValueOnce({ reason: "quiet_hours", status: "blocked" })
-      .mockResolvedValueOnce({ route: { channel: "linq" }, status: "ok" });
+    mocks.appendCallCircleTerminalNotificationsTx.mockResolvedValueOnce([
+      { mailboxItemId: "mailbox_123", memberId: "member_b" },
+    ]);
 
     await expect(handleRetellCallAnalyzed({
       call: {
@@ -241,39 +209,23 @@ describe("Retell call analysis for Call Circle connector calls", () => {
         data_storage_setting: "basic_attributes_only",
       },
     })).resolves.toEqual({
-      notificationMailboxItemId: "mailbox_123",
       notificationSignals: [
         {
-          notificationMailboxItemId: "mailbox_123",
-          notificationUserId: "member_b",
+          mailboxItemId: "mailbox_123",
+          memberId: "member_b",
         },
       ],
-      notificationUserId: "member_b",
     });
 
-    expect(mocks.appendCallCircleOutcomeNotificationTx).toHaveBeenCalledTimes(1);
-    expect(mocks.appendCallCircleOutcomeNotificationTx).toHaveBeenCalledWith(
-      expect.objectContaining({
-        memberId: "member_b",
-        preflight: { route: { channel: "linq" }, status: "ok" },
-      }),
+    expect(mocks.appendCallCircleTerminalNotificationsTx).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: "outcome", memberBId: "member_b" }),
     );
-    expect(mocks.readCallCircleNotificationPreflightTx).toHaveBeenNthCalledWith(1, {
-      memberId: "member_a",
-      now: expect.any(Date),
-      timeZone: "America/Los_Angeles",
-      tx: expect.any(Object),
-    });
-    expect(mocks.readCallCircleNotificationPreflightTx).toHaveBeenNthCalledWith(2, {
-      memberId: "member_b",
-      now: expect.any(Date),
-      timeZone: "America/New_York",
-      tx: expect.any(Object),
-    });
   });
 
   it("does not append Call Circle result notifications when the match outcome was already claimed", async () => {
-    mocks.markCallCircleMatchOutcome.mockResolvedValueOnce(false);
+    mocks.markCallCircleMatchOutcome
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(false);
 
     await expect(handleRetellCallAnalyzed({
       call: {
@@ -287,23 +239,15 @@ describe("Retell call analysis for Call Circle connector calls", () => {
         data_storage_setting: "basic_attributes_only",
       },
     })).resolves.toEqual({
-      notificationMailboxItemId: null,
       notificationSignals: [],
-      notificationUserId: null,
     });
 
     expect(mocks.markCallCircleMatchOutcome).toHaveBeenCalledWith({
       matchId: "hccm_123",
-      now: expect.any(Date),
       outcome: "completed",
       phoneCallId: "hpc_123",
       prisma: expect.any(Object),
       status: "completed",
-    });
-    expect(mocks.attachCallCirclePhoneCall).toHaveBeenCalledWith({
-      matchId: "hccm_123",
-      phoneCallId: "hpc_123",
-      prisma: expect.any(Object),
     });
     expect(mocks.hostedCallCircleMatchFindUnique).toHaveBeenCalledWith({
       select: {
@@ -313,12 +257,14 @@ describe("Retell call analysis for Call Circle connector calls", () => {
       where: { id: "hccm_123" },
     });
     expect(mocks.hostedMailboxItemFindUnique).toHaveBeenCalledTimes(2);
-    expect(mocks.appendCallCircleOutcomeNotificationTx).not.toHaveBeenCalled();
-    expect(mocks.appendCallCircleHandoffNotificationTx).not.toHaveBeenCalled();
+    expect(mocks.appendCallCircleTerminalNotificationsTx)
+      .not.toHaveBeenCalled();
   });
 
   it("re-signals existing unconsumed Call Circle result notifications on Retell replay", async () => {
-    mocks.markCallCircleMatchOutcome.mockResolvedValueOnce(false);
+    mocks.markCallCircleMatchOutcome
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(false);
     mocks.hostedMailboxItemFindUnique
       .mockResolvedValueOnce({ consumedAt: null, id: "mailbox_a" })
       .mockResolvedValueOnce({ consumedAt: null, id: "mailbox_b" });
@@ -335,22 +281,20 @@ describe("Retell call analysis for Call Circle connector calls", () => {
         data_storage_setting: "basic_attributes_only",
       },
     })).resolves.toEqual({
-      notificationMailboxItemId: "mailbox_a",
       notificationSignals: [
         {
-          notificationMailboxItemId: "mailbox_a",
-          notificationUserId: "member_a",
+          mailboxItemId: "mailbox_a",
+          memberId: "member_a",
         },
         {
-          notificationMailboxItemId: "mailbox_b",
-          notificationUserId: "member_b",
+          mailboxItemId: "mailbox_b",
+          memberId: "member_b",
         },
       ],
-      notificationUserId: "member_a",
     });
 
-    expect(mocks.appendCallCircleOutcomeNotificationTx).not.toHaveBeenCalled();
-    expect(mocks.appendCallCircleHandoffNotificationTx).not.toHaveBeenCalled();
+    expect(mocks.appendCallCircleTerminalNotificationsTx)
+      .not.toHaveBeenCalled();
     expect(mocks.hostedMailboxItemFindUnique).toHaveBeenNthCalledWith(1, {
       select: {
         consumedAt: true,
@@ -374,6 +318,45 @@ describe("Retell call analysis for Call Circle connector calls", () => {
           userId: "member_b",
         },
       },
+    });
+  });
+
+  it("upgrades a dropped text handoff after a late authoritative bridge", async () => {
+    mocks.markCallCircleMatchOutcome
+      .mockResolvedValueOnce(true)
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(true);
+    const call = {
+      call_id: "retell_call_123",
+      data_storage_setting: "basic_attributes_only",
+      disconnection_reason: "transfer_cancelled",
+    };
+
+    await handleRetellCallAnalyzed({ call });
+    await expect(handleRetellTransferOutcome({
+      call,
+      event: "transfer_bridged",
+    })).resolves.toEqual({
+      notificationSignals: [
+        {
+          mailboxItemId: "mailbox_123",
+          memberId: "member_a",
+        },
+        {
+          mailboxItemId: "mailbox_123",
+          memberId: "member_b",
+        },
+      ],
+    });
+
+    expect(mocks.markCallCircleMatchOutcome).toHaveBeenNthCalledWith(3, {
+      expectedOutcome: "text_handoff",
+      expectedStatuses: ["dropped"],
+      matchId: "hccm_123",
+      outcome: "completed",
+      phoneCallId: "hpc_123",
+      prisma: expect.any(Object),
+      status: "completed",
     });
   });
 });
@@ -401,9 +384,10 @@ function buildCallCirclePhoneCall(): HostedPhoneCall {
     provider: "retell",
     providerCallId: "retell_call_123",
     providerStartAttemptedAt: null,
-    requestKey: "call-circle:hccm_123",
+    requestKey: "opaque-idempotency-key",
     resultJson: null,
     status: "ended",
+    transferOutcome: "bridged",
     updatedAt: now,
   };
 }

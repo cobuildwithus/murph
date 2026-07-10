@@ -1,10 +1,12 @@
 import {
   type LinqMessageReceivedEvent,
+  type LinqOutboundMessageIdentity,
   type LinqWebhookEvent,
   isLinqWebhookPayloadError,
   isLinqWebhookVerificationError,
   parseLinqMessageReceivedEvent,
   parseLinqWebhookEvent,
+  readLinqOutboundMessageIdentity,
   resolveLinqWebhookOccurredAt,
   summarizeLinqMessageReceivedEvent,
   verifyAndParseLinqWebhookRequest,
@@ -31,6 +33,12 @@ export function parseHostedLinqWebhookEvent(rawBody: string): HostedLinqWebhookE
       timestampPresent: true,
     });
   }
+}
+
+export function readHostedLinqOutboundMessageIdentity(
+  event: HostedLinqWebhookEvent,
+): LinqOutboundMessageIdentity | null {
+  return readLinqOutboundMessageIdentity(event);
 }
 
 export function requireHostedLinqMessageReceivedEvent(

@@ -30,6 +30,7 @@ export interface LinqMessageReceivedData {
   direction?: "inbound" | "outbound" | string | null;
   from: string;
   from_handle?: LinqChatHandle | null;
+  idempotency_key?: string | null;
   preferred_service?: "iMessage" | "SMS" | "RCS" | string | null;
   recipient_handle?: LinqChatHandle | null;
   recipient_phone?: string | null;
@@ -107,6 +108,12 @@ export interface LinqMessageReceivedSummary {
   messageId: string;
   phoneNumber: string;
   text: string | null;
+}
+
+export interface LinqOutboundMessageIdentity {
+  createdAt: string;
+  idempotencyKey: string;
+  messageId: string;
 }
 
 const DEFAULT_LINQ_WEBHOOK_TIMESTAMP_TOLERANCE_MS = 5 * 60_000;
@@ -307,6 +314,7 @@ export function parseRawLinqMessageReceivedEvent(
       direction,
       from: senderAddress,
       from_handle: senderHandle,
+      idempotency_key: normalizeNullableString(data.idempotency_key),
       preferred_service: preferredService,
       recipient_handle: recipientHandle,
       recipient_phone: recipientPhone,
@@ -338,6 +346,43 @@ export function parseLinqMessageReceivedEvent(
   }
 
   return parseNormalizedLinqMessageReceivedEventData(event, data);
+}
+
+/**
+ * Reads the server-generated identity returned by Linq for an outbound send.
+ * `message.sent` is the canonical provider event; outbound
+ * `message.received` remains supported for legacy subscriptions.
+ */
+export function readLinqOutboundMessageIdentity(
+  event: LinqWebhookEvent,
+): LinqOutboundMessageIdentity | null {
+  if (
+    event.event_type !== "message.sent"
+    && event.event_type !== "message.received"
+  ) {
+    return null;
+  }
+  if (!event.data || typeof event.data !== "object" || Array.isArray(event.data)) {
+    return null;
+  }
+
+  const data = event.data as Record<string, unknown>;
+  const direction = normalizeNullableString(data.direction);
+  const isOutbound = direction === null
+    ? data.is_from_me === true
+    : direction === "outbound";
+  if (!isOutbound) return null;
+
+  const message = data.message && typeof data.message === "object"
+    && !Array.isArray(data.message)
+    ? data.message as Record<string, unknown>
+    : null;
+  const idempotencyKey = normalizeNullableString(data.idempotency_key);
+  const messageId = normalizeNullableString(data.id)
+    ?? normalizeNullableString(message?.id);
+  return idempotencyKey && messageId
+    ? { createdAt: event.created_at, idempotencyKey, messageId }
+    : null;
 }
 
 export function buildLinqMessageText(
@@ -754,6 +799,7 @@ function parseNormalizedLinqMessageReceivedEventData(
       direction,
       from: normalizeRequiredString(data.from, "Linq message.received from"),
       from_handle: fromHandle,
+      idempotency_key: normalizeNullableString(data.idempotency_key),
       preferred_service: normalizeNullableString(data.preferred_service) ?? undefined,
       recipient_handle: recipientHandle,
       recipient_phone: normalizeNullableString(data.recipient_phone),

@@ -45,11 +45,15 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-identity-store", () => ({
 import {
   acceptHostedGroupJoinCodeTx,
   acceptHostedGroupJoinOfferTx,
+  bindHostedGroupJoinOfferTx,
+  buildHostedGroupJoinOfferProviderIdempotencyKey,
   createHostedGroupJoinLinkForOwnedThreadContainerTx,
   HOSTED_GROUP_VAULT_SHARE_DESTINATION_LIMIT_PER_PROJECTION,
   HOSTED_GROUP_VAULT_SHARE_GRANT_LIMIT_PER_GRANTOR_PROJECTION,
   readHostedGroupJoinView,
-  recordHostedGroupJoinOfferTx,
+  readHostedGroupJoinOfferIdFromProviderIdempotencyKey,
+  repairHostedGroupJoinOfferBindingFromProviderEchoTx,
+  reserveHostedGroupJoinOfferTx,
 } from "@/src/lib/hosted-groups/group-store";
 import {
   normalizeHostedVaultShareProjectionKinds,
@@ -59,6 +63,10 @@ const PROFILE_SCOPE = hostedVaultShareProjectionKindToScope("profile-name.v0");
 const GROUP_EMAIL_SCOPE = hostedVaultShareProjectionKindToScope("group-email.v0");
 const SLEEP_SCOPE = hostedVaultShareProjectionKindToScope("sleep-times.v0");
 const ACTIVITY_SCOPE = hostedVaultShareProjectionKindToScope("activity-days.v0");
+const RUNNING_DISTANCE_SCOPE = {
+  projectionKind: "activity-distance-days.v1",
+  selector: { activityKind: "running" },
+} as const;
 
 const JOIN_POLICY = {
   requestedVaultShareProjectionKinds: ["sleep-times.v0"],
@@ -97,11 +105,16 @@ function buildTx(input?: {
   existingMembershipId?: string | null;
   offerMessageLookupKey?: string;
   offerProjectionKinds?: string[];
+  offerScopeJson?: Prisma.InputJsonValue;
+  memberBillingStatus?: "active" | "not_started";
+  sponsoredGroupBillingStatus?: "active" | "unpaid";
+  sponsoredMembershipStatus?: "active" | "removed";
   requestedProjectionKinds?: string[];
   revokedOfferAt?: Date | null;
   runtimeMemberId?: string | null;
   threadIdentityLookupKey?: string;
 }): PrismaClient & {
+  $queryRaw: ReturnType<typeof vi.fn>;
   hostedGroup: {
     findUnique: ReturnType<typeof vi.fn>;
     update: ReturnType<typeof vi.fn>;
@@ -110,7 +123,12 @@ function buildTx(input?: {
     create: ReturnType<typeof vi.fn>;
     findFirst: ReturnType<typeof vi.fn>;
     findUnique: ReturnType<typeof vi.fn>;
+    update: ReturnType<typeof vi.fn>;
     updateMany: ReturnType<typeof vi.fn>;
+  };
+  hostedGroupMember: {
+    create: ReturnType<typeof vi.fn>;
+    findUnique: ReturnType<typeof vi.fn>;
   };
   hostedThreadRoute: {
     findFirst: ReturnType<typeof vi.fn>;
@@ -121,7 +139,22 @@ function buildTx(input?: {
   };
 } {
   return createPrismaStub({
-    $queryRaw: vi.fn(async () => []),
+    $queryRaw: vi.fn(async (query: unknown) => {
+      const sql = readRawSqlText(query);
+      if (sql.includes('FROM "hosted_member"')) {
+        return [{
+          billingStatus: input?.memberBillingStatus ?? "active",
+          suspendedAt: null,
+        }];
+      }
+      if (sql.includes('FROM "hosted_account_group_membership"')) {
+        return input?.sponsoredGroupBillingStatus === "active"
+          && (input.sponsoredMembershipStatus ?? "active") === "active"
+          ? [{ id: "membership_active" }]
+          : [];
+      }
+      return [];
+    }),
     hostedGroup: {
       findUnique: vi.fn(async (args: {
         where: { id?: string; joinCode?: string };
@@ -161,8 +194,11 @@ function buildTx(input?: {
         if (matches && (!("revokedAt" in args.where) || input?.revokedOfferAt == null)) {
           return {
             groupId: "group_1",
+            id: "offer_1",
             messageLookupKey,
-            projectionKindsJson: input?.offerProjectionKinds ?? ["sleep-times.v0"],
+            offerScopeJson:
+              input?.offerScopeJson ?? input?.offerProjectionKinds ?? ["sleep-times.v0"],
+            postedAt: new Date("2026-07-01T00:00:00.000Z"),
             revokedAt: input?.revokedOfferAt ?? null,
             group: {
               id: "group_1",
@@ -176,14 +212,17 @@ function buildTx(input?: {
         return null;
       }),
       findUnique: vi.fn(async (args: {
-        where: { messageLookupKey?: string };
+        where: { id?: string; messageLookupKey?: string };
       }) => {
         const messageLookupKey = input?.offerMessageLookupKey ?? "hbidx:linq-message:v1:offer";
         if (args.where.messageLookupKey === messageLookupKey) {
           return {
             groupId: "group_1",
+            id: "offer_1",
             messageLookupKey,
-            projectionKindsJson: input?.offerProjectionKinds ?? ["sleep-times.v0"],
+            offerScopeJson:
+              input?.offerScopeJson ?? input?.offerProjectionKinds ?? ["sleep-times.v0"],
+            postedAt: new Date("2026-07-01T00:00:00.000Z"),
             revokedAt: input?.revokedOfferAt ?? null,
             group: {
               id: "group_1",
@@ -196,6 +235,7 @@ function buildTx(input?: {
         }
         return null;
       }),
+      update: vi.fn(async () => ({ id: "offer_1" })),
       updateMany: vi.fn(async () => ({ count: 0 })),
     },
     hostedGroupMember: {
@@ -205,7 +245,12 @@ function buildTx(input?: {
       }),
     },
     hostedMember: {
-      findUnique: vi.fn(async () => ({ suspendedAt: null })),
+      findUnique: vi.fn(async () => ({
+        accountGroupMemberships: [],
+        billingStatus: input?.memberBillingStatus ?? "active",
+        suspendedAt: null,
+        threadContainer: null,
+      })),
     },
     hostedThreadContainer: {
       findUnique: vi.fn(async () => ({ memberId: "member_group_runtime" })),
@@ -241,6 +286,21 @@ function buildTx(input?: {
       }),
     },
   });
+}
+
+function readRawSqlText(query: unknown): string {
+  if (Array.isArray(query)) {
+    return query.join(" ");
+  }
+  if (
+    query
+    && typeof query === "object"
+    && "strings" in query
+    && Array.isArray((query as { strings?: unknown }).strings)
+  ) {
+    return ((query as { strings: string[] }).strings).join(" ");
+  }
+  return String(query);
 }
 
 describe("acceptHostedGroupJoinCodeTx", () => {
@@ -477,33 +537,261 @@ describe("acceptHostedGroupJoinCodeTx", () => {
     });
   });
 
-  it("records join-offer bindings as message lookup keys and projection snapshots", async () => {
-    const tx = buildTx();
+  it("reserves then binds join offers with a compatible versioned scope snapshot", async () => {
+    const tx = buildStatefulJoinOfferTx();
     const postedAt = new Date("2026-07-01T00:00:00.000Z");
 
-    await expect(recordHostedGroupJoinOfferTx({
+    const reservation = await reserveHostedGroupJoinOfferTx({
+      activation: "call-circle.enroll.v0",
+      allowNewActivation: true,
       groupId: "group_1",
-      messageId: "msg_offer_123",
+      operationId: "tool_call_1",
       postedAt,
       projectionKinds: ["sleep-times.v0", "profile-name.v0"],
       tx,
-    })).resolves.toMatchObject({
-      groupId: "group_1",
-      messageIdSuffix: expect.stringContaining("123"),
-      messageLookupKey: expect.stringMatching(/^hbidx:linq-message:/u),
-      projectionKinds: ["sleep-times.v0"],
-      projectionScopes: [SLEEP_SCOPE],
+    });
+    expect(reservation).toMatchObject({
+      id: expect.stringMatching(/^hgrpjo_/u),
+      messageLookupKey: null,
+      offerPayload: {
+        activation: "call-circle.enroll.v0",
+        vaultShareProjectionScopes: [SLEEP_SCOPE],
+      },
     });
 
     expect(tx.hostedGroupJoinOffer.create).toHaveBeenCalledWith({
       data: {
+        bindingAttemptedAt: postedAt,
         groupId: "group_1",
-        id: expect.stringMatching(/^hgrpjo_/u),
+        id: reservation.id,
+        messageIdSuffix: null,
+        messageLookupKey: null,
+        offerScopeJson: [
+          {
+            activation: "call-circle.enroll.v0",
+            schema: "murph.hosted-group.join-offer.v2",
+          },
+          SLEEP_SCOPE,
+        ],
+        postedAt,
+      },
+    });
+
+    await expect(bindHostedGroupJoinOfferTx({
+      messageId: "msg_offer_123",
+      offerId: reservation.id,
+      tx,
+    })).resolves.toBeUndefined();
+    expect(tx.hostedGroupJoinOffer.update).toHaveBeenCalledWith({
+      data: {
         messageIdSuffix: expect.stringContaining("123"),
         messageLookupKey: expect.stringMatching(/^hbidx:linq-message:/u),
-        postedAt,
-        projectionKindsJson: [SLEEP_SCOPE],
       },
+      select: { id: true },
+      where: { id: reservation.id },
+    });
+  });
+
+  it("repairs an unbound offer from its exact provider echo identity", async () => {
+    const tx = buildStatefulJoinOfferTx();
+    const reservation = await reserveHostedGroupJoinOfferTx({
+      groupId: "group_1",
+      operationId: "mailbox_echo_repair",
+      postedAt: new Date("2026-07-01T00:00:00.000Z"),
+      projectionKinds: ["sleep-times.v0"],
+      tx,
+    });
+    const idempotencyKey = buildHostedGroupJoinOfferProviderIdempotencyKey(
+      reservation.id,
+    );
+    const offerId = readHostedGroupJoinOfferIdFromProviderIdempotencyKey(
+      idempotencyKey,
+    );
+
+    const providerPostedAt = new Date("2026-07-01T00:00:02.000Z");
+    expect(offerId).toBe(reservation.id);
+    await expect(repairHostedGroupJoinOfferBindingFromProviderEchoTx({
+      messageId: "msg_offer_echo",
+      offerId: offerId!,
+      postedAt: providerPostedAt,
+      tx,
+    })).resolves.toBeUndefined();
+    expect(tx.hostedGroupJoinOffer.update).toHaveBeenCalledWith({
+      data: {
+        messageIdSuffix: expect.stringContaining("echo"),
+        messageLookupKey: createHostedLinqMessageLookupKey("msg_offer_echo"),
+        postedAt: providerPostedAt,
+      },
+      select: { id: true },
+      where: { id: reservation.id },
+    });
+  });
+
+  it("accepts only the server-owned join-offer provider identity shape", () => {
+    expect(readHostedGroupJoinOfferIdFromProviderIdempotencyKey(
+      "group-join-offer:hgrpjo_0123456789abcdef0123456789abcdef",
+    )).toBe("hgrpjo_0123456789abcdef0123456789abcdef");
+    expect(readHostedGroupJoinOfferIdFromProviderIdempotencyKey(
+      "group-join-offer:offer_from_model",
+    )).toBeNull();
+    expect(readHostedGroupJoinOfferIdFromProviderIdempotencyKey(
+      "other:hgrpjo_0123456789abcdef0123456789abcdef",
+    )).toBeNull();
+  });
+
+  it("gates only new Call Circle offer reservations", async () => {
+    const tx = buildStatefulJoinOfferTx();
+    const postedAt = new Date("2026-07-01T00:00:00.000Z");
+    const request = {
+      activation: "call-circle.enroll.v0" as const,
+      groupId: "group_1",
+      operationId: "tool_call_activation",
+      postedAt,
+      projectionKinds: ["sleep-times.v0" as const],
+      tx,
+    };
+
+    await expect(reserveHostedGroupJoinOfferTx({
+      ...request,
+      allowNewActivation: false,
+    })).rejects.toMatchObject({
+      code: "HOSTED_GROUP_JOIN_OFFER_ACTIVATION_DISABLED",
+      retryable: false,
+    });
+
+    const created = await reserveHostedGroupJoinOfferTx({
+      ...request,
+      allowNewActivation: true,
+    });
+    await expect(reserveHostedGroupJoinOfferTx({
+      ...request,
+      allowNewActivation: false,
+    })).resolves.toMatchObject({ id: created.id });
+  });
+
+  it("reuses one reservation only for the same runtime operation", async () => {
+    const tx = buildStatefulJoinOfferTx();
+    const postedAt = new Date("2026-07-01T00:00:00.000Z");
+    const first = await reserveHostedGroupJoinOfferTx({
+      groupId: "group_1",
+      operationId: "tool_call_same",
+      postedAt,
+      projectionScopes: [SLEEP_SCOPE],
+      tx,
+    });
+    const retry = await reserveHostedGroupJoinOfferTx({
+      groupId: "group_1",
+      operationId: "tool_call_same",
+      postedAt: new Date("2026-07-01T00:00:05.000Z"),
+      projectionScopes: [SLEEP_SCOPE],
+      tx,
+    });
+    const later = await reserveHostedGroupJoinOfferTx({
+      groupId: "group_1",
+      operationId: "tool_call_later",
+      postedAt,
+      projectionScopes: [SLEEP_SCOPE],
+      tx,
+    });
+
+    expect(retry.id).toBe(first.id);
+    expect(later.id).not.toBe(first.id);
+    expect(tx.hostedGroupJoinOffer.create).toHaveBeenCalledTimes(2);
+
+    await expect(reserveHostedGroupJoinOfferTx({
+      groupId: "group_1",
+      activation: "call-circle.enroll.v0",
+      operationId: "tool_call_same",
+      postedAt,
+      projectionScopes: [SLEEP_SCOPE],
+      tx,
+    })).rejects.toMatchObject({
+      code: "HOSTED_GROUP_JOIN_OFFER_OPERATION_CONFLICT",
+      httpStatus: 409,
+      retryable: false,
+    });
+  });
+
+  it("returns a retryable outcome while a fresh offer reservation is unbound", async () => {
+    const tx = buildStatefulJoinOfferTx();
+    const postedAt = new Date("2026-07-01T00:00:00.000Z");
+    await reserveHostedGroupJoinOfferTx({
+      groupId: "group_1",
+      operationId: "tool_call_pending",
+      postedAt,
+      projectionScopes: [SLEEP_SCOPE],
+      tx,
+    });
+
+    await expect(acceptHostedGroupJoinOfferTx({
+      memberId: "member_grantor",
+      messageLookupKeyReadCandidates: ["hbidx:linq-message:v1:unknown"],
+      now: new Date("2026-07-01T00:01:00.000Z"),
+      threadIdentityLookupKeyReadCandidates: ["hbidx:external-thread-identity:v1:thread"],
+      tx,
+    })).rejects.toMatchObject({
+      code: "HOSTED_GROUP_JOIN_OFFER_BINDING_PENDING",
+      httpStatus: 503,
+      retryable: true,
+    });
+  });
+
+  it("refreshes only binding freshness before a later provider retry", async () => {
+    const tx = buildStatefulJoinOfferTx();
+    const request = {
+      groupId: "group_1",
+      operationId: "tool_call_delayed_retry",
+      projectionScopes: [SLEEP_SCOPE],
+      tx,
+    };
+    await reserveHostedGroupJoinOfferTx({
+      ...request,
+      postedAt: new Date("2026-07-01T00:00:00.000Z"),
+    });
+    await reserveHostedGroupJoinOfferTx({
+      ...request,
+      postedAt: new Date("2026-07-01T00:10:00.000Z"),
+    });
+
+    expect(tx.hostedGroupJoinOffer.update).toHaveBeenCalledWith({
+      data: { bindingAttemptedAt: new Date("2026-07-01T00:10:00.000Z") },
+      select: { id: true },
+      where: { id: expect.any(String) },
+    });
+
+    await expect(acceptHostedGroupJoinOfferTx({
+      memberId: "member_grantor",
+      messageLookupKeyReadCandidates: ["hbidx:linq-message:v1:unknown"],
+      now: new Date("2026-07-01T00:10:01.000Z"),
+      threadIdentityLookupKeyReadCandidates: ["hbidx:external-thread-identity:v1:thread"],
+      tx,
+    })).rejects.toMatchObject({
+      code: "HOSTED_GROUP_JOIN_OFFER_BINDING_PENDING",
+      retryable: true,
+    });
+  });
+
+  it("uses server receipt time when provider time lags a fresh reservation", async () => {
+    const tx = buildStatefulJoinOfferTx();
+    await reserveHostedGroupJoinOfferTx({
+      groupId: "group_1",
+      operationId: "mailbox_clock_skew",
+      postedAt: new Date("2026-07-01T00:01:00.000Z"),
+      projectionScopes: [SLEEP_SCOPE],
+      tx,
+    });
+
+    await expect(acceptHostedGroupJoinOfferTx({
+      bindingPendingAt: new Date("2026-07-01T00:01:01.000Z"),
+      memberId: "member_grantor",
+      messageLookupKeyReadCandidates: ["hbidx:linq-message:v1:unknown"],
+      now: new Date("2026-07-01T00:00:59.000Z"),
+      threadIdentityLookupKeyReadCandidates: ["hbidx:external-thread-identity:v1:thread"],
+      tx,
+    })).rejects.toMatchObject({
+      code: "HOSTED_GROUP_JOIN_OFFER_BINDING_PENDING",
+      httpStatus: 503,
+      retryable: true,
     });
   });
 
@@ -540,6 +828,81 @@ describe("acceptHostedGroupJoinCodeTx", () => {
       },
     });
     expect(mocks.revokeHostedVaultSharesWithCleanupTx).not.toHaveBeenCalled();
+  });
+
+  it("rechecks active access under the member lock before granting an offer", async () => {
+    const tx = buildTx({ memberBillingStatus: "not_started" });
+
+    await expect(acceptHostedGroupJoinOfferTx({
+      memberId: "member_grantor",
+      messageLookupKeyReadCandidates: ["hbidx:linq-message:v1:offer"],
+      now: new Date("2026-07-01T00:00:00.000Z"),
+      threadIdentityLookupKeyReadCandidates: ["hbidx:external-thread-identity:v1:thread"],
+      tx,
+    })).rejects.toMatchObject({
+      code: "HOSTED_ACCESS_REQUIRED",
+      httpStatus: 403,
+    });
+
+    expect(tx.hostedGroupMember.create).not.toHaveBeenCalled();
+    expect(mocks.grantHostedVaultShareTx).not.toHaveBeenCalled();
+  });
+
+  it("holds sponsored access authority locks through the join write", async () => {
+    const tx = buildTx({
+      activeGroupGrantCount: 0,
+      memberBillingStatus: "not_started",
+      sponsoredGroupBillingStatus: "active",
+    });
+
+    await expect(acceptHostedGroupJoinOfferTx({
+      memberId: "member_grantor",
+      messageLookupKeyReadCandidates: ["hbidx:linq-message:v1:offer"],
+      now: new Date("2026-07-01T00:00:00.000Z"),
+      threadIdentityLookupKeyReadCandidates: ["hbidx:external-thread-identity:v1:thread"],
+      tx,
+    })).resolves.toMatchObject({ membershipId: "membership_created" });
+
+    const sponsorshipLockCall = tx.$queryRaw.mock.calls.find(
+      ([query]) => readRawSqlText(query).includes('FROM "hosted_account_group_membership"'),
+    );
+    expect(sponsorshipLockCall).toBeDefined();
+    expect(readRawSqlText(sponsorshipLockCall?.[0])).toContain(
+      "FOR UPDATE OF membership, account_group",
+    );
+    expect(tx.$queryRaw.mock.invocationCallOrder.at(-1)).toBeLessThan(
+      tx.hostedGroupMember.create.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY,
+    );
+  });
+
+  it("reads activation and selector-aware scopes from the versioned offer payload", async () => {
+    const tx = buildTx({
+      activeGroupGrantCount: 0,
+      offerScopeJson: [
+        {
+          activation: "call-circle.enroll.v0",
+          schema: "murph.hosted-group.join-offer.v2",
+        },
+        RUNNING_DISTANCE_SCOPE,
+      ],
+    });
+
+    await expect(acceptHostedGroupJoinOfferTx({
+      memberId: "member_grantor",
+      messageLookupKeyReadCandidates: ["hbidx:linq-message:v1:offer"],
+      now: new Date("2026-07-01T00:00:00.000Z"),
+      threadIdentityLookupKeyReadCandidates: ["hbidx:external-thread-identity:v1:thread"],
+      tx,
+    })).resolves.toMatchObject({
+      activation: "call-circle.enroll.v0",
+      offerId: "offer_1",
+      selectedVaultShareProjectionKinds: ["activity-distance-days.v1"],
+      selectedVaultShareProjectionScopes: [RUNNING_DISTANCE_SCOPE],
+    });
+
+    expect(mocks.grantHostedVaultShareTx).toHaveBeenCalledWith(
+      expect.objectContaining({ projectionScope: RUNNING_DISTANCE_SCOPE }),
+    );
   });
 
   it("reports email sharing when a join offer grants it", async () => {
@@ -672,24 +1035,36 @@ describe("acceptHostedGroupJoinCodeTx", () => {
     const secondPostedAt = new Date("2026-07-01T00:05:00.000Z");
     const now = new Date("2026-07-01T00:06:00.000Z");
 
-    const firstOffer = await recordHostedGroupJoinOfferTx({
+    const firstReservation = await reserveHostedGroupJoinOfferTx({
       groupId: "group_1",
-      messageId: "msg_offer_a",
+      operationId: "mailbox_offer_a",
       postedAt: firstPostedAt,
       projectionKinds: ["sleep-times.v0"],
       tx,
     });
-    await recordHostedGroupJoinOfferTx({
+    await bindHostedGroupJoinOfferTx({
+      messageId: "msg_offer_a",
+      offerId: firstReservation.id,
+      tx,
+    });
+    const secondReservation = await reserveHostedGroupJoinOfferTx({
       groupId: "group_1",
-      messageId: "msg_offer_b",
+      operationId: "mailbox_offer_b",
       postedAt: secondPostedAt,
       projectionKinds: ["activity-days.v0"],
+      tx,
+    });
+    await bindHostedGroupJoinOfferTx({
+      messageId: "msg_offer_b",
+      offerId: secondReservation.id,
       tx,
     });
 
     await expect(acceptHostedGroupJoinOfferTx({
       memberId: "member_grantor",
-      messageLookupKeyReadCandidates: [firstOffer.messageLookupKey],
+      messageLookupKeyReadCandidates: [
+        createHostedLinqMessageLookupKey("msg_offer_a")!,
+      ],
       now,
       threadIdentityLookupKeyReadCandidates: ["hbidx:external-thread-identity:v1:thread"],
       tx,
@@ -1149,6 +1524,7 @@ function buildStatefulJoinOfferTx(): PrismaClient & {
     create: ReturnType<typeof vi.fn>;
     findFirst: ReturnType<typeof vi.fn>;
     findUnique: ReturnType<typeof vi.fn>;
+    update: ReturnType<typeof vi.fn>;
     updateMany: ReturnType<typeof vi.fn>;
   };
   hostedThreadRoute: {
@@ -1169,20 +1545,31 @@ function buildStatefulJoinOfferTx(): PrismaClient & {
     runtimeMemberId: "member_group_runtime",
   };
   const offers: Array<{
+    bindingAttemptedAt: Date | null;
     groupId: string;
-    messageLookupKey: string;
-    projectionKindsJson: Prisma.InputJsonValue;
+    id: string;
+    messageIdSuffix: string | null;
+    messageLookupKey: string | null;
+    offerScopeJson: Prisma.InputJsonValue;
+    postedAt: Date;
     revokedAt: Date | null;
   }> = [];
 
   return createPrismaStub({
-    $queryRaw: vi.fn(async () => []),
+    $queryRaw: vi.fn(async (query: unknown) => {
+      return readRawSqlText(query).includes('FROM "hosted_member"')
+        ? [{ billingStatus: "active", suspendedAt: null }]
+        : [];
+    }),
     hostedGroup: {
       findUnique: vi.fn(async (args: {
-        where: { id?: string };
+        where: { id?: string; runtimeMemberId?: string };
       }) => {
         if (args.where.id) {
           return { ...group };
+        }
+        if (args.where.runtimeMemberId === group.runtimeMemberId) {
+          return { id: group.id };
         }
         return null;
       }),
@@ -1190,52 +1577,111 @@ function buildStatefulJoinOfferTx(): PrismaClient & {
     hostedGroupJoinOffer: {
       create: vi.fn(async (args: {
         data: {
+          bindingAttemptedAt: Date;
           groupId: string;
-          messageLookupKey: string;
-          projectionKindsJson: Prisma.InputJsonValue;
+          id: string;
+          messageIdSuffix: string | null;
+          messageLookupKey: string | null;
+          offerScopeJson: Prisma.InputJsonValue;
+          postedAt: Date;
         };
       }) => {
         offers.push({
+          bindingAttemptedAt: args.data.bindingAttemptedAt,
           groupId: args.data.groupId,
+          id: args.data.id,
+          messageIdSuffix: args.data.messageIdSuffix,
           messageLookupKey: args.data.messageLookupKey,
-          projectionKindsJson: args.data.projectionKindsJson,
+          offerScopeJson: args.data.offerScopeJson,
+          postedAt: args.data.postedAt,
           revokedAt: null,
         });
         return {};
       }),
       findUnique: vi.fn(async (args: {
-        where: { messageLookupKey?: string };
+        where: { id?: string; messageLookupKey?: string };
       }) => {
         const offer = offers.find((entry) =>
-          entry.messageLookupKey === args.where.messageLookupKey);
+          (args.where.id && entry.id === args.where.id)
+          || (args.where.messageLookupKey
+            && entry.messageLookupKey === args.where.messageLookupKey));
         return offer
           ? {
               groupId: offer.groupId,
+              id: offer.id,
+              messageIdSuffix: offer.messageIdSuffix,
               messageLookupKey: offer.messageLookupKey,
-              projectionKindsJson: offer.projectionKindsJson,
+              offerScopeJson: offer.offerScopeJson,
+              postedAt: offer.postedAt,
               revokedAt: offer.revokedAt,
               group,
             }
           : null;
       }),
       findFirst: vi.fn(async (args: {
-        where: { messageLookupKey?: string | { in?: string[] }; revokedAt?: null };
+        where: {
+          bindingAttemptedAt?: { gte: Date; lte?: Date };
+          groupId?: string;
+          messageLookupKey?: string | null | { in?: string[] };
+          revokedAt?: null;
+        };
       }) => {
         const lookup = args.where.messageLookupKey;
         const offer = offers.find((entry) =>
-          typeof lookup === "string"
-            ? entry.messageLookupKey === lookup
-            : lookup?.in?.includes(entry.messageLookupKey));
+          (!args.where.groupId || entry.groupId === args.where.groupId)
+          && (lookup === undefined
+            || lookup === null && entry.messageLookupKey === null
+            || typeof lookup === "string" && entry.messageLookupKey === lookup
+            || lookup !== null && typeof lookup === "object"
+              && entry.messageLookupKey !== null
+              && lookup.in?.includes(entry.messageLookupKey))
+          && (!args.where.bindingAttemptedAt || (
+            entry.bindingAttemptedAt !== null
+            && entry.bindingAttemptedAt >= args.where.bindingAttemptedAt.gte
+            && (
+              !args.where.bindingAttemptedAt.lte
+              || entry.bindingAttemptedAt <= args.where.bindingAttemptedAt.lte
+            )
+          )));
         if (!offer || ("revokedAt" in args.where && offer.revokedAt !== null)) {
           return null;
         }
         return {
           groupId: offer.groupId,
+          id: offer.id,
+          messageIdSuffix: offer.messageIdSuffix,
           messageLookupKey: offer.messageLookupKey,
-          projectionKindsJson: offer.projectionKindsJson,
+          offerScopeJson: offer.offerScopeJson,
+          postedAt: offer.postedAt,
           revokedAt: offer.revokedAt,
           group,
         };
+      }),
+      update: vi.fn(async (args: {
+        data: {
+          bindingAttemptedAt?: Date;
+          messageIdSuffix?: string | null;
+          messageLookupKey?: string;
+          postedAt?: Date;
+        };
+        where: { id: string };
+      }) => {
+        const offer = offers.find((entry) => entry.id === args.where.id);
+        if (offer) {
+          if (args.data.bindingAttemptedAt !== undefined) {
+            offer.bindingAttemptedAt = args.data.bindingAttemptedAt;
+          }
+          if (args.data.messageIdSuffix !== undefined) {
+            offer.messageIdSuffix = args.data.messageIdSuffix;
+          }
+          if (args.data.messageLookupKey !== undefined) {
+            offer.messageLookupKey = args.data.messageLookupKey;
+          }
+          if (args.data.postedAt !== undefined) {
+            offer.postedAt = args.data.postedAt;
+          }
+        }
+        return { id: args.where.id };
       }),
       updateMany: vi.fn(async () => ({ count: 0 })),
     },
@@ -1244,7 +1690,12 @@ function buildStatefulJoinOfferTx(): PrismaClient & {
       findUnique: vi.fn(async () => null),
     },
     hostedMember: {
-      findUnique: vi.fn(async () => ({ suspendedAt: null })),
+      findUnique: vi.fn(async () => ({
+        accountGroupMemberships: [],
+        billingStatus: "active",
+        suspendedAt: null,
+        threadContainer: null,
+      })),
     },
     hostedThreadContainer: {
       findUnique: vi.fn(async () => ({ memberId: "member_group_runtime" })),

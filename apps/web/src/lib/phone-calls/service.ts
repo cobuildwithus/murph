@@ -15,6 +15,9 @@ import {
 
 import { getPrisma } from "../prisma";
 import {
+  activeHostedMemberAccessWithParticipantsWhere,
+} from "../hosted-onboarding/member-access";
+import {
   requireHostedPhoneCallResultNotificationRoute,
 } from "./notification-route";
 import { createRetellPhoneCallRuntime } from "./retell-runtime";
@@ -25,11 +28,19 @@ import {
 } from "./types";
 
 const HOSTED_PHONE_CALL_UNSTARTED_REPLAY_GRACE_MS = 2 * 60 * 1_000;
+const HOSTED_PHONE_CALL_START_FAILED_RESULT: HostedPhoneCallResult = {
+  outcome: "not_completed",
+  summary: "Murph could not start the phone call.",
+};
 
 type HostedPhoneCallBeforeStart = (resolverInput: {
   memberId: string;
   phoneCallId: string;
 }) => Promise<boolean>;
+
+type HostedPhoneCallProviderStartGuard = (
+  attemptedAt: Date,
+) => Prisma.HostedPhoneCallWhereInput;
 
 interface HostedPhoneCallStore {
   hostedPhoneCall: {
@@ -65,6 +76,10 @@ interface HostedPhoneCallStore {
   };
 }
 
+interface HostedPhoneCallUpdateStore {
+  hostedPhoneCall: Pick<HostedPhoneCallStore["hostedPhoneCall"], "updateMany">;
+}
+
 export async function createHostedPhoneCall(input: {
   beforeStart?: (resolverInput: {
     memberId: string;
@@ -74,7 +89,7 @@ export async function createHostedPhoneCall(input: {
   memberId: string;
   prisma?: HostedPhoneCallStore;
   requestKey: string;
-  providerStartGuardWhere?: Prisma.HostedPhoneCallWhereInput;
+  providerStartGuardWhere?: HostedPhoneCallProviderStartGuard;
   resultNotificationRouteResolver?: (resolverInput: {
     memberId: string;
   }) => Promise<void>;
@@ -191,7 +206,7 @@ async function startHostedPhoneCallReservation(input: {
   call: HostedPhoneCall;
   memberId: string;
   prisma: HostedPhoneCallStore;
-  providerStartGuardWhere?: Prisma.HostedPhoneCallWhereInput;
+  providerStartGuardWhere?: HostedPhoneCallProviderStartGuard;
   requireResultNotificationRoute: (resolverInput: {
     memberId: string;
   }) => Promise<void>;
@@ -251,6 +266,15 @@ async function startHostedPhoneCallReservation(input: {
   } catch (error) {
     if (hasProviderStartAttemptMarker(call)) {
       if (isPhoneCallRuntimeStartRejectedError(error)) {
+        if (error.providerCallId) {
+          await retainHostedPhoneCallProviderIdForCleanup({
+            call,
+            prisma: input.prisma,
+            providerCallId: error.providerCallId,
+            runtime: input.runtime,
+          });
+          throw error.cause ?? error;
+        }
         const failed = await failDefiniteUnstartedPhoneCallReservation({
           call,
           prisma: input.prisma,
@@ -310,6 +334,9 @@ async function startHostedPhoneCallReservation(input: {
     const current = await input.prisma.hostedPhoneCall.findUniqueOrThrow({
       where: { id: call.id },
     });
+    if (current.providerCallId !== started.providerCallId) {
+      await input.runtime.stop(started.providerCallId);
+    }
     return {
       phoneCallId: current.id,
       status: toStartResponseStatus(current.status),
@@ -322,17 +349,38 @@ async function startHostedPhoneCallReservation(input: {
   };
 }
 
+async function retainHostedPhoneCallProviderIdForCleanup(input: {
+  call: HostedPhoneCall;
+  prisma: HostedPhoneCallStore;
+  providerCallId: string;
+  runtime: PhoneCallRuntime;
+}): Promise<void> {
+  const retained = await input.prisma.hostedPhoneCall.updateMany({
+    data: { providerCallId: input.providerCallId },
+    where: {
+      analyzedAt: null,
+      id: input.call.id,
+      provider: "retell",
+      providerCallId: null,
+      status: "starting",
+    },
+  });
+  if (retained.count > 0) return;
+
+  const current = await input.prisma.hostedPhoneCall.findUniqueOrThrow({
+    where: { id: input.call.id },
+  });
+  if (current.providerCallId === input.providerCallId) return;
+  await input.runtime.stop(input.providerCallId);
+}
+
 async function failDefiniteUnstartedPhoneCallReservation(input: {
   call: HostedPhoneCall;
   prisma: HostedPhoneCallStore;
 }): Promise<HostedPhoneCall> {
-  const resultJson: HostedPhoneCallResult = {
-    outcome: "not_completed",
-    summary: "Murph could not start the phone call.",
-  };
   const updated = await input.prisma.hostedPhoneCall.updateMany({
     data: {
-      resultJson,
+      resultJson: HOSTED_PHONE_CALL_START_FAILED_RESULT,
       status: "failed",
     },
     where: hostedPhoneCallUnstartedWhere(input.call.id),
@@ -345,9 +393,24 @@ async function failDefiniteUnstartedPhoneCallReservation(input: {
 
   return {
     ...input.call,
-    resultJson,
+    resultJson: HOSTED_PHONE_CALL_START_FAILED_RESULT,
     status: "failed",
   };
+}
+
+export async function terminalizeUnstartedHostedPhoneCall(input: {
+  phoneCallId: string;
+  prisma?: HostedPhoneCallUpdateStore;
+}): Promise<boolean> {
+  const prisma = input.prisma ?? getPrisma();
+  const updated = await prisma.hostedPhoneCall.updateMany({
+    data: {
+      resultJson: HOSTED_PHONE_CALL_START_FAILED_RESULT,
+      status: "failed",
+    },
+    where: hostedPhoneCallUnstartedAndUnattemptedWhere(input.phoneCallId),
+  });
+  return updated.count > 0;
 }
 
 function createHostedPhoneCallId(): string {
@@ -392,24 +455,55 @@ function hasProviderStartAttemptMarker(call: HostedPhoneCall): boolean {
 async function markHostedPhoneCallProviderStartAttempt(input: {
   call: HostedPhoneCall;
   prisma: HostedPhoneCallStore;
-  providerStartGuardWhere?: Prisma.HostedPhoneCallWhereInput;
+  providerStartGuardWhere?: HostedPhoneCallProviderStartGuard;
 }): Promise<
   | { call: HostedPhoneCall; marked: true }
   | { call: HostedPhoneCall; marked: false }
 > {
   const markedAt = new Date();
   const baseWhere = hostedPhoneCallUnstartedAndUnattemptedWhere(input.call.id);
+  const authorityWhere: Prisma.HostedPhoneCallWhereInput[] = [
+    baseWhere,
+    {
+      member: {
+        is: activeHostedMemberAccessWithParticipantsWhere(),
+      },
+    },
+  ];
+  if (input.providerStartGuardWhere) {
+    authorityWhere.push(input.providerStartGuardWhere(markedAt));
+  }
   const updated = await input.prisma.hostedPhoneCall.updateMany({
     data: { providerStartAttemptedAt: markedAt },
-    where: input.providerStartGuardWhere
-      ? { AND: [baseWhere, input.providerStartGuardWhere] }
-      : baseWhere,
+    where: { AND: authorityWhere },
   });
   if (updated.count === 0) {
-    return {
-      call: await input.prisma.hostedPhoneCall.findUniqueOrThrow({
+    let current = await input.prisma.hostedPhoneCall.findUniqueOrThrow({
+      where: { id: input.call.id },
+    });
+    if (
+      isUnstartedPhoneCallReservation(current)
+      && !hasProviderStartAttemptMarker(current)
+      && await terminalizeUnstartedHostedPhoneCall({
+        phoneCallId: current.id,
+        prisma: input.prisma,
+      })
+    ) {
+      current = {
+        ...current,
+        resultJson: HOSTED_PHONE_CALL_START_FAILED_RESULT,
+        status: "failed",
+      };
+    } else if (
+      isUnstartedPhoneCallReservation(current)
+      && !hasProviderStartAttemptMarker(current)
+    ) {
+      current = await input.prisma.hostedPhoneCall.findUniqueOrThrow({
         where: { id: input.call.id },
-      }),
+      });
+    }
+    return {
+      call: current,
       marked: false,
     };
   }
@@ -427,10 +521,6 @@ async function failStaleUnstartedPhoneCallReservation(input: {
   call: HostedPhoneCall;
   prisma: HostedPhoneCallStore;
 }): Promise<HostedPhoneCall> {
-  const resultJson: HostedPhoneCallResult = {
-    outcome: "not_completed",
-    summary: "Murph could not start the phone call.",
-  };
   if (
     !isStaleUnstartedPhoneCallReservation(input.call)
     || hasProviderStartAttemptMarker(input.call)
@@ -438,14 +528,11 @@ async function failStaleUnstartedPhoneCallReservation(input: {
     return input.call;
   }
 
-  const updated = await input.prisma.hostedPhoneCall.updateMany({
-    data: {
-      resultJson,
-      status: "failed",
-    },
-    where: hostedPhoneCallUnstartedAndUnattemptedWhere(input.call.id),
+  const terminalized = await terminalizeUnstartedHostedPhoneCall({
+    phoneCallId: input.call.id,
+    prisma: input.prisma,
   });
-  if (updated.count === 0) {
+  if (!terminalized) {
     return input.prisma.hostedPhoneCall.findUniqueOrThrow({
       where: { id: input.call.id },
     });
@@ -453,7 +540,7 @@ async function failStaleUnstartedPhoneCallReservation(input: {
 
   return {
     ...input.call,
-    resultJson,
+    resultJson: HOSTED_PHONE_CALL_START_FAILED_RESULT,
     status: "failed",
   };
 }

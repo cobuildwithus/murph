@@ -5,10 +5,11 @@ import {
   type HostedCallCircleMatchResponse,
   type PrismaClient,
 } from "@prisma/client";
+import {
+  isHostedCallCircleTimeZone,
+} from "@murphai/hosted-execution/call-circle";
 
 import {
-  canAppendCallCircleSetupNotification,
-  canUseActiveCallCircleParticipant,
   canUseActiveCallCircleParticipantPair,
   type CallCircleEligibleParticipant,
   listCallCircleEligibleParticipants,
@@ -16,53 +17,38 @@ import {
 } from "./participant-store";
 import {
   createCallCircleMatchProposal,
-  dropCallCircleFinalMatchForCalendarBusy,
-  dropCallCircleFinalMatchForNotificationBlocked,
-  dropCallCircleMorningMatchForCalendarBusy,
-  dropCallCircleMorningMatchForNotificationBlocked,
+  callCircleExpiredResponseWhere,
+  dropCallCircleMatchForNotificationBlocked,
   expirePastCallCircleMatches,
+  listCallCircleMemberIdsWithRecentMatch,
   listRecentCallCircleMatches,
   markCallCircleMatchAmAsked,
   markCallCircleMatchFinalAsked,
   markCallCircleMatchOutcome,
-  readLastCallCirclePartnerMemberIds,
 } from "./match-store";
-import {
-  proposeCallCircleMatches,
-} from "./matcher";
-import {
-  readCallCircleCalendarAvailability,
-  type CallCircleConnectedAppsRequester,
-} from "./free-busy";
+import { proposeCallCircleMatches } from "./matcher";
 import {
   appendCallCircleConfirmNotificationTx,
-  appendCallCircleHandoffNotificationTx,
-  appendCallCircleOutcomeNotificationTx,
   appendCallCircleSetupNotificationTx,
-  buildCallCircleHandoffNotificationEventId,
-  buildCallCircleOutcomeNotificationEventId,
   buildCallCircleSetupNotificationEventIdPrefix,
-  type CallCircleNotificationSignal,
-  readCallCircleNotificationSignal,
-  readExistingCallCircleNotificationSignalTx,
   readCallCircleNotificationPreflightTx,
-  signalCallCircleNotificationRuntimesBestEffort,
+  readCallCircleNotificationSignal,
 } from "./notifications";
 import {
+  signalHostedAssistantNotificationsBestEffort,
+  type HostedAssistantNotificationSignal,
+} from "../hosted-execution/assistant-notifications";
+import {
+  CALL_CIRCLE_BRIDGE_WINDOW_MS,
   CALL_CIRCLE_FINAL_ASK_LEAD_MS,
-  hasCallCircleBridgeWindowElapsed,
-  isWithinCallCircleBridgeWindow,
   isSameCallCircleLocalDate,
-  isWithinCallCircleQuietHours,
+  isWithinCallCircleDaytime,
+  readNextCallCircleMatchingAt,
 } from "./time";
 import {
   startCallCircleConnectorCall,
   type CallCircleConnectorStarter,
 } from "./connector-call";
-import {
-  isPreProviderFailedCallCircleBridgePhoneCall,
-  isUnstartedCallCircleBridgePhoneCall,
-} from "./phone-call-state";
 import { getPrisma } from "../prisma";
 
 export interface RunCallCircleSchedulerResult {
@@ -72,9 +58,11 @@ export interface RunCallCircleSchedulerResult {
   expired: number;
   handoffs: number;
   proposals: number;
-  resultNotifications: number;
   setupAsks: number;
 }
+
+type CallCircleSchedulerClock = () => Date;
+type CallCircleConfirmationStage = "am" | "final";
 
 const EMPTY_RESULT: RunCallCircleSchedulerResult = {
   askedFinal: 0,
@@ -83,18 +71,47 @@ const EMPTY_RESULT: RunCallCircleSchedulerResult = {
   expired: 0,
   handoffs: 0,
   proposals: 0,
-  resultNotifications: 0,
   setupAsks: 0,
 };
 
-const CALL_CIRCLE_STRANDED_BRIDGE_LOOKBACK_MS = 7 * 24 * 60 * 60 * 1000;
-const CALL_CIRCLE_SCHEDULER_PAGE_SIZE = 100;
-const CALL_CIRCLE_HANDOFF_OUTCOMES = [
-  "connector_agent_unconfigured",
-  "connector_start_failed",
-  "text_handoff",
-  "verified_phone_missing",
-] as const;
+const CALL_CIRCLE_PHASE_LIMIT = 100;
+const CALL_CIRCLE_PROPOSAL_DUE_PARTICIPANT_LIMIT = 32;
+const CALL_CIRCLE_UPCOMING_CONFIRMATION_LOOKAHEAD_MS = 24 * 60 * 60 * 1000;
+const CALL_CIRCLE_RECOVERABLE_BRIDGE_WHERE = {
+  OR: [
+    {
+      phoneCallId: null,
+      status: "both_confirmed",
+    },
+    {
+      phoneCallId: null,
+      status: "bridging",
+    },
+    {
+      phoneCall: {
+        is: {
+          analyzedAt: null,
+          endedAt: null,
+          providerCallId: null,
+          providerStartAttemptedAt: null,
+          status: "starting",
+        },
+      },
+      status: "bridging",
+    },
+    {
+      phoneCall: {
+        is: {
+          analyzedAt: null,
+          endedAt: null,
+          providerCallId: null,
+          status: "failed",
+        },
+      },
+      status: "bridging",
+    },
+  ],
+} satisfies Prisma.HostedCallCircleMatchWhereInput;
 
 type CallCircleNotificationPreflightOk = Extract<
   Awaited<ReturnType<typeof readCallCircleNotificationPreflightTx>>,
@@ -102,654 +119,292 @@ type CallCircleNotificationPreflightOk = Extract<
 >;
 
 export async function runCallCircleScheduler(input: {
-  calendarRequester?: CallCircleConnectedAppsRequester;
+  clock?: CallCircleSchedulerClock;
   connectorStarter?: CallCircleConnectorStarter;
   now?: Date;
   prisma?: PrismaClient;
 } = {}): Promise<RunCallCircleSchedulerResult> {
   const prisma = input.prisma ?? getPrisma();
-  const now = input.now ?? new Date();
+  const clock = resolveCallCircleSchedulerClock(input);
   const result = { ...EMPTY_RESULT };
 
-  result.handoffs += await appendMissedCallCircleBridgeHandoffs({ now, prisma });
-  result.expired += await expirePastCallCircleMatches({ now, prisma });
-  result.proposals += await createWeeklyCallCircleProposals({ now, prisma });
-  let dueCursor: DueCallCircleMatchCursor | null = null;
-  while (true) {
-    const dueMatches: SchedulerMatch[] = await prisma.hostedCallCircleMatch.findMany({
-      include: {
-        phoneCall: {
-          select: {
-            analyzedAt: true,
-            endedAt: true,
-            id: true,
-            providerCallId: true,
-            providerStartAttemptedAt: true,
-            status: true,
-          },
-        },
-      },
-      orderBy: [
-        { windowStartAt: "asc" },
-        { id: "asc" },
-      ],
-      take: CALL_CIRCLE_SCHEDULER_PAGE_SIZE,
-      where: dueCallCircleMatchWhere({ cursor: dueCursor, now }),
-    });
-
-    for (const match of dueMatches) {
-      const timeZones = await readCallCircleMatchParticipantTimeZones({
-        groupId: match.groupId,
-        memberAId: match.memberAId,
-        memberBId: match.memberBId,
-        prisma,
-      });
-      if (!timeZones) continue;
-      const { memberATimeZone, memberBTimeZone } = timeZones;
-      if (
-        (match.status === "proposed" || match.status === "asking")
-        && match.amAskedAt === null
-        && shouldSendCallCircleMorningConfirmations({
-          match,
-          memberATimeZone,
-          memberBTimeZone,
-          now,
-        })
-      ) {
-        const asked = await askCallCircleMorningConfirmations({
-          calendarRequester: input.calendarRequester,
-          match,
-          memberATimeZone,
-          memberBTimeZone,
-          now,
-          prisma,
-        });
-        if (asked) result.askedMorning += 1;
-        continue;
-      }
-
-      if (
-        match.status === "both_confirmed"
-        && match.finalAskedAt === null
-        && now.getTime() >= match.windowStartAt.getTime() - CALL_CIRCLE_FINAL_ASK_LEAD_MS
-        && now < match.windowStartAt
-        && isWithinCallCircleQuietHours({ now, timeZone: memberATimeZone })
-        && isWithinCallCircleQuietHours({ now, timeZone: memberBTimeZone })
-      ) {
-        const asked = await askCallCircleFinalConfirmations({
-          calendarRequester: input.calendarRequester,
-          match,
-          memberATimeZone,
-          memberBTimeZone,
-          now,
-          prisma,
-        });
-        if (asked) result.askedFinal += 1;
-        continue;
-      }
-
-      if (
-        match.status === "both_confirmed"
-        && match.finalAskedAt !== null
-        && hasCallCircleBridgeWindowElapsed({
-          now,
-          windowEndAt: match.windowEndAt,
-          windowStartAt: match.windowStartAt,
-        })
-      ) {
-        const handedOff = await appendCallCircleBridgeHandoffs({
-          match,
-          now,
-          prisma,
-        });
-        if (handedOff) result.handoffs += 1;
-        continue;
-      }
-
-      if (
-        (
-          match.status === "both_confirmed"
-          || (match.status === "bridging" && isRecoverableCallCircleBridgePhoneCall(match.phoneCall))
-        )
-        && match.finalAskedAt !== null
-        && isWithinCallCircleBridgeWindow({
-          now,
-          windowEndAt: match.windowEndAt,
-          windowStartAt: match.windowStartAt,
-        })
-      ) {
-        if (!await cancelCallCircleMatchIfParticipantsInactive({
-          match,
-          now,
-          prisma,
-        })) {
-          continue;
-        }
-        const starter = input.connectorStarter ?? startCallCircleConnectorCall;
-        await starter({ matchId: match.id, now, prisma });
-        result.bridgeAttempts += 1;
-        continue;
-      }
-
-      if (
-        match.status === "bridging"
-        && isRecoverableCallCircleBridgePhoneCall(match.phoneCall)
-        && hasCallCircleBridgeWindowElapsed({
-          now,
-          windowEndAt: match.windowEndAt,
-          windowStartAt: match.windowStartAt,
-        })
-      ) {
-        const handedOff = await appendCallCircleBridgeHandoffs({
-          match,
-          now,
-          prisma,
-        });
-        if (handedOff) result.handoffs += 1;
-        continue;
-      }
-
-      if (
-        match.status === "bridging"
-        && isPreProviderFailedCallCircleBridgePhoneCall(match.phoneCall)
-        && now >= match.windowStartAt
-      ) {
-        const handedOff = await appendCallCircleBridgeHandoffs({
-          match,
-          now,
-          prisma,
-        });
-        if (handedOff) result.handoffs += 1;
-        continue;
-      }
-
-      if (
-        match.status === "bridging"
-        && match.phoneCall
-        && match.phoneCall.analyzedAt !== null
-        && ["failed", "needs_user"].includes(match.phoneCall.status)
-      ) {
-        const handedOff = await appendCallCircleBridgeHandoffs({
-          match,
-          now,
-          prisma,
-        });
-        if (handedOff) result.handoffs += 1;
-      }
-    }
-
-    const last = dueMatches.at(-1);
-    if (dueMatches.length < CALL_CIRCLE_SCHEDULER_PAGE_SIZE || !last) break;
-    dueCursor = {
-      id: last.id,
-      windowStartAt: last.windowStartAt,
-    };
-  }
-
-  result.setupAsks += await appendPendingCallCircleSetupNotifications({
-    now,
+  result.handoffs += await handoffElapsedCallCircleBridges({
+    clock,
+    connectorStarter: input.connectorStarter,
     prisma,
   });
-  result.resultNotifications += await appendTerminalCallCircleResultNotifications({
-    now,
+  result.askedFinal += await advanceCallCircleConfirmationStage({
+    clock,
+    prisma,
+    stage: "final",
+  });
+  result.expired += await expireDueCallCircleMatches({ clock, prisma });
+  result.proposals += await createWeeklyCallCircleProposals({ clock, prisma });
+  result.askedMorning += await advanceCallCircleConfirmationStage({
+    clock,
+    prisma,
+    stage: "am",
+  });
+  result.bridgeAttempts += await startDueCallCircleBridges({
+    clock,
+    connectorStarter: input.connectorStarter,
+    prisma,
+  });
+  result.setupAsks += await appendPendingCallCircleSetupNotifications({
+    clock,
     prisma,
   });
 
   return result;
 }
 
-interface DueCallCircleMatchCursor {
-  id: string;
-  windowStartAt: Date;
+function resolveCallCircleSchedulerClock(input: {
+  clock?: CallCircleSchedulerClock;
+  now?: Date;
+}): CallCircleSchedulerClock {
+  if (input.clock) return input.clock;
+  if (input.now) {
+    const nowMs = input.now.getTime();
+    return () => new Date(nowMs);
+  }
+  return () => new Date();
 }
 
-function dueCallCircleMatchWhere(input: {
-  cursor: DueCallCircleMatchCursor | null;
-  now: Date;
-}): Prisma.HostedCallCircleMatchWhereInput {
-  const baseWhere: Prisma.HostedCallCircleMatchWhereInput = {
-    OR: [
-      {
-        status: { in: ["proposed", "asking", "both_confirmed", "bridging"] },
-        windowEndAt: {
-          gt: new Date(input.now.getTime() - 60 * 60 * 1000),
-        },
-      },
-      {
-        status: "bridging",
-        windowEndAt: {
-          gt: new Date(input.now.getTime() - CALL_CIRCLE_STRANDED_BRIDGE_LOOKBACK_MS),
-        },
-      },
-    ],
-    windowStartAt: {
-      lte: new Date(input.now.getTime() + 24 * 60 * 60 * 1000),
-    },
-  };
-  if (!input.cursor) return baseWhere;
-  return {
-    AND: [
-      baseWhere,
-      {
-        OR: [
-          { windowStartAt: { gt: input.cursor.windowStartAt } },
-          {
-            id: { gt: input.cursor.id },
-            windowStartAt: input.cursor.windowStartAt,
-          },
-        ],
-      },
-    ],
-  };
-}
-
-async function appendPendingCallCircleSetupNotifications(input: {
-  now: Date;
+async function expireDueCallCircleMatches(input: {
+  clock: CallCircleSchedulerClock;
   prisma: PrismaClient;
 }): Promise<number> {
-  let asked = 0;
-  let cursor: PendingCallCircleSetupCursor | null = null;
-  while (true) {
-    const participants: PendingCallCircleSetupParticipant[] =
-      await input.prisma.hostedCallCircleParticipant.findMany({
-        orderBy: [
-          { updatedAt: "asc" },
-          { createdAt: "asc" },
-          { id: "asc" },
-        ],
-        select: {
-          createdAt: true,
-          groupId: true,
-          id: true,
-          memberId: true,
-          updatedAt: true,
-        },
-        take: CALL_CIRCLE_SCHEDULER_PAGE_SIZE,
-        where: {
-          ...pendingSetupCursorWhere(cursor),
-          preferencesJson: { equals: Prisma.DbNull },
-          status: "enrolled",
-        },
-      });
-
-    for (const participant of participants) {
-      if (await appendCallCircleSetupNotificationIfMissing({
-        groupId: participant.groupId,
-        memberId: participant.memberId,
-        now: input.now,
-        prisma: input.prisma,
-      })) {
-        asked += 1;
-      }
-    }
-    const last = participants.at(-1);
-    if (participants.length < CALL_CIRCLE_SCHEDULER_PAGE_SIZE || !last) break;
-    cursor = {
-      createdAt: last.createdAt,
-      id: last.id,
-      updatedAt: last.updatedAt,
-    };
-  }
-  return asked;
-}
-
-interface PendingCallCircleSetupParticipant {
-  createdAt: Date;
-  groupId: string;
-  id: string;
-  memberId: string;
-  updatedAt: Date;
-}
-
-interface PendingCallCircleSetupCursor {
-  createdAt: Date;
-  id: string;
-  updatedAt: Date;
-}
-
-function pendingSetupCursorWhere(
-  cursor: PendingCallCircleSetupCursor | null,
-): Prisma.HostedCallCircleParticipantWhereInput {
-  if (!cursor) return {};
-  return {
-    OR: [
-      { updatedAt: { gt: cursor.updatedAt } },
-      {
-        createdAt: { gt: cursor.createdAt },
-        updatedAt: cursor.updatedAt,
-      },
-      {
-        createdAt: cursor.createdAt,
-        id: { gt: cursor.id },
-        updatedAt: cursor.updatedAt,
-      },
-    ],
-  };
-}
-
-async function appendCallCircleSetupNotificationIfMissing(input: {
-  groupId: string;
-  memberId: string;
-  now: Date;
-  prisma: PrismaClient;
-}): Promise<boolean> {
-  const eventIdPrefix = buildCallCircleSetupNotificationEventIdPrefix({
-    groupId: input.groupId,
-    memberId: input.memberId,
-  });
-  const transaction = await input.prisma.$transaction(async (tx): Promise<{
-    asked: boolean;
-    signals: CallCircleNotificationSignal[];
-  }> => {
-    const existing = await tx.hostedMailboxItem.findFirst({
-      select: { id: true },
-      where: {
-        dedupeKey: {
-          startsWith: eventIdPrefix,
-        },
-        userId: input.memberId,
-      },
-    });
-    if (existing) return { asked: false, signals: [] };
-
-    if (!await canAppendCallCircleSetupNotification({
-      groupId: input.groupId,
-      memberId: input.memberId,
-      prisma: tx,
-    })) {
-      return { asked: false, signals: [] };
-    }
-
-    const notification = await appendCallCircleSetupNotificationTx({
-      groupId: input.groupId,
-      memberId: input.memberId,
-      now: input.now,
-      tx,
-    });
-    const signal = readCallCircleNotificationSignal({
-      memberId: input.memberId,
-      notification,
-    });
-    return {
-      asked: signal !== null,
-      signals: signal ? [signal] : [],
-    };
-  });
-  if (transaction.signals.length > 0) {
-    await signalCallCircleNotificationRuntimesBestEffort(transaction.signals);
-  }
-  return transaction.asked;
-}
-
-async function appendMissedCallCircleBridgeHandoffs(input: {
-  now: Date;
-  prisma: PrismaClient;
-}): Promise<number> {
+  const queryNow = input.clock();
   const matches = await input.prisma.hostedCallCircleMatch.findMany({
-    include: {
-      phoneCall: {
-        select: {
-          analyzedAt: true,
-          endedAt: true,
-          id: true,
-          providerCallId: true,
-          providerStartAttemptedAt: true,
-          status: true,
-        },
-      },
-    },
-    orderBy: { windowEndAt: "asc" },
-    take: 100,
+    orderBy: [
+      { windowEndAt: "asc" },
+      { id: "asc" },
+    ],
+    select: { id: true },
+    take: CALL_CIRCLE_PHASE_LIMIT,
     where: {
-      finalAskedAt: { not: null },
-      phoneCallId: null,
-      status: "both_confirmed",
-      windowEndAt: {
-        gt: new Date(input.now.getTime() - CALL_CIRCLE_STRANDED_BRIDGE_LOOKBACK_MS),
-        lte: input.now,
-      },
+      ...callCircleExpiredResponseWhere(queryNow),
     },
   });
-
-  let handedOff = 0;
-  for (const match of matches) {
-    if (await appendCallCircleBridgeHandoffs({
-      match,
-      now: input.now,
-      prisma: input.prisma,
-    })) {
-      handedOff += 1;
-    }
-  }
-  return handedOff;
-}
-
-async function appendTerminalCallCircleResultNotifications(input: {
-  now: Date;
-  prisma: PrismaClient;
-}): Promise<number> {
-  let notified = 0;
-  let cursor: TerminalCallCircleNotificationCursor | null = null;
-  while (true) {
-    const matches: TerminalNotificationMatch[] =
-      await input.prisma.hostedCallCircleMatch.findMany({
-        orderBy: [
-          { endedAt: "desc" },
-          { windowEndAt: "desc" },
-          { id: "asc" },
-        ],
-        take: CALL_CIRCLE_SCHEDULER_PAGE_SIZE,
-        where: terminalCallCircleNotificationWhere({
-          cursor,
-          now: input.now,
-        }),
-      });
-
-    for (const match of matches) {
-      if (await appendTerminalCallCircleResultNotificationIfMissing({
-        match,
-        now: input.now,
-        prisma: input.prisma,
-      })) {
-        notified += 1;
-      }
-    }
-
-    const last = matches.at(-1);
-    if (matches.length < CALL_CIRCLE_SCHEDULER_PAGE_SIZE || !last?.endedAt) break;
-    cursor = {
-      endedAt: last.endedAt,
-      id: last.id,
-      windowEndAt: last.windowEndAt,
-    };
-  }
-  return notified;
-}
-
-interface TerminalCallCircleNotificationCursor {
-  endedAt: Date;
-  id: string;
-  windowEndAt: Date;
-}
-
-function terminalCallCircleNotificationWhere(input: {
-  cursor: TerminalCallCircleNotificationCursor | null;
-  now: Date;
-}): Prisma.HostedCallCircleMatchWhereInput {
-  const baseWhere: Prisma.HostedCallCircleMatchWhereInput = {
-    endedAt: {
-      gt: new Date(input.now.getTime() - CALL_CIRCLE_STRANDED_BRIDGE_LOOKBACK_MS),
-    },
-    outcome: { in: ["completed", ...CALL_CIRCLE_HANDOFF_OUTCOMES] },
-    status: { in: ["completed", "dropped"] },
-  };
-  if (!input.cursor) return baseWhere;
-  return {
-    AND: [
-      baseWhere,
-      {
-        OR: [
-          { endedAt: { lt: input.cursor.endedAt } },
-          {
-            endedAt: input.cursor.endedAt,
-            windowEndAt: { lt: input.cursor.windowEndAt },
-          },
-          {
-            endedAt: input.cursor.endedAt,
-            id: { gt: input.cursor.id },
-            windowEndAt: input.cursor.windowEndAt,
-          },
-        ],
-      },
-    ],
-  };
-}
-
-async function appendTerminalCallCircleResultNotificationIfMissing(input: {
-  match: TerminalNotificationMatch;
-  now: Date;
-  prisma: PrismaClient;
-}): Promise<boolean> {
-  const kind = readTerminalCallCircleNotificationKind(input.match);
-  if (!kind) return false;
-  const timeZones = await readCallCircleMatchParticipantTimeZones({
-    groupId: input.match.groupId,
-    memberAId: input.match.memberAId,
-    memberBId: input.match.memberBId,
+  if (matches.length === 0) return 0;
+  return expirePastCallCircleMatches({
+    matchIds: matches.map((match) => match.id),
+    now: input.clock(),
     prisma: input.prisma,
   });
-  if (!timeZones) return false;
-  const memberNotifications = [
-    {
-      dedupeKey: buildTerminalCallCircleNotificationEventId({
-        kind,
-        matchId: input.match.id,
-        memberId: input.match.memberAId,
-      }),
-      memberId: input.match.memberAId,
-      timeZone: timeZones.memberATimeZone,
-    },
-    {
-      dedupeKey: buildTerminalCallCircleNotificationEventId({
-        kind,
-        matchId: input.match.id,
-        memberId: input.match.memberBId,
-      }),
-      memberId: input.match.memberBId,
-      timeZone: timeZones.memberBTimeZone,
-    },
-  ];
+}
 
-  const transaction = await input.prisma.$transaction(async (tx): Promise<{
-    notified: boolean;
-    signals: CallCircleNotificationSignal[];
-  }> => {
-    const existing = await Promise.all(memberNotifications.map((notification) =>
-      readExistingCallCircleNotificationSignalTx({
-        eventId: notification.dedupeKey,
-        memberId: notification.memberId,
+async function createWeeklyCallCircleProposals(input: {
+  clock: CallCircleSchedulerClock;
+  prisma: PrismaClient;
+}): Promise<number> {
+  const queryNow = input.clock();
+  const dueParticipants: CallCircleProposalDueParticipant[] =
+    await input.prisma.hostedCallCircleParticipant.findMany({
+      orderBy: [
+        { nextMatchingAt: "asc" },
+        { id: "asc" },
+      ],
+      select: {
+        groupId: true,
+      },
+      take: CALL_CIRCLE_PROPOSAL_DUE_PARTICIPANT_LIMIT,
+      where: {
+        nextMatchingAt: { lte: queryNow },
+        preferencesJson: { not: Prisma.DbNull },
+        status: "enrolled",
+      },
+    });
+  const groupIds = [...new Set(dueParticipants.map((participant) => participant.groupId))];
+  let created = 0;
+
+  for (const groupId of groupIds) {
+    const proposalNow = input.clock();
+    const [participants, recentMatches] = await Promise.all([
+      listCallCircleEligibleParticipants({
+        groupId,
+        prisma: input.prisma,
+      }),
+      listRecentCallCircleMatches({
+        groupId,
+        prisma: input.prisma,
+      }),
+    ]);
+    const recentlyMatchedMemberIds = new Set(
+      await listCallCircleMemberIdsWithRecentMatch({
+        memberIds: participants.map((participant) => participant.memberId),
+        now: proposalNow,
+        prisma: input.prisma,
+      }),
+    );
+    const reachableParticipants = await listCallCircleReachableParticipants({
+      clock: input.clock,
+      participants: participants.filter((participant) =>
+        !recentlyMatchedMemberIds.has(participant.memberId)
+      ),
+      prisma: input.prisma,
+    });
+    const proposals = proposeCallCircleMatches({
+      now: proposalNow,
+      participants: reachableParticipants,
+      recentMatches,
+    });
+    for (const proposal of proposals) {
+      const match = await createCallCircleMatchProposal({
+        proposal: {
+          groupId,
+          memberAId: proposal.memberAId,
+          memberBId: proposal.memberBId,
+          now: proposalNow,
+          windowEndAt: proposal.windowEndAt,
+          windowStartAt: proposal.windowStartAt,
+        },
+        prisma: input.prisma,
+      });
+      if (match) created += 1;
+    }
+
+    await input.prisma.hostedCallCircleParticipant.updateMany({
+      data: {
+        nextMatchingAt: readNextCallCircleMatchingAt(proposalNow),
+      },
+      where: {
+        groupId,
+        nextMatchingAt: { lte: proposalNow },
+        preferencesJson: { not: Prisma.DbNull },
+        status: "enrolled",
+      },
+    });
+  }
+
+  return created;
+}
+
+interface CallCircleProposalDueParticipant {
+  groupId: string;
+}
+
+async function listCallCircleReachableParticipants(input: {
+  clock: CallCircleSchedulerClock;
+  participants: CallCircleEligibleParticipant[];
+  prisma: PrismaClient;
+}): Promise<CallCircleEligibleParticipant[]> {
+  if (input.participants.length === 0) return [];
+  const now = input.clock();
+  return input.prisma.$transaction(async (tx) => {
+    const preflights = await Promise.all(input.participants.map((participant) =>
+      readCallCircleNotificationPreflightTx({
+        memberId: participant.memberId,
+        now,
+        requireDaytime: false,
+        timeZone: participant.preferences.timeZone,
         tx,
       })
     ));
-    const existingSignals = existing.flatMap((result) =>
-      result.signal ? [result.signal] : []);
-    const missing = memberNotifications.filter((_, index) => !existing[index]?.exists);
-    if (missing.length === 0) {
-      return {
-        notified: existingSignals.length > 0,
-        signals: existingSignals,
-      };
+    return input.participants.filter((_, index) =>
+      preflights[index]?.status === "ok"
+    );
+  });
+}
+
+async function advanceCallCircleConfirmationStage(input: {
+  clock: CallCircleSchedulerClock;
+  prisma: PrismaClient;
+  stage: CallCircleConfirmationStage;
+}): Promise<number> {
+  const queryNow = input.clock();
+  const matches: SchedulerMatch[] = await input.prisma.hostedCallCircleMatch.findMany({
+    orderBy: [
+      { updatedAt: "asc" },
+      { windowStartAt: "asc" },
+      { id: "asc" },
+    ],
+    take: CALL_CIRCLE_PHASE_LIMIT,
+    where: confirmationStageWhere({
+      now: queryNow,
+      stage: input.stage,
+    }),
+  });
+  let asked = 0;
+  const deferredMatchIds: string[] = [];
+
+  for (const match of matches) {
+    if (await askCallCircleConfirmations({
+      clock: input.clock,
+      match,
+      prisma: input.prisma,
+      stage: input.stage,
+    })) {
+      asked += 1;
+    } else {
+      deferredMatchIds.push(match.id);
     }
+  }
 
-    const notifications = await Promise.all(memberNotifications.map((notification, index) => {
-      if (existing[index]?.exists) return Promise.resolve(null);
-      return appendTerminalCallCircleNotificationIfReachableTx({
-        kind,
-        matchId: input.match.id,
-        memberId: notification.memberId,
-        now: input.now,
-        timeZone: notification.timeZone,
-        tx,
-      });
-    }));
-
-    const signals = notifications.flatMap((notification, index) => {
-      if (!notification) return [];
-      const signal = readCallCircleNotificationSignal({
-        memberId: memberNotifications[index]?.memberId ?? "",
-        notification,
-      });
-      return signal ? [signal] : [];
+  if (deferredMatchIds.length > 0) {
+    await input.prisma.hostedCallCircleMatch.updateMany({
+      data: { updatedAt: input.clock() },
+      where: {
+        id: { in: deferredMatchIds },
+        ...confirmationStageWhere({ now: queryNow, stage: input.stage }),
+      },
     });
-    signals.unshift(...existingSignals);
-    return {
-      notified: signals.length > 0,
-      signals,
-    };
-  });
-  if (transaction.signals.length > 0) {
-    await signalCallCircleNotificationRuntimesBestEffort(transaction.signals);
   }
-  return transaction.notified;
+
+  return asked;
 }
 
-function readTerminalCallCircleNotificationKind(
-  match: Pick<TerminalNotificationMatch, "outcome" | "status">,
-): "handoff" | "outcome" | null {
-  if (match.status === "completed" && match.outcome === "completed") {
-    return "outcome";
-  }
-  if (
-    match.status === "dropped"
-    && CALL_CIRCLE_HANDOFF_OUTCOMES.includes(
-      match.outcome as (typeof CALL_CIRCLE_HANDOFF_OUTCOMES)[number],
-    )
-  ) {
-    return "handoff";
-  }
-  return null;
-}
-
-function buildTerminalCallCircleNotificationEventId(input: {
-  kind: "handoff" | "outcome";
-  matchId: string;
-  memberId: string;
-}): string {
-  return input.kind === "outcome"
-    ? buildCallCircleOutcomeNotificationEventId(input)
-    : buildCallCircleHandoffNotificationEventId(input);
-}
-
-async function appendTerminalCallCircleNotificationIfReachableTx(input: {
-  kind: "handoff" | "outcome";
-  matchId: string;
-  memberId: string;
+function confirmationStageWhere(input: {
   now: Date;
-  timeZone: string;
-  tx: Prisma.TransactionClient;
-}): Promise<Awaited<ReturnType<typeof appendCallCircleHandoffNotificationTx>> | null> {
-  const preflight = await readCallCircleNotificationPreflightTx({
-    memberId: input.memberId,
-    now: input.now,
-    timeZone: input.timeZone,
-    tx: input.tx,
-  });
-  if (preflight.status !== "ok") return null;
-  return input.kind === "outcome"
-    ? appendCallCircleOutcomeNotificationTx({
-        matchId: input.matchId,
-        memberId: input.memberId,
-        now: input.now,
-        preflight,
-        tx: input.tx,
-      })
-    : appendCallCircleHandoffNotificationTx({
-        matchId: input.matchId,
-        memberId: input.memberId,
-        now: input.now,
-        preflight,
-        tx: input.tx,
-      });
+  stage: CallCircleConfirmationStage;
+}): Prisma.HostedCallCircleMatchWhereInput {
+  if (input.stage === "am") {
+    return {
+      amAskedAt: null,
+      finalAskedAt: null,
+      status: { in: ["proposed", "asking"] },
+      windowEndAt: { gt: input.now },
+      windowStartAt: {
+        gt: new Date(input.now.getTime() + CALL_CIRCLE_FINAL_ASK_LEAD_MS),
+        lte: new Date(
+          input.now.getTime() + CALL_CIRCLE_UPCOMING_CONFIRMATION_LOOKAHEAD_MS,
+        ),
+      },
+    };
+  }
+  return {
+    amAskedAt: { not: null },
+    finalAskedAt: null,
+    status: "both_confirmed",
+    windowEndAt: { gt: input.now },
+    windowStartAt: {
+      gt: input.now,
+      lte: new Date(input.now.getTime() + CALL_CIRCLE_FINAL_ASK_LEAD_MS),
+    },
+  };
+}
+
+function shouldAdvanceCallCircleConfirmationStage(input: {
+  match: Pick<SchedulerMatch, "windowStartAt">;
+  memberATimeZone: string;
+  memberBTimeZone: string;
+  now: Date;
+  stage: CallCircleConfirmationStage;
+}): boolean {
+  if (input.stage === "am") {
+    return shouldSendCallCircleMorningConfirmations(input);
+  }
+  return input.now.getTime()
+    >= input.match.windowStartAt.getTime() - CALL_CIRCLE_FINAL_ASK_LEAD_MS
+    && input.now < input.match.windowStartAt
+    && isWithinCallCircleDaytime({
+      now: input.now,
+      timeZone: input.memberATimeZone,
+    })
+    && isWithinCallCircleDaytime({
+      now: input.now,
+      timeZone: input.memberBTimeZone,
+    });
 }
 
 function shouldSendCallCircleMorningConfirmations(input: {
@@ -770,200 +425,111 @@ function shouldSendCallCircleMorningConfirmations(input: {
       second: input.match.windowStartAt,
       timeZone: input.memberBTimeZone,
     })
-    && isWithinCallCircleQuietHours({
+    && isWithinCallCircleDaytime({
       now: input.now,
       timeZone: input.memberATimeZone,
     })
-    && isWithinCallCircleQuietHours({
+    && isWithinCallCircleDaytime({
       now: input.now,
       timeZone: input.memberBTimeZone,
     });
 }
 
-async function createWeeklyCallCircleProposals(input: {
-  now: Date;
+async function askCallCircleConfirmations(input: {
+  clock: CallCircleSchedulerClock;
+  match: SchedulerMatch;
   prisma: PrismaClient;
-}): Promise<number> {
-  let created = 0;
-  let groupCursor: string | null = null;
-  while (true) {
-    const groups: CallCircleProposalGroup[] =
-      await input.prisma.hostedCallCircleParticipant.findMany({
-        distinct: ["groupId"],
-        orderBy: { groupId: "asc" },
-        select: { groupId: true },
-        take: CALL_CIRCLE_SCHEDULER_PAGE_SIZE,
-        where: {
-          ...(groupCursor ? { groupId: { gt: groupCursor } } : {}),
-          preferencesJson: { not: Prisma.DbNull },
-          status: "enrolled",
-        },
-      });
-
-    for (const group of groups) {
-      const [participants, recentMatches] = await Promise.all([
-        listCallCircleEligibleParticipants({
-          groupId: group.groupId,
-          prisma: input.prisma,
-        }),
-        listRecentCallCircleMatches({
-          groupId: group.groupId,
-          now: input.now,
-          prisma: input.prisma,
-        }),
-      ]);
-      const activeParticipants = await listCallCircleActiveParticipants({
-        participants,
-        prisma: input.prisma,
-      });
-      const reachableParticipants = await listCallCircleReachableParticipants({
-        now: input.now,
-        participants: activeParticipants,
-        prisma: input.prisma,
-      });
-      const lastPartners = await readLastCallCirclePartnerMemberIds({
-        groupId: group.groupId,
-        memberIds: reachableParticipants.map((participant) => participant.memberId),
-        prisma: input.prisma,
-      });
-      const proposals = proposeCallCircleMatches({
-        now: input.now,
-        participants: reachableParticipants.map((participant) => ({
-          ...participant,
-          lastPartnerMemberId: lastPartners.get(participant.memberId) ?? null,
-        })),
-        recentMatches,
-      });
-      for (const proposal of proposals) {
-        const match = await createCallCircleMatchProposal({
-          proposal: {
-            groupId: group.groupId,
-            memberAId: proposal.memberAId,
-            memberBId: proposal.memberBId,
-            now: input.now,
-            windowEndAt: proposal.windowEndAt,
-            windowStartAt: proposal.windowStartAt,
-          },
-          prisma: input.prisma,
-        });
-        if (match) created += 1;
-      }
+  stage: CallCircleConfirmationStage;
+}): Promise<boolean> {
+  const transaction = await input.prisma.$transaction(async (tx): Promise<{
+    asked: boolean;
+    signals: HostedAssistantNotificationSignal[];
+  }> => {
+    const timeZones = await readCallCircleMatchParticipantTimeZones({
+      groupId: input.match.groupId,
+      memberAId: input.match.memberAId,
+      memberBId: input.match.memberBId,
+      prisma: tx,
+    });
+    if (!hasValidCallCircleParticipantTimeZones(timeZones)) {
+      return { asked: false, signals: [] };
     }
-
-    const last = groups.at(-1);
-    if (groups.length < CALL_CIRCLE_SCHEDULER_PAGE_SIZE || !last) break;
-    groupCursor = last.groupId;
-  }
-  return created;
-}
-
-interface CallCircleProposalGroup {
-  groupId: string;
-}
-
-async function listCallCircleActiveParticipants(input: {
-  participants: CallCircleEligibleParticipant[];
-  prisma: PrismaClient;
-}): Promise<CallCircleEligibleParticipant[]> {
-  const active = await Promise.all(input.participants.map(async (participant) =>
-    await canUseActiveCallCircleParticipant({
-      groupId: participant.groupId,
-      memberId: participant.memberId,
-      prisma: input.prisma,
-    })
-      ? participant
-      : null
-  ));
-  return active.filter((participant): participant is CallCircleEligibleParticipant =>
-    participant !== null);
-}
-
-async function listCallCircleReachableParticipants(input: {
-  now: Date;
-  participants: CallCircleEligibleParticipant[];
-  prisma: PrismaClient;
-}): Promise<CallCircleEligibleParticipant[]> {
-  if (input.participants.length === 0) return [];
-  return input.prisma.$transaction(async (tx) => {
-    const preflights = await Promise.all(input.participants.map((participant) =>
+    if (!await cancelCallCircleMatchIfParticipantsInactive({
+      match: input.match,
+      prisma: tx,
+    })) {
+      return { asked: false, signals: [] };
+    }
+    const now = input.clock();
+    if (!shouldAdvanceCallCircleConfirmationStage({
+      match: input.match,
+      memberATimeZone: timeZones.memberATimeZone,
+      memberBTimeZone: timeZones.memberBTimeZone,
+      now,
+      stage: input.stage,
+    })) {
+      return { asked: false, signals: [] };
+    }
+    const pendingRecipients = listCallCircleConfirmationRecipients({
+      match: input.match,
+      memberATimeZone: timeZones.memberATimeZone,
+      memberBTimeZone: timeZones.memberBTimeZone,
+      stage: input.stage,
+    });
+    if (pendingRecipients.length === 0) {
+      return { asked: false, signals: [] };
+    }
+    const preflights = await Promise.all(pendingRecipients.map((recipient) =>
       readCallCircleNotificationPreflightTx({
-        memberId: participant.memberId,
-        now: input.now,
-        timeZone: participant.timeZone,
+        memberId: recipient.memberId,
+        now,
+        timeZone: recipient.timeZone,
         tx,
       })
     ));
-    return input.participants.filter((_, index) =>
-      preflights[index]?.status === "ok"
-    );
-  });
-}
+    if (preflights.some((preflight) => preflight.status !== "ok")) {
+      await dropCallCircleMatchForNotificationBlocked({
+        groupId: input.match.groupId,
+        matchId: input.match.id,
+        prisma: tx,
+        sideAResponse: input.match.sideAResponse,
+        sideBResponse: input.match.sideBResponse,
+        stage: input.stage,
+        windowEndAt: input.match.windowEndAt,
+        windowStartAt: input.match.windowStartAt,
+      });
+      return { asked: false, signals: [] };
+    }
 
-async function askCallCircleMorningConfirmations(input: {
-  calendarRequester?: CallCircleConnectedAppsRequester;
-  match: SchedulerMatch;
-  memberATimeZone: string;
-  memberBTimeZone: string;
-  now: Date;
-  prisma: PrismaClient;
-}): Promise<boolean> {
-  const calendarRecipients = await preflightCallCircleMorningCalendarRecipients(input);
-  if (!calendarRecipients) return false;
+    const pendingNotifications: PendingConfirmationNotification[] = [];
+    for (let index = 0; index < pendingRecipients.length; index += 1) {
+      const recipient = pendingRecipients[index];
+      const preflight = preflights[index];
+      if (!recipient || !preflight || preflight.status !== "ok") {
+        return { asked: false, signals: [] };
+      }
+      pendingNotifications.push({
+        memberId: recipient.memberId,
+        preflight,
+        timeZone: recipient.timeZone,
+      });
+    }
 
-  const calendarAvailability = await Promise.all(calendarRecipients.map((recipient) =>
-    readCallCircleCalendarAvailability({
-      endAt: input.match.windowEndAt,
-      memberId: recipient.memberId,
-      requester: input.calendarRequester,
-      startAt: input.match.windowStartAt,
-      timeZone: recipient.timeZone,
-    })
-  ));
-  if (calendarAvailability.some((availability) => availability === "busy")) {
-    await dropCallCircleMorningMatchForCalendarBusy({
-      groupId: input.match.groupId,
-      matchId: input.match.id,
-      now: input.now,
-      prisma: input.prisma,
-      sideAResponse: input.match.sideAResponse,
-      sideBResponse: input.match.sideBResponse,
-      windowEndAt: input.match.windowEndAt,
-      windowStartAt: input.match.windowStartAt,
-    });
-    return false;
-  }
-
-  const transaction = await input.prisma.$transaction(async (tx): Promise<{
-    asked: boolean;
-    signals: CallCircleNotificationSignal[];
-  }> => {
-    const pendingNotifications = await preflightCallCircleMorningNotificationsTx({
+    const marked = await markCallCircleConfirmationStage({
       match: input.match,
-      memberATimeZone: input.memberATimeZone,
-      memberBTimeZone: input.memberBTimeZone,
-      now: input.now,
-      tx,
-    });
-    if (!pendingNotifications) return { asked: false, signals: [] };
-    const marked = await markCallCircleMatchAmAsked({
-      groupId: input.match.groupId,
-      matchId: input.match.id,
-      now: input.now,
+      now,
       prisma: tx,
-      sideAResponse: input.match.sideAResponse,
-      sideBResponse: input.match.sideBResponse,
-      windowEndAt: input.match.windowEndAt,
-      windowStartAt: input.match.windowStartAt,
+      stage: input.stage,
     });
     if (!marked) return { asked: false, signals: [] };
+
     const notifications = await Promise.all(pendingNotifications.map((notification) =>
       appendCallCircleConfirmNotificationTx({
         matchId: input.match.id,
         memberId: notification.memberId,
-        now: input.now,
-        otherMemberLabel: null,
+        now,
         preflight: notification.preflight,
-        stage: "am",
+        stage: input.stage,
         tx,
         windowLabel: formatCallCircleWindowLabel({
           startAt: input.match.windowStartAt,
@@ -982,329 +548,250 @@ async function askCallCircleMorningConfirmations(input: {
       }),
     };
   });
-  await signalCallCircleNotificationRuntimesBestEffort(transaction.signals);
+  await signalHostedAssistantNotificationsBestEffort(transaction.signals);
   return transaction.asked;
 }
 
-async function preflightCallCircleMorningCalendarRecipients(input: {
+function listCallCircleConfirmationRecipients(input: {
   match: SchedulerMatch;
   memberATimeZone: string;
   memberBTimeZone: string;
-  now: Date;
-  prisma: PrismaClient;
-}): Promise<PendingConfirmationRecipient[] | null> {
-  return input.prisma.$transaction(async (tx) => {
-    const pendingNotifications = await preflightCallCircleMorningNotificationsTx({
-      match: input.match,
-      memberATimeZone: input.memberATimeZone,
-      memberBTimeZone: input.memberBTimeZone,
-      now: input.now,
-      tx,
-    });
-    return pendingNotifications?.map((notification) => ({
-      memberId: notification.memberId,
-      timeZone: notification.timeZone,
-    })) ?? null;
-  });
-}
-
-async function preflightCallCircleMorningNotificationsTx(input: {
-  match: SchedulerMatch;
-  memberATimeZone: string;
-  memberBTimeZone: string;
-  now: Date;
-  tx: Prisma.TransactionClient;
-}): Promise<PendingConfirmationNotification[] | null> {
-  if (!await cancelCallCircleMatchIfParticipantsInactive({
-    match: input.match,
-    now: input.now,
-    prisma: input.tx,
-  })) {
-    return null;
+  stage: CallCircleConfirmationStage;
+}): PendingConfirmationRecipient[] {
+  if (input.stage === "final") {
+    return [
+      {
+        memberId: input.match.memberAId,
+        timeZone: input.memberATimeZone,
+      },
+      {
+        memberId: input.match.memberBId,
+        timeZone: input.memberBTimeZone,
+      },
+    ];
   }
-  const pendingRecipients: PendingConfirmationRecipient[] = [];
+
+  const recipients: PendingConfirmationRecipient[] = [];
   if (input.match.sideAResponse === "pending") {
-    pendingRecipients.push({
+    recipients.push({
       memberId: input.match.memberAId,
       timeZone: input.memberATimeZone,
     });
   }
   if (input.match.sideBResponse === "pending") {
-    pendingRecipients.push({
+    recipients.push({
       memberId: input.match.memberBId,
       timeZone: input.memberBTimeZone,
     });
   }
-  if (pendingRecipients.length === 0) return null;
-  const preflights = await Promise.all(pendingRecipients.map((recipient) =>
-    readCallCircleNotificationPreflightTx({
-      memberId: recipient.memberId,
-      now: input.now,
-      timeZone: recipient.timeZone,
-      tx: input.tx,
-    })
-  ));
-  if (preflights.some((preflight) => preflight.status !== "ok")) {
-    await dropCallCircleMorningMatchForNotificationBlocked({
-      groupId: input.match.groupId,
-      matchId: input.match.id,
-      now: input.now,
-      prisma: input.tx,
-      sideAResponse: input.match.sideAResponse,
-      sideBResponse: input.match.sideBResponse,
-      windowEndAt: input.match.windowEndAt,
-      windowStartAt: input.match.windowStartAt,
-    });
-    return null;
-  }
-  const pendingNotifications: PendingConfirmationNotification[] = [];
-  for (let index = 0; index < pendingRecipients.length; index += 1) {
-    const recipient = pendingRecipients[index];
-    const preflight = preflights[index];
-    if (!recipient || !preflight || preflight.status !== "ok") return null;
-    pendingNotifications.push({
-      memberId: recipient.memberId,
-      preflight,
-      timeZone: recipient.timeZone,
-    });
-  }
-  return pendingNotifications;
+  return recipients;
 }
 
-async function askCallCircleFinalConfirmations(input: {
-  calendarRequester?: CallCircleConnectedAppsRequester;
+async function markCallCircleConfirmationStage(input: {
   match: SchedulerMatch;
-  memberATimeZone: string;
-  memberBTimeZone: string;
   now: Date;
-  prisma: PrismaClient;
+  prisma: Prisma.TransactionClient;
+  stage: CallCircleConfirmationStage;
 }): Promise<boolean> {
-  const calendarRecipients = await preflightCallCircleFinalNotifications(input);
-  if (!calendarRecipients) return false;
-
-  const calendarAvailability = await Promise.all(calendarRecipients.map((recipient) =>
-    readCallCircleCalendarAvailability({
-      endAt: input.match.windowEndAt,
-      memberId: recipient.memberId,
-      requester: input.calendarRequester,
-      startAt: input.match.windowStartAt,
-      timeZone: recipient.timeZone,
-    })
-  ));
-  if (calendarAvailability.some((availability) => availability === "busy")) {
-    await dropCallCircleFinalMatchForCalendarBusy({
-      groupId: input.match.groupId,
-      matchId: input.match.id,
-      now: input.now,
-      prisma: input.prisma,
-      sideAResponse: input.match.sideAResponse,
-      sideBResponse: input.match.sideBResponse,
-      windowEndAt: input.match.windowEndAt,
-      windowStartAt: input.match.windowStartAt,
-    });
-    return false;
-  }
-
-  const transaction = await input.prisma.$transaction(async (tx): Promise<{
-    asked: boolean;
-    signals: CallCircleNotificationSignal[];
-  }> => {
-    const pendingNotifications = await preflightCallCircleFinalNotificationsTx({
-      match: input.match,
-      memberATimeZone: input.memberATimeZone,
-      memberBTimeZone: input.memberBTimeZone,
-      now: input.now,
-      tx,
-    });
-    if (!pendingNotifications) return { asked: false, signals: [] };
-    const marked = await markCallCircleMatchFinalAsked({
-      groupId: input.match.groupId,
-      matchId: input.match.id,
-      now: input.now,
-      prisma: tx,
-      sideAResponse: input.match.sideAResponse,
-      sideBResponse: input.match.sideBResponse,
-      windowEndAt: input.match.windowEndAt,
-      windowStartAt: input.match.windowStartAt,
-    });
-    if (!marked) return { asked: false, signals: [] };
-    const notifications = await Promise.all(pendingNotifications.map((notification) =>
-      appendCallCircleConfirmNotificationTx({
-        matchId: input.match.id,
-        memberId: notification.memberId,
-        now: input.now,
-        otherMemberLabel: null,
-        preflight: notification.preflight,
-        stage: "final",
-        tx,
-        windowLabel: formatCallCircleWindowLabel({
-          startAt: input.match.windowStartAt,
-          timeZone: notification.timeZone,
-        }),
-        windowStartAt: input.match.windowStartAt,
-      })
-    ));
-    return {
-      asked: true,
-      signals: notifications.flatMap((notification, index) => {
-        const memberId = pendingNotifications[index]?.memberId;
-        if (!memberId) return [];
-        const signal = readCallCircleNotificationSignal({ memberId, notification });
-        return signal ? [signal] : [];
-      }),
-    };
-  });
-  await signalCallCircleNotificationRuntimesBestEffort(transaction.signals);
-  return transaction.asked;
-}
-
-async function preflightCallCircleFinalNotifications(input: {
-  match: SchedulerMatch;
-  memberATimeZone: string;
-  memberBTimeZone: string;
-  now: Date;
-  prisma: PrismaClient;
-}): Promise<PendingConfirmationNotification[] | null> {
-  return input.prisma.$transaction(async (tx) =>
-    preflightCallCircleFinalNotificationsTx({
-      match: input.match,
-      memberATimeZone: input.memberATimeZone,
-      memberBTimeZone: input.memberBTimeZone,
-      now: input.now,
-      tx,
-    })
-  );
-}
-
-async function preflightCallCircleFinalNotificationsTx(input: {
-  match: SchedulerMatch;
-  memberATimeZone: string;
-  memberBTimeZone: string;
-  now: Date;
-  tx: Prisma.TransactionClient;
-}): Promise<PendingConfirmationNotification[] | null> {
-  if (!await cancelCallCircleMatchIfParticipantsInactive({
-    match: input.match,
-    now: input.now,
-    prisma: input.tx,
-  })) {
-    return null;
-  }
-  const pendingRecipients: PendingConfirmationRecipient[] = [
-    {
-      memberId: input.match.memberAId,
-      timeZone: input.memberATimeZone,
-    },
-    {
-      memberId: input.match.memberBId,
-      timeZone: input.memberBTimeZone,
-    },
-  ];
-  const preflights = await Promise.all(pendingRecipients.map((recipient) =>
-    readCallCircleNotificationPreflightTx({
-      memberId: recipient.memberId,
-      now: input.now,
-      timeZone: recipient.timeZone,
-      tx: input.tx,
-    })
-  ));
-  if (preflights.some((preflight) => preflight.status !== "ok")) {
-    await dropCallCircleFinalMatchForNotificationBlocked({
-      groupId: input.match.groupId,
-      matchId: input.match.id,
-      now: input.now,
-      prisma: input.tx,
-      sideAResponse: input.match.sideAResponse,
-      sideBResponse: input.match.sideBResponse,
-      windowEndAt: input.match.windowEndAt,
-      windowStartAt: input.match.windowStartAt,
-    });
-    return null;
-  }
-  const pendingNotifications: PendingConfirmationNotification[] = [];
-  for (let index = 0; index < pendingRecipients.length; index += 1) {
-    const recipient = pendingRecipients[index];
-    const preflight = preflights[index];
-    if (!recipient || !preflight || preflight.status !== "ok") return null;
-    pendingNotifications.push({
-      memberId: recipient.memberId,
-      preflight,
-      timeZone: recipient.timeZone,
-    });
-  }
-  return pendingNotifications;
-}
-
-async function appendCallCircleBridgeHandoffs(input: {
-  match: SchedulerMatch;
-  now: Date;
-  prisma: PrismaClient;
-}): Promise<boolean> {
-  const timeZones = await readCallCircleMatchParticipantTimeZones({
+  const shared = {
     groupId: input.match.groupId,
+    matchId: input.match.id,
     memberAId: input.match.memberAId,
     memberBId: input.match.memberBId,
+    now: input.now,
     prisma: input.prisma,
+    sideAResponse: input.match.sideAResponse,
+    sideBResponse: input.match.sideBResponse,
+    windowEndAt: input.match.windowEndAt,
+    windowStartAt: input.match.windowStartAt,
+  };
+  return input.stage === "am"
+    ? markCallCircleMatchAmAsked(shared)
+    : markCallCircleMatchFinalAsked(shared);
+}
+
+async function startDueCallCircleBridges(input: {
+  clock: CallCircleSchedulerClock;
+  connectorStarter?: CallCircleConnectorStarter;
+  prisma: PrismaClient;
+}): Promise<number> {
+  const queryNow = input.clock();
+  const matches: SchedulerMatch[] = await input.prisma.hostedCallCircleMatch.findMany({
+    orderBy: [
+      { windowStartAt: "asc" },
+      { id: "asc" },
+    ],
+    take: CALL_CIRCLE_PHASE_LIMIT,
+    where: {
+      ...CALL_CIRCLE_RECOVERABLE_BRIDGE_WHERE,
+      finalAskedAt: { not: null },
+      windowEndAt: { gt: queryNow },
+      windowStartAt: {
+        gt: new Date(queryNow.getTime() - CALL_CIRCLE_BRIDGE_WINDOW_MS),
+        lte: queryNow,
+      },
+    },
   });
-  if (!timeZones) return false;
-  const transaction = await input.prisma.$transaction(async (tx): Promise<{
-    handedOff: boolean;
-    signals: CallCircleNotificationSignal[];
-  }> => {
-    if (!await cancelCallCircleMatchIfParticipantsInactive({
-      match: input.match,
-      now: input.now,
-      prisma: tx,
-    })) {
-      return { handedOff: false, signals: [] };
-    }
-    const marked = await markCallCircleMatchOutcome({
-      matchId: input.match.id,
-      now: input.now,
-      outcome: "text_handoff",
-      phoneCallId: input.match.phoneCall?.id ?? null,
-      prisma: tx,
-      status: "dropped",
+  const starter = input.connectorStarter ?? startCallCircleConnectorCall;
+  let attempts = 0;
+
+  for (const match of matches) {
+    await starter({
+      matchId: match.id,
+      now: input.clock(),
+      prisma: input.prisma,
     });
-    if (!marked) return { handedOff: false, signals: [] };
-    const notifications = await Promise.all([
-      appendTerminalCallCircleNotificationIfReachableTx({
-        kind: "handoff",
-        matchId: input.match.id,
-        memberId: input.match.memberAId,
-        now: input.now,
-        timeZone: timeZones.memberATimeZone,
-        tx,
-      }),
-      appendTerminalCallCircleNotificationIfReachableTx({
-        kind: "handoff",
-        matchId: input.match.id,
-        memberId: input.match.memberBId,
-        now: input.now,
-        timeZone: timeZones.memberBTimeZone,
-        tx,
-      }),
-    ]);
+    attempts += 1;
+  }
+
+  return attempts;
+}
+
+async function handoffElapsedCallCircleBridges(input: {
+  clock: CallCircleSchedulerClock;
+  connectorStarter?: CallCircleConnectorStarter;
+  prisma: PrismaClient;
+}): Promise<number> {
+  const queryNow = input.clock();
+  const matches: SchedulerMatch[] = await input.prisma.hostedCallCircleMatch.findMany({
+    orderBy: [
+      { windowStartAt: "asc" },
+      { id: "asc" },
+    ],
+    take: CALL_CIRCLE_PHASE_LIMIT,
+    where: {
+      AND: [
+        CALL_CIRCLE_RECOVERABLE_BRIDGE_WHERE,
+        {
+          OR: [
+            { windowEndAt: { lte: queryNow } },
+            {
+              windowStartAt: {
+                lte: new Date(queryNow.getTime() - CALL_CIRCLE_BRIDGE_WINDOW_MS),
+              },
+            },
+          ],
+        },
+      ],
+      finalAskedAt: { not: null },
+    },
+  });
+  const starter = input.connectorStarter ?? startCallCircleConnectorCall;
+  let handedOff = 0;
+
+  for (const match of matches) {
+    const result = await starter({
+      matchId: match.id,
+      now: input.clock(),
+      prisma: input.prisma,
+    });
+    if (result.status === "handoff") {
+      handedOff += 1;
+    }
+  }
+
+  return handedOff;
+}
+
+async function appendPendingCallCircleSetupNotifications(input: {
+  clock: CallCircleSchedulerClock;
+  prisma: PrismaClient;
+}): Promise<number> {
+  const queryNow = input.clock();
+  const participants: PendingCallCircleSetupParticipant[] =
+    await input.prisma.hostedCallCircleParticipant.findMany({
+      orderBy: [
+        { nextMatchingAt: "asc" },
+        { id: "asc" },
+      ],
+      select: {
+        groupId: true,
+        memberId: true,
+      },
+      take: CALL_CIRCLE_PHASE_LIMIT,
+      where: {
+        nextMatchingAt: { lte: queryNow },
+        preferencesJson: { equals: Prisma.DbNull },
+        status: "enrolled",
+      },
+    });
+  let asked = 0;
+
+  for (const participant of participants) {
+    const appended = await appendCallCircleSetupNotificationIfMissing({
+      groupId: participant.groupId,
+      memberId: participant.memberId,
+      now: input.clock(),
+      prisma: input.prisma,
+    });
+    if (appended) asked += 1;
+    await input.prisma.hostedCallCircleParticipant.updateMany({
+      data: {
+        nextMatchingAt: readNextCallCircleMatchingAt(input.clock()),
+      },
+      where: {
+        groupId: participant.groupId,
+        memberId: participant.memberId,
+        nextMatchingAt: { lte: queryNow },
+        preferencesJson: { equals: Prisma.DbNull },
+        status: "enrolled",
+      },
+    });
+  }
+  return asked;
+}
+
+interface PendingCallCircleSetupParticipant {
+  groupId: string;
+  memberId: string;
+}
+
+async function appendCallCircleSetupNotificationIfMissing(input: {
+  groupId: string;
+  memberId: string;
+  now: Date;
+  prisma: PrismaClient;
+}): Promise<boolean> {
+  const eventIdPrefix = buildCallCircleSetupNotificationEventIdPrefix({
+    groupId: input.groupId,
+    memberId: input.memberId,
+  });
+  const transaction = await input.prisma.$transaction(async (tx): Promise<{
+    asked: boolean;
+    signals: HostedAssistantNotificationSignal[];
+  }> => {
+    const existing = await tx.hostedMailboxItem.findFirst({
+      select: { id: true },
+      where: {
+        dedupeKey: { startsWith: eventIdPrefix },
+        userId: input.memberId,
+      },
+    });
+    if (existing) return { asked: false, signals: [] };
+
+    const notification = await appendCallCircleSetupNotificationTx({
+      groupId: input.groupId,
+      memberId: input.memberId,
+      now: input.now,
+      tx,
+    });
+    const signal = notification ? readCallCircleNotificationSignal({
+      memberId: input.memberId,
+      notification,
+    }) : null;
     return {
-      handedOff: true,
-      signals: notifications.flatMap((notification, index) => {
-        const memberId = index === 0
-          ? input.match.memberAId
-          : input.match.memberBId;
-        const signal = notification
-          ? readCallCircleNotificationSignal({ memberId, notification })
-          : null;
-        return signal ? [signal] : [];
-      }),
+      asked: signal !== null,
+      signals: signal ? [signal] : [],
     };
   });
-  await signalCallCircleNotificationRuntimesBestEffort(transaction.signals);
-  return transaction.handedOff;
+  if (transaction.signals.length > 0) {
+    await signalHostedAssistantNotificationsBestEffort(transaction.signals);
+  }
+  return transaction.asked;
 }
 
 async function cancelCallCircleMatchIfParticipantsInactive(input: {
   match: Pick<SchedulerMatch, "groupId" | "id" | "memberAId" | "memberBId">;
-  now: Date;
   prisma: Prisma.TransactionClient | PrismaClient;
 }): Promise<boolean> {
   if (await canUseActiveCallCircleParticipantPair({
@@ -1317,18 +804,11 @@ async function cancelCallCircleMatchIfParticipantsInactive(input: {
   }
   await markCallCircleMatchOutcome({
     matchId: input.match.id,
-    now: input.now,
     outcome: "participant_unavailable",
     prisma: input.prisma,
     status: "canceled",
   });
   return false;
-}
-
-function isRecoverableCallCircleBridgePhoneCall(
-  phoneCall: SchedulerMatch["phoneCall"],
-): boolean {
-  return !phoneCall || isUnstartedCallCircleBridgePhoneCall(phoneCall);
 }
 
 interface SchedulerMatch {
@@ -1338,14 +818,6 @@ interface SchedulerMatch {
   id: string;
   memberAId: string;
   memberBId: string;
-  phoneCall: {
-    analyzedAt: Date | null;
-    endedAt: Date | null;
-    id: string;
-    providerCallId: string | null;
-    providerStartAttemptedAt: Date | null;
-    status: string;
-  } | null;
   sideAResponse: HostedCallCircleMatchResponse;
   sideBResponse: HostedCallCircleMatchResponse;
   status: string;
@@ -1353,25 +825,27 @@ interface SchedulerMatch {
   windowStartAt: Date;
 }
 
-interface TerminalNotificationMatch {
-  endedAt: Date | null;
-  groupId: string;
-  id: string;
-  memberAId: string;
-  memberBId: string;
-  outcome: string | null;
-  status: string;
-  windowEndAt: Date;
-}
-
 interface PendingConfirmationRecipient {
   memberId: string;
   timeZone: string;
 }
 
-interface PendingConfirmationNotification
-  extends PendingConfirmationRecipient {
+interface PendingConfirmationNotification extends PendingConfirmationRecipient {
   preflight: CallCircleNotificationPreflightOk;
+}
+
+function hasValidCallCircleParticipantTimeZones(
+  timeZones: {
+    memberATimeZone: string;
+    memberBTimeZone: string;
+  } | null,
+): timeZones is {
+  memberATimeZone: string;
+  memberBTimeZone: string;
+} {
+  return timeZones !== null
+    && isHostedCallCircleTimeZone(timeZones.memberATimeZone)
+    && isHostedCallCircleTimeZone(timeZones.memberBTimeZone);
 }
 
 function formatCallCircleWindowLabel(input: {

@@ -9,21 +9,26 @@ import {
   type HostedVaultShareProjectionKind,
   type HostedVaultShareProjectionScope,
 } from "@murphai/hosted-execution/vault-share";
+import type { HostedRuntimeGroupJoinOfferActivation } from "@murphai/hosted-execution/runtime-control";
 
 import { assertHostedLaunchRequiredConsentGranted } from "../legal/consent";
 import { hasHostedRuntimeActiveAccess } from "../hosted-mailbox/runtime-access";
 import { createHostedLinqMessageLookupKey } from "../hosted-onboarding/contact-privacy";
-import { assertHostedMemberNotSuspended } from "../hosted-onboarding/entitlement";
-import { hostedOnboardingError } from "../hosted-onboarding/errors";
+import { assertActiveHostedPersonAccessAllowedTx } from "../hosted-onboarding/member-access";
+import {
+  hostedOnboardingError,
+  isHostedOnboardingError,
+} from "../hosted-onboarding/errors";
 import {
   generateHostedGroupId,
-  generateHostedGroupJoinOfferId,
   generateHostedGroupMemberId,
   generateHostedGroupJoinCode,
+  lockHostedGroupRow,
+  lockHostedMemberRow,
 } from "../hosted-onboarding/shared";
 import { readHostedMemberIdentity } from "../hosted-onboarding/hosted-member-identity-store";
 import { toHostedOnboardingLogIdSuffix } from "../hosted-onboarding/logging";
-import { normalizeNullableString } from "../primitives";
+import { isRecord, normalizeNullableString, sha256Hex } from "../primitives";
 import { getPrisma } from "../prisma";
 import {
   grantHostedVaultShareTx,
@@ -90,18 +95,27 @@ export interface HostedGroupJoinAcceptanceTxResult
   vaultShareCleanupSignals: HostedVaultShareCleanupSignal[];
 }
 
-export interface HostedGroupJoinOfferBindingTxResult {
-  groupId: string;
-  messageIdSuffix: string | null;
-  messageLookupKey: string;
-  projectionKinds: HostedVaultShareProjectionKind[];
-  projectionScopes: HostedVaultShareProjectionScope[];
+const HOSTED_GROUP_JOIN_OFFER_PAYLOAD_SCHEMA =
+  "murph.hosted-group.join-offer.v2" as const;
+
+interface HostedGroupJoinOfferPayload {
+  activation: HostedRuntimeGroupJoinOfferActivation | null;
+  vaultShareProjectionScopes: HostedVaultShareProjectionScope[];
+}
+
+interface HostedGroupJoinOfferReservation {
+  id: string;
+  messageLookupKey: string | null;
+  offerPayload: HostedGroupJoinOfferPayload;
 }
 
 export interface HostedGroupJoinOfferAcceptanceTxResult
   extends HostedGroupJoinAcceptanceTxResult {
+  activation: HostedRuntimeGroupJoinOfferActivation | null;
   joinCode: string;
   messageLookupKey: string;
+  offerId: string;
+  offerPostedAt: Date;
   selectedVaultShareProjectionKinds: HostedVaultShareProjectionKind[];
   selectedVaultShareProjectionScopes: HostedVaultShareProjectionScope[];
 }
@@ -121,6 +135,10 @@ export type HostedGroupMemberEmailShareRevocationTxResult =
 
 export const HOSTED_GROUP_VAULT_SHARE_GRANT_LIMIT_PER_GRANTOR_PROJECTION = 25;
 export const HOSTED_GROUP_VAULT_SHARE_DESTINATION_LIMIT_PER_PROJECTION = 100;
+const HOSTED_GROUP_JOIN_OFFER_BINDING_PENDING_WINDOW_MS = 5 * 60 * 1000;
+const HOSTED_GROUP_JOIN_OFFER_PROVIDER_IDEMPOTENCY_KEY_PREFIX =
+  "group-join-offer:";
+const HOSTED_GROUP_JOIN_OFFER_ID_PATTERN = /^hgrpjo_[a-f0-9]{32}$/u;
 const DEFAULT_HOSTED_GROUP_REQUESTED_VAULT_SHARE_PROJECTION_KINDS = [
   "group-email.v0",
 ] as const satisfies readonly HostedVaultShareProjectionKind[];
@@ -491,29 +509,34 @@ export async function acceptHostedGroupJoinCodeTx(input: {
   });
 }
 
-export async function recordHostedGroupJoinOfferTx(input: {
+export async function reserveHostedGroupJoinOfferTx(input: {
+  activation?: HostedRuntimeGroupJoinOfferActivation | null;
+  allowNewActivation?: boolean;
   groupId: string;
-  messageId: string | null;
+  operationId: string;
   postedAt: Date;
   projectionKinds?: readonly HostedVaultShareProjectionKind[] | null;
   projectionScopes?: readonly HostedVaultShareProjectionScope[] | null;
   tx: Prisma.TransactionClient;
-}): Promise<HostedGroupJoinOfferBindingTxResult> {
-  const messageLookupKey = createHostedLinqMessageLookupKey(input.messageId);
-  if (!messageLookupKey) {
-    throw hostedOnboardingError({
-      code: "HOSTED_GROUP_JOIN_OFFER_MESSAGE_ID_REQUIRED",
-      httpStatus: 502,
-      message: "Could not bind this group offer to a provider message.",
-      retryable: true,
-    });
-  }
+}): Promise<HostedGroupJoinOfferReservation> {
   const projectionScopes = normalizeHostedVaultShareProjectionScopes(
     input.projectionScopes && input.projectionScopes.length > 0
       ? input.projectionScopes
       : fixedProjectionKindsToScopes(input.projectionKinds ?? []),
   );
-  const projectionKinds = [...new Set(projectionScopes.map((scope) => scope.projectionKind))];
+  const operationId = normalizeNullableString(input.operationId);
+  if (!operationId) {
+    throw new TypeError("Hosted group join offer operation identity is required.");
+  }
+  const offerPayload: HostedGroupJoinOfferPayload = {
+    activation: normalizeHostedGroupJoinOfferActivation(input.activation),
+    vaultShareProjectionScopes: projectionScopes,
+  };
+  const offerId = `hgrpjo_${sha256Hex([
+    HOSTED_GROUP_JOIN_OFFER_PAYLOAD_SCHEMA,
+    input.groupId,
+    operationId,
+  ].join("\n")).slice(0, 32)}`;
   await lockHostedGroupRow(input.tx, input.groupId);
   const group = await input.tx.hostedGroup.findUnique({
     where: { id: input.groupId },
@@ -527,27 +550,180 @@ export async function recordHostedGroupJoinOfferTx(input: {
       retryable: false,
     });
   }
+
+  const existing = await input.tx.hostedGroupJoinOffer.findUnique({
+    where: { id: offerId },
+    select: {
+      groupId: true,
+      id: true,
+      messageLookupKey: true,
+      offerScopeJson: true,
+      revokedAt: true,
+    },
+  });
+  if (existing) {
+    const existingPayload = parseHostedGroupJoinOfferPayload(existing.offerScopeJson);
+    if (
+      existing.groupId !== input.groupId
+      || existing.revokedAt !== null
+      || !areHostedGroupJoinOfferPayloadsEqual(existingPayload, offerPayload)
+    ) {
+      throw hostedOnboardingError({
+        code: "HOSTED_GROUP_JOIN_OFFER_OPERATION_CONFLICT",
+        httpStatus: 409,
+        message: "This group-offer operation cannot be reused with different details.",
+        retryable: false,
+      });
+    }
+    if (!existing.messageLookupKey) {
+      await input.tx.hostedGroupJoinOffer.update({
+        data: { bindingAttemptedAt: input.postedAt },
+        select: { id: true },
+        where: { id: existing.id },
+      });
+    }
+    return {
+      id: existing.id,
+      messageLookupKey: existing.messageLookupKey,
+      offerPayload: existingPayload,
+    };
+  }
+  if (offerPayload.activation && input.allowNewActivation !== true) {
+    throw hostedOnboardingError({
+      code: "HOSTED_GROUP_JOIN_OFFER_ACTIVATION_DISABLED",
+      httpStatus: 409,
+      message: "Call Circle offers are not currently enabled.",
+      retryable: false,
+    });
+  }
+
   await input.tx.hostedGroupJoinOffer.create({
     data: {
-      id: generateHostedGroupJoinOfferId(),
+      id: offerId,
       groupId: input.groupId,
-      messageIdSuffix: toHostedOnboardingLogIdSuffix(input.messageId),
-      messageLookupKey,
+      messageIdSuffix: null,
+      messageLookupKey: null,
+      offerScopeJson: toHostedGroupJoinOfferPayloadJson(offerPayload),
+      bindingAttemptedAt: input.postedAt,
       postedAt: input.postedAt,
-      projectionKindsJson: toHostedGroupJoinOfferProjectionScopesJson(projectionScopes),
     },
   });
 
   return {
-    groupId: input.groupId,
-    messageIdSuffix: toHostedOnboardingLogIdSuffix(input.messageId),
-    messageLookupKey,
-    projectionKinds,
-    projectionScopes,
+    id: offerId,
+    messageLookupKey: null,
+    offerPayload,
   };
 }
 
+export async function bindHostedGroupJoinOfferTx(input: {
+  messageId: string | null;
+  offerId: string;
+  postedAt?: Date;
+  tx: Prisma.TransactionClient;
+}): Promise<void> {
+  const messageLookupKey = createHostedLinqMessageLookupKey(input.messageId);
+  if (!messageLookupKey) {
+    throw hostedOnboardingError({
+      code: "HOSTED_GROUP_JOIN_OFFER_MESSAGE_ID_REQUIRED",
+      httpStatus: 502,
+      message: "Could not bind this group offer to a provider message.",
+      retryable: true,
+    });
+  }
+  const lookup = await input.tx.hostedGroupJoinOffer.findUnique({
+    where: { id: input.offerId },
+    select: { groupId: true },
+  });
+  if (!lookup) {
+    throw hostedOnboardingError({
+      code: "HOSTED_GROUP_JOIN_OFFER_NOT_FOUND",
+      httpStatus: 404,
+      message: "This group offer is no longer active.",
+      retryable: false,
+    });
+  }
+  await lockHostedGroupRow(input.tx, lookup.groupId);
+  const offer = await input.tx.hostedGroupJoinOffer.findUnique({
+    where: { id: input.offerId },
+    select: {
+      groupId: true,
+      id: true,
+      messageLookupKey: true,
+      revokedAt: true,
+    },
+  });
+  if (!offer || offer.revokedAt !== null) {
+    throw hostedOnboardingError({
+      code: "HOSTED_GROUP_JOIN_OFFER_REVOKED",
+      httpStatus: 410,
+      message: "This group offer has been revoked.",
+      retryable: false,
+    });
+  }
+  if (offer.messageLookupKey && offer.messageLookupKey !== messageLookupKey) {
+    throw hostedOnboardingError({
+      code: "HOSTED_GROUP_JOIN_OFFER_ALREADY_BOUND",
+      httpStatus: 409,
+      message: "This group offer is already bound to another provider message.",
+      retryable: false,
+    });
+  }
+  await input.tx.hostedGroupJoinOffer.update({
+    where: { id: offer.id },
+    data: {
+      messageIdSuffix: toHostedOnboardingLogIdSuffix(input.messageId),
+      messageLookupKey,
+      ...(input.postedAt ? { postedAt: input.postedAt } : {}),
+    },
+    select: { id: true },
+  });
+}
+
+export function buildHostedGroupJoinOfferProviderIdempotencyKey(
+  offerId: string,
+): string {
+  return `${HOSTED_GROUP_JOIN_OFFER_PROVIDER_IDEMPOTENCY_KEY_PREFIX}${offerId}`;
+}
+
+export function readHostedGroupJoinOfferIdFromProviderIdempotencyKey(
+  value: string | null | undefined,
+): string | null {
+  if (typeof value !== "string") return null;
+  if (!value.startsWith(HOSTED_GROUP_JOIN_OFFER_PROVIDER_IDEMPOTENCY_KEY_PREFIX)) {
+    return null;
+  }
+  const offerId = value.slice(
+    HOSTED_GROUP_JOIN_OFFER_PROVIDER_IDEMPOTENCY_KEY_PREFIX.length,
+  );
+  return HOSTED_GROUP_JOIN_OFFER_ID_PATTERN.test(offerId) ? offerId : null;
+}
+
+export async function repairHostedGroupJoinOfferBindingFromProviderEchoTx(input: {
+  messageId: string | null;
+  offerId: string;
+  postedAt?: Date;
+  tx: Prisma.TransactionClient;
+}): Promise<void> {
+  try {
+    await bindHostedGroupJoinOfferTx(input);
+  } catch (error) {
+    if (
+      isHostedOnboardingError(error)
+      && (
+        error.code === "HOSTED_GROUP_JOIN_OFFER_ALREADY_BOUND"
+        || error.code === "HOSTED_GROUP_JOIN_OFFER_NOT_FOUND"
+        || error.code === "HOSTED_GROUP_JOIN_OFFER_REVOKED"
+      )
+    ) {
+      return;
+    }
+    throw error;
+  }
+}
+
 export async function acceptHostedGroupJoinOfferTx(input: {
+  bindingPendingAt?: Date;
   memberId: string;
   messageLookupKeyReadCandidates: readonly string[];
   now: Date;
@@ -580,12 +756,12 @@ export async function acceptHostedGroupJoinOfferTx(input: {
     select: { groupId: true },
   });
   if (!offerLookup) {
-    throw hostedOnboardingError({
-      code: "HOSTED_GROUP_JOIN_OFFER_NOT_FOUND",
-      httpStatus: 404,
-      message: "This group offer is no longer active.",
-      retryable: false,
+    await throwIfHostedGroupJoinOfferBindingPendingTx({
+      now: input.bindingPendingAt ?? input.now,
+      threadIdentityLookupKeyReadCandidates,
+      tx: input.tx,
     });
+    throwHostedGroupJoinOfferNotFound();
   }
   await lockHostedGroupRow(input.tx, offerLookup.groupId);
   const offer = await input.tx.hostedGroupJoinOffer.findFirst({
@@ -597,8 +773,10 @@ export async function acceptHostedGroupJoinOfferTx(input: {
     },
     select: {
       groupId: true,
+      id: true,
       messageLookupKey: true,
-      projectionKindsJson: true,
+      offerScopeJson: true,
+      postedAt: true,
       revokedAt: true,
       group: {
         select: {
@@ -615,6 +793,14 @@ export async function acceptHostedGroupJoinOfferTx(input: {
       httpStatus: 410,
       message: "This group offer has been revoked.",
       retryable: false,
+    });
+  }
+  if (!offer.messageLookupKey) {
+    throw hostedOnboardingError({
+      code: "HOSTED_GROUP_JOIN_OFFER_BINDING_PENDING",
+      httpStatus: 503,
+      message: "This group offer is still being attached to its provider message.",
+      retryable: true,
     });
   }
   const group = offer.group;
@@ -653,9 +839,8 @@ export async function acceptHostedGroupJoinOfferTx(input: {
     });
   }
 
-  const selectedVaultShareProjectionScopes = normalizeHostedVaultShareProjectionScopes(
-    offer.projectionKindsJson,
-  );
+  const offerPayload = parseHostedGroupJoinOfferPayload(offer.offerScopeJson);
+  const selectedVaultShareProjectionScopes = offerPayload.vaultShareProjectionScopes;
   const selectedVaultShareProjectionKinds = [
     ...new Set(selectedVaultShareProjectionScopes.map((scope) => scope.projectionKind)),
   ];
@@ -671,11 +856,69 @@ export async function acceptHostedGroupJoinOfferTx(input: {
 
   return {
     ...accepted,
+    activation: offerPayload.activation,
     joinCode: group.joinCode,
     messageLookupKey: offer.messageLookupKey,
+    offerId: offer.id,
+    offerPostedAt: offer.postedAt,
     selectedVaultShareProjectionKinds,
     selectedVaultShareProjectionScopes,
   };
+}
+
+async function throwIfHostedGroupJoinOfferBindingPendingTx(input: {
+  now: Date;
+  threadIdentityLookupKeyReadCandidates: readonly string[];
+  tx: Prisma.TransactionClient;
+}): Promise<void> {
+  const route = await input.tx.hostedThreadRoute.findFirst({
+    where: {
+      channel: "linq",
+      threadIdentityLookupKey: {
+        in: [...input.threadIdentityLookupKeyReadCandidates],
+      },
+    },
+    select: { containerMemberId: true },
+  });
+  if (!route) return;
+  const group = await input.tx.hostedGroup.findUnique({
+    where: { runtimeMemberId: route.containerMemberId },
+    select: { id: true },
+  });
+  if (!group) return;
+  const pending = await input.tx.hostedGroupJoinOffer.findFirst({
+    where: {
+      groupId: group.id,
+      messageLookupKey: null,
+      bindingAttemptedAt: {
+        gte: new Date(
+          input.now.getTime() - HOSTED_GROUP_JOIN_OFFER_BINDING_PENDING_WINDOW_MS,
+        ),
+        lte: new Date(
+          input.now.getTime() + HOSTED_GROUP_JOIN_OFFER_BINDING_PENDING_WINDOW_MS,
+        ),
+      },
+      revokedAt: null,
+    },
+    orderBy: { bindingAttemptedAt: "desc" },
+    select: { id: true },
+  });
+  if (!pending) return;
+  throw hostedOnboardingError({
+    code: "HOSTED_GROUP_JOIN_OFFER_BINDING_PENDING",
+    httpStatus: 503,
+    message: "This group offer is still being attached to its provider message.",
+    retryable: true,
+  });
+}
+
+function throwHostedGroupJoinOfferNotFound(): never {
+  throw hostedOnboardingError({
+    code: "HOSTED_GROUP_JOIN_OFFER_NOT_FOUND",
+    httpStatus: 404,
+    message: "This group offer is no longer active.",
+    retryable: false,
+  });
 }
 
 function normalizeHostedGroupLookupKeyCandidates(
@@ -722,19 +965,10 @@ async function acceptHostedGroupJoinTx(input: {
       message: "This group is no longer active.",
     });
   }
-  await lockHostedMemberRow(input.tx, input.memberId);
-  const member = await input.tx.hostedMember.findUnique({
-    where: { id: input.memberId },
-    select: { suspendedAt: true },
+  await assertActiveHostedPersonAccessAllowedTx({
+    memberId: input.memberId,
+    tx: input.tx,
   });
-  if (!member) {
-    throw hostedOnboardingError({
-      code: "HOSTED_GROUP_JOIN_MEMBER_NOT_FOUND",
-      httpStatus: 404,
-      message: "Your Murph account could not be found.",
-    });
-  }
-  assertHostedMemberNotSuspended(member);
 
   const selected = normalizeHostedVaultShareProjectionScopes(
     input.selectedVaultShareProjectionScopes,
@@ -966,10 +1200,50 @@ function toHostedGroupJoinPolicyJson(policy: ReturnType<typeof mergeHostedGroupJ
   return JSON.parse(JSON.stringify(policy)) as Prisma.InputJsonValue;
 }
 
-function toHostedGroupJoinOfferProjectionScopesJson(
-  projectionScopes: readonly HostedVaultShareProjectionScope[],
+function toHostedGroupJoinOfferPayloadJson(
+  payload: HostedGroupJoinOfferPayload,
 ): Prisma.InputJsonValue {
-  return JSON.parse(JSON.stringify(normalizeHostedVaultShareProjectionScopes(projectionScopes))) as Prisma.InputJsonValue;
+  // Keep the physical value array-shaped so older web deployments continue
+  // reading the complete selector-aware scopes while ignoring the v2 header.
+  const header = {
+    ...(payload.activation ? { activation: payload.activation } : {}),
+    schema: HOSTED_GROUP_JOIN_OFFER_PAYLOAD_SCHEMA,
+  };
+  return JSON.parse(JSON.stringify([
+    header,
+    ...payload.vaultShareProjectionScopes,
+  ])) as Prisma.InputJsonValue;
+}
+
+function parseHostedGroupJoinOfferPayload(value: unknown): HostedGroupJoinOfferPayload {
+  const entries = Array.isArray(value) ? value : [];
+  const envelope = entries.find((entry) => (
+    isRecord(entry) && entry.schema === HOSTED_GROUP_JOIN_OFFER_PAYLOAD_SCHEMA
+  ));
+  return {
+    activation: normalizeHostedGroupJoinOfferActivation(
+      envelope && isRecord(envelope) ? envelope.activation : null,
+    ),
+    vaultShareProjectionScopes: normalizeHostedVaultShareProjectionScopes(entries),
+  };
+}
+
+function normalizeHostedGroupJoinOfferActivation(
+  value: unknown,
+): HostedRuntimeGroupJoinOfferActivation | null {
+  return value === "call-circle.enroll.v0" ? value : null;
+}
+
+function areHostedGroupJoinOfferPayloadsEqual(
+  left: HostedGroupJoinOfferPayload,
+  right: HostedGroupJoinOfferPayload,
+): boolean {
+  if (left.activation !== right.activation) return false;
+  const toScopeKeys = (scopes: readonly HostedVaultShareProjectionScope[]) => scopes
+    .map((scope) => buildHostedVaultShareProjectionScopeKey(scope))
+    .sort();
+  return JSON.stringify(toScopeKeys(left.vaultShareProjectionScopes))
+    === JSON.stringify(toScopeKeys(right.vaultShareProjectionScopes));
 }
 
 function fixedProjectionKindsToScopes(
@@ -1226,14 +1500,6 @@ async function assertHostedGroupVaultShareGrantLimitTx(
       retryable: false,
     });
   }
-}
-
-async function lockHostedGroupRow(tx: Prisma.TransactionClient, groupId: string): Promise<void> {
-  await tx.$queryRaw`select 1 from "hosted_group" where "id" = ${groupId} for update`;
-}
-
-async function lockHostedMemberRow(tx: Prisma.TransactionClient, memberId: string): Promise<void> {
-  await tx.$queryRaw`select 1 from "hosted_member" where "id" = ${memberId} for update`;
 }
 
 async function lockHostedThreadContainerRow(

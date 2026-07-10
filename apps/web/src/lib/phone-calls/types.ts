@@ -19,12 +19,19 @@ export interface PhoneCallRuntimeStartResult {
 export interface PhoneCallRuntime {
   validateStart?(call: HostedPhoneCallRuntimeRecord): Promise<void> | void;
   start(call: HostedPhoneCallRuntimeRecord): Promise<PhoneCallRuntimeStartResult>;
+  stop(providerCallId: string): Promise<void>;
 }
 
 export class PhoneCallRuntimeStartRejectedError extends Error {
-  constructor(message: string, options?: ErrorOptions) {
+  readonly providerCallId: string | null;
+
+  constructor(
+    message: string,
+    options?: ErrorOptions & { providerCallId?: string },
+  ) {
     super(message, options);
     this.name = "PhoneCallRuntimeStartRejectedError";
+    this.providerCallId = options?.providerCallId ?? null;
   }
 }
 

@@ -10,8 +10,10 @@ import {
   hasActiveHostedMemberAccess,
   hasActiveHostedThreadContainerAccess,
   hasActiveHostedThreadContainerAccessWithParticipants,
+  assertActiveHostedPersonAccessAllowedTx,
   readActiveHostedMemberAccess,
 } from "@/src/lib/hosted-onboarding/member-access";
+import { createPrismaClient } from "@/src/lib/prisma";
 
 const SUSPENDED_AT = new Date("2026-04-06T10:00:00.000Z");
 
@@ -34,6 +36,65 @@ function person(input: {
     billingStatus: input.billingStatus,
     suspendedAt: input.suspendedAt ?? null,
   };
+}
+
+function buildLockedPersonAccessTx(input: {
+  groupBillingStatus?: HostedBillingStatus;
+  memberBillingStatus: HostedBillingStatus;
+  membershipStatus?: string;
+}) {
+  const $queryRaw = vi.fn(async (query: unknown) => {
+    const sql = readRawSqlText(query);
+    if (sql.includes('FROM "hosted_member"')) {
+      return [{
+        billingStatus: input.memberBillingStatus,
+        suspendedAt: null,
+      }];
+    }
+    if (sql.includes('FROM "hosted_account_group_membership"')) {
+      return input.groupBillingStatus === HostedBillingStatus.active
+        && (input.membershipStatus ?? "active") === "active"
+        ? [{ id: "membership_active" }]
+        : [];
+    }
+    return [];
+  });
+  const tx = createPrismaClient({
+    databaseUrl: "postgresql://test:test@127.0.0.1:1/test",
+  });
+  Object.defineProperty(tx, "$queryRaw", {
+    configurable: true,
+    value: $queryRaw,
+  });
+  Object.defineProperty(tx, "hostedMember", {
+    configurable: true,
+    value: {
+      findUnique: vi.fn(async () => ({
+        billingStatus: input.memberBillingStatus,
+        suspendedAt: null,
+        threadContainer: null,
+      })),
+    },
+  });
+  return {
+    $queryRaw,
+    tx,
+  };
+}
+
+function readRawSqlText(query: unknown): string {
+  if (Array.isArray(query)) {
+    return query.join(" ");
+  }
+  if (
+    query
+    && typeof query === "object"
+    && "strings" in query
+    && Array.isArray((query as { strings?: unknown }).strings)
+  ) {
+    return ((query as { strings: string[] }).strings).join(" ");
+  }
+  return String(query);
 }
 
 describe("hosted onboarding entitlement (own billing)", () => {
@@ -101,6 +162,43 @@ describe("hosted member access (single resolver)", () => {
     expect(hasActiveHostedMemberAccess(person({
       billingStatus: HostedBillingStatus.not_started,
     }))).toBe(false);
+  });
+
+  it("derives sponsored access from membership and group rows held under update locks", async () => {
+    const { $queryRaw, tx } = buildLockedPersonAccessTx({
+      groupBillingStatus: HostedBillingStatus.active,
+      memberBillingStatus: HostedBillingStatus.not_started,
+    });
+
+    await expect(assertActiveHostedPersonAccessAllowedTx({
+      memberId: "member_sponsored",
+      tx,
+    })).resolves.toBeUndefined();
+
+    expect($queryRaw).toHaveBeenCalledTimes(2);
+    expect(readRawSqlText($queryRaw.mock.calls[0]?.[0])).toContain(
+      'from "hosted_member"',
+    );
+    expect(readRawSqlText($queryRaw.mock.calls[0]?.[0]).toLowerCase()).toContain("for update");
+    expect(readRawSqlText($queryRaw.mock.calls[1]?.[0])).toContain(
+      "FOR UPDATE OF membership, account_group",
+    );
+    expect(readRawSqlText($queryRaw.mock.calls[1]?.[0])).toContain("LIMIT 1");
+  });
+
+  it("fails closed when the locked sponsorship snapshot is no longer active", async () => {
+    const { tx } = buildLockedPersonAccessTx({
+      groupBillingStatus: HostedBillingStatus.unpaid,
+      memberBillingStatus: HostedBillingStatus.not_started,
+    });
+
+    await expect(assertActiveHostedPersonAccessAllowedTx({
+      memberId: "member_sponsored",
+      tx,
+    })).rejects.toMatchObject({
+      code: "HOSTED_ACCESS_REQUIRED",
+      httpStatus: 403,
+    });
   });
 
   it("grants access via an active membership in an active, unsuspended group", () => {

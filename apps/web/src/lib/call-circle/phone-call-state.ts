@@ -1,4 +1,6 @@
-export interface CallCircleBridgePhoneCallState {
+export const CALL_CIRCLE_PHONE_CALL_REQUEST_KEY_PREFIX = "call-circle:";
+
+interface CallCircleBridgePhoneCallState {
   analyzedAt: Date | null;
   endedAt: Date | null;
   providerCallId: string | null;

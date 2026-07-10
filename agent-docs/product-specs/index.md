@@ -1,6 +1,6 @@
 # Product Specs Index
 
-Last verified: 2026-07-08
+Last verified: 2026-07-09
 
 | Path | Purpose | Status |
 | --- | --- | --- |
@@ -23,7 +23,7 @@ Last verified: 2026-07-08
 | `agent-docs/product-specs/murph-contact-card-picker.md` | Post-signup add-Murph-to-contacts step where the member picks the avatar on Murph's vCard; picker components live on `/design`. | Implemented |
 | `agent-docs/product-specs/murph-tone-and-voice.md` | Onboarding and settings preference flow for Murph tone and voice, hosted mailbox handoff, vault preference owner, and ElevenLabs preview assets. | Implemented |
 | `agent-docs/product-specs/group-health-newsletter.md` | Recurring group health newsletter emailed from a group chat: cron automation in the group vault, tone flavors, a reusable default-at-join email-sharing grant, and Cloudflare `HOSTED_EMAIL` delivery with web-side address resolution. | Specified |
-| `agent-docs/product-specs/call-circle.md` | Friend-call matchmaking for groups: web-owned coordinator, in-chat enrollment, calendar-aware confirms, and a Retell connector bridge over existing rails. | Planned |
+| `agent-docs/product-specs/call-circle.md` | Weekly friend-call matching for groups using the generic reaction-consent offer, exact mailbox and delivery authority, and the existing Retell phone-call owner. | In review |
 
 ## Rule
 

@@ -87,6 +87,7 @@ vi.mock("@/src/lib/hosted-runtime-latency/store", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
+  signalHostedMailboxAppendsBestEffort: vi.fn(),
   signalHostedRuntimeRecheckRuntime: mocks.signalHostedRuntimeRecheckRuntime,
 }));
 

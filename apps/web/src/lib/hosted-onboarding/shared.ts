@@ -16,6 +16,13 @@ export async function lockHostedMemberRow(
   await tx.$queryRaw`select 1 from "hosted_member" where "id" = ${memberId} for update`;
 }
 
+export async function lockHostedGroupRow(
+  tx: Prisma.TransactionClient,
+  groupId: string,
+): Promise<void> {
+  await tx.$queryRaw`select 1 from "hosted_group" where "id" = ${groupId} for update`;
+}
+
 export function extractLinqTextMessage(input: unknown): string | null {
   if (!input || typeof input !== "object") {
     return null;
@@ -71,10 +78,6 @@ export function generateHostedGroupId(): string {
 
 export function generateHostedGroupMemberId(): string {
   return `hgrpm_${randomBytes(12).toString("base64url")}`;
-}
-
-export function generateHostedGroupJoinOfferId(): string {
-  return `hgrpjo_${randomBytes(12).toString("base64url")}`;
 }
 
 export function generateHostedCallCircleParticipantId(): string {

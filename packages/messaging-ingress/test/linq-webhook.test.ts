@@ -12,6 +12,7 @@ import {
   minimizeLinqWebhookEvent,
   parseLinqMessageReceivedEvent,
   parseLinqWebhookEvent,
+  readLinqOutboundMessageIdentity,
   readLinqRecipientLineHandle,
   readLinqWebhookHeader,
   parseRawLinqMessageReceivedEvent,
@@ -724,6 +725,81 @@ test("parseRawLinqMessageReceivedEvent preserves explicit recipient fields on ra
   assert.equal(event.data.recipient_handle.id, "handle_recipient_legacy");
   assert.equal(event.data.recipient_handle.is_me, true);
   assert.equal(event.data.recipient_handle.service, "iMessage");
+});
+
+test("parseRawLinqMessageReceivedEvent preserves outbound provider idempotency identity", () => {
+  const event = parseRawLinqMessageReceivedEvent(buildV2026MessageReceivedWebhook({
+    data: {
+      direction: "outbound",
+      idempotency_key:
+        "group-join-offer:hgrpjo_0123456789abcdef0123456789abcdef",
+      sender_handle: {
+        handle: "+15550000000",
+        id: "handle_owner_outbound",
+        is_me: true,
+        service: "iMessage",
+      },
+      service: "iMessage",
+    },
+    eventId: "evt_outbound_idempotency",
+  }));
+
+  assert.equal(
+    event.data.idempotency_key,
+    "group-join-offer:hgrpjo_0123456789abcdef0123456789abcdef",
+  );
+});
+
+test("readLinqOutboundMessageIdentity reads canonical message.sent identity", () => {
+  assert.deepEqual(readLinqOutboundMessageIdentity({
+    api_version: "v3",
+    created_at: "2026-07-09T12:00:00.000Z",
+    data: {
+      direction: "outbound",
+      id: "msg_sent_123",
+      idempotency_key:
+        "group-join-offer:hgrpjo_0123456789abcdef0123456789abcdef",
+    },
+    event_id: "evt_sent_123",
+    event_type: "message.sent",
+  }), {
+    createdAt: "2026-07-09T12:00:00.000Z",
+    idempotencyKey:
+      "group-join-offer:hgrpjo_0123456789abcdef0123456789abcdef",
+    messageId: "msg_sent_123",
+  });
+});
+
+test("readLinqOutboundMessageIdentity keeps legacy outbound message.received support", () => {
+  assert.deepEqual(readLinqOutboundMessageIdentity({
+    api_version: "v3",
+    created_at: "2026-07-09T12:00:00.000Z",
+    data: {
+      idempotency_key:
+        "group-join-offer:hgrpjo_0123456789abcdef0123456789abcdef",
+      is_from_me: true,
+      message: { id: "msg_echo_123" },
+    },
+    event_id: "evt_echo_123",
+    event_type: "message.received",
+  }), {
+    createdAt: "2026-07-09T12:00:00.000Z",
+    idempotencyKey:
+      "group-join-offer:hgrpjo_0123456789abcdef0123456789abcdef",
+    messageId: "msg_echo_123",
+  });
+  assert.equal(readLinqOutboundMessageIdentity({
+    api_version: "v3",
+    created_at: "2026-07-09T12:00:00.000Z",
+    data: {
+      direction: "inbound",
+      id: "msg_inbound_123",
+      idempotency_key:
+        "group-join-offer:hgrpjo_0123456789abcdef0123456789abcdef",
+    },
+    event_id: "evt_inbound_123",
+    event_type: "message.received",
+  }), null);
 });
 
 test("parseRawLinqMessageReceivedEvent falls back to an explicit raw recipient handle without changing service fallback", () => {

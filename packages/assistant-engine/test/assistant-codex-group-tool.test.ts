@@ -106,12 +106,8 @@ describe("murph.group dynamic tool", () => {
       .not.toContain("sleep");
     expect(MURPH_GROUP_TOOL.inputSchema.properties.displayName.description)
       .toContain("the name the group chose");
-    expect(MURPH_GROUP_TOOL.inputSchema.properties.messageTemplate.description)
-      .toContain("{{join_url}}");
-    expect(MURPH_GROUP_TOOL.inputSchema.properties.messageTemplate.description)
-      .toContain("{{share_scope}}");
-    expect(MURPH_GROUP_TOOL.inputSchema.properties.messageTemplate.description)
-      .toContain("Include {{join_url}} exactly once");
+    expect(MURPH_GROUP_TOOL.inputSchema.properties.activation.enum)
+      .toEqual(["call-circle.enroll.v0"]);
   });
 
   it("parses the chat-scoped actions without accepting a model-supplied thread target", () => {
@@ -131,18 +127,16 @@ describe("murph.group dynamic tool", () => {
 
     expect(readMurphDynamicToolRequest(groupToolCall({
       action: "post_join_offer",
+      activation: "call-circle.enroll.v0",
       displayName: "Sunday Sleep Crew",
-      messageTemplate:
-        "React here to join. This shares {{share_scope}} with the group. Details: {{join_url}}.",
       projectionScopes: [{ projectionKind: "sleep-times.v0" }],
     }))).toEqual({
       kind: "group",
       request: {
         action: "post_join_offer",
         joinOffer: {
+          activation: "call-circle.enroll.v0",
           displayName: "Sunday Sleep Crew",
-          messageTemplate:
-            "React here to join. This shares {{share_scope}} with the group. Details: {{join_url}}.",
           projectionScopes: [{ projectionKind: "sleep-times.v0" }],
         },
       },
@@ -162,8 +156,6 @@ describe("murph.group dynamic tool", () => {
 
     expect(readMurphDynamicToolRequest(groupToolCall({
       action: "post_join_offer",
-      messageTemplate:
-        "React here to join. This shares {{share_scope}} with the group. Details: {{join_url}}.",
       linqThread: { chatId: "chat_hijack" },
     }))?.kind).toBe("invalid-group-arguments");
 
@@ -363,8 +355,6 @@ describe("murph.group dynamic tool", () => {
   it("keeps displayName optional on post_join_offer", () => {
     const request = readMurphDynamicToolRequest(groupToolCall({
       action: "post_join_offer",
-      messageTemplate:
-        "React here to join. This shares {{share_scope}} with the group. Details: {{join_url}}.",
       projectionScopes: [{ projectionKind: "sleep-times.v0" }],
     }));
 
@@ -373,10 +363,43 @@ describe("murph.group dynamic tool", () => {
       request: {
         action: "post_join_offer",
         joinOffer: {
-          messageTemplate:
-            "React here to join. This shares {{share_scope}} with the group. Details: {{join_url}}.",
           projectionScopes: [{ projectionKind: "sleep-times.v0" }],
         },
+      },
+    });
+  });
+
+  it("passes the dynamic call id as the join-offer operation identity", async () => {
+    const groupRequest = vi.fn<GroupToolRequest>(async () => ({
+      action: "post_join_offer",
+      result: {
+        group: null,
+        status: "unavailable",
+        unavailableReason: "test",
+      },
+    }));
+    const request = readMurphDynamicToolRequest(groupToolCall({
+      action: "post_join_offer",
+      activation: "call-circle.enroll.v0",
+    }, { callId: "call_join_offer_stable" }));
+    if (!request || request.kind !== "group") {
+      throw new Error("Expected group request.");
+    }
+
+    await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext: createGroupHostedToolContext({ groupRequest }),
+      nextUsageOrdinal: () => 1,
+      progressDelivery: null,
+      request,
+    });
+
+    expect(groupRequest).toHaveBeenCalledWith({
+      action: "post_join_offer",
+      joinOffer: {
+        activation: "call-circle.enroll.v0",
+        operationId: "mailbox_group_turn_1",
       },
     });
   });
@@ -428,59 +451,24 @@ describe("murph.group dynamic tool", () => {
 
     expect(readMurphDynamicToolRequest(groupToolCall({
       action: "post_join_offer",
-      messageTemplate:
-        "React here to join. This shares {{share_scope}} with the group. Details: {{join_url}}.",
       intro: "Like this to join.",
     }))?.kind).toBe("invalid-group-arguments");
 
     expect(readMurphDynamicToolRequest(groupToolCall({
       action: "post_join_offer",
       displayName: "   ",
-      messageTemplate:
-        "React here to join. This shares {{share_scope}} with the group. Details: {{join_url}}.",
       projectionScopes: [{ projectionKind: "sleep-times.v0" }],
     }))?.kind).toBe("invalid-group-arguments");
 
     expect(readMurphDynamicToolRequest(groupToolCall({
       action: "post_join_offer",
       displayName: "a".repeat(121),
-      messageTemplate:
-        "React here to join. This shares {{share_scope}} with the group. Details: {{join_url}}.",
       projectionScopes: [{ projectionKind: "sleep-times.v0" }],
     }))?.kind).toBe("invalid-group-arguments");
 
     expect(readMurphDynamicToolRequest(groupToolCall({
       action: "post_join_offer",
-      messageTemplate:
-        "React here to join. This shares {{share_scope}} with the group. Details: {{join_url}}.",
       projectionScopes: [{ projectionKind: "all-health-data" }],
-    }))?.kind).toBe("invalid-group-arguments");
-
-    expect(readMurphDynamicToolRequest(groupToolCall({
-      action: "post_join_offer",
-      messageTemplate: "React here to join. Details: {{join_url}}.",
-      projectionScopes: [{ projectionKind: "sleep-times.v0" }],
-    }))?.kind).toBe("invalid-group-arguments");
-
-    expect(readMurphDynamicToolRequest(groupToolCall({
-      action: "post_join_offer",
-      messageTemplate:
-        "React to this message to join. This shares {{share_scope}} with the group.",
-      projectionScopes: [
-        { projectionKind: "group-email.v0" },
-        { projectionKind: "sleep-times.v0" },
-        { projectionKind: "activity-days.v0" },
-        { projectionKind: "workout-days.v0" },
-        { projectionKind: "resting-heart-rate-days.v0" },
-        { projectionKind: "hrv-days.v0" },
-      ],
-    }))?.kind).toBe("invalid-group-arguments");
-
-    expect(readMurphDynamicToolRequest(groupToolCall({
-      action: "post_join_offer",
-      messageTemplate:
-        "React to join. This shares {{share_scope}}. Details: {{join_url}} and {{join_url}}.",
-      projectionScopes: [{ projectionKind: "sleep-times.v0" }],
     }))?.kind).toBe("invalid-group-arguments");
   });
 
@@ -1350,12 +1338,14 @@ function createNewsletterHostedToolContext(input: {
 
 function createGroupHostedToolContext(input: {
   groupRequest?: GroupToolRequest;
+  mailboxItemIds?: readonly string[];
 } = {}): AssistantHostedToolContext {
   const context = {
     connectedApps: null,
     computerToolsAvailable: false,
     currentHostedDeliveryContext: () => null,
-    currentHostedMailboxItemIds: () => [],
+    currentHostedMailboxItemIds: () =>
+      input.mailboxItemIds ?? ["mailbox_group_turn_1", "mailbox_prior_turn"],
     currentPhoneCallToolRequestKeyScope: () => null,
     currentScheduledAutomationAuthority: () => null,
     familyPlanTool: null,

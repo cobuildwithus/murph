@@ -1,6 +1,6 @@
 # Hosted account data deletion and vault export
 
-Last verified: 2026-06-24
+Last verified: 2026-07-09
 
 ## Purpose
 
@@ -83,6 +83,11 @@ The Settings vault export does not include:
 | `prisma.hosted_account_group_membership` | Live delete | Metadata/counts | Deletes the member's Family memberships and memberships in groups they own. Export reports counts only. |
 | `prisma.hosted_account_group_invite` | Live delete | Metadata/counts | Deletes Family invitations sent, accepted, or owned through the member's Family group. Export omits invite codes and private target contact values. |
 | `prisma.hosted_account_group_billing_ref` | Local reference delete | Metadata/counts | Deletes local Family Stripe references for groups owned by the member after fail-closed Family subscription cancellation. |
+| `prisma.hosted_group` | Live delete | Metadata/counts | Deletes generic groups owned by the member or backed by the member's runtime. Export omits join codes and other members' private data. |
+| `prisma.hosted_group_member` | Live delete | Metadata/counts | Deletes the member's generic group memberships and memberships attached to a deleted group. Export reports role/status metadata only. |
+| `prisma.hosted_call_circle_participant` | Live delete | Metadata/counts | Deletes the member's Call Circle enrollment and enrollments attached to a deleted group before relation cascades run. |
+| `prisma.hosted_call_circle_match` | Live delete | Metadata/counts | Deletes matches involving the member or a deleted group after attached phone calls are removed and before relation cascades run. |
+| `prisma.hosted_phone_call` | Live delete | Metadata/counts | Deletes member-owned calls and Call Circle calls attached through either participant or a deleted group before their match relation is removed. |
 | `prisma.hosted_mailbox_item` | Live delete | Metadata/counts | Deletes mailbox envelopes, inline ciphertext refs, dedupe keys, and sequence data. Export includes envelope metadata and payload presence/byte counts while omitting dedupe keys and payload refs. |
 | `prisma.hosted_mailbox_payload` | Live delete | Not exported secret | Deletes encrypted mailbox payload ciphertext. Export reports payload presence and bytes while omitting ciphertext and arbitrary decoded payload JSON. |
 | `prisma.hosted_mailbox_lane_counter` | Live delete | Metadata/counts | Deletes per-lane counters so deleted users cannot resume old lanes. |
