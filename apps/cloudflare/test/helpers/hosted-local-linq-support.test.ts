@@ -16,7 +16,8 @@ describe("hosted local Linq provider stub", () => {
     const stub = await startHostedLocalLinqStub();
 
     try {
-      const response = await fetch(`${stub.runnerBaseUrl}/chats/chat_direct`);
+      expect(new URL(stub.runnerBaseUrl).hostname).toBe("host.docker.internal");
+      const response = await fetch(`${stub.baseUrl}/chats/chat_direct`);
 
       expect(response.status).toBe(200);
       await expect(response.json()).resolves.toEqual({
