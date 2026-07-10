@@ -71,7 +71,7 @@ describe("hosted retention cleanup", () => {
       inboxMediaRetentionRuntimeSignalsSent: 1,
       oldRuntimeLogsDeleted: 8,
       stalePhoneCallAnalysesTerminalized: 0,
-      stalePhoneCallProviderStartsFailed: 0,
+      staleActivePhoneCallsFailed: 0,
       staleWebSessionsDeleted: 9,
     });
 
@@ -179,18 +179,26 @@ describe("hosted retention cleanup", () => {
         endedAt: null,
         OR: [
           {
-            providerStartAttemptedAt: {
-              lt: new Date("2026-04-25T10:00:00.000Z"),
-            },
+            providerCallId: { not: null },
+            status: "calling",
           },
           {
-            providerStartAttemptedAt: null,
-            requestKey: { startsWith: "call-circle:" },
+            OR: [
+              {
+                providerStartAttemptedAt: {
+                  lt: new Date("2026-04-25T10:00:00.000Z"),
+                },
+              },
+              {
+                providerStartAttemptedAt: null,
+                requestKey: { startsWith: "call-circle:" },
+              },
+            ],
+            status: "starting",
           },
         ],
         provider: "retell",
         resultJson: { equals: expect.anything() },
-        status: "starting",
         updatedAt: {
           lt: new Date("2026-04-25T10:00:00.000Z"),
         },
@@ -370,7 +378,7 @@ describe("hosted retention cleanup", () => {
         inboxMediaRetentionRuntimeSignalsSent: 0,
         oldRuntimeLogsDeleted: 2,
         stalePhoneCallAnalysesTerminalized: 0,
-        stalePhoneCallProviderStartsFailed: 0,
+        staleActivePhoneCallsFailed: 0,
         staleWebSessionsDeleted: 3,
       });
       expect(executeRaw.mock.invocationCallOrder[0]).toBeLessThan(

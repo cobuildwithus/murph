@@ -113,15 +113,16 @@ interface RetellWebhookHandlingResult {
 const HOSTED_PHONE_CALL_RESULT_SUMMARY_MAX_LENGTH = 2_000;
 const HOSTED_PHONE_CALL_RESULT_FOLLOW_UP_MAX_LENGTH = 1_000;
 const HOSTED_PHONE_CALL_RESULT_TRUNCATION_MARKER = " [truncated]";
-export const HOSTED_PHONE_CALL_PROVIDER_START_SWEEP_LIMIT = 100;
-const HOSTED_PHONE_CALL_PROVIDER_START_STOP_CONCURRENCY = 10;
-export const HOSTED_PHONE_CALL_PROVIDER_START_WEBHOOK_GRACE_MS =
+const HOSTED_PHONE_CALL_RESULT_CAS_ATTEMPTS = 3;
+export const HOSTED_PHONE_CALL_ACTIVE_SWEEP_LIMIT = 100;
+const HOSTED_PHONE_CALL_ACTIVE_STOP_CONCURRENCY = 10;
+export const HOSTED_PHONE_CALL_ACTIVE_WEBHOOK_GRACE_MS =
   2 * 60 * 60 * 1_000;
 export const HOSTED_PHONE_CALL_ANALYSIS_WEBHOOK_GRACE_MS =
-  HOSTED_PHONE_CALL_PROVIDER_START_WEBHOOK_GRACE_MS;
-const HOSTED_PHONE_CALL_PROVIDER_START_TIMEOUT_RESULT: HostedPhoneCallResult = {
+  HOSTED_PHONE_CALL_ACTIVE_WEBHOOK_GRACE_MS;
+const HOSTED_PHONE_CALL_ACTIVE_TIMEOUT_RESULT: HostedPhoneCallResult = {
   outcome: "not_completed",
-  summary: "Murph could not confirm whether the phone call started, and no Retell result arrived.",
+  summary: "Retell did not return a final result for the phone call.",
 };
 const HOSTED_PHONE_CALL_ANALYSIS_TIMEOUT_RESULT: HostedPhoneCallResult = {
   outcome: "not_completed",
@@ -269,7 +270,7 @@ export async function handleRetellCallAnalyzed(input: {
       target.call.id,
     );
     let currentCall = target.call;
-    for (let attempt = 0; attempt < 3; attempt += 1) {
+    for (let attempt = 0; attempt < HOSTED_PHONE_CALL_RESULT_CAS_ATTEMPTS; attempt += 1) {
       const transferOutcome = mergeRetellTransferOutcome(
         currentCall.transferOutcome,
         receivedTransferOutcome,
@@ -315,7 +316,7 @@ export async function handleRetellCallAnalyzed(input: {
   });
 }
 
-export async function terminalizeStaleHostedPhoneCallProviderStarts(input: {
+export async function terminalizeStaleActiveHostedPhoneCalls(input: {
   limit?: number;
   now?: Date | string;
   prisma?: PrismaClient;
@@ -323,32 +324,40 @@ export async function terminalizeStaleHostedPhoneCallProviderStarts(input: {
   store?: HostedPhoneCallResultSweepStore;
 } = {}): Promise<{ failedPhoneCalls: number }> {
   const store = input.store
-    ?? resolveHostedPhoneCallProviderStartSweepStore(input.prisma);
+    ?? resolveHostedPhoneCallSweepStore(input.prisma);
   const now = normalizePhoneCallSweepDate(input.now ?? new Date());
   const cutoff = new Date(
-    now.getTime() - HOSTED_PHONE_CALL_PROVIDER_START_WEBHOOK_GRACE_MS,
+    now.getTime() - HOSTED_PHONE_CALL_ACTIVE_WEBHOOK_GRACE_MS,
   );
   const calls = await store.hostedPhoneCall.findMany({
     orderBy: [
       { updatedAt: "asc" },
       { id: "asc" },
     ],
-    take: input.limit ?? HOSTED_PHONE_CALL_PROVIDER_START_SWEEP_LIMIT,
+    take: input.limit ?? HOSTED_PHONE_CALL_ACTIVE_SWEEP_LIMIT,
     where: {
       analyzedAt: null,
       endedAt: null,
       OR: [
-        { providerStartAttemptedAt: { lt: cutoff } },
         {
-          providerStartAttemptedAt: null,
-          requestKey: {
-            startsWith: CALL_CIRCLE_PHONE_CALL_REQUEST_KEY_PREFIX,
-          },
+          providerCallId: { not: null },
+          status: "calling",
+        },
+        {
+          OR: [
+            { providerStartAttemptedAt: { lt: cutoff } },
+            {
+              providerStartAttemptedAt: null,
+              requestKey: {
+                startsWith: CALL_CIRCLE_PHONE_CALL_REQUEST_KEY_PREFIX,
+              },
+            },
+          ],
+          status: "starting",
         },
       ],
       provider: "retell",
       resultJson: { equals: Prisma.DbNull },
-      status: "starting",
       updatedAt: { lt: cutoff },
     },
   });
@@ -356,13 +365,12 @@ export async function terminalizeStaleHostedPhoneCallProviderStarts(input: {
   let failedPhoneCalls = 0;
   await runWithConcurrency(
     calls,
-    HOSTED_PHONE_CALL_PROVIDER_START_STOP_CONCURRENCY,
+    HOSTED_PHONE_CALL_ACTIVE_STOP_CONCURRENCY,
     async (call) => {
-      const authorityWhere = staleHostedPhoneCallProviderStartWhere({
+      const authorityWhere = staleActiveHostedPhoneCallWhere({
         call,
         cutoff,
       });
-      let finalizationWhere = authorityWhere;
       if (call.providerCallId) {
         const claimed = await store.$transaction((tx) =>
           tx.hostedPhoneCall.updateMany({
@@ -370,10 +378,6 @@ export async function terminalizeStaleHostedPhoneCallProviderStarts(input: {
             where: authorityWhere,
           }));
         if (claimed.count === 0) return;
-        finalizationWhere = {
-          ...authorityWhere,
-          updatedAt: now,
-        };
         try {
           await (input.stopProviderCall ?? stopRetellPhoneCall)(call.providerCallId);
         } catch {
@@ -390,22 +394,33 @@ export async function terminalizeStaleHostedPhoneCallProviderStarts(input: {
             prisma: tx,
           });
         }
-        const callCircleMatch = await tx.findCallCircleMatchByPhoneCallId(call.id);
-        const result = callCircleMatch
-          ? mapCallCircleTransferResult(call.transferOutcome)
-          : HOSTED_PHONE_CALL_PROVIDER_START_TIMEOUT_RESULT;
-        const finalized = await finalizeHostedPhoneCallResultTx({
-          callId: call.id,
-          result,
-          tx,
-          where: {
-            ...finalizationWhere,
-            ...(callCircleMatch
-              ? { transferOutcome: call.transferOutcome }
-              : {}),
-          },
+        let currentCall = await tx.hostedPhoneCall.findUniqueOrThrow({
+          where: { id: call.id },
         });
-        return finalized.finalized && result.outcome !== "completed";
+        for (
+          let attempt = 0;
+          attempt < HOSTED_PHONE_CALL_RESULT_CAS_ATTEMPTS;
+          attempt += 1
+        ) {
+          if (!isSameActiveHostedPhoneCall(currentCall, call)) return false;
+          const callCircleMatch = await tx.findCallCircleMatchByPhoneCallId(
+            currentCall.id,
+          );
+          const result = callCircleMatch
+            ? mapCallCircleTransferResult(currentCall.transferOutcome)
+            : HOSTED_PHONE_CALL_ACTIVE_TIMEOUT_RESULT;
+          const finalized = await finalizeHostedPhoneCallResultTx({
+            callId: currentCall.id,
+            result,
+            tx,
+            where: activeHostedPhoneCallSnapshotWhere(currentCall),
+          });
+          if (finalized.finalized || finalized.storedCall.resultJson) {
+            return finalized.finalized && result.outcome !== "completed";
+          }
+          currentCall = finalized.storedCall;
+        }
+        return false;
       });
       if (failed) {
         failedPhoneCalls += 1;
@@ -416,23 +431,43 @@ export async function terminalizeStaleHostedPhoneCallProviderStarts(input: {
   return { failedPhoneCalls };
 }
 
-function staleHostedPhoneCallProviderStartWhere(input: {
+function staleActiveHostedPhoneCallWhere(input: {
   call: HostedPhoneCall;
   cutoff: Date;
 }): Prisma.HostedPhoneCallWhereInput {
   return {
-    analyzedAt: null,
-    endedAt: null,
-    id: input.call.id,
-    provider: "retell",
-    providerCallId: input.call.providerCallId,
-    providerStartAttemptedAt: input.call.providerStartAttemptedAt === null
-      ? null
-      : { lt: input.cutoff },
-    resultJson: { equals: Prisma.DbNull },
-    status: "starting",
+    ...activeHostedPhoneCallSnapshotWhere(input.call),
     updatedAt: { lt: input.cutoff },
   };
+}
+
+function activeHostedPhoneCallSnapshotWhere(
+  call: HostedPhoneCall,
+): Prisma.HostedPhoneCallWhereInput {
+  return {
+    analyzedAt: null,
+    endedAt: null,
+    id: call.id,
+    provider: "retell",
+    providerCallId: call.providerCallId,
+    providerStartAttemptedAt: call.providerStartAttemptedAt,
+    resultJson: { equals: Prisma.DbNull },
+    status: call.status,
+    transferOutcome: call.transferOutcome,
+    updatedAt: call.updatedAt,
+  };
+}
+
+function isSameActiveHostedPhoneCall(
+  current: HostedPhoneCall,
+  claimed: HostedPhoneCall,
+): boolean {
+  return current.id === claimed.id
+    && current.providerCallId === claimed.providerCallId
+    && current.analyzedAt === null
+    && current.endedAt === null
+    && current.resultJson === null
+    && (current.status === "starting" || current.status === "calling");
 }
 
 export async function terminalizeStaleHostedPhoneCallAnalyses(input: {
@@ -442,7 +477,7 @@ export async function terminalizeStaleHostedPhoneCallAnalyses(input: {
   store?: HostedPhoneCallResultSweepStore;
 } = {}): Promise<{ terminalizedPhoneCalls: number }> {
   const store = input.store
-    ?? resolveHostedPhoneCallProviderStartSweepStore(input.prisma);
+    ?? resolveHostedPhoneCallSweepStore(input.prisma);
   const now = normalizePhoneCallSweepDate(input.now ?? new Date());
   const cutoff = new Date(
     now.getTime() - HOSTED_PHONE_CALL_ANALYSIS_WEBHOOK_GRACE_MS,
@@ -452,7 +487,7 @@ export async function terminalizeStaleHostedPhoneCallAnalyses(input: {
       { updatedAt: "asc" },
       { id: "asc" },
     ],
-    take: input.limit ?? HOSTED_PHONE_CALL_PROVIDER_START_SWEEP_LIMIT,
+    take: input.limit ?? HOSTED_PHONE_CALL_ACTIVE_SWEEP_LIMIT,
     where: {
       analyzedAt: null,
       endedAt: { lt: cutoff },
@@ -901,7 +936,7 @@ function resolveHostedPhoneCallWebhookStore(
   };
 }
 
-function resolveHostedPhoneCallProviderStartSweepStore(
+function resolveHostedPhoneCallSweepStore(
   prisma: PrismaClient | undefined,
 ): HostedPhoneCallResultSweepStore {
   const client = prisma ?? getPrisma();

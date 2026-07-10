@@ -931,6 +931,71 @@ describe("createHostedPhoneCall", () => {
     expect(store.currentCall().providerCallId).toBe("retell_other");
   });
 
+  it("stops a provider call when its association write fails", async () => {
+    const created = buildHostedPhoneCall();
+    const associationError = new Error("provider association unavailable");
+    const store = createPhoneCallStore({
+      beforeUpdateMany: (args) => {
+        if (args.data.status === "calling") {
+          throw associationError;
+        }
+      },
+      created,
+    });
+    const runtime = createPhoneCallRuntime({
+      providerCallId: "retell_started",
+    });
+
+    await expect(createHostedPhoneCall({
+      brief: VALID_BRIEF,
+      memberId: created.memberId,
+      prisma: store.prisma,
+      requestKey: created.requestKey,
+      runtime: runtime.runtime,
+      transferNumberResolver: createTransferNumberResolver(null),
+    })).rejects.toBe(associationError);
+
+    expect(runtime.stopCalls).toEqual(["retell_started"]);
+    expect(store.currentCall()).toMatchObject({
+      providerCallId: null,
+      providerStartAttemptedAt: expect.any(Date),
+      status: "starting",
+    });
+  });
+
+  it("retains a provider id when association and compensating stop both fail", async () => {
+    const created = buildHostedPhoneCall();
+    const associationError = new Error("provider association unavailable");
+    const store = createPhoneCallStore({
+      beforeUpdateMany: (args) => {
+        if (args.data.status === "calling") {
+          throw associationError;
+        }
+      },
+      created,
+    });
+    const runtime = createPhoneCallRuntime({
+      providerCallId: "retell_cleanup",
+      stopError: new Error("Retell stop unavailable"),
+    });
+
+    await expect(createHostedPhoneCall({
+      brief: VALID_BRIEF,
+      memberId: created.memberId,
+      prisma: store.prisma,
+      requestKey: created.requestKey,
+      runtime: runtime.runtime,
+      transferNumberResolver: createTransferNumberResolver(null),
+    })).rejects.toBe(associationError);
+
+    expect(runtime.stopCalls).toEqual(["retell_cleanup"]);
+    expect(store.currentCall()).toMatchObject({
+      providerCallId: "retell_cleanup",
+      providerStartAttemptedAt: expect.any(Date),
+      status: "starting",
+    });
+  });
+
   it("does not overwrite webhook-final state when start failure loses the race", async () => {
     const created = buildHostedPhoneCall();
     const store = createPhoneCallStore({ created });
@@ -1222,6 +1287,7 @@ function createPhoneCallRuntime(input: {
   error?: Error;
   onStart?: (call: Parameters<PhoneCallRuntime["start"]>[0]) => Promise<void> | void;
   providerCallId: string;
+  stopError?: Error;
   validateError?: Error;
 }) {
   const validateCalls: Array<Parameters<NonNullable<PhoneCallRuntime["validateStart"]>>[0]> = [];
@@ -1244,6 +1310,9 @@ function createPhoneCallRuntime(input: {
     },
     stop: async (providerCallId) => {
       stopCalls.push(providerCallId);
+      if (input.stopError) {
+        throw input.stopError;
+      }
     },
   };
 

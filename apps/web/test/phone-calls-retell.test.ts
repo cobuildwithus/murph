@@ -22,13 +22,13 @@ import { consultPhoneCall } from "@/src/lib/phone-calls/consult";
 import {
   buildPhoneCallResultNotificationInstructions,
   HOSTED_PHONE_CALL_ANALYSIS_WEBHOOK_GRACE_MS,
-  HOSTED_PHONE_CALL_PROVIDER_START_WEBHOOK_GRACE_MS,
+  HOSTED_PHONE_CALL_ACTIVE_WEBHOOK_GRACE_MS,
   handleRetellCallAnalyzed,
   handleRetellCallEnded,
   handleRetellTransferOutcome,
   mapRetellCallAnalysis,
   terminalizeStaleHostedPhoneCallAnalyses,
-  terminalizeStaleHostedPhoneCallProviderStarts,
+  terminalizeStaleActiveHostedPhoneCalls,
 } from "@/src/lib/phone-calls/result";
 import { verifyRetellSignature } from "@/src/lib/phone-calls/retell-signature";
 
@@ -41,9 +41,9 @@ type RetellWebhookTx = Parameters<RetellWebhookStore["$transaction"]>[0] extends
 type RetellWebhookFindUniqueInput = Parameters<RetellWebhookTx["hostedPhoneCall"]["findUnique"]>[0];
 type RetellWebhookFindUniqueOrThrowInput = Parameters<RetellWebhookTx["hostedPhoneCall"]["findUniqueOrThrow"]>[0];
 type RetellWebhookUpdateManyInput = Parameters<RetellWebhookTx["hostedPhoneCall"]["updateMany"]>[0];
-type ProviderStartSweepStore =
-  NonNullable<NonNullable<Parameters<typeof terminalizeStaleHostedPhoneCallProviderStarts>[0]>["store"]>;
-type ProviderStartSweepTx = Parameters<ProviderStartSweepStore["$transaction"]>[0] extends (
+type ActiveCallSweepStore =
+  NonNullable<NonNullable<Parameters<typeof terminalizeStaleActiveHostedPhoneCalls>[0]>["store"]>;
+type ActiveCallSweepTx = Parameters<ActiveCallSweepStore["$transaction"]>[0] extends (
   tx: infer Tx,
 ) => Promise<unknown>
   ? Tx
@@ -929,7 +929,7 @@ describe("Retell phone-call result handling", () => {
     )).toEqual(["not_completed", "completed"]);
   });
 
-  it("upgrades a Call Circle provider-start timeout when bridge evidence arrives later", async () => {
+  it("upgrades a Call Circle active-call timeout when bridge evidence arrives later", async () => {
     const store = createWebhookStore({
       call: buildHostedPhoneCall({
         id: "hpc_123",
@@ -937,7 +937,7 @@ describe("Retell phone-call result handling", () => {
         providerStartAttemptedAt: new Date("2026-06-25T10:00:00.000Z"),
         resultJson: {
           outcome: "not_completed",
-          summary: "Murph could not confirm whether the phone call started, and no Retell result arrived.",
+          summary: "Retell did not return a final result for the phone call.",
         },
         status: "failed",
       }),
@@ -1601,11 +1601,11 @@ describe("Retell phone-call result handling", () => {
   });
 
   it.each([null, "retell_cleanup"])(
-    "fails stale provider-start attempts and returns the result notification signal (provider id %s)",
+    "fails stale active calls and returns the result notification signal (provider id %s)",
     async (providerCallId) => {
       const now = new Date("2026-06-25T12:00:00.000Z");
       const staleAt = new Date(
-        now.getTime() - HOSTED_PHONE_CALL_PROVIDER_START_WEBHOOK_GRACE_MS - 1_000,
+        now.getTime() - HOSTED_PHONE_CALL_ACTIVE_WEBHOOK_GRACE_MS - 1_000,
       );
       let currentCall: HostedPhoneCall | null = buildHostedPhoneCall({
         id: "hpc_stale",
@@ -1613,11 +1613,11 @@ describe("Retell phone-call result handling", () => {
         providerStartAttemptedAt: staleAt,
         updatedAt: staleAt,
       });
-      const findManyCalls: Array<Parameters<ProviderStartSweepStore["hostedPhoneCall"]["findMany"]>[0]> = [];
-      const updateManyCalls: Array<Parameters<ProviderStartSweepTx["hostedPhoneCall"]["updateMany"]>[0]> = [];
+      const findManyCalls: Array<Parameters<ActiveCallSweepStore["hostedPhoneCall"]["findMany"]>[0]> = [];
+      const updateManyCalls: Array<Parameters<ActiveCallSweepTx["hostedPhoneCall"]["updateMany"]>[0]> = [];
       const appendResultNotificationCalls: HostedPhoneCall[] = [];
       const stopProviderCall = vi.fn(async () => {});
-      const tx: ProviderStartSweepTx = {
+      const tx: ActiveCallSweepTx = {
         appendResultNotification: async (call) => {
           appendResultNotificationCalls.push(call);
           return {
@@ -1638,9 +1638,10 @@ describe("Retell phone-call result handling", () => {
           },
           updateMany: async (args) => {
             updateManyCalls.push(args);
-            const providerStartCutoff = readLessThanDateFilter(
-              args.where.providerStartAttemptedAt,
-            );
+            const expectedProviderStartAttemptedAt =
+              args.where.providerStartAttemptedAt instanceof Date
+                ? args.where.providerStartAttemptedAt
+                : null;
             const updatedAtCutoff = readLessThanDateFilter(args.where.updatedAt);
             const updatedAtEquals = args.where.updatedAt instanceof Date
               ? args.where.updatedAt
@@ -1654,8 +1655,9 @@ describe("Retell phone-call result handling", () => {
               || currentCall.analyzedAt !== args.where.analyzedAt
               || currentCall.endedAt !== args.where.endedAt
               || !currentCall.providerStartAttemptedAt
-              || !providerStartCutoff
-              || currentCall.providerStartAttemptedAt >= providerStartCutoff
+              || !expectedProviderStartAttemptedAt
+              || currentCall.providerStartAttemptedAt.getTime()
+                !== expectedProviderStartAttemptedAt.getTime()
               || (updatedAtCutoff !== null && currentCall.updatedAt >= updatedAtCutoff)
               || (updatedAtEquals !== null
                 && currentCall.updatedAt.getTime() !== updatedAtEquals.getTime())
@@ -1674,7 +1676,7 @@ describe("Retell phone-call result handling", () => {
           },
         },
       };
-      const store: ProviderStartSweepStore = {
+      const store: ActiveCallSweepStore = {
         $transaction: async (callback) => callback(tx),
         hostedPhoneCall: {
           findMany: async (args) => {
@@ -1684,7 +1686,7 @@ describe("Retell phone-call result handling", () => {
         },
       };
 
-      await expect(terminalizeStaleHostedPhoneCallProviderStarts({
+      await expect(terminalizeStaleActiveHostedPhoneCalls({
         now,
         stopProviderCall,
         store,
@@ -1693,7 +1695,7 @@ describe("Retell phone-call result handling", () => {
       });
 
       const cutoff = new Date(
-        now.getTime() - HOSTED_PHONE_CALL_PROVIDER_START_WEBHOOK_GRACE_MS,
+        now.getTime() - HOSTED_PHONE_CALL_ACTIVE_WEBHOOK_GRACE_MS,
       );
       expect(findManyCalls).toEqual([{
         orderBy: [
@@ -1705,15 +1707,23 @@ describe("Retell phone-call result handling", () => {
           analyzedAt: null,
           endedAt: null,
           OR: [
-            { providerStartAttemptedAt: { lt: cutoff } },
             {
-              providerStartAttemptedAt: null,
-              requestKey: { startsWith: "call-circle:" },
+              providerCallId: { not: null },
+              status: "calling",
+            },
+            {
+              OR: [
+                { providerStartAttemptedAt: { lt: cutoff } },
+                {
+                  providerStartAttemptedAt: null,
+                  requestKey: { startsWith: "call-circle:" },
+                },
+              ],
+              status: "starting",
             },
           ],
           provider: "retell",
           resultJson: { equals: Prisma.DbNull },
-          status: "starting",
           updatedAt: { lt: cutoff },
         },
       }]);
@@ -1728,15 +1738,17 @@ describe("Retell phone-call result handling", () => {
         data: {
           resultJson: {
             outcome: "not_completed",
-            summary: "Murph could not confirm whether the phone call started, and no Retell result arrived.",
+            summary: "Retell did not return a final result for the phone call.",
           },
           status: "failed",
         },
         where: {
           id: "hpc_stale",
-          providerStartAttemptedAt: { lt: cutoff },
+          providerStartAttemptedAt: staleAt,
           resultJson: { equals: Prisma.DbNull },
-          updatedAt: providerCallId ? now : { lt: cutoff },
+          status: "starting",
+          transferOutcome: null,
+          updatedAt: providerCallId ? now : staleAt,
         },
       });
       expect(currentCall).toMatchObject({
@@ -1762,12 +1774,12 @@ describe("Retell phone-call result handling", () => {
     const now = new Date("2026-06-25T12:00:00.000Z");
     const call = buildHostedPhoneCall({
       providerCallId: "retell_cleanup",
-      providerStartAttemptedAt: staleAt,
-      status: "starting",
+      providerStartAttemptedAt: null,
+      status: "calling",
       updatedAt: staleAt,
     });
     const touchStaleCall = vi.fn(async () => ({ count: 1 }));
-    const tx: ProviderStartSweepTx = {
+    const tx: ActiveCallSweepTx = {
       appendResultNotification: async () => null,
       findCallCircleMatchByPhoneCallId: async () => null,
       hostedPhoneCall: {
@@ -1777,7 +1789,7 @@ describe("Retell phone-call result handling", () => {
       },
     };
     const transaction = vi.fn(async (
-      callback: Parameters<ProviderStartSweepStore["$transaction"]>[0],
+      callback: Parameters<ActiveCallSweepStore["$transaction"]>[0],
     ) => callback(tx));
     const stopProviderCall = vi.fn(async () => {
       throw new Error("Retell unavailable");
@@ -1789,7 +1801,7 @@ describe("Retell phone-call result handling", () => {
       },
     };
 
-    await expect(terminalizeStaleHostedPhoneCallProviderStarts({
+    await expect(terminalizeStaleActiveHostedPhoneCalls({
       now,
       stopProviderCall,
       store: store as never,
@@ -1805,16 +1817,13 @@ describe("Retell phone-call result handling", () => {
         id: "hpc_test",
         provider: "retell",
         providerCallId: "retell_cleanup",
-        providerStartAttemptedAt: {
-          lt: new Date(
-            now.getTime() - HOSTED_PHONE_CALL_PROVIDER_START_WEBHOOK_GRACE_MS,
-          ),
-        },
+        providerStartAttemptedAt: null,
         resultJson: { equals: Prisma.DbNull },
-        status: "starting",
+        status: "calling",
+        transferOutcome: null,
         updatedAt: {
           lt: new Date(
-            now.getTime() - HOSTED_PHONE_CALL_PROVIDER_START_WEBHOOK_GRACE_MS,
+            now.getTime() - HOSTED_PHONE_CALL_ACTIVE_WEBHOOK_GRACE_MS,
           ),
         },
       },
@@ -1835,7 +1844,7 @@ describe("Retell phone-call result handling", () => {
       claimAvailable = false;
       return { count: 1 };
     });
-    const tx: ProviderStartSweepTx = {
+    const tx: ActiveCallSweepTx = {
       appendResultNotification: async () => null,
       findCallCircleMatchByPhoneCallId: async () => null,
       hostedPhoneCall: {
@@ -1844,7 +1853,7 @@ describe("Retell phone-call result handling", () => {
         updateMany: claim,
       },
     };
-    const store: ProviderStartSweepStore = {
+    const store: ActiveCallSweepStore = {
       $transaction: async (callback) => callback(tx),
       hostedPhoneCall: {
         findMany: async () => [call],
@@ -1869,10 +1878,10 @@ describe("Retell phone-call result handling", () => {
       store,
     };
 
-    const firstSweep = terminalizeStaleHostedPhoneCallProviderStarts(options);
+    const firstSweep = terminalizeStaleActiveHostedPhoneCalls(options);
     await stopStarted;
     await expect(
-      terminalizeStaleHostedPhoneCallProviderStarts(options),
+      terminalizeStaleActiveHostedPhoneCalls(options),
     ).resolves.toEqual({ failedPhoneCalls: 0 });
 
     expect(stopProviderCall).toHaveBeenCalledOnce();
@@ -1890,7 +1899,7 @@ describe("Retell phone-call result handling", () => {
       status: "starting",
       updatedAt: staleAt,
     }));
-    const tx: ProviderStartSweepTx = {
+    const tx: ActiveCallSweepTx = {
       appendResultNotification: async () => null,
       findCallCircleMatchByPhoneCallId: async () => null,
       hostedPhoneCall: {
@@ -1899,7 +1908,7 @@ describe("Retell phone-call result handling", () => {
         updateMany: async () => ({ count: 1 }),
       },
     };
-    const store: ProviderStartSweepStore = {
+    const store: ActiveCallSweepStore = {
       $transaction: async (callback) => callback(tx),
       hostedPhoneCall: {
         findMany: async () => calls,
@@ -1926,7 +1935,7 @@ describe("Retell phone-call result handling", () => {
       throw new Error("Retell unavailable");
     });
 
-    const sweep = terminalizeStaleHostedPhoneCallProviderStarts({
+    const sweep = terminalizeStaleActiveHostedPhoneCalls({
       now: new Date("2026-06-25T12:00:00.000Z"),
       stopProviderCall,
       store,
@@ -1944,7 +1953,7 @@ describe("Retell phone-call result handling", () => {
   it("fails a stale unattempted Call Circle reservation without a generic result notice", async () => {
     const now = new Date("2026-06-25T12:00:00.000Z");
     const staleAt = new Date(
-      now.getTime() - HOSTED_PHONE_CALL_PROVIDER_START_WEBHOOK_GRACE_MS - 1_000,
+      now.getTime() - HOSTED_PHONE_CALL_ACTIVE_WEBHOOK_GRACE_MS - 1_000,
     );
     let currentCall = buildHostedPhoneCall({
       id: "hpc_unattempted_call_circle",
@@ -1954,7 +1963,7 @@ describe("Retell phone-call result handling", () => {
       updatedAt: staleAt,
     });
     const appendResultNotification = vi.fn(async () => null);
-    const tx: ProviderStartSweepTx = {
+    const tx: ActiveCallSweepTx = {
       appendResultNotification,
       findCallCircleMatchByPhoneCallId: async () => null,
       hostedPhoneCall: {
@@ -1978,14 +1987,14 @@ describe("Retell phone-call result handling", () => {
         },
       },
     };
-    const store: ProviderStartSweepStore = {
+    const store: ActiveCallSweepStore = {
       $transaction: async (callback) => callback(tx),
       hostedPhoneCall: {
         findMany: async () => [currentCall],
       },
     };
 
-    await expect(terminalizeStaleHostedPhoneCallProviderStarts({
+    await expect(terminalizeStaleActiveHostedPhoneCalls({
       now,
       store,
     })).resolves.toEqual({ failedPhoneCalls: 1 });
@@ -1997,36 +2006,132 @@ describe("Retell phone-call result handling", () => {
     expect(appendResultNotification).not.toHaveBeenCalled();
   });
 
-  it("preserves a bridged Call Circle outcome when provider-start cleanup wins", async () => {
+  it.each([
+    [null, "not_completed", "failed", 1],
+    ["cancelled", "not_completed", "failed", 1],
+    ["bridged", "completed", "completed", 0],
+  ] as const)(
+    "terminalizes a stale active Call Circle call once from transfer outcome %s",
+    async (transferOutcome, expectedOutcome, expectedStatus, failedPhoneCalls) => {
+      const now = new Date("2026-06-25T12:00:00.000Z");
+      const staleAt = new Date(
+        now.getTime() - HOSTED_PHONE_CALL_ACTIVE_WEBHOOK_GRACE_MS - 1_000,
+      );
+      const sweep = createAnalysisSweepStore({
+        call: buildHostedPhoneCall({
+          id: "hpc_stale_active_call_circle",
+          providerCallId: "retell_stale_active_call_circle",
+          providerStartAttemptedAt: staleAt,
+          status: "calling",
+          transferOutcome,
+          updatedAt: staleAt,
+        }),
+        matchId: "hccm_stale_active_call_circle",
+      });
+      const stopProviderCall = vi.fn(async () => {});
+
+      await expect(terminalizeStaleActiveHostedPhoneCalls({
+        now,
+        stopProviderCall,
+        store: sweep.store,
+      })).resolves.toEqual({ failedPhoneCalls });
+      await expect(terminalizeStaleActiveHostedPhoneCalls({
+        now,
+        stopProviderCall,
+        store: sweep.store,
+      })).resolves.toEqual({ failedPhoneCalls: 0 });
+
+      expect(sweep.currentCall()).toMatchObject({
+        resultJson: { outcome: expectedOutcome },
+        status: expectedStatus,
+        transferOutcome,
+      });
+      expect(stopProviderCall).toHaveBeenCalledOnce();
+      expect(sweep.appendResultNotificationCalls).toHaveLength(1);
+    },
+  );
+
+  it.each([null, "cancelled"] as const)(
+    "uses a bridge callback during stale-call cleanup from transfer outcome %s",
+    async (transferOutcome) => {
+      const now = new Date("2026-06-25T12:00:00.000Z");
+      const staleAt = new Date(
+        now.getTime() - HOSTED_PHONE_CALL_ACTIVE_WEBHOOK_GRACE_MS - 1_000,
+      );
+      const sweep = createAnalysisSweepStore({
+        call: buildHostedPhoneCall({
+          id: "hpc_bridge_during_cleanup",
+          providerCallId: "retell_bridge_during_cleanup",
+          providerStartAttemptedAt: staleAt,
+          status: "calling",
+          transferOutcome,
+          updatedAt: staleAt,
+        }),
+        matchId: "hccm_bridge_during_cleanup",
+      });
+      const stopProviderCall = vi.fn(async () => {
+        await handleRetellTransferOutcome({
+          call: { call_id: "retell_bridge_during_cleanup" },
+          event: "transfer_bridged",
+          prisma: sweep.store,
+        });
+      });
+
+      await expect(terminalizeStaleActiveHostedPhoneCalls({
+        now,
+        stopProviderCall,
+        store: sweep.store,
+      })).resolves.toEqual({ failedPhoneCalls: 0 });
+
+      expect(sweep.currentCall()).toMatchObject({
+        resultJson: { outcome: "completed" },
+        status: "completed",
+        transferOutcome: "bridged",
+      });
+      expect(stopProviderCall).toHaveBeenCalledOnce();
+      expect(sweep.appendResultNotificationCalls).toHaveLength(1);
+    },
+  );
+
+  it("upgrades a recovered stale Call Circle call from a late bridge callback", async () => {
     const now = new Date("2026-06-25T12:00:00.000Z");
     const staleAt = new Date(
-      now.getTime() - HOSTED_PHONE_CALL_PROVIDER_START_WEBHOOK_GRACE_MS - 1_000,
+      now.getTime() - HOSTED_PHONE_CALL_ACTIVE_WEBHOOK_GRACE_MS - 1_000,
     );
     const sweep = createAnalysisSweepStore({
       call: buildHostedPhoneCall({
-        id: "hpc_stale_bridged_start",
-        providerCallId: "retell_stale_bridged_start",
+        id: "hpc_stale_late_bridge",
+        providerCallId: "retell_stale_late_bridge",
         providerStartAttemptedAt: staleAt,
-        transferOutcome: "bridged",
+        status: "calling",
+        transferOutcome: "cancelled",
         updatedAt: staleAt,
       }),
-      matchId: "hccm_stale_bridged_start",
+      matchId: "hccm_stale_late_bridge",
     });
 
-    await expect(terminalizeStaleHostedPhoneCallProviderStarts({
+    await terminalizeStaleActiveHostedPhoneCalls({
       now,
       stopProviderCall: vi.fn(async () => {}),
       store: sweep.store,
-    })).resolves.toEqual({ failedPhoneCalls: 0 });
+    });
+    await handleRetellTransferOutcome({
+      call: { call_id: "retell_stale_late_bridge" },
+      event: "transfer_bridged",
+      prisma: sweep.store,
+    });
+    await handleRetellTransferOutcome({
+      call: { call_id: "retell_stale_late_bridge" },
+      event: "transfer_cancelled",
+      prisma: sweep.store,
+    });
 
     expect(sweep.currentCall()).toMatchObject({
-      resultJson: {
-        outcome: "completed",
-        summary: "Retell confirmed that the Call Circle transfer connected.",
-      },
+      resultJson: { outcome: "completed" },
       status: "completed",
       transferOutcome: "bridged",
     });
+    expect(sweep.appendResultNotificationCalls).toHaveLength(2);
   });
 
   it("terminalizes stale Call Circle analysis from the stored bridge fact", async () => {
@@ -2350,14 +2455,18 @@ function createAnalysisSweepStore(input: {
   matchId: string | null;
 }) {
   let currentCall: HostedPhoneCall = input.call;
+  const appendResultNotificationCalls: HostedPhoneCall[] = [];
   const findManyCalls: Array<Parameters<AnalysisSweepStore["hostedPhoneCall"]["findMany"]>[0]> = [];
-  const tx: ProviderStartSweepTx = {
-    appendResultNotification: async (call) => ({
-      notificationSignals: [{
-        mailboxItemId: `mailbox_${call.id}`,
-        memberId: call.memberId,
-      }],
-    }),
+  const tx: ActiveCallSweepTx = {
+    appendResultNotification: async (call) => {
+      appendResultNotificationCalls.push(call);
+      return {
+        notificationSignals: [{
+          mailboxItemId: `mailbox_${call.id}`,
+          memberId: call.memberId,
+        }],
+      };
+    },
     findCallCircleMatchByPhoneCallId: async (phoneCallId) =>
       input.matchId && currentCall.id === phoneCallId
         ? { id: input.matchId }
@@ -2388,6 +2497,7 @@ function createAnalysisSweepStore(input: {
     },
   };
   return {
+    appendResultNotificationCalls,
     currentCall: () => currentCall,
     findManyCalls,
     store,

@@ -316,24 +316,42 @@ async function startHostedPhoneCallReservation(input: {
     throw error;
   }
 
-  const updated = await input.prisma.hostedPhoneCall.updateMany({
-    data: {
-      providerCallId: started.providerCallId,
-      status: "calling",
-    },
-    where: {
-      analyzedAt: null,
-      id: call.id,
-      provider: "retell",
-      providerCallId: null,
-      status: "starting",
-    },
-  });
-
-  if (updated.count === 0) {
-    const current = await input.prisma.hostedPhoneCall.findUniqueOrThrow({
-      where: { id: call.id },
+  let current: HostedPhoneCall | null = null;
+  try {
+    const updated = await input.prisma.hostedPhoneCall.updateMany({
+      data: {
+        providerCallId: started.providerCallId,
+        status: "calling",
+      },
+      where: {
+        analyzedAt: null,
+        id: call.id,
+        provider: "retell",
+        providerCallId: null,
+        status: "starting",
+      },
     });
+
+    if (updated.count === 0) {
+      current = await input.prisma.hostedPhoneCall.findUniqueOrThrow({
+        where: { id: call.id },
+      });
+    }
+  } catch (error) {
+    try {
+      await input.runtime.stop(started.providerCallId);
+    } catch {
+      await retainHostedPhoneCallProviderIdForCleanup({
+        call,
+        prisma: input.prisma,
+        providerCallId: started.providerCallId,
+        runtime: input.runtime,
+      });
+    }
+    throw error;
+  }
+
+  if (current) {
     if (current.providerCallId !== started.providerCallId) {
       await input.runtime.stop(started.providerCallId);
     }

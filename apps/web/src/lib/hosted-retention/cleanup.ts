@@ -10,8 +10,8 @@ import {
   signalHostedMailboxAppendRuntime,
 } from "../hosted-orchestration/signal-runtime";
 import {
+  terminalizeStaleActiveHostedPhoneCalls,
   terminalizeStaleHostedPhoneCallAnalyses,
-  terminalizeStaleHostedPhoneCallProviderStarts,
 } from "../phone-calls/result";
 
 const DAY_MS = 86_400_000;
@@ -44,7 +44,7 @@ export interface HostedRetentionCleanupResult {
   inboxMediaRetentionRuntimeSignalsSent: number;
   oldRuntimeLogsDeleted: number;
   stalePhoneCallAnalysesTerminalized: number;
-  stalePhoneCallProviderStartsFailed: number;
+  staleActivePhoneCallsFailed: number;
   staleWebSessionsDeleted: number;
 }
 
@@ -72,7 +72,7 @@ export async function runHostedRetentionCleanup(input: {
     now: () => now,
     store: new PrismaComputerUseStore(prisma),
   }).cleanupExpiredRuns({ now }).then((result) => result.expiredRuns);
-  const stalePhoneCallStarts = await terminalizeStaleHostedPhoneCallProviderStarts({
+  const staleActivePhoneCalls = await terminalizeStaleActiveHostedPhoneCalls({
     now,
     prisma,
   });
@@ -102,7 +102,7 @@ export async function runHostedRetentionCleanup(input: {
     oldRuntimeLogsDeleted,
     stalePhoneCallAnalysesTerminalized:
       stalePhoneCallAnalyses.terminalizedPhoneCalls,
-    stalePhoneCallProviderStartsFailed: stalePhoneCallStarts.failedPhoneCalls,
+    staleActivePhoneCallsFailed: staleActivePhoneCalls.failedPhoneCalls,
     staleWebSessionsDeleted,
   };
 }
