@@ -201,6 +201,16 @@ export async function startHostedLocalLinqStub(input: {
       return;
     }
 
+    if (request.method === "GET" && request.url && /^\/chats\/[^/]+$/u.test(request.url)) {
+      const chatId = decodeURIComponent(request.url.split("/")[2] ?? "unknown");
+      writeJsonResponse(response, 200, {
+        handles: [],
+        id: chatId,
+        is_group: false,
+      });
+      return;
+    }
+
     if (
       request.method === "POST"
       && request.url

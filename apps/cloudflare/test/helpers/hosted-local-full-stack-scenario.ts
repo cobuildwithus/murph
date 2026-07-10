@@ -310,6 +310,7 @@ export async function startHostedLocalFullStackScenario(input: {
       statusPath: (userId: string) => `/internal/users/${encodeURIComponent(userId)}/status`,
       streamLogs: input.streamLogs,
       testControls,
+      webProcessEnvOverrides: buildHostedLocalFullStackWebProcessEnvOverrides(runtimeEnv),
     });
     preparedRunnerBundleCacheKeys.add(runnerBundleCacheKey);
     const scenarioHarness = harness;
@@ -501,6 +502,34 @@ export async function startHostedLocalFullStackScenario(input: {
     await localDatabase.cleanup().catch(() => {});
     throw error;
   }
+}
+
+export function buildHostedLocalFullStackWebProcessEnvOverrides(
+  source: Readonly<NodeJS.ProcessEnv>,
+): NodeJS.ProcessEnv {
+  const configuredLinqBaseUrl = source.LINQ_API_BASE_URL?.trim();
+  if (!configuredLinqBaseUrl) {
+    return {};
+  }
+
+  let linqBaseUrl: URL;
+  try {
+    linqBaseUrl = new URL(configuredLinqBaseUrl);
+  } catch {
+    return {};
+  }
+
+  // The Linq E2E stub listens on one host port. Runner containers reach that
+  // port through Docker's host alias, while the host web process must use
+  // loopback on Linux. Keep the runner URL authoritative everywhere else.
+  if (linqBaseUrl.protocol !== "http:" || linqBaseUrl.hostname !== "host.docker.internal") {
+    return {};
+  }
+
+  linqBaseUrl.hostname = "127.0.0.1";
+  return {
+    LINQ_API_BASE_URL: linqBaseUrl.toString().replace(/\/$/u, ""),
+  };
 }
 
 function resolveHostedLocalScenarioTestControls(input: {

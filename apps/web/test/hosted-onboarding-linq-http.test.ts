@@ -1,10 +1,16 @@
+import { createServer, type Server } from "node:http";
+
+import type { Chat } from "@linqapp/sdk/resources/chats";
 import { afterEach, beforeEach, describe as baseDescribe, expect, it, vi } from "vitest";
 
+const DEFAULT_LINQ_API_BASE_URL = "https://linq.example.test/api/partner/v3";
+const linqRuntimeConfig = vi.hoisted(() => ({
+  apiBaseUrl: "https://linq.example.test/api/partner/v3",
+  apiToken: "linq-token",
+}));
+
 vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
-  requireHostedOnboardingLinqConfig: () => ({
-    apiBaseUrl: "https://linq.example.test/api/partner/v3",
-    apiToken: "linq-token",
-  }),
+  requireHostedOnboardingLinqConfig: () => linqRuntimeConfig,
 }));
 
 import {
@@ -14,9 +20,16 @@ import {
   updateHostedLinqChatAvatar,
   updateHostedLinqChatDisplayName,
 } from "@/src/lib/hosted-onboarding/linq";
+import {
+  getHostedLinqChatSummary,
+} from "@/src/lib/hosted-onboarding/linq-client";
 
 const originalFetch = globalThis.fetch;
 const describe = baseDescribe.sequential;
+
+beforeEach(() => {
+  linqRuntimeConfig.apiBaseUrl = DEFAULT_LINQ_API_BASE_URL;
+});
 
 function createJsonResponse(body: unknown, status: number): Response {
   return new Response(JSON.stringify(body), {
@@ -48,6 +61,202 @@ function readJsonRequestBody(init: RequestInit | undefined): unknown {
 
   return JSON.parse(body);
 }
+
+function createCanonicalLinqChat(isGroup: boolean): Chat {
+  return {
+    created_at: "2026-07-10T00:00:00.000Z",
+    display_name: null,
+    handles: [
+      {
+        handle: "+15550000000",
+        id: "handle_me",
+        is_me: true,
+        joined_at: "2026-07-10T00:00:00.000Z",
+        service: "iMessage",
+        status: "active",
+      },
+    ],
+    health_status: {
+      doc_url: "https://docs.linqapp.com/guides/chats/chat-health",
+      status: "HEALTHY",
+      updated_at: "2026-07-10T00:00:00.000Z",
+    },
+    id: "chat_123",
+    is_archived: false,
+    is_group: isGroup,
+    service: "iMessage",
+    updated_at: "2026-07-10T00:00:00.000Z",
+  };
+}
+
+async function listenOnLoopback(server: Server): Promise<string> {
+  await new Promise<void>((resolve) => {
+    server.listen(0, "127.0.0.1", resolve);
+  });
+  const address = server.address();
+  if (!address || typeof address === "string") {
+    throw new Error("Expected a loopback TCP server address.");
+  }
+  return `http://127.0.0.1:${address.port}/api/partner/v3`;
+}
+
+async function closeTestServer(server: Server): Promise<void> {
+  server.closeAllConnections();
+  await new Promise<void>((resolve, reject) => {
+    server.close((error) => {
+      if (error) {
+        reject(error);
+        return;
+      }
+      resolve();
+    });
+  });
+}
+
+describe("getHostedLinqChatSummary", () => {
+  afterEach(() => {
+    if (originalFetch) {
+      vi.stubGlobal("fetch", originalFetch);
+      return;
+    }
+
+    Reflect.deleteProperty(globalThis, "fetch");
+  });
+
+  it("reads top-level canonical group directness from the chat endpoint", async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => {
+      void _input;
+      void _init;
+      return createJsonResponse(createCanonicalLinqChat(true), 200);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(getHostedLinqChatSummary({
+      chatId: "chat_123",
+      timeoutMs: 1_500,
+    })).resolves.toEqual({
+      handles: [
+        {
+          handle: "+15550000000",
+          isMe: true,
+          status: "active",
+        },
+      ],
+      isGroup: true,
+    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      new URL("chats/chat_123", "https://linq.example.test/api/partner/v3/"),
+      expect.objectContaining({
+        method: "GET",
+        signal: expect.any(AbortSignal),
+      }),
+    );
+  });
+
+  it("reads top-level canonical direct-chat directness from the chat endpoint", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () =>
+      createJsonResponse(createCanonicalLinqChat(false), 200)
+    ));
+
+    await expect(getHostedLinqChatSummary({
+      chatId: "chat_123",
+      timeoutMs: 1_500,
+    })).resolves.toMatchObject({
+      isGroup: false,
+    });
+  });
+
+  it.each([
+    {
+      label: "nested webhook-style truth",
+      payload: {
+        chat: createCanonicalLinqChat(true),
+      },
+    },
+    {
+      label: "malformed top-level truth",
+      payload: {
+        ...createCanonicalLinqChat(true),
+        is_group: "true",
+      },
+    },
+  ])("rejects $label as a canonical chat-read response", async ({ payload }) => {
+    vi.stubGlobal("fetch", vi.fn(async () => createJsonResponse(payload, 200)));
+
+    await expect(getHostedLinqChatSummary({
+      chatId: "chat_123",
+      timeoutMs: 1_500,
+    })).resolves.toEqual({
+      handles: [],
+      isGroup: null,
+    });
+  });
+
+  it("keeps the chat-read deadline active through a stalled response body", async () => {
+    let connectionClosed = false;
+    const server = createServer((_request, response) => {
+      response.on("close", () => {
+        connectionClosed = true;
+      });
+      response.writeHead(200, {
+        "content-type": "application/json",
+      });
+      response.flushHeaders();
+      response.write('{"is_group":');
+    });
+    linqRuntimeConfig.apiBaseUrl = await listenOnLoopback(server);
+
+    try {
+      const startedAt = performance.now();
+      await expect(getHostedLinqChatSummary({
+        chatId: "chat_123",
+        timeoutMs: 75,
+      })).rejects.toMatchObject({
+        code: "LINQ_SEND_FAILED",
+        httpStatus: 502,
+        message: "Linq chat read timed out.",
+        retryable: true,
+      });
+      expect(performance.now() - startedAt).toBeLessThan(1_500);
+      await vi.waitFor(() => {
+        expect(connectionClosed).toBe(true);
+      });
+    } finally {
+      await closeTestServer(server);
+    }
+  });
+
+  it("preserves caller cancellation while reading a stalled response body", async () => {
+    let headersFlushed: (() => void) | null = null;
+    const didFlushHeaders = new Promise<void>((resolve) => {
+      headersFlushed = resolve;
+    });
+    const server = createServer((_request, response) => {
+      response.writeHead(200, {
+        "content-type": "application/json",
+      });
+      response.flushHeaders();
+      response.write('{"is_group":');
+      headersFlushed?.();
+    });
+    linqRuntimeConfig.apiBaseUrl = await listenOnLoopback(server);
+    const controller = new AbortController();
+    const abortReason = new Error("caller cancelled chat read");
+
+    try {
+      const result = getHostedLinqChatSummary({
+        chatId: "chat_123",
+        signal: controller.signal,
+        timeoutMs: 5_000,
+      });
+      await didFlushHeaders;
+      controller.abort(abortReason);
+      await expect(result).rejects.toBe(abortReason);
+    } finally {
+      await closeTestServer(server);
+    }
+  });
+});
 
 describe("sendHostedLinqChatMessage", () => {
   beforeEach(() => {

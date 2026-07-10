@@ -86,6 +86,7 @@ describe("KernelComputerClient", () => {
 
     expect(kernelSdkMocks.browserCreate).toHaveBeenCalledWith({
       headless: false,
+      kiosk_mode: true,
       name: "browser-1",
       profile: {
         name: "profile-1",

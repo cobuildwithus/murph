@@ -1319,9 +1319,9 @@ function createHostedConversationAssistantInputConversation(
         identifierBlind,
         wake.message.linqMessage.chatId,
       ),
-      threadIsDirect: typeof wake.message.linqMessage.threadIsDirect === "boolean"
-        ? wake.message.linqMessage.threadIsDirect
-        : true,
+      threadIsDirect: wake.message.linqMessage.threadIsDirect === undefined
+        ? true
+        : wake.message.linqMessage.threadIsDirect,
     };
   }
 

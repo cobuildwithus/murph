@@ -601,7 +601,7 @@ export async function planHostedOnboardingLinqWebhook(input: {
           parts: messageEvent.data.message.parts,
           service: messageEvent.data.service ?? null,
         }),
-        threadIsDirect: isHostedLinqDirectChatAttested(messageEvent),
+        threadIsDirect: resolveHostedLinqThreadIsDirect(messageEvent),
         ...(messageEvent.data.message.reply_to?.message_id === undefined
           ? {}
           : { replyToMessageId: messageEvent.data.message.reply_to.message_id }),
@@ -902,7 +902,7 @@ export async function planHostedOnboardingLinqWebhook(input: {
       occurredAt,
       service: messageEvent.data.service ?? null,
       sourceEventId: input.event.event_id,
-      threadIsDirect: isHostedLinqDirectChatAttested(messageEvent),
+      threadIsDirect: resolveHostedLinqThreadIsDirect(messageEvent),
     }),
     buildHostedLinqWebhookPlannerDetails(input.event, context, {
       chatDirectAttested: isHostedLinqDirectChatAttested(messageEvent),
@@ -1137,7 +1137,7 @@ async function planHostedLinqExplicitThreadRouteWebhook(input: {
         parts: messageEvent.data.message.parts,
         service: messageEvent.data.service ?? null,
       }),
-      threadIsDirect: isHostedLinqDirectChatAttested(messageEvent),
+      threadIsDirect: false,
       ...(messageEvent.data.message.reply_to?.message_id === undefined
         ? {}
         : { replyToMessageId: messageEvent.data.message.reply_to.message_id }),
@@ -1888,6 +1888,13 @@ function isHostedLinqDirectChatAttested(
   messageEvent: HostedLinqMessageReceivedEvent,
 ): boolean {
   return messageEvent.data.chat?.is_group === false;
+}
+
+function resolveHostedLinqThreadIsDirect(
+  messageEvent: HostedLinqMessageReceivedEvent,
+): boolean | null {
+  const isGroup = messageEvent.data.chat?.is_group;
+  return typeof isGroup === "boolean" ? !isGroup : null;
 }
 
 async function readRetryableUnsentFallbackRecipientPhone(input: {

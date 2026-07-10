@@ -94,6 +94,7 @@ export function markLocallyDisconnectedSources(
       connectProvider,
       disconnectConnectionId,
       disconnectScope,
+      recoveryKind,
       requiresReconnect,
       ...locallyDisconnectedSource
     } = source;
@@ -101,6 +102,7 @@ export function markLocallyDisconnectedSources(
     void connectProvider;
     void disconnectConnectionId;
     void disconnectScope;
+    void recoveryKind;
     void requiresReconnect;
 
     return {
@@ -254,7 +256,13 @@ export function resolveConnectIntentStartSource(
   sources: readonly ConnectSource[],
 ): ConnectSource | null {
   const source = findInitialConnectIntentSource(intent, sources);
-  if (!source || (source.connected && !source.requiresReconnect)) {
+  // A connection-reset source must not auto-start a plain connect: the existing
+  // connection has to be disconnected first.
+  if (
+    !source
+    || (source.connected && !source.requiresReconnect)
+    || source.recoveryKind === "connection_reset"
+  ) {
     return null;
   }
 

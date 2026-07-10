@@ -358,6 +358,121 @@ describe("container entrypoint abort boundary", () => {
     expect(mocks.runHostedWorkspaceInvocation).toHaveBeenCalledTimes(1);
   });
 
+  it("rejects replacement invocations until an aborted workspace invocation settles", async () => {
+    const invocationStarted = createDeferred<AbortSignal>();
+    const invocationAborted = createDeferred();
+    const finishInvocation = createDeferred();
+    const exit = vi.fn();
+    let invocationCalls = 0;
+
+    mocks.runHostedWorkspaceInvocation.mockImplementation(
+      async (_job, options) => {
+        invocationCalls += 1;
+        if (invocationCalls > 1) {
+          return buildWorkspaceRunnerResult();
+        }
+
+        const signal = options?.signal;
+        if (!signal) {
+          throw new Error("Expected hosted workspace invocation signal.");
+        }
+
+        invocationStarted.resolve(signal);
+        if (!signal.aborted) {
+          await new Promise<void>((resolve) => {
+            signal.addEventListener("abort", () => resolve(), { once: true });
+          });
+        }
+        invocationAborted.resolve();
+        await finishInvocation.promise;
+        throw signal.reason instanceof Error ? signal.reason : new Error("Request aborted.");
+      },
+    );
+
+    const server = await startHostedContainerEntrypoint({
+      port: 0,
+      runtime: {
+        exitScheduler: exit,
+      },
+    });
+    servers.push(server);
+    const address = server.address();
+
+    if (!address || typeof address === "string") {
+      throw new Error("Expected the hosted container entrypoint to expose a TCP port.");
+    }
+
+    const requestBody = buildWorkspaceJobBody({ eventId: "evt_semantic_abort_drains" });
+    const request = sendHostedContainerPostRequest({
+      body: requestBody,
+      path: "/internal/workspace-invocation",
+      port: address.port,
+    });
+
+    const signal = await invocationStarted.promise;
+    const abortResponse = await fetch(
+      `http://127.0.0.1:${address.port}/internal/workspace-invocation/abort`,
+      {
+        body: JSON.stringify({
+          attemptId: requestBody.job.request.attemptId,
+          leaseGeneration: requestBody.job.request.leaseGeneration,
+          userId: requestBody.job.request.userId,
+        }),
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        method: "POST",
+      },
+    );
+    expect(abortResponse.status).toBe(204);
+    await invocationAborted.promise;
+    expect(signal.aborted).toBe(true);
+
+    const replacementWhileDraining = await fetch(
+      `http://127.0.0.1:${address.port}/internal/workspace-invocation`,
+      {
+        body: JSON.stringify(buildWorkspaceJobBody({ eventId: "evt_replacement_while_draining" })),
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        method: "POST",
+      },
+    );
+    expect(replacementWhileDraining.status).toBe(409);
+    await expect(replacementWhileDraining.json()).resolves.toEqual({
+      error: "Hosted runner is busy.",
+    });
+
+    finishInvocation.resolve();
+    await request.done;
+    await waitForAssertion(async () => {
+      const health = await sendHostedContainerGetRequest({
+        path: "/health",
+        port: address.port,
+      });
+      expect(health.status).toBe(200);
+      expect(health.json).toMatchObject({
+        activeJobCount: 0,
+        poisoned: false,
+      });
+    });
+
+    const replacementAfterDrain = await fetch(
+      `http://127.0.0.1:${address.port}/internal/workspace-invocation`,
+      {
+        body: JSON.stringify(buildWorkspaceJobBody({ eventId: "evt_replacement_after_drain" })),
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        method: "POST",
+      },
+    );
+    expect(replacementAfterDrain.status).toBe(200);
+    expect(mocks.runHostedWorkspaceInvocation).toHaveBeenCalledTimes(2);
+    expect(exit).not.toHaveBeenCalled();
+    expect(mocks.reportHostedContainerFatalBestEffort).not.toHaveBeenCalled();
+  });
+
   it("applies an abort that arrives before the matching workspace invocation is accepted", async () => {
     const invocationAborted = createDeferred<AbortSignal>();
     const exit = vi.fn();

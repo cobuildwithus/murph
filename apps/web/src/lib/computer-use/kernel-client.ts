@@ -261,6 +261,7 @@ export class KernelComputerClient implements ComputerKernelClient {
   }): Promise<KernelBrowserHandle> {
     const browser = await this.kernel.browsers.create({
       headless: false,
+      kiosk_mode: true,
       name: input.browserName,
       profile: {
         name: input.profileName,

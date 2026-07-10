@@ -6,6 +6,7 @@ import {
 } from "@murphai/hosted-execution/runtime-control";
 import type { TextPart } from "@linqapp/sdk/resources";
 import type {
+  Chat,
   ChatCreateParams,
   ChatCreateResponse,
   ChatUpdateParams,
@@ -14,7 +15,7 @@ import type {
 } from "@linqapp/sdk/resources/chats";
 
 import { maybeDate } from "../primitives";
-import { fetchLinqApi, LinqApiTimeoutError } from "../linq/api";
+import { fetchLinqApi, fetchLinqApiJson, LinqApiTimeoutError } from "../linq/api";
 import { hostedOnboardingError, isHostedOnboardingError } from "./errors";
 import { requireHostedOnboardingLinqConfig } from "./runtime";
 import { normalizeNullableString } from "./shared";
@@ -194,16 +195,22 @@ export type HostedLinqChatHandleSummary = {
   status: string | null;
 };
 
-export async function getHostedLinqChatHandles(input: {
+export type HostedLinqChatSummary = {
+  handles: HostedLinqChatHandleSummary[];
+  isGroup: boolean | null;
+};
+
+export async function getHostedLinqChatSummary(input: {
   chatId: string;
   signal?: AbortSignal;
-}): Promise<HostedLinqChatHandleSummary[]> {
-  const response = await fetchHostedLinqApiOrThrow({
+  timeoutMs?: number;
+}): Promise<HostedLinqChatSummary> {
+  const response = await fetchHostedLinqJsonApiOrThrow({
     method: "GET",
-    operation: "chat read",
     path: `chats/${encodeURIComponent(normalizeRequiredString(input.chatId, "chat id"))}`,
     signal: input.signal,
     timeoutMessage: "Linq chat read timed out.",
+    timeoutMs: input.timeoutMs,
   });
 
   if (!response.ok) {
@@ -214,19 +221,41 @@ export async function getHostedLinqChatHandles(input: {
     });
   }
 
-  const payload = await readHostedLinqOptionalJsonResponse<{
-    chat?: { handles?: unknown } | null;
-    handles?: unknown;
-  }>(response);
-  const handles = Array.isArray(payload?.handles)
-    ? payload.handles
-    : Array.isArray(payload?.chat?.handles)
-      ? payload.chat.handles
-      : [];
+  const payload = readHostedLinqCanonicalChat(response.payload);
+  const handles: Chat["handles"] = payload?.handles ?? [];
+  const isGroup: Chat["is_group"] | null = payload?.is_group ?? null;
 
-  return handles
-    .map(parseHostedLinqChatHandleSummary)
-    .filter((handle): handle is HostedLinqChatHandleSummary => handle !== null);
+  return {
+    handles: handles
+      .map(parseHostedLinqChatHandleSummary)
+      .filter((handle): handle is HostedLinqChatHandleSummary => handle !== null),
+    isGroup,
+  };
+}
+
+function readHostedLinqCanonicalChat(
+  value: unknown,
+): Pick<Chat, "handles" | "is_group"> | null {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+
+  const record = value as Record<string, unknown>;
+  if (!Array.isArray(record.handles) || typeof record.is_group !== "boolean") {
+    return null;
+  }
+
+  return {
+    handles: record.handles,
+    is_group: record.is_group,
+  };
+}
+
+export async function getHostedLinqChatHandles(input: {
+  chatId: string;
+  signal?: AbortSignal;
+}): Promise<HostedLinqChatHandleSummary[]> {
+  return (await getHostedLinqChatSummary(input)).handles;
 }
 
 function parseHostedLinqChatHandleSummary(value: unknown): HostedLinqChatHandleSummary | null {
@@ -413,6 +442,7 @@ async function fetchHostedLinqApiOrThrow(input: {
   path: string;
   signal?: AbortSignal;
   timeoutMessage: string;
+  timeoutMs?: number;
 }): Promise<Response> {
   const { apiBaseUrl, apiToken } = requireHostedOnboardingLinqConfig();
 
@@ -424,6 +454,39 @@ async function fetchHostedLinqApiOrThrow(input: {
       method: input.method,
       path: input.path,
       signal: input.signal,
+      timeoutMs: input.timeoutMs,
+    });
+  } catch (error) {
+    if (error instanceof LinqApiTimeoutError) {
+      throw hostedOnboardingError({
+        code: "LINQ_SEND_FAILED",
+        message: input.timeoutMessage,
+        httpStatus: 502,
+        retryable: true,
+      });
+    }
+
+    throw error;
+  }
+}
+
+async function fetchHostedLinqJsonApiOrThrow(input: {
+  method: string;
+  path: string;
+  signal?: AbortSignal;
+  timeoutMessage: string;
+  timeoutMs?: number;
+}) {
+  const { apiBaseUrl, apiToken } = requireHostedOnboardingLinqConfig();
+
+  try {
+    return await fetchLinqApiJson({
+      apiBaseUrl,
+      apiToken,
+      method: input.method,
+      path: input.path,
+      signal: input.signal,
+      timeoutMs: input.timeoutMs,
     });
   } catch (error) {
     if (error instanceof LinqApiTimeoutError) {
