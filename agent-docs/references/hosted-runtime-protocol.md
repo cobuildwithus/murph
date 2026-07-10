@@ -113,23 +113,24 @@ active invocation lease to the Worker egress authorizer. UserRunner stores only
 the token hash on the active write fence. The Worker validates the token against
 that hash, injects the Worker-owned provider credential on success, and strips
 the provider-egress token before forwarding upstream.
-Warm Codex App Server OpenAI egress uses a signed Murph provider credential in
-the native OpenAI bearer slot instead of the injected-credential sentinel. That
-credential identifies provider kind, hosted user, and runner container name. It
-does not authorize egress by itself: the Worker verifies the signature, asks
-UserRunner whether the same runner currently has an active runtime for that
-user/provider, then injects the Worker-owned OpenAI credential only after the
-OpenAI request policy passes. Missing runner state, missing active runtime,
-wrong runner, wrong user, wrong provider, missing signing config, or validator
-failure all fail closed without provider secret injection. `ctx.containerId` and
-RunnerContainer active-user recovery are not OpenAI provider-egress authority.
+Native child-process provider egress for OpenAI, Exa, Mapbox,
+`murph_data_api`, and `workers_ai_transcribe` uses a signed Murph provider
+credential in the provider's native credential slot instead of the
+injected-credential sentinel. That credential identifies provider kind, hosted
+user, and runner container name. It does not authorize egress by itself: the
+Worker verifies the signature, asks UserRunner whether the same runner has an
+active runtime for that user/provider, then injects the Worker-owned credential
+only after the provider request policy passes. Missing runner state, missing
+active runtime, wrong runner, wrong user, wrong provider, missing signing
+config, or validator failure all fail closed without provider secret
+injection. `ctx.containerId` and RunnerContainer active-user recovery are not
+provider-egress authority.
 Runtime-controlled delivery/control provider integrations such as Linq,
 Telegram, and WhatsApp still use provider-egress token proof when exact runtime
-authority headers are absent. Legacy lookup providers such as Exa, Mapbox,
-`murph_data_api`, and `workers_ai_transcribe` remain on the tokenless
-active-user-fence fallback until they are migrated deliberately. Runner
-container names remain lifecycle/routing handles, not provider-egress authority
-outside the explicit signed provider credential identity checked by UserRunner.
+authority headers are absent. There is no tokenless active-user-fence provider
+authorization path. Runner container names remain lifecycle/routing handles,
+not provider-egress authority outside the explicit signed provider credential
+identity checked by UserRunner.
 Hosted-local may rewrite loopback provider bases to the configured
 `HOSTED_EXECUTION_RUNNER_HOST_ALIAS` so Linux runner containers can reach host
 stubs through the Docker bridge. The provider-fetch allowlist may accept HTTP
@@ -753,7 +754,12 @@ snapshot producer. `canonical_runtime_commit` instead uploads exact canonical
 write receipts and publishes a receipt-log ref, bounded to 64 pending entries
 and 64 KiB, through a status-only workspace checkpoint that retains the prior
 snapshot ref. Capacity and log shape are validated before referenced payloads
-are uploaded. Cold restore replays that log over the prior snapshot and marks
+are uploaded. If that checkpoint has an ambiguous transport outcome, the
+Cloudflare workspace port retries the identical expected-version CAS once. It
+accepts a version-conflict response only when the active invocation fence still
+matches and the returned workspace is the exact requested successor, including
+the receipt fingerprint, snapshot ref, wake fields, and retention wake. Cold
+restore replays that log over the prior snapshot and marks
 affected context domains dirty; when the restored log is at the hard entry
 bound, the runtime consolidates it through an idle snapshot before foreground
 mailbox or assistant work. That recovery snapshot publishes an immediate
