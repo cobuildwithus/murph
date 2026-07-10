@@ -1,6 +1,6 @@
 # Verification And Runtime
 
-Last verified: 2026-07-09
+Last verified: 2026-07-10
 
 ## Verification Matrix
 
@@ -102,6 +102,24 @@ When that fast path applies:
 - `pnpm test:diff <path ...>` remains required and replaces a separate root `pnpm typecheck` for this fast path.
 - Direct checks on the touched tooling files remain required.
 - `pnpm test`, `pnpm verify:acceptance`, and the explicit acceptance-only lanes such as `pnpm test:coverage` are optional and should be skipped unless the touched files really need broader proof.
+
+## Hosted Runner Bundle Size Ratchet
+
+`pnpm --dir apps/cloudflare runner:bundle` measures the entry chunk, its full
+static boot closure, and the total bundle from the esbuild metafile. The
+ratcheted baselines and tolerances live beside that assembly code, and an exact
+regression test locks every budget. When intended boot-path growth trips the
+guard, measure the final head on CI Linux and one local host, record those
+measurements in the baseline comment, and update the locked budget test in the
+same change. Do not loosen the fixed total ceiling or carry stale accumulated
+headroom forward in the explicit noise tolerance.
+
+The 2026-07-10 companion-metadata plus Junction-recovery head measured a
+6,859,426-byte static closure on macOS and 6,819,834 bytes on CI Linux. Its
+ratchet uses the larger measurement as the baseline plus a 40,000-byte noise
+band, producing one 6,899,426-byte cross-platform ceiling. That leaves 79,592
+bytes above the Linux measurement; the locked sub-6,900,000-byte assertion
+bounds the combined platform delta and emit jitter.
 
 ## Current Command Meaning
 

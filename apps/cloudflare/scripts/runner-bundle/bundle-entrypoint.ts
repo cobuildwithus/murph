@@ -33,8 +33,11 @@ export const RUNNER_ENTRYPOINT_BUNDLE_DIRECTORY_NAME = "dist-bundled";
 // surface fails the assembly instead of silently regressing cold start.
 // Latest ratcheted baselines come from reviewed bundle measurements:
 // - 2026-07-09 local macOS after mailbox-lane sequence preference coalescing:
-//   entry container-entrypoint.js 1,374,586B, static boot closure 6,722,281B.
-// The tolerances below cover local emit jitter.
+//   entry container-entrypoint.js 1,374,586B.
+// - 2026-07-10 local macOS after companion health metadata landed beside the
+//   Junction history-recovery path: static boot closure 6,859,426B. The same
+//   head measured 6,819,834B on CI Linux. The tolerances below cover emit
+//   jitter; the static closure uses one shared cross-platform envelope.
 //
 // The entry chunk gates cold-start parse, so it is ratcheted, not given
 // headroom: the guard holds it to the measured baseline plus a tight noise
@@ -45,11 +48,11 @@ export const RUNNER_ENTRYPOINT_BUNDLE_DIRECTORY_NAME = "dist-bundled";
 //
 // Node parses the entry chunk plus every statically reachable chunk before
 // HTTP listen, so the static boot closure is ratcheted with the same reviewed
-// baseline discipline as the entry chunk. Its tolerance is wider than the
-// entry tolerance because the closure spans ~5x more bytes and many more
-// chunks, so path comments, content hashes, and platform-specific emit jitter
-// have more surface. CI Linux has measured slightly smaller than local macOS;
-// since this ratchet fails only on growth, the local baseline remains safe.
+// baseline discipline as the entry chunk. The baseline uses the larger local
+// macOS measurement; CI Linux measured slightly smaller. A separate 40,000B
+// tolerance covers content-hash and minifier jitter on that larger result. As
+// a shared ceiling, Linux also retains the measured platform delta; the locked
+// sub-6,900,000B guard caps that combined margin.
 //
 // The total ceiling stays a fixed backstop at its prior 9,300,000B value (not
 // ratcheted): #397 shrank the bundle, so there is no reason to loosen it, and
@@ -58,12 +61,12 @@ export const RUNNER_ENTRYPOINT_BUNDLE_DIRECTORY_NAME = "dist-bundled";
 // inputs before raising either.
 const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 9_300_000;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 1_374_586;
-const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 6_722_281;
-// Noise band above the baseline before the ratchet trips (~2%): absorbs
-// content-hash and minifier jitter without letting real boot-path weight land
-// silently. Keep it tight; it is a tolerance for noise, not feature headroom.
+const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 6_859_426;
+// Noise bands above the baselines absorb content-hash and minifier jitter
+// without letting real boot-path weight land silently. Keep them tight; they
+// are tolerances for noise, not feature headroom.
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_TOLERANCE_BYTES = 48_000;
-const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_TOLERANCE_BYTES = 96_000;
+const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_TOLERANCE_BYTES = 40_000;
 // The @murphai package markers are path suffixes, not node_modules-anchored:
 // workspace package inputs appear as `node_modules/@murphai/*/dist/...` in
 // the staged production assembly but as `packages/*/dist/...` when bundling
