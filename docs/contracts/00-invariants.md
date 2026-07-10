@@ -111,10 +111,10 @@ executable tests.
   irreversible-effect boundary. Carry narrow typed proof within that bounded
   operation instead of making sibling layers rediscover it. Model-supplied
   targets are requests, never authority.
-- Match state lifetime to scope. User-facing or queryable product truth never
-  begins in process, request, turn, assistant-runtime, wake, orchestration, or
-  other operational state. Durable obligations must be derivable from owned
-  durable metadata on every pass.
+- Match state lifetime to scope. User-facing or queryable product truth is
+  never assistant runtime state and never begins in process, request, turn,
+  wake, orchestration, or other operational state. Durable obligations must be
+  derivable from owned durable metadata on every pass.
 - Canonical vault writes go through the owning canonical API with provenance.
   Importers prepare data; CLIs, assistants, and runtimes call the owner.
   Transcripts, projections, and runtime state are never promoted implicitly.
