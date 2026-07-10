@@ -195,8 +195,6 @@ export async function writeHostedMemberStripeBillingTx(input: {
   });
 }
 
-export const updateHostedMemberStripeBillingIfFreshTx = writeHostedMemberStripeBillingTx;
-
 export async function writeHostedMemberStripeBillingRefIfFreshTx(input: {
   currentBillingPhase?: string | null;
   currentBillingPlanCode?: string | null;

@@ -5,9 +5,6 @@ import path from "node:path";
 import { describe, expect, test } from "vitest";
 
 import {
-  normalizeLegacyCloudflareHostedLocalE2eArgs,
-} from "../src/compat.ts";
-import {
   listHostedLocalE2eScenarios,
   resolveHostedLocalE2eScenarios,
 } from "../src/e2e.ts";
@@ -36,20 +33,6 @@ describe("hosted-local harness", () => {
     expect(workflow).toContain('echo "${npm_prefix}/bin" >> "$GITHUB_PATH"');
     expect(workflow).toContain('"${npm_prefix}/bin/codex" --version');
   }
-
-  test("keeps legacy Cloudflare E2E entrypoint on the no-bundle path", () => {
-    expect(normalizeLegacyCloudflareHostedLocalE2eArgs([])).toEqual([
-      "all",
-      "--no-bundle",
-    ]);
-    expect(normalizeLegacyCloudflareHostedLocalE2eArgs(["linq-webhook"])).toEqual([
-      "linq-webhook",
-      "--no-bundle",
-    ]);
-    expect(normalizeLegacyCloudflareHostedLocalE2eArgs(["--bundle"])).toEqual([
-      "all",
-    ]);
-  });
 
   test("keeps root hosted-local scripts canonical", async () => {
     const rootPackage = JSON.parse(
@@ -84,8 +67,6 @@ describe("hosted-local harness", () => {
       "test:e2e:local",
       "test:e2e:hosted-local",
       "test:e2e:workers:local",
-      "test:e2e:full-stack:local",
-      "test:e2e:smoke:local",
       "test:e2e:runner-python:local",
     ]);
 
