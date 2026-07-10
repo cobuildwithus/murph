@@ -1,6 +1,7 @@
 import {
   DEFAULT_ASSISTANT_AUTOMATION_SCAN_LIMIT,
   type AssistantExecutionContext,
+  type AssistantAutoReplyHistoryMetrics,
   type AssistantInputCandidateBatch,
   type AssistantInputCandidateQuery,
   type AssistantInputSource,
@@ -664,6 +665,7 @@ function attachHostedAssistantAutomationFailureLogEntries(
 
 function recordHostedAssistantProviderStartLatencyTraceBestEffort(input: {
   admissionMs?: number;
+  autoReplyHistory?: AssistantAutoReplyHistoryMetrics;
   assistantInputIds: readonly string[];
   codexAppServerInitializeMs?: number;
   codexAppServerPreProviderMs?: number;
@@ -690,9 +692,14 @@ function recordHostedAssistantProviderStartLatencyTraceBestEffort(input: {
     return;
   }
 
-  // In-memory provider sub-split rides the EXISTING provider_started POST. No new
-  // request, await, or I/O: the durations were measured during turn setup and are
-  // attached to the request object already being sent best-effort.
+  // In-memory pre-provider and provider diagnostics ride the EXISTING
+  // provider_started POST. No new request, await, or I/O is added.
+  const preProvider: NonNullable<
+    HostedRuntimeLatencyPhaseBreakdown["preProvider"]
+  > = {
+    ...(input.preProviderPhase ?? {}),
+    ...(input.autoReplyHistory ?? {}),
+  };
   const provider: NonNullable<
     HostedRuntimeLatencyPhaseBreakdown["provider"]
   > = {
@@ -727,12 +734,12 @@ function recordHostedAssistantProviderStartLatencyTraceBestEffort(input: {
     event: {
       assistantInputIds: [...input.assistantInputIds],
       at: input.startedAt,
-      ...(Object.keys(provider).length > 0 || input.preProviderPhase
+      ...(Object.keys(provider).length > 0 || Object.keys(preProvider).length > 0
         ? {
             phaseBreakdown: {
               schemaVersion: 1,
-              ...(input.preProviderPhase
-                ? { preProvider: input.preProviderPhase }
+              ...(Object.keys(preProvider).length > 0
+                ? { preProvider }
                 : {}),
               ...(Object.keys(provider).length > 0 ? { provider } : {}),
             },

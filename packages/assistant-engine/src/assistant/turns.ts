@@ -239,10 +239,19 @@ function assistantTurnTimelineKindForStatus(
 export async function listRecentAssistantTurnReceipts(
   vault: string,
   limit = 10,
+  onScan?: (metrics: AssistantTurnReceiptScanMetrics) => void,
 ): Promise<AssistantTurnReceipt[]> {
   return await listRecentAssistantTurnReceiptsInternal(vault, {
     limit,
+    ...(onScan ? { onScan } : {}),
   })
+}
+
+export interface AssistantTurnReceiptScanMetrics {
+  bytesRead: number
+  filesRead: number
+  lockWaitMs: number
+  scanElapsedMs: number
 }
 
 export async function listRecentAssistantTurnReceiptsForSession(
@@ -260,23 +269,35 @@ async function listRecentAssistantTurnReceiptsInternal(
   vault: string,
   input: {
     limit: number
+    onScan?: (metrics: AssistantTurnReceiptScanMetrics) => void
     sessionId?: string | null
   },
 ): Promise<AssistantTurnReceipt[]> {
+  const scanStartedAt = Date.now()
   const normalizedLimit =
     typeof input.limit === 'number' && Number.isFinite(input.limit)
       ? Math.max(0, Math.trunc(input.limit))
       : 0
   if (normalizedLimit === 0) {
+    input.onScan?.({
+      bytesRead: 0,
+      filesRead: 0,
+      lockWaitMs: 0,
+      scanElapsedMs: Math.max(0, Date.now() - scanStartedAt),
+    })
     return []
   }
 
   const sessionFilter = input.sessionId?.trim() || null
-  return withAssistantRuntimeWriteLock(vault, async (paths) => {
+  const lockRequestedAt = Date.now()
+  const result = await withAssistantRuntimeWriteLock(vault, async (paths) => {
+    const lockWaitMs = Math.max(0, Date.now() - lockRequestedAt)
     await ensureAssistantState(paths)
     const entries = await readdir(paths.turnsDirectory, {
       withFileTypes: true,
     })
+    let bytesRead = 0
+    let filesRead = 0
     const receipts: AssistantTurnReceipt[] = []
 
     for (const entry of entries) {
@@ -287,6 +308,10 @@ async function listRecentAssistantTurnReceiptsInternal(
       const receipt = await readAssistantTurnReceiptAtPath(
         paths,
         path.join(paths.turnsDirectory, entry.name),
+        (bytes) => {
+          filesRead += 1
+          bytesRead += bytes
+        },
       )
       if (!receipt || (sessionFilter && receipt.sessionId !== sessionFilter)) {
         continue
@@ -295,8 +320,20 @@ async function listRecentAssistantTurnReceiptsInternal(
       insertRecentAssistantTurnReceipt(receipts, receipt, normalizedLimit)
     }
 
-    return receipts
+    return {
+      bytesRead,
+      filesRead,
+      lockWaitMs,
+      receipts,
+    }
   })
+  input.onScan?.({
+    bytesRead: result.bytesRead,
+    filesRead: result.filesRead,
+    lockWaitMs: result.lockWaitMs,
+    scanElapsedMs: Math.max(0, Date.now() - scanStartedAt),
+  })
+  return result.receipts
 }
 
 function insertRecentAssistantTurnReceipt(
@@ -336,10 +373,12 @@ export function resolveAssistantTurnReceiptPath(
 async function readAssistantTurnReceiptAtPath(
   paths: AssistantStatePaths,
   receiptPath: string,
+  onBytesRead?: (bytes: number) => void,
 ): Promise<AssistantTurnReceipt | null> {
   let raw: string | null = null
   try {
     raw = await readFile(receiptPath, 'utf8')
+    onBytesRead?.(Buffer.byteLength(raw, 'utf8'))
     return assistantTurnReceiptSchema.parse(JSON.parse(raw))
   } catch (error) {
     if (isMissingFileError(error)) {
