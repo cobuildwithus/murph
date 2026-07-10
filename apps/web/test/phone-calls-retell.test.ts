@@ -1,6 +1,6 @@
 import { createHmac } from "node:crypto";
 
-import type { HostedPhoneCall } from "@prisma/client";
+import { Prisma, type HostedPhoneCall } from "@prisma/client";
 import type {
   HostedPhoneCallBrief,
 } from "@murphai/hosted-execution/phone-calls";
@@ -9,6 +9,9 @@ import {
 } from "@murphai/hosted-execution/phone-calls";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import {
+  readHostedPhoneCallResult,
+} from "@/src/lib/phone-calls/crypto";
 import {
   createRetellPhoneCallRuntime,
 } from "@/src/lib/phone-calls/retell-runtime";
@@ -510,10 +513,8 @@ describe("Retell phone-call result handling", () => {
     expect(store.updateManyCalls).toHaveLength(1);
     expect(store.updateManyCalls[0]).toMatchObject({
       data: {
-        resultJson: {
-          outcome: "completed",
-          summary: "The appointment is booked for Friday at 3:45 PM.",
-        },
+        resultEncrypted: expect.stringMatching(/^hsb-test:/u),
+        resultJson: Prisma.DbNull,
         status: "completed",
       },
       where: {
@@ -559,11 +560,10 @@ describe("Retell phone-call result handling", () => {
       prisma: store.prisma,
     });
 
-    const result = store.currentCall()?.resultJson as {
-      followUp?: string;
-      outcome: string;
-      summary: string;
-    } | null;
+    const currentCall = store.currentCall();
+    const result = currentCall
+      ? await readHostedPhoneCallResult({ call: currentCall })
+      : null;
     expect(result).toMatchObject({
       outcome: "needs_user",
     });
@@ -770,10 +770,8 @@ describe("Retell phone-call result handling", () => {
 
     expect(store.updateManyCalls[0]).toMatchObject({
       data: {
-        resultJson: {
-          outcome: "not_completed",
-          summary: "The office line was busy.",
-        },
+        resultEncrypted: expect.stringMatching(/^hsb-test:/u),
+        resultJson: Prisma.DbNull,
         status: "failed",
       },
       where: {
@@ -793,10 +791,8 @@ describe("Retell phone-call result handling", () => {
       analyzedAt: expect.any(Date),
       endedAt,
       providerCallId: "retell_busy",
-      resultJson: {
-        outcome: "not_completed",
-        summary: "The office line was busy.",
-      },
+      resultEncrypted: expect.stringMatching(/^hsb-test:/u),
+      resultJson: null,
       status: "failed",
     });
     expect(store.appendResultNotificationCalls.map((callRecord) => callRecord.id)).toEqual([
@@ -1005,6 +1001,7 @@ function buildHostedPhoneCall(overrides: Partial<HostedPhoneCall> = {}): HostedP
   const now = new Date("2026-06-25T00:00:00.000Z");
   return {
     analyzedAt: null,
+    briefEncrypted: null,
     briefJson: VALID_BRIEF,
     createdAt: now,
     endedAt: null,
@@ -1013,6 +1010,7 @@ function buildHostedPhoneCall(overrides: Partial<HostedPhoneCall> = {}): HostedP
     provider: "retell",
     providerCallId: "retell_call_123",
     requestKey: "phone_call_request_1",
+    resultEncrypted: null,
     resultJson: null,
     status: "starting",
     updatedAt: now,
@@ -1069,8 +1067,11 @@ function createWebhookStore(input: {
           providerCallId: "providerCallId" in args.data
             ? args.data.providerCallId ?? currentCall.providerCallId
             : currentCall.providerCallId,
+          resultEncrypted: "resultEncrypted" in args.data
+            ? args.data.resultEncrypted ?? currentCall.resultEncrypted
+            : currentCall.resultEncrypted,
           resultJson: "resultJson" in args.data
-            ? args.data.resultJson ?? currentCall.resultJson
+            ? args.data.resultJson === Prisma.DbNull ? null : currentCall.resultJson
             : currentCall.resultJson,
           status: args.data.status,
         };

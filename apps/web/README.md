@@ -146,7 +146,9 @@ The hosted Prisma schema keeps ownership sharp and nested:
   without storing raw conversation text, health details, tags, topics, or provider payloads
 - `HostedPhoneCall` owns one member-bound Retell phone-call row per real call
   with a bounded call brief, provider call id, status, and final analysis
-  result; Retell credentials stay in web env, transfer destinations are resolved
+  result. Briefs and results use member/table/row/field/scope-bound hosted
+  secure-box ciphertext; new writes never populate the nullable legacy JSON
+  columns. Retell credentials stay in web env, transfer destinations are resolved
   from verified member identity, and raw transcripts/audio are not stored in
   Murph.
 - `HostedComputerRun` and `HostedComputerHandoff`
@@ -631,6 +633,35 @@ The `2026062100_hosted_computer_single_member_profile` migration is an explicit
 greenfield computer-use hard cut: deploy it only as part of a coordinated
 hosted web plus Worker cutover with hosted computer-use traffic paused during
 the skew window.
+
+### Hosted phone-call private-content migration
+
+The phone-call private-content rollout is an expand-and-scrub hard cut with no
+plaintext dual-write. Deploy the additive migration first: it adds nullable
+`brief_encrypted` and `result_encrypted` columns and makes the legacy brief JSON
+nullable, so the previously deployed web remains compatible. The replacement
+web encrypts every new brief/result before the guarded database write, reads
+ciphertext first, and falls back to legacy JSON only when ciphertext is null;
+this keeps both old calls and new calls usable while the scrub runs.
+
+After the replacement deployment is live, run
+`pnpm --dir apps/web privacy:backfill-phone-calls -- --batch-size 50` through
+the production environment wrapper shown by the script's `--help`. Review the
+count-only dry run, then add `--apply` and repeat bounded batches while
+`hasMore` is true or `selectedRows` is nonzero. Rerun the dry run and record a
+zero-row result. Apply encrypts and round-trips missing ciphertext, proves any
+existing ciphertext equals the legacy value, and scrubs plaintext in one
+compare-and-set write; conflicts are safe to rerun. Output never contains row
+ids, member ids, plaintext, or ciphertext.
+
+The rollback floor begins when the replacement deployment writes its first
+encrypted-only phone-call row. From that point, do not roll back to a build
+that requires `brief_json` or reads only legacy result JSON; redeploy this
+compatible build or a forward fix. If the deployment fails before receiving
+phone-call traffic, the additive schema remains safe for the prior build. The
+legacy columns remain nullable in this rollout; remove them only in a later
+contract migration after the zero-row proof and the prior Vercel function
+window has drained.
 
 ## Production build memory guard
 

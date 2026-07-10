@@ -175,6 +175,7 @@ function buildHostedPhoneCall(overrides: Partial<HostedPhoneCall> = {}): HostedP
   const now = new Date("2026-06-25T00:00:00.000Z");
   return {
     analyzedAt: null,
+    briefEncrypted: null,
     briefJson: VALID_BRIEF,
     createdAt: now,
     endedAt: null,
@@ -183,6 +184,7 @@ function buildHostedPhoneCall(overrides: Partial<HostedPhoneCall> = {}): HostedP
     provider: "retell",
     providerCallId: "retell_call_123",
     requestKey: "phone_call_request_1",
+    resultEncrypted: null,
     resultJson: null,
     status: "calling",
     updatedAt: now,

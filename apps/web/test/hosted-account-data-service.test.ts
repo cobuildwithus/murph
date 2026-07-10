@@ -100,6 +100,7 @@ const REQUIRED_STORE_SLUGS = [
   "prisma.hosted_workspace",
   "prisma.hosted_computer_run",
   "prisma.hosted_computer_handoff",
+  "prisma.hosted_phone_call",
   "prisma.hosted_runtime_log",
   "prisma.hosted_user_crypto_envelope",
   "prisma.hosted_user_crypto_audit",
@@ -785,6 +786,26 @@ describe("deleteHostedAccountData", () => {
     });
     expect(deleteCalls).toContainEqual({
       model: "hostedComputerRun",
+      where: { memberId: "member_123" },
+    });
+  });
+
+  it("deletes hosted phone-call rows explicitly with account data", async () => {
+    const deleteCalls: HostedAccountDeletionPrismaDeleteCall[] = [];
+    const prisma = createHostedAccountDeletionPrismaForTest({
+      deleteCalls,
+      onTransaction: () => undefined,
+    });
+
+    const result = await deleteHostedAccountData({
+      memberId: "member_123",
+      prisma,
+      request: new Request("https://join.example.test/settings"),
+    });
+
+    expect(result.deletedCounts["prisma.hosted_phone_call"]).toBe(1);
+    expect(deleteCalls).toContainEqual({
+      model: "hostedPhoneCall",
       where: { memberId: "member_123" },
     });
   });

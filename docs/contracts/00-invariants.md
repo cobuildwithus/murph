@@ -130,6 +130,19 @@ executable tests.
   metadata-only audit trail.
 - A guard or authority change is complete only when every path to the protected
   effect routes through it durably or is proved unreachable.
+- For any storage owner placed under a private-content classification guard,
+  every persisted field has an explicit classification: encrypted content,
+  keyed lookup, hashed capability, approved operational metadata, or temporary
+  legacy debt with one owner and a concrete removal condition. Identifiers,
+  state enums, and timestamps qualify as operational metadata only when they do
+  not carry private payload content. Owner docs name the guard's exact coverage;
+  one guarded model is not proof that every repository store has been audited.
+- Newly introduced or materially changed private content is protected before its first durable write and is never
+  dual-written to plaintext. Migration readers prefer ciphertext and may use a
+  legacy plaintext value only when ciphertext is absent; present empty,
+  malformed, or unauthentic ciphertext fails closed. Plaintext cleanup proves
+  the replacement value, uses bounded compare-and-set work, and emits no private
+  content or storage identifiers.
 
 ## Conversation-First Product Control
 

@@ -5,7 +5,6 @@ import {
 } from "@prisma/client";
 import {
   buildHostedExecutionAssistantNotificationRequestedWake,
-  hostedPhoneCallBriefSchema,
   hostedPhoneCallResultSchema,
   type HostedPhoneCallBrief,
   type HostedPhoneCallResult,
@@ -18,6 +17,12 @@ import {
   hostedOnboardingError,
 } from "../hosted-onboarding/errors";
 import { getPrisma } from "../prisma";
+import {
+  hostedPhoneCallCrypto,
+  readHostedPhoneCallBrief,
+  readHostedPhoneCallResult,
+  type HostedPhoneCallCrypto,
+} from "./crypto";
 import {
   requireHostedPhoneCallResultNotificationRoute,
 } from "./notification-route";
@@ -44,7 +49,8 @@ interface HostedPhoneCallWebhookTx {
         analyzedAt?: Date;
         endedAt?: Date;
         providerCallId?: string;
-        resultJson?: HostedPhoneCallResult;
+        resultEncrypted?: string;
+        resultJson?: Prisma.NullTypes.DbNull;
         status: HostedPhoneCallStatus;
       };
       where: HostedPhoneCallWebhookUpdateWhere;
@@ -131,9 +137,11 @@ export async function handleRetellCallEnded(input: {
 
 export async function handleRetellCallAnalyzed(input: {
   call: RetellCallPayload;
+  crypto?: HostedPhoneCallCrypto;
   prisma?: HostedPhoneCallWebhookStore;
 }): Promise<RetellCallAnalyzedHandlingResult> {
   assertRetellStorageMode(input.call);
+  const crypto = input.crypto ?? hostedPhoneCallCrypto;
   const prisma = resolveHostedPhoneCallWebhookStore(input.prisma);
   const result = mapRetellCallAnalysis(input.call);
 
@@ -146,7 +154,7 @@ export async function handleRetellCallAnalyzed(input: {
       return emptyRetellCallAnalyzedHandlingResult();
     }
 
-    if (target.call.analyzedAt && target.call.resultJson) {
+    if (target.call.analyzedAt && hasStoredHostedPhoneCallResult(target.call)) {
       return await tx.appendResultNotification(target.call);
     }
 
@@ -158,12 +166,18 @@ export async function handleRetellCallAnalyzed(input: {
       return emptyRetellCallAnalyzedHandlingResult();
     }
 
+    const resultEncrypted = await crypto.encryptResult({
+      callId: target.call.id,
+      memberId: target.call.memberId,
+      value: result,
+    });
     const updated = await tx.hostedPhoneCall.updateMany({
       data: {
         ...target.providerCallIdData,
         analyzedAt: new Date(),
         endedAt: readRetellEndedAt(input.call) ?? undefined,
-        resultJson: result,
+        resultEncrypted,
+        resultJson: Prisma.DbNull,
         status: mapPhoneCallStatus(result.outcome),
       },
       where: {
@@ -180,7 +194,7 @@ export async function handleRetellCallAnalyzed(input: {
           id: target.call.id,
         },
       });
-      if (stored.analyzedAt && stored.resultJson) {
+      if (stored.analyzedAt && hasStoredHostedPhoneCallResult(stored)) {
         return await tx.appendResultNotification(stored);
       }
       return emptyRetellCallAnalyzedHandlingResult();
@@ -200,23 +214,32 @@ async function appendPhoneCallResultNotificationTx(input: {
   prisma: Prisma.TransactionClient;
 }): Promise<HostedPhoneCallResultNotificationAppend> {
   const call = input.call;
-  if (!call?.resultJson) {
+  let result: HostedPhoneCallResult | null;
+  try {
+    result = await readHostedPhoneCallResult({
+      call,
+      prisma: input.prisma,
+    });
+  } catch {
+    throw hostedPhoneCallResultNotificationError(
+      "HOSTED_PHONE_CALL_RESULT_INVALID",
+      "Hosted phone call result notification requires a valid stored result.",
+    );
+  }
+  if (!result) {
     throw hostedPhoneCallResultNotificationError(
       "HOSTED_PHONE_CALL_RESULT_REQUIRED",
       "Hosted phone call result notification requires a stored result.",
     );
   }
 
-  const result = hostedPhoneCallResultSchema.safeParse(call.resultJson);
-  if (!result.success) {
-    throw hostedPhoneCallResultNotificationError(
-      "HOSTED_PHONE_CALL_RESULT_INVALID",
-      "Hosted phone call result notification requires a valid stored result.",
-    );
-  }
-
-  const brief = hostedPhoneCallBriefSchema.safeParse(call.briefJson);
-  if (!brief.success) {
+  let brief: HostedPhoneCallBrief;
+  try {
+    brief = await readHostedPhoneCallBrief({
+      call,
+      prisma: input.prisma,
+    });
+  } catch {
     throw hostedPhoneCallResultNotificationError(
       "HOSTED_PHONE_CALL_BRIEF_INVALID",
       "Hosted phone call result notification requires a valid stored brief.",
@@ -229,8 +252,8 @@ async function appendPhoneCallResultNotificationTx(input: {
   });
 
   const instructions = buildPhoneCallResultNotificationInstructions({
-    brief: brief.data,
-    result: result.data,
+    brief,
+    result,
   });
   const notificationKey = `phone-call-result:${call.id}`;
   const appended = await appendHostedMailboxEnvelopeTx({
@@ -255,6 +278,10 @@ async function appendPhoneCallResultNotificationTx(input: {
     notificationMailboxItemId: appended.item.id,
     notificationUserId: appended.item.userId,
   };
+}
+
+function hasStoredHostedPhoneCallResult(call: HostedPhoneCall): boolean {
+  return call.resultEncrypted !== null || call.resultJson !== null;
 }
 
 function emptyRetellCallAnalyzedHandlingResult(): RetellCallAnalyzedHandlingResult {

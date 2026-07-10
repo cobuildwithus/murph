@@ -1,13 +1,17 @@
 import type { HostedPhoneCall } from "@prisma/client";
 import {
   hostedPhoneCallAdviceSchema,
-  hostedPhoneCallBriefSchema,
   type HostedPhoneCallAdvice,
   type HostedPhoneCallBrief,
 } from "@murphai/hosted-execution/phone-calls";
 
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
 import { getPrisma } from "../prisma";
+import {
+  hostedPhoneCallCrypto,
+  readHostedPhoneCallBrief,
+  type HostedPhoneCallCrypto,
+} from "./crypto";
 import { resolveVerifiedMemberTransferNumber } from "./transfer";
 
 export interface HostedPhoneCallForConsultation {
@@ -44,10 +48,12 @@ interface HostedPhoneCallConsultationStore {
 
 export async function getHostedPhoneCallForConsultation(input: {
   callId: string;
+  crypto?: HostedPhoneCallCrypto;
   providerCallId: string;
   prisma?: HostedPhoneCallConsultationStore;
 }): Promise<HostedPhoneCallForConsultation> {
   const prisma = input.prisma ?? getPrisma();
+  const crypto = input.crypto ?? hostedPhoneCallCrypto;
   let call = await prisma.hostedPhoneCall.findUnique({
     where: {
       id: input.callId,
@@ -87,7 +93,7 @@ export async function getHostedPhoneCallForConsultation(input: {
   }
 
   return {
-    brief: hostedPhoneCallBriefSchema.parse(call.briefJson),
+    brief: await readHostedPhoneCallBrief({ call, crypto }),
     id: call.id,
     memberId: call.memberId,
     providerCallId: call.providerCallId,

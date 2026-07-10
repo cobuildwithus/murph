@@ -62,7 +62,7 @@ describe("createHostedPhoneCall", () => {
       status: "calling",
     });
     expect(store.createCalls[0]!.data).toMatchObject({
-      briefJson: VALID_BRIEF,
+      briefEncrypted: expect.stringMatching(/^hsb-test:/u),
       memberId: "member_1",
       provider: "retell",
       requestKey: "phone_call_request_1",
@@ -182,10 +182,8 @@ describe("createHostedPhoneCall", () => {
     expect(runtime.startCalls).toEqual([]);
     expect(store.updateManyCalls).toEqual([{
       data: {
-        resultJson: {
-          outcome: "not_completed",
-          summary: "Murph could not start the phone call.",
-        },
+        resultEncrypted: expect.stringMatching(/^hsb-test:/u),
+        resultJson: Prisma.DbNull,
         status: "failed",
       },
       where: {
@@ -197,10 +195,8 @@ describe("createHostedPhoneCall", () => {
       },
     }]);
     expect(store.currentCall()).toMatchObject({
-      resultJson: {
-        outcome: "not_completed",
-        summary: "Murph could not start the phone call.",
-      },
+      resultEncrypted: expect.stringMatching(/^hsb-test:/u),
+      resultJson: null,
       status: "failed",
     });
   });
@@ -279,10 +275,8 @@ describe("createHostedPhoneCall", () => {
     const createdCallId = store.createCalls[0]!.data.id;
     expect(store.updateManyCalls).toEqual([{
       data: {
-        resultJson: {
-          outcome: "not_completed",
-          summary: "Murph could not start the phone call.",
-        },
+        resultEncrypted: expect.stringMatching(/^hsb-test:/u),
+        resultJson: Prisma.DbNull,
         status: "failed",
       },
       where: {
@@ -316,10 +310,8 @@ describe("createHostedPhoneCall", () => {
     expect(runtime.startCalls).toEqual([]);
     expect(store.updateManyCalls).toEqual([{
       data: {
-        resultJson: {
-          outcome: "not_completed",
-          summary: "Murph could not start the phone call.",
-        },
+        resultEncrypted: expect.stringMatching(/^hsb-test:/u),
+        resultJson: Prisma.DbNull,
         status: "failed",
       },
       where: {
@@ -430,10 +422,8 @@ describe("createHostedPhoneCall", () => {
     });
     expect(store.updateManyCalls).toEqual([{
       data: {
-        resultJson: {
-          outcome: "not_completed",
-          summary: "Murph could not start the phone call.",
-        },
+        resultEncrypted: expect.stringMatching(/^hsb-test:/u),
+        resultJson: Prisma.DbNull,
         status: "failed",
       },
       where: {
@@ -549,7 +539,9 @@ function createPhoneCallStore(input: {
         current = {
           ...current,
           ...args.data,
+          briefJson: null,
           providerCallId: null,
+          resultEncrypted: null,
           resultJson: null,
         };
         return current;
@@ -574,7 +566,8 @@ function createPhoneCallStore(input: {
         current = {
           ...current,
           providerCallId: args.data.providerCallId ?? current.providerCallId,
-          resultJson: args.data.resultJson ?? current.resultJson,
+          resultEncrypted: args.data.resultEncrypted ?? current.resultEncrypted,
+          resultJson: args.data.resultJson === Prisma.DbNull ? null : current.resultJson,
           status: args.data.status,
         };
         return { count: 1 };
@@ -639,6 +632,7 @@ function buildHostedPhoneCall(overrides: Partial<HostedPhoneCall> = {}): HostedP
   const now = new Date("2026-06-25T00:00:00.000Z");
   return {
     analyzedAt: null,
+    briefEncrypted: null,
     briefJson: VALID_BRIEF,
     createdAt: now,
     endedAt: null,
@@ -647,6 +641,7 @@ function buildHostedPhoneCall(overrides: Partial<HostedPhoneCall> = {}): HostedP
     provider: "retell",
     providerCallId: null,
     requestKey: "phone_call_request_1",
+    resultEncrypted: null,
     resultJson: null,
     status: "starting",
     updatedAt: now,

@@ -15,6 +15,11 @@ import {
 
 import { getPrisma } from "../prisma";
 import {
+  hostedPhoneCallCrypto,
+  readHostedPhoneCallBrief,
+  type HostedPhoneCallCrypto,
+} from "./crypto";
+import {
   requireHostedPhoneCallResultNotificationRoute,
 } from "./notification-route";
 import { createRetellPhoneCallRuntime } from "./retell-runtime";
@@ -27,7 +32,7 @@ interface HostedPhoneCallStore {
   hostedPhoneCall: {
     create(input: {
       data: {
-        briefJson: HostedPhoneCallBrief;
+        briefEncrypted: string;
         id: string;
         memberId: string;
         provider: "retell";
@@ -48,7 +53,8 @@ interface HostedPhoneCallStore {
     updateMany(input: {
       data: {
         providerCallId?: string;
-        resultJson?: HostedPhoneCallResult;
+        resultEncrypted?: string;
+        resultJson?: Prisma.NullTypes.DbNull;
         status: HostedPhoneCall["status"];
       };
       where: {
@@ -64,6 +70,7 @@ interface HostedPhoneCallStore {
 
 export async function createHostedPhoneCall(input: {
   brief: HostedPhoneCallBrief;
+  crypto?: HostedPhoneCallCrypto;
   memberId: string;
   prisma?: HostedPhoneCallStore;
   requestKey: string;
@@ -76,6 +83,7 @@ export async function createHostedPhoneCall(input: {
   }) => Promise<string | null>;
 }): Promise<HostedPhoneCallStartResponse> {
   const prisma = input.prisma ?? getPrisma();
+  const crypto = input.crypto ?? hostedPhoneCallCrypto;
   const runtime = input.runtime ?? createRetellPhoneCallRuntime();
   const resolveTransferNumber =
     input.transferNumberResolver ?? resolveVerifiedMemberTransferNumber;
@@ -87,12 +95,18 @@ export async function createHostedPhoneCall(input: {
       await requireHostedPhoneCallResultNotificationRoute({ memberId });
     });
 
+  const callId = createHostedPhoneCallId();
+  const briefEncrypted = await crypto.encryptBrief({
+    callId,
+    memberId: input.memberId,
+    value: input.brief,
+  });
   let call: HostedPhoneCall;
   try {
     call = await prisma.hostedPhoneCall.create({
       data: {
-        briefJson: input.brief,
-        id: createHostedPhoneCallId(),
+        briefEncrypted,
+        id: callId,
         memberId: input.memberId,
         provider: "retell",
         requestKey: input.requestKey,
@@ -115,11 +129,12 @@ export async function createHostedPhoneCall(input: {
       throw new Error("Hosted phone call request key collision.");
     }
     assertHostedPhoneCallBriefMatches({
-      actual: existing.briefJson,
+      actual: await readHostedPhoneCallBrief({ call: existing, crypto }),
       expected: input.brief,
     });
     const replayed = await failStaleUnstartedPhoneCallReservation({
       call: existing,
+      crypto,
       prisma,
     });
     return {
@@ -144,12 +159,18 @@ export async function createHostedPhoneCall(input: {
         : null,
     });
   } catch (error) {
+    const failedResult: HostedPhoneCallResult = {
+      outcome: "not_completed",
+      summary: "Murph could not start the phone call.",
+    };
     const updated = await prisma.hostedPhoneCall.updateMany({
       data: {
-        resultJson: {
-          outcome: "not_completed",
-          summary: "Murph could not start the phone call.",
-        },
+        resultEncrypted: await crypto.encryptResult({
+          callId: call.id,
+          memberId: call.memberId,
+          value: failedResult,
+        }),
+        resultJson: Prisma.DbNull,
         status: "failed",
       },
       where: {
@@ -230,6 +251,7 @@ function hasPhoneCallAdvancedBeyondStart(call: HostedPhoneCall): boolean {
 
 async function failStaleUnstartedPhoneCallReservation(input: {
   call: HostedPhoneCall;
+  crypto: HostedPhoneCallCrypto;
   prisma: HostedPhoneCallStore;
 }): Promise<HostedPhoneCall> {
   const resultJson: HostedPhoneCallResult = {
@@ -246,9 +268,15 @@ async function failStaleUnstartedPhoneCallReservation(input: {
     return input.call;
   }
 
+  const resultEncrypted = await input.crypto.encryptResult({
+    callId: input.call.id,
+    memberId: input.call.memberId,
+    value: resultJson,
+  });
   const updated = await input.prisma.hostedPhoneCall.updateMany({
     data: {
-      resultJson,
+      resultEncrypted,
+      resultJson: Prisma.DbNull,
       status: "failed",
     },
     where: {
@@ -267,7 +295,8 @@ async function failStaleUnstartedPhoneCallReservation(input: {
 
   return {
     ...input.call,
-    resultJson,
+    resultEncrypted,
+    resultJson: null,
     status: "failed",
   };
 }
