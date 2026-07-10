@@ -93,7 +93,19 @@ export default async function OGImage() {
             width: "100%",
             height: "100%",
             background:
-              "radial-gradient(circle at 30% 45%, rgba(245, 240, 232, 0.95) 0%, rgba(245, 240, 232, 0.75) 40%, rgba(245, 240, 232, 0) 72%)",
+              "radial-gradient(circle at 30% 42%, rgba(245, 240, 232, 0.9) 0%, rgba(245, 240, 232, 0.55) 38%, rgba(245, 240, 232, 0) 68%)",
+          }}
+        />
+        {/* Warm corner tone, bottom-left */}
+        <div
+          style={{
+            position: "absolute",
+            top: 0,
+            left: 0,
+            width: "100%",
+            height: "100%",
+            background:
+              "radial-gradient(circle at 5% 100%, rgba(224, 210, 183, 0.6) 0%, rgba(224, 210, 183, 0) 45%)",
           }}
         />
 
@@ -146,6 +158,37 @@ export default async function OGImage() {
             Murph figures out what actually works and keeps score in your
             group chat.
           </div>
+        </div>
+
+        {/* Goal pills anchoring the bottom-left */}
+        <div
+          style={{
+            position: "absolute",
+            bottom: 64,
+            left: 72,
+            display: "flex",
+            gap: 12,
+          }}
+        >
+          {["Get stronger", "Fix your sleep", "Lower cholesterol"].map(
+            (goal) => (
+              <div
+                key={goal}
+                style={{
+                  padding: "9px 18px",
+                  borderRadius: 999,
+                  border: "1px solid rgba(160, 122, 78, 0.35)",
+                  backgroundColor: "rgba(255, 255, 255, 0.45)",
+                  fontFamily: "DM Sans",
+                  fontSize: 13,
+                  letterSpacing: "0.14em",
+                  color: MUTED,
+                }}
+              >
+                {goal.toUpperCase()}
+              </div>
+            ),
+          )}
         </div>
 
         {/* Phone mock, bleeding off the bottom edge (mirrors the homepage
