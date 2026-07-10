@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import os from "node:os";
 import path from "node:path";
 import { promises as fs } from "node:fs";
+import { gzipSync } from "node:zlib";
 import { test, vi } from "vitest";
 
 import {
@@ -531,6 +532,55 @@ test("integration ingest migration rewrites event rawRefs before deleting legacy
   assert.equal(rewrittenEvents.length, 1);
   assert.equal(rewrittenEvents[0]?.id, eventId);
   assert.equal(Object.hasOwn(rewrittenEvents[0] ?? {}, "rawRefs"), false);
+});
+
+test("integration ingest migration amends archived ingest months and stays idempotent", async () => {
+  const vaultRoot = await makeTempDirectory("murph-integration-ingest-migration-archive-amend");
+  await initializeVault({ vaultRoot, createdAt: "2026-05-01T00:00:00.000Z" });
+  await writeLegacyVaultFormat(vaultRoot);
+
+  const archivedImportId = "xfm_AAAAAAAAAAAAAAAAAAAAAAAAAA";
+  const logicalPath = "ledger/integration-ingests/2026/2026-05.jsonl";
+  await writeConflictingIntegrationJournalRow({
+    vaultRoot,
+    importId: archivedImportId,
+    importedAt: "2026-05-02T00:00:00.000Z",
+  });
+  const logicalAbsolutePath = path.join(vaultRoot, logicalPath);
+  const archivedContent = await fs.readFile(logicalAbsolutePath);
+  await fs.writeFile(`${logicalAbsolutePath}.gz`, gzipSync(archivedContent));
+  await fs.unlink(logicalAbsolutePath);
+
+  const bundle = await writeLegacyIntegrationBundle({
+    vaultRoot,
+    importId: "xfm_CCCCCCCCCCCCCCCCCCCCCCCCCC",
+    importedAt: "2026-05-03T00:00:00.000Z",
+    resource: "sleep",
+  });
+
+  const result = await runIntegrationIngestMigration({
+    apply: true,
+    vaultRoot,
+  });
+
+  assert.equal(result.appendedBundleCount, 1);
+  assert.equal(result.deletedFileCount, 2);
+  assert.equal(result.finalized, true);
+  assert.equal(await fileExists(logicalAbsolutePath), false);
+  assert.equal(await fileExists(`${logicalAbsolutePath}.gz`), true);
+  assert.ok(await readIntegrationIngestById(vaultRoot, archivedImportId));
+  const migrated = await readIntegrationIngestById(vaultRoot, bundle.importId);
+  assert.ok(migrated);
+  assert.equal(migrated.relativePath, logicalPath);
+
+  const rerun = await runIntegrationIngestMigration({
+    apply: true,
+    vaultRoot,
+  });
+  assert.equal(rerun.mutated, false);
+  assert.equal(rerun.appendedBundleCount, 0);
+  assert.equal(await fileExists(logicalAbsolutePath), false);
+  assert.equal(await fileExists(`${logicalAbsolutePath}.gz`), true);
 });
 
 test("integration ingest migration preserves BOM-prefixed evidence bytes", async () => {

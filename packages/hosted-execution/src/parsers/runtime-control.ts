@@ -26,6 +26,7 @@ import {
   HOSTED_MAILBOX_LANES,
   HOSTED_IDLE_CHECKPOINT_TRIGGERS,
   HOSTED_CODEX_AUTH_UPDATE_RESPONSE_STATUSES,
+  HOSTED_CANONICAL_WRITE_RECEIPT_REDACTED_STATUS_KEYS,
   HOSTED_RUNTIME_LOG_COMPONENTS,
   HOSTED_RUNTIME_LOG_EVENT_CODES,
   HOSTED_RUNTIME_LOG_LEVELS,
@@ -273,6 +274,8 @@ const SAFE_REDACTED_METADATA_KEY_SUFFIXES = [
   "Types",
 ] as const;
 const HOSTED_RUNTIME_REDACTED_JSON_MAX_KEYS = 96;
+const HOSTED_CANONICAL_WRITE_RECEIPT_REDACTED_STATUS_KEY_SET =
+  new Set<string>(HOSTED_CANONICAL_WRITE_RECEIPT_REDACTED_STATUS_KEYS);
 const HOSTED_RUNTIME_REDACTED_ARRAY_MAX_LENGTH = 16;
 const HOSTED_RUNTIME_REDACTED_OBJECT_MAX_KEYS = 16;
 const HOSTED_RUNTIME_REDACTED_OBJECT_ARRAY_KEYS = new Set([
@@ -2837,6 +2840,7 @@ export function parseHostedWorkspaceState(value: unknown): HostedWorkspaceState 
           redactedStatus: parseHostedRuntimeRedactedJson(
             record.redactedStatus,
             "Hosted workspace state redactedStatus",
+            HOSTED_CANONICAL_WRITE_RECEIPT_REDACTED_STATUS_KEY_SET,
           ),
         }),
     snapshotRef: parseHostedExecutionSnapshotRef(
@@ -2928,6 +2932,7 @@ export function parseHostedWorkspaceCheckpointRequest(
           redactedStatus: parseHostedRuntimeRedactedJson(
             record.redactedStatus,
             "Hosted workspace checkpoint request redactedStatus",
+            HOSTED_CANONICAL_WRITE_RECEIPT_REDACTED_STATUS_KEY_SET,
           ),
         }),
     ...(record.runtimeWakePendingAtCheckpoint === undefined
@@ -3441,6 +3446,7 @@ export function parseHostedWorkspaceInvocationResult(value: unknown): HostedWork
           redactedStatus: parseHostedRuntimeRedactedJson(
             record.redactedStatus,
             "Hosted workspace invocation result redactedStatus",
+            HOSTED_CANONICAL_WRITE_RECEIPT_REDACTED_STATUS_KEY_SET,
           ),
         }),
     status,
@@ -3757,6 +3763,7 @@ function readNullableNonNegativeBigIntString(value: unknown, label: string): str
 function parseHostedRuntimeRedactedJson(
   value: unknown,
   label: string,
+  reservedKeys?: ReadonlySet<string>,
 ): HostedRuntimeRedactedJson | null {
   if (value === null || value === undefined) {
     return null;
@@ -3766,7 +3773,10 @@ function parseHostedRuntimeRedactedJson(
   const entries = Object.entries(record);
   const parsed: HostedRuntimeRedactedJson = {};
 
-  if (entries.length > HOSTED_RUNTIME_REDACTED_JSON_MAX_KEYS) {
+  const ordinaryEntryCount = reservedKeys
+    ? entries.filter(([key]) => !reservedKeys.has(key)).length
+    : entries.length;
+  if (ordinaryEntryCount > HOSTED_RUNTIME_REDACTED_JSON_MAX_KEYS) {
     throw new TypeError(
       `${label} must contain at most ${HOSTED_RUNTIME_REDACTED_JSON_MAX_KEYS} fields.`,
     );
