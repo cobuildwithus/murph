@@ -5143,8 +5143,8 @@ test('sendAssistantMessageLocal probes active-turn input once before provider st
 
 // Hosted-runner turns always run queue-only (the outbox owns final-reply
 // delivery), including interactive auto-replies where a member is actively
-// waiting. Progress delivery must stay wired there so mid-turn updates and
-// commentary-phase messages reach the member instead of silently vanishing.
+// waiting. Progress delivery stays wired there for explicit model progress and
+// required system notices; native provider commentary remains internal.
 test('sendAssistantMessageLocal keeps hosted progress wired in queue-only auto-replies', async () => {
   const context = await createTempVaultContext(
     'assistant-local-service-hosted-auto-reply-progress-',

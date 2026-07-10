@@ -29,7 +29,7 @@ import {
   extractCodexSessionId,
   extractCodexStatusEventFromStderrLine,
   extractCodexTraceUpdatesFromNormalized,
-  extractCodexCurrentChannelProgressTextFromNormalized,
+  extractCodexContextCompactionProgressTextFromNormalized,
   normalizeCodexEvent,
   normalizeStreamingText,
 } from './assistant-codex-events.js'
@@ -136,7 +136,6 @@ import type {
 import type {
   AssistantProgressDelivery,
   AssistantProgressDeliveryResult,
-  AssistantProgressDeliverySource,
   AssistantTurnProductFeedbackRecorder,
 } from './assistant/turn-progress.js'
 
@@ -385,28 +384,6 @@ async function waitForCodexProgressDrain(
   }
 
   await Promise.allSettled(pending)
-}
-
-function resolveCodexCurrentChannelProgressSource(
-  normalizedEvent: CodexNormalizedEvent,
-): AssistantProgressDeliverySource | null {
-  if (
-    normalizedEvent.kind === 'assistant_message' &&
-    normalizedEvent.itemState === 'completed' &&
-    normalizedEvent.messagePhase === 'commentary'
-  ) {
-    return 'model'
-  }
-
-  if (
-    normalizedEvent.kind === 'status_item' &&
-    normalizedEvent.itemType === 'context.compaction' &&
-    normalizedEvent.itemState === 'running'
-  ) {
-    return 'system'
-  }
-
-  return null
 }
 
 export interface CodexAppServerTurnInput {
@@ -2269,7 +2246,6 @@ async function runCodexAppServerTurnOnProcess(
   let codexThreadId = normalizeNullableString(input.resumeSessionId) ?? null
   let turnId: string | null = null
   const isReusedWarmProcess = codexProcess.initializedForRpc
-  let lastAgentMessage: string | null = null
   // Completed final-phase agent messages that were followed by a steered
   // user-message item and then superseded by a newer response segment in the
   // same turn. A closed segment is held as a candidate until newer text or
@@ -2747,48 +2723,41 @@ async function runCodexAppServerTurnOnProcess(
       })
   }
 
-  const notifyCurrentChannelProgress = (
+  const notifyContextCompactionProgress = (
     deliveryContextOrdinal: number,
     text: string,
-    source: AssistantProgressDeliverySource,
   ): boolean => {
     const progressDelivery = resolveCodexAppServerProgressDelivery(input)
     if (
       !progressDelivery ||
-      (source === 'system' &&
-        (contextCompactionProgressNotified || contextCompactionProgressPending))
+      contextCompactionProgressNotified ||
+      contextCompactionProgressPending
     ) {
       return false
     }
 
     let progressPromise: Promise<AssistantProgressDeliveryResult>
     try {
-      if (source === 'system') {
-        contextCompactionProgressPending = true
-      }
+      contextCompactionProgressPending = true
       progressPromise = progressDelivery.send(text, {
-        ...(source === 'system' ? { required: true } : {}),
-        source,
+        required: true,
+        source: 'system',
       })
     } catch {
-      if (source === 'system') {
-        contextCompactionProgressPending = false
-      }
+      contextCompactionProgressPending = false
       return false
     }
-    if (source === 'system') {
-      progressPromise = progressPromise.then((result) => {
-        if (result.kind === 'sent') {
-          contextCompactionProgressNotified = true
-        } else {
-          contextCompactionProgressPending = false
-        }
-        return result
-      }, (error: unknown) => {
+    progressPromise = progressPromise.then((result) => {
+      if (result.kind === 'sent') {
+        contextCompactionProgressNotified = true
+      } else {
         contextCompactionProgressPending = false
-        throw error
-      })
-    }
+      }
+      return result
+    }, (error: unknown) => {
+      contextCompactionProgressPending = false
+      throw error
+    })
     trackProgressDelivery(
       trackExternallyVisibleProgressDelivery({
         deliveryContextOrdinal,
@@ -3350,13 +3319,12 @@ async function runCodexAppServerTurnOnProcess(
       recordAssistantTraceUpdate(update, deliveryContextOrdinal)
     }
     if (isCommentaryAssistantMessage) {
-      // Commentary is classified for immediate progress delivery. Remove its
-      // stream, including any earlier deltas for the same item, so a media-only
-      // response cannot reuse progress as final reply text.
+      // Commentary is internal progress, not a member-facing message. Remove
+      // its stream, including any earlier deltas for the same item, so a
+      // media-only response cannot reuse it as final reply text.
       for (const update of rawUpdates) {
         removeAssistantTraceUpdateFromFinalFallback(update)
       }
-      lastAgentMessage = null
     }
 
     if (
@@ -3376,20 +3344,15 @@ async function runCodexAppServerTurnOnProcess(
       }
     }
 
-    const progressDeliveryText =
-      extractCodexCurrentChannelProgressTextFromNormalized(normalizedEvent)
-    const progressDeliverySource = progressDeliveryText
-      ? resolveCodexCurrentChannelProgressSource(normalizedEvent)
-      : null
+    const contextCompactionProgressText =
+      extractCodexContextCompactionProgressTextFromNormalized(normalizedEvent)
     if (
-      progressDeliveryText &&
-      progressDeliverySource &&
+      contextCompactionProgressText &&
       !suppressDeliveryContext
     ) {
-      notifyCurrentChannelProgress(
+      notifyContextCompactionProgress(
         deliveryContextOrdinal,
-        progressDeliveryText,
-        progressDeliverySource,
+        contextCompactionProgressText,
       )
     }
 
@@ -3408,7 +3371,6 @@ async function runCodexAppServerTurnOnProcess(
         completedFinalAgentMessage = null
         assistantStreams.clear()
         assistantStreamOrder.length = 0
-        lastAgentMessage = null
         responseMedia = []
       }
       completedUserMessageOrdinal += 1
@@ -3420,10 +3382,10 @@ async function runCodexAppServerTurnOnProcess(
         // A completed no-reply context must not leak later text progress.
       } else {
         if (progressEvent.kind === 'message') {
-          if (!isCommentaryAssistantMessage) {
-            lastAgentMessage = progressEvent.text
-          }
-          if (input.onProgress && normalizeStreamingText(progressEvent.text)) {
+          if (
+            input.onProgress &&
+            normalizeStreamingText(progressEvent.text)
+          ) {
             markExternallyVisibleAssistantOutput(deliveryContextOrdinal)
           }
         }
@@ -3924,9 +3886,7 @@ async function runCodexAppServerTurnOnProcess(
     extractAssistantMessageFallback({
       assistantStreams,
       assistantStreamOrder,
-    }) ??
-    lastAgentMessage ??
-    ''
+    }) ?? ''
   const latestDeliveryContextOrdinal = Math.max(0, completedUserMessageOrdinal)
   const latestFinalActionPatch = resolveFinalActionPatch(
     latestDeliveryContextOrdinal,
