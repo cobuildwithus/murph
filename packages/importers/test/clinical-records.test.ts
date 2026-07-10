@@ -16,7 +16,7 @@ import {
   type ClinicalImportPlan,
   type ClinicalImportUpsertPayload,
 } from "@murphai/clinical-records";
-import { importEventBatch, initializeVault } from "@murphai/core";
+import { findEventByExternalRef, importEventBatch, initializeVault } from "@murphai/core";
 import { buildClinicalImportPlan } from "../src/clinical-records/index.ts";
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -455,6 +455,127 @@ describe("buildClinicalImportPlan", () => {
     ]);
   });
 
+  it("rejects vital observations that mix component and top-level values", async () => {
+    const vaultRoot = await writeClinicalFixture({
+      resourceFiles: [{
+        resourceType: "Observation",
+        relativePath: "Observation/page-1.json",
+        count: 1,
+      }],
+      pages: {
+        "Observation/page-1.json": {
+          resourceType: "Observation",
+          id: "mixed-top-level-vital",
+          status: "final",
+          effectiveDateTime: "2026-07-01T12:00:00.000Z",
+          code: {
+            coding: [{ system: "http://loinc.org", code: "8867-4", display: "Heart rate" }],
+          },
+          valueQuantity: { value: 188, unit: "bpm" },
+          component: [
+            {
+              code: {
+                coding: [{ system: "http://loinc.org", code: "8480-6", display: "Systolic blood pressure" }],
+              },
+              valueQuantity: { value: 128, unit: "mmHg" },
+            },
+            {
+              code: {
+                coding: [{ system: "http://loinc.org", code: "8462-4", display: "Diastolic blood pressure" }],
+              },
+              valueQuantity: { value: 82, unit: "mmHg" },
+            },
+          ],
+        },
+      },
+    });
+
+    const plan = await buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot });
+
+    expect(upserts(plan)).toEqual([]);
+    expect(reviews(plan)).toEqual([
+      expect.objectContaining({
+        resourceId: "mixed-top-level-vital",
+        reason: "vital observation mixes component and top-level values",
+      }),
+    ]);
+  });
+
+  it("rejects observations with multiple value choices", async () => {
+    const vaultRoot = await writeClinicalFixture({
+      resourceFiles: [{
+        resourceType: "Observation",
+        relativePath: "Observation/page-1.json",
+        count: 3,
+      }],
+      pages: {
+        "Observation/page-1.json": [
+          {
+            resourceType: "Observation",
+            id: "ambiguous-vital-value",
+            status: "final",
+            effectiveDateTime: "2026-07-01T12:00:00.000Z",
+            code: {
+              coding: [{ system: "http://loinc.org", code: "8867-4", display: "Heart rate" }],
+            },
+            valueQuantity: { value: 72, unit: "bpm" },
+            valueString: "critical",
+          },
+          {
+            resourceType: "Observation",
+            id: "ambiguous-vital-component-value",
+            status: "final",
+            effectiveDateTime: "2026-07-01T12:00:30.000Z",
+            code: { text: "Vital signs panel" },
+            component: [{
+              code: {
+                coding: [{ system: "http://loinc.org", code: "8867-4", display: "Heart rate" }],
+              },
+              valueQuantity: { value: 72, unit: "bpm" },
+              valueString: "critical",
+            }],
+          },
+          {
+            resourceType: "Observation",
+            id: "ambiguous-lab-component-value",
+            status: "final",
+            effectiveDateTime: "2026-07-01T12:01:00.000Z",
+            category: [{
+              coding: [{
+                system: "http://terminology.hl7.org/CodeSystem/observation-category",
+                code: "laboratory",
+              }],
+            }],
+            code: { text: "Metabolic panel" },
+            component: [{
+              code: { text: "Glucose" },
+              valueQuantity: { value: 91, unit: "mg/dL" },
+              valueString: "critical",
+            }],
+          },
+        ],
+      },
+    });
+
+    const plan = await buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot });
+
+    expect(upserts(plan)).toEqual([]);
+    expect(reviews(plan)).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        resourceId: "ambiguous-vital-value",
+        reason: "vital quantity is not importable",
+      }),
+      expect.objectContaining({
+        resourceId: "ambiguous-vital-component-value",
+        reason: "vital quantity is not importable",
+      }),
+      expect.objectContaining({
+        resourceId: "ambiguous-lab-component-value",
+        reason: "laboratory observation component result is not importable",
+      }),
+    ]));
+  });
+
   it("rejects scalar vitals that have unhandled components", async () => {
     const vaultRoot = await writeClinicalFixture({
       resourceFiles: [{
@@ -750,6 +871,27 @@ describe("buildClinicalImportPlan", () => {
         assertedOn: "2026-07-02",
       }),
     );
+
+    const canonicalVaultRoot = await initializeCanonicalFixtureVault();
+    const applied = await importEventBatch({
+      vaultRoot: canonicalVaultRoot,
+      decisions: executableDecisions(plan),
+      apply: true,
+    });
+    const liveEvents = await Promise.all([note, assertion].map((payload) =>
+      payload
+        ? findEventByExternalRef({
+            vaultRoot: canonicalVaultRoot,
+            system: payload.externalRef.system,
+            resourceType: payload.externalRef.resourceType,
+            resourceId: payload.externalRef.resourceId,
+          })
+        : null
+    ));
+
+    expect(applied.createdCount).toBe(2);
+    expect(liveEvents.map((event) => event?.kind)).toEqual(["note", "clinical_assertion"]);
+    expect(liveEvents).toHaveLength(2);
   });
 
   it("blocks no-known allergy assertions when allergy retrieval is incomplete", async () => {
@@ -1021,7 +1163,7 @@ describe("buildClinicalImportPlan", () => {
         {
           resourceType: "DocumentReference",
           relativePath: "DocumentReference/page-1.json",
-          count: 4,
+          count: 5,
         },
       ],
       pages: {
@@ -1102,6 +1244,22 @@ describe("buildClinicalImportPlan", () => {
               },
             ],
           },
+          {
+            resourceType: "DocumentReference",
+            id: "document-numeric-data",
+            status: "current",
+            docStatus: "final",
+            date: "2026-07-02T08:34:00.000Z",
+            description: "Numeric clinical note",
+            content: [
+              {
+                attachment: {
+                  contentType: "text/plain",
+                  data: 1400,
+                },
+              },
+            ],
+          },
         ],
       },
     });
@@ -1109,7 +1267,7 @@ describe("buildClinicalImportPlan", () => {
     const plan = await buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot });
 
     expect(upserts(plan)).toEqual([]);
-    expect(reviews(plan)).toHaveLength(4);
+    expect(reviews(plan)).toHaveLength(5);
     expect(reviews(plan)).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -1127,6 +1285,10 @@ describe("buildClinicalImportPlan", () => {
         expect.objectContaining({
           resourceId: "document-valid-then-malformed",
           reason: "document reference has multiple inline text attachments",
+        }),
+        expect.objectContaining({
+          resourceId: "document-numeric-data",
+          reason: "document reference text is not available in raw FHIR page",
         }),
       ]),
     );
@@ -1190,6 +1352,46 @@ describe("buildClinicalImportPlan", () => {
         slug: "albumin",
         textValue: "Normal",
       },
+    ]);
+  });
+
+  it("rejects a malformed top-level laboratory result instead of dropping it from a panel", async () => {
+    const vaultRoot = await writeClinicalFixture({
+      resourceFiles: [{
+        resourceType: "Observation",
+        relativePath: "Observation/page-1.json",
+        count: 1,
+      }],
+      pages: {
+        "Observation/page-1.json": {
+          resourceType: "Observation",
+          id: "malformed-top-level-lab-result",
+          status: "final",
+          effectiveDateTime: "2026-07-01T12:00:00.000Z",
+          category: [{
+            coding: [{
+              system: "http://terminology.hl7.org/CodeSystem/observation-category",
+              code: "laboratory",
+            }],
+          }],
+          code: { text: "Sodium" },
+          valueQuantity: { value: "142", unit: "mmol/L" },
+          component: [{
+            code: { text: "Potassium" },
+            valueQuantity: { value: 4.2, unit: "mmol/L" },
+          }],
+        },
+      },
+    });
+
+    const plan = await buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot });
+
+    expect(upserts(plan)).toEqual([]);
+    expect(reviews(plan)).toEqual([
+      expect.objectContaining({
+        resourceId: "malformed-top-level-lab-result",
+        reason: "laboratory observation result is not importable",
+      }),
     ]);
   });
 
@@ -1356,6 +1558,87 @@ describe("buildClinicalImportPlan", () => {
         }),
       ]),
     );
+  });
+
+  it("rejects whitespace-only and coerced resource text", async () => {
+    const vaultRoot = await writeClinicalFixture({
+      resourceFiles: [
+        {
+          resourceType: "DiagnosticReport",
+          relativePath: "DiagnosticReport/page-1.json",
+          count: 3,
+        },
+        {
+          resourceType: "Observation",
+          relativePath: "Observation/page-1.json",
+          count: 1,
+        },
+      ],
+      pages: {
+        "DiagnosticReport/page-1.json": [
+          {
+            resourceType: "DiagnosticReport",
+            id: "whitespace-report-summary",
+            status: "final",
+            issued: "2026-07-01T12:00:00.000Z",
+            code: { text: "Pathology report" },
+            conclusion: "   ",
+          },
+          {
+            resourceType: "DiagnosticReport",
+            id: "numeric-report-summary",
+            status: "final",
+            issued: "2026-07-01T12:01:00.000Z",
+            code: { text: "Pathology report" },
+            conclusion: 12345,
+          },
+          {
+            resourceType: "DiagnosticReport",
+            id: "numeric-report-narrative",
+            status: "final",
+            issued: "2026-07-01T12:01:30.000Z",
+            code: { text: "Pathology report" },
+            text: { div: 12345 },
+          },
+        ],
+        "Observation/page-1.json": {
+          resourceType: "Observation",
+          id: "whitespace-lab-analyte",
+          status: "final",
+          effectiveDateTime: "2026-07-01T12:02:00.000Z",
+          category: [{
+            coding: [{
+              system: "http://terminology.hl7.org/CodeSystem/observation-category",
+              code: "laboratory",
+            }],
+          }],
+          code: { text: " " },
+          valueQuantity: { value: 142, unit: "mmol/L" },
+        },
+      },
+    });
+
+    const plan = await buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot });
+
+    expect(upserts(plan)).toEqual([]);
+    expect(reviews(plan)).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        resourceId: "whitespace-report-summary",
+        reason: "diagnostic report summary is not available in raw FHIR page",
+      }),
+      expect.objectContaining({
+        resourceId: "numeric-report-summary",
+        reason: "diagnostic report summary is not available in raw FHIR page",
+      }),
+      expect.objectContaining({
+        resourceId: "numeric-report-narrative",
+        reason: "diagnostic report summary is not available in raw FHIR page",
+      }),
+      expect.objectContaining({
+        resourceId: "whitespace-lab-analyte",
+        reason: "laboratory observation result is not importable",
+      }),
+    ]));
   });
 
   it("preserves lab analytes that do not derive a slug", async () => {
@@ -2734,6 +3017,129 @@ describe("buildClinicalImportPlan", () => {
     ]));
   });
 
+  it("blocks no-known allergies when another resource contains allergy evidence", async () => {
+    const vaultRoot = await writeClinicalFixture({
+      resourceFiles: [
+        {
+          resourceType: "AllergyIntolerance",
+          relativePath: "AllergyIntolerance/page-1.json",
+          count: 1,
+        },
+        {
+          resourceType: "Condition",
+          relativePath: "Condition/page-1.json",
+          count: 0,
+        },
+        {
+          resourceType: "Observation",
+          relativePath: "Observation/page-1.json",
+          count: 1,
+        },
+      ],
+      pages: {
+        "AllergyIntolerance/page-1.json": [
+          noKnownAllergyResource("allergy-negative-with-contained-conflict"),
+        ],
+        "Condition/page-1.json": [],
+        "Observation/page-1.json": {
+          ...heartRateResource("observation-with-contained-condition"),
+          contained: [{
+            resourceType: "Condition",
+            id: "contained-penicillin-condition",
+            clinicalStatus: {
+              coding: [{
+                system: "http://terminology.hl7.org/CodeSystem/condition-clinical",
+                code: "active",
+              }],
+            },
+            code: {
+              text: "Penicillin allergy",
+              coding: [{
+                system: "http://snomed.info/sct",
+                code: "91936005",
+                display: "Penicillin allergy",
+              }],
+            },
+          }],
+        },
+      },
+    });
+
+    const plan = await buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot });
+
+    expect(reviews(plan)).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        resourceId: "allergy-negative-with-contained-conflict",
+        reason: "no-known allergy conflicts with allergy evidence",
+      }),
+    ]));
+  });
+
+  it("routes malformed contained resources to review and blocks no-known allergies", async () => {
+    for (const testCase of [
+      {
+        suffix: "object",
+        contained: {
+          resourceType: "Condition",
+          id: "contained-penicillin-condition",
+          code: { text: "Penicillin allergy" },
+        },
+      },
+      {
+        suffix: "padded-type",
+        contained: [{
+          resourceType: " Condition ",
+          id: "contained-penicillin-condition",
+          code: { text: "Penicillin allergy" },
+        }],
+      },
+    ]) {
+      const vaultRoot = await writeClinicalFixture({
+        resourceFiles: [
+          {
+            resourceType: "AllergyIntolerance",
+            relativePath: "AllergyIntolerance/page-1.json",
+            count: 1,
+          },
+          {
+            resourceType: "Condition",
+            relativePath: "Condition/page-1.json",
+            count: 0,
+          },
+          {
+            resourceType: "Observation",
+            relativePath: "Observation/page-1.json",
+            count: 1,
+          },
+        ],
+        pages: {
+          "AllergyIntolerance/page-1.json": [
+            noKnownAllergyResource(`allergy-negative-with-malformed-contained-${testCase.suffix}`),
+          ],
+          "Condition/page-1.json": [],
+          "Observation/page-1.json": {
+            ...heartRateResource(`observation-with-malformed-contained-${testCase.suffix}`),
+            contained: testCase.contained,
+          },
+        },
+      });
+
+      const plan = await buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot });
+
+      expect(upserts(plan)).toEqual([]);
+      expect(reviews(plan)).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          resourceId: `allergy-negative-with-malformed-contained-${testCase.suffix}`,
+          reason: "no-known allergy conflicts with allergy evidence",
+        }),
+        expect.objectContaining({
+          resourceId: `observation-with-malformed-contained-${testCase.suffix}`,
+          reason: "FHIR contained resources are invalid",
+        }),
+      ]));
+    }
+  });
+
   it("does not import global no-known allergies when unsafe no-known allergy evidence is present", async () => {
     const vaultRoot = await writeClinicalFixture({
       resourceFiles: [
@@ -2831,6 +3237,51 @@ describe("buildClinicalImportPlan", () => {
         reason: "FHIR no-known-allergy assertion was refuted or entered in error",
       }),
     ]);
+  });
+
+  it("rejects no-known allergies with contradictory note detail", async () => {
+    for (const testCase of [
+      {
+        resourceId: "allergy-negative-with-note",
+        note: [{ text: "except penicillin" }],
+      },
+      {
+        resourceId: "allergy-negative-with-malformed-note",
+        note: { text: "except penicillin" },
+      },
+    ]) {
+      const vaultRoot = await writeClinicalFixture({
+        resourceFiles: [
+          {
+            resourceType: "AllergyIntolerance",
+            relativePath: "AllergyIntolerance/page-1.json",
+            count: 1,
+          },
+          {
+            resourceType: "Condition",
+            relativePath: "Condition/page-1.json",
+            count: 0,
+          },
+        ],
+        pages: {
+          "AllergyIntolerance/page-1.json": [{
+            ...noKnownAllergyResource(testCase.resourceId),
+            note: testCase.note,
+          }],
+          "Condition/page-1.json": [],
+        },
+      });
+
+      const plan = await buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot });
+
+      expect(upserts(plan)).toEqual([]);
+      expect(reviews(plan)).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          resourceId: testCase.resourceId,
+          reason: "no-known allergy conflicts with allergy evidence",
+        }),
+      ]));
+    }
   });
 
   it("keeps no-known-allergy assertedOn on the source-local date", async () => {
@@ -3308,6 +3759,29 @@ describe("buildClinicalImportPlan", () => {
       .rejects.toThrow("outside the manifest FHIR base");
   });
 
+  it("rejects ambiguous next links before validating their FHIR base", async () => {
+    const vaultRoot = await writeClinicalFixture({
+      resourceFiles: [{
+        resourceType: "Observation",
+        relativePath: "Observation/page-1.json",
+        count: 1,
+      }],
+      pages: {
+        "Observation/page-1.json": {
+          resourceType: "Bundle",
+          link: [
+            { relation: "next", url: "https://foreign-a.example.test/fhir/Observation?page=2" },
+            { relation: "next", url: "https://foreign-b.example.test/fhir/Observation?page=2" },
+          ],
+          entry: [{ resource: heartRateResource("ambiguous-next-links") }],
+        },
+      },
+    });
+
+    await expect(buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot }))
+      .rejects.toThrow("ambiguous next links");
+  });
+
   it("rejects pagination pages that are not reachable from a root page", async () => {
     const orphanPageUrl = `${FHIR_BASE_URL}/Observation?page=2`;
     const vaultRoot = await writeClinicalFixture({
@@ -3753,6 +4227,54 @@ describe("buildClinicalImportPlan", () => {
         resourceId: "missing-provider-freshness",
         reason: "FHIR resource lastUpdated is missing",
       }),
+    ]);
+  });
+
+  it("routes oversized FHIR ids and source revisions to review without aborting the plan", async () => {
+    const oversizedId = "x".repeat(250);
+    const oversizedLastUpdated = `2026-01-03T00:00:00.${"1".repeat(190)}Z`;
+    const vaultRoot = await writeClinicalFixture({
+      resourceFiles: [
+        {
+          resourceType: "Observation",
+          relativePath: "Observation/page-1.json",
+          count: 3,
+        },
+        {
+          resourceType: "Condition",
+          relativePath: "Condition/page-1.json",
+          count: 1,
+        },
+      ],
+      pages: {
+        "Observation/page-1.json": [
+          heartRateResource(oversizedId),
+          {
+            ...heartRateResource(oversizedId),
+            status: "cancelled",
+          },
+          {
+            ...heartRateResource("oversized-source-revision"),
+            meta: { lastUpdated: oversizedLastUpdated },
+          },
+        ],
+        "Condition/page-1.json": {
+          resourceType: "Condition",
+          id: oversizedId,
+          code: { text: "Hypertension" },
+        },
+      },
+    });
+
+    const plan = await buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot });
+
+    expect(upserts(plan)).toEqual([]);
+    expect(retractions(plan)).toEqual([]);
+    expect(reviews(plan).map((decision) => decision.reason)).toEqual([
+      "FHIR resource id is missing",
+      "FHIR resource id is missing",
+      "FHIR resource lastUpdated is missing",
+      "condition registry import not implemented",
     ]);
   });
 

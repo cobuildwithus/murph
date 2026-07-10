@@ -1610,9 +1610,10 @@ function deviceEventContentKey(record: EventRecord): string {
 
 // Public bulk-import content equality also ignores per-import identity (id,
 // lifecycle, and recordedAt, which defaults to the import wall clock), but it
-// keeps rawRefs: import payloads carry caller-supplied provenance there, so a
-// rawRefs-only correction must supersede the stored event instead of being
-// skipped as identical.
+// keeps rawRefs. For unversioned rows, a rawRefs-only correction supersedes the
+// stored event. Comparable versioned rows are ordered by source revision:
+// older revisions are skipped, equal revisions must replay-match or the batch
+// is rejected as a conflict, and newer revisions supersede.
 function eventImportContentKey(record: EventRecord): string {
   const {
     id: _id,
@@ -1621,6 +1622,28 @@ function eventImportContentKey(record: EventRecord): string {
     ...content
   } = record;
   return stableStringify(content);
+}
+
+// Equal source revisions must compare caller-supplied provenance while
+// ignoring vault-local day placement and equivalent version lexemes.
+function eventImportVersionedReplayContentKey(record: EventRecord): string {
+  const {
+    id: _id,
+    dayKey: _dayKey,
+    lifecycle: _lifecycle,
+    recordedAt: _recordedAt,
+    externalRef,
+    ...content
+  } = record;
+  const semanticExternalRef = externalRef
+    ? {
+        system: externalRef.system,
+        resourceType: externalRef.resourceType,
+        resourceId: externalRef.resourceId,
+        facet: externalRef.facet,
+      }
+    : undefined;
+  return stableStringify({ ...content, externalRef: semanticExternalRef });
 }
 
 // Comparable source revisions describe the provider resource, not the local
@@ -2480,10 +2503,10 @@ async function reconcileEventImportDecisionsByExternalRef(
       if (sourceVersionComparison === 0) {
         const existingContentKey = decision.allowsKindReplacement
           ? eventImportSourceSemanticContentKey(latest)
-          : eventImportContentKey(latest);
+          : eventImportVersionedReplayContentKey(latest);
         const incomingContentKey = decision.allowsKindReplacement
           ? eventImportSourceSemanticContentKey(entry.record)
-          : eventImportContentKey(entry.record);
+          : eventImportVersionedReplayContentKey(entry.record);
         if (existingContentKey === incomingContentKey) {
           skippedExistingCount += 1;
           continue;

@@ -133,6 +133,18 @@ const clinicalRawManifestResourceFilesSchema = z
         message: `Clinical raw FHIR manifest total resource count exceeds ${CLINICAL_RAW_MANIFEST_MAX_TOTAL_RESOURCES}.`,
       });
     }
+
+    const seenRelativePaths = new Set<string>();
+    resourceFiles.forEach((resourceFile, index) => {
+      if (seenRelativePaths.has(resourceFile.relativePath)) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Clinical raw FHIR manifest resource file relativePath values must be unique.",
+          path: [index, "relativePath"],
+        });
+      }
+      seenRelativePaths.add(resourceFile.relativePath);
+    });
   });
 
 const clinicalRawManifestCompletedResourceTypesSchema = z

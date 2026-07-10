@@ -345,6 +345,70 @@ test("importEventBatch does not let an older source revision replace a newer eve
   assert.equal(updatedRecords[1]!.kind === "observation" ? updatedRecords[1]!.value : null, 74);
 });
 
+test("importEventBatch skips an equal-version payload replay with an equivalent version lexeme", async () => {
+  const vaultRoot = await makeVault("murph-event-batch-version-lexeme-replay");
+  const firstPayload = buildClinicalMeasurementPayload("2026-03-10T08:00:00.000Z");
+  const replayPayload = {
+    ...firstPayload,
+    externalRef: {
+      ...firstPayload.externalRef,
+      version: "2026-03-10T08:00:00Z",
+    },
+  };
+
+  const first = await importEventBatch({ vaultRoot, payloads: [firstPayload], apply: true });
+  const replay = await importEventBatch({ vaultRoot, payloads: [replayPayload], apply: true });
+
+  assert.equal(first.createdCount, 1);
+  assert.equal(replay.applied, false);
+  assert.equal(replay.skippedExistingCount, 1);
+  assert.equal(replay.supersededCount, 0);
+  assert.equal((await readEventShard(vaultRoot, first.eventShardPaths[0]!)).length, 1);
+});
+
+test("importEventBatch skips an identical equal-version payload after the vault timezone changes", async () => {
+  const vaultRoot = await makeVault("murph-event-batch-timezone-replay", "UTC");
+  const payload = {
+    ...buildClinicalMeasurementPayload("2026-03-10T08:00:00.000Z"),
+    occurredAt: "2026-03-10T01:00:00.000Z",
+  };
+
+  const first = await importEventBatch({ vaultRoot, payloads: [payload], apply: true });
+  await updateVaultSummary({ vaultRoot, timezone: "America/Los_Angeles" });
+  const replay = await importEventBatch({ vaultRoot, payloads: [payload], apply: true });
+
+  assert.equal(first.createdCount, 1);
+  assert.equal(replay.applied, false);
+  assert.equal(replay.skippedExistingCount, 1);
+  assert.equal(replay.supersededCount, 0);
+  assert.equal((await readEventShard(vaultRoot, first.eventShardPaths[0]!)).length, 1);
+});
+
+test("importEventBatch rejects an equal-version payload when only rawRefs change", async () => {
+  const vaultRoot = await makeVault("murph-event-batch-versioned-raw-ref-conflict");
+  const version = "2026-03-10T08:00:00.000Z";
+  const firstPayload = {
+    ...buildClinicalMeasurementPayload(version),
+    rawRefs: ["raw/clinical/import-a.json"],
+  };
+  const conflictingPayload = {
+    ...firstPayload,
+    rawRefs: ["raw/clinical/import-b.json"],
+  };
+
+  const first = await importEventBatch({ vaultRoot, payloads: [firstPayload], apply: true });
+  await assert.rejects(
+    importEventBatch({ vaultRoot, payloads: [conflictingPayload], apply: true }),
+    (error) => {
+      assert.equal(error instanceof VaultError, true);
+      assert.equal((error as VaultError).code, "EVENT_SOURCE_REVISION_CONFLICT");
+      return true;
+    },
+  );
+
+  assert.equal((await readEventShard(vaultRoot, first.eventShardPaths[0]!)).length, 1);
+});
+
 test("importEventBatch treats retrieval-local provenance changes as a source replay", async () => {
   const vaultRoot = await makeVault("murph-event-batch-source-replay", "UTC");
   const firstPayload = {
@@ -523,6 +587,34 @@ test("importEventBatch applies a newer source retraction and replays it idempote
   assert.equal(records[1]!.lifecycle?.state, "deleted");
   assert.equal(records[1]!.externalRef?.version, "2026-03-10T08:00:00.123457Z");
   assert.deepEqual(records[1]!.evidence, retraction.evidence);
+});
+
+test("importEventBatch rejects a versioned retraction when the stored source revision is unordered", async () => {
+  const vaultRoot = await makeVault("murph-event-batch-unordered-retraction");
+  const payload = buildSleepSessionPayload(10);
+  const first = await importEventBatch({ vaultRoot, payloads: [payload], apply: true });
+
+  await assert.rejects(
+    importEventBatch({
+      vaultRoot,
+      decisions: [{
+        action: "retract",
+        externalRef: {
+          ...payload.externalRef,
+          version: "2026-03-10T08:00:00.000Z",
+        },
+        reason: "FHIR resource entered in error",
+      }],
+      apply: true,
+    }),
+    (error) => {
+      assert.equal(error instanceof VaultError, true);
+      assert.equal((error as VaultError).code, "EVENT_SOURCE_REVISION_UNORDERED");
+      return true;
+    },
+  );
+
+  assert.equal((await readEventShard(vaultRoot, first.eventShardPaths[0]!)).length, 1);
 });
 
 test("importEventBatch persists unseen retractions and orders same-batch source revisions", async () => {

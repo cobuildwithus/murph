@@ -412,12 +412,6 @@ function readFhirNextPageUrlHash(input: {
     if (!nextUrl) {
       throw new Error(`Clinical FHIR raw Bundle next link is invalid for ${input.rawRef}.`);
     }
-    if (!isClinicalFhirUrlWithinBase({
-      fhirBaseUrlHash: input.fhirBaseUrlHash,
-      url: nextUrl,
-    })) {
-      throw new Error(`Clinical FHIR raw Bundle next link is outside the manifest FHIR base for ${input.rawRef}.`);
-    }
     nextUrls.add(nextUrl);
   }
   if (nextUrls.size > 1) {
@@ -425,7 +419,16 @@ function readFhirNextPageUrlHash(input: {
   }
 
   const nextUrl = nextUrls.values().next().value;
-  return nextUrl === undefined ? undefined : hashClinicalFhirPageUrl(nextUrl);
+  if (nextUrl === undefined) {
+    return undefined;
+  }
+  if (!isClinicalFhirUrlWithinBase({
+    fhirBaseUrlHash: input.fhirBaseUrlHash,
+    url: nextUrl,
+  })) {
+    throw new Error(`Clinical FHIR raw Bundle next link is outside the manifest FHIR base for ${input.rawRef}.`);
+  }
+  return hashClinicalFhirPageUrl(nextUrl);
 }
 
 function assertResolvedFhirPagination(resourcePages: readonly FhirResourcePage[]): void {
@@ -529,6 +532,9 @@ function mapFhirResource(
   context: FhirResourceContext,
   allergyEvidence: AllergyEvidenceSummary,
 ): MappedFhirResource {
+  if (hasMalformedFhirContained(context.resource)) {
+    return reviewOnly(context, "FHIR contained resources are invalid");
+  }
   if (hasUnsupportedFhirModifier(context.resource)) {
     return reviewOnly(context, "FHIR modifier semantics are not importable");
   }
@@ -691,6 +697,9 @@ function mapObservation(context: FhirResourceContext<Observation>): MappedFhirRe
       continue;
     }
 
+    if (!hasOnlyFhirValue(component, "valueQuantity")) {
+      return reviewOnly(context, "vital quantity is not importable");
+    }
     const value = readQuantityValue(component.valueQuantity);
     if (!value) {
       return reviewOnly(context, "vital quantity is not importable");
@@ -722,6 +731,9 @@ function mapObservation(context: FhirResourceContext<Observation>): MappedFhirRe
     if (hasUnmatchedVitalComponent) {
       return reviewOnly(context, "vital component code is not importable");
     }
+    if (hasOwnFhirValue(context.resource)) {
+      return reviewOnly(context, "vital observation mixes component and top-level values");
+    }
     if (!occurredAt) {
       return reviewOnly(context, "clinical timestamp is missing");
     }
@@ -749,6 +761,9 @@ function mapObservation(context: FhirResourceContext<Observation>): MappedFhirRe
     return reviewOnly(context, "vital component code is not importable");
   }
 
+  if (vital && !hasOnlyFhirValue(context.resource, "valueQuantity")) {
+    return reviewOnly(context, "vital quantity is not importable");
+  }
   const quantity = readQuantityValue(context.resource.valueQuantity);
   if (vital && !quantity) {
     return reviewOnly(context, "vital quantity is not importable");
@@ -811,6 +826,8 @@ function mapLaboratoryObservation(
   const singleResult = buildBloodTestResult(context.resource, topLevelInterpretation.flag);
   if (singleResult) {
     results.unshift(singleResult);
+  } else if (hasOwnFhirValue(context.resource)) {
+    return reviewOnly(context, "laboratory observation result is not importable");
   }
 
   if (results.length === 0) {
@@ -870,7 +887,7 @@ function mapDiagnosticReport(context: FhirResourceContext<DiagnosticReport>): Ma
 
   const occurredAt = readClinicalOccurredAt(context.resource);
   const testName = textForCodeableConcept(context.resource.code) ?? "FHIR diagnostic report";
-  const conclusion = readString(context.resource.conclusion);
+  const conclusion = readText(context.resource.conclusion);
   const narrativeText = textFromNarrative(context.resource.text);
 
   if (conclusion || narrativeText) {
@@ -940,7 +957,7 @@ function mapDocumentReference(context: FhirResourceContext<DocumentReference>): 
     return reviewOnly(context, "clinical timestamp is missing");
   }
 
-  const title = readString(context.resource.description)
+  const title = readText(context.resource.description)
     ?? textForCodeableConcept(context.resource.type)
     ?? "FHIR document reference";
 
@@ -1064,6 +1081,10 @@ function buildBloodTestResult(
   resource: Observation | ObservationComponent,
   flag?: BloodTestResultFlag,
 ): BloodTestResultRecord | null {
+  if (fhirValueKeys(resource).length !== 1) {
+    return null;
+  }
+
   const analyte = textForCodeableConcept(resource.code);
   if (!analyte || analyte.length > LAB_RESULT_TEXT_MAX_LENGTH) {
     return null;
@@ -1238,6 +1259,16 @@ function isUnambiguousNoKnownAllergy(resource: AllergyIntolerance): boolean {
 }
 
 function isAllergyConflictEvidence(resource: Resource): boolean {
+  if (hasMalformedFhirContained(resource)) {
+    return true;
+  }
+  if (
+    isRecord(resource)
+    && Object.hasOwn(resource, "contained")
+    && readUnknownArray(resource.contained).length > 0
+  ) {
+    return true;
+  }
   if (!ALLERGY_CONFLICT_RESOURCE_TYPES.has(resource.resourceType)) {
     return false;
   }
@@ -1248,6 +1279,19 @@ function isAllergyConflictEvidence(resource: Resource): boolean {
     return !isImportableGlobalNoKnownAllergyAssertion(resource);
   }
   return resource.resourceType === "Condition";
+}
+
+function hasMalformedFhirContained(resource: Resource): boolean {
+  if (!isRecord(resource) || !Object.hasOwn(resource, "contained")) {
+    return false;
+  }
+
+  return !Array.isArray(resource.contained) || resource.contained.some((contained) =>
+    !isRecord(contained)
+    || typeof contained.resourceType !== "string"
+    || contained.resourceType !== contained.resourceType.trim()
+    || !/^[A-Z][A-Za-z0-9]+$/u.test(contained.resourceType)
+  );
 }
 
 function hasUnsupportedFhirModifier(value: unknown): boolean {
@@ -1335,7 +1379,13 @@ function hasImportableAllergyStatus(resource: AllergyIntolerance): boolean {
 }
 
 function hasScopedOrContradictoryAllergyDetail(resource: AllergyIntolerance): boolean {
-  return readFhirArray(resource.category).length > 0 || readFhirArray(resource.reaction).length > 0;
+  return (
+    hasFhirArrayContentOrInvalidShape(resource.category)
+    || hasFhirArrayContentOrInvalidShape(resource.reaction)
+    || hasFhirArrayContentOrInvalidShape(resource.note)
+    || resource.lastOccurrence !== undefined
+    || Object.keys(resource).some((key) => key.startsWith("onset"))
+  );
 }
 
 function hasImportableStatus(value: unknown, importableStatuses: ReadonlySet<string>): boolean {
@@ -1512,12 +1562,13 @@ function readIsoDateTime(value: unknown): string | undefined {
 }
 
 function readResourceId(resource: Resource): string | undefined {
-  return readString(resource.id);
+  const resourceId = readString(resource.id);
+  return resourceId && resourceId.length <= 64 ? resourceId : undefined;
 }
 
 function readResourceUpdatedAt(resource: Resource): string | undefined {
   const text = readString(resource.meta?.lastUpdated);
-  return text && isWritableIsoDateTime(text) ? text : undefined;
+  return text && text.length <= 200 && isWritableIsoDateTime(text) ? text : undefined;
 }
 
 function readQuantityValue(
@@ -1563,7 +1614,7 @@ function readQuantityComparator(comparator: string | undefined): QuantityCompara
 
 function readObservationTextValue(resource: Observation | ObservationComponent): string | null {
   return (
-    readString(resource.valueString)
+    readText(resource.valueString)
     ?? readString(resource.valueInteger)
     ?? readString(resource.valueBoolean)
     ?? textForCodeableConcept(resource.valueCodeableConcept)
@@ -1577,10 +1628,10 @@ function textForCodeableConcept(value: CodeableConcept | undefined): string | un
   }
 
   return (
-    readString(value.text)
+    readText(value.text)
     ?? codingsForCodeableConcept(value)
       .map((coding) => coding.display)
-      .find((display): display is string => typeof display === "string" && display.length > 0)
+      .find((display): display is string => display !== undefined)
   );
 }
 
@@ -1593,7 +1644,7 @@ function codingsForCodeableConcept(value: CodeableConcept | undefined): Array<Pi
     .filter(isRecord)
     .map((coding) => ({
       code: readString(coding.code),
-      display: readString(coding.display),
+      display: readText(coding.display),
       system: readString(coding.system),
     }));
 }
@@ -1602,9 +1653,9 @@ function decideDocumentReferenceText(resource: DocumentReference): DocumentRefer
   const textData: Array<string | undefined> = [];
   for (const content of readUnknownArray(resource.content)) {
     const attachment = isRecord(content) && isRecord(content.attachment) ? content.attachment : null;
-    const contentType = readString(attachment?.contentType)?.toLowerCase() ?? "";
+    const contentType = readText(attachment?.contentType)?.toLowerCase() ?? "";
     if (contentType.startsWith("text/")) {
-      textData.push(readString(attachment?.data));
+      textData.push(readStrictString(attachment?.data));
     }
   }
 
@@ -1636,7 +1687,7 @@ function decodeDocumentReferenceTextData(value: string): string | null {
 }
 
 function textFromNarrative(value: Narrative | undefined): string | null {
-  const div = readString(value?.div);
+  const div = readText(value?.div);
   if (!div) {
     return null;
   }
@@ -1683,6 +1734,36 @@ function readUnknownArray(value: unknown): unknown[] {
 
 function readFhirArray<T>(value: T[] | undefined): T[] {
   return Array.isArray(value) ? value : [];
+}
+
+function hasFhirArrayContentOrInvalidShape(value: unknown): boolean {
+  return value !== undefined && (!Array.isArray(value) || value.length > 0);
+}
+
+function fhirValueKeys(value: object): string[] {
+  return Object.keys(value).filter((key) => key.startsWith("value"));
+}
+
+function hasOwnFhirValue(value: object): boolean {
+  return fhirValueKeys(value).length > 0;
+}
+
+function hasOnlyFhirValue(value: object, expectedKey: string): boolean {
+  const keys = fhirValueKeys(value);
+  return keys.length === 1 && keys[0] === expectedKey;
+}
+
+function readText(value: unknown): string | undefined {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+
+  const text = value.trim();
+  return text.length > 0 ? text : undefined;
+}
+
+function readStrictString(value: unknown): string | undefined {
+  return typeof value === "string" && value.length > 0 ? value : undefined;
 }
 
 function readString(value: unknown): string | undefined {

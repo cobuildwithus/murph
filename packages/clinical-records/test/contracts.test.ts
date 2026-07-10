@@ -133,6 +133,36 @@ describe("clinical records contracts", () => {
     }
   });
 
+  it("rejects duplicate raw manifest resource file paths", () => {
+    expect(() => clinicalRawManifestSchema.parse({
+      schemaVersion: "murph.clinical-raw-manifest.v1",
+      kind: "clinical_fhir_retrieval",
+      connectionId: "clinical-connection-1",
+      retrievalJobId: "retrieval-job-1",
+      sourceSystem: "cerner-fhir",
+      fhirBaseUrlHash: FHIR_BASE_URL_HASH,
+      patientIdHash: PATIENT_ID_HASH,
+      fetchedAt: "2026-07-01T12:00:00.000Z",
+      resourceFiles: [
+        {
+          resourceType: "Observation",
+          relativePath: "Observation/page-1.json",
+          count: 1,
+          sha256: SHA256,
+        },
+        {
+          resourceType: "Observation",
+          relativePath: "Observation/page-1.json",
+          count: 1,
+          sha256: SHA256,
+        },
+      ],
+      completedResourceTypes: ["Observation"],
+      requestedScopes: [],
+      grantedScopes: [],
+    })).toThrow("relativePath values must be unique");
+  });
+
   it("normalizes deterministic source-resource external references", () => {
     expect(normalizeClinicalFhirPatientId("Patient/patient-1")).toBe("patient-1");
     expect(normalizeClinicalFhirPatientId(`${FHIR_BASE_URL}/Patient/patient-1/_history/2`)).toBe("patient-1");
