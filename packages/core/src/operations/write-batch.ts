@@ -6,6 +6,7 @@ import { createReadStream, promises as fs } from "node:fs";
 import {
   copyFileAtomic,
   copyFileAtomicExclusive,
+  writeBytesFileAtomicExclusive,
   writeTextFileAtomic,
 } from "../atomic-write.ts";
 import { VaultError } from "../errors.ts";
@@ -178,10 +179,12 @@ interface StageTextWriteOptions {
   allowAppendOnlyJsonl?: boolean;
   overwrite?: boolean;
   allowExistingMatch?: boolean;
+  expectedTargetReceipt?: CommittedPayloadReceipt;
 }
 
 interface StageRawCopyOptions {
   allowExistingMatch?: boolean;
+  expectedSourceReceipt?: CommittedPayloadReceipt;
 }
 
 interface StageRawCopyInput extends StageRawCopyOptions {
@@ -228,6 +231,7 @@ type StoredWriteAction =
       allowExistingMatch: boolean;
       originalFileName: string;
       mediaType: string;
+      expectedSourceReceipt?: CommittedPayloadReceipt;
       effect?: "copy" | "reuse";
       existedBefore?: boolean;
       appliedAt?: string;
@@ -245,6 +249,7 @@ type StoredWriteAction =
       existedBefore?: boolean;
       backupRelativePath?: string;
       committedPayloadReceipt?: CommittedPayloadReceipt;
+      expectedTargetReceipt?: CommittedPayloadReceipt;
       appliedAt?: string;
       rolledBackAt?: string;
     }
@@ -269,6 +274,7 @@ type StoredWriteAction =
       effect?: "delete";
       existedBefore?: boolean;
       backupRelativePath?: string;
+      expectedTargetReceipt?: CommittedPayloadReceipt;
       // Opt-in for delete paths that are otherwise covered by the raw
       // immutability policy (e.g. raw/inbox/... privacy retention sweeps).
       // Persisted in the operation record so resume keeps the same allowance.
@@ -1148,6 +1154,10 @@ function parseStoredAction(value: unknown): StoredWriteAction | null {
       if (backupRelativePath === null) {
         return null;
       }
+      const expectedTargetReceipt = parseCommittedPayloadReceipt(record.expectedTargetReceipt);
+      if (expectedTargetReceipt === null) {
+        return null;
+      }
 
       return {
         kind: "delete",
@@ -1155,11 +1165,16 @@ function parseStoredAction(value: unknown): StoredWriteAction | null {
         allowRaw: record.allowRaw === true,
         backupRelativePath,
         effect: record.effect === "delete" ? record.effect : undefined,
+        ...(expectedTargetReceipt ? { expectedTargetReceipt } : {}),
       };
     }
     case "raw_copy": {
       const stageRelativePath = parseStoredRequiredStageRelativePath(record);
       if (!stageRelativePath) {
+        return null;
+      }
+      const expectedSourceReceipt = parseCommittedPayloadReceipt(record.expectedSourceReceipt);
+      if (expectedSourceReceipt === null) {
         return null;
       }
 
@@ -1168,6 +1183,7 @@ function parseStoredAction(value: unknown): StoredWriteAction | null {
         ...base,
         allowExistingMatch: record.allowExistingMatch === true,
         effect: record.effect === "copy" || record.effect === "reuse" ? record.effect : undefined,
+        ...(expectedSourceReceipt ? { expectedSourceReceipt } : {}),
         mediaType: typeof record.mediaType === "string" ? record.mediaType : "",
         originalFileName: typeof record.originalFileName === "string" ? record.originalFileName : "",
         stageRelativePath,
@@ -1188,6 +1204,10 @@ function parseStoredAction(value: unknown): StoredWriteAction | null {
       if (committedPayloadReceipt === null) {
         return null;
       }
+      const expectedTargetReceipt = parseCommittedPayloadReceipt(record.expectedTargetReceipt);
+      if (expectedTargetReceipt === null) {
+        return null;
+      }
 
       return {
         kind: "text_write",
@@ -1196,6 +1216,7 @@ function parseStoredAction(value: unknown): StoredWriteAction | null {
         allowRaw: record.allowRaw === true,
         backupRelativePath,
         committedPayloadReceipt,
+        ...(expectedTargetReceipt ? { expectedTargetReceipt } : {}),
         effect:
           record.effect === "create" || record.effect === "update" || record.effect === "reuse"
             ? record.effect
@@ -1583,6 +1604,7 @@ export class WriteBatch {
     sourcePath,
     targetRelativePath,
     allowExistingMatch = false,
+    expectedSourceReceipt,
     originalFileName,
     mediaType,
   }: StageRawCopyInput): Promise<StagedRawCopy> {
@@ -1609,6 +1631,17 @@ export class WriteBatch {
     const stageAbsolutePath = resolveVaultPath(this.vaultRoot, stageRelativePath).absolutePath;
     await ensureDirectory(path.dirname(stageAbsolutePath));
     await fs.copyFile(sourceAbsolutePath, stageAbsolutePath);
+    if (expectedSourceReceipt) {
+      const stagedReceipt = await createFileContentReceipt(stageAbsolutePath);
+      if (!receiptsMatch(stagedReceipt, expectedSourceReceipt)) {
+        await safeUnlink(stageAbsolutePath);
+        throw new VaultError(
+          "OPERATION_PRECONDITION_FAILED",
+          `Raw source for "${normalizedTarget}" changed after it was inspected.`,
+          { relativePath: normalizedTarget },
+        );
+      }
+    }
 
     this.record.actions.push({
       kind: "raw_copy",
@@ -1618,6 +1651,9 @@ export class WriteBatch {
       allowExistingMatch,
       originalFileName,
       mediaType,
+      expectedSourceReceipt: expectedSourceReceipt
+        ? { ...expectedSourceReceipt }
+        : undefined,
     });
     await this.persist();
 
@@ -1711,6 +1747,13 @@ export class WriteBatch {
     options: StageTextWriteOptions = {},
   ): Promise<string> {
     this.assertMutable();
+    if (options.expectedTargetReceipt && options.overwrite === false) {
+      throw new VaultError(
+        "OPERATION_PRECONDITION_INVALID",
+        "Receipt-guarded text writes must replace the inspected target.",
+        { relativePath: targetRelativePath },
+      );
+    }
     const normalizedTarget = normalizeRelativeVaultPath(targetRelativePath);
     await assertWriteTargetPolicyForVault(this.vaultRoot, normalizedTarget, {
       kind: "text",
@@ -1735,6 +1778,9 @@ export class WriteBatch {
       overwrite: options.overwrite ?? true,
       allowExistingMatch: options.allowExistingMatch ?? false,
       allowRaw: options.allowRaw ?? false,
+      expectedTargetReceipt: options.expectedTargetReceipt
+        ? { ...options.expectedTargetReceipt }
+        : undefined,
     });
     await this.persist();
     return normalizedTarget;
@@ -1801,6 +1847,7 @@ export class WriteBatch {
     options: {
       allowAppendOnlyJsonl?: boolean;
       allowRaw?: boolean;
+      expectedTargetReceipt?: CommittedPayloadReceipt;
     } = {},
   ): Promise<string> {
     this.assertMutable();
@@ -1820,6 +1867,9 @@ export class WriteBatch {
       state: "staged",
       targetRelativePath: normalizedTarget,
       allowRaw: options.allowRaw ?? false,
+      expectedTargetReceipt: options.expectedTargetReceipt
+        ? { ...options.expectedTargetReceipt }
+        : undefined,
     });
     await this.persist();
     return normalizedTarget;
@@ -2127,6 +2177,9 @@ export class WriteBatch {
       }
       const bytes = await fs.readFile(resolveVaultPath(this.vaultRoot, action.stageRelativePath).absolutePath);
       const receipt = createCommittedPayloadReceipt(bytes);
+      if (action.kind === "raw_copy") {
+        this.assertExpectedSourceReceipt(action, receipt);
+      }
       const existing = payloadsBySha.get(receipt.sha256);
       if (existing) {
         if (existing.byteLength !== receipt.byteLength) {
@@ -2218,7 +2271,11 @@ export class WriteBatch {
     action: Extract<StoredWriteAction, { kind: "jsonl_append" | "raw_copy" | "text_write" }>,
   ): Promise<CommittedPayloadReceipt> {
     const stageAbsolutePath = resolveVaultPath(this.vaultRoot, action.stageRelativePath).absolutePath;
-    return createCommittedPayloadReceipt(await fs.readFile(stageAbsolutePath));
+    const receipt = createCommittedPayloadReceipt(await fs.readFile(stageAbsolutePath));
+    if (action.kind === "raw_copy") {
+      this.assertExpectedSourceReceipt(action, receipt);
+    }
+    return receipt;
   }
 
   private async applyAction(index: number, action: StoredWriteAction): Promise<void> {
@@ -2295,6 +2352,230 @@ export class WriteBatch {
     });
   }
 
+  private assertExpectedSourceReceipt(
+    action: Extract<StoredWriteAction, { kind: "raw_copy" }>,
+    actualReceipt: CommittedPayloadReceipt,
+  ): void {
+    if (
+      action.expectedSourceReceipt
+      && !receiptsMatch(actualReceipt, action.expectedSourceReceipt)
+    ) {
+      throw new VaultError(
+        "OPERATION_PRECONDITION_FAILED",
+        `Raw source for "${action.targetRelativePath}" changed after it was inspected.`,
+        {
+          operationId: this.operationId,
+          relativePath: action.targetRelativePath,
+        },
+      );
+    }
+  }
+
+  private async assertExpectedTargetReceipt(
+    action: Extract<StoredWriteAction, { kind: "delete" | "text_write" }>,
+    absolutePath: string,
+  ): Promise<void> {
+    if (!action.expectedTargetReceipt) {
+      return;
+    }
+
+    let actualReceipt: CommittedPayloadReceipt;
+    try {
+      actualReceipt = await createFileContentReceipt(absolutePath);
+    } catch (error) {
+      if (!isErrnoException(error) || error.code !== "ENOENT") {
+        throw error;
+      }
+      throw new VaultError(
+        "OPERATION_PRECONDITION_FAILED",
+        `Write target "${action.targetRelativePath}" disappeared after it was inspected.`,
+        {
+          operationId: this.operationId,
+          relativePath: action.targetRelativePath,
+        },
+      );
+    }
+
+    if (!receiptsMatch(actualReceipt, action.expectedTargetReceipt)) {
+      throw new VaultError(
+        "OPERATION_PRECONDITION_FAILED",
+        `Write target "${action.targetRelativePath}" changed after it was inspected.`,
+        {
+          operationId: this.operationId,
+          relativePath: action.targetRelativePath,
+        },
+      );
+    }
+  }
+
+  private async moveExpectedTargetToBackup(
+    action: BackupCapableStoredWriteAction,
+    targetAbsolutePath: string,
+  ): Promise<string> {
+    if (!action.expectedTargetReceipt || !action.backupRelativePath) {
+      throw new VaultError(
+        "OPERATION_PRECONDITION_INVALID",
+        `Write target "${action.targetRelativePath}" has incomplete precondition metadata.`,
+        {
+          operationId: this.operationId,
+          relativePath: action.targetRelativePath,
+        },
+      );
+    }
+
+    const backupAbsolutePath = resolveVaultPath(
+      this.vaultRoot,
+      action.backupRelativePath,
+    ).absolutePath;
+    const backupExists = await pathExists(backupAbsolutePath);
+    if (backupExists) {
+      if (await pathExists(targetAbsolutePath)) {
+        throw new VaultError(
+          "OPERATION_PRECONDITION_FAILED",
+          `Write target "${action.targetRelativePath}" was recreated while its inspected bytes were quarantined.`,
+          {
+            operationId: this.operationId,
+            relativePath: action.targetRelativePath,
+          },
+        );
+      }
+    } else {
+      await ensureDirectory(path.dirname(backupAbsolutePath));
+      try {
+        await fs.rename(targetAbsolutePath, backupAbsolutePath);
+      } catch (error) {
+        if (!isErrnoException(error) || error.code !== "ENOENT") {
+          throw error;
+        }
+        throw new VaultError(
+          "OPERATION_PRECONDITION_FAILED",
+          `Write target "${action.targetRelativePath}" disappeared after it was inspected.`,
+          {
+            operationId: this.operationId,
+            relativePath: action.targetRelativePath,
+          },
+        );
+      }
+    }
+
+    await this.assertExpectedTargetReceipt(action, backupAbsolutePath);
+    return backupAbsolutePath;
+  }
+
+  private async restoreExpectedTargetFromBackup(
+    action: BackupCapableStoredWriteAction,
+  ): Promise<boolean> {
+    if (!action.expectedTargetReceipt || !action.backupRelativePath) {
+      return false;
+    }
+
+    const backupAbsolutePath = resolveVaultPath(
+      this.vaultRoot,
+      action.backupRelativePath,
+    ).absolutePath;
+    if (!(await pathExists(backupAbsolutePath))) {
+      return false;
+    }
+
+    const targetAbsolutePath = resolveVaultPath(
+      this.vaultRoot,
+      action.targetRelativePath,
+    ).absolutePath;
+    const backupReceipt = await createFileContentReceipt(backupAbsolutePath);
+    if (action.kind === "delete") {
+      if (await pathExists(targetAbsolutePath)) {
+        const targetReceipt = await createFileContentReceipt(targetAbsolutePath);
+        if (receiptsMatch(backupReceipt, targetReceipt)) {
+          return true;
+        }
+
+        throw new VaultError(
+          "OPERATION_ROLLBACK_CONFLICT",
+          `Write target "${action.targetRelativePath}" was recreated before rollback; its quarantined bytes were retained.`,
+          {
+            operationId: this.operationId,
+            relativePath: action.targetRelativePath,
+          },
+        );
+      }
+    } else {
+      const replacementRelativePath = `${action.backupRelativePath}.replacement`;
+      const replacementAbsolutePath = resolveVaultPath(
+        this.vaultRoot,
+        replacementRelativePath,
+      ).absolutePath;
+
+      if (await pathExists(targetAbsolutePath)) {
+        const targetReceipt = await createFileContentReceipt(targetAbsolutePath);
+        if (receiptsMatch(backupReceipt, targetReceipt)) {
+          return true;
+        }
+        if (await pathExists(replacementAbsolutePath)) {
+          throw new VaultError(
+            "OPERATION_ROLLBACK_CONFLICT",
+            `Text target "${action.targetRelativePath}" and its replacement quarantine both exist; all bytes were retained.`,
+            {
+              operationId: this.operationId,
+              relativePath: action.targetRelativePath,
+            },
+          );
+        }
+        await ensureDirectory(path.dirname(replacementAbsolutePath));
+        await fs.rename(targetAbsolutePath, replacementAbsolutePath);
+      }
+
+      if (await pathExists(replacementAbsolutePath)) {
+        const replacementReceipt = await createFileContentReceipt(
+          replacementAbsolutePath,
+        );
+        if (
+          !action.committedPayloadReceipt
+          || !receiptsMatch(replacementReceipt, action.committedPayloadReceipt)
+        ) {
+          try {
+            await copyFileAtomicExclusive(
+              replacementAbsolutePath,
+              targetAbsolutePath,
+            );
+          } catch (error) {
+            throw new VaultError(
+              "OPERATION_ROLLBACK_CONFLICT",
+              `Text target "${action.targetRelativePath}" changed during rollback; the changed bytes and original backup were retained.`,
+              {
+                cause: error instanceof Error ? error.message : String(error),
+                operationId: this.operationId,
+                relativePath: action.targetRelativePath,
+              },
+            );
+          }
+          throw new VaultError(
+            "OPERATION_ROLLBACK_CONFLICT",
+            `Text target "${action.targetRelativePath}" changed before rollback; the changed bytes and original backup were retained.`,
+            {
+              operationId: this.operationId,
+              relativePath: action.targetRelativePath,
+            },
+          );
+        }
+      }
+    }
+
+    try {
+      await copyFileAtomicExclusive(backupAbsolutePath, targetAbsolutePath);
+    } catch (error) {
+      throw new VaultError(
+        "OPERATION_ROLLBACK_CONFLICT",
+        `Write target "${action.targetRelativePath}" was recreated during rollback; its quarantined bytes were retained.`,
+        {
+          cause: error instanceof Error ? error.message : String(error),
+          operationId: this.operationId,
+          relativePath: action.targetRelativePath,
+        },
+      );
+    }
+    return true;
+  }
+
   private getPreparedJsonlBaseReceipt(
     action: Extract<StoredWriteAction, { kind: "jsonl_append" }>,
   ): CommittedPayloadReceipt {
@@ -2312,7 +2593,11 @@ export class WriteBatch {
 
   private async applyRawCopy(action: Extract<StoredWriteAction, { kind: "raw_copy" }>): Promise<void> {
     const stageAbsolutePath = resolveVaultPath(this.vaultRoot, action.stageRelativePath).absolutePath;
-    const stagedContent = await fs.readFile(stageAbsolutePath);
+    const [stagedContent, stagedStats] = await Promise.all([
+      fs.readFile(stageAbsolutePath),
+      fs.stat(stageAbsolutePath),
+    ]);
+    this.assertExpectedSourceReceipt(action, createCommittedPayloadReceipt(stagedContent));
     await this.applyPreparedAction({
       action,
       finalize: (result: Awaited<ReturnType<typeof applyImmutableWriteTarget>>) => {
@@ -2342,7 +2627,10 @@ export class WriteBatch {
         await applyImmutableWriteTarget({
           allowExistingMatch: action.allowExistingMatch,
           createEffect: "copy",
-          createTarget: () => copyFileAtomicExclusive(stageAbsolutePath, target.absolutePath),
+          createTarget: () =>
+            writeBytesFileAtomicExclusive(target.absolutePath, stagedContent, {
+              mode: stagedStats.mode & 0o7777,
+            }),
           existsErrorMessage: "Raw target already exists and may not be overwritten.",
           matchesExistingContent: async () => {
             const existingContent = await fs.readFile(target.absolutePath);
@@ -2393,7 +2681,6 @@ export class WriteBatch {
               `Text backup metadata for "${action.targetRelativePath}" is missing while resuming the write batch.`,
             );
           }
-
           return {
             effect: action.existedBefore ? (action.overwrite ? "update" : "reuse") : "create",
             existedBefore: action.existedBefore,
@@ -2410,11 +2697,59 @@ export class WriteBatch {
         return undefined;
       },
       mutateTarget: async (target) => {
-        if (action.existedBefore === true && action.overwrite && !(await pathExists(target.absolutePath))) {
+        if (
+          !action.expectedTargetReceipt
+          &&
+          action.existedBefore === true
+          && action.overwrite
+          && !(await pathExists(target.absolutePath))
+        ) {
           throw this.buildResumeConflictError(
             action,
             `Text target "${action.targetRelativePath}" disappeared while resuming the write batch.`,
           );
+        }
+
+        if (action.expectedTargetReceipt) {
+          if (!action.overwrite || !action.backupRelativePath) {
+            throw new VaultError(
+              "OPERATION_PRECONDITION_INVALID",
+              `Receipt-guarded text target "${action.targetRelativePath}" has incomplete replacement metadata.`,
+              {
+                operationId: this.operationId,
+                relativePath: action.targetRelativePath,
+              },
+            );
+          }
+
+          const backupAbsolutePath = await this.moveExpectedTargetToBackup(
+            action,
+            target.absolutePath,
+          );
+          const replacementMode = (await fs.stat(backupAbsolutePath)).mode & 0o7777;
+          try {
+            await writeBytesFileAtomicExclusive(
+              target.absolutePath,
+              Buffer.from(stagedContent, "utf8"),
+              { mode: replacementMode },
+            );
+          } catch (error) {
+            if (!isErrnoException(error) || error.code !== "EEXIST") {
+              throw error;
+            }
+            throw new VaultError(
+              "OPERATION_PRECONDITION_FAILED",
+              `Text target "${action.targetRelativePath}" was recreated while its inspected bytes were quarantined.`,
+              {
+                operationId: this.operationId,
+                relativePath: action.targetRelativePath,
+              },
+            );
+          }
+          return {
+            effect: "update",
+            existedBefore: true,
+          } as const;
         }
 
         return await applyTextWriteTarget({
@@ -2467,7 +2802,12 @@ export class WriteBatch {
           return changed;
         });
 
-        if (action.overwrite && existedBefore && backupRelativePath) {
+        if (
+          action.overwrite
+          && existedBefore
+          && backupRelativePath
+          && !action.expectedTargetReceipt
+        ) {
           await this.ensureBackupArtifactExists(target.absolutePath, backupRelativePath);
         }
       },
@@ -2756,6 +3096,9 @@ export class WriteBatch {
             `Delete backup "${action.backupRelativePath}" is missing while resuming the write batch.`,
           );
         }
+        if (action.expectedTargetReceipt) {
+          await this.assertExpectedTargetReceipt(action, backupAbsolutePath);
+        }
 
         return {
           backupRelativePath: action.backupRelativePath,
@@ -2766,6 +3109,9 @@ export class WriteBatch {
       mutateTarget: async (target): Promise<DeleteActionMutationResult> => {
         const existedBefore = await pathExists(target.absolutePath);
         if (!existedBefore) {
+          if (action.expectedTargetReceipt) {
+            await this.assertExpectedTargetReceipt(action, target.absolutePath);
+          }
           return {
             existedBefore: false,
             state: "reused",
@@ -2773,6 +3119,15 @@ export class WriteBatch {
         }
 
         const backupRelativePath = this.resolveActionBackupRelativePath(index, action);
+        if (action.expectedTargetReceipt) {
+          await this.moveExpectedTargetToBackup(action, target.absolutePath);
+          return {
+            backupRelativePath,
+            existedBefore: true,
+            state: "applied",
+          };
+        }
+
         await this.ensureBackupArtifactExists(target.absolutePath, backupRelativePath);
         await fs.unlink(target.absolutePath);
         return {
@@ -2800,7 +3155,9 @@ export class WriteBatch {
           return changed;
         });
 
-        await this.ensureBackupArtifactExists(target.absolutePath, backupRelativePath);
+        if (!action.expectedTargetReceipt) {
+          await this.ensureBackupArtifactExists(target.absolutePath, backupRelativePath);
+        }
       },
       prepareTarget: async () =>
         await prepareVerifiedDeleteTarget(this.vaultRoot, action.targetRelativePath, {
@@ -2812,6 +3169,16 @@ export class WriteBatch {
 
   private async rollbackAppliedActions(): Promise<void> {
     for (const action of [...this.record.actions].reverse()) {
+      if (
+        (action.kind === "delete" || action.kind === "text_write")
+        && action.expectedTargetReceipt
+        && await this.restoreExpectedTargetFromBackup(action)
+      ) {
+        action.state = "rolled_back";
+        action.rolledBackAt = nowIso();
+        continue;
+      }
+
       if (action.state !== "applied") {
         continue;
       }

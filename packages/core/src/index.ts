@@ -117,6 +117,7 @@ export {
   promoteInboxExperimentNote,
   promoteInboxJournal,
   repairJunctionWorkoutHeartRateZones,
+  repairExperimentMedia,
   repairVault,
   saveEncounterBundle,
   stopExperiment,
@@ -143,6 +144,11 @@ export {
   upsertWorkoutFormat,
   validateVault,
 } from "./public-mutations.ts";
+export type {
+  ExperimentMediaRepairBlocker,
+  RepairExperimentMediaInput,
+  RepairExperimentMediaResult,
+} from "./experiment-media-repair.ts";
 export {
   listHabitatAspects,
   readHabitatAspect,

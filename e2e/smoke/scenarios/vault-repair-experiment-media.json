@@ -1,0 +1,11 @@
+{
+  "id": "vault-repair-experiment-media",
+  "command": "vault-cli vault repair-experiment-media --vault <path> [--dry-run] [--apply] [--request-id <id>]",
+  "vaultFixture": "fixtures/minimal-vault",
+  "inputs": [
+    "fixtures/minimal-vault/CORE.md",
+    "fixtures/minimal-vault/bank/experiments/baseline-observation.md"
+  ],
+  "goldenOutput": "fixtures/golden-outputs/validate",
+  "purpose": "Covers the experiment media ownership repair surface so operators can preview legacy media candidates by default and mutate only with explicit apply authority."
+}
