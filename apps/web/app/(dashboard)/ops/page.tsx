@@ -32,6 +32,11 @@ const OPS_TOOLS = [
     href: "/ops/runtime-latency",
     label: "Runtime latency",
   },
+  {
+    description: "Preview and add 7 trial days for every active Pulse Trial or one member.",
+    href: "/ops/trials",
+    label: "Trials",
+  },
 ] as const;
 
 export default async function HostedOpsPage() {

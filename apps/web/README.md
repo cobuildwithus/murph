@@ -856,33 +856,22 @@ Current hosted billing assumptions:
   `HOSTED_AUTO_PULSE_TRIAL_ENABLED=0` only to force card checkout fallback.
 - Card-based Pulse Trial checkout fallback is gated by
   `HOSTED_PULSE_TRIAL_CHECKOUT_ENABLED=1`.
-- The one-time `apps/web/scripts/extend-pulse-trials.ts` production script owns
-  the fixed `pulse-beta-extension-2026-07` beta campaign. It defaults to an
-  aggregate-only dry run; Apply additionally requires the exact campaign key.
-  Run it through `vercel env run --environment=production` with
-  `NODE_OPTIONS=--conditions=react-server`, as shown by the script's `--help`.
-  Before running even the production dry run, freeze production deploys and
-  rollbacks, record the exact lock-capable deployed SHA, and use
-  `apps/web/scripts/resolve-vercel-production-alias-sha.ts` with the secure
-  `HOSTED_WEB_VERCEL_*` operator environment to prove the production alias
-  points at that SHA. Start a 1,140-second (19-minute) drain from that proof.
-  An old Start-paid invocation can make up to three sequential Stripe calls at
-  the pinned six-minute per-call provider budget; the remaining minute covers
-  local completion margin. Resolve the production alias again after the drain;
-  if it changed, select a lock-capable SHA and restart the full drain. Run the
-  campaign dry run only after the exact SHA recheck, investigate unexpected
-  failures or skips, and recheck the alias once more immediately before Apply.
-  Record the intended SHA, both alias proofs, elapsed drain, campaign results,
-  and final zero-work dry run as the rollout evidence.
-  It extends each Stripe-authoritative current trial from its existing end by
-  exactly seven days, then reconciles only the matching local billing and
-  usage-period end timestamps under that lock, so paid conversion cannot be
-  followed by a stale local trial restoration. A Stripe metadata marker makes
-  Apply safe to retry without resetting the original trial start or recorded
-  usage. Keep the first lock-capable deployment live from the initial alias
-  proof through Apply and the confirming dry run; this is the campaign rollback
-  floor. If production rolls below it, stop Apply, redeploy a lock-capable SHA,
-  and repeat the alias proof plus 1,140-second drain. After Apply, rerun the dry
-  run and confirm `wouldExtend` and `wouldReconcile` are both zero with every
-  unexpected failure or skip resolved before ending the deploy freeze or
-  retiring the campaign script, service, focused tests, and this note.
+- `/ops/trials` is the canonical Pulse Trial extension surface. It runs
+  `extendHostedPulseTrialsForCampaign` in-process through
+  `POST /api/ops/pulse-trial-extension` (allowlist + mutation-origin gated),
+  extending each Stripe-authoritative current trial by exactly seven days from
+  its existing end and reconciling only the matching local billing and
+  usage-period end timestamps under the shared hosted-member Stripe mutation
+  lock. Preview (dry-run) is the default and is aggregate-only; Apply requires
+  echoing the exact server-derived campaign key
+  (`pulse-beta-extension-<UTC date>`) returned by the preview. The Stripe
+  metadata marker makes a same-campaign Apply retry safe: it cannot re-extend,
+  it can only repair incomplete local reconciliation. A later occasion uses
+  that day's fresh campaign key and extends again; markers from earlier
+  `pulse-beta-extension-*` campaigns are overwritten, while foreign marker
+  values still skip as conflicts. Because the route executes on the deployed
+  SHA and every production deployment since the Start-paid locking change is
+  lock-capable, the retired local-script alias-proof and drain gate does not
+  apply to in-app runs. The legacy one-time script
+  `apps/web/scripts/extend-pulse-trials.ts` remains only for environments
+  where an operator can inject production env locally; prefer `/ops/trials`.

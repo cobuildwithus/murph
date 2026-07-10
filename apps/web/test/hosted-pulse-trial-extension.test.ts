@@ -16,6 +16,7 @@ import {
 import {
   classifyHostedPulseTrialExtensionSubscription as classifyHostedPulseTrialExtensionSubscriptionWithPrice,
   createPrismaHostedPulseTrialExtensionCandidateSource,
+  deriveHostedPulseTrialExtensionCampaign,
   extendHostedPulseTrials as extendHostedPulseTrialsWithPrice,
   HOSTED_PULSE_TRIAL_EXTENSION_CAMPAIGN,
   HOSTED_PULSE_TRIAL_EXTENSION_CAMPAIGN_METADATA_KEY,
@@ -744,6 +745,170 @@ describe("Pulse Trial beta extension", () => {
     });
   });
 
+  test("Prisma candidate scan narrows to one member when a member filter is set", async () => {
+    const findMany = vi.fn(async (input: unknown) => {
+      void input;
+      return [];
+    });
+    const prisma = {
+      hostedMemberBillingRef: { findMany },
+    };
+
+    await createPrismaHostedPulseTrialExtensionCandidateSource(
+      prisma as never,
+      { memberId: "member_only" },
+    ).listCandidates({
+      afterMemberId: null,
+      limit: 100,
+    });
+
+    assert.deepEqual(findMany.mock.calls[0]?.[0], {
+      orderBy: { memberId: "asc" },
+      take: 100,
+      where: {
+        currentBillingPhase: "trial",
+        currentBillingPlanCode: "launch_monthly",
+        currentCheckoutOffer: "pulse_trial_7d",
+        member: {
+          billingStatus: "active",
+          suspendedAt: null,
+        },
+        memberId: "member_only",
+      },
+    });
+  });
+
+});
+
+describe("Pulse Trial extension campaign occasions", () => {
+  const DATED_CAMPAIGN = "pulse-beta-extension-2026-07-10";
+
+  test("derives the campaign key from the UTC day", () => {
+    assert.equal(
+      deriveHostedPulseTrialExtensionCampaign(new Date("2026-07-10T23:59:59.000Z")),
+      DATED_CAMPAIGN,
+    );
+    assert.equal(
+      deriveHostedPulseTrialExtensionCampaign(new Date("2026-07-11T00:00:00.000Z")),
+      "pulse-beta-extension-2026-07-11",
+    );
+  });
+
+  test("rejects campaign keys outside the extension family", async () => {
+    await assert.rejects(
+      extendHostedPulseTrials({
+        campaign: "not-a-trial-campaign",
+        candidateSource: makeCandidateSource([]),
+        mode: "dry-run",
+        now: NOW,
+        stripe: makeStripeClient(),
+      }),
+      /campaign key is invalid/,
+    );
+  });
+
+  test("treats an earlier extension campaign marker as extendable, not a conflict", () => {
+    const candidate = makeCandidate();
+    const markedByEarlierCampaign = makeSubscription({
+      metadata: {
+        billingPlanCode: "launch_monthly",
+        checkoutOffer: "pulse_trial_7d",
+        [HOSTED_PULSE_TRIAL_EXTENSION_CAMPAIGN_METADATA_KEY]:
+          HOSTED_PULSE_TRIAL_EXTENSION_CAMPAIGN,
+        [HOSTED_PULSE_TRIAL_EXTENSION_DAYS_METADATA_KEY]: "7",
+      },
+    });
+
+    assert.deepEqual(
+      classifyHostedPulseTrialExtensionSubscription({
+        campaign: DATED_CAMPAIGN,
+        candidate,
+        nowUnixSeconds: toUnixSeconds(NOW),
+        subscription: markedByEarlierCampaign,
+      }),
+      {
+        alreadyMarked: false,
+        ok: true,
+        stripeTrialEnd: toUnixSeconds(ORIGINAL_TRIAL_END),
+      },
+    );
+    assert.deepEqual(
+      classifyHostedPulseTrialExtensionSubscription({
+        campaign: HOSTED_PULSE_TRIAL_EXTENSION_CAMPAIGN,
+        candidate,
+        nowUnixSeconds: toUnixSeconds(NOW),
+        subscription: markedByEarlierCampaign,
+      }),
+      {
+        alreadyMarked: true,
+        ok: true,
+        stripeTrialEnd: toUnixSeconds(ORIGINAL_TRIAL_END),
+      },
+    );
+  });
+
+  test("a later campaign extends again and overwrites the earlier marker", async () => {
+    const source = makeCandidateSource([makeCandidate()]);
+    const stripe = makeStripeClient(makeSubscription({
+      metadata: {
+        billingPlanCode: "launch_monthly",
+        checkoutOffer: "pulse_trial_7d",
+        [HOSTED_PULSE_TRIAL_EXTENSION_CAMPAIGN_METADATA_KEY]:
+          HOSTED_PULSE_TRIAL_EXTENSION_CAMPAIGN,
+        [HOSTED_PULSE_TRIAL_EXTENSION_DAYS_METADATA_KEY]: "7",
+      },
+    }));
+
+    const summary = await extendHostedPulseTrials({
+      campaign: DATED_CAMPAIGN,
+      candidateSource: source,
+      mode: "apply",
+      now: NOW,
+      stripe,
+    });
+
+    assert.equal(summary.campaign, DATED_CAMPAIGN);
+    assert.equal(summary.stripeTrialsExtended, 1);
+    assert.equal(summary.localWindowsReconciled, 1);
+    const update = stripe.updateCalls[0];
+    assert.equal(
+      update?.params.metadata[HOSTED_PULSE_TRIAL_EXTENSION_CAMPAIGN_METADATA_KEY],
+      DATED_CAMPAIGN,
+    );
+    assert.equal(update?.params.trial_end, toUnixSeconds(EXTENDED_TRIAL_END));
+    assert.equal(
+      update?.options.idempotencyKey,
+      `hosted-pulse-trial-extension:${DATED_CAMPAIGN}:sub_test`,
+    );
+  });
+
+  test("the same campaign stays idempotent under its marker", async () => {
+    const source = makeCandidateSource([makeCandidate({
+      currentPeriodEnd: EXTENDED_TRIAL_END,
+      currentTrialEndsAt: EXTENDED_TRIAL_END,
+    })]);
+    const stripe = makeStripeClient(makeSubscription({
+      metadata: {
+        billingPlanCode: "launch_monthly",
+        checkoutOffer: "pulse_trial_7d",
+        [HOSTED_PULSE_TRIAL_EXTENSION_CAMPAIGN_METADATA_KEY]: DATED_CAMPAIGN,
+        [HOSTED_PULSE_TRIAL_EXTENSION_DAYS_METADATA_KEY]: "7",
+      },
+      trial_end: toUnixSeconds(EXTENDED_TRIAL_END),
+    }));
+
+    const summary = await extendHostedPulseTrials({
+      campaign: DATED_CAMPAIGN,
+      candidateSource: source,
+      mode: "apply",
+      now: NOW,
+      stripe,
+    });
+
+    assert.equal(summary.stripeTrialsExtended, 0);
+    assert.equal(summary.alreadyExtended, 1);
+    assert.equal(stripe.updateCalls.length, 0);
+  });
 });
 
 function extendHostedPulseTrials(

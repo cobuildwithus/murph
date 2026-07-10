@@ -34,6 +34,8 @@ const STRIPE_UPDATE_MAX_NETWORK_RETRIES = 2;
 const STRIPE_UPDATE_TIMEOUT_MS = 80_000;
 const STRIPE_UPDATE_MINIMUM_RUNWAY_SECONDS = 361;
 
+export const HOSTED_PULSE_TRIAL_EXTENSION_CAMPAIGN_PREFIX =
+  "pulse-beta-extension-" as const;
 export const HOSTED_PULSE_TRIAL_EXTENSION_CAMPAIGN =
   "pulse-beta-extension-2026-07" as const;
 export const HOSTED_PULSE_TRIAL_EXTENSION_DAYS = 7;
@@ -142,7 +144,7 @@ export type HostedPulseTrialExtensionFailureReason =
 
 export interface HostedPulseTrialExtensionSummary {
   alreadyExtended: number;
-  campaign: typeof HOSTED_PULSE_TRIAL_EXTENSION_CAMPAIGN;
+  campaign: string;
   candidates: number;
   extensionDays: typeof HOSTED_PULSE_TRIAL_EXTENSION_DAYS;
   failures: Record<HostedPulseTrialExtensionFailureReason, number>;
@@ -188,7 +190,13 @@ type HostedPulseTrialLockedOutcome = {
   result: HostedPulseTrialLockedApplyResult;
 };
 
+export function deriveHostedPulseTrialExtensionCampaign(now?: Date): string {
+  const dayKey = (now ?? new Date()).toISOString().slice(0, 10);
+  return `${HOSTED_PULSE_TRIAL_EXTENSION_CAMPAIGN_PREFIX}${dayKey}`;
+}
+
 export async function extendHostedPulseTrials(input: {
+  campaign?: string;
   candidateSource: HostedPulseTrialExtensionCandidateSource;
   mode?: HostedPulseTrialExtensionMode;
   now?: Date;
@@ -196,8 +204,9 @@ export async function extendHostedPulseTrials(input: {
   stripe: HostedPulseTrialExtensionStripeClient;
 }): Promise<HostedPulseTrialExtensionSummary> {
   const mode = input.mode ?? "dry-run";
+  const campaign = requireHostedPulseTrialExtensionCampaign(input.campaign);
 
-  const summary = buildEmptyHostedPulseTrialExtensionSummary(mode);
+  const summary = buildEmptyHostedPulseTrialExtensionSummary(mode, campaign);
   let afterMemberId: string | null = null;
 
   for (;;) {
@@ -222,6 +231,7 @@ export async function extendHostedPulseTrials(input: {
 
       if (mode === "dry-run") {
         await previewHostedPulseTrialExtensionCandidate({
+          campaign,
           candidate,
           now: input.now,
           priceId: input.priceId,
@@ -257,6 +267,7 @@ export async function extendHostedPulseTrials(input: {
             }
 
             const providerResult = await applyHostedPulseTrialExtensionUnderLock({
+              campaign,
               candidate: locked.candidate,
               now: input.now,
               priceId: input.priceId,
@@ -321,6 +332,8 @@ export async function extendHostedPulseTrials(input: {
 }
 
 export async function extendHostedPulseTrialsForCampaign(input: {
+  campaign?: string;
+  memberId?: string;
   mode: HostedPulseTrialExtensionMode;
   now?: Date;
   priceId?: string;
@@ -337,7 +350,10 @@ export async function extendHostedPulseTrialsForCampaign(input: {
   }
 
   return extendHostedPulseTrials({
-    candidateSource: createPrismaHostedPulseTrialExtensionCandidateSource(prisma),
+    campaign: input.campaign,
+    candidateSource: createPrismaHostedPulseTrialExtensionCandidateSource(prisma, {
+      memberId: input.memberId,
+    }),
     mode: input.mode,
     now: input.now,
     priceId,
@@ -346,11 +362,13 @@ export async function extendHostedPulseTrialsForCampaign(input: {
 }
 
 export function classifyHostedPulseTrialExtensionSubscription(input: {
+  campaign?: string;
   candidate: HostedPulseTrialExtensionCandidate;
   nowUnixSeconds: number;
   priceId: string;
   subscription: HostedPulseTrialExtensionStripeSubscription;
 }): HostedPulseTrialExtensionClassification {
+  const campaign = requireHostedPulseTrialExtensionCampaign(input.campaign);
   if (input.subscription.id !== input.candidate.stripeSubscriptionId) {
     return { ok: false, reason: "stripe_subscription_id_mismatch" };
   }
@@ -386,11 +404,15 @@ export function classifyHostedPulseTrialExtensionSubscription(input: {
   const campaignMarker = input.subscription.metadata?.[
     HOSTED_PULSE_TRIAL_EXTENSION_CAMPAIGN_METADATA_KEY
   ];
-  if (campaignMarker && campaignMarker !== HOSTED_PULSE_TRIAL_EXTENSION_CAMPAIGN) {
+  if (
+    campaignMarker &&
+    campaignMarker !== campaign &&
+    !campaignMarker.startsWith(HOSTED_PULSE_TRIAL_EXTENSION_CAMPAIGN_PREFIX)
+  ) {
     return { ok: false, reason: "stripe_campaign_marker_conflict" };
   }
 
-  const alreadyMarked = campaignMarker === HOSTED_PULSE_TRIAL_EXTENSION_CAMPAIGN;
+  const alreadyMarked = campaignMarker === campaign;
   if (
     alreadyMarked &&
     input.subscription.metadata?.[HOSTED_PULSE_TRIAL_EXTENSION_DAYS_METADATA_KEY] !==
@@ -407,14 +429,14 @@ export function classifyHostedPulseTrialExtensionSubscription(input: {
 }
 
 function buildHostedPulseTrialExtensionStripeUpdateParams(input: {
+  campaign: string;
   subscription: HostedPulseTrialExtensionStripeSubscription;
   targetTrialEnd: number;
 }): HostedPulseTrialExtensionStripeUpdateParams {
   return {
     metadata: {
       ...(input.subscription.metadata ?? {}),
-      [HOSTED_PULSE_TRIAL_EXTENSION_CAMPAIGN_METADATA_KEY]:
-        HOSTED_PULSE_TRIAL_EXTENSION_CAMPAIGN,
+      [HOSTED_PULSE_TRIAL_EXTENSION_CAMPAIGN_METADATA_KEY]: input.campaign,
       [HOSTED_PULSE_TRIAL_EXTENSION_DAYS_METADATA_KEY]:
         HOSTED_PULSE_TRIAL_EXTENSION_DAYS.toString(),
     },
@@ -425,6 +447,9 @@ function buildHostedPulseTrialExtensionStripeUpdateParams(input: {
 
 export function createPrismaHostedPulseTrialExtensionCandidateSource(
   prisma: PrismaClient,
+  options: {
+    memberId?: string;
+  } = {},
 ): HostedPulseTrialExtensionCandidateSource {
   return {
     async listCandidates(input) {
@@ -445,6 +470,7 @@ export function createPrismaHostedPulseTrialExtensionCandidateSource(
             billingStatus: HostedBillingStatus.active,
             suspendedAt: null,
           },
+          ...(options.memberId ? { memberId: options.memberId } : {}),
         },
       });
 
@@ -516,10 +542,11 @@ function classifyHostedPulseTrialExtensionCandidate(
 
 function buildEmptyHostedPulseTrialExtensionSummary(
   mode: HostedPulseTrialExtensionMode,
+  campaign: string,
 ): HostedPulseTrialExtensionSummary {
   return {
     alreadyExtended: 0,
-    campaign: HOSTED_PULSE_TRIAL_EXTENSION_CAMPAIGN,
+    campaign,
     candidates: 0,
     extensionDays: HOSTED_PULSE_TRIAL_EXTENSION_DAYS,
     failures: {
@@ -550,12 +577,26 @@ function buildEmptyHostedPulseTrialExtensionSummary(
   };
 }
 
-function buildHostedPulseTrialExtensionIdempotencyKey(subscriptionId: string): string {
+function buildHostedPulseTrialExtensionIdempotencyKey(input: {
+  campaign: string;
+  subscriptionId: string;
+}): string {
   return [
     "hosted-pulse-trial-extension",
-    HOSTED_PULSE_TRIAL_EXTENSION_CAMPAIGN,
-    subscriptionId,
+    input.campaign,
+    input.subscriptionId,
   ].join(":");
+}
+
+function requireHostedPulseTrialExtensionCampaign(campaign?: string): string {
+  const resolved = campaign ?? HOSTED_PULSE_TRIAL_EXTENSION_CAMPAIGN;
+  if (
+    !resolved.startsWith(HOSTED_PULSE_TRIAL_EXTENSION_CAMPAIGN_PREFIX) ||
+    resolved.length <= HOSTED_PULSE_TRIAL_EXTENSION_CAMPAIGN_PREFIX.length
+  ) {
+    throw new Error("Pulse Trial extension campaign key is invalid.");
+  }
+  return resolved;
 }
 
 function isHostedPulseTrialExtensionLocallyReconciled(input: {
@@ -568,12 +609,14 @@ function isHostedPulseTrialExtensionLocallyReconciled(input: {
 }
 
 function isValidHostedPulseTrialExtensionUpdateResult(input: {
+  campaign: string;
   candidate: HostedPulseTrialExtensionCandidate;
   priceId: string;
   subscription: HostedPulseTrialExtensionStripeSubscription;
   targetTrialEnd: number;
 }): boolean {
   const classification = classifyHostedPulseTrialExtensionSubscription({
+    campaign: input.campaign,
     candidate: input.candidate,
     nowUnixSeconds: input.targetTrialEnd - 1,
     priceId: input.priceId,
@@ -585,6 +628,7 @@ function isValidHostedPulseTrialExtensionUpdateResult(input: {
 }
 
 async function applyHostedPulseTrialExtensionUnderLock(input: {
+  campaign: string;
   candidate: HostedPulseTrialExtensionCandidate;
   now?: Date;
   priceId: string;
@@ -600,6 +644,7 @@ async function applyHostedPulseTrialExtensionUnderLock(input: {
 
   const nowUnixSeconds = resolveHostedPulseTrialExtensionNowUnixSeconds(input.now);
   const classification = classifyHostedPulseTrialExtensionSubscription({
+    campaign: input.campaign,
     candidate: input.candidate,
     nowUnixSeconds,
     priceId: input.priceId,
@@ -628,13 +673,15 @@ async function applyHostedPulseTrialExtensionUnderLock(input: {
     updatedSubscription = await input.stripe.updateSubscription(
       stripeSubscriptionId,
       buildHostedPulseTrialExtensionStripeUpdateParams({
+        campaign: input.campaign,
         subscription,
         targetTrialEnd,
       }),
       {
-        idempotencyKey: buildHostedPulseTrialExtensionIdempotencyKey(
-          stripeSubscriptionId,
-        ),
+        idempotencyKey: buildHostedPulseTrialExtensionIdempotencyKey({
+          campaign: input.campaign,
+          subscriptionId: stripeSubscriptionId,
+        }),
         maxNetworkRetries: STRIPE_UPDATE_MAX_NETWORK_RETRIES,
         timeout: STRIPE_UPDATE_TIMEOUT_MS,
       },
@@ -644,6 +691,7 @@ async function applyHostedPulseTrialExtensionUnderLock(input: {
   }
 
   if (!isValidHostedPulseTrialExtensionUpdateResult({
+    campaign: input.campaign,
     candidate: input.candidate,
     priceId: input.priceId,
     subscription: updatedSubscription,
@@ -676,6 +724,7 @@ async function projectHostedPulseTrialExtensionCandidate(
 }
 
 async function previewHostedPulseTrialExtensionCandidate(input: {
+  campaign: string;
   candidate: HostedPulseTrialExtensionCandidate;
   now?: Date;
   priceId: string;
@@ -694,6 +743,7 @@ async function previewHostedPulseTrialExtensionCandidate(input: {
 
   const nowUnixSeconds = resolveHostedPulseTrialExtensionNowUnixSeconds(input.now);
   const classification = classifyHostedPulseTrialExtensionSubscription({
+    campaign: input.campaign,
     candidate: input.candidate,
     nowUnixSeconds,
     priceId: input.priceId,
