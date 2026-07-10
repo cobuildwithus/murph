@@ -262,19 +262,19 @@ describe("hosted runner container identity", () => {
       expectedModel: HOSTED_ASSISTANT_SOL_MODEL,
       fleetModel: HOSTED_ASSISTANT_TERRA_MODEL,
       hostedAssistantModelOverride: HOSTED_ASSISTANT_SOL_MODEL,
-      name: "applies Sol over the Terra fleet default",
+      name: "applies the saved Sol choice",
+    },
+    {
+      expectedModel: HOSTED_ASSISTANT_SOL_MODEL,
+      fleetModel: "gpt-5.6-luna",
+      hostedAssistantModelOverride: HOSTED_ASSISTANT_SOL_MODEL,
+      name: "applies the saved Sol choice independently of the platform default",
     },
     {
       expectedModel: HOSTED_ASSISTANT_TERRA_MODEL,
       fleetModel: HOSTED_ASSISTANT_TERRA_MODEL,
       hostedAssistantModelOverride: null,
       name: "preserves Terra without an override",
-    },
-    {
-      expectedModel: "gpt-5.5",
-      fleetModel: "gpt-5.5",
-      hostedAssistantModelOverride: HOSTED_ASSISTANT_SOL_MODEL,
-      name: "preserves a non-Terra fleet rollback",
     },
   ] as const)("$name", async ({
     expectedModel,

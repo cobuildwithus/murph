@@ -1,6 +1,6 @@
 # Hosted Plan Downgrades
 
-Last verified: 2026-07-09
+Last verified: 2026-07-10
 
 ## Goal
 
@@ -38,9 +38,9 @@ Settings:
 - Only an active, unsuspended member whose own current billing state is paid
   Edge can opt into Sol. Sponsored Family access, Pulse, trials, and synthetic
   thread-container members do not qualify.
-- Postgres stores only the nullable Sol intent. Terra is the absence of an
-  override, so the platform fleet model remains the default and rollback
-  authority.
+- Postgres stores only the nullable Sol intent. Terra is the normal absence of
+  an override; members who do not opt in use the platform-configured model,
+  normally Terra.
 - A scheduled switch to Pulse keeps Sol available until Stripe applies the
   Pulse phase and reconciliation changes the current billing state. After that
   boundary, Terra is effective while the stored Sol intent remains available
@@ -51,7 +51,7 @@ Settings:
 - Changing the preference does not create a mailbox item, wake, queue, or a
   second copy in the vault or hosted workspace snapshot.
 
-### Deployment And Rollback
+### Deployment And Compatibility
 
 Deploy this additive path in the following order:
 
@@ -74,18 +74,16 @@ The feature is safe under gradual container rollout and adds no requirement for
 global rollout preflight in `apps/cloudflare/DEPLOY.md`, which currently requires
 immediate rollout for the GPT-5.6 fleet and selector-scope compatibility.
 
-The rollback action is to set `HOSTED_ASSISTANT_MODEL=gpt-5.5` and redeploy
-Cloudflare. The new Worker applies the stored Sol intent only when the fleet
-value is exactly Terra, so the GPT-5.5 floor wins without clearing the member
-preference. An old Worker does not consume the preference and likewise
-preserves that floor.
+Feature rollback may restore either the pre-feature web producer or the
+pre-feature Cloudflare consumer; the additive nullable column may remain. Old
+web code emits no model field, and old Cloudflare code ignores one, so either
+rollback independently returns every member to the platform-configured model,
+normally Terra. This feature has no model-specific fallback or rollback path.
 
-Focused contract coverage proves old/no-field compatibility, Sol over Terra,
-the Terra default, and the GPT-5.5 rollback floor. The normal deploy keeps its
-managed-container fingerprint and live Terra smoke. An optional post-deploy
-canary may select Sol for one eligible Edge member and confirm the next new
-invocation reports Sol; if rollback is exercised, confirm the next invocation
-reports GPT-5.5 while the stored preference remains intact.
+Focused contract coverage proves old/no-field compatibility, the saved Sol
+choice, and the Terra default. The normal deploy keeps its managed-container
+fingerprint and live Terra smoke. An optional post-deploy canary may select Sol
+for one eligible Edge member and confirm the next new invocation reports Sol.
 
 ## First-Version Scope
 
