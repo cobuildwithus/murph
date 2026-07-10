@@ -30,7 +30,10 @@ import type {
 import type {
   AssistantMessageReaction,
 } from '@murphai/operator-config/assistant-cli-contracts'
-import { normalizeNullableString } from './shared.js'
+import {
+  normalizeNullableString,
+  warnAssistantBestEffortFailure,
+} from './shared.js'
 import {
   normalizeAssistantResponseMediaList,
 } from './response-media.js'
@@ -992,7 +995,6 @@ export async function finalizeAssistantTurnFromDeliveryOutcome(input: {
   })
   const state = createAssistantRuntimeStateService(input.vault)
   await state.turns.finalizeReceipt(plan.receipt)
-  await state.diagnostics.recordEvent(plan.diagnostic)
   // Any accepted reply on a first-contact-scoped route is first contact, not
   // just the canned welcome text: once the user has heard from the assistant
   // here, a queued signup welcome for this route is stale and must skip.
@@ -1007,6 +1009,15 @@ export async function finalizeAssistantTurnFromDeliveryOutcome(input: {
       vault: input.vault,
     })
   }
+  // The receipt finalization above is the commit; the terminal diagnostic is
+  // observability only and must never fail an already-accepted delivery (a
+  // thrown error here would abandon a queued outbox intent upstream).
+  await state.diagnostics.recordEvent(plan.diagnostic).catch((error) => {
+    warnAssistantBestEffortFailure({
+      error,
+      operation: 'turn delivery diagnostic',
+    })
+  })
 }
 
 // The first-contact marker's only reader is the hosted signup-welcome skip,
