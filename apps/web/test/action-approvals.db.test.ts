@@ -78,15 +78,17 @@ describe("hosted action approvals", () => {
       now: new Date("2026-06-25T16:01:00.000Z"),
       prisma: deps.prisma,
     });
-    const firstDecision = await deps.prisma.$transaction((tx) =>
-      decideHostedActionApprovalTx({
+    const firstDecision = await deps.prisma.$transaction((tx) => {
+      assertHostedActionApprovalTransactionClient(tx);
+      return decideHostedActionApprovalTx({
         approval: firstPending,
         challenge: verifiedApprovalChallenge(firstPending, memberId),
         decision: "approved",
         memberId,
         now: new Date("2026-06-25T16:01:00.000Z"),
         tx,
-      }));
+      });
+    });
 
     expect(firstDecision.approval.status).toBe("approved");
     expect(firstDecision.runtimeResume).toEqual({
@@ -136,15 +138,17 @@ describe("hosted action approvals", () => {
       now: new Date("2026-06-25T16:04:00.000Z"),
       prisma: deps.prisma,
     });
-    const secondDecision = await deps.prisma.$transaction((tx) =>
-      decideHostedActionApprovalTx({
+    const secondDecision = await deps.prisma.$transaction((tx) => {
+      assertHostedActionApprovalTransactionClient(tx);
+      return decideHostedActionApprovalTx({
         approval: secondPending,
         challenge: verifiedApprovalChallenge(secondPending, memberId),
         decision: "approved",
         memberId,
         now: new Date("2026-06-25T16:04:00.000Z"),
         tx,
-      }));
+      });
+    });
 
     const secondWake = await deps.prisma.hostedMailboxItem.findUniqueOrThrow({
       where: { id: secondDecision.runtimeResume.mailboxItemId },
@@ -171,6 +175,7 @@ describe("hosted action approvals", () => {
     });
 
     await expect(deps.prisma.$transaction(async (tx) => {
+      assertHostedActionApprovalTransactionClient(tx);
       const failingTx = new Proxy(tx, {
         get(target, property, receiver) {
           if (property === "$queryRaw") {
@@ -645,6 +650,20 @@ function verifiedApprovalChallenge(
     memberId,
     tokenHash: pending.tokenHash,
   };
+}
+
+function assertHostedActionApprovalTransactionClient(
+  value: unknown,
+): asserts value is Parameters<typeof decideHostedActionApprovalTx>[0]["tx"] {
+  if (
+    typeof value !== "object"
+    || value === null
+    || !("$queryRaw" in value)
+    || !("hostedMailboxItem" in value)
+    || !("hostedSensitiveActionChallenge" in value)
+  ) {
+    throw new TypeError("Expected a hosted action-approval transaction client.");
+  }
 }
 
 function consumeRequest(
