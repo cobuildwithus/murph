@@ -57,6 +57,46 @@ export default async function OGImage() {
             "radial-gradient(circle at 90% 0%, #e7ddc8 0%, #f0e9db 40%, #f5f0e8 70%)",
         }}
       >
+        {/* Dot-grid texture echoing the logo motif, quieted behind the text.
+            Drawn as elements: satori does not tile background gradients. */}
+        <div
+          style={{
+            position: "absolute",
+            top: -8,
+            left: -8,
+            display: "flex",
+            flexDirection: "column",
+            gap: 24,
+          }}
+        >
+          {Array.from({ length: 24 }, (_, rowIndex) => (
+            <div key={rowIndex} style={{ display: "flex", gap: 24 }}>
+              {Array.from({ length: 44 }, (_, colIndex) => (
+                <div
+                  key={colIndex}
+                  style={{
+                    width: 3.5,
+                    height: 3.5,
+                    borderRadius: "50%",
+                    backgroundColor: "rgba(160, 122, 78, 0.32)",
+                  }}
+                />
+              ))}
+            </div>
+          ))}
+        </div>
+        <div
+          style={{
+            position: "absolute",
+            top: 0,
+            left: 0,
+            width: "100%",
+            height: "100%",
+            background:
+              "radial-gradient(circle at 30% 45%, rgba(245, 240, 232, 0.95) 0%, rgba(245, 240, 232, 0.75) 40%, rgba(245, 240, 232, 0) 72%)",
+          }}
+        />
+
         {/* Logo */}
         <img
           src={logoDataUri}
@@ -103,7 +143,8 @@ export default async function OGImage() {
               color: MUTED,
             }}
           >
-            Murph reads your data and keeps score in your group chat.
+            Murph figures out what actually works and keeps score in your
+            group chat.
           </div>
         </div>
 
