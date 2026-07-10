@@ -21,6 +21,7 @@ import {
 import {
   HostedMailboxUserMismatchError,
   fetchAndProcessHostedMailboxPrefix,
+  prefetchHostedMailboxPrefix,
 } from "../src/hosted-runtime/mailbox-import.ts";
 import type {
   HostedRuntimeMailboxPort,
@@ -30,6 +31,192 @@ const TEST_NOW = "2026-04-26T00:00:00.000Z";
 const TEST_USER_ID = "member_synthetic_import";
 
 describe("hosted mailbox import loop", () => {
+  test("reuses one mixed prefetch for isolated conversation and system phases", async () => {
+    const state = createEmptyHostedMailboxImportState();
+    const conversation = createMailboxItem({
+      id: "mailbox_item_prefetch_conversation_001",
+      laneSeq: "1",
+    });
+    const system = createMailboxItem({
+      id: "mailbox_item_prefetch_system_001",
+      kind: "member.activated",
+      lane: "system",
+      laneSeq: "1",
+    });
+    const { fetchRequests, mailboxPort } = createMailboxPort({
+      consumedSeqByLane: [
+        { consumedSeq: "0", lane: "conversation" },
+        { consumedSeq: "0", lane: "system" },
+      ],
+      items: [conversation, system],
+    });
+    const prefetch = prefetchHostedMailboxPrefix({
+      lanes: ["conversation", "system"],
+      limitPerLane: 10,
+      mailboxPort,
+      requestId: "request_mixed_prefetch",
+      state,
+    });
+    const imported: string[] = [];
+
+    const conversationResult = await fetchAndProcessHostedMailboxPrefix({
+      expectedUserId: TEST_USER_ID,
+      async importItem(input) {
+        imported.push(input.item.id);
+        return { status: "imported" };
+      },
+      lanes: ["conversation"],
+      limitPerLane: 10,
+      mailboxPort,
+      now: () => TEST_NOW,
+      prefetch,
+      requestId: "request_conversation_phase",
+      state,
+    });
+    const systemResult = await fetchAndProcessHostedMailboxPrefix({
+      expectedUserId: TEST_USER_ID,
+      async importItem(input) {
+        imported.push(input.item.id);
+        return { status: "imported" };
+      },
+      lanes: ["system"],
+      limitPerLane: 10,
+      mailboxPort,
+      now: () => TEST_NOW,
+      prefetch,
+      requestId: "request_system_phase",
+      state: conversationResult.state,
+    });
+
+    assert.deepEqual(fetchRequests, [{
+      cursorMode: "imported_seq",
+      lanes: [
+        { importedSeq: "0", lane: "conversation" },
+        { importedSeq: "0", lane: "system" },
+      ],
+      limitPerLane: 10,
+      requestId: "request_mixed_prefetch",
+    }]);
+    assert.deepEqual(imported, [conversation.id, system.id]);
+    assert.deepEqual(conversationResult.fetchedLanes, ["conversation"]);
+    assert.deepEqual(systemResult.fetchedLanes, ["system"]);
+    assert.equal(systemResult.state.watermarks.conversation, "1");
+    assert.equal(systemResult.state.watermarks.system, "1");
+  });
+
+  test("falls back independently by lane when the mixed prefetch rejects", async () => {
+    const state = createEmptyHostedMailboxImportState();
+    const fetchRequests: HostedMailboxFetchRequest[] = [];
+    const mailboxPort: HostedRuntimeMailboxPort = {
+      async fetch(request): Promise<HostedMailboxFetchResponse> {
+        fetchRequests.push(request);
+        if (request.lanes.length === 2) {
+          throw new Error("mixed fetch unavailable");
+        }
+        const lane = request.lanes[0]?.lane ?? "conversation";
+        const item = lane === "conversation"
+          ? createMailboxItem({ id: "mailbox_item_fallback_conversation_001" })
+          : createMailboxItem({
+              id: "mailbox_item_fallback_system_001",
+              kind: "member.activated",
+              lane: "system",
+            });
+        return {
+          consumedSeqByLane: [{ consumedSeq: "0", lane }],
+          fetchedAt: TEST_NOW,
+          items: [item],
+          maxSeqByLane: [{ lane, maxSeq: "1" }],
+          userId: TEST_USER_ID,
+        };
+      },
+      async fetchPayload(): Promise<HostedMailboxPayloadFetchResponse> {
+        throw new Error("unexpected payload fetch");
+      },
+    };
+    const prefetch = prefetchHostedMailboxPrefix({
+      lanes: ["conversation", "system"],
+      limitPerLane: 10,
+      mailboxPort,
+      requestId: "request_failed_mixed_prefetch",
+      state,
+    });
+
+    const conversationResult = await fetchAndProcessHostedMailboxPrefix({
+      expectedUserId: TEST_USER_ID,
+      async importItem() {
+        return { status: "imported" };
+      },
+      lanes: ["conversation"],
+      limitPerLane: 10,
+      mailboxPort,
+      prefetch,
+      requestId: "request_conversation_fallback",
+      state,
+    });
+    const systemResult = await fetchAndProcessHostedMailboxPrefix({
+      expectedUserId: TEST_USER_ID,
+      async importItem() {
+        return { status: "imported" };
+      },
+      lanes: ["system"],
+      limitPerLane: 10,
+      mailboxPort,
+      prefetch,
+      requestId: "request_system_fallback",
+      state: conversationResult.state,
+    });
+
+    assert.equal(fetchRequests.length, 3);
+    assert.deepEqual(fetchRequests.map((request) => request.lanes.map((lane) => lane.lane)), [
+      ["conversation", "system"],
+      ["conversation"],
+      ["system"],
+    ]);
+    assert.equal(systemResult.state.watermarks.conversation, "1");
+    assert.equal(systemResult.state.watermarks.system, "1");
+  });
+
+  test("validates the complete mixed prefetch before selecting a requested lane", async () => {
+    const state = createEmptyHostedMailboxImportState();
+    const { mailboxPort } = createMailboxPort({
+      items: [
+        createMailboxItem(),
+        createMailboxItem({
+          id: "mailbox_item_prefetch_wrong_user_system",
+          kind: "member.activated",
+          lane: "system",
+          userId: "member_synthetic_other",
+        }),
+      ],
+    });
+    const prefetch = prefetchHostedMailboxPrefix({
+      lanes: ["conversation", "system"],
+      limitPerLane: 10,
+      mailboxPort,
+      requestId: "request_wrong_user_mixed_prefetch",
+      state,
+    });
+
+    await assert.rejects(
+      fetchAndProcessHostedMailboxPrefix({
+        expectedUserId: TEST_USER_ID,
+        async importItem() {
+          return { status: "imported" };
+        },
+        lanes: ["conversation"],
+        limitPerLane: 10,
+        mailboxPort,
+        prefetch,
+        requestId: "request_wrong_user_conversation_phase",
+        state,
+      }),
+      (error) =>
+        error instanceof HostedMailboxUserMismatchError
+        && error.scope === "item"
+        && error.itemId === "mailbox_item_prefetch_wrong_user_system",
+    );
+  });
+
   test("fetches after runtime watermarks and advances only after durable import", async () => {
     const first = createMailboxItem({
       id: "mailbox_item_conversation_001",

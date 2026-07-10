@@ -16,6 +16,10 @@ import {
   resolveHostedAssistantLinqDeliveryContextFromCandidatesForRequest,
   type HostedAssistantLinqDeliveryContext,
 } from "./linq-delivery-context.ts";
+import {
+  recordHostedAssistantMilestonesBestEffort,
+  type HostedAssistantMilestoneTraceContext,
+} from "./assistant-latency-trace.ts";
 
 const HOSTED_TELEGRAM_CHANNEL_ENV_KEYS = [
   "TELEGRAM_API_BASE_URL",
@@ -107,6 +111,7 @@ export function buildHostedWhatsAppChannelEnv(input: {
 
 export function createHostedAssistantChannelTypingDependencies(input: {
   forwardedEnv: Readonly<Record<string, string>>;
+  latencyTraceContext?: HostedAssistantMilestoneTraceContext | null;
   linqDeliveryContexts?: readonly HostedAssistantLinqDeliveryContext[] | null;
   platformEnv?: Readonly<Record<string, string>>;
   providerFetch?: typeof fetch | null;
@@ -145,6 +150,7 @@ export function createHostedAssistantChannelTypingDependencies(input: {
         fetchImplementation: input.providerFetch,
         signal: input.signal,
       }, "Hosted Linq typing indicator");
+      const typingRequestStartedAt = new Date().toISOString();
       try {
         const handle = await startLinqTypingIndicator({
           target,
@@ -152,6 +158,21 @@ export function createHostedAssistantChannelTypingDependencies(input: {
           ...dependencies,
           maxSessionMs: HOSTED_LINQ_TYPING_MAX_SESSION_MS,
           refreshMs: HOSTED_LINQ_TYPING_REFRESH_MS,
+        });
+        recordHostedAssistantMilestonesBestEffort({
+          context: input.latencyTraceContext,
+          milestones: [
+            {
+              at: typingRequestStartedAt,
+              milestone: "linq_typing_request_started",
+            },
+            ...(handle
+              ? [{
+                  at: new Date().toISOString(),
+                  milestone: "linq_typing_accepted" as const,
+                }]
+              : []),
+          ],
         });
         if (!handle) {
           releaseHostedLinqTypingTarget(typingTarget, {
@@ -164,6 +185,13 @@ export function createHostedAssistantChannelTypingDependencies(input: {
           target: typingTarget,
         });
       } catch (error) {
+        recordHostedAssistantMilestonesBestEffort({
+          context: input.latencyTraceContext,
+          milestones: [{
+            at: typingRequestStartedAt,
+            milestone: "linq_typing_request_started",
+          }],
+        });
         releaseHostedLinqTypingTarget(typingTarget, {
           completedMaxSession: false,
         });

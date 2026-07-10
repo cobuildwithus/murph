@@ -29,7 +29,5 @@ services:
         sync: false
       - key: CLOUDFLARE_HOSTED_CONTROL_BASE_URL
         sync: false
-      - key: HOSTED_RUNTIME_DEMAND_TIMEOUT_MS
-        value: "10000"
       - key: HOSTED_TEMPORAL_ENSURE_EXECUTION_TIMEOUT_MARGIN_MS
         value: "30000"

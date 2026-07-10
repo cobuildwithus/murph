@@ -24,6 +24,9 @@ import {
 import {
   isHostedMailboxLane,
 } from "@murphai/hosted-execution/runtime-control";
+import {
+  HOSTED_RUNTIME_RECONCILIATION_FACTS_START_TO_CLOSE_TIMEOUT_MS,
+} from "@murphai/hosted-execution/temporal-env";
 import type {
   HostedUserRuntimeWorkflowCarryForwardState,
   HostedUserRuntimeWorkflowInput,
@@ -35,11 +38,9 @@ export const HOSTED_USER_RUNTIME_DEFAULT_CONTINUE_AS_NEW_HISTORY_LENGTH = 750;
 export const HOSTED_USER_RUNTIME_DEFAULT_RECONCILIATION_FAILURE_RETRY_DELAY_MS = 30_000;
 export const HOSTED_USER_RUNTIME_DEFAULT_EXECUTION_FAILURE_RETRY_DELAY_MS = 30_000;
 export const HOSTED_USER_RUNTIME_DEFAULT_ENSURE_PROCESSING_START_TO_CLOSE_TIMEOUT_MS = 15_000;
-export const HOSTED_USER_RUNTIME_DEFAULT_READ_RECONCILIATION_FACTS_START_TO_CLOSE_TIMEOUT_MS = 10_000;
 export const HOSTED_USER_RUNTIME_MAX_CONTINUE_AS_NEW_HISTORY_LENGTH = 10_000;
 export const HOSTED_USER_RUNTIME_MAX_CONTINUE_AS_NEW_ITERATION_THRESHOLD = 10_000;
 export const HOSTED_USER_RUNTIME_MAX_ENSURE_PROCESSING_START_TO_CLOSE_TIMEOUT_MS = 3_600_000;
-export const HOSTED_USER_RUNTIME_MAX_READ_RECONCILIATION_FACTS_START_TO_CLOSE_TIMEOUT_MS = 30_000;
 export const HOSTED_USER_RUNTIME_MIN_ACTIVITY_START_TO_CLOSE_TIMEOUT_MS = 1_000;
 export const HOSTED_USER_RUNTIME_RECONCILE_BEFORE_MAILBOX_PATCH_ID =
   "hosted-runtime-reconcile-before-mailbox-processing";
@@ -64,7 +65,7 @@ export async function hostedUserRuntimeWorkflow(
       maximumInterval: "1 minute",
     },
     startToCloseTimeout:
-      options.readRuntimeReconciliationFactsStartToCloseTimeoutMs,
+      HOSTED_RUNTIME_RECONCILIATION_FACTS_START_TO_CLOSE_TIMEOUT_MS,
   });
   const processingActivities = proxyActivities<typeof activities>({
     retry: {
@@ -133,7 +134,6 @@ interface NormalizedWorkflowOptions {
   continueAsNewAfterHistoryEvents: number;
   continueAsNewAfterIterations: number;
   ensureRuntimeProcessingStartToCloseTimeoutMs: number;
-  readRuntimeReconciliationFactsStartToCloseTimeoutMs: number;
 }
 
 export function createHostedUserRuntimeWorkflowMachine(
@@ -141,7 +141,6 @@ export function createHostedUserRuntimeWorkflowMachine(
   runtime: HostedUserRuntimeWorkflowRuntime,
 ): HostedUserRuntimeWorkflowMachine {
   const options = normalizeHostedUserRuntimeWorkflowOptions(input.options);
-  const continueAsNewOptions = normalizeContinueAsNewOptions(input.options);
   const state = createInitialWorkflowState(input.userId, input.state);
   let completedIterations = 0;
   let mailboxSignalVersion = 0;
@@ -153,7 +152,7 @@ export function createHostedUserRuntimeWorkflowMachine(
 
   const continueAsNewWithCurrentState = async (): Promise<never> =>
     await runtime.continueAsNew({
-      options: continueAsNewOptions,
+      options,
       state: readCarryForwardState(state),
       userId: input.userId,
     });
@@ -626,35 +625,6 @@ export function normalizeHostedUserRuntimeWorkflowOptions(
       min: HOSTED_USER_RUNTIME_MIN_ACTIVITY_START_TO_CLOSE_TIMEOUT_MS,
       value: options?.ensureRuntimeProcessingStartToCloseTimeoutMs,
     }),
-    readRuntimeReconciliationFactsStartToCloseTimeoutMs:
-      normalizePositiveIntegerOption({
-        fallback:
-          HOSTED_USER_RUNTIME_DEFAULT_READ_RECONCILIATION_FACTS_START_TO_CLOSE_TIMEOUT_MS,
-        max:
-          HOSTED_USER_RUNTIME_MAX_READ_RECONCILIATION_FACTS_START_TO_CLOSE_TIMEOUT_MS,
-        min: HOSTED_USER_RUNTIME_MIN_ACTIVITY_START_TO_CLOSE_TIMEOUT_MS,
-        value: options?.readRuntimeReconciliationFactsStartToCloseTimeoutMs,
-      }),
-  };
-}
-
-function normalizeContinueAsNewOptions(
-  options: HostedUserRuntimeWorkflowOptions | undefined,
-): HostedUserRuntimeWorkflowOptions {
-  const normalized = normalizeHostedUserRuntimeWorkflowOptions(options);
-  const ensureRuntimeProcessingStartToCloseTimeoutMs = normalizePositiveIntegerOption({
-    fallback: HOSTED_USER_RUNTIME_DEFAULT_ENSURE_PROCESSING_START_TO_CLOSE_TIMEOUT_MS,
-    max: HOSTED_USER_RUNTIME_MAX_ENSURE_PROCESSING_START_TO_CLOSE_TIMEOUT_MS,
-    min: HOSTED_USER_RUNTIME_MIN_ACTIVITY_START_TO_CLOSE_TIMEOUT_MS,
-    value: options?.ensureRuntimeProcessingStartToCloseTimeoutMs,
-  });
-  return {
-    continueAsNewAfterHistoryEvents:
-      normalized.continueAsNewAfterHistoryEvents,
-    continueAsNewAfterIterations: normalized.continueAsNewAfterIterations,
-    ensureRuntimeProcessingStartToCloseTimeoutMs,
-    readRuntimeReconciliationFactsStartToCloseTimeoutMs:
-      normalized.readRuntimeReconciliationFactsStartToCloseTimeoutMs,
   };
 }
 

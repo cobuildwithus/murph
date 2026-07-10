@@ -1148,7 +1148,7 @@ describe("runHostedAssistantAutomation", () => {
           autoReplyChannels: "telegram",
           autoReplyEligibleAfterSummary: "telegram:present",
         }),
-        message: "Hosted assistant automation pass starting.",
+        message: "Hosted assistant automation pass finished.",
       }),
     );
     expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
@@ -3149,6 +3149,7 @@ describe("runHostedAssistantAutomationLane", () => {
       inputSource: expect.any(Object),
       maxPerScan: 1,
       onEvent: expect.any(Function),
+      onProviderEvent: expect.any(Function),
       onProviderRequestStarted: expect.any(Function),
       onTraceEvent: expect.any(Function),
       requestId: "req_123",
@@ -3198,6 +3199,47 @@ describe("runHostedAssistantAutomationLane", () => {
         type: "provider_started",
       },
     });
+    automationPassInput.onProviderEvent?.({
+      id: "reasoning_1",
+      kind: "reasoning",
+      rawEvent: { sensitive: "must-not-leave-runtime" },
+      state: "running",
+      text: "private reasoning text",
+    });
+    await vi.waitFor(() => {
+      expect(latencyTraceRecord).toHaveBeenCalledTimes(2);
+    });
+    expect(latencyTraceRecord).toHaveBeenLastCalledWith({
+      event: expect.objectContaining({
+        assistantInputIds: ["input_1"],
+        milestone: "first_codex_output_observed",
+        runtimeAttemptId: "attempt_123",
+        source: "linq",
+        type: "assistant_milestone",
+      }),
+    });
+    automationPassInput.onProviderEvent?.({
+      id: "message_1",
+      kind: "message",
+      rawEvent: { sensitive: "must-not-leave-runtime" },
+      state: "running",
+      text: "private response text",
+    });
+    await vi.waitFor(() => {
+      expect(latencyTraceRecord).toHaveBeenCalledTimes(3);
+    });
+    expect(latencyTraceRecord).toHaveBeenLastCalledWith({
+      event: expect.objectContaining({
+        assistantInputIds: ["input_1"],
+        milestone: "first_codex_text_observed",
+        runtimeAttemptId: "attempt_123",
+        source: "linq",
+        type: "assistant_milestone",
+      }),
+    });
+    expect(JSON.stringify(latencyTraceRecord.mock.calls)).not.toContain("private reasoning text");
+    expect(JSON.stringify(latencyTraceRecord.mock.calls)).not.toContain("private response text");
+    expect(JSON.stringify(latencyTraceRecord.mock.calls)).not.toContain("must-not-leave-runtime");
     automationPassInput.onProviderRequestStarted?.({
       assistantInputIds: ["input_2"],
       providerRequestOrdinal: 0,
@@ -3205,7 +3247,7 @@ describe("runHostedAssistantAutomationLane", () => {
       startedAt: "2026-04-08T00:00:02.000Z",
     });
     await Promise.resolve();
-    expect(latencyTraceRecord).toHaveBeenCalledTimes(2);
+    expect(latencyTraceRecord).toHaveBeenCalledTimes(4);
     expect(latencyTraceRecord).toHaveBeenLastCalledWith({
       event: {
         assistantInputIds: ["input_2"],

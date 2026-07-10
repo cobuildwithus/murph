@@ -244,10 +244,17 @@ describe("@murphai/contracts public entrypoint", () => {
       previewPath: option.previewPath,
     }))).toEqual([
       {
+        elevenLabsVoiceId: "tnSpp4vdxKPjI9w0GnoV",
+        gender: "female",
+        id: "upbeat",
+        label: "Classic Murph",
+        previewPath: "/audio/murph-voices/upbeat.mp3",
+      },
+      {
         elevenLabsVoiceId: null,
         gender: "male",
         id: "classic",
-        label: "Classic Murph",
+        label: "New York",
         previewPath: "/audio/murph-voices/classic.mp3",
       },
       {
@@ -363,13 +370,6 @@ describe("@murphai/contracts public entrypoint", () => {
         previewPath: "/audio/murph-voices/mysterious.mp3",
       },
       {
-        elevenLabsVoiceId: "tnSpp4vdxKPjI9w0GnoV",
-        gender: "female",
-        id: "upbeat",
-        label: "Upbeat",
-        previewPath: "/audio/murph-voices/upbeat.mp3",
-      },
-      {
         elevenLabsVoiceId: "RILOU7YmBhvwJGDGjNmP",
         gender: "female",
         id: "narrator",
@@ -400,6 +400,7 @@ describe("@murphai/contracts public entrypoint", () => {
     ]);
     expect(contracts.isAssistantVoiceOptionId("drill-sergeant")).toBe(true);
     expect(contracts.isAssistantVoiceOptionId("bright")).toBe(false);
+    expect(contracts.defaultAssistantVoiceOptionId).toBe("upbeat");
     expect(contracts.resolveAssistantVoiceOptionElevenLabsVoiceId("classic")).toBeNull();
     expect(contracts.resolveAssistantVoiceOptionElevenLabsVoiceId("warm")).toBe(
       "EST9Ui6982FZPSi7gCHi",
@@ -407,7 +408,14 @@ describe("@murphai/contracts public entrypoint", () => {
     // A retired roster id must fall back to the env voice rather than fail the
     // voice memo, so stale stored preferences stay harmless.
     expect(contracts.resolveAssistantVoiceOptionElevenLabsVoiceId("retired-voice")).toBeNull();
-    expect(contracts.resolveAssistantVoiceOptionElevenLabsVoiceId(null)).toBeNull();
+    // No stored preference resolves to the shared default voice instead of the
+    // env fallback.
+    expect(contracts.resolveAssistantVoiceOptionElevenLabsVoiceId(null)).toBe(
+      "tnSpp4vdxKPjI9w0GnoV",
+    );
+    expect(contracts.resolveAssistantVoiceOptionElevenLabsVoiceId(undefined)).toBe(
+      "tnSpp4vdxKPjI9w0GnoV",
+    );
     expect(contracts.VAULT_LAYOUT.preferencesDocument).toBe("bank/preferences.json");
   });
 });
