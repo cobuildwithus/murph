@@ -29,8 +29,9 @@ export function buildHostedRuntimeLogContextFields(
 
 // Every awaited runtime log write costs a full runner->worker->web round trip
 // (~150ms in production), and several sit directly on the reply hot path
-// between mailbox import and provider start (see the "observability writes
-// are never user latency" invariant in docs/contracts/00-invariants.md).
+// between mailbox import and the local Codex `turn/start` request write (see
+// the "observability writes are never user latency" invariant in
+// docs/contracts/00-invariants.md).
 // Info-level entries are durable diagnostics, not control flow: queue them so
 // the caller returns immediately while writes flush in the background in
 // enqueue order. warn/error entries write directly and block only on their

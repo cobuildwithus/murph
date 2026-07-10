@@ -4,6 +4,7 @@ import type { VaultServices } from '@murphai/vault-usecases/vault-services'
 import type { AssistantExecutionContext } from '../execution-context.js'
 import type { AssistantOutboxDispatchMode } from '../outbox.js'
 import type { AssistantProviderTraceEvent } from '../provider-traces.js'
+import type { AssistantProviderProgressEvent } from '../provider-progress.js'
 import type { AssistantTurnEnvironment } from '../service-contracts.js'
 import {
   type AssistantInputCandidate,
@@ -49,6 +50,7 @@ export async function scanAssistantAutomationOnce(input: {
   inboxServices: InboxServices
   maxPerScan?: number
   onEvent?: (event: AssistantRunEvent) => void
+  onProviderEvent?: ((event: AssistantProviderProgressEvent) => void) | null
   onProviderRequestStarted?: AssistantAutoReplyProviderRequestStartHook | null
   onTraceEvent?: (event: AssistantProviderTraceEvent) => void
   onStateProgress?: (
@@ -168,6 +170,7 @@ export async function scanAssistantAutomationOnce(input: {
       executionContext: input.executionContext,
       inboxServices: input.inboxServices,
       onEvent: input.onEvent,
+      onProviderEvent: input.onProviderEvent ?? null,
       onProviderRequestStarted: input.onProviderRequestStarted ?? null,
       onTraceEvent: input.onTraceEvent,
       providerHeartbeatMs: input.providerHeartbeatMs,

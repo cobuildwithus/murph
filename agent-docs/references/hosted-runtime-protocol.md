@@ -1,6 +1,6 @@
 # Hosted Mailbox Runtime Protocol
 
-Last verified: 2026-07-07
+Last verified: 2026-07-09
 
 ## Decision
 
@@ -345,8 +345,21 @@ exists, the failure is logged as a post-commit best-effort handoff failure and
 does not make provider ingress fail; direct Linq ensure is not fired without
 the accepted Temporal signal. Web does not run a mailbox-lag cron backstop:
 missed post-commit workflow signal recovery remains future hardening for a
-DB-backed pending-handoff reconciler or Temporal-owned reconciler. Repeated
-dirty hints while the same connection is already dirty do not append or signal
+DB-backed pending-handoff reconciler or Temporal-owned reconciler.
+
+Hosted reply-latency telemetry records only boundaries observed by their owning
+process. The web-owned `provider_started` field means the runtime observed a
+local Codex `turn/start`; it is not evidence of an upstream OpenAI request or
+first token. The runtime may also emit metadata-only `assistant_milestone`
+events for Linq typing request start/acceptance and the first locally observed
+Codex output/text. Web accepts those milestones only for the exact staged
+runtime attempt and merges them into the existing phase document under a row
+lock. Emission is queued off the reply path and may retry only the bounded
+staging/trace-row race; it carries no message, prompt, response, reasoning, or
+provider payload. Post-generation delivery guards must never create or
+overwrite the local Codex start milestone.
+
+Repeated dirty hints while the same connection is already dirty do not append or signal
 another device-sync wake; dirty coalescing remains the work-queue invariant,
 and any stronger signal-delivery repair must be mailbox-wide. Redacted runtime logs
 remain diagnostic evidence only; they must not be merged into checkpointed
@@ -468,6 +481,18 @@ succeeded. Connection-established and disconnect lifecycle commands may still
 use coarse device-sync mailbox wakes because they are explicit lifecycle events,
 not high-cardinality freshness hints.
 
+Before due background assistant automation, the runtime may read the existing
+web-owned device snapshot through provider- or source-filtered requests with
+fixed result limits and project positively established active or
+reconnect-required wearable state as bounded dynamic context. That projection
+contains only product labels and coarse state; it excludes connection and
+account identifiers, credential material, provider payloads, raw health values,
+and diagnostic text. Established account state uses the shared device-sync
+lifecycle predicate (`active` plus `source_confirmed`), and source-derived active
+labels require a connected source. Empty, incomplete-setup, failed, or preempted
+reads produce no device context and must not be interpreted as proof that the
+user has no connection.
+
 Hosted Stripe webhook routes keep raw request bodies and Stripe signatures in
 the route/service verification path only. After verification, web stores the
 minimal `HostedStripeEvent` receipt and starts a Stripe-specific Vercel Workflow
@@ -564,8 +589,19 @@ authoritative source for imported per-lane watermarks; `HostedWorkspace`
 redacted status is a diagnostic/status surface, not an import progress input.
 Fetching after restore keeps user messages appended during restore visible to
 the same invocation instead of hiding them behind a stale pre-restore read. The
-runtime stages decoded conversation rows as assistant input and marks the active
-invocation dirty. Foreground runtime work may defer intermediate checkpoints.
+normal foreground path takes one authorized post-restore snapshot of the
+conversation and system lanes, consumes the conversation slice first, and then
+consumes the system slice through the existing failure-contained pre-assistant
+phase. A failed mixed snapshot falls back independently by lane, so system-lane
+denial or import failure cannot suppress current conversation work. Additional
+system pages remain ordinary system-only fetches. This snapshot defines the
+same-turn system-fact barrier: system facts accepted before the snapshot may
+affect the current turn, while facts appended after it remain durable for their
+normal wake or a later pass. Late conversation input continues through the
+active-turn import path and retains foreground priority. Cold bootstrap and
+background-only mailbox semantics are unchanged.
+The runtime stages decoded conversation rows as assistant input and marks the
+active invocation dirty. Foreground runtime work may defer intermediate checkpoints.
 The active invocation remains dirty until the runtime-owned
 idle or scheduled-wake checkpoint succeeds. RunnerContainer never records
 pending checkpoint intent. Activity expiry is cleanup-only. Projection status

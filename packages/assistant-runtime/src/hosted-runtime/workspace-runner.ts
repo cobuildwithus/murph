@@ -320,6 +320,7 @@ export interface HostedWorkspaceRunnerInput {
   initialAssistantInputBatch?: HostedWorkspaceRunnerAssistantInputBatch | null;
   initialMailboxImport?: HostedMailboxImportCheckpointResult | null;
   initialMailboxImportContext?: HostedWorkspaceRunnerMailboxImportContext | null;
+  initialMailboxPrefetch?: HostedMailboxPrefixPrefetch | null;
   limitPerLane: number;
   materializeWorkspaceArtifacts?: HostedWorkspaceArtifactMaterializer | null;
   trackDeferredUsageCapture?: ((capture: HostedWorkspaceRunnerDeferredUsageCapture) => void) | null;
@@ -543,6 +544,7 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
       importItemContext: input.initialMailboxImportContext ?? null,
       input,
       lanes: input.runAssistantPhase ? ["conversation"] : undefined,
+      prefetch: input.initialMailboxPrefetch ?? null,
       requestId: input.requestId,
       signal: input.signal ?? null,
     });
@@ -1391,6 +1393,7 @@ async function importHostedPreAssistantSystemMailboxForWorkspaceRunner(input: {
       importItemContext: input.importItemContext,
       input: input.input,
       lanes: ["system"],
+      prefetch: importPage === 1 ? input.input.initialMailboxPrefetch ?? null : null,
       requestId: `${input.requestId}:pre-assistant-system:${importPage}`,
       signal: input.signal,
       suppressNoopRuntimeLog: true,

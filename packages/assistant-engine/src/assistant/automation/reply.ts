@@ -22,6 +22,7 @@ import {
 } from '../provider-failure-diagnostics.js'
 import type { AssistantProviderRequestStartTiming } from '../providers/types.js'
 import type { AssistantProviderTraceEvent } from '../provider-traces.js'
+import type { AssistantProviderProgressEvent } from '../provider-progress.js'
 import type {
   AssistantHostedDeliveryIdempotencyContext,
   AssistantTurnEnvironment,
@@ -346,6 +347,7 @@ export async function processAssistantAutoReplyGroup(input: {
   executionContext?: AssistantExecutionContext | null
   inboxServices: InboxServices
   onEvent?: (event: AssistantRunEvent) => void
+  onProviderEvent?: ((event: AssistantProviderProgressEvent) => void) | null
   onProviderRequestStarted?: AssistantAutoReplyProviderRequestStartHook | null
   onTraceEvent?: (event: AssistantProviderTraceEvent) => void
   providerHeartbeatMs?: number | null
@@ -438,6 +440,7 @@ async function resolveAssistantAutoReplyGroupOutcome(input: {
   enabledChannels: readonly string[]
   executionContext?: AssistantExecutionContext | null
   onEvent?: (event: AssistantRunEvent) => void
+  onProviderEvent?: ((event: AssistantProviderProgressEvent) => void) | null
   onProviderRequestStarted?: AssistantAutoReplyProviderRequestStartHook | null
   onTraceEvent?: (event: AssistantProviderTraceEvent) => void
   onAcceptedContext?: (context: AssistantAutoReplyGroupContext) => void
@@ -549,6 +552,7 @@ async function resolveAssistantAutoReplyGroupOutcome(input: {
     signal: input.signal,
     maxSessionAgeMs: input.sessionMaxAgeMs,
     onEvent: input.onEvent,
+    onProviderEvent: input.onProviderEvent ?? null,
     onProviderRequestStarted: input.onProviderRequestStarted ?? null,
     onTraceEvent: input.onTraceEvent,
     onFinishWithoutReplyAccepted: async (event) => {
@@ -1484,6 +1488,7 @@ async function executeAssistantAutoReply(input: {
     deliveryContextOrdinal: number
     messageReactionsAvailable?: boolean | null
   }) => Promise<void> | void) | null
+  onProviderEvent?: ((event: AssistantProviderProgressEvent) => void) | null
   onProviderRequestStarted?: AssistantAutoReplyProviderRequestStartHook | null
   onTraceEvent?: (event: AssistantProviderTraceEvent) => void
   operatorAuthority: AssistantOperatorAuthority
@@ -1556,7 +1561,10 @@ async function executeAssistantAutoReply(input: {
             }),
       },
       maxSessionAgeMs: input.maxSessionAgeMs,
-      onProviderEvent: watchdog.onProviderEvent,
+      onProviderEvent: (event) => {
+        watchdog.onProviderEvent(event)
+        input.onProviderEvent?.(event)
+      },
       onProviderRequestStarted: input.onProviderRequestStarted
         ? (event) => input.onProviderRequestStarted?.({
             ...(event.admissionMs === undefined ? {} : { admissionMs: event.admissionMs }),

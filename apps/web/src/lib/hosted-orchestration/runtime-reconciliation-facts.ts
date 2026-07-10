@@ -35,7 +35,6 @@ import {
 } from "../hosted-mailbox/store";
 import {
   claimHostedAiUsageLimitNotice,
-  releaseHostedAiUsageLimitNotice,
 } from "../hosted-execution/usage-allowance";
 import {
   sendClaimedHostedAiUsageLimitNoticeToLinqChat,
@@ -418,21 +417,11 @@ async function sendHostedRuntimeAiUsageLimitNoticeForPendingConversation(input: 
       return;
     }
 
-    try {
-      await sendHostedRuntimeTelegramUsageLimitNotice({
-        delivery: noticeDelivery,
-        message: decision.userNotice.message,
-        replyToMessageId: wake.message.telegramMessage.messageId,
-      });
-    } catch (error) {
-      await releaseHostedRuntimeAiUsageNoticeClaimBestEffort({
-        memberId: input.userId,
-        periodStart: decision.periodStart,
-        prisma: input.prisma,
-        sentAt,
-      });
-      throw error;
-    }
+    await sendHostedRuntimeTelegramUsageLimitNotice({
+      delivery: noticeDelivery,
+      message: decision.userNotice.message,
+      replyToMessageId: wake.message.telegramMessage.messageId,
+    });
     return;
   }
 
@@ -716,21 +705,6 @@ function readHostedRuntimeTelegramEnv(name: string): string | null {
   return typeof value === "string" && value.trim().length > 0
     ? value.trim()
     : null;
-}
-
-async function releaseHostedRuntimeAiUsageNoticeClaimBestEffort(input: {
-  memberId: string;
-  periodStart: Date;
-  prisma: NonNullable<Parameters<typeof readHostedMailboxMaxSeqByLane>[0]["prisma"]>;
-  sentAt: Date;
-}): Promise<void> {
-  try {
-    await releaseHostedAiUsageLimitNotice(input);
-  } catch (error) {
-    console.error("Hosted Telegram usage-limit notice claim release failed.", {
-      errorName: error instanceof Error ? error.name : "UnknownError",
-    });
-  }
 }
 
 async function readHostedRuntimePendingConversationWake(input: {

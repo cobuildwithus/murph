@@ -81,6 +81,14 @@ export function ActionApprovalCard({
   const busy = submission !== null;
   const primaryLabel = authorization.setup.pendingLabel
     ?? (submission === "approving" ? "Verifying approval…" : "Approve with passkey");
+  const busyStatus = authorization.setup.pendingLabel
+    ?? (submission === "approving"
+      ? "Verifying approval…"
+      : submission === "denying"
+        ? "Denying…"
+        : submission === "returning"
+          ? "Approval saved. Returning to Murph…"
+          : null);
   const surfacedError = error ?? authorization.setup.error;
 
   return (
@@ -100,7 +108,10 @@ export function ActionApprovalCard({
       ) : null}
 
       <div className="mt-7 border-t border-[#c4a882]/25 pt-6">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+        <div
+          aria-busy={busy}
+          className="flex flex-col gap-3 sm:flex-row sm:items-center"
+        >
           <Button
             className="w-full sm:w-auto"
             disabled={busy}
@@ -121,6 +132,12 @@ export function ActionApprovalCard({
             {submission === "denying" ? "Denying…" : "Deny"}
           </Button>
         </div>
+
+        {busyStatus ? (
+          <p aria-live="polite" className="sr-only" role="status">
+            {busyStatus}
+          </p>
+        ) : null}
 
         {submission === "returning" ? (
           redirectTo ? (

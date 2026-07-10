@@ -23,6 +23,7 @@ This is a policy layer over existing Murph surfaces. Do not add a nutrition stor
 Food-journal answers "what happened?" This skill answers "what should we do next?"
 
 - Use `food-journal` for meal logging, low-pressure records, retrospective pattern finding, or observing links with symptoms, digestion, energy, appetite, or performance.
+- When exact food identity, ingredients, allergens, or label nutrition could change a recommendation, read `food-journal`'s exact-label section and use that lookup/provenance workflow before estimating.
 - Use `$MURPH_ASSISTANT_SKILLS_ROOT/body-composition/SKILL.md` when the main job is fat loss, muscle gain, recomposition, maintenance, waist or weight trends, plateaus, calorie tradeoffs, measurement noise, or sustainable body change. Return here only for meal execution after that owner sets the direction.
 - Use `$MURPH_ASSISTANT_SKILLS_ROOT/gut-digestion/SKILL.md` for bloating, reflux, constipation, diarrhea, IBS-style patterns, fiber changes, elimination or reintroduction plans, digestive symptom tracking, and digestive red flags. Return here only for practical meals once the digestion constraint is understood.
 - Use `chronic-illness-support` and care navigation when a condition, medication, major symptom, therapeutic diet, or clinician instruction is central. Do not override clinical instructions.

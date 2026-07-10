@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import { test } from "vitest";
 
 import {
+  isDeviceSyncConnectionSetupConfirmed,
+  isEstablishedDeviceSyncConnection,
   redactPublicDeviceSyncMetadata,
   toRedactedPublicDeviceSyncAccount,
 } from "../src/public-account.ts";
@@ -54,4 +56,27 @@ test("public-account helpers always drop metadata while preserving the public ac
       id: "sensitive",
     },
   });
+});
+
+test("established connection status requires active source-confirmed setup", () => {
+  assert.equal(isDeviceSyncConnectionSetupConfirmed({
+    setupPhase: "source_confirmed",
+  }), true);
+  assert.equal(isEstablishedDeviceSyncConnection({
+    setupPhase: "source_confirmed",
+    status: "active",
+  }), true);
+
+  for (const setupPhase of ["pending_link", "link_returned", "failed", null]) {
+    assert.equal(isDeviceSyncConnectionSetupConfirmed({ setupPhase }), false);
+    assert.equal(isEstablishedDeviceSyncConnection({
+      setupPhase,
+      status: "active",
+    }), false);
+  }
+
+  assert.equal(isEstablishedDeviceSyncConnection({
+    setupPhase: "source_confirmed",
+    status: "disconnected",
+  }), false);
 });

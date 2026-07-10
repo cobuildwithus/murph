@@ -47,8 +47,6 @@
     "runner:bundle": "pnpm --dir ../.. exec tsx --tsconfig apps/cloudflare/tsconfig.scripts.json apps/cloudflare/scripts/assemble-runner-bundle.ts",
     "runner:bundle:hosted-local": "pnpm --dir ../.. exec tsx --tsconfig apps/cloudflare/tsconfig.scripts.json apps/cloudflare/scripts/assemble-runner-bundle.ts",
     "runner:bundle:assemble-only": "pnpm --dir ../.. exec tsx --tsconfig apps/cloudflare/tsconfig.scripts.json apps/cloudflare/scripts/assemble-runner-bundle.ts --skip-build",
-    "runner:bundle:manifest:refresh": "pnpm --dir ../.. exec tsx --tsconfig apps/cloudflare/tsconfig.scripts.json apps/cloudflare/scripts/refresh-runner-bundle-manifest.ts",
-    "runner:bundle:manifest:validate": "pnpm --dir ../.. exec tsx --tsconfig apps/cloudflare/tsconfig.scripts.json apps/cloudflare/scripts/validate-runner-bundle-manifest.ts",
     "runner:docker:base": "pnpm --dir ../.. exec tsx --tsconfig apps/cloudflare/tsconfig.scripts.json apps/cloudflare/scripts/runner-base-image.ts",
     "runner:docker:build": "pnpm runner:bundle && pnpm runner:docker:base && docker build --platform linux/amd64 -f ../../Dockerfile.cloudflare-hosted-runner -t murph-cloudflare-runner .",
     "runner:docker:python-path": "pnpm --dir ../.. exec tsx --tsconfig apps/cloudflare/tsconfig.scripts.json apps/cloudflare/scripts/runner-python-path-e2e.ts",

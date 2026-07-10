@@ -50,95 +50,71 @@ describe('assistant capability-offers prompt contract', () => {
     }
   })
 
-  it('keeps capability offers scoped to health-relevant tasks', () => {
+  it('keeps offers adjacent, available, and outcome-focused', () => {
     const section = getPromptSection(
       buildAssistantSystemPromptLayers(createCommonCodexPromptInput())
         .stableRouteCapabilityPrompt,
       CAPABILITY_OFFERS_HEADER,
     )
 
-    expect(section).toContain('health and dental care')
-    expect(section).toContain('contact lenses, supplements, OTC products')
-    expect(section).toContain('insurance/provider portals')
-    expect(section).toContain('General shopping, procurement, work errands')
-    expect(section).not.toMatch(/\bordering or reordering,\b/u)
+    expect(section).toContain('Complete the request first')
+    expect(section).toContain("turn priority's single next-step offer")
+    expect(section).toContain('not an additional item')
+    expect(section).toContain('available now')
+    expect(section).toContain('materially advances the same health goal')
+    expect(section).toContain('No menus')
+    expect(section).toContain('re-offers after a decline')
+    expect(section).toContain('real-world outcome, not tool names or internal plumbing')
   })
 
-  it('names task takeover and setup as distinct offer kinds', () => {
+  it('surfaces latent fit before applying owning eligibility gates', () => {
     const section = getPromptSection(
       buildAssistantSystemPromptLayers(createCommonCodexPromptInput())
         .stableRouteCapabilityPrompt,
       CAPABILITY_OFFERS_HEADER,
     )
 
-    expect(section).toContain('task takeover means Murph does a bounded thing now')
-    expect(section).toContain('setup means Murph stands up something ongoing')
+    expect(section).toContain('Undiscovered capabilities are effectively absent')
+    expect(section).toContain('repeated manual health reporting')
+    expect(section).toContain('recurring friction or forgetting')
+    expect(section).toContain('a named data source')
+    expect(section).toContain('longitudinal visual tracking')
+    expect(section).toContain('group accountability/update context')
+    expect(section).toContain('owning availability and eligibility gates')
   })
 
-  it('keeps setup consent separate from activation consent', () => {
+  it('keeps consent bounded and setup separate from activation', () => {
     const section = getPromptSection(
       buildAssistantSystemPromptLayers(createCommonCodexPromptInput())
         .stableRouteCapabilityPrompt,
       CAPABILITY_OFFERS_HEADER,
     )
 
-    expect(section).toContain(
-      'a clear "yes" authorizes only the setup conversation, not activation',
-    )
-    expect(section).toContain('other people, shared health data, email delivery')
-    expect(section).toContain('recurring messages, account OAuth')
-    expect(section).toContain('durable private media, or the user\'s money')
-    expect(section).toContain(
-      'who is involved, what data is shared, where messages go, cadence',
-    )
-    expect(section).toContain('how to stop, and any cost or irreversible step')
+    expect(section).toContain('only the exact bounded offer')
+    expect(section).toContain('setup conversation only, not activation')
+    expect(section).toContain('Recurrence, OAuth, shared health data, other people')
+    expect(section).toContain('money, and irreversible actions')
+    expect(section).toContain('concrete final scope and confirmation')
+    expect(section).toContain('subject to the owning action\'s consent')
   })
 
-  it('makes newsletter setup offerable without permitting immediate sends', () => {
+  it('suppresses harmful or misplaced offers while retaining narrow group gates', () => {
     const section = getPromptSection(
       buildAssistantSystemPromptLayers(createCommonCodexPromptInput())
         .stableRouteCapabilityPrompt,
       CAPABILITY_OFFERS_HEADER,
     )
 
-    expect(section).toContain(
-      'weekly group health newsletter is offerable only as setup',
-    )
-    expect(section).toContain('Never offer to send an edition immediately')
-    expect(section).toContain('setup notice and opt-out window elapse')
-    expect(section).toContain('one shared email thread only')
-  })
-
-  it('keeps group challenge offers inside group chats', () => {
-    const section = getPromptSection(
-      buildAssistantSystemPromptLayers(createCommonCodexPromptInput())
-        .stableRouteCapabilityPrompt,
-      CAPABILITY_OFFERS_HEADER,
-    )
-
-    expect(section).toContain('Offer one only inside a group chat')
-    expect(section).toContain('reacting to a server-owned offer message')
-    expect(section).toContain(
-      'In a 1:1 conversation, do not pitch a group challenge or a join link',
-    )
-    expect(section).toContain('Do not imply Murph can create the group chat itself')
-    // The setup-trigger list must not reintroduce a 1:1 group pitch.
-    expect(section).not.toContain('mint a join link')
-  })
-
-  it('keeps internal primitives out of proactive offers', () => {
-    const section = getPromptSection(
-      buildAssistantSystemPromptLayers(createCommonCodexPromptInput())
-        .stableRouteCapabilityPrompt,
-      CAPABILITY_OFFERS_HEADER,
-    )
-
-    expect(section).toContain('Never proactively offer internal plumbing as features')
-    expect(section).toContain('progress updates, response-media attachment')
-    expect(section).toContain('broad mailbox/calendar/document scans')
-    expect(section).toContain('spending money, direct purchase/payment execution')
-    expect(section).toContain('health-relevant ordering offers are bounded prep')
+    expect(section).toContain('urgent, emotionally sensitive, flare, or low-capacity')
+    expect(section).toContain('suppress unrelated offers')
+    expect(section).toContain('broad account scans')
+    expect(section).toContain('enrollment of other people')
+    expect(section).toContain('spending, prescription changes')
     expect(section).toContain('body/diagnosis leaderboards')
+    expect(section).toContain('Group challenges are group-chat only')
+    expect(section).toContain(
+      'weekly group newsletter is setup-only, never immediate',
+    )
   })
 
   it('names newsletter mechanics inside hosted-group guidance', () => {
@@ -156,15 +132,16 @@ describe('assistant capability-offers prompt contract', () => {
     expect(section).toContain('normal `vault-cli automation` surface')
   })
 
-  it('keeps the turn-priority cap and decline restraint load-bearing', () => {
+  it('delegates capability mechanics and stays compact', () => {
     const section = getPromptSection(
       buildAssistantSystemPromptLayers(createCommonCodexPromptInput())
         .stableRouteCapabilityPrompt,
       CAPABILITY_OFFERS_HEADER,
     )
 
-    expect(section).toContain('turn priority item 9')
-    expect(section).toContain('do not re-offer after a decline')
+    expect(section).toContain('Capability mechanics live in the owning')
+    expect(section).toContain('do not promise implementation beyond it')
+    expect(Buffer.byteLength(section, 'utf8')).toBeLessThanOrEqual(1_600)
   })
 
   it('keeps phone-call start-status wording aligned with the hosted schema', () => {
