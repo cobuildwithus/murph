@@ -122,7 +122,7 @@ export default async function HomePage() {
         ],
         note: null,
         signupLabel: "Get started",
-        title: "Discover what actually makes you healthier.",
+        title: "Whatever your goal, you don’t have to hit it alone.",
       };
 
   return (

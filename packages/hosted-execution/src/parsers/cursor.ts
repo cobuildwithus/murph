@@ -136,14 +136,6 @@ export function readHostedExecutionSnapshotDeltaRef(
   return isHostedExecutionWorkingSnapshotRef(value) ? value.delta : null;
 }
 
-export function readHostedBrowserVaultSourceStateHash(
-  value: HostedExecutionSnapshotRefState,
-): string | null {
-  return readHostedExecutionSnapshotDeltaRef(value)?.hash
-    ?? readHostedExecutionSnapshotBaseRef(value)?.hash
-    ?? null;
-}
-
 export function buildHostedExecutionLayeredSnapshotRef(input: {
   base: HostedExecutionBundleRefState;
   hot: HostedExecutionBundleRefState;
