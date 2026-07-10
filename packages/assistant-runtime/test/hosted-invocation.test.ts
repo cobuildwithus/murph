@@ -137,7 +137,7 @@ describe("runHostedWorkspaceInvocation", () => {
         outputDir: path.join(durableRoot, "scratch"),
       }),
     );
-    expect(runtimeWakeSignal.consumePending).toHaveBeenCalled();
+    expect(runtimeWakeSignal.consumePending).not.toHaveBeenCalled();
     expect(checkpointResult?.checkpoint?.workspace.version).toBe("8");
     expect(checkpointResult?.snapshotRef).toEqual(expect.objectContaining({
       snapshotId: "snapshot_invocation",

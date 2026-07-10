@@ -34,6 +34,8 @@ import {
   buildHostedAiUsageAllowDecisionBody,
   isHostedMailboxKind,
   isHostedMailboxLane,
+  isHostedRuntimeFutureMailboxContinuation,
+  isHostedRuntimeMailboxContinuation,
   normalizeHostedAiUsageAllowanceElevenLabsTtsModelId,
   normalizeHostedAiUsageAllowanceOpenAiImageModelId,
   normalizeHostedAiUsageAllowancePricedModelId,
@@ -79,6 +81,63 @@ import {
 } from "../src/parsers.ts";
 
 describe("hosted runtime control contracts", () => {
+  it("classifies typed and retryable mailbox continuations", () => {
+    expect(isHostedRuntimeMailboxContinuation({
+      nextWakeAt: "2026-04-27T00:00:15.000Z",
+      nextWakeReason: "mailbox",
+    })).toBe(true);
+    expect(isHostedRuntimeMailboxContinuation({
+      nextWakeAt: "2026-04-27T00:00:05.000Z",
+      nextWakeReason: "assistant",
+      redactedStatus: {
+        hostedMailboxRetryableBlockedCount: 1,
+      },
+    })).toBe(true);
+    expect(isHostedRuntimeMailboxContinuation({
+      nextWakeAt: "2026-04-27T00:00:05.000Z",
+      nextWakeReason: "assistant",
+      redactedStatus: {
+        hostedMailboxRetryableBlockedCount: 0,
+      },
+    })).toBe(false);
+    expect(() => isHostedRuntimeMailboxContinuation({
+      nextWakeAt: "2026-04-27T00:00:05.000Z",
+      redactedStatus: {
+        hostedMailboxRetryableBlockedCount: -1,
+      },
+    })).toThrow(/must be a non-negative integer/u);
+    expect(() => isHostedRuntimeMailboxContinuation({
+      nextWakeAt: "2026-04-27T00:00:05.000Z",
+      redactedStatus: {
+        hostedMailboxRetryableBlockedCount: false,
+      },
+    })).toThrow(/must be a non-negative integer/u);
+  });
+
+  it("classifies only future mailbox continuations for retry deferral", () => {
+    const nowMs = Date.parse("2026-04-27T00:00:10.000Z");
+
+    expect(isHostedRuntimeFutureMailboxContinuation({
+      nextWakeAt: "2026-04-27T00:00:15.000Z",
+      nextWakeReason: "mailbox",
+    }, nowMs)).toBe(true);
+    expect(isHostedRuntimeFutureMailboxContinuation({
+      nextWakeAt: "2026-04-27T00:00:10.000Z",
+      nextWakeReason: "mailbox",
+    }, nowMs)).toBe(false);
+    expect(isHostedRuntimeFutureMailboxContinuation({
+      nextWakeAt: "2026-04-27T00:00:15.000Z",
+      nextWakeReason: "assistant",
+    }, nowMs)).toBe(false);
+    expect(isHostedRuntimeFutureMailboxContinuation({
+      nextWakeAt: new Date("2026-04-27T00:00:15.000Z"),
+      nextWakeReason: "assistant",
+      redactedStatus: {
+        hostedMailboxRetryableBlockedCount: 1,
+      },
+    }, nowMs)).toBe(true);
+  });
+
   it("signs hosted AI usage allow decisions over the canonical decision body", async () => {
     const body = buildHostedAiUsageAllowDecisionBody({
       expiresAt: "2026-04-27T00:00:30.000Z",
@@ -428,14 +487,22 @@ describe("hosted runtime control contracts", () => {
       status: "scheduled",
     });
     expect(parseHostedWorkspaceInvocationResult({
+      immediateRecheckRequested: true,
       nextWakeAt: "2026-04-26T00:00:05.000Z",
       nextWakeReason: "assistant",
       status: "idle",
     })).toEqual({
+      immediateRecheckRequested: true,
       nextWakeAt: "2026-04-26T00:00:05.000Z",
       nextWakeReason: "assistant",
       status: "idle",
     });
+    expect(() => parseHostedWorkspaceInvocationResult({
+      immediateRecheckRequested: false,
+      status: "idle",
+    })).toThrow(
+      "Hosted workspace invocation result immediateRecheckRequested must be true when present.",
+    );
     expect(() => parseHostedWorkspaceInvocationResult({
       idleShutdownCheckpointed: true,
       status: "idle",
@@ -1523,13 +1590,29 @@ describe("hosted runtime control contracts", () => {
     }
     expect(parseHostedWorkspaceCheckpointResponse({
       checkpointed: true,
+      conversationInputAhead: true,
       replacedSnapshotRef: null,
       workspace,
     })).toEqual({
       checkpointed: true,
+      conversationInputAhead: true,
       replacedSnapshotRef: null,
       workspace,
     });
+    expect(parseHostedWorkspaceCheckpointResponse({
+      checkpointed: true,
+      conversationInputAhead: false,
+      workspace,
+    })).toEqual({
+      checkpointed: true,
+      conversationInputAhead: false,
+      workspace,
+    });
+    expect(() => parseHostedWorkspaceCheckpointResponse({
+      checkpointed: true,
+      conversationInputAhead: null,
+      workspace,
+    })).toThrow(/conversationInputAhead must be a boolean/u);
     expect(parseHostedWorkspaceCheckpointResponse({
       checkpointConflictReason: "foreground_pending",
       checkpointed: false,

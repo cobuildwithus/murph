@@ -922,33 +922,62 @@ describe('assistant outbox runtime', () => {
       updatedAt: '2026-03-01T00:05:00.000Z',
     })
 
-    for (let index = 0; index < 101; index += 1) {
+    const recentTerminalIntents = Array.from({ length: 101 }, (_, index) => {
       const createdAt = new Date(Date.UTC(2026, 3, 19, 0, index, 0)).toISOString()
-      const seeded = await createIntent(vaultRoot, {
+      const message = `terminal-${index}`
+      const sessionId = `session-terminal-${index}`
+      const turnId = `turn-terminal-${index}`
+      return {
+        ...oldTerminal,
         createdAt,
-        message: `terminal-${index}`,
-        sessionId: `session-terminal-${index}`,
-        turnId: `turn-terminal-${index}`,
-      })
-      await saveAssistantOutboxIntent(vaultRoot, {
-        ...seeded,
+        dedupeKey: hashAssistantOutboxIdentity({
+          dedupeToken: `${sessionId}:${turnId}`,
+          media: oldTerminal.media,
+          message,
+          subject: oldTerminal.subject,
+          sessionId,
+          turnId,
+        }),
+        intentId: `outbox_${(index + 1).toString(16).padStart(32, '0')}`,
+        message,
+        nextAttemptAt: createdAt,
+        sentAt: null,
+        sessionId,
         status: index % 2 === 0 ? 'failed' : 'abandoned',
+        turnId,
         updatedAt: createdAt,
-      })
-    }
+      } satisfies AssistantOutboxIntent
+    })
 
-    const activeRetryable = await createIntent(vaultRoot, {
+    const activeRetryable = {
+      ...oldTerminal,
       createdAt: '2026-03-01T00:10:00.000Z',
+      dedupeKey: hashAssistantOutboxIdentity({
+        dedupeToken: 'session-active-retryable:turn-active-retryable',
+        media: oldTerminal.media,
+        message: 'active retryable intent',
+        subject: oldTerminal.subject,
+        sessionId: 'session-active-retryable',
+        turnId: 'turn-active-retryable',
+      }),
+      intentId: `outbox_${'f'.repeat(32)}`,
       message: 'active retryable intent',
-      sessionId: 'session-active-retryable',
-      turnId: 'turn-active-retryable',
-    })
-    await saveAssistantOutboxIntent(vaultRoot, {
-      ...activeRetryable,
       nextAttemptAt: '2026-04-20T12:05:00.000Z',
+      sentAt: null,
+      sessionId: 'session-active-retryable',
       status: 'retryable',
+      turnId: 'turn-active-retryable',
       updatedAt: '2026-04-20T12:00:00.000Z',
-    })
+    } satisfies AssistantOutboxIntent
+    await Promise.all(
+      [...recentTerminalIntents, activeRetryable].map((intent) =>
+        writeFile(
+          resolveAssistantOutboxIntentPath(paths.outboxDirectory, intent.intentId),
+          JSON.stringify(intent),
+          'utf8',
+        ),
+      ),
+    )
 
     await expect(
       pruneAssistantTerminalOutboxIntents({
