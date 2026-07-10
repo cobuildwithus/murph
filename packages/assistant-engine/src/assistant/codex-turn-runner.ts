@@ -76,7 +76,6 @@ import {
   recordCodexAttemptFailed,
   recordCodexAttemptStarted,
   recordCodexAttemptSucceeded,
-  recordCodexPlan,
 } from './codex-turn/attempt-observability.js'
 import {
   buildCodexTurnExecutionPlan,
@@ -359,18 +358,6 @@ async function executeAssistantCodexAttempt(input: {
   }
 
   const attemptAt = new Date().toISOString()
-  await recordCodexPlan({
-    at: attemptAt,
-    codexContinuation: attemptPlan.routePlan.codexContinuation.kind,
-    providerRequestOrdinal: input.providerRequestOrdinal ?? null,
-    resumeCodexThreadIdPresent: attemptPlan.routePlan.resume !== null,
-    route: attemptPlan.route,
-    sessionId: attemptPlan.session.sessionId,
-    turnId: executionPlan.turnId,
-    vault: executionPlan.input.vault,
-    vaultRoot: executionPlan.input.vault,
-    workingDirectory: attemptPlan.routePlan.workingDirectory,
-  })
   emitCodexPlanTraceEvent({
     onTraceEvent: executionPlan.input.onTraceEvent,
     codexContinuation: attemptPlan.routePlan.codexContinuation.kind,
@@ -382,10 +369,7 @@ async function executeAssistantCodexAttempt(input: {
   await recordCodexAttemptStarted({
     attemptCount: attemptPlan.attemptCount,
     at: attemptAt,
-    hasResumeCodexThreadId: attemptPlan.routePlan.resume !== null,
-    codexContinuationKind: attemptPlan.routePlan.codexContinuation.kind,
     route: attemptPlan.route,
-    sessionId: attemptPlan.session.sessionId,
     turnId: executionPlan.turnId,
     vault: executionPlan.input.vault,
   })

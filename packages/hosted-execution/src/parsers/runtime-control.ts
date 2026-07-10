@@ -7,6 +7,9 @@ import {
   parseAssistantUsageRecord,
 } from "../assistant-usage.ts";
 import {
+  parseHostedAssistantModelOverride,
+} from "../assistant-model.ts";
+import {
   parseAssistantRuntimeIssueRecord,
 } from "@murphai/runtime-state/node/assistant-runtime-issues";
 import {
@@ -2614,6 +2617,13 @@ function parseHostedRuntimeLatencyPhaseBreakdown(
       ...requireOptionalNonNegativeInteger(preProvider, "systemMailboxMaintenanceMs", preProviderLabel),
       ...requireOptionalNonNegativeInteger(preProvider, "memberPreferencesPrePlanningMs", preProviderLabel),
       ...requireOptionalNonNegativeInteger(preProvider, "automationBootstrapMs", preProviderLabel),
+      ...requireOptionalNonNegativeInteger(preProvider, "outboxScanElapsedMs", preProviderLabel),
+      ...requireOptionalBoolean(preProvider, "outboxScanPerformed", preProviderLabel),
+      ...requireOptionalNonNegativeInteger(preProvider, "receiptScanBytesRead", preProviderLabel),
+      ...requireOptionalNonNegativeInteger(preProvider, "receiptScanElapsedMs", preProviderLabel),
+      ...requireOptionalNonNegativeInteger(preProvider, "receiptScanFilesRead", preProviderLabel),
+      ...requireOptionalNonNegativeInteger(preProvider, "receiptScanLockWaitMs", preProviderLabel),
+      ...requireOptionalBoolean(preProvider, "receiptScanPerformed", preProviderLabel),
     };
   }
 
@@ -2841,9 +2851,15 @@ export function parseHostedWorkspaceState(value: unknown): HostedWorkspaceState 
 
 export function parseHostedWorkspaceReadResponse(value: unknown): HostedWorkspaceReadResponse {
   const record = requireObject(value, "Hosted workspace read response");
+  const hostedAssistantModelOverride = parseHostedAssistantModelOverride(
+    record.hostedAssistantModelOverride,
+  );
 
   return {
     fetchedAt: requireString(record.fetchedAt, "Hosted workspace read response fetchedAt"),
+    ...(hostedAssistantModelOverride
+      ? { hostedAssistantModelOverride }
+      : {}),
     workspace: record.workspace === null ? null : parseHostedWorkspaceState(record.workspace),
   };
 }
@@ -2946,6 +2962,14 @@ export function parseHostedWorkspaceCheckpointResponse(
             record.checkpointConflictReason,
             "Hosted workspace checkpoint response checkpointConflictReason",
             HOSTED_WORKSPACE_CHECKPOINT_CONFLICT_REASONS,
+          ),
+        }),
+    ...(record.conversationInputAhead === undefined
+      ? {}
+      : {
+          conversationInputAhead: requireBoolean(
+            record.conversationInputAhead,
+            "Hosted workspace checkpoint response conversationInputAhead",
           ),
         }),
     ...(record.replacedSnapshotRef === undefined
@@ -3395,9 +3419,20 @@ export function parseHostedWorkspaceInvocationResult(value: unknown): HostedWork
         record.nextWakeReason,
         "Hosted workspace invocation result nextWakeReason",
       );
+  if (
+    record.immediateRecheckRequested !== undefined
+    && record.immediateRecheckRequested !== true
+  ) {
+    throw new TypeError(
+      "Hosted workspace invocation result immediateRecheckRequested must be true when present.",
+    );
+  }
   const status = parseHostedWorkspaceInvocationStatus(record.status);
 
   return {
+    ...(record.immediateRecheckRequested === true
+      ? { immediateRecheckRequested: true as const }
+      : {}),
     ...(nextWakeAt === undefined ? {} : { nextWakeAt }),
     ...(nextWakeReason === undefined ? {} : { nextWakeReason }),
     ...(record.redactedStatus === undefined

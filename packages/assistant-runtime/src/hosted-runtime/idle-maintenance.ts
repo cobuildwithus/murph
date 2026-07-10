@@ -127,8 +127,8 @@ export async function runHostedIdleCheckpointMaintenance(input: {
         // Retention is opportunistic maintenance; a cleanup miss must not block
         // checkpointing or member-visible wake handling. Emit the failure
         // through the shared structured-log boundary so the cause is not
-        // silently dropped (Observability And Logging invariant: error logs
-        // must include both a stable code and a redacted cause).
+        // silently dropped (Observability And Bounded Growth invariant: error
+        // logs must include both a stable code and a redacted cause).
         emitInboxMediaRetentionFailureLog({
           error,
           memberId: input.memberId,

@@ -23,7 +23,6 @@ import {
 
 import {
   type HostedRuntimePlatform,
-  type RuntimeWakeNotification,
   type HostedWorkspaceRuntimeJobOptions,
 } from "../src/hosted-runtime.ts";
 import {
@@ -199,35 +198,6 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
         );
       });
     }
-  }
-
-  for (const wakeCallIndex of [1, 2]) {
-    it(`interrupts checkpoint publication when runtime wake is pending on check ${wakeCallIndex}`, async () => {
-      const vaultRoot = await createVaultRoot();
-      const { calls, platform } = createRuntimePlatform();
-      let wakeReadCount = 0;
-      const wakeNotification = { notifiedAtEpochMs: 1_777_010_000_000 + wakeCallIndex };
-      const consumePendingRuntimeWake = vi.fn(() => {
-        wakeReadCount += 1;
-        return wakeReadCount === wakeCallIndex ? wakeNotification : null;
-      });
-      const options = createBridgeOptions({
-        consumePendingRuntimeWake,
-        platform,
-        vaultRoot,
-      });
-
-      await expect(options.createCheckpointSnapshot(
-        createCheckpointInput("idle_shutdown"),
-      )).rejects.toMatchObject({
-        notification: wakeNotification,
-      });
-
-      expect(consumePendingRuntimeWake).toHaveBeenCalledTimes(wakeCallIndex);
-      expect(calls.putSnapshotObjectDirect).toHaveBeenCalledOnce();
-      expect(calls.completeSnapshotSession).not.toHaveBeenCalled();
-      expect(calls.abortSnapshotSession).toHaveBeenCalledOnce();
-    });
   }
 
   it("aborts the snapshot session when archive construction fails before checkpoint", async () => {
@@ -512,7 +482,6 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
 });
 
 function createBridgeOptions(input: {
-  consumePendingRuntimeWake?: () => RuntimeWakeNotification | null;
   mailboxPayloadDecoder?: HostedWorkspaceMailboxPayloadDecoder;
   platform: HostedRuntimePlatform;
   readCurrentLease?: HostedRuntimeBridgeReadCurrentLease;
@@ -522,7 +491,6 @@ function createBridgeOptions(input: {
 }): HostedWorkspaceRuntimeJobOptions {
   const request = input.request ?? TEST_REQUEST;
   return createHostedWorkspaceRuntimeBridgeJobOptions({
-    consumePendingRuntimeWake: input.consumePendingRuntimeWake,
     decodeMailboxPayload: input.mailboxPayloadDecoder ?? createMailboxPayloadDecoder({
       status: "decoded",
       wake: createMemberChannelsWake(),

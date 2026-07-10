@@ -305,6 +305,7 @@ export interface HostedWorkspaceRunnerInput {
   limitPerLane: number;
   materializeWorkspaceArtifacts?: HostedWorkspaceArtifactMaterializer | null;
   trackDeferredUsageCapture?: ((capture: HostedWorkspaceRunnerDeferredUsageCapture) => void) | null;
+  trackLocalWorkspaceMutationCompletion?: ((completion: Promise<void> | null) => void) | null;
   platform: HostedWorkspaceRunnerPlatform;
   requestId: string;
   runtimePassDiagnostics?: HostedWorkspaceRunnerRuntimePassDiagnostics | null;
@@ -685,6 +686,7 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
         foregroundConversationWorkObserved = true;
       },
     });
+  input.trackLocalWorkspaceMutationCompletion?.(foregroundMailboxImportLoop.completion);
   let foregroundMailboxImportLoopStopped = false;
   const stopForegroundMailboxImportLoop = async (): Promise<void> => {
     if (foregroundMailboxImportLoopStopped) {
@@ -950,6 +952,7 @@ function startHostedForegroundConversationMailboxImportLoop(input: {
   input: HostedWorkspaceRunnerInput;
   onForegroundConversationWorkObserved?: (() => void) | null;
 }): {
+  completion: Promise<void>;
   stop(options?: {
     shouldAbortInFlightImport?: (() => boolean) | null;
   }): Promise<void>;
@@ -957,6 +960,7 @@ function startHostedForegroundConversationMailboxImportLoop(input: {
   const runtimeWakeSignal = input.input.runtimeWakeSignal ?? null;
   if (!runtimeWakeSignal) {
     return {
+      completion: Promise.resolve(),
       stop: async () => undefined,
     };
   }
@@ -966,7 +970,11 @@ function startHostedForegroundConversationMailboxImportLoop(input: {
   const abort = () => {
     waitController.abort(readHostedForegroundRuntimeWakeAbortReason(outerSignal));
   };
-  outerSignal?.addEventListener("abort", abort, { once: true });
+  if (outerSignal?.aborted) {
+    abort();
+  } else {
+    outerSignal?.addEventListener("abort", abort, { once: true });
+  }
   let wakeOrdinal = 0;
   let stopRequested = false;
   let shouldAbortInFlightImportOnStop: (() => boolean) | null = null;
@@ -1123,8 +1131,10 @@ function startHostedForegroundConversationMailboxImportLoop(input: {
       }
     }
   })();
+  const completion = loop.catch(() => undefined);
 
   return {
+    completion,
     async stop(options) {
       stopRequested = true;
       shouldAbortInFlightImportOnStop = options?.shouldAbortInFlightImport ?? null;
@@ -1133,7 +1143,7 @@ function startHostedForegroundConversationMailboxImportLoop(input: {
         waitController.abort(new DOMException("Foreground mailbox import loop stopped.", "AbortError"));
       }
       abortInFlightImportAfterObservedWork();
-      await loop.catch(() => undefined);
+      await completion;
     },
   };
 }
@@ -1543,7 +1553,7 @@ async function notifyHostedActiveTurnInputForMailboxImport(input: {
   });
 }
 
-export async function importHostedMailboxForWorkspaceRunner(input: {
+type HostedMailboxForWorkspaceRunnerImportInput = {
   checkpointRequestBuilder: HostedWorkspaceCheckpointRequestBuilder;
   checkpointReason: HostedWorkspaceCheckpointReason;
   deferConversationUntil?: HostedMailboxConversationDeferral | null;
@@ -1557,7 +1567,28 @@ export async function importHostedMailboxForWorkspaceRunner(input: {
   requestId: string;
   signal?: AbortSignal | null;
   suppressNoopRuntimeLog?: boolean;
-}): Promise<HostedMailboxImportCheckpointResult> {
+};
+
+export async function importHostedMailboxForWorkspaceRunner(
+  input: HostedMailboxForWorkspaceRunnerImportInput,
+): Promise<HostedMailboxImportCheckpointResult> {
+  const signal = input.signal ?? input.importItemContext?.signal ?? input.input.signal ?? null;
+  if (signal?.aborted) {
+    throw readHostedForegroundRuntimeWakeAbortReason(signal);
+  }
+  const operation = importHostedMailboxForWorkspaceRunnerUntracked(input);
+  input.input.trackLocalWorkspaceMutationCompletion?.(
+    operation.then(
+      () => undefined,
+      () => undefined,
+    ),
+  );
+  return await operation;
+}
+
+async function importHostedMailboxForWorkspaceRunnerUntracked(
+  input: HostedMailboxForWorkspaceRunnerImportInput,
+): Promise<HostedMailboxImportCheckpointResult> {
   const importItem = input.importItem ?? input.input.importItem;
   const signal = input.signal ?? input.importItemContext?.signal ?? input.input.signal ?? null;
   const importItemContext = stampHostedMailboxImportStartedLatencyMilestone(

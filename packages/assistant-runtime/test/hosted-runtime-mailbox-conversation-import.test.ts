@@ -315,10 +315,7 @@ describe("hosted mailbox conversation import adapter", () => {
     });
 
     try {
-      await withTestTimeout(
-        notificationObserved.promise,
-        "active turn notify did not fire before projection",
-      );
+      await notificationObserved.promise;
       assert.deepEqual(order, ["staged-callback", "notify"]);
 
       projectionRelease.resolve(undefined);
@@ -3992,23 +3989,6 @@ function createDeferred<T = void>(): {
     reject,
     resolve,
   };
-}
-
-async function withTestTimeout<T>(
-  promise: Promise<T>,
-  message: string,
-): Promise<T> {
-  let timeout: ReturnType<typeof setTimeout> | null = null;
-  const timer = new Promise<never>((_, reject) => {
-    timeout = setTimeout(() => reject(new Error(message)), 1_000);
-  });
-  try {
-    return await Promise.race([promise, timer]);
-  } finally {
-    if (timeout) {
-      clearTimeout(timeout);
-    }
-  }
 }
 
 function createLinqConversationLookupKey(input: {

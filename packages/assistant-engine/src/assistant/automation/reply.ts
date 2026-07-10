@@ -27,7 +27,10 @@ import type {
   AssistantHostedDeliveryIdempotencyContext,
   AssistantTurnEnvironment,
 } from '../service-contracts.js'
-import { listAssistantTurnReceipts } from '../receipts.js'
+import {
+  listAssistantTurnReceipts,
+  type AssistantTurnReceiptScanMetrics,
+} from '../receipts.js'
 import { sanitizeAssistantPortableStateString } from '../redaction.js'
 import { errorMessage, normalizeNullableString } from '../shared.js'
 import { sendAssistantMessage } from '../service.js'
@@ -126,7 +129,22 @@ const ASSISTANT_NO_REPLY_SUPPRESSION_REASON =
 type AssistantAutoReplyReceiptRecord =
   Awaited<ReturnType<typeof listAssistantTurnReceipts>>[number]
 
-export interface AssistantAutoReplyReceiptReader {
+type AssistantAutoReplyOutboxIntent =
+  Awaited<ReturnType<typeof listAssistantOutboxIntents>>[number]
+
+export interface AssistantAutoReplyHistoryMetrics {
+  outboxScanElapsedMs?: number
+  outboxScanPerformed: boolean
+  receiptScanBytesRead?: number
+  receiptScanElapsedMs?: number
+  receiptScanFilesRead?: number
+  receiptScanLockWaitMs?: number
+  receiptScanPerformed: boolean
+}
+
+export interface AssistantAutoReplyHistoryReader {
+  readMetrics(): AssistantAutoReplyHistoryMetrics
+  readOutboxIntents(): Promise<readonly AssistantAutoReplyOutboxIntent[]>
   readReceipts(): Promise<readonly AssistantAutoReplyReceiptRecord[]>
 }
 
@@ -353,7 +371,7 @@ export async function processAssistantAutoReplyGroup(input: {
   providerHeartbeatMs?: number | null
   providerLongRunningCommandStallTimeoutMs?: number | null
   providerStallTimeoutMs?: number | null
-  receiptReader?: AssistantAutoReplyReceiptReader
+  historyReader?: AssistantAutoReplyHistoryReader
   requestId: string | null
   signal?: AbortSignal
   sessionMaxAgeMs: number | null
@@ -361,6 +379,9 @@ export async function processAssistantAutoReplyGroup(input: {
   inputSource?: AssistantActiveTurnInputSource
   vault: string
 }): Promise<AssistantAutoReplyProcessResult> {
+  const historyReader = input.historyReader ?? createAssistantAutoReplyHistoryReader({
+    vault: input.vault,
+  })
   let latestContext = input.context
   let observedTerminalLinqCleanup: string[] | null = null
   const withObservedTerminalLinqCleanup = (
@@ -374,6 +395,7 @@ export async function processAssistantAutoReplyGroup(input: {
   try {
     const resolved = await resolveAssistantAutoReplyGroupOutcome({
       ...input,
+      historyReader,
       onAcceptedContext(context) {
         latestContext = context
       },
@@ -448,7 +470,7 @@ async function resolveAssistantAutoReplyGroupOutcome(input: {
   providerHeartbeatMs?: number | null
   providerLongRunningCommandStallTimeoutMs?: number | null
   providerStallTimeoutMs?: number | null
-  receiptReader?: AssistantAutoReplyReceiptReader
+  historyReader: AssistantAutoReplyHistoryReader
   requestId: string | null
   signal?: AbortSignal
   sessionMaxAgeMs: number | null
@@ -464,7 +486,7 @@ async function resolveAssistantAutoReplyGroupOutcome(input: {
     executionContext: input.executionContext,
     group: context,
     onEvent: input.onEvent,
-    receiptReader: input.receiptReader,
+    historyReader: input.historyReader,
     receiptFallbackEnabled: shouldUseAssistantAutoReplyReceiptFallback({
       deliveryDispatchMode: input.deliveryDispatchMode,
       executionContext: input.executionContext,
@@ -553,7 +575,12 @@ async function resolveAssistantAutoReplyGroupOutcome(input: {
     maxSessionAgeMs: input.sessionMaxAgeMs,
     onEvent: input.onEvent,
     onProviderEvent: input.onProviderEvent ?? null,
-    onProviderRequestStarted: input.onProviderRequestStarted ?? null,
+    onProviderRequestStarted: input.onProviderRequestStarted
+      ? (event) => input.onProviderRequestStarted?.({
+          ...event,
+          autoReplyHistory: input.historyReader.readMetrics(),
+        })
+      : null,
     onTraceEvent: input.onTraceEvent,
     onFinishWithoutReplyAccepted: async (event) => {
       const acceptedInputIds = [...new Set(event.acceptedInputIds)]
@@ -1045,7 +1072,7 @@ async function evaluateAssistantAutoReplyGroup(input: {
   executionContext?: AssistantExecutionContext | null
   group: AssistantAutoReplyGroupContext
   onEvent?: (event: AssistantRunEvent) => void
-  receiptReader?: AssistantAutoReplyReceiptReader
+  historyReader: AssistantAutoReplyHistoryReader
   receiptFallbackEnabled: boolean
   requestId: string | null
   sessionMaxAgeMs: number | null
@@ -1127,9 +1154,9 @@ async function evaluateAssistantAutoReplyGroup(input: {
     return { kind: 'ignore' }
   }
   const primaryReplyInput = createAssistantAutoReplyPrimaryInput(primaryInput)
-  const receipts = await readAssistantAutoReplyReceiptRecords(input)
 
   if (input.receiptFallbackEnabled) {
+    const receipts = await input.historyReader.readReceipts()
     const handledReceipt = findHandledAutoReplyReceiptForGroup({
       captureIds: input.group.optionalInboxCaptureIds,
       inputIds: input.group.inputIds,
@@ -1188,6 +1215,7 @@ async function evaluateAssistantAutoReplyGroup(input: {
     input.group.firstItem.summary.actorIsSelf &&
     await isRecentSelfAuthoredAssistantEcho({
       deliveryTarget: conversationDeliveryTarget,
+      historyReader: input.historyReader,
       input: primaryReplyInput,
       session: existingSession,
       vault: input.vault,
@@ -1200,10 +1228,8 @@ async function evaluateAssistantAutoReplyGroup(input: {
 
   const latestCrossSessionDelivery =
     await resolveAssistantAutoReplyLatestCrossSessionDelivery({
-      consumedIntentIds: readAssistantAutoReplyConsumedCrossSessionIntentIds(
-        receipts,
-      ),
       deliveryTarget: conversationDeliveryTarget,
+      historyReader: input.historyReader,
       input: primaryReplyInput,
       // Newest grouped input with a native reply. The selector treats it as
       // an authoritative provider-side identification, so it bypasses the
@@ -1213,7 +1239,6 @@ async function evaluateAssistantAutoReplyGroup(input: {
         promptInputs,
       ),
       session: existingSession,
-      vault: input.vault,
     })
   if (
     input.executionContext?.hosted &&
@@ -1620,6 +1645,7 @@ async function executeAssistantAutoReply(input: {
 
 export type AssistantAutoReplyProviderRequestStartHook = (event: {
   admissionMs?: number
+  autoReplyHistory?: AssistantAutoReplyHistoryMetrics
   assistantInputIds: readonly string[]
   preProviderSetupMs?: number
   promptBuildMs?: number
@@ -3136,36 +3162,56 @@ async function backfillAssistantAutoReplyTerminalEvidenceFromTerminalSnapshot(in
   })
 }
 
-export function createAssistantAutoReplyReceiptReader(input: {
+export function createAssistantAutoReplyHistoryReader(input: {
   vault: string
-}): AssistantAutoReplyReceiptReader {
+}): AssistantAutoReplyHistoryReader {
+  let outboxIntents:
+    | Promise<readonly AssistantAutoReplyOutboxIntent[]>
+    | null = null
+  let outboxScanElapsedMs: number | null = null
+  let receiptScanMetrics: AssistantTurnReceiptScanMetrics | null = null
   let receipts:
     | Promise<readonly AssistantAutoReplyReceiptRecord[]>
     | null = null
 
   return {
+    readMetrics() {
+      return {
+        ...(outboxScanElapsedMs === null ? {} : { outboxScanElapsedMs }),
+        outboxScanPerformed: outboxScanElapsedMs !== null,
+        ...(receiptScanMetrics === null
+          ? {}
+          : {
+              receiptScanBytesRead: receiptScanMetrics.bytesRead,
+              receiptScanElapsedMs: receiptScanMetrics.scanElapsedMs,
+              receiptScanFilesRead: receiptScanMetrics.filesRead,
+              receiptScanLockWaitMs: receiptScanMetrics.lockWaitMs,
+            }),
+        receiptScanPerformed: receiptScanMetrics !== null,
+      }
+    },
+    readOutboxIntents() {
+      outboxIntents ??= (async () => {
+        const startedAt = Date.now()
+        try {
+          return await listAssistantOutboxIntents(input.vault)
+        } finally {
+          outboxScanElapsedMs = Math.max(0, Date.now() - startedAt)
+        }
+      })()
+      return outboxIntents
+    },
     readReceipts() {
       receipts ??= listAssistantTurnReceipts(
         input.vault,
         ASSISTANT_AUTO_REPLY_RECEIPT_SCAN_LIMIT,
+        (metrics) => {
+          receiptScanMetrics = metrics
+        },
       )
       return receipts
     },
   }
-}
-
-async function readAssistantAutoReplyReceiptRecords(input: {
-  receiptReader?: AssistantAutoReplyReceiptReader
-  vault: string
-}): Promise<readonly AssistantAutoReplyReceiptRecord[]> {
-  if (input.receiptReader) {
-    return input.receiptReader.readReceipts()
-  }
-
-  return listAssistantTurnReceipts(
-    input.vault,
-    ASSISTANT_AUTO_REPLY_RECEIPT_SCAN_LIMIT,
-  )
 }
 
 function findHandledAutoReplyReceiptForGroup(input: {
@@ -3290,6 +3336,7 @@ function createDeferredSkipDecision(
 
 async function isRecentSelfAuthoredAssistantEcho(input: {
   deliveryTarget: string | null
+  historyReader: AssistantAutoReplyHistoryReader
   input: AssistantAutoReplyPrimaryInput
   session: AssistantSession | null
   vault: string
@@ -3300,8 +3347,8 @@ async function isRecentSelfAuthoredAssistantEcho(input: {
   const matchingDeliveries = await listAssistantAutoReplyMatchingOutboxDeliveries(
     {
       deliveryTarget: input.deliveryTarget,
+      historyReader: input.historyReader,
       input: input.input,
-      vault: input.vault,
     },
   )
   if (
@@ -3407,12 +3454,11 @@ function isAssistantAutoReplyNearestTextEchoMatch(input: {
 }
 
 async function resolveAssistantAutoReplyLatestCrossSessionDelivery(input: {
-  consumedIntentIds: ReadonlySet<string>
   deliveryTarget: string | null
+  historyReader: AssistantAutoReplyHistoryReader
   input: AssistantAutoReplyPrimaryInput
   replyToMessageId: string | null
   session: AssistantSession | null
-  vault: string
 }): Promise<AssistantAutoReplyMatchingOutboxDelivery | null> {
   const channel = normalizeNullableString(input.input.source)
   const deliveryTarget = normalizeNullableString(input.deliveryTarget)
@@ -3423,8 +3469,8 @@ async function resolveAssistantAutoReplyLatestCrossSessionDelivery(input: {
   const sessionEligible = (
     await listAssistantAutoReplyMatchingOutboxDeliveries({
       deliveryTarget,
+      historyReader: input.historyReader,
       input: input.input,
-      vault: input.vault,
     })
   )
     .filter((delivery) =>
@@ -3467,9 +3513,12 @@ async function resolveAssistantAutoReplyLatestCrossSessionDelivery(input: {
 
   // Unanchored fallback: once a delivery has been used as turn context, no
   // earlier delivery from the same route should resurface as "latest".
+  const consumedIntentIds = readAssistantAutoReplyConsumedCrossSessionIntentIds(
+    await input.historyReader.readReceipts(),
+  )
   let firstFreshIndex = 0
   for (let index = 0; index < fresh.length; index++) {
-    if (input.consumedIntentIds.has(fresh[index]!.intentId)) {
+    if (consumedIntentIds.has(fresh[index]!.intentId)) {
       firstFreshIndex = index + 1
     }
   }
@@ -3520,17 +3569,14 @@ interface AssistantAutoReplyMatchingOutboxDelivery {
   sessionId: string
 }
 
-type AssistantAutoReplyOutboxIntent =
-  Awaited<ReturnType<typeof listAssistantOutboxIntents>>[number]
-
 type AssistantAutoReplyOutboxDelivery = NonNullable<
   AssistantAutoReplyOutboxIntent['delivery']
 >
 
 async function listAssistantAutoReplyMatchingOutboxDeliveries(input: {
   deliveryTarget: string | null
+  historyReader: AssistantAutoReplyHistoryReader
   input: AssistantAutoReplyPrimaryInput
-  vault: string
 }): Promise<AssistantAutoReplyMatchingOutboxDelivery[]> {
   const channel = normalizeNullableString(input.input.source)
   const deliveryTarget = normalizeNullableString(input.deliveryTarget)
@@ -3538,7 +3584,7 @@ async function listAssistantAutoReplyMatchingOutboxDeliveries(input: {
     return []
   }
 
-  const intents = await listAssistantOutboxIntents(input.vault)
+  const intents = await input.historyReader.readOutboxIntents()
   return intents.flatMap((intent) => {
     if (intent.status !== 'sent' || intent.operation !== null) {
       return []
