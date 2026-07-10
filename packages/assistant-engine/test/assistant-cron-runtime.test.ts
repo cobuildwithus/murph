@@ -5272,6 +5272,78 @@ describe('assistant cron runtime orchestration', () => {
     )
   })
 
+  it('executes hosted Linq current-route snapshots with concrete locators as thread binding deliveries', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-08T10:20:00.000Z'))
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-linq-current-route-concrete-locators-',
+    )
+    getVaultAutomationStore(vaultRoot).push({
+      automationId: 'automation-linq-current-route-concrete-locators',
+      continuityPolicy: 'fresh',
+      createdAt: '2026-04-08T08:00:00.000Z',
+      instructions: 'Send the morning reminder.',
+      route: {
+        channel: 'linq',
+        currentRouteSnapshot: true,
+        deliverySource: null,
+        deliveryTarget: 'old-home-chat',
+        identityId: 'identity-concrete',
+        participantId: 'participant-concrete',
+        threadId: 'thread-concrete',
+        threadIsDirect: true,
+      },
+      schedule: {
+        kind: 'dailyLocal',
+        localTime: '10:00',
+      },
+      slug: 'linq-current-route-concrete-locators-reminder',
+      status: 'active',
+      summary: null,
+      tags: ['assistant', 'scheduled'],
+      title: 'Linq current route concrete locators reminder',
+      updatedAt: '2026-04-08T08:00:00.000Z',
+    })
+    const paths = resolveAssistantStatePaths(vaultRoot)
+    const source = (await listCanonicalAssistantCronRecords(vaultRoot))[0]
+
+    if (!source) {
+      throw new Error('Expected canonical source to exist.')
+    }
+
+    const runtimeStore = await readAssistantCronCanonicalRuntimeStore(paths)
+    const runtimeState = resolveCanonicalRuntimeState(source, runtimeStore)
+    const claimed = await claimResolvedAssistantCronJob({
+      job: {
+        kind: 'canonical',
+        source,
+        runtimeState,
+        job: projectCanonicalAssistantCronJob({
+          source,
+          runtimeState,
+        }),
+      },
+      paths,
+    })
+    const result = await executeClaimedAssistantCronJob({
+      job: claimed,
+      paths,
+      trigger: 'scheduled',
+      vault: vaultRoot,
+    })
+
+    expect(result.run.status).toBe('succeeded')
+    expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledWith(
+      expect.objectContaining({
+        bindingDeliveryTarget: 'old-home-chat',
+        deliveryKind: 'thread',
+        deliveryTarget: null,
+        threadId: 'thread-concrete',
+        threadIsDirect: true,
+      }),
+    )
+  })
+
   it('keeps untagged private Linq delivery targets strict without stored directness', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-04-08T10:20:00.000Z'))

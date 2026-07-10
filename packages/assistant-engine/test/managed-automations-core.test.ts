@@ -646,6 +646,85 @@ describe('applyMurphManagedAutomations core integration', () => {
     })).resolves.toMatchObject({ status: 'archived' })
   })
 
+  it('resumes a partially applied migration while a bare managed anchor remains', async () => {
+    const vaultRoot = await createVaultRoot()
+    const legacyHomeRoute = {
+      channel: 'linq',
+      deliverySource: null,
+      deliveryTarget: 'legacy-home-chat',
+      identityId: null,
+      participantId: null,
+      threadId: null,
+    }
+    const digestSeed = MURPH_MANAGED_AUTOMATIONS.find(
+      (seed) => seed.automationId === MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID,
+    )
+    if (!digestSeed) {
+      throw new Error('Expected the managed weekly health digest seed.')
+    }
+
+    await applyMurphManagedAutomations({
+      defaultRoute: legacyHomeRoute,
+      now: new Date('2026-07-10T12:00:00.000Z'),
+      seeds: [digestSeed],
+      vaultRoot,
+    })
+    // A user reminder that an earlier interrupted migration already patched:
+    // migration patches non-managed records before the managed anchors, so
+    // this is the only reachable partial state.
+    await upsertAutomation({
+      automationId: 'automation_01KZ0000000000000000000030',
+      continuityPolicy: 'fresh',
+      instructions: 'Send the saved reminder.',
+      now: new Date('2026-07-10T12:01:00.000Z'),
+      route: {
+        ...legacyHomeRoute,
+        currentRouteSnapshot: true,
+        threadIsDirect: true,
+      },
+      schedule: { kind: 'dailyLocal', localTime: '09:00' },
+      slug: 'user-migrated',
+      status: 'active',
+      summary: null,
+      tags: ['assistant', 'scheduled'],
+      title: 'user-migrated',
+      vaultRoot,
+    })
+
+    const currentHomeRoute = {
+      ...legacyHomeRoute,
+      currentRouteSnapshot: true,
+      deliveryTarget: 'current-home-chat',
+      threadIsDirect: true,
+    }
+    await expect(applyMurphManagedAutomations({
+      defaultRoute: currentHomeRoute,
+      now: new Date('2026-07-10T12:05:00.000Z'),
+      vaultRoot,
+    })).resolves.toMatchObject({
+      updated: 1,
+    })
+
+    await expect(showAutomation({
+      automationId: MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID,
+      vaultRoot,
+    })).resolves.toMatchObject({
+      route: {
+        currentRouteSnapshot: true,
+        deliveryTarget: 'legacy-home-chat',
+        threadIsDirect: true,
+      },
+    })
+    await expect(applyMurphManagedAutomations({
+      defaultRoute: currentHomeRoute,
+      now: new Date('2026-07-10T12:10:00.000Z'),
+      vaultRoot,
+    })).resolves.toMatchObject({
+      created: 0,
+      updated: 0,
+    })
+  })
+
   it('creates hosted overnight memory consolidation through the canonical automation registry', async () => {
     const vaultRoot = await createVaultRoot()
 

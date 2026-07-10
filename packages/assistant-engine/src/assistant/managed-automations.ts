@@ -790,16 +790,26 @@ async function reconcileLegacyPersonalHomeAutomationRoutes(input: {
     return 0
   }
 
-  let updated = 0
-  for (const record of records) {
-    if (
-      record.status === 'archived' ||
-      record.route.deliveryTarget !== legacyHomeTarget ||
-      !isLegacyBareLinqHomeRoute(record.route)
-    ) {
-      continue
-    }
+  const migratableRecords = records.filter((record) =>
+    record.status !== 'archived' &&
+    record.route.deliveryTarget === legacyHomeTarget &&
+    isLegacyBareLinqHomeRoute(record.route)
+  )
+  // Patch the managed anchor records last: an abort mid-loop then always
+  // leaves a bare managed anchor behind, so the next apply still passes the
+  // single-anchor gate above and resumes the migration instead of stranding
+  // the remaining legacy routes.
+  const orderedRecords = [
+    ...migratableRecords.filter((record) =>
+      !managedAutomationIds.has(record.automationId)
+    ),
+    ...migratableRecords.filter((record) =>
+      managedAutomationIds.has(record.automationId)
+    ),
+  ]
 
+  let updated = 0
+  for (const record of orderedRecords) {
     await patchAutomation({
       lookup: record.automationId,
       now: input.now,
