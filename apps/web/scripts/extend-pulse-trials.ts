@@ -28,6 +28,12 @@ Options:
   --apply                 Extend and reconcile eligible trials. Without this, preview only.
   --campaign <key>        Exact fixed campaign confirmation; required with --apply.
   --help                  Print this message.
+
+Production gate:
+  Before dry-run or Apply, keep the lock-capable web deployment live, prove the
+  production alias points at its exact SHA, wait 1,140 seconds for old unlocked
+  Start-paid requests to drain, then prove the same alias SHA again. Follow the
+  complete rollout and rollback-floor procedure in apps/web/README.md.
 `;
 
 async function main(): Promise<void> {
