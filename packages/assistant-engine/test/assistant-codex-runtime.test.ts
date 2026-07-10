@@ -304,7 +304,10 @@ async function runCodexResponseMediaToolTurn(
   })
 }
 
-async function runCodexTelegramVoiceMemoOnlyTurn() {
+async function runCodexTelegramVoiceMemoOnlyTurn(input: {
+  commentaryText?: string
+  progressDelivery?: CodexAppServerTurnInput['progressDelivery']
+} = {}) {
   const workingDirectory = await createTempDir('assistant-codex-voice-memo-only-work-')
   const codexHome = await createTempDir('assistant-codex-voice-memo-only-home-')
   const voiceMemoText = 'Voice-only reply.'
@@ -357,6 +360,29 @@ async function runCodexTelegramVoiceMemoOnlyTurn() {
             },
           },
         }))
+
+        if (input.commentaryText) {
+          child.stdout.write(jsonLine({
+            method: 'item/agentMessage/delta',
+            params: {
+              delta: input.commentaryText,
+              itemId: 'assistant-voice-memo-commentary',
+              threadId: 'thread-voice-memo-only',
+              turnId: 'turn-voice-memo-only',
+            },
+          }))
+          child.stdout.write(jsonLine({
+            method: 'item/completed',
+            params: {
+              item: {
+                id: 'assistant-voice-memo-commentary',
+                type: 'assistant_message',
+                phase: 'commentary',
+                message: input.commentaryText,
+              },
+            },
+          }))
+        }
 
         child.stdout.write(jsonLine({
           id: 61,
@@ -420,6 +446,7 @@ async function runCodexTelegramVoiceMemoOnlyTurn() {
     codexCommand: 'codex',
     codexHome,
     env,
+    progressDelivery: input.progressDelivery,
     prompt: 'Send only a voice memo',
     sandbox: 'workspace-write',
     voiceMemoRuntime: createVoiceMemoToolRuntimeFromEnv({
@@ -1182,6 +1209,27 @@ describe('assistant codex runtime', () => {
         },
       ],
     })
+  })
+
+  it('does not reuse delivered commentary as final text for a voice-only response', async () => {
+    const commentaryText = 'I’ll record that now.'
+    const progressDelivery = createProgressDeliveryMock()
+
+    const result = await runCodexTelegramVoiceMemoOnlyTurn({
+      commentaryText,
+      progressDelivery,
+    })
+
+    expect(progressDelivery.send).toHaveBeenCalledTimes(1)
+    expect(progressDelivery.send).toHaveBeenCalledWith(commentaryText, {
+      source: 'model',
+    })
+    expect(result.finalMessage).toBe('')
+    expect(result.responseMedia).toEqual([
+      expect.objectContaining({
+        kind: 'voice_memo',
+      }),
+    ])
   })
 
   it('applies overlapping dynamic media tools in request order', async () => {

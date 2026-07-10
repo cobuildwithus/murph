@@ -2682,6 +2682,21 @@ async function runCodexAppServerTurnOnProcess(
     )
   }
 
+  const removeAssistantTraceUpdateFromFinalFallback = (
+    update: AssistantProviderTraceUpdate,
+  ): void => {
+    if (update.kind !== 'assistant') {
+      return
+    }
+
+    const streamKey = normalizeAssistantTraceStreamKey(update)
+    assistantStreams.delete(streamKey)
+    const streamOrderIndex = assistantStreamOrder.indexOf(streamKey)
+    if (streamOrderIndex >= 0) {
+      assistantStreamOrder.splice(streamOrderIndex, 1)
+    }
+  }
+
   const notifyProviderRequestStarted = () => {
     if (providerRequestStartedNotified) {
       return
@@ -3312,10 +3327,23 @@ async function runCodexAppServerTurnOnProcess(
     const deliveryContextOrdinal = currentDeliveryContextOrdinal()
     const suppressDeliveryContext =
       shouldSuppressDeliveryContext(deliveryContextOrdinal)
-    const updates = extractCodexTraceUpdatesFromNormalized(normalizedEvent)
+    const isCommentaryAssistantMessage =
+      normalizedEvent.kind === 'assistant_message' &&
+      normalizedEvent.messagePhase === 'commentary'
+    const rawUpdates = extractCodexTraceUpdatesFromNormalized(normalizedEvent)
+    const updates = rawUpdates
       .filter((update) => !(suppressDeliveryContext && update.kind === 'assistant'))
     for (const update of updates) {
       recordAssistantTraceUpdate(update, deliveryContextOrdinal)
+    }
+    if (isCommentaryAssistantMessage) {
+      // Commentary is classified for immediate progress delivery. Remove its
+      // stream, including any earlier deltas for the same item, so a media-only
+      // response cannot reuse progress as final reply text.
+      for (const update of rawUpdates) {
+        removeAssistantTraceUpdateFromFinalFallback(update)
+      }
+      lastAgentMessage = null
     }
 
     if (
@@ -3384,7 +3412,9 @@ async function runCodexAppServerTurnOnProcess(
         // A completed no-reply context must not leak later text progress.
       } else {
         if (progressEvent.kind === 'message') {
-          lastAgentMessage = progressEvent.text
+          if (!isCommentaryAssistantMessage) {
+            lastAgentMessage = progressEvent.text
+          }
           if (input.onProgress && normalizeStreamingText(progressEvent.text)) {
             markExternallyVisibleAssistantOutput(deliveryContextOrdinal)
           }
