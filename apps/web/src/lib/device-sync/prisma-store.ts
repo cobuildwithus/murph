@@ -55,7 +55,10 @@ export {
   type HostedStoredDeviceSyncAccount,
   type HostedConnectionRecord,
 } from "./prisma-store/connections";
-export { generateHostedAgentBearerToken } from "./prisma-store/agent-sessions";
+export {
+  HOSTED_AGENT_BEARER_TOKEN_PREFIX,
+  generateHostedAgentBearerToken,
+} from "./prisma-store/agent-sessions";
 export {
   hostedConnectionSourceRecordArgs,
   mapHostedConnectionSourceRecord,

@@ -320,9 +320,9 @@ export const HOSTED_ACCOUNT_DATA_STORE_COVERAGE = [
   },
   {
     slug: "prisma.device_agent_session",
-    label: "Local device agent sessions",
+    label: "Scoped device and companion sessions",
     deletion: "live-delete",
-    note: "Deletes agent bearer-token hashes and session metadata for local device sync agents.",
+    note: "Deletes bearer-token hashes and session metadata for local device sync agents and short-lived companion extension credentials.",
   },
   {
     slug: "prisma.device_browser_assertion_nonce",

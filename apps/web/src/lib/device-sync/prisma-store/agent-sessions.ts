@@ -4,7 +4,6 @@ import { PrismaClient } from "@prisma/client";
 import type { Prisma } from "@prisma/client";
 import { deviceSyncError } from "@murphai/device-syncd/errors";
 
-import type { AuthenticatedHostedUser } from "../auth";
 import { generateHostedRandomPrefixedId, maybeIsoTimestamp, toIsoTimestamp } from "../shared";
 import type {
   HostedAgentSessionAuthResult,
@@ -21,7 +20,7 @@ export class PrismaHostedAgentSessionStore {
   }
 
   async createAgentSession(input: {
-    user: AuthenticatedHostedUser;
+    user: { id: string };
     label?: string | null;
     tokenHash: string;
     now?: string;
@@ -251,8 +250,10 @@ function mapHostedAgentSessionRecord(record: HostedAgentSessionPrismaRecord): Ho
   } satisfies HostedAgentSessionRecord;
 }
 
+export const HOSTED_AGENT_BEARER_TOKEN_PREFIX = "hbds_agent_";
+
 export function generateHostedAgentBearerToken(): { token: string; tokenHash: string } {
-  const token = `hbds_agent_${randomBytes(32).toString("base64url")}`;
+  const token = `${HOSTED_AGENT_BEARER_TOKEN_PREFIX}${randomBytes(32).toString("base64url")}`;
   const tokenHash = createHash("sha256").update(token).digest("hex");
   return { token, tokenHash };
 }
