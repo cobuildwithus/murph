@@ -996,6 +996,7 @@ describe("buildHostedLocalDevOverrides", () => {
         "projects/murph-local/locations/global/keyRings/hosted-local/cryptoKeys/web-wrap",
       HOSTED_CRYPTO_LOCAL_AUTHORITY_SIGN_PRIVATE_JWK: generatedAuthorityPrivateJwkJson,
       HOSTED_CRYPTO_LOCAL_KMS_WRAP_KEY: "local-wrap-key",
+      HOSTED_APP_SESSION_HMAC_KEY: Buffer.alloc(32, 10).toString("base64url"),
       HOSTED_WEB_CALLBACK_SIGNING_KEY_ID: "callback:v1",
       HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: callbackPrivateJwkJson,
     });
@@ -1007,6 +1008,7 @@ describe("buildHostedLocalDevOverrides", () => {
       HOSTED_ONBOARDING_PUBLIC_BASE_URL: "http://localhost:3000",
       HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION: "v1",
       HOSTED_CONTACT_PRIVACY_KEYS: "v1:BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc",
+      HOSTED_APP_SESSION_HMAC_KEY: Buffer.alloc(32, 10).toString("base64url"),
       HOSTED_MAILBOX_FINGERPRINT_KEY: "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc",
       HOSTED_WEB_BASE_URL: "http://localhost:3000",
       HOSTED_WEB_CALLBACK_SIGNING_KEY_ID: "callback:v1",
@@ -1056,6 +1058,9 @@ describe("buildHostedLocalDevOverrides", () => {
   it("keeps hosted onboarding links on the local web origin", () => {
     const overrides = buildHostedLocalDevOverrides(localConfig, {});
 
+    expect(overrides.HOSTED_APP_SESSION_HMAC_KEY).toBe(
+      Buffer.alloc(32, 8).toString("base64url"),
+    );
     expect(overrides.HOSTED_ONBOARDING_PUBLIC_BASE_URL).toBe("http://localhost:3000");
     expect(overrides.HOSTED_WEB_BASE_URL).toBe("http://localhost:3000");
     expect(overrides.RETELL_WEBHOOK_PUBLIC_BASE_URL).toBeUndefined();

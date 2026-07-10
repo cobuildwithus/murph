@@ -10,6 +10,7 @@ const hostedWebDistSuffixEnvVarName = "NEXT_DIST_DIR_SUFFIX";
 const hostedWebSmokeDistMode = "smoke";
 const hostedWebSmokeDefaultDatabaseUrl = "postgresql://postgres:postgres@127.0.0.1:5432/murph_device_sync";
 const hostedWebSmokeDefaultEncryptionKey = "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc";
+const hostedWebSmokeDefaultAppSessionHmacKey = Buffer.alloc(32, 8).toString("base64url");
 const hostedWebSmokeDefaultEncryptionKeyVersion = "v1";
 const hostedWebSmokeDefaultPrivyAppId = "cm_app_smoke_placeholder1";
 
@@ -19,6 +20,9 @@ export function createHostedWebSmokeEnvironment(
   return {
     ...environment,
     DATABASE_URL: environment.DATABASE_URL ?? hostedWebSmokeDefaultDatabaseUrl,
+    HOSTED_APP_SESSION_HMAC_KEY:
+      environment.HOSTED_APP_SESSION_HMAC_KEY
+      ?? hostedWebSmokeDefaultAppSessionHmacKey,
     HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION:
       environment.HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION
       ?? hostedWebSmokeDefaultEncryptionKeyVersion,

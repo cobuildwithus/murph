@@ -179,6 +179,9 @@ Required:
 
 - `DATABASE_URL`
 - `HOSTED_DEVICE_ROUTING_INDEX_KEY`
+- `HOSTED_APP_SESSION_HMAC_KEY` as a dedicated canonical 32-byte base64url
+  key. Web uses it only to authenticate first-party app-session bearer and row
+  claims; do not reuse contact, mailbox, provider, or encryption keys.
 
 Required for production migrations:
 
@@ -520,6 +523,14 @@ as long-lived provider callback or webhook bases.
 Set these under `Settings -> Environment Variables` in the Vercel project that
 deploys `apps/web`. Production is the minimum.
 
+Provision `HOSTED_APP_SESSION_HMAC_KEY` in every hosted-web environment that
+will serve authenticated traffic before deploying the strict v2 session code.
+This is a deliberate secret-before-code hard cut: the deployment rejects all
+legacy unsigned cookies, so existing users sign in again, and a missing or
+malformed key fails session issuance, resolution, and revocation closed. Keep
+the key out of Cloudflare Worker and runner environments; no Cloudflare deploy
+is required for this cutover.
+
 - Enable Vercel OIDC so the app-local hosted-execution auth adapter can present
   workload identity to Cloudflare on dispatch and status requests.
 - Set `CRON_SECRET` for the hosted cron routes under `/api/internal/**/cron`.
@@ -830,8 +841,9 @@ The onboarding lane is intentionally thin:
 
 - Linq or the public landing page can start phone-bound signup.
 - Privy verifies login, linking, and security-sensitive identity operations;
-  successful hosted completion issues a first-party opaque app session stored as
-  a hashed `HostedWebSession`.
+  successful hosted completion issues a strict opaque v2 app session whose
+  database row stores a dedicated-key HMAC over its bearer, session id, member,
+  Privy identity, and expiry. Legacy unsigned cookies are rejected.
 - Stripe Checkout is subscription-only. `invoice.paid` remains the normal
   positive entitlement source, with one metadata-gated exception: a valid
   Pulse Trial Checkout completion can activate Pulse in `trial` phase.

@@ -351,6 +351,7 @@ vi.mock("../../src/dev-hosted-local/environment.ts", () => ({
   }),
   buildHostedLocalDevOverrides: vi.fn(() => ({
     DEVICE_SYNC_PUBLIC_BASE_URL: "http://localhost:3000/api/device-sync",
+    HOSTED_APP_SESSION_HMAC_KEY: Buffer.alloc(32, 8).toString("base64url"),
     HOSTED_WEB_BASE_URL: "http://localhost:3000",
   })),
   buildHostedLocalStateEnvFileText: vi.fn(() => 'HOSTED_CRYPTO_ENV="local"'),
@@ -603,6 +604,10 @@ describe("hosted local dev stack", () => {
     expect(stack.runtimeEnv.LINQ_API_BASE_URL).toBe(
       "http://host.docker.internal:4011",
     );
+    expect(stack.runtimeEnv.HOSTED_APP_SESSION_HMAC_KEY).toBe(
+      Buffer.alloc(32, 8).toString("base64url"),
+    );
+    expect(stack.workerRuntimeEnv?.HOSTED_APP_SESSION_HMAC_KEY).toBeUndefined();
     expect(startHostedLocalTemporalRuntime).toHaveBeenCalledWith(
       expect.objectContaining({
         env: expect.objectContaining({
@@ -668,7 +673,20 @@ describe("hosted local dev stack", () => {
       }),
       expect.any(Object),
     );
+    const cloudflareCall = spawnChildProcess.mock.calls.find(([name]) => name === "cloudflare");
     const devWebCall = spawnChildProcess.mock.calls.find(([name]) => name === "web");
+    expect(cloudflareCall?.[3].HOSTED_APP_SESSION_HMAC_KEY).toBeUndefined();
+    expect(devWebCall?.[3].HOSTED_APP_SESSION_HMAC_KEY).toBe(
+      Buffer.alloc(32, 8).toString("base64url"),
+    );
+    expect(
+      vi.mocked(environmentModule.buildWranglerEnvFileText).mock.calls.at(-1)?.[0]
+        .HOSTED_APP_SESSION_HMAC_KEY,
+    ).toBeUndefined();
+    expect(
+      vi.mocked(environmentModule.buildWranglerLocalDevConfig).mock.calls.at(-1)?.[0]
+        .HOSTED_APP_SESSION_HMAC_KEY,
+    ).toBeUndefined();
     expect(devWebCall?.[2]).not.toContain("start");
     expect(runCommand).toHaveBeenCalledWith(
       "pnpm",
@@ -692,6 +710,10 @@ describe("hosted local dev stack", () => {
         name: "setup",
       }),
     );
+    const runnerBundleCall = runCommand.mock.calls.find(([, args]) =>
+      args.includes("runner:bundle:hosted-local")
+    );
+    expect(runnerBundleCall?.[2].env.HOSTED_APP_SESSION_HMAC_KEY).toBeUndefined();
     expect(runCommand).toHaveBeenCalledWith(
       "pnpm",
       ["--dir", "apps/cloudflare", "deploy:smoke"],

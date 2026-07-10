@@ -495,7 +495,7 @@ export async function startHostedLocalDevStack(input: {
         env: initialProcessEnv,
       })
       : null;
-    const workerRuntimeSourceEnv = {
+    const workerRuntimeSourceEnv: NodeJS.ProcessEnv = {
       ...stripHostedLocalHostOnlyCodexEnv({
         ...runtimeEnv,
         ...cloudflareDevVars,
@@ -508,6 +508,9 @@ export async function startHostedLocalDevStack(input: {
         ? { [HOSTED_RUNTIME_CODEX_CHATGPT_AUTH_JSON_ENV]: codexSubscriptionAuthEnvValue }
         : {}),
     };
+    // This key authenticates web-owned browser sessions and must never enter
+    // the Cloudflare worker or runner process environment.
+    delete workerRuntimeSourceEnv.HOSTED_APP_SESSION_HMAC_KEY;
     workerRuntimeEnv = workerPortMode === "start"
       ? {
         ...workerRuntimeSourceEnv,
