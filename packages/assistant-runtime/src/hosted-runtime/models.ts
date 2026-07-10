@@ -183,7 +183,6 @@ export interface HostedMailboxExecutionMetrics extends HostedMailboxEffect {
 
 export interface HostedMaintenanceMetrics {
   activeTurnInputIngested?: boolean | null;
-  assistantAutomationAfterStateElapsedMs?: number | null;
   assistantAutomationCronProcessed?: number | null;
   assistantAutomationCronStatusDeferred?: boolean | null;
   assistantAutomationCronStatusElapsedMs?: number | null;

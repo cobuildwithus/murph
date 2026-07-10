@@ -25,9 +25,20 @@ import {
 import { toIsoTimestamp } from "../time.ts";
 import { isErrnoException, isPlainRecord } from "../types.ts";
 import {
+  assertAuthorizedIntegrationIngestAppendPlan,
+  appendArchivedIntegrationIngestShard,
+  buildIntegrationIngestAppendPlan,
+  parseIntegrationIngestAppendPayload,
+  readArchivedIntegrationIngestShardText,
+  truncateArchivedIntegrationIngestShard,
+  type IntegrationIngestAppendPlan,
+} from "../integration-ingests.ts";
+import {
   applyImmutableWriteTarget,
   applyJsonlAppendTarget,
   applyTextWriteTarget,
+  assertJsonlAppendTargetCanAppend,
+  isIntegrationIngestJsonlAppendTarget,
   assertWriteTargetPolicy,
   assertWriteTargetPolicyForVault,
   prepareVerifiedDeleteTarget,
@@ -87,6 +98,7 @@ export type HostedCanonicalWriteReceiptAction =
       baseSha256: string;
       baseByteLength: number;
       originalSize: number | null;
+      allowArchivedIntegrationIngestAmendment?: boolean;
       contentRef?: HostedCanonicalWriteReceiptContentRef;
     }
   | {
@@ -103,6 +115,7 @@ export type HostedCanonicalWriteReceiptAction =
       kind: "delete";
       targetRelativePath: string;
       existedBefore: boolean;
+      allowRaw?: true;
     };
 
 export interface HostedCanonicalWriteReceipt {
@@ -247,6 +260,7 @@ type StoredWriteAction =
       committedPayloadReceipt?: CommittedPayloadReceipt;
       appliedAt?: string;
       rolledBackAt?: string;
+      allowArchivedIntegrationIngestAmendment?: boolean;
     }
   | {
       kind: "delete";
@@ -314,6 +328,7 @@ export interface PruneTerminalWriteOperationRecordsResult {
   prunedByteCount: number;
   prunedCount: number;
   prunedFileCount: number;
+  prunedStageDirectoryCount: number;
   retainedErroredTerminalCount: number;
   retainedNewestTerminalCount: number;
   retainedProtectedCount: number;
@@ -535,6 +550,7 @@ export async function applyHostedCanonicalWriteReceipt(input: {
           ref: action.contentRef,
         });
         await applyHostedCanonicalJsonlAppendReceiptAction({
+          allowArchivedIntegrationIngestAmendment: action.allowArchivedIntegrationIngestAmendment === true,
           baseByteLength: action.baseByteLength,
           baseSha256: action.baseSha256,
           bytes,
@@ -560,6 +576,7 @@ export async function applyHostedCanonicalWriteReceipt(input: {
       }
       case "delete":
         await applyHostedCanonicalDeleteReceiptAction({
+          allowRaw: action.allowRaw === true,
           targetRelativePath: action.targetRelativePath,
           vaultRoot,
         });
@@ -630,6 +647,7 @@ async function applyHostedCanonicalTextReceiptAction(input: {
 }
 
 async function applyHostedCanonicalJsonlAppendReceiptAction(input: {
+  allowArchivedIntegrationIngestAmendment: boolean;
   baseByteLength: number;
   baseSha256: string;
   bytes: Uint8Array;
@@ -640,6 +658,32 @@ async function applyHostedCanonicalJsonlAppendReceiptAction(input: {
   const target = await prepareVerifiedWriteTarget(input.vaultRoot, input.targetRelativePath, {
     kind: "jsonl_append",
   });
+  const comparisonOptions: VaultPathComparisonOptions = {
+    caseInsensitive: await isVaultFilesystemCaseInsensitive(input.vaultRoot),
+  };
+  try {
+    await assertJsonlAppendTargetCanAppend(target, comparisonOptions);
+  } catch (error) {
+    if (isArchivedIntegrationIngestAppendError(error, target, comparisonOptions)) {
+      if (input.allowArchivedIntegrationIngestAmendment) {
+        await appendArchivedIntegrationIngestShard({
+          expectedBaseByteLength: input.baseByteLength,
+          expectedBaseSha256: input.baseSha256,
+          payload: Buffer.from(input.bytes).toString("utf8"),
+          targetRelativePath: target.relativePath,
+          vaultRoot: input.vaultRoot,
+        });
+        return;
+      }
+      await assertArchivedIntegrationIngestHostedAppendAlreadyApplied({
+        bytes: input.bytes,
+        targetRelativePath: target.relativePath,
+        vaultRoot: input.vaultRoot,
+      });
+      return;
+    }
+    throw error;
+  }
   const originalSize = input.originalSize ?? 0;
   if (input.baseByteLength !== originalSize) {
     throw new VaultError(
@@ -690,6 +734,34 @@ async function applyHostedCanonicalJsonlAppendReceiptAction(input: {
   await fs.appendFile(target.absolutePath, input.bytes);
 }
 
+function isArchivedIntegrationIngestAppendError(
+  error: unknown,
+  target: ResolvedVaultPath,
+  options: VaultPathComparisonOptions = {},
+): boolean {
+  return error instanceof VaultError
+    && error.code === "INTEGRATION_INGEST_SHARD_ARCHIVED"
+    && isIntegrationIngestJsonlAppendTarget(target.relativePath, options);
+}
+
+async function assertArchivedIntegrationIngestHostedAppendAlreadyApplied(input: {
+  bytes: Uint8Array;
+  targetRelativePath: string;
+  vaultRoot: string;
+}): Promise<void> {
+  const payload = Buffer.from(input.bytes).toString("utf8");
+  const records = await parseIntegrationIngestAppendPayload(payload, input.targetRelativePath);
+  const plan = await buildIntegrationIngestAppendPlan(input.vaultRoot, records);
+  if (plan.payloads.size === 0) {
+    return;
+  }
+  throw new VaultError(
+    "INTEGRATION_INGEST_SHARD_ARCHIVED",
+    `Integration ingest shard "${input.targetRelativePath}" is archived and cannot be appended.`,
+    { relativePath: input.targetRelativePath },
+  );
+}
+
 async function applyHostedCanonicalRawReceiptAction(input: {
   bytes: Uint8Array;
   targetRelativePath: string;
@@ -711,11 +783,13 @@ async function applyHostedCanonicalRawReceiptAction(input: {
 }
 
 async function applyHostedCanonicalDeleteReceiptAction(input: {
+  allowRaw: boolean;
   targetRelativePath: string;
   vaultRoot: string;
 }): Promise<void> {
   const target = await prepareVerifiedDeleteTarget(input.vaultRoot, input.targetRelativePath, {
     allowAppendOnlyJsonl: true,
+    allowRaw: input.allowRaw,
     kind: "delete",
   });
   await fs.rm(target.absolutePath, { force: true });
@@ -880,6 +954,7 @@ export async function pruneTerminalWriteOperationRecords(
     prunedByteCount: 0,
     prunedCount: 0,
     prunedFileCount: 0,
+    prunedStageDirectoryCount: 0,
     retainedErroredTerminalCount: 0,
     retainedNewestTerminalCount: 0,
     retainedProtectedCount: 0,
@@ -925,20 +1000,24 @@ export async function pruneTerminalWriteOperationRecords(
       continue;
     }
 
-    if (updatedAtMs >= checkpointedAfterMs) {
-      result.retainedUncheckpointedTerminalCount += 1;
-      continue;
-    }
-
-    await resolveVaultPathOnDisk(input.vaultRoot, relativePath);
     const stageRoot = (await resolveVaultPathOnDisk(
       input.vaultRoot,
       path.posix.join(WRITE_OPERATION_DIRECTORY, operationId),
     )).absolutePath;
-    if (await pathExists(stageRoot)) {
-      result.retainedStageDirectoryCount += 1;
+    if (updatedAtMs >= checkpointedAfterMs) {
+      if (await pathExists(stageRoot)) {
+        result.retainedStageDirectoryCount += 1;
+      }
+      result.retainedUncheckpointedTerminalCount += 1;
       continue;
     }
+
+    if (await pathExists(stageRoot)) {
+      await fs.rm(stageRoot, { force: true, recursive: true });
+      result.prunedStageDirectoryCount += 1;
+    }
+
+    await resolveVaultPathOnDisk(input.vaultRoot, relativePath);
 
     candidates.push({
       metadataRelativePath: relativePath,
@@ -965,8 +1044,8 @@ export async function pruneTerminalWriteOperationRecords(
     }
 
     if (await pathExists(candidate.stageRoot)) {
-      result.retainedStageDirectoryCount += 1;
-      continue;
+      await fs.rm(candidate.stageRoot, { force: true, recursive: true });
+      result.prunedStageDirectoryCount += 1;
     }
 
     const metadataPath = (await resolveVaultPathOnDisk(
@@ -1073,6 +1152,7 @@ function parseStoredAction(value: unknown): StoredWriteAction | null {
       return {
         kind: "delete",
         ...base,
+        allowRaw: record.allowRaw === true,
         backupRelativePath,
         effect: record.effect === "delete" ? record.effect : undefined,
       };
@@ -1143,6 +1223,7 @@ function parseStoredAction(value: unknown): StoredWriteAction | null {
       return {
         kind: "jsonl_append",
         ...base,
+        allowArchivedIntegrationIngestAmendment: record.allowArchivedIntegrationIngestAmendment === true,
         baseContentReceipt,
         committedPayloadReceipt,
         effect: record.effect === "append" ? record.effect : undefined,
@@ -1659,7 +1740,36 @@ export class WriteBatch {
     return normalizedTarget;
   }
 
-  async stageJsonlAppend(targetRelativePath: string, content: string): Promise<string> {
+  async stageJsonlAppend(
+    targetRelativePath: string,
+    content: string,
+  ): Promise<string> {
+    return await this.stageJsonlAppendAction(targetRelativePath, content, false);
+  }
+
+  async stageIntegrationIngestAppendPlan(
+    plan: IntegrationIngestAppendPlan,
+  ): Promise<void> {
+    this.assertMutable();
+    assertAuthorizedIntegrationIngestAppendPlan(plan);
+    const archivedAmendmentShardPaths = new Set(plan.archivedAmendmentShardPaths);
+    for (const relativePath of [...plan.payloads.keys()].sort()) {
+      const payload = plan.payloads.get(relativePath);
+      if (payload) {
+        await this.stageJsonlAppendAction(
+          relativePath,
+          payload,
+          archivedAmendmentShardPaths.has(relativePath),
+        );
+      }
+    }
+  }
+
+  private async stageJsonlAppendAction(
+    targetRelativePath: string,
+    content: string,
+    allowArchivedIntegrationIngestAmendment: boolean,
+  ): Promise<string> {
     this.assertMutable();
     const normalizedTarget = normalizeRelativeVaultPath(targetRelativePath);
     await assertWriteTargetPolicyForVault(this.vaultRoot, normalizedTarget, {
@@ -1680,6 +1790,7 @@ export class WriteBatch {
       state: "staged",
       targetRelativePath: normalizedTarget,
       stageRelativePath,
+      allowArchivedIntegrationIngestAmendment,
     });
     await this.persist();
     return normalizedTarget;
@@ -2068,6 +2179,9 @@ export class WriteBatch {
           baseSha256: baseContentReceipt.sha256,
           baseByteLength: baseContentReceipt.byteLength,
           originalSize: action.originalSize ?? null,
+          ...(action.allowArchivedIntegrationIngestAmendment
+            ? { allowArchivedIntegrationIngestAmendment: true as const }
+            : {}),
           contentRef: createHostedCanonicalWriteReceiptContentRef(payloadReceipt),
         };
       }
@@ -2089,6 +2203,7 @@ export class WriteBatch {
           kind: "delete",
           targetRelativePath: action.targetRelativePath,
           existedBefore: action.existedBefore ?? false,
+          ...(action.allowRaw ? { allowRaw: true as const } : {}),
         };
     }
   }
@@ -2366,6 +2481,9 @@ export class WriteBatch {
     const payload = await readText(stageAbsolutePath);
     const payloadBytes = Buffer.from(payload, "utf8");
     const payloadReceipt = action.committedPayloadReceipt ?? createCommittedPayloadReceipt(payloadBytes);
+    const comparisonOptions: VaultPathComparisonOptions = {
+      caseInsensitive: await isVaultFilesystemCaseInsensitive(this.vaultRoot),
+    };
     await this.applyPreparedAction({
       action,
       finalize: (result: Awaited<ReturnType<typeof applyJsonlAppendTarget>>) => {
@@ -2381,6 +2499,52 @@ export class WriteBatch {
         }
 
         const baseContentReceipt = this.getPreparedJsonlBaseReceipt(action);
+        if (action.allowArchivedIntegrationIngestAmendment) {
+          const archived = await readArchivedIntegrationIngestShardText(this.vaultRoot, action.targetRelativePath);
+          if (archived) {
+            const targetContent = Buffer.from(archived.content, "utf8");
+            if (targetContent.byteLength < action.originalSize) {
+              throw this.buildResumeConflictError(
+                action,
+                `Archived append target "${action.targetRelativePath}" changed unexpectedly while resuming the write batch.`,
+              );
+            }
+
+            const actualBaseReceipt = createCommittedPayloadReceipt(targetContent.subarray(0, action.originalSize));
+            if (!receiptsMatch(actualBaseReceipt, baseContentReceipt)) {
+              throw this.buildResumeConflictError(
+                action,
+                `Archived append target "${action.targetRelativePath}" base content changed while resuming the write batch.`,
+              );
+            }
+
+            if (targetContent.byteLength === action.originalSize) {
+              return undefined;
+            }
+
+            const expectedSize = action.originalSize + payloadBytes.byteLength;
+            if (targetContent.byteLength !== expectedSize) {
+              throw this.buildResumeConflictError(
+                action,
+                `Archived append target "${action.targetRelativePath}" changed unexpectedly while resuming the write batch.`,
+              );
+            }
+
+            if (!targetContent.subarray(action.originalSize).equals(payloadBytes)) {
+              throw this.buildResumeConflictError(
+                action,
+                `Archived append target "${action.targetRelativePath}" changed unexpectedly while resuming the write batch.`,
+              );
+            }
+
+            return {
+              effect: "append",
+              existedBefore: true,
+              originalSize: action.originalSize,
+            } as const;
+          }
+        }
+
         if (!(await pathExists(target.absolutePath))) {
           if (action.existedBefore) {
             throw this.buildResumeConflictError(
@@ -2434,13 +2598,79 @@ export class WriteBatch {
           originalSize: action.originalSize,
         } as const;
       },
-      mutateTarget: async (target) =>
-        await applyJsonlAppendTarget({
-          appendPayload: (payloadChunk) => fs.appendFile(target.absolutePath, payloadChunk, "utf8"),
-          readPayload: async () => payload,
-          target,
-        }),
+      mutateTarget: async (target) => {
+        try {
+          return await applyJsonlAppendTarget({
+            appendPayload: (payloadChunk) => fs.appendFile(target.absolutePath, payloadChunk, "utf8"),
+            readPayload: async () => payload,
+            target,
+          });
+        } catch (error) {
+          if (
+            action.allowArchivedIntegrationIngestAmendment &&
+            isArchivedIntegrationIngestAppendError(error, target, comparisonOptions)
+          ) {
+            const baseContentReceipt = action.baseContentReceipt;
+            if (!baseContentReceipt) {
+              throw this.buildResumeConflictError(
+                action,
+                `Archived append target "${action.targetRelativePath}" is missing its prepared base receipt.`,
+              );
+            }
+            const result = await appendArchivedIntegrationIngestShard({
+              expectedBaseByteLength: baseContentReceipt.byteLength,
+              expectedBaseSha256: baseContentReceipt.sha256,
+              payload,
+              targetRelativePath: action.targetRelativePath,
+              vaultRoot: this.vaultRoot,
+            });
+            return {
+              effect: "append",
+              existedBefore: true,
+              originalSize: result.originalSize,
+            } as const;
+          }
+          throw error;
+        }
+      },
       prepareMutation: async (target) => {
+        if (action.allowArchivedIntegrationIngestAmendment) {
+          const archived = await readArchivedIntegrationIngestShardText(this.vaultRoot, action.targetRelativePath);
+          if (archived) {
+            const archivedContent = Buffer.from(archived.content, "utf8");
+            const originalSize = action.originalSize ?? archivedContent.byteLength;
+            const baseContentReceipt = action.baseContentReceipt ??
+              createCommittedPayloadReceipt(archivedContent);
+            if (baseContentReceipt.byteLength !== originalSize) {
+              throw this.buildResumeConflictError(
+                action,
+                `Archived append target "${action.targetRelativePath}" base size changed while preparing the write batch.`,
+              );
+            }
+            await this.persistPreparedAction(() => {
+              let changed = false;
+              if (action.baseContentReceipt === undefined) {
+                action.baseContentReceipt = baseContentReceipt;
+                changed = true;
+              }
+              if (action.committedPayloadReceipt === undefined) {
+                action.committedPayloadReceipt = payloadReceipt;
+                changed = true;
+              }
+              if (action.existedBefore === undefined) {
+                action.existedBefore = true;
+                changed = true;
+              }
+              if (action.originalSize === undefined) {
+                action.originalSize = originalSize;
+                changed = true;
+              }
+              return changed;
+            });
+            return;
+          }
+        }
+
         const existedBefore = action.existedBefore ?? (await pathExists(target.absolutePath));
         const originalSize = action.originalSize ?? (existedBefore ? (await fs.stat(target.absolutePath)).size : 0);
         const baseContentReceipt = action.baseContentReceipt ??
@@ -2598,7 +2828,19 @@ export class WriteBatch {
         }
       } else if (action.kind === "jsonl_append") {
         const targetAbsolutePath = resolveVaultPath(this.vaultRoot, action.targetRelativePath).absolutePath;
-        if (!action.existedBefore) {
+        if (
+          action.allowArchivedIntegrationIngestAmendment &&
+          action.baseContentReceipt &&
+          action.originalSize !== undefined &&
+          await readArchivedIntegrationIngestShardText(this.vaultRoot, action.targetRelativePath)
+        ) {
+          await truncateArchivedIntegrationIngestShard({
+            expectedBaseByteLength: action.originalSize,
+            expectedBaseSha256: action.baseContentReceipt.sha256,
+            targetRelativePath: action.targetRelativePath,
+            vaultRoot: this.vaultRoot,
+          });
+        } else if (!action.existedBefore) {
           await safeUnlink(targetAbsolutePath);
         } else {
           await fs.truncate(targetAbsolutePath, action.originalSize ?? 0);

@@ -132,13 +132,18 @@ describe("hosted local idle checkpoint deferred progress e2e", () => {
       expectMailboxLagDrained(firstCompletionStatus);
     }
 
-    const idleCheckpointStatus =
-      firstCompletionWorkspaceVersion === activationWorkspaceVersion
-        ? await waitForIdleShutdownCheckpoint({
-            expectedConversationSeqEnd: firstSeq,
-            previousWorkspaceVersion: activationWorkspaceVersion,
-          })
-        : firstCompletionStatus;
+    const idleCheckpointStatus = hasCommittedIdleCheckpointProgressEvidence(
+      firstCompletionStatus,
+      {
+        expectedConversationSeqEnd: firstSeq,
+        expectedWorkspaceVersion: activationWorkspaceVersion,
+      },
+    )
+      ? firstCompletionStatus
+      : await waitForIdleShutdownCheckpoint({
+          expectedConversationSeqEnd: firstSeq,
+          previousWorkspaceVersion: activationWorkspaceVersion,
+        });
     expectWorkspaceBaseOnly(idleCheckpointStatus);
     const idleWorkspaceVersion = requireWorkspaceVersion(idleCheckpointStatus);
     expect(idleWorkspaceVersion).not.toBe(activationWorkspaceVersion);
@@ -178,13 +183,18 @@ describe("hosted local idle checkpoint deferred progress e2e", () => {
     } else {
       expectMailboxLagDrained(finalStatus);
     }
-    const secondIdleCheckpointStatus =
-      finalWorkspaceVersion === idleWorkspaceVersion
-        ? await waitForIdleShutdownCheckpoint({
-            expectedConversationSeqEnd: secondSeq,
-            previousWorkspaceVersion: idleWorkspaceVersion,
-          })
-        : finalStatus;
+    const secondIdleCheckpointStatus = hasCommittedIdleCheckpointProgressEvidence(
+      finalStatus,
+      {
+        expectedConversationSeqEnd: secondSeq,
+        expectedWorkspaceVersion: idleWorkspaceVersion,
+      },
+    )
+      ? finalStatus
+      : await waitForIdleShutdownCheckpoint({
+          expectedConversationSeqEnd: secondSeq,
+          previousWorkspaceVersion: idleWorkspaceVersion,
+        });
     expectCommittedIdleCheckpointProgressEvidence(secondIdleCheckpointStatus, {
       expectedConversationSeqEnd: secondSeq,
       expectedWorkspaceVersion: idleWorkspaceVersion,

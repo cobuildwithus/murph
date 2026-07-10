@@ -23,7 +23,6 @@ const mocks = vi.hoisted(() => ({
   detectWearableStorageMigrationCandidates: vi.fn(),
   emitHostedExecutionStructuredLog: vi.fn(),
   initInboxRuntime: vi.fn(),
-  readAssistantAutomationState: vi.fn(),
   readConfiguredJunctionDeviceSyncProviderConfig: vi.fn(),
   readHostedAssistantRuntimeState: vi.fn(),
   reconcileHostedDeviceSyncControlPlaneState: vi.fn(),
@@ -56,7 +55,6 @@ vi.mock("@murphai/assistant-engine", () => ({
   HOSTED_ASSISTANT_CONTEXT_DIAGNOSTICS_TYPE: "assistant.context.diagnostics",
   HOSTED_ASSISTANT_TURN_TIMING_SCHEMA: "murph.assistant-turn-timing.v1",
   HOSTED_ASSISTANT_TURN_TIMING_TYPE: "assistant.turn.timing",
-  readAssistantAutomationState: mocks.readAssistantAutomationState,
   runAssistantAutomationPass: mocks.runAssistantAutomationPass,
 }));
 
@@ -277,11 +275,6 @@ beforeEach(async () => {
     assistantConfigStatus: "saved",
     assistantConfigured: true,
     assistantProvider: "codex-cli",
-  });
-  mocks.readAssistantAutomationState.mockResolvedValue({
-    autoReply: [],
-    updatedAt: "2026-04-08T00:00:00.000Z",
-    version: 1,
   });
   mocks.runAssistantAutomationPass.mockResolvedValue({
     nextWakeAt: "2026-04-08T01:00:00.000Z",
@@ -1044,41 +1037,6 @@ describe("runHostedAssistantAutomation", () => {
   });
 
   it("logs automation events emitted during the hosted pass", async () => {
-    mocks.readAssistantAutomationState
-      .mockResolvedValueOnce({
-        autoReply: [
-          {
-            channel: "telegram",
-            enabledAt: "2026-04-08T00:00:00.000Z",
-            eligibleAfter: {
-              createdAt: null,
-              inputId: "ain_00000000000000000000000000000122",
-              occurredAt: "2026-04-08T00:05:00.000Z",
-              sourceKind: "inbox-capture",
-              sourcePosition: null,
-            },
-          },
-        ],
-        updatedAt: "2026-04-08T00:00:00.000Z",
-        version: 1,
-      })
-      .mockResolvedValueOnce({
-        autoReply: [
-          {
-            channel: "telegram",
-            enabledAt: "2026-04-08T00:00:00.000Z",
-            eligibleAfter: {
-              createdAt: null,
-              inputId: "ain_00000000000000000000000000000123",
-              occurredAt: "2026-04-08T00:10:00.000Z",
-              sourceKind: "inbox-capture",
-              sourcePosition: null,
-            },
-          },
-        ],
-        updatedAt: "2026-04-08T00:10:00.000Z",
-        version: 2,
-      });
     mocks.runAssistantAutomationPass.mockImplementationOnce(async (input) => {
       input.onEvent?.({
         inputId: "ain_123",
@@ -1144,10 +1102,6 @@ describe("runHostedAssistantAutomation", () => {
 
     expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
       expect.objectContaining({
-        details: expect.objectContaining({
-          autoReplyChannels: "telegram",
-          autoReplyEligibleAfterSummary: "telegram:present",
-        }),
         message: "Hosted assistant automation pass finished.",
       }),
     );
@@ -1166,10 +1120,7 @@ describe("runHostedAssistantAutomation", () => {
     ).not.toContain("real_thread_id");
     expect(
       JSON.stringify(mocks.emitHostedExecutionStructuredLog.mock.calls),
-    ).not.toContain("ain_00000000000000000000000000000122");
-    expect(
-      JSON.stringify(mocks.emitHostedExecutionStructuredLog.mock.calls),
-    ).not.toContain("ain_00000000000000000000000000000123");
+    ).not.toContain("autoReplyEligibleAfterSummary");
   });
 
   it("treats missing inbox runtime state as a non-fatal bootstrap gap", async () => {
@@ -3107,6 +3058,9 @@ describe("runHostedAssistantAutomationLane", () => {
         },
       }),
       runtimeAttemptId: "attempt_123",
+      preProviderPhase: {
+        workspaceAssistantPreAutomationMs: 11,
+      },
       vaultRoot: "/tmp/vault-root",
     });
 
@@ -3168,6 +3122,15 @@ describe("runHostedAssistantAutomationLane", () => {
     const automationPassInput =
       mocks.runAssistantAutomationPass.mock.calls[0]?.[0] as RunAssistantAutomationPassInput;
     automationPassInput.onProviderRequestStarted?.({
+      autoReplyHistory: {
+        outboxScanElapsedMs: 23,
+        outboxScanPerformed: true,
+        receiptScanBytesRead: 4_096,
+        receiptScanElapsedMs: 19,
+        receiptScanFilesRead: 12,
+        receiptScanLockWaitMs: 3,
+        receiptScanPerformed: true,
+      },
       assistantInputIds: ["input_1"],
       codexAppServerInitializeMs: 7,
       codexAppServerPreProviderMs: 17,
@@ -3184,6 +3147,16 @@ describe("runHostedAssistantAutomationLane", () => {
         assistantInputIds: ["input_1"],
         at: "2026-04-08T00:00:01.000Z",
         phaseBreakdown: {
+          preProvider: {
+            outboxScanElapsedMs: 23,
+            outboxScanPerformed: true,
+            receiptScanBytesRead: 4_096,
+            receiptScanElapsedMs: 19,
+            receiptScanFilesRead: 12,
+            receiptScanLockWaitMs: 3,
+            receiptScanPerformed: true,
+            workspaceAssistantPreAutomationMs: 11,
+          },
           provider: {
             codexAppServerInitializeMs: 7,
             codexAppServerPreProviderMs: 17,
@@ -3252,6 +3225,12 @@ describe("runHostedAssistantAutomationLane", () => {
       event: {
         assistantInputIds: ["input_2"],
         at: "2026-04-08T00:00:02.000Z",
+        phaseBreakdown: {
+          preProvider: {
+            workspaceAssistantPreAutomationMs: 11,
+          },
+          schemaVersion: 1,
+        },
         providerRequestOrdinal: 0,
         runtimeAttemptId: "attempt_123",
         source: "telegram",

@@ -72,6 +72,12 @@ test("pruneTerminalWriteOperationRecords removes only clean committed records co
     "payloads/residue.txt",
     "leftover\n",
   );
+  await writeStageResidue(
+    vaultRoot,
+    uncheckpointedCommitted.stageRootRelativePath,
+    "payloads/uncheckpointed-residue.txt",
+    "uncheckpointed leftover\n",
+  );
 
   const result = await pruneTerminalWriteOperationRecords({
     checkpointedAfter: "2026-06-21T12:00:00.000Z",
@@ -81,9 +87,10 @@ test("pruneTerminalWriteOperationRecords removes only clean committed records co
   });
 
   assert.equal(result.scannedCount, 9);
-  assert.equal(result.prunedCount, 1);
-  assert.equal(result.prunedFileCount, 1);
+  assert.equal(result.prunedCount, 2);
+  assert.equal(result.prunedFileCount, 2);
   assert.equal(result.prunedByteCount > 0, true);
+  assert.equal(result.prunedStageDirectoryCount, 1);
   assert.equal(result.retainedProtectedCount, 4);
   assert.equal(result.retainedErroredTerminalCount, 1);
   assert.equal(result.retainedNewestTerminalCount, 0);
@@ -105,9 +112,20 @@ test("pruneTerminalWriteOperationRecords removes only clean committed records co
   await assertPresent(vaultRoot, failed.metadataRelativePath);
   await assertPresent(vaultRoot, recentCommitted.metadataRelativePath);
   await assertPresent(vaultRoot, uncheckpointedCommitted.metadataRelativePath);
+  await assertPresent(vaultRoot, uncheckpointedCommitted.stageRootRelativePath);
+  assert.equal(
+    await fs.readFile(
+      resolveVaultPath(
+        vaultRoot,
+        `${uncheckpointedCommitted.stageRootRelativePath}/payloads/uncheckpointed-residue.txt`,
+      ).absolutePath,
+      "utf8",
+    ),
+    "uncheckpointed leftover\n",
+  );
   await assertPresent(vaultRoot, erroredCommitted.metadataRelativePath);
-  await assertPresent(vaultRoot, stageResidueCommitted.metadataRelativePath);
-  await assertPresent(vaultRoot, stageResidueCommitted.stageRootRelativePath);
+  await assertMissing(vaultRoot, stageResidueCommitted.metadataRelativePath);
+  await assertMissing(vaultRoot, stageResidueCommitted.stageRootRelativePath);
 
   assert.deepEqual((await listWriteOperationMetadataPaths(vaultRoot)).sort(), [
     committing.metadataRelativePath,
@@ -115,7 +133,6 @@ test("pruneTerminalWriteOperationRecords removes only clean committed records co
     failed.metadataRelativePath,
     recentCommitted.metadataRelativePath,
     retainedRolledBack.metadataRelativePath,
-    stageResidueCommitted.metadataRelativePath,
     staged.metadataRelativePath,
     uncheckpointedCommitted.metadataRelativePath,
   ].sort());
@@ -138,6 +155,7 @@ test("pruneTerminalWriteOperationRecords is inert without checkpoint proof and s
     prunedByteCount: 0,
     prunedCount: 0,
     prunedFileCount: 0,
+    prunedStageDirectoryCount: 0,
     retainedErroredTerminalCount: 0,
     retainedNewestTerminalCount: 0,
     retainedProtectedCount: 0,

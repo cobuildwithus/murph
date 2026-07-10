@@ -9,6 +9,7 @@ import { listAssistantRuntimeEventsAtPath } from '../src/assistant/runtime-event
 import { ensureAssistantState } from '../src/assistant/store/persistence.ts'
 import { resolveAssistantStatePaths } from '../src/assistant/store/paths.ts'
 import {
+  type AssistantTurnReceiptScanMetrics,
   appendAssistantTurnReceiptEvent,
   createAssistantTurnId,
   createAssistantTurnReceipt,
@@ -286,9 +287,32 @@ describe('assistant turns', () => {
     await mkdir(path.join(paths.turnsDirectory, 'nested'), {
       recursive: true,
     })
+    const expectedBytesRead = (
+      await Promise.all(['turn-a', 'turn-b', 'turn-c'].map(async (turnId) =>
+        await readFile(resolveAssistantTurnReceiptPath(paths, turnId), 'utf8')
+      ))
+    ).reduce((total, raw) => total + Buffer.byteLength(raw, 'utf8'), 0)
 
-    const recent = await listRecentAssistantTurnReceipts(vaultRoot, 2)
+    const scanMetrics: AssistantTurnReceiptScanMetrics[] = []
+    const recent = await listRecentAssistantTurnReceipts(
+      vaultRoot,
+      2,
+      (metrics) => {
+        scanMetrics.push(metrics)
+      },
+    )
     expect(recent.map((receipt) => receipt.turnId)).toEqual(['turn-a', 'turn-b'])
+    expect(scanMetrics).toHaveLength(1)
+    expect(scanMetrics[0]).toEqual({
+      bytesRead: expectedBytesRead,
+      filesRead: 3,
+      scanElapsedMs: expect.any(Number),
+      lockWaitMs: expect.any(Number),
+    })
+    expect(Number.isSafeInteger(scanMetrics[0]?.scanElapsedMs)).toBe(true)
+    expect(scanMetrics[0]?.scanElapsedMs).toBeGreaterThanOrEqual(0)
+    expect(Number.isSafeInteger(scanMetrics[0]?.lockWaitMs)).toBe(true)
+    expect(scanMetrics[0]?.lockWaitMs).toBeGreaterThanOrEqual(0)
 
     const sessionFiltered = await listRecentAssistantTurnReceiptsForSession(
       vaultRoot,
@@ -297,7 +321,20 @@ describe('assistant turns', () => {
     )
     expect(sessionFiltered.map((receipt) => receipt.turnId)).toEqual(['turn-a', 'turn-c'])
 
-    await expect(listRecentAssistantTurnReceipts(vaultRoot, Number.NaN)).resolves.toEqual([])
+    const skippedScanMetrics: AssistantTurnReceiptScanMetrics[] = []
+    await expect(listRecentAssistantTurnReceipts(
+      vaultRoot,
+      Number.NaN,
+      (metrics) => {
+        skippedScanMetrics.push(metrics)
+      },
+    )).resolves.toEqual([])
+    expect(skippedScanMetrics).toEqual([{
+      bytesRead: 0,
+      filesRead: 0,
+      lockWaitMs: 0,
+      scanElapsedMs: expect.any(Number),
+    }])
     await expect(listRecentAssistantTurnReceipts(vaultRoot, -2)).resolves.toEqual([])
 
     const oneRecent = await listRecentAssistantTurnReceiptsForSession(

@@ -4089,6 +4089,42 @@ test("WriteBatch keeps delete rollback prerequisites durable before finalization
   assert.equal(operation.actions[0]?.existedBefore, true);
 });
 
+test("WriteBatch preserves raw delete allowance when reading stored operations", async () => {
+  const vaultRoot = await makeTempDirectory("murph-raw-delete-resume-window");
+  await initializeVault({ vaultRoot });
+
+  const targetRelativePath = "raw/inbox/attachments/delete-allow-raw.bin";
+  const targetAbsolutePath = path.join(vaultRoot, targetRelativePath);
+  await fs.mkdir(path.dirname(targetAbsolutePath), { recursive: true });
+  await fs.writeFile(targetAbsolutePath, "raw attachment bytes");
+
+  const batch = await WriteBatch.create({
+    vaultRoot,
+    operationType: "raw_delete_resume_window",
+    summary: "Preserve raw delete allowance across stored operation parsing",
+  });
+  await batch.stageDelete(targetRelativePath, { allowRaw: true });
+
+  const stored = await readStoredWriteOperation(vaultRoot, batch.metadataRelativePath);
+  const storedAction = stored.actions[0];
+  assert.equal(storedAction?.kind, "delete");
+  if (storedAction?.kind !== "delete") {
+    throw new Error("Expected a stored delete action.");
+  }
+  assert.equal(storedAction.allowRaw, true);
+
+  const recoverable = await readRecoverableStoredWriteOperation(vaultRoot, batch.metadataRelativePath);
+  const recoverableAction = recoverable?.actions[0];
+  assert.equal(recoverableAction?.kind, "delete");
+  if (recoverableAction?.kind !== "delete") {
+    throw new Error("Expected a recoverable delete action.");
+  }
+  assert.equal(recoverableAction.allowRaw, true);
+
+  await batch.commit();
+  assert.equal(await fs.access(targetAbsolutePath).then(() => true, () => false), false);
+});
+
 test("WriteBatch keeps rollback bookkeeping best-effort when rollback-status persistence fails after rollback", async () => {
   const vaultRoot = await makeTempDirectory("murph-vault");
   await initializeVault({ vaultRoot });
