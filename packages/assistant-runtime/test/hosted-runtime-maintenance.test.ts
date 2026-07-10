@@ -3107,6 +3107,9 @@ describe("runHostedAssistantAutomationLane", () => {
         },
       }),
       runtimeAttemptId: "attempt_123",
+      preProviderPhase: {
+        workspaceAssistantPreAutomationMs: 11,
+      },
       vaultRoot: "/tmp/vault-root",
     });
 
@@ -3168,6 +3171,15 @@ describe("runHostedAssistantAutomationLane", () => {
     const automationPassInput =
       mocks.runAssistantAutomationPass.mock.calls[0]?.[0] as RunAssistantAutomationPassInput;
     automationPassInput.onProviderRequestStarted?.({
+      autoReplyHistory: {
+        outboxScanElapsedMs: 23,
+        outboxScanPerformed: true,
+        receiptScanBytesRead: 4_096,
+        receiptScanElapsedMs: 19,
+        receiptScanFilesRead: 12,
+        receiptScanLockWaitMs: 3,
+        receiptScanPerformed: true,
+      },
       assistantInputIds: ["input_1"],
       codexAppServerInitializeMs: 7,
       codexAppServerPreProviderMs: 17,
@@ -3184,6 +3196,16 @@ describe("runHostedAssistantAutomationLane", () => {
         assistantInputIds: ["input_1"],
         at: "2026-04-08T00:00:01.000Z",
         phaseBreakdown: {
+          preProvider: {
+            outboxScanElapsedMs: 23,
+            outboxScanPerformed: true,
+            receiptScanBytesRead: 4_096,
+            receiptScanElapsedMs: 19,
+            receiptScanFilesRead: 12,
+            receiptScanLockWaitMs: 3,
+            receiptScanPerformed: true,
+            workspaceAssistantPreAutomationMs: 11,
+          },
           provider: {
             codexAppServerInitializeMs: 7,
             codexAppServerPreProviderMs: 17,
@@ -3252,6 +3274,12 @@ describe("runHostedAssistantAutomationLane", () => {
       event: {
         assistantInputIds: ["input_2"],
         at: "2026-04-08T00:00:02.000Z",
+        phaseBreakdown: {
+          preProvider: {
+            workspaceAssistantPreAutomationMs: 11,
+          },
+          schemaVersion: 1,
+        },
         providerRequestOrdinal: 0,
         runtimeAttemptId: "attempt_123",
         source: "telegram",

@@ -16,6 +16,7 @@ import {
 } from '../src/assistant/automation/input-summary.ts'
 import {
   createAssistantAutoReplyGroupContext,
+  createAssistantAutoReplyHistoryReader,
   processAssistantAutoReplyGroup,
 } from '../src/assistant/automation/reply.ts'
 import {
@@ -1096,7 +1097,14 @@ describe('assistant auto-reply event-first path', () => {
     await processAssistantAutoReplyGroup({
       allowSelfAuthored: false,
       context: createReplyContext(candidate),
+      deliveryDispatchMode: 'queue-only',
       enabledChannels: ['linq'],
+      executionContext: {
+        hosted: {
+          memberId: 'member-test',
+          userEnvKeys: [],
+        },
+      },
       inboxServices: createInboxServices(),
       requestId: null,
       sessionMaxAgeMs: null,
@@ -1109,6 +1117,7 @@ describe('assistant auto-reply event-first path', () => {
       [AUTO_REPLY_RECEIPT_CROSS_SESSION_CONTEXT_INTENT_ID_KEY]:
         'intent-anchored-target',
     }))
+    expect(replyEventPathMocks.listAssistantTurnReceipts).not.toHaveBeenCalled()
   })
 
   it('uses the anchored input timestamps to compute the causal cutoff so an anchored delivery sent after the oldest grouped input is still eligible', async () => {
@@ -1389,6 +1398,190 @@ describe('assistant auto-reply event-first path', () => {
     const sendInput = replyEventPathMocks.sendAssistantMessage.mock.calls[0]?.[0]
     expect(sendInput).not.toHaveProperty('turnContext')
     expect(replyEventPathMocks.listAssistantTurnReceipts).toHaveBeenCalled()
+  })
+
+  it('skips receipts in hosted queue-only mode when no outbox context exists', async () => {
+    const vault = await createTempVault()
+    const candidate = createAssistantInputCandidate({
+      occurredAt: '2026-04-08T00:10:00.000Z',
+      optionalInboxCaptureId: null,
+      source: 'email',
+      text: 'No earlier delivery here',
+      threadIsDirect: true,
+    })
+
+    await processAssistantAutoReplyGroup({
+      allowSelfAuthored: false,
+      context: createReplyContext(candidate),
+      deliveryDispatchMode: 'queue-only',
+      enabledChannels: ['email'],
+      executionContext: {
+        hosted: {
+          memberId: 'member-test',
+          userEnvKeys: [],
+        },
+      },
+      inboxServices: createInboxServices(),
+      requestId: null,
+      sessionMaxAgeMs: null,
+      vault,
+    })
+
+    expect(replyEventPathMocks.sendAssistantMessage).toHaveBeenCalledOnce()
+    expect(replyEventPathMocks.listAssistantOutboxIntents).toHaveBeenCalledOnce()
+    expect(replyEventPathMocks.listAssistantTurnReceipts).not.toHaveBeenCalled()
+  })
+
+  it('shares one lazy outbox read between self-echo and context selection', async () => {
+    const vault = await createTempVault()
+    const candidate = createAssistantInputCandidate({
+      actorIsSelf: true,
+      occurredAt: '2026-04-08T00:10:00.000Z',
+      optionalInboxCaptureId: null,
+      source: 'email',
+      text: 'Not a recent assistant echo',
+      threadIsDirect: true,
+    })
+
+    await processAssistantAutoReplyGroup({
+      allowSelfAuthored: true,
+      context: createReplyContext(candidate),
+      deliveryDispatchMode: 'queue-only',
+      enabledChannels: ['email'],
+      executionContext: {
+        hosted: {
+          memberId: 'member-test',
+          userEnvKeys: [],
+        },
+      },
+      inboxServices: createInboxServices(),
+      requestId: null,
+      sessionMaxAgeMs: null,
+      vault,
+    })
+
+    expect(replyEventPathMocks.sendAssistantMessage).toHaveBeenCalledOnce()
+    expect(replyEventPathMocks.listAssistantOutboxIntents).toHaveBeenCalledOnce()
+    expect(replyEventPathMocks.listAssistantTurnReceipts).not.toHaveBeenCalled()
+  })
+
+  it('memoizes each lazy history inventory and exposes only scan measurements', async () => {
+    const vault = await createTempVault()
+    const outboxIntents = [createOutboxMessage({
+      intentId: 'intent-history-reader',
+      message: 'history reader message',
+      sentAt: '2026-04-08T00:05:00.000Z',
+      sessionId: 'session-history-reader',
+    })]
+    const receipts = [createConsumedCrossSessionReceipt({
+      intentId: 'intent-history-reader',
+      updatedAt: '2026-04-08T00:06:00.000Z',
+    })]
+    replyEventPathMocks.listAssistantOutboxIntents.mockResolvedValue(outboxIntents)
+    replyEventPathMocks.listAssistantTurnReceipts.mockImplementationOnce(async (
+      _vault: string,
+      _limit: number,
+      onScan?: (metrics: {
+        bytesRead: number
+        filesRead: number
+        lockWaitMs: number
+        scanElapsedMs: number
+      }) => void,
+    ) => {
+      onScan?.({
+        bytesRead: 4_096,
+        filesRead: 12,
+        lockWaitMs: 3,
+        scanElapsedMs: 19,
+      })
+      return receipts
+    })
+    const reader = createAssistantAutoReplyHistoryReader({ vault })
+
+    const firstOutboxRead = reader.readOutboxIntents()
+    const secondOutboxRead = reader.readOutboxIntents()
+    const firstReceiptRead = reader.readReceipts()
+    const secondReceiptRead = reader.readReceipts()
+
+    expect(secondOutboxRead).toBe(firstOutboxRead)
+    expect(secondReceiptRead).toBe(firstReceiptRead)
+    await expect(firstOutboxRead).resolves.toBe(outboxIntents)
+    await expect(firstReceiptRead).resolves.toBe(receipts)
+    expect(replyEventPathMocks.listAssistantOutboxIntents).toHaveBeenCalledOnce()
+    expect(replyEventPathMocks.listAssistantTurnReceipts).toHaveBeenCalledOnce()
+    expect(reader.readMetrics()).toEqual({
+      outboxScanElapsedMs: expect.any(Number),
+      outboxScanPerformed: true,
+      receiptScanBytesRead: 4_096,
+      receiptScanElapsedMs: 19,
+      receiptScanFilesRead: 12,
+      receiptScanLockWaitMs: 3,
+      receiptScanPerformed: true,
+    })
+    expect(reader.readMetrics().outboxScanElapsedMs).toBeGreaterThanOrEqual(0)
+  })
+
+  it.each([
+    {
+      label: 'belongs to the current session',
+      sentAt: '2026-04-08T00:05:00.000Z',
+      sessionId: 'session-chat',
+    },
+    {
+      label: 'is newer than the durable inbound receipt',
+      sentAt: '2026-04-08T00:10:20.000Z',
+      sessionId: 'session-automation',
+    },
+  ])('skips hosted receipt loading when matching outbox history $label', async ({
+    sentAt,
+    sessionId,
+  }) => {
+    const vault = await createTempVault()
+    replyEventPathMocks.resolveAssistantSession.mockResolvedValue({
+      created: false,
+      session: {
+        lastTurnAt: '2026-04-08T00:02:00.000Z',
+        sessionId: 'session-chat',
+      },
+    })
+    replyEventPathMocks.listAssistantOutboxIntents.mockResolvedValue([
+      createOutboxMessage({
+        intentId: 'intent-ineligible-context',
+        message: 'ineligible context',
+        sentAt,
+        sessionId,
+      }),
+    ])
+    const candidate = createAssistantInputCandidate({
+      occurredAt: '2026-04-08T00:10:00.000Z',
+      optionalInboxCaptureId: null,
+      receivedAt: '2026-04-08T00:10:02.000Z',
+      source: 'email',
+      text: 'Current inbound message',
+      threadIsDirect: true,
+    })
+
+    await processAssistantAutoReplyGroup({
+      allowSelfAuthored: false,
+      context: createReplyContext(candidate),
+      deliveryDispatchMode: 'queue-only',
+      enabledChannels: ['email'],
+      executionContext: {
+        hosted: {
+          memberId: 'member-test',
+          userEnvKeys: [],
+        },
+      },
+      inboxServices: createInboxServices(),
+      requestId: null,
+      sessionMaxAgeMs: null,
+      vault,
+    })
+
+    const sendInput = replyEventPathMocks.sendAssistantMessage.mock.calls[0]?.[0]
+    expect(sendInput).not.toHaveProperty('turnContext')
+    expect(replyEventPathMocks.listAssistantOutboxIntents).toHaveBeenCalledOnce()
+    expect(replyEventPathMocks.listAssistantTurnReceipts).not.toHaveBeenCalled()
   })
 
   it('keeps cross-session context after session advance when only a failed receipt mentions it', async () => {
