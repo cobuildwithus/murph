@@ -222,10 +222,9 @@ Activity HTTP targets:
 - Cloudflare ensure-processing calls use the same hosted callback signing env as
   web reconciliation-facts calls; Cloudflare must verify the corresponding signed internal
   callback key.
-- `HOSTED_RUNTIME_RECONCILIATION_FACTS_TIMEOUT_MS`: optional
-  reconciliation-facts Activity timeout, max `30000`.
-- `HOSTED_RUNTIME_DEMAND_TIMEOUT_MS`: deprecated fallback for the same timeout
-  during the hard-cut deploy window.
+- Reconciliation facts use a fixed `55000` millisecond HTTP timeout inside a
+  `60000` millisecond Activity Start-To-Close timeout so the Activity can
+  report the HTTP result before Temporal closes it.
 - `HOSTED_DEVICE_SYNC_RECOVERY_SWEEP_TIMEOUT_MS`: optional HTTP timeout for the
   signed web device-sync scheduled wake sweep Activity, default `30000`, max
   `120000`.

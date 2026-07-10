@@ -13,10 +13,8 @@ import { describe, expect, it, vi } from "vitest";
 import {
   accountHostedAiUsageForAllowanceTx,
   checkHostedAiUsageGate,
-  claimHostedAiUsageLimitNotice,
   priceHostedAiUsageForAllowance,
   readHostedAiUsageGate,
-  releaseHostedAiUsageLimitNotice,
   resolveHostedAiUsageGate,
 } from "@/src/lib/hosted-execution/usage-allowance";
 
@@ -1077,6 +1075,36 @@ describe("accountHostedAiUsageForAllowanceTx", () => {
     })).resolves.toBeNull();
   });
 
+  it("returns a crossing candidate when the marker exists so the delivery claim resolves ownership", async () => {
+    const tx = createAllowanceTx({
+      executeRaw: vi.fn<AllowanceExecuteRaw>(async () => 1),
+      hostedAiUsageUpdateMany: vi.fn(async () => ({ count: 1 })),
+      limitNoticeSentAt: new Date("2026-03-28T12:00:00.000Z"),
+      spentUsdMicros: 9_999_000n,
+    });
+
+    await expect(accountHostedAiUsageForAllowanceTx({
+      memberId: "member_123",
+      now: new Date("2026-03-29T12:00:05.000Z"),
+      record: BASE_USAGE_RECORD,
+      tx: tx as never,
+    })).resolves.toEqual({
+      crossedAt: new Date("2026-03-29T12:00:05.000Z"),
+      memberId: "member_123",
+      periodEnd: new Date("2026-04-01T00:00:00.000Z"),
+      periodStart: new Date("2026-03-01T00:00:00.000Z"),
+      sourceUsageId: "turn_123.attempt-1",
+      userNotice: expect.objectContaining({
+        code: "pulse_upgrade_edge",
+        message: expect.any(String),
+      }),
+    });
+
+    const [sql] = tx.$executeRaw.mock.calls[0] ?? [];
+    const sqlText = Array.isArray(sql) ? sql.join("") : String(sql);
+    expect(sqlText).not.toContain('"limit_notice_sent_at"');
+  });
+
   it("accounts a worker-built transcription record with duration pricing", async () => {
     const updateMany = vi.fn(async () => ({ count: 1 }));
     const executeRaw = vi.fn<AllowanceExecuteRaw>(async () => 1);
@@ -2056,6 +2084,53 @@ describe("resolveHostedAiUsageGate", () => {
     expect(updateData).not.toHaveProperty("spentUsdMicros");
   });
 
+  it("does not rewrite sent usage-limit notice markers during same-period normalization", async () => {
+    const priorBlockedAt = new Date("2026-03-28T11:59:00.000Z");
+    const priorNoticeSentAt = new Date("2026-03-28T12:00:00.000Z");
+    const update = vi.fn(async (args?: unknown) => {
+      void args;
+      return undefined;
+    });
+    const prisma = createGatePrisma({
+      billingPlanCode: "launch_edge_monthly",
+      findUniquePeriod: {
+        billingPlanCode: "launch_edge_monthly",
+        blockedAt: priorBlockedAt,
+        limitNoticeSentAt: priorNoticeSentAt,
+        limitUsdMicros: 25_000_000n,
+        periodEnd: new Date("2026-04-01T00:00:00.000Z"),
+        periodStart: new Date("2026-03-01T00:00:00.000Z"),
+        spentUsdMicros: 14_000_000n,
+      },
+      limitUsdMicros: 25_000_000n,
+      periodEnd: new Date("2026-04-01T00:00:00.000Z"),
+      periodStart: new Date("2026-03-01T00:00:00.000Z"),
+      spentUsdMicros: 14_000_000n,
+      update,
+    });
+
+    await expect(resolveHostedAiUsageGate({
+      memberId: "member_123",
+      now: "2026-03-29T12:00:00.000Z",
+      prisma: prisma as never,
+    })).resolves.toMatchObject({
+      allowed: true,
+      billingPlanCode: "launch_edge_monthly",
+      limitUsdMicros: 25_000_000n,
+      remainingUsdMicros: 11_000_000n,
+    });
+
+    expect(update).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        blockedAt: null,
+      }),
+    }));
+    const updateData = (update.mock.calls[0]?.[0] as { data?: Record<string, unknown> } | undefined)
+      ?.data;
+    expect(updateData).not.toHaveProperty("limitNoticeSentAt");
+    expect(updateData).not.toHaveProperty("spentUsdMicros");
+  });
+
   it("uses billing-period counter without aggregating historical usage rows", async () => {
     const queryRaw = vi.fn(async (sql: TemplateStringsArray) => {
       void sql;
@@ -2679,88 +2754,6 @@ describe("checkHostedAiUsageGate", () => {
   });
 });
 
-describe("claimHostedAiUsageLimitNotice", () => {
-  it("claims the usage-period limit notice once", async () => {
-    const updateMany = vi.fn()
-      .mockResolvedValueOnce({ count: 1 })
-      .mockResolvedValueOnce({ count: 0 });
-    const prisma = {
-      hostedAiUsagePeriod: {
-        updateMany,
-      },
-    };
-
-    await expect(claimHostedAiUsageLimitNotice({
-      memberId: "member_123",
-      periodStart: "2026-03-01T00:00:00.000Z",
-      prisma: prisma as never,
-      sentAt: "2026-03-29T12:00:00.000Z",
-    })).resolves.toBe(true);
-
-    await expect(claimHostedAiUsageLimitNotice({
-      memberId: "member_123",
-      periodStart: "2026-03-01T00:00:00.000Z",
-      prisma: prisma as never,
-      sentAt: "2026-03-29T12:00:01.000Z",
-    })).resolves.toBe(false);
-
-    expect(updateMany).toHaveBeenNthCalledWith(1, {
-      data: {
-        limitNoticeSentAt: new Date("2026-03-29T12:00:00.000Z"),
-      },
-      where: {
-        AND: [
-          {
-            periodStart: {
-              lte: new Date("2026-03-29T12:00:00.000Z"),
-            },
-          },
-          {
-            periodEnd: {
-              gt: new Date("2026-03-29T12:00:00.000Z"),
-            },
-          },
-        ],
-        blockedAt: {
-          not: null,
-        },
-        limitNoticeSentAt: null,
-        memberId: "member_123",
-        periodStart: new Date("2026-03-01T00:00:00.000Z"),
-      },
-    });
-  });
-});
-
-describe("releaseHostedAiUsageLimitNotice", () => {
-  it("clears only a claim with the exact sentAt timestamp", async () => {
-    const updateMany = vi.fn(async () => ({ count: 1 }));
-    const prisma = {
-      hostedAiUsagePeriod: {
-        updateMany,
-      },
-    };
-
-    await releaseHostedAiUsageLimitNotice({
-      memberId: "member_123",
-      periodStart: "2026-03-01T00:00:00.000Z",
-      prisma: prisma as never,
-      sentAt: "2026-03-29T12:00:00.000Z",
-    });
-
-    expect(updateMany).toHaveBeenCalledWith({
-      data: {
-        limitNoticeSentAt: null,
-      },
-      where: {
-        limitNoticeSentAt: new Date("2026-03-29T12:00:00.000Z"),
-        memberId: "member_123",
-        periodStart: new Date("2026-03-01T00:00:00.000Z"),
-      },
-    });
-  });
-});
-
 function createAllowanceTx(input: {
   billingPhase?: string | null;
   billingPlanCode?: string;
@@ -2771,6 +2764,7 @@ function createAllowanceTx(input: {
   familyBillingPlanCode?: string | null;
   hostedAiUsageAggregate?: ReturnType<typeof vi.fn>;
   hostedAiUsageUpdateMany: ReturnType<typeof vi.fn>;
+  limitNoticeSentAt?: Date | null;
   limitUsdMicros?: bigint;
   periodEnd?: Date;
   periodStart?: Date;
@@ -2811,6 +2805,7 @@ function createAllowanceTx(input: {
         billingPlanCode: input.billingPlanCode ?? "launch_monthly",
         blockedAt: input.blockedAt ?? null,
         lastUsageAt: null,
+        limitNoticeSentAt: input.limitNoticeSentAt ?? null,
         limitUsdMicros: input.limitUsdMicros ?? 10_000_000n,
         periodEnd: input.periodEnd ?? new Date("2026-04-01T00:00:00.000Z"),
         periodStart: input.periodStart ?? new Date("2026-03-01T00:00:00.000Z"),
@@ -2820,12 +2815,14 @@ function createAllowanceTx(input: {
         data?: {
           billingPlanCode?: string;
           blockedAt?: Date | null;
+          limitNoticeSentAt?: Date | null;
           limitUsdMicros?: bigint;
           periodEnd?: Date;
         };
       }) => ({
         billingPlanCode: args?.data?.billingPlanCode ?? input.billingPlanCode ?? "launch_monthly",
         blockedAt: args?.data?.blockedAt ?? input.blockedAt ?? null,
+        limitNoticeSentAt: args?.data?.limitNoticeSentAt ?? input.limitNoticeSentAt ?? null,
         limitUsdMicros: args?.data?.limitUsdMicros ?? input.limitUsdMicros ?? 10_000_000n,
         periodEnd: args?.data?.periodEnd ?? input.periodEnd ?? new Date("2026-04-01T00:00:00.000Z"),
         periodStart: input.periodStart ?? new Date("2026-03-01T00:00:00.000Z"),

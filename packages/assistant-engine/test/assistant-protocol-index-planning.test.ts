@@ -4,6 +4,7 @@ import path from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import {
+  defaultAssistantVoiceOptionId,
   preferencesDocumentRelativePath,
   resolveAssistantVoiceOptionElevenLabsVoiceId,
 } from '@murphai/contracts'
@@ -311,7 +312,9 @@ describe('assistant protocol index planning', () => {
     )
 
     try {
-      await expect(resolvePlannedElevenLabsVoiceId(vault)).resolves.toBeNull()
+      await expect(resolvePlannedElevenLabsVoiceId(vault)).resolves.toBe(
+        resolveAssistantVoiceOptionElevenLabsVoiceId(defaultAssistantVoiceOptionId),
+      )
 
       await writeAssistantPreferencesDocument(vault, {
         voice: 'classic',

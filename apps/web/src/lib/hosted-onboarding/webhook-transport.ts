@@ -4,18 +4,18 @@ import type {
 } from "@prisma/client";
 
 import {
-  buildHostedAiUsageGateNoticeIdempotencyKey,
-  releaseHostedAiUsageLimitNotice,
   type HostedAiUsageGateNoticeCode,
 } from "../hosted-execution/usage-allowance";
 import { sha256Hex } from "../primitives";
 import { hostedOnboardingError } from "./errors";
 import {
+  buildHostedAiUsageGateNoticeIdempotencyKey,
   claimHostedLinqDeliveryProviderDispatchTx,
   markHostedLinqDeliveryAcceptedTx,
   markHostedLinqDeliverySendFailedTx,
   recordHostedLinqDeliveryAttemptTx,
   resolveHostedLinqInviteSignupDispatchEffectIdTx,
+  startHostedAiUsageLimitNoticeDispatchTx,
 } from "./linq-delivery-store";
 import {
   assertHostedLinqRouteAuthorityMatchesTarget,
@@ -51,14 +51,10 @@ import {
   sanitizeHostedOnboardingStructuredLogDetails,
   toHostedOnboardingLogIdSuffix,
 } from "./logging";
+import { requireHostedOnboardingLinqConfig } from "./runtime";
 
 type HostedLinqTransportPersistenceClient = PrismaClient | Prisma.TransactionClient;
 type HostedLinqTransportPostResponseScheduler = (task: () => Promise<void>) => void;
-
-export type HostedLinqCurrentInboundReplyProof = {
-  chatId: string | null;
-  messageId: string | null;
-};
 
 export type HostedLinqConversationHomeRedirectPayload = {
   chatId: string;
@@ -261,7 +257,6 @@ function buildHostedWebhookLinqMessageEffectId(
   if (input.template === "ai_usage_quota" && input.claimToken) {
     return buildHostedAiUsageGateNoticeIdempotencyKey({
       memberId: input.memberId,
-      noticeCode: input.noticeCode,
       periodStart: input.claimToken.periodStart,
     });
   }
@@ -299,45 +294,86 @@ function buildHostedLinqConversationHomeRedirectEffectId(
   return `linq-home-redirect:${hash}`;
 }
 
-export async function drainHostedLinqSideEffectsDirect(input: {
-  currentInboundReply?: HostedLinqCurrentInboundReplyProof | null;
+type HostedLinqSideEffectDrainInput = {
   prisma: HostedLinqTransportPersistenceClient;
   scheduleAfterResponse?: HostedLinqTransportPostResponseScheduler;
   sideEffects: readonly HostedLinqMessageSideEffect[];
   signal?: AbortSignal;
-}): Promise<void> {
+};
+
+type HostedLinqSideEffectDrainSkipReason =
+  | "effect_unresolved"
+  | "notice_already_claimed"
+  | "notice_in_flight";
+
+export type HostedLinqSideEffectDrainResult = {
+  sentCount: number;
+  skipped: readonly {
+    effectId: string;
+    reason: HostedLinqSideEffectDrainSkipReason;
+    template: HostedLinqMessagePayload["template"];
+  }[];
+};
+
+export async function drainHostedLinqSideEffectsDirect(
+  input: HostedLinqSideEffectDrainInput,
+): Promise<HostedLinqSideEffectDrainResult> {
+  let sentCount = 0;
+  const skipped: HostedLinqSideEffectDrainResult["skipped"][number][] = [];
+
   for (const plannedEffect of input.sideEffects) {
     const effect = await resolveHostedLinqDispatchSideEffect(plannedEffect, input.prisma);
     if (!effect) {
+      skipped.push({
+        effectId: plannedEffect.effectId,
+        reason: "effect_unresolved",
+        template: plannedEffect.payload.template,
+      });
       continue;
     }
     const noticeClaimed = await claimHostedLinqNoticeForSideEffect(effect, input.prisma);
     if (!noticeClaimed) {
+      skipped.push({
+        effectId: effect.effectId,
+        reason: "notice_already_claimed",
+        template: effect.payload.template,
+      });
       continue;
     }
-
+    let sendSkipReason: Exclude<
+      HostedLinqSideEffectDrainSkipReason,
+      "effect_unresolved"
+    > | null;
     try {
-      const result = await sendHostedLinqSideEffect(effect, {
-        currentInboundReply: input.currentInboundReply ?? null,
+      sendSkipReason = await sendHostedLinqSideEffect(effect, {
         prisma: input.prisma,
         scheduleAfterResponse: input.scheduleAfterResponse,
         signal: input.signal,
       });
-
-      if (result.status === "skipped") {
-        await releaseHostedLinqNoticeClaimForSideEffect(effect, input.prisma);
-        continue;
-      }
     } catch (error) {
       await releaseHostedLinqNoticeClaimForSideEffect(effect, input.prisma);
       throw error;
+    }
+    if (sendSkipReason) {
+      skipped.push({
+        effectId: effect.effectId,
+        reason: sendSkipReason,
+        template: effect.payload.template,
+      });
+      continue;
     }
 
     if (isHostedInviteLinqMessagePayload(effect.payload)) {
       await markHostedLinqNoticeSentForSideEffect(effect, input.prisma);
       await markHostedInviteSentBestEffort(effect.payload.inviteId, input.prisma);
     }
+    sentCount += 1;
   }
+
+  return {
+    sentCount,
+    skipped,
+  };
 }
 
 /**
@@ -384,18 +420,24 @@ async function sendHostedLinqSideEffect(
     payload: HostedLinqMessagePayload;
   },
   options: {
-    currentInboundReply: HostedLinqCurrentInboundReplyProof | null;
     prisma: HostedLinqTransportPersistenceClient;
     scheduleAfterResponse?: HostedLinqTransportPostResponseScheduler;
     signal?: AbortSignal;
   },
-): Promise<{ status: "sent" | "skipped" }> {
+): Promise<Exclude<HostedLinqSideEffectDrainSkipReason, "effect_unresolved"> | null> {
   const startedAtMs = Date.now();
-  const deliveryAttemptTask = recordHostedLinqDeliveryAttemptBestEffort({
-    effect,
-    prisma: options.prisma,
-    startedAtMs,
-  });
+  const usageLimitPayload =
+    effect.payload.template === "ai_usage_quota" && effect.payload.claimToken
+      ? effect.payload
+      : null;
+  const deliveryAttemptTask = usageLimitPayload
+    ? Promise.resolve()
+    : recordHostedLinqDeliveryAttemptBestEffort({
+        effect,
+        prisma: options.prisma,
+        startedAtMs,
+      });
+  let deliveryEffect = effect;
 
   try {
     if (effect.payload.template === "invite_signup_fallback") {
@@ -417,38 +459,70 @@ async function sendHostedLinqSideEffect(
         }),
         scheduleAfterResponse: options.scheduleAfterResponse,
       });
-      return { status: "sent" };
+      return null;
     }
 
     await assertHostedLinqSideEffectRouteAuthority(effect, options.prisma);
 
+    const message = await buildHostedLinqSideEffectMessage(effect, options.prisma);
+    if (usageLimitPayload) {
+      requireHostedOnboardingLinqConfig();
+      options.signal?.throwIfAborted();
+      const attemptedAt = new Date(usageLimitPayload.claimToken.sentAt);
+      const dispatch = await startHostedAiUsageLimitNoticeDispatchTx({
+        attemptedAt,
+        linqChatId: usageLimitPayload.chatId,
+        memberId: usageLimitPayload.memberId,
+        periodStart: new Date(usageLimitPayload.claimToken.periodStart),
+        prisma: requireHostedLinqTransportPrismaClient(options.prisma),
+        source: "hosted_webhook_side_effect",
+        sourceRef: effect.effectId,
+        targetKind: "thread",
+      });
+      if (dispatch.status !== "claimed") {
+        return dispatch.status === "already_notified"
+          ? "notice_already_claimed"
+          : "notice_in_flight";
+      }
+      deliveryEffect = dispatch.idempotencyKey === effect.effectId
+        ? effect
+        : { ...effect, effectId: dispatch.idempotencyKey };
+    }
+
     const result = await sendHostedLinqChatMessage({
       chatId: effect.payload.chatId,
-      idempotencyKey: effect.effectId,
-      message: await buildHostedLinqSideEffectMessage(effect, options.prisma),
+      idempotencyKey: deliveryEffect.effectId,
+      message,
       replyToMessageId: effect.payload.replyToMessageId,
       signal: options.signal,
     });
-    if (effect.payload.template === "invite_signup") {
+    if (deliveryEffect.payload.template === "invite_signup") {
       queueHostedLinqContactCardSideEffectShare({
         effect: {
-          effectId: effect.effectId,
-          payload: effect.payload,
+          effectId: deliveryEffect.effectId,
+          payload: deliveryEffect.payload,
         },
         prisma: options.prisma,
         signal: options.signal,
       });
     }
-    scheduleHostedLinqDeliveryMilestoneAfterAttempt({
-      attemptTask: deliveryAttemptTask,
-      milestoneTask: () => markHostedLinqDeliveryAcceptedBestEffort({
-        chatId: result.chatId ?? effect.payload.chatId,
-        effect,
-        messageId: result.messageId,
-        prisma: options.prisma,
-      }),
-      scheduleAfterResponse: options.scheduleAfterResponse,
+    const acceptedMilestone = () => markHostedLinqDeliveryAcceptedBestEffort({
+      chatId: result.chatId ?? effect.payload.chatId,
+      effect: deliveryEffect,
+      messageId: result.messageId,
+      prisma: options.prisma,
+      throwOnError: deliveryEffect.payload.template === "ai_usage_quota",
     });
+    if (deliveryEffect.payload.template === "ai_usage_quota") {
+      await deliveryAttemptTask;
+      await acceptedMilestone();
+    } else {
+      scheduleHostedLinqDeliveryMilestoneAfterAttempt({
+        attemptTask: deliveryAttemptTask,
+        milestoneTask: acceptedMilestone,
+        scheduleAfterResponse: options.scheduleAfterResponse,
+      });
+    }
   } catch (error) {
     if (
       effect.payload.template === "invite_signup"
@@ -460,6 +534,15 @@ async function sendHostedLinqSideEffect(
         error,
         prisma: options.prisma,
       });
+    } else if (
+      effect.payload.template === "ai_usage_quota"
+      && usageLimitPayload
+    ) {
+      console.error(
+        "Hosted Linq side-effect delivery failed.",
+        buildHostedLinqSideEffectLogDetails(deliveryEffect, error, Date.now() - startedAtMs),
+      );
+      throw error;
     } else {
       scheduleHostedLinqDeliveryMilestoneAfterAttempt({
         attemptTask: deliveryAttemptTask,
@@ -473,12 +556,12 @@ async function sendHostedLinqSideEffect(
     }
     console.error(
       "Hosted Linq side-effect delivery failed.",
-      buildHostedLinqSideEffectLogDetails(effect, error, Date.now() - startedAtMs),
+      buildHostedLinqSideEffectLogDetails(deliveryEffect, error, Date.now() - startedAtMs),
     );
     throw error;
   }
 
-  return { status: "sent" };
+  return null;
 }
 
 function queueHostedLinqContactCardSideEffectShare(share: {
@@ -606,6 +689,7 @@ async function markHostedLinqDeliveryAcceptedBestEffort(input: {
   effect: HostedLinqMessageSideEffect;
   messageId: string | null;
   prisma: HostedLinqTransportPersistenceClient;
+  throwOnError?: boolean;
 }): Promise<void> {
   const template = input.effect.payload.template;
   try {
@@ -642,6 +726,9 @@ async function markHostedLinqDeliveryAcceptedBestEffort(input: {
       errorName: error instanceof Error ? error.name : "UnknownError",
       template,
     });
+    if (input.throwOnError === true) {
+      throw error;
+    }
   }
 }
 
@@ -662,10 +749,12 @@ async function runHostedLinqTransportTransaction<TResult>(
 async function markHostedLinqDeliveryFailedBestEffort(input: {
   effect: HostedLinqMessageSideEffect;
   error: unknown;
+  expectedAttemptedAt?: Date;
   prisma: HostedLinqTransportPersistenceClient;
 }): Promise<void> {
   try {
     await markHostedLinqDeliverySendFailedTx({
+      expectedAttemptedAt: input.expectedAttemptedAt,
       failureCode: readHostedLinqSideEffectString(readErrorRecord(input.error), "code"),
       failureReason: input.error instanceof Error ? input.error.message : null,
       idempotencyKey: input.effect.effectId,
@@ -1033,6 +1122,23 @@ async function claimHostedLinqNoticeForSideEffect(
   }
 }
 
+function requireHostedLinqTransportPrismaClient(
+  prisma: HostedLinqTransportPersistenceClient,
+): PrismaClient {
+  if (!isHostedLinqTransportPrismaClient(prisma)) {
+    throw new TypeError(
+      "Hosted AI usage-limit notice dispatch must run outside an existing transaction.",
+    );
+  }
+  return prisma;
+}
+
+function isHostedLinqTransportPrismaClient(
+  prisma: HostedLinqTransportPersistenceClient,
+): prisma is PrismaClient {
+  return "$transaction" in prisma;
+}
+
 async function releaseHostedLinqNoticeClaimForSideEffect(
   effect: HostedLinqMessageSideEffect,
   prisma: HostedLinqTransportPersistenceClient,
@@ -1056,15 +1162,6 @@ async function releaseHostedLinqNoticeClaimForSideEffect(
         });
         return;
       case "ai_usage_quota":
-        if (!effect.payload.claimToken) {
-          return;
-        }
-        await releaseHostedAiUsageLimitNotice({
-          memberId: effect.payload.memberId,
-          periodStart: effect.payload.claimToken.periodStart,
-          prisma,
-          sentAt: effect.payload.claimToken.sentAt,
-        });
         return;
       case "invite_signin":
       case "conversation_home_redirect":
