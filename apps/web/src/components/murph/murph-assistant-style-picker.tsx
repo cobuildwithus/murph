@@ -114,6 +114,16 @@ export function MurphAssistantStylePicker({
     advanceAfterStep(savedPreferences);
   };
 
+  // While a save is in flight, Escape/backdrop/swipe dismissal would unmount
+  // the picker and orphan the request's result; keep the picker open until the
+  // save settles so success stays attributable to this instance.
+  const handleOpenChange = (nextOpen: boolean) => {
+    if (!nextOpen && saving) {
+      return;
+    }
+    onOpenChange(nextOpen);
+  };
+
   const advanceAfterStep = (preferences: MurphAssistantStylePreferences) => {
     if (!singleStep && step === "tone") {
       setStep("voice");
@@ -178,7 +188,7 @@ export function MurphAssistantStylePicker({
 
   if (isMobile) {
     return (
-      <Drawer open={open} onOpenChange={onOpenChange}>
+      <Drawer open={open} onOpenChange={handleOpenChange}>
         <DrawerContent className="h-dvh data-[vaul-drawer-direction=bottom]:mt-0 data-[vaul-drawer-direction=bottom]:max-h-dvh data-[vaul-drawer-direction=bottom]:rounded-t-none">
           <DrawerHeader className="items-start gap-2 pb-3 text-left">
             {icon}
@@ -212,7 +222,7 @@ export function MurphAssistantStylePicker({
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent
         showCloseButton={false}
         className={cn(

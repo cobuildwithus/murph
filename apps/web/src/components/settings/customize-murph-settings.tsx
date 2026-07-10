@@ -6,7 +6,7 @@ import {
   type AssistantVoiceOptionId,
 } from "@murphai/contracts";
 import { IdCard, MessageSquareText, Mic2 } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 
 import {
   MurphAssistantStylePicker,
@@ -47,7 +47,6 @@ export function CustomizeMurphSettings({
   );
   const [contactPickerOpen, setContactPickerOpen] = useState(false);
   const [previousOpenVoiceLink, setPreviousOpenVoiceLink] = useState(openVoiceLink);
-  const voiceSavedRef = useRef(false);
 
   if (previousOpenVoiceLink !== openVoiceLink) {
     setPreviousOpenVoiceLink(openVoiceLink);
@@ -61,15 +60,6 @@ export function CustomizeMurphSettings({
       stripSettingsQueryParam(VOICE_QUERY_KEY);
     }
   }, [openVoiceLink]);
-
-  const closePicker = () => {
-    setPickerStep(null);
-    const voiceSaved = voiceSavedRef.current;
-    voiceSavedRef.current = false;
-    if (voiceSaved && voiceTestContactOption) {
-      window.location.assign(voiceTestContactOption.href);
-    }
-  };
 
   return (
     <>
@@ -115,15 +105,17 @@ export function CustomizeMurphSettings({
           initialStep={pickerStep}
           initialTone={style.tone}
           initialVoice={style.voice}
+          // The successful save owns the chat handoff; closing the picker any
+          // other way never navigates.
           onSaved={(preferences) => {
             setStyle(preferences);
-            if (pickerStep === "voice") {
-              voiceSavedRef.current = true;
+            if (pickerStep === "voice" && voiceTestContactOption) {
+              window.location.assign(voiceTestContactOption.href);
             }
           }}
           onOpenChange={(open) => {
             if (!open) {
-              closePicker();
+              setPickerStep(null);
             }
           }}
           open

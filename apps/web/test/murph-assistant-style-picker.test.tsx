@@ -12,12 +12,24 @@ const componentMocks = vi.hoisted(() => ({
 vi.mock("@/src/components/ui/dialog", () => ({
   Dialog: ({
     children,
+    onOpenChange,
     open,
   }: {
     children?: ReactNode;
     open?: boolean;
     onOpenChange?: (open: boolean) => void;
-  }) => open ? createElement("div", { "data-dialog-open": "true" }, children) : null,
+  }) => open
+    ? createElement(
+        "div",
+        { "data-dialog-open": "true" },
+        createElement("button", {
+          "data-dialog-dismiss": "true",
+          onClick: () => onOpenChange?.(false),
+          type: "button",
+        }, "Dismiss"),
+        children,
+      )
+    : null,
   DialogContent: ({ children, className }: HTMLAttributes<HTMLDivElement>) =>
     createElement("div", { className, "data-dialog-content": "true" }, children),
   DialogDescription: (props: HTMLAttributes<HTMLParagraphElement>) =>
@@ -219,6 +231,64 @@ test("MurphAssistantStylePicker keeps the default tone to voice onboarding chain
     assert.match(rendered.container.textContent ?? "", /22 voices/u);
     assert.equal(onComplete.mock.calls.length, 0);
     assert.equal(onOpenChange.mock.calls.length, 0);
+  } finally {
+    await rendered.cleanup();
+  }
+});
+
+test("MurphAssistantStylePicker ignores dismissal while a save is in flight", async () => {
+  let resolveSave: (() => void) | null = null;
+  const fetchMock = vi.fn(
+    () =>
+      new Promise((resolve) => {
+        resolveSave = () =>
+          resolve({
+            ok: true,
+            json: async () => ({
+              assistantTone: "casual",
+              assistantVoice: null,
+            }),
+          });
+      }),
+  );
+  vi.stubGlobal("fetch", fetchMock);
+
+  const onComplete = vi.fn();
+  const onOpenChange = vi.fn();
+  const { MurphAssistantStylePicker } = await import(
+    "@/src/components/murph/murph-assistant-style-picker"
+  );
+  const rendered = await renderClientComponent(
+    createElement(MurphAssistantStylePicker, {
+      initialStep: "tone",
+      onComplete,
+      onOpenChange,
+      open: true,
+      singleStep: true,
+    }),
+    {
+      requireButton: false,
+    },
+  );
+
+  try {
+    await clickButton(rendered, "Save");
+    assert.equal(fetchMock.mock.calls.length, 1);
+
+    // Escape/backdrop dismissal while the save is pending must not close the
+    // picker and orphan the request's result.
+    const dismiss = rendered.container.querySelector("[data-dialog-dismiss]");
+    assert.ok(dismiss instanceof rendered.window.HTMLButtonElement);
+    await act(async () => {
+      dismiss.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
+    });
+    assert.equal(onOpenChange.mock.calls.length, 0);
+
+    await act(async () => {
+      resolveSave?.();
+    });
+    assert.equal(onComplete.mock.calls.length, 1);
+    assert.deepEqual(onOpenChange.mock.calls, [[false]]);
   } finally {
     await rendered.cleanup();
   }
