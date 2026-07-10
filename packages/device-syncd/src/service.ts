@@ -291,6 +291,7 @@ class DeviceSyncServiceController {
         markConnectionSetupFailed: (record) => {
           const account = this.store.markConnectionSetupFailed(
             record.accountId,
+            record.expectedUpdatedAt,
             record.now,
             record.code,
             record.message,

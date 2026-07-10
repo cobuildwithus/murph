@@ -1,6 +1,6 @@
 # Device Sync Ingestion Invariants
 
-Last verified: 2026-07-09
+Last verified: 2026-07-10
 
 ## Purpose
 
@@ -97,8 +97,25 @@ drain/batch service seam in `packages/device-syncd/src/service.ts`.
    durable error code (`HISTORICAL_RESET_REVOKE_FAILED`), so the settings and
    connect surfaces keep projecting the manual-removal guidance across refresh
    until a fresh established connection clears it; there is no separate warning
-   store. Recovery does not use an automatic export endpoint, operator action,
-   or vendor support.
+   store. At the hosted authority boundary, coverage metadata and the source
+   reset signal are one coupled decision: legacy runners cannot replace
+   current/future progress, reset-required is valid exactly while progress is
+   `exhausted`, and a stale participating source rejects the account transition
+   for retry from a fresh snapshot. Junction source-only writes carry the same
+   connection-epoch fence as account writes. Hydration resolves Junction
+   sources by semantic provider identity and lets an accepted reconnect epoch
+   replace older local source state, so hosted/local keys or timestamps cannot
+   create competing source owners. Future ownership comes from the versioned
+   status scalar rather than today's window fields; opaque future progress and
+   evidence remain unchanged while canonical webhook import continues.
+   Disconnect captures its connection and credential epoch atomically, then
+   rechecks `connectedAt` and OAuth `tokenVersion` under the existing mutation
+   lock. Setup-failure cleanup similarly compare-and-sets the captured
+   `updatedAt` epoch. Seeded connection flows carry that same revision in their
+   one-time state and recheck it inside the existing upsert transaction, so an
+   old callback cannot adopt, replace, or fail a newer reconnect. Stale work
+   therefore cannot clear a newer local connection or token. Recovery does not
+   use an automatic export endpoint, operator action, or vendor support.
 
 ## Consequences for changes
 

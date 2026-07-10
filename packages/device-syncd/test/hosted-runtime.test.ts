@@ -348,9 +348,7 @@ describe("mergeHostedDeviceSyncConnectionMetadata", () => {
     const result = mergeHostedDeviceSyncConnectionMetadata({
       hostedMetadata: {
         junctionHistoricalBackfillEvidence: opaqueEvidence,
-        junctionHistoricalBackfillStatus: "coverage_v3_exhausted",
-        junctionHistoricalBackfillWindowStart: "2025-12-20T00:00:00.000Z",
-        junctionHistoricalBackfillWindowEnd: "2026-03-20T00:00:00.000Z",
+        junctionHistoricalBackfillStatus: "coverage_v3_deferred",
       },
       localConnectionStateUnpublished: true,
       localMetadata: {
@@ -363,8 +361,33 @@ describe("mergeHostedDeviceSyncConnectionMetadata", () => {
     });
 
     expect(result.preservedLocalProgress).toBe(false);
-    expect(result.metadata.junctionHistoricalBackfillStatus).toBe("coverage_v3_exhausted");
+    expect(result.metadata.junctionHistoricalBackfillStatus).toBe("coverage_v3_deferred");
     expect(result.metadata.junctionHistoricalBackfillEvidence).toBe(opaqueEvidence);
+  });
+
+  it("preserves unpublished opaque local progress owned by a future runtime", () => {
+    const result = mergeHostedDeviceSyncConnectionMetadata({
+      hostedMetadata: {
+        hostedOnly: "current",
+        junctionHistoricalBackfillStatus: "coverage_v2_retrying",
+      },
+      localConnectionStateUnpublished: true,
+      localMetadata: {
+        junctionHistoricalBackfillEvidence: "e2|opaque-future-evidence",
+        junctionHistoricalBackfillStatus: "coverage_v3_deferred",
+        localOnly: "future",
+      },
+    });
+
+    expect(result).toEqual({
+      metadata: {
+        hostedOnly: "current",
+        junctionHistoricalBackfillEvidence: "e2|opaque-future-evidence",
+        junctionHistoricalBackfillStatus: "coverage_v3_deferred",
+        localOnly: "future",
+      },
+      preservedLocalProgress: true,
+    });
   });
 
   it.each([

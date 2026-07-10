@@ -66,18 +66,26 @@ export async function disconnectHostedDeviceSyncConnection(input: {
   connection: PublicDeviceSyncAccount;
   warning?: { code: string; message: string };
 }> {
-  const existing = await input.store.getConnectionForUser(input.userId, input.connectionId);
+  const target = await input.store.withConnectionMutationLock(input.connectionId, async (tx) => {
+    const connection = await input.store.getConnectionForUser(input.userId, input.connectionId, tx);
+    if (!connection) {
+      throw deviceSyncError({
+        code: "CONNECTION_NOT_FOUND",
+        message: "Hosted device-sync connection was not found for the current user.",
+        retryable: false,
+        httpStatus: 404,
+      });
+    }
 
-  if (!existing) {
-    throw deviceSyncError({
-      code: "CONNECTION_NOT_FOUND",
-      message: "Hosted device-sync connection was not found for the current user.",
-      retryable: false,
-      httpStatus: 404,
-    });
-  }
-
-  const storedAccount = await input.store.getStoredConnectionAccountForUser(input.userId, input.connectionId);
+    const storedAccount = await input.store.getStoredConnectionAccountForUser(
+      input.userId,
+      input.connectionId,
+      tx,
+    );
+    return { connection, storedAccount };
+  });
+  const existing = target.connection;
+  const storedAccount = target.storedAccount;
 
   if (existing.status === "disconnected" && !storedAccount) {
     return {
@@ -147,7 +155,10 @@ export async function disconnectHostedDeviceSyncConnection(input: {
       tx,
     );
 
-    if (storedAccount && !storedAccountMatchesDisconnectTarget(storedAccount, freshStoredAccount)) {
+    if (
+      !publicAccountMatchesDisconnectTarget(existing, freshExisting)
+      || !storedAccountMatchesDisconnectTarget(storedAccount, freshStoredAccount)
+    ) {
       connectionChangedDuringDisconnectError();
     }
 
@@ -314,6 +325,7 @@ function storedAccountMatchesDisconnectTarget(
   if (
     expected.provider !== current.provider
     || expected.externalAccountId !== current.externalAccountId
+    || expected.connectedAt !== current.connectedAt
     || expected.credential.kind !== current.credential.kind
   ) {
     return false;
@@ -325,7 +337,16 @@ function storedAccountMatchesDisconnectTarget(
       && expected.credential.providerConfigKey === current.credential.providerConfigKey;
   }
 
-  return true;
+  return expected.tokenVersion === current.tokenVersion;
+}
+
+function publicAccountMatchesDisconnectTarget(
+  expected: PublicDeviceSyncAccount,
+  current: PublicDeviceSyncAccount,
+): boolean {
+  return expected.provider === current.provider
+    && expected.externalAccountId === current.externalAccountId
+    && expected.connectedAt === current.connectedAt;
 }
 
 function connectionChangedDuringDisconnectError(): never {

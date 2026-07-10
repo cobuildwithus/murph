@@ -198,15 +198,20 @@ export function markSyncFailed(
 export function markConnectionSetupFailed(
   database: DatabaseSync,
   accountId: string,
+  expectedUpdatedAt: string | null,
   now: string,
   code: string,
   message: string,
 ) {
-  if (!getAccountById(database, accountId)) {
-    return null;
-  }
-
   return withImmediateTransaction(database, () => {
+    const existing = getAccountById(database, accountId);
+    if (!existing) {
+      return null;
+    }
+    if (expectedUpdatedAt === null || existing.updatedAt !== expectedUpdatedAt) {
+      return existing;
+    }
+
     const connectionResult = database.prepare(`
       update device_connection
       set status = 'reauthorization_required',

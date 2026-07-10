@@ -69,6 +69,8 @@ const SEEDED_CONNECTION_EXTERNAL_ACCOUNT_ID_STATE_METADATA_KEY =
   "__murphSeededConnectionExternalAccountId";
 const SEEDED_CONNECTION_SETUP_EXPIRES_AT_STATE_METADATA_KEY =
   "__murphSeededConnectionSetupExpiresAt";
+const SEEDED_CONNECTION_UPDATED_AT_STATE_METADATA_KEY =
+  "__murphSeededConnectionUpdatedAt";
 const CONNECT_SOURCE_ID_STATE_METADATA_KEY =
   "__murphConnectSourceId";
 const CONNECT_TARGET_STATE_METADATA_KEY =
@@ -304,6 +306,7 @@ function buildProviderConnectionStateMetadata(
   delete providerMetadata[SEEDED_CONNECTION_ACCOUNT_ID_STATE_METADATA_KEY];
   delete providerMetadata[SEEDED_CONNECTION_EXTERNAL_ACCOUNT_ID_STATE_METADATA_KEY];
   delete providerMetadata[SEEDED_CONNECTION_SETUP_EXPIRES_AT_STATE_METADATA_KEY];
+  delete providerMetadata[SEEDED_CONNECTION_UPDATED_AT_STATE_METADATA_KEY];
   delete providerMetadata[CONNECT_SOURCE_ID_STATE_METADATA_KEY];
   delete providerMetadata[CONNECT_TARGET_STATE_METADATA_KEY];
   delete providerMetadata[SOURCE_PROVIDER_SLUG_STATE_METADATA_KEY];
@@ -317,6 +320,7 @@ function sanitizeConnectionStateMetadata(
   delete metadata[SEEDED_CONNECTION_ACCOUNT_ID_STATE_METADATA_KEY];
   delete metadata[SEEDED_CONNECTION_EXTERNAL_ACCOUNT_ID_STATE_METADATA_KEY];
   delete metadata[SEEDED_CONNECTION_SETUP_EXPIRES_AT_STATE_METADATA_KEY];
+  delete metadata[SEEDED_CONNECTION_UPDATED_AT_STATE_METADATA_KEY];
   delete metadata[CONNECT_SOURCE_ID_STATE_METADATA_KEY];
   delete metadata[CONNECT_TARGET_STATE_METADATA_KEY];
   delete metadata[SOURCE_PROVIDER_SLUG_STATE_METADATA_KEY];
@@ -367,6 +371,13 @@ function readSeededConnectionSetupExpiresAt(
   return typeof value === "string" ? normalizeString(value) ?? null : null;
 }
 
+function readSeededConnectionUpdatedAt(
+  metadata: Record<string, unknown> | undefined,
+): string | null {
+  const value = metadata?.[SEEDED_CONNECTION_UPDATED_AT_STATE_METADATA_KEY];
+  return typeof value === "string" ? normalizeString(value) ?? null : null;
+}
+
 function readConnectSourceId(
   metadata: Record<string, unknown> | undefined,
 ): string | null {
@@ -393,6 +404,7 @@ function setSeededConnectionStateMetadata(
   return {
     ...metadata,
     [SEEDED_CONNECTION_ACCOUNT_ID_STATE_METADATA_KEY]: account.id,
+    [SEEDED_CONNECTION_UPDATED_AT_STATE_METADATA_KEY]: account.updatedAt,
     ...(setupExpiresAt
       ? { [SEEDED_CONNECTION_SETUP_EXPIRES_AT_STATE_METADATA_KEY]: setupExpiresAt }
       : {}),
@@ -596,7 +608,14 @@ export class DeviceSyncPublicIngress {
       });
     } catch (error) {
       if (seededAccount) {
-        await this.markSeededConnectionSetupFailed(provider, seededAccount.id, null, now, error);
+        await this.markSeededConnectionSetupFailed(
+          provider,
+          seededAccount.id,
+          seededAccount.updatedAt,
+          null,
+          now,
+          error,
+        );
       }
       throw error;
     }
@@ -860,6 +879,7 @@ export class DeviceSyncPublicIngress {
     const seededAccountId = readSeededConnectionAccountId(stateRecord.metadata);
     let seededExternalAccountId = readSeededConnectionExternalAccountId(stateRecord.metadata);
     const seededSetupExpiresAt = readSeededConnectionSetupExpiresAt(stateRecord.metadata);
+    const seededUpdatedAt = readSeededConnectionUpdatedAt(stateRecord.metadata);
     const connectSourceId = readConnectSourceId(stateRecord.metadata);
     const connectTarget = readConnectTarget(stateRecord.metadata);
     const sourceProviderSlug = readSourceProviderSlug(stateRecord.metadata);
@@ -869,6 +889,17 @@ export class DeviceSyncPublicIngress {
       provider: provider.provider,
       returnTo,
     };
+    if (seededAccountId && !seededUpdatedAt) {
+      throw attachOAuthCallbackContext(
+        deviceSyncError({
+          code: "OAUTH_STATE_INVALID",
+          message: "OAuth state is missing its seeded connection revision.",
+          retryable: false,
+          httpStatus: 400,
+        }),
+        callbackContext,
+      );
+    }
     let connection: ProviderConnectionResult | null = null;
     let account: PublicDeviceSyncAccount | null = null;
     let connectionPersisted = false;
@@ -882,6 +913,42 @@ export class DeviceSyncPublicIngress {
           message: "Device sync connection callback referenced a seeded account for another provider.",
           retryable: false,
           httpStatus: 400,
+        }),
+        callbackContext,
+      );
+    }
+
+    if (seededAccountId && !seededAccount) {
+      throw attachOAuthCallbackContext(
+        deviceSyncError({
+          code: "CONNECTION_SEEDED_ACCOUNT_MISMATCH",
+          message: "Device sync connection callback referenced an unexpected seeded account.",
+          retryable: false,
+          httpStatus: 400,
+        }),
+        callbackContext,
+      );
+    }
+
+    if (seededAccount?.status === "disconnected") {
+      throw attachOAuthCallbackContext(
+        deviceSyncError({
+          code: "CONNECTION_ALREADY_DISCONNECTED",
+          message: "Device sync connection callback was received after the seeded account was disconnected.",
+          retryable: false,
+          httpStatus: 409,
+        }),
+        callbackContext,
+      );
+    }
+
+    if (seededAccount && seededAccount.updatedAt !== seededUpdatedAt) {
+      throw attachOAuthCallbackContext(
+        deviceSyncError({
+          code: "CONNECTION_SEEDED_ACCOUNT_CHANGED",
+          message: "Device sync connection changed after this connection flow started.",
+          retryable: false,
+          httpStatus: 409,
         }),
         callbackContext,
       );
@@ -981,6 +1048,7 @@ export class DeviceSyncPublicIngress {
         existingAccountGuard: seededAccountId
           ? {
               expectedAccountId: seededAccountId,
+              expectedUpdatedAt: seededUpdatedAt!,
               rejectIfDisconnected: true,
             }
           : null,
@@ -1017,7 +1085,14 @@ export class DeviceSyncPublicIngress {
           } else if (isSeededAccountDisconnectedGuardError(error)) {
             await this.cleanupFailedOAuthConnection(provider, connection, now);
           } else if (seededAccountId) {
-            await this.markSeededConnectionSetupFailed(provider, seededAccountId, connection, now, error);
+            await this.markSeededConnectionSetupFailed(
+              provider,
+              seededAccountId,
+              seededUpdatedAt,
+              connection,
+              now,
+              error,
+            );
           } else {
             await this.cleanupFailedOAuthConnection(provider, connection, now);
           }
@@ -1026,7 +1101,14 @@ export class DeviceSyncPublicIngress {
         }
       } else if (seededAccountId) {
         try {
-          await this.markSeededConnectionSetupFailed(provider, seededAccountId, null, now, error);
+          await this.markSeededConnectionSetupFailed(
+            provider,
+            seededAccountId,
+            seededUpdatedAt,
+            null,
+            now,
+            error,
+          );
         } catch (cleanupError) {
           throw attachOAuthCallbackContext(cleanupError, callbackContext);
         }
@@ -1368,6 +1450,7 @@ export class DeviceSyncPublicIngress {
     try {
       markedAccount = await this.store.markConnectionSetupFailed({
         accountId: account.id,
+        expectedUpdatedAt: account.updatedAt,
         now,
         code: failure.code,
         message: failure.message,
@@ -1408,6 +1491,7 @@ export class DeviceSyncPublicIngress {
   private async markSeededConnectionSetupFailed(
     provider: DeviceSyncProvider,
     accountId: string,
+    expectedUpdatedAt: string | null,
     connection: ProviderConnectionResult | null,
     now: string,
     error: unknown,
@@ -1421,6 +1505,7 @@ export class DeviceSyncPublicIngress {
     try {
       markedAccount = await this.store.markConnectionSetupFailed({
         accountId,
+        expectedUpdatedAt,
         now,
         code: failure.code,
         message: failure.message,

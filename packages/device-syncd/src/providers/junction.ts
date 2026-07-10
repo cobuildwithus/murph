@@ -32,6 +32,7 @@ import {
 } from "../hosted-runtime.ts";
 import {
   addJunctionHistoricalBackfillEvidence,
+  canCurrentRuntimeMutateJunctionHistoricalBackfillProgress,
   encodeJunctionHistoricalBackfillStatus,
   hasJunctionHistoricalBackfillEvidence,
   JUNCTION_HISTORICAL_BACKFILL_COVERAGE_VERSION,
@@ -707,6 +708,10 @@ export function createJunctionDeviceSyncProvider(
     now: string,
   ): DeviceSyncJobInput[] {
     const metadata = account.metadata;
+    if (!canCurrentRuntimeMutateJunctionHistoricalBackfillProgress(metadata)) {
+      return [];
+    }
+
     const statusState = readHistoricalBackfillStatus(metadata);
     const status = statusState?.status ?? null;
     const connectWindow = buildConnectHistoricalBackfillWindow(account, summaryBackfillDays);
@@ -718,13 +723,6 @@ export function createJunctionDeviceSyncProvider(
     const coverageVersion = statusState?.coverageVersion ?? 0;
     const hasCurrentCoverageSemantics =
       coverageVersion >= JUNCTION_HISTORICAL_BACKFILL_COVERAGE_VERSION;
-
-    if (
-      coverageVersion > JUNCTION_HISTORICAL_BACKFILL_COVERAGE_VERSION
-      && metadataMatchesConnectWindow
-    ) {
-      return [];
-    }
 
     if (
       hasCurrentCoverageSemantics
@@ -1703,7 +1701,8 @@ export function createJunctionDeviceSyncProvider(
   ): ProviderJobResult {
     const eventType = normalizeString(job.payload.eventType);
     if (
-      canonicalEventCount <= 0
+      !canCurrentRuntimeMutateJunctionHistoricalBackfillProgress(context.account.metadata)
+      || canonicalEventCount <= 0
       || !eventType
       || !isJunctionDataEvent(eventType)
       || !providerFilter.includes(directInput.sourceProviderSlug)
@@ -4790,15 +4789,7 @@ function buildHistoricalBackfillFollowUp(input: {
   windowStart: string;
   windowEnd: string;
 }): JunctionHistoricalBackfillFollowUp {
-  const existingStatus = readHistoricalBackfillStatus(input.metadata);
-  if (
-    existingStatus
-    && existingStatus.coverageVersion > JUNCTION_HISTORICAL_BACKFILL_COVERAGE_VERSION
-    && normalizeString(input.metadata[JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS.windowStart])
-      === input.windowStart
-    && normalizeString(input.metadata[JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS.windowEnd])
-      === input.windowEnd
-  ) {
+  if (!canCurrentRuntimeMutateJunctionHistoricalBackfillProgress(input.metadata)) {
     return {};
   }
 

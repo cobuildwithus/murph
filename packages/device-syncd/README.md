@@ -86,8 +86,13 @@ the exact connect window. The existing deduplicated verification unions that
 evidence with fresh REST rows, and complete late coverage clears the source
 error even when Garmin's REST sleep response remains empty. If Garmin coverage
 is still incomplete, only the pending source is marked reconnect-required while
-current ingestion remains active. To restart the export, the member explicitly
-confirms the existing connection-wide disconnect and then reconnects Garmin.
+current ingestion remains active. Hosted apply treats that progress and source
+signal as one monotonic transition: stale or legacy writers cannot clear either
+half, a reset signal exists exactly while progress is exhausted, source-only
+writes stay in their observed connection epoch, future versions stay opaque,
+and hosted/local source keys collapse to one semantic provider source. To
+restart the export, the member explicitly confirms the existing connection-wide
+disconnect and then reconnects Garmin.
 That reset can disconnect other wearables on the same Junction connection, so
 its scope must be explained before confirmation. A failed provider-side
 deregistration still completes the local disconnect, but the member must remove

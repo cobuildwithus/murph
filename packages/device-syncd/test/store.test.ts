@@ -3196,6 +3196,7 @@ test("device sync store clears tokens and requires reauthorization after connect
     assert.equal(
       store.markConnectionSetupFailed(
         "missing-account",
+        null,
         "2026-04-07T00:30:00.000Z",
         "OAUTH_DENIED",
         "operator denied access",
@@ -3221,6 +3222,7 @@ test("device sync store clears tokens and requires reauthorization after connect
 
     const failed = store.markConnectionSetupFailed(
       account.id,
+      account.updatedAt,
       "2026-04-07T00:30:00.000Z",
       "OAUTH_DENIED",
       "operator denied access",
@@ -3279,6 +3281,7 @@ test("device sync store clears tokens and requires reauthorization after connect
     const disconnected = store.disconnectAccount(raceAccount.id, "2026-04-07T00:20:00.000Z");
     const blockedFailure = store.markConnectionSetupFailed(
       raceAccount.id,
+      raceAccount.updatedAt,
       "2026-04-07T00:30:00.000Z",
       "OAUTH_DENIED",
       "operator denied access",
@@ -3291,6 +3294,78 @@ test("device sync store clears tokens and requires reauthorization after connect
     assert.equal(blockedFailure?.localConnectionRevision, disconnected.localConnectionRevision);
     assert.equal(blockedFailure?.localTokenRevision, disconnected.localTokenRevision);
     assert.equal(blockedFailure?.lastErrorCode, null);
+
+    const epochOne = store.upsertAccount({
+      provider: "demo",
+      externalAccountId: "demo-setup-epoch",
+      displayName: "Setup Epoch One",
+      scopes: ["offline"],
+      tokens: {
+        accessToken: "epoch-one-access",
+        accessTokenEncrypted: "enc:epoch-one-access",
+        refreshToken: "epoch-one-refresh",
+        refreshTokenEncrypted: "enc:epoch-one-refresh",
+      },
+      connectedAt: "2026-04-07T00:40:00.000Z",
+      nextReconcileAt: "2026-04-07T01:40:00.000Z",
+    });
+    const epochTwo = store.upsertAccount({
+      provider: "demo",
+      externalAccountId: "demo-setup-epoch",
+      displayName: "Setup Epoch Two",
+      scopes: ["offline"],
+      tokens: {
+        accessToken: "epoch-two-access",
+        accessTokenEncrypted: "enc:epoch-two-access",
+        refreshToken: "epoch-two-refresh",
+        refreshTokenEncrypted: "enc:epoch-two-refresh",
+      },
+      connectedAt: "2026-04-07T00:45:00.000Z",
+      nextReconcileAt: "2026-04-07T01:45:00.000Z",
+    });
+    assert.throws(
+      () =>
+        store.upsertAccount({
+          provider: "demo",
+          externalAccountId: "demo-setup-epoch",
+          displayName: "Stale Setup Epoch",
+          scopes: ["offline"],
+          tokens: {
+            accessToken: "stale-epoch-access",
+            accessTokenEncrypted: "enc:stale-epoch-access",
+          },
+          existingAccountGuard: {
+            expectedAccountId: epochOne.id,
+            expectedUpdatedAt: epochOne.updatedAt,
+            rejectIfDisconnected: true,
+          },
+          connectedAt: "2026-04-07T00:50:00.000Z",
+          nextReconcileAt: null,
+        }),
+      (error: unknown) =>
+        error instanceof Error
+        && "code" in error
+        && error.code === "CONNECTION_SEEDED_ACCOUNT_CHANGED",
+    );
+    const guardedEpoch = store.getAccountById(epochTwo.id);
+    assert.equal(guardedEpoch?.updatedAt, epochTwo.updatedAt);
+    assert.equal(guardedEpoch?.displayName, "Setup Epoch Two");
+    assert.equal(
+      requireStoredOAuthCredential(guardedEpoch).accessTokenEncrypted,
+      "enc:epoch-two-access",
+    );
+    const staleFailure = store.markConnectionSetupFailed(
+      epochTwo.id,
+      epochOne.updatedAt,
+      "2026-04-07T00:50:00.000Z",
+      "OAUTH_DENIED",
+      "stale setup failure",
+    );
+
+    assert.equal(staleFailure?.status, "active");
+    assert.equal(staleFailure?.updatedAt, epochTwo.updatedAt);
+    assertStoredCredentialKind(staleFailure, "oauth_tokens");
+    assert.equal(staleFailure?.lastErrorCode, null);
   } finally {
     store.close();
     await rm(tempDir, {

@@ -147,7 +147,7 @@ export class PrismaHostedConnectionStore {
     const setupWrite = buildHostedConnectionSetupWrite(input, connectedAt, "create");
 
     const result = await this.prisma.$transaction(async (tx) => {
-      const existing = await tx.deviceConnection.findUnique({
+      let existing = await tx.deviceConnection.findUnique({
         where: {
           provider_providerAccountBlindIndex: {
             provider: input.provider,
@@ -156,6 +156,19 @@ export class PrismaHostedConnectionStore {
         },
         ...hostedConnectionRecordArgs,
       });
+
+      if (existing) {
+        await tx.$executeRaw`select pg_advisory_xact_lock(hashtext(${existing.id}))`;
+        existing = await tx.deviceConnection.findUnique({
+          where: {
+            provider_providerAccountBlindIndex: {
+              provider: input.provider,
+              providerAccountBlindIndex,
+            },
+          },
+          ...hostedConnectionRecordArgs,
+        });
+      }
 
       if (existing) {
         assertHostedUpsertExistingConnectionGuard(existing, input.existingAccountGuard ?? null);
@@ -380,6 +393,7 @@ export class PrismaHostedConnectionStore {
     input: MarkPublicDeviceSyncConnectionSetupFailedInput,
   ): Promise<PublicDeviceSyncAccount | null> {
     const record = await this.prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`select pg_advisory_xact_lock(hashtext(${input.accountId}))`;
       const existing = await tx.deviceConnection.findUnique({
         where: {
           id: input.accountId,
@@ -389,6 +403,13 @@ export class PrismaHostedConnectionStore {
 
       if (!existing) {
         return null;
+      }
+      if (
+        input.expectedUpdatedAt === null
+        || existing.updatedAt.toISOString() !== input.expectedUpdatedAt
+        || existing.status === "disconnected"
+      ) {
+        return existing;
       }
 
       return tx.deviceConnection.update({
@@ -1045,6 +1066,15 @@ function assertHostedUpsertExistingConnectionGuard(
     throw deviceSyncError({
       code: "CONNECTION_ALREADY_DISCONNECTED",
       message: "Device sync connection callback was received after the seeded account was disconnected.",
+      retryable: false,
+      httpStatus: 409,
+    });
+  }
+
+  if (existing.updatedAt.toISOString() !== guard.expectedUpdatedAt) {
+    throw deviceSyncError({
+      code: "CONNECTION_SEEDED_ACCOUNT_CHANGED",
+      message: "Device sync connection changed after this connection flow started.",
       retryable: false,
       httpStatus: 409,
     });

@@ -30,7 +30,7 @@ export interface JunctionHistoricalBackfillEvidence {
   windowStart: string;
 }
 
-export interface JunctionHistoricalBackfillProgress {
+interface JunctionHistoricalBackfillProgress {
   coverageVersion: number;
   emptyAttempts: number;
   lastEmptyAt: string | null;
@@ -47,14 +47,6 @@ export const JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS = Object.freeze({
   windowEnd: "junctionHistoricalBackfillWindowEnd",
   evidence: "junctionHistoricalBackfillEvidence",
 } as const);
-
-const JUNCTION_HISTORICAL_BACKFILL_METADATA_KEY_SET = new Set<string>(
-  Object.values(JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS),
-);
-
-export function isJunctionHistoricalBackfillMetadataKey(key: string): boolean {
-  return JUNCTION_HISTORICAL_BACKFILL_METADATA_KEY_SET.has(key);
-}
 
 export function readJunctionHistoricalBackfillProgress(
   metadata: Record<string, unknown>,
@@ -79,7 +71,17 @@ export function readJunctionHistoricalBackfillProgress(
   };
 }
 
-export function shouldPreserveLocalJunctionHistoricalBackfillProgress(input: {
+export function canCurrentRuntimeMutateJunctionHistoricalBackfillProgress(
+  metadata: Record<string, unknown>,
+): boolean {
+  const coverageVersion = readJunctionHistoricalBackfillCoverageVersion(
+    metadata[JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS.status],
+  );
+  return coverageVersion === null
+    || coverageVersion <= JUNCTION_HISTORICAL_BACKFILL_COVERAGE_VERSION;
+}
+
+function shouldPreserveLocalJunctionHistoricalBackfillProgress(input: {
   hostedMetadata: Record<string, unknown>;
   localConnectionStateUnpublished: boolean;
   localMetadata: Record<string, unknown>;
@@ -142,6 +144,23 @@ export function mergeHostedJunctionHistoricalBackfillMetadata(input: {
   localConnectionStateUnpublished: boolean;
   localMetadata: Record<string, unknown>;
 }): { metadata: Record<string, unknown>; preservedLocalProgress: boolean } {
+  if (!canCurrentRuntimeMutateJunctionHistoricalBackfillProgress(input.hostedMetadata)) {
+    return {
+      metadata: { ...input.hostedMetadata },
+      preservedLocalProgress: false,
+    };
+  }
+
+  if (
+    input.localConnectionStateUnpublished
+    && !canCurrentRuntimeMutateJunctionHistoricalBackfillProgress(input.localMetadata)
+  ) {
+    return {
+      metadata: { ...input.hostedMetadata, ...input.localMetadata },
+      preservedLocalProgress: true,
+    };
+  }
+
   const preserveLocalProgressMetadata = shouldPreserveLocalJunctionHistoricalBackfillProgress(input);
   const localEvidence = readJunctionHistoricalBackfillEvidence(
     input.localMetadata[JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS.evidence],
@@ -235,6 +254,20 @@ export function readJunctionHistoricalBackfillStatus(
   const coverageVersion = Number(match[1]);
   const status = match[2] as JunctionHistoricalBackfillStatus;
   return Number.isSafeInteger(coverageVersion) ? { coverageVersion, status } : null;
+}
+
+function readJunctionHistoricalBackfillCoverageVersion(value: unknown): number | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const match = /^coverage_v([1-9]\d*)_/u.exec(value);
+  if (!match) {
+    return null;
+  }
+
+  const coverageVersion = Number(match[1]);
+  return Number.isSafeInteger(coverageVersion) ? coverageVersion : null;
 }
 
 export function addJunctionHistoricalBackfillEvidence(input: {

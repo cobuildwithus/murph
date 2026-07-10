@@ -354,11 +354,19 @@ export class SqliteDeviceSyncStore {
 
   markConnectionSetupFailed(
     accountId: string,
+    expectedUpdatedAt: string | null,
     now: string,
     code: string,
     message: string,
   ): StoredDeviceSyncAccount | null {
-    return markStoredConnectionSetupFailed(this.database, accountId, now, code, message);
+    return markStoredConnectionSetupFailed(
+      this.database,
+      accountId,
+      expectedUpdatedAt,
+      now,
+      code,
+      message,
+    );
   }
 
   enqueueJob(input: DeviceSyncEnqueueJobInput): DeviceSyncJobRecord {

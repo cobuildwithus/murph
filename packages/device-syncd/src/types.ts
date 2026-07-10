@@ -264,6 +264,7 @@ export interface ProviderConnectionSeed {
 
 export interface UpsertPublicDeviceSyncExistingAccountGuard {
   expectedAccountId: string;
+  expectedUpdatedAt: string;
   rejectIfDisconnected?: boolean;
 }
 
@@ -287,6 +288,7 @@ export interface UpsertPublicDeviceSyncConnectionInput {
 
 export interface MarkPublicDeviceSyncConnectionSetupFailedInput {
   accountId: string;
+  expectedUpdatedAt: string | null;
   now: string;
   code: string;
   message: string;

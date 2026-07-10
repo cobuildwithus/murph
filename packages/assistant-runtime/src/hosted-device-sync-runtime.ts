@@ -1,6 +1,8 @@
 import { createHash } from "node:crypto";
 
+import { buildJunctionProviderSourceInstanceKey } from "@murphai/device-syncd/connect-config";
 import { buildDeviceSyncTokenCipherOptions, createSecretCodec } from "@murphai/device-syncd/local-secret-codec";
+import { requiresHistoricalResetDeviceSyncSource } from "@murphai/device-syncd/public-account";
 import type { DeviceSyncService } from "@murphai/device-syncd/service";
 import type {
   DeviceSyncJobInput,
@@ -9,8 +11,10 @@ import type {
   StoredDeviceSyncAccount,
 } from "@murphai/device-syncd/types";
 import {
+  JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS,
   mergeHostedDeviceSyncConnectionMetadata,
   normalizeHostedDeviceSyncJobHints,
+  readJunctionHistoricalBackfillStatus,
   resolveHostedDeviceSyncWakeContext,
   sanitizeHostedExecutionDeviceSyncRuntimeCredentialMetadata,
   serializeHostedExecutionDeviceSyncDirtyPayloadIdentity,
@@ -121,9 +125,13 @@ export async function syncHostedDeviceSyncControlPlaneState(input: {
       continue;
     }
 
+    const hostedConnectionEpochChanged = Boolean(
+      existing && existing.connectedAt !== stored.connectedAt,
+    );
     const terminalStatus = readHostedTerminalDeviceSyncStatus(stored);
+    const localSources = store.listConnectionSources({ connectionId: stored.id });
     const localSourcesByKey = new Map(
-      store.listConnectionSources({ connectionId: stored.id }).map(
+      localSources.map(
         (source) => [source.sourceInstanceKey, source] as const,
       ),
     );
@@ -132,18 +140,30 @@ export async function syncHostedDeviceSyncControlPlaneState(input: {
         continue;
       }
 
-      const localSource = localSourcesByKey.get(source.sourceInstanceKey);
+      const sourceInstanceKey = resolveHostedHydrationSourceInstanceKey({
+        entry,
+        localSources,
+        source,
+        sourceInstanceKey: source.sourceInstanceKey,
+      });
+      const localSource = localSourcesByKey.get(sourceInstanceKey);
       if (
         !terminalStatus
         && localSource
-        && Date.parse(localSource.lastSeenAt) >= Date.parse(source.lastSeenAt)
+        && shouldPreserveLocalHydrationSource({
+          hostedConnectionEpochChanged,
+          localSource,
+          metadata: stored.metadata,
+          provider: entry.connection.provider,
+          source,
+        })
       ) {
         continue;
       }
 
       const hydratedSource = store.upsertConnectionSource({
         connectionId: stored.id,
-        sourceInstanceKey: source.sourceInstanceKey,
+        sourceInstanceKey,
         sourceProviderSlug: source.sourceProviderSlug,
         displayName: source.displayName,
         status: source.status,
@@ -155,7 +175,7 @@ export async function syncHostedDeviceSyncControlPlaneState(input: {
         firstSeenAt: source.firstSeenAt,
         lastSeenAt: source.lastSeenAt,
       });
-      localSourcesByKey.set(source.sourceInstanceKey, hydratedSource);
+      localSourcesByKey.set(sourceInstanceKey, hydratedSource);
     }
 
     if (terminalStatus) {
@@ -198,6 +218,63 @@ export async function syncHostedDeviceSyncControlPlaneState(input: {
   }
 
   return state;
+}
+
+function resolveHostedHydrationSourceInstanceKey(input: {
+  entry: HostedDeviceSyncRuntimeConnectionSnapshot;
+  localSources: readonly StoredDeviceConnectionSource[];
+  source: NonNullable<HostedDeviceSyncRuntimeConnectionSnapshot["sources"]>[number];
+  sourceInstanceKey: string;
+}): string {
+  if (input.entry.connection.provider.trim().toLowerCase() !== "junction") {
+    return input.sourceInstanceKey;
+  }
+
+  const canonicalSourceInstanceKey = buildJunctionProviderSourceInstanceKey({
+    connectionId: input.entry.connection.id,
+    sourceProviderSlug: input.source.sourceProviderSlug,
+  });
+  const matchingSource = input.localSources.find((source) =>
+    source.sourceInstanceKey === canonicalSourceInstanceKey
+  ) ?? input.localSources.find((source) =>
+    source.sourceInstanceKey === input.sourceInstanceKey
+  ) ?? input.localSources.find((source) =>
+    source.sourceProviderSlug === input.source.sourceProviderSlug
+  );
+
+  return matchingSource?.sourceInstanceKey
+    ?? canonicalSourceInstanceKey
+    ?? input.sourceInstanceKey;
+}
+
+function shouldPreserveLocalHydrationSource(input: {
+  hostedConnectionEpochChanged: boolean;
+  localSource: StoredDeviceConnectionSource;
+  metadata: Record<string, unknown>;
+  provider: string;
+  source: NonNullable<HostedDeviceSyncRuntimeConnectionSnapshot["sources"]>[number];
+}): boolean {
+  if (input.hostedConnectionEpochChanged) {
+    return false;
+  }
+
+  if (input.provider.trim().toLowerCase() === "junction") {
+    const historicalStatus = readJunctionHistoricalBackfillStatus(
+      input.metadata[JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS.status],
+    );
+    if (historicalStatus?.status !== "exhausted") {
+      return Date.parse(input.localSource.lastSeenAt) >= Date.parse(input.source.lastSeenAt);
+    }
+
+    if (requiresHistoricalResetDeviceSyncSource(input.source)) {
+      return false;
+    }
+    if (requiresHistoricalResetDeviceSyncSource(input.localSource)) {
+      return true;
+    }
+  }
+
+  return Date.parse(input.localSource.lastSeenAt) >= Date.parse(input.source.lastSeenAt);
 }
 
 export async function reconcileHostedDeviceSyncControlPlaneState(input: {

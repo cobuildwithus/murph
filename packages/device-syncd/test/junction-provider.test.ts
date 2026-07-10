@@ -3480,6 +3480,55 @@ test("Junction direct pushes without canonical events or from another source do 
   assert.equal(otherSourceResult.metadataPatch, undefined);
 });
 
+test("Junction direct pushes preserve opaque future historical evidence after import", async () => {
+  const provider = createJunctionProvider(async (input) => {
+    throw new Error(`Unexpected request: ${readUrl(input)}`);
+  }, {
+    providerFilter: ["garmin"],
+  });
+  const futureStatus = "coverage_v3_exhausted";
+  const futureEvidence = "e2|opaque-future-evidence";
+  const account = createAccount({
+    metadata: {
+      junctionHistoricalBackfillEvidence: futureEvidence,
+      junctionHistoricalBackfillStatus: futureStatus,
+    },
+  });
+  let importCount = 0;
+
+  const result = await executeJunctionJob(
+    provider,
+    createJunctionJobContext({
+      account,
+      importSnapshot: async () => {
+        importCount += 1;
+        return { canonicalEventCount: 1 };
+      },
+    }),
+    createJob("resource", {
+      eventType: "daily.data.activity.created",
+      objectId: "future-evidence-activity",
+      occurredAt: "2026-04-02T00:00:00.000Z",
+      resource: "activity",
+      resourceCategory: "summary",
+      sourceProviderSlug: "garmin",
+      webhookDataJson: JSON.stringify({
+        date: "2026-04-02",
+        id: "future-evidence-activity",
+        sourceProviderSlug: "garmin",
+        steps: 4321,
+      }),
+      windowEnd: "2026-04-03T00:00:00.000Z",
+      windowStart: "2026-04-02T00:00:00.000Z",
+    }),
+  );
+  const metadata = mergeStoredDeviceSyncMetadataPatch(account.metadata, result.metadataPatch);
+
+  assert.equal(importCount, 1);
+  assert.equal(metadata.junctionHistoricalBackfillStatus, futureStatus);
+  assert.equal(metadata.junctionHistoricalBackfillEvidence, futureEvidence);
+});
+
 test("Junction exhausted historical backfill completes when the same window later has data", async () => {
   const upserts: Array<Parameters<NonNullable<ProviderJobContext["upsertConnectionSource"]>>[0]> = [];
   const provider = createJunctionProvider(async (input) => {
@@ -3559,8 +3608,6 @@ test("Junction exhausted historical backfill completes when the same window late
       account: createAccount({
         metadata: {
           junctionHistoricalBackfillStatus: "coverage_v3_exhausted",
-          junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
-          junctionHistoricalBackfillWindowEnd: "2026-04-03T00:00:00.000Z",
         },
       }),
       listConnectionSources: () => [createConnectionSource({
@@ -4728,13 +4775,9 @@ test("Junction scheduled pass repairs legacy completion and honors current termi
     },
     {
       junctionHistoricalBackfillStatus: "coverage_v3_complete",
-      junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
-      junctionHistoricalBackfillWindowEnd: "2026-04-03T00:00:00.000Z",
     },
     {
-      junctionHistoricalBackfillStatus: "coverage_v3_retrying",
-      junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
-      junctionHistoricalBackfillWindowEnd: "2026-04-03T00:00:00.000Z",
+      junctionHistoricalBackfillStatus: "coverage_v3_deferred",
     },
   ] as const) {
     const scheduled = executor.createScheduledJobs?.(

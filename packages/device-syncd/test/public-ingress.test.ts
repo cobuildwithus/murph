@@ -204,6 +204,7 @@ class InMemoryPublicIngressStore implements DeviceSyncPublicIngressStore {
   markConnectionSetupFailed(input: {
     accountId: string;
     code: string;
+    expectedUpdatedAt: string | null;
     message: string;
     now: string;
   }): PublicDeviceSyncAccount | null {
@@ -214,6 +215,9 @@ class InMemoryPublicIngressStore implements DeviceSyncPublicIngressStore {
     const existing = this.accounts.get(input.accountId) ?? null;
     if (!existing) {
       return null;
+    }
+    if (input.expectedUpdatedAt === null || existing.updatedAt !== input.expectedUpdatedAt) {
+      return existing;
     }
 
     const record: PublicDeviceSyncAccount = {
@@ -376,6 +380,15 @@ function assertExistingAccountGuard(
     throw deviceSyncError({
       code: "CONNECTION_ALREADY_DISCONNECTED",
       message: "Device sync connection callback was received after the seeded account was disconnected.",
+      retryable: false,
+      httpStatus: 409,
+    });
+  }
+
+  if (existing.updatedAt !== guard.expectedUpdatedAt) {
+    throw deviceSyncError({
+      code: "CONNECTION_SEEDED_ACCOUNT_CHANGED",
+      message: "Device sync connection changed after this connection flow started.",
       retryable: false,
       httpStatus: 409,
     });
@@ -1183,6 +1196,107 @@ test("public ingress rejects stale external-link callbacks after seeded accounts
   const disconnected = store.getConnectionByExternalAccount("junction", "external-account-1");
   assert.equal(disconnected?.status, "disconnected");
   assert.equal(disconnected?.setupPhase, "pending_link");
+  assert.equal(completeCalls, 0);
+});
+
+test("public ingress rejects seeded callbacks after the connection starts a newer epoch", async () => {
+  const store = new InMemoryPublicIngressStore();
+  let completeCalls = 0;
+  const provider = createFakeProvider({
+    provider: "junction",
+    credentialPolicy: {
+      kind: "provider_config",
+      providerConfigKey: "junction",
+    },
+    descriptor: {
+      provider: "junction",
+      displayName: "Junction",
+      transportModes: ["external_link", "scheduled_poll"],
+      connection: {
+        kind: "external_link",
+        callbackPath: "/connect/junction/callback",
+      },
+      normalization: {
+        metricFamilies: ["activity"],
+        snapshotParser: "schema",
+      },
+      sourcePriorityHints: {
+        defaultPriority: 60,
+        metricFamilies: {
+          activity: 60,
+        },
+      },
+    },
+    async beginConnection(input) {
+      return {
+        authorizationUrl: `https://junction.example/link?murph_state=${input.state}`,
+        connectionSeed: {
+          externalAccountId: "external-account-1",
+          credential: {
+            kind: "provider_config",
+            providerConfigKey: "junction",
+          },
+        },
+      };
+    },
+    async completeConnection() {
+      completeCalls += 1;
+      return {
+        externalAccountId: "external-account-1",
+        credential: {
+          kind: "provider_config",
+          providerConfigKey: "junction",
+        },
+      };
+    },
+  });
+  const ingress = createDeviceSyncPublicIngress({
+    publicBaseUrl: "https://sync.example.test/device-sync",
+    registry: createDeviceSyncRegistry([provider]),
+    store,
+  });
+
+  const begin = await ingress.startConnection({
+    provider: "junction",
+    ownerId: "<REDACTED_OWNER_ID>",
+  });
+  const seeded = store.getConnectionByExternalAccount("junction", "external-account-1");
+  assert.ok(seeded);
+  const reconnected = store.upsertConnection({
+    provider: "junction",
+    externalAccountId: "external-account-1",
+    displayName: "Garmin",
+    setupPhase: "source_confirmed",
+    scopes: [],
+    credential: {
+      kind: "provider_config",
+      providerConfigKey: "junction",
+    },
+    metadata: { connectionEpoch: "new" },
+    connectedAt: "2099-04-27T00:00:00.000Z",
+    nextReconcileAt: null,
+  });
+
+  await assert.rejects(
+    () =>
+      ingress.handleConnectionCallback({
+        provider: "junction",
+        query: new URLSearchParams({
+          murph_state: begin.state,
+          result: "success",
+        }),
+      }),
+    (error: unknown) =>
+      error instanceof DeviceSyncError
+      && error.code === "CONNECTION_SEEDED_ACCOUNT_CHANGED"
+      && error.httpStatus === 409,
+  );
+
+  const current = store.getConnectionByExternalAccount("junction", "external-account-1");
+  assert.equal(current?.id, reconnected.id);
+  assert.equal(current?.connectedAt, reconnected.connectedAt);
+  assert.deepEqual(current?.metadata, { connectionEpoch: "new" });
+  assert.equal(current?.status, "active");
   assert.equal(completeCalls, 0);
 });
 

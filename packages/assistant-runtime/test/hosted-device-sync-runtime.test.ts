@@ -6,6 +6,7 @@ import { beforeEach, describe, test, vi } from "vitest";
 import { openSqliteRuntimeDatabase } from "@murphai/runtime-state/node";
 
 import { createConfiguredDeviceSyncProvidersFromConfigs } from "@murphai/device-syncd/config";
+import { buildJunctionProviderSourceInstanceKey } from "@murphai/device-syncd/connect-config";
 import { buildDeviceSyncTokenCipherOptions, createSecretCodec } from "@murphai/device-syncd/local-secret-codec";
 import { deviceSyncError } from "@murphai/device-syncd/errors";
 import {
@@ -711,6 +712,195 @@ describe("hosted device-sync runtime", () => {
       assert.equal(preservedSource?.status, "error");
       assert.equal(preservedSource?.lastErrorCode, "HISTORICAL_DATA_RECONNECT_REQUIRED");
       assert.equal(preservedSource?.lastSeenAt, "2026-04-06T09:15:00.000Z");
+    } finally {
+      closeHostedRuntimeDeviceSyncService(service);
+      await cleanup();
+    }
+  });
+
+  test("sync reuses one semantic Junction source across hosted and local key spaces", async () => {
+    const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace(
+      "hosted-device-sync-runtime-",
+    );
+    await mkdir(vaultRoot, { recursive: true });
+
+    const [provider] = createConfiguredDeviceSyncProvidersFromConfigs({
+      junction: {
+        apiKey: "sk_us_test_123",
+        clientUserIdSecret: "junction-client-user-id-secret",
+        environment: "sandbox",
+        fetchImpl: async () => {
+          throw new Error("Junction network access is not expected during source hydration.");
+        },
+        region: "us",
+        summaryBackfillDays: 2,
+        summaryResources: ["activity", "sleep"],
+        timeseriesResources: [],
+      },
+    });
+    assert.ok(provider);
+    const service = createDeviceSyncServiceForVault(vaultRoot, [provider]);
+    const hostedConnectionId = "hosted_conn_junction_source_identity";
+    const externalAccountId = "junction-source-identity";
+    const windowStart = "2026-04-01T00:00:00.000Z";
+    const windowEnd = "2026-04-03T00:00:00.000Z";
+    const exhaustedMetadata = {
+      junctionHistoricalBackfillEmptyAttempts: 5,
+      junctionHistoricalBackfillEvidence: `e1|${windowStart}|${windowEnd}|garmin:1`,
+      junctionHistoricalBackfillLastEmptyAt: "2026-04-04T00:00:00.000Z",
+      junctionHistoricalBackfillStatus: "coverage_v2_exhausted",
+      junctionHistoricalBackfillWindowEnd: windowEnd,
+      junctionHistoricalBackfillWindowStart: windowStart,
+    };
+    let hostedSnapshot = buildRuntimeSnapshot({
+      connectionId: hostedConnectionId,
+      credential: {
+        credentialMetadata: {},
+        kind: "provider_config",
+        providerConfigKey: "junction",
+      },
+      externalAccountId,
+      metadata: exhaustedMetadata,
+      provider: "junction",
+    });
+    const deviceSyncPort: HostedRuntimeDeviceSyncPort = {
+      ...createNoDirtyStateDeviceSyncPortMethods(),
+      async applyUpdates() {
+        throw new Error("applyUpdates should not be called during source hydration.");
+      },
+      async createConnectLink() {
+        throw new Error("createConnectLink should not be called during source hydration.");
+      },
+      async fetchSnapshot() {
+        return hostedSnapshot;
+      },
+    };
+
+    try {
+      const state = await syncHostedDeviceSyncControlPlaneState({
+        deviceSyncPort,
+        wake: buildCronWake("2026-04-06T09:00:00.000Z"),
+        secret: DEVICE_SYNC_SECRET,
+        service,
+      });
+      const localAccountId = state.hostedToLocalAccountIds.get(hostedConnectionId);
+      assert.ok(localAccountId);
+      const localSourceInstanceKey = buildJunctionProviderSourceInstanceKey({
+        connectionId: localAccountId,
+        sourceProviderSlug: "garmin",
+      });
+      const hostedSourceInstanceKey = buildJunctionProviderSourceInstanceKey({
+        connectionId: hostedConnectionId,
+        sourceProviderSlug: "garmin",
+      });
+      assert.ok(localSourceInstanceKey);
+      assert.ok(hostedSourceInstanceKey);
+      assert.notEqual(localSourceInstanceKey, hostedSourceInstanceKey);
+
+      getStore(service).upsertConnectionSource({
+        connectionId: localAccountId,
+        displayName: "Garmin",
+        firstSeenAt: "2026-04-01T09:00:00.000Z",
+        lastErrorCode: null,
+        lastErrorMessage: null,
+        lastSeenAt: "2026-04-06T09:20:00.000Z",
+        resourceAvailabilitySummary: { activity: true },
+        sourceInstanceKey: localSourceInstanceKey,
+        sourceProviderSlug: "garmin",
+        status: "connected",
+      });
+      hostedSnapshot = buildRuntimeSnapshot({
+        connectionId: hostedConnectionId,
+        credential: {
+          credentialMetadata: {},
+          kind: "provider_config",
+          providerConfigKey: "junction",
+        },
+        externalAccountId,
+        metadata: exhaustedMetadata,
+        provider: "junction",
+        sources: [
+          {
+            displayName: "Garmin",
+            firstSeenAt: "2026-04-01T09:00:00.000Z",
+            lastErrorCode: "HISTORICAL_DATA_RECONNECT_REQUIRED",
+            lastErrorMessage: "Historical data remained incomplete.",
+            lastSeenAt: "2026-04-06T09:15:00.000Z",
+            resourceCount: 2,
+            resourceAvailabilitySummary: { activity: true, sleep: true },
+            sourceInstanceKey: hostedSourceInstanceKey,
+            sourceProviderSlug: "garmin",
+            status: "error",
+          },
+        ],
+      });
+
+      await syncHostedDeviceSyncControlPlaneState({
+        deviceSyncPort,
+        wake: buildCronWake("2026-04-06T09:25:00.000Z"),
+        secret: DEVICE_SYNC_SECRET,
+        service,
+      });
+
+      const sources = getStore(service).listConnectionSources({
+        connectionId: localAccountId,
+      });
+      assert.equal(sources.length, 1);
+      assert.equal(sources[0]?.sourceInstanceKey, localSourceInstanceKey);
+      assert.equal(sources[0]?.sourceProviderSlug, "garmin");
+      assert.equal(sources[0]?.status, "error");
+      assert.equal(
+        sources[0]?.lastErrorCode,
+        "HISTORICAL_DATA_RECONNECT_REQUIRED",
+      );
+      assert.deepEqual(sources[0]?.resourceAvailabilitySummary, {
+        activity: true,
+        sleep: true,
+      });
+
+      hostedSnapshot = buildRuntimeSnapshot({
+        connectedAt: "2026-04-06T09:30:00.000Z",
+        connectionId: hostedConnectionId,
+        credential: {
+          credentialMetadata: {},
+          kind: "provider_config",
+          providerConfigKey: "junction",
+        },
+        externalAccountId,
+        hostedUpdatedAt: "2026-04-06T09:30:00.000Z",
+        metadata: {},
+        provider: "junction",
+        sources: [
+          {
+            displayName: "Garmin",
+            firstSeenAt: "2026-04-01T09:00:00.000Z",
+            lastErrorCode: null,
+            lastErrorMessage: null,
+            lastSeenAt: "2026-04-06T09:10:00.000Z",
+            resourceCount: 1,
+            resourceAvailabilitySummary: { activity: true },
+            sourceInstanceKey: hostedSourceInstanceKey,
+            sourceProviderSlug: "garmin",
+            status: "connected",
+          },
+        ],
+      });
+
+      await syncHostedDeviceSyncControlPlaneState({
+        deviceSyncPort,
+        wake: buildCronWake("2026-04-06T09:35:00.000Z"),
+        secret: DEVICE_SYNC_SECRET,
+        service,
+      });
+
+      const reconnectedSources = getStore(service).listConnectionSources({
+        connectionId: localAccountId,
+      });
+      assert.equal(reconnectedSources.length, 1);
+      assert.equal(reconnectedSources[0]?.sourceInstanceKey, localSourceInstanceKey);
+      assert.equal(reconnectedSources[0]?.status, "connected");
+      assert.equal(reconnectedSources[0]?.lastErrorCode, null);
+      assert.equal(reconnectedSources[0]?.lastSeenAt, "2026-04-06T09:10:00.000Z");
     } finally {
       closeHostedRuntimeDeviceSyncService(service);
       await cleanup();
