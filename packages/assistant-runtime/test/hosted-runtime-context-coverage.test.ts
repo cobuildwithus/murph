@@ -77,9 +77,6 @@ vi.mock("@murphai/operator-config/operator-config", async () => {
 
 import {
   applyHostedMemberPreferences,
-  ensureHostedInboxSidecarReady,
-  invalidateHostedInboxSidecarReady,
-  isHostedInboxSidecarReady,
   prepareHostedWakeContext,
   prepareHostedInboxProjectionRuntime,
   readHostedAssistantRuntimeState,
@@ -786,108 +783,19 @@ describe("hosted runtime context coverage", () => {
     }
   });
 
-  it("initializes hosted inbox sidecar with rebuild and makes later projection init cheap", async () => {
-    const { cleanup, vaultRoot } = await createWorkspace();
-
-    try {
-      await expect(
-        ensureHostedInboxSidecarReady({
-          bestEffort: false,
-          rebuild: true,
-          requestId: "req_startup_sidecar",
-          vaultRoot,
-        }),
-      ).resolves.toBe(true);
-
-      await prepareHostedInboxProjectionRuntime(vaultRoot, "req_projection_sidecar");
-
-      expect(mocks.createIntegratedInboxServices).toHaveBeenCalledTimes(2);
-      expect(mocks.inboxInit).toHaveBeenNthCalledWith(1, {
-        rebuild: true,
-        rebuildParserJobs: false,
-        requestId: "req_startup_sidecar",
-        vault: vaultRoot,
-      });
-      expect(mocks.inboxInit).toHaveBeenNthCalledWith(2, {
-        rebuild: false,
-        rebuildParserJobs: false,
-        requestId: "req_projection_sidecar",
-        vault: vaultRoot,
-      });
-      expect(isHostedInboxSidecarReady(vaultRoot)).toBe(true);
-      expect(isHostedInboxSidecarReady(path.join(vaultRoot, "..", path.basename(vaultRoot)))).toBe(true);
-      invalidateHostedInboxSidecarReady(path.join(vaultRoot, "..", path.basename(vaultRoot)));
-      expect(isHostedInboxSidecarReady(vaultRoot)).toBe(false);
-      expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
-        expect.objectContaining({
-          component: "hosted.inbox",
-          details: expect.objectContaining({
-            ready: true,
-            rebuild: true,
-            requestId: "req_startup_sidecar",
-            elapsedMs: expect.any(Number),
-          }),
-          level: "info",
-          message: "Hosted inbox sidecar bootstrap finished.",
-        }),
-      );
-    } finally {
-      await cleanup();
-    }
-  });
-
-  it("uses rebuild for projection init when startup sidecar bootstrap was skipped", async () => {
+  it("initializes cold current-message projection without a historical rebuild", async () => {
     const { cleanup, vaultRoot } = await createWorkspace();
 
     try {
       await prepareHostedInboxProjectionRuntime(vaultRoot, "req_projection_without_startup");
 
       expect(mocks.inboxInit).toHaveBeenCalledWith({
-        rebuild: true,
+        rebuild: false,
         rebuildParserJobs: false,
         requestId: "req_projection_without_startup",
         vault: vaultRoot,
       });
-    } finally {
-      await cleanup();
-    }
-  });
-
-  it("logs sanitized best-effort hosted inbox sidecar bootstrap failures", async () => {
-    const { cleanup, vaultRoot } = await createWorkspace();
-    const sensitiveErrorMessage =
-      "failed rebuilding capture cap_private_attachment_001 from raw/inbox/private-labs.pdf";
-    mocks.inboxInit.mockRejectedValueOnce(
-      new Error(sensitiveErrorMessage),
-    );
-
-    try {
-      await expect(
-        ensureHostedInboxSidecarReady({
-          bestEffort: true,
-          rebuild: true,
-          requestId: "req_startup_sidecar_failed",
-          vaultRoot,
-        }),
-      ).resolves.toBe(false);
-
-      expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
-        expect.objectContaining({
-          component: "hosted.inbox",
-          details: expect.objectContaining({
-            errorMessage: "hosted_inbox_sidecar_bootstrap_failed",
-            elapsedMs: expect.any(Number),
-            ready: false,
-            rebuild: true,
-            requestId: "req_startup_sidecar_failed",
-          }),
-          level: "warn",
-          message: "Hosted inbox sidecar bootstrap failed; continuing best-effort.",
-        }),
-      );
-      expect(JSON.stringify(mocks.emitHostedExecutionStructuredLog.mock.calls)).not.toContain(
-        sensitiveErrorMessage,
-      );
+      expect(mocks.emitHostedExecutionStructuredLog).not.toHaveBeenCalled();
     } finally {
       await cleanup();
     }

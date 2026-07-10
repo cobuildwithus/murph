@@ -48,11 +48,11 @@ import {
   importHostedConversationMessageWakeIntoLocalInbox,
 } from "../src/hosted-runtime/events/conversation.ts";
 import {
-  ensureHostedInboxSidecarReady,
+  prepareHostedInboxProjectionRuntime,
 } from "../src/hosted-runtime/context.ts";
 
 describe("hosted Linq document preservation", () => {
-  it("bootstraps the hosted inbox sidecar before document preservation", async () => {
+  it("projects a cold current-message document without rebuilding history", async () => {
     const workspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-linq-document-"));
     const vaultRoot = path.join(workspaceRoot, "vault");
     const pdfBytes = Uint8Array.from([0x25, 0x50, 0x44, 0x46, 0x2d, 0x31, 0x2e, 0x37]);
@@ -67,6 +67,10 @@ describe("hosted Linq document preservation", () => {
     });
 
     await initializeVault({ vaultRoot, createdAt: "2026-04-29T00:00:00.000Z" });
+    await prepareHostedInboxProjectionRuntime(
+      vaultRoot,
+      "req_init_cold_inbox_runtime",
+    );
 
     mocks.createHostedLinqAttachmentDownloadDriver.mockReturnValue({
       downloadPart: vi.fn(async (part: { url?: string | null }) => {
@@ -162,27 +166,9 @@ describe("hosted Linq document preservation", () => {
       });
 
       await expect(
-        services.preserveDocumentAttachments({
-          captureId,
-          requestId: "req_preserve_without_init",
-          vault: vaultRoot,
-        }),
-      ).rejects.toMatchObject({
-        code: "INBOX_NOT_INITIALIZED",
-      });
-      expect(importDocument).not.toHaveBeenCalled();
-
-      await ensureHostedInboxSidecarReady({
-        bestEffort: false,
-        rebuild: true,
-        requestId: "req_init_inbox_runtime",
-        vaultRoot,
-      });
-
-      await expect(
         services.show({
           captureId,
-          requestId: "req_show_after_hosted_sidecar_bootstrap",
+          requestId: "req_show_after_current_message_projection",
           vault: vaultRoot,
         }),
       ).resolves.toMatchObject({
@@ -194,7 +180,7 @@ describe("hosted Linq document preservation", () => {
       await expect(
         services.preserveDocumentAttachments({
           captureId,
-          requestId: "req_preserve_after_hosted_sidecar_bootstrap",
+          requestId: "req_preserve_after_current_message_projection",
           vault: vaultRoot,
         }),
       ).resolves.toMatchObject({
@@ -203,13 +189,6 @@ describe("hosted Linq document preservation", () => {
         preservedCount: 1,
       });
       expect(importDocument).toHaveBeenCalledTimes(1);
-
-      await ensureHostedInboxSidecarReady({
-        bestEffort: false,
-        rebuild: false,
-        requestId: "req_idempotent_inbox_runtime",
-        vaultRoot,
-      });
     } finally {
       await rm(workspaceRoot, { force: true, recursive: true });
     }
