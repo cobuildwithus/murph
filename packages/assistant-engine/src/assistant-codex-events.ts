@@ -476,17 +476,9 @@ export function extractCodexProgressEventFromNormalized(
   return null
 }
 
-export function extractCodexCurrentChannelProgressTextFromNormalized(
+export function extractCodexContextCompactionProgressTextFromNormalized(
   normalized: CodexNormalizedEvent,
 ): string | null {
-  if (
-    normalized.kind === 'assistant_message' &&
-    normalized.itemState === 'completed' &&
-    normalized.messagePhase === 'commentary'
-  ) {
-    return normalized.text
-  }
-
   if (normalized.kind !== 'status_item') {
     return null
   }

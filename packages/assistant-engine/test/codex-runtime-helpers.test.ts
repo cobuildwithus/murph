@@ -2269,7 +2269,7 @@ describe('Codex assistant registry helpers', () => {
     expect(attempt.providerTurnId).toBe('turn-failed-issues')
   })
 
-  it('preserves pre-steer segment delivery ordinals across the provider adapter', async () => {
+  it('preserves response delivery ordinals across the provider adapter', async () => {
     codexAppServerMocks.executeCodexAppServerTurn.mockResolvedValueOnce({
       finalMessage: 'Final answer.',
       jsonEvents: [],
@@ -2288,6 +2288,7 @@ describe('Codex assistant registry helpers', () => {
         },
       ],
       providerActionCount: 0,
+      responseDeliveryContextOrdinal: 0,
       responseMedia: [],
       sessionId: 'provider-session-segments',
       stderr: '',
@@ -2323,6 +2324,7 @@ describe('Codex assistant registry helpers', () => {
         ],
       },
     ])
+    expect(attempt.result.responseDeliveryContextOrdinal).toBe(0)
   })
 
   it('passes Venice provider id and config overrides through the Codex app-server seam', async () => {
