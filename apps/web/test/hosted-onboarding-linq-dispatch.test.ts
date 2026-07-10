@@ -683,12 +683,14 @@ describe("handleHostedOnboardingLinqWebhook", () => {
                 messageId: "msg_123",
                 reactionEligible: false,
                 service,
+                threadIsDirect: null,
               }),
             }),
             userId: "member_123",
           }),
         }),
       );
+      expect(mocks.getHostedLinqChatSummary).not.toHaveBeenCalled();
       expect(mocks.nudgeHostedRunnerUserBestEffort).not.toHaveBeenCalled();
       expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
       expectHostedLinqPointerSignalAccepted();

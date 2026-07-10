@@ -6,6 +6,7 @@ import {
 } from "@murphai/hosted-execution/runtime-control";
 import type { TextPart } from "@linqapp/sdk/resources";
 import type {
+  Chat,
   ChatCreateParams,
   ChatCreateResponse,
   ChatUpdateParams,
@@ -13,7 +14,7 @@ import type {
   MessageSendResponse,
 } from "@linqapp/sdk/resources/chats";
 
-import { fetchLinqApi, LinqApiTimeoutError } from "../linq/api";
+import { fetchLinqApi, fetchLinqApiJson, LinqApiTimeoutError } from "../linq/api";
 import { hostedOnboardingError, isHostedOnboardingError } from "./errors";
 import { requireHostedOnboardingLinqConfig } from "./runtime";
 import { normalizeNullableString } from "./shared";
@@ -202,9 +203,8 @@ export async function getHostedLinqChatSummary(input: {
   signal?: AbortSignal;
   timeoutMs?: number;
 }): Promise<HostedLinqChatSummary> {
-  const response = await fetchHostedLinqApiOrThrow({
+  const response = await fetchHostedLinqJsonApiOrThrow({
     method: "GET",
-    operation: "chat read",
     path: `chats/${encodeURIComponent(normalizeRequiredString(input.chatId, "chat id"))}`,
     signal: input.signal,
     timeoutMessage: "Linq chat read timed out.",
@@ -219,27 +219,33 @@ export async function getHostedLinqChatSummary(input: {
     });
   }
 
-  const payload = await readHostedLinqOptionalJsonResponse<{
-    chat?: { handles?: unknown; is_group?: unknown } | null;
-    handles?: unknown;
-    is_group?: unknown;
-  }>(response);
-  const handles = Array.isArray(payload?.handles)
-    ? payload.handles
-    : Array.isArray(payload?.chat?.handles)
-      ? payload.chat.handles
-      : [];
-  const isGroup = typeof payload?.is_group === "boolean"
-    ? payload.is_group
-    : typeof payload?.chat?.is_group === "boolean"
-      ? payload.chat.is_group
-      : null;
+  const payload = readHostedLinqCanonicalChat(response.payload);
+  const handles: Chat["handles"] = payload?.handles ?? [];
+  const isGroup: Chat["is_group"] | null = payload?.is_group ?? null;
 
   return {
     handles: handles
       .map(parseHostedLinqChatHandleSummary)
       .filter((handle): handle is HostedLinqChatHandleSummary => handle !== null),
     isGroup,
+  };
+}
+
+function readHostedLinqCanonicalChat(
+  value: unknown,
+): Pick<Chat, "handles" | "is_group"> | null {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+
+  const record = value as Record<string, unknown>;
+  if (!Array.isArray(record.handles) || typeof record.is_group !== "boolean") {
+    return null;
+  }
+
+  return {
+    handles: record.handles,
+    is_group: record.is_group,
   };
 }
 
@@ -443,6 +449,38 @@ async function fetchHostedLinqApiOrThrow(input: {
       apiBaseUrl,
       apiToken,
       body: input.body,
+      method: input.method,
+      path: input.path,
+      signal: input.signal,
+      timeoutMs: input.timeoutMs,
+    });
+  } catch (error) {
+    if (error instanceof LinqApiTimeoutError) {
+      throw hostedOnboardingError({
+        code: "LINQ_SEND_FAILED",
+        message: input.timeoutMessage,
+        httpStatus: 502,
+        retryable: true,
+      });
+    }
+
+    throw error;
+  }
+}
+
+async function fetchHostedLinqJsonApiOrThrow(input: {
+  method: string;
+  path: string;
+  signal?: AbortSignal;
+  timeoutMessage: string;
+  timeoutMs?: number;
+}) {
+  const { apiBaseUrl, apiToken } = requireHostedOnboardingLinqConfig();
+
+  try {
+    return await fetchLinqApiJson({
+      apiBaseUrl,
+      apiToken,
       method: input.method,
       path: input.path,
       signal: input.signal,

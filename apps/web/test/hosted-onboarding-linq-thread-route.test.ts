@@ -1193,7 +1193,7 @@ describe("Linq explicit external-thread routing", () => {
         message: expect.objectContaining({
           linqMessage: expect.objectContaining({
             chatId: "chat_group_123",
-            threadIsDirect: false,
+            threadIsDirect: null,
           }),
         }),
       }),
