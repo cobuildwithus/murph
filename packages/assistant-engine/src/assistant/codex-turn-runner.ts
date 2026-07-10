@@ -74,8 +74,6 @@ import type { AssistantUserMessageContentPart } from './content-types.js'
 import type { AssistantProviderTraceEvent } from './provider-traces.js'
 import {
   recordCodexAttemptFailed,
-  recordCodexAttemptStarted,
-  recordCodexAttemptSucceeded,
 } from './codex-turn/attempt-observability.js'
 import {
   buildCodexTurnExecutionPlan,
@@ -357,7 +355,6 @@ async function executeAssistantCodexAttempt(input: {
     runtimeIssueInputs: [] as readonly AssistantRuntimeIssueInput[],
   }
 
-  const attemptAt = new Date().toISOString()
   emitCodexPlanTraceEvent({
     onTraceEvent: executionPlan.input.onTraceEvent,
     codexContinuation: attemptPlan.routePlan.codexContinuation.kind,
@@ -365,13 +362,6 @@ async function executeAssistantCodexAttempt(input: {
     routePlanningDiagnostics: attemptPlan.routePlan.planningDiagnostics,
     resumeCodexThreadIdPresent: attemptPlan.routePlan.resume !== null,
     workingDirectory: attemptPlan.routePlan.workingDirectory,
-  })
-  await recordCodexAttemptStarted({
-    attemptCount: attemptPlan.attemptCount,
-    at: attemptAt,
-    route: attemptPlan.route,
-    turnId: executionPlan.turnId,
-    vault: executionPlan.input.vault,
   })
   let effectiveCodexContinuation = attemptPlan.routePlan.codexContinuation
   let usageAttribution: AssistantUsageAttribution | null = null
@@ -530,14 +520,6 @@ async function executeAssistantCodexAttempt(input: {
       throw attemptResult.error
     }
     const result = attemptResult.result
-
-    await recordCodexAttemptSucceeded({
-      activityLabels: attemptMetadata.activityLabels,
-      attemptCount: attemptPlan.attemptCount,
-      route: attemptPlan.route,
-      turnId: executionPlan.turnId,
-      vault: executionPlan.input.vault,
-    })
     return {
       kind: 'succeeded',
       result: {
