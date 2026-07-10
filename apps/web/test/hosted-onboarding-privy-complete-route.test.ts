@@ -16,7 +16,7 @@ vi.mock("@/src/lib/hosted-onboarding/csrf", () => ({
   assertHostedOnboardingMutationOrigin: mocks.assertHostedOnboardingMutationOrigin,
 }));
 
-vi.mock("@/src/lib/hosted-onboarding/member-service", () => ({
+vi.mock("@/src/lib/hosted-onboarding/authentication-service", () => ({
   completeHostedPrivyVerification: mocks.completeHostedPrivyVerification,
 }));
 

@@ -13,24 +13,6 @@ export interface WorkerAiBindingLike {
   run(model: string, input: Record<string, unknown>): Promise<unknown>;
 }
 
-export type WorkerActiveRuntimeWriteFenceValidationRejectReason =
-  | "missing_runner_state"
-  | "missing_write_fence"
-  | "write_fence_mismatch";
-
-export type WorkerActiveRuntimeWriteFenceValidationResult =
-  | {
-      owns: false;
-      reason?: WorkerActiveRuntimeWriteFenceValidationRejectReason;
-    }
-  | {
-      attemptId: string;
-      leaseGeneration: string;
-      owns: true;
-      userId: string;
-      workspaceVersion: string | null;
-    };
-
 export type WorkerProviderEgressTokenValidationRejectReason =
   | "missing_provider_egress_token"
   | "missing_runner_state"
@@ -136,9 +118,6 @@ export interface WorkerUserRunnerStubLike {
     generation: string;
     userId: string;
   }): Promise<boolean>;
-  validateActiveRuntimeWriteFence?(input: {
-    userId: string;
-  }): Promise<WorkerActiveRuntimeWriteFenceValidationResult>;
   validateRuntimeProviderEgressToken?(input: {
     providerEgressToken: string;
     userId: string;

@@ -149,6 +149,4 @@ identifiers, payload-like env values, and sensitive command args are redacted.
    subscription auth seed, and must not own `MURPH_E2E_*` wiring or fake
    assistant directives.
 
-The old `scripts/dev-hosted-local.ts` and
-`apps/cloudflare/scripts/run-hosted-local-e2e.ts` files are compatibility
-wrappers only.
+Use `pnpm hosted-local` as the single hosted-local entrypoint.
