@@ -25,14 +25,13 @@ afterEach(async () => {
   }))
 })
 
-// GPT-5.5 emits mid-turn user-visible updates as commentary-phase agent
-// messages rather than calling the murph.send_progress_update tool. This
-// real-binary test proves the whole chain: the app-server surfaces the phase
-// on item/completed, normalization classifies it, and the turn routes the
-// commentary text into progress delivery while keeping it out of the final
-// reply. A silent regression here strands members with no mid-turn updates.
-describeRealCodex('real Codex commentary phase progress delivery e2e', () => {
-  it('routes commentary-phase agent messages into progress delivery', async () => {
+// Native Codex commentary is runtime narration, not a member-facing message.
+// This real-binary test proves the app-server still surfaces commentary to
+// internal progress consumers without routing it through outbound delivery or
+// reusing it as the final reply. Member-facing progress remains an explicit
+// murph.send_progress_update tool action.
+describeRealCodex('real Codex commentary isolation e2e', () => {
+  it('keeps commentary-phase agent messages internal', async () => {
     const codexHome = await mkdtemp(path.join(tmpdir(), 'murph-commentary-e2e-'))
     temporaryPaths.push(codexHome)
     const workingDirectory = await mkdtemp(
@@ -73,6 +72,7 @@ describeRealCodex('real Codex commentary phase progress delivery e2e', () => {
     env.OPENAI_API_KEY = process.env.OPENAI_API_KEY
 
     const progressSends: Array<{ source: string; text: string }> = []
+    const internalProgress: Array<{ kind: string; text: string }> = []
     const progressDelivery = {
       async send(text: string, options?: { source?: string }) {
         const source = options?.source ?? 'model'
@@ -89,25 +89,35 @@ describeRealCodex('real Codex commentary phase progress delivery e2e', () => {
       excludeResumeTurns: true,
       model: 'gpt-5.5',
       modelProvider: 'openai-env',
+      onProgress(event) {
+        internalProgress.push({ kind: event.kind, text: event.text })
+      },
       progressDelivery,
       prompt: [
-        'Multi-step task: first send a short mid-turn commentary/progress',
-        'message that says exactly PROBE_COMMENTARY_ALPHA, then run a shell',
+        'Multi-step task: first provide a short commentary message that says',
+        'exactly PROBE_COMMENTARY_ALPHA, then run a shell',
         'command like `echo probe`, and finally reply with the final answer',
-        'exactly PROBE_FINAL_OMEGA.',
+        'exactly PROBE_FINAL_OMEGA. Do not call any Murph dynamic tool.',
       ].join(' '),
       reasoningEffort: 'low',
       sandbox: 'workspace-write',
       workingDirectory,
       dynamicTools: resolveMurphDynamicTools({
-        progressUpdatesAvailable: true,
+        progressUpdatesAvailable: false,
       }),
     })
 
     expect(result.finalMessage).toContain('PROBE_FINAL_OMEGA')
     expect(result.finalMessage).not.toContain('PROBE_COMMENTARY_ALPHA')
     expect(
-      progressSends.some((send) => send.text.includes('PROBE_COMMENTARY_ALPHA')),
+      internalProgress.some(
+        (event) =>
+          event.kind === 'message' &&
+          event.text.includes('PROBE_COMMENTARY_ALPHA'),
+      ),
     ).toBe(true)
+    expect(
+      progressSends.some((send) => send.text.includes('PROBE_COMMENTARY_ALPHA')),
+    ).toBe(false)
   }, 240_000)
 })
