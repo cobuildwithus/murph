@@ -135,6 +135,7 @@ describe("hosted local Codex image media delivery e2e", () => {
     expect(finalStatus.lastErrorCode ?? null).toBeNull();
     expect(finalStatus.mailboxLag.every((lane) => lane.lag === "0")).toBe(true);
     expectAdvertisedMurphDynamicTools(requireScenario().assistantProviderRequests, {
+      callCircleAvailable: true,
       computerToolsAvailable: true,
       connectedAppsAvailable: true,
       phoneCallsAvailable: true,

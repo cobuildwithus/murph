@@ -724,6 +724,7 @@ productionDescribe("hosted local Linq first-contact e2e", () => {
       OPENAI_API_KEY: "stub-local-openai-key",
     });
     expectAdvertisedMurphDynamicTools(requireScenario().assistantProviderRequests, {
+      callCircleAvailable: true,
       computerToolsAvailable: true,
       connectedAppsAvailable: true,
       phoneCallsAvailable: true,
