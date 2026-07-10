@@ -75,6 +75,9 @@ import {
   repairJunctionWorkoutHeartRateZones as repairJunctionWorkoutHeartRateZonesInternal,
 } from "./junction-hr-zone-repair.ts";
 import {
+  repairExperimentMediaInternal,
+} from "./experiment-media-repair.ts";
+import {
   updateAssistantPreferences as updateAssistantPreferencesInternal,
   updateWearablePreferences as updateWearablePreferencesInternal,
   updateWorkoutUnitPreferences as updateWorkoutUnitPreferencesInternal,
@@ -575,6 +578,12 @@ export async function repairJunctionWorkoutHeartRateZones(
   input: Parameters<typeof repairJunctionWorkoutHeartRateZonesInternal>[0],
 ): ReturnType<typeof repairJunctionWorkoutHeartRateZonesInternal> {
   return withCanonicalInputWriteLock(input, repairJunctionWorkoutHeartRateZonesInternal);
+}
+
+export async function repairExperimentMedia(
+  input: Parameters<typeof repairExperimentMediaInternal>[0],
+): ReturnType<typeof repairExperimentMediaInternal> {
+  return withCanonicalInputWriteLock(input, repairExperimentMediaInternal);
 }
 
 export async function promoteInboxJournal(
