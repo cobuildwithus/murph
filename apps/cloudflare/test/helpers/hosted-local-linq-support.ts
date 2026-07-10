@@ -43,7 +43,6 @@ const hostedLocalLinqObservedRequestWaitTimeoutMs = 180_000;
 const hostedLocalLinqWaitExpireAfterInFlightMs = 30_000;
 const hostedLocalLinqWaitNudgeAfterMailboxLagMs = 15_000;
 const hostedLocalLinqWaitAlarmAfterPendingDeliveryMs = 2_000;
-const hostedLocalRunnerProviderHost = "host.docker.internal";
 
 type HostedLinqInboundPartInput =
   | {
@@ -201,6 +200,16 @@ export async function startHostedLocalLinqStub(input: {
       return;
     }
 
+    if (request.method === "GET" && request.url && /^\/chats\/[^/]+$/u.test(request.url)) {
+      const chatId = decodeURIComponent(request.url.split("/")[2] ?? "unknown");
+      writeJsonResponse(response, 200, {
+        handles: [],
+        id: chatId,
+        is_group: false,
+      });
+      return;
+    }
+
     if (
       request.method === "POST"
       && request.url
@@ -310,7 +319,6 @@ export async function startHostedLocalLinqStub(input: {
   const baseUrl = `http://127.0.0.1:${tcpPort}`;
   const containerBaseUrl =
     `http://${formatHostedLocalLinqUrlHost(resolveHostedLocalLinqContainerHost())}:${tcpPort}`;
-  const runnerBaseUrl = `http://${hostedLocalRunnerProviderHost}:${tcpPort}`;
   attachmentDownloadBaseUrl = `${baseUrl}${linqAttachmentDownloadBasePath}`;
   attachmentDownloadContainerBaseUrl =
     `${containerBaseUrl}${linqAttachmentDownloadBasePath}`;
@@ -441,7 +449,9 @@ export async function startHostedLocalLinqStub(input: {
 
       return latestMessageId;
     },
-    runnerBaseUrl,
+    // The full-stack harness shares this value with the host web process.
+    // Runner container env construction rewrites loopback to its host alias.
+    runnerBaseUrl: baseUrl,
     stop: async () => {
       await stopHttpStubServer(activeServer);
       server = null;
