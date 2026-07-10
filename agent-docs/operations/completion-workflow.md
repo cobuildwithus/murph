@@ -18,7 +18,8 @@ Removed 2026-06-12: the `simplify` and `task-finish-review` subagent passes. Jun
 ## Sequence
 
 1. Finish the functional implementation first.
-   During local iteration, prefer the narrowest truthful verification loop for the task. In practice that is usually `pnpm test:diff <path ...>` for package or app work, the low-risk `pnpm typecheck` fast path for tiny repo-internal workflow/tooling changes, or `pnpm verify:acceptance` when the task already clearly needs the full lane.
+   During local iteration, prefer the narrowest truthful verification loop for the task. In practice that is usually `pnpm test:diff <path ...>` for package, app, or low-risk repo-internal workflow/tooling work, or `pnpm verify:acceptance` when the task already clearly needs the full lane.
+   A truthful `pnpm test:diff <path ...>` already typechecks the touched owners and reverse dependents; do not run a separate root `pnpm typecheck` before it unless the verification matrix selects the full-workspace fallback.
 2. Run a scope and shape check before polish: confirm the diff is still proportional to the task, new abstractions are immediately justified, any new persisted state is explicitly classified and versioned, and any architecture/API/trust-boundary change is documented or split into an explicit plan. This check owns simplification: delete dead code, cut speculative structure, and collapse needless indirection yourself; there is no separate simplify subagent pass.
 3. If the change sprawled, duplicated existing patterns, or introduced speculative structure, cut it back before continuing.
 4. Decide the audit path required by the routed task class:

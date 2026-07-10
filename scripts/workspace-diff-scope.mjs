@@ -227,7 +227,9 @@ async function buildDiffScopeSummary(explicitChangedFiles) {
     .filter((metadata) => metadata !== undefined)
     .sort((left, right) => left.dir.localeCompare(right.dir));
   const runVerifyCli = changedFiles.some((filePath) => isCliArtifactSensitiveFile(filePath));
-  const runRepoToolsTests = changedFiles.some((filePath) => filePath.startsWith("scripts/"));
+  const runRepoToolsTests = changedFiles.some((filePath) =>
+    filePath.startsWith("config/") || filePath.startsWith("scripts/")
+  );
   const typecheckDirs = [];
   const testDirs = [];
   const verifyAppDirs = [];
