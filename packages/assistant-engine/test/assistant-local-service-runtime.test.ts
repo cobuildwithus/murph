@@ -1395,6 +1395,7 @@ test('sendAssistantMessageLocal keeps auto-reply turns on the session Codex thre
       ?.providerResumeStateAction,
     'persist-from-provider-turn',
   )
+  assert.equal(mocks.maybeRunAssistantRuntimeMaintenance.mock.calls.length, 0)
 })
 
 test('sendAssistantMessageLocal runs automation cron turns on isolated Codex threads', async () => {
@@ -1418,6 +1419,7 @@ test('sendAssistantMessageLocal runs automation cron turns on isolated Codex thr
       ?.providerResumeStateAction,
     'preserve-existing',
   )
+  assert.equal(mocks.maybeRunAssistantRuntimeMaintenance.mock.calls.length, 1)
 })
 
 test('sendAssistantMessageLocal prefers the hosted execution default target when resolving the session', async () => {
@@ -6826,6 +6828,76 @@ test('sendAssistantMessageLocal does not wait for a pending typing indicator sta
   expect(stopTyping).toHaveBeenCalledWith({
     providerStop: false,
   })
+})
+
+test('sendAssistantMessageLocal requests typing after the receipt without waiting for turn-start diagnostics', async () => {
+  const diagnosticRelease = createDeferred<void>()
+  const stopTyping = vi.fn(async () => undefined)
+  const startTypingIndicator = vi.fn(async () => ({
+    stop: stopTyping,
+  }))
+  const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
+    adapter: {
+      startTypingIndicator,
+    },
+  })
+  mocks.recordAssistantDiagnosticEvent.mockImplementationOnce(async () => {
+    await diagnosticRelease.promise
+  })
+
+  const resultPromise = sendAssistantMessageLocal({
+    deliverResponse: true,
+    prompt: 'Summarize my inbox',
+    vault: '/vaults/test',
+  })
+
+  await vi.waitFor(() => {
+    expect(startTypingIndicator).toHaveBeenCalledTimes(1)
+  })
+  expect(
+    mocks.createAssistantTurnReceipt.mock.invocationCallOrder[0],
+  ).toBeLessThan(
+    mocks.recordAssistantDiagnosticEvent.mock.invocationCallOrder[0] ?? 0,
+  )
+  expect(mocks.executeCodexTurnWithRecovery).not.toHaveBeenCalled()
+
+  diagnosticRelease.resolve()
+  const result = await resultPromise
+
+  expect(result.status).toBe('completed')
+  expect(stopTyping).toHaveBeenCalledWith({
+    providerStop: false,
+  })
+})
+
+test('sendAssistantMessageLocal stops typing when turn-start diagnostics fail', async () => {
+  const diagnosticError = new Error('turn-start diagnostic failed')
+  const stopTyping = vi.fn(async () => undefined)
+  const startTypingIndicator = vi.fn(async () => ({
+    stop: stopTyping,
+  }))
+  const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
+    adapter: {
+      startTypingIndicator,
+    },
+  })
+  mocks.recordAssistantDiagnosticEvent.mockRejectedValueOnce(diagnosticError)
+
+  await expect(sendAssistantMessageLocal({
+    deliverResponse: true,
+    prompt: 'Summarize my inbox',
+    vault: '/vaults/test',
+  })).rejects.toBe(diagnosticError)
+
+  await vi.waitFor(() => {
+    expect(stopTyping).toHaveBeenCalledTimes(1)
+  })
+  expect(mocks.finalizeAssistantTurnReceipt).toHaveBeenCalledWith(
+    expect.objectContaining({
+      status: 'failed',
+      turnId: 'turn-1',
+    }),
+  )
 })
 
 test('sendAssistantMessageLocal returns deferred delivery results and keeps typing in queue-only mode', async () => {

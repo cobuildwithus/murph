@@ -9,6 +9,7 @@ import {
   decodeHostedMailboxStoredPayload,
   fetchHostedMailboxPayload,
   fetchHostedMailboxItemsAfterLaneCursors,
+  fetchHostedRuntimeMailboxProjection,
   hasHostedMailboxItemByKind,
   HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA,
   HOSTED_MAILBOX_PAYLOAD_SCHEMA,
@@ -1364,6 +1365,164 @@ describe("fetchHostedMailboxItemsAfterLaneCursors", () => {
   });
 });
 
+describe("fetchHostedRuntimeMailboxProjection", () => {
+  it("projects both requested lanes with one query while preserving item payload metadata", async () => {
+    const queryRaw = vi.fn(async () => [
+      {
+        consumedSeq: 11n,
+        itemConsumedAt: new Date("2026-04-26T00:00:04.000Z"),
+        itemCreatedAt: new Date("2026-04-26T00:00:01.000Z"),
+        itemDedupeKey: "conversation-dedupe-1",
+        itemExpiresAt: null,
+        itemId: "mailbox_conversation_12",
+        itemKind: "conversation.message",
+        itemLane: "conversation",
+        itemLaneSeq: 12n,
+        itemOccurredAt: new Date("2026-04-26T00:00:00.000Z"),
+        itemPayloadBytes: 64,
+        itemPayloadHash: "hash-conversation-12",
+        itemPayloadInlineCiphertext: "cipher-conversation-12",
+        itemPayloadRef: null,
+        itemPayloadSchema: HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA,
+        itemUpdatedAt: new Date("2026-04-26T00:00:02.000Z"),
+        itemUserId: "member_mailbox_1",
+        maxSeq: 12n,
+        maxUpdatedAt: new Date("2026-04-26T00:00:02.000Z"),
+        requestedLane: "conversation",
+      },
+      {
+        consumedSeq: 2n,
+        itemConsumedAt: null,
+        itemCreatedAt: new Date("2026-04-26T00:00:03.000Z"),
+        itemDedupeKey: "system-dedupe-3",
+        itemExpiresAt: null,
+        itemId: "mailbox_system_3",
+        itemKind: "runtime.manual-requested",
+        itemLane: "system",
+        itemLaneSeq: 3n,
+        itemOccurredAt: new Date("2026-04-26T00:00:03.000Z"),
+        itemPayloadBytes: 128_001,
+        itemPayloadHash: "hash-system-3",
+        itemPayloadInlineCiphertext: null,
+        itemPayloadRef: "hosted-mailbox-payload:mailbox_system_3",
+        itemPayloadSchema: HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA,
+        itemUpdatedAt: new Date("2026-04-26T00:00:04.000Z"),
+        itemUserId: "member_mailbox_1",
+        maxSeq: 3n,
+        maxUpdatedAt: new Date("2026-04-26T00:00:04.000Z"),
+        requestedLane: "system",
+      },
+    ]);
+    const prisma = createHostedMailboxClient({
+      hostedMailboxItem: createHostedMailboxItemDelegate(),
+      hostedMailboxPayload: createHostedMailboxPayloadDelegate(),
+      queryRaw,
+    });
+
+    const result = await fetchHostedRuntimeMailboxProjection({
+      cursorMode: "imported_seq",
+      lanes: [
+        { importedSeq: "11", lane: "conversation" },
+        { importedSeq: "2", lane: "system" },
+      ],
+      limitPerLane: 10,
+      now: FIXED_NOW,
+      prisma,
+      userId: "member_mailbox_1",
+    });
+
+    expect(queryRaw).toHaveBeenCalledTimes(1);
+    expect(result.consumedSeqByLane).toEqual([
+      { consumedSeq: "11", lane: "conversation" },
+      { consumedSeq: "2", lane: "system" },
+    ]);
+    expect(result.maxSeqByLane).toEqual([
+      {
+        lane: "conversation",
+        maxSeq: "12",
+        maxUpdatedAt: "2026-04-26T00:00:02.000Z",
+      },
+      {
+        lane: "system",
+        maxSeq: "3",
+        maxUpdatedAt: "2026-04-26T00:00:04.000Z",
+      },
+    ]);
+    expect(result.items).toMatchObject([
+      {
+        consumedAt: "2026-04-26T00:00:04.000Z",
+        id: "mailbox_conversation_12",
+        laneSeq: "12",
+        payloadInlineCiphertext: "cipher-conversation-12",
+        payloadRef: null,
+      },
+      {
+        consumedAt: null,
+        id: "mailbox_system_3",
+        laneSeq: "3",
+        payloadInlineCiphertext: null,
+        payloadRef: "hosted-mailbox-payload:mailbox_system_3",
+      },
+    ]);
+  });
+
+  it("returns lane sentinels and rejects duplicate lane projections before querying", async () => {
+    const queryRaw = vi.fn(async () => [{
+      consumedSeq: 14n,
+      itemConsumedAt: null,
+      itemCreatedAt: null,
+      itemDedupeKey: null,
+      itemExpiresAt: null,
+      itemId: null,
+      itemKind: null,
+      itemLane: null,
+      itemLaneSeq: null,
+      itemOccurredAt: null,
+      itemPayloadBytes: null,
+      itemPayloadHash: null,
+      itemPayloadInlineCiphertext: null,
+      itemPayloadRef: null,
+      itemPayloadSchema: null,
+      itemUpdatedAt: null,
+      itemUserId: null,
+      maxSeq: 0n,
+      maxUpdatedAt: null,
+      requestedLane: "conversation",
+    }]);
+    const prisma = createHostedMailboxClient({
+      hostedMailboxItem: createHostedMailboxItemDelegate(),
+      hostedMailboxPayload: createHostedMailboxPayloadDelegate(),
+      queryRaw,
+    });
+
+    await expect(fetchHostedRuntimeMailboxProjection({
+      lanes: [
+        { importedSeq: "14", lane: "conversation" },
+        { importedSeq: "15", lane: "conversation" },
+      ],
+      limitPerLane: 10,
+      now: FIXED_NOW,
+      prisma,
+      userId: "member_mailbox_1",
+    })).rejects.toThrow("requested more than once");
+    expect(queryRaw).not.toHaveBeenCalled();
+
+    const result = await fetchHostedRuntimeMailboxProjection({
+      lanes: [{ importedSeq: "14", lane: "conversation" }],
+      limitPerLane: 10,
+      now: FIXED_NOW,
+      prisma,
+      userId: "member_mailbox_1",
+    });
+    expect(queryRaw).toHaveBeenCalledTimes(1);
+    expect(result).toEqual({
+      consumedSeqByLane: [{ consumedSeq: "14", lane: "conversation" }],
+      items: [],
+      maxSeqByLane: [{ lane: "conversation", maxSeq: "0", maxUpdatedAt: null }],
+    });
+  });
+});
+
 interface HostedMailboxCreateArgs {
   data: {
     dedupeKey: string;
@@ -1588,8 +1747,10 @@ function readHostedMailboxRawSql(call: unknown[] | undefined): string {
 function createHostedMailboxClient(input: {
   hostedMailboxItem: ReturnType<typeof createHostedMailboxItemDelegate>;
   hostedMailboxPayload: ReturnType<typeof createHostedMailboxPayloadDelegate>;
+  queryRaw?: ReturnType<typeof vi.fn>;
 }) {
   return Object.assign(Object.create(null), {
+    ...(input.queryRaw ? { $queryRaw: input.queryRaw } : {}),
     hostedMailboxItem: input.hostedMailboxItem,
     hostedMailboxPayload: input.hostedMailboxPayload,
   }) as Parameters<typeof fetchHostedMailboxItemsAfterLaneCursors>[0]["prisma"];

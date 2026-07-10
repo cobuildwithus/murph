@@ -538,6 +538,13 @@ describe("hosted Prisma baseline migration", () => {
       ),
       "utf8",
     );
+    const hostedLinqDeliveryRetryAfterMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/20260709120000_hosted_linq_delivery_retry_after_at/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
     expect(migrationEntries).toEqual([
       "2026040600_init",
       "20260425000000_drop_legacy_linq_control_plane",
@@ -624,6 +631,7 @@ describe("hosted Prisma baseline migration", () => {
       "20260707180000_hosted_vault_share_projection_scopes",
       "20260708120000_hosted_member_assistant_preferences",
       "20260709120000_hosted_ingress_latency_delivery_link",
+      "20260709120000_hosted_linq_delivery_retry_after_at",
       "migration_lock.toml",
     ]);
     expect(hostedThreadRoutesMigrationSql).toContain('CREATE TABLE "hosted_thread_container"');
@@ -787,6 +795,9 @@ describe("hosted Prisma baseline migration", () => {
     );
     expect(staleLinqRecencyDropMigrationSql).toContain(
       'DROP COLUMN IF EXISTS "last_inbound_at"',
+    );
+    expect(hostedLinqDeliveryRetryAfterMigrationSql).toContain(
+      'ADD COLUMN "retry_after_at" TIMESTAMP(3)',
     );
     expect(hostedLinqObservabilityMigrationSql).toContain('"skipped_at" TIMESTAMP(3)');
     expect(hostedLinqObservabilityMigrationSql).toContain('"skip_reason" TEXT');

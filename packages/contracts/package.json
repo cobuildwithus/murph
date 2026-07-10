@@ -33,12 +33,14 @@
     "./generated/*": "./generated/*"
   },
   "scripts": {
-    "build": "node ../../scripts/rm-paths.mjs dist tsconfig.build.tsbuildinfo && tsc -b tsconfig.build.json --pretty false && tsc -p tsconfig.scripts.json --pretty false",
+    "build": "node ../../scripts/rm-paths.mjs dist tsconfig.build.tsbuildinfo tsconfig.scripts.tsbuildinfo && tsc -b tsconfig.build.json --pretty false && tsc -p tsconfig.scripts.json --pretty false",
+    "build:incremental": "tsc -b tsconfig.build.json --pretty false && tsc -p tsconfig.scripts.json --pretty false",
     "typecheck": "tsc -p tsconfig.json --pretty false && tsc -p tsconfig.vitest.json --pretty false",
     "generate": "node --run build && node ./dist/scripts/generate-json-schema.js",
     "test:vitest": "vitest run --config vitest.config.ts",
     "test:coverage:vitest": "vitest run --config vitest.config.ts --coverage",
     "test:artifacts": "node --run build && node ./dist/scripts/verify.js",
+    "test:artifacts:incremental": "node --run build:incremental && node ./dist/scripts/verify.js",
     "test:artifacts:prepared": "node ./dist/scripts/verify.js",
     "test:coverage:prepared": "node --run test:coverage:vitest && node --run test:artifacts:prepared",
     "test:coverage": "node --run test:coverage:vitest && node --run test:artifacts",

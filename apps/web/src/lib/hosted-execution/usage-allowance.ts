@@ -47,11 +47,9 @@ import {
   readActiveHostedMemberAccess,
 } from "../hosted-onboarding/member-access";
 import { getPrisma } from "../prisma";
-import { sha256Hex } from "../primitives";
 import { renderUserFacingMessage } from "../hosted-messages/user-facing-messages";
 
 type HostedAiUsageAllowanceClient = PrismaClient | Prisma.TransactionClient;
-
 export type HostedAiUsageGateDeniedReason =
   | "ai_usage_limit_exceeded"
   | "hosted_access_inactive"
@@ -1178,79 +1176,6 @@ export async function checkHostedAiUsageGate(input: {
   return resolveHostedAiUsageGate(input);
 }
 
-export function buildHostedAiUsageGateNoticeIdempotencyKey(input: {
-  memberId: string;
-  noticeCode: HostedAiUsageGateNoticeCode | string;
-  periodStart: Date | string;
-}): string {
-  const periodStart = normalizeHostedAiUsageAllowanceDate(input.periodStart);
-
-  return `ai-usage-gate:${sha256Hex(JSON.stringify({
-    memberId: input.memberId,
-    noticeCode: input.noticeCode,
-    periodStart: periodStart.toISOString(),
-  })).slice(0, 32)}`;
-}
-
-export async function claimHostedAiUsageLimitNotice(input: {
-  memberId: string;
-  periodStart: Date | string;
-  prisma?: HostedAiUsageAllowanceClient;
-  sentAt?: Date | string;
-}): Promise<boolean> {
-  const prisma = input.prisma ?? getPrisma();
-  const periodStart = normalizeHostedAiUsageAllowanceDate(input.periodStart);
-  const sentAt = normalizeHostedAiUsageAllowanceDate(input.sentAt ?? new Date());
-
-  const claimed = await prisma.hostedAiUsagePeriod.updateMany({
-    where: {
-      AND: [
-        {
-          periodStart: {
-            lte: sentAt,
-          },
-        },
-        {
-          periodEnd: {
-            gt: sentAt,
-          },
-        },
-      ],
-      blockedAt: {
-        not: null,
-      },
-      limitNoticeSentAt: null,
-      memberId: input.memberId,
-      periodStart,
-    },
-    data: {
-      limitNoticeSentAt: sentAt,
-    },
-  });
-
-  return claimed.count === 1;
-}
-
-export async function releaseHostedAiUsageLimitNotice(input: {
-  memberId: string;
-  periodStart: Date | string;
-  prisma?: HostedAiUsageAllowanceClient;
-  sentAt: Date | string;
-}): Promise<void> {
-  const prisma = input.prisma ?? getPrisma();
-
-  await prisma.hostedAiUsagePeriod.updateMany({
-    where: {
-      limitNoticeSentAt: normalizeHostedAiUsageAllowanceDate(input.sentAt),
-      memberId: input.memberId,
-      periodStart: normalizeHostedAiUsageAllowanceDate(input.periodStart),
-    },
-    data: {
-      limitNoticeSentAt: null,
-    },
-  });
-}
-
 function resolveHostedAiUsageInactiveGateDecision(input: {
   at: Date;
   billingRef: HostedAiUsageAllowanceBillingRef | null;
@@ -1409,7 +1334,6 @@ async function ensureHostedAiUsageAllowancePeriodTx(input: {
       billingPlanCode: true,
       blockedAt: true,
       lastUsageAt: true,
-      limitNoticeSentAt: true,
       limitUsdMicros: true,
       periodEnd: true,
       periodStart: true,
@@ -1425,18 +1349,14 @@ async function ensureHostedAiUsageAllowancePeriodTx(input: {
     current.periodEnd.getTime() === resolved.periodEnd.getTime();
 
   if (periodMatches) {
-    const metadata = buildHostedAiUsageAllowancePeriodMetadata({
+    const blockedAt = resolveHostedAiUsageAllowanceBlockedAt({
       blockedAt: current.blockedAt,
-      limitNoticeSentAt: current.limitNoticeSentAt,
       limitUsdMicros: current.limitUsdMicros,
       now: input.now,
       spentUsdMicros: current.spentUsdMicros,
     });
 
-    if (
-      !sameNullableTime(current.blockedAt, metadata.blockedAt) ||
-      !sameNullableTime(current.limitNoticeSentAt, metadata.limitNoticeSentAt)
-    ) {
+    if (!sameNullableTime(current.blockedAt, blockedAt)) {
       await input.tx.hostedAiUsagePeriod.update({
         where: {
           memberId_periodStart: {
@@ -1445,8 +1365,7 @@ async function ensureHostedAiUsageAllowancePeriodTx(input: {
           },
         },
         data: {
-          blockedAt: metadata.blockedAt,
-          limitNoticeSentAt: metadata.limitNoticeSentAt,
+          blockedAt,
           updatedAt: input.now,
         },
       });
@@ -1464,10 +1383,8 @@ async function ensureHostedAiUsageAllowancePeriodTx(input: {
     };
   }
 
-  const limitIncreased = current.limitUsdMicros < resolved.limitUsdMicros;
-  const metadata = buildHostedAiUsageAllowancePeriodMetadata({
+  const blockedAt = resolveHostedAiUsageAllowanceBlockedAt({
     blockedAt: current.blockedAt,
-    limitNoticeSentAt: current.limitNoticeSentAt,
     limitUsdMicros: resolved.limitUsdMicros,
     now: input.now,
     spentUsdMicros: current.spentUsdMicros,
@@ -1481,9 +1398,8 @@ async function ensureHostedAiUsageAllowancePeriodTx(input: {
     },
     data: {
       billingPlanCode: resolved.billingPlanCode,
-      blockedAt: metadata.blockedAt,
+      blockedAt,
       limitUsdMicros: resolved.limitUsdMicros,
-      limitNoticeSentAt: limitIncreased ? null : metadata.limitNoticeSentAt,
       periodEnd: resolved.periodEnd,
       updatedAt: input.now,
     },
@@ -1607,10 +1523,6 @@ async function accountHostedAiUsageAllowancePeriodSpendTx(input: {
     SET
       "spent_usd_micros" = "spent_usd_micros" + ${input.costUsdMicros},
       "last_usage_at" = GREATEST(COALESCE("last_usage_at", ${input.recordOccurredAt}), ${input.recordOccurredAt}),
-      "limit_notice_sent_at" = CASE
-        WHEN "spent_usd_micros" < "limit_usd_micros" THEN NULL
-        ELSE "limit_notice_sent_at"
-      END,
       "blocked_at" = CASE
         WHEN "spent_usd_micros" + ${input.costUsdMicros} >= "limit_usd_micros" THEN
           CASE
@@ -1872,27 +1784,17 @@ function buildHostedPulseTrialPendingBillingDeniedPeriod(input: {
   };
 }
 
-function buildHostedAiUsageAllowancePeriodMetadata(input: {
+function resolveHostedAiUsageAllowanceBlockedAt(input: {
   blockedAt: Date | null;
-  limitNoticeSentAt: Date | null;
   limitUsdMicros: bigint;
   now: Date;
   spentUsdMicros: bigint;
-}): {
-  blockedAt: Date | null;
-  limitNoticeSentAt: Date | null;
-} {
+}): Date | null {
   if (input.spentUsdMicros < input.limitUsdMicros) {
-    return {
-      blockedAt: null,
-      limitNoticeSentAt: null,
-    };
+    return null;
   }
 
-  return {
-    blockedAt: input.blockedAt ?? input.now,
-    limitNoticeSentAt: input.limitNoticeSentAt,
-  };
+  return input.blockedAt ?? input.now;
 }
 
 function sameNullableTime(left: Date | null, right: Date | null): boolean {
@@ -2634,12 +2536,15 @@ function buildHostedAiUsageGateLimitNotice(input: {
     };
   }
 
-  const base = "Hey, you've reached your usage limit for the month.";
-
   if (input.allowanceSource === "family_sponsored_pulse") {
     return {
       code: "family_usage_limit_reached",
-      message: `${base} Murph will resume when your Family usage resets.`,
+      message: renderHostedAiUsageGateLimitNoticeMessage({
+        key: "linq.ai_usage.family_limit_reached",
+        memberId: input.memberId,
+        noticeCode: "family_usage_limit_reached",
+        periodStart: input.periodStart,
+      }),
     };
   }
 
@@ -2669,6 +2574,7 @@ function buildHostedAiUsageGateLimitNotice(input: {
 function renderHostedAiUsageGateLimitNoticeMessage(input: {
   key:
     | "linq.ai_usage.edge_limit_reached"
+    | "linq.ai_usage.family_limit_reached"
     | "linq.ai_usage.pulse_upgrade_edge"
     | "linq.ai_usage.trial_limit_reached";
   memberId: string;

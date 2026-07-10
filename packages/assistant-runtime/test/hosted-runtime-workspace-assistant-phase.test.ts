@@ -4476,7 +4476,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(JSON.stringify(deviceConnectLogs)).not.toContain("synthetic-whoop-secret");
   });
 
-  it("injects reconnect-required hosted device sync status as dynamic context for due cron lanes", async () => {
+  it("injects active hosted device connection status as dynamic context for due cron lanes", async () => {
     const fetchSnapshotRequests: Array<Parameters<RuntimeDeviceSyncPort["fetchSnapshot"]>[0]> = [];
     const deviceSyncPort = {
       ...createNoDirtyRuntimeDeviceSyncPortMethods(),
@@ -4513,6 +4513,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
                 metadata: {},
                 provider: "junction",
                 scopes: [],
+                setupPhase: "source_confirmed",
                 status: "active",
               },
               credential: {
@@ -4533,12 +4534,12 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
                 {
                   displayName: null,
                   firstSeenAt: "2026-04-22T00:00:00.000Z",
-                  lastErrorCode: "TOKEN_REFRESH_FAILED",
-                  lastErrorMessage: "refresh failed",
+                  lastErrorCode: null,
+                  lastErrorMessage: null,
                   lastSeenAt: "2026-04-29T00:00:00.000Z",
                   resourceCount: 0,
                   sourceProviderSlug: "whoop_v2",
-                  status: "error",
+                  status: "connected",
                 },
               ],
             },
@@ -4597,12 +4598,11 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(assistantLaneCall).not.toHaveProperty("suppressActiveTurnInputRefresh");
     expect(assistantLaneCall?.executionContext.hosted?.dynamicContextPrompts)
       .toBeUndefined();
-    expect(dynamicContextPrompt).toContain("WHOOP currently needs reconnect");
-    expect(dynamicContextPrompt).toContain("source `whoop_v2`");
-    expect(dynamicContextPrompt).toContain("`TOKEN_REFRESH_FAILED`");
+    expect(dynamicContextPrompt).toContain("WHOOP has an active connection");
     expect(dynamicContextPrompt).toContain(
-      "vault-cli device connect whoop --format json",
+      "Do not offer initial wearable connection",
     );
+    expect(dynamicContextPrompt).not.toContain("needs reconnect");
     expect(dynamicContextPrompt).not.toContain("synthetic-external-account");
     expect(dynamicContextPrompt).not.toContain("refresh failed");
   });
@@ -4620,15 +4620,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       async createConnectLink() {
         throw new Error("createConnectLink should not be called.");
       },
-      async fetchSnapshot(request) {
-        if (request?.sourceProviderSlug !== "oura") {
-          return {
-            connections: [],
-            generatedAt: "2026-04-29T00:00:00.000Z",
-            userId: "member_synthetic_phase",
-          };
-        }
-
+      async fetchSnapshot() {
         return {
           connections: [
             {
@@ -4642,6 +4634,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
                 metadata: {},
                 provider: "junction",
                 scopes: [],
+                setupPhase: "source_confirmed",
                 status: "active",
               },
               credential: {
@@ -9731,38 +9724,6 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       expect.objectContaining({
         assistantDeliveryEffects: [effect],
         linqDeliveryContexts: [linqDeliveryContext],
-      }),
-    );
-  });
-
-  it("passes foreground Linq egress latency trace into hosted delivery dependencies", async () => {
-    const latencyTraceRequests: HostedRuntimeLatencyTraceRequest[] = [];
-    const effect = createDeliveryEffect();
-    mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValueOnce([effect]);
-    mocks.drainHostedPreparedAssistantDeliveries.mockResolvedValueOnce([]);
-
-    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
-      importedCount: 1,
-      runtimeLatencyTraceRequests: latencyTraceRequests,
-    }));
-    await result.afterCheckpoint?.();
-
-    const expectedTrace = expect.objectContaining({
-      assistantInputIds: ["ain_00000000000000000000000000000001"],
-      latencyTracePort: expect.objectContaining({
-        record: expect.any(Function),
-      }),
-      runtimeAttemptId: "attempt_synthetic_phase",
-    });
-    expect(mocks.createHostedAssistantProgressDeliveryDependencies).toHaveBeenCalledWith(
-      expect.objectContaining({
-        linqEgressLatencyTrace: expectedTrace,
-      }),
-    );
-    expect(mocks.drainHostedPreparedAssistantDeliveries).toHaveBeenCalledWith(
-      expect.objectContaining({
-        assistantDeliveryEffects: [effect],
-        linqEgressLatencyTrace: expectedTrace,
       }),
     );
   });

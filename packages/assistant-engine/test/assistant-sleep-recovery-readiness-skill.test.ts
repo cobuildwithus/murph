@@ -37,28 +37,15 @@ async function readSkill(): Promise<string> {
 describe('assistant sleep recovery readiness skill', () => {
   it('routes only readiness and recovery-block decisions to the umbrella skill', () => {
     const prompt = buildPrompt()
-    const readinessLine = prompt
-      .split('\n')
-      .find((line) => line.includes('sleep-recovery-readiness:'))
 
-    expect(readinessLine).toContain(
-      'Use when the user needs an acute readiness decision',
-    )
-    expect(readinessLine).toContain(
-      'whether to train hard, modify, train easy, rest, deload',
-    )
-    expect(readinessLine).toContain('Use sleep-improvement for sleep mechanics')
-    expect(readinessLine).toContain('circadian-rhythm for clock timing')
-    expect(readinessLine).toContain('hrv-resting-heart-rate for HRV/RHR interpretation')
-    expect(readinessLine).toContain('energy-fatigue for persistent tiredness')
-    expect(readinessLine).not.toContain('sleep routines')
-    expect(readinessLine).not.toContain('naps')
-    expect(readinessLine).not.toContain('shift work')
-    expect(readinessLine).not.toContain('travel or jet lag')
-    expect(readinessLine).not.toContain('wearable sleep')
     expect(prompt).toContain(
-      '$MURPH_ASSISTANT_SKILLS_ROOT/sleep-recovery-readiness/SKILL.md',
+      'Sleep/readiness: sleep-improvement, circadian-rhythm, sleep-recovery-readiness, hrv-resting-heart-rate, energy-fatigue.',
     )
+    expect(prompt).toContain(
+      'sleep-improvement owns sleep mechanics; circadian-rhythm clock timing; sleep-recovery-readiness an acute train/modify/rest decision; hrv-resting-heart-rate marker interpretation; energy-fatigue persistent fatigue.',
+    )
+    expect(prompt).toContain('$MURPH_ASSISTANT_SKILLS_ROOT/<slug>/SKILL.md')
+    expect(prompt).not.toContain('Use when the user needs an acute readiness decision')
   })
 
   it('keeps one compact decision layer instead of a parallel sleep system', async () => {

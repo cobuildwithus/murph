@@ -30,6 +30,7 @@ import {
   CLOUDFLARE_HOSTED_CONTROL_BROWSER_VAULT_REPLICA_NOT_FOUND_CODE,
   buildCloudflareHostedControlBrowserVaultSessionPath,
   buildCloudflareHostedControlRuntimeEnsureProcessingPath,
+  buildCloudflareHostedControlTelegramUsageLimitNoticePath,
   buildCloudflareHostedControlUserDataDeletionPath,
   buildCloudflareHostedControlUserStatusPath,
 } from "./routes.ts";
@@ -71,6 +72,23 @@ export interface CloudflareHostedControlUserDataDeletionResult {
   userId: string;
 }
 
+export interface CloudflareHostedControlTelegramUsageLimitNoticeRequest {
+  message: string;
+  replyToMessageId: string;
+  target: string;
+}
+
+export type CloudflareHostedControlTelegramUsageLimitNoticeResponse =
+  | {
+    status: "sent";
+  }
+  | {
+    failureCode: string;
+    retryAfterSeconds?: number;
+    retryable: boolean;
+    status: "failed";
+  };
+
 export interface CloudflareHostedControlClient {
   createBrowserVaultSession(input: {
     browserPublicKeyJwk: HostedUserRecipientPublicKeyJwk;
@@ -84,6 +102,11 @@ export interface CloudflareHostedControlClient {
     userId: string;
   }): Promise<CloudflareHostedControlRuntimeEnsureProcessingResponse>;
   getRunnerStatus(userId: string): Promise<HostedRunnerStatusResponse>;
+  sendTelegramUsageLimitNotice(input: {
+    onRequestAttempted?: () => Promise<void> | void;
+    request: CloudflareHostedControlTelegramUsageLimitNoticeRequest;
+    userId: string;
+  }): Promise<CloudflareHostedControlTelegramUsageLimitNoticeResponse>;
 }
 
 export interface CloudflareHostedControlRuntimeEnsureProcessingAcceptedAck {
@@ -111,6 +134,20 @@ export interface CloudflareHostedControlClientOptions {
 }
 
 const BROWSER_VAULT_REPLICA_NOT_FOUND_ERROR_MESSAGE = "Hosted execution browser vault replica was not found.";
+
+export function parseCloudflareHostedControlTelegramUsageLimitNoticeRequest(
+  value: unknown,
+): CloudflareHostedControlTelegramUsageLimitNoticeRequest {
+  const record = requireRecord(value, "Telegram usage-limit notice request");
+  return {
+    message: requireString(record.message, "Telegram usage-limit notice request message"),
+    replyToMessageId: requireString(
+      record.replyToMessageId,
+      "Telegram usage-limit notice request replyToMessageId",
+    ),
+    target: requireString(record.target, "Telegram usage-limit notice request target"),
+  };
+}
 
 export function createCloudflareHostedControlClient(
   options: CloudflareHostedControlClientOptions,
@@ -234,6 +271,31 @@ export function createCloudflareHostedControlClient(
         timeoutMs: options.timeoutMs,
       });
     },
+    sendTelegramUsageLimitNotice(input) {
+      const request = parseCloudflareHostedControlTelegramUsageLimitNoticeRequest(
+        input.request,
+      );
+      const userId = requireCloudflareHostedControlUserId(input.userId);
+
+      return requestHostedExecutionAuthorizedJson({
+        baseUrl,
+        boundUserId: userId,
+        fetchImpl,
+        getAuthorizationHeader,
+        label: "Telegram usage-limit notice",
+        onRequestAttempted: input.onRequestAttempted,
+        parse: parseCloudflareHostedControlTelegramUsageLimitNoticeResponse,
+        path: buildCloudflareHostedControlTelegramUsageLimitNoticePath(userId),
+        request: {
+          body: JSON.stringify(request),
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          method: "POST",
+        },
+        timeoutMs: options.timeoutMs,
+      });
+    },
   };
 }
 
@@ -251,6 +313,14 @@ class HostedExecutionHttpResponseError extends Error {
     this.code = input.code;
     this.status = input.status;
   }
+}
+
+export function readCloudflareHostedControlHttpError(
+  error: unknown,
+): Readonly<{ code: string | undefined; status: number }> | null {
+  return error instanceof HostedExecutionHttpResponseError
+    ? { code: error.code, status: error.status }
+    : null;
 }
 
 function isHostedExecutionHttpError(
@@ -527,6 +597,57 @@ function parseCloudflareHostedControlRuntimeEnsureProcessingResponse(
   return parseHostedRuntimeEnsureProcessingResponse(value);
 }
 
+function parseCloudflareHostedControlTelegramUsageLimitNoticeResponse(
+  value: unknown,
+): CloudflareHostedControlTelegramUsageLimitNoticeResponse {
+  const record = requireRecord(value, "Cloudflare Telegram usage-limit notice response");
+  const status = requireString(
+    record.status,
+    "Cloudflare Telegram usage-limit notice response status",
+  );
+
+  if (status === "failed") {
+    return {
+      failureCode: requireString(
+        record.failureCode,
+        "Cloudflare Telegram usage-limit notice response failureCode",
+      ),
+      ...readOptionalPositiveIntegerField(
+        record.retryAfterSeconds,
+        "retryAfterSeconds",
+      ),
+      retryable: requireBoolean(
+        record.retryable,
+        "Cloudflare Telegram usage-limit notice response retryable",
+      ),
+      status,
+    };
+  }
+
+  if (status !== "sent") {
+    throw new TypeError(
+      "Cloudflare Telegram usage-limit notice response status must be sent or failed.",
+    );
+  }
+
+  return { status };
+}
+
+function readOptionalPositiveIntegerField<Key extends string>(
+  value: unknown,
+  key: Key,
+): { [K in Key]?: number } {
+  if (value === undefined || value === null) {
+    return {};
+  }
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value <= 0) {
+    throw new TypeError(
+      `Cloudflare Telegram usage-limit notice response ${key} must be a positive integer.`,
+    );
+  }
+  return { [key]: value } as { [K in Key]?: number };
+}
+
 function assertHostedBrowserVaultReplicaRefMatches(
   actual: HostedBrowserVaultReplicaRef,
   expected: HostedBrowserVaultReplicaRef,
@@ -705,6 +826,7 @@ async function requestHostedExecutionAuthorizedJson<TResponse>(input: {
   onRuntimeEnsureProcessingTiming?: (
     timing: CloudflareHostedControlRuntimeEnsureProcessingTiming,
   ) => void;
+  onRequestAttempted?: () => Promise<void> | void;
   parse: (value: unknown) => TResponse;
   path: string;
   request: {
@@ -758,6 +880,8 @@ async function requestHostedExecutionAuthorizedJson<TResponse>(input: {
       String(directEnsureRequestStartedAtEpochMs),
     );
   }
+
+  await input.onRequestAttempted?.();
 
   const response = await input.fetchImpl(url.toString(), {
     ...(input.request.body === undefined ? {} : { body: input.request.body }),
@@ -834,6 +958,12 @@ function requireString(value: unknown, label: string): string {
   }
 
   return value;
+}
+
+function normalizeOptionalString(value: string | null | undefined): string | null {
+  return typeof value === "string" && value.trim().length > 0
+    ? value.trim()
+    : null;
 }
 
 function requireBoolean(value: unknown, label: string): boolean {

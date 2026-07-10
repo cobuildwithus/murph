@@ -19,7 +19,6 @@ import {
 
 const defaultWorkflowOptions = {
   ensureRuntimeProcessingStartToCloseTimeoutMs: 15_000,
-  readRuntimeReconciliationFactsStartToCloseTimeoutMs: 10_000,
 };
 
 describe("hostedUserRuntimeWorkflowId", () => {

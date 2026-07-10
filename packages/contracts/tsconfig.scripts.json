@@ -14,7 +14,8 @@
     "rootDir": "scripts",
     "outDir": "dist/scripts",
     "composite": false,
-    "incremental": false,
+    "incremental": true,
+    "tsBuildInfoFile": "tsconfig.scripts.tsbuildinfo",
     "declaration": false,
     "declarationMap": false
   },
