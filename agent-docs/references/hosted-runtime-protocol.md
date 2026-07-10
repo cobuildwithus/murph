@@ -753,7 +753,12 @@ snapshot producer. `canonical_runtime_commit` instead uploads exact canonical
 write receipts and publishes a receipt-log ref, bounded to 64 pending entries
 and 64 KiB, through a status-only workspace checkpoint that retains the prior
 snapshot ref. Capacity and log shape are validated before referenced payloads
-are uploaded. Cold restore replays that log over the prior snapshot and marks
+are uploaded. If that checkpoint has an ambiguous transport outcome, the
+Cloudflare workspace port retries the identical expected-version CAS once. It
+accepts a version-conflict response only when the active invocation fence still
+matches and the returned workspace is the exact requested successor, including
+the receipt fingerprint, snapshot ref, wake fields, and retention wake. Cold
+restore replays that log over the prior snapshot and marks
 affected context domains dirty; when the restored log is at the hard entry
 bound, the runtime consolidates it through an idle snapshot before foreground
 mailbox or assistant work. That recovery snapshot publishes an immediate
