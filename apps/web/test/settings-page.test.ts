@@ -20,6 +20,15 @@ const mocks = vi.hoisted(() => ({
       null,
       `Hosted account settings ${String(props.murphPhoneNumber ?? "")}`,
     )),
+  HostedAssistantModelSettings: vi.fn((props: {
+    initialModel: string;
+    solAvailable: boolean;
+  }) =>
+    React.createElement(
+      "div",
+      null,
+      `Hosted assistant model ${props.initialModel} ${String(props.solAvailable)}`,
+    )),
   HostedBillingSettings: vi.fn((props: {
     authenticated: boolean;
     canStartFamily?: boolean;
@@ -128,6 +137,10 @@ vi.mock("@/src/components/settings/hosted-billing-settings", () => ({
 
 vi.mock("@/src/components/settings/hosted-account-settings-cards", () => ({
   HostedAccountSettingsCards: mocks.HostedAccountSettingsCards,
+}));
+
+vi.mock("@/src/components/settings/hosted-assistant-model-settings", () => ({
+  HostedAssistantModelSettings: mocks.HostedAssistantModelSettings,
 }));
 
 vi.mock("@/src/components/settings/hosted-data-privacy-settings", () => ({
@@ -319,6 +332,10 @@ test("SettingsPage reads the app session and persisted account settings into the
     stripeSubscriptionId: "sub_123",
   });
   const accountSnapshot = {
+    assistant: {
+      model: "gpt-5.6-sol",
+      solAvailable: true,
+    },
     email: {
       address: "verified@example.com",
       verifiedAt: "2025-03-27T08:30:00.000Z",
@@ -342,13 +359,14 @@ test("SettingsPage reads the app session and persisted account settings into the
     }));
 
     assert.match(markup, /Hosted billing settings/);
+    assert.match(markup, /Hosted assistant model gpt-5\.6-sol true/);
     assert.match(markup, /Hosted account settings \+15550100001/);
     assert.match(markup, /Manage wearables/);
     assert.match(markup, /href="\/connect"/);
     assert.match(markup, /Hosted passkey settings true configured/);
     assert.match(markup, /Hosted data privacy settings/);
     assert.match(markup, /Your account/);
-    assert.match(markup, /Subscription, connected accounts, and data privacy\./);
+    assert.match(markup, /Plan, model, connected accounts, and data privacy\./);
     assert.doesNotMatch(markup, /ChatGPT/);
     assert.doesNotMatch(markup, /Data sources/);
     for (const removedCopy of [
@@ -369,6 +387,10 @@ test("SettingsPage reads the app session and persisted account settings into the
       currentCheckoutOffer: "standard",
       currentBillingPlanCode: "launch_monthly",
     }), undefined);
+    expect(mocks.HostedAssistantModelSettings).toHaveBeenCalledWith({
+      initialModel: "gpt-5.6-sol",
+      solAvailable: true,
+    }, undefined);
     expect(mocks.readHostedMemberRoutingState).toHaveBeenCalledWith({
       memberId: "member_123",
       prisma: mocks.prisma,

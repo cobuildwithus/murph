@@ -1,8 +1,10 @@
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
+import { HOSTED_ASSISTANT_TERRA_MODEL } from "@murphai/hosted-execution/assistant-model";
 
 import { HostedPrivyProvider } from "@/src/components/hosted-onboarding/privy-provider";
 import { HostedAccountSettingsCards } from "@/src/components/settings/hosted-account-settings-cards";
+import { HostedAssistantModelSettings } from "@/src/components/settings/hosted-assistant-model-settings";
 import { HostedBillingSettings } from "@/src/components/settings/hosted-billing-settings";
 import { HostedDataPrivacySettings } from "@/src/components/settings/hosted-data-privacy-settings";
 import { HostedFamilySettings } from "@/src/components/settings/hosted-family-settings";
@@ -121,7 +123,7 @@ export default async function SettingsPage({
       <PageHeader
         eyebrow="Settings"
         title="Your account"
-        description="Subscription, connected accounts, and data privacy."
+        description="Plan, model, connected accounts, and data privacy."
       />
 
       <section className="flex flex-col gap-4">
@@ -161,6 +163,16 @@ export default async function SettingsPage({
           currentPeriodEnd={billingRef?.currentPeriodEnd}
           scheduledBillingEffectiveAt={billingRef?.scheduledBillingEffectiveAt}
           scheduledBillingPlanCode={billingRef?.scheduledBillingPlanCode}
+        />
+      </section>
+
+      <section className="flex flex-col gap-4">
+        <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+          AI model
+        </div>
+        <HostedAssistantModelSettings
+          initialModel={account?.assistant?.model ?? HOSTED_ASSISTANT_TERRA_MODEL}
+          solAvailable={account?.assistant?.solAvailable === true}
         />
       </section>
 
