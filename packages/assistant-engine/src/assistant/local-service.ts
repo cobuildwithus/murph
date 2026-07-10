@@ -94,6 +94,7 @@ import {
   recordAdditionalAssistantUsageEvents,
   recordAssistantUsageEvent,
 } from './service-usage.js'
+import { maybeRunAssistantRuntimeMaintenance } from './runtime-budgets.js'
 import {
   type AssistantActiveTurnInputAdmissionResult,
 } from './turn-input.js'
@@ -368,7 +369,7 @@ export async function sendAssistantMessageLocal(
     executionContext,
   })
   const turnLockWaitStartedAt = Date.now()
-  return withAssistantTurnLock({
+  const runLockedTurn = () => withAssistantTurnLock({
     abortSignal: input.abortSignal,
     vault: input.vault,
     run: async () => {
@@ -1709,6 +1710,23 @@ export async function sendAssistantMessageLocal(
       }
     },
   })
+
+  try {
+    return await runLockedTurn()
+  } finally {
+    // The automation pass owns maintenance for auto-reply turns; every
+    // independently-started turn keeps a post-turn owner so direct ask/chat/
+    // assistantd use cannot grow runtime state (transcripts, event logs)
+    // without bound. Post-turn keeps it off the foreground reply path.
+    if (input.turnTrigger !== 'automation-auto-reply') {
+      await runAssistantTurnBestEffort(() =>
+        maybeRunAssistantRuntimeMaintenance({
+          signal: input.abortSignal ?? null,
+          vault: input.vault,
+        })
+      )
+    }
+  }
 }
 
 function assistantDeliveryOutcomeSupersedesTypingIndicatorForTarget(input: {
