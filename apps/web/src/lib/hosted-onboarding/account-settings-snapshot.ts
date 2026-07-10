@@ -4,8 +4,10 @@ import type {
   AssistantTonePreference,
   AssistantVoiceOptionId,
 } from "@murphai/contracts";
+import type { HostedAssistantProductModel } from "@murphai/hosted-execution/assistant-model";
 
 import { getPrisma } from "../prisma";
+import { readHostedMemberAssistantModelPreference } from "./assistant-model-preference";
 import { createHostedMemberReplyAliasRouteFromLookupKey } from "./hosted-email-reply-alias";
 import { readHostedMemberSnapshot } from "./hosted-member-store";
 import { readHostedMemberAssistantPreferences } from "./member-preferences";
@@ -17,6 +19,8 @@ import {
 
 export interface HostedAccountSettingsSnapshot {
   assistant?: {
+    model: HostedAssistantProductModel;
+    solAvailable: boolean;
     tone: AssistantTonePreference | null;
     voice: AssistantVoiceOptionId | null;
   };
@@ -46,12 +50,16 @@ export async function readHostedAccountSettingsSnapshot(input: {
   memberId: string;
 }): Promise<HostedAccountSettingsSnapshot> {
   const prisma = getPrisma();
-  const [snapshot, assistant] = await Promise.all([
+  const [snapshot, assistantPreferences, assistantModel] = await Promise.all([
     readHostedMemberSnapshot({
       memberId: input.memberId,
       prisma,
     }),
     readHostedMemberAssistantPreferences({
+      memberId: input.memberId,
+      prisma,
+    }),
+    readHostedMemberAssistantModelPreference({
       memberId: input.memberId,
       prisma,
     }),
@@ -65,7 +73,11 @@ export async function readHostedAccountSettingsSnapshot(input: {
   const telegramUserId = snapshot?.routing?.telegramUserId ?? null;
 
   return {
-    assistant,
+    assistant: {
+      model: assistantModel.model,
+      solAvailable: assistantModel.solAvailable,
+      ...assistantPreferences,
+    },
     email: {
       address: verifiedEmail?.address
         ?? snapshot?.emailAuthorization?.stripeCheckoutEmail?.address
