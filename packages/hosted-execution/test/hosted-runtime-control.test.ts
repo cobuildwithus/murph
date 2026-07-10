@@ -11,6 +11,14 @@ import {
   ASSISTANT_USAGE_SCHEMA,
   type AssistantUsageRecord,
 } from "../src/assistant-usage.ts";
+import {
+  HOSTED_ASSISTANT_MODEL_OVERRIDES,
+  HOSTED_ASSISTANT_PRODUCT_MODELS,
+  HOSTED_ASSISTANT_SOL_MODEL,
+  HOSTED_ASSISTANT_TERRA_MODEL,
+  isHostedAssistantProductModel,
+  parseHostedAssistantModelOverride,
+} from "../src/assistant-model.ts";
 
 import {
   HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA,
@@ -26,6 +34,8 @@ import {
   buildHostedAiUsageAllowDecisionBody,
   isHostedMailboxKind,
   isHostedMailboxLane,
+  isHostedRuntimeFutureMailboxContinuation,
+  isHostedRuntimeMailboxContinuation,
   normalizeHostedAiUsageAllowanceElevenLabsTtsModelId,
   normalizeHostedAiUsageAllowanceOpenAiImageModelId,
   normalizeHostedAiUsageAllowancePricedModelId,
@@ -71,6 +81,63 @@ import {
 } from "../src/parsers.ts";
 
 describe("hosted runtime control contracts", () => {
+  it("classifies typed and retryable mailbox continuations", () => {
+    expect(isHostedRuntimeMailboxContinuation({
+      nextWakeAt: "2026-04-27T00:00:15.000Z",
+      nextWakeReason: "mailbox",
+    })).toBe(true);
+    expect(isHostedRuntimeMailboxContinuation({
+      nextWakeAt: "2026-04-27T00:00:05.000Z",
+      nextWakeReason: "assistant",
+      redactedStatus: {
+        hostedMailboxRetryableBlockedCount: 1,
+      },
+    })).toBe(true);
+    expect(isHostedRuntimeMailboxContinuation({
+      nextWakeAt: "2026-04-27T00:00:05.000Z",
+      nextWakeReason: "assistant",
+      redactedStatus: {
+        hostedMailboxRetryableBlockedCount: 0,
+      },
+    })).toBe(false);
+    expect(() => isHostedRuntimeMailboxContinuation({
+      nextWakeAt: "2026-04-27T00:00:05.000Z",
+      redactedStatus: {
+        hostedMailboxRetryableBlockedCount: -1,
+      },
+    })).toThrow(/must be a non-negative integer/u);
+    expect(() => isHostedRuntimeMailboxContinuation({
+      nextWakeAt: "2026-04-27T00:00:05.000Z",
+      redactedStatus: {
+        hostedMailboxRetryableBlockedCount: false,
+      },
+    })).toThrow(/must be a non-negative integer/u);
+  });
+
+  it("classifies only future mailbox continuations for retry deferral", () => {
+    const nowMs = Date.parse("2026-04-27T00:00:10.000Z");
+
+    expect(isHostedRuntimeFutureMailboxContinuation({
+      nextWakeAt: "2026-04-27T00:00:15.000Z",
+      nextWakeReason: "mailbox",
+    }, nowMs)).toBe(true);
+    expect(isHostedRuntimeFutureMailboxContinuation({
+      nextWakeAt: "2026-04-27T00:00:10.000Z",
+      nextWakeReason: "mailbox",
+    }, nowMs)).toBe(false);
+    expect(isHostedRuntimeFutureMailboxContinuation({
+      nextWakeAt: "2026-04-27T00:00:15.000Z",
+      nextWakeReason: "assistant",
+    }, nowMs)).toBe(false);
+    expect(isHostedRuntimeFutureMailboxContinuation({
+      nextWakeAt: new Date("2026-04-27T00:00:15.000Z"),
+      nextWakeReason: "assistant",
+      redactedStatus: {
+        hostedMailboxRetryableBlockedCount: 1,
+      },
+    }, nowMs)).toBe(true);
+  });
+
   it("signs hosted AI usage allow decisions over the canonical decision body", async () => {
     const body = buildHostedAiUsageAllowDecisionBody({
       expiresAt: "2026-04-27T00:00:30.000Z",
@@ -227,6 +294,24 @@ describe("hosted runtime control contracts", () => {
     expect(normalizeHostedAiUsageAllowancePricedModelId("gpt-image-2")).toBeNull();
     expect(normalizeHostedAiUsageAllowancePricedModelId("gpt-5.4-mini")).toBeNull();
     expect(normalizeHostedAiUsageAllowancePricedModelId("gpt-4.1-mini-2026-04-23")).toBeNull();
+  });
+
+  it("keeps the hosted assistant product models narrower than deploy pricing support", () => {
+    expect(HOSTED_ASSISTANT_PRODUCT_MODELS).toEqual([
+      HOSTED_ASSISTANT_TERRA_MODEL,
+      HOSTED_ASSISTANT_SOL_MODEL,
+    ]);
+    expect(HOSTED_ASSISTANT_MODEL_OVERRIDES).toEqual([
+      HOSTED_ASSISTANT_SOL_MODEL,
+    ]);
+    expect(isHostedAssistantProductModel(HOSTED_ASSISTANT_TERRA_MODEL)).toBe(true);
+    expect(isHostedAssistantProductModel(HOSTED_ASSISTANT_SOL_MODEL)).toBe(true);
+    expect(isHostedAssistantProductModel("gpt-5.6-luna")).toBe(false);
+    expect(parseHostedAssistantModelOverride(HOSTED_ASSISTANT_SOL_MODEL))
+      .toBe(HOSTED_ASSISTANT_SOL_MODEL);
+    expect(parseHostedAssistantModelOverride(HOSTED_ASSISTANT_TERRA_MODEL))
+      .toBeNull();
+    expect(parseHostedAssistantModelOverride(" gpt-5.6-sol ")).toBeNull();
   });
 
   it("normalizes OpenAI image usage priced model aliases separately", () => {
@@ -402,14 +487,22 @@ describe("hosted runtime control contracts", () => {
       status: "scheduled",
     });
     expect(parseHostedWorkspaceInvocationResult({
+      immediateRecheckRequested: true,
       nextWakeAt: "2026-04-26T00:00:05.000Z",
       nextWakeReason: "assistant",
       status: "idle",
     })).toEqual({
+      immediateRecheckRequested: true,
       nextWakeAt: "2026-04-26T00:00:05.000Z",
       nextWakeReason: "assistant",
       status: "idle",
     });
+    expect(() => parseHostedWorkspaceInvocationResult({
+      immediateRecheckRequested: false,
+      status: "idle",
+    })).toThrow(
+      "Hosted workspace invocation result immediateRecheckRequested must be true when present.",
+    );
     expect(() => parseHostedWorkspaceInvocationResult({
       idleShutdownCheckpointed: true,
       status: "idle",
@@ -1366,11 +1459,29 @@ describe("hosted runtime control contracts", () => {
     });
     expect(parseHostedWorkspaceReadResponse({
       fetchedAt: "2026-04-26T00:00:02.000Z",
+      hostedAssistantModelOverride: HOSTED_ASSISTANT_SOL_MODEL,
       workspace: null,
     })).toEqual({
       fetchedAt: "2026-04-26T00:00:02.000Z",
+      hostedAssistantModelOverride: HOSTED_ASSISTANT_SOL_MODEL,
       workspace: null,
     });
+    for (const invalidOverride of [
+      null,
+      HOSTED_ASSISTANT_TERRA_MODEL,
+      "gpt-5.6-luna",
+      " gpt-5.6-sol ",
+      56,
+    ]) {
+      expect(parseHostedWorkspaceReadResponse({
+        fetchedAt: "2026-04-26T00:00:02.000Z",
+        hostedAssistantModelOverride: invalidOverride,
+        workspace: null,
+      })).toEqual({
+        fetchedAt: "2026-04-26T00:00:02.000Z",
+        workspace: null,
+      });
+    }
     expect(parseHostedWorkspaceCheckpointRequest({
       attemptId: "attempt_1",
       expectedWorkspaceVersion: "4",
@@ -1423,13 +1534,29 @@ describe("hosted runtime control contracts", () => {
     }
     expect(parseHostedWorkspaceCheckpointResponse({
       checkpointed: true,
+      conversationInputAhead: true,
       replacedSnapshotRef: null,
       workspace,
     })).toEqual({
       checkpointed: true,
+      conversationInputAhead: true,
       replacedSnapshotRef: null,
       workspace,
     });
+    expect(parseHostedWorkspaceCheckpointResponse({
+      checkpointed: true,
+      conversationInputAhead: false,
+      workspace,
+    })).toEqual({
+      checkpointed: true,
+      conversationInputAhead: false,
+      workspace,
+    });
+    expect(() => parseHostedWorkspaceCheckpointResponse({
+      checkpointed: true,
+      conversationInputAhead: null,
+      workspace,
+    })).toThrow(/conversationInputAhead must be a boolean/u);
     expect(parseHostedWorkspaceCheckpointResponse({
       checkpointConflictReason: "foreground_pending",
       checkpointed: false,

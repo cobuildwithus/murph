@@ -1116,51 +1116,83 @@ export function updateAccountTokens(
   });
 }
 
+export function disconnectAccountIfCurrentInTransaction(
+  database: DatabaseSync,
+  accountId: string,
+  now: string,
+  expectedLocalConnectionRevision: number | null,
+  expectedStatus: DeviceSyncAccountStatus | null,
+  expectedConnectedAt: string | null,
+): StoredDeviceSyncAccount | null {
+  const connectionResult = database.prepare(`
+    update device_connection
+    set status = 'disconnected',
+        setup_phase = null,
+        setup_expires_at = null,
+        disconnect_generation = disconnect_generation + 1,
+        updated_at = ?
+    where id = ?
+      and (? is null or status = ?)
+      and (? is null or connected_at = ?)
+      and (? is null or exists (
+        select 1
+        from device_observation_state
+        where device_observation_state.account_id = device_connection.id
+          and device_observation_state.local_connection_revision = ?
+      ))
+  `).run(
+    now,
+    accountId,
+    expectedStatus,
+    expectedStatus,
+    expectedConnectedAt,
+    expectedConnectedAt,
+    expectedLocalConnectionRevision,
+    expectedLocalConnectionRevision,
+  ) as { changes: number };
+
+  if ((connectionResult.changes ?? 0) === 0) {
+    return null;
+  }
+
+  database.prepare(`
+    update device_credential_state
+    set credential_kind = case
+          when credential_kind = 'oauth_tokens' then 'none'
+          else credential_kind
+        end,
+        provider_config_key = case
+          when credential_kind = 'oauth_tokens' then null
+          else provider_config_key
+        end,
+        access_token_encrypted = null,
+        refresh_token_encrypted = null,
+        access_token_expires_at = null,
+        updated_at = ?
+    where account_id = ?
+  `).run(now, accountId);
+
+  database.prepare(`
+    update device_observation_state
+    set last_sync_error_at = null,
+        last_error_code = null,
+        last_error_message = null,
+        next_reconcile_at = null,
+        local_connection_revision = local_connection_revision + 1,
+        local_token_revision = local_token_revision + 1,
+        updated_at = ?
+    where account_id = ?
+  `).run(now, accountId);
+
+  return getAccountById(database, accountId);
+}
+
 export function disconnectAccount(
   database: DatabaseSync,
   accountId: string,
   now: string,
 ): StoredDeviceSyncAccount {
-  withImmediateTransaction(database, () => {
-    database.prepare(`
-      update device_connection
-      set status = 'disconnected',
-          setup_phase = null,
-          setup_expires_at = null,
-          disconnect_generation = disconnect_generation + 1,
-          updated_at = ?
-      where id = ?
-    `).run(now, accountId);
-
-    database.prepare(`
-      update device_credential_state
-      set credential_kind = case
-            when credential_kind = 'oauth_tokens' then 'none'
-            else credential_kind
-          end,
-          provider_config_key = case
-            when credential_kind = 'oauth_tokens' then null
-            else provider_config_key
-          end,
-          access_token_encrypted = null,
-          refresh_token_encrypted = null,
-          access_token_expires_at = null,
-          updated_at = ?
-      where account_id = ?
-    `).run(now, accountId);
-
-    database.prepare(`
-      update device_observation_state
-      set last_sync_error_at = null,
-          last_error_code = null,
-          last_error_message = null,
-          next_reconcile_at = null,
-          local_connection_revision = local_connection_revision + 1,
-          local_token_revision = local_token_revision + 1,
-          updated_at = ?
-      where account_id = ?
-    `).run(now, accountId);
-  });
-
-  return getAccountById(database, accountId)!;
+  return withImmediateTransaction(database, () =>
+    disconnectAccountIfCurrentInTransaction(database, accountId, now, null, null, null)
+  )!;
 }

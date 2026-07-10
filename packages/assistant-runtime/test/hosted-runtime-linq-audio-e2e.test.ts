@@ -184,18 +184,15 @@ describe("hosted Linq audio conversation ingestion", () => {
       let state = createEmptyHostedMailboxImportState();
 
       await assert.rejects(
-        withTestTimeout(
-          fetchAndProcessHostedMailboxPrefix({
-            expectedUserId: "member_linq_audio",
-            importItem: (item) => importItem(item, { signal: controller.signal }),
-            lanes: ["conversation"],
-            limitPerLane: 10,
-            mailboxPort: mailboxPort.port,
-            requestId: "linq-audio-abort-first",
-            state,
-          }),
-          "aborted mailbox import did not settle",
-        ),
+        fetchAndProcessHostedMailboxPrefix({
+          expectedUserId: "member_linq_audio",
+          importItem: (item) => importItem(item, { signal: controller.signal }),
+          lanes: ["conversation"],
+          limitPerLane: 10,
+          mailboxPort: mailboxPort.port,
+          requestId: "linq-audio-abort-first",
+          state,
+        }),
         (error) => error === abortReason,
       );
 

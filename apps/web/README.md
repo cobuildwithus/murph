@@ -38,6 +38,15 @@ authenticated execution intents, restores encrypted runtime state, runs a
 workspace-runtime pass, and checkpoints through the web-owned workspace CAS. It may hold
 opaque encrypted runtime blobs and explicit execution-time callback data, but it is not the
 canonical owner of hosted product facts.
+When a valid `idle_shutdown` checkpoint matches the locked workspace version,
+web commits it even if a newer durable conversation row is pending. The same CAS
+commits the request snapshot, redacted watermarks, and wake projection as one
+prefix, and Web returns the optional transient
+`conversationInputAhead` observation so a live default-mode runtime can import
+immediately; during retention-only work or shutdown, the durable mailbox row
+remains the recovery source. Current
+web does not return `foreground_pending`; that response remains runner/parser
+compatibility for old web deployments only.
 Hosted device-sync provider registration is intentionally shared with
 `@murphai/device-syncd/config`; `apps/web` should reuse that assembly path
 instead of maintaining an app-local provider list or provider-config object.
@@ -490,6 +499,17 @@ Callback auth contract:
 - Hosted member private fields, device-sync credentials, mailbox payloads, and
   runtime execution state use signed hosted domain-root secure-box envelopes;
   lookup fingerprints/indexes use separate HMAC-only keys.
+- `POST /api/internal/hosted-runtime/owner-released` is the payload-free
+  completion handoff. Web accepts a zero-byte body and either no query or the
+  exact signature-bound `immediateRecheckRequested=1` positive edge, binds the
+  user through the signed request plus normal nonce protection, and emits the
+  existing `runtime_recheck_requested` Temporal signal. Without the edge, Web
+  signals only for current runnable mailbox lag; a persisted default or
+  retention wake is not itself signal authority. The edge means the completed
+  invocation newly committed an unserviced schedule and carries no wake data.
+  Known future mailbox retry continuations remain deferred. Cloudflare calls the
+  route at most once, with a timeout capped at two seconds, only after exact
+  write-fence completion; failure is non-fatal and has no callback retry.
 
 When you set `DEVICE_SYNC_PUBLIC_BASE_URL`, point it at the stable production
 project domain or a custom domain. Do not use ephemeral preview deployment URLs
@@ -763,6 +783,7 @@ Internal hosted maintenance and Cloudflare callback routes:
 - `POST /api/internal/hosted-mailbox/email-ingress`
 - `GET /api/internal/hosted-runtime/status`
 - `POST /api/internal/hosted-runtime/log`
+- `POST /api/internal/hosted-runtime/owner-released`
 - `GET /api/internal/hosted-workspace`
 - `POST /api/internal/hosted-workspace/checkpoint`
 - `POST /api/internal/computer/runs`
@@ -777,7 +798,8 @@ are gone. Cloudflare no longer round-trips through broad mirror CRUD routes,
 deleted sharing CRUD, local-vault import callbacks, or an outbox drain route. It
 still uses narrow signed hosted-web callbacks for execution-time device-sync
 runtime snapshot/apply, device connect-link starts, direct hosted usage
-recording, and mailbox/workspace runtime status plus log callbacks.
+recording, mailbox/workspace runtime status plus log callbacks, and the
+payload-free runtime owner-release recheck handoff.
 
 ## Hosted onboarding routes
 
@@ -834,3 +856,33 @@ Current hosted billing assumptions:
   `HOSTED_AUTO_PULSE_TRIAL_ENABLED=0` only to force card checkout fallback.
 - Card-based Pulse Trial checkout fallback is gated by
   `HOSTED_PULSE_TRIAL_CHECKOUT_ENABLED=1`.
+- The one-time `apps/web/scripts/extend-pulse-trials.ts` production script owns
+  the fixed `pulse-beta-extension-2026-07` beta campaign. It defaults to an
+  aggregate-only dry run; Apply additionally requires the exact campaign key.
+  Run it through `vercel env run --environment=production` with
+  `NODE_OPTIONS=--conditions=react-server`, as shown by the script's `--help`.
+  Before running even the production dry run, freeze production deploys and
+  rollbacks, record the exact lock-capable deployed SHA, and use
+  `apps/web/scripts/resolve-vercel-production-alias-sha.ts` with the secure
+  `HOSTED_WEB_VERCEL_*` operator environment to prove the production alias
+  points at that SHA. Start a 1,140-second (19-minute) drain from that proof.
+  An old Start-paid invocation can make up to three sequential Stripe calls at
+  the pinned six-minute per-call provider budget; the remaining minute covers
+  local completion margin. Resolve the production alias again after the drain;
+  if it changed, select a lock-capable SHA and restart the full drain. Run the
+  campaign dry run only after the exact SHA recheck, investigate unexpected
+  failures or skips, and recheck the alias once more immediately before Apply.
+  Record the intended SHA, both alias proofs, elapsed drain, campaign results,
+  and final zero-work dry run as the rollout evidence.
+  It extends each Stripe-authoritative current trial from its existing end by
+  exactly seven days, then reconciles only the matching local billing and
+  usage-period end timestamps under that lock, so paid conversion cannot be
+  followed by a stale local trial restoration. A Stripe metadata marker makes
+  Apply safe to retry without resetting the original trial start or recorded
+  usage. Keep the first lock-capable deployment live from the initial alias
+  proof through Apply and the confirming dry run; this is the campaign rollback
+  floor. If production rolls below it, stop Apply, redeploy a lock-capable SHA,
+  and repeat the alias proof plus 1,140-second drain. After Apply, rerun the dry
+  run and confirm `wouldExtend` and `wouldReconcile` are both zero with every
+  unexpected failure or skip resolved before ending the deploy freeze or
+  retiring the campaign script, service, focused tests, and this note.

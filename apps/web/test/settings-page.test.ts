@@ -9,16 +9,40 @@ const mocks = vi.hoisted(() => ({
   getHostedPageAuthSnapshot: vi.fn(),
   getHostedPrivySession: vi.fn(),
   getPrisma: vi.fn(),
+  CustomizeMurphSettings: vi.fn((props: {
+    assistant?: unknown;
+    murphPhoneNumber?: string | null;
+    openVoiceLink?: boolean;
+    voiceTestContactOption?: unknown;
+  }) =>
+    React.createElement(
+      "div",
+      null,
+      `Customize murph settings ${String(props.murphPhoneNumber ?? "")}`,
+    )),
   HostedAccountSettingsCards: vi.fn((props: {
     account: unknown;
     murphPhoneNumber?: string | null;
     openEmailLink?: boolean;
-    openVoiceLink?: boolean;
   }) =>
     React.createElement(
       "div",
       null,
       `Hosted account settings ${String(props.murphPhoneNumber ?? "")}`,
+    )),
+  resolveHostedMurphContactOption: vi.fn(async () => ({
+    href: "sms:+15550100001?body=voice%20test",
+    kind: "text",
+    label: "Messages",
+  })),
+  HostedAssistantModelSettings: vi.fn((props: {
+    initialModel: string;
+    solAvailable: boolean;
+  }) =>
+    React.createElement(
+      "div",
+      null,
+      `Hosted assistant model ${props.initialModel} ${String(props.solAvailable)}`,
     )),
   HostedBillingSettings: vi.fn((props: {
     authenticated: boolean;
@@ -128,6 +152,18 @@ vi.mock("@/src/components/settings/hosted-billing-settings", () => ({
 
 vi.mock("@/src/components/settings/hosted-account-settings-cards", () => ({
   HostedAccountSettingsCards: mocks.HostedAccountSettingsCards,
+}));
+
+vi.mock("@/src/components/settings/customize-murph-settings", () => ({
+  CustomizeMurphSettings: mocks.CustomizeMurphSettings,
+}));
+
+vi.mock("@/src/components/murph/hosted-murph-contact-action", () => ({
+  resolveHostedMurphContactOption: mocks.resolveHostedMurphContactOption,
+}));
+
+vi.mock("@/src/components/settings/hosted-assistant-model-settings", () => ({
+  HostedAssistantModelSettings: mocks.HostedAssistantModelSettings,
 }));
 
 vi.mock("@/src/components/settings/hosted-data-privacy-settings", () => ({
@@ -319,6 +355,10 @@ test("SettingsPage reads the app session and persisted account settings into the
     stripeSubscriptionId: "sub_123",
   });
   const accountSnapshot = {
+    assistant: {
+      model: "gpt-5.6-sol",
+      solAvailable: true,
+    },
     email: {
       address: "verified@example.com",
       verifiedAt: "2025-03-27T08:30:00.000Z",
@@ -342,13 +382,14 @@ test("SettingsPage reads the app session and persisted account settings into the
     }));
 
     assert.match(markup, /Hosted billing settings/);
+    assert.match(markup, /Hosted assistant model gpt-5\.6-sol true/);
     assert.match(markup, /Hosted account settings \+15550100001/);
     assert.match(markup, /Manage wearables/);
     assert.match(markup, /href="\/connect"/);
     assert.match(markup, /Hosted passkey settings true configured/);
     assert.match(markup, /Hosted data privacy settings/);
     assert.match(markup, /Your account/);
-    assert.match(markup, /Subscription, connected accounts, and data privacy\./);
+    assert.match(markup, /Plan, model, connected accounts, and data privacy\./);
     assert.doesNotMatch(markup, /ChatGPT/);
     assert.doesNotMatch(markup, /Data sources/);
     for (const removedCopy of [
@@ -369,6 +410,10 @@ test("SettingsPage reads the app session and persisted account settings into the
       currentCheckoutOffer: "standard",
       currentBillingPlanCode: "launch_monthly",
     }), undefined);
+    expect(mocks.HostedAssistantModelSettings).toHaveBeenCalledWith({
+      initialModel: "gpt-5.6-sol",
+      solAvailable: true,
+    }, undefined);
     expect(mocks.readHostedMemberRoutingState).toHaveBeenCalledWith({
       memberId: "member_123",
       prisma: mocks.prisma,
@@ -395,14 +440,25 @@ test("SettingsPage reads the app session and persisted account settings into the
       ],
     });
     expect(mocks.HostedAccountSettingsCards).toHaveBeenCalledWith(expect.objectContaining({
-      openEmailLink: true,
-      openVoiceLink: true,
-    }), undefined);
-    expect(mocks.HostedAccountSettingsCards).toHaveBeenCalledWith(expect.objectContaining({
       account: accountSnapshot,
       murphPhoneNumber: "+15550100001",
       openEmailLink: true,
     }), undefined);
+    expect(mocks.CustomizeMurphSettings).toHaveBeenCalledWith(expect.objectContaining({
+      murphPhoneNumber: "+15550100001",
+      openVoiceLink: true,
+      voiceTestContactOption: {
+        href: "sms:+15550100001?body=voice%20test",
+        kind: "text",
+        label: "Messages",
+      },
+    }), undefined);
+    expect(mocks.resolveHostedMurphContactOption).toHaveBeenCalledWith({
+      message: {
+        body: "just picked a new voice for you! send me a voice memo so I can hear it",
+      },
+      preferredKind: "text",
+    });
     expect(mocks.HostedPasskeySettings).toHaveBeenCalledWith(expect.objectContaining({
       authenticated: true,
       secureApprovalStatus: { status: "configured" },
@@ -469,6 +525,52 @@ test("SettingsPage passes a pending Murph text line to account settings", async 
   expect(mocks.HostedAccountSettingsCards).toHaveBeenCalledWith(expect.objectContaining({
     account: accountSnapshot,
     murphPhoneNumber: "+15550100003",
+  }), undefined);
+});
+
+test("SettingsPage drops the voice-test chat link for an email-only member", async () => {
+  mocks.getPrisma.mockReturnValue(mocks.prisma);
+  mocks.getHostedPrivySession.mockResolvedValue(null);
+  mocks.getHostedPageAuthSnapshot.mockResolvedValue({
+    authenticated: true,
+    authenticatedMember: {
+      billingStatus: "active",
+      id: "member_123",
+      suspendedAt: null,
+    },
+    linkedAccounts: [],
+    memberLookup: null,
+    session: {
+      privyUserId: "did:privy:user_123",
+    },
+  });
+  mocks.readHostedMemberRoutingState.mockResolvedValue(null);
+  mocks.readHostedMemberStripeBillingRef.mockResolvedValue(null);
+  mocks.readHostedAccountSettingsSnapshot.mockResolvedValue({
+    email: {
+      address: "member@example.com",
+      verifiedAt: "2025-03-27T08:30:00.000Z",
+    },
+    phone: {
+      number: null,
+      verifiedAt: null,
+    },
+    telegram: {
+      telegramUserId: null,
+    },
+  });
+  mocks.resolveHostedMurphContactOption.mockResolvedValueOnce({
+    href: "mailto:murph@mail.withmurph.ai?body=test",
+    kind: "email",
+    label: "Email",
+  });
+
+  const { default: SettingsPage } = await import("../app/(dashboard)/settings/page");
+
+  renderToStaticMarkup(await SettingsPage());
+
+  expect(mocks.CustomizeMurphSettings).toHaveBeenCalledWith(expect.objectContaining({
+    voiceTestContactOption: null,
   }), undefined);
 });
 
