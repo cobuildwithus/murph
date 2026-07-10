@@ -9,6 +9,7 @@ import { DEVICE_SYNC_METADATA_MAX_STRING_LENGTH } from "../src/metadata.ts";
 import {
   buildHostedExecutionDeviceSyncConnectLinkPath,
   isHostedRuntimeIdShapedDiagnosticToken,
+  mergeGuardedJunctionHistoricalBackfillMetadata,
   mergeHostedDeviceSyncConnectionMetadata,
   normalizeHostedDeviceSyncJobHints,
   parseHostedExecutionDeviceSyncConnectLinkResponse,
@@ -457,6 +458,26 @@ describe("mergeHostedDeviceSyncConnectionMetadata", () => {
         windowEnd: "2026-03-20T00:00:00.000Z",
       })).toBeNull();
     }
+  });
+});
+
+describe("mergeGuardedJunctionHistoricalBackfillMetadata", () => {
+  it("preserves opaque future historical state without retaining ordinary seed metadata", () => {
+    expect(mergeGuardedJunctionHistoricalBackfillMetadata({
+      existingMetadata: {
+        junctionHistoricalBackfillEvidence: "e2|opaque-future-evidence",
+        junctionHistoricalBackfillStatus: "coverage_v3_deferred",
+        seedOnlyState: "discard",
+      },
+      replacementMetadata: {
+        callbackOutcome: "complete",
+        junctionHistoricalBackfillStatus: "coverage_v2_retrying",
+      },
+    })).toEqual({
+      callbackOutcome: "complete",
+      junctionHistoricalBackfillEvidence: "e2|opaque-future-evidence",
+      junctionHistoricalBackfillStatus: "coverage_v3_deferred",
+    });
   });
 });
 

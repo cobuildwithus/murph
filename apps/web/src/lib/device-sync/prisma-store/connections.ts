@@ -1,6 +1,9 @@
 import { Prisma, PrismaClient } from "@prisma/client";
 import { deviceSyncError } from "@murphai/device-syncd/errors";
 import {
+  mergeGuardedJunctionHistoricalBackfillMetadata,
+} from "@murphai/device-syncd/hosted-runtime";
+import {
   isEstablishedDeviceSyncConnection,
   toRedactedPublicDeviceSyncAccount,
 } from "@murphai/device-syncd/public-account";
@@ -137,7 +140,7 @@ export class PrismaHostedConnectionStore {
   ): Promise<UpsertPublicDeviceSyncConnectionResult> {
     const ownerId = normalizeNullableString(input.ownerId);
     const displayName = normalizeNullableString(input.displayName);
-    const metadata = sanitizeHostedDeviceSyncConnectionMetadata(input.metadata ?? {});
+    const replacementMetadata = sanitizeHostedDeviceSyncConnectionMetadata(input.metadata ?? {});
     const scopes = normalizeStoredScopes(input.scopes);
     const connectedAt = new Date(input.connectedAt);
     const requestedStatus = input.status === undefined
@@ -196,6 +199,15 @@ export class PrismaHostedConnectionStore {
         }
 
         assertNoActiveHostedConnectionRefreshLease(existing, connectedAt);
+
+        const metadata = input.provider === "junction" && input.existingAccountGuard
+          ? sanitizeHostedDeviceSyncConnectionMetadata(
+              mergeGuardedJunctionHistoricalBackfillMetadata({
+                existingMetadata: mapHostedConnectionRecord(existing).metadata,
+                replacementMetadata,
+              }),
+            )
+          : replacementMetadata;
 
         const credentialWrite = await buildHostedConnectionCredentialWrite({
           connectionId: existing.id,
@@ -284,7 +296,7 @@ export class PrismaHostedConnectionStore {
             value: input.externalAccountId,
           }),
           id: connectionId,
-          metadataJson: toPrismaJsonObject(metadata),
+          metadataJson: toPrismaJsonObject(replacementMetadata),
           nextReconcileAt: maybeDate(input.nextReconcileAt),
           provider: input.provider,
           providerAccountBlindIndex,
