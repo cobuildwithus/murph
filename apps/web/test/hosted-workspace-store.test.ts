@@ -18,7 +18,6 @@ import { describe, expect, it, vi } from "vitest";
 import {
   checkpointHostedWorkspaceTx,
   ensureHostedWorkspace,
-  publishHostedBrowserVaultReplicaRef,
   publishLatestBrowserVaultReplicaRefTx,
   projectHostedRuntimeLog,
   readAcceptedRuntimeAttemptFailureSignalOwnerLogId,
@@ -27,9 +26,6 @@ import {
   type HostedWorkspaceTransactionRunner,
   type HostedWorkspaceRow,
 } from "@/src/lib/hosted-workspace/store";
-import {
-  publishLegacySourceHashBrowserVaultReplicaRefTx,
-} from "@/src/lib/hosted-workspace/legacy-source-hash-browser-vault";
 
 const FIXED_NOW = new Date("2026-04-26T00:00:00.000Z");
 
@@ -1331,180 +1327,6 @@ describe("hosted workspace store", () => {
     });
   });
 
-  it("publishes legacy source-hash browser-vault refs against the working delta hash", async () => {
-    const snapshotRef = createWorkingSnapshotRef({
-      base: createBundleRef("snapshot_2"),
-      delta: createBundleRef("delta_2"),
-    });
-    const replicaRef = createBrowserVaultReplicaRef("delta_2_hash");
-    const hostedWorkspace = createHostedWorkspaceDelegate({
-      findUnique: vi.fn<HostedWorkspaceFindUnique>(async () => buildHostedWorkspaceRow({
-        snapshotRef,
-        version: 5n,
-      })),
-      updateMany: vi.fn<HostedWorkspaceUpdateMany>(async () => ({ count: 1 })),
-    });
-    const tx = createHostedWorkspaceTx({
-      hostedWorkspace,
-    });
-
-    await publishLegacySourceHashBrowserVaultReplicaRefTx({
-      expectedSourceStateHash: "delta_2_hash",
-      replicaRef,
-      tx,
-      userId: "member_workspace_1",
-    });
-
-    expect(hostedWorkspace.updateMany).toHaveBeenCalledWith({
-      data: {
-        browserVaultReplicaRef: replicaRef,
-      },
-      where: {
-        browserVaultReplicaRef: {
-          equals: Prisma.DbNull,
-        },
-        userId: "member_workspace_1",
-        version: 5n,
-      },
-    });
-  });
-
-  it("rejects legacy source-hash browser-vault publishes for the wrong replica source hash", async () => {
-    const hostedWorkspace = createHostedWorkspaceDelegate();
-    const tx = createHostedWorkspaceTx({
-      hostedWorkspace,
-    });
-
-    await expect(publishLegacySourceHashBrowserVaultReplicaRefTx({
-      expectedSourceStateHash: "snapshot_2_hash",
-      replicaRef: createBrowserVaultReplicaRef("delta_2_hash"),
-      tx,
-      userId: "member_workspace_1",
-    })).rejects.toThrow(
-      "Legacy hosted browser-vault replica publish sourceBundleHash must match expectedSourceStateHash.",
-    );
-    expect(hostedWorkspace.updateMany).not.toHaveBeenCalled();
-  });
-
-  it("rejects legacy source-hash browser-vault publishes when the workspace source advanced", async () => {
-    const replicaRef = createBrowserVaultReplicaRef("delta_2_hash");
-    const current = buildHostedWorkspaceRow({
-      snapshotRef: createWorkingSnapshotRef({
-        base: createBundleRef("snapshot_2"),
-        delta: createBundleRef("delta_3"),
-      }),
-      version: 6n,
-    });
-    const hostedWorkspace = createHostedWorkspaceDelegate({
-      findUnique: vi.fn<HostedWorkspaceFindUnique>(async () => current),
-    });
-    const tx = createHostedWorkspaceTx({
-      hostedWorkspace,
-    });
-
-    const result = await publishLegacySourceHashBrowserVaultReplicaRefTx({
-      expectedSourceStateHash: "delta_2_hash",
-      replicaRef,
-      tx,
-      userId: "member_workspace_1",
-    });
-
-    expect(result).toMatchObject({
-      status: "conflict",
-      workspace: {
-        snapshotRef: current.snapshotRef,
-        version: "6",
-      },
-    });
-    expect(hostedWorkspace.updateMany).not.toHaveBeenCalled();
-  });
-
-  it("does not retry legacy source-hash browser-vault ref publishes across an expected runtime workspace version", async () => {
-    const snapshotRef = createWorkingSnapshotRef({
-      base: createBundleRef("snapshot_2"),
-      delta: createBundleRef("delta_2"),
-    });
-    const replicaRef = createBrowserVaultReplicaRef("delta_2_hash");
-    const firstRead = buildHostedWorkspaceRow({
-      snapshotRef,
-      version: 6n,
-    });
-    const racedRead = buildHostedWorkspaceRow({
-      nextWakeReason: "checkpoint-race",
-      snapshotRef,
-      version: 7n,
-    });
-    const findUniqueRows = [firstRead, racedRead];
-    const findUnique = vi.fn<HostedWorkspaceFindUnique>(async () => findUniqueRows.shift() ?? racedRead);
-    const updateMany = vi.fn<HostedWorkspaceUpdateMany>()
-      .mockResolvedValueOnce({ count: 0 })
-      .mockResolvedValueOnce({ count: 1 });
-    const hostedWorkspace = createHostedWorkspaceDelegate({
-      findUnique,
-      updateMany,
-    });
-    const tx = createHostedWorkspaceTx({
-      hostedWorkspace,
-    });
-
-    const result = await publishLegacySourceHashBrowserVaultReplicaRefTx({
-      expectedSourceStateHash: "delta_2_hash",
-      expectedWorkspaceVersion: "6",
-      replicaRef,
-      tx,
-      userId: "member_workspace_1",
-    });
-
-    expect(updateMany).toHaveBeenCalledOnce();
-    expect(result).toMatchObject({
-      status: "conflict",
-      workspace: {
-        browserVaultReplicaRef: null,
-        nextWakeReason: "checkpoint-race",
-        version: "7",
-      },
-    });
-  });
-
-  it("rejects legacy source-hash browser-vault publishes older than the stored latest ref", async () => {
-    const snapshotRef = createWorkingSnapshotRef({
-      base: createBundleRef("snapshot_2"),
-      delta: createBundleRef("delta_2"),
-    });
-    const current = buildHostedWorkspaceRow({
-      browserVaultReplicaRef: createBrowserVaultReplicaRef("delta_2_hash", {
-        generatedAt: "2026-04-26T00:05:00.000Z",
-      }),
-      snapshotRef,
-      version: 6n,
-    });
-    const hostedWorkspace = createHostedWorkspaceDelegate({
-      findUnique: vi.fn<HostedWorkspaceFindUnique>(async () => current),
-      updateMany: vi.fn<HostedWorkspaceUpdateMany>(async () => ({ count: 1 })),
-    });
-    const tx = createHostedWorkspaceTx({
-      hostedWorkspace,
-    });
-
-    const result = await publishLegacySourceHashBrowserVaultReplicaRefTx({
-      expectedSourceStateHash: "delta_2_hash",
-      replicaRef: createBrowserVaultReplicaRef("delta_2_hash", {
-        generatedAt: "2026-04-26T00:01:00.000Z",
-      }),
-      tx,
-      userId: "member_workspace_1",
-    });
-
-    expect(result).toMatchObject({
-      status: "conflict",
-      workspace: {
-        snapshotRef,
-        version: "6",
-      },
-    });
-    expect(hostedWorkspace.updateMany).not.toHaveBeenCalled();
-  });
-
   it("publishes live latest-ref browser-vault refs without coupling them to workspace snapshot source", async () => {
     const replicaRef = createBrowserVaultReplicaRef("delta_2_hash");
     const current = buildHostedWorkspaceRow({
@@ -1538,44 +1360,6 @@ describe("hosted workspace store", () => {
       workspace: {
         browserVaultReplicaRef: replicaRef,
         snapshotRef: current.snapshotRef,
-        version: "6",
-      },
-    });
-    expect(hostedWorkspace.updateMany).toHaveBeenCalledOnce();
-  });
-
-  it("keeps the old hosted browser-vault publish name as a latest-ref compatibility wrapper", async () => {
-    const replicaRef = createBrowserVaultReplicaRef("delta_2_hash");
-    const current = buildHostedWorkspaceRow({
-      snapshotRef: createWorkingSnapshotRef({
-        base: createBundleRef("snapshot_2"),
-        delta: createBundleRef("delta_3"),
-      }),
-      version: 6n,
-    });
-    const updated = buildHostedWorkspaceRow({
-      browserVaultReplicaRef: replicaRef,
-      snapshotRef: current.snapshotRef,
-      version: 6n,
-    });
-    const findUniqueRows = [current, updated];
-    const hostedWorkspace = createHostedWorkspaceDelegate({
-      findUnique: vi.fn<HostedWorkspaceFindUnique>(async () => findUniqueRows.shift() ?? updated),
-    });
-    const prisma = createHostedWorkspaceClient({
-      hostedWorkspace,
-    });
-
-    const result = await publishHostedBrowserVaultReplicaRef({
-      prisma,
-      replicaRef,
-      userId: "member_workspace_1",
-    });
-
-    expect(result).toMatchObject({
-      status: "published",
-      workspace: {
-        browserVaultReplicaRef: replicaRef,
         version: "6",
       },
     });
@@ -1669,22 +1453,6 @@ describe("hosted runtime log store", () => {
       messageReactionsAvailable: true,
       unallowlistedDetail: "DROP_THIS",
     });
-  });
-
-  it("projects legacy reconnect notice runtime log codes", () => {
-    for (const eventCode of [
-      "device-sync.reconnect_notice_created",
-      "device-sync.reconnect_notice_duplicate",
-      "device-sync.reconnect_notice_skipped",
-    ]) {
-      expect(projectHostedRuntimeLog(buildHostedRuntimeLogRow({
-        component: "device-sync",
-        eventCode,
-        mailboxLane: null,
-        phase: "invoke",
-        redactedJson: {},
-      })).eventCode).toBe(eventCode);
-    }
   });
 
   it("persists sanitized device-sync provider failure diagnostics", async () => {

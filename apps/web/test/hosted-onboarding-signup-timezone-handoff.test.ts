@@ -69,7 +69,7 @@ vi.mock("@/src/lib/hosted-onboarding/privy", async (importOriginal) => {
   };
 });
 
-import { completeHostedPrivyVerification } from "@/src/lib/hosted-onboarding/member-service";
+import { completeHostedPrivyVerification } from "@/src/lib/hosted-onboarding/authentication-service";
 
 const NOW = new Date("2026-06-21T12:00:00.000Z");
 const MEMBER = {

@@ -97,7 +97,7 @@ export function AuthDialog({
   open,
   onOpenChange,
   title = "Log in or sign up",
-  description = "Discover what actually makes you healthier.",
+  description = "Whatever your goal, you don’t have to hit it alone.",
   onCompleted,
   requireLaunchConsentOnCompletion = false,
   showPassiveLegalNotice = false,

@@ -57,6 +57,58 @@ export default async function OGImage() {
             "radial-gradient(circle at 90% 0%, #e7ddc8 0%, #f0e9db 40%, #f5f0e8 70%)",
         }}
       >
+        {/* Dot-grid texture echoing the logo motif, quieted behind the text.
+            Drawn as elements: satori does not tile background gradients. */}
+        <div
+          style={{
+            position: "absolute",
+            top: -8,
+            left: -8,
+            display: "flex",
+            flexDirection: "column",
+            gap: 24,
+          }}
+        >
+          {Array.from({ length: 24 }, (_, rowIndex) => (
+            <div key={rowIndex} style={{ display: "flex", gap: 24 }}>
+              {Array.from({ length: 44 }, (_, colIndex) => (
+                <div
+                  key={colIndex}
+                  style={{
+                    width: 3.5,
+                    height: 3.5,
+                    borderRadius: "50%",
+                    backgroundColor: "rgba(160, 122, 78, 0.32)",
+                  }}
+                />
+              ))}
+            </div>
+          ))}
+        </div>
+        <div
+          style={{
+            position: "absolute",
+            top: 0,
+            left: 0,
+            width: "100%",
+            height: "100%",
+            background:
+              "radial-gradient(circle at 30% 42%, rgba(245, 240, 232, 0.9) 0%, rgba(245, 240, 232, 0.55) 38%, rgba(245, 240, 232, 0) 68%)",
+          }}
+        />
+        {/* Warm corner tone, bottom-left */}
+        <div
+          style={{
+            position: "absolute",
+            top: 0,
+            left: 0,
+            width: "100%",
+            height: "100%",
+            background:
+              "radial-gradient(circle at 5% 100%, rgba(224, 210, 183, 0.6) 0%, rgba(224, 210, 183, 0) 45%)",
+          }}
+        />
+
         {/* Logo */}
         <img
           src={logoDataUri}
@@ -103,7 +155,67 @@ export default async function OGImage() {
               color: MUTED,
             }}
           >
-            Murph reads your data and keeps score in your group chat.
+            Murph figures out what actually works and keeps score in your
+            group chat.
+          </div>
+        </div>
+
+        {/* Channel row anchoring the bottom-left (icons match the homepage) */}
+        <div
+          style={{
+            position: "absolute",
+            bottom: 66,
+            left: 72,
+            display: "flex",
+            alignItems: "center",
+            gap: 32,
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
+              <rect width="24" height="24" rx="5.5" fill="#34C759" />
+              <path
+                d="M12 6.5c-3.7 0-6.7 2.42-6.7 5.4 0 1.62.92 3.06 2.36 4.06l-.78 1.96 2.48-1.15c.81.3 1.71.46 2.64.46 3.7 0 6.7-2.42 6.7-5.4S15.7 6.5 12 6.5z"
+                fill="#fff"
+              />
+            </svg>
+            <div style={{ fontFamily: "DM Sans", fontSize: 16, color: MUTED }}>
+              iMessage
+            </div>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
+              <circle cx="12" cy="12" r="12" fill="#2AABEE" />
+              <path
+                d="M17.66 7.4 5.45 12.13c-.83.32-.82.78-.15.98l3.13.98 7.25-4.57c.34-.21.65-.1.4.13l-5.87 5.3-.23 3.4c.33 0 .47-.15.66-.33l1.58-1.53 3.28 2.42c.6.33 1.04.16 1.19-.56l2.15-10.13c.22-.88-.32-1.28-.99-1.02z"
+                fill="#fff"
+              />
+            </svg>
+            <div style={{ fontFamily: "DM Sans", fontSize: 16, color: MUTED }}>
+              Telegram
+            </div>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
+              <rect width="24" height="24" rx="5.5" fill="#2d3436" />
+              <path
+                d="M6 8.8A1.8 1.8 0 0 1 7.8 7h8.4A1.8 1.8 0 0 1 18 8.8v6.4a1.8 1.8 0 0 1-1.8 1.8H7.8A1.8 1.8 0 0 1 6 15.2V8.8Z"
+                stroke="#fff"
+                strokeWidth="1.4"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+              <path
+                d="m6.9 8.6 4.4 3.6c.4.33 1 .33 1.4 0l4.4-3.6"
+                stroke="#fff"
+                strokeWidth="1.4"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+            <div style={{ fontFamily: "DM Sans", fontSize: 16, color: MUTED }}>
+              Email
+            </div>
           </div>
         </div>
 

@@ -59,7 +59,6 @@ import {
   readHostedExecutionSnapshotDeltaRef,
   readHostedExecutionSnapshotHotRef,
 } from "../src/parsers.ts";
-import { readHostedBrowserVaultSourceStateHash } from "../src/parsers/cursor.ts";
 
 function decodeUtf8(buffer: ArrayBuffer): string {
   return new TextDecoder().decode(buffer);
@@ -300,8 +299,6 @@ describe("hosted execution coverage gaps", () => {
       sourceBundleHash: delta.hash,
     } satisfies HostedBrowserVaultReplicaRef;
 
-    expect(readHostedBrowserVaultSourceStateHash(working)).toBe(delta.hash);
-    expect(readHostedBrowserVaultSourceStateHash(base)).toBe(base.hash);
     expect(assessBrowserVaultReplicaFreshness({
       currentSourceHash: delta.hash,
       now: "2026-05-04T00:03:30.000Z",
@@ -590,6 +587,7 @@ describe("hosted execution coverage gaps", () => {
       currentReplicaRef: null,
       currentSnapshotRef: null,
     })).toBeNull();
+    expect(legacyDashboardReplicaModule.readDashboardReplicaSourceStateHash(null)).toBeNull();
     expect(typeof legacyDashboardReplicaCompatibilityModule.getDashboardReplicaFreshness)
       .toBe("function");
     expect("getDashboardReplicaFreshness" in rootModule).toBe(false);
