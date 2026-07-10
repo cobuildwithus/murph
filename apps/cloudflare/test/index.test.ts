@@ -246,6 +246,10 @@ describe("cloudflare worker routes", () => {
     expect(workerSource).not.toContain("startStuckInvocationForTest");
     expect(workerSource).not.toContain("armCanonicalCheckpointLostAckForTest");
     expect(workerSource).not.toContain("armSnapshotPublicationCorruptionForTest");
+    expect(workerSource).not.toContain("armShutdownCheckpointPublicationBarrierForTest");
+    expect(workerSource).not.toContain("beginShutdownCheckpointGracefulStopForTest");
+    expect(workerSource).not.toContain("readShutdownCheckpointPublicationBarrierForTest");
+    expect(workerSource).not.toContain("releaseShutdownCheckpointPublicationBarrierForTest");
     expect(workerSource).not.toContain("expireActivityForTest");
     expect(workerSource).not.toContain("ageActiveInvocationForTest");
     expect(workerSource).not.toContain("probeActiveContainerProviderEgressForTest");
@@ -1174,6 +1178,25 @@ describe("cloudflare worker routes", () => {
 
     expect(snapshotPublicationCorruptionResponse.status).toBe(401);
     await expect(snapshotPublicationCorruptionResponse.json()).resolves.toEqual({
+      error: "Hosted execution bound user does not match the test runner user.",
+    });
+
+    const shutdownCheckpointPublicationBarrierResponse =
+      await hostedLocalTestWorker.fetch(
+        await signControlRequest(new Request(
+          "https://runner.example.test/__test/users/member_123"
+            + "/shutdown-checkpoint-publication-barrier?action=status",
+          {
+            method: "POST",
+          },
+        ), {
+          boundUserId: "member_other",
+        }),
+        env,
+      );
+
+    expect(shutdownCheckpointPublicationBarrierResponse.status).toBe(401);
+    await expect(shutdownCheckpointPublicationBarrierResponse.json()).resolves.toEqual({
       error: "Hosted execution bound user does not match the test runner user.",
     });
 

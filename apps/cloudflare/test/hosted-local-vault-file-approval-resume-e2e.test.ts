@@ -41,6 +41,7 @@ const pendingReplyText =
   "The report is prepared. Approve the secure action, then tell me to attach it.";
 const attachedReplyText = "Here it is: report.pdf.";
 const reportRef = "documents/report.pdf";
+const attachmentUploadLogMessage = "Hosted-local Linq attachment upload accepted.";
 
 const streamDevLogs = process.env.MURPH_E2E_STREAM_DEV_LOGS === "1";
 const workerPersistDirOverride = process.env.MURPH_E2E_CF_PERSIST_DIR?.trim() || null;
@@ -101,6 +102,11 @@ describe("hosted local vault-file approval resume e2e", () => {
     });
 
     const replyPath = `/chats/${encodeURIComponent(chatId)}/messages`;
+    const attachmentCreateBaseline = requireLinqStub().countObservedRequests({
+      expectedMethod: "POST",
+      expectedPath: "/attachments",
+    });
+    const attachmentUploadBaseline = countAttachmentUploadLogs();
     const firstReplyBaseline = requireLinqStub().countObservedSends(replyPath);
     requireScenario().queueAssistantResponses([
       buildAssistantProviderShellCommandCall(
@@ -131,6 +137,9 @@ describe("hosted local vault-file approval resume e2e", () => {
     expect(requireLinqStub().readObservedMessageText(pendingReply)).toBe(
       pendingReplyText,
     );
+    expect(readObservedLinqMessageParts(pendingReply)).toEqual([
+      { type: "text", value: pendingReplyText },
+    ]);
     await requireScenario().waitForHostedCompletion(userId);
 
     const challenge = await waitForLatestChallenge((candidate) =>
@@ -139,15 +148,16 @@ describe("hosted local vault-file approval resume e2e", () => {
       && candidate.tokenHash.length > 0
     );
     expect(challenge.actionId).toMatch(/^vault-file-send:[0-9a-f]{64}$/u);
+    expect(requireLinqStub().countObservedRequests({
+      expectedMethod: "POST",
+      expectedPath: "/attachments",
+    })).toBe(attachmentCreateBaseline);
+    expect(countAttachmentUploadLogs()).toBe(attachmentUploadBaseline);
     await approveHostedSensitiveActionChallengeForTest({
       environment: requireScenario().runtimeEnv,
       tokenHash: challenge.tokenHash,
     });
 
-    const attachmentCreateBaseline = requireLinqStub().countObservedRequests({
-      expectedMethod: "POST",
-      expectedPath: "/attachments",
-    });
     const secondReplyBaseline = requireLinqStub().countObservedSends(replyPath);
     requireScenario().queueAssistantResponses([
       buildAssistantProviderMurphToolCall("send_vault_file", { ref: reportRef }),
@@ -191,6 +201,11 @@ describe("hosted local vault-file approval resume e2e", () => {
       candidate.tokenHash === challenge.tokenHash && candidate.consumedAt !== null
     );
     expect(consumedChallenge.approvalStatus).toBe("approved");
+    expect(requireLinqStub().countObservedRequests({
+      expectedMethod: "POST",
+      expectedPath: "/attachments",
+    })).toBe(attachmentCreateBaseline + 1);
+    expect(countAttachmentUploadLogs()).toBe(attachmentUploadBaseline + 1);
     expect(requireLinqStub().countObservedSends(replyPath)).toBe(
       secondReplyBaseline + 1,
     );
@@ -255,6 +270,14 @@ function readObservedLinqMessageParts(request: ObservedLinqRequest): unknown[] {
     };
   };
   return Array.isArray(parsed.message?.parts) ? parsed.message.parts : [];
+}
+
+function countAttachmentUploadLogs(): number {
+  const output = [
+    requireScenario().harness.stdoutTail(2_000_000),
+    requireScenario().harness.stderrTail(2_000_000),
+  ].join("\n");
+  return output.split(attachmentUploadLogMessage).length - 1;
 }
 
 function requireScenario(): HostedLocalFullStackScenario {

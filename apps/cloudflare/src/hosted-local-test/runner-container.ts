@@ -196,10 +196,12 @@ export function wrapCanonicalCheckpointLostAckForTest(
       return await handler(request, env, ctx);
     }
 
-    // Consume before awaiting the real handler so concurrent checkpoints cannot
-    // receive the same one-shot fault. Restore the arm if the real checkpoint
-    // does not commit successfully.
-    canonicalCheckpointLostAckUserIds.delete(userId);
+    // Claim atomically after request classification and before awaiting the
+    // real handler so concurrent checkpoints cannot receive the same one-shot
+    // fault. Restore the arm if the real checkpoint does not commit successfully.
+    if (!canonicalCheckpointLostAckUserIds.delete(userId)) {
+      return await handler(request, env, ctx);
+    }
     let committedResponse: Response;
     try {
       committedResponse = await handler(request, env, ctx);
@@ -562,9 +564,19 @@ const handleHostedLocalLinqAttachmentUpload: HostedLocalTestRunnerOutboundHandle
   if (request.headers.get("content-type")?.trim().toLowerCase() !== "application/pdf") {
     return new Response("Unsupported media type", { status: 415 });
   }
-  if ((await request.arrayBuffer()).byteLength === 0) {
+  const uploadBytes = (await request.arrayBuffer()).byteLength;
+  if (uploadBytes === 0) {
     return new Response("Attachment body must not be empty", { status: 400 });
   }
+  emitHostedExecutionStructuredLog({
+    component: "runner",
+    details: {
+      contentType: "application/pdf",
+      uploadBytes,
+    },
+    message: "Hosted-local Linq attachment upload accepted.",
+    phase: "wake.running",
+  });
   return new Response(null, { status: 204 });
 };
 

@@ -160,6 +160,7 @@ describe("hosted local canonical receipt lost-ack recovery e2e", () => {
     expect(finalStatus.mailboxLag.every((lane) => lane.lag === "0")).toBe(true);
     expect(finalStatus.workspace).not.toBeNull();
     expect(BigInt(finalStatus.workspace!.version)).toBeGreaterThan(activationWorkspaceVersion);
+    expect(requireLinqStub().countObservedSends(replyPath)).toBe(outboundBaseline + 1);
 
     const providerRequestText = requireScenario().assistantProviderRequests
       .filter((request) => request.url === "/v1/responses")

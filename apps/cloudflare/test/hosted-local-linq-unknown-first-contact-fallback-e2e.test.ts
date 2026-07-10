@@ -103,12 +103,27 @@ describe("hosted local Linq unknown first-contact fallback e2e", () => {
       throw new Error("Expected first-contact admission to return a signup join URL.");
     }
 
+    const memberState = await readHostedLinqFirstContactMemberState({
+      environment: requireScenario().runtimeEnv,
+      memberPhone: unknownContactPhone,
+    });
+    expect(memberState).toMatchObject({
+      homeChatId: null,
+      homeRecipientPhone: fallbackLinePhone,
+      memberCount: 1,
+      memberId: expect.stringMatching(/^member_/u),
+      pendingChatId: null,
+    });
+    if (!memberState.memberId) {
+      throw new Error("Expected first-contact admission to persist one member.");
+    }
+
     const matchingCreateChats = await requireLinqStub().waitForMatchingSendCount({
       expectedCount: fallbackCreateChatBaseline + 1,
       expectedPath: createChatPath,
       matchRequest: isFallbackSignupCreateChat,
       scenario: requireScenario(),
-      userId: unknownContactFixtureId,
+      userId: memberState.memberId,
     });
     const signupCreateChat = matchingCreateChats.at(-1);
     if (!signupCreateChat) {
@@ -120,16 +135,6 @@ describe("hosted local Linq unknown first-contact fallback e2e", () => {
       totalCreateChatBaseline + 1,
     );
 
-    await expect(readHostedLinqFirstContactMemberState({
-      environment: requireScenario().runtimeEnv,
-      memberPhone: unknownContactPhone,
-    })).resolves.toMatchObject({
-      homeChatId: null,
-      homeRecipientPhone: fallbackLinePhone,
-      memberCount: 1,
-      memberId: expect.stringMatching(/^member_/u),
-      pendingChatId: null,
-    });
   }, 300_000);
 });
 

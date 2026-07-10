@@ -229,6 +229,15 @@ describe("hosted-local test RunnerContainer outbound composition", () => {
       body: "synthetic-pdf-bytes",
       contentType: "application/pdf",
     }).then((response) => response.status)).resolves.toBe(204);
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith({
+      component: "runner",
+      details: {
+        contentType: "application/pdf",
+        uploadBytes: 19,
+      },
+      message: "Hosted-local Linq attachment upload accepted.",
+      phase: "wake.running",
+    });
     await expect(run({
       body: "synthetic-pdf-bytes",
       contentType: "text/plain",
@@ -319,6 +328,33 @@ describe("hosted-local test RunnerContainer outbound composition", () => {
     );
     expect(retryResponse.status).toBe(200);
     expect(realHandler).toHaveBeenCalledTimes(3);
+  });
+
+  it("claims one canonical checkpoint lost-ack fault across concurrent commits", async () => {
+    const userId = "member_canonical_lost_ack_concurrent";
+    const committedResponse = JSON.stringify({ checkpointed: true });
+    const realHandler = vi.fn(async () => new Response(committedResponse, {
+      headers: { "content-type": "application/json; charset=utf-8" },
+      status: 200,
+    }));
+    const handler = wrapCanonicalCheckpointLostAckForTest(realHandler);
+    armCanonicalCheckpointLostAck(userId);
+
+    const responses = await Promise.all([
+      handler(
+        createCanonicalCheckpointRequest(userId),
+        createOutboundEnv(),
+        { containerId: "opaque-container-id" },
+      ),
+      handler(
+        createCanonicalCheckpointRequest(userId),
+        createOutboundEnv(),
+        { containerId: "opaque-container-id" },
+      ),
+    ]);
+
+    expect(responses.map((response) => response.status).sort()).toEqual([200, 503]);
+    expect(realHandler).toHaveBeenCalledTimes(2);
   });
 
   it("corrupts one snapshot completion before the real publication validator", async () => {
