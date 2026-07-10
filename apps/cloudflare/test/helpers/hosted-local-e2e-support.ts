@@ -172,6 +172,7 @@ function quoteShellArgument(value: string): string {
 export function expectAdvertisedMurphDynamicTools(
   requests: readonly HostedLocalAssistantProviderStubRequest[],
   options: {
+    callCircleAvailable?: boolean;
     connectedAppsAvailable?: boolean;
     computerToolsAvailable?: boolean;
     messageReactionsAvailable?: boolean;
@@ -223,6 +224,13 @@ export function expectAdvertisedMurphDynamicTools(
       if (
         options.phoneCallsAvailable !== true
         && name === "murph.create_phone_call"
+      ) {
+        return false;
+      }
+
+      if (
+        options.callCircleAvailable !== true
+        && name === "murph.call_circle_respond"
       ) {
         return false;
       }
