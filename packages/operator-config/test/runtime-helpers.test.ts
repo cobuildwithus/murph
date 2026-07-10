@@ -124,6 +124,15 @@ test('runtime env helpers trim shell values and read the first configured value'
   assert.equal(resolveLinqWebhookSecret(env), 'linq-secret')
 })
 
+test('Telegram API base URL rejects malformed and non-HTTP overrides', () => {
+  assert.equal(resolveTelegramApiBaseUrl({ TELEGRAM_API_BASE_URL: 'not a url' }), null)
+  assert.equal(resolveTelegramApiBaseUrl({ TELEGRAM_API_BASE_URL: 'file:///tmp/telegram' }), null)
+  assert.equal(
+    resolveTelegramApiBaseUrl({ TELEGRAM_API_BASE_URL: 'http://telegram.example.test' }),
+    'http://telegram.example.test',
+  )
+})
+
 test('retry helpers parse retry-after headers and surface abort errors', async () => {
   assert.equal(
     parseRetryAfterHeaderMs({
