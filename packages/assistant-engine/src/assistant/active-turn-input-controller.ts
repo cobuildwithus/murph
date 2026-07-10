@@ -435,7 +435,9 @@ class AssistantActiveTurnInputController {
       return []
     }
     const accepted: QueuedAssistantActiveTurnInputAdmission[] = []
-    const pendingLength = this.pending.length
+    const pendingLength = input.requireProviderAcknowledged === true
+      ? 1
+      : this.pending.length
 
     while (accepted.length < pendingLength) {
       const item = this.pending[accepted.length]
