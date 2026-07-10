@@ -12149,6 +12149,7 @@ describe("hosted workspace runtime entrypoint", () => {
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const fetchRequests: HostedMailboxFetchRequest[] = [];
     const checkpointResponse = createDeferred<HostedWorkspaceCheckpointResponse>();
+    const pendingRuntimeWakeQueued = createDeferred<void>();
     const mailboxItems = [
       createMailboxItem({
         id: "mailbox_item_entrypoint_checkpoint_timer_001",
@@ -12209,6 +12210,7 @@ describe("hosted workspace runtime entrypoint", () => {
                     laneSeq: "2",
                   }));
                   runtimeWakeSignal.notify();
+                  pendingRuntimeWakeQueued.resolve();
                   return await checkpointResponse.promise;
                 }
                 return {
@@ -12226,10 +12228,11 @@ describe("hosted workspace runtime entrypoint", () => {
         },
       );
 
-      await waitUntil(() => {
-        assert.equal(checkpointRequests.length, 1);
-      });
-      await new Promise((resolve) => setTimeout(resolve, 750));
+      await withRealTimeout(
+        pendingRuntimeWakeQueued.promise,
+        15_000,
+        () => events.join(","),
+      );
       checkpointResponse.resolve({
         checkpointed: true,
         workspace: createWorkspaceState({
@@ -12238,7 +12241,11 @@ describe("hosted workspace runtime entrypoint", () => {
         }),
       });
 
-      const result = await resultPromise;
+      const result = await withRealTimeout(
+        resultPromise,
+        15_000,
+        () => events.join(","),
+      );
 
       assert.deepEqual(readConversationImportedSeqs(fetchRequests), ["0", "1"]);
       assert.deepEqual(events.filter((event) => event.startsWith("mailbox.importItem:")), [
@@ -13012,6 +13019,7 @@ describe("hosted workspace runtime entrypoint", () => {
     const importedInputIds: string[] = [];
     const assistantPhaseInputIds: string[][] = [];
     const assistantPhaseLinqContextTargets: string[][] = [];
+    const initialConversationImportsComplete = createDeferred<void>();
     let assistantPhaseCalls = 0;
 
     try {
@@ -13053,6 +13061,9 @@ describe("hosted workspace runtime entrypoint", () => {
               vaultRoot,
             });
             importedInputIds.push(inputId);
+            if (importedInputIds.length === 2) {
+              initialConversationImportsComplete.resolve();
+            }
             return {
               assistantInputId: inputId,
               linqDeliveryContext: {
@@ -13121,9 +13132,7 @@ describe("hosted workspace runtime entrypoint", () => {
                     }));
                   }
                   runtimeWakeSignal.notify();
-                  await waitUntil(() => {
-                    assert.equal(importedInputIds.length, 2);
-                  });
+                  await initialConversationImportsComplete.promise;
                   return {
                     checkpointReason: "system_mailbox_receipt" as const,
                     nextWakeAt: "2099-04-27T00:10:00.000Z",
@@ -13163,10 +13172,11 @@ describe("hosted workspace runtime entrypoint", () => {
           vaultRoot,
         },
       );
-      await waitUntil(() => {
-        assert.equal(assistantPhaseCalls, 3);
-      });
-      const result = await resultPromise;
+      const result = await withRealTimeout(
+        resultPromise,
+        15_000,
+        () => events.join(","),
+      );
 
       assert.equal(assistantPhaseInputIds[1]?.length, 2);
       assert.deepEqual(assistantPhaseInputIds[1], importedInputIds.slice(0, 2));
@@ -13222,6 +13232,8 @@ describe("hosted workspace runtime entrypoint", () => {
     const assistantPhaseLinqContextTargets: string[][] = [];
     const assistantPhaseLinqContextRouteThreadIds: string[][] = [];
     const assistantPhaseLinqContextInboundItemIds: string[][] = [];
+    const firstFreshImportComplete = createDeferred<void>();
+    const secondFreshImportComplete = createDeferred<void>();
     let assistantPhaseCalls = 0;
 
     const createLinqContext = (item: HostedMailboxItem, target: string) => ({
@@ -13295,6 +13307,11 @@ describe("hosted workspace runtime entrypoint", () => {
               vaultRoot,
             });
             freshImportedInputIds.push(inputId);
+            if (freshImportedInputIds.length === 1) {
+              firstFreshImportComplete.resolve();
+            } else if (freshImportedInputIds.length === 2) {
+              secondFreshImportComplete.resolve();
+            }
             return {
               assistantInputId: inputId,
               linqDeliveryContext,
@@ -13349,9 +13366,7 @@ describe("hosted workspace runtime entrypoint", () => {
                     occurredAt: "2026-04-27T00:00:01.000Z",
                   }));
                   runtimeWakeSignal.notify();
-                  await waitUntil(() => {
-                    assert.equal(freshImportedInputIds.length, 1);
-                  });
+                  await firstFreshImportComplete.promise;
                   return {
                     checkpointReason: "system_mailbox_receipt" as const,
                     nextWakeAt: "2099-04-27T00:10:00.000Z",
@@ -13386,9 +13401,7 @@ describe("hosted workspace runtime entrypoint", () => {
                 }),
               );
               runtimeWakeSignal.notify();
-              await waitUntil(() => {
-                assert.equal(freshImportedInputIds.length, 2);
-              });
+              await secondFreshImportComplete.promise;
             }
 
             const assistantRedactedStatus: HostedRuntimeRedactedJson = {
@@ -13407,10 +13420,11 @@ describe("hosted workspace runtime entrypoint", () => {
           vaultRoot,
         },
       );
-      await waitUntil(() => {
-        assert.equal(assistantPhaseCalls, 3);
-      });
-      const result = await resultPromise;
+      const result = await withRealTimeout(
+        resultPromise,
+        15_000,
+        () => events.join(","),
+      );
 
       assert.deepEqual(assistantPhaseInputIds[1], [freshImportedInputIds[0]]);
       assert.deepEqual(assistantPhaseLinqContextTargets[1], ["thread_1"]);

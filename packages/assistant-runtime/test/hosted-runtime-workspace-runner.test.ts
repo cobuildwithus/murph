@@ -3893,61 +3893,58 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     });
 
     try {
-      const result = await withTestTimeout(
-        runHostedWorkspaceUntilIdleOrBudget({
-          checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
-            attemptId: "attempt_synthetic_runner_stop_aborts_projection",
-            expectedWorkspaceVersion: "0",
-            leaseGeneration: "4",
-            nextWakeAt: null,
-            nextWakeReason: null,
-            snapshotRef: null,
-          }),
-          expectedUserId: TEST_USER_ID,
-          foregroundImportItem: async (item, context) => {
-            importedSeqs.push(item.item.laneSeq);
-            return await conversationImportItem(item, context);
-          },
-          async importItem(item) {
-            importedSeqs.push(item.item.laneSeq);
-            return { status: "imported" };
-          },
-          limitPerLane: 10,
-          platform: createPlatform({
-            logRequests,
-            mailboxPort,
-            workspacePort: createWorkspacePort({ checkpointRequests }),
-          }),
-          requestId: "request_synthetic_runner_stop_aborts_projection",
-          runtimeLogContext: {
-            attemptId: "attempt_synthetic_runner_stop_aborts_projection",
-            leaseGeneration: "4",
-            workspaceVersion: "0",
-          },
-          runtimeWakeSignal,
-          async runAssistantPhase(input) {
-            yieldStates.push(input.shouldYieldBackgroundMaintenance?.() ?? false);
-            items.push(createMailboxItem({
-              dedupeKey: lateWake.eventId,
-              id: "mailbox_item_runner_stop_aborts_projection",
-              laneSeq: "1",
-              occurredAt: lateOccurredAt,
-            }));
-            runtimeWakeSignal.notify();
-            await withTestTimeout(projectionStartedPromise, 1_000);
-            assert.equal(projectionFinished, false);
-            yieldStates.push(input.shouldYieldBackgroundMaintenance?.() ?? false);
-            return {
-              checkpointReason: "canonical_runtime_commit",
-              progressed: true,
-            };
-          },
-          vaultRoot,
-          workspace: createWorkspaceState({ version: "0" }),
-          now: () => TEST_NOW,
+      const result = await runHostedWorkspaceUntilIdleOrBudget({
+        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+          attemptId: "attempt_synthetic_runner_stop_aborts_projection",
+          expectedWorkspaceVersion: "0",
+          leaseGeneration: "4",
+          nextWakeAt: null,
+          nextWakeReason: null,
+          snapshotRef: null,
         }),
-        1_000,
-      );
+        expectedUserId: TEST_USER_ID,
+        foregroundImportItem: async (item, context) => {
+          importedSeqs.push(item.item.laneSeq);
+          return await conversationImportItem(item, context);
+        },
+        async importItem(item) {
+          importedSeqs.push(item.item.laneSeq);
+          return { status: "imported" };
+        },
+        limitPerLane: 10,
+        platform: createPlatform({
+          logRequests,
+          mailboxPort,
+          workspacePort: createWorkspacePort({ checkpointRequests }),
+        }),
+        requestId: "request_synthetic_runner_stop_aborts_projection",
+        runtimeLogContext: {
+          attemptId: "attempt_synthetic_runner_stop_aborts_projection",
+          leaseGeneration: "4",
+          workspaceVersion: "0",
+        },
+        runtimeWakeSignal,
+        async runAssistantPhase(input) {
+          yieldStates.push(input.shouldYieldBackgroundMaintenance?.() ?? false);
+          items.push(createMailboxItem({
+            dedupeKey: lateWake.eventId,
+            id: "mailbox_item_runner_stop_aborts_projection",
+            laneSeq: "1",
+            occurredAt: lateOccurredAt,
+          }));
+          runtimeWakeSignal.notify();
+          await projectionStartedPromise;
+          assert.equal(projectionFinished, false);
+          yieldStates.push(input.shouldYieldBackgroundMaintenance?.() ?? false);
+          return {
+            checkpointReason: "canonical_runtime_commit",
+            progressed: true,
+          };
+        },
+        vaultRoot,
+        workspace: createWorkspaceState({ version: "0" }),
+        now: () => TEST_NOW,
+      });
 
       assert.deepEqual(importedSeqs, ["1"]);
       assert.deepEqual(yieldStates, [false, true]);

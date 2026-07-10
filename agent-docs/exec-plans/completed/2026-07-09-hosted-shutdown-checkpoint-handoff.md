@@ -1,7 +1,7 @@
 # Hosted Shutdown Checkpoint Handoff
 
-Status: active
-Updated: 2026-07-09
+Status: completed
+Updated: 2026-07-10
 
 ## Why
 
@@ -118,10 +118,10 @@ make completed runtime work fail or recreate the cleared owner.
 
 ### 4. Ambiguous liveness preserves ownership
 
-Only a positive `inactive` probe or exact completion may clear the active
-fence. `unsupported`, timeout, error, and other indeterminate probe outcomes
-preserve it. This closes the deploy-skew path where a still-running old child
-could continue publishing after its fence was prematurely cleared.
+Only a positive `inactive` or `mismatch` probe, or exact completion, may clear
+the active fence. `unsupported`, timeout, error, and other indeterminate probe
+outcomes preserve it. This closes the deploy-skew path where a still-running
+old child could continue publishing after its fence was prematurely cleared.
 
 ## Deletion Ledger
 
@@ -218,3 +218,4 @@ then Cloudflare/runner.
 - `agent-docs/SECURITY.md`
 - `agent-docs/references/hosted-runtime-protocol.md`
 - app/package README updates required by the changed trust boundary
+Completed: 2026-07-10
