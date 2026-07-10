@@ -1,6 +1,8 @@
 type OrderedConnectSource = {
   connected?: boolean;
+  historicalResetIncomplete?: boolean;
   id: string;
+  recoveryKind?: "connection_reset";
   requiresReconnect?: boolean;
 };
 
@@ -52,8 +54,12 @@ export function sortConnectSourcesByConnectionState<TSource extends OrderedConne
     .sort((left, right) => {
       const leftConnected = Boolean(left.source.connected);
       const rightConnected = Boolean(right.source.connected);
-      const leftRequiresReconnect = Boolean(left.source.requiresReconnect);
-      const rightRequiresReconnect = Boolean(right.source.requiresReconnect);
+      const leftRequiresReconnect = Boolean(
+        left.source.requiresReconnect || left.source.recoveryKind || left.source.historicalResetIncomplete,
+      );
+      const rightRequiresReconnect = Boolean(
+        right.source.requiresReconnect || right.source.recoveryKind || right.source.historicalResetIncomplete,
+      );
 
       if (leftRequiresReconnect !== rightRequiresReconnect) {
         return leftRequiresReconnect ? -1 : 1;

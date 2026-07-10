@@ -7,7 +7,7 @@ export class LinqApiTimeoutError extends Error {
 
 const DEFAULT_LINQ_API_TIMEOUT_MS = 10_000;
 
-export async function fetchLinqApi(input: {
+type LinqApiRequestInput = {
   apiBaseUrl: string;
   apiToken: string;
   body?: BodyInit | null;
@@ -15,14 +15,47 @@ export async function fetchLinqApi(input: {
   path: string;
   signal?: AbortSignal;
   timeoutMs?: number;
-}): Promise<Response> {
+};
+
+export async function fetchLinqApi(input: LinqApiRequestInput): Promise<Response> {
+  return runLinqApiRequest(input, (response) => response);
+}
+
+export async function fetchLinqApiJson(input: LinqApiRequestInput): Promise<{
+  ok: boolean;
+  payload: unknown | null;
+  status: number;
+}> {
+  return runLinqApiRequest(input, async (response) => {
+    const text = await response.text();
+    let payload: unknown | null = null;
+    if (text.trim()) {
+      try {
+        payload = JSON.parse(text);
+      } catch {
+        payload = null;
+      }
+    }
+
+    return {
+      ok: response.ok,
+      payload,
+      status: response.status,
+    };
+  });
+}
+
+async function runLinqApiRequest<T>(
+  input: LinqApiRequestInput,
+  consumeResponse: (response: Response) => Promise<T> | T,
+): Promise<T> {
   const { didTimeout, signal, clearTimeout } = createTimedAbortSignal({
     signal: input.signal,
     timeoutMs: input.timeoutMs ?? DEFAULT_LINQ_API_TIMEOUT_MS,
   });
 
   try {
-    return await fetch(new URL(input.path, `${input.apiBaseUrl}/`), {
+    const response = await fetch(new URL(input.path, `${input.apiBaseUrl}/`), {
       method: input.method ?? "GET",
       headers: {
         authorization: `Bearer ${input.apiToken}`,
@@ -35,7 +68,12 @@ export async function fetchLinqApi(input: {
       body: input.body ?? undefined,
       signal,
     });
+    return await consumeResponse(response);
   } catch (error) {
+    if (input.signal?.aborted) {
+      throw input.signal.reason ?? error;
+    }
+
     if (didTimeout() && !input.signal?.aborted) {
       throw new LinqApiTimeoutError("Linq API request timed out.");
     }

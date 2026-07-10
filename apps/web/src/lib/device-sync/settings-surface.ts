@@ -2,6 +2,7 @@ import type { PublicProviderDescriptor } from "@murphai/device-syncd/types";
 import type { ConfiguredDeviceSyncProviderKey } from "@murphai/device-syncd/connect-config";
 
 import { formatDeviceSyncProviderLabel } from "@murphai/device-syncd/provider-label";
+import { isHistoricalResetIncompleteDeviceSyncAccount } from "@murphai/device-syncd/public-account";
 
 import type { HostedBrowserDeviceSyncConnectionSource } from "./browser-connection-source";
 import type { HostedBrowserDeviceSyncConnection } from "./public-connection";
@@ -41,6 +42,10 @@ export interface HostedDeviceSyncSettingsSource {
   displayName: string | null;
   guidance: string;
   headline: string;
+  // Set on a disconnected connection whose provider-side revoke failed while a
+  // historical reset was pending: the member must remove the old connection in the
+  // wearable provider account before reconnecting.
+  historicalResetIncomplete?: true;
   lastActivityAt: string | null;
   lastSuccessfulSyncAt: string | null;
   lastWebhookAt: string | null;
@@ -63,6 +68,7 @@ export interface HostedDeviceSyncSettingsUpstreamSource {
   connectSourceId?: string | null;
   connectTarget?: string | null;
   providerLabel: string;
+  recoveryKind?: HostedBrowserDeviceSyncConnectionSource["recoveryKind"];
   requiresReconnect?: boolean;
   resourceCount: number;
   sourceProviderSlug: string;
@@ -229,26 +235,34 @@ function buildConnectedSource(input: {
     : null;
   const connectedAgeMs = ageInMilliseconds(connection.connectedAt, now);
   const setupPhase = connection.setupPhase ?? null;
-  const reconnectSource = findReconnectRequiredUpstreamSource(input.upstreamSources);
+  const reconnectSource = findRecoveryRequiredUpstreamSource(input.upstreamSources);
+  const needsConnectionReset = reconnectSource?.recoveryKind === "connection_reset";
   const sourceReconnectTarget = reconnectSource
     ? resolveUpstreamSourceReconnectTarget(reconnectSource)
     : null;
-  const sourceReconnectAction = reconnectSource
+  const sourceReconnectAction = reconnectSource && !needsConnectionReset
     ? buildReconnectAction(sourceReconnectTarget)
     : null;
 
   if (connection.status === "disconnected") {
+    const resetIncomplete = isHistoricalResetIncompleteDeviceSyncAccount(connection);
+
     return {
       connectionId: connection.id,
       connectedAt: connection.connectedAt,
       connectSourceId: input.connectTarget?.connectSourceId ?? null,
       connectTarget: input.connectTarget?.connectTarget ?? null,
-      detail: lastSuccessfulSyncAt
-        ? "This source is disconnected. Your past history stays in place."
-        : "This source is disconnected.",
+      detail: resetIncomplete
+        ? "This source is disconnected, but the last reset did not finish in your wearable provider account."
+        : lastSuccessfulSyncAt
+          ? "This source is disconnected. Your past history stays in place."
+          : "This source is disconnected.",
       displayName,
-      guidance: "Past history stays in place.",
+      guidance: resetIncomplete
+        ? "Remove the old connection in your wearable provider account, then connect it again here."
+        : "Past history stays in place.",
       headline: "Disconnected",
+      ...(resetIncomplete ? { historicalResetIncomplete: true } : {}),
       lastActivityAt,
       lastSuccessfulSyncAt,
       lastWebhookAt: connection.lastWebhookAt,
@@ -259,8 +273,8 @@ function buildConnectedSource(input: {
       providerLabel,
       secondaryAction: null,
       state: connection.status,
-      statusLabel: "Disconnected",
-      tone: "muted",
+      statusLabel: resetIncomplete ? "Needs attention" : "Disconnected",
+      tone: resetIncomplete ? "attention" : "muted",
       updatedAt: connection.updatedAt,
       upstreamSources: input.upstreamSources,
     } satisfies HostedDeviceSyncSettingsSource;
@@ -348,11 +362,15 @@ function buildConnectedSource(input: {
       connectedAt: connection.connectedAt,
       connectSourceId: sourceReconnectTarget?.connectSourceId ?? null,
       connectTarget: sourceReconnectTarget?.connectTarget ?? null,
-      detail: `${reconnectSource.providerLabel} needs to be reconnected before Murph can keep syncing it.`,
+      detail: needsConnectionReset
+        ? `${reconnectSource.providerLabel} needs a fresh connection before Murph can bring in its history.`
+        : `${reconnectSource.providerLabel} needs to be reconnected before Murph can keep syncing it.`,
       displayName,
-      guidance: sourceReconnectAction
-        ? "Reconnect this source to refresh access, or disconnect it if you no longer need it."
-        : "Disconnect this source if you no longer need it.",
+      guidance: needsConnectionReset
+        ? "Disconnect this source first, then connect it again to start a fresh sync."
+        : sourceReconnectAction
+          ? "Reconnect this source to refresh access, or disconnect it if you no longer need it."
+          : "Disconnect this source if you no longer need it.",
       headline: "Access needs attention",
       lastActivityAt,
       lastSuccessfulSyncAt,
@@ -367,7 +385,7 @@ function buildConnectedSource(input: {
         label: "Disconnect",
       },
       state: connection.status,
-      statusLabel: "Needs access",
+      statusLabel: needsConnectionReset ? "Needs attention" : "Needs access",
       tone: "attention",
       updatedAt: connection.updatedAt,
       upstreamSources: input.upstreamSources,
@@ -778,6 +796,7 @@ function toSettingsUpstreamSource(
 ): HostedDeviceSyncSettingsUpstreamSource {
   return {
     providerLabel: formatHostedDeviceSyncSourceLabel(source.sourceProviderSlug),
+    ...(source.recoveryKind ? { recoveryKind: source.recoveryKind } : {}),
     ...(source.requiresReconnect ? { requiresReconnect: true } : {}),
     resourceCount: source.resourceCount,
     sourceProviderSlug: source.sourceProviderSlug,
@@ -785,12 +804,12 @@ function toSettingsUpstreamSource(
   };
 }
 
-function findReconnectRequiredUpstreamSource(
+function findRecoveryRequiredUpstreamSource(
   sources: readonly HostedDeviceSyncSettingsUpstreamSource[],
 ): HostedDeviceSyncSettingsUpstreamSource | null {
   return sources.find((source) =>
     source.status === "error"
-    && source.requiresReconnect === true
+    && (source.requiresReconnect === true || source.recoveryKind === "connection_reset")
   ) ?? null;
 }
 

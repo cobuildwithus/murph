@@ -45,7 +45,7 @@ import type {
 } from "./connect-page-types";
 
 interface HostedDeviceSyncDisconnectResponse {
-  warning?: { code: string; message: string };
+  warning?: { historicalResetIncomplete?: boolean; message: string };
 }
 
 export type { ConnectCallbackInput, InitialDeviceConnectIntent } from "./connect-page-types";
@@ -276,7 +276,7 @@ export function ConnectSourcesGrid({
         kind: result.warning?.message ? "warning" : "success",
         title: "Source disconnected",
         message: result.warning?.message
-          ? `${resolveDisconnectSuccessMessage(source)} The provider did not fully confirm, so check that account if you want access removed there too.`
+          ? `${resolveDisconnectSuccessMessage(source)} ${resolveDisconnectWarningDetail(result.warning)}`
           : resolveDisconnectSuccessMessage(source),
       });
     } catch (error) {
@@ -418,4 +418,12 @@ function resolveDisconnectFailureMessage(source: ConnectSource): string {
   return source.disconnectScope === "junction_account"
     ? "We could not disconnect this connection right now."
     : `We could not disconnect ${source.name} right now.`;
+}
+
+// Keyed off the response semantic, not the clicked card: a shared connection can be
+// disconnected from a healthy sibling card while the historical reset lives elsewhere.
+function resolveDisconnectWarningDetail(warning: { historicalResetIncomplete?: boolean }): string {
+  return warning.historicalResetIncomplete
+    ? "The historical reset did not finish. Remove the old connection in your wearable provider account before reconnecting here."
+    : "The provider did not fully confirm, so check that account if you want access removed there too.";
 }

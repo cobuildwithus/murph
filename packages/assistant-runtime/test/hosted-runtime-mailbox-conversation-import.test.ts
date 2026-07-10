@@ -120,6 +120,7 @@ describe("hosted mailbox conversation import adapter", () => {
               url: "redacted-attachment-url-sentinel",
             },
           ],
+          threadIsDirect: null,
         },
         phoneLookupKey: "redacted-contact-sentinel",
       },
@@ -182,6 +183,7 @@ describe("hosted mailbox conversation import adapter", () => {
     assert.match(event.conversation?.accountId ?? "", HASHED_IDENTIFIER_PATTERN);
     assert.match(event.conversation?.actorId ?? "", HASHED_IDENTIFIER_PATTERN);
     assert.match(event.conversation?.threadId ?? "", HASHED_IDENTIFIER_PATTERN);
+    assert.equal(event.conversation?.threadIsDirect, null);
     const replyTarget = event.replyTarget;
     assert.deepEqual(replyTarget, {
       channel: "linq",

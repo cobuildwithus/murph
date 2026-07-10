@@ -31,10 +31,20 @@ import {
   sanitizeHostedRuntimeDiagnosticText,
 } from "../hosted-runtime.ts";
 import {
+  addJunctionHistoricalBackfillEvidence,
+  canCurrentRuntimeMutateJunctionHistoricalBackfillProgress,
+  encodeJunctionHistoricalBackfillStatus,
+  hasJunctionHistoricalBackfillEvidence,
+  JUNCTION_HISTORICAL_BACKFILL_COVERAGE_VERSION,
   JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS,
+  readJunctionHistoricalBackfillEvidence,
+  readJunctionHistoricalBackfillStatus,
+  type JunctionHistoricalBackfillEvidence,
+  type JunctionHistoricalBackfillEvidenceResource,
   type JunctionHistoricalBackfillStatus,
 } from "../junction-historical-backfill-progress.ts";
 import { DEVICE_SYNC_METADATA_MAX_STRING_LENGTH } from "../metadata.ts";
+import { DEVICE_SYNC_HISTORICAL_DATA_RECONNECT_REQUIRED_ERROR_CODE } from "../public-account.ts";
 import {
   assertValidJunctionClientUserIdSecret,
   normalizeJunctionDeviceSyncRuntimeConfig,
@@ -106,6 +116,11 @@ interface JunctionTimeseriesImportResult {
   yieldedAt: string | null;
 }
 
+interface JunctionHistoricalBackfillCoverage {
+  complete: boolean;
+  pendingProviderSlugs: string[];
+}
+
 type JunctionHistoricalBackfillFollowUp = Pick<ProviderJobResult, "metadataPatch" | "nextReconcileAt" | "scheduledJobs">;
 
 type JunctionResourceCategory = "summary" | "timeseries";
@@ -162,6 +177,18 @@ type JunctionHistoricalBackfillCompletionSummaryResource =
   (typeof JUNCTION_HISTORICAL_BACKFILL_COMPLETION_SUMMARY_RESOURCES)[number];
 const JUNCTION_HISTORICAL_BACKFILL_COMPLETION_SUMMARY_RESOURCE_SET = new Set<string>(
   JUNCTION_HISTORICAL_BACKFILL_COMPLETION_SUMMARY_RESOURCES,
+);
+// Resource availability describes permission/capability, not whether the
+// member should have a row. Limit connect-window obligations to high-signal
+// daily families; sparse sessions such as workouts and body measurements still
+// count as useful data, but their absence is not evidence of a failed export.
+const JUNCTION_HISTORICAL_BACKFILL_REQUIRED_SUMMARY_RESOURCES = Object.freeze([
+  "activity",
+  "sleep",
+  "sleep_cycle",
+] as const satisfies readonly JunctionHistoricalBackfillEvidenceResource[]);
+const JUNCTION_HISTORICAL_BACKFILL_REQUIRED_SUMMARY_RESOURCE_SET = new Set<string>(
+  JUNCTION_HISTORICAL_BACKFILL_REQUIRED_SUMMARY_RESOURCES,
 );
 
 type JunctionOptionalResourceFailureReason = "not_found" | "unavailable" | "unsupported" | "ambiguous";
@@ -681,19 +708,31 @@ export function createJunctionDeviceSyncProvider(
     now: string,
   ): DeviceSyncJobInput[] {
     const metadata = account.metadata;
-    const status = normalizeString(metadata[JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS.status]);
+    if (!canCurrentRuntimeMutateJunctionHistoricalBackfillProgress(metadata)) {
+      return [];
+    }
+
+    const statusState = readHistoricalBackfillStatus(metadata);
+    const status = statusState?.status ?? null;
     const connectWindow = buildConnectHistoricalBackfillWindow(account, summaryBackfillDays);
     const metadataWindowStart = normalizeString(metadata[JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS.windowStart]);
     const metadataWindowEnd = normalizeString(metadata[JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS.windowEnd]);
     const metadataMatchesConnectWindow =
       metadataWindowStart === connectWindow.windowStart
       && metadataWindowEnd === connectWindow.windowEnd;
+    const coverageVersion = statusState?.coverageVersion ?? 0;
+    const hasCurrentCoverageSemantics =
+      coverageVersion >= JUNCTION_HISTORICAL_BACKFILL_COVERAGE_VERSION;
 
-    if ((status === "complete" || status === "exhausted") && metadataMatchesConnectWindow) {
+    if (
+      hasCurrentCoverageSemantics
+      && (status === "complete" || status === "exhausted")
+      && metadataMatchesConnectWindow
+    ) {
       return [];
     }
 
-    if (status === "retrying" && metadataMatchesConnectWindow) {
+    if (hasCurrentCoverageSemantics && status === "retrying" && metadataMatchesConnectWindow) {
       const retryAt = readPendingConnectHistoricalBackfillRetryAt(account);
       const retryAtMs = retryAt ? Date.parse(retryAt) : NaN;
       if (retryAt && Number.isFinite(retryAtMs) && Date.parse(now) < retryAtMs) {
@@ -779,6 +818,7 @@ export function createJunctionDeviceSyncProvider(
     }
 
     const window = resolveJobWindow(job, context.now, job.kind === "backfill" ? summaryBackfillDays : reconcileDays);
+    const isConnectHistoricalBackfill = isConnectHistoricalBackfillWindow(context.account, window);
     const sourceProviders = await client.listUserProviders(context.account.externalAccountId, {
       signal: context.signal ?? null,
     });
@@ -807,7 +847,22 @@ export function createJunctionDeviceSyncProvider(
     if (profileSummaryResult.records.length > 0) {
       summaries[JUNCTION_PROFILE_SUMMARY_RESOURCE] = profileSummaryResult.records;
     }
-    const historicalSummaryHasRecords = hasJunctionHistoricalBackfillSummaryRecords(summaries, sourceProviders);
+    const historicalSummaryCoverage = evaluateJunctionHistoricalBackfillCoverage(
+      summaries,
+      sourceProviders,
+      summaryResources,
+      providerFilter,
+      isConnectHistoricalBackfill
+        ? readJunctionHistoricalBackfillEvidence(
+            context.account.metadata[JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS.evidence],
+          )
+        : null,
+      window,
+    );
+    const historicalSummaryHasRecords = hasJunctionHistoricalBackfillSummaryRecords(
+      summaries,
+      sourceProviders,
+    );
     const summaryHasFetchedRecords = hasJunctionSnapshotRecords(summaries);
     const baseTimeseriesWindowStart = job.kind === "backfill"
       ? maxIsoTimestamp(window.windowStart, subtractDays(window.windowEnd, timeseriesBackfillDays))
@@ -860,11 +915,10 @@ export function createJunctionDeviceSyncProvider(
       }
     }
 
-    const isConnectHistoricalBackfill = isConnectHistoricalBackfillWindow(context.account, window);
     const backfillFollowUp = job.kind === "backfill"
       ? isConnectHistoricalBackfill
         ? buildHistoricalBackfillFollowUp({
-            hasRecords: historicalSummaryHasRecords,
+            coverageComplete: historicalSummaryCoverage.complete,
             metadata: context.account.metadata,
             now: context.now,
             windowStart: window.windowStart,
@@ -878,6 +932,48 @@ export function createJunctionDeviceSyncProvider(
             windowEnd: window.windowEnd,
           })
       : {};
+    const historicalStatusAfterJob = readJunctionHistoricalBackfillStatus(
+      backfillFollowUp.metadataPatch?.[JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS.status],
+    ) ?? readHistoricalBackfillStatus(context.account.metadata);
+    const historicalStatusBeforeJob = readHistoricalBackfillStatus(context.account.metadata);
+    if (
+      isConnectHistoricalBackfill
+      && (
+        !historicalStatusBeforeJob
+        || historicalStatusBeforeJob.coverageVersion
+          <= JUNCTION_HISTORICAL_BACKFILL_COVERAGE_VERSION
+      )
+      && (
+        historicalStatusAfterJob?.status === "exhausted"
+        || (
+          historicalSummaryCoverage.complete
+          && historicalStatusBeforeJob?.status === "exhausted"
+        )
+      )
+    ) {
+      const pendingProviderSlugs = new Set(historicalSummaryCoverage.pendingProviderSlugs);
+      const hasCoveredProvider = sourceProviders.some((provider) => {
+        const providerSlug = normalizeProviderSlug(
+          provider.origin.sourceProviderSlug ?? provider.slug,
+        );
+        return providerSlug !== null
+          && providerFilter.includes(providerSlug)
+          && mapJunctionSourceStatus(provider.status) !== "disconnected"
+          && !pendingProviderSlugs.has(providerSlug);
+      });
+      if (historicalSummaryCoverage.complete || hasCoveredProvider) {
+        await projectJunctionSources(context, sourceProviders, {
+          preserveHistoricalReconnectProviderSlugs:
+            historicalSummaryCoverage.pendingProviderSlugs,
+        });
+      }
+      if (!historicalSummaryCoverage.complete) {
+        await markJunctionHistoricalReconnectRequired(
+          context,
+          historicalSummaryCoverage.pendingProviderSlugs,
+        );
+      }
+    }
     const nextReconcileAt = backfillFollowUp.nextReconcileAt ?? resolveJunctionNextReconcileAt(
       context.account,
       context.now,
@@ -894,6 +990,73 @@ export function createJunctionDeviceSyncProvider(
       ),
       skippedOptionalResources,
     );
+  }
+
+  async function markJunctionHistoricalReconnectRequired(
+    context: ProviderJobContext,
+    pendingProviderSlugs: readonly string[],
+  ): Promise<void> {
+    if (!context.upsertConnectionSource) {
+      return;
+    }
+
+    const existingSources = context.listConnectionSources
+      ? await context.listConnectionSources()
+      : [];
+    const existingByInstanceKey = new Map(
+      existingSources.map((source) => [source.sourceInstanceKey, source] as const),
+    );
+    const recoveryProviderSlugs = new Set(
+      pendingProviderSlugs
+        .map(normalizeProviderSlug)
+        .filter((providerSlug): providerSlug is string => providerSlug !== null),
+    );
+    if (recoveryProviderSlugs.size === 0) {
+      for (const source of existingSources) {
+        const providerSlug = normalizeProviderSlug(source.sourceProviderSlug);
+        if (source.status !== "disconnected" && providerSlug) {
+          recoveryProviderSlugs.add(providerSlug);
+        }
+      }
+    }
+
+    for (const providerSlug of recoveryProviderSlugs) {
+      if (!providerFilter.includes(providerSlug)) {
+        continue;
+      }
+
+      const projectedSourceInstanceKey = buildJunctionProviderSourceInstanceKey({
+        connectionId: context.account.id,
+        sourceProviderSlug: providerSlug,
+      });
+      if (!projectedSourceInstanceKey) {
+        continue;
+      }
+
+      const existing = existingByInstanceKey.get(projectedSourceInstanceKey) ?? existingSources.find(
+        (source) =>
+          normalizeProviderSlug(source.sourceProviderSlug) === providerSlug,
+      );
+      if (
+        existing?.status === "error"
+        && existing.lastErrorCode === DEVICE_SYNC_HISTORICAL_DATA_RECONNECT_REQUIRED_ERROR_CODE
+      ) {
+        continue;
+      }
+      await context.upsertConnectionSource({
+        sourceInstanceKey: existing?.sourceInstanceKey ?? projectedSourceInstanceKey,
+        sourceProviderSlug: providerSlug,
+        displayName: existing?.displayName ?? null,
+        status: "error",
+        ...(existing
+          ? { resourceAvailabilitySummary: existing.resourceAvailabilitySummary }
+          : {}),
+        lastErrorCode: DEVICE_SYNC_HISTORICAL_DATA_RECONNECT_REQUIRED_ERROR_CODE,
+        lastErrorMessage:
+          "Historical data remained incomplete after bounded observation. A member-confirmed connection reset is required to restart its history export.",
+        lastSeenAt: context.now,
+      });
+    }
   }
 
   function readJunctionDirectResourceJobInput(
@@ -1329,7 +1492,7 @@ export function createJunctionDeviceSyncProvider(
         const sourceProviders = shouldLoadJunctionDirectResourceSourceProviders(directInput)
           ? await loadSourceProviders()
           : [];
-        await importJunctionDirectResourceSnapshot(
+        const canonicalEventCount = await importJunctionDirectResourceSnapshot(
           context,
           sourceProviders,
           directInput.windowStart,
@@ -1337,9 +1500,18 @@ export function createJunctionDeviceSyncProvider(
           directInput.resource,
           [directInput.record],
         );
-        return {
-          nextReconcileAt: clampWebhookJobNextReconcileAt(context),
-        };
+        return withJunctionHistoricalCoverageVerification(
+          context,
+          job,
+          window,
+          withJunctionDirectHistoricalBackfillEvidence(
+            context,
+            job,
+            directInput,
+            canonicalEventCount,
+            { nextReconcileAt: clampWebhookJobNextReconcileAt(context) },
+          ),
+        );
       }
 
       if (inferredCategory === "timeseries") {
@@ -1365,12 +1537,17 @@ export function createJunctionDeviceSyncProvider(
             skippedOptionalResources,
           );
         }
-        return withJunctionSkippedResourceMetadata(
+        return withJunctionHistoricalCoverageVerification(
           context,
-          {
-            nextReconcileAt: clampWebhookJobNextReconcileAt(context),
-          },
-          skippedOptionalResources,
+          job,
+          window,
+          withJunctionSkippedResourceMetadata(
+            context,
+            {
+              nextReconcileAt: clampWebhookJobNextReconcileAt(context),
+            },
+            skippedOptionalResources,
+          ),
         );
       }
 
@@ -1405,12 +1582,17 @@ export function createJunctionDeviceSyncProvider(
       timeseries: {},
     });
 
-    return withJunctionSkippedResourceMetadata(
+    return withJunctionHistoricalCoverageVerification(
       context,
-      {
-        nextReconcileAt: clampWebhookJobNextReconcileAt(context),
-      },
-      skippedOptionalResources,
+      job,
+      window,
+      withJunctionSkippedResourceMetadata(
+        context,
+        {
+          nextReconcileAt: clampWebhookJobNextReconcileAt(context),
+        },
+        skippedOptionalResources,
+      ),
     );
   }
 
@@ -1464,6 +1646,105 @@ export function createJunctionDeviceSyncProvider(
     return scheduledAt && Date.parse(scheduledAt) <= Date.parse(latestAt)
       ? scheduledAt
       : latestAt;
+  }
+
+  function withJunctionHistoricalCoverageVerification(
+    context: ProviderJobContext,
+    job: DeviceSyncJobRecord,
+    resourceWindow: { windowEnd: string; windowStart: string },
+    result: ProviderJobResult,
+  ): ProviderJobResult {
+    const historicalState = readHistoricalBackfillStatus(context.account.metadata);
+    const eventType = normalizeString(job.payload.eventType);
+    if (
+      !historicalState
+      || historicalState.coverageVersion > JUNCTION_HISTORICAL_BACKFILL_COVERAGE_VERSION
+      || historicalState.status !== "exhausted"
+      || !eventType
+      || !isJunctionDataEvent(eventType)
+    ) {
+      return result;
+    }
+
+    const connectWindow = buildConnectHistoricalBackfillWindow(
+      context.account,
+      summaryBackfillDays,
+    );
+    if (
+      Date.parse(resourceWindow.windowStart) >= Date.parse(connectWindow.windowEnd)
+      || Date.parse(resourceWindow.windowEnd) <= Date.parse(connectWindow.windowStart)
+    ) {
+      return result;
+    }
+
+    return {
+      ...result,
+      scheduledJobs: [
+        ...(result.scheduledJobs ?? []),
+        buildExactWindowJob({
+          availableAt: context.now,
+          kind: "backfill",
+          priority: JUNCTION_HISTORICAL_BACKFILL_RETRY_PRIORITY,
+          windowEnd: connectWindow.windowEnd,
+          windowStart: connectWindow.windowStart,
+        }),
+      ],
+    };
+  }
+
+  function withJunctionDirectHistoricalBackfillEvidence(
+    context: ProviderJobContext,
+    job: DeviceSyncJobRecord,
+    directInput: JunctionDirectResourceJobInput,
+    canonicalEventCount: number,
+    result: ProviderJobResult,
+  ): ProviderJobResult {
+    const eventType = normalizeString(job.payload.eventType);
+    if (
+      !canCurrentRuntimeMutateJunctionHistoricalBackfillProgress(context.account.metadata)
+      || canonicalEventCount <= 0
+      || !eventType
+      || !isJunctionDataEvent(eventType)
+      || !providerFilter.includes(directInput.sourceProviderSlug)
+      || !isJunctionHistoricalBackfillRequiredSummaryResource(directInput.resource)
+    ) {
+      return result;
+    }
+
+    const connectWindow = buildConnectHistoricalBackfillWindow(
+      context.account,
+      summaryBackfillDays,
+    );
+    if (
+      Date.parse(directInput.windowStart) >= Date.parse(connectWindow.windowEnd)
+      || Date.parse(directInput.windowEnd) <= Date.parse(connectWindow.windowStart)
+    ) {
+      return result;
+    }
+
+    const evidence = addJunctionHistoricalBackfillEvidence({
+      existingValue:
+        context.account.metadata[JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS.evidence],
+      providerSlug: directInput.sourceProviderSlug,
+      resource: directInput.resource,
+      windowEnd: connectWindow.windowEnd,
+      windowStart: connectWindow.windowStart,
+    });
+    if (!evidence) {
+      context.logger.warn?.("Junction historical push evidence exceeded bounded metadata limits.", {
+        provider: "junction",
+        resource: directInput.resource,
+      });
+      return result;
+    }
+
+    return {
+      ...result,
+      metadataPatch: {
+        ...(result.metadataPatch ?? {}),
+        [JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS.evidence]: evidence,
+      },
+    };
   }
 
   async function verifyAndParseWebhook(
@@ -1790,10 +2071,10 @@ export function createJunctionDeviceSyncProvider(
     windowEnd: string,
     resource: string,
     records: readonly Record<string, unknown>[],
-  ): Promise<void> {
+  ): Promise<number> {
     const snapshots: Record<string, unknown[]> = { [resource]: [...records] };
 
-    await context.importSnapshot({
+    const receipt = await context.importSnapshot({
       provider: "junction",
       accountId: buildJunctionImportAccountId(context.account.externalAccountId),
       connectionId: context.account.id,
@@ -1806,6 +2087,7 @@ export function createJunctionDeviceSyncProvider(
       }),
       timeseries: {},
     });
+    return readProviderSnapshotCanonicalEventCount(receipt);
   }
 
   async function fetchOptionalJunctionResourceRecords(
@@ -3184,7 +3466,7 @@ function listJunctionDiagnosticAvailableResourcesForSlug(
     }
 
     for (const [key, value] of Object.entries(provider.resourceAvailability)) {
-      if (normalizeProviderSlug(key) && value !== false && value !== null && value !== undefined) {
+      if (normalizeProviderSlug(key) && isJunctionResourceAdvertisedAvailable(value)) {
         resourceNames.add(key);
       }
     }
@@ -3198,8 +3480,10 @@ function listJunctionDiagnosticAvailableResourcesForSlug(
 function readJunctionHistoricalBackfillMetadata(
   metadata: Record<string, unknown>,
 ): Record<string, unknown> {
+  const statusState = readHistoricalBackfillStatus(metadata);
   return {
-    status: normalizeString(metadata[JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS.status]) ?? null,
+    coverageVersion: statusState?.coverageVersion ?? 0,
+    status: statusState?.status ?? null,
     emptyAttempts: typeof metadata[JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS.emptyAttempts] === "number"
       ? metadata[JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS.emptyAttempts]
       : null,
@@ -3950,6 +4234,157 @@ function hasJunctionHistoricalBackfillSummaryRecords(
   );
 }
 
+function evaluateJunctionHistoricalBackfillCoverage(
+  snapshot: Record<string, unknown[]>,
+  sourceProviders: readonly JunctionProviderConnection[],
+  configuredSummaryResources: readonly string[],
+  providerFilter: readonly string[],
+  historicalPushEvidence: JunctionHistoricalBackfillEvidence | null,
+  window: { windowEnd: string; windowStart: string },
+): JunctionHistoricalBackfillCoverage {
+  const configuredProviderSlugs = new Set(providerFilter);
+  const configuredResources = new Set<string>(
+    configuredSummaryResources.filter((resource) =>
+      JUNCTION_HISTORICAL_BACKFILL_REQUIRED_SUMMARY_RESOURCE_SET.has(resource)
+    ),
+  );
+  const requiredResourcesByProvider = new Map<string, Set<string>>();
+  const connectedProviderSlugs = new Set<string>();
+  const pendingProviderSlugs = new Set<string>();
+  const providerStatusBySlug = new Map<string, DeviceConnectionSourceStatus>();
+
+  for (const provider of sourceProviders) {
+    const providerSlug = normalizeProviderSlug(provider.origin.sourceProviderSlug ?? provider.slug);
+    if (!providerSlug || !configuredProviderSlugs.has(providerSlug)) {
+      continue;
+    }
+    const status = mapJunctionSourceStatus(provider.status);
+    const existingStatus = providerStatusBySlug.get(providerSlug);
+    providerStatusBySlug.set(
+      providerSlug,
+      existingStatus ? mergeJunctionSourceStatus(existingStatus, status) : status,
+    );
+  }
+
+  for (const [providerSlug, status] of providerStatusBySlug.entries()) {
+    if (status === "disconnected") {
+      continue;
+    }
+    if (status !== "connected") {
+      pendingProviderSlugs.add(providerSlug);
+      continue;
+    }
+    connectedProviderSlugs.add(providerSlug);
+  }
+
+  for (const provider of sourceProviders) {
+    const providerSlug = normalizeProviderSlug(provider.origin.sourceProviderSlug ?? provider.slug);
+    if (!providerSlug || providerStatusBySlug.get(providerSlug) !== "connected") {
+      continue;
+    }
+
+    for (const [rawResource, availability] of Object.entries(provider.resourceAvailability)) {
+      const resource = normalizeJunctionResourceName(rawResource);
+      if (
+        !resource
+        || !configuredResources.has(resource)
+        || !isJunctionResourceAdvertisedAvailable(availability)
+      ) {
+        continue;
+      }
+
+      const requiredResources = requiredResourcesByProvider.get(providerSlug) ?? new Set<string>();
+      requiredResources.add(resource);
+      requiredResourcesByProvider.set(providerSlug, requiredResources);
+    }
+  }
+
+  const coveredResourcesByProvider = new Map<string, Set<string>>();
+  for (const [providerSlug, requiredResources] of requiredResourcesByProvider.entries()) {
+    for (const resource of requiredResources) {
+      if (
+        isJunctionHistoricalBackfillRequiredSummaryResource(resource)
+        && hasJunctionHistoricalBackfillEvidence(
+          historicalPushEvidence,
+          providerSlug,
+          resource,
+          window.windowStart,
+          window.windowEnd,
+        )
+      ) {
+        const coveredResources = coveredResourcesByProvider.get(providerSlug) ?? new Set<string>();
+        coveredResources.add(resource);
+        coveredResourcesByProvider.set(providerSlug, coveredResources);
+      }
+    }
+  }
+  const sourceReferences = buildJunctionSourceReferenceMap(sourceProviders);
+
+  for (const [resource, records] of Object.entries(snapshot)) {
+    if (!isJunctionHistoricalBackfillCompletionSummaryResource(resource)) {
+      continue;
+    }
+
+    for (const record of records) {
+      for (const { entry, originFallback } of expandJunctionHistoricalBackfillSummaryRecord(record)) {
+        const providerSlug = normalizeProviderSlug(
+          resolveJunctionSummarySourceProviderSlug(entry, originFallback, sourceReferences),
+        );
+        if (
+          !providerSlug
+          || !requiredResourcesByProvider.get(providerSlug)?.has(resource)
+          || !hasUsefulJunctionHistoricalBackfillSummaryRecord(resource, entry, providerSlug)
+        ) {
+          continue;
+        }
+
+        const coveredResources = coveredResourcesByProvider.get(providerSlug) ?? new Set<string>();
+        coveredResources.add(resource);
+        coveredResourcesByProvider.set(providerSlug, coveredResources);
+      }
+    }
+  }
+
+  for (const [providerSlug, requiredResources] of requiredResourcesByProvider.entries()) {
+    const coveredResources = coveredResourcesByProvider.get(providerSlug);
+    if ([...requiredResources].some((resource) => !coveredResources?.has(resource))) {
+      pendingProviderSlugs.add(providerSlug);
+    }
+  }
+
+  const sortedPendingProviderSlugs = [...pendingProviderSlugs]
+    .sort((left, right) => left.localeCompare(right));
+
+  return {
+    complete: connectedProviderSlugs.size > 0 && sortedPendingProviderSlugs.length === 0,
+    pendingProviderSlugs: sortedPendingProviderSlugs,
+  };
+}
+
+function isJunctionHistoricalBackfillRequiredSummaryResource(
+  resource: string,
+): resource is JunctionHistoricalBackfillEvidenceResource {
+  return JUNCTION_HISTORICAL_BACKFILL_REQUIRED_SUMMARY_RESOURCE_SET.has(resource);
+}
+
+function isJunctionResourceAdvertisedAvailable(value: unknown): boolean {
+  if (value === true) {
+    return true;
+  }
+
+  if (typeof value === "string") {
+    return value.trim().toLowerCase() === "available";
+  }
+
+  const record = readPlainObject(value);
+  if (!record) {
+    return false;
+  }
+
+  return record.available === true
+    || normalizeString(record.status)?.toLowerCase() === "available";
+}
+
 function isJunctionHistoricalBackfillCompletionSummaryResource(
   resource: string,
 ): resource is JunctionHistoricalBackfillCompletionSummaryResource {
@@ -4348,13 +4783,17 @@ function isJunctionSourceSpecificFloatingTimestampProvider(sourceProviderSlug: s
 }
 
 function buildHistoricalBackfillFollowUp(input: {
-  hasRecords: boolean;
+  coverageComplete: boolean;
   metadata: Record<string, unknown>;
   now: string;
   windowStart: string;
   windowEnd: string;
 }): JunctionHistoricalBackfillFollowUp {
-  if (input.hasRecords) {
+  if (!canCurrentRuntimeMutateJunctionHistoricalBackfillProgress(input.metadata)) {
+    return {};
+  }
+
+  if (input.coverageComplete) {
     return {
       metadataPatch: buildHistoricalBackfillMetadataPatch({
         status: "complete",
@@ -4416,7 +4855,14 @@ function readPendingHistoricalBackfillRetryAt(
   windowStart: string,
   windowEnd: string,
 ): string | null {
-  const status = normalizeString(metadata[JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS.status]);
+  if (
+    readHistoricalBackfillCoverageVersion(metadata)
+      !== JUNCTION_HISTORICAL_BACKFILL_COVERAGE_VERSION
+  ) {
+    return null;
+  }
+
+  const status = readHistoricalBackfillStatus(metadata)?.status ?? null;
 
   if (status !== "retrying") {
     return null;
@@ -4490,7 +4936,8 @@ function buildHistoricalBackfillMetadataPatch(input: {
   windowEnd: string;
 }): Record<string, unknown> {
   return {
-    [JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS.status]: input.status,
+    [JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS.status]:
+      encodeJunctionHistoricalBackfillStatus(input.status),
     [JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS.emptyAttempts]: input.emptyAttempts,
     [JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS.lastEmptyAt]: input.lastEmptyAt,
     [JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS.windowStart]: input.windowStart,
@@ -4504,7 +4951,9 @@ function hasHistoricalBackfillWindowStatus(
   windowStart: string,
   windowEnd: string,
 ): boolean {
-  return normalizeString(metadata[JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS.status]) === status
+  return readHistoricalBackfillCoverageVersion(metadata)
+      === JUNCTION_HISTORICAL_BACKFILL_COVERAGE_VERSION
+    && readHistoricalBackfillStatus(metadata)?.status === status
     && normalizeString(metadata[JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS.windowStart]) === windowStart
     && normalizeString(metadata[JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS.windowEnd]) === windowEnd;
 }
@@ -4515,7 +4964,9 @@ function readHistoricalBackfillEmptyAttempts(
   windowEnd: string,
 ): number {
   if (
-    normalizeString(metadata[JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS.windowStart]) !== windowStart
+    readHistoricalBackfillCoverageVersion(metadata)
+      !== JUNCTION_HISTORICAL_BACKFILL_COVERAGE_VERSION
+    || normalizeString(metadata[JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS.windowStart]) !== windowStart
     || normalizeString(metadata[JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS.windowEnd]) !== windowEnd
   ) {
     return 0;
@@ -4525,6 +4976,19 @@ function readHistoricalBackfillEmptyAttempts(
   return typeof rawAttempts === "number" && Number.isInteger(rawAttempts) && rawAttempts >= 0
     ? rawAttempts
     : 0;
+}
+
+function readHistoricalBackfillStatus(metadata: Record<string, unknown>): {
+  coverageVersion: number;
+  status: JunctionHistoricalBackfillStatus;
+} | null {
+  return readJunctionHistoricalBackfillStatus(
+    metadata[JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS.status],
+  );
+}
+
+function readHistoricalBackfillCoverageVersion(metadata: Record<string, unknown>): number {
+  return readHistoricalBackfillStatus(metadata)?.coverageVersion ?? 0;
 }
 
 function readHistoricalBackfillJobEmptyAttempts(job: DeviceSyncJobRecord): number {
@@ -5558,6 +6022,10 @@ function describeJunctionWebhookIdentityCandidateDiagnostics(
 async function projectJunctionSources(
   context: ProviderJobContext,
   providers: readonly JunctionProviderConnection[],
+  options: {
+    preserveHistoricalReconnect?: boolean;
+    preserveHistoricalReconnectProviderSlugs?: readonly string[];
+  } = {},
 ): Promise<void> {
   if (!context.upsertConnectionSource) {
     context.logger.warn?.("Junction source projection skipped because the job context does not expose source storage.", {
@@ -5566,20 +6034,59 @@ async function projectJunctionSources(
     return;
   }
 
+  const historicalState = readHistoricalBackfillStatus(context.account.metadata);
+  const preserveHistoricalReconnect = options.preserveHistoricalReconnect ?? (
+    options.preserveHistoricalReconnectProviderSlugs !== undefined
+    || (
+      historicalState !== null
+      && historicalState.coverageVersion >= JUNCTION_HISTORICAL_BACKFILL_COVERAGE_VERSION
+      && historicalState.status === "exhausted"
+    )
+  );
+  const preserveHistoricalReconnectProviderSlugs =
+    options.preserveHistoricalReconnectProviderSlugs === undefined
+      ? null
+      : new Set(options.preserveHistoricalReconnectProviderSlugs);
+  const existingSources = context.listConnectionSources
+    ? await context.listConnectionSources()
+    : [];
+  const existingByInstanceKey = new Map(
+    existingSources.map((source) => [source.sourceInstanceKey, source] as const),
+  );
+
   for (const source of projectJunctionSourcesByProviderSlug(
     context.account.id,
     providers,
   )) {
+    const existing = existingByInstanceKey.get(source.sourceInstanceKey) ?? existingSources.find(
+      (candidate) =>
+        normalizeProviderSlug(candidate.sourceProviderSlug) === source.sourceProviderSlug,
+    );
+    const keepHistoricalReconnect =
+      preserveHistoricalReconnect
+      && (
+        preserveHistoricalReconnectProviderSlugs === null
+        || preserveHistoricalReconnectProviderSlugs.has(source.sourceProviderSlug)
+      )
+      && source.status !== "disconnected"
+      && existing?.status === "error"
+      && existing.lastErrorCode === DEVICE_SYNC_HISTORICAL_DATA_RECONNECT_REQUIRED_ERROR_CODE;
+    const historicalReconnectError = keepHistoricalReconnect ? existing : null;
     await context.upsertConnectionSource({
-      sourceInstanceKey: source.sourceInstanceKey,
+      sourceInstanceKey: existing?.sourceInstanceKey ?? source.sourceInstanceKey,
       sourceProviderSlug: source.sourceProviderSlug,
-      displayName: null,
-      status: source.status,
+      displayName: existing?.displayName ?? null,
+      status: keepHistoricalReconnect ? "error" : source.status,
       resourceAvailabilitySummary: source.resourceAvailabilitySummary,
       // Only assert error fields when this projection saw an errored entry;
       // omitting the keys lets the store preserve existing detail while the
       // status stays "error" and auto-clear it once the status recovers.
-      ...(source.lastErrorCode !== null || source.lastErrorMessage !== null
+      ...(historicalReconnectError
+        ? {
+            lastErrorCode: historicalReconnectError.lastErrorCode,
+            lastErrorMessage: historicalReconnectError.lastErrorMessage,
+          }
+        : source.lastErrorCode !== null || source.lastErrorMessage !== null
         ? { lastErrorCode: source.lastErrorCode, lastErrorMessage: source.lastErrorMessage }
         : {}),
       lastSeenAt: context.now,
@@ -5857,6 +6364,11 @@ function readPlainObject(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" && !Array.isArray(value)
     ? value as Record<string, unknown>
     : null;
+}
+
+function readProviderSnapshotCanonicalEventCount(value: unknown): number {
+  const count = readPlainObject(value)?.canonicalEventCount;
+  return typeof count === "number" && Number.isSafeInteger(count) && count > 0 ? count : 0;
 }
 
 function base32UrlEncode(input: Buffer): string {
