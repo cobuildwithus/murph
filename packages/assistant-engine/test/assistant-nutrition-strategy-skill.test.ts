@@ -29,53 +29,50 @@ function buildPrompt(): string {
 async function readSkills(): Promise<{
   nutrition: string
   foodJournal: string
+  gut: string
 }> {
   const root = resolveAssistantSkillsRoot()
-  const [nutrition, foodJournal] = await Promise.all([
+  const [nutrition, foodJournal, gut] = await Promise.all([
     readFile(path.join(root, 'nutrition-strategy', 'SKILL.md'), 'utf8'),
     readFile(path.join(root, 'food-journal', 'SKILL.md'), 'utf8'),
+    readFile(path.join(root, 'gut-digestion', 'SKILL.md'), 'utf8'),
   ])
-  return { nutrition, foodJournal }
+  return { nutrition, foodJournal, gut }
 }
 
 describe('assistant nutrition strategy skill', () => {
-  it('routes meal execution without stealing meal capture, body composition, or digestion', () => {
+  it('routes meal execution without repeating every skill trigger hint', () => {
     const prompt = buildPrompt()
-    const nutritionLine = prompt
-      .split('\n')
-      .find((line) => line.includes('nutrition-strategy:'))
 
-    expect(nutritionLine).toContain(
-      'Use for forward-looking nutrition decisions about meal structure',
-    )
-    expect(nutritionLine).toContain('training fuel and recovery eating')
-    expect(nutritionLine).toContain('real-life food-system execution')
-    expect(nutritionLine).toContain('Use food-journal for meal capture')
-    expect(nutritionLine).toContain('body-composition for fat loss/muscle gain/recomposition')
-    expect(nutritionLine).toContain('gut-digestion for digestive symptom strategy')
-    expect(nutritionLine).not.toContain('body composition, training fuel')
-    expect(nutritionLine).not.toContain('GI comfort')
     expect(prompt).toContain(
-      '$MURPH_ASSISTANT_SKILLS_ROOT/nutrition-strategy/SKILL.md',
+      'Nutrition/metabolic: food-journal, nutrition-strategy, body-composition, gut-digestion',
     )
     expect(prompt).toContain(
-      'food-journal: Use when the user logs meals or asks Murph to notice patterns',
+      'Food-journal owns capture and retrospective patterns; nutrition-strategy forward meal execution; body-composition weight/waist/recomposition; gut-digestion digestive symptoms',
+    )
+    expect(prompt).toContain('$MURPH_ASSISTANT_SKILLS_ROOT/<slug>/SKILL.md')
+    expect(prompt).not.toContain(
+      'For forward-looking nutrition advice about meal structure, protein, training fuel',
     )
   })
 
-  it('keeps prompt guidance focused on meal execution and focused-owner handoffs', () => {
+  it('keeps the compact router bounded to task-relevant skill reads', () => {
     const prompt = buildPrompt()
 
     expect(prompt).toContain(
-      'For forward-looking nutrition advice about meal structure, protein, training fuel, recovery eating, hydration, appetite or under-fueling, or realistic food-system execution, read `$MURPH_ASSISTANT_SKILLS_ROOT/nutrition-strategy/SKILL.md` before recommending what to eat or change.',
+      "Route by the user's visible outcome and read the primary skill before acting.",
     )
     expect(prompt).toContain(
-      'Use food-journal for capture and retrospective observation, body-composition for fat-loss, muscle-gain, recomposition, weight, waist, or plateau strategy, gut-digestion for digestive symptom strategy, and experiment-onboarding only after the user chooses a bounded change to test.',
+      'inspect at most two likely skill files',
     )
+    expect(prompt).toContain(
+      'load a secondary skill only when it owns a distinct part of the task',
+    )
+    expect(prompt).toContain('Do not preload skills or call a discovery CLI just to route.')
   })
 
   it('stays policy-only and composes with existing owners', async () => {
-    const { nutrition, foodJournal } = await readSkills()
+    const { nutrition, foodJournal, gut } = await readSkills()
 
     expect(nutrition).toMatch(/^---\nname: nutrition-strategy\n/)
     expect(nutrition).toContain(
@@ -91,6 +88,15 @@ describe('assistant nutrition strategy skill', () => {
     )
     expect(foodJournal).toContain(
       'Use `nutrition-strategy` for forward-looking decisions about what to eat or change',
+    )
+    expect(nutrition).toContain(
+      'When exact food identity, ingredients, allergens, or label nutrition could change a recommendation, read `food-journal`',
+    )
+    expect(gut).toContain(
+      "When exact product ingredients or allergens could change the digestive plan, read food-journal's exact-label section",
+    )
+    expect(gut).toContain(
+      'Use nutrition-strategy for broad diet planning once the digestion constraint is understood.',
     )
     expect(nutrition).not.toContain('/tmp/')
     expect(nutrition).not.toContain('.codex-hosted')

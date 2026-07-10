@@ -430,83 +430,8 @@ jobs:
           trap - INT TERM
           exit "$status"
 
-  immediate-build-prep-gate:
-    name: Immediate deploy build prep
-    if: ${{ inputs.deploy_worker && inputs.skip_predeploy_e2e && inputs.container_rollout == 'immediate' && github.ref == 'refs/heads/main' && github.ref_protected }}
-    runs-on: blacksmith-4vcpu-ubuntu-2404
-    timeout-minutes: 60
-    env:
-      MURPH_RUNNER_BUNDLE_BUILD_CONCURRENCY: 1
-      MURPH_RUNNER_BUNDLE_PACK_CONCURRENCY: 4
-    steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
-        with:
-          persist-credentials: false
-
-      - name: Setup pnpm
-        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5
-
-      - name: Setup Node
-        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
-        with:
-          node-version-file: .nvmrc
-
-      - name: Install workspace dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Login to GHCR for runner model image
-        run: echo "${{ github.token }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
-
-      - name: Run hosted Codex auth deploy guard
-        shell: bash
-        env:
-          MURPH_RUN_HOSTED_CODEX_AUTH_E2E: "1"
-        run: |
-          set -euo pipefail
-
-          codex_cli_version="$(
-            sed -n 's/^ARG CODEX_CLI_VERSION=//p' Dockerfile.cloudflare-hosted-runner-base | tail -n 1
-          )"
-          if [[ -z "${codex_cli_version}" ]]; then
-            echo "Missing CODEX_CLI_VERSION in Dockerfile.cloudflare-hosted-runner-base" >&2
-            exit 1
-          fi
-
-          npm_prefix="${RUNNER_TEMP:-${TMPDIR:-/tmp}}/hosted-codex-auth-guard-npm"
-          mkdir -p "${npm_prefix}"
-          npm install --prefix "${npm_prefix}" --global --omit=dev --no-audit --no-fund --ignore-scripts "@openai/codex@${codex_cli_version}"
-          export PATH="${npm_prefix}/bin:${PATH}"
-          codex --version
-          pnpm --dir packages/assistant-runtime exec vitest run --config vitest.config.ts --no-coverage test/hosted-runtime-codex-config.test.ts
-
-      - name: Prepare immediate runner bundle and base image
-        run: pnpm --dir apps/cloudflare runner:bundle && pnpm --dir apps/cloudflare runner:docker:base -- --force
-
-      - name: Save immediate build artifacts
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p .artifacts/cloudflare-hosted-deploy
-          tar --hard-dereference -czf .artifacts/cloudflare-hosted-deploy/runner-bundle.tar.gz \
-            -C apps/cloudflare/.deploy \
-            runner-bundle
-          docker save ghcr.io/cobuildwithus/murph-cloudflare-runner-base:node24.14.1-codex0.144.0 \
-            | gzip -1 > .artifacts/cloudflare-hosted-deploy/runner-base-image.tar.gz
-
-      - name: Upload immediate build handoff
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
-        with:
-          name: cloudflare-hosted-immediate-build-${{ github.sha }}
-          path: |
-            .artifacts/cloudflare-hosted-deploy/runner-bundle.tar.gz
-            .artifacts/cloudflare-hosted-deploy/runner-base-image.tar.gz
-          if-no-files-found: error
-          retention-days: 1
-          compression-level: 0
-
   codex-auth-deploy-guard:
     name: Hosted Codex auth deploy guard
-    if: ${{ !(inputs.deploy_worker && inputs.skip_predeploy_e2e && inputs.container_rollout == 'immediate') }}
     runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 15
     steps:
@@ -555,9 +480,8 @@ jobs:
       - linq-delivery-gate
       - linq-scheduled-reminder-gate
       - cloudflare-runner-smoke-gate
-      - immediate-build-prep-gate
       - codex-auth-deploy-guard
-    if: ${{ !cancelled() && ((inputs.skip_predeploy_e2e && !inputs.deploy_worker && needs.codex-auth-deploy-guard.result == 'success') || (inputs.skip_predeploy_e2e && inputs.deploy_worker && inputs.container_rollout == 'immediate' && needs.immediate-build-prep-gate.result == 'success') || (!inputs.skip_predeploy_e2e && needs.codex-auth-deploy-guard.result == 'success' && needs.codex-cache-prefix-gate.result == 'success' && needs.linq-delivery-gate.result == 'success' && needs.linq-scheduled-reminder-gate.result == 'success' && (!inputs.deploy_worker || needs.cloudflare-runner-smoke-gate.result == 'success'))) }}
+    if: ${{ !cancelled() && github.ref == 'refs/heads/main' && github.ref_protected && needs.codex-auth-deploy-guard.result == 'success' && ((inputs.skip_predeploy_e2e && (!inputs.deploy_worker || inputs.container_rollout == 'immediate')) || (!inputs.skip_predeploy_e2e && needs.codex-cache-prefix-gate.result == 'success' && needs.linq-delivery-gate.result == 'success' && needs.linq-scheduled-reminder-gate.result == 'success' && (!inputs.deploy_worker || needs.cloudflare-runner-smoke-gate.result == 'success'))) }}
     runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 60
     environment: ${{ inputs.environment }}
@@ -724,120 +648,6 @@ jobs:
       - name: Install workspace dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Download immediate build handoff
-        if: ${{ inputs.deploy_worker && inputs.skip_predeploy_e2e && inputs.container_rollout == 'immediate' }}
-        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6
-        with:
-          name: cloudflare-hosted-immediate-build-${{ github.sha }}
-          path: .
-
-      - name: Restore immediate build handoff
-        if: ${{ inputs.deploy_worker && inputs.skip_predeploy_e2e && inputs.container_rollout == 'immediate' }}
-        run: |
-          set -euo pipefail
-          resolve_handoff_archive() {
-            local expected_path="$1"
-            local archive_name="$2"
-            if [[ -f "${expected_path}" ]]; then
-              printf '%s\n' "${expected_path}"
-              return
-            fi
-
-            mapfile -t matches < <(find . -type f -name "${archive_name}" | sort)
-            if [[ "${#matches[@]}" -ne 1 ]]; then
-              echo "Expected exactly one downloaded ${archive_name}; found ${#matches[@]}." >&2
-              exit 1
-            fi
-            printf '%s\n' "${matches[0]}"
-          }
-
-          bundle_archive="$(
-            resolve_handoff_archive \
-              ".artifacts/cloudflare-hosted-deploy/runner-bundle.tar.gz" \
-              "runner-bundle.tar.gz"
-          )"
-          runner_base_archive="$(
-            resolve_handoff_archive \
-              ".artifacts/cloudflare-hosted-deploy/runner-base-image.tar.gz" \
-              "runner-base-image.tar.gz"
-          )"
-          restore_staging="$(mktemp -d)"
-          cleanup_restore_staging() {
-            rm -rf "${restore_staging}"
-          }
-          trap cleanup_restore_staging EXIT
-
-          BUNDLE_ARCHIVE="${bundle_archive}" python3 <<'PY'
-          import os
-          import posixpath
-          import sys
-          import tarfile
-
-          archive_path = os.environ["BUNDLE_ARCHIVE"]
-
-          def fail(message: str) -> None:
-              print(message, file=sys.stderr)
-              raise SystemExit(1)
-
-          def normalize_bundle_path(path: str, label: str) -> str:
-              if not path or path.startswith("/"):
-                  fail(f"Unsafe runner bundle {label}.")
-              parts = path.split("/")
-              if any(part == ".." for part in parts):
-                  fail(f"Unsafe runner bundle {label}.")
-              normalized = posixpath.normpath(path)
-              if normalized == ".":
-                  fail(f"Unsafe runner bundle {label}.")
-              if normalized != "runner-bundle" and not normalized.startswith("runner-bundle/"):
-                  fail(f"Unexpected runner bundle {label}.")
-              return normalized
-
-          with tarfile.open(archive_path, "r:gz") as archive:
-              for member in archive.getmembers():
-                  member_path = normalize_bundle_path(member.name, "archive entry")
-                  if not (member.isfile() or member.isdir() or member.issym() or member.islnk()):
-                      fail("Unsupported runner bundle archive entry type.")
-                  if member.islnk():
-                      normalize_bundle_path(member.linkname, "hardlink target")
-                  if member.issym():
-                      link_target = member.linkname
-                      if not link_target or link_target.startswith("/"):
-                          fail("Unsafe runner bundle symlink target.")
-                      resolved_target = posixpath.normpath(
-                          posixpath.join(posixpath.dirname(member_path), link_target),
-                      )
-                      normalize_bundle_path(resolved_target, "symlink target")
-          PY
-
-          mkdir -p apps/cloudflare/.deploy
-          tar --no-same-owner --no-same-permissions -xzf "${bundle_archive}" \
-            -C "${restore_staging}"
-          if [[ ! -d "${restore_staging}/runner-bundle" ]]; then
-            echo "Runner bundle archive did not contain runner-bundle." >&2
-            exit 1
-          fi
-          bundle_root="$(realpath -m "${restore_staging}/runner-bundle")"
-          while IFS= read -r -d '' link_path; do
-            link_target="$(readlink "${link_path}")"
-            if [[ "${link_target}" == /* ]]; then
-              echo "Unsafe absolute runner bundle symlink target." >&2
-              exit 1
-            fi
-            link_dir="$(dirname "${link_path}")"
-            resolved_target="$(realpath -m "${link_dir}/${link_target}")"
-            if [[ "${resolved_target}" != "${bundle_root}" && "${resolved_target}" != "${bundle_root}/"* ]]; then
-              echo "Unsafe runner bundle symlink target." >&2
-              exit 1
-            fi
-          done < <(find "${restore_staging}/runner-bundle" -type l -print0)
-          rm -rf apps/cloudflare/.deploy/runner-bundle
-          mv "${restore_staging}/runner-bundle" apps/cloudflare/.deploy/runner-bundle
-          gzip -dc "${runner_base_archive}" | docker load
-
-      - name: Validate immediate runner bundle manifest
-        if: ${{ inputs.deploy_worker && inputs.skip_predeploy_e2e && inputs.container_rollout == 'immediate' }}
-        run: pnpm --dir apps/cloudflare runner:bundle:manifest:validate
-
       - name: Validate required deploy environment
         env:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
@@ -857,19 +667,15 @@ jobs:
         run: pnpm --dir apps/cloudflare deploy:preflight
 
       - name: Prepare deploy artifacts
-        if: ${{ inputs.deploy_worker && !(inputs.skip_predeploy_e2e && inputs.container_rollout == 'immediate') }}
+        if: ${{ inputs.deploy_worker }}
         run: pnpm --dir apps/cloudflare deploy:config:render && pnpm --dir apps/cloudflare runner:bundle
 
-      - name: Render deploy config for immediate handoff
-        if: ${{ inputs.deploy_worker && inputs.skip_predeploy_e2e && inputs.container_rollout == 'immediate' }}
-        run: pnpm --dir apps/cloudflare deploy:config:render && pnpm --dir apps/cloudflare runner:bundle:manifest:refresh
-
       - name: Login to GHCR for runner model image
-        if: ${{ inputs.deploy_worker && !(inputs.skip_predeploy_e2e && inputs.container_rollout == 'immediate') }}
+        if: ${{ inputs.deploy_worker }}
         run: echo "${{ github.token }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
 
       - name: Prepare runner base image
-        if: ${{ inputs.deploy_worker && !(inputs.skip_predeploy_e2e && inputs.container_rollout == 'immediate') }}
+        if: ${{ inputs.deploy_worker }}
         run: pnpm --dir apps/cloudflare runner:docker:base -- --force
 
       - name: Render Worker secrets

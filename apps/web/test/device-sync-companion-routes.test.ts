@@ -1,3 +1,5 @@
+import { readFile } from "node:fs/promises";
+
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   serializeHostedExecutionDeviceSyncDirtyPayloadIdentity,
@@ -78,10 +80,13 @@ vi.mock("@/src/lib/prisma", () => ({
 type SignInTokenRouteModule = typeof import("../app/api/device-sync/companion/sign-in-token/route");
 type StatusRouteModule = typeof import("../app/api/device-sync/companion/status/route");
 type HealthMetadataRouteModule = typeof import("../app/api/device-sync/companion/health-metadata/route");
+type AuthDiagnosticsRouteModule =
+  typeof import("../app/api/device-sync/companion/auth-diagnostics/route");
 
 let signInTokenRoute: SignInTokenRouteModule;
 let statusRoute: StatusRouteModule;
 let healthMetadataRoute: HealthMetadataRouteModule;
+let authDiagnosticsRoute: AuthDiagnosticsRouteModule;
 
 const ACTIVE_MEMBER = {
   billingStatus: "active",
@@ -154,11 +159,37 @@ function healthMetadataRecord(overrides: Record<string, unknown> = {}) {
   };
 }
 
+function authDiagnosticsRequest(
+  body: unknown,
+  init: Omit<RequestInit, "body" | "method"> = {},
+) {
+  return createJsonPostRequest(
+    "https://app.example.test/api/device-sync/companion/auth-diagnostics",
+    body,
+    init,
+  );
+}
+
+async function withProductionAuthDiagnosticsEnv<T>(
+  enabled: boolean,
+  callback: () => Promise<T>,
+): Promise<T> {
+  vi.stubEnv("NODE_ENV", "production");
+  vi.stubEnv("MURPH_COMPANION_AUTH_DIAGNOSTICS_ENABLED", enabled ? "1" : "");
+
+  try {
+    return await callback();
+  } finally {
+    vi.unstubAllEnvs();
+  }
+}
+
 describe("device sync companion routes", () => {
   beforeAll(async () => {
     signInTokenRoute = await import("../app/api/device-sync/companion/sign-in-token/route");
     statusRoute = await import("../app/api/device-sync/companion/status/route");
     healthMetadataRoute = await import("../app/api/device-sync/companion/health-metadata/route");
+    authDiagnosticsRoute = await import("../app/api/device-sync/companion/auth-diagnostics/route");
   });
 
   beforeEach(() => {
@@ -196,6 +227,339 @@ describe("device sync companion routes", () => {
   afterEach(() => {
     vi.useRealTimers();
     vi.restoreAllMocks();
+  });
+
+  describe("POST /api/device-sync/companion/auth-diagnostics", () => {
+    it("records typed pre-login Privy auth diagnostics without raw provider prose", async () => {
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+      const response = await authDiagnosticsRoute.POST(authDiagnosticsRequest({
+        appVersion: "1.0.0",
+        diagnosticCode: "privy_rate_limited",
+        errorKind: "rate_limited",
+        httpStatus: 429,
+        method: "email",
+        providerErrorCode: "too_many_requests",
+        retryable: true,
+        stage: "send_code",
+      }));
+
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toEqual({ ok: true });
+      expect(warnSpy).toHaveBeenCalledWith("Companion auth diagnostic.", expect.objectContaining({
+        appVersion: "1.0.0",
+        diagnosticCode: "privy_rate_limited",
+        diagnosticDescription: "Privy rate limited the auth request.",
+        errorKind: "rate_limited",
+        httpStatus: 429,
+        method: "email",
+        platform: "ios",
+        provider: "privy",
+        providerErrorCode: "too_many_requests",
+        retryable: true,
+        stage: "send_code",
+      }));
+    });
+
+    it("records native app configuration failures as typed diagnostics", async () => {
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+      const response = await authDiagnosticsRoute.POST(authDiagnosticsRequest({
+        diagnosticCode: "privy_invalid_native_app_id",
+        errorKind: "configuration",
+        method: "email",
+        providerErrorCode: null,
+        retryable: false,
+        stage: "send_code",
+      }));
+
+      expect(response.status).toBe(200);
+      expect(warnSpy).toHaveBeenCalledWith(
+        "Companion auth diagnostic.",
+        expect.objectContaining({
+          diagnosticCode: "privy_invalid_native_app_id",
+          diagnosticDescription: "Privy rejected the native app configuration.",
+          providerErrorCode: null,
+          retryable: false,
+        }),
+      );
+    });
+
+    it("accepts the checked-in iOS OTP failure contract", async () => {
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const contract = JSON.parse(await readFile(
+        new URL("./fixtures/companion-auth-diagnostic-ios-rate-limited.json", import.meta.url),
+        "utf8",
+      )) as unknown;
+
+      const response = await authDiagnosticsRoute.POST(authDiagnosticsRequest(
+        contract,
+        { headers: { "x-vercel-forwarded-for": "203.0.113.27" } },
+      ));
+
+      expect(response.status).toBe(200);
+      expect(warnSpy).toHaveBeenCalledWith(
+        "Companion auth diagnostic.",
+        expect.objectContaining({
+          diagnosticCode: "privy_rate_limited",
+          errorKind: "rate_limited",
+          method: "email",
+          providerErrorCode: "too_many_requests",
+          retryable: true,
+          stage: "send_code",
+        }),
+      );
+    });
+
+    it("quietly hides auth diagnostics in production until explicitly enabled", async () => {
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+      const response = await withProductionAuthDiagnosticsEnv(false, () =>
+        authDiagnosticsRoute.POST(authDiagnosticsRequest({
+          diagnosticCode: "privy_unknown",
+          errorKind: "provider",
+          method: "email",
+          retryable: true,
+          stage: "send_code",
+        })),
+      );
+
+      expect(response.status).toBe(404);
+      await expect(response.text()).resolves.toBe("");
+      expect(warnSpy).not.toHaveBeenCalled();
+    });
+
+    it("allows auth diagnostics in production after the explicit deployment gate is enabled", async () => {
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+      const response = await withProductionAuthDiagnosticsEnv(true, () =>
+        authDiagnosticsRoute.POST(authDiagnosticsRequest({
+          diagnosticCode: "privy_unknown",
+          errorKind: "provider",
+          method: "email",
+          retryable: true,
+          stage: "send_code",
+        })),
+      );
+
+      expect(response.status).toBe(200);
+      expect(warnSpy).toHaveBeenCalledWith(
+        "Companion auth diagnostic.",
+        expect.objectContaining({ errorKind: "provider" }),
+      );
+    });
+
+    it.each([
+      ["authorization", "not-a-real-auth-header"],
+      ["email", "person@example.test"],
+      ["healthData", "blood glucose 280 mg/dL"],
+      ["memberId", "hbm_abc123xyz"],
+      ["phone", "+14155552671"],
+      ["provider", "privy"],
+      ["providerMessage", "Privy failed for person@example.test code 123456"],
+      ["token", "secret-token"],
+    ])("rejects the unknown %s field without logging it", async (field, value) => {
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+      const response = await authDiagnosticsRoute.POST(authDiagnosticsRequest({
+        diagnosticCode: "privy_unknown",
+        errorKind: "provider",
+        method: "email",
+        retryable: true,
+        stage: "send_code",
+        [field]: value,
+      }));
+
+      expect(response.status).toBe(400);
+      await expect(response.json()).resolves.toMatchObject({
+        error: { code: "COMPANION_REQUEST_INVALID" },
+      });
+      expect(warnSpy).not.toHaveBeenCalledWith(
+        "Companion auth diagnostic.",
+        expect.anything(),
+      );
+      expect(JSON.stringify(warnSpy.mock.calls)).not.toContain(value);
+    });
+
+    it.each([
+      "UPPERCASE",
+      "contains-hyphens",
+      "contains spaces",
+      "x".repeat(65),
+      "123456",
+      "otp_654321",
+      "hbm_abc123xyz",
+      "14155552671",
+      "hiv_positive",
+      "unexpected_provider_error",
+    ])("drops unsupported provider machine code %s without logging it", async (providerErrorCode) => {
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+      const response = await authDiagnosticsRoute.POST(authDiagnosticsRequest({
+        diagnosticCode: "privy_unknown",
+        errorKind: "provider",
+        method: "email",
+        providerErrorCode,
+        retryable: true,
+        stage: "send_code",
+      }));
+
+      expect(response.status).toBe(200);
+      expect(warnSpy).toHaveBeenCalledWith(
+        "Companion auth diagnostic.",
+        expect.objectContaining({ providerErrorCode: null }),
+      );
+      expect(JSON.stringify(warnSpy.mock.calls)).not.toContain(providerErrorCode);
+    });
+
+    it.each([
+      ["absent", undefined],
+      ["null", null],
+      ["number", 123456],
+      ["object", { code: "invalid_code" }],
+      ["array", ["invalid_code"]],
+    ])("drops %s provider error code values", async (_label, providerErrorCode) => {
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+      const response = await authDiagnosticsRoute.POST(authDiagnosticsRequest({
+        diagnosticCode: "privy_unknown",
+        errorKind: "provider",
+        method: "email",
+        providerErrorCode,
+        retryable: true,
+        stage: "send_code",
+      }));
+
+      expect(response.status).toBe(200);
+      expect(warnSpy).toHaveBeenCalledWith(
+        "Companion auth diagnostic.",
+        expect.objectContaining({ providerErrorCode: null }),
+      );
+    });
+
+    it("drops an unsafe app version without losing the diagnostic", async () => {
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+      const response = await authDiagnosticsRoute.POST(authDiagnosticsRequest({
+        appVersion: "1.0 beta",
+        diagnosticCode: "privy_unknown",
+        errorKind: "provider",
+        method: "email",
+        retryable: true,
+        stage: "send_code",
+      }));
+
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toEqual({ ok: true });
+      expect(warnSpy).toHaveBeenCalledWith(
+        "Companion auth diagnostic.",
+        expect.objectContaining({ appVersion: null }),
+      );
+    });
+
+    it("rejects diagnostic request bodies over eight kilobytes", async () => {
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+      const response = await authDiagnosticsRoute.POST(authDiagnosticsRequest({
+        padding: "x".repeat(9_000),
+      }));
+
+      expect(response.status).toBe(413);
+      await expect(response.json()).resolves.toMatchObject({
+        error: { code: "REQUEST_BODY_TOO_LARGE" },
+      });
+      expect(JSON.stringify(warnSpy.mock.calls)).not.toContain("x".repeat(100));
+    });
+
+    it("does not keep a process-local rate-limit owner after WAF admission", async () => {
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const body = {
+        diagnosticCode: "privy_unknown",
+        errorKind: "provider",
+        method: "email",
+        retryable: true,
+        stage: "send_code",
+      };
+
+      for (let index = 0; index < 31; index += 1) {
+        const response = await authDiagnosticsRoute.POST(authDiagnosticsRequest(body, {
+          headers: {
+            "x-vercel-forwarded-for": "192.0.2.99",
+          },
+        }));
+        expect(response.status).toBe(200);
+      }
+
+      expect(warnSpy.mock.calls.filter(([message]) => (
+        message === "Companion auth diagnostic."
+      ))).toHaveLength(31);
+      expect(warnSpy.mock.calls).toHaveLength(31);
+    });
+
+    it("rejects malformed diagnostics without logging request body fields", async () => {
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+      const response = await authDiagnosticsRoute.POST(authDiagnosticsRequest({
+        email: "person@example.test",
+        diagnosticCode: "privy_unknown",
+        errorKind: "provider",
+        method: "email",
+        retryable: true,
+        stage: "send_magic_link",
+      }));
+
+      expect(response.status).toBe(400);
+      await expect(response.json()).resolves.toMatchObject({
+        error: { code: "COMPANION_REQUEST_INVALID" },
+      });
+      expect(JSON.stringify(warnSpy.mock.calls)).not.toContain("person@example");
+    });
+
+    it("rejects malformed JSON without logging parser body fragments", async () => {
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const rawBody = "otp_654321 abcdefghijklmnop+/123456qrstuvwxyzabcdef==";
+      const request = new Request(
+        "https://app.example.test/api/device-sync/companion/auth-diagnostics",
+        {
+          body: rawBody,
+          headers: {
+            "content-type": "application/json",
+          },
+          method: "POST",
+        },
+      );
+
+      const response = await authDiagnosticsRoute.POST(request);
+
+      expect(response.status).toBe(400);
+      await expect(response.json()).resolves.toMatchObject({
+        error: { code: "COMPANION_REQUEST_INVALID" },
+      });
+      expect(JSON.stringify(warnSpy.mock.calls)).not.toContain("otp_654321");
+      expect(JSON.stringify(warnSpy.mock.calls)).not.toContain("abcdefghijklmnop+/123456");
+    });
+
+    it("rejects unknown diagnostic codes without logging them", async () => {
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+      const response = await authDiagnosticsRoute.POST(authDiagnosticsRequest({
+        diagnosticCode: "HIV_POSITIVE",
+        errorKind: "provider",
+        method: "email",
+        retryable: false,
+        stage: "send_code",
+      }));
+
+      expect(response.status).toBe(400);
+      await expect(response.json()).resolves.toMatchObject({
+        error: { code: "COMPANION_REQUEST_INVALID" },
+      });
+      expect(warnSpy).not.toHaveBeenCalledWith(
+        "Companion auth diagnostic.",
+        expect.anything(),
+      );
+      expect(JSON.stringify(warnSpy.mock.calls)).not.toContain("HIV");
+    });
   });
 
   describe("POST /api/device-sync/companion/sign-in-token", () => {

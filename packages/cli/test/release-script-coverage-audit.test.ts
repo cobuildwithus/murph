@@ -158,6 +158,7 @@ function readWorkspaceDiffScope(...changedFiles: string[]) {
   return JSON.parse(result.stdout) as {
     affectedWorkspaceDirs: string[]
     repoInternalFastPath: boolean
+    runRepoToolsTests: boolean
     runVerifyCli: boolean
     testDirs: string[]
     typecheckDirs: string[]
@@ -279,8 +280,8 @@ describe('monorepo release flow coverage audit', () => {
     expect(existsSync(path.join(repoRoot, 'scripts', 'chatgpt-managed-browser.test.mjs'))).toBe(false)
     expect(existsSync(path.join(repoRoot, 'scripts', 'review-gpt.sh'))).toBe(false)
     expect(existsSync(path.join(repoRoot, 'scripts', 'review-gpt-cli.sh'))).toBe(false)
-    expect(rootPackageJson.devDependencies?.['@cobuild/review-gpt']).toBe('^0.5.98')
-    expect(pnpmWorkspace).toContain('@cobuild/review-gpt@0.5.98')
+    expect(rootPackageJson.devDependencies?.['@cobuild/review-gpt']).toBe('^0.5.100')
+    expect(pnpmWorkspace).toContain('@cobuild/review-gpt@0.5.100')
     expect(pnpmWorkspace.match(/^patchedDependencies:\n((?:  .+\n)+)/mu)?.[1]?.trim()).toBe(
       'incur@0.4.5: patches/incur@0.4.5.patch',
     )
@@ -290,7 +291,7 @@ describe('monorepo release flow coverage audit', () => {
     expect(reviewGptConfig).toContain('repo_context_url=""')
     expect(reviewGptConfig).toContain('attach_artifacts=1')
     expect(reviewGptConfig).toContain('app_connector="current"')
-    expect(reviewGptConfig).toContain('model="gpt-5.5-pro"')
+    expect(reviewGptConfig).toContain('model="gpt-5.6-sol"')
     expect(reviewGptConfig).toContain('thinking="current"')
     expect(reviewGptConfig).toContain('snapshot_attachment_name="repo.snapshot.zip"')
     expect(reviewGptConfig).toContain('repomix_attachment_format="zip"')
@@ -395,6 +396,13 @@ describe('monorepo release flow coverage audit', () => {
 
     expect(summary.repoInternalFastPath).toBe(true)
     expect(summary.runVerifyCli).toBe(true)
+  })
+
+  it('runs repo-tool regressions for config-only verification changes', () => {
+    const summary = readWorkspaceDiffScope('config/vitest-parallelism.ts')
+
+    expect(summary.repoInternalFastPath).toBe(true)
+    expect(summary.runRepoToolsTests).toBe(true)
   })
 
   it('keeps active execution plans aligned with live coordination-ledger state', () => {
@@ -783,7 +791,7 @@ Updated: 2026-04-24
       'delay App verification ${acceptance_app_verify_delay_seconds}s to preserve package coverage throughput',
     )
     expect(workspaceVerify).toContain(
-      'readonly package_coverage_vitest_max_workers_default="$([[ -n "${CI:-}" ]] && echo 50% || echo 75%)"',
+      'readonly package_coverage_vitest_max_workers_default="$([[ -n "${CI:-}" ]] && echo 50% || local_worker_budget_default "$package_coverage_concurrency_limit" 1)"',
     )
     expect(workspaceVerify).toContain(
       'readonly package_coverage_cli_active_concurrency_default="$([[ -n "${CI:-}" ]] && echo 1 || echo 4)"',

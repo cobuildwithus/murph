@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto'
-import { readFile, stat } from 'node:fs/promises'
+import { readFile, realpath, stat } from 'node:fs/promises'
+import path from 'node:path'
 import {
   RAW_CAPTURES_DIRECTORY,
   RAW_INBOX_DIRECTORY,
@@ -11,25 +12,32 @@ import type {
   AssistantWorkspaceArtifactMaterializer,
 } from '../assistant/execution-context.js'
 
-// Reference authority is structural: refs must live in a vault family whose
-// only writers are the inbound-attachment pipeline (raw/inbox/**) or the
+// Reference authority is structural. Vault refs must live in a vault family
+// whose only writers are the inbound-attachment pipeline (raw/inbox/**) or the
 // canonical capture surface (raw/captures/**). Both hold media a human sent
 // into this vault's conversation, so "pipeline-written media family" is the
 // consent fact that authorizes reuse in image generation. Confidentiality
 // across relationships is owned by vault separation (each 1:1 and each group
 // is its own runtime and vault), not by this check; this check blocks DIRECT
 // reference of document scans (raw/documents/**), bank/, derived/, and other
-// non-media vault files by a confused or injected model. It is a
-// misreference guardrail, not a wall against deliberate re-materialization:
-// the agent holds shell and capture authority inside its own vault, so no
-// within-vault path check can stop it from copying bytes into an authorized
-// family — just as it can already read any vault file into its own provider
-// -bound context. Do not "harden" this by coupling capture or other product
-// surfaces to image authority; the hard boundary lives at the vault seam.
+// non-media vault files by a confused or injected model. The only non-vault
+// family is skill-assets/**, which resolves to product-shipped read-only
+// content under the installed assistant-engine package's skills/shared/
+// directory. That family carries no user data and no consent question; it is
+// Murph's own canonical character art, served from the package rather than
+// the vault. This remains a misreference guardrail, not a wall against
+// deliberate re-materialization: the agent holds shell and capture authority
+// inside its own vault, so no within-vault path check can stop it from copying
+// bytes into an authorized family — just as it can already read any vault file
+// into its own provider-bound context. Do not "harden" this by coupling
+// capture or other product surfaces to image authority; the hard boundary
+// lives at the vault seam.
 const AUTHORIZED_REFERENCE_IMAGE_PATH_PREFIXES = [
   `${RAW_INBOX_DIRECTORY}/`,
   `${RAW_CAPTURES_DIRECTORY}/`,
 ] as const
+const SKILL_ASSET_REFERENCE_IMAGE_PATH_PREFIX = 'skill-assets/' as const
+const SKILL_ASSET_SHARED_DIRECTORY = 'shared'
 
 export const MAX_GENERATE_IMAGE_REFERENCE_COUNT = 16
 // The per-file cap matches the generated-image output cap so a saved
@@ -59,17 +67,11 @@ export interface ResolvedGenerateImageReference {
 export async function resolveGenerateImageReferences(input: {
   materializeWorkspaceArtifacts?: AssistantWorkspaceArtifactMaterializer | null
   refs: readonly string[]
+  skillsRoot?: string | null
   vaultRoot: string
 }): Promise<ResolvedGenerateImageReference[]> {
-  const vaultRoot = input.vaultRoot.trim()
-  if (!vaultRoot) {
-    throw new VaultCliError(
-      'ASSISTANT_IMAGE_REFERENCE_VAULT_UNAVAILABLE',
-      'Image references require a vault root.',
-    )
-  }
-
   const refs = input.refs.map(normalizeGenerateImageReferenceRef)
+  const skillsRoot = input.skillsRoot?.trim() ?? ''
   if (refs.length === 0) {
     return []
   }
@@ -80,37 +82,57 @@ export async function resolveGenerateImageReferences(input: {
     )
   }
 
-  for (const ref of refs) {
-    const authorized = AUTHORIZED_REFERENCE_IMAGE_PATH_PREFIXES.some(
-      (prefix) => ref.startsWith(prefix),
-    )
-    if (!authorized) {
-      throw new VaultCliError(
-        'ASSISTANT_IMAGE_REFERENCE_REF_UNAUTHORIZED',
-        'Image references must live under raw/inbox/** or raw/captures/**.',
-      )
+  const refFamilies = refs.map((ref) => {
+    if (isVaultReferenceImageRef(ref)) {
+      return 'vault' as const
     }
+    if (isSkillAssetReferenceImageRef(ref)) {
+      if (!skillsRoot) {
+        throw new VaultCliError(
+          'ASSISTANT_IMAGE_REFERENCE_SKILLS_ROOT_UNAVAILABLE',
+          'Skill asset image references require an assistant skills root.',
+        )
+      }
+      return 'skill-asset' as const
+    }
+    throw new VaultCliError(
+      'ASSISTANT_IMAGE_REFERENCE_REF_UNAUTHORIZED',
+      'Image references must live under raw/inbox/**, raw/captures/**, or skill-assets/**.',
+    )
+  })
+  const vaultRefs = refs.filter((ref) => isVaultReferenceImageRef(ref))
+  const vaultRoot = input.vaultRoot.trim()
+
+  if (vaultRefs.length > 0 && !vaultRoot) {
+    throw new VaultCliError(
+      'ASSISTANT_IMAGE_REFERENCE_VAULT_UNAVAILABLE',
+      'Image references require a vault root.',
+    )
   }
 
-  const materialization = await input.materializeWorkspaceArtifacts?.(refs)
-  const missingRefs = materialization
-    ? refs.filter((ref) => materialization.missingArtifactPaths.has(ref))
-    : []
-  if (missingRefs.length > 0) {
-    throw new VaultCliError(
-      'ASSISTANT_IMAGE_REFERENCE_UNAVAILABLE',
-      'One or more image references are unavailable in the workspace.',
-    )
+  if (vaultRefs.length > 0) {
+    const materialization = await input.materializeWorkspaceArtifacts?.(vaultRefs)
+    const missingRefs = materialization
+      ? vaultRefs.filter((ref) => materialization.missingArtifactPaths.has(ref))
+      : []
+    if (missingRefs.length > 0) {
+      throw new VaultCliError(
+        'ASSISTANT_IMAGE_REFERENCE_UNAVAILABLE',
+        'One or more image references are unavailable in the workspace.',
+      )
+    }
   }
 
   const resolved: ResolvedGenerateImageReference[] = []
   let totalBytes = 0
   for (const [index, ref] of refs.entries()) {
-    const absolutePath = await resolveAssistantVaultPath(
-      vaultRoot,
-      ref,
-      'file path',
-    )
+    const absolutePath = refFamilies[index] === 'skill-asset'
+      ? await resolveSkillAssetReferencePath(skillsRoot, ref)
+      : await resolveAssistantVaultPath(
+          vaultRoot,
+          ref,
+          'file path',
+        )
     const fileStats = await stat(absolutePath)
     if (!fileStats.isFile()) {
       throw new VaultCliError(
@@ -161,6 +183,55 @@ export async function resolveGenerateImageReferences(input: {
   }
 
   return resolved
+}
+
+export function isVaultReferenceImageRef(ref: string): boolean {
+  return AUTHORIZED_REFERENCE_IMAGE_PATH_PREFIXES.some(
+    (prefix) => ref.startsWith(prefix),
+  )
+}
+
+function isSkillAssetReferenceImageRef(ref: string): boolean {
+  return ref.startsWith(SKILL_ASSET_REFERENCE_IMAGE_PATH_PREFIX)
+}
+
+async function resolveSkillAssetReferencePath(
+  skillsRoot: string,
+  ref: string,
+): Promise<string> {
+  const sharedRoot = path.resolve(skillsRoot, SKILL_ASSET_SHARED_DIRECTORY)
+  const absolutePath = path.resolve(
+    sharedRoot,
+    ref.slice(SKILL_ASSET_REFERENCE_IMAGE_PATH_PREFIX.length),
+  )
+  assertPathWithinSkillAssetSharedRoot(sharedRoot, absolutePath, ref)
+
+  const [canonicalSharedRoot, canonicalPath] = await Promise.all([
+    realpath(sharedRoot),
+    realpath(absolutePath),
+  ])
+  assertPathWithinSkillAssetSharedRoot(canonicalSharedRoot, canonicalPath, ref)
+
+  return canonicalPath
+}
+
+function assertPathWithinSkillAssetSharedRoot(
+  sharedRoot: string,
+  absolutePath: string,
+  ref: string,
+): void {
+  const relativeToSharedRoot = path.relative(sharedRoot, absolutePath)
+
+  if (
+    relativeToSharedRoot === '..' ||
+    relativeToSharedRoot.startsWith(`..${path.sep}`) ||
+    path.isAbsolute(relativeToSharedRoot)
+  ) {
+    throw new VaultCliError(
+      'ASSISTANT_IMAGE_REFERENCE_SKILL_ASSET_OUTSIDE_ROOT',
+      `Skill asset image reference "${ref}" resolves outside the assistant skills shared root.`,
+    )
+  }
 }
 
 export function normalizeGenerateImageReferenceRef(value: string): string {

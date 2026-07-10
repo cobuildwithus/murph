@@ -108,6 +108,9 @@ jobs:
       - name: Typecheck
         run: pnpm typecheck
 
+      - name: Test repo verification tools
+        run: pnpm test:repo-tools
+
       - name: Artifact hygiene
         run: pnpm no-js
 
@@ -188,6 +191,8 @@ jobs:
           for package_dir in ${{ matrix.packages }}; do
             if [[ "$package_dir" == "packages/cli" ]]; then
               env MURPH_PREPARED_CLI_RUNTIME_ARTIFACTS=1 MURPH_VITEST_MAX_WORKERS=50% pnpm exec vitest run --config packages/cli/vitest.workspace.ts --coverage
+            elif [[ "$package_dir" == "packages/assistant-engine" ]]; then
+              env NODE_OPTIONS=--max-old-space-size=5120 MURPH_VITEST_MAX_WORKERS=50% pnpm --dir "$package_dir" test:coverage
             else
               env MURPH_VITEST_MAX_WORKERS=50% pnpm --dir "$package_dir" test:coverage
             fi
