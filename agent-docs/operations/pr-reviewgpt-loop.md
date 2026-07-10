@@ -1,6 +1,6 @@
 # PR ReviewGPT Loop
 
-Last verified: 2026-07-09
+Last verified: 2026-07-10
 
 Required post-completion ReviewGPT loop for non-trivial PR-lane work. It runs
 the repo-local `pr-review` preset through `pnpm review:gpt`, using one of the
@@ -189,8 +189,10 @@ the touched surface, push it, and use the ordinary review-loop rules.
   context, dirty-worktree context, ad hoc archives, or an unmanaged/non-ReviewGPT
   browser profile for this PR gate unless the current user task explicitly
   changes the route.
-- Response files under `audit-packages/` are local working artifacts and stay
-  uncommitted.
+- Do not commit each ReviewGPT round as a Markdown document. Response files
+  under `audit-packages/` are local working artifacts and stay uncommitted.
+  Agents may instead post a concise PR comment as each round is resolved,
+  stating what they fixed and why; these comments are optional.
 - The `pr-review` prompt lives at
   `scripts/chatgpt-review-presets/pr-deep-review.md`; despite the historical
   filename, it is the ReviewGPT PR-review prompt used by this loop.

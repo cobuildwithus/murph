@@ -5,6 +5,9 @@ import {
 import {
   parseHostedRuntimeLogResponse,
 } from "@murphai/hosted-execution/parsers";
+import type {
+  HostedAssistantModelOverride,
+} from "@murphai/hosted-execution/assistant-model";
 import {
   HOSTED_RUNTIME_LOG_PATH,
 } from "@murphai/hosted-execution/routes";
@@ -160,6 +163,8 @@ export class RuntimeInvocationService {
     });
     const workspaceRunnerInvocation = await this.prepareWorkspaceRunnerInvocation({
       commandBudget: input.commandBudget,
+      hostedAssistantModelOverride:
+        workspaceRead.hostedAssistantModelOverride ?? null,
       processingMode: input.input.processingMode ?? null,
       token,
       userId: input.input.userId,
@@ -516,6 +521,7 @@ export class RuntimeInvocationService {
 
   private async prepareWorkspaceRunnerInvocation(input: {
     commandBudget?: RuntimeProcessingCommandBudget;
+    hostedAssistantModelOverride: HostedAssistantModelOverride | null;
     processingMode?: "default" | "inbox_media_retention" | null;
     token: RunnerWriteFenceToken;
     userId: string;
@@ -532,6 +538,10 @@ export class RuntimeInvocationService {
     const forwardedEnv = buildHostedRunnerContainerEnv(
       this.input.runnerRuntimeEnvSource,
     );
+    if (input.hostedAssistantModelOverride !== null) {
+      forwardedEnv.HOSTED_ASSISTANT_MODEL =
+        input.hostedAssistantModelOverride;
+    }
     const configSource = this.input.runnerStoreCache.readRuntimeConfigSource();
     const webControlTimeoutMs = input.commandBudget
       ? readRuntimeProcessingCommandStepTimeoutMs({

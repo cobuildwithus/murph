@@ -14,6 +14,9 @@ import type {
   AssistantUsageTokenPricingBasis,
 } from "./assistant-usage.ts";
 import type {
+  HostedAssistantModelOverride,
+} from "./assistant-model.ts";
+import type {
   HostedBrowserVaultReplicaCursorRef,
   HostedBrowserVaultReplicaRef,
   HostedExecutionLinqExternalThreadRouteAuthority,
@@ -1806,6 +1809,7 @@ export interface HostedWorkspaceState {
 
 export interface HostedWorkspaceReadResponse {
   fetchedAt: string;
+  hostedAssistantModelOverride?: HostedAssistantModelOverride;
   workspace: HostedWorkspaceState | null;
 }
 
