@@ -36,6 +36,9 @@ describe('host support workflow guards', () => {
     expect(workflow).toContain('MURPH_VERIFY_STEP_PARALLEL: "1"')
     expect(workflow).toContain('pnpm exec tsx e2e/smoke/verify-scenario-integrity.ts --coverage')
     expect(workflow).toContain('MURPH_PREPARED_CLI_RUNTIME_ARTIFACTS=1 MURPH_VITEST_MAX_WORKERS=50%')
+    expect(workflow).toContain(
+      "NODE_OPTIONS: ${{ matrix.shard == 'assistant' && '--max-old-space-size=6144' || '' }}",
+    )
     expect(workflow).not.toContain('run: pnpm release:check')
   })
 
