@@ -160,35 +160,63 @@ export default async function OGImage() {
           </div>
         </div>
 
-        {/* Goal pills anchoring the bottom-left */}
+        {/* Channel row anchoring the bottom-left (icons match the homepage) */}
         <div
           style={{
             position: "absolute",
-            bottom: 64,
+            bottom: 66,
             left: 72,
             display: "flex",
-            gap: 12,
+            alignItems: "center",
+            gap: 32,
           }}
         >
-          {["Get stronger", "Fix your sleep", "Lower cholesterol"].map(
-            (goal) => (
-              <div
-                key={goal}
-                style={{
-                  padding: "9px 18px",
-                  borderRadius: 999,
-                  border: "1px solid rgba(160, 122, 78, 0.35)",
-                  backgroundColor: "rgba(255, 255, 255, 0.45)",
-                  fontFamily: "DM Sans",
-                  fontSize: 13,
-                  letterSpacing: "0.14em",
-                  color: MUTED,
-                }}
-              >
-                {goal.toUpperCase()}
-              </div>
-            ),
-          )}
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
+              <rect width="24" height="24" rx="5.5" fill="#34C759" />
+              <path
+                d="M12 6.5c-3.7 0-6.7 2.42-6.7 5.4 0 1.62.92 3.06 2.36 4.06l-.78 1.96 2.48-1.15c.81.3 1.71.46 2.64.46 3.7 0 6.7-2.42 6.7-5.4S15.7 6.5 12 6.5z"
+                fill="#fff"
+              />
+            </svg>
+            <div style={{ fontFamily: "DM Sans", fontSize: 16, color: MUTED }}>
+              iMessage
+            </div>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
+              <circle cx="12" cy="12" r="12" fill="#2AABEE" />
+              <path
+                d="M17.66 7.4 5.45 12.13c-.83.32-.82.78-.15.98l3.13.98 7.25-4.57c.34-.21.65-.1.4.13l-5.87 5.3-.23 3.4c.33 0 .47-.15.66-.33l1.58-1.53 3.28 2.42c.6.33 1.04.16 1.19-.56l2.15-10.13c.22-.88-.32-1.28-.99-1.02z"
+                fill="#fff"
+              />
+            </svg>
+            <div style={{ fontFamily: "DM Sans", fontSize: 16, color: MUTED }}>
+              Telegram
+            </div>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
+              <rect width="24" height="24" rx="5.5" fill="#2d3436" />
+              <path
+                d="M6 8.8A1.8 1.8 0 0 1 7.8 7h8.4A1.8 1.8 0 0 1 18 8.8v6.4a1.8 1.8 0 0 1-1.8 1.8H7.8A1.8 1.8 0 0 1 6 15.2V8.8Z"
+                stroke="#fff"
+                strokeWidth="1.4"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+              <path
+                d="m6.9 8.6 4.4 3.6c.4.33 1 .33 1.4 0l4.4-3.6"
+                stroke="#fff"
+                strokeWidth="1.4"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+            <div style={{ fontFamily: "DM Sans", fontSize: 16, color: MUTED }}>
+              Email
+            </div>
+          </div>
         </div>
 
         {/* Phone mock, bleeding off the bottom edge (mirrors the homepage
