@@ -61,8 +61,6 @@ const hostedContextDiagnosticDetailReaders = {
   conversationLookupIndexedCandidateCount: readHostedContextNonnegativeNumber,
   conversationLookupKeyCount: readHostedContextNonnegativeNumber,
   conversationLookupMatchedScope: readHostedContextScope,
-  existingTranscriptEntryCount: readHostedContextNonnegativeNumber,
-  existingTranscriptWelcomeVisible: readHostedContextBoolean,
   fingerprintReady: readHostedContextBoolean,
   identityFingerprint: readHostedContextFingerprint,
   identityPresent: readHostedContextBoolean,

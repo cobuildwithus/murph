@@ -3,7 +3,6 @@ import type { Prisma } from "@prisma/client";
 import {
   buildHostedInviteUrl,
 } from "./invite-service";
-import type { HostedAiUsageGateNoticeCode } from "../hosted-execution/usage-allowance";
 import {
   incrementHostedLinqInboundDailyState,
 } from "./linq-daily-state";
@@ -24,7 +23,6 @@ import {
 } from "./hosted-member-routing-store";
 import {
   createHostedWebhookLinqMessageSideEffect,
-  type HostedLinqAiUsageQuotaClaimToken,
   type HostedLinqMessageSideEffect,
 } from "./webhook-transport";
 import type {
@@ -222,49 +220,6 @@ export function buildActiveMemberDirectPlan(
   return plan;
 }
 
-export function buildAiUsageQuotaReplyResponse(input: {
-  chatId: string;
-  claimToken: HostedLinqAiUsageQuotaClaimToken | null;
-  memberId: string;
-  message: string;
-  messageId: string;
-  noticeCode: HostedAiUsageGateNoticeCode;
-  occurredAt: string;
-  routeAuthority?: HostedLinqThreadRouteEgressAuthority | null;
-  sourceEventId: string;
-}): HostedOnboardingLinqDirectPlan {
-  const baseInput = {
-    chatId: input.chatId,
-    memberId: input.memberId,
-    message: input.message,
-    occurredAt: input.occurredAt,
-    replyToMessageId: input.messageId,
-    ...(input.routeAuthority ? { routeAuthority: input.routeAuthority } : {}),
-    sourceEventId: input.sourceEventId,
-    template: "ai_usage_quota" as const,
-  };
-
-  return buildActiveMemberDirectPlan({
-    desiredSideEffects: [
-      input.claimToken
-        ? createHostedWebhookLinqMessageSideEffect({
-            ...baseInput,
-            claimToken: input.claimToken,
-            noticeCode: requireHostedLinqUsageLimitNoticeCode(input.noticeCode),
-          })
-        : createHostedWebhookLinqMessageSideEffect({
-            ...baseInput,
-            claimToken: null,
-            noticeCode: requireHostedLinqTrialConversionNoticeCode(input.noticeCode),
-          }),
-    ],
-    response: {
-      ok: true,
-      reason: "sent-ai-usage-quota-reply",
-    },
-  });
-}
-
 export function buildConversationHomeRedirectResponse(input: {
   chatId: string;
   homeRecipientPhone: string;
@@ -341,30 +296,6 @@ export async function bindHostedMemberHomeLinqChatAndTrackInbound(input: {
     occurredAt: input.occurredAt,
     prisma: input.prisma,
   });
-}
-
-function requireHostedLinqUsageLimitNoticeCode(
-  code: HostedAiUsageGateNoticeCode,
-): Exclude<HostedAiUsageGateNoticeCode, "trial_conversion_pending"> {
-  if (code === "trial_conversion_pending") {
-    throw new TypeError(
-      "Hosted Linq AI usage-limit notices require usage-limit notice codes.",
-    );
-  }
-
-  return code;
-}
-
-function requireHostedLinqTrialConversionNoticeCode(
-  code: HostedAiUsageGateNoticeCode,
-): "trial_conversion_pending" {
-  if (code !== "trial_conversion_pending") {
-    throw new TypeError(
-      "Hosted Linq trial conversion notices require the trial conversion notice code.",
-    );
-  }
-
-  return code;
 }
 
 export async function bindHostedMemberPendingLinqChatAndTrackInbound(input: {

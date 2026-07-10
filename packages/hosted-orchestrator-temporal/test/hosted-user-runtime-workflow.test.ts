@@ -455,7 +455,6 @@ function normalizedContinuedOptions(
     continueAsNewAfterIterations: 500,
     ensureRuntimeProcessingStartToCloseTimeoutMs:
       HOSTED_USER_RUNTIME_DEFAULT_ENSURE_PROCESSING_START_TO_CLOSE_TIMEOUT_MS,
-    readRuntimeReconciliationFactsStartToCloseTimeoutMs: 10_000,
     ...overrides,
   };
 }

@@ -50,14 +50,14 @@ describe("CustomizeMurphSettings", () => {
   test("shows the saved tone and voice with their own actions", () => {
     const markup = renderToStaticMarkup(
       React.createElement(CustomizeMurphSettings, {
-        assistant: { tone: "formal", voice: "upbeat" },
+        assistant: { tone: "formal", voice: "grandpa" },
       }),
     );
 
     expect(markup).toContain("How Murph talks");
     expect(markup).toContain("Formal");
     expect(markup).toContain("Voice");
-    expect(markup).toContain("Upbeat");
+    expect(markup).toContain("Grandpa");
     expect(markup).toContain("Customize");
     expect(markup).toContain("Change");
   });

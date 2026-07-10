@@ -1,5 +1,6 @@
 import { deviceSyncError, isDeviceSyncError } from "./errors.ts";
 import { sanitizeHostedRuntimeErrorText } from "./hosted-runtime.ts";
+import { isEstablishedDeviceSyncConnection } from "./public-account.ts";
 import { resolveDeviceSyncProviderCredentialPolicy } from "./provider-credential-policy.ts";
 import { resolvePublicProviderDefaultScopes } from "./public-provider-descriptor-shared.ts";
 import {
@@ -401,12 +402,8 @@ function resolveConnectionSetupExpiresAt(input: {
   return input.seededSetupExpiresAt;
 }
 
-function isEstablishedSdkConnection(account: PublicDeviceSyncAccount): boolean {
-  return account.status === "active" && account.setupPhase === "source_confirmed";
-}
-
 function shouldRunSdkConnectionEstablishedHook(existingAccount: PublicDeviceSyncAccount | null): boolean {
-  return !existingAccount || !isEstablishedSdkConnection(existingAccount);
+  return !existingAccount || !isEstablishedDeviceSyncConnection(existingAccount);
 }
 
 function assertSeededConnectionExternalAccountMatches(input: {
@@ -697,7 +694,7 @@ export class DeviceSyncPublicIngress {
     account: PublicDeviceSyncAccount,
     ownerId: string,
   ): Promise<boolean> {
-    if (!isEstablishedSdkConnection(account)) {
+    if (!isEstablishedDeviceSyncConnection(account)) {
       return false;
     }
 

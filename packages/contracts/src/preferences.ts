@@ -47,11 +47,19 @@ export interface AssistantVoiceOption {
 
 export const assistantVoiceOptions = [
   {
-    description: "The original. How Murph usually sounds.",
+    description: "Clear, positive, and energetic.",
+    elevenLabsVoiceId: "tnSpp4vdxKPjI9w0GnoV",
+    gender: "female",
+    id: "upbeat",
+    label: "Classic Murph",
+    previewPath: "/audio/murph-voices/upbeat.mp3",
+  },
+  {
+    description: "Quick, wry, and a little nerdy.",
     elevenLabsVoiceId: null,
     gender: "male",
     id: "classic",
-    label: "Classic Murph",
+    label: "New York",
     previewPath: "/audio/murph-voices/classic.mp3",
   },
   {
@@ -183,14 +191,6 @@ export const assistantVoiceOptions = [
     previewPath: "/audio/murph-voices/mysterious.mp3",
   },
   {
-    description: "Clear, positive, and energetic.",
-    elevenLabsVoiceId: "tnSpp4vdxKPjI9w0GnoV",
-    gender: "female",
-    id: "upbeat",
-    label: "Upbeat",
-    previewPath: "/audio/murph-voices/upbeat.mp3",
-  },
-  {
     description: "Steady, clear, and bookish.",
     elevenLabsVoiceId: "RILOU7YmBhvwJGDGjNmP",
     gender: "female",
@@ -223,6 +223,8 @@ export const assistantVoiceOptions = [
     previewPath: "/audio/murph-voices/smooth.mp3",
   },
 ] as const satisfies readonly AssistantVoiceOption[];
+
+export const defaultAssistantVoiceOptionId = "upbeat" satisfies AssistantVoiceOptionId;
 
 export const workoutUnitPreferencesSchema = z
   .object({
@@ -298,7 +300,12 @@ export function resolveAssistantVoiceOption(
 export function resolveAssistantVoiceOptionElevenLabsVoiceId(
   voiceId: string | null | undefined,
 ): string | null {
-  return resolveAssistantVoiceOption(voiceId)?.elevenLabsVoiceId ?? null;
+  // No stored preference means the shared default voice; explicit `classic`
+  // and stale roster ids stay null so callers fall back to the env voice.
+  return (
+    resolveAssistantVoiceOption(voiceId ?? defaultAssistantVoiceOptionId)?.elevenLabsVoiceId ??
+    null
+  );
 }
 
 export function normalizeWearablePreferenceProviders(

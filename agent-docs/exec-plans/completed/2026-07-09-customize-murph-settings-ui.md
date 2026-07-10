@@ -2,7 +2,7 @@
 
 ## Why
 
-Will reviewed the assistant style picker dialogs and the settings entry points and asked for three things:
+A review of the assistant style picker dialogs and the settings entry points asked for three things:
 
 1. The voice step is cramped and busy: the dialog renders narrow (the `max-w-lg` override loses to the dialog primitive's `sm:max-w-sm`), voices stack one per row, and each card nests several bordered boxes. He wants a wider dialog with a three-column voice grid on desktop and two columns on mobile.
 2. The Classic Murph description, "Murph's default voice from this workspace.", is jargon. Members do not know what a workspace is.
