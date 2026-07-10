@@ -1398,8 +1398,6 @@ describe("executeHostedMailboxEvent", () => {
           actorFallbackConversationScope: "actor",
           sessionResolutionCreated: true,
           sessionTurnCount: 0,
-          existingTranscriptEntryCount: 0,
-          existingTranscriptWelcomeVisible: false,
         },
         updates: [],
       });
@@ -1614,8 +1612,6 @@ describe("executeHostedMailboxEvent", () => {
         details: expect.objectContaining({
           actorFingerprint: "h1_111111111111111111111111",
           actorFallbackConversationFingerprint: "h1_666666666666666666666666",
-          existingTranscriptEntryCount: 0,
-          existingTranscriptWelcomeVisible: false,
           fingerprintReady: true,
           primaryConversationFingerprint: "h1_555555555555555555555555",
           sessionFingerprint: "h1_444444444444444444444444",
@@ -1693,8 +1689,6 @@ describe("executeHostedMailboxEvent", () => {
           phase: "wake.running",
           redacted: expect.objectContaining({
             actorFallbackConversationFingerprint: "h1_666666666666666666666666",
-            existingTranscriptEntryCount: 0,
-            existingTranscriptWelcomeVisible: false,
             fingerprintReady: true,
             primaryConversationFingerprint: "h1_555555555555555555555555",
             sessionFingerprint: "h1_444444444444444444444444",

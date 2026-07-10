@@ -304,7 +304,7 @@ describe("hosted AI usage allowance pricing", () => {
     });
   });
 
-  it("prices GPT-5.6 model slugs with official preview standard and flex accounting", () => {
+  it("prices GPT-5.6 model slugs with official standard and flex accounting", () => {
     expect(priceHostedAiUsageForAllowance({
       ...BASE_USAGE_RECORD,
       requestedModel: "gpt-5.6-terra",
@@ -315,7 +315,7 @@ describe("hosted AI usage allowance pricing", () => {
       pricingSnapshot: {
         model: "gpt-5.6-terra",
         modelSource: "served",
-        pricingSource: "https://help.openai.com/en/articles/20001325-a-preview-of-gpt-56-sol-terra-and-luna",
+        pricingSource: "https://developers.openai.com/api/docs/pricing",
         ratesUsdMicrosPerMillionTokens: {
           cachedInput: "250000",
           cacheWrite: "3125000",
@@ -326,7 +326,7 @@ describe("hosted AI usage allowance pricing", () => {
         servedModel: "openai/gpt-5.6-terra-2026-07-08",
         tokenPricingBasis: "standard",
       },
-      pricingVersion: "openai-gpt-5.6-preview-pricing-2026-07-08-standard",
+      pricingVersion: "openai-api-pricing-2026-07-09-gpt-5.6-standard",
     });
 
     expect(priceHostedAiUsageForAllowance({
@@ -340,7 +340,7 @@ describe("hosted AI usage allowance pricing", () => {
       counted: true,
       pricingSnapshot: {
         model: "gpt-5.6-luna",
-        pricingSource: "https://help.openai.com/en/articles/20001325-a-preview-of-gpt-56-sol-terra-and-luna",
+        pricingSource: "https://developers.openai.com/api/docs/pricing",
         ratesUsdMicrosPerMillionTokens: {
           cachedInput: "100000",
           cacheWrite: "1250000",
@@ -353,11 +353,11 @@ describe("hosted AI usage allowance pricing", () => {
         },
         tokenPricingBasis: "openai-flex",
       },
-      pricingVersion: "openai-gpt-5.6-preview-pricing-2026-07-08-openai-flex",
+      pricingVersion: "openai-api-pricing-2026-07-09-gpt-5.6-openai-flex",
     });
   });
 
-  it("prices GPT-5.6 cache-write tokens at the official preview write rate", () => {
+  it("prices GPT-5.6 cache-write tokens at the official write rate", () => {
     expect(priceHostedAiUsageForAllowance({
       ...BASE_USAGE_RECORD,
       cacheWriteTokens: 1_000,
@@ -388,7 +388,7 @@ describe("hosted AI usage allowance pricing", () => {
           output: "0",
         },
       },
-      pricingVersion: "openai-gpt-5.6-preview-pricing-2026-07-08-standard",
+      pricingVersion: "openai-api-pricing-2026-07-09-gpt-5.6-standard",
     });
   });
 
@@ -1004,7 +1004,7 @@ describe("accountHostedAiUsageForAllowanceTx", () => {
     expect(sqlText).toContain('UPDATE "hosted_ai_usage_period"');
     expect(sqlText).toContain('"spent_usd_micros" = "spent_usd_micros" +');
     expect(sqlText).toContain('"last_usage_at" = GREATEST');
-    expect(sqlText).toContain('"limit_notice_sent_at" = CASE');
+    expect(sqlText).not.toContain('"limit_notice_sent_at"');
     expect(sqlText).toContain('"blocked_at" = CASE');
     expect(sqlText).toContain('OR "blocked_at" IS NULL');
     expect(params).toEqual([
@@ -2012,7 +2012,8 @@ describe("resolveHostedAiUsageGate", () => {
     });
   });
 
-  it("raises the current period limit on upgrade without lowering spend", async () => {
+  it("raises the current period limit without lowering spend or clearing the sent notice", async () => {
+    const priorNoticeSentAt = new Date("2026-03-28T12:00:00.000Z");
     const update = vi.fn(async (args?: unknown) => {
       void args;
       return {
@@ -2025,6 +2026,7 @@ describe("resolveHostedAiUsageGate", () => {
     });
     const prisma = createGatePrisma({
       billingPlanCode: "launch_edge_monthly",
+      limitNoticeSentAt: priorNoticeSentAt,
       limitUsdMicros: 10_000_000n,
       periodEnd: new Date("2026-04-01T00:00:00.000Z"),
       periodStart: new Date("2026-03-01T00:00:00.000Z"),
@@ -2045,12 +2047,12 @@ describe("resolveHostedAiUsageGate", () => {
     expect(update).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({
         blockedAt: null,
-        limitNoticeSentAt: null,
         limitUsdMicros: 25_000_000n,
       }),
     }));
     const updateData = (update.mock.calls[0]?.[0] as { data?: Record<string, unknown> } | undefined)
       ?.data;
+    expect(updateData).not.toHaveProperty("limitNoticeSentAt");
     expect(updateData).not.toHaveProperty("spentUsdMicros");
   });
 
@@ -2118,7 +2120,7 @@ describe("resolveHostedAiUsageGate", () => {
     expect(updateData).not.toHaveProperty("spentUsdMicros");
   });
 
-  it("clears stale block and notice metadata after a manual period-counter reset", async () => {
+  it("clears stale block metadata without clearing the sent notice marker", async () => {
     const aggregate = vi.fn(async () => ({
       _max: {
         occurredAt: new Date("2026-04-20T12:00:00.000Z"),
@@ -2166,11 +2168,11 @@ describe("resolveHostedAiUsageGate", () => {
     expect(update).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({
         blockedAt: null,
-        limitNoticeSentAt: null,
       }),
     }));
     const updateData = (update.mock.calls[0]?.[0] as { data?: Record<string, unknown> } | undefined)
       ?.data;
+    expect(updateData).not.toHaveProperty("limitNoticeSentAt");
     expect(updateData).not.toHaveProperty("lastUsageAt");
     expect(updateData).not.toHaveProperty("spentUsdMicros");
   });
@@ -2903,6 +2905,7 @@ function createGatePrisma(input: {
     periodStart: Date;
     spentUsdMicros: bigint;
   } | null;
+  limitNoticeSentAt?: Date | null;
   limitUsdMicros?: bigint;
   periodEnd?: Date;
   periodStart?: Date;
@@ -2956,7 +2959,7 @@ function createGatePrisma(input: {
     lastUsageAt: input.spentUsdMicros > 0n
       ? new Date(periodStart.getTime() + 60_000)
       : null,
-    limitNoticeSentAt: null,
+    limitNoticeSentAt: input.limitNoticeSentAt ?? null,
     limitUsdMicros: input.limitUsdMicros ?? 10_000_000n,
     periodEnd,
     periodStart,

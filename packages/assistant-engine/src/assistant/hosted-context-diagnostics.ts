@@ -1,11 +1,8 @@
 import { createHmac } from 'node:crypto'
-import type { AssistantTranscriptEntry } from '@murphai/operator-config/assistant-cli-contracts'
 import {
   resolveAssistantConversationKey,
   type AssistantBindingInput,
 } from './bindings.js'
-import { ASSISTANT_FIRST_CONTACT_WELCOME_MESSAGE } from './first-contact-welcome.js'
-import { listAssistantTranscriptEntries } from './store.js'
 import type {
   AssistantMessageInput,
 } from './service-contracts.js'
@@ -157,7 +154,6 @@ export async function emitHostedAssistantContextSessionResolvedTrace(input: {
     | 'onTraceEvent'
     | 'threadId'
     | 'threadIsDirect'
-    | 'vault'
   >
   resolved: ResolvedAssistantSession
   source: 'assistant-message' | 'assistant-notification'
@@ -167,10 +163,6 @@ export async function emitHostedAssistantContextSessionResolvedTrace(input: {
     return
   }
 
-  const transcript = await readHostedAssistantContextTranscriptMetrics({
-    sessionId: input.resolved.session.sessionId,
-    vault: input.message.vault,
-  })
   const binding = input.resolved.session.binding
 
   try {
@@ -183,8 +175,6 @@ export async function emitHostedAssistantContextSessionResolvedTrace(input: {
         source: input.source,
         sessionResolutionCreated: input.resolved.created,
         sessionTurnCount: input.resolved.session.turnCount,
-        existingTranscriptEntryCount: transcript.entryCount,
-        existingTranscriptWelcomeVisible: transcript.welcomeVisible,
         ...buildHostedAssistantSessionResolutionDiagnosticDetails(
           input.resolved,
         ),
@@ -260,40 +250,6 @@ function buildHostedAssistantSessionResolutionDiagnosticDetails(
     sessionResolutionLookupSource:
       diagnostics.sessionResolutionLookupSource,
   }
-}
-
-async function readHostedAssistantContextTranscriptMetrics(input: {
-  sessionId: string
-  vault: string
-}): Promise<{
-  entryCount: number | null
-  welcomeVisible: boolean | null
-}> {
-  try {
-    const entries = await listAssistantTranscriptEntries(
-      input.vault,
-      input.sessionId,
-    )
-    return {
-      entryCount: entries.length,
-      welcomeVisible: hasHostedAssistantWelcomeTranscriptEntry(entries),
-    }
-  } catch {
-    return {
-      entryCount: null,
-      welcomeVisible: null,
-    }
-  }
-}
-
-function hasHostedAssistantWelcomeTranscriptEntry(
-  entries: readonly AssistantTranscriptEntry[],
-): boolean {
-  return entries.some(
-    (entry) =>
-      entry.kind === 'assistant' &&
-      entry.text === ASSISTANT_FIRST_CONTACT_WELCOME_MESSAGE,
-  )
 }
 
 function resolveHostedAssistantConversationScope(

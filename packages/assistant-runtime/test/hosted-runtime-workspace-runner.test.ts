@@ -90,6 +90,7 @@ import {
 } from "../src/hosted-runtime/workspace-restore.ts";
 import {
   HostedMailboxUserMismatchError,
+  prefetchHostedMailboxPrefix,
   type HostedMailboxPostCheckpointEffectResult,
 } from "../src/hosted-runtime/mailbox-import.ts";
 import type {
@@ -763,6 +764,13 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       ],
     });
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const initialMailboxPrefetch = prefetchHostedMailboxPrefix({
+      lanes: ["conversation", "system"],
+      limitPerLane: 10,
+      mailboxPort,
+      requestId: "request_synthetic_runner_preferences_barrier",
+      state: createEmptyHostedMailboxImportState(),
+    });
 
     try {
       const result = await runHostedWorkspaceUntilIdleOrBudget({
@@ -779,6 +787,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
           events.push(`import:${item.route.action}`);
           return { status: "imported" };
         },
+        initialMailboxPrefetch,
         limitPerLane: 10,
         platform: createPlatform({
           mailboxPort,
@@ -799,8 +808,6 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       assert.deepEqual(fetchRequests.map((request) => request.lanes), [
         [
           { importedSeq: "0", lane: "conversation" },
-        ],
-        [
           { importedSeq: "0", lane: "system" },
         ],
         [

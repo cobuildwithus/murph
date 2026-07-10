@@ -125,6 +125,13 @@ import {
   type GroupNewsletterSharedMemberDailyRecords,
 } from './group-newsletter-shared-stats.js'
 
+const MURPH_CHARACTER_SHEET_REFERENCE_IMAGE_REF =
+  'skill-assets/murph-character-sheet-v1.png'
+const GENERATE_IMAGE_REFERENCE_IMAGE_REFS_DESCRIPTION =
+  `Optional ordered JPG, PNG, or WebP image refs to use as visual references (up to 16). Refs may be user-sent media under raw/inbox/**, captured media under raw/captures/**, or ${MURPH_CHARACTER_SHEET_REFERENCE_IMAGE_REF}, Murph's canonical character sheet. Attach ${MURPH_CHARACTER_SHEET_REFERENCE_IMAGE_REF} whenever Murph itself appears in a generated image. Describe in the prompt how image 1, image 2, etc. should be used.`
+const GROUP_GENERATED_AVATAR_REFERENCE_IMAGE_REFS_DESCRIPTION =
+  `Optional ordered JPG, PNG, or WebP image refs to use as visual references when action="set_chat_avatar" and avatarSource="generate". Refs may be user-sent media under raw/inbox/**, captured media under raw/captures/**, or ${MURPH_CHARACTER_SHEET_REFERENCE_IMAGE_REF}, Murph's canonical character sheet. Attach ${MURPH_CHARACTER_SHEET_REFERENCE_IMAGE_REF} whenever Murph itself appears in a generated avatar.`
+
 const HOSTED_COMPUTER_UNKNOWN_OUTCOME_TEXT =
   'computer API outcome is unknown after a transport or browser execution failure; call computer_open before retrying Playwright code or taking another step'
 
@@ -203,7 +210,7 @@ export const MURPH_GENERATE_IMAGE_TOOL = {
   namespace: 'murph',
   name: 'generate_image',
   description:
-    'Generate one image with GPT Image 2, optionally using ordered vault image references. When referenceImageRefs is provided, describe in the prompt how image 1, image 2, etc. should be used. When a vault is available, generated images are saved as canonical capture media under raw/captures/** for later reuse. Hosted runs also attach the generated image to the final response; local runs also save it under CODEX_HOME/generated_images.',
+    `Generate one image with GPT Image 2, optionally using ordered reference images from vault media or ${MURPH_CHARACTER_SHEET_REFERENCE_IMAGE_REF}. Attach ${MURPH_CHARACTER_SHEET_REFERENCE_IMAGE_REF}, Murph's canonical character sheet, whenever Murph itself appears in a generated image. When referenceImageRefs is provided, describe in the prompt how image 1, image 2, etc. should be used. When a vault is available, generated images are saved as canonical capture media under raw/captures/** for later reuse. Hosted runs also attach the generated image to the final response; local runs also save it under CODEX_HOME/generated_images.`,
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -239,8 +246,7 @@ export const MURPH_GENERATE_IMAGE_TOOL = {
         type: 'array',
         maxItems: 16,
         default: [],
-        description:
-          'Optional ordered vault-relative JPG, PNG, or WebP image refs to use as visual references (up to 16). Refs must be user-sent media under raw/inbox/** or captured media under raw/captures/** (other vault paths are rejected as unauthorized). Describe in the prompt how image 1, image 2, etc. should be used.',
+        description: GENERATE_IMAGE_REFERENCE_IMAGE_REFS_DESCRIPTION,
         items: {
           type: 'string',
           minLength: 1,
@@ -521,8 +527,7 @@ export const MURPH_GROUP_TOOL = {
         type: 'array',
         maxItems: 16,
         default: [],
-        description:
-          'Optional ordered JPG, PNG, or WebP image refs to use as visual references when action="set_chat_avatar" and avatarSource="generate". Refs must be user-sent media under raw/inbox/** or captured media under raw/captures/**.',
+        description: GROUP_GENERATED_AVATAR_REFERENCE_IMAGE_REFS_DESCRIPTION,
         items: {
           type: 'string',
           minLength: 1,
@@ -924,6 +929,7 @@ const generateImageArgumentsSchema = z
     referenceImageRefs: z
       .array(z.string().trim().min(1).max(1024))
       .max(16)
+      .describe(GENERATE_IMAGE_REFERENCE_IMAGE_REFS_DESCRIPTION)
       .default([]),
     size: z.enum(['1024x1024', '1024x1536', '1536x1024']).default('1024x1024'),
   })
@@ -994,6 +1000,7 @@ const groupArgumentsSchema = z.discriminatedUnion('action', [
       referenceImageRefs: z
         .array(z.string().trim().min(1).max(1024))
         .max(16)
+        .describe(GROUP_GENERATED_AVATAR_REFERENCE_IMAGE_REFS_DESCRIPTION)
         .default([]),
       size: z.literal('1024x1024').default('1024x1024'),
     })

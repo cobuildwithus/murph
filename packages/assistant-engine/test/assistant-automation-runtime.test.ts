@@ -1530,6 +1530,7 @@ describe('assistant automation scanner', () => {
   })
 
   it('advances the auto-reply channel cursor with the processed assistant input cursor', async () => {
+    const onProviderEvent = vi.fn()
     const first = createCaptureSummary({
       captureId: 'capture-1',
       occurredAt: '2026-04-08T00:01:00.000Z',
@@ -1562,6 +1563,7 @@ describe('assistant automation scanner', () => {
     await scanner.scanAssistantAutomationOnce({
       inboxServices: createInboxServices(),
       inputSource: createAssistantInputSourceForCaptures([first, second]),
+      onProviderEvent,
       onStateProgress: async (next) => {
         stateUpdates.push({
           ...createAutomationState(),
@@ -1579,6 +1581,9 @@ describe('assistant automation scanner', () => {
       'telegram',
     )
     expect(cursor).toEqual(createReplyGroupItem(second).inputCandidate.event.cursor)
+    expect(scannerReplyMocks.processAssistantAutoReplyGroup).toHaveBeenCalledWith(
+      expect.objectContaining({ onProviderEvent }),
+    )
   })
 
   it('clears reply backlog state once the backlog is drained', async () => {
@@ -2655,6 +2660,7 @@ describe('assistant auto-reply runtime', () => {
   })
 
   it('writes result artifacts for successful replies', async () => {
+    const onProviderEvent = vi.fn()
     const inboxServices = createInboxServices({
       show: vi
         .fn()
@@ -2693,6 +2699,7 @@ describe('assistant auto-reply runtime', () => {
       onEvent: (event) => {
         events.push(toSnapshotRecord(event))
       },
+      onProviderEvent,
       requestId: null,
       sessionMaxAgeMs: null,
       vault: '/tmp/assistant-automation-vault',
@@ -2718,6 +2725,21 @@ describe('assistant auto-reply runtime', () => {
         turnTrigger: 'automation-auto-reply',
       }),
     )
+    const providerEvent = {
+      id: 'message-1',
+      kind: 'message' as const,
+      rawEvent: { type: 'provider-output' },
+      state: 'running' as const,
+      text: 'response text',
+    }
+    const sendInput = replyMocks.sendAssistantMessage.mock.calls[0]?.[0] as {
+      onProviderEvent?: (event: typeof providerEvent) => void
+    }
+    sendInput.onProviderEvent?.(providerEvent)
+    expect(onProviderEvent).toHaveBeenCalledWith(providerEvent)
+    expect(
+      replyMocks.createAssistantProviderWatchdog.mock.results[0]?.value.onProviderEvent,
+    ).toHaveBeenCalledWith(providerEvent)
     expect(evidenceMocks.writeAssistantAutoReplyReplyIntentEvidence).toHaveBeenCalledOnce()
     expect(evidenceMocks.writeAssistantAutoReplyReplyIntentEvidence).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -5170,8 +5192,10 @@ describe('assistant auto-reply runtime', () => {
       },
     } as const
 
+    const onProviderEvent = vi.fn()
     const result = await runLoop.runAssistantAutomationPass({
       executionContext,
+      onProviderEvent,
       requestId: 'request-hosted',
       vault: '/tmp/assistant-automation-vault',
     })
@@ -5182,6 +5206,7 @@ describe('assistant auto-reply runtime', () => {
     expect(runLoopMocks.scanAssistantAutomationOnce).toHaveBeenCalledWith(
       expect.objectContaining({
         executionContext,
+        onProviderEvent,
         inputSource: expect.objectContaining({
           listInputCandidates: expect.any(Function),
           listNewConversationInputs: expect.any(Function),

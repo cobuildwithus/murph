@@ -64,7 +64,7 @@ export default async function RuntimeLatencyOpsPage({
               Hosted runtime latency
             </h1>
             <p className="mt-3 max-w-2xl text-sm leading-6 text-muted-foreground">
-              {dashboard.source} mailbox accepted to provider start, measured over the last{" "}
+              {dashboard.source} mailbox accepted to local Codex turn/start write, measured over the last{" "}
               {dashboard.window.hours} hours.{" "}
               {dashboard.truncated
                 ? `Metrics use the newest ${formatInteger(dashboard.readLimit)} accepted rows.`
@@ -84,8 +84,8 @@ export default async function RuntimeLatencyOpsPage({
 
       <section aria-labelledby="runtime-latency-distribution-title" className="flex flex-col gap-4">
         <SectionHeading
-          title="Provider start distribution"
-          description="End-to-end wait from mailbox accepted to first provider generation signal."
+          title="Codex turn-start distribution"
+          description="End-to-end wait from mailbox acceptance until the local Codex turn/start request is written."
           id="runtime-latency-distribution-title"
         />
         <div className="grid gap-3 md:grid-cols-3 xl:grid-cols-6">
@@ -109,7 +109,7 @@ export default async function RuntimeLatencyOpsPage({
       <section aria-labelledby="runtime-latency-stage-title" className="flex flex-col gap-4">
         <SectionHeading
           title="Pipeline stages"
-          description="P50 stage timing isolates queue handoff, staging, and provider wait."
+          description="P50 stage timing isolates queue handoff, staging, and the local Codex turn-start wait."
           id="runtime-latency-stage-title"
         />
         <div className="grid overflow-hidden rounded-xl border border-border/70 bg-card/90 md:grid-cols-3">
@@ -122,16 +122,53 @@ export default async function RuntimeLatencyOpsPage({
             value={formatMs(dashboard.stageLatencyMs.acceptedToStagedP50)}
           />
           <StageMetric
-            label={metricLabel("staged to provider p50", metricScope)}
+            label={metricLabel("staged to Codex start p50", metricScope)}
             value={formatMs(dashboard.stageLatencyMs.stagedToProviderStartP50)}
           />
-          <StageMetric
-            label={metricLabel("Linq guard p50", metricScope)}
-            value={formatMs(dashboard.linqEgressGuardMs.p50)}
+        </div>
+      </section>
+
+      <section aria-labelledby="runtime-latency-observed-title" className="flex flex-col gap-4">
+        <SectionHeading
+          title="Observed reply boundaries"
+          description="P50 timings for exact Linq and local Codex boundaries; these are not upstream OpenAI request or token timestamps."
+          id="runtime-latency-observed-title"
+        />
+        <div className={dashboard.source === "linq"
+          ? "grid gap-3 md:grid-cols-2 xl:grid-cols-4"
+          : "grid gap-3 md:grid-cols-2"}
+        >
+          {dashboard.source === "linq" ? (
+            <>
+              <Metric
+                helper={formatObservationCount(
+                  dashboard.observedMilestoneLatency.acceptedToTypingRequest.observationCount,
+                )}
+                label={metricLabel("accepted to Linq typing request p50", metricScope)}
+                value={formatObservedP50(dashboard.observedMilestoneLatency.acceptedToTypingRequest)}
+              />
+              <Metric
+                helper={formatObservationCount(
+                  dashboard.observedMilestoneLatency.typingRequestToAccepted.observationCount,
+                )}
+                label={metricLabel("Linq typing request to accepted p50", metricScope)}
+                value={formatObservedP50(dashboard.observedMilestoneLatency.typingRequestToAccepted)}
+              />
+            </>
+          ) : null}
+          <Metric
+            helper={formatObservationCount(
+              dashboard.observedMilestoneLatency.codexStartToFirstOutput.observationCount,
+            )}
+            label={metricLabel("Codex start to first output p50", metricScope)}
+            value={formatObservedP50(dashboard.observedMilestoneLatency.codexStartToFirstOutput)}
           />
-          <StageMetric
-            label={metricLabel("Linq guard p95", metricScope)}
-            value={formatMs(dashboard.linqEgressGuardMs.p95)}
+          <Metric
+            helper={formatObservationCount(
+              dashboard.observedMilestoneLatency.codexStartToFirstText.observationCount,
+            )}
+            label={metricLabel("Codex start to first text p50", metricScope)}
+            value={formatObservedP50(dashboard.observedMilestoneLatency.codexStartToFirstText)}
           />
         </div>
       </section>
@@ -149,12 +186,12 @@ export default async function RuntimeLatencyOpsPage({
             value={formatInteger(dashboard.missingStagedCount)}
           />
           <Metric
-            label={metricLabel("missing provider", metricScope)}
+            label={metricLabel("missing Codex start", metricScope)}
             tone={dashboard.missingProviderStartCount > 0 ? "warning" : "default"}
             value={formatInteger(dashboard.missingProviderStartCount)}
           />
           <Metric
-            label={metricLabel("staged missing provider", metricScope)}
+            label={metricLabel("staged missing Codex start", metricScope)}
             tone={dashboard.stagedButMissingProviderCount > 0 ? "warning" : "default"}
             value={formatInteger(dashboard.stagedButMissingProviderCount)}
           />
@@ -194,7 +231,7 @@ export default async function RuntimeLatencyOpsPage({
               <TableHead className="text-right">Total</TableHead>
               <TableHead className="text-right">Signal</TableHead>
               <TableHead className="text-right">Staged</TableHead>
-              <TableHead className="text-right">Provider wait</TableHead>
+              <TableHead className="text-right">Codex start wait</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -352,6 +389,14 @@ function formatMs(value: number | null): string {
     return "-";
   }
   return `${formatInteger(value)} ms`;
+}
+
+function formatObservedP50(input: { observationCount: number; p50Ms: number | null }): string {
+  return input.observationCount === 0 ? "No observations" : formatMs(input.p50Ms);
+}
+
+function formatObservationCount(value: number): string {
+  return `n = ${formatInteger(value)}`;
 }
 
 function formatInteger(value: number): string {

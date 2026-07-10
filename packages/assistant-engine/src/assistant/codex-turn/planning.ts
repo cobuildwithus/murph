@@ -68,7 +68,6 @@ import type {
 } from '../hosted-tool-context.js'
 import {
   buildAssistantNotificationDecisionSystemPromptWithCacheMetadata,
-  buildAssistantStyleSettingsDynamicPrompt,
   buildAssistantSystemPromptWithCacheMetadata,
   resolveAssistantMurphProductBaseUrl,
   type AssistantPromptCacheMetadata,
@@ -471,14 +470,6 @@ export async function resolveAssistantRouteTurnPlan(input: {
   const hostedDynamicContextPrompts = maintenanceTurn
     ? []
     : input.executionContext?.hosted?.dynamicContextPrompts ?? []
-  const assistantStyleSettingsPrompt =
-    !maintenanceTurn && input.profile.promptProfile === 'conversation'
-      ? buildAssistantStyleSettingsDynamicPrompt(input.input.prompt)
-      : null
-  const assistantDynamicContextPrompts = [
-    ...hostedDynamicContextPrompts,
-    ...(assistantStyleSettingsPrompt ? [assistantStyleSettingsPrompt] : []),
-  ]
   const promptCapabilityAvailability = resolveAssistantPromptCapabilityAvailability({
     executionContext: input.executionContext,
   })
@@ -535,7 +526,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
     input.profile.promptProfile === 'notification-decision'
       ? buildAssistantNotificationDecisionSystemPromptWithCacheMetadata({
             assistantContextSnapshotPrompt,
-            assistantDynamicContextPrompts,
+            assistantDynamicContextPrompts: hostedDynamicContextPrompts,
             maintenanceTurn,
             assistantHostedDeviceConnectAvailable:
               promptCapabilityAvailability.assistantHostedDeviceConnectAvailable,
@@ -552,7 +543,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
       : buildAssistantSystemPromptWithCacheMetadata({
             assistantCliContract: options.assistantCliContract,
             assistantContextSnapshotPrompt,
-            assistantDynamicContextPrompts,
+            assistantDynamicContextPrompts: hostedDynamicContextPrompts,
             assistantHostedDeviceConnectAvailable:
               promptCapabilityAvailability.assistantHostedDeviceConnectAvailable,
             assistantHostedDeviceConnectProviders:

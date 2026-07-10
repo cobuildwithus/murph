@@ -12,6 +12,7 @@ import {
 import {
   HOSTED_RUNTIME_DEVICE_SYNC_BRIDGE_KINDS,
   HOSTED_INGRESS_LATENCY_SOURCES,
+  HOSTED_RUNTIME_ASSISTANT_MILESTONES,
   HOSTED_RUNTIME_SIDE_INPUT_UNAVAILABLE_CODES,
   HOSTED_RUNTIME_LATENCY_TRACE_ASSISTANT_INPUT_MAX_IDS,
   HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_KEYS,
@@ -57,6 +58,8 @@ import {
   type HostedRuntimeIssueExportResponse,
   type HostedRuntimeLatencyPhaseBreakdown,
   type HostedRuntimeLatencyPhaseBreakdownPhase,
+  type HostedRuntimeAssistantMilestone,
+  type HostedRuntimeLatencyTraceAssistantMilestoneEvent,
   type HostedRuntimeLatencyTraceAssistantInputStagedEvent,
   type HostedRuntimeLatencyTraceEvent,
   type HostedRuntimeLatencyTraceMilestone,
@@ -315,6 +318,14 @@ const HOSTED_RUNTIME_LATENCY_TRACE_PROVIDER_STARTED_KEYS = new Set([
   "source",
   "type",
 ]);
+const HOSTED_RUNTIME_LATENCY_TRACE_ASSISTANT_MILESTONE_KEYS = new Set([
+  "assistantInputIds",
+  "at",
+  "milestone",
+  "runtimeAttemptId",
+  "source",
+  "type",
+]);
 const HOSTED_RUNTIME_LATENCY_TRACE_MILESTONE_KEYS = new Set([
   "at",
   "milestone",
@@ -335,6 +346,8 @@ const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEY_SETS: Record<
   boot: new Set(HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS.boot),
   wake: new Set(HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS.wake),
   import: new Set(HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS.import),
+  preProvider: new Set(HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS.preProvider),
+  assistant: new Set(HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS.assistant),
   provider: new Set(HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS.provider),
 };
 const HOSTED_WORKSPACE_INVOCATION_REMOVED_FIELDS = [
@@ -2318,6 +2331,8 @@ export function parseHostedRuntimeLatencyTraceEvent(
   switch (type) {
     case "assistant_input_staged":
       return parseHostedRuntimeLatencyTraceAssistantInputStagedEvent(record);
+    case "assistant_milestone":
+      return parseHostedRuntimeLatencyTraceAssistantMilestoneEvent(record);
     case "provider_started":
       return parseHostedRuntimeLatencyTraceProviderStartedEvent(record);
     case "runtime_milestone":
@@ -2608,6 +2623,39 @@ function parseHostedRuntimeLatencyPhaseBreakdown(
     };
   }
 
+  if (record.preProvider !== undefined) {
+    const preProviderLabel = `${label}.preProvider`;
+    const preProvider = requireObject(record.preProvider, preProviderLabel);
+    assertAllowedObjectKeys(
+      preProvider,
+      HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEY_SETS.preProvider,
+      preProviderLabel,
+    );
+    breakdown.preProvider = {
+      ...requireOptionalNonNegativeInteger(preProvider, "workspaceAssistantPreAutomationMs", preProviderLabel),
+      ...requireOptionalNonNegativeInteger(preProvider, "executionTargetHydrateMs", preProviderLabel),
+      ...requireOptionalNonNegativeInteger(preProvider, "systemMailboxMaintenanceMs", preProviderLabel),
+      ...requireOptionalNonNegativeInteger(preProvider, "memberPreferencesPrePlanningMs", preProviderLabel),
+      ...requireOptionalNonNegativeInteger(preProvider, "automationBootstrapMs", preProviderLabel),
+    };
+  }
+
+  if (record.assistant !== undefined) {
+    const assistantLabel = `${label}.assistant`;
+    const assistant = requireObject(record.assistant, assistantLabel);
+    assertAllowedObjectKeys(
+      assistant,
+      HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEY_SETS.assistant,
+      assistantLabel,
+    );
+    breakdown.assistant = {
+      ...requireOptionalNonNegativeInteger(assistant, "linqTypingRequestStartedAtEpochMs", assistantLabel),
+      ...requireOptionalNonNegativeInteger(assistant, "linqTypingAcceptedAtEpochMs", assistantLabel),
+      ...requireOptionalNonNegativeInteger(assistant, "firstCodexOutputObservedAtEpochMs", assistantLabel),
+      ...requireOptionalNonNegativeInteger(assistant, "firstCodexTextObservedAtEpochMs", assistantLabel),
+    };
+  }
+
   if (record.provider !== undefined) {
     const providerLabel = `${label}.provider`;
     const provider = requireObject(record.provider, providerLabel);
@@ -2643,21 +2691,7 @@ function parseHostedRuntimeLatencyTraceProviderStartedEvent(
     HOSTED_RUNTIME_LATENCY_TRACE_PROVIDER_STARTED_KEYS,
     "Hosted runtime latency trace provider_started event",
   );
-  const assistantInputIds = requireArray(
-    record.assistantInputIds,
-    "Hosted runtime latency trace assistantInputIds",
-  ).map((entry, index) =>
-    requireString(entry, `Hosted runtime latency trace assistantInputIds[${index}]`)
-  );
-
-  if (assistantInputIds.length === 0) {
-    throw new TypeError("Hosted runtime latency trace assistantInputIds must not be empty.");
-  }
-  if (assistantInputIds.length > HOSTED_RUNTIME_LATENCY_TRACE_ASSISTANT_INPUT_MAX_IDS) {
-    throw new TypeError(
-      `Hosted runtime latency trace assistantInputIds must contain at most ${HOSTED_RUNTIME_LATENCY_TRACE_ASSISTANT_INPUT_MAX_IDS} ids.`,
-    );
-  }
+  const assistantInputIds = parseHostedRuntimeLatencyTraceAssistantInputIds(record);
 
   return {
     assistantInputIds,
@@ -2678,6 +2712,61 @@ function parseHostedRuntimeLatencyTraceProviderStartedEvent(
     source: parseHostedIngressLatencySource(record.source),
     type: "provider_started",
   };
+}
+
+function parseHostedRuntimeAssistantMilestone(value: unknown): HostedRuntimeAssistantMilestone {
+  return parseAllowedString(
+    value,
+    "Hosted runtime assistant milestone",
+    HOSTED_RUNTIME_ASSISTANT_MILESTONES,
+  );
+}
+
+function parseHostedRuntimeLatencyTraceAssistantMilestoneEvent(
+  record: Record<string, unknown>,
+): HostedRuntimeLatencyTraceAssistantMilestoneEvent {
+  assertAllowedObjectKeys(
+    record,
+    HOSTED_RUNTIME_LATENCY_TRACE_ASSISTANT_MILESTONE_KEYS,
+    "Hosted runtime latency trace assistant_milestone event",
+  );
+
+  return {
+    assistantInputIds: parseHostedRuntimeLatencyTraceAssistantInputIds(record),
+    at: requireString(record.at, "Hosted runtime latency trace at"),
+    milestone: parseHostedRuntimeAssistantMilestone(record.milestone),
+    ...(record.runtimeAttemptId === undefined
+      ? {}
+      : {
+          runtimeAttemptId: readNullableString(
+            record.runtimeAttemptId,
+            "Hosted runtime latency trace runtimeAttemptId",
+          ),
+        }),
+    source: parseHostedIngressLatencySource(record.source),
+    type: "assistant_milestone",
+  };
+}
+
+function parseHostedRuntimeLatencyTraceAssistantInputIds(
+  record: Record<string, unknown>,
+): string[] {
+  const assistantInputIds = requireArray(
+    record.assistantInputIds,
+    "Hosted runtime latency trace assistantInputIds",
+  ).map((entry, index) =>
+    requireString(entry, `Hosted runtime latency trace assistantInputIds[${index}]`)
+  );
+
+  if (assistantInputIds.length === 0) {
+    throw new TypeError("Hosted runtime latency trace assistantInputIds must not be empty.");
+  }
+  if (assistantInputIds.length > HOSTED_RUNTIME_LATENCY_TRACE_ASSISTANT_INPUT_MAX_IDS) {
+    throw new TypeError(
+      `Hosted runtime latency trace assistantInputIds must contain at most ${HOSTED_RUNTIME_LATENCY_TRACE_ASSISTANT_INPUT_MAX_IDS} ids.`,
+    );
+  }
+  return assistantInputIds;
 }
 
 function parseHostedRuntimeLatencyTraceMilestone(

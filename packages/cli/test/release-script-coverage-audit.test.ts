@@ -158,6 +158,7 @@ function readWorkspaceDiffScope(...changedFiles: string[]) {
   return JSON.parse(result.stdout) as {
     affectedWorkspaceDirs: string[]
     repoInternalFastPath: boolean
+    runRepoToolsTests: boolean
     runVerifyCli: boolean
     testDirs: string[]
     typecheckDirs: string[]
@@ -279,8 +280,8 @@ describe('monorepo release flow coverage audit', () => {
     expect(existsSync(path.join(repoRoot, 'scripts', 'chatgpt-managed-browser.test.mjs'))).toBe(false)
     expect(existsSync(path.join(repoRoot, 'scripts', 'review-gpt.sh'))).toBe(false)
     expect(existsSync(path.join(repoRoot, 'scripts', 'review-gpt-cli.sh'))).toBe(false)
-    expect(rootPackageJson.devDependencies?.['@cobuild/review-gpt']).toBe('^0.5.98')
-    expect(pnpmWorkspace).toContain('@cobuild/review-gpt@0.5.98')
+    expect(rootPackageJson.devDependencies?.['@cobuild/review-gpt']).toBe('^0.5.100')
+    expect(pnpmWorkspace).toContain('@cobuild/review-gpt@0.5.100')
     expect(pnpmWorkspace.match(/^patchedDependencies:\n((?:  .+\n)+)/mu)?.[1]?.trim()).toBe(
       'incur@0.4.5: patches/incur@0.4.5.patch',
     )
@@ -290,7 +291,7 @@ describe('monorepo release flow coverage audit', () => {
     expect(reviewGptConfig).toContain('repo_context_url=""')
     expect(reviewGptConfig).toContain('attach_artifacts=1')
     expect(reviewGptConfig).toContain('app_connector="current"')
-    expect(reviewGptConfig).toContain('model="gpt-5.5-pro"')
+    expect(reviewGptConfig).toContain('model="gpt-5.6-sol"')
     expect(reviewGptConfig).toContain('thinking="current"')
     expect(reviewGptConfig).toContain('snapshot_attachment_name="repo.snapshot.zip"')
     expect(reviewGptConfig).toContain('repomix_attachment_format="zip"')
@@ -326,12 +327,46 @@ describe('monorepo release flow coverage audit', () => {
     expect(prReviewGptLoop).toContain('`review-gpt-pr-context/pr.diff`')
     expect(prReviewGptLoop).toContain('It does **not** run the local Codex')
     expect(prReviewGptLoop).toContain('does **not** run the local Codex')
+    expect(prReviewGptLoop).toContain('replaces the default local `deep-review` pass')
+    expect(prReviewGptLoop).toContain(
+      'specialist `prompt-review`, `security-privacy-review`, `frontend-review`, or',
+    )
     const completionWorkflow = readFileSync(
       path.join(repoRoot, 'agent-docs', 'operations', 'completion-workflow.md'),
       'utf8',
     )
     expect(completionWorkflow).toContain('not complete until the PR branch has no merge conflicts')
     expect(completionWorkflow).toContain('fetch the latest `main`')
+    expect(completionWorkflow).toContain('still runs every specialist pass triggered')
+    expect(completionWorkflow).not.toContain(
+      'may skip the individual required local audit subagent passes',
+    )
+    expect(completionWorkflow).toContain('gpt-5.6-sol')
+    expect(completionWorkflow).toContain('prompt-guidance-gpt-5p6.md')
+    expect(completionWorkflow).not.toContain('prompt-guidance?model=gpt-5.5')
+
+    const completionAuditPrompts = [
+      'prompt-review.md',
+      'frontend-review.md',
+      'security-privacy-review.md',
+      'coverage-write.md',
+    ].map((fileName) =>
+      readFileSync(
+        path.join(repoRoot, 'agent-docs', 'prompts', fileName),
+        'utf8',
+      ),
+    )
+    for (const auditPrompt of completionAuditPrompts) {
+      expect(auditPrompt).not.toContain('Assume there is at least one')
+      expect(auditPrompt).toContain('Stop rule:')
+    }
+    expect(completionAuditPrompts[0]).toContain('prompt-guidance-gpt-5p6.md')
+    expect(completionAuditPrompts[0]).toContain('latest-model.md')
+    expect(completionAuditPrompts[0]).toContain('upgrading-to-gpt-5p6-sol.md')
+    expect(completionAuditPrompts[1]).toContain('render and inspect')
+    expect(completionAuditPrompts[1]).toContain('desktop and mobile viewports')
+    expect(completionAuditPrompts[2]).toContain('trace the changed source to its sink')
+    expect(completionAuditPrompts[3]).toContain('completion-workflow.md` § Audit Worker Rules')
     expect(existsSync(path.join(repoRoot, 'scripts', 'review-gpt-full.config.sh'))).toBe(false)
     expect(existsSync(path.join(repoRoot, 'scripts', 'review-gpt.data.config.sh'))).toBe(false)
     expect(existsSync(path.join(repoRoot, 'scripts', 'research-run.mjs'))).toBe(false)
@@ -361,6 +396,13 @@ describe('monorepo release flow coverage audit', () => {
 
     expect(summary.repoInternalFastPath).toBe(true)
     expect(summary.runVerifyCli).toBe(true)
+  })
+
+  it('runs repo-tool regressions for config-only verification changes', () => {
+    const summary = readWorkspaceDiffScope('config/vitest-parallelism.ts')
+
+    expect(summary.repoInternalFastPath).toBe(true)
+    expect(summary.runRepoToolsTests).toBe(true)
   })
 
   it('keeps active execution plans aligned with live coordination-ledger state', () => {
@@ -749,7 +791,7 @@ Updated: 2026-04-24
       'delay App verification ${acceptance_app_verify_delay_seconds}s to preserve package coverage throughput',
     )
     expect(workspaceVerify).toContain(
-      'readonly package_coverage_vitest_max_workers_default="$([[ -n "${CI:-}" ]] && echo 50% || echo 75%)"',
+      'readonly package_coverage_vitest_max_workers_default="$([[ -n "${CI:-}" ]] && echo 50% || local_worker_budget_default "$package_coverage_concurrency_limit" 1)"',
     )
     expect(workspaceVerify).toContain(
       'readonly package_coverage_cli_active_concurrency_default="$([[ -n "${CI:-}" ]] && echo 1 || echo 4)"',

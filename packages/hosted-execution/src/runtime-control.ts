@@ -1245,6 +1245,16 @@ export const HOSTED_RUNTIME_LATENCY_TRACE_MILESTONES = [
   "mailbox_import_done",
 ] as const;
 
+export const HOSTED_RUNTIME_ASSISTANT_MILESTONES = [
+  "linq_typing_request_started",
+  "linq_typing_accepted",
+  "first_codex_output_observed",
+  "first_codex_text_observed",
+] as const;
+
+export type HostedRuntimeAssistantMilestone =
+  (typeof HOSTED_RUNTIME_ASSISTANT_MILESTONES)[number];
+
 export type HostedRuntimeLatencyTraceMilestone =
   (typeof HOSTED_RUNTIME_LATENCY_TRACE_MILESTONES)[number];
 
@@ -1321,6 +1331,25 @@ export interface HostedRuntimeLatencyPhaseBreakdown {
     pendingIndexEnsuredAtEpochMs?: number;
     stagedAtEpochMs?: number;
   };
+  // Runtime-owned work between mailbox staging and the assistant engine's
+  // local Codex turn/start write. These are duration-only diagnostics and are
+  // attached to that existing milestone rather than emitted synchronously.
+  preProvider?: {
+    workspaceAssistantPreAutomationMs?: number;
+    executionTargetHydrateMs?: number;
+    systemMailboxMaintenanceMs?: number;
+    memberPreferencesPrePlanningMs?: number;
+    automationBootstrapMs?: number;
+  };
+  // Exact runtime-observed epoch timestamps. These deliberately distinguish
+  // visible channel activity and local Codex output from an upstream provider
+  // request or token boundary that the runtime cannot observe.
+  assistant?: {
+    linqTypingRequestStartedAtEpochMs?: number;
+    linqTypingAcceptedAtEpochMs?: number;
+    firstCodexOutputObservedAtEpochMs?: number;
+    firstCodexTextObservedAtEpochMs?: number;
+  };
   provider?: {
     codexAppServerInitializeMs?: number;
     codexAppServerPreProviderMs?: number;
@@ -1344,6 +1373,8 @@ export const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_PHASE_KEYS = [
   "boot",
   "wake",
   "import",
+  "preProvider",
+  "assistant",
   "provider",
 ] as const;
 
@@ -1417,6 +1448,19 @@ export const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS: Record<
     "pendingIndexEnsuredAtEpochMs",
     "stagedAtEpochMs",
   ],
+  preProvider: [
+    "workspaceAssistantPreAutomationMs",
+    "executionTargetHydrateMs",
+    "systemMailboxMaintenanceMs",
+    "memberPreferencesPrePlanningMs",
+    "automationBootstrapMs",
+  ],
+  assistant: [
+    "linqTypingRequestStartedAtEpochMs",
+    "linqTypingAcceptedAtEpochMs",
+    "firstCodexOutputObservedAtEpochMs",
+    "firstCodexTextObservedAtEpochMs",
+  ],
   provider: [
     "codexAppServerInitializeMs",
     "codexAppServerPreProviderMs",
@@ -1475,6 +1519,8 @@ const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEY_SETS: Record<
   boot: new Set(HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS.boot),
   wake: new Set(HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS.wake),
   import: new Set(HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS.import),
+  preProvider: new Set(HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS.preProvider),
+  assistant: new Set(HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS.assistant),
   provider: new Set(HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS.provider),
 };
 
@@ -1697,6 +1743,8 @@ export interface HostedRuntimeLatencyTraceAssistantInputStagedEvent
 }
 
 export interface HostedRuntimeLatencyTraceProviderStartedEvent {
+  // This legacy wire name marks the local Codex `turn/start` request write.
+  // It does not prove upstream generation or first-token delivery has begun.
   assistantInputIds: string[];
   at: string;
   phaseBreakdown?: HostedRuntimeLatencyPhaseBreakdown | null;
@@ -1704,6 +1752,15 @@ export interface HostedRuntimeLatencyTraceProviderStartedEvent {
   runtimeAttemptId?: string | null;
   source: HostedIngressLatencySource;
   type: "provider_started";
+}
+
+export interface HostedRuntimeLatencyTraceAssistantMilestoneEvent {
+  assistantInputIds: string[];
+  at: string;
+  milestone: HostedRuntimeAssistantMilestone;
+  runtimeAttemptId?: string | null;
+  source: HostedIngressLatencySource;
+  type: "assistant_milestone";
 }
 
 export interface HostedRuntimeLatencyTraceMilestoneEvent {
@@ -1716,6 +1773,7 @@ export interface HostedRuntimeLatencyTraceMilestoneEvent {
 
 export type HostedRuntimeLatencyTraceEvent =
   | HostedRuntimeLatencyTraceAssistantInputStagedEvent
+  | HostedRuntimeLatencyTraceAssistantMilestoneEvent
   | HostedRuntimeLatencyTraceProviderStartedEvent
   | HostedRuntimeLatencyTraceMilestoneEvent;
 

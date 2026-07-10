@@ -11,6 +11,7 @@ import {
 } from "@/src/lib/hosted-execution/cloudflare-callback-auth";
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import {
+  recordHostedIngressAssistantMilestone,
   recordHostedIngressAssistantInputStaged,
   recordHostedIngressProviderStarted,
   recordHostedIngressRuntimeMilestone,
@@ -46,7 +47,16 @@ export const POST = withJsonError(async (request: Request) => {
         source: traceRequest.event.source,
         workspaceRestoreDoneAt: traceRequest.event.workspaceRestoreDoneAt,
       })
-    : traceRequest.event.type === "provider_started"
+    : traceRequest.event.type === "assistant_milestone"
+      ? await recordHostedIngressAssistantMilestone({
+          assistantInputIds: traceRequest.event.assistantInputIds,
+          at: traceRequest.event.at,
+          authenticatedUserId,
+          milestone: traceRequest.event.milestone,
+          runtimeAttemptId,
+          source: traceRequest.event.source,
+        })
+      : traceRequest.event.type === "provider_started"
       ? await recordHostedIngressProviderStarted({
           assistantInputIds: traceRequest.event.assistantInputIds,
           at: traceRequest.event.at,
