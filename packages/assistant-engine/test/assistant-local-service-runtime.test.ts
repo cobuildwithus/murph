@@ -1,4 +1,4 @@
-import { readFile, rm } from 'node:fs/promises'
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import assert from 'node:assert/strict'
 
 import { afterEach, expect, test, vi } from 'vitest'
@@ -76,6 +76,7 @@ afterEach(async () => {
   vi.doUnmock('../src/assistant/prompt-attempts.js')
   vi.doUnmock('../src/assistant/service-turn-routes.js')
   vi.doUnmock('../src/assistant/service-usage.js')
+  vi.doUnmock('../src/assistant/runtime-budgets.js')
   vi.doUnmock('../src/assistant/channel-adapters.js')
   vi.doUnmock('../src/assistant/runtime-state-service.js')
   vi.doUnmock('../src/assistant/turn-lock.js')
@@ -141,6 +142,16 @@ test('sendAssistantMessageLocal completes a successful turn, persists usage, and
   assert.equal(mocks.getAssistantChannelAdapter.mock.calls[0]?.[0], 'telegram')
   assert.equal(stopTyping.mock.calls.length, 1)
   assert.deepEqual(stopTyping.mock.calls[0], [{ providerStop: false }])
+  assert.deepEqual(mocks.maybeRunAssistantRuntimeMaintenance.mock.calls[0]?.[0], {
+    signal: null,
+    vault: '/vaults/test',
+  })
+  // Maintenance is a post-turn owner: it must run after the reply is
+  // committed and delivered, never on the foreground path before it.
+  assert.ok(
+    (mocks.maybeRunAssistantRuntimeMaintenance.mock.invocationCallOrder[0] ?? 0) >
+      (mocks.finalizeDeliveredAssistantTurn.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY),
+  )
 })
 
 test('sendAssistantMessageLocal gives hosted manual phone-call turns a real accepted input id', async () => {
@@ -204,6 +215,46 @@ test('sendAssistantMessageLocal gives hosted manual phone-call turns a real acce
   expect(phoneCallScope).toMatchObject({
     acceptedInputIds: ['manual-phone-call:turn-1'],
   })
+})
+
+test('sendAssistantMessageLocal compacts oversized runtime logs after the turn commits', async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    'assistant-local-service-runtime-maintenance-',
+  )
+  tempRoots.push(parentRoot)
+  const paths = resolveAssistantStatePaths(vaultRoot)
+  await mkdir(paths.journalsDirectory, {
+    recursive: true,
+  })
+  await writeFile(
+    paths.runtimeEventsPath,
+    Array.from({ length: 2050 }, (_value, index) =>
+      JSON.stringify(makeRuntimeEvent(index)),
+    ).join('\n') + '\n',
+    'utf8',
+  )
+
+  const { sendAssistantMessageLocal } = await loadLocalServiceModule({
+    useRealRuntimeMaintenance: true,
+  })
+
+  await sendAssistantMessageLocal({
+    deliverResponse: false,
+    executionContext: {
+      hosted: null,
+    },
+    prompt: 'Summarize my inbox',
+    vault: vaultRoot,
+  })
+
+  const compactedRuntimeEvents = await readFile(paths.runtimeEventsPath, 'utf8')
+  const compactedRuntimeEventCount = compactedRuntimeEvents
+    .trim()
+    .split('\n')
+    .filter(Boolean).length
+
+  assert.ok(compactedRuntimeEventCount <= 2000)
+  assert.match(compactedRuntimeEvents, /runtime\.maintenance/)
 })
 
 test('sendAssistantMessageLocal delivers media-only provider replies', async () => {
@@ -1347,6 +1398,8 @@ test('sendAssistantMessageLocal keeps auto-reply turns on the session Codex thre
       ?.providerResumeStateAction,
     'persist-from-provider-turn',
   )
+  // The automation pass owns maintenance for auto-reply turns.
+  assert.equal(mocks.maybeRunAssistantRuntimeMaintenance.mock.calls.length, 0)
 })
 
 test('sendAssistantMessageLocal runs automation cron turns on isolated Codex threads', async () => {
@@ -1370,6 +1423,7 @@ test('sendAssistantMessageLocal runs automation cron turns on isolated Codex thr
       ?.providerResumeStateAction,
     'preserve-existing',
   )
+  assert.equal(mocks.maybeRunAssistantRuntimeMaintenance.mock.calls.length, 1)
 })
 
 test('sendAssistantMessageLocal prefers the hosted execution default target when resolving the session', async () => {
@@ -5936,6 +5990,9 @@ test('sendAssistantMessageLocal runs best-effort failure cleanup and rethrows te
   mocks.refreshAssistantStatusSnapshotLocal.mockRejectedValueOnce(
     new Error('ignore failed status refresh'),
   )
+  mocks.maybeRunAssistantRuntimeMaintenance.mockRejectedValueOnce(
+    new Error('ignore failed post-turn maintenance'),
+  )
 
   await assert.rejects(
     () =>
@@ -5951,6 +6008,10 @@ test('sendAssistantMessageLocal runs best-effort failure cleanup and rethrows te
   )
 
   assert.equal(mocks.appendAssistantTranscriptEntries.mock.calls.length, 0)
+  // The post-turn maintenance owner still runs when the turn fails, and its
+  // own rejection above must not mask the original provider error asserted
+  // by assert.rejects.
+  assert.equal(mocks.maybeRunAssistantRuntimeMaintenance.mock.calls.length, 1)
   assert.equal(mocks.persistFailedAssistantPromptAttempt.mock.calls.length, 1)
   assert.equal(
     mocks.persistFailedAssistantPromptAttempt.mock.calls[0]?.[0]?.persistUserPromptOnFailure,
@@ -8280,6 +8341,7 @@ async function loadLocalServiceModule(input?: {
     startTypingIndicator?: NonNullable<AssistantChannelAdapter['startTypingIndicator']>
   } | null
   realAcceptedInputPersistence?: boolean
+  useRealRuntimeMaintenance?: boolean
   plan?: ReturnType<typeof createSharedPlan>
   providerOutcome?:
     | {
@@ -8366,6 +8428,7 @@ async function loadLocalServiceModule(input?: {
   const session = input?.session ?? createAssistantSession()
   const sharedPlan = input?.plan ?? createSharedPlan()
   const useRealAcceptedInputPersistence = input?.realAcceptedInputPersistence === true
+  const useRealRuntimeMaintenance = input?.useRealRuntimeMaintenance === true
   const realStore = await vi.importActual<typeof import('../src/assistant/store.js')>(
     '../src/assistant/store.js',
   )
@@ -8655,6 +8718,13 @@ async function loadLocalServiceModule(input?: {
         >[0],
       ) => undefined,
     ),
+    maybeRunAssistantRuntimeMaintenance: vi.fn(
+      async (
+        _input: Parameters<
+          typeof import('../src/assistant/runtime-budgets.js').maybeRunAssistantRuntimeMaintenance
+        >[0],
+      ) => undefined,
+    ),
     redactAssistantDisplayPath: vi.fn(() => '<redacted-vault>'),
     refreshAssistantStatusSnapshotLocal: vi.fn(async () => undefined),
     saveAssistantSession: vi.fn(),
@@ -8886,6 +8956,12 @@ async function loadLocalServiceModule(input?: {
     recordAdditionalAssistantUsageEvents: mocks.recordAdditionalAssistantUsageEvents,
     recordAssistantUsageEvent: mocks.recordAssistantUsageEvent,
   }))
+  if (!useRealRuntimeMaintenance) {
+    vi.doMock('../src/assistant/runtime-budgets.js', () => ({
+      maybeRunAssistantRuntimeMaintenance:
+        mocks.maybeRunAssistantRuntimeMaintenance,
+    }))
+  }
   if (!useRealAcceptedInputPersistence) {
     vi.doMock('../src/assistant/runtime-state-service.js', () => ({
       createAssistantRuntimeStateService: vi.fn(() => mocks.runtimeState),
@@ -9098,5 +9174,21 @@ function createDeferred<T>(): Deferred<T> {
     promise,
     reject,
     resolve,
+  }
+}
+
+function makeRuntimeEvent(index: number) {
+  return {
+    at: `2026-04-08T10:${String(Math.floor(index / 60)).padStart(2, '0')}:${String(
+      index % 60,
+    ).padStart(2, '0')}.000Z`,
+    component: 'test',
+    dataJson: null,
+    entityId: `entity-${index}`,
+    entityType: 'session',
+    kind: 'runtime.maintenance' as const,
+    level: 'info' as const,
+    message: `event-${index}`,
+    schema: 'murph.assistant-runtime-event.v1' as const,
   }
 }

@@ -41,6 +41,8 @@ const QUARANTINE_METADATA_SUFFIX = '.meta.json'
 
 export async function maybeRunAssistantRuntimeMaintenance(input: {
   now?: Date
+  shouldYield?: (() => boolean) | null
+  signal?: AbortSignal | null
   vault: string
 }): Promise<AssistantRuntimeBudgetSnapshot> {
   const now = input.now ?? new Date()
@@ -58,10 +60,17 @@ export async function maybeRunAssistantRuntimeMaintenance(input: {
     ) {
       return current
     }
+    // Foreground work may have arrived while waiting for the runtime lock.
+    if (assistantRuntimeMaintenanceYieldRequested(input)) {
+      return current
+    }
 
     return await runAssistantRuntimeMaintenanceAtPaths({
       now,
       paths,
+      previousLastRunAt: lastRunAt,
+      shouldYield: input.shouldYield ?? null,
+      signal: input.signal ?? null,
       vault: input.vault,
     })
   })
@@ -93,64 +102,116 @@ export async function readAssistantRuntimeBudgetStatus(
   })
 }
 
+function assistantRuntimeMaintenanceYieldRequested(input: {
+  shouldYield?: (() => boolean) | null
+  signal?: AbortSignal | null
+}): boolean {
+  return input.signal?.aborted === true || input.shouldYield?.() === true
+}
+
 async function runAssistantRuntimeMaintenanceAtPaths(input: {
   now: Date
   paths: AssistantStatePaths
+  previousLastRunAt?: string | null
+  shouldYield?: (() => boolean) | null
+  signal?: AbortSignal | null
   vault: string
 }): Promise<AssistantRuntimeBudgetSnapshot> {
   const nowIso = input.now.toISOString()
   const notes: string[] = []
+  let staleQuarantinePruned = 0
+  let transcriptRetention = {
+    entriesTrimmed: 0,
+    transcriptsTrimmed: 0,
+  }
+  let terminalOutboxPruned = 0
+  let cronHistory = {
+    responsesRedacted: 0,
+    runsPruned: 0,
+  }
+  let staleLocksCleared = 0
+
   const expiredCacheEntries = pruneAssistantRuntimeCaches(input.now.getTime())
   if (expiredCacheEntries > 0) {
     notes.push(
       `${expiredCacheEntries} expired runtime cache entr${expiredCacheEntries === 1 ? 'y was' : 'ies were'} pruned.`,
     )
   }
-  const staleQuarantinePruned = await pruneAssistantQuarantineFiles(
-    input.paths,
-    input.now,
-  )
-  if (staleQuarantinePruned > 0) {
-    notes.push(
-      `${staleQuarantinePruned} expired quarantine artifact(s) were removed.`,
-    )
+
+  const units: Array<() => Promise<void>> = [
+    async () => {
+      staleQuarantinePruned = await pruneAssistantQuarantineFiles(
+        input.paths,
+        input.now,
+      )
+      if (staleQuarantinePruned > 0) {
+        notes.push(
+          `${staleQuarantinePruned} expired quarantine artifact(s) were removed.`,
+        )
+      }
+    },
+    async () => {
+      transcriptRetention = await pruneAssistantTranscriptRetention(input.paths)
+      if (transcriptRetention.entriesTrimmed > 0) {
+        notes.push(
+          `${transcriptRetention.entriesTrimmed} transcript entr${transcriptRetention.entriesTrimmed === 1 ? 'y was' : 'ies were'} trimmed across ${transcriptRetention.transcriptsTrimmed} session transcript(s).`,
+        )
+      }
+    },
+    async () => {
+      terminalOutboxPruned = await pruneAssistantTerminalOutboxIntents({
+        now: input.now,
+        paths: input.paths,
+        vault: input.vault,
+      })
+      if (terminalOutboxPruned > 0) {
+        notes.push(
+          `${terminalOutboxPruned} terminal outbox intent(s) were pruned.`,
+        )
+      }
+    },
+    async () => {
+      cronHistory = await pruneAssistantCronRunHistory({
+        now: input.now,
+        paths: input.paths,
+      })
+      if (cronHistory.responsesRedacted > 0) {
+        notes.push(
+          `${cronHistory.responsesRedacted} older cron response(s) were redacted.`,
+        )
+      }
+      if (cronHistory.runsPruned > 0) {
+        notes.push(
+          `${cronHistory.runsPruned} stale cron run record(s) were pruned.`,
+        )
+      }
+    },
+    async () => {
+      staleLocksCleared = await clearStaleAssistantLocks({
+        paths: input.paths,
+        vault: input.vault,
+      })
+      if (staleLocksCleared > 0) {
+        notes.push(`${staleLocksCleared} stale runtime lock(s) were cleared.`)
+      }
+    },
+  ]
+
+  // Maintenance holds the runtime write lock through workspace-wide file
+  // traversals. Yield between bounded units so foreground work arriving
+  // mid-pass only ever waits for the unit already in flight.
+  let yielded = false
+  for (const unit of units) {
+    if (assistantRuntimeMaintenanceYieldRequested(input)) {
+      yielded = true
+      break
+    }
+    await unit()
   }
-  const transcriptRetention = await pruneAssistantTranscriptRetention(input.paths)
-  if (transcriptRetention.entriesTrimmed > 0) {
+  if (yielded) {
     notes.push(
-      `${transcriptRetention.entriesTrimmed} transcript entr${transcriptRetention.entriesTrimmed === 1 ? 'y was' : 'ies were'} trimmed across ${transcriptRetention.transcriptsTrimmed} session transcript(s).`,
+      'Runtime maintenance yielded to foreground work and will finish in a later pass.',
     )
-  }
-  const terminalOutboxPruned = await pruneAssistantTerminalOutboxIntents({
-    now: input.now,
-    paths: input.paths,
-    vault: input.vault,
-  })
-  if (terminalOutboxPruned > 0) {
-    notes.push(
-      `${terminalOutboxPruned} terminal outbox intent(s) were pruned.`,
-    )
-  }
-  const cronHistory = await pruneAssistantCronRunHistory({
-    now: input.now,
-    paths: input.paths,
-  })
-  if (cronHistory.responsesRedacted > 0) {
-    notes.push(
-      `${cronHistory.responsesRedacted} older cron response(s) were redacted.`,
-    )
-  }
-  if (cronHistory.runsPruned > 0) {
-    notes.push(
-      `${cronHistory.runsPruned} stale cron run record(s) were pruned.`,
-    )
-  }
-  const staleLocksCleared = await clearStaleAssistantLocks({
-    paths: input.paths,
-    vault: input.vault,
-  })
-  if (staleLocksCleared > 0) {
-    notes.push(`${staleLocksCleared} stale runtime lock(s) were cleared.`)
   }
 
   await appendAssistantRuntimeEventAtPaths(input.paths, {
@@ -170,17 +231,20 @@ async function runAssistantRuntimeMaintenanceAtPaths(input: {
       terminalOutboxPruned,
       transcriptEntriesTrimmed: transcriptRetention.entriesTrimmed,
       transcriptFilesTrimmed: transcriptRetention.transcriptsTrimmed,
+      yielded,
     },
   }).catch(() => undefined)
-  try {
-    await compactAssistantEventLogsAtPaths({
-      now: input.now,
-      paths: input.paths,
-    })
-  } catch {
-    notes.push(
-      'Assistant event log compaction failed and will be retried by a later maintenance pass.',
-    )
+  if (!yielded && !assistantRuntimeMaintenanceYieldRequested(input)) {
+    try {
+      await compactAssistantEventLogsAtPaths({
+        now: input.now,
+        paths: input.paths,
+      })
+    } catch {
+      notes.push(
+        'Assistant event log compaction failed and will be retried by a later maintenance pass.',
+      )
+    }
   }
 
   const snapshot = assistantRuntimeBudgetSnapshotSchema.parse({
@@ -188,7 +252,9 @@ async function runAssistantRuntimeMaintenanceAtPaths(input: {
     updatedAt: nowIso,
     caches: listAssistantRuntimeCacheSnapshots(),
     maintenance: {
-      lastRunAt: nowIso,
+      // A yielded pass is unfinished: keep the previous run marker so the
+      // next idle pass retries promptly instead of waiting a full interval.
+      lastRunAt: yielded ? input.previousLastRunAt ?? null : nowIso,
       staleQuarantinePruned,
       staleLocksCleared,
       notes,

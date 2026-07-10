@@ -42,8 +42,6 @@ const providerTurnRunnerMocks = vi.hoisted(() => ({
   buildCodexTurnAttemptPlan: vi.fn(),
   recordAssistantRuntimeIssueInputsBestEffort: vi.fn(),
   recordCodexAttemptFailed: vi.fn(),
-  recordCodexAttemptStarted: vi.fn(),
-  recordCodexAttemptSucceeded: vi.fn(),
 }))
 
 const storeMocks = vi.hoisted(() => ({
@@ -75,9 +73,6 @@ vi.mock('../src/assistant/codex-turn/planning.js', () => ({
 
 vi.mock('../src/assistant/codex-turn/attempt-observability.js', () => ({
   recordCodexAttemptFailed: providerTurnRunnerMocks.recordCodexAttemptFailed,
-  recordCodexAttemptStarted: providerTurnRunnerMocks.recordCodexAttemptStarted,
-  recordCodexAttemptSucceeded:
-    providerTurnRunnerMocks.recordCodexAttemptSucceeded,
 }))
 
 vi.mock('../src/assistant/issue-reporting.js', () => ({
@@ -135,8 +130,6 @@ afterEach(() => {
   providerTurnRunnerMocks.buildCodexTurnAttemptPlan.mockReset()
   providerTurnRunnerMocks.recordAssistantRuntimeIssueInputsBestEffort.mockReset()
   providerTurnRunnerMocks.recordCodexAttemptFailed.mockReset()
-  providerTurnRunnerMocks.recordCodexAttemptStarted.mockReset()
-  providerTurnRunnerMocks.recordCodexAttemptSucceeded.mockReset()
   storeMocks.appendAssistantTranscriptEntries
     .mockReset()
     .mockImplementation(() => Promise.resolve([]))
@@ -1651,10 +1644,9 @@ describe('Codex model catalog', () => {
         userPrompt: 'Please connect my WHOOP',
       }),
     )
-    expect(
-      providerTurnRunnerMocks.recordCodexAttemptSucceeded,
-    ).toHaveBeenCalledWith(expect.objectContaining({
-      activityLabels: [],
-    }))
+    // Attempt observability is the runner's only receipt-writing seam, and it
+    // records failures exclusively: a successful attempt must make no receipt
+    // timeline write between provider success and the reply return.
+    expect(providerTurnRunnerMocks.recordCodexAttemptFailed).not.toHaveBeenCalled()
   })
 })
