@@ -19,6 +19,9 @@ import {
   type HostedOnboardingLinqWebhookResponse,
 } from "./webhook-provider-linq";
 import {
+  isHostedLinqIMessageService,
+} from "./webhook-provider-linq-shared";
+import {
   planHostedOnboardingTelegramWebhook,
   type HostedOnboardingTelegramWebhookResponse,
 } from "./webhook-provider-telegram";
@@ -449,7 +452,10 @@ async function resolveHostedLinqPlanningEvent(input: {
     return messageEvent;
   }
 
-  if (messageEvent.data.is_from_me || !isHostedLinqIMessage(messageEvent)) {
+  if (
+    messageEvent.data.is_from_me
+    || !isHostedLinqIMessageService(messageEvent.data.service)
+  ) {
     if (webhookIsGroup === false) {
       logHostedLinqChatClassification("webhook-direct");
     }
@@ -500,17 +506,6 @@ async function resolveHostedLinqPlanningEvent(input: {
       },
     },
   };
-}
-
-function isHostedLinqIMessage(
-  event: ReturnType<typeof requireHostedLinqMessageReceivedEvent>,
-): boolean {
-  return [
-    event.data.preferred_service,
-    event.data.service,
-    event.data.sender_handle?.service,
-    event.data.chat?.owner_handle?.service,
-  ].some((service) => service?.trim().toLowerCase() === "imessage");
 }
 
 function logHostedLinqChatClassification(

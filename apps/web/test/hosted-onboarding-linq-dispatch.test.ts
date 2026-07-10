@@ -629,7 +629,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
   });
 
   it.each(["sms", "RCS"] as const)(
-    "reuses an existing transaction when dispatching active-member Linq %s messages",
+    "uses parser-owned Linq %s service when preferred-service metadata conflicts",
     async (service) => {
       const prisma = asPrismaTransactionClient({
         hostedWebhookReceipt: {
@@ -661,6 +661,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
           data: {
             extra_field: "discard-me",
             extra_message_field: "discard-me-too",
+            preferred_service: "iMessage",
           },
           service,
         }),
