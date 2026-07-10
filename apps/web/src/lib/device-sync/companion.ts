@@ -14,6 +14,115 @@ export const COMPANION_DEVICE_SYNC_PROVIDER = "junction";
 
 const COMPANION_METADATA_STRING_MAX_LENGTH = 200;
 const COMPANION_SDK_VERSION_MAX_ENTRIES = 10;
+const COMPANION_AUTH_DIAGNOSTIC_VERSION_PATTERN = /^[0-9]{1,3}(?:\.[0-9]{1,3}){1,3}$/u;
+const COMPANION_AUTH_DIAGNOSTIC_PROVIDER_CODES = new Set([
+  "authentication_failure",
+  "bad_email",
+  "bad_request",
+  "custom_auth_provider_returned_no_token",
+  "email_not_found",
+  "embedded_wallet_failure",
+  "expired_code",
+  "failure_during_authentication",
+  "forbidden",
+  "incorrect_credentials_custom_access_token",
+  "incorrect_credentials_email",
+  "incorrect_credentials_oauth",
+  "incorrect_credentials_passkey",
+  "incorrect_credentials_phone",
+  "incorrect_credentials_siwe",
+  "incorrect_credentials_siws",
+  "incorrect_credentials_unknown",
+  "initialization_failed",
+  "invalid_code",
+  "invalid_email",
+  "invalid_jwt",
+  "invalid_native_app_id",
+  "invalid_native_app_identifier",
+  "invalid_native_client",
+  "invalid_phone",
+  "invalid_request",
+  "no_custom_auth_provider_configured",
+  "not_found",
+  "not_logged_in",
+  "passkey_authentication_failed",
+  "passkey_creation_failed",
+  "passkey_no_credentials",
+  "passkey_user_cancelled",
+  "phone_not_found",
+  "rate_limit_exceeded",
+  "rate_limited",
+  "service_unavailable",
+  "timeout",
+  "too_many_requests",
+  "unauthorized",
+  "unavailable",
+]);
+const COMPANION_AUTH_DIAGNOSTIC_ALLOWED_KEYS = new Set([
+  "appVersion",
+  "diagnosticCode",
+  "errorKind",
+  "httpStatus",
+  "method",
+  "providerErrorCode",
+  "retryable",
+  "stage",
+]);
+
+const COMPANION_AUTH_DIAGNOSTIC_STAGES = new Set([
+  "confirm_code",
+  "send_code",
+]);
+const COMPANION_AUTH_DIAGNOSTIC_METHODS = new Set(["email", "sms"]);
+const COMPANION_AUTH_DIAGNOSTIC_ERROR_KINDS = new Set([
+  "configuration",
+  "network",
+  "provider",
+  "rate_limited",
+  "unavailable",
+  "unknown",
+]);
+const COMPANION_AUTH_DIAGNOSTIC_CODE_DESCRIPTIONS = {
+  network_lost: "Network connection was lost.",
+  network_offline: "Network appears offline.",
+  network_timeout: "Network request timed out.",
+  network_unknown: "Network request failed.",
+  privy_bad_email: "Privy rejected the email address.",
+  privy_bad_request: "Privy rejected the auth request.",
+  privy_authentication_failed: "Privy authentication failed.",
+  privy_could_not_construct_request: "Privy request construction failed.",
+  privy_decoding_error: "Privy response decoding failed.",
+  privy_expired_code: "Privy OTP expired.",
+  privy_forbidden: "Privy rejected the request as forbidden.",
+  privy_invalid_code: "Privy rejected the OTP code.",
+  privy_invalid_email: "Privy rejected the email address.",
+  privy_invalid_native_app_id: "Privy rejected the native app configuration.",
+  privy_invalid_phone: "Privy rejected the phone number.",
+  privy_initialization_failed: "Privy initialization failed.",
+  privy_malformed_response: "Privy returned a malformed response.",
+  privy_network_error: "Privy request failed at the network layer.",
+  privy_not_found: "Privy resource was not found.",
+  privy_rate_limited: "Privy rate limited the auth request.",
+  privy_service_unavailable: "Privy service was unavailable.",
+  privy_timeout: "Privy request timed out.",
+  privy_unauthorized: "Privy rejected the request as unauthorized.",
+  privy_unknown: "Privy auth request failed.",
+} as const;
+type CompanionAuthDiagnosticCode = keyof typeof COMPANION_AUTH_DIAGNOSTIC_CODE_DESCRIPTIONS;
+
+interface CompanionAuthDiagnosticLog {
+  diagnosticCode: string;
+  diagnosticDescription: string;
+  errorKind: string;
+  httpStatus: number | null;
+  method: string;
+  platform: "ios";
+  provider: "privy";
+  providerErrorCode: string | null;
+  retryable: boolean;
+  stage: string;
+  appVersion: string | null;
+}
 
 /**
  * Validates the optional companion sign-in request metadata and discards it.
@@ -50,6 +159,62 @@ export function validateCompanionSignInRequestBody(body: Record<string, unknown>
       throw companionRequestInvalid("sdkVersions must be an object of string values.");
     }
   }
+}
+
+/**
+ * Validates pre-login companion auth diagnostics. The allowlisted envelope uses
+ * app-owned diagnostic codes and strict provider machine identifiers only: raw
+ * provider prose, contacts, credentials, and health fields never cross the
+ * server boundary.
+ */
+export function validateCompanionAuthDiagnosticRequestBody(
+  body: Record<string, unknown>,
+): CompanionAuthDiagnosticLog {
+  rejectUnknownAuthDiagnosticKeys(body);
+  const stage = readRequiredEnum(body, "stage", COMPANION_AUTH_DIAGNOSTIC_STAGES);
+  const method = readRequiredEnum(body, "method", COMPANION_AUTH_DIAGNOSTIC_METHODS);
+  const errorKind = readRequiredEnum(
+    body,
+    "errorKind",
+    COMPANION_AUTH_DIAGNOSTIC_ERROR_KINDS,
+  );
+  const httpStatus = readOptionalHttpStatus(body, "httpStatus");
+  const diagnosticCode = readRequiredAuthDiagnosticCode(body, "diagnosticCode");
+
+  return {
+    diagnosticCode,
+    diagnosticDescription: COMPANION_AUTH_DIAGNOSTIC_CODE_DESCRIPTIONS[diagnosticCode],
+    errorKind,
+    httpStatus,
+    method,
+    platform: "ios",
+    provider: "privy",
+    providerErrorCode: readOptionalProviderErrorCode(body),
+    retryable: readRequiredBoolean(body, "retryable"),
+    stage,
+    appVersion: readOptionalAuthDiagnosticAppVersion(body),
+  };
+}
+
+function readOptionalProviderErrorCode(body: Record<string, unknown>): string | null {
+  const value = body.providerErrorCode;
+  return typeof value === "string" && COMPANION_AUTH_DIAGNOSTIC_PROVIDER_CODES.has(value)
+    ? value
+    : null;
+}
+
+function rejectUnknownAuthDiagnosticKeys(body: Record<string, unknown>): void {
+  if (Object.keys(body).some((key) => !COMPANION_AUTH_DIAGNOSTIC_ALLOWED_KEYS.has(key))) {
+    throw companionRequestInvalid("auth diagnostic contains unsupported fields.");
+  }
+}
+
+function readOptionalAuthDiagnosticAppVersion(body: Record<string, unknown>): string | null {
+  const value = body.appVersion;
+
+  return typeof value === "string" && COMPANION_AUTH_DIAGNOSTIC_VERSION_PATTERN.test(value)
+    ? value
+    : null;
 }
 
 export interface CompanionDeviceSyncResourceStatus {
@@ -167,15 +332,77 @@ function maxIsoTimestamp(current: string | null, candidate: string | null): stri
   return Date.parse(candidate) > Date.parse(current) ? candidate : current;
 }
 
-function readOptionalBoundedString(body: Record<string, unknown>, key: string): string | null {
+function readOptionalBoundedString(
+  body: Record<string, unknown>,
+  key: string,
+  maxLength = COMPANION_METADATA_STRING_MAX_LENGTH,
+): string | null {
   const value = body[key];
 
   if (value === undefined || value === null) {
     return null;
   }
 
-  if (typeof value !== "string" || value.length > COMPANION_METADATA_STRING_MAX_LENGTH) {
+  if (typeof value !== "string" || value.length > maxLength) {
     throw companionRequestInvalid(`${key} must be a short string when provided.`);
+  }
+
+  return value;
+}
+
+function readRequiredEnum(
+  body: Record<string, unknown>,
+  key: string,
+  allowed: ReadonlySet<string>,
+): string {
+  const value = body[key];
+
+  if (typeof value !== "string" || !allowed.has(value)) {
+    throw companionRequestInvalid(`${key} is invalid.`);
+  }
+
+  return value;
+}
+
+function readRequiredAuthDiagnosticCode(
+  body: Record<string, unknown>,
+  key: string,
+): CompanionAuthDiagnosticCode {
+  const value = body[key];
+
+  if (typeof value !== "string" || !isCompanionAuthDiagnosticCode(value)) {
+    throw companionRequestInvalid(`${key} is invalid.`);
+  }
+
+  return value;
+}
+
+function isCompanionAuthDiagnosticCode(value: string): value is CompanionAuthDiagnosticCode {
+  return Object.prototype.hasOwnProperty.call(
+    COMPANION_AUTH_DIAGNOSTIC_CODE_DESCRIPTIONS,
+    value,
+  );
+}
+
+function readRequiredBoolean(body: Record<string, unknown>, key: string): boolean {
+  const value = body[key];
+
+  if (typeof value !== "boolean") {
+    throw companionRequestInvalid(`${key} must be a boolean.`);
+  }
+
+  return value;
+}
+
+function readOptionalHttpStatus(body: Record<string, unknown>, key: string): number | null {
+  const value = body[key];
+
+  if (value === undefined || value === null) {
+    return null;
+  }
+
+  if (typeof value !== "number" || !Number.isInteger(value) || value < 100 || value > 599) {
+    throw companionRequestInvalid(`${key} must be a valid HTTP status.`);
   }
 
   return value;

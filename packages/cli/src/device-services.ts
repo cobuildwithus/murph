@@ -342,7 +342,11 @@ export function createIntegratedDeviceSyncServices(): DeviceSyncServices {
     async disconnectAccount(input) {
       assertHostedRuntimeDoesNotUseExplicitControlPlaneTarget(input, 'account disconnect')
       const client = await createControlPlaneClient(input)
-      const result = await client.disconnectAccount(input.accountId)
+      const current = await client.showAccount(input.accountId)
+      const result = await client.disconnectAccount(
+        input.accountId,
+        current.account.connectedAt,
+      )
 
       return {
         baseUrl: client.baseUrl,

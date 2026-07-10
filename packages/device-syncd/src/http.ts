@@ -385,11 +385,15 @@ const DEVICE_SYNC_HTTP_ROUTES = [
   }),
   createParameterizedRoute({
     method: "POST",
-    pattern: /^\/accounts\/([^/]+)\/disconnect$/u,
+    pattern: /^\/accounts\/([^/]+)\/disconnect-if-connected-at$/u,
     paramNames: ["accountId"],
     surface: "control",
-    async handle({ response, service, params }) {
-      const result = await service.disconnectAccount(params.accountId ?? "");
+    async handle({ request, response, service, bodyLimitBytes, params }) {
+      const body = await maybeReadJsonBody(request, bodyLimitBytes);
+      const result = await service.disconnectAccount(
+        params.accountId ?? "",
+        requireDisconnectExpectedConnectedAt(body),
+      );
       sendJson(response, 200, result);
     },
   }),
@@ -900,6 +904,20 @@ function sendError(response: ServerResponse, error: unknown): void {
       code: "INTERNAL_ERROR",
       message: "Internal server error.",
     },
+  });
+}
+
+function requireDisconnectExpectedConnectedAt(body: Record<string, unknown>): string {
+  const expectedConnectedAt = readStringField(body, "expectedConnectedAt");
+  if (expectedConnectedAt) {
+    return expectedConnectedAt;
+  }
+
+  throw deviceSyncError({
+    code: "CONNECTION_GENERATION_REQUIRED",
+    message: "Device account disconnect requires the expected connection generation.",
+    retryable: false,
+    httpStatus: 400,
   });
 }
 

@@ -58,6 +58,7 @@ import {
   type MurphContactAvatarOption,
 } from "@/src/components/murph/murph-contact-card-picker";
 import type { ExperimentStartContactOption } from "@/src/lib/experiments/start-experiment-contact";
+import { MurphAssistantStylePicker } from "@/src/components/murph/murph-assistant-style-picker";
 import { MURPH_TELEGRAM_URL } from "@/src/lib/murph-contact-routing";
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
@@ -139,6 +140,8 @@ export function ComponentsContent() {
   const [collapsibleOpen, setCollapsibleOpen] = useState(false);
   const [channelPickerOpen, setChannelPickerOpen] = useState(false);
   const [contactCardPickerOpen, setContactCardPickerOpen] = useState(false);
+  const [assistantStylePickerStep, setAssistantStylePickerStep] =
+    useState<"tone" | "voice" | null>(null);
   const [segmentedControlValue, setSegmentedControlValue] =
     useState<SegmentedControlDemoValue>("phone");
   const [warmSegmentedControlValue, setWarmSegmentedControlValue] =
@@ -510,6 +513,41 @@ export function ComponentsContent() {
               </div>
             ))}
           </div>
+        </Section>
+
+        <Separator />
+
+        <Section title="Assistant Style Picker">
+          <p className="text-sm text-muted-foreground">
+            Tone and voice pickers used in onboarding (chained) and settings
+            (one step at a time). Full-height drawer under 768px, dialog above;
+            the voice grid is two columns on mobile and three on desktop.
+          </p>
+          <div className="flex flex-wrap gap-3 rounded-xl border border-border bg-card p-5">
+            <Button onClick={() => setAssistantStylePickerStep("tone")}>
+              Preview tone step
+            </Button>
+            <Button variant="secondary" onClick={() => setAssistantStylePickerStep("voice")}>
+              Preview voice step
+            </Button>
+          </div>
+          {assistantStylePickerStep ? (
+            <MurphAssistantStylePicker
+              singleStep
+              initialStep={assistantStylePickerStep}
+              onOpenChange={(open) => {
+                if (!open) {
+                  setAssistantStylePickerStep(null);
+                }
+              }}
+              open
+              // Preview only: never persist a real preference from the showcase.
+              savePreference={async (preferences) => ({
+                tone: "tone" in preferences ? preferences.tone : null,
+                voice: "voice" in preferences ? preferences.voice : null,
+              })}
+            />
+          ) : null}
         </Section>
 
         <Separator />

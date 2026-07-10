@@ -26,6 +26,40 @@ Docker runner smoke derives a separate `.deploy/runner-smoke-bundle/` from the v
 Runner bundle assembly esbuild-bundles two boot-critical surfaces with byte budgets and assembly-time probes: the in-container `vault-cli` binary (`scripts/runner-bundle/bundle-cli.ts`) and the container entrypoint itself (`scripts/runner-bundle/bundle-entrypoint.ts`, output `dist-bundled/`, run by the image CMD). The bundled entrypoint cuts cold-boot module loading from ~960 file reads to ~27 chunk reads on lazily pulled image layers; package resolvers that derive asset paths from their own module location are pinned to the installed package copies via Dockerfile ENV (`MURPH_ASSISTANT_SKILLS_ROOT`, `MURPH_ASSISTANT_CLI_SURFACE_PREBUILT_ARTIFACT_PATH`, `MURPH_HEALTH_COMMONS_PACKAGE_ROOT`). Health Commons stays installed in the runner bundle for its generated catalog payload, while its JS is inlined and assembly probes set the same package-root pin for bundled and unbundled parity.
 Hosted assistant delivery recovery now relies on committed side-effect state inside the encrypted workspace and the web-owned hosted workspace checkpoint.
 
+## Shutdown Checkpoint Handoff Rollout
+
+Roll out the single-snapshot shutdown handoff in this order:
+
+1. Deploy the Cloudflare Worker and runner bundle with
+   `container_rollout=immediate`, then require managed-container smoke to report
+   the new bundle fingerprint.
+2. Deploy `apps/web` only after the runner fleet has converged.
+
+The intermediate state is safe: the new runner still understands an old web
+deployment's `foreground_pending` checkpoint response, and its payload-free
+owner-release callback may receive a non-success response from old web without
+changing completed work or retrying. After web deploys, a valid checkpoint may
+return `conversationInputAhead` instead; a live default-mode runtime imports it,
+while retention-only work or shutdown leaves it to durable mailbox/Temporal
+reconciliation. An old
+runner ignores the additive field, and durable mailbox lag plus the existing
+owner horizon still recover the input; its old post-upload wake path may retain
+the extra-snapshot latency until the runner converges. Both mixed-version states
+are correctness-compatible, so either side may be rolled back independently
+during this compatibility window. The recommended order minimizes exposure to
+the old latency path.
+
+The same producer-first order applies to the positive
+`immediateRecheckRequested` owner-release edge. New Cloudflare code signs its
+exact query and lets it override only the normal future-continuation callback
+skip; old runners simply omit the edge and fall back to the owner horizon. Web
+must not deploy the due-wake level-trigger removal before the new producer is
+available. Roll back Web before Cloudflare/runner if the pair must be reverted.
+
+After both deploys, confirm there is no extra metadata-only handoff checkpoint
+for the same shutdown and actionable late input causes the existing Temporal
+recheck after owner release.
+
 ## One-Time Cloudflare Setup
 
 Before the first deploy:
