@@ -1144,7 +1144,16 @@ describe("Linq explicit external-thread routing", () => {
     });
   });
 
-  it("does not treat routed Linq traffic as direct when directness is not attested", async () => {
+  it.each([
+    {
+      description: "provider directness is omitted",
+      isGroup: null,
+    },
+    {
+      description: "the provider reports a direct chat",
+      isGroup: false,
+    },
+  ] as const)("keeps a routed Linq thread non-direct when $description", async ({ isGroup }) => {
     const prisma = createPrisma({
       routeContainerMemberId: "member_thread_container_123",
     });
@@ -1171,14 +1180,14 @@ describe("Linq explicit external-thread routing", () => {
       duplicate: false,
       inserted: true,
       item: buildHostedMailboxItem({
-        id: "mailbox_unknown_directness_123",
+        id: "mailbox_routed_directness_123",
         userId: "member_thread_container_123",
       }),
     });
 
     const plan = await planHostedOnboardingLinqWebhook({
       event: buildLinqMessageReceivedEvent({
-        isGroup: null,
+        isGroup,
       }),
       prisma: prisma as never,
     });
@@ -1193,64 +1202,7 @@ describe("Linq explicit external-thread routing", () => {
         message: expect.objectContaining({
           linqMessage: expect.objectContaining({
             chatId: "chat_group_123",
-            threadIsDirect: null,
-          }),
-        }),
-      }),
-      tx: prisma,
-    });
-  });
-
-  it("preserves routed Linq directness when the provider attests direct chat", async () => {
-    const prisma = createPrisma({
-      routeContainerMemberId: "member_thread_container_123",
-    });
-    vi.mocked(mailboxStore.readHostedMailboxItemByDedupeKey).mockResolvedValueOnce(null);
-    vi.mocked(linqDailyState.incrementHostedLinqInboundDailyState).mockResolvedValueOnce({
-      dayUtc: new Date("2026-06-24T00:00:00.000Z"),
-      inboundCount: 1,
-      memberId: "member_thread_container_123",
-      outboundCount: 0,
-      quotaReplySentAt: null,
-    } as Awaited<ReturnType<typeof linqDailyState.incrementHostedLinqInboundDailyState>>);
-    vi.mocked(usageAllowance.checkHostedAiUsageGate).mockResolvedValueOnce({
-      allowed: true,
-      billingPlanCode: "launch_monthly",
-      limitUsdMicros: 4_500_000n,
-      memberId: "member_thread_container_123",
-      periodEnd: new Date("2026-07-01T00:00:00.000Z"),
-      periodStart: new Date("2026-06-01T00:00:00.000Z"),
-      remainingUsdMicros: 4_500_000n,
-      spentUsdMicros: 0n,
-    });
-    vi.mocked(mailboxStore.appendHostedMailboxEnvelopeTx).mockResolvedValueOnce({
-      dedupeConflict: false,
-      duplicate: false,
-      inserted: true,
-      item: buildHostedMailboxItem({
-        id: "mailbox_direct_123",
-        userId: "member_thread_container_123",
-      }),
-    });
-
-    const plan = await planHostedOnboardingLinqWebhook({
-      event: buildLinqMessageReceivedEvent({
-        isGroup: false,
-      }),
-      prisma: prisma as never,
-    });
-
-    expect(plan.response).toMatchObject({
-      ignored: false,
-      ok: true,
-      reason: "wake-appended-thread-route",
-    });
-    expect(mailboxStore.appendHostedMailboxEnvelopeTx).toHaveBeenCalledWith({
-      envelope: expect.objectContaining({
-        message: expect.objectContaining({
-          linqMessage: expect.objectContaining({
-            chatId: "chat_group_123",
-            threadIsDirect: true,
+            threadIsDirect: false,
           }),
         }),
       }),
