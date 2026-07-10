@@ -8,7 +8,6 @@ import {
   type AssistantRunEvent,
   type AssistantTurnEnvironment,
   type AssistantTurnConversationInputQuery,
-  readAssistantAutomationState,
   runAssistantAutomationPass,
 } from "@murphai/assistant-engine";
 import { createIntegratedInboxServices } from "@murphai/inbox-services";
@@ -48,7 +47,6 @@ import {
 } from "./environment.ts";
 import { emitHostedAssistantProviderTraceLog } from "./events/provider-trace-log.ts";
 import {
-  summarizeHostedAssistantAutoReplyEligibleAfter,
   summarizeHostedRuntimeStatusCounts,
   toHostedRuntimeLogCode,
 } from "./runtime-logs.ts";
@@ -214,8 +212,6 @@ export async function runHostedAssistantAutomationLane(input: {
   return {
     activeTurnInputIngested:
       assistantResult.timings?.activeTurnInputIngested ?? false,
-    assistantAutomationAfterStateElapsedMs:
-      assistantResult.timings?.afterStateElapsedMs ?? null,
     assistantAutomationCurrentTurnDeliveryIntentIds:
       assistantResult.currentTurnDeliveryIntentIds ?? [],
     assistantAutomationElapsedMs,
@@ -268,7 +264,6 @@ export async function runHostedAssistantAutomation(
   terminalLinqCleanup: string[] | null;
   timings?: {
     activeTurnInputIngested?: boolean | null;
-    afterStateElapsedMs: number;
     cronStatusDeferred?: boolean | null;
     cronStatusElapsedMs?: number | null;
     inputCandidateListed?: boolean | null;
@@ -526,9 +521,6 @@ export async function runHostedAssistantAutomation(
       vault: vaultRoot,
     });
     const passElapsedMs = elapsedSince(passStartedAt);
-    const afterStateStartedAt = Date.now();
-    const afterState = await readAssistantAutomationState(vaultRoot);
-    const afterStateElapsedMs = elapsedSince(afterStateStartedAt);
     const replies = result.replies ?? {
       considered: 0,
       failed: 0,
@@ -557,10 +549,6 @@ export async function runHostedAssistantAutomation(
       component: "runtime",
       details: {
         ...buildHostedAssistantAutomationEventCountLogDetails(automationEventCounts),
-        autoReplyChannels: afterState.autoReply.map((entry) => entry.channel).join(","),
-        autoReplyEligibleAfterSummary: summarizeHostedAssistantAutoReplyEligibleAfter(
-          afterState.autoReply,
-        ),
         cronProcessed: result.cronProcessed,
         nextWakeAt,
         outboxAttempted: result.outboxAttempted,
@@ -592,7 +580,6 @@ export async function runHostedAssistantAutomation(
       terminalLinqCleanup: replies.terminalLinqCleanup ?? null,
       timings: {
         activeTurnInputIngested,
-        afterStateElapsedMs,
         cronStatusDeferred: result.passTiming?.cronStatusDeferred ?? null,
         cronStatusElapsedMs: result.passTiming?.cronStatusElapsedMs ?? null,
         inputCandidateListed,

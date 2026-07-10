@@ -1,4 +1,4 @@
-import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { readFile, rm } from 'node:fs/promises'
 import assert from 'node:assert/strict'
 
 import { afterEach, expect, test, vi } from 'vitest'
@@ -76,7 +76,6 @@ afterEach(async () => {
   vi.doUnmock('../src/assistant/prompt-attempts.js')
   vi.doUnmock('../src/assistant/service-turn-routes.js')
   vi.doUnmock('../src/assistant/service-usage.js')
-  vi.doUnmock('../src/assistant/runtime-budgets.js')
   vi.doUnmock('../src/assistant/channel-adapters.js')
   vi.doUnmock('../src/assistant/runtime-state-service.js')
   vi.doUnmock('../src/assistant/turn-lock.js')
@@ -137,17 +136,11 @@ test('sendAssistantMessageLocal completes a successful turn, persists usage, and
   assert.equal(mocks.finalizeAssistantTurnArtifacts.mock.calls.length, 1)
   assert.equal(mocks.dispatchAssistantReply.mock.calls.length, 1)
   assert.equal(mocks.finalizeDeliveredAssistantTurn.mock.calls.length, 1)
+  assert.equal(mocks.recordAssistantDiagnosticEvent.mock.calls.length, 0)
   assert.equal(mocks.refreshAssistantStatusSnapshotLocal.mock.calls.length, 1)
   assert.equal(mocks.getAssistantChannelAdapter.mock.calls[0]?.[0], 'telegram')
   assert.equal(stopTyping.mock.calls.length, 1)
   assert.deepEqual(stopTyping.mock.calls[0], [{ providerStop: false }])
-  assert.deepEqual(mocks.maybeRunAssistantRuntimeMaintenance.mock.calls[0]?.[0], {
-    vault: '/vaults/test',
-  })
-  assert.ok(
-    (mocks.maybeRunAssistantRuntimeMaintenance.mock.invocationCallOrder[0] ?? 0) <
-      (mocks.recordAssistantDiagnosticEvent.mock.invocationCallOrder[0] ?? 0),
-  )
 })
 
 test('sendAssistantMessageLocal gives hosted manual phone-call turns a real accepted input id', async () => {
@@ -211,47 +204,6 @@ test('sendAssistantMessageLocal gives hosted manual phone-call turns a real acce
   expect(phoneCallScope).toMatchObject({
     acceptedInputIds: ['manual-phone-call:turn-1'],
   })
-})
-
-test('sendAssistantMessageLocal compacts oversized runtime logs before foreground turn writes', async () => {
-  const { parentRoot, vaultRoot } = await createTempVaultContext(
-    'assistant-local-service-runtime-maintenance-',
-  )
-  tempRoots.push(parentRoot)
-  const paths = resolveAssistantStatePaths(vaultRoot)
-  await mkdir(paths.journalsDirectory, {
-    recursive: true,
-  })
-  await writeFile(
-    paths.runtimeEventsPath,
-    Array.from({ length: 2050 }, (_value, index) =>
-      JSON.stringify(makeRuntimeEvent(index)),
-    ).join('\n') + '\n',
-    'utf8',
-  )
-
-  const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
-    useRealRuntimeMaintenance: true,
-  })
-
-  await sendAssistantMessageLocal({
-    deliverResponse: false,
-    executionContext: {
-      hosted: null,
-    },
-    prompt: 'Summarize my inbox',
-    vault: vaultRoot,
-  })
-
-  const compactedRuntimeEvents = await readFile(paths.runtimeEventsPath, 'utf8')
-  const compactedRuntimeEventCount = compactedRuntimeEvents
-    .trim()
-    .split('\n')
-    .filter(Boolean).length
-
-  assert.ok(compactedRuntimeEventCount <= 2000)
-  assert.match(compactedRuntimeEvents, /runtime\.maintenance/)
-  assert.equal(mocks.recordAssistantDiagnosticEvent.mock.calls.length > 0, true)
 })
 
 test('sendAssistantMessageLocal delivers media-only provider replies', async () => {
@@ -1395,7 +1347,6 @@ test('sendAssistantMessageLocal keeps auto-reply turns on the session Codex thre
       ?.providerResumeStateAction,
     'persist-from-provider-turn',
   )
-  assert.equal(mocks.maybeRunAssistantRuntimeMaintenance.mock.calls.length, 0)
 })
 
 test('sendAssistantMessageLocal runs automation cron turns on isolated Codex threads', async () => {
@@ -1419,7 +1370,6 @@ test('sendAssistantMessageLocal runs automation cron turns on isolated Codex thr
       ?.providerResumeStateAction,
     'preserve-existing',
   )
-  assert.equal(mocks.maybeRunAssistantRuntimeMaintenance.mock.calls.length, 1)
 })
 
 test('sendAssistantMessageLocal prefers the hosted execution default target when resolving the session', async () => {
@@ -2486,15 +2436,9 @@ test('sendAssistantMessageLocal steers same-conversation input into an active ma
   const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
     session,
   })
-  const blockedMaintenance = createDeferred<void>()
   const providerStarted = createDeferred<void>()
   const providerRelease = createDeferred<void>()
   const liveSteeredPrompts: string[] = []
-  mocks.maybeRunAssistantRuntimeMaintenance
-    .mockResolvedValueOnce(undefined)
-    .mockImplementationOnce(async () => {
-      await blockedMaintenance.promise
-    })
   mocks.executeCodexTurnWithRecovery.mockImplementationOnce(async (providerInput) => {
     const releaseLiveTurn = providerInput.activeTurnSteering?.registerLiveProviderTurn({
       interrupt: async () => undefined,
@@ -2541,7 +2485,6 @@ test('sendAssistantMessageLocal steers same-conversation input into an active ma
   await vi.waitFor(() => {
     expect(liveSteeredPrompts).toEqual(['Follow-up while running'])
   })
-  assert.equal(mocks.maybeRunAssistantRuntimeMaintenance.mock.calls.length, 1)
   providerRelease.resolve()
 
   const [firstResult, steeredResult] = await Promise.all([
@@ -6070,8 +6013,14 @@ test('sendAssistantMessageLocal runs best-effort failure cleanup and rethrows te
       },
     ],
   )
-  assert.equal(mocks.recordAssistantDiagnosticEvent.mock.calls.length, 2)
-  assert.equal(mocks.recordAssistantDiagnosticEvent.mock.calls[1]?.[0]?.kind, 'turn.failed')
+  assert.equal(mocks.recordAssistantDiagnosticEvent.mock.calls.length, 1)
+  assert.equal(mocks.recordAssistantDiagnosticEvent.mock.calls[0]?.[0]?.kind, 'turn.failed')
+  assert.deepEqual(
+    mocks.recordAssistantDiagnosticEvent.mock.calls[0]?.[0]?.counterDeltas,
+    {
+      turnsFailed: 1,
+    },
+  )
   assert.equal(mocks.normalizeAssistantDeliveryError.mock.calls.length, 1)
   assert.equal(mocks.refreshAssistantStatusSnapshotLocal.mock.calls.length, 1)
 })
@@ -6828,76 +6777,6 @@ test('sendAssistantMessageLocal does not wait for a pending typing indicator sta
   expect(stopTyping).toHaveBeenCalledWith({
     providerStop: false,
   })
-})
-
-test('sendAssistantMessageLocal requests typing after the receipt without waiting for turn-start diagnostics', async () => {
-  const diagnosticRelease = createDeferred<void>()
-  const stopTyping = vi.fn(async () => undefined)
-  const startTypingIndicator = vi.fn(async () => ({
-    stop: stopTyping,
-  }))
-  const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
-    adapter: {
-      startTypingIndicator,
-    },
-  })
-  mocks.recordAssistantDiagnosticEvent.mockImplementationOnce(async () => {
-    await diagnosticRelease.promise
-  })
-
-  const resultPromise = sendAssistantMessageLocal({
-    deliverResponse: true,
-    prompt: 'Summarize my inbox',
-    vault: '/vaults/test',
-  })
-
-  await vi.waitFor(() => {
-    expect(startTypingIndicator).toHaveBeenCalledTimes(1)
-  })
-  expect(
-    mocks.createAssistantTurnReceipt.mock.invocationCallOrder[0],
-  ).toBeLessThan(
-    mocks.recordAssistantDiagnosticEvent.mock.invocationCallOrder[0] ?? 0,
-  )
-  expect(mocks.executeCodexTurnWithRecovery).not.toHaveBeenCalled()
-
-  diagnosticRelease.resolve()
-  const result = await resultPromise
-
-  expect(result.status).toBe('completed')
-  expect(stopTyping).toHaveBeenCalledWith({
-    providerStop: false,
-  })
-})
-
-test('sendAssistantMessageLocal stops typing when turn-start diagnostics fail', async () => {
-  const diagnosticError = new Error('turn-start diagnostic failed')
-  const stopTyping = vi.fn(async () => undefined)
-  const startTypingIndicator = vi.fn(async () => ({
-    stop: stopTyping,
-  }))
-  const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
-    adapter: {
-      startTypingIndicator,
-    },
-  })
-  mocks.recordAssistantDiagnosticEvent.mockRejectedValueOnce(diagnosticError)
-
-  await expect(sendAssistantMessageLocal({
-    deliverResponse: true,
-    prompt: 'Summarize my inbox',
-    vault: '/vaults/test',
-  })).rejects.toBe(diagnosticError)
-
-  await vi.waitFor(() => {
-    expect(stopTyping).toHaveBeenCalledTimes(1)
-  })
-  expect(mocks.finalizeAssistantTurnReceipt).toHaveBeenCalledWith(
-    expect.objectContaining({
-      status: 'failed',
-      turnId: 'turn-1',
-    }),
-  )
 })
 
 test('sendAssistantMessageLocal returns deferred delivery results and keeps typing in queue-only mode', async () => {
@@ -8401,7 +8280,6 @@ async function loadLocalServiceModule(input?: {
     session: AssistantSession
   }
   reactionOutcome?: AssistantDeliveryOutcome
-  useRealRuntimeMaintenance?: boolean
   route?: {
     provider: string
     providerOptions?: {
@@ -8416,7 +8294,6 @@ async function loadLocalServiceModule(input?: {
   const session = input?.session ?? createAssistantSession()
   const sharedPlan = input?.plan ?? createSharedPlan()
   const useRealAcceptedInputPersistence = input?.realAcceptedInputPersistence === true
-  const useRealRuntimeMaintenance = input?.useRealRuntimeMaintenance === true
   const realStore = await vi.importActual<typeof import('../src/assistant/store.js')>(
     '../src/assistant/store.js',
   )
@@ -8706,13 +8583,6 @@ async function loadLocalServiceModule(input?: {
         >[0],
       ) => undefined,
     ),
-    maybeRunAssistantRuntimeMaintenance: vi.fn(
-      async (
-        _input: Parameters<
-          typeof import('../src/assistant/runtime-budgets.js').maybeRunAssistantRuntimeMaintenance
-        >[0],
-      ) => undefined,
-    ),
     redactAssistantDisplayPath: vi.fn(() => '<redacted-vault>'),
     refreshAssistantStatusSnapshotLocal: vi.fn(async () => undefined),
     saveAssistantSession: vi.fn(),
@@ -8944,12 +8814,6 @@ async function loadLocalServiceModule(input?: {
     recordAdditionalAssistantUsageEvents: mocks.recordAdditionalAssistantUsageEvents,
     recordAssistantUsageEvent: mocks.recordAssistantUsageEvent,
   }))
-  if (!useRealRuntimeMaintenance) {
-    vi.doMock('../src/assistant/runtime-budgets.js', () => ({
-      maybeRunAssistantRuntimeMaintenance:
-        mocks.maybeRunAssistantRuntimeMaintenance,
-    }))
-  }
   if (!useRealAcceptedInputPersistence) {
     vi.doMock('../src/assistant/runtime-state-service.js', () => ({
       createAssistantRuntimeStateService: vi.fn(() => mocks.runtimeState),
@@ -8998,22 +8862,6 @@ function isTraceEventWithRawType(
     !Array.isArray(rawEvent) &&
     (rawEvent as { type?: unknown }).type === type
   )
-}
-
-function makeRuntimeEvent(index: number) {
-  return {
-    at: `2026-04-08T10:${String(Math.floor(index / 60)).padStart(2, '0')}:${String(
-      index % 60,
-    ).padStart(2, '0')}.000Z`,
-    component: 'test',
-    dataJson: null,
-    entityId: `entity-${index}`,
-    entityType: 'session',
-    kind: 'runtime.maintenance' as const,
-    level: 'info' as const,
-    message: `event-${index}`,
-    schema: 'murph.assistant-runtime-event.v1' as const,
-  }
 }
 
 function createHostedMailboxSourceRef(input: {
