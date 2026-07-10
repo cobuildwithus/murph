@@ -31,7 +31,6 @@ import {
   type ComputerUseStore,
   type PersistedComputerHandoffPurpose,
 } from "./store";
-import type { ComputerBrowserViewport } from "./viewport";
 
 const COMPUTER_RUN_TTL_MS = 60 * 60 * 1000;
 const COMPUTER_HANDOFF_TTL_MS = 20 * 60 * 1000;
@@ -820,38 +819,6 @@ export class ComputerUseService {
       purpose: requireSupportedPersistedHandoffPurpose(handoff.purpose),
       suggestedReply: handoff.suggestedReply,
     };
-  }
-
-  async ensureHandoffViewport(input: {
-    memberId: string;
-    token: string;
-    viewport: ComputerBrowserViewport;
-  }): Promise<void> {
-    await this.store.requireMemberComputerUseAvailable({
-      memberId: input.memberId,
-    });
-    const handoff = await this.store.requireHandoffByTokenHash({
-      tokenHash: sha256Hex(input.token),
-    });
-
-    assertHandoffOwnedByMember(handoff, input.memberId);
-    assertOpenFreshHandoff(handoff, this.now());
-
-    const run = await this.store.requireOwnedRun({
-      memberId: input.memberId,
-      runId: handoff.runId,
-    });
-    if (run.status !== "awaiting_user" || run.pendingHandoffId !== handoff.id) {
-      throw computerUseConflictError({
-        code: "HOSTED_COMPUTER_HANDOFF_CLOSED",
-        message: "Computer handoff is no longer open.",
-      });
-    }
-
-    await this.requireKernel().ensureBrowserViewport({
-      sessionId: requireKernelSessionId(run),
-      viewport: input.viewport,
-    });
   }
 
   async continueManagedLoginHandoff(input: {
@@ -1951,7 +1918,7 @@ export class ComputerUseService {
       };
     }
 
-    if (isRetiredStaticPreviewHandoff(handoff)) {
+    if (handoff.status === "open" || handoff.status === "expired") {
       if (!await validateResumeProof()) {
         return null;
       }
