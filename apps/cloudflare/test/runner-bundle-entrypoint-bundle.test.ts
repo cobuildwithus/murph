@@ -353,6 +353,11 @@ describe("runner bundle container-entrypoint esbuild step", () => {
       /node_modules\/@murphai\/importers\/dist\/index\.js/,
     ],
     [
+      "clinical-records",
+      ".deploy/runner-bundle/node_modules/@murphai/clinical-records/dist/index.js",
+      /node_modules\/@murphai\/clinical-records\/dist\/index\.js/,
+    ],
+    [
       "Junction SDK",
       ".deploy/runner-bundle/node_modules/@junction-api/sdk/index.js",
       /node_modules\/@junction-api\/sdk\/index\.js/,
@@ -511,18 +516,19 @@ describe("runner bundle container-entrypoint esbuild step", () => {
     const budgets = resolveRunnerEntrypointBundleBudgets();
 
     // Entry = measured local baseline (1,374,586B on 2026-07-09) + 48,000B
-    // noise band. Static closure = measured local baseline (6,722,281B on
-    // 2026-07-09) + 96,000B noise band. Locking exact values makes any silent
-    // change to a ratchet a failing, reviewed diff.
+    // noise band. Static closure = measured CI Linux baseline (6,818,632B
+    // after the 2026-07-10 mainline integration) + 96,000B noise band.
+    // Locking exact values makes any silent change to a ratchet a failing,
+    // reviewed diff.
     expect(budgets).toEqual({
       entryBytes: 1_374_586 + 48_000,
-      staticClosureBytes: 6_722_281 + 96_000,
+      staticClosureBytes: 6_818_632 + 96_000,
       totalBytes: 9_300_000,
     });
     // The ratchet is meaningfully tighter than the prior loose 2.9MB ceiling
     // it replaced, so real boot-path creep can no longer hide in headroom.
     expect(budgets.entryBytes).toBeLessThan(2_900_000);
-    expect(budgets.staticClosureBytes).toBeLessThan(6_900_000);
+    expect(budgets.staticClosureBytes).toBeLessThan(7_000_000);
   });
 
   it("gates the entry chunk at the production ratchet boundary", () => {

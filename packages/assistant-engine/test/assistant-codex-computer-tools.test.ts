@@ -875,6 +875,9 @@ describe("murph computer dynamic tools", () => {
     });
 
     expect(result.rpcResult.success).toBe(true);
+    expect(result.requiredComputerHandoffUrl).toBe(
+      "https://web.example.test/computer/handoff/raw-token",
+    );
     expect(result.rpcResult.contentItems[0]!.text).toContain("raw-token");
     expect(JSON.parse(result.rpcResult.contentItems[0]!.text)).toEqual({
       awaitingReason: "login_needed",

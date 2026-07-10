@@ -6,7 +6,6 @@ import { ComputerHandoffAuthRequiredState } from "@/src/components/computer-use/
 import { ComputerHandoffReplyAction } from "@/src/components/computer-use/computer-handoff-reply-action";
 import { resolveHostedMurphContactOptions } from "@/src/components/murph/hosted-murph-contact-action";
 import { buttonVariants } from "@/src/components/ui/button";
-import { scheduleHostedWebSessionComputerHandoffViewportApply } from "@/src/lib/computer-use/handoff-viewport-session";
 import { createComputerUseService } from "@/src/lib/computer-use/service";
 import { requireActiveHostedAppSession } from "@/src/lib/hosted-onboarding/app-session";
 import { isHostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
@@ -138,26 +137,13 @@ export default async function ComputerHandoffPage({
 
   const encodedToken = encodeURIComponent(token);
   const doneEndpoint = `/api/computer/handoff/${encodedToken}/done`;
-  const viewportEndpoint = `/api/computer/handoff/${encodedToken}/viewport`;
-  const initialViewportSize = session.computerHandoffViewportSize;
-
-  if (initialViewportSize) {
-    scheduleHostedWebSessionComputerHandoffViewportApply({
-      memberId: session.member.id,
-      reason: "cached",
-      sessionId: session.sessionId,
-      token,
-    });
-  }
 
   return (
     <main className="relative min-h-dvh bg-foreground text-foreground">
       <ComputerHandoffActiveView
         doneEndpoint={doneEndpoint}
         iframeAllow={state.iframeAllow}
-        initialViewportSize={initialViewportSize}
         liveViewUrl={state.liveViewUrl}
-        viewportEndpoint={viewportEndpoint}
       />
     </main>
   );

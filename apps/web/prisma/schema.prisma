@@ -719,6 +719,8 @@ model HostedIngressLatencyTrace {
   mailboxLaneSeq           BigInt            @map("mailbox_lane_seq")
   assistantInputId         String?           @map("assistant_input_id")
   runtimeAttemptId         String?           @map("runtime_attempt_id")
+  replyRuntimeAttemptId    String?           @map("reply_runtime_attempt_id")
+  linqDeliveryId           String?           @map("linq_delivery_id")
   acceptedAt               DateTime          @map("accepted_at")
   temporalSignalAcceptedAt DateTime?         @map("temporal_signal_accepted_at")
   runnerJobAcceptedAt      DateTime?         @map("runner_job_accepted_at")
@@ -732,6 +734,7 @@ model HostedIngressLatencyTrace {
   createdAt                DateTime          @default(now()) @map("created_at")
   updatedAt                DateTime          @updatedAt @map("updated_at")
   mailboxItem              HostedMailboxItem @relation(fields: [userId, mailboxItemId], references: [userId, id], onDelete: Cascade)
+  linqDelivery             HostedLinqDelivery? @relation(fields: [linqDeliveryId], references: [id], onDelete: SetNull)
 
   @@unique([userId, mailboxItemId])
   @@index([source, acceptedAt])
@@ -739,6 +742,7 @@ model HostedIngressLatencyTrace {
   @@index([userId, acceptedAt])
   @@index([assistantInputId])
   @@index([runtimeAttemptId])
+  @@index([linqDeliveryId])
   @@map("hosted_ingress_latency_trace")
 }
 
@@ -835,6 +839,7 @@ model HostedRuntimeLog {
 
   @@index([userId, at])
   @@index([userId, eventCode, createdAt])
+  @@index([attemptId, eventCode, at])
   @@index([level, at])
   @@index([component, at])
   @@map("hosted_runtime_log")
@@ -1280,6 +1285,7 @@ model HostedLinqDelivery {
   updatedAt            DateTime @updatedAt @map("updated_at")
   line                 HostedLinqLine? @relation(fields: [phoneNumberLookupKey], references: [phoneNumberLookupKey], onDelete: SetNull)
   alerts               HostedLinqAlert[]
+  ingressLatencyTraces HostedIngressLatencyTrace[]
 
   @@index([phoneNumberLookupKey, attemptedAt])
   @@index([status, attemptedAt])
