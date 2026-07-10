@@ -167,6 +167,7 @@ async function startScenario(): Promise<void> {
       OPENAI_API_KEY: "stub-local-openai-key",
     },
     assistantProviderStubModelId: productionLikeAssistantModel,
+    faultInjection: true,
     localDatabaseUrl,
     persistDirOverride: workerPersistDirOverride,
     persistDirPrefix: "murph-hosted-local-stale-deferred-",

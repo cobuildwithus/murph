@@ -47,7 +47,6 @@ import {
 import {
   appendHostedWake,
   appendHostedWakeAndWakeWorker,
-  wakeHostedWorkerForLatestPendingWake,
 } from "./hosted-local-wake.js";
 import {
   sanitizeHostedFailureText,
@@ -153,7 +152,8 @@ export interface HostedLocalFullStackScenario {
       timeoutMs?: number;
     },
   ): Promise<HostedRunnerStatusResponse>;
-  waitForLatestPendingWake(userId: string): Promise<HostedRuntimeEnsureProcessingResponse>;
+  /** Passively observes new hosted work; it never triggers runtime processing. */
+  waitForLatestPendingWake(userId: string): Promise<HostedRunnerStatusResponse>;
   buildFailureMessage(userId: string, summaryLines: readonly string[]): Promise<string>;
   seedActiveHostedLinqMember(input: HostedActiveLinqMemberSeedArgs): Promise<void>;
   seedActiveHostedMember(input: HostedActiveMemberSeedArgs): Promise<void>;
@@ -178,6 +178,11 @@ export async function startHostedLocalFullStackScenario(input: {
   assistantProviderStubModelId?: string;
   assistantProviderStubUsageMode?: HostedLocalAssistantProviderStubUsageMode;
   enableWorkersAiBinding?: boolean;
+  /**
+   * Allows explicit mutating test controls without weakening their existing
+   * route gate.
+   */
+  faultInjection?: boolean;
   localDatabaseUrl?: string;
   persistDirOverride?: string | null;
   persistDirPrefix: string;
@@ -315,6 +320,8 @@ export async function startHostedLocalFullStackScenario(input: {
     preparedRunnerBundleCacheKeys.add(runnerBundleCacheKey);
     const scenarioHarness = harness;
     const scenarioRuntimeEnv = scenarioHarness.runtimeEnv;
+    const lastCompletedStatusByUser = new Map<string, HostedRunnerStatusResponse>();
+    const observedProgressUsers = new Set<string>();
     const seedEnvironment = input.seedEnvironment ?? scenarioRuntimeEnv;
     const buildScenarioSeedEnvironment = (
       overrides: NodeJS.ProcessEnv = {},
@@ -470,6 +477,13 @@ export async function startHostedLocalFullStackScenario(input: {
         const failures = cleanupResults.flatMap((result) =>
           result.status === "rejected" ? [result.reason] : []
         );
+        if (input.faultInjection !== true) {
+          try {
+            scenarioHarness.assertNoInterventions();
+          } catch (error) {
+            failures.push(error);
+          }
+        }
         if (failures.length === 1) {
           throw failures[0];
         }
@@ -478,7 +492,17 @@ export async function startHostedLocalFullStackScenario(input: {
         }
       },
       waitForHostedCompletion: async (userId, waitInput) => {
+        const progressWasAlreadyObserved = observedProgressUsers.delete(userId);
+        const previousCompletion = lastCompletedStatusByUser.get(userId);
+        if (!progressWasAlreadyObserved && previousCompletion !== undefined) {
+          await scenarioHarness.waitForHostedProgress(userId, {
+            afterStatus: previousCompletion,
+            pollIntervalMs: waitInput?.pollIntervalMs,
+            timeoutMs: waitInput?.timeoutMs,
+          });
+        }
         const status = await scenarioHarness.waitForHostedCompletion(userId, waitInput);
+        lastCompletedStatusByUser.set(userId, status);
         await assertHostedRunNoProviderEgressAuthFailures({
           assistantProviderRequests,
           environment: scenarioRuntimeEnv,
@@ -487,13 +511,19 @@ export async function startHostedLocalFullStackScenario(input: {
         });
         return status;
       },
-      waitForHostedIdle: async (userId, waitInput) =>
-        await scenarioHarness.waitForHostedIdle(userId, waitInput),
-      waitForLatestPendingWake: async (userId) =>
-        await wakeHostedWorkerForLatestPendingWake({
-          harness: scenarioHarness,
-          userId,
-        }),
+      waitForHostedIdle: async (userId, waitInput) => {
+        const status = await scenarioHarness.waitForHostedIdle(userId, waitInput);
+        lastCompletedStatusByUser.set(userId, status);
+        observedProgressUsers.delete(userId);
+        return status;
+      },
+      waitForLatestPendingWake: async (userId) => {
+        const status = await scenarioHarness.waitForHostedProgress(userId, {
+          afterStatus: lastCompletedStatusByUser.get(userId),
+        });
+        observedProgressUsers.add(userId);
+        return status;
+      },
     };
   } catch (error) {
     await harness?.stop().catch(() => {});

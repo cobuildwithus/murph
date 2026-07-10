@@ -166,6 +166,7 @@ describe("hosted local runner warm reuse e2e", () => {
     const finalStatus = await requireScenario().waitForHostedCompletion(userId);
     expect(finalStatus.lastErrorCode ?? null).toBeNull();
     expect(finalStatus.mailboxLag.every((lane) => lane.lag === "0")).toBe(true);
+    requireScenario().harness.assertNoInterventions();
   }, 600_000);
 
   it("replies from pending Linq input restored without initial delivery context without typing", async () => {
@@ -247,6 +248,7 @@ async function startScenario(): Promise<void> {
       OPENAI_API_KEY: "stub-local-openai-key",
     },
     assistantProviderStubModelId: productionLikeAssistantModel,
+    faultInjection: true,
     localDatabaseUrl,
     persistDirOverride: workerPersistDirOverride,
     persistDirPrefix: "murph-hosted-local-warm-reuse-",
