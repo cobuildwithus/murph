@@ -2614,6 +2614,13 @@ function parseHostedRuntimeLatencyPhaseBreakdown(
       ...requireOptionalNonNegativeInteger(preProvider, "systemMailboxMaintenanceMs", preProviderLabel),
       ...requireOptionalNonNegativeInteger(preProvider, "memberPreferencesPrePlanningMs", preProviderLabel),
       ...requireOptionalNonNegativeInteger(preProvider, "automationBootstrapMs", preProviderLabel),
+      ...requireOptionalNonNegativeInteger(preProvider, "outboxScanElapsedMs", preProviderLabel),
+      ...requireOptionalBoolean(preProvider, "outboxScanPerformed", preProviderLabel),
+      ...requireOptionalNonNegativeInteger(preProvider, "receiptScanBytesRead", preProviderLabel),
+      ...requireOptionalNonNegativeInteger(preProvider, "receiptScanElapsedMs", preProviderLabel),
+      ...requireOptionalNonNegativeInteger(preProvider, "receiptScanFilesRead", preProviderLabel),
+      ...requireOptionalNonNegativeInteger(preProvider, "receiptScanLockWaitMs", preProviderLabel),
+      ...requireOptionalBoolean(preProvider, "receiptScanPerformed", preProviderLabel),
     };
   }
 

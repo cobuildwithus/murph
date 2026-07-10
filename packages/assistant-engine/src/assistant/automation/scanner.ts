@@ -24,7 +24,7 @@ import {
 import {
   applyAssistantAutoReplyProcessResult,
   createAssistantAutoReplyGroupContext,
-  createAssistantAutoReplyReceiptReader,
+  createAssistantAutoReplyHistoryReader,
   processAssistantAutoReplyGroup,
   type AssistantAutoReplyProviderRequestStartHook,
 } from './reply.js'
@@ -118,7 +118,7 @@ export async function scanAssistantAutomationOnce(input: {
     details: `${candidates.length} input(s)`,
   })
 
-  const receiptReader = createAssistantAutoReplyReceiptReader({
+  const historyReader = createAssistantAutoReplyHistoryReader({
     vault: input.vault,
   })
   const inputSummaries = candidates.map((candidate) => candidate.summary)
@@ -177,7 +177,7 @@ export async function scanAssistantAutomationOnce(input: {
       providerLongRunningCommandStallTimeoutMs:
         input.providerLongRunningCommandStallTimeoutMs,
       providerStallTimeoutMs: input.providerStallTimeoutMs,
-      receiptReader,
+      historyReader,
       requestId: input.requestId ?? null,
       signal: input.signal,
       sessionMaxAgeMs: input.sessionMaxAgeMs ?? null,

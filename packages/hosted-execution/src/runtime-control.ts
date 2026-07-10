@@ -1319,14 +1319,21 @@ export interface HostedRuntimeLatencyPhaseBreakdown {
     stagedAtEpochMs?: number;
   };
   // Runtime-owned work between mailbox staging and the assistant engine's
-  // local Codex turn/start write. These are duration-only diagnostics and are
-  // attached to that existing milestone rather than emitted synchronously.
+  // local Codex turn/start write. These metadata-only diagnostics are attached
+  // to that existing milestone rather than emitted synchronously.
   preProvider?: {
     workspaceAssistantPreAutomationMs?: number;
     executionTargetHydrateMs?: number;
     systemMailboxMaintenanceMs?: number;
     memberPreferencesPrePlanningMs?: number;
     automationBootstrapMs?: number;
+    outboxScanElapsedMs?: number;
+    outboxScanPerformed?: boolean;
+    receiptScanBytesRead?: number;
+    receiptScanElapsedMs?: number;
+    receiptScanFilesRead?: number;
+    receiptScanLockWaitMs?: number;
+    receiptScanPerformed?: boolean;
   };
   // Exact runtime-observed epoch timestamps. These deliberately distinguish
   // visible channel activity and local Codex output from an upstream provider
@@ -1441,6 +1448,13 @@ export const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS: Record<
     "systemMailboxMaintenanceMs",
     "memberPreferencesPrePlanningMs",
     "automationBootstrapMs",
+    "outboxScanElapsedMs",
+    "outboxScanPerformed",
+    "receiptScanBytesRead",
+    "receiptScanElapsedMs",
+    "receiptScanFilesRead",
+    "receiptScanLockWaitMs",
+    "receiptScanPerformed",
   ],
   assistant: [
     "linqTypingRequestStartedAtEpochMs",
@@ -1471,6 +1485,8 @@ export const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_BOOLEAN_LEAF_KEYS =
     "orchestration.triggeredByWebDirect",
     "wake.activeRuntimePassForeground",
     "boot.restoreWasCold",
+    "preProvider.outboxScanPerformed",
+    "preProvider.receiptScanPerformed",
   ] as const;
 
 export type HostedRuntimeLatencyPhaseBreakdownJsonLeaf = number | boolean;
