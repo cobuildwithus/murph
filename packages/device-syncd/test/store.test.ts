@@ -2216,6 +2216,79 @@ test("device sync store failJob requeues retryable jobs, dead-letters terminal j
   }
 });
 
+test("device sync store disconnects only the expected connection generation", async () => {
+  const tempDir = await makeTempDirectory("murph-device-syncd-store-disconnect-generation");
+  const store = new SqliteDeviceSyncStore(path.join(tempDir, "state.sqlite"));
+
+  try {
+    const originalConnectedAt = "2026-04-07T00:00:00.000Z";
+    const reconnectedAt = "2026-04-07T01:00:00.000Z";
+    const original = store.upsertAccount({
+      provider: "demo",
+      externalAccountId: "demo-disconnect-generation",
+      displayName: "Demo",
+      scopes: ["offline"],
+      tokens: {
+        accessToken: "original-access-token",
+        accessTokenEncrypted: "enc:original-access-token",
+      },
+      connectedAt: originalConnectedAt,
+    });
+    const reconnected = store.upsertAccount({
+      provider: "demo",
+      externalAccountId: "demo-disconnect-generation",
+      displayName: "Demo",
+      scopes: ["offline"],
+      tokens: {
+        accessToken: "reconnected-access-token",
+        accessTokenEncrypted: "enc:reconnected-access-token",
+      },
+      connectedAt: reconnectedAt,
+    });
+    const job = store.enqueueJob({
+      accountId: reconnected.id,
+      availableAt: reconnectedAt,
+      kind: "reconcile",
+      payload: {},
+      provider: "demo",
+    });
+
+    assert.equal(reconnected.id, original.id);
+    assert.equal(
+      store.disconnectAccountAndMarkPendingJobsDeadIfConnectedAt({
+        accountId: reconnected.id,
+        code: "ACCOUNT_DISCONNECTED",
+        expectedConnectedAt: originalConnectedAt,
+        message: "The account was disconnected.",
+        now: "2026-04-07T02:00:00.000Z",
+      }),
+      null,
+    );
+    assert.equal(store.getAccountById(reconnected.id)?.status, "active");
+    assert.equal(store.getAccountById(reconnected.id)?.connectedAt, reconnectedAt);
+    assert.equal(store.getJobById(job.id)?.status, "queued");
+
+    const disconnected = store.disconnectAccountAndMarkPendingJobsDeadIfConnectedAt({
+      accountId: reconnected.id,
+      code: "ACCOUNT_DISCONNECTED",
+      expectedConnectedAt: reconnectedAt,
+      message: "The account was disconnected.",
+      now: "2026-04-07T02:00:00.000Z",
+    });
+
+    assert.equal(disconnected?.status, "disconnected");
+    assert.equal(disconnected?.connectedAt, reconnectedAt);
+    assert.equal(store.getJobById(job.id)?.status, "dead");
+    assert.equal(store.getJobById(job.id)?.lastErrorCode, "ACCOUNT_DISCONNECTED");
+  } finally {
+    store.close();
+    await rm(tempDir, {
+      force: true,
+      recursive: true,
+    });
+  }
+});
+
 test("device sync store wakes expired final-attempt leases and dead-letters them instead of stranding them", async () => {
   const tempDir = await makeTempDirectory("murph-device-syncd-store-expired-final-attempt");
   const store = new SqliteDeviceSyncStore(path.join(tempDir, "state.sqlite"));

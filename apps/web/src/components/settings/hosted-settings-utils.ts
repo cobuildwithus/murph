@@ -21,6 +21,18 @@ export function formatMaskedPhoneNumber(phoneNumber: string): string {
   return `•••• ${last4}`;
 }
 
+// Deep links like ?voice=true and ?addEmail=true open a dialog once; drop the
+// param so refresh and back navigation do not reopen it.
+export function stripSettingsQueryParam(queryKey: string): void {
+  if (typeof window === "undefined" || typeof window.location.href !== "string") {
+    return;
+  }
+
+  const url = new URL(window.location.href);
+  url.searchParams.delete(queryKey);
+  window.history?.replaceState?.({}, "", `${url.pathname}${url.search}${url.hash}`);
+}
+
 export function formatContactPhoneNumber(phoneNumber: string): string {
   const digits = phoneNumber.replace(/\D/g, "");
 

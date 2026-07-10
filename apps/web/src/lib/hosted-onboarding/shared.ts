@@ -10,7 +10,7 @@ export type HostedOnboardingReadClient = PrismaClient | Prisma.TransactionClient
 export const HOSTED_ONBOARDING_TRANSACTION_OPTIONS = { maxWait: 5_000 } as const;
 
 export async function lockHostedMemberRow(
-  tx: Prisma.TransactionClient,
+  tx: Pick<Prisma.TransactionClient, "$queryRaw">,
   memberId: string,
 ): Promise<void> {
   await tx.$queryRaw`select 1 from "hosted_member" where "id" = ${memberId} for update`;

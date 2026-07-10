@@ -3295,6 +3295,7 @@ function restoreEnvValue(key: string, value: string | undefined): void {
 
 function createHostedMember(overrides: Partial<HostedMember> = {}): HostedMember {
   return {
+    assistantModelPreference: null,
     assistantTone: null,
     assistantVoice: null,
     billingStatus: HostedBillingStatus.not_started,
