@@ -21,7 +21,11 @@ import {
   type HostedStripeActivatedMemberOutcome,
   type HostedSubscriptionCancellationEmailCandidate,
 } from "./stripe-billing-events";
-import { resolveStripeCustomerContext } from "./stripe-billing-lookup";
+import {
+  findMemberForStripeInvoice,
+  findMemberForStripeSubscription,
+  resolveStripeCustomerContext,
+} from "./stripe-billing-lookup";
 import {
   buildHostedStripeDispatchContext,
   type HostedStripeDispatchContext,
@@ -56,8 +60,14 @@ import {
 import {
   sendHostedSubscriptionCancellationEmailForMember,
 } from "./subscription-cancellation-email";
+import {
+  withHostedMemberStripeMutationLock,
+} from "./hosted-member-billing-store";
 
-const STRIPE_EVENT_LEASE_MS = 10 * 60_000;
+// One pinned Stripe event retrieve can consume six minutes, the shared member
+// mutation transaction can consume thirteen, and post-commit side effects plus
+// receipt finalization need a bounded two-minute margin.
+const STRIPE_EVENT_LEASE_MS = 21 * 60_000;
 const STRIPE_EVENT_MAX_ATTEMPTS = 6;
 const STRIPE_EVENT_RETRY_DELAYS_MS = [
   15 * 1000,
@@ -363,6 +373,38 @@ async function prepareHostedStripeEventProcessingContext(
   };
 }
 
+async function resolveHostedStripeEventDirectBillingMemberId(
+  event: Stripe.Event,
+  prisma: PrismaClient,
+): Promise<string | null> {
+  if (isHostedStripeSubscriptionBillingEvent(event.type)) {
+    const subscription = event.data.object as Stripe.Subscription;
+    const member = await findMemberForStripeSubscription({
+      prisma,
+      subscription,
+    });
+    return member?.core.id ?? null;
+  }
+
+  if (event.type !== "invoice.paid" && event.type !== "invoice.payment_failed") {
+    return null;
+  }
+
+  const member = await findMemberForStripeInvoice({
+    invoice: event.data.object as Stripe.Invoice,
+    prisma,
+  });
+  return member?.core.id ?? null;
+}
+
+function isHostedStripeSubscriptionBillingEvent(type: string): boolean {
+  return type === "customer.subscription.created"
+    || type === "customer.subscription.updated"
+    || type === "customer.subscription.deleted"
+    || type === "customer.subscription.paused"
+    || type === "customer.subscription.resumed";
+}
+
 async function resolveHostedStripeCheckoutSessionSubscriptionForProcessing(
   event: Stripe.Event,
 ): Promise<Stripe.Subscription | null> {
@@ -504,15 +546,24 @@ async function processClaimedHostedStripeEvent(
 
   try {
     const stripeEvent = await fetchHostedStripeEventForReconciliation(claimed.eventId);
-    const processingContext = await prepareHostedStripeEventProcessingContext(stripeEvent);
-    let result!: Awaited<ReturnType<typeof processHostedStripeEventRecord>>;
-    await prisma.$transaction(async (transaction) => {
-      result = await processHostedStripeEventRecord(
-        stripeEvent,
-        processingContext,
-        transaction,
-      );
-    }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+    const directBillingMemberId = await resolveHostedStripeEventDirectBillingMemberId(
+      stripeEvent,
+      prisma,
+    );
+    const result = directBillingMemberId
+      ? await withHostedMemberStripeMutationLock({
+          memberId: directBillingMemberId,
+          prisma,
+          run: async (transaction) => {
+            const processingContext = await prepareHostedStripeEventProcessingContext(stripeEvent);
+            return processHostedStripeEventRecord(
+              stripeEvent,
+              processingContext,
+              transaction,
+            );
+          },
+        })
+      : await processHostedStripeEventWithoutDirectMemberLock(stripeEvent, prisma);
     if (result.welcomeEmailMemberId) {
       await sendHostedSignupWelcomeEmailForMemberBestEffort({
         memberId: result.welcomeEmailMemberId,
@@ -542,9 +593,11 @@ async function processClaimedHostedStripeEvent(
         }
       }
     }
-    await prisma.hostedStripeEvent.update({
+    await prisma.hostedStripeEvent.updateMany({
       where: {
+        attemptCount: claimed.attemptCount,
         eventId: claimed.eventId,
+        status: HostedStripeEventStatus.processing,
       },
       data: {
         claimExpiresAt: null,
@@ -580,9 +633,11 @@ async function processClaimedHostedStripeEvent(
       eventType: claimed.type,
       poisoned: claimed.attemptCount >= STRIPE_EVENT_MAX_ATTEMPTS,
     });
-    await prisma.hostedStripeEvent.update({
+    await prisma.hostedStripeEvent.updateMany({
       where: {
+        attemptCount: claimed.attemptCount,
         eventId: claimed.eventId,
+        status: HostedStripeEventStatus.processing,
       },
       data: {
         claimExpiresAt: null,
@@ -612,6 +667,21 @@ async function processClaimedHostedStripeEvent(
       status: "failed",
     };
   }
+}
+
+async function processHostedStripeEventWithoutDirectMemberLock(
+  stripeEvent: Stripe.Event,
+  prisma: PrismaClient,
+): Promise<Awaited<ReturnType<typeof processHostedStripeEventRecord>>> {
+  const processingContext = await prepareHostedStripeEventProcessingContext(stripeEvent);
+  return prisma.$transaction(
+    (transaction) => processHostedStripeEventRecord(
+      stripeEvent,
+      processingContext,
+      transaction,
+    ),
+    HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
+  );
 }
 
 async function markHostedStripeSubscriptionCancellationEmailSent(input: {
