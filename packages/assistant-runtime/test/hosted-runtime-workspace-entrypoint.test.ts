@@ -177,6 +177,8 @@ import type {
 } from "../src/hosted-runtime/runtime-wake.ts";
 import {
   ensureHostedInboxSidecarReady,
+  isHostedInboxSidecarReady,
+  prepareHostedInboxProjectionRuntime,
 } from "../src/hosted-runtime/context.ts";
 import {
   collectHostedPendingAssistantInputMediaRetentionProtections,
@@ -16444,17 +16446,7 @@ describe("hosted workspace runtime entrypoint", () => {
         requestId: "request_mark_sidecar_ready_before_cold_restore",
         vaultRoot,
       });
-      mocks.ensureHostedInboxSidecarReady.mockClear();
-      const ensureHostedInboxSidecarReadyImpl =
-        mocks.ensureHostedInboxSidecarReady.getMockImplementation();
-      assert.ok(ensureHostedInboxSidecarReadyImpl);
-      mocks.ensureHostedInboxSidecarReady.mockImplementationOnce(async (input) => {
-        events.push("sidecar.ready");
-        assert.equal(input.rebuild, true);
-        assert.equal(input.requestId, "request_projection_after_cold_restore");
-        assert.equal(input.vaultRoot, path.resolve(vaultRoot));
-        return await ensureHostedInboxSidecarReadyImpl(input);
-      });
+      assert.equal(isHostedInboxSidecarReady(vaultRoot), true);
 
       await runHostedWorkspaceRuntimeJobInProcess(
         createWorkspaceRuntimeJobInput({
@@ -16475,12 +16467,13 @@ describe("hosted workspace runtime entrypoint", () => {
           },
           async importItem(item) {
             imported.push(item.item.laneSeq);
-            await ensureHostedInboxSidecarReady({
-              bestEffort: false,
-              rebuild: true,
-              requestId: "request_projection_after_cold_restore",
+            assert.equal(isHostedInboxSidecarReady(vaultRoot), false);
+            await prepareHostedInboxProjectionRuntime(
               vaultRoot,
-            });
+              "request_projection_after_cold_restore",
+            );
+            assert.equal(isHostedInboxSidecarReady(vaultRoot), true);
+            events.push("projection.ready");
             return { status: "imported" };
           },
           platform: createPlatform({
@@ -16536,11 +16529,10 @@ describe("hosted workspace runtime entrypoint", () => {
       ]);
       assert.equal(readConversationImportedSeq(fetchRequests[0]), "3");
       assert.equal((await readHostedMailboxImportState({ vaultRoot })).watermarks.conversation, "4");
-      assert.equal(mocks.ensureHostedInboxSidecarReady.mock.calls.length, 1);
       assert.deepEqual(events, [
         "workspace.read",
         "mailbox.fetch",
-        "sidecar.ready",
+        "projection.ready",
         "mailbox.fetch",
         "snapshot:4",
         "workspace.checkpoint",
