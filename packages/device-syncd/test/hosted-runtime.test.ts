@@ -2,6 +2,11 @@ import { describe, expect, it } from "vitest";
 
 import * as hostedRuntime from "../src/hosted-runtime.ts";
 import {
+  addJunctionHistoricalBackfillEvidence,
+  readJunctionHistoricalBackfillEvidence,
+} from "../src/junction-historical-backfill-progress.ts";
+import { DEVICE_SYNC_METADATA_MAX_STRING_LENGTH } from "../src/metadata.ts";
+import {
   buildHostedExecutionDeviceSyncConnectLinkPath,
   isHostedRuntimeIdShapedDiagnosticToken,
   mergeHostedDeviceSyncConnectionMetadata,
@@ -20,11 +25,67 @@ import {
 } from "../src/hosted-runtime.ts";
 
 describe("mergeHostedDeviceSyncConnectionMetadata", () => {
+  it("preserves current local Junction retry progress over hosted legacy completion", () => {
+    const result = mergeHostedDeviceSyncConnectionMetadata({
+      hostedMetadata: {
+        hostedOnly: true,
+        junctionHistoricalBackfillStatus: "complete",
+        junctionHistoricalBackfillEmptyAttempts: 0,
+        junctionHistoricalBackfillLastEmptyAt: null,
+        junctionHistoricalBackfillWindowStart: "2025-12-20T00:00:00.000Z",
+        junctionHistoricalBackfillWindowEnd: "2026-03-20T00:00:00.000Z",
+      },
+      localConnectionStateUnpublished: true,
+      localMetadata: {
+        junctionHistoricalBackfillStatus: "coverage_v2_retrying",
+        junctionHistoricalBackfillEmptyAttempts: 1,
+        junctionHistoricalBackfillLastEmptyAt: "2026-03-20T12:00:00.000Z",
+        junctionHistoricalBackfillWindowStart: "2025-12-20T00:00:00.000Z",
+        junctionHistoricalBackfillWindowEnd: "2026-03-20T00:00:00.000Z",
+      },
+    });
+
+    expect(result.preservedLocalProgress).toBe(true);
+    expect(result.metadata).toEqual({
+      hostedOnly: true,
+      junctionHistoricalBackfillStatus: "coverage_v2_retrying",
+      junctionHistoricalBackfillEmptyAttempts: 1,
+      junctionHistoricalBackfillLastEmptyAt: "2026-03-20T12:00:00.000Z",
+      junctionHistoricalBackfillWindowStart: "2025-12-20T00:00:00.000Z",
+      junctionHistoricalBackfillWindowEnd: "2026-03-20T00:00:00.000Z",
+    });
+  });
+
+  it("accepts current hosted Junction completion over local legacy retry progress", () => {
+    const hostedMetadata = {
+      hostedOnly: true,
+      junctionHistoricalBackfillStatus: "coverage_v2_complete",
+      junctionHistoricalBackfillEmptyAttempts: 0,
+      junctionHistoricalBackfillLastEmptyAt: null,
+      junctionHistoricalBackfillWindowStart: "2025-12-20T00:00:00.000Z",
+      junctionHistoricalBackfillWindowEnd: "2026-03-20T00:00:00.000Z",
+    };
+    const result = mergeHostedDeviceSyncConnectionMetadata({
+      hostedMetadata,
+      localConnectionStateUnpublished: true,
+      localMetadata: {
+        junctionHistoricalBackfillStatus: "retrying",
+        junctionHistoricalBackfillEmptyAttempts: 3,
+        junctionHistoricalBackfillLastEmptyAt: "2026-03-20T12:00:00.000Z",
+        junctionHistoricalBackfillWindowStart: "2025-12-20T00:00:00.000Z",
+        junctionHistoricalBackfillWindowEnd: "2026-03-20T00:00:00.000Z",
+      },
+    });
+
+    expect(result.preservedLocalProgress).toBe(false);
+    expect(result.metadata).toEqual(hostedMetadata);
+  });
+
   it("preserves newer unpublished local Junction retry metadata", () => {
     const result = mergeHostedDeviceSyncConnectionMetadata({
       hostedMetadata: {
         hostedOnly: true,
-        junctionHistoricalBackfillStatus: "retrying",
+        junctionHistoricalBackfillStatus: "coverage_v2_retrying",
         junctionHistoricalBackfillEmptyAttempts: 1,
         junctionHistoricalBackfillLastEmptyAt: "2026-03-20T12:00:00.000Z",
         junctionHistoricalBackfillWindowStart: "2025-12-20T00:00:00.000Z",
@@ -33,7 +94,7 @@ describe("mergeHostedDeviceSyncConnectionMetadata", () => {
       localConnectionStateUnpublished: true,
       localMetadata: {
         localOnly: true,
-        junctionHistoricalBackfillStatus: "retrying",
+        junctionHistoricalBackfillStatus: "coverage_v2_retrying",
         junctionHistoricalBackfillEmptyAttempts: 2,
         junctionHistoricalBackfillLastEmptyAt: "2026-03-20T12:15:00.000Z",
         junctionHistoricalBackfillWindowStart: "2025-12-20T00:00:00.000Z",
@@ -44,7 +105,7 @@ describe("mergeHostedDeviceSyncConnectionMetadata", () => {
     expect(result.preservedLocalProgress).toBe(true);
     expect(result.metadata).toEqual({
       hostedOnly: true,
-      junctionHistoricalBackfillStatus: "retrying",
+      junctionHistoricalBackfillStatus: "coverage_v2_retrying",
       junctionHistoricalBackfillEmptyAttempts: 2,
       junctionHistoricalBackfillLastEmptyAt: "2026-03-20T12:15:00.000Z",
       junctionHistoricalBackfillWindowStart: "2025-12-20T00:00:00.000Z",
@@ -55,7 +116,7 @@ describe("mergeHostedDeviceSyncConnectionMetadata", () => {
   it("keeps hosted Junction retry metadata when local retry progress is stale", () => {
     const result = mergeHostedDeviceSyncConnectionMetadata({
       hostedMetadata: {
-        junctionHistoricalBackfillStatus: "retrying",
+        junctionHistoricalBackfillStatus: "coverage_v2_retrying",
         junctionHistoricalBackfillEmptyAttempts: 2,
         junctionHistoricalBackfillLastEmptyAt: "2026-03-20T12:15:00.000Z",
         junctionHistoricalBackfillWindowStart: "2025-12-20T00:00:00.000Z",
@@ -63,7 +124,7 @@ describe("mergeHostedDeviceSyncConnectionMetadata", () => {
       },
       localConnectionStateUnpublished: true,
       localMetadata: {
-        junctionHistoricalBackfillStatus: "retrying",
+        junctionHistoricalBackfillStatus: "coverage_v2_retrying",
         junctionHistoricalBackfillEmptyAttempts: 1,
         junctionHistoricalBackfillLastEmptyAt: "2026-03-20T12:00:00.000Z",
         junctionHistoricalBackfillWindowStart: "2025-12-20T00:00:00.000Z",
@@ -73,7 +134,7 @@ describe("mergeHostedDeviceSyncConnectionMetadata", () => {
 
     expect(result.preservedLocalProgress).toBe(false);
     expect(result.metadata).toEqual({
-      junctionHistoricalBackfillStatus: "retrying",
+      junctionHistoricalBackfillStatus: "coverage_v2_retrying",
       junctionHistoricalBackfillEmptyAttempts: 2,
       junctionHistoricalBackfillLastEmptyAt: "2026-03-20T12:15:00.000Z",
       junctionHistoricalBackfillWindowStart: "2025-12-20T00:00:00.000Z",
@@ -88,7 +149,7 @@ describe("mergeHostedDeviceSyncConnectionMetadata", () => {
       ),
       localConnectionStateUnpublished: true,
       localMetadata: {
-        junctionHistoricalBackfillStatus: "complete",
+        junctionHistoricalBackfillStatus: "coverage_v2_complete",
         junctionHistoricalBackfillEmptyAttempts: 0,
         junctionHistoricalBackfillLastEmptyAt: null,
         junctionHistoricalBackfillWindowStart: "2025-12-20T00:00:00.000Z",
@@ -110,7 +171,7 @@ describe("mergeHostedDeviceSyncConnectionMetadata", () => {
     const result = mergeHostedDeviceSyncConnectionMetadata({
       hostedMetadata: {
         hostedOnly: true,
-        junctionHistoricalBackfillStatus: "exhausted",
+        junctionHistoricalBackfillStatus: "coverage_v2_exhausted",
         junctionHistoricalBackfillEmptyAttempts: 5,
         junctionHistoricalBackfillLastEmptyAt: "2026-03-20T12:00:00.000Z",
         junctionHistoricalBackfillWindowStart: "2025-12-20T00:00:00.000Z",
@@ -119,7 +180,7 @@ describe("mergeHostedDeviceSyncConnectionMetadata", () => {
       localConnectionStateUnpublished: true,
       localMetadata: {
         localOnly: true,
-        junctionHistoricalBackfillStatus: "complete",
+        junctionHistoricalBackfillStatus: "coverage_v2_complete",
         junctionHistoricalBackfillEmptyAttempts: 0,
         junctionHistoricalBackfillLastEmptyAt: null,
         junctionHistoricalBackfillWindowStart: "2025-12-20T00:00:00.000Z",
@@ -130,7 +191,7 @@ describe("mergeHostedDeviceSyncConnectionMetadata", () => {
     expect(result.preservedLocalProgress).toBe(true);
     expect(result.metadata).toEqual({
       hostedOnly: true,
-      junctionHistoricalBackfillStatus: "complete",
+      junctionHistoricalBackfillStatus: "coverage_v2_complete",
       junctionHistoricalBackfillEmptyAttempts: 0,
       junctionHistoricalBackfillLastEmptyAt: null,
       junctionHistoricalBackfillWindowStart: "2025-12-20T00:00:00.000Z",
@@ -141,7 +202,7 @@ describe("mergeHostedDeviceSyncConnectionMetadata", () => {
   it("keeps hosted complete progress ahead of unpublished local retry progress", () => {
     const result = mergeHostedDeviceSyncConnectionMetadata({
       hostedMetadata: {
-        junctionHistoricalBackfillStatus: "complete",
+        junctionHistoricalBackfillStatus: "coverage_v2_complete",
         junctionHistoricalBackfillEmptyAttempts: 0,
         junctionHistoricalBackfillLastEmptyAt: null,
         junctionHistoricalBackfillWindowStart: "2025-12-20T00:00:00.000Z",
@@ -149,7 +210,7 @@ describe("mergeHostedDeviceSyncConnectionMetadata", () => {
       },
       localConnectionStateUnpublished: true,
       localMetadata: {
-        junctionHistoricalBackfillStatus: "retrying",
+        junctionHistoricalBackfillStatus: "coverage_v2_retrying",
         junctionHistoricalBackfillEmptyAttempts: 3,
         junctionHistoricalBackfillLastEmptyAt: "2026-03-20T12:30:00.000Z",
         junctionHistoricalBackfillWindowStart: "2025-12-20T00:00:00.000Z",
@@ -159,7 +220,7 @@ describe("mergeHostedDeviceSyncConnectionMetadata", () => {
 
     expect(result.preservedLocalProgress).toBe(false);
     expect(result.metadata).toEqual({
-      junctionHistoricalBackfillStatus: "complete",
+      junctionHistoricalBackfillStatus: "coverage_v2_complete",
       junctionHistoricalBackfillEmptyAttempts: 0,
       junctionHistoricalBackfillLastEmptyAt: null,
       junctionHistoricalBackfillWindowStart: "2025-12-20T00:00:00.000Z",
@@ -170,7 +231,7 @@ describe("mergeHostedDeviceSyncConnectionMetadata", () => {
   it("keeps hosted progress when local progress has already been published", () => {
     const result = mergeHostedDeviceSyncConnectionMetadata({
       hostedMetadata: {
-        junctionHistoricalBackfillStatus: "retrying",
+        junctionHistoricalBackfillStatus: "coverage_v2_retrying",
         junctionHistoricalBackfillEmptyAttempts: 1,
         junctionHistoricalBackfillLastEmptyAt: "2026-03-20T12:00:00.000Z",
         junctionHistoricalBackfillWindowStart: "2025-12-20T00:00:00.000Z",
@@ -178,7 +239,7 @@ describe("mergeHostedDeviceSyncConnectionMetadata", () => {
       },
       localConnectionStateUnpublished: false,
       localMetadata: {
-        junctionHistoricalBackfillStatus: "retrying",
+        junctionHistoricalBackfillStatus: "coverage_v2_retrying",
         junctionHistoricalBackfillEmptyAttempts: 2,
         junctionHistoricalBackfillLastEmptyAt: "2026-03-20T12:15:00.000Z",
         junctionHistoricalBackfillWindowStart: "2025-12-20T00:00:00.000Z",
@@ -188,12 +249,214 @@ describe("mergeHostedDeviceSyncConnectionMetadata", () => {
 
     expect(result.preservedLocalProgress).toBe(false);
     expect(result.metadata).toEqual({
-      junctionHistoricalBackfillStatus: "retrying",
+      junctionHistoricalBackfillStatus: "coverage_v2_retrying",
       junctionHistoricalBackfillEmptyAttempts: 1,
       junctionHistoricalBackfillLastEmptyAt: "2026-03-20T12:00:00.000Z",
       junctionHistoricalBackfillWindowStart: "2025-12-20T00:00:00.000Z",
       junctionHistoricalBackfillWindowEnd: "2026-03-20T00:00:00.000Z",
     });
+  });
+
+  it("unions same-window Junction push evidence monotonically", () => {
+    const hostedMetadata = {
+      junctionHistoricalBackfillEvidence:
+        "e1|2025-12-20T00:00:00.000Z|2026-03-20T00:00:00.000Z|garmin:1",
+      junctionHistoricalBackfillStatus: "coverage_v2_exhausted",
+      junctionHistoricalBackfillEmptyAttempts: 5,
+      junctionHistoricalBackfillLastEmptyAt: "2026-03-20T12:00:00.000Z",
+      junctionHistoricalBackfillWindowStart: "2025-12-20T00:00:00.000Z",
+      junctionHistoricalBackfillWindowEnd: "2026-03-20T00:00:00.000Z",
+    };
+    const localMetadata = {
+      ...hostedMetadata,
+      junctionHistoricalBackfillEvidence:
+        "e1|2025-12-20T00:00:00.000Z|2026-03-20T00:00:00.000Z|garmin:2",
+    };
+
+    for (const localConnectionStateUnpublished of [true, false]) {
+      const result = mergeHostedDeviceSyncConnectionMetadata({
+        hostedMetadata,
+        localConnectionStateUnpublished,
+        localMetadata,
+      });
+      expect(result.metadata.junctionHistoricalBackfillEvidence).toBe(
+        "e1|2025-12-20T00:00:00.000Z|2026-03-20T00:00:00.000Z|garmin:3",
+      );
+    }
+  });
+
+  it("keeps evidence matching selected progress when hosted and local evidence windows differ", () => {
+    const result = mergeHostedDeviceSyncConnectionMetadata({
+      hostedMetadata: {
+        junctionHistoricalBackfillEvidence:
+          "e1|2025-12-20T00:00:00.000Z|2026-03-20T00:00:00.000Z|garmin:1",
+        junctionHistoricalBackfillStatus: "coverage_v2_exhausted",
+        junctionHistoricalBackfillEmptyAttempts: 5,
+        junctionHistoricalBackfillLastEmptyAt: "2026-03-20T12:00:00.000Z",
+        junctionHistoricalBackfillWindowStart: "2025-12-20T00:00:00.000Z",
+        junctionHistoricalBackfillWindowEnd: "2026-03-20T00:00:00.000Z",
+      },
+      localConnectionStateUnpublished: true,
+      localMetadata: {
+        junctionHistoricalBackfillEvidence:
+          "e1|2025-12-19T00:00:00.000Z|2026-03-19T00:00:00.000Z|garmin:2",
+        junctionHistoricalBackfillStatus: "coverage_v2_complete",
+        junctionHistoricalBackfillEmptyAttempts: 0,
+        junctionHistoricalBackfillLastEmptyAt: null,
+        junctionHistoricalBackfillWindowStart: "2025-12-20T00:00:00.000Z",
+        junctionHistoricalBackfillWindowEnd: "2026-03-20T00:00:00.000Z",
+      },
+    });
+
+    expect(result.preservedLocalProgress).toBe(true);
+    expect(result.metadata.junctionHistoricalBackfillStatus).toBe("coverage_v2_complete");
+    expect(result.metadata.junctionHistoricalBackfillEvidence).toBe(
+      "e1|2025-12-20T00:00:00.000Z|2026-03-20T00:00:00.000Z|garmin:1",
+    );
+  });
+
+  it("marks selected local evidence unpublished when equal progress has stale hosted evidence", () => {
+    const sharedProgress = {
+      junctionHistoricalBackfillStatus: "coverage_v2_retrying",
+      junctionHistoricalBackfillEmptyAttempts: 2,
+      junctionHistoricalBackfillLastEmptyAt: "2026-03-20T12:00:00.000Z",
+      junctionHistoricalBackfillWindowStart: "2025-12-20T00:00:00.000Z",
+      junctionHistoricalBackfillWindowEnd: "2026-03-20T00:00:00.000Z",
+    };
+    const result = mergeHostedDeviceSyncConnectionMetadata({
+      hostedMetadata: {
+        ...sharedProgress,
+        junctionHistoricalBackfillEvidence:
+          "e1|2025-12-19T00:00:00.000Z|2026-03-19T00:00:00.000Z|garmin:1",
+      },
+      localConnectionStateUnpublished: true,
+      localMetadata: {
+        ...sharedProgress,
+        junctionHistoricalBackfillEvidence:
+          "e1|2025-12-20T00:00:00.000Z|2026-03-20T00:00:00.000Z|garmin:2",
+      },
+    });
+
+    expect(result.preservedLocalProgress).toBe(true);
+    expect(result.metadata.junctionHistoricalBackfillEvidence).toBe(
+      "e1|2025-12-20T00:00:00.000Z|2026-03-20T00:00:00.000Z|garmin:2",
+    );
+  });
+
+  it("preserves opaque hosted evidence owned by selected future progress", () => {
+    const opaqueEvidence = "future-hosted-evidence-format";
+    const result = mergeHostedDeviceSyncConnectionMetadata({
+      hostedMetadata: {
+        junctionHistoricalBackfillEvidence: opaqueEvidence,
+        junctionHistoricalBackfillStatus: "coverage_v3_deferred",
+      },
+      localConnectionStateUnpublished: true,
+      localMetadata: {
+        junctionHistoricalBackfillEvidence:
+          "e1|2025-12-20T00:00:00.000Z|2026-03-20T00:00:00.000Z|garmin:1",
+        junctionHistoricalBackfillStatus: "coverage_v2_complete",
+        junctionHistoricalBackfillWindowStart: "2025-12-20T00:00:00.000Z",
+        junctionHistoricalBackfillWindowEnd: "2026-03-20T00:00:00.000Z",
+      },
+    });
+
+    expect(result.preservedLocalProgress).toBe(false);
+    expect(result.metadata.junctionHistoricalBackfillStatus).toBe("coverage_v3_deferred");
+    expect(result.metadata.junctionHistoricalBackfillEvidence).toBe(opaqueEvidence);
+  });
+
+  it("preserves unpublished opaque local progress owned by a future runtime", () => {
+    const result = mergeHostedDeviceSyncConnectionMetadata({
+      hostedMetadata: {
+        hostedOnly: "current",
+        junctionHistoricalBackfillStatus: "coverage_v2_retrying",
+      },
+      localConnectionStateUnpublished: true,
+      localMetadata: {
+        junctionHistoricalBackfillEvidence: "e2|opaque-future-evidence",
+        junctionHistoricalBackfillStatus: "coverage_v3_deferred",
+        localOnly: "future",
+      },
+    });
+
+    expect(result).toEqual({
+      metadata: {
+        hostedOnly: "current",
+        junctionHistoricalBackfillEvidence: "e2|opaque-future-evidence",
+        junctionHistoricalBackfillStatus: "coverage_v3_deferred",
+        localOnly: "future",
+      },
+      preservedLocalProgress: true,
+    });
+  });
+
+  it.each([
+    ["wrong encoding version", "e2|2025-12-20T00:00:00.000Z|2026-03-20T00:00:00.000Z|garmin:1"],
+    ["wrong field count", "e1|2025-12-20T00:00:00.000Z|2026-03-20T00:00:00.000Z|garmin:1|extra"],
+    ["noncanonical start", "e1|2025-12-20T00:00:00Z|2026-03-20T00:00:00.000Z|garmin:1"],
+    ["reversed window", "e1|2026-03-20T00:00:00.000Z|2025-12-20T00:00:00.000Z|garmin:1"],
+    ["empty providers", "e1|2025-12-20T00:00:00.000Z|2026-03-20T00:00:00.000Z|"],
+    ["malformed provider entry", "e1|2025-12-20T00:00:00.000Z|2026-03-20T00:00:00.000Z|garmin"],
+    ["duplicate provider", "e1|2025-12-20T00:00:00.000Z|2026-03-20T00:00:00.000Z|garmin:1,garmin:2"],
+    ["noncanonical provider order", "e1|2025-12-20T00:00:00.000Z|2026-03-20T00:00:00.000Z|oura:1,garmin:2"],
+    ["zero mask", "e1|2025-12-20T00:00:00.000Z|2026-03-20T00:00:00.000Z|garmin:0"],
+    ["fractional mask", "e1|2025-12-20T00:00:00.000Z|2026-03-20T00:00:00.000Z|garmin:1.5"],
+    ["unknown mask bit", "e1|2025-12-20T00:00:00.000Z|2026-03-20T00:00:00.000Z|garmin:8"],
+    ["oversized scalar", "x".repeat(DEVICE_SYNC_METADATA_MAX_STRING_LENGTH + 1)],
+  ])("rejects malformed Junction push evidence: %s", (_label, value) => {
+    expect(readJunctionHistoricalBackfillEvidence(value)).toBeNull();
+  });
+
+  it("fails closed when evidence additions cannot be encoded canonically or within metadata limits", () => {
+    const windowStart = "2025-12-20T00:00:00.000Z";
+    const windowEnd = "2026-03-20T00:00:00.000Z";
+    expect(addJunctionHistoricalBackfillEvidence({
+      existingValue: null,
+      providerSlug: "garmin",
+      resource: "sleep",
+      windowStart: "2025-12-20T00:00:00Z",
+      windowEnd,
+    })).toBeNull();
+    expect(addJunctionHistoricalBackfillEvidence({
+      existingValue: null,
+      providerSlug: "garmin",
+      resource: "sleep",
+      windowStart: windowEnd,
+      windowEnd: windowStart,
+    })).toBeNull();
+
+    const nearLimitEvidence = [
+      "e1",
+      windowStart,
+      windowEnd,
+      Array.from({ length: 29 }, (_, index) => `p${String(index).padStart(3, "0")}:1`).join(","),
+    ].join("|");
+    expect(nearLimitEvidence).toHaveLength(DEVICE_SYNC_METADATA_MAX_STRING_LENGTH - 1);
+    expect(readJunctionHistoricalBackfillEvidence(nearLimitEvidence)).not.toBeNull();
+    expect(addJunctionHistoricalBackfillEvidence({
+      existingValue: nearLimitEvidence,
+      providerSlug: "zzzz",
+      resource: "activity",
+      windowStart,
+      windowEnd,
+    })).toBeNull();
+  });
+
+  it("rejects prototype-sensitive provider names in Junction push evidence", () => {
+    for (const providerSlug of ["__proto__", "constructor", "prototype"]) {
+      expect(
+        readJunctionHistoricalBackfillEvidence(
+          `e1|2025-12-20T00:00:00.000Z|2026-03-20T00:00:00.000Z|${providerSlug}:1`,
+        ),
+      ).toBeNull();
+      expect(addJunctionHistoricalBackfillEvidence({
+        existingValue: null,
+        providerSlug,
+        resource: "activity",
+        windowStart: "2025-12-20T00:00:00.000Z",
+        windowEnd: "2026-03-20T00:00:00.000Z",
+      })).toBeNull();
+    }
   });
 });
 
@@ -921,7 +1184,7 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
             accountStatus: "reauthorization_required",
             code: "WHOOP_TOKEN_REQUEST_FAILED",
             details: {
-              providerResponseErrorCode: "11649ed4-27e2-4718-959f-d68de1d1a120f",
+              providerResponseErrorCode: "00000000-0000-4000-8000-000000000003f",
               providerOAuthErrorCode: "invalid_grant",
               providerOAuthErrorDescription: "Refresh token expired.",
             },
@@ -2182,7 +2445,7 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
 
 describe("sanitizeHostedRuntimeDiagnosticText", () => {
   it("classifies standalone id-shaped diagnostic tokens", () => {
-    expect(isHostedRuntimeIdShapedDiagnosticToken("11649ed4-27e2-4718-959f-d68de1d1a120")).toBe(true);
+    expect(isHostedRuntimeIdShapedDiagnosticToken("00000000-0000-4000-8000-000000000003")).toBe(true);
     expect(isHostedRuntimeIdShapedDiagnosticToken("a1".repeat(16))).toBe(true);
     expect(isHostedRuntimeIdShapedDiagnosticToken("invalid_request")).toBe(false);
     expect(isHostedRuntimeIdShapedDiagnosticToken("value_error.date")).toBe(false);
@@ -2194,12 +2457,12 @@ describe("sanitizeHostedRuntimeDiagnosticText", () => {
   it("masks long opaque tokens in place instead of dropping the whole text", () => {
     expect(
       sanitizeHostedRuntimeDiagnosticText(
-        "Team 11649ed4-27e2-4718-959f-d68de1d1a120 is not configured for sleep_cycle.",
+        "Team 00000000-0000-4000-8000-000000000003 is not configured for sleep_cycle.",
       ),
     ).toBe("Team <redacted-id> is not configured for sleep_cycle.");
     expect(
       sanitizeHostedRuntimeDiagnosticText(
-        "record 11649ed4-27e2-4718-959f-d68de1d1a120 was rejected upstream.",
+        "record 00000000-0000-4000-8000-000000000003 was rejected upstream.",
       ),
     ).toBe("record <redacted-token> was rejected upstream.");
   });
@@ -2508,7 +2771,7 @@ describe("sanitizeHostedRuntimeDiagnosticText", () => {
   it("masks multiple unsafe spans in one string", () => {
     expect(
       sanitizeHostedRuntimeDiagnosticText(
-        "user 0123456789abcdef0123456789abcdef01 denied; retry as 11649ed4-27e2-4718-959f-d68de1d1a120",
+        "user 0123456789abcdef0123456789abcdef01 denied; retry as 00000000-0000-4000-8000-000000000003",
       ),
     ).toBe("user <redacted-id> denied; retry as <redacted-token>");
   });
