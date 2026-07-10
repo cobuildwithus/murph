@@ -80,8 +80,16 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     });
 
     await expect(options.createCheckpointSnapshot(
+      createCheckpointInput("import"),
+    )).rejects.toThrow(
+      "Hosted workspace snapshot construction is idle-shutdown only.",
+    );
+    await expect(options.createCheckpointSnapshot(
+      // @ts-expect-error Intentionally verifies the JavaScript boundary fails closed.
       createCheckpointInput("canonical_runtime_commit"),
-    )).rejects.toThrow("Hosted workspace snapshot construction is idle-shutdown only.");
+    )).rejects.toThrow(
+      "Hosted workspace snapshot construction is idle-shutdown only.",
+    );
 
     expect(calls.startSnapshotSession).not.toHaveBeenCalled();
     expect(calls.putSnapshotObjectDirect).not.toHaveBeenCalled();
@@ -342,6 +350,23 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
       status: "staged",
       updatedAt: "2026-06-01T00:00:00.000Z",
     });
+    const uncheckpointedCommittedOperationPath = await writeOperationRecord(vaultRoot, {
+      operationId: "op_uncheckpointed_committed",
+      status: "committed",
+      updatedAt: "2026-06-10T00:00:00.000Z",
+    });
+    const uncheckpointedCommittedStageRoot =
+      ".runtime/operations/op_uncheckpointed_committed";
+    const uncheckpointedCommittedPayloadPath =
+      `${uncheckpointedCommittedStageRoot}/payloads/residue.txt`;
+    await mkdir(path.join(vaultRoot, uncheckpointedCommittedStageRoot, "payloads"), {
+      recursive: true,
+    });
+    await writeFile(
+      path.join(vaultRoot, uncheckpointedCommittedPayloadPath),
+      "uncheckpointed residue\n",
+      "utf8",
+    );
     const request = createInvocationRequestWithWorkspaceCheckpoint("2026-06-10T00:00:00.000Z");
     const options = createBridgeOptions({
       platform,
@@ -358,9 +383,13 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     expect(archiveEntries.some((entry) => entry.relativePath === staleOperationPaths.oldest)).toBe(false);
     expect(archiveEntries.some((entry) => entry.relativePath === staleOperationPaths.newest)).toBe(true);
     expect(archiveEntries.some((entry) => entry.relativePath === activeOperationPath)).toBe(true);
+    expect(archiveEntries.some((entry) => entry.relativePath === uncheckpointedCommittedOperationPath)).toBe(true);
+    expect(archiveEntries.some((entry) => entry.relativePath === uncheckpointedCommittedPayloadPath)).toBe(true);
     await expectMissing(path.join(vaultRoot, staleOperationPaths.oldest));
     await expectPresent(path.join(vaultRoot, staleOperationPaths.newest));
     await expectPresent(path.join(vaultRoot, activeOperationPath));
+    await expectPresent(path.join(vaultRoot, uncheckpointedCommittedOperationPath));
+    await expectPresent(path.join(vaultRoot, uncheckpointedCommittedStageRoot));
   });
 
   it("prunes settled assistant runtime residue before v2 snapshot archive planning", async () => {
@@ -674,8 +703,8 @@ function createLease(
   };
 }
 
-function createCheckpointInput(
-  reason: "canonical_runtime_commit" | "idle_shutdown" = "idle_shutdown",
+function createCheckpointInput<const Reason extends HostedWorkspaceCheckpointRequest["reason"]>(
+  reason: Reason,
 ) {
   const state = {
     recentStatuses: [],
