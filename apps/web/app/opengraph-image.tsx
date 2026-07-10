@@ -16,15 +16,17 @@ export const alt = MURPH_DEFAULT_OPEN_GRAPH_IMAGE.alt;
 export const size = { width: 1200, height: 630 };
 export const contentType = "image/png";
 
-const INK = "#1f2422";
+// Palette lifted from the homepage hero phone mock.
+const INK = "#2d3436";
 const GREEN = "#5a6e32";
 const MUTED = "#736a58";
-const HAIRLINE = "rgba(196, 168, 130, 0.35)";
+const CREAM = "#f5f0e8";
+const MEMBER_BUBBLE = "#ece7dc";
 
 const STANDINGS = [
-  { name: "Theo", steps: "41,204 steps", fill: 296, leader: true },
-  { name: "You", steps: "38,977 steps", fill: 265, leader: false },
-  { name: "Maya", steps: "36,412 steps", fill: 236, leader: false },
+  { name: "Theo", steps: "41,204", fill: 264, leader: true },
+  { name: "You", steps: "38,977", fill: 236, leader: false },
+  { name: "Maya", steps: "36,412", fill: 210, leader: false },
 ];
 
 export default async function OGImage() {
@@ -71,7 +73,7 @@ export default async function OGImage() {
             top: 0,
             bottom: 0,
             left: 72,
-            width: 600,
+            width: 660,
             display: "flex",
             flexDirection: "column",
             justifyContent: "center",
@@ -83,20 +85,20 @@ export default async function OGImage() {
               flexDirection: "column",
               fontFamily: "Fraunces",
               fontWeight: 400,
-              fontSize: 42,
-              lineHeight: 1.3,
-              letterSpacing: "-0.02em",
+              fontSize: 51,
+              lineHeight: 1.25,
+              letterSpacing: "-0.03em",
             }}
           >
-            <div style={{ color: INK }}>{MURPH_TAGLINE_LINE_1}</div>
+            <div style={{ color: "#1f2422" }}>{MURPH_TAGLINE_LINE_1}</div>
             <div style={{ color: GREEN }}>{MURPH_TAGLINE_LINE_2}</div>
           </div>
           <div
             style={{
-              marginTop: 26,
-              maxWidth: 400,
+              marginTop: 28,
+              maxWidth: 460,
               fontFamily: "DM Sans",
-              fontSize: 19,
+              fontSize: 21,
               lineHeight: 1.5,
               color: MUTED,
             }}
@@ -105,191 +107,348 @@ export default async function OGImage() {
           </div>
         </div>
 
-        {/* Group-chat panel, bleeding off the bottom edge */}
+        {/* Phone mock, bleeding off the bottom edge (mirrors the homepage
+            hero's PhoneShell) */}
         <div
           style={{
             position: "absolute",
-            top: 84,
-            right: 64,
-            width: 424,
-            height: 620,
+            top: 64,
+            right: 80,
+            width: 348,
+            height: 640,
             display: "flex",
-            flexDirection: "column",
-            gap: 16,
-            padding: "24px 24px 0",
-            backgroundColor: "rgba(255, 255, 255, 0.45)",
-            borderRadius: 22,
-            border: `1px solid ${HAIRLINE}`,
-            boxShadow: "0 32px 64px -28px rgba(45, 52, 54, 0.25)",
+            padding: 4,
+            backgroundColor: "#0a0a0a",
+            borderRadius: 44,
+            boxShadow: "0 30px 80px -20px rgba(0, 0, 0, 0.5)",
           }}
         >
-          <div
-            style={{
-              fontFamily: "DM Sans",
-              fontSize: 13,
-              letterSpacing: "0.14em",
-              color: MUTED,
-            }}
-          >
-            WALK CHALLENGE · 4 PEOPLE
-          </div>
-
-          {/* Outgoing kickoff bubble */}
-          <div
-            style={{
-              alignSelf: "flex-end",
-              maxWidth: 300,
-              padding: "11px 15px",
-              backgroundColor: GREEN,
-              borderRadius: 16,
-              color: "rgba(255, 255, 255, 0.96)",
-              fontFamily: "DM Sans",
-              fontSize: 17,
-              lineHeight: 1.4,
-            }}
-          >
-            walk challenge starts tomorrow. loser buys steak dinner
-          </div>
-
-          {/* Murph reply */}
-          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-            <div
-              style={{
-                paddingLeft: 4,
-                fontFamily: "DM Sans",
-                fontSize: 12,
-                letterSpacing: "0.12em",
-                color: MUTED,
-              }}
-            >
-              MURPH
-            </div>
-            <div
-              style={{
-                alignSelf: "flex-start",
-                maxWidth: 320,
-                padding: "11px 15px",
-                backgroundColor: "rgba(255, 255, 255, 0.85)",
-                borderRadius: 16,
-                border: `1px solid ${HAIRLINE}`,
-                color: INK,
-                fontFamily: "DM Sans",
-                fontSize: 17,
-                lineHeight: 1.4,
-              }}
-            >
-              Baselines are set from everyone&rsquo;s wearables. I keep score,
-              standings drop daily.
-            </div>
-          </div>
-        </div>
-
-        {/* Standings card overlapping the chat panel */}
-        <div
-          style={{
-            position: "absolute",
-            left: 648,
-            top: 396,
-            width: 376,
-            display: "flex",
-            flexDirection: "column",
-            padding: "20px 24px 22px",
-            backgroundColor: "rgba(255, 255, 255, 0.94)",
-            borderRadius: 18,
-            border: `1px solid ${HAIRLINE}`,
-            boxShadow: "0 28px 56px -22px rgba(45, 52, 54, 0.3)",
-          }}
-        >
-          <div
-            style={{
-              display: "flex",
-              justifyContent: "space-between",
-              alignItems: "baseline",
-            }}
-          >
-            <div
-              style={{
-                fontFamily: "DM Sans",
-                fontSize: 12,
-                letterSpacing: "0.16em",
-                color: MUTED,
-              }}
-            >
-              STANDINGS · DAY 5
-            </div>
-            <div
-              style={{
-                fontFamily: "DM Sans",
-                fontSize: 12,
-                letterSpacing: "0.1em",
-                color: MUTED,
-              }}
-            >
-              2 DAYS LEFT
-            </div>
-          </div>
           <div
             style={{
               display: "flex",
               flexDirection: "column",
-              gap: 13,
-              marginTop: 18,
+              width: "100%",
+              height: "100%",
+              overflow: "hidden",
+              borderRadius: 40,
+              backgroundColor: CREAM,
             }}
           >
-            {STANDINGS.map((row) => (
+            {/* Status bar */}
+            <div
+              style={{
+                position: "relative",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                padding: "14px 24px 6px",
+              }}
+            >
               <div
-                key={row.name}
-                style={{ display: "flex", flexDirection: "column", gap: 7 }}
+                style={{ fontFamily: "DM Sans", fontSize: 14, color: INK }}
               >
-                <div
-                  style={{
-                    display: "flex",
-                    justifyContent: "space-between",
-                    alignItems: "baseline",
-                  }}
-                >
-                  <div
-                    style={{
-                      fontFamily: "Fraunces",
-                      fontWeight: 600,
-                      fontSize: 16,
-                      color: INK,
-                    }}
-                  >
-                    {row.name}
-                  </div>
-                  <div
-                    style={{
-                      fontFamily: "DM Sans",
-                      fontSize: 13,
-                      color: MUTED,
-                    }}
-                  >
-                    {row.steps}
-                  </div>
+                9:41
+              </div>
+              <div
+                style={{
+                  position: "absolute",
+                  left: "50%",
+                  top: 8,
+                  width: 92,
+                  height: 24,
+                  marginLeft: -46,
+                  borderRadius: 999,
+                  backgroundColor: "#0a0a0a",
+                }}
+              />
+              <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
+                <div style={{ display: "flex", alignItems: "flex-end", gap: 1.5 }}>
+                  {[4, 6, 8, 10].map((barHeight) => (
+                    <div
+                      key={barHeight}
+                      style={{
+                        width: 3,
+                        height: barHeight,
+                        borderRadius: 1,
+                        backgroundColor: INK,
+                      }}
+                    />
+                  ))}
                 </div>
                 <div
                   style={{
                     display: "flex",
-                    width: 328,
-                    height: 5,
-                    borderRadius: 3,
-                    backgroundColor: "rgba(196, 168, 130, 0.25)",
+                    width: 24,
+                    height: 12,
+                    padding: 2,
+                    borderRadius: 4,
+                    border: `1px solid ${INK}`,
                   }}
                 >
                   <div
                     style={{
-                      width: row.fill,
-                      height: 5,
-                      borderRadius: 3,
-                      backgroundColor: row.leader
-                        ? GREEN
-                        : "rgba(196, 168, 130, 0.75)",
+                      width: 13,
+                      height: 6,
+                      borderRadius: 1.5,
+                      backgroundColor: INK,
                     }}
                   />
                 </div>
               </div>
-            ))}
+            </div>
+
+            {/* Chat header: avatar cluster + group label */}
+            <div
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                gap: 4,
+                paddingBottom: 10,
+                borderBottom: "1px solid rgba(196, 168, 130, 0.3)",
+              }}
+            >
+              <div style={{ display: "flex" }}>
+                {[
+                  { initial: "T", bg: "#c9a06b" },
+                  { initial: "M", bg: "#8ba173" },
+                  { initial: "S", bg: "#b8845f" },
+                ].map((avatar, i) => (
+                  <div
+                    key={avatar.initial}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      width: 34,
+                      height: 34,
+                      borderRadius: "50%",
+                      backgroundColor: avatar.bg,
+                      border: `2px solid ${CREAM}`,
+                      marginLeft: i === 0 ? 0 : -10,
+                      color: "#fff",
+                      fontFamily: "DM Sans",
+                      fontSize: 15,
+                    }}
+                  >
+                    {avatar.initial}
+                  </div>
+                ))}
+              </div>
+              <div
+                style={{ fontFamily: "DM Sans", fontSize: 12, color: MUTED }}
+              >
+                4 People ›
+              </div>
+            </div>
+
+            {/* Messages */}
+            <div
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                gap: 10,
+                padding: "14px 14px 0",
+              }}
+            >
+              {/* Outgoing kickoff */}
+              <div
+                style={{
+                  alignSelf: "flex-end",
+                  maxWidth: 250,
+                  padding: "8px 14px",
+                  backgroundColor: GREEN,
+                  borderRadius: 17,
+                  color: "#fff",
+                  fontFamily: "DM Sans",
+                  fontSize: 15,
+                  lineHeight: 1.4,
+                }}
+              >
+                walk challenge starts tomorrow. loser buys steak dinner
+              </div>
+
+              {/* Murph reply */}
+              <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                <div
+                  style={{
+                    paddingLeft: 12,
+                    fontFamily: "DM Sans",
+                    fontSize: 11,
+                    letterSpacing: "0.08em",
+                    color: MUTED,
+                  }}
+                >
+                  Murph
+                </div>
+                <div
+                  style={{
+                    alignSelf: "flex-start",
+                    maxWidth: 262,
+                    padding: "8px 14px",
+                    backgroundColor: "#fff",
+                    borderRadius: 17,
+                    color: INK,
+                    fontFamily: "DM Sans",
+                    fontSize: 15,
+                    lineHeight: 1.4,
+                  }}
+                >
+                  Baselines are set from everyone&rsquo;s wearables. I keep
+                  score, standings drop daily.
+                </div>
+              </div>
+
+              {/* Theo banter */}
+              <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                <div
+                  style={{
+                    paddingLeft: 12,
+                    fontFamily: "DM Sans",
+                    fontSize: 11,
+                    letterSpacing: "0.08em",
+                    color: MUTED,
+                  }}
+                >
+                  Theo
+                </div>
+                <div
+                  style={{
+                    alignSelf: "flex-start",
+                    padding: "8px 14px",
+                    backgroundColor: MEMBER_BUBBLE,
+                    borderRadius: 17,
+                    color: INK,
+                    fontFamily: "DM Sans",
+                    fontSize: 15,
+                    lineHeight: 1.4,
+                  }}
+                >
+                  day 5 and i&rsquo;m still winning btw
+                </div>
+              </div>
+
+              {/* Murph standings card (in-chat, like the hero's weekly card) */}
+              <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                <div
+                  style={{
+                    paddingLeft: 12,
+                    fontFamily: "DM Sans",
+                    fontSize: 11,
+                    letterSpacing: "0.08em",
+                    color: MUTED,
+                  }}
+                >
+                  Murph
+                </div>
+                <div
+                  style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    padding: "12px 14px 14px",
+                    backgroundColor: "#fff",
+                    borderRadius: 17,
+                    border: "1px solid rgba(196, 168, 130, 0.25)",
+                  }}
+                >
+                  <div
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "baseline",
+                    }}
+                  >
+                    <div
+                      style={{
+                        fontFamily: "DM Sans",
+                        fontSize: 10,
+                        letterSpacing: "0.14em",
+                        color: GREEN,
+                      }}
+                    >
+                      WALK CHALLENGE · DAY 5
+                    </div>
+                    <div
+                      style={{
+                        fontFamily: "DM Sans",
+                        fontSize: 10,
+                        letterSpacing: "0.1em",
+                        color: MUTED,
+                      }}
+                    >
+                      2 DAYS LEFT
+                    </div>
+                  </div>
+                  <div
+                    style={{
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: 10,
+                      marginTop: 12,
+                    }}
+                  >
+                    {STANDINGS.map((row) => (
+                      <div
+                        key={row.name}
+                        style={{
+                          display: "flex",
+                          flexDirection: "column",
+                          gap: 5,
+                        }}
+                      >
+                        <div
+                          style={{
+                            display: "flex",
+                            justifyContent: "space-between",
+                            alignItems: "baseline",
+                          }}
+                        >
+                          <div
+                            style={{
+                              fontFamily: "Fraunces",
+                              fontWeight: 600,
+                              fontSize: 13,
+                              color: INK,
+                            }}
+                          >
+                            {row.name}
+                          </div>
+                          <div
+                            style={{
+                              fontFamily: "DM Sans",
+                              fontSize: 11,
+                              color: MUTED,
+                            }}
+                          >
+                            {`${row.steps} steps`}
+                          </div>
+                        </div>
+                        <div
+                          style={{
+                            display: "flex",
+                            width: 264,
+                            height: 4,
+                            borderRadius: 2,
+                            backgroundColor: "rgba(196, 168, 130, 0.25)",
+                          }}
+                        >
+                          <div
+                            style={{
+                              width: row.fill,
+                              height: 4,
+                              borderRadius: 2,
+                              backgroundColor: row.leader
+                                ? GREEN
+                                : "rgba(196, 168, 130, 0.75)",
+                            }}
+                          />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       </div>
