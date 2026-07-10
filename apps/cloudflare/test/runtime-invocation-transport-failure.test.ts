@@ -3,6 +3,9 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   parseHostedRuntimeLogRequest,
 } from "@murphai/hosted-execution/parsers";
+import {
+  HOSTED_RUNTIME_OWNER_RELEASED_PATH,
+} from "@murphai/hosted-execution/routes";
 import type {
   HostedRuntimeWebStatusResponse,
 } from "@murphai/hosted-execution/runtime-control";
@@ -365,6 +368,38 @@ describe("runtime invocation transport failure fence handling", () => {
     ]);
   });
 
+  it("does not trust committed progress when the container stub lacks the liveness probe method", async () => {
+    const readHostedRuntimeStatusFromWeb = vi.fn(async (userId: string) => ({
+      mailboxLag: [],
+      userId,
+      workspace: {
+        createdAt: FIXED_NOW,
+        nextWakeAt: null,
+        nextWakeReason: null,
+        redactedStatus: {},
+        snapshotRef: null,
+        updatedAt: FIXED_NOW,
+        userId,
+        version: "1",
+      },
+    }));
+    const harness = await createTransportFailureHarness({
+      readActiveRuntimeUserFence: null,
+      readHostedRuntimeStatusFromWeb,
+    });
+
+    await expect(harness.invoke()).rejects.toThrow("container transport failed");
+
+    await expect(harness.stateStore.readWriteFenceToken()).resolves.toEqual(
+      expect.objectContaining({
+        attemptId: harness.token.attemptId,
+        userId: TEST_USER_ID,
+      }),
+    );
+    expect(readHostedRuntimeStatusFromWeb).not.toHaveBeenCalled();
+    expect(harness.ownerReleaseCallCount()).toBe(0);
+  });
+
   it("keeps the fence without posting an accepted-attempt-failed row for non-accepted attempts", async () => {
     const harness = await createTransportFailureHarness({
       readActiveRuntimeUserFence: async (token) => ({
@@ -388,14 +423,70 @@ describe("runtime invocation transport failure fence handling", () => {
     expect(harness.loggedFailureEntries()).toEqual([]);
   });
 
-  it("still returns committed progress instead of clearing toward failure when the attempt is inactive but the workspace advanced", async () => {
+  it("keeps a non-accepted fence when container liveness is unsupported", async () => {
+    const harness = await createTransportFailureHarness({
+      readActiveRuntimeUserFence: null,
+    });
+
+    await expect(
+      harness.invoke({ acceptedProcessingAttempt: false }),
+    ).rejects.toThrow("container transport failed");
+
+    await expect(harness.stateStore.readWriteFenceToken()).resolves.toEqual(
+      expect.objectContaining({
+        attemptId: harness.token.attemptId,
+        userId: TEST_USER_ID,
+      }),
+    );
+    expect(harness.loggedFailureEntries()).toEqual([]);
+  });
+
+  for (const livenessFailure of ["error", "timeout"] as const) {
+    it(`keeps a non-accepted fence when container liveness ends in ${livenessFailure}`, async () => {
+      const harness = await createTransportFailureHarness({
+        readActiveRuntimeUserFence: livenessFailure === "error"
+          ? async () => {
+              throw new Error("container probe unavailable");
+            }
+          : () => new Promise<WorkerActiveRuntimeUserFenceResult>(() => {}),
+      });
+
+      const invocation = harness.invoke({ acceptedProcessingAttempt: false });
+      const settled = invocation.then(
+        () => "resolved" as const,
+        () => "rejected" as const,
+      );
+      if (livenessFailure === "timeout") {
+        await vi.advanceTimersByTimeAsync(6_000);
+      }
+
+      await expect(settled).resolves.toBe("rejected");
+      await expect(harness.stateStore.readWriteFenceToken()).resolves.toEqual(
+        expect.objectContaining({
+          attemptId: harness.token.attemptId,
+          userId: TEST_USER_ID,
+        }),
+      );
+      expect(harness.loggedFailureEntries()).toEqual([]);
+      expect(harness.ownerReleaseCallCount()).toBe(0);
+    });
+  }
+
+  it("returns committed progress when the inactive attempt advanced the workspace with newer mailbox input still ahead", async () => {
     const harness = await createTransportFailureHarness({
       readActiveRuntimeUserFence: async () => ({
         active: false,
         reason: "no_active_runtime",
       }),
       readHostedRuntimeStatusFromWeb: async (userId) => ({
-        mailboxLag: [],
+        mailboxLag: [
+          {
+            importedSeq: "1",
+            lag: "1",
+            lane: "conversation",
+            maxSeq: "2",
+          },
+        ],
         userId,
         workspace: {
           createdAt: FIXED_NOW,
@@ -420,6 +511,82 @@ describe("runtime invocation transport failure fence handling", () => {
     // Fence released through the completion path, with no failure row posted.
     await expect(harness.stateStore.readWriteFenceToken()).resolves.toBeNull();
     expect(harness.loggedFailureEntries()).toEqual([]);
+    expect(harness.ownerReleaseCallCount()).toBe(1);
+  });
+
+  it("requests one immediate recheck when recovered progress published a due default wake", async () => {
+    const harness = await createTransportFailureHarness({
+      readActiveRuntimeUserFence: async () => ({
+        active: false,
+        reason: "no_active_runtime",
+      }),
+      readHostedRuntimeStatusFromWeb: async (userId) => ({
+        mailboxLag: [],
+        userId,
+        workspace: {
+          createdAt: FIXED_NOW,
+          nextWakeAt: FIXED_NOW,
+          nextWakeReason: "assistant",
+          redactedStatus: { lastTurn: "staged" },
+          snapshotRef: null,
+          updatedAt: FIXED_NOW,
+          userId,
+          version: "1",
+        },
+      }),
+    });
+
+    await expect(harness.invoke()).resolves.toEqual({
+      immediateRecheckRequested: true,
+      nextWakeAt: FIXED_NOW,
+      nextWakeReason: "assistant",
+      redactedStatus: { lastTurn: "staged" },
+      status: "idle",
+    });
+    await expect(harness.stateStore.readWriteFenceToken()).resolves.toBeNull();
+    expect(harness.ownerReleaseCallCount()).toBe(1);
+  });
+
+  it("keeps a recovered future mailbox retry on its authoritative timer", async () => {
+    const futureRetryAt = "2026-06-11T00:00:15.000Z";
+    const harness = await createTransportFailureHarness({
+      readActiveRuntimeUserFence: async () => ({
+        active: false,
+        reason: "no_active_runtime",
+      }),
+      readHostedRuntimeStatusFromWeb: async (userId) => ({
+        mailboxLag: [{
+          importedSeq: "1",
+          lag: "1",
+          lane: "conversation",
+          maxSeq: "2",
+        }],
+        userId,
+        workspace: {
+          createdAt: FIXED_NOW,
+          nextWakeAt: futureRetryAt,
+          nextWakeReason: "mailbox",
+          redactedStatus: {
+            hostedMailboxRetryableBlockedCount: 1,
+          },
+          snapshotRef: null,
+          updatedAt: FIXED_NOW,
+          userId,
+          version: "1",
+        },
+      }),
+    });
+
+    await expect(harness.invoke()).resolves.toEqual({
+      nextWakeAt: futureRetryAt,
+      nextWakeReason: "mailbox",
+      redactedStatus: {
+        hostedMailboxRetryableBlockedCount: 1,
+      },
+      status: "idle",
+    });
+    await expect(harness.stateStore.readWriteFenceToken()).resolves.toBeNull();
+    expect(harness.ownerReleaseCallCount()).toBe(0);
   });
 });
 
@@ -479,6 +646,7 @@ async function createTransportFailureHarness(input: {
 }): Promise<{
   invoke: (overrides?: { acceptedProcessingAttempt?: boolean }) => Promise<unknown>;
   loggedFailureEntries: () => unknown[];
+  ownerReleaseCallCount: () => number;
   stateStore: RunnerStateStore;
   token: RunnerWriteFenceToken;
 }> {
@@ -486,6 +654,7 @@ async function createTransportFailureHarness(input: {
   vi.setSystemTime(new Date(FIXED_NOW));
 
   const loggedBodies: unknown[] = [];
+  let ownerReleaseCallCount = 0;
   vi.stubGlobal("fetch", async (request: Request | string, init?: RequestInit) => {
     const url = typeof request === "string" ? request : request.url;
     if (url.includes("/hosted-runtime/log")) {
@@ -494,6 +663,10 @@ async function createTransportFailureHarness(input: {
         : await request.clone().text();
       loggedBodies.push(JSON.parse(String(rawBody)));
       return Response.json({ loggedCount: 1 });
+    }
+    if (url.includes(HOSTED_RUNTIME_OWNER_RELEASED_PATH)) {
+      ownerReleaseCallCount += 1;
+      return Response.json({ signaled: true });
     }
     return Response.json({}, { status: 404 });
   });
@@ -555,6 +728,7 @@ async function createTransportFailureHarness(input: {
     loggedFailureEntries: () => loggedBodies.flatMap((body) =>
       parseHostedRuntimeLogRequest(body).entries
     ),
+    ownerReleaseCallCount: () => ownerReleaseCallCount,
     stateStore,
     token,
   };

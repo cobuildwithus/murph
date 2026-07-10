@@ -76,12 +76,12 @@ describe('host support workflow guards', () => {
 
     expect(workflow).toContain('elif [[ "$package_dir" == "packages/assistant-engine" ]]')
     expect(workflow).toContain(
-      'env NODE_OPTIONS=--max-old-space-size=5120 MURPH_VITEST_MAX_WORKERS=50% pnpm --dir "$package_dir" test:coverage',
+      'env NODE_OPTIONS=--max-old-space-size=6144 MURPH_VITEST_MAX_WORKERS=50% pnpm --dir "$package_dir" test:coverage',
     )
     expect(workflow).toContain(
       'env MURPH_VITEST_MAX_WORKERS=50% pnpm --dir "$package_dir" test:coverage',
     )
-    expect(workflow.match(/NODE_OPTIONS=--max-old-space-size=5120/gu) ?? []).toHaveLength(1)
+    expect(workflow.match(/NODE_OPTIONS=--max-old-space-size=6144/gu) ?? []).toHaveLength(1)
   })
 
   it('prepares built CLI runtime artifacts before the host-support setup suite', () => {
