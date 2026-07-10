@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto'
 import {
+  listAutomations,
   loadVault,
   patchAutomation,
   showAutomation,
@@ -747,7 +748,83 @@ export async function applyMurphManagedAutomations(
     result.updated += 1
   }
 
+  result.updated += await reconcileLegacyPersonalHomeAutomationRoutes({
+    input,
+    now,
+    seeds,
+  })
+
   return result
+}
+
+async function reconcileLegacyPersonalHomeAutomationRoutes(input: {
+  input: ApplyMurphManagedAutomationsInput
+  now: Date
+  seeds: readonly MurphManagedAutomationSeed[]
+}): Promise<number> {
+  if (input.input.seeds !== undefined) {
+    return 0
+  }
+
+  const records = (await listAutomations({
+    vaultRoot: input.input.vaultRoot,
+  })).items
+  const managedAutomationIds = new Set(
+    input.seeds.map((seed) => seed.automationId),
+  )
+  const legacyManagedTargets = new Set(
+    records
+      .filter((record) =>
+        managedAutomationIds.has(record.automationId) &&
+        record.status !== 'archived' &&
+        isLegacyBareLinqHomeRoute(record.route)
+      )
+      .map((record) => record.route.deliveryTarget),
+  )
+  if (legacyManagedTargets.size !== 1) {
+    return 0
+  }
+
+  const [legacyHomeTarget] = legacyManagedTargets
+  if (!legacyHomeTarget) {
+    return 0
+  }
+
+  let updated = 0
+  for (const record of records) {
+    if (
+      record.status === 'archived' ||
+      record.route.deliveryTarget !== legacyHomeTarget ||
+      !isLegacyBareLinqHomeRoute(record.route)
+    ) {
+      continue
+    }
+
+    await patchAutomation({
+      lookup: record.automationId,
+      now: input.now,
+      route: {
+        ...record.route,
+        currentRouteSnapshot: true,
+        threadIsDirect: true,
+      },
+      vaultRoot: input.input.vaultRoot,
+    })
+    updated += 1
+  }
+
+  return updated
+}
+
+function isLegacyBareLinqHomeRoute(route: AutomationRoute): boolean {
+  return route.channel === 'linq' &&
+    route.currentRouteSnapshot !== true &&
+    route.deliverySource === null &&
+    Boolean(route.deliveryTarget) &&
+    route.identityId === null &&
+    route.participantId === null &&
+    route.threadId === null &&
+    route.threadIsDirect == null
 }
 
 function markPersonalMurphManagedAutomationSeeds(

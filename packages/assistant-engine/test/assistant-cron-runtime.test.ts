@@ -5145,9 +5145,9 @@ describe('assistant cron runtime orchestration', () => {
         currentRouteSnapshot: true,
         deliverySource: null,
         deliveryTarget: 'old-home-chat',
-        identityId: 'h1_111111111111111111111111',
-        participantId: 'h1_222222222222222222222222',
-        threadId: 'h1_333333333333333333333333',
+        identityId: null,
+        participantId: null,
+        threadId: null,
         threadIsDirect: true,
       },
       schedule: {
@@ -5195,7 +5195,7 @@ describe('assistant cron runtime orchestration', () => {
         bindingDeliveryTarget: 'old-home-chat',
         deliveryKind: 'thread',
         deliveryTarget: null,
-        threadId: 'h1_333333333333333333333333',
+        threadId: null,
         threadIsDirect: true,
       }),
     )

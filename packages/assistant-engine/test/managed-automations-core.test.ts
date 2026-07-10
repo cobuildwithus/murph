@@ -2,6 +2,7 @@ import { rm } from 'node:fs/promises'
 
 import {
   initializeVault,
+  patchAutomation,
   showAutomation,
   upsertAutomation,
 } from '@murphai/core'
@@ -12,6 +13,7 @@ import { serializeHostedEmailThreadTarget } from '@murphai/runtime-state'
 import { afterEach, describe, expect, it } from 'vitest'
 
 import {
+  MURPH_MANAGED_AUTOMATIONS,
   MURPH_ONBOARDING_FOLLOWUP_AUTOMATION,
   MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID,
   MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID,
@@ -327,6 +329,321 @@ describe('applyMurphManagedAutomations core integration', () => {
       automationId: MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID,
       vaultRoot,
     })).resolves.toBeNull()
+  })
+
+  it('upgrades only legacy routes anchored to the personal managed home target', async () => {
+    const vaultRoot = await createVaultRoot()
+    const legacyHomeRoute = {
+      channel: 'linq',
+      deliverySource: null,
+      deliveryTarget: 'legacy-home-chat',
+      identityId: null,
+      participantId: null,
+      threadId: null,
+    }
+    const digestSeed = MURPH_MANAGED_AUTOMATIONS.find(
+      (seed) => seed.automationId === MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID,
+    )
+    if (!digestSeed) {
+      throw new Error('Expected the managed weekly health digest seed.')
+    }
+
+    await applyMurphManagedAutomations({
+      defaultRoute: legacyHomeRoute,
+      now: new Date('2026-07-10T12:00:00.000Z'),
+      seeds: [digestSeed],
+      vaultRoot,
+    })
+    for (const record of [
+      {
+        id: 'automation_01KZ0000000000000000000001',
+        slug: 'user-active',
+        status: 'active' as const,
+      },
+      {
+        id: 'automation_01KZ0000000000000000000002',
+        slug: 'user-paused',
+        status: 'paused' as const,
+      },
+      {
+        id: 'automation_01KZ0000000000000000000003',
+        slug: 'user-archived',
+        status: 'archived' as const,
+      },
+    ]) {
+      await upsertAutomation({
+        automationId: record.id,
+        continuityPolicy: 'fresh',
+        instructions: 'Send the saved reminder.',
+        now: new Date('2026-07-10T12:00:00.000Z'),
+        route: legacyHomeRoute,
+        schedule: { kind: 'dailyLocal', localTime: '09:00' },
+        slug: record.slug,
+        status: record.status,
+        summary: null,
+        tags: ['assistant', 'scheduled'],
+        title: record.slug,
+        vaultRoot,
+      })
+    }
+    await upsertAutomation({
+      automationId: 'automation_01KZ0000000000000000000004',
+      continuityPolicy: 'fresh',
+      instructions: 'Send the group reminder.',
+      now: new Date('2026-07-10T12:00:00.000Z'),
+      route: {
+        ...legacyHomeRoute,
+        identityId: 'group-identity',
+        participantId: 'group-participant',
+        threadId: 'group-thread',
+        threadIsDirect: false,
+      },
+      schedule: { kind: 'dailyLocal', localTime: '09:00' },
+      slug: 'group-reminder',
+      status: 'active',
+      summary: null,
+      tags: ['assistant', 'scheduled'],
+      title: 'Group reminder',
+      vaultRoot,
+    })
+
+    const currentHomeRoute = {
+      ...legacyHomeRoute,
+      currentRouteSnapshot: true,
+      deliveryTarget: 'current-home-chat',
+      threadIsDirect: true,
+    }
+    await expect(applyMurphManagedAutomations({
+      defaultRoute: currentHomeRoute,
+      now: new Date('2026-07-10T12:05:00.000Z'),
+      vaultRoot,
+    })).resolves.toEqual({
+      created: 4,
+      skipped: 1,
+      updated: 3,
+    })
+
+    for (const lookup of [
+      MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID,
+      'automation_01KZ0000000000000000000001',
+      'automation_01KZ0000000000000000000002',
+    ]) {
+      await expect(showAutomation({
+        automationId: lookup,
+        vaultRoot,
+      })).resolves.toMatchObject({
+        route: {
+          currentRouteSnapshot: true,
+          deliveryTarget: 'legacy-home-chat',
+          threadIsDirect: true,
+        },
+      })
+    }
+    await expect(showAutomation({
+      automationId: 'automation_01KZ0000000000000000000003',
+      vaultRoot,
+    })).resolves.toMatchObject({ route: legacyHomeRoute })
+    const groupRecord = await showAutomation({
+      automationId: 'automation_01KZ0000000000000000000004',
+      vaultRoot,
+    })
+    expect(groupRecord?.route).toMatchObject({
+      threadIsDirect: false,
+    })
+    expect(groupRecord?.route).not.toHaveProperty('currentRouteSnapshot')
+
+    await expect(applyMurphManagedAutomations({
+      defaultRoute: currentHomeRoute,
+      now: new Date('2026-07-10T12:10:00.000Z'),
+      vaultRoot,
+    })).resolves.toEqual({
+      created: 0,
+      skipped: 5,
+      updated: 0,
+    })
+  })
+
+  it('does not infer a personal home route from ambiguous managed legacy targets', async () => {
+    const vaultRoot = await createVaultRoot()
+    const firstLegacyRoute = {
+      channel: 'linq',
+      deliverySource: null,
+      deliveryTarget: 'first-legacy-chat',
+      identityId: null,
+      participantId: null,
+      threadId: null,
+    }
+    const secondLegacyRoute = {
+      ...firstLegacyRoute,
+      deliveryTarget: 'second-legacy-chat',
+    }
+    const digestSeed = MURPH_MANAGED_AUTOMATIONS.find(
+      (seed) => seed.automationId === MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID,
+    )
+    const insightSeed = MURPH_MANAGED_AUTOMATIONS.find(
+      (seed) => seed.automationId === MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID,
+    )
+    if (!digestSeed || !insightSeed) {
+      throw new Error('Expected the managed legacy route anchor seeds.')
+    }
+
+    await applyMurphManagedAutomations({
+      defaultRoute: firstLegacyRoute,
+      now: new Date('2026-07-10T12:00:00.000Z'),
+      seeds: [digestSeed],
+      vaultRoot,
+    })
+    await applyMurphManagedAutomations({
+      defaultRoute: secondLegacyRoute,
+      now: new Date('2026-07-10T12:00:00.000Z'),
+      seeds: [insightSeed],
+      vaultRoot,
+    })
+    await upsertAutomation({
+      automationId: 'automation_01KZ0000000000000000000010',
+      continuityPolicy: 'fresh',
+      instructions: 'Send the saved reminder.',
+      now: new Date('2026-07-10T12:00:00.000Z'),
+      route: firstLegacyRoute,
+      schedule: { kind: 'dailyLocal', localTime: '09:00' },
+      slug: 'ambiguous-user-reminder',
+      status: 'active',
+      summary: null,
+      tags: ['assistant', 'scheduled'],
+      title: 'Ambiguous user reminder',
+      vaultRoot,
+    })
+
+    const result = await applyMurphManagedAutomations({
+      defaultRoute: {
+        ...firstLegacyRoute,
+        currentRouteSnapshot: true,
+        deliveryTarget: 'current-home-chat',
+        threadIsDirect: true,
+      },
+      now: new Date('2026-07-10T12:05:00.000Z'),
+      vaultRoot,
+    })
+
+    expect(result.updated).toBe(0)
+    for (const [automationId, route] of [
+      [MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID, firstLegacyRoute],
+      [MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID, secondLegacyRoute],
+      ['automation_01KZ0000000000000000000010', firstLegacyRoute],
+    ] as const) {
+      const record = await showAutomation({ automationId, vaultRoot })
+      expect(record?.route).toMatchObject(route)
+      expect(record?.route).not.toHaveProperty('currentRouteSnapshot')
+      expect(record?.route).not.toHaveProperty('threadIsDirect')
+    }
+  })
+
+  it('excludes archived managed routes from personal home inference', async () => {
+    const vaultRoot = await createVaultRoot()
+    const liveLegacyRoute = {
+      channel: 'linq',
+      deliverySource: null,
+      deliveryTarget: 'live-legacy-chat',
+      identityId: null,
+      participantId: null,
+      threadId: null,
+    }
+    const archivedLegacyRoute = {
+      ...liveLegacyRoute,
+      deliveryTarget: 'archived-legacy-chat',
+    }
+    const digestSeed = MURPH_MANAGED_AUTOMATIONS.find(
+      (seed) => seed.automationId === MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID,
+    )
+    const insightSeed = MURPH_MANAGED_AUTOMATIONS.find(
+      (seed) => seed.automationId === MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID,
+    )
+    if (!digestSeed || !insightSeed) {
+      throw new Error('Expected the managed legacy route anchor seeds.')
+    }
+
+    await applyMurphManagedAutomations({
+      defaultRoute: liveLegacyRoute,
+      now: new Date('2026-07-10T12:00:00.000Z'),
+      seeds: [digestSeed],
+      vaultRoot,
+    })
+    await applyMurphManagedAutomations({
+      defaultRoute: archivedLegacyRoute,
+      now: new Date('2026-07-10T12:00:00.000Z'),
+      seeds: [insightSeed],
+      vaultRoot,
+    })
+    await patchAutomation({
+      lookup: MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID,
+      now: new Date('2026-07-10T12:01:00.000Z'),
+      status: 'archived',
+      vaultRoot,
+    })
+    for (const [automationId, slug, route] of [
+      [
+        'automation_01KZ0000000000000000000020',
+        'live-target-user-reminder',
+        liveLegacyRoute,
+      ],
+      [
+        'automation_01KZ0000000000000000000021',
+        'archived-target-user-reminder',
+        archivedLegacyRoute,
+      ],
+    ] as const) {
+      await upsertAutomation({
+        automationId,
+        continuityPolicy: 'fresh',
+        instructions: 'Send the saved reminder.',
+        now: new Date('2026-07-10T12:00:00.000Z'),
+        route,
+        schedule: { kind: 'dailyLocal', localTime: '09:00' },
+        slug,
+        status: 'active',
+        summary: null,
+        tags: ['assistant', 'scheduled'],
+        title: slug,
+        vaultRoot,
+      })
+    }
+
+    await applyMurphManagedAutomations({
+      defaultRoute: {
+        ...liveLegacyRoute,
+        currentRouteSnapshot: true,
+        deliveryTarget: 'current-home-chat',
+        threadIsDirect: true,
+      },
+      now: new Date('2026-07-10T12:05:00.000Z'),
+      vaultRoot,
+    })
+
+    for (const automationId of [
+      MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID,
+      'automation_01KZ0000000000000000000020',
+    ]) {
+      await expect(showAutomation({ automationId, vaultRoot })).resolves.toMatchObject({
+        route: {
+          currentRouteSnapshot: true,
+          deliveryTarget: 'live-legacy-chat',
+          threadIsDirect: true,
+        },
+      })
+    }
+    for (const automationId of [
+      MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID,
+      'automation_01KZ0000000000000000000021',
+    ]) {
+      const record = await showAutomation({ automationId, vaultRoot })
+      expect(record?.route).toMatchObject(archivedLegacyRoute)
+      expect(record?.route).not.toHaveProperty('currentRouteSnapshot')
+      expect(record?.route).not.toHaveProperty('threadIsDirect')
+    }
+    await expect(showAutomation({
+      automationId: MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID,
+      vaultRoot,
+    })).resolves.toMatchObject({ status: 'archived' })
   })
 
   it('creates hosted overnight memory consolidation through the canonical automation registry', async () => {

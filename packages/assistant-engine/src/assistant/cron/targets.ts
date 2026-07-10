@@ -8,7 +8,6 @@ import type { AutomationRoute } from '@murphai/contracts'
 import {
   type AssistantAutomationRouteValidationProfile,
   getAssistantAutomationRouteDeliverabilityIssue,
-  looksLikePrivateAssistantRoutePlaceholder,
   resolveAssistantDeliveryRouteWithCurrentRoute,
   stripPrivateAssistantRoutePlaceholders,
 } from '@murphai/operator-config/assistant/current-delivery-route'
@@ -269,14 +268,6 @@ function resolveAssistantCronLinqCurrentRouteBindingTarget(
     target.channel !== 'linq' ||
     !deliveryTarget ||
     target.currentRouteSnapshot !== true
-  ) {
-    return null
-  }
-
-  if (
-    !looksLikePrivateAssistantRoutePlaceholder(target.identityId) &&
-    !looksLikePrivateAssistantRoutePlaceholder(target.participantId) &&
-    !looksLikePrivateAssistantRoutePlaceholder(target.threadId)
   ) {
     return null
   }
