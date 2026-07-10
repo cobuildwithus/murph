@@ -523,8 +523,8 @@ export interface CodexAppServerTurnResult {
     reaction: MurphDynamicToolReactionPatch['reaction']
   }[]
   // Completed final-phase agent messages that were followed by a steered user
-  // message and later superseded by another final message in the same turn, in
-  // completion order. Empty unless the turn was steered after the model had
+  // message and later superseded by another response segment in the same turn,
+  // in completion order. Empty unless the turn was steered after the model had
   // already finished an answer.
   precedingAgentMessageSegments: readonly CodexAppServerResponseSegment[]
   additionalUsages: AssistantProviderUsageDraft[]
@@ -2271,15 +2271,13 @@ async function runCodexAppServerTurnOnProcess(
   const isReusedWarmProcess = codexProcess.initializedForRpc
   let lastAgentMessage: string | null = null
   // Completed final-phase agent messages that were followed by a steered
-  // user-message item and then superseded by a newer final message in the
-  // same turn. A closed segment is held as a candidate until a later final
-  // appears; if the turn ends at the steer boundary, that segment remains the
-  // final reply rather than a preceding duplicate.
+  // user-message item and then superseded by a newer response segment in the
+  // same turn. A closed segment is held as a candidate until newer text or
+  // media appears; if the turn ends at the steer boundary, that segment remains
+  // the final reply rather than a preceding duplicate.
   const precedingAgentMessageSegments: CodexAppServerResponseSegment[] = []
   let completedFinalAgentMessage: string | null = null
   let trailingSteerCandidate: CodexAppServerResponseSegment | null = null
-  let trailingSteerCandidateDeliveryContextOrdinal: number | null = null
-  let trailingSteerCandidateMedia: AssistantResponseMedia[] | null = null
   let completedUserMessageOrdinal = -1
   let lastEventError: string | null = null
   let lastEventErrorInfo: CodexStructuredErrorInfo | null = null
@@ -2697,6 +2695,20 @@ async function runCodexAppServerTurnOnProcess(
     }
   }
 
+  // App-server events mutate this state inside the asynchronous message
+  // handler, so finalization reads it through an explicitly typed boundary.
+  const readTrailingSteerCandidate = (): CodexAppServerResponseSegment | null =>
+    trailingSteerCandidate
+
+  const promoteTrailingSteerCandidate = (): void => {
+    if (!trailingSteerCandidate) {
+      return
+    }
+
+    precedingAgentMessageSegments.push(trailingSteerCandidate)
+    trailingSteerCandidate = null
+  }
+
   const notifyProviderRequestStarted = () => {
     if (providerRequestStartedNotified) {
       return
@@ -2852,6 +2864,8 @@ async function runCodexAppServerTurnOnProcess(
   }
 
   const canApplyNoReplyPatch = (deliveryContextOrdinal: number): boolean => {
+    const trailingSteerCandidateOrdinal =
+      trailingSteerCandidate?.deliveryContextOrdinal
     if (
       externallyVisibleAssistantOutputDeliveryContexts.has(deliveryContextOrdinal) ||
       hasPendingExternallyVisibleAssistantOutput(deliveryContextOrdinal)
@@ -2859,9 +2873,8 @@ async function runCodexAppServerTurnOnProcess(
       return false
     }
     if (
-      trailingSteerCandidate !== null &&
-      trailingSteerCandidateDeliveryContextOrdinal !== null &&
-      trailingSteerCandidateDeliveryContextOrdinal < deliveryContextOrdinal
+      typeof trailingSteerCandidateOrdinal === 'number' &&
+      trailingSteerCandidateOrdinal < deliveryContextOrdinal
     ) {
       return false
     }
@@ -3383,12 +3396,7 @@ async function runCodexAppServerTurnOnProcess(
     const completedFinalAgentMessageText =
       extractCodexCompletedFinalAgentMessageTextFromNormalized(normalizedEvent)
     if (completedFinalAgentMessageText !== null && !suppressDeliveryContext) {
-      if (trailingSteerCandidate) {
-        precedingAgentMessageSegments.push(trailingSteerCandidate)
-        trailingSteerCandidate = null
-        trailingSteerCandidateDeliveryContextOrdinal = null
-        trailingSteerCandidateMedia = null
-      }
+      promoteTrailingSteerCandidate()
       completedFinalAgentMessage = completedFinalAgentMessageText
     } else if (isCodexCompletedUserMessageItemFromNormalized(normalizedEvent)) {
       if (completedFinalAgentMessage !== null) {
@@ -3397,10 +3405,10 @@ async function runCodexAppServerTurnOnProcess(
           response: completedFinalAgentMessage,
           media: [...responseMedia],
         }
-        trailingSteerCandidateDeliveryContextOrdinal =
-          trailingSteerCandidate.deliveryContextOrdinal ?? 0
-        trailingSteerCandidateMedia = trailingSteerCandidate.media
         completedFinalAgentMessage = null
+        assistantStreams.clear()
+        assistantStreamOrder.length = 0
+        lastAgentMessage = null
         responseMedia = []
       }
       completedUserMessageOrdinal += 1
@@ -3923,30 +3931,47 @@ async function runCodexAppServerTurnOnProcess(
   const latestFinalActionPatch = resolveFinalActionPatch(
     latestDeliveryContextOrdinal,
   )
+  let finalTrailingSteerCandidate = readTrailingSteerCandidate()
+  const trailingSteerCandidateDeliveryContextOrdinal =
+    finalTrailingSteerCandidate?.deliveryContextOrdinal ?? null
   const trailingSteerCandidateFinalActionPatch =
     trailingSteerCandidateDeliveryContextOrdinal !== null
       ? resolveFinalActionPatch(trailingSteerCandidateDeliveryContextOrdinal)
       : null
   const suppressTrailingSteerCandidateForEarlierNoReply =
     latestFinalActionPatch === null &&
-    trailingSteerCandidate !== null &&
+    finalTrailingSteerCandidate !== null &&
     trailingSteerCandidateFinalActionPatch?.kind === 'none'
-  const finalPrecedingAgentMessageSegments =
-    latestFinalActionPatch?.kind === 'none' && trailingSteerCandidate
-      ? [...precedingAgentMessageSegments, trailingSteerCandidate]
-      : precedingAgentMessageSegments
+  const shouldPromoteTrailingSteerCandidate =
+    finalTrailingSteerCandidate !== null &&
+    (
+      latestFinalActionPatch?.kind === 'none' ||
+      (
+        !suppressTrailingSteerCandidateForEarlierNoReply &&
+        (
+          normalizeNullableString(extractedFinalMessage) !== null ||
+          responseMedia.length > 0
+        )
+      )
+    )
+  if (shouldPromoteTrailingSteerCandidate) {
+    promoteTrailingSteerCandidate()
+    finalTrailingSteerCandidate = null
+  }
+  const selectedFinalMessage =
+    finalTrailingSteerCandidate?.response ?? extractedFinalMessage
   const finalResponseMedia =
     latestFinalActionPatch?.kind === 'none'
       ? responseMedia
       : suppressTrailingSteerCandidateForEarlierNoReply
         ? responseMedia
-        : trailingSteerCandidateMedia ?? responseMedia
+        : finalTrailingSteerCandidate?.media ?? responseMedia
   const finalDeliveryContextOrdinal =
     latestFinalActionPatch?.kind === 'none'
       ? latestDeliveryContextOrdinal
       : suppressTrailingSteerCandidateForEarlierNoReply
         ? latestDeliveryContextOrdinal
-        : trailingSteerCandidateDeliveryContextOrdinal ??
+        : finalTrailingSteerCandidate?.deliveryContextOrdinal ??
           latestDeliveryContextOrdinal
   const finalActionPatch = resolveFinalActionPatch(finalDeliveryContextOrdinal)
   const noReplySelected = finalActionPatch?.kind === 'none'
@@ -3956,7 +3981,7 @@ async function runCodexAppServerTurnOnProcess(
   const finalMessage =
     noReplySelected || suppressTrailingSteerCandidateForEarlierNoReply
       ? ''
-      : extractedFinalMessage
+      : selectedFinalMessage
   if (
     noReplySelected &&
     normalizeNullableString(extractedFinalMessage) !== null
@@ -3968,7 +3993,7 @@ async function runCodexAppServerTurnOnProcess(
       suppressedTextLength: extractedFinalMessage.length,
     })
   }
-  const filteredPrecedingAgentMessageSegments = finalPrecedingAgentMessageSegments
+  const filteredPrecedingAgentMessageSegments = precedingAgentMessageSegments
     .filter((segment) => !shouldSuppressDeliveryContext(
       segment.deliveryContextOrdinal,
     ))
@@ -3976,7 +4001,7 @@ async function runCodexAppServerTurnOnProcess(
     finalActionPatches.some((entry) => entry.patch.kind === 'none') ||
     suppressTrailingSteerCandidateForEarlierNoReply ||
     filteredPrecedingAgentMessageSegments.length !==
-      finalPrecedingAgentMessageSegments.length
+      precedingAgentMessageSegments.length
   const finalHasDeliverableOutput =
     normalizeNullableString(finalMessage) !== null ||
     (!noReplySelected && finalResponseMedia.length > 0)

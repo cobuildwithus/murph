@@ -306,6 +306,7 @@ async function runCodexResponseMediaToolTurn(
 
 async function runCodexTelegramVoiceMemoOnlyTurn(input: {
   commentaryText?: string
+  precedingFinalText?: string
   progressDelivery?: CodexAppServerTurnInput['progressDelivery']
 } = {}) {
   const workingDirectory = await createTempDir('assistant-codex-voice-memo-only-work-')
@@ -360,6 +361,39 @@ async function runCodexTelegramVoiceMemoOnlyTurn(input: {
             },
           },
         }))
+
+        if (input.precedingFinalText) {
+          child.stdout.write(jsonLine({
+            method: 'item/completed',
+            params: {
+              item: {
+                id: 'user-before-voice-memo-steer',
+                type: 'user_message',
+                message: 'Answer this first',
+              },
+            },
+          }))
+          child.stdout.write(jsonLine({
+            method: 'item/completed',
+            params: {
+              item: {
+                id: 'assistant-before-voice-memo-steer',
+                type: 'assistant_message',
+                message: input.precedingFinalText,
+              },
+            },
+          }))
+          child.stdout.write(jsonLine({
+            method: 'item/completed',
+            params: {
+              item: {
+                id: 'user-voice-memo-steer',
+                type: 'user_message',
+                message: 'Send that as a voice memo instead',
+              },
+            },
+          }))
+        }
 
         if (input.commentaryText) {
           child.stdout.write(jsonLine({
@@ -1225,6 +1259,33 @@ describe('assistant codex runtime', () => {
       source: 'model',
     })
     expect(result.finalMessage).toBe('')
+    expect(result.responseMedia).toEqual([
+      expect.objectContaining({
+        kind: 'voice_memo',
+      }),
+    ])
+  })
+
+  it('keeps a steered voice-only response in the current response segment', async () => {
+    const commentaryText = 'I’ll record that now.'
+    const precedingFinalText = 'Earlier answer.'
+    const progressDelivery = createProgressDeliveryMock()
+
+    const result = await runCodexTelegramVoiceMemoOnlyTurn({
+      commentaryText,
+      precedingFinalText,
+      progressDelivery,
+    })
+
+    expect(progressDelivery.send).toHaveBeenCalledTimes(1)
+    expect(result.finalMessage).toBe('')
+    expect(result.precedingAgentMessageSegments).toEqual([
+      {
+        deliveryContextOrdinal: 0,
+        response: precedingFinalText,
+        media: [],
+      },
+    ])
     expect(result.responseMedia).toEqual([
       expect.objectContaining({
         kind: 'voice_memo',
@@ -13770,6 +13831,39 @@ describe('steered final segments', () => {
 
     expect(result.finalMessage).toBe('Answer one.')
     expect(result.precedingAgentMessageSegments).toEqual([])
+  })
+
+  it('promotes a trailing-steer answer when the current segment has fallback text', async () => {
+    const result = await runScriptedSteeredFinalSegmentsTurn([
+      completedItemEvent({
+        id: 'assistant-1',
+        type: 'assistant_message',
+        message: 'Answer one.',
+      }),
+      completedItemEvent({
+        id: 'user-2',
+        type: 'user_message',
+        message: 'Answer this differently',
+      }),
+      {
+        method: 'item/agentMessage/delta',
+        params: {
+          delta: 'Answer two from fallback.',
+          itemId: 'assistant-2',
+          threadId: 'thread-steered-finals',
+          turnId: 'turn-steered-finals',
+        },
+      },
+    ])
+
+    expect(result.finalMessage).toBe('Answer two from fallback.')
+    expect(result.precedingAgentMessageSegments).toEqual([
+      {
+        deliveryContextOrdinal: 0,
+        response: 'Answer one.',
+        media: [],
+      },
+    ])
   })
 
   it('keeps repeated same-text final answers when they are distinct steered segments', async () => {
