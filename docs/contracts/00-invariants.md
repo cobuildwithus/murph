@@ -131,6 +131,28 @@ executable tests.
 - A guard or authority change is complete only when every path to the protected
   effect routes through it durably or is proved unreachable.
 
+## Conversation-First Product Control
+
+- A new or materially changed member-facing setting, query, or user-initiated
+  product action is complete only when the member can request and complete its
+  discrete outcome in a normal supported conversation, then receive a
+  trustworthy result or durable confirmation. The assistant reaches the
+  capability through an assistant-accessible typed CLI command or headless
+  product operation; an otherwise routine outcome cannot require a web page as
+  its only control path.
+- Web and conversation adapters route through the same canonical owner and its
+  applicable validation, authorization, confirmation, and audit rules. Neither
+  may create a second mutation owner, source of truth, or surface-specific
+  business policy. A command that the production assistant cannot discover or
+  invoke does not satisfy this rule.
+- If an irreducible step needs another surface, the owning product spec records
+  the narrow exception allowed by `agent-docs/PRODUCT_SENSE.md`. Conversation
+  still handles every safe surrounding step and the smallest authorized
+  handoff. Capability parity does not require reproducing browser presentation
+  in chat.
+- Conversation access never weakens identity, authentication, consent, privacy,
+  recipient, payment, confirmation, or irreversible-effect controls.
+
 ## Ordered Progress And Bounded Work
 
 - Cursors, watermarks, sequences, pending-input indexes, and pagination use one
