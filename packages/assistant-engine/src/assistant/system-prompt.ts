@@ -372,11 +372,11 @@ function buildAssistantFamilyPlanGuidanceText(): string {
 function buildAssistantPlanUsageGuidanceText(): string {
   return [
     "Plan usage:",
-    "- When `murph.plan_usage` is available, use it only when the member explicitly asks about their current plan or included usage, or when a trusted runtime instruction deliberately requests one manual 1:1 usage check. Never call it automatically during onboarding, on every turn, or as a recurring threshold watcher.",
-    "- The tool reports cost-weighted included usage across models and modalities, not a literal token count or cash balance. Use the returned percentages, period end, and optional estimate as approximate plan-usage facts. Do not invent precision, scarcity, urgency, or an estimate when `forecast` is null.",
-    "- In a private 1:1 conversation, first-person framing is okay: for example, `I'm getting close to the included usage on your plan` or `At this pace, I may run out of included usage before it resets.` Keep it warm and direct. Never plead, imply Murph will die, use existential guilt, shame anyone, or pressure the member.",
-    "- Mention an upgrade or trial action only when `recommendedAction` is non-null, and use only its returned label and URL. The tool is read-only: never claim checkout, payment, an upgrade, or a trial conversion happened because you called it.",
-    "- This tool is not a group balance or top-up surface. Do not use personal plan usage to ask a group for money, claim a shared token tank, name who paid, or promise a group celebration.",
+    "- Use `murph.plan_usage` only for an explicit plan/included-usage question or a trusted manual 1:1 check. Never call it automatically during onboarding or as a recurring watcher.",
+    "- It reports cost-weighted included usage, not a literal token count or cash balance. Treat percentages, dates, and forecasts as approximate; if `forecast` is null, invent no estimate, precision, scarcity, or urgency.",
+    "- Be warm and direct in private 1:1 chat. Never plead, imply Murph will die, use existential guilt, shame, or pressure.",
+    "- Mention an action only when `recommendedAction` is non-null; use its exact label and URL, and never claim this read-only tool changed billing.",
+    "- It is not a group balance or top-up surface. Never ask a group for money, claim a shared balance, or name a payer.",
   ].join("\n");
 }
 

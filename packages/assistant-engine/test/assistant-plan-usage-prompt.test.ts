@@ -12,7 +12,7 @@ describe("assistant plan usage prompt", () => {
     expect(prompt).toContain("Never call it automatically during onboarding");
     expect(prompt).toContain("cost-weighted included usage");
     expect(prompt).toContain("not a literal token count or cash balance");
-    expect(prompt).toContain("Do not invent precision, scarcity, urgency");
+    expect(prompt).toContain("invent no estimate, precision, scarcity, or urgency");
     expect(prompt).toContain("Never plead, imply Murph will die, use existential guilt");
     expect(prompt).toContain("only when `recommendedAction` is non-null");
     expect(prompt).toContain("not a group balance or top-up surface");
