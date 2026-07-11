@@ -485,7 +485,7 @@ describe("hosted-local run CLI", () => {
 
     expect(runHostedLocalE2eSuite).toHaveBeenCalledWith(expect.objectContaining({
       prepareRunnerBundle: false,
-      scenario: "linq-webhook",
+      scenario: ["linq-webhook"],
     }));
     expect(updateHostedLocalHarnessState).toHaveBeenLastCalledWith(
       expect.objectContaining({ status: "running" }),
@@ -495,6 +495,43 @@ describe("hosted-local run CLI", () => {
       "Hosted-local E2E stopped (SIGINT): .artifacts/hosted-local/test/state.json",
     );
     expect(output.text()).not.toContain("Hosted-local E2E complete");
+  });
+
+  test("passes named E2E scenarios to one prepared suite", async () => {
+    const output = createBufferedStdout();
+
+    await runHostedLocalCli([
+      "e2e",
+      "linq-delivery",
+      "temporal-orchestration",
+      "--no-bundle",
+    ], {
+      env: {},
+      stdout: output.stdout,
+    });
+
+    expect(runHostedLocalE2eSuite).toHaveBeenCalledWith(expect.objectContaining({
+      prepareRunnerBundle: false,
+      scenario: ["linq-first-contact", "temporal-orchestration"],
+    }));
+    expect(createHostedLocalHarnessState).toHaveBeenCalledWith(expect.objectContaining({
+      runIdSuffix: "group-2",
+    }));
+    expect(output.text()).toContain("Hosted-local E2E complete");
+  });
+
+  test("keeps the aggregate E2E state suffix compact", async () => {
+    await runHostedLocalCli(["e2e", "--no-bundle"], {
+      env: {},
+      stdout: createBufferedStdout().stdout,
+    });
+
+    expect(createHostedLocalHarnessState).toHaveBeenCalledWith(expect.objectContaining({
+      runIdSuffix: "all",
+    }));
+    expect(runHostedLocalE2eSuite).toHaveBeenCalledWith(expect.objectContaining({
+      scenario: expect.arrayContaining(["checkpoint-baseline", "linq-first-contact"]),
+    }));
   });
 
   test("aborts startup and stops the stack when hosted-local up is interrupted before the stack returns", async () => {
