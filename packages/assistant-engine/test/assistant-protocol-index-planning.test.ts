@@ -239,6 +239,7 @@ describe('assistant protocol index planning', () => {
     )
     expect(notificationToolNames).toContain('generate_image')
     expect(notificationToolNames).toContain('attach_response_media')
+    expect(notificationToolNames).not.toContain('assistant_style')
     expect(notificationPlan.systemPrompt).toContain('hypertension')
     expect(notificationPlan.systemPrompt).toContain('device sync pending')
     expect(notificationPlan.systemPrompt).toContain('Notification execution rules:')
@@ -271,6 +272,9 @@ describe('assistant protocol index planning', () => {
     expect(conversationNotificationPlan.systemPrompt).not.toContain(
       'Humor 10/10',
     )
+    expect(
+      conversationNotificationPlan.dynamicTools.map((tool) => tool.name),
+    ).not.toContain('assistant_style')
   })
 
   it('soft-fails to an empty assistant protocol index when generated artifacts are unavailable', async () => {

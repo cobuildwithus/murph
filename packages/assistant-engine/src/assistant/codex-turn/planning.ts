@@ -463,6 +463,10 @@ export async function resolveAssistantRouteTurnPlan(input: {
       audience.channel === null &&
       audience.explicitTarget === null &&
       audience.threadId === null)
+  const assistantStyleSettingsAvailable =
+    privateInteractiveAudience &&
+    input.profile.promptProfile === 'conversation' &&
+    input.profile.toolProfile === 'provider-turn'
   const diagnosticsPolicy = resolveAssistantDiagnosticsPolicy({
     channel: resolvedChannel,
     executionContext: input.input.executionContext,
@@ -566,11 +570,10 @@ export async function resolveAssistantRouteTurnPlan(input: {
             assistantSupportedExperimentProtocols,
             assistantToolNameAliases,
             assistantPersonality:
-              input.profile.toolProfile === 'provider-turn' &&
-              privateInteractiveAudience
+              assistantStyleSettingsAvailable
                 ? preferenceContext.assistantPersonality
                 : null,
-            assistantStyleSettingsAvailable: privateInteractiveAudience,
+            assistantStyleSettingsAvailable,
             assistantTone: preferenceContext.assistantTone,
             cliAccess: input.sharedPlan.cliAccess,
             channel: resolvedChannel,
@@ -627,7 +630,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
   const dynamicTools = maintenanceTurn
     ? []
     : resolveMurphDynamicTools({
-        assistantStyleSettingsAvailable: privateInteractiveAudience,
+        assistantStyleSettingsAvailable,
         allowFinishWithoutReply,
         allowMessageReactions: messageReactionsAvailable,
         computerToolsAvailable:

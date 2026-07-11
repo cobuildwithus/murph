@@ -178,6 +178,13 @@ The dials never change notification eligibility or frequency, quiet hours, tool 
 
 Personality dials apply only to the member's private interactive conversation. Group behavior remains owned by the current group context and the group-chat and group-comedy rules. Turn planning may read the shared preferences document for existing tone and voice behavior, but a group prompt never receives, advertises, exposes, or applies a member's private dials, and Murph does not mutate them from a group. Assistant turns receive a headless style operation only when the exact current route is private and direct; group and indeterminate routes omit both that operation and all prompt or assistant CLI contract references to the style surface.
 
+The raw style CLI hard cut is effective only after every old assistant runner
+bundle has drained or restarted. A gradual rollout that leaves warm older
+bundles serving turns leaves the retired shell command reachable, so deploy the
+runner/CLI change as an immediate convergence and verify the live fleet reports
+the new bundle before treating the audience boundary as active. The first
+personality-aware reader/writer release remains the rollback floor.
+
 A future group-level style control needs separate group-scoped authority and storage. It must not reuse a member's private preference as room-wide truth.
 
 ## Hosted Tone And Voice
