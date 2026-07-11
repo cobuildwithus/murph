@@ -71,6 +71,7 @@ import {
 } from "./group-newsletter";
 import {
   createHostedGroupJoinLinkForOwnedThreadContainerTx,
+  leaveHostedGroupMemberTx,
   readHostedGroupByRuntimeMemberId,
   recordHostedGroupJoinOfferTx,
   revokeHostedGroupMemberEmailShareTx,
@@ -93,6 +94,7 @@ export type HostedRuntimeGroupToolAccessClassification =
 
 export const HOSTED_RUNTIME_GROUP_TOOL_ACCESS_CLASSIFICATION = {
   create_join_link: "owner_active",
+  leave_current: "participant_aware",
   post_join_offer: "owner_active",
   preflight_set_chat_avatar: "owner_active",
   read_chat_participants: "participant_aware",
@@ -164,6 +166,13 @@ export async function handleHostedRuntimeGroupTool(input: {
 
   if (input.request.action === "revoke_own_email_share") {
     return handleHostedRuntimeGroupRevokeOwnEmailShare({
+      memberId: input.memberId,
+      selfOptOut: input.request.selfOptOut ?? null,
+    });
+  }
+
+  if (input.request.action === "leave_current") {
+    return handleHostedRuntimeGroupLeaveCurrent({
       memberId: input.memberId,
       selfOptOut: input.request.selfOptOut ?? null,
     });
@@ -305,9 +314,9 @@ async function handleHostedRuntimeGroupRevokeOwnEmailShare(input: {
   }
 
   const prisma = getPrisma();
-  let participant: Awaited<ReturnType<typeof lookupSelfOptOutParticipantMember>> | null;
+  let participant: Awaited<ReturnType<typeof lookupSelfServiceParticipantMember>> | null;
   try {
-    participant = await lookupSelfOptOutParticipantMember({
+    participant = await lookupSelfServiceParticipantMember({
       context: input.selfOptOut,
       prisma,
     });
@@ -350,7 +359,60 @@ async function handleHostedRuntimeGroupRevokeOwnEmailShare(input: {
   };
 }
 
-async function lookupSelfOptOutParticipantMember(input: {
+async function handleHostedRuntimeGroupLeaveCurrent(input: {
+  memberId: string;
+  selfOptOut: HostedRuntimeGroupToolSelfOptOutContext | null;
+}): Promise<HostedRuntimeGroupToolResponse> {
+  const unavailable = (unavailableReason: string): HostedRuntimeGroupToolResponse => ({
+    action: "leave_current",
+    result: { status: "unavailable", unavailableReason },
+  });
+
+  if (!input.selfOptOut) {
+    return unavailable("sender_unavailable");
+  }
+
+  const prisma = getPrisma();
+  let participant: Awaited<ReturnType<typeof lookupSelfServiceParticipantMember>> | null;
+  try {
+    participant = await lookupSelfServiceParticipantMember({
+      context: input.selfOptOut,
+      prisma,
+    });
+  } catch {
+    return unavailable("membership_lookup_unavailable");
+  }
+  if (!participant) {
+    return unavailable("member_unresolved");
+  }
+
+  const left = await prisma.$transaction(async (tx) => leaveHostedGroupMemberTx({
+    groupRuntimeMemberId: input.memberId,
+    memberId: participant.core.id,
+    tx,
+  }), HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+  if (left.kind === "group_not_found") {
+    return unavailable(left.kind);
+  }
+  if (left.kind === "already_left" || left.kind === "owner_cannot_leave") {
+    return {
+      action: "leave_current",
+      result: { status: left.kind },
+    };
+  }
+
+  await signalVaultShareCleanupRuntimesBestEffort(left.vaultShareCleanupSignals);
+  return {
+    action: "leave_current",
+    result: {
+      cleanupPending: left.revokedCount > 0,
+      revokedShareCount: left.revokedCount,
+      status: "left",
+    },
+  };
+}
+
+async function lookupSelfServiceParticipantMember(input: {
   context: HostedRuntimeGroupToolSelfOptOutContext;
   prisma: ReturnType<typeof getPrisma>;
 }) {

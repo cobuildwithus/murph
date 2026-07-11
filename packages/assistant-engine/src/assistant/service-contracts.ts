@@ -226,6 +226,8 @@ export type {
   AssistantGeneratedImageContentType,
   AssistantHostedGeneratedImageUploadInput,
   AssistantHostedGeneratedImageUploader,
+  AssistantHostedGroupTool,
+  AssistantHostedGroupToolRequestContext,
   AssistantHostedExecutionContext,
   AssistantHostedProgressDeliveryDependencies,
 } from './execution-context.js'

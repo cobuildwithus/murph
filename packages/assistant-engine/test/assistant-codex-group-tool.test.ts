@@ -75,6 +75,7 @@ describe("murph.group dynamic tool", () => {
       "set_chat_avatar",
       "share_contact_card",
       "revoke_own_email_share",
+      "leave_current",
     ]);
     expect(MURPH_GROUP_TOOL.inputSchema.properties.requestedVaultShareProjectionScopes.maxItems)
       .toBe(HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES.length);
@@ -112,6 +113,9 @@ describe("murph.group dynamic tool", () => {
       .toContain("{{share_scope}}");
     expect(MURPH_GROUP_TOOL.inputSchema.properties.messageTemplate.description)
       .toContain("Include {{join_url}} exactly once");
+    expect(MURPH_GROUP_TOOL.description).toContain('action="leave_current"');
+    expect(MURPH_GROUP_TOOL.description).toContain("shared-projection cleanup is pending");
+    expect(MURPH_GROUP_TOOL.description).toContain("does not erase historical chat messages");
   });
 
   it("parses the chat-scoped actions without accepting a model-supplied thread target", () => {
@@ -156,6 +160,13 @@ describe("murph.group dynamic tool", () => {
     });
 
     expect(readMurphDynamicToolRequest(groupToolCall({
+      action: "leave_current",
+    }))).toEqual({
+      kind: "group",
+      request: { action: "leave_current" },
+    });
+
+    expect(readMurphDynamicToolRequest(groupToolCall({
       action: "share_contact_card",
       linqThread: { chatId: "chat_hijack" },
     }))?.kind).toBe("invalid-group-arguments");
@@ -175,6 +186,21 @@ describe("murph.group dynamic tool", () => {
     expect(readMurphDynamicToolRequest(groupToolCall({
       action: "revoke_own_email_share",
       selfOptOut: { senderHandle: "member@example.test", source: "email" },
+    }))?.kind).toBe("invalid-group-arguments");
+
+    expect(readMurphDynamicToolRequest(groupToolCall({
+      action: "leave_current",
+      memberId: "member_hijack",
+    }))?.kind).toBe("invalid-group-arguments");
+
+    expect(readMurphDynamicToolRequest(groupToolCall({
+      action: "leave_current",
+      groupId: "group_hijack",
+    }))?.kind).toBe("invalid-group-arguments");
+
+    expect(readMurphDynamicToolRequest(groupToolCall({
+      action: "leave_current",
+      selfOptOut: { senderHandle: "+15550000001", source: "linq" },
     }))?.kind).toBe("invalid-group-arguments");
   });
 

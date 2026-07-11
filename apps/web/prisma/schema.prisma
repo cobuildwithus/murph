@@ -1092,6 +1092,7 @@ model HostedGroupMember {
   memberId  String       @map("member_id")
   role      String       @default("member")
   joinedAt  DateTime?    @map("joined_at")
+  leftAt    DateTime?    @map("left_at")
   createdAt DateTime     @default(now()) @map("created_at")
   updatedAt DateTime     @updatedAt @map("updated_at")
   group     HostedGroup  @relation(fields: [groupId], references: [id], onDelete: Cascade)

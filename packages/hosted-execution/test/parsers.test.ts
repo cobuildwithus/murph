@@ -649,6 +649,19 @@ describe("parseHostedRuntimeGroupTool", () => {
       action: "preflight_set_chat_avatar",
     });
     expect(parseHostedRuntimeGroupToolRequest({
+      action: "leave_current",
+      selfOptOut: {
+        senderHandle: "+15555550123",
+        source: "linq",
+      },
+    })).toEqual({
+      action: "leave_current",
+      selfOptOut: {
+        senderHandle: "+15555550123",
+        source: "linq",
+      },
+    });
+    expect(parseHostedRuntimeGroupToolRequest({
       action: "revoke_own_email_share",
       selfOptOut: {
         senderHandle: "person@example.test",
@@ -807,6 +820,12 @@ describe("parseHostedRuntimeGroupTool", () => {
         groupChatIconUrl: "https://example.com/avatar.png",
       })
     ).toThrow(/not allowed/u);
+    expect(() =>
+      parseHostedRuntimeGroupToolRequest({
+        action: "leave_current",
+        selfOptOut: { senderHandle: "+15555550123", source: "sms" },
+      })
+    ).toThrow(/not supported/u);
     expect(() =>
       parseHostedRuntimeGroupToolRequest({
         action: "revoke_own_email_share",
@@ -1321,6 +1340,57 @@ describe("parseHostedRuntimeGroupTool", () => {
         result: { revokedCount: 2, status: "revoked" },
       })
     ).toThrow(/must be 1/u);
+  });
+
+  it("parses leave_current responses and preserves cleanup state", () => {
+    expect(parseHostedRuntimeGroupToolResponse({
+      action: "leave_current",
+      result: { cleanupPending: true, revokedShareCount: 2, status: "left" },
+    })).toEqual({
+      action: "leave_current",
+      result: { cleanupPending: true, revokedShareCount: 2, status: "left" },
+    });
+    expect(parseHostedRuntimeGroupToolResponse({
+      action: "leave_current",
+      result: { cleanupPending: false, revokedShareCount: 0, status: "left" },
+    })).toEqual({
+      action: "leave_current",
+      result: { cleanupPending: false, revokedShareCount: 0, status: "left" },
+    });
+    for (const status of ["already_left", "owner_cannot_leave"] as const) {
+      expect(parseHostedRuntimeGroupToolResponse({
+        action: "leave_current",
+        result: { status },
+      })).toEqual({
+        action: "leave_current",
+        result: { status },
+      });
+    }
+    expect(parseHostedRuntimeGroupToolResponse({
+      action: "leave_current",
+      result: { status: "unavailable", unavailableReason: "sender_unavailable" },
+    })).toEqual({
+      action: "leave_current",
+      result: { status: "unavailable", unavailableReason: "sender_unavailable" },
+    });
+    expect(() =>
+      parseHostedRuntimeGroupToolResponse({
+        action: "leave_current",
+        result: { cleanupPending: false, revokedShareCount: 1, status: "left" },
+      })
+    ).toThrow(/must match/u);
+    expect(() =>
+      parseHostedRuntimeGroupToolResponse({
+        action: "leave_current",
+        result: { cleanupPending: true, revokedShareCount: 0, status: "left" },
+      })
+    ).toThrow(/must match/u);
+    expect(() =>
+      parseHostedRuntimeGroupToolResponse({
+        action: "leave_current",
+        result: { revokedShareCount: 0, status: "already_left" },
+      })
+    ).toThrow(/not allowed/u);
   });
 });
 

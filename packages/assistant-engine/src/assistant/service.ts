@@ -25,6 +25,8 @@ export type {
   AssistantGeneratedImageContentType,
   AssistantHostedGeneratedImageUploadInput,
   AssistantHostedGeneratedImageUploader,
+  AssistantHostedGroupTool,
+  AssistantHostedGroupToolRequestContext,
   AssistantMessageInput,
   AssistantHostedExecutionContext,
   AssistantHostedProgressDeliveryDependencies,

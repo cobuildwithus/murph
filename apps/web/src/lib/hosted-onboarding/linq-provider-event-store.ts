@@ -21,6 +21,19 @@ import { sha256Hex } from "../primitives";
 
 type HostedLinqProviderEventClient = PrismaClient | Prisma.TransactionClient;
 
+export async function readHostedLinqProviderEventReceivedAt(input: {
+  eventId: string;
+  prisma: HostedLinqProviderEventClient;
+}): Promise<Date | null> {
+  const event = await input.prisma.hostedLinqProviderEvent.findUnique({
+    where: {
+      eventId: createHostedLinqProviderEventLookupKey(input.eventId),
+    },
+    select: { receivedAt: true },
+  });
+  return event?.receivedAt ?? null;
+}
+
 export async function ingestHostedLinqProviderEventTx(input: {
   event: ParsedHostedLinqProviderEvent;
   prisma: HostedLinqProviderEventClient;

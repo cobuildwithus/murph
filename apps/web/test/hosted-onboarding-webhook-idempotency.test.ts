@@ -1,6 +1,8 @@
 import { HostedBillingStatus } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+const REACTION_RECEIVED_AT = new Date("2026-03-26T12:00:01.000Z");
+
 const mocks = vi.hoisted(() => ({
   acquireHostedMemberHomeLinqRecipientAssignmentLockTx: vi.fn(),
   claimHostedLinqOnboardingLinkNotice: vi.fn(),
@@ -377,6 +379,7 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
           reactionType: "like",
         }),
         prisma,
+        receivedAt: REACTION_RECEIVED_AT,
       }),
     );
     expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
@@ -433,6 +436,9 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
     });
 
     expect(mocks.handleHostedGroupJoinOfferReaction).toHaveBeenCalledTimes(2);
+    expect(mocks.handleHostedGroupJoinOfferReaction.mock.calls.map(([input]) =>
+      input.receivedAt
+    )).toEqual([REACTION_RECEIVED_AT, REACTION_RECEIVED_AT]);
     expect(confirmationAttempts).toBe(2);
     expect(membershipCreates).toBe(1);
   });
@@ -1179,6 +1185,7 @@ function createPrismaStub() {
     hostedLinqProviderEvent: {
       createMany: vi.fn().mockResolvedValue({ count: 1 }),
       findFirst: vi.fn().mockResolvedValue(null),
+      findUnique: vi.fn().mockResolvedValue({ receivedAt: REACTION_RECEIVED_AT }),
     },
     hostedInvite: {
       findUnique: vi.fn().mockResolvedValue({

@@ -119,6 +119,19 @@ export type HostedGroupMemberEmailShareRevocationTxResult =
       vaultShareCleanupSignals: [];
     };
 
+export type HostedGroupMemberLeaveTxResult =
+  | {
+      groupId: string;
+      kind: "left";
+      revokedCount: number;
+      vaultShareCleanupSignals: HostedVaultShareCleanupSignal[];
+    }
+  | {
+      kind: "already_left" | "group_not_found" | "owner_cannot_leave";
+      revokedCount: 0;
+      vaultShareCleanupSignals: [];
+    };
+
 export const HOSTED_GROUP_VAULT_SHARE_GRANT_LIMIT_PER_GRANTOR_PROJECTION = 25;
 export const HOSTED_GROUP_VAULT_SHARE_DESTINATION_LIMIT_PER_PROJECTION = 100;
 const DEFAULT_HOSTED_GROUP_REQUESTED_VAULT_SHARE_PROJECTION_KINDS = [
@@ -420,9 +433,13 @@ export async function readHostedGroupJoinView(input: {
       joinPolicyJson: true,
       kind: true,
       runtimeMemberId: true,
-      _count: { select: { members: true } },
+      _count: {
+        select: {
+          members: { where: { leftAt: null } },
+        },
+      },
       members: {
-        where: { memberId: viewerMemberId },
+        where: { leftAt: null, memberId: viewerMemberId },
         select: { id: true },
         take: 1,
       },
@@ -484,6 +501,7 @@ export async function acceptHostedGroupJoinCodeTx(input: {
     memberId: input.memberId,
     now: input.now,
     policyProjectionScopes: null,
+    rejectReactionAtOrBeforeLeave: false,
     selectedVaultShareProjectionScopes:
       input.selectedVaultShareProjectionScopes
       ?? fixedProjectionKindsToScopes(input.selectedVaultShareProjectionKinds ?? []),
@@ -665,6 +683,7 @@ export async function acceptHostedGroupJoinOfferTx(input: {
     memberId: input.memberId,
     now: input.now,
     policyProjectionScopes: selectedVaultShareProjectionScopes,
+    rejectReactionAtOrBeforeLeave: true,
     selectedVaultShareProjectionScopes,
     tx: input.tx,
   });
@@ -707,13 +726,14 @@ async function acceptHostedGroupJoinTx(input: {
   memberId: string;
   now: Date;
   policyProjectionScopes: readonly HostedVaultShareProjectionScope[] | null;
+  rejectReactionAtOrBeforeLeave: boolean;
   selectedVaultShareProjectionScopes: readonly HostedVaultShareProjectionScope[];
   tx: Prisma.TransactionClient;
 }): Promise<HostedGroupJoinAcceptanceTxResult> {
   await lockHostedGroupRow(input.tx, input.groupId);
   const group = await input.tx.hostedGroup.findUnique({
     where: { id: input.groupId },
-    select: { id: true, joinPolicyJson: true, runtimeMemberId: true },
+    select: { id: true, joinPolicyJson: true, ownerMemberId: true, runtimeMemberId: true },
   });
   if (!group) {
     throw hostedOnboardingError({
@@ -774,7 +794,7 @@ async function acceptHostedGroupJoinTx(input: {
 
   const existingMembership = await input.tx.hostedGroupMember.findUnique({
     where: { groupId_memberId: { groupId: group.id, memberId: input.memberId } },
-    select: { id: true },
+    select: { id: true, leftAt: true },
   });
   let membershipId: string;
   let alreadyMember = false;
@@ -785,11 +805,33 @@ async function acceptHostedGroupJoinTx(input: {
         groupId: group.id,
         joinedAt: input.now,
         memberId: input.memberId,
-        role: "member",
+        role: group.ownerMemberId === input.memberId ? "owner" : "member",
       },
       select: { id: true },
     });
     membershipId = created.id;
+  } else if (existingMembership.leftAt) {
+    if (
+      input.rejectReactionAtOrBeforeLeave
+      && input.now.getTime() <= existingMembership.leftAt.getTime()
+    ) {
+      throw hostedOnboardingError({
+        code: "HOSTED_GROUP_JOIN_REACTION_PREDATES_LEAVE",
+        httpStatus: 409,
+        message: "This reaction was recorded before you left the group.",
+        retryable: false,
+      });
+    }
+    const rejoined = await input.tx.hostedGroupMember.update({
+      where: { id: existingMembership.id },
+      data: {
+        joinedAt: input.now,
+        leftAt: null,
+        role: group.ownerMemberId === input.memberId ? "owner" : "member",
+      },
+      select: { id: true },
+    });
+    membershipId = rejoined.id;
   } else {
     alreadyMember = true;
     membershipId = existingMembership.id;
@@ -880,9 +922,9 @@ export async function revokeHostedGroupMemberEmailShareTx(input: {
         memberId: input.memberId,
       },
     },
-    select: { id: true },
+    select: { id: true, leftAt: true },
   });
-  if (!membership) {
+  if (!membership || membership.leftAt) {
     return {
       kind: "not_group_member",
       revokedCount: 0,
@@ -906,6 +948,86 @@ export async function revokeHostedGroupMemberEmailShareTx(input: {
   };
 }
 
+export async function leaveHostedGroupMemberTx(input: {
+  clock?: () => Date;
+  groupRuntimeMemberId: string;
+  memberId: string;
+  tx: Prisma.TransactionClient;
+}): Promise<HostedGroupMemberLeaveTxResult> {
+  const groupLookup = await input.tx.hostedGroup.findUnique({
+    where: { runtimeMemberId: input.groupRuntimeMemberId },
+    select: { id: true },
+  });
+  if (!groupLookup) {
+    return {
+      kind: "group_not_found",
+      revokedCount: 0,
+      vaultShareCleanupSignals: [],
+    };
+  }
+
+  await lockHostedGroupRow(input.tx, groupLookup.id);
+  const group = await input.tx.hostedGroup.findUnique({
+    where: { id: groupLookup.id },
+    select: { id: true, ownerMemberId: true, runtimeMemberId: true },
+  });
+  if (!group?.runtimeMemberId) {
+    return {
+      kind: "group_not_found",
+      revokedCount: 0,
+      vaultShareCleanupSignals: [],
+    };
+  }
+
+  await lockHostedMemberRow(input.tx, input.memberId);
+  if (group.ownerMemberId === input.memberId) {
+    return {
+      kind: "owner_cannot_leave",
+      revokedCount: 0,
+      vaultShareCleanupSignals: [],
+    };
+  }
+
+  const membership = await input.tx.hostedGroupMember.findUnique({
+    where: {
+      groupId_memberId: {
+        groupId: group.id,
+        memberId: input.memberId,
+      },
+    },
+    select: { id: true, leftAt: true },
+  });
+  if (!membership || membership.leftAt) {
+    return {
+      kind: "already_left",
+      revokedCount: 0,
+      vaultShareCleanupSignals: [],
+    };
+  }
+
+  // Capture the leave fence only after the membership and group locks are held.
+  // This makes it a serialization timestamp instead of a request-start timestamp.
+  const now = input.clock?.() ?? new Date();
+  const revoked = await revokeHostedVaultSharesWithCleanupTx({
+    destinationMemberId: group.runtimeMemberId,
+    grantorMemberId: input.memberId,
+    now,
+    tx: input.tx,
+  });
+  await input.tx.hostedGroupMember.update({
+    where: { id: membership.id },
+    data: { leftAt: now },
+    select: { id: true },
+  });
+
+  return {
+    groupId: group.id,
+    kind: "left",
+    revokedCount: revoked.revokedCount,
+    vaultShareCleanupSignals: revoked.cleanupSignals,
+  };
+}
+
 async function ensureHostedGroupOwnerMembershipTx(
   tx: Prisma.TransactionClient,
   input: { groupId: string; memberId: string; now: Date },
@@ -920,6 +1042,7 @@ async function ensureHostedGroupOwnerMembershipTx(
     },
     update: {
       joinedAt: input.now,
+      leftAt: null,
       role: "owner",
     },
     where: { groupId_memberId: { groupId: input.groupId, memberId: input.memberId } },
@@ -1063,6 +1186,7 @@ async function readHostedGroupSummaryById(
       kind: true,
       runtimeMemberId: true,
       members: {
+        where: { leftAt: null },
         orderBy: { createdAt: "asc" },
         select: { memberId: true, role: true },
       },

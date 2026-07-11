@@ -17,6 +17,17 @@ const ROUTE_AUTHORITY = {
   threadId: "chat_group_1",
 };
 
+function buildCurrentInbound(mailboxItemId: string) {
+  return {
+    dedupeKey: `dedupe:${mailboxItemId}`,
+    eventId: `event:${mailboxItemId}`,
+    mailboxItemId,
+    occurredAt: "2026-07-10T00:00:00.000Z",
+    replyToMessageId: `message:${mailboxItemId}`,
+    target: "chat_group_1",
+  };
+}
+
 function buildLinqDeliveryContext(
   overrides: Partial<HostedAssistantLinqDeliveryContext>,
 ): HostedAssistantLinqDeliveryContext {
@@ -291,13 +302,17 @@ describe("createHostedGroupToolWithLinqThreadContext", () => {
       groupToolPort: { request },
       linqDeliveryContexts: [
         buildLinqDeliveryContext({
+          currentInbound: buildCurrentInbound("mailbox_group_1"),
           directRecipientPhoneNumber: "+15550000001",
           routeAuthority: ROUTE_AUTHORITY,
         }),
       ],
     });
 
-    await groupTool.request({ action: "revoke_own_email_share" });
+    await groupTool.request(
+      { action: "revoke_own_email_share" },
+      { currentHostedMailboxItemIds: ["mailbox_group_1"] },
+    );
     expect(request).toHaveBeenLastCalledWith({
       action: "revoke_own_email_share",
       selfOptOut: {
@@ -307,7 +322,7 @@ describe("createHostedGroupToolWithLinqThreadContext", () => {
     });
   });
 
-  it("fails closed when newsletter opt-out has ambiguous current senders", async () => {
+  it("fails closed when newsletter opt-out has mixed current senders", async () => {
     const request = vi.fn().mockResolvedValue({
       action: "revoke_own_email_share",
       result: {
@@ -316,16 +331,111 @@ describe("createHostedGroupToolWithLinqThreadContext", () => {
       },
     });
     const groupTool = createHostedGroupToolWithLinqThreadContext({
-      emailDeliveryContexts: [
-        buildEmailDeliveryContext({ senderHandle: "one@example.test" }),
-        buildEmailDeliveryContext({ senderHandle: "two@example.test" }),
-      ],
       groupToolPort: { request },
-      linqDeliveryContexts: [],
+      linqDeliveryContexts: [
+        buildLinqDeliveryContext({
+          currentInbound: buildCurrentInbound("mailbox_group_1"),
+          directRecipientPhoneNumber: "+15550000001",
+          routeAuthority: ROUTE_AUTHORITY,
+        }),
+        buildLinqDeliveryContext({
+          currentInbound: buildCurrentInbound("mailbox_group_2"),
+          directRecipientPhoneNumber: "+15550000002",
+          routeAuthority: ROUTE_AUTHORITY,
+        }),
+      ],
     });
 
-    await groupTool.request({ action: "revoke_own_email_share" });
+    await groupTool.request(
+      { action: "revoke_own_email_share" },
+      {
+        currentHostedMailboxItemIds: [
+          "mailbox_group_1",
+          "mailbox_group_2",
+        ],
+      },
+    );
     expect(request).toHaveBeenLastCalledWith({ action: "revoke_own_email_share" });
+  });
+
+  it("fails closed for empty, unknown, partial, or ineligible mailbox proof", async () => {
+    const request = vi.fn().mockResolvedValue({
+      action: "revoke_own_email_share",
+      result: {
+        status: "unavailable",
+        unavailableReason: "sender_unavailable",
+      },
+    });
+    const groupTool = createHostedGroupToolWithLinqThreadContext({
+      groupToolPort: { request },
+      linqDeliveryContexts: [
+        buildLinqDeliveryContext({
+          currentInbound: buildCurrentInbound("mailbox_group_1"),
+          directRecipientPhoneNumber: "+15550000001",
+          routeAuthority: ROUTE_AUTHORITY,
+        }),
+        buildLinqDeliveryContext({
+          currentInbound: buildCurrentInbound("mailbox_direct"),
+          directRecipientPhoneNumber: "+15550000001",
+          routeAuthority: ROUTE_AUTHORITY,
+          threadIsDirect: true,
+        }),
+      ],
+    });
+
+    for (const currentHostedMailboxItemIds of [
+      [],
+      [""],
+      ["mailbox_unknown"],
+      ["mailbox_group_1", "mailbox_unknown"],
+      ["mailbox_group_1", "mailbox_direct"],
+    ]) {
+      await groupTool.request(
+        { action: "revoke_own_email_share" },
+        { currentHostedMailboxItemIds },
+      );
+      expect(request).toHaveBeenLastCalledWith({
+        action: "revoke_own_email_share",
+      });
+    }
+  });
+
+  it("does not reuse the initial sender for a late steered mailbox input", async () => {
+    const request = vi.fn().mockResolvedValue({
+      action: "leave_current",
+      result: {
+        status: "unavailable",
+        unavailableReason: "sender_unavailable",
+      },
+    });
+    const groupTool = createHostedGroupToolWithLinqThreadContext({
+      groupToolPort: { request },
+      linqDeliveryContexts: [
+        buildLinqDeliveryContext({
+          currentInbound: buildCurrentInbound("mailbox_bob"),
+          directRecipientPhoneNumber: "+15550000001",
+          routeAuthority: ROUTE_AUTHORITY,
+        }),
+      ],
+    });
+
+    await groupTool.request(
+      { action: "leave_current" },
+      { currentHostedMailboxItemIds: ["mailbox_bob"] },
+    );
+    expect(request).toHaveBeenLastCalledWith({
+      action: "leave_current",
+      selfOptOut: {
+        senderHandle: "+15550000001",
+        source: "linq",
+      },
+    });
+
+    await groupTool.request(
+      { action: "leave_current" },
+      { currentHostedMailboxItemIds: ["mailbox_alice"] },
+    );
+    expect(request).toHaveBeenLastCalledWith({ action: "leave_current" });
   });
 });
 

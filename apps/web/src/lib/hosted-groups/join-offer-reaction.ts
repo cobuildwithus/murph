@@ -30,6 +30,7 @@ type HostedGroupJoinOfferReactionSkipReason =
   | "offer_revoked"
   | "not_a_member"
   | "reaction_removed"
+  | "reaction_predates_leave"
   | "unsupported_reaction";
 
 export type HostedGroupJoinOfferReactionResult =
@@ -39,6 +40,7 @@ export type HostedGroupJoinOfferReactionResult =
 export async function handleHostedGroupJoinOfferReaction(input: {
   event: ParsedHostedLinqProviderEvent;
   prisma: PrismaClient;
+  receivedAt: Date;
 }): Promise<HostedGroupJoinOfferReactionResult> {
   if (input.event.eventType === "reaction.removed") {
     return skipHostedGroupJoinOfferReaction({
@@ -101,7 +103,7 @@ export async function handleHostedGroupJoinOfferReaction(input: {
       acceptHostedGroupJoinOfferTx({
         memberId: member.id,
         messageLookupKeyReadCandidates,
-        now: input.event.providerCreatedAt,
+        now: input.receivedAt,
         threadIdentityLookupKeyReadCandidates,
         tx,
       }), HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
@@ -169,6 +171,9 @@ function readHostedGroupJoinOfferReactionSkipReason(
   }
   if (error.code === "HOSTED_GROUP_JOIN_OFFER_REVOKED") {
     return "offer_revoked";
+  }
+  if (error.code === "HOSTED_GROUP_JOIN_REACTION_PREDATES_LEAVE") {
+    return "reaction_predates_leave";
   }
   if (
     error.code === "HOSTED_GROUP_JOIN_OFFER_NOT_FOUND"

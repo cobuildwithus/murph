@@ -88,7 +88,10 @@ export const POST = withJsonError(async (request: Request) => {
     const group = await prisma.hostedGroup.findUnique({
       where: { id: groupId },
       select: {
-        members: { select: { memberId: true } },
+        members: {
+          where: { leftAt: null },
+          select: { memberId: true },
+        },
         runtimeMemberId: true,
       },
     });

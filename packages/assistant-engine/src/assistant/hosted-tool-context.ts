@@ -98,6 +98,20 @@ export function createAssistantHostedToolContext(input: {
     messageInput: input.messageInput,
     session: input.session,
   }
+  const sourceGroupTool = input.groupTool ?? null
+  const groupTool: AssistantHostedGroupTool | null = sourceGroupTool
+    ? {
+        async request(request) {
+          const deliveryContext = readDeliveryContext()
+          return await sourceGroupTool.request(request, {
+            currentHostedMailboxItemIds: [
+              ...(deliveryContext.messageInput.hostedDeliveryIdempotency
+                ?.inboundMailboxItemIds ?? []),
+            ],
+          })
+        },
+      }
+    : null
   const buildRequestKeyScope = (
     acceptedInputIds: readonly string[],
   ): AssistantHostedToolRequestKeyScope => {
@@ -114,7 +128,7 @@ export function createAssistantHostedToolContext(input: {
   return {
     connectedApps: input.connectedApps ?? null,
     familyPlanTool: input.familyPlanTool ?? null,
-    groupTool: input.groupTool ?? null,
+    groupTool,
     newsletterTool: input.newsletterTool ?? null,
     phoneCalls: input.phoneCalls ?? null,
     computerToolsAvailable: input.computerToolsAvailable === true,

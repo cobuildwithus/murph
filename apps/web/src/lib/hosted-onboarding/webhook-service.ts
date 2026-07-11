@@ -35,6 +35,7 @@ import {
 } from "./linq-alert-email";
 import {
   ingestHostedLinqProviderEventTx,
+  readHostedLinqProviderEventReceivedAt,
 } from "./linq-provider-event-store";
 import {
   parseHostedLinqProviderEvent,
@@ -175,9 +176,17 @@ export async function handleHostedOnboardingLinqWebhook(input: {
         event: providerEvent,
         prisma,
       });
+      const receivedAt = await readHostedLinqProviderEventReceivedAt({
+        eventId: providerEvent.eventId,
+        prisma,
+      });
+      if (!receivedAt) {
+        throw new Error("Persisted Linq provider event is missing after ingestion.");
+      }
       const reactionResult = await handleHostedGroupJoinOfferReaction({
         event: providerEvent,
         prisma,
+        receivedAt,
       });
       const response: HostedOnboardingLinqWebhookResponse = {
         duplicate: providerResult.duplicate || undefined,

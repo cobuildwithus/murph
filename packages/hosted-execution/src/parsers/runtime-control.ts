@@ -838,11 +838,11 @@ export function parseHostedRuntimeGroupToolRequest(
       ),
     };
   }
-  if (action === "revoke_own_email_share") {
+  if (action === "leave_current" || action === "revoke_own_email_share") {
     assertAllowedObjectKeys(
       record,
       new Set(["action", "selfOptOut"]),
-      "Hosted runtime group tool revoke_own_email_share request",
+      `Hosted runtime group tool ${action} request`,
     );
     if (record.selfOptOut === undefined || record.selfOptOut === null) {
       return { action };
@@ -851,7 +851,7 @@ export function parseHostedRuntimeGroupToolRequest(
       action,
       selfOptOut: parseHostedRuntimeGroupToolSelfOptOutContext(
         record.selfOptOut,
-        "Hosted runtime group tool revoke_own_email_share request selfOptOut",
+        `Hosted runtime group tool ${action} request selfOptOut`,
       ),
     };
   }
@@ -1238,6 +1238,57 @@ export function parseHostedRuntimeGroupToolResponse(
         result: {
           status,
           unavailableReason: requireString(result.unavailableReason, "Hosted runtime group unavailableReason"),
+        },
+      };
+    }
+  }
+
+  if (action === "leave_current") {
+    const result = requireObject(record.result, "Hosted runtime group tool leave_current response result");
+    const status = requireString(result.status, "Hosted runtime group tool leave_current response status");
+    if (status === "left") {
+      assertAllowedObjectKeys(
+        result,
+        new Set(["status", "revokedShareCount", "cleanupPending"]),
+        "Hosted runtime group tool leave_current left response result",
+      );
+      const revokedShareCount = requireNonNegativeInteger(
+        result.revokedShareCount,
+        "Hosted runtime group tool leave_current revokedShareCount",
+      );
+      const cleanupPending = requireBoolean(
+        result.cleanupPending,
+        "Hosted runtime group tool leave_current cleanupPending",
+      );
+      if (cleanupPending !== (revokedShareCount > 0)) {
+        throw new TypeError(
+          "Hosted runtime group tool leave_current cleanupPending must match whether revokedShareCount is positive.",
+        );
+      }
+      return { action, result: { status, revokedShareCount, cleanupPending } };
+    }
+    if (status === "already_left" || status === "owner_cannot_leave") {
+      assertAllowedObjectKeys(
+        result,
+        new Set(["status"]),
+        `Hosted runtime group tool leave_current ${status} response result`,
+      );
+      return { action, result: { status } };
+    }
+    if (status === "unavailable") {
+      assertAllowedObjectKeys(
+        result,
+        new Set(["status", "unavailableReason"]),
+        "Hosted runtime group tool leave_current unavailable response result",
+      );
+      return {
+        action,
+        result: {
+          status,
+          unavailableReason: requireString(
+            result.unavailableReason,
+            "Hosted runtime group unavailableReason",
+          ),
         },
       };
     }

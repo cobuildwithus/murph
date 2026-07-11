@@ -828,6 +828,7 @@ export type HostedRuntimeGroupToolAction =
   | "read_chat_participants"
   | "set_chat_avatar"
   | "share_contact_card"
+  | "leave_current"
   | "revoke_own_email_share";
 
 export const HOSTED_RUNTIME_GROUP_KINDS = [
@@ -906,6 +907,10 @@ export interface HostedRuntimeGroupToolLinqThreadContext {
   chatId: string;
 }
 
+/**
+ * Injected by the hosted runtime from the authenticated current delivery;
+ * never accepted from model-authored tool arguments.
+ */
 export interface HostedRuntimeGroupToolSelfOptOutContext {
   senderHandle: string;
   source: "email" | "linq";
@@ -942,6 +947,10 @@ export type HostedRuntimeGroupToolRequest =
       linqThread?: HostedRuntimeGroupToolLinqThreadContext | null;
     }
   | { action: "share_contact_card"; linqThread?: HostedRuntimeGroupToolLinqThreadContext | null }
+  | {
+      action: "leave_current";
+      selfOptOut?: HostedRuntimeGroupToolSelfOptOutContext | null;
+    }
   | {
       action: "revoke_own_email_share";
       selfOptOut?: HostedRuntimeGroupToolSelfOptOutContext | null;
@@ -997,6 +1006,14 @@ export type HostedRuntimeGroupToolResponse =
       result:
         | { status: "sent" }
         | { status: "already_shared" }
+        | { status: "unavailable"; unavailableReason: string };
+    }
+  | {
+      action: "leave_current";
+      result:
+        | { status: "left"; revokedShareCount: number; cleanupPending: boolean }
+        | { status: "already_left" }
+        | { status: "owner_cannot_leave" }
         | { status: "unavailable"; unavailableReason: string };
     }
   | {

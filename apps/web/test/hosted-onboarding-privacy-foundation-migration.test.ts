@@ -553,6 +553,13 @@ describe("hosted Prisma baseline migration", () => {
       ),
       "utf8",
     );
+    const hostedGroupMemberLeftAtMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/20260710233000_hosted_group_member_left_at/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
     expect(migrationEntries).toEqual([
       "2026040600_init",
       "20260425000000_drop_legacy_linq_control_plane",
@@ -641,6 +648,7 @@ describe("hosted Prisma baseline migration", () => {
       "20260709120000_hosted_ingress_latency_delivery_link",
       "20260709120000_hosted_linq_delivery_retry_after_at",
       "20260709120000_hosted_member_assistant_model_preference",
+      "20260710233000_hosted_group_member_left_at",
       "migration_lock.toml",
     ]);
     expect(hostedThreadRoutesMigrationSql).toContain('CREATE TABLE "hosted_thread_container"');
@@ -817,6 +825,13 @@ describe("hosted Prisma baseline migration", () => {
     expect(hostedMemberAssistantModelPreferenceMigrationSql).not.toContain(
       "NOT NULL",
     );
+    expect(hostedGroupMemberLeftAtMigrationSql).toContain(
+      'ALTER TABLE "hosted_group_member"',
+    );
+    expect(hostedGroupMemberLeftAtMigrationSql).toContain(
+      'ADD COLUMN "left_at" TIMESTAMP(3)',
+    );
+    expect(hostedGroupMemberLeftAtMigrationSql).not.toContain("NOT NULL");
     expect(hostedMemberAssistantModelPreferenceMigrationSql).not.toContain(
       "DEFAULT",
     );

@@ -33,6 +33,8 @@ import {
   upsertAssistantInputEvent,
   type AssistantCronStatusOptions,
   type AssistantExecutionContext,
+  type AssistantHostedGroupTool,
+  type AssistantHostedGroupToolRequestContext,
   type AssistantInputEventRecord,
   type HostedAssistantTurnTimingStage,
 } from "@murphai/assistant-engine";
@@ -231,11 +233,19 @@ export function createHostedGroupToolWithLinqThreadContext(input: {
   emailDeliveryContexts?: readonly HostedAssistantEmailDeliveryContext[] | null;
   groupToolPort: NonNullable<HostedRuntimePlatform["groupToolPort"]>;
   linqDeliveryContexts: readonly HostedAssistantLinqDeliveryContext[];
-}): NonNullable<HostedRuntimePlatform["groupToolPort"]> {
+}): AssistantHostedGroupTool {
   return {
-    async request(request) {
-      if (request.action === "revoke_own_email_share") {
+    async request(
+      request,
+      requestContext?: AssistantHostedGroupToolRequestContext,
+    ) {
+      if (
+        request.action === "revoke_own_email_share"
+        || request.action === "leave_current"
+      ) {
         const selfOptOut = resolveHostedGroupToolSelfOptOutContext({
+          currentHostedMailboxItemIds:
+            requestContext?.currentHostedMailboxItemIds ?? [],
           linqDeliveryContexts: input.linqDeliveryContexts,
         });
         return await input.groupToolPort.request(
@@ -263,12 +273,28 @@ export function createHostedGroupToolWithLinqThreadContext(input: {
 }
 
 function resolveHostedGroupToolSelfOptOutContext(input: {
+  currentHostedMailboxItemIds: readonly string[];
   linqDeliveryContexts: readonly HostedAssistantLinqDeliveryContext[];
 }): HostedRuntimeGroupToolSelfOptOutContext | null {
+  const normalizedHostedMailboxItemIds = input.currentHostedMailboxItemIds.map(
+    (itemId) => itemId.trim(),
+  );
+  if (
+    normalizedHostedMailboxItemIds.length === 0
+    || normalizedHostedMailboxItemIds.some((itemId) => itemId.length === 0)
+  ) {
+    return null;
+  }
+  const currentHostedMailboxItemIds = new Set(normalizedHostedMailboxItemIds);
   const eligible = new Map<string, HostedRuntimeGroupToolSelfOptOutContext>();
+  const eligibleHostedMailboxItemIds = new Set<string>();
   // Hosted email reply aliases authenticate the route, not the human From
   // header. Do not turn parsed From into self-opt-out authority.
   for (const context of input.linqDeliveryContexts) {
+    const mailboxItemId = context.currentInbound?.mailboxItemId.trim() ?? "";
+    if (!mailboxItemId || !currentHostedMailboxItemIds.has(mailboxItemId)) {
+      continue;
+    }
     if (context.threadIsDirect !== false) {
       continue;
     }
@@ -276,12 +302,16 @@ function resolveHostedGroupToolSelfOptOutContext(input: {
     if (!senderHandle) {
       continue;
     }
+    eligibleHostedMailboxItemIds.add(mailboxItemId);
     eligible.set(JSON.stringify(["linq", senderHandle]), {
       senderHandle,
       source: "linq",
     });
   }
 
+  if (eligibleHostedMailboxItemIds.size !== currentHostedMailboxItemIds.size) {
+    return null;
+  }
   return eligible.size === 1 ? [...eligible.values()][0] ?? null : null;
 }
 

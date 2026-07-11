@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
   hostedThreadContainerParticipantUpsert: vi.fn(),
   hostedThreadContainerFindUnique: vi.fn(),
   isHostedMemberSuspended: vi.fn(),
+  leaveHostedGroupMemberTx: vi.fn(),
   lookupHostedMemberByVerifiedEmailAddress: vi.fn(),
   lookupHostedMemberIdentityByPhoneNumber: vi.fn(),
   readActiveHostedMemberAccess: vi.fn(),
@@ -91,6 +92,7 @@ vi.mock("@/src/lib/hosted-routing/thread-route-store", () => ({
 vi.mock("@/src/lib/hosted-groups/group-store", () => ({
   createHostedGroupJoinLinkForOwnedThreadContainerTx:
     mocks.createHostedGroupJoinLinkForOwnedThreadContainerTx,
+  leaveHostedGroupMemberTx: mocks.leaveHostedGroupMemberTx,
   readHostedGroupByRuntimeMemberId: mocks.readHostedGroupByRuntimeMemberId,
   recordHostedGroupJoinOfferTx: mocks.recordHostedGroupJoinOfferTx,
   revokeHostedGroupMemberEmailShareTx: mocks.revokeHostedGroupMemberEmailShareTx,
@@ -210,6 +212,12 @@ describe("handleHostedRuntimeGroupTool", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.hasHostedRuntimeActiveAccess.mockResolvedValue(true);
+    mocks.leaveHostedGroupMemberTx.mockResolvedValue({
+      groupId: "hgrp_123",
+      kind: "left",
+      revokedCount: 1,
+      vaultShareCleanupSignals: [],
+    });
     mocks.readActiveHostedMemberAccess.mockResolvedValue(true);
     mocks.readHostedGroupByRuntimeMemberId.mockResolvedValue(GROUP_SUMMARY);
     mocks.revokeHostedGroupMemberEmailShareTx.mockResolvedValue({
@@ -247,6 +255,7 @@ describe("handleHostedRuntimeGroupTool", () => {
   it("classifies group-tool actions by access authority", () => {
     expect(HOSTED_RUNTIME_GROUP_TOOL_ACCESS_CLASSIFICATION).toEqual({
       create_join_link: "owner_active",
+      leave_current: "participant_aware",
       post_join_offer: "owner_active",
       preflight_set_chat_avatar: "owner_active",
       read_chat_participants: "participant_aware",
@@ -706,6 +715,206 @@ describe("handleHostedRuntimeGroupTool", () => {
     });
 
     expect(mocks.revokeHostedGroupMemberEmailShareTx).not.toHaveBeenCalled();
+  });
+
+  it("leaves only the current authenticated linq sender and schedules projection cleanup", async () => {
+    mocks.lookupHostedMemberIdentityByPhoneNumber.mockResolvedValue({
+      core: { id: "member_sender", suspendedAt: null },
+    });
+    mocks.leaveHostedGroupMemberTx.mockResolvedValue({
+      groupId: "hgrp_123",
+      kind: "left",
+      revokedCount: 2,
+      vaultShareCleanupSignals: [
+        { mailboxItemId: "hmi_revoke_1", memberId: "member_group_runtime" },
+      ],
+    });
+    mocks.signalHostedMailboxAppendRuntime.mockRejectedValueOnce(new Error("wake unavailable"));
+
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_group_runtime",
+      request: {
+        action: "leave_current",
+        selfOptOut: {
+          senderHandle: "+15550000001",
+          source: "linq",
+        },
+      },
+    })).resolves.toEqual({
+      action: "leave_current",
+      result: {
+        cleanupPending: true,
+        revokedShareCount: 2,
+        status: "left",
+      },
+    });
+
+    expect(mocks.leaveHostedGroupMemberTx).toHaveBeenCalledWith(
+      expect.objectContaining({
+        groupRuntimeMemberId: "member_group_runtime",
+        memberId: "member_sender",
+      }),
+    );
+    expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
+      expectedUserId: "member_group_runtime",
+      mailboxItemId: "hmi_revoke_1",
+    });
+  });
+
+  it("does not signal cleanup when the leave transaction fails", async () => {
+    mocks.lookupHostedMemberIdentityByPhoneNumber.mockResolvedValue({
+      core: { id: "member_sender", suspendedAt: null },
+    });
+    mocks.leaveHostedGroupMemberTx.mockRejectedValueOnce(
+      new Error("leave transaction failed"),
+    );
+
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_group_runtime",
+      request: {
+        action: "leave_current",
+        selfOptOut: {
+          senderHandle: "+15550000001",
+          source: "linq",
+        },
+      },
+    })).rejects.toThrow("leave transaction failed");
+
+    expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
+  });
+
+  it("allows an authenticated sender to leave even when their account is suspended", async () => {
+    mocks.lookupHostedMemberIdentityByPhoneNumber.mockResolvedValue({
+      core: { id: "member_sender", suspendedAt: new Date("2026-07-10T00:00:00.000Z") },
+    });
+    mocks.readActiveHostedMemberAccess.mockResolvedValue(false);
+    mocks.leaveHostedGroupMemberTx.mockResolvedValue({
+      groupId: "hgrp_123",
+      kind: "left",
+      revokedCount: 0,
+      vaultShareCleanupSignals: [],
+    });
+
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_group_runtime",
+      request: {
+        action: "leave_current",
+        selfOptOut: {
+          senderHandle: "+15550000001",
+          source: "linq",
+        },
+      },
+    })).resolves.toEqual({
+      action: "leave_current",
+      result: {
+        cleanupPending: false,
+        revokedShareCount: 0,
+        status: "left",
+      },
+    });
+
+    expect(mocks.leaveHostedGroupMemberTx).toHaveBeenCalled();
+  });
+
+  it("keeps departure available when the group runtime has lost active access", async () => {
+    mocks.hasHostedRuntimeActiveAccess.mockResolvedValue(false);
+    mocks.lookupHostedMemberIdentityByPhoneNumber.mockResolvedValue({
+      core: { id: "member_sender", suspendedAt: null },
+    });
+    mocks.leaveHostedGroupMemberTx.mockResolvedValue({
+      groupId: "hgrp_123",
+      kind: "left",
+      revokedCount: 1,
+      vaultShareCleanupSignals: [],
+    });
+
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_group_runtime",
+      request: {
+        action: "leave_current",
+        selfOptOut: {
+          senderHandle: "+15550000001",
+          source: "linq",
+        },
+      },
+    })).resolves.toEqual({
+      action: "leave_current",
+      result: {
+        cleanupPending: true,
+        revokedShareCount: 1,
+        status: "left",
+      },
+    });
+
+    expect(mocks.leaveHostedGroupMemberTx).toHaveBeenCalled();
+  });
+
+  it("fails closed for email-sourced or missing leave identity", async () => {
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_group_runtime",
+      request: {
+        action: "leave_current",
+        selfOptOut: {
+          senderHandle: "spoofed-member@example.test",
+          source: "email",
+        },
+      },
+    })).resolves.toEqual({
+      action: "leave_current",
+      result: {
+        status: "unavailable",
+        unavailableReason: "member_unresolved",
+      },
+    });
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_group_runtime",
+      request: { action: "leave_current" },
+    })).resolves.toEqual({
+      action: "leave_current",
+      result: {
+        status: "unavailable",
+        unavailableReason: "sender_unavailable",
+      },
+    });
+
+    expect(mocks.leaveHostedGroupMemberTx).not.toHaveBeenCalled();
+  });
+
+  it("reports owner and repeated leave outcomes without cleanup claims", async () => {
+    mocks.lookupHostedMemberIdentityByPhoneNumber.mockResolvedValue({
+      core: { id: "member_sender", suspendedAt: null },
+    });
+    mocks.leaveHostedGroupMemberTx.mockResolvedValueOnce({
+      kind: "owner_cannot_leave",
+      revokedCount: 0,
+      vaultShareCleanupSignals: [],
+    }).mockResolvedValueOnce({
+      kind: "already_left",
+      revokedCount: 0,
+      vaultShareCleanupSignals: [],
+    });
+    const request = {
+      action: "leave_current" as const,
+      selfOptOut: {
+        senderHandle: "+15550000001",
+        source: "linq" as const,
+      },
+    };
+
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_group_runtime",
+      request,
+    })).resolves.toEqual({
+      action: "leave_current",
+      result: { status: "owner_cannot_leave" },
+    });
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_group_runtime",
+      request,
+    })).resolves.toEqual({
+      action: "leave_current",
+      result: { status: "already_left" },
+    });
   });
 });
 

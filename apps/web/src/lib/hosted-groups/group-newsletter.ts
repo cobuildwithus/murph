@@ -60,7 +60,7 @@ export async function enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEf
       where: {
         id: input.groupId,
         members: {
-          some: { memberId: input.memberId },
+          some: { leftAt: null, memberId: input.memberId },
         },
       },
       select: {
@@ -214,6 +214,7 @@ async function readHostedGroupNewsletterParticipantEmailFacts(input: {
       id: true,
       displayName: true,
       members: {
+        where: { leftAt: null },
         orderBy: { createdAt: "asc" },
         select: { memberId: true },
       },

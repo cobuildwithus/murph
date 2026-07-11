@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
 import type {
   AssistantSession,
@@ -62,6 +62,50 @@ describe('assistant return contact kind', () => {
       recipientKey: null,
       returnContactKind: 'telegram',
     })
+  })
+
+  it('binds group-tool requests to the current hosted mailbox inputs', async () => {
+    const request = vi.fn(async () => ({
+      action: 'leave_current' as const,
+      result: { status: 'already_left' as const },
+    }))
+    let currentMessageInput = createMessageInput({
+      channel: 'linq',
+      hostedDeliveryIdempotency: {
+        assistantTurnOrdinal: 1,
+        conversationId: 'conversation-123',
+        inboundMailboxItemIds: ['mailbox_bob'],
+        recipientKey: null,
+      },
+    })
+    const session = createAssistantSession()
+    const hostedToolContext = createAssistantHostedToolContext({
+      getDeliveryContext: () => ({ messageInput: currentMessageInput, session }),
+      groupTool: { request },
+      messageInput: currentMessageInput,
+      session,
+    })
+
+    await hostedToolContext.groupTool?.request({ action: 'leave_current' })
+    expect(request).toHaveBeenLastCalledWith(
+      { action: 'leave_current' },
+      { currentHostedMailboxItemIds: ['mailbox_bob'] },
+    )
+
+    currentMessageInput = createMessageInput({
+      channel: 'linq',
+      hostedDeliveryIdempotency: {
+        assistantTurnOrdinal: 2,
+        conversationId: 'conversation-123',
+        inboundMailboxItemIds: ['mailbox_bob', 'mailbox_alice'],
+        recipientKey: null,
+      },
+    })
+    await hostedToolContext.groupTool?.request({ action: 'leave_current' })
+    expect(request).toHaveBeenLastCalledWith(
+      { action: 'leave_current' },
+      { currentHostedMailboxItemIds: ['mailbox_bob', 'mailbox_alice'] },
+    )
   })
 })
 

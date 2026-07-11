@@ -1,6 +1,6 @@
 # Group Health Newsletter
 
-Last verified: 2026-07-07
+Last verified: 2026-07-10
 Status: Specified (not yet implemented)
 
 ## Current State
@@ -31,7 +31,8 @@ The newsletter is not a new scheduler, not a second email system, and not a new 
 | Newsletter content opt-in | A reaction to the newsletter join offer grants the disclosed default scope: profile name, email, sleep timing, activity minutes, workout summaries, resting heart rate, and HRV. The customize link lets a member share more or less. |
 | Setup flow | **Ask before creating.** Murph asks for the name, schedule, and email-versus-chat delivery in one short message, with tone optional. If the group already answered or says "just set it up," Murph uses sensible defaults and confirms the essentials. |
 | Naming | The **group-chosen name** becomes the automation title, the group display name when a group join link is created, and the name in the setup notice. |
-| Individual opt-out | **Revoke email sharing** (self-service, in chat or by replying in the thread). Leaves challenge/health-sharing intact. Forward-only. |
+| Individual opt-out | **Revoke email sharing from the authenticated group chat.** Email-thread replies cannot authorize revocation. Leaves challenge/health-sharing intact. Forward-only. |
+| Leave the hosted group | **Self-service from the current Linq group conversation for non-owners.** Leaving withdraws active membership and every active share to the group runtime. The owner must transfer ownership or dissolve the group through a future explicit flow before leaving. |
 | First send | **Announced in the group with a short opt-out window.** Never a silent immediate first fire. |
 | No-email-yet member | Grants email permission at join anyway; **auto-joins** once they add + verify an email later. |
 | Tone | **Supportive by default, never shaming.** Coach-style roast only on explicit group opt-in ("be hard on us"). Optional custom note. |
@@ -42,6 +43,30 @@ The newsletter is not a new scheduler, not a second email system, and not a new 
 | Consent invariant | The offer message and stored grant snapshot must match: `HostedGroupJoinOffer.projectionKindsJson` is the frozen server-side snapshot, and `{{share_scope}}` must render from that same projection list. |
 | Health data toggles | The newsletter default scope includes the named health fields above. Members can narrow or widen it with the customize link before joining. |
 | Projection retention | Each vault-share delivery can carry **the 7 most recent records per projection kind**, matching count-based receiver retention. |
+
+### Hosted-group departure and erasure boundary
+
+Hosted-group departure is broader than newsletter opt-out. When a non-owner
+participant asks Murph to leave from the current Linq group conversation, the
+server derives that participant and group from the authenticated delivery
+context. It marks the membership inactive, revokes every active share from that
+participant to the group runtime, and appends the existing durable revoke wakes
+in one transaction. A minimal `leftAt` marker remains only to make repeated
+leave requests idempotent and fence delayed pre-leave reactions; active rosters,
+newsletter recipients, and group email routing exclude it. An explicit join
+link acceptance, or a reaction first received by Murph after `leftAt`, may
+rejoin the participant through the normal consent checks. The ordering uses the
+persisted provider-event `receivedAt` written on first ingestion, not the
+provider's clock, so duplicate webhook delivery cannot move the fence.
+
+The revoke wakes remove the participant's current entries from the group
+workspace's shared projection materialization and prevent future deliveries.
+Cleanup is durable but asynchronous, so the conversational result may say it is
+pending. Departure does not rewrite already-sent group or email messages,
+provider-held history, general group-vault conversation artifacts, backups, a
+copy another person made, or legacy immutable raw provenance evidence. Murph
+must describe this as membership withdrawal plus shared-projection cleanup, not
+as total retroactive erasure.
 
 ## Canonical Objects
 
@@ -154,6 +179,17 @@ Everything else is reuse: scheduling, health projections, rollup engine, roster,
 - **Consent review**: copy + flow against `consent.ts` and FTC HBNR posture.
 
 ## Deployment Concerns
+
+Hosted-group leave adds `HostedGroupMember.leftAt` and spans web readers plus
+the hosted runtime tool. Deploy the nullable schema migration first, then deploy
+the `leftAt`-aware web application and drain old web instances, and only then
+enable the hosted runtime action. After the first production leave, the
+`leftAt`-aware web version is the rollback floor: an older web build could treat
+a former member as active and regrant data. Post-deploy, smoke-test one leave,
+replay its old reaction and confirm it remains inactive, then submit a newly
+received reaction and confirm explicit rejoin. Verify newsletter recipients and
+group email routing exclude the departed member before enabling broad runtime
+rollout.
 
 The base newsletter change spans **Cloudflare** (`apps/cloudflare`: HTML MIME, group-send path, address-resolution callback, inbound thread participation) and **Vercel/web** (`apps/web`: `group-email.v0` display + default request, address-resolution endpoint, `?addEmail=true`). Safe deploy order is **web first, then Cloudflare** — the web resolution endpoint and the new grant kind must exist before the Worker calls them. Both sides must recognize `group-email.v0` during the window.
 

@@ -120,6 +120,21 @@ describe("hosted group newsletter participants", () => {
       ],
       status: "ok",
     });
+    expect(mocks.getPrisma().hostedGroup.findFirst).toHaveBeenCalledWith({
+      where: {
+        id: "hgrp_123",
+        runtimeMemberId: "group_runtime_member",
+      },
+      select: {
+        displayName: true,
+        id: true,
+        members: {
+          orderBy: { createdAt: "asc" },
+          select: { memberId: true },
+          where: { leftAt: null },
+        },
+      },
+    });
     expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledTimes(1);
     expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledWith({
       envelope: expect.objectContaining({
@@ -372,7 +387,7 @@ describe("hosted group newsletter participants", () => {
       where: {
         id: "hgrp_123",
         members: {
-          some: { memberId: "member_active_missing_email" },
+          some: { leftAt: null, memberId: "member_active_missing_email" },
         },
       },
       select: {

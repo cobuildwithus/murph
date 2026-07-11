@@ -19,7 +19,10 @@ import {
   buildHostedLinqInviteSignupEffectId,
   parseHostedLinqInviteSignupEffectId,
 } from "@/src/lib/hosted-onboarding/linq-invite-signup-effect-id";
-import { ingestHostedLinqProviderEventTx } from "@/src/lib/hosted-onboarding/linq-provider-event-store";
+import {
+  ingestHostedLinqProviderEventTx,
+  readHostedLinqProviderEventReceivedAt,
+} from "@/src/lib/hosted-onboarding/linq-provider-event-store";
 import {
   createHostedLinqDeliveryIdempotencyLookupKey,
   createHostedLinqDeliverySourceRefLookupKey,
@@ -51,6 +54,24 @@ function buildLegacyAiUsageNoticeKey(): string {
 }
 
 describe("hosted Linq observability stores", () => {
+  it("reads the immutable first-received time through the hashed provider event id", async () => {
+    const fixture = createObservabilityPrismaFixture();
+    const receivedAt = new Date("2026-03-26T12:00:01.000Z");
+    fixture.hostedLinqProviderEventFindUnique.mockResolvedValueOnce({ receivedAt });
+
+    await expect(readHostedLinqProviderEventReceivedAt({
+      eventId: "evt_reaction_123",
+      prisma: fixture.prisma as never,
+    })).resolves.toEqual(receivedAt);
+
+    expect(fixture.hostedLinqProviderEventFindUnique).toHaveBeenCalledWith({
+      where: {
+        eventId: createHostedLinqProviderEventLookupKey("evt_reaction_123"),
+      },
+      select: { receivedAt: true },
+    });
+  });
+
   it("keeps non-contact observability ids stable when the contact-privacy keyring rotates", () => {
     const restoreV1 = configureHostedContactPrivacyKeyringForTest({
       currentVersion: "v1",
@@ -3595,6 +3616,7 @@ function createObservabilityPrismaFixture() {
   const hostedLinqProviderEventCreateMany = vi.fn().mockResolvedValue({ count: 1 });
   const hostedLinqProviderEventFindFirst = vi.fn().mockResolvedValue(null);
   const hostedLinqProviderEventFindMany = vi.fn().mockResolvedValue([]);
+  const hostedLinqProviderEventFindUnique = vi.fn().mockResolvedValue(null);
   const hostedMailboxItemUpdateMany = vi.fn().mockResolvedValue({ count: 0 });
   const hostedAiUsagePeriodUpdateMany = vi.fn().mockResolvedValue({ count: 1 });
   const prisma = {
@@ -3630,6 +3652,7 @@ function createObservabilityPrismaFixture() {
       createMany: hostedLinqProviderEventCreateMany,
       findFirst: hostedLinqProviderEventFindFirst,
       findMany: hostedLinqProviderEventFindMany,
+      findUnique: hostedLinqProviderEventFindUnique,
     },
     hostedMailboxItem: {
       updateMany: hostedMailboxItemUpdateMany,
@@ -3660,6 +3683,7 @@ function createObservabilityPrismaFixture() {
     hostedLinqProviderEventCreateMany,
     hostedLinqProviderEventFindFirst,
     hostedLinqProviderEventFindMany,
+    hostedLinqProviderEventFindUnique,
     hostedMailboxItemUpdateMany,
     prisma,
     transaction,

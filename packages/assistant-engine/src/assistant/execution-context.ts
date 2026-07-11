@@ -75,9 +75,14 @@ export interface AssistantHostedFamilyPlanTool {
   ): Promise<HostedRuntimeFamilyPlanToolResponse>
 }
 
+export interface AssistantHostedGroupToolRequestContext {
+  currentHostedMailboxItemIds: readonly string[]
+}
+
 export interface AssistantHostedGroupTool {
   request(
     request: HostedRuntimeGroupToolRequest,
+    context?: AssistantHostedGroupToolRequestContext,
   ): Promise<HostedRuntimeGroupToolResponse>
 }
 

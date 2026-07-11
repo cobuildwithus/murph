@@ -43,7 +43,7 @@ vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
 }));
 
 import {
-  handleHostedGroupJoinOfferReaction,
+  handleHostedGroupJoinOfferReaction as handleHostedGroupJoinOfferReactionImpl,
 } from "@/src/lib/hosted-groups/join-offer-reaction";
 import {
   parseHostedLinqProviderEvent,
@@ -53,6 +53,16 @@ const TEST_KEYRING_ENTRIES = {
   v1: "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=",
   v2: "MTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTE=",
 } as const;
+const REACTION_RECEIVED_AT = new Date("2026-03-26T12:00:01.000Z");
+
+function handleHostedGroupJoinOfferReaction(
+  input: Omit<Parameters<typeof handleHostedGroupJoinOfferReactionImpl>[0], "receivedAt">,
+) {
+  return handleHostedGroupJoinOfferReactionImpl({
+    ...input,
+    receivedAt: REACTION_RECEIVED_AT,
+  });
+}
 
 let restoreKeyring: (() => void) | null = null;
 
@@ -109,6 +119,7 @@ describe("handleHostedGroupJoinOfferReaction", () => {
         threadIdentityLookupKeyReadCandidates: expect.arrayContaining([
           expect.stringMatching(/^hbidx:external-thread-identity:/u),
         ]),
+        now: REACTION_RECEIVED_AT,
       }),
     );
     expect(mocks.enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort)
@@ -321,6 +332,33 @@ describe("handleHostedGroupJoinOfferReaction", () => {
     expect(mocks.enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort)
       .not.toHaveBeenCalled();
     expect(mocks.signalHostedRuntimeMaintenanceRuntime).not.toHaveBeenCalled();
+  });
+
+  it("ignores a reaction first received before the member left", async () => {
+    mocks.acceptHostedGroupJoinOfferTx.mockRejectedValue(hostedOnboardingError({
+      code: "HOSTED_GROUP_JOIN_REACTION_PREDATES_LEAVE",
+      httpStatus: 409,
+      message: "This reaction was recorded before you left the group.",
+      retryable: false,
+    }));
+    const event = parseReactionEvent({ reactionType: "like" });
+    const prisma = createPrismaStub();
+
+    await expect(handleHostedGroupJoinOfferReaction({
+      event,
+      prisma,
+    })).resolves.toEqual({
+      reason: "reaction_predates_leave",
+      status: "ignored",
+    });
+
+    expect(mocks.acceptHostedGroupJoinOfferTx).toHaveBeenCalledWith(
+      expect.objectContaining({ now: REACTION_RECEIVED_AT }),
+    );
+    expect(mocks.enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort)
+      .not.toHaveBeenCalled();
+    expect(mocks.signalHostedRuntimeMaintenanceRuntime).not.toHaveBeenCalled();
+    expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
   });
 });
 

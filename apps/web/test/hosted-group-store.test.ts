@@ -48,6 +48,7 @@ import {
   createHostedGroupJoinLinkForOwnedThreadContainerTx,
   HOSTED_GROUP_VAULT_SHARE_DESTINATION_LIMIT_PER_PROJECTION,
   HOSTED_GROUP_VAULT_SHARE_GRANT_LIMIT_PER_GRANTOR_PROJECTION,
+  leaveHostedGroupMemberTx,
   readHostedGroupJoinView,
   recordHostedGroupJoinOfferTx,
 } from "@/src/lib/hosted-groups/group-store";
@@ -95,8 +96,10 @@ function buildTx(input?: {
   activeDestinationGrantCount?: number;
   activeGroupGrantCount?: number;
   existingMembershipId?: string | null;
+  existingMembershipLeftAt?: Date | null;
   offerMessageLookupKey?: string;
   offerProjectionKinds?: string[];
+  ownerMemberId?: string;
   requestedProjectionKinds?: string[];
   revokedOfferAt?: Date | null;
   runtimeMemberId?: string | null;
@@ -124,12 +127,12 @@ function buildTx(input?: {
     $queryRaw: vi.fn(async () => []),
     hostedGroup: {
       findUnique: vi.fn(async (args: {
-        where: { id?: string; joinCode?: string };
+        where: { id?: string; joinCode?: string; runtimeMemberId?: string };
       }) => {
         if (args.where.joinCode) {
           return { id: "group_1" };
         }
-        if (args.where.id) {
+        if (args.where.id || args.where.runtimeMemberId) {
           return {
             id: "group_1",
             joinCode: "join_1",
@@ -139,6 +142,7 @@ function buildTx(input?: {
                   requestedVaultShareProjectionKinds: input.requestedProjectionKinds,
                 }
               : JOIN_POLICY,
+            ownerMemberId: input?.ownerMemberId ?? "member_owner",
             runtimeMemberId: input?.runtimeMemberId === undefined
               ? "member_group_runtime"
               : input.runtimeMemberId,
@@ -201,8 +205,11 @@ function buildTx(input?: {
     hostedGroupMember: {
       create: vi.fn(async () => ({ id: "membership_created" })),
       findUnique: vi.fn(async () => {
-        return input?.existingMembershipId ? { id: input.existingMembershipId } : null;
+        return input?.existingMembershipId
+          ? { id: input.existingMembershipId, leftAt: input.existingMembershipLeftAt ?? null }
+          : null;
       }),
+      update: vi.fn(async (args: { where: { id: string } }) => ({ id: args.where.id })),
     },
     hostedMember: {
       findUnique: vi.fn(async () => ({ suspendedAt: null })),
@@ -477,6 +484,109 @@ describe("acceptHostedGroupJoinCodeTx", () => {
     });
   });
 
+  it("reactivates a left membership only through an explicit join", async () => {
+    const tx = buildTx({
+      existingMembershipId: "membership_existing",
+      existingMembershipLeftAt: new Date("2026-07-02T00:00:00.000Z"),
+    });
+    const now = new Date("2026-07-03T00:00:00.000Z");
+
+    await expect(acceptHostedGroupJoinCodeTx({
+      joinCode: "join_1",
+      memberId: "member_grantor",
+      now,
+      selectedVaultShareProjectionKinds: [],
+      tx,
+    })).resolves.toMatchObject({
+      alreadyMember: false,
+      membershipId: "membership_existing",
+    });
+
+    expect(tx.hostedGroupMember.create).not.toHaveBeenCalled();
+    expect(tx.hostedGroupMember.update).toHaveBeenCalledWith({
+      where: { id: "membership_existing" },
+      data: {
+        joinedAt: now,
+        leftAt: null,
+        role: "member",
+      },
+      select: { id: true },
+    });
+  });
+
+  it("rejects a join-offer reaction received before the member left", async () => {
+    const tx = buildTx({
+      existingMembershipId: "membership_existing",
+      existingMembershipLeftAt: new Date("2026-07-02T00:00:00.000Z"),
+    });
+
+    await expect(acceptHostedGroupJoinOfferTx({
+      memberId: "member_grantor",
+      messageLookupKeyReadCandidates: ["hbidx:linq-message:v1:offer"],
+      now: new Date("2026-07-01T00:00:00.000Z"),
+      threadIdentityLookupKeyReadCandidates: ["hbidx:external-thread-identity:v1:thread"],
+      tx,
+    })).rejects.toMatchObject({
+      code: "HOSTED_GROUP_JOIN_REACTION_PREDATES_LEAVE",
+      httpStatus: 409,
+    });
+
+    expect(tx.hostedGroupMember.update).not.toHaveBeenCalled();
+    expect(mocks.grantHostedVaultShareTx).not.toHaveBeenCalled();
+  });
+
+  it("rejects a join-offer reaction received exactly when the member left", async () => {
+    const leftAt = new Date("2026-07-02T00:00:00.000Z");
+    const tx = buildTx({
+      existingMembershipId: "membership_existing",
+      existingMembershipLeftAt: leftAt,
+    });
+
+    await expect(acceptHostedGroupJoinOfferTx({
+      memberId: "member_grantor",
+      messageLookupKeyReadCandidates: ["hbidx:linq-message:v1:offer"],
+      now: leftAt,
+      threadIdentityLookupKeyReadCandidates: ["hbidx:external-thread-identity:v1:thread"],
+      tx,
+    })).rejects.toMatchObject({
+      code: "HOSTED_GROUP_JOIN_REACTION_PREDATES_LEAVE",
+      httpStatus: 409,
+    });
+
+    expect(tx.hostedGroupMember.update).not.toHaveBeenCalled();
+    expect(mocks.grantHostedVaultShareTx).not.toHaveBeenCalled();
+  });
+
+  it("accepts a genuinely later join-offer reaction after a leave", async () => {
+    const tx = buildTx({
+      activeGroupGrantCount: 0,
+      existingMembershipId: "membership_existing",
+      existingMembershipLeftAt: new Date("2026-07-02T00:00:00.000Z"),
+    });
+    const now = new Date("2026-07-03T00:00:00.000Z");
+
+    await expect(acceptHostedGroupJoinOfferTx({
+      memberId: "member_grantor",
+      messageLookupKeyReadCandidates: ["hbidx:linq-message:v1:offer"],
+      now,
+      threadIdentityLookupKeyReadCandidates: ["hbidx:external-thread-identity:v1:thread"],
+      tx,
+    })).resolves.toMatchObject({
+      alreadyMember: false,
+      membershipId: "membership_existing",
+    });
+
+    expect(tx.hostedGroupMember.update).toHaveBeenCalledWith({
+      where: { id: "membership_existing" },
+      data: {
+        joinedAt: now,
+        leftAt: null,
+        role: "member",
+      },
+      select: { id: true },
+    });
+  });
+
   it("records join-offer bindings as message lookup keys and projection snapshots", async () => {
     const tx = buildTx();
     const postedAt = new Date("2026-07-01T00:00:00.000Z");
@@ -715,6 +825,138 @@ describe("acceptHostedGroupJoinCodeTx", () => {
   });
 });
 
+describe("leaveHostedGroupMemberTx", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.revokeHostedVaultSharesWithCleanupTx.mockResolvedValue({
+      cleanupSignals: [{
+        mailboxItemId: "mailbox_item_revoke_1",
+        memberId: "member_group_runtime",
+      }],
+      revokedCount: 2,
+    });
+  });
+
+  it("captures the leave fence after locking, then revokes every active share", async () => {
+    const tx = buildTx({ existingMembershipId: "membership_existing" });
+    const now = new Date("2026-07-10T00:00:00.000Z");
+    const clock = vi.fn(() => now);
+
+    await expect(leaveHostedGroupMemberTx({
+      clock,
+      groupRuntimeMemberId: "member_group_runtime",
+      memberId: "member_grantor",
+      tx,
+    })).resolves.toEqual({
+      groupId: "group_1",
+      kind: "left",
+      revokedCount: 2,
+      vaultShareCleanupSignals: [{
+        mailboxItemId: "mailbox_item_revoke_1",
+        memberId: "member_group_runtime",
+      }],
+    });
+
+    expect(clock).toHaveBeenCalledOnce();
+    expect(
+      vi.mocked(tx.hostedGroupMember.findUnique).mock.invocationCallOrder[0],
+    ).toBeLessThan(clock.mock.invocationCallOrder[0]);
+    expect(mocks.revokeHostedVaultSharesWithCleanupTx).toHaveBeenCalledWith({
+      destinationMemberId: "member_group_runtime",
+      grantorMemberId: "member_grantor",
+      now,
+      tx,
+    });
+    expect(tx.hostedGroupMember.update).toHaveBeenCalledWith({
+      where: { id: "membership_existing" },
+      data: { leftAt: now },
+      select: { id: true },
+    });
+    expect(
+      mocks.revokeHostedVaultSharesWithCleanupTx.mock.invocationCallOrder[0],
+    ).toBeLessThan(
+      vi.mocked(tx.hostedGroupMember.update).mock.invocationCallOrder[0],
+    );
+  });
+
+  it("keeps repeated leave idempotent", async () => {
+    const tx = buildTx({
+      existingMembershipId: "membership_existing",
+      existingMembershipLeftAt: new Date("2026-07-09T00:00:00.000Z"),
+    });
+
+    await expect(leaveHostedGroupMemberTx({
+      groupRuntimeMemberId: "member_group_runtime",
+      memberId: "member_grantor",
+      tx,
+    })).resolves.toEqual({
+      kind: "already_left",
+      revokedCount: 0,
+      vaultShareCleanupSignals: [],
+    });
+
+    expect(mocks.revokeHostedVaultSharesWithCleanupTx).not.toHaveBeenCalled();
+    expect(tx.hostedGroupMember.update).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when the group disappears before its row lock is acquired", async () => {
+    const tx = buildTx({ existingMembershipId: "membership_existing" });
+    tx.hostedGroup.findUnique
+      .mockResolvedValueOnce({ id: "group_1" })
+      .mockResolvedValueOnce(null);
+
+    await expect(leaveHostedGroupMemberTx({
+      groupRuntimeMemberId: "member_group_runtime",
+      memberId: "member_grantor",
+      tx,
+    })).resolves.toEqual({
+      kind: "group_not_found",
+      revokedCount: 0,
+      vaultShareCleanupSignals: [],
+    });
+
+    expect(mocks.revokeHostedVaultSharesWithCleanupTx).not.toHaveBeenCalled();
+    expect(tx.hostedGroupMember.findUnique).not.toHaveBeenCalled();
+    expect(tx.hostedGroupMember.update).not.toHaveBeenCalled();
+  });
+
+  it("rejects owner leave without revoking owner data", async () => {
+    const tx = buildTx({
+      existingMembershipId: "membership_owner",
+      ownerMemberId: "member_owner",
+    });
+
+    await expect(leaveHostedGroupMemberTx({
+      groupRuntimeMemberId: "member_group_runtime",
+      memberId: "member_owner",
+      tx,
+    })).resolves.toEqual({
+      kind: "owner_cannot_leave",
+      revokedCount: 0,
+      vaultShareCleanupSignals: [],
+    });
+
+    expect(mocks.revokeHostedVaultSharesWithCleanupTx).not.toHaveBeenCalled();
+    expect(tx.hostedGroupMember.update).not.toHaveBeenCalled();
+  });
+
+  it("does not report a leave when the membership fence write fails", async () => {
+    const tx = buildTx({ existingMembershipId: "membership_existing" });
+    vi.mocked(tx.hostedGroupMember.update).mockRejectedValueOnce(
+      new Error("membership write failed"),
+    );
+
+    await expect(leaveHostedGroupMemberTx({
+      clock: () => new Date("2026-07-10T00:00:00.000Z"),
+      groupRuntimeMemberId: "member_group_runtime",
+      memberId: "member_grantor",
+      tx,
+    })).rejects.toThrow("membership write failed");
+
+    expect(mocks.revokeHostedVaultSharesWithCleanupTx).toHaveBeenCalled();
+  });
+});
+
 describe("createHostedGroupJoinLinkForOwnedThreadContainerTx", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -870,6 +1112,21 @@ describe("createHostedGroupJoinLinkForOwnedThreadContainerTx", () => {
       joinCode: "join_created",
     });
 
+    expect(tx.hostedGroup.findUnique).toHaveBeenCalledWith({
+      where: { id: "group_1" },
+      select: {
+        displayName: true,
+        id: true,
+        joinPolicyJson: true,
+        kind: true,
+        runtimeMemberId: true,
+        members: {
+          where: { leftAt: null },
+          orderBy: { createdAt: "asc" },
+          select: { memberId: true, role: true },
+        },
+      },
+    });
     expect(tx.hostedGroup.update).toHaveBeenCalledWith({
       data: {
         joinCode: expect.any(String),
@@ -913,8 +1170,10 @@ describe("createHostedGroupJoinLinkForOwnedThreadContainerTx", () => {
       }),
     }));
 
+    mocks.readActiveHostedVaultShareProjectionScopes.mockResolvedValueOnce([]);
     await expect(readHostedGroupJoinView({
       joinCode: created.joinCode,
+      memberId: "member_former",
       prisma: tx,
     })).resolves.toMatchObject({
       displayName: "Sunday Sleep Crew",
@@ -922,6 +1181,27 @@ describe("createHostedGroupJoinLinkForOwnedThreadContainerTx", () => {
       requestedVaultShareProjections: [
         expect.objectContaining({ projectionKind: "group-email.v0" }),
       ],
+      viewerMembershipStatus: null,
+    });
+    expect(tx.hostedGroup.findUnique).toHaveBeenCalledWith({
+      where: { joinCode: created.joinCode },
+      select: {
+        displayName: true,
+        id: true,
+        joinPolicyJson: true,
+        kind: true,
+        runtimeMemberId: true,
+        _count: {
+          select: {
+            members: { where: { leftAt: null } },
+          },
+        },
+        members: {
+          where: { leftAt: null, memberId: "member_former" },
+          select: { id: true },
+          take: 1,
+        },
+      },
     });
   });
 

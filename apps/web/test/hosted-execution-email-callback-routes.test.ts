@@ -376,7 +376,10 @@ describe("hosted execution email callback routes", () => {
     });
     expect(prismaClient.hostedGroup.findUnique).toHaveBeenCalledWith({
       select: {
-        members: { select: { memberId: true } },
+        members: {
+          select: { memberId: true },
+          where: { leftAt: null },
+        },
         runtimeMemberId: true,
       },
       where: { id: "hgrp_123" },
@@ -493,6 +496,42 @@ describe("hosted execution email callback routes", () => {
     await expect(response.json()).resolves.toEqual({
       userId: null,
     });
+  });
+
+  it("returns userId null when a former member is absent from the active group roster", async () => {
+    mocks.lookupHostedMemberByVerifiedEmailAddress.mockResolvedValue({
+      core: { id: "member_123" },
+    });
+    prismaClient.hostedGroup.findUnique.mockResolvedValue({
+      members: [],
+      runtimeMemberId: "group_runtime_member",
+    });
+
+    const response = await resolveRoute.POST(await createSignedCallbackRequest({
+      body: JSON.stringify({
+        envelopeFrom: "member@example.com",
+        groupId: "hgrp_123",
+        hasRepeatedHeaderFrom: false,
+        headerFrom: "Member <member@example.com>",
+      }),
+      path: HOSTED_EMAIL_RESOLVE_ROUTE_CALLBACK_PATH,
+      privateJwkJson: currentPrivateJwkJson,
+      userId: HOSTED_EMAIL_ROUTE_RESOLUTION_CALLBACK_USER_ID,
+    }));
+
+    expect(response.status).toBe(200);
+    expect(prismaClient.hostedGroup.findUnique).toHaveBeenCalledWith({
+      select: {
+        members: {
+          select: { memberId: true },
+          where: { leftAt: null },
+        },
+        runtimeMemberId: true,
+      },
+      where: { id: "hgrp_123" },
+    });
+    expect(prismaClient.hostedVaultShare.findFirst).not.toHaveBeenCalled();
+    await expect(response.json()).resolves.toEqual({ userId: null });
   });
 
   it("returns userId null for signed group route callbacks when the sender has revoked the group email grant", async () => {

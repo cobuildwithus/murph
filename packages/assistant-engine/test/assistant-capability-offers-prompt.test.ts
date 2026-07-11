@@ -132,6 +132,19 @@ describe('assistant capability-offers prompt contract', () => {
     expect(section).toContain('normal `vault-cli automation` surface')
   })
 
+  it('keeps self-service hosted-group departure sender-bound and truthful', () => {
+    const section = getPromptSection(
+      buildAssistantSystemPromptLayers(createCommonCodexPromptInput())
+        .stableRouteCapabilityPrompt,
+      HOSTED_GROUPS_HEADER,
+    )
+
+    expect(section).toContain('`action="leave_current"`')
+    expect(section).toContain('without supplying identity or group arguments')
+    expect(section).toContain('Never use this action to remove someone else')
+    expect(section).toContain('historical chat/provider copies are not erased')
+  })
+
   it('delegates capability mechanics and stays compact', () => {
     const section = getPromptSection(
       buildAssistantSystemPromptLayers(createCommonCodexPromptInput())
