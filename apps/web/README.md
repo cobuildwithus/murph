@@ -531,6 +531,23 @@ malformed key fails session issuance, resolution, and revocation closed. Keep
 the key out of Cloudflare Worker and runner environments; no Cloudflare deploy
 is required for this cutover.
 
+Freeze production deploys and rollbacks for the cutover. Record the exact
+strict-v2 commit, deploy it, and prove the production alias points at that
+commit with `apps/web/scripts/resolve-vercel-production-alias-sha.ts` and the
+secure `HOSTED_WEB_VERCEL_*` operator environment. Wait the configured
+`HOSTED_WEB_CONTRACT_MIGRATION_DRAIN_SECONDS` prior-function interval, then
+resolve the alias again. If it changed, select a strict-v2 commit and restart
+the full drain. A completion response from an old function can set a legacy
+cookie during this window; rejection is intentional, and the user must retry
+sign-in after the drain to receive a v2 cookie. Verify that retry, authenticated
+browser-vault access, expiry, and logout before ending the freeze.
+
+The first strict-v2 production deployment is the app-session rollback floor.
+Do not roll back to an older build: it accepts the database-forgeable legacy
+session protocol. For incidents after the cutover, deploy a forward fix or
+roll forward to this floor or a newer strict-v2 commit. Record the commit, both
+alias proofs, elapsed drain, and post-drain verification as rollout evidence.
+
 - Enable Vercel OIDC so the app-local hosted-execution auth adapter can present
   workload identity to Cloudflare on dispatch and status requests.
 - Set `CRON_SECRET` for the hosted cron routes under `/api/internal/**/cron`.

@@ -218,6 +218,7 @@ export async function startHostedLocalDevStack(input: {
   throwIfAbortSignalAborted(input.abortSignal);
   const initialEnv = { ...input.env } satisfies NodeJS.ProcessEnv;
   const initialProcessEnv = { ...initialEnv } satisfies NodeJS.ProcessEnv;
+  delete initialProcessEnv.HOSTED_APP_SESSION_HMAC_KEY;
   const config = resolveHostedLocalDevConfig(initialEnv);
   assertHostedLocalWorktreeRuntimePreconditions(initialEnv);
   assertHostedLocalE2eIsolation(initialEnv, config);
@@ -471,14 +472,22 @@ export async function startHostedLocalDevStack(input: {
     const localOverrides = buildHostedLocalDevOverrides(config, cloudflareDevVars, {
       retellWebhookPublicBaseUrl: linqWebhookSetup?.publicBaseUrl ?? null,
     });
+    const {
+      HOSTED_APP_SESSION_HMAC_KEY: hostedAppSessionHmacKeyCandidate,
+      ...sharedLocalOverrides
+    } = localOverrides;
+    const sharedVercelEnv = { ...vercelEnv };
+    const sharedCloudflareDevVars = { ...cloudflareDevVars };
+    delete sharedVercelEnv.HOSTED_APP_SESSION_HMAC_KEY;
+    delete sharedCloudflareDevVars.HOSTED_APP_SESSION_HMAC_KEY;
     const runtimeEnv: NodeJS.ProcessEnv = {
-      ...vercelEnv,
-      ...localOverrides,
+      ...sharedVercelEnv,
+      ...sharedLocalOverrides,
       ...buildHostedLocalTemporalRuntimeEnv({
         config,
         env: {
-          ...vercelEnv,
-          ...localOverrides,
+          ...sharedVercelEnv,
+          ...sharedLocalOverrides,
         },
       }),
       TSX_TSCONFIG_PATH: tsxTsconfigPath,
@@ -498,8 +507,8 @@ export async function startHostedLocalDevStack(input: {
     const workerRuntimeSourceEnv: NodeJS.ProcessEnv = {
       ...stripHostedLocalHostOnlyCodexEnv({
         ...runtimeEnv,
-        ...cloudflareDevVars,
-        ...localOverrides,
+        ...sharedCloudflareDevVars,
+        ...sharedLocalOverrides,
       }),
       ...(hostedLocalCodexModelCatalogJson !== null
         ? { [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]: hostedLocalCodexModelCatalogJson }
@@ -508,9 +517,6 @@ export async function startHostedLocalDevStack(input: {
         ? { [HOSTED_RUNTIME_CODEX_CHATGPT_AUTH_JSON_ENV]: codexSubscriptionAuthEnvValue }
         : {}),
     };
-    // This key authenticates web-owned browser sessions and must never enter
-    // the Cloudflare worker or runner process environment.
-    delete workerRuntimeSourceEnv.HOSTED_APP_SESSION_HMAC_KEY;
     workerRuntimeEnv = workerPortMode === "start"
       ? {
         ...workerRuntimeSourceEnv,
@@ -869,6 +875,7 @@ export async function startHostedLocalDevStack(input: {
       }), buildHostedWebProcessEnv({
         ...runtimeEnv,
         ...(input.webProcessEnvOverrides ?? {}),
+        HOSTED_APP_SESSION_HMAC_KEY: hostedAppSessionHmacKeyCandidate,
       }, shouldUseWebProductionStart), {
         pipeOutput: input.pipeOutput,
         stderrTarget: input.stderrTarget,

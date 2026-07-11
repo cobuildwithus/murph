@@ -592,6 +592,7 @@ describe("hosted local dev stack", () => {
     const stack = await startHostedLocalDevStack({
       env: {
         ...process.env,
+        HOSTED_APP_SESSION_HMAC_KEY: "inherited-key-must-not-propagate",
         LINQ_API_BASE_URL: "http://host.docker.internal:4011",
       },
       webProcessEnvOverrides: {
@@ -604,9 +605,7 @@ describe("hosted local dev stack", () => {
     expect(stack.runtimeEnv.LINQ_API_BASE_URL).toBe(
       "http://host.docker.internal:4011",
     );
-    expect(stack.runtimeEnv.HOSTED_APP_SESSION_HMAC_KEY).toBe(
-      Buffer.alloc(32, 8).toString("base64url"),
-    );
+    expect(stack.runtimeEnv.HOSTED_APP_SESSION_HMAC_KEY).toBeUndefined();
     expect(stack.workerRuntimeEnv?.HOSTED_APP_SESSION_HMAC_KEY).toBeUndefined();
     expect(startHostedLocalTemporalRuntime).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -679,6 +678,20 @@ describe("hosted local dev stack", () => {
     expect(devWebCall?.[3].HOSTED_APP_SESSION_HMAC_KEY).toBe(
       Buffer.alloc(32, 8).toString("base64url"),
     );
+    for (const [name, , , env] of spawnChildProcess.mock.calls) {
+      if (name !== "web") {
+        expect(env.HOSTED_APP_SESSION_HMAC_KEY).toBeUndefined();
+      }
+    }
+    for (const [, , options] of runCommand.mock.calls) {
+      expect(options.env?.HOSTED_APP_SESSION_HMAC_KEY).toBeUndefined();
+    }
+    for (const [input] of spawnStripeListenerWithSecretCapture.mock.calls) {
+      expect(input.env.HOSTED_APP_SESSION_HMAC_KEY).toBeUndefined();
+    }
+    for (const [input] of startHostedLocalTemporalRuntime.mock.calls) {
+      expect(input.env.HOSTED_APP_SESSION_HMAC_KEY).toBeUndefined();
+    }
     expect(
       vi.mocked(environmentModule.buildWranglerEnvFileText).mock.calls.at(-1)?.[0]
         .HOSTED_APP_SESSION_HMAC_KEY,
