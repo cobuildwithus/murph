@@ -78,7 +78,7 @@ test("dashboard routes define page-specific metadata with the shared preview ima
   ]) {
     assert.deepEqual(routeMetadata.openGraph?.images, [
       {
-        alt: "Murph figures out what works for you—and gets your friends in on it.",
+        alt: "Health is hard. Don’t do it alone.",
         height: 630,
         type: "image/png",
         url: "/opengraph-image",
@@ -87,7 +87,7 @@ test("dashboard routes define page-specific metadata with the shared preview ima
     ]);
     assert.deepEqual(routeMetadata.twitter?.images, [
       {
-        alt: "Murph figures out what works for you—and gets your friends in on it.",
+        alt: "Health is hard. Don’t do it alone.",
         height: 630,
         type: "image/png",
         url: "/opengraph-image",
