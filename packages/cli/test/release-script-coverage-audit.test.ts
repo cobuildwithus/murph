@@ -56,23 +56,28 @@ type BrowserCommand = {
 type ReviewGptHarnessOptions = {
   closeBrowserSocketBeforeOpen?: boolean
   closeBrowserSocketAfterCreate?: boolean
+  closeCommandFailuresBeforeSuccess?: number
   closeCommandReturnsFalse?: boolean
   closeCommandFails?: boolean
+  closeCommandHangsAfterClosingAtAttempt?: number
   createCommandOmitsTargetId?: boolean
   draftTimeoutMs?: number
   failBrowserSocketOpen?: boolean
   failListAfterClose?: boolean
   failPageCommand?: boolean
+  failPageCommandAtMethod?: string
   firstTargetPageCommandsHangThenFail?: boolean
   failPageSocketOpen?: boolean
   failPageSocketOpenAttempts?: number
   hangBrowserSocketAfterCreate?: boolean
+  hangCloseCommandAtAttempt?: number
   hangListAfterClose?: boolean
   hangPageSocketOpenAttempts?: number
   hangVersionAtCall?: number
   shouldSend?: boolean
   shouldWaitForResponse?: boolean
   targetPresentAfterClose?: boolean
+  throwCreateSendSynchronouslyOnce?: boolean
 }
 
 type MockSocketEvent = {
@@ -107,16 +112,20 @@ function loadReviewGptOpenTargetHarness(
     'module.exports.__withTimeoutTest = withTimeout;',
   ].join('\n')
   const commands: BrowserCommand[] = []
-  let closeAttempted = false
+  let closeCommandAttemptCount = 0
+  let createSendAttemptCount = 0
   let createdTargetCount = 0
   let latestTargetId = ''
+  let latestTargetUrl = ''
   let listPollCount = 0
   let now = 0
   let pageSocketCount = 0
+  let targetClosed = false
   let versionFetchCount = 0
 
   class MockWebSocket {
     readonly listeners = new Map<string, Array<(event: MockSocketEvent) => void>>()
+    readonly readyState = 1
     private readonly pageSocketOrdinal: number | null
 
     constructor(private readonly url: string) {
@@ -175,6 +184,13 @@ function loadReviewGptOpenTargetHarness(
         method: string
         params?: Record<string, unknown>
       }
+      const isCreateCommand = command.method === 'Target.createTarget'
+      if (isCreateCommand) {
+        createSendAttemptCount += 1
+        if (options.throwCreateSendSynchronouslyOnce && createSendAttemptCount === 1) {
+          throw new Error('Injected synchronous create send failure')
+        }
+      }
       commands.push({
         listPollCount,
         method: command.method,
@@ -183,12 +199,13 @@ function loadReviewGptOpenTargetHarness(
 
       const isCloseCommand = command.method === 'Target.closeTarget'
       if (isCloseCommand) {
-        closeAttempted = true
+        closeCommandAttemptCount += 1
       }
-      if (command.method === 'Target.createTarget') {
+      if (isCreateCommand) {
         createdTargetCount += 1
         latestTargetId = `target-${createdTargetCount}`
-        closeAttempted = false
+        latestTargetUrl = String(command.params?.url ?? '')
+        targetClosed = false
       }
 
       queueMicrotask(() => {
@@ -212,19 +229,35 @@ function loadReviewGptOpenTargetHarness(
           return
         }
         if (
-          command.method === 'Target.createTarget' &&
+          this.url === 'ws://page' &&
+          command.method === options.failPageCommandAtMethod
+        ) {
+          this.emit('message', {
+            data: JSON.stringify({
+              error: { message: 'Injected CDP socket error' },
+              id: command.id,
+            }),
+          })
+          return
+        }
+        if (
+          isCreateCommand &&
           options.closeBrowserSocketAfterCreate
         ) {
           this.emit('close', {})
           return
         }
         if (
-          command.method === 'Target.createTarget' &&
+          isCreateCommand &&
           options.hangBrowserSocketAfterCreate
         ) {
           return
         }
-        if (isCloseCommand && options.closeCommandFails) {
+        const closeCommandShouldFail = isCloseCommand && (
+          options.closeCommandFails ||
+          closeCommandAttemptCount <= (options.closeCommandFailuresBeforeSuccess ?? 0)
+        )
+        if (closeCommandShouldFail) {
           this.emit('message', {
             data: JSON.stringify({
               error: { message: 'Injected target close failure' },
@@ -233,7 +266,23 @@ function loadReviewGptOpenTargetHarness(
           })
           return
         }
-        const result = command.method === 'Target.createTarget'
+        if (isCloseCommand && options.hangCloseCommandAtAttempt === closeCommandAttemptCount) {
+          return
+        }
+        if (
+          isCloseCommand &&
+          options.closeCommandHangsAfterClosingAtAttempt === closeCommandAttemptCount
+        ) {
+          targetClosed = true
+          return
+        }
+        if (isCloseCommand && !options.targetPresentAfterClose) {
+          targetClosed = true
+        }
+        if (command.method === 'Page.navigate') {
+          latestTargetUrl = String(command.params?.url ?? '')
+        }
+        const result = isCreateCommand
           ? (options.createCommandOmitsTargetId ? {} : { targetId: latestTargetId })
           : { success: isCloseCommand ? !options.closeCommandReturnsFalse : true }
         this.emit('message', {
@@ -290,29 +339,33 @@ function loadReviewGptOpenTargetHarness(
     }
     if (pathname === '/json/list') {
       listPollCount += 1
-      if (closeAttempted && options.hangListAfterClose) {
+      if (closeCommandAttemptCount > 0 && options.hangListAfterClose) {
         return new Promise<never>(() => {})
       }
-      if (closeAttempted && options.failListAfterClose) {
+      if (closeCommandAttemptCount > 0 && options.failListAfterClose) {
         throw new Error('Mock post-close target-list failure')
       }
       if (listPollCount === listFailureAtPoll) {
         throw new Error('Mock target-list failure')
       }
-      const targetVisible = closeAttempted
-        ? Boolean(options.targetPresentAfterClose)
-        : listPollCount >= targetReadyAfterPoll
+      const targetReady = listPollCount >= targetReadyAfterPoll
+      const targetVisible = !targetClosed && (
+        targetReady ||
+        (closeCommandAttemptCount > 0 && Boolean(options.targetPresentAfterClose))
+      )
       const targets = [
         {
           id: 'unrelated-user-target',
           type: 'page',
+          url: 'https://chatgpt.com/',
           webSocketDebuggerUrl: 'ws://user-page',
         },
         ...(targetVisible
           ? [{
               id: latestTargetId,
               type: 'page',
-              webSocketDebuggerUrl: 'ws://page',
+              url: latestTargetUrl,
+              ...(targetReady ? { webSocketDebuggerUrl: 'ws://page' } : {}),
             }]
           : []),
       ]
@@ -365,6 +418,7 @@ function loadReviewGptOpenTargetHarness(
   const isRetryableSocketError = moduleRecord.exports.__isRetryableSocketErrorTest
   const main = moduleRecord.exports.__mainTest
   const mainWithRetry = moduleRecord.exports.__mainWithRetryTest
+  const modelConfirmationFailure = moduleRecord.exports.modelConfirmationFailure
   const withTimeout = moduleRecord.exports.__withTimeoutTest
   if (
     typeof browserTransportTimeoutMs !== 'number' ||
@@ -374,6 +428,7 @@ function loadReviewGptOpenTargetHarness(
     typeof isRetryableSocketError !== 'function' ||
     typeof main !== 'function' ||
     typeof mainWithRetry !== 'function' ||
+    typeof modelConfirmationFailure !== 'function' ||
     typeof withTimeout !== 'function'
   ) {
     throw new Error('ReviewGPT lifecycle functions were not available to the test harness')
@@ -384,7 +439,10 @@ function loadReviewGptOpenTargetHarness(
     connectTarget: async (desiredUrl: string) => {
       return Reflect.apply(connectTarget, undefined, [desiredUrl])
     },
+    getCloseCommandAttemptCount: () => closeCommandAttemptCount,
+    getCreateSendAttemptCount: () => createSendAttemptCount,
     getListPollCount: () => listPollCount,
+    getLatestTargetUrl: () => latestTargetUrl,
     getNow: () => now,
     getBrowserTransportTimeoutMs: () => browserTransportTimeoutMs,
     getPageCommandTimeoutMs: () => pageCommandTimeoutMs,
@@ -397,6 +455,17 @@ function loadReviewGptOpenTargetHarness(
     mainWithRetry: async () => {
       await Reflect.apply(mainWithRetry, undefined, [])
     },
+    modelConfirmationFailure: (
+      targetModel: string,
+      responseText: string,
+      responseModelSlug = '',
+      generationElapsedMs = 0,
+    ) => String(Reflect.apply(modelConfirmationFailure, undefined, [
+      targetModel,
+      responseText,
+      responseModelSlug,
+      generationElapsedMs,
+    ])),
     openNewTarget: async (desiredUrl: string) => {
       const target: unknown = await Reflect.apply(openNewTarget, undefined, [desiredUrl])
       if (
@@ -644,6 +713,10 @@ describe('monorepo release flow coverage audit', () => {
       ),
       'utf8',
     )
+    const reviewGptReadme = readFileSync(
+      path.join(repoRoot, 'node_modules', '@cobuild', 'review-gpt', 'README.md'),
+      'utf8',
+    )
     const removedScripts = [
       'review:gpt:full',
       'review:gpt:protocol',
@@ -687,18 +760,16 @@ describe('monorepo release flow coverage audit', () => {
     expect(
       existsSync(path.join(repoRoot, 'patches', '@cobuild__review-gpt@0.5.103.patch')),
     ).toBe(true)
+    expect(reviewGptDriver).toContain("const { randomUUID } = require('crypto');")
     expect(reviewGptDriver).toContain(
-      [
-        '    } catch (error) {',
-        '      discoveryError = error;',
-        '    }',
-        '    try {',
-        '      await closeBackgroundTarget(created.targetId);',
-        '    } catch (cleanupError) {',
-        '      throw addTargetCleanupContext(cleanupError, discoveryError);',
-        '    }',
-        '    if (discoveryError) throw discoveryError;',
-      ].join('\n'),
+      "const targetOwnershipUrlPrefix = 'about:blank#review-gpt-owned-';",
+    )
+    expect(reviewGptDriver).toContain(
+      "(entry) => entry.type === 'page' && entry.url === ownershipUrl",
+    )
+    expect(reviewGptDriver).toContain('const navigation = await cdp(\'Page.navigate\', { url: chatgptUrl });')
+    expect(reviewGptDriver.indexOf('ws.send(payload);')).toBeLessThan(
+      reviewGptDriver.indexOf('commandDeliveryStarted = true;'),
     )
     expect(reviewGptDriver).toContain(
       [
@@ -715,13 +786,10 @@ describe('monorepo release flow coverage audit', () => {
         '      lastError = error;',
       ].join('\n'),
     )
-    expect(reviewGptDriver).toContain(
-      [
-        "      'Target.closeTarget',",
-        '      { targetId: normalizedTargetId },',
-        '      cleanupDeadline',
-      ].join('\n'),
-    )
+    expect(reviewGptDriver).toContain('while (Date.now() < cleanupDeadline)')
+    expect(reviewGptDriver).toContain("'Target.closeTarget'")
+    expect(reviewGptDriver).toContain('{ targetId: normalizedTargetId }')
+    expect(reviewGptDriver).toContain('attemptDeadline')
     expect(reviewGptDriver).toContain('failure.reviewGptTargetId = targetId;')
     expect(reviewGptDriver.match(/void (?:targetClosed|closed)\.catch\(\(\) => \{\}\);/gu)).toHaveLength(3)
     expect(reviewGptDriver).toContain('const controller = new AbortController();')
@@ -737,6 +805,11 @@ describe('monorepo release flow coverage audit', () => {
     expect(reviewGptDriver).toContain("'Timed out opening page CDP socket'")
     expect(reviewGptDriver).toContain('`CDP socket command timed out: ${method}`')
     expect(reviewGptDriver).toContain('`Nested CDP socket command timed out: ${method}`')
+    expect(reviewGptDriver).not.toContain('MODEL_CONFIRMATION_UNKNOWN_FALLBACK_MS')
+    expect(reviewGptDriver).not.toContain('acceptsTimedUnknown')
+    expect(reviewGptReadme).toContain(
+      'require exactly one unfenced, unquoted, matching `MODEL_CONFIRMATION` line',
+    )
     expect(reviewGptDriver).toContain(
       [
         '  });',
@@ -897,7 +970,7 @@ describe('monorepo release flow coverage audit', () => {
         method: 'Target.createTarget',
         params: {
           background: true,
-          url: 'https://chatgpt.com/',
+          url: expect.stringMatching(/^about:blank#review-gpt-owned-[0-9a-f-]+$/u),
         },
       },
     ])
@@ -912,7 +985,7 @@ describe('monorepo release flow coverage audit', () => {
         method: 'Target.createTarget',
         params: {
           background: true,
-          url: 'https://chatgpt.com/',
+          url: expect.stringMatching(/^about:blank#review-gpt-owned-[0-9a-f-]+$/u),
         },
       },
       {
@@ -922,26 +995,19 @@ describe('monorepo release flow coverage audit', () => {
       },
     ])
 
-    const failedPollTarget = loadReviewGptOpenTargetHarness(
-      Number.POSITIVE_INFINITY,
-      1,
-    )
+    const recoveredPollTarget = loadReviewGptOpenTargetHarness(2, 1)
     await expect(
-      failedPollTarget.openNewTarget('https://chatgpt.com/'),
-    ).rejects.toThrow('Mock target-list failure')
-    expect(failedPollTarget.commands).toEqual([
+      recoveredPollTarget.openNewTarget('https://chatgpt.com/'),
+    ).resolves.toMatchObject({ id: 'target-1' })
+    expect(recoveredPollTarget.getListPollCount()).toBe(2)
+    expect(recoveredPollTarget.commands).toEqual([
       {
         listPollCount: 0,
         method: 'Target.createTarget',
         params: {
           background: true,
-          url: 'https://chatgpt.com/',
+          url: expect.stringMatching(/^about:blank#review-gpt-owned-[0-9a-f-]+$/u),
         },
-      },
-      {
-        listPollCount: 1,
-        method: 'Target.closeTarget',
-        params: { targetId: 'target-1' },
       },
     ])
 
@@ -952,14 +1018,14 @@ describe('monorepo release flow coverage audit', () => {
     )
     await expect(
       absentAfterAmbiguousClose.openNewTarget('https://chatgpt.com/'),
-    ).rejects.toThrow('Mock target-list failure')
+    ).rejects.toThrow('did not expose a debuggable page')
     expect(
       absentAfterAmbiguousClose.commands.filter(
         (command) => command.method === 'Target.closeTarget',
       ),
     ).toEqual([
       {
-        listPollCount: 1,
+        listPollCount: 30,
         method: 'Target.closeTarget',
         params: { targetId: 'target-1' },
       },
@@ -1022,17 +1088,37 @@ describe('monorepo release flow coverage audit', () => {
       { createCommandOmitsTargetId: true },
       { hangBrowserSocketAfterCreate: true },
     ]) {
-      const ambiguousCreate = loadReviewGptOpenTargetHarness(1, undefined, options)
-      await expect(ambiguousCreate.mainWithRetry()).rejects.toMatchObject({
-        reviewGptStage: 'target-create',
-        reviewGptTargetOwnershipUncertain: true,
+      const recoveredCreate = loadReviewGptOpenTargetHarness(1, undefined, {
+        ...options,
+        failPageCommandAtMethod: 'Runtime.enable',
       })
+      await expect(recoveredCreate.main()).rejects.toThrow('Injected CDP socket error')
       expect(
-        ambiguousCreate.commands.filter(
+        recoveredCreate.commands.filter(
           (command) => command.method === 'Target.createTarget',
         ),
       ).toHaveLength(1)
+      expect(recoveredCreate.getLatestTargetUrl()).toBe('https://chatgpt.com/')
+      expect(
+        recoveredCreate.commands
+          .filter((command) => command.method === 'Target.closeTarget')
+          .map((command) => command.params.targetId),
+      ).toEqual(['target-1'])
     }
+
+    const synchronousCreateSendFailure = loadReviewGptOpenTargetHarness(1, undefined, {
+      failPageCommandAtMethod: 'Runtime.enable',
+      throwCreateSendSynchronouslyOnce: true,
+    })
+    await expect(synchronousCreateSendFailure.main()).rejects.toThrow(
+      'Injected CDP socket error',
+    )
+    expect(synchronousCreateSendFailure.getCreateSendAttemptCount()).toBe(2)
+    expect(
+      synchronousCreateSendFailure.commands.filter(
+        (command) => command.method === 'Target.createTarget',
+      ),
+    ).toHaveLength(1)
 
     const failedBrowserSocket = loadReviewGptOpenTargetHarness(1, undefined, {
       failBrowserSocketOpen: true,
@@ -1047,6 +1133,79 @@ describe('monorepo release flow coverage audit', () => {
     await expect(
       closedBrowserSocket.openNewTarget('https://chatgpt.com/'),
     ).rejects.toThrow('Browser CDP socket closed unexpectedly')
+  })
+
+  it('requires exact model confirmation even after a long generation', () => {
+    const modelClassifier = loadReviewGptOpenTargetHarness(1)
+    expect(
+      modelClassifier.modelConfirmationFailure(
+        'gpt-5.6-sol',
+        'MODEL_CONFIRMATION: UNKNOWN',
+        'gpt-5-6-pro',
+        46 * 60 * 1000,
+      ),
+    ).toContain('confirmed model UNKNOWN, expected gpt-5.6-sol')
+    expect(
+      modelClassifier.modelConfirmationFailure(
+        'gpt-5.6-sol',
+        [
+          '```bad`',
+          'MODEL_CONFIRMATION: UNKNOWN',
+          '```',
+          'MODEL_CONFIRMATION: gpt-5.6-sol',
+        ].join('\n'),
+        'gpt-5-6-pro',
+      ),
+    ).toContain('confirmed model UNKNOWN, expected gpt-5.6-sol')
+    expect(
+      modelClassifier.modelConfirmationFailure(
+        'gpt-5.6-sol',
+        [
+          '```text',
+          '```js',
+          'MODEL_CONFIRMATION: gpt-5.6-sol',
+          '```',
+          'MODEL_CONFIRMATION: UNKNOWN',
+        ].join('\n'),
+        'gpt-5-6-pro',
+      ),
+    ).toContain('confirmed model UNKNOWN, expected gpt-5.6-sol')
+    expect(
+      modelClassifier.modelConfirmationFailure(
+        'gpt-5.6-sol',
+        [
+          'MODEL_CONFIRMATION: gpt-5.6-sol',
+          'MODEL_CONFIRMATION: UNKNOWN',
+        ].join('\n'),
+        'gpt-5-6-pro',
+      ),
+    ).toContain('multiple MODEL_CONFIRMATION lines')
+    expect(
+      modelClassifier.modelConfirmationFailure(
+        'gpt-5.6-sol',
+        [
+          '```text',
+          'MODEL_CONFIRMATION: gpt-5.6-sol',
+          '```',
+          'MODEL_CONFIRMATION: UNKNOWN',
+        ].join('\n'),
+        'gpt-5-6-pro',
+      ),
+    ).toContain('confirmed model UNKNOWN, expected gpt-5.6-sol')
+    expect(
+      modelClassifier.modelConfirmationFailure(
+        'gpt-5.6-sol',
+        'MODEL_CONFIRMATION: GPT-5.6 Sol',
+        'gpt-5-6-pro',
+      ),
+    ).toBe('')
+    expect(
+      modelClassifier.modelConfirmationFailure(
+        'gpt-5.6-sol',
+        'MODEL_CONFIRMATION: gpt-5.6-sol',
+        'gpt-5-5-pro',
+      ),
+    ).toContain('DOM reported model gpt-5-5-pro, expected gpt-5.6-sol')
   })
 
   it('releases failed non-wait runs and stops retries after unconfirmed cleanup', async () => {
@@ -1117,25 +1276,24 @@ describe('monorepo release flow coverage audit', () => {
         (command) => command.method === 'Target.createTarget',
       ),
     ).toHaveLength(1)
-    expect(
-      unconfirmedCleanup.commands.filter(
-        (command) => command.method === 'Target.closeTarget',
-      ),
-    ).toHaveLength(1)
+    const persistentCloseAttempts = unconfirmedCleanup.commands.filter(
+      (command) => command.method === 'Target.closeTarget',
+    )
+    expect(persistentCloseAttempts.length).toBeGreaterThan(1)
+    expect(persistentCloseAttempts.every(
+      (command) => command.params.targetId === 'target-1',
+    )).toBe(true)
+    expect(unconfirmedCleanup.getNow()).toBe(5000)
 
-    const boundedCleanup = loadReviewGptOpenTargetHarness(1, undefined, {
-      failPageCommand: true,
+    const recoveredVersionLookup = loadReviewGptOpenTargetHarness(1, undefined, {
+      failPageCommandAtMethod: 'Runtime.enable',
       hangVersionAtCall: 2,
     })
-    await expect(boundedCleanup.mainWithRetry()).rejects.toMatchObject({
-      reviewGptStage: 'target-cleanup',
-      reviewGptTargetCleanupFailure: true,
-      reviewGptTargetId: 'target-1',
-    })
-    expect(boundedCleanup.getNow()).toBe(5000)
+    await expect(recoveredVersionLookup.main()).rejects.toThrow('Injected CDP socket error')
+    expect(recoveredVersionLookup.getNow()).toBeLessThan(5000)
     expect(
-      boundedCleanup.commands.filter(
-        (command) => command.method === 'Target.createTarget',
+      recoveredVersionLookup.commands.filter(
+        (command) => command.method === 'Target.closeTarget',
       ),
     ).toHaveLength(1)
   })
@@ -1177,6 +1335,51 @@ describe('monorepo release flow coverage audit', () => {
       },
     ])
 
+    const retriedExactClose = loadReviewGptOpenTargetHarness(1, undefined, {
+      closeCommandFailuresBeforeSuccess: 1,
+      failPageSocketOpenAttempts: 1,
+    })
+    await expect(
+      retriedExactClose.connectTarget('https://chatgpt.com/'),
+    ).resolves.toMatchObject({ target: { id: 'target-2' } })
+    expect(
+      retriedExactClose.commands
+        .filter((command) => command.method === 'Target.closeTarget')
+        .map((command) => command.params.targetId),
+    ).toEqual(['target-1', 'target-1'])
+    expect(
+      retriedExactClose.commands.filter(
+        (command) => command.method === 'Target.createTarget',
+      ),
+    ).toHaveLength(2)
+
+    const recoveredHungClose = loadReviewGptOpenTargetHarness(1, undefined, {
+      failPageSocketOpenAttempts: 1,
+      hangCloseCommandAtAttempt: 1,
+    })
+    await expect(
+      recoveredHungClose.connectTarget('https://chatgpt.com/'),
+    ).resolves.toMatchObject({ target: { id: 'target-2' } })
+    expect(recoveredHungClose.getNow()).toBeLessThan(5000)
+    expect(
+      recoveredHungClose.commands
+        .filter((command) => command.method === 'Target.closeTarget')
+        .map((command) => command.params.targetId),
+    ).toEqual(['target-1', 'target-1'])
+
+    const lostSuccessfulCloseResponse = loadReviewGptOpenTargetHarness(1, undefined, {
+      closeCommandHangsAfterClosingAtAttempt: 1,
+      failPageSocketOpenAttempts: 1,
+    })
+    await expect(
+      lostSuccessfulCloseResponse.connectTarget('https://chatgpt.com/'),
+    ).resolves.toMatchObject({ target: { id: 'target-2' } })
+    expect(
+      lostSuccessfulCloseResponse.commands
+        .filter((command) => command.method === 'Target.closeTarget')
+        .map((command) => command.params.targetId),
+    ).toEqual(['target-1'])
+
     const failedAttachment = loadReviewGptOpenTargetHarness(1, undefined, {
       closeCommandFails: true,
       failPageSocketOpen: true,
@@ -1195,11 +1398,13 @@ describe('monorepo release flow coverage audit', () => {
         (command) => command.method === 'Target.createTarget',
       ),
     ).toHaveLength(1)
-    expect(
-      failedAttachment.commands.filter(
-        (command) => command.method === 'Target.closeTarget',
-      ),
-    ).toHaveLength(1)
+    const failedAttachmentCloses = failedAttachment.commands.filter(
+      (command) => command.method === 'Target.closeTarget',
+    )
+    expect(failedAttachmentCloses.length).toBeGreaterThan(1)
+    expect(failedAttachmentCloses.every(
+      (command) => command.params.targetId === 'target-1',
+    )).toBe(true)
   })
 
   it('keeps reverse-dependent CLI coverage on the source lane for inboxd-only diffs', () => {

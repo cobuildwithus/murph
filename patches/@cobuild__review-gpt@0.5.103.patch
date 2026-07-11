@@ -1,8 +1,36 @@
+diff --git a/README.md b/README.md
+index 7895f2f6b13bcfcb2e22a5eaca8b0c794445e90a..ad95e263911ac1becf3cde8ec87fef91053053da 100644
+--- a/README.md
++++ b/README.md
+@@ -212,7 +212,7 @@ In addition to the review workflow, the incur runtime also exposes:
+ - `--wait` implies auto-send and uses a longer timeout budget: `10m` by default and `40m` in Deep Research mode.
+ - When `--wait` is enabled, `review-gpt` stays attached until the assistant finishes or the wait timeout is hit. Deep Research runs can stay quiet for a long time before the final report arrives.
+ - A response is only captured after it stays unchanged across consecutive quiet polls (no busy status, no stop control) for several seconds, so interim assistant status messages emitted before long tool/connector work are not mistaken for the final reply.
+-- Waited runs that request a concrete model require an explicit `MODEL_CONFIRMATION` line. Matching confirmation passes normally; `UNKNOWN` is also accepted after at least 10 minutes of observed generation because reviewers cannot always inspect their own model identity. Missing confirmation and named model mismatches still fail closed. When ChatGPT model metadata is available, capture also validates it, including the UI-only GPT-5.6 Sol name's `gpt-5-6-pro` backend slug, and a known metadata mismatch always fails.
++- Waited runs that request a concrete model require exactly one unfenced, unquoted, matching `MODEL_CONFIRMATION` line. `UNKNOWN`, missing or multiple confirmation lines, and named model mismatches fail closed. For concrete GPT model names, capture also validates available ChatGPT model metadata, including the UI-only GPT-5.6 Sol name's `gpt-5-6-pro` backend slug; a known metadata mismatch for those targets fails.
+ - `--response-marker <text>` makes capture contract-based instead of heuristic: the wait only accepts a response containing that exact text, so prompts that instruct the assistant to end its final message with the marker are immune to interim status messages even across minutes-long quiet gaps. If the marker never appears, capture fails after writing the best snapshot to `--response-file` when one was configured.
+ - Browsers throttle background-tab rendering, which can freeze the DOM the capture reads mid-stream. The managed browser launches with backgrounding disabled and the capture session pins focus emulation and an active page lifecycle over CDP, so polling works with the tab fully in the background and never steals OS focus.
+ - Deep Research auto-send gives the product up to 60 seconds to auto-start, then only falls back to the approval-card `Start` action if that gate is still present.
 diff --git a/src/prepare-chatgpt-draft.js b/src/prepare-chatgpt-draft.js
-index 77ac533f5ecd7f53278ba06130b868402795b08a..79dca6af902c6e37383c27a18cc1e56694ec0607 100644
+index 77ac533f5ecd7f53278ba06130b868402795b08a..416935cdd21732e31295eb967bb20506977ac2b2 100644
 --- a/src/prepare-chatgpt-draft.js
 +++ b/src/prepare-chatgpt-draft.js
-@@ -125,6 +125,28 @@ const {
+@@ -1,5 +1,6 @@
+ const fs = require('fs');
+ const path = require('path');
++const { randomUUID } = require('crypto');
+ const { URL } = require('url');
+ const {
+   CHATGPT_ASSISTANT_TURN_SELECTOR,
+@@ -103,7 +104,6 @@ const DEEP_RESEARCH_AUTO_START_GRACE_MS = 60_000;
+ const DEEP_RESEARCH_AUTO_START_POLL_MS = 1000;
+ const DEEP_RESEARCH_START_RETRY_DELAY_MS = 2000;
+ const DEEP_RESEARCH_START_ATTEMPTS = 3;
+-const MODEL_CONFIRMATION_UNKNOWN_FALLBACK_MS = 10 * 60 * 1000;
+ const SAFE_RETRY_STAGES = new Set([
+   'connect',
+   'initial-ready',
+@@ -125,6 +125,31 @@ const {
  } = require('./prepare-chatgpt-draft-helpers.js');
 
  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -10,6 +38,9 @@ index 77ac533f5ecd7f53278ba06130b868402795b08a..79dca6af902c6e37383c27a18cc1e566
 +const browserTransportTimeoutMs = Math.min(configuredDraftTimeoutMs, 15000);
 +const pageCommandTimeoutMs = Math.min(configuredDraftTimeoutMs, 30000);
 +const targetCleanupTimeoutMs = Math.min(browserTransportTimeoutMs, 5000);
++const targetCleanupAttemptTimeoutMs = Math.min(targetCleanupTimeoutMs, 1000);
++const targetOwnershipReconciliationTimeoutMs = Math.min(configuredDraftTimeoutMs, 6000);
++const targetOwnershipUrlPrefix = 'about:blank#review-gpt-owned-';
 +
 +async function withTimeout(promise, durationMs, message, onTimeout) {
 +  let timer;
@@ -31,7 +62,7 @@ index 77ac533f5ecd7f53278ba06130b868402795b08a..79dca6af902c6e37383c27a18cc1e566
 
  let confirmedAttachmentCleanupFinished = false;
  function cleanupConfirmedDraftAttachments(reason) {
-@@ -138,12 +160,24 @@ function cleanupConfirmedDraftAttachments(reason) {
+@@ -138,12 +163,24 @@ function cleanupConfirmedDraftAttachments(reason) {
    }
  }
 
@@ -59,44 +90,154 @@ index 77ac533f5ecd7f53278ba06130b868402795b08a..79dca6af902c6e37383c27a18cc1e566
  }
 
  function safeUrl(value) {
-@@ -938,20 +972,41 @@ async function openNewTarget(desiredUrl) {
+@@ -790,27 +827,53 @@ function appendModelConfirmationPrompt(prompt, input) {
+   return `${modelConfirmationPromptBlock(input.targetModel, input.responseMarker)}\n\n${value}`;
+ }
+
++function extractModelConfirmationValues(responseText) {
++  const values = [];
++  let fenceCharacter = '';
++  let fenceLength = 0;
++  for (const line of String(responseText || '').split(/\r?\n/u)) {
++    if (fenceCharacter) {
++      const closingFence = line.match(/^[ ]{0,3}(`{3,}|~{3,})[ \t]*$/u);
++      const marker = closingFence?.[1] || '';
++      if (marker[0] === fenceCharacter && marker.length >= fenceLength) {
++        fenceCharacter = '';
++        fenceLength = 0;
++      }
++      continue;
++    }
++    const openingFence = line.match(/^[ ]{0,3}(`{3,}|~{3,})(.*)$/u);
++    if (openingFence && (openingFence[1][0] !== '`' || !openingFence[2].includes('`'))) {
++      fenceCharacter = openingFence[1][0];
++      fenceLength = openingFence[1].length;
++      continue;
++    }
++    const match = line.match(/^[ ]{0,3}MODEL_CONFIRMATION\s*:\s*(.+?)\s*$/iu);
++    const value = String(match?.[1] || '').trim();
++    if (value) values.push(value);
++  }
++  return values;
++}
++
+ function extractModelConfirmationValue(responseText) {
+-  const match = String(responseText || '').match(/^\s*MODEL_CONFIRMATION\s*:\s*(.+?)\s*$/imu);
+-  return String(match?.[1] || '').trim();
++  return extractModelConfirmationValues(responseText)[0] || '';
+ }
+
+-function modelConfirmationFailure(targetModel, responseText, responseModelSlug = '', generationElapsedMs = 0) {
++function modelConfirmationFailure(targetModel, responseText, responseModelSlug = '') {
+   if (isCurrentSelectionTarget(targetModel)) {
+     return '';
    }
-   const created = await createBackgroundTarget(browserWsUrl, desiredUrl);
-   if (created?.targetId) {
+
+   const expected = normalizeModelConfirmationName(targetModel);
+-  const actual = extractModelConfirmationValue(responseText);
+-  if (!actual) {
++  const confirmations = extractModelConfirmationValues(responseText);
++  if (confirmations.length === 0) {
+     return `Assistant response did not include MODEL_CONFIRMATION for requested model ${targetModel}.`;
+   }
++  if (confirmations.length !== 1) {
++    return `Assistant response included multiple MODEL_CONFIRMATION lines for requested model ${targetModel}.`;
++  }
++  const actual = confirmations[0];
+   const actualNormalized = normalizeModelConfirmationName(actual);
+-  const acceptsTimedUnknown =
+-    actualNormalized === 'unknown' &&
+-    Number.isFinite(Number(generationElapsedMs)) &&
+-    Number(generationElapsedMs) >= MODEL_CONFIRMATION_UNKNOWN_FALLBACK_MS;
+-  if (actualNormalized !== expected && !acceptsTimedUnknown) {
++  if (actualNormalized !== expected) {
+     return `Assistant response confirmed model ${actual}, expected ${targetModel}.`;
+   }
+
+@@ -936,22 +999,87 @@ async function openNewTarget(desiredUrl) {
+   if (!browserWsUrl) {
+     throw new Error('Browser debugging endpoint did not expose a browser websocket URL');
+   }
+-  const created = await createBackgroundTarget(browserWsUrl, desiredUrl);
+-  if (created?.targetId) {
 -    const createdDeadline = Date.now() + 6000;
 -    while (Date.now() < createdDeadline) {
 -      const listed = await fetchJson('/json/list');
 -      const target = listed.find(
 -        (entry) => entry.type === 'page' && entry.id === created.targetId && entry.webSocketDebuggerUrl
--      );
--      if (target) return target;
--      await sleep(200);
-+    let discoveryError = null;
++  const ownershipUrl = `${targetOwnershipUrlPrefix}${randomUUID()}`;
++  let created = null;
++  let creationError = null;
++  try {
++    created = await createBackgroundTarget(browserWsUrl, ownershipUrl);
++  } catch (error) {
++    if (!error?.reviewGptTargetOwnershipUncertain) throw error;
++    creationError = error;
++  }
++
++  const createdTargetId = String(created?.targetId || '').trim();
++  const recoveredTargetIds = new Set();
++  const discoveryDeadline = Date.now() + targetOwnershipReconciliationTimeoutMs;
++  let discoveryError = null;
++  let lastListConfirmedNoMarker = false;
++  while (Date.now() < discoveryDeadline) {
 +    try {
-+      const createdDeadline = Date.now() + 6000;
-+      while (Date.now() < createdDeadline) {
-+        const listed = await fetchJson(
-+          '/json/list',
-+          Math.max(1, createdDeadline - Date.now())
-+        );
-+        const target = listed.find(
-+          (entry) => entry.type === 'page' && entry.id === created.targetId && entry.webSocketDebuggerUrl
-+        );
-+        if (target) {
-+          return target;
-+        }
-+        await sleep(200);
++      const listed = await fetchJson(
++        '/json/list',
++        Math.max(1, discoveryDeadline - Date.now())
+       );
++      if (!Array.isArray(listed)) {
++        throw new Error('Browser target list was not an array');
 +      }
++      const markerTargets = listed.filter(
++        (entry) => entry.type === 'page' && entry.url === ownershipUrl
++      );
++      for (const markerTarget of markerTargets) {
++        const markerTargetId = String(markerTarget?.id || '').trim();
++        if (markerTargetId) recoveredTargetIds.add(markerTargetId);
++      }
++      if (markerTargets.length > 1) {
++        discoveryError = new Error('Browser exposed multiple targets for one ownership marker');
++        break;
++      }
++      const target = createdTargetId
++        ? listed.find(
++          (entry) => entry.type === 'page' && entry.id === createdTargetId && entry.webSocketDebuggerUrl
++        )
++        : markerTargets.find((entry) => entry.webSocketDebuggerUrl);
+       if (target) return target;
+-      await sleep(200);
++      lastListConfirmedNoMarker = markerTargets.length === 0;
++      discoveryError = null;
 +    } catch (error) {
++      lastListConfirmedNoMarker = false;
 +      discoveryError = error;
 +    }
++    if (Date.now() < discoveryDeadline) await sleep(200);
++  }
++
++  if (createdTargetId) recoveredTargetIds.add(createdTargetId);
++  let cleanupError = null;
++  for (const targetId of recoveredTargetIds) {
 +    try {
-+      await closeBackgroundTarget(created.targetId);
-+    } catch (cleanupError) {
-+      throw addTargetCleanupContext(cleanupError, discoveryError);
++      await closeBackgroundTarget(targetId);
++    } catch (error) {
++      cleanupError = cleanupError
++        ? new Error(`${errorMessage(cleanupError)}; ${errorMessage(error)}`)
++        : error;
++    }
++  }
++  if (cleanupError) {
++    throw addTargetCleanupContext(cleanupError, discoveryError || creationError);
++  }
++  if (creationError) {
++    if (recoveredTargetIds.size > 0) {
++      throw creationError.cause || creationError;
      }
-+    if (discoveryError) throw discoveryError;
++    if (lastListConfirmedNoMarker && !discoveryError) throw creationError;
++    throw createTargetOwnershipFailure(discoveryError || creationError);
    }
++  if (discoveryError) throw discoveryError;
    throw new Error(`Created ChatGPT target did not expose a debuggable page for ${desiredUrl}`);
  }
 
@@ -110,7 +251,7 @@ index 77ac533f5ecd7f53278ba06130b868402795b08a..79dca6af902c6e37383c27a18cc1e566
    const ws = new WebSocket(browserWsUrl);
    const pending = new Map();
    let nextId = 0;
-@@ -959,6 +1014,7 @@ async function createBackgroundTarget(browserWsUrl, desiredUrl) {
+@@ -959,6 +1087,7 @@ async function createBackgroundTarget(browserWsUrl, desiredUrl) {
      ws.addEventListener('close', () => reject(new Error('Browser CDP socket closed unexpectedly')));
      ws.addEventListener('error', (event) => reject(event.error || new Error('Browser CDP socket error')));
    });
@@ -118,7 +259,7 @@ index 77ac533f5ecd7f53278ba06130b868402795b08a..79dca6af902c6e37383c27a18cc1e566
 
    ws.addEventListener('message', (event) => {
      let message;
-@@ -974,31 +1030,59 @@ async function createBackgroundTarget(browserWsUrl, desiredUrl) {
+@@ -974,31 +1103,63 @@ async function createBackgroundTarget(browserWsUrl, desiredUrl) {
      if (!slot) return;
      pending.delete(message.id);
      if (message.error) {
@@ -157,7 +298,8 @@ index 77ac533f5ecd7f53278ba06130b868402795b08a..79dca6af902c6e37383c27a18cc1e566
        pending.set(id, { resolve, reject });
      });
 -    ws.send(JSON.stringify({
--      id,
++    const payload = JSON.stringify({
+       id,
 -      method: 'Target.createTarget',
 -      params: {
 -        url: desiredUrl,
@@ -165,14 +307,16 @@ index 77ac533f5ecd7f53278ba06130b868402795b08a..79dca6af902c6e37383c27a18cc1e566
 -      },
 -    }));
 -    return await Promise.race([response, closed]);
++      method,
++      params,
++    });
 +    let commandDeliveryStarted = false;
 +    try {
++      if (typeof ws.readyState === 'number' && ws.readyState !== 1) {
++        throw new Error('Browser CDP socket was not open for command delivery');
++      }
++      ws.send(payload);
 +      commandDeliveryStarted = true;
-+      ws.send(JSON.stringify({
-+        id,
-+        method,
-+        params,
-+      }));
 +      return await withTimeout(
 +        Promise.race([response, closed]),
 +        Math.max(1, commandDeadline - Date.now()),
@@ -193,7 +337,7 @@ index 77ac533f5ecd7f53278ba06130b868402795b08a..79dca6af902c6e37383c27a18cc1e566
    } finally {
      try {
        ws.close();
-@@ -1006,6 +1090,113 @@ async function createBackgroundTarget(browserWsUrl, desiredUrl) {
+@@ -1006,6 +1167,128 @@ async function createBackgroundTarget(browserWsUrl, desiredUrl) {
    }
  }
 
@@ -207,10 +351,10 @@ index 77ac533f5ecd7f53278ba06130b868402795b08a..79dca6af902c6e37383c27a18cc1e566
 +  return failure;
 +}
 +
-+async function createBackgroundTarget(browserWsUrl, desiredUrl) {
++async function createBackgroundTarget(browserWsUrl, ownershipUrl) {
 +  try {
 +    const created = await sendBrowserCommand(browserWsUrl, 'Target.createTarget', {
-+      url: desiredUrl,
++      url: ownershipUrl,
 +      background: true,
 +    });
 +    if (!created?.targetId) {
@@ -252,62 +396,77 @@ index 77ac533f5ecd7f53278ba06130b868402795b08a..79dca6af902c6e37383c27a18cc1e566
 +  const normalizedTargetId = String(targetId || '').trim();
 +  if (!normalizedTargetId) return;
 +  const cleanupDeadline = Date.now() + targetCleanupTimeoutMs;
-+  let commandError = null;
-+  try {
-+    const version = await fetchJson(
-+      '/json/version',
-+      Math.max(1, cleanupDeadline - Date.now())
-+    );
-+    const browserWsUrl = version?.webSocketDebuggerUrl;
-+    if (!browserWsUrl) {
-+      throw new Error('Browser debugging endpoint did not expose a browser websocket URL');
++  let closeAccepted = false;
++  let lastError = null;
++  while (Date.now() < cleanupDeadline) {
++    if (!closeAccepted) {
++      const attemptDeadline = Math.min(
++        cleanupDeadline,
++        Date.now() + targetCleanupAttemptTimeoutMs
++      );
++      try {
++        const version = await fetchJson(
++          '/json/version',
++          Math.max(1, attemptDeadline - Date.now())
++        );
++        const browserWsUrl = version?.webSocketDebuggerUrl;
++        if (!browserWsUrl) {
++          throw new Error('Browser debugging endpoint did not expose a browser websocket URL');
++        }
++        const result = await sendBrowserCommand(
++          browserWsUrl,
++          'Target.closeTarget',
++          { targetId: normalizedTargetId },
++          attemptDeadline
++        );
++        if (result?.success !== true) {
++          throw new Error(`Browser did not accept closure of target ${normalizedTargetId}`);
++        }
++        closeAccepted = true;
++      } catch (error) {
++        lastError = error;
++      }
 +    }
-+    const result = await sendBrowserCommand(
-+      browserWsUrl,
-+      'Target.closeTarget',
-+      { targetId: normalizedTargetId },
-+      cleanupDeadline
-+    );
-+    if (result?.success !== true) {
-+      commandError = new Error(`Browser did not accept closure of target ${normalizedTargetId}`);
++
++    if (Date.now() < cleanupDeadline) {
++      try {
++        const listed = await fetchJson(
++          '/json/list',
++          Math.max(
++            1,
++            Math.min(targetCleanupAttemptTimeoutMs, cleanupDeadline - Date.now())
++          )
++        );
++        if (!Array.isArray(listed)) {
++          throw new Error('Browser target list was not an array');
++        }
++        const stillPresent = listed.some(
++          (entry) => String(entry?.id || '').trim() === normalizedTargetId
++        );
++        if (!stillPresent) return;
++        lastError = new Error(
++          `Browser target ${normalizedTargetId} remained present after close`
++        );
++      } catch (error) {
++        lastError = new Error(`Target absence check failed: ${errorMessage(error)}`);
++      }
 +    }
-+  } catch (error) {
-+    commandError = error;
++
++    if (Date.now() < cleanupDeadline) {
++      await sleep(Math.min(100, cleanupDeadline - Date.now()));
++    }
 +  }
 +
-+  let confirmationError = null;
-+  do {
-+    try {
-+      const listed = await fetchJson(
-+        '/json/list',
-+        Math.max(1, cleanupDeadline - Date.now())
-+      );
-+      if (!Array.isArray(listed)) {
-+        throw new Error('Browser target list was not an array');
-+      }
-+      const stillPresent = listed.some(
-+        (entry) => String(entry?.id || '').trim() === normalizedTargetId
-+      );
-+      if (!stillPresent) return;
-+      confirmationError = new Error(
-+        `Browser target ${normalizedTargetId} remained present after close`
-+      );
-+    } catch (error) {
-+      confirmationError = new Error(`Target absence check failed: ${errorMessage(error)}`);
-+    }
-+    if (Date.now() < cleanupDeadline) await sleep(100);
-+  } while (Date.now() < cleanupDeadline);
-+
-+  const cleanupError = commandError && confirmationError
-+    ? new Error(`${errorMessage(commandError)}; ${errorMessage(confirmationError)}`)
-+    : commandError || confirmationError || new Error('Target absence was not confirmed');
-+  throw createTargetCleanupFailure(normalizedTargetId, cleanupError);
++  throw createTargetCleanupFailure(
++    normalizedTargetId,
++    lastError || new Error('Target absence was not confirmed')
++  );
 +}
 +
  async function ensureTarget(desiredUrl) {
    const deadline = Date.now() + timeoutMs;
    let lastError = null;
-@@ -1013,6 +1204,12 @@ async function ensureTarget(desiredUrl) {
+@@ -1013,6 +1296,12 @@ async function ensureTarget(desiredUrl) {
      try {
        return await openNewTarget(desiredUrl);
      } catch (error) {
@@ -320,7 +479,7 @@ index 77ac533f5ecd7f53278ba06130b868402795b08a..79dca6af902c6e37383c27a18cc1e566
        lastError = error;
      }
      await sleep(300);
-@@ -1024,15 +1221,32 @@ async function connectTargetWebSocket(desiredUrl) {
+@@ -1024,15 +1313,32 @@ async function connectTargetWebSocket(desiredUrl) {
    let lastError = null;
    for (let attempt = 0; attempt < 6; attempt += 1) {
      const target = await ensureTarget(desiredUrl);
@@ -359,7 +518,7 @@ index 77ac533f5ecd7f53278ba06130b868402795b08a..79dca6af902c6e37383c27a18cc1e566
        lastError = error;
        await sleep(250);
      }
-@@ -1055,6 +1269,7 @@ function isRetryableSocketError(error) {
+@@ -1055,6 +1361,7 @@ function isRetryableSocketError(error) {
    return (
      message.includes('cdp socket closed unexpectedly') ||
      message.includes('cdp socket error') ||
@@ -367,7 +526,7 @@ index 77ac533f5ecd7f53278ba06130b868402795b08a..79dca6af902c6e37383c27a18cc1e566
      message.includes('websocket') ||
      message.includes('target closed') ||
      message.includes('promise was collected')
-@@ -1073,8 +1288,10 @@ async function main() {
+@@ -1073,8 +1380,10 @@ async function main() {
    const { ws, target } = await connectTargetWebSocket(chatgptUrl).catch((error) => {
      throw tagStageError(error);
    });
@@ -379,7 +538,7 @@ index 77ac533f5ecd7f53278ba06130b868402795b08a..79dca6af902c6e37383c27a18cc1e566
 
    const pending = new Map();
    let nextId = 0;
-@@ -1083,6 +1300,7 @@ async function main() {
+@@ -1083,6 +1392,7 @@ async function main() {
      ws.addEventListener('close', () => reject(new Error('CDP socket closed unexpectedly')));
      ws.addEventListener('error', (event) => reject(event.error || new Error('CDP socket error')));
    });
@@ -387,7 +546,7 @@ index 77ac533f5ecd7f53278ba06130b868402795b08a..79dca6af902c6e37383c27a18cc1e566
 
    ws.addEventListener('message', (event) => {
      let message;
-@@ -1111,7 +1329,11 @@ async function main() {
+@@ -1111,7 +1421,11 @@ async function main() {
        pending.set(id, { resolve, reject });
      });
      ws.send(payload);
@@ -400,7 +559,7 @@ index 77ac533f5ecd7f53278ba06130b868402795b08a..79dca6af902c6e37383c27a18cc1e566
    };
 
    const evaluate = async (expression) => {
-@@ -1164,7 +1386,6 @@ async function main() {
+@@ -1164,7 +1478,6 @@ async function main() {
    const desiredTargetChatId = extractChatId(desiredTargetUrl?.pathname || '').toLowerCase();
    const desiredTargetOriginLiteral = JSON.stringify(desiredTargetOrigin);
    const desiredTargetChatIdLiteral = JSON.stringify(desiredTargetChatId);
@@ -408,7 +567,39 @@ index 77ac533f5ecd7f53278ba06130b868402795b08a..79dca6af902c6e37383c27a18cc1e566
    const activateCurrentPageForNativeInput = async () => {
      try {
        await cdp('Page.bringToFront');
-@@ -4079,45 +4300,58 @@ async function main() {
+@@ -3565,7 +3878,6 @@ async function main() {
+     let stableText = '';
+     let stableCount = 0;
+     let sawGenerationActive = false;
+-    let generationStartedAt = 0;
+
+     // Re-assert before the wait: a navigation since session setup can reset
+     // the renderer's lifecycle/focus emulation state.
+@@ -3584,7 +3896,6 @@ async function main() {
+       const generationActive = Boolean(state?.stopVisible || state?.statusBusy);
+       if (generationActive) {
+         sawGenerationActive = true;
+-        generationStartedAt ||= Date.now();
+       }
+       const assistantFailureText = responseStateAssistantFailureText(state);
+       if (assistantFailureText && !generationActive) {
+@@ -3624,7 +3935,6 @@ async function main() {
+           modelTargetRaw,
+           candidate.text,
+           candidate.modelSlug,
+-          generationStartedAt ? Date.now() - generationStartedAt : 0,
+         );
+         if (confirmationFailure) {
+           return {
+@@ -3649,7 +3959,6 @@ async function main() {
+         modelTargetRaw,
+         bestSnapshot.text,
+         bestSnapshot.modelSlug,
+-        generationStartedAt ? Date.now() - generationStartedAt : 0,
+       );
+       if (confirmationFailure) {
+         return {
+@@ -4079,45 +4388,58 @@ async function main() {
    const evaluateInTargetWebSocket = async (webSocketUrl, expression) => {
      if (!webSocketUrl) return null;
      const targetWs = new WebSocket(webSocketUrl);
@@ -505,7 +696,18 @@ index 77ac533f5ecd7f53278ba06130b868402795b08a..79dca6af902c6e37383c27a18cc1e566
        await targetCdp('Runtime.enable');
        const result = await targetCdp('Runtime.evaluate', {
          expression,
-@@ -4833,13 +5067,17 @@ async function main() {
+@@ -4668,6 +4990,10 @@ async function main() {
+   };
+
+   await cdp('Page.enable');
++  const navigation = await cdp('Page.navigate', { url: chatgptUrl });
++  if (navigation?.errorText) {
++    throw new Error(`ChatGPT target navigation failed: ${navigation.errorText}`);
++  }
+   await cdp('Runtime.enable');
+   await cdp('DOM.enable');
+   await keepPageRenderingWhileBackgrounded();
+@@ -4833,13 +5159,17 @@ async function main() {
      console.log(
        `Draft prepared in ChatGPT tab: attachments confirmed (${formatAttachmentVerificationSummary(verification.summary)}).`
      );
@@ -526,7 +728,7 @@ index 77ac533f5ecd7f53278ba06130b868402795b08a..79dca6af902c6e37383c27a18cc1e566
    if (shouldSend) {
      currentStage = 'send';
      const sendResult = await autoSendDraftMessage();
-@@ -4892,18 +5130,30 @@ async function main() {
+@@ -4892,18 +5222,30 @@ async function main() {
            throw new Error(`Assistant response capture failed: ${JSON.stringify(responseResult || { status: 'unknown' })}`);
          }
        }
@@ -562,7 +764,7 @@ index 77ac533f5ecd7f53278ba06130b868402795b08a..79dca6af902c6e37383c27a18cc1e566
  }
 
  async function mainWithRetry() {
-@@ -4920,6 +5170,8 @@ async function mainWithRetry() {
+@@ -4920,6 +5262,8 @@ async function mainWithRetry() {
      } catch (error) {
        lastError = error;
        if (
