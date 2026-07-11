@@ -5243,6 +5243,11 @@ describe("hosted workspace runtime entrypoint", () => {
             }),
           }),
           async runAssistantPhase(input) {
+            assert.equal(input.workspace?.version, "1");
+            assert.equal(
+              typeof input.workspace?.redactedStatus?.hostedCanonicalWriteReceiptLogSha256,
+              "string",
+            );
             assert.equal(input.initialMailboxImport.state.watermarks.system, "1");
             assert.equal(input.initialMailboxImport.state.watermarks.conversation, "1");
             return {
@@ -5264,8 +5269,25 @@ describe("hosted workspace runtime entrypoint", () => {
         "conversation:conversation.message",
       ]);
       assert.deepEqual(checkpointRequests.map((request) => request.reason), [
+        "canonical_runtime_commit",
         "idle_shutdown",
       ]);
+      assert.deepEqual(
+        checkpointRequests.map((request) => request.expectedWorkspaceVersion),
+        ["0", "1"],
+      );
+      assert.equal(
+        checkpointRequests[0]?.redactedStatus?.hostedMailboxSystemImportedSeq,
+        "1",
+      );
+      assert.equal(
+        checkpointRequests[0]?.redactedStatus?.hostedMailboxConversationImportedSeq,
+        "1",
+      );
+      assert.equal(
+        typeof checkpointRequests[0]?.redactedStatus?.hostedCanonicalWriteReceiptLogSha256,
+        "string",
+      );
       assert.deepEqual(result, {
         nextWakeAt: null,
         redactedStatus: {

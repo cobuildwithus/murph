@@ -64,6 +64,21 @@ function expectHostedLocalCodexCliInstall(workflow: string): void {
   expect(workflow).toContain('"${npm_prefix}/bin/codex" --version')
 }
 
+function expectStableRequiredAggregator(input: {
+  jobId: string
+  jobName: string
+  needs: readonly string[]
+  workflow: string
+}): void {
+  expect(input.workflow).toContain(`  ${input.jobId}:\n    name: ${input.jobName}`)
+  expect(input.workflow).toContain(`  ${input.jobId}:\n    name: ${input.jobName}\n    runs-on: ubuntu-24.04\n    needs:\n${
+    input.needs.map((jobId) => `      - ${jobId}`).join('\n')
+  }\n    if: \${{ always() }}`)
+  for (const jobId of input.needs) {
+    expect(input.workflow).toContain(`needs.${jobId}.result`)
+  }
+}
+
 describe('cloudflare hosted e2e workflow guards', () => {
   it('provisions a real local postgres service for hosted local e2e jobs', () => {
     const workflow = readFileSync(hostedE2eWorkflowPath, 'utf8')
@@ -85,16 +100,35 @@ describe('cloudflare hosted e2e workflow guards', () => {
     expect(postgresBackedScenarioCount).toBeGreaterThan(0)
     expectPostgresServiceContract(workflow, 1)
     expect(hostedLocalE2eScenarios).toEqual([
+      'canonical-receipt-lost-ack-recovery',
       'codex-image-media-delivery',
+      'computer-handoff-linq-roundtrip',
       'device-connect',
       'device-sync-junction-wearable-direct-resource-replay',
       'direct-r2-presigned-put',
+      'family-sponsored-group-roundtrip',
       'idle-checkpoint-deferred-progress',
       'linq-delivery',
+      'linq-group-route-drift',
+      'linq-home-line-reroute-retry',
+      'linq-lost-active-operation',
+      'linq-onboarding-followup',
       'linq-scheduled-reminder',
+      'linq-unknown-first-contact-fallback',
       'linq-webhook',
+      'linq-webhook-audio',
+      'openai-egress-authority',
+      'provider-egress-token-bridge',
+      'retell-call-result-roundtrip',
+      'retryable-outbox-foreground-restart',
+      'shutdown-checkpoint-conversation-ahead',
+      'snapshot-publication-fallback',
       'telegram',
       'temporal-orchestration',
+      'timezone-injection',
+      'usage-limit-ambiguous-send',
+      'vault-file-approval-resume',
+      'warm-reuse-egress',
     ])
     expect(workflow).not.toContain('for scenario in ${{ matrix.scenarios }}; do')
     expect(workflow).toContain('pnpm hosted-local e2e "${scenarios[@]}" --no-bundle')
@@ -106,6 +140,12 @@ describe('cloudflare hosted e2e workflow guards', () => {
     expect(workflow.match(/\.artifacts\/hosted-local\/\*\*\/state\.json/g)).toHaveLength(1)
     expect(workflow).not.toContain('pnpm --dir apps/cloudflare test:e2e:linq-delivery:local')
     expect(workflow).not.toContain('pnpm --dir apps/cloudflare test:e2e:telegram:local')
+    expectStableRequiredAggregator({
+      jobId: 'hosted-e2e-required',
+      jobName: 'Hosted E2E required gate',
+      needs: ['runner-bundle', 'hosted-scenarios'],
+      workflow,
+    })
   })
 
   it('shortens only the routine scheduled-reminder gate', () => {
@@ -117,11 +157,29 @@ describe('cloudflare hosted e2e workflow guards', () => {
     )
 
     expect(workflow).toContain([
-      '          - name: Linq scheduled reminder E2E',
+      '          - name: Linq reminder + onboarding follow-up E2E',
       '            fastGate: "1"',
-      '            slug: linq-scheduled-reminder',
+      '            slug: linq-reminder-onboarding-followup',
+      '            scenarios: linq-scheduled-reminder linq-onboarding-followup',
     ].join('\n'))
     expect(deployReminderJob).toContain('pnpm hosted-local e2e linq-scheduled-reminder')
     expect(deployReminderJob).not.toContain('MURPH_HOSTED_LOCAL_E2E_FAST_GATE')
+  })
+
+  it('keeps the Junction replay and stable device-sync gate in the unified workflow', () => {
+    const workflow = readFileSync(hostedE2eWorkflowPath, 'utf8')
+
+    expect(workflow).toContain([
+      '          - name: Junction wearable direct-resource replay E2E',
+      '            slug: junction-wearable-direct-resource-replay',
+      '            scenarios: device-sync-junction-wearable-direct-resource-replay',
+      '            timeoutMinutes: 35',
+    ].join('\n'))
+    expectStableRequiredAggregator({
+      jobId: 'hosted-device-sync-e2e-required',
+      jobName: 'Hosted device-sync E2E required gate',
+      needs: ['hosted-scenarios'],
+      workflow,
+    })
   })
 })

@@ -7,6 +7,7 @@ import type {
 import {
   pruneTerminalWriteOperationRecords,
   type PruneTerminalWriteOperationRecordsResult,
+  withCanonicalWriteLock,
 } from "@murphai/core";
 import {
   pruneAssistantRuntimeResidue,
@@ -226,28 +227,30 @@ async function createHostedWorkspaceBridgeCheckpointSnapshot(input: {
   snapshotRef: HostedExecutionSnapshotRef;
 }> {
   const request = requireHostedWorkspaceBridgeSnapshotCheckpointRequest(input.request);
-  const legacyMaterialization = await prepareLegacyWorkspaceRefsForV2SnapshotMaterialization({
-    artifactStore: input.platform.artifactStore,
-    platform: input.platform,
-    vaultRoot: input.vaultRoot,
-  });
-  await writeHostedCheckpointSnapshotLifecycleLog({
-    details: {
-      currentSnapshotRefPresent: legacyMaterialization.currentSnapshotRefPresent,
-      legacyBundleRefPresent: legacyMaterialization.legacyBundleRefPresent,
-      preservedInlineFileCount: legacyMaterialization.preservedInlineFileCount,
-      skippedInlineFileCount: legacyMaterialization.skippedInlineFileCount,
-    },
-    eventCode: "checkpoint.snapshot_plan",
-    level: "info",
-    platform: input.platform,
-    request,
-  });
-  return await createHostedWorkspaceV2Snapshot({
-    ...input,
-    legacyMaterialization,
-    request,
-    snapshotDiagnosticsHashSecret: input.snapshotDiagnosticsHashSecret ?? null,
+  return await withCanonicalWriteLock(input.vaultRoot, async () => {
+    const legacyMaterialization = await prepareLegacyWorkspaceRefsForV2SnapshotMaterialization({
+      artifactStore: input.platform.artifactStore,
+      platform: input.platform,
+      vaultRoot: input.vaultRoot,
+    });
+    await writeHostedCheckpointSnapshotLifecycleLog({
+      details: {
+        currentSnapshotRefPresent: legacyMaterialization.currentSnapshotRefPresent,
+        legacyBundleRefPresent: legacyMaterialization.legacyBundleRefPresent,
+        preservedInlineFileCount: legacyMaterialization.preservedInlineFileCount,
+        skippedInlineFileCount: legacyMaterialization.skippedInlineFileCount,
+      },
+      eventCode: "checkpoint.snapshot_plan",
+      level: "info",
+      platform: input.platform,
+      request,
+    });
+    return await createHostedWorkspaceV2Snapshot({
+      ...input,
+      legacyMaterialization,
+      request,
+      snapshotDiagnosticsHashSecret: input.snapshotDiagnosticsHashSecret ?? null,
+    });
   });
 }
 

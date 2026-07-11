@@ -1,6 +1,9 @@
 import { readFile } from "node:fs/promises";
 
 import { describe, expect, it, vi } from "vitest";
+import {
+  HOSTED_RUNTIME_WORKSPACE_CHECKPOINT_PATH,
+} from "@murphai/hosted-execution/routes";
 
 const mocks = vi.hoisted(() => ({
   emitHostedExecutionStructuredLog: vi.fn(),
@@ -17,7 +20,16 @@ vi.mock("@murphai/hosted-execution", async () => {
 });
 
 import {
+  armCanonicalCheckpointLostAck,
+  armSnapshotPublicationCorruption,
+  armShutdownCheckpointPublicationBarrier,
+  HOSTED_LOCAL_LINQ_ATTACHMENT_UPLOAD_HOST,
+  readShutdownCheckpointPublicationBarrierState,
+  releaseShutdownCheckpointPublicationBarrier,
   RunnerContainer as HostedLocalTestRunnerContainer,
+  wrapCanonicalCheckpointLostAckForTest,
+  wrapSnapshotPublicationCorruptionForTest,
+  wrapShutdownCheckpointPublicationBarrierForTest,
 } from "../src/hosted-local-test/runner-container.ts";
 import {
   HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS,
@@ -26,6 +38,15 @@ import {
 import {
   createHostedProviderEgressCredential,
 } from "../src/hosted-provider-egress-credential.ts";
+import {
+  HOSTED_EXECUTION_RUNNER_GENERATED_IMAGE_UPLOAD_PATH,
+} from "../src/runner-effects-contract.ts";
+import {
+  HOSTED_RUNTIME_ATTEMPT_ID_HEADER,
+  HOSTED_RUNTIME_LEASE_GENERATION_HEADER,
+  HOSTED_RUNTIME_WORKSPACE_VERSION_HEADER,
+  HOSTED_RUNNER_BOUND_USER_ID_HEADER,
+} from "../src/runner-outbound/headers.ts";
 import type {
   RunnerOutboundEnvironmentSource,
 } from "../src/runner-outbound.ts";
@@ -36,6 +57,54 @@ import {
 const TRANSCRIBE_URL = "http://murph-transcribe.worker/v1/transcribe";
 const PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET = "provider-egress-signing-secret";
 const RUNNER_CONTAINER_NAME = "member_123--v-version_1";
+
+function createCanonicalCheckpointRequest(userId: string): Request {
+  return new Request(
+    `http://${HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.webControlPlane}${HOSTED_RUNTIME_WORKSPACE_CHECKPOINT_PATH}`,
+    {
+      body: JSON.stringify({ reason: "canonical_runtime_commit" }),
+      headers: {
+        [HOSTED_RUNNER_BOUND_USER_ID_HEADER]: userId,
+        "content-type": "application/json; charset=utf-8",
+      },
+      method: "POST",
+    },
+  );
+}
+
+function createSnapshotCompleteRequest(
+  userId: string,
+  encryptedObjectSha256 = "a".repeat(64),
+  reason?: "canonical_runtime_commit" | "idle_shutdown",
+): Request {
+  return new Request(
+    `http://${HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.workspaceSnapshotStore}`
+      + "/workspace-snapshots/snapshot-test/complete",
+    {
+      body: JSON.stringify({
+        archive: {
+          encryptedObjectSha256,
+        },
+        checkpointRequest: reason ? { reason } : {},
+        objectKey: `users/${userId}/workspace-snapshots/snapshot-test.enc`,
+        snapshotId: "snapshot-test",
+      }),
+      headers: {
+        [HOSTED_RUNNER_BOUND_USER_ID_HEADER]: userId,
+        "content-type": "application/json; charset=utf-8",
+      },
+      method: "POST",
+    },
+  );
+}
+
+async function readSnapshotCompleteSha256(request: Request): Promise<string | null> {
+  const body = await request.json() as {
+    archive?: { encryptedObjectSha256?: unknown };
+  };
+  const value = body.archive?.encryptedObjectSha256;
+  return typeof value === "string" ? value : null;
+}
 
 function readHostedLocalTestOutboundByHost(): typeof HOSTED_RUNNER_OUTBOUND_BY_HOST {
   const handlers = HostedLocalTestRunnerContainer.outboundByHost;
@@ -48,13 +117,26 @@ function readHostedLocalTestOutboundByHost(): typeof HOSTED_RUNNER_OUTBOUND_BY_H
 
 function createOutboundEnv(input: {
   AI?: RunnerOutboundEnvironmentSource["AI"];
+  cloudflareImages?: {
+    accountId: string;
+    apiKey: string;
+  };
+  openAiApiKey?: string;
+  ownsRuntimeWriteFence?: boolean;
 } = {}): RunnerOutboundEnvironmentSource {
   return {
     ...createHostedExecutionTestEnv(),
     AI: input.AI,
     BUNDLES: {} as RunnerOutboundEnvironmentSource["BUNDLES"],
+    ...(input.cloudflareImages
+      ? {
+          CLOUDFLARE_IMAGES_ACCOUNT_ID: input.cloudflareImages.accountId,
+          CLOUDFLARE_IMAGES_API_KEY: input.cloudflareImages.apiKey,
+        }
+      : {}),
     HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET:
       PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET,
+    ...(input.openAiApiKey ? { OPENAI_API_KEY: input.openAiApiKey } : {}),
     RUNNER_CONTAINER: {
       get: () => ({
         readActiveRuntimeUserFence: async () => ({ active: true, attemptId: "attempt-1", leaseGeneration: "1", userId: "member_123" }),
@@ -81,7 +163,7 @@ function createOutboundEnv(input: {
           workspaceVersion: "4",
         }),
         validateRuntimeProviderEgressToken: async () => ({ owns: false }),
-        validateRuntimeWriteFence: async () => false,
+        validateRuntimeWriteFence: async () => input.ownsRuntimeWriteFence ?? false,
       }),
     },
   };
@@ -111,20 +193,452 @@ async function createAuthorizedTranscribeRequest(input: {
   });
 }
 
+async function createAuthorizedOpenAiImagesRequest(): Promise<Request> {
+  const credential = await createHostedProviderEgressCredential({
+    providerKind: "openai",
+    runnerContainerName: RUNNER_CONTAINER_NAME,
+    source: {
+      HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET:
+        PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET,
+    },
+    userId: "member_123",
+  });
+  return new Request("https://api.openai.com/v1/images/generations", {
+    body: JSON.stringify({
+      model: "gpt-image-2",
+      prompt: "Render a synthetic mobility setup diagram.",
+    }),
+    headers: {
+      authorization: `Bearer ${credential}`,
+      [HOSTED_RUNNER_BOUND_USER_ID_HEADER]: "member_123",
+      "content-type": "application/json; charset=utf-8",
+    },
+    method: "POST",
+  });
+}
+
 describe("hosted-local test RunnerContainer outbound composition", () => {
-  it("wraps only the transcribe host and keeps every other production handler untouched", () => {
+  it("uses SIGTERM for the shutdown checkpoint control", async () => {
+    const stop = vi.fn(async () => undefined);
+    const destroy = vi.fn(async () => undefined);
+    const container: HostedLocalTestRunnerContainer = Object.create(
+      HostedLocalTestRunnerContainer.prototype,
+    );
+    Object.defineProperties(container, {
+      destroy: { value: destroy },
+      stop: { value: stop },
+    });
+
+    await expect(container.beginShutdownCheckpointGracefulStopForTest({
+      userId: "member_shutdown_checkpoint_signal",
+    })).resolves.toEqual({ ok: true });
+    expect(stop).toHaveBeenCalledOnce();
+    expect(stop).toHaveBeenCalledWith("SIGTERM");
+    expect(destroy).not.toHaveBeenCalled();
+  });
+
+  it("wraps only the deterministic hosted-local fault and external-provider hosts", () => {
     const wrapped = readHostedLocalTestOutboundByHost();
 
-    expect(Object.keys(wrapped).sort()).toEqual(
-      Object.keys(HOSTED_RUNNER_OUTBOUND_BY_HOST).sort(),
-    );
+    expect(Object.keys(wrapped).sort()).toEqual([
+      ...Object.keys(HOSTED_RUNNER_OUTBOUND_BY_HOST),
+      HOSTED_LOCAL_LINQ_ATTACHMENT_UPLOAD_HOST,
+    ].sort());
     expect(wrapped).not.toBe(HOSTED_RUNNER_OUTBOUND_BY_HOST);
     for (const [host, handler] of Object.entries(HOSTED_RUNNER_OUTBOUND_BY_HOST)) {
-      if (host === HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.transcribe) {
+      if (
+        host === HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.transcribe
+        || host === HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.effectsPort
+        || host === HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.openAi
+        || host === HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.webControlPlane
+        || host === HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.workspaceSnapshotStore
+      ) {
         expect(wrapped[host]).not.toBe(handler);
       } else {
         expect(wrapped[host]).toBe(handler);
       }
+    }
+    expect(wrapped[HOSTED_LOCAL_LINQ_ATTACHMENT_UPLOAD_HOST]).toBeTypeOf("function");
+  });
+
+  it("accepts only nonempty PDF PUTs on the hosted-local Linq upload path", async () => {
+    const handler = readHostedLocalTestOutboundByHost()[
+      HOSTED_LOCAL_LINQ_ATTACHMENT_UPLOAD_HOST
+    ];
+    if (!handler) {
+      throw new Error("Hosted-local Linq attachment upload handler is missing.");
+    }
+    const run = async (input: {
+      body?: BodyInit;
+      contentType?: string;
+      method?: string;
+      pathname?: string;
+    }): Promise<Response> => await handler(
+      new Request(
+        `https://${HOSTED_LOCAL_LINQ_ATTACHMENT_UPLOAD_HOST}`
+          + (input.pathname ?? "/linq-attachments/attachment_local_1"),
+        {
+          body: input.body,
+          headers: input.contentType ? { "content-type": input.contentType } : undefined,
+          method: input.method ?? "PUT",
+        },
+      ),
+      createOutboundEnv(),
+      { containerId: "opaque-container-id" },
+    );
+
+    await expect(run({
+      body: "synthetic-pdf-bytes",
+      contentType: "application/pdf",
+    }).then((response) => response.status)).resolves.toBe(204);
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith({
+      component: "runner",
+      details: {
+        contentType: "application/pdf",
+        uploadBytes: 19,
+      },
+      message: "Hosted-local Linq attachment upload accepted.",
+      phase: "wake.running",
+    });
+    await expect(run({
+      body: "synthetic-pdf-bytes",
+      contentType: "text/plain",
+    }).then((response) => response.status)).resolves.toBe(415);
+    await expect(run({
+      body: "",
+      contentType: "application/pdf",
+    }).then((response) => response.status)).resolves.toBe(400);
+    await expect(run({
+      body: "synthetic-pdf-bytes",
+      contentType: "application/pdf",
+      pathname: "/other-upload/attachment_local_1",
+    }).then((response) => response.status)).resolves.toBe(404);
+  });
+
+  it("preserves the generated-image upload method and body in the Cloudflare Images stub", async () => {
+    const handler = readHostedLocalTestOutboundByHost()[
+      HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.effectsPort
+    ];
+    if (!handler) {
+      throw new Error("Wrapped generated-image outbound handler is missing.");
+    }
+    const userId = "member_123";
+    const webpBytes = new Uint8Array([
+      0x52, 0x49, 0x46, 0x46,
+      0x00, 0x00, 0x00, 0x00,
+      0x57, 0x45, 0x42, 0x50,
+    ]);
+
+    const response = await handler(
+      new Request(
+        `http://${HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.effectsPort}`
+          + HOSTED_EXECUTION_RUNNER_GENERATED_IMAGE_UPLOAD_PATH,
+        {
+          body: JSON.stringify({
+            alt: "Generated mobility setup",
+            bytesBase64: Buffer.from(webpBytes).toString("base64"),
+            contentType: "image/webp",
+            filename: "generated.webp",
+            metadata: {
+              model: "gpt-image-2",
+              schema: "murph.generated-image.v1",
+            },
+            source: "gpt-image-2",
+          }),
+          headers: {
+            [HOSTED_RUNTIME_ATTEMPT_ID_HEADER]: "attempt-1",
+            [HOSTED_RUNTIME_LEASE_GENERATION_HEADER]: "1",
+            [HOSTED_RUNTIME_WORKSPACE_VERSION_HEADER]: "4",
+            [HOSTED_RUNNER_BOUND_USER_ID_HEADER]: userId,
+            "content-type": "application/json; charset=utf-8",
+          },
+          method: "POST",
+        },
+      ),
+      createOutboundEnv({
+        cloudflareImages: {
+          accountId: "hosted-local-images-account",
+          apiKey: "hosted-local-images-key",
+        },
+        ownsRuntimeWriteFence: true,
+      }),
+      { containerId: "opaque-container-id" },
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      media: {
+        alt: "Generated mobility setup",
+        kind: "image",
+        source: "gpt-image-2",
+        url: "https://imagedelivery.net/hosted-local/generated-image/public",
+      },
+    });
+  });
+
+  it("returns priceable modality usage from the hosted-local OpenAI Images stub", async () => {
+    const handler = readHostedLocalTestOutboundByHost()[
+      HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.openAi
+    ];
+    if (!handler) {
+      throw new Error("Wrapped OpenAI outbound handler is missing.");
+    }
+
+    const response = await handler(
+      await createAuthorizedOpenAiImagesRequest(),
+      createOutboundEnv({ openAiApiKey: "openai-worker-secret" }),
+      { containerId: RUNNER_CONTAINER_NAME },
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      usage: {
+        input_tokens: 12,
+        input_tokens_details: {
+          cached_tokens: 0,
+          image_tokens: 0,
+          text_tokens: 12,
+        },
+        output_tokens: 34,
+        output_tokens_details: {
+          image_tokens: 34,
+          reasoning_tokens: 0,
+          text_tokens: 0,
+        },
+        total_tokens: 46,
+      },
+    });
+  });
+
+  it("returns a synthetic 503 only after the armed canonical checkpoint commits", async () => {
+    const userId = "member_canonical_lost_ack_success";
+    const committedResponse = JSON.stringify({ checkpointed: true });
+    const realHandler = vi.fn(async () => new Response(committedResponse, {
+      headers: { "content-type": "application/json; charset=utf-8" },
+      status: 200,
+    }));
+    const handler = wrapCanonicalCheckpointLostAckForTest(realHandler);
+    armCanonicalCheckpointLostAck(userId);
+
+    const lostAckResponse = await handler(
+      createCanonicalCheckpointRequest(userId),
+      createOutboundEnv(),
+      { containerId: "opaque-container-id" },
+    );
+
+    expect(lostAckResponse.status).toBe(503);
+    await expect(lostAckResponse.json()).resolves.toEqual({
+      error: "Synthetic hosted-local canonical checkpoint acknowledgement loss.",
+    });
+    expect(realHandler).toHaveBeenCalledTimes(1);
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        details: expect.objectContaining({
+          committedStatus: 200,
+          faultKind: "canonical_checkpoint_lost_ack",
+        }),
+        userId,
+      }),
+    );
+
+    const retryResponse = await handler(
+      createCanonicalCheckpointRequest(userId),
+      createOutboundEnv(),
+      { containerId: "opaque-container-id" },
+    );
+    expect(retryResponse.status).toBe(200);
+    await expect(retryResponse.text()).resolves.toBe(committedResponse);
+    expect(realHandler).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps the one-shot fault armed when the real checkpoint does not commit", async () => {
+    const userId = "member_canonical_lost_ack_upstream_failure";
+    const realHandler = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ checkpointed: false }), {
+        status: 200,
+      }))
+      .mockResolvedValue(new Response(JSON.stringify({ checkpointed: true }), {
+        status: 200,
+      }));
+    const handler = wrapCanonicalCheckpointLostAckForTest(realHandler);
+    armCanonicalCheckpointLostAck(userId);
+
+    const failedCommitResponse = await handler(
+      createCanonicalCheckpointRequest(userId),
+      createOutboundEnv(),
+      { containerId: "opaque-container-id" },
+    );
+    expect(failedCommitResponse.status).toBe(200);
+    await expect(failedCommitResponse.json()).resolves.toEqual({ checkpointed: false });
+
+    const lostAckResponse = await handler(
+      createCanonicalCheckpointRequest(userId),
+      createOutboundEnv(),
+      { containerId: "opaque-container-id" },
+    );
+    expect(lostAckResponse.status).toBe(503);
+
+    const retryResponse = await handler(
+      createCanonicalCheckpointRequest(userId),
+      createOutboundEnv(),
+      { containerId: "opaque-container-id" },
+    );
+    expect(retryResponse.status).toBe(200);
+    expect(realHandler).toHaveBeenCalledTimes(3);
+  });
+
+  it("claims one canonical checkpoint lost-ack fault across concurrent commits", async () => {
+    const userId = "member_canonical_lost_ack_concurrent";
+    const committedResponse = JSON.stringify({ checkpointed: true });
+    const realHandler = vi.fn(async () => new Response(committedResponse, {
+      headers: { "content-type": "application/json; charset=utf-8" },
+      status: 200,
+    }));
+    const handler = wrapCanonicalCheckpointLostAckForTest(realHandler);
+    armCanonicalCheckpointLostAck(userId);
+
+    const responses = await Promise.all([
+      handler(
+        createCanonicalCheckpointRequest(userId),
+        createOutboundEnv(),
+        { containerId: "opaque-container-id" },
+      ),
+      handler(
+        createCanonicalCheckpointRequest(userId),
+        createOutboundEnv(),
+        { containerId: "opaque-container-id" },
+      ),
+    ]);
+
+    expect(responses.map((response) => response.status).sort()).toEqual([200, 503]);
+    expect(realHandler).toHaveBeenCalledTimes(2);
+  });
+
+  it("corrupts one snapshot completion before the real publication validator", async () => {
+    const userId = "member_snapshot_publication_corruption";
+    const originalSha256 = "a".repeat(64);
+    const observedSha256: Array<string | null> = [];
+    const realHandler = vi.fn(async (request: Request) => {
+      observedSha256.push(await readSnapshotCompleteSha256(request));
+      return new Response("snapshot metadata rejected", { status: 409 });
+    });
+    const handler = wrapSnapshotPublicationCorruptionForTest(realHandler);
+    armSnapshotPublicationCorruption(userId);
+
+    const rejectedResponse = await handler(
+      createSnapshotCompleteRequest(userId, originalSha256),
+      createOutboundEnv(),
+      { containerId: "opaque-container-id" },
+    );
+
+    expect(rejectedResponse.status).toBe(409);
+    expect(observedSha256[0]).toMatch(/^[0-9a-f]{64}$/u);
+    expect(observedSha256[0]).not.toBe(originalSha256);
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        details: {
+          faultKind: "snapshot_publication_corrupt_metadata",
+          validationStatus: 409,
+        },
+        userId,
+      }),
+    );
+
+    const cleanResponse = await handler(
+      createSnapshotCompleteRequest(userId, originalSha256),
+      createOutboundEnv(),
+      { containerId: "opaque-container-id" },
+    );
+    expect(cleanResponse.status).toBe(409);
+    expect(observedSha256).toEqual([
+      `0${originalSha256.slice(1)}`,
+      originalSha256,
+    ]);
+  });
+
+  it("does not consume snapshot publication corruption on malformed metadata", async () => {
+    const userId = "member_snapshot_publication_malformed";
+    const observedSha256: Array<string | null> = [];
+    const realHandler = vi.fn(async (request: Request) => {
+      observedSha256.push(await readSnapshotCompleteSha256(request));
+      return new Response("snapshot metadata rejected", { status: 409 });
+    });
+    const handler = wrapSnapshotPublicationCorruptionForTest(realHandler);
+    armSnapshotPublicationCorruption(userId);
+
+    await handler(
+      createSnapshotCompleteRequest(userId, "not-a-sha256"),
+      createOutboundEnv(),
+      { containerId: "opaque-container-id" },
+    );
+    await handler(
+      createSnapshotCompleteRequest(userId),
+      createOutboundEnv(),
+      { containerId: "opaque-container-id" },
+    );
+
+    expect(observedSha256).toEqual([
+      "not-a-sha256",
+      `0${"a".repeat(63)}`,
+    ]);
+  });
+
+  it("holds one matching shutdown snapshot publication until explicit release", async () => {
+    const userId = "member_shutdown_checkpoint_barrier";
+    const otherUserId = "member_shutdown_checkpoint_barrier_other";
+    const realHandler = vi.fn(async () => new Response("checkpoint committed", { status: 200 }));
+    const handler = wrapShutdownCheckpointPublicationBarrierForTest(realHandler);
+    armShutdownCheckpointPublicationBarrier(userId);
+
+    try {
+      expect(readShutdownCheckpointPublicationBarrierState(userId)).toBe("armed");
+
+      await handler(
+        createSnapshotCompleteRequest(otherUserId, "a".repeat(64), "idle_shutdown"),
+        createOutboundEnv(),
+        { containerId: "opaque-container-id" },
+      );
+      await handler(
+        createSnapshotCompleteRequest(userId, "a".repeat(64), "canonical_runtime_commit"),
+        createOutboundEnv(),
+        { containerId: "opaque-container-id" },
+      );
+      expect(realHandler).toHaveBeenCalledTimes(2);
+      expect(readShutdownCheckpointPublicationBarrierState(userId)).toBe("armed");
+
+      const heldPublication = handler(
+        createSnapshotCompleteRequest(userId, "a".repeat(64), "idle_shutdown"),
+        createOutboundEnv(),
+        { containerId: "opaque-container-id" },
+      );
+      await vi.waitFor(() => {
+        expect(readShutdownCheckpointPublicationBarrierState(userId)).toBe("entered");
+      });
+      expect(realHandler).toHaveBeenCalledTimes(2);
+      expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+        expect.objectContaining({
+          details: {
+            barrierKind: "shutdown_checkpoint_publication",
+          },
+          userId,
+        }),
+      );
+
+      expect(releaseShutdownCheckpointPublicationBarrier(userId)).toBe(true);
+      await expect(heldPublication.then((response) => response.text()))
+        .resolves.toBe("checkpoint committed");
+      expect(realHandler).toHaveBeenCalledTimes(3);
+      expect(readShutdownCheckpointPublicationBarrierState(userId)).toBe("unarmed");
+
+      await handler(
+        createSnapshotCompleteRequest(userId, "a".repeat(64), "idle_shutdown"),
+        createOutboundEnv(),
+        { containerId: "opaque-container-id" },
+      );
+      expect(realHandler).toHaveBeenCalledTimes(4);
+      expect(releaseShutdownCheckpointPublicationBarrier(userId)).toBe(false);
+    } finally {
+      releaseShutdownCheckpointPublicationBarrier(userId);
     }
   });
 
