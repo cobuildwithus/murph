@@ -46,7 +46,6 @@ const HOSTED_LOCAL_AUTHORITY_SIGN_KEY_VERSION_PREFIX =
   "projects/murph-local/locations/global/keyRings/hosted-local/cryptoKeys/authority-sign/cryptoKeyVersions/local-";
 const HOSTED_LOCAL_MAILBOX_FINGERPRINT_KEY =
   "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc";
-const HOSTED_LOCAL_APP_SESSION_HMAC_KEY = Buffer.alloc(32, 8).toString("base64url");
 const HOSTED_LOCAL_CONTACT_PRIVACY_KEY_VERSION = "v1";
 const HOSTED_LOCAL_CONTACT_PRIVACY_KEYS =
   `${HOSTED_LOCAL_CONTACT_PRIVACY_KEY_VERSION}:${HOSTED_LOCAL_MAILBOX_FINGERPRINT_KEY}`;
@@ -225,6 +224,7 @@ export function mergeCloudflareLocalEnv(input: {
     ...input.existing,
     ...normalizedOverrides,
   };
+  delete resolvedExisting.HOSTED_APP_SESSION_HMAC_KEY;
   assertNoDeprecatedHostedLocalCodexBridgeEnv(input.existing);
   assertNoDeprecatedHostedLocalCodexBridgeEnv(normalizedOverrides);
   stripStaleHostedLocalOidcJwksOverride({
@@ -741,9 +741,6 @@ export function buildHostedLocalDevOverrides(
     ...copyNonEmptyEnv(cloudflareDevVars, "HOSTED_CRYPTO_LOCAL_KMS_WRAP_KEY"),
     ...copyNonEmptyEnv(cloudflareDevVars, "HOSTED_DEVICE_ROUTING_INDEX_KEY"),
     ...resolveHostedLocalContactPrivacyEnv(cloudflareDevVars),
-    HOSTED_APP_SESSION_HMAC_KEY:
-      cloudflareDevVars.HOSTED_APP_SESSION_HMAC_KEY?.trim()
-      || HOSTED_LOCAL_APP_SESSION_HMAC_KEY,
     HOSTED_MAILBOX_FINGERPRINT_KEY:
       cloudflareDevVars.HOSTED_MAILBOX_FINGERPRINT_KEY?.trim()
       || HOSTED_LOCAL_MAILBOX_FINGERPRINT_KEY,

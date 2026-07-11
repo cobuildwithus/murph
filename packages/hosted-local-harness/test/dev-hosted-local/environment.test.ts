@@ -208,6 +208,7 @@ describe("mergeCloudflareLocalEnv", () => {
     const merged = mergeCloudflareLocalEnv({
       config: localConfig,
       existing: {
+        HOSTED_APP_SESSION_HMAC_KEY: "web-only-key",
         HOSTED_CRYPTO_ENV: "local",
         HOSTED_EXECUTION_INTERNAL_PROXY_UPSTREAM_BASE_URL: "http://127.0.0.1:9998",
         HOSTED_EXECUTION_LOCAL_LOOPBACK_PROXY_TOKEN: "stale-token",
@@ -272,6 +273,7 @@ describe("mergeCloudflareLocalEnv", () => {
     expect(merged.HOSTED_EXECUTION_RUNNER_HOST_ALIAS).toBe("192.168.65.2");
     expect(merged.HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK).toBe(callbackPrivateJwkJson);
     expect(merged.HOSTED_WEB_BASE_URL).toBe("http://localhost:3000");
+    expect(merged.HOSTED_APP_SESSION_HMAC_KEY).toBeUndefined();
   });
 
   it("preserves an existing hosted-local log fingerprint secret", () => {
@@ -1008,7 +1010,6 @@ describe("buildHostedLocalDevOverrides", () => {
       HOSTED_ONBOARDING_PUBLIC_BASE_URL: "http://localhost:3000",
       HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION: "v1",
       HOSTED_CONTACT_PRIVACY_KEYS: "v1:BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc",
-      HOSTED_APP_SESSION_HMAC_KEY: Buffer.alloc(32, 10).toString("base64url"),
       HOSTED_MAILBOX_FINGERPRINT_KEY: "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc",
       HOSTED_WEB_BASE_URL: "http://localhost:3000",
       HOSTED_WEB_CALLBACK_SIGNING_KEY_ID: "callback:v1",
@@ -1058,9 +1059,7 @@ describe("buildHostedLocalDevOverrides", () => {
   it("keeps hosted onboarding links on the local web origin", () => {
     const overrides = buildHostedLocalDevOverrides(localConfig, {});
 
-    expect(overrides.HOSTED_APP_SESSION_HMAC_KEY).toBe(
-      Buffer.alloc(32, 8).toString("base64url"),
-    );
+    expect(overrides.HOSTED_APP_SESSION_HMAC_KEY).toBeUndefined();
     expect(overrides.HOSTED_ONBOARDING_PUBLIC_BASE_URL).toBe("http://localhost:3000");
     expect(overrides.HOSTED_WEB_BASE_URL).toBe("http://localhost:3000");
     expect(overrides.RETELL_WEBHOOK_PUBLIC_BASE_URL).toBeUndefined();

@@ -120,6 +120,7 @@ const HOSTED_WEB_HEALTH_COMMONS_BRIDGE_FILES = [
   path.join(webDir, "src", "lib", "health-commons", "measurement-method-detail.ts"),
 ];
 const HOSTED_LOCAL_REQUIRED_ASSISTANT_PROVIDER = "openai";
+const HOSTED_LOCAL_APP_SESSION_HMAC_KEY = Buffer.alloc(32, 8).toString("base64url");
 const HOSTED_LOCAL_DEFAULT_WRANGLER_PERSIST_DIR_NAME = "wrangler-state";
 
 export interface HostedLocalDevStack {
@@ -350,6 +351,10 @@ export async function startHostedLocalDevStack(input: {
       ...localStripeEnv,
       ...initialEnv,
     };
+    const hostedAppSessionHmacKey =
+      rawVercelEnv.HOSTED_APP_SESSION_HMAC_KEY?.trim()
+      || HOSTED_LOCAL_APP_SESSION_HMAC_KEY;
+    delete rawVercelEnv.HOSTED_APP_SESSION_HMAC_KEY;
     const inputNodeEnv = rawVercelEnv.NODE_ENV?.trim();
     const shouldPreserveTestNodeEnvForLocalTestMode =
       usesWranglerLocalDevTestRoutes(rawVercelEnv)
@@ -472,22 +477,14 @@ export async function startHostedLocalDevStack(input: {
     const localOverrides = buildHostedLocalDevOverrides(config, cloudflareDevVars, {
       retellWebhookPublicBaseUrl: linqWebhookSetup?.publicBaseUrl ?? null,
     });
-    const {
-      HOSTED_APP_SESSION_HMAC_KEY: hostedAppSessionHmacKeyCandidate,
-      ...sharedLocalOverrides
-    } = localOverrides;
-    const sharedVercelEnv = { ...vercelEnv };
-    const sharedCloudflareDevVars = { ...cloudflareDevVars };
-    delete sharedVercelEnv.HOSTED_APP_SESSION_HMAC_KEY;
-    delete sharedCloudflareDevVars.HOSTED_APP_SESSION_HMAC_KEY;
     const runtimeEnv: NodeJS.ProcessEnv = {
-      ...sharedVercelEnv,
-      ...sharedLocalOverrides,
+      ...vercelEnv,
+      ...localOverrides,
       ...buildHostedLocalTemporalRuntimeEnv({
         config,
         env: {
-          ...sharedVercelEnv,
-          ...sharedLocalOverrides,
+          ...vercelEnv,
+          ...localOverrides,
         },
       }),
       TSX_TSCONFIG_PATH: tsxTsconfigPath,
@@ -507,8 +504,8 @@ export async function startHostedLocalDevStack(input: {
     const workerRuntimeSourceEnv: NodeJS.ProcessEnv = {
       ...stripHostedLocalHostOnlyCodexEnv({
         ...runtimeEnv,
-        ...sharedCloudflareDevVars,
-        ...sharedLocalOverrides,
+        ...cloudflareDevVars,
+        ...localOverrides,
       }),
       ...(hostedLocalCodexModelCatalogJson !== null
         ? { [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]: hostedLocalCodexModelCatalogJson }
@@ -875,7 +872,7 @@ export async function startHostedLocalDevStack(input: {
       }), buildHostedWebProcessEnv({
         ...runtimeEnv,
         ...(input.webProcessEnvOverrides ?? {}),
-        HOSTED_APP_SESSION_HMAC_KEY: hostedAppSessionHmacKeyCandidate,
+        HOSTED_APP_SESSION_HMAC_KEY: hostedAppSessionHmacKey,
       }, shouldUseWebProductionStart), {
         pipeOutput: input.pipeOutput,
         stderrTarget: input.stderrTarget,

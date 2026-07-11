@@ -351,7 +351,6 @@ vi.mock("../../src/dev-hosted-local/environment.ts", () => ({
   }),
   buildHostedLocalDevOverrides: vi.fn(() => ({
     DEVICE_SYNC_PUBLIC_BASE_URL: "http://localhost:3000/api/device-sync",
-    HOSTED_APP_SESSION_HMAC_KEY: Buffer.alloc(32, 8).toString("base64url"),
     HOSTED_WEB_BASE_URL: "http://localhost:3000",
   })),
   buildHostedLocalStateEnvFileText: vi.fn(() => 'HOSTED_CRYPTO_ENV="local"'),
@@ -569,6 +568,7 @@ describe("hosted local dev stack", () => {
 
   it("starts Cloudflare with web-only process environment overrides", async () => {
     vi.stubEnv("OPENAI_API_KEY", "local-openai-key");
+    const appSessionHmacKey = Buffer.alloc(32, 9).toString("base64url");
     spawnChildProcess
       .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "cloudflare", pid: 101 }))
       .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "web", pid: 102 }));
@@ -587,12 +587,13 @@ describe("hosted local dev stack", () => {
     });
 
     const environmentModule = await import("../../src/dev-hosted-local/environment.ts");
+    const vercelModule = await import("../../src/dev-hosted-local/vercel.ts");
     const { startHostedLocalDevStack } = await import("../../src/dev-hosted-local/stack.ts");
 
     const stack = await startHostedLocalDevStack({
       env: {
         ...process.env,
-        HOSTED_APP_SESSION_HMAC_KEY: "inherited-key-must-not-propagate",
+        HOSTED_APP_SESSION_HMAC_KEY: appSessionHmacKey,
         LINQ_API_BASE_URL: "http://host.docker.internal:4011",
       },
       webProcessEnvOverrides: {
@@ -675,9 +676,15 @@ describe("hosted local dev stack", () => {
     const cloudflareCall = spawnChildProcess.mock.calls.find(([name]) => name === "cloudflare");
     const devWebCall = spawnChildProcess.mock.calls.find(([name]) => name === "web");
     expect(cloudflareCall?.[3].HOSTED_APP_SESSION_HMAC_KEY).toBeUndefined();
-    expect(devWebCall?.[3].HOSTED_APP_SESSION_HMAC_KEY).toBe(
-      Buffer.alloc(32, 8).toString("base64url"),
-    );
+    expect(devWebCall?.[3].HOSTED_APP_SESSION_HMAC_KEY).toBe(appSessionHmacKey);
+    expect(
+      vi.mocked(vercelModule.resolveVercelOidcToken).mock.calls.at(-1)?.[0]
+        .HOSTED_APP_SESSION_HMAC_KEY,
+    ).toBeUndefined();
+    expect(
+      vi.mocked(environmentModule.resolveCloudflareLocalEnv).mock.calls.at(-1)?.[0]
+        .overrides?.HOSTED_APP_SESSION_HMAC_KEY,
+    ).toBeUndefined();
     for (const [name, , , env] of spawnChildProcess.mock.calls) {
       if (name !== "web") {
         expect(env.HOSTED_APP_SESSION_HMAC_KEY).toBeUndefined();
