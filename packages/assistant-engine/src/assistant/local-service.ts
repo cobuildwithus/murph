@@ -502,7 +502,7 @@ export async function sendAssistantMessageLocal(
           initialAcceptedInputJournal.inputs
         const refreshTypingIndicatorAfterProgress = () => {
           void runAssistantTurnBestEffort(async () => {
-            await typingIndicator?.refreshNow?.()
+            await typingIndicator?.refreshAfterMessage?.()
           })
         }
         const progressDelivery =
