@@ -762,7 +762,10 @@ are uploaded. If that checkpoint has an ambiguous transport outcome, the
 Cloudflare workspace port retries the identical expected-version CAS once. It
 accepts a version-conflict response only when the active invocation fence still
 matches and the returned workspace is the exact requested successor, including
-the receipt fingerprint, snapshot ref, wake fields, and retention wake. Cold
+the receipt fingerprint, snapshot ref, wake fields, and retention wake.
+Cloudflare forwarding maps an unreadable successful checkpoint response to a
+server error so this bounded ambiguity path remains reachable; verified
+authority and fence rejections remain deterministic `401` failures. Cold
 restore replays that log over the prior snapshot and marks
 affected context domains dirty; when the restored log is at the hard entry
 bound, the runtime consolidates it through an idle snapshot before foreground
