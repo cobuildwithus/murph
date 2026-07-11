@@ -701,6 +701,11 @@ untargeted new input remains staged for a normal later assistant turn, while
 strict active-turn-targeted input fails closed instead of falling through; the
 assistant engine does not synthesize another provider request inside the same
 assistant turn.
+When mailbox import produces or reuses a canonical write receipt, the runner
+publishes the receipt-log fingerprint and the advanced imported watermark in
+the same status checkpoint. That progress checkpoint is still required when
+the receipt fingerprint is already durable: receipt durability proves the
+canonical write, not the corresponding mailbox watermark.
 Accepted-input journaling, transcript updates, checkpoint bookkeeping,
 provider-request metadata, and outbox intent creation remain on the normal
 local assistant-service path. The same-reply coalescing window ends when the
@@ -791,7 +796,12 @@ reference-safe owner-scoped retention primitive.
 a direct-R2 v2 snapshot from the effective restored state, runs through the
 ordinary invocation lease shortly before container sleep, and checks the lease
 during the broad snapshot walk so stale idle shutdown can abort before direct
-R2 upload. `packages/assistant-runtime` owns the hosted invocation bridge,
+R2 upload. Snapshot planning, archive construction, upload, and publication hold
+the vault's canonical-write lock as one transaction. A canonical mutation may
+therefore complete with its receipt before snapshotting starts or begin after
+the published snapshot boundary, but it cannot change the local canonical base
+between archive collection and publication. `packages/assistant-runtime` owns
+the hosted invocation bridge,
 snapshot planning, diagnostics, and mailbox-import policy; Cloudflare supplies
 only explicit platform capabilities such as mailbox payload decode, direct-R2
 ports, and the local encrypted archive writer.

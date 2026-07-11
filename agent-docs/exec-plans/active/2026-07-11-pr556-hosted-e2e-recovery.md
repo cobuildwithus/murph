@@ -38,16 +38,22 @@ must remain recoverable from the prior snapshot plus canonical receipts.
 
 Active. CI proved that an assistant checkpoint could publish a mailbox receipt
 before the import watermark, after which the mailbox callback skipped the
-watermark because the receipt was already durable. The same race left the
-rejected-snapshot scenario with conversation sequence zero and a five-receipt
-audit chain whose first append base was absent from the prior published
-snapshot. The callback now always checkpoints dirty mailbox progress when a
-canonical receipt exists, including idempotent imports whose receipt is already
-durable. Exact usage-denial codes are also recognized through the transport
-cause chain so the active invocation ends cleanly instead of preserving its
-write fence as an authorization failure.
+watermark because the receipt was already durable. The callback now always
+checkpoints dirty mailbox progress when a canonical receipt exists, including
+idempotent imports whose receipt is already durable. Exact usage-denial codes
+are also recognized through the transport cause chain so the active invocation
+ends cleanly instead of preserving its write fence as an authorization failure.
 
-Focused assistant-runtime tests (87), Cloudflare mailbox-port tests (3), and
-both package typechecks pass. The pre-fix full affected diff gate passed all
-affected tests, typechecks, builds, lint, and dev smoke; final affected
-verification remains required after the recovery commit.
+A subsequent full matrix passed the mailbox recovery scenario and isolated the
+remaining rejected-snapshot failure: its five receipts were internally ordered,
+but the first append base was absent from the prior published snapshot. Snapshot
+archive construction and publication did not hold the canonical-write lock, so
+a canonical mutation could change the local base across that boundary. The v2
+snapshot transaction now holds the existing lock through publication, and a
+focused bridge test proves a canonical writer cannot enter during that window.
+
+Focused assistant-runtime tests (87), Cloudflare mailbox-port tests (3), the
+snapshot-bridge suite (25), and both package typechecks pass. The pre-fix full
+affected diff gate passed all affected tests, typechecks, builds, lint, and dev
+smoke; final affected verification remains required after the snapshot
+serialization correction.

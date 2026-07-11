@@ -20,6 +20,9 @@ import {
 import {
   upsertAssistantInputEvent,
 } from "@murphai/assistant-engine";
+import {
+  withCanonicalWriteLock,
+} from "@murphai/core";
 
 import {
   type HostedRuntimePlatform,
@@ -277,6 +280,49 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     expect(calls.putSnapshotObjectDirect).toHaveBeenCalledOnce();
     expect(calls.completeSnapshotSession).toHaveBeenCalledOnce();
     expect(calls.abortSnapshotSession).not.toHaveBeenCalled();
+  });
+
+  it("holds the canonical write lock through snapshot publication", async () => {
+    const vaultRoot = await createVaultRoot();
+    const { calls, platform } = createRuntimePlatform();
+    let releasePublication: () => void = () => undefined;
+    const publicationBlocked = new Promise<void>((resolve) => {
+      releasePublication = resolve;
+    });
+    calls.completeSnapshotSession.mockImplementationOnce(async (input) => {
+      await publicationBlocked;
+      return {
+        checkpoint: createCheckpointResponse({
+          snapshotRef: input.ref,
+          userId: TEST_REQUEST.userId,
+          version: TEST_REQUEST.workspaceVersion,
+        }),
+        snapshotRef: input.ref,
+      };
+    });
+    const options = createBridgeOptions({
+      platform,
+      vaultRoot,
+    });
+
+    const snapshot = options.createCheckpointSnapshot(
+      createCheckpointInput("idle_shutdown"),
+    );
+    await vi.waitFor(() => {
+      expect(calls.completeSnapshotSession).toHaveBeenCalledOnce();
+    });
+
+    let canonicalWriterEntered = false;
+    const canonicalWrite = withCanonicalWriteLock(vaultRoot, async () => {
+      canonicalWriterEntered = true;
+    });
+    await new Promise<void>((resolve) => setTimeout(resolve, 25));
+    expect(canonicalWriterEntered).toBe(false);
+
+    releasePublication();
+    await snapshot;
+    await canonicalWrite;
+    expect(canonicalWriterEntered).toBe(true);
   });
 
   it("carries idle checkpoint trigger metadata through the production bridge snapshot path", async () => {
