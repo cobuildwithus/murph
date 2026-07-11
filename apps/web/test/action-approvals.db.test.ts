@@ -121,7 +121,6 @@ describe("hosted action approvals", () => {
       occurredAt: firstWake.occurredAt.toISOString(),
       payloadInlineCiphertext: firstWake.payloadInlineCiphertext,
       payloadSchema: firstWake.payloadSchema,
-      prisma: deps.prisma,
       userId: firstWake.userId,
     })).resolves.toMatchObject({
       effectId: REQUEST.actionId,

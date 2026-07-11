@@ -58,8 +58,13 @@ interface HostedTestPrismaFactoryClient {
     count(args: unknown): Promise<number>;
     findUniqueOrThrow(args: unknown): Promise<{
       dedupeKey: string;
+      id: string;
       kind: string;
       lane: string;
+      laneSeq: bigint;
+      occurredAt: Date;
+      payloadInlineCiphertext: string | null;
+      payloadSchema: string | null;
       userId: string;
     }>;
   };
