@@ -1,8 +1,65 @@
 diff --git a/src/prepare-chatgpt-draft.js b/src/prepare-chatgpt-draft.js
-index 77ac533f5ecd7f53278ba06130b868402795b08a..7a3beb741bd8dbcfad00a6fb3c7ec15b35700178 100644
+index 77ac533f5ecd7f53278ba06130b868402795b08a..79dca6af902c6e37383c27a18cc1e56694ec0607 100644
 --- a/src/prepare-chatgpt-draft.js
 +++ b/src/prepare-chatgpt-draft.js
-@@ -938,20 +938,32 @@ async function openNewTarget(desiredUrl) {
+@@ -125,6 +125,28 @@ const {
+ } = require('./prepare-chatgpt-draft-helpers.js');
+
+ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
++const configuredDraftTimeoutMs = Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : 90000;
++const browserTransportTimeoutMs = Math.min(configuredDraftTimeoutMs, 15000);
++const pageCommandTimeoutMs = Math.min(configuredDraftTimeoutMs, 30000);
++const targetCleanupTimeoutMs = Math.min(browserTransportTimeoutMs, 5000);
++
++async function withTimeout(promise, durationMs, message, onTimeout) {
++  let timer;
++  const timeoutPromise = new Promise((_, reject) => {
++    timer = setTimeout(() => {
++      try {
++        onTimeout?.();
++      } finally {
++        reject(new Error(message));
++      }
++    }, Math.max(1, durationMs));
++  });
++  try {
++    return await Promise.race([promise, timeoutPromise]);
++  } finally {
++    if (timer !== undefined) clearTimeout(timer);
++  }
++}
+
+ let confirmedAttachmentCleanupFinished = false;
+ function cleanupConfirmedDraftAttachments(reason) {
+@@ -138,12 +160,24 @@ function cleanupConfirmedDraftAttachments(reason) {
+   }
+ }
+
+-async function fetchJson(path) {
+-  const res = await fetch(`http://127.0.0.1:${remotePort}${path}`);
++async function fetchJson(path, requestTimeoutMs = browserTransportTimeoutMs) {
++  const controller = new AbortController();
++  const requestDeadline = Date.now() + requestTimeoutMs;
++  const res = await withTimeout(
++    fetch(`http://127.0.0.1:${remotePort}${path}`, { signal: controller.signal }),
++    requestTimeoutMs,
++    `Timed out fetching browser endpoint ${path}`,
++    () => controller.abort()
++  );
+   if (!res.ok) {
+     throw new Error(`HTTP ${res.status} for ${path}`);
+   }
+-  return res.json();
++  return withTimeout(
++    res.json(),
++    Math.max(1, requestDeadline - Date.now()),
++    `Timed out reading browser endpoint ${path}`,
++    () => controller.abort()
++  );
+ }
+
+ function safeUrl(value) {
+@@ -938,20 +972,41 @@ async function openNewTarget(desiredUrl) {
    }
    const created = await createBackgroundTarget(browserWsUrl, desiredUrl);
    if (created?.targetId) {
@@ -14,99 +71,336 @@ index 77ac533f5ecd7f53278ba06130b868402795b08a..7a3beb741bd8dbcfad00a6fb3c7ec15b
 -      );
 -      if (target) return target;
 -      await sleep(200);
-+    let handedOff = false;
++    let discoveryError = null;
 +    try {
 +      const createdDeadline = Date.now() + 6000;
 +      while (Date.now() < createdDeadline) {
-+        const listed = await fetchJson('/json/list');
++        const listed = await fetchJson(
++          '/json/list',
++          Math.max(1, createdDeadline - Date.now())
++        );
 +        const target = listed.find(
 +          (entry) => entry.type === 'page' && entry.id === created.targetId && entry.webSocketDebuggerUrl
 +        );
 +        if (target) {
-+          handedOff = true;
 +          return target;
 +        }
 +        await sleep(200);
 +      }
-+    } finally {
-+      if (!handedOff) {
-+        try {
-+          await closeBackgroundTarget(created.targetId);
-+        } catch {}
-+      }
++    } catch (error) {
++      discoveryError = error;
++    }
++    try {
++      await closeBackgroundTarget(created.targetId);
++    } catch (cleanupError) {
++      throw addTargetCleanupContext(cleanupError, discoveryError);
      }
++    if (discoveryError) throw discoveryError;
    }
    throw new Error(`Created ChatGPT target did not expose a debuggable page for ${desiredUrl}`);
  }
 
 -async function createBackgroundTarget(browserWsUrl, desiredUrl) {
-+async function sendBrowserCommand(browserWsUrl, method, params = {}) {
++async function sendBrowserCommand(
++  browserWsUrl,
++  method,
++  params = {},
++  commandDeadline = Date.now() + browserTransportTimeoutMs
++) {
    const ws = new WebSocket(browserWsUrl);
    const pending = new Map();
    let nextId = 0;
-@@ -992,11 +1004,8 @@ async function createBackgroundTarget(browserWsUrl, desiredUrl) {
+@@ -959,6 +1014,7 @@ async function createBackgroundTarget(browserWsUrl, desiredUrl) {
+     ws.addEventListener('close', () => reject(new Error('Browser CDP socket closed unexpectedly')));
+     ws.addEventListener('error', (event) => reject(event.error || new Error('Browser CDP socket error')));
+   });
++  void closed.catch(() => {});
+
+   ws.addEventListener('message', (event) => {
+     let message;
+@@ -974,31 +1030,59 @@ async function createBackgroundTarget(browserWsUrl, desiredUrl) {
+     if (!slot) return;
+     pending.delete(message.id);
+     if (message.error) {
+-      slot.reject(new Error(message.error.message || 'Browser CDP command failed'));
++      const commandError = new Error(message.error.message || 'Browser CDP command failed');
++      commandError.reviewGptBrowserCommandResponseReceived = true;
++      slot.reject(commandError);
+       return;
+     }
+     slot.resolve(message.result || {});
+   });
+
+-  await new Promise((resolve, reject) => {
+-    ws.addEventListener('open', resolve, { once: true });
+-    ws.addEventListener('error', reject, { once: true });
+-  });
+-
+   try {
++    await withTimeout(
++      Promise.race([
++        new Promise((resolve, reject) => {
++          ws.addEventListener('open', resolve, { once: true });
++          ws.addEventListener(
++            'error',
++            (event) => reject(event.error || new Error('Browser CDP socket error')),
++            { once: true }
++          );
++        }),
++        closed,
++      ]),
++      Math.max(1, commandDeadline - Date.now()),
++      'Timed out opening browser CDP socket'
++    );
+     const id = ++nextId;
+     const response = new Promise((resolve, reject) => {
+       pending.set(id, { resolve, reject });
      });
-     ws.send(JSON.stringify({
-       id,
+-    ws.send(JSON.stringify({
+-      id,
 -      method: 'Target.createTarget',
 -      params: {
 -        url: desiredUrl,
 -        background: true,
 -      },
-+      method,
-+      params,
-     }));
-     return await Promise.race([response, closed]);
+-    }));
+-    return await Promise.race([response, closed]);
++    let commandDeliveryStarted = false;
++    try {
++      commandDeliveryStarted = true;
++      ws.send(JSON.stringify({
++        id,
++        method,
++        params,
++      }));
++      return await withTimeout(
++        Promise.race([response, closed]),
++        Math.max(1, commandDeadline - Date.now()),
++        `Timed out waiting for browser CDP command ${method}`
++      );
++    } catch (error) {
++      if (
++        commandDeliveryStarted &&
++        error &&
++        typeof error === 'object' &&
++        !error.reviewGptBrowserCommandResponseReceived
++      ) {
++        error.reviewGptBrowserCommandDeliveryUncertain = true;
++        error.reviewGptBrowserCommandMethod = method;
++      }
++      throw error;
++    }
    } finally {
-@@ -1006,6 +1015,29 @@ async function createBackgroundTarget(browserWsUrl, desiredUrl) {
+     try {
+       ws.close();
+@@ -1006,6 +1090,113 @@ async function createBackgroundTarget(browserWsUrl, desiredUrl) {
    }
  }
 
++function createTargetOwnershipFailure(error) {
++  const failure = new Error(
++    `Could not confirm whether browser target creation completed: ${errorMessage(error)}`
++  );
++  failure.reviewGptStage = 'target-create';
++  failure.reviewGptTargetOwnershipUncertain = true;
++  failure.cause = error;
++  return failure;
++}
++
 +async function createBackgroundTarget(browserWsUrl, desiredUrl) {
-+  return sendBrowserCommand(browserWsUrl, 'Target.createTarget', {
-+    url: desiredUrl,
-+    background: true,
-+  });
++  try {
++    const created = await sendBrowserCommand(browserWsUrl, 'Target.createTarget', {
++      url: desiredUrl,
++      background: true,
++    });
++    if (!created?.targetId) {
++      throw createTargetOwnershipFailure(
++        new Error('Browser acknowledged target creation without returning a target ID')
++      );
++    }
++    return created;
++  } catch (error) {
++    if (error?.reviewGptTargetOwnershipUncertain) throw error;
++    if (!error?.reviewGptBrowserCommandDeliveryUncertain) throw error;
++    throw createTargetOwnershipFailure(error);
++  }
++}
++
++function createTargetCleanupFailure(targetId, error) {
++  const failure = new Error(
++    `Could not confirm cleanup for browser target ${targetId}: ${errorMessage(error)}`
++  );
++  failure.reviewGptStage = 'target-cleanup';
++  failure.reviewGptTargetCleanupFailure = true;
++  failure.reviewGptTargetId = targetId;
++  failure.cause = error;
++  return failure;
++}
++
++function addTargetCleanupContext(cleanupError, operationError) {
++  if (!operationError) return cleanupError;
++  const failure = new Error(`${errorMessage(operationError)}; ${errorMessage(cleanupError)}`);
++  failure.reviewGptStage = 'target-cleanup';
++  failure.reviewGptTargetCleanupFailure = true;
++  failure.reviewGptTargetId = cleanupError?.reviewGptTargetId;
++  failure.operationCause = operationError;
++  failure.cause = cleanupError;
++  return failure;
 +}
 +
 +async function closeBackgroundTarget(targetId) {
 +  const normalizedTargetId = String(targetId || '').trim();
 +  if (!normalizedTargetId) return;
-+  const version = await fetchJson('/json/version');
-+  const browserWsUrl = version?.webSocketDebuggerUrl;
-+  if (!browserWsUrl) {
-+    throw new Error('Browser debugging endpoint did not expose a browser websocket URL');
++  const cleanupDeadline = Date.now() + targetCleanupTimeoutMs;
++  let commandError = null;
++  try {
++    const version = await fetchJson(
++      '/json/version',
++      Math.max(1, cleanupDeadline - Date.now())
++    );
++    const browserWsUrl = version?.webSocketDebuggerUrl;
++    if (!browserWsUrl) {
++      throw new Error('Browser debugging endpoint did not expose a browser websocket URL');
++    }
++    const result = await sendBrowserCommand(
++      browserWsUrl,
++      'Target.closeTarget',
++      { targetId: normalizedTargetId },
++      cleanupDeadline
++    );
++    if (result?.success !== true) {
++      commandError = new Error(`Browser did not accept closure of target ${normalizedTargetId}`);
++    }
++  } catch (error) {
++    commandError = error;
 +  }
-+  const result = await sendBrowserCommand(browserWsUrl, 'Target.closeTarget', {
-+    targetId: normalizedTargetId,
-+  });
-+  if (result?.success === false) {
-+    throw new Error(`Browser refused to close target ${normalizedTargetId}`);
-+  }
++
++  let confirmationError = null;
++  do {
++    try {
++      const listed = await fetchJson(
++        '/json/list',
++        Math.max(1, cleanupDeadline - Date.now())
++      );
++      if (!Array.isArray(listed)) {
++        throw new Error('Browser target list was not an array');
++      }
++      const stillPresent = listed.some(
++        (entry) => String(entry?.id || '').trim() === normalizedTargetId
++      );
++      if (!stillPresent) return;
++      confirmationError = new Error(
++        `Browser target ${normalizedTargetId} remained present after close`
++      );
++    } catch (error) {
++      confirmationError = new Error(`Target absence check failed: ${errorMessage(error)}`);
++    }
++    if (Date.now() < cleanupDeadline) await sleep(100);
++  } while (Date.now() < cleanupDeadline);
++
++  const cleanupError = commandError && confirmationError
++    ? new Error(`${errorMessage(commandError)}; ${errorMessage(confirmationError)}`)
++    : commandError || confirmationError || new Error('Target absence was not confirmed');
++  throw createTargetCleanupFailure(normalizedTargetId, cleanupError);
 +}
 +
  async function ensureTarget(desiredUrl) {
    const deadline = Date.now() + timeoutMs;
    let lastError = null;
-@@ -1033,6 +1065,9 @@ async function connectTargetWebSocket(desiredUrl) {
-       });
+@@ -1013,6 +1204,12 @@ async function ensureTarget(desiredUrl) {
+     try {
+       return await openNewTarget(desiredUrl);
+     } catch (error) {
++      if (
++        error?.reviewGptTargetCleanupFailure ||
++        error?.reviewGptTargetOwnershipUncertain
++      ) {
++        throw error;
++      }
+       lastError = error;
+     }
+     await sleep(300);
+@@ -1024,15 +1221,32 @@ async function connectTargetWebSocket(desiredUrl) {
+   let lastError = null;
+   for (let attempt = 0; attempt < 6; attempt += 1) {
+     const target = await ensureTarget(desiredUrl);
++    let ws = null;
+     try {
+-      const ws = new WebSocket(target.webSocketDebuggerUrl);
+-      await new Promise((resolve, reject) => {
+-        ws.addEventListener('open', resolve, { once: true });
+-        ws.addEventListener('error', reject, { once: true });
+-        ws.addEventListener('close', () => reject(new Error('CDP socket closed unexpectedly')), { once: true });
+-      });
++      ws = new WebSocket(target.webSocketDebuggerUrl);
++      await withTimeout(
++        new Promise((resolve, reject) => {
++          ws.addEventListener('open', resolve, { once: true });
++          ws.addEventListener(
++            'error',
++            (event) => reject(event.error || new Error('CDP socket error')),
++            { once: true }
++          );
++          ws.addEventListener('close', () => reject(new Error('CDP socket closed unexpectedly')), { once: true });
++        }),
++        browserTransportTimeoutMs,
++        'Timed out opening page CDP socket'
++      );
        return { ws, target };
      } catch (error) {
 +      try {
-+        await closeBackgroundTarget(target?.id);
++        ws?.close();
 +      } catch {}
++      try {
++        await closeBackgroundTarget(target?.id);
++      } catch (cleanupError) {
++        throw addTargetCleanupContext(cleanupError, error);
++      }
        lastError = error;
        await sleep(250);
      }
-@@ -1073,6 +1108,7 @@ async function main() {
+@@ -1055,6 +1269,7 @@ function isRetryableSocketError(error) {
+   return (
+     message.includes('cdp socket closed unexpectedly') ||
+     message.includes('cdp socket error') ||
++    (message.includes('cdp socket') && message.includes('timed out')) ||
+     message.includes('websocket') ||
+     message.includes('target closed') ||
+     message.includes('promise was collected')
+@@ -1073,8 +1288,10 @@ async function main() {
    const { ws, target } = await connectTargetWebSocket(chatgptUrl).catch((error) => {
      throw tagStageError(error);
    });
 +  const pageTargetId = String(target?.id || '');
++  let ownedTargetId = pageTargetId;
++  let operationError = null;
    try {
-     try {
+-    try {
 
-@@ -1164,7 +1200,6 @@ async function main() {
+   const pending = new Map();
+   let nextId = 0;
+@@ -1083,6 +1300,7 @@ async function main() {
+     ws.addEventListener('close', () => reject(new Error('CDP socket closed unexpectedly')));
+     ws.addEventListener('error', (event) => reject(event.error || new Error('CDP socket error')));
+   });
++  void closed.catch(() => {});
+
+   ws.addEventListener('message', (event) => {
+     let message;
+@@ -1111,7 +1329,11 @@ async function main() {
+       pending.set(id, { resolve, reject });
+     });
+     ws.send(payload);
+-    return Promise.race([response, closed]);
++    return withTimeout(
++      Promise.race([response, closed]),
++      pageCommandTimeoutMs,
++      `CDP socket command timed out: ${method}`
++    );
+   };
+
+   const evaluate = async (expression) => {
+@@ -1164,7 +1386,6 @@ async function main() {
    const desiredTargetChatId = extractChatId(desiredTargetUrl?.pathname || '').toLowerCase();
    const desiredTargetOriginLiteral = JSON.stringify(desiredTargetOrigin);
    const desiredTargetChatIdLiteral = JSON.stringify(desiredTargetChatId);
@@ -114,17 +408,166 @@ index 77ac533f5ecd7f53278ba06130b868402795b08a..7a3beb741bd8dbcfad00a6fb3c7ec15b
    const activateCurrentPageForNativeInput = async () => {
      try {
        await cdp('Page.bringToFront');
-@@ -4900,6 +4935,13 @@ async function main() {
-     throw tagStageError(error);
-   }
-   } finally {
-+    if (shouldWaitForResponse && pageTargetId) {
-+      try {
-+        await closeBackgroundTarget(pageTargetId);
-+      } catch (error) {
-+        console.warn(`ReviewGPT target cleanup failed: ${errorMessage(error)}`);
-+      }
-+    }
+@@ -4079,45 +4300,58 @@ async function main() {
+   const evaluateInTargetWebSocket = async (webSocketUrl, expression) => {
+     if (!webSocketUrl) return null;
+     const targetWs = new WebSocket(webSocketUrl);
+-    await new Promise((resolve, reject) => {
+-      targetWs.addEventListener('open', resolve, { once: true });
+-      targetWs.addEventListener('error', reject, { once: true });
+-      targetWs.addEventListener('close', () => reject(new Error('CDP socket closed unexpectedly')), { once: true });
+-    });
+-    const targetPending = new Map();
+-    let targetNextId = 0;
+-    const targetClosed = new Promise((_, reject) => {
+-      targetWs.addEventListener('close', () => reject(new Error('CDP socket closed unexpectedly')));
+-      targetWs.addEventListener('error', (event) => reject(event.error || new Error('CDP socket error')));
+-    });
+-    targetWs.addEventListener('message', (event) => {
+-      let message;
+-      try {
+-        message = JSON.parse(event.data);
+-      } catch {
+-        return;
+-      }
+-      if (typeof message.id !== 'number') {
+-        return;
+-      }
+-      const slot = targetPending.get(message.id);
+-      if (!slot) return;
+-      targetPending.delete(message.id);
+-      if (message.error) {
+-        slot.reject(new Error(message.error.message || 'CDP command failed'));
+-        return;
+-      }
+-      slot.resolve(message.result || {});
+-    });
+-    const targetCdp = async (method, params = {}) => {
+-      const id = ++targetNextId;
+-      targetWs.send(JSON.stringify({ id, method, params }));
+-      const response = new Promise((resolve, reject) => {
+-        targetPending.set(id, { resolve, reject });
+-      });
+-      return Promise.race([response, targetClosed]);
+-    };
      try {
-       ws.close();
-     } catch {}
++      await withTimeout(
++        new Promise((resolve, reject) => {
++          targetWs.addEventListener('open', resolve, { once: true });
++          targetWs.addEventListener(
++            'error',
++            (event) => reject(event.error || new Error('CDP socket error')),
++            { once: true }
++          );
++          targetWs.addEventListener('close', () => reject(new Error('CDP socket closed unexpectedly')), { once: true });
++        }),
++        browserTransportTimeoutMs,
++        'Timed out opening nested target CDP socket'
++      );
++      const targetPending = new Map();
++      let targetNextId = 0;
++      const targetClosed = new Promise((_, reject) => {
++        targetWs.addEventListener('close', () => reject(new Error('CDP socket closed unexpectedly')));
++        targetWs.addEventListener('error', (event) => reject(event.error || new Error('CDP socket error')));
++      });
++      void targetClosed.catch(() => {});
++      targetWs.addEventListener('message', (event) => {
++        let message;
++        try {
++          message = JSON.parse(event.data);
++        } catch {
++          return;
++        }
++        if (typeof message.id !== 'number') {
++          return;
++        }
++        const slot = targetPending.get(message.id);
++        if (!slot) return;
++        targetPending.delete(message.id);
++        if (message.error) {
++          slot.reject(new Error(message.error.message || 'CDP command failed'));
++          return;
++        }
++        slot.resolve(message.result || {});
++      });
++      const targetCdp = async (method, params = {}) => {
++        const id = ++targetNextId;
++        const response = new Promise((resolve, reject) => {
++          targetPending.set(id, { resolve, reject });
++        });
++        targetWs.send(JSON.stringify({ id, method, params }));
++        return withTimeout(
++          Promise.race([response, targetClosed]),
++          pageCommandTimeoutMs,
++          `Nested CDP socket command timed out: ${method}`
++        );
++      };
+       await targetCdp('Runtime.enable');
+       const result = await targetCdp('Runtime.evaluate', {
+         expression,
+@@ -4833,13 +5067,17 @@ async function main() {
+     console.log(
+       `Draft prepared in ChatGPT tab: attachments confirmed (${formatAttachmentVerificationSummary(verification.summary)}).`
+     );
+-    if (!shouldSend) {
+-      cleanupConfirmedDraftAttachments('the upload');
+-    }
+   } else {
+     console.log('Draft prepared in ChatGPT tab: prompt staged (no attachments requested).');
+   }
+
++  if (!shouldSend) {
++    if (shouldAttachFiles) {
++      cleanupConfirmedDraftAttachments('the upload');
++    }
++    ownedTargetId = '';
++  }
++
+   if (shouldSend) {
+     currentStage = 'send';
+     const sendResult = await autoSendDraftMessage();
+@@ -4892,18 +5130,30 @@ async function main() {
+           throw new Error(`Assistant response capture failed: ${JSON.stringify(responseResult || { status: 'unknown' })}`);
+         }
+       }
++      if (!shouldWaitForResponse) {
++        ownedTargetId = '';
++      }
+     } else {
+       throw new Error(`Auto-send failed: ${JSON.stringify(sendResult?.lastAttempt || sendResult || { status: 'unknown' })}`);
+     }
+-    }
++  }
+   } catch (error) {
+-    throw tagStageError(error);
++    operationError = tagStageError(error);
+   }
+-  } finally {
++
++  let cleanupError = null;
++  if (ownedTargetId) {
+     try {
+-      ws.close();
+-    } catch {}
++      await closeBackgroundTarget(ownedTargetId);
++    } catch (error) {
++      cleanupError = addTargetCleanupContext(error, operationError);
++    }
+   }
++  try {
++    ws.close();
++  } catch {}
++  if (cleanupError) throw cleanupError;
++  if (operationError) throw operationError;
+ }
+
+ async function mainWithRetry() {
+@@ -4920,6 +5170,8 @@ async function mainWithRetry() {
+     } catch (error) {
+       lastError = error;
+       if (
++        error?.reviewGptTargetCleanupFailure ||
++        error?.reviewGptTargetOwnershipUncertain ||
+         !isRetryableSocketError(error) ||
+         attempt === maxAttempts ||
+         !SAFE_RETRY_STAGES.has(String(error?.reviewGptStage || ''))
