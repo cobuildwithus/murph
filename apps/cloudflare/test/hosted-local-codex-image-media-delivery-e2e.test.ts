@@ -205,13 +205,7 @@ describe("hosted local Codex image media delivery e2e", () => {
       environment: requireScenario().runtimeEnv,
       memberId: userId,
     });
-    expect(usage).toEqual(expect.arrayContaining([
-      expect.objectContaining({
-        providerName: "OpenAI Images",
-        requestedModel: "gpt-image-2",
-        totalTokens: 46,
-      }),
-    ]));
+    expectPriceableImageUsage(usage, 1);
 
     const reuseReplyText = "I reused the saved setup image as the edit reference.";
     const outboundCountBeforeReuse = requireLinqStub().countObservedSends(replyPath);
@@ -264,8 +258,46 @@ describe("hosted local Codex image media delivery e2e", () => {
     const finalStatus = await requireScenario().waitForHostedCompletion(userId);
     expect(finalStatus.lastErrorCode ?? null).toBeNull();
     expect(finalStatus.mailboxLag.every((lane) => lane.lag === "0")).toBe(true);
+    expectPriceableImageUsage(
+      await listHostedAiUsageForTest({
+        environment: requireScenario().runtimeEnv,
+        memberId: userId,
+      }),
+      2,
+    );
   }, 360_000);
 });
+
+function expectPriceableImageUsage(
+  usage: Awaited<ReturnType<typeof listHostedAiUsageForTest>>,
+  expectedCount: number,
+): void {
+  const imageUsage = usage.filter((row) => row.providerName === "OpenAI Images");
+  expect(imageUsage).toHaveLength(expectedCount);
+  expect(imageUsage).toEqual(
+    Array.from({ length: expectedCount }, () =>
+      expect.objectContaining({
+        allowanceCostUsdMicros: "1080",
+        allowanceCounted: true,
+        allowancePricingSnapshotJson: expect.objectContaining({
+          schema: "murph.hosted-ai-usage-allowance-pricing.v1",
+          tokens: expect.objectContaining({
+            openAiImage: expect.objectContaining({
+              billableImageInput: "0",
+              billableTextInput: "12",
+              imageInput: "0",
+              output: "34",
+              textInput: "12",
+            }),
+          }),
+        }),
+        allowancePricingVersion: "openai-image-api-pricing-2026-07-08-standard",
+        requestedModel: "gpt-image-2",
+        totalTokens: 46,
+      }),
+    ),
+  );
+}
 
 async function ensureScenario(): Promise<void> {
   if (scenario) {
