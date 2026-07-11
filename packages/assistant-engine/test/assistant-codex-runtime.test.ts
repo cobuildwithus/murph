@@ -5764,7 +5764,7 @@ describe('assistant codex runtime', () => {
     )
   })
 
-  it('retires the exact failed process when replacement races teardown cleanup', async () => {
+  it('waits for the exact failed process teardown before replacement', async () => {
     const workingDirectory = await createTempDir('assistant-codex-teardown-race-work-')
     const codexHome = await createTempDir('assistant-codex-teardown-race-home-')
     const spawnedChildren: MockChildProcess[] = []
@@ -5822,6 +5822,15 @@ describe('assistant codex runtime', () => {
     failedChild.stdout.write('not-json\n')
     await waitForProcessKill(-25_600, 'SIGTERM')
 
+    const concurrentStop = stopWarmCodexAppServer('operator-stop')
+    void concurrentStop.catch(() => undefined)
+    await waitForStableMicrotask()
+    expect(
+      vi.mocked(process.kill).mock.calls.filter(
+        ([pid, signal]) => pid === -25_600 && signal === 'SIGTERM',
+      ),
+    ).toHaveLength(1)
+
     const replacementTrace = vi.fn()
     const replacementTurn = executeCodexAppServerTurn({
       ...stableInput,
@@ -5838,6 +5847,7 @@ describe('assistant codex runtime', () => {
     await expect(failedTurn).rejects.toMatchObject({
       code: 'ASSISTANT_CODEX_APP_SERVER_FRAMING_ERROR',
     })
+    await expect(concurrentStop).resolves.toBeUndefined()
     await expect(replacementTurn).resolves.toMatchObject({
       sessionId: 'thread-teardown-race-2',
       turnId: 'turn-teardown-race-2',
@@ -7188,7 +7198,7 @@ describe('assistant codex runtime', () => {
     expect(secondChild.pid).not.toBe(firstChild.pid)
   })
 
-  it('keeps the pending cold-start reason when replacement construction throws', async () => {
+  it('keeps the stopped process reason when replacement construction throws', async () => {
     const codexHome = await createTempDir('assistant-codex-constructor-retry-home-')
     const workingDirectory = await createTempDir('assistant-codex-constructor-retry-work-')
     const spawnedChildren: MockChildProcess[] = []
@@ -7264,6 +7274,126 @@ describe('assistant codex runtime', () => {
       workingDirectory,
     })
 
+    expect(replacementTrace).toHaveBeenCalledWith(
+      expect.objectContaining({
+        rawEvent: expect.objectContaining({
+          codexTimingColdStartReason: 'previous-process-exit',
+          codexTimingStage: 'initialized',
+        }),
+      }),
+    )
+  })
+
+  it('keeps process-exit precedence when abort follows close and sweeps the child group', async () => {
+    const codexHome = await createTempDir('assistant-codex-exit-abort-precedence-home-')
+    const workingDirectory = await createTempDir('assistant-codex-exit-abort-precedence-work-')
+    const controller = new AbortController()
+    const firstTurnStarted = createDeferred<void>()
+    const spawnedChildren: MockChildProcess[] = []
+
+    codexMocks.spawn.mockImplementation(() => {
+      const child = new MockChildProcess()
+      const processNumber = spawnedChildren.length + 1
+      child.pid = 41_000 + spawnedChildren.length
+      spawnedChildren.push(child)
+
+      queueMicrotask(() => {
+        void (async () => {
+          const initialize = await waitForRpcMethod(child, 'initialize')
+          child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
+
+          const thread = await waitForRpcMethod(child, 'thread/start')
+          child.stdout.write(jsonLine({
+            id: thread.id,
+            result: {
+              thread: {
+                id: `thread-exit-abort-precedence-${processNumber}`,
+              },
+            },
+          }))
+
+          const turn = await waitForRpcMethod(child, 'turn/start')
+          child.stdout.write(jsonLine({
+            id: turn.id,
+            result: {
+              turn: {
+                id: `turn-exit-abort-precedence-${processNumber}`,
+              },
+            },
+          }))
+          child.stdout.write(jsonLine({
+            method: 'turn/started',
+            params: {
+              turn: {
+                id: `turn-exit-abort-precedence-${processNumber}`,
+              },
+            },
+          }))
+
+          if (processNumber === 1) {
+            firstTurnStarted.resolve()
+            return
+          }
+
+          child.stdout.write(jsonLine({
+            method: 'turn/completed',
+            params: {
+              turn: {
+                id: `turn-exit-abort-precedence-${processNumber}`,
+                status: 'completed',
+              },
+            },
+          }))
+        })()
+      })
+
+      return child
+    })
+
+    const failedTurn = executeCodexAppServerTurn({
+      abortSignal: controller.signal,
+      env: {
+        CODEX_HOME: codexHome,
+        PATH: '/usr/bin',
+      },
+      prompt: 'process exits before abort',
+      workingDirectory,
+    })
+    void failedTurn.catch(() => undefined)
+
+    await firstTurnStarted.promise
+    const exitedChild = requireMockChildProcess(spawnedChildren[0] ?? null)
+    exitedChild.emit('exit', 1, null)
+    exitedChild.emit('close', 1, null)
+    controller.abort()
+
+    await expect(failedTurn).rejects.toMatchObject({
+      context: {
+        codexExitCode: 1,
+        codexFailureStage: 'process_exit',
+      },
+    })
+    if (process.platform === 'win32') {
+      expect(exitedChild.kill).toHaveBeenCalledWith('SIGKILL')
+    } else {
+      expect(process.kill).toHaveBeenCalledWith(-41_000, 'SIGKILL')
+    }
+
+    const replacementTrace = vi.fn()
+    await expect(
+      executeCodexAppServerTurn({
+        env: {
+          CODEX_HOME: codexHome,
+          PATH: '/usr/bin',
+        },
+        onTraceEvent: replacementTrace,
+        prompt: 'replacement after process exit and abort',
+        workingDirectory,
+      }),
+    ).resolves.toMatchObject({
+      sessionId: 'thread-exit-abort-precedence-2',
+      turnId: 'turn-exit-abort-precedence-2',
+    })
     expect(replacementTrace).toHaveBeenCalledWith(
       expect.objectContaining({
         rawEvent: expect.objectContaining({
@@ -11716,13 +11846,19 @@ describe('assistant codex runtime', () => {
   it('treats abort-race stdin EPIPE as interrupted, sends turn/interrupt, and signals the child group', async () => {
     const workingDirectory = await createTempDir('assistant-codex-abort-')
     const controller = new AbortController()
-    let child: MockChildProcess | null = null
+    const spawnedChildren: MockChildProcess[] = []
 
     codexMocks.spawn.mockImplementation(() => {
       const spawnedChild = new MockChildProcess()
-      child = spawnedChild
+      spawnedChild.pid = 40_000 + spawnedChildren.length
+      spawnedChildren.push(spawnedChild)
+      const processNumber = spawnedChildren.length
       vi.mocked(process.kill).mockImplementation((pid, signal) => {
-        if (pid === -spawnedChild.pid && signal === 'SIGINT') {
+        if (
+          processNumber === 1 &&
+          pid === -spawnedChild.pid &&
+          signal === 'SIGINT'
+        ) {
           queueMicrotask(() => {
             spawnedChild.emit('exit', null, signal)
             spawnedChild.emit('close', null, signal)
@@ -11730,41 +11866,42 @@ describe('assistant codex runtime', () => {
         }
         return true
       })
-      spawnedChild.stdin.onWrite = (write) => {
-        const message = asRecord(JSON.parse(write))
-        if (message.method !== 'turn/interrupt') {
-          return
-        }
+      if (processNumber === 1) {
+        spawnedChild.stdin.onWrite = (write) => {
+          const message = asRecord(JSON.parse(write))
+          if (message.method !== 'turn/interrupt') {
+            return
+          }
 
-        spawnedChild.stdin.onWrite = null
-        queueMicrotask(() => {
-          spawnedChild.stdin.emit('error', createErrnoException('EPIPE', 'write EPIPE'))
-        })
+          spawnedChild.stdin.onWrite = null
+          queueMicrotask(() => {
+            spawnedChild.stdin.emit('error', createErrnoException('EPIPE', 'write EPIPE'))
+          })
+        }
       }
 
       queueMicrotask(() => {
         void (async () => {
-          const spawnedChild = requireMockChildProcess(child)
-          await waitForRpcMethod(spawnedChild, 'initialize')
-          spawnedChild.stdout.write(jsonLine({ id: 1, result: {} }))
-          await waitForRpcMethod(spawnedChild, 'thread/start')
+          const initialize = await waitForRpcMethod(spawnedChild, 'initialize')
+          spawnedChild.stdout.write(jsonLine({ id: initialize.id, result: {} }))
+          const thread = await waitForRpcMethod(spawnedChild, 'thread/start')
           spawnedChild.stdout.write(
             jsonLine({
-              id: 2,
+              id: thread.id,
               result: {
                 thread: {
-                  id: 'thread-abort',
+                  id: `thread-abort-${processNumber}`,
                 },
               },
             }),
           )
-          await waitForRpcMessages(spawnedChild, 4)
+          const turn = await waitForRpcMethod(spawnedChild, 'turn/start')
           spawnedChild.stdout.write(
             jsonLine({
-              id: 3,
+              id: turn.id,
               result: {
                 turn: {
-                  id: 'turn-abort',
+                  id: `turn-abort-${processNumber}`,
                 },
               },
             }),
@@ -11774,13 +11911,25 @@ describe('assistant codex runtime', () => {
               method: 'turn/started',
               params: {
                 turn: {
-                  id: 'turn-abort',
+                  id: `turn-abort-${processNumber}`,
                 },
               },
             }),
           )
-          await waitForRpcMessages(spawnedChild, 4)
-          controller.abort()
+          if (processNumber === 1) {
+            await waitForRpcMessages(spawnedChild, 4)
+            controller.abort()
+            return
+          }
+          spawnedChild.stdout.write(jsonLine({
+            method: 'turn/completed',
+            params: {
+              turn: {
+                id: `turn-abort-${processNumber}`,
+                status: 'completed',
+              },
+            },
+          }))
         })()
       })
 
@@ -11806,18 +11955,39 @@ describe('assistant codex runtime', () => {
       },
     })
 
-    const spawnedChild = requireMockChildProcess(child)
+    const spawnedChild = requireMockChildProcess(spawnedChildren[0] ?? null)
     const messages = await waitForRpcMessages(spawnedChild, 5)
     expect(messages[4]).toEqual({
       id: 4,
       method: 'turn/interrupt',
       params: {
-        threadId: 'thread-abort',
-        turnId: 'turn-abort',
+        threadId: 'thread-abort-1',
+        turnId: 'turn-abort-1',
       },
     })
     expect(process.kill).toHaveBeenCalledWith(-spawnedChild.pid, 'SIGINT')
     expect(spawnedChild.kill).not.toHaveBeenCalledWith('SIGINT')
+
+    const replacementTrace = vi.fn()
+    await expect(
+      executeCodexAppServerTurn({
+        onTraceEvent: replacementTrace,
+        prompt: 'continue after abort',
+        workingDirectory,
+      }),
+    ).resolves.toMatchObject({
+      sessionId: 'thread-abort-2',
+      turnId: 'turn-abort-2',
+    })
+    expect(codexMocks.spawn).toHaveBeenCalledTimes(2)
+    expect(replacementTrace).toHaveBeenCalledWith(
+      expect.objectContaining({
+        rawEvent: expect.objectContaining({
+          codexTimingColdStartReason: 'previous-turn-abort',
+          codexTimingStage: 'initialized',
+        }),
+      }),
+    )
   })
 
   it('terminates Codex app-server process groups during shutdown', async () => {

@@ -623,11 +623,7 @@ export async function executeCodexAppServerTurn(
 
   try {
     const processInstance = await getOrStartWarmCodexProcess(preparedInput)
-    try {
-      return await runCodexAppServerTurnOnProcess(processInstance, preparedInput)
-    } finally {
-      clearWarmCodexProcessIfUnusable(processInstance)
-    }
+    return await runCodexAppServerTurnOnProcess(processInstance, preparedInput)
   } finally {
     await rm(tempRoot, {
       recursive: true,
@@ -795,6 +791,10 @@ class CodexAppServerProcess {
     return this.endReason ?? 'previous-process-unhealthy'
   }
 
+  noteTurnAbort(): void {
+    this.endReason ??= 'previous-turn-abort'
+  }
+
   get hasInFlightTurn(): boolean {
     return this.state === 'reserved' || this.state === 'running'
   }
@@ -959,17 +959,19 @@ class CodexAppServerProcess {
   }
 
   async stop(reason: string): Promise<void> {
-    if (this.stopCompleted) {
+    if (this.stopPromise) {
+      await this.stopPromise
       return
     }
-    // Memoized so concurrent callers (a failed compaction's poison and a
-    // racing turn's replacement stop) share one teardown instead of
-    // double-signaling; an unsuccessful teardown clears the memo so later
-    // callers retry, matching the pre-memoization semantics.
-    this.stopPromise ??= this.runStop(reason).finally(() => {
-      if (!this.stopCompleted) {
-        this.stopPromise = null
-      }
+    if (this.stopCompleted || this.state === 'stopped') {
+      return
+    }
+    // Memoized while in flight so concurrent callers (a failed compaction's
+    // poison and a racing turn's replacement stop) share one teardown instead
+    // of double-signaling. Once settled, later calls either observe the stopped
+    // state or retry an unsuccessful teardown.
+    this.stopPromise = this.runStop(reason).finally(() => {
+      this.stopPromise = null
     })
     await this.stopPromise
   }
@@ -1230,6 +1232,9 @@ class CodexAppServerProcess {
     if (!this.normalShutdown) {
       this.poisoned = true
       this.endReason ??= 'previous-process-exit'
+      // The detached leader can exit before its owned tool descendants.
+      // Sweep that exact process group before releasing parent-exit cleanup.
+      this.signal('SIGKILL')
     }
     this.state = 'stopped'
     this.cleanupProcessExitListener()
@@ -1333,7 +1338,6 @@ function resolveCodexAppServerEndReason(
 }
 
 let warmCodexProcess: CodexAppServerProcess | null = null
-let pendingCodexAppServerColdStartReason: CodexAppServerColdStartReason | null = null
 let warmCodexSlotLock: Promise<void> = Promise.resolve()
 
 async function withWarmCodexSlotLock<T>(
@@ -1363,6 +1367,7 @@ async function getOrStartWarmCodexProcess(
     }
 
     const previousProcess = warmCodexProcess
+    let coldStartReason: CodexAppServerColdStartReason = 'node-process-first-use'
     if (previousProcess) {
       if (previousProcess.hasInFlightTurn) {
         throw previousProcess.buildBusyError(
@@ -1378,44 +1383,17 @@ async function getOrStartWarmCodexProcess(
           ? 'launch-identity-changed'
           : 'process-unhealthy'
       await previousProcess.stop(stopReason)
-      retireWarmCodexProcess(previousProcess)
+      coldStartReason = previousProcess.nextColdStartReason
     }
 
-    const coldStartReason =
-      pendingCodexAppServerColdStartReason ?? 'node-process-first-use'
     const processInstance = new CodexAppServerProcess({
       ...input,
       coldStartReason,
     })
-    pendingCodexAppServerColdStartReason = null
     warmCodexProcess = processInstance
     warmCodexProcess.reserveTurn()
     return warmCodexProcess
   })
-}
-
-function retireWarmCodexProcess(
-  processInstance: CodexAppServerProcess,
-): void {
-  if (warmCodexProcess !== processInstance) {
-    return
-  }
-  pendingCodexAppServerColdStartReason ??=
-    processInstance.nextColdStartReason
-  warmCodexProcess = null
-}
-
-function clearWarmCodexProcessIfUnusable(
-  processInstance: CodexAppServerProcess,
-): void {
-  const launchKey = processInstance.launchKey
-  if (
-    warmCodexProcess === processInstance &&
-    !processInstance.isReusableFor(launchKey) &&
-    (processInstance.child.exitCode !== null || processInstance.child.signalCode !== null)
-  ) {
-    retireWarmCodexProcess(processInstance)
-  }
 }
 
 export async function stopWarmCodexAppServer(
@@ -1434,7 +1412,6 @@ export async function stopWarmCodexAppServer(
     }
 
     await processInstance.stop(reason)
-    retireWarmCodexProcess(processInstance)
   })
 }
 
@@ -1720,9 +1697,6 @@ export async function executeCodexManagedAccountOperation(
     processInstance.releaseTurn(binding)
     processInstance.releaseReservation()
     await processInstance.stop('managed-account-operation-complete').catch(() => undefined)
-    await withWarmCodexSlotLock(async () => {
-      retireWarmCodexProcess(processInstance)
-    })
   }
 }
 
@@ -2098,9 +2072,6 @@ export async function compactWarmCodexThread(input: {
     input.signal?.removeEventListener('abort', onAbort)
     processInstance.releaseTurn(binding)
     processInstance.releaseReservation()
-    await withWarmCodexSlotLock(async () => {
-      clearWarmCodexProcessIfUnusable(processInstance)
-    })
   }
 }
 
@@ -2629,6 +2600,7 @@ async function runCodexAppServerTurnOnProcess(
     abortSignal: input.abortSignal,
     onAbort: () => {
       abortRequested = true
+      codexProcess.noteTurnAbort()
       if (codexThreadId && turnId) {
         codexProcess.sendUntrackedRequest(
           'turn/interrupt',
