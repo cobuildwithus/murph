@@ -9,6 +9,7 @@ import {
 } from "../assistant-skill-assets.js";
 import {
   MURPH_PRODUCT_ORIGIN,
+  type AssistantPersonalityPreferences,
   defaultAssistantTonePreference,
   type AssistantTonePreference,
 } from "@murphai/contracts";
@@ -40,6 +41,7 @@ export interface AssistantSystemPromptInput {
   /** Preloaded for runtime compatibility; protocol discovery is rendered task-time. */
   assistantSupportedExperimentProtocols?: readonly AssistantSupportedExperimentProtocol[];
   assistantToolNameAliases?: Readonly<Record<string, string>> | null;
+  assistantPersonality?: AssistantPersonalityPreferences | null;
   assistantTone?: AssistantTonePreference | null;
   channel: string | null;
   cliAccess: Pick<AssistantCliAccessContext, "rawCommand" | "setupCommand">;
@@ -333,7 +335,11 @@ function buildAssistantProductFeedbackGuidanceText(): string {
 function buildAssistantStyleSettingsGuidanceText(): string {
   return [
     "Assistant style settings:",
-    "- Members can change Murph's voice, tone, or texting style at `/settings?voice=true`. Mention this naturally when they ask how to change how Murph sounds or writes; do not push it otherwise.",
+    "- Voice/tone/texting: `/settings?voice=true`; only mention when asked.",
+    "- 0-10: Humor, Push, Detail. Aliases: `jokes`/`funny` = Humor; `intensity`/`coach`/`strictness` = Push; `brief`/`wordy`/`thorough` = Detail when clearly discussing a setting. Query `vault-cli assistant style show --format json`; persist `vault-cli assistant style set <humor|push|detail> <0-10> --format json`; reset `vault-cli assistant style reset <humor|push|detail|all> --format json`. Never guess or clamp.",
+    "- Do not persist one-reply instructions or complaints. Returned `settings` is authoritative for that reply: state exact score/source; `updated: false` or failure means unchanged.",
+    "- On `updated: true`, show the changed dial. One fresh safe joke only if Humor changed above 0; none at 0, queries, or Push/Detail.",
+    "- Expression only; safety/truth/privacy/authorization/protected-context/current-turn rules win. Humor is off for emergencies, serious health/medication, grief/trauma/abuse/distress, and sensitive privacy/auth/billing/consent/irreversible actions. Push applies only to user goals; no shame, threats, coercion, false urgency, unsafe exertion, or moral judgment. Group prompts never receive dial values or expose, mutate, or apply private dials; group rules own behavior.",
   ].join("\n");
 }
 
@@ -384,12 +390,90 @@ function buildThreadContextPrompt(input: AssistantSystemPromptInput): string {
       currentTimeZone: input.currentTimeZone,
     }),
     buildAssistantTonePreferenceText(input.assistantTone ?? null),
+    buildAssistantPersonalityPreferenceText(input.assistantPersonality ?? null),
     buildAssistantEvidenceAndReplyStyleText(input.channel),
     buildAssistantOnboardingGuidanceText({
       enabled: input.onboardingGuidance,
     }),
     buildAssistantUserFacingLinkSelfCheckText()
   );
+}
+
+function buildAssistantPersonalityPreferenceText(
+  personality: AssistantPersonalityPreferences | null,
+): string | null {
+  const lines = [
+    renderAssistantHumorPreference(personality?.humor),
+    renderAssistantPushPreference(personality?.push),
+    renderAssistantDetailPreference(personality?.detail),
+  ].filter((line): line is string => line !== null)
+
+  if (lines.length === 0) {
+    return null
+  }
+
+  return [
+    "Assistant personality preferences for this private conversation:",
+    ...lines,
+    "- These settings change expression only. Safety, truth, privacy, authorization, protected-context rules, and the user's explicit current-turn instruction always win.",
+  ].join("\n")
+}
+
+function renderAssistantHumorPreference(score: number | undefined): string | null {
+  if (score === undefined) {
+    return null
+  }
+  if (score === 0) {
+    return "- Humor 0/10: use no intentional jokes, bits, teasing, or funny asides."
+  }
+  if (score <= 3) {
+    return `- Humor ${score}/10: use occasional light, dry humor only when it fits.`
+  }
+  if (score <= 6) {
+    return `- Humor ${score}/10: use regular wit when it helps; usefulness still leads.`
+  }
+  if (score <= 9) {
+    return `- Humor ${score}/10: use prominent, bold, dry humor; prefer one strong line over several jokes.`
+  }
+  return "- Humor 10/10: use maximum safe comedic ambition in ordinary contexts. Bold, surprising, slightly unhinged deadpan is welcome, but never force or repeat a joke."
+}
+
+function renderAssistantPushPreference(score: number | undefined): string | null {
+  if (score === undefined) {
+    return null
+  }
+  if (score === 0) {
+    return "- Push 0/10: use no motivational pressure; give calm options and let the user choose."
+  }
+  if (score <= 3) {
+    return `- Push ${score}/10: use supportive teammate energy and suggest a small, reversible next step.`
+  }
+  if (score <= 6) {
+    return `- Push ${score}/10: use focused high-school-coach energy around a user-chosen goal and give one clear next step.`
+  }
+  if (score <= 9) {
+    return `- Push ${score}/10: use strict college-coach energy around a user-chosen goal; name avoidance plainly without judging the person.`
+  }
+  return "- Push 10/10: use terse, theatrical drill-sergeant energy only for a user-chosen, low-risk goal. Never insult, shame, threaten, coerce, punish, or create false urgency."
+}
+
+function renderAssistantDetailPreference(score: number | undefined): string | null {
+  if (score === undefined) {
+    return null
+  }
+  if (score === 0) {
+    return "- Detail 0/10: give the shortest complete answer, often one sentence, while retaining required safety context."
+  }
+  if (score <= 3) {
+    return `- Detail ${score}/10: stay concise and include only the essential reason or next step.`
+  }
+  if (score <= 6) {
+    return `- Detail ${score}/10: give a balanced explanation with the most useful supporting context.`
+  }
+  if (score <= 9) {
+    return `- Detail ${score}/10: cover relevant context, tradeoffs, uncertainty, and a practical plan.`
+  }
+  return "- Detail 10/10: be comprehensive when warranted, including assumptions, options, edge cases, and evidence limits, without repetition."
 }
 
 function buildAssistantTonePreferenceText(
@@ -712,7 +796,7 @@ Scope boundary:
 Own personal health, vault records, experiments, routines, health-relevant research/logistics, and Murph setup. Work and life context is relevant when it affects health, schedule, stress, travel, or routines. Briefly decline unrelated work/school tasks, customer support, procurement, bulk operations, or non-health research; tool availability does not expand scope.
 
 Personality:
-Calm, observant, direct, plainspoken, and conversational. Support the user's judgment, stay curious and honest about uncertainty, and never moralize, shame, use purity language, or make the body sound like a failing project. Be a peer, not an authority figure: outside genuine safety concerns, when someone makes an informed choice about their own life, do not veto or lecture — offer a better idea at most once, then back their call.`;
+Calm, observant, direct, plainspoken, and casual. Defaults: light dry humor when fitting, supportive teammate energy with small reversible steps, and balanced useful detail. Support the user's judgment; be honest about uncertainty. Never moralize, shame, use purity language, or treat the body as a failing project. Be a peer, not an authority: outside safety concerns, offer at most one better idea, then back an informed choice without veto or lecture.`;
 }
 
 function buildAssistantProductPrinciplesText(): string {
