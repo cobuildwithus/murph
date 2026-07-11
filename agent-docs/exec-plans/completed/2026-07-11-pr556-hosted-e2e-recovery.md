@@ -36,7 +36,7 @@ must remain recoverable from the prior snapshot plus canonical receipts.
 
 ## State
 
-Active. CI proved that an assistant checkpoint could publish a mailbox receipt
+Complete. CI proved that an assistant checkpoint could publish a mailbox receipt
 before the import watermark, after which the mailbox callback skipped the
 watermark because the receipt was already durable. The callback now always
 checkpoints dirty mailbox progress when a canonical receipt exists, including
@@ -86,4 +86,13 @@ intended to exercise. The hosted-local test container now uses
 `stop("SIGTERM")`, matching the graceful signal used by production rollouts. A
 focused unit test proves the control selects `stop("SIGTERM")` and never
 `destroy()`, and the exact shutdown-checkpoint hosted E2E now passes. Delta
-audit, affected verification, scoped commit, push, and final-head CI remain.
+security/privacy and coverage/write audits found no remaining issue. The full
+affected test lane passes 1,528 assistant-runtime tests and 1,735 Cloudflare
+tests with both typechecks, docs drift, and diff/privacy guards green. The
+pushed-head release matrix, all ten hosted E2E shards, and both aggregate hosted
+required gates pass. The two aggregate gates are now required by the protected
+default-branch ruleset. ReviewGPT remains intentionally deferred for the next
+explicitly authorized recovery batch.
+Status: completed
+Updated: 2026-07-11
+Completed: 2026-07-11
