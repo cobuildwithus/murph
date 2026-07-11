@@ -487,7 +487,17 @@ const hostedLocalOpenAiImagesFetch: typeof fetch = async (input) => {
     data: [{ b64_json: "UklGRgAAAABXRUJQ" }],
     usage: {
       input_tokens: 12,
+      input_tokens_details: {
+        cached_tokens: 0,
+        image_tokens: 0,
+        text_tokens: 12,
+      },
       output_tokens: 34,
+      output_tokens_details: {
+        image_tokens: 34,
+        reasoning_tokens: 0,
+        text_tokens: 0,
+      },
       total_tokens: 46,
     },
   }), {

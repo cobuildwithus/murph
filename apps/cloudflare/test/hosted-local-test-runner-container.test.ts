@@ -121,6 +121,7 @@ function createOutboundEnv(input: {
     accountId: string;
     apiKey: string;
   };
+  openAiApiKey?: string;
   ownsRuntimeWriteFence?: boolean;
 } = {}): RunnerOutboundEnvironmentSource {
   return {
@@ -135,6 +136,7 @@ function createOutboundEnv(input: {
       : {}),
     HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET:
       PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET,
+    ...(input.openAiApiKey ? { OPENAI_API_KEY: input.openAiApiKey } : {}),
     RUNNER_CONTAINER: {
       get: () => ({
         readActiveRuntimeUserFence: async () => ({ active: true, attemptId: "attempt-1", leaseGeneration: "1", userId: "member_123" }),
@@ -188,6 +190,30 @@ async function createAuthorizedTranscribeRequest(input: {
       ...(input.headers ?? {}),
     },
     method: input.method ?? "POST",
+  });
+}
+
+async function createAuthorizedOpenAiImagesRequest(): Promise<Request> {
+  const credential = await createHostedProviderEgressCredential({
+    providerKind: "openai",
+    runnerContainerName: RUNNER_CONTAINER_NAME,
+    source: {
+      HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET:
+        PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET,
+    },
+    userId: "member_123",
+  });
+  return new Request("https://api.openai.com/v1/images/generations", {
+    body: JSON.stringify({
+      model: "gpt-image-2",
+      prompt: "Render a synthetic mobility setup diagram.",
+    }),
+    headers: {
+      authorization: `Bearer ${credential}`,
+      [HOSTED_RUNNER_BOUND_USER_ID_HEADER]: "member_123",
+      "content-type": "application/json; charset=utf-8",
+    },
+    method: "POST",
   });
 }
 
@@ -327,6 +353,40 @@ describe("hosted-local test RunnerContainer outbound composition", () => {
         kind: "image",
         source: "gpt-image-2",
         url: "https://imagedelivery.net/hosted-local/generated-image/public",
+      },
+    });
+  });
+
+  it("returns priceable modality usage from the hosted-local OpenAI Images stub", async () => {
+    const handler = readHostedLocalTestOutboundByHost()[
+      HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.openAi
+    ];
+    if (!handler) {
+      throw new Error("Wrapped OpenAI outbound handler is missing.");
+    }
+
+    const response = await handler(
+      await createAuthorizedOpenAiImagesRequest(),
+      createOutboundEnv({ openAiApiKey: "openai-worker-secret" }),
+      { containerId: RUNNER_CONTAINER_NAME },
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      usage: {
+        input_tokens: 12,
+        input_tokens_details: {
+          cached_tokens: 0,
+          image_tokens: 0,
+          text_tokens: 12,
+        },
+        output_tokens: 34,
+        output_tokens_details: {
+          image_tokens: 34,
+          reasoning_tokens: 0,
+          text_tokens: 0,
+        },
+        total_tokens: 46,
       },
     });
   });
