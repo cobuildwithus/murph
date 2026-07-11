@@ -205,15 +205,16 @@ describe("hosted action approvals", () => {
       prisma: deps.prisma,
     });
 
-    const decision = await deps.prisma.$transaction((tx) =>
-      decideHostedActionApprovalTx({
+    const decision = await deps.prisma.$transaction((tx) => {
+      assertHostedActionApprovalTransactionClient(tx);
+      return decideHostedActionApprovalTx({
         approval: pending,
         decision: "denied",
         memberId,
         now: new Date("2026-06-25T18:01:00.000Z"),
         tx,
-      })
-    );
+      });
+    });
 
     expect(decision.runtimeResume).toBeNull();
     await expect(deps.prisma.hostedMailboxItem.count({
