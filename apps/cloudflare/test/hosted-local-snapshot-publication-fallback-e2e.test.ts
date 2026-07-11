@@ -422,7 +422,7 @@ function readStructuredLogRecords(): Array<{
       continue;
     }
     try {
-      const value = JSON.parse(trimmed.slice(jsonStart, jsonEnd + 1)) as unknown;
+      const value: unknown = JSON.parse(trimmed.slice(jsonStart, jsonEnd + 1));
       if (value && typeof value === "object" && !Array.isArray(value)) {
         records.push(value as {
           details?: Record<string, unknown>;

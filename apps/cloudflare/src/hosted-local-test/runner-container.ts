@@ -243,7 +243,7 @@ export function wrapCanonicalCheckpointLostAckForTest(
 async function isCommittedCanonicalRuntimeCheckpointResponse(
   response: Response,
 ): Promise<boolean> {
-  const body = await response.clone().json().catch(() => null) as unknown;
+  const body: unknown = await response.clone().json().catch(() => null);
   return Boolean(
     body
     && typeof body === "object"
@@ -262,7 +262,7 @@ async function isCanonicalRuntimeCheckpointRequest(request: Request): Promise<bo
     return false;
   }
 
-  const body = await request.clone().json().catch(() => null) as unknown;
+  const body: unknown = await request.clone().json().catch(() => null);
   return Boolean(
     body
     && typeof body === "object"
@@ -355,7 +355,7 @@ async function isShutdownCheckpointSnapshotCompleteRequest(request: Request): Pr
   if (!isWorkspaceSnapshotCompleteRequest(request)) {
     return false;
   }
-  const body = await request.clone().json().catch(() => null) as unknown;
+  const body: unknown = await request.clone().json().catch(() => null);
   if (!body || typeof body !== "object" || Array.isArray(body)) {
     return false;
   }
@@ -435,7 +435,7 @@ function isWorkspaceSnapshotCompleteRequest(request: Request): boolean {
 async function corruptWorkspaceSnapshotCompleteRequest(
   request: Request,
 ): Promise<Request | null> {
-  const body = await request.clone().json().catch(() => null) as unknown;
+  const body: unknown = await request.clone().json().catch(() => null);
   if (!body || typeof body !== "object" || Array.isArray(body)) {
     return null;
   }

@@ -472,7 +472,7 @@ function readStructuredLogRecords(): Array<{ message?: unknown }> {
       return [];
     }
     try {
-      const value = JSON.parse(trimmed) as unknown;
+      const value: unknown = JSON.parse(trimmed);
       return value && typeof value === "object" && !Array.isArray(value)
         ? [value as { message?: unknown }]
         : [];
