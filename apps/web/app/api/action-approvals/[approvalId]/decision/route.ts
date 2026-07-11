@@ -8,6 +8,7 @@ import {
   requirePendingHostedActionApproval,
 } from "@/src/lib/action-approvals";
 import type { HostedActionApprovalDecisionResponse } from "@/src/lib/action-approvals-shared";
+import { formatHostedExecutionSafeLogErrorDetails } from "@/src/lib/hosted-execution/logging";
 import { signalHostedMailboxAppendRuntime } from "@/src/lib/hosted-orchestration/signal-runtime";
 import { requireActiveHostedAppSessionFromRequest } from "@/src/lib/hosted-onboarding/app-session";
 import { assertHostedOnboardingMutationOrigin } from "@/src/lib/hosted-onboarding/csrf";
@@ -83,7 +84,14 @@ export const POST = withJsonError(async (
       userId: result.runtimeResume.userId,
     },
     mailboxItemId: result.runtimeResume.mailboxItemId,
-  }).catch(() => undefined);
+  }).catch((error: unknown) => {
+    console.warn("Hosted action approval mailbox wake signal failed after decision commit.", {
+      ...formatHostedExecutionSafeLogErrorDetails(error, {
+        code: "HOSTED_ACTION_APPROVAL_TEMPORAL_SIGNAL_FAILED",
+      }),
+      mailboxItemIdPresent: result.runtimeResume.mailboxItemId.length > 0,
+    });
+  });
 
   const contactOption = approval.returnContactKind === null
     ? null

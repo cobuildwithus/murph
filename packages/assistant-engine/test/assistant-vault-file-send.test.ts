@@ -77,7 +77,7 @@ describe('assistant vault-file send', () => {
         `hosted-turn-delivery-123:vault-file:haa_${'a'.repeat(32)}`,
       media: [first.file],
       message: 'Here it is: report.pdf',
-      nextAttemptAt: '2026-06-24T12:15:00.000Z',
+      nextAttemptAt: '2026-06-24T12:05:00.000Z',
       status: 'awaiting_approval',
     })
     expect(first).toMatchObject({
@@ -209,6 +209,28 @@ describe('assistant vault-file send', () => {
       ],
       nextAttemptAt: now.toISOString(),
       status: 'pending',
+    })
+  })
+
+  it('restores the approval-expiry wake when the pre-expiry fallback still observes pending', () => {
+    const intent = {
+      ...createVaultFileIntent(),
+      nextAttemptAt: '2026-06-24T12:05:00.000Z',
+    }
+    const pending = applyAssistantVaultFileSendApprovalResult({
+      approval: {
+        approvalId: `haa_${'b'.repeat(32)}`,
+        approvalUrl: 'https://murph.test/approve/haa_test',
+        expiresAt: '2026-06-24T12:15:00.000Z',
+        status: 'pending',
+      },
+      intent,
+      now: new Date('2026-06-24T12:05:00.000Z'),
+    })
+
+    expect(pending).toMatchObject({
+      nextAttemptAt: '2026-06-24T12:15:00.000Z',
+      status: 'awaiting_approval',
     })
   })
 

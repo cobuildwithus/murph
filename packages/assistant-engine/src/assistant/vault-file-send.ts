@@ -33,6 +33,8 @@ import {
 
 export const ASSISTANT_VAULT_FILE_SEND_ACTION_KIND = 'vault.file.send.v1'
 
+const ASSISTANT_VAULT_FILE_APPROVAL_FALLBACK_LEAD_MS = 10 * 60 * 1_000
+
 const ASSISTANT_VAULT_FILE_CONTENT_TYPES = new Map<string, string>([
   ['.csv', 'text/csv'],
   ['.doc', 'application/msword'],
@@ -114,7 +116,9 @@ export async function requestAssistantVaultFileSend(input: {
       explicitTarget: input.explicitTarget ?? null,
       identityId: input.identityId ?? null,
       initialState: {
-        nextAttemptAt: approval.expiresAt,
+        nextAttemptAt: buildAssistantVaultFileApprovalFallbackWakeAt(
+          approval.expiresAt,
+        ),
         status: 'awaiting_approval',
       },
       media: [file],
@@ -163,6 +167,14 @@ export function buildAssistantVaultFileDeliveryIdempotencyKey(input: {
 
 export function buildAssistantVaultFileDeliveryMessage(filename: string): string {
   return `Here it is: ${filename}`
+}
+
+export function buildAssistantVaultFileApprovalFallbackWakeAt(
+  expiresAt: string,
+): string {
+  return new Date(
+    Date.parse(expiresAt) - ASSISTANT_VAULT_FILE_APPROVAL_FALLBACK_LEAD_MS,
+  ).toISOString()
 }
 
 export async function resolveAssistantVaultFileResponseMedia(input: {

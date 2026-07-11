@@ -474,6 +474,14 @@ may refresh a denied or expired cycle. The row is never authorization or outcome
 truth.
 Secure-action approval and denial use this shape because the exact attachment,
 destination, and delivery identity remain in the runtime-owned parked intent.
+The parked intent arms one pre-expiry fallback wake ten minutes before the
+pending approval expires. A rejected post-commit Temporal signal is logged; the
+existing outbox wake then makes Temporal re-read mailbox lag while at least five
+minutes remain in the renewed authorization window. If the approval is still
+pending at that fallback, normal pending reconciliation restores the expiry wake,
+which provides the same margin for any decision made afterward. This reuses the
+effect's existing durable timer instead of adding an approval-specific retry
+queue, poller, or second handoff owner.
 External outcomes that require generated user-facing prose, such as phone-call
 results, continue to use `assistant.notification.requested` instead.
 

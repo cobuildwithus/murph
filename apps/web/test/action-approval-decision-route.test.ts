@@ -208,20 +208,37 @@ describe("hosted action approval decision route", () => {
   });
 
   it("keeps the committed mailbox outcome successful when the latency signal is unavailable", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     mocks.signalHostedMailboxAppendRuntime.mockRejectedValueOnce(
-      new Error("Temporal signal unavailable"),
+      new Error(
+        "Temporal signal unavailable for hosted-user-runtime:user_private member_private",
+      ),
     );
 
-    const response = await route.POST(
-      jsonRequest({ decision: "denied" }),
-      routeContext(),
-    );
+    try {
+      const response = await route.POST(
+        jsonRequest({ decision: "denied" }),
+        routeContext(),
+      );
 
-    expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual(expect.objectContaining({
-      status: "denied",
-    }));
-    expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledTimes(1);
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toEqual(expect.objectContaining({
+        status: "denied",
+      }));
+      expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledTimes(1);
+      expect(warn).toHaveBeenCalledWith(
+        "Hosted action approval mailbox wake signal failed after decision commit.",
+        {
+          errorCode: "HOSTED_ACTION_APPROVAL_TEMPORAL_SIGNAL_FAILED",
+          errorMessage:
+            "Temporal signal unavailable for hosted-user-runtime:<redacted-id> member_<redacted-id>",
+          errorType: "Error",
+          mailboxItemIdPresent: true,
+        },
+      );
+    } finally {
+      warn.mockRestore();
+    }
   });
 
   it("keeps a committed decision successful when optional contact resolution fails", async () => {

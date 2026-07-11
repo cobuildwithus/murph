@@ -2153,6 +2153,109 @@ describe("hosted runtime callbacks", () => {
     expect(sideEffects).toEqual([]);
   });
 
+  it("does not let a parked vault-file approval hide its same-turn approval-link reply", async () => {
+    const vaultFile = {
+      contentType: "application/pdf",
+      filename: "report.pdf",
+      kind: "vault_file" as const,
+      ref: "documents/report.pdf",
+      sha256: "a".repeat(64),
+      sizeBytes: 42,
+    };
+    mocks.listAssistantOutboxIntents.mockResolvedValue([
+      {
+        actorId: "actor_1",
+        bindingDelivery: { kind: "thread", target: "chat_1" },
+        channel: "linq",
+        createdAt: "2026-04-08T00:01:00.000Z",
+        dedupeKey: "dedupe_vault_file",
+        delivery: null,
+        deliveryIdempotencyKey:
+          `hosted-turn-delivery-123:vault-file:haa_${"a".repeat(32)}`,
+        deliveryTransportIdempotent: true,
+        explicitTarget: "chat_1",
+        identityId: "identity_1",
+        intentId: "intent_vault_file",
+        lastAttemptAt: null,
+        lastError: null,
+        media: [vaultFile],
+        message: "Here it is: report.pdf",
+        nextAttemptAt: "2026-04-08T00:06:00.000Z",
+        replyToMessageId: "message_1",
+        sessionId: "session_1",
+        status: "awaiting_approval",
+        subject: null,
+        threadId: "thread_1",
+        threadIsDirect: true,
+        turnId: "turn_1",
+        updatedAt: "2026-04-08T00:01:00.000Z",
+      },
+      {
+        actorId: "actor_1",
+        bindingDelivery: { kind: "thread", target: "chat_1" },
+        channel: "linq",
+        createdAt: "2026-04-08T00:01:01.000Z",
+        dedupeKey: "dedupe_approval_link",
+        delivery: null,
+        deliveryIdempotencyKey: "hosted-turn-delivery-123",
+        deliveryTransportIdempotent: true,
+        explicitTarget: "chat_1",
+        identityId: "identity_1",
+        intentId: "intent_approval_link",
+        lastAttemptAt: null,
+        lastError: null,
+        media: [],
+        message: "Approve here: https://withmurph.test/approve/haa_test",
+        nextAttemptAt: "2026-04-08T00:01:01.000Z",
+        replyToMessageId: "message_1",
+        sessionId: "session_1",
+        status: "pending",
+        subject: null,
+        threadId: "thread_1",
+        threadIsDirect: true,
+        turnId: "turn_1",
+        updatedAt: "2026-04-08T00:01:01.000Z",
+      },
+    ]);
+    const actionApprovalPort = {
+      consume: vi.fn(),
+      read: vi.fn(async () => ({
+        approvalId: `haa_${"a".repeat(32)}`,
+        approvalUrl: "https://withmurph.test/approve/haa_test",
+        expiresAt: "2026-04-08T00:16:00.000Z",
+        status: "pending" as const,
+      })),
+      request: vi.fn(),
+    };
+    mocks.readAssistantVaultFileMedia.mockImplementation((intent) =>
+      intent.intentId === "intent_vault_file" ? vaultFile : null
+    );
+    mocks.buildAssistantVaultFileSendApprovalRequest.mockReturnValue({
+      actionFingerprint: "a".repeat(64),
+      actionId: "vault-file-send:approval-link-ordering",
+      actionKind: "vault.file.send.v1",
+      presentation: {
+        body: "Send a vault file.",
+        title: "Send a file?",
+      },
+    });
+
+    const sideEffects = await collectHostedAssistantDeliverySideEffects({
+      actionApprovalPort,
+      includeBackgroundDueIntents: false,
+      preferredIntentIds: ["intent_approval_link"],
+      vaultRoot: "/tmp/vault",
+    });
+
+    expect(sideEffects.map((effect) => effect.effectId)).toEqual([
+      "intent_approval_link",
+    ]);
+    await expect(resolveHostedAssistantOutboxNextWakeAt({
+      now: new Date("2026-04-08T00:01:01.000Z"),
+      vaultRoot: "/tmp/vault",
+    })).resolves.toBe("2026-04-08T00:06:00.000Z");
+  });
+
   it("holds background replies while an earlier same-boundary predecessor is not due", async () => {
     mocks.shouldDispatchAssistantOutboxIntent.mockImplementation((intent) =>
       intent.intentId !== "intent_segment"

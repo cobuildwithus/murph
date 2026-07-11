@@ -646,6 +646,12 @@ function buildSelectableHostedAssistantDeliveryCandidateIds(input: {
         selectableIntentIds.add(intent.intentId);
         continue;
       }
+      if (intent.status === "awaiting_approval") {
+        // Approval is an authorization wait, not an outbound-message
+        // predecessor. Keep its fallback in next-wake calculation, but do not
+        // hide a ready approval-link reply queued later on the same boundary.
+        continue;
+      }
       if (resolveHostedAssistantOutboxIntentWakeAt(intent, input.now)) {
         break;
       }
