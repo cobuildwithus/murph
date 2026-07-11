@@ -531,6 +531,20 @@ malformed key fails session issuance, resolution, and revocation closed. Keep
 the key out of Cloudflare Worker and runner environments; no Cloudflare deploy
 is required for this cutover.
 
+Before deploying, enable Vercel Authentication with Standard Protection (or a
+stricter All Deployments scope) for the project. This keeps the custom
+production domain public while protecting every generated production URL,
+including URLs for historical deployments that still accept legacy sessions.
+With the secure `HOSTED_WEB_VERCEL_*` operator environment loaded, require this
+check to pass before cutover:
+
+```sh
+pnpm --dir apps/web release:production:verify-deployment-protection
+```
+
+Do not proceed if the check fails. Keep deployment-protection bypass secrets
+and share links out of the cutover verification path.
+
 Freeze production deploys and rollbacks for the cutover. Record the exact
 strict-v2 commit, deploy it, and prove the production alias points at that
 commit with `apps/web/scripts/resolve-vercel-production-alias-sha.ts` and the

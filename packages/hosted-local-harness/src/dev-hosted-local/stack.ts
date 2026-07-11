@@ -218,8 +218,11 @@ export async function startHostedLocalDevStack(input: {
 }): Promise<HostedLocalDevStack> {
   throwIfAbortSignalAborted(input.abortSignal);
   const initialEnv = { ...input.env } satisfies NodeJS.ProcessEnv;
+  const inheritedHostedAppSessionHmacKey =
+    initialEnv.HOSTED_APP_SESSION_HMAC_KEY?.trim() || null;
+  delete initialEnv.HOSTED_APP_SESSION_HMAC_KEY;
+  delete process.env.HOSTED_APP_SESSION_HMAC_KEY;
   const initialProcessEnv = { ...initialEnv } satisfies NodeJS.ProcessEnv;
-  delete initialProcessEnv.HOSTED_APP_SESSION_HMAC_KEY;
   const config = resolveHostedLocalDevConfig(initialEnv);
   assertHostedLocalWorktreeRuntimePreconditions(initialEnv);
   assertHostedLocalE2eIsolation(initialEnv, config);
@@ -352,7 +355,8 @@ export async function startHostedLocalDevStack(input: {
       ...initialEnv,
     };
     const hostedAppSessionHmacKey =
-      rawVercelEnv.HOSTED_APP_SESSION_HMAC_KEY?.trim()
+      inheritedHostedAppSessionHmacKey
+      || rawVercelEnv.HOSTED_APP_SESSION_HMAC_KEY?.trim()
       || HOSTED_LOCAL_APP_SESSION_HMAC_KEY;
     delete rawVercelEnv.HOSTED_APP_SESSION_HMAC_KEY;
     const inputNodeEnv = rawVercelEnv.NODE_ENV?.trim();

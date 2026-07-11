@@ -569,6 +569,7 @@ describe("hosted local dev stack", () => {
   it("starts Cloudflare with web-only process environment overrides", async () => {
     vi.stubEnv("OPENAI_API_KEY", "local-openai-key");
     const appSessionHmacKey = Buffer.alloc(32, 9).toString("base64url");
+    vi.stubEnv("HOSTED_APP_SESSION_HMAC_KEY", appSessionHmacKey);
     spawnChildProcess
       .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "cloudflare", pid: 101 }))
       .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "web", pid: 102 }));
@@ -587,8 +588,22 @@ describe("hosted local dev stack", () => {
     });
 
     const environmentModule = await import("../../src/dev-hosted-local/environment.ts");
+    const runtimeModule = await import("../../src/dev-hosted-local/runtime.ts");
     const vercelModule = await import("../../src/dev-hosted-local/vercel.ts");
     const { startHostedLocalDevStack } = await import("../../src/dev-hosted-local/stack.ts");
+    vi.mocked(runtimeModule.assertHostedWebPortAvailable).mockImplementationOnce(
+      async () => {
+        expect(process.env.HOSTED_APP_SESSION_HMAC_KEY).toBeUndefined();
+      },
+    );
+    resolveHostedLocalWorkerPortMode.mockImplementationOnce(async () => {
+      expect(process.env.HOSTED_APP_SESSION_HMAC_KEY).toBeUndefined();
+      return "start";
+    });
+    startHostedLocalTemporalRuntime.mockImplementationOnce(async () => {
+      expect(process.env.HOSTED_APP_SESSION_HMAC_KEY).toBeUndefined();
+      return null;
+    });
 
     const stack = await startHostedLocalDevStack({
       env: {
@@ -603,6 +618,7 @@ describe("hosted local dev stack", () => {
     await stack.ready;
     await stack.stop();
 
+    expect(process.env.HOSTED_APP_SESSION_HMAC_KEY).toBeUndefined();
     expect(stack.runtimeEnv.LINQ_API_BASE_URL).toBe(
       "http://host.docker.internal:4011",
     );

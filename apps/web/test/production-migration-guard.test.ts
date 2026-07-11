@@ -16,6 +16,7 @@ import {
 } from "../scripts/run-production-contract-migrations";
 import {
   resolveVercelProductionAliasSha,
+  verifyVercelProductionDeploymentProtection,
 } from "../scripts/resolve-vercel-production-alias-sha";
 import {
   hostedWebProductionLinqLineSyncCommand,
@@ -637,6 +638,62 @@ describe("hosted web production migration guard", () => {
     );
   });
 
+  test("requires Vercel protection for generated production deployment URLs", async () => {
+    const environment = {
+      HOSTED_WEB_VERCEL_PROJECT_ID: "project-id",
+      HOSTED_WEB_VERCEL_TEAM_ID: "team-id",
+      HOSTED_WEB_VERCEL_TOKEN: "token",
+    };
+    const projectUrl =
+      "https://api.vercel.com/v9/projects/project-id?teamId=team-id";
+    const protectedTypes = [
+      "all",
+      "all_except_custom_domains",
+      "prod_deployment_urls_and_all_previews",
+    ];
+
+    for (const deploymentType of protectedTypes) {
+      const requests: Array<{
+        authorization: string | undefined;
+        url: string;
+      }> = [];
+      const result = await verifyVercelProductionDeploymentProtection(
+        environment,
+        async (url, init) => {
+          requests.push({
+            authorization:
+              init?.headers === undefined
+                ? undefined
+                : new Headers(init.headers).get("authorization") ?? undefined,
+            url,
+          });
+          return jsonFetchResponse({ ssoProtection: { deploymentType } });
+        },
+      );
+
+      assert.equal(result, deploymentType);
+      assert.deepEqual(requests, [{
+        authorization: "Bearer token",
+        url: projectUrl,
+      }]);
+    }
+
+    for (const response of [
+      {},
+      { ssoProtection: null },
+      { ssoProtection: { deploymentType: "preview" } },
+    ]) {
+      await assert.rejects(
+        () =>
+          verifyVercelProductionDeploymentProtection(
+            environment,
+            async () => jsonFetchResponse(response),
+          ),
+        /Standard or All Deployment Protection/u,
+      );
+    }
+  });
+
   test("keeps package build non-mutating and keeps Vercel deploy migrations automatic", async () => {
     const packageJson = JSON.parse(
       await readFile(path.join(appRoot, "package.json"), "utf8"),
@@ -654,6 +711,8 @@ describe("hosted web production migration guard", () => {
     const contractMigrationScript =
       scripts["release:production:contract-migrate"] ?? "";
     const releaseMigrationScript = scripts["release:production:migrate"] ?? "";
+    const deploymentProtectionScript =
+      scripts["release:production:verify-deployment-protection"] ?? "";
 
     assert.match(buildScript, /pnpm prisma:generate/u);
     assert.match(buildScript, /next build/u);
@@ -672,6 +731,10 @@ describe("hosted web production migration guard", () => {
     assert.equal(
       releaseMigrationScript,
       "pnpm --dir ../.. exec tsx apps/web/scripts/run-production-migrations.ts",
+    );
+    assert.equal(
+      deploymentProtectionScript,
+      "pnpm --dir ../.. exec tsx apps/web/scripts/verify-vercel-production-deployment-protection.ts",
     );
     assert.equal(
       vercelJson.buildCommand,

@@ -16,9 +16,16 @@ type FetchLike = (
   init?: { headers?: HeadersInit },
 ) => Promise<FetchResponse>;
 
+const PROTECTED_PRODUCTION_DEPLOYMENT_TYPES = new Set([
+  "all",
+  "all_except_custom_domains",
+  "prod_deployment_urls_and_all_previews",
+]);
+
 // Keep this workflow helper on direct REST calls: the GitHub deployment_status job
-// needs only Vercel's alias and deployment endpoints, and the response contract is
-// pinned by focused tests without adding SDK/runtime setup to the deploy gate.
+// needs only Vercel's alias, deployment, and project endpoints, and the response
+// contracts are pinned by focused tests without adding SDK/runtime setup to the
+// deploy gate.
 function extractVercelAliasDeploymentRef(
   aliasResponse: unknown,
 ): string | undefined {
@@ -82,6 +89,45 @@ export async function resolveVercelProductionAliasSha(
   return gitSha;
 }
 
+export async function verifyVercelProductionDeploymentProtection(
+  environment: VercelAliasShaEnvironment = readProcessVercelAliasShaEnvironment(),
+  fetchImpl: FetchLike = fetch,
+): Promise<string> {
+  const token = readRequiredEnvironment(
+    environment,
+    "HOSTED_WEB_VERCEL_TOKEN",
+  );
+  const projectUrl = buildVercelProjectUrl(environment);
+  const projectResponse = await fetchVercelJson(
+    projectUrl,
+    token,
+    fetchImpl,
+    "project",
+  );
+  const deploymentType = extractVercelDeploymentProtectionType(projectResponse);
+
+  if (
+    deploymentType === undefined
+    || !PROTECTED_PRODUCTION_DEPLOYMENT_TYPES.has(deploymentType)
+  ) {
+    throw new Error(
+      "Vercel Standard or All Deployment Protection must protect generated production deployment URLs before the strict app-session cutover.",
+    );
+  }
+
+  return deploymentType;
+}
+
+function extractVercelDeploymentProtectionType(
+  projectResponse: unknown,
+): string | undefined {
+  if (!isRecord(projectResponse) || !isRecord(projectResponse.ssoProtection)) {
+    return undefined;
+  }
+
+  return readString(projectResponse.ssoProtection.deploymentType);
+}
+
 function buildVercelAliasUrl(
   environment: VercelAliasShaEnvironment,
 ): string {
@@ -109,6 +155,21 @@ function buildVercelDeploymentUrl(
     `https://api.vercel.com/v13/deployments/${encodeURIComponent(deploymentRef)}`,
   );
   url.searchParams.set("withGitRepoInfo", "true");
+  appendTeamId(url, environment.HOSTED_WEB_VERCEL_TEAM_ID);
+
+  return url.toString();
+}
+
+function buildVercelProjectUrl(
+  environment: VercelAliasShaEnvironment,
+): string {
+  const projectId = readRequiredEnvironment(
+    environment,
+    "HOSTED_WEB_VERCEL_PROJECT_ID",
+  );
+  const url = new URL(
+    `https://api.vercel.com/v9/projects/${encodeURIComponent(projectId)}`,
+  );
   appendTeamId(url, environment.HOSTED_WEB_VERCEL_TEAM_ID);
 
   return url.toString();
