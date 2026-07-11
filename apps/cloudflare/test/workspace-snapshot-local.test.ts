@@ -665,6 +665,58 @@ exec "\${MURPH_TEST_REAL_TAR:?}" "$@"
       name: ".env-prefixed paths",
     },
     {
+      entries: [{
+        content: "{\"pid\":1}\n",
+        path: "vault/.runtime/operations/assistant/.runtime-write.lock/owner.json",
+        type: "0",
+      }],
+      name: "runtime write locks",
+    },
+    {
+      entries: [{
+        content: "secret\n",
+        path: "vault/.runtime/operations/assistant/secrets/token.json",
+        type: "0",
+      }],
+      name: "assistant secrets",
+    },
+    {
+      entries: [{
+        content: "quarantined\n",
+        path: "vault/.runtime/operations/assistant/quarantine/item.json",
+        type: "0",
+      }],
+      name: "assistant quarantine",
+    },
+    {
+      entries: [{ content: "cache\n", path: "vault/.runtime/cache/parser.json", type: "0" }],
+      name: "runtime cache",
+    },
+    {
+      entries: [{ content: "temporary\n", path: "vault/.runtime/tmp/work.txt", type: "0" }],
+      name: "runtime temporary state",
+    },
+    {
+      entries: [{
+        content: "projection\n",
+        path: "vault/.runtime/projections/query.sqlite",
+        type: "0",
+      }],
+      name: "runtime projections",
+    },
+    {
+      entries: [{
+        content: "sandbox_mode = \"danger-full-access\"\n",
+        path: "home/.codex-hosted/config.toml",
+        type: "0",
+      }],
+      name: "non-continuity operator-home files",
+    },
+    {
+      entries: [{ content: "outside\n", path: "other/file.txt", type: "0" }],
+      name: "unsupported durable roots",
+    },
+    {
       entries: [{ linkPath: "target.txt", path: "vault/link.txt", type: "2" }],
       name: "symbolic links",
     },

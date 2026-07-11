@@ -27,6 +27,9 @@ import {
   type HostedWorkspaceSnapshotV2Aad,
   type HostedWorkspaceSnapshotV2Ref,
 } from "@murphai/hosted-execution/workspace-snapshot-v2";
+import {
+  isHostedWorkspaceSnapshotArchiveEntryPortable,
+} from "@murphai/runtime-state/node";
 
 const HOSTED_WORKSPACE_SNAPSHOT_AUTH_TAG_BYTES = 16;
 const HOSTED_WORKSPACE_SNAPSHOT_ZSTD_ARGS = [
@@ -1035,6 +1038,14 @@ function readHostedWorkspaceSnapshotTarInventory(
     );
     if (isHostedWorkspaceSnapshotEnvPath(parsedArchivePath)) {
       throw new Error("Hosted workspace snapshot tar archive contains environment files.");
+    }
+    if (!isHostedWorkspaceSnapshotArchiveEntryPortable({
+      archivePath: parsedArchivePath,
+      kind: parsed.type,
+    })) {
+      throw new Error(
+        "Hosted workspace snapshot tar archive contains capture-forbidden entries.",
+      );
     }
     if (seenPaths.has(parsedArchivePath)) {
       throw new Error("Hosted workspace snapshot tar archive contains duplicate entries.");
