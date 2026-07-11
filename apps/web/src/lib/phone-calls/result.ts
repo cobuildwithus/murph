@@ -206,7 +206,12 @@ export async function handleRetellCallAnalyzed(input: {
       if (stored.analyzedAt && hasStoredHostedPhoneCallResult(stored)) {
         return await tx.appendResultNotification(stored);
       }
-      return emptyRetellCallAnalyzedHandlingResult();
+      throw hostedOnboardingError({
+        code: "HOSTED_PHONE_CALL_ANALYSIS_RETRY_REQUIRED",
+        httpStatus: 503,
+        message: "Hosted phone call analysis lost authority and must be retried.",
+        retryable: true,
+      });
     }
 
     return await tx.appendResultNotification(target.call, result);

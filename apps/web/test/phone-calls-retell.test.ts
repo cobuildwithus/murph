@@ -816,6 +816,69 @@ describe("Retell phone-call result handling", () => {
     ]);
   });
 
+  it("requires retry when call_ended changes authority during result encryption", async () => {
+    const endedAt = new Date("2026-06-25T12:34:56.000Z");
+    const onEncryptResult = vi
+      .fn<(call: HostedPhoneCall) => Promise<HostedPhoneCall | null>>()
+      .mockImplementationOnce(async (call) => ({
+        ...call,
+        endedAt,
+        status: "failed",
+      }))
+      .mockResolvedValue(null);
+    const store = createWebhookStore({
+      call: buildHostedPhoneCall({
+        id: "hpc_123",
+        status: "calling",
+      }),
+      onEncryptResult,
+    });
+    const call = {
+      call_analysis: {
+        custom_analysis_data: {
+          outcome: "not_completed",
+          result: "The line was busy.",
+        },
+      },
+      call_id: "retell_call_123",
+      data_storage_setting: "basic_attributes_only",
+    };
+
+    await expect(handleRetellCallAnalyzed({
+      call,
+      prisma: store.prisma,
+    })).rejects.toMatchObject({
+      code: "HOSTED_PHONE_CALL_ANALYSIS_RETRY_REQUIRED",
+      httpStatus: 503,
+      retryable: true,
+    });
+    expect(store.currentCall()).toMatchObject({
+      analyzedAt: null,
+      endedAt,
+      resultEncrypted: null,
+      resultJson: null,
+      status: "failed",
+    });
+    expect(store.appendResultNotificationCalls).toEqual([]);
+
+    await expect(handleRetellCallAnalyzed({
+      call,
+      prisma: store.prisma,
+    })).resolves.toEqual({
+      notificationMailboxItemId: "mailbox_hpc_123",
+      notificationUserId: "member_123",
+    });
+    expect(store.currentCall()).toMatchObject({
+      analyzedAt: expect.any(Date),
+      endedAt,
+      resultEncrypted: expect.stringMatching(/^hsb-test:/u),
+      resultJson: null,
+      status: "failed",
+    });
+    expect(store.appendResultNotificationCalls).toHaveLength(1);
+    expect(onEncryptResult).toHaveBeenCalledTimes(2);
+  });
+
   it("rolls call_analyzed back when notification enqueue fails so Retell replay can notify", async () => {
     const store = createWebhookStore({
       call: buildHostedPhoneCall({ id: "hpc_123" }),
@@ -1075,8 +1138,10 @@ function createWebhookStore(input: {
     result?: HostedPhoneCallResult,
   ) => Promise<void>;
   call: HostedPhoneCall;
+  onEncryptResult?: (call: HostedPhoneCall) => Promise<HostedPhoneCall | null>;
 }) {
   let currentCall: HostedPhoneCall | null = input.call;
+  let externallyCommittedCall: HostedPhoneCall | null = null;
   const appendResultNotificationCalls: HostedPhoneCall[] = [];
   const appendResultNotificationResults: Array<HostedPhoneCallResult | undefined> = [];
   const findUniqueCalls: RetellWebhookFindUniqueInput[] = [];
@@ -1093,15 +1158,21 @@ function createWebhookStore(input: {
         notificationUserId: call.memberId,
       };
     },
-    encryptResult: async ({ memberId, value }) => `hsb-test:${Buffer.from(
-      JSON.stringify({
-        lane: "hosted-member-private-field",
-        scope: "hosted-phone-call:result",
-        userId: memberId,
-        value: JSON.stringify(value),
-      }),
-      "utf8",
-    ).toString("base64url")}`,
+    encryptResult: async ({ memberId, value }) => {
+      if (currentCall && input.onEncryptResult) {
+        externallyCommittedCall = await input.onEncryptResult(currentCall);
+        currentCall = externallyCommittedCall ?? currentCall;
+      }
+      return `hsb-test:${Buffer.from(
+        JSON.stringify({
+          lane: "hosted-member-private-field",
+          scope: "hosted-phone-call:result",
+          userId: memberId,
+          value: JSON.stringify(value),
+        }),
+        "utf8",
+      ).toString("base64url")}`;
+    },
     hostedPhoneCall: {
       findUnique: async (args) => {
         findUniqueCalls.push(args);
@@ -1147,11 +1218,14 @@ function createWebhookStore(input: {
   const prisma: RetellWebhookStore = {
     $transaction: async (callback) => {
       const before = currentCall;
+      externallyCommittedCall = null;
       try {
         return await callback(tx);
       } catch (error) {
-        currentCall = before;
+        currentCall = externallyCommittedCall ?? before;
         throw error;
+      } finally {
+        externallyCommittedCall = null;
       }
     },
   };
