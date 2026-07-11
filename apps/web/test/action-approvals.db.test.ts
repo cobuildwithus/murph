@@ -24,6 +24,7 @@ vi.mock("@/src/lib/hosted-web/public-url", () => ({
 import {
   consumeHostedActionApproval,
   decideHostedActionApprovalTx,
+  readHostedActionApprovalResult,
   requirePendingHostedActionApproval,
   requestHostedActionApproval,
 } from "@/src/lib/action-approvals";
@@ -339,6 +340,20 @@ describe("hosted action approvals", () => {
         decidedAt: new Date("2026-06-25T16:12:00.000Z"),
       },
       where: { approvalKey: requested.approvalId },
+    });
+
+    await expect(readHostedActionApprovalResult({
+      memberId,
+      now: new Date("2026-06-25T16:12:30.000Z"),
+      prisma: deps.prisma,
+      request: REQUEST,
+    })).resolves.toEqual({
+      approvalId: requested.approvalId,
+      status: "denied",
+    });
+    expect((await requireApprovalRow(deps, requested.approvalId))).toMatchObject({
+      approvalStatus: "denied",
+      decidedAt: new Date("2026-06-25T16:12:00.000Z"),
     });
 
     const afterDenial = await requestHostedActionApproval({

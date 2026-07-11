@@ -135,6 +135,26 @@ export async function requestHostedActionApproval(input: {
   );
 }
 
+export async function readHostedActionApprovalResult(input: {
+  memberId: string;
+  now?: Date;
+  prisma: HostedActionApprovalReadStore;
+  request: HostedActionApprovalRequest | unknown;
+}): Promise<HostedActionApprovalResult> {
+  const prepared = prepareHostedActionApprovalRequest({
+    memberId: input.memberId,
+    now: input.now,
+    request: input.request,
+  });
+  const approval = await findHostedActionApprovalForRequest({
+    prepared,
+    prisma: input.prisma,
+  });
+
+  assertHostedActionApprovalMatchesRequest(approval, prepared);
+  return buildHostedActionApprovalResult(approval, prepared.now);
+}
+
 export async function consumeHostedActionApproval(input: {
   memberId: string;
   now?: Date;

@@ -472,6 +472,9 @@ export interface HostedRuntimeActionApprovalPort {
   consume(
     input: HostedActionApprovalConsumeRequest,
   ): Promise<HostedActionApprovalResult>;
+  read(
+    input: HostedActionApprovalRequest,
+  ): Promise<HostedActionApprovalResult>;
   request(
     input: HostedActionApprovalRequest,
   ): Promise<HostedActionApprovalResult>;

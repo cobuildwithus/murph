@@ -5453,6 +5453,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
   it("passes the runtime action-approval port into hosted delivery drain", async () => {
     const actionApprovalPort = {
       consume: vi.fn(),
+      read: vi.fn(),
       request: vi.fn(),
     };
     const deliveryEffect = createDeliveryEffect();

@@ -466,7 +466,10 @@ for a trusted owner-state change that may unblock an already-persisted runtime
 effect. The owner mutation and control row commit in one transaction; only the
 mailbox pointer is signaled afterward. The runtime records the control receipt
 and performs bounded delivery-effect reconciliation without continuing the
-assistant automation lane. The row is never authorization or outcome truth.
+assistant automation lane. Reconciliation uses an observation-only approval
+read that cannot create or refresh an approval cycle; only an explicit new
+action request may refresh a denied or expired cycle. The row is never
+authorization or outcome truth.
 Secure-action approval and denial use this shape because the exact attachment,
 destination, and delivery identity remain in the runtime-owned parked intent.
 External outcomes that require generated user-facing prose, such as phone-call

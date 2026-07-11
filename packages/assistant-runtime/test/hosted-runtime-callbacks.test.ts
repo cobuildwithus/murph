@@ -1068,6 +1068,113 @@ describe("hosted runtime callbacks", () => {
     }
   });
 
+  it("observes a denied vault-file approval without reopening it and abandons the parked intent", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-08T00:02:00.000Z"));
+    try {
+      const vaultFile = {
+        approvalId: `haa_${"a".repeat(32)}`,
+        contentType: "application/pdf",
+        filename: "report.pdf",
+        kind: "vault_file" as const,
+        ref: "documents/report.pdf",
+        sha256: "a".repeat(64),
+        sizeBytes: 42,
+      };
+      const storedIntent = {
+        actorId: "actor_1",
+        bindingDelivery: { kind: "thread", target: "linq_chat_1" },
+        channel: "linq",
+        createdAt: "2026-04-08T00:00:00.000Z",
+        dedupeKey: "dedupe_vault_file_denied",
+        delivery: null,
+        deliveryIdempotencyKey: "assistant-outbox:intent_vault_file_denied",
+        deliveryTransportIdempotent: true,
+        explicitTarget: "linq_chat_1",
+        identityId: "identity_1",
+        intentId: "intent_vault_file_denied",
+        lastAttemptAt: null,
+        lastError: null,
+        media: [vaultFile],
+        message: "Attached.",
+        nextAttemptAt: "2026-04-08T00:15:00.000Z",
+        replyToMessageId: "linq_message_1",
+        sessionId: "session_1",
+        status: "awaiting_approval",
+        subject: null,
+        threadId: "thread_1",
+        threadIsDirect: true,
+        turnId: "turn_1",
+        updatedAt: "2026-04-08T00:01:00.000Z",
+      };
+      const abandonedIntent = {
+        ...storedIntent,
+        lastError: {
+          code: "ASSISTANT_VAULT_FILE_APPROVAL_DENIED",
+          message: "Vault-file delivery was denied.",
+        },
+        nextAttemptAt: null,
+        status: "abandoned",
+        updatedAt: "2026-04-08T00:02:00.000Z",
+      };
+      const approvalRequest = {
+        actionFingerprint: "a".repeat(64),
+        actionId: "vault-file-send:denied",
+        actionKind: "vault.file.send.v1",
+        presentation: {
+          body: "Send a vault file.",
+          title: "Send a file?",
+        },
+      };
+      const actionApprovalPort = {
+        consume: vi.fn(),
+        read: vi.fn(async () => ({
+          approvalId: vaultFile.approvalId,
+          status: "denied" as const,
+        })),
+        request: vi.fn(),
+      };
+      mocks.listAssistantOutboxIntents.mockResolvedValueOnce([storedIntent]);
+      mocks.readAssistantVaultFileMedia.mockReturnValueOnce(vaultFile);
+      mocks.buildAssistantVaultFileSendApprovalRequest.mockReturnValueOnce(
+        approvalRequest,
+      );
+      mocks.applyAssistantVaultFileSendApprovalResult.mockReturnValueOnce(
+        abandonedIntent,
+      );
+      mocks.saveAssistantOutboxIntentIfUnchanged.mockResolvedValueOnce(
+        abandonedIntent,
+      );
+
+      await expect(collectHostedAssistantDeliverySideEffects({
+        actionApprovalPort,
+        includeBackgroundDueIntents: true,
+        preferredIntentIds: [],
+        vaultRoot: "/tmp/vault",
+      })).resolves.toEqual([]);
+
+      expect(actionApprovalPort.read).toHaveBeenCalledWith(approvalRequest);
+      expect(actionApprovalPort.request).not.toHaveBeenCalled();
+      expect(mocks.applyAssistantVaultFileSendApprovalResult).toHaveBeenCalledWith({
+        approval: {
+          approvalId: vaultFile.approvalId,
+          status: "denied",
+        },
+        intent: storedIntent,
+        now: new Date("2026-04-08T00:02:00.000Z"),
+      });
+      expect(mocks.saveAssistantOutboxIntentIfUnchanged).toHaveBeenCalledWith({
+        expectedDedupeKey: storedIntent.dedupeKey,
+        expectedStatus: "awaiting_approval",
+        expectedUpdatedAt: storedIntent.updatedAt,
+        intent: abandonedIntent,
+        vault: "/tmp/vault",
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("abandons a queued signup welcome when a foreground reply targets the same route", async () => {
     mocks.listAssistantOutboxIntents.mockResolvedValue([
       {
@@ -7738,6 +7845,7 @@ describe("hosted runtime callbacks", () => {
     });
     const actionApprovalPort = {
       consume: vi.fn(),
+      read: vi.fn(),
       request: vi.fn(async () => ({
         approvalGeneration: "b".repeat(64),
         approvalId: "approval_123",
@@ -7778,6 +7886,7 @@ describe("hosted runtime callbacks", () => {
       { signal: null },
     );
     expect(actionApprovalPort.request).not.toHaveBeenCalled();
+    expect(actionApprovalPort.read).not.toHaveBeenCalled();
     expect(mocks.readAssistantOutboxIntent).not.toHaveBeenCalled();
     expect(mocks.readVerifiedAssistantVaultFileBytes).not.toHaveBeenCalled();
     expect(mocks.sendLinqMessage).not.toHaveBeenCalled();
@@ -7817,6 +7926,7 @@ describe("hosted runtime callbacks", () => {
         approvalId: `haa_${"a".repeat(32)}`,
         status: "approved" as const,
       })),
+      read: vi.fn(),
       request: vi.fn(),
     };
     mocks.buildAssistantVaultFileSendApprovalRequest.mockReturnValueOnce(
@@ -7878,6 +7988,7 @@ describe("hosted runtime callbacks", () => {
       request: approvalRequest,
     });
     expect(actionApprovalPort.request).not.toHaveBeenCalled();
+    expect(actionApprovalPort.read).not.toHaveBeenCalled();
     expect(mocks.readVerifiedAssistantVaultFileBytes).toHaveBeenCalledWith({
       file: vaultFile,
       vaultRoot: HOSTED_WAKE.vaultRoot,

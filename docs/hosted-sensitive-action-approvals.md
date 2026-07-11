@@ -32,6 +32,8 @@ The hosted runtime receives one optional platform capability:
 
 ```ts
 interface HostedRuntimeActionApprovalPort {
+  consume(input: HostedActionApprovalConsumeRequest): Promise<HostedActionApprovalResult>;
+  read(input: HostedActionApprovalRequest): Promise<HostedActionApprovalResult>;
   request(input: HostedActionApprovalRequest): Promise<HostedActionApprovalResult>;
 }
 ```
@@ -43,14 +45,16 @@ A request contains:
 - a lowercase SHA-256 `actionFingerprint` over the exact immutable effect;
 - bounded trusted plain-text `title` and `body` presentation.
 
-`request` is idempotent:
+`request` is idempotent for the active approval cycle:
 
 1. The first call creates `pending` and returns a stable `/approve/:approvalId` URL.
 2. The same request returns the same row and URL.
 3. Reusing the action ID with a changed kind, fingerprint, or presentation fails closed.
-4. Later calls return `approved`, `denied`, or derived `expired`.
+4. A later explicit request may refresh a denied, expired, or consumed cycle so the member can retry the same exact action.
 
-The caller owns action execution, retries, and completion. It must recompute the fingerprint and call `request` again at the final effect boundary. Approval has no claimed, executing, completed, or provider-error state.
+`read` derives and validates the same exact request identity, then returns the current `pending`, `approved`, `denied`, or derived `expired` status without creating or refreshing a row. Runtime reconciliation uses `read`; only a new explicit action request uses `request`.
+
+The caller owns action execution, retries, and completion. It must recompute the fingerprint and call `consume` with the observed approval generation at the final effect boundary. Approval has no claimed, executing, completed, or provider-error state.
 When `pending` is returned, the approval URL is handed to the normal assistant reply path; the approval system must not send a separate hard-coded user message.
 
 The runtime keeps the exact file-and-destination delivery intent in its own outbox as `awaiting_approval`. Web never reconstructs that effect from the approval row. A later approval wake only asks the runtime to re-read owner state; the normal pre-dispatch consume gate remains the authorization boundary.
@@ -64,10 +68,10 @@ The runtime keeps the exact file-and-destination delivery intent in its own outb
 5. Denial requires the authenticated session but not wallet MFA because it cannot release data or execute the action.
 6. The same Postgres transaction appends one payload-free `runtime.pending-effects-reconcile-requested` system-mailbox row. Its stable event identity is derived from the approval identity, committed decision time, and decision, so a refreshed decision cycle receives a distinct wake.
 7. After commit, the route best-effort sends the existing pointer-only `mailbox_appended` Temporal signal for that row.
-8. The runtime records the control receipt, rechecks bounded pending delivery effects, and either resumes the approved delivery or terminalizes the denied one without running assistant automation.
+8. The runtime records the control receipt, uses the observation-only approval read to recheck bounded pending delivery effects, and either resumes the approved delivery or terminalizes the denied one without running assistant automation.
 9. The decision response returns the browser to the originating Murph conversation without pre-filling an approval-confirmation message.
 
-The mailbox row is a durable shoulder tap, not authorization evidence or outcome payload. The runtime trusts only `actionApprovalPort.request()` and consumes the matching approval generation again at the final delivery boundary.
+The mailbox row is a durable shoulder tap, not authorization evidence or outcome payload. The runtime observes the outcome through `actionApprovalPort.read()` and consumes the matching approved generation again at the final delivery boundary.
 
 ## Asynchronous outcome primitives
 

@@ -393,7 +393,7 @@ async function reconcileHostedAssistantVaultFileApproval(input: {
 
   let approval: HostedActionApprovalResult;
   try {
-    approval = await input.actionApprovalPort.request(approvalRequest);
+    approval = await input.actionApprovalPort.read(approvalRequest);
   } catch {
     const deferred = deferAssistantVaultFileApprovalCheck({
       intent: input.intent,
