@@ -283,6 +283,13 @@ Usage and product policy blocks are successful reconciliation reads with a
 non-null `blocked` object, never Temporal activity failures. Transport, auth,
 parser, and availability failures remain activity exceptions and keep the normal
 Temporal retry/error semantics.
+If AI usage becomes denied after runner execution starts, the web mailbox plane
+returns the exact `HOSTED_RUNTIME_MAILBOX_AI_USAGE_DENIED` code. The Cloudflare
+mailbox adapter treats only that code, including when preserved through a
+transport cause chain, as an empty unchanged mailbox prefix. Durable mailbox
+lag therefore remains available for later reconciliation while the current
+invocation releases cleanly; unrelated authorization, transport, and parser
+failures keep their normal failure semantics.
 
 The normal execution command response is either `runtime_processing_accepted`
 or `retry_later`. Accepted responses include an `action` of `started`,

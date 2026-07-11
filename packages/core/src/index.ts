@@ -224,6 +224,7 @@ export {
   resolveHostedCanonicalWritePayloadFilePath,
   runCanonicalWrite,
   withHostedCanonicalWritePort,
+  readHostedCanonicalWritePort,
 } from "./operations/index.ts";
 export type {
   CanonicalMutationResource,

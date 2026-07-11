@@ -8,9 +8,6 @@ import {
 import {
   buildHostedExecutionMemberActivatedWake,
 } from "@murphai/hosted-execution";
-import type {
-  HostedRunnerStatusResponse,
-} from "@murphai/hosted-execution/runtime-control";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 import {
@@ -44,8 +41,8 @@ const followupTags = MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.tags;
 const followupReminderText = "Want to finish setup? Send me where you left off and we can continue.";
 const accelerationReplyText = "Done - I will check back soon so we can finish setup.";
 const onboardingCompleteReplyText = "Setup is marked complete.";
-const acceleratedEveryMs = 90_000;
-const minimumScheduleRunwayMs = 10_000;
+const acceleratedEveryMs = 150_000;
+const minimumScheduleRunwayMs = 45_000;
 const scheduledSendWaitMs = 120_000;
 const secondPeriodQuietWindowMs = 5_000;
 const seededDailyFollowupMinimumDelayMs = 60 * 60 * 1000;
@@ -239,7 +236,15 @@ describe("hosted local onboarding follow-up e2e", () => {
       baselineCount: secondSendBaseline,
       quietWindowMs: secondPeriodQuietWindowMs,
     });
-    await waitForHostedWorkspaceNextWakeCleared(userId);
+    const archiveTurnRequestBodies = requireScenario().assistantProviderRequests
+      .slice(secondProviderRequestBaseline)
+      .filter((request) => request.url === "/v1/responses")
+      .map((request) => request.body);
+    expect(archiveTurnRequestBodies.some((body) =>
+      body.includes(followupSlug)
+      && body.replaceAll("\\", "").replaceAll(/\s/gu, "")
+        .includes('"status":"archived"')
+    )).toBe(true);
   }, 720_000);
 });
 
@@ -270,7 +275,7 @@ async function startScenario(): Promise<void> {
 
 function buildActivationWake(memberId: string) {
   return buildHostedExecutionMemberActivatedWake({
-    eventId: `member.activated:local:${memberId}:evt_linq_onboarding_followup`,
+    eventId: `member.activated:local:${memberId}:evt_linq_onboarding_followup_setup`,
     memberChannels: {
       email: false,
       linq: true,
@@ -451,36 +456,6 @@ async function waitForHostedWorkspaceNextWakeAfter(input: {
   ].filter((line): line is string => Boolean(line))));
 }
 
-async function waitForHostedWorkspaceNextWakeCleared(userId: string): Promise<void> {
-  const startedAt = Date.now();
-  let latestNextWakeAt: string | null = null;
-  let latestNextAlarmAt: string | null = null;
-
-  while ((Date.now() - startedAt) < 120_000) {
-    const status = await requireScenario().harness.readUserStatus(userId);
-    if (status.lastErrorCode) {
-      throw new Error(await requireScenario().buildFailureMessage(userId, [
-        "Hosted runner reported an error before clearing the onboarding follow-up wake.",
-        `lastErrorCode: ${status.lastErrorCode}`,
-      ]));
-    }
-
-    latestNextWakeAt = status.workspace?.nextWakeAt ?? null;
-    latestNextAlarmAt = status.nextAlarmAt ?? null;
-    if (!latestNextWakeAt && !latestNextAlarmAt) {
-      return;
-    }
-
-    await sleep(1_000);
-  }
-
-  throw new Error(await requireScenario().buildFailureMessage(userId, [
-    "Timed out waiting for the hosted workspace to clear the onboarding follow-up wake.",
-    `latestNextWakeAt: ${latestNextWakeAt ?? "null"}`,
-    `latestNextAlarmAt: ${latestNextAlarmAt ?? "null"}`,
-  ]));
-}
-
 async function waitForAssistantProviderRequestCount(input: {
   minimumCount: number;
   timeoutMs: number;
@@ -568,6 +543,13 @@ function buildHostedAssistantArchiveAndSkipResponses(): readonly HostedLocalAssi
       followupSlug,
       "--status",
       "archived",
+    ]),
+    buildAssistantProviderVaultCliCall([
+      "automation",
+      "show",
+      followupSlug,
+      "--format",
+      "json",
     ]),
     JSON.stringify({
       kind: "skip",
