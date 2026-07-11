@@ -1,5 +1,6 @@
 import {
   compactHostedPendingAssistantInputIds,
+  hasHostedPendingAssistantInputWakeCandidate,
 } from "./pending-input-index.ts";
 
 export async function resolveHostedPendingAssistantInputWakeAt(input: {
@@ -11,6 +12,9 @@ export async function resolveHostedPendingAssistantInputWakeAt(input: {
   });
 
   return inputIds.length > 0
+    && await hasHostedPendingAssistantInputWakeCandidate({
+      vaultRoot: input.vaultRoot,
+    })
     ? resolveHostedPendingAssistantInputWakeNow(input.now)
     : null;
 }

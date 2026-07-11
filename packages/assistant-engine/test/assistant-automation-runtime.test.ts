@@ -331,6 +331,7 @@ function createAutomationInputSummary(input: {
     text: 'hello',
     attachmentCount: 0,
     actorIsSelf: false,
+    contextOnly: false,
     replyToMessageId: null,
   }
 }
@@ -960,6 +961,8 @@ function createReplyGroupItem(
       text: capture.text,
       attachmentCount: capture.attachmentCount,
       actorIsSelf: capture.actorIsSelf,
+      contextOnly:
+        metadata?.kind === 'linq' && metadata.contextOnly === true,
       replyToMessageId:
         metadata?.kind === 'linq' ? metadata.replyToMessageId ?? null : null,
       captureId: capture.captureId,
@@ -978,6 +981,8 @@ function createCapturelessReplyGroupItem(
     summary: {
       attachmentCount: candidate.event.attachmentCount,
       actorIsSelf: conversation?.actorIsSelf ?? false,
+      contextOnly:
+        metadata?.kind === 'linq' && metadata.contextOnly === true,
       conversation: conversation ?? {
         accountId: null,
         actorId: null,

@@ -1,6 +1,7 @@
 import path from "node:path";
 
 import {
+  isHostedSystemWake,
   type HostedExecutionSystemWake,
 } from "@murphai/hosted-execution/contracts";
 import {
@@ -365,7 +366,7 @@ function parseHostedSystemMailboxPendingItem(value: unknown): HostedSystemMailbo
   }
   const record = value as Record<string, unknown>;
   const wake = parseHostedExecutionWake(record.wake);
-  if (wake.kind === "conversation.message") {
+  if (!isHostedSystemWake(wake)) {
     throw new TypeError("hosted system mailbox wake must be a system wake.");
   }
 

@@ -1,6 +1,7 @@
 import type {
   HostedExecutionConversationMessagePayload,
   HostedExecutionConversationMessageWake,
+  HostedExecutionConversationReactionWake,
   HostedExecutionAssistantNotificationRequestedPayload,
   HostedExecutionAssistantNotificationRequestedWake,
   HostedExecutionDeviceSyncWake,
@@ -123,6 +124,41 @@ function cloneConversationMessagePayload(
   }
 }
 
+function buildHostedExecutionLinqConversationMessagePayload(input: {
+  accountLookupKey?: string | null;
+  contactKind?: HostedExecutionLinqConversationContactKind;
+  contactLookupKey?: string;
+  linqMessage: HostedExecutionLinqConversationMessage;
+  phoneLookupKey?: string | null;
+  routeAuthority?: HostedExecutionLinqExternalThreadRouteAuthority | null;
+}): HostedExecutionLinqConversationMessagePayload {
+  const contactKind = input.contactKind ?? "phone";
+  const contactLookupKey = input.contactLookupKey ?? input.phoneLookupKey;
+  if (!contactLookupKey) {
+    throw new TypeError("Hosted Linq conversation wake requires a contact lookup key.");
+  }
+
+  return {
+    ...(input.accountLookupKey === undefined
+      ? {}
+      : { accountLookupKey: input.accountLookupKey }),
+    channel: "linq",
+    contactKind,
+    contactLookupKey,
+    linqMessage: cloneLinqMessage(input.linqMessage),
+    ...(input.phoneLookupKey === undefined
+      ? {}
+      : { phoneLookupKey: input.phoneLookupKey }),
+    ...(input.routeAuthority === undefined
+      ? {}
+      : {
+          routeAuthority: input.routeAuthority === null
+            ? null
+            : cloneExternalThreadRouteAuthority(input.routeAuthority),
+        }),
+  };
+}
+
 type HostedExecutionMemberOwnedWake =
   | HostedExecutionAssistantNotificationRequestedWake
   | HostedExecutionMemberActivatedWake
@@ -181,34 +217,30 @@ export function buildHostedExecutionLinqConversationMessageWake(input: {
 }): HostedExecutionConversationMessageWake & {
   message: HostedExecutionLinqConversationMessagePayload;
 } {
-  const contactKind = input.contactKind ?? "phone";
-  const contactLookupKey = input.contactLookupKey ?? input.phoneLookupKey;
-  if (!contactLookupKey) {
-    throw new TypeError("Hosted Linq conversation wake requires a contact lookup key.");
-  }
-
   return {
     eventId: input.eventId,
     kind: "conversation.message",
-    message: {
-      ...(input.accountLookupKey === undefined
-        ? {}
-        : { accountLookupKey: input.accountLookupKey }),
-      channel: "linq",
-      contactKind,
-      contactLookupKey,
-      linqMessage: cloneLinqMessage(input.linqMessage),
-      ...(input.phoneLookupKey === undefined
-        ? {}
-        : { phoneLookupKey: input.phoneLookupKey }),
-      ...(input.routeAuthority === undefined
-        ? {}
-        : {
-            routeAuthority: input.routeAuthority === null
-              ? null
-              : cloneExternalThreadRouteAuthority(input.routeAuthority),
-          }),
-    },
+    message: buildHostedExecutionLinqConversationMessagePayload(input),
+    occurredAt: input.occurredAt,
+    userId: input.userId,
+  };
+}
+
+export function buildHostedExecutionLinqConversationReactionWake(input: {
+  accountLookupKey?: string | null;
+  contactKind?: HostedExecutionLinqConversationContactKind;
+  contactLookupKey?: string;
+  eventId: string;
+  linqMessage: HostedExecutionLinqConversationMessage;
+  occurredAt: string;
+  phoneLookupKey?: string | null;
+  routeAuthority?: HostedExecutionLinqExternalThreadRouteAuthority | null;
+  userId: string;
+}): HostedExecutionConversationReactionWake {
+  return {
+    eventId: input.eventId,
+    kind: "conversation.reaction",
+    message: buildHostedExecutionLinqConversationMessagePayload(input),
     occurredAt: input.occurredAt,
     userId: input.userId,
   };

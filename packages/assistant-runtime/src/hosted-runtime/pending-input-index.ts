@@ -53,7 +53,7 @@ const HOSTED_PENDING_ASSISTANT_INPUT_STATE_KEYS =
 
 type HostedPendingAssistantInputReplyabilityEvent = Pick<
   AssistantInputEventRecord,
-  "conversation" | "replyTarget" | "sourceRef"
+  "conversation" | "replyTarget" | "sourceMetadata" | "sourceRef"
 >;
 
 export function resolveHostedPendingAssistantInputStatePath(
@@ -182,15 +182,29 @@ export async function hasHostedPendingAssistantInputWakeCandidate(input: {
   if (existing.missing) {
     return false;
   }
-  if (existing.state.inputIds.length > 0) {
-    return true;
-  }
-  if (existing.state.backfilled) {
-    return false;
-  }
-
   const automationState = await readAssistantAutomationState(input.vaultRoot);
-  return automationState.autoReply.length > 0;
+  if (!existing.state.backfilled) {
+    return automationState.autoReply.length > 0;
+  }
+  const enabledAutoReplyChannels = new Set(
+    automationState.autoReply.map((entry) => entry.channel),
+  );
+  for (const inputId of existing.state.inputIds) {
+    const event = await readAssistantInputEvent({
+      inputId,
+      vault: input.vaultRoot,
+    });
+    if (
+      event
+      && isHostedPendingAssistantInputActionable({
+        enabledAutoReplyChannels,
+        event,
+      })
+    ) {
+      return true;
+    }
+  }
+  return false;
 }
 
 export async function enqueueHostedPendingAssistantInputId(input: {
@@ -491,7 +505,10 @@ async function createBackfilledHostedPendingAssistantInputState(input: {
         if (candidate.event.source !== channelState.channel) {
           continue;
         }
-        if (candidate.event.replyTarget?.channel !== channelState.channel) {
+        if (
+          !isHostedContextOnlyAssistantInputEvent(candidate.event)
+          && candidate.event.replyTarget?.channel !== channelState.channel
+        ) {
           continue;
         }
         const complete = await hasCompleteAssistantAutoReplyTerminalEvidence({
@@ -538,6 +555,17 @@ export function isHostedPendingAssistantInputStillReplyable(input: {
   enabledAutoReplyChannels: ReadonlySet<string>;
   event: HostedPendingAssistantInputReplyabilityEvent;
 }): boolean {
+  if (isHostedContextOnlyAssistantInputEvent(input.event)) {
+    const source = input.event.conversation?.source ?? input.event.sourceRef.source;
+    return source === "linq" && input.enabledAutoReplyChannels.has("linq");
+  }
+  return isHostedPendingAssistantInputActionable(input);
+}
+
+function isHostedPendingAssistantInputActionable(input: {
+  enabledAutoReplyChannels: ReadonlySet<string>;
+  event: HostedPendingAssistantInputReplyabilityEvent;
+}): boolean {
   const replyChannel = input.event.replyTarget?.channel;
   if (!replyChannel) {
     return false;
@@ -550,6 +578,13 @@ export function isHostedPendingAssistantInputStillReplyable(input: {
   }
 
   return input.enabledAutoReplyChannels.has(replyChannel);
+}
+
+function isHostedContextOnlyAssistantInputEvent(
+  event: HostedPendingAssistantInputReplyabilityEvent,
+): boolean {
+  return event.sourceMetadata?.kind === "linq"
+    && event.sourceMetadata.contextOnly === true;
 }
 
 function createEmptyHostedPendingAssistantInputState(input: {

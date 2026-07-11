@@ -4,6 +4,7 @@ import {
   buildHostedExecutionDeviceSyncWake,
   buildHostedExecutionEmailConversationMessageWake,
   buildHostedExecutionLinqConversationMessageWake,
+  buildHostedExecutionLinqConversationReactionWake,
   buildHostedExecutionMemberPreferencesUpdatedWake,
   buildHostedExecutionRuntimeControlWake,
   buildHostedExecutionTelegramConversationMessageWake,
@@ -11,9 +12,13 @@ import {
 } from "../src/builders.ts";
 import {
   isHostedConversationMessageWake,
+  isHostedConversationReactionWake,
+  isHostedConversationWake,
   isHostedEmailConversationMessageWake,
   isHostedExecutionWakeKind,
   isHostedLinqConversationMessageWake,
+  isHostedLinqConversationReactionWake,
+  isHostedLinqConversationWake,
   isHostedSystemWake,
   isHostedTelegramConversationMessageWake,
   isHostedWhatsAppConversationMessageWake,
@@ -25,6 +30,7 @@ import {
 describe("hosted execution wake guards", () => {
   it("accepts canonical wake kinds only", () => {
     expect(isHostedExecutionWakeKind("conversation.message")).toBe(true);
+    expect(isHostedExecutionWakeKind("conversation.reaction")).toBe(true);
     expect(isHostedExecutionWakeKind("member.activated")).toBe(true);
     expect(isHostedExecutionWakeKind("member.preferences.updated")).toBe(true);
     expect(isHostedExecutionWakeKind("runtime.manual-requested")).toBe(true);
@@ -62,6 +68,24 @@ describe("hosted execution wake guards", () => {
         text: "hello telegram",
         threadId: "thread_guard",
       },
+      userId: "user_guard",
+    });
+    const reactionWake = buildHostedExecutionLinqConversationReactionWake({
+      eventId: "linq-reaction-1",
+      linqMessage: {
+        chatId: "chat_123",
+        from: "+15557654321",
+        isFromMe: false,
+        messageId: "reaction_123",
+        parts: [{
+          type: "text",
+          value: "Group reaction context",
+        }],
+        reactionEligible: false,
+        threadIsDirect: false,
+      },
+      occurredAt: "2026-07-10T00:00:00.000Z",
+      phoneLookupKey: "phone_lookup_reaction_guard",
       userId: "user_guard",
     });
     const emailWake = buildHostedExecutionEmailConversationMessageWake({
@@ -112,10 +136,16 @@ describe("hosted execution wake guards", () => {
     expect(isHostedConversationMessageWake(whatsappWake)).toBe(true);
     expect(isHostedConversationMessageWake(systemWake)).toBe(false);
     expect(isHostedConversationMessageWake(controlWake)).toBe(false);
+    expect(isHostedConversationMessageWake(reactionWake)).toBe(false);
+    expect(isHostedConversationReactionWake(reactionWake)).toBe(true);
+    expect(isHostedConversationWake(reactionWake)).toBe(true);
 
     expect(isHostedLinqConversationMessageWake(linqWake)).toBe(true);
     expect(isHostedLinqConversationMessageWake(telegramWake)).toBe(false);
     expect(isHostedLinqConversationMessageWake(emailWake)).toBe(false);
+    expect(isHostedLinqConversationMessageWake(reactionWake)).toBe(false);
+    expect(isHostedLinqConversationReactionWake(reactionWake)).toBe(true);
+    expect(isHostedLinqConversationWake(reactionWake)).toBe(true);
 
     expect(isHostedTelegramConversationMessageWake(telegramWake)).toBe(true);
     expect(isHostedTelegramConversationMessageWake(linqWake)).toBe(false);
@@ -133,6 +163,7 @@ describe("hosted execution wake guards", () => {
     expect(isHostedSystemWake(controlWake)).toBe(true);
     expect(isHostedSystemWake(preferencesWake)).toBe(true);
     expect(isHostedSystemWake(emailWake)).toBe(false);
+    expect(isHostedSystemWake(reactionWake)).toBe(false);
   });
 
   it("parses member preferences updated wakes with strict shared preference ids", () => {

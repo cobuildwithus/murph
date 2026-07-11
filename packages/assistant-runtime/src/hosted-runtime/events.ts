@@ -8,7 +8,7 @@ import {
 } from "@murphai/assistant-engine";
 import {
   emitHostedExecutionStructuredLog,
-  isHostedConversationMessageWake,
+  isHostedConversationWake,
 } from "@murphai/hosted-execution";
 import {
   applyHostedMemberPreferences,
@@ -59,7 +59,7 @@ export async function executeHostedMailboxEvent(input: {
   runtimeEnv: Readonly<Record<string, string>>;
   vaultRoot: string;
 }): Promise<HostedMailboxExecutionMetrics> {
-  if (isHostedConversationMessageWake(input.wake)) {
+  if (isHostedConversationWake(input.wake)) {
     throw new TypeError(DIRECT_CONVERSATION_WAKE_ERROR_MESSAGE);
   }
 
@@ -120,7 +120,7 @@ async function handleHostedMailboxEvent(input: {
   sourceMailboxItemId: string | null;
   vaultRoot: string;
 }): Promise<HostedMailboxOutcome> {
-  if (isHostedConversationMessageWake(input.wake)) {
+  if (isHostedConversationWake(input.wake)) {
     throw new TypeError(DIRECT_CONVERSATION_WAKE_ERROR_MESSAGE);
   }
 

@@ -25,6 +25,7 @@ import {
   HOSTED_MAILBOX_PAYLOAD_SCHEMA,
   HOSTED_MAILBOX_KINDS,
   HOSTED_MAILBOX_LANES,
+  HOSTED_NON_WAKEABLE_MAILBOX_KINDS,
   HOSTED_CANONICAL_WRITE_RECEIPT_LOG_BYTE_SIZE_STATUS_KEY,
   HOSTED_CANONICAL_WRITE_RECEIPT_LOG_SHA_STATUS_KEY,
   HOSTED_CANONICAL_WRITE_RECEIPT_RECOVERY_PRIOR_WAKE_AT_STATUS_KEY,
@@ -39,6 +40,7 @@ import {
   buildHostedAiUsageAllowDecisionBody,
   isHostedMailboxKind,
   isHostedMailboxLane,
+  isHostedNonWakeableMailboxKind,
   isHostedRuntimeFutureMailboxContinuation,
   isHostedRuntimeMailboxContinuation,
   normalizeHostedAiUsageAllowanceElevenLabsTtsModelId,
@@ -176,6 +178,7 @@ describe("hosted runtime control contracts", () => {
     ]);
     expect(HOSTED_MAILBOX_KINDS).toEqual([
       "conversation.message",
+      "conversation.reaction",
       "member.activated",
       "member.channels.updated",
       "member.preferences.updated",
@@ -190,6 +193,9 @@ describe("hosted runtime control contracts", () => {
       "runtime.codex-auth-requested",
       "runtime.device-sync-recovery-requested",
       "runtime.mailbox-lag-observed",
+    ]);
+    expect(HOSTED_NON_WAKEABLE_MAILBOX_KINDS).toEqual([
+      "conversation.reaction",
     ]);
     expect(HOSTED_WORKSPACE_CHECKPOINT_REASONS).toEqual([
       "import",
@@ -230,6 +236,9 @@ describe("hosted runtime control contracts", () => {
     expect(isHostedMailboxLane("conversation")).toBe(true);
     expect(isHostedMailboxLane("global")).toBe(false);
     expect(isHostedMailboxKind("conversation.message")).toBe(true);
+    expect(isHostedMailboxKind("conversation.reaction")).toBe(true);
+    expect(isHostedNonWakeableMailboxKind("conversation.reaction")).toBe(true);
+    expect(isHostedNonWakeableMailboxKind("conversation.message")).toBe(false);
     expect(isHostedMailboxKind("runtime.manual-requested")).toBe(true);
     expect(isHostedMailboxKind("runtime.maintenance-requested")).toBe(true);
     expect(isHostedMailboxKind("runtime.codex-auth-requested")).toBe(true);

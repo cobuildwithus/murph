@@ -28,6 +28,11 @@ describe("hosted mailbox routing", () => {
         lane: "conversation",
       },
       {
+        action: "import-conversation-message",
+        kind: "conversation.reaction",
+        lane: "conversation",
+      },
+      {
         action: "apply-member-activation",
         kind: "member.activated",
         lane: "system",
@@ -106,6 +111,7 @@ describe("hosted mailbox routing", () => {
 
   test("keeps the mailbox lane contract explicit for producer and runtime agreement", () => {
     assert.equal(resolveExpectedLaneForHostedMailboxKind("conversation.message"), "conversation");
+    assert.equal(resolveExpectedLaneForHostedMailboxKind("conversation.reaction"), "conversation");
     assert.equal(resolveExpectedLaneForHostedMailboxKind("member.activated"), "system");
     assert.equal(resolveExpectedLaneForHostedMailboxKind("member.channels.updated"), "system");
     assert.equal(resolveExpectedLaneForHostedMailboxKind("member.preferences.updated"), "system");
@@ -120,6 +126,13 @@ describe("hosted mailbox routing", () => {
     assertQuarantine(
       createHostedMailboxRoutingPlan(createMailboxItem({
         kind: "conversation.message",
+        lane: "system",
+      })),
+      "lane_kind_mismatch",
+    );
+    assertQuarantine(
+      createHostedMailboxRoutingPlan(createMailboxItem({
+        kind: "conversation.reaction",
         lane: "system",
       })),
       "lane_kind_mismatch",

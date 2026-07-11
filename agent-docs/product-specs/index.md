@@ -1,6 +1,6 @@
 # Product Specs Index
 
-Last verified: 2026-07-10
+Last verified: 2026-07-11
 
 | Path | Purpose | Status |
 | --- | --- | --- |
@@ -23,6 +23,7 @@ Last verified: 2026-07-10
 | `agent-docs/product-specs/murph-contact-card-picker.md` | Post-signup add-Murph-to-contacts step where the member picks the avatar on Murph's vCard; picker components live on `/design`. | Implemented |
 | `agent-docs/product-specs/murph-tone-and-voice.md` | Five controls for how Murph talks: hosted tone and voice plus private conversation-first Humor, Push, and Detail dials. | Implemented |
 | `agent-docs/product-specs/group-health-newsletter.md` | Recurring group health newsletter emailed from a group chat: cron automation in the group vault, tone flavors, a reusable default-at-join email-sharing grant, and Cloudflare `HOSTED_EMAIL` delivery with web-side address resolution. | Specified |
+| `agent-docs/product-specs/group-reaction-context.md` | Deferred Linq group reaction context: add/remove enrichment, no-wake mailbox staging, next-turn exposure, and weak group-scoped preference evidence. | Implemented |
 
 ## Rule
 

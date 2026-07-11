@@ -22,6 +22,7 @@ import {
 } from "@/src/lib/hosted-onboarding/linq";
 import {
   getHostedLinqChatSummary,
+  getHostedLinqReactionTargetMessage,
 } from "@/src/lib/hosted-onboarding/linq-client";
 
 const originalFetch = globalThis.fetch;
@@ -255,6 +256,86 @@ describe("getHostedLinqChatSummary", () => {
     } finally {
       await closeTestServer(server);
     }
+  });
+});
+
+describe("getHostedLinqReactionTargetMessage", () => {
+  afterEach(() => {
+    if (originalFetch) {
+      vi.stubGlobal("fetch", originalFetch);
+      return;
+    }
+    Reflect.deleteProperty(globalThis, "fetch");
+  });
+
+  it("reads canonical message parts without carrying media download URLs", async () => {
+    const fetchMock = vi.fn(async () => createJsonResponse({
+      chat_id: "chat_123",
+      id: "message_123",
+      is_from_me: false,
+      parts: [
+        { reactions: null, type: "text", value: "The exact target text" },
+        {
+          filename: "photo.jpg",
+          id: "attachment_123",
+          mime_type: "image/jpeg",
+          reactions: null,
+          size_bytes: 123,
+          type: "media",
+          url: "https://private.example.test/download-token",
+        },
+      ],
+      service: "iMessage",
+    }, 200));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(getHostedLinqReactionTargetMessage({
+      messageId: "message_123",
+    })).resolves.toEqual({
+      chatId: "chat_123",
+      id: "message_123",
+      isFromMe: false,
+      parts: [
+        { type: "text", value: "The exact target text" },
+        { fileName: "photo.jpg", mimeType: "image/jpeg", type: "media" },
+      ],
+      service: "iMessage",
+    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      new URL("messages/message_123", "https://linq.example.test/api/partner/v3/"),
+      expect.objectContaining({ method: "GET" }),
+    );
+  });
+
+  it("marks a missing target as a permanent provider read failure", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => createJsonResponse({}, 404)));
+
+    await expect(getHostedLinqReactionTargetMessage({
+      messageId: "missing_message",
+    })).rejects.toMatchObject({
+      code: "LINQ_SEND_FAILED",
+      retryable: false,
+    });
+  });
+
+  it("accepts a canonical message with no parts", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => createJsonResponse({
+      chat_id: "chat_123",
+      id: "message_123",
+      is_from_me: false,
+      parts: null,
+      service: "iMessage",
+    }, 200)));
+
+    await expect(getHostedLinqReactionTargetMessage({
+      messageId: "message_123",
+    })).resolves.toEqual({
+      chatId: "chat_123",
+      id: "message_123",
+      isFromMe: false,
+      parts: [],
+      service: "iMessage",
+    });
   });
 });
 

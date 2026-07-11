@@ -1,5 +1,8 @@
 import type { AssistantInputCandidate } from '../input-source.js'
-import { isSameAssistantConversationRef } from '../conversation-ref.js'
+import {
+  isSameAssistantConversationRef,
+  type AssistantInputConversationRef,
+} from '../conversation-ref.js'
 import {
   readTelegramAutoReplyMetadataFromAssistantInput,
   type TelegramAutoReplyMetadata,
@@ -34,6 +37,9 @@ export async function collectAssistantAutoReplyGroup(input: {
     }),
   ]
   let endIndex = input.startIndex
+  let actionableReplyAnchor = first.contextOnly
+    ? undefined
+    : first.replyToMessageId
 
   for (
     let index = input.startIndex + 1;
@@ -41,7 +47,28 @@ export async function collectAssistantAutoReplyGroup(input: {
     index += 1
   ) {
     const candidate = input.inputSummaries[index]
-    if (!candidate || !shouldGroupAdjacentConversationInput(first, candidate)) {
+    if (
+      !candidate ||
+      !isSameAssistantConversationRef(first.conversation, candidate.conversation)
+    ) {
+      break
+    }
+
+    if (candidate.contextOnly) {
+      if (
+        actionableReplyAnchor !== undefined &&
+        !nextActionableInputSharesReplyAnchor({
+          actionableReplyAnchor,
+          conversation: first.conversation,
+          inputSummaries: input.inputSummaries,
+          startIndex: index + 1,
+        })
+      ) {
+        break
+      }
+    } else if (actionableReplyAnchor === undefined) {
+      actionableReplyAnchor = candidate.replyToMessageId
+    } else if (candidate.replyToMessageId !== actionableReplyAnchor) {
       break
     }
 
@@ -58,6 +85,30 @@ export async function collectAssistantAutoReplyGroup(input: {
     endIndex,
     items,
   }
+}
+
+function nextActionableInputSharesReplyAnchor(input: {
+  actionableReplyAnchor: string | null
+  conversation: AssistantInputConversationRef
+  inputSummaries: readonly AssistantAutomationInputSummary[]
+  startIndex: number
+}): boolean {
+  for (let index = input.startIndex; index < input.inputSummaries.length; index += 1) {
+    const candidate = input.inputSummaries[index]
+    if (
+      !candidate ||
+      !isSameAssistantConversationRef(
+        input.conversation,
+        candidate.conversation,
+      )
+    ) {
+      return false
+    }
+    if (!candidate.contextOnly) {
+      return candidate.replyToMessageId === input.actionableReplyAnchor
+    }
+  }
+  return false
 }
 
 export async function loadAssistantAutoReplyGroupItems(input: {
@@ -118,6 +169,9 @@ export function shouldGroupAdjacentConversationInput(
 ): boolean {
   if (!isSameAssistantConversationRef(first.conversation, candidate.conversation)) {
     return false
+  }
+  if (first.contextOnly || candidate.contextOnly) {
+    return true
   }
   // Native reply targets identify the specific prior assistant message the
   // input is answering. Mixing them into one group would inject only one

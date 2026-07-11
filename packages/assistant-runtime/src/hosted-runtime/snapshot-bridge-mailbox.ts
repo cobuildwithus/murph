@@ -3,9 +3,11 @@ import {
   importHostedVaultShareDeliveryWake,
 } from "./vault-share-import.ts";
 import {
+  isHostedConversationWake,
   isHostedLinqConversationMessageWake,
+  isHostedSystemWake,
   isHostedTelegramConversationMessageWake,
-  type HostedExecutionConversationMessageWake,
+  type HostedExecutionConversationWake,
   type HostedExecutionSystemWake,
   type HostedExecutionWake,
 } from "@murphai/hosted-execution/contracts";
@@ -107,7 +109,7 @@ export function createHostedWorkspaceBridgeMailboxImporter(input: {
             return decoded;
           }
 
-          if (decoded.wake.kind !== "conversation.message") {
+          if (!isHostedConversationWake(decoded.wake)) {
             return {
               reasonCode: "payload.decode_mismatch",
               retryable: false,
@@ -149,7 +151,10 @@ async function importHostedWorkspaceBridgeMailboxItem(input: {
 }): ReturnType<HostedWorkspaceRuntimeBridgeImportItem> {
   if (
     input.item.route.action === "import-conversation-message"
-    && input.item.item.kind === "conversation.message"
+    && (
+      input.item.item.kind === "conversation.message"
+      || input.item.item.kind === "conversation.reaction"
+    )
   ) {
     return await input.importConversationItem(input.item, input.context);
   }
@@ -157,6 +162,7 @@ async function importHostedWorkspaceBridgeMailboxItem(input: {
   if (
     input.item.route.action === "import-conversation-message"
     || input.item.item.kind === "conversation.message"
+    || input.item.item.kind === "conversation.reaction"
   ) {
     return {
       reasonCode: "cloudflare_bridge.unhandled_mailbox_route",
@@ -266,7 +272,7 @@ async function importHostedWorkspaceBridgeMailboxItem(input: {
 }
 
 function resolveHostedCliBridgeMessagingReturnTarget(
-  wake: HostedExecutionConversationMessageWake,
+  wake: HostedExecutionConversationWake,
 ): HostedRuntimeDeviceSyncMessagingReturnTarget | null {
   if (isHostedTelegramConversationMessageWake(wake)) {
     return "telegram";
@@ -283,7 +289,7 @@ function decodedSystemWakeMatchesMailboxItem(
   wake: HostedExecutionWake,
   item: HostedWorkspaceRuntimeBridgeImportItemInput,
 ): wake is HostedExecutionSystemWake {
-  return wake.kind !== "conversation.message"
+  return isHostedSystemWake(wake)
     && wake.userId === item.item.userId
     && wake.occurredAt === item.item.occurredAt
     && wake.eventId === item.item.dedupeKey

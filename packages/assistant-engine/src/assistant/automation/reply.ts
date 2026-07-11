@@ -863,7 +863,9 @@ function emitAssistantAutoReplyOutcomeEvent(input: {
 function primaryAutoReplyInputId(
   context: AssistantAutoReplyGroupContext,
 ): string {
-  return context.inputIds[0] ?? context.firstInputId
+  return context.items.find((item) => !item.summary.contextOnly)?.summary.inputId ??
+    context.inputIds[0] ??
+    context.firstInputId
 }
 
 function buildAutoReplyReceiptInputIds(input: {
@@ -1079,6 +1081,13 @@ async function evaluateAssistantAutoReplyGroup(input: {
   signal?: AbortSignal
   vault: string
 }): Promise<AssistantAutoReplyDecision> {
+  if (input.group.items.every((item) => item.summary.contextOnly)) {
+    return createDeferredSkipDecision(
+      'context-only group is waiting for the next actionable conversation input',
+      { nextWakeAt: null },
+    )
+  }
+
   if (!input.enabledChannels.includes(input.group.firstItem.summary.source)) {
     return createAdvancingSkipDecision(
       'channel not enabled for assistant auto-reply',
@@ -1149,7 +1158,10 @@ async function evaluateAssistantAutoReplyGroup(input: {
   const promptInputs = await loadAssistantAutoReplyPromptInputs({
     group: input.group,
   })
-  const primaryInput = promptInputs[0]
+  const primaryInput = promptInputs.find((candidate) =>
+    candidate.sourceMetadata?.kind !== 'linq' ||
+    candidate.sourceMetadata.contextOnly !== true
+  )
   if (!primaryInput) {
     return { kind: 'ignore' }
   }
@@ -1575,8 +1587,7 @@ async function executeAssistantAutoReply(input: {
       deliveryTarget: input.deliveryTarget,
       deliveryReplyToMessageId: input.deliveryReplyToMessageId,
       receiptMetadata: {
-        [AUTO_REPLY_RECEIPT_INPUT_ID_KEY]:
-          input.inputIds[0] ?? input.replyInputId,
+        [AUTO_REPLY_RECEIPT_INPUT_ID_KEY]: input.replyInputId,
         [AUTO_REPLY_RECEIPT_INPUT_IDS_KEY]: input.inputIds.join(','),
         ...(input.crossSessionContext === null
           ? {}

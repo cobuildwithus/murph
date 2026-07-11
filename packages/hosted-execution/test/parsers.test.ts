@@ -1897,4 +1897,44 @@ describe("parseHostedExecutionWake", () => {
       userId: "user-1",
     });
   });
+
+  it("parses deferred Linq reaction context and rejects other channels", () => {
+    const reaction = {
+      eventId: "evt_linq_reaction",
+      kind: "conversation.reaction",
+      message: {
+        channel: "linq",
+        contactKind: "phone",
+        contactLookupKey: "hbidx:phone:v1:test",
+        linqMessage: {
+          chatId: "chat_group",
+          from: "+15551234567",
+          isFromMe: false,
+          messageId: "evt_linq_reaction",
+          parts: [{
+            type: "text",
+            value: "Group reaction context",
+          }],
+          reactionEligible: false,
+          threadIsDirect: false,
+        },
+      },
+      occurredAt: "2026-07-10T00:00:00.000Z",
+      userId: "user-1",
+    } as const;
+
+    expect(parseHostedExecutionWake(reaction)).toEqual(reaction);
+    expect(() => parseHostedExecutionWake({
+      ...reaction,
+      message: {
+        channel: "telegram",
+        telegramMessage: {
+          messageId: "message-1",
+          schema: "murph.hosted-telegram-message.v1",
+          text: "not valid reaction context",
+          threadId: "chat-1",
+        },
+      },
+    })).toThrow("conversation.reaction wake payload must use the Linq channel");
+  });
 });

@@ -28,6 +28,9 @@ import {
 import {
   resolveHostedPendingAssistantInputWakeAt,
 } from "../src/hosted-runtime/pending-assistant-input.ts";
+import {
+  selectHostedAssistantInputIds,
+} from "../src/hosted-runtime/turn-input.ts";
 
 const tempRoots: string[] = [];
 const TERMINAL_EVIDENCE_SCHEMA =
@@ -70,6 +73,79 @@ describe("hosted pending assistant input index", () => {
     await expect(readHostedPendingAssistantInputIds({ vaultRoot })).resolves.toEqual([
       inputId,
     ]);
+  });
+
+  it("retains deferred Linq context without scheduling work and selects it with the next message", async () => {
+    const vaultRoot = await createTempVault();
+    await saveAssistantAutomationState(vaultRoot, {
+      autoReply: [{
+        channel: "linq",
+        eligibleAfter: null,
+        enabledAt: "2026-07-10T00:00:00.000Z",
+      }],
+      updatedAt: "2026-07-10T00:00:00.000Z",
+      version: 1,
+    });
+    const context = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createAssistantInputEvent({
+        contextOnly: true,
+        dedupeKey: "dedupe_reaction_context",
+        eventId: "evt_reaction_context",
+        itemId: "item_reaction_context",
+        laneSeq: "10",
+        messageId: "msg_reaction_context",
+        occurredAt: "2026-07-10T00:00:01.000Z",
+        receivedAt: "2026-07-10T00:00:02.000Z",
+        replyTarget: null,
+        text: "weak reaction context",
+      }),
+    });
+    await enqueueHostedPendingAssistantInputId({
+      inputId: context.inputId,
+      vaultRoot,
+    });
+
+    await expect(resolveHostedPendingAssistantInputWakeAt({
+      now: () => "2026-07-10T00:00:03.000Z",
+      vaultRoot,
+    })).resolves.toBeNull();
+    await expect(readHostedPendingAssistantInputIds({ vaultRoot })).resolves.toEqual([
+      context.inputId,
+    ]);
+
+    const message = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createAssistantInputEvent({
+        dedupeKey: "dedupe_next_message",
+        eventId: "evt_next_message",
+        itemId: "item_next_message",
+        laneSeq: "20",
+        messageId: "msg_next_message",
+        occurredAt: "2026-07-10T00:00:04.000Z",
+        receivedAt: "2026-07-10T00:00:05.000Z",
+        text: "the next natural message",
+      }),
+    });
+    await enqueueHostedPendingAssistantInputId({
+      inputId: message.inputId,
+      vaultRoot,
+    });
+
+    await expect(resolveHostedPendingAssistantInputWakeAt({
+      now: () => "2026-07-10T00:00:06.000Z",
+      vaultRoot,
+    })).resolves.toBe("2026-07-10T00:00:06.000Z");
+    await expect(selectHostedAssistantInputIds({
+      freshAssistantInputIds: [message.inputId],
+      mode: "foreground",
+      vaultRoot,
+    })).resolves.toEqual({
+      freshInputIds: [message.inputId],
+      inputIds: [context.inputId, message.inputId],
+      mode: "foreground",
+      pendingInputIds: [context.inputId, message.inputId],
+    });
   });
 
   it("collects raw inbox media protections from active pending inputs", async () => {
@@ -783,6 +859,7 @@ async function writeTerminalEvidence(input: {
 }
 
 function createAssistantInputEvent(input: {
+  contextOnly?: boolean;
   dedupeKey: string;
   eventId: string;
   itemId: string;
@@ -825,6 +902,15 @@ function createAssistantInputEvent(input: {
     occurredAt: input.occurredAt,
     receivedAt: input.receivedAt,
     replyTarget,
+    ...(source === "linq"
+      ? {
+          sourceMetadata: {
+            ...(input.contextOnly ? { contextOnly: true } : {}),
+            kind: "linq" as const,
+            partCount: 1,
+          },
+        }
+      : {}),
     sourceRef: {
       dedupeKey: input.dedupeKey,
       eventId: input.eventId,

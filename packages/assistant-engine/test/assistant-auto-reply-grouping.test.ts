@@ -22,6 +22,7 @@ function createInputSummary(
     text: overrides.text ?? 'hello',
     attachmentCount: overrides.attachmentCount ?? 0,
     actorIsSelf: overrides.actorIsSelf ?? overrides.conversation?.actorIsSelf ?? false,
+    contextOnly: overrides.contextOnly ?? false,
     replyToMessageId: overrides.replyToMessageId ?? null,
   }
 }
@@ -97,5 +98,20 @@ describe('shouldGroupAdjacentConversationInput', () => {
     })
 
     expect(shouldGroupAdjacentConversationInput(unanchored, anchored)).toBe(false)
+  })
+
+  it('lets deferred context sit beside an actionable input without setting its reply anchor', () => {
+    const context = createInputSummary({
+      contextOnly: true,
+      inputId: 'ain_context',
+      replyToMessageId: null,
+    })
+    const anchored = createInputSummary({
+      inputId: 'ain_anchored',
+      replyToMessageId: 'linq-msg-anchor',
+    })
+
+    expect(shouldGroupAdjacentConversationInput(context, anchored)).toBe(true)
+    expect(shouldGroupAdjacentConversationInput(anchored, context)).toBe(true)
   })
 })

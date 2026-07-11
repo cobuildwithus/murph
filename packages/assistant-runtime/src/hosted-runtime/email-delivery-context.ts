@@ -1,5 +1,5 @@
 import type {
-  HostedExecutionConversationMessageWake,
+  HostedExecutionConversationWake,
 } from "@murphai/hosted-execution";
 import {
   isHostedEmailConversationMessageWake,
@@ -10,7 +10,7 @@ export interface HostedAssistantEmailDeliveryContext {
 }
 
 export function buildHostedAssistantEmailDeliveryContextFromWake(
-  wake: HostedExecutionConversationMessageWake,
+  wake: HostedExecutionConversationWake,
 ): HostedAssistantEmailDeliveryContext | null {
   if (!isHostedEmailConversationMessageWake(wake)) {
     return null;

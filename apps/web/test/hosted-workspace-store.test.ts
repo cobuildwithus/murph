@@ -261,6 +261,7 @@ describe("hosted workspace store", () => {
         laneSeq: true,
       },
       where: expect.objectContaining({
+        kind: "conversation.message",
         lane: "conversation",
         userId: "member_workspace_1",
       }),

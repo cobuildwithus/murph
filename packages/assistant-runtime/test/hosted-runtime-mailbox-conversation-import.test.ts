@@ -16,6 +16,8 @@ import {
   hashNullableHostedAssistantConversationIdentifier,
 } from "@murphai/hosted-execution/assistant-identifiers";
 import type {
+  HostedExecutionConversationReactionWake,
+  HostedExecutionConversationWake,
   HostedExecutionConversationMessageWake,
 } from "@murphai/hosted-execution/contracts";
 import type {
@@ -356,6 +358,104 @@ describe("hosted mailbox conversation import adapter", () => {
       projectionRelease.resolve(undefined);
       controller.close();
       await importPromise.catch(() => undefined);
+    }
+  });
+
+  test("stages deferred reaction context without reply or active-turn authority", async () => {
+    const parentRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-reaction-context-"));
+    tempRoots.push(parentRoot);
+    const vaultRoot = path.join(parentRoot, "vault");
+    const item = createResolvedConversationMailboxItem({
+      dedupeKey: "evt_synthetic_reaction_001",
+      id: "mailbox_item_reaction_001",
+      kind: "conversation.reaction",
+    });
+    const decodedWake: HostedExecutionConversationReactionWake = {
+      eventId: "evt_synthetic_reaction_001",
+      kind: "conversation.reaction",
+      message: {
+        accountLookupKey: "hbidx:linq-account:v1:synthetic",
+        channel: "linq",
+        contactKind: "phone",
+        contactLookupKey: "hbidx:phone:v1:synthetic",
+        linqMessage: {
+          chatId: "chat_reaction_context",
+          from: "redacted-contact-sentinel",
+          isFromMe: false,
+          messageId: "evt_synthetic_reaction_001",
+          parts: [{
+            type: "text",
+            value: "Group reaction context (weak evidence; do not reply to this item alone).",
+          }],
+          reactionEligible: false,
+          service: "iMessage",
+          threadIsDirect: false,
+        },
+        phoneLookupKey: "hbidx:phone:v1:synthetic",
+        routeAuthority: {
+          accountLookupKey: "hbidx:linq-account:v1:synthetic",
+          channel: "linq",
+          containerMemberId: TEST_USER_ID,
+          threadId: "chat_reaction_context",
+        },
+      },
+      occurredAt: TEST_NOW,
+      userId: TEST_USER_ID,
+    };
+    const admissionHook = vi.fn(async () => ({ kind: "no-new-input" as const }));
+    const controller = createAssistantActiveTurnInputController({
+      admissionHook,
+      conversationKeys: [createLinqConversationLookupKey({ item, wake: decodedWake })],
+      sessionId: "session_reaction_context",
+      turnId: "turn_reaction_context",
+      vault: vaultRoot,
+    });
+    const onConversationInputStaged = vi.fn();
+
+    try {
+      const outcome = await importHostedConversationMailboxItem({
+        decodePayload: createDecodedPayloadDecoder(decodedWake),
+        async importConversationWake() {
+          return {
+            captureId: null,
+            metrics: {
+              nextWakeAt: null,
+              parserProcessed: 0,
+            },
+          };
+        },
+        async prepareWakeContext() {},
+        item,
+        onConversationInputStaged,
+        runtime: createRuntime(),
+        vaultRoot,
+      });
+
+      assert.equal(outcome.status, "imported");
+      assert.equal(outcome.linqDeliveryContext, undefined);
+      assert.equal(onConversationInputStaged.mock.calls.length, 0);
+      assert.equal(admissionHook.mock.calls.length, 0);
+
+      const listed = await listAssistantInputEvents({ vault: vaultRoot });
+      assert.equal(listed.events.length, 1);
+      const event = listed.events[0]!;
+      assert.equal(event.replyTarget, null);
+      assert.deepEqual(event.sourceMetadata, {
+        contextOnly: true,
+        externalThreadRouteAuthorityPresent: true,
+        kind: "linq",
+        partCount: 1,
+        reactionEligible: false,
+        replyToMessageId: null,
+        senderHandle: "redacted-contact-sentinel",
+        service: "iMessage",
+      });
+      assert.deepEqual(
+        await readHostedPendingAssistantInputIds({ vaultRoot }),
+        [event.inputId],
+      );
+    } finally {
+      controller.close();
     }
   });
 
@@ -3161,7 +3261,7 @@ describe("hosted mailbox conversation import adapter", () => {
 
   test("keeps deterministic local-capture dedupe out of hosted cursor terms", async () => {
     const item = createResolvedConversationMailboxItem();
-    const decodedWakes: HostedExecutionConversationMessageWake[] = [];
+    const decodedWakes: HostedExecutionConversationWake[] = [];
     const importItem = createHostedConversationMailboxImportItem({
       decodePayload: createDecodedPayloadDecoder(createConversationWake()),
       async importConversationWake() {
@@ -3995,7 +4095,7 @@ function createDeferred<T = void>(): {
 
 function createLinqConversationLookupKey(input: {
   item: HostedMailboxResolvedImportItem;
-  wake: HostedExecutionConversationMessageWake;
+  wake: HostedExecutionConversationWake;
 }): string {
   if (input.wake.message.channel !== "linq") {
     throw new Error("Expected Linq conversation wake.");
@@ -4035,7 +4135,7 @@ function createLinqConversationLookupKey(input: {
 }
 
 function createDecodedPayloadDecoder(
-  wake: HostedExecutionConversationMessageWake,
+  wake: HostedExecutionConversationWake,
 ): HostedConversationMailboxPayloadDecoder {
   return {
     async decode() {
@@ -4052,7 +4152,7 @@ function createAssistantInputEventStager(input: {
   projectionUpdates?: unknown[];
 } = {}) {
   return async (stageInput: {
-    wake: HostedExecutionConversationMessageWake;
+    wake: HostedExecutionConversationWake;
   }) => {
     input.order?.push(`stage:${stageInput.wake.eventId}`);
     return {

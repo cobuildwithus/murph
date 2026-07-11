@@ -810,6 +810,7 @@ export async function readHostedMailboxMaxSeqByLane(input: {
   lanes?: readonly (HostedMailboxLane | string)[];
   prisma?: HostedMailboxStoreClient;
   userId: string;
+  wakeableOnly?: boolean;
 }): Promise<HostedMailboxLaneHighWater[]> {
   const prisma = input.prisma ?? getPrisma();
   const userId = requireNonEmptyString(input.userId, "Hosted mailbox userId");
@@ -833,6 +834,9 @@ export async function readHostedMailboxMaxSeqByLane(input: {
       },
       where: {
         ...buildHostedMailboxLiveItemWhere(now),
+        ...(input.wakeableOnly && lane === "conversation"
+          ? { kind: "conversation.message" }
+          : {}),
         lane,
         userId,
       },
@@ -1472,7 +1476,9 @@ export async function decodeHostedMailboxStoredPayload(input: {
 }
 
 export function resolveHostedMailboxLaneForKind(kind: string): HostedMailboxLane {
-  return kind === "conversation.message" ? "conversation" : "system";
+  return kind === "conversation.message" || kind === "conversation.reaction"
+    ? "conversation"
+    : "system";
 }
 
 interface HostedMailboxStoredPayloadMetadata {
