@@ -474,6 +474,10 @@ may refresh a denied or expired cycle. The row is never authorization or outcome
 truth.
 Secure-action approval and denial use this shape because the exact attachment,
 destination, and delivery identity remain in the runtime-owned parked intent.
+One active approval cycle maps to one parked intent through a cycle-stable
+approval-ID-plus-expiry transport identity. A causal outcome wake reconciles one
+canonical matching owner and does not mix unrelated due work into that control
+item; only the background fallback path scans its fixed due-item bound.
 The parked intent arms one pre-expiry fallback wake ten minutes before the
 pending approval expires. A rejected post-commit Temporal signal is logged; the
 existing outbox wake then makes Temporal re-read mailbox lag while at least five
@@ -481,7 +485,10 @@ minutes remain in the renewed authorization window. If the approval is still
 pending at that fallback, normal pending reconciliation restores the expiry wake,
 which provides the same margin for any decision made afterward. This reuses the
 effect's existing durable timer instead of adding an approval-specific retry
-queue, poller, or second handoff owner.
+queue, poller, or second handoff owner. Within a delivery boundary, that parked
+fallback is transparent to later outbound work: the next wake is the earlier of
+the approval fallback and the first ordinary predecessor wake, so an approval-link
+reply retry is never hidden behind authorization reconciliation.
 External outcomes that require generated user-facing prose, such as phone-call
 results, continue to use `assistant.notification.requested` instead.
 
@@ -491,8 +498,9 @@ web retains the legacy runtime recheck and confirmation-message fallback and
 does not append the new mailbox kind. Merge with the gate disabled, deploy
 Cloudflare with `container_rollout=immediate`, and wait for the managed-container
 smoke to prove the new parser/runtime bundle is active. Only then set the gate to
-`1` and redeploy web. The confirmation-message fallback remains additive during
-this activation stage. New web producer behavior against an old runtime is not
+`1` and redeploy web. Once enabled, browser returns use a bare conversation link;
+the confirmation-message fallback exists only while the gate is disabled. New
+web producer behavior against an old runtime is not
 safe because the old parser quarantines the new system row and blocks system-lane
 progress. Roll back in the reverse order: set the gate to `0` and redeploy web
 first so no new rows can be produced, verify system-lane lag is clear, then roll

@@ -13,6 +13,7 @@ import {
 } from '../src/assistant/outbox.ts'
 import {
   applyAssistantVaultFileSendApprovalResult,
+  buildAssistantVaultFileDeliveryIdempotencyKey,
   buildAssistantVaultFileSendApprovalRequest,
   buildAssistantVaultFileSendApprovalRequestForTarget,
   readVerifiedAssistantVaultFileBytes,
@@ -55,7 +56,6 @@ describe('assistant vault-file send', () => {
         target: 'chat_123',
       },
       channel: 'linq',
-      deliveryIdempotencyKey: 'hosted-turn-delivery-123',
       deliveryTransportIdempotent: true,
       identityId: 'member_123',
       ref: 'documents/report.pdf',
@@ -68,13 +68,17 @@ describe('assistant vault-file send', () => {
     }
 
     const first = await requestAssistantVaultFileSend(request)
-    const second = await requestAssistantVaultFileSend(request)
+    const second = await requestAssistantVaultFileSend({
+      ...request,
+      replyToMessageId: 'original_message_456',
+      turnId: 'turn_456',
+    })
     const intents = await listAssistantOutboxIntents(vaultRoot)
     expect(second.file).toEqual(first.file)
     expect(intents).toHaveLength(1)
     expect(intents[0]).toMatchObject({
       deliveryIdempotencyKey:
-        `hosted-turn-delivery-123:vault-file:haa_${'a'.repeat(32)}`,
+        `assistant-vault-file:haa_${'a'.repeat(32)}:2026-06-24T12:15:00.000Z`,
       media: [first.file],
       message: 'Here it is: report.pdf',
       nextAttemptAt: '2026-06-24T12:05:00.000Z',
@@ -97,6 +101,18 @@ describe('assistant vault-file send', () => {
     expect(buildAssistantVaultFileSendApprovalRequest(intents[0]!)).toEqual(
       approvalPort.request.mock.calls[0]?.[0],
     )
+  })
+
+  it('uses a distinct parked owner for a refreshed approval cycle', () => {
+    const approvalId = `haa_${'a'.repeat(32)}`
+
+    expect(buildAssistantVaultFileDeliveryIdempotencyKey({
+      approvalId,
+      expiresAt: '2026-06-24T12:15:00.000Z',
+    })).not.toBe(buildAssistantVaultFileDeliveryIdempotencyKey({
+      approvalId,
+      expiresAt: '2026-06-24T12:30:00.000Z',
+    }))
   })
 
   it('requires a new action when file bytes change and rejects post-approval mutation', async () => {
@@ -270,7 +286,6 @@ describe('assistant vault-file send', () => {
     const baseRequest = {
       actionApprovalPort: approvalPort,
       channel: 'linq',
-      deliveryIdempotencyKey: 'hosted-turn-delivery-target-stable',
       deliveryTransportIdempotent: true,
       identityId: 'member_123',
       ref: 'documents/report.pdf',

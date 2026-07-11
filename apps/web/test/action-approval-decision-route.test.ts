@@ -139,7 +139,7 @@ describe("hosted action approval decision route", () => {
     vi.useRealTimers();
   });
 
-  it("commits approval work before signaling its mailbox pointer and retains the confirmation fallback", async () => {
+  it("commits approval work before signaling its mailbox pointer and returns a bare conversation link", async () => {
     const response = await route.POST(
       jsonRequest({
         authorization: {
@@ -181,7 +181,6 @@ describe("hosted action approval decision route", () => {
       mailboxItemId: "mailbox_approval_outcome",
     });
     expect(mocks.resolveHostedMurphContactOption).toHaveBeenCalledWith({
-      message: { body: "I approved the secure request." },
       preferredKind: "text",
     });
     expect(
@@ -241,6 +240,9 @@ describe("hosted action approval decision route", () => {
       tx: { tx: true },
     });
     expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledTimes(1);
+    expect(mocks.resolveHostedMurphContactOption).toHaveBeenCalledWith({
+      preferredKind: "text",
+    });
   });
 
   it("keeps the committed mailbox outcome successful when the latency signal is unavailable", async () => {

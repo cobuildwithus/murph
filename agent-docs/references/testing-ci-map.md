@@ -106,7 +106,10 @@ Last verified: 2026-07-09
   and managed-container smoke pass, set it to `1` and redeploy web. To roll back,
   set it to `0` and redeploy web before draining the system lane and rolling back
   Cloudflare. The disabled path emits no new mailbox kind and retains the legacy
-  approval confirmation fallback.
+  approval confirmation fallback. Approval-outcome coverage also proves bare
+  return links when enabled, one parked owner across repeated turns in the same
+  approval cycle, one canonical causal observation read, and approval-link retry
+  wakes taking precedence over a later parked fallback.
 
 ## Current Gaps
 

@@ -5,6 +5,7 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   getPrisma: vi.fn(() => ({ database: "test" })),
+  isHostedActionApprovalOutcomeWakeEnabled: vi.fn(() => true),
   readHostedActionApproval: vi.fn(),
   redirect: vi.fn(),
   requireActiveHostedAppSession: vi.fn(),
@@ -23,6 +24,8 @@ vi.mock("@/src/components/murph/hosted-murph-contact-action", () => ({
 }));
 
 vi.mock("@/src/lib/action-approvals", () => ({
+  isHostedActionApprovalOutcomeWakeEnabled:
+    mocks.isHostedActionApprovalOutcomeWakeEnabled,
   readHostedActionApproval: mocks.readHostedActionApproval,
   requireHostedActionApprovalId: mocks.requireHostedActionApprovalId,
 }));
@@ -49,6 +52,7 @@ describe("action approval page", () => {
     mocks.requireActiveHostedAppSession.mockResolvedValue({
       member: { id: "member_test" },
     });
+    mocks.isHostedActionApprovalOutcomeWakeEnabled.mockReturnValue(true);
     mocks.readHostedActionApproval.mockResolvedValue({
       approvalId: "haa_test",
       expiresAt: "2026-07-09T16:00:00.000Z",
@@ -131,7 +135,7 @@ describe("action approval page", () => {
     assert.equal(markup.includes('href="'), false);
   });
 
-  it("keeps a group approval on its originating conversation fallback", async () => {
+  it("does not ask a group member to confirm an automatically resumed approval", async () => {
     mocks.readHostedActionApproval.mockResolvedValueOnce({
       approvalId: "haa_test",
       expiresAt: "2026-07-09T16:00:00.000Z",
@@ -152,7 +156,96 @@ describe("action approval page", () => {
 
     expect(mocks.resolveHostedMurphContactOptions).not.toHaveBeenCalled();
     expect(mocks.redirect).not.toHaveBeenCalled();
-    assert.match(markup, /I approved the request\./);
+    assert.match(
+      markup,
+      /Return to the Murph conversation where this request started\./,
+    );
+    assert.equal(markup.includes("I approved the request."), false);
     assert.equal(markup.includes('href="'), false);
+  });
+
+  it("redirects an automatically resumed approval through a bare conversation link", async () => {
+    mocks.readHostedActionApproval.mockResolvedValueOnce({
+      approvalId: "haa_test",
+      expiresAt: "2026-07-09T16:00:00.000Z",
+      presentation: {
+        body: "Share the requested file.",
+        title: "Share this file?",
+      },
+      returnContactKind: "text",
+      status: "approved",
+    });
+    mocks.resolveHostedMurphContactOptions.mockResolvedValueOnce([
+      {
+        href: "sms:+15550100001",
+        kind: "text",
+        label: "Messages",
+      },
+    ]);
+
+    const view = await actionApprovalPage.default({
+      params: Promise.resolve({ approvalId: "haa_test" }),
+    });
+    const stream = await renderToReadableStream(view);
+    await stream.allReady;
+
+    expect(mocks.resolveHostedMurphContactOptions).toHaveBeenCalledWith({
+      preferredKind: "text",
+    });
+    expect(mocks.redirect).toHaveBeenCalledWith("sms:+15550100001");
+  });
+
+  it("does not request a confirmation when enabled contact resolution fails", async () => {
+    mocks.readHostedActionApproval.mockResolvedValueOnce({
+      approvalId: "haa_test",
+      expiresAt: "2026-07-09T16:00:00.000Z",
+      presentation: {
+        body: "Share the requested file.",
+        title: "Share this file?",
+      },
+      returnContactKind: "text",
+      status: "denied",
+    });
+    mocks.resolveHostedMurphContactOptions.mockRejectedValueOnce(
+      new Error("Contact resolution unavailable"),
+    );
+
+    const view = await actionApprovalPage.default({
+      params: Promise.resolve({ approvalId: "haa_test" }),
+    });
+    const stream = await renderToReadableStream(view);
+    await stream.allReady;
+    const markup = await new Response(stream).text();
+
+    assert.match(
+      markup,
+      /Return to the Murph conversation where this request started\./,
+    );
+    assert.equal(markup.includes("I denied the request."), false);
+    assert.equal(markup.includes("and send:"), false);
+  });
+
+  it("retains the confirmation message while automatic continuation is gated off", async () => {
+    mocks.isHostedActionApprovalOutcomeWakeEnabled.mockReturnValueOnce(false);
+    mocks.readHostedActionApproval.mockResolvedValueOnce({
+      approvalId: "haa_test",
+      expiresAt: "2026-07-09T16:00:00.000Z",
+      presentation: {
+        body: "Share the requested file.",
+        title: "Share this file?",
+      },
+      returnContactKind: null,
+      status: "denied",
+    });
+
+    const view = await actionApprovalPage.default({
+      params: Promise.resolve({ approvalId: "haa_test" }),
+    });
+    const stream = await renderToReadableStream(view);
+    await stream.allReady;
+    const markup = await new Response(stream).text();
+
+    assert.match(markup, /I denied the request\./);
+    expect(mocks.redirect).not.toHaveBeenCalled();
   });
 });

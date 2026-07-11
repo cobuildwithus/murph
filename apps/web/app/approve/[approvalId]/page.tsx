@@ -17,6 +17,7 @@ import { MurphContactLink } from "@/src/components/murph/murph-contact-link";
 import { buttonVariants } from "@/src/components/ui/button";
 import { Separator } from "@/src/components/ui/separator";
 import {
+  isHostedActionApprovalOutcomeWakeEnabled,
   readHostedActionApproval,
   requireHostedActionApprovalId,
 } from "@/src/lib/action-approvals";
@@ -78,10 +79,14 @@ async function ActionApprovalTerminalState({
   approval: TerminalActionApprovalView;
 }) {
   const content = terminalContent(approval.status);
+  const needsConfirmationMessage = approval.status === "expired"
+    || !isHostedActionApprovalOutcomeWakeEnabled();
   const contactOptions = approval.returnContactKind === null
     ? []
     : await resolveHostedMurphContactOptions({
-        message: { body: content.replyBody },
+        ...(needsConfirmationMessage
+          ? { message: { body: content.replyBody } }
+          : {}),
         preferredKind: approval.returnContactKind,
       }).catch(() => []);
 
@@ -112,7 +117,7 @@ async function ActionApprovalTerminalState({
             {content.actionLabel}
             <ArrowRight aria-hidden="true" data-icon="inline-end" />
           </MurphContactLink>
-        ) : (
+        ) : needsConfirmationMessage ? (
           <div>
             <p className="text-sm text-muted-foreground">
               Return to the Murph conversation where this request started and
@@ -122,6 +127,10 @@ async function ActionApprovalTerminalState({
               {content.replyBody}
             </p>
           </div>
+        ) : (
+          <p className="text-sm text-muted-foreground">
+            Return to the Murph conversation where this request started.
+          </p>
         )}
       </div>
     </ActionApprovalScreen>

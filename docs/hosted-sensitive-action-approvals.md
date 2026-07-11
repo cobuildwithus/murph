@@ -57,7 +57,7 @@ A request contains:
 The caller owns action execution, retries, and completion. It must recompute the fingerprint and call `consume` with the observed approval generation at the final effect boundary. Approval has no claimed, executing, completed, or provider-error state.
 When `pending` is returned, the approval URL is handed to the normal assistant reply path; the approval system must not send a separate hard-coded user message.
 
-The runtime keeps the exact file-and-destination delivery intent in its own outbox as `awaiting_approval`. Web never reconstructs that effect from the approval row. A later approval wake only asks the runtime to re-read owner state; the normal pre-dispatch consume gate remains the authorization boundary.
+The runtime keeps the exact file-and-destination delivery intent in its own outbox as `awaiting_approval`. One active approval cycle owns one parked intent, keyed by the approval ID and cycle expiry, so repeating the same request in another turn reuses that owner. Web never reconstructs the effect from the approval row. A later approval wake selects one canonical matching owner and only asks the runtime to re-read owner state; the normal pre-dispatch consume gate remains the authorization boundary. Background fallback reconciliation is a separate bounded path.
 
 ## Browser decision flow
 

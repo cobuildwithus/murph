@@ -626,7 +626,6 @@ export async function sendAssistantMessageLocal(
                         answeredMailboxItemIds: currentInput.answeredMailboxItemIds ?? [],
                         bindingDelivery: deliveryFields.bindingDelivery,
                         channel: deliveryFields.channel,
-                        deliveryIdempotencyKey: hostedDelivery.deliveryIdempotencyKey,
                         deliverySource: deliveryFields.deliverySource,
                         deliveryTransportIdempotent:
                           hostedDelivery.deliveryTransportIdempotent,

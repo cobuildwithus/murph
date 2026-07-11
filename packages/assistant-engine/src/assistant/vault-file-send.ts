@@ -70,7 +70,6 @@ export async function requestAssistantVaultFileSend(input: {
   answeredMailboxItemIds?: readonly string[] | null
   bindingDelivery?: AssistantOutboxIntent['bindingDelivery']
   channel?: string | null
-  deliveryIdempotencyKey?: string | null
   deliverySource?: AssistantOutboxIntent['deliverySource']
   deliveryTransportIdempotent?: boolean
   explicitTarget?: string | null
@@ -101,8 +100,7 @@ export async function requestAssistantVaultFileSend(input: {
   if (approval.status === 'pending') {
     const deliveryIdempotencyKey = buildAssistantVaultFileDeliveryIdempotencyKey({
       approvalId: approval.approvalId,
-      deliveryIdempotencyKey: input.deliveryIdempotencyKey ?? null,
-      turnId: input.turnId,
+      expiresAt: approval.expiresAt,
     })
     await createAssistantOutboxIntent({
       actorId: input.actorId ?? null,
@@ -157,12 +155,9 @@ export async function requestAssistantVaultFileSend(input: {
 
 export function buildAssistantVaultFileDeliveryIdempotencyKey(input: {
   approvalId: string
-  deliveryIdempotencyKey?: string | null
-  turnId: string
+  expiresAt: string
 }): string {
-  const prefix = normalizeNullableString(input.deliveryIdempotencyKey)
-    ?? `assistant-vault-file:${input.turnId}`
-  return `${prefix}:vault-file:${input.approvalId}`
+  return `assistant-vault-file:${input.approvalId}:${input.expiresAt}`
 }
 
 export function buildAssistantVaultFileDeliveryMessage(filename: string): string {

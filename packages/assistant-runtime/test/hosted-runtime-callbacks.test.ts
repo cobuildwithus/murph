@@ -1141,7 +1141,7 @@ describe("hosted runtime callbacks", () => {
     }
   });
 
-  it("reconciles the causally selected approval even when newer approvals are not due", async () => {
+  it("reconciles one canonical causal approval before unrelated due work", async () => {
     const vaultFile = {
       contentType: "application/pdf",
       filename: "report.pdf",
@@ -1166,7 +1166,9 @@ describe("hosted runtime callbacks", () => {
       lastError: null,
       media: [vaultFile],
       message: "Attached.",
-      nextAttemptAt: "2030-04-08T00:15:00.000Z",
+      nextAttemptAt: index === 0 || index >= 3
+        ? "2020-04-08T00:15:00.000Z"
+        : "2030-04-08T00:15:00.000Z",
       replyToMessageId: "linq_message_1",
       sessionId: "session_1",
       status: "awaiting_approval" as const,
@@ -1176,7 +1178,7 @@ describe("hosted runtime callbacks", () => {
       turnId: `turn_${index}`,
       updatedAt: `2026-04-08T00:0${index}:00.000Z`,
     }));
-    const selectedEffectId = "vault-file-send:intent_vault_file_0";
+    const selectedEffectId = "vault-file-send:shared-approval-cycle";
     const actionApprovalPort = {
       consume: vi.fn(),
       read: vi.fn(async (request: { actionId: string }) =>
@@ -1199,7 +1201,10 @@ describe("hosted runtime callbacks", () => {
     mocks.buildAssistantVaultFileSendApprovalRequest.mockImplementation(
       (intent: { intentId: string }) => ({
         actionFingerprint: "a".repeat(64),
-        actionId: `vault-file-send:${intent.intentId}`,
+        actionId: intent.intentId === "intent_vault_file_1"
+          || intent.intentId === "intent_vault_file_2"
+          ? selectedEffectId
+          : `vault-file-send:${intent.intentId}`,
         actionKind: "vault.file.send.v1",
         presentation: {
           body: "Send a vault file.",
@@ -1232,7 +1237,85 @@ describe("hosted runtime callbacks", () => {
       expect.objectContaining({ actionId: selectedEffectId }),
     );
     expect(sideEffects).toHaveLength(1);
-    expect(sideEffects[0]?.effectId).toBe("intent_vault_file_0");
+    expect(sideEffects[0]?.effectId).toBe("intent_vault_file_1");
+  });
+
+  it("defers one causal approval owner after a control-plane timeout", async () => {
+    const storedIntent = {
+      actorId: "actor_1",
+      bindingDelivery: { kind: "thread" as const, target: "linq_chat_1" },
+      channel: "linq",
+      createdAt: "2026-04-08T00:00:00.000Z",
+      dedupeKey: "dedupe_vault_file_timeout",
+      delivery: null,
+      deliveryIdempotencyKey: "approval-cycle-timeout",
+      deliveryTransportIdempotent: true,
+      explicitTarget: "linq_chat_1",
+      identityId: "identity_1",
+      intentId: "intent_vault_file_timeout",
+      lastAttemptAt: null,
+      lastError: null,
+      media: [{
+        contentType: "application/pdf",
+        filename: "report.pdf",
+        kind: "vault_file" as const,
+        ref: "documents/report.pdf",
+        sha256: "a".repeat(64),
+        sizeBytes: 42,
+      }],
+      message: "Attached.",
+      nextAttemptAt: "2026-04-08T00:05:00.000Z",
+      replyToMessageId: "linq_message_1",
+      sessionId: "session_1",
+      status: "awaiting_approval" as const,
+      subject: null,
+      threadId: "thread_1",
+      threadIsDirect: true,
+      turnId: "turn_1",
+      updatedAt: "2026-04-08T00:00:00.000Z",
+    };
+    const deferredIntent = {
+      ...storedIntent,
+      nextAttemptAt: "2026-04-08T00:06:00.000Z",
+      updatedAt: "2026-04-08T00:01:00.000Z",
+    };
+    const actionApprovalPort = {
+      consume: vi.fn(),
+      read: vi.fn().mockRejectedValue(new Error("control timeout")),
+      request: vi.fn(),
+    };
+    mocks.listAssistantOutboxIntents.mockResolvedValueOnce([storedIntent]);
+    mocks.readAssistantVaultFileMedia.mockReturnValue(storedIntent.media[0]);
+    mocks.buildAssistantVaultFileSendApprovalRequest.mockReturnValue({
+      actionFingerprint: "a".repeat(64),
+      actionId: "vault-file-send:timeout",
+      actionKind: "vault.file.send.v1",
+      presentation: {
+        body: "Send a vault file.",
+        title: "Send a file?",
+      },
+    });
+    mocks.deferAssistantVaultFileApprovalCheck.mockReturnValue(deferredIntent);
+    mocks.saveAssistantOutboxIntentIfUnchanged.mockResolvedValueOnce(
+      deferredIntent,
+    );
+
+    await expect(collectHostedAssistantDeliverySideEffects({
+      actionApprovalPort,
+      includeBackgroundDueIntents: true,
+      preferredEffectIds: ["vault-file-send:timeout"],
+      preferredIntentIds: [],
+      vaultRoot: "/tmp/vault",
+    })).resolves.toEqual([]);
+
+    expect(actionApprovalPort.read).toHaveBeenCalledTimes(1);
+    expect(mocks.saveAssistantOutboxIntentIfUnchanged).toHaveBeenCalledWith({
+      expectedDedupeKey: storedIntent.dedupeKey,
+      expectedStatus: "awaiting_approval",
+      expectedUpdatedAt: storedIntent.updatedAt,
+      intent: deferredIntent,
+      vault: "/tmp/vault",
+    });
   });
 
   it("reconciles an older due approval ahead of newer approvals that are not due", async () => {
@@ -2300,6 +2383,62 @@ describe("hosted runtime callbacks", () => {
     expect(mocks.applyAssistantVaultFileSendApprovalResult).not.toHaveBeenCalled();
     await expect(resolveHostedAssistantOutboxNextWakeAt({
       now: new Date("2026-04-08T00:01:01.000Z"),
+      vaultRoot: "/tmp/vault",
+    })).resolves.toBe("2026-04-08T00:01:01.000Z");
+  });
+
+  it("does not let a parked approval fallback hide an earlier approval-link retry", async () => {
+    const parkedIntent = {
+      actorId: "actor_1",
+      bindingDelivery: { kind: "thread" as const, target: "chat_1" },
+      channel: "linq",
+      createdAt: "2026-04-08T00:01:00.000Z",
+      dedupeKey: "dedupe_vault_file",
+      deliveryIdempotencyKey: "approval-cycle",
+      deliveryTransportIdempotent: true,
+      explicitTarget: "chat_1",
+      identityId: "identity_1",
+      intentId: "intent_vault_file",
+      lastError: null,
+      message: "Here it is: report.pdf",
+      nextAttemptAt: "2026-04-08T00:06:00.000Z",
+      replyToMessageId: "message_1",
+      sessionId: "session_1",
+      status: "awaiting_approval" as const,
+      threadId: "thread_1",
+      threadIsDirect: true,
+      turnId: "turn_1",
+    };
+    const approvalLinkIntent = {
+      ...parkedIntent,
+      createdAt: "2026-04-08T00:01:01.000Z",
+      dedupeKey: "dedupe_approval_link",
+      deliveryIdempotencyKey: "approval-link",
+      intentId: "intent_approval_link",
+      lastError: {
+        code: "LINQ_TEMPORARY_FAILURE",
+        message: "temporary provider failure",
+      },
+      message: "Approve here: https://withmurph.test/approve/haa_test",
+      nextAttemptAt: "2026-04-08T00:01:31.000Z",
+      status: "retryable" as const,
+    };
+    mocks.listAssistantOutboxIntents.mockResolvedValue([
+      parkedIntent,
+      approvalLinkIntent,
+    ]);
+
+    await expect(resolveHostedAssistantOutboxNextWakeAt({
+      now: new Date("2026-04-08T00:01:01.000Z"),
+      vaultRoot: "/tmp/vault",
+    })).resolves.toBe("2026-04-08T00:01:31.000Z");
+
+    mocks.listAssistantOutboxIntents.mockResolvedValueOnce([
+      parkedIntent,
+      { ...approvalLinkIntent, nextAttemptAt: null, status: "sent" },
+    ]);
+    await expect(resolveHostedAssistantOutboxNextWakeAt({
+      now: new Date("2026-04-08T00:01:31.000Z"),
       vaultRoot: "/tmp/vault",
     })).resolves.toBe("2026-04-08T00:06:00.000Z");
   });

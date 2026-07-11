@@ -296,22 +296,27 @@ function selectHostedAssistantApprovalReconcileTargets(input: {
   storedIntents: readonly AssistantOutboxIntent[];
 }): Set<string> {
   const targets = new Set<string>();
-  const preferredEffectIds = new Set(input.preferredEffectIds);
-  if (preferredEffectIds.size > 0) {
-    for (const intent of input.storedIntents) {
-      if (intent.status !== "awaiting_approval" || targets.has(intent.intentId)) {
-        continue;
-      }
-      try {
-        const request = buildAssistantVaultFileSendApprovalRequest(intent);
-        if (preferredEffectIds.has(request.actionId)) {
-          targets.add(intent.intentId);
+  if (input.preferredEffectIds.length > 0) {
+    for (const effectId of input.preferredEffectIds) {
+      for (const intent of input.storedIntents) {
+        if (intent.status !== "awaiting_approval") {
+          continue;
         }
-      } catch {
-        // The normal reconciliation path owns terminal handling for malformed
-        // vault-file intents; an opaque effect pointer must not broaden it.
+        try {
+          const request = buildAssistantVaultFileSendApprovalRequest(intent);
+          if (request.actionId === effectId) {
+            // A causal wake owns one approval cycle. Reconcile its canonical
+            // parked intent first and never mix unrelated due work into it.
+            targets.add(intent.intentId);
+            return targets;
+          }
+        } catch {
+          // The normal reconciliation path owns terminal handling for malformed
+          // vault-file intents; an opaque effect pointer must not broaden it.
+        }
       }
     }
+    return targets;
   }
   if (!input.includeBackgroundDueIntents) {
     return targets;
@@ -907,13 +912,23 @@ function resolveHostedAssistantDeliveryBoundaryWakeAt(
   intents: readonly AssistantOutboxIntent[],
   now: Date,
 ): string | null {
+  let approvalFallbackWakeAt: string | null = null;
   for (const intent of intents) {
     const wakeAt = resolveHostedAssistantOutboxIntentWakeAt(intent, now);
-    if (wakeAt) {
-      return wakeAt;
+    if (!wakeAt) {
+      continue;
     }
+    if (intent.status === "awaiting_approval") {
+      if (!approvalFallbackWakeAt || wakeAt < approvalFallbackWakeAt) {
+        approvalFallbackWakeAt = wakeAt;
+      }
+      continue;
+    }
+    return approvalFallbackWakeAt && approvalFallbackWakeAt < wakeAt
+      ? approvalFallbackWakeAt
+      : wakeAt;
   }
-  return null;
+  return approvalFallbackWakeAt;
 }
 
 function resolveHostedAssistantOutboxIntentWakeAt(

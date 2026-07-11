@@ -110,11 +110,15 @@ export const POST = withJsonError(async (
   const contactOption = approval.returnContactKind === null
     ? null
     : await resolveHostedMurphContactOption({
-        message: {
-          body: decision.decision === "approved"
-            ? APPROVED_REPLY_BODY
-            : DENIED_REPLY_BODY,
-        },
+        ...(result.runtimeResume
+          ? {}
+          : {
+              message: {
+                body: decision.decision === "approved"
+                  ? APPROVED_REPLY_BODY
+                  : DENIED_REPLY_BODY,
+              },
+            }),
         preferredKind: approval.returnContactKind,
       }).catch(() => null);
   const response: HostedActionApprovalDecisionResponse = {
