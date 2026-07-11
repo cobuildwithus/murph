@@ -1,6 +1,7 @@
 import {
   assistantInputCandidateFromStoredEvent,
   compareAssistantInputCursors,
+  isSameAssistantDeferredContextRoute,
   isSameAssistantConversationRef,
   readAssistantInputEvent,
   readHostedMailboxAssistantInputItems,
@@ -253,9 +254,16 @@ function isHostedPendingEventRelevantToFreshConversation(input: {
   }
   return input.latestFreshEventByConversation.some((freshEvent) =>
     freshEvent.conversation
-    && isSameAssistantConversationRef(
-      event.conversation!,
-      freshEvent.conversation,
+    && (
+      isSameAssistantConversationRef(event.conversation!, freshEvent.conversation)
+      || (
+        event.sourceMetadata?.kind === "linq"
+        && event.sourceMetadata.contextOnly === true
+        && isSameAssistantDeferredContextRoute(
+          event.conversation!,
+          freshEvent.conversation,
+        )
+      )
     )
   );
 }

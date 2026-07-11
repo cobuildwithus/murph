@@ -146,13 +146,67 @@ describe('hasPendingAssistantAutoReplyInput', () => {
       false,
     )
   })
+
+  it('does not report deferred context as pending until an actionable input exists', async () => {
+    const { parentRoot, vaultRoot } = await createTempVaultContext(
+      'assistant-automation-pending-context-',
+    )
+    tempRoots.push(parentRoot)
+    await stageHostedInput({
+      contextOnly: true,
+      eventId: 'evt_pending_reaction_context',
+      laneSeq: '1',
+      occurredAt: '2026-06-02T12:00:00.000Z',
+      text: 'weak group reaction context',
+      vault: vaultRoot,
+    })
+    const inputSource = createStoreBackedAssistantInputSource({
+      vault: vaultRoot,
+    })
+    const state = {
+      autoReply: [{
+        channel: 'linq',
+        eligibleAfter: null,
+        enabledAt: '2026-06-02T12:00:00.000Z',
+      }],
+    }
+
+    assert.equal(
+      await hasPendingAssistantAutoReplyInput({
+        inputSource,
+        state,
+        vault: vaultRoot,
+      }),
+      false,
+    )
+
+    await stageHostedInput({
+      eventId: 'evt_pending_group_message',
+      laneSeq: '2',
+      occurredAt: '2026-06-02T12:01:00.000Z',
+      text: 'next actionable group message',
+      threadIsDirect: false,
+      vault: vaultRoot,
+    })
+
+    assert.equal(
+      await hasPendingAssistantAutoReplyInput({
+        inputSource,
+        state,
+        vault: vaultRoot,
+      }),
+      true,
+    )
+  })
 })
 
 function stageHostedInput(input: {
+  contextOnly?: boolean
   eventId: string
   laneSeq: string
   occurredAt: string
   text: string
+  threadIsDirect?: boolean
   vault: string
 }) {
   return upsertAssistantInputEvent({
@@ -175,15 +229,26 @@ function stageHostedInput(input: {
         actorIsSelf: false,
         source: 'linq',
         threadId: 'thread_1',
-        threadIsDirect: true,
+        threadIsDirect: input.threadIsDirect ?? !input.contextOnly,
       },
       occurredAt: input.occurredAt,
       receivedAt: input.occurredAt,
-      replyTarget: {
-        channel: 'linq',
-        messageId: `message_${input.eventId}`,
-        threadId: 'thread_1',
-      },
+      replyTarget: input.contextOnly
+        ? null
+        : {
+            channel: 'linq',
+            messageId: `message_${input.eventId}`,
+            threadId: 'thread_1',
+          },
+      ...(input.contextOnly
+        ? {
+            sourceMetadata: {
+              contextOnly: true,
+              kind: 'linq' as const,
+              partCount: 1,
+            },
+          }
+        : {}),
       sourceRef: {
         dedupeKey: `dedupe_${input.eventId}`,
         eventId: input.eventId,

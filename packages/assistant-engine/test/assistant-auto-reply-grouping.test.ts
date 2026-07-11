@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import { shouldGroupAdjacentConversationInput } from '../src/assistant/automation/grouping.ts'
+import {
+  orderAssistantAutoReplyInputSummaries,
+  shouldGroupAdjacentConversationInput,
+} from '../src/assistant/automation/grouping.ts'
 import type { AssistantAutomationInputSummary } from '../src/assistant/automation/input-summary.ts'
 
 function createInputSummary(
@@ -22,6 +25,7 @@ function createInputSummary(
     text: overrides.text ?? 'hello',
     attachmentCount: overrides.attachmentCount ?? 0,
     actorIsSelf: overrides.actorIsSelf ?? overrides.conversation?.actorIsSelf ?? false,
+    contextOnly: overrides.contextOnly ?? false,
     replyToMessageId: overrides.replyToMessageId ?? null,
   }
 }
@@ -97,5 +101,96 @@ describe('shouldGroupAdjacentConversationInput', () => {
     })
 
     expect(shouldGroupAdjacentConversationInput(unanchored, anchored)).toBe(false)
+  })
+
+  it('lets deferred context sit beside an actionable input without setting its reply anchor', () => {
+    const context = createInputSummary({
+      contextOnly: true,
+      inputId: 'ain_context',
+      replyToMessageId: null,
+    })
+    const anchored = createInputSummary({
+      inputId: 'ain_anchored',
+      replyToMessageId: 'linq-msg-anchor',
+    })
+
+    expect(shouldGroupAdjacentConversationInput(context, anchored)).toBe(true)
+    expect(shouldGroupAdjacentConversationInput(anchored, context)).toBe(true)
+  })
+})
+
+describe('orderAssistantAutoReplyInputSummaries', () => {
+  const groupConversation = (input: {
+    actorId: string
+    threadId: string
+  }): AssistantAutomationInputSummary['conversation'] => ({
+    accountId: 'linq-account-1',
+    actorId: input.actorId,
+    actorIsSelf: false,
+    source: 'linq',
+    threadId: input.threadId,
+    threadIsDirect: false,
+  })
+
+  it('attaches a group reaction to the next message despite a different actor', () => {
+    const reaction = createInputSummary({
+      contextOnly: true,
+      conversation: groupConversation({ actorId: 'alice', threadId: 'group-a' }),
+      inputId: 'reaction-alice',
+      source: 'linq',
+    })
+    const message = createInputSummary({
+      conversation: groupConversation({ actorId: 'bob', threadId: 'group-a' }),
+      inputId: 'message-bob',
+      source: 'linq',
+    })
+
+    expect(orderAssistantAutoReplyInputSummaries([reaction, message]))
+      .toEqual([reaction, message])
+  })
+
+  it('does not let reaction context from another group block an actionable message', () => {
+    const unmatchedReaction = createInputSummary({
+      contextOnly: true,
+      conversation: groupConversation({ actorId: 'alice', threadId: 'group-a' }),
+      inputId: 'reaction-group-a',
+      source: 'linq',
+    })
+    const message = createInputSummary({
+      conversation: groupConversation({ actorId: 'bob', threadId: 'group-b' }),
+      inputId: 'message-group-b',
+      source: 'linq',
+    })
+
+    expect(orderAssistantAutoReplyInputSummaries([unmatchedReaction, message]))
+      .toEqual([message, unmatchedReaction])
+  })
+
+  it('orders delivered-out-of-order reaction context by provider occurrence time', () => {
+    const removed = createInputSummary({
+      contextOnly: true,
+      conversation: groupConversation({ actorId: 'alice', threadId: 'group-a' }),
+      inputId: 'reaction-removed',
+      occurredAt: '2026-04-22T10:01:00.000Z',
+      receivedAt: '2026-04-22T10:01:01.000Z',
+      source: 'linq',
+    })
+    const added = createInputSummary({
+      contextOnly: true,
+      conversation: groupConversation({ actorId: 'alice', threadId: 'group-a' }),
+      inputId: 'reaction-added',
+      occurredAt: '2026-04-22T10:00:00.000Z',
+      receivedAt: '2026-04-22T10:02:00.000Z',
+      source: 'linq',
+    })
+    const message = createInputSummary({
+      conversation: groupConversation({ actorId: 'bob', threadId: 'group-a' }),
+      inputId: 'message-bob',
+      occurredAt: '2026-04-22T10:03:00.000Z',
+      source: 'linq',
+    })
+
+    expect(orderAssistantAutoReplyInputSummaries([removed, added, message]))
+      .toEqual([added, removed, message])
   })
 })

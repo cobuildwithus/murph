@@ -56,6 +56,7 @@ import {
   buildHostedExecutionAssistantNotificationRequestedWake,
   buildHostedExecutionEmailConversationMessageWake,
   buildHostedExecutionLinqConversationMessageWake,
+  buildHostedExecutionLinqConversationReactionWake,
   buildHostedExecutionMemberActivatedWake,
   buildHostedExecutionMemberChannelsUpdatedWake,
   buildHostedExecutionMemberPreferencesUpdatedWake,
@@ -185,6 +186,35 @@ export function parseHostedExecutionWake(value: unknown): HostedExecutionWake {
         occurredAt,
         userId: wireUserId,
       });
+    case "conversation.reaction": {
+      const message = parseHostedExecutionConversationMessagePayload(record.message);
+      if (message.channel !== "linq") {
+        throw new TypeError(
+          "Hosted execution conversation.reaction wake payload must use the Linq channel.",
+        );
+      }
+      return buildHostedExecutionLinqConversationReactionWake({
+        ...(message.accountLookupKey === undefined
+          ? {}
+          : { accountLookupKey: message.accountLookupKey }),
+        ...(message.contactKind === undefined
+          ? {}
+          : { contactKind: message.contactKind }),
+        ...(message.contactLookupKey === undefined
+          ? {}
+          : { contactLookupKey: message.contactLookupKey }),
+        eventId,
+        linqMessage: message.linqMessage,
+        occurredAt,
+        ...(message.phoneLookupKey === undefined
+          ? {}
+          : { phoneLookupKey: message.phoneLookupKey }),
+        ...(message.routeAuthority === undefined
+          ? {}
+          : { routeAuthority: message.routeAuthority }),
+        userId: wireUserId,
+      });
+    }
     case "member.activated":
       return buildHostedExecutionMemberActivatedWake({
         eventId,

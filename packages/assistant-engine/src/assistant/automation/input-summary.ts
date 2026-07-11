@@ -14,6 +14,9 @@ export interface AssistantAutomationInputSummary {
   text: string | null
   attachmentCount: number
   actorIsSelf: boolean
+  // Deferred provider context is rendered with the next actionable input but
+  // never becomes the actionable input itself.
+  contextOnly: boolean
   // Provider-level native reply target (Linq only today). Carried on the
   // summary so adjacent-grouping can split across reply-anchor boundaries
   // without re-reading source metadata.
@@ -34,6 +37,8 @@ export function assistantAutomationInputSummaryFromCandidate(
   const sourceMetadata = input.event.sourceMetadata
   const replyToMessageId =
     sourceMetadata?.kind === 'linq' ? sourceMetadata.replyToMessageId ?? null : null
+  const contextOnly =
+    sourceMetadata?.kind === 'linq' && sourceMetadata.contextOnly === true
 
   return {
     inputId: input.event.inputId,
@@ -45,6 +50,7 @@ export function assistantAutomationInputSummaryFromCandidate(
     text: input.event.transcriptText ?? input.event.text,
     attachmentCount: input.event.attachmentCount,
     actorIsSelf: conversation.actorIsSelf,
+    contextOnly,
     replyToMessageId,
   }
 }
@@ -53,8 +59,16 @@ export function compareAssistantInputSummaryOrder(
   left: AssistantAutomationInputSummary,
   right: AssistantAutomationInputSummary,
 ): number {
-  const leftTimestamp = left.receivedAt ?? left.occurredAt
-  const rightTimestamp = right.receivedAt ?? right.occurredAt
+  if (left.contextOnly !== right.contextOnly) {
+    return left.contextOnly ? -1 : 1
+  }
+  const compareSemanticTime = left.contextOnly && right.contextOnly
+  const leftTimestamp = compareSemanticTime
+    ? left.occurredAt
+    : left.receivedAt ?? left.occurredAt
+  const rightTimestamp = compareSemanticTime
+    ? right.occurredAt
+    : right.receivedAt ?? right.occurredAt
 
   return leftTimestamp === rightTimestamp
     ? left.inputId.localeCompare(right.inputId)

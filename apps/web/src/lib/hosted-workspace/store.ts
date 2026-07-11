@@ -513,6 +513,7 @@ async function readForegroundPendingConversationSeqTx(input: {
       createdAt: {
         gte: new Date(now.getTime() - HOSTED_WORKSPACE_CHECKPOINT_MAILBOX_RETENTION_MS),
       },
+      kind: "conversation.message",
       lane: "conversation",
       OR: [
         {

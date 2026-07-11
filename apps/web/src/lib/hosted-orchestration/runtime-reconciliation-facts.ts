@@ -102,7 +102,7 @@ export async function readHostedRuntimeOwnerReleaseMailboxLagActionable(input: {
   const now = normalizeHostedRuntimeReconciliationDate(input.now);
   const [workspace, maxSeqByLane] = await Promise.all([
     readHostedWorkspace({ prisma, userId: input.userId }),
-    readHostedMailboxMaxSeqByLane({ prisma, userId: input.userId }),
+    readHostedMailboxMaxSeqByLane({ prisma, userId: input.userId, wakeableOnly: true }),
   ]);
   if (!workspace) {
     return false;
@@ -171,7 +171,7 @@ export async function readHostedRuntimeReconciliationFacts(
   }
 
   const [maxSeqByLane, consumedSeqByLane] = await Promise.all([
-    readHostedMailboxMaxSeqByLane({ prisma, userId: input.userId }),
+    readHostedMailboxMaxSeqByLane({ prisma, userId: input.userId, wakeableOnly: true }),
     readHostedMailboxConsumedSeqByLane({
       lanes: ["conversation"],
       prisma,

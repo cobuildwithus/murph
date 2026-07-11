@@ -17,6 +17,9 @@ export {
   hasPendingAssistantAutoReplyInput,
   scanAssistantAutomationOnce,
 } from './automation/scanner.js'
+export {
+  isSameAssistantDeferredContextRoute,
+} from './automation/grouping.js'
 export type {
   AssistantAutoReplyHistoryMetrics,
 } from './automation/reply.js'
@@ -25,6 +28,7 @@ export {
   hasCompleteAssistantAutoReplyTerminalEvidence,
   listPendingAssistantAutoReplyLinqCleanupEvidence,
   markAssistantAutoReplyLinqCleanupQueued,
+  writeAssistantAutoReplySuppressionEvidence,
 } from './automation/evidence.js'
 export {
   compareAssistantInputCursors,

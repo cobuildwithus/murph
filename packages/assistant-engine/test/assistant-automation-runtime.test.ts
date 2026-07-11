@@ -331,6 +331,7 @@ function createAutomationInputSummary(input: {
     text: 'hello',
     attachmentCount: 0,
     actorIsSelf: false,
+    contextOnly: false,
     replyToMessageId: null,
   }
 }
@@ -690,6 +691,40 @@ function createAssistantInputSourceForCaptures(
   }
 }
 
+function createAssistantInputSourceForCandidates(
+  candidates: readonly AssistantInputCandidate[],
+): AssistantInputSource {
+  return {
+    refresh: vi.fn(async () => ({
+      progressed: false,
+      reason: 'no_new_input' as const,
+    })),
+    listInputCandidates: vi.fn(async (input) => {
+      const selected = candidates
+        .filter((candidate) =>
+          input.sourceId ? candidate.event.source === input.sourceId : true,
+        )
+        .filter((candidate) =>
+          input.afterCursor
+            ? compareAssistantInputCursors(candidate.event.cursor, input.afterCursor) > 0
+            : true,
+        )
+        .sort((left, right) =>
+          compareAssistantInputCursors(left.event.cursor, right.event.cursor),
+        )
+        .slice(0, input.limit ?? candidates.length)
+      return {
+        inputs: selected,
+        nextCursor: selected.at(-1)?.event.cursor ?? input.afterCursor ?? null,
+      }
+    }),
+    listNewConversationInputs: vi.fn(async () => ({
+      inputs: [],
+      nextCursor: null,
+    })),
+  }
+}
+
 function assistantInputCandidateFromInboxCapture(
   capture: ReturnType<typeof createCaptureSummary>,
 ): AssistantInputCandidate {
@@ -760,6 +795,7 @@ function assistantInputCandidateFromInboxCapture(
 }
 
 function createCapturelessAssistantInputCandidate(input: {
+  actorId?: string
   actorIsSelf?: boolean
   conversationThreadId?: string | null
   inputId: string
@@ -777,6 +813,7 @@ function createCapturelessAssistantInputCandidate(input: {
   source?: string
   sourceMetadata?: AssistantInputCandidate['event']['sourceMetadata']
   text: string
+  threadIsDirect?: boolean
 }): AssistantInputCandidate {
   const source = input.source ?? 'linq'
   return {
@@ -798,11 +835,11 @@ function createCapturelessAssistantInputCandidate(input: {
       attachmentDescriptors: [],
       conversation: {
         accountId: 'safe_acct_1',
-        actorId: 'safe_actor_1',
+        actorId: input.actorId ?? 'safe_actor_1',
         actorIsSelf: input.actorIsSelf ?? false,
         source,
         threadId: input.conversationThreadId ?? 'safe_thread_1',
-        threadIsDirect: true,
+        threadIsDirect: input.threadIsDirect ?? true,
       },
       cursor: {
         createdAt: input.receivedAt ?? input.occurredAt,
@@ -960,6 +997,8 @@ function createReplyGroupItem(
       text: capture.text,
       attachmentCount: capture.attachmentCount,
       actorIsSelf: capture.actorIsSelf,
+      contextOnly:
+        metadata?.kind === 'linq' && metadata.contextOnly === true,
       replyToMessageId:
         metadata?.kind === 'linq' ? metadata.replyToMessageId ?? null : null,
       captureId: capture.captureId,
@@ -978,6 +1017,8 @@ function createCapturelessReplyGroupItem(
     summary: {
       attachmentCount: candidate.event.attachmentCount,
       actorIsSelf: conversation?.actorIsSelf ?? false,
+      contextOnly:
+        metadata?.kind === 'linq' && metadata.contextOnly === true,
       conversation: conversation ?? {
         accountId: null,
         actorId: null,
@@ -1631,6 +1672,288 @@ describe('assistant automation scanner', () => {
     expect(cursor).toEqual(createReplyGroupItem(second).inputCandidate.event.cursor)
     expect(scannerReplyMocks.processAssistantAutoReplyGroup).toHaveBeenCalledWith(
       expect.objectContaining({ onProviderEvent }),
+    )
+  })
+
+  it('groups deferred Linq reaction context with the next group message across actors', async () => {
+    const reaction = createCapturelessAssistantInputCandidate({
+      actorId: 'safe_actor_alice',
+      conversationThreadId: 'safe_group_a',
+      inputId: 'ain_0001_reaction_alice',
+      occurredAt: '2026-04-08T00:01:00.000Z',
+      sourceMetadata: {
+        contextOnly: true,
+        kind: 'linq',
+        partCount: 1,
+        reactionEligible: false,
+        replyToMessageId: null,
+        service: null,
+      },
+      text: 'Alice added a reaction.',
+      threadIsDirect: false,
+    })
+    const message = createCapturelessAssistantInputCandidate({
+      actorId: 'safe_actor_bob',
+      conversationThreadId: 'safe_group_a',
+      inputId: 'ain_0002_message_bob',
+      occurredAt: '2026-04-08T00:02:00.000Z',
+      sourceMetadata: {
+        kind: 'linq',
+        partCount: 1,
+        reactionEligible: false,
+        replyToMessageId: null,
+        service: null,
+      },
+      text: 'Bob sent the next group message.',
+      threadIsDirect: false,
+    })
+    const grouping = await vi.importActual<
+      typeof import('../src/assistant/automation/grouping.ts')
+    >('../src/assistant/automation/grouping.ts')
+    groupingMocks.collectAssistantAutoReplyGroup.mockImplementation(
+      grouping.collectAssistantAutoReplyGroup,
+    )
+    scannerReplyMocks.processAssistantAutoReplyGroup.mockResolvedValueOnce({
+      advanceCursor: true,
+      failed: 0,
+      replied: 1,
+      skipped: 0,
+      stopScanning: false,
+    })
+    const stateUpdates: AssistantAutomationState[] = []
+    const scanner = await vi.importActual<typeof import('../src/assistant/automation/scanner.ts')>(
+      '../src/assistant/automation/scanner.ts',
+    )
+
+    await scanner.scanAssistantAutomationOnce({
+      inboxServices: createInboxServices(),
+      inputSource: createAssistantInputSourceForCandidates([reaction, message]),
+      onStateProgress: async (next) => {
+        stateUpdates.push({
+          ...createAutomationState(),
+          autoReply: [...next.autoReply],
+        })
+      },
+      state: createAutomationState({ autoReplyChannels: ['linq'] }),
+      vault: '/tmp/assistant-automation-vault',
+    })
+
+    expect(scannerReplyMocks.processAssistantAutoReplyGroup).toHaveBeenCalledOnce()
+    expect(scannerReplyMocks.processAssistantAutoReplyGroup).toHaveBeenCalledWith(
+      expect.objectContaining({
+        context: expect.objectContaining({
+          inputIds: [reaction.event.inputId, message.event.inputId],
+        }),
+      }),
+    )
+    expect(readAutoReplyCursor(
+      stateUpdates.at(-1) ?? createAutomationState(),
+      'linq',
+    )).toEqual(message.event.cursor)
+  })
+
+  it('keeps interleaved group context behind the cursor until its group becomes actionable', async () => {
+    const reactionA = createCapturelessAssistantInputCandidate({
+      actorId: 'safe_actor_alice',
+      conversationThreadId: 'safe_group_a',
+      inputId: 'ain_0001_reaction_group_a',
+      occurredAt: '2026-04-08T00:01:00.000Z',
+      sourceMetadata: {
+        contextOnly: true,
+        kind: 'linq',
+        partCount: 1,
+        reactionEligible: false,
+        replyToMessageId: null,
+        service: null,
+      },
+      text: 'Group A reaction context.',
+      threadIsDirect: false,
+    })
+    const messageB = createCapturelessAssistantInputCandidate({
+      actorId: 'safe_actor_bob',
+      conversationThreadId: 'safe_group_b',
+      inputId: 'ain_0002_message_group_b',
+      occurredAt: '2026-04-08T00:02:00.000Z',
+      sourceMetadata: {
+        kind: 'linq',
+        partCount: 1,
+        reactionEligible: false,
+        replyToMessageId: null,
+        service: null,
+      },
+      text: 'Group B actionable message.',
+      threadIsDirect: false,
+    })
+    const messageA = createCapturelessAssistantInputCandidate({
+      actorId: 'safe_actor_charlie',
+      conversationThreadId: 'safe_group_a',
+      inputId: 'ain_0003_message_group_a',
+      occurredAt: '2026-04-08T00:03:00.000Z',
+      sourceMetadata: {
+        kind: 'linq',
+        partCount: 1,
+        reactionEligible: false,
+        replyToMessageId: null,
+        service: null,
+      },
+      text: 'Group A actionable message.',
+      threadIsDirect: false,
+    })
+    const grouping = await vi.importActual<
+      typeof import('../src/assistant/automation/grouping.ts')
+    >('../src/assistant/automation/grouping.ts')
+    groupingMocks.collectAssistantAutoReplyGroup.mockImplementation(
+      grouping.collectAssistantAutoReplyGroup,
+    )
+    scannerReplyMocks.processAssistantAutoReplyGroup
+      .mockResolvedValueOnce({
+        advanceCursor: true,
+        failed: 0,
+        replied: 1,
+        skipped: 0,
+        stopScanning: false,
+      })
+      .mockResolvedValueOnce({
+        advanceCursor: false,
+        failed: 0,
+        replied: 0,
+        skipped: 1,
+        stopScanning: true,
+      })
+    const firstStateUpdates: AssistantAutomationState[] = []
+    const scanner = await vi.importActual<typeof import('../src/assistant/automation/scanner.ts')>(
+      '../src/assistant/automation/scanner.ts',
+    )
+
+    await scanner.scanAssistantAutomationOnce({
+      inboxServices: createInboxServices(),
+      inputSource: createAssistantInputSourceForCandidates([reactionA, messageB]),
+      onStateProgress: async (next) => {
+        firstStateUpdates.push({
+          ...createAutomationState(),
+          autoReply: [...next.autoReply],
+        })
+      },
+      state: createAutomationState({ autoReplyChannels: ['linq'] }),
+      vault: '/tmp/assistant-automation-vault',
+    })
+
+    expect(firstStateUpdates).toEqual([])
+    expect(scannerReplyMocks.processAssistantAutoReplyGroup.mock.calls[0]?.[0])
+      .toEqual(expect.objectContaining({
+        context: expect.objectContaining({ inputIds: [messageB.event.inputId] }),
+      }))
+
+    evidenceMocks.hasCompleteAssistantAutoReplyTerminalEvidence
+      .mockImplementation(async ({ inputId }: { inputId: string }) =>
+        inputId === messageB.event.inputId,
+      )
+    scannerReplyMocks.processAssistantAutoReplyGroup.mockReset().mockResolvedValue({
+      advanceCursor: true,
+      failed: 0,
+      replied: 1,
+      skipped: 0,
+      stopScanning: false,
+    })
+    const resumedStateUpdates: AssistantAutomationState[] = []
+
+    await scanner.scanAssistantAutomationOnce({
+      inboxServices: createInboxServices(),
+      inputSource: createAssistantInputSourceForCandidates([
+        reactionA,
+        messageB,
+        messageA,
+      ]),
+      onStateProgress: async (next) => {
+        resumedStateUpdates.push({
+          ...createAutomationState(),
+          autoReply: [...next.autoReply],
+        })
+      },
+      state: createAutomationState({ autoReplyChannels: ['linq'] }),
+      vault: '/tmp/assistant-automation-vault',
+    })
+
+    expect(scannerReplyMocks.processAssistantAutoReplyGroup).toHaveBeenCalledOnce()
+    expect(scannerReplyMocks.processAssistantAutoReplyGroup).toHaveBeenCalledWith(
+      expect.objectContaining({
+        context: expect.objectContaining({
+          inputIds: [reactionA.event.inputId, messageA.event.inputId],
+        }),
+      }),
+    )
+    expect(readAutoReplyCursor(
+      resumedStateUpdates.at(-1) ?? createAutomationState(),
+      'linq',
+    )).toEqual(messageA.event.cursor)
+  })
+
+  it('scans past more than one candidate window of reaction context', async () => {
+    const reactions = Array.from({ length: 51 }, (_, index) =>
+      createCapturelessAssistantInputCandidate({
+        actorId: `safe_actor_${String(index).padStart(2, '0')}`,
+        conversationThreadId: 'safe_group_a',
+        inputId: `ain_reaction_${String(index).padStart(3, '0')}`,
+        occurredAt: `2026-04-08T00:01:${String(index).padStart(2, '0')}.000Z`,
+        sourceMetadata: {
+          contextOnly: true,
+          kind: 'linq',
+          partCount: 1,
+          reactionEligible: false,
+          replyToMessageId: null,
+          service: null,
+        },
+        text: `Reaction context ${index}.`,
+        threadIsDirect: false,
+      }),
+    )
+    const message = createCapturelessAssistantInputCandidate({
+      actorId: 'safe_actor_message',
+      conversationThreadId: 'safe_group_a',
+      inputId: 'ain_z_message_after_reactions',
+      occurredAt: '2026-04-08T00:03:00.000Z',
+      sourceMetadata: {
+        kind: 'linq',
+        partCount: 1,
+        reactionEligible: false,
+        replyToMessageId: null,
+        service: null,
+      },
+      text: 'Actionable message after reaction backlog.',
+      threadIsDirect: false,
+    })
+    const grouping = await vi.importActual<
+      typeof import('../src/assistant/automation/grouping.ts')
+    >('../src/assistant/automation/grouping.ts')
+    groupingMocks.collectAssistantAutoReplyGroup.mockImplementation(
+      grouping.collectAssistantAutoReplyGroup,
+    )
+    scannerReplyMocks.processAssistantAutoReplyGroup.mockResolvedValueOnce({
+      advanceCursor: true,
+      failed: 0,
+      replied: 1,
+      skipped: 0,
+      stopScanning: false,
+    })
+    const scanner = await vi.importActual<typeof import('../src/assistant/automation/scanner.ts')>(
+      '../src/assistant/automation/scanner.ts',
+    )
+
+    await scanner.scanAssistantAutomationOnce({
+      inboxServices: createInboxServices(),
+      inputSource: createAssistantInputSourceForCandidates([...reactions, message]),
+      state: createAutomationState({ autoReplyChannels: ['linq'] }),
+      vault: '/tmp/assistant-automation-vault',
+    })
+
+    expect(scannerReplyMocks.processAssistantAutoReplyGroup).toHaveBeenCalledOnce()
+    expect(scannerReplyMocks.processAssistantAutoReplyGroup).toHaveBeenCalledWith(
+      expect.objectContaining({
+        context: expect.objectContaining({
+          inputCount: 52,
+          inputIds: [...reactions.map((reaction) => reaction.event.inputId), message.event.inputId],
+        }),
+      }),
     )
   })
 

@@ -1,11 +1,11 @@
 import { createHash } from "node:crypto";
 
 import type {
-  HostedExecutionConversationMessageWake,
+  HostedExecutionConversationWake,
 } from "@murphai/hosted-execution";
 import {
   isHostedEmailConversationMessageWake,
-  isHostedLinqConversationMessageWake,
+  isHostedLinqConversationWake,
   isHostedTelegramConversationMessageWake,
   isHostedWhatsAppConversationMessageWake,
   readHostedLinqConversationMessageAccountLookupKey,
@@ -115,7 +115,7 @@ class HostedConversationEventsModuleLoadError extends Error {
 export type HostedConversationMailboxPayloadDecodeResult =
   | {
       status: "decoded";
-      wake: HostedExecutionConversationMessageWake;
+      wake: HostedExecutionConversationWake;
     }
   | {
       reasonCode: string;
@@ -164,7 +164,7 @@ export type HostedConversationMailboxLocalImporter = (input: {
   runtime: HostedConversationMailboxRuntime;
   signal?: AbortSignal | null;
   vaultRoot: string;
-  wake: HostedExecutionConversationMessageWake;
+  wake: HostedExecutionConversationWake;
 }) => Promise<HostedConversationMailboxLocalImportResult>;
 
 export interface HostedConversationMailboxAssistantInputProjectionUpdate {
@@ -188,7 +188,7 @@ export type HostedConversationMailboxAssistantInputStager = (input: {
   item: HostedMailboxResolvedImportItem;
   pendingReplyEligible: boolean;
   vaultRoot: string;
-  wake: HostedExecutionConversationMessageWake;
+  wake: HostedExecutionConversationWake;
 }) => Promise<HostedConversationMailboxAssistantInputStageResult>;
 
 export interface HostedConversationMailboxAttachmentEvidenceCapture {
@@ -210,7 +210,7 @@ export type HostedConversationMailboxAttachmentEvidenceCaptureLoader = (input: {
 export type HostedConversationMailboxWakeContextPreparer = (input: {
   runtime: HostedConversationMailboxRuntime;
   vaultRoot: string;
-  wake: HostedExecutionConversationMessageWake;
+  wake: HostedExecutionConversationWake;
 }) => Promise<void>;
 
 export type HostedConversationMailboxImportOutcome =
@@ -238,7 +238,7 @@ export function createHostedConversationMailboxImportItem(input: {
   decodePayload: HostedConversationMailboxPayloadDecoder;
   importConversationWake?: HostedConversationMailboxLocalImporter;
   loadAttachmentEvidenceCapture?: HostedConversationMailboxAttachmentEvidenceCaptureLoader;
-  onDecodedConversationWake?(wake: HostedExecutionConversationMessageWake): void;
+  onDecodedConversationWake?(wake: HostedExecutionConversationWake): void;
   prepareWakeContext?: HostedConversationMailboxWakeContextPreparer;
   runtime: HostedConversationMailboxRuntime;
   stageAssistantInputEvent?: HostedConversationMailboxAssistantInputStager;
@@ -270,7 +270,7 @@ export async function importHostedConversationMailboxItem(input: {
   prepareWakeContext?: HostedConversationMailboxWakeContextPreparer;
   item: HostedMailboxResolvedImportItem;
   latencyMilestones?: HostedRuntimeLatencyTraceStagedMilestones | null;
-  onDecodedConversationWake?(wake: HostedExecutionConversationMessageWake): void;
+  onDecodedConversationWake?(wake: HostedExecutionConversationWake): void;
   onConversationInputStaged?: (() => void) | null;
   runtime: HostedConversationMailboxRuntime;
   runtimeAttemptId?: string | null;
@@ -280,7 +280,10 @@ export async function importHostedConversationMailboxItem(input: {
 }): Promise<HostedConversationMailboxImportOutcome> {
   if (
     input.item.route.action !== "import-conversation-message"
-    || input.item.item.kind !== "conversation.message"
+    || (
+      input.item.item.kind !== "conversation.message"
+      && input.item.item.kind !== "conversation.reaction"
+    )
   ) {
     return {
       reasonCode: "conversation_import.unexpected_route",
@@ -337,7 +340,7 @@ export async function importHostedConversationMailboxItem(input: {
     ?? loadHostedConversationAttachmentEvidenceCapture;
   const prepareWakeContext =
     input.prepareWakeContext ?? prepareHostedConversationMailboxWakeContext;
-  let pendingReplyEligible = true;
+  let pendingReplyEligible = decoded.wake.kind === "conversation.message";
   let autoReplyPreparedAtEpochMs: number | null = null;
   let pendingIndexEnsuredAtEpochMs: number | null = null;
   assertHostedConversationMailboxImportLive(input.signal ?? null);
@@ -353,10 +356,11 @@ export async function importHostedConversationMailboxItem(input: {
       input.runtime.resolvedConfig,
     );
     autoReplyPreparedAtEpochMs = Date.now();
-    pendingReplyEligible = isHostedConversationMailboxPendingReplyEligible({
-      assistantRuntimeState,
-      wake: decoded.wake,
-    });
+    pendingReplyEligible = decoded.wake.kind === "conversation.message"
+      && isHostedConversationMailboxPendingReplyEligible({
+        assistantRuntimeState,
+        wake: decoded.wake,
+      });
   }
 
   assertHostedConversationMailboxImportLive(input.signal ?? null);
@@ -383,20 +387,22 @@ export async function importHostedConversationMailboxItem(input: {
       pendingIndexEnsuredAtEpochMs,
       stagedAtEpochMs: Date.now(),
     });
-    notifyConversationInputStagedBestEffort(input.onConversationInputStaged ?? null);
-    recordHostedConversationLatencyTraceAssistantInputStagedBestEffort({
-      inputId: stagedInput.inputId,
-      item: input.item,
-      latencyMilestones,
-      runtime: input.runtime,
-      runtimeAttemptId: input.runtimeAttemptId ?? null,
-      wake: decoded.wake,
-    });
-    await notifyAssistantActiveTurnInputAvailableForInputIds({
-      inputIds: [stagedInput.inputId],
-      ...(input.signal ? { signal: input.signal } : {}),
-      vault: input.vaultRoot,
-    });
+    if (decoded.wake.kind === "conversation.message") {
+      notifyConversationInputStagedBestEffort(input.onConversationInputStaged ?? null);
+      recordHostedConversationLatencyTraceAssistantInputStagedBestEffort({
+        inputId: stagedInput.inputId,
+        item: input.item,
+        latencyMilestones,
+        runtime: input.runtime,
+        runtimeAttemptId: input.runtimeAttemptId ?? null,
+        wake: decoded.wake,
+      });
+      await notifyAssistantActiveTurnInputAvailableForInputIds({
+        inputIds: [stagedInput.inputId],
+        ...(input.signal ? { signal: input.signal } : {}),
+        vault: input.vaultRoot,
+      });
+    }
   }
 
   const linqDeliveryContext = buildHostedAssistantLinqDeliveryContextFromWake(
@@ -484,7 +490,7 @@ function recordHostedConversationLatencyTraceAssistantInputStagedBestEffort(inpu
   latencyMilestones?: HostedRuntimeLatencyTraceStagedMilestones | null;
   runtime: Pick<NormalizedHostedAssistantRuntimeConfig, "platform">;
   runtimeAttemptId?: string | null;
-  wake: HostedExecutionConversationMessageWake;
+  wake: HostedExecutionConversationWake;
 }): void {
   const source = readHostedIngressLatencySource(input.wake.message.channel);
   if (!source) {
@@ -532,7 +538,7 @@ function recordHostedConversationLatencyTraceAssistantInputStagedBestEffort(inpu
 
 function sanitizeHostedConversationWakeLatencyMilestones(input: {
   latencyMilestones?: HostedRuntimeLatencyTraceStagedMilestones | null;
-  wake: HostedExecutionConversationMessageWake;
+  wake: HostedExecutionConversationWake;
 }): HostedRuntimeLatencyTraceStagedMilestones | null {
   const latencyMilestones = input.latencyMilestones ?? null;
   const phaseBreakdown = latencyMilestones?.phaseBreakdown;
@@ -586,7 +592,7 @@ async function projectHostedConversationAssistantInputBestEffort(input: {
   signal?: AbortSignal | null;
   stagedInput: HostedConversationMailboxAssistantInputStageResult;
   vaultRoot: string;
-  wake: HostedExecutionConversationMessageWake;
+  wake: HostedExecutionConversationWake;
 }): Promise<{
   effect: HostedMailboxPostCheckpointEffectResult;
   parserRetry: boolean;
@@ -831,7 +837,7 @@ async function importHostedConversationWakeWithLocalInbox(input: {
   runtime: HostedConversationMailboxRuntime;
   signal?: AbortSignal | null;
   vaultRoot: string;
-  wake: HostedExecutionConversationMessageWake;
+  wake: HostedExecutionConversationWake;
 }): Promise<HostedConversationMailboxLocalImportResult> {
   const {
     importHostedConversationMessageWakeIntoLocalInbox,
@@ -860,7 +866,7 @@ async function stageHostedConversationAssistantInputEvent(input: {
   item: HostedMailboxResolvedImportItem;
   pendingReplyEligible: boolean;
   vaultRoot: string;
-  wake: HostedExecutionConversationMessageWake;
+  wake: HostedExecutionConversationWake;
 }): Promise<HostedConversationMailboxAssistantInputStageResult> {
   const event = await upsertAssistantInputEvent({
     event: createHostedConversationAssistantInputEvent({
@@ -883,7 +889,10 @@ async function stageHostedConversationAssistantInputEvent(input: {
       vault: input.vaultRoot,
     });
   }
-  if (input.pendingReplyEligible && event.replyTarget) {
+  if (
+    (input.pendingReplyEligible && event.replyTarget)
+    || input.wake.kind === "conversation.reaction"
+  ) {
     await enqueueHostedPendingAssistantInputId({
       inputId: event.inputId,
       vaultRoot: input.vaultRoot,
@@ -939,7 +948,7 @@ async function stageHostedConversationAssistantInputEvent(input: {
 
 function isHostedConversationMailboxPendingReplyEligible(input: {
   assistantRuntimeState: HostedAssistantAutoReplyReadinessState;
-  wake: HostedExecutionConversationMessageWake;
+  wake: HostedExecutionConversationWake;
 }): boolean {
   if (!input.assistantRuntimeState.assistantConfigured) {
     return false;
@@ -1047,7 +1056,7 @@ function isUsefulHostedAttachmentEvidence(
 
 function createHostedConversationAssistantInputEvent(input: {
   item: HostedMailboxResolvedImportItem;
-  wake: HostedExecutionConversationMessageWake;
+  wake: HostedExecutionConversationWake;
 }): UpsertAssistantInputEventInput {
   const identifierBlind = createHostedAssistantConversationIdentifierBlind({
     secret: readHostedConversationAssistantIdentifierSecret(input.wake),
@@ -1071,7 +1080,7 @@ function createHostedConversationAssistantInputEvent(input: {
     // again. assistant-engine automation/reply.ts gates reply eligibility on a
     // replyTarget channel match (reply.ts:1600, 2073), so staging a null
     // replyTarget keeps the event context-only.
-    replyTarget: input.item.durablyConsumed === true
+    replyTarget: input.item.durablyConsumed === true || input.wake.kind === "conversation.reaction"
       ? null
       : createHostedConversationAssistantInputReplyTarget(
           input.wake,
@@ -1105,7 +1114,7 @@ function createHostedConversationAssistantInputEvent(input: {
 }
 
 function createHostedConversationAssistantInputContent(
-  wake: HostedExecutionConversationMessageWake,
+  wake: HostedExecutionConversationWake,
   identifierBlind: HostedAssistantConversationIdentifierBlind,
 ): UpsertAssistantInputEventInput["content"] {
   const text = createHostedConversationAssistantInputText(wake);
@@ -1128,9 +1137,9 @@ function createHostedConversationAssistantInputContent(
 }
 
 function createHostedConversationAssistantInputText(
-  wake: HostedExecutionConversationMessageWake,
+  wake: HostedExecutionConversationWake,
 ): string {
-  if (isHostedLinqConversationMessageWake(wake)) {
+  if (isHostedLinqConversationWake(wake)) {
     const textParts = wake.message.linqMessage.parts
       .filter((part) => part.type === "text")
       .map((part) => part.value);
@@ -1173,9 +1182,9 @@ function createHostedConversationAssistantInputText(
 }
 
 function createHostedEmailConversationAssistantInputText(
-  wake: HostedExecutionConversationMessageWake & {
+  wake: HostedExecutionConversationWake & {
     message: Extract<
-      HostedExecutionConversationMessageWake["message"],
+      HostedExecutionConversationWake["message"],
       { channel: "email" }
     >;
   },
@@ -1212,7 +1221,7 @@ function createHostedEmailConversationAssistantInputText(
 }
 
 function buildHostedEmailConversationPromptFields(
-  message: Extract<HostedExecutionConversationMessageWake["message"], { channel: "email" }>,
+  message: Extract<HostedExecutionConversationWake["message"], { channel: "email" }>,
 ): {
   cc?: string[];
   from?: string | null;
@@ -1299,10 +1308,10 @@ function renderHostedEmailPromptListLine(
 }
 
 function createHostedConversationAssistantInputConversation(
-  wake: HostedExecutionConversationMessageWake,
+  wake: HostedExecutionConversationWake,
   identifierBlind: HostedAssistantConversationIdentifierBlind,
 ): UpsertAssistantInputEventInput["conversation"] {
-  if (isHostedLinqConversationMessageWake(wake)) {
+  if (isHostedLinqConversationWake(wake)) {
     const accountLookupKey = readHostedLinqConversationMessageAccountLookupKey(wake.message);
     return {
       accountId: hashNullableHostedAssistantConversationIdentifier(
@@ -1385,9 +1394,9 @@ function createHostedConversationAssistantInputConversation(
 }
 
 function readHostedConversationAssistantIdentifierSecret(
-  wake: HostedExecutionConversationMessageWake,
+  wake: HostedExecutionConversationWake,
 ): string {
-  if (isHostedLinqConversationMessageWake(wake)) {
+  if (isHostedLinqConversationWake(wake)) {
     return readHostedLinqConversationMessageAccountLookupKey(wake.message);
   }
 
@@ -1413,9 +1422,12 @@ function readHostedConversationAssistantIdentifierSecret(
 }
 
 function createHostedConversationAssistantInputReplyTarget(
-  wake: HostedExecutionConversationMessageWake,
+  wake: HostedExecutionConversationWake,
 ): UpsertAssistantInputEventInput["replyTarget"] {
-  if (isHostedLinqConversationMessageWake(wake)) {
+  if (wake.kind === "conversation.reaction") {
+    return null;
+  }
+  if (isHostedLinqConversationWake(wake)) {
     return {
       channel: "linq",
       messageId: normalizeHostedAssistantInputReplyTargetIdentifier(
@@ -1478,13 +1490,14 @@ function normalizeHostedAssistantInputReplyTargetIdentifier(
 }
 
 function createHostedConversationAssistantInputSourceMetadata(
-  wake: HostedExecutionConversationMessageWake,
+  wake: HostedExecutionConversationWake,
   identifierBlind: HostedAssistantConversationIdentifierBlind,
 ): UpsertAssistantInputEventInput["sourceMetadata"] {
-  if (isHostedLinqConversationMessageWake(wake)) {
+  if (isHostedLinqConversationWake(wake)) {
     const externalThreadRouteAuthorityPresent = wake.message.routeAuthority !== undefined
       && wake.message.routeAuthority !== null;
     return {
+      ...(wake.kind === "conversation.reaction" ? { contextOnly: true } : {}),
       externalThreadRouteAuthorityPresent,
       kind: "linq",
       partCount: wake.message.linqMessage.parts.length,
@@ -1562,10 +1575,10 @@ function normalizeHostedAssistantInputSourceMetadataToken(
 }
 
 function createHostedConversationAssistantInputAttachmentDescriptors(
-  wake: HostedExecutionConversationMessageWake,
+  wake: HostedExecutionConversationWake,
   identifierBlind: HostedAssistantConversationIdentifierBlind,
 ): AssistantInputAttachmentDescriptor[] {
-  if (isHostedLinqConversationMessageWake(wake)) {
+  if (isHostedLinqConversationWake(wake)) {
     return wake.message.linqMessage.parts.flatMap((part, index) => {
       if (part.type !== "media" && part.type !== "voice_memo") {
         return [];
@@ -1762,10 +1775,11 @@ function normalizeHostedAssistantInputSize(value: number | null | undefined): nu
 }
 
 function decodedWakeMatchesMailboxItem(
-  wake: HostedExecutionConversationMessageWake,
+  wake: HostedExecutionConversationWake,
   item: HostedMailboxResolvedImportItem["item"],
 ): boolean {
-  return wake.kind === "conversation.message"
+  return wake.kind === item.kind
+    && (wake.kind === "conversation.message" || wake.kind === "conversation.reaction")
     && wake.userId === item.userId
     && wake.occurredAt === item.occurredAt
     && wake.eventId === item.dedupeKey;
@@ -1777,7 +1791,7 @@ async function prepareHostedConversationMailboxWakeContext(input: {
     "forwardedEnv" | "resolvedConfig" | "userEnv"
   >;
   vaultRoot: string;
-  wake: HostedExecutionConversationMessageWake;
+  wake: HostedExecutionConversationWake;
 }): Promise<void> {
   void input.runtime;
   await prepareHostedInboxProjectionRuntime(

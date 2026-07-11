@@ -88,6 +88,9 @@ import {
 import {
   handleHostedGroupJoinOfferReaction,
 } from "../hosted-groups/join-offer-reaction";
+import {
+  stageHostedLinqGroupReactionContext,
+} from "./webhook-provider-linq-reaction";
 import type {
   HostedOnboardingLinqGroupRosterReconcile,
 } from "./webhook-provider-linq-types";
@@ -179,13 +182,25 @@ export async function handleHostedOnboardingLinqWebhook(input: {
         event: providerEvent,
         prisma,
       });
+      const joinAccepted = reactionResult.status === "accepted";
+      const contextResult = await stageHostedLinqGroupReactionContext({
+        event: providerEvent,
+        prisma,
+        ...(input.signal ? { signal: input.signal } : {}),
+      });
+      const contextStaged = contextResult.status === "staged";
       const response: HostedOnboardingLinqWebhookResponse = {
-        duplicate: providerResult.duplicate || undefined,
-        ignored: reactionResult.status !== "accepted",
+        duplicate:
+          providerResult.duplicate
+          || (contextResult.status === "staged" && contextResult.duplicate)
+          || undefined,
+        ignored: !joinAccepted && !contextStaged,
         ok: true,
-        reason: reactionResult.status === "accepted"
+        reason: joinAccepted
           ? "accepted-linq-group-join-offer-reaction"
-          : `skipped-linq-group-join-offer-reaction:${reactionResult.reason}`,
+          : contextResult.status === "staged"
+            ? "staged-linq-group-reaction-context"
+            : `skipped-linq-group-reaction-context:${contextResult.reason}`,
       };
       responseReason = response.reason ?? null;
       finishHostedOnboardingTiming(timing, "completed", {

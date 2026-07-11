@@ -41,6 +41,7 @@ export type HostedMailboxLane = (typeof HOSTED_MAILBOX_LANES)[number];
 
 export const HOSTED_MAILBOX_KINDS = [
   "conversation.message",
+  "conversation.reaction",
   "member.activated",
   "member.channels.updated",
   "member.preferences.updated",
@@ -53,6 +54,14 @@ export const HOSTED_MAILBOX_KINDS = [
 ] as const;
 
 export type HostedMailboxKind = (typeof HOSTED_MAILBOX_KINDS)[number];
+
+/** Mailbox facts that are imported as context but never signal runtime work. */
+export const HOSTED_NON_WAKEABLE_MAILBOX_KINDS = [
+  "conversation.reaction",
+] as const satisfies readonly HostedMailboxKind[];
+
+export type HostedNonWakeableMailboxKind =
+  (typeof HOSTED_NON_WAKEABLE_MAILBOX_KINDS)[number];
 
 export const HOSTED_RUNTIME_CONTROL_MAILBOX_KINDS =
   HOSTED_EXECUTION_RUNTIME_CONTROL_WAKE_KINDS;
@@ -2170,4 +2179,12 @@ export function isHostedMailboxLane(value: string): value is HostedMailboxLane {
 
 export function isHostedMailboxKind(value: string): value is HostedMailboxKind {
   return HOSTED_MAILBOX_KINDS.includes(value as HostedMailboxKind);
+}
+
+export function isHostedNonWakeableMailboxKind(
+  value: string,
+): value is HostedNonWakeableMailboxKind {
+  return HOSTED_NON_WAKEABLE_MAILBOX_KINDS.includes(
+    value as HostedNonWakeableMailboxKind,
+  );
 }

@@ -62,6 +62,7 @@ const SUPPORTED_MAILBOX_LANES: readonly string[] = HOSTED_MAILBOX_LANES;
 const ACTION_BY_KIND = {
   "assistant.notification.requested": "dispatch-assistant-notification",
   "conversation.message": "import-conversation-message",
+  "conversation.reaction": "import-conversation-message",
   "device-sync.wake": "run-device-sync-wake",
   "group-newsletter.email-needed": "import-group-newsletter-email-needed",
   "member.activated": "apply-member-activation",
@@ -124,7 +125,9 @@ export function createHostedMailboxRoutingPlan(
 export function resolveExpectedLaneForHostedMailboxKind(
   kind: HostedMailboxKind,
 ): HostedMailboxLane {
-  return kind === "conversation.message" ? "conversation" : "system";
+  return kind === "conversation.message" || kind === "conversation.reaction"
+    ? "conversation"
+    : "system";
 }
 
 function quarantine(

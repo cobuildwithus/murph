@@ -1081,6 +1081,40 @@ describe("fetchHostedMailboxItemsAfterLaneCursors", () => {
     ]);
   });
 
+  it("excludes deferred conversation context from wakeable lane high water", async () => {
+    const hostedMailboxItem = createHostedMailboxItemDelegate({
+      findFirst: vi.fn<HostedMailboxItemFindFirst>(async () => null),
+    });
+    const hostedMailboxPayload = createHostedMailboxPayloadDelegate();
+    const prisma = createHostedMailboxClient({
+      hostedMailboxItem,
+      hostedMailboxPayload,
+    });
+
+    const result = await readHostedMailboxMaxSeqByLane({
+      lanes: ["conversation"],
+      prisma,
+      userId: "member_mailbox_1",
+      wakeableOnly: true,
+    });
+
+    expect(hostedMailboxItem.findFirst).toHaveBeenCalledWith({
+      orderBy: {
+        laneSeq: "desc",
+      },
+      where: expectLiveHostedMailboxWhere({
+        kind: "conversation.message",
+        lane: "conversation",
+        userId: "member_mailbox_1",
+      }),
+    });
+    expect(result).toEqual([{
+      lane: "conversation",
+      maxSeq: "0",
+      maxUpdatedAt: null,
+    }]);
+  });
+
   it("checks whether a member has any mailbox item for a given kind", async () => {
     const hostedMailboxItem = createHostedMailboxItemDelegate({
       findFirst: vi.fn<HostedMailboxItemFindFirst>(async () => buildHostedMailboxItemRow({

@@ -129,8 +129,10 @@ describe("parseHostedLinqProviderEvent", () => {
           },
           line: { phone_number: "+15550000000" },
           message_id: "msg_offer_123",
+          part_index: 2,
           reacted_at: "2026-03-26T12:01:00.000Z",
           reaction_type: "custom",
+          is_from_me: false,
         },
         eventType: "reaction.added",
       }),
@@ -143,6 +145,8 @@ describe("parseHostedLinqProviderEvent", () => {
       phoneNumberRole: "line",
       reactionCustomEmoji: "👍🏽",
       reactionFromHandle: "+15551234567",
+      reactionIsFromMe: false,
+      reactionPartIndex: 2,
       reactionType: "custom",
     });
     expect(parsed?.providerCreatedAt.toISOString()).toBe("2026-03-26T12:01:00.000Z");

@@ -198,6 +198,36 @@ export type HostedLinqChatSummary = {
   isGroup: boolean | null;
 };
 
+export type HostedLinqReactionTargetPart =
+  | {
+      type: "imessage_app";
+      visibleText: string[];
+    }
+  | {
+      fileName: string;
+      mimeType: string;
+      type: "media";
+    }
+  | {
+      type: "link" | "text";
+      value: string;
+    }
+  | {
+      type: "unsupported";
+    };
+
+export type HostedLinqReactionTargetMessage = {
+  chatId: string;
+  id: string;
+  isFromMe: boolean;
+  parts: HostedLinqReactionTargetPart[];
+  service: string | null;
+};
+
+const HOSTED_LINQ_REACTION_TARGET_MAX_PARTS = 32;
+const HOSTED_LINQ_REACTION_TARGET_TEXT_MAX_CHARS = 2_000;
+const HOSTED_LINQ_REACTION_TARGET_LABEL_MAX_CHARS = 160;
+
 export async function getHostedLinqChatSummary(input: {
   chatId: string;
   signal?: AbortSignal;
@@ -229,6 +259,152 @@ export async function getHostedLinqChatSummary(input: {
       .filter((handle): handle is HostedLinqChatHandleSummary => handle !== null),
     isGroup,
   };
+}
+
+export async function getHostedLinqReactionTargetMessage(input: {
+  messageId: string;
+  signal?: AbortSignal;
+  timeoutMs?: number;
+}): Promise<HostedLinqReactionTargetMessage> {
+  const response = await fetchHostedLinqJsonApiOrThrow({
+    method: "GET",
+    path: `messages/${encodeURIComponent(normalizeRequiredString(input.messageId, "message id"))}`,
+    signal: input.signal,
+    timeoutMessage: "Linq message read timed out.",
+    timeoutMs: input.timeoutMs,
+  });
+
+  if (!response.ok) {
+    throw buildHostedLinqRequestFailedError({
+      operation: "message read",
+      retryable: isRetryableHostedLinqStatus(response.status),
+      status: response.status,
+    });
+  }
+
+  const message = readHostedLinqCanonicalReactionTargetMessage(response.payload);
+  if (!message) {
+    throw hostedOnboardingError({
+      code: "LINQ_MESSAGE_READ_INVALID",
+      httpStatus: 502,
+      message: "Linq message read returned an invalid canonical response.",
+      retryable: false,
+    });
+  }
+  return message;
+}
+
+function readHostedLinqCanonicalReactionTargetMessage(
+  value: unknown,
+): HostedLinqReactionTargetMessage | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+  const record = value as Record<string, unknown>;
+  const id = normalizeBoundedHostedLinqReactionTargetString(
+    record.id,
+    HOSTED_LINQ_REACTION_TARGET_LABEL_MAX_CHARS,
+  );
+  const chatId = normalizeBoundedHostedLinqReactionTargetString(
+    record.chat_id,
+    HOSTED_LINQ_REACTION_TARGET_LABEL_MAX_CHARS,
+  );
+  if (
+    !id
+    || !chatId
+    || typeof record.is_from_me !== "boolean"
+    || !(record.parts === null || record.parts === undefined || Array.isArray(record.parts))
+  ) {
+    return null;
+  }
+
+  const parts = Array.isArray(record.parts) ? record.parts : [];
+
+  return {
+    chatId,
+    id,
+    isFromMe: record.is_from_me,
+    parts: parts
+      .slice(0, HOSTED_LINQ_REACTION_TARGET_MAX_PARTS)
+      .map(readHostedLinqReactionTargetPart),
+    service: normalizeBoundedHostedLinqReactionTargetString(
+      record.service,
+      HOSTED_LINQ_REACTION_TARGET_LABEL_MAX_CHARS,
+    ),
+  };
+}
+
+function readHostedLinqReactionTargetPart(
+  value: unknown,
+): HostedLinqReactionTargetPart {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return { type: "unsupported" };
+  }
+  const record = value as Record<string, unknown>;
+  if ((record.type === "text" || record.type === "link") && typeof record.value === "string") {
+    return {
+      type: record.type,
+      value: record.value.slice(0, HOSTED_LINQ_REACTION_TARGET_TEXT_MAX_CHARS),
+    };
+  }
+  if (record.type === "media") {
+    return {
+      fileName: normalizeBoundedHostedLinqReactionTargetString(
+        record.filename,
+        HOSTED_LINQ_REACTION_TARGET_LABEL_MAX_CHARS,
+      ) ?? "attachment",
+      mimeType: normalizeBoundedHostedLinqReactionTargetString(
+        record.mime_type,
+        HOSTED_LINQ_REACTION_TARGET_LABEL_MAX_CHARS,
+      ) ?? "application/octet-stream",
+      type: "media",
+    };
+  }
+  if (record.type === "imessage_app") {
+    return {
+      type: "imessage_app",
+      visibleText: readHostedLinqIMessageAppVisibleText(record),
+    };
+  }
+  return { type: "unsupported" };
+}
+
+function readHostedLinqIMessageAppVisibleText(
+  record: Record<string, unknown>,
+): string[] {
+  const values: string[] = [];
+  const fallback = normalizeBoundedHostedLinqReactionTargetString(
+    record.fallback_text,
+    HOSTED_LINQ_REACTION_TARGET_TEXT_MAX_CHARS,
+  );
+  if (fallback) {
+    values.push(fallback);
+  }
+  const layout = record.layout && typeof record.layout === "object" && !Array.isArray(record.layout)
+    ? record.layout as Record<string, unknown>
+    : null;
+  for (const value of [
+    layout?.caption,
+    layout?.subcaption,
+    layout?.trailing_caption,
+    layout?.trailing_subcaption,
+  ]) {
+    const normalized = normalizeBoundedHostedLinqReactionTargetString(
+      value,
+      HOSTED_LINQ_REACTION_TARGET_TEXT_MAX_CHARS,
+    );
+    if (normalized && !values.includes(normalized)) {
+      values.push(normalized);
+    }
+  }
+  return values;
+}
+
+function normalizeBoundedHostedLinqReactionTargetString(
+  value: unknown,
+  maxChars: number,
+): string | null {
+  return normalizeNullableString(value)?.slice(0, maxChars) ?? null;
 }
 
 function readHostedLinqCanonicalChat(

@@ -72,6 +72,7 @@ import type {
 
 export const HOSTED_EXECUTION_WAKE_KINDS = [
   "conversation.message",
+  "conversation.reaction",
   "member.activated",
   "member.channels.updated",
   "member.preferences.updated",
@@ -445,6 +446,19 @@ export interface HostedExecutionConversationMessageWake extends HostedExecutionB
   message: HostedExecutionConversationMessagePayload;
 }
 
+/**
+ * Deferred Linq group context. This envelope is durable mailbox input, not an
+ * orchestration signal; consumers must not use its presence to wake a runtime.
+ */
+export interface HostedExecutionConversationReactionWake extends HostedExecutionBaseWake {
+  kind: "conversation.reaction";
+  message: HostedExecutionLinqConversationMessagePayload;
+}
+
+export type HostedExecutionConversationWake =
+  | HostedExecutionConversationMessageWake
+  | HostedExecutionConversationReactionWake;
+
 export interface HostedExecutionMemberActivatedWake extends HostedExecutionBaseWake {
   kind: "member.activated";
   memberChannels: HostedExecutionMemberChannels;
@@ -515,6 +529,7 @@ export interface HostedExecutionRuntimeTimerWake extends HostedExecutionBaseWake
 
 export type HostedExecutionWake =
   | HostedExecutionConversationMessageWake
+  | HostedExecutionConversationReactionWake
   | HostedExecutionMemberActivatedWake
   | HostedExecutionMemberChannelsUpdatedWake
   | HostedExecutionMemberPreferencesUpdatedWake
@@ -531,7 +546,7 @@ export type HostedRuntimeEvent =
 
 export type HostedExecutionSystemWake = Exclude<
   HostedExecutionWake,
-  HostedExecutionConversationMessageWake
+  HostedExecutionConversationWake
 >;
 
 export type HostedExecutionBundleKind = RuntimeHostedExecutionBundleKind;
@@ -651,6 +666,18 @@ export function isHostedConversationMessageWake(
   return wake.kind === "conversation.message";
 }
 
+export function isHostedConversationReactionWake(
+  wake: HostedExecutionWake,
+): wake is HostedExecutionConversationReactionWake {
+  return wake.kind === "conversation.reaction";
+}
+
+export function isHostedConversationWake(
+  wake: HostedExecutionWake,
+): wake is HostedExecutionConversationWake {
+  return isHostedConversationMessageWake(wake) || isHostedConversationReactionWake(wake);
+}
+
 export function isHostedRuntimeTimerWake(
   wake: HostedRuntimeEvent,
 ): wake is HostedExecutionRuntimeTimerWake {
@@ -660,7 +687,15 @@ export function isHostedRuntimeTimerWake(
 export function isHostedSystemWake(
   wake: HostedExecutionWake,
 ): wake is HostedExecutionSystemWake {
-  return wake.kind !== "conversation.message";
+  return !isHostedConversationWake(wake);
+}
+
+export function isHostedLinqConversationWake(
+  wake: HostedExecutionWake,
+): wake is HostedExecutionConversationWake & {
+  message: HostedExecutionLinqConversationMessagePayload;
+} {
+  return isHostedConversationWake(wake) && wake.message.channel === "linq";
 }
 
 export function isHostedLinqConversationMessageWake(
@@ -669,6 +704,12 @@ export function isHostedLinqConversationMessageWake(
   message: HostedExecutionLinqConversationMessagePayload;
 } {
   return wake.kind === "conversation.message" && wake.message.channel === "linq";
+}
+
+export function isHostedLinqConversationReactionWake(
+  wake: HostedExecutionWake,
+): wake is HostedExecutionConversationReactionWake {
+  return wake.kind === "conversation.reaction";
 }
 
 export function isHostedTelegramConversationMessageWake(

@@ -446,6 +446,74 @@ describe("selectHostedAssistantInputIds", () => {
     expect(selection.pendingInputIds).toEqual([pending.inputId]);
   });
 
+  it("selects cross-actor reaction context only from the fresh Linq group", async () => {
+    const vaultRoot = await createTempVault();
+    await enableLinqAutoReply(vaultRoot);
+    const matchingContext = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createAssistantInputEvent({
+        actorId: "actor_alice",
+        contextOnly: true,
+        dedupeKey: "dedupe_pending_cross_actor_context",
+        eventId: "evt_pending_cross_actor_context",
+        itemId: "item_pending_cross_actor_context",
+        laneSeq: "10",
+        occurredAt: "2026-04-23T00:00:01.000Z",
+        receivedAt: "2026-04-23T00:00:02.000Z",
+        replyTarget: null,
+        text: "Alice added weak reaction context",
+        threadId: "group_thread",
+        threadIsDirect: false,
+      }),
+    });
+    const otherGroupContext = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createAssistantInputEvent({
+        actorId: "actor_other",
+        contextOnly: true,
+        dedupeKey: "dedupe_pending_other_group_context",
+        eventId: "evt_pending_other_group_context",
+        itemId: "item_pending_other_group_context",
+        laneSeq: "11",
+        occurredAt: "2026-04-23T00:00:01.500Z",
+        receivedAt: "2026-04-23T00:00:02.500Z",
+        replyTarget: null,
+        text: "Unrelated group reaction context",
+        threadId: "other_group_thread",
+        threadIsDirect: false,
+      }),
+    });
+    const fresh = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createAssistantInputEvent({
+        actorId: "actor_bob",
+        dedupeKey: "dedupe_fresh_cross_actor_message",
+        eventId: "evt_fresh_cross_actor_message",
+        itemId: "item_fresh_cross_actor_message",
+        laneSeq: "20",
+        occurredAt: "2026-04-23T00:00:03.000Z",
+        receivedAt: "2026-04-23T00:00:04.000Z",
+        text: "Bob sent the next group message",
+        threadId: "group_thread",
+        threadIsDirect: false,
+      }),
+    });
+    for (const inputId of [matchingContext.inputId, otherGroupContext.inputId]) {
+      await enqueueHostedPendingAssistantInputId({ inputId, vaultRoot });
+    }
+
+    await expect(selectHostedAssistantInputIds({
+      freshAssistantInputIds: [fresh.inputId],
+      mode: "foreground",
+      vaultRoot,
+    })).resolves.toEqual({
+      freshInputIds: [fresh.inputId],
+      inputIds: [matchingContext.inputId, fresh.inputId],
+      mode: "foreground",
+      pendingInputIds: [matchingContext.inputId, otherGroupContext.inputId],
+    });
+  });
+
   it("selects newer pending same-conversation inputs with fresh foreground input", async () => {
     const vaultRoot = await createTempVault();
     await enableLinqAutoReply(vaultRoot);
@@ -791,6 +859,9 @@ async function enableLinqAutoReply(vaultRoot: string): Promise<void> {
 }
 
 function createAssistantInputEvent(input: {
+  actorId?: string;
+  accountId?: string;
+  contextOnly?: boolean;
   dedupeKey?: string;
   eventId?: string;
   itemId?: string;
@@ -802,6 +873,7 @@ function createAssistantInputEvent(input: {
   source?: string;
   text?: string;
   threadId?: string;
+  threadIsDirect?: boolean;
 } = {}) {
   const source = input.source ?? "linq";
   const threadId = input.threadId ?? "thread_1";
@@ -818,12 +890,12 @@ function createAssistantInputEvent(input: {
       ],
     },
     conversation: {
-      accountId: "acct_1",
-      actorId: "actor_1",
+      accountId: input.accountId ?? "acct_1",
+      actorId: input.actorId ?? "actor_1",
       actorIsSelf: false,
       source,
       threadId,
-      threadIsDirect: true,
+      threadIsDirect: input.threadIsDirect ?? true,
     },
     occurredAt: input.occurredAt ?? "2026-04-23T00:00:02.000Z",
     receivedAt: input.receivedAt ?? "2026-04-23T00:00:03.000Z",
@@ -834,6 +906,15 @@ function createAssistantInputEvent(input: {
           messageId: input.messageId ?? "msg_selected",
           threadId,
         },
+    ...(source === "linq" && input.contextOnly
+      ? {
+          sourceMetadata: {
+            contextOnly: true,
+            kind: "linq" as const,
+            partCount: 1,
+          },
+        }
+      : {}),
     sourceRef: {
       dedupeKey: input.dedupeKey ?? "dedupe_selected",
       eventId: input.eventId ?? "evt_selected",

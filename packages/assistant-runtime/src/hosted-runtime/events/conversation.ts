@@ -1,9 +1,9 @@
-import type { HostedExecutionConversationMessageWake } from "@murphai/hosted-execution";
+import type { HostedExecutionConversationWake } from "@murphai/hosted-execution";
 import {
   buildHostedExecutionSafeErrorDiagnostics,
   deriveHostedExecutionErrorCode,
   isHostedEmailConversationMessageWake,
-  isHostedLinqConversationMessageWake,
+  isHostedLinqConversationWake,
   isHostedTelegramConversationMessageWake,
   isHostedWhatsAppConversationMessageWake,
   readHostedLinqConversationMessageAccountLookupKey,
@@ -71,7 +71,7 @@ export class HostedConversationInboxProjectionError extends Error {
 }
 
 export async function importHostedConversationMessageWakeIntoLocalInbox(input: {
-  wake: HostedExecutionConversationMessageWake;
+  wake: HostedExecutionConversationWake;
   runtime: Pick<NormalizedHostedAssistantRuntimeConfig, "forwardedEnv" | "platform" | "platformEnv" | "userEnv">
     & Partial<Pick<NormalizedHostedAssistantRuntimeConfig, "parserToolchain">>;
   signal?: AbortSignal | null;
@@ -374,12 +374,12 @@ function hasPendingHostedConversationMediaParseJob(input: {
 }
 
 async function normalizeHostedConversationMessageWake(input: {
-  wake: HostedExecutionConversationMessageWake;
+  wake: HostedExecutionConversationWake;
   runtime: Pick<NormalizedHostedAssistantRuntimeConfig, "forwardedEnv" | "platform" | "platformEnv" | "userEnv">
     & Partial<Pick<NormalizedHostedAssistantRuntimeConfig, "parserToolchain">>;
   signal?: AbortSignal | null;
 }) {
-  if (isHostedLinqConversationMessageWake(input.wake)) {
+  if (isHostedLinqConversationWake(input.wake)) {
     return normalizeHostedLinqConversationCapture({
       accountId: readHostedLinqConversationMessageAccountLookupKey(input.wake.message),
       attachmentDownloadTimeoutMs: HOSTED_LINQ_ATTACHMENT_DOWNLOAD_TIMEOUT_MS,
@@ -461,7 +461,7 @@ async function normalizeHostedConversationMessageWake(input: {
 }
 
 function shouldSkipHostedEmailRawInboxProjection(
-  wake: HostedExecutionConversationMessageWake,
+  wake: HostedExecutionConversationWake,
 ): boolean {
   if (!isHostedEmailConversationMessageWake(wake)) {
     return false;

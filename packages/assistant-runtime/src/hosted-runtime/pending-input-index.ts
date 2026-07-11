@@ -2,6 +2,7 @@ import path from "node:path";
 
 import {
   hasCompleteAssistantAutoReplyTerminalEvidence,
+  writeAssistantAutoReplySuppressionEvidence,
 } from "@murphai/assistant-engine/assistant-automation";
 import {
   compareAssistantInputCursors,
@@ -50,10 +51,14 @@ const HOSTED_PENDING_ASSISTANT_INPUT_STATE_LABEL =
   "hosted pending assistant input state";
 const HOSTED_PENDING_ASSISTANT_INPUT_STATE_KEYS =
   new Set(["backfilled", "inputIds"]);
+const HOSTED_DEFERRED_CONTEXT_MAX_PER_GROUP = 32;
+const HOSTED_DEFERRED_CONTEXT_MAX_TOTAL = 256;
+const HOSTED_DEFERRED_CONTEXT_OVERFLOW_REASON =
+  "deferred group context exceeded the hosted retention window";
 
 type HostedPendingAssistantInputReplyabilityEvent = Pick<
   AssistantInputEventRecord,
-  "conversation" | "replyTarget" | "sourceRef"
+  "conversation" | "replyTarget" | "sourceMetadata" | "sourceRef"
 >;
 
 export function resolveHostedPendingAssistantInputStatePath(
@@ -182,15 +187,29 @@ export async function hasHostedPendingAssistantInputWakeCandidate(input: {
   if (existing.missing) {
     return false;
   }
-  if (existing.state.inputIds.length > 0) {
-    return true;
-  }
-  if (existing.state.backfilled) {
-    return false;
-  }
-
   const automationState = await readAssistantAutomationState(input.vaultRoot);
-  return automationState.autoReply.length > 0;
+  if (!existing.state.backfilled) {
+    return automationState.autoReply.length > 0;
+  }
+  const enabledAutoReplyChannels = new Set(
+    automationState.autoReply.map((entry) => entry.channel),
+  );
+  for (const inputId of existing.state.inputIds) {
+    const event = await readAssistantInputEvent({
+      inputId,
+      vault: input.vaultRoot,
+    });
+    if (
+      event
+      && isHostedPendingAssistantInputActionable({
+        enabledAutoReplyChannels,
+        event,
+      })
+    ) {
+      return true;
+    }
+  }
+  return false;
 }
 
 export async function enqueueHostedPendingAssistantInputId(input: {
@@ -207,10 +226,32 @@ export async function enqueueHostedPendingAssistantInputId(input: {
         backfilled: false,
       }),
     });
-    const nextState = appendHostedPendingAssistantInputId({
+    let nextState = appendHostedPendingAssistantInputId({
       inputId,
       state,
     });
+    const enqueuedEvent = await readAssistantInputEvent({
+      inputId,
+      paths,
+    });
+    if (enqueuedEvent && isHostedDeferredGroupContextEvent(enqueuedEvent)) {
+      const deferredContextEntries = await readHostedDeferredContextEntries({
+        inputIds: nextState.inputIds,
+        paths,
+      });
+      const overflow = selectHostedDeferredContextOverflow(deferredContextEntries);
+      if (overflow.length > 0) {
+        await suppressHostedDeferredContextOverflow({
+          entries: overflow,
+          vaultRoot: input.vaultRoot,
+        });
+        const overflowInputIds = new Set(overflow.map((entry) => entry.inputId));
+        nextState = createHostedPendingAssistantInputState(
+          nextState.inputIds.filter((candidate) => !overflowInputIds.has(candidate)),
+          { backfilled: nextState.backfilled },
+        );
+      }
+    }
     if (sameHostedPendingAssistantInputState(nextState, state)) {
       return [...state.inputIds];
     }
@@ -292,7 +333,7 @@ async function compactHostedPendingAssistantInputStateForWrite(input: {
     (await readAssistantAutomationState(input.vaultRoot)).autoReply
       .map((entry) => entry.channel),
   );
-  const remaining: { cursor: AssistantInputCursor; inputId: string }[] = [];
+  const remaining: HostedPendingAssistantInputEntry[] = [];
   for (const inputId of input.state.inputIds) {
     const event = await readAssistantInputEvent({
       inputId,
@@ -317,14 +358,26 @@ async function compactHostedPendingAssistantInputStateForWrite(input: {
     if (!complete) {
       remaining.push({
         cursor: event.cursor,
+        event,
         inputId,
       });
     }
   }
 
+  const sortedRemaining = remaining.sort((left, right) =>
+    compareAssistantInputCursors(left.cursor, right.cursor)
+  );
+  const overflow = selectHostedDeferredContextOverflow(sortedRemaining);
+  if (overflow.length > 0) {
+    await suppressHostedDeferredContextOverflow({
+      entries: overflow,
+      vaultRoot: input.vaultRoot,
+    });
+  }
+  const overflowInputIds = new Set(overflow.map((entry) => entry.inputId));
   const remainingState = createHostedPendingAssistantInputState(
-    remaining
-      .sort((left, right) => compareAssistantInputCursors(left.cursor, right.cursor))
+    sortedRemaining
+      .filter((item) => !overflowInputIds.has(item.inputId))
       .map((item) => item.inputId),
     { backfilled: input.backfilled },
   );
@@ -336,6 +389,134 @@ async function compactHostedPendingAssistantInputStateForWrite(input: {
     });
   }
   return [...remainingState.inputIds];
+}
+
+interface HostedPendingAssistantInputEntry {
+  cursor: AssistantInputCursor;
+  event: AssistantInputEventRecord;
+  inputId: string;
+}
+
+async function readHostedDeferredContextEntries(input: {
+  inputIds: readonly string[];
+  paths: Parameters<typeof readAssistantInputEvent>[0]["paths"];
+}): Promise<HostedPendingAssistantInputEntry[]> {
+  const entries: HostedPendingAssistantInputEntry[] = [];
+  for (const inputId of input.inputIds) {
+    const event = await readAssistantInputEvent({
+      inputId,
+      paths: input.paths,
+    });
+    if (!event || !isHostedDeferredGroupContextEvent(event)) {
+      continue;
+    }
+    entries.push({
+      cursor: event.cursor,
+      event,
+      inputId,
+    });
+  }
+  return entries.sort((left, right) =>
+    compareAssistantInputCursors(left.cursor, right.cursor)
+  );
+}
+
+function selectHostedDeferredContextOverflow(
+  entries: readonly HostedPendingAssistantInputEntry[],
+): HostedPendingAssistantInputEntry[] {
+  const contextEntries = entries
+    .filter((entry) => isHostedDeferredGroupContextEvent(entry.event))
+    .sort(compareHostedDeferredContextSemanticOrder);
+  const overflowInputIds = new Set<string>();
+  const entriesByGroup = new Map<string, HostedPendingAssistantInputEntry[]>();
+
+  for (const entry of contextEntries) {
+    const groupKey = hostedDeferredContextGroupKey(entry.event);
+    if (!groupKey) {
+      continue;
+    }
+    const groupEntries = entriesByGroup.get(groupKey) ?? [];
+    groupEntries.push(entry);
+    entriesByGroup.set(groupKey, groupEntries);
+  }
+  for (const groupEntries of entriesByGroup.values()) {
+    const overflowCount = Math.max(
+      0,
+      groupEntries.length - HOSTED_DEFERRED_CONTEXT_MAX_PER_GROUP,
+    );
+    for (const entry of groupEntries.slice(0, overflowCount)) {
+      overflowInputIds.add(entry.inputId);
+    }
+  }
+
+  const globallyRetained = contextEntries.filter((entry) =>
+    !overflowInputIds.has(entry.inputId)
+  );
+  const globalOverflowCount = Math.max(
+    0,
+    globallyRetained.length - HOSTED_DEFERRED_CONTEXT_MAX_TOTAL,
+  );
+  for (const entry of globallyRetained.slice(0, globalOverflowCount)) {
+    overflowInputIds.add(entry.inputId);
+  }
+
+  return contextEntries.filter((entry) => overflowInputIds.has(entry.inputId));
+}
+
+function compareHostedDeferredContextSemanticOrder(
+  left: HostedPendingAssistantInputEntry,
+  right: HostedPendingAssistantInputEntry,
+): number {
+  const leftOccurredAt = Date.parse(left.event.occurredAt);
+  const rightOccurredAt = Date.parse(right.event.occurredAt);
+  if (
+    Number.isFinite(leftOccurredAt)
+    && Number.isFinite(rightOccurredAt)
+    && leftOccurredAt !== rightOccurredAt
+  ) {
+    return leftOccurredAt - rightOccurredAt;
+  }
+  return left.inputId.localeCompare(right.inputId);
+}
+
+async function suppressHostedDeferredContextOverflow(input: {
+  entries: readonly HostedPendingAssistantInputEntry[];
+  vaultRoot: string;
+}): Promise<void> {
+  for (const entry of input.entries) {
+    await writeAssistantAutoReplySuppressionEvidence({
+      captureIds: entry.event.projection.captureId
+        ? [entry.event.projection.captureId]
+        : [],
+      inputIds: [entry.inputId],
+      reason: HOSTED_DEFERRED_CONTEXT_OVERFLOW_REASON,
+      vault: input.vaultRoot,
+    });
+  }
+}
+
+function isHostedDeferredGroupContextEvent(
+  event: HostedPendingAssistantInputReplyabilityEvent,
+): boolean {
+  return isHostedContextOnlyAssistantInputEvent(event)
+    && event.conversation?.source === "linq"
+    && event.conversation.threadIsDirect === false
+    && Boolean(event.conversation.accountId)
+    && Boolean(event.conversation.threadId);
+}
+
+function hostedDeferredContextGroupKey(
+  event: HostedPendingAssistantInputReplyabilityEvent,
+): string | null {
+  if (!isHostedDeferredGroupContextEvent(event) || !event.conversation) {
+    return null;
+  }
+  return JSON.stringify([
+    event.conversation.source,
+    event.conversation.accountId,
+    event.conversation.threadId,
+    event.conversation.threadIsDirect,
+  ]);
 }
 
 export async function ensureHostedPendingAssistantInputIndex(input: {
@@ -491,7 +672,10 @@ async function createBackfilledHostedPendingAssistantInputState(input: {
         if (candidate.event.source !== channelState.channel) {
           continue;
         }
-        if (candidate.event.replyTarget?.channel !== channelState.channel) {
+        if (
+          !isHostedContextOnlyAssistantInputEvent(candidate.event)
+          && candidate.event.replyTarget?.channel !== channelState.channel
+        ) {
           continue;
         }
         const complete = await hasCompleteAssistantAutoReplyTerminalEvidence({
@@ -538,6 +722,17 @@ export function isHostedPendingAssistantInputStillReplyable(input: {
   enabledAutoReplyChannels: ReadonlySet<string>;
   event: HostedPendingAssistantInputReplyabilityEvent;
 }): boolean {
+  if (isHostedContextOnlyAssistantInputEvent(input.event)) {
+    const source = input.event.conversation?.source ?? input.event.sourceRef.source;
+    return source === "linq" && input.enabledAutoReplyChannels.has("linq");
+  }
+  return isHostedPendingAssistantInputActionable(input);
+}
+
+function isHostedPendingAssistantInputActionable(input: {
+  enabledAutoReplyChannels: ReadonlySet<string>;
+  event: HostedPendingAssistantInputReplyabilityEvent;
+}): boolean {
   const replyChannel = input.event.replyTarget?.channel;
   if (!replyChannel) {
     return false;
@@ -550,6 +745,13 @@ export function isHostedPendingAssistantInputStillReplyable(input: {
   }
 
   return input.enabledAutoReplyChannels.has(replyChannel);
+}
+
+function isHostedContextOnlyAssistantInputEvent(
+  event: HostedPendingAssistantInputReplyabilityEvent,
+): boolean {
+  return event.sourceMetadata?.kind === "linq"
+    && event.sourceMetadata.contextOnly === true;
 }
 
 function createEmptyHostedPendingAssistantInputState(input: {

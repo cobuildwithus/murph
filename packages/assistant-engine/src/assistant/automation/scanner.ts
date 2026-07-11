@@ -13,7 +13,10 @@ import {
 import { compareAssistantInputCursors } from '../input-store.js'
 import { sameAssistantAutoReplyState } from '../automation-state.js'
 import { emitHostedAssistantTurnTimingTrace } from '../hosted-turn-timing.js'
-import { collectAssistantAutoReplyGroup } from './grouping.js'
+import {
+  collectAssistantAutoReplyGroup,
+  orderAssistantAutoReplyInputSummaries,
+} from './grouping.js'
 import {
   assistantAutomationInputSummaryFromCandidate,
   type AssistantAutomationInputSummary,
@@ -121,7 +124,9 @@ export async function scanAssistantAutomationOnce(input: {
   const historyReader = createAssistantAutoReplyHistoryReader({
     vault: input.vault,
   })
-  const inputSummaries = candidates.map((candidate) => candidate.summary)
+  const inputSummaries = orderAssistantAutoReplyInputSummaries(
+    candidates.map((candidate) => candidate.summary),
+  )
   const candidatesByInputId = new Map(
     candidates.map((candidate) => [candidate.summary.inputId, candidate] as const),
   )
@@ -131,12 +136,13 @@ export async function scanAssistantAutomationOnce(input: {
       candidate.inputCandidate,
     ] as const),
   )
-  for (let index = 0; index < candidates.length; index += 1) {
+  const terminalInputIds = new Set<string>()
+  for (let index = 0; index < inputSummaries.length; index += 1) {
     if (input.signal?.aborted) {
       break
     }
 
-    const candidate = candidates[index]
+    const candidate = candidatesByInputId.get(inputSummaries[index]?.inputId ?? '')
     if (!candidate) {
       continue
     }
@@ -194,6 +200,19 @@ export async function scanAssistantAutomationOnce(input: {
       ...(replyResult.currentTurnDeliveryIntentIds ?? []),
     )
     if (replyResult.advanceCursor) {
+      for (const inputId of context.inputIds) {
+        terminalInputIds.add(inputId)
+      }
+    }
+    if (
+      replyResult.advanceCursor &&
+      canAdvanceAssistantAutoReplyCursor({
+        candidates,
+        channel: context.firstItem.summary.source,
+        cursor: replyResult.lastInputCursor ?? context.lastInputCursor,
+        terminalInputIds,
+      })
+    ) {
       advanceAssistantAutoReplyChannelCursor({
         autoReply: scanState.autoReply,
         channel: context.firstItem.summary.source,
@@ -238,7 +257,7 @@ export async function hasPendingAssistantAutoReplyInput(input: {
     signal: input.signal,
     vault: input.vault,
   })
-  return candidates.length > 0
+  return candidates.some((candidate) => !candidate.summary.contextOnly)
 }
 
 async function listAssistantReplyCandidates(input: {
@@ -270,9 +289,10 @@ async function listAssistantReplyCandidates(input: {
   const candidates = await Promise.all(
     input.autoReply.map(async (channelState) => {
       const channelCandidates: AssistantAutomationCandidate[] = []
+      let actionableCandidateCount = 0
       let cursor = channelState.eligibleAfter
 
-      while (channelCandidates.length < input.limit) {
+      while (actionableCandidateCount < input.limit) {
         const listed = await input.inputSource.listInputCandidates({
           afterCursor: cursor,
           limit: input.limit,
@@ -291,7 +311,11 @@ async function listAssistantReplyCandidates(input: {
           if (await terminalEvidenceComplete(candidate)) {
             continue
           }
-          channelCandidates.push(assistantAutomationCandidateFromInput(candidate))
+          const automationCandidate = assistantAutomationCandidateFromInput(candidate)
+          channelCandidates.push(automationCandidate)
+          if (!automationCandidate.summary.contextOnly) {
+            actionableCandidateCount += 1
+          }
         }
 
         cursor = listed.nextCursor ?? cursor
@@ -300,18 +324,47 @@ async function listAssistantReplyCandidates(input: {
         }
       }
 
-      return channelCandidates.slice(0, input.limit)
+      return channelCandidates
     }),
   )
 
-  return candidates
+  const sortedCandidates = candidates
     .flat()
     .sort((left, right) =>
       compareAssistantInputCursors(
         left.inputCandidate.event.cursor,
         right.inputCandidate.event.cursor,
       ))
-    .slice(0, input.limit)
+
+  const selectedCandidates: AssistantAutomationCandidate[] = []
+  let actionableCandidateCount = 0
+  for (const candidate of sortedCandidates) {
+    selectedCandidates.push(candidate)
+    if (candidate.summary.contextOnly) {
+      continue
+    }
+    actionableCandidateCount += 1
+    if (actionableCandidateCount >= input.limit) {
+      break
+    }
+  }
+  return selectedCandidates
+}
+
+function canAdvanceAssistantAutoReplyCursor(input: {
+  candidates: readonly AssistantAutomationCandidate[]
+  channel: string
+  cursor: AssistantInputCandidate['event']['cursor']
+  terminalInputIds: ReadonlySet<string>
+}): boolean {
+  return input.candidates
+    .filter((candidate) => candidate.summary.source === input.channel)
+    .every((candidate) =>
+      compareAssistantInputCursors(
+        candidate.inputCandidate.event.cursor,
+        input.cursor,
+      ) > 0 || input.terminalInputIds.has(candidate.summary.inputId),
+    )
 }
 
 function advanceAssistantAutoReplyChannelCursor(input: {

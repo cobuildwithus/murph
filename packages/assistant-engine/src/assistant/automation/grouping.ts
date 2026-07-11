@@ -1,10 +1,16 @@
 import type { AssistantInputCandidate } from '../input-source.js'
-import { isSameAssistantConversationRef } from '../conversation-ref.js'
+import {
+  isSameAssistantConversationRef,
+  type AssistantInputConversationRef,
+} from '../conversation-ref.js'
 import {
   readTelegramAutoReplyMetadataFromAssistantInput,
   type TelegramAutoReplyMetadata,
 } from './prompt-builder.js'
-import type { AssistantAutomationInputSummary } from './input-summary.js'
+import {
+  compareAssistantInputSummaryOrder,
+  type AssistantAutomationInputSummary,
+} from './input-summary.js'
 
 export interface AssistantAutoReplyGroupItem {
   inputCandidate?: AssistantInputCandidate | null
@@ -34,6 +40,12 @@ export async function collectAssistantAutoReplyGroup(input: {
     }),
   ]
   let endIndex = input.startIndex
+  let actionableConversation = first.contextOnly
+    ? undefined
+    : first.conversation
+  let actionableReplyAnchor = first.contextOnly
+    ? undefined
+    : first.replyToMessageId
 
   for (
     let index = input.startIndex + 1;
@@ -41,8 +53,43 @@ export async function collectAssistantAutoReplyGroup(input: {
     index += 1
   ) {
     const candidate = input.inputSummaries[index]
-    if (!candidate || !shouldGroupAdjacentConversationInput(first, candidate)) {
+    if (!candidate) {
       break
+    }
+
+    if (candidate.contextOnly) {
+      if (!isSameAssistantDeferredContextRoute(first.conversation, candidate.conversation)) {
+        break
+      }
+      if (
+        actionableConversation !== undefined &&
+        actionableReplyAnchor !== undefined &&
+        !nextActionableInputSharesReplyAnchor({
+          actionableReplyAnchor,
+          conversation: actionableConversation,
+          inputSummaries: input.inputSummaries,
+          startIndex: index + 1,
+        })
+      ) {
+        break
+      }
+    } else if (actionableReplyAnchor === undefined) {
+      if (!isSameAssistantDeferredContextRoute(first.conversation, candidate.conversation)) {
+        break
+      }
+      actionableConversation = candidate.conversation
+      actionableReplyAnchor = candidate.replyToMessageId
+    } else {
+      if (
+        !actionableConversation ||
+        !isSameAssistantConversationRef(
+          actionableConversation,
+          candidate.conversation,
+        ) ||
+        candidate.replyToMessageId !== actionableReplyAnchor
+      ) {
+        break
+      }
     }
 
     items.push(
@@ -58,6 +105,81 @@ export async function collectAssistantAutoReplyGroup(input: {
     endIndex,
     items,
   }
+}
+
+export function orderAssistantAutoReplyInputSummaries(
+  inputSummaries: readonly AssistantAutomationInputSummary[],
+): AssistantAutomationInputSummary[] {
+  const deferredContext: AssistantAutomationInputSummary[] = []
+  const ordered: AssistantAutomationInputSummary[] = []
+
+  for (const summary of inputSummaries) {
+    if (summary.contextOnly) {
+      deferredContext.push(summary)
+      continue
+    }
+
+    const matchingContext: AssistantAutomationInputSummary[] = []
+    const remainingContext: AssistantAutomationInputSummary[] = []
+    for (const context of deferredContext) {
+      if (isSameAssistantDeferredContextRoute(context.conversation, summary.conversation)) {
+        matchingContext.push(context)
+      } else {
+        remainingContext.push(context)
+      }
+    }
+    deferredContext.splice(0, deferredContext.length, ...remainingContext)
+    matchingContext.sort(compareDeferredContextSemanticOrder)
+    ordered.push(...matchingContext, summary)
+  }
+
+  return [...ordered, ...deferredContext.sort(compareDeferredContextSemanticOrder)]
+}
+
+function compareDeferredContextSemanticOrder(
+  left: AssistantAutomationInputSummary,
+  right: AssistantAutomationInputSummary,
+): number {
+  return compareAssistantInputSummaryOrder(left, right)
+}
+
+export function isSameAssistantDeferredContextRoute(
+  left: AssistantInputConversationRef,
+  right: AssistantInputConversationRef,
+): boolean {
+  return (
+    left.source === 'linq' &&
+    right.source === 'linq' &&
+    left.accountId === right.accountId &&
+    left.source === right.source &&
+    left.threadId === right.threadId &&
+    left.threadIsDirect === false &&
+    right.threadIsDirect === false
+  )
+}
+
+function nextActionableInputSharesReplyAnchor(input: {
+  actionableReplyAnchor: string | null
+  conversation: AssistantInputConversationRef
+  inputSummaries: readonly AssistantAutomationInputSummary[]
+  startIndex: number
+}): boolean {
+  for (let index = input.startIndex; index < input.inputSummaries.length; index += 1) {
+    const candidate = input.inputSummaries[index]
+    if (
+      !candidate ||
+      !isSameAssistantConversationRef(
+        input.conversation,
+        candidate.conversation,
+      )
+    ) {
+      return false
+    }
+    if (!candidate.contextOnly) {
+      return candidate.replyToMessageId === input.actionableReplyAnchor
+    }
+  }
+  return false
 }
 
 export async function loadAssistantAutoReplyGroupItems(input: {
@@ -118,6 +240,9 @@ export function shouldGroupAdjacentConversationInput(
 ): boolean {
   if (!isSameAssistantConversationRef(first.conversation, candidate.conversation)) {
     return false
+  }
+  if (first.contextOnly || candidate.contextOnly) {
+    return true
   }
   // Native reply targets identify the specific prior assistant message the
   // input is answering. Mixing them into one group would inject only one

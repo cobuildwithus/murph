@@ -167,6 +167,7 @@ function createInputSummary(
     text: capture.text,
     attachmentCount: capture.attachmentCount,
     actorIsSelf: capture.actorIsSelf,
+    contextOnly: overrides.contextOnly ?? false,
     replyToMessageId: overrides.replyToMessageId ?? null,
   }
 }
@@ -829,6 +830,69 @@ describe('assistant auto-reply grouping', () => {
       'linq-2',
     ])
     expect(result.items.every((item) => item.telegramMetadata === null)).toBe(true)
+  })
+
+  it('keeps deferred context with its next actionable reply anchor', async () => {
+    const inputSummaries = [
+      createInputSummary({
+        contextOnly: true,
+        inputId: 'context-before-a',
+        source: 'linq',
+        threadIsDirect: false,
+      }),
+      createInputSummary({
+        inputId: 'action-a-1',
+        replyToMessageId: 'reply-a',
+        source: 'linq',
+        threadIsDirect: false,
+      }),
+      createInputSummary({
+        contextOnly: true,
+        inputId: 'context-between-a',
+        source: 'linq',
+        threadIsDirect: false,
+      }),
+      createInputSummary({
+        inputId: 'action-a-2',
+        replyToMessageId: 'reply-a',
+        source: 'linq',
+        threadIsDirect: false,
+      }),
+      createInputSummary({
+        contextOnly: true,
+        inputId: 'context-before-b',
+        source: 'linq',
+        threadIsDirect: false,
+      }),
+      createInputSummary({
+        inputId: 'action-b',
+        replyToMessageId: 'reply-b',
+        source: 'linq',
+        threadIsDirect: false,
+      }),
+    ]
+
+    const firstGroup = await collectAssistantAutoReplyGroup({
+      inputSummaries,
+      startIndex: 0,
+      vault: '/tmp/automation-support-vault',
+    })
+    const secondGroup = await collectAssistantAutoReplyGroup({
+      inputSummaries,
+      startIndex: firstGroup.endIndex + 1,
+      vault: '/tmp/automation-support-vault',
+    })
+
+    expect(firstGroup.items.map((item) => item.summary.inputId)).toEqual([
+      'context-before-a',
+      'action-a-1',
+      'context-between-a',
+      'action-a-2',
+    ])
+    expect(secondGroup.items.map((item) => item.summary.inputId)).toEqual([
+      'context-before-b',
+      'action-b',
+    ])
   })
 
   it('groups adjacent telegram inputs without reading projected envelope metadata', async () => {

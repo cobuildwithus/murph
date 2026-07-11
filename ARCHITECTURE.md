@@ -1,6 +1,6 @@
 # Murph Architecture
 
-Last verified: 2026-07-09
+Last verified: 2026-07-10
 
 ## Hosted Connected Apps
 
@@ -153,6 +153,21 @@ latency; it may be dropped at any time with no correctness impact because
 delivery-time `consumedAt` stamps make racing Linq ensures no-op on already
 answered input and the Durable Object write fence coalesces active runners.
 There is no other web-to-Cloudflare prewarm or nudge path.
+
+Hosted Linq reaction additions and removals for an existing active group route
+are encrypted mailbox context, not wake authority. Web resolves the exact
+referenced message or part before appending the bounded context row, but emits
+no Temporal signal or direct ensure request for that row. Reaction context is
+excluded from runnable mailbox lag and idle-pending decisions, so it cannot
+start, restart, or keep a runtime alive; assistant automation defers it until
+the next natural message in the same group provides an actionable reply anchor.
+The hosted pending-input boundary retains only the newest 32 reaction contexts
+per group and 256 total, terminally suppressing older overflow before it can
+inflate foreground reads or prompt size.
+The mailbox and existing group-scoped Knowledge Wiki remain the only owners:
+there is no reaction scheduler, queue, or second memory store. Removal retracts
+the weak signal, and only repeated patterns may support cautious group-scoped
+knowledge synthesis.
 
 Hosted Linq unknown first-contact admission is a web-owned classifier gate on
 the signup-link path only. It runs after cheap deterministic ingress filters and
