@@ -96,10 +96,12 @@ export interface HostedLocalLinqStub {
   armNextPostAcceptLostAcknowledgment(input: {
     expectedPath: string;
     matchRequest: ObservedLinqRequestMatcher;
+    responseCount?: number;
   }): void;
   armNextPreAcceptRetryableSendFailure(input: {
     expectedPath: string;
     matchRequest: ObservedLinqRequestMatcher;
+    responseCount?: number;
   }): void;
   attachmentDownloadContainerBaseUrl: string;
   attachmentDownloadBaseUrl: string;
@@ -492,25 +494,43 @@ export async function startHostedLocalLinqStub(input: {
 
   return {
     acceptedSendRequests,
-    armNextPostAcceptLostAcknowledgment: ({ expectedPath, matchRequest }) => {
+    armNextPostAcceptLostAcknowledgment: ({
+      expectedPath,
+      matchRequest,
+      responseCount = hostedLocalLinqHttpAttemptsPerLogicalSend,
+    }) => {
       if (nextPostAcceptLostAcknowledgment) {
         throw new Error("A post-accept Linq lost-acknowledgment control is already armed.");
+      }
+      if (!Number.isSafeInteger(responseCount) || responseCount < 1) {
+        throw new Error(
+          "A post-accept Linq lost-acknowledgment control requires a positive response count.",
+        );
       }
       postAcceptLostAcknowledgmentAcceptedMessage = null;
       nextPostAcceptLostAcknowledgment = {
         expectedPath,
         matchRequest,
-        remainingResponses: hostedLocalLinqHttpAttemptsPerLogicalSend,
+        remainingResponses: responseCount,
       };
     },
-    armNextPreAcceptRetryableSendFailure: ({ expectedPath, matchRequest }) => {
+    armNextPreAcceptRetryableSendFailure: ({
+      expectedPath,
+      matchRequest,
+      responseCount = hostedLocalLinqHttpAttemptsPerLogicalSend,
+    }) => {
       if (nextPreAcceptRetryableSendFailure) {
         throw new Error("A pre-accept Linq retryable-send control is already armed.");
+      }
+      if (!Number.isSafeInteger(responseCount) || responseCount < 1) {
+        throw new Error(
+          "A pre-accept Linq retryable-send control requires a positive response count.",
+        );
       }
       nextPreAcceptRetryableSendFailure = {
         expectedPath,
         matchRequest,
-        remainingResponses: hostedLocalLinqHttpAttemptsPerLogicalSend,
+        remainingResponses: responseCount,
       };
     },
     attachmentDownloadContainerBaseUrl,

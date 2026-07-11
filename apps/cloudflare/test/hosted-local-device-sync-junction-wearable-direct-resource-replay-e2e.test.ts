@@ -304,6 +304,16 @@ describe("hosted local Junction wearable direct-resource replay e2e", () => {
     });
     expect(connection.sourceCount).toBe(1);
 
+    const triggeredRunningStart = new Date();
+    const triggeredRunning = buildJunctionWorkoutDirtyResource({
+      activityKind: "running",
+      calendarDate: formatDateInTimeZone(triggeredRunningStart, "America/New_York"),
+      endAt: new Date(triggeredRunningStart.getTime() + 60_000).toISOString(),
+      id: `junction-adherence-running-${runId}`,
+      sportName: "Running",
+      startAt: triggeredRunningStart.toISOString(),
+    });
+
     const nudgeOutboundBaseline = requireLinqStub().countObservedSends(replyPath);
     const nudgeProviderBaseline = countAssistantResponsesApiRequests();
     activeScenario.queueAssistantResponses([
@@ -329,7 +339,7 @@ describe("hosted local Junction wearable direct-resource replay e2e", () => {
       scenario: activeScenario,
     });
     await postSignedJunctionWebhookWithLostAcknowledgementRetry({
-      dirtyResource: activityPlan.running,
+      dirtyResource: triggeredRunning,
       externalAccountId,
       messageId: `msg_junction_adherence_running_${runId}`,
       scenario: activeScenario,

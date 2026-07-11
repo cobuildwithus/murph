@@ -295,7 +295,9 @@ export async function executeGenerateImageTool(input: {
             } else {
               return {
                 rpcSuccess: false,
-                rpcText: 'image generated but vault save failed',
+                rpcText: input.env.MURPH_E2E_DEBUG_ASSISTANT_PROVIDER_STUB === '1'
+                  ? `image generated but vault save failed (${resolvedCapture.status})`
+                  : 'image generated but vault save failed',
                 usageDraft,
               }
             }

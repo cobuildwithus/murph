@@ -120,6 +120,7 @@ describe("hosted local Linq home-line reroute retry e2e", () => {
     requireLinqStub().armNextPreAcceptRetryableSendFailure({
       expectedPath: redirectPath,
       matchRequest: redirectMatcher,
+      responseCount: 1,
     });
 
     const failedResponse = await postSignedLinqWebhook(signedWebhook);

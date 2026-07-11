@@ -130,6 +130,7 @@ describe("hosted local usage-limit ambiguous send e2e", () => {
     requireLinqStub().armNextPostAcceptLostAcknowledgment({
       expectedPath: replyPath,
       matchRequest: usageNoticeMatcher,
+      responseCount: 1,
     });
 
     const firstResponse = await postSignedLinqWebhook(buildHostedLinqInboundEvent(
@@ -149,7 +150,7 @@ describe("hosted local usage-limit ambiguous send e2e", () => {
     });
 
     await requireLinqStub().waitForMatchingSendCount({
-      expectedCount: observedBaseline + 3,
+      expectedCount: observedBaseline + 1,
       expectedPath: replyPath,
       matchRequest: usageNoticeMatcher,
       scenario: requireScenario(),
@@ -168,7 +169,7 @@ describe("hosted local usage-limit ambiguous send e2e", () => {
     const firstBlockedStatus = await requireScenario().harness.readUserStatus(userId);
 
     expect(requireLinqStub().countObservedSends(replyPath, usageNoticeMatcher)).toBe(
-      observedBaseline + 3,
+      observedBaseline + 1,
     );
     expect(requireLinqStub().countAcceptedSends(replyPath, usageNoticeMatcher)).toBe(
       acceptedBaseline + 1,
@@ -227,7 +228,7 @@ describe("hosted local usage-limit ambiguous send e2e", () => {
       readConversationMailboxMaxSeq(firstBlockedStatus),
     )).toBeGreaterThan(0);
     expect(requireLinqStub().countObservedSends(replyPath, usageNoticeMatcher)).toBe(
-      observedBaseline + 3,
+      observedBaseline + 1,
     );
     expect(requireLinqStub().countAcceptedSends(replyPath, usageNoticeMatcher)).toBe(
       acceptedBaseline + 1,

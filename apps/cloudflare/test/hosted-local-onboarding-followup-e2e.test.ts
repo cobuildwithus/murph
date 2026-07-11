@@ -242,10 +242,8 @@ describe("hosted local onboarding follow-up e2e", () => {
       .map((request) => request.body);
     expect(archiveTurnRequestBodies.some((body) =>
       body.includes(followupSlug)
-      && (
-        body.includes('"status":"archived"')
-        || body.includes('\\"status\\":\\"archived\\"')
-      )
+      && body.replaceAll("\\", "").replaceAll(/\s/gu, "")
+        .includes('"status":"archived"')
     )).toBe(true);
   }, 720_000);
 });

@@ -35,8 +35,10 @@ const chatId = `chat_local_vault_file_approval_${runId}`;
 const linqApiToken = "linq-local-vault-file-token";
 const linqWebhookSecret = "linq-local-vault-file-webhook-secret";
 const assistantModel = "gpt-5.5";
-const firstInboundText = "Prepare the synthetic report PDF for this conversation.";
-const secondInboundText = "I approved it. Attach the report now.";
+const prepareInboundText = "Prepare the synthetic report PDF for this conversation.";
+const requestInboundText = "Please attach the prepared report.";
+const approvedInboundText = "I approved it. Attach the report now.";
+const preparedReplyText = "The synthetic report is prepared.";
 const pendingReplyText =
   "The report is prepared. Approve the secure action, then tell me to attach it.";
 const attachedReplyText = "Here it is: report.pdf.";
@@ -107,29 +109,57 @@ describe("hosted local vault-file approval resume e2e", () => {
       expectedPath: "/attachments",
     });
     const attachmentUploadBaseline = countAttachmentUploadLogs();
-    const firstReplyBaseline = requireLinqStub().countObservedSends(replyPath);
+    const prepareReplyBaseline = requireLinqStub().countObservedSends(replyPath);
     requireScenario().queueAssistantResponses([
       buildAssistantProviderShellCommandCall(
         "mkdir -p documents && printf '%s\\n' '%PDF-1.7 synthetic hosted-local report' > documents/report.pdf",
       ),
-      buildAssistantProviderMurphToolCall("send_vault_file", { ref: reportRef }),
-      pendingReplyText,
+      preparedReplyText,
     ], {
-      matchInputContains: firstInboundText,
+      matchInputContains: prepareInboundText,
     });
 
-    const firstResponse = await postSignedLinqWebhook(buildHostedLinqInboundEvent(
+    const prepareResponse = await postSignedLinqWebhook(buildHostedLinqInboundEvent(
       userId,
       chatId,
       {
         eventId: `evt_vault_file_prepare_${runId}`,
         messageId: `msg_vault_file_prepare_${runId}`,
-        text: firstInboundText,
+        text: prepareInboundText,
       },
     ));
-    expect(firstResponse.status).toBe(202);
+    expect(prepareResponse.status).toBe(202);
+    const preparedReply = await requireLinqStub().waitForAdditionalSend({
+      baselineCount: prepareReplyBaseline,
+      expectedPath: replyPath,
+      scenario: requireScenario(),
+      userId,
+    });
+    expect(readObservedLinqMessageParts(preparedReply)).toEqual([
+      { type: "text", value: preparedReplyText },
+    ]);
+    await requireScenario().waitForHostedCompletion(userId);
+
+    const requestReplyBaseline = requireLinqStub().countObservedSends(replyPath);
+    requireScenario().queueAssistantResponses([
+      buildAssistantProviderMurphToolCall("send_vault_file", { ref: reportRef }),
+      pendingReplyText,
+    ], {
+      matchInputContains: requestInboundText,
+    });
+
+    const requestResponse = await postSignedLinqWebhook(buildHostedLinqInboundEvent(
+      userId,
+      chatId,
+      {
+        eventId: `evt_vault_file_request_${runId}`,
+        messageId: `msg_vault_file_request_${runId}`,
+        text: requestInboundText,
+      },
+    ));
+    expect(requestResponse.status).toBe(202);
     const pendingReply = await requireLinqStub().waitForAdditionalSend({
-      baselineCount: firstReplyBaseline,
+      baselineCount: requestReplyBaseline,
       expectedPath: replyPath,
       scenario: requireScenario(),
       userId,
@@ -158,26 +188,26 @@ describe("hosted local vault-file approval resume e2e", () => {
       tokenHash: challenge.tokenHash,
     });
 
-    const secondReplyBaseline = requireLinqStub().countObservedSends(replyPath);
+    const approvedReplyBaseline = requireLinqStub().countObservedSends(replyPath);
     requireScenario().queueAssistantResponses([
       buildAssistantProviderMurphToolCall("send_vault_file", { ref: reportRef }),
       attachedReplyText,
     ], {
-      matchInputContains: secondInboundText,
+      matchInputContains: approvedInboundText,
     });
 
-    const secondResponse = await postSignedLinqWebhook(buildHostedLinqInboundEvent(
+    const approvedResponse = await postSignedLinqWebhook(buildHostedLinqInboundEvent(
       userId,
       chatId,
       {
         eventId: `evt_vault_file_resume_${runId}`,
         messageId: `msg_vault_file_resume_${runId}`,
-        text: secondInboundText,
+        text: approvedInboundText,
       },
     ));
-    expect(secondResponse.status).toBe(202);
+    expect(approvedResponse.status).toBe(202);
     const attachedReply = await requireLinqStub().waitForAdditionalSend({
-      baselineCount: secondReplyBaseline,
+      baselineCount: approvedReplyBaseline,
       expectedPath: replyPath,
       scenario: requireScenario(),
       userId,
@@ -207,7 +237,7 @@ describe("hosted local vault-file approval resume e2e", () => {
     })).toBe(attachmentCreateBaseline + 1);
     expect(countAttachmentUploadLogs()).toBe(attachmentUploadBaseline + 1);
     expect(requireLinqStub().countObservedSends(replyPath)).toBe(
-      secondReplyBaseline + 1,
+      approvedReplyBaseline + 1,
     );
   }, 420_000);
 });

@@ -8,6 +8,9 @@ import {
   seedHostedWorkspaceCheckpointForTest,
 } from "#hosted-web-testing";
 import {
+  buildHostedExecutionMemberActivatedWake,
+} from "@murphai/hosted-execution";
+import {
   HOSTED_EXECUTION_USER_ID_HEADER,
   type HostedBrowserVaultReplicaRef,
   type HostedExecutionSnapshotRef,
@@ -133,10 +136,16 @@ describe("hosted local snapshot publication fallback e2e", () => {
       recipientPhone: memberPhone,
     });
 
-    const baselineSnapshotRef = await seedBaselineWorkspaceSnapshot();
+    const seededSnapshotRef = await seedBaselineWorkspaceSnapshot();
     const seededStatus = await requireScenario().harness.readUserStatus(userId);
-    expect(seededStatus.workspace?.snapshotRef).toEqual(baselineSnapshotRef);
-    const initialWorkspaceVersion = requireWorkspaceVersion(seededStatus);
+    expect(seededStatus.workspace?.snapshotRef).toEqual(seededSnapshotRef);
+    await requireScenario().runWake(buildActivationWake(), userId);
+    const baselineStatus = await waitForCleanSnapshotPublication(seededSnapshotRef);
+    const baselineSnapshotRef = baselineStatus.workspace?.snapshotRef;
+    if (!baselineSnapshotRef || !isHostedWorkspaceSnapshotV2Ref(baselineSnapshotRef)) {
+      throw new Error("Activation did not publish the production v2 baseline snapshot.");
+    }
+    const initialWorkspaceVersion = requireWorkspaceVersion(baselineStatus);
     const baselineReplyCount = requireLinqStub().countObservedSends(replyPath);
     const baselineFaultCount = countSnapshotPublicationFaults();
     const baselineInvokeFailureDestroyCount = countInvokeFailureDestroyRequests();
@@ -226,6 +235,19 @@ describe("hosted local snapshot publication fallback e2e", () => {
     expect(countSnapshotPublicationFaults()).toBe(baselineFaultCount + 1);
   }, 600_000);
 });
+
+function buildActivationWake() {
+  return buildHostedExecutionMemberActivatedWake({
+    eventId: `member.activated:local:${userId}:snapshot-publication-fallback`,
+    memberChannels: {
+      email: false,
+      linq: true,
+      telegram: false,
+    },
+    memberId: userId,
+    occurredAt: new Date().toISOString(),
+  });
+}
 
 async function seedBaselineWorkspaceSnapshot(): Promise<HostedExecutionSnapshotRef> {
   const root = await mkdtemp(path.join(tmpdir(), "murph-snapshot-publication-fallback-"));
