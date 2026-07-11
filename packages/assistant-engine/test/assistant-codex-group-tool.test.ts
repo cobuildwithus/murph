@@ -113,6 +113,14 @@ describe("murph.group dynamic tool", () => {
       .toContain("{{share_scope}}");
     expect(MURPH_GROUP_TOOL.inputSchema.properties.messageTemplate.description)
       .toContain("Include {{join_url}} exactly once");
+    expect(MURPH_GROUP_TOOL.description)
+      .toContain('In a connected group-chat turn, if read_current returns status="none"');
+    expect(MURPH_GROUP_TOOL.description)
+      .toContain("no hosted group record exists yet");
+    expect(MURPH_GROUP_TOOL.description)
+      .toContain("continue with create_join_link or post_join_offer");
+    expect(MURPH_GROUP_TOOL.description)
+      .toContain("instead of claiming that an external workspace-linking step is required");
     expect(MURPH_GROUP_TOOL.description).toContain('action="leave_current"');
     expect(MURPH_GROUP_TOOL.description).toContain("shared-projection cleanup is pending");
     expect(MURPH_GROUP_TOOL.description).toContain("does not erase historical chat messages");
