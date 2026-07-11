@@ -18,10 +18,8 @@ import {
 import {
   isHostedWorkspaceSnapshotV2Ref,
 } from "@murphai/hosted-execution/parsers";
-import {
-  HOSTED_CANONICAL_WRITE_RECEIPT_LOG_BYTE_SIZE_STATUS_KEY,
-  HOSTED_CANONICAL_WRITE_RECEIPT_LOG_SHA_STATUS_KEY,
-  type HostedRunnerStatusResponse,
+import type {
+  HostedRunnerStatusResponse,
 } from "@murphai/hosted-execution/runtime-control";
 import {
   sha256HostedBundleHex,
@@ -181,11 +179,6 @@ describe("hosted local snapshot publication fallback e2e", () => {
     const rejectedPublicationStatus = await waitForRejectedSnapshotPublication({
       baselineFaultCount,
     });
-    console.info(
-      `[snapshot-receipt-diagnostics] ${JSON.stringify(
-        await readCanonicalReceiptReplayDiagnostics(rejectedPublicationStatus),
-      )}`,
-    );
     expect(readSnapshotPublicationValidationStatuses()).toContain(409);
     expect(rejectedPublicationStatus.workspace?.snapshotRef).toEqual(baselineSnapshotRef);
     expect(requireWorkspaceVersion(rejectedPublicationStatus))
@@ -393,83 +386,6 @@ function countSnapshotPublicationFaults(): number {
   return readStructuredLogRecords().filter((record) =>
     record.message === publicationFaultMessage
   ).length;
-}
-
-async function readCanonicalReceiptReplayDiagnostics(
-  status: HostedRunnerStatusResponse,
-): Promise<unknown[]> {
-  const redactedStatus = status.workspace?.redactedStatus ?? null;
-  const logSha256 = redactedStatus?.[
-    HOSTED_CANONICAL_WRITE_RECEIPT_LOG_SHA_STATUS_KEY
-  ];
-  const logByteSize = redactedStatus?.[
-    HOSTED_CANONICAL_WRITE_RECEIPT_LOG_BYTE_SIZE_STATUS_KEY
-  ];
-  if (typeof logSha256 !== "string" || typeof logByteSize !== "number") {
-    return [];
-  }
-
-  const log = await readHostedTestArtifactJson(logSha256);
-  const entries = readRecord(log)?.entries;
-  if (!Array.isArray(entries)) {
-    return [];
-  }
-
-  const diagnostics: unknown[] = [];
-  for (const [receiptIndex, entry] of entries.entries()) {
-    const receiptSha256 = readRecord(entry)?.sha256;
-    if (typeof receiptSha256 !== "string") {
-      continue;
-    }
-    const receipt = readRecord(await readHostedTestArtifactJson(receiptSha256));
-    const actions = receipt?.actions;
-    if (!Array.isArray(actions)) {
-      continue;
-    }
-    for (const [actionIndex, actionValue] of actions.entries()) {
-      const action = readRecord(actionValue);
-      if (!action) {
-        continue;
-      }
-      const targetRelativePath = action.targetRelativePath;
-      diagnostics.push({
-        actionIndex,
-        appendByteLength: readFiniteNumber(action.appendByteLength),
-        baseByteLength: readFiniteNumber(action.baseByteLength),
-        kind: typeof action.kind === "string" ? action.kind : null,
-        originalSize: readFiniteNumber(action.originalSize),
-        receiptIndex,
-        targetPathSha256Prefix: typeof targetRelativePath === "string"
-          ? createHash("sha256").update(targetRelativePath).digest("hex").slice(0, 16)
-          : null,
-      });
-    }
-  }
-  return diagnostics;
-}
-
-async function readHostedTestArtifactJson(sha256: string): Promise<unknown> {
-  const response = await requireScenario().harness.request(
-    `/__test/artifacts?userId=${encodeURIComponent(userId)}&sha256=${encodeURIComponent(sha256)}`,
-    {
-      headers: {
-        [HOSTED_EXECUTION_USER_ID_HEADER]: userId,
-      },
-      method: "GET",
-    },
-  );
-  expect(response.status).toBe(200);
-  return JSON.parse(await response.text()) as unknown;
-}
-
-function readRecord(value: unknown): Record<string, unknown> | null {
-  return value && typeof value === "object" && !Array.isArray(value)
-    ? value as Record<string, unknown>
-    : null;
-}
-
-function readFiniteNumber(value: unknown): number | null {
-  return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
 function readSnapshotPublicationValidationStatuses(): number[] {

@@ -76,10 +76,15 @@ export function createHostedWebMailboxPort(input: {
 }
 
 function isHostedMailboxAiUsageDeniedError(error: unknown): boolean {
-  return Boolean(
-    error
-    && typeof error === "object"
-    && "code" in error
-    && error.code === HOSTED_RUNTIME_MAILBOX_AI_USAGE_DENIED_CODE,
-  );
+  let current: unknown = error;
+  const seen = new Set<unknown>();
+  while (current && typeof current === "object" && !seen.has(current)) {
+    seen.add(current);
+    const record = current as Record<string, unknown>;
+    if (record.code === HOSTED_RUNTIME_MAILBOX_AI_USAGE_DENIED_CODE) {
+      return true;
+    }
+    current = record.cause;
+  }
+  return false;
 }

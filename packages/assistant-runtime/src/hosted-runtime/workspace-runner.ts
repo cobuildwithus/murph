@@ -585,16 +585,7 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
       const pendingReceiptLog = readHostedCanonicalWriteReceiptLogStatusFingerprint(
         readCurrentRedactedStatus(),
       );
-      const durableReceiptLog = readHostedCanonicalWriteReceiptLogStatusFingerprint(
-        readDurableRedactedStatus(),
-      );
-      if (
-        !pendingReceiptLog
-        || (
-          durableReceiptLog?.sha256 === pendingReceiptLog.sha256
-          && durableReceiptLog.byteSize === pendingReceiptLog.byteSize
-        )
-      ) {
+      if (!pendingReceiptLog) {
         return;
       }
       if (!input.checkpointRuntimeRedactedStatus) {

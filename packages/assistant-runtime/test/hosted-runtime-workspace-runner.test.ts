@@ -2826,6 +2826,72 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     }
   });
 
+  test("checkpoints mailbox progress when its canonical receipt is already durable", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const mailboxItem = createMailboxItem({
+      id: "mailbox_item_runner_durable_canonical_receipt",
+      laneSeq: "1",
+    });
+    const workspace = createWorkspaceState({
+      redactedStatus: {
+        hostedCanonicalWriteReceiptLogByteSize: 1,
+        hostedCanonicalWriteReceiptLogSha256: "a".repeat(64),
+      },
+      version: "0",
+    });
+
+    try {
+      await runHostedWorkspaceUntilIdleOrBudget({
+        checkpointRuntimeRedactedStatus: createRuntimeRedactedStatusCheckpoint({
+          attemptId: "attempt_synthetic_runner_durable_mailbox_receipt",
+          checkpointRequests,
+          leaseGeneration: "1",
+        }),
+        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+          attemptId: "attempt_synthetic_runner_durable_mailbox_receipt",
+          expectedWorkspaceVersion: "0",
+          leaseGeneration: "1",
+          nextWakeAt: null,
+          nextWakeReason: null,
+          snapshotRef: null,
+        }),
+        expectedUserId: TEST_USER_ID,
+        async importItem() {
+          return { status: "imported" };
+        },
+        limitPerLane: 10,
+        platform: createPlatform({
+          mailboxPort: createMailboxPort({ items: [mailboxItem] }).mailboxPort,
+          workspacePort: createWorkspacePort({ checkpointRequests }),
+        }),
+        requestId: "request_synthetic_runner_durable_mailbox_receipt",
+        vaultRoot,
+        workspace,
+        now: () => TEST_NOW,
+      });
+
+      assert.deepEqual(checkpointRequests.map((request) => request.reason), [
+        "canonical_runtime_commit",
+      ]);
+      assert.equal(
+        checkpointRequests[0]?.redactedStatus
+          ?.hostedMailboxConversationImportedSeq,
+        "1",
+      );
+      assert.equal(
+        checkpointRequests[0]?.redactedStatus
+          ?.hostedCanonicalWriteReceiptLogSha256,
+        "a".repeat(64),
+      );
+    } finally {
+      await rm(vaultRoot, {
+        force: true,
+        recursive: true,
+      });
+    }
+  });
+
   test("does not publish receipt-log status when a post-checkpoint canonical receipt checkpoint fails", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
     await initializeVault({

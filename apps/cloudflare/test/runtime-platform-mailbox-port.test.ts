@@ -79,4 +79,26 @@ describe("createHostedWebMailboxPort", () => {
       status: 403,
     });
   });
+
+  it("recognizes an exact AI usage denial preserved as a transport cause", async () => {
+    const fetchImpl = vi.fn(async () => {
+      throw new Error("Hosted mailbox fetch request failed.", {
+        cause: Object.assign(new Error("Hosted runtime mailbox AI usage is denied."), {
+          code: "HOSTED_RUNTIME_MAILBOX_AI_USAGE_DENIED",
+          status: 403,
+        }),
+      });
+    });
+    const mailboxPort = createHostedWebMailboxPort({
+      boundUserId: "member_usage_denied",
+      fetchImpl: fetchImpl as typeof fetch,
+      timeoutMs: 1_000,
+      transport: { mode: "proxy" },
+    });
+
+    await expect(mailboxPort.fetch(mailboxRequest)).resolves.toMatchObject({
+      items: [],
+      userId: "member_usage_denied",
+    });
+  });
 });

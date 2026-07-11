@@ -36,4 +36,18 @@ must remain recoverable from the prior snapshot plus canonical receipts.
 
 ## State
 
-Active. Root causes proven; regression tests and implementation in progress.
+Active. CI proved that an assistant checkpoint could publish a mailbox receipt
+before the import watermark, after which the mailbox callback skipped the
+watermark because the receipt was already durable. The same race left the
+rejected-snapshot scenario with conversation sequence zero and a five-receipt
+audit chain whose first append base was absent from the prior published
+snapshot. The callback now always checkpoints dirty mailbox progress when a
+canonical receipt exists, including idempotent imports whose receipt is already
+durable. Exact usage-denial codes are also recognized through the transport
+cause chain so the active invocation ends cleanly instead of preserving its
+write fence as an authorization failure.
+
+Focused assistant-runtime tests (87), Cloudflare mailbox-port tests (3), and
+both package typechecks pass. The pre-fix full affected diff gate passed all
+affected tests, typechecks, builds, lint, and dev smoke; final affected
+verification remains required after the recovery commit.
