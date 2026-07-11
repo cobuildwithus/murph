@@ -464,7 +464,7 @@ describe('assistant skill assets', () => {
     )
   })
 
-  it('keeps hosted computer-use guidance on the browser step primitive and health playbook', async () => {
+  it('keeps hosted computer-use guidance on decision-bounded browser macro-steps and the health playbook', async () => {
     const computerUseSkill = ASSISTANT_SKILLS.find(
       (skill) => skill.slug === 'computer-use',
     )
@@ -474,6 +474,12 @@ describe('assistant skill assets', () => {
     }
 
     const raw = await readSkillFile(computerUseSkill)
+    const actPrimitive = raw.match(
+      /## Act primitive\n(?<section>[\s\S]*?)\n## Browser control loop/u,
+    )?.groups?.section ?? ''
+    const browserControlLoop = raw.match(
+      /## Browser control loop\n(?<section>[\s\S]*?)\n## Playwright control tactics/u,
+    )?.groups?.section ?? ''
     const playbook = await readFile(
       path.join(
         resolveAssistantSkillsRoot(),
@@ -489,6 +495,19 @@ describe('assistant skill assets', () => {
     )
     expect(raw).toContain('computer_act` is the browser execution primitive')
     expect(raw).toContain('runs bounded Playwright code against the current page')
+    expect(actPrimitive).toMatch(/decision-bounded macro-step/iu)
+    expect(actPrimitive).toMatch(/combine every\s+deterministic operation/iu)
+    expect(actPrimitive).toMatch(/final verification/iu)
+    expect(actPrimitive).toMatch(
+      /ambiguous intent.*missing\s+data.*sensitive\s+input.*irreversible\s+confirmation.*unknown\s+transition.*timeout/isu,
+    )
+    expect(actPrimitive).toMatch(/waitFor/iu)
+    expect(actPrimitive).not.toMatch(/one small browser step|one small inspection/iu)
+    expect(browserControlLoop).toMatch(/decision-bounded macro-step/iu)
+    expect(browserControlLoop).not.toMatch(/Take one bounded action at a time/iu)
+    expect(raw).toMatch(
+      /return the\s+resulting state from the same `computer_act` call/iu,
+    )
     expect(raw).toContain('Pass Playwright')
     expect(raw).toContain('locator(...).nth(index)')
     expect(raw).toMatch(/hidden browser\s+credentials/u)

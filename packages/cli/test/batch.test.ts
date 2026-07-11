@@ -80,7 +80,7 @@ test('batch runs multiple vault-cli argv arrays in one process', async () => {
         argv: string[]
         data?: unknown
         ok: boolean
-        stdout: string
+        stdout?: string
       }>
       vault: string
     }
@@ -92,9 +92,55 @@ test('batch runs multiple vault-cli argv arrays in one process', async () => {
     assert.deepEqual(result.commands[0]?.argv.slice(0, 2), ['memory', 'show'])
     assert.equal(result.commands[0]?.argv.includes('--vault'), true)
     assert.equal(result.commands[0]?.argv.includes('--format'), true)
-    assert.equal(typeof result.commands[0]?.stdout, 'string')
+    assert.equal(Object.hasOwn(result.commands[0] ?? {}, 'stdout'), false)
+    assert.equal(Object.hasOwn(result.commands[1] ?? {}, 'stdout'), false)
     assert.equal(typeof result.commands[0]?.data, 'object')
     assert.equal(typeof result.commands[1]?.data, 'object')
+
+    const duplicatedRaw = JSON.stringify({
+      ...result,
+      commands: result.commands.map((command) => ({
+        ...command,
+        stdout: JSON.stringify(command.data),
+      })),
+    })
+    assert.ok(JSON.stringify(result).length < duplicatedRaw.length * 0.7)
+  } finally {
+    await rm(parent, {
+      recursive: true,
+      force: true,
+    })
+  }
+})
+
+test('batch preserves successful non-JSON output as stdout', async () => {
+  const parent = await mkdtemp(path.join(os.tmpdir(), 'murph-cli-batch-text-'))
+  const vault = path.join(parent, 'vault')
+
+  try {
+    await runCli(['init', '--vault', vault, '--format', 'json'])
+
+    const raw = await runCli([
+      'batch',
+      '--vault',
+      vault,
+      '--command',
+      '["memory","show","--help"]',
+      '--format',
+      'json',
+    ])
+    const result = JSON.parse(raw) as {
+      commands: Array<{
+        data?: unknown
+        ok: boolean
+        stdout?: string
+      }>
+    }
+
+    assert.equal(result.commands[0]?.ok, true)
+    assert.equal(typeof result.commands[0]?.stdout, 'string')
+    assert.ok((result.commands[0]?.stdout?.length ?? 0) > 0)
+    assert.equal(Object.hasOwn(result.commands[0] ?? {}, 'data'), false)
   } finally {
     await rm(parent, {
       recursive: true,
@@ -132,6 +178,7 @@ test('batch captures child failures and honors stopOnError', async () => {
           message: string
         }
         ok: boolean
+        stdout?: string
       }>
     }
 
@@ -176,6 +223,7 @@ test('batch captures executed child command failures and continues by default', 
           message: string
         }
         ok: boolean
+        stdout?: string
       }>
     }
 
@@ -183,6 +231,7 @@ test('batch captures executed child command failures and continues by default', 
     assert.equal(result.failed, 1)
     assert.deepEqual(result.commands.map((command) => command.ok), [false, true])
     assert.equal(typeof result.commands[0]?.error?.message, 'string')
+    assert.equal(typeof result.commands[0]?.stdout, 'string')
   } finally {
     await rm(parent, {
       recursive: true,

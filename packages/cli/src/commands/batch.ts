@@ -14,7 +14,7 @@ const batchCommandResultSchema = z.object({
   argv: z.array(z.string().min(1)),
   durationMs: z.number().int().nonnegative(),
   ok: z.boolean(),
-  stdout: z.string(),
+  stdout: z.string().optional(),
   data: z.unknown().optional(),
   error: z.object({
     message: z.string().min(1),
@@ -208,13 +208,19 @@ async function runBatchCommand(input: {
     }
 
     const output = stdout.join('')
+    const parsedOutput = parseJsonOutput(output)
     return {
       index: input.index,
       argv,
       durationMs: elapsedMs(startedAt),
       ok: true,
-      stdout: output,
-      ...parseJsonOutput(output),
+      ...(parsedOutput.ok
+        ? {
+            data: parsedOutput.data,
+          }
+        : {
+            stdout: output,
+          }),
     }
   } catch (error) {
     return {
@@ -290,17 +296,29 @@ function insertDefaultOption(argv: string[], option: readonly [string, string]) 
   argv.splice(terminatorIndex, 0, ...option)
 }
 
-function parseJsonOutput(stdout: string): { data?: unknown } {
+function parseJsonOutput(stdout: string):
+  | {
+      data: unknown
+      ok: true
+    }
+  | {
+      ok: false
+    } {
   const trimmed = stdout.trim()
   if (trimmed.length === 0) {
-    return {}
+    return {
+      ok: false,
+    }
   }
 
   try {
     return {
       data: JSON.parse(trimmed),
+      ok: true,
     }
   } catch {
-    return {}
+    return {
+      ok: false,
+    }
   }
 }
