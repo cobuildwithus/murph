@@ -14,7 +14,7 @@ const batchCommandResultSchema = z.object({
   argv: z.array(z.string().min(1)),
   durationMs: z.number().int().nonnegative(),
   ok: z.boolean(),
-  stdout: z.string().optional(),
+  stdout: z.string(),
   data: z.unknown().optional(),
   error: z.object({
     message: z.string().min(1),
@@ -37,6 +37,9 @@ export function registerBatchCommands(cli: Cli.Cli) {
     args: emptyArgsSchema,
     options: withBaseOptions({
       command: z.array(batchCommandOptionSchema).min(1).max(50),
+      compact: z.boolean().default(false).describe(
+        'Replace duplicate raw JSON output with an empty stdout string after successful parsing.',
+      ),
       stopOnError: z.boolean().default(false),
     }),
     output: batchRunResultSchema,
@@ -46,6 +49,7 @@ export function registerBatchCommands(cli: Cli.Cli) {
       for (const [index, command] of options.command.entries()) {
         const result = await runBatchCommand({
           command,
+          compact: options.compact,
           index,
           vault: options.vault,
         })
@@ -179,6 +183,7 @@ function isRootOptionWithoutValue(token: string): boolean {
 
 async function runBatchCommand(input: {
   command: string
+  compact: boolean
   index: number
   vault: string
 }): Promise<BatchCommandResult> {
@@ -214,13 +219,8 @@ async function runBatchCommand(input: {
       argv,
       durationMs: elapsedMs(startedAt),
       ok: true,
-      ...(parsedOutput.ok
-        ? {
-            data: parsedOutput.data,
-          }
-        : {
-            stdout: output,
-          }),
+      stdout: input.compact && parsedOutput.ok ? '' : output,
+      ...(parsedOutput.ok ? { data: parsedOutput.data } : {}),
     }
   } catch (error) {
     return {

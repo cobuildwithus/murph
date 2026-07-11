@@ -80,7 +80,7 @@ test('batch runs multiple vault-cli argv arrays in one process', async () => {
         argv: string[]
         data?: unknown
         ok: boolean
-        stdout?: string
+        stdout: string
       }>
       vault: string
     }
@@ -92,8 +92,49 @@ test('batch runs multiple vault-cli argv arrays in one process', async () => {
     assert.deepEqual(result.commands[0]?.argv.slice(0, 2), ['memory', 'show'])
     assert.equal(result.commands[0]?.argv.includes('--vault'), true)
     assert.equal(result.commands[0]?.argv.includes('--format'), true)
-    assert.equal(Object.hasOwn(result.commands[0] ?? {}, 'stdout'), false)
-    assert.equal(Object.hasOwn(result.commands[1] ?? {}, 'stdout'), false)
+    assert.equal(typeof result.commands[0]?.stdout, 'string')
+    assert.equal(typeof result.commands[1]?.stdout, 'string')
+    assert.equal(typeof result.commands[0]?.data, 'object')
+    assert.equal(typeof result.commands[1]?.data, 'object')
+    assert.deepEqual(JSON.parse(result.commands[0]?.stdout ?? ''), result.commands[0]?.data)
+    assert.deepEqual(JSON.parse(result.commands[1]?.stdout ?? ''), result.commands[1]?.data)
+  } finally {
+    await rm(parent, {
+      recursive: true,
+      force: true,
+    })
+  }
+})
+
+test('batch compact mode removes duplicate parsed JSON bytes without changing the released result shape', async () => {
+  const parent = await mkdtemp(path.join(os.tmpdir(), 'murph-cli-batch-compact-'))
+  const vault = path.join(parent, 'vault')
+
+  try {
+    await runCli(['init', '--vault', vault, '--format', 'json'])
+
+    const raw = await runCli([
+      'batch',
+      '--compact',
+      '--vault',
+      vault,
+      '--command',
+      '["memory","show"]',
+      '--command',
+      '["goal","list"]',
+      '--format',
+      'json',
+    ])
+    const result = JSON.parse(raw) as {
+      commands: Array<{
+        data?: unknown
+        ok: boolean
+        stdout: string
+      }>
+    }
+
+    assert.deepEqual(result.commands.map((command) => command.ok), [true, true])
+    assert.deepEqual(result.commands.map((command) => command.stdout), ['', ''])
     assert.equal(typeof result.commands[0]?.data, 'object')
     assert.equal(typeof result.commands[1]?.data, 'object')
 
@@ -113,7 +154,7 @@ test('batch runs multiple vault-cli argv arrays in one process', async () => {
   }
 })
 
-test('batch preserves successful non-JSON output as stdout', async () => {
+test('batch compact mode preserves successful non-JSON output as stdout', async () => {
   const parent = await mkdtemp(path.join(os.tmpdir(), 'murph-cli-batch-text-'))
   const vault = path.join(parent, 'vault')
 
@@ -122,6 +163,7 @@ test('batch preserves successful non-JSON output as stdout', async () => {
 
     const raw = await runCli([
       'batch',
+      '--compact',
       '--vault',
       vault,
       '--command',
@@ -133,7 +175,7 @@ test('batch preserves successful non-JSON output as stdout', async () => {
       commands: Array<{
         data?: unknown
         ok: boolean
-        stdout?: string
+        stdout: string
       }>
     }
 
@@ -178,7 +220,7 @@ test('batch captures child failures and honors stopOnError', async () => {
           message: string
         }
         ok: boolean
-        stdout?: string
+        stdout: string
       }>
     }
 
@@ -223,7 +265,7 @@ test('batch captures executed child command failures and continues by default', 
           message: string
         }
         ok: boolean
-        stdout?: string
+        stdout: string
       }>
     }
 

@@ -3,18 +3,12 @@ import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import {
-  readAssistantCliLlmsManifest,
   type AssistantCliLlmsManifest,
   type AssistantCliLlmsManifestCommand,
   type AssistantCliLlmsManifestSchemaNode,
-  buildAssistantCliProcessEnv,
 } from './cli-surface-manifest.js'
-import { ensureAssistantStateDirectory, isMissingFileError, writeJsonFileAtomic } from './shared.js'
-import { resolveAssistantStatePaths } from './store/paths.js'
-import { resolveAssistantStateDocumentPath } from './state.js'
+import { isMissingFileError } from './shared.js'
 
-const assistantCliSurfaceBootstrapSchemaVersion =
-  'murph.assistant-cli-surface-bootstrap.v5'
 export const assistantCliSurfacePrebuiltSchemaVersion =
   'murph.assistant-cli-surface-prebuilt.v2'
 const assistantCliSurfaceBootstrapRenderPolicyVersion =
@@ -68,10 +62,6 @@ const assistantCliSurfaceBootstrapIgnoredCommandNames = new Set([
   'stop',
 ])
 
-const cachedAssistantCliSurfaceContractPromises = new Map<
-  string,
-  Promise<AssistantCliSurfaceContractSnapshot | null>
->()
 let cachedPrebuiltAssistantCliSurfaceContractPromise:
   | Promise<AssistantCliSurfaceContractSnapshot | null>
   | null = null
@@ -87,68 +77,9 @@ export type AssistantCliSurfacePrebuiltArtifact = {
   schemaVersion: typeof assistantCliSurfacePrebuiltSchemaVersion
 }
 
-export function buildAssistantCliSurfaceBootstrapDocId(sessionId: string): string {
-  return `sessions/${sessionId}/cli-surface-bootstrap`
-}
-
-export async function resolveAssistantCliSurfaceBootstrapContext(input: {
-  cliEnv?: NodeJS.ProcessEnv
-  executionContext?: import('./execution-context.js').AssistantExecutionContext | null
-  sessionId: string
-  vault: string
-  workingDirectory?: string | null
-}): Promise<string | null> {
+export async function readAssistantCliSurfaceBootstrapContext(): Promise<string | null> {
   const prebuiltContract = await readPrebuiltAssistantCliSurfaceContract()
-  if (prebuiltContract !== null) {
-    return prebuiltContract.contract
-  }
-
-  const docId = buildAssistantCliSurfaceBootstrapDocId(input.sessionId)
-  const stateDirectory = resolveAssistantStatePaths(input.vault).stateDirectory
-  const documentPath = resolveAssistantStateDocumentPath(
-    {
-      stateDirectory,
-    },
-    docId,
-  )
-  const persistedContract = await readPersistedAssistantCliSurfaceContract(documentPath)
-  const contractSnapshot = await loadAssistantCliSurfaceContract({
-    cliEnv: input.cliEnv,
-    executionContext: input.executionContext,
-    vault: input.vault,
-    workingDirectory: input.workingDirectory,
-  })
-  if (!contractSnapshot) {
-    return persistedContract?.contract ?? null
-  }
-  if (
-    persistedContract !== null &&
-    persistedContract.manifestFingerprint === contractSnapshot.manifestFingerprint
-  ) {
-    return persistedContract.contract
-  }
-
-  await ensureAssistantStateDirectory(path.dirname(documentPath))
-  await writeJsonFileAtomic(documentPath, {
-    contract: contractSnapshot.contract,
-    generatedAt: new Date().toISOString(),
-    manifestFingerprint: contractSnapshot.manifestFingerprint,
-    schemaVersion: assistantCliSurfaceBootstrapSchemaVersion,
-  })
-
-  return contractSnapshot.contract
-}
-
-export async function readAssistantCliSurfaceBootstrapContext(input: {
-  sessionId: string
-  vault: string
-}): Promise<string | null> {
-  const prebuiltContract = await readPrebuiltAssistantCliSurfaceContract()
-  if (prebuiltContract !== null) {
-    return prebuiltContract.contract
-  }
-
-  return await readPersistedAssistantCliSurfaceBootstrapContext(input)
+  return prebuiltContract?.contract ?? null
 }
 
 export async function readPrebuiltAssistantCliSurfaceContract(input: {
@@ -179,22 +110,6 @@ export async function readPrebuiltAssistantCliSurfaceContract(input: {
   }
 }
 
-export async function readPersistedAssistantCliSurfaceBootstrapContext(input: {
-  sessionId: string
-  vault: string
-}): Promise<string | null> {
-  const docId = buildAssistantCliSurfaceBootstrapDocId(input.sessionId)
-  const stateDirectory = resolveAssistantStatePaths(input.vault).stateDirectory
-  const documentPath = resolveAssistantStateDocumentPath(
-    {
-      stateDirectory,
-    },
-    docId,
-  )
-
-  return (await readPersistedAssistantCliSurfaceContract(documentPath))?.contract ?? null
-}
-
 export function buildAssistantCliSurfaceContract(
   manifest: AssistantCliLlmsManifest,
 ): string | null {
@@ -209,49 +124,6 @@ export function buildAssistantCliSurfaceContract(
   }
 
   return null
-}
-
-async function readPersistedAssistantCliSurfaceContract(
-  documentPath: string,
-): Promise<{
-  contract: string
-  manifestFingerprint: string
-} | null> {
-  try {
-    const raw = await readFile(documentPath, 'utf8')
-    const value = JSON.parse(raw) as Record<string, unknown>
-    const contract = value.contract
-    const manifestFingerprint = value.manifestFingerprint
-    if (
-      value.schemaVersion !== assistantCliSurfaceBootstrapSchemaVersion ||
-      typeof contract !== 'string' ||
-      typeof manifestFingerprint !== 'string' ||
-      !/^[a-f0-9]{64}$/u.test(manifestFingerprint) ||
-      value.sourceDetail !== undefined
-    ) {
-      return null
-    }
-
-    const normalizedContract = contract.trim()
-    if (
-      normalizedContract.length === 0 ||
-      normalizedContract.length > assistantCliSurfaceBootstrapContractCharBudget ||
-      !normalizedContract.startsWith('Murph CLI Contract:')
-    ) {
-      return null
-    }
-
-    return {
-      contract: normalizedContract,
-      manifestFingerprint,
-    }
-  } catch (error) {
-    if (isMissingFileError(error)) {
-      return null
-    }
-
-    return null
-  }
 }
 
 async function readPrebuiltAssistantCliSurfaceContractFromPath(
@@ -360,84 +232,6 @@ async function readFirstPrebuiltAssistantCliSurfaceContract(
   }
 
   return null
-}
-
-async function loadAssistantCliSurfaceContract(input: {
-  cliEnv?: NodeJS.ProcessEnv
-  executionContext?: import('./execution-context.js').AssistantExecutionContext | null
-  vault: string
-  workingDirectory?: string | null
-}): Promise<AssistantCliSurfaceContractSnapshot | null> {
-  const cacheKey = createAssistantCliSurfaceContractCacheKey(input)
-  let cachedAssistantCliSurfaceContractPromise =
-    cachedAssistantCliSurfaceContractPromises.get(cacheKey) ?? null
-  if (cachedAssistantCliSurfaceContractPromise === null) {
-    cachedAssistantCliSurfaceContractPromise =
-      generateAssistantCliSurfaceContract(input)
-    cachedAssistantCliSurfaceContractPromises.set(
-      cacheKey,
-      cachedAssistantCliSurfaceContractPromise,
-    )
-  }
-
-  try {
-    const contract = await cachedAssistantCliSurfaceContractPromise
-    cachedAssistantCliSurfaceContractPromises.delete(cacheKey)
-
-    return contract
-  } catch {
-    cachedAssistantCliSurfaceContractPromises.delete(cacheKey)
-    return null
-  }
-}
-
-function createAssistantCliSurfaceContractCacheKey(input: {
-  cliEnv?: NodeJS.ProcessEnv
-  executionContext?: import('./execution-context.js').AssistantExecutionContext | null
-  vault: string
-  workingDirectory?: string | null
-}): string {
-  return JSON.stringify({
-    cliEnvHash: hashAssistantCliSurfaceEnv(input.cliEnv),
-    executionContext: input.executionContext ?? null,
-    vault: input.vault,
-    workingDirectory: input.workingDirectory ?? null,
-  })
-}
-
-function hashAssistantCliSurfaceEnv(env: NodeJS.ProcessEnv | undefined): string {
-  const effectiveEnv = buildAssistantCliProcessEnv({
-    cliEnv: env,
-  })
-  const hash = createHash('sha256')
-  for (const key of Object.keys(effectiveEnv).sort()) {
-    hash.update(key)
-    hash.update('\0')
-    hash.update(effectiveEnv[key] ?? '')
-    hash.update('\0')
-  }
-
-  return hash.digest('hex')
-}
-
-async function generateAssistantCliSurfaceContract(input: {
-  cliEnv?: NodeJS.ProcessEnv
-  executionContext?: import('./execution-context.js').AssistantExecutionContext | null
-  vault: string
-  workingDirectory?: string | null
-}): Promise<AssistantCliSurfaceContractSnapshot | null> {
-  const manifest = await readAssistantCliLlmsManifest({
-    cliEnv: input.cliEnv,
-    executionContext: input.executionContext,
-    workingDirectory: input.workingDirectory,
-  })
-  const contract = buildAssistantCliSurfaceContract(manifest)
-  return contract
-    ? {
-        contract,
-        manifestFingerprint: hashAssistantCliSurfaceManifest(manifest),
-      }
-    : null
 }
 
 export function hashAssistantCliSurfaceManifest(
