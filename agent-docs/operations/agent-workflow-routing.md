@@ -63,6 +63,29 @@ Then load only the task-relevant docs listed below.
 - Do not use `scripts/committer` or raw `git commit` as the final task commit for work that has an active plan unless the user explicitly asks to leave the plan active.
 - If a plan-bearing task cannot safely create a scoped commit because overlapping dirty files would force an unsafe partial stage, do not leave the plan under `active/`; clear the matching ledger row and archive it with `scripts/close-exec-plan.sh` before handoff.
 
+## Model Complementarity (Fable ↔ Sol)
+
+This is a working hypothesis from a single observed collaboration, not a proven law — treat it as a prompt to reach for the other model, not a fixed claim about either one's ability. In that session Fable and Sol (`gpt-5.6-sol`, the Codex model this repo pins) showed distinct working styles whose failure modes leaned in opposite directions, so a cross-model pass caught real mistakes in both directions. Bounce a sub-problem to the other model whenever you hit its apparent strength or your own known weakness, and lean on a second-model pass more as the stakes rise.
+
+**Sol — the builder.** Tends to produce concrete artifacts: working implementations, specific fixes, reproductions, failing tests, and concrete cases that settle a question. It tends to make progress by building or running something specific, and even when reviewing it often objects by producing a concrete counterexample rather than an abstract concern.
+- Apparent failure mode: overclaiming scope. The code it writes is often sound, but the claim about *what it covers* can exceed it — "this handles X" when it handles only part of X. Its own caveats often already flag the gap; the caution just doesn't always propagate into the summary.
+- So: lean on Sol's concrete work, double-check its scope claims, and read its self-flagged caveats as real.
+
+**Fable — the architect.** Tends to produce structure: reframing the problem, finding the root cause or the real obstruction, choosing the right abstraction and placement, and simplifying. It also tends toward process hygiene — flagging shaky steps and documenting what it could not verify.
+- Apparent failure mode: overreach at the polish layer. At finishing time it can add "nice" extras beyond the verified core — a speculative refactor, an extra abstraction, or a claimed generalization — that weren't actually checked. It also leans on concrete artifacts as raw material more than it originates them.
+- So: lean on Fable's framing and simplifications, double-check any extra it adds after the core change, and re-verify claimed generalizations.
+
+**Route by need — hand the sub-problem to whichever model's zone it is.**
+- Hand to Sol when you need something concrete built or verified: an implementation, a specific fix, a reproduction, a failing test, or a case that settles whether a claim holds. If Fable is stuck for raw material or needs its structure grounded in something concrete, that is Sol's zone.
+- Hand to Fable when you need structure: a reframing, the root cause or obstruction, the right abstraction/placement, a simplification, or scope and process discipline. If Sol has working code but is unsure what it means or how far it reaches, that is Fable's zone.
+
+**Referee across model when it's worth it.** A cross-model pass tends to catch what a same-model self-review misses, because a model's blind spot and its self-review share the same bias:
+- Fable checking Sol's scope: does the change actually cover the cases it claims? did an assumption slip in?
+- Sol checking Fable's added polish: is each extra refactor or generalization actually verified? build the concrete case that tests it.
+- A workable rhythm is alternation: Sol builds something concrete → Fable reframes or simplifies it → Sol re-grounds the next step in something concrete.
+
+In that session the styles seemed to persist even when the models swapped roles (the builder still built while reviewing, the architect still reframed while attacking), a hint the tendency is model-level rather than just prompt-driven. Either way, when a task hits one model's weak spot, routing that piece to the other is usually cheaper than trying to prompt the same model out of its default mode.
+
 ## Quick Path
 
 For tiny repo-internal workflow/tooling changes:

@@ -1024,12 +1024,16 @@ export async function startHostedLocalDevStack(input: {
             ignoreErrors: true,
             scope: "current-build",
           });
-          await cleanupHostedRunnerImages({
-            cwd: repoRoot,
-            env: workerProcessEnv ?? workerRuntimeEnv,
-            ignoreErrors: true,
-            scope: "current-build",
-          });
+          // A prepared E2E suite keeps its proved image between compatible
+          // scenarios and performs the final current-build cleanup itself.
+          if (!shouldRunHostedLocalE2eRunnerSmokeOnce(initialProcessEnv)) {
+            await cleanupHostedRunnerImages({
+              cwd: repoRoot,
+              env: workerProcessEnv ?? workerRuntimeEnv,
+              ignoreErrors: true,
+              scope: "current-build",
+            });
+          }
         }
         if (minioServer !== null) {
           await cleanupHostedLocalMinioContainerBestEffort(
@@ -1170,12 +1174,16 @@ export async function startHostedLocalDevStack(input: {
         ignoreErrors: true,
         scope: "current-build",
       }).catch(() => {});
-      await cleanupHostedRunnerImages({
-        cwd: repoRoot,
-        env: workerProcessEnv ?? workerRuntimeEnv,
-        ignoreErrors: true,
-        scope: "current-build",
-      }).catch(() => {});
+      // Preserve suite-owned reuse even when this scenario fails to start; the
+      // outer E2E finally block still removes the current-build image.
+      if (!shouldRunHostedLocalE2eRunnerSmokeOnce(initialProcessEnv)) {
+        await cleanupHostedRunnerImages({
+          cwd: repoRoot,
+          env: workerProcessEnv ?? workerRuntimeEnv,
+          ignoreErrors: true,
+          scope: "current-build",
+        }).catch(() => {});
+      }
     }
     if (minioServer !== null) {
       await cleanupHostedLocalMinioContainerBestEffort(

@@ -51,11 +51,21 @@ Memory record metadata uses only canonical `mem_<ULID>` ids.
 - Memory document:
   `docType`, `schemaVersion`, `title`, `updatedAt`, plus sectioned memory records under `Identity`, `Preferences`, `Instructions`, and `Context`. Each stored memory bullet carries a hidden `murph-memory` metadata comment with canonical id, creation time, and update time.
 - Preferences singleton:
-  `schemaVersion`, `updatedAt`, `workoutUnitPreferences`
+  `schemaVersion`, `updatedAt`, optional `assistant`, `workoutUnitPreferences`, and `wearablePreferences`
 - Markdown frontmatter:
   `CORE.md`, journal day pages, experiment pages, provider pages, food pages, workout-format pages, and health registry pages each use a closed or explicitly documented frontmatter schema
 
 Baseline does not define a standalone transform record family. `xfm_*` ids are batch identifiers surfaced by import flows and raw-path layout only.
+
+## Preferences Singleton
+
+`bank/preferences.json` is the canonical typed product-preferences singleton. Its optional `assistant` object may contain `tone`, `voice`, and a strict sparse `personality` object. Personality supports only `humor`, `push`, and `detail`; each stored value is an integer from 0 through 10.
+
+Missing personality values resolve through the shared contract defaults: Humor 3, Push 3, and Detail 5. Missing means default, not a stored choice. An explicit stored value remains a custom choice even when it equals the current default. Reset removes the selected property, and resetting the final override removes the empty personality object.
+
+Personality stores expression preferences only. It never stores prompt text, conversation excerpts, inferred psychological traits, notification policy, tool authority, or group-wide settings. Member personality is private-conversation state; a future group setting needs separate group-scoped authority.
+
+The preferences schema is strict. Although `assistant.personality` is additive, a binary that predates the field can reject a document after the first personality write. Roll out compatible readers before writers. After a personality override is stored, the first compatible reader/writer version is the rollback floor unless a current compatible binary removes the field through the canonical mutation path.
 
 ## Event Kinds
 

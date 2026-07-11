@@ -570,26 +570,40 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
     expect(createCalled).toBe(false);
   });
 
-  it("accepts a guarded callback after mutable connection observations change", async () => {
-    const existing = createConnection({
+  it("atomically preserves Junction historical progress during a guarded callback", async () => {
+    let stored = createConnection({
+      credentialKind: "provider_config",
+      externalAccountIdEncrypted: "enc:junction-user-123",
       id: "dsc_123",
-      provider: "oura",
+      metadataJson: {
+        callbackOutcome: "seeded",
+        junctionHistoricalBackfillStatus: "coverage_v2_retrying",
+        junctionHistoricalBackfillEmptyAttempts: 2,
+        junctionHistoricalBackfillLastEmptyAt: "2026-03-25T00:30:00.000Z",
+        junctionHistoricalBackfillWindowStart: "2026-03-23T00:00:00.000Z",
+        junctionHistoricalBackfillWindowEnd: "2026-03-25T00:00:00.000Z",
+        junctionHistoricalBackfillEvidence:
+          "e1|2026-03-23T00:00:00.000Z|2026-03-25T00:00:00.000Z|garmin:1",
+        seedOnlyState: "discard",
+      },
+      provider: "junction",
+      providerConfigKey: "junction",
+      setupPhase: "pending_link",
       status: "active",
       updatedAt: new Date("2026-03-25T00:30:00.000Z"),
       userId: "user-123",
     });
-    const updated = createConnection({
-      id: "dsc_123",
-      nextReconcileAt: new Date("2026-03-25T05:00:00.000Z"),
-      provider: "oura",
-      status: "active",
-      updatedAt: new Date("2026-03-26T04:00:00.000Z"),
-      userId: "user-123",
-    });
 
     const lockConnectionMutation = vi.fn(async () => 0);
-    const findConnection = vi.fn(async () => cloneConnection(existing));
-    const updateConnection = vi.fn(async () => cloneConnection(updated));
+    const findConnection = vi.fn(async () => cloneConnection(stored));
+    const updateConnection = vi.fn(async ({ data }: { data: Partial<MutableConnectionRecord> }) => {
+      stored = {
+        ...stored,
+        ...data,
+        updatedAt: new Date("2026-03-26T04:00:00.000Z"),
+      };
+      return cloneConnection(stored);
+    });
     const tx = {
       $executeRaw: lockConnectionMutation,
       deviceConnection: {
@@ -613,17 +627,16 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
 
     await expect(store.upsertConnection({
       ownerId: "user-123",
-      provider: "oura",
-      externalAccountId: "acct_456",
-      displayName: "Updated Oura ring",
-      scopes: ["daily"],
-      tokens: {
-        accessToken: "new-access-token",
-        refreshToken: "new-refresh-token",
-        accessTokenExpiresAt: "2026-03-26T04:00:00.000Z",
+      provider: "junction",
+      externalAccountId: "junction-user-123",
+      displayName: "Junction",
+      scopes: [],
+      credential: {
+        kind: "provider_config",
+        providerConfigKey: "junction",
       },
       metadata: {
-        region: "ca",
+        callbackOutcome: "complete",
       },
       existingAccountGuard: {
         expectedAccountId: "dsc_123",
@@ -644,6 +657,20 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
     expect(lockConnectionMutation.mock.invocationCallOrder[0]).toBeLessThan(
       updateConnection.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY,
     );
+    expect(updateConnection).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        metadataJson: {
+          junctionHistoricalBackfillStatus: "coverage_v2_retrying",
+          junctionHistoricalBackfillEmptyAttempts: 2,
+          junctionHistoricalBackfillLastEmptyAt: "2026-03-25T00:30:00.000Z",
+          junctionHistoricalBackfillWindowStart: "2026-03-23T00:00:00.000Z",
+          junctionHistoricalBackfillWindowEnd: "2026-03-25T00:00:00.000Z",
+          junctionHistoricalBackfillEvidence:
+            "e1|2026-03-23T00:00:00.000Z|2026-03-25T00:00:00.000Z|garmin:1",
+          callbackOutcome: "complete",
+        },
+      }),
+    }));
     expect(tx.deviceConnectionSecret.upsert).not.toHaveBeenCalled();
   });
 

@@ -63,6 +63,8 @@ export type HostedLocalE2eScenarioName =
   | "telegram-scheduled-reminder"
   | "vault-persistence";
 
+export type HostedLocalE2eScenarioSelection = string | readonly string[];
+
 export interface HostedLocalE2eScenario {
   aliases?: readonly HostedLocalE2eScenarioName[];
   file: string;
@@ -249,7 +251,7 @@ export interface HostedLocalE2eSuiteInput {
   env?: NodeJS.ProcessEnv;
   injectSkipRunnerBundleEnv?: boolean;
   prepareRunnerBundle?: boolean;
-  scenario?: HostedLocalE2eScenarioName | string;
+  scenario?: HostedLocalE2eScenarioSelection;
 }
 
 export interface HostedLocalE2eSuiteResult {
@@ -257,26 +259,46 @@ export interface HostedLocalE2eSuiteResult {
 }
 
 export function resolveHostedLocalE2eScenarios(
-  scenarioName: HostedLocalE2eScenarioName | string | null | undefined,
+  selection: HostedLocalE2eScenarioSelection | null | undefined,
 ): readonly HostedLocalE2eScenario[] {
-  const normalized = (scenarioName?.trim() || "all") as HostedLocalE2eScenarioName;
-  if (normalized === "all") {
+  const requestedNames = (typeof selection === "string" ? [selection] : selection ?? [])
+    .map((name) => name.trim())
+    .filter((name) => name.length > 0);
+  const normalizedNames = requestedNames.length > 0 ? requestedNames : ["all"];
+
+  if (normalizedNames.includes("all")) {
+    if (normalizedNames.length > 1) {
+      throw new Error("The hosted-local E2E 'all' selection cannot be combined with named scenarios.");
+    }
     return hostedLocalE2eScenarios.filter((scenario) => scenario.manualOnly !== true);
   }
-  const scenario = hostedLocalE2eScenarios.find(
-    (entry) => entry.name === normalized || entry.aliases?.includes(normalized),
-  );
-  if (!scenario) {
-    throw new Error(
-      [
-        `Unsupported hosted-local E2E scenario: ${JSON.stringify(scenarioName)}`,
-        `Supported scenarios: all, ${hostedLocalE2eScenarios
-          .flatMap((entry) => [entry.name, ...(entry.aliases ?? [])])
-          .join(", ")}`,
-      ].join("\n"),
+
+  const resolved: HostedLocalE2eScenario[] = [];
+  const seenNames = new Set<HostedLocalE2eScenario["name"]>();
+  for (const normalized of normalizedNames) {
+    const scenario = hostedLocalE2eScenarios.find(
+      (entry) => entry.name === normalized
+        || entry.aliases?.some((alias) => alias === normalized),
     );
+    if (!scenario) {
+      throw new Error(
+        [
+          `Unsupported hosted-local E2E scenario: ${JSON.stringify(normalized)}`,
+          `Supported scenarios: all, ${hostedLocalE2eScenarios
+            .flatMap((entry) => [entry.name, ...(entry.aliases ?? [])])
+            .join(", ")}`,
+        ].join("\n"),
+      );
+    }
+    if (seenNames.has(scenario.name)) {
+      throw new Error(
+        `Duplicate hosted-local E2E scenario selection: ${JSON.stringify(normalized)}`,
+      );
+    }
+    seenNames.add(scenario.name);
+    resolved.push(scenario);
   }
-  return [scenario];
+  return resolved;
 }
 
 export function listHostedLocalE2eScenarios(): readonly HostedLocalE2eScenario[] {
@@ -309,7 +331,7 @@ export async function runHostedLocalE2eSuite(
       if (prepareRunnerBundle) {
         await prepareHostedLocalRunnerBundle({ env: suiteEnv, scenarios });
       }
-      prepareHostedLocalRunnerSmokeEnv({ env: suiteEnv, scenarios });
+      prepareHostedLocalRunnerSmokeEnv(suiteEnv);
       await prepareHostedLocalRunnerBaseImage({ env: suiteEnv });
       await prepareHostedLocalWebGeneratedArtifacts({ env: suiteEnv, scenarios });
       await runHostedLocalVitest({ env: suiteEnv, scenarios });
@@ -378,15 +400,10 @@ async function prepareHostedLocalRunnerBaseImage(input: {
   input.env.MURPH_DEV_SKIP_RUNNER_DOCKER_BASE = "1";
 }
 
-function prepareHostedLocalRunnerSmokeEnv(input: {
-  env: NodeJS.ProcessEnv;
-  scenarios: readonly HostedLocalE2eScenario[];
-}): void {
-  if (input.scenarios.length <= 1) {
-    return;
-  }
-
-  input.env[HOSTED_LOCAL_E2E_RUNNER_SMOKE_ONCE_ENV] = "1";
+function prepareHostedLocalRunnerSmokeEnv(env: NodeJS.ProcessEnv): void {
+  // The suite owns final current-build image cleanup, so every non-isolated
+  // stack in this invocation can reuse the same proved image and smoke proof.
+  env[HOSTED_LOCAL_E2E_RUNNER_SMOKE_ONCE_ENV] = "1";
 }
 
 async function prepareHostedLocalWebGeneratedArtifacts(input: {

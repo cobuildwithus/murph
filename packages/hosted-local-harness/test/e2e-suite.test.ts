@@ -344,6 +344,32 @@ describe("hosted-local E2E suite preparation", () => {
     expect(cleanupHostedLocalMinioE2eContainersBestEffort).toHaveBeenCalled();
   });
 
+  test("runs an explicit scenario group in one prepared suite", async () => {
+    await runHostedLocalE2eSuite({
+      env: {},
+      prepareRunnerBundle: false,
+      scenario: ["linq-delivery", "temporal-orchestration"],
+    });
+
+    const vitestCalls = runForegroundCommand.mock.calls
+      .map(([call]) => call)
+      .filter((call) => call.args.includes("vitest"));
+    expect(vitestCalls).toHaveLength(1);
+    expect(vitestCalls[0]).toEqual(expect.objectContaining({
+      args: expect.arrayContaining([
+        "apps/cloudflare/test/hosted-local-linq-first-contact-e2e.test.ts",
+        "apps/cloudflare/test/hosted-local-temporal-orchestration-e2e.test.ts",
+        "--bail",
+        "1",
+      ]),
+      env: expect.objectContaining({
+        MURPH_HOSTED_LOCAL_E2E_RUNNER_SMOKE_ONCE: "1",
+      }),
+      label: "Hosted local full-stack e2e suite 1/1",
+    }));
+    expect(cleanupHostedRunnerImages).toHaveBeenCalledTimes(1);
+  });
+
   test("preserves SIGINT exit semantics while cleaning up runner artifacts", async () => {
     const signalHandlers = new Map<NodeJS.Signals, Array<() => void>>();
     const originalOnceMethod = process.once.bind(process);
@@ -421,6 +447,9 @@ describe("hosted-local E2E suite preparation", () => {
       args: expect.arrayContaining([
         "apps/cloudflare/test/hosted-runtime-checkpoint-baseline-e2e.test.ts",
       ]),
+      env: expect.objectContaining({
+        MURPH_HOSTED_LOCAL_E2E_RUNNER_SMOKE_ONCE: "1",
+      }),
       label: "Hosted local full-stack e2e scenario 1/1 checkpoint-baseline",
     }));
   });

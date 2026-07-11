@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test, vi } from "vitest";
 
 import { DeviceSyncError, deviceSyncError } from "../src/errors.ts";
+import { mergeGuardedJunctionHistoricalBackfillMetadata } from "../src/junction-historical-backfill-progress.ts";
 import { createDeviceSyncPublicIngress } from "../src/public-ingress.ts";
 import { createDeviceSyncRegistry } from "../src/registry.ts";
 import { scopeWebhookTraceId, sha256Text } from "../src/shared.ts";
@@ -163,6 +164,12 @@ class InMemoryPublicIngressStore implements DeviceSyncPublicIngressStore {
     const setupExpiresAt = Object.prototype.hasOwnProperty.call(input, "setupExpiresAt")
       ? input.setupExpiresAt ?? null
       : existing?.setupExpiresAt ?? null;
+    const metadata = existing && input.provider === "junction" && input.existingAccountGuard
+      ? mergeGuardedJunctionHistoricalBackfillMetadata({
+          existingMetadata: existing.metadata,
+          replacementMetadata: input.metadata ?? {},
+        })
+      : input.metadata ?? {};
 
     const record: PublicDeviceSyncAccount = {
       id,
@@ -174,7 +181,7 @@ class InMemoryPublicIngressStore implements DeviceSyncPublicIngressStore {
       setupExpiresAt,
       scopes: [...(input.scopes ?? [])],
       accessTokenExpiresAt: tokens?.accessTokenExpiresAt ?? null,
-      metadata: { ...(input.metadata ?? {}) },
+      metadata: { ...metadata },
       connectedAt: input.connectedAt,
       lastWebhookAt: existing?.lastWebhookAt ?? null,
       lastSyncStartedAt: existing?.lastSyncStartedAt ?? null,
@@ -986,7 +993,9 @@ test("public ingress completes seeded external-link callbacks after mutable webh
           kind: "provider_config",
           providerConfigKey: "junction",
         },
-        metadata: { ...input.stateMetadata },
+        metadata: {
+          callbackOutcome: "complete",
+        },
       };
     },
   });
@@ -1003,6 +1012,33 @@ test("public ingress completes seeded external-link callbacks after mutable webh
   });
   const seeded = store.getConnectionByExternalAccount("junction", "external-account-1");
   assert.ok(seeded?.setupExpiresAt);
+  store.upsertConnection({
+    ownerId: "<REDACTED_OWNER_ID>",
+    provider: "junction",
+    externalAccountId: "external-account-1",
+    displayName: "Junction",
+    status: "active",
+    setupPhase: "pending_link",
+    setupExpiresAt: seeded.setupExpiresAt,
+    scopes: [],
+    credential: {
+      kind: "provider_config",
+      providerConfigKey: "junction",
+    },
+    metadata: {
+      callbackOutcome: "seeded",
+      junctionHistoricalBackfillStatus: "coverage_v2_retrying",
+      junctionHistoricalBackfillEmptyAttempts: 2,
+      junctionHistoricalBackfillLastEmptyAt: "2026-04-03T00:30:00.000Z",
+      junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
+      junctionHistoricalBackfillWindowEnd: "2026-04-03T00:00:00.000Z",
+      junctionHistoricalBackfillEvidence:
+        "e1|2026-04-01T00:00:00.000Z|2026-04-03T00:00:00.000Z|garmin:1",
+      seedOnlyState: "discard",
+    },
+    connectedAt: seeded.connectedAt,
+    nextReconcileAt: seeded.nextReconcileAt,
+  });
   const stateRecord = store.peekOAuthState(begin.state);
   assert.ok(stateRecord);
   store.createOAuthState({
@@ -1041,6 +1077,16 @@ test("public ingress completes seeded external-link callbacks after mutable webh
   assert.equal(completed.account.setupExpiresAt, null);
   assert.equal(completed.account.externalAccountId, "external-account-1");
   assert.equal(completed.account.id, seeded.id);
+  assert.deepEqual(completed.account.metadata, {
+    callbackOutcome: "complete",
+    junctionHistoricalBackfillStatus: "coverage_v2_retrying",
+    junctionHistoricalBackfillEmptyAttempts: 2,
+    junctionHistoricalBackfillLastEmptyAt: "2026-04-03T00:30:00.000Z",
+    junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
+    junctionHistoricalBackfillWindowEnd: "2026-04-03T00:00:00.000Z",
+    junctionHistoricalBackfillEvidence:
+      "e1|2026-04-01T00:00:00.000Z|2026-04-03T00:00:00.000Z|garmin:1",
+  });
   assert.equal(
     Object.prototype.hasOwnProperty.call(
       completed.account.metadata,

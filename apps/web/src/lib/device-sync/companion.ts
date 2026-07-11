@@ -1,12 +1,25 @@
 import "server-only";
 
 import { deviceSyncError } from "@murphai/device-syncd/errors";
+import { normalizeJunctionProviderSlug } from "@murphai/device-syncd/connect-config";
 import {
+  JUNCTION_COMPANION_HEALTH_METADATA_EVENT_TYPE,
+  JUNCTION_COMPANION_HEALTH_METADATA_MAX_BATCH_BYTES,
+  JUNCTION_COMPANION_HEALTH_METADATA_RESOURCE,
+  JUNCTION_COMPANION_HEALTH_METADATA_SOURCE_PROVIDER,
+  JunctionCompanionHealthMetadataParseError,
   normalizeJunctionResourceName,
+  parseJunctionCompanionHealthMetadataBatch,
   readJunctionWebhookResourceName,
+  type JunctionCompanionHealthMetadataBatch,
+  type JunctionCompanionHealthMetadataKind,
+  type JunctionCompanionHealthMetadataRecord,
 } from "@murphai/device-syncd/junction-resources";
 
-import type { PrismaDeviceSyncControlPlaneStore } from "./prisma-store";
+import type {
+  HostedDeviceSyncDirtyResource,
+  PrismaDeviceSyncControlPlaneStore,
+} from "./prisma-store";
 import { isAvailableConnectionSourceResource } from "./browser-connection-source";
 
 /** The companion app's only device-sync provider. */
@@ -14,6 +27,16 @@ export const COMPANION_DEVICE_SYNC_PROVIDER = "junction";
 
 const COMPANION_METADATA_STRING_MAX_LENGTH = 200;
 const COMPANION_SDK_VERSION_MAX_ENTRIES = 10;
+const COMPANION_HEALTH_METADATA_JUNCTION_SOURCE_PROVIDER =
+  normalizeJunctionProviderSlug(JUNCTION_COMPANION_HEALTH_METADATA_SOURCE_PROVIDER);
+
+export const COMPANION_HEALTH_METADATA_RESOURCE = JUNCTION_COMPANION_HEALTH_METADATA_RESOURCE;
+export const COMPANION_HEALTH_METADATA_BODY_LIMIT_BYTES =
+  JUNCTION_COMPANION_HEALTH_METADATA_MAX_BATCH_BYTES;
+
+export type CompanionHealthMetadataKind = JunctionCompanionHealthMetadataKind;
+export type CompanionHealthMetadataRecord = JunctionCompanionHealthMetadataRecord;
+export type CompanionHealthMetadataBatch = JunctionCompanionHealthMetadataBatch;
 const COMPANION_AUTH_DIAGNOSTIC_VERSION_PATTERN = /^[0-9]{1,3}(?:\.[0-9]{1,3}){1,3}$/u;
 const COMPANION_AUTH_DIAGNOSTIC_PROVIDER_CODES = new Set([
   "authentication_failure",
@@ -159,6 +182,101 @@ export function validateCompanionSignInRequestBody(body: Record<string, unknown>
       throw companionRequestInvalid("sdkVersions must be an object of string values.");
     }
   }
+}
+
+/**
+ * Parse the companion's deliberately closed HealthKit metadata envelope.
+ *
+ * Only privacy-safe record hashes and the two WHOOP-keyed scalar values
+ * cross this boundary. Arbitrary HealthKit metadata, provider identifiers,
+ * metric names, and canonical event fields are not accepted.
+ */
+export function parseCompanionHealthMetadataBatch(
+  body: Record<string, unknown>,
+  receivedAt: string,
+): CompanionHealthMetadataBatch {
+  const receivedAtMs = Date.parse(receivedAt);
+  if (!Number.isFinite(receivedAtMs)) {
+    throw companionRequestInvalid("receivedAt must be a valid timestamp.");
+  }
+
+  try {
+    return parseJunctionCompanionHealthMetadataBatch(body, receivedAtMs);
+  } catch (error) {
+    if (error instanceof JunctionCompanionHealthMetadataParseError) {
+      throw companionRequestInvalid(`${error.message}.`);
+    }
+    throw error;
+  }
+}
+
+export function buildCompanionHealthMetadataDirtyResource(input: {
+  batch: CompanionHealthMetadataBatch;
+  occurredAt: string;
+}): HostedDeviceSyncDirtyResource {
+  return {
+    count: input.batch.records.length,
+    jobKind: "resource",
+    payload: {
+      eventType: JUNCTION_COMPANION_HEALTH_METADATA_EVENT_TYPE,
+      occurredAt: input.occurredAt,
+      resource: COMPANION_HEALTH_METADATA_RESOURCE,
+      resourceCategory: "summary",
+      sourceProviderSlug: JUNCTION_COMPANION_HEALTH_METADATA_SOURCE_PROVIDER,
+      webhookDataJson: JSON.stringify(input.batch),
+    },
+    resource: COMPANION_HEALTH_METADATA_RESOURCE,
+    resourceCategory: "summary",
+    sourceProviderSlug: JUNCTION_COMPANION_HEALTH_METADATA_SOURCE_PROVIDER,
+    windowEnd: null,
+    windowStart: null,
+  };
+}
+
+export async function resolveCompanionHealthMetadataConnection(input: {
+  memberId: string;
+  store: PrismaDeviceSyncControlPlaneStore;
+}): Promise<{ id: string; provider: string }> {
+  const activeConnections = (await input.store.listConnectionsForUser(input.memberId)).filter(
+    (connection) =>
+      connection.provider === COMPANION_DEVICE_SYNC_PROVIDER
+      && connection.status === "active",
+  );
+
+  if (activeConnections.length === 0) {
+    throw deviceSyncError({
+      code: "COMPANION_HEALTH_CONNECTION_REQUIRED",
+      message: "Connect Apple Health in the companion before syncing supplemental metadata.",
+      retryable: false,
+      httpStatus: 409,
+    });
+  }
+  if (activeConnections.length === 1) {
+    return activeConnections[0]!;
+  }
+
+  const appleHealthConnections: typeof activeConnections = [];
+  for (const connection of activeConnections) {
+    const sources = await input.store.listConnectionSources(connection.id);
+    if (sources.some((source) =>
+      source.status === "connected"
+      && normalizeJunctionProviderSlug(source.sourceProviderSlug)
+        === COMPANION_HEALTH_METADATA_JUNCTION_SOURCE_PROVIDER
+    )) {
+      appleHealthConnections.push(connection);
+    }
+  }
+
+  if (appleHealthConnections.length === 1) {
+    return appleHealthConnections[0]!;
+  }
+
+  throw deviceSyncError({
+    code: "COMPANION_HEALTH_CONNECTION_AMBIGUOUS",
+    message: "The companion could not identify one active Apple Health connection. Reconnect Apple Health and retry.",
+    retryable: false,
+    httpStatus: 409,
+  });
 }
 
 /**

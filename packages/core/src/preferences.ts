@@ -1,12 +1,18 @@
 import {
+  assistantPersonalityScoreSchema,
+  assistantPersonalitySettingIds,
   assistantPreferencesSchema,
   assistantTonePreferenceSchema,
   assistantVoiceOptionIdSchema,
+  isAssistantPersonalitySettingId,
   isWearablePreferenceProvider,
   normalizeWearablePreferenceProviders,
   preferencesDocumentRelativePath,
   preferencesDocumentSchema,
   preferencesDocumentSchemaVersion,
+  type AssistantPersonalityPreferences,
+  type AssistantPersonalityScores,
+  type AssistantPersonalitySettingId,
   type AssistantPreferences,
   type AssistantTonePreference,
   type AssistantVoiceOptionId,
@@ -28,6 +34,9 @@ import { commitAuditedCanonicalWrite } from "./audited-write.ts";
 import { isPlainRecord } from "./types.ts";
 
 export type {
+  AssistantPersonalityPreferences,
+  AssistantPersonalityScores,
+  AssistantPersonalitySettingId,
   AssistantPreferences,
   AssistantTonePreference,
   AssistantVoiceOptionId,
@@ -36,9 +45,14 @@ export type {
   WorkoutUnitPreferences,
 } from "@murphai/contracts";
 
+export type AssistantPersonalityPreferencesUpdate = {
+  [TSetting in AssistantPersonalitySettingId]?: AssistantPersonalityScores[TSetting] | null;
+};
+
 export interface AssistantPreferencesUpdate {
   tone?: AssistantTonePreference;
   voice?: AssistantVoiceOptionId;
+  personality?: AssistantPersonalityPreferencesUpdate;
 }
 
 export interface PreferencesDocumentSnapshot extends Omit<PreferencesDocument, "updatedAt"> {
@@ -74,8 +88,17 @@ function normalizeAssistantPreferencesForRead(value: unknown): AssistantPreferen
 
 function normalizeAssistantPreferencesForWrite(
   preferences: AssistantPreferencesUpdate,
-): AssistantPreferences {
-  const nextPreferences: AssistantPreferences = {};
+): AssistantPreferencesUpdate {
+  if (!isPlainRecord(preferences)) {
+    throw new TypeError("Assistant preferences must be an object.");
+  }
+  for (const key of Object.keys(preferences)) {
+    if (key !== "tone" && key !== "voice" && key !== "personality") {
+      throw new TypeError(`Unknown assistant preference: ${key}.`);
+    }
+  }
+
+  const nextPreferences: AssistantPreferencesUpdate = {};
 
   if (preferences.tone !== undefined) {
     nextPreferences.tone = assistantTonePreferenceSchema.parse(preferences.tone);
@@ -83,13 +106,33 @@ function normalizeAssistantPreferencesForWrite(
   if (preferences.voice !== undefined) {
     nextPreferences.voice = assistantVoiceOptionIdSchema.parse(preferences.voice);
   }
+  if (preferences.personality !== undefined) {
+    if (!isPlainRecord(preferences.personality)) {
+      throw new TypeError("Assistant personality preferences must be an object.");
+    }
+
+    const personality: AssistantPersonalityPreferencesUpdate = {};
+    for (const key of Object.keys(preferences.personality)) {
+      if (!isAssistantPersonalitySettingId(key)) {
+        throw new TypeError(`Unknown assistant personality preference: ${key}.`);
+      }
+    }
+    for (const settingId of assistantPersonalitySettingIds) {
+      const value = preferences.personality[settingId];
+      if (value !== undefined) {
+        personality[settingId] =
+          value === null ? null : assistantPersonalityScoreSchema.parse(value);
+      }
+    }
+    nextPreferences.personality = personality;
+  }
 
   return nextPreferences;
 }
 
 function mergeAssistantPreferences(
   current: AssistantPreferences | undefined,
-  preferences: AssistantPreferences,
+  preferences: AssistantPreferencesUpdate,
 ): AssistantPreferences | undefined {
   const nextPreferences: AssistantPreferences = {
     ...(current ?? {}),
@@ -100,6 +143,26 @@ function mergeAssistantPreferences(
   }
   if (preferences.voice !== undefined) {
     nextPreferences.voice = preferences.voice;
+  }
+  if (preferences.personality !== undefined) {
+    const nextPersonality: AssistantPersonalityPreferences = {
+      ...(current?.personality ?? {}),
+    };
+
+    for (const settingId of assistantPersonalitySettingIds) {
+      const value = preferences.personality[settingId];
+      if (value === null) {
+        delete nextPersonality[settingId];
+      } else if (value !== undefined) {
+        nextPersonality[settingId] = value;
+      }
+    }
+
+    if (Object.keys(nextPersonality).length > 0) {
+      nextPreferences.personality = nextPersonality;
+    } else {
+      delete nextPreferences.personality;
+    }
   }
 
   return Object.keys(nextPreferences).length > 0
@@ -310,7 +373,10 @@ export async function updateAssistantPreferences(input: {
     const requestedPreferences = normalizeAssistantPreferencesForWrite(input.preferences);
     if (
       requestedPreferences.tone === undefined &&
-      requestedPreferences.voice === undefined
+      requestedPreferences.voice === undefined &&
+      !assistantPersonalitySettingIds.some(
+        (settingId) => requestedPreferences.personality?.[settingId] !== undefined,
+      )
     ) {
       throw new TypeError("At least one assistant preference is required.");
     }
@@ -323,7 +389,7 @@ export async function updateAssistantPreferences(input: {
     const hasChanges =
       JSON.stringify(current.assistant ?? {}) !== JSON.stringify(nextPreferences ?? {});
 
-    if (!hasChanges && current.exists) {
+    if (!hasChanges) {
       return {
         created: false,
         updated: false,
