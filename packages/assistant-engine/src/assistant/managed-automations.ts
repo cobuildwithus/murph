@@ -3,6 +3,7 @@ import {
   listAutomations,
   loadVault,
   patchAutomation,
+  patchAutomationRoutesIfUnchanged,
   showAutomation,
   upsertAutomation,
   type AutomationRecord,
@@ -757,7 +758,10 @@ async function reconcileLegacyPersonalHomeAutomationRoutes(input: {
   now: Date
   seeds: readonly MurphManagedAutomationSeed[]
 }): Promise<number> {
-  if (input.input.seeds !== undefined) {
+  if (
+    input.input.seeds !== undefined ||
+    !isCurrentDirectLinqHomeRoute(input.input.defaultRoute)
+  ) {
     return 0
   }
 
@@ -767,16 +771,15 @@ async function reconcileLegacyPersonalHomeAutomationRoutes(input: {
   const managedAutomationIds = new Set(
     input.seeds.map((seed) => seed.automationId),
   )
-  const legacyManagedTargets = new Set(
-    records
-      .filter((record) =>
-        managedAutomationIds.has(record.automationId) &&
-        record.status !== 'archived' &&
-        isLegacyBareLinqHomeRoute(record.route)
-      )
-      .map((record) => record.route.deliveryTarget),
+  const legacyManagedAnchors = records.filter((record) =>
+    managedAutomationIds.has(record.automationId) &&
+    record.status !== 'archived' &&
+    isLegacyBareLinqHomeRoute(record.route)
   )
-  if (legacyManagedTargets.size !== 1) {
+  const legacyManagedTargets = new Set(
+    legacyManagedAnchors.map((record) => record.route.deliveryTarget),
+  )
+  if (legacyManagedAnchors.length < 2 || legacyManagedTargets.size !== 1) {
     return 0
   }
 
@@ -803,22 +806,35 @@ async function reconcileLegacyPersonalHomeAutomationRoutes(input: {
     ),
   ]
 
-  let updated = 0
-  for (const record of orderedRecords) {
-    await patchAutomation({
+  if (orderedRecords.length === 0) {
+    return 0
+  }
+
+  const result = await patchAutomationRoutesIfUnchanged({
+    now: input.now,
+    patches: orderedRecords.map((record) => ({
+      expectedRoute: record.route,
+      expectedStatus: record.status,
       lookup: record.automationId,
-      now: input.now,
       route: {
         ...record.route,
         currentRouteSnapshot: true,
         threadIsDirect: true,
       },
-      vaultRoot: input.input.vaultRoot,
-    })
-    updated += 1
-  }
+    })),
+    vaultRoot: input.input.vaultRoot,
+  })
 
-  return updated
+  return result.updated ? orderedRecords.length : 0
+}
+
+function isCurrentDirectLinqHomeRoute(
+  route: AutomationRoute | null | undefined,
+): boolean {
+  return route?.channel === 'linq' &&
+    route.currentRouteSnapshot === true &&
+    route.threadIsDirect === true &&
+    Boolean(route.deliveryTarget)
 }
 
 function isLegacyBareLinqHomeRoute(route: AutomationRoute): boolean {

@@ -14,6 +14,7 @@ import {
   buildAutomationMarkdownPreview,
   listAutomations,
   patchAutomation,
+  patchAutomationRoutesIfUnchanged,
   readAutomation,
   readAutomationMarkdown,
   scaffoldAutomationPayload,
@@ -286,6 +287,105 @@ describe("markdown document primitives", () => {
     expect(patched.record.route).toEqual(created.record.route);
     expect(patched.record.summary).toBe(created.record.summary);
     expect(patched.record.tags).toEqual(created.record.tags);
+  });
+
+  it("patches automation routes only while every scanned route and status remain unchanged", async () => {
+    const vaultRoot = await makeVaultRoot();
+    const legacyRoute = {
+      channel: "linq",
+      deliverySource: null,
+      deliveryTarget: "legacy-home-chat",
+      identityId: null,
+      participantId: null,
+      threadId: null,
+    } as const;
+    const migratedRoute = {
+      ...legacyRoute,
+      currentRouteSnapshot: true,
+      threadIsDirect: true,
+    } as const;
+    const created = await upsertAutomation({
+      vaultRoot,
+      ...createAutomationPayload({
+        route: legacyRoute,
+        status: "active",
+      }),
+    });
+
+    await expect(patchAutomationRoutesIfUnchanged({
+      vaultRoot,
+      patches: [{
+        expectedRoute: legacyRoute,
+        expectedStatus: "active",
+        lookup: created.record.automationId,
+        route: migratedRoute,
+      }],
+    })).resolves.toEqual({ updated: true });
+    await expect(showAutomation({
+      automationId: created.record.automationId,
+      vaultRoot,
+    })).resolves.toMatchObject({ route: migratedRoute });
+
+    const userRoute = {
+      ...legacyRoute,
+      deliveryTarget: "user-selected-chat",
+    };
+    const peer = await upsertAutomation({
+      vaultRoot,
+      ...createAutomationPayload({
+        automationId: "automation_01KZ0000000000000000000099",
+        route: legacyRoute,
+        slug: "peer-route",
+        status: "paused",
+      }),
+    });
+    await patchAutomation({
+      vaultRoot,
+      lookup: created.record.automationId,
+      route: userRoute,
+    });
+    await expect(patchAutomationRoutesIfUnchanged({
+      vaultRoot,
+      patches: [{
+        expectedRoute: migratedRoute,
+        expectedStatus: "active",
+        lookup: created.record.automationId,
+        route: {
+          ...migratedRoute,
+          deliveryTarget: "stale-overwrite",
+        },
+      }, {
+        expectedRoute: legacyRoute,
+        expectedStatus: "paused",
+        lookup: peer.record.automationId,
+        route: migratedRoute,
+      }],
+    })).resolves.toEqual({ updated: false });
+    await expect(showAutomation({
+      automationId: created.record.automationId,
+      vaultRoot,
+    })).resolves.toMatchObject({ route: userRoute });
+    await expect(showAutomation({
+      automationId: peer.record.automationId,
+      vaultRoot,
+    })).resolves.toMatchObject({ route: legacyRoute });
+
+    await expect(patchAutomationRoutesIfUnchanged({
+      vaultRoot,
+      patches: [{
+        expectedRoute: legacyRoute,
+        expectedStatus: "active",
+        lookup: peer.record.automationId,
+        route: migratedRoute,
+      }],
+    })).resolves.toEqual({ updated: false });
+    await expect(showAutomation({
+      automationId: peer.record.automationId,
+      vaultRoot,
+    })).resolves.toMatchObject({
+      route: legacyRoute,
+      status: "paused",
+    });
   });
 
   it("advances only the device activity cursor and refuses stale matcher expectations", async () => {

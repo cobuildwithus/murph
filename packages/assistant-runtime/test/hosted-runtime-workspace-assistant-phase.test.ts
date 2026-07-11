@@ -10496,11 +10496,11 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }));
   });
 
-  it("reconciles managed automations before consuming persisted assistant input", async () => {
+  it("consumes persisted assistant input before deferring managed automation reconciliation to idle", async () => {
     const callOrder: string[] = [];
-    mocks.resolveHostedPendingAssistantInputWakeAt.mockResolvedValueOnce(
-      "2026-04-27T00:10:00.000Z",
-    );
+    mocks.resolveHostedPendingAssistantInputWakeAt
+      .mockResolvedValueOnce("2026-04-27T00:10:00.000Z")
+      .mockResolvedValueOnce(null);
     mocks.applyMurphManagedAutomations.mockImplementationOnce(async () => {
       callOrder.push("managed-automations");
       return {
@@ -10525,13 +10525,22 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       now: () => "2026-04-27T00:10:00.000Z",
     }));
 
-    expect(callOrder).toEqual(["managed-automations", "assistant"]);
+    expect(callOrder).toEqual(["assistant"]);
+    expect(mocks.applyMurphManagedAutomations).not.toHaveBeenCalled();
     expect(mocks.prepareHostedSystemMailboxItemForCheckpoint).not.toHaveBeenCalled();
     expect(mocks.prepareHostedAssistantAutomationForWake).toHaveBeenCalledTimes(1);
     expect(result).toEqual(expect.objectContaining({
       progressed: true,
     }));
     expect(result.nextWakeAt ?? null).toBeNull();
+
+    await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      importedCount: 0,
+      now: () => "2026-04-27T00:11:00.000Z",
+    }));
+
+    expect(callOrder).toEqual(["assistant", "managed-automations"]);
+    expect(mocks.applyMurphManagedAutomations).toHaveBeenCalledTimes(1);
   });
 
   it("processes persisted assistant input before due device-sync work", async () => {
@@ -10586,7 +10595,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }));
 
     expect(callOrder).toEqual(["assistant", "device-sync"]);
-    expect(mocks.applyMurphManagedAutomations).toHaveBeenCalledTimes(1);
+    expect(mocks.applyMurphManagedAutomations).not.toHaveBeenCalled();
     expect(result).toEqual(expect.objectContaining({
       nextWakeAt: "2026-04-27T00:10:30.000Z",
       progressed: true,
@@ -10820,7 +10829,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }));
 
     expect(callOrder).toEqual(["assistant", "system-mailbox"]);
-    expect(mocks.applyMurphManagedAutomations).toHaveBeenCalledTimes(1);
+    expect(mocks.applyMurphManagedAutomations).not.toHaveBeenCalled();
     expect(result).toEqual(expect.objectContaining({
       nextWakeAt: "2026-04-27T00:10:30.000Z",
       progressed: true,

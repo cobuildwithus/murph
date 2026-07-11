@@ -123,6 +123,23 @@ export interface PatchAutomationInput {
   vaultRoot: string;
 }
 
+export interface AutomationRoutePatchPrecondition {
+  expectedRoute: AutomationRoute;
+  expectedStatus: AutomationStatus;
+  lookup: string;
+  route: AutomationRoute;
+}
+
+export interface PatchAutomationRoutesIfUnchangedInput {
+  now?: Date;
+  patches: readonly AutomationRoutePatchPrecondition[];
+  vaultRoot: string;
+}
+
+export interface PatchAutomationRoutesIfUnchangedResult {
+  updated: boolean;
+}
+
 export interface AdvanceAutomationDeviceActivityCursorInput {
   after: string;
   afterEntityId: string;
@@ -799,6 +816,50 @@ export async function patchAutomation(
       vaultRoot: input.vaultRoot,
       allowSlugRename: input.slug !== undefined,
     }, records);
+  });
+}
+
+export async function patchAutomationRoutesIfUnchanged(
+  input: PatchAutomationRoutesIfUnchangedInput,
+): Promise<PatchAutomationRoutesIfUnchangedResult> {
+  return withAutomationRegistryLock(input.vaultRoot, async () => {
+    const records = await loadAutomationRecords(input.vaultRoot);
+    const planned = input.patches.flatMap((patch) => {
+      const existingRecord = selectAutomationRecord(records, {
+        automationId: patch.lookup,
+        slug: patch.lookup,
+      });
+      return existingRecord ? [{ existingRecord, patch }] : [];
+    });
+    if (
+      planned.length !== input.patches.length
+      || planned.some(({ existingRecord, patch }) =>
+        existingRecord.status !== patch.expectedStatus
+        || !automationRoutesEqual(existingRecord.route, patch.expectedRoute)
+      )
+    ) {
+      return { updated: false };
+    }
+
+    for (const { existingRecord, patch } of planned) {
+      await upsertAutomationWithLatestRegistry({
+        automationId: existingRecord.automationId,
+        assistantTargetOverride: existingRecord.assistantTargetOverride,
+        continuityPolicy: existingRecord.continuityPolicy,
+        instructions: existingRecord.instructions,
+        now: input.now,
+        route: patch.route,
+        schedule: existingRecord.schedule,
+        slug: existingRecord.slug,
+        status: existingRecord.status,
+        summary: existingRecord.summary,
+        tags: existingRecord.tags,
+        title: existingRecord.title,
+        vaultRoot: input.vaultRoot,
+      }, records);
+    }
+
+    return { updated: true };
   });
 }
 

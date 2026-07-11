@@ -2208,12 +2208,17 @@ function createHostedAssistantLinqSendDependency(input: {
 }): NonNullable<AssistantHostedProgressDeliveryDependencies["sendLinq"]> {
   return async (request) => {
     await assertHostedDeliveryLiveNow(input);
-    const deliveryContext = resolveHostedAssistantLinqDeliveryContextFromCandidatesForRequest({
-      contexts: input.linqDeliveryContexts ?? [],
+    const deliveryContext = shouldBypassHostedLinqDeliveryContextForHomeFallback({
+      homeRouteFallbackAllowed: request.homeRouteFallbackAllowed === true,
       replyToMessageId: request.replyToMessageId ?? null,
-      target: request.target,
-      targetKind: request.targetKind ?? null,
-    });
+    })
+      ? null
+      : resolveHostedAssistantLinqDeliveryContextFromCandidatesForRequest({
+          contexts: input.linqDeliveryContexts ?? [],
+          replyToMessageId: request.replyToMessageId ?? null,
+          target: request.target,
+          targetKind: request.targetKind ?? null,
+        });
     const directRecipientPhoneNumber =
       normalizeHostedLinqDirectRecipient(request.directRecipientPhoneNumber)
       ?? normalizeHostedLinqDirectRecipient(deliveryContext?.directRecipientPhoneNumber);
@@ -2466,12 +2471,17 @@ function createHostedAssistantLinqVoiceMemoSendDependency(input: {
 }): NonNullable<AssistantHostedProgressDeliveryDependencies["sendLinqVoiceMemo"]> {
   return async (request) => {
     await assertHostedDeliveryLiveNow(input);
-    const deliveryContext = resolveHostedAssistantLinqDeliveryContextFromCandidatesForRequest({
-      contexts: input.linqDeliveryContexts ?? [],
+    const deliveryContext = shouldBypassHostedLinqDeliveryContextForHomeFallback({
+      homeRouteFallbackAllowed: request.homeRouteFallbackAllowed === true,
       replyToMessageId: request.replyToMessageId ?? null,
-      target: request.target,
-      targetKind: request.targetKind ?? null,
-    });
+    })
+      ? null
+      : resolveHostedAssistantLinqDeliveryContextFromCandidatesForRequest({
+          contexts: input.linqDeliveryContexts ?? [],
+          replyToMessageId: request.replyToMessageId ?? null,
+          target: request.target,
+          targetKind: request.targetKind ?? null,
+        });
     const signal = mergeHostedAssistantLinqSignals(input.signal, request.signal);
     const dependencies = requireHostedProviderFetchDependencies({
       env: input.linqEnv,
@@ -2837,6 +2847,13 @@ function normalizeHostedAssistantLinqTargetKind(
   return targetKind === "explicit" || targetKind === "participant" || targetKind === "thread"
     ? targetKind
     : null;
+}
+
+function shouldBypassHostedLinqDeliveryContextForHomeFallback(input: {
+  homeRouteFallbackAllowed: boolean;
+  replyToMessageId: string | null;
+}): boolean {
+  return input.homeRouteFallbackAllowed && !input.replyToMessageId?.trim();
 }
 
 function normalizeHostedLinqDirectRecipient(value: string | null | undefined): string | null {
