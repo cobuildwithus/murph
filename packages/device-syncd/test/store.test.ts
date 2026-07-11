@@ -3379,6 +3379,84 @@ test("device sync store clears tokens and requires reauthorization after connect
   }
 });
 
+test("device sync store preserves guarded Junction historical progress across callback replacement", async () => {
+  const tempDir = await makeTempDirectory("murph-device-syncd-store-junction-callback-metadata");
+  const store = new SqliteDeviceSyncStore(path.join(tempDir, "state.sqlite"));
+
+  try {
+    const seeded = store.upsertAccount({
+      provider: "junction",
+      externalAccountId: "junction-guarded-callback",
+      displayName: "Junction",
+      status: "active",
+      setupPhase: "pending_link",
+      scopes: [],
+      credential: {
+        kind: "provider_config",
+        providerConfigKey: "junction",
+      },
+      metadata: {
+        callbackOutcome: "seeded",
+        seedOnlyState: "discard",
+      },
+      connectedAt: "2026-04-03T00:00:00.000Z",
+      nextReconcileAt: null,
+    });
+    store.patchAccount(seeded.id, {
+      metadata: {
+        junctionHistoricalBackfillStatus: "coverage_v2_retrying",
+        junctionHistoricalBackfillEmptyAttempts: 2,
+        junctionHistoricalBackfillLastEmptyAt: "2026-04-03T00:30:00.000Z",
+        junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
+        junctionHistoricalBackfillWindowEnd: "2026-04-03T00:00:00.000Z",
+        junctionHistoricalBackfillEvidence:
+          "e1|2026-04-01T00:00:00.000Z|2026-04-03T00:00:00.000Z|garmin:1",
+      },
+    });
+
+    const completed = store.upsertAccount({
+      provider: "junction",
+      externalAccountId: "junction-guarded-callback",
+      displayName: "Junction",
+      status: "active",
+      setupPhase: "link_returned",
+      scopes: [],
+      credential: {
+        kind: "provider_config",
+        providerConfigKey: "junction",
+      },
+      metadata: {
+        callbackOutcome: "complete",
+      },
+      existingAccountGuard: {
+        expectedAccountId: seeded.id,
+        expectedConnectedAt: seeded.connectedAt,
+        rejectIfDisconnected: true,
+      },
+      connectedAt: seeded.connectedAt,
+      nextReconcileAt: null,
+    });
+
+    assert.equal(completed.id, seeded.id);
+    assert.deepEqual(completed.metadata, {
+      junctionHistoricalBackfillStatus: "coverage_v2_retrying",
+      junctionHistoricalBackfillEmptyAttempts: 2,
+      junctionHistoricalBackfillLastEmptyAt: "2026-04-03T00:30:00.000Z",
+      junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
+      junctionHistoricalBackfillWindowEnd: "2026-04-03T00:00:00.000Z",
+      junctionHistoricalBackfillEvidence:
+        "e1|2026-04-01T00:00:00.000Z|2026-04-03T00:00:00.000Z|garmin:1",
+      callbackOutcome: "complete",
+    });
+  } finally {
+    store.close();
+    await rm(tempDir, {
+      force: true,
+      recursive: true,
+    });
+  }
+});
+
 test("device sync store updates existing accounts and rejects stale success writes", async () => {
   const tempDir = await makeTempDirectory("murph-device-syncd-store-update-existing");
   const store = new SqliteDeviceSyncStore(path.join(tempDir, "state.sqlite"));

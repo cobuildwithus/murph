@@ -27,6 +27,7 @@ export interface AssistantChannelActivityStopOptions {
 }
 
 export interface AssistantChannelActivityHandle {
+  refreshAfterMessage?: () => Promise<void>
   refreshNow?: () => Promise<void>
   stop: (options?: AssistantChannelActivityStopOptions) => Promise<void>
 }

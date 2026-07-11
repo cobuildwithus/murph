@@ -3,6 +3,9 @@ import {
   buildJunctionProviderSourceInstanceKey,
 } from "@murphai/device-syncd/connect-config";
 import {
+  JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS,
+} from "@murphai/device-syncd/hosted-runtime";
+import {
   decodeHostedDeviceRoutingIndexKey,
 } from "../../src/lib/device-sync/routing-index";
 
@@ -69,6 +72,35 @@ interface HostedActiveLinqMemberSeedInput extends HostedActiveMemberSeedInput {
   walletAddress?: string | null;
 }
 
+interface HostedFamilySponsoredLinqMemberSeedInput {
+  environment?: NodeJS.ProcessEnv;
+  groupId: string;
+  homePhone: string;
+  memberId: string;
+  memberPhone: string;
+  ownerMemberId: string;
+  recentInboundAt?: Date | string | null;
+}
+
+interface HostedLinqFirstContactFallbackLineSeedInput {
+  environment?: NodeJS.ProcessEnv;
+  fallbackPhone: string;
+  incomingPhone: string;
+}
+
+interface HostedLinqFirstContactMemberStateInput {
+  environment?: NodeJS.ProcessEnv;
+  memberPhone: string;
+}
+
+export interface HostedLinqFirstContactMemberState {
+  homeChatId: string | null;
+  homeRecipientPhone: string | null;
+  memberCount: number;
+  memberId: string | null;
+  pendingChatId: string | null;
+}
+
 interface HostedActiveTelegramMemberBindingInput {
   environment?: NodeJS.ProcessEnv;
   memberId: string;
@@ -132,11 +164,35 @@ export interface HostedJunctionDeviceSyncReplayDrainStatusInput {
 export interface HostedJunctionDeviceSyncReplayDrainStatus {
   hasPendingDirtyConnection: boolean;
   hasPendingDirtyConnectionForUser: boolean;
+  historicalBackfillEmptyAttempts: number | null;
+  historicalBackfillEvidence: string | null;
+  historicalBackfillLastEmptyAt: string | null;
+  historicalBackfillStatus: string | null;
+}
+
+interface HostedMemberSeedTransactionClient {
+  hostedAccountGroup: {
+    create(input: { data: Record<string, unknown> }): Promise<unknown>;
+  };
+  hostedMember: {
+    update(input: {
+      data: Record<string, unknown>;
+      where: { id: string };
+    }): Promise<unknown>;
+  };
+  hostedMemberIdentity: {
+    findMany(input: {
+      select: { memberId: true };
+      where: { phoneLookupKey: { in: readonly string[] } };
+    }): Promise<Array<{ memberId: string }>>;
+  };
 }
 
 interface HostedMemberSeedPrismaClient {
   $disconnect(): Promise<void>;
-  $transaction<T>(callback: (tx: unknown) => Promise<T>): Promise<T>;
+  $transaction<T>(
+    callback: (tx: HostedMemberSeedTransactionClient) => Promise<T>,
+  ): Promise<T>;
 }
 
 interface HostedMemberSeedPrismaModule {
@@ -148,7 +204,7 @@ interface HostedMemberSeedPrismaModule {
 
 interface HostedMemberStoreModule {
   createHostedMember(input: {
-    billingStatus: "active";
+    billingStatus: "active" | "not_started";
     memberId: string;
     prisma: unknown;
   }): Promise<unknown>;
@@ -176,6 +232,7 @@ interface HostedCryptoDomainRootStoreModule {
 
 interface ContactPrivacyModule {
   createHostedPhoneLookupKey(phoneNumber: string): string | null;
+  createHostedPhoneLookupKeyReadCandidates(phoneNumber: string): string[];
   readHostedPhoneHint(phoneNumber: string): string | null;
 }
 
@@ -200,6 +257,14 @@ interface HostedMemberIdentityStoreModule {
 }
 
 interface HostedMemberRoutingStoreModule {
+  readHostedMemberRoutingState(input: {
+    memberId: string;
+    prisma: unknown;
+  }): Promise<{
+    linqChatId: string | null;
+    linqRecipientPhone: string | null;
+    pendingLinqChatId: string | null;
+  } | null>;
   upsertHostedMemberHomeLinqBindingTx(input: {
     clearPending: boolean;
     linqChatId: string;
@@ -223,9 +288,11 @@ interface HostedMemberRoutingStoreModule {
 
 interface HostedLinqLineStoreModule {
   upsertHostedLinqLineForPhoneTx(input: {
+    activeMemberLimit?: number | null;
     observedAt: Date;
     phoneNumber: string;
     prisma: unknown;
+    providerStatus?: string | null;
     source: "configured";
   }): Promise<unknown>;
 }
@@ -239,6 +306,10 @@ interface HostedLinqDailyStateModule {
 }
 
 interface HostedDeviceSyncControlPlaneStore {
+  getStoredConnectionAccountForUser(
+    userId: string,
+    connectionId: string,
+  ): Promise<{ metadata: Record<string, unknown> } | null>;
   upsertConnection(input: {
     connectedAt: string;
     credential: {
@@ -288,9 +359,13 @@ interface HostedMemberSeedModules {
   createPrismaClient: HostedMemberSeedPrismaModule["createPrismaClient"];
   createHostedMember: HostedMemberStoreModule["createHostedMember"];
   createHostedPhoneLookupKey: ContactPrivacyModule["createHostedPhoneLookupKey"];
+  createHostedPhoneLookupKeyReadCandidates:
+    ContactPrivacyModule["createHostedPhoneLookupKeyReadCandidates"];
   provisionHostedCryptoDomainRootsForUserTx:
     HostedCryptoDomainRootStoreModule["provisionHostedCryptoDomainRootsForUserTx"];
   readHostedPhoneHint: ContactPrivacyModule["readHostedPhoneHint"];
+  readHostedMemberRoutingState:
+    HostedMemberRoutingStoreModule["readHostedMemberRoutingState"];
   upsertHostedMemberHomeLinqBindingTx:
     HostedMemberRoutingStoreModule["upsertHostedMemberHomeLinqBindingTx"];
   upsertHostedMemberHomeLinqRecipientPhoneTx:
@@ -434,6 +509,195 @@ export async function seedHostedActiveLinqMember(
             value: recentInboundAt,
           });
         }
+      });
+    } finally {
+      await prisma.$disconnect();
+    }
+  });
+}
+
+export async function seedHostedFamilySponsoredLinqMember(
+  input: HostedFamilySponsoredLinqMemberSeedInput,
+): Promise<void> {
+  if (
+    !input.groupId.trim()
+    || !input.ownerMemberId.trim()
+    || input.ownerMemberId === input.memberId
+  ) {
+    throw new Error(
+      "Hosted family-sponsored Linq member seed requires distinct owner, member, and group ids.",
+    );
+  }
+
+  await seedHostedActiveLinqMember({
+    environment: input.environment,
+    homePhone: input.homePhone,
+    memberId: input.memberId,
+    memberPhone: input.memberPhone,
+    recentInboundAt: input.recentInboundAt,
+  });
+
+  await withHostedMemberSeedEnvironment(input.environment, async (environment) => {
+    const modules = await loadHostedMemberSeedModules(environment);
+    const prisma = createHostedMemberSeedPrisma({
+      environment,
+      modules,
+    });
+    const now = new Date();
+    const currentPeriodStart = new Date(now.getTime() - 24 * 60 * 60 * 1_000);
+    const currentPeriodEnd = new Date(now.getTime() + 31 * 24 * 60 * 60 * 1_000);
+
+    try {
+      await prisma.$transaction(async (tx) => {
+        await modules.createHostedMember({
+          billingStatus: "active",
+          memberId: input.ownerMemberId,
+          prisma: tx,
+        });
+        await tx.hostedMember.update({
+          data: {
+            billingStatus: "not_started",
+          },
+          where: {
+            id: input.memberId,
+          },
+        });
+        await tx.hostedAccountGroup.create({
+          data: {
+            billingRef: {
+              create: {
+                billedSeatCount: 2,
+                currentBillingPhase: "paid",
+                currentBillingPlanCode: "launch_family_monthly",
+                currentPeriodEnd,
+                currentPeriodStart,
+              },
+            },
+            billingStatus: "active",
+            displayName: "Hosted local family fixture",
+            id: input.groupId,
+            memberships: {
+              create: [
+                {
+                  id: `membership_${input.groupId}_owner`,
+                  joinedAt: now,
+                  memberId: input.ownerMemberId,
+                  role: "owner",
+                  status: "active",
+                },
+                {
+                  id: `membership_${input.groupId}_member`,
+                  joinedAt: now,
+                  memberId: input.memberId,
+                  role: "member",
+                  status: "active",
+                },
+              ],
+            },
+            ownerMemberId: input.ownerMemberId,
+          },
+        });
+      });
+    } finally {
+      await prisma.$disconnect();
+    }
+  });
+}
+
+export async function seedHostedLinqFirstContactFallbackLines(
+  input: HostedLinqFirstContactFallbackLineSeedInput,
+): Promise<void> {
+  if (
+    !input.incomingPhone.trim()
+    || !input.fallbackPhone.trim()
+    || input.incomingPhone.trim() === input.fallbackPhone.trim()
+  ) {
+    throw new Error(
+      "Hosted Linq first-contact fallback seed requires distinct incoming and fallback phones.",
+    );
+  }
+
+  await withHostedMemberSeedEnvironment(input.environment, async (environment) => {
+    const modules = await loadHostedMemberSeedModules(environment);
+    const prisma = createHostedMemberSeedPrisma({
+      environment,
+      modules,
+    });
+
+    try {
+      await prisma.$transaction(async (tx) => {
+        const observedAt = new Date();
+        await modules.upsertHostedLinqLineForPhoneTx({
+          activeMemberLimit: 0,
+          observedAt,
+          phoneNumber: input.incomingPhone,
+          prisma: tx,
+          providerStatus: "active",
+          source: "configured",
+        });
+        await modules.upsertHostedLinqLineForPhoneTx({
+          activeMemberLimit: 100,
+          observedAt,
+          phoneNumber: input.fallbackPhone,
+          prisma: tx,
+          providerStatus: "active",
+          source: "configured",
+        });
+      });
+    } finally {
+      await prisma.$disconnect();
+    }
+  });
+}
+
+export async function readHostedLinqFirstContactMemberState(
+  input: HostedLinqFirstContactMemberStateInput,
+): Promise<HostedLinqFirstContactMemberState> {
+  if (!input.memberPhone.trim()) {
+    throw new Error("Hosted Linq first-contact member-state read requires a member phone.");
+  }
+
+  return await withHostedMemberSeedEnvironment(input.environment, async (environment) => {
+    const modules = await loadHostedMemberSeedModules(environment);
+    const phoneLookupKeys = modules.createHostedPhoneLookupKeyReadCandidates(
+      input.memberPhone,
+    );
+    if (phoneLookupKeys.length === 0) {
+      throw new Error("Hosted Linq first-contact member-state read requires a valid phone.");
+    }
+    const prisma = createHostedMemberSeedPrisma({
+      environment,
+      modules,
+    });
+
+    try {
+      return await prisma.$transaction(async (tx) => {
+        const identities = await tx.hostedMemberIdentity.findMany({
+          select: {
+            memberId: true,
+          },
+          where: {
+            phoneLookupKey: {
+              in: phoneLookupKeys,
+            },
+          },
+        });
+        const memberIds = [...new Set(identities.map((identity) => identity.memberId))];
+        const memberId = memberIds.length === 1 ? memberIds[0] ?? null : null;
+        const routing = memberId
+          ? await modules.readHostedMemberRoutingState({
+              memberId,
+              prisma: tx,
+            })
+          : null;
+
+        return {
+          homeChatId: routing?.linqChatId ?? null,
+          homeRecipientPhone: routing?.linqRecipientPhone ?? null,
+          memberCount: memberIds.length,
+          memberId,
+          pendingChatId: routing?.pendingLinqChatId ?? null,
+        };
       });
     } finally {
       await prisma.$disconnect();
@@ -643,14 +907,43 @@ export async function readHostedJunctionDeviceSyncReplayDrainStatus(
       const [
         hasPendingDirtyConnection,
         hasPendingDirtyConnectionForUser,
+        account,
       ] = await Promise.all([
         store.hasPendingDirtyConnection(input.connectionId),
         store.hasPendingDirtyConnectionForUser(input.memberId),
+        store.getStoredConnectionAccountForUser(input.memberId, input.connectionId),
       ]);
+      const metadata = account?.metadata ?? {};
+      const historicalBackfillEmptyAttempts =
+        metadata[JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS.emptyAttempts];
+      const historicalBackfillEvidence =
+        metadata[JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS.evidence];
+      const historicalBackfillLastEmptyAt =
+        metadata[JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS.lastEmptyAt];
+      const historicalBackfillStatus =
+        metadata[JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS.status];
 
       return {
         hasPendingDirtyConnection,
         hasPendingDirtyConnectionForUser,
+        historicalBackfillEmptyAttempts:
+          typeof historicalBackfillEmptyAttempts === "number"
+          && Number.isInteger(historicalBackfillEmptyAttempts)
+          && historicalBackfillEmptyAttempts >= 0
+            ? historicalBackfillEmptyAttempts
+            : null,
+        historicalBackfillEvidence:
+          typeof historicalBackfillEvidence === "string"
+            ? historicalBackfillEvidence
+            : null,
+        historicalBackfillLastEmptyAt:
+          typeof historicalBackfillLastEmptyAt === "string"
+            ? historicalBackfillLastEmptyAt
+            : null,
+        historicalBackfillStatus:
+          typeof historicalBackfillStatus === "string"
+            ? historicalBackfillStatus
+            : null,
       };
     } finally {
       await prisma.$disconnect();
@@ -814,9 +1107,13 @@ async function loadHostedMemberSeedModules(
     createPrismaClient: typedPrismaModule.createPrismaClient,
     createHostedMember: typedHostedMemberStoreModule.createHostedMember,
     createHostedPhoneLookupKey: typedContactPrivacyModule.createHostedPhoneLookupKey,
+    createHostedPhoneLookupKeyReadCandidates:
+      typedContactPrivacyModule.createHostedPhoneLookupKeyReadCandidates,
     provisionHostedCryptoDomainRootsForUserTx:
       typedHostedCryptoDomainRootStoreModule.provisionHostedCryptoDomainRootsForUserTx,
     readHostedPhoneHint: typedContactPrivacyModule.readHostedPhoneHint,
+    readHostedMemberRoutingState:
+      typedHostedMemberRoutingStoreModule.readHostedMemberRoutingState,
     upsertHostedMemberHomeLinqBindingTx:
       typedHostedMemberRoutingStoreModule.upsertHostedMemberHomeLinqBindingTx,
     upsertHostedMemberHomeLinqRecipientPhoneTx:

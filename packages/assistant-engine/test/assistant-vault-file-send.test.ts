@@ -64,7 +64,12 @@ describe('assistant vault-file send', () => {
     }
 
     const first = await requestAssistantVaultFileSend(request)
-    const second = await requestAssistantVaultFileSend(request)
+    const second = await requestAssistantVaultFileSend({
+      ...request,
+      actorId: 'actor_after_session_restore',
+      identityId: 'identity_after_session_restore',
+      threadId: 'thread_metadata_after_session_restore',
+    })
     const intents = await listAssistantOutboxIntents(vaultRoot)
     const replyIntent = await createAssistantOutboxIntent({
       actorId: null,

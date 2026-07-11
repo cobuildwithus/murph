@@ -82,7 +82,7 @@ cd apps/web && pnpm typecheck
 
 ## Rules
 
-- Implementation is Fable-only. Codex-native and other non-Claude agents do not write `apps/web` UI code themselves; delegate implementation through the Claude Code (Fable) route in `agent-docs/operations/agent-workflow-routing.md` § Workflow Defaults.
+- Prefer implementation through the Claude Code (Fable) route in `agent-docs/operations/agent-workflow-routing.md` § Workflow Defaults. A non-Claude parent may implement directly only after the required sweep of discoverable Claude homes and safe reusable sessions proves Fable unavailable; record that fallback and still run the normal frontend verification and `frontend-review` pass.
 - Use shadcn components and standard Tailwind classes. Arbitrary values for edge cases only.
 - No `@radix-ui/*` imports. We use base UI.
 - Motion restrained — only for hierarchy or affordance.

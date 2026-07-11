@@ -40,6 +40,15 @@ function expectCronSchedule(
   expect(schedule?.kind).toBe('cron')
 }
 
+function expectEveryTwoWeeksSchedule(
+  schedule: NonNullable<Awaited<ReturnType<typeof showAutomation>>>['schedule'] | undefined,
+): void {
+  expect(schedule).toEqual({
+    kind: 'every',
+    everyMs: 14 * 24 * 60 * 60 * 1000,
+  })
+}
+
 const legacyOnboardingFollowupInstructions = [
   'This scheduled check helps continue Murph setup.',
   '',
@@ -270,10 +279,11 @@ describe('applyMurphManagedAutomations core integration', () => {
       route: defaultRoute,
       slug: 'weekly-product-updates',
       status: 'active',
-      summary: 'A personalized note alternating what is new in Murph with things Murph can do for you.',
+      summary: 'A biweekly personalized note alternating what is new in Murph with things Murph can do for you.',
       title: 'Murph product notes',
     })
-    expectCronSchedule(productUpdatesRecord?.schedule)
+    expectEveryTwoWeeksSchedule(productUpdatesRecord?.schedule)
+    expect(productUpdatesRecord?.instructions).toContain('Goal: every two weeks')
     expect(productUpdatesRecord?.assistantTargetOverride).toEqual({
       reasoningEffort: 'high',
     })
@@ -708,6 +718,63 @@ describe('applyMurphManagedAutomations core integration', () => {
     expect(insightRecord?.instructions).toContain('On this scheduled weekly run')
     expect(insightRecord?.instructions).not.toContain('Sunday at noon local time')
     expect(insightRecord?.instructions).not.toContain('6:00 PM local time')
+  })
+
+  it('migrates an existing weekly product note to the two-week cadence', async () => {
+    const vaultRoot = await createVaultRoot()
+
+    await upsertAutomation({
+      automationId: MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID,
+      continuityPolicy: 'preserve',
+      instructions: 'Send the old weekly product update.',
+      now: new Date('2026-06-09T12:00:00.000Z'),
+      route: defaultRoute,
+      schedule: {
+        kind: 'cron',
+        expression: '30 12 * * 5',
+      },
+      slug: 'weekly-product-updates',
+      status: 'active',
+      summary: 'Old weekly product updates.',
+      tags: ['assistant', 'scheduled', 'murph-managed'],
+      title: 'Weekly product updates',
+      vaultRoot,
+    })
+
+    await expect(applyMurphManagedAutomations({
+      defaultRoute,
+      now: new Date('2026-06-09T13:00:00.000Z'),
+      vaultRoot,
+    })).resolves.toEqual({
+      created: 4,
+      skipped: 0,
+      updated: 1,
+    })
+
+    const productNotesRecord = await showAutomation({
+      automationId: MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID,
+      vaultRoot,
+    })
+
+    expect(productNotesRecord).toMatchObject({
+      automationId: MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID,
+      route: defaultRoute,
+      slug: 'weekly-product-updates',
+      status: 'active',
+      summary: 'A biweekly personalized note alternating what is new in Murph with things Murph can do for you.',
+      title: 'Murph product notes',
+    })
+    expectEveryTwoWeeksSchedule(productNotesRecord?.schedule)
+    expect(productNotesRecord?.instructions).toContain('Goal: every two weeks')
+    expect(productNotesRecord?.instructions).toContain(
+      '/api/changelog?days=14&featureLimit=70&improvementLimit=10',
+    )
+    expect(productNotesRecord?.instructions).toContain(
+      'last recorded changelog means feature discovery now',
+    )
+    expect(productNotesRecord?.instructions).toContain(
+      'last recorded feature discovery means changelog now',
+    )
   })
 
   it('preserves a device-activity trigger on an existing weekly health insight', async () => {

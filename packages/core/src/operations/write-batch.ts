@@ -512,6 +512,10 @@ function resolveAmbientHostedCanonicalWritePort(): HostedCanonicalWritePort | nu
   return hostedCanonicalWritePortStorage.getStore() ?? null;
 }
 
+export function readHostedCanonicalWritePort(): HostedCanonicalWritePort | null {
+  return resolveAmbientHostedCanonicalWritePort();
+}
+
 export async function withHostedCanonicalWritePort<TResult>(
   port: HostedCanonicalWritePort | null,
   run: () => Promise<TResult>,

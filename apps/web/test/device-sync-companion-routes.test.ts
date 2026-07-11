@@ -1,6 +1,9 @@
 import { readFile } from "node:fs/promises";
 
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  serializeHostedExecutionDeviceSyncDirtyPayloadIdentity,
+} from "@murphai/device-syncd/hosted-runtime";
 
 import { hostedOnboardingError } from "../src/lib/hosted-onboarding/errors";
 import { createBearerRequest, createJsonPostRequest } from "./route-test-helpers";
@@ -19,6 +22,7 @@ const mocks = vi.hoisted(() => ({
   listConnectionsForUser: vi.fn(),
   listRecentConnectionWebhookSignals: vi.fn(),
   lookupHostedMemberForPrivyPrincipal: vi.fn(),
+  persistHostedDeviceSyncCompanionMetadata: vi.fn(),
   prismaClient: {
     hostedMember: {
       findUnique: vi.fn(),
@@ -65,17 +69,23 @@ vi.mock("@/src/lib/device-sync/public-ingress-service", () => ({
   createHostedDeviceSyncPublicIngressService: mocks.createHostedDeviceSyncPublicIngressService,
 }));
 
+vi.mock("@/src/lib/device-sync/wake-service", () => ({
+  persistHostedDeviceSyncCompanionMetadata: mocks.persistHostedDeviceSyncCompanionMetadata,
+}));
+
 vi.mock("@/src/lib/prisma", () => ({
   getPrisma: mocks.getPrisma,
 }));
 
 type SignInTokenRouteModule = typeof import("../app/api/device-sync/companion/sign-in-token/route");
 type StatusRouteModule = typeof import("../app/api/device-sync/companion/status/route");
+type HealthMetadataRouteModule = typeof import("../app/api/device-sync/companion/health-metadata/route");
 type AuthDiagnosticsRouteModule =
   typeof import("../app/api/device-sync/companion/auth-diagnostics/route");
 
 let signInTokenRoute: SignInTokenRouteModule;
 let statusRoute: StatusRouteModule;
+let healthMetadataRoute: HealthMetadataRouteModule;
 let authDiagnosticsRoute: AuthDiagnosticsRouteModule;
 
 const ACTIVE_MEMBER = {
@@ -128,6 +138,27 @@ function statusRequest(bearerToken: string | null = "privy-identity-token") {
     : createBearerRequest(url, bearerToken);
 }
 
+function healthMetadataRequest(body: unknown, bearerToken: string | null = "privy-identity-token") {
+  const url = "https://app.example.test/api/device-sync/companion/health-metadata";
+  const init = bearerToken === null
+    ? {}
+    : { headers: { authorization: `Bearer ${bearerToken}` } };
+
+  return createJsonPostRequest(url, body, init);
+}
+
+function healthMetadataRecord(overrides: Record<string, unknown> = {}) {
+  return {
+    endAt: "2026-07-08T12:00:00.000Z",
+    kind: "recovery_score",
+    recordId: "a".repeat(64),
+    startAt: "2026-07-08T04:00:00.000Z",
+    syncVersion: 1,
+    value: 80,
+    ...overrides,
+  };
+}
+
 function authDiagnosticsRequest(
   body: unknown,
   init: Omit<RequestInit, "body" | "method"> = {},
@@ -157,10 +188,13 @@ describe("device sync companion routes", () => {
   beforeAll(async () => {
     signInTokenRoute = await import("../app/api/device-sync/companion/sign-in-token/route");
     statusRoute = await import("../app/api/device-sync/companion/status/route");
+    healthMetadataRoute = await import("../app/api/device-sync/companion/health-metadata/route");
     authDiagnosticsRoute = await import("../app/api/device-sync/companion/auth-diagnostics/route");
   });
 
   beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-09T12:00:00.000Z"));
     vi.clearAllMocks();
     mocks.getPrisma.mockReturnValue(mocks.prismaClient);
     mocks.assertHostedLaunchRequiredConsentGranted.mockResolvedValue(undefined);
@@ -177,6 +211,7 @@ describe("device sync companion routes", () => {
     mocks.listConnectionsForUser.mockResolvedValue([]);
     mocks.listConnectionSources.mockResolvedValue([]);
     mocks.listRecentConnectionWebhookSignals.mockResolvedValue([]);
+    mocks.persistHostedDeviceSyncCompanionMetadata.mockResolvedValue(undefined);
     mocks.createHostedDeviceSyncControlPlane.mockReturnValue({
       store: {
         listConnectionSources: mocks.listConnectionSources,
@@ -190,6 +225,7 @@ describe("device sync companion routes", () => {
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     vi.restoreAllMocks();
   });
 
@@ -863,6 +899,344 @@ describe("device sync companion routes", () => {
         connectionIds: ["dsc_1"],
         userId: "member_1",
       });
+    });
+  });
+
+  describe("POST /api/device-sync/companion/health-metadata", () => {
+    it("requires bearer auth and never falls back to cookies", async () => {
+      const body = { records: [healthMetadataRecord()], schemaVersion: 1 };
+      const missingResponse = await healthMetadataRoute.POST(healthMetadataRequest(body, null));
+      expect(missingResponse.status).toBe(401);
+
+      const cookieResponse = await healthMetadataRoute.POST(new Request(
+        "https://app.example.test/api/device-sync/companion/health-metadata",
+        {
+          body: JSON.stringify(body),
+          headers: {
+            "content-type": "application/json",
+            cookie: "privy-id-token=cookie-identity-token",
+          },
+          method: "POST",
+        },
+      ));
+      expect(cookieResponse.status).toBe(401);
+      expect(mocks.persistHostedDeviceSyncCompanionMetadata).not.toHaveBeenCalled();
+    });
+
+    it("requires current launch consent before parsing or staging health data", async () => {
+      mockVerifiedPrivyUser();
+      mocks.assertHostedLaunchRequiredConsentGranted.mockRejectedValue(hostedOnboardingError({
+        code: "HOSTED_CONSENT_REQUIRED",
+        httpStatus: 403,
+        message: "Accept the current Murph legal consent before continuing.",
+      }));
+
+      const response = await healthMetadataRoute.POST(healthMetadataRequest({
+        records: [healthMetadataRecord()],
+        schemaVersion: 1,
+      }));
+
+      expect(response.status).toBe(403);
+      expect(mocks.persistHostedDeviceSyncCompanionMetadata).not.toHaveBeenCalled();
+    });
+
+    it("stages on the sole active Junction connection before source projection", async () => {
+      mockVerifiedPrivyUser();
+      mocks.listConnectionsForUser.mockResolvedValue([{
+        id: "dsc_1",
+        provider: "junction",
+        status: "active",
+      }]);
+      const secondRecord = healthMetadataRecord({
+        endAt: "2026-07-08T14:00:00.000Z",
+        kind: "workout_strain",
+        recordId: "b".repeat(64),
+        startAt: "2026-07-08T13:00:00.000Z",
+        syncVersion: 2,
+        value: 12.5,
+      });
+
+      const response = await healthMetadataRoute.POST(healthMetadataRequest({
+        records: [secondRecord, healthMetadataRecord()],
+        schemaVersion: 1,
+      }));
+
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({ acceptedCount: 2 });
+      expect(mocks.persistHostedDeviceSyncCompanionMetadata).toHaveBeenCalledTimes(1);
+      const input = mocks.persistHostedDeviceSyncCompanionMetadata.mock.calls[0]?.[0];
+      expect(input).toMatchObject({
+        connectionId: "dsc_1",
+        resource: {
+          count: 2,
+          jobKind: "resource",
+          resource: "companion_health_metadata",
+          resourceCategory: "summary",
+          sourceProviderSlug: "apple-health-kit",
+          windowEnd: null,
+          windowStart: null,
+        },
+        userId: "member_1",
+      });
+      const stagedBatch = JSON.parse(input.resource.payload.webhookDataJson);
+      expect(stagedBatch).toEqual({
+        records: [healthMetadataRecord(), secondRecord].map((record) => {
+          const entries = Object.entries(record).filter(([, value]) => value !== undefined);
+          return Object.fromEntries(entries);
+        }),
+        schemaVersion: 1,
+      });
+      expect(input.resource.payload).toMatchObject({
+        eventType: "companion.health_metadata.v1",
+        occurredAt: "2026-07-09T12:00:00.000Z",
+        resource: "companion_health_metadata",
+        sourceProviderSlug: "apple-health-kit",
+      });
+      expect(mocks.listConnectionSources).not.toHaveBeenCalled();
+    });
+
+    it("keeps durable batch identity stable across receipt-time retries", async () => {
+      mockVerifiedPrivyUser();
+      mocks.listConnectionsForUser.mockResolvedValue([{
+        id: "dsc_1",
+        provider: "junction",
+        status: "active",
+      }]);
+      const body = {
+        records: [healthMetadataRecord()],
+        schemaVersion: 1,
+      };
+
+      const firstResponse = await healthMetadataRoute.POST(healthMetadataRequest(body));
+      vi.setSystemTime(new Date("2026-07-09T12:05:00.000Z"));
+      const retryResponse = await healthMetadataRoute.POST(healthMetadataRequest(body));
+
+      expect(firstResponse.status).toBe(200);
+      expect(retryResponse.status).toBe(200);
+      const firstInput = mocks.persistHostedDeviceSyncCompanionMetadata.mock.calls[0]?.[0];
+      const retryInput = mocks.persistHostedDeviceSyncCompanionMetadata.mock.calls[1]?.[0];
+      expect(firstInput.occurredAt).not.toBe(retryInput.occurredAt);
+      expect(firstInput.resource.payload.occurredAt).toBe(firstInput.occurredAt);
+      expect(retryInput.resource.payload.occurredAt).toBe(retryInput.occurredAt);
+      expect(serializeHostedExecutionDeviceSyncDirtyPayloadIdentity(firstInput.resource.payload))
+        .toBe(serializeHostedExecutionDeviceSyncDirtyPayloadIdentity(retryInput.resource.payload));
+    });
+
+    it("accepts closed value, sync-version, history, and future-skew boundaries", async () => {
+      mockVerifiedPrivyUser();
+      mocks.listConnectionsForUser.mockResolvedValue([{
+        id: "dsc_1",
+        provider: "junction",
+        status: "active",
+      }]);
+      const receivedAt = new Date("2026-07-09T12:00:00.000Z");
+
+      const response = await healthMetadataRoute.POST(healthMetadataRequest({
+        records: [
+          healthMetadataRecord({
+            endAt: new Date(receivedAt.getTime() - 366 * 24 * 60 * 60 * 1_000 + 1).toISOString(),
+            recordId: "b".repeat(64),
+            startAt: new Date(receivedAt.getTime() - 366 * 24 * 60 * 60 * 1_000).toISOString(),
+            syncVersion: Number.MAX_SAFE_INTEGER,
+            value: 0,
+          }),
+          healthMetadataRecord({
+            endAt: new Date(receivedAt.getTime() + 24 * 60 * 60 * 1_000).toISOString(),
+            kind: "workout_strain",
+            recordId: "c".repeat(64),
+            startAt: new Date(receivedAt.getTime() + 24 * 60 * 60 * 1_000 - 1).toISOString(),
+            value: 21,
+          }),
+        ],
+        schemaVersion: 1,
+      }));
+
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({ acceptedCount: 2 });
+      expect(mocks.persistHostedDeviceSyncCompanionMetadata).toHaveBeenCalledTimes(1);
+    });
+
+    it("rejects unknown fields, duplicate hashes, and out-of-range values", async () => {
+      mockVerifiedPrivyUser();
+      mocks.listConnectionsForUser.mockResolvedValue([{
+        id: "dsc_1",
+        provider: "junction",
+        status: "active",
+      }]);
+
+      const invalidBodies = [
+        {
+          records: [],
+          schemaVersion: 1,
+        },
+        {
+          records: Array.from({ length: 201 }, () => healthMetadataRecord()),
+          schemaVersion: 1,
+        },
+        {
+          records: [healthMetadataRecord({ arbitraryMetric: "not-allowed" })],
+          schemaVersion: 1,
+        },
+        {
+          records: [healthMetadataRecord()],
+          schemaVersion: 1,
+          arbitraryMetric: "not-allowed",
+        },
+        {
+          records: [healthMetadataRecord(), healthMetadataRecord()],
+          schemaVersion: 1,
+        },
+        {
+          records: [healthMetadataRecord({ syncVersion: undefined })],
+          schemaVersion: 1,
+        },
+        {
+          records: [healthMetadataRecord({ value: 101 })],
+          schemaVersion: 1,
+        },
+        {
+          records: [healthMetadataRecord({ kind: "workout_strain", value: 21.1 })],
+          schemaVersion: 1,
+        },
+        {
+          records: [healthMetadataRecord({
+            endAt: "2026-07-08T04:00:00.000Z",
+            startAt: "2026-07-08T04:00:00.000Z",
+          })],
+          schemaVersion: 1,
+        },
+        {
+          records: [healthMetadataRecord({ startAt: "July 8, 2026 04:00:00 UTC" })],
+          schemaVersion: 1,
+        },
+        {
+          records: [healthMetadataRecord({
+            endAt: "2025-07-07T12:00:00.000Z",
+            startAt: "2025-07-07T04:00:00.000Z",
+          })],
+          schemaVersion: 1,
+        },
+        {
+          records: [healthMetadataRecord({
+            endAt: "2026-07-10T12:00:00.001Z",
+            startAt: "2026-07-10T11:00:00.000Z",
+          })],
+          schemaVersion: 1,
+        },
+      ];
+
+      for (const body of invalidBodies) {
+        const response = await healthMetadataRoute.POST(healthMetadataRequest(body));
+        expect(response.status).toBe(400);
+      }
+      expect(mocks.persistHostedDeviceSyncCompanionMetadata).not.toHaveBeenCalled();
+    });
+
+    it("rejects payloads over the closed route body limit", async () => {
+      mockVerifiedPrivyUser();
+
+      const response = await healthMetadataRoute.POST(healthMetadataRequest({
+        padding: "x".repeat(64_000),
+        records: [healthMetadataRecord()],
+        schemaVersion: 1,
+      }));
+
+      expect(response.status).toBe(413);
+      expect(mocks.persistHostedDeviceSyncCompanionMetadata).not.toHaveBeenCalled();
+    });
+
+    it("keeps malformed health JSON fragments out of logs", async () => {
+      mockVerifiedPrivyUser();
+      const rawHealthMarker = "raw-health-value-do-not-log";
+      const consoleSpies = (["debug", "error", "info", "log", "warn"] as const).map((level) =>
+        vi.spyOn(console, level).mockImplementation(() => {}),
+      );
+      const response = await healthMetadataRoute.POST(new Request(
+        "https://app.example.test/api/device-sync/companion/health-metadata",
+        {
+          body: `{"value":${rawHealthMarker}}`,
+          headers: {
+            authorization: "Bearer privy-identity-token",
+            "content-type": "application/json",
+          },
+          method: "POST",
+        },
+      ));
+
+      expect(response.status).toBe(400);
+      expect(await response.json()).toEqual({
+        error: {
+          code: "COMPANION_REQUEST_INVALID",
+          message: "Companion health metadata must be valid JSON.",
+          retryable: false,
+        },
+      });
+      expect(mocks.persistHostedDeviceSyncCompanionMetadata).not.toHaveBeenCalled();
+      for (const spy of consoleSpies) {
+        for (const callArgs of spy.mock.calls) {
+          expect(JSON.stringify(callArgs)).not.toContain(rawHealthMarker);
+        }
+      }
+    });
+
+    it("uses source projection to disambiguate multiple active Junction connections", async () => {
+      mockVerifiedPrivyUser();
+      mocks.listConnectionsForUser.mockResolvedValue([
+        { id: "dsc_1", provider: "junction", status: "active" },
+        { id: "dsc_2", provider: "junction", status: "active" },
+      ]);
+      mocks.listConnectionSources.mockImplementation(async (connectionId: string) =>
+        connectionId === "dsc_2"
+          ? [{ sourceProviderSlug: "apple_health_kit", status: "connected" }]
+          : [{ sourceProviderSlug: "oura", status: "connected" }]
+      );
+
+      const response = await healthMetadataRoute.POST(healthMetadataRequest({
+        records: [healthMetadataRecord()],
+        schemaVersion: 1,
+      }));
+
+      expect(response.status).toBe(200);
+      expect(mocks.persistHostedDeviceSyncCompanionMetadata).toHaveBeenCalledWith(
+        expect.objectContaining({ connectionId: "dsc_2" }),
+      );
+    });
+
+    it("rejects ambiguous active Junction connections without source projection", async () => {
+      mockVerifiedPrivyUser();
+      mocks.listConnectionsForUser.mockResolvedValue([
+        { id: "dsc_1", provider: "junction", status: "active" },
+        { id: "dsc_2", provider: "junction", status: "active" },
+      ]);
+
+      const response = await healthMetadataRoute.POST(healthMetadataRequest({
+        records: [healthMetadataRecord()],
+        schemaVersion: 1,
+      }));
+
+      expect(response.status).toBe(409);
+      expect(await response.json()).toMatchObject({
+        error: { code: "COMPANION_HEALTH_CONNECTION_AMBIGUOUS" },
+      });
+      expect(mocks.persistHostedDeviceSyncCompanionMetadata).not.toHaveBeenCalled();
+    });
+
+    it("rejects uploads when Apple Health has no active runtime lane", async () => {
+      mockVerifiedPrivyUser();
+      mocks.listConnectionsForUser.mockResolvedValue([
+        { id: "dsc_old", provider: "junction", status: "disconnected" },
+      ]);
+
+      const response = await healthMetadataRoute.POST(healthMetadataRequest({
+        records: [healthMetadataRecord()],
+        schemaVersion: 1,
+      }));
+
+      expect(response.status).toBe(409);
+      expect(await response.json()).toMatchObject({
+        error: { code: "COMPANION_HEALTH_CONNECTION_REQUIRED" },
+      });
+      expect(mocks.persistHostedDeviceSyncCompanionMetadata).not.toHaveBeenCalled();
     });
   });
 });

@@ -123,12 +123,16 @@ describe("hosted local idle checkpoint deferred progress e2e", () => {
     expect(hasCompletedHostedError(firstCompletionStatus)).toBe(false);
     expectWorkspaceBaseOnly(firstCompletionStatus);
     const firstCompletionWorkspaceVersion = requireWorkspaceVersion(firstCompletionStatus);
-    if (firstCompletionWorkspaceVersion === activationWorkspaceVersion) {
+    if (hasForegroundDeferredMailboxProgressEvidence(firstCompletionStatus, {
+      expectedConversationSeqEnd: firstSeq,
+      expectedWorkspaceVersion: activationWorkspaceVersion,
+    })) {
       expectForegroundDeferredMailboxProgressEvidence(firstCompletionStatus, {
         expectedConversationSeqEnd: firstSeq,
         expectedWorkspaceVersion: activationWorkspaceVersion,
       });
     } else {
+      expect(firstCompletionWorkspaceVersion).not.toBe(activationWorkspaceVersion);
       expectMailboxLagDrained(firstCompletionStatus);
     }
 
@@ -175,12 +179,16 @@ describe("hosted local idle checkpoint deferred progress e2e", () => {
     });
     expect(hasCompletedHostedError(finalStatus)).toBe(false);
     const finalWorkspaceVersion = requireWorkspaceVersion(finalStatus);
-    if (finalWorkspaceVersion === idleWorkspaceVersion) {
+    if (hasForegroundDeferredMailboxProgressEvidence(finalStatus, {
+      expectedConversationSeqEnd: secondSeq,
+      expectedWorkspaceVersion: idleWorkspaceVersion,
+    })) {
       expectForegroundDeferredMailboxProgressEvidence(finalStatus, {
         expectedConversationSeqEnd: secondSeq,
         expectedWorkspaceVersion: idleWorkspaceVersion,
       });
     } else {
+      expect(finalWorkspaceVersion).not.toBe(idleWorkspaceVersion);
       expectMailboxLagDrained(finalStatus);
     }
     const secondIdleCheckpointStatus = hasCommittedIdleCheckpointProgressEvidence(
@@ -370,6 +378,7 @@ async function startScenario(): Promise<void> {
       OPENAI_API_KEY: "stub-local-openai-key",
     },
     assistantProviderStubModelId: productionLikeAssistantModel,
+    faultInjection: true,
     localDatabaseUrl,
     persistDirOverride: workerPersistDirOverride,
     persistDirPrefix: "murph-hosted-local-idle-checkpoint-deferred-",

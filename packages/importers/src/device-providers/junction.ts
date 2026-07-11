@@ -4298,9 +4298,26 @@ function makeJunctionExternalRef(
     "junction",
     resourceContext.externalRefResourceType,
     buildStableResourceId(resourceContext, entry, timestamp),
-    undefined,
+    junctionCompanionExternalRefVersion(resourceContext, entry),
     slugify(facet, "value"),
   );
+}
+
+function junctionCompanionExternalRefVersion(
+  resourceContext: ResourceContext,
+  entry: PlainObject,
+): string | undefined {
+  if (
+    resourceContext.sourceProviderSlug !== "apple-health-kit"
+    || resourceContext.origin.sourceType !== "companion-whoop-metadata-unverified"
+  ) {
+    return undefined;
+  }
+
+  const version = entry.companionSyncVersion;
+  return typeof version === "number" && Number.isSafeInteger(version) && version >= 0
+    ? String(version)
+    : undefined;
 }
 
 function buildJunctionResourceType(sourceProviderSlug: string, resourceSlug: string): string {

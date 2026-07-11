@@ -244,6 +244,12 @@ describe("cloudflare worker routes", () => {
     expect(workerSource).not.toContain("MURPH_HOSTED_LOCAL_TEST_ROUTES");
     expect(workerSource).not.toContain("runUntilIdleForTest");
     expect(workerSource).not.toContain("startStuckInvocationForTest");
+    expect(workerSource).not.toContain("armCanonicalCheckpointLostAckForTest");
+    expect(workerSource).not.toContain("armSnapshotPublicationCorruptionForTest");
+    expect(workerSource).not.toContain("armShutdownCheckpointPublicationBarrierForTest");
+    expect(workerSource).not.toContain("beginShutdownCheckpointGracefulStopForTest");
+    expect(workerSource).not.toContain("readShutdownCheckpointPublicationBarrierForTest");
+    expect(workerSource).not.toContain("releaseShutdownCheckpointPublicationBarrierForTest");
     expect(workerSource).not.toContain("expireActivityForTest");
     expect(workerSource).not.toContain("ageActiveInvocationForTest");
     expect(workerSource).not.toContain("probeActiveContainerProviderEgressForTest");
@@ -334,6 +340,9 @@ describe("cloudflare worker routes", () => {
       "test-artifact-seed",
       "test-run-until-idle",
       "test-run-alarm",
+      "test-canonical-checkpoint-lost-ack",
+      "test-snapshot-publication-corruption",
+      "test-shutdown-checkpoint-publication-barrier",
       "test-container-activity-expired",
       "test-container-active-operation-drop",
       "test-start-stuck-invocation",
@@ -1138,6 +1147,59 @@ describe("cloudflare worker routes", () => {
       error: "Hosted execution bound user does not match the test runner user.",
     });
 
+    const canonicalCheckpointLostAckResponse = await hostedLocalTestWorker.fetch(
+      await signControlRequest(new Request(
+        "https://runner.example.test/__test/users/member_123/canonical-checkpoint-lost-ack",
+        {
+          method: "POST",
+        },
+      ), {
+        boundUserId: "member_other",
+      }),
+      env,
+    );
+
+    expect(canonicalCheckpointLostAckResponse.status).toBe(401);
+    await expect(canonicalCheckpointLostAckResponse.json()).resolves.toEqual({
+      error: "Hosted execution bound user does not match the test runner user.",
+    });
+
+    const snapshotPublicationCorruptionResponse = await hostedLocalTestWorker.fetch(
+      await signControlRequest(new Request(
+        "https://runner.example.test/__test/users/member_123/snapshot-publication-corruption",
+        {
+          method: "POST",
+        },
+      ), {
+        boundUserId: "member_other",
+      }),
+      env,
+    );
+
+    expect(snapshotPublicationCorruptionResponse.status).toBe(401);
+    await expect(snapshotPublicationCorruptionResponse.json()).resolves.toEqual({
+      error: "Hosted execution bound user does not match the test runner user.",
+    });
+
+    const shutdownCheckpointPublicationBarrierResponse =
+      await hostedLocalTestWorker.fetch(
+        await signControlRequest(new Request(
+          "https://runner.example.test/__test/users/member_123"
+            + "/shutdown-checkpoint-publication-barrier?action=status",
+          {
+            method: "POST",
+          },
+        ), {
+          boundUserId: "member_other",
+        }),
+        env,
+      );
+
+    expect(shutdownCheckpointPublicationBarrierResponse.status).toBe(401);
+    await expect(shutdownCheckpointPublicationBarrierResponse.json()).resolves.toEqual({
+      error: "Hosted execution bound user does not match the test runner user.",
+    });
+
     const directR2Response = await hostedLocalTestWorker.fetch(
       await signControlRequest(new Request(
         "https://runner.example.test/__test/users/member_123/direct-r2-presigned-put",
@@ -1427,6 +1489,152 @@ describe("cloudflare worker routes", () => {
     await expect(response.json()).resolves.toEqual({ ok: true });
     expect(getByName).toHaveBeenCalledWith(expect.stringContaining("member_123"));
     expect(dropActiveOperationForTest).toHaveBeenCalledWith({ userId: "member_123" });
+  });
+
+  it("arms canonical checkpoint lost-ack injection for correctly bound callers", async () => {
+    const baseRunnerContainerNamespace = createRunnerContainerNamespace();
+    const armCanonicalCheckpointLostAckForTest = vi.fn(async () => ({ ok: true as const }));
+    const getByName = vi.fn((name: string) => ({
+      ...baseRunnerContainerNamespace.getByName(name),
+      armCanonicalCheckpointLostAckForTest,
+    }));
+    const env = createWorkerEnv(createUserRunnerStub(), {
+      MURPH_HOSTED_LOCAL_TEST_ROUTES: "1",
+      NODE_ENV: "test",
+      RUNNER_CONTAINER: {
+        getByName,
+      },
+    });
+
+    const response = await hostedLocalTestWorker.fetch(
+      await signControlRequest(new Request(
+        "https://runner.example.test/__test/users/member_123/canonical-checkpoint-lost-ack",
+        {
+          method: "POST",
+        },
+      ), {
+        boundUserId: "member_123",
+      }),
+      env,
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ ok: true });
+    expect(getByName).toHaveBeenCalledWith(expect.stringContaining("member_123"));
+    expect(armCanonicalCheckpointLostAckForTest).toHaveBeenCalledWith({
+      userId: "member_123",
+    });
+  });
+
+  it("arms snapshot publication corruption for correctly bound callers", async () => {
+    const baseRunnerContainerNamespace = createRunnerContainerNamespace();
+    const armSnapshotPublicationCorruptionForTest = vi.fn(async () => ({ ok: true as const }));
+    const getByName = vi.fn((name: string) => ({
+      ...baseRunnerContainerNamespace.getByName(name),
+      armSnapshotPublicationCorruptionForTest,
+    }));
+    const env = createWorkerEnv(createUserRunnerStub(), {
+      MURPH_HOSTED_LOCAL_TEST_ROUTES: "1",
+      NODE_ENV: "test",
+      RUNNER_CONTAINER: {
+        getByName,
+      },
+    });
+
+    const response = await hostedLocalTestWorker.fetch(
+      await signControlRequest(new Request(
+        "https://runner.example.test/__test/users/member_123/snapshot-publication-corruption",
+        {
+          method: "POST",
+        },
+      ), {
+        boundUserId: "member_123",
+      }),
+      env,
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ ok: true });
+    expect(getByName).toHaveBeenCalledWith(expect.stringContaining("member_123"));
+    expect(armSnapshotPublicationCorruptionForTest).toHaveBeenCalledWith({
+      userId: "member_123",
+    });
+  });
+
+  it("controls the user-scoped shutdown checkpoint publication barrier", async () => {
+    const baseRunnerContainerNamespace = createRunnerContainerNamespace();
+    const armShutdownCheckpointPublicationBarrierForTest =
+      vi.fn(async () => ({ ok: true as const }));
+    const beginShutdownCheckpointGracefulStopForTest =
+      vi.fn(async () => ({ ok: true as const }));
+    const readShutdownCheckpointPublicationBarrierForTest =
+      vi.fn(async () => ({ state: "entered" as const }));
+    const releaseShutdownCheckpointPublicationBarrierForTest =
+      vi.fn(async () => ({ ok: true as const, released: true }));
+    const getByName = vi.fn((name: string) => ({
+      ...baseRunnerContainerNamespace.getByName(name),
+      armShutdownCheckpointPublicationBarrierForTest,
+      beginShutdownCheckpointGracefulStopForTest,
+      readShutdownCheckpointPublicationBarrierForTest,
+      releaseShutdownCheckpointPublicationBarrierForTest,
+    }));
+    const env = createWorkerEnv(createUserRunnerStub(), {
+      MURPH_HOSTED_LOCAL_TEST_ROUTES: "1",
+      NODE_ENV: "test",
+      RUNNER_CONTAINER: {
+        getByName,
+      },
+    });
+    const request = async (action: "arm" | "release" | "shutdown" | "status") =>
+      await hostedLocalTestWorker.fetch(
+        await signControlRequest(new Request(
+          "https://runner.example.test/__test/users/member_123"
+            + `/shutdown-checkpoint-publication-barrier?action=${action}`,
+          { method: "POST" },
+        ), {
+          boundUserId: "member_123",
+        }),
+        env,
+      );
+
+    const armResponse = await request("arm");
+    const statusResponse = await request("status");
+    const shutdownResponse = await request("shutdown");
+    const releaseResponse = await request("release");
+
+    expect(armResponse.status).toBe(200);
+    await expect(armResponse.json()).resolves.toEqual({ ok: true });
+    expect(statusResponse.status).toBe(200);
+    await expect(statusResponse.json()).resolves.toEqual({ state: "entered" });
+    expect(shutdownResponse.status).toBe(200);
+    await expect(shutdownResponse.json()).resolves.toEqual({ ok: true });
+    expect(releaseResponse.status).toBe(200);
+    await expect(releaseResponse.json()).resolves.toEqual({ ok: true, released: true });
+    expect(getByName).toHaveBeenCalledWith(expect.stringContaining("member_123"));
+    expect(armShutdownCheckpointPublicationBarrierForTest).toHaveBeenCalledWith({
+      userId: "member_123",
+    });
+    expect(readShutdownCheckpointPublicationBarrierForTest).toHaveBeenCalledWith({
+      userId: "member_123",
+    });
+    expect(beginShutdownCheckpointGracefulStopForTest).toHaveBeenCalledWith({
+      userId: "member_123",
+    });
+    expect(releaseShutdownCheckpointPublicationBarrierForTest).toHaveBeenCalledWith({
+      userId: "member_123",
+    });
+
+    const invalidResponse = await hostedLocalTestWorker.fetch(
+      await signControlRequest(new Request(
+        "https://runner.example.test/__test/users/member_123"
+          + "/shutdown-checkpoint-publication-barrier?action=arm&extra=1",
+        { method: "POST" },
+      ), {
+        boundUserId: "member_123",
+      }),
+      env,
+    );
+    expect(invalidResponse.status).toBe(400);
   });
 
   it("starts the hosted-local stuck invocation test route for correctly bound callers", async () => {

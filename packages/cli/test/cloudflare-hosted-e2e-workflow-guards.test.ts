@@ -6,12 +6,24 @@ import { describe, expect, it } from 'vitest'
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..')
 const hostedE2eWorkflowPath = path.join(repoRoot, '.github', 'workflows', 'cloudflare-hosted-e2e.yml')
-const hostedDeviceSyncE2eWorkflowPath = path.join(
+const hostedDeployWorkflowPath = path.join(
   repoRoot,
   '.github',
   'workflows',
-  'cloudflare-hosted-device-sync-e2e.yml',
+  'deploy-cloudflare-hosted.yml',
 )
+
+function extractWorkflowJob(workflow: string, jobName: string): string {
+  const marker = `\n  ${jobName}:\n`
+  const markerIndex = workflow.indexOf(marker)
+  expect(markerIndex).toBeGreaterThanOrEqual(0)
+  const jobStart = markerIndex + marker.length
+  const remainingWorkflow = workflow.slice(jobStart)
+  const nextJobIndex = remainingWorkflow.search(/\n  [a-z0-9-]+:\n/)
+  return nextJobIndex === -1
+    ? remainingWorkflow
+    : remainingWorkflow.slice(0, nextJobIndex)
+}
 
 function expectPostgresServiceContract(workflow: string, expectedServiceCount: number): void {
   expect(
@@ -52,6 +64,21 @@ function expectHostedLocalCodexCliInstall(workflow: string): void {
   expect(workflow).toContain('"${npm_prefix}/bin/codex" --version')
 }
 
+function expectStableRequiredAggregator(input: {
+  jobId: string
+  jobName: string
+  needs: readonly string[]
+  workflow: string
+}): void {
+  expect(input.workflow).toContain(`  ${input.jobId}:\n    name: ${input.jobName}`)
+  expect(input.workflow).toContain(`  ${input.jobId}:\n    name: ${input.jobName}\n    runs-on: ubuntu-24.04\n    needs:\n${
+    input.needs.map((jobId) => `      - ${jobId}`).join('\n')
+  }\n    if: \${{ always() }}`)
+  for (const jobId of input.needs) {
+    expect(input.workflow).toContain(`needs.${jobId}.result`)
+  }
+}
+
 describe('cloudflare hosted e2e workflow guards', () => {
   it('provisions a real local postgres service for hosted local e2e jobs', () => {
     const workflow = readFileSync(hostedE2eWorkflowPath, 'utf8')
@@ -73,35 +100,86 @@ describe('cloudflare hosted e2e workflow guards', () => {
     expect(postgresBackedScenarioCount).toBeGreaterThan(0)
     expectPostgresServiceContract(workflow, 1)
     expect(hostedLocalE2eScenarios).toEqual([
+      'canonical-receipt-lost-ack-recovery',
       'codex-image-media-delivery',
+      'computer-handoff-linq-roundtrip',
       'device-connect',
+      'device-sync-junction-wearable-direct-resource-replay',
       'direct-r2-presigned-put',
+      'family-sponsored-group-roundtrip',
       'idle-checkpoint-deferred-progress',
       'linq-delivery',
+      'linq-group-route-drift',
+      'linq-home-line-reroute-retry',
+      'linq-lost-active-operation',
+      'linq-onboarding-followup',
       'linq-scheduled-reminder',
+      'linq-unknown-first-contact-fallback',
       'linq-webhook',
+      'linq-webhook-audio',
+      'openai-egress-authority',
+      'provider-egress-token-bridge',
+      'retell-call-result-roundtrip',
+      'retryable-outbox-foreground-restart',
+      'shutdown-checkpoint-conversation-ahead',
+      'snapshot-publication-fallback',
       'telegram',
       'temporal-orchestration',
+      'timezone-injection',
+      'usage-limit-ambiguous-send',
+      'vault-file-approval-resume',
+      'warm-reuse-egress',
     ])
-    expect(workflow).toContain('for scenario in ${{ matrix.scenarios }}; do')
-    expect(workflow).toContain('pnpm hosted-local e2e "$scenario" --no-bundle')
-    // The linq-webhook media job gates the Workers AI transcription path and
-    // depends on the shared bundle shipping the e2e parser toolchain stub.
+    expect(workflow).not.toContain('for scenario in ${{ matrix.scenarios }}; do')
+    expect(workflow).toContain('pnpm hosted-local e2e "${scenarios[@]}" --no-bundle')
+    expect(workflow).toContain('timeoutMinutes: 35')
+    // The Linq webhook media scenario depends on the shared bundle shipping
+    // the E2E parser toolchain stub.
     expect(workflow).toContain('MURPH_RUNNER_BUNDLE_TEST_PARSER_TOOLCHAIN: "1"')
     expect(workflow).not.toContain('WHISPER_COMMAND')
     expect(workflow.match(/\.artifacts\/hosted-local\/\*\*\/state\.json/g)).toHaveLength(1)
     expect(workflow).not.toContain('pnpm --dir apps/cloudflare test:e2e:linq-delivery:local')
     expect(workflow).not.toContain('pnpm --dir apps/cloudflare test:e2e:telegram:local')
+    expectStableRequiredAggregator({
+      jobId: 'hosted-e2e-required',
+      jobName: 'Hosted E2E required gate',
+      needs: ['runner-bundle', 'hosted-scenarios'],
+      workflow,
+    })
   })
 
-  it('keeps the device-sync hosted e2e job on the same postgres service contract', () => {
-    const workflow = readFileSync(hostedDeviceSyncE2eWorkflowPath, 'utf8')
+  it('shortens only the routine scheduled-reminder gate', () => {
+    const workflow = readFileSync(hostedE2eWorkflowPath, 'utf8')
+    const deployWorkflow = readFileSync(hostedDeployWorkflowPath, 'utf8')
+    const deployReminderJob = extractWorkflowJob(
+      deployWorkflow,
+      'linq-scheduled-reminder-gate',
+    )
 
-    expect(workflow).toContain('DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/murph_test')
-    expect(workflow).toContain('pnpm hosted-local e2e device-sync-junction-wearable-direct-resource-replay')
-    expectHostedLocalCodexCliInstall(workflow)
-    expectPostgresServiceContract(workflow, 1)
-    expect(workflow).toContain('.artifacts/cloudflare-hosted-device-sync-e2e/junction-wearable-direct-resource-replay.log')
-    expect(workflow).toContain('.artifacts/hosted-local/**/state.json')
+    expect(workflow).toContain([
+      '          - name: Linq reminder + onboarding follow-up E2E',
+      '            fastGate: "1"',
+      '            slug: linq-reminder-onboarding-followup',
+      '            scenarios: linq-scheduled-reminder linq-onboarding-followup',
+    ].join('\n'))
+    expect(deployReminderJob).toContain('pnpm hosted-local e2e linq-scheduled-reminder')
+    expect(deployReminderJob).not.toContain('MURPH_HOSTED_LOCAL_E2E_FAST_GATE')
+  })
+
+  it('keeps the Junction replay and stable device-sync gate in the unified workflow', () => {
+    const workflow = readFileSync(hostedE2eWorkflowPath, 'utf8')
+
+    expect(workflow).toContain([
+      '          - name: Junction wearable direct-resource replay E2E',
+      '            slug: junction-wearable-direct-resource-replay',
+      '            scenarios: device-sync-junction-wearable-direct-resource-replay',
+      '            timeoutMinutes: 35',
+    ].join('\n'))
+    expectStableRequiredAggregator({
+      jobId: 'hosted-device-sync-e2e-required',
+      jobName: 'Hosted device-sync E2E required gate',
+      needs: ['hosted-scenarios'],
+      workflow,
+    })
   })
 })

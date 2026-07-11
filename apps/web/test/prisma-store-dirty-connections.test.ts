@@ -1227,6 +1227,101 @@ describe("PrismaHostedDirtyConnectionStore dirty pending state", () => {
     expect(result.shouldRequestWake).toBe(false);
   });
 
+  it("reuses the durable payload id when a companion batch is retried at a later receipt time", async () => {
+    installHostedSecureBoxStringTestCodec();
+    try {
+      const dirtyAt = new Date("2026-07-09T12:00:00.000Z");
+      const payloadCreates: Array<Array<Record<string, unknown>>> = [];
+      const dirtyRecord = {
+        connectionId: "dsc_companion_123",
+        createdAt: dirtyAt,
+        dirtyResourcesJson: {},
+        dirtyRevision: 7n,
+        eventCount: 7n,
+        firstDirtyAt: dirtyAt,
+        latestDirtyAt: dirtyAt,
+        latestEventType: "companion.health_metadata.v1",
+        latestResourceCategory: "summary",
+        latestTraceId: null,
+        processedRevision: 6n,
+        provider: "junction",
+        resourceCategoryCountsJson: {},
+        sourceProviderCountsJson: {},
+        updatedAt: dirtyAt,
+        userId: "member_123",
+        windowEnd: null,
+        windowStart: null,
+      };
+      const prisma = {
+        $transaction: vi.fn(async (callback: (tx: unknown) => Promise<unknown>) => callback(prisma)),
+        deviceSyncDirtyConnection: {
+          findUnique: vi.fn(async () => dirtyRecord),
+          updateMany: vi.fn(async () => ({ count: 1 })),
+        },
+        deviceSyncDirtyPayload: {
+          createMany: vi.fn(async (input: {
+            data: Array<Record<string, unknown>>;
+            skipDuplicates: boolean;
+          }) => {
+            payloadCreates.push(input.data);
+            return { count: input.data.length };
+          }),
+        },
+      };
+      const store = new PrismaHostedDirtyConnectionStore(prisma as never);
+      const webhookDataJson = JSON.stringify({
+        records: [{ recordId: "a".repeat(64) }],
+        schemaVersion: 1,
+      });
+      const resource = (occurredAt: string) => ({
+        count: 1,
+        jobKind: "resource",
+        payload: {
+          eventType: "companion.health_metadata.v1",
+          occurredAt,
+          resource: "companion_health_metadata",
+          resourceCategory: "summary",
+          sourceProviderSlug: "apple-health-kit",
+          webhookDataJson,
+        },
+        resource: "companion_health_metadata",
+        resourceCategory: "summary",
+        sourceProviderSlug: "apple-health-kit",
+        windowEnd: "2026-07-08T12:00:00.000Z",
+        windowStart: "2026-07-08T04:00:00.000Z",
+      });
+
+      await store.upsertDirtyConnection({
+        connectionId: dirtyRecord.connectionId,
+        dirtyAt: "2026-07-09T12:00:00.000Z",
+        eventType: "companion.health_metadata.v1",
+        provider: "junction",
+        resourceCategory: "summary",
+        resources: [resource("2026-07-09T12:00:00.000Z")],
+        userId: dirtyRecord.userId,
+      });
+      await store.upsertDirtyConnection({
+        connectionId: dirtyRecord.connectionId,
+        dirtyAt: "2026-07-09T12:05:00.000Z",
+        eventType: "companion.health_metadata.v1",
+        provider: "junction",
+        resourceCategory: "summary",
+        resources: [resource("2026-07-09T12:05:00.000Z")],
+        userId: dirtyRecord.userId,
+      });
+
+      expect(payloadCreates).toHaveLength(2);
+      expect(expectFirstPayloadCreateRow(payloadCreates[0] ?? []).id)
+        .toBe(expectFirstPayloadCreateRow(payloadCreates[1] ?? []).id);
+      expect(prisma.deviceSyncDirtyPayload.createMany).toHaveBeenCalledWith(expect.objectContaining({
+        skipDuplicates: true,
+      }));
+      expect(prisma.deviceSyncDirtyConnection.updateMany).not.toHaveBeenCalled();
+    } finally {
+      installHostedSecureBoxStringTestCodec();
+    }
+  });
+
   it("deletes only explicitly acknowledged durable payload ids", async () => {
     const dirtyAt = new Date("2026-05-26T12:00:00.000Z");
     const prisma = {
