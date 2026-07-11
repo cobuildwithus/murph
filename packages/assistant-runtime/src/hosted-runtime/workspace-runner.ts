@@ -89,6 +89,7 @@ import {
 import {
   appendHostedCanonicalWriteReceiptToArtifactLog,
   hostedCanonicalWriteReceiptLogStatusFields,
+  readHostedCanonicalWriteReceiptLogStatusFingerprint,
 } from "./canonical-write-receipt-log.ts";
 import {
   markHostedWorkspaceLiveRuntimeStateDirtyForSnapshotRefBestEffort,
@@ -314,12 +315,15 @@ export interface HostedWorkspaceRunnerInput {
     input: HostedWorkspaceRunnerRuntimeStatusCheckpointInput,
   ) => Promise<HostedWorkspaceCheckpointResponse> | HostedWorkspaceCheckpointResponse) | null;
   checkpointRequestBuilder: HostedWorkspaceCheckpointRequestBuilder;
+  deferInitialMailboxPostCheckpointEffects?: boolean;
   expectedUserId: string;
   foregroundImportItem?: HostedWorkspaceRunnerMailboxImportItem | null;
   importItem: HostedWorkspaceRunnerMailboxImportItem;
   initialAssistantInputBatch?: HostedWorkspaceRunnerAssistantInputBatch | null;
+  initialMailboxConversationDeferral?: HostedMailboxConversationDeferral | null;
   initialMailboxImport?: HostedMailboxImportCheckpointResult | null;
   initialMailboxImportContext?: HostedWorkspaceRunnerMailboxImportContext | null;
+  initialMailboxImportLanes?: readonly ("conversation" | "system")[];
   initialMailboxPrefetch?: HostedMailboxPrefixPrefetch | null;
   limitPerLane: number;
   materializeWorkspaceArtifacts?: HostedWorkspaceArtifactMaterializer | null;
@@ -537,18 +541,107 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
         initialAssistantInputBatch?.assistantInputIds.length ?? 0,
     },
   );
+  let assistantContextSnapshotDirty = false;
+  let runtimeRedactedStatus: HostedRuntimeRedactedJson | null = null;
+  const mergeRuntimeRedactedStatus = (status: HostedRuntimeRedactedJson): void => {
+    runtimeRedactedStatus = {
+      ...(runtimeRedactedStatus ?? {}),
+      ...status,
+    };
+  };
+  const readDurableRedactedStatus = (): HostedRuntimeRedactedJson | null =>
+    mergeHostedRuntimeRedactedStatusValues(
+      input.workspace?.redactedStatus ?? null,
+      checkpointRequestSession.latestWorkspace()?.redactedStatus ?? null,
+    );
+  const readCurrentRedactedStatus = (): HostedRuntimeRedactedJson | null =>
+    mergeHostedRuntimeRedactedStatusValues(
+      readDurableRedactedStatus(),
+      runtimeRedactedStatus,
+    );
+  const hostedCanonicalWritePort = createHostedWorkspaceCanonicalWritePort({
+    checkpointRequestBuilder: checkpointRequestSession,
+    input,
+    onAssistantContextSnapshotDirty: () => {
+      assistantContextSnapshotDirty = true;
+    },
+    readPreviousRedactedStatus: readCurrentRedactedStatus,
+    recordRedactedStatus: mergeRuntimeRedactedStatus,
+  });
+  const hostedCanonicalMailboxWritePort = createHostedWorkspaceCanonicalWritePort({
+    checkpointRequestBuilder: checkpointRequestSession,
+    deferRuntimeStatusCheckpoint: true,
+    input,
+    onAssistantContextSnapshotDirty: () => {
+      assistantContextSnapshotDirty = true;
+    },
+    readPreviousRedactedStatus: readCurrentRedactedStatus,
+    recordRedactedStatus: mergeRuntimeRedactedStatus,
+  });
+  const checkpointCanonicalMailboxImportProgress = async (
+    result: HostedMailboxImportCheckpointResult,
+  ): Promise<void> => {
+    if (!isDeferredHostedMailboxImportDirty(result)) {
+      return;
+    }
+    const persist = async (): Promise<void> => {
+      const pendingReceiptLog = readHostedCanonicalWriteReceiptLogStatusFingerprint(
+        readCurrentRedactedStatus(),
+      );
+      if (!pendingReceiptLog) {
+        return;
+      }
+      if (!input.checkpointRuntimeRedactedStatus) {
+        throw new TypeError(
+          "Hosted canonical mailbox progress checkpoint requires runtime status checkpoint support.",
+        );
+      }
+      const mailboxStatus = buildHostedMailboxImportRedactedStatus(result.importResult);
+      const redactedStatus = mergeHostedRuntimeRedactedStatusValues(
+        readCurrentRedactedStatus(),
+        mailboxStatus,
+      ) ?? mailboxStatus;
+      const checkpoint = await input.checkpointRuntimeRedactedStatus({
+        reason: "canonical_runtime_commit",
+        redactedStatus,
+        workspace: checkpointRequestSession.latestWorkspace() ?? input.workspace,
+      });
+      if (checkpoint.workspace.userId !== input.expectedUserId) {
+        throw new HostedMailboxImportCheckpointUserMismatchError({
+          actualUserId: checkpoint.workspace.userId,
+          expectedUserId: input.expectedUserId,
+        });
+      }
+      if (!checkpoint.checkpointed) {
+        throw new HostedMailboxImportCheckpointConflictError(checkpoint);
+      }
+      checkpointRequestSession.recordStatusCheckpoint(checkpoint);
+      mergeRuntimeRedactedStatus(mailboxStatus);
+    };
+    if (input.withCanonicalWritePersistence) {
+      await input.withCanonicalWritePersistence(persist);
+      return;
+    }
+    await persist();
+  };
   let initialMailboxImport = input.initialMailboxImport
-    ?? await importHostedMailboxForWorkspaceRunner({
-      checkpointRequestBuilder: checkpointRequestSession,
-      checkpointReason: "import",
-      deferCheckpoint: true,
-      importItemContext: input.initialMailboxImportContext ?? null,
-      input,
-      lanes: input.runAssistantPhase ? ["conversation"] : undefined,
-      prefetch: input.initialMailboxPrefetch ?? null,
-      requestId: input.requestId,
-      signal: input.signal ?? null,
-    });
+    ?? await withHostedCanonicalWritePort(
+      hostedCanonicalMailboxWritePort,
+      async () => await importHostedMailboxForWorkspaceRunner({
+        checkpointRequestBuilder: checkpointRequestSession,
+        checkpointReason: "import",
+        deferConversationUntil: input.initialMailboxConversationDeferral ?? null,
+        deferCheckpoint: true,
+        importItemContext: input.initialMailboxImportContext ?? null,
+        input,
+        lanes: input.initialMailboxImportLanes
+          ?? (input.runAssistantPhase ? ["conversation"] : undefined),
+        prefetch: input.initialMailboxPrefetch ?? null,
+        requestId: input.requestId,
+        signal: input.signal ?? null,
+        checkpointCanonicalMailboxImportProgress,
+      }),
+    );
   checkpointRequestSession.recordCheckpointResult(initialMailboxImport, {
     captureAssistantInputBatch: false,
   });
@@ -567,13 +660,17 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
     })
   ) {
     try {
-      await importHostedPreAssistantSystemMailboxForWorkspaceRunner({
-        checkpointRequestBuilder: checkpointRequestSession,
-        importItemContext: input.initialMailboxImportContext ?? null,
-        input,
-        requestId: input.requestId,
-        signal: input.signal ?? null,
-      });
+      await withHostedCanonicalWritePort(
+        hostedCanonicalMailboxWritePort,
+        async () => await importHostedPreAssistantSystemMailboxForWorkspaceRunner({
+          checkpointRequestBuilder: checkpointRequestSession,
+          importItemContext: input.initialMailboxImportContext ?? null,
+          input,
+          requestId: input.requestId,
+          signal: input.signal ?? null,
+          checkpointCanonicalMailboxImportProgress,
+        }),
+      );
     } catch (error) {
       if (isHostedWorkspaceRunnerAbortError(error, input.signal ?? null)) {
         throw error;
@@ -590,22 +687,27 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
     && !initialAssistantInputBatchHasWork
     && !initialMailboxImportHasForegroundConversationWork
   ) {
-    const preAssistantSystemImport =
-      await importHostedPreAssistantSystemMailboxForWorkspaceRunner({
+    const preAssistantSystemImport = await withHostedCanonicalWritePort(
+      hostedCanonicalMailboxWritePort,
+      async () => await importHostedPreAssistantSystemMailboxForWorkspaceRunner({
         checkpointRequestBuilder: checkpointRequestSession,
         importItemContext: input.initialMailboxImportContext ?? null,
         input,
         requestId: input.requestId,
         signal: input.signal ?? null,
-      });
+        checkpointCanonicalMailboxImportProgress,
+      }),
+    );
     initialMailboxImport = preAssistantSystemImport ?? initialMailboxImport;
   }
 
   if (!input.runAssistantPhase) {
-    await runHostedMailboxPostCheckpointEffectsAndLogBestEffort({
-      checkpointRequestBuilder: checkpointRequestSession,
-      input,
-    });
+    if (input.deferInitialMailboxPostCheckpointEffects !== true) {
+      await runHostedMailboxPostCheckpointEffectsAndLogBestEffort({
+        checkpointRequestBuilder: checkpointRequestSession,
+        input,
+      });
+    }
     return {
       afterDurableCheckpoint,
       assistantPhaseResult: null,
@@ -700,14 +802,17 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
   }
   const runnerStartedAtEpochMs = Date.now();
   let foregroundConversationWorkObserved = false;
-  const foregroundMailboxImportLoop =
-    startHostedForegroundConversationMailboxImportLoop({
+  const foregroundMailboxImportLoop = await withHostedCanonicalWritePort(
+    hostedCanonicalMailboxWritePort,
+    async () => startHostedForegroundConversationMailboxImportLoop({
       checkpointRequestBuilder: checkpointRequestSession,
       input,
       onForegroundConversationWorkObserved: () => {
         foregroundConversationWorkObserved = true;
       },
-    });
+      checkpointCanonicalMailboxImportProgress,
+    }),
+  );
   input.trackLocalWorkspaceMutationCompletion?.(foregroundMailboxImportLoop.completion);
   let foregroundMailboxImportLoopStopped = false;
   const stopForegroundMailboxImportLoop = async (): Promise<void> => {
@@ -779,6 +884,8 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
     prepareAutoReplyDelivery: async () =>
       await prepareHostedAutoReplyDeliveryForWorkspaceRunner({
         checkpointRequestBuilder: checkpointRequestSession,
+        checkpointCanonicalMailboxImportProgress,
+        hostedCanonicalMailboxWritePort,
         input,
         stopForegroundMailboxImportLoop,
       }),
@@ -793,31 +900,8 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
     shouldYieldBackgroundMaintenance,
     workspace: input.workspace,
   };
-  let assistantContextSnapshotDirty = false;
-  let runtimeRedactedStatus: HostedRuntimeRedactedJson | null = null;
-  const mergeRuntimeRedactedStatus = (status: HostedRuntimeRedactedJson): void => {
-    runtimeRedactedStatus = {
-      ...(runtimeRedactedStatus ?? {}),
-      ...status,
-    };
-  };
   let mailboxPostCheckpointEffectsFinished: Promise<void> | null = null;
   let postCheckpointWakeMerged = false;
-  const hostedCanonicalWritePort = createHostedWorkspaceCanonicalWritePort({
-    checkpointRequestBuilder: checkpointRequestSession,
-    initialMailboxImport,
-    input,
-    onAssistantContextSnapshotDirty: () => {
-      assistantContextSnapshotDirty = true;
-    },
-    readPreviousRedactedStatus: () =>
-      mergeHostedRuntimeRedactedStatusValues(
-        input.workspace?.redactedStatus ?? null,
-        checkpointRequestSession.latestWorkspace()?.redactedStatus ?? null,
-        runtimeRedactedStatus,
-      ),
-    recordRedactedStatus: mergeRuntimeRedactedStatus,
-  });
   let assistantPhaseResult: HostedWorkspaceRunnerAssistantPhaseResult;
   let runnerError: unknown = null;
   try {
@@ -986,6 +1070,7 @@ function assertHostedWorkspaceRunnerUser(input: HostedWorkspaceRunnerInput): voi
 
 function startHostedForegroundConversationMailboxImportLoop(input: {
   checkpointRequestBuilder: HostedWorkspaceCheckpointRequestSession;
+  checkpointCanonicalMailboxImportProgress: HostedCanonicalMailboxImportProgressCheckpoint;
   input: HostedWorkspaceRunnerInput;
   onForegroundConversationWorkObserved?: (() => void) | null;
 }): {
@@ -1114,6 +1199,8 @@ function startHostedForegroundConversationMailboxImportLoop(input: {
               limitPerLane: input.checkpointRequestBuilder.assistantInputBatchRemaining(),
               requestId: `${requestId}:conversation`,
               signal: conversationImportSignal.signal,
+              checkpointCanonicalMailboxImportProgress:
+                input.checkpointCanonicalMailboxImportProgress,
             });
           } finally {
             conversationImportSignal.dispose();
@@ -1148,6 +1235,8 @@ function startHostedForegroundConversationMailboxImportLoop(input: {
               limitPerLane: input.input.limitPerLane,
               requestId: `${requestId}:system`,
               signal: systemImportSignal.signal,
+              checkpointCanonicalMailboxImportProgress:
+                input.checkpointCanonicalMailboxImportProgress,
             });
           } finally {
             systemImportSignal.dispose();
@@ -1238,6 +1327,8 @@ function composeHostedForegroundMailboxImportSignal(
 
 async function prepareHostedAutoReplyDeliveryForWorkspaceRunner(input: {
   checkpointRequestBuilder: HostedWorkspaceCheckpointRequestSession;
+  checkpointCanonicalMailboxImportProgress: HostedCanonicalMailboxImportProgressCheckpoint;
+  hostedCanonicalMailboxWritePort: HostedCanonicalWritePort;
   input: HostedWorkspaceRunnerInput;
   stopForegroundMailboxImportLoop: () => Promise<void>;
 }): Promise<HostedWorkspaceRunnerAssistantPhaseDeliveryBarrier | null> {
@@ -1247,17 +1338,22 @@ async function prepareHostedAutoReplyDeliveryForWorkspaceRunner(input: {
   let importPage = 0;
   while (true) {
     importPage += 1;
-    const result = await importHostedMailboxForWorkspaceRunner({
-      checkpointRequestBuilder: input.checkpointRequestBuilder,
-      checkpointReason: "active_turn_input",
-      deferCheckpoint: true,
-      importItem: input.input.importItem,
-      input: input.input,
-      lanes: ["system"],
-      limitPerLane: input.input.limitPerLane,
-      requestId: `${input.input.requestId}:pre-auto-reply-system:${importPage}`,
-      signal: input.input.signal ?? null,
-    });
+    const result = await withHostedCanonicalWritePort(
+      input.hostedCanonicalMailboxWritePort,
+      async () => await importHostedMailboxForWorkspaceRunner({
+        checkpointRequestBuilder: input.checkpointRequestBuilder,
+        checkpointReason: "active_turn_input",
+        deferCheckpoint: true,
+        importItem: input.input.importItem,
+        input: input.input,
+        lanes: ["system"],
+        limitPerLane: input.input.limitPerLane,
+        requestId: `${input.input.requestId}:pre-auto-reply-system:${importPage}`,
+        signal: input.input.signal ?? null,
+        checkpointCanonicalMailboxImportProgress:
+          input.checkpointCanonicalMailboxImportProgress,
+      }),
+    );
     input.checkpointRequestBuilder.recordCheckpointResult(result);
     markHostedMailboxImportDirtyIfNeeded(input.checkpointRequestBuilder, result);
     await runHostedMailboxPostCheckpointEffectsForPromptPreparationBestEffort({
@@ -1388,6 +1484,7 @@ function shouldImportHostedPreAssistantSystemMailbox(input: {
 
 async function importHostedPreAssistantSystemMailboxForWorkspaceRunner(input: {
   checkpointRequestBuilder: HostedWorkspaceCheckpointRequestSession;
+  checkpointCanonicalMailboxImportProgress: HostedCanonicalMailboxImportProgressCheckpoint;
   importItemContext: HostedWorkspaceRunnerMailboxImportContext | null;
   input: HostedWorkspaceRunnerInput;
   requestId: string;
@@ -1407,6 +1504,8 @@ async function importHostedPreAssistantSystemMailboxForWorkspaceRunner(input: {
       requestId: `${input.requestId}:pre-assistant-system:${importPage}`,
       signal: input.signal,
       suppressNoopRuntimeLog: true,
+      checkpointCanonicalMailboxImportProgress:
+        input.checkpointCanonicalMailboxImportProgress,
     });
     if (!hostedMailboxImportCheckpointResultIsNoop(result)) {
       latestImport = result;
@@ -1590,8 +1689,13 @@ async function notifyHostedActiveTurnInputForMailboxImport(input: {
   });
 }
 
+type HostedCanonicalMailboxImportProgressCheckpoint = (
+  result: HostedMailboxImportCheckpointResult,
+) => Promise<void>;
+
 type HostedMailboxForWorkspaceRunnerImportInput = {
   checkpointRequestBuilder: HostedWorkspaceCheckpointRequestBuilder;
+  checkpointCanonicalMailboxImportProgress?: HostedCanonicalMailboxImportProgressCheckpoint;
   checkpointReason: HostedWorkspaceSnapshotCheckpointMailboxReason;
   deferConversationUntil?: HostedMailboxConversationDeferral | null;
   deferCheckpoint?: boolean;
@@ -1677,6 +1781,7 @@ async function importHostedMailboxForWorkspaceRunnerUntracked(
       vaultRoot: input.input.vaultRoot,
     });
   }
+  await input.checkpointCanonicalMailboxImportProgress?.(result);
 
   return result;
 }
@@ -1932,7 +2037,7 @@ function isDeferredHostedMailboxImportDirty(
 
 function createHostedWorkspaceCanonicalWritePort(input: {
   checkpointRequestBuilder: HostedWorkspaceCheckpointRequestSession;
-  initialMailboxImport: HostedMailboxImportCheckpointResult;
+  deferRuntimeStatusCheckpoint?: boolean;
   input: HostedWorkspaceRunnerInput;
   onAssistantContextSnapshotDirty?: (() => void) | null;
   readPreviousRedactedStatus: () => HostedRuntimeRedactedJson | null;
@@ -1982,22 +2087,27 @@ function createHostedWorkspaceCanonicalWritePort(input: {
           receipt: writeInput.receipt,
         });
         const receiptLogStatus = hostedCanonicalWriteReceiptLogStatusFields(receiptLogUpdate);
-        const checkpointRedactedStatus =
-          mergeHostedRuntimeRedactedStatusValues(
-            input.readPreviousRedactedStatus(),
-            receiptLogStatus,
-          ) ?? receiptLogStatus;
-        if (!input.input.checkpointRuntimeRedactedStatus) {
-          throw new TypeError("Hosted canonical write receipt checkpoint requires runtime status checkpoint support.");
+        if (input.deferRuntimeStatusCheckpoint === true) {
+          input.recordRedactedStatus(receiptLogStatus);
+          input.checkpointRequestBuilder.markRuntimeStateDirty();
+        } else {
+          const checkpointRedactedStatus =
+            mergeHostedRuntimeRedactedStatusValues(
+              input.readPreviousRedactedStatus(),
+              receiptLogStatus,
+            ) ?? receiptLogStatus;
+          if (!input.input.checkpointRuntimeRedactedStatus) {
+            throw new TypeError("Hosted canonical write receipt checkpoint requires runtime status checkpoint support.");
+          }
+          const checkpoint = await input.input.checkpointRuntimeRedactedStatus({
+            reason: "canonical_runtime_commit",
+            redactedStatus: checkpointRedactedStatus,
+            workspace: input.checkpointRequestBuilder.latestWorkspace() ?? input.input.workspace,
+          });
+          input.checkpointRequestBuilder.recordStatusCheckpoint(checkpoint);
+          input.recordRedactedStatus(receiptLogStatus);
+          input.checkpointRequestBuilder.markRuntimeStateDirty();
         }
-        const checkpoint = await input.input.checkpointRuntimeRedactedStatus({
-          reason: "canonical_runtime_commit",
-          redactedStatus: checkpointRedactedStatus,
-          workspace: input.checkpointRequestBuilder.latestWorkspace() ?? input.input.workspace,
-        });
-        input.checkpointRequestBuilder.recordStatusCheckpoint(checkpoint);
-        input.recordRedactedStatus(receiptLogStatus);
-        input.checkpointRequestBuilder.markRuntimeStateDirty();
         await writeHostedForegroundCheckpointDeferredLog({
           checkpointPhase: "canonical_write",
           now: input.input.now,

@@ -41,6 +41,7 @@ export {
   resolveHostedCanonicalWritePayloadFilePath,
   runCanonicalWrite,
   withHostedCanonicalWritePort,
+  readHostedCanonicalWritePort,
   WriteBatch,
   TERMINAL_WRITE_OPERATION_PRUNE_MIN_RETAINED_COUNT,
   TERMINAL_WRITE_OPERATION_PRUNE_RETENTION_MS,
