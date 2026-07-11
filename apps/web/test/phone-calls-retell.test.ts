@@ -1046,6 +1046,15 @@ function createWebhookStore(input: {
         notificationUserId: call.memberId,
       };
     },
+    encryptResult: async ({ memberId, value }) => `hsb-test:${Buffer.from(
+      JSON.stringify({
+        lane: "hosted-member-private-field",
+        scope: "hosted-phone-call:result",
+        userId: memberId,
+        value: JSON.stringify(value),
+      }),
+      "utf8",
+    ).toString("base64url")}`,
     hostedPhoneCall: {
       findUnique: async (args) => {
         findUniqueCalls.push(args);

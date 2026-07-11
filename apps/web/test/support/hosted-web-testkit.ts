@@ -124,6 +124,7 @@ export interface HostedPhoneCallForTest {
   memberId: string;
   providerCallId: string | null;
   requestKey: string;
+  resultEncrypted: string | null;
   resultJson: unknown;
   status: "calling" | "completed" | "ended" | "failed" | "needs_user" | "starting";
 }

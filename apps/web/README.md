@@ -644,18 +644,32 @@ web encrypts every new brief/result before the guarded database write, reads
 ciphertext first, and falls back to legacy JSON only when ciphertext is null;
 this keeps both old calls and new calls usable while the scrub runs.
 
-After the replacement deployment is live, run
+Freeze production deploys and rollbacks before promoting the replacement web,
+then record its exact commit. Preliminary bounded backfill batches may run as
+soon as that deployment is live, but they are not the authoritative scrub: an
+invocation of the previous web can still finish later and write plaintext.
+Prove the production alias points at the replacement commit with
+`apps/web/scripts/resolve-vercel-production-alias-sha.ts` and the secure
+`HOSTED_WEB_VERCEL_*` operator environment, then wait the configured
+`HOSTED_WEB_CONTRACT_MIGRATION_DRAIN_SECONDS` prior-function interval.
+Resolve the alias again after the drain. If it changed, select the replacement
+or a newer compatible commit and restart the full drain.
+
+Only after that final alias proof, run
 `pnpm --dir apps/web privacy:backfill-phone-calls -- --batch-size 50` through
 the production environment wrapper shown by the script's `--help`. Review the
-count-only dry run, then add `--apply` and repeat bounded batches while
-`hasMore` is true or `selectedRows` is nonzero. Rerun the dry run and record a
-zero-row result. Apply encrypts and round-trips missing ciphertext, proves any
-existing ciphertext equals the legacy value, and scrubs plaintext in one
-compare-and-set write; conflicts are safe to rerun. Output never contains row
-ids, member ids, plaintext, or ciphertext.
+count-only dry run, add `--apply`, and repeat bounded batches while `hasMore` is
+true or `selectedRows` is nonzero. Rerun the dry run and record the zero-row
+result as the authoritative scrub proof. Apply encrypts and round-trips missing
+ciphertext, proves any existing ciphertext equals the legacy value, and scrubs
+plaintext in one compare-and-set write; conflicts are safe to rerun. Output
+never contains row ids, member ids, plaintext, or ciphertext. Record the
+replacement commit, both alias proofs, elapsed drain, batch summaries, and
+final zero-row dry run before ending the deploy freeze.
 
 The rollback floor begins when the replacement deployment writes its first
-encrypted-only phone-call row. From that point, do not roll back to a build
+encrypted-only phone-call row. Keep that deployment live throughout the drain
+and authoritative scrub. From that point, do not roll back to a build
 that requires `brief_json` or reads only legacy result JSON; redeploy this
 compatible build or a forward fix. If the deployment fails before receiving
 phone-call traffic, the additive schema remains safe for the prior build. The

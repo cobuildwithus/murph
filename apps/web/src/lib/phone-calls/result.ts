@@ -33,6 +33,11 @@ import {
 
 interface HostedPhoneCallWebhookTx {
   appendResultNotification(call: HostedPhoneCall): Promise<HostedPhoneCallResultNotificationAppend>;
+  encryptResult(input: {
+    callId: string;
+    memberId: string;
+    value: HostedPhoneCallResult;
+  }): Promise<string>;
   hostedPhoneCall: {
     findUnique(input: {
       where:
@@ -142,7 +147,7 @@ export async function handleRetellCallAnalyzed(input: {
 }): Promise<RetellCallAnalyzedHandlingResult> {
   assertRetellStorageMode(input.call);
   const crypto = input.crypto ?? hostedPhoneCallCrypto;
-  const prisma = resolveHostedPhoneCallWebhookStore(input.prisma);
+  const prisma = resolveHostedPhoneCallWebhookStore(input.prisma, crypto);
   const result = mapRetellCallAnalysis(input.call);
 
   return await prisma.$transaction(async (tx) => {
@@ -166,7 +171,7 @@ export async function handleRetellCallAnalyzed(input: {
       return emptyRetellCallAnalyzedHandlingResult();
     }
 
-    const resultEncrypted = await crypto.encryptResult({
+    const resultEncrypted = await tx.encryptResult({
       callId: target.call.id,
       memberId: target.call.memberId,
       value: result,
@@ -333,6 +338,7 @@ async function readRetellWebhookCallTarget(input: {
 
 function resolveHostedPhoneCallWebhookStore(
   store: HostedPhoneCallWebhookStore | undefined,
+  crypto: HostedPhoneCallCrypto = hostedPhoneCallCrypto,
 ): HostedPhoneCallWebhookStore {
   if (store) {
     return store;
@@ -343,6 +349,10 @@ function resolveHostedPhoneCallWebhookStore(
     $transaction: async (callback) => prisma.$transaction(async (tx) => callback({
       appendResultNotification: async (call) => appendPhoneCallResultNotificationTx({
         call,
+        prisma: tx,
+      }),
+      encryptResult: async (input) => crypto.encryptResult({
+        ...input,
         prisma: tx,
       }),
       hostedPhoneCall: {
