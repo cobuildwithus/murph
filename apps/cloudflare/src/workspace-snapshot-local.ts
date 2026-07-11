@@ -468,7 +468,9 @@ export async function restoreEncryptedWorkspaceSnapshotFromEncryptedStream(input
       signal: input.signal,
       totalPlainBytes: input.ref.archive.totalPlainBytes,
     });
-    const inventory = readHostedWorkspaceSnapshotTarInventory(inventoryEntries);
+    const inventory = readHostedWorkspaceSnapshotTarInventory(inventoryEntries, {
+      enforcePortableEntries: true,
+    });
     assertHostedWorkspaceSnapshotTarInventoryMatchesRef({
       fileCount: input.ref.archive.fileCount,
       inventory,
@@ -777,7 +779,9 @@ async function assertHostedWorkspaceSnapshotEncryptedArchiveMatchesState(input: 
   }
   const remaining = new Map(expectedEntries);
   const entries = await listHostedWorkspaceSnapshotEncryptedVerboseTarEntries(input);
-  const inventory = readHostedWorkspaceSnapshotTarInventory(entries);
+  const inventory = readHostedWorkspaceSnapshotTarInventory(entries, {
+    enforcePortableEntries: false,
+  });
 
   for (const entry of inventory.entries) {
     const expectedType = expectedEntries.get(entry.path);
@@ -1020,6 +1024,9 @@ interface HostedWorkspaceSnapshotTarInventory {
 
 function readHostedWorkspaceSnapshotTarInventory(
   entries: readonly string[],
+  options: {
+    enforcePortableEntries: boolean;
+  },
 ): HostedWorkspaceSnapshotTarInventory {
   const inventoryEntries: HostedWorkspaceSnapshotTarInventory["entries"] = [];
   const seenPaths = new Set<string>();
@@ -1039,10 +1046,13 @@ function readHostedWorkspaceSnapshotTarInventory(
     if (isHostedWorkspaceSnapshotEnvPath(parsedArchivePath)) {
       throw new Error("Hosted workspace snapshot tar archive contains environment files.");
     }
-    if (!isHostedWorkspaceSnapshotArchiveEntryPortable({
-      archivePath: parsedArchivePath,
-      kind: parsed.type,
-    })) {
+    if (
+      options.enforcePortableEntries
+      && !isHostedWorkspaceSnapshotArchiveEntryPortable({
+        archivePath: parsedArchivePath,
+        kind: parsed.type,
+      })
+    ) {
       throw new Error(
         "Hosted workspace snapshot tar archive contains capture-forbidden entries.",
       );
