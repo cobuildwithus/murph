@@ -738,6 +738,7 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
           updates: [
             {
               connectionId: hostedConnectionId,
+              observedUpdatedAt: "2026-05-26T17:35:33.451Z",
               sources: [
                 {
                   displayName: null,
@@ -787,6 +788,583 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
     expect(harness.upsertConnectionSource).not.toHaveBeenCalledWith(expect.objectContaining({
       sourceInstanceKey: runtimeSourceInstanceKey,
     }));
+  });
+
+  it("rejects a legacy Junction runner that would erase current exhausted recovery state", async () => {
+    const hostedConnectionId = "conn_junction_exhausted";
+    const runtimeLocalAccountId = "dsa_legacy_runtime";
+    const windowStart = "2026-04-01T00:00:00.000Z";
+    const windowEnd = "2026-04-03T00:00:00.000Z";
+    const canonicalSourceInstanceKey = buildJunctionProviderSourceInstanceKey({
+      connectionId: hostedConnectionId,
+      sourceProviderSlug: "garmin",
+    });
+    const runtimeSourceInstanceKey = buildJunctionProviderSourceInstanceKey({
+      connectionId: runtimeLocalAccountId,
+      sourceProviderSlug: "garmin",
+    });
+    expect(canonicalSourceInstanceKey).toBeTruthy();
+    expect(runtimeSourceInstanceKey).toBeTruthy();
+    if (!canonicalSourceInstanceKey || !runtimeSourceInstanceKey) {
+      throw new Error("Expected Junction source keys for the authority regression.");
+    }
+
+    const exhaustedMetadata = {
+      junctionHistoricalBackfillEmptyAttempts: 5,
+      junctionHistoricalBackfillEvidence: `e1|${windowStart}|${windowEnd}|garmin:1`,
+      junctionHistoricalBackfillLastEmptyAt: "2026-04-04T00:00:00.000Z",
+      junctionHistoricalBackfillStatus: "coverage_v2_exhausted",
+      junctionHistoricalBackfillWindowEnd: windowEnd,
+      junctionHistoricalBackfillWindowStart: windowStart,
+    };
+    const harness = createAuthorityHarness({
+      connectionSources: [
+        {
+          connectionId: hostedConnectionId,
+          displayName: "Garmin",
+          firstSeenAt: "2026-04-01T09:00:00.000Z",
+          lastErrorCode: "HISTORICAL_DATA_RECONNECT_REQUIRED",
+          lastErrorMessage: "Historical data remained incomplete.",
+          lastSeenAt: "2026-04-04T09:00:00.000Z",
+          resourceAvailabilitySummary: { activity: true, sleep: true },
+          sourceInstanceKey: canonicalSourceInstanceKey,
+          sourceProviderSlug: "garmin",
+          status: "error",
+        },
+      ],
+      record: buildHostedRecord({
+        id: hostedConnectionId,
+        metadata: exhaustedMetadata,
+        provider: "junction",
+      }),
+    });
+    const { applyHostedDeviceSyncRuntimeResult } = await import(
+      "@/src/lib/device-sync/hosted-runtime-authority"
+    );
+
+    const response = await applyHostedDeviceSyncRuntimeResult({
+      request: new Request("https://example.test/device-sync/runtime/apply", {
+        body: JSON.stringify({
+          updates: [
+            {
+              connection: {
+                metadata: {
+                  junctionHistoricalBackfillEmptyAttempts: 0,
+                  junctionHistoricalBackfillLastEmptyAt: null,
+                  junctionHistoricalBackfillStatus: "complete",
+                  junctionHistoricalBackfillWindowEnd: windowEnd,
+                  junctionHistoricalBackfillWindowStart: windowStart,
+                },
+              },
+              connectionId: hostedConnectionId,
+              observedUpdatedAt: "2026-04-06T10:00:00.000Z",
+              sources: [
+                {
+                  displayName: "Garmin",
+                  firstSeenAt: "2026-04-01T09:00:00.000Z",
+                  lastErrorCode: null,
+                  lastErrorMessage: null,
+                  lastSeenAt: "2026-04-04T09:05:00.000Z",
+                  observedLastSeenAt: null,
+                  resourceAvailabilitySummary: { activity: true, sleep: true },
+                  sourceInstanceKey: runtimeSourceInstanceKey,
+                  sourceProviderSlug: "garmin",
+                  status: "connected",
+                },
+              ],
+            },
+          ],
+          userId: "user_123",
+        }),
+        method: "POST",
+      }),
+      trustedUserId: "user_123",
+    });
+
+    expect(response.updates[0]?.writeUpdate).toBe("skipped_version_mismatch");
+    expect(harness.syncDurableConnectionState).not.toHaveBeenCalled();
+    expect(harness.upsertConnectionSource).not.toHaveBeenCalled();
+    expect(harness.record.metadata).toEqual(exhaustedMetadata);
+  });
+
+  it("rejects exhausted Junction progress without a durable reset signal", async () => {
+    const hostedConnectionId = "conn_junction_missing_reset_signal";
+    const sourceInstanceKey = buildJunctionProviderSourceInstanceKey({
+      connectionId: hostedConnectionId,
+      sourceProviderSlug: "garmin",
+    });
+    expect(sourceInstanceKey).toBeTruthy();
+    if (!sourceInstanceKey) {
+      throw new Error("Expected a Junction source key for the reset-signal regression.");
+    }
+    const windowStart = "2026-04-01T00:00:00.000Z";
+    const windowEnd = "2026-04-03T00:00:00.000Z";
+    const retryingMetadata = {
+      junctionHistoricalBackfillEmptyAttempts: 1,
+      junctionHistoricalBackfillLastEmptyAt: "2026-04-04T00:00:00.000Z",
+      junctionHistoricalBackfillStatus: "coverage_v2_retrying",
+      junctionHistoricalBackfillWindowEnd: windowEnd,
+      junctionHistoricalBackfillWindowStart: windowStart,
+    };
+    const harness = createAuthorityHarness({
+      connectionSources: [
+        {
+          connectionId: hostedConnectionId,
+          displayName: "Garmin",
+          firstSeenAt: "2026-04-01T09:00:00.000Z",
+          lastErrorCode: null,
+          lastErrorMessage: null,
+          lastSeenAt: "2026-04-06T10:00:00.000Z",
+          resourceAvailabilitySummary: { activity: true },
+          sourceInstanceKey,
+          sourceProviderSlug: "garmin",
+          status: "connected",
+        },
+      ],
+      record: buildHostedRecord({
+        id: hostedConnectionId,
+        metadata: retryingMetadata,
+        provider: "junction",
+      }),
+    });
+    const { applyHostedDeviceSyncRuntimeResult } = await import(
+      "@/src/lib/device-sync/hosted-runtime-authority"
+    );
+
+    const response = await applyHostedDeviceSyncRuntimeResult({
+      request: new Request("https://example.test/device-sync/runtime/apply", {
+        body: JSON.stringify({
+          updates: [
+            {
+              connection: {
+                metadata: {
+                  junctionHistoricalBackfillEmptyAttempts: 5,
+                  junctionHistoricalBackfillLastEmptyAt: "2026-04-06T10:05:00.000Z",
+                  junctionHistoricalBackfillStatus: "coverage_v2_exhausted",
+                  junctionHistoricalBackfillWindowEnd: windowEnd,
+                  junctionHistoricalBackfillWindowStart: windowStart,
+                },
+              },
+              connectionId: hostedConnectionId,
+              observedUpdatedAt: "2026-04-06T10:00:00.000Z",
+            },
+          ],
+          userId: "user_123",
+        }),
+        method: "POST",
+      }),
+      trustedUserId: "user_123",
+    });
+
+    expect(response.updates[0]?.writeUpdate).toBe("skipped_version_mismatch");
+    expect(harness.syncDurableConnectionState).not.toHaveBeenCalled();
+    expect(harness.upsertConnectionSource).not.toHaveBeenCalled();
+    expect(harness.record.metadata).toEqual(retryingMetadata);
+  });
+
+  it("keeps Junction historical progress and its reset marker bidirectionally consistent", async () => {
+    const hostedConnectionId = "conn_junction_reset_consistency";
+    const sourceInstanceKey = buildJunctionProviderSourceInstanceKey({
+      connectionId: hostedConnectionId,
+      sourceProviderSlug: "garmin",
+    });
+    if (!sourceInstanceKey) {
+      throw new Error("Expected a Junction source key for reset consistency.");
+    }
+    const windowStart = "2026-04-01T00:00:00.000Z";
+    const windowEnd = "2026-04-03T00:00:00.000Z";
+    const progress = (status: "complete" | "exhausted" | "retrying") => ({
+      junctionHistoricalBackfillEmptyAttempts: status === "exhausted" ? 5 : 1,
+      junctionHistoricalBackfillLastEmptyAt: "2026-04-06T10:00:00.000Z",
+      junctionHistoricalBackfillStatus: `coverage_v2_${status}`,
+      junctionHistoricalBackfillWindowEnd: windowEnd,
+      junctionHistoricalBackfillWindowStart: windowStart,
+    });
+    const source = (resetRequired: boolean, lastSeenAt: string) => ({
+      connectionId: hostedConnectionId,
+      displayName: "Garmin",
+      firstSeenAt: "2026-04-01T09:00:00.000Z",
+      lastErrorCode: resetRequired ? "HISTORICAL_DATA_RECONNECT_REQUIRED" : null,
+      lastErrorMessage: resetRequired ? "Historical data remained incomplete." : null,
+      lastSeenAt,
+      resourceAvailabilitySummary: { activity: true },
+      sourceInstanceKey,
+      sourceProviderSlug: "garmin",
+      status: resetRequired ? "error" as const : "connected" as const,
+    });
+    const { applyHostedDeviceSyncRuntimeResult } = await import(
+      "@/src/lib/device-sync/hosted-runtime-authority"
+    );
+
+    const cases = [
+      {
+        expectedWrite: "skipped_version_mismatch",
+        name: "marker without exhausted progress",
+        storedMetadata: progress("retrying"),
+        storedSource: source(false, "2026-04-06T10:00:00.000Z"),
+        update: {
+          connectionId: hostedConnectionId,
+          observedUpdatedAt: "2026-04-06T10:00:00.000Z",
+          sources: [{
+            ...source(true, "2026-04-06T10:05:00.000Z"),
+            connectionId: undefined,
+            observedLastSeenAt: "2026-04-06T10:00:00.000Z",
+          }],
+        },
+      },
+      {
+        expectedWrite: "skipped_version_mismatch",
+        name: "completed progress without marker clear",
+        storedMetadata: progress("exhausted"),
+        storedSource: source(true, "2026-04-06T10:00:00.000Z"),
+        update: {
+          connection: { metadata: progress("complete") },
+          connectionId: hostedConnectionId,
+          observedUpdatedAt: "2026-04-06T10:00:00.000Z",
+        },
+      },
+      {
+        expectedWrite: "applied",
+        name: "completed progress with marker clear",
+        storedMetadata: progress("exhausted"),
+        storedSource: source(true, "2026-04-06T10:00:00.000Z"),
+        update: {
+          connection: { metadata: progress("complete") },
+          connectionId: hostedConnectionId,
+          observedUpdatedAt: "2026-04-06T10:00:00.000Z",
+          sources: [{
+            ...source(false, "2026-04-06T10:05:00.000Z"),
+            connectionId: undefined,
+            observedLastSeenAt: "2026-04-06T10:00:00.000Z",
+          }],
+        },
+      },
+    ] as const;
+
+    for (const scenario of cases) {
+      const harness = createAuthorityHarness({
+        connectionSources: [scenario.storedSource],
+        record: buildHostedRecord({
+          id: hostedConnectionId,
+          metadata: scenario.storedMetadata,
+          provider: "junction",
+        }),
+      });
+      const response = await applyHostedDeviceSyncRuntimeResult({
+        request: new Request("https://example.test/device-sync/runtime/apply", {
+          body: JSON.stringify({ updates: [scenario.update], userId: "user_123" }),
+          method: "POST",
+        }),
+        trustedUserId: "user_123",
+      });
+
+      expect(response.updates[0]?.writeUpdate, scenario.name).toBe(scenario.expectedWrite);
+      if (scenario.expectedWrite === "applied") {
+        expect(harness.syncDurableConnectionState, scenario.name).toHaveBeenCalledTimes(1);
+        expect(harness.upsertConnectionSource, scenario.name).toHaveBeenCalledWith(
+          expect.objectContaining({ lastErrorCode: null, status: "connected" }),
+        );
+      } else {
+        expect(harness.syncDurableConnectionState, scenario.name).not.toHaveBeenCalled();
+        expect(harness.upsertConnectionSource, scenario.name).not.toHaveBeenCalled();
+      }
+    }
+  });
+
+  it("applies monotonic Junction evidence unions without a permanent version mismatch", async () => {
+    const windowStart = "2026-04-01T00:00:00.000Z";
+    const windowEnd = "2026-04-03T00:00:00.000Z";
+    const baselineMetadata = {
+      junctionHistoricalBackfillEmptyAttempts: 1,
+      junctionHistoricalBackfillEvidence: `e1|${windowStart}|${windowEnd}|garmin:1`,
+      junctionHistoricalBackfillLastEmptyAt: "2026-04-04T00:00:00.000Z",
+      junctionHistoricalBackfillStatus: "coverage_v2_retrying",
+      junctionHistoricalBackfillWindowEnd: windowEnd,
+      junctionHistoricalBackfillWindowStart: windowStart,
+    };
+    const harness = createAuthorityHarness({
+      record: buildHostedRecord({
+        id: "conn_junction_evidence_union",
+        metadata: baselineMetadata,
+        provider: "junction",
+      }),
+    });
+    const { applyHostedDeviceSyncRuntimeResult } = await import(
+      "@/src/lib/device-sync/hosted-runtime-authority"
+    );
+
+    const response = await applyHostedDeviceSyncRuntimeResult({
+      request: new Request("https://example.test/device-sync/runtime/apply", {
+        body: JSON.stringify({
+          updates: [
+            {
+              connection: {
+                metadata: {
+                  ...baselineMetadata,
+                  junctionHistoricalBackfillEvidence:
+                    `e1|${windowStart}|${windowEnd}|oura:2`,
+                  providerCursor: "cursor-next",
+                },
+              },
+              connectionId: "conn_junction_evidence_union",
+              observedUpdatedAt: "2026-04-06T10:00:00.000Z",
+            },
+          ],
+          userId: "user_123",
+        }),
+        method: "POST",
+      }),
+      trustedUserId: "user_123",
+    });
+
+    expect(response.updates[0]?.writeUpdate).toBe("applied");
+    expect(harness.syncDurableConnectionState).toHaveBeenCalledTimes(1);
+    expect(harness.record.metadata).toEqual({
+      ...baselineMetadata,
+      junctionHistoricalBackfillEvidence:
+        `e1|${windowStart}|${windowEnd}|garmin:1,oura:2`,
+      providerCursor: "cursor-next",
+    });
+  });
+
+  it("preserves a Junction reset marker on source-only updates while progress is exhausted", async () => {
+    const hostedConnectionId = "conn_junction_source_marker";
+    const sourceInstanceKey = buildJunctionProviderSourceInstanceKey({
+      connectionId: hostedConnectionId,
+      sourceProviderSlug: "garmin",
+    });
+    expect(sourceInstanceKey).toBeTruthy();
+    if (!sourceInstanceKey) {
+      throw new Error("Expected a Junction source key for the reset-marker regression.");
+    }
+    const windowStart = "2026-04-01T00:00:00.000Z";
+    const windowEnd = "2026-04-03T00:00:00.000Z";
+    const harness = createAuthorityHarness({
+      connectionSources: [
+        {
+          connectionId: hostedConnectionId,
+          displayName: "Garmin",
+          firstSeenAt: "2026-04-01T09:00:00.000Z",
+          lastErrorCode: "HISTORICAL_DATA_RECONNECT_REQUIRED",
+          lastErrorMessage: "Historical data remained incomplete.",
+          lastSeenAt: "2026-04-06T10:00:00.000Z",
+          resourceAvailabilitySummary: { activity: true },
+          sourceInstanceKey,
+          sourceProviderSlug: "garmin",
+          status: "error",
+        },
+      ],
+      record: buildHostedRecord({
+        id: hostedConnectionId,
+        metadata: {
+          junctionHistoricalBackfillEmptyAttempts: 5,
+          junctionHistoricalBackfillLastEmptyAt: "2026-04-06T10:00:00.000Z",
+          junctionHistoricalBackfillStatus: "coverage_v2_exhausted",
+          junctionHistoricalBackfillWindowEnd: windowEnd,
+          junctionHistoricalBackfillWindowStart: windowStart,
+        },
+        provider: "junction",
+      }),
+    });
+    const { applyHostedDeviceSyncRuntimeResult } = await import(
+      "@/src/lib/device-sync/hosted-runtime-authority"
+    );
+
+    const response = await applyHostedDeviceSyncRuntimeResult({
+      request: new Request("https://example.test/device-sync/runtime/apply", {
+        body: JSON.stringify({
+          updates: [
+            {
+              connectionId: hostedConnectionId,
+              observedUpdatedAt: "2026-04-06T10:00:00.000Z",
+              sources: [
+                {
+                  displayName: "Garmin",
+                  firstSeenAt: "2026-04-01T09:00:00.000Z",
+                  lastErrorCode: null,
+                  lastErrorMessage: null,
+                  lastSeenAt: "2026-04-06T10:05:00.000Z",
+                  observedLastSeenAt: "2026-04-06T10:00:00.000Z",
+                  resourceAvailabilitySummary: { activity: true, sleep: true },
+                  sourceInstanceKey,
+                  sourceProviderSlug: "garmin",
+                  status: "connected",
+                },
+              ],
+            },
+          ],
+          userId: "user_123",
+        }),
+        method: "POST",
+      }),
+      trustedUserId: "user_123",
+    });
+
+    expect(response.updates[0]?.writeUpdate).toBe("applied");
+    expect(harness.upsertConnectionSource).toHaveBeenCalledWith(expect.objectContaining({
+      lastErrorCode: "HISTORICAL_DATA_RECONNECT_REQUIRED",
+      lastErrorMessage: "Historical data remained incomplete.",
+      sourceInstanceKey,
+      status: "error",
+    }));
+  });
+
+  it("rejects a Junction source-only write from an older connection epoch", async () => {
+    const hostedConnectionId = "conn_junction_stale_epoch";
+    const sourceInstanceKey = buildJunctionProviderSourceInstanceKey({
+      connectionId: hostedConnectionId,
+      sourceProviderSlug: "garmin",
+    });
+    if (!sourceInstanceKey) {
+      throw new Error("Expected a Junction source key for the connection-epoch regression.");
+    }
+    const harness = createAuthorityHarness({
+      connectionSources: [
+        {
+          connectionId: hostedConnectionId,
+          displayName: "Garmin",
+          firstSeenAt: "2026-04-06T09:00:00.000Z",
+          lastErrorCode: null,
+          lastErrorMessage: null,
+          lastSeenAt: "2026-04-06T10:05:00.000Z",
+          resourceAvailabilitySummary: { activity: true },
+          sourceInstanceKey,
+          sourceProviderSlug: "garmin",
+          status: "connected",
+        },
+      ],
+      record: buildHostedRecord({
+        id: hostedConnectionId,
+        provider: "junction",
+        updatedAt: "2026-04-06T10:10:00.000Z",
+      }),
+    });
+    const { applyHostedDeviceSyncRuntimeResult } = await import(
+      "@/src/lib/device-sync/hosted-runtime-authority"
+    );
+
+    const response = await applyHostedDeviceSyncRuntimeResult({
+      request: new Request("https://example.test/device-sync/runtime/apply", {
+        body: JSON.stringify({
+          updates: [
+            {
+              connectionId: hostedConnectionId,
+              observedUpdatedAt: "2026-04-06T10:00:00.000Z",
+              sources: [
+                {
+                  displayName: "Garmin",
+                  firstSeenAt: "2026-04-06T09:00:00.000Z",
+                  lastErrorCode: null,
+                  lastErrorMessage: null,
+                  lastSeenAt: "2026-04-06T10:15:00.000Z",
+                  observedLastSeenAt: "2026-04-06T10:05:00.000Z",
+                  resourceAvailabilitySummary: { activity: true, sleep: true },
+                  sourceInstanceKey,
+                  sourceProviderSlug: "garmin",
+                  status: "connected",
+                },
+              ],
+            },
+          ],
+          userId: "user_123",
+        }),
+        method: "POST",
+      }),
+      trustedUserId: "user_123",
+    });
+
+    expect(response.updates[0]?.writeUpdate).toBe("skipped_version_mismatch");
+    expect(harness.upsertConnectionSource).not.toHaveBeenCalled();
+    expect(harness.syncDurableConnectionState).not.toHaveBeenCalled();
+  });
+
+  it("rejects a coupled Junction progress transition when its source fence is stale", async () => {
+    const hostedConnectionId = "conn_junction_source_race";
+    const sourceInstanceKey = buildJunctionProviderSourceInstanceKey({
+      connectionId: hostedConnectionId,
+      sourceProviderSlug: "garmin",
+    });
+    expect(sourceInstanceKey).toBeTruthy();
+    if (!sourceInstanceKey) {
+      throw new Error("Expected a Junction source key for the source-fence regression.");
+    }
+    const windowStart = "2026-04-01T00:00:00.000Z";
+    const windowEnd = "2026-04-03T00:00:00.000Z";
+    const retryingMetadata = {
+      junctionHistoricalBackfillEmptyAttempts: 1,
+      junctionHistoricalBackfillLastEmptyAt: "2026-04-04T00:00:00.000Z",
+      junctionHistoricalBackfillStatus: "coverage_v2_retrying",
+      junctionHistoricalBackfillWindowEnd: windowEnd,
+      junctionHistoricalBackfillWindowStart: windowStart,
+    };
+    const harness = createAuthorityHarness({
+      connectionSources: [
+        {
+          connectionId: hostedConnectionId,
+          displayName: "Garmin",
+          firstSeenAt: "2026-04-01T09:00:00.000Z",
+          lastErrorCode: null,
+          lastErrorMessage: null,
+          lastSeenAt: "2026-04-06T10:10:00.000Z",
+          resourceAvailabilitySummary: { activity: true },
+          sourceInstanceKey,
+          sourceProviderSlug: "garmin",
+          status: "connected",
+        },
+      ],
+      record: buildHostedRecord({
+        id: hostedConnectionId,
+        metadata: retryingMetadata,
+        provider: "junction",
+      }),
+    });
+    const { applyHostedDeviceSyncRuntimeResult } = await import(
+      "@/src/lib/device-sync/hosted-runtime-authority"
+    );
+
+    const response = await applyHostedDeviceSyncRuntimeResult({
+      request: new Request("https://example.test/device-sync/runtime/apply", {
+        body: JSON.stringify({
+          updates: [
+            {
+              connection: {
+                metadata: {
+                  junctionHistoricalBackfillEmptyAttempts: 5,
+                  junctionHistoricalBackfillLastEmptyAt: "2026-04-06T10:05:00.000Z",
+                  junctionHistoricalBackfillStatus: "coverage_v2_exhausted",
+                  junctionHistoricalBackfillWindowEnd: windowEnd,
+                  junctionHistoricalBackfillWindowStart: windowStart,
+                },
+              },
+              connectionId: hostedConnectionId,
+              observedUpdatedAt: "2026-04-06T10:00:00.000Z",
+              sources: [
+                {
+                  displayName: "Garmin",
+                  firstSeenAt: "2026-04-01T09:00:00.000Z",
+                  lastErrorCode: "HISTORICAL_DATA_RECONNECT_REQUIRED",
+                  lastErrorMessage: "Historical data remained incomplete.",
+                  lastSeenAt: "2026-04-06T10:05:00.000Z",
+                  observedLastSeenAt: "2026-04-06T10:00:00.000Z",
+                  resourceAvailabilitySummary: { activity: true },
+                  sourceInstanceKey,
+                  sourceProviderSlug: "garmin",
+                  status: "error",
+                },
+              ],
+            },
+          ],
+          userId: "user_123",
+        }),
+        method: "POST",
+      }),
+      trustedUserId: "user_123",
+    });
+
+    expect(response.updates[0]?.writeUpdate).toBe("skipped_version_mismatch");
+    expect(harness.syncDurableConnectionState).not.toHaveBeenCalled();
+    expect(harness.upsertConnectionSource).not.toHaveBeenCalled();
+    expect(harness.record.metadata).toEqual(retryingMetadata);
   });
 
   it("skips stale runtime source availability updates", async () => {

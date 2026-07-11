@@ -12,6 +12,7 @@ Status: frozen baseline plus health extension fence for `murph` and `vault-cli`
 - Native `incur` owns the transport envelope and human-oriented formatting behavior.
 - `packages/cli` must not write vault files directly. Write commands delegate to `packages/core` or `packages/importers`; read commands delegate to `packages/query`.
 - Canonical write commands run through the core mutation runtime, which acquires declared canonical file resources before any read-modify-write work begins. Commands may overlap only when those declared resources are disjoint; singleton documents and shared monthly ledger or audit shards still serialize by design.
+- `vault repair-experiment-media` dry-runs by default and mutates only with explicit command-line `--apply`. It promotes a supported misplaced media file through the canonical capture owner only when the boundary-safe, byte-exact full source path appears in exactly one direct canonical experiment document. Basenames, relative or encoded paths, substrings, case or Unicode normalization variants, residual alternate spellings, and multiple-document owners do not qualify. The command verifies every event, attachment, raw manifest, and copied byte; replaces only the proved full-path literals with the canonical capture path; then atomically quarantines and verifies the inspected note and legacy media before replacement or deletion. Concurrent edits and unsupported, unassociated, multiply-associated, ambiguous-reference, symlink, special, or conflicting files block apply without losing their bytes.
 - `vault repair-junction-hr-zones` dry-runs by default and mutates only with explicit `--apply`. It repairs Junction workout rows from any source provider only when the candidate's rawRefs contain a Junction record whose heart-rate zones are a dense six-element primitive numeric array (numbers or numeric strings) whose seconds-to-minutes conversion equals each stored `durationMinutes`, AND that record either carries the same source provider inline OR is the only duration-matching same-id record with no inline provider — the latter exists for legacy connection-resolved imports whose `connectionId`/`sourceId` was stripped during raw sanitization. Any same-id raw record with a different inline provider, with non-primitive `hr_zones`, or with primitive zones whose durations do not match the stored row counts as ambiguity and disqualifies the repair. Candidate ids that also appear on schema-invalid ledger rows are refused, since a rejected row may be the actual latest revision and shadowing it would append over stale state. Normalized `1..6` rows without that proof are reported as `unverifiedCandidateCount` and skipped. Sparse legacy imports (six-slot arrays with `null` entries that were compacted into fewer-than-six stored zones) are intentionally out of scope: re-importing the affected workout is the supported recovery path.
 
 ## Command Groups
@@ -22,6 +23,7 @@ vault-cli validate --vault <path> [--request-id <id>]
 vault-cli vault show --vault <path> [--request-id <id>]
 vault-cli vault stats --vault <path> [--request-id <id>]
 vault-cli vault repair --vault <path> [--request-id <id>]
+vault-cli vault repair-experiment-media --vault <path> [--dry-run] [--apply] [--request-id <id>]
 vault-cli vault repair-junction-hr-zones --vault <path> [--dry-run] [--apply] [--request-id <id>]
 vault-cli vault update --vault <path> [--title <title>] [--timezone <tz>] [--request-id <id>]
 vault-cli audit show <id> --vault <path> [--request-id <id>]
@@ -266,9 +268,14 @@ The per-command synopses above intentionally omit incur-owned global output and 
 `event import-jsonl` rows must omit caller-supplied `id`, `eventId`, and
 `dayKey`; ids and local-day shards are derived by core. `externalRef` is
 optional for compatibility with append-only import producers. Include it when a
-JSONL row should be retry-safe: rows with the same external identity are skipped
-or superseded in place, while rows without `externalRef` intentionally append a
-fresh event every time the same file is applied.
+JSONL row should be retry-safe: for ISO-versioned rows with the same external
+identity, older revisions are skipped, an equal revision must match the stored
+content apart from the derived `dayKey` and an equivalent
+`externalRef.version` lexeme or the batch is rejected, and a newer revision
+supersedes in place. Explicit retraction decisions exist only on the decisions
+surface, not `event import-jsonl`. Other same-identity rows are skipped when
+identical or superseded in place, while rows without `externalRef` intentionally
+append a fresh event every time the same file is applied.
 
 Read-only vault metadata and audit commands require an initialized vault root and fail with `invalid_vault` before query reads when `vault.json` is missing. Missing default-vault routing failures use `missing_vault`; typed CLI errors include a boolean `retryable` field in the JSON error envelope.
 
@@ -955,7 +962,7 @@ The five-file pack shape stays stable; health extensions enrich `manifest.json`,
 ## Boundary Rules
 
 - `init`, `validate`, `meal add`, `document import`, `samples import-csv`, and `intake import` delegate to `packages/core` or `packages/importers` write paths that preserve immutable raw evidence and append-only ledgers.
-- `provider save|import-json`, `food save|import-json|schedule|unschedule`, `recipe save|import-json`, `automation save|import-json`, typed `event * add`, `event import-json`, `samples add`, `samples import-json`, `supplement save|stop`, `medication history add`, `regimen save`, `regimen import-json`, `regimen stop`, `protocol import-json`, `workout add`, `workout format save|show|list|log`, `intervention add`, `experiment start|edit|checkpoint|stop`, `experiment session log`, `experiment context log`, `journal ensure|append|link|unlink`, `vault repair|repair-junction-hr-zones|update`, `intake project`, health `<noun> scaffold`, and health `<noun> import-json` all delegate to `packages/core` exports or to CLI-local helpers built only on top of `packages/core` frontmatter/jsonl primitives, importer entrypoints, canonical write locks, and assistant runtime automation state.
+- `provider save|import-json`, `food save|import-json|schedule|unschedule`, `recipe save|import-json`, `automation save|import-json`, typed `event * add`, `event import-json`, `samples add`, `samples import-json`, `supplement save|stop`, `medication history add`, `regimen save`, `regimen import-json`, `regimen stop`, `protocol import-json`, `workout add`, `workout format save|show|list|log`, `intervention add`, `experiment start|edit|checkpoint|stop`, `experiment session log`, `experiment context log`, `journal ensure|append|link|unlink`, `vault repair|repair-experiment-media|repair-junction-hr-zones|update`, `intake project`, health `<noun> scaffold`, and health `<noun> import-json` all delegate to `packages/core` exports or to CLI-local helpers built only on top of `packages/core` frontmatter/jsonl primitives, importer entrypoints, canonical write locks, and assistant runtime automation state.
 - `show`, `list`, `search query`, `query projection status|rebuild`, `timeline`, `document/meal/samples/intake/export` follow-up reads, `audit show|list|tail`, and `vault show|stats` delegate to the read model plus immutable-manifest inspection helpers.
 - Inbox ingestion, projection, audio/video transcription, and promotion helpers are owned by `packages/inboxd`, `packages/parsers`, and shared `packages/core` primitives. They are programmatic runtime services, not a `vault-cli inbox` command namespace.
 - Contract validation errors normalize to the shared codes in `docs/contracts/04-error-codes.md`.

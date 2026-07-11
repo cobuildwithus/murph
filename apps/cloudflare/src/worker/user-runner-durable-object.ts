@@ -68,12 +68,6 @@ export class UserRunnerDurableObject extends DurableObject implements UserRunner
     return this.runner.validateRuntimeWriteFence(input);
   }
 
-  async validateActiveRuntimeWriteFence(input: {
-    userId: string;
-  }): ReturnType<HostedUserRunner["validateActiveRuntimeWriteFence"]> {
-    return this.runner.validateActiveRuntimeWriteFence(input);
-  }
-
   async validateRuntimeProviderEgressToken(input: {
     providerEgressToken: string;
     userId: string;

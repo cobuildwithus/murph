@@ -516,6 +516,7 @@ export const vaultCliCommandDescriptors = [
         'validate',
         'updateVault',
         'repairVault',
+        'repairExperimentMedia',
         'repairJunctionWorkoutHeartRateZones',
         'repairWearableStorage',
       ],

@@ -1,4 +1,5 @@
-import { rm } from 'node:fs/promises'
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
+import path from 'node:path'
 
 import { afterEach, expect, it } from 'vitest'
 
@@ -7,6 +8,7 @@ import {
   initializeVault,
   updateExperiment,
 } from '@murphai/core'
+import { VAULT_LAYOUT } from '@murphai/contracts'
 
 import { buildAssistantActiveExperimentContextBlock } from '../src/assistant/active-experiment-context.ts'
 import { createTempVaultContext } from './test-helpers.ts'
@@ -176,6 +178,47 @@ it('returns null when no active experiments are present', async () => {
   await expect(
     buildAssistantActiveExperimentContextBlock(vaultRoot),
   ).resolves.toBeNull()
+})
+
+it('ignores nested legacy experiment Markdown', async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    'assistant-active-experiment-context-nested-',
+  )
+  cleanupRoots.push(parentRoot)
+
+  await initializeVault({ vaultRoot })
+  const direct = await createExperiment({
+    slug: 'direct-active',
+    startedOn: '2026-04-02T09:00:00.000Z',
+    title: 'Direct Active',
+    vaultRoot,
+  })
+  const nestedDirectory = path.join(
+    vaultRoot,
+    VAULT_LAYOUT.experimentsDirectory,
+    'legacy',
+  )
+  await mkdir(nestedDirectory, { recursive: true })
+  await writeFile(
+    path.join(nestedDirectory, 'nested.md'),
+    '---\nexperimentId: exp_nested\nslug: nested\nstatus: active\ntitle: Nested Legacy\n---\n',
+    'utf8',
+  )
+  const directDocument = await readFile(
+    path.join(vaultRoot, direct.experiment.relativePath),
+    'utf8',
+  )
+  await writeFile(
+    path.join(vaultRoot, VAULT_LAYOUT.experimentsDirectory, 'mismatched.md'),
+    directDocument.replaceAll('Direct Active', 'Mismatched Direct'),
+    'utf8',
+  )
+
+  const context = await buildAssistantActiveExperimentContextBlock(vaultRoot)
+
+  expect(context).toContain('Direct Active')
+  expect(context).not.toContain('Nested Legacy')
+  expect(context).not.toContain('Mismatched Direct')
 })
 
 it('renders sparse active experiment records without optional details', async () => {

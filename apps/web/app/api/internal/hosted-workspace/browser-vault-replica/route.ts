@@ -9,10 +9,6 @@ import {
 import { readOptionalJsonObject } from "@/src/lib/http";
 import { jsonOk, withJsonError } from "@/src/lib/hosted-onboarding/http";
 import {
-  publishLegacySourceHashBrowserVaultReplicaRef,
-  readLegacyExpectedSourceStateHash,
-} from "@/src/lib/hosted-workspace/legacy-source-hash-browser-vault";
-import {
   publishLatestBrowserVaultReplicaRef,
 } from "@/src/lib/hosted-workspace/store";
 
@@ -28,20 +24,11 @@ export const POST = withJsonError(async (request: Request) => {
   const writeFence = readHostedRuntimeWriteFenceHeaders(request);
   const rawBody = await readOptionalJsonObject(request);
   const body = parseHostedBrowserVaultReplicaPublishRequest(rawBody);
-  const legacyExpectedSourceStateHash =
-    readLegacyExpectedSourceStateHash(rawBody);
-  const result = legacyExpectedSourceStateHash === null
-    ? await publishLatestBrowserVaultReplicaRef({
-        expectedWorkspaceVersion: writeFence.workspaceVersion,
-        replicaRef: body.replicaRef,
-        userId,
-      })
-    : await publishLegacySourceHashBrowserVaultReplicaRef({
-        expectedSourceStateHash: legacyExpectedSourceStateHash,
-        expectedWorkspaceVersion: writeFence.workspaceVersion,
-        replicaRef: body.replicaRef,
-        userId,
-      });
+  const result = await publishLatestBrowserVaultReplicaRef({
+    expectedWorkspaceVersion: writeFence.workspaceVersion,
+    replicaRef: body.replicaRef,
+    userId,
+  });
 
   if (!result.workspace) {
     return jsonOk(parseHostedBrowserVaultReplicaPublishResponse({

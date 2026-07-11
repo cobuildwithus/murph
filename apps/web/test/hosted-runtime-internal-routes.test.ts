@@ -23,7 +23,6 @@ const mocks = vi.hoisted(() => ({
   hostedThreadContainerParticipantFindFirst: vi.fn(),
   getPrisma: vi.fn(),
   listHostedRuntimeLogs: vi.fn(),
-  publishLegacySourceHashBrowserVaultReplicaRef: vi.fn(),
   publishLatestBrowserVaultReplicaRef: vi.fn(),
   readAcceptedRuntimeAttemptFailureSignalOwnerLogId: vi.fn(),
   readHostedMailboxConsumedSeqByLane: vi.fn(),
@@ -105,22 +104,6 @@ vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
 vi.mock("@/src/lib/hosted-orchestration/runtime-reconciliation-facts", () => ({
   readHostedRuntimeOwnerReleaseMailboxLagActionable:
     mocks.readHostedRuntimeOwnerReleaseMailboxLagActionable,
-}));
-
-vi.mock("@/src/lib/hosted-workspace/legacy-source-hash-browser-vault", () => ({
-  publishLegacySourceHashBrowserVaultReplicaRef:
-    mocks.publishLegacySourceHashBrowserVaultReplicaRef,
-  readLegacyExpectedSourceStateHash: (body: Record<string, unknown>) => {
-    if (!Object.hasOwn(body, "expectedSourceStateHash")) {
-      return null;
-    }
-    if (typeof body.expectedSourceStateHash !== "string" || !body.expectedSourceStateHash.trim()) {
-      throw new TypeError(
-        "Legacy hosted browser-vault replica publish expectedSourceStateHash must be a non-empty string.",
-      );
-    }
-    return body.expectedSourceStateHash;
-  },
 }));
 
 type MailboxFetchRoute = typeof import("../app/api/internal/hosted-mailbox/fetch/route");
@@ -2033,48 +2016,15 @@ describe("hosted runtime internal web routes", () => {
       },
     });
     expect(mocks.publishLatestBrowserVaultReplicaRef).not.toHaveBeenCalled();
-    expect(mocks.publishLegacySourceHashBrowserVaultReplicaRef)
-      .not.toHaveBeenCalled();
   });
 
-  it("fences legacy source-hash browser-vault publishes behind the compatibility helper", async () => {
-    const replicaRef = createBrowserVaultReplicaRef("snapshot_2_hash");
-    mocks.publishLegacySourceHashBrowserVaultReplicaRef.mockResolvedValue({
-      status: "published",
-      workspace: buildWorkspaceRecord({
-        browserVaultReplicaRef: replicaRef,
-        snapshotRef: createBundleRef("snapshot_2"),
-        version: "5",
-      }),
-    });
-
-    const response = await browserVaultReplicaRoute.POST(jsonRequest(
-      "/api/internal/hosted-workspace/browser-vault-replica",
-      {
-        expectedSourceStateHash: "snapshot_2_hash",
-        replicaRef,
-      },
-      runtimeWriteFenceHeaders(),
-    ));
-
-    expect(response.status).toBe(200);
-    expect(mocks.publishLegacySourceHashBrowserVaultReplicaRef)
-      .toHaveBeenCalledWith({
-        expectedSourceStateHash: "snapshot_2_hash",
-        expectedWorkspaceVersion: "4",
-        replicaRef,
-        userId: "member_routes_1",
-      });
-    expect(mocks.publishLatestBrowserVaultReplicaRef).not.toHaveBeenCalled();
-  });
-
-  it("rejects malformed legacy source-hash browser-vault publish fields before publishing", async () => {
+  it("rejects the retired source-hash browser-vault publish field", async () => {
     const replicaRef = createBrowserVaultReplicaRef("snapshot_2_hash");
 
     const response = await browserVaultReplicaRoute.POST(jsonRequest(
       "/api/internal/hosted-workspace/browser-vault-replica",
       {
-        expectedSourceStateHash: "",
+        expectedSourceStateHash: "snapshot_2_hash",
         replicaRef,
       },
       runtimeWriteFenceHeaders(),
@@ -2086,8 +2036,6 @@ describe("hosted runtime internal web routes", () => {
         message: "Invalid request.",
       },
     });
-    expect(mocks.publishLegacySourceHashBrowserVaultReplicaRef)
-      .not.toHaveBeenCalled();
     expect(mocks.publishLatestBrowserVaultReplicaRef).not.toHaveBeenCalled();
   });
 

@@ -6,7 +6,7 @@ const { imageResponseSpy, readFileMock } = vi.hoisted(() => ({
   imageResponseSpy: vi.fn(),
   readFileMock: vi.fn(async (path: string | URL) => {
     const value = String(path);
-    if (value.includes("hero.jpg")) return Buffer.from("hero");
+    if (value.includes("logo.svg")) return Buffer.from("<svg/>");
     if (value.includes("Fraunces-400.ttf")) return Buffer.from([1, 2, 3]);
     if (value.includes("Fraunces-600.ttf")) return Buffer.from([4, 5, 6]);
     if (value.includes("DMSans-400.ttf")) return Buffer.from([7, 8, 9]);
@@ -41,7 +41,7 @@ afterEach(() => {
   readFileMock.mockClear();
 });
 
-test("OGImage reads bundled hero and font assets without fetching Google Fonts", async () => {
+test("OGImage reads bundled font assets without fetching Google Fonts", async () => {
   const fetchSpy = vi.spyOn(globalThis, "fetch");
 
   try {
@@ -53,7 +53,7 @@ test("OGImage reads bundled hero and font assets without fetching Google Fonts",
   expect(readFileMock).toHaveBeenCalledTimes(4);
 
   const readPaths = readFileMock.mock.calls.map(([path]) => String(path));
-  assert.equal(readPaths.some((path) => path.includes("public/hero.jpg")), true);
+  assert.equal(readPaths.some((path) => path.includes("public/logo.svg")), true);
   assert.equal(readPaths.some((path) => path.includes("Fraunces-400.ttf")), true);
   assert.equal(readPaths.some((path) => path.includes("Fraunces-600.ttf")), true);
   assert.equal(readPaths.some((path) => path.includes("DMSans-400.ttf")), true);
@@ -65,8 +65,9 @@ test("OGImage reads bundled hero and font assets without fetching Google Fonts",
     { fonts: Array<{ name: string; weight: number; data: ArrayBuffer }> },
   ];
   const serializedImageTree = JSON.stringify(imageTree);
-  expect(serializedImageTree).toContain("Health experiments with friends.");
-  expect(serializedImageTree).not.toContain("measured by your wearable");
+  expect(serializedImageTree).toContain("Everyone has a health goal.");
+  expect(serializedImageTree).toContain("Nobody gets there alone.");
+  expect(serializedImageTree).not.toContain("Health experiments with friends.");
 
   expect(init.fonts.map((font) => [font.name, font.weight])).toEqual([
     ["Fraunces", 400],

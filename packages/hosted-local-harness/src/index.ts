@@ -1,4 +1,3 @@
-export * from "./compat.ts";
 export * from "./e2e.ts";
 export * from "./harness.ts";
 export * from "./process.ts";

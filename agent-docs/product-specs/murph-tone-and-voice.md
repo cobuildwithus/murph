@@ -27,6 +27,7 @@ Skip advances without writing a tone or voice preference. Continue writes the se
 Shared contracts live in `packages/contracts/src/preferences.ts`. The canonical vault document is `bank/preferences.json`.
 
 - Tone ids: `casual`, `formal`.
+- `formal` is the shared default tone (`defaultAssistantTonePreference`). The picker preselects it and prompt assembly resolves an absent saved tone to it, so skipping the picker does not silently restore casual behavior.
 - Voice ids are vibe-based stable preference ids: `classic`, `drill-sergeant`, `grandpa`, `country`, `jamaican`, `radio-host`, `deep-calm`, `warm`, `husky`, `storyteller`, `british-warm`, `late-night`, `easygoing`, `northern`, `football-announcer`, `sweet`, `mysterious`, `upbeat`, `narrator`, `expressive`, `bubbly`, and `smooth`.
 - `upbeat` is the shared default voice id (`defaultAssistantVoiceOptionId`), sits first in the roster, and is displayed as "Classic Murph".
 - `classic` is displayed as "New York", preserves the previous default sound, and has `elevenLabsVoiceId: null` so it resolves to `MURPH_ELEVENLABS_VOICE_ID`.
@@ -182,7 +183,7 @@ The web surfaces use the same tone ids and shared voice roster defined above.
 
 `hosted_member.assistant_tone` and `hosted_member.assistant_voice` capture the latest web-side choices for display and mailbox handoff. `POST /api/settings/assistant-style` validates those values, updates changed columns, appends `member.preferences.updated`, and best-effort signals the runtime. This release does not add personality columns or claim that web Settings shows the numeric dials.
 
-Tone is read from the canonical vault during turn planning. When absent, no tone block is added. Voice memo defaults resolve in this order:
+Tone is read from the canonical vault during turn planning. An absent saved tone resolves to the shared `formal` default, and prompt assembly adds one persistent user-facing writing contract (casual lowercases all Murph-authored prose except casing-sensitive literals; formal keeps standard capitalization and no slang, staying warm and direct). Voice memo defaults resolve in this order:
 
 1. Explicit tool argument `voiceId`.
 2. Vault assistant voice preference mapped through the shared roster to an ElevenLabs voice id.

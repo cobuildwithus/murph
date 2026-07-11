@@ -5040,7 +5040,10 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         redacted: {
           schema: "murph.assistant-turn-timing.v1",
           type: "assistant.turn.timing",
+          turnTimingDeliveryIntentId: "intent_timing_failure",
           turnTimingElapsedMs: 41,
+          turnTimingProviderRequestElapsedMs: 31,
+          turnTimingSinceProviderResultMs: 10,
           turnTimingStage: "reply-dispatched",
         },
       }],
@@ -5057,7 +5060,10 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       redactedJson: expect.objectContaining({
         detailComponent: "runtime.provider",
         schema: "murph.assistant-turn-timing.v1",
+        turnTimingDeliveryIntentId: "intent_timing_failure",
         turnTimingElapsedMs: 41,
+        turnTimingProviderRequestElapsedMs: 31,
+        turnTimingSinceProviderResultMs: 10,
         turnTimingStage: "reply-dispatched",
       }),
     }));
@@ -11276,7 +11282,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
 
     expect(result.checkpointReason).toBe("system_mailbox_receipt");
     expect(result.afterCheckpoint).toEqual(expect.any(Function));
-    // Hosted Foreground Priority: a cleanup-capable post-checkpoint step must
+    // Foreground Reply Critical Path: a cleanup-capable post-checkpoint step must
     // keep the foreground import loop alive so a message arriving mid-drain
     // is imported and preempts via the yield hook.
     expect(result.afterCheckpointKeepsForegroundImportLoop).toBe(true);

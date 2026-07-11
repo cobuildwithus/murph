@@ -3,6 +3,7 @@ import type { DatabaseSync } from "node:sqlite";
 import { withImmediateTransaction } from "@murphai/runtime-state/node";
 
 import { deviceSyncError } from "../errors.ts";
+import { mergeGuardedJunctionHistoricalBackfillMetadata } from "../junction-historical-backfill-progress.ts";
 import { resolveDeviceProviderMatchKeys } from "../provider-match.ts";
 import {
   generatePrefixedId,
@@ -796,11 +797,18 @@ export function upsertAccount(
       ? input.setupExpiresAt ?? null
       : existing?.setupExpiresAt ?? null;
     const scopesJson = stringifyJson(input.scopes ?? []);
-    const metadataJson = stringifyJson(sanitizeStoredDeviceSyncAccountMetadata(input.metadata ?? {}));
+    const replacementMetadata = sanitizeStoredDeviceSyncAccountMetadata(input.metadata ?? {});
 
     if (existing) {
       assertAccountUpsertExistingGuard(existing, input.existingAccountGuard ?? null);
       const credential = resolveAccountCredentialInput(input);
+      const metadata = input.provider === "junction" && input.existingAccountGuard
+        ? mergeGuardedJunctionHistoricalBackfillMetadata({
+            existingMetadata: existing.metadata,
+            replacementMetadata,
+          })
+        : replacementMetadata;
+      const metadataJson = stringifyJson(sanitizeStoredDeviceSyncAccountMetadata(metadata));
 
       database.prepare(`
         update device_connection
@@ -869,6 +877,7 @@ export function upsertAccount(
 
     assertAccountUpsertExistingGuard(null, input.existingAccountGuard ?? null);
     const credential = resolveAccountCredentialInput(input);
+    const metadataJson = stringifyJson(replacementMetadata);
 
     const id = generatePrefixedId("dsa");
     database.prepare(`
@@ -976,6 +985,15 @@ function assertAccountUpsertExistingGuard(
     throw deviceSyncError({
       code: "CONNECTION_ALREADY_DISCONNECTED",
       message: "Device sync connection callback was received after the seeded account was disconnected.",
+      retryable: false,
+      httpStatus: 409,
+    });
+  }
+
+  if (existing.connectedAt !== guard.expectedConnectedAt) {
+    throw deviceSyncError({
+      code: "CONNECTION_SEEDED_ACCOUNT_CHANGED",
+      message: "Device sync connection changed after this connection flow started.",
       retryable: false,
       httpStatus: 409,
     });

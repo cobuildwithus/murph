@@ -11,6 +11,7 @@ import {
   hashCanonicalQuerySources,
   isCanonicalQuerySourcePath,
   listCanonicalSourceManifest,
+  readVaultSourceStrict,
 } from "../src/vault-source.ts";
 
 const tempRoots: string[] = [];
@@ -46,6 +47,16 @@ test("listCanonicalSourceManifest uses shared vault family inclusion rules", asy
     vaultRoot,
     path.posix.join(VAULT_LAYOUT.experimentsDirectory, "test-experiment.md"),
     "---\nexperimentId: exp_test\nslug: test-experiment\n---\n# Experiment\n",
+  );
+  await writeVaultFile(
+    vaultRoot,
+    path.posix.join(VAULT_LAYOUT.experimentsDirectory, "legacy", "nested.md"),
+    "---\nexperimentId: exp_nested\nslug: nested\n---\n# Nested legacy experiment\n",
+  );
+  await writeVaultFile(
+    vaultRoot,
+    path.posix.join(VAULT_LAYOUT.experimentOutcomesDirectory, "test-experiment.json"),
+    "{}\n",
   );
   await writeVaultFile(
     vaultRoot,
@@ -125,6 +136,53 @@ test("listCanonicalSourceManifest uses shared vault family inclusion rules", asy
     relativePaths.includes(path.posix.join(VAULT_LAYOUT.integrationIngestLedgerDirectory, "2026", "2026-04.jsonl")),
     false,
   );
+  assert.equal(
+    relativePaths.includes(path.posix.join(VAULT_LAYOUT.experimentsDirectory, "legacy", "nested.md")),
+    false,
+  );
+  assert.equal(
+    relativePaths.includes(path.posix.join(VAULT_LAYOUT.experimentOutcomesDirectory, "test-experiment.json")),
+    false,
+  );
+});
+
+test("readVaultSourceStrict ignores nested legacy experiment Markdown", async () => {
+  const vaultRoot = await createTempVaultRoot();
+  await writeVaultFile(
+    vaultRoot,
+    path.posix.join(VAULT_LAYOUT.experimentsDirectory, "direct.md"),
+    "---\nexperimentId: exp_direct\nslug: direct\ntitle: Direct\n---\n# Direct\n",
+  );
+  await writeVaultFile(
+    vaultRoot,
+    path.posix.join(VAULT_LAYOUT.experimentsDirectory, "legacy", "nested.md"),
+    "---\nexperimentId: exp_nested\nslug: nested\ntitle: Nested\n---\n# Nested\n",
+  );
+
+  const snapshot = await readVaultSourceStrict(vaultRoot);
+  assert.deepEqual(
+    snapshot.entities
+      .filter((entity) => entity.family === "experiment")
+      .map((entity) => entity.entityId),
+    ["exp_direct"],
+  );
+});
+
+test("readVaultSourceStrict rejects a direct experiment filename that disagrees with its slug", async () => {
+  const vaultRoot = await createTempVaultRoot();
+  await writeVaultFile(
+    vaultRoot,
+    path.posix.join(VAULT_LAYOUT.experimentsDirectory, "file-slug.md"),
+    "---\nexperimentId: exp_mismatch\nslug: frontmatter-slug\ntitle: Mismatch\n---\n# Mismatch\n",
+  );
+
+  await assert.rejects(
+    readVaultSourceStrict(vaultRoot),
+    (error: unknown) =>
+      error instanceof Error
+      && "code" in error
+      && error.code === "EXPERIMENT_DOCUMENT_PATH_MISMATCH",
+  );
 });
 
 test("hashCanonicalQuerySources is stable across mtimes and ignores non-query files", async () => {
@@ -168,6 +226,14 @@ test("isCanonicalQuerySourcePath matches the shared source families", () => {
   assert.equal(
     isCanonicalQuerySourcePath(path.posix.join(VAULT_LAYOUT.experimentsDirectory, "trial.md")),
     true,
+  );
+  assert.equal(
+    isCanonicalQuerySourcePath(path.posix.join(VAULT_LAYOUT.experimentsDirectory, "legacy", "trial.md")),
+    false,
+  );
+  assert.equal(
+    isCanonicalQuerySourcePath(path.posix.join(VAULT_LAYOUT.experimentOutcomesDirectory, "trial.json")),
+    false,
   );
   assert.equal(
     isCanonicalQuerySourcePath(path.posix.join(VAULT_LAYOUT.eventLedgerDirectory, "2026", "events.jsonl")),

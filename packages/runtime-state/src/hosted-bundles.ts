@@ -69,6 +69,7 @@ const HOSTED_ASSISTANT_RUNTIME_HOT_STATE_INCLUDE_PATHS = [
   `${ASSISTANT_RUNTIME_ROOT_RELATIVE_PATH}/state/accepted-turn-inputs`,
   `${ASSISTANT_RUNTIME_ROOT_RELATIVE_PATH}/auto-reply`,
   `${ASSISTANT_RUNTIME_ROOT_RELATIVE_PATH}/automation-state.json`,
+  `${ASSISTANT_RUNTIME_ROOT_RELATIVE_PATH}/context-snapshot.json`,
   `${ASSISTANT_RUNTIME_ROOT_RELATIVE_PATH}/cron/automation-runtime.json`,
   `${ASSISTANT_RUNTIME_ROOT_RELATIVE_PATH}/cron/jobs.json`,
   `${ASSISTANT_RUNTIME_ROOT_RELATIVE_PATH}/hosted-mailbox.json`,

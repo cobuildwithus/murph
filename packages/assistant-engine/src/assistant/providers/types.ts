@@ -238,6 +238,8 @@ export interface AssistantProviderTurnExecutionResult {
   // completion order. Delivered ahead of `response` because Codex frontends
   // render every completed agent message.
   precedingResponseSegments?: readonly AssistantProviderResponseSegment[]
+  /** Accepted-input ordinal whose delivery context owns `response` and `responseMedia`. */
+  responseDeliveryContextOrdinal?: number
   responseMedia?: readonly AssistantResponseMedia[] | null
   stderr: string
   stdout: string

@@ -35,6 +35,10 @@ Settings:
 
 - Terra remains the default for every member, including Edge members who do
   nothing.
+- Settings keeps both Terra and Sol visible to non-Edge members. A paid Pulse
+  member who is eligible for the direct upgrade sees Sol locked with the
+  existing Edge upgrade action; other ineligible members see the Edge
+  requirement without a billing action.
 - Only an active, unsuspended member whose own current billing state is paid
   Edge can opt into Sol. Sponsored Family access, Pulse, trials, and synthetic
   thread-container members do not qualify.
@@ -48,6 +52,8 @@ Settings:
 - The existing signed workspace read projects an eligible Sol intent to the
   runner at the next hosted invocation boundary. An already-active invocation
   can retain its model snapshot through its bounded 180-second idle window.
+  Settings states that an idle run can take up to three minutes to close so a
+  member does not mistake that bounded delay for a failed save.
 - Changing the preference does not create a mailbox item, wake, queue, or a
   second copy in the vault or hosted workspace snapshot.
 

@@ -113,23 +113,24 @@ active invocation lease to the Worker egress authorizer. UserRunner stores only
 the token hash on the active write fence. The Worker validates the token against
 that hash, injects the Worker-owned provider credential on success, and strips
 the provider-egress token before forwarding upstream.
-Warm Codex App Server OpenAI egress uses a signed Murph provider credential in
-the native OpenAI bearer slot instead of the injected-credential sentinel. That
-credential identifies provider kind, hosted user, and runner container name. It
-does not authorize egress by itself: the Worker verifies the signature, asks
-UserRunner whether the same runner currently has an active runtime for that
-user/provider, then injects the Worker-owned OpenAI credential only after the
-OpenAI request policy passes. Missing runner state, missing active runtime,
-wrong runner, wrong user, wrong provider, missing signing config, or validator
-failure all fail closed without provider secret injection. `ctx.containerId` and
-RunnerContainer active-user recovery are not OpenAI provider-egress authority.
+Native child-process provider egress for OpenAI, Exa, Mapbox,
+`murph_data_api`, and `workers_ai_transcribe` uses a signed Murph provider
+credential in the provider's native credential slot instead of the
+injected-credential sentinel. That credential identifies provider kind, hosted
+user, and runner container name. It does not authorize egress by itself: the
+Worker verifies the signature, asks UserRunner whether the same runner has an
+active runtime for that user/provider, then injects the Worker-owned credential
+only after the provider request policy passes. Missing runner state, missing
+active runtime, wrong runner, wrong user, wrong provider, missing signing
+config, or validator failure all fail closed without provider secret
+injection. `ctx.containerId` and RunnerContainer active-user recovery are not
+provider-egress authority.
 Runtime-controlled delivery/control provider integrations such as Linq,
 Telegram, and WhatsApp still use provider-egress token proof when exact runtime
-authority headers are absent. Legacy lookup providers such as Exa, Mapbox,
-`murph_data_api`, and `workers_ai_transcribe` remain on the tokenless
-active-user-fence fallback until they are migrated deliberately. Runner
-container names remain lifecycle/routing handles, not provider-egress authority
-outside the explicit signed provider credential identity checked by UserRunner.
+authority headers are absent. There is no tokenless active-user-fence provider
+authorization path. Runner container names remain lifecycle/routing handles,
+not provider-egress authority outside the explicit signed provider credential
+identity checked by UserRunner.
 Hosted-local may rewrite loopback provider bases to the configured
 `HOSTED_EXECUTION_RUNNER_HOST_ALIAS` so Linux runner containers can reach host
 stubs through the Docker bridge. The provider-fetch allowlist may accept HTTP
@@ -262,9 +263,13 @@ inactive-fence replacement path. An inactive liveness proof must still send the
 identity-checked abort first so any queued exact retention invocation is
 canceled before the fence is cleared; an inactive result or queued matching
 abort is replacement-safe. Missing-pointer abort delivery without inactive
-proof is only an abort request and preserves the fence until a later liveness
-pass proves the old child inactive. Stale or failed status preserves the fence
-and retries.
+proof owns the container lifecycle while it delivers the identity-checked abort.
+A stale result preserves the fence and retries. An accepted or queued result, or
+an ambiguous delivery failure, recycles the old shell fail-closed before the
+container returns `accepted`; only that settled stop allows the controller to
+clear the exact fence and start a replacement. A deploy-skewed request-only
+`requested` result remains non-authoritative without inactive proof and
+preserves the fence for retry.
 
 The foreground-priority rule does not weaken correctness checks. Wrong-user
 authority, invalid auth, undecryptable mailbox payloads, stale leases, and
@@ -741,15 +746,44 @@ abort, and data-key unwrap metadata, stores a short-lived upload session without
 the URL or data key, verifies the object by `HEAD` on completion, and never
 receives the snapshot body. The v2 format is a greenfield zstd hard cut, so
 gzip v2 refs are intentionally unsupported; legacy restore compatibility stays
-limited to pre-v2 workspace refs. The bridge no longer writes foreground working
-commits. Mailbox import, active-turn acceptance, `canonical_runtime_commit`,
-assistant-runtime commits, provider cleanup, system-mailbox receipts, and
-pre-delivery outbox state must not enter workspace snapshot construction; the
-foreground caller tripwire fails those paths before the bridge. Bootstrap or
-live foreground paths must not fall back to broad foreground full snapshots,
-path-scoped working deltas, legacy hot
-producers, Worker-body snapshot uploads, or artifact-sidecar v2 producers.
-`idle_shutdown` is the only new checkpoint snapshot producer.
+limited to pre-v2 workspace refs. The bridge no longer writes foreground
+working commits. Mailbox import, active-turn acceptance, assistant-runtime
+commits, canonical-runtime commits, provider cleanup, system-mailbox receipts,
+and pre-delivery outbox state must not enter workspace snapshot construction;
+the foreground caller tripwire fails those paths before the bridge. Bootstrap
+or live foreground paths must not fall back to broad foreground full snapshots,
+path-scoped working deltas, legacy hot producers, Worker-body snapshot uploads,
+or artifact-sidecar v2 producers. `idle_shutdown` is the only new checkpoint
+snapshot producer. `canonical_runtime_commit` instead uploads exact canonical
+write receipts and publishes a receipt-log ref, bounded to 64 pending entries
+and 64 KiB, through a status-only workspace checkpoint that retains the prior
+snapshot ref. Capacity and log shape are validated before referenced payloads
+are uploaded. If that checkpoint has an ambiguous transport outcome, the
+Cloudflare workspace port retries the identical expected-version CAS once. It
+accepts a version-conflict response only when the active invocation fence still
+matches and the returned workspace is the exact requested successor, including
+the receipt fingerprint, snapshot ref, wake fields, and retention wake. Cold
+restore replays that log over the prior snapshot and marks
+affected context domains dirty; when the restored log is at the hard entry
+bound, the runtime consolidates it through an idle snapshot before foreground
+mailbox or assistant work. That recovery snapshot publishes an immediate
+mailbox-continuation wake so web accepts it even when foreground conversation
+rows are already pending; immediately after that snapshot, a status-only
+checkpoint durably restores the prior wake projection before foreground work
+or any early return, and the runner then drains any queued runtime wake. The
+recovery snapshot retains the receipt-log pointer and the original prior wake
+as its retry marker; only the wake-reset status checkpoint clears them, so a
+crash or ambiguous failure between those checkpoints safely repeats idempotent
+receipt replay and consolidation without losing or replacing that prior wake.
+The two receipt-log pointer fields and three recovery-marker fields are
+reserved outside the ordinary 96-field redacted-status budget at both
+transport parsing and workspace persistence boundaries; ordinary status
+remains capped at 96 fields.
+Later idle snapshots omit the receipt-log status. The pending-log
+limits bound replay work, not object
+retention: encrypted owner-scoped receipt, log, and payload artifacts are not
+eagerly deleted after consolidation until the artifact store has a
+reference-safe owner-scoped retention primitive.
 `idle_shutdown` is the snapshot boundary for warm-runner wind-down: it maps to
 a direct-R2 v2 snapshot from the effective restored state, runs through the
 ordinary invocation lease shortly before container sleep, and checks the lease
@@ -778,10 +812,11 @@ restorable during migration, but new bridge snapshots are idle-shutdown direct
 R2 v2 refs only.
 
 Foreground assistant turns do not publish a separate Codex continuity artifact
-or workspace pointer. Provider-native continuity remains a workspace snapshot
-concern: if a container dies before the next idle-shutdown direct-R2 v2 snapshot,
-restore must still be correct from durable mailbox, transcript, and assistant
-runtime state even if provider-native resume optimization is unavailable.
+or snapshot pointer. Provider-native continuity remains an idle workspace
+snapshot concern: if a container dies before the next idle-shutdown direct-R2
+v2 snapshot, restore must still be correct from durable mailbox, exact canonical
+write receipts, transcript, and assistant runtime state even if provider-native
+resume optimization is unavailable.
 Fresh-thread starts and stale native-resume fallback may include bounded recent
 committed transcript history; primary native-resume attempts do not replay that
 history into the provider prompt. Active-turn input is not serialized as
@@ -798,8 +833,9 @@ replica, but they must mark it stale and request refresh after the HTTP response
 Web represents that request as ordinary low-priority runtime work only when its
 freshness policy explicitly asks for it; normal nudges do not become browser-vault
 refresh sweeps just because a workspace has no replica yet. Foreground work may
-schedule refresh as ordinary runtime work, but `idle_shutdown` v2 checkpoints write only
-the workspace snapshot ref; they do not publish browser-vault replicas.
+schedule refresh as ordinary runtime work, but workspace snapshot checkpoints
+write only the workspace snapshot ref; they do not publish browser-vault
+replicas.
 Browser-vault replica writes require the active runtime write fence and publish
 the latest replica ref separately, without changing the workspace checkpoint
 version.

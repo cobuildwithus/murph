@@ -44,6 +44,7 @@ import {
 import {
   copyFileAtomic,
   copyFileAtomicExclusive,
+  writeBytesFileAtomicExclusive,
   writeTextFileAtomic,
   writeTextFileAtomicExclusive,
 } from "../src/atomic-write.ts";
@@ -125,6 +126,7 @@ test("atomic writes preserve existing modes while replacing content", async () =
 test("exclusive atomic writes fall back when hard links are unavailable", async () => {
   const vaultRoot = await makeTempDirectory("murph-core-operations-thresholds-atomic-exclusive");
   const textTargetAbsolutePath = path.join(vaultRoot, "nested", "exclusive.txt");
+  const bytesTargetAbsolutePath = path.join(vaultRoot, "nested", "bytes.bin");
   const copyTargetAbsolutePath = path.join(vaultRoot, "nested", "copied.txt");
   const freshTextTargetAbsolutePath = path.join(vaultRoot, "fresh", "new.txt");
   const sourceAbsolutePath = path.join(vaultRoot, "source.txt");
@@ -144,13 +146,15 @@ test("exclusive atomic writes fall back when hard links are unavailable", async 
   );
 
   await writeTextFileAtomicExclusive(textTargetAbsolutePath, "exclusive text\n");
+  await writeBytesFileAtomicExclusive(bytesTargetAbsolutePath, new Uint8Array([0, 1, 2, 255]));
   await copyFileAtomicExclusive(sourceAbsolutePath, copyTargetAbsolutePath);
 
   assert.equal(await fs.readFile(textTargetAbsolutePath, "utf8"), "exclusive text\n");
+  assert.deepEqual(await fs.readFile(bytesTargetAbsolutePath), Buffer.from([0, 1, 2, 255]));
   assert.equal(await fs.readFile(copyTargetAbsolutePath, "utf8"), "copy me\n");
   await writeTextFileAtomic(freshTextTargetAbsolutePath, "fresh text\n");
   assert.equal(await fs.readFile(freshTextTargetAbsolutePath, "utf8"), "fresh text\n");
-  assert.equal(linkSpy.mock.calls.length >= 2, true);
+  assert.equal(linkSpy.mock.calls.length >= 3, true);
 });
 
 test("atomic writes surface non-ENOENT mode preservation errors", async () => {
@@ -615,6 +619,60 @@ test("write batches emit exact hosted canonical write receipts", async () => {
     receiptRoot,
     sha256: createHash("sha256").update("raw scan\n").digest("hex"),
   });
+});
+
+test("hosted canonical receipts preserve raw delete authority during replay", async () => {
+  const vaultRoot = await makeTempDirectory("murph-core-hosted-raw-delete-replay");
+  await initializeVault({ vaultRoot });
+
+  const targetRelativePath = "raw/inbox/expired/attachment.bin";
+  const targetAbsolutePath = resolveVaultPath(vaultRoot, targetRelativePath).absolutePath;
+  await fs.mkdir(path.dirname(targetAbsolutePath), { recursive: true });
+  await fs.writeFile(targetAbsolutePath, "expired private bytes", "utf8");
+
+  const batch = await WriteBatch.create({
+    vaultRoot,
+    operationType: "hosted_raw_delete_replay",
+    summary: "preserve raw delete authority",
+    hostedCanonicalWritePort: {
+      async persistCanonicalWrite() {},
+    },
+  });
+  await batch.stageDelete(targetRelativePath, { allowRaw: true });
+  const receipt = await batch.commit();
+  assert.ok(receipt);
+  assert.deepEqual(receipt.actions, [{
+    allowRaw: true,
+    existedBefore: true,
+    kind: "delete",
+    targetRelativePath,
+  }]);
+
+  await fs.writeFile(targetAbsolutePath, "expired private bytes", "utf8");
+  await applyHostedCanonicalWriteReceipt({
+    readPayload: async () => null,
+    receipt,
+    vaultRoot,
+  });
+  await assert.rejects(fs.stat(targetAbsolutePath), { code: "ENOENT" });
+
+  await fs.writeFile(targetAbsolutePath, "expired private bytes", "utf8");
+  await assert.rejects(
+    applyHostedCanonicalWriteReceipt({
+      readPayload: async () => null,
+      receipt: {
+        ...receipt,
+        actions: [{
+          existedBefore: true,
+          kind: "delete",
+          targetRelativePath,
+        }],
+      },
+      vaultRoot,
+    }),
+    /Use copyRawArtifact for raw writes/u,
+  );
+  assert.equal(await fs.readFile(targetAbsolutePath, "utf8"), "expired private bytes");
 });
 
 test("WriteBatch reserves unique stage artifacts under concurrent raw staging", async () => {
@@ -1337,6 +1395,338 @@ test("applyCanonicalWriteBatch reports resume conflicts when delete backups are 
   assert.ok(deleteBackupMissingOperation);
   assert.equal(deleteBackupMissingOperation?.operation.status, "rolled_back");
   assert.equal(deleteBackupMissingOperation?.operation.error?.code, "OPERATION_RESUME_CONFLICT");
+});
+
+test("write batches preserve text and delete targets that changed after staging", async () => {
+  const vaultRoot = await makeTempDirectory("murph-core-operations-target-preconditions");
+  await initializeVault({ vaultRoot });
+
+  const receipt = (content: string) => ({
+    byteLength: Buffer.byteLength(content, "utf8"),
+    sha256: createHash("sha256").update(content, "utf8").digest("hex"),
+  });
+  const textPath = "bank/thresholds/precondition-text.md";
+  const deletePath = "bank/thresholds/precondition-delete.md";
+  const textAbsolutePath = resolveVaultPath(vaultRoot, textPath).absolutePath;
+  const deleteAbsolutePath = resolveVaultPath(vaultRoot, deletePath).absolutePath;
+  await fs.mkdir(path.dirname(textAbsolutePath), { recursive: true });
+  await fs.writeFile(textAbsolutePath, "text-a\n", "utf8");
+  await fs.writeFile(deleteAbsolutePath, "delete-a\n", "utf8");
+
+  const textBatch = await WriteBatch.create({
+    vaultRoot,
+    operationType: "text_target_precondition",
+    summary: "preserve a changed text target",
+  });
+  await textBatch.stageTextWrite(textPath, "replacement\n", {
+    expectedTargetReceipt: receipt("text-a\n"),
+    overwrite: true,
+  });
+  await fs.writeFile(textAbsolutePath, "text-b\n", "utf8");
+  await assert.rejects(
+    () => textBatch.commit(),
+    (error: unknown) =>
+      error instanceof VaultError && error.code === "OPERATION_PRECONDITION_FAILED",
+  );
+  assert.equal(await fs.readFile(textAbsolutePath, "utf8"), "text-b\n");
+
+  const deleteBatch = await WriteBatch.create({
+    vaultRoot,
+    operationType: "delete_target_precondition",
+    summary: "preserve a changed delete target",
+  });
+  await deleteBatch.stageDelete(deletePath, {
+    expectedTargetReceipt: receipt("delete-a\n"),
+  });
+  await fs.writeFile(deleteAbsolutePath, "delete-b\n", "utf8");
+  await assert.rejects(
+    () => deleteBatch.commit(),
+    (error: unknown) =>
+      error instanceof VaultError && error.code === "OPERATION_PRECONDITION_FAILED",
+  );
+  assert.equal(await fs.readFile(deleteAbsolutePath, "utf8"), "delete-b\n");
+});
+
+test("receipt-guarded raw copies reject changed source and staged bytes before commit", async () => {
+  const vaultRoot = await makeTempDirectory("murph-core-operations-raw-source-receipt");
+  const sourceRoot = await makeTempDirectory("murph-core-operations-raw-source-receipt-input");
+  await initializeVault({ vaultRoot });
+
+  const inspectedContent = "inspected raw bytes\n";
+  const changedContent = "changed raw bytes\n";
+  const expectedSourceReceipt = {
+    byteLength: Buffer.byteLength(inspectedContent),
+    sha256: createHash("sha256").update(inspectedContent).digest("hex"),
+  };
+  const sourcePath = path.join(sourceRoot, "source.bin");
+  const targetRelativePath = "raw/testing/receipt/source.bin";
+  const targetAbsolutePath = resolveVaultPath(vaultRoot, targetRelativePath).absolutePath;
+  await fs.writeFile(sourcePath, changedContent, "utf8");
+
+  const changedSourceBatch = await WriteBatch.create({
+    vaultRoot,
+    operationType: "raw_source_receipt_changed",
+    summary: "reject changed raw source bytes",
+  });
+  await assert.rejects(
+    () =>
+      changedSourceBatch.stageRawCopy({
+        expectedSourceReceipt,
+        mediaType: "application/octet-stream",
+        originalFileName: "source.bin",
+        sourcePath,
+        targetRelativePath,
+      }),
+    (error: unknown) =>
+      error instanceof VaultError && error.code === "OPERATION_PRECONDITION_FAILED",
+  );
+  await changedSourceBatch.rollback();
+  assert.equal(await pathExists(targetAbsolutePath), false);
+
+  await fs.writeFile(sourcePath, inspectedContent, "utf8");
+  const changedStageBatch = await WriteBatch.create({
+    vaultRoot,
+    operationType: "raw_stage_receipt_changed",
+    summary: "reject changed staged raw bytes",
+  });
+  const staged = await changedStageBatch.stageRawCopy({
+    expectedSourceReceipt,
+    mediaType: "application/octet-stream",
+    originalFileName: "source.bin",
+    sourcePath,
+    targetRelativePath,
+  });
+  const stored = await readStoredWriteOperation(vaultRoot, changedStageBatch.metadataRelativePath);
+  const storedAction = stored.actions[0];
+  assert.equal(storedAction?.kind, "raw_copy");
+  if (storedAction?.kind !== "raw_copy") {
+    throw new Error("Expected a stored raw-copy action.");
+  }
+  assert.deepEqual(storedAction.expectedSourceReceipt, expectedSourceReceipt);
+  await fs.writeFile(staged.stagedAbsolutePath, changedContent, "utf8");
+  await assert.rejects(
+    () => changedStageBatch.commit(),
+    (error: unknown) =>
+      error instanceof VaultError && error.code === "OPERATION_PRECONDITION_FAILED",
+  );
+  assert.equal(await pathExists(targetAbsolutePath), false);
+  assert.equal(
+    (await readStoredWriteOperation(vaultRoot, changedStageBatch.metadataRelativePath)).status,
+    "rolled_back",
+  );
+
+  await fs.writeFile(sourcePath, inspectedContent, "utf8");
+  await fs.chmod(sourcePath, 0o600);
+  const successfulBatch = await WriteBatch.create({
+    vaultRoot,
+    operationType: "raw_source_receipt_preserves_mode",
+    summary: "preserve restrictive raw source mode",
+  });
+  await successfulBatch.stageRawCopy({
+    expectedSourceReceipt,
+    mediaType: "application/octet-stream",
+    originalFileName: "source.bin",
+    sourcePath,
+    targetRelativePath,
+  });
+  await successfulBatch.commit();
+  assert.equal(await fs.readFile(targetAbsolutePath, "utf8"), inspectedContent);
+  assert.equal((await fs.stat(targetAbsolutePath)).mode & 0o777, 0o600);
+});
+
+test("receipt-guarded text writes preserve restrictive target modes", async () => {
+  const vaultRoot = await makeTempDirectory("murph-core-operations-text-mode");
+  await initializeVault({ vaultRoot });
+  const targetPath = "bank/thresholds/private-note.md";
+  const targetAbsolutePath = resolveVaultPath(vaultRoot, targetPath).absolutePath;
+  const original = "private original\n";
+  await fs.mkdir(path.dirname(targetAbsolutePath), { recursive: true });
+  await fs.writeFile(targetAbsolutePath, original, { encoding: "utf8", mode: 0o600 });
+
+  const batch = await WriteBatch.create({
+    vaultRoot,
+    operationType: "expected_text_preserves_mode",
+    summary: "preserve a restrictive text target mode",
+  });
+  await batch.stageTextWrite(targetPath, "private replacement\n", {
+    expectedTargetReceipt: {
+      byteLength: Buffer.byteLength(original, "utf8"),
+      sha256: createHash("sha256").update(original, "utf8").digest("hex"),
+    },
+    overwrite: true,
+  });
+
+  await batch.commit();
+
+  assert.equal(await fs.readFile(targetAbsolutePath, "utf8"), "private replacement\n");
+  assert.equal((await fs.stat(targetAbsolutePath)).mode & 0o777, 0o600);
+});
+
+test("receipt-guarded text writes preserve an edit that races the atomic quarantine", async () => {
+  const vaultRoot = await makeTempDirectory("murph-core-operations-text-quarantine-race");
+  await initializeVault({ vaultRoot });
+  const targetPath = "bank/thresholds/quarantined-text-race.md";
+  const targetAbsolutePath = resolveVaultPath(vaultRoot, targetPath).absolutePath;
+  const original = "inspected text\n";
+  const racingEdit = "racing edit\n";
+  await fs.mkdir(path.dirname(targetAbsolutePath), { recursive: true });
+  await fs.writeFile(targetAbsolutePath, original, "utf8");
+
+  const batch = await WriteBatch.create({
+    vaultRoot,
+    operationType: "expected_text_race",
+    summary: "preserve a racing text edit",
+  });
+  await batch.stageTextWrite(targetPath, "replacement\n", {
+    expectedTargetReceipt: {
+      byteLength: Buffer.byteLength(original, "utf8"),
+      sha256: createHash("sha256").update(original, "utf8").digest("hex"),
+    },
+    overwrite: true,
+  });
+
+  const moveExpectedTargetToBackup = Reflect.get(
+    Object.getPrototypeOf(batch),
+    "moveExpectedTargetToBackup",
+  );
+  if (typeof moveExpectedTargetToBackup !== "function") {
+    throw new Error("Expected WriteBatch quarantine support.");
+  }
+
+  let injectedRace = false;
+  Reflect.set(batch, "moveExpectedTargetToBackup", async (...args: unknown[]) => {
+    if (!injectedRace) {
+      injectedRace = true;
+      await fs.writeFile(targetAbsolutePath, racingEdit, "utf8");
+    }
+    return await Reflect.apply(moveExpectedTargetToBackup, batch, args);
+  });
+
+  await assert.rejects(
+    () => batch.commit(),
+    (error: unknown) =>
+      error instanceof VaultError && error.code === "OPERATION_PRECONDITION_FAILED",
+  );
+  assert.equal(injectedRace, true);
+  assert.equal(await fs.readFile(targetAbsolutePath, "utf8"), racingEdit);
+});
+
+test("receipt-guarded text writes restore inspected bytes after interrupted finalization", async () => {
+  const vaultRoot = await makeTempDirectory("murph-core-operations-text-quarantine-interruption");
+  await initializeVault({ vaultRoot });
+  const targetPath = "bank/thresholds/quarantined-text-interruption.md";
+  const targetAbsolutePath = resolveVaultPath(vaultRoot, targetPath).absolutePath;
+  const original = "restore through interruption\n";
+  await fs.mkdir(path.dirname(targetAbsolutePath), { recursive: true });
+  await fs.writeFile(targetAbsolutePath, original, "utf8");
+
+  const batch = await WriteBatch.create({
+    vaultRoot,
+    operationType: "expected_text_interruption",
+    summary: "restore an interrupted text replacement",
+  });
+  await batch.stageTextWrite(targetPath, "replacement\n", {
+    expectedTargetReceipt: {
+      byteLength: Buffer.byteLength(original, "utf8"),
+      sha256: createHash("sha256").update(original, "utf8").digest("hex"),
+    },
+    overwrite: true,
+  });
+
+  const record = Reflect.get(batch, "record");
+  const actions = typeof record === "object" && record !== null
+    ? Reflect.get(record, "actions")
+    : null;
+  const action = Array.isArray(actions) ? actions[0] : null;
+  const persist = Reflect.get(batch, "persist");
+  if (!action || typeof persist !== "function") {
+    throw new Error("Expected a staged text action and WriteBatch persistence.");
+  }
+
+  let injectedFailure = false;
+  Reflect.set(batch, "persist", async () => {
+    if (!injectedFailure && Reflect.get(action, "state") === "applied") {
+      injectedFailure = true;
+      throw new Error("injected text finalization interruption");
+    }
+    return await Reflect.apply(persist, batch, []);
+  });
+
+  await assert.rejects(
+    () => batch.commit(),
+    /injected text finalization interruption/u,
+  );
+  assert.equal(injectedFailure, true);
+  assert.equal(await fs.readFile(targetAbsolutePath, "utf8"), original);
+});
+
+test("expected deletes retain quarantined bytes across an interrupted finalization", async () => {
+  const vaultRoot = await makeTempDirectory("murph-core-operations-delete-quarantine");
+  await initializeVault({ vaultRoot });
+  const targetPath = "bank/thresholds/quarantined-delete.md";
+  const targetAbsolutePath = resolveVaultPath(vaultRoot, targetPath).absolutePath;
+  const content = "preserve through interruption\n";
+  await fs.mkdir(path.dirname(targetAbsolutePath), { recursive: true });
+  await fs.writeFile(targetAbsolutePath, content, "utf8");
+
+  const batch = await WriteBatch.create({
+    vaultRoot,
+    operationType: "expected_delete_interruption",
+    summary: "retain quarantined delete bytes",
+  });
+  await batch.stageDelete(targetPath, {
+    expectedTargetReceipt: {
+      byteLength: Buffer.byteLength(content, "utf8"),
+      sha256: createHash("sha256").update(content, "utf8").digest("hex"),
+    },
+  });
+
+  const record = Reflect.get(batch, "record");
+  const actions = typeof record === "object" && record !== null
+    ? Reflect.get(record, "actions")
+    : null;
+  const action = Array.isArray(actions) ? actions[0] : null;
+  const applyDelete = Reflect.get(Object.getPrototypeOf(batch), "applyDelete");
+  const persist = Reflect.get(batch, "persist");
+  if (!action || typeof applyDelete !== "function" || typeof persist !== "function") {
+    throw new Error("Expected a staged delete action and WriteBatch internals.");
+  }
+
+  let injectedFailure = false;
+  Reflect.set(batch, "persist", async () => {
+    if (!injectedFailure && Reflect.get(action, "state") === "applied") {
+      injectedFailure = true;
+      throw new Error("injected delete finalization interruption");
+    }
+    return await Reflect.apply(persist, batch, []);
+  });
+  await assert.rejects(
+    () => Reflect.apply(applyDelete, batch, [0, action]),
+    /injected delete finalization interruption/u,
+  );
+  Reflect.set(batch, "persist", persist);
+
+  assert.equal(injectedFailure, true);
+  assert.equal(await fs.access(targetAbsolutePath).then(() => true, () => false), false);
+  const recoverable = await readRecoverableStoredWriteOperation(
+    vaultRoot,
+    batch.metadataRelativePath,
+  );
+  const recoverableAction = recoverable?.actions[0];
+  assert.equal(recoverableAction?.kind, "delete");
+  assert.equal(recoverableAction?.state, "staged");
+  assert.equal(
+    recoverableAction?.kind === "delete" && recoverableAction.backupRelativePath
+      ? await fs.readFile(
+        resolveVaultPath(vaultRoot, recoverableAction.backupRelativePath).absolutePath,
+        "utf8",
+      )
+      : null,
+    content,
+  );
+
+  await batch.rollback();
+  assert.equal(await fs.readFile(targetAbsolutePath, "utf8"), content);
 });
 
 test("validateVault reports missing metadata and missing required directories", async () => {

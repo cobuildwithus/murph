@@ -9,6 +9,7 @@ Adding a new wearable provider? Pair the importer work with the transport half d
 - `document` import reads file metadata only and forwards a normalized document payload.
 - `meal` import inspects photo/audio attachments and forwards a normalized meal payload.
 - `samples` CSV import parses tabular sample rows and forwards an explicit raw/debug sample-ledger batch payload.
+- Clinical FHIR planning is available only from `@murphai/importers/clinical-records`; it stays off the broad importer root and hosted cold-start path until a clinical intake owner wires that explicit seam.
 - No OCR, transcription, or structured lab parsing is performed in the baseline.
 
 ## Built-in Device Providers

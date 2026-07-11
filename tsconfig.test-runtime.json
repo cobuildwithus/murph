@@ -5,6 +5,9 @@
       "path": "./packages/contracts/tsconfig.build.json"
     },
     {
+      "path": "./packages/clinical-records"
+    },
+    {
       "path": "./packages/hosted-execution"
     },
     {

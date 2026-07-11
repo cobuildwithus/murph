@@ -330,6 +330,8 @@ describe('monorepo release flow coverage audit', () => {
     expect(prReviewGptLoop).toContain('zero accepted findings')
     expect(prReviewGptLoop).toContain('`review-gpt-pr-context/pr.diff`')
     expect(prReviewGptLoop).toContain('It does **not** run the local Codex')
+    expect(prReviewGptLoop).toContain('scripts/review-gpt-pr-head-preflight.sh')
+    expect(prReviewGptLoop).toContain('REVIEW_COMPLETE')
     expect(prReviewGptLoop).toContain('does **not** run the local Codex')
     expect(prReviewGptLoop).toContain('replaces the default local `deep-review` pass')
     expect(prReviewGptLoop).toContain(
@@ -1027,6 +1029,7 @@ exit 1
 
     expect(summary.packages).toContainEqual(expect.objectContaining({
       bundledWorkspaceDependencies: [
+        '@murphai/clinical-records',
         '@murphai/core',
         '@murphai/device-syncd',
         '@murphai/health-metrics',
@@ -1041,6 +1044,7 @@ exit 1
         '@murphai/assistant-cli',
         '@murphai/assistant-engine',
         '@murphai/assistantd',
+        '@murphai/clinical-records',
         '@murphai/core',
         '@murphai/device-syncd',
         '@murphai/importers',
@@ -1295,7 +1299,6 @@ exit 1
           outputRoot,
           '--name',
           'murph-test-data',
-          '--no-docs',
         ],
         {
           cwd: repoRoot,

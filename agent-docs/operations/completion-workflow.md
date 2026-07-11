@@ -1,6 +1,6 @@
 # Completion Workflow
 
-Last verified: 2026-07-09
+Last verified: 2026-07-10
 
 This workflow applies to repo code/docs/test/config changes after implementation is materially complete.
 Use `agent-docs/operations/agent-workflow-routing.md` to classify the task, choose the commit path, and decide whether ledger or plan mechanics apply.
@@ -14,6 +14,10 @@ Required workflow audit subagents default to high reasoning. Use xhigh reasoning
 
 Final review is not a spawned subagent pass. The parent agent runs an explicit local final review (step 11), and for PR-lane work the ReviewGPT loop in `agent-docs/operations/pr-reviewgpt-loop.md` is the required final review gate before merge-readiness (rounds fire on push, in parallel with PR CI).
 Removed 2026-06-12: the `simplify` and `task-finish-review` subagent passes. June 2026 transcript mining across Codex/Claude sessions and `audit-packages/` artifacts showed `simplify` produced no accepted findings, and `task-finish-review` produced mostly low-severity polish while the specialized passes caught the real local bugs and the post-completion PR ReviewGPT loop caught what the entire local stack missed. The parent-owned scope-and-shape check (step 2) owns simplification; `/simplify` remains available on demand.
+
+## Frontend Implementation Routing
+
+For user-facing `apps/web` work, apply the Fable-first routing in `agent-docs/operations/agent-workflow-routing.md` before implementation. The parent must inspect all discoverable local Claude Code homes and safe reusable session/background-agent indexes, avoid signaling or commandeering live processes, and try every usable authenticated Fable lane. When none can run because of CLI, auth, model, credit, or safe-session availability, direct implementation by the parent is an allowed fallback rather than a completion blocker. Record why the fallback was necessary. This changes only who writes the implementation: frontend verification, browser evidence, the required `frontend-review` pass, parent final review, and PR-lane ReviewGPT remain unchanged.
 
 ## Sequence
 
@@ -131,7 +135,7 @@ Use focused component/page tests, typecheck, `git diff --check`, and stale-strin
 ## Audit Worker Rules
 
 - Codex-native agents run all required completion audit passes as spawned local subagents. Do not use `codex exec` from Codex to satisfy these passes.
-- Claude (and other non-Codex) parent agents run every required completion audit pass (`prompt-review`, `security-privacy-review`, `coverage-write`, `frontend-review`, `deep-review`) on Codex `gpt-5.6-sol` through the local Codex CLI. Use non-interactive `codex exec -m gpt-5.6-sol -c 'model_reasoning_effort="high"'` with stdin closed (for example, `</dev/null`); use `xhigh` only under the complexity rule below. An operator alias is acceptable only when it selects the same model and effort. When `MURPH_AUDIT_CODEX_HOME` is set, pass it as `CODEX_HOME`; otherwise use normal Codex home resolution. Do not run a required pass on the non-Codex parent's model or another model family while the Codex CLI is available. If the CLI or its auth is unavailable, report that limitation and run the pass on the parent's current model instead of skipping it.
+- Claude (and other non-Codex) parent agents run every required completion audit pass (`prompt-review`, `security-privacy-review`, `coverage-write`, `frontend-review`, `deep-review`) on Codex `gpt-5.6-sol` through the local Codex CLI. Use non-interactive `codex exec -m gpt-5.6-sol -c 'model_reasoning_effort="high"'` with stdin closed (for example, `</dev/null`); use `xhigh` only under the complexity rule below. An operator alias is acceptable only when it selects the same model and effort. When `MURPH_AUDIT_CODEX_HOME` is set, pass it as `CODEX_HOME`; otherwise use normal Codex home resolution. Do not run a required pass on the non-Codex parent's model or another model family while the Codex CLI is available. A rejected or unavailable explicit model is a routing failure: do not rerun without `-m` and inherit a profile default. If the exact model, CLI, or CLI auth is unavailable, report that limitation and run the pass on the parent's current model instead of skipping it or silently using an older Codex model.
 - All required audit subagents use high reasoning by default. Use xhigh reasoning for large or complex changes, high-risk/cross-cutting changes, or audits that span multiple owners, architecture decisions, or trust-boundary decisions.
 - `prompt-review` is a review-only pass for prompt-primary changes. Every run must read the current GPT-5.6 prompting guide at `https://developers.openai.com/api/docs/guides/prompt-guidance-gpt-5p6.md`, the latest-model guide, and the GPT-5.6 Sol migration guide before reviewing. It inspects the affected assembled prompt stack and tool descriptions for deletion opportunities, clear outcomes/success/evidence/stop rules, stable-versus-dynamic placement, action scope, current model assumptions, conflicts, and unnecessary scaffolding.
 - `coverage-write` is the default write-capable audit pass, follows the model routing above, and stays narrowly scoped to truthful tests or direct-proof scaffolding for the changed behavior. A passing coverage number alone is not the completion bar, and existing sufficient proof is a valid no-edit result.

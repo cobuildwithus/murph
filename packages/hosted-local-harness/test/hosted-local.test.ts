@@ -5,9 +5,6 @@ import path from "node:path";
 import { describe, expect, test } from "vitest";
 
 import {
-  normalizeLegacyCloudflareHostedLocalE2eArgs,
-} from "../src/compat.ts";
-import {
   listHostedLocalE2eScenarios,
   resolveHostedLocalE2eScenarios,
 } from "../src/e2e.ts";
@@ -36,20 +33,6 @@ describe("hosted-local harness", () => {
     expect(workflow).toContain('echo "${npm_prefix}/bin" >> "$GITHUB_PATH"');
     expect(workflow).toContain('"${npm_prefix}/bin/codex" --version');
   }
-
-  test("keeps legacy Cloudflare E2E entrypoint on the no-bundle path", () => {
-    expect(normalizeLegacyCloudflareHostedLocalE2eArgs([])).toEqual([
-      "all",
-      "--no-bundle",
-    ]);
-    expect(normalizeLegacyCloudflareHostedLocalE2eArgs(["linq-webhook"])).toEqual([
-      "linq-webhook",
-      "--no-bundle",
-    ]);
-    expect(normalizeLegacyCloudflareHostedLocalE2eArgs(["--bundle"])).toEqual([
-      "all",
-    ]);
-  });
 
   test("keeps root hosted-local scripts canonical", async () => {
     const rootPackage = JSON.parse(
@@ -84,8 +67,6 @@ describe("hosted-local harness", () => {
       "test:e2e:local",
       "test:e2e:hosted-local",
       "test:e2e:workers:local",
-      "test:e2e:full-stack:local",
-      "test:e2e:smoke:local",
       "test:e2e:runner-python:local",
     ]);
 
@@ -124,6 +105,17 @@ describe("hosted-local harness", () => {
     expect(resolveHostedLocalE2eScenarios("all").map((scenario) => scenario.name)).toContain(
       "timezone-injection",
     );
+    expect(resolveHostedLocalE2eScenarios([
+      "linq-delivery",
+      "temporal-orchestration",
+    ]).map((scenario) => scenario.name)).toEqual([
+      "linq-first-contact",
+      "temporal-orchestration",
+    ]);
+    expect(() => resolveHostedLocalE2eScenarios(["linq-delivery", "linq-first-contact"]))
+      .toThrow("Duplicate hosted-local E2E scenario selection");
+    expect(() => resolveHostedLocalE2eScenarios(["all", "telegram"]))
+      .toThrow("cannot be combined");
   });
 
   test("keeps registered hosted-local E2E scenario files present", () => {
@@ -134,17 +126,16 @@ describe("hosted-local harness", () => {
     expect(missingScenarios).toEqual([]);
   });
 
-  test("keeps the hosted device-sync CI workflow wired to the registered scenario", async () => {
+  test("keeps the Junction replay scenario on the shared hosted E2E artifact lane", async () => {
     const workflow = await readFile(
-      path.join(repoRoot, ".github", "workflows", "cloudflare-hosted-device-sync-e2e.yml"),
+      path.join(repoRoot, ".github", "workflows", "cloudflare-hosted-e2e.yml"),
       "utf8",
     );
-    const workflowScenarios = Array.from(
-      workflow.matchAll(/pnpm hosted-local e2e ([^\s\\]+)/g),
-      (match) => match[1],
-    );
 
-    expect(workflowScenarios).toEqual(["device-sync-junction-wearable-direct-resource-replay"]);
+    expect(workflow).toContain(
+      "scenarios: device-sync-junction-wearable-direct-resource-replay",
+    );
+    expect(workflow).toContain("timeoutMinutes: 35");
     expect(resolveHostedLocalE2eScenarios("device-sync-junction-wearable-direct-resource-replay")[0]?.file).toBe(
       "apps/cloudflare/test/hosted-local-device-sync-junction-wearable-direct-resource-replay-e2e.test.ts",
     );
@@ -153,6 +144,12 @@ describe("hosted-local harness", () => {
     );
     expectCodexCliInstallContract(workflow);
     expect(workflow).toContain(".artifacts/hosted-local/**/state.json");
+    expect(existsSync(path.join(
+      repoRoot,
+      ".github",
+      "workflows",
+      "cloudflare-hosted-device-sync-e2e.yml",
+    ))).toBe(false);
   });
 
   test("keeps Cloudflare hosted E2E jobs provisioned with Codex CLI", async () => {
@@ -161,7 +158,11 @@ describe("hosted-local harness", () => {
       "utf8",
     );
 
-    expect(workflow).toContain('pnpm hosted-local e2e "$scenario" --no-bundle');
+    expect(workflow).toContain('pnpm hosted-local e2e "${scenarios[@]}" --no-bundle');
+    expect(workflow).toContain([
+      "- name: Linq scheduled reminder E2E",
+      '            fastGate: "1"',
+    ].join("\n"));
     expectCodexCliInstallContract(workflow);
   });
 

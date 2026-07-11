@@ -1,10 +1,17 @@
-import { sanitizeStoredDeviceSyncMetadata } from "@murphai/device-syncd/public-account";
+import {
+  requiresHistoricalResetDeviceSyncSource,
+  sanitizeStoredDeviceSyncMetadata,
+} from "@murphai/device-syncd/public-account";
 import type { PublicDeviceSyncAccount } from "@murphai/device-syncd/types";
 import {
+  canCurrentRuntimeMutateJunctionHistoricalBackfillProgress,
+  JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS,
+  mergeHostedDeviceSyncConnectionMetadata,
   parseHostedExecutionDeviceSyncRuntimeApplyRequest,
   parseHostedExecutionDeviceSyncDirtyAckRequest,
   parseHostedExecutionDeviceSyncDirtyPendingRequest,
   parseHostedExecutionDeviceSyncRuntimeSnapshotRequest,
+  readJunctionHistoricalBackfillProgress,
   sanitizeHostedRuntimeDiagnosticText,
   sanitizeHostedExecutionDeviceSyncRuntimeCredentialMetadata,
   type HostedExecutionDeviceSyncRuntimeApplyEntry,
@@ -220,9 +227,16 @@ export async function applyHostedDeviceSyncRuntimeResult(input: {
             includeCredentialMaterial: true,
           },
         );
+        const historicalMetadataResolution = resolveHostedRuntimeHistoricalMetadata({
+          baselineMetadata: baseline.connection.metadata,
+          candidateMetadata: update.connection?.metadata,
+          provider: record.provider,
+        });
         const sourceUpdates = resolveHostedRuntimeSourceUpdatesToApply({
           connectionId: record.id,
           currentSources: sources,
+          historicalMetadata: historicalMetadataResolution?.metadata
+            ?? baseline.connection.metadata,
           provider: record.provider,
           updates: update.sources ?? [],
         });
@@ -230,10 +244,19 @@ export async function applyHostedDeviceSyncRuntimeResult(input: {
         const credentialMutationRequested = update.credential !== undefined;
         const sourceMutationRequested = sourceUpdates.toApply.length > 0;
         const sourceVersionMismatch =
-          (update.sources?.length ?? 0) > 0 && sourceUpdates.staleCount > 0 && !sourceMutationRequested;
+          (update.sources?.length ?? 0) > 0 && sourceUpdates.staleCount > 0;
+        const historicalResetStateMismatch = isHostedRuntimeHistoricalResetStateInconsistent({
+          currentSources: sources,
+          historicalMetadata: historicalMetadataResolution?.metadata
+            ?? baseline.connection.metadata,
+          provider: record.provider,
+          sourceUpdates: sourceUpdates.toApply,
+        });
         const connectionWriteRequested =
           stateMutationRequested || credentialMutationRequested || sourceMutationRequested;
-        const connectionVersionMismatch = stateMutationRequested
+        const junctionSourceMutationRequested = record.provider.trim().toLowerCase() === "junction"
+          && (update.sources?.length ?? 0) > 0;
+        const connectionVersionMismatch = (stateMutationRequested || junctionSourceMutationRequested)
           && (baseline.connection.updatedAt ?? null) !== update.observedUpdatedAt;
         const baselineTokenVersion = getHostedRuntimeOAuthTokenBundle(baseline.credential)?.tokenVersion ?? null;
         const tokenVersionMismatch = hostedRuntimeCredentialMutationRequiresTokenFence(update)
@@ -241,7 +264,12 @@ export async function applyHostedDeviceSyncRuntimeResult(input: {
         const tokenRefreshLeaseConflict = hostedRuntimeCredentialMutationRequiresTokenFence(update)
           && hasHostedRuntimeRefreshLeaseForTokenVersion(record, baselineTokenVersion);
         const versionMismatch =
-          connectionVersionMismatch || tokenVersionMismatch || tokenRefreshLeaseConflict;
+          connectionVersionMismatch
+          || tokenVersionMismatch
+          || tokenRefreshLeaseConflict
+          || (stateMutationRequested && sourceVersionMismatch)
+          || historicalMetadataResolution?.rejected === true
+          || historicalResetStateMismatch;
         const credentialUpdate = update.credential === undefined
           ? undefined
           : resolveHostedRuntimeCredentialUpdate(update.credential);
@@ -267,7 +295,8 @@ export async function applyHostedDeviceSyncRuntimeResult(input: {
             nextAccount.displayName = update.connection.displayName ?? null;
           }
           if (Object.prototype.hasOwnProperty.call(update.connection, "metadata")) {
-            nextAccount.metadata = sanitizeStoredDeviceSyncMetadata(update.connection.metadata ?? {});
+            nextAccount.metadata = historicalMetadataResolution?.metadata
+              ?? sanitizeStoredDeviceSyncMetadata(update.connection.metadata ?? {});
           }
           if (Object.prototype.hasOwnProperty.call(update.connection, "scopes")) {
             nextAccount.scopes = [...(update.connection.scopes ?? [])];
@@ -305,7 +334,7 @@ export async function applyHostedDeviceSyncRuntimeResult(input: {
         }
 
         let tokenUpdate: HostedExecutionDeviceSyncRuntimeApplyEntry["tokenUpdate"];
-        if (versionMismatch) {
+        if (versionMismatch && update.credential !== undefined) {
           tokenUpdate = "skipped_version_mismatch";
         } else if (update.credential !== undefined) {
           if (!credentialUpdate) {
@@ -660,9 +689,94 @@ function toHostedRuntimeConnectionSourceSnapshot(
   };
 }
 
+function resolveHostedRuntimeHistoricalMetadata(input: {
+  baselineMetadata: Record<string, unknown>;
+  candidateMetadata: Record<string, unknown> | undefined;
+  provider: string;
+}): { metadata: Record<string, unknown>; rejected: boolean } | null {
+  if (input.candidateMetadata === undefined) {
+    return null;
+  }
+
+  const candidateMetadata = sanitizeStoredDeviceSyncMetadata(input.candidateMetadata);
+  if (input.provider.trim().toLowerCase() !== "junction") {
+    return { metadata: candidateMetadata, rejected: false };
+  }
+
+  const baselineMetadata = sanitizeStoredDeviceSyncMetadata(input.baselineMetadata);
+  const baselineProgressMutable = canCurrentRuntimeMutateJunctionHistoricalBackfillProgress(
+    baselineMetadata,
+  );
+  const resolvedMetadata = baselineProgressMutable
+    ? mergeHostedDeviceSyncConnectionMetadata({
+        hostedMetadata: baselineMetadata,
+        localConnectionStateUnpublished: true,
+        localMetadata: candidateMetadata,
+      }).metadata
+    : baselineMetadata;
+  const metadata: Record<string, unknown> = { ...candidateMetadata };
+  let rejected = false;
+
+  for (const key of Object.values(JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS)) {
+    const candidateHasKey = Object.prototype.hasOwnProperty.call(candidateMetadata, key);
+    const resolvedHasKey = Object.prototype.hasOwnProperty.call(resolvedMetadata, key);
+    if (
+      candidateHasKey !== resolvedHasKey
+      || (candidateHasKey && !Object.is(candidateMetadata[key], resolvedMetadata[key]))
+    ) {
+      if (
+        !baselineProgressMutable
+        || key !== JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS.evidence
+      ) {
+        rejected = true;
+      }
+    }
+
+    if (resolvedHasKey) {
+      metadata[key] = resolvedMetadata[key];
+    } else {
+      delete metadata[key];
+    }
+  }
+
+  return { metadata, rejected };
+}
+
+function isHostedRuntimeHistoricalResetStateInconsistent(input: {
+  currentSources: readonly HostedDeviceConnectionSource[];
+  historicalMetadata: Record<string, unknown>;
+  provider: string;
+  sourceUpdates: readonly HostedExecutionDeviceSyncRuntimeConnectionSourceUpdate[];
+}): boolean {
+  if (input.provider.trim().toLowerCase() !== "junction") {
+    return false;
+  }
+
+  if (!canCurrentRuntimeMutateJunctionHistoricalBackfillProgress(input.historicalMetadata)) {
+    return false;
+  }
+
+  const sourcesByProvider = new Map<
+    string,
+    HostedDeviceConnectionSource | HostedExecutionDeviceSyncRuntimeConnectionSourceUpdate
+  >();
+  for (const source of input.currentSources) {
+    sourcesByProvider.set(source.sourceProviderSlug.trim().toLowerCase(), source);
+  }
+  for (const source of input.sourceUpdates) {
+    sourcesByProvider.set(source.sourceProviderSlug.trim().toLowerCase(), source);
+  }
+
+  const resetRequired = readJunctionHistoricalBackfillProgress(input.historicalMetadata)?.status
+    === "exhausted";
+  const resetPresent = [...sourcesByProvider.values()].some(requiresHistoricalResetDeviceSyncSource);
+  return resetRequired !== resetPresent;
+}
+
 function resolveHostedRuntimeSourceUpdatesToApply(input: {
   connectionId: string;
   currentSources: readonly HostedDeviceConnectionSource[];
+  historicalMetadata: Record<string, unknown>;
   provider: string;
   updates: readonly HostedExecutionDeviceSyncRuntimeConnectionSourceUpdate[];
 }): {
@@ -674,15 +788,35 @@ function resolveHostedRuntimeSourceUpdatesToApply(input: {
   );
   const toApply: HostedExecutionDeviceSyncRuntimeConnectionSourceUpdate[] = [];
   let staleCount = 0;
+  const historicalProgressMutable =
+    canCurrentRuntimeMutateJunctionHistoricalBackfillProgress(input.historicalMetadata);
+  const historicalResetRequired = historicalProgressMutable
+    && readJunctionHistoricalBackfillProgress(input.historicalMetadata)?.status === "exhausted";
 
   for (const rawUpdate of input.updates) {
-    const { sourceInstanceKeyCanonicalized, update } = normalizeHostedRuntimeSourceUpdateForProvider({
+    const normalized = normalizeHostedRuntimeSourceUpdateForProvider({
       connectionId: input.connectionId,
       provider: input.provider,
       update: rawUpdate,
     });
+    const sourceInstanceKeyCanonicalized = normalized.sourceInstanceKeyCanonicalized;
+    let update = normalized.update;
     const current = currentByInstanceKey.get(update.sourceInstanceKey) ?? null;
     const currentLastSeenAt = current?.lastSeenAt ?? null;
+
+    if (
+      (historicalResetRequired || !historicalProgressMutable)
+      && current
+      && requiresHistoricalResetDeviceSyncSource(current)
+      && !requiresHistoricalResetDeviceSyncSource(update)
+    ) {
+      update = {
+        ...update,
+        lastErrorCode: current.lastErrorCode,
+        lastErrorMessage: current.lastErrorMessage,
+        status: "error",
+      };
+    }
 
     if (sourceInstanceKeyCanonicalized) {
       if (current && isHostedRuntimeTimestampOlder(update.lastSeenAt, currentLastSeenAt)) {

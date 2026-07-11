@@ -38,7 +38,7 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", async () => {
   };
 });
 
-vi.mock("@/src/lib/hosted-onboarding/member-service", () => ({
+vi.mock("@/src/lib/hosted-onboarding/authentication-service", () => ({
   completeHostedPrivyVerification: mocks.completeHostedPrivyVerification,
 }));
 

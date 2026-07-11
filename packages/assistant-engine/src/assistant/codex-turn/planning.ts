@@ -468,7 +468,8 @@ export async function resolveAssistantRouteTurnPlan(input: {
   })
   const shouldInjectOnboardingGuidance =
     input.profile.promptProfile === 'conversation' &&
-    input.sharedPlan.onboardingGuidanceOpen
+    input.sharedPlan.onboardingGuidanceOpen &&
+    input.sharedPlan.conversationPolicy.audience.effectiveThreadIsDirect !== false
   const assistantToolNameAliases = null
   // Maintenance turns consume only the engine-supplied conversation evidence
   // plus canonical memory; the context snapshot (which carries health

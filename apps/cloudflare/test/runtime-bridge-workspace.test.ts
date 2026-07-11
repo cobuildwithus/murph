@@ -114,7 +114,7 @@ afterEach(async () => {
 });
 
 describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
-  it("rejects every non-idle checkpoint reason before snapshot side effects", async () => {
+  it("rejects every non-snapshot checkpoint reason before snapshot side effects", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-workspace-"));
     cleanupPaths.push(vaultRoot);
     await writeFile(path.join(vaultRoot, "note.md"), "workspace snapshot\n", "utf8");
@@ -145,10 +145,12 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     });
 
     for (const reason of HOSTED_WORKSPACE_CHECKPOINT_REASONS.filter((reason) =>
-      reason !== "idle_shutdown"
+      reason !== "canonical_runtime_commit" && reason !== "idle_shutdown"
     )) {
       await expect(createOptions().createCheckpointSnapshot(createCheckpointInput(reason)))
-        .rejects.toThrow("Hosted workspace snapshot construction is idle-shutdown only.");
+        .rejects.toThrow(
+          "Hosted workspace snapshot construction is idle-shutdown only.",
+        );
     }
 
     expect(readWorkspace).not.toHaveBeenCalled();
@@ -2662,9 +2664,9 @@ function createSystemMailboxImportItem(input: {
   };
 }
 
-function createCheckpointInput(
-  reason: (typeof HOSTED_WORKSPACE_CHECKPOINT_REASONS)[number] = "canonical_runtime_commit",
-) {
+function createCheckpointInput<
+  const Reason extends (typeof HOSTED_WORKSPACE_CHECKPOINT_REASONS)[number],
+>(reason: Reason) {
   const state = {
     recentStatuses: [],
     watermarks: {

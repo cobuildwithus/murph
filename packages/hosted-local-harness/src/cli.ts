@@ -413,8 +413,12 @@ async function runE2e(args: readonly string[], io: HostedLocalCliIo): Promise<vo
     printE2eScenarios(io.stdout ?? process.stdout);
     return;
   }
-  const scenario = positional[0] ?? "all";
-  const scenarios = resolveHostedLocalE2eScenarios(scenario);
+  const scenarioSelection = positional.length > 0 ? positional : ["all"];
+  const scenarios = resolveHostedLocalE2eScenarios(scenarioSelection);
+  const scenarioNames = scenarios.map((scenario) => scenario.name);
+  const runIdSuffix = scenarioSelection.length === 1
+    ? scenarioSelection[0]?.trim() || "all"
+    : `group-${scenarioNames.length}`;
   const profiled = applyHostedLocalProfile({
     env: io.env ?? process.env,
     profileName: parsed.profileName,
@@ -423,7 +427,7 @@ async function runE2e(args: readonly string[], io: HostedLocalCliIo): Promise<vo
     command: ["hosted-local", "e2e", ...args],
     env: profiled.env,
     profile: profiled.profile,
-    runIdSuffix: scenario,
+    runIdSuffix,
     status: "running",
   });
   const env = applyHostedLocalStateEnv({ env: profiled.env, state });
@@ -431,7 +435,7 @@ async function runE2e(args: readonly string[], io: HostedLocalCliIo): Promise<vo
     const result = await runHostedLocalE2eSuite({
       env,
       prepareRunnerBundle,
-      scenario,
+      scenario: scenarioNames,
     });
     if (result.terminationSignal) {
       state = await updateHostedLocalHarnessState(state, { status: "stopped" });
@@ -446,8 +450,6 @@ async function runE2e(args: readonly string[], io: HostedLocalCliIo): Promise<vo
     await updateHostedLocalHarnessState(state, { status: "failed" });
     throw error;
   }
-
-  void scenarios;
 }
 
 async function runCommand(args: readonly string[], io: HostedLocalCliIo): Promise<void> {
@@ -622,14 +624,13 @@ function printHelp(stdout: NodeJS.WritableStream): void {
       "  hosted-local worktree up <slug>",
       "  hosted-local worktree doctor <slug> [--json]",
       "  hosted-local worktree env <slug>",
-      "  hosted-local e2e [scenario] [--profile e2e:stub] [--list]",
+      "  hosted-local e2e [scenario ...] [--profile e2e:stub] [--list]",
       "  hosted-local run [--profile dev] -- <command> [args...]",
       "  hosted-local doctor [--profile dev] [--json]",
       "  hosted-local profiles",
       "",
-      "Compatibility:",
+      "Shortcut:",
       "  pnpm dev is a shortcut for pnpm hosted-local up.",
-      "  scripts/dev-hosted-local.ts remains a compatibility wrapper.",
       "",
     ].join("\n"),
   );
@@ -664,10 +665,11 @@ function printWorktreeHelp(stdout: NodeJS.WritableStream): void {
 function printE2eHelp(stdout: NodeJS.WritableStream): void {
   stdout.write(
     [
-      "Usage: hosted-local e2e [scenario] [--profile e2e:stub|e2e:live] [--no-bundle] [--list]",
+      "Usage: hosted-local e2e [scenario ...] [--profile e2e:stub|e2e:live] [--no-bundle] [--list]",
       "",
       "The command prepares one hosted-local runner bundle, runs the selected Vitest files,",
-      "and cleans stale Cloudflare runner containers once in a finally block.",
+      "and cleans stale Cloudflare runner containers once in a finally block. Named scenarios",
+      "run serially in one prepared suite so they can reuse the runner image and smoke proof.",
       "",
     ].join("\n"),
   );

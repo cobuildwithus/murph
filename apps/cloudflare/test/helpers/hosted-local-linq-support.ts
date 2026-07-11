@@ -11,10 +11,6 @@ import {
   createHostedAssistantConversationIdentifierBlind,
   hashHostedAssistantConversationIdentifier,
 } from "@murphai/hosted-execution/assistant-identifiers";
-import type {
-  HostedRunnerStatusResponse,
-} from "@murphai/hosted-execution/runtime-control";
-
 import { createHostedPhoneLookupKey } from "./hosted-contact-privacy.js";
 import {
   buildStableNumericSuffix,
@@ -36,13 +32,14 @@ export interface ObservedLinqRequest {
 }
 
 export type ObservedLinqRequestMatcher = (request: ObservedLinqRequest) => boolean;
+export type HostedLocalLinqWaitScenario = Pick<
+  HostedLocalFullStackScenario,
+  "buildFailureMessage"
+>;
 
 const linqCreateChatPath = "/chats";
 const linqAttachmentDownloadBasePath = "/attachment-downloads";
 const hostedLocalLinqObservedRequestWaitTimeoutMs = 180_000;
-const hostedLocalLinqWaitExpireAfterInFlightMs = 30_000;
-const hostedLocalLinqWaitNudgeAfterMailboxLagMs = 15_000;
-const hostedLocalLinqWaitAlarmAfterPendingDeliveryMs = 2_000;
 const hostedLocalRunnerProviderHost = "host.docker.internal";
 
 type HostedLinqInboundPartInput =
@@ -84,14 +81,14 @@ export interface HostedLocalLinqStub {
     expectedMethod: string;
     expectedPath: string;
     matchRequest?: ObservedLinqRequestMatcher;
-    scenario: HostedLocalFullStackScenario;
+    scenario: HostedLocalLinqWaitScenario;
     userId: string;
   }): Promise<ObservedLinqRequest>;
   waitForAdditionalSend(input: {
     baselineCount: number;
     expectedPath: string;
     matchRequest?: ObservedLinqRequestMatcher;
-    scenario: HostedLocalFullStackScenario;
+    scenario: HostedLocalLinqWaitScenario;
     userId: string;
   }): Promise<ObservedLinqRequest>;
   waitForMatchingRequestCount(input: {
@@ -99,20 +96,20 @@ export interface HostedLocalLinqStub {
     expectedMethod: string;
     expectedPath: string;
     matchRequest?: ObservedLinqRequestMatcher;
-    scenario: HostedLocalFullStackScenario;
+    scenario: HostedLocalLinqWaitScenario;
     userId: string;
   }): Promise<ObservedLinqRequest[]>;
   waitForMatchingSendCount(input: {
     expectedCount: number;
     expectedPath: string;
     matchRequest?: ObservedLinqRequestMatcher;
-    scenario: HostedLocalFullStackScenario;
+    scenario: HostedLocalLinqWaitScenario;
     userId: string;
   }): Promise<ObservedLinqRequest[]>;
   waitForSend(input: {
     expectedPath: string;
     matchRequest?: ObservedLinqRequestMatcher;
-    scenario: HostedLocalFullStackScenario;
+    scenario: HostedLocalLinqWaitScenario;
     userId: string;
   }): Promise<ObservedLinqRequest>;
 }
@@ -197,6 +194,16 @@ export async function startHostedLocalLinqStub(input: {
             id: messageId,
           },
         },
+      });
+      return;
+    }
+
+    if (request.method === "GET" && request.url && /^\/chats\/[^/]+$/u.test(request.url)) {
+      const chatId = decodeURIComponent(request.url.split("/")[2] ?? "unknown");
+      writeJsonResponse(response, 200, {
+        handles: [],
+        id: chatId,
+        is_group: false,
       });
       return;
     }
@@ -320,14 +327,10 @@ export async function startHostedLocalLinqStub(input: {
     expectedMethod: string;
     expectedPath: string;
     matchRequest?: ObservedLinqRequestMatcher;
-    scenario: HostedLocalFullStackScenario;
+    scenario: HostedLocalLinqWaitScenario;
     userId: string;
   }): Promise<ObservedLinqRequest[]> => {
     const startedAt = Date.now();
-    let nextNudgeAt = startedAt;
-    let mailboxLagFirstObservedAt: number | null = null;
-    let pendingDeliveryFirstObservedAt: number | null = null;
-    let latestStatusReadError: string | null = null;
 
     while ((Date.now() - startedAt) < hostedLocalLinqObservedRequestWaitTimeoutMs) {
       const matchingRequests = observedRequests.filter((request) =>
@@ -343,47 +346,6 @@ export async function startHostedLocalLinqStub(input: {
         return matchingRequests;
       }
 
-      const now = Date.now();
-      if (now >= nextNudgeAt) {
-        nextNudgeAt = now + 2_000;
-        const status = await input.scenario.harness.readUserStatus(input.userId)
-          .catch((error: unknown) => {
-            latestStatusReadError = error instanceof Error ? error.message : String(error);
-            return null;
-          });
-        mailboxLagFirstObservedAt = updateHostedLocalLinqMailboxLagFirstObservedAt({
-          firstObservedAt: mailboxLagFirstObservedAt,
-          now,
-          status,
-        });
-        pendingDeliveryFirstObservedAt =
-          updateHostedLocalLinqPendingDeliveryFirstObservedAt({
-            firstObservedAt: pendingDeliveryFirstObservedAt,
-            now,
-            status,
-          });
-        if (status) {
-          if (shouldExpireHostedLocalLinqWaitInFlightForStatus({ now, status })) {
-            await input.scenario.harness.expireRunnerActivityForTest(input.userId)
-              .catch(() => {});
-            await input.scenario.harness.nudgeUserBestEffort(input.userId);
-          } else if (shouldRunHostedLocalLinqWaitAlarmInvocationForStatus({
-            now,
-            pendingDeliveryFirstObservedAt,
-            status,
-          })) {
-            await input.scenario.harness.runHostedAlarmInvocationForTest(input.userId)
-              .catch(() => input.scenario.harness.nudgeUserBestEffort(input.userId));
-          } else if (shouldNudgeHostedLocalLinqWaitForStatus({
-            mailboxLagFirstObservedAt,
-            now,
-            status,
-          })) {
-            await input.scenario.harness.nudgeUserBestEffort(input.userId);
-          }
-        }
-      }
-
       await sleep(250);
     }
 
@@ -392,8 +354,7 @@ export async function startHostedLocalLinqStub(input: {
         `Timed out waiting for ${input.expectedCount} Linq request(s) for ${input.userId}.`,
         `expected path: ${input.expectedPath}`,
         `observed requests: ${JSON.stringify(summarizeObservedLinqRequests(observedRequests))}`,
-        latestStatusReadError ? `latest status read error: ${latestStatusReadError}` : null,
-      ].filter((line): line is string => Boolean(line))),
+      ]),
     );
   };
 
@@ -498,126 +459,6 @@ export async function startHostedLocalLinqStub(input: {
         })
       )[0]!,
   };
-}
-
-export function shouldExpireHostedLocalLinqWaitInFlightForStatus(input: {
-  now: number;
-  status: HostedRunnerStatusResponse;
-}): boolean {
-  if (!input.status.inFlight) {
-    return false;
-  }
-
-  const activityAt = readHostedLocalLinqStatusActivityAtMs(input.status);
-  return activityAt !== null
-    && input.now - activityAt >= hostedLocalLinqWaitExpireAfterInFlightMs;
-}
-
-export function shouldNudgeHostedLocalLinqWaitForStatus(input: {
-  mailboxLagFirstObservedAt: number | null;
-  now: number;
-  status: HostedRunnerStatusResponse;
-}): boolean {
-  if (input.status.inFlight || input.status.lastErrorCode) {
-    return false;
-  }
-
-  return hostedLocalLinqStatusHasMailboxLag(input.status)
-    && input.mailboxLagFirstObservedAt !== null
-    && input.now - input.mailboxLagFirstObservedAt
-      >= hostedLocalLinqWaitNudgeAfterMailboxLagMs;
-}
-
-export function shouldRunHostedLocalLinqWaitAlarmInvocationForStatus(input: {
-  now: number;
-  pendingDeliveryFirstObservedAt: number | null;
-  status: HostedRunnerStatusResponse;
-}): boolean {
-  if (input.status.inFlight || input.status.lastErrorCode) {
-    return false;
-  }
-
-  return hostedLocalLinqStatusHasPendingDelivery(input.status)
-    && input.pendingDeliveryFirstObservedAt !== null
-    && input.now - input.pendingDeliveryFirstObservedAt
-      >= hostedLocalLinqWaitAlarmAfterPendingDeliveryMs
-    && hostedLocalLinqStatusNextWakeIsDue(input.status, input.now);
-}
-
-function readHostedLocalLinqStatusActivityAtMs(status: HostedRunnerStatusResponse): number | null {
-  const rawActivityAt = status.heartbeatAt ?? status.lastInvocationAt ?? null;
-  if (rawActivityAt === null) {
-    return null;
-  }
-
-  const activityAt = Date.parse(rawActivityAt);
-  return Number.isFinite(activityAt) ? activityAt : null;
-}
-
-function updateHostedLocalLinqMailboxLagFirstObservedAt(input: {
-  firstObservedAt: number | null;
-  now: number;
-  status: HostedRunnerStatusResponse | null;
-}): number | null {
-  if (!input.status || !hostedLocalLinqStatusHasMailboxLag(input.status)) {
-    return null;
-  }
-
-  return input.firstObservedAt ?? input.now;
-}
-
-function hostedLocalLinqStatusHasMailboxLag(status: HostedRunnerStatusResponse): boolean {
-  return status.mailboxLag.some((lane) => {
-    try {
-      return BigInt(lane.lag) > 0n;
-    } catch {
-      return lane.lag !== "0";
-    }
-  });
-}
-
-function updateHostedLocalLinqPendingDeliveryFirstObservedAt(input: {
-  firstObservedAt: number | null;
-  now: number;
-  status: HostedRunnerStatusResponse | null;
-}): number | null {
-  if (!input.status || !hostedLocalLinqStatusHasPendingDelivery(input.status)) {
-    return null;
-  }
-
-  return input.firstObservedAt ?? input.now;
-}
-
-function hostedLocalLinqStatusHasPendingDelivery(status: HostedRunnerStatusResponse): boolean {
-  const pendingDeliveryEffects =
-    status.workspace?.redactedStatus?.hostedOutboxPendingDeliveryEffects;
-
-  if (typeof pendingDeliveryEffects === "number") {
-    return pendingDeliveryEffects > 0;
-  }
-
-  if (typeof pendingDeliveryEffects === "string") {
-    try {
-      return BigInt(pendingDeliveryEffects) > 0n;
-    } catch {
-      return pendingDeliveryEffects !== "0";
-    }
-  }
-
-  return false;
-}
-
-function hostedLocalLinqStatusNextWakeIsDue(
-  status: HostedRunnerStatusResponse,
-  now: number,
-): boolean {
-  const rawNextWakeAt = status.workspace?.nextWakeAt ?? null;
-  if (!rawNextWakeAt) {
-    return false;
-  }
-
-  const nextWakeAt = Date.parse(rawNextWakeAt);
-  return Number.isFinite(nextWakeAt) && nextWakeAt <= now;
 }
 
 export function buildHostedLinqInboundEvent(

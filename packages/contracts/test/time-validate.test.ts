@@ -53,6 +53,24 @@ describe("time helpers", () => {
         "2026-04-08T00:00:00.000Z",
       ),
     ).toBe(0);
+    expect(
+      compareIsoTimestampsAscending(
+        "2026-04-08T00:00:00.123456Z",
+        "2026-04-08T00:00:00.123457Z",
+      ),
+    ).toBeLessThan(0);
+    expect(
+      compareIsoTimestampsAscending(
+        "2026-04-08T01:00:00.123456+01:00",
+        "2026-04-08T00:00:00.1234560Z",
+      ),
+    ).toBe(0);
+    expect(
+      compareIsoTimestampsAscending(
+        "2026-04-08T01:00:00.123456+01:00",
+        "2026-04-08T00:00:00.123457Z",
+      ),
+    ).toBeLessThan(0);
     expect(compareIsoTimestampsAscending("not-a-date-b", "not-a-date-a")).toBeGreaterThan(0);
     expect(
       compareNullableIsoTimestampsAscending(null, "2026-04-08T00:00:00.000Z"),

@@ -17,13 +17,6 @@ export type {
   ProductLabelSearchItem,
 } from "./product-labels";
 export { createProductLabelsQueries } from "./product-labels";
-export type { FoodDetail, FoodSearchItem } from "./foods";
-export {
-  createFoodsQueries,
-  getFoodById,
-  getFoodByUpc,
-  searchFoods,
-} from "./foods";
 
 const SUPPLEMENT_SEARCH_WEAK_QUERY_TOKENS = [
   "supplement",
