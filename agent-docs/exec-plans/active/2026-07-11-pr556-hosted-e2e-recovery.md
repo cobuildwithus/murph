@@ -51,9 +51,32 @@ archive construction and publication did not hold the canonical-write lock, so
 a canonical mutation could change the local base across that boundary. The v2
 snapshot transaction now holds the existing lock through publication, and a
 focused bridge test proves a canonical writer cannot enter during that window.
+The final coverage/write audit tightened that proof to queue one writer while
+archive construction is blocked and keep it excluded through upload and
+publication; this guards the entire documented boundary rather than only the
+completion call.
+
+Final-head CI and the local full-stack scenario then proved a second ordering
+defect behind the same fallback: the prior snapshot was valid but shorter than
+the first pending audit append base. The outer initial mailbox import bypassed
+the runner's canonical mailbox-write port, so its canonical inbox/audit effects
+had no receipt even though later managed-automation receipts depended on those
+bytes. The initial import now runs as a mailbox-only pass through the same
+runner primitive as later imports. It preserves the existing bootstrap lanes,
+conversation deferral, prefetch, and deferred enrichment timing while
+atomically checkpointing any canonical receipt with the imported watermark.
+Cold restore can therefore replay the complete receipt sequence over the prior
+snapshot before reimporting already-accounted mailbox rows.
 
 Focused assistant-runtime tests (87), Cloudflare mailbox-port tests (3), the
-snapshot-bridge suite (25), and both package typechecks pass. The pre-fix full
-affected diff gate passed all affected tests, typechecks, builds, lint, and dev
-smoke; final affected verification remains required after the snapshot
-serialization correction.
+snapshot-bridge suite (25), the workspace entrypoint suite (206), and both
+package typechecks pass. The exact hosted-local snapshot-publication fallback
+scenario now passes through the intentional rejection, cold restore, second
+reply, and clean replacement snapshot. Final affected verification passes all
+repository guards, the assistant-runtime typecheck and 1,528 tests, plus the
+Cloudflare app typecheck and 1,734 tests. The final coverage/write audit added
+entrypoint proof that the initial mailbox checkpoint atomically carries the
+receipt fingerprint, both mailbox watermarks, and workspace-version advance;
+the focused suite, typecheck, and affected verification still pass. The final
+security/privacy audit found no medium-or-higher issue. Scoped commit, push,
+and final-head CI remain.

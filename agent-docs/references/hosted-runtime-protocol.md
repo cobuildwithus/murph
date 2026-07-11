@@ -771,10 +771,17 @@ the receipt fingerprint, snapshot ref, wake fields, and retention wake.
 Cloudflare forwarding maps an unreadable successful checkpoint response to a
 server error so this bounded ambiguity path remains reachable; verified
 authority and fence rejections remain deterministic `401` failures. Cold
-restore replays that log over the prior snapshot and marks
-affected context domains dirty; when the restored log is at the hard entry
-bound, the runtime consolidates it through an idle snapshot before foreground
-mailbox or assistant work. That recovery snapshot publishes an immediate
+restore replays that log over the prior snapshot and marks affected context
+domains dirty. The initial mailbox import uses the same canonical mailbox-write
+port as later runner imports, including bootstrap lane selection and
+conversation deferral. When that import performs a canonical write, the runner
+publishes its receipt and imported watermark atomically before later assistant
+or managed-automation writes can add dependent receipts. Restore can therefore
+replay the complete canonical sequence directly over the published snapshot
+without reconstructing unauthenticated local prefixes. When the restored log
+is at the hard entry bound, the runtime consolidates it through an idle
+snapshot before foreground mailbox or assistant work. That recovery snapshot
+publishes an immediate
 mailbox-continuation wake so web accepts it even when foreground conversation
 rows are already pending; immediately after that snapshot, a status-only
 checkpoint durably restores the prior wake projection before foreground work

@@ -285,11 +285,32 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
   it("holds the canonical write lock through snapshot publication", async () => {
     const vaultRoot = await createVaultRoot();
     const { calls, platform } = createRuntimePlatform();
+    let signalArchiveStarted: () => void = () => undefined;
+    const archiveStarted = new Promise<void>((resolve) => {
+      signalArchiveStarted = resolve;
+    });
+    let releaseArchive: () => void = () => undefined;
+    const archiveBlocked = new Promise<void>((resolve) => {
+      releaseArchive = resolve;
+    });
+    const baseArchiveBuilder = createSnapshotArchiveBuilder();
+    const snapshotArchiveBuilder: HostedWorkspaceSnapshotArchiveBuilder = {
+      buildEncryptedSnapshot: vi.fn(async (input) => {
+        signalArchiveStarted();
+        await archiveBlocked;
+        return await baseArchiveBuilder.buildEncryptedSnapshot(input);
+      }),
+    };
+    let signalPublicationStarted: () => void = () => undefined;
+    const publicationStarted = new Promise<void>((resolve) => {
+      signalPublicationStarted = resolve;
+    });
     let releasePublication: () => void = () => undefined;
     const publicationBlocked = new Promise<void>((resolve) => {
       releasePublication = resolve;
     });
     calls.completeSnapshotSession.mockImplementationOnce(async (input) => {
+      signalPublicationStarted();
       await publicationBlocked;
       return {
         checkpoint: createCheckpointResponse({
@@ -302,21 +323,24 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     });
     const options = createBridgeOptions({
       platform,
+      snapshotArchiveBuilder,
       vaultRoot,
     });
 
     const snapshot = options.createCheckpointSnapshot(
       createCheckpointInput("idle_shutdown"),
     );
-    await vi.waitFor(() => {
-      expect(calls.completeSnapshotSession).toHaveBeenCalledOnce();
-    });
+    await archiveStarted;
 
     let canonicalWriterEntered = false;
     const canonicalWrite = withCanonicalWriteLock(vaultRoot, async () => {
       canonicalWriterEntered = true;
     });
     await new Promise<void>((resolve) => setTimeout(resolve, 25));
+    expect(canonicalWriterEntered).toBe(false);
+
+    releaseArchive();
+    await publicationStarted;
     expect(canonicalWriterEntered).toBe(false);
 
     releasePublication();

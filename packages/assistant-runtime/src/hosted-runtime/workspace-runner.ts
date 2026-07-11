@@ -315,12 +315,15 @@ export interface HostedWorkspaceRunnerInput {
     input: HostedWorkspaceRunnerRuntimeStatusCheckpointInput,
   ) => Promise<HostedWorkspaceCheckpointResponse> | HostedWorkspaceCheckpointResponse) | null;
   checkpointRequestBuilder: HostedWorkspaceCheckpointRequestBuilder;
+  deferInitialMailboxPostCheckpointEffects?: boolean;
   expectedUserId: string;
   foregroundImportItem?: HostedWorkspaceRunnerMailboxImportItem | null;
   importItem: HostedWorkspaceRunnerMailboxImportItem;
   initialAssistantInputBatch?: HostedWorkspaceRunnerAssistantInputBatch | null;
+  initialMailboxConversationDeferral?: HostedMailboxConversationDeferral | null;
   initialMailboxImport?: HostedMailboxImportCheckpointResult | null;
   initialMailboxImportContext?: HostedWorkspaceRunnerMailboxImportContext | null;
+  initialMailboxImportLanes?: readonly ("conversation" | "system")[];
   initialMailboxPrefetch?: HostedMailboxPrefixPrefetch | null;
   limitPerLane: number;
   materializeWorkspaceArtifacts?: HostedWorkspaceArtifactMaterializer | null;
@@ -627,10 +630,12 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
       async () => await importHostedMailboxForWorkspaceRunner({
         checkpointRequestBuilder: checkpointRequestSession,
         checkpointReason: "import",
+        deferConversationUntil: input.initialMailboxConversationDeferral ?? null,
         deferCheckpoint: true,
         importItemContext: input.initialMailboxImportContext ?? null,
         input,
-        lanes: input.runAssistantPhase ? ["conversation"] : undefined,
+        lanes: input.initialMailboxImportLanes
+          ?? (input.runAssistantPhase ? ["conversation"] : undefined),
         prefetch: input.initialMailboxPrefetch ?? null,
         requestId: input.requestId,
         signal: input.signal ?? null,
@@ -697,10 +702,12 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
   }
 
   if (!input.runAssistantPhase) {
-    await runHostedMailboxPostCheckpointEffectsAndLogBestEffort({
-      checkpointRequestBuilder: checkpointRequestSession,
-      input,
-    });
+    if (input.deferInitialMailboxPostCheckpointEffects !== true) {
+      await runHostedMailboxPostCheckpointEffectsAndLogBestEffort({
+        checkpointRequestBuilder: checkpointRequestSession,
+        input,
+      });
+    }
     return {
       afterDurableCheckpoint,
       assistantPhaseResult: null,
