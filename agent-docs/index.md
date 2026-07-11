@@ -1,6 +1,6 @@
 # Murph Agent Docs Index
 
-Last verified: 2026-07-10
+Last verified: 2026-07-11
 
 ## Purpose
 
@@ -26,7 +26,7 @@ It intentionally lists live architecture, product, verification, and package-bou
 | `docs/legal-consent-implementation.md` | Hosted legal consent document registry, event/grant storage, API routes, and gate helpers. | Hosted legal consent workflow | High | 2026-05-13 |
 | `docs/health-data-incident-runbook.md` | Engineering runbook for suspected health-data incidents, consent bypasses, vendor incidents, and tracking disclosures. | Health-data incident response | High | 2026-04-29 |
 | `docs/templates/README.md` | Entry points for reusable device-provider templates. | Template inventory | Low | 2026-04-03 |
-| `agent-docs/PRODUCT_SENSE.md` | Product behavior guardrails for implementation work, including conversation-first control coverage and exceptions. | Current product behavior | High | 2026-07-10 |
+| `agent-docs/PRODUCT_SENSE.md` | Product behavior guardrails for implementation work, including conversation-first control coverage and exceptions plus the bounded public changelog archive. | Current product behavior | High | 2026-07-11 |
 | `agent-docs/PRODUCT_CONSTITUTION.md` | Internal product constitution and tradeoff rules. | Product principles | High | 2026-04-22 |
 | `agent-docs/FRONTEND.md` | Frontend implementation guidance for `apps/web`, including design-system sources (`PRODUCT.md`, `DESIGN.md`) and UI workflow rules. | Current frontend implementation guidance | Medium | 2026-04-24 |
 | `agent-docs/product-marketing-context.md` | Product marketing context: positioning, audience, differentiation, customer language, brand voice, and the protocol outcome graph. Rewritten 2026-06-10 around the group-challenge wedge with fact/hypothesis/target-state labels. | Product/marketing decisions | High | 2026-06-10 |
