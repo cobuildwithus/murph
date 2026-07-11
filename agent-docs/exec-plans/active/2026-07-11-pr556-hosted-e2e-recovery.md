@@ -79,4 +79,11 @@ entrypoint proof that the initial mailbox checkpoint atomically carries the
 receipt fingerprint, both mailbox watermarks, and workspace-version advance;
 the focused suite, typecheck, and affected verification still pass. The final
 security/privacy audit found no medium-or-higher issue. Scoped commit, push,
-and final-head CI remain.
+and final-head CI then passed both receipt-fallback scenarios but exposed an
+invalid shutdown test control: `Container.destroy()` delivers an immediate
+SIGKILL, so the process could not enter the checkpoint barrier the scenario
+intended to exercise. The hosted-local test container now uses
+`stop("SIGTERM")`, matching the graceful signal used by production rollouts. A
+focused unit test proves the control selects `stop("SIGTERM")` and never
+`destroy()`, and the exact shutdown-checkpoint hosted E2E now passes. Delta
+audit, affected verification, scoped commit, push, and final-head CI remain.

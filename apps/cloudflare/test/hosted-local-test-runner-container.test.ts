@@ -218,6 +218,25 @@ async function createAuthorizedOpenAiImagesRequest(): Promise<Request> {
 }
 
 describe("hosted-local test RunnerContainer outbound composition", () => {
+  it("uses SIGTERM for the shutdown checkpoint control", async () => {
+    const stop = vi.fn(async () => undefined);
+    const destroy = vi.fn(async () => undefined);
+    const container: HostedLocalTestRunnerContainer = Object.create(
+      HostedLocalTestRunnerContainer.prototype,
+    );
+    Object.defineProperties(container, {
+      destroy: { value: destroy },
+      stop: { value: stop },
+    });
+
+    await expect(container.beginShutdownCheckpointGracefulStopForTest({
+      userId: "member_shutdown_checkpoint_signal",
+    })).resolves.toEqual({ ok: true });
+    expect(stop).toHaveBeenCalledOnce();
+    expect(stop).toHaveBeenCalledWith("SIGTERM");
+    expect(destroy).not.toHaveBeenCalled();
+  });
+
   it("wraps only the deterministic hosted-local fault and external-provider hosts", () => {
     const wrapped = readHostedLocalTestOutboundByHost();
 

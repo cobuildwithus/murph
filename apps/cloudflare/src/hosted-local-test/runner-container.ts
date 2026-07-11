@@ -68,10 +68,11 @@ export class RunnerContainer extends BaseRunnerContainer {
   async beginShutdownCheckpointGracefulStopForTest(
     _input: { userId: string },
   ): Promise<{ ok: true }> {
-    // This is the same graceful container-platform stop used during a rollout,
-    // without aborting the active runtime request first. The armed outbound
-    // barrier can therefore hold the shutdown checkpoint publication itself.
-    await this.destroy();
+    // Cloudflare rollouts send SIGTERM. Container.destroy() sends SIGKILL, so
+    // use the graceful stop primitive without aborting the active runtime
+    // request first. The armed outbound barrier can then hold the shutdown
+    // checkpoint publication itself.
+    await this.stop("SIGTERM");
     return { ok: true };
   }
 
