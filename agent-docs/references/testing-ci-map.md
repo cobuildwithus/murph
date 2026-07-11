@@ -103,10 +103,14 @@ Last verified: 2026-07-09
   activation exception: `MURPH_HOSTED_ACTION_APPROVAL_OUTCOME_WAKE_ENABLED`
   must stay unset or `0` while the matching Cloudflare consumer is unverified.
   After the protected-main Cloudflare `container_rollout=immediate` deployment
-  and managed-container smoke pass, set it to `1` and redeploy web. To roll back,
-  set it to `0` and redeploy web before draining the system lane and rolling back
-  Cloudflare. The disabled path emits no new mailbox kind and retains the legacy
-  approval confirmation fallback. Approval-outcome coverage also proves bare
+  and managed-container smoke pass, keep it disabled for a full 30-minute drain
+  after the last old runtime bundle can serve an approval request. Restart that
+  drain if an old bundle can still serve later. This covers the 15-minute pending
+  approval lifetime plus the fresh 15-minute approved lifetime before the gate
+  is set to `1` and web is redeployed. To roll back, set it to `0` and redeploy
+  web before draining the system lane and rolling back Cloudflare. The disabled
+  path emits no new mailbox kind and retains the legacy approval confirmation
+  fallback. Approval-outcome coverage also proves bare
   return links when enabled, one parked owner across repeated turns in the same
   approval cycle, exact-cycle causal selection and generation validation instead
   of oldest-owner fallback, retained causal control work across foreground

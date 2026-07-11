@@ -507,14 +507,20 @@ unless `MURPH_HOSTED_ACTION_APPROVAL_OUTCOME_WAKE_ENABLED=1`; while disabled,
 web retains the legacy runtime recheck and confirmation-message fallback and
 does not append the new mailbox kind. Merge with the gate disabled, deploy
 Cloudflare with `container_rollout=immediate`, and wait for the managed-container
-smoke to prove the new parser/runtime bundle is active. Only then set the gate to
-`1` and redeploy web. Once enabled, browser returns use a bare conversation link;
-the confirmation-message fallback exists only while the gate is disabled. New
-web producer behavior against an old runtime is not
-safe because the old parser quarantines the new system row and blocks system-lane
-progress. Roll back in the reverse order: set the gate to `0` and redeploy web
-first so no new rows can be produced, verify system-lane lag is clear, then roll
-back Cloudflare. Do not roll the runtime back while the producer remains active.
+smoke to prove the new parser/runtime bundle is active. Keep the gate disabled
+for a full 30-minute drain after the last old runtime bundle can serve an
+approval request; restart the drain window if an old bundle can still serve
+later. The drain covers the 15-minute pending approval lifetime plus the fresh
+15-minute approved lifetime, so pre-cutover approvals retain the legacy
+confirmation continuation through their entire actionable window. Only after
+that drain may the gate be set to `1` and web redeployed. Once enabled, browser
+returns use a bare conversation link; the confirmation-message fallback exists
+only while the gate is disabled. New web producer behavior against an old
+runtime is not safe because the old parser quarantines the new system row and
+blocks system-lane progress. Roll back in the reverse order: set the gate to `0`
+and redeploy web first so no new rows can be produced, verify system-lane lag is
+clear, then roll back Cloudflare. Do not roll the runtime back while the producer
+remains active.
 
 ### Hosted Runtime Maintenance Wake
 
