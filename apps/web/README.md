@@ -645,9 +645,9 @@ ciphertext first, and falls back to legacy JSON only when ciphertext is null;
 this keeps both old calls and new calls usable while the scrub runs.
 
 Freeze production deploys and rollbacks before promoting the replacement web,
-then record its exact commit. Preliminary bounded backfill batches may run as
-soon as that deployment is live, but they are not the authoritative scrub: an
-invocation of the previous web can still finish later and write plaintext.
+then record its exact commit. Preliminary count-only dry runs may start once
+that deployment is live, but no applying backfill is safe yet: an invocation
+of the previous web can still finish later and require or write plaintext.
 Prove the production alias points at the replacement commit with
 `apps/web/scripts/resolve-vercel-production-alias-sha.ts` and the secure
 `HOSTED_WEB_VERCEL_*` operator environment, then wait the configured
@@ -655,7 +655,9 @@ Prove the production alias points at the replacement commit with
 Resolve the alias again after the drain. If it changed, select the replacement
 or a newer compatible commit and restart the full drain.
 
-Only after that final alias proof, run
+Before the final alias proof and prior-function drain, only count-only dry runs
+are safe; do not use `--apply` because it scrubs plaintext that a warm previous
+function may still need. Only after that final alias proof, run
 `pnpm --dir apps/web privacy:backfill-phone-calls -- --batch-size 50` through
 the production environment wrapper shown by the script's `--help`. Review the
 count-only dry run, add `--apply`, and repeat bounded batches while `hasMore` is
@@ -666,6 +668,11 @@ plaintext in one compare-and-set write; conflicts are safe to rerun. Output
 never contains row ids, member ids, plaintext, or ciphertext. Record the
 replacement commit, both alias proofs, elapsed drain, batch summaries, and
 final zero-row dry run before ending the deploy freeze.
+
+Live Retell consultation decrypts under one 10-second deadline spanning token
+exchange and KMS, while honoring an earlier caller abort. This path does not
+retry provider calls and fails closed without falling back to legacy plaintext
+when ciphertext is present.
 
 The rollback floor begins when the replacement deployment writes its first
 encrypted-only phone-call row. Keep that deployment live throughout the drain

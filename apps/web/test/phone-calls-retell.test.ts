@@ -3,6 +3,7 @@ import { createHmac } from "node:crypto";
 import { Prisma, type HostedPhoneCall } from "@prisma/client";
 import type {
   HostedPhoneCallBrief,
+  HostedPhoneCallResult,
 } from "@murphai/hosted-execution/phone-calls";
 import {
   hostedPhoneCallBriefSchema,
@@ -11,11 +12,15 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   readHostedPhoneCallResult,
+  type HostedPhoneCallCrypto,
 } from "@/src/lib/phone-calls/crypto";
 import {
   createRetellPhoneCallRuntime,
 } from "@/src/lib/phone-calls/retell-runtime";
-import { consultPhoneCall } from "@/src/lib/phone-calls/consult";
+import {
+  consultPhoneCall,
+  getHostedPhoneCallForConsultation,
+} from "@/src/lib/phone-calls/consult";
 import {
   buildPhoneCallResultNotificationInstructions,
   handleRetellCallAnalyzed,
@@ -33,6 +38,9 @@ type RetellWebhookTx = Parameters<RetellWebhookStore["$transaction"]>[0] extends
 type RetellWebhookFindUniqueInput = Parameters<RetellWebhookTx["hostedPhoneCall"]["findUnique"]>[0];
 type RetellWebhookFindUniqueOrThrowInput = Parameters<RetellWebhookTx["hostedPhoneCall"]["findUniqueOrThrow"]>[0];
 type RetellWebhookUpdateManyInput = Parameters<RetellWebhookTx["hostedPhoneCall"]["updateMany"]>[0];
+type ConsultationStore = NonNullable<
+  Parameters<typeof getHostedPhoneCallForConsultation>[0]["prisma"]
+>;
 
 const VALID_BRIEF: HostedPhoneCallBrief = {
   allowTransferToUser: true,
@@ -527,23 +535,22 @@ describe("Retell phone-call result handling", () => {
         },
       },
     });
-    expect(store.findUniqueOrThrowCalls).toEqual([
-      {
-        where: {
-          id: "hpc_123",
-        },
-      },
-    ]);
+    expect(store.findUniqueOrThrowCalls).toEqual([]);
     expect(store.appendResultNotificationCalls.map((callRecord) => callRecord.id)).toEqual([
       "hpc_123",
       "hpc_123",
     ]);
-    const notificationCall = store.appendResultNotificationCalls[0]!;
-    expect(notificationCall.resultJson).toBeNull();
+    expect(store.appendResultNotificationResults).toEqual([
+      {
+        outcome: "completed",
+        summary: "The appointment is booked for Friday at 3:45 PM.",
+      },
+      undefined,
+    ]);
     expect(JSON.stringify(store.updateManyCalls[0]!.data)).not.toContain(
       "The appointment is booked for Friday at 3:45 PM.",
     );
-    await expect(readHostedPhoneCallResult({ call: notificationCall })).resolves.toEqual({
+    await expect(readHostedPhoneCallResult({ call: store.currentCall()! })).resolves.toEqual({
       outcome: "completed",
       summary: "The appointment is booked for Friday at 3:45 PM.",
     });
@@ -994,6 +1001,41 @@ describe("consultPhoneCall", () => {
   });
 });
 
+describe("getHostedPhoneCallForConsultation", () => {
+  it("threads the caller abort signal into ciphertext decryption", async () => {
+    const signal = new AbortController().signal;
+    const decryptBrief = vi.fn<HostedPhoneCallCrypto["decryptBrief"]>(async () => VALID_BRIEF);
+    const crypto: HostedPhoneCallCrypto = {
+      decryptBrief,
+      decryptResult: async () => ({
+        outcome: "completed",
+        summary: "Completed.",
+      }),
+      encryptBrief: async () => "encrypted-brief",
+      encryptResult: async () => "encrypted-result",
+    };
+    const prisma: ConsultationStore = {
+      hostedPhoneCall: {
+        findUnique: async () => buildHostedPhoneCall({
+          briefEncrypted: "encrypted-brief",
+          briefJson: null,
+          status: "calling",
+        }),
+        updateMany: async () => ({ count: 0 }),
+      },
+    };
+
+    await expect(getHostedPhoneCallForConsultation({
+      callId: "hpc_123",
+      crypto,
+      prisma,
+      providerCallId: "retell_call_123",
+      signal,
+    })).resolves.toMatchObject({ brief: VALID_BRIEF });
+    expect(decryptBrief).toHaveBeenCalledWith(expect.objectContaining({ signal }));
+  });
+});
+
 function signRetellBody(input: {
   apiKey: string;
   now: Date;
@@ -1028,19 +1070,24 @@ function buildHostedPhoneCall(overrides: Partial<HostedPhoneCall> = {}): HostedP
 }
 
 function createWebhookStore(input: {
-  appendResultNotification?: (call: HostedPhoneCall) => Promise<void>;
+  appendResultNotification?: (
+    call: HostedPhoneCall,
+    result?: HostedPhoneCallResult,
+  ) => Promise<void>;
   call: HostedPhoneCall;
 }) {
   let currentCall: HostedPhoneCall | null = input.call;
   const appendResultNotificationCalls: HostedPhoneCall[] = [];
+  const appendResultNotificationResults: Array<HostedPhoneCallResult | undefined> = [];
   const findUniqueCalls: RetellWebhookFindUniqueInput[] = [];
   const findUniqueOrThrowCalls: RetellWebhookFindUniqueOrThrowInput[] = [];
   const updateManyCalls: RetellWebhookUpdateManyInput[] = [];
 
   const tx: RetellWebhookTx = {
-    appendResultNotification: async (call) => {
+    appendResultNotification: async (call, result) => {
       appendResultNotificationCalls.push(call);
-      await input.appendResultNotification?.(call);
+      appendResultNotificationResults.push(result);
+      await input.appendResultNotification?.(call, result);
       return {
         notificationMailboxItemId: `mailbox_${call.id}`,
         notificationUserId: call.memberId,
@@ -1111,6 +1158,7 @@ function createWebhookStore(input: {
 
   return {
     appendResultNotificationCalls,
+    appendResultNotificationResults,
     currentCall: () => currentCall,
     findUniqueCalls,
     findUniqueOrThrowCalls,

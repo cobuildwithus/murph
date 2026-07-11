@@ -51,6 +51,7 @@ export async function getHostedPhoneCallForConsultation(input: {
   crypto?: HostedPhoneCallCrypto;
   providerCallId: string;
   prisma?: HostedPhoneCallConsultationStore;
+  signal?: AbortSignal;
 }): Promise<HostedPhoneCallForConsultation> {
   const prisma = input.prisma ?? getPrisma();
   const crypto = input.crypto ?? hostedPhoneCallCrypto;
@@ -93,7 +94,7 @@ export async function getHostedPhoneCallForConsultation(input: {
   }
 
   return {
-    brief: await readHostedPhoneCallBrief({ call, crypto }),
+    brief: await readHostedPhoneCallBrief({ call, crypto, signal: input.signal }),
     id: call.id,
     memberId: call.memberId,
     providerCallId: call.providerCallId,

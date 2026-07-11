@@ -11,6 +11,9 @@ const LOCAL_KMS_IV_BYTES = 12;
 const LOCAL_KMS_KEY_BYTES = 32;
 const DEFAULT_STS_TOKEN_URI = "https://sts.googleapis.com/v1/token";
 const DEFAULT_IAM_CREDENTIALS_API_ROOT = "https://iamcredentials.googleapis.com/v1";
+// One deadline owns the complete token + KMS operation. Callers may abort
+// earlier. Provider failures are fail-closed and are never retried here.
+const HOSTED_GCP_KMS_OPERATION_TIMEOUT_MS = 10_000;
 const GOOGLE_RPC_STATUS_REASONS = new Set([
   "ABORTED",
   "ALREADY_EXISTS",
@@ -43,17 +46,20 @@ export interface GcpKmsEncryptInput {
   additionalAuthenticatedData: string;
   keyName: string;
   plaintext: Uint8Array;
+  signal?: AbortSignal;
 }
 
 export interface GcpKmsDecryptInput {
   additionalAuthenticatedData: string;
   ciphertext: string;
   keyName: string;
+  signal?: AbortSignal;
 }
 
 export interface GcpKmsAsymmetricSignInput {
   keyVersionName: string;
   message: Uint8Array;
+  signal?: AbortSignal;
 }
 
 interface HostedGcpKmsJsonClientConfig {
@@ -62,7 +68,7 @@ interface HostedGcpKmsJsonClientConfig {
 }
 
 interface HostedGcpAccessTokenProvider {
-  getAccessToken(): Promise<string>;
+  getAccessToken(signal?: AbortSignal): Promise<string>;
 }
 
 interface GcpEncryptResponse {
@@ -269,6 +275,7 @@ class HostedGcpKmsJsonClient implements HostedGcpKmsClient {
       },
       operation: "cloudkms/encrypt",
       resource: `${requireKmsResourceName(input.keyName, "GCP KMS Encrypt keyName")}:encrypt`,
+      signal: input.signal,
     });
     return {
       ciphertext: requireNonEmptyString(response.ciphertext, "GCP KMS Encrypt ciphertext"),
@@ -284,6 +291,7 @@ class HostedGcpKmsJsonClient implements HostedGcpKmsClient {
       },
       operation: "cloudkms/decrypt",
       resource: `${requireKmsResourceName(input.keyName, "GCP KMS Decrypt keyName")}:decrypt`,
+      signal: input.signal,
     });
     return {
       plaintext: decodeBase64(
@@ -305,6 +313,7 @@ class HostedGcpKmsJsonClient implements HostedGcpKmsClient {
         input.keyVersionName,
         "GCP KMS Sign keyVersionName",
       )}:asymmetricSign`,
+      signal: input.signal,
     });
     return {
       keyVersionName: requireNonEmptyString(
@@ -319,8 +328,12 @@ class HostedGcpKmsJsonClient implements HostedGcpKmsClient {
     body: Record<string, unknown>;
     operation: string;
     resource: string;
+    signal?: AbortSignal;
   }): Promise<TResponse> {
-    const token = await this.accessTokenProvider.getAccessToken();
+    const deadline = AbortSignal.timeout(HOSTED_GCP_KMS_OPERATION_TIMEOUT_MS);
+    const signal = input.signal ? AbortSignal.any([input.signal, deadline]) : deadline;
+    signal.throwIfAborted();
+    const token = await this.accessTokenProvider.getAccessToken(signal);
     const response = await fetch(`${this.apiRoot}/${input.resource}`, {
       body: JSON.stringify(input.body),
       headers: {
@@ -328,6 +341,7 @@ class HostedGcpKmsJsonClient implements HostedGcpKmsClient {
         "Content-Type": "application/json",
       },
       method: "POST",
+      signal,
     });
     return parseGoogleJsonResponse<TResponse>(response, input.operation);
   }
@@ -494,19 +508,22 @@ class VercelOidcGcpWorkloadIdentityAccessTokenProvider implements HostedGcpAcces
     this.stsTokenUri = readOptionalString(input.stsTokenUri) ?? DEFAULT_STS_TOKEN_URI;
   }
 
-  async getAccessToken(): Promise<string> {
+  async getAccessToken(signal?: AbortSignal): Promise<string> {
     const nowMs = Date.now();
     if (this.cachedAccessToken && this.cachedAccessToken.expiresAtMs - 60_000 > nowMs) {
       return this.cachedAccessToken.token;
     }
     const subjectToken = await getVercelOidcToken();
-    const federatedToken = await this.exchangeSubjectToken(subjectToken);
-    const accessToken = await this.generateServiceAccountAccessToken(federatedToken);
+    const federatedToken = await this.exchangeSubjectToken(subjectToken, signal);
+    const accessToken = await this.generateServiceAccountAccessToken(federatedToken, signal);
     this.cachedAccessToken = accessToken;
     return accessToken.token;
   }
 
-  private async exchangeSubjectToken(subjectToken: string): Promise<string> {
+  private async exchangeSubjectToken(
+    subjectToken: string,
+    signal?: AbortSignal,
+  ): Promise<string> {
     const response = await fetch(this.stsTokenUri, {
       body: new URLSearchParams({
         audience: this.audience,
@@ -518,6 +535,7 @@ class VercelOidcGcpWorkloadIdentityAccessTokenProvider implements HostedGcpAcces
       }),
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       method: "POST",
+      signal,
     });
     const parsed = await parseGoogleJsonResponse<StsTokenExchangeResponse>(
       response,
@@ -528,6 +546,7 @@ class VercelOidcGcpWorkloadIdentityAccessTokenProvider implements HostedGcpAcces
 
   private async generateServiceAccountAccessToken(
     federatedAccessToken: string,
+    signal?: AbortSignal,
   ): Promise<{ expiresAtMs: number; token: string }> {
     const response = await fetch(
       `${this.iamCredentialsApiRoot}/projects/-/serviceAccounts/${encodeURIComponent(
@@ -543,6 +562,7 @@ class VercelOidcGcpWorkloadIdentityAccessTokenProvider implements HostedGcpAcces
           "Content-Type": "application/json",
         },
         method: "POST",
+        signal,
       },
     );
     const parsed = await parseGoogleJsonResponse<IamGenerateAccessTokenResponse>(

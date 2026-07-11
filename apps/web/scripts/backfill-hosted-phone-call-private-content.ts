@@ -16,19 +16,23 @@ Usage:
     pnpm --dir ../.. exec tsx --tsconfig apps/web/tsconfig.json \\
     apps/web/scripts/backfill-hosted-phone-call-private-content.ts [--batch-size 50]
 
-  # Perform one bounded batch after reviewing dry-run counts:
+  # Perform one bounded batch only after the replacement alias is proven and
+  # the configured prior-function drain has elapsed:
   NODE_OPTIONS=--conditions=react-server \\
     vercel env run --environment=production -- \\
     pnpm --dir ../.. exec tsx --tsconfig apps/web/tsconfig.json \\
     apps/web/scripts/backfill-hosted-phone-call-private-content.ts --apply [--batch-size 50]
 
 Options:
-  --apply                 Encrypt and scrub one batch. Without this, dry-run only.
+  --apply                 Encrypt and scrub one post-drain batch. Before the final
+                          alias proof and prior-function drain, use dry-run only.
   --batch-size <1..100>   Maximum rows in this invocation (default: 50).
   --help                  Print this message.
 
 Output contains counts only. It never includes call ids, member ids, plaintext,
-or ciphertext. Repeat apply batches until selectedRows and hasMore are both zero.
+or ciphertext. Applying before the final alias proof and prior-function drain is
+unsafe because warm previous functions may still require plaintext. After drain,
+repeat apply batches until selectedRows and hasMore are both zero.
 `;
 
 async function main(): Promise<void> {

@@ -177,6 +177,7 @@ export async function provisionActiveHostedDomainRootEnvelopeForUserOnly(input: 
 export async function unwrapHostedDomainRootForWeb(input: {
   domain: HostedCryptoDomain;
   prisma?: HostedCryptoClient;
+  signal?: AbortSignal;
   userId: string;
 }): Promise<UnwrappedHostedDomainRoot> {
   if (!WEB_UNWRAP_DOMAINS.has(input.domain)) {
@@ -190,7 +191,7 @@ export async function unwrapHostedDomainRootForWeb(input: {
         prisma: input.prisma,
         userId: input.userId,
       });
-      const rootKey = await unwrapEnvelopeForWeb({ envelope });
+      const rootKey = await unwrapEnvelopeForWeb({ envelope, signal: input.signal });
       return { envelope, rootKey };
     },
   );
@@ -200,6 +201,7 @@ export async function unwrapHostedDomainRootForWebByRootKeyId(input: {
   domain: HostedCryptoDomain;
   prisma?: HostedCryptoClient;
   rootKeyId: string;
+  signal?: AbortSignal;
   userId: string;
 }): Promise<UnwrappedHostedDomainRoot> {
   if (!WEB_UNWRAP_DOMAINS.has(input.domain)) {
@@ -209,7 +211,7 @@ export async function unwrapHostedDomainRootForWebByRootKeyId(input: {
     `${input.userId}|${input.domain}|${input.rootKeyId}`,
     async () => {
       const envelope = await readHostedDomainRootEnvelopeByRootKeyIdOrThrow(input);
-      const rootKey = await unwrapEnvelopeForWeb({ envelope });
+      const rootKey = await unwrapEnvelopeForWeb({ envelope, signal: input.signal });
       return { envelope, rootKey };
     },
   );
@@ -451,6 +453,7 @@ async function createEcdhWrap(input: {
 
 async function unwrapEnvelopeForWeb(input: {
   envelope: HostedDomainRootKeyEnvelopeV1;
+  signal?: AbortSignal;
 }): Promise<Uint8Array> {
   const config = getHostedWebCryptoConfig();
   await verifyEnvelopeAuthoritySignature(input.envelope);
@@ -467,6 +470,7 @@ async function unwrapEnvelopeForWeb(input: {
     additionalAuthenticatedData: wrap.additionalAuthenticatedData,
     ciphertext: wrap.ciphertextBlob,
     keyName: wrap.kmsKeyName,
+    signal: input.signal,
   });
   if (decrypted.plaintext.byteLength !== 32) {
     throw new Error(`Hosted ${input.envelope.domain} root GCP KMS decrypt returned invalid root length.`);

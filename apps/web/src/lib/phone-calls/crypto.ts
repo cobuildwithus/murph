@@ -28,6 +28,7 @@ interface HostedPhoneCallPrivateContentInput {
   callId: string;
   memberId: string;
   prisma?: HostedSecureBoxPrismaClient;
+  signal?: AbortSignal;
 }
 
 export interface HostedPhoneCallCrypto {
@@ -70,6 +71,7 @@ export async function encryptHostedPhoneCallBrief(
   return requireEncryptedValue(await sealHostedUserSecureBoxString({
     ...binding,
     prisma: input.prisma,
+    signal: input.signal,
     userId: input.memberId,
     value: JSON.stringify(hostedPhoneCallBriefSchema.parse(input.value)),
   }));
@@ -82,6 +84,7 @@ export async function decryptHostedPhoneCallBrief(
   const plaintext = await openHostedUserSecureBoxString({
     ...binding,
     prisma: input.prisma,
+    signal: input.signal,
     userId: input.memberId,
     value: input.value,
   });
@@ -95,6 +98,7 @@ export async function encryptHostedPhoneCallResult(
   return requireEncryptedValue(await sealHostedUserSecureBoxString({
     ...binding,
     prisma: input.prisma,
+    signal: input.signal,
     userId: input.memberId,
     value: JSON.stringify(hostedPhoneCallResultSchema.parse(input.value)),
   }));
@@ -107,6 +111,7 @@ export async function decryptHostedPhoneCallResult(
   const plaintext = await openHostedUserSecureBoxString({
     ...binding,
     prisma: input.prisma,
+    signal: input.signal,
     userId: input.memberId,
     value: input.value,
   });
@@ -117,12 +122,14 @@ export async function readHostedPhoneCallBrief(input: {
   call: HostedPhoneCall;
   crypto?: HostedPhoneCallCrypto;
   prisma?: HostedSecureBoxPrismaClient;
+  signal?: AbortSignal;
 }): Promise<HostedPhoneCallBrief> {
   if (input.call.briefEncrypted !== null) {
     return (input.crypto ?? hostedPhoneCallCrypto).decryptBrief({
       callId: input.call.id,
       memberId: input.call.memberId,
       prisma: input.prisma,
+      signal: input.signal,
       value: input.call.briefEncrypted,
     });
   }

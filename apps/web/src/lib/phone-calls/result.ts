@@ -13,6 +13,7 @@ import {
 import {
   appendHostedMailboxEnvelopeTx,
 } from "../hosted-mailbox/store";
+import { runWithHostedDomainRootUnwrapCache } from "../hosted-crypto/domain-root-unwrap-cache";
 import {
   hostedOnboardingError,
 } from "../hosted-onboarding/errors";
@@ -32,7 +33,10 @@ import {
 } from "./retell-payloads";
 
 interface HostedPhoneCallWebhookTx {
-  appendResultNotification(call: HostedPhoneCall): Promise<HostedPhoneCallResultNotificationAppend>;
+  appendResultNotification(
+    call: HostedPhoneCall,
+    result?: HostedPhoneCallResult,
+  ): Promise<HostedPhoneCallResultNotificationAppend>;
   encryptResult(input: {
     callId: string;
     memberId: string;
@@ -205,31 +209,29 @@ export async function handleRetellCallAnalyzed(input: {
       return emptyRetellCallAnalyzedHandlingResult();
     }
 
-    const stored = await tx.hostedPhoneCall.findUniqueOrThrow({
-      where: {
-        id: target.call.id,
-      },
-    });
-    return await tx.appendResultNotification(stored);
+    return await tx.appendResultNotification(target.call, result);
   });
 }
 
 async function appendPhoneCallResultNotificationTx(input: {
   call: HostedPhoneCall;
   prisma: Prisma.TransactionClient;
+  result?: HostedPhoneCallResult;
 }): Promise<HostedPhoneCallResultNotificationAppend> {
   const call = input.call;
-  let result: HostedPhoneCallResult | null;
-  try {
-    result = await readHostedPhoneCallResult({
-      call,
-      prisma: input.prisma,
-    });
-  } catch {
-    throw hostedPhoneCallResultNotificationError(
-      "HOSTED_PHONE_CALL_RESULT_INVALID",
-      "Hosted phone call result notification requires a valid stored result.",
-    );
+  let result: HostedPhoneCallResult | null = input.result ?? null;
+  if (!result) {
+    try {
+      result = await readHostedPhoneCallResult({
+        call,
+        prisma: input.prisma,
+      });
+    } catch {
+      throw hostedPhoneCallResultNotificationError(
+        "HOSTED_PHONE_CALL_RESULT_INVALID",
+        "Hosted phone call result notification requires a valid stored result.",
+      );
+    }
   }
   if (!result) {
     throw hostedPhoneCallResultNotificationError(
@@ -346,49 +348,52 @@ function resolveHostedPhoneCallWebhookStore(
 
   const prisma = getPrisma();
   return {
-    $transaction: async (callback) => prisma.$transaction(async (tx) => callback({
-      appendResultNotification: async (call) => appendPhoneCallResultNotificationTx({
-        call,
-        prisma: tx,
-      }),
-      encryptResult: async (input) => crypto.encryptResult({
-        ...input,
-        prisma: tx,
-      }),
-      hostedPhoneCall: {
-        findUnique: async (args) => {
-          if ("id" in args.where) {
+    $transaction: async (callback) => runWithHostedDomainRootUnwrapCache(() =>
+      prisma.$transaction(async (tx) => callback({
+        appendResultNotification: async (call, result) =>
+          appendPhoneCallResultNotificationTx({
+            call,
+            prisma: tx,
+            result,
+          }),
+        encryptResult: async (input) => crypto.encryptResult({
+          ...input,
+          prisma: tx,
+        }),
+        hostedPhoneCall: {
+          findUnique: async (args) => {
+            if ("id" in args.where) {
+              return tx.hostedPhoneCall.findUnique({
+                where: {
+                  id: args.where.id,
+                },
+              });
+            }
+
             return tx.hostedPhoneCall.findUnique({
               where: {
-                id: args.where.id,
+                providerCallId: args.where.providerCallId,
               },
             });
-          }
-
-          return tx.hostedPhoneCall.findUnique({
+          },
+          findUniqueOrThrow: async (args) => tx.hostedPhoneCall.findUniqueOrThrow({
             where: {
-              providerCallId: args.where.providerCallId,
+              id: args.where.id,
             },
-          });
+          }),
+          updateMany: async (args) => tx.hostedPhoneCall.updateMany({
+            data: args.data,
+            where: {
+              analyzedAt: args.where.analyzedAt,
+              endedAt: args.where.endedAt,
+              id: args.where.id,
+              provider: args.where.provider,
+              providerCallId: args.where.providerCallId,
+              status: args.where.status,
+            },
+          }),
         },
-        findUniqueOrThrow: async (args) => tx.hostedPhoneCall.findUniqueOrThrow({
-          where: {
-            id: args.where.id,
-          },
-        }),
-        updateMany: async (args) => tx.hostedPhoneCall.updateMany({
-          data: args.data,
-          where: {
-            analyzedAt: args.where.analyzedAt,
-            endedAt: args.where.endedAt,
-            id: args.where.id,
-            provider: args.where.provider,
-            providerCallId: args.where.providerCallId,
-            status: args.where.status,
-          },
-        }),
-      },
-    })),
+      }))),
   };
 }
 
