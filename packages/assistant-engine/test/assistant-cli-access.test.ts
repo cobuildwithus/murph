@@ -10,7 +10,6 @@ import { describe, expect, it } from "vitest";
 
 import {
   buildAssistantCliGuidanceText,
-  canUseAssistantStyleSettingsForCurrentRoute,
   HOSTED_RUNTIME_PROCESS_ENV_MARKER,
   prepareAssistantDirectCliEnv,
   resolveAssistantCliAccessContext,
@@ -22,90 +21,6 @@ import {
 describe("prepareAssistantDirectCliEnv", () => {
   it("aliases the hosted runtime marker from the bridge owner", () => {
     expect(HOSTED_RUNTIME_PROCESS_ENV_MARKER).toBe(HOSTED_RUNTIME_PROCESS_ENV);
-  });
-
-  it("allows style settings outside hosted assistant turns", async () => {
-    await expect(
-      canUseAssistantStyleSettingsForCurrentRoute({
-        env: {},
-      }),
-    ).resolves.toBe(true);
-  });
-
-  it("requires a trusted direct-private route during hosted assistant turns", async () => {
-    const env = {
-      [HOSTED_CLI_BRIDGE_TOKEN_ENV]: "bridge-token",
-      [HOSTED_CLI_BRIDGE_URL_ENV]: "http://127.0.0.1:43123/",
-      [HOSTED_RUNTIME_PROCESS_ENV_MARKER]: "1",
-    };
-    const routeResponse = (threadIsDirect: boolean | null) =>
-      async (): Promise<Response> => new Response(JSON.stringify({
-        route: {
-          channel: "linq",
-          deliveryTarget: "linq_chat_test",
-          threadIsDirect,
-        },
-      }), {
-        headers: { "content-type": "application/json" },
-        status: 200,
-      });
-
-    await expect(
-      canUseAssistantStyleSettingsForCurrentRoute({
-        env,
-        fetchImpl: routeResponse(true),
-      }),
-    ).resolves.toBe(true);
-    await expect(
-      canUseAssistantStyleSettingsForCurrentRoute({
-        env,
-        fetchImpl: routeResponse(false),
-      }),
-    ).resolves.toBe(false);
-    await expect(
-      canUseAssistantStyleSettingsForCurrentRoute({
-        env,
-        fetchImpl: routeResponse(null),
-      }),
-    ).resolves.toBe(false);
-  });
-
-  it("allows off-turn hosted operator use but fails closed on bridge errors", async () => {
-    const env = {
-      [HOSTED_CLI_BRIDGE_TOKEN_ENV]: "bridge-token",
-      [HOSTED_CLI_BRIDGE_URL_ENV]: "http://127.0.0.1:43123/",
-      [HOSTED_RUNTIME_PROCESS_ENV_MARKER]: "1",
-    };
-    const errorResponse = (code: string) =>
-      async (): Promise<Response> => new Response(JSON.stringify({
-        error: {
-          code,
-          message: "Bridge unavailable.",
-        },
-      }), {
-        headers: { "content-type": "application/json" },
-        status: 503,
-      });
-
-    await expect(
-      canUseAssistantStyleSettingsForCurrentRoute({
-        env,
-        fetchImpl: errorResponse("HOSTED_CLI_BRIDGE_UNAVAILABLE"),
-      }),
-    ).resolves.toBe(true);
-    await expect(
-      canUseAssistantStyleSettingsForCurrentRoute({
-        env,
-        fetchImpl: errorResponse("HOSTED_CLI_BRIDGE_REQUEST_FAILED"),
-      }),
-    ).resolves.toBe(false);
-    await expect(
-      canUseAssistantStyleSettingsForCurrentRoute({
-        env: {
-          [HOSTED_RUNTIME_PROCESS_ENV_MARKER]: "1",
-        },
-      }),
-    ).resolves.toBe(false);
   });
 
   it("returns the canonical raw and setup command names", () => {

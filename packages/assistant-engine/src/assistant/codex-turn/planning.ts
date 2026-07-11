@@ -19,7 +19,7 @@ import {
 } from '../codex-runtime.js'
 import {
   readAssistantCliSurfaceBootstrapContext,
-  scopeAssistantCliSurfaceContractToAudience,
+  scopeAssistantCliSurfaceContractForAssistant,
 } from '../cli-surface-bootstrap.js'
 import {
   readAssistantContextSnapshotPrompt,
@@ -504,9 +504,8 @@ export async function resolveAssistantRouteTurnPlan(input: {
         },
       )
     : null
-  const bootstrapAssistantCliContract = scopeAssistantCliSurfaceContractToAudience({
+  const bootstrapAssistantCliContract = scopeAssistantCliSurfaceContractForAssistant({
     contract: unscopedAssistantCliContract,
-    privateInteractiveAudience,
   })
   const assistantSupportedExperimentProtocols =
     input.profile.promptProfile === 'conversation'
@@ -628,6 +627,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
   const dynamicTools = maintenanceTurn
     ? []
     : resolveMurphDynamicTools({
+        assistantStyleSettingsAvailable: privateInteractiveAudience,
         allowFinishWithoutReply,
         allowMessageReactions: messageReactionsAvailable,
         computerToolsAvailable:

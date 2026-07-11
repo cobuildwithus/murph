@@ -1,7 +1,6 @@
 export * from './assistant-automation.js'
 export {
   buildAssistantCliGuidanceText,
-  canUseAssistantStyleSettingsForCurrentRoute,
   prepareAssistantDirectCliEnv,
   resolveAssistantCliAccessContext,
 } from './assistant-cli-access.js'

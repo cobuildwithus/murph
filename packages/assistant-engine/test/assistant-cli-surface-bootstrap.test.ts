@@ -431,9 +431,9 @@ test('buildAssistantCliSurfaceContract normalizes commands and renders detailed 
   assert.doesNotMatch(contract, /`model`/u)
 })
 
-test('scopeAssistantCliSurfaceContractToAudience removes only private style commands from non-private routes', async () => {
+test('scopeAssistantCliSurfaceContractForAssistant removes retired style commands from stale contracts', async () => {
   const {
-    scopeAssistantCliSurfaceContractToAudience,
+    scopeAssistantCliSurfaceContractForAssistant,
   } = await import('../src/assistant/cli-surface-bootstrap.ts')
   const contract = [
     'Murph CLI Contract:',
@@ -445,16 +445,8 @@ test('scopeAssistantCliSurfaceContractToAudience removes only private style comm
   ].join('\n')
 
   assert.equal(
-    scopeAssistantCliSurfaceContractToAudience({
+    scopeAssistantCliSurfaceContractForAssistant({
       contract,
-      privateInteractiveAudience: true,
-    }),
-    contract,
-  )
-  assert.equal(
-    scopeAssistantCliSurfaceContractToAudience({
-      contract,
-      privateInteractiveAudience: false,
     }),
     [
       'Murph CLI Contract:',

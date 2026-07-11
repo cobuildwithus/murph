@@ -338,18 +338,16 @@ function buildAssistantProductFeedbackGuidanceText(): string {
 function buildAssistantStyleSettingsGuidanceText(input: {
   available: boolean;
 }): string {
-  const privateStateBoundary =
-    "- Humor, Push, and Detail are member-private conversation state. They are available only in a private direct conversation; groups never receive, expose, mutate, or apply them.";
   if (!input.available) {
-    return ["Assistant style settings:", privateStateBoundary].join("\n");
+    return "";
   }
 
   return [
     "Assistant style settings:",
-    privateStateBoundary,
-    "- Saved tone (formal/casual) and voice: mention `/settings?voice=true` when asked. Dials use CLI.",
+    "- Humor, Push, and Detail are member-private conversation state available only in this private direct conversation.",
+    "- Saved tone (formal/casual) and voice: mention `/settings?voice=true` when asked. Use `murph.assistant_style` for dials.",
     "- Setting aliases: `jokes`/`funny` = Humor; `intensity`/`coach`/`strictness` = Push; `brief`/`wordy`/`thorough` = Detail.",
-    "- CLI JSON: `vault-cli assistant style show`; `vault-cli assistant style set <humor|push|detail> <0-10>`; `vault-cli assistant style reset <humor|push|detail|all>`; add `--format json`. Never guess/clamp.",
+    "- Tool actions: `show`; `set` with `setting` and integer `value` from 0 through 10; `reset` with one setting or `all`. Never guess or clamp.",
     "- Persist only explicit ongoing setting requests. `show`: scores/sources only. Successful set/reset: returned `settings` governs; state exact score/source; false `updated` = already requested. Error/no `settings`: unconfirmed, never changed/unchanged. One `show` may state values, not cause.",
     "- True `updated`: one fresh safe joke only for Humor >0, none for 0/query/Push/Detail.",
     "- Expression only; higher rules win. No Humor for emergencies, self-harm, serious health/medication decisions, grief/trauma/abuse/acute distress, or sensitive privacy/auth/billing/consent/irreversible actions. Push only user goals; no shame, threats, coercion, false urgency, unsafe exertion, or moral judgment.",

@@ -286,19 +286,13 @@ describe('assistant execution prompt contract', () => {
       'Saved tone (formal/casual) and voice',
     )
     expect(layers.stableRouteCapabilityPrompt).toContain(
-      'Dials use CLI',
+      'Use `murph.assistant_style` for dials',
     )
-    expect(layers.stableRouteCapabilityPrompt).toContain(
-      '`vault-cli assistant style show`',
-    )
-    expect(layers.stableRouteCapabilityPrompt).toContain(
-      '`vault-cli assistant style set <humor|push|detail> <0-10>`',
-    )
-    expect(layers.stableRouteCapabilityPrompt).toContain(
-      '`vault-cli assistant style reset <humor|push|detail|all>`',
-    )
-    expect(layers.stableRouteCapabilityPrompt).toContain(
-      'add `--format json`',
+    expect(layers.stableRouteCapabilityPrompt).toContain('`show`')
+    expect(layers.stableRouteCapabilityPrompt).toContain('`set`')
+    expect(layers.stableRouteCapabilityPrompt).toContain('`reset`')
+    expect(layers.stableRouteCapabilityPrompt).not.toContain(
+      'vault-cli assistant style',
     )
     expect(layers.stableRouteCapabilityPrompt).toContain(
       '`intensity`/`coach`/`strictness` = Push',
@@ -358,31 +352,33 @@ describe('assistant execution prompt contract', () => {
       'member-private conversation state',
     )
     expect(layers.stableRouteCapabilityPrompt).toContain(
-      'available only in a private direct conversation',
+      'available only in this private direct conversation',
     )
     expect(layers.threadContextPrompt).not.toContain('/settings?voice=true')
     expect(layers.dynamicTurnContextPrompt).not.toContain('/settings?voice=true')
   })
 
-  it('omits private style commands from non-private route prompts', () => {
+  it('omits the entire private style surface from non-private route prompts', () => {
     const layers = buildAssistantSystemPromptLayers(
       createCommonCodexPromptInput({
         assistantStyleSettingsAvailable: false,
       }),
     )
 
-    expect(layers.stableRouteCapabilityPrompt).toContain(
-      'member-private conversation state',
-    )
-    expect(layers.stableRouteCapabilityPrompt).toContain(
-      'groups never receive, expose, mutate, or apply them',
-    )
-    expect(layers.stableRouteCapabilityPrompt).not.toContain(
+    for (const privateStyleText of [
+      'Assistant style settings:',
+      'Humor',
+      'Push',
+      'Detail',
+      '`jokes`',
+      '`intensity`',
+      '`brief`',
+      '/settings?voice=true',
       'vault-cli assistant style',
-    )
-    expect(layers.stableRouteCapabilityPrompt).not.toContain(
-      'Dials use CLI',
-    )
+      'murph.assistant_style',
+    ]) {
+      expect(layers.stableRouteCapabilityPrompt).not.toContain(privateStyleText)
+    }
   })
 
   it('requires pending vault-file approvals to include the returned handoff link and approved sends to avoid stock queue copy', () => {

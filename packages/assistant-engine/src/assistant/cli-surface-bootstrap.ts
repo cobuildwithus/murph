@@ -83,7 +83,9 @@ const assistantCliSurfaceBootstrapIgnoredCommandNames = new Set([
   'status',
   'stop',
 ])
-const assistantCliSurfacePrivateCommandNames = new Set([
+// Keep stale prebuilt contracts from advertising the removed shell-bypass
+// surface during a rolling deployment.
+const assistantCliSurfaceRetiredCommandNames = new Set([
   'assistant style reset',
   'assistant style set',
   'assistant style show',
@@ -244,11 +246,10 @@ export function buildAssistantCliSurfaceContract(
   return minimalContract.slice(0, assistantCliSurfaceBootstrapContractCharBudget).trimEnd()
 }
 
-export function scopeAssistantCliSurfaceContractToAudience(input: {
+export function scopeAssistantCliSurfaceContractForAssistant(input: {
   contract: string | null
-  privateInteractiveAudience: boolean
 }): string | null {
-  if (input.contract === null || input.privateInteractiveAudience) {
+  if (input.contract === null) {
     return input.contract
   }
 
@@ -256,7 +257,7 @@ export function scopeAssistantCliSurfaceContractToAudience(input: {
     .split('\n')
     .filter((line) => {
       const match = /^- `([^`]+)`/u.exec(line.trim())
-      return match === null || !assistantCliSurfacePrivateCommandNames.has(match[1])
+      return match === null || !assistantCliSurfaceRetiredCommandNames.has(match[1])
     })
     .join('\n')
     .trim()

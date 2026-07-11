@@ -38,11 +38,10 @@ vi.mock('@murphai/health-commons/runtime', () => ({
 vi.mock('../src/assistant/cli-surface-bootstrap.js', () => ({
   readAssistantCliSurfaceBootstrapContext:
     planningMocks.readAssistantCliSurfaceBootstrapContext,
-  scopeAssistantCliSurfaceContractToAudience: (input: {
+  scopeAssistantCliSurfaceContractForAssistant: (input: {
     contract: string | null
-    privateInteractiveAudience: boolean
-  }) => input.contract === null || input.privateInteractiveAudience
-    ? input.contract
+  }) => input.contract === null
+    ? null
     : input.contract
         .split('\n')
         .filter((line) => !/^- `assistant style (?:show|set|reset)`/u.test(line))
@@ -417,14 +416,24 @@ describe('assistant protocol index planning', () => {
     expect(plan.developerInstructions).not.toContain(
       'Before ending a normal reply while onboarding is open, keep onboarding moving unless a skip condition applies',
     )
-    expect(plan.developerInstructions).toContain(
-      'groups never receive, expose, mutate, or apply them',
-    )
-    expect(plan.developerInstructions).not.toContain('vault-cli assistant style')
+    for (const privateStyleText of [
+      'Assistant style settings:',
+      'Humor',
+      'Push',
+      'Detail',
+      '/settings?voice=true',
+      'vault-cli assistant style',
+      'murph.assistant_style',
+    ]) {
+      expect(plan.developerInstructions).not.toContain(privateStyleText)
+    }
     expect(plan.developerInstructions).not.toContain('`assistant style show`')
     expect(plan.assistantCliContract).not.toContain('`assistant style show`')
     expect(plan.assistantCliContract).toContain(
       '`assistant onboarding resume-context`',
+    )
+    expect(plan.dynamicTools.map((tool) => tool.name)).not.toContain(
+      'assistant_style',
     )
     expect(plan.developerInstructions).not.toContain('Humor 9/10')
     expect(plan.developerInstructions).not.toContain('Push 8/10')
@@ -557,6 +566,9 @@ describe('assistant protocol index planning', () => {
       expect(updatedAttemptPlan.routePlan.developerInstructions).toContain(
         'Detail 0/10: give the shortest complete answer',
       )
+      expect(updatedAttemptPlan.routePlan.dynamicTools.map((tool) => tool.name)).toContain(
+        'assistant_style',
+      )
       expect(updatedAttemptPlan.routePlan.developerInstructions).not.toContain(
         'Push 3/10',
       )
@@ -594,6 +606,9 @@ describe('assistant protocol index planning', () => {
       expect(groupAttemptPlan.routePlan.developerInstructions).not.toContain(
         'Humor 9/10',
       )
+      expect(groupAttemptPlan.routePlan.dynamicTools.map((tool) => tool.name)).not.toContain(
+        'assistant_style',
+      )
 
       const unknownExternalSession = createSession()
       const unknownExternalExecutionPlan = await buildCodexTurnExecutionPlan({
@@ -627,6 +642,9 @@ describe('assistant protocol index planning', () => {
       ).not.toContain(
         'Assistant personality preferences for this private conversation',
       )
+      expect(
+        unknownExternalAttemptPlan.routePlan.dynamicTools.map((tool) => tool.name),
+      ).not.toContain('assistant_style')
 
       const localSession = createSession()
       const localExecutionPlan = await buildCodexTurnExecutionPlan({
@@ -651,6 +669,9 @@ describe('assistant protocol index planning', () => {
       expect(
         localAttemptPlan.routePlan.developerInstructions,
       ).toContain('Humor 9/10: use prominent, bold, dry humor')
+      expect(localAttemptPlan.routePlan.dynamicTools.map((tool) => tool.name)).toContain(
+        'assistant_style',
+      )
     } finally {
       await rm(vault, { force: true, recursive: true })
     }
@@ -812,6 +833,7 @@ describe('assistant protocol index planning', () => {
       buildAssistantCodexContractFingerprint({
         developerInstructions: first.developerInstructions,
         dynamicTools: resolveMurphDynamicTools({
+          assistantStyleSettingsAvailable: true,
           progressUpdatesAvailable: false,
           voiceMemoGenerationAvailable: false,
         }),
@@ -853,6 +875,7 @@ describe('assistant protocol index planning', () => {
       buildAssistantCodexContractFingerprint({
         developerInstructions: telegramReplyPlan.developerInstructions,
         dynamicTools: resolveMurphDynamicTools({
+          assistantStyleSettingsAvailable: true,
           allowMessageReactions: true,
           progressUpdatesAvailable: false,
           voiceMemoGenerationAvailable: false,
@@ -881,6 +904,7 @@ describe('assistant protocol index planning', () => {
       buildAssistantCodexContractFingerprint({
         developerInstructions: linqReplyPlan.developerInstructions,
         dynamicTools: resolveMurphDynamicTools({
+          assistantStyleSettingsAvailable: true,
           allowMessageReactions: true,
           voiceMemoGenerationAvailable: false,
           progressUpdatesAvailable: false,
@@ -909,6 +933,7 @@ describe('assistant protocol index planning', () => {
       buildAssistantCodexContractFingerprint({
         developerInstructions: linqSmsReplyPlan.developerInstructions,
         dynamicTools: resolveMurphDynamicTools({
+          assistantStyleSettingsAvailable: true,
           allowMessageReactions: false,
           voiceMemoGenerationAvailable: false,
           progressUpdatesAvailable: false,
@@ -935,6 +960,7 @@ describe('assistant protocol index planning', () => {
       buildAssistantCodexContractFingerprint({
         developerInstructions: telegramBusinessReplyPlan.developerInstructions,
         dynamicTools: resolveMurphDynamicTools({
+          assistantStyleSettingsAvailable: true,
           allowMessageReactions: false,
           voiceMemoGenerationAvailable: false,
           progressUpdatesAvailable: false,
@@ -957,6 +983,7 @@ describe('assistant protocol index planning', () => {
       buildAssistantCodexContractFingerprint({
         developerInstructions: telegramNoReplyPlan.developerInstructions,
         dynamicTools: resolveMurphDynamicTools({
+          assistantStyleSettingsAvailable: true,
           allowMessageReactions: false,
           voiceMemoGenerationAvailable: false,
           progressUpdatesAvailable: false,
@@ -1012,6 +1039,7 @@ describe('assistant protocol index planning', () => {
       buildAssistantCodexContractFingerprint({
         developerInstructions: plan.developerInstructions,
         dynamicTools: resolveMurphDynamicTools({
+          assistantStyleSettingsAvailable: true,
           computerToolsAvailable: true,
           progressUpdatesAvailable: false,
           voiceMemoGenerationAvailable: plan.voiceMemoDeliveryChannel !== null,
