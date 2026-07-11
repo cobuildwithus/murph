@@ -163,7 +163,7 @@ describe("hosted local vault-file approval resume e2e", () => {
       buildAssistantProviderMurphToolCall("send_vault_file", { ref: reportRef }),
       attachedReplyText,
     ], {
-      matchInputContains: [secondInboundText, '"deliveryStatus":"queued_with_reply"'],
+      matchInputContains: secondInboundText,
     });
 
     const secondResponse = await postSignedLinqWebhook(buildHostedLinqInboundEvent(

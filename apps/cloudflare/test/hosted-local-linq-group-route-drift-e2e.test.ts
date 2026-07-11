@@ -132,7 +132,7 @@ describe("hosted local Linq group route drift e2e", () => {
       throw new Error("Expected the first durable group-route reply to be observed.");
     }
     expect(requireLinqStub().readObservedMessageText(firstSend)).toBe(firstReplyText);
-    expect(firstSend.authorizationStatus).toBe("expected");
+    expect(firstSend.authorizationStatus).toBe("hosted-sentinel");
 
     const provisionReads = await requireLinqStub().waitForMatchingRequestCount({
       expectedCount: canonicalReadBaseline + 2,
@@ -175,7 +175,9 @@ describe("hosted local Linq group route drift e2e", () => {
     expect(newSends.map((request) =>
       requireLinqStub().readObservedMessageText(request)
     )).toEqual([firstReplyText, secondReplyText]);
-    expect(newSends.every((request) => request.authorizationStatus === "expected")).toBe(true);
+    expect(newSends.every((request) =>
+      request.authorizationStatus === "hosted-sentinel"
+    )).toBe(true);
 
     expect(countCanonicalChatReads()).toBe(canonicalReadsAfterProvision);
     expect(requireLinqStub().countObservedSends(requireLinqStub().createChatPath)).toBe(

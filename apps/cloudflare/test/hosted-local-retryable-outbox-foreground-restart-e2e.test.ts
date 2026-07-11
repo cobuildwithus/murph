@@ -289,8 +289,10 @@ async function waitForDurableRetryableOutbox(): Promise<HostedRunnerStatusRespon
       && Number.isFinite(nextWakeAtMs)
       && nextWakeAtMs > Date.now()
       // The prepared delivery effect is consumed by this attempt; the durable
-      // retry is represented by its future wake and retryable outbox journal.
-      && hasRetryableOutboxDeliveryLog(status)
+      // retry is represented by its future wake and nonterminal attempt state.
+      && readHostedOutboxCounter(status, "hostedOutboxDeliveryAttempted") === 1
+      && readHostedOutboxCounter(status, "hostedOutboxDeliverySent") === 0
+      && readHostedOutboxCounter(status, "hostedOutboxTerminalizedSending") === 0
     ) {
       return status;
     }
@@ -399,15 +401,6 @@ async function readHostedRunnerStatusWithLogLimit(
   return status;
 }
 
-function hasRetryableOutboxDeliveryLog(status: HostedRunnerStatusResponse): boolean {
-  return (status.recentLogs ?? []).some((entry) =>
-    entry.eventCode === "outbox.delivery_finished"
-    && entry.redactedJson?.retryable === 1
-    && entry.redactedJson?.sent === 0
-    && entry.redactedJson?.nextWakeAtPresent === true
-  );
-}
-
 function readPendingDeliveryEffectCount(status: HostedRunnerStatusResponse): number {
   const rawCount = status.workspace?.redactedStatus?.hostedOutboxPendingDeliveryEffects;
   if (typeof rawCount === "number" && Number.isSafeInteger(rawCount)) {
@@ -417,6 +410,20 @@ function readPendingDeliveryEffectCount(status: HostedRunnerStatusResponse): num
     return Number(rawCount);
   }
   return 0;
+}
+
+function readHostedOutboxCounter(
+  status: HostedRunnerStatusResponse,
+  key: string,
+): number {
+  const rawCount = status.workspace?.redactedStatus?.[key];
+  if (typeof rawCount === "number" && Number.isSafeInteger(rawCount)) {
+    return rawCount;
+  }
+  if (typeof rawCount === "string" && /^\d+$/u.test(rawCount)) {
+    return Number(rawCount);
+  }
+  return -1;
 }
 
 function countActivityExpiredDestroyRequestLogs(): number {

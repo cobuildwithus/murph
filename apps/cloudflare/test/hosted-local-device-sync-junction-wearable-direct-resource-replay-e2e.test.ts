@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHmac, randomUUID } from "node:crypto";
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
@@ -7,7 +7,6 @@ import {
 } from "@murphai/cloudflare-hosted-control/routes";
 import {
   buildHostedExecutionDeviceSyncWake,
-  buildHostedExecutionLinqConversationMessageWake,
   buildHostedExecutionMemberActivatedWake,
 } from "@murphai/hosted-execution";
 import {
@@ -55,9 +54,9 @@ import {
   type HostedLocalFullStackScenario,
 } from "./helpers/hosted-local-full-stack-scenario.js";
 import {
+  buildHostedLinqInboundEvent,
   buildLinqHomePhoneNumber,
   buildLinqRecipientPhoneNumber,
-  requireLinqPhoneLookupKey,
   startHostedLocalLinqStub,
   type HostedLocalLinqStub,
 } from "./helpers/hosted-local-linq-support.js";
@@ -259,7 +258,6 @@ describe("hosted local Junction wearable direct-resource replay e2e", () => {
     await activeScenario.bindActiveHostedLinqHomeChat({
       chatId: experimentAdherenceChatId,
       memberId: experimentAdherenceUserId,
-      recentInboundAt: new Date(),
       recipientPhone: memberPhone,
     });
 
@@ -269,11 +267,16 @@ describe("hosted local Junction wearable direct-resource replay e2e", () => {
       buildExperimentAdherenceSetupResponses(activityPlan),
       { matchInputContains: experimentSetupText },
     );
-    await activeScenario.runWake(
-      buildExperimentAdherenceSetupWake(activityPlan.seededAt),
+    const setupResponse = await postSignedLinqWebhook(buildHostedLinqInboundEvent(
       experimentAdherenceUserId,
-      { timeoutMs: 300_000 },
-    );
+      experimentAdherenceChatId,
+      {
+        eventId: `evt_junction_experiment_adherence_setup_${runId}`,
+        messageId: `msg_junction_experiment_adherence_setup_${runId}`,
+        text: experimentSetupText,
+      },
+    ));
+    expect(setupResponse.status).toBe(202);
     const setupReply = await requireLinqStub().waitForAdditionalSend({
       baselineCount: setupOutboundBaseline,
       expectedPath: replyPath,
@@ -706,26 +709,6 @@ function buildExperimentAdherenceActivationWake(occurredAt: string) {
   });
 }
 
-function buildExperimentAdherenceSetupWake(occurredAt: string) {
-  return buildHostedExecutionLinqConversationMessageWake({
-    eventId: `conversation:junction-experiment-adherence:${runId}`,
-    linqMessage: {
-      chatId: experimentAdherenceChatId,
-      from: buildLinqRecipientPhoneNumber(experimentAdherenceUserId),
-      isFromMe: false,
-      messageId: `msg_junction_experiment_adherence_setup_${runId}`,
-      parts: [{
-        type: "text",
-        value: experimentSetupText,
-      }],
-      service: "SMS",
-    },
-    occurredAt,
-    phoneLookupKey: requireLinqPhoneLookupKey(experimentAdherenceUserId),
-    userId: experimentAdherenceUserId,
-  });
-}
-
 async function assertHostedRunnerCompletedWithoutError(input: {
   context: string;
   scenario: HostedLocalFullStackScenario;
@@ -1095,6 +1078,27 @@ async function postSignedJunctionWebhook(input: {
     duplicate: false,
     response,
   });
+}
+
+async function postSignedLinqWebhook(event: Record<string, unknown>): Promise<Response> {
+  const rawBody = JSON.stringify(event);
+  const timestamp = String(Math.floor(Date.now() / 1_000));
+  const signature = createHmac("sha256", linqWebhookSecret)
+    .update(`${timestamp}.${rawBody}`)
+    .digest("hex");
+
+  return await fetch(
+    `${requireScenario().harness.webBaseUrl}/api/hosted-onboarding/linq/webhook`,
+    {
+      body: rawBody,
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+        "x-webhook-signature": `sha256=${signature}`,
+        "x-webhook-timestamp": timestamp,
+      },
+      method: "POST",
+    },
+  );
 }
 
 async function postSignedJunctionWebhookWithLostAcknowledgementRetry(input: {

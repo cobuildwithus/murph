@@ -376,11 +376,13 @@ function readStructuredLogRecords(): Array<{
   }> = [];
   for (const line of output.split(/\r?\n/u)) {
     const trimmed = line.trim();
-    if (!trimmed.startsWith("{") || !trimmed.endsWith("}")) {
+    const jsonStart = trimmed.indexOf("{");
+    const jsonEnd = trimmed.lastIndexOf("}");
+    if (jsonStart < 0 || jsonEnd <= jsonStart) {
       continue;
     }
     try {
-      const value = JSON.parse(trimmed) as unknown;
+      const value = JSON.parse(trimmed.slice(jsonStart, jsonEnd + 1)) as unknown;
       if (value && typeof value === "object" && !Array.isArray(value)) {
         records.push(value as {
           details?: Record<string, unknown>;

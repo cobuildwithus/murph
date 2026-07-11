@@ -312,7 +312,16 @@ function readLatestSavedGeneratedImageRef(): string {
       return match[0];
     }
   }
-  throw new Error("Expected the generated-image tool output to expose a saved vault ref.");
+  const knownOutcome = [
+    "saved generated image lookup could not be loaded",
+    "image generation failed",
+    "image generation returned invalid image data",
+    "image generated but vault save failed",
+    "image generated but upload failed",
+  ].find((outcome) => requests.some((body) => body.includes(outcome))) ?? "unclassified";
+  throw new Error(
+    `Expected the generated-image tool output to expose a saved vault ref; outcome: ${knownOutcome}.`,
+  );
 }
 
 function buildActivationWake(memberId: string) {
