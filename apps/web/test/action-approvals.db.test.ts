@@ -42,16 +42,20 @@ const REQUEST: HostedActionApprovalRequest = {
   },
   returnContactKind: "text",
 };
+const OUTCOME_WAKE_ROLLOUT_ENV =
+  "MURPH_HOSTED_ACTION_APPROVAL_OUTCOME_WAKE_ENABLED";
 
 describe("hosted action approvals", () => {
   let deps: HostedWebTestkitDeps | null = null;
 
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.stubEnv(OUTCOME_WAKE_ROLLOUT_ENV, "1");
     mocks.resolveHostedPublicOrigin.mockReturnValue("https://withmurph.ai");
   });
 
   afterEach(async () => {
+    vi.unstubAllEnvs();
     await deps?.prisma.$disconnect();
     deps = null;
   });
@@ -95,14 +99,18 @@ describe("hosted action approvals", () => {
     });
 
     expect(firstDecision.approval.status).toBe("approved");
-    expect(firstDecision.runtimeResume).toEqual({
+    const firstRuntimeResume = firstDecision.runtimeResume;
+    if (!firstRuntimeResume) {
+      throw new Error("Expected automatic approval continuation to be enabled.");
+    }
+    expect(firstRuntimeResume).toEqual({
       lane: "system",
       laneSeq: expect.stringMatching(/^[1-9][0-9]*$/u),
       mailboxItemId: expect.any(String),
       userId: memberId,
     });
     const firstWake = await deps.prisma.hostedMailboxItem.findUniqueOrThrow({
-      where: { id: firstDecision.runtimeResume.mailboxItemId },
+      where: { id: firstRuntimeResume.mailboxItemId },
     });
     expect(firstWake).toMatchObject({
       dedupeKey: expect.stringMatching(
@@ -168,13 +176,52 @@ describe("hosted action approvals", () => {
       });
     });
 
+    const secondRuntimeResume = secondDecision.runtimeResume;
+    if (!secondRuntimeResume) {
+      throw new Error("Expected automatic approval continuation to be enabled.");
+    }
     const secondWake = await deps.prisma.hostedMailboxItem.findUniqueOrThrow({
-      where: { id: secondDecision.runtimeResume.mailboxItemId },
+      where: { id: secondRuntimeResume.mailboxItemId },
     });
     expect(secondWake.dedupeKey).not.toBe(firstWake.dedupeKey);
-    expect(BigInt(secondDecision.runtimeResume.laneSeq)).toBeGreaterThan(
-      BigInt(firstDecision.runtimeResume.laneSeq),
+    expect(BigInt(secondRuntimeResume.laneSeq)).toBeGreaterThan(
+      BigInt(firstRuntimeResume.laneSeq),
     );
+  });
+
+  it("does not emit the new mailbox kind before its rollout gate is enabled", async () => {
+    vi.stubEnv(OUTCOME_WAKE_ROLLOUT_ENV, "0");
+    const { deps, memberId } = await setup();
+    const requested = await requestHostedActionApproval({
+      memberId,
+      now: new Date("2026-06-25T18:00:00.000Z"),
+      prisma: deps.prisma,
+      request: REQUEST,
+    });
+    const pending = await requirePendingHostedActionApproval({
+      approvalId: requested.approvalId,
+      memberId,
+      now: new Date("2026-06-25T18:01:00.000Z"),
+      prisma: deps.prisma,
+    });
+
+    const decision = await deps.prisma.$transaction((tx) =>
+      decideHostedActionApprovalTx({
+        approval: pending,
+        decision: "denied",
+        memberId,
+        now: new Date("2026-06-25T18:01:00.000Z"),
+        tx,
+      })
+    );
+
+    expect(decision.runtimeResume).toBeNull();
+    await expect(deps.prisma.hostedMailboxItem.count({
+      where: {
+        kind: "runtime.pending-effects-reconcile-requested",
+        userId: memberId,
+      },
+    })).resolves.toBe(0);
   });
 
   it("rolls back the approval decision when its durable wake cannot append", async () => {

@@ -44,6 +44,8 @@ const ACTION_APPROVAL_HASH_VERSION = "murph-action-approval-request-hash-v1";
 const ACTION_APPROVAL_BINDING_VERSION = "murph-action-approval-binding-v1";
 const ACTION_APPROVAL_GENERATION_VERSION = "murph-action-approval-generation-v1";
 const ACTION_APPROVAL_OUTCOME_WAKE_VERSION = "murph-action-approval-outcome-wake-v1";
+const ACTION_APPROVAL_OUTCOME_WAKE_ROLLOUT_ENV =
+  "MURPH_HOSTED_ACTION_APPROVAL_OUTCOME_WAKE_ENABLED";
 const ACTION_APPROVAL_PLACEHOLDER_VERSION = "murph-action-approval-placeholder-v1";
 const ACTION_APPROVAL_ID_BYTES = 24;
 const SHA256_HEX_PATTERN = /^[0-9a-f]{64}$/u;
@@ -66,7 +68,13 @@ export interface HostedActionApprovalDecisionTxResult {
     laneSeq: string;
     mailboxItemId: string;
     userId: string;
-  };
+  } | null;
+}
+
+export function isHostedActionApprovalOutcomeWakeEnabled(
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  return env[ACTION_APPROVAL_OUTCOME_WAKE_ROLLOUT_ENV] === "1";
 }
 
 interface HostedActionApprovalReadChallengeDelegate {
@@ -394,6 +402,10 @@ export async function decideHostedActionApprovalTx(input: {
     returnContactKind: input.approval.returnContactKind,
     status: input.decision,
   };
+  if (!isHostedActionApprovalOutcomeWakeEnabled()) {
+    return { approval, runtimeResume: null };
+  }
+
   const mailboxItem = (await appendHostedMailboxEnvelopeTx({
     envelope: buildHostedExecutionPendingEffectsReconcileRequestedWake({
       effectId: input.approval.actionId,

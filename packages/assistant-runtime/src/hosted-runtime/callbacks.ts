@@ -102,13 +102,9 @@ import {
 } from "./provider-fetch.ts";
 
 const HOSTED_MAX_BACKGROUND_DELIVERY_EFFECTS = 1;
-// Bounds the per-collect approval reconciliation work so a backlog of
-// pending vault-file approvals cannot stall foreground delivery with an
-// unbounded series of web-control round trips. Preferred (current-turn)
-// intents are always reconciled; beyond those we additionally reconcile
-// only the N most-recently-updated `awaiting_approval` intents to catch
-// fresh user decisions on the shoulder-tap wake.
-const HOSTED_MAX_FOREGROUND_APPROVAL_RECONCILE = 4;
+// Bounds due approval reconciliation so a backlog cannot stall delivery with
+// an unbounded series of web-control round trips.
+const HOSTED_MAX_DUE_APPROVAL_RECONCILE = 4;
 const HOSTED_ASSISTANT_DELIVERY_BOUNDARY = "hosted_runtime_outbox";
 const HOSTED_NON_IDEMPOTENT_CONFIRMATION_GRACE_MS = 2 * 60 * 1000;
 const HOSTED_SENDING_STALE_RECONCILIATION_MS = 10 * 60 * 1000;
@@ -152,8 +148,9 @@ export async function collectHostedAssistantDeliverySideEffects(
   const now = new Date();
   const storedIntents = await listAssistantOutboxIntents(request.vaultRoot);
   const reconcileTargetIds = selectHostedAssistantApprovalReconcileTargets({
+    includeBackgroundDueIntents: request.includeBackgroundDueIntents,
+    now,
     preferredEffectIds: request.preferredEffectIds,
-    preferredIntentIds: request.preferredIntentIds,
     storedIntents,
   });
   const reconciliationByIntentId = new Map<
@@ -188,6 +185,9 @@ export async function collectHostedAssistantDeliverySideEffects(
   const candidates: AssistantOutboxIntent[] = [];
   const nowIso = now.toISOString();
   for (const intent of intents) {
+    if (intent.status === "awaiting_approval") {
+      continue;
+    }
     if (approvalBlockedIntentIds.has(intent.intentId)) {
       continue;
     }
@@ -285,18 +285,17 @@ export async function collectHostedAssistantDeliverySideEffects(
 }
 
 /**
- * Bounds the set of intents reconciled per collect. The dispatch preflight
- * gate is the security invariant; this pass exists only so freshly-decided
- * approvals transition out of
- * `awaiting_approval` promptly. Reconciling every stored intent would add an
- * O(n) sequence of web-control round trips to the foreground delivery path.
+ * Reconciles only causally named or due approval work. Foreground delivery
+ * identities are not approval-state identities, and must not replace a parked
+ * effect's durable fallback wake before it is due.
  */
 function selectHostedAssistantApprovalReconcileTargets(input: {
+  includeBackgroundDueIntents: boolean;
+  now: Date;
   preferredEffectIds: readonly string[];
-  preferredIntentIds: readonly string[];
   storedIntents: readonly AssistantOutboxIntent[];
 }): Set<string> {
-  const targets = new Set<string>(input.preferredIntentIds);
+  const targets = new Set<string>();
   const preferredEffectIds = new Set(input.preferredEffectIds);
   if (preferredEffectIds.size > 0) {
     for (const intent of input.storedIntents) {
@@ -314,16 +313,26 @@ function selectHostedAssistantApprovalReconcileTargets(input: {
       }
     }
   }
-  const recent = [...input.storedIntents]
+  if (!input.includeBackgroundDueIntents) {
+    return targets;
+  }
+
+  const nowIso = input.now.toISOString();
+  const due = [...input.storedIntents]
     .filter((intent) =>
       intent.status === "awaiting_approval"
       && !targets.has(intent.intentId)
+      && (resolveHostedAssistantOutboxIntentWakeAt(intent, input.now) ?? nowIso)
+        <= nowIso
     )
     .sort((left, right) =>
-      compareHostedIsoTimestampsAscending(right.updatedAt, left.updatedAt)
+      compareHostedIsoTimestampsAscending(
+        resolveHostedAssistantOutboxIntentWakeAt(left, input.now) ?? nowIso,
+        resolveHostedAssistantOutboxIntentWakeAt(right, input.now) ?? nowIso,
+      )
     )
-    .slice(0, HOSTED_MAX_FOREGROUND_APPROVAL_RECONCILE);
-  for (const intent of recent) {
+    .slice(0, HOSTED_MAX_DUE_APPROVAL_RECONCILE);
+  for (const intent of due) {
     targets.add(intent.intentId);
   }
   return targets;

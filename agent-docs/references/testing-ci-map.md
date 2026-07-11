@@ -99,6 +99,14 @@ Last verified: 2026-07-09
   that floor requires DB restore/re-expand or a forward deploy. Cloudflare
   `container_rollout=immediate` is not applicable to this Vercel-only lane; the
   bounded drain wait and final alias check own the old-function window.
+- Automatic approval-outcome mailbox emission is an explicit cross-plane
+  activation exception: `MURPH_HOSTED_ACTION_APPROVAL_OUTCOME_WAKE_ENABLED`
+  must stay unset or `0` while the matching Cloudflare consumer is unverified.
+  After the protected-main Cloudflare `container_rollout=immediate` deployment
+  and managed-container smoke pass, set it to `1` and redeploy web. To roll back,
+  set it to `0` and redeploy web before draining the system lane and rolling back
+  Cloudflare. The disabled path emits no new mailbox kind and retains the legacy
+  approval confirmation fallback.
 
 ## Current Gaps
 

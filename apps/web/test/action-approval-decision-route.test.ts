@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   requirePendingHostedActionApproval: vi.fn(),
   resolveHostedMurphContactOption: vi.fn(),
   signalHostedMailboxAppendRuntime: vi.fn(),
+  signalHostedRuntimeRecheckRuntime: vi.fn(),
   transaction: vi.fn(),
   verifySensitiveActionChallenge: vi.fn(),
 }));
@@ -37,6 +38,7 @@ vi.mock("@/src/lib/hosted-onboarding/csrf", () => ({
 
 vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
   signalHostedMailboxAppendRuntime: mocks.signalHostedMailboxAppendRuntime,
+  signalHostedRuntimeRecheckRuntime: mocks.signalHostedRuntimeRecheckRuntime,
 }));
 
 vi.mock("@/src/lib/prisma", () => ({
@@ -108,6 +110,10 @@ describe("hosted action approval decision route", () => {
       signalAccepted: true,
       workflowId: "hosted-user-runtime:member_action_decision",
     });
+    mocks.signalHostedRuntimeRecheckRuntime.mockResolvedValue({
+      signalAccepted: true,
+      workflowId: "hosted-user-runtime:member_action_decision",
+    });
     mocks.decideHostedActionApprovalTx.mockImplementation(async (input: {
       decision: "approved" | "denied";
     }) => ({
@@ -133,7 +139,7 @@ describe("hosted action approval decision route", () => {
     vi.useRealTimers();
   });
 
-  it("commits approval work before signaling its mailbox pointer and returns a bare thread link", async () => {
+  it("commits approval work before signaling its mailbox pointer and retains the confirmation fallback", async () => {
     const response = await route.POST(
       jsonRequest({
         authorization: {
@@ -175,7 +181,7 @@ describe("hosted action approval decision route", () => {
       mailboxItemId: "mailbox_approval_outcome",
     });
     expect(mocks.resolveHostedMurphContactOption).toHaveBeenCalledWith({
-      message: null,
+      message: { body: "I approved the secure request." },
       preferredKind: "text",
     });
     expect(
@@ -183,6 +189,36 @@ describe("hosted action approval decision route", () => {
     ).toBeLessThan(
       mocks.signalHostedMailboxAppendRuntime.mock.invocationCallOrder[0] ?? Number.MAX_SAFE_INTEGER,
     );
+  });
+
+  it("keeps the legacy signal path while automatic continuation is gated off", async () => {
+    mocks.decideHostedActionApprovalTx.mockImplementationOnce(async (input: {
+      decision: "approved" | "denied";
+    }) => ({
+      approval: {
+        approvalId: APPROVAL_ID,
+        expiresAt: PENDING_APPROVAL.expiresAt.toISOString(),
+        presentation: PENDING_APPROVAL.presentation,
+        returnContactKind: "text",
+        status: input.decision,
+      },
+      runtimeResume: null,
+    }));
+
+    const response = await route.POST(
+      jsonRequest({ decision: "denied" }),
+      routeContext(),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
+    expect(mocks.signalHostedRuntimeRecheckRuntime).toHaveBeenCalledWith({
+      userId: "member_action_decision",
+    });
+    expect(mocks.resolveHostedMurphContactOption).toHaveBeenCalledWith({
+      message: { body: "I denied the secure request." },
+      preferredKind: "text",
+    });
   });
 
   it("uses the same durable continuation for denial", async () => {

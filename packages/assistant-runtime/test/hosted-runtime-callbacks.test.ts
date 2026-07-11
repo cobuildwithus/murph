@@ -963,7 +963,7 @@ describe("hosted runtime callbacks", () => {
     });
   });
 
-  it("durably parks preferred vault-file intents when the hosted approval port is missing", async () => {
+  it("keeps a parked vault-file intent out of delivery when the approval port is missing", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-04-08T00:00:00.000Z"));
     try {
@@ -975,7 +975,7 @@ describe("hosted runtime callbacks", () => {
         sha256: "a".repeat(64),
         sizeBytes: 42,
       };
-      let storedIntent = {
+      const storedIntent = {
         actorId: "actor_1",
         bindingDelivery: { kind: "thread", target: "linq_chat_1" },
         channel: "linq",
@@ -991,52 +991,20 @@ describe("hosted runtime callbacks", () => {
         lastError: null,
         media: [vaultFile],
         message: "Attached.",
-        nextAttemptAt: null,
+        nextAttemptAt: "2026-04-08T00:01:00.000Z",
         replyToMessageId: "linq_message_1",
         sessionId: "session_1",
-        status: "pending",
+        status: "awaiting_approval",
         subject: null,
         threadId: "thread_1",
         threadIsDirect: true,
         turnId: "turn_1",
         updatedAt: "2026-04-08T00:00:00.000Z",
       };
-      const deferredIntent = {
-        ...storedIntent,
-        lastError: {
-          code: "ASSISTANT_VAULT_FILE_APPROVAL_CHECK_DEFERRED",
-          diagnosticContext: {
-            assistantDeliveryFailureClass: "blocked",
-            assistantDeliveryResumeTrigger: "approval_state_change",
-            retryable: false,
-          },
-          message: "Secure vault-file approval could not be checked yet.",
-        },
-        nextAttemptAt: "2026-04-08T00:01:00.000Z",
-        status: "awaiting_approval",
-        updatedAt: "2026-04-08T00:00:00.000Z",
-      };
       mocks.listAssistantOutboxIntents.mockImplementation(async () => [
         storedIntent,
       ]);
       mocks.readAssistantVaultFileMedia.mockReturnValue(vaultFile);
-      mocks.deferAssistantVaultFileApprovalCheck.mockImplementationOnce(
-        ({ intent, now }) => {
-          expect(intent).toBe(storedIntent);
-          expect(now.toISOString()).toBe("2026-04-08T00:00:00.000Z");
-          return deferredIntent;
-        },
-      );
-      mocks.saveAssistantOutboxIntentIfUnchanged.mockImplementationOnce(
-        async ({ expectedDedupeKey, expectedStatus, expectedUpdatedAt, intent, vault }) => {
-          expect(expectedDedupeKey).toBe("dedupe_vault_file");
-          expect(expectedStatus).toBe("pending");
-          expect(expectedUpdatedAt).toBe("2026-04-08T00:00:00.000Z");
-          expect(vault).toBe("/tmp/vault");
-          storedIntent = intent;
-          return intent;
-        },
-      );
 
       const sideEffects = await collectHostedAssistantDeliverySideEffects({
         actionApprovalPort: null,
@@ -1048,14 +1016,11 @@ describe("hosted runtime callbacks", () => {
       expect(sideEffects).toEqual([]);
       expect(storedIntent).toMatchObject({
         intentId: "intent_vault_file",
-        lastError: {
-          code: "ASSISTANT_VAULT_FILE_APPROVAL_CHECK_DEFERRED",
-        },
         nextAttemptAt: "2026-04-08T00:01:00.000Z",
         status: "awaiting_approval",
       });
       expect(mocks.buildAssistantVaultFileSendApprovalRequest).not.toHaveBeenCalled();
-      expect(mocks.saveAssistantOutboxIntentIfUnchanged).toHaveBeenCalledTimes(1);
+      expect(mocks.saveAssistantOutboxIntentIfUnchanged).not.toHaveBeenCalled();
 
       const wakeAt = await resolveHostedAssistantOutboxNextWakeAt({
         now: new Date("2026-04-08T00:00:00.000Z"),
@@ -1136,7 +1101,7 @@ describe("hosted runtime callbacks", () => {
       };
       mocks.listAssistantOutboxIntents.mockResolvedValueOnce([storedIntent]);
       mocks.readAssistantVaultFileMedia.mockReturnValueOnce(vaultFile);
-      mocks.buildAssistantVaultFileSendApprovalRequest.mockReturnValueOnce(
+      mocks.buildAssistantVaultFileSendApprovalRequest.mockReturnValue(
         approvalRequest,
       );
       mocks.applyAssistantVaultFileSendApprovalResult.mockReturnValueOnce(
@@ -1149,6 +1114,7 @@ describe("hosted runtime callbacks", () => {
       await expect(collectHostedAssistantDeliverySideEffects({
         actionApprovalPort,
         includeBackgroundDueIntents: true,
+        preferredEffectIds: [approvalRequest.actionId],
         preferredIntentIds: [],
         vaultRoot: "/tmp/vault",
       })).resolves.toEqual([]);
@@ -1175,7 +1141,7 @@ describe("hosted runtime callbacks", () => {
     }
   });
 
-  it("reconciles the causally selected approval even when it is older than the recent-intent cap", async () => {
+  it("reconciles the causally selected approval even when newer approvals are not due", async () => {
     const vaultFile = {
       contentType: "application/pdf",
       filename: "report.pdf",
@@ -1200,7 +1166,7 @@ describe("hosted runtime callbacks", () => {
       lastError: null,
       media: [vaultFile],
       message: "Attached.",
-      nextAttemptAt: "2026-04-08T00:15:00.000Z",
+      nextAttemptAt: "2030-04-08T00:15:00.000Z",
       replyToMessageId: "linq_message_1",
       sessionId: "session_1",
       status: "awaiting_approval" as const,
@@ -1261,12 +1227,92 @@ describe("hosted runtime callbacks", () => {
       vaultRoot: "/tmp/vault",
     });
 
-    expect(actionApprovalPort.read).toHaveBeenCalledTimes(5);
+    expect(actionApprovalPort.read).toHaveBeenCalledTimes(1);
     expect(actionApprovalPort.read).toHaveBeenCalledWith(
       expect.objectContaining({ actionId: selectedEffectId }),
     );
     expect(sideEffects).toHaveLength(1);
     expect(sideEffects[0]?.effectId).toBe("intent_vault_file_0");
+  });
+
+  it("reconciles an older due approval ahead of newer approvals that are not due", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-08T00:05:00.000Z"));
+    try {
+      const vaultFile = {
+        contentType: "application/pdf",
+        filename: "report.pdf",
+        kind: "vault_file" as const,
+        ref: "documents/report.pdf",
+        sha256: "a".repeat(64),
+        sizeBytes: 42,
+      };
+      const storedIntents = Array.from({ length: 5 }, (_, index) => ({
+        actorId: "actor_1",
+        bindingDelivery: { kind: "thread" as const, target: "linq_chat_1" },
+        channel: "linq",
+        createdAt: `2026-04-08T00:0${index}:00.000Z`,
+        dedupeKey: `dedupe_vault_file_${index}`,
+        delivery: null,
+        deliveryIdempotencyKey: `assistant-outbox:intent_vault_file_${index}`,
+        deliveryTransportIdempotent: true,
+        explicitTarget: "linq_chat_1",
+        identityId: "identity_1",
+        intentId: `intent_vault_file_${index}`,
+        lastAttemptAt: null,
+        lastError: null,
+        media: [vaultFile],
+        message: "Attached.",
+        nextAttemptAt: index === 0
+          ? "2026-04-08T00:05:00.000Z"
+          : "2026-04-08T00:15:00.000Z",
+        replyToMessageId: "linq_message_1",
+        sessionId: "session_1",
+        status: "awaiting_approval" as const,
+        subject: null,
+        threadId: "thread_1",
+        threadIsDirect: true,
+        turnId: `turn_${index}`,
+        updatedAt: `2026-04-08T00:0${index}:00.000Z`,
+      }));
+      const actionApprovalPort = {
+        consume: vi.fn(),
+        read: vi.fn(async () => ({
+          approvalId: `haa_${"b".repeat(32)}`,
+          approvalUrl: "https://murph.test/approve/pending",
+          expiresAt: "2026-04-08T00:15:00.000Z",
+          status: "pending" as const,
+        })),
+        request: vi.fn(),
+      };
+      mocks.listAssistantOutboxIntents.mockResolvedValueOnce(storedIntents);
+      mocks.readAssistantVaultFileMedia.mockReturnValue(vaultFile);
+      mocks.buildAssistantVaultFileSendApprovalRequest.mockImplementation(
+        (intent: { intentId: string }) => ({
+          actionFingerprint: "a".repeat(64),
+          actionId: `vault-file-send:${intent.intentId}`,
+          actionKind: "vault.file.send.v1",
+          presentation: {
+            body: "Send a vault file.",
+            title: "Send a file?",
+          },
+        }),
+      );
+
+      await collectHostedAssistantDeliverySideEffects({
+        actionApprovalPort,
+        includeBackgroundDueIntents: true,
+        preferredIntentIds: [],
+        vaultRoot: "/tmp/vault",
+      });
+
+      expect(actionApprovalPort.read).toHaveBeenCalledTimes(1);
+      expect(actionApprovalPort.read).toHaveBeenCalledWith(
+        expect.objectContaining({ actionId: "vault-file-send:intent_vault_file_0" }),
+      );
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("abandons a queued signup welcome when a foreground reply targets the same route", async () => {
@@ -2250,6 +2296,8 @@ describe("hosted runtime callbacks", () => {
     expect(sideEffects.map((effect) => effect.effectId)).toEqual([
       "intent_approval_link",
     ]);
+    expect(actionApprovalPort.read).not.toHaveBeenCalled();
+    expect(mocks.applyAssistantVaultFileSendApprovalResult).not.toHaveBeenCalled();
     await expect(resolveHostedAssistantOutboxNextWakeAt({
       now: new Date("2026-04-08T00:01:01.000Z"),
       vaultRoot: "/tmp/vault",

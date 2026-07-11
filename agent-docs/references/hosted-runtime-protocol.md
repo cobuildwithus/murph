@@ -485,14 +485,16 @@ queue, poller, or second handoff owner.
 External outcomes that require generated user-facing prose, such as phone-call
 results, continue to use `assistant.notification.requested` instead.
 
-Deploy consumers before the producer for this kind: deploy Cloudflare with
-`container_rollout=immediate`, wait for the managed-container smoke to prove the
-new parser/runtime bundle is active, then deploy web immediately. Old web
-against the new runtime remains safe during that short window: observation-only
-approval reads may defer while the additive web read route is unavailable, and
-the old web confirmation path remains in place until web deploys. New web
-against an old runtime is not safe because the old parser quarantines the new
-system row and blocks system-lane progress. Roll back in the reverse order: web
+Deploy consumers before the producer for this kind. Web emission is fail-closed
+unless `MURPH_HOSTED_ACTION_APPROVAL_OUTCOME_WAKE_ENABLED=1`; while disabled,
+web retains the legacy runtime recheck and confirmation-message fallback and
+does not append the new mailbox kind. Merge with the gate disabled, deploy
+Cloudflare with `container_rollout=immediate`, and wait for the managed-container
+smoke to prove the new parser/runtime bundle is active. Only then set the gate to
+`1` and redeploy web. The confirmation-message fallback remains additive during
+this activation stage. New web producer behavior against an old runtime is not
+safe because the old parser quarantines the new system row and blocks system-lane
+progress. Roll back in the reverse order: set the gate to `0` and redeploy web
 first so no new rows can be produced, verify system-lane lag is clear, then roll
 back Cloudflare. Do not roll the runtime back while the producer remains active.
 

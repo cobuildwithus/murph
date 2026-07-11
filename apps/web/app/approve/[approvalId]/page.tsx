@@ -81,7 +81,7 @@ async function ActionApprovalTerminalState({
   const contactOptions = approval.returnContactKind === null
     ? []
     : await resolveHostedMurphContactOptions({
-        message: content.replyBody ? { body: content.replyBody } : null,
+        message: { body: content.replyBody },
         preferredKind: approval.returnContactKind,
       }).catch(() => []);
 
@@ -112,7 +112,7 @@ async function ActionApprovalTerminalState({
             {content.actionLabel}
             <ArrowRight aria-hidden="true" data-icon="inline-end" />
           </MurphContactLink>
-        ) : content.replyBody ? (
+        ) : (
           <div>
             <p className="text-sm text-muted-foreground">
               Return to the Murph conversation where this request started and
@@ -122,10 +122,6 @@ async function ActionApprovalTerminalState({
               {content.replyBody}
             </p>
           </div>
-        ) : (
-          <p className="text-sm text-muted-foreground">
-            Murph received this decision. You can close this page.
-          </p>
         )}
       </div>
     </ActionApprovalScreen>
@@ -147,7 +143,7 @@ interface TerminalContent {
   actionLabel: string;
   description: string;
   icon: LucideIcon;
-  replyBody: string | null;
+  replyBody: string;
   title: string;
 }
 
@@ -158,10 +154,9 @@ function terminalContent(
     case "approved":
       return {
         actionLabel: "Return to Murph",
-        description:
-          "You approved this action. Murph will continue automatically.",
+        description: "You approved this action. Head back to Murph to continue.",
         icon: CheckCircle2,
-        replyBody: null,
+        replyBody: "I approved the request.",
         title: "Approved",
       };
     case "denied":
@@ -169,7 +164,7 @@ function terminalContent(
         actionLabel: "Return to Murph",
         description: "Murph will not continue with this action.",
         icon: XCircle,
-        replyBody: null,
+        replyBody: "I denied the request.",
         title: "Denied",
       };
     case "expired":
