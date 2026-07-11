@@ -100,11 +100,15 @@ The assistant interprets these natural-language aliases:
 
 Examples of persistent requests include “put your humor at nine,” “set intensity to seven,” “turn jokes off,” “use detail three from now on,” and “reset your humor.” A request limited to the current reply, such as “be serious for this one” or “keep this short,” is not persisted. An ordinary complaint or inferred preference is not persisted unless the user clearly asks for an ongoing setting change.
 
-The assistant must read canonical state for a setting query. It must not infer a score from its current prose. After a set or reset, it treats the returned `settings` snapshot as authoritative for the rest of that reply:
+The assistant must read canonical state for a setting query, report the scores
+and sources, and not treat the query's `updated: false` as a mutation outcome.
+It must not infer a score from its current prose. After a successful set or
+reset, it treats the returned `settings` snapshot as authoritative for the rest
+of that reply:
 
 - Confirm the exact effective score and whether it is custom or default.
 - If `updated` is false, say the setting was already in that state.
-- If the command fails, say the setting was not confirmed or changed.
+- If the command errors or returns no `settings` snapshot, say the result is unconfirmed. Do not claim that it changed or stayed unchanged. One `show` may report current canonical state without claiming whether the original command caused it.
 - When Humor changes above 0 and the context is safe, include one fresh, fitting funny line.
 - When Humor changes to 0, confirm it plainly without a joke.
 - Do not hard-code a recurring acknowledgement joke.

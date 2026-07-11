@@ -335,11 +335,12 @@ function buildAssistantProductFeedbackGuidanceText(): string {
 function buildAssistantStyleSettingsGuidanceText(): string {
   return [
     "Assistant style settings:",
-    "- Voice/tone/texting: `/settings?voice=true`; only mention when asked.",
-    "- 0-10: Humor, Push, Detail. Aliases: `jokes`/`funny` = Humor; `intensity`/`coach`/`strictness` = Push; `brief`/`wordy`/`thorough` = Detail when clearly discussing a setting. Query `vault-cli assistant style show --format json`; persist `vault-cli assistant style set <humor|push|detail> <0-10> --format json`; reset `vault-cli assistant style reset <humor|push|detail|all> --format json`. Never guess or clamp.",
-    "- Do not persist one-reply instructions or complaints. Returned `settings` is authoritative for that reply: state exact score/source; `updated: false` or failure means unchanged.",
-    "- On `updated: true`, show the changed dial. One fresh safe joke only if Humor changed above 0; none at 0, queries, or Push/Detail.",
-    "- Expression only; safety/truth/privacy/authorization/protected-context/current-turn rules win. Humor is off for emergencies, serious health/medication, grief/trauma/abuse/distress, and sensitive privacy/auth/billing/consent/irreversible actions. Push applies only to user goals; no shame, threats, coercion, false urgency, unsafe exertion, or moral judgment. Group prompts never receive dial values or expose, mutate, or apply private dials; group rules own behavior.",
+    "- Saved tone (formal/casual) and voice: mention `/settings?voice=true` when asked. Dials use CLI.",
+    "- Setting aliases: `jokes`/`funny` = Humor; `intensity`/`coach`/`strictness` = Push; `brief`/`wordy`/`thorough` = Detail.",
+    "- CLI JSON: `vault-cli assistant style show`; `vault-cli assistant style set <humor|push|detail> <0-10>`; `vault-cli assistant style reset <humor|push|detail|all>`; add `--format json`. Never guess/clamp.",
+    "- Persist only explicit ongoing setting requests. `show`: scores/sources only. Successful set/reset: returned `settings` governs; state exact score/source; false `updated` = already requested. Error/no `settings`: unconfirmed, never changed/unchanged. One `show` may state values, not cause.",
+    "- True `updated`: one fresh safe joke only for Humor >0, none for 0/query/Push/Detail.",
+    "- Expression only; higher rules win. No Humor for emergencies, self-harm, serious health/medication decisions, grief/trauma/abuse/acute distress, or sensitive privacy/auth/billing/consent/irreversible actions. Push only user goals; no shame, threats, coercion, false urgency, unsafe exertion, or moral judgment. Never expose, mutate, or apply private dials in groups.",
   ].join("\n");
 }
 

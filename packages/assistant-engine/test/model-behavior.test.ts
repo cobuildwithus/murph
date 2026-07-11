@@ -283,43 +283,79 @@ describe('assistant execution prompt contract', () => {
       '/settings?voice=true',
     )
     expect(layers.stableRouteCapabilityPrompt).toContain(
-      'only mention when asked',
+      'Saved tone (formal/casual) and voice',
     )
     expect(layers.stableRouteCapabilityPrompt).toContain(
-      '`vault-cli assistant style show --format json`',
+      'Dials use CLI',
     )
     expect(layers.stableRouteCapabilityPrompt).toContain(
-      '`vault-cli assistant style set <humor|push|detail> <0-10> --format json`',
+      '`vault-cli assistant style show`',
     )
     expect(layers.stableRouteCapabilityPrompt).toContain(
-      '`vault-cli assistant style reset <humor|push|detail|all> --format json`',
+      '`vault-cli assistant style set <humor|push|detail> <0-10>`',
+    )
+    expect(layers.stableRouteCapabilityPrompt).toContain(
+      '`vault-cli assistant style reset <humor|push|detail|all>`',
+    )
+    expect(layers.stableRouteCapabilityPrompt).toContain(
+      'add `--format json`',
     )
     expect(layers.stableRouteCapabilityPrompt).toContain(
       '`intensity`/`coach`/`strictness` = Push',
     )
     expect(layers.stableRouteCapabilityPrompt).toContain(
-      '`brief`/`wordy`/`thorough` = Detail when clearly discussing a setting',
+      '`brief`/`wordy`/`thorough` = Detail',
     )
     expect(layers.stableRouteCapabilityPrompt).toContain(
       '`jokes`/`funny` = Humor',
     )
     expect(layers.stableRouteCapabilityPrompt).toContain(
-      'Returned `settings` is authoritative for that reply',
+      '`show`: scores/sources only',
     )
     expect(layers.stableRouteCapabilityPrompt).toContain(
-      'One fresh safe joke only if Humor changed above 0',
+      'returned `settings` governs',
     )
     expect(layers.stableRouteCapabilityPrompt).toContain(
-      'none at 0, queries, or Push/Detail',
+      'state exact score/source',
     )
     expect(layers.stableRouteCapabilityPrompt).toContain(
-      'Do not persist one-reply instructions or complaints',
+      'false `updated` = already requested',
+    )
+    expect(layers.stableRouteCapabilityPrompt).toContain(
+      'Error/no `settings`: unconfirmed',
+    )
+    expect(layers.stableRouteCapabilityPrompt).toContain(
+      'never changed/unchanged',
+    )
+    expect(layers.stableRouteCapabilityPrompt).toContain(
+      'One `show` may state values, not cause',
+    )
+    expect(layers.stableRouteCapabilityPrompt).toContain(
+      'one fresh safe joke only for Humor >0',
+    )
+    expect(layers.stableRouteCapabilityPrompt).toContain(
+      'none for 0/query/Push/Detail',
+    )
+    expect(layers.stableRouteCapabilityPrompt).toContain(
+      'Persist only explicit ongoing setting requests',
     )
     expect(layers.stableRouteCapabilityPrompt).toContain(
       'no shame, threats, coercion, false urgency',
     )
     expect(layers.stableRouteCapabilityPrompt).toContain(
-      'Group prompts never receive dial values or expose, mutate, or apply private dials',
+      'self-harm',
+    )
+    expect(layers.stableRouteCapabilityPrompt).toContain(
+      'serious health/medication decisions',
+    )
+    expect(layers.stableRouteCapabilityPrompt).toContain(
+      'grief/trauma/abuse/acute distress',
+    )
+    expect(layers.stableRouteCapabilityPrompt).toContain(
+      'privacy/auth/billing/consent/irreversible actions',
+    )
+    expect(layers.stableRouteCapabilityPrompt).toContain(
+      'Never expose, mutate, or apply private dials in groups',
     )
     expect(layers.threadContextPrompt).not.toContain('/settings?voice=true')
     expect(layers.dynamicTurnContextPrompt).not.toContain('/settings?voice=true')
