@@ -825,6 +825,7 @@ async function listHostedWorkspaceSnapshotEncryptedVerboseTarEntries(input: {
   });
   const tar = spawn("tar", [
     "-P",
+    "--numeric-owner",
     "-tvf",
     "-",
   ], {
@@ -910,6 +911,7 @@ async function listHostedWorkspaceSnapshotCompressedVerboseTarEntries(input: {
   });
   const tar = spawn("tar", [
     "-P",
+    "--numeric-owner",
     "-tvf",
     "-",
   ], {

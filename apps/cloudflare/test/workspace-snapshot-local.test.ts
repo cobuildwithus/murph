@@ -555,6 +555,77 @@ describe("workspace snapshot local restore", () => {
     }
   });
 
+  it("uses numeric tar ownership fields before rejecting environment files", async () => {
+    const tempRoot = await mkdtemp(path.join(tmpdir(), "workspace-snapshot-local-owner-test-"));
+    const durableRoot = path.join(tempRoot, "durable");
+    const existingDurableFile = path.join(durableRoot, "existing.txt");
+    const extractionMarker = path.join(tempRoot, "extraction-started");
+    const wrapperDir = path.join(tempRoot, "bin");
+    const tarWrapperPath = path.join(wrapperDir, "tar");
+    const originalPath = process.env.PATH;
+    const realTarPath = (await execFileAsync("which", ["tar"])).stdout.trim();
+    const dataKey = Uint8Array.from({ length: 32 }, (_, index) => index + 71);
+
+    try {
+      await mkdir(durableRoot, { mode: 0o700, recursive: true });
+      await mkdir(wrapperDir, { mode: 0o700, recursive: true });
+      await writeFile(existingDurableFile, "existing durable root\n", { mode: 0o600 });
+      await writeFile(
+        tarWrapperPath,
+        `#!/bin/sh
+listing=0
+numeric_owner=0
+extracting=0
+for argument in "$@"; do
+  if [ "$argument" = "-tvf" ]; then listing=1; fi
+  if [ "$argument" = "--numeric-owner" ]; then numeric_owner=1; fi
+  if [ "$argument" = "-xf" ]; then extracting=1; fi
+done
+if [ "$listing" = "1" ] && [ "$numeric_owner" != "1" ]; then
+  exit 97
+fi
+if [ "$extracting" = "1" ]; then
+  : > "\${MURPH_TEST_EXTRACTION_MARKER:?}" || exit 1
+fi
+exec "\${MURPH_TEST_REAL_TAR:?}" "$@"
+`,
+        { mode: 0o700 },
+      );
+      await chmod(tarWrapperPath, 0o700);
+      process.env.MURPH_TEST_EXTRACTION_MARKER = extractionMarker;
+      process.env.MURPH_TEST_REAL_TAR = realTarPath;
+      process.env.PATH = `${wrapperDir}${path.delimiter}${originalPath ?? ""}`;
+      const fixture = await createAuthenticatedTarSnapshotFixture({
+        dataKey,
+        entries: [{
+          content: "SECRET=placeholder\n",
+          groupName: "group name",
+          ownerName: "owner name",
+          path: "vault/.env",
+          type: "0",
+        }],
+        snapshotId: "snapshot_owner_metadata",
+      });
+
+      await expect(restoreEncryptedWorkspaceSnapshotFromEncryptedStream({
+        dataKey: encodeHostedWorkspaceSnapshotV2DataKey(dataKey),
+        durableRoot,
+        encryptedStream: streamEncryptedChunks([fixture.encryptedBytes]),
+        ref: fixture.ref,
+      })).rejects.toThrow("Hosted workspace snapshot tar archive contains environment files.");
+
+      await expect(readFile(existingDurableFile, "utf8")).resolves.toBe("existing durable root\n");
+      await expect(access(extractionMarker)).rejects.toThrow();
+      await expect(readdir(durableRoot)).resolves.toEqual(["existing.txt"]);
+    } finally {
+      process.env.PATH = originalPath;
+      delete process.env.MURPH_TEST_EXTRACTION_MARKER;
+      delete process.env.MURPH_TEST_REAL_TAR;
+      dataKey.fill(0);
+      await rm(tempRoot, { force: true, recursive: true });
+    }
+  });
+
   it.each([
     {
       entries: [{ content: "absolute\n", path: "/absolute-escape.txt", type: "0" }],
@@ -1252,7 +1323,9 @@ const TEST_HOSTED_WORKSPACE_SNAPSHOT_AUTH_TAG_BYTES = 16;
 
 interface TestTarEntry {
   content?: string;
+  groupName?: string;
   linkPath?: string;
+  ownerName?: string;
   path: string;
   type: "0" | "1" | "2" | "5" | "6" | "7" | "x";
 }
@@ -1361,8 +1434,8 @@ function createTestTarArchive(entries: readonly TestTarEntry[]): Buffer {
     writeTestTarString(header, 157, 100, entry.linkPath ?? "");
     header.write("ustar\0", 257, 6, "ascii");
     header.write("00", 263, 2, "ascii");
-    writeTestTarString(header, 265, 32, "runner");
-    writeTestTarString(header, 297, 32, "runner");
+    writeTestTarString(header, 265, 32, entry.ownerName ?? "runner");
+    writeTestTarString(header, 297, 32, entry.groupName ?? "runner");
     const checksum = header.reduce((total, byte) => total + byte, 0);
     header.write(checksum.toString(8).padStart(6, "0"), 148, 6, "ascii");
     header[154] = 0;

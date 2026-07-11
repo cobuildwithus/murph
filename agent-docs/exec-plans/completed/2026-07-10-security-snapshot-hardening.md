@@ -1,8 +1,8 @@
 # Harden encrypted snapshot restore boundaries
 
-Status: active
+Status: completed
 Created: 2026-07-10
-Updated: 2026-07-10
+Updated: 2026-07-11
 
 ## Goal
 
@@ -56,3 +56,4 @@ Updated: 2026-07-10
 
 - Commands to run: focused workspace-snapshot/runner-platform/R2 tests; `pnpm test:diff` for touched `apps/cloudflare` and docs; `pnpm verify:acceptance`; direct valid/adversarial archive scenario; `git diff --check`; required audits; PR ReviewGPT and CI.
 - Expected outcomes: valid snapshots restore, unsafe archives are rejected before extraction/replacement, diagnostics contain no injected path marker, GET TTL is exact, and all gates pass without secret or identifier leakage.
+Completed: 2026-07-11
