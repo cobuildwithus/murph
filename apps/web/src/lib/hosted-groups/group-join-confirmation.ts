@@ -7,6 +7,7 @@ import {
 } from "@murphai/hosted-execution";
 
 import { appendHostedMailboxEnvelopeTx } from "../hosted-mailbox/store";
+import { hasActiveHostedCryptoDomainRootsForUserTx } from "../hosted-crypto/domain-root-store";
 import { readHostedMemberIdentity } from "../hosted-onboarding/hosted-member-identity-store";
 import { readHostedMemberRoutingState } from "../hosted-onboarding/hosted-member-routing-store";
 import { readHostedMemberEmailAuthorization } from "../hosted-onboarding/hosted-member-store";
@@ -16,6 +17,7 @@ import {
   resolveHostedMemberMessagingState,
 } from "../hosted-onboarding/messaging-state";
 import { buildHostedGroupJoinUrl } from "./group-links";
+import { resolveHostedPublicBaseUrl } from "../hosted-web/public-url";
 
 export interface HostedGroupJoinConfirmationSignal {
   mailboxItemId: string;
@@ -35,6 +37,12 @@ export async function appendHostedGroupJoinConfirmationTx(input: {
     publicBaseUrl: input.publicBaseUrl,
   });
   if (!joinUrl) {
+    return null;
+  }
+  if (!(await hasActiveHostedCryptoDomainRootsForUserTx({
+    tx: input.tx,
+    userId: input.memberId,
+  }))) {
     return null;
   }
 
@@ -73,6 +81,43 @@ export async function appendHostedGroupJoinConfirmationTx(input: {
   };
 }
 
+export async function materializePendingHostedGroupJoinConfirmationsTx(input: {
+  memberId: string;
+  tx: Prisma.TransactionClient;
+}): Promise<void> {
+  const publicBaseUrl = resolveHostedPublicBaseUrl();
+  if (!publicBaseUrl) {
+    return;
+  }
+
+  const memberships = await input.tx.hostedGroupMember.findMany({
+    orderBy: { createdAt: "asc" },
+    select: {
+      createdAt: true,
+      id: true,
+      joinedAt: true,
+      group: {
+        select: { joinCode: true },
+      },
+    },
+    where: { memberId: input.memberId },
+  });
+
+  for (const membership of memberships) {
+    if (!membership.group.joinCode) {
+      continue;
+    }
+    await appendHostedGroupJoinConfirmationTx({
+      joinCode: membership.group.joinCode,
+      memberId: input.memberId,
+      membershipId: membership.id,
+      occurredAt: membership.joinedAt ?? membership.createdAt,
+      publicBaseUrl,
+      tx: input.tx,
+    });
+  }
+}
+
 async function resolveHostedGroupJoinConfirmationRouteTx(input: {
   memberId: string;
   tx: Prisma.TransactionClient;
@@ -97,17 +142,19 @@ async function resolveHostedGroupJoinConfirmationRouteTx(input: {
     ?? emailAuthorization?.verifiedEmail?.lookupKey
     ?? emailAuthorization?.directPublicSender?.lookupKey
     ?? null;
-  const linqRoute = linqAuthority.kind === "home" && currentMemberLookupKey
+  const linqContactLookupKey = linqAuthority.kind === "home"
+    ? linqAuthority.participantContact?.lookupKey ?? currentMemberLookupKey
+    : linqAuthority.kind === "pending"
+      ? linqAuthority.participantContact?.lookupKey ?? identity?.phoneLookupKey ?? null
+      : null;
+  const linqRoute = (
+    linqAuthority.kind === "home" || linqAuthority.kind === "pending"
+  ) && linqContactLookupKey
     ? {
         chatId: linqAuthority.chatId,
-        contactLookupKey: currentMemberLookupKey,
+        contactLookupKey: linqContactLookupKey,
       }
-    : linqAuthority.kind === "pending" && routing?.pendingLinqParticipantContact?.lookupKey
-      ? {
-          chatId: linqAuthority.chatId,
-          contactLookupKey: routing.pendingLinqParticipantContact.lookupKey,
-        }
-      : null;
+    : null;
 
   return resolveHostedMemberAssistantNotificationRoute({
     linqChatId: linqRoute?.chatId ?? null,

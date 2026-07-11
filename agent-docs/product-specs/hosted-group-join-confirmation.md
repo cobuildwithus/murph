@@ -1,6 +1,6 @@
 # Hosted Group Join Confirmation
 
-Last verified: 2026-07-10
+Last verified: 2026-07-11
 Status: Implemented
 
 ## User behavior
@@ -23,6 +23,11 @@ member's sharing edit does not create another confirmation.
 
 - The message goes only to the joining member's persisted private Linq thread
   or private Telegram thread. It is never sent into the group conversation.
+- A Linq home route persists the blinded participant kind and lookup key that
+  established the thread. Private notifications and subsequent inbound turns
+  therefore derive the same conversation identity even if the member later
+  adds another account credential. The raw participant value is not added to
+  the home-route row.
 - This flow does not use Linq participant-target delivery and therefore cannot
   start a new outbound iMessage conversation. If no private route exists, the
   join still succeeds and no confirmation is created.
@@ -54,10 +59,16 @@ consumer.
 
 ## Durability and failure behavior
 
-Membership, grants, revokes, and the confirmation mailbox item share one
-Prisma transaction. If a required mailbox append fails, the whole mutation
-rolls back. A stable membership-derived event ID makes mailbox replay
-idempotent.
+For activated members, membership, grants, revokes, and the confirmation
+mailbox item share one Prisma transaction. If a required mailbox append fails,
+the whole mutation rolls back. A stable membership-derived event ID makes
+mailbox replay idempotent.
+
+Pre-activation members do not yet own the ingress crypto root required to
+encrypt a mailbox payload. Their join transaction commits the durable
+membership without attempting the append. The central activation transaction
+materializes any missing membership-derived confirmations after provisioning
+all domain roots; mailbox deduplication keeps that replay exactly-once.
 
 After commit, each join adapter sends a best-effort mailbox pointer to the
 member runtime. The pointer is a latency hint; the encrypted mailbox item is
@@ -66,6 +77,7 @@ into an error.
 
 ## Deployment concerns
 
-This is a web-only producer change. The hosted runtime already supports the
-generic assistant-notification mailbox contract, so Vercel and Cloudflare do
-not require a tandem deployment or compatibility window.
+Apply the additive `hosted_member_routing` migration before deploying the web
+producer that writes the home participant identity. The hosted runtime already
+supports the generic assistant-notification mailbox contract, so Vercel and
+Cloudflare do not require a tandem deployment or compatibility window.

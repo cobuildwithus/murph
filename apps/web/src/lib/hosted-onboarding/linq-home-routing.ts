@@ -287,12 +287,6 @@ async function resolveHostedMemberActivationLinqRouteAttempt(input: {
     routing,
   });
   const memberPhoneNumber = input.member.identity?.phoneNumber ?? null;
-  const linqContactLookupKey =
-    input.member.identity?.phoneLookupKey
-    ?? routing?.pendingLinqParticipantContact?.lookupKey
-    ?? input.member.emailAuthorization?.verifiedEmail?.lookupKey
-    ?? null;
-
   const authority = readHostedLinqHomeLineAuthority(routing);
 
   if (authority.kind === "home") {
@@ -301,10 +295,17 @@ async function resolveHostedMemberActivationLinqRouteAttempt(input: {
         clearPending: true,
         linqChatId: authority.chatId,
         memberId: input.member.core.id,
+        participantContact: authority.participantContact,
         prisma: input.prisma,
         recipientPhone: authority.recipientPhone,
       });
     }
+
+    const linqContactLookupKey =
+      authority.participantContact?.lookupKey
+      ?? input.member.identity?.phoneLookupKey
+      ?? input.member.emailAuthorization?.verifiedEmail?.lookupKey
+      ?? null;
 
     return {
       welcomeRoute: resolveHostedMemberAssistantNotificationRoute({
@@ -321,17 +322,34 @@ async function resolveHostedMemberActivationLinqRouteAttempt(input: {
   // depend on the line still being in the assignable pool.
   if (
     authority.kind === "pending"
-    && linqContactLookupKey
+    && (
+      authority.participantContact?.lookupKey
+      ?? input.member.identity?.phoneLookupKey
+      ?? input.member.emailAuthorization?.verifiedEmail?.lookupKey
+    )
     && (
       memberPhoneNumber
         ? authority.recipientPhone !== null
         : true
     )
   ) {
+    const linqContactLookupKey =
+      authority.participantContact?.lookupKey
+      ?? input.member.identity?.phoneLookupKey
+      ?? input.member.emailAuthorization?.verifiedEmail?.lookupKey
+      ?? null;
     await upsertHostedMemberHomeLinqBindingTx({
       clearPending: true,
       linqChatId: authority.chatId,
       memberId: input.member.core.id,
+      participantContact: authority.participantContact ?? (
+        input.member.identity?.phoneLookupKey
+          ? {
+              kind: "phone",
+              lookupKey: input.member.identity.phoneLookupKey,
+            }
+          : null
+      ),
       prisma: input.prisma,
       recipientPhone: authority.recipientPhone,
     });
@@ -509,6 +527,10 @@ export type HostedLinqHomeLineAuthority =
       assignedAt: Date | null;
       chatId: string;
       kind: "home" | "pending";
+      participantContact?: {
+        kind: "email" | "phone";
+        lookupKey: string;
+      } | null;
       recipientPhone: string | null;
     }
   | {
@@ -532,6 +554,9 @@ export function readHostedLinqHomeLineAuthority(
       assignedAt: routing.linqHomeLineAssignedAt ?? null,
       chatId: routing.linqChatId,
       kind: "home",
+      ...(routing.linqParticipantContact
+        ? { participantContact: routing.linqParticipantContact }
+        : {}),
       recipientPhone: normalizePhoneNumber(routing.linqRecipientPhone),
     };
   }
@@ -541,6 +566,9 @@ export function readHostedLinqHomeLineAuthority(
       assignedAt: routing.linqHomeLineAssignedAt ?? null,
       chatId: routing.pendingLinqChatId,
       kind: "pending",
+      ...(routing.pendingLinqParticipantContact
+        ? { participantContact: routing.pendingLinqParticipantContact }
+        : {}),
       recipientPhone:
         normalizePhoneNumber(routing.pendingLinqRecipientPhone)
         ?? normalizePhoneNumber(routing.linqRecipientPhone),

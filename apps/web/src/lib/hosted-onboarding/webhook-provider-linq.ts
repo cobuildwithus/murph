@@ -469,6 +469,7 @@ export async function planHostedOnboardingLinqWebhook(input: {
       homeLineAssignedAt: familyHomeLineAssignedAt,
       memberId: familyAcceptance.memberId,
       occurredAt,
+      participantContact,
       prisma: input.prisma,
       recipientPhone: familyHomeRecipientPhone,
     });
@@ -565,6 +566,7 @@ export async function planHostedOnboardingLinqWebhook(input: {
       homeLineAssignedAt: bindingResult.homeLineAssignedAt,
       memberId: existingMember.id,
       occurredAt,
+      participantContact,
       prisma: input.prisma,
       recipientPhone: bindingResult.recipientPhone,
     });

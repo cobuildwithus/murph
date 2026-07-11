@@ -354,6 +354,10 @@ describe("resolveHostedMemberActivationLinqRoute", () => {
       clearPending: true,
       linqChatId: "chat_pending",
       memberId: "member_123",
+      participantContact: {
+        kind: "phone",
+        lookupKey: "hbidx:phone:v1:test",
+      },
       prisma: {} as never,
       recipientPhone: "+15550100001",
     });
@@ -419,6 +423,12 @@ describe("resolveHostedMemberActivationLinqRoute", () => {
       clearPending: true,
       linqChatId: "chat_pending_email",
       memberId: "member_123",
+      participantContact: {
+        kind: "email",
+        lookupKey: emailLookupKey,
+        observedAt: new Date("2026-04-12T00:01:00.000Z"),
+        value: "buddy@icloud.com",
+      },
       prisma: {} as never,
       recipientPhone: null,
     });
@@ -461,6 +471,10 @@ describe("resolveHostedMemberActivationLinqRoute", () => {
       clearPending: true,
       linqChatId: "chat_pending",
       memberId: "member_123",
+      participantContact: {
+        kind: "phone",
+        lookupKey: "hbidx:phone:v1:test",
+      },
       prisma: {} as never,
       recipientPhone: "+15550100001",
     });
@@ -493,6 +507,10 @@ describe("resolveHostedMemberActivationLinqRoute", () => {
       clearPending: true,
       linqChatId: "chat_pending",
       memberId: "member_123",
+      participantContact: {
+        kind: "phone",
+        lookupKey: "hbidx:phone:v1:test",
+      },
       prisma: {} as never,
       recipientPhone: "+15550100001",
     });
@@ -531,6 +549,10 @@ describe("resolveHostedMemberActivationLinqRoute", () => {
       clearPending: true,
       linqChatId: "chat_pending",
       memberId: "member_123",
+      participantContact: {
+        kind: "phone",
+        lookupKey: "hbidx:phone:v1:test",
+      },
       prisma: {} as never,
       recipientPhone: "+15550100001",
     });

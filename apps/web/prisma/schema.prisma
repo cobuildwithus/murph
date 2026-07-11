@@ -598,6 +598,9 @@ model HostedMemberRouting {
   /// Sticky post-activation Linq home thread for the member's long-lived Murph number.
   linqChatLookupKey                  String?      @unique @map("linq_chat_lookup_key")
   linqChatIdEncrypted                String?      @map("linq_chat_id_encrypted")
+  /// Blinded participant identity that owns the durable home thread.
+  linqParticipantContactKind        String?      @map("linq_participant_contact_kind")
+  linqParticipantContactLookupKey   String?      @map("linq_participant_contact_lookup_key")
   linqRecipientPhoneLookupKey        String?      @map("linq_recipient_phone_lookup_key")
   linqRecipientPhoneEncrypted        String?      @map("linq_recipient_phone_encrypted")
   linqHomeLineAssignedAt             DateTime?    @map("linq_home_line_assigned_at")

@@ -744,6 +744,8 @@ describe("upsertHostedMemberHomeLinqBinding", () => {
       create: {
         linqChatIdEncrypted: expect.stringMatching(/^hsb-test:/u),
         linqChatLookupKey: expect.stringMatching(/^hbidx:linq-chat:v1:/u),
+        linqParticipantContactKind: null,
+        linqParticipantContactLookupKey: null,
         linqRecipientPhoneEncrypted: expect.stringMatching(/^hsb-test:/u),
         linqRecipientPhoneLookupKey: expect.stringMatching(/^hbidx:phone:v1:/u),
         memberId: "member_123",

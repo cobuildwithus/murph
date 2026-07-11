@@ -623,6 +623,8 @@ describe("hosted-member-store", () => {
         linqChatIdEncrypted: true,
         linqChatLookupKey: true,
         linqHomeLineAssignedAt: true,
+        linqParticipantContactKind: true,
+        linqParticipantContactLookupKey: true,
         linqRecipientPhoneEncrypted: true,
         linqRecipientPhoneLookupKey: true,
         member: {
@@ -724,6 +726,8 @@ describe("hosted-member-store", () => {
         linqChatIdEncrypted: true,
         linqChatLookupKey: true,
         linqHomeLineAssignedAt: true,
+        linqParticipantContactKind: true,
+        linqParticipantContactLookupKey: true,
         linqRecipientPhoneEncrypted: true,
         linqRecipientPhoneLookupKey: true,
         member: {
@@ -761,6 +765,8 @@ describe("hosted-member-store", () => {
             value: "chat_123",
           }),
           linqChatLookupKey: "hbidx:linq-chat:v1:abc123",
+          linqParticipantContactKind: "email",
+          linqParticipantContactLookupKey: "hbidx:email:v1:home-participant",
           linqRecipientPhoneEncrypted: null,
           memberId: "member_123",
           pendingLinqChatIdEncrypted: null,
@@ -780,6 +786,10 @@ describe("hosted-member-store", () => {
       hasPendingLinqRouteState: false,
       linqChatId: "chat_123",
       linqChatLookupKey: "hbidx:linq-chat:v1:abc123",
+      linqParticipantContact: {
+        kind: "email",
+        lookupKey: "hbidx:email:v1:home-participant",
+      },
       linqRecipientPhone: null,
       linqRecipientPhoneLookupKey: null,
       memberId: "member_123",
@@ -1223,6 +1233,10 @@ describe("hosted-member-store", () => {
     await upsertHostedMemberHomeLinqBindingTx({
       linqChatId: "chat_123",
       memberId: "member_123",
+      participantContact: {
+        kind: "email",
+        lookupKey: "hbidx:email:v1:home-participant",
+      },
       prisma,
       recipientPhone: "+15550100001",
     });
@@ -1296,6 +1310,8 @@ describe("hosted-member-store", () => {
       create: {
         linqChatIdEncrypted: expect.stringMatching(/^hsb-test:/u),
         linqChatLookupKey: expect.stringMatching(/^hbidx:linq-chat:v1:/u),
+        linqParticipantContactKind: "email",
+        linqParticipantContactLookupKey: "hbidx:email:v1:home-participant",
         linqRecipientPhoneEncrypted: expect.stringMatching(/^hsb-test:/u),
         linqRecipientPhoneLookupKey: expect.stringMatching(/^hbidx:phone:v1:/u),
         memberId: "member_123",
@@ -1313,6 +1329,8 @@ describe("hosted-member-store", () => {
       update: {
         linqChatIdEncrypted: expect.stringMatching(/^hsb-test:/u),
         linqChatLookupKey: expect.stringMatching(/^hbidx:linq-chat:v1:/u),
+        linqParticipantContactKind: "email",
+        linqParticipantContactLookupKey: "hbidx:email:v1:home-participant",
         linqRecipientPhoneEncrypted: expect.stringMatching(/^hsb-test:/u),
         linqRecipientPhoneLookupKey: expect.stringMatching(/^hbidx:phone:v1:/u),
       },
@@ -1667,6 +1685,8 @@ describe("hosted-member-store", () => {
       update: {
         linqChatIdEncrypted: null,
         linqChatLookupKey: null,
+        linqParticipantContactKind: null,
+        linqParticipantContactLookupKey: null,
         linqRecipientPhoneEncrypted: expect.stringMatching(/^hsb-test:/u),
         linqRecipientPhoneLookupKey: expect.stringMatching(/^hbidx:phone:v1:/u),
         pendingLinqChatIdEncrypted: null,

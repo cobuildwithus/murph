@@ -279,6 +279,7 @@ export async function bindHostedMemberHomeLinqChatAndTrackInbound(input: {
   homeLineAssignedAt?: Date | null;
   memberId: string;
   occurredAt: string;
+  participantContact: HostedLinqParticipantContact;
   prisma: Prisma.TransactionClient;
   recipientPhone: string | null;
 }) {
@@ -287,6 +288,7 @@ export async function bindHostedMemberHomeLinqChatAndTrackInbound(input: {
     homeLineAssignedAt: input.homeLineAssignedAt ?? null,
     linqChatId: input.chatId,
     memberId: input.memberId,
+    participantContact: input.participantContact,
     prisma: input.prisma,
     recipientPhone: input.recipientPhone,
   });

@@ -80,6 +80,8 @@ const HOSTED_MEMBER_SCHEMA_GUARD = {
     'memberId String @unique @map("member_id")',
     'linqChatLookupKey String? @unique @map("linq_chat_lookup_key")',
     'linqChatIdEncrypted String? @map("linq_chat_id_encrypted")',
+    'linqParticipantContactKind String? @map("linq_participant_contact_kind")',
+    'linqParticipantContactLookupKey String? @map("linq_participant_contact_lookup_key")',
     'linqRecipientPhoneLookupKey String? @map("linq_recipient_phone_lookup_key")',
     'linqRecipientPhoneEncrypted String? @map("linq_recipient_phone_encrypted")',
     'linqHomeLineAssignedAt DateTime? @map("linq_home_line_assigned_at")',
@@ -641,6 +643,7 @@ describe("hosted Prisma baseline migration", () => {
       "20260709120000_hosted_ingress_latency_delivery_link",
       "20260709120000_hosted_linq_delivery_retry_after_at",
       "20260709120000_hosted_member_assistant_model_preference",
+      "20260711180000_hosted_linq_home_participant_identity",
       "migration_lock.toml",
     ]);
     expect(hostedThreadRoutesMigrationSql).toContain('CREATE TABLE "hosted_thread_container"');

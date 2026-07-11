@@ -14,6 +14,7 @@ import {
   createHostedLinqParticipantContactLookupKeyReadCandidates,
   normalizeHostedLinqParticipantContactValue,
   type HostedLinqParticipantContact,
+  type HostedLinqParticipantIdentity,
 } from "./linq-participant-contact";
 import { buildHostedMemberRoutingPrivateColumns } from "./member-private-codecs";
 import { hostedOnboardingError } from "./errors";
@@ -83,6 +84,8 @@ export async function upsertHostedMemberPendingLinqParticipantContactTx(input: {
     create: {
       linqChatIdEncrypted: null,
       linqChatLookupKey: null,
+      linqParticipantContactKind: null,
+      linqParticipantContactLookupKey: null,
       linqRecipientPhoneEncrypted: null,
       linqRecipientPhoneLookupKey: null,
       memberId: input.memberId,
@@ -175,6 +178,7 @@ export async function upsertHostedMemberHomeLinqBindingTx(input: {
   homeLineAssignedAt?: Date | null;
   linqChatId: string;
   memberId: string;
+  participantContact?: HostedLinqParticipantIdentity | null;
   prisma: Prisma.TransactionClient;
   recipientPhone: string | null;
 }): Promise<void> {
@@ -183,7 +187,7 @@ export async function upsertHostedMemberHomeLinqBindingTx(input: {
     kind: "home",
     linqChatId: input.linqChatId,
     memberId: input.memberId,
-    participantContact: null,
+    participantContact: input.participantContact ?? null,
     participantContactObservedAt: null,
     prisma: input.prisma,
     recipientPhone: input.recipientPhone,
@@ -245,6 +249,8 @@ export async function upsertHostedMemberHomeLinqRecipientPhoneTx(input: {
     update: {
       linqChatIdEncrypted: null,
       linqChatLookupKey: null,
+      linqParticipantContactKind: null,
+      linqParticipantContactLookupKey: null,
       ...(input.homeLineAssignedAt === undefined
         ? {}
         : { linqHomeLineAssignedAt: input.homeLineAssignedAt }),
@@ -443,7 +449,7 @@ async function writeHostedMemberLinqBindingTx(input: {
   kind: "home" | "pending";
   linqChatId: string;
   memberId: string;
-  participantContact: HostedLinqParticipantContact | null;
+  participantContact: HostedLinqParticipantContact | HostedLinqParticipantIdentity | null;
   participantContactObservedAt: Date | null;
   prisma: Prisma.TransactionClient;
   recipientPhone: string | null;
@@ -455,7 +461,7 @@ async function writeHostedMemberLinqBindingTx(input: {
     throw new TypeError("Hosted Linq routing requires a non-empty chat id.");
   }
 
-  const participantContactLookupKeys = input.participantContact
+  const participantContactLookupKeys = input.participantContact && "value" in input.participantContact
     ? readHostedLinqParticipantContactLookupKeys(input.participantContact)
     : [];
   const recipientPhone = normalizePhoneNumber(input.recipientPhone);
@@ -466,8 +472,8 @@ async function writeHostedMemberLinqBindingTx(input: {
     linqRecipientPhone: reservesHomeRecipient ? recipientPhone : null,
     memberId: input.memberId,
     pendingLinqChatId: input.kind === "pending" ? input.linqChatId : null,
-    pendingLinqParticipantContact: input.kind === "pending"
-      ? input.participantContact?.value ?? null
+    pendingLinqParticipantContact: input.kind === "pending" && input.participantContact && "value" in input.participantContact
+      ? input.participantContact.value
       : null,
     pendingLinqRecipientPhone: input.kind === "pending" ? recipientPhone : null,
     prisma: input.prisma,
@@ -475,7 +481,7 @@ async function writeHostedMemberLinqBindingTx(input: {
     telegramUserId: null,
   });
 
-  if (input.participantContact) {
+  if (input.participantContact && "value" in input.participantContact) {
     await acquireHostedLinqRoutingWriteLockTx({
       lockValue: buildHostedLinqParticipantContactLockValue(input.participantContact),
       namespace: "participant-contact",
@@ -530,7 +536,7 @@ function buildHostedMemberLinqBindingCreateData(input: {
   kind: "home" | "pending";
   linqChatLookupKey: string;
   memberId: string;
-  participantContact: HostedLinqParticipantContact | null;
+  participantContact: HostedLinqParticipantContact | HostedLinqParticipantIdentity | null;
   participantContactObservedAt: Date | null;
   recipientPhoneLookupKey: string | null;
   routingPrivateColumns: Awaited<ReturnType<typeof buildHostedMemberRoutingPrivateColumns>>;
@@ -540,6 +546,12 @@ function buildHostedMemberLinqBindingCreateData(input: {
       ? input.routingPrivateColumns.linqChatIdEncrypted
       : null,
     linqChatLookupKey: input.kind === "home" ? input.linqChatLookupKey : null,
+    linqParticipantContactKind: input.kind === "home"
+      ? input.participantContact?.kind ?? null
+      : null,
+    linqParticipantContactLookupKey: input.kind === "home"
+      ? input.participantContact?.lookupKey ?? null
+      : null,
     ...(input.homeLineAssignedAt
       ? { linqHomeLineAssignedAt: input.homeLineAssignedAt }
       : {}),
@@ -582,7 +594,7 @@ function buildHostedMemberLinqBindingUpdateData(input: {
   homeLineAssignedAt: Date | null;
   kind: "home" | "pending";
   linqChatLookupKey: string;
-  participantContact: HostedLinqParticipantContact | null;
+  participantContact: HostedLinqParticipantContact | HostedLinqParticipantIdentity | null;
   participantContactObservedAt: Date | null;
   recipientPhoneLookupKey: string | null;
   routingPrivateColumns: Awaited<ReturnType<typeof buildHostedMemberRoutingPrivateColumns>>;
@@ -591,6 +603,12 @@ function buildHostedMemberLinqBindingUpdateData(input: {
     return {
       linqChatIdEncrypted: input.routingPrivateColumns.linqChatIdEncrypted,
       linqChatLookupKey: input.linqChatLookupKey,
+      ...(input.participantContact
+        ? {
+            linqParticipantContactKind: input.participantContact.kind,
+            linqParticipantContactLookupKey: input.participantContact.lookupKey,
+          }
+        : {}),
       ...(input.homeLineAssignedAt === null
         ? {}
         : { linqHomeLineAssignedAt: input.homeLineAssignedAt }),

@@ -828,6 +828,10 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
       homeLineAssignedAt: null,
       linqChatId: "chat_123",
       memberId: "member_123",
+      participantContact: expect.objectContaining({
+        kind: "phone",
+        value: "+15551234567",
+      }),
       prisma,
       recipientPhone: "+15550000000",
     });

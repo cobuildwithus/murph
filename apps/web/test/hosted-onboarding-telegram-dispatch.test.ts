@@ -971,6 +971,8 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
           linqChatIdEncrypted: true,
           linqChatLookupKey: true,
           linqHomeLineAssignedAt: true,
+          linqParticipantContactKind: true,
+          linqParticipantContactLookupKey: true,
           linqRecipientPhoneEncrypted: true,
           linqRecipientPhoneLookupKey: true,
           member: {
