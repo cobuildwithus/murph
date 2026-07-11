@@ -11,6 +11,7 @@ import {
   compareAssistantInputSummaryOrder,
   type AssistantAutomationInputSummary,
 } from './input-summary.js'
+import { compareAssistantTimestampsAscending } from '../shared.js'
 
 export interface AssistantAutoReplyGroupItem {
   inputCandidate?: AssistantInputCandidate | null
@@ -110,30 +111,61 @@ export async function collectAssistantAutoReplyGroup(input: {
 export function orderAssistantAutoReplyInputSummaries(
   inputSummaries: readonly AssistantAutomationInputSummary[],
 ): AssistantAutomationInputSummary[] {
-  const deferredContext: AssistantAutomationInputSummary[] = []
-  const ordered: AssistantAutomationInputSummary[] = []
+  const actionable = inputSummaries.filter((summary) => !summary.contextOnly)
+  const contextByActionableInputId = new Map<string, AssistantAutomationInputSummary[]>()
+  const unpairedContext: AssistantAutomationInputSummary[] = []
 
-  for (const summary of inputSummaries) {
-    if (summary.contextOnly) {
-      deferredContext.push(summary)
+  for (const context of inputSummaries.filter((summary) => summary.contextOnly)) {
+    const target = selectEarliestCausalActionableInput({
+      actionable,
+      context,
+    })
+    if (!target) {
+      unpairedContext.push(context)
       continue
     }
-
-    const matchingContext: AssistantAutomationInputSummary[] = []
-    const remainingContext: AssistantAutomationInputSummary[] = []
-    for (const context of deferredContext) {
-      if (isSameAssistantDeferredContextRoute(context.conversation, summary.conversation)) {
-        matchingContext.push(context)
-      } else {
-        remainingContext.push(context)
-      }
-    }
-    deferredContext.splice(0, deferredContext.length, ...remainingContext)
-    matchingContext.sort(compareDeferredContextSemanticOrder)
-    ordered.push(...matchingContext, summary)
+    const matching = contextByActionableInputId.get(target.inputId) ?? []
+    matching.push(context)
+    contextByActionableInputId.set(target.inputId, matching)
   }
 
-  return [...ordered, ...deferredContext.sort(compareDeferredContextSemanticOrder)]
+  const ordered = actionable.flatMap((summary) => [
+    ...(contextByActionableInputId.get(summary.inputId) ?? [])
+      .sort(compareDeferredContextSemanticOrder),
+    summary,
+  ])
+  return [...ordered, ...unpairedContext.sort(compareDeferredContextSemanticOrder)]
+}
+
+function selectEarliestCausalActionableInput(input: {
+  actionable: readonly AssistantAutomationInputSummary[]
+  context: AssistantAutomationInputSummary
+}): AssistantAutomationInputSummary | null {
+  let selected: AssistantAutomationInputSummary | null = null
+  for (const candidate of input.actionable) {
+    if (
+      !isSameAssistantDeferredContextRoute(
+        input.context.conversation,
+        candidate.conversation,
+      )
+      || compareAssistantTimestampsAscending(
+        input.context.occurredAt,
+        candidate.occurredAt,
+      ) > 0
+    ) {
+      continue
+    }
+    if (
+      selected === null
+      || compareAssistantTimestampsAscending(
+        candidate.occurredAt,
+        selected.occurredAt,
+      ) < 0
+    ) {
+      selected = candidate
+    }
+  }
+  return selected
 }
 
 function compareDeferredContextSemanticOrder(

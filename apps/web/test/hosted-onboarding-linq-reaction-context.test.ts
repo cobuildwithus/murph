@@ -42,11 +42,18 @@ describe("stageHostedLinqGroupReactionContext", () => {
     mocks.readActiveHostedMemberAccess.mockResolvedValue(true);
     mocks.readHostedMailboxItemByDedupeKey.mockResolvedValue(null);
     mocks.getHostedLinqChatSummary.mockResolvedValue({
-      handles: [{
-        handle: "+15550000000",
-        isMe: true,
-        status: "active",
-      }],
+      handles: [
+        {
+          handle: "+15550000000",
+          isMe: true,
+          status: "active",
+        },
+        {
+          handle: "+15551234567",
+          isMe: false,
+          status: "active",
+        },
+      ],
       isGroup: true,
     });
     mocks.getHostedLinqReactionTargetMessage.mockResolvedValue({
@@ -97,6 +104,8 @@ describe("stageHostedLinqGroupReactionContext", () => {
           isFromMe: false,
           messageId: "event_reaction_1",
           reactionEligible: false,
+          reactionOperation: "added",
+          reactionTargetKey: expect.stringMatching(/^linq-reaction-target\.v1:/u),
           threadIsDirect: false,
         },
         routeAuthority: {
@@ -110,8 +119,91 @@ describe("stageHostedLinqGroupReactionContext", () => {
     });
     const text = envelope.message.linqMessage.parts[0].value;
     expect(text).toContain("Action: added reaction like");
+    expect(text).toContain(`Reaction target: ${envelope.message.linqMessage.reactionTargetKey}`);
     expect(text).toContain("second target part");
     expect(text).not.toContain("first target part");
+  });
+
+  it("keeps a stable target key across add/remove while separating parts", async () => {
+    const prisma = createPrismaStub();
+    await stageHostedLinqGroupReactionContext({
+      event: buildReactionEvent({ eventId: "event_reaction_target_add", partIndex: 1 }),
+      prisma,
+    });
+    await stageHostedLinqGroupReactionContext({
+      event: buildReactionEvent({
+        eventId: "event_reaction_target_remove",
+        eventType: "reaction.removed",
+        partIndex: 1,
+      }),
+      prisma,
+    });
+    await stageHostedLinqGroupReactionContext({
+      event: buildReactionEvent({ eventId: "event_reaction_other_part", partIndex: 0 }),
+      prisma,
+    });
+
+    const [added, removed, otherPart] = mocks.appendHostedMailboxEnvelopeTx.mock.calls
+      .map((call) => call[0].envelope.message.linqMessage);
+    expect(added.reactionTargetKey).toBe(removed.reactionTargetKey);
+    expect(added.reactionTargetKey).not.toBe(otherPart.reactionTargetKey);
+    expect(added.reactionOperation).toBe("added");
+    expect(removed.reactionOperation).toBe("removed");
+  });
+
+  it("requires the signed actor to be a canonical non-self group participant", async () => {
+    const prisma = createPrismaStub();
+    mocks.getHostedLinqChatSummary.mockResolvedValueOnce({
+      handles: [
+        { handle: "+15550000000", isMe: true, status: "active" },
+        { handle: "+15557654321", isMe: false, status: "active" },
+      ],
+      isGroup: true,
+    });
+    await expect(stageHostedLinqGroupReactionContext({
+      event: buildReactionEvent({ eventId: "event_reaction_actor_absent" }),
+      prisma,
+    })).resolves.toEqual({ reason: "invalid_actor", status: "ignored" });
+
+    mocks.getHostedLinqChatSummary.mockResolvedValueOnce({
+      handles: [{ handle: "+15551234567", isMe: true, status: "active" }],
+      isGroup: true,
+    });
+    await expect(stageHostedLinqGroupReactionContext({
+      event: buildReactionEvent({ eventId: "event_reaction_actor_self_only" }),
+      prisma,
+    })).resolves.toEqual({ reason: "invalid_actor", status: "ignored" });
+    expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+  });
+
+  it("accepts equivalent normalized phone and email participant identities", async () => {
+    const prisma = createPrismaStub();
+    mocks.getHostedLinqChatSummary.mockResolvedValueOnce({
+      handles: [
+        { handle: "+15550000000", isMe: true, status: "active" },
+        { handle: "+1 (555) 123-4567", isMe: false, status: "active" },
+      ],
+      isGroup: true,
+    });
+    await expect(stageHostedLinqGroupReactionContext({
+      event: buildReactionEvent({ eventId: "event_reaction_phone_normalized" }),
+      prisma,
+    })).resolves.toMatchObject({ status: "staged" });
+
+    mocks.getHostedLinqChatSummary.mockResolvedValueOnce({
+      handles: [
+        { handle: "+15550000000", isMe: true, status: "active" },
+        { handle: "Buddy@Example.com", isMe: false, status: "active" },
+      ],
+      isGroup: true,
+    });
+    await expect(stageHostedLinqGroupReactionContext({
+      event: buildReactionEvent({
+        actorHandle: "buddy@example.com",
+        eventId: "event_reaction_email_normalized",
+      }),
+      prisma,
+    })).resolves.toMatchObject({ status: "staged" });
   });
 
   it("preserves a removal against the full target when no part index is supplied", async () => {
@@ -334,6 +426,7 @@ describe("stageHostedLinqGroupReactionContext", () => {
 });
 
 function buildReactionEvent(input: {
+  actorHandle?: string;
   eventId?: string;
   eventType?: "reaction.added" | "reaction.removed";
   isFromMe?: boolean;
@@ -347,7 +440,7 @@ function buildReactionEvent(input: {
       data: {
         chat_id: "chat_group_1",
         from_handle: {
-          handle: "+15551234567",
+          handle: input.actorHandle ?? "+15551234567",
           is_me: input.isFromMe ?? false,
           service: "iMessage",
         },

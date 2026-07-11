@@ -193,4 +193,46 @@ describe('orderAssistantAutoReplyInputSummaries', () => {
     expect(orderAssistantAutoReplyInputSummaries([removed, added, message]))
       .toEqual([added, removed, message])
   })
+
+  it('leaves a reaction that occurred after the current message for the next turn', () => {
+    const reaction = createInputSummary({
+      contextOnly: true,
+      conversation: groupConversation({ actorId: 'alice', threadId: 'group-a' }),
+      inputId: 'reaction-delivered-first',
+      occurredAt: '2026-04-22T10:01:00.000Z',
+      receivedAt: '2026-04-22T10:01:01.000Z',
+      source: 'linq',
+    })
+    const message = createInputSummary({
+      conversation: groupConversation({ actorId: 'bob', threadId: 'group-a' }),
+      inputId: 'message-occurred-first',
+      occurredAt: '2026-04-22T10:00:00.000Z',
+      receivedAt: '2026-04-22T10:02:00.000Z',
+      source: 'linq',
+    })
+
+    expect(orderAssistantAutoReplyInputSummaries([reaction, message]))
+      .toEqual([message, reaction])
+  })
+
+  it('pairs a delayed reaction with the first message that causally follows it', () => {
+    const message = createInputSummary({
+      conversation: groupConversation({ actorId: 'bob', threadId: 'group-a' }),
+      inputId: 'message-delivered-first',
+      occurredAt: '2026-04-22T10:01:00.000Z',
+      receivedAt: '2026-04-22T10:01:01.000Z',
+      source: 'linq',
+    })
+    const reaction = createInputSummary({
+      contextOnly: true,
+      conversation: groupConversation({ actorId: 'alice', threadId: 'group-a' }),
+      inputId: 'reaction-delivered-late',
+      occurredAt: '2026-04-22T10:00:00.000Z',
+      receivedAt: '2026-04-22T10:02:00.000Z',
+      source: 'linq',
+    })
+
+    expect(orderAssistantAutoReplyInputSummaries([message, reaction]))
+      .toEqual([reaction, message])
+  })
 })

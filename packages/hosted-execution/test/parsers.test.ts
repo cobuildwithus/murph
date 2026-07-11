@@ -1916,6 +1916,8 @@ describe("parseHostedExecutionWake", () => {
             value: "Group reaction context",
           }],
           reactionEligible: false,
+          reactionOperation: "removed",
+          reactionTargetKey: "linq-reaction-target.v1:test",
           threadIsDirect: false,
         },
       },
@@ -1924,6 +1926,16 @@ describe("parseHostedExecutionWake", () => {
     } as const;
 
     expect(parseHostedExecutionWake(reaction)).toEqual(reaction);
+    expect(() => parseHostedExecutionWake({
+      ...reaction,
+      message: {
+        ...reaction.message,
+        linqMessage: {
+          ...reaction.message.linqMessage,
+          reactionOperation: "changed",
+        },
+      },
+    })).toThrow(/reactionOperation is invalid/u);
     expect(() => parseHostedExecutionWake({
       ...reaction,
       message: {

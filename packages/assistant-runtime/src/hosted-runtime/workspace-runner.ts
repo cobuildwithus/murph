@@ -1463,9 +1463,7 @@ function hasHostedMailboxImportForegroundConversationWork(
   return (
     (result.importResult.assistantInputIds?.length ?? 0) > 0
     || (result.importResult.conversationImportedCount ?? 0) > 0
-    || result.importResult.blocked.some((item) =>
-      item.retryable && item.lane === "conversation"
-    )
+    || (result.importResult.retryableConversationMessageBlockedCount ?? 0) > 0
   );
 }
 

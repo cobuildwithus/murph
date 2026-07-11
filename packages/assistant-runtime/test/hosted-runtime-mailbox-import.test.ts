@@ -1023,6 +1023,97 @@ describe("hosted mailbox import loop", () => {
     assert.equal(result.state.watermarks.conversation, "251");
   });
 
+  test("fast-forwards a bounded reaction-only backlog without foreground work or continuation", async () => {
+    const newestReaction = createMailboxItem({
+      id: "mailbox_item_reaction_backlog_1000",
+      kind: "conversation.reaction",
+      laneSeq: "1000",
+    });
+    const mailboxPort: HostedRuntimeMailboxPort = {
+      async fetch(): Promise<HostedMailboxFetchResponse> {
+        return {
+          consumedSeqByLane: [{ consumedSeq: "999", lane: "conversation" }],
+          fetchedAt: TEST_NOW,
+          items: [newestReaction],
+          maxSeqByLane: [{ lane: "conversation", maxSeq: "1000" }],
+          userId: TEST_USER_ID,
+        };
+      },
+      async fetchPayload(): Promise<HostedMailboxPayloadFetchResponse> {
+        throw new Error("inline reaction backlog should not fetch a sidecar payload");
+      },
+    };
+
+    const result = await fetchAndProcessHostedMailboxPrefix({
+      expectedUserId: TEST_USER_ID,
+      async importItem() {
+        return {
+          assistantInputId: "assistant_input_reaction_backlog_1000",
+          status: "imported",
+        };
+      },
+      limitPerLane: 1,
+      mailboxPort,
+      now: () => TEST_NOW,
+      requestId: "request_reaction_only_bounded_backlog",
+      state: createEmptyHostedMailboxImportState(),
+    });
+
+    assert.deepEqual(result.assistantInputIds, []);
+    assert.equal(result.conversationImportedCount, 0);
+    assert.equal(result.nextRetryAt, undefined);
+    assert.equal(result.state.watermarks.conversation, "1000");
+  });
+
+  test("leaves retryable reaction failures for a natural wake without scheduling one", async () => {
+    const reaction = createMailboxItem({
+      id: "mailbox_item_reaction_retryable_1",
+      kind: "conversation.reaction",
+      laneSeq: "1",
+    });
+    const mailboxPort: HostedRuntimeMailboxPort = {
+      async fetch(): Promise<HostedMailboxFetchResponse> {
+        return {
+          consumedSeqByLane: [{ consumedSeq: "0", lane: "conversation" }],
+          fetchedAt: TEST_NOW,
+          items: [reaction],
+          maxSeqByLane: [{ lane: "conversation", maxSeq: "0" }],
+          userId: TEST_USER_ID,
+        };
+      },
+      async fetchPayload(): Promise<HostedMailboxPayloadFetchResponse> {
+        throw new Error("inline reaction should not fetch a sidecar payload");
+      },
+    };
+
+    const result = await fetchAndProcessHostedMailboxPrefix({
+      expectedUserId: TEST_USER_ID,
+      async importItem() {
+        return {
+          reasonCode: "reaction.context_temporarily_unavailable",
+          retryable: true,
+          status: "blocked",
+        };
+      },
+      limitPerLane: 1,
+      mailboxPort,
+      now: () => TEST_NOW,
+      requestId: "request_reaction_retryable_no_wake",
+      state: createEmptyHostedMailboxImportState(),
+    });
+
+    assert.equal(result.retryableConversationMessageBlockedCount, 0);
+    assert.equal(result.nextRetryAt, undefined);
+    assert.equal(result.state.watermarks.conversation, "0");
+    assert.deepEqual(result.blocked, [{
+      itemId: "mailbox_item_reaction_retryable_1",
+      lane: "conversation",
+      reasonCode: "reaction.context_temporarily_unavailable",
+      retryable: true,
+      seq: "1",
+    }]);
+  });
+
   test("keeps legacy local-watermark strict-prefix ordering when consumed metadata is missing", async () => {
     const item = createMailboxItem({
       id: "mailbox_item_conversation_legacy_next",

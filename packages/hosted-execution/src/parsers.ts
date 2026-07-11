@@ -748,6 +748,24 @@ function parseHostedExecutionLinqConversationMessage(
             `${label} reactionEligible`,
           ),
         }),
+    ...(record.reactionOperation === undefined
+      ? {}
+      : {
+          reactionOperation: record.reactionOperation === null
+            ? null
+            : parseHostedExecutionLinqReactionOperation(
+                record.reactionOperation,
+                `${label} reactionOperation`,
+              ),
+        }),
+    ...(record.reactionTargetKey === undefined
+      ? {}
+      : {
+          reactionTargetKey: readOptionalNullableString(
+            record.reactionTargetKey,
+            `${label} reactionTargetKey`,
+          ),
+        }),
     ...(record.replyToMessageId === undefined
       ? {}
       : {
@@ -777,6 +795,17 @@ function parseHostedExecutionLinqConversationMessage(
             : requireBoolean(record.threadIsDirect, `${label} threadIsDirect`),
         }),
   };
+}
+
+function parseHostedExecutionLinqReactionOperation(
+  value: unknown,
+  label: string,
+): "added" | "removed" {
+  const operation = requireString(value, label);
+  if (operation !== "added" && operation !== "removed") {
+    throw new TypeError(`${label} is invalid.`);
+  }
+  return operation;
 }
 
 function parseHostedExecutionLinqConversationMessagePart(

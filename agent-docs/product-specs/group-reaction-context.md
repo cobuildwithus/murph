@@ -17,7 +17,8 @@ it must never wake Murph or produce a standalone reply.
   inactive routes, and Murph's own reactions do not enter this flow.
 - Resolve the reactor, reaction type or custom emoji, group, and exact referenced
   message. When the provider supplies a part index, bind the reaction to that
-  exact part; otherwise bind it to the referenced message.
+  exact part; otherwise bind it to the referenced message. The reactor must be
+  a canonical non-self participant of that group.
 - Preserve a bounded representation of the referenced content rather than
   guessing from webhook metadata. Truncation must be explicit, and media must
   use safe descriptors rather than provider URLs or attachment identifiers.
@@ -29,13 +30,18 @@ it must never wake Murph or produce a standalone reply.
   restart, or keep a hosted runtime alive.
 - Hold the observation until the next natural message in the same group. That
   message remains the actionable reply anchor; reaction context alone is never
-  eligible for a response.
+  eligible for a response. Pair by provider occurrence time, using mailbox
+  order only as a deterministic tie-break; delivery skew must not attach a
+  later reaction to an earlier message.
 - Bound deferred context to the newest 32 observations per group and 256 across
   the hosted pending set. Older overflow is terminally suppressed so reaction
   floods cannot create unbounded foreground reads or prompts.
 - A removal retracts the corresponding positive or negative signal. If an add
   and removal are both pending, Murph must understand the ordered result rather
-  than treating the original reaction as durable evidence.
+  than treating the original reaction as durable evidence. The encrypted wake
+  and imported source metadata retain one opaque target key derived from the
+  canonical message id plus optional part index so identical rendered text
+  cannot merge distinct targets.
 - Keep the existing disclosed react-to-join flow intact. Observational reaction
   ingestion must not weaken group admission, sharing consent, ordinary message
   replies, or any other product-critical flow.
@@ -67,8 +73,11 @@ preferences, or a participant's apparent tastes. Any such synthesis must:
 3. Web writes one encrypted, mailbox-only context item through the existing
    conversation lane without signaling orchestration.
 4. The hosted runtime may import that item only through normal mailbox
-   processing. Assistant automation keeps context-only input deferred until a
-   subsequent actionable message from the same group arrives.
+   processing. The mailbox projection exposes the earliest wakeable message
+   with only the bounded newest reaction suffix before it and advances existing
+   durable progress over the omitted non-wakeable prefix. Assistant automation
+   keeps context-only input deferred until a causally subsequent actionable
+   message from the same group arrives.
 5. The ordinary group turn sees the pending reaction observations alongside the
    new message and applies the group-chat behavior rules.
 

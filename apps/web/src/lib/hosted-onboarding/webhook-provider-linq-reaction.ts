@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import type { Prisma, PrismaClient } from "@prisma/client";
 import {
   buildHostedExecutionLinqConversationReactionWake,
@@ -96,9 +98,10 @@ export async function stageHostedLinqGroupReactionContext(input: {
     throw error;
   }
 
-  let accountLookupKey: string | null;
+  let canonicalContext: Awaited<ReturnType<typeof readHostedLinqReactionCanonicalContext>>;
   try {
-    accountLookupKey = await readHostedLinqReactionAccountLookupKey({
+    canonicalContext = await readHostedLinqReactionCanonicalContext({
+      actor: context.actor,
       chatId: context.chatId,
       event: input.event,
       ...(input.signal ? { signal: input.signal } : {}),
@@ -112,12 +115,10 @@ export async function stageHostedLinqGroupReactionContext(input: {
     }
     throw error;
   }
-  if (!accountLookupKey) {
-    return {
-      reason: "missing_context",
-      status: "ignored",
-    };
+  if (canonicalContext.status === "ignored") {
+    return canonicalContext;
   }
+  const accountLookupKey = canonicalContext.accountLookupKey;
 
   const targetText = buildHostedLinqReactionTargetText({
     chatId: context.chatId,
@@ -131,6 +132,13 @@ export async function stageHostedLinqGroupReactionContext(input: {
       status: "ignored",
     };
   }
+  const reactionTargetKey = buildHostedLinqReactionTargetKey({
+    messageId: context.messageId,
+    partIndex: context.partIndex,
+  });
+  const reactionOperation = input.event.eventType === "reaction.removed"
+    ? "removed"
+    : "added";
 
   const envelope = buildHostedExecutionLinqConversationReactionWake({
     accountLookupKey,
@@ -145,13 +153,16 @@ export async function stageHostedLinqGroupReactionContext(input: {
       parts: [{
         type: "text",
         value: buildHostedLinqReactionContextText({
-          eventType: input.event.eventType,
+          operation: reactionOperation,
           reactionCustomEmoji: input.event.reactionCustomEmoji,
           reactionType: input.event.reactionType,
+          reactionTargetKey,
           targetText,
         }),
       }],
       reactionEligible: false,
+      reactionOperation,
+      reactionTargetKey,
       service: input.event.service ?? target.service,
       threadIsDirect: false,
     },
@@ -247,18 +258,22 @@ function readHostedLinqGroupReactionContext(
   };
 }
 
-async function readHostedLinqReactionAccountLookupKey(input: {
+async function readHostedLinqReactionCanonicalContext(input: {
+  actor: NonNullable<ReturnType<typeof createHostedLinqParticipantContact>>;
   chatId: string;
   event: ParsedHostedLinqProviderEvent;
   signal?: AbortSignal;
-}): Promise<string | null> {
+}): Promise<
+  | { accountLookupKey: string; status: "ready" }
+  | { reason: "invalid_actor" | "missing_context"; status: "ignored" }
+> {
   const eventAccountLookupKey = createHostedPhoneLookupKey(input.event.phoneNumber);
   const chat = await getHostedLinqChatSummary({
     chatId: input.chatId,
     ...(input.signal ? { signal: input.signal } : {}),
   });
   if (chat.isGroup !== true) {
-    return null;
+    return { reason: "missing_context", status: "ignored" };
   }
 
   const accountLookupKeys = new Set(
@@ -268,16 +283,34 @@ async function readHostedLinqReactionAccountLookupKey(input: {
       .filter((value): value is string => value !== null),
   );
   if (accountLookupKeys.size !== 1) {
-    return null;
+    return { reason: "missing_context", status: "ignored" };
   }
   const canonicalAccountLookupKey = accountLookupKeys.values().next().value ?? null;
+  if (
+    !canonicalAccountLookupKey
+    || !chat.handles
+      .filter((handle) => !handle.isMe)
+      .map((handle) => createHostedLinqParticipantContact({
+        kind: handle.handle.includes("@") ? "email" : "phone",
+        value: handle.handle,
+      }))
+      .some((participant) =>
+        participant?.kind === input.actor.kind
+        && participant.lookupKey === input.actor.lookupKey
+      )
+  ) {
+    return { reason: "invalid_actor", status: "ignored" };
+  }
   if (
     eventAccountLookupKey
     && eventAccountLookupKey !== canonicalAccountLookupKey
   ) {
-    return null;
+    return { reason: "missing_context", status: "ignored" };
   }
-  return canonicalAccountLookupKey;
+  return {
+    accountLookupKey: canonicalAccountLookupKey,
+    status: "ready",
+  };
 }
 
 async function readHostedActiveLinqReactionRoute(input: {
@@ -362,22 +395,33 @@ function renderHostedLinqReactionTargetPart(
 }
 
 function buildHostedLinqReactionContextText(input: {
-  eventType: ParsedHostedLinqProviderEvent["eventType"];
+  operation: "added" | "removed";
   reactionCustomEmoji: string | null;
   reactionType: string | null;
+  reactionTargetKey: string;
   targetText: string;
 }): string {
-  const operation = input.eventType === "reaction.removed" ? "removed" : "added";
   const reaction = truncateHostedLinqReactionContextText(
     input.reactionCustomEmoji ?? input.reactionType ?? "reaction",
     HOSTED_LINQ_REACTION_LABEL_MAX_CHARS,
   );
   return [
     "Group reaction context (weak evidence; do not reply to this item alone).",
-    `Action: ${operation} reaction ${reaction}`,
+    `Action: ${input.operation} reaction ${reaction}`,
+    `Reaction target: ${input.reactionTargetKey}`,
     "Reacted-to content:",
     input.targetText,
   ].join("\n");
+}
+
+function buildHostedLinqReactionTargetKey(input: {
+  messageId: string;
+  partIndex: number | null;
+}): string {
+  const digest = createHash("sha256")
+    .update(`linq-reaction-target.v1\0${input.messageId}\0${input.partIndex ?? "message"}`)
+    .digest("base64url");
+  return `linq-reaction-target.v1:${digest}`;
 }
 
 function truncateHostedLinqReactionContextText(value: string, maxChars: number): string {

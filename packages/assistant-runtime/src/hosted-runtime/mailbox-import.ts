@@ -95,6 +95,7 @@ export interface HostedMailboxImportLoopResult {
   emailDeliveryContexts?: HostedAssistantEmailDeliveryContext[];
   latestLinqDeliveryContext?: HostedAssistantLinqDeliveryContext | null;
   linqDeliveryContexts?: HostedAssistantLinqDeliveryContext[];
+  retryableConversationMessageBlockedCount?: number;
   conversationImportTiming?: HostedMailboxConversationImportTiming;
   nextRetryAt?: string | null;
   state: HostedMailboxImportState;
@@ -263,7 +264,9 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
         retryable: true,
         seq: item.laneSeq,
       });
-      nextRetryAt = earliestHostedMailboxRetryAt(nextRetryAt, computeHostedMailboxRetryAt(now()));
+      if (hostedMailboxItemMayScheduleRetry(item)) {
+        nextRetryAt = earliestHostedMailboxRetryAt(nextRetryAt, computeHostedMailboxRetryAt(now()));
+      }
       stoppedLanes.add(lane);
       continue;
     }
@@ -291,7 +294,9 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
         retryable: true,
         seq: item.laneSeq,
       });
-      nextRetryAt = earliestHostedMailboxRetryAt(nextRetryAt, computeHostedMailboxRetryAt(now()));
+      if (hostedMailboxItemMayScheduleRetry(item)) {
+        nextRetryAt = earliestHostedMailboxRetryAt(nextRetryAt, computeHostedMailboxRetryAt(now()));
+      }
       stoppedLanes.add(lane);
       continue;
     }
@@ -306,10 +311,12 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
           retryable: true,
           seq: item.laneSeq,
         });
-        nextRetryAt = earliestHostedMailboxRetryAt(
-          nextRetryAt,
-          computeHostedMailboxRetryAt(now()),
-        );
+        if (hostedMailboxItemMayScheduleRetry(item)) {
+          nextRetryAt = earliestHostedMailboxRetryAt(
+            nextRetryAt,
+            computeHostedMailboxRetryAt(now()),
+          );
+        }
         stoppedLanes.add(lane);
         continue;
       }
@@ -369,7 +376,9 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
         seq: item.laneSeq,
       });
       if (payload.retryable) {
-        nextRetryAt = earliestHostedMailboxRetryAt(nextRetryAt, computeHostedMailboxRetryAt(now()));
+        if (hostedMailboxItemMayScheduleRetry(item)) {
+          nextRetryAt = earliestHostedMailboxRetryAt(nextRetryAt, computeHostedMailboxRetryAt(now()));
+        }
         stoppedLanes.add(lane);
         continue;
       }
@@ -417,7 +426,9 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
         retryable: true,
         seq: item.laneSeq,
       });
-      nextRetryAt = earliestHostedMailboxRetryAt(nextRetryAt, computeHostedMailboxRetryAt(now()));
+      if (hostedMailboxItemMayScheduleRetry(item)) {
+        nextRetryAt = earliestHostedMailboxRetryAt(nextRetryAt, computeHostedMailboxRetryAt(now()));
+      }
       stoppedLanes.add(lane);
       continue;
     }
@@ -443,7 +454,9 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
         seq: item.laneSeq,
       });
       if (outcome.retryable) {
-        nextRetryAt = earliestHostedMailboxRetryAt(nextRetryAt, computeHostedMailboxRetryAt(now()));
+        if (hostedMailboxItemMayScheduleRetry(item)) {
+          nextRetryAt = earliestHostedMailboxRetryAt(nextRetryAt, computeHostedMailboxRetryAt(now()));
+        }
         stoppedLanes.add(lane);
         continue;
       }
@@ -480,7 +493,7 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
         importedSystemMailboxItemIds.push(item.id);
       }
       const replyableConversationInput =
-        route.action === "import-conversation-message" && !itemIsDurablyConsumedReplay;
+        item.kind === "conversation.message" && !itemIsDurablyConsumedReplay;
       const foregroundAssistantInput =
         replyableConversationInput
         || (
@@ -528,6 +541,15 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
       stoppedLanes,
     });
   }
+  const fetchedKindByItemId = new Map(
+    fetched.items.map((item) => [item.id, item.kind]),
+  );
+  const retryableConversationMessageBlockedCount = blocked.filter((item) =>
+    item.retryable
+    && item.lane === "conversation"
+    && item.itemId !== null
+    && fetchedKindByItemId.get(item.itemId) === "conversation.message"
+  ).length;
 
   return {
     assistantInputIds,
@@ -542,6 +564,7 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
     ...(emailDeliveryContexts.length > 0 ? { emailDeliveryContexts } : {}),
     ...(latestLinqDeliveryContext ? { latestLinqDeliveryContext } : {}),
     ...(linqDeliveryContexts.length > 0 ? { linqDeliveryContexts } : {}),
+    retryableConversationMessageBlockedCount,
     ...(conversationImportTiming ? { conversationImportTiming } : {}),
     ...(nextRetryAt ? { nextRetryAt } : {}),
     state: nextState,
@@ -562,6 +585,10 @@ function mergeHostedMailboxConversationImportTiming(
   addHostedMailboxConversationImportTimingField(merged, "attachmentEvidenceMs", next.attachmentEvidenceMs);
   addHostedMailboxConversationImportTimingField(merged, "projectionTotalMs", next.projectionTotalMs);
   return Object.keys(merged).length > 0 ? merged : current;
+}
+
+function hostedMailboxItemMayScheduleRetry(item: HostedMailboxItem): boolean {
+  return item.kind !== "conversation.reaction";
 }
 
 function addHostedMailboxConversationImportTimingField(

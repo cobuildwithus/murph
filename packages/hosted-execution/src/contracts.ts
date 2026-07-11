@@ -321,6 +321,8 @@ export interface HostedExecutionLinqConversationMessage {
   messageId: string;
   parts: HostedExecutionLinqConversationMessagePart[];
   reactionEligible?: boolean | null;
+  reactionOperation?: "added" | "removed" | null;
+  reactionTargetKey?: string | null;
   replyToMessageId?: string | null;
   replyToPartIndex?: number | null;
   service?: string | null;
