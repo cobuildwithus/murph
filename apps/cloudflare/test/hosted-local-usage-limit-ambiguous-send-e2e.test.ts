@@ -220,7 +220,9 @@ describe("hosted local usage-limit ambiguous send e2e", () => {
       reason: "wake-appended-active-member",
     });
     await waitForUsageLimitBlockedWorkflowState(firstBlockedWorkflowState.signalVersion);
-    const finalStatus = await requireScenario().harness.readUserStatus(userId);
+    const finalStatus = await waitForUsageLimitBlockedRuntimeStatus(
+      readConversationMailboxMaxSeq(firstBlockedStatus),
+    );
 
     expect(finalStatus.lastErrorCode ?? null).toBeNull();
     expect(finalStatus.inFlight).toBe(false);
@@ -311,6 +313,41 @@ async function waitForUsageLimitBlockedWorkflowState(
     `Timed out waiting for usage-limit workflow signal above ${previousSignalVersion}.`,
     ...(latestState ? [`last workflow state: ${JSON.stringify(latestState)}`] : []),
     ...(latestError ? [`last workflow query error: ${latestError}`] : []),
+  ]));
+}
+
+async function waitForUsageLimitBlockedRuntimeStatus(
+  previousConversationMaxSeq: string,
+): Promise<HostedRunnerStatusResponse> {
+  const deadline = Date.now() + 180_000;
+  let latestStatus: HostedRunnerStatusResponse | null = null;
+
+  while (Date.now() < deadline) {
+    latestStatus = await requireScenario().harness.readUserStatus(userId);
+    if (
+      !latestStatus.inFlight
+      && !latestStatus.lastErrorCode
+      && readConversationMailboxLag(latestStatus) !== "0"
+      && compareMailboxSeq(
+        readConversationMailboxMaxSeq(latestStatus),
+        previousConversationMaxSeq,
+      ) > 0
+    ) {
+      return latestStatus;
+    }
+    await sleep(250);
+  }
+
+  throw new Error(await requireScenario().buildFailureMessage(userId, [
+    "Timed out waiting for the usage-limited runtime to retain the later mailbox item.",
+    ...(latestStatus
+      ? [`last status: ${JSON.stringify({
+          conversationLag: readConversationMailboxLag(latestStatus),
+          conversationMaxSeq: readConversationMailboxMaxSeq(latestStatus),
+          inFlight: latestStatus.inFlight,
+          lastErrorCode: latestStatus.lastErrorCode ?? null,
+        })}`]
+      : []),
   ]));
 }
 

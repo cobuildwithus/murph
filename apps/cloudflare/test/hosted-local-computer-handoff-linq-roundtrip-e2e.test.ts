@@ -154,7 +154,15 @@ describe("hosted local computer handoff Linq roundtrip e2e", () => {
       pendingHandoffId: awaiting.handoff?.id,
       status: "awaiting_user",
     });
-    expect(awaiting.run?.checkpointContext?.conversationId).toContain(chatId);
+    expect(readLinqCheckpointConversationParts(
+      awaiting.run?.checkpointContext?.conversationId ?? null,
+    )).toEqual([
+      "linq",
+      "linq",
+      expect.stringMatching(/^hid_[0-9a-f]{32}$/u),
+      expect.stringMatching(/^hid_[0-9a-f]{32}$/u),
+      true,
+    ]);
     expect(awaiting.handoff).toMatchObject({
       memberId,
       purpose: "manual_browser_help",
@@ -364,6 +372,22 @@ function collectJsonStrings(value: unknown): string[] {
     return [];
   }
   return Object.values(value).flatMap(collectJsonStrings);
+}
+
+function readLinqCheckpointConversationParts(value: string | null): unknown[] {
+  if (!value) {
+    throw new Error("Computer handoff omitted its checkpoint conversation identity.");
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value);
+  } catch {
+    throw new Error("Computer handoff checkpoint conversation identity was not JSON.");
+  }
+  if (!Array.isArray(parsed)) {
+    throw new Error("Computer handoff checkpoint conversation identity was not an array.");
+  }
+  return parsed;
 }
 
 function requireValue<T>(value: T | null | undefined, label: string): T {
