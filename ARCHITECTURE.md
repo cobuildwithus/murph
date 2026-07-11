@@ -1,10 +1,30 @@
 # Murph Architecture
 
-Last verified: 2026-07-09
+Last verified: 2026-07-10
 
 ## Hosted Connected Apps
 
 Connected apps expose exactly three assistant tools: account management, semantic tool search, and execution. `apps/web` owns the Composio API key, durable per-member Tool Router session id, short-lived member-bound connect intents, account verification, server-owned built-in service tool allowlist, server-held OpenWeather custom auth for the allowlisted weather tools, agent-approved calendar-create write allowlist, and branded OAuth completion UX. The hosted runner reaches that authority only through the existing signed `web-control.worker` boundary; Composio credentials, session ids, OAuth state, OpenWeather credentials, and connected-account provider tokens never enter Codex env or prompts. Composio owns provider schemas and raw execution results, while Murph applies a session-level read-only/non-destructive policy, explicit multi-account selection for connected-account tools, accountless execution only for server-allowlisted built-in service tools, one generic result-size bound rather than provider-specific tool or result adapters, direct custom-auth execution only for allowlisted OpenWeather read tools, and a separate direct-execute path only for agent-approved primary-calendar event creation with unsupported write arguments rejected before provider execution and failed or ambiguous provider outcomes marked non-retryable.
+
+Conversation billing and Family controls follow the same narrow web-control
+ownership rule. `apps/web` owns the member-bound billing read model, configured
+plan presentations, Stripe mutations, Family membership/invite rows, and seat
+reconciliation. The hosted assistant reaches only typed signed routes behind
+the active-attempt runtime write fence; Cloudflare binds the request to the
+current member and stores no second billing or approval state. New money,
+subscription, invite-cancel, member-removal, and seat-count actions first use
+`confirmed: false` to return the web-owned exact-action presentation without
+approval or mutation. Literal current-conversation `confirmed: true` is then a
+typed prompt precondition, not mutation authority. Before mutation, `apps/web`
+derives the canonical price, cadence, timing, proration behavior, target, and
+current-state fingerprint; it requests and then consumes the existing
+member-bound, human-approved, TTL-limited sensitive-action challenge. Changed
+price or seat state derives a different challenge, and the canonical mutation
+is unreachable until exact-action approval is consumed. Canonical web services
+return applied, scheduled, unchanged, pending, or browser-handoff truth while
+Stripe webhooks remain the durable reconciliation owner. Tool execution
+failures presented to the model stay generic; Stripe ids, configuration values,
+ownership lookup results, and provider errors do not cross the tool boundary.
 
 ## Hosted Computer Authentication
 

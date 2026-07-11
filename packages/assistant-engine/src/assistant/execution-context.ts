@@ -12,6 +12,8 @@ import type {
 import type {
   HostedRuntimeProductFeedbackRecord,
   HostedRuntimeProductFeedbackRecordResponse,
+  HostedRuntimeBillingPlanToolRequest,
+  HostedRuntimeBillingPlanToolResponse,
   HostedRuntimeFamilyPlanToolRequest,
   HostedRuntimeFamilyPlanToolResponse,
   HostedRuntimeGroupToolRequest,
@@ -75,6 +77,12 @@ export interface AssistantHostedFamilyPlanTool {
   ): Promise<HostedRuntimeFamilyPlanToolResponse>
 }
 
+export interface AssistantHostedBillingPlanTool {
+  request(
+    request: HostedRuntimeBillingPlanToolRequest,
+  ): Promise<HostedRuntimeBillingPlanToolResponse>
+}
+
 export interface AssistantHostedGroupTool {
   request(
     request: HostedRuntimeGroupToolRequest,
@@ -127,6 +135,7 @@ export type AssistantWorkspaceArtifactMaterializer = (
 
 export interface AssistantHostedExecutionContext {
   actionApprovalPort?: AssistantHostedActionApprovalPort | null
+  billingPlanTool?: AssistantHostedBillingPlanTool | null
   channelTypingDependencies?: AssistantChannelTypingDependencies
   connectedApps?: AssistantConnectedAppsPort | null
   defaultTarget?: AssistantModelTarget | null
@@ -180,6 +189,7 @@ export function normalizeAssistantExecutionContext(
   const generatedImageUploader = normalizeAssistantGeneratedImageUploader(
     hosted?.generatedImageUploader,
   )
+  const billingPlanTool = normalizeAssistantBillingPlanTool(hosted?.billingPlanTool)
   const familyPlanTool = normalizeAssistantFamilyPlanTool(hosted?.familyPlanTool)
   const groupTool = normalizeAssistantGroupTool(hosted?.groupTool)
   const newsletterTool = normalizeAssistantNewsletterTool(hosted?.newsletterTool)
@@ -198,6 +208,7 @@ export function normalizeAssistantExecutionContext(
     hosted: {
       ...(actionApprovalPort ? { actionApprovalPort } : {}),
       ...(connectedApps ? { connectedApps } : {}),
+      ...(billingPlanTool ? { billingPlanTool } : {}),
       ...(typeof hosted?.issueDeviceConnectLink === 'function'
         ? {
             issueDeviceConnectLink: hosted.issueDeviceConnectLink,
@@ -317,6 +328,18 @@ function normalizeAssistantProductFeedbackRecorder(
 function normalizeAssistantFamilyPlanTool(
   input: AssistantHostedExecutionContext['familyPlanTool'] | undefined,
 ): AssistantHostedFamilyPlanTool | undefined {
+  if (!input || typeof input.request !== 'function') {
+    return undefined
+  }
+
+  return {
+    request: input.request.bind(input),
+  }
+}
+
+function normalizeAssistantBillingPlanTool(
+  input: AssistantHostedExecutionContext['billingPlanTool'] | undefined,
+): AssistantHostedBillingPlanTool | undefined {
   if (!input || typeof input.request !== 'function') {
     return undefined
   }

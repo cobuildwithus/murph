@@ -54,6 +54,18 @@ describe('resolveAssistantModelBehaviorProfile', () => {
 })
 
 describe('assistant execution prompt contract', () => {
+  it('keeps email-only Family invites available in the assembled prompt', () => {
+    const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
+
+    expect(prompt).toContain(
+      'can invite family members by phone number, Telegram username, or email',
+    )
+    expect(prompt).toContain(
+      'provided a phone number, Telegram username, or email',
+    )
+    expect(prompt).not.toContain('provided a phone number or Telegram username')
+  })
+
   it('adds the shared execution contract without changing the calmer Murph voice', () => {
     const prompt = buildAssistantSystemPrompt({
       assistantCliContract: null,

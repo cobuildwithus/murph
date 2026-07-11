@@ -11,6 +11,7 @@ import type { HostedWorkspaceCheckpointBridgeAuthority } from "./authority-heade
 import { createCloudflareArtifactStore } from "./artifact-store.ts";
 import { createHostedWebActionApprovalPort } from "./action-approval-port.ts";
 import { createCloudflareBrowserVaultReplicaPort } from "./browser-vault-replica-port.ts";
+import { createHostedRuntimeBillingPlanToolPort } from "./billing-plan-tool-port.ts";
 import { createHostedRuntimeCodexAuthPort } from "./codex-auth-port.ts";
 import { createHostedWebConnectedAppsPort } from "./connected-apps-port.ts";
 import { createHostedWebDeviceSyncPort } from "./device-sync-port.ts";
@@ -204,6 +205,12 @@ export function buildHostedExecutionRuntimePlatform(input: {
     }),
     ...(transport
       ? {
+          billingPlanToolPort: createHostedRuntimeBillingPlanToolPort({
+            boundUserId: input.boundUserId,
+            fetchImpl,
+            timeoutMs,
+            transport,
+          }),
           issueExportPort: createHostedRuntimeIssueExportPort({
             boundUserId: input.boundUserId,
             fetchImpl,

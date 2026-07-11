@@ -113,6 +113,7 @@ describe("scheduleHostedBillingPlanSwitchToPulse", () => {
 
   test("creates a Stripe schedule and stores pending Pulse display fields only after update", async () => {
     await expect(scheduleHostedBillingPlanSwitchToPulse({
+      expectedCurrentPeriodEnd: new Date("2026-05-06T12:00:00.000Z"),
       memberId: "member_123",
       now: new Date("2026-05-06T00:00:00.000Z"),
     })).resolves.toEqual({
@@ -187,6 +188,22 @@ describe("scheduleHostedBillingPlanSwitchToPulse", () => {
       stripeSubscriptionScheduleId: "sched_123",
       tx: mocks.prismaClient,
     });
+  });
+
+  test("rejects when the live billing period changed after approval", async () => {
+    await expect(scheduleHostedBillingPlanSwitchToPulse({
+      expectedCurrentPeriodEnd: new Date("2026-05-05T12:00:00.000Z"),
+      memberId: "member_123",
+      now: new Date("2026-05-06T00:00:00.000Z"),
+    })).rejects.toMatchObject({
+      code: "HOSTED_BILLING_APPROVED_PERIOD_CHANGED",
+      httpStatus: 409,
+    });
+
+    expect(mocks.stripe.subscriptionSchedules.create).not.toHaveBeenCalled();
+    expect(mocks.stripe.subscriptionSchedules.retrieve).not.toHaveBeenCalled();
+    expect(mocks.stripe.subscriptionSchedules.update).not.toHaveBeenCalled();
+    expect(mocks.writeHostedMemberStripeBillingRefTx).not.toHaveBeenCalled();
   });
 
   test("returns already_scheduled for the same compatible app-authored schedule", async () => {

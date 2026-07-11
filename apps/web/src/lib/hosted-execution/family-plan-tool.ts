@@ -11,20 +11,31 @@ import type {
 } from "@murphai/hosted-execution/runtime-control";
 
 import {
+  buildHostedRuntimeFamilyActionApprovalRequest,
+  requestHostedRuntimeSensitiveActionApproval,
+} from "./billing-family-action-approval";
+
+import {
   createHostedFamilyBillingCheckout,
   type HostedFamilyChatInviteResult,
   ensureHostedAccountGroupForOwnerTx,
   readHostedFamilyAccessForMember,
   issueHostedFamilyInviteFromOwnerTx,
   readHostedFamilyOwnerSnapshotForMember,
+  removeHostedFamilyMemberTx,
+  revokeHostedFamilyInviteTx,
+  updateHostedFamilySeatCount,
+  waitForHostedFamilyBilledSeatCount,
 } from "@/src/lib/hosted-onboarding/family-plan";
 import {
   HOSTED_FAMILY_MAX_SEATS,
   HOSTED_FAMILY_MIN_SEATS,
+  HOSTED_FAMILY_SEAT_RECURRING_AMOUNT_USD_CENTS,
 } from "@/src/lib/hosted-onboarding/billing-plans";
 import {
   HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
 } from "@/src/lib/hosted-onboarding/shared";
+import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import { getPrisma } from "@/src/lib/prisma";
 
 export async function handleHostedRuntimeFamilyPlanTool(input: {
@@ -44,6 +55,262 @@ export async function handleHostedRuntimeFamilyPlanTool(input: {
         input.memberId,
         input.request.invite ?? null,
       ),
+    };
+  }
+  if (input.request.action === "cancel_invite") {
+    const request = input.request;
+    const snapshot = await requireHostedRuntimeFamilyOwnerSnapshot(input.memberId);
+    const invite = snapshot.invites.find((row) => row.id === request.inviteId);
+    if (!invite) {
+      const existing = await getPrisma().hostedAccountGroupInvite.findFirst({
+        select: { status: true },
+        where: {
+          groupId: snapshot.groupId,
+          id: request.inviteId,
+        },
+      });
+      if (existing?.status === "revoked") {
+        return {
+          action: "cancel_invite",
+          result: {
+            inviteId: request.inviteId,
+            status: "unchanged",
+          },
+        };
+      }
+      throw hostedOnboardingError({
+        code: "HOSTED_FAMILY_INVITE_NOT_FOUND",
+        httpStatus: 404,
+        message: "Pending Family invite not found.",
+      });
+    }
+    const approvalRequest = buildHostedRuntimeFamilyActionApprovalRequest({
+      action: "cancel_invite",
+      inviteId: request.inviteId,
+      returnContactKind: request.returnContactKind ?? null,
+      status: projectHostedRuntimeFamilyPlanToolStatus(snapshot),
+      targetLabel: invite.targetLabel,
+    });
+    if (!request.confirmed) {
+      return {
+        action: "cancel_invite",
+        result: {
+          presentation: approvalRequest.presentation,
+          status: "confirmation_required",
+        },
+      };
+    }
+    const approval = await requestHostedRuntimeSensitiveActionApproval({
+      memberId: input.memberId,
+      prisma: getPrisma(),
+      request: approvalRequest,
+    });
+    if (approval.status !== "approved") {
+      return { action: "cancel_invite", result: approval };
+    }
+    const canceled = await getPrisma().$transaction(async (tx) => {
+      return await revokeHostedFamilyInviteTx({
+        groupId: snapshot.groupId,
+        inviteId: request.inviteId,
+        ownerMemberId: input.memberId,
+        tx,
+      });
+    }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+    if (!canceled) {
+      const existing = await getPrisma().hostedAccountGroupInvite.findFirst({
+        select: { status: true },
+        where: {
+          groupId: snapshot.groupId,
+          id: request.inviteId,
+        },
+      });
+      if (existing?.status === "revoked") {
+        return {
+          action: "cancel_invite",
+          result: {
+            inviteId: request.inviteId,
+            status: "unchanged",
+          },
+        };
+      }
+      throw hostedOnboardingError({
+        code: "HOSTED_FAMILY_INVITE_NOT_FOUND",
+        httpStatus: 404,
+        message: "Pending Family invite not found.",
+      });
+    }
+    return {
+      action: "cancel_invite",
+      result: {
+        inviteId: request.inviteId,
+        status: "canceled",
+      },
+    };
+  }
+  if (input.request.action === "remove_member") {
+    const request = input.request;
+    const snapshot = await requireHostedRuntimeFamilyOwnerSnapshot(input.memberId);
+    const member = snapshot.members.find((row) =>
+      row.memberId === request.memberId && !row.isOwner
+    );
+    if (!member) {
+      const existing = await getPrisma().hostedAccountGroupMembership.findFirst({
+        select: { status: true },
+        where: {
+          groupId: snapshot.groupId,
+          memberId: request.memberId,
+        },
+      });
+      if (existing?.status === "removed") {
+        return {
+          action: "remove_member",
+          result: {
+            memberId: request.memberId,
+            status: "unchanged",
+          },
+        };
+      }
+      throw hostedOnboardingError({
+        code: "HOSTED_FAMILY_MEMBER_NOT_FOUND",
+        httpStatus: 404,
+        message: "Active sponsored Family member not found.",
+      });
+    }
+    const approvalRequest = buildHostedRuntimeFamilyActionApprovalRequest({
+      action: "remove_member",
+      memberId: request.memberId,
+      returnContactKind: request.returnContactKind ?? null,
+      status: projectHostedRuntimeFamilyPlanToolStatus(snapshot),
+      targetLabel: member.label,
+    });
+    if (!request.confirmed) {
+      return {
+        action: "remove_member",
+        result: {
+          presentation: approvalRequest.presentation,
+          status: "confirmation_required",
+        },
+      };
+    }
+    const approval = await requestHostedRuntimeSensitiveActionApproval({
+      memberId: input.memberId,
+      prisma: getPrisma(),
+      request: approvalRequest,
+    });
+    if (approval.status !== "approved") {
+      return { action: "remove_member", result: approval };
+    }
+    const removed = await getPrisma().$transaction(async (tx) => {
+      return await removeHostedFamilyMemberTx({
+        groupId: snapshot.groupId,
+        memberId: request.memberId,
+        ownerMemberId: input.memberId,
+        tx,
+      });
+    }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+    if (!removed) {
+      const existing = await getPrisma().hostedAccountGroupMembership.findFirst({
+        select: { status: true },
+        where: {
+          groupId: snapshot.groupId,
+          memberId: request.memberId,
+        },
+      });
+      if (existing?.status === "removed") {
+        return {
+          action: "remove_member",
+          result: {
+            memberId: request.memberId,
+            status: "unchanged",
+          },
+        };
+      }
+      throw hostedOnboardingError({
+        code: "HOSTED_FAMILY_MEMBER_NOT_FOUND",
+        httpStatus: 404,
+        message: "Active sponsored Family member not found.",
+      });
+    }
+    return {
+      action: "remove_member",
+      result: {
+        memberId: request.memberId,
+        status: "removed",
+      },
+    };
+  }
+  if (input.request.action === "change_seat_count") {
+    const request = input.request;
+    const prisma = getPrisma();
+    const snapshot = await requireHostedRuntimeFamilyOwnerSnapshot(
+      input.memberId,
+      prisma,
+    );
+    if (snapshot.seats.billed === request.seatCount) {
+      return {
+        action: "change_seat_count",
+        result: {
+          requestedSeatCount: request.seatCount,
+          seats: snapshot.seats,
+          status: "unchanged",
+        },
+      };
+    }
+    if (!snapshot.billingActive || request.seatCount < snapshot.seats.used) {
+      throw hostedOnboardingError({
+        code: "HOSTED_FAMILY_SEAT_COUNT_UNAVAILABLE",
+        httpStatus: 409,
+        message: "This Family seat count is not available for the current plan state.",
+      });
+    }
+    const approvalRequest = buildHostedRuntimeFamilyActionApprovalRequest({
+      action: "change_seat_count",
+      returnContactKind: request.returnContactKind ?? null,
+      status: projectHostedRuntimeFamilyPlanToolStatus(snapshot),
+      targetSeatCount: request.seatCount,
+    });
+    if (!request.confirmed) {
+      return {
+        action: "change_seat_count",
+        result: {
+          presentation: approvalRequest.presentation,
+          status: "confirmation_required",
+        },
+      };
+    }
+    const approval = await requestHostedRuntimeSensitiveActionApproval({
+      memberId: input.memberId,
+      prisma,
+      request: approvalRequest,
+    });
+    if (approval.status !== "approved") {
+      return { action: "change_seat_count", result: approval };
+    }
+    const initial = await updateHostedFamilySeatCount({
+      expectedCurrentSeatCount: snapshot.seats.billed,
+      groupId: snapshot.groupId,
+      ownerMemberId: input.memberId,
+      prisma,
+      targetSeatCount: request.seatCount,
+    });
+    const applied = await waitForHostedFamilyBilledSeatCount({
+      groupId: snapshot.groupId,
+      prisma,
+      targetSeatCount: request.seatCount,
+    });
+    const refreshed = applied
+      ? await readHostedFamilyOwnerSnapshotForMember({
+          memberId: input.memberId,
+          prisma,
+        })
+      : null;
+    return {
+      action: "change_seat_count",
+      result: {
+        requestedSeatCount: request.seatCount,
+        seats: (refreshed ?? initial).seats,
+        status: applied ? "applied" : "pending",
+      },
     };
   }
   const request = input.request;
@@ -69,6 +336,7 @@ export async function handleHostedRuntimeFamilyPlanTool(input: {
         invite: projectHostedRuntimeFamilyPlanToolInvite(snapshotInvite ?? {
           acceptUrl: null,
           expiresAt: invite.invite.expiresAt,
+          id: invite.invite.id,
           status: invite.invite.status,
           targetLabel: invite.invite.targetLabel,
           targetPhoneHint: invite.invite.targetPhoneHint,
@@ -189,34 +457,48 @@ async function readHostedRuntimeFamilyPlanToolStatus(
     memberId,
   });
   if (!snapshot) {
-    return {
-      billingActive: false,
-      billingStatus: "none",
-      members: [],
-      owner: false,
-      pendingInvites: [],
-      seats: emptyHostedRuntimeFamilyPlanSeatStatus(),
-    };
+    return projectHostedRuntimeFamilyPlanToolStatus(null);
   }
 
+  return projectHostedRuntimeFamilyPlanToolStatus(snapshot);
+}
+
+function projectHostedRuntimeFamilyPlanToolStatus(
+  snapshot: Awaited<ReturnType<typeof readHostedFamilyOwnerSnapshotForMember>>,
+): HostedRuntimeFamilyPlanToolStatusResponse {
+  const seats = snapshot?.seats ?? emptyHostedRuntimeFamilyPlanSeatStatus();
   return {
-    billingActive: snapshot.billingActive,
-    billingStatus: snapshot.billingStatus,
-    members: snapshot.members.map((member) => ({
+    billingActive: snapshot?.billingActive ?? false,
+    billingStatus: snapshot?.billingStatus ?? "none",
+    members: snapshot?.members.map((member) => ({
       isOwner: member.isOwner,
       label: member.label,
+      memberId: member.memberId,
       role: member.role,
       status: member.status,
-    })),
-    owner: true,
-    pendingInvites: snapshot.invites.map(projectHostedRuntimeFamilyPlanToolInvite),
-    seats: snapshot.seats,
+    })) ?? [],
+    owner: snapshot !== null,
+    pendingInvites:
+      snapshot?.invites.map(projectHostedRuntimeFamilyPlanToolInvite) ?? [],
+    pricing: {
+      currency: "USD",
+      currentRecurringAmountUsdCents: snapshot?.billingActive
+        ? seats.billed * HOSTED_FAMILY_SEAT_RECURRING_AMOUNT_USD_CENTS
+        : 0,
+      interval: "month",
+      recurringAmountUsdCentsPerSeat:
+        HOSTED_FAMILY_SEAT_RECURRING_AMOUNT_USD_CENTS,
+      seatDecreaseTiming: "immediate_without_proration",
+      seatIncreaseTiming: "immediate_with_proration_and_immediate_invoice",
+    },
+    seats,
   };
 }
 
 function projectHostedRuntimeFamilyPlanToolInvite(input: {
   acceptUrl: string | null;
   expiresAt: Date;
+  id: string;
   status: string;
   targetLabel: string | null;
   targetPhoneHint: string | null;
@@ -225,6 +507,7 @@ function projectHostedRuntimeFamilyPlanToolInvite(input: {
   return {
     acceptUrl: input.acceptUrl,
     expiresAt: input.expiresAt.toISOString(),
+    inviteId: input.id,
     status: input.status,
     targetLabel: input.targetLabel,
     targetPhoneHint: input.targetPhoneHint,
@@ -250,11 +533,30 @@ function projectPreparedHostedRuntimeFamilyPlanToolInvite(
   return projectHostedRuntimeFamilyPlanToolInvite(snapshotInvite ?? {
     acceptUrl: null,
     expiresAt: prepared.invite.expiresAt,
+    id: prepared.invite.id,
     status: prepared.invite.status,
     targetLabel: prepared.invite.targetLabel,
     targetPhoneHint: prepared.invite.targetPhoneHint,
     telegramInviteUrl: null,
   });
+}
+
+async function requireHostedRuntimeFamilyOwnerSnapshot(
+  memberId: string,
+  prisma = getPrisma(),
+) {
+  const snapshot = await readHostedFamilyOwnerSnapshotForMember({
+    memberId,
+    prisma,
+  });
+  if (!snapshot) {
+    throw hostedOnboardingError({
+      code: "HOSTED_FAMILY_OWNER_NOT_FOUND",
+      httpStatus: 403,
+      message: "Only the Family plan owner can manage Family members and seats.",
+    });
+  }
+  return snapshot;
 }
 
 function emptyHostedRuntimeFamilyPlanSeatStatus(): HostedRuntimeFamilyPlanToolSeatStatus {

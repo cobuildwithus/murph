@@ -61,6 +61,7 @@ interface HostedSwitchScheduleContext {
 }
 
 export async function scheduleHostedBillingPlanSwitchToPulse(input: {
+  expectedCurrentPeriodEnd?: Date;
   memberId: string;
   now?: Date;
   prisma?: PrismaClient;
@@ -130,6 +131,10 @@ export async function scheduleHostedBillingPlanSwitchToPulse(input: {
   const currentPeriodEnd = requireHostedStripeSubscriptionCurrentPeriodEnd({
     now,
     subscription,
+  });
+  assertHostedBillingApprovedCurrentPeriodEnd({
+    actualCurrentPeriodEnd: currentPeriodEnd,
+    expectedCurrentPeriodEnd: input.expectedCurrentPeriodEnd,
   });
   const currentPeriodEndUnix = toUnixSeconds(currentPeriodEnd);
   const context: HostedSwitchScheduleContext = {
@@ -856,6 +861,28 @@ function readHostedStripeObjectNumber(
 ): number | null {
   const rawValue = Reflect.get(value, field);
   return typeof rawValue === "number" && Number.isFinite(rawValue) ? rawValue : null;
+}
+
+function assertHostedBillingApprovedCurrentPeriodEnd(input: {
+  actualCurrentPeriodEnd: Date;
+  expectedCurrentPeriodEnd?: Date;
+}): void {
+  if (!input.expectedCurrentPeriodEnd) {
+    return;
+  }
+
+  if (
+    toUnixSeconds(input.actualCurrentPeriodEnd) ===
+    toUnixSeconds(input.expectedCurrentPeriodEnd)
+  ) {
+    return;
+  }
+
+  throw hostedOnboardingError({
+    code: "HOSTED_BILLING_APPROVED_PERIOD_CHANGED",
+    httpStatus: 409,
+    message: "Your billing period changed after approval. Review the current plan and try again.",
+  });
 }
 
 function toUnixSeconds(date: Date): number {

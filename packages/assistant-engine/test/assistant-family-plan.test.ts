@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   executeMurphDynamicToolRequest,
+  MURPH_BILLING_PLAN_TOOL,
   MURPH_FAMILY_PLAN_TOOL,
   readMurphDynamicToolRequest,
   resolveMurphDynamicTools,
@@ -18,6 +19,31 @@ describe("assistant family plan tool", () => {
     expect(resolveMurphDynamicTools({
       familyPlanAvailable: false,
     })).not.toContain(MURPH_FAMILY_PLAN_TOOL);
+    expect(MURPH_FAMILY_PLAN_TOOL.description).toContain("confirmed=false");
+    expect(MURPH_FAMILY_PLAN_TOOL.description).toContain("confirmation_required");
+    expect(MURPH_FAMILY_PLAN_TOOL.description).toContain("approval_required");
+    expect(MURPH_FAMILY_PLAN_TOOL.description).toContain("approval_expired can also mean another execution consumed");
+    expect(MURPH_FAMILY_PLAN_TOOL.description).toContain("outcome is uncertain");
+    expect(MURPH_FAMILY_PLAN_TOOL.description).toContain("pending means initiated but not yet reconciled");
+    expect(MURPH_FAMILY_PLAN_TOOL.description).toContain("unchanged means the requested state already existed");
+  });
+
+  it("exposes strict action-discriminated Family schemas", () => {
+    const branches = MURPH_FAMILY_PLAN_TOOL.inputSchema.oneOf;
+    expect(branches).toHaveLength(6);
+    expect(branches.every((branch) => branch.additionalProperties === false)).toBe(true);
+    expect(branches.find((branch) => branch.properties.action.const === "read_status"))
+      .toMatchObject({ required: ["action"] });
+    expect(branches.find((branch) => branch.properties.action.const === "change_seat_count"))
+      .toMatchObject({
+        required: ["action", "confirmed", "seatCount"],
+        properties: { confirmed: { type: "boolean" } },
+      });
+    const schema = JSON.stringify(MURPH_FAMILY_PLAN_TOOL.inputSchema);
+    expect(schema).toContain('"required":["targetEmail"]');
+    expect(schema).toContain('"required":["targetPhoneNumber"]');
+    expect(schema).toContain('"required":["targetTelegramUsername"]');
+    expect(schema).toContain('^[^\\\\s@]+@[^\\\\s@]+\\\\.[^\\\\s@]+$');
   });
 
   it("parses and executes structured family invite requests", async () => {
@@ -139,6 +165,17 @@ describe("assistant family plan tool", () => {
         },
       },
     });
+    expect(readMurphDynamicToolRequest({
+      method: "item/tool/call",
+      params: {
+        arguments: {
+          action: "create_invite",
+          invite: { targetEmail: "not-an-email" },
+        },
+        namespace: "murph",
+        tool: "family_plan",
+      },
+    })?.kind).toBe("invalid-family-plan-arguments");
   });
 
   it("parses and executes Family checkout requests with optional next invite context", async () => {
@@ -252,5 +289,238 @@ describe("assistant family plan tool", () => {
         tool: "family_plan",
       },
     })?.kind).toBe("invalid-family-plan-arguments");
+  });
+
+  it("requires a confirmation decision and preserves Family preview requests", () => {
+    expect(readMurphDynamicToolRequest({
+      method: "item/tool/call",
+      params: {
+        arguments: {
+          action: "remove_member",
+          memberId: "member_sponsored",
+        },
+        namespace: "murph",
+        tool: "family_plan",
+      },
+    })?.kind).toBe("invalid-family-plan-arguments");
+    expect(readMurphDynamicToolRequest({
+      method: "item/tool/call",
+      params: {
+        arguments: {
+          action: "remove_member",
+          confirmed: false,
+          memberId: "member_sponsored",
+        },
+        namespace: "murph",
+        tool: "family_plan",
+      },
+    })).toEqual({
+      kind: "family-plan",
+      request: {
+        action: "remove_member",
+        confirmed: false,
+        memberId: "member_sponsored",
+      },
+    });
+    expect(readMurphDynamicToolRequest({
+      method: "item/tool/call",
+      params: {
+        arguments: {
+          action: "remove_member",
+          confirmed: true,
+          memberId: "member_sponsored",
+        },
+        namespace: "murph",
+        tool: "family_plan",
+      },
+    })).toEqual({
+      kind: "family-plan",
+      request: {
+        action: "remove_member",
+        confirmed: true,
+        memberId: "member_sponsored",
+      },
+    });
+  });
+
+  it("returns Family approval handoffs plainly and binds the return channel", async () => {
+    const request = readMurphDynamicToolRequest({
+      method: "item/tool/call",
+      params: {
+        arguments: {
+          action: "change_seat_count",
+          confirmed: true,
+          seatCount: 4,
+        },
+        namespace: "murph",
+        tool: "family_plan",
+      },
+    });
+    if (!request) {
+      throw new Error("Expected a Family plan dynamic tool request.");
+    }
+    const familyPlanTool = {
+      request: vi.fn(async () => ({
+        action: "change_seat_count" as const,
+        result: {
+          approvalUrl: "https://withmurph.ai/approve/family",
+          expiresAt: "2026-07-10T16:15:00.000Z",
+          status: "approval_required" as const,
+        },
+      })),
+    };
+    const hostedToolContext: AssistantHostedToolContext = {
+      computerToolsAvailable: false,
+      currentHostedDeliveryContext: () => ({
+        conversationId: "conversation_1",
+        recipientKey: "recipient_1",
+        returnContactKind: "telegram",
+      }),
+      currentHostedMailboxItemIds: () => [],
+      familyPlanTool,
+      sendVaultFile: vi.fn(),
+      vaultFileSendAvailable: false,
+    };
+
+    const result = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext,
+      nextUsageOrdinal: () => 0,
+      progressDelivery: null,
+      request,
+    });
+
+    expect(familyPlanTool.request).toHaveBeenCalledWith({
+      action: "change_seat_count",
+      confirmed: true,
+      returnContactKind: "telegram",
+      seatCount: 4,
+    });
+    expect(result.rpcResult.contentItems[0]?.text).toContain("approval_required");
+    expect(result.rpcResult.contentItems[0]?.text)
+      .toContain("https://withmurph.ai/approve/family");
+  });
+});
+
+describe("assistant billing plan tool", () => {
+  it("is hosted-only and requires a confirmation decision for mutations", () => {
+    expect(resolveMurphDynamicTools({ billingPlanAvailable: true }))
+      .toContain(MURPH_BILLING_PLAN_TOOL);
+    expect(resolveMurphDynamicTools({ billingPlanAvailable: false }))
+      .not.toContain(MURPH_BILLING_PLAN_TOOL);
+    expect(MURPH_BILLING_PLAN_TOOL.description).toContain("confirmed=false");
+    expect(MURPH_BILLING_PLAN_TOOL.description).toContain("confirmation_required");
+    expect(MURPH_BILLING_PLAN_TOOL.description).toContain("approval_required");
+    expect(MURPH_BILLING_PLAN_TOOL.description).toContain("approval_expired can also mean another execution consumed");
+    expect(MURPH_BILLING_PLAN_TOOL.description).toContain("outcome is uncertain");
+    expect(MURPH_BILLING_PLAN_TOOL.description).toContain("browser_handoff means the target change is not yet proven complete");
+
+    expect(readMurphDynamicToolRequest({
+      method: "item/tool/call",
+      params: {
+        arguments: { action: "upgrade_to_edge" },
+        namespace: "murph",
+        tool: "billing_plan",
+      },
+    })?.kind).toBe("invalid-billing-plan-arguments");
+    expect(readMurphDynamicToolRequest({
+      method: "item/tool/call",
+      params: {
+        arguments: { action: "upgrade_to_edge", confirmed: false },
+        namespace: "murph",
+        tool: "billing_plan",
+      },
+    })).toEqual({
+      kind: "billing-plan",
+      request: { action: "upgrade_to_edge", confirmed: false },
+    });
+    expect(readMurphDynamicToolRequest({
+      method: "item/tool/call",
+      params: {
+        arguments: { action: "upgrade_to_edge", confirmed: true },
+        namespace: "murph",
+        tool: "billing_plan",
+      },
+    })).toEqual({
+      kind: "billing-plan",
+      request: { action: "upgrade_to_edge", confirmed: true },
+    });
+    expect(readMurphDynamicToolRequest({
+      method: "item/tool/call",
+      params: {
+        arguments: { action: "read_status" },
+        namespace: "murph",
+        tool: "billing_plan",
+      },
+    })).toEqual({
+      kind: "billing-plan",
+      request: { action: "read_status" },
+    });
+  });
+
+  it("exposes strict monetary action schemas and returns the approval handoff plainly", async () => {
+    const branches = MURPH_BILLING_PLAN_TOOL.inputSchema.oneOf;
+    expect(branches).toHaveLength(5);
+    expect(branches.every((branch) => branch.additionalProperties === false)).toBe(true);
+    expect(branches.find((branch) => branch.properties.action.const === "open_portal"))
+      .toMatchObject({ required: ["action"] });
+    expect(branches.find((branch) => branch.properties.action.const === "upgrade_to_edge"))
+      .toMatchObject({
+        required: ["action", "confirmed"],
+        properties: { confirmed: { type: "boolean" } },
+      });
+
+    const request = readMurphDynamicToolRequest({
+      method: "item/tool/call",
+      params: {
+        arguments: { action: "upgrade_to_edge", confirmed: true },
+        namespace: "murph",
+        tool: "billing_plan",
+      },
+    });
+    if (!request) {
+      throw new Error("Expected a billing plan dynamic tool request.");
+    }
+    const billingPlanTool = {
+      request: vi.fn(async () => ({
+        action: "upgrade_to_edge" as const,
+        result: {
+          approvalUrl: "https://withmurph.ai/approve/billing",
+          expiresAt: "2026-07-10T16:15:00.000Z",
+          status: "approval_required" as const,
+        },
+      })),
+    };
+    const hostedToolContext: AssistantHostedToolContext = {
+      billingPlanTool,
+      computerToolsAvailable: false,
+      currentHostedDeliveryContext: () => ({
+        conversationId: "conversation_1",
+        recipientKey: "recipient_1",
+        returnContactKind: "text",
+      }),
+      currentHostedMailboxItemIds: () => [],
+      sendVaultFile: vi.fn(),
+      vaultFileSendAvailable: false,
+    };
+
+    const result = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext,
+      nextUsageOrdinal: () => 0,
+      progressDelivery: null,
+      request,
+    });
+
+    expect(billingPlanTool.request).toHaveBeenCalledWith({
+      action: "upgrade_to_edge",
+      confirmed: true,
+      returnContactKind: "text",
+    });
+    expect(result.rpcResult.contentItems[0]?.text).toContain("approval_required");
+    expect(result.rpcResult.contentItems[0]?.text)
+      .toContain("https://withmurph.ai/approve/billing");
   });
 });

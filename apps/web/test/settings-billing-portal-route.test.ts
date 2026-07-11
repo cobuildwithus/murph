@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   readHostedAccountGroupStripeBillingRef: vi.fn(),
   readHostedFamilyOwnerSnapshotForMember: vi.fn(),
   readHostedMemberStripeBillingRef: vi.fn(),
+  readHostedMemberCoreState: vi.fn(),
   requireHostedAppSessionFromRequest: vi.fn(),
   requireHostedStripeApi: vi.fn(),
 }));
@@ -20,6 +21,10 @@ vi.mock("@/src/lib/prisma", () => ({
 
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-billing-store", () => ({
   readHostedMemberStripeBillingRef: mocks.readHostedMemberStripeBillingRef,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", () => ({
+  readHostedMemberCoreState: mocks.readHostedMemberCoreState,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/family-plan", () => ({
@@ -56,6 +61,11 @@ beforeEach(async () => {
     memberId: "member_123",
     stripeCustomerId: "cus_123",
     stripeSubscriptionId: "sub_123",
+  });
+  mocks.readHostedMemberCoreState.mockResolvedValue({
+    billingStatus: "active",
+    id: "member_123",
+    suspendedAt: null,
   });
   mocks.readHostedFamilyOwnerSnapshotForMember.mockResolvedValue({
     groupId: "hbag_123",
@@ -168,12 +178,10 @@ test("uses the dedicated Family portal configuration when configured", async () 
 });
 
 test("keeps billing self-serve available for canceled members with a stored Stripe customer", async () => {
-  mocks.requireHostedAppSessionFromRequest.mockResolvedValueOnce({
-    member: {
-      billingStatus: "canceled",
-      id: "member_123",
-      suspendedAt: null,
-    },
+  mocks.readHostedMemberCoreState.mockResolvedValueOnce({
+    billingStatus: "canceled",
+    id: "member_123",
+    suspendedAt: null,
   });
 
   const response = await billingPortalRoute.POST(

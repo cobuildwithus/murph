@@ -290,6 +290,50 @@ access.
 - Family entitlement checks should be explicit and test-covered at access
   boundaries instead of inferred from unrelated billing status.
 
+## Conversation Management Control
+
+The existing typed Family assistant operation also supports canceling a
+pending invite, removing a sponsored member, and changing the billed seat
+count. These actions call the same owner-scoped web services as Settings.
+`read_status` may return opaque member and invite ids already bound to the
+owner's group; the assistant must never invent or resolve an id from a label.
+Foreign or unknown ids fail closed without revealing whether they exist.
+
+Each new mutation first accepts `confirmed: false` to return the presentation
+from the web owner's exact-action request without creating an approval or
+mutating. After the user confirms those terms, the identical signed,
+member-bound request requires literal `confirmed: true`, but that model-supplied
+value is not authority. The web owner reuses the existing 15-minute,
+member-bound sensitive-action challenge. A pending request returns the narrow
+approval URL and performs no mutation; a later identical call must observe and
+consume the human-approved generation before reaching the canonical owner.
+Denied, expired, mismatched, or already-consumed-by-another-consumer challenges
+cannot mutate. Because a losing concurrent consumer is reported as expired,
+the assistant must re-read status and must not claim no mutation unless
+canonical state proves it. This adds no Family-specific approval store or
+manager.
+
+`read_status` returns the web registry's canonical USD per-seat price, monthly
+interval, current billed-seat total, and explicit seat-change timing. Seat
+approval binds source and target count, source and target monthly total, and
+whether Stripe will immediately prorate/invoice an increase or apply a decrease
+without proration. A changed billed count or canonical price derives a new
+fingerprint. The seat owner holds the existing member Stripe-mutation lock
+while it retrieves and updates the item, verifies the stored subscription and
+canonical Family price, and requires the live quantity to equal the approved
+source count. Proration is derived from that locked live quantity; the webhook
+remains the only local billed-count writer. Replayed cancel/remove requests
+return `unchanged` only when the same owner-scoped row is already revoked/removed;
+unknown ids still return not found. Seat changes report `pending` until the
+existing Stripe webhook reconciles the billed quantity and `applied` only
+after that read model matches. Removal never deletes the member account or
+private data.
+
+Optional ids and pricing are additive in the status response so a newer
+consumer can read an older web response. Deploy the consumer before the web
+producer and keep the compatibility window short; cancel/remove must be offered
+only when the corresponding id was actually returned.
+
 ## Implementation Phases
 
 1. Add the spec, data model, store helpers, and entitlement tests.

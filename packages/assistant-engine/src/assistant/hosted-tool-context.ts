@@ -17,6 +17,7 @@ import type {
   AssistantConnectedAppsPort,
 } from './connected-apps-port.js'
 import type {
+  AssistantHostedBillingPlanTool,
   AssistantHostedFamilyPlanTool,
   AssistantHostedGroupTool,
   AssistantHostedNewsletterTool,
@@ -56,6 +57,7 @@ export type AssistantHostedVaultFileSendResult =
     }
 
 export interface AssistantHostedToolContext {
+  readonly billingPlanTool?: AssistantHostedBillingPlanTool | null
   readonly connectedApps?: AssistantConnectedAppsPort | null
   readonly familyPlanTool?: AssistantHostedFamilyPlanTool | null
   readonly groupTool?: AssistantHostedGroupTool | null
@@ -79,6 +81,7 @@ type AssistantHostedToolDeliveryContext = {
 }
 
 export function createAssistantHostedToolContext(input: {
+  billingPlanTool?: AssistantHostedBillingPlanTool | null
   connectedApps?: AssistantConnectedAppsPort | null
   familyPlanTool?: AssistantHostedFamilyPlanTool | null
   groupTool?: AssistantHostedGroupTool | null
@@ -112,6 +115,7 @@ export function createAssistantHostedToolContext(input: {
   }
 
   return {
+    billingPlanTool: input.billingPlanTool ?? null,
     connectedApps: input.connectedApps ?? null,
     familyPlanTool: input.familyPlanTool ?? null,
     groupTool: input.groupTool ?? null,

@@ -45,6 +45,7 @@ export type HostedBillingPlanUpgradeResult =
   };
 
 export async function upgradeHostedBillingPlan(input: {
+  expectedCurrentPeriodEnd?: Date;
   memberId: string;
   now?: Date;
   prisma?: PrismaClient;
@@ -124,6 +125,10 @@ export async function upgradeHostedBillingPlan(input: {
 
   assertHostedStripeSubscriptionMatchesCustomer({
     stripeCustomerId,
+    subscription,
+  });
+  assertHostedBillingApprovedCurrentPeriodEnd({
+    expectedCurrentPeriodEnd: input.expectedCurrentPeriodEnd,
     subscription,
   });
 
@@ -520,6 +525,48 @@ function assertHostedStripeSubscriptionMatchesCustomer(input: {
     httpStatus: 409,
     message: "Your subscription could not be matched to this hosted account.",
   });
+}
+
+function assertHostedBillingApprovedCurrentPeriodEnd(input: {
+  expectedCurrentPeriodEnd?: Date;
+  subscription: Stripe.Subscription;
+}): void {
+  if (!input.expectedCurrentPeriodEnd) {
+    return;
+  }
+
+  const actualCurrentPeriodEnd =
+    readHostedStripeObjectDate(input.subscription, "current_period_end") ??
+    input.subscription.items.data
+      .map((item) => readHostedStripeObjectDate(item, "current_period_end"))
+      .find((value): value is Date => value !== null) ??
+    null;
+  if (
+    actualCurrentPeriodEnd &&
+    toUnixSeconds(actualCurrentPeriodEnd) === toUnixSeconds(input.expectedCurrentPeriodEnd)
+  ) {
+    return;
+  }
+
+  throw hostedOnboardingError({
+    code: "HOSTED_BILLING_APPROVED_PERIOD_CHANGED",
+    httpStatus: 409,
+    message: "Your billing period changed after approval. Review the current plan and try again.",
+  });
+}
+
+function readHostedStripeObjectDate(value: object, field: string): Date | null {
+  const rawValue = Reflect.get(value, field);
+  if (typeof rawValue !== "number" || !Number.isFinite(rawValue)) {
+    return null;
+  }
+
+  const date = new Date(rawValue * 1000);
+  return Number.isFinite(date.getTime()) ? date : null;
+}
+
+function toUnixSeconds(date: Date): number {
+  return Math.floor(date.getTime() / 1000);
 }
 
 function findHostedStripeSubscriptionItemByPriceId(

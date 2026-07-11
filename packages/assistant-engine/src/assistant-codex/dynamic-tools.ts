@@ -3,6 +3,7 @@ import { loadVault } from '@murphai/core'
 import {
   HOSTED_PRODUCT_FEEDBACK_KINDS,
   HOSTED_PRODUCT_FEEDBACK_SUMMARY_MAX_LENGTH,
+  HOSTED_RUNTIME_FAMILY_PLAN_EMAIL_PATTERN,
   HOSTED_RUNTIME_GROUP_DISPLAY_NAME_MAX_LENGTH,
   HOSTED_RUNTIME_GROUP_JOIN_OFFER_MESSAGE_TEMPLATE_MAX_LENGTH,
   HOSTED_RUNTIME_GROUP_KINDS,
@@ -10,6 +11,7 @@ import {
   HOSTED_RUNTIME_NEWSLETTER_SUBJECT_MAX_LENGTH,
   HOSTED_RUNTIME_NEWSLETTER_TEXT_MAX_LENGTH,
   sanitizeHostedProductFeedbackSummary,
+  type HostedRuntimeBillingPlanToolRequest,
   type HostedRuntimeFamilyPlanToolRequest,
   type HostedRuntimeGroupToolRequest,
   type HostedRuntimeGroupToolResponse,
@@ -291,61 +293,197 @@ export const MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL = {
   },
 } as const
 
+const FAMILY_PLAN_EMAIL_INPUT_SCHEMA = {
+  type: 'string',
+  minLength: 3,
+  maxLength: 320,
+  pattern: HOSTED_RUNTIME_FAMILY_PLAN_EMAIL_PATTERN,
+} as const
+
+const FAMILY_PLAN_LABEL_INPUT_SCHEMA = {
+  type: 'string',
+  minLength: 1,
+  maxLength: 80,
+  pattern: '\\S',
+} as const
+
+const FAMILY_PLAN_PHONE_INPUT_SCHEMA = {
+  type: 'string',
+  minLength: 1,
+  maxLength: 40,
+  pattern: '\\S',
+} as const
+
+const FAMILY_PLAN_TELEGRAM_INPUT_SCHEMA = {
+  type: 'string',
+  minLength: 5,
+  maxLength: 32,
+  pattern: '\\S',
+} as const
+
+const FAMILY_PLAN_INVITE_INPUT_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  properties: {
+    targetEmail: {
+      anyOf: [
+        FAMILY_PLAN_EMAIL_INPUT_SCHEMA,
+        { type: 'null' },
+      ],
+      default: null,
+      description: 'Email address for an email-bound web invite when the user provided one.',
+    },
+    targetLabel: {
+      anyOf: [
+        FAMILY_PLAN_LABEL_INPUT_SCHEMA,
+        { type: 'null' },
+      ],
+      default: null,
+      description: 'Optional natural label such as mom, dad, brother, or a first name.',
+    },
+    targetPhoneNumber: {
+      anyOf: [
+        FAMILY_PLAN_PHONE_INPUT_SCHEMA,
+        { type: 'null' },
+      ],
+      default: null,
+      description: 'Phone number for a phone-bound invite when the user provided one.',
+    },
+    targetTelegramUsername: {
+      anyOf: [
+        FAMILY_PLAN_TELEGRAM_INPUT_SCHEMA,
+        { type: 'null' },
+      ],
+      default: null,
+      description: 'Telegram username without @ when the user provided one.',
+    },
+  },
+  anyOf: [
+    {
+      properties: { targetEmail: FAMILY_PLAN_EMAIL_INPUT_SCHEMA },
+      required: ['targetEmail'],
+    },
+    {
+      properties: { targetPhoneNumber: FAMILY_PLAN_PHONE_INPUT_SCHEMA },
+      required: ['targetPhoneNumber'],
+    },
+    {
+      properties: { targetTelegramUsername: FAMILY_PLAN_TELEGRAM_INPUT_SCHEMA },
+      required: ['targetTelegramUsername'],
+    },
+  ],
+} as const
+
+const MUTATION_CONFIRMATION_INPUT_SCHEMA = {
+  type: 'boolean',
+  description:
+    'Use false first to preview the canonical terms without approval or mutation. Use true only after the current user message explicitly confirms those exact terms.',
+} as const
+
+const SENSITIVE_MUTATION_TOOL_GUIDANCE =
+  'For a sensitive mutation, first call the exact action and target with confirmed=false. confirmation_required performs no approval or mutation: present its canonical presentation faithfully, then call the identical action with confirmed=true only after the current user message confirms those terms. approval_required also means no mutation: give approvalUrl plainly, then retry the identical confirmed=true action only after the user approves and replies. approval_denied means no mutation. approval_expired can also mean another execution consumed the approval: call read_status and claim no mutation only if current state proves it; otherwise say the outcome is uncertain and do not seek another approval blindly.'
+
+const MUTATION_OUTCOME_TOOL_GUIDANCE =
+  'applied, canceled, removed, or scheduled means the named result was accepted; pending means initiated but not yet reconciled; unchanged means the requested state already existed and no new mutation ran; browser_handoff means the target change is not yet proven complete and the user must continue in the returned URL.'
+
 export const MURPH_FAMILY_PLAN_TOOL = {
   namespace: 'murph',
   name: 'family_plan',
   description:
-    'Read or manage the current hosted user\'s Murph Family plan. Use for Murph Family plan questions, seat/status checks, starting Family checkout, and requests to invite a family member. Do not use for family medical history.',
+    `Read or manage the current hosted user's Murph Family plan. Use for status, checkout, invites, canceling a pending invite, removing a sponsored member, or changing seats. Call read_status first; use memberId/inviteId only from that result. ${SENSITIVE_MUTATION_TOOL_GUIDANCE} ${MUTATION_OUTCOME_TOOL_GUIDANCE} Do not use for family medical history.`,
   inputSchema: {
     type: 'object',
-    additionalProperties: false,
-    properties: {
-      action: {
-        type: 'string',
-        enum: ['read_status', 'start_checkout', 'create_invite'],
+    oneOf: [
+      {
+        type: 'object',
+        additionalProperties: false,
+        properties: { action: { const: 'read_status', type: 'string' } },
+        required: ['action'],
       },
-      invite: {
+      {
         type: 'object',
         additionalProperties: false,
         properties: {
-          targetEmail: {
-            anyOf: [
-              { type: 'string', minLength: 3, maxLength: 320 },
-              { type: 'null' },
-            ],
+          action: { const: 'start_checkout', type: 'string' },
+          invite: {
+            anyOf: [FAMILY_PLAN_INVITE_INPUT_SCHEMA, { type: 'null' }],
             default: null,
-            description: 'Email address for an email-bound web invite when the user provided one.',
-          },
-          targetLabel: {
-            anyOf: [
-              { type: 'string', minLength: 1, maxLength: 80 },
-              { type: 'null' },
-            ],
-            default: null,
-            description: 'Optional natural label such as mom, dad, brother, or a first name.',
-          },
-          targetPhoneNumber: {
-            anyOf: [
-              { type: 'string', minLength: 1, maxLength: 40 },
-              { type: 'null' },
-            ],
-            default: null,
-            description: 'Phone number for a phone-bound invite when the user provided one.',
-          },
-          targetTelegramUsername: {
-            anyOf: [
-              { type: 'string', minLength: 5, maxLength: 32 },
-              { type: 'null' },
-            ],
-            default: null,
-            description: 'Telegram username without @ when the user provided one.',
+            description: 'Optional next-invite context; no invite token is created until billing is active.',
           },
         },
-        description:
-          'Invite target for create_invite. Optional context for start_checkout when the user mentions the person they want to invite; no invite token is created until Family billing is active.',
+        required: ['action'],
       },
-    },
-    required: ['action'],
+      {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          action: { const: 'create_invite', type: 'string' },
+          invite: FAMILY_PLAN_INVITE_INPUT_SCHEMA,
+        },
+        required: ['action', 'invite'],
+      },
+      {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          action: { const: 'cancel_invite', type: 'string' },
+          confirmed: MUTATION_CONFIRMATION_INPUT_SCHEMA,
+          inviteId: { type: 'string', minLength: 1 },
+        },
+        required: ['action', 'confirmed', 'inviteId'],
+      },
+      {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          action: { const: 'remove_member', type: 'string' },
+          confirmed: MUTATION_CONFIRMATION_INPUT_SCHEMA,
+          memberId: { type: 'string', minLength: 1 },
+        },
+        required: ['action', 'confirmed', 'memberId'],
+      },
+      {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          action: { const: 'change_seat_count', type: 'string' },
+          confirmed: MUTATION_CONFIRMATION_INPUT_SCHEMA,
+          seatCount: { type: 'integer', minimum: 2, maximum: 6 },
+        },
+        required: ['action', 'confirmed', 'seatCount'],
+      },
+    ],
+  },
+} as const
+
+export const MURPH_BILLING_PLAN_TOOL = {
+  namespace: 'murph',
+  name: 'billing_plan',
+  description:
+    `Read or manage the current hosted user's direct Pulse or Edge subscription. Call read_status first. ${SENSITIVE_MUTATION_TOOL_GUIDANCE} ${MUTATION_OUTCOME_TOOL_GUIDANCE} Payment-method or payment-confirmation steps stay in Stripe through the returned browser handoff. open_portal creates a browser handoff but does not itself change billing.`,
+  inputSchema: {
+    type: 'object',
+    oneOf: [
+      ...(['read_status', 'open_portal'] as const).map((action) => ({
+        type: 'object' as const,
+        additionalProperties: false,
+        properties: { action: { const: action, type: 'string' as const } },
+        required: ['action'] as const,
+      })),
+      ...([
+        'start_paid_pulse',
+        'upgrade_to_edge',
+        'switch_to_pulse_at_renewal',
+      ] as const).map((action) => ({
+        type: 'object' as const,
+        additionalProperties: false,
+        properties: {
+          action: { const: action, type: 'string' as const },
+          confirmed: MUTATION_CONFIRMATION_INPUT_SCHEMA,
+        },
+        required: ['action', 'confirmed'] as const,
+      })),
+    ],
   },
 } as const
 
@@ -806,6 +944,7 @@ const MURPH_BASE_DYNAMIC_TOOLS = [
   MURPH_ATTACH_RESPONSE_MEDIA_TOOL,
   MURPH_GENERATE_IMAGE_TOOL,
   MURPH_GENERATE_VOICE_MEMO_TOOL,
+  MURPH_BILLING_PLAN_TOOL,
   MURPH_FAMILY_PLAN_TOOL,
   MURPH_GROUP_TOOL,
   MURPH_NEWSLETTER_TOOL,
@@ -839,6 +978,7 @@ export interface MurphDynamicToolAvailability {
   computerToolsAvailable?: boolean | null
   progressUpdatesAvailable?: boolean | null
   connectedAppsAvailable?: boolean | null
+  billingPlanAvailable?: boolean | null
   familyPlanAvailable?: boolean | null
   groupAvailable?: boolean | null
   newsletterAvailable?: boolean | null
@@ -870,6 +1010,7 @@ const TOOL_AVAILABILITY: ReadonlyMap<MurphDynamicTool, AvailabilityPredicate> =
     [MURPH_FINISH_WITHOUT_REPLY_TOOL, defaultOn((a) => a.allowFinishWithoutReply)],
     [MURPH_REACT_TO_MESSAGE_TOOL, defaultOff((a) => a.allowMessageReactions)],
     [MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL, defaultOff((a) => a.productFeedbackAvailable)],
+    [MURPH_BILLING_PLAN_TOOL, defaultOff((a) => a.billingPlanAvailable)],
     [MURPH_FAMILY_PLAN_TOOL, defaultOff((a) => a.familyPlanAvailable)],
     [MURPH_GROUP_TOOL, defaultOff((a) => a.groupAvailable)],
     [MURPH_NEWSLETTER_TOOL, defaultOff((a) => a.newsletterAvailable)],
@@ -1130,7 +1271,9 @@ const familyPlanArgumentsSchema = z
     z.object({
       action: z.literal('start_checkout'),
       invite: z.object({
-        targetEmail: z.string().trim().email().max(320).nullable().default(null),
+        targetEmail: z.string().trim()
+          .regex(new RegExp(HOSTED_RUNTIME_FAMILY_PLAN_EMAIL_PATTERN, 'u'))
+          .min(3).max(320).nullable().default(null),
         targetLabel: z.string().trim().min(1).max(80).nullable().default(null),
         targetPhoneNumber: z.string().trim().min(1).max(40).nullable().default(null),
         targetTelegramUsername: z.string().trim().min(5).max(32).nullable().default(null),
@@ -1139,11 +1282,28 @@ const familyPlanArgumentsSchema = z
     z.object({
       action: z.literal('create_invite'),
       invite: z.object({
-        targetEmail: z.string().trim().email().max(320).nullable().default(null),
+        targetEmail: z.string().trim()
+          .regex(new RegExp(HOSTED_RUNTIME_FAMILY_PLAN_EMAIL_PATTERN, 'u'))
+          .min(3).max(320).nullable().default(null),
         targetLabel: z.string().trim().min(1).max(80).nullable().default(null),
         targetPhoneNumber: z.string().trim().min(1).max(40).nullable().default(null),
         targetTelegramUsername: z.string().trim().min(5).max(32).nullable().default(null),
       }).strict(),
+    }).strict(),
+    z.object({
+      action: z.literal('cancel_invite'),
+      confirmed: z.boolean(),
+      inviteId: z.string().trim().min(1),
+    }).strict(),
+    z.object({
+      action: z.literal('remove_member'),
+      confirmed: z.boolean(),
+      memberId: z.string().trim().min(1),
+    }).strict(),
+    z.object({
+      action: z.literal('change_seat_count'),
+      confirmed: z.boolean(),
+      seatCount: z.number().int().min(2).max(6),
     }).strict(),
   ])
   .superRefine((value, context) => {
@@ -1160,6 +1320,23 @@ const familyPlanArgumentsSchema = z
       })
     }
   })
+
+const billingPlanArgumentsSchema = z.discriminatedUnion('action', [
+  z.object({ action: z.literal('read_status') }).strict(),
+  z.object({ action: z.literal('open_portal') }).strict(),
+  z.object({
+    action: z.literal('start_paid_pulse'),
+    confirmed: z.boolean(),
+  }).strict(),
+  z.object({
+    action: z.literal('switch_to_pulse_at_renewal'),
+    confirmed: z.boolean(),
+  }).strict(),
+  z.object({
+    action: z.literal('upgrade_to_edge'),
+    confirmed: z.boolean(),
+  }).strict(),
+])
 
 const computerRunIdSchema = z.string().trim().min(1)
 
@@ -1454,6 +1631,10 @@ export type MurphDynamicToolRequest =
       validationDigest: SafeToolCallValidationDigest
     }
   | {
+      kind: 'invalid-billing-plan-arguments'
+      validationDigest: SafeToolCallValidationDigest
+    }
+  | {
       kind: 'invalid-group-arguments'
       validationDigest: SafeToolCallValidationDigest
     }
@@ -1464,6 +1645,10 @@ export type MurphDynamicToolRequest =
   | {
       kind: 'family-plan'
       request: HostedRuntimeFamilyPlanToolRequest
+    }
+  | {
+      kind: 'billing-plan'
+      request: HostedRuntimeBillingPlanToolRequest
     }
   | {
       kind: 'group'
@@ -1639,6 +1824,19 @@ export function readMurphDynamicToolRequest(
       }
       return {
         kind: 'family-plan',
+        request: parsed.request,
+      }
+    }
+    case MURPH_BILLING_PLAN_TOOL.name: {
+      const parsed = parseBillingPlanArguments(request.arguments)
+      if (!parsed.ok) {
+        return {
+          kind: 'invalid-billing-plan-arguments',
+          validationDigest: parsed.validationDigest,
+        }
+      }
+      return {
+        kind: 'billing-plan',
         request: parsed.request,
       }
     }
@@ -1883,6 +2081,8 @@ export async function executeMurphDynamicToolRequest(input: {
       return toolTextResult(false, 'invalid product feedback arguments')
     case 'invalid-family-plan-arguments':
       return toolTextResult(false, 'invalid family plan arguments')
+    case 'invalid-billing-plan-arguments':
+      return toolTextResult(false, 'invalid billing plan arguments')
     case 'invalid-group-arguments':
       return toolTextResult(false, 'invalid group arguments')
     case 'invalid-newsletter-arguments':
@@ -2021,6 +2221,11 @@ export async function executeMurphDynamicToolRequest(input: {
       })
     case 'family-plan':
       return await executeFamilyPlanTool({
+        hostedToolContext: input.hostedToolContext ?? null,
+        request: input.request.request,
+      })
+    case 'billing-plan':
+      return await executeBillingPlanTool({
         hostedToolContext: input.hostedToolContext ?? null,
         request: input.request.request,
       })
@@ -2255,10 +2460,47 @@ async function executeFamilyPlanTool(input: {
   }
 
   try {
-    const result = await familyPlanTool.request(input.request)
+    const request = input.request.action === 'cancel_invite'
+      || input.request.action === 'change_seat_count'
+      || input.request.action === 'remove_member'
+      ? {
+          ...input.request,
+          returnContactKind:
+            input.hostedToolContext?.currentHostedDeliveryContext()
+              ?.returnContactKind ?? null,
+        }
+      : input.request
+    const result = await familyPlanTool.request(request)
     return toolTextResult(true, safeToolPayloadText(result))
   } catch {
     return toolTextResult(false, 'family plan tool request failed')
+  }
+}
+
+async function executeBillingPlanTool(input: {
+  hostedToolContext: AssistantHostedToolContext | null
+  request: HostedRuntimeBillingPlanToolRequest
+}): Promise<MurphDynamicToolExecutionResult> {
+  const billingPlanTool = input.hostedToolContext?.billingPlanTool ?? null
+  if (!billingPlanTool) {
+    return toolTextResult(false, 'billing plan tools are unavailable for this turn')
+  }
+
+  try {
+    const request = input.request.action === 'start_paid_pulse'
+      || input.request.action === 'switch_to_pulse_at_renewal'
+      || input.request.action === 'upgrade_to_edge'
+      ? {
+          ...input.request,
+          returnContactKind:
+            input.hostedToolContext?.currentHostedDeliveryContext()
+              ?.returnContactKind ?? null,
+        }
+      : input.request
+    const result = await billingPlanTool.request(request)
+    return toolTextResult(true, safeToolPayloadText(result))
+  } catch {
+    return toolTextResult(false, 'billing plan tool request failed')
   }
 }
 
@@ -3372,7 +3614,7 @@ function parseFamilyPlanArguments(
         error: parsed.error,
         rawInput: value,
         schemaName: 'murph.family_plan.input',
-        schemaRootKeys: ['action', 'invite'],
+        schemaRootKeys: ['action', 'confirmed', 'invite', 'inviteId', 'memberId', 'seatCount'],
         toolName: 'murph.family_plan',
       }),
     }
@@ -3406,6 +3648,36 @@ function parseFamilyPlanArguments(
           },
     }
   }
+  if (parsed.data.action === 'cancel_invite') {
+    return {
+      ok: true,
+      request: {
+        action: 'cancel_invite',
+        confirmed: parsed.data.confirmed,
+        inviteId: parsed.data.inviteId,
+      },
+    }
+  }
+  if (parsed.data.action === 'remove_member') {
+    return {
+      ok: true,
+      request: {
+        action: 'remove_member',
+        confirmed: parsed.data.confirmed,
+        memberId: parsed.data.memberId,
+      },
+    }
+  }
+  if (parsed.data.action === 'change_seat_count') {
+    return {
+      ok: true,
+      request: {
+        action: 'change_seat_count',
+        confirmed: parsed.data.confirmed,
+        seatCount: parsed.data.seatCount,
+      },
+    }
+  }
 
   return {
     ok: true,
@@ -3419,6 +3691,42 @@ function parseFamilyPlanArguments(
         targetPhoneNumber: parsed.data.invite.targetPhoneNumber,
         targetTelegramUsername: parsed.data.invite.targetTelegramUsername,
       },
+    },
+  }
+}
+
+function parseBillingPlanArguments(
+  value: unknown,
+):
+  | {
+      request: HostedRuntimeBillingPlanToolRequest
+      ok: true
+    }
+  | { ok: false; validationDigest: SafeToolCallValidationDigest } {
+  const parsed = billingPlanArgumentsSchema.safeParse(value)
+  if (!parsed.success) {
+    return {
+      ok: false,
+      validationDigest: buildDynamicToolValidationDigest({
+        error: parsed.error,
+        rawInput: value,
+        schemaName: 'murph.billing_plan.input',
+        schemaRootKeys: ['action', 'confirmed'],
+        toolName: 'murph.billing_plan',
+      }),
+    }
+  }
+  if (parsed.data.action === 'read_status' || parsed.data.action === 'open_portal') {
+    return {
+      ok: true,
+      request: { action: parsed.data.action },
+    }
+  }
+  return {
+    ok: true,
+    request: {
+      action: parsed.data.action,
+      confirmed: parsed.data.confirmed,
     },
   }
 }

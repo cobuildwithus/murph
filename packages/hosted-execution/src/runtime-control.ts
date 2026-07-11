@@ -31,6 +31,12 @@ import type {
   HostedVaultShareSelectableProjectionKind,
   HostedVaultShareSelectableProjectionScope,
 } from "./vault-share.ts";
+import type {
+  HostedReturnContactKind,
+} from "./return-contact.ts";
+import type {
+  HostedActionApprovalPresentation,
+} from "./action-approval.ts";
 
 export const HOSTED_MAILBOX_LANES = [
   "system",
@@ -1081,9 +1087,15 @@ export type HostedRuntimeNewsletterToolResponse =
     };
 
 export type HostedRuntimeFamilyPlanToolAction =
+  | "cancel_invite"
+  | "change_seat_count"
   | "create_invite"
   | "read_status"
+  | "remove_member"
   | "start_checkout";
+
+export const HOSTED_RUNTIME_FAMILY_PLAN_EMAIL_PATTERN =
+  "^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$";
 
 export interface HostedRuntimeFamilyPlanCreateInviteRequest {
   targetEmail?: string | null;
@@ -1092,7 +1104,36 @@ export interface HostedRuntimeFamilyPlanCreateInviteRequest {
   targetTelegramUsername?: string | null;
 }
 
+export interface HostedRuntimeSensitiveActionApprovalInput {
+  returnContactKind?: HostedReturnContactKind | null;
+}
+
+export interface HostedRuntimeSensitiveActionConfirmationResult {
+  presentation: HostedActionApprovalPresentation;
+  status: "confirmation_required";
+}
+
+export type HostedRuntimeSensitiveActionApprovalResult =
+  | {
+      approvalUrl: string;
+      expiresAt: string;
+      status: "approval_required";
+    }
+  | {
+      status: "approval_denied" | "approval_expired";
+    };
+
 export type HostedRuntimeFamilyPlanToolRequest =
+  | ({
+      action: "cancel_invite";
+      confirmed: boolean;
+      inviteId: string;
+    } & HostedRuntimeSensitiveActionApprovalInput)
+  | ({
+      action: "change_seat_count";
+      confirmed: boolean;
+      seatCount: number;
+    } & HostedRuntimeSensitiveActionApprovalInput)
   | {
       action: "create_invite";
       invite: HostedRuntimeFamilyPlanCreateInviteRequest;
@@ -1100,6 +1141,11 @@ export type HostedRuntimeFamilyPlanToolRequest =
   | {
       action: "read_status";
     }
+  | ({
+      action: "remove_member";
+      confirmed: boolean;
+      memberId: string;
+    } & HostedRuntimeSensitiveActionApprovalInput)
   | {
       action: "start_checkout";
       invite?: HostedRuntimeFamilyPlanCreateInviteRequest | null;
@@ -1118,6 +1164,7 @@ export interface HostedRuntimeFamilyPlanToolSeatStatus {
 export interface HostedRuntimeFamilyPlanToolMember {
   isOwner: boolean;
   label: string | null;
+  memberId?: string;
   role: string;
   status: string;
 }
@@ -1125,6 +1172,7 @@ export interface HostedRuntimeFamilyPlanToolMember {
 export interface HostedRuntimeFamilyPlanToolInvite {
   acceptUrl: string | null;
   expiresAt: string;
+  inviteId?: string;
   status: string;
   targetLabel: string | null;
   targetPhoneHint: string | null;
@@ -1137,6 +1185,14 @@ export interface HostedRuntimeFamilyPlanToolStatusResponse {
   members: HostedRuntimeFamilyPlanToolMember[];
   owner: boolean;
   pendingInvites: HostedRuntimeFamilyPlanToolInvite[];
+  pricing?: {
+    currency: "USD";
+    currentRecurringAmountUsdCents: number;
+    interval: "month";
+    recurringAmountUsdCentsPerSeat: number;
+    seatDecreaseTiming: "immediate_without_proration";
+    seatIncreaseTiming: "immediate_with_proration_and_immediate_invoice";
+  };
   seats: HostedRuntimeFamilyPlanToolSeatStatus;
 }
 
@@ -1160,6 +1216,23 @@ export interface HostedRuntimeFamilyPlanToolStartCheckoutResponse {
 
 export type HostedRuntimeFamilyPlanToolResponse =
   | {
+      action: "cancel_invite";
+      result: {
+        inviteId: string;
+        status: "canceled" | "unchanged";
+      } | HostedRuntimeSensitiveActionConfirmationResult
+        | HostedRuntimeSensitiveActionApprovalResult;
+    }
+  | {
+      action: "change_seat_count";
+      result: {
+        requestedSeatCount: number;
+        seats: HostedRuntimeFamilyPlanToolSeatStatus;
+        status: "applied" | "pending" | "unchanged";
+      } | HostedRuntimeSensitiveActionConfirmationResult
+        | HostedRuntimeSensitiveActionApprovalResult;
+    }
+  | {
       action: "create_invite";
       result: HostedRuntimeFamilyPlanToolCreateInviteResponse;
     }
@@ -1168,8 +1241,118 @@ export type HostedRuntimeFamilyPlanToolResponse =
       result: HostedRuntimeFamilyPlanToolStatusResponse;
     }
   | {
+      action: "remove_member";
+      result: {
+        memberId: string;
+        status: "removed" | "unchanged";
+      } | HostedRuntimeSensitiveActionConfirmationResult
+        | HostedRuntimeSensitiveActionApprovalResult;
+    }
+  | {
       action: "start_checkout";
       result: HostedRuntimeFamilyPlanToolStartCheckoutResponse;
+    };
+
+export type HostedRuntimeBillingPlanToolAction =
+  | "open_portal"
+  | "read_status"
+  | "start_paid_pulse"
+  | "switch_to_pulse_at_renewal"
+  | "upgrade_to_edge";
+
+export type HostedRuntimeBillingPlanToolRequest =
+  | {
+      action: "open_portal";
+    }
+  | {
+      action: "read_status";
+    }
+  | ({
+      action: "start_paid_pulse";
+      confirmed: boolean;
+    } & HostedRuntimeSensitiveActionApprovalInput)
+  | ({
+      action: "switch_to_pulse_at_renewal";
+      confirmed: boolean;
+    } & HostedRuntimeSensitiveActionApprovalInput)
+  | ({
+      action: "upgrade_to_edge";
+      confirmed: boolean;
+    } & HostedRuntimeSensitiveActionApprovalInput);
+
+export interface HostedRuntimeBillingPlanToolStatusResponse {
+  billingStatus: string;
+  canStartPaidPulse: boolean;
+  canSwitchToPulseAtRenewal: boolean;
+  canUpgradeToEdge: boolean;
+  currentBillingPhase: string | null;
+  currentBillingPlanCode: string | null;
+  currentCheckoutOffer: string | null;
+  currentPeriodEnd: string | null;
+  portalAvailable: boolean;
+  planPresentations: Array<{
+    code: "launch_edge_monthly" | "launch_monthly";
+    displayName: string;
+    interval: "month";
+    recurringAmountUsdCents: number;
+  }>;
+  scheduledBillingEffectiveAt: string | null;
+  scheduledBillingPlanCode: string | null;
+  sponsoredFamilyAccess: boolean;
+}
+
+export type HostedRuntimeBillingPlanToolResponse =
+  | {
+      action: "open_portal";
+      result: {
+        status: "browser_handoff";
+        url: string;
+      };
+    }
+  | {
+      action: "read_status";
+      result: HostedRuntimeBillingPlanToolStatusResponse;
+    }
+  | {
+      action: "start_paid_pulse";
+      result:
+        | {
+            billingPlanCode: "launch_monthly";
+            status: "applied" | "pending" | "unchanged";
+          }
+        | {
+            billingPlanCode: "launch_monthly";
+            status: "browser_handoff";
+            url: string;
+          }
+        | HostedRuntimeSensitiveActionConfirmationResult
+        | HostedRuntimeSensitiveActionApprovalResult;
+    }
+  | {
+      action: "switch_to_pulse_at_renewal";
+      result: {
+        effectiveAt: string;
+        scheduledBillingPlanCode: "launch_monthly";
+        status: "scheduled" | "unchanged";
+      } | HostedRuntimeSensitiveActionConfirmationResult
+        | HostedRuntimeSensitiveActionApprovalResult;
+    }
+  | {
+      action: "upgrade_to_edge";
+      result:
+        | {
+            currentBillingPlanCode: "launch_edge_monthly";
+            status: "applied" | "unchanged";
+            targetBillingPlanCode: "launch_edge_monthly";
+          }
+        | {
+            currentBillingPlanCode: "launch_monthly";
+            status: "browser_handoff";
+            targetBillingPlanCode: "launch_edge_monthly";
+            url: string;
+          }
+        | HostedRuntimeSensitiveActionConfirmationResult
+        | HostedRuntimeSensitiveActionApprovalResult;
     };
 
 export type HostedCodexAuthUpdate =

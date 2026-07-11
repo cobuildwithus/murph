@@ -10,10 +10,14 @@ import {
   parseHostedAssistantModelOverride,
 } from "../assistant-model.ts";
 import {
+  parseHostedActionApprovalPresentation,
+} from "../action-approval.ts";
+import {
   parseAssistantRuntimeIssueRecord,
 } from "@murphai/runtime-state/node/assistant-runtime-issues";
 import {
   HOSTED_RUNTIME_DEVICE_SYNC_BRIDGE_KINDS,
+  HOSTED_RUNTIME_FAMILY_PLAN_EMAIL_PATTERN,
   HOSTED_INGRESS_LATENCY_SOURCES,
   HOSTED_RUNTIME_ASSISTANT_MILESTONES,
   HOSTED_RUNTIME_SIDE_INPUT_UNAVAILABLE_CODES,
@@ -87,6 +91,9 @@ import {
   type HostedRuntimeSideInputUnavailableCode,
   type HostedRuntimeUsageRecordRequest,
   type HostedRuntimeUsageRecordResponse,
+  type HostedRuntimeBillingPlanToolRequest,
+  type HostedRuntimeBillingPlanToolResponse,
+  type HostedRuntimeBillingPlanToolStatusResponse,
   type HostedRuntimeFamilyPlanToolRequest,
   type HostedRuntimeFamilyPlanToolResponse,
   type HostedRuntimeFamilyPlanToolStartCheckoutResponse,
@@ -160,6 +167,9 @@ import {
   parseHostedBrowserVaultReplicaRef,
   parseHostedExecutionSnapshotRef,
 } from "./cursor.ts";
+import {
+  parseHostedReturnContactKind,
+} from "../return-contact.ts";
 
 const FORBIDDEN_RAW_REDACTED_KEY_NAMES = [
   "address",
@@ -1765,6 +1775,72 @@ export function parseHostedRuntimeFamilyPlanToolRequest(
       action,
     };
   }
+  if (action === "cancel_invite") {
+    assertAllowedObjectKeys(
+      record,
+      new Set(["action", "confirmed", "inviteId", "returnContactKind"]),
+      "Hosted runtime family plan tool cancel_invite request",
+    );
+    const confirmed = parseHostedRuntimeMutationConfirmation(
+      record.confirmed,
+      "Hosted runtime family plan tool cancel_invite request confirmed",
+    );
+    return {
+      action,
+      confirmed,
+      inviteId: requireString(
+        record.inviteId,
+        "Hosted runtime family plan tool cancel_invite request inviteId",
+      ),
+      ...parseHostedRuntimeSensitiveActionApprovalInput(record),
+    };
+  }
+  if (action === "change_seat_count") {
+    assertAllowedObjectKeys(
+      record,
+      new Set(["action", "confirmed", "returnContactKind", "seatCount"]),
+      "Hosted runtime family plan tool change_seat_count request",
+    );
+    const confirmed = parseHostedRuntimeMutationConfirmation(
+      record.confirmed,
+      "Hosted runtime family plan tool change_seat_count request confirmed",
+    );
+    const seatCount = requireNumber(
+      record.seatCount,
+      "Hosted runtime family plan tool change_seat_count request seatCount",
+    );
+    if (!Number.isInteger(seatCount)) {
+      throw new TypeError(
+        "Hosted runtime family plan tool change_seat_count request seatCount must be an integer.",
+      );
+    }
+    return {
+      action,
+      confirmed,
+      ...parseHostedRuntimeSensitiveActionApprovalInput(record),
+      seatCount,
+    };
+  }
+  if (action === "remove_member") {
+    assertAllowedObjectKeys(
+      record,
+      new Set(["action", "confirmed", "memberId", "returnContactKind"]),
+      "Hosted runtime family plan tool remove_member request",
+    );
+    const confirmed = parseHostedRuntimeMutationConfirmation(
+      record.confirmed,
+      "Hosted runtime family plan tool remove_member request confirmed",
+    );
+    return {
+      action,
+      confirmed,
+      memberId: requireString(
+        record.memberId,
+        "Hosted runtime family plan tool remove_member request memberId",
+      ),
+      ...parseHostedRuntimeSensitiveActionApprovalInput(record),
+    };
+  }
   if (action === "start_checkout") {
     assertAllowedObjectKeys(
       record,
@@ -1806,6 +1882,66 @@ export function parseHostedRuntimeFamilyPlanToolRequest(
   };
 }
 
+export function parseHostedRuntimeBillingPlanToolRequest(
+  value: unknown,
+): HostedRuntimeBillingPlanToolRequest {
+  const record = requireObject(value, "Hosted runtime billing plan tool request");
+  const action = requireString(
+    record.action,
+    "Hosted runtime billing plan tool request action",
+  );
+  if (action === "read_status" || action === "open_portal") {
+    assertAllowedObjectKeys(
+      record,
+      new Set(["action"]),
+      `Hosted runtime billing plan tool ${action} request`,
+    );
+    return { action };
+  }
+  if (
+    action !== "start_paid_pulse" &&
+    action !== "switch_to_pulse_at_renewal" &&
+    action !== "upgrade_to_edge"
+  ) {
+    throw new TypeError("Hosted runtime billing plan tool action is not supported.");
+  }
+  assertAllowedObjectKeys(
+    record,
+    new Set(["action", "confirmed", "returnContactKind"]),
+    `Hosted runtime billing plan tool ${action} request`,
+  );
+  const confirmed = parseHostedRuntimeMutationConfirmation(
+    record.confirmed,
+    `Hosted runtime billing plan tool ${action} request confirmed`,
+  );
+  return {
+    action,
+    confirmed,
+    ...parseHostedRuntimeSensitiveActionApprovalInput(record),
+  };
+}
+
+function parseHostedRuntimeSensitiveActionApprovalInput(
+  record: Record<string, unknown>,
+): { returnContactKind?: "email" | "telegram" | "text" | null } {
+  if (record.returnContactKind === undefined) {
+    return {};
+  }
+  return {
+    returnContactKind: parseHostedReturnContactKind(
+      record.returnContactKind,
+      "Hosted runtime sensitive action returnContactKind",
+    ),
+  };
+}
+
+function parseHostedRuntimeMutationConfirmation(
+  value: unknown,
+  label: string,
+): boolean {
+  return requireBoolean(value, label);
+}
+
 function parseHostedRuntimeFamilyPlanInviteRequest(
   value: unknown,
   label: string,
@@ -1816,21 +1952,32 @@ function parseHostedRuntimeFamilyPlanInviteRequest(
     new Set(["targetEmail", "targetLabel", "targetPhoneNumber", "targetTelegramUsername"]),
     label,
   );
-  const targetEmail = readOptionalNullableString(
+  const targetEmail = parseHostedRuntimeFamilyPlanInviteString(
     invite.targetEmail,
     "Hosted runtime family plan invite targetEmail",
+    { maxLength: 320, minLength: 3 },
   );
-  const targetLabel = readOptionalNullableString(
+  if (
+    targetEmail !== undefined
+    && targetEmail !== null
+    && !new RegExp(HOSTED_RUNTIME_FAMILY_PLAN_EMAIL_PATTERN, "u").test(targetEmail)
+  ) {
+    throw new TypeError("Hosted runtime family plan invite targetEmail must be an email address.");
+  }
+  const targetLabel = parseHostedRuntimeFamilyPlanInviteString(
     invite.targetLabel,
     "Hosted runtime family plan invite targetLabel",
+    { maxLength: 80, minLength: 1 },
   );
-  const targetPhoneNumber = readOptionalNullableString(
+  const targetPhoneNumber = parseHostedRuntimeFamilyPlanInviteString(
     invite.targetPhoneNumber,
     "Hosted runtime family plan invite targetPhoneNumber",
+    { maxLength: 40, minLength: 1 },
   );
-  const targetTelegramUsername = readOptionalNullableString(
+  const targetTelegramUsername = parseHostedRuntimeFamilyPlanInviteString(
     invite.targetTelegramUsername,
     "Hosted runtime family plan invite targetTelegramUsername",
+    { maxLength: 32, minLength: 5 },
   );
   if (!targetPhoneNumber && !targetTelegramUsername && !targetEmail) {
     throw new TypeError(
@@ -1844,6 +1991,27 @@ function parseHostedRuntimeFamilyPlanInviteRequest(
     targetPhoneNumber,
     targetTelegramUsername,
   };
+}
+
+function parseHostedRuntimeFamilyPlanInviteString(
+  value: unknown,
+  label: string,
+  bounds: { maxLength: number; minLength: number },
+): string | null | undefined {
+  const parsed = readOptionalNullableString(value, label);
+  if (parsed === undefined || parsed === null) {
+    return parsed;
+  }
+  const normalized = parsed.trim();
+  if (
+    normalized.length < bounds.minLength
+    || normalized.length > bounds.maxLength
+  ) {
+    throw new TypeError(
+      `${label} must be between ${bounds.minLength} and ${bounds.maxLength} characters.`,
+    );
+  }
+  return normalized;
 }
 
 export function parseHostedRuntimeFamilyPlanToolResponse(
@@ -1863,6 +2031,75 @@ export function parseHostedRuntimeFamilyPlanToolResponse(
     return {
       action,
       result: parseHostedRuntimeFamilyPlanStatusResponse(record.result),
+    };
+  }
+  if (action === "cancel_invite") {
+    const gate = parseHostedRuntimeSensitiveActionGateResult(
+      record.result,
+      "Hosted runtime family plan tool cancel_invite response result",
+    );
+    if (gate) {
+      return { action, result: gate };
+    }
+    const result = parseHostedRuntimeFamilyPlanMutationResponse(record, {
+      action,
+      idKey: "inviteId",
+      status: "canceled",
+    });
+    if (result.status === "removed") {
+      throw new TypeError(
+        "Hosted runtime family plan tool cancel_invite response status is not supported.",
+      );
+    }
+    return {
+      action,
+      result: {
+        inviteId: result.id,
+        status: result.status,
+      },
+    };
+  }
+  if (action === "change_seat_count") {
+    assertAllowedObjectKeys(
+      record,
+      new Set(["action", "result"]),
+      "Hosted runtime family plan tool change_seat_count response",
+    );
+    const result = requireObject(
+      record.result,
+      "Hosted runtime family plan tool change_seat_count response result",
+    );
+    const gate = parseHostedRuntimeSensitiveActionGateResult(
+      result,
+      "Hosted runtime family plan tool change_seat_count response result",
+    );
+    if (gate) {
+      return { action, result: gate };
+    }
+    assertAllowedObjectKeys(
+      result,
+      new Set(["requestedSeatCount", "seats", "status"]),
+      "Hosted runtime family plan tool change_seat_count response result",
+    );
+    const status = requireString(
+      result.status,
+      "Hosted runtime family plan tool change_seat_count response status",
+    );
+    if (status !== "applied" && status !== "pending" && status !== "unchanged") {
+      throw new TypeError(
+        "Hosted runtime family plan tool change_seat_count response status is not supported.",
+      );
+    }
+    return {
+      action,
+      result: {
+        requestedSeatCount: requireNumber(
+          result.requestedSeatCount,
+          "Hosted runtime family plan tool change_seat_count response requestedSeatCount",
+        ),
+        seats: parseHostedRuntimeFamilyPlanSeatStatus(result.seats),
+        status,
+      },
     };
   }
   if (action === "create_invite") {
@@ -1903,7 +2140,349 @@ export function parseHostedRuntimeFamilyPlanToolResponse(
       result: parseHostedRuntimeFamilyPlanStartCheckoutResponse(record.result),
     };
   }
+  if (action === "remove_member") {
+    const gate = parseHostedRuntimeSensitiveActionGateResult(
+      record.result,
+      "Hosted runtime family plan tool remove_member response result",
+    );
+    if (gate) {
+      return { action, result: gate };
+    }
+    const result = parseHostedRuntimeFamilyPlanMutationResponse(record, {
+      action,
+      idKey: "memberId",
+      status: "removed",
+    });
+    if (result.status === "canceled") {
+      throw new TypeError(
+        "Hosted runtime family plan tool remove_member response status is not supported.",
+      );
+    }
+    return {
+      action,
+      result: {
+        memberId: result.id,
+        status: result.status,
+      },
+    };
+  }
   throw new TypeError("Hosted runtime family plan tool response action is not supported.");
+}
+
+function parseHostedRuntimeFamilyPlanMutationResponse(
+  record: Record<string, unknown>,
+  input: {
+    action: "cancel_invite" | "remove_member";
+    idKey: "inviteId" | "memberId";
+    status: "canceled" | "removed";
+  },
+): { id: string; status: "canceled" | "removed" | "unchanged" } {
+  assertAllowedObjectKeys(
+    record,
+    new Set(["action", "result"]),
+    `Hosted runtime family plan tool ${input.action} response`,
+  );
+  const result = requireObject(
+    record.result,
+    `Hosted runtime family plan tool ${input.action} response result`,
+  );
+  assertAllowedObjectKeys(
+    result,
+    new Set([input.idKey, "status"]),
+    `Hosted runtime family plan tool ${input.action} response result`,
+  );
+  const status = requireString(result.status, `${input.action} response status`);
+  if (status !== input.status && status !== "unchanged") {
+    throw new TypeError(
+      `Hosted runtime family plan tool ${input.action} response status is not supported.`,
+    );
+  }
+  return {
+    id: requireString(
+      result[input.idKey],
+      `Hosted runtime family plan tool ${input.action} response ${input.idKey}`,
+    ),
+    status,
+  };
+}
+
+export function parseHostedRuntimeBillingPlanToolResponse(
+  value: unknown,
+): HostedRuntimeBillingPlanToolResponse {
+  const record = requireObject(value, "Hosted runtime billing plan tool response");
+  const action = requireString(
+    record.action,
+    "Hosted runtime billing plan tool response action",
+  );
+  assertAllowedObjectKeys(
+    record,
+    new Set(["action", "result"]),
+    `Hosted runtime billing plan tool ${action} response`,
+  );
+  if (action === "read_status") {
+    return {
+      action,
+      result: parseHostedRuntimeBillingPlanStatusResponse(record.result),
+    };
+  }
+  const result = requireObject(
+    record.result,
+    `Hosted runtime billing plan tool ${action} response result`,
+  );
+  if (action === "open_portal") {
+    assertAllowedObjectKeys(
+      result,
+      new Set(["status", "url"]),
+      "Hosted runtime billing plan tool open_portal response result",
+    );
+    return {
+      action,
+      result: parseHostedRuntimeBillingBrowserHandoff(result),
+    };
+  }
+  if (action === "start_paid_pulse") {
+    const gate = parseHostedRuntimeSensitiveActionGateResult(
+      result,
+      "Hosted runtime billing plan tool start_paid_pulse response result",
+    );
+    if (gate) {
+      return { action, result: gate };
+    }
+    assertAllowedObjectKeys(
+      result,
+      new Set(["billingPlanCode", "status", "url"]),
+      "Hosted runtime billing plan tool start_paid_pulse response result",
+    );
+    const billingPlanCode = requireString(
+      result.billingPlanCode,
+      "Hosted runtime billing plan tool start_paid_pulse billingPlanCode",
+    );
+    if (billingPlanCode !== "launch_monthly") {
+      throw new TypeError(
+        "Hosted runtime billing plan tool start_paid_pulse billingPlanCode is not supported.",
+      );
+    }
+    const status = requireString(
+      result.status,
+      "Hosted runtime billing plan tool start_paid_pulse status",
+    );
+    if (status === "browser_handoff") {
+      return {
+        action,
+        result: {
+          billingPlanCode,
+          ...parseHostedRuntimeBillingBrowserHandoff(result),
+        },
+      };
+    }
+    if (status !== "applied" && status !== "pending" && status !== "unchanged") {
+      throw new TypeError(
+        "Hosted runtime billing plan tool start_paid_pulse status is not supported.",
+      );
+    }
+    if (result.url !== undefined) {
+      throw new TypeError(
+        "Hosted runtime billing plan tool start_paid_pulse url is not allowed without a browser handoff.",
+      );
+    }
+    return {
+      action,
+      result: {
+        billingPlanCode,
+        status,
+      },
+    };
+  }
+  if (action === "switch_to_pulse_at_renewal") {
+    const gate = parseHostedRuntimeSensitiveActionGateResult(
+      result,
+      "Hosted runtime billing plan tool switch_to_pulse_at_renewal response result",
+    );
+    if (gate) {
+      return { action, result: gate };
+    }
+    assertAllowedObjectKeys(
+      result,
+      new Set(["effectiveAt", "scheduledBillingPlanCode", "status"]),
+      "Hosted runtime billing plan tool switch_to_pulse_at_renewal response result",
+    );
+    const scheduledBillingPlanCode = requireString(
+      result.scheduledBillingPlanCode,
+      "Hosted runtime billing plan tool switch_to_pulse_at_renewal scheduledBillingPlanCode",
+    );
+    const status = requireString(
+      result.status,
+      "Hosted runtime billing plan tool switch_to_pulse_at_renewal status",
+    );
+    if (
+      scheduledBillingPlanCode !== "launch_monthly" ||
+      (status !== "scheduled" && status !== "unchanged")
+    ) {
+      throw new TypeError(
+        "Hosted runtime billing plan tool switch_to_pulse_at_renewal response is not supported.",
+      );
+    }
+    return {
+      action,
+      result: {
+        effectiveAt: requireString(
+          result.effectiveAt,
+          "Hosted runtime billing plan tool switch_to_pulse_at_renewal effectiveAt",
+        ),
+        scheduledBillingPlanCode,
+        status,
+      },
+    };
+  }
+  if (action === "upgrade_to_edge") {
+    const gate = parseHostedRuntimeSensitiveActionGateResult(
+      result,
+      "Hosted runtime billing plan tool upgrade_to_edge response result",
+    );
+    if (gate) {
+      return { action, result: gate };
+    }
+    assertAllowedObjectKeys(
+      result,
+      new Set(["currentBillingPlanCode", "status", "targetBillingPlanCode", "url"]),
+      "Hosted runtime billing plan tool upgrade_to_edge response result",
+    );
+    const status = requireString(
+      result.status,
+      "Hosted runtime billing plan tool upgrade_to_edge status",
+    );
+    const targetBillingPlanCode = requireString(
+      result.targetBillingPlanCode,
+      "Hosted runtime billing plan tool upgrade_to_edge targetBillingPlanCode",
+    );
+    if (targetBillingPlanCode !== "launch_edge_monthly") {
+      throw new TypeError(
+        "Hosted runtime billing plan tool upgrade_to_edge targetBillingPlanCode is not supported.",
+      );
+    }
+    if (status === "browser_handoff") {
+      const currentBillingPlanCode = requireString(
+        result.currentBillingPlanCode,
+        "Hosted runtime billing plan tool upgrade_to_edge currentBillingPlanCode",
+      );
+      if (currentBillingPlanCode !== "launch_monthly") {
+        throw new TypeError(
+          "Hosted runtime billing plan tool upgrade_to_edge pending currentBillingPlanCode is not supported.",
+        );
+      }
+      return {
+        action,
+        result: {
+          currentBillingPlanCode,
+          ...parseHostedRuntimeBillingBrowserHandoff(result),
+          targetBillingPlanCode,
+        },
+      };
+    }
+    if (
+      (status !== "applied" && status !== "unchanged") ||
+      requireString(
+        result.currentBillingPlanCode,
+        "Hosted runtime billing plan tool upgrade_to_edge currentBillingPlanCode",
+      ) !== "launch_edge_monthly"
+    ) {
+      throw new TypeError(
+        "Hosted runtime billing plan tool upgrade_to_edge response is not supported.",
+      );
+    }
+    if (result.url !== undefined) {
+      throw new TypeError(
+        "Hosted runtime billing plan tool upgrade_to_edge url is not allowed without a browser handoff.",
+      );
+    }
+    return {
+      action,
+      result: {
+        currentBillingPlanCode: "launch_edge_monthly",
+        status,
+        targetBillingPlanCode,
+      },
+    };
+  }
+  throw new TypeError("Hosted runtime billing plan tool response action is not supported.");
+}
+
+function parseHostedRuntimeBillingBrowserHandoff(
+  result: Record<string, unknown>,
+): { status: "browser_handoff"; url: string } {
+  if (
+    requireString(result.status, "Hosted runtime billing plan browser handoff status") !==
+      "browser_handoff"
+  ) {
+    throw new TypeError("Hosted runtime billing plan browser handoff status is not supported.");
+  }
+  return {
+    status: "browser_handoff",
+    url: requireString(result.url, "Hosted runtime billing plan browser handoff url"),
+  };
+}
+
+function parseHostedRuntimeSensitiveActionGateResult(
+  value: unknown,
+  label: string,
+):
+  | {
+      approvalUrl: string;
+      expiresAt: string;
+      status: "approval_required";
+    }
+  | {
+      status: "approval_denied" | "approval_expired";
+    }
+  | {
+      presentation: { body: string; title: string };
+      status: "confirmation_required";
+    }
+  | null {
+  const result = requireObject(value, label);
+  if (result.status === "confirmation_required") {
+    assertAllowedObjectKeys(
+      result,
+      new Set(["presentation", "status"]),
+      label,
+    );
+    return {
+      presentation: parseHostedActionApprovalPresentation(result.presentation),
+      status: "confirmation_required",
+    };
+  }
+  if (result.status === "approval_required") {
+    assertAllowedObjectKeys(
+      result,
+      new Set(["approvalUrl", "expiresAt", "status"]),
+      label,
+    );
+    const approvalUrl = requireString(result.approvalUrl, `${label} approvalUrl`);
+    let parsedApprovalUrl: URL;
+    try {
+      parsedApprovalUrl = new URL(approvalUrl);
+    } catch {
+      throw new TypeError(`${label} approvalUrl must be a URL.`);
+    }
+    if (parsedApprovalUrl.protocol !== "http:" && parsedApprovalUrl.protocol !== "https:") {
+      throw new TypeError(`${label} approvalUrl must use http or https.`);
+    }
+    const expiresAt = requireString(result.expiresAt, `${label} expiresAt`);
+    const expiresAtDate = new Date(expiresAt);
+    if (Number.isNaN(expiresAtDate.getTime()) || expiresAtDate.toISOString() !== expiresAt) {
+      throw new TypeError(`${label} expiresAt must be a canonical ISO-8601 timestamp.`);
+    }
+    return {
+      approvalUrl,
+      expiresAt,
+      status: "approval_required",
+    };
+  }
+  if (result.status === "approval_denied" || result.status === "approval_expired") {
+    assertAllowedObjectKeys(result, new Set(["status"]), label);
+    return { status: result.status };
+  }
+  return null;
 }
 
 export function parseHostedCodexAuthUpdate(
@@ -2096,6 +2675,7 @@ function parseHostedRuntimeFamilyPlanStatusResponse(
       "members",
       "owner",
       "pendingInvites",
+      "pricing",
       "seats",
     ]),
     "Hosted runtime family plan status response",
@@ -2122,7 +2702,164 @@ function parseHostedRuntimeFamilyPlanStatusResponse(
       record.pendingInvites,
       "Hosted runtime family plan status pendingInvites",
     ).map(parseHostedRuntimeFamilyPlanInvite),
+    ...(record.pricing === undefined
+      ? {}
+      : { pricing: parseHostedRuntimeFamilyPlanPricing(record.pricing) }),
     seats: parseHostedRuntimeFamilyPlanSeatStatus(record.seats),
+  };
+}
+
+function parseHostedRuntimeFamilyPlanPricing(
+  value: unknown,
+): HostedRuntimeFamilyPlanToolStatusResponse["pricing"] {
+  const record = requireObject(value, "Hosted runtime family plan pricing");
+  assertAllowedObjectKeys(
+    record,
+    new Set([
+      "currency",
+      "currentRecurringAmountUsdCents",
+      "interval",
+      "recurringAmountUsdCentsPerSeat",
+      "seatDecreaseTiming",
+      "seatIncreaseTiming",
+    ]),
+    "Hosted runtime family plan pricing",
+  );
+  if (record.currency !== "USD" || record.interval !== "month") {
+    throw new TypeError("Hosted runtime family plan pricing currency or interval is not supported.");
+  }
+  if (record.seatDecreaseTiming !== "immediate_without_proration") {
+    throw new TypeError("Hosted runtime family plan seat decrease timing is not supported.");
+  }
+  if (record.seatIncreaseTiming !== "immediate_with_proration_and_immediate_invoice") {
+    throw new TypeError("Hosted runtime family plan seat increase timing is not supported.");
+  }
+  return {
+    currency: "USD",
+    currentRecurringAmountUsdCents: requireNumber(
+      record.currentRecurringAmountUsdCents,
+      "Hosted runtime family plan pricing currentRecurringAmountUsdCents",
+    ),
+    interval: "month",
+    recurringAmountUsdCentsPerSeat: requireNumber(
+      record.recurringAmountUsdCentsPerSeat,
+      "Hosted runtime family plan pricing recurringAmountUsdCentsPerSeat",
+    ),
+    seatDecreaseTiming: "immediate_without_proration",
+    seatIncreaseTiming: "immediate_with_proration_and_immediate_invoice",
+  };
+}
+
+function parseHostedRuntimeBillingPlanStatusResponse(
+  value: unknown,
+): HostedRuntimeBillingPlanToolStatusResponse {
+  const record = requireObject(value, "Hosted runtime billing plan status response");
+  assertAllowedObjectKeys(
+    record,
+    new Set([
+      "billingStatus",
+      "canStartPaidPulse",
+      "canSwitchToPulseAtRenewal",
+      "canUpgradeToEdge",
+      "currentBillingPhase",
+      "currentBillingPlanCode",
+      "currentCheckoutOffer",
+      "currentPeriodEnd",
+      "portalAvailable",
+      "planPresentations",
+      "scheduledBillingEffectiveAt",
+      "scheduledBillingPlanCode",
+      "sponsoredFamilyAccess",
+    ]),
+    "Hosted runtime billing plan status response",
+  );
+  return {
+    billingStatus: requireString(
+      record.billingStatus,
+      "Hosted runtime billing plan status billingStatus",
+    ),
+    canStartPaidPulse: requireBoolean(
+      record.canStartPaidPulse,
+      "Hosted runtime billing plan status canStartPaidPulse",
+    ),
+    canSwitchToPulseAtRenewal: requireBoolean(
+      record.canSwitchToPulseAtRenewal,
+      "Hosted runtime billing plan status canSwitchToPulseAtRenewal",
+    ),
+    canUpgradeToEdge: requireBoolean(
+      record.canUpgradeToEdge,
+      "Hosted runtime billing plan status canUpgradeToEdge",
+    ),
+    currentBillingPhase: readNullableString(
+      record.currentBillingPhase,
+      "Hosted runtime billing plan status currentBillingPhase",
+    ),
+    currentBillingPlanCode: readNullableString(
+      record.currentBillingPlanCode,
+      "Hosted runtime billing plan status currentBillingPlanCode",
+    ),
+    currentCheckoutOffer: readNullableString(
+      record.currentCheckoutOffer,
+      "Hosted runtime billing plan status currentCheckoutOffer",
+    ),
+    currentPeriodEnd: readNullableString(
+      record.currentPeriodEnd,
+      "Hosted runtime billing plan status currentPeriodEnd",
+    ),
+    portalAvailable: requireBoolean(
+      record.portalAvailable,
+      "Hosted runtime billing plan status portalAvailable",
+    ),
+    planPresentations: requireArray(
+      record.planPresentations,
+      "Hosted runtime billing plan status planPresentations",
+    ).map(parseHostedRuntimeBillingPlanPresentation),
+    scheduledBillingEffectiveAt: readNullableString(
+      record.scheduledBillingEffectiveAt,
+      "Hosted runtime billing plan status scheduledBillingEffectiveAt",
+    ),
+    scheduledBillingPlanCode: readNullableString(
+      record.scheduledBillingPlanCode,
+      "Hosted runtime billing plan status scheduledBillingPlanCode",
+    ),
+    sponsoredFamilyAccess: requireBoolean(
+      record.sponsoredFamilyAccess,
+      "Hosted runtime billing plan status sponsoredFamilyAccess",
+    ),
+  };
+}
+
+function parseHostedRuntimeBillingPlanPresentation(
+  value: unknown,
+): HostedRuntimeBillingPlanToolStatusResponse["planPresentations"][number] {
+  const record = requireObject(value, "Hosted runtime billing plan presentation");
+  assertAllowedObjectKeys(
+    record,
+    new Set(["code", "displayName", "interval", "recurringAmountUsdCents"]),
+    "Hosted runtime billing plan presentation",
+  );
+  const code = requireString(record.code, "Hosted runtime billing plan presentation code");
+  if (code !== "launch_monthly" && code !== "launch_edge_monthly") {
+    throw new TypeError("Hosted runtime billing plan presentation code is not supported.");
+  }
+  const interval = requireString(
+    record.interval,
+    "Hosted runtime billing plan presentation interval",
+  );
+  if (interval !== "month") {
+    throw new TypeError("Hosted runtime billing plan presentation interval is not supported.");
+  }
+  return {
+    code,
+    displayName: requireString(
+      record.displayName,
+      "Hosted runtime billing plan presentation displayName",
+    ),
+    interval,
+    recurringAmountUsdCents: requireNumber(
+      record.recurringAmountUsdCents,
+      "Hosted runtime billing plan presentation recurringAmountUsdCents",
+    ),
   };
 }
 
@@ -2217,7 +2954,7 @@ function parseHostedRuntimeFamilyPlanMember(value: unknown) {
   const record = requireObject(value, "Hosted runtime family plan member");
   assertAllowedObjectKeys(
     record,
-    new Set(["isOwner", "label", "role", "status"]),
+    new Set(["isOwner", "label", "memberId", "role", "status"]),
     "Hosted runtime family plan member",
   );
 
@@ -2230,6 +2967,14 @@ function parseHostedRuntimeFamilyPlanMember(value: unknown) {
       record.label,
       "Hosted runtime family plan member label",
     ),
+    ...(record.memberId === undefined
+      ? {}
+      : {
+          memberId: requireString(
+            record.memberId,
+            "Hosted runtime family plan member memberId",
+          ),
+        }),
     role: requireString(record.role, "Hosted runtime family plan member role"),
     status: requireString(record.status, "Hosted runtime family plan member status"),
   };
@@ -2242,6 +2987,7 @@ function parseHostedRuntimeFamilyPlanInvite(value: unknown) {
     new Set([
       "acceptUrl",
       "expiresAt",
+      "inviteId",
       "status",
       "targetLabel",
       "targetPhoneHint",
@@ -2259,6 +3005,14 @@ function parseHostedRuntimeFamilyPlanInvite(value: unknown) {
       record.expiresAt,
       "Hosted runtime family plan invite expiresAt",
     ),
+    ...(record.inviteId === undefined
+      ? {}
+      : {
+          inviteId: requireString(
+            record.inviteId,
+            "Hosted runtime family plan invite inviteId",
+          ),
+        }),
     status: requireString(record.status, "Hosted runtime family plan invite status"),
     targetLabel: readNullableString(
       record.targetLabel,

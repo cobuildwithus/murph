@@ -67,6 +67,10 @@ import {
   parseHostedCodexAuthUpdate,
   parseHostedCodexAuthUpdateResponse,
   parseHostedRuntimeDeviceSyncBridgeEnvelope,
+  parseHostedRuntimeBillingPlanToolRequest,
+  parseHostedRuntimeBillingPlanToolResponse,
+  parseHostedRuntimeFamilyPlanToolRequest,
+  parseHostedRuntimeFamilyPlanToolResponse,
   parseHostedRuntimeIssueExportRequest,
   parseHostedRuntimeIssueExportResponse,
   parseHostedRuntimeLatencyTraceRequest,
@@ -86,6 +90,208 @@ import {
 } from "../src/parsers.ts";
 
 describe("hosted runtime control contracts", () => {
+  it("requires an explicit confirmation decision on billing and Family mutations", () => {
+    expect(parseHostedRuntimeBillingPlanToolRequest({
+      action: "upgrade_to_edge",
+      confirmed: true,
+      returnContactKind: "text",
+    })).toEqual({
+      action: "upgrade_to_edge",
+      confirmed: true,
+      returnContactKind: "text",
+    });
+    expect(parseHostedRuntimeBillingPlanToolRequest({
+      action: "upgrade_to_edge",
+      confirmed: false,
+    })).toEqual({
+      action: "upgrade_to_edge",
+      confirmed: false,
+    });
+    expect(() => parseHostedRuntimeFamilyPlanToolRequest({
+      action: "change_seat_count",
+      seatCount: 4,
+    })).toThrow();
+    expect(parseHostedRuntimeFamilyPlanToolRequest({
+      action: "change_seat_count",
+      confirmed: false,
+      seatCount: 4,
+    })).toEqual({
+      action: "change_seat_count",
+      confirmed: false,
+      seatCount: 4,
+    });
+  });
+
+  it("keeps Family invite contact validation aligned at the runtime boundary", () => {
+    expect(parseHostedRuntimeFamilyPlanToolRequest({
+      action: "create_invite",
+      invite: {
+        targetEmail: " family@example.com ",
+        targetLabel: " family member ",
+      },
+    })).toEqual({
+      action: "create_invite",
+      invite: {
+        targetEmail: "family@example.com",
+        targetLabel: "family member",
+        targetPhoneNumber: undefined,
+        targetTelegramUsername: undefined,
+      },
+    });
+    expect(() => parseHostedRuntimeFamilyPlanToolRequest({
+      action: "create_invite",
+      invite: { targetLabel: "family member" },
+    })).toThrow(/requires a phone number, Telegram username, or email/u);
+    expect(() => parseHostedRuntimeFamilyPlanToolRequest({
+      action: "create_invite",
+      invite: { targetEmail: "not-an-email" },
+    })).toThrow(/must be an email address/u);
+  });
+
+  it("keeps old Family status responses readable while accepting additive owner-bound ids", () => {
+    const baseStatus = {
+      billingActive: true,
+      billingStatus: "active",
+      owner: true,
+      pricing: {
+        currency: "USD",
+        currentRecurringAmountUsdCents: 2_100,
+        interval: "month",
+        recurringAmountUsdCentsPerSeat: 700,
+        seatDecreaseTiming: "immediate_without_proration",
+        seatIncreaseTiming: "immediate_with_proration_and_immediate_invoice",
+      },
+      seats: {
+        active: 2,
+        billed: 3,
+        invited: 1,
+        max: 6,
+        min: 2,
+        remaining: 0,
+        used: 3,
+      },
+    };
+    expect(parseHostedRuntimeFamilyPlanToolResponse({
+      action: "read_status",
+      result: {
+        ...baseStatus,
+        members: [{ isOwner: true, label: null, role: "owner", status: "active" }],
+        pendingInvites: [],
+      },
+    })).toMatchObject({
+      result: {
+        members: [{ isOwner: true }],
+        pricing: { currentRecurringAmountUsdCents: 2_100 },
+      },
+    });
+    expect(parseHostedRuntimeFamilyPlanToolResponse({
+      action: "read_status",
+      result: {
+        ...baseStatus,
+        members: [{
+          isOwner: false,
+          label: "family member",
+          memberId: "member_sponsored",
+          role: "member",
+          status: "active",
+        }],
+        pendingInvites: [{
+          acceptUrl: null,
+          expiresAt: "2026-07-20T00:00:00.000Z",
+          inviteId: "invite_pending",
+          status: "pending",
+          targetLabel: null,
+          targetPhoneHint: null,
+          telegramInviteUrl: null,
+        }],
+      },
+    })).toMatchObject({
+      result: {
+        members: [{ memberId: "member_sponsored" }],
+        pendingInvites: [{ inviteId: "invite_pending" }],
+      },
+    });
+  });
+
+  it("parses truthful billing status and no-op results", () => {
+    expect(parseHostedRuntimeBillingPlanToolResponse({
+      action: "read_status",
+      result: {
+        billingStatus: "active",
+        canStartPaidPulse: false,
+        canSwitchToPulseAtRenewal: false,
+        canUpgradeToEdge: true,
+        currentBillingPhase: "paid",
+        currentBillingPlanCode: "launch_monthly",
+        currentCheckoutOffer: "standard",
+        currentPeriodEnd: "2026-08-01T00:00:00.000Z",
+        planPresentations: [{
+          code: "launch_monthly",
+          displayName: "Pulse",
+          interval: "month",
+          recurringAmountUsdCents: 800,
+        }],
+        portalAvailable: true,
+        scheduledBillingEffectiveAt: null,
+        scheduledBillingPlanCode: null,
+        sponsoredFamilyAccess: false,
+      },
+    })).toMatchObject({
+      result: {
+        canUpgradeToEdge: true,
+        planPresentations: [{ recurringAmountUsdCents: 800 }],
+      },
+    });
+    expect(parseHostedRuntimeBillingPlanToolResponse({
+      action: "upgrade_to_edge",
+      result: {
+        currentBillingPlanCode: "launch_edge_monthly",
+        status: "unchanged",
+        targetBillingPlanCode: "launch_edge_monthly",
+      },
+    })).toMatchObject({ result: { status: "unchanged" } });
+    expect(parseHostedRuntimeBillingPlanToolResponse({
+      action: "upgrade_to_edge",
+      result: {
+        presentation: {
+          body: "Upgrade to Edge for $20.00 USD per month now.",
+          title: "Upgrade to Edge now?",
+        },
+        status: "confirmation_required",
+      },
+    })).toMatchObject({
+      result: {
+        presentation: { title: "Upgrade to Edge now?" },
+        status: "confirmation_required",
+      },
+    });
+    expect(parseHostedRuntimeBillingPlanToolResponse({
+      action: "upgrade_to_edge",
+      result: {
+        approvalUrl: "https://withmurph.ai/approve/billing",
+        expiresAt: "2026-07-10T16:15:00.000Z",
+        status: "approval_required",
+      },
+    })).toMatchObject({ result: { status: "approval_required" } });
+    expect(parseHostedRuntimeFamilyPlanToolResponse({
+      action: "remove_member",
+      result: {
+        presentation: {
+          body: "Remove this member without deleting their private data.",
+          title: "Remove this Family member?",
+        },
+        status: "confirmation_required",
+      },
+    })).toMatchObject({ result: { status: "confirmation_required" } });
+    expect(parseHostedRuntimeFamilyPlanToolResponse({
+      action: "remove_member",
+      result: { status: "approval_denied" },
+    })).toEqual({
+      action: "remove_member",
+      result: { status: "approval_denied" },
+    });
+  });
+
   it("classifies typed and retryable mailbox continuations", () => {
     expect(isHostedRuntimeMailboxContinuation({
       nextWakeAt: "2026-04-27T00:00:15.000Z",

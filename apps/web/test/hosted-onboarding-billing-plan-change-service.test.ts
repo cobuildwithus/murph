@@ -135,6 +135,7 @@ describe("upgradeHostedBillingPlan", () => {
 
   test("updates the existing Pulse subscription item to Edge and removes old metered items", async () => {
     await expect(upgradeHostedBillingPlan({
+      expectedCurrentPeriodEnd: new Date("2026-06-01T00:00:00.000Z"),
       memberId: "member_123",
       now: new Date("2026-05-06T00:00:00.000Z"),
       targetPlanCode: "launch_edge_monthly",
@@ -182,6 +183,22 @@ describe("upgradeHostedBillingPlan", () => {
     expect(mocks.signalHostedRuntimeManualWakeBestEffort).toHaveBeenCalledWith({
       userId: "member_123",
     });
+  });
+
+  test("rejects when the live billing period changed after approval", async () => {
+    await expect(upgradeHostedBillingPlan({
+      expectedCurrentPeriodEnd: new Date("2026-06-02T00:00:00.000Z"),
+      memberId: "member_123",
+      now: new Date("2026-05-06T00:00:00.000Z"),
+      targetPlanCode: "launch_edge_monthly",
+    })).rejects.toMatchObject({
+      code: "HOSTED_BILLING_APPROVED_PERIOD_CHANGED",
+      httpStatus: 409,
+    });
+
+    expect(mocks.stripe.subscriptions.update).not.toHaveBeenCalled();
+    expect(mocks.applyStripeSubscriptionUpdated).not.toHaveBeenCalled();
+    expect(mocks.prismaClient.$transaction).not.toHaveBeenCalled();
   });
 
   test("rejects quantity-bearing metered subscription items during Edge upgrade", async () => {
@@ -920,13 +937,16 @@ describe("upgradeHostedBillingPlan", () => {
 });
 
 function makeSubscription(input: {
+  currentPeriodEnd?: number;
   customer: string;
   items: Array<[id: string, priceId: string, quantity?: number | null]>;
   metadata: Record<string, string>;
   pendingUpdate?: boolean;
   status: Stripe.Subscription.Status;
 }): Stripe.Subscription {
+  // @ts-expect-error - the synthetic fixture only includes Stripe fields exercised here.
   return {
+    current_period_end: input.currentPeriodEnd ?? 1_780_272_000,
     customer: input.customer,
     id: "sub_123",
     items: {

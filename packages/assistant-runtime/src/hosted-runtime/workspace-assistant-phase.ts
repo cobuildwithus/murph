@@ -568,6 +568,9 @@ export async function runHostedWorkspaceAssistantPhase(
           userEnv: input.runtime.userEnv,
         }),
         deviceConnectProviders,
+        ...(input.runtime.platform.billingPlanToolPort
+          ? { billingPlanTool: input.runtime.platform.billingPlanToolPort }
+          : {}),
         ...(input.runtime.platform.familyPlanToolPort
           ? { familyPlanTool: input.runtime.platform.familyPlanToolPort }
           : {}),

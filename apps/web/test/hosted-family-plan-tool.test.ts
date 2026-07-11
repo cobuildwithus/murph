@@ -1,12 +1,23 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
+  consumeHostedActionApproval: vi.fn(),
   createHostedFamilyBillingCheckout: vi.fn(),
   ensureHostedAccountGroupForOwnerTx: vi.fn(),
   getPrisma: vi.fn(),
   issueHostedFamilyInviteFromOwnerTx: vi.fn(),
   readHostedFamilyAccessForMember: vi.fn(),
   readHostedFamilyOwnerSnapshotForMember: vi.fn(),
+  requestHostedActionApproval: vi.fn(),
+  removeHostedFamilyMemberTx: vi.fn(),
+  revokeHostedFamilyInviteTx: vi.fn(),
+  updateHostedFamilySeatCount: vi.fn(),
+  waitForHostedFamilyBilledSeatCount: vi.fn(),
+}));
+
+vi.mock("@/src/lib/action-approvals", () => ({
+  consumeHostedActionApproval: mocks.consumeHostedActionApproval,
+  requestHostedActionApproval: mocks.requestHostedActionApproval,
 }));
 
 vi.mock("@/src/lib/prisma", () => ({
@@ -19,6 +30,10 @@ vi.mock("@/src/lib/hosted-onboarding/family-plan", () => ({
   issueHostedFamilyInviteFromOwnerTx: mocks.issueHostedFamilyInviteFromOwnerTx,
   readHostedFamilyAccessForMember: mocks.readHostedFamilyAccessForMember,
   readHostedFamilyOwnerSnapshotForMember: mocks.readHostedFamilyOwnerSnapshotForMember,
+  removeHostedFamilyMemberTx: mocks.removeHostedFamilyMemberTx,
+  revokeHostedFamilyInviteTx: mocks.revokeHostedFamilyInviteTx,
+  updateHostedFamilySeatCount: mocks.updateHostedFamilySeatCount,
+  waitForHostedFamilyBilledSeatCount: mocks.waitForHostedFamilyBilledSeatCount,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/shared", () => ({
@@ -34,6 +49,8 @@ describe("hosted runtime Family plan tool", () => {
     vi.clearAllMocks();
     mocks.getPrisma.mockReturnValue({
       $transaction: vi.fn((callback) => callback({ label: "tx" })),
+      hostedAccountGroupInvite: { findFirst: vi.fn() },
+      hostedAccountGroupMembership: { findFirst: vi.fn() },
     });
     mocks.ensureHostedAccountGroupForOwnerTx.mockResolvedValue({
       billingStatus: "not_started",
@@ -59,6 +76,16 @@ describe("hosted runtime Family plan tool", () => {
       replyText: "Done. I prepared a Murph Family invite for Adam.",
     });
     mocks.readHostedFamilyOwnerSnapshotForMember.mockResolvedValue(null);
+    mocks.removeHostedFamilyMemberTx.mockResolvedValue(true);
+    mocks.revokeHostedFamilyInviteTx.mockResolvedValue(true);
+    mocks.waitForHostedFamilyBilledSeatCount.mockResolvedValue(true);
+    const approved = {
+      approvalGeneration: "a".repeat(64),
+      approvalId: `haa_${"b".repeat(32)}`,
+      status: "approved" as const,
+    };
+    mocks.requestHostedActionApproval.mockResolvedValue(approved);
+    mocks.consumeHostedActionApproval.mockResolvedValue(approved);
   });
 
   it("starts checkout for an owner without an active Family plan", async () => {
@@ -276,6 +303,7 @@ describe("hosted runtime Family plan tool", () => {
         preparedInvite: {
           acceptUrl: "https://local.withmurph.ai/family/accept/family_token",
           expiresAt: "2026-06-25T00:00:00.000Z",
+          inviteId: "hbagi_adam",
           status: "pending",
           targetLabel: "Adam",
           targetPhoneHint: null,
@@ -430,5 +458,450 @@ describe("hosted runtime Family plan tool", () => {
 
     expect(mocks.ensureHostedAccountGroupForOwnerTx).not.toHaveBeenCalled();
     expect(mocks.createHostedFamilyBillingCheckout).not.toHaveBeenCalled();
+  });
+
+  it("returns canonical Family seat pricing, total, and timing semantics", async () => {
+    mocks.readHostedFamilyOwnerSnapshotForMember.mockResolvedValueOnce({
+      billingActive: true,
+      billingStatus: "active",
+      groupId: "hbag_family",
+      invites: [],
+      members: [],
+      seats: {
+        active: 2,
+        billed: 3,
+        invited: 0,
+        max: 6,
+        min: 2,
+        remaining: 1,
+        used: 2,
+      },
+    });
+
+    await expect(handleHostedRuntimeFamilyPlanTool({
+      memberId: "member_owner",
+      request: { action: "read_status" },
+    })).resolves.toMatchObject({
+      action: "read_status",
+      result: {
+        pricing: {
+          currency: "USD",
+          currentRecurringAmountUsdCents: 2_100,
+          interval: "month",
+          recurringAmountUsdCentsPerSeat: 700,
+          seatDecreaseTiming: "immediate_without_proration",
+          seatIncreaseTiming: "immediate_with_proration_and_immediate_invoice",
+        },
+      },
+    });
+  });
+
+  it("previews canonical Family mutation terms without approval or mutation", async () => {
+    const snapshot = {
+      billingActive: true,
+      billingStatus: "active",
+      groupId: "hbag_family",
+      invites: [{
+        acceptUrl: "https://app.example/family/invite/accept",
+        expiresAt: new Date("2026-07-17T00:00:00.000Z"),
+        id: "invite_pending",
+        status: "pending",
+        targetLabel: "Family invitee",
+        targetPhoneHint: null,
+        telegramInviteUrl: null,
+      }],
+      members: [{
+        isOwner: false,
+        label: "Family member",
+        memberId: "member_sponsored",
+        role: "member",
+        status: "active",
+      }],
+      seats: {
+        active: 2,
+        billed: 3,
+        invited: 0,
+        max: 6,
+        min: 2,
+        remaining: 1,
+        used: 2,
+      },
+    };
+    mocks.readHostedFamilyOwnerSnapshotForMember.mockResolvedValue(snapshot);
+
+    await expect(handleHostedRuntimeFamilyPlanTool({
+      memberId: "member_owner",
+      request: {
+        action: "change_seat_count",
+        confirmed: false,
+        seatCount: 4,
+      },
+    })).resolves.toMatchObject({
+      action: "change_seat_count",
+      result: {
+        presentation: {
+          body: expect.stringContaining(
+            "3 seats ($21.00 USD per month) to 4 seats ($28.00 USD per month)",
+          ),
+        },
+        status: "confirmation_required",
+      },
+    });
+    await expect(handleHostedRuntimeFamilyPlanTool({
+      memberId: "member_owner",
+      request: {
+        action: "remove_member",
+        confirmed: false,
+        memberId: "member_sponsored",
+      },
+    })).resolves.toMatchObject({
+      result: {
+        presentation: {
+          body: expect.stringContaining(
+            "This does not delete their Murph account or private data.",
+          ),
+        },
+        status: "confirmation_required",
+      },
+    });
+    await expect(handleHostedRuntimeFamilyPlanTool({
+      memberId: "member_owner",
+      request: {
+        action: "cancel_invite",
+        confirmed: false,
+        inviteId: "invite_pending",
+      },
+    })).resolves.toMatchObject({
+      result: {
+        presentation: {
+          body: expect.stringContaining(
+            "Its acceptance link will stop working. Family seat billing is unchanged.",
+          ),
+        },
+        status: "confirmation_required",
+      },
+    });
+    expect(mocks.requestHostedActionApproval).not.toHaveBeenCalled();
+    expect(mocks.consumeHostedActionApproval).not.toHaveBeenCalled();
+    expect(mocks.updateHostedFamilySeatCount).not.toHaveBeenCalled();
+    expect(mocks.removeHostedFamilyMemberTx).not.toHaveBeenCalled();
+    expect(mocks.revokeHostedFamilyInviteTx).not.toHaveBeenCalled();
+  });
+
+  it("cancels owner-bound pending invites and reports retries as unchanged", async () => {
+    const prisma = mocks.getPrisma();
+    const ownerSnapshot = {
+      billingActive: true,
+      billingStatus: "active",
+      groupId: "hbag_family",
+      invites: [{
+        acceptUrl: "https://app.example/family/invite/accept",
+        expiresAt: new Date("2026-07-17T00:00:00.000Z"),
+        id: "invite_pending",
+        status: "pending",
+        targetLabel: "Family member",
+        targetPhoneHint: null,
+        telegramInviteUrl: null,
+      }],
+      members: [],
+      seats: {
+        active: 2,
+        billed: 3,
+        invited: 1,
+        max: 6,
+        min: 2,
+        remaining: 0,
+        used: 3,
+      },
+    };
+    mocks.readHostedFamilyOwnerSnapshotForMember.mockResolvedValue(ownerSnapshot);
+
+    await expect(handleHostedRuntimeFamilyPlanTool({
+      memberId: "member_owner",
+      request: {
+        action: "cancel_invite",
+        confirmed: true,
+        inviteId: "invite_pending",
+      },
+    })).resolves.toEqual({
+      action: "cancel_invite",
+      result: { inviteId: "invite_pending", status: "canceled" },
+    });
+    expect(mocks.consumeHostedActionApproval.mock.invocationCallOrder[0])
+      .toBeLessThan(mocks.revokeHostedFamilyInviteTx.mock.invocationCallOrder[0] ?? 0);
+
+    mocks.revokeHostedFamilyInviteTx.mockResolvedValueOnce(false);
+    mocks.readHostedFamilyOwnerSnapshotForMember.mockResolvedValueOnce({
+      ...ownerSnapshot,
+      invites: [],
+    });
+    prisma.hostedAccountGroupInvite.findFirst.mockResolvedValueOnce({
+      status: "revoked",
+    });
+    await expect(handleHostedRuntimeFamilyPlanTool({
+      memberId: "member_owner",
+      request: {
+        action: "cancel_invite",
+        confirmed: true,
+        inviteId: "invite_pending",
+      },
+    })).resolves.toMatchObject({ result: { status: "unchanged" } });
+  });
+
+  it("consumes exact approval before revoking the selected member sponsorship", async () => {
+    mocks.readHostedFamilyOwnerSnapshotForMember.mockResolvedValue({
+      billingActive: true,
+      billingStatus: "active",
+      groupId: "hbag_family",
+      invites: [],
+      members: [{
+        isOwner: false,
+        label: "Family member",
+        memberId: "member_sponsored",
+        role: "member",
+        status: "active",
+      }],
+      seats: {
+        active: 2,
+        billed: 3,
+        invited: 0,
+        max: 6,
+        min: 2,
+        remaining: 1,
+        used: 2,
+      },
+    });
+
+    await expect(handleHostedRuntimeFamilyPlanTool({
+      memberId: "member_owner",
+      request: {
+        action: "remove_member",
+        confirmed: true,
+        memberId: "member_sponsored",
+      },
+    })).resolves.toEqual({
+      action: "remove_member",
+      result: { memberId: "member_sponsored", status: "removed" },
+    });
+
+    expect(mocks.requestHostedActionApproval).toHaveBeenCalledWith(
+      expect.objectContaining({
+        memberId: "member_owner",
+        request: expect.objectContaining({
+          actionKind: "family.plan.remove-member.v1",
+        }),
+      }),
+    );
+    expect(mocks.consumeHostedActionApproval.mock.invocationCallOrder[0])
+      .toBeLessThan(
+        mocks.removeHostedFamilyMemberTx.mock.invocationCallOrder[0] ?? 0,
+      );
+    expect(mocks.removeHostedFamilyMemberTx).toHaveBeenCalledWith({
+      groupId: "hbag_family",
+      memberId: "member_sponsored",
+      ownerMemberId: "member_owner",
+      tx: { label: "tx" },
+    });
+  });
+
+  it("returns pending until the Family seat webhook reconciles", async () => {
+    const initial = {
+      billingActive: true,
+      billingStatus: "active",
+      groupId: "hbag_family",
+      invites: [],
+      members: [],
+      seats: {
+        active: 2,
+        billed: 3,
+        invited: 0,
+        max: 6,
+        min: 2,
+        remaining: 1,
+        used: 2,
+      },
+    };
+    mocks.readHostedFamilyOwnerSnapshotForMember.mockResolvedValue(initial);
+    mocks.updateHostedFamilySeatCount.mockResolvedValue(initial);
+    mocks.waitForHostedFamilyBilledSeatCount.mockResolvedValue(false);
+
+    await expect(handleHostedRuntimeFamilyPlanTool({
+      memberId: "member_owner",
+      request: {
+        action: "change_seat_count",
+        confirmed: true,
+        seatCount: 4,
+      },
+    })).resolves.toEqual({
+      action: "change_seat_count",
+      result: {
+        requestedSeatCount: 4,
+        seats: initial.seats,
+        status: "pending",
+      },
+    });
+    expect(mocks.updateHostedFamilySeatCount).toHaveBeenCalledWith(expect.objectContaining({
+      expectedCurrentSeatCount: 3,
+      targetSeatCount: 4,
+    }));
+  });
+
+  it("requires a fresh exact approval when Family seat state changes", async () => {
+    const source = {
+      billingActive: true,
+      billingStatus: "active",
+      groupId: "hbag_family",
+      invites: [],
+      members: [],
+      seats: {
+        active: 2,
+        billed: 3,
+        invited: 0,
+        max: 6,
+        min: 2,
+        remaining: 1,
+        used: 2,
+      },
+    };
+    mocks.requestHostedActionApproval.mockResolvedValue({
+      approvalId: `haa_${"c".repeat(32)}`,
+      approvalUrl: "https://withmurph.ai/approve/seats",
+      expiresAt: "2026-07-10T16:15:00.000Z",
+      status: "pending",
+    });
+    mocks.readHostedFamilyOwnerSnapshotForMember
+      .mockResolvedValueOnce(source)
+      .mockResolvedValueOnce({
+        ...source,
+        seats: { ...source.seats, billed: 2, remaining: 0 },
+      });
+
+    for (let index = 0; index < 2; index += 1) {
+      await expect(handleHostedRuntimeFamilyPlanTool({
+        memberId: "member_owner",
+        request: {
+          action: "change_seat_count",
+          confirmed: true,
+          returnContactKind: "telegram",
+          seatCount: 4,
+        },
+      })).resolves.toMatchObject({ result: { status: "approval_required" } });
+    }
+
+    const firstRequest = mocks.requestHostedActionApproval.mock.calls[0]?.[0].request;
+    const secondRequest = mocks.requestHostedActionApproval.mock.calls[1]?.[0].request;
+    expect(firstRequest.actionFingerprint).not.toBe(secondRequest.actionFingerprint);
+    expect(firstRequest.presentation.body).toContain("$21.00 USD per month");
+    expect(firstRequest.presentation.body).toContain("$28.00 USD per month");
+    expect(firstRequest.returnContactKind).toBe("telegram");
+    expect(mocks.consumeHostedActionApproval).not.toHaveBeenCalled();
+    expect(mocks.updateHostedFamilySeatCount).not.toHaveBeenCalled();
+  });
+
+  it("returns an already-applied seat count unchanged without replaying approval", async () => {
+    const snapshot = {
+      billingActive: true,
+      billingStatus: "active",
+      groupId: "hbag_family",
+      invites: [],
+      members: [],
+      seats: {
+        active: 2,
+        billed: 4,
+        invited: 0,
+        max: 6,
+        min: 2,
+        remaining: 2,
+        used: 2,
+      },
+    };
+    mocks.readHostedFamilyOwnerSnapshotForMember.mockResolvedValueOnce(snapshot);
+
+    await expect(handleHostedRuntimeFamilyPlanTool({
+      memberId: "member_owner",
+      request: {
+        action: "change_seat_count",
+        confirmed: true,
+        seatCount: 4,
+      },
+    })).resolves.toEqual({
+      action: "change_seat_count",
+      result: {
+        requestedSeatCount: 4,
+        seats: snapshot.seats,
+        status: "unchanged",
+      },
+    });
+    expect(mocks.requestHostedActionApproval).not.toHaveBeenCalled();
+    expect(mocks.updateHostedFamilySeatCount).not.toHaveBeenCalled();
+  });
+
+  it("reports an already removed owner-bound member as unchanged", async () => {
+    const prisma = mocks.getPrisma();
+    mocks.readHostedFamilyOwnerSnapshotForMember.mockResolvedValue({
+      billingActive: true,
+      billingStatus: "active",
+      groupId: "hbag_family",
+      invites: [],
+      members: [],
+      seats: {
+        active: 1,
+        billed: 2,
+        invited: 0,
+        max: 6,
+        min: 2,
+        remaining: 1,
+        used: 1,
+      },
+    });
+    mocks.removeHostedFamilyMemberTx.mockResolvedValueOnce(false);
+    prisma.hostedAccountGroupMembership.findFirst.mockResolvedValueOnce({
+      status: "removed",
+    });
+
+    await expect(handleHostedRuntimeFamilyPlanTool({
+      memberId: "member_owner",
+      request: {
+        action: "remove_member",
+        confirmed: true,
+        memberId: "member_removed",
+      },
+    })).resolves.toEqual({
+      action: "remove_member",
+      result: { memberId: "member_removed", status: "unchanged" },
+    });
+  });
+
+  it("fails closed for a member id outside the owner group", async () => {
+    const prisma = mocks.getPrisma();
+    mocks.readHostedFamilyOwnerSnapshotForMember.mockResolvedValue({
+      billingActive: true,
+      billingStatus: "active",
+      groupId: "hbag_family",
+      invites: [],
+      members: [],
+      seats: {
+        active: 1,
+        billed: 2,
+        invited: 0,
+        max: 6,
+        min: 2,
+        remaining: 1,
+        used: 1,
+      },
+    });
+    mocks.removeHostedFamilyMemberTx.mockResolvedValueOnce(false);
+    prisma.hostedAccountGroupMembership.findFirst.mockResolvedValueOnce(null);
+
+    await expect(handleHostedRuntimeFamilyPlanTool({
+      memberId: "member_owner",
+      request: {
+        action: "remove_member",
+        confirmed: true,
+        memberId: "member_unknown",
+      },
+    })).rejects.toMatchObject({
+      code: "HOSTED_FAMILY_MEMBER_NOT_FOUND",
+    });
   });
 });

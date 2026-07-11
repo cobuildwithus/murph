@@ -2690,12 +2690,20 @@ describe("hosted Family plan", () => {
       $transaction: ReturnType<typeof vi.fn>;
     };
     prisma.$transaction = vi.fn((callback) => callback(tx));
+    tx.hostedAccountGroupBillingRef.findUnique.mockResolvedValue(createBillingRefMock({
+      billedSeatCount: 2,
+      lastStripeEventCreatedAt: new Date("2026-06-18T12:00:00.000Z"),
+    }));
+    const stripeSubscriptionItemRetrieve = vi.fn().mockResolvedValue(
+      makeFamilyStripeSubscriptionItem({ quantity: 2 }),
+    );
     const stripeSubscriptionItemUpdate = vi.fn().mockResolvedValue({
       id: "si_family",
       quantity: 3,
     });
     runtimeMocks.requireHostedStripeApi.mockReturnValueOnce({
       subscriptionItems: {
+        retrieve: stripeSubscriptionItemRetrieve,
         update: stripeSubscriptionItemUpdate,
       },
     });
@@ -2717,9 +2725,63 @@ describe("hosted Family plan", () => {
         proration_behavior: "always_invoice",
         quantity: 3,
       },
+      {
+        idempotencyKey: expect.stringMatching(
+          /^hosted-family-seat-count:[a-f0-9]{64}$/u,
+        ),
+      },
     );
-    expect(stripeSubscriptionItemUpdate.mock.calls[0]).toHaveLength(2);
+    expect(stripeSubscriptionItemRetrieve).toHaveBeenCalledWith("si_family");
+    expect(stripeSubscriptionItemUpdate.mock.calls[0]).toHaveLength(3);
+    expect(tx.$queryRaw).toHaveBeenCalledTimes(1);
     expect(tx.hostedAccountGroupBillingRef.update).not.toHaveBeenCalled();
+  });
+
+  it("derives decrease proration from the locked live Stripe quantity", async () => {
+    const tx = createTxMock({
+      activeMembershipCount: 2,
+      billedSeatCount: 4,
+      pendingInviteCount: 0,
+    });
+    const prisma = tx as FamilyPlanTxMock & {
+      $transaction: ReturnType<typeof vi.fn>;
+    };
+    prisma.$transaction = vi.fn((callback) => callback(tx));
+    const stripeSubscriptionItemUpdate = vi.fn().mockImplementation(
+      async (_itemId, params) => makeFamilyStripeSubscriptionItem({
+        quantity: params.quantity,
+      }),
+    );
+    runtimeMocks.requireHostedStripeApi.mockReturnValueOnce({
+      subscriptionItems: {
+        retrieve: vi.fn().mockResolvedValue(
+          makeFamilyStripeSubscriptionItem({ quantity: 4 }),
+        ),
+        update: stripeSubscriptionItemUpdate,
+      },
+    });
+
+    await updateHostedFamilySeatCount({
+      expectedCurrentSeatCount: 4,
+      groupId: "hbag_family",
+      now: new Date("2026-06-18T12:00:00.000Z"),
+      ownerMemberId: "member_owner",
+      prisma: prisma as never,
+      targetSeatCount: 2,
+    });
+
+    expect(stripeSubscriptionItemUpdate).toHaveBeenCalledWith(
+      "si_family",
+      {
+        proration_behavior: "none",
+        quantity: 2,
+      },
+      {
+        idempotencyKey: expect.stringMatching(
+          /^hosted-family-seat-count:[a-f0-9]{64}$/u,
+        ),
+      },
+    );
   });
 
   it("does not reduce Family seats below active members and pending invites", async () => {
@@ -2745,6 +2807,175 @@ describe("hosted Family plan", () => {
 
     expect(runtimeMocks.requireHostedStripeApi).not.toHaveBeenCalled();
     expect(tx.hostedAccountGroupBillingRef.update).not.toHaveBeenCalled();
+  });
+
+  it("rejects a seat mutation when the approved source count is stale", async () => {
+    const tx = createTxMock({
+      activeMembershipCount: 2,
+      billedSeatCount: 3,
+      pendingInviteCount: 0,
+    });
+    const prisma = tx as FamilyPlanTxMock & {
+      $transaction: ReturnType<typeof vi.fn>;
+    };
+    prisma.$transaction = vi.fn((callback) => callback(tx));
+
+    await expect(updateHostedFamilySeatCount({
+      expectedCurrentSeatCount: 2,
+      groupId: "hbag_family",
+      now: new Date("2026-06-18T12:00:00.000Z"),
+      ownerMemberId: "member_owner",
+      prisma: prisma as never,
+      targetSeatCount: 4,
+    })).rejects.toMatchObject({
+      code: "HOSTED_FAMILY_SEAT_COUNT_CHANGED",
+    });
+
+    expect(runtimeMocks.requireHostedStripeApi).not.toHaveBeenCalled();
+  });
+
+  it("rejects a seat mutation when the live Stripe source count is stale", async () => {
+    const tx = createTxMock({
+      activeMembershipCount: 2,
+      billedSeatCount: 2,
+      pendingInviteCount: 0,
+    });
+    const prisma = tx as FamilyPlanTxMock & {
+      $transaction: ReturnType<typeof vi.fn>;
+    };
+    prisma.$transaction = vi.fn((callback) => callback(tx));
+    const update = vi.fn();
+    runtimeMocks.requireHostedStripeApi.mockReturnValueOnce({
+      subscriptionItems: {
+        retrieve: vi.fn().mockResolvedValue(
+          makeFamilyStripeSubscriptionItem({ quantity: 3 }),
+        ),
+        update,
+      },
+    });
+
+    await expect(updateHostedFamilySeatCount({
+      expectedCurrentSeatCount: 2,
+      groupId: "hbag_family",
+      now: new Date("2026-06-18T12:00:00.000Z"),
+      ownerMemberId: "member_owner",
+      prisma: prisma as never,
+      targetSeatCount: 4,
+    })).rejects.toMatchObject({
+      code: "HOSTED_FAMILY_SEAT_COUNT_CHANGED",
+      httpStatus: 409,
+    });
+
+    expect(update).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    {
+      label: "subscription",
+      stripeItem: makeFamilyStripeSubscriptionItem({ subscriptionId: "sub_other" }),
+    },
+    {
+      label: "price",
+      stripeItem: makeFamilyStripeSubscriptionItem({ priceId: "price_other" }),
+    },
+  ])("rejects a Family seat item with the wrong $label", async ({ stripeItem }) => {
+    const tx = createTxMock({
+      activeMembershipCount: 2,
+      billedSeatCount: 2,
+      pendingInviteCount: 0,
+    });
+    const prisma = tx as FamilyPlanTxMock & {
+      $transaction: ReturnType<typeof vi.fn>;
+    };
+    prisma.$transaction = vi.fn((callback) => callback(tx));
+    const update = vi.fn();
+    runtimeMocks.requireHostedStripeApi.mockReturnValueOnce({
+      subscriptionItems: {
+        retrieve: vi.fn().mockResolvedValue(stripeItem),
+        update,
+      },
+    });
+
+    await expect(updateHostedFamilySeatCount({
+      expectedCurrentSeatCount: 2,
+      groupId: "hbag_family",
+      now: new Date("2026-06-18T12:00:00.000Z"),
+      ownerMemberId: "member_owner",
+      prisma: prisma as never,
+      targetSeatCount: 3,
+    })).rejects.toMatchObject({
+      code: "HOSTED_FAMILY_SUBSCRIPTION_ITEM_MISMATCH",
+      httpStatus: 409,
+    });
+
+    expect(update).not.toHaveBeenCalled();
+  });
+
+  it("serializes concurrent seat changes under the member Stripe mutation lock", async () => {
+    const tx = createTxMock({
+      activeMembershipCount: 2,
+      billedSeatCount: 2,
+      pendingInviteCount: 0,
+    });
+    const prisma = tx as FamilyPlanTxMock & {
+      $transaction: ReturnType<typeof vi.fn>;
+    };
+    let transactionTail = Promise.resolve();
+    prisma.$transaction = vi.fn(async (callback) => {
+      const previous = transactionTail;
+      let release = (): void => undefined;
+      transactionTail = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      await previous;
+      try {
+        return await callback(tx);
+      } finally {
+        release();
+      }
+    });
+    let liveSeatCount = 2;
+    const update = vi.fn().mockImplementation(async (_itemId, params) => {
+      liveSeatCount = params.quantity;
+      return makeFamilyStripeSubscriptionItem({ quantity: liveSeatCount });
+    });
+    runtimeMocks.requireHostedStripeApi.mockReturnValue({
+      subscriptionItems: {
+        retrieve: vi.fn().mockImplementation(async () =>
+          makeFamilyStripeSubscriptionItem({ quantity: liveSeatCount })
+        ),
+        update,
+      },
+    });
+
+    const outcomes = await Promise.allSettled([
+      updateHostedFamilySeatCount({
+        expectedCurrentSeatCount: 2,
+        groupId: "hbag_family",
+        now: new Date("2026-06-18T12:00:00.000Z"),
+        ownerMemberId: "member_owner",
+        prisma: prisma as never,
+        targetSeatCount: 3,
+      }),
+      updateHostedFamilySeatCount({
+        expectedCurrentSeatCount: 2,
+        groupId: "hbag_family",
+        now: new Date("2026-06-18T12:00:00.000Z"),
+        ownerMemberId: "member_owner",
+        prisma: prisma as never,
+        targetSeatCount: 4,
+      }),
+    ]);
+
+    expect(outcomes[0]).toMatchObject({ status: "fulfilled" });
+    expect(outcomes[1]).toMatchObject({
+      reason: expect.objectContaining({
+        code: "HOSTED_FAMILY_SEAT_COUNT_CHANGED",
+      }),
+      status: "rejected",
+    });
+    expect(update).toHaveBeenCalledTimes(1);
+    expect(tx.$queryRaw).toHaveBeenCalledTimes(2);
   });
 
   it("does not activate a group from non-family subscription metadata", async () => {
@@ -2795,6 +3026,7 @@ function createBillingRefMock(overrides: Partial<{
   stripeCustomerIdEncrypted: string | null;
   stripeSubscriptionIdEncrypted: string | null;
   stripeSubscriptionItemIdEncrypted: string | null;
+  updatedAt: Date;
 }> = {}) {
   const group = overrides.group ?? {
     billingStatus: HostedBillingStatus.active,
@@ -2846,6 +3078,7 @@ function createBillingRefMock(overrides: Partial<{
       "stripeSubscriptionItemIdEncrypted",
       "encrypted:si_family",
     ),
+    updatedAt: overrides.updatedAt ?? new Date("2026-06-18T12:00:00.000Z"),
   };
 }
 
@@ -2949,6 +3182,7 @@ function createTxMock(input: {
         stripeCustomerIdEncrypted: create.stripeCustomerIdEncrypted,
         stripeSubscriptionItemIdEncrypted: create.stripeSubscriptionItemIdEncrypted,
         stripeSubscriptionIdEncrypted: create.stripeSubscriptionIdEncrypted,
+        updatedAt: new Date("2026-06-18T12:00:00.000Z"),
       })),
     },
     hostedAccountGroupInvite: {
@@ -3059,6 +3293,22 @@ function makeFamilyStripeCheckoutSession(input: {
   };
 
   return session as Stripe.Checkout.Session;
+}
+
+function makeFamilyStripeSubscriptionItem(input: {
+  priceId?: string;
+  quantity?: number;
+  subscriptionId?: string;
+} = {}): Stripe.SubscriptionItem {
+  return {
+    id: "si_family",
+    object: "subscription_item",
+    price: {
+      id: input.priceId ?? "price_family",
+    },
+    quantity: input.quantity ?? 2,
+    subscription: input.subscriptionId ?? "sub_family",
+  } as Stripe.SubscriptionItem;
 }
 
 function makeFamilyStripeSubscription(input: {

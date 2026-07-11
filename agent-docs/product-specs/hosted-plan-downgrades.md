@@ -28,6 +28,60 @@ scheduled switch:
 The app-owned Edge-to-Pulse path is intentionally narrow; arbitrary plan
 transitions still stay out of scope.
 
+## Conversation Billing Control
+
+The hosted assistant exposes one typed, member-bound billing operation backed
+by the same web-owned services as Settings. It can read direct-plan status,
+start paid Pulse from an eligible Pulse Trial, upgrade paid Pulse to Edge,
+schedule Edge-to-Pulse at renewal, and open Stripe Customer Portal.
+
+`read_status` projects only the local Stripe-reconciled read model, canonical
+configured plan presentations, and eligibility booleans from the existing
+billing predicates. It never exposes Stripe customer, subscription, price, or
+schedule ids. Plan presentations are filtered to configured plans so the
+assistant cannot offer an unavailable action. Before a money mutation, the
+assistant calls the selected action with `confirmed: false`; the web owner
+returns the exact-action presentation without approval or mutation. The
+assistant presents those canonical terms and obtains explicit
+current-conversation confirmation of price, monthly cadence, and timing. The
+identical signed web request then requires literal `confirmed: true`, but that
+model-supplied value is only a prompt/schema precondition.
+
+For every money mutation, the web owner reconstructs an exact-action request
+from the current canonical read model and configured price registry. Its
+member-bound fingerprint includes currency, source/target plan, recurring
+price and cadence, effective timing, and whether Stripe prorates or immediately
+invoices. The existing sensitive-action approval owner provides the human
+approval page, 15-minute TTL, denial/expiry state, approval generation, and
+single-consumer replay fence. A pending request returns `approval_required`
+with the narrow approval URL and performs no billing mutation. A later
+identical call consumes the approved generation before entering the canonical
+billing service. Changed terms derive a different challenge, while an
+already-applied state returns `unchanged` without replaying approval.
+An `approval_expired` result can also represent a losing concurrent consumer,
+so the assistant re-reads canonical status and treats the outcome as uncertain
+unless current state proves whether the mutation occurred.
+
+Upgrade and renewal-switch approvals bind the reconciled current-period end.
+After retrieving the live Stripe subscription, the canonical service requires
+its period end to match that approved boundary to the exact Unix second before
+any Stripe or local mutation; a rollover requires fresh terms and approval.
+
+The existing services remain the only mutation owners. An Edge upgrade is
+immediate, uses Stripe proration, and may create an immediate prorated invoice;
+the Pulse switch is scheduled for renewal. Responses distinguish applied,
+scheduled, unchanged, pending webhook/payment reconciliation, and the smallest
+Stripe browser handoff. No billing-specific approval state is persisted;
+Stripe webhooks remain the durable reconciliation boundary.
+
+Deploy the additive control plane in this order: Cloudflare/runner consumer,
+then web producer, with the two deploys kept in one short compatibility window.
+The new consumer accepts old Family status responses without optional action
+ids; old runtimes do not expose the new billing operation. After web deploy,
+verify signed `read_status`, one no-op billing request, and Stripe webhook
+convergence before exercising a live plan change. Payment-method and payment
+confirmation work remains in Stripe-hosted browser UI.
+
 ## Edge Assistant Model Choice
 
 The current paid Edge plan also unlocks an explicit assistant-model choice in

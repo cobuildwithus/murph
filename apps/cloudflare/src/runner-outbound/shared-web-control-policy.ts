@@ -17,6 +17,7 @@ import {
   HOSTED_RUNTIME_ACTION_APPROVAL_CONSUME_PATH,
   HOSTED_RUNTIME_ACTION_APPROVAL_REQUEST_PATH,
   HOSTED_RUNTIME_BROWSER_VAULT_REPLICA_PUBLISH_PATH,
+  HOSTED_RUNTIME_BILLING_PLAN_TOOL_PATH,
   HOSTED_RUNTIME_CODEX_AUTH_PATH,
   HOSTED_RUNTIME_FAMILY_PLAN_TOOL_PATH,
   HOSTED_RUNTIME_GROUP_TOOL_PATH,
@@ -54,6 +55,7 @@ export type HostedRunnerWebControlOperation =
   | "action_approval_request"
   | "assistant_runtime_issue_export"
   | "browser_vault_replica_publish"
+  | "billing_plan_tool"
   | "codex_auth_update"
   | "computer_use"
   | "connected_apps"
@@ -98,6 +100,7 @@ const HOSTED_RUNNER_WEB_CONTROL_POST_POLICY = new Map<string, HostedRunnerWebCon
   [HOSTED_RUNTIME_LATENCY_TRACE_PATH, "runtime_latency_trace"],
   [HOSTED_RUNTIME_BROWSER_VAULT_REPLICA_PUBLISH_PATH, "browser_vault_replica_publish"],
   [HOSTED_RUNTIME_CODEX_AUTH_PATH, "codex_auth_update"],
+  [HOSTED_RUNTIME_BILLING_PLAN_TOOL_PATH, "billing_plan_tool"],
   [HOSTED_RUNTIME_FAMILY_PLAN_TOOL_PATH, "family_plan_tool"],
   [HOSTED_RUNTIME_GROUP_TOOL_PATH, "group_tool"],
   [HOSTED_RUNTIME_NEWSLETTER_TOOL_PATH, "newsletter_tool"],

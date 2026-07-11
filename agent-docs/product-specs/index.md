@@ -7,8 +7,8 @@ Last verified: 2026-07-10
 | `agent-docs/product-specs/repo.md` | Canonical repository posture and success criteria for keeping the repo current-state only. | Active |
 | `agent-docs/product-specs/pulse-trial-checkout-offer.md` | Implemented Pulse Trial checkout-offer architecture over the existing hosted billing and AI usage allowance system. | Active |
 | `agent-docs/product-specs/pulse-trial-start-paid-pulse.md` | Implemented exhausted Pulse Trial conversion to paid Pulse through Stripe trial-end billing. | Active |
-| `agent-docs/product-specs/hosted-plan-downgrades.md` | Edge-to-Pulse renewal switches plus the billing-gated Edge assistant-model choice, downgrade behavior, and deployment compatibility contract. | Active |
-| `agent-docs/product-specs/hosted-family-plan.md` | Hosted Family plan MVP: fixed four-person sponsored access, private member accounts, chat-first invites, and privacy boundaries. | Active |
+| `agent-docs/product-specs/hosted-plan-downgrades.md` | Conversation-first direct billing controls with canonical financial terms and exact-action approval, Edge-to-Pulse renewal switches, assistant-model gating, and deployment compatibility. | Active |
+| `agent-docs/product-specs/hosted-family-plan.md` | Hosted Family sponsored access, private member accounts, chat-first owner management, canonical seat terms, exact-action approval, and privacy boundaries. | Active |
 | `agent-docs/product-specs/health-commons.md` | Health Commons page graph, catalog, versioning, future aggregate outcome summaries, and artifact-storage product boundary. | Active |
 | `agent-docs/product-specs/protocol-summary-copy.md` | Source-of-truth copy rules for Health Commons protocol `summary:` fields shown on `/experiments` cards. | Active |
 | `agent-docs/product-specs/experiment-onboarding.md` | Chat-based experiment start, protocol onboarding contracts, assistant setup behavior, and private run handoff. | Active |

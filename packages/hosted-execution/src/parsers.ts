@@ -150,6 +150,8 @@ export {
   parseHostedRuntimeNewsletterToolResponse,
   parseHostedRuntimeFamilyPlanToolRequest,
   parseHostedRuntimeFamilyPlanToolResponse,
+  parseHostedRuntimeBillingPlanToolRequest,
+  parseHostedRuntimeBillingPlanToolResponse,
   parseHostedRuntimeProductFeedbackRecordRequest,
   parseHostedRuntimeProductFeedbackRecordResponse,
   parseHostedRuntimeWebStatusResponse,

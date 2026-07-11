@@ -2,6 +2,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { HOSTED_CONNECTED_APPS_PATH } from "@murphai/hosted-execution/connected-apps";
 import { HOSTED_PHONE_CALLS_PATH } from "@murphai/hosted-execution/phone-calls";
+import { HOSTED_RUNTIME_BILLING_PLAN_TOOL_PATH } from
+  "@murphai/hosted-execution/routes";
 
 const mocks = vi.hoisted(() => ({
   fetchHostedExecutionWebControlPlaneResponse: vi.fn(),
@@ -31,6 +33,20 @@ beforeEach(() => {
 });
 
 describe("connected-app web-control policy", () => {
+  it("allows only POST for the bounded billing plan tool route", () => {
+    expect(readHostedRunnerWebControlPolicy({
+      method: "POST",
+      path: HOSTED_RUNTIME_BILLING_PLAN_TOOL_PATH,
+    })).toEqual({
+      allowed: true,
+      operation: "billing_plan_tool",
+    });
+    expect(readHostedRunnerWebControlPolicy({
+      method: "GET",
+      path: HOSTED_RUNTIME_BILLING_PLAN_TOOL_PATH,
+    }).allowed).toBe(false);
+  });
+
   it("allows only the bounded POST route", () => {
     expect(readHostedRunnerWebControlPolicy({
       method: "POST",

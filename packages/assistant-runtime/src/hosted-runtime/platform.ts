@@ -20,6 +20,8 @@ import type {
   HostedRuntimeLogRequest,
   HostedRuntimeLogResponse,
   HostedRuntimeIssueExportResponse,
+  HostedRuntimeBillingPlanToolRequest,
+  HostedRuntimeBillingPlanToolResponse,
   HostedRuntimeFamilyPlanToolRequest,
   HostedRuntimeFamilyPlanToolResponse,
   HostedRuntimeGroupToolRequest,
@@ -348,6 +350,12 @@ export interface HostedRuntimeFamilyPlanToolPort {
   ): Promise<HostedRuntimeFamilyPlanToolResponse>;
 }
 
+export interface HostedRuntimeBillingPlanToolPort {
+  request(
+    request: HostedRuntimeBillingPlanToolRequest,
+  ): Promise<HostedRuntimeBillingPlanToolResponse>;
+}
+
 export interface HostedRuntimeGroupToolPort {
   request(
     request: HostedRuntimeGroupToolRequest,
@@ -488,6 +496,7 @@ export interface HostedRuntimePlatform {
   actionApprovalPort?: HostedRuntimeActionApprovalPort | null;
   artifactStore: HostedRuntimeArtifactStore;
   browserVaultReplicaPort?: HostedRuntimeBrowserVaultReplicaPort | null;
+  billingPlanToolPort?: HostedRuntimeBillingPlanToolPort | null;
   codexAuthPort?: HostedRuntimeCodexAuthPort | null;
   connectedApps?: AssistantConnectedAppsPort | null;
   deviceSyncPort?: HostedRuntimeDeviceSyncPort | null;
