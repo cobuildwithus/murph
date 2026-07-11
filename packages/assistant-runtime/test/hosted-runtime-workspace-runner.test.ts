@@ -2801,7 +2801,6 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
 
       assert.deepEqual(checkpointRequests.map((request) => request.reason), [
         "canonical_runtime_commit",
-        "canonical_runtime_commit",
       ]);
       assert.equal(artifactPutCalls.length >= 3, true);
       assert.equal(
@@ -2815,15 +2814,9 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         "number",
       );
       assert.equal(
-        checkpointRequests[1]?.redactedStatus
+        checkpointRequests[0]?.redactedStatus
           ?.hostedMailboxConversationImportedSeq,
         "1",
-      );
-      assert.equal(
-        checkpointRequests[1]?.redactedStatus
-          ?.hostedCanonicalWriteReceiptLogSha256,
-        checkpointRequests[0]?.redactedStatus
-          ?.hostedCanonicalWriteReceiptLogSha256,
       );
     } finally {
       await rm(vaultRoot, {
