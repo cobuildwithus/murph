@@ -333,7 +333,16 @@ export function resolveAssistantVaultFileSendTargetFingerprint(input: {
     return null
   }
   return hashAssistantOutboxTargetFingerprint(
-    buildAssistantOutboxRawTargetIdentity(persistedTarget),
+    buildAssistantOutboxRawTargetIdentity({
+      actorId: null,
+      bindingDelivery: persistedTarget.bindingDelivery,
+      channel: persistedTarget.channel,
+      deliverySource: null,
+      explicitTarget: persistedTarget.explicitTarget,
+      identityId: null,
+      replyToMessageId: null,
+      threadId: null,
+    }),
   )
 }
 

@@ -1,11 +1,15 @@
 export {
   bindHostedActiveLinqHomeChat,
   bindHostedActiveTelegramMember,
+  readHostedLinqFirstContactMemberState,
   readHostedJunctionDeviceSyncReplayDrainStatus,
   seedHostedJunctionDeviceSyncConnection,
   seedHostedJunctionDeviceSyncReplay,
   seedHostedActiveLinqMember,
+  seedHostedFamilySponsoredLinqMember,
+  seedHostedLinqFirstContactFallbackLines,
   seedHostedActiveMember,
+  type HostedLinqFirstContactMemberState,
   type HostedJunctionDeviceSyncConnectionSeedInput,
   type HostedJunctionDeviceSyncConnectionSeedResult,
   type HostedJunctionDeviceSyncReplayDrainStatus,
@@ -39,6 +43,14 @@ const hostedSignalRuntimeModuleSpecifier = new URL(
   "../../src/lib/hosted-orchestration/signal-runtime.ts",
   import.meta.url,
 ).href;
+const hostedComputerUseServiceModuleSpecifier = new URL(
+  "../../src/lib/computer-use/service.ts",
+  import.meta.url,
+).href;
+const hostedComputerUseStoreModuleSpecifier = new URL(
+  "../../src/lib/computer-use/store.ts",
+  import.meta.url,
+).href;
 const hostedTestingHostOnlyEnv = {
   DOCKER_BUILDKIT: process.env.DOCKER_BUILDKIT,
   DOCKER_CONFIG: process.env.DOCKER_CONFIG,
@@ -48,6 +60,9 @@ const hostedTestingHostOnlyEnv = {
 type HostedTestPrismaClient =
   & HostedTestPrismaFactoryClient
   & HostedActionApprovalForTestPrismaClient
+  & HostedPhoneCallForTestPrismaClient
+  & HostedUsageLimitForTestPrismaClient
+  & HostedComputerUseForTestPrismaClient
   & HostedWorkspaceSeedForTestPrismaClient
   & HostedUsageDiagnosticsForTestPrismaClient;
 
@@ -110,6 +125,162 @@ export interface HostedSensitiveActionChallengeForTest {
 
 interface HostedBatchPayloadForTest {
   count: number;
+}
+
+interface HostedPhoneCallForTestPrismaClient {
+  hostedPhoneCall: {
+    create(args: unknown): Promise<HostedPhoneCallForTest>;
+    findUnique(args: unknown): Promise<HostedPhoneCallForTest | null>;
+  };
+}
+
+export interface HostedPhoneCallForTest {
+  analyzedAt: Date | null;
+  endedAt: Date | null;
+  id: string;
+  memberId: string;
+  providerCallId: string | null;
+  requestKey: string;
+  resultJson: unknown;
+  status: "calling" | "completed" | "ended" | "failed" | "needs_user" | "starting";
+}
+
+interface HostedUsageLimitForTestPrismaClient {
+  hostedAiUsagePeriod: {
+    findUnique(args: unknown): Promise<HostedAiUsagePeriodForTest | null>;
+    upsert(args: unknown): Promise<HostedAiUsagePeriodForTest>;
+  };
+  hostedLinqDelivery: {
+    findMany(args: unknown): Promise<HostedLinqDeliveryForTest[]>;
+  };
+}
+
+export interface HostedAiUsagePeriodForTest {
+  blockedAt: Date | null;
+  limitNoticeSentAt: Date | null;
+  limitUsdMicros: bigint;
+  memberId: string;
+  periodEnd: Date;
+  periodStart: Date;
+  spentUsdMicros: bigint;
+}
+
+export interface HostedLinqDeliveryForTest {
+  acceptedAt: Date | null;
+  attemptedAt: Date;
+  failedAt: Date | null;
+  failureCode: string | null;
+  idempotencyKey: string | null;
+  sourceRef: string | null;
+  status: string;
+  template: string | null;
+}
+
+interface HostedComputerUseForTestPrismaClient {
+  hostedComputerHandoff: {
+    findFirst(args: unknown): Promise<HostedComputerHandoffForTestPrismaRow | null>;
+  };
+  hostedComputerRun: {
+    create(args: unknown): Promise<HostedComputerRunForTestPrismaRow>;
+    findUnique(args: unknown): Promise<HostedComputerRunForTestPrismaRow | null>;
+  };
+}
+
+interface HostedComputerRunForTestPrismaRow {
+  awaitingReason: string | null;
+  completedAt: Date | null;
+  expiresAt: Date;
+  id: string;
+  kernelSessionId: string | null;
+  memberId: string;
+  metadataJson: unknown;
+  pausedAt: Date | null;
+  pendingHandoffId: string | null;
+  status: string;
+  updatedAt: Date;
+}
+
+interface HostedComputerHandoffForTestPrismaRow {
+  completedAt: Date | null;
+  expiresAt: Date;
+  id: string;
+  memberId: string;
+  purpose: string;
+  returnContactKind: string | null;
+  runId: string;
+  status: string;
+  suggestedReply: string | null;
+  tokenHash: string;
+  updatedAt: Date;
+}
+
+interface HostedComputerUseStoreForTest {
+  claimHandoffForCompletion(input: {
+    handoffId: string;
+    memberId: string;
+  }): Promise<HostedComputerHandoffForTestPrismaRow | null>;
+  completeHandoff(input: {
+    expectedUpdatedAt?: Date;
+    handoffId: string;
+    now: Date;
+  }): Promise<HostedComputerHandoffForTestPrismaRow>;
+  releaseHandoffClaim(input: {
+    expectedUpdatedAt?: Date;
+    handoffId: string;
+  }): Promise<void>;
+}
+
+interface HostedComputerUseStoreModule {
+  PrismaComputerUseStore: new (prisma: unknown) => HostedComputerUseStoreForTest;
+}
+
+interface HostedComputerUseServiceForTest {
+  completeHandoff(input: {
+    memberId: string;
+    token: string;
+  }): Promise<{
+    returnContactKind: string | null;
+    status: string;
+    suggestedReply: string | null;
+  }>;
+}
+
+interface HostedComputerUseServiceModule {
+  ComputerUseService: new (input: {
+    env: NodeJS.ProcessEnv;
+    store: HostedComputerUseStoreForTest;
+  }) => HostedComputerUseServiceForTest;
+}
+
+export interface HostedComputerRunForTest {
+  awaitingReason: string | null;
+  checkpointContext: {
+    conversationId: string | null;
+    recipientKey: string | null;
+  } | null;
+  completedAt: string | null;
+  expiresAt: string;
+  id: string;
+  kernelSessionId: string | null;
+  memberId: string;
+  pausedAt: string | null;
+  pendingHandoffId: string | null;
+  status: string;
+  updatedAt: string;
+}
+
+export interface HostedComputerHandoffForTest {
+  completedAt: string | null;
+  expiresAt: string;
+  id: string;
+  memberId: string;
+  purpose: string;
+  returnContactKind: string | null;
+  runId: string;
+  status: string;
+  suggestedReply: string | null;
+  tokenHash: string;
+  updatedAt: string;
 }
 
 interface HostedTestPrismaModule {
@@ -378,6 +549,43 @@ export async function seedHostedWorkspaceCheckpointForTest(input: {
   });
 }
 
+export async function readLatestHostedSensitiveActionChallengeForTest(input: {
+  environment?: NodeJS.ProcessEnv;
+  memberId: string;
+}): Promise<HostedSensitiveActionChallengeForTest | null> {
+  return withHostedWebTestkitDeps(input.environment, async (deps) =>
+    await deps.prisma.hostedSensitiveActionChallenge.findFirst({
+      orderBy: {
+        createdAt: "desc",
+      },
+      where: {
+        memberId: input.memberId,
+      },
+    })
+  );
+}
+
+export async function approveHostedSensitiveActionChallengeForTest(input: {
+  environment?: NodeJS.ProcessEnv;
+  tokenHash: string;
+}): Promise<HostedSensitiveActionChallengeForTest> {
+  return withHostedWebTestkitDeps(input.environment, async (deps) => {
+    const decidedAt = new Date();
+    return await deps.prisma.hostedSensitiveActionChallenge.update({
+      data: {
+        approvalStatus: "approved",
+        consumedAt: null,
+        consumedBy: null,
+        decidedAt,
+        expiresAt: new Date(decidedAt.getTime() + 15 * 60 * 1_000),
+      },
+      where: {
+        tokenHash: input.tokenHash,
+      },
+    });
+  });
+}
+
 export async function listHostedAiUsageForTest(input: {
   environment?: NodeJS.ProcessEnv;
   limit?: number;
@@ -418,6 +626,250 @@ export async function listHostedAiUsageForTest(input: {
       totalTokens: row.totalTokens,
       triggerKind: row.triggerKind,
     }));
+  });
+}
+
+export async function seedHostedPhoneCallForTest(input: {
+  brief: {
+    allowTransferToUser?: boolean;
+    callerName?: string;
+    goal: string;
+    instructions?: string[];
+    shareableFacts?: Record<string, string>;
+    successCriteria: string;
+    timeZone: string;
+    to: {
+      label?: string;
+      phoneNumber: string;
+    };
+  };
+  environment?: NodeJS.ProcessEnv;
+  id: string;
+  memberId: string;
+  providerCallId: string;
+  requestKey: string;
+}): Promise<HostedPhoneCallForTest> {
+  return withHostedWebTestkitDeps(input.environment, async (deps) =>
+    await deps.prisma.hostedPhoneCall.create({
+      data: {
+        briefJson: {
+          allowTransferToUser: input.brief.allowTransferToUser ?? false,
+          goal: input.brief.goal,
+          instructions: input.brief.instructions ?? [],
+          shareableFacts: input.brief.shareableFacts ?? {},
+          successCriteria: input.brief.successCriteria,
+          timeZone: input.brief.timeZone,
+          to: {
+            ...input.brief.to,
+          },
+          ...(input.brief.callerName
+            ? { callerName: input.brief.callerName }
+            : {}),
+        },
+        id: input.id,
+        memberId: input.memberId,
+        provider: "retell",
+        providerCallId: input.providerCallId,
+        requestKey: input.requestKey,
+        status: "calling",
+      },
+    })
+  );
+}
+
+export async function readHostedPhoneCallForTest(input: {
+  environment?: NodeJS.ProcessEnv;
+  id: string;
+}): Promise<HostedPhoneCallForTest | null> {
+  return withHostedWebTestkitDeps(input.environment, async (deps) =>
+    await deps.prisma.hostedPhoneCall.findUnique({
+      where: {
+        id: input.id,
+      },
+    })
+  );
+}
+
+export async function seedHostedAiUsageLimitPeriodForTest(input: {
+  environment?: NodeJS.ProcessEnv;
+  memberId: string;
+  periodEnd: Date;
+  periodStart: Date;
+}): Promise<HostedAiUsagePeriodForTest> {
+  const limitUsdMicros = 10_000_000n;
+  return withHostedWebTestkitDeps(input.environment, async (deps) =>
+    await deps.prisma.hostedAiUsagePeriod.upsert({
+      create: {
+        billingPlanCode: "launch_monthly",
+        blockedAt: input.periodStart,
+        lastUsageAt: input.periodStart,
+        limitNoticeSentAt: null,
+        limitUsdMicros,
+        memberId: input.memberId,
+        periodEnd: input.periodEnd,
+        periodStart: input.periodStart,
+        spentUsdMicros: limitUsdMicros,
+      },
+      update: {
+        billingPlanCode: "launch_monthly",
+        blockedAt: input.periodStart,
+        lastUsageAt: input.periodStart,
+        limitNoticeSentAt: null,
+        limitUsdMicros,
+        periodEnd: input.periodEnd,
+        spentUsdMicros: limitUsdMicros,
+      },
+      where: {
+        memberId_periodStart: {
+          memberId: input.memberId,
+          periodStart: input.periodStart,
+        },
+      },
+    })
+  );
+}
+
+export async function readHostedAiUsageLimitPeriodForTest(input: {
+  environment?: NodeJS.ProcessEnv;
+  memberId: string;
+  periodStart: Date;
+}): Promise<HostedAiUsagePeriodForTest | null> {
+  return withHostedWebTestkitDeps(input.environment, async (deps) =>
+    await deps.prisma.hostedAiUsagePeriod.findUnique({
+      where: {
+        memberId_periodStart: {
+          memberId: input.memberId,
+          periodStart: input.periodStart,
+        },
+      },
+    })
+  );
+}
+
+export async function listHostedLinqDeliveriesForTest(input: {
+  environment?: NodeJS.ProcessEnv;
+  template: string;
+}): Promise<HostedLinqDeliveryForTest[]> {
+  return withHostedWebTestkitDeps(input.environment, async (deps) =>
+    await deps.prisma.hostedLinqDelivery.findMany({
+      orderBy: {
+        attemptedAt: "asc",
+      },
+      where: {
+        template: input.template,
+      },
+    })
+  );
+}
+
+export async function seedHostedComputerRunForTest(input: {
+  environment?: NodeJS.ProcessEnv;
+  expiresAt?: Date;
+  kernelSessionId?: string;
+  memberId: string;
+  runId: string;
+}): Promise<HostedComputerRunForTest> {
+  return withHostedWebTestkitDeps(input.environment, async (deps) => {
+    const run = await deps.prisma.hostedComputerRun.create({
+      data: {
+        expiresAt: input.expiresAt ?? new Date(Date.now() + 60 * 60 * 1_000),
+        id: input.runId,
+        kernelProfileName: `hosted-local-${input.runId}`,
+        kernelSessionId: input.kernelSessionId ?? `hosted-local-${input.runId}`,
+        memberId: input.memberId,
+        status: "running",
+      },
+    });
+    return mapHostedComputerRunForTest(run);
+  });
+}
+
+export async function readHostedComputerRunHandoffForTest(input: {
+  environment?: NodeJS.ProcessEnv;
+  runId: string;
+}): Promise<{
+  handoff: HostedComputerHandoffForTest | null;
+  run: HostedComputerRunForTest | null;
+}> {
+  return withHostedWebTestkitDeps(input.environment, async (deps) => {
+    const [run, handoff] = await Promise.all([
+      deps.prisma.hostedComputerRun.findUnique({
+        where: { id: input.runId },
+      }),
+      deps.prisma.hostedComputerHandoff.findFirst({
+        orderBy: { updatedAt: "desc" },
+        where: { runId: input.runId },
+      }),
+    ]);
+    return {
+      handoff: handoff ? mapHostedComputerHandoffForTest(handoff) : null,
+      run: run ? mapHostedComputerRunForTest(run) : null,
+    };
+  });
+}
+
+export async function proveHostedComputerHandoffCompletionCasForTest(input: {
+  environment?: NodeJS.ProcessEnv;
+  handoffId: string;
+  memberId: string;
+  staleUpdatedAt: Date;
+}): Promise<{
+  claimedUpdatedAt: string;
+  staleCompletionRejected: true;
+}> {
+  return withHostedWebTestkitDeps(input.environment, async (deps) => {
+    const store = await createHostedComputerUseStoreForTest(deps.prisma);
+    const claimed = await store.claimHandoffForCompletion({
+      handoffId: input.handoffId,
+      memberId: input.memberId,
+    });
+    if (!claimed) {
+      throw new Error("Hosted computer handoff was not open for the CAS probe.");
+    }
+
+    let staleCompletionRejected = false;
+    try {
+      await store.completeHandoff({
+        expectedUpdatedAt: input.staleUpdatedAt,
+        handoffId: input.handoffId,
+        now: new Date(),
+      });
+    } catch (error) {
+      if (!isHostedComputerStaleStateConflictForTest(error)) {
+        throw error;
+      }
+      staleCompletionRejected = true;
+    }
+    if (!staleCompletionRejected) {
+      throw new Error("Hosted computer handoff accepted a stale completion write.");
+    }
+
+    await store.releaseHandoffClaim({
+      expectedUpdatedAt: claimed.updatedAt,
+      handoffId: input.handoffId,
+    });
+    return {
+      claimedUpdatedAt: claimed.updatedAt.toISOString(),
+      staleCompletionRejected: true,
+    };
+  });
+}
+
+export async function completeHostedComputerHandoffForTest(input: {
+  environment?: NodeJS.ProcessEnv;
+  memberId: string;
+  token: string;
+}): Promise<{
+  returnContactKind: string | null;
+  status: string;
+  suggestedReply: string | null;
+}> {
+  return withHostedWebTestkitDeps(input.environment, async (deps) => {
+    const service = await createHostedComputerUseServiceForTest(deps);
+    return await service.completeHandoff({
+      memberId: input.memberId,
+      token: input.token,
+    });
   });
 }
 
@@ -602,6 +1054,27 @@ async function loadHostedRuntimeSignalModule(): Promise<HostedRuntimeSignalModul
   return await import(hostedSignalRuntimeModuleSpecifier) as HostedRuntimeSignalModule;
 }
 
+async function createHostedComputerUseStoreForTest(
+  prisma: HostedTestPrismaClient,
+): Promise<HostedComputerUseStoreForTest> {
+  const storeModule = await import(
+    hostedComputerUseStoreModuleSpecifier
+  ) as HostedComputerUseStoreModule;
+  return new storeModule.PrismaComputerUseStore(prisma);
+}
+
+async function createHostedComputerUseServiceForTest(
+  deps: HostedWebTestkitDeps,
+): Promise<HostedComputerUseServiceForTest> {
+  const serviceModule = await import(
+    hostedComputerUseServiceModuleSpecifier
+  ) as HostedComputerUseServiceModule;
+  return new serviceModule.ComputerUseService({
+    env: deps.environment,
+    store: await createHostedComputerUseStoreForTest(deps.prisma),
+  });
+}
+
 async function createHostedTestPrisma(
   environment: NodeJS.ProcessEnv,
 ): Promise<HostedTestPrismaClient> {
@@ -631,4 +1104,68 @@ function normalizeHostedTestingRedactedJson(value: unknown): Record<string, unkn
   }
 
   return value as Record<string, unknown>;
+}
+
+function mapHostedComputerRunForTest(
+  run: HostedComputerRunForTestPrismaRow,
+): HostedComputerRunForTest {
+  return {
+    awaitingReason: run.awaitingReason,
+    checkpointContext: readHostedComputerCheckpointContextForTest(run.metadataJson),
+    completedAt: run.completedAt?.toISOString() ?? null,
+    expiresAt: run.expiresAt.toISOString(),
+    id: run.id,
+    kernelSessionId: run.kernelSessionId,
+    memberId: run.memberId,
+    pausedAt: run.pausedAt?.toISOString() ?? null,
+    pendingHandoffId: run.pendingHandoffId,
+    status: run.status,
+    updatedAt: run.updatedAt.toISOString(),
+  };
+}
+
+function mapHostedComputerHandoffForTest(
+  handoff: HostedComputerHandoffForTestPrismaRow,
+): HostedComputerHandoffForTest {
+  return {
+    completedAt: handoff.completedAt?.toISOString() ?? null,
+    expiresAt: handoff.expiresAt.toISOString(),
+    id: handoff.id,
+    memberId: handoff.memberId,
+    purpose: handoff.purpose,
+    returnContactKind: handoff.returnContactKind,
+    runId: handoff.runId,
+    status: handoff.status,
+    suggestedReply: handoff.suggestedReply,
+    tokenHash: handoff.tokenHash,
+    updatedAt: handoff.updatedAt.toISOString(),
+  };
+}
+
+function readHostedComputerCheckpointContextForTest(value: unknown): {
+  conversationId: string | null;
+  recipientKey: string | null;
+} | null {
+  const root = normalizeHostedTestingRedactedJson(value);
+  const pause = normalizeHostedTestingRedactedJson(root?.pause);
+  const context = normalizeHostedTestingRedactedJson(pause?.checkpointContext);
+  if (!context) {
+    return null;
+  }
+  return {
+    conversationId:
+      typeof context.conversationId === "string" ? context.conversationId : null,
+    recipientKey:
+      typeof context.recipientKey === "string" ? context.recipientKey : null,
+  };
+}
+
+function isHostedComputerStaleStateConflictForTest(error: unknown): boolean {
+  if (!error || typeof error !== "object") {
+    return false;
+  }
+  const record = error as Record<string, unknown>;
+  return record.code === "HOSTED_COMPUTER_RUN_STATE_CHANGED"
+    && record.httpStatus === 409
+    && record.retryable === true;
 }

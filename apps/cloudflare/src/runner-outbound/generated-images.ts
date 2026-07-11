@@ -21,6 +21,7 @@ const GENERATED_IMAGE_METADATA_LIMIT_BYTES = 1024;
 
 export async function handleRunnerGeneratedImageUploadRequest(input: {
   env: RunnerOutboundEnvironmentSource;
+  fetchImpl?: typeof fetch;
   request: Request;
   userId: string;
 }): Promise<Response> {
@@ -92,6 +93,7 @@ export async function handleRunnerGeneratedImageUploadRequest(input: {
     bytes,
     contentType: request.contentType,
     filename: request.filename,
+    fetchImpl: input.fetchImpl ?? fetch,
     metadata: request.metadata,
     signal: input.request.signal,
   });
@@ -126,6 +128,7 @@ async function uploadCloudflareImage(input: {
   bytes: Uint8Array;
   contentType: "image/jpeg" | "image/png" | "image/webp";
   filename: string;
+  fetchImpl: typeof fetch;
   metadata: Record<string, string>;
   signal: AbortSignal;
 }): Promise<Response> {
@@ -138,7 +141,7 @@ async function uploadCloudflareImage(input: {
   form.set("metadata", JSON.stringify(input.metadata));
   form.set("requireSignedURLs", "false");
 
-  return await fetch(
+  return await input.fetchImpl(
     `${CLOUDFLARE_IMAGES_API_BASE_URL}/accounts/${encodeURIComponent(input.accountId)}/images/v1`,
     {
       body: form,

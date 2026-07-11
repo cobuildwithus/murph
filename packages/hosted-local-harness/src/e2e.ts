@@ -29,22 +29,31 @@ interface HostedLocalE2eRunnerCleanupOptions {
 export type HostedLocalE2eScenarioName =
   | "all"
   | "active-turn-latency"
+  | "canonical-receipt-lost-ack-recovery"
   | "checkpoint-baseline"
   | "codex-container-continuity"
   | "codex-gateway-prefix"
   | "codex-image-media-delivery"
   | "codex-long-thread"
+  | "computer-handoff-linq-roundtrip"
   | "container-continuity"
   | "device-connect"
   | "device-sync-junction-wearable-direct-resource-replay"
   | "device-sync-wake"
   | "direct-r2-presigned-put"
+  | "family-sponsored-group-roundtrip"
   | "idle-checkpoint-deferred-progress"
   | "junction-wearable-fixture"
   | "mailbox-platform-env"
   | "linq-first-contact"
+  | "linq-group-route-drift"
+  | "linq-home-line-reroute-retry"
+  | "linq-unknown-first-contact-fallback"
   | "openai-egress-authority"
   | "provider-egress-token-bridge"
+  | "retell-call-result-roundtrip"
+  | "retryable-outbox-foreground-restart"
+  | "shutdown-checkpoint-conversation-ahead"
   | "warm-reuse-egress"
   | "linq-delivery"
   | "linq-lost-active-operation"
@@ -54,13 +63,16 @@ export type HostedLocalE2eScenarioName =
   | "linq-webhook"
   | "linq-webhook-audio"
   | "runner-warm-reuse"
+  | "snapshot-publication-fallback"
   | "snapshot-stress"
   | "stuck-invocation-recovery"
   | "timezone-injection"
+  | "usage-limit-ambiguous-send"
   | "temporal-orchestration"
   | "telegram"
   | "telegram-first-contact"
   | "telegram-scheduled-reminder"
+  | "vault-file-approval-resume"
   | "vault-persistence";
 
 export type HostedLocalE2eScenarioSelection = string | readonly string[];
@@ -110,10 +122,6 @@ export const hostedLocalE2eScenarios: readonly HostedLocalE2eScenario[] = [
     name: "codex-gateway-prefix",
   },
   {
-    file: "apps/cloudflare/test/hosted-local-codex-image-media-delivery-e2e.test.ts",
-    name: "codex-image-media-delivery",
-  },
-  {
     file: "apps/cloudflare/test/hosted-local-codex-long-thread-e2e.test.ts",
     manualOnly: true,
     name: "codex-long-thread",
@@ -136,6 +144,12 @@ export const hostedLocalE2eScenarios: readonly HostedLocalE2eScenario[] = [
   {
     file: "apps/cloudflare/test/hosted-local-direct-r2-presigned-put-e2e.test.ts",
     name: "direct-r2-presigned-put",
+  },
+  {
+    file:
+      "apps/cloudflare/test/hosted-local-canonical-receipt-lost-ack-recovery-e2e.test.ts",
+    name: "canonical-receipt-lost-ack-recovery",
+    testControls: true,
   },
   {
     file: "apps/cloudflare/test/hosted-local-idle-checkpoint-deferred-progress-e2e.test.ts",
@@ -163,6 +177,25 @@ export const hostedLocalE2eScenarios: readonly HostedLocalE2eScenario[] = [
     aliases: ["linq-delivery"],
     file: "apps/cloudflare/test/hosted-local-linq-first-contact-e2e.test.ts",
     name: "linq-first-contact",
+  },
+  {
+    file: "apps/cloudflare/test/hosted-local-linq-group-route-drift-e2e.test.ts",
+    name: "linq-group-route-drift",
+  },
+  {
+    file:
+      "apps/cloudflare/test/hosted-local-linq-home-line-reroute-retry-e2e.test.ts",
+    name: "linq-home-line-reroute-retry",
+  },
+  {
+    file:
+      "apps/cloudflare/test/hosted-local-family-sponsored-group-roundtrip-e2e.test.ts",
+    name: "family-sponsored-group-roundtrip",
+  },
+  {
+    file:
+      "apps/cloudflare/test/hosted-local-linq-unknown-first-contact-fallback-e2e.test.ts",
+    name: "linq-unknown-first-contact-fallback",
   },
   {
     file: "apps/cloudflare/test/hosted-local-linq-first-contact-e2e.test.ts",
@@ -244,6 +277,46 @@ export const hostedLocalE2eScenarios: readonly HostedLocalE2eScenario[] = [
     aliases: ["telegram"],
     file: "apps/cloudflare/test/hosted-local-telegram-first-contact-e2e.test.ts",
     name: "telegram-first-contact",
+  },
+  {
+    file:
+      "apps/cloudflare/test/hosted-local-snapshot-publication-fallback-e2e.test.ts",
+    name: "snapshot-publication-fallback",
+    testControls: true,
+  },
+  {
+    file: "apps/cloudflare/test/hosted-local-computer-handoff-linq-roundtrip-e2e.test.ts",
+    name: "computer-handoff-linq-roundtrip",
+  },
+  {
+    file: "apps/cloudflare/test/hosted-local-retell-call-result-roundtrip-e2e.test.ts",
+    name: "retell-call-result-roundtrip",
+  },
+  {
+    file: "apps/cloudflare/test/hosted-local-usage-limit-ambiguous-send-e2e.test.ts",
+    name: "usage-limit-ambiguous-send",
+  },
+  {
+    file: "apps/cloudflare/test/hosted-local-codex-image-media-delivery-e2e.test.ts",
+    name: "codex-image-media-delivery",
+    testControls: true,
+  },
+  {
+    file:
+      "apps/cloudflare/test/hosted-local-retryable-outbox-foreground-restart-e2e.test.ts",
+    name: "retryable-outbox-foreground-restart",
+    testControls: true,
+  },
+  {
+    file:
+      "apps/cloudflare/test/hosted-local-shutdown-checkpoint-conversation-ahead-e2e.test.ts",
+    name: "shutdown-checkpoint-conversation-ahead",
+    testControls: true,
+  },
+  {
+    file: "apps/cloudflare/test/hosted-local-vault-file-approval-resume-e2e.test.ts",
+    name: "vault-file-approval-resume",
+    testControls: true,
   },
 ] as const;
 
