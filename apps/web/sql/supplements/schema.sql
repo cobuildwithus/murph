@@ -26,6 +26,16 @@ CREATE TABLE IF NOT EXISTS supplements (
     CHECK (btrim(data_origin_id) <> ''),
   CONSTRAINT supplements_data_origin_priority_check
     CHECK (data_origin_priority >= 0),
+  CONSTRAINT supplements_payload_format_check
+    CHECK (
+      btrim(name) <> ''
+      AND btrim(search_text) <> ''
+      AND char_length(search_text) <= 6000
+      AND COALESCE(jsonb_typeof(label) = 'object', false)
+      AND (brand IS NULL OR btrim(brand) <> '')
+      AND (upc IS NULL OR upc ~ '^[0-9]+$')
+      AND (data_origin_url IS NULL OR btrim(data_origin_url) <> '')
+    ),
   CONSTRAINT supplements_serving_grams_check
     CHECK (serving_grams IS NULL OR serving_grams > 0)
 );
@@ -37,6 +47,33 @@ ALTER TABLE supplements
   DROP CONSTRAINT IF EXISTS supplements_serving_grams_check,
   ADD CONSTRAINT supplements_serving_grams_check
     CHECK (serving_grams IS NULL OR serving_grams > 0) NOT VALID;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conrelid = 'supplements'::regclass
+      AND conname = 'supplements_payload_format_check'
+  ) THEN
+    ALTER TABLE supplements
+      ADD CONSTRAINT supplements_payload_format_check
+      CHECK (
+        btrim(name) <> ''
+        AND btrim(search_text) <> ''
+        AND char_length(search_text) <= 6000
+        AND COALESCE(jsonb_typeof(label) = 'object', false)
+        AND (brand IS NULL OR btrim(brand) <> '')
+        AND (upc IS NULL OR upc ~ '^[0-9]+$')
+        AND (data_origin_url IS NULL OR btrim(data_origin_url) <> '')
+      ) NOT VALID;
+  END IF;
+END
+$$;
+
+ALTER TABLE supplements
+  VALIDATE CONSTRAINT supplements_payload_format_check,
+  VALIDATE CONSTRAINT supplements_serving_grams_check;
 
 CREATE INDEX IF NOT EXISTS supplements_search_idx
   ON supplements
