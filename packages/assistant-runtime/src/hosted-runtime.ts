@@ -345,6 +345,7 @@ interface HostedInitialMailboxImportResult {
   bootstrapPending: boolean;
   prefetch: HostedMailboxPrefixPrefetch | null;
   result: HostedMailboxImportCheckpointResult;
+  workspace: HostedWorkspaceState | null;
 }
 
 interface HostedVaultFormatMigrationRuntimeResult {
@@ -428,7 +429,6 @@ async function readHostedVaultStoredFormatVersion(vaultRoot: string): Promise<nu
 }
 
 async function importHostedInitialMailboxForWorkspaceRunner(input: {
-  checkpointRequestBuilder: HostedWorkspaceCheckpointRequestBuilder;
   importItemContext?: HostedWorkspaceRunnerMailboxImportContext | null;
   runnerInput: HostedWorkspaceRunnerInput;
   requestId: string;
@@ -443,22 +443,21 @@ async function importHostedInitialMailboxForWorkspaceRunner(input: {
         requestId: input.requestId,
         runnerInput: input.runnerInput,
       });
-  const result = await importHostedMailboxForWorkspaceRunner({
-    checkpointRequestBuilder: input.checkpointRequestBuilder,
-    checkpointReason: "import",
-    deferCheckpoint: true,
-    input: input.runnerInput,
-    importItemContext: input.importItemContext ?? null,
-    deferConversationUntil: plan.bootstrapRequired
+  const runnerResult = await runHostedWorkspaceUntilIdleOrBudget({
+    ...input.runnerInput,
+    deferInitialMailboxPostCheckpointEffects: true,
+    initialMailboxConversationDeferral: plan.bootstrapRequired
       ? {
           ready: () => hasHostedVaultMetadata(input.runnerInput.vaultRoot),
           reasonCode: HOSTED_INITIAL_BOOTSTRAP_PENDING_REASON_CODE,
         }
       : null,
-    lanes: plan.lanes,
-    prefetch,
+    initialMailboxImportContext: input.importItemContext ?? null,
+    initialMailboxImportLanes: plan.lanes,
+    initialMailboxPrefetch: prefetch,
     requestId: input.requestId,
   });
+  const result = runnerResult.initialMailboxImport;
 
   return {
     bootstrapPending: isHostedInitialBootstrapPending({
@@ -468,6 +467,7 @@ async function importHostedInitialMailboxForWorkspaceRunner(input: {
     }),
     prefetch,
     result,
+    workspace: runnerResult.latestWorkspace,
   };
 }
 
@@ -1344,12 +1344,12 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
     // Keep the container's single-runner ownership until that work settles so
     // an aborted invocation cannot write into a newer restore at the same path.
     const initialMailboxImportResult = await importHostedInitialMailboxForWorkspaceRunner({
-      checkpointRequestBuilder,
       importItemContext: initialMailboxImportContext,
       runnerInput: baseRunnerInput,
       requestId,
     });
     assertRuntimeNotAborted();
+    activeWorkspace = initialMailboxImportResult.workspace ?? activeWorkspace;
     const initialMailboxImport = initialMailboxImportResult.result;
     const mailboxImportDoneAt = new Date().toISOString();
     emitPhaseLog({

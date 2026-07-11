@@ -9,6 +9,10 @@ import type {
 } from '@murphai/hosted-execution/contracts'
 import { normalizeNullableString } from '@murphai/operator-config/text/shared'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
+import {
+  readHostedCanonicalWritePort,
+  withHostedCanonicalWritePort,
+} from '@murphai/core'
 
 import type {
   AssistantResponseMedia,
@@ -2251,6 +2255,7 @@ async function runCodexAppServerTurnOnProcess(
   codexProcess: CodexAppServerProcess,
   input: CodexAppServerPreparedTurnInput,
 ): Promise<CodexAppServerTurnResult> {
+  const hostedCanonicalWritePort = readHostedCanonicalWritePort()
   let stdout = ''
   let stderr = ''
   let settled = false
@@ -3143,34 +3148,37 @@ async function runCodexAppServerTurnOnProcess(
       closeLiveTurn()
     }
 
-    const runDynamicTool = () => executeMurphDynamicToolRequest({
-      abortSignal: input.abortSignal
-        ? AbortSignal.any([input.abortSignal, dynamicToolAbortController.signal])
-        : dynamicToolAbortController.signal,
-      codexHome: input.codexHome ?? input.env.CODEX_HOME ?? null,
-      env: input.env,
-      fetchImpl: input.fetchImpl,
-      hostedGeneratedImageUploader: input.hostedGeneratedImageUploader,
-      hostedToolContext: resolveCodexAppServerHostedToolContext(input),
-      materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts ?? null,
-      currentResponseMedia: responseMedia,
-      nextUsageOrdinal: () => nextDynamicToolUsageOrdinal++,
-      productFeedbackRecorder: input.productFeedbackRecorder ?? null,
-      progressDelivery:
-        dynamicToolRequest.kind === 'send-progress-update'
-          ? dynamicToolProgressDelivery
-          : null,
-      publicFetchImpl: input.publicInternetFetch ?? null,
-      request: dynamicToolRequest,
-      requireHostedGeneratedImageUploader:
-        input.requireHostedGeneratedImageUploader ?? false,
-      vaultRoot: input.vaultRoot ?? null,
-      voiceMemoRuntime:
-        dynamicToolRequest.kind === 'generate-voice-memo' ||
-        dynamicToolRequest.kind === 'generate-song'
-          ? input.voiceMemoRuntime ?? null
-          : null,
-    }).then(async (result) => {
+    const runDynamicTool = () => withHostedCanonicalWritePort(
+      hostedCanonicalWritePort,
+      async () => await executeMurphDynamicToolRequest({
+        abortSignal: input.abortSignal
+          ? AbortSignal.any([input.abortSignal, dynamicToolAbortController.signal])
+          : dynamicToolAbortController.signal,
+        codexHome: input.codexHome ?? input.env.CODEX_HOME ?? null,
+        env: input.env,
+        fetchImpl: input.fetchImpl,
+        hostedGeneratedImageUploader: input.hostedGeneratedImageUploader,
+        hostedToolContext: resolveCodexAppServerHostedToolContext(input),
+        materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts ?? null,
+        currentResponseMedia: responseMedia,
+        nextUsageOrdinal: () => nextDynamicToolUsageOrdinal++,
+        productFeedbackRecorder: input.productFeedbackRecorder ?? null,
+        progressDelivery:
+          dynamicToolRequest.kind === 'send-progress-update'
+            ? dynamicToolProgressDelivery
+            : null,
+        publicFetchImpl: input.publicInternetFetch ?? null,
+        request: dynamicToolRequest,
+        requireHostedGeneratedImageUploader:
+          input.requireHostedGeneratedImageUploader ?? false,
+        vaultRoot: input.vaultRoot ?? null,
+        voiceMemoRuntime:
+          dynamicToolRequest.kind === 'generate-voice-memo' ||
+          dynamicToolRequest.kind === 'generate-song'
+            ? input.voiceMemoRuntime ?? null
+            : null,
+      }),
+    ).then(async (result) => {
       if (dynamicToolRequest.kind === 'send-progress-update') {
         releaseDynamicProgressPending?.()
       }
