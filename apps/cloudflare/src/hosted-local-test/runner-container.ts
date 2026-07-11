@@ -499,8 +499,8 @@ const hostedLocalOpenAiImagesFetch: typeof fetch = async (input) => {
   });
 };
 
-const hostedLocalCloudflareImagesFetch: typeof fetch = async (input) => {
-  const request = input instanceof Request ? input : new Request(input);
+const hostedLocalCloudflareImagesFetch: typeof fetch = async (input, init) => {
+  const request = new Request(input, init);
   if (request.method !== "POST" || !new URL(request.url).pathname.endsWith("/images/v1")) {
     return new Response("Unexpected hosted-local Cloudflare Images request.", { status: 502 });
   }

@@ -39,6 +39,12 @@ import {
   createHostedProviderEgressCredential,
 } from "../src/hosted-provider-egress-credential.ts";
 import {
+  HOSTED_EXECUTION_RUNNER_GENERATED_IMAGE_UPLOAD_PATH,
+} from "../src/runner-effects-contract.ts";
+import {
+  HOSTED_RUNTIME_ATTEMPT_ID_HEADER,
+  HOSTED_RUNTIME_LEASE_GENERATION_HEADER,
+  HOSTED_RUNTIME_WORKSPACE_VERSION_HEADER,
   HOSTED_RUNNER_BOUND_USER_ID_HEADER,
 } from "../src/runner-outbound/headers.ts";
 import type {
@@ -111,11 +117,22 @@ function readHostedLocalTestOutboundByHost(): typeof HOSTED_RUNNER_OUTBOUND_BY_H
 
 function createOutboundEnv(input: {
   AI?: RunnerOutboundEnvironmentSource["AI"];
+  cloudflareImages?: {
+    accountId: string;
+    apiKey: string;
+  };
+  ownsRuntimeWriteFence?: boolean;
 } = {}): RunnerOutboundEnvironmentSource {
   return {
     ...createHostedExecutionTestEnv(),
     AI: input.AI,
     BUNDLES: {} as RunnerOutboundEnvironmentSource["BUNDLES"],
+    ...(input.cloudflareImages
+      ? {
+          CLOUDFLARE_IMAGES_ACCOUNT_ID: input.cloudflareImages.accountId,
+          CLOUDFLARE_IMAGES_API_KEY: input.cloudflareImages.apiKey,
+        }
+      : {}),
     HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET:
       PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET,
     RUNNER_CONTAINER: {
@@ -144,7 +161,7 @@ function createOutboundEnv(input: {
           workspaceVersion: "4",
         }),
         validateRuntimeProviderEgressToken: async () => ({ owns: false }),
-        validateRuntimeWriteFence: async () => false,
+        validateRuntimeWriteFence: async () => input.ownsRuntimeWriteFence ?? false,
       }),
     },
   };
@@ -251,6 +268,67 @@ describe("hosted-local test RunnerContainer outbound composition", () => {
       contentType: "application/pdf",
       pathname: "/other-upload/attachment_local_1",
     }).then((response) => response.status)).resolves.toBe(404);
+  });
+
+  it("preserves the generated-image upload method and body in the Cloudflare Images stub", async () => {
+    const handler = readHostedLocalTestOutboundByHost()[
+      HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.effectsPort
+    ];
+    if (!handler) {
+      throw new Error("Wrapped generated-image outbound handler is missing.");
+    }
+    const userId = "member_123";
+    const webpBytes = new Uint8Array([
+      0x52, 0x49, 0x46, 0x46,
+      0x00, 0x00, 0x00, 0x00,
+      0x57, 0x45, 0x42, 0x50,
+    ]);
+
+    const response = await handler(
+      new Request(
+        `http://${HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.effectsPort}`
+          + HOSTED_EXECUTION_RUNNER_GENERATED_IMAGE_UPLOAD_PATH,
+        {
+          body: JSON.stringify({
+            alt: "Generated mobility setup",
+            bytesBase64: Buffer.from(webpBytes).toString("base64"),
+            contentType: "image/webp",
+            filename: "generated.webp",
+            metadata: {
+              model: "gpt-image-2",
+              schema: "murph.generated-image.v1",
+            },
+            source: "gpt-image-2",
+          }),
+          headers: {
+            [HOSTED_RUNTIME_ATTEMPT_ID_HEADER]: "attempt-1",
+            [HOSTED_RUNTIME_LEASE_GENERATION_HEADER]: "1",
+            [HOSTED_RUNTIME_WORKSPACE_VERSION_HEADER]: "4",
+            [HOSTED_RUNNER_BOUND_USER_ID_HEADER]: userId,
+            "content-type": "application/json; charset=utf-8",
+          },
+          method: "POST",
+        },
+      ),
+      createOutboundEnv({
+        cloudflareImages: {
+          accountId: "hosted-local-images-account",
+          apiKey: "hosted-local-images-key",
+        },
+        ownsRuntimeWriteFence: true,
+      }),
+      { containerId: "opaque-container-id" },
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      media: {
+        alt: "Generated mobility setup",
+        kind: "image",
+        source: "gpt-image-2",
+        url: "https://imagedelivery.net/hosted-local/generated-image/public",
+      },
+    });
   });
 
   it("returns a synthetic 503 only after the armed canonical checkpoint commits", async () => {
