@@ -246,7 +246,7 @@ test("SettingsPage metadata uses the shared preview image", async () => {
   assert.equal(metadata.description, "Manage your Murph account settings.");
   assert.deepEqual(metadata.openGraph?.images, [
     {
-      alt: "Murph — Everyone has a health goal. Almost no one gets there alone.",
+      alt: "Murph — Everyone has a health goal. Nobody does it alone.",
       height: 630,
       type: "image/png",
       url: "/opengraph-image",
@@ -255,7 +255,7 @@ test("SettingsPage metadata uses the shared preview image", async () => {
   ]);
   assert.deepEqual(metadata.twitter?.images, [
     {
-      alt: "Murph — Everyone has a health goal. Almost no one gets there alone.",
+      alt: "Murph — Everyone has a health goal. Nobody does it alone.",
       height: 630,
       type: "image/png",
       url: "/opengraph-image",
