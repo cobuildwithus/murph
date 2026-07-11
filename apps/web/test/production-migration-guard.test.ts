@@ -85,22 +85,41 @@ describe("hosted web production migration guard", () => {
     }
   });
 
-  test("runs migrate, Prisma generate, and Linq line sync for main-branch production builds", async () => {
-    const calls: Array<{ args: readonly string[]; command: string }> = [];
+  test("verifies deployment protection before production commands and keeps its token out of children", async () => {
+    const events: string[] = [];
+    const calls: Array<{
+      args: readonly string[];
+      command: string;
+      environment: HostedWebProductionMigrationEnvironment;
+    }> = [];
+    const environment = {
+      HOSTED_WEB_VERCEL_TOKEN: "verifier-only-token",
+      VERCEL: "1",
+      VERCEL_ENV: "production",
+      VERCEL_GIT_COMMIT_REF: "main",
+    };
 
     const result = await runHostedWebProductionMigrationsIfNeeded(
-      {
-        VERCEL: "1",
-        VERCEL_ENV: "production",
-        VERCEL_GIT_COMMIT_REF: "main",
+      environment,
+      async (command, args, commandEnvironment) => {
+        events.push(command);
+        calls.push({ args, command, environment: commandEnvironment });
       },
-      async (command, args) => {
-        calls.push({ args, command });
+      async (verifierEnvironment) => {
+        events.push("verify");
+        assert.equal(verifierEnvironment.HOSTED_WEB_VERCEL_TOKEN, "verifier-only-token");
+        return "verified-sha";
       },
     );
 
     assert.equal(result, "ran");
-    assert.deepEqual(calls, [
+    assert.deepEqual(events, [
+      "verify",
+      hostedWebProductionMigrationCommand.command,
+      hostedWebProductionPrismaGenerateCommand.command,
+      hostedWebProductionLinqLineSyncCommand.command,
+    ]);
+    assert.deepEqual(calls.map(({ args, command }) => ({ args, command })), [
       {
         command: hostedWebProductionMigrationCommand.command,
         args: ["--dir", "apps/web", "prisma:migrate:deploy"],
@@ -114,6 +133,38 @@ describe("hosted web production migration guard", () => {
         args: ["--dir", "apps/web", "linq:sync-lines", "--", "--skip-provider-inventory"],
       },
     ]);
+    for (const call of calls) {
+      assert.equal(call.environment.HOSTED_WEB_VERCEL_TOKEN, undefined);
+    }
+    assert.equal(environment.HOSTED_WEB_VERCEL_TOKEN, "verifier-only-token");
+  });
+
+  test("fails closed before production commands when deployment protection cannot be verified", async () => {
+    for (const message of [
+      "Missing HOSTED_WEB_VERCEL_TOKEN",
+      "Malformed Vercel response",
+      "Standard or All Deployment Protection is required",
+    ]) {
+      let commandRan = false;
+      await assert.rejects(
+        () =>
+          runHostedWebProductionMigrationsIfNeeded(
+            {
+              VERCEL: "1",
+              VERCEL_ENV: "production",
+              VERCEL_GIT_COMMIT_REF: "main",
+            },
+            async () => {
+              commandRan = true;
+            },
+            async () => {
+              throw new Error(message);
+            },
+          ),
+        new RegExp(message.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"), "u"),
+      );
+      assert.equal(commandRan, false);
+    }
   });
 
   test("blocks future destructive Prisma migrations before Vercel deploy promotion", async () => {
@@ -326,6 +377,7 @@ describe("hosted web production migration guard", () => {
           async () => {
             throw new Error("migration failed");
           },
+          async () => "verified-sha",
         ),
       /migration failed/u,
     );

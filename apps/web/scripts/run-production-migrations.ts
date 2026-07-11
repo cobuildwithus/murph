@@ -1,5 +1,7 @@
 import { spawn, type SpawnOptions } from "node:child_process";
 
+import { verifyVercelProductionDeploymentProtection } from "./resolve-vercel-production-alias-sha";
+
 export const hostedWebProductionMigrationCommand = {
   command: resolvePnpmCommand(),
   args: ["--dir", "apps/web", "prisma:migrate:deploy"],
@@ -20,7 +22,12 @@ export type HostedWebProductionMigrationEnvironment = Record<string, string | un
 export type HostedWebProductionMigrationRunner = (
   command: string,
   args: readonly string[],
+  environment: HostedWebProductionMigrationEnvironment,
 ) => Promise<void>;
+
+export type HostedWebProductionDeploymentProtectionVerifier = (
+  environment: HostedWebProductionMigrationEnvironment,
+) => Promise<string>;
 
 export function shouldRunHostedWebProductionMigrations(
   environment: HostedWebProductionMigrationEnvironment,
@@ -35,26 +42,37 @@ export function shouldRunHostedWebProductionMigrations(
 export async function runHostedWebProductionMigrationsIfNeeded(
   environment: HostedWebProductionMigrationEnvironment = process.env,
   runCommand: HostedWebProductionMigrationRunner = runCommandInherited,
+  verifyDeploymentProtection: HostedWebProductionDeploymentProtectionVerifier =
+    verifyVercelProductionDeploymentProtection,
 ): Promise<"ran" | "skipped"> {
   if (!shouldRunHostedWebProductionMigrations(environment)) {
     console.log("Skipping hosted web production migrations outside main-branch Vercel production deploys.");
     return "skipped";
   }
 
+  console.log("Verifying Vercel deployment protection before strict production cutover.");
+  await verifyDeploymentProtection(environment);
+  const commandEnvironment = { ...environment };
+  delete commandEnvironment.HOSTED_WEB_VERCEL_TOKEN;
+  delete process.env.HOSTED_WEB_VERCEL_TOKEN;
+
   console.log("Applying pending hosted web Prisma migrations.");
   await runCommand(
     hostedWebProductionMigrationCommand.command,
     hostedWebProductionMigrationCommand.args,
+    commandEnvironment,
   );
   console.log("Regenerating hosted web Prisma client for post-migration tasks.");
   await runCommand(
     hostedWebProductionPrismaGenerateCommand.command,
     hostedWebProductionPrismaGenerateCommand.args,
+    commandEnvironment,
   );
   console.log("Syncing hosted Linq DB home-line inventory.");
   await runCommand(
     hostedWebProductionLinqLineSyncCommand.command,
     hostedWebProductionLinqLineSyncCommand.args,
+    commandEnvironment,
   );
   return "ran";
 }
@@ -63,11 +81,17 @@ async function main(): Promise<void> {
   await runHostedWebProductionMigrationsIfNeeded();
 }
 
-function runCommandInherited(command: string, args: readonly string[]): Promise<void> {
+function runCommandInherited(
+  command: string,
+  args: readonly string[],
+  environment: HostedWebProductionMigrationEnvironment,
+): Promise<void> {
   return new Promise((resolve, reject) => {
+    const childEnvironment = { ...process.env, ...environment };
+    delete childEnvironment.HOSTED_WEB_VERCEL_TOKEN;
     const child = spawn(command, [...args], {
       cwd: resolveRepoRoot(),
-      env: process.env,
+      env: childEnvironment,
       stdio: "inherit",
     } satisfies SpawnOptions);
 

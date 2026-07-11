@@ -7,6 +7,10 @@ import path from "node:path";
 import process from "node:process";
 
 import {
+  removeHostedLocalWebAuthorityFromProcessEnvironment,
+  sanitizeHostedLocalGenericEnvironment,
+} from "../authority-env.ts";
+import {
   isHostedLocalUseOpenaiApiKey,
   MURPH_DEV_USE_OPENAI_API_KEY_ENV,
   resolveHostedLocalCodexSubscriptionAuthEnvValue,
@@ -217,11 +221,8 @@ export async function startHostedLocalDevStack(input: {
   webProcessEnvOverrides?: NodeJS.ProcessEnv;
 }): Promise<HostedLocalDevStack> {
   throwIfAbortSignalAborted(input.abortSignal);
-  const initialEnv = { ...input.env } satisfies NodeJS.ProcessEnv;
-  const inheritedHostedAppSessionHmacKey =
-    initialEnv.HOSTED_APP_SESSION_HMAC_KEY?.trim() || null;
-  delete initialEnv.HOSTED_APP_SESSION_HMAC_KEY;
-  delete process.env.HOSTED_APP_SESSION_HMAC_KEY;
+  const initialEnv = sanitizeHostedLocalGenericEnvironment(input.env);
+  removeHostedLocalWebAuthorityFromProcessEnvironment();
   const initialProcessEnv = { ...initialEnv } satisfies NodeJS.ProcessEnv;
   const config = resolveHostedLocalDevConfig(initialEnv);
   assertHostedLocalWorktreeRuntimePreconditions(initialEnv);
@@ -355,8 +356,7 @@ export async function startHostedLocalDevStack(input: {
       ...initialEnv,
     };
     const hostedAppSessionHmacKey =
-      inheritedHostedAppSessionHmacKey
-      || rawVercelEnv.HOSTED_APP_SESSION_HMAC_KEY?.trim()
+      rawVercelEnv.HOSTED_APP_SESSION_HMAC_KEY?.trim()
       || HOSTED_LOCAL_APP_SESSION_HMAC_KEY;
     delete rawVercelEnv.HOSTED_APP_SESSION_HMAC_KEY;
     const inputNodeEnv = rawVercelEnv.NODE_ENV?.trim();

@@ -6,6 +6,9 @@ import path from "node:path";
 import process from "node:process";
 
 import {
+  sanitizeHostedLocalGenericEnvironment,
+} from "../authority-env.ts";
+import {
   DEFAULT_LINQ_WEBHOOK_TUNNEL_CONFIG,
   DEFAULT_DATABASE_URL,
   HOSTED_LOCAL_PERSISTED_STATE_ENV_NAMES,
@@ -117,12 +120,13 @@ export function buildHostedLocalWorktreeConfig(input: {
   ports: HostedLocalWorktreePorts;
   slug: string;
 }): HostedLocalWorktreeConfig {
-  assertHostedLocalWorktreeLocalCryptoMode(input.env);
+  const genericEnvironment = sanitizeHostedLocalGenericEnvironment(input.env);
+  assertHostedLocalWorktreeLocalCryptoMode(genericEnvironment);
   const slug = normalizeHostedLocalWorktreeSlug(input.slug);
   const databaseName = buildHostedLocalWorktreeDatabaseName(slug);
-  const databaseUrl = buildHostedLocalWorktreeDatabaseUrl(databaseName, input.env);
+  const databaseUrl = buildHostedLocalWorktreeDatabaseUrl(databaseName, genericEnvironment);
   const buildId = `worktree-${slug}`;
-  const webHost = resolveHostedLocalWorktreeWebHost(input.env);
+  const webHost = resolveHostedLocalWorktreeWebHost(genericEnvironment);
   const webOrigin = buildHostedLocalWorktreeWebOrigin(webHost, input.ports.web);
   const rootDir = path.join(HOSTED_LOCAL_WORKTREE_ROOT, slug);
   const paths = {
@@ -140,7 +144,7 @@ export function buildHostedLocalWorktreeConfig(input: {
     ),
   } satisfies HostedLocalWorktreePaths;
   const env = buildHostedLocalWorktreeEnv({
-    baseEnv: input.env,
+    baseEnv: genericEnvironment,
     buildId,
     databaseUrl,
     paths,
@@ -936,7 +940,7 @@ function resolveHostedLocalWorktreeDatabaseCommand(config: HostedLocalWorktreeCo
       database.username,
     ],
     commonEnv: {
-      ...process.env,
+      ...sanitizeHostedLocalGenericEnvironment(process.env),
       PGCONNECT_TIMEOUT: "5",
       ...(database.password ? { PGPASSWORD: database.password } : {}),
     },

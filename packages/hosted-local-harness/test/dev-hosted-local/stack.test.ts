@@ -568,8 +568,9 @@ describe("hosted local dev stack", () => {
 
   it("starts Cloudflare with web-only process environment overrides", async () => {
     vi.stubEnv("OPENAI_API_KEY", "local-openai-key");
-    const appSessionHmacKey = Buffer.alloc(32, 9).toString("base64url");
-    vi.stubEnv("HOSTED_APP_SESSION_HMAC_KEY", appSessionHmacKey);
+    const inheritedAppSessionHmacKey = Buffer.alloc(32, 9).toString("base64url");
+    const localAppSessionHmacKey = Buffer.alloc(32, 8).toString("base64url");
+    vi.stubEnv("HOSTED_APP_SESSION_HMAC_KEY", inheritedAppSessionHmacKey);
     spawnChildProcess
       .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "cloudflare", pid: 101 }))
       .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "web", pid: 102 }));
@@ -608,7 +609,7 @@ describe("hosted local dev stack", () => {
     const stack = await startHostedLocalDevStack({
       env: {
         ...process.env,
-        HOSTED_APP_SESSION_HMAC_KEY: appSessionHmacKey,
+        HOSTED_APP_SESSION_HMAC_KEY: inheritedAppSessionHmacKey,
         LINQ_API_BASE_URL: "http://host.docker.internal:4011",
       },
       webProcessEnvOverrides: {
@@ -692,7 +693,10 @@ describe("hosted local dev stack", () => {
     const cloudflareCall = spawnChildProcess.mock.calls.find(([name]) => name === "cloudflare");
     const devWebCall = spawnChildProcess.mock.calls.find(([name]) => name === "web");
     expect(cloudflareCall?.[3].HOSTED_APP_SESSION_HMAC_KEY).toBeUndefined();
-    expect(devWebCall?.[3].HOSTED_APP_SESSION_HMAC_KEY).toBe(appSessionHmacKey);
+    expect(devWebCall?.[3].HOSTED_APP_SESSION_HMAC_KEY).toBe(localAppSessionHmacKey);
+    expect(devWebCall?.[3].HOSTED_APP_SESSION_HMAC_KEY).not.toBe(
+      inheritedAppSessionHmacKey,
+    );
     expect(
       vi.mocked(vercelModule.resolveVercelOidcToken).mock.calls.at(-1)?.[0]
         .HOSTED_APP_SESSION_HMAC_KEY,
