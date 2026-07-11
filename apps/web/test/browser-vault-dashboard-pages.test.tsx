@@ -70,7 +70,7 @@ test("dashboard routes define page-specific metadata with the shared preview ima
   assert.equal(environmentMetadata.title, "Environment — Murph");
   assert.equal(
     environmentMetadata.description,
-    "The living-context facts Murph knows about your home, sleep, air, light, and workspace.",
+    "What Murph knows about your home, and what to check next.",
   );
 
   for (const routeMetadata of [
@@ -193,13 +193,14 @@ test("EnvironmentPage renders the habitat catalog mock", () => {
   const markup = renderToStaticMarkup(createElement(EnvironmentPage));
 
   assert.match(markup, /Your environment/);
-  assert.match(markup, /Overall picture/);
-  assert.match(markup, /Target score/);
+  assert.match(markup, /Environment grade/);
+  assert.match(markup, /Murph knows 43 of 49/);
   assert.match(markup, /Air &amp; water/);
   assert.match(markup, /Night temperature/);
-  assert.match(markup, />Targets</);
-  assert.match(markup, /Other facts &amp; gaps/);
+  assert.match(markup, /Recovery &amp; devices/);
   assert.match(markup, /group\/category/);
+  assert.doesNotMatch(markup, /Overall picture/);
+  assert.doesNotMatch(markup, /Target score/);
 });
 
 test("ExperimentsPage renders the public library with private browser-vault overlays", () => {
