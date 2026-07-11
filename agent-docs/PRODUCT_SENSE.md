@@ -8,6 +8,7 @@ Last verified: 2026-07-10
 - The core loop is: choose a protocol, run a bounded experiment, review what changed, then decide what to do next. Sharing and contribution are future consent-bound extensions, not current default behavior.
 - The assistant is the easiest interface into that loop; the compounding layer is the protocol outcome network and living Health Commons.
 - Hosted landing-page signup should hand users directly toward messaging Murph. Signup-oriented accessible-stage landing auth routes to `/home?initialVisit=true`, where `/home` opens a one-shot welcome dialog with a primary Murph contact CTA and a secondary exploration path. Login-oriented landing CTAs continue to route to ordinary `/home`.
+- The public changelog is a bounded archive, one dated edition per URL-addressable page. API and digest links to an older item resolve to the exact page and anchor that contains it.
 - Product behavior should help people learn from interventions and from people like them without turning health into status theater.
 
 ## Conversation-First Control
