@@ -56,7 +56,7 @@ overrides:
 
 patchedDependencies:
   '@cobuild/review-gpt@0.5.103':
-    hash: 525e12153f7b088ad7a77117f9ce9e0ade3a86b062863c57b2c6481e92229d34
+    hash: 080c09b134b51431a2a1517a6db7335dc537941d8eaac67ef059c030d69fcd3c
     path: patches/@cobuild__review-gpt@0.5.103.patch
   incur@0.4.5:
     hash: a4a70545bebf677aebb5ab89bf04d130ba1469d166e0e08e00096f4158f73a2e
@@ -71,7 +71,7 @@ importers:
         version: 0.1.15
       '@cobuild/review-gpt':
         specifier: ^0.5.103
-        version: 0.5.103(patch_hash=525e12153f7b088ad7a77117f9ce9e0ade3a86b062863c57b2c6481e92229d34)(@cfworker/json-schema@4.1.1)(typescript@5.9.3)
+        version: 0.5.103(patch_hash=080c09b134b51431a2a1517a6db7335dc537941d8eaac67ef059c030d69fcd3c)(@cfworker/json-schema@4.1.1)(typescript@5.9.3)
       '@murphai/health-metrics':
         specifier: workspace:*
         version: link:packages/health-metrics
@@ -10469,7 +10469,7 @@ snapshots:
 
   '@cobuild/repo-tools@0.1.15': {}
 
-  '@cobuild/review-gpt@0.5.103(patch_hash=525e12153f7b088ad7a77117f9ce9e0ade3a86b062863c57b2c6481e92229d34)(@cfworker/json-schema@4.1.1)(typescript@5.9.3)':
+  '@cobuild/review-gpt@0.5.103(patch_hash=080c09b134b51431a2a1517a6db7335dc537941d8eaac67ef059c030d69fcd3c)(@cfworker/json-schema@4.1.1)(typescript@5.9.3)':
     dependencies:
       '@cobuild/repo-tools': 0.1.15
       incur: 0.4.5(patch_hash=a4a70545bebf677aebb5ab89bf04d130ba1469d166e0e08e00096f4158f73a2e)

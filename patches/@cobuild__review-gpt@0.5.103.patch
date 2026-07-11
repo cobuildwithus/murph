@@ -1,15 +1,53 @@
 diff --git a/src/prepare-chatgpt-draft.js b/src/prepare-chatgpt-draft.js
-index 77ac533f5ecd7f53278ba06130b868402795b08a..38641a08cf91d0d6bbe4a1fe1fd61284f60b858b 100644
+index 77ac533f5ecd7f53278ba06130b868402795b08a..7a3beb741bd8dbcfad00a6fb3c7ec15b35700178 100644
 --- a/src/prepare-chatgpt-draft.js
 +++ b/src/prepare-chatgpt-draft.js
-@@ -949,0 +950,3 @@
+@@ -938,20 +938,32 @@ async function openNewTarget(desiredUrl) {
+   }
+   const created = await createBackgroundTarget(browserWsUrl, desiredUrl);
+   if (created?.targetId) {
+-    const createdDeadline = Date.now() + 6000;
+-    while (Date.now() < createdDeadline) {
+-      const listed = await fetchJson('/json/list');
+-      const target = listed.find(
+-        (entry) => entry.type === 'page' && entry.id === created.targetId && entry.webSocketDebuggerUrl
+-      );
+-      if (target) return target;
+-      await sleep(200);
++    let handedOff = false;
 +    try {
-+      await closeBackgroundTarget(created.targetId);
-+    } catch {}
-@@ -954 +957 @@
++      const createdDeadline = Date.now() + 6000;
++      while (Date.now() < createdDeadline) {
++        const listed = await fetchJson('/json/list');
++        const target = listed.find(
++          (entry) => entry.type === 'page' && entry.id === created.targetId && entry.webSocketDebuggerUrl
++        );
++        if (target) {
++          handedOff = true;
++          return target;
++        }
++        await sleep(200);
++      }
++    } finally {
++      if (!handedOff) {
++        try {
++          await closeBackgroundTarget(created.targetId);
++        } catch {}
++      }
+     }
+   }
+   throw new Error(`Created ChatGPT target did not expose a debuggable page for ${desiredUrl}`);
+ }
+
 -async function createBackgroundTarget(browserWsUrl, desiredUrl) {
 +async function sendBrowserCommand(browserWsUrl, method, params = {}) {
-@@ -995,5 +998,2 @@
+   const ws = new WebSocket(browserWsUrl);
+   const pending = new Map();
+   let nextId = 0;
+@@ -992,11 +1004,8 @@ async function createBackgroundTarget(browserWsUrl, desiredUrl) {
+     });
+     ws.send(JSON.stringify({
+       id,
 -      method: 'Target.createTarget',
 -      params: {
 -        url: desiredUrl,
@@ -17,7 +55,13 @@ index 77ac533f5ecd7f53278ba06130b868402795b08a..38641a08cf91d0d6bbe4a1fe1fd61284
 -      },
 +      method,
 +      params,
-@@ -1008,0 +1009,23 @@
+     }));
+     return await Promise.race([response, closed]);
+   } finally {
+@@ -1006,6 +1015,29 @@ async function createBackgroundTarget(browserWsUrl, desiredUrl) {
+   }
+ }
+
 +async function createBackgroundTarget(browserWsUrl, desiredUrl) {
 +  return sendBrowserCommand(browserWsUrl, 'Target.createTarget', {
 +    url: desiredUrl,
@@ -41,15 +85,39 @@ index 77ac533f5ecd7f53278ba06130b868402795b08a..38641a08cf91d0d6bbe4a1fe1fd61284
 +  }
 +}
 +
-@@ -1036,0 +1060,3 @@
+ async function ensureTarget(desiredUrl) {
+   const deadline = Date.now() + timeoutMs;
+   let lastError = null;
+@@ -1033,6 +1065,9 @@ async function connectTargetWebSocket(desiredUrl) {
+       });
+       return { ws, target };
+     } catch (error) {
 +      try {
 +        await closeBackgroundTarget(target?.id);
 +      } catch {}
-@@ -1075,0 +1102 @@
+       lastError = error;
+       await sleep(250);
+     }
+@@ -1073,6 +1108,7 @@ async function main() {
+   const { ws, target } = await connectTargetWebSocket(chatgptUrl).catch((error) => {
+     throw tagStageError(error);
+   });
 +  const pageTargetId = String(target?.id || '');
-@@ -1167 +1193,0 @@
+   try {
+     try {
+
+@@ -1164,7 +1200,6 @@ async function main() {
+   const desiredTargetChatId = extractChatId(desiredTargetUrl?.pathname || '').toLowerCase();
+   const desiredTargetOriginLiteral = JSON.stringify(desiredTargetOrigin);
+   const desiredTargetChatIdLiteral = JSON.stringify(desiredTargetChatId);
 -  const pageTargetId = String(target?.id || '');
-@@ -4905,0 +4932,7 @@
+   const activateCurrentPageForNativeInput = async () => {
+     try {
+       await cdp('Page.bringToFront');
+@@ -4900,6 +4935,13 @@ async function main() {
+     throw tagStageError(error);
+   }
+   } finally {
 +    if (shouldWaitForResponse && pageTargetId) {
 +      try {
 +        await closeBackgroundTarget(pageTargetId);
@@ -57,3 +125,6 @@ index 77ac533f5ecd7f53278ba06130b868402795b08a..38641a08cf91d0d6bbe4a1fe1fd61284
 +        console.warn(`ReviewGPT target cleanup failed: ${errorMessage(error)}`);
 +      }
 +    }
+     try {
+       ws.close();
+     } catch {}

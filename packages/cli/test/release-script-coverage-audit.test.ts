@@ -9,9 +9,11 @@ import {
   rmSync,
   writeFileSync,
 } from 'node:fs'
+import { createRequire } from 'node:module'
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { Script } from 'node:vm'
 import { describe, expect, it } from 'vitest'
 import {
   detectWorkspacePackageCycles,
@@ -44,6 +46,173 @@ const hostedWebPackageJson = JSON.parse(
   scripts?: Record<string, string>
 }
 const auditZipEntryListMaxBufferBytes = 16 * 1024 * 1024
+
+type BrowserCommand = {
+  listPollCount: number
+  method: string
+  params: Record<string, unknown>
+}
+
+// The package keeps this lifecycle function private, so expose it only inside
+// an in-memory test wrapper around the exact installed driver.
+function loadReviewGptOpenTargetHarness(
+  targetReadyAfterPoll: number,
+  listFailureAtPoll?: number,
+) {
+  const driverPath = path.join(
+    repoRoot,
+    'node_modules',
+    '@cobuild',
+    'review-gpt',
+    'src',
+    'prepare-chatgpt-draft.js',
+  )
+  const driverSource = `${readFileSync(driverPath, 'utf8')}\nmodule.exports.__openTargetTest = openNewTarget;\n`
+  const commands: BrowserCommand[] = []
+  let listPollCount = 0
+  let now = 0
+
+  class MockWebSocket {
+    readonly listeners = new Map<string, Array<(event: { data?: string }) => void>>()
+
+    addEventListener(
+      type: string,
+      listener: (event: { data?: string }) => void,
+    ) {
+      const listeners = this.listeners.get(type) ?? []
+      listeners.push(listener)
+      this.listeners.set(type, listeners)
+
+      if (type === 'open') {
+        queueMicrotask(() => this.emit('open', {}))
+      }
+    }
+
+    send(payload: string) {
+      const command = JSON.parse(payload) as {
+        id: number
+        method: string
+        params?: Record<string, unknown>
+      }
+      commands.push({
+        listPollCount,
+        method: command.method,
+        params: command.params ?? {},
+      })
+
+      const result = command.method === 'Target.createTarget'
+        ? { targetId: 'target-1' }
+        : { success: true }
+
+      queueMicrotask(() => {
+        this.emit('message', {
+          data: JSON.stringify({ id: command.id, result }),
+        })
+      })
+    }
+
+    close() {}
+
+    private emit(type: string, event: { data?: string }) {
+      for (const listener of this.listeners.get(type) ?? []) {
+        listener(event)
+      }
+    }
+  }
+
+  class MockDate extends Date {
+    static override now() {
+      return now
+    }
+  }
+
+  const mockSetTimeout = (callback: () => void, delay = 0) => {
+    now += Number(delay)
+    queueMicrotask(callback)
+    return 0
+  }
+  const mockFetch = async (url: string) => {
+    const pathname = new URL(url).pathname
+    if (pathname === '/json/version') {
+      return {
+        json: async () => ({ webSocketDebuggerUrl: 'ws://browser' }),
+        ok: true,
+        status: 200,
+      }
+    }
+    if (pathname === '/json/list') {
+      listPollCount += 1
+      if (listPollCount === listFailureAtPoll) {
+        throw new Error('Mock target-list failure')
+      }
+      const targets = listPollCount >= targetReadyAfterPoll
+        ? [{
+            id: 'target-1',
+            type: 'page',
+            webSocketDebuggerUrl: 'ws://page',
+          }]
+        : []
+      return {
+        json: async () => targets,
+        ok: true,
+        status: 200,
+      }
+    }
+    throw new Error(`Unexpected mock browser endpoint: ${pathname}`)
+  }
+
+  const processForDriver = Object.create(process) as NodeJS.Process
+  Object.defineProperty(processForDriver, 'env', {
+    value: {
+      ...process.env,
+      ORACLE_DRAFT_REMOTE_PORT: '9999',
+      ORACLE_DRAFT_TIMEOUT_MS: '10000',
+      ORACLE_DRAFT_URL: 'https://chatgpt.com/',
+    },
+  })
+  const moduleRecord: { exports: Record<string, unknown> } = { exports: {} }
+  const compiledDriver = new Script(
+    `(function (require, module, exports, __filename, __dirname, process, console, setTimeout, Date, fetch, WebSocket) {\n${driverSource}\n})`,
+    { filename: driverPath },
+  ).runInThisContext()
+  if (typeof compiledDriver !== 'function') {
+    throw new Error('ReviewGPT driver test wrapper did not compile to a function')
+  }
+  Reflect.apply(compiledDriver, undefined, [
+    createRequire(driverPath),
+    moduleRecord,
+    moduleRecord.exports,
+    driverPath,
+    path.dirname(driverPath),
+    processForDriver,
+    console,
+    mockSetTimeout,
+    MockDate,
+    mockFetch,
+    MockWebSocket,
+  ])
+  const openNewTarget = moduleRecord.exports.__openTargetTest
+  if (typeof openNewTarget !== 'function') {
+    throw new Error('ReviewGPT openNewTarget was not available to the test harness')
+  }
+
+  return {
+    commands,
+    getListPollCount: () => listPollCount,
+    openNewTarget: async (desiredUrl: string) => {
+      const target: unknown = await Reflect.apply(openNewTarget, undefined, [desiredUrl])
+      if (
+        !target ||
+        typeof target !== 'object' ||
+        !('id' in target) ||
+        typeof target.id !== 'string'
+      ) {
+        throw new Error('ReviewGPT openNewTarget did not return a target')
+      }
+      return target
+    },
+  }
+}
 
 function runNodeScript(...args: string[]) {
   return spawnSync('node', args, {
@@ -300,12 +469,57 @@ describe('monorepo release flow coverage audit', () => {
     expect(
       existsSync(path.join(repoRoot, 'patches', '@cobuild__review-gpt@0.5.103.patch')),
     ).toBe(true)
-    expect(reviewGptDriver).toContain('await closeBackgroundTarget(created.targetId)')
-    expect(reviewGptDriver).toContain('await closeBackgroundTarget(target?.id)')
+    expect(reviewGptDriver).toContain(
+      [
+        '        if (target) {',
+        '          handedOff = true;',
+        '          return target;',
+        '        }',
+        '        await sleep(200);',
+        '      }',
+        '    } finally {',
+        '      if (!handedOff) {',
+        '        try {',
+        '          await closeBackgroundTarget(created.targetId);',
+        '        } catch {}',
+        '      }',
+        '    }',
+        '  }',
+      ].join('\n'),
+    )
+    expect(reviewGptDriver).toContain(
+      [
+        '      return { ws, target };',
+        '    } catch (error) {',
+        '      try {',
+        '        await closeBackgroundTarget(target?.id);',
+        '      } catch {}',
+        '      lastError = error;',
+      ].join('\n'),
+    )
     expect(reviewGptDriver).toContain("sendBrowserCommand(browserWsUrl, 'Target.closeTarget', {")
     expect(reviewGptDriver).toContain('targetId: normalizedTargetId')
-    expect(reviewGptDriver).toContain('if (shouldWaitForResponse && pageTargetId)')
-    expect(reviewGptDriver).toContain('await closeBackgroundTarget(pageTargetId)')
+    expect(reviewGptDriver).toContain(
+      [
+        '  });',
+        "  const pageTargetId = String(target?.id || '');",
+        '  try {',
+      ].join('\n'),
+    )
+    expect(reviewGptDriver).toContain(
+      [
+        '  } finally {',
+        '    if (shouldWaitForResponse && pageTargetId) {',
+        '      try {',
+        '        await closeBackgroundTarget(pageTargetId);',
+        '      } catch (error) {',
+        '        console.warn(`ReviewGPT target cleanup failed: ${errorMessage(error)}`);',
+        '      }',
+        '    }',
+        '    try {',
+        '      ws.close();',
+      ].join('\n'),
+    )
     expect(reviewGptDriver).not.toContain('if (shouldSend && pageTargetId)')
     expect(existsSync(path.join(repoRoot, 'scripts', 'review-gpt-browser-profile.sh'))).toBe(false)
     expect(existsSync(path.join(repoRoot, 'scripts', 'review-gpt.config.sh'))).toBe(true)
@@ -399,6 +613,68 @@ describe('monorepo release flow coverage audit', () => {
     expect(existsSync(path.join(repoRoot, 'scripts', 'review-gpt.data.config.sh'))).toBe(false)
     expect(existsSync(path.join(repoRoot, 'scripts', 'research-run.mjs'))).toBe(false)
     expect(existsSync(path.join(repoRoot, 'scripts', 'research-init.mjs'))).toBe(false)
+  })
+
+  it('keeps delayed targets alive until discovery and closes only failed discoveries', async () => {
+    const delayedTarget = loadReviewGptOpenTargetHarness(2)
+
+    await expect(
+      delayedTarget.openNewTarget('https://chatgpt.com/'),
+    ).resolves.toMatchObject({ id: 'target-1' })
+    expect(delayedTarget.getListPollCount()).toBe(2)
+    expect(delayedTarget.commands).toEqual([
+      {
+        listPollCount: 0,
+        method: 'Target.createTarget',
+        params: {
+          background: true,
+          url: 'https://chatgpt.com/',
+        },
+      },
+    ])
+
+    const failedTarget = loadReviewGptOpenTargetHarness(Number.POSITIVE_INFINITY)
+    await expect(
+      failedTarget.openNewTarget('https://chatgpt.com/'),
+    ).rejects.toThrow('did not expose a debuggable page')
+    expect(failedTarget.commands).toEqual([
+      {
+        listPollCount: 0,
+        method: 'Target.createTarget',
+        params: {
+          background: true,
+          url: 'https://chatgpt.com/',
+        },
+      },
+      {
+        listPollCount: 30,
+        method: 'Target.closeTarget',
+        params: { targetId: 'target-1' },
+      },
+    ])
+
+    const failedPollTarget = loadReviewGptOpenTargetHarness(
+      Number.POSITIVE_INFINITY,
+      1,
+    )
+    await expect(
+      failedPollTarget.openNewTarget('https://chatgpt.com/'),
+    ).rejects.toThrow('Mock target-list failure')
+    expect(failedPollTarget.commands).toEqual([
+      {
+        listPollCount: 0,
+        method: 'Target.createTarget',
+        params: {
+          background: true,
+          url: 'https://chatgpt.com/',
+        },
+      },
+      {
+        listPollCount: 1,
+        method: 'Target.closeTarget',
+        params: { targetId: 'target-1' },
+      },
+    ])
   })
 
   it('keeps reverse-dependent CLI coverage on the source lane for inboxd-only diffs', () => {
