@@ -1846,6 +1846,7 @@ export async function executeMurphDynamicToolRequest(input: {
   abortSignal?: AbortSignal | null
   codexHome?: string | null
   currentResponseMedia?: readonly AssistantResponseMedia[] | null
+  deliveryContextOrdinal?: number
   env: NodeJS.ProcessEnv
   fetchImpl: typeof fetch
   hostedToolContext?: AssistantHostedToolContext | null
@@ -2033,6 +2034,7 @@ export async function executeMurphDynamicToolRequest(input: {
     case 'group':
       return await executeGroupTool({
         abortSignal: input.abortSignal ?? null,
+        deliveryContextOrdinal: input.deliveryContextOrdinal,
         env: input.env,
         fetchImpl: input.fetchImpl,
         hostedToolContext: input.hostedToolContext ?? null,
@@ -2282,6 +2284,7 @@ function groupAvatarUnavailableToolResult(
 
 async function executeGroupTool(input: {
   abortSignal: AbortSignal | null
+  deliveryContextOrdinal?: number
   env: NodeJS.ProcessEnv
   fetchImpl: typeof fetch
   hostedToolContext: AssistantHostedToolContext | null
@@ -2353,7 +2356,11 @@ async function executeGroupTool(input: {
   }
 
   try {
-    const result = await groupTool.request(request)
+    const result = typeof input.deliveryContextOrdinal === 'number'
+      ? await groupTool.request(request, {
+          deliveryContextOrdinal: input.deliveryContextOrdinal,
+        })
+      : await groupTool.request(request)
     const payload = generatedAvatarCapture
       ? { ...result, generatedImage: generatedAvatarCapture }
       : result

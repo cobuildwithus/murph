@@ -18,6 +18,7 @@ import {
 import type { ParsedHostedLinqProviderEvent } from "./linq-provider-events";
 import { toHostedOnboardingLogIdSuffix } from "./logging";
 import { sha256Hex } from "../primitives";
+import { readHostedDatabaseClock } from "./database-clock";
 
 type HostedLinqProviderEventClient = PrismaClient | Prisma.TransactionClient;
 
@@ -42,7 +43,10 @@ export async function ingestHostedLinqProviderEventTx(input: {
   alertIds: string[];
   duplicate: boolean;
 }> {
-  const receivedAt = input.receivedAt ?? new Date();
+  // The persisted first-ingest timestamp is also a causal fence for reactions.
+  // Keep it on the same database clock as membership transitions so separate
+  // web instances cannot reorder consent mutations through local clock skew.
+  const receivedAt = input.receivedAt ?? await readHostedDatabaseClock(input.prisma);
   const eventLookupKey = createHostedLinqProviderEventLookupKey(input.event.eventId);
   const lineLookupKey = await ensureHostedLinqLineForProviderEventTx({
     event: input.event,

@@ -76,7 +76,8 @@ export interface AssistantHostedFamilyPlanTool {
 }
 
 export interface AssistantHostedGroupToolRequestContext {
-  currentHostedMailboxItemIds: readonly string[]
+  currentHostedMailboxItemIds?: readonly string[]
+  deliveryContextOrdinal?: number
 }
 
 export interface AssistantHostedGroupTool {

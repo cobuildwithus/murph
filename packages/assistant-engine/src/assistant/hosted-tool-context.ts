@@ -85,6 +85,9 @@ export function createAssistantHostedToolContext(input: {
   newsletterTool?: AssistantHostedNewsletterTool | null
   computerToolsAvailable?: boolean
   getDeliveryContext?: () => AssistantHostedToolDeliveryContext
+  getGroupToolMailboxItemIdsForDeliveryContextOrdinal?: (
+    deliveryContextOrdinal: number,
+  ) => readonly string[] | null
   getPhoneCallAcceptedInputIds?: () => readonly string[]
   messageInput: AssistantMessageInput
   phoneCalls?: AssistantPhoneCallPort | null
@@ -101,13 +104,16 @@ export function createAssistantHostedToolContext(input: {
   const sourceGroupTool = input.groupTool ?? null
   const groupTool: AssistantHostedGroupTool | null = sourceGroupTool
     ? {
-        async request(request) {
-          const deliveryContext = readDeliveryContext()
+        async request(request, requestContext) {
+          const deliveryContextOrdinal = requestContext?.deliveryContextOrdinal
+          const currentHostedMailboxItemIds = typeof deliveryContextOrdinal === 'number'
+            ? input.getGroupToolMailboxItemIdsForDeliveryContextOrdinal?.(
+                deliveryContextOrdinal,
+              ) ?? []
+            : readDeliveryContext().messageInput.hostedDeliveryIdempotency
+              ?.inboundMailboxItemIds ?? []
           return await sourceGroupTool.request(request, {
-            currentHostedMailboxItemIds: [
-              ...(deliveryContext.messageInput.hostedDeliveryIdempotency
-                ?.inboundMailboxItemIds ?? []),
-            ],
+            currentHostedMailboxItemIds: [...currentHostedMailboxItemIds],
           })
         },
       }

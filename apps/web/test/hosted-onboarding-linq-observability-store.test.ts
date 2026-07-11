@@ -3620,6 +3620,9 @@ function createObservabilityPrismaFixture() {
   const hostedMailboxItemUpdateMany = vi.fn().mockResolvedValue({ count: 0 });
   const hostedAiUsagePeriodUpdateMany = vi.fn().mockResolvedValue({ count: 1 });
   const prisma = {
+    $queryRaw: vi.fn().mockResolvedValue([{
+      now: new Date("2026-03-26T12:00:02.000Z"),
+    }]),
     $transaction: transaction,
     $executeRaw: executeRaw,
     hostedAiUsagePeriod: {

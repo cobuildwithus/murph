@@ -233,6 +233,7 @@ export function createHostedGroupToolWithLinqThreadContext(input: {
   emailDeliveryContexts?: readonly HostedAssistantEmailDeliveryContext[] | null;
   groupToolPort: NonNullable<HostedRuntimePlatform["groupToolPort"]>;
   linqDeliveryContexts: readonly HostedAssistantLinqDeliveryContext[];
+  readLinqDeliveryContexts?: (() => readonly HostedAssistantLinqDeliveryContext[]) | null;
 }): AssistantHostedGroupTool {
   return {
     async request(
@@ -246,7 +247,8 @@ export function createHostedGroupToolWithLinqThreadContext(input: {
         const selfOptOut = resolveHostedGroupToolSelfOptOutContext({
           currentHostedMailboxItemIds:
             requestContext?.currentHostedMailboxItemIds ?? [],
-          linqDeliveryContexts: input.linqDeliveryContexts,
+          linqDeliveryContexts:
+            input.readLinqDeliveryContexts?.() ?? input.linqDeliveryContexts,
         });
         return await input.groupToolPort.request(
           selfOptOut ? { action: request.action, selfOptOut } : { action: request.action },
@@ -263,7 +265,7 @@ export function createHostedGroupToolWithLinqThreadContext(input: {
         return await input.groupToolPort.request(request);
       }
       const linqThread = resolveHostedGroupToolLinqThreadContext(
-        input.linqDeliveryContexts,
+        input.readLinqDeliveryContexts?.() ?? input.linqDeliveryContexts,
       );
       return await input.groupToolPort.request(
         linqThread ? { ...request, linqThread } : request,
@@ -607,6 +609,9 @@ export async function runHostedWorkspaceAssistantPhase(
                 emailDeliveryContexts: initialEmailDeliveryContexts,
                 groupToolPort: input.runtime.platform.groupToolPort,
                 linqDeliveryContexts: initialLinqDeliveryContexts,
+                readLinqDeliveryContexts: () =>
+                  input.readCurrentAssistantInputBatch?.()?.linqDeliveryContexts
+                  ?? initialLinqDeliveryContexts,
               }),
             }
           : {}),

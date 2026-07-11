@@ -204,6 +204,7 @@ export interface HostedWorkspaceRunnerAssistantPhaseInput {
   now?: () => string;
   platform: HostedRuntimePlatform;
   prepareAutoReplyDelivery?: (() => Promise<HostedWorkspaceRunnerAssistantPhaseDeliveryBarrier | null>) | null;
+  readCurrentAssistantInputBatch?: (() => HostedWorkspaceRunnerAssistantInputBatch | null) | null;
   recordDeferredUsage?: ((record: AssistantUsageRecord) => void) | null;
   shouldYieldBackgroundMaintenance?: (() => boolean) | null;
   workspace: HostedWorkspaceState | null;
@@ -875,6 +876,12 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
       vaultRoot: input.vaultRoot,
     });
   };
+  const initialAssistantContextBatch = initialAssistantInputBatch
+    ?? accumulateHostedWorkspaceRunnerAssistantInputBatch({
+      assistantInputBatchLimit: input.limitPerLane,
+      current: null,
+      result: initialMailboxImport,
+    });
   const assistantPhaseInput = {
     initialAssistantInputBatch,
     initialMailboxImport,
@@ -889,6 +896,29 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
         input,
         stopForegroundMailboxImportLoop,
       }),
+    readCurrentAssistantInputBatch: () => {
+      const latest = checkpointRequestSession.latestAssistantInputBatch();
+      if (!initialAssistantContextBatch) {
+        return latest;
+      }
+      if (!latest) {
+        return initialAssistantContextBatch;
+      }
+      return {
+        assistantInputIds: [
+          ...initialAssistantContextBatch.assistantInputIds,
+          ...latest.assistantInputIds,
+        ],
+        emailDeliveryContexts: [
+          ...initialAssistantContextBatch.emailDeliveryContexts,
+          ...latest.emailDeliveryContexts,
+        ],
+        linqDeliveryContexts: [
+          ...initialAssistantContextBatch.linqDeliveryContexts,
+          ...latest.linqDeliveryContexts,
+        ],
+      };
+    },
     recordDeferredUsage(record: AssistantUsageRecord): void {
       if (deferredUsageCaptureStarted) {
         startDeferredUsageRecords([record]);

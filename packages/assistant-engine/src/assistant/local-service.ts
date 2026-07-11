@@ -563,6 +563,7 @@ export async function sendAssistantMessageLocal(
           session: currentSession,
           sharedPlan,
         })
+        const replyDeliveryContexts: AssistantReplyDeliveryContext[] = []
         const vaultFileSendTargetFingerprint =
           resolveAssistantVaultFileSendTargetFingerprint(currentDeliveryFields)
         // Captured once so the narrowing survives into the sendVaultFile
@@ -586,6 +587,12 @@ export async function sendAssistantMessageLocal(
               getDeliveryContext: () => ({
                 messageInput: currentInput,
                 session: currentSession,
+              }),
+              getGroupToolMailboxItemIdsForDeliveryContextOrdinal: (
+                deliveryContextOrdinal,
+              ) => resolveAssistantGroupToolMailboxItemIdsForDeliveryContextOrdinal({
+                contexts: replyDeliveryContexts,
+                deliveryContextOrdinal,
               }),
               getPhoneCallAcceptedInputIds: () =>
                 resolveAssistantPhoneCallAcceptedInputIds({
@@ -792,9 +799,7 @@ export async function sendAssistantMessageLocal(
             sessionId: currentSession.sessionId,
           })
         }
-        const replyDeliveryContexts: AssistantReplyDeliveryContext[] = [
-          pickAssistantReplyDeliveryContext(currentInput),
-        ]
+        replyDeliveryContexts.push(pickAssistantReplyDeliveryContext(currentInput))
         const acceptedInputIdsByDeliveryContextOrdinal: string[][] = [
           [...acceptedInputIdsForProviderRequest],
         ]
@@ -2137,6 +2142,33 @@ function resolveAssistantReplyDeliveryContextForSegment(input: {
     context: null,
     invalidDeliveryContextOrdinal: input.deliveryContextOrdinal,
   }
+}
+
+function resolveAssistantGroupToolMailboxItemIdsForDeliveryContextOrdinal(input: {
+  contexts: readonly AssistantReplyDeliveryContext[]
+  deliveryContextOrdinal: number
+}): readonly string[] | null {
+  if (
+    !Number.isInteger(input.deliveryContextOrdinal)
+    || input.deliveryContextOrdinal < 0
+    || input.deliveryContextOrdinal >= input.contexts.length
+  ) {
+    return null
+  }
+
+  const priorMailboxItemIds = new Set(
+    input.contexts
+      .slice(0, input.deliveryContextOrdinal)
+      .flatMap((context) => context.hostedDeliveryIdempotency?.inboundMailboxItemIds ?? [])
+      .map((itemId) => itemId.trim())
+      .filter(Boolean),
+  )
+  return [...new Set(
+    (input.contexts[input.deliveryContextOrdinal]?.hostedDeliveryIdempotency
+      ?.inboundMailboxItemIds ?? [])
+      .map((itemId) => itemId.trim())
+      .filter((itemId) => itemId.length > 0 && !priorMailboxItemIds.has(itemId)),
+  )]
 }
 
 function isManualAssistantTurnTrigger(

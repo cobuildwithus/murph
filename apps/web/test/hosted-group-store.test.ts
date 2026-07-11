@@ -95,7 +95,9 @@ function buildTx(input?: {
   activeShareAlreadyExists?: boolean;
   activeDestinationGrantCount?: number;
   activeGroupGrantCount?: number;
+  databaseNow?: Date;
   existingMembershipId?: string | null;
+  existingMembershipJoinedAt?: Date | null;
   existingMembershipLeftAt?: Date | null;
   offerMessageLookupKey?: string;
   offerProjectionKinds?: string[];
@@ -124,7 +126,9 @@ function buildTx(input?: {
   };
 } {
   return createPrismaStub({
-    $queryRaw: vi.fn(async () => []),
+    $queryRaw: vi.fn(async () => [{
+      now: input?.databaseNow ?? new Date("2026-06-01T00:00:00.000Z"),
+    }]),
     hostedGroup: {
       findUnique: vi.fn(async (args: {
         where: { id?: string; joinCode?: string; runtimeMemberId?: string };
@@ -206,7 +210,13 @@ function buildTx(input?: {
       create: vi.fn(async () => ({ id: "membership_created" })),
       findUnique: vi.fn(async () => {
         return input?.existingMembershipId
-          ? { id: input.existingMembershipId, leftAt: input.existingMembershipLeftAt ?? null }
+          ? {
+              id: input.existingMembershipId,
+              joinedAt: input.existingMembershipJoinedAt === undefined
+                ? new Date("2026-06-01T00:00:00.000Z")
+                : input.existingMembershipJoinedAt,
+              leftAt: input.existingMembershipLeftAt ?? null,
+            }
           : null;
       }),
       update: vi.fn(async (args: { where: { id: string } }) => ({ id: args.where.id })),
@@ -485,11 +495,12 @@ describe("acceptHostedGroupJoinCodeTx", () => {
   });
 
   it("reactivates a left membership only through an explicit join", async () => {
+    const now = new Date("2026-07-03T00:00:00.000Z");
     const tx = buildTx({
+      databaseNow: now,
       existingMembershipId: "membership_existing",
       existingMembershipLeftAt: new Date("2026-07-02T00:00:00.000Z"),
     });
-    const now = new Date("2026-07-03T00:00:00.000Z");
 
     await expect(acceptHostedGroupJoinCodeTx({
       joinCode: "join_1",
@@ -527,7 +538,7 @@ describe("acceptHostedGroupJoinCodeTx", () => {
       threadIdentityLookupKeyReadCandidates: ["hbidx:external-thread-identity:v1:thread"],
       tx,
     })).rejects.toMatchObject({
-      code: "HOSTED_GROUP_JOIN_REACTION_PREDATES_LEAVE",
+      code: "HOSTED_GROUP_JOIN_REACTION_PREDATES_MEMBERSHIP",
       httpStatus: 409,
     });
 
@@ -549,7 +560,7 @@ describe("acceptHostedGroupJoinCodeTx", () => {
       threadIdentityLookupKeyReadCandidates: ["hbidx:external-thread-identity:v1:thread"],
       tx,
     })).rejects.toMatchObject({
-      code: "HOSTED_GROUP_JOIN_REACTION_PREDATES_LEAVE",
+      code: "HOSTED_GROUP_JOIN_REACTION_PREDATES_MEMBERSHIP",
       httpStatus: 409,
     });
 
@@ -558,12 +569,13 @@ describe("acceptHostedGroupJoinCodeTx", () => {
   });
 
   it("accepts a genuinely later join-offer reaction after a leave", async () => {
+    const now = new Date("2026-07-03T00:00:00.000Z");
     const tx = buildTx({
       activeGroupGrantCount: 0,
+      databaseNow: now,
       existingMembershipId: "membership_existing",
       existingMembershipLeftAt: new Date("2026-07-02T00:00:00.000Z"),
     });
-    const now = new Date("2026-07-03T00:00:00.000Z");
 
     await expect(acceptHostedGroupJoinOfferTx({
       memberId: "member_grantor",
@@ -585,6 +597,68 @@ describe("acceptHostedGroupJoinCodeTx", () => {
       },
       select: { id: true },
     });
+  });
+
+  it("rejects a replayed reaction from before the active membership epoch", async () => {
+    const tx = buildTx({
+      existingMembershipId: "membership_existing",
+      existingMembershipJoinedAt: new Date("2026-07-03T00:00:00.000Z"),
+    });
+
+    await expect(acceptHostedGroupJoinOfferTx({
+      memberId: "member_grantor",
+      messageLookupKeyReadCandidates: ["hbidx:linq-message:v1:offer"],
+      now: new Date("2026-07-01T00:00:00.000Z"),
+      threadIdentityLookupKeyReadCandidates: ["hbidx:external-thread-identity:v1:thread"],
+      tx,
+    })).rejects.toMatchObject({
+      code: "HOSTED_GROUP_JOIN_REACTION_PREDATES_MEMBERSHIP",
+      httpStatus: 409,
+    });
+
+    expect(mocks.grantHostedVaultShareTx).not.toHaveBeenCalled();
+    expect(mocks.revokeHostedVaultSharesWithCleanupTx).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when a legacy active membership has no causal epoch", async () => {
+    const tx = buildTx({
+      existingMembershipId: "membership_existing",
+      existingMembershipJoinedAt: null,
+    });
+
+    await expect(acceptHostedGroupJoinOfferTx({
+      memberId: "member_grantor",
+      messageLookupKeyReadCandidates: ["hbidx:linq-message:v1:offer"],
+      now: new Date("2026-07-04T00:00:00.000Z"),
+      threadIdentityLookupKeyReadCandidates: ["hbidx:external-thread-identity:v1:thread"],
+      tx,
+    })).rejects.toMatchObject({
+      code: "HOSTED_GROUP_JOIN_REACTION_PREDATES_MEMBERSHIP",
+      httpStatus: 409,
+    });
+
+    expect(mocks.grantHostedVaultShareTx).not.toHaveBeenCalled();
+  });
+
+  it("treats the reaction that established the active epoch as an idempotent replay", async () => {
+    const joinedAt = new Date("2026-07-03T00:00:00.000Z");
+    const tx = buildTx({
+      existingMembershipId: "membership_existing",
+      existingMembershipJoinedAt: joinedAt,
+    });
+
+    await expect(acceptHostedGroupJoinOfferTx({
+      memberId: "member_grantor",
+      messageLookupKeyReadCandidates: ["hbidx:linq-message:v1:offer"],
+      now: joinedAt,
+      threadIdentityLookupKeyReadCandidates: ["hbidx:external-thread-identity:v1:thread"],
+      tx,
+    })).rejects.toMatchObject({
+      code: "HOSTED_GROUP_JOIN_REACTION_PREDATES_MEMBERSHIP",
+      httpStatus: 409,
+    });
+
+    expect(mocks.grantHostedVaultShareTx).not.toHaveBeenCalled();
   });
 
   it("records join-offer bindings as message lookup keys and projection snapshots", async () => {
@@ -895,6 +969,24 @@ describe("leaveHostedGroupMemberTx", () => {
       vaultShareCleanupSignals: [],
     });
 
+    expect(mocks.revokeHostedVaultSharesWithCleanupTx).not.toHaveBeenCalled();
+    expect(tx.hostedGroupMember.update).not.toHaveBeenCalled();
+  });
+
+  it("keeps leave safe for a member who never joined the group", async () => {
+    const tx = buildTx();
+
+    await expect(leaveHostedGroupMemberTx({
+      groupRuntimeMemberId: "member_group_runtime",
+      memberId: "member_outside_group",
+      tx,
+    })).resolves.toEqual({
+      kind: "already_left",
+      revokedCount: 0,
+      vaultShareCleanupSignals: [],
+    });
+
+    expect(tx.$queryRaw).toHaveBeenCalledTimes(2);
     expect(mocks.revokeHostedVaultSharesWithCleanupTx).not.toHaveBeenCalled();
     expect(tx.hostedGroupMember.update).not.toHaveBeenCalled();
   });
@@ -1287,7 +1379,9 @@ function buildGroupLinkTx(input: {
   let groupJoinCode = input.joinCode ?? null;
   let groupKind = "friends";
   return createPrismaStub({
-    $queryRaw: vi.fn(async () => []),
+    $queryRaw: vi.fn(async () => [{
+      now: new Date("2026-07-01T00:00:00.000Z"),
+    }]),
     hostedGroup: {
       create: vi.fn(async (args: {
         data?: {
@@ -1456,7 +1550,9 @@ function buildStatefulJoinOfferTx(): PrismaClient & {
   }> = [];
 
   return createPrismaStub({
-    $queryRaw: vi.fn(async () => []),
+    $queryRaw: vi.fn(async () => [{
+      now: new Date("2026-07-01T00:00:00.000Z"),
+    }]),
     hostedGroup: {
       findUnique: vi.fn(async (args: {
         where: { id?: string };

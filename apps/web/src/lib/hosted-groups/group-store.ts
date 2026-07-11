@@ -13,6 +13,7 @@ import {
 import { assertHostedLaunchRequiredConsentGranted } from "../legal/consent";
 import { hasHostedRuntimeActiveAccess } from "../hosted-mailbox/runtime-access";
 import { createHostedLinqMessageLookupKey } from "../hosted-onboarding/contact-privacy";
+import { readHostedDatabaseClock } from "../hosted-onboarding/database-clock";
 import { assertHostedMemberNotSuspended } from "../hosted-onboarding/entitlement";
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
 import {
@@ -501,7 +502,7 @@ export async function acceptHostedGroupJoinCodeTx(input: {
     memberId: input.memberId,
     now: input.now,
     policyProjectionScopes: null,
-    rejectReactionAtOrBeforeLeave: false,
+    rejectReactionAtOrBeforeMembershipBoundary: false,
     selectedVaultShareProjectionScopes:
       input.selectedVaultShareProjectionScopes
       ?? fixedProjectionKindsToScopes(input.selectedVaultShareProjectionKinds ?? []),
@@ -683,7 +684,7 @@ export async function acceptHostedGroupJoinOfferTx(input: {
     memberId: input.memberId,
     now: input.now,
     policyProjectionScopes: selectedVaultShareProjectionScopes,
-    rejectReactionAtOrBeforeLeave: true,
+    rejectReactionAtOrBeforeMembershipBoundary: true,
     selectedVaultShareProjectionScopes,
     tx: input.tx,
   });
@@ -726,7 +727,7 @@ async function acceptHostedGroupJoinTx(input: {
   memberId: string;
   now: Date;
   policyProjectionScopes: readonly HostedVaultShareProjectionScope[] | null;
-  rejectReactionAtOrBeforeLeave: boolean;
+  rejectReactionAtOrBeforeMembershipBoundary: boolean;
   selectedVaultShareProjectionScopes: readonly HostedVaultShareProjectionScope[];
   tx: Prisma.TransactionClient;
 }): Promise<HostedGroupJoinAcceptanceTxResult> {
@@ -794,16 +795,33 @@ async function acceptHostedGroupJoinTx(input: {
 
   const existingMembership = await input.tx.hostedGroupMember.findUnique({
     where: { groupId_memberId: { groupId: group.id, memberId: input.memberId } },
-    select: { id: true, leftAt: true },
+    select: { id: true, joinedAt: true, leftAt: true },
   });
+  const membershipBoundary = existingMembership?.leftAt ?? existingMembership?.joinedAt ?? null;
+  if (
+    input.rejectReactionAtOrBeforeMembershipBoundary
+    && existingMembership
+    && (
+      !membershipBoundary
+      || input.now.getTime() <= membershipBoundary.getTime()
+    )
+  ) {
+    throw hostedOnboardingError({
+      code: "HOSTED_GROUP_JOIN_REACTION_PREDATES_MEMBERSHIP",
+      httpStatus: 409,
+      message: "This reaction was recorded before your current group membership.",
+      retryable: false,
+    });
+  }
   let membershipId: string;
   let alreadyMember = false;
   if (!existingMembership) {
+    const membershipChangedAt = await readHostedDatabaseClock(input.tx);
     const created = await input.tx.hostedGroupMember.create({
       data: {
         id: generateHostedGroupMemberId(),
         groupId: group.id,
-        joinedAt: input.now,
+        joinedAt: membershipChangedAt,
         memberId: input.memberId,
         role: group.ownerMemberId === input.memberId ? "owner" : "member",
       },
@@ -811,21 +829,11 @@ async function acceptHostedGroupJoinTx(input: {
     });
     membershipId = created.id;
   } else if (existingMembership.leftAt) {
-    if (
-      input.rejectReactionAtOrBeforeLeave
-      && input.now.getTime() <= existingMembership.leftAt.getTime()
-    ) {
-      throw hostedOnboardingError({
-        code: "HOSTED_GROUP_JOIN_REACTION_PREDATES_LEAVE",
-        httpStatus: 409,
-        message: "This reaction was recorded before you left the group.",
-        retryable: false,
-      });
-    }
+    const membershipChangedAt = await readHostedDatabaseClock(input.tx);
     const rejoined = await input.tx.hostedGroupMember.update({
       where: { id: existingMembership.id },
       data: {
-        joinedAt: input.now,
+        joinedAt: membershipChangedAt,
         leftAt: null,
         role: group.ownerMemberId === input.memberId ? "owner" : "member",
       },
@@ -949,7 +957,7 @@ export async function revokeHostedGroupMemberEmailShareTx(input: {
 }
 
 export async function leaveHostedGroupMemberTx(input: {
-  clock?: () => Date;
+  clock?: () => Date | Promise<Date>;
   groupRuntimeMemberId: string;
   memberId: string;
   tx: Prisma.TransactionClient;
@@ -1007,7 +1015,9 @@ export async function leaveHostedGroupMemberTx(input: {
 
   // Capture the leave fence only after the membership and group locks are held.
   // This makes it a serialization timestamp instead of a request-start timestamp.
-  const now = input.clock?.() ?? new Date();
+  const now = input.clock
+    ? await input.clock()
+    : await readHostedDatabaseClock(input.tx);
   const revoked = await revokeHostedVaultSharesWithCleanupTx({
     destinationMemberId: group.runtimeMemberId,
     grantorMemberId: input.memberId,

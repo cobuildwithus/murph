@@ -6425,6 +6425,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         messageId: "provider_msg_fallback",
       })),
       prisma: prisma as never,
+      receivedAt: new Date("2026-03-26T12:00:02.000Z"),
     });
     const response = await handleHostedOnboardingLinqWebhook({
       prisma,
@@ -7740,6 +7741,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         messageId: "provider_msg_123",
       })),
       prisma: prisma as never,
+      receivedAt: new Date("2026-03-26T12:00:02.000Z"),
     });
     const response = await handleHostedOnboardingLinqWebhook({
       prisma,

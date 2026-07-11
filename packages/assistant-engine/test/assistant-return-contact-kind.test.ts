@@ -107,6 +107,50 @@ describe('assistant return contact kind', () => {
       { currentHostedMailboxItemIds: ['mailbox_bob', 'mailbox_alice'] },
     )
   })
+
+  it('binds group-tool requests to the mailbox inputs introduced by the captured ordinal', async () => {
+    const request = vi.fn(async () => ({
+      action: 'leave_current' as const,
+      result: { status: 'already_left' as const },
+    }))
+    const messageInput = createMessageInput({
+      channel: 'linq',
+      hostedDeliveryIdempotency: {
+        assistantTurnOrdinal: 2,
+        conversationId: 'conversation-123',
+        inboundMailboxItemIds: ['mailbox_bob', 'mailbox_alice'],
+        recipientKey: null,
+      },
+    })
+    const hostedToolContext = createAssistantHostedToolContext({
+      getGroupToolMailboxItemIdsForDeliveryContextOrdinal: (ordinal) => {
+        if (ordinal === 0) return ['mailbox_bob']
+        if (ordinal === 1) return ['mailbox_alice']
+        return null
+      },
+      groupTool: { request },
+      messageInput,
+      session: createAssistantSession(),
+    })
+
+    await hostedToolContext.groupTool?.request(
+      { action: 'leave_current' },
+      { deliveryContextOrdinal: 1 },
+    )
+    expect(request).toHaveBeenLastCalledWith(
+      { action: 'leave_current' },
+      { currentHostedMailboxItemIds: ['mailbox_alice'] },
+    )
+
+    await hostedToolContext.groupTool?.request(
+      { action: 'leave_current' },
+      { deliveryContextOrdinal: 99 },
+    )
+    expect(request).toHaveBeenLastCalledWith(
+      { action: 'leave_current' },
+      { currentHostedMailboxItemIds: [] },
+    )
+  })
 })
 
 function createMessageInput(input: {

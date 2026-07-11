@@ -336,7 +336,7 @@ describe("handleHostedGroupJoinOfferReaction", () => {
 
   it("ignores a reaction first received before the member left", async () => {
     mocks.acceptHostedGroupJoinOfferTx.mockRejectedValue(hostedOnboardingError({
-      code: "HOSTED_GROUP_JOIN_REACTION_PREDATES_LEAVE",
+      code: "HOSTED_GROUP_JOIN_REACTION_PREDATES_MEMBERSHIP",
       httpStatus: 409,
       message: "This reaction was recorded before you left the group.",
       retryable: false,
@@ -348,7 +348,7 @@ describe("handleHostedGroupJoinOfferReaction", () => {
       event,
       prisma,
     })).resolves.toEqual({
-      reason: "reaction_predates_leave",
+      reason: "reaction_predates_membership",
       status: "ignored",
     });
 

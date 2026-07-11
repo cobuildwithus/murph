@@ -400,7 +400,7 @@ describe("createHostedGroupToolWithLinqThreadContext", () => {
     }
   });
 
-  it("does not reuse the initial sender for a late steered mailbox input", async () => {
+  it("uses the authenticated sender context for a late steered mailbox input", async () => {
     const request = vi.fn().mockResolvedValue({
       action: "leave_current",
       result: {
@@ -408,15 +408,17 @@ describe("createHostedGroupToolWithLinqThreadContext", () => {
         unavailableReason: "sender_unavailable",
       },
     });
+    const linqDeliveryContexts = [
+      buildLinqDeliveryContext({
+        currentInbound: buildCurrentInbound("mailbox_bob"),
+        directRecipientPhoneNumber: "+15550000001",
+        routeAuthority: ROUTE_AUTHORITY,
+      }),
+    ];
     const groupTool = createHostedGroupToolWithLinqThreadContext({
       groupToolPort: { request },
-      linqDeliveryContexts: [
-        buildLinqDeliveryContext({
-          currentInbound: buildCurrentInbound("mailbox_bob"),
-          directRecipientPhoneNumber: "+15550000001",
-          routeAuthority: ROUTE_AUTHORITY,
-        }),
-      ],
+      linqDeliveryContexts,
+      readLinqDeliveryContexts: () => linqDeliveryContexts,
     });
 
     await groupTool.request(
@@ -431,9 +433,26 @@ describe("createHostedGroupToolWithLinqThreadContext", () => {
       },
     });
 
+    linqDeliveryContexts.push(buildLinqDeliveryContext({
+      currentInbound: buildCurrentInbound("mailbox_alice"),
+      directRecipientPhoneNumber: "+15550000002",
+      routeAuthority: ROUTE_AUTHORITY,
+    }));
     await groupTool.request(
       { action: "leave_current" },
       { currentHostedMailboxItemIds: ["mailbox_alice"] },
+    );
+    expect(request).toHaveBeenLastCalledWith({
+      action: "leave_current",
+      selfOptOut: {
+        senderHandle: "+15550000002",
+        source: "linq",
+      },
+    });
+
+    await groupTool.request(
+      { action: "leave_current" },
+      { currentHostedMailboxItemIds: ["mailbox_unknown"] },
     );
     expect(request).toHaveBeenLastCalledWith({ action: "leave_current" });
   });

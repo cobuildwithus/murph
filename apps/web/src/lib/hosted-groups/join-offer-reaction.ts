@@ -30,7 +30,7 @@ type HostedGroupJoinOfferReactionSkipReason =
   | "offer_revoked"
   | "not_a_member"
   | "reaction_removed"
-  | "reaction_predates_leave"
+  | "reaction_predates_membership"
   | "unsupported_reaction";
 
 export type HostedGroupJoinOfferReactionResult =
@@ -172,8 +172,8 @@ function readHostedGroupJoinOfferReactionSkipReason(
   if (error.code === "HOSTED_GROUP_JOIN_OFFER_REVOKED") {
     return "offer_revoked";
   }
-  if (error.code === "HOSTED_GROUP_JOIN_REACTION_PREDATES_LEAVE") {
-    return "reaction_predates_leave";
+  if (error.code === "HOSTED_GROUP_JOIN_REACTION_PREDATES_MEMBERSHIP") {
+    return "reaction_predates_membership";
   }
   if (
     error.code === "HOSTED_GROUP_JOIN_OFFER_NOT_FOUND"

@@ -3155,6 +3155,7 @@ async function runCodexAppServerTurnOnProcess(
           ? AbortSignal.any([input.abortSignal, dynamicToolAbortController.signal])
           : dynamicToolAbortController.signal,
         codexHome: input.codexHome ?? input.env.CODEX_HOME ?? null,
+        deliveryContextOrdinal: dynamicToolRequestDeliveryContextOrdinal,
         env: input.env,
         fetchImpl: input.fetchImpl,
         hostedGeneratedImageUploader: input.hostedGeneratedImageUploader,

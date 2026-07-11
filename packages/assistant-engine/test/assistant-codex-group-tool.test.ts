@@ -204,6 +204,34 @@ describe("murph.group dynamic tool", () => {
     }))?.kind).toBe("invalid-group-arguments");
   });
 
+  it("forwards the captured delivery-context ordinal to self-opt-out execution", async () => {
+    const groupRequest = vi.fn(async () => ({
+      action: "leave_current" as const,
+      result: { status: "already_left" as const },
+    }));
+    const request = readMurphDynamicToolRequest(groupToolCall({
+      action: "leave_current",
+    }));
+    if (!request || request.kind !== "group") {
+      throw new Error("Expected group request.");
+    }
+
+    await executeMurphDynamicToolRequest({
+      deliveryContextOrdinal: 2,
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext: createGroupHostedToolContext({ groupRequest }),
+      nextUsageOrdinal: () => 1,
+      progressDelivery: null,
+      request,
+    });
+
+    expect(groupRequest).toHaveBeenCalledWith(
+      { action: "leave_current" },
+      { deliveryContextOrdinal: 2 },
+    );
+  });
+
   it("parses set_chat_avatar arguments without accepting model-supplied URLs or targets", () => {
     expect(readMurphDynamicToolRequest(groupToolCall({
       action: "set_chat_avatar",

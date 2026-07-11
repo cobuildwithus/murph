@@ -13552,6 +13552,8 @@ describe("hosted workspace runtime entrypoint", () => {
     const assistantPhaseLinqContextTargets: string[][] = [];
     const assistantPhaseLinqContextRouteThreadIds: string[][] = [];
     const assistantPhaseLinqContextInboundItemIds: string[][] = [];
+    const liveAssistantLinqContextTargets: string[][] = [];
+    const liveAssistantLinqContextInboundItemIds: string[][] = [];
     const firstFreshImportComplete = createDeferred<void>();
     const secondFreshImportComplete = createDeferred<void>();
     let assistantPhaseCalls = 0;
@@ -13722,6 +13724,22 @@ describe("hosted workspace runtime entrypoint", () => {
               );
               runtimeWakeSignal.notify();
               await secondFreshImportComplete.promise;
+              await waitUntil(() => {
+                assert.equal(
+                  phaseInput.readCurrentAssistantInputBatch?.()
+                    ?.linqDeliveryContexts.length ?? 0,
+                  2,
+                );
+              });
+              const liveBatch = phaseInput.readCurrentAssistantInputBatch?.();
+              liveAssistantLinqContextTargets.push(
+                liveBatch?.linqDeliveryContexts.map((context) => context.target ?? "") ?? [],
+              );
+              liveAssistantLinqContextInboundItemIds.push(
+                liveBatch?.linqDeliveryContexts.map(
+                  (context) => context.currentInbound?.mailboxItemId ?? "",
+                ) ?? [],
+              );
             }
 
             const assistantRedactedStatus: HostedRuntimeRedactedJson = {
@@ -13758,6 +13776,11 @@ describe("hosted workspace runtime entrypoint", () => {
       assert.deepEqual(assistantPhaseLinqContextInboundItemIds[2], [
         "mailbox_item_entrypoint_foreground_context_replay_conversation_3",
       ]);
+      assert.deepEqual(liveAssistantLinqContextTargets, [["thread_1", "thread_3"]]);
+      assert.deepEqual(liveAssistantLinqContextInboundItemIds, [[
+        "mailbox_item_entrypoint_foreground_context_replay_conversation_1",
+        "mailbox_item_entrypoint_foreground_context_replay_conversation_3",
+      ]]);
       assert.ok(events.includes(
         "mailbox.importItem:mailbox_item_entrypoint_foreground_context_replay_consumed_2:consumed",
       ));
