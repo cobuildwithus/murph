@@ -72,7 +72,7 @@ jobs:
       - name: Assemble hosted-local runner bundle
         env:
           MURPH_RUNNER_BUNDLE_SKIP_PACK_PREFLIGHTS: "1"
-          # The linq-webhook scenario needs the bundle-local e2e parser
+          # The linq-webhook-audio scenario needs the bundle-local e2e parser
           # toolchain stub (ffmpeg); other scenarios ignore the extra files.
           MURPH_RUNNER_BUNDLE_TEST_PARSER_TOOLCHAIN: "1"
         run: pnpm --dir apps/cloudflare runner:bundle:hosted-local
@@ -123,25 +123,40 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - name: Codex image media delivery E2E
-            slug: codex-image-media-delivery
-            scenarios: codex-image-media-delivery
-          - name: Linq scheduled reminder E2E
+          - name: Codex media + provider egress E2E
+            slug: codex-media-provider-egress
+            scenarios: codex-image-media-delivery openai-egress-authority provider-egress-token-bridge warm-reuse-egress
+          - name: Linq reminder + onboarding follow-up E2E
             fastGate: "1"
-            slug: linq-scheduled-reminder
-            scenarios: linq-scheduled-reminder
-          - name: Linq delivery + Temporal orchestration E2E
+            slug: linq-reminder-onboarding-followup
+            scenarios: linq-scheduled-reminder linq-onboarding-followup
+          - name: Linq delivery + recovery + Temporal E2E
             fastGate: "1"
-            slug: linq-delivery-temporal-orchestration
-            scenarios: linq-delivery temporal-orchestration
+            slug: linq-delivery-recovery-temporal
+            scenarios: linq-delivery linq-lost-active-operation temporal-orchestration timezone-injection
           - name: Telegram + idle checkpoint E2E
             slug: telegram-idle-checkpoint
             scenarios: telegram idle-checkpoint-deferred-progress direct-r2-presigned-put
-          # linq-webhook gates signed webhook handling plus text, PDF, and
-          # image media through the hosted container path.
+          # linq-webhook-audio gates the Worker-mediated Workers AI transcription
+          # path: audio media flows through the container parser drain, the
+          # remote-transcription provider, and the murph-transcribe.worker
+          # egress handler with a deterministic fake AI binding from the
+          # hosted-local test entrypoint.
           - name: Linq webhook media + device connect E2E
             slug: linq-webhook-device-connect
-            scenarios: linq-webhook device-connect
+            scenarios: linq-webhook linq-webhook-audio device-connect
+          - name: Runtime checkpoint durability E2E
+            slug: runtime-checkpoint-durability
+            scenarios: canonical-receipt-lost-ack-recovery snapshot-publication-fallback shutdown-checkpoint-conversation-ahead
+          - name: Delivery ambiguity + restart E2E
+            slug: delivery-ambiguity-restart
+            scenarios: retryable-outbox-foreground-restart usage-limit-ambiguous-send
+          - name: Linq route authority + admission E2E
+            slug: linq-route-authority-admission
+            scenarios: linq-group-route-drift linq-home-line-reroute-retry family-sponsored-group-roundtrip linq-unknown-first-contact-fallback
+          - name: Sensitive effect + handoff E2E
+            slug: sensitive-effect-handoff
+            scenarios: vault-file-approval-resume retell-call-result-roundtrip computer-handoff-linq-roundtrip
           - name: Junction wearable direct-resource replay E2E
             slug: junction-wearable-direct-resource-replay
             scenarios: device-sync-junction-wearable-direct-resource-replay
@@ -243,3 +258,36 @@ jobs:
             .artifacts/cloudflare-hosted-e2e/*.log
             .artifacts/hosted-local/**/state.json
           if-no-files-found: warn
+
+  hosted-e2e-required:
+    name: Hosted E2E required gate
+    runs-on: ubuntu-24.04
+    needs:
+      - runner-bundle
+      - hosted-scenarios
+    if: ${{ always() }}
+    steps:
+      - name: Check hosted E2E jobs
+        run: |
+          if [[ "${{ needs.runner-bundle.result }}" != "success" ]]; then
+            echo "Hosted runner bundle job failed or did not complete."
+            exit 1
+          fi
+          if [[ "${{ needs.hosted-scenarios.result }}" != "success" ]]; then
+            echo "Hosted E2E scenario matrix failed or did not complete."
+            exit 1
+          fi
+
+  hosted-device-sync-e2e-required:
+    name: Hosted device-sync E2E required gate
+    runs-on: ubuntu-24.04
+    needs:
+      - hosted-scenarios
+    if: ${{ always() }}
+    steps:
+      - name: Check hosted device-sync E2E job
+        run: |
+          if [[ "${{ needs.hosted-scenarios.result }}" != "success" ]]; then
+            echo "Hosted E2E scenario matrix, including Junction replay, failed or did not complete."
+            exit 1
+          fi
