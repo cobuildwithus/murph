@@ -2954,7 +2954,7 @@ async function runPrePlanningMemberPreferencesMailboxPhase(input: {
   }
 
   return {
-    continueAssistantLane: true,
+    continueAssistantLane: false,
     result: mergeHostedAssistantPhaseResults(
       result,
       buildPrePlanningMemberPreferencesMailboxPendingResult({

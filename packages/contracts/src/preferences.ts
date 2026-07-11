@@ -323,6 +323,12 @@ export function isAssistantPersonalitySettingId(
   );
 }
 
+export function isAssistantPersonalityScore(
+  value: unknown,
+): value is AssistantPersonalityScores[AssistantPersonalitySettingId] {
+  return assistantPersonalityScoreSchema.safeParse(value).success;
+}
+
 export function resolveAssistantPersonalityScores(
   preferences?: AssistantPersonalityPreferences | null,
 ): AssistantPersonalityScores {

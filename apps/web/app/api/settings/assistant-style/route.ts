@@ -1,6 +1,8 @@
 import {
+  assistantPersonalityPreferencesSchema,
   isAssistantTonePreference,
   isAssistantVoiceOptionId,
+  type AssistantPersonalityPreferences,
   type AssistantTonePreference,
   type AssistantVoiceOptionId,
 } from "@murphai/contracts";
@@ -44,7 +46,6 @@ export const POST = withJsonError(async (request: Request) => {
       occurredAt: now.toISOString(),
       preferences,
       prisma: tx,
-      sourceType: "settings.assistant-style",
     })
   ), HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
 
@@ -56,6 +57,7 @@ export const POST = withJsonError(async (request: Request) => {
   }
 
   return jsonOk({
+    assistantPersonality: result.assistantPersonality,
     assistantTone: result.assistantTone,
     assistantVoice: result.assistantVoice,
     ok: true,
@@ -67,6 +69,9 @@ export const POST = withJsonError(async (request: Request) => {
 function parseAssistantStyleRequestBody(
   body: Record<string, unknown>,
 ): HostedMemberAssistantPreferencesUpdate {
+  const personality = body.personality === undefined
+    ? undefined
+    : parseAssistantPersonality(body.personality);
   const tone = body.tone === undefined
     ? undefined
     : parseAssistantTone(body.tone);
@@ -74,18 +79,40 @@ function parseAssistantStyleRequestBody(
     ? undefined
     : parseAssistantVoice(body.voice);
 
-  if (tone === undefined && voice === undefined) {
+  if (personality !== undefined && (tone !== undefined || voice !== undefined)) {
+    throw hostedOnboardingError({
+      code: "ASSISTANT_STYLE_MIXED_UPDATE",
+      httpStatus: 400,
+      message: "Update personality separately from tone and voice.",
+    });
+  }
+
+  if (personality === undefined && tone === undefined && voice === undefined) {
     throw hostedOnboardingError({
       code: "ASSISTANT_STYLE_EMPTY_UPDATE",
       httpStatus: 400,
-      message: "Choose a tone or voice before continuing.",
+      message: "Choose a tone, voice, or personality setting before continuing.",
     });
   }
 
   return {
+    ...(personality === undefined ? {} : { personality }),
     ...(tone === undefined ? {} : { tone }),
     ...(voice === undefined ? {} : { voice }),
   };
+}
+
+function parseAssistantPersonality(value: unknown): AssistantPersonalityPreferences {
+  const result = assistantPersonalityPreferencesSchema.safeParse(value);
+  if (result.success && Object.keys(result.data).length > 0) {
+    return result.data;
+  }
+
+  throw hostedOnboardingError({
+    code: "ASSISTANT_STYLE_INVALID_PERSONALITY",
+    httpStatus: 400,
+    message: "Choose a valid personality setting.",
+  });
 }
 
 function parseAssistantTone(value: unknown): AssistantTonePreference {

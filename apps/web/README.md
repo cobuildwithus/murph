@@ -125,7 +125,12 @@ retention/deletion, and security practices.
 
 The hosted Prisma schema keeps ownership sharp and nested:
 
-- `HostedMember` is the core member row plus activation/billing status
+- `HostedMember` is the core member row plus activation/billing status. Its
+  nullable assistant tone, voice, Humor, Push, and Detail columns are only the
+  authenticated Settings display/write projection; canonical assistant
+  preferences remain in `bank/preferences.json`. Settings writes strict sparse
+  deltas through the hosted mailbox instead of treating these columns as a
+  canonical snapshot.
 - `HostedMemberIdentity` owns recoverable member identity facts
 - `HostedMemberRouting` owns hosted channel routing facts
 - `HostedMemberBillingRef` owns Stripe/customer subscription references

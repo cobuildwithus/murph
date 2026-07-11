@@ -10674,6 +10674,52 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }));
   });
 
+  it("drains a bounded member preference page before planning fresh conversation input", async () => {
+    const now = "2026-04-27T00:00:00.000Z";
+    mocks.resolveHostedSystemMailboxNextWakeCandidate.mockResolvedValue({
+      at: now,
+      reason: "assistant",
+    });
+    mocks.prepareHostedSystemMailboxItemForCheckpoint.mockImplementation(async (input) => {
+      expect(input.allowedRouteActions).toEqual(["apply-member-preferences"]);
+      const itemNumber = mocks.prepareHostedSystemMailboxItemForCheckpoint.mock.calls.length;
+      const item = {
+        ...createMemberPreferencesSystemMailboxItem(),
+        itemId: `system_mailbox_item_member_preferences_${itemNumber}`,
+        mailboxDedupeKey: `dedupe_system_mailbox_item_member_preferences_${itemNumber}`,
+      };
+      return {
+        item,
+        itemId: item.itemId,
+        metrics: {
+          bootstrapResult: null,
+          conversationMetrics: null,
+          mailboxLane: "member-preferences-updated",
+          redactedLogEntries: [],
+        },
+        status: "processed",
+      };
+    });
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      importedCount: 1,
+      now: () => now,
+    }));
+
+    expect(mocks.prepareHostedSystemMailboxItemForCheckpoint).toHaveBeenCalledTimes(10);
+    expect(mocks.resolveHostedSystemMailboxNextWakeCandidate).toHaveBeenCalledTimes(11);
+    expect(mocks.runHostedAssistantAutomationLane).not.toHaveBeenCalled();
+    expect(result).toEqual(expect.objectContaining({
+      nextWakeAt: now,
+      progressed: true,
+      redactedStatus: expect.objectContaining({
+        hostedMemberPreferencesPrePlanningPageLimit: 10,
+        hostedMemberPreferencesPrePlanningPending: 1,
+        hostedMemberPreferencesPrePlanningProcessed: 10,
+      }),
+    }));
+  });
+
   it("applies member preference mailbox work before background notification work", async () => {
     const callOrder: string[] = [];
     let preferenceWakeChecks = 0;

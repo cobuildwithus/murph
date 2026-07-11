@@ -8,6 +8,7 @@ import type {
   HostedExecutionDeviceSyncWakeHint as DeviceSyncHostedExecutionDeviceSyncWakeHint,
 } from "@murphai/device-syncd/hosted-runtime";
 import type {
+  AssistantPersonalitySettingId,
   AssistantTonePreference,
   AssistantVoiceOptionId,
 } from "@murphai/contracts";
@@ -144,7 +145,19 @@ export interface HostedExecutionMemberChannelsUpdatedEvent extends HostedExecuti
   memberChannels: HostedExecutionMemberChannels;
 }
 
+/**
+ * Sparse personality-dial delta: only dials the member changed in the
+ * originating request appear, so applying one dial never clobbers a sibling
+ * dial the member set elsewhere (for example conversationally through the
+ * assistant CLI). `null` clears the member's override back to the product
+ * default.
+ */
+export type HostedExecutionMemberPersonalityPreferences = {
+  [TSetting in AssistantPersonalitySettingId]?: number | null;
+};
+
 export interface HostedExecutionMemberPreferences {
+  personality?: HostedExecutionMemberPersonalityPreferences;
   tone?: AssistantTonePreference;
   voice?: AssistantVoiceOptionId;
 }

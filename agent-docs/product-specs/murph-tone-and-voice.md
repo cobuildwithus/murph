@@ -1,7 +1,7 @@
 # How Murph Talks
 
 Last verified: 2026-07-10
-Status: Implemented for onboarding, settings, hosted mailbox handoff, prompt tone, voice memo default resolution, supervisor-run preview generation, and private conversation-first Humor, Push, and Detail dials
+Status: Implemented for onboarding, settings, hosted mailbox handoff, prompt tone, voice memo default resolution, supervisor-run preview generation, and private Humor, Push, and Detail controls in conversation and Settings
 
 ## Product Contract
 
@@ -13,7 +13,7 @@ Murph's speaking style has five controls:
 4. Push: an integer from 0 through 10.
 5. Detail: an integer from 0 through 10.
 
-Tone and voice appear during the hosted first visit and under **How Murph talks** in Settings. The numeric personality dials are conversation-first in this release. The Settings page does not display them yet.
+Tone and voice appear during the hosted first visit and under **How Murph talks** in Settings. Humor, Push, and Detail are available through explicit conversational requests and under **Personality** in Settings. Settings shows all three effective 0–10 values in one dialog on desktop and one drawer on mobile; it does not add onboarding steps.
 
 The first-visit sequence remains:
 
@@ -177,11 +177,36 @@ Personality dials apply only to the member's private interactive conversation. G
 
 A future group-level style control needs separate group-scoped authority and storage. It must not reuse a member's private preference as room-wide truth.
 
-## Hosted Tone And Voice
+## Hosted Settings Projection
 
 The web surfaces use the same tone ids and shared voice roster defined above.
 
-`hosted_member.assistant_tone` and `hosted_member.assistant_voice` capture the latest web-side choices for display and mailbox handoff. `POST /api/settings/assistant-style` validates those values, updates changed columns, appends `member.preferences.updated`, and best-effort signals the runtime. This release does not add personality columns or claim that web Settings shows the numeric dials.
+`hosted_member.assistant_tone`, `hosted_member.assistant_voice`, and the nullable
+`assistant_humor`, `assistant_push`, and `assistant_detail` columns capture the
+latest web-side choices for display and mailbox handoff. The three numeric
+columns have database range constraints from 0 through 10. They are a
+Settings-side display/write projection, not canonical preference truth;
+`bank/preferences.json` remains canonical.
+
+`POST /api/settings/assistant-style` validates the authenticated member's
+values, updates changed columns, appends one `member.preferences.updated`
+delta, and best-effort signals the runtime. Personality payloads are strict,
+non-empty sparse objects. They reject unknown keys, fractions, out-of-range
+scores, and mixed tone-or-voice plus personality requests before persistence.
+The response returns the full web projection so the Settings row can update
+without inventing a second readback service.
+
+Conversation-written personality values do not reverse-sync into the web
+projection. Settings therefore resolves missing columns to the shared defaults
+for display but submits only dials changed in that dialog. It must never submit
+all three displayed defaults automatically. The mailbox delta likewise carries
+only fields changed by the request, so a web save cannot overwrite an unseen
+canonical sibling preference.
+
+`member.preferences.updated` is a delta contract, not a replaceable snapshot.
+The hosted system mailbox applies every preference item in mailbox order. An
+older retry blocks newer preference deltas until it succeeds; preference items
+must not be latest-wins coalesced or superseded.
 
 Tone is read from the canonical vault during turn planning. An absent saved tone resolves to the shared `formal` default, and prompt assembly adds one persistent user-facing writing contract (casual lowercases all Murph-authored prose except casing-sensitive literals; formal keeps standard capitalization and no slang, staying warm and direct). Voice memo defaults resolve in this order:
 
@@ -198,7 +223,28 @@ The personality field is additive but existing preferences readers are strict. D
 
 The rollback floor is therefore the first deployed runtime and CLI version that understands the optional personality field. Rollback below that floor requires removing the new field with a current compatible binary or forward-deploying a compatible reader. Do not hand-edit canonical preferences files.
 
-This release changes shared packages and the bundled assistant CLI/runtime, not web storage or a web-to-runtime event schema. A deployed runner must contain the compatible contracts, core mutation, CLI command, and assistant prompt together before personality writes are enabled. Hosted rollout should use the repository's normal immediate runner-bundle path when old warm containers could otherwise execute the previous strict reader.
+The conversational controls first require the compatible contracts, core
+mutation, CLI command, and assistant prompt from the parent runtime release.
+For Settings, deploy the Cloudflare worker and runner bundle that understand
+the personality mailbox delta before deploying the Vercel writer/UI. Use the
+normal immediate runner-bundle rollout so old warm containers cannot execute
+the previous parser. The additive nullable web migration is safe to apply
+earlier, but it does not make an old runtime consumer compatible.
+
+The web route rejects mixed style/personality requests, and the UI emits
+personality-only deltas. If Vercel briefly reaches production first, an old
+runtime therefore rejects the unknown personality-only event and leaves it
+retryable instead of acknowledging a tone/voice payload while silently losing
+the dial. Deploy the compatible consumer promptly and verify the queued item
+applies canonically.
+
+After the first personality mailbox event is emitted, keep both rollback
+floors: do not roll the runtime below the personality-aware event parser, and
+do not roll canonical readers below support for `assistant.personality`.
+Vercel may roll back while leaving the additive nullable columns in place.
+Post-deploy, save one dial, confirm only that dial appears in the mailbox delta,
+confirm the canonical vault applies it, and confirm no preference item remains
+rejected or stuck.
 
 ## Preview Clips
 

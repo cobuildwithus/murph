@@ -62,6 +62,11 @@ describe("assistant style settings route", () => {
     });
     mocks.signalHostedMailboxAppendRuntime.mockResolvedValue(undefined);
     mocks.upsertHostedMemberAssistantPreferencesTx.mockResolvedValue({
+      assistantPersonality: {
+        detail: 5,
+        humor: 3,
+        push: 3,
+      },
       assistantTone: "formal",
       assistantVoice: "warm",
       dispatch: {
@@ -83,6 +88,11 @@ describe("assistant style settings route", () => {
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({
+      assistantPersonality: {
+        detail: 5,
+        humor: 3,
+        push: 3,
+      },
       assistantTone: "formal",
       assistantVoice: "warm",
       ok: true,
@@ -102,7 +112,6 @@ describe("assistant style settings route", () => {
         voice: "warm",
       },
       prisma: { tx: true },
-      sourceType: "settings.assistant-style",
     });
     expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
       expectedUserId: "member_123",
@@ -110,8 +119,35 @@ describe("assistant style settings route", () => {
     });
   });
 
+  it("persists a sparse validated personality update", async () => {
+    const response = await route.POST(jsonRequest({
+      personality: {
+        detail: 8,
+        humor: 7,
+      },
+    }));
+
+    expect(response.status).toBe(200);
+    expect(mocks.upsertHostedMemberAssistantPreferencesTx).toHaveBeenCalledWith({
+      memberId: "member_123",
+      occurredAt: "2026-07-08T12:00:00.000Z",
+      preferences: {
+        personality: {
+          detail: 8,
+          humor: 7,
+        },
+      },
+      prisma: { tx: true },
+    });
+  });
+
   it("returns an idempotent no-op response without signaling the runtime", async () => {
     mocks.upsertHostedMemberAssistantPreferencesTx.mockResolvedValue({
+      assistantPersonality: {
+        detail: 5,
+        humor: 3,
+        push: 3,
+      },
       assistantTone: "formal",
       assistantVoice: "warm",
       dispatch: null,
@@ -125,6 +161,11 @@ describe("assistant style settings route", () => {
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({
+      assistantPersonality: {
+        detail: 5,
+        humor: 3,
+        push: 3,
+      },
       assistantTone: "formal",
       assistantVoice: "warm",
       ok: true,
@@ -139,7 +180,6 @@ describe("assistant style settings route", () => {
         voice: "warm",
       },
       prisma: { tx: true },
-      sourceType: "settings.assistant-style",
     });
     expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
   });
@@ -153,6 +193,11 @@ describe("assistant style settings route", () => {
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({
+      assistantPersonality: {
+        detail: 5,
+        humor: 3,
+        push: 3,
+      },
       assistantTone: "formal",
       assistantVoice: "warm",
       ok: true,
@@ -201,6 +246,49 @@ describe("assistant style settings route", () => {
     expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
   });
 
+  it.each([
+    { personality: {} },
+    { personality: null },
+    { personality: [] },
+    { personality: "maximum" },
+    { personality: { detail: 11 } },
+    { personality: { humor: 2.5 } },
+    { personality: { surprise: 4 } },
+  ])("rejects invalid personality updates before opening persistence: %j", async (body) => {
+    const response = await route.POST(jsonRequest(body));
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: "ASSISTANT_STYLE_INVALID_PERSONALITY",
+        message: "Choose a valid personality setting.",
+        retryable: false,
+      },
+    });
+    expect(mocks.transaction).not.toHaveBeenCalled();
+    expect(mocks.upsertHostedMemberAssistantPreferencesTx).not.toHaveBeenCalled();
+    expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
+  });
+
+  it("rejects mixed personality and tone or voice updates", async () => {
+    const response = await route.POST(jsonRequest({
+      personality: {
+        humor: 7,
+      },
+      tone: "formal",
+    }));
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: "ASSISTANT_STYLE_MIXED_UPDATE",
+        message: "Update personality separately from tone and voice.",
+        retryable: false,
+      },
+    });
+    expect(mocks.transaction).not.toHaveBeenCalled();
+  });
+
   it("rejects empty preference updates before opening the persistence transaction", async () => {
     const response = await route.POST(jsonRequest({}));
 
@@ -208,7 +296,7 @@ describe("assistant style settings route", () => {
     await expect(response.json()).resolves.toEqual({
       error: {
         code: "ASSISTANT_STYLE_EMPTY_UPDATE",
-        message: "Choose a tone or voice before continuing.",
+        message: "Choose a tone, voice, or personality setting before continuing.",
         retryable: false,
       },
     });

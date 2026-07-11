@@ -7,6 +7,7 @@ import {
   assistantPersonalitySettingIds,
   assistantPersonalitySettingSchema,
   defaultAssistantPersonalityScores,
+  isAssistantPersonalityScore,
   isAssistantPersonalitySettingId,
   preferencesDocumentSchema,
   resolveAssistantPersonalityScores,
@@ -27,9 +28,12 @@ describe("assistant personality preference contracts", () => {
   it("accepts integer scores at both boundaries and rejects invalid scores", () => {
     expect(assistantPersonalityScoreSchema.parse(0)).toBe(0);
     expect(assistantPersonalityScoreSchema.parse(10)).toBe(10);
+    expect(isAssistantPersonalityScore(0)).toBe(true);
+    expect(isAssistantPersonalityScore(10)).toBe(true);
 
     for (const invalid of [-1, 11, 4.5, "5", Number.NaN, Number.POSITIVE_INFINITY]) {
       expect(assistantPersonalityScoreSchema.safeParse(invalid).success).toBe(false);
+      expect(isAssistantPersonalityScore(invalid)).toBe(false);
     }
   });
 

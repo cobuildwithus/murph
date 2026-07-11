@@ -461,6 +461,15 @@ periodic scheduler input. Historical `runtime.mailbox-lag-observed` and
 `runtime.device-sync-recovery-requested` control rows remain importable for
 deploy-skew and drain compatibility, but there is no active producer for them.
 
+`member.preferences.updated` carries a sparse canonical mutation delta, not a
+replaceable snapshot. The local system mailbox keeps each imported preference
+item and executes them in mailbox order. If an older item is waiting for its
+retry time, later preference items remain blocked behind it; the runtime never
+selects a newer preference item around that retry and never drops older pending
+preference items during enqueue or checkpoint preparation. This ordering is
+what preserves two adjacent changes to different personality dials without a
+merge queue or second state owner.
+
 ### Hosted Runtime Maintenance Wake
 
 `runtime.maintenance-requested` is the explicit operator wake for one-time

@@ -762,6 +762,9 @@ describe("hosted runtime context coverage", () => {
         memberId: "member_123",
         occurredAt: "2026-04-08T00:25:00.000Z",
         preferences: {
+          personality: {
+            humor: 8,
+          },
           tone: "formal",
           voice: "warm",
         },
@@ -772,12 +775,37 @@ describe("hosted runtime context coverage", () => {
       assert.equal(first.exists, true);
       assert.equal(first.updatedAt, "2026-04-08T00:25:00.000Z");
       assert.deepEqual(first.assistant, {
+        personality: {
+          humor: 8,
+        },
         tone: "formal",
         voice: "warm",
       });
 
-      await applyHostedMemberPreferences(vaultRoot, wake);
-      await expect(readPreferencesDocument(vaultRoot)).resolves.toEqual(first);
+      const siblingDelta = buildHostedExecutionMemberPreferencesUpdatedWake({
+        eventId: "evt_preferences_sibling_delta",
+        memberId: "member_123",
+        occurredAt: "2026-04-08T00:26:00.000Z",
+        preferences: {
+          personality: {
+            detail: 7,
+          },
+        },
+      });
+      await applyHostedMemberPreferences(vaultRoot, siblingDelta);
+      const second = await readPreferencesDocument(vaultRoot);
+      assert.equal(second.updatedAt, "2026-04-08T00:26:00.000Z");
+      assert.deepEqual(second.assistant, {
+        personality: {
+          detail: 7,
+          humor: 8,
+        },
+        tone: "formal",
+        voice: "warm",
+      });
+
+      await applyHostedMemberPreferences(vaultRoot, siblingDelta);
+      await expect(readPreferencesDocument(vaultRoot)).resolves.toEqual(second);
     } finally {
       await cleanup();
     }

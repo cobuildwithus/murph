@@ -1360,14 +1360,16 @@ describe("hosted system mailbox notification execution context", () => {
     }
   });
 
-  it("supersedes older pending member preference snapshots when a newer snapshot is queued", async () => {
+  it("applies sparse member preference deltas in mailbox order", async () => {
     const workspace = await createHostedRuntimeWorkspace("murph-hosted-system-mailbox-");
     const olderWake = buildHostedExecutionMemberPreferencesUpdatedWake({
       eventId: "member.preferences.updated:older",
       memberId: "member_123",
       occurredAt: FIXED_NOW,
       preferences: {
-        tone: "casual",
+        personality: {
+          humor: 8,
+        },
       },
     });
     const newerWake = buildHostedExecutionMemberPreferencesUpdatedWake({
@@ -1375,8 +1377,9 @@ describe("hosted system mailbox notification execution context", () => {
       memberId: "member_123",
       occurredAt: "2026-04-27T00:00:01.000Z",
       preferences: {
-        tone: "formal",
-        voice: "warm",
+        personality: {
+          detail: 7,
+        },
       },
     });
 
@@ -1398,7 +1401,7 @@ describe("hosted system mailbox notification execution context", () => {
         wake: newerWake,
       });
 
-      const prepared = await prepareHostedSystemMailboxItemForCheckpoint({
+      const first = await prepareHostedSystemMailboxItemForCheckpoint({
         allowedRouteActions: ["apply-member-preferences"],
         executionContext: null,
         now: () => FIXED_NOW,
@@ -1407,17 +1410,28 @@ describe("hosted system mailbox notification execution context", () => {
         vaultRoot: workspace.vaultRoot,
       });
 
-      assert.equal(prepared?.status, "processed");
-      assert.equal(prepared.itemId, "mailbox_item_system_member_preferences_002");
-      assert.equal(prepared.item.mailboxLaneSeq, "2");
-      expect(mocks.executeHostedMailboxEvent).toHaveBeenCalledTimes(1);
-      expect(mocks.executeHostedMailboxEvent).toHaveBeenCalledWith(
-        expect.objectContaining({
-          wake: expect.objectContaining({
-            eventId: "member.preferences.updated:newer",
-          }),
-        }),
-      );
+      assert.equal(first?.status, "processed");
+      assert.equal(first.itemId, "mailbox_item_system_member_preferences_001");
+      assert.equal(first.item.mailboxLaneSeq, "1");
+
+      const second = await prepareHostedSystemMailboxItemForCheckpoint({
+        allowedRouteActions: ["apply-member-preferences"],
+        executionContext: null,
+        now: () => FIXED_NOW,
+        runtime: createRuntime({}),
+        runtimeEnv: {},
+        vaultRoot: workspace.vaultRoot,
+      });
+
+      assert.equal(second?.status, "processed");
+      assert.equal(second.itemId, "mailbox_item_system_member_preferences_002");
+      assert.equal(second.item.mailboxLaneSeq, "2");
+      expect(mocks.executeHostedMailboxEvent.mock.calls.map((call) =>
+        call[0]?.wake?.eventId
+      )).toEqual([
+        "member.preferences.updated:older",
+        "member.preferences.updated:newer",
+      ]);
       assert.equal(
         await resolveHostedSystemMailboxNextWakeAt({
           allowedRouteActions: ["apply-member-preferences"],
@@ -1431,14 +1445,16 @@ describe("hosted system mailbox notification execution context", () => {
     }
   });
 
-  it("uses mailbox lane sequence when rollback leaves multiple pending member preference snapshots", async () => {
+  it("preserves mailbox order when rollback restores multiple preference deltas", async () => {
     const workspace = await createHostedRuntimeWorkspace("murph-hosted-system-mailbox-");
     const lowerSeqNewerTimestampWake = buildHostedExecutionMemberPreferencesUpdatedWake({
       eventId: "member.preferences.updated:lower-seq-newer-timestamp",
       memberId: "member_123",
       occurredAt: "2026-04-27T00:00:05.000Z",
       preferences: {
-        tone: "casual",
+        personality: {
+          humor: 9,
+        },
       },
     });
     const higherSeqOlderTimestampWake = buildHostedExecutionMemberPreferencesUpdatedWake({
@@ -1446,8 +1462,9 @@ describe("hosted system mailbox notification execution context", () => {
       memberId: "member_123",
       occurredAt: "2026-04-27T00:00:01.000Z",
       preferences: {
-        tone: "formal",
-        voice: "warm",
+        personality: {
+          push: 8,
+        },
       },
     });
 
@@ -1472,7 +1489,7 @@ describe("hosted system mailbox notification execution context", () => {
         vaultRoot: workspace.vaultRoot,
       });
 
-      const prepared = await prepareHostedSystemMailboxItemForCheckpoint({
+      const first = await prepareHostedSystemMailboxItemForCheckpoint({
         allowedRouteActions: ["apply-member-preferences"],
         executionContext: null,
         now: () => FIXED_NOW,
@@ -1481,17 +1498,28 @@ describe("hosted system mailbox notification execution context", () => {
         vaultRoot: workspace.vaultRoot,
       });
 
-      assert.equal(prepared?.status, "processed");
-      assert.equal(prepared.itemId, "mailbox_item_system_member_preferences_higher_seq");
-      assert.equal(prepared.item.mailboxLaneSeq, "42");
-      expect(mocks.executeHostedMailboxEvent).toHaveBeenCalledTimes(1);
-      expect(mocks.executeHostedMailboxEvent).toHaveBeenCalledWith(
-        expect.objectContaining({
-          wake: expect.objectContaining({
-            eventId: "member.preferences.updated:higher-seq-older-timestamp",
-          }),
-        }),
-      );
+      assert.equal(first?.status, "processed");
+      assert.equal(first.itemId, "mailbox_item_system_member_preferences_lower_seq");
+      assert.equal(first.item.mailboxLaneSeq, "41");
+
+      const second = await prepareHostedSystemMailboxItemForCheckpoint({
+        allowedRouteActions: ["apply-member-preferences"],
+        executionContext: null,
+        now: () => FIXED_NOW,
+        runtime: createRuntime({}),
+        runtimeEnv: {},
+        vaultRoot: workspace.vaultRoot,
+      });
+
+      assert.equal(second?.status, "processed");
+      assert.equal(second.itemId, "mailbox_item_system_member_preferences_higher_seq");
+      assert.equal(second.item.mailboxLaneSeq, "42");
+      expect(mocks.executeHostedMailboxEvent.mock.calls.map((call) =>
+        call[0]?.wake?.eventId
+      )).toEqual([
+        "member.preferences.updated:lower-seq-newer-timestamp",
+        "member.preferences.updated:higher-seq-older-timestamp",
+      ]);
       assert.deepEqual(
         (await readHostedSystemMailboxState(workspace.vaultRoot)).pending,
         [],
@@ -1501,14 +1529,16 @@ describe("hosted system mailbox notification execution context", () => {
     }
   });
 
-  it("runs the latest due member preference snapshot while an older retry waits", async () => {
+  it("retries an older preference delta before applying a newer delta", async () => {
     const workspace = await createHostedRuntimeWorkspace("murph-hosted-system-mailbox-");
     const olderWake = buildHostedExecutionMemberPreferencesUpdatedWake({
       eventId: "member.preferences.updated:older-retry",
       memberId: "member_123",
       occurredAt: FIXED_NOW,
       preferences: {
-        tone: "casual",
+        personality: {
+          humor: 8,
+        },
       },
     });
     const newerWake = buildHostedExecutionMemberPreferencesUpdatedWake({
@@ -1516,7 +1546,9 @@ describe("hosted system mailbox notification execution context", () => {
       memberId: "member_123",
       occurredAt: "2026-04-27T00:00:01.000Z",
       preferences: {
-        tone: "formal",
+        personality: {
+          detail: 7,
+        },
       },
     });
 
@@ -1554,7 +1586,7 @@ describe("hosted system mailbox notification execution context", () => {
         wake: newerWake,
       });
 
-      const prepared = await prepareHostedSystemMailboxItemForCheckpoint({
+      const blocked = await prepareHostedSystemMailboxItemForCheckpoint({
         allowedRouteActions: ["apply-member-preferences"],
         executionContext: null,
         now: () => FIXED_NOW,
@@ -1563,22 +1595,49 @@ describe("hosted system mailbox notification execution context", () => {
         vaultRoot: workspace.vaultRoot,
       });
 
-      assert.equal(prepared?.status, "processed");
-      assert.equal(prepared.itemId, "mailbox_item_system_member_preferences_retry_002");
+      assert.equal(blocked, null);
       expect(mocks.executeHostedMailboxEvent.mock.calls.map((call) =>
         call[0]?.wake?.eventId
       )).toEqual([
         "member.preferences.updated:older-retry",
-        "member.preferences.updated:newer-due",
       ]);
       assert.equal(
         await resolveHostedSystemMailboxNextWakeAt({
           allowedRouteActions: ["apply-member-preferences"],
-          now: () => "2026-04-27T00:01:00.000Z",
+          now: () => FIXED_NOW,
           vaultRoot: workspace.vaultRoot,
         }),
-        null,
+        "2026-04-27T00:01:00.000Z",
       );
+
+      const retried = await prepareHostedSystemMailboxItemForCheckpoint({
+        allowedRouteActions: ["apply-member-preferences"],
+        executionContext: null,
+        now: () => "2026-04-27T00:01:00.000Z",
+        runtime: createRuntime({}),
+        runtimeEnv: {},
+        vaultRoot: workspace.vaultRoot,
+      });
+      assert.equal(retried?.status, "processed");
+      assert.equal(retried.itemId, "mailbox_item_system_member_preferences_retry_001");
+
+      const newer = await prepareHostedSystemMailboxItemForCheckpoint({
+        allowedRouteActions: ["apply-member-preferences"],
+        executionContext: null,
+        now: () => "2026-04-27T00:01:00.000Z",
+        runtime: createRuntime({}),
+        runtimeEnv: {},
+        vaultRoot: workspace.vaultRoot,
+      });
+      assert.equal(newer?.status, "processed");
+      assert.equal(newer.itemId, "mailbox_item_system_member_preferences_retry_002");
+      expect(mocks.executeHostedMailboxEvent.mock.calls.map((call) =>
+        call[0]?.wake?.eventId
+      )).toEqual([
+        "member.preferences.updated:older-retry",
+        "member.preferences.updated:older-retry",
+        "member.preferences.updated:newer-due",
+      ]);
     } finally {
       await workspace.cleanup();
     }

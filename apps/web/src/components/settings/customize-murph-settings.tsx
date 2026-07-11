@@ -1,11 +1,13 @@
 "use client";
 
 import {
+  assistantPersonalitySettingIds,
   assistantVoiceOptions,
+  type AssistantPersonalityScores,
   type AssistantTonePreference,
   type AssistantVoiceOptionId,
 } from "@murphai/contracts";
-import { IdCard, MessageSquareText, Mic2 } from "lucide-react";
+import { IdCard, MessageSquareText, Mic2, SlidersHorizontal } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import {
@@ -16,8 +18,28 @@ import { MurphContactCardPicker } from "@/src/components/murph/murph-contact-car
 import { Button } from "@/src/components/ui/button";
 import type { MurphContactOption } from "@/src/lib/murph-contact-routing";
 
+import {
+  MurphPersonalitySettingsDialog,
+  resolveAssistantPersonalitySnapshotScores,
+  type AssistantPersonalitySnapshot,
+} from "./murph-personality-settings-dialog";
 import { SettingsRow, SettingsRowList } from "./settings-row";
 import { stripSettingsQueryParam } from "./hosted-settings-utils";
+
+// Personality lives in the same Settings snapshot block as tone and voice, but
+// its dials are tracked separately so a personality save never touches them.
+type CustomizeMurphAssistant = MurphAssistantStylePreferences & {
+  personality?: AssistantPersonalitySnapshot | null;
+};
+
+const PERSONALITY_DIAL_SUMMARY_LABELS: Record<
+  keyof AssistantPersonalityScores,
+  string
+> = {
+  humor: "Humor",
+  push: "Push",
+  detail: "Detail",
+};
 
 type AssistantStyleStep = "tone" | "voice";
 const VOICE_QUERY_KEY = "voice";
@@ -32,7 +54,7 @@ export function CustomizeMurphSettings({
   openVoiceLink = false,
   voiceTestContactOption = null,
 }: {
-  assistant?: MurphAssistantStylePreferences | null;
+  assistant?: CustomizeMurphAssistant | null;
   murphPhoneNumber?: string | null;
   openVoiceLink?: boolean;
   // Prefilled "hear the new voice" chat link; after a voice save we send the
@@ -42,9 +64,13 @@ export function CustomizeMurphSettings({
   const [style, setStyle] = useState<MurphAssistantStylePreferences>(
     assistant ?? DEFAULT_ASSISTANT_STYLE,
   );
+  const [personality, setPersonality] = useState<AssistantPersonalitySnapshot | null>(
+    assistant?.personality ?? null,
+  );
   const [pickerStep, setPickerStep] = useState<AssistantStyleStep | null>(
     openVoiceLink ? "voice" : null,
   );
+  const [personalityOpen, setPersonalityOpen] = useState(false);
   const [contactPickerOpen, setContactPickerOpen] = useState(false);
   const [previousOpenVoiceLink, setPreviousOpenVoiceLink] = useState(openVoiceLink);
 
@@ -71,6 +97,16 @@ export function CustomizeMurphSettings({
           empty={!style.tone}
           action={
             <Button type="button" size="default" variant="ghost" onClick={() => setPickerStep("tone")}>
+              Customize
+            </Button>
+          }
+        />
+        <SettingsRow
+          icon={<SlidersHorizontal className="size-[18px] shrink-0 text-muted-foreground" strokeWidth={1.6} aria-hidden="true" />}
+          label="Personality"
+          value={formatPersonalitySummary(personality)}
+          action={
+            <Button type="button" size="default" variant="ghost" onClick={() => setPersonalityOpen(true)}>
               Customize
             </Button>
           }
@@ -121,6 +157,20 @@ export function CustomizeMurphSettings({
           open
         />
       ) : null}
+      {personalityOpen ? (
+        <MurphPersonalitySettingsDialog
+          personality={personality}
+          // The successful save returns the authoritative web projection; it
+          // updates the row and never triggers the voice chat handoff.
+          onSaved={setPersonality}
+          onOpenChange={(open) => {
+            if (!open) {
+              setPersonalityOpen(false);
+            }
+          }}
+          open
+        />
+      ) : null}
       {contactPickerOpen ? (
         <MurphContactCardPicker
           copy={{
@@ -138,6 +188,15 @@ export function CustomizeMurphSettings({
       ) : null}
     </>
   );
+}
+
+function formatPersonalitySummary(
+  personality: AssistantPersonalitySnapshot | null,
+): string {
+  const scores = resolveAssistantPersonalitySnapshotScores(personality);
+  return assistantPersonalitySettingIds
+    .map((id) => `${PERSONALITY_DIAL_SUMMARY_LABELS[id]} ${scores[id]}`)
+    .join(" · ");
 }
 
 function formatAssistantTone(tone: AssistantTonePreference): string {

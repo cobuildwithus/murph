@@ -42,6 +42,9 @@ const HOSTED_MEMBER_SCHEMA_GUARD = {
   HostedMember: [
     "id String @id",
     'assistantModelPreference String? @map("assistant_model_preference")',
+    'assistantDetail Int? @map("assistant_detail")',
+    'assistantHumor Int? @map("assistant_humor")',
+    'assistantPush Int? @map("assistant_push")',
     'assistantTone String? @map("assistant_tone")',
     'assistantVoice String? @map("assistant_voice")',
     'billingStatus HostedBillingStatus @default(not_started) @map("billing_status")',
@@ -553,6 +556,13 @@ describe("hosted Prisma baseline migration", () => {
       ),
       "utf8",
     );
+    const hostedMemberAssistantPersonalityMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/20260710130000_hosted_member_assistant_personality/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
     expect(migrationEntries).toEqual([
       "2026040600_init",
       "20260425000000_drop_legacy_linq_control_plane",
@@ -641,8 +651,20 @@ describe("hosted Prisma baseline migration", () => {
       "20260709120000_hosted_ingress_latency_delivery_link",
       "20260709120000_hosted_linq_delivery_retry_after_at",
       "20260709120000_hosted_member_assistant_model_preference",
+      "20260710130000_hosted_member_assistant_personality",
       "migration_lock.toml",
     ]);
+    for (const setting of ["humor", "push", "detail"]) {
+      expect(hostedMemberAssistantPersonalityMigrationSql).toContain(
+        `ADD COLUMN "assistant_${setting}" INTEGER`,
+      );
+      expect(hostedMemberAssistantPersonalityMigrationSql).toContain(
+        `CONSTRAINT "hosted_member_assistant_${setting}_range"`,
+      );
+      expect(hostedMemberAssistantPersonalityMigrationSql).toContain(
+        `CHECK ("assistant_${setting}" BETWEEN 0 AND 10)`,
+      );
+    }
     expect(hostedThreadRoutesMigrationSql).toContain('CREATE TABLE "hosted_thread_container"');
     expect(hostedThreadRoutesMigrationSql).toContain('CREATE TABLE "hosted_thread_route"');
     expect(hostedThreadRoutesMigrationSql).toContain(
