@@ -66,7 +66,7 @@ test("OGImage reads bundled font assets without fetching Google Fonts", async ()
   ];
   const serializedImageTree = JSON.stringify(imageTree);
   expect(serializedImageTree).toContain("Everyone has a health goal.");
-  expect(serializedImageTree).toContain("Nobody gets there alone.");
+  expect(serializedImageTree).toContain("Almost no one gets there alone.");
   expect(serializedImageTree).not.toContain("Health experiments with friends.");
 
   expect(init.fonts.map((font) => [font.name, font.weight])).toEqual([
