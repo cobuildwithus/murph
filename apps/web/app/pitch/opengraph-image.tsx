@@ -12,12 +12,12 @@ export const size = OG_SIZE;
 export const contentType = OG_CONTENT_TYPE;
 
 export default async function PitchOGImage() {
-  const { fonts, heroDataUri } = await loadMurphHeroOgAssets();
+  const { fonts, logoDataUri } = await loadMurphHeroOgAssets();
 
   return new ImageResponse(
     (
       <MurphHeroOg
-        heroDataUri={heroDataUri}
+        logoDataUri={logoDataUri}
         eyebrow="MURPH"
         headline={"The AI referee for\nhealth challenges."}
         headlineFontSize={68}

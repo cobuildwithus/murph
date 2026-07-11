@@ -229,6 +229,39 @@ export function mergeHostedJunctionHistoricalBackfillMetadata(input: {
   return { metadata, preservedLocalProgress };
 }
 
+/** Preserve provider-owned progress during a guarded replacement inside the store transaction. */
+export function mergeGuardedJunctionHistoricalBackfillMetadata(input: {
+  existingMetadata: Record<string, unknown>;
+  replacementMetadata: Record<string, unknown>;
+}): Record<string, unknown> {
+  const existingHistoricalMetadata: Record<string, unknown> = {};
+  for (const key of Object.values(JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS)) {
+    if (Object.prototype.hasOwnProperty.call(input.existingMetadata, key)) {
+      existingHistoricalMetadata[key] = input.existingMetadata[key];
+    }
+  }
+
+  const mergedMetadata = mergeHostedJunctionHistoricalBackfillMetadata({
+    hostedMetadata: input.replacementMetadata,
+    localConnectionStateUnpublished: true,
+    localMetadata: existingHistoricalMetadata,
+  }).metadata;
+  const metadata: Record<string, unknown> = {};
+
+  for (const key of Object.values(JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS)) {
+    if (Object.prototype.hasOwnProperty.call(mergedMetadata, key)) {
+      metadata[key] = mergedMetadata[key];
+    }
+  }
+  for (const [key, value] of Object.entries(input.replacementMetadata)) {
+    if (!Object.prototype.hasOwnProperty.call(metadata, key)) {
+      metadata[key] = value;
+    }
+  }
+
+  return metadata;
+}
+
 export function encodeJunctionHistoricalBackfillStatus(
   status: JunctionHistoricalBackfillStatus,
 ): string {

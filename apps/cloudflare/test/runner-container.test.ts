@@ -3728,25 +3728,58 @@ describe("RunnerContainer", () => {
     );
   });
 
-  it("posts workspace abort when the local active pointer is missing but the child is running", async () => {
-    const request = createRunnerRequest("evt_missing_pointer_abort");
-    const containerFetch = vi.fn(async (url: string, init?: RequestInit) => {
+  it.each(["accepted", "queued", "failed"] as const)(
+    "destroys the child after a %s no-pointer abort result",
+    async (abortStatus) => {
+      const request = createRunnerRequest(`evt_missing_pointer_${abortStatus}_abort`);
+      const containerFetch = vi.fn(async (url: string, init?: RequestInit) => {
+        if (url.endsWith("/internal/workspace-invocation/abort")) {
+          expect(JSON.parse(String(init?.body))).toEqual({
+            attemptId: request.attemptId,
+            leaseGeneration: request.leaseGeneration,
+            userId: "member_123",
+          });
+          if (abortStatus === "failed") {
+            return new Response(null, { status: 503 });
+          }
+          return new Response(null, {
+            headers: {
+              "x-workspace-invocation-abort-status": abortStatus,
+            },
+            status: 204,
+          });
+        }
+        throw new Error(`Unexpected runner request URL: ${url}`);
+      });
+      const { container, destroy } = createContainerDouble({
+        containerFetch,
+        initialStatus: "running",
+      });
+
+      await expect(container.abortWorkspaceInvocation({
+        attemptId: request.attemptId,
+        leaseGeneration: request.leaseGeneration,
+        userId: "member_123",
+      })).resolves.toBe("accepted");
+      expect(containerFetch).toHaveBeenCalledOnce();
+      expect(destroy).toHaveBeenCalledOnce();
+    },
+  );
+
+  it("preserves a newer child when a no-pointer abort is stale", async () => {
+    const request = createRunnerRequest("evt_missing_pointer_stale_abort");
+    const containerFetch = vi.fn(async (url: string) => {
       if (url.endsWith("/internal/workspace-invocation/abort")) {
-        expect(JSON.parse(String(init?.body))).toEqual({
-          attemptId: request.attemptId,
-          leaseGeneration: request.leaseGeneration,
-          userId: "member_123",
-        });
         return new Response(null, {
           headers: {
-            "x-workspace-invocation-abort-status": "accepted",
+            "x-workspace-invocation-abort-status": "stale",
           },
           status: 204,
         });
       }
       throw new Error(`Unexpected runner request URL: ${url}`);
     });
-    const { container } = createContainerDouble({
+    const { container, destroy } = createContainerDouble({
       containerFetch,
       initialStatus: "running",
     });
@@ -3755,8 +3788,88 @@ describe("RunnerContainer", () => {
       attemptId: request.attemptId,
       leaseGeneration: request.leaseGeneration,
       userId: "member_123",
-    })).resolves.toBe("requested");
-    expect(containerFetch).toHaveBeenCalledOnce();
+    })).resolves.toBe("stale");
+    expect(destroy).not.toHaveBeenCalled();
+  });
+
+  it("serializes no-pointer abort recovery before starting a replacement", async () => {
+    const firstAbortStarted = createDeferred<void>();
+    const firstAbortResponse = createDeferred<Response>();
+    let status: "running" | "stopped" = "running";
+    const containerFetch = vi.fn(async (url: string) => {
+      if (url.endsWith("/internal/workspace-invocation/abort")) {
+        firstAbortStarted.resolve();
+        return await firstAbortResponse.promise;
+      }
+      if (url.endsWith("/health")) {
+        return new Response(JSON.stringify(createRunnerHealthResult()), {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        });
+      }
+      if (url.endsWith("/internal/workspace-invocation")) {
+        return new Response(JSON.stringify(createRunnerResult()), {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        });
+      }
+      throw new Error(`Unexpected runner request URL: ${url}`);
+    });
+    const destroy = vi.fn(async () => {
+      status = "stopped";
+    });
+    const getState = vi.fn(async () => ({
+      lastChange: Date.now(),
+      status,
+    }));
+    const startAndWaitForPorts = vi.fn(async () => {
+      status = "running";
+    });
+    const { container } = createContainerDouble({
+      containerFetch,
+      destroy,
+      getState,
+      initialStatus: "running",
+      startAndWaitForPorts,
+    });
+    const staleRequest = createRunnerRequest("evt_missing_pointer_serialized_abort");
+    const replacementRequest = createRunnerRequest("evt_replacement_after_abort");
+
+    const firstAbort = container.abortWorkspaceInvocation({
+      attemptId: staleRequest.attemptId,
+      leaseGeneration: staleRequest.leaseGeneration,
+      userId: "member_123",
+    });
+    await firstAbortStarted.promise;
+    const secondAbort = container.abortWorkspaceInvocation({
+      attemptId: staleRequest.attemptId,
+      leaseGeneration: staleRequest.leaseGeneration,
+      userId: "member_123",
+    });
+    const replacement = container.invoke({
+      job: {
+        kind: "workspace-invocation",
+        request: replacementRequest,
+      },
+      timeoutMs: 30_000,
+      userId: "member_123",
+    });
+
+    await Promise.resolve();
+    expect(containerFetch).toHaveBeenCalledTimes(1);
+    expect(startAndWaitForPorts).not.toHaveBeenCalled();
+
+    firstAbortResponse.resolve(new Response(null, { status: 503 }));
+
+    await expect(firstAbort).resolves.toBe("accepted");
+    await expect(secondAbort).resolves.toBe("inactive");
+    await expect(replacement).resolves.toEqual(createRunnerResult());
+    expect(destroy).toHaveBeenCalledOnce();
+    expect(startAndWaitForPorts).toHaveBeenCalledOnce();
   });
 
   it("reports inactive liveness from a missing local pointer only after running health is idle", async () => {

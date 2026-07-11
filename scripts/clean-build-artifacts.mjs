@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 
 const BUILD_ARTIFACTS = {
   "packages/contracts": "tsconfig.build.tsbuildinfo",
+  "packages/clinical-records": ".tsbuildinfo",
   "packages/hosted-execution": ".tsbuildinfo",
   "packages/cloudflare-hosted-control": ".tsbuildinfo",
   "packages/messaging-ingress": ".tsbuildinfo",
@@ -43,6 +44,7 @@ const BUILD_ARTIFACTS = {
 const CLEAN_GROUPS = {
   workspace: [
     "packages/contracts",
+    "packages/clinical-records",
     "packages/hosted-execution",
     "packages/cloudflare-hosted-control",
     "packages/messaging-ingress",
@@ -70,6 +72,7 @@ const CLEAN_GROUPS = {
   ],
   "test-runtime": [
     "packages/contracts",
+    "packages/clinical-records",
     "packages/hosted-execution",
     "packages/cloudflare-hosted-control",
     "packages/messaging-ingress",

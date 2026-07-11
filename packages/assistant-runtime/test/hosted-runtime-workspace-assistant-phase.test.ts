@@ -2371,14 +2371,18 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     );
   });
 
-  it("skips hosted managed automation work when background maintenance yields", async () => {
+  it("preserves foreground preemption over persisted assistant input", async () => {
     const shouldYieldBackgroundMaintenance = vi.fn(() => true);
+    mocks.resolveHostedPendingAssistantInputWakeAt.mockResolvedValueOnce(
+      "2026-04-27T00:00:00.000Z",
+    );
 
     const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
       importedCount: 0,
       shouldYieldBackgroundMaintenance,
     }));
 
+    expect(mocks.resolveHostedPendingAssistantInputWakeAt).toHaveBeenCalledTimes(1);
     expect(mocks.applyMurphManagedAutomations).not.toHaveBeenCalled();
     expect(mocks.runHostedAssistantAutomationLane).not.toHaveBeenCalled();
     expect(result).toEqual(expect.objectContaining({
@@ -5046,7 +5050,10 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         redacted: {
           schema: "murph.assistant-turn-timing.v1",
           type: "assistant.turn.timing",
+          turnTimingDeliveryIntentId: "intent_timing_failure",
           turnTimingElapsedMs: 41,
+          turnTimingProviderRequestElapsedMs: 31,
+          turnTimingSinceProviderResultMs: 10,
           turnTimingStage: "reply-dispatched",
         },
       }],
@@ -5063,7 +5070,10 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       redactedJson: expect.objectContaining({
         detailComponent: "runtime.provider",
         schema: "murph.assistant-turn-timing.v1",
+        turnTimingDeliveryIntentId: "intent_timing_failure",
         turnTimingElapsedMs: 41,
+        turnTimingProviderRequestElapsedMs: 31,
+        turnTimingSinceProviderResultMs: 10,
         turnTimingStage: "reply-dispatched",
       }),
     }));

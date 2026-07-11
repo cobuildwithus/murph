@@ -23,6 +23,27 @@
         "voice": {
           "type": "string",
           "minLength": 1
+        },
+        "personality": {
+          "type": "object",
+          "properties": {
+            "humor": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 10
+            },
+            "push": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 10
+            },
+            "detail": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 10
+            }
+          },
+          "additionalProperties": false
         }
       },
       "additionalProperties": false

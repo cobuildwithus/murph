@@ -9,6 +9,7 @@ import { DEVICE_SYNC_METADATA_MAX_STRING_LENGTH } from "../src/metadata.ts";
 import {
   buildHostedExecutionDeviceSyncConnectLinkPath,
   isHostedRuntimeIdShapedDiagnosticToken,
+  mergeGuardedJunctionHistoricalBackfillMetadata,
   mergeHostedDeviceSyncConnectionMetadata,
   normalizeHostedDeviceSyncJobHints,
   parseHostedExecutionDeviceSyncConnectLinkResponse,
@@ -22,7 +23,44 @@ import {
   resolveHostedDeviceSyncWakeContext,
   sanitizeHostedRuntimeDiagnosticText,
   sanitizeHostedRuntimeErrorText,
+  serializeHostedExecutionDeviceSyncDirtyPayloadIdentity,
 } from "../src/hosted-runtime.ts";
+
+describe("serializeHostedExecutionDeviceSyncDirtyPayloadIdentity", () => {
+  const companionPayload = {
+    eventType: "companion.health_metadata.v1",
+    occurredAt: "2026-07-09T12:00:00.000Z",
+    resource: "companion_health_metadata",
+    resourceCategory: "summary",
+    sourceProviderSlug: "apple-health-kit",
+    webhookDataJson: JSON.stringify({ records: [{ recordId: "a".repeat(64) }] }),
+  };
+
+  it("ignores receipt time only for an exact companion health payload", () => {
+    const retry = {
+      ...companionPayload,
+      occurredAt: "2026-07-09T12:05:00.000Z",
+    };
+
+    expect(serializeHostedExecutionDeviceSyncDirtyPayloadIdentity(companionPayload))
+      .toBe(serializeHostedExecutionDeviceSyncDirtyPayloadIdentity(retry));
+    expect(serializeHostedExecutionDeviceSyncDirtyPayloadIdentity({
+      ...companionPayload,
+      eventType: "daily.data.steps.created",
+    })).not.toBe(serializeHostedExecutionDeviceSyncDirtyPayloadIdentity({
+      ...retry,
+      eventType: "daily.data.steps.created",
+    }));
+  });
+
+  it("keeps companion batch content in the identity", () => {
+    expect(serializeHostedExecutionDeviceSyncDirtyPayloadIdentity(companionPayload))
+      .not.toBe(serializeHostedExecutionDeviceSyncDirtyPayloadIdentity({
+        ...companionPayload,
+        webhookDataJson: JSON.stringify({ records: [{ recordId: "b".repeat(64) }] }),
+      }));
+  });
+});
 
 describe("mergeHostedDeviceSyncConnectionMetadata", () => {
   it("preserves current local Junction retry progress over hosted legacy completion", () => {
@@ -457,6 +495,26 @@ describe("mergeHostedDeviceSyncConnectionMetadata", () => {
         windowEnd: "2026-03-20T00:00:00.000Z",
       })).toBeNull();
     }
+  });
+});
+
+describe("mergeGuardedJunctionHistoricalBackfillMetadata", () => {
+  it("preserves opaque future historical state without retaining ordinary seed metadata", () => {
+    expect(mergeGuardedJunctionHistoricalBackfillMetadata({
+      existingMetadata: {
+        junctionHistoricalBackfillEvidence: "e2|opaque-future-evidence",
+        junctionHistoricalBackfillStatus: "coverage_v3_deferred",
+        seedOnlyState: "discard",
+      },
+      replacementMetadata: {
+        callbackOutcome: "complete",
+        junctionHistoricalBackfillStatus: "coverage_v2_retrying",
+      },
+    })).toEqual({
+      callbackOutcome: "complete",
+      junctionHistoricalBackfillEvidence: "e2|opaque-future-evidence",
+      junctionHistoricalBackfillStatus: "coverage_v3_deferred",
+    });
   });
 });
 

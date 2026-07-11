@@ -1432,7 +1432,25 @@ describe('assistant codex runtime', () => {
     expect(uploader.uploadGeneratedImage).toHaveBeenCalledOnce()
   })
 
-  it('serializes overlapping computer tools so pause waits for prior navigation completion', async () => {
+  const computerPauseFinalMessageScenarios = [
+    {
+      expectedFinalMessage:
+        'Paused for confirmation.\n\nTake over here: https://web.example.test/computer/handoff/raw-token',
+      modelMessage: 'Paused for confirmation.',
+      name: 'appends an omitted handoff URL',
+    },
+    {
+      expectedFinalMessage:
+        'Paused for confirmation. Take over here: https://web.example.test/computer/handoff/raw-token',
+      modelMessage:
+        'Paused for confirmation. Take over here: https://web.example.test/computer/handoff/raw-token',
+      name: 'preserves a model-supplied handoff URL once',
+    },
+  ] as const
+
+  const runComputerPauseFinalMessageScenario = async (
+    scenario: (typeof computerPauseFinalMessageScenarios)[number],
+  ): Promise<void> => {
     const workingDirectory = await createTempDir('assistant-codex-computer-order-work-')
     const releaseAct = createDeferred<void>()
     const actStarted = createDeferred<void>()
@@ -1561,7 +1579,7 @@ describe('assistant codex runtime', () => {
                 item: {
                   id: 'assistant-computer-order',
                   type: 'assistant_message',
-                  message: 'Paused for confirmation.',
+                  message: scenario.modelMessage,
                 },
               },
             }),
@@ -1592,10 +1610,15 @@ describe('assistant codex runtime', () => {
         workingDirectory,
       }),
     ).resolves.toMatchObject({
-      finalMessage: 'Paused for confirmation.',
+      finalMessage: scenario.expectedFinalMessage,
     })
     expect(fetchOrder).toEqual(['act:start', 'act:end', 'pause'])
-  })
+  }
+
+  it.each(computerPauseFinalMessageScenarios)(
+    'serializes overlapping computer tools and $name',
+    runComputerPauseFinalMessageScenario,
+  )
 
   it('closes live steering before saving a computer pause', async () => {
     const workingDirectory = await createTempDir('assistant-codex-computer-pause-live-turn-work-')
@@ -1753,7 +1776,7 @@ describe('assistant codex runtime', () => {
     expect(liveTurnReleased).toBe(1)
   })
 
-  it('allows finish_without_reply after pausing a computer run for the user', async () => {
+  it('overrides an earlier no-reply and rejects a later one when a handoff URL must be delivered', async () => {
     const workingDirectory = await createTempDir('assistant-codex-computer-pause-no-reply-work-')
     const progressDelivery = createProgressDeliveryMock()
     const hostedToolContext = createHostedToolContext()
@@ -1813,6 +1836,22 @@ describe('assistant codex runtime', () => {
           )
           child.stdout.write(
             jsonLine({
+              id: 60,
+              method: 'item/tool/call',
+              params: {
+                namespace: 'murph',
+                tool: 'finish_without_reply',
+                arguments: {},
+              },
+            }),
+          )
+          await expect(waitForRpcResponse(child, 60)).resolves.toMatchObject({
+            id: 60,
+            result: { success: true },
+          })
+
+          child.stdout.write(
+            jsonLine({
               id: 61,
               method: 'item/tool/call',
               params: {
@@ -1846,11 +1885,11 @@ describe('assistant codex runtime', () => {
           await expect(waitForRpcResponse(child, 62)).resolves.toEqual({
             id: 62,
             result: {
-              success: true,
+              success: false,
               contentItems: [
                 {
                   type: 'inputText',
-                  text: 'finished without reply',
+                  text: 'finish_without_reply is unavailable after pausing a computer run for the user',
                 },
               ],
             },
@@ -1882,9 +1921,9 @@ describe('assistant codex runtime', () => {
         workingDirectory,
       }),
     ).resolves.toMatchObject({
-      acceptedNoReplyDeliveryContextOrdinals: [0],
-      finalAction: { kind: 'none' },
-      finalMessage: '',
+      acceptedNoReplyDeliveryContextOrdinals: [],
+      finalAction: null,
+      finalMessage: 'Take over here: https://web.example.test/computer/handoff/raw-token',
     })
   })
 
