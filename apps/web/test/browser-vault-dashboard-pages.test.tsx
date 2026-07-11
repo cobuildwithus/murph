@@ -17,7 +17,8 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("@/src/lib/browser-vault/context", () => ({
-  BrowserVaultProvider: ({ children }: { children: React.ReactNode }) => children,
+  BrowserVaultProvider: ({ children }: { children: React.ReactNode }) =>
+    children,
   useBrowserVault: mocks.useBrowserVault,
 }));
 
@@ -30,7 +31,9 @@ import { metadata as historyMetadata } from "../app/(dashboard)/history/layout";
 import OverviewPageClient from "../app/(dashboard)/overview/overview-page-client";
 import { metadata as overviewMetadata } from "../app/(dashboard)/overview/layout";
 
-type BrowserVaultEntity = Parameters<typeof createVaultReadModel>[0]["entities"][number];
+type BrowserVaultEntity = Parameters<
+  typeof createVaultReadModel
+>[0]["entities"][number];
 
 let clientFixture: Awaited<ReturnType<typeof createFixtureClient>>;
 const experimentProtocols = listHealthCommonsExperimentBrowseProtocols();
@@ -67,7 +70,7 @@ test("dashboard routes define page-specific metadata with the shared preview ima
   assert.equal(environmentMetadata.title, "Environment — Murph");
   assert.equal(
     environmentMetadata.description,
-    "The living-context facts Murph knows about your home, bedroom, light, and workspace.",
+    "The living-context facts Murph knows about your home, sleep, air, light, and workspace.",
   );
 
   for (const routeMetadata of [
@@ -111,7 +114,10 @@ test("dashboard no longer ships a signals app route", async () => {
 test("OverviewPage renders the dashboard overview", () => {
   const markup = renderToStaticMarkup(createElement(OverviewPageClient));
 
-  assert.match(markup, /A quick read on your recent notes, experiments, and tracked trends\./);
+  assert.match(
+    markup,
+    /A quick read on your recent notes, experiments, and tracked trends\./,
+  );
   assert.match(markup, /Morning walk/);
   assert.match(markup, /Travel recovery note/);
   assert.match(markup, /Weekly changes/);
@@ -175,7 +181,10 @@ test("HistoryPage renders recent timeline entries", () => {
   const markup = renderToStaticMarkup(createElement(HistoryPageClient));
 
   assert.match(markup, /Travel recovery note/);
-  assert.match(markup, /Recent notes, events, assessments, and daily summaries/);
+  assert.match(
+    markup,
+    /Recent notes, events, assessments, and daily summaries/,
+  );
   assert.match(markup, /sleep_duration_minutes daily summary/);
   assert.doesNotMatch(markup, /history\/sample\/sample_1\.md/);
 });
@@ -183,13 +192,14 @@ test("HistoryPage renders recent timeline entries", () => {
 test("EnvironmentPage renders the habitat catalog mock", () => {
   const markup = renderToStaticMarkup(createElement(EnvironmentPage));
 
-  assert.match(markup, /Environment/);
-  assert.match(markup, /Mock preview/);
-  assert.match(markup, /Bedroom &amp; sleep/);
+  assert.match(markup, /Your environment/);
+  assert.match(markup, /Overall picture/);
+  assert.match(markup, /Target score/);
+  assert.match(markup, /Air &amp; water/);
   assert.match(markup, /Night temperature/);
-  assert.match(markup, /Desk ergonomics/);
-  assert.match(markup, /skipped/);
-  assert.match(markup, /unknown/);
+  assert.match(markup, />Targets</);
+  assert.match(markup, /Other facts &amp; gaps/);
+  assert.match(markup, /group\/category/);
 });
 
 test("ExperimentsPage renders the public library with private browser-vault overlays", () => {
@@ -244,7 +254,10 @@ test("ExperimentsPage merges protocol-shaped private runs into the matching publ
 
   assert.match(markup, /Finnish Dry Sauna/);
   assert.match(markup, /Started Apr 18, 2026 · 14 days · 150 studies/);
-  assert.doesNotMatch(markup, /protocol_variant:dry-sauna\/murph-finnish-standard-3x-week/);
+  assert.doesNotMatch(
+    markup,
+    /protocol_variant:dry-sauna\/murph-finnish-standard-3x-week/,
+  );
   assert.doesNotMatch(markup, /Morning walk/);
 });
 
@@ -281,7 +294,10 @@ test("ExperimentsPage keeps the public library visible when browser-vault loadin
 
   assert.match(markup, /Your experiments couldn/);
   assert.match(markup, /The latest refresh failed\./);
-  assert.match(markup, /The public experiment library is still available below\./);
+  assert.match(
+    markup,
+    /The public experiment library is still available below\./,
+  );
   assert.match(markup, /Finnish Dry Sauna/);
   assert.doesNotMatch(markup, /Red Light Glasses Before Bed/);
 });
@@ -315,7 +331,9 @@ test("dashboard empty pages show preparing copy while a replica refresh is pendi
     status: "empty",
   });
 
-  const overviewMarkup = renderToStaticMarkup(createElement(OverviewPageClient));
+  const overviewMarkup = renderToStaticMarkup(
+    createElement(OverviewPageClient),
+  );
   const historyMarkup = renderToStaticMarkup(createElement(HistoryPageClient));
 
   assert.match(overviewMarkup, /Preparing overview\./);
@@ -389,10 +407,12 @@ function createEntity(
   };
 }
 
-async function createFixtureClient(input: {
-  experimentSlug?: string;
-  extraEntities?: BrowserVaultEntity[];
-} = {}) {
+async function createFixtureClient(
+  input: {
+    experimentSlug?: string;
+    extraEntities?: BrowserVaultEntity[];
+  } = {},
+) {
   const replica = await createBrowserVaultReplica({
     metricPoints: [],
     generatedAt: "2026-04-20T12:00:00.000Z",
@@ -483,7 +503,9 @@ async function createFixtureClient(input: {
   return createBrowserVaultQueryClient(replica);
 }
 
-function resolveRecordClass(family: BrowserVaultEntity["family"]): BrowserVaultEntity["recordClass"] {
+function resolveRecordClass(
+  family: BrowserVaultEntity["family"],
+): BrowserVaultEntity["recordClass"] {
   switch (family) {
     case "experiment":
     case "goal":
