@@ -613,6 +613,16 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
       phoneNumber: "+15551234567",
       prisma,
     });
+    expect(mocks.upsertHostedMemberPendingLinqBindingTx).toHaveBeenCalledWith(
+      expect.objectContaining({
+        linqChatId: "chat_123",
+        memberId: "member_123",
+        participantContact: expect.objectContaining({
+          kind: "phone",
+          value: "+15551234567",
+        }),
+      }),
+    );
     expect(mocks.issueHostedInviteTx).toHaveBeenCalledWith({
       channel: "linq",
       memberId: "member_123",

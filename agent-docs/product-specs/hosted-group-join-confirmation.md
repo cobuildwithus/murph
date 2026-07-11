@@ -28,6 +28,10 @@ member's sharing edit does not create another confirmation.
   therefore derive the same conversation identity even if the member later
   adds another account credential. The raw participant value is not added to
   the home-route row.
+- Existing Linq rows without that observed participant authority are not
+  paired with a later phone or email credential. The confirmation uses an
+  existing Telegram thread when available; otherwise that attempt is skipped
+  rather than writing the message into the wrong assistant conversation.
 - This flow does not use Linq participant-target delivery and therefore cannot
   start a new outbound iMessage conversation. If no private route exists, the
   join still succeeds and no confirmation is created.
@@ -66,9 +70,10 @@ mailbox replay idempotent.
 
 Pre-activation members do not yet own the ingress crypto root required to
 encrypt a mailbox payload. Their join transaction commits the durable
-membership without attempting the append. The central activation transaction
-materializes any missing membership-derived confirmations after provisioning
-all domain roots; mailbox deduplication keeps that replay exactly-once.
+membership with a confirmation-eligibility timestamp but does not attempt the
+append. The central activation transaction materializes only eligible member
+joins after provisioning all domain roots; historical memberships and owner
+rows remain ineligible, and mailbox deduplication keeps replay exactly-once.
 
 After commit, each join adapter sends a best-effort mailbox pointer to the
 member runtime. The pointer is a latency hint; the encrypted mailbox item is
@@ -77,7 +82,8 @@ into an error.
 
 ## Deployment concerns
 
-Apply the additive `hosted_member_routing` migration before deploying the web
-producer that writes the home participant identity. The hosted runtime already
-supports the generic assistant-notification mailbox contract, so Vercel and
-Cloudflare do not require a tandem deployment or compatibility window.
+Apply the additive `hosted_member_routing` and `hosted_group_member`
+migrations before deploying the web producer that writes route identity and
+confirmation eligibility. The hosted runtime already supports the generic
+assistant-notification mailbox contract, so Vercel and Cloudflare do not
+require a tandem deployment or compatibility window.

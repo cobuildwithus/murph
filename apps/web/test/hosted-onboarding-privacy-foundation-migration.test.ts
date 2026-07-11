@@ -555,6 +555,13 @@ describe("hosted Prisma baseline migration", () => {
       ),
       "utf8",
     );
+    const hostedGroupJoinConfirmationEligibilityMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/20260711210000_hosted_group_join_confirmation_eligibility/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
     expect(migrationEntries).toEqual([
       "2026040600_init",
       "20260425000000_drop_legacy_linq_control_plane",
@@ -644,8 +651,18 @@ describe("hosted Prisma baseline migration", () => {
       "20260709120000_hosted_linq_delivery_retry_after_at",
       "20260709120000_hosted_member_assistant_model_preference",
       "20260711180000_hosted_linq_home_participant_identity",
+      "20260711210000_hosted_group_join_confirmation_eligibility",
       "migration_lock.toml",
     ]);
+    expect(hostedGroupJoinConfirmationEligibilityMigrationSql).toContain(
+      'ALTER TABLE "hosted_group_member"',
+    );
+    expect(hostedGroupJoinConfirmationEligibilityMigrationSql).toContain(
+      'ADD COLUMN "join_confirmation_eligible_at" TIMESTAMP(3)',
+    );
+    expect(schema).toMatch(
+      /joinConfirmationEligibleAt\s+DateTime\?\s+@map\("join_confirmation_eligible_at"\)/u,
+    );
     expect(hostedThreadRoutesMigrationSql).toContain('CREATE TABLE "hosted_thread_container"');
     expect(hostedThreadRoutesMigrationSql).toContain('CREATE TABLE "hosted_thread_route"');
     expect(hostedThreadRoutesMigrationSql).toContain(

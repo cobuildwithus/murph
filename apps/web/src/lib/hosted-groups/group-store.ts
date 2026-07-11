@@ -798,6 +798,7 @@ async function acceptHostedGroupJoinTx(input: {
       data: {
         id: generateHostedGroupMemberId(),
         groupId: group.id,
+        joinConfirmationEligibleAt: input.now,
         joinedAt: input.now,
         memberId: input.memberId,
         role: "member",

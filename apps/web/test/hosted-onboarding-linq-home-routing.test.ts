@@ -229,6 +229,10 @@ describe("resolveHostedMemberActivationLinqRoute", () => {
       clearPending: true,
       linqChatId: "chat_home",
       memberId: "member_123",
+      participantContact: {
+        kind: "phone",
+        lookupKey: "hbidx:phone:v1:test",
+      },
       prisma: {} as never,
       recipientPhone: "+15550100001",
     });
@@ -320,25 +324,38 @@ describe("resolveHostedMemberActivationLinqRoute", () => {
     });
   });
 
-  it("reuses a pending Linq thread when its recipient matches the chosen home line", async () => {
+  it("keeps a phone-backed pending thread on its observed identity after the member phone changes", async () => {
+    const pendingPhoneLookupKey = "hbidx:phone:v1:pending-a";
+    const member = buildMember({
+      pendingLinqChatId: "chat_pending",
+      pendingLinqParticipantContact: {
+        kind: "phone",
+        lookupKey: pendingPhoneLookupKey,
+        observedAt: new Date("2026-04-12T00:00:00.000Z"),
+        value: "+15551230001",
+      },
+      pendingLinqRecipientPhone: "+15550100001",
+    });
+    if (member.identity) {
+      member.identity.phoneLookupKey = "hbidx:phone:v1:member-b";
+      member.identity.phoneNumber = "+15551230002";
+    }
+
     await expect(
       resolveHostedMemberActivationLinqRoute({
-        member: buildMember({
-          pendingLinqChatId: "chat_pending",
-          pendingLinqRecipientPhone: "+15550100001",
-        }),
+        member,
         prisma: {} as never,
       }),
     ).resolves.toEqual({
       welcomeRoute: {
-        actorId: hashHostedLinqRouteIdentifier("+15551234567"),
+        actorId: hashHostedLinqRouteIdentifier("+15551230002", pendingPhoneLookupKey),
         channel: "linq",
         delivery: {
           kind: "thread",
           target: "chat_pending",
         },
-        identityId: hashHostedLinqRouteIdentifier("hbidx:phone:v1:test"),
-        threadId: hashHostedLinqRouteIdentifier("chat_pending"),
+        identityId: hashHostedLinqRouteIdentifier(pendingPhoneLookupKey, pendingPhoneLookupKey),
+        threadId: hashHostedLinqRouteIdentifier("chat_pending", pendingPhoneLookupKey),
         threadIsDirect: true,
       },
     });
@@ -356,7 +373,7 @@ describe("resolveHostedMemberActivationLinqRoute", () => {
       memberId: "member_123",
       participantContact: {
         kind: "phone",
-        lookupKey: "hbidx:phone:v1:test",
+        lookupKey: pendingPhoneLookupKey,
       },
       prisma: {} as never,
       recipientPhone: "+15550100001",
@@ -426,8 +443,6 @@ describe("resolveHostedMemberActivationLinqRoute", () => {
       participantContact: {
         kind: "email",
         lookupKey: emailLookupKey,
-        observedAt: new Date("2026-04-12T00:01:00.000Z"),
-        value: "buddy@icloud.com",
       },
       prisma: {} as never,
       recipientPhone: null,
@@ -1139,7 +1154,7 @@ function hashHostedLinqRouteIdentifier(
 }
 
 function buildMember(
-  overrides: Partial<HostedMemberSnapshot["routing"]> = {},
+  overrides: Partial<NonNullable<HostedMemberSnapshot["routing"]>> = {},
 ): HostedMemberSnapshot {
   return {
     billingRef: null,
@@ -1169,10 +1184,23 @@ function buildMember(
     routing: {
       linqChatId: null,
       linqHomeLineAssignedAt: null,
+      linqParticipantContact: overrides.linqChatId
+        ? {
+            kind: "phone",
+            lookupKey: "hbidx:phone:v1:test",
+          }
+        : null,
       linqRecipientPhone: null,
       memberId: "member_123",
       pendingLinqChatId: null,
-      pendingLinqParticipantContact: null,
+      pendingLinqParticipantContact: overrides.pendingLinqChatId
+        ? {
+            kind: "phone",
+            lookupKey: "hbidx:phone:v1:test",
+            observedAt: new Date("2026-04-12T00:00:00.000Z"),
+            value: "+15551234567",
+          }
+        : null,
       pendingLinqRecipientPhone: null,
       telegramThreadId: null,
       telegramUserId: null,

@@ -10,7 +10,6 @@ import { appendHostedMailboxEnvelopeTx } from "../hosted-mailbox/store";
 import { hasActiveHostedCryptoDomainRootsForUserTx } from "../hosted-crypto/domain-root-store";
 import { readHostedMemberIdentity } from "../hosted-onboarding/hosted-member-identity-store";
 import { readHostedMemberRoutingState } from "../hosted-onboarding/hosted-member-routing-store";
-import { readHostedMemberEmailAuthorization } from "../hosted-onboarding/hosted-member-store";
 import { readHostedLinqHomeLineAuthority } from "../hosted-onboarding/linq-home-routing";
 import {
   resolveHostedMemberAssistantNotificationRoute,
@@ -100,7 +99,11 @@ export async function materializePendingHostedGroupJoinConfirmationsTx(input: {
         select: { joinCode: true },
       },
     },
-    where: { memberId: input.memberId },
+    where: {
+      joinConfirmationEligibleAt: { not: null },
+      memberId: input.memberId,
+      role: "member",
+    },
   });
 
   for (const membership of memberships) {
@@ -122,11 +125,7 @@ async function resolveHostedGroupJoinConfirmationRouteTx(input: {
   memberId: string;
   tx: Prisma.TransactionClient;
 }): Promise<HostedExecutionAssistantNotificationRoute | null> {
-  const [emailAuthorization, identity, routing] = await Promise.all([
-    readHostedMemberEmailAuthorization({
-      memberId: input.memberId,
-      prisma: input.tx,
-    }),
+  const [identity, routing] = await Promise.all([
     readHostedMemberIdentity({
       memberId: input.memberId,
       prisma: input.tx,
@@ -137,16 +136,11 @@ async function resolveHostedGroupJoinConfirmationRouteTx(input: {
     }),
   ]);
   const linqAuthority = readHostedLinqHomeLineAuthority(routing);
-  const currentMemberLookupKey =
-    identity?.phoneLookupKey
-    ?? emailAuthorization?.verifiedEmail?.lookupKey
-    ?? emailAuthorization?.directPublicSender?.lookupKey
-    ?? null;
-  const linqContactLookupKey = linqAuthority.kind === "home"
-    ? linqAuthority.participantContact?.lookupKey ?? currentMemberLookupKey
-    : linqAuthority.kind === "pending"
-      ? linqAuthority.participantContact?.lookupKey ?? identity?.phoneLookupKey ?? null
-      : null;
+  const linqContactLookupKey = (
+    linqAuthority.kind === "home" || linqAuthority.kind === "pending"
+  )
+    ? linqAuthority.participantContact?.lookupKey ?? null
+    : null;
   const linqRoute = (
     linqAuthority.kind === "home" || linqAuthority.kind === "pending"
   ) && linqContactLookupKey

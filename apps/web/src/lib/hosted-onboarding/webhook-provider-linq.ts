@@ -870,7 +870,7 @@ export async function planHostedOnboardingLinqWebhook(input: {
     homeLineAssignedAt: bindingResult.homeLineAssignedAt,
     memberId: member.id,
     occurredAt,
-    participantContact: participantContact.kind === "email" ? participantContact : null,
+    participantContact,
     prisma: input.prisma,
     recipientPhone: bindingResult.recipientPhone,
   });

@@ -301,15 +301,11 @@ async function resolveHostedMemberActivationLinqRouteAttempt(input: {
       });
     }
 
-    const linqContactLookupKey =
-      authority.participantContact?.lookupKey
-      ?? input.member.identity?.phoneLookupKey
-      ?? input.member.emailAuthorization?.verifiedEmail?.lookupKey
-      ?? null;
+    const linqContactLookupKey = authority.participantContact?.lookupKey ?? null;
 
     return {
       welcomeRoute: resolveHostedMemberAssistantNotificationRoute({
-        linqChatId: authority.chatId,
+        linqChatId: linqContactLookupKey ? authority.chatId : null,
         linqContactLookupKey,
         memberId: input.member.core.id,
         memberPhoneNumber,
@@ -324,8 +320,6 @@ async function resolveHostedMemberActivationLinqRouteAttempt(input: {
     authority.kind === "pending"
     && (
       authority.participantContact?.lookupKey
-      ?? input.member.identity?.phoneLookupKey
-      ?? input.member.emailAuthorization?.verifiedEmail?.lookupKey
     )
     && (
       memberPhoneNumber
@@ -333,23 +327,12 @@ async function resolveHostedMemberActivationLinqRouteAttempt(input: {
         : true
     )
   ) {
-    const linqContactLookupKey =
-      authority.participantContact?.lookupKey
-      ?? input.member.identity?.phoneLookupKey
-      ?? input.member.emailAuthorization?.verifiedEmail?.lookupKey
-      ?? null;
+    const linqContactLookupKey = authority.participantContact?.lookupKey ?? null;
     await upsertHostedMemberHomeLinqBindingTx({
       clearPending: true,
       linqChatId: authority.chatId,
       memberId: input.member.core.id,
-      participantContact: authority.participantContact ?? (
-        input.member.identity?.phoneLookupKey
-          ? {
-              kind: "phone",
-              lookupKey: input.member.identity.phoneLookupKey,
-            }
-          : null
-      ),
+      participantContact: authority.participantContact,
       prisma: input.prisma,
       recipientPhone: authority.recipientPhone,
     });
@@ -567,7 +550,12 @@ export function readHostedLinqHomeLineAuthority(
       chatId: routing.pendingLinqChatId,
       kind: "pending",
       ...(routing.pendingLinqParticipantContact
-        ? { participantContact: routing.pendingLinqParticipantContact }
+        ? {
+            participantContact: {
+              kind: routing.pendingLinqParticipantContact.kind,
+              lookupKey: routing.pendingLinqParticipantContact.lookupKey,
+            },
+          }
         : {}),
       recipientPhone:
         normalizePhoneNumber(routing.pendingLinqRecipientPhone)

@@ -361,6 +361,13 @@ describe("acceptHostedGroupJoinCodeTx", () => {
       publicBaseUrl: "https://murph.example",
       tx,
     });
+    expect(tx.hostedGroupMember.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        joinConfirmationEligibleAt: now,
+        role: "member",
+      }),
+      select: { id: true },
+    });
   });
 
   it("propagates a confirmation append failure so the enclosing transaction can roll back", async () => {

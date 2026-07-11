@@ -2,7 +2,6 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   createHostedAssistantConversationIdentifierBlind,
   hashHostedAssistantConversationIdentifier,
-  hashNullableHostedAssistantConversationIdentifier,
 } from "@murphai/hosted-execution/assistant-identifiers";
 
 import { createPrismaClient } from "@/src/lib/prisma";
@@ -68,6 +67,10 @@ describe("appendHostedGroupJoinConfirmationTx", () => {
     });
     mocks.readHostedMemberRoutingState.mockResolvedValue({
       linqChatId: "private_chat_1",
+      linqParticipantContact: {
+        kind: "email",
+        lookupKey: "verified_email_lookup_1",
+      },
       linqRecipientPhone: null,
       pendingLinqChatId: null,
       pendingLinqParticipantContact: null,
@@ -127,7 +130,7 @@ describe("appendHostedGroupJoinConfirmationTx", () => {
     });
   });
 
-  it("keeps a home Linq thread on the current member identity when stale pending state remains", async () => {
+  it("does not guess a legacy home thread identity from a later member phone", async () => {
     mocks.readHostedMemberEmailAuthorization.mockResolvedValue(null);
     mocks.readHostedMemberIdentity.mockResolvedValue({
       phoneLookupKey: "home_phone_lookup_1",
@@ -142,17 +145,12 @@ describe("appendHostedGroupJoinConfirmationTx", () => {
         lookupKey: "stale_pending_lookup_1",
         value: "+15550100003",
       },
-      telegramThreadId: null,
-      telegramUserId: null,
+      telegramThreadId: "telegram_private_thread_1",
+      telegramUserId: "telegram_user_1",
     });
     const tx = createPrismaClient({
       databaseUrl: "postgresql://test:test@127.0.0.1:1/test",
     });
-    const identifierBlind = createHostedAssistantConversationIdentifierBlind({
-      secret: "home_phone_lookup_1",
-      userId: "member_joiner",
-    });
-
     await appendHostedGroupJoinConfirmationTx({
       joinCode: "JOIN1",
       memberId: "member_joiner",
@@ -165,26 +163,13 @@ describe("appendHostedGroupJoinConfirmationTx", () => {
     expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledWith({
       envelope: expect.objectContaining({
         notification: expect.objectContaining({
-          route: {
-            actorId: hashNullableHostedAssistantConversationIdentifier(
-              identifierBlind,
-              "+15550100001",
-            ),
-            channel: "linq",
+          route: expect.objectContaining({
+            channel: "telegram",
             delivery: {
               kind: "thread",
-              target: "private_chat_home_1",
+              target: "telegram_private_thread_1",
             },
-            identityId: hashHostedAssistantConversationIdentifier(
-              identifierBlind,
-              "home_phone_lookup_1",
-            ),
-            threadId: hashHostedAssistantConversationIdentifier(
-              identifierBlind,
-              "private_chat_home_1",
-            ),
-            threadIsDirect: true,
-          },
+          }),
         }),
       }),
       tx,
@@ -301,7 +286,7 @@ describe("appendHostedGroupJoinConfirmationTx", () => {
     });
   });
 
-  it("keeps a phone-backed pending Linq thread when no pending contact claim exists", async () => {
+  it("does not guess a legacy pending thread identity from the current member phone", async () => {
     mocks.readHostedMemberEmailAuthorization.mockResolvedValue(null);
     mocks.readHostedMemberIdentity.mockResolvedValue({
       phoneLookupKey: "member_phone_lookup_1",
@@ -312,8 +297,8 @@ describe("appendHostedGroupJoinConfirmationTx", () => {
       linqRecipientPhone: "+15550100002",
       pendingLinqChatId: "private_chat_pending_phone_1",
       pendingLinqParticipantContact: null,
-      telegramThreadId: null,
-      telegramUserId: null,
+      telegramThreadId: "telegram_private_thread_1",
+      telegramUserId: "telegram_user_1",
     });
     const tx = createPrismaClient({
       databaseUrl: "postgresql://test:test@127.0.0.1:1/test",
@@ -332,10 +317,10 @@ describe("appendHostedGroupJoinConfirmationTx", () => {
       envelope: expect.objectContaining({
         notification: expect.objectContaining({
           route: expect.objectContaining({
-            channel: "linq",
+            channel: "telegram",
             delivery: {
               kind: "thread",
-              target: "private_chat_pending_phone_1",
+              target: "telegram_private_thread_1",
             },
           }),
         }),
@@ -527,7 +512,11 @@ describe("appendHostedGroupJoinConfirmationTx", () => {
         id: true,
         joinedAt: true,
       },
-      where: { memberId: "member_joiner" },
+      where: {
+        joinConfirmationEligibleAt: { not: null },
+        memberId: "member_joiner",
+        role: "member",
+      },
     });
     expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledWith({
       envelope: expect.objectContaining({
