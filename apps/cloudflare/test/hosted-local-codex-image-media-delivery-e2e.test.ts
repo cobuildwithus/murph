@@ -312,13 +312,18 @@ function readLatestSavedGeneratedImageRef(): string {
       return match[0];
     }
   }
-  const knownOutcome = [
-    "saved generated image lookup could not be loaded",
-    "image generation failed",
-    "image generation returned invalid image data",
-    "image generated but vault save failed",
-    "image generated but upload failed",
-  ].find((outcome) => requests.some((body) => body.includes(outcome))) ?? "unclassified";
+  const classifiedVaultSaveFailure = requests
+    .map((body) => body.match(/image generated but vault save failed \(([A-Za-z0-9_]+)\)/u)?.[1])
+    .find((code): code is string => typeof code === "string");
+  const knownOutcome = classifiedVaultSaveFailure
+    ? `image generated but vault save failed (${classifiedVaultSaveFailure})`
+    : [
+        "saved generated image lookup could not be loaded",
+        "image generation failed",
+        "image generation returned invalid image data",
+        "image generated but vault save failed",
+        "image generated but upload failed",
+      ].find((outcome) => requests.some((body) => body.includes(outcome))) ?? "unclassified";
   throw new Error(
     `Expected the generated-image tool output to expose a saved vault ref; outcome: ${knownOutcome}.`,
   );

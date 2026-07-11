@@ -132,7 +132,7 @@ describe("hosted local Junction wearable direct-resource replay e2e", () => {
       localDatabaseUrl,
       persistDirOverride: workerPersistDirOverride,
       persistDirPrefix: "murph-hosted-local-junction-direct-replay-",
-      requiredRunnerEnvProfile: "device-sync",
+      requiredRunnerEnvProfile: "device-sync,linq",
       scenarioLabel: "Local hosted Junction wearable direct-resource replay e2e",
       streamLogs: streamDevLogs,
     });

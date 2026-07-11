@@ -302,8 +302,25 @@ async function waitForInvokeFailureDestroy(input: {
 }): Promise<HostedRunnerStatusResponse> {
   const startedAt = Date.now();
   let lastStatus: HostedRunnerStatusResponse | null = null;
+  let lastStatusReadError: string | null = null;
   while (Date.now() - startedAt < 120_000) {
-    lastStatus = await requireScenario().harness.readUserStatus(userId);
+    const destroyObserved =
+      countInvokeFailureDestroyRequests() > input.baselineInvokeFailureDestroyCount;
+    if (destroyObserved && lastStatus) {
+      return lastStatus;
+    }
+
+    try {
+      lastStatus = await requireScenario().harness.readUserStatus(userId);
+      lastStatusReadError = null;
+    } catch (error) {
+      lastStatusReadError = error instanceof Error
+        ? `status read failed with ${error.name}`
+        : "status read failed with an unknown error";
+      await sleep(250);
+      continue;
+    }
+
     if (countInvokeFailureDestroyRequests() > input.baselineInvokeFailureDestroyCount) {
       return lastStatus;
     }
@@ -313,6 +330,7 @@ async function waitForInvokeFailureDestroy(input: {
   throw new Error(await requireScenario().buildFailureMessage(userId, [
     "Timed out waiting for the failed snapshot publication to recycle its runner container.",
     ...(lastStatus ? [`last status: ${JSON.stringify(lastStatus)}`] : []),
+    ...(lastStatusReadError ? [lastStatusReadError] : []),
   ]));
 }
 

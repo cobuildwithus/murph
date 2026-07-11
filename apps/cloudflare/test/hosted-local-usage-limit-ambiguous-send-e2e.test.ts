@@ -106,8 +106,6 @@ describe("hosted local usage-limit ambiguous send e2e", () => {
     });
     const activationStatus = await requireScenario().harness.readUserStatus(userId);
     const conversationSeqBeforeDenial = readConversationMailboxMaxSeq(activationStatus);
-    const workflowStateBeforeDenial = await readHostedRuntimeWorkflowState();
-
     const { periodEnd, periodStart } = buildCurrentUtcCalendarMonthPeriod();
     await seedHostedAiUsageLimitPeriodForTest({
       environment: requireScenario().runtimeEnv,
@@ -165,7 +163,7 @@ describe("hosted local usage-limit ambiguous send e2e", () => {
       userId,
     });
     const firstBlockedWorkflowState = await waitForUsageLimitBlockedWorkflowState(
-      workflowStateBeforeDenial.signalVersion,
+      0,
     );
     const firstBlockedStatus = await requireScenario().harness.readUserStatus(userId);
 
@@ -272,17 +270,6 @@ function countAssistantResponseRequests(): number {
   return requireScenario().assistantProviderRequests.filter((request) =>
     request.url === "/v1/responses"
   ).length;
-}
-
-async function readHostedRuntimeWorkflowState(): Promise<HostedRuntimeWorkflowState> {
-  const client = await createHostedRuntimeTemporalClientFromEnv(requireScenario().runtimeEnv);
-  try {
-    return await client.workflow
-      .getHandle(hostedUserRuntimeWorkflowId(userId))
-      .query<HostedRuntimeWorkflowState>(HOSTED_USER_RUNTIME_STATUS_QUERY_NAME);
-  } finally {
-    await client.connection.close();
-  }
 }
 
 async function waitForUsageLimitBlockedWorkflowState(

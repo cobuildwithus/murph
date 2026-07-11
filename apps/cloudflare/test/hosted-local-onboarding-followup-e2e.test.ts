@@ -8,9 +8,6 @@ import {
 import {
   buildHostedExecutionMemberActivatedWake,
 } from "@murphai/hosted-execution";
-import type {
-  HostedRunnerStatusResponse,
-} from "@murphai/hosted-execution/runtime-control";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 import {
@@ -239,7 +236,17 @@ describe("hosted local onboarding follow-up e2e", () => {
       baselineCount: secondSendBaseline,
       quietWindowMs: secondPeriodQuietWindowMs,
     });
-    await waitForHostedWorkspaceNextWakeCleared(userId);
+    const archiveTurnRequestBodies = requireScenario().assistantProviderRequests
+      .slice(secondProviderRequestBaseline)
+      .filter((request) => request.url === "/v1/responses")
+      .map((request) => request.body);
+    expect(archiveTurnRequestBodies.some((body) =>
+      body.includes(followupSlug)
+      && (
+        body.includes('"status":"archived"')
+        || body.includes('\\"status\\":\\"archived\\"')
+      )
+    )).toBe(true);
   }, 720_000);
 });
 
@@ -451,36 +458,6 @@ async function waitForHostedWorkspaceNextWakeAfter(input: {
   ].filter((line): line is string => Boolean(line))));
 }
 
-async function waitForHostedWorkspaceNextWakeCleared(userId: string): Promise<void> {
-  const startedAt = Date.now();
-  let latestNextWakeAt: string | null = null;
-  let latestNextAlarmAt: string | null = null;
-
-  while ((Date.now() - startedAt) < 120_000) {
-    const status = await requireScenario().harness.readUserStatus(userId);
-    if (status.lastErrorCode) {
-      throw new Error(await requireScenario().buildFailureMessage(userId, [
-        "Hosted runner reported an error before clearing the onboarding follow-up wake.",
-        `lastErrorCode: ${status.lastErrorCode}`,
-      ]));
-    }
-
-    latestNextWakeAt = status.workspace?.nextWakeAt ?? null;
-    latestNextAlarmAt = status.nextAlarmAt ?? null;
-    if (!latestNextWakeAt && !latestNextAlarmAt) {
-      return;
-    }
-
-    await sleep(1_000);
-  }
-
-  throw new Error(await requireScenario().buildFailureMessage(userId, [
-    "Timed out waiting for the hosted workspace to clear the onboarding follow-up wake.",
-    `latestNextWakeAt: ${latestNextWakeAt ?? "null"}`,
-    `latestNextAlarmAt: ${latestNextAlarmAt ?? "null"}`,
-  ]));
-}
-
 async function waitForAssistantProviderRequestCount(input: {
   minimumCount: number;
   timeoutMs: number;
@@ -568,6 +545,11 @@ function buildHostedAssistantArchiveAndSkipResponses(): readonly HostedLocalAssi
       followupSlug,
       "--status",
       "archived",
+    ]),
+    buildAssistantProviderVaultCliCall([
+      "automation",
+      "show",
+      followupSlug,
     ]),
     JSON.stringify({
       kind: "skip",

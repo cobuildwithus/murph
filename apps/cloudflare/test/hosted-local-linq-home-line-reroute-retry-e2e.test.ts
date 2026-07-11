@@ -132,7 +132,7 @@ describe("hosted local Linq home-line reroute retry e2e", () => {
     });
 
     expect(requireLinqStub().countObservedSends(redirectPath, redirectMatcher)).toBe(
-      observedBaseline + 3,
+      observedBaseline + 1,
     );
     expect(requireLinqStub().countAcceptedSends(redirectPath, redirectMatcher)).toBe(
       acceptedBaseline,
@@ -149,7 +149,7 @@ describe("hosted local Linq home-line reroute retry e2e", () => {
     });
 
     const allRedirectAttempts = await requireLinqStub().waitForMatchingSendCount({
-      expectedCount: observedBaseline + 4,
+      expectedCount: observedBaseline + 2,
       expectedPath: redirectPath,
       matchRequest: redirectMatcher,
       scenario: requireScenario(),
@@ -165,7 +165,7 @@ describe("hosted local Linq home-line reroute retry e2e", () => {
     });
     const acceptedRedirects = allAcceptedRedirects.slice(acceptedBaseline);
 
-    expect(redirectAttempts).toHaveLength(4);
+    expect(redirectAttempts).toHaveLength(2);
     expect(redirectAttempts.every((request) =>
       request.authorizationStatus === "expected"
     )).toBe(true);

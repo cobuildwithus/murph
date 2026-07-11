@@ -299,17 +299,23 @@ export async function executeGenerateImageTool(input: {
                 usageDraft,
               }
             }
-          } catch {
+          } catch (lookupError) {
             return {
               rpcSuccess: false,
-              rpcText: 'image generated but vault save failed',
+              rpcText: buildGeneratedImageVaultSaveFailureText({
+                env: input.env,
+                error: lookupError,
+              }),
               usageDraft,
             }
           }
         } else {
           return {
             rpcSuccess: false,
-            rpcText: 'image generated but vault save failed',
+            rpcText: buildGeneratedImageVaultSaveFailureText({
+              env: input.env,
+              error,
+            }),
             usageDraft,
           }
         }
@@ -372,6 +378,38 @@ export async function executeGenerateImageTool(input: {
       usageDraft,
     }
   }
+}
+
+function buildGeneratedImageVaultSaveFailureText(input: {
+  env: NodeJS.ProcessEnv
+  error: unknown
+}): string {
+  const message = 'image generated but vault save failed'
+  if (input.env.MURPH_E2E_DEBUG_ASSISTANT_PROVIDER_STUB !== '1') {
+    return message
+  }
+
+  const code = readGeneratedImageVaultSaveFailureCode(input.error)
+  return `${message} (${code})`
+}
+
+function readGeneratedImageVaultSaveFailureCode(error: unknown): string {
+  if (isVaultError(error)) {
+    return error.code
+  }
+  if (
+    error &&
+    typeof error === 'object' &&
+    'code' in error &&
+    typeof error.code === 'string' &&
+    /^[A-Z0-9_]{1,64}$/u.test(error.code)
+  ) {
+    return error.code
+  }
+  if (error instanceof Error && /^[A-Za-z][A-Za-z0-9_]{0,63}$/u.test(error.name)) {
+    return error.name
+  }
+  return 'unclassified'
 }
 
 function hasVaultReferenceImageRef(refs: readonly string[]): boolean {
