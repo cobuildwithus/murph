@@ -3995,6 +3995,16 @@
                                   "description": "Override the local device sync control-plane URL. Read-only list commands use an explicit target when set; daemon-backed commands may manage the selected vault daemon when omitted.",
                                   "type": "string",
                                   "minLength": 1
+                                },
+                                "confirm": {
+                                  "description": "Confirm only after the user approves the shown connection scope; Junction approval must cover its entire shared connection and every upstream wearable source.",
+                                  "type": "boolean"
+                                },
+                                "expectedConnectedAt": {
+                                  "description": "Bind hosted disconnect confirmation to the connectedAt value returned by account show.",
+                                  "type": "string",
+                                  "format": "date-time",
+                                  "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
                                 }
                               }
                             }
