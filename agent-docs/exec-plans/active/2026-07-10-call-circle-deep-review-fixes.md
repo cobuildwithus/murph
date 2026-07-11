@@ -77,11 +77,15 @@ Success means:
   located the clean PR worktree at reviewed head `2b8f438fe5`, loaded required
   guidance, implemented all ten fixes, passed focused regressions plus real
   PostgreSQL barriers for provider-start/deletion ordering and preference-write
-  proposal invalidation, and passed the truthful affected cross-owner
-  verification lane including package/app typechecks, tests, lint, smoke, and
-  production builds.
-- Now: complete the controller-gated local security, coverage, and deep-review
-  audits while the parent performs final diff and privacy review.
+  proposal invalidation, passed the truthful affected cross-owner verification
+  lane including package/app typechecks, tests, lint, smoke, and production
+  builds, merged the current `origin/main` through ordinary Git history, and
+  proved the merged base's two assistant-style CLI tests after rebuilding its
+  prepared runtime artifacts.
+- Now: wait for physical unused memory to recover above the 12 GiB heavy-command
+  floor, rerun the full affected lane on the merged head, and complete the
+  controller-gated local security, coverage, and deep-review audits while the
+  parent performs final diff and privacy review.
 - Next: resolve accepted audit findings, finish and push the scoped commit, then
   confirm exact-head CI, thread resolution, and mergeability before the
   controller-gated ReviewGPT handoff.

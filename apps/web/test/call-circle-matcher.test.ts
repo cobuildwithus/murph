@@ -118,6 +118,43 @@ describe("Call Circle matching and time windows", () => {
     ]);
   });
 
+  it("matches the brute-force maximum cardinality for every five-member graph", () => {
+    const now = new Date("2026-07-06T13:00:00.000Z");
+    const memberIds = Array.from({ length: 5 }, (_, index) => `member_${index}`);
+    const completeEdges: Array<readonly [number, number]> = [];
+    for (let first = 0; first < memberIds.length; first += 1) {
+      for (let second = first + 1; second < memberIds.length; second += 1) {
+        completeEdges.push([first, second]);
+      }
+    }
+
+    for (let graphMask = 0; graphMask < 2 ** completeEdges.length; graphMask += 1) {
+      const includedEdges = completeEdges.filter(
+        (_edge, edgeIndex) => (graphMask & (1 << edgeIndex)) !== 0,
+      );
+      const windowsByMember = memberIds.map(() => [] as CallCircleTestWindow[]);
+      for (const edge of includedEdges) {
+        const edgeIndex = completeEdges.indexOf(edge);
+        const hour = 14 + Math.floor(edgeIndex / 2);
+        const minute = edgeIndex % 2 === 0 ? "00" : "30";
+        const window = testWindow(`${String(hour).padStart(2, "0")}:${minute}`);
+        windowsByMember[edge[0]]?.push(window);
+        windowsByMember[edge[1]]?.push(window);
+      }
+
+      const proposals = proposeCallCircleMatches({
+        now,
+        participants: memberIds.map((memberId, index) =>
+          participant(memberId, windowsByMember[index] ?? [])),
+        recentMatches: [],
+      });
+
+      expect(proposals, `candidate graph mask ${graphMask}`).toHaveLength(
+        bruteForceMaximumMatchingSize(memberIds.length, includedEdges),
+      );
+    }
+  });
+
   it("canonicalizes opaque ids with code-unit order", () => {
     const now = new Date("2026-07-06T13:00:00.000Z");
     const sharedWindow = {
@@ -681,6 +718,28 @@ function testWindow(startLocalTime: string): CallCircleTestWindow {
     endLocalTime: `${String(endHour).padStart(2, "0")}:${String(minute % 60).padStart(2, "0")}`,
     startLocalTime,
   };
+}
+
+function bruteForceMaximumMatchingSize(
+  vertexCount: number,
+  edges: readonly (readonly [number, number])[],
+): number {
+  const search = (edgeIndex: number, usedMask: number): number => {
+    const edge = edges[edgeIndex];
+    if (!edge) return 0;
+    const withoutEdge = search(edgeIndex + 1, usedMask);
+    const edgeMask = (1 << edge[0]) | (1 << edge[1]);
+    if ((usedMask & edgeMask) !== 0) return withoutEdge;
+    return Math.max(
+      withoutEdge,
+      1 + search(edgeIndex + 1, usedMask | edgeMask),
+    );
+  };
+
+  if (vertexCount > 30) {
+    throw new Error("Brute-force matching test supports at most 30 vertices.");
+  }
+  return search(0, 0);
 }
 
 function participant(
