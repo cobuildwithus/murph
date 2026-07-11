@@ -518,8 +518,16 @@ returns use a bare conversation link; the confirmation-message fallback exists
 only while the gate is disabled. New web producer behavior against an old
 runtime is not safe because the old parser quarantines the new system row and
 blocks system-lane progress. Roll back in the reverse order: set the gate to `0`
-and redeploy web first so no new rows can be produced, verify system-lane lag is
-clear, then roll back Cloudflare. Do not roll the runtime back while the producer
+and redeploy web first so no new rows can be produced. Once the gate has ever
+been enabled in production, the first compatible Cloudflare/runner bundle is a
+permanent runtime rollback floor. System-lane lag measures import progress, not
+handling progress: an imported approval wake may still be pending in
+`hosted-system-mailbox.json` and preserved in the hot workspace snapshot after
+lag reaches zero. Roll Cloudflare back only to that compatible bundle or newer,
+or forward-fix it. A rollback below the floor requires a separate migration and
+operator proof that covers durable server rows, imported local pending items,
+committed snapshots, and in-flight producers; disabling the gate and observing
+zero lag alone is insufficient. Do not roll the runtime back while the producer
 remains active.
 
 ### Hosted Runtime Maintenance Wake

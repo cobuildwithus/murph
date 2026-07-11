@@ -108,9 +108,15 @@ Last verified: 2026-07-10
   drain if an old bundle can still serve later. This covers the 15-minute pending
   approval lifetime plus the fresh 15-minute approved lifetime before the gate
   is set to `1` and web is redeployed. To roll back, set it to `0` and redeploy
-  web before draining the system lane and rolling back Cloudflare. The disabled
-  path emits no new mailbox kind and retains the legacy approval confirmation
-  fallback. Approval-outcome coverage also proves bare
+  web first. Once the gate has ever been enabled, the first compatible
+  Cloudflare/runner bundle is the permanent runtime rollback floor; system-lane
+  lag proves import progress, not that imported pending items or committed hot
+  snapshots no longer contain the new wake. Roll back only to that floor or
+  newer, or forward-fix. A below-floor rollback requires a separate migration
+  and proof covering server rows, imported local pending items, committed
+  snapshots, and in-flight producers. The disabled path emits no new mailbox
+  kind and retains the legacy approval confirmation fallback. Approval-outcome
+  coverage also proves bare
   return links when enabled, one parked owner across repeated turns in the same
   approval cycle, exact-cycle causal selection and generation validation instead
   of oldest-owner fallback, retained causal control work across foreground
