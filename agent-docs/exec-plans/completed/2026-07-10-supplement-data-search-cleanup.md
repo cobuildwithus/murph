@@ -47,7 +47,8 @@ Success means:
 
 ## State
 
-Active. Canonical and legacy env keys resolve to the same endpoint. A complete
+Completed pending the explicitly deferred ReviewGPT browser gate. Canonical and
+legacy env keys resolve to the same endpoint. A complete
 239,367-row compressed CSV snapshot was captured and verified outside git before
 mutation. Its compressed SHA-256 is
 `542c72b7e029d4b5380c61de77ba88e17a94e2dbfc3784bb010bebeb1cd8969a`. A
@@ -108,6 +109,27 @@ labels bounded candidate IDs as selected drilldowns rather than a comprehensive
 second classification, and names the already-applied one-time repair as an
 immutable July 2026 artifact.
 
-Next is the final scoped and acceptance verification, required coverage and
-security re-audit, parent final review, scoped commit/PR flow, ReviewGPT, CI, and
-mergeability proof.
+The final diff-aware verification passed every affected owner and reverse
+dependent. Canonical acceptance then passed all workspace typechecks, guards,
+package coverage, app tests, lint, dev smoke, Cloudflare verification, and the
+production Next build with the real PostgreSQL corpus enabled. Its hosted-web
+lane reported 4,387 passing tests and 10 intentional skips. An earlier
+high-fanout acceptance attempt had one unrelated CLI test hit its 120-second
+timeout; the file passed 24/24 alone, the full CLI suite passed 1,050/1,050 in
+both the diff lane and the serialized acceptance rerun, and no timeout remains.
+
+The security/privacy re-audit reported no Medium-or-higher findings. The
+recovery controller explicitly withheld permission for a new local audit
+helper, so the parent performed the required coverage review against the direct
+proof above; every changed behavior has focused coverage and no additional test
+scaffolding was justified. Parent final review found no unresolved correctness,
+privacy, security, or scope issue.
+
+After the final upstream rebase, the complete supplement library plus real
+PostgreSQL corpus passed 163/163, the aggregate auditor passed 6/6, and the CI
+workflow guard passed 5/5. The remaining work is the scoped plan-closing commit,
+push, PR CI and mergeability proof, followed by ReviewGPT only after the later
+explicit controller grant.
+Status: completed
+Updated: 2026-07-11
+Completed: 2026-07-11
