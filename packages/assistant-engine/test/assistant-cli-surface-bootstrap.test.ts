@@ -431,6 +431,39 @@ test('buildAssistantCliSurfaceContract normalizes commands and renders detailed 
   assert.doesNotMatch(contract, /`model`/u)
 })
 
+test('scopeAssistantCliSurfaceContractToAudience removes only private style commands from non-private routes', async () => {
+  const {
+    scopeAssistantCliSurfaceContractToAudience,
+  } = await import('../src/assistant/cli-surface-bootstrap.ts')
+  const contract = [
+    'Murph CLI Contract:',
+    'assistant:',
+    '- `assistant style show`: Show style settings.',
+    '- `assistant style set`: Set style settings.',
+    '- `assistant style reset`: Reset style settings.',
+    '- `assistant onboarding resume-context`: Read onboarding context.',
+  ].join('\n')
+
+  assert.equal(
+    scopeAssistantCliSurfaceContractToAudience({
+      contract,
+      privateInteractiveAudience: true,
+    }),
+    contract,
+  )
+  assert.equal(
+    scopeAssistantCliSurfaceContractToAudience({
+      contract,
+      privateInteractiveAudience: false,
+    }),
+    [
+      'Murph CLI Contract:',
+      'assistant:',
+      '- `assistant onboarding resume-context`: Read onboarding context.',
+    ].join('\n'),
+  )
+})
+
 test('buildAssistantCliProcessEnv keeps manifest subprocess env credential-free', async () => {
   const {
     buildAssistantCliProcessEnv,

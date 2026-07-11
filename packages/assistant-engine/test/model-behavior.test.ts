@@ -355,16 +355,34 @@ describe('assistant execution prompt contract', () => {
       'privacy/auth/billing/consent/irreversible actions',
     )
     expect(layers.stableRouteCapabilityPrompt).toContain(
-      'In groups, never run style show/set/reset',
+      'member-private conversation state',
     )
     expect(layers.stableRouteCapabilityPrompt).toContain(
-      'receive, expose, mutate, or apply member-private dials',
-    )
-    expect(layers.stableRouteCapabilityPrompt).toContain(
-      'group rules own behavior',
+      'available only in a private direct conversation',
     )
     expect(layers.threadContextPrompt).not.toContain('/settings?voice=true')
     expect(layers.dynamicTurnContextPrompt).not.toContain('/settings?voice=true')
+  })
+
+  it('omits private style commands from non-private route prompts', () => {
+    const layers = buildAssistantSystemPromptLayers(
+      createCommonCodexPromptInput({
+        assistantStyleSettingsAvailable: false,
+      }),
+    )
+
+    expect(layers.stableRouteCapabilityPrompt).toContain(
+      'member-private conversation state',
+    )
+    expect(layers.stableRouteCapabilityPrompt).toContain(
+      'groups never receive, expose, mutate, or apply them',
+    )
+    expect(layers.stableRouteCapabilityPrompt).not.toContain(
+      'vault-cli assistant style',
+    )
+    expect(layers.stableRouteCapabilityPrompt).not.toContain(
+      'Dials use CLI',
+    )
   })
 
   it('requires pending vault-file approvals to include the returned handoff link and approved sends to avoid stock queue copy', () => {

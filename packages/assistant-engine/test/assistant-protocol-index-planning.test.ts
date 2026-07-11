@@ -38,6 +38,15 @@ vi.mock('@murphai/health-commons/runtime', () => ({
 vi.mock('../src/assistant/cli-surface-bootstrap.js', () => ({
   readAssistantCliSurfaceBootstrapContext:
     planningMocks.readAssistantCliSurfaceBootstrapContext,
+  scopeAssistantCliSurfaceContractToAudience: (input: {
+    contract: string | null
+    privateInteractiveAudience: boolean
+  }) => input.contract === null || input.privateInteractiveAudience
+    ? input.contract
+    : input.contract
+        .split('\n')
+        .filter((line) => !/^- `assistant style (?:show|set|reset)`/u.test(line))
+        .join('\n'),
 }))
 
 vi.mock('../src/assistant/codex-runtime.js', () => ({
@@ -356,7 +365,14 @@ describe('assistant protocol index planning', () => {
   })
 
   it('does not inject personal onboarding guidance into a group conversation', async () => {
-    planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
+    planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue([
+      'Murph CLI Contract:',
+      'assistant:',
+      '- `assistant style show`: Show style settings.',
+      '- `assistant style set`: Set style settings.',
+      '- `assistant style reset`: Reset style settings.',
+      '- `assistant onboarding resume-context`: Read onboarding context.',
+    ].join('\n'))
     planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
     planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
       supportsNativeResume: false,
@@ -402,10 +418,13 @@ describe('assistant protocol index planning', () => {
       'Before ending a normal reply while onboarding is open, keep onboarding moving unless a skip condition applies',
     )
     expect(plan.developerInstructions).toContain(
-      'In groups, never run style show/set/reset',
+      'groups never receive, expose, mutate, or apply them',
     )
-    expect(plan.developerInstructions).toContain(
-      'receive, expose, mutate, or apply member-private dials',
+    expect(plan.developerInstructions).not.toContain('vault-cli assistant style')
+    expect(plan.developerInstructions).not.toContain('`assistant style show`')
+    expect(plan.assistantCliContract).not.toContain('`assistant style show`')
+    expect(plan.assistantCliContract).toContain(
+      '`assistant onboarding resume-context`',
     )
     expect(plan.developerInstructions).not.toContain('Humor 9/10')
     expect(plan.developerInstructions).not.toContain('Push 8/10')

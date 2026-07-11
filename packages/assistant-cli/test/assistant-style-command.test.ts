@@ -12,6 +12,11 @@ const usecaseMocks = vi.hoisted(() => ({
   setAssistantPersonalitySetting: vi.fn(),
   showAssistantPersonality: vi.fn(),
 }))
+const routeAccessMocks = vi.hoisted(() => ({
+  canUseAssistantStyleSettingsForCurrentRoute: vi.fn(),
+}))
+
+vi.mock('@murphai/assistant-engine/assistant-runtime', () => routeAccessMocks)
 
 vi.mock('@murphai/vault-usecases/preferences', () => {
   usecaseMocks.moduleLoads += 1
@@ -82,6 +87,8 @@ function createStyleCommands(): Map<string, unknown> {
 }
 
 beforeEach(() => {
+  routeAccessMocks.canUseAssistantStyleSettingsForCurrentRoute.mockReset()
+  routeAccessMocks.canUseAssistantStyleSettingsForCurrentRoute.mockResolvedValue(true)
   for (const mock of [
     usecaseMocks.resetAllAssistantPersonalitySettings,
     usecaseMocks.resetAssistantPersonalitySetting,
@@ -114,6 +121,39 @@ test('assistant style registers the closed show, set, and reset command surface'
   const reset = readCommand(commands, 'reset')
   assert.deepEqual(reset.args.parse({ setting: 'all' }), { setting: 'all' })
   assert.throws(() => reset.args.parse({ setting: 'everything' }))
+})
+
+test('assistant style denies active non-private routes before loading preferences', async () => {
+  const commands = createStyleCommands()
+  routeAccessMocks.canUseAssistantStyleSettingsForCurrentRoute.mockResolvedValue(false)
+
+  await assert.rejects(
+    readCommand(commands, 'show').run({
+      args: {},
+      options: { vault: '/tmp/vault' },
+    }),
+    /available only in a private direct conversation/u,
+  )
+  await assert.rejects(
+    readCommand(commands, 'set').run({
+      args: { setting: 'humor', value: 9 },
+      options: { vault: '/tmp/vault' },
+    }),
+    /available only in a private direct conversation/u,
+  )
+  await assert.rejects(
+    readCommand(commands, 'reset').run({
+      args: { setting: 'all' },
+      options: { vault: '/tmp/vault' },
+    }),
+    /available only in a private direct conversation/u,
+  )
+
+  assert.equal(usecaseMocks.moduleLoads, 0)
+  assert.equal(usecaseMocks.showAssistantPersonality.mock.calls.length, 0)
+  assert.equal(usecaseMocks.setAssistantPersonalitySetting.mock.calls.length, 0)
+  assert.equal(usecaseMocks.resetAssistantPersonalitySetting.mock.calls.length, 0)
+  assert.equal(usecaseMocks.resetAllAssistantPersonalitySettings.mock.calls.length, 0)
 })
 
 test('assistant style delegates show and zero-valued set through the preference usecases', async () => {

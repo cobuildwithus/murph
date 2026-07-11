@@ -83,6 +83,11 @@ const assistantCliSurfaceBootstrapIgnoredCommandNames = new Set([
   'status',
   'stop',
 ])
+const assistantCliSurfacePrivateCommandNames = new Set([
+  'assistant style reset',
+  'assistant style set',
+  'assistant style show',
+])
 
 const cachedAssistantCliSurfaceContractPromises = new Map<
   string,
@@ -237,6 +242,26 @@ export function buildAssistantCliSurfaceContract(
     'description-only',
   )
   return minimalContract.slice(0, assistantCliSurfaceBootstrapContractCharBudget).trimEnd()
+}
+
+export function scopeAssistantCliSurfaceContractToAudience(input: {
+  contract: string | null
+  privateInteractiveAudience: boolean
+}): string | null {
+  if (input.contract === null || input.privateInteractiveAudience) {
+    return input.contract
+  }
+
+  const contract = input.contract
+    .split('\n')
+    .filter((line) => {
+      const match = /^- `([^`]+)`/u.exec(line.trim())
+      return match === null || !assistantCliSurfacePrivateCommandNames.has(match[1])
+    })
+    .join('\n')
+    .trim()
+
+  return contract || null
 }
 
 async function readPersistedAssistantCliSurfaceContract(

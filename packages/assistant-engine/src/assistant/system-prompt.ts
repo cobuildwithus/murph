@@ -42,6 +42,7 @@ export interface AssistantSystemPromptInput {
   assistantSupportedExperimentProtocols?: readonly AssistantSupportedExperimentProtocol[];
   assistantToolNameAliases?: Readonly<Record<string, string>> | null;
   assistantPersonality?: AssistantPersonalityPreferences | null;
+  assistantStyleSettingsAvailable?: boolean | null;
   assistantTone?: AssistantTonePreference | null;
   channel: string | null;
   cliAccess: Pick<AssistantCliAccessContext, "rawCommand" | "setupCommand">;
@@ -239,7 +240,9 @@ function buildStableRouteCapabilityPrompt(
     buildAssistantPhoneCallGuidanceText(),
     buildAssistantConnectedAppsGuidanceText(),
     buildAssistantProductFeedbackGuidanceText(),
-    buildAssistantStyleSettingsGuidanceText(),
+    buildAssistantStyleSettingsGuidanceText({
+      available: input.assistantStyleSettingsAvailable ?? true,
+    }),
     buildAssistantFamilyPlanGuidanceText(),
     buildAssistantHabitatGuidanceText(),
     buildAssistantHostedGroupGuidanceText(),
@@ -332,15 +335,24 @@ function buildAssistantProductFeedbackGuidanceText(): string {
   ].join("\n");
 }
 
-function buildAssistantStyleSettingsGuidanceText(): string {
+function buildAssistantStyleSettingsGuidanceText(input: {
+  available: boolean;
+}): string {
+  const privateStateBoundary =
+    "- Humor, Push, and Detail are member-private conversation state. They are available only in a private direct conversation; groups never receive, expose, mutate, or apply them.";
+  if (!input.available) {
+    return ["Assistant style settings:", privateStateBoundary].join("\n");
+  }
+
   return [
     "Assistant style settings:",
+    privateStateBoundary,
     "- Saved tone (formal/casual) and voice: mention `/settings?voice=true` when asked. Dials use CLI.",
     "- Setting aliases: `jokes`/`funny` = Humor; `intensity`/`coach`/`strictness` = Push; `brief`/`wordy`/`thorough` = Detail.",
     "- CLI JSON: `vault-cli assistant style show`; `vault-cli assistant style set <humor|push|detail> <0-10>`; `vault-cli assistant style reset <humor|push|detail|all>`; add `--format json`. Never guess/clamp.",
     "- Persist only explicit ongoing setting requests. `show`: scores/sources only. Successful set/reset: returned `settings` governs; state exact score/source; false `updated` = already requested. Error/no `settings`: unconfirmed, never changed/unchanged. One `show` may state values, not cause.",
     "- True `updated`: one fresh safe joke only for Humor >0, none for 0/query/Push/Detail.",
-    "- Expression only; higher rules win. No Humor for emergencies, self-harm, serious health/medication decisions, grief/trauma/abuse/acute distress, or sensitive privacy/auth/billing/consent/irreversible actions. Push only user goals; no shame, threats, coercion, false urgency, unsafe exertion, or moral judgment. In groups, never run style show/set/reset or receive, expose, mutate, or apply member-private dials; group rules own behavior.",
+    "- Expression only; higher rules win. No Humor for emergencies, self-harm, serious health/medication decisions, grief/trauma/abuse/acute distress, or sensitive privacy/auth/billing/consent/irreversible actions. Push only user goals; no shame, threats, coercion, false urgency, unsafe exertion, or moral judgment.",
   ].join("\n");
 }
 

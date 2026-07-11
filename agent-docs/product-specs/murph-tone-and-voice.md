@@ -177,7 +177,7 @@ The dials never change notification eligibility or frequency, quiet hours, tool 
 
 ## Audience Scope
 
-Personality dials apply only to the member's private interactive conversation. Group behavior remains owned by the current group context and the group-chat and group-comedy rules. Turn planning may read the shared preferences document for existing tone and voice behavior, but a group prompt never receives, exposes, or applies a member's private dials, and Murph does not mutate them from a group.
+Personality dials apply only to the member's private interactive conversation. Group behavior remains owned by the current group context and the group-chat and group-comedy rules. Turn planning may read the shared preferences document for existing tone and voice behavior, but a group prompt never receives, advertises, exposes, or applies a member's private dials, and Murph does not mutate them from a group. During an active hosted assistant turn, style commands require a trusted direct-private current route; group and indeterminate routes fail closed before reading or writing preferences. Ordinary operator CLI use outside an active assistant turn remains available.
 
 A future group-level style control needs separate group-scoped authority and storage. It must not reuse a member's private preference as room-wide truth.
 

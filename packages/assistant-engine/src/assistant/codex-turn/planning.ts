@@ -19,6 +19,7 @@ import {
 } from '../codex-runtime.js'
 import {
   readAssistantCliSurfaceBootstrapContext,
+  scopeAssistantCliSurfaceContractToAudience,
 } from '../cli-surface-bootstrap.js'
 import {
   readAssistantContextSnapshotPrompt,
@@ -490,7 +491,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
   const shouldPrepareConversationThreadInstructions =
     input.profile.promptProfile === 'conversation'
   let cliBootstrapElapsedMs: number | null = null
-  const bootstrapAssistantCliContract = shouldPrepareConversationThreadInstructions
+  const unscopedAssistantCliContract = shouldPrepareConversationThreadInstructions
     ? await measureRoutePlanningAsync(
         routePlanningSpans,
         'cliBootstrapElapsedMs',
@@ -503,6 +504,10 @@ export async function resolveAssistantRouteTurnPlan(input: {
         },
       )
     : null
+  const bootstrapAssistantCliContract = scopeAssistantCliSurfaceContractToAudience({
+    contract: unscopedAssistantCliContract,
+    privateInteractiveAudience,
+  })
   const assistantSupportedExperimentProtocols =
     input.profile.promptProfile === 'conversation'
       ? measureRoutePlanningSync(
@@ -566,6 +571,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
               privateInteractiveAudience
                 ? preferenceContext.assistantPersonality
                 : null,
+            assistantStyleSettingsAvailable: privateInteractiveAudience,
             assistantTone: preferenceContext.assistantTone,
             cliAccess: input.sharedPlan.cliAccess,
             channel: resolvedChannel,

@@ -26,7 +26,10 @@ import {
   type AssistantSessionSummary,
 } from '@murphai/operator-config/assistant-cli-contracts'
 import { deliverAssistantMessage } from '@murphai/assistant-engine/outbound-channel'
-import type { ConversationRef } from '@murphai/assistant-engine/assistant-runtime'
+import {
+  canUseAssistantStyleSettingsForCurrentRoute,
+  type ConversationRef,
+} from '@murphai/assistant-engine/assistant-runtime'
 import {
   runAssistantAutomation,
   runAssistantChat,
@@ -1240,6 +1243,7 @@ export function registerAssistantCommands(
       options: withBaseOptions(),
       output: assistantPersonalityResultSchema,
       async run(context) {
+        await assertAssistantStyleSettingsAvailable()
         const { showAssistantPersonality } =
           await loadAssistantPersonalityUsecases()
         return showAssistantPersonality(context.options.vault)
@@ -1260,6 +1264,7 @@ export function registerAssistantCommands(
       options: withBaseOptions(),
       output: assistantPersonalityResultSchema,
       async run(context) {
+        await assertAssistantStyleSettingsAvailable()
         const { setAssistantPersonalitySetting } =
           await loadAssistantPersonalityUsecases()
         return setAssistantPersonalitySetting({
@@ -1283,6 +1288,7 @@ export function registerAssistantCommands(
       options: withBaseOptions(),
       output: assistantPersonalityResultSchema,
       async run(context) {
+        await assertAssistantStyleSettingsAvailable()
         const usecases = await loadAssistantPersonalityUsecases()
         if (context.args.setting === 'all') {
           return usecases.resetAllAssistantPersonalitySettings({
@@ -1582,4 +1588,15 @@ export function registerAssistantCommands(
 
   cli.command(assistant)
   registerRootAliases()
+}
+
+async function assertAssistantStyleSettingsAvailable(): Promise<void> {
+  if (await canUseAssistantStyleSettingsForCurrentRoute()) {
+    return
+  }
+
+  throw new VaultCliError(
+    'invalid_option',
+    'Assistant style settings are available only in a private direct conversation.',
+  )
 }

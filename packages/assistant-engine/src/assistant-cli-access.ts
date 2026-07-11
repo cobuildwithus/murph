@@ -1,11 +1,14 @@
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import {
+  HostedCliBridgeRequestError,
   HOSTED_CLI_BRIDGE_TOKEN_ENV,
   HOSTED_CLI_BRIDGE_URL_ENV,
   HOSTED_RUNTIME_CODEX_APP_SERVER_COMMAND_ENV,
   HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV,
   HOSTED_RUNTIME_PROCESS_ENV,
+  readHostedCliBridgeEnv,
+  requestHostedCliAssistantCurrentRoute,
 } from '@murphai/hosted-execution/cli-runtime-bridge'
 import {
   HOSTED_ASSISTANT_CODEX_SHELL_ENV_NAMES,
@@ -72,6 +75,39 @@ export function resolveAssistantCliAccessContext(
     env,
     rawCommand: 'vault-cli',
     setupCommand: 'murph',
+  }
+}
+
+export async function canUseAssistantStyleSettingsForCurrentRoute(
+  input: {
+    env?: NodeJS.ProcessEnv
+    fetchImpl?: typeof fetch
+  } = {},
+): Promise<boolean> {
+  const env = input.env ?? process.env
+  if (!isHostedRuntimeProcessEnv(env)) {
+    return true
+  }
+
+  let bridge
+  try {
+    bridge = readHostedCliBridgeEnv(env)
+  } catch {
+    return false
+  }
+  if (bridge === null) {
+    return false
+  }
+
+  try {
+    const response = await requestHostedCliAssistantCurrentRoute({
+      bridge,
+      fetchImpl: input.fetchImpl,
+    })
+    return response.route?.threadIsDirect === true
+  } catch (error) {
+    return error instanceof HostedCliBridgeRequestError
+      && error.code === 'HOSTED_CLI_BRIDGE_UNAVAILABLE'
   }
 }
 
