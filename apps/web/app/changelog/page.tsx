@@ -1,16 +1,18 @@
 import type { Metadata } from "next";
+import { notFound } from "next/navigation";
 import type { ReactNode } from "react";
-import { Link2 } from "lucide-react";
+import { ChevronLeft, ChevronRight, Link2 } from "lucide-react";
 
 import { SiteFooter } from "@/src/components/homepage/site-footer";
 import { resolveHostedMurphContactOptions } from "@/src/components/murph/hosted-murph-contact-action";
 import {
   buildAbsoluteChangelogUrl,
   buildChangelogCardPath,
+  buildChangelogPagePath,
   CHANGELOG_PREVIEW_CARD_ITEMS,
   type ChangelogItem,
-  listChangelogEditions,
-  listPublishedChangelogItems,
+  resolveChangelogEditionPage,
+  resolveChangelogPage,
 } from "@/src/lib/changelog";
 import { getMurphGithubStarCount } from "@/src/lib/github-stars";
 import { getHostedPageAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
@@ -1466,33 +1468,43 @@ const VISUALS: Record<string, ReactNode> = {
 const DESCRIPTION =
   "See what is new in Murph, why it matters, and the simplest way to try each update.";
 
-// Top-N most recent items by date+priority, same source as /api/changelog.
-const PREVIEW_CARD_ITEM_IDS = listPublishedChangelogItems()
-  .slice(0, CHANGELOG_PREVIEW_CARD_ITEMS)
-  .map((item) => item.id);
+type ChangelogPageProps = {
+  searchParams: Promise<{ edition?: string | string[] }>;
+};
 
-const PREVIEW_CARD_IMAGE = {
-  alt: "What's new in Murph — recent features and improvements.",
-  height: 630,
-  type: "image/png",
-  url: buildAbsoluteChangelogUrl(buildChangelogCardPath(PREVIEW_CARD_ITEM_IDS)),
-  width: 1200,
-} as const;
-
-export const metadata: Metadata = createMurphPageMetadata({
-  title: "Murph Changelog — new features and improvements to try",
-  description: DESCRIPTION,
-  alternates: {
-    canonical: "/changelog",
-  },
-  openGraph: {
-    images: [PREVIEW_CARD_IMAGE],
-    type: "article",
-  },
-  twitter: {
-    images: [PREVIEW_CARD_IMAGE],
-  },
-});
+export async function generateMetadata({
+  searchParams,
+}: ChangelogPageProps): Promise<Metadata> {
+  const page = await resolveRequestedChangelogPage(searchParams);
+  const previewCardItemIds = page.editions
+    .flatMap((edition) => edition.items)
+    .slice(0, CHANGELOG_PREVIEW_CARD_ITEMS)
+    .map((item) => item.id);
+  const previewCardImage = {
+    alt: "What's new in Murph, recent features and improvements.",
+    height: 630,
+    type: "image/png",
+    url: buildAbsoluteChangelogUrl(buildChangelogCardPath(previewCardItemIds)),
+    width: 1200,
+  } as const;
+  return createMurphPageMetadata({
+    title:
+      page.currentPage === 1
+        ? "Murph Changelog, new features and improvements to try"
+        : `Murph Changelog, page ${page.currentPage}`,
+    description: DESCRIPTION,
+    alternates: {
+      canonical: buildChangelogPagePath(page.currentPage),
+    },
+    openGraph: {
+      images: [previewCardImage],
+      type: "article",
+    },
+    twitter: {
+      images: [previewCardImage],
+    },
+  });
+}
 
 type ResolvedTryIt = {
   authenticated: boolean;
@@ -1501,12 +1513,15 @@ type ResolvedTryIt = {
   prompt?: string | null;
 };
 
-export default async function ChangelogPage() {
+export default async function ChangelogPage({
+  searchParams,
+}: ChangelogPageProps) {
+  const page = await resolveRequestedChangelogPage(searchParams);
   const [{ authenticated }, githubStarCount] = await Promise.all([
     getHostedPageAuthSnapshot(),
     getMurphGithubStarCount(),
   ]);
-  const editions = listChangelogEditions();
+  const editions = page.editions;
   const tryItByItemId = await resolveTryItByItemId({
     authenticated,
     editions,
@@ -1591,11 +1606,133 @@ export default async function ChangelogPage() {
               </section>
             );
           })}
+          <ChangelogPagination
+            currentPage={page.currentPage}
+            totalPages={page.totalPages}
+          />
         </div>
       </main>
       <SiteFooter />
     </>
   );
+}
+
+function ChangelogPagination({
+  currentPage,
+  totalPages,
+}: {
+  currentPage: number;
+  totalPages: number;
+}) {
+  if (totalPages <= 1) {
+    return null;
+  }
+  const pageItems = buildPaginationItems(currentPage, totalPages);
+
+  return (
+    <nav
+      aria-label="Changelog pages"
+      className="mt-20 border-t border-[#c4a882]/35 pt-8"
+    >
+      <div className="flex items-center justify-between gap-4">
+        {currentPage > 1 ? (
+          <a
+            className="inline-flex min-h-10 items-center gap-1.5 rounded-lg px-2 text-sm font-medium text-[#3a4a1e] outline-none transition-colors hover:bg-[#c4a882]/15 focus-visible:ring-2 focus-visible:ring-[#7a8c6e] focus-visible:ring-offset-2 focus-visible:ring-offset-[#f5f0e8]"
+            href={buildChangelogPagePath(currentPage - 1)}
+            rel="prev"
+          >
+            <ChevronLeft aria-hidden="true" className="size-4" />
+            Newer
+          </a>
+        ) : (
+          <span aria-hidden="true" className="w-[72px]" />
+        )}
+
+        <ol className="hidden items-center gap-1 sm:flex">
+          {pageItems.map((item) =>
+            typeof item === "number" ? (
+              <li key={item}>
+                <a
+                  aria-current={item === currentPage ? "page" : undefined}
+                  aria-label={`Page ${item}`}
+                  className={
+                    item === currentPage
+                      ? "inline-flex size-9 items-center justify-center rounded-lg bg-[#3a4a1e] font-mono text-[11px] font-medium text-[#f5f0e8] outline-none focus-visible:ring-2 focus-visible:ring-[#7a8c6e] focus-visible:ring-offset-2 focus-visible:ring-offset-[#f5f0e8]"
+                      : "inline-flex size-9 items-center justify-center rounded-lg font-mono text-[11px] font-medium text-[#736a58] outline-none transition-colors hover:bg-[#c4a882]/15 hover:text-[#3a4a1e] focus-visible:ring-2 focus-visible:ring-[#7a8c6e] focus-visible:ring-offset-2 focus-visible:ring-offset-[#f5f0e8]"
+                  }
+                  href={buildChangelogPagePath(item)}
+                >
+                  {item}
+                </a>
+              </li>
+            ) : (
+              <li
+                key={item}
+                aria-hidden="true"
+                className="inline-flex size-7 items-center justify-center font-mono text-[11px] text-[#736a58]"
+              >
+                …
+              </li>
+            ),
+          )}
+        </ol>
+
+        <p className="font-mono text-[10px] font-medium text-[#736a58] uppercase tracking-[0.12em] sm:hidden">
+          Page {currentPage} of {totalPages}
+        </p>
+
+        {currentPage < totalPages ? (
+          <a
+            className="inline-flex min-h-10 items-center gap-1.5 rounded-lg px-2 text-sm font-medium text-[#3a4a1e] outline-none transition-colors hover:bg-[#c4a882]/15 focus-visible:ring-2 focus-visible:ring-[#7a8c6e] focus-visible:ring-offset-2 focus-visible:ring-offset-[#f5f0e8]"
+            href={buildChangelogPagePath(currentPage + 1)}
+            rel="next"
+          >
+            Older
+            <ChevronRight aria-hidden="true" className="size-4" />
+          </a>
+        ) : (
+          <span aria-hidden="true" className="w-[72px]" />
+        )}
+      </div>
+    </nav>
+  );
+}
+
+function buildPaginationItems(
+  currentPage: number,
+  totalPages: number,
+): readonly (number | "ellipsis-start" | "ellipsis-end")[] {
+  const visiblePages = new Set([
+    1,
+    totalPages,
+    currentPage - 1,
+    currentPage,
+    currentPage + 1,
+  ]);
+  const pages = [...visiblePages]
+    .filter((page) => page >= 1 && page <= totalPages)
+    .sort((left, right) => left - right);
+  const items: (number | "ellipsis-start" | "ellipsis-end")[] = [];
+
+  for (const page of pages) {
+    const previous = items.at(-1);
+    if (typeof previous === "number" && page - previous > 1) {
+      items.push(previous === 1 ? "ellipsis-start" : "ellipsis-end");
+    }
+    items.push(page);
+  }
+  return items;
+}
+
+async function resolveRequestedChangelogPage(
+  searchParams: ChangelogPageProps["searchParams"],
+) {
+  const pageNumber = resolveChangelogEditionPage((await searchParams).edition);
+  const page = pageNumber === null ? null : resolveChangelogPage(pageNumber);
+  if (!page) {
+    notFound();
+  }
+  return page;
 }
 
 function ItemGroup({
