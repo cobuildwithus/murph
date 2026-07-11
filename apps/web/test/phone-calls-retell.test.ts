@@ -15,8 +15,10 @@ import {
   type HostedPhoneCallCrypto,
 } from "@/src/lib/phone-calls/crypto";
 import {
+  createRetellPhoneCallAccountDeletionRuntime,
   createRetellPhoneCallRuntime,
 } from "@/src/lib/phone-calls/retell-runtime";
+import { hasPhoneCallRuntimeNoActiveEffect } from "@/src/lib/phone-calls/types";
 import {
   consultPhoneCall,
   getHostedPhoneCallForConsultation,
@@ -322,6 +324,64 @@ describe("Retell phone-call runtime", () => {
     })).rejects.toThrow(
       "RETELL_AGENT_DATA_STORAGE_SETTING must be basic_attributes_only",
     );
+  });
+
+  it("classifies an abort before provider dispatch as having no active effect", async () => {
+    vi.stubEnv("RETELL_API_KEY", "retell-api-key");
+    vi.stubEnv("RETELL_FROM_NUMBER", "+12125559999");
+    vi.stubEnv("RETELL_AGENT_ID", "agent_123");
+    vi.stubEnv("RETELL_AGENT_DATA_STORAGE_SETTING", "basic_attributes_only");
+    const fetchImpl = vi.fn<typeof fetch>();
+    const controller = new AbortController();
+    controller.abort();
+
+    const error = await createRetellPhoneCallRuntime({ fetchImpl }).start({
+      brief: VALID_BRIEF,
+      id: "hpc_123",
+      memberId: "member_123",
+      transferNumber: null,
+    }, { signal: controller.signal }).catch((caught: unknown) => caught);
+
+    expect(error).toMatchObject({ name: "AbortError" });
+    expect(hasPhoneCallRuntimeNoActiveEffect(error)).toBe(true);
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("stops registered or ongoing calls during account deletion", async () => {
+    vi.stubEnv("RETELL_API_KEY", "retell-api-key");
+    const fetchImpl = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        call_id: "retell_call_123",
+        call_status: "ongoing",
+      }), {
+        headers: { "content-type": "application/json" },
+        status: 200,
+      }))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }));
+
+    await createRetellPhoneCallAccountDeletionRuntime({ fetchImpl })
+      .stopIfActive("retell_call_123");
+
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    expect(String(fetchImpl.mock.calls[0]![0])).toContain("/v2/get-call/retell_call_123");
+    expect(String(fetchImpl.mock.calls[1]![0])).toContain("/v2/stop-call/retell_call_123");
+    expect(fetchImpl.mock.calls[1]![1]?.method).toBe("POST");
+  });
+
+  it("does not stop calls Retell already reports as terminal", async () => {
+    vi.stubEnv("RETELL_API_KEY", "retell-api-key");
+    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({
+      call_id: "retell_call_123",
+      call_status: "ended",
+    }), {
+      headers: { "content-type": "application/json" },
+      status: 200,
+    }));
+
+    await createRetellPhoneCallAccountDeletionRuntime({ fetchImpl })
+      .stopIfActive("retell_call_123");
+
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
 });
 

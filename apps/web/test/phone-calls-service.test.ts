@@ -23,7 +23,7 @@ import {
 
 type CreateHostedPhoneCallInput = Parameters<typeof createHostedPhoneCallImpl>[0];
 type PhoneCallStore = NonNullable<CreateHostedPhoneCallInput["prisma"]>;
-type PhoneCallCreateInput = Parameters<PhoneCallStore["hostedPhoneCall"]["create"]>[0];
+type PhoneCallReserveInput = Parameters<PhoneCallStore["reserve"]>[0];
 type PhoneCallFindInput = Parameters<PhoneCallStore["hostedPhoneCall"]["findUniqueOrThrow"]>[0];
 type PhoneCallUpdateManyInput = Parameters<PhoneCallStore["hostedPhoneCall"]["updateMany"]>[0];
 
@@ -110,7 +110,6 @@ describe("createHostedPhoneCall", () => {
       value: VALID_BRIEF,
     });
     const store = createPhoneCallStore({
-      createError: createUniqueRequestKeyError(["requestKey"]),
       existing,
     });
     const runtime = createPhoneCallRuntime({ providerCallId: "retell_unused" });
@@ -127,14 +126,7 @@ describe("createHostedPhoneCall", () => {
       phoneCallId: "hpc_existing",
       status: "calling",
     });
-    expect(store.findCalls).toEqual([{
-      where: {
-        memberId_requestKey: {
-          memberId: existing.memberId,
-          requestKey: existing.requestKey,
-        },
-      },
-    }]);
+    expect(store.createCalls).toEqual([]);
     expect(runtime.startCalls).toEqual([]);
     expect(store.updateManyCalls).toEqual([]);
   });
@@ -147,7 +139,6 @@ describe("createHostedPhoneCall", () => {
       updatedAt: new Date(),
     });
     const store = createPhoneCallStore({
-      createError: createUniqueRequestKeyError(["requestKey"]),
       existing,
     });
     const runtime = createPhoneCallRuntime({ providerCallId: "retell_unused" });
@@ -176,7 +167,6 @@ describe("createHostedPhoneCall", () => {
       updatedAt: new Date(0),
     });
     const store = createPhoneCallStore({
-      createError: createUniqueRequestKeyError(["requestKey"]),
       existing,
     });
     const runtime = createPhoneCallRuntime({ providerCallId: "retell_unused" });
@@ -209,7 +199,6 @@ describe("createHostedPhoneCall", () => {
       status: "calling",
     });
     const store = createPhoneCallStore({
-      createError: createUniqueRequestKeyError(["requestKey"]),
       existing,
     });
     const runtime = createPhoneCallRuntime({ providerCallId: "retell_unused" });
@@ -334,6 +323,44 @@ describe("createHostedPhoneCall", () => {
     expect(runtime.startCalls).toEqual([]);
     expect(store.createCalls).toEqual([]);
     expect(store.updateManyCalls).toEqual([]);
+  });
+
+  it("marks a committed reservation failed when the deadline aborts before provider dispatch", async () => {
+    const controller = new AbortController();
+    const created = buildHostedPhoneCall();
+    const store = createPhoneCallStore({
+      created,
+      onReserve: () => controller.abort(),
+    });
+    const runtime = createPhoneCallRuntime({ providerCallId: "retell_unused" });
+
+    await expect(createHostedPhoneCallImpl({
+      brief: VALID_BRIEF,
+      memberId: created.memberId,
+      prisma: store.prisma,
+      requestKey: created.requestKey,
+      resultNotificationRouteResolver: async () => {},
+      runtime: runtime.runtime,
+      signal: controller.signal,
+      transferNumberResolver: createTransferNumberResolver(null),
+    })).rejects.toMatchObject({ name: "AbortError" });
+
+    expect(runtime.startCalls).toEqual([]);
+    expect(store.createCalls).toHaveLength(1);
+    expect(store.updateManyCalls).toEqual([{
+      data: {
+        resultEncrypted: expect.stringMatching(/^hsb-test:/u),
+        resultJson: Prisma.DbNull,
+        status: "failed",
+      },
+      where: {
+        analyzedAt: null,
+        id: store.createCalls[0]!.data.id,
+        provider: "retell",
+        providerCallId: null,
+        status: "starting",
+      },
+    }]);
   });
 
   it("allows individually bounded prerequisites to exceed the generic 30-second control timeout", async () => {
@@ -548,33 +575,40 @@ function createHostedPhoneCall(input: CreateHostedPhoneCallInput) {
 }
 
 function createPhoneCallStore(input: {
-  createError?: unknown;
   created?: HostedPhoneCall;
   existing?: HostedPhoneCall;
+  onReserve?: () => Promise<void> | void;
 }) {
-  const createCalls: PhoneCallCreateInput[] = [];
+  const createCalls: PhoneCallReserveInput[] = [];
   const findCalls: PhoneCallFindInput[] = [];
   const updateManyCalls: PhoneCallUpdateManyInput[] = [];
   let current = input.created ?? input.existing ?? buildHostedPhoneCall();
   const existing = input.existing ?? current;
 
   const prisma: PhoneCallStore = {
-    hostedPhoneCall: {
-      create: async (args) => {
-        createCalls.push(args);
-        if (input.createError) {
-          throw input.createError;
-        }
-        current = {
-          ...current,
-          ...args.data,
-          briefJson: null,
-          providerCallId: null,
-          resultEncrypted: null,
-          resultJson: null,
+    reserve: async (args) => {
+      if (input.existing) {
+        return {
+          call: existing,
+          created: false,
         };
-        return current;
-      },
+      }
+      createCalls.push(args);
+      current = {
+        ...current,
+        ...args.data,
+        briefJson: null,
+        providerCallId: null,
+        resultEncrypted: null,
+        resultJson: null,
+      };
+      await input.onReserve?.();
+      return {
+        call: current,
+        created: true,
+      };
+    },
+    hostedPhoneCall: {
       findUniqueOrThrow: async (args) => {
         findCalls.push(args);
         if ("id" in args.where) {
@@ -676,12 +710,4 @@ function buildHostedPhoneCall(overrides: Partial<HostedPhoneCall> = {}): HostedP
     updatedAt: now,
     ...overrides,
   };
-}
-
-function createUniqueRequestKeyError(target: string[]): Prisma.PrismaClientKnownRequestError {
-  return new Prisma.PrismaClientKnownRequestError("duplicate phone call request", {
-    clientVersion: "test",
-    code: "P2002",
-    meta: { target },
-  });
 }

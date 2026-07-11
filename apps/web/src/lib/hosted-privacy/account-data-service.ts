@@ -44,6 +44,10 @@ import {
   signalHostedMailboxAppendRuntime,
 } from "../hosted-orchestration/signal-runtime";
 import {
+  assertHostedPhoneCallsReadyForAccountDeletionTx,
+  stopHostedPhoneCallsForAccountDeletion,
+} from "../phone-calls/account-deletion";
+import {
   revokeOutgoingHostedVaultSharesForMemberDeletionTx,
   type HostedVaultShareCleanupSignal,
 } from "../hosted-vault-share/share-grant-store";
@@ -544,6 +548,10 @@ export async function deleteHostedAccountData(input: {
     now: deletionStartedAt,
     prisma: input.prisma,
   });
+  await stopHostedPhoneCallsForAccountDeletion({
+    memberIds: deletionMemberIds,
+    prisma: input.prisma,
+  });
   await Promise.all(deletionMemberIds.map((memberId) =>
     terminateHostedUserRuntimeWorkflowBestEffort({
       reason: "account-deleted",
@@ -602,6 +610,10 @@ export async function deleteHostedAccountData(input: {
     await refreshHostedMembersAccountDeletionFenceTx({
       memberIds: transactionDeletionMemberIds,
       now: deletionStartedAt,
+      prisma: tx,
+    });
+    await assertHostedPhoneCallsReadyForAccountDeletionTx({
+      memberIds: transactionDeletionMemberIds,
       prisma: tx,
     });
     await assertNoConnectedAppWritesAfterProviderCleanupTx({

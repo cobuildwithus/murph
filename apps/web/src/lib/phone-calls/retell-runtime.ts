@@ -32,7 +32,17 @@ export function createRetellPhoneCallRuntime(input: {
   return new RetellPhoneCallRuntime(input.fetchImpl);
 }
 
-class RetellPhoneCallRuntime implements PhoneCallRuntime {
+export interface RetellPhoneCallAccountDeletionRuntime {
+  stopIfActive(providerCallId: string): Promise<void>;
+}
+
+export function createRetellPhoneCallAccountDeletionRuntime(input: {
+  fetchImpl?: typeof fetch;
+} = {}): RetellPhoneCallAccountDeletionRuntime {
+  return new RetellPhoneCallRuntime(input.fetchImpl);
+}
+
+class RetellPhoneCallRuntime implements PhoneCallRuntime, RetellPhoneCallAccountDeletionRuntime {
   constructor(private readonly fetchImpl: typeof fetch | undefined) {}
 
   async start(
@@ -50,6 +60,11 @@ class RetellPhoneCallRuntime implements PhoneCallRuntime {
 
     let response: Awaited<ReturnType<typeof client.call.createPhoneCall>>;
     try {
+      try {
+        options.signal?.throwIfAborted();
+      } catch (error) {
+        throw markPhoneCallRuntimeNoActiveEffect(error);
+      }
       response = await client.call.createPhoneCall(params, {
         signal: options.signal,
       });
@@ -80,6 +95,14 @@ class RetellPhoneCallRuntime implements PhoneCallRuntime {
     }
 
     return { providerCallId };
+  }
+
+  async stopIfActive(providerCallId: string): Promise<void> {
+    const client = this.buildClient();
+    const call = await client.call.retrieve(providerCallId);
+    if (call.call_status === "registered" || call.call_status === "ongoing") {
+      await client.call.stop(providerCallId);
+    }
   }
 
   private buildClient(): Retell {

@@ -155,6 +155,18 @@ The hosted Prisma schema keeps ownership sharp and nested:
   timeout ambiguity preserves the durable row as `starting`; the same request
   key returns that reservation without blindly creating another provider call,
   and a signed webhook may still bind the provider call id through Murph metadata.
+  Account deletion first suspends the member under the same row lock used by
+  call reservation, then proves every active provider call stopped before
+  deleting local call authority or user crypto material.
+
+The 40-second web-owned phone-call start deadline requires the Cloudflare
+caller's 45-second protocol floor. Roll out or restore the 45-second Cloudflare
+caller and prove runner convergence before deploying a web build that uses the
+40-second deadline. A 45-second caller remains compatible with an older web
+build; a 30-second caller does not remain compatible with the 40-second web
+deadline, so do not roll Cloudflare back below 45 seconds while that web build
+is active.
+
 - `HostedComputerRun` and `HostedComputerHandoff`
   own member-scoped Kernel profile names, resumable run state, and durable
   `awaiting_user` checkpoints. Assistant dynamic tools receive only run handles;

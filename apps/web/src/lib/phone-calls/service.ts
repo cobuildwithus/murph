@@ -16,6 +16,11 @@ import {
 
 import { getPrisma } from "../prisma";
 import { runWithHostedDomainRootUnwrapCache } from "../hosted-crypto/domain-root-unwrap-cache";
+import { assertActiveHostedMemberAccessAllowed } from "../hosted-onboarding/member-access";
+import {
+  HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
+  lockHostedMemberRow,
+} from "../hosted-onboarding/shared";
 import {
   hostedPhoneCallCrypto,
   readHostedPhoneCallBrief,
@@ -28,21 +33,27 @@ import { createRetellPhoneCallRuntime } from "./retell-runtime";
 import { resolveVerifiedMemberTransferNumber } from "./transfer";
 import {
   hasPhoneCallRuntimeNoActiveEffect,
+  markPhoneCallRuntimeNoActiveEffect,
   type PhoneCallRuntime,
 } from "./types";
 
+interface HostedPhoneCallReservationData {
+  briefEncrypted: string;
+  id: string;
+  memberId: string;
+  provider: "retell";
+  requestKey: string;
+  status: "starting";
+}
+
 interface HostedPhoneCallStore {
+  reserve(input: {
+    data: HostedPhoneCallReservationData;
+  }): Promise<{
+    call: HostedPhoneCall;
+    created: boolean;
+  }>;
   hostedPhoneCall: {
-    create(input: {
-      data: {
-        briefEncrypted: string;
-        id: string;
-        memberId: string;
-        provider: "retell";
-        requestKey: string;
-        status: "starting";
-      };
-    }): Promise<HostedPhoneCall>;
     findUniqueOrThrow(input: {
       where:
         | { id: string }
@@ -101,7 +112,7 @@ export async function createHostedPhoneCall(input: {
 async function createHostedPhoneCallWithinDeadline(input: Parameters<
   typeof createHostedPhoneCall
 >[0] & { signal: AbortSignal }): Promise<HostedPhoneCallStartResponse> {
-  const prisma = input.prisma ?? getPrisma();
+  const store = resolveHostedPhoneCallStore(input.prisma);
   const crypto = input.crypto ?? hostedPhoneCallCrypto;
   const runtime = input.runtime ?? createRetellPhoneCallRuntime();
   const resolveTransferNumber =
@@ -134,30 +145,19 @@ async function createHostedPhoneCallWithinDeadline(input: Parameters<
     value: input.brief,
   });
   input.signal.throwIfAborted();
-  let call: HostedPhoneCall;
-  try {
-    call = await prisma.hostedPhoneCall.create({
-      data: {
-        briefEncrypted,
-        id: callId,
-        memberId: input.memberId,
-        provider: "retell",
-        requestKey: input.requestKey,
-        status: "starting",
-      },
-    });
-  } catch (error) {
-    if (!isRequestKeyUniqueConstraintError(error)) {
-      throw error;
-    }
-    const existing = await prisma.hostedPhoneCall.findUniqueOrThrow({
-      where: {
-        memberId_requestKey: {
-          memberId: input.memberId,
-          requestKey: input.requestKey,
-        },
-      },
-    });
+  const reservation = await store.reserve({
+    data: {
+      briefEncrypted,
+      id: callId,
+      memberId: input.memberId,
+      provider: "retell",
+      requestKey: input.requestKey,
+      status: "starting",
+    },
+  });
+  const call = reservation.call;
+  if (!reservation.created) {
+    const existing = reservation.call;
     if (existing.memberId !== input.memberId) {
       throw new Error("Hosted phone call request key collision.");
     }
@@ -179,6 +179,11 @@ async function createHostedPhoneCallWithinDeadline(input: Parameters<
 
   let started: Awaited<ReturnType<PhoneCallRuntime["start"]>>;
   try {
+    try {
+      input.signal.throwIfAborted();
+    } catch (error) {
+      throw markPhoneCallRuntimeNoActiveEffect(error);
+    }
     started = await runtime.start({
       brief: input.brief,
       id: call.id,
@@ -198,7 +203,7 @@ async function createHostedPhoneCallWithinDeadline(input: Parameters<
       outcome: "not_completed",
       summary: "Murph could not start the phone call.",
     };
-    const updated = await prisma.hostedPhoneCall.updateMany({
+    const updated = await store.hostedPhoneCall.updateMany({
       data: {
         resultEncrypted: await crypto.encryptResult({
           callId: call.id,
@@ -218,7 +223,7 @@ async function createHostedPhoneCallWithinDeadline(input: Parameters<
     });
 
     if (updated.count === 0) {
-      const current = await prisma.hostedPhoneCall.findUniqueOrThrow({
+      const current = await store.hostedPhoneCall.findUniqueOrThrow({
         where: { id: call.id },
       });
       if (hasPhoneCallAdvancedBeyondStart(current)) {
@@ -232,7 +237,7 @@ async function createHostedPhoneCallWithinDeadline(input: Parameters<
     throw error;
   }
 
-  const updated = await prisma.hostedPhoneCall.updateMany({
+  const updated = await store.hostedPhoneCall.updateMany({
     data: {
       providerCallId: started.providerCallId,
       status: "calling",
@@ -247,7 +252,7 @@ async function createHostedPhoneCallWithinDeadline(input: Parameters<
   });
 
   if (updated.count === 0) {
-    const current = await prisma.hostedPhoneCall.findUniqueOrThrow({
+    const current = await store.hostedPhoneCall.findUniqueOrThrow({
       where: { id: call.id },
     });
     return {
@@ -284,25 +289,46 @@ function hasPhoneCallAdvancedBeyondStart(call: HostedPhoneCall): boolean {
     || call.analyzedAt !== null;
 }
 
-function isRequestKeyUniqueConstraintError(error: unknown): boolean {
-  if (!(error instanceof Prisma.PrismaClientKnownRequestError) || error.code !== "P2002") {
-    return false;
+function resolveHostedPhoneCallStore(
+  provided: HostedPhoneCallStore | undefined,
+): HostedPhoneCallStore {
+  if (provided) {
+    return provided;
   }
 
-  const target = error.meta?.target;
-  if (Array.isArray(target)) {
-    return target.some(isRequestKeyUniqueConstraintTarget);
-  }
-  return isRequestKeyUniqueConstraintTarget(target);
-}
+  const prisma = getPrisma();
+  return {
+    reserve: async (input) => prisma.$transaction(async (tx) => {
+      await lockHostedMemberRow(tx, input.data.memberId);
+      await assertActiveHostedMemberAccessAllowed({
+        memberId: input.data.memberId,
+        prisma: tx,
+      });
+      const existing = await tx.hostedPhoneCall.findUnique({
+        where: {
+          memberId_requestKey: {
+            memberId: input.data.memberId,
+            requestKey: input.data.requestKey,
+          },
+        },
+      });
+      if (existing) {
+        return {
+          call: existing,
+          created: false,
+        };
+      }
 
-function isRequestKeyUniqueConstraintTarget(value: unknown): boolean {
-  return typeof value === "string" && (
-    value === "requestKey"
-    || value === "request_key"
-    || value.includes("requestKey")
-    || value.includes("request_key")
-  );
+      return {
+        call: await tx.hostedPhoneCall.create({ data: input.data }),
+        created: true,
+      };
+    }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS),
+    hostedPhoneCall: {
+      findUniqueOrThrow: async (input) => prisma.hostedPhoneCall.findUniqueOrThrow(input),
+      updateMany: async (input) => prisma.hostedPhoneCall.updateMany(input),
+    },
+  };
 }
 
 function assertHostedPhoneCallBriefMatches(input: {
