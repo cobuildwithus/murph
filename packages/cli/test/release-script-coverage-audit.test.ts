@@ -1196,6 +1196,17 @@ exit 1
   it.skipIf(process.env.MURPH_PREPARED_CLI_RUNTIME_ARTIFACTS !== '1')(
     'regenerates and verifies the assistant CLI surface contract in the real release tarball',
     () => {
+      const openClawBuild = spawnSync(
+        'pnpm',
+        ['--dir', 'packages/openclaw-plugin', 'build'],
+        {
+          cwd: repoRoot,
+          encoding: 'utf8',
+          env: withoutNodeV8Coverage(),
+        },
+      )
+      expect(openClawBuild.status, openClawBuild.stderr || openClawBuild.stdout).toBe(0)
+
       const outDir = mkdtempSync(path.join(os.tmpdir(), 'murph-release-cli-surface-'))
       const packOutputPath = path.join(outDir, 'pack-output.json')
       const assistantDistDirectory = path.join(
