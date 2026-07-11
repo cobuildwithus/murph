@@ -47,6 +47,7 @@ const RESEARCHED_HEALTH_TOPIC_SKILL_SLUGS = [
   'body-composition',
   'cycle-hormonal-health',
   'gut-digestion',
+  'general-eye-health',
 ] as const
 
 type AssistantSkillMetadata = {
@@ -272,6 +273,98 @@ describe('assistant skill assets', () => {
       return
     }
     expect(devices.length).toBeGreaterThan(0)
+  })
+
+  it('routes general eye health with evidence and contact-lens safety boundaries', async () => {
+    const eyeSkill = ASSISTANT_SKILLS.find(
+      (skill) => skill.slug === 'general-eye-health',
+    )
+    expect(eyeSkill).toBeTruthy()
+    if (!eyeSkill) {
+      return
+    }
+
+    expect(eyeSkill.triggerHint).toContain('digital eye strain')
+    expect(eyeSkill.triggerHint).toContain('contact-lens comfort and safety')
+    expect(buildAssistantSkillFileRef('general-eye-health')).toBe(
+      '$MURPH_ASSISTANT_SKILLS_ROOT/general-eye-health/SKILL.md',
+    )
+
+    const eyeSkillText = await readSkillFile(eyeSkill)
+    expect(eyeSkillText).toContain('references/triage-and-contact-lenses.md')
+    expect(eyeSkillText).toContain('references/evidence-register.md')
+    expect(eyeSkillText).toContain('correction information, not an eye-health score')
+    expect(eyeSkillText).toContain('optional memory cue, not a proven treatment dose')
+    expect(eyeSkillText).toContain('Do not recommend blue-light-filtering glasses')
+    expect(eyeSkillText).toContain('new flashes of light')
+    expect(eyeSkillText).toContain('a sudden increase in or many new floaters')
+    expect(eyeSkillText).toContain('gradual, mild, in both eyes')
+    expect(eyeSkillText).not.toContain('usually in both eyes')
+    expect(eyeSkillText).toContain('Stop the trial')
+    expect(eyeSkillText).not.toContain('Stop the experiment')
+
+    const [triageText, evidenceText] = await Promise.all([
+      readFile(
+        path.join(
+          resolveAssistantSkillsRoot(),
+          'general-eye-health',
+          'references',
+          'triage-and-contact-lenses.md',
+        ),
+        'utf8',
+      ),
+      readFile(
+        path.join(
+          resolveAssistantSkillsRoot(),
+          'general-eye-health',
+          'references',
+          'evidence-register.md',
+        ),
+        'utf8',
+      ),
+    ])
+    expect(triageText).toContain('### Emergency now')
+    expect(triageText).toContain('### Prompt same-day eye care')
+    expect(triageText).toContain('new flashes of light')
+    expect(triageText).toContain('a sudden increase in or many new floaters')
+    expect(triageText).toContain('A contact-lens wearer has pain;')
+    expect(triageText).not.toContain('pain that persists or worsens after removal')
+    expect(triageText).toContain('mild, gradual, bilateral')
+    expect(triageText).not.toContain('usually bilateral')
+    expect(triageText).toContain(
+      'new flashes, a sudden increase in or many new floaters',
+    )
+    expect(triageText).toContain(
+      'Stable, longstanding occasional floaters do not meet this rule by themselves.',
+    )
+    expect(triageText).toContain(
+      'https://www.cdc.gov/contact-lenses/causes/index.html',
+    )
+    expect(evidenceText).toContain('The exact `20-20-20` formula has limited evidence')
+    expect(evidenceText).toContain(
+      'https://www.cochrane.org/evidence/CD013244_blue-light-filtering-spectacle-lenses-visual-performance-macular-back-part-eye-protection-and',
+    )
+
+    const systemPrompt = buildAssistantSystemPrompt({
+      assistantCliContract: null,
+      assistantContextSnapshotPrompt: null,
+      assistantHostedDeviceConnectAvailable: false,
+      assistantHostedDeviceConnectProviders: [],
+      assistantKnowledgeToolsAvailable: false,
+      channel: 'local',
+      cliAccess: {
+        rawCommand: 'vault-cli',
+        setupCommand: 'murph',
+      },
+      currentLocalDate: '2026-07-10',
+      currentTimeZone: 'America/New_York',
+      onboardingGuidance: false,
+      modelBehaviorProfile: 'gpt5-agentic',
+      turnTrigger: null,
+    })
+    expect(systemPrompt).toContain(
+      'Eye health: general-eye-health for screen-linked discomfort, contact-lens safety, refractive questions, prevention, and symptom triage.',
+    )
   })
 
   it('keeps umbrella skills from duplicating focused health topic owners', async () => {
