@@ -178,13 +178,23 @@ export async function collectHostedAssistantDeliverySideEffects(
       .filter((reconciliation) => reconciliation.blocked)
       .map((reconciliation) => reconciliation.intent.intentId),
   );
+  const causalOnly = request.preferredEffectIds.length > 0;
+  const preferredIntentIds = [
+    ...new Set([
+      ...(causalOnly ? reconcileTargetIds : []),
+      ...request.preferredIntentIds,
+    ]),
+  ];
   const preferredIntentOrder = new Map(
-    request.preferredIntentIds.map((intentId, index) => [intentId, index] as const),
+    preferredIntentIds.map((intentId, index) => [intentId, index] as const),
   );
 
   const candidates: AssistantOutboxIntent[] = [];
   const nowIso = now.toISOString();
   for (const intent of intents) {
+    if (causalOnly && !reconcileTargetIds.has(intent.intentId)) {
+      continue;
+    }
     if (intent.status === "awaiting_approval") {
       continue;
     }

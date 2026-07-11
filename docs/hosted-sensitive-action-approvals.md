@@ -57,7 +57,7 @@ A request contains:
 The caller owns action execution, retries, and completion. It must recompute the fingerprint and call `consume` with the observed approval generation at the final effect boundary. Approval has no claimed, executing, completed, or provider-error state.
 When `pending` is returned, the approval URL is handed to the normal assistant reply path; the approval system must not send a separate hard-coded user message.
 
-The runtime keeps the exact file-and-destination delivery intent in its own outbox as `awaiting_approval`. One active approval cycle owns one parked intent, keyed by the approval ID and cycle expiry, so repeating the same request in another turn reuses that owner. Web never reconstructs the effect from the approval row. A later approval wake selects one canonical matching owner and only asks the runtime to re-read owner state; the normal pre-dispatch consume gate remains the authorization boundary. Background fallback reconciliation is a separate bounded path.
+The runtime keeps the exact file-and-destination delivery intent in its own outbox as `awaiting_approval`. One active approval cycle owns one parked intent, keyed by the approval ID and cycle expiry, so repeating the same request in another turn reuses that owner. Web never reconstructs the effect from the approval row. A later approval wake selects one canonical matching owner and only asks the runtime to re-read and dispatch that owner; it cannot select unrelated due delivery work. The normal pre-dispatch consume gate remains the authorization boundary. Background fallback reconciliation is a separate bounded path.
 
 ## Browser decision flow
 
@@ -72,6 +72,8 @@ The runtime keeps the exact file-and-destination delivery intent in its own outb
 9. The decision response returns the browser to the originating Murph conversation without pre-filling an approval-confirmation message.
 
 The mailbox row is a durable shoulder tap, not authorization evidence or outcome payload. The runtime observes the outcome through `actionApprovalPort.read()` and consumes the matching approved generation again at the final delivery boundary.
+
+Consumption closes the authorization generation against replay but does not rewrite the member's historical decision. Runtime approval reads and later consume attempts therefore report the consumed generation as expired, while the member-facing approval page continues to present that row as approved. A genuinely elapsed, unconsumed approval still presents as expired.
 
 ## Asynchronous outcome primitives
 

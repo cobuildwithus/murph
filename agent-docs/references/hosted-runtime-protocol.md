@@ -476,8 +476,10 @@ Secure-action approval and denial use this shape because the exact attachment,
 destination, and delivery identity remain in the runtime-owned parked intent.
 One active approval cycle maps to one parked intent through a cycle-stable
 approval-ID-plus-expiry transport identity. A causal outcome wake reconciles one
-canonical matching owner and does not mix unrelated due work into that control
-item; only the background fallback path scans its fixed due-item bound.
+canonical matching owner, allowlists only that owner for dispatch, and does not
+mix unrelated due work into that control item. A missing, denied, or deferred
+causal owner produces no delivery effect; only the background fallback path scans
+its fixed due-item bound.
 The parked intent arms one pre-expiry fallback wake ten minutes before the
 pending approval expires. A rejected post-commit Temporal signal is logged; the
 existing outbox wake then makes Temporal re-read mailbox lag while at least five

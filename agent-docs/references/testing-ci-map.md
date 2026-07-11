@@ -108,8 +108,10 @@ Last verified: 2026-07-09
   Cloudflare. The disabled path emits no new mailbox kind and retains the legacy
   approval confirmation fallback. Approval-outcome coverage also proves bare
   return links when enabled, one parked owner across repeated turns in the same
-  approval cycle, one canonical causal observation read, and approval-link retry
-  wakes taking precedence over a later parked fallback.
+  approval cycle, one canonical causal observation read and dispatch allowlist,
+  consumed authorization remaining approved in member-facing presentation while
+  replay reads fail closed, and approval-link retry wakes taking precedence over
+  a later parked fallback.
 
 ## Current Gaps
 

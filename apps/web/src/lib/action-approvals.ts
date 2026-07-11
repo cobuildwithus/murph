@@ -714,7 +714,7 @@ function buildHostedActionApprovalView(
     expiresAt: identity.expiresAt.toISOString(),
     presentation: identity.presentation,
     returnContactKind: identity.returnContactKind,
-    status: readHostedActionApprovalStatus(approval, now),
+    status: readHostedActionApprovalPresentationStatus(approval, now),
   };
 }
 
@@ -778,6 +778,19 @@ function readHostedActionApprovalStatus(
     throw new TypeError("Hosted action approval status is invalid.");
   }
   return approval.expiresAt <= now ? "expired" : "pending";
+}
+
+function readHostedActionApprovalPresentationStatus(
+  approval: HostedSensitiveActionChallenge,
+  now: Date,
+): HostedActionApprovalStatus {
+  if (
+    approval.approvalStatus === "approved"
+    && approval.consumedAt !== null
+  ) {
+    return "approved";
+  }
+  return readHostedActionApprovalStatus(approval, now);
 }
 
 function requireApprovalChallenge(

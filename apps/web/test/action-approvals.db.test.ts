@@ -24,6 +24,7 @@ vi.mock("@/src/lib/hosted-web/public-url", () => ({
 import {
   consumeHostedActionApproval,
   decideHostedActionApprovalTx,
+  readHostedActionApproval,
   readHostedActionApprovalResult,
   requirePendingHostedActionApproval,
   requestHostedActionApproval,
@@ -307,6 +308,25 @@ describe("hosted action approvals", () => {
     const consumed = await requireApprovalRow(deps, requested.approvalId);
     expect(consumed.consumedAt?.toISOString()).toBe("2026-06-25T16:02:00.000Z");
     expect(consumed.consumedBy).toBe("delivery_1");
+
+    await expect(readHostedActionApproval({
+      approvalId: requested.approvalId,
+      memberId,
+      now: new Date("2026-06-25T16:02:30.000Z"),
+      prisma: deps.prisma,
+    })).resolves.toMatchObject({
+      approvalId: requested.approvalId,
+      status: "approved",
+    });
+    await expect(readHostedActionApprovalResult({
+      memberId,
+      now: new Date("2026-06-25T16:02:30.000Z"),
+      prisma: deps.prisma,
+      request: REQUEST,
+    })).resolves.toEqual({
+      approvalId: requested.approvalId,
+      status: "expired",
+    });
 
     await expect(consumeHostedActionApproval({
       memberId,

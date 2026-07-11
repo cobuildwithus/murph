@@ -1099,7 +1099,24 @@ describe("hosted runtime callbacks", () => {
         })),
         request: vi.fn(),
       };
-      mocks.listAssistantOutboxIntents.mockResolvedValueOnce([storedIntent]);
+      const unrelatedPendingIntent = {
+        ...storedIntent,
+        bindingDelivery: { kind: "thread" as const, target: "linq_chat_2" },
+        createdAt: "2026-04-07T23:59:00.000Z",
+        dedupeKey: "dedupe_unrelated_denied",
+        explicitTarget: "linq_chat_2",
+        intentId: "intent_unrelated_denied",
+        media: [],
+        message: "Older unrelated delivery.",
+        nextAttemptAt: "2026-04-08T00:01:00.000Z",
+        status: "pending" as const,
+        threadId: "thread_2",
+        turnId: "turn_unrelated",
+      };
+      mocks.listAssistantOutboxIntents.mockResolvedValueOnce([
+        unrelatedPendingIntent,
+        storedIntent,
+      ]);
       mocks.readAssistantVaultFileMedia.mockReturnValueOnce(vaultFile);
       mocks.buildAssistantVaultFileSendApprovalRequest.mockReturnValue(
         approvalRequest,
@@ -1178,6 +1195,24 @@ describe("hosted runtime callbacks", () => {
       turnId: `turn_${index}`,
       updatedAt: `2026-04-08T00:0${index}:00.000Z`,
     }));
+    const storedTemplate = storedIntents[0];
+    if (!storedTemplate) {
+      throw new Error("Expected a stored approval intent.");
+    }
+    const unrelatedPendingIntent = {
+      ...storedTemplate,
+      bindingDelivery: { kind: "thread" as const, target: "linq_chat_2" },
+      createdAt: "2026-04-07T23:59:00.000Z",
+      dedupeKey: "dedupe_unrelated_causal",
+      explicitTarget: "linq_chat_2",
+      intentId: "intent_unrelated_causal",
+      media: [],
+      message: "Older unrelated delivery.",
+      nextAttemptAt: "2026-04-08T00:00:00.000Z",
+      status: "pending" as const,
+      threadId: "thread_2",
+      turnId: "turn_unrelated",
+    };
     const selectedEffectId = "vault-file-send:shared-approval-cycle";
     const actionApprovalPort = {
       consume: vi.fn(),
@@ -1196,7 +1231,10 @@ describe("hosted runtime callbacks", () => {
             }),
       request: vi.fn(),
     };
-    mocks.listAssistantOutboxIntents.mockResolvedValueOnce(storedIntents);
+    mocks.listAssistantOutboxIntents.mockResolvedValueOnce([
+      unrelatedPendingIntent,
+      ...storedIntents,
+    ]);
     mocks.readAssistantVaultFileMedia.mockReturnValue(vaultFile);
     mocks.buildAssistantVaultFileSendApprovalRequest.mockImplementation(
       (intent: { intentId: string }) => ({
@@ -1279,12 +1317,29 @@ describe("hosted runtime callbacks", () => {
       nextAttemptAt: "2026-04-08T00:06:00.000Z",
       updatedAt: "2026-04-08T00:01:00.000Z",
     };
+    const unrelatedPendingIntent = {
+      ...storedIntent,
+      bindingDelivery: { kind: "thread" as const, target: "linq_chat_2" },
+      createdAt: "2026-04-07T23:59:00.000Z",
+      dedupeKey: "dedupe_unrelated_timeout",
+      explicitTarget: "linq_chat_2",
+      intentId: "intent_unrelated_timeout",
+      media: [],
+      message: "Older unrelated delivery.",
+      nextAttemptAt: "2026-04-08T00:00:00.000Z",
+      status: "pending" as const,
+      threadId: "thread_2",
+      turnId: "turn_unrelated",
+    };
     const actionApprovalPort = {
       consume: vi.fn(),
       read: vi.fn().mockRejectedValue(new Error("control timeout")),
       request: vi.fn(),
     };
-    mocks.listAssistantOutboxIntents.mockResolvedValueOnce([storedIntent]);
+    mocks.listAssistantOutboxIntents.mockResolvedValueOnce([
+      unrelatedPendingIntent,
+      storedIntent,
+    ]);
     mocks.readAssistantVaultFileMedia.mockReturnValue(storedIntent.media[0]);
     mocks.buildAssistantVaultFileSendApprovalRequest.mockReturnValue({
       actionFingerprint: "a".repeat(64),
@@ -1316,6 +1371,18 @@ describe("hosted runtime callbacks", () => {
       intent: deferredIntent,
       vault: "/tmp/vault",
     });
+
+    mocks.listAssistantOutboxIntents.mockResolvedValueOnce([
+      unrelatedPendingIntent,
+    ]);
+    await expect(collectHostedAssistantDeliverySideEffects({
+      actionApprovalPort,
+      includeBackgroundDueIntents: true,
+      preferredEffectIds: ["vault-file-send:unknown"],
+      preferredIntentIds: [],
+      vaultRoot: "/tmp/vault",
+    })).resolves.toEqual([]);
+    expect(actionApprovalPort.read).toHaveBeenCalledTimes(1);
   });
 
   it("reconciles an older due approval ahead of newer approvals that are not due", async () => {
