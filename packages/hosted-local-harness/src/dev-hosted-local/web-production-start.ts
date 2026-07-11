@@ -43,9 +43,9 @@ export async function shouldUseHostedWebProductionStart(input: {
   }
 
   // This gate intentionally stays a harness-owned decision over explicit
-  // process env plus the prepared dist path. CI re-extracts the production
-  // web dist per scenario; source freshness is producer-owned so this helper
-  // does not try to become a partial Next build cache invalidator.
+  // process env plus the prepared dist path. A prepared suite may reuse the
+  // production web dist across scenarios; source freshness is producer-owned
+  // so this helper does not become a partial Next build cache invalidator.
   const buildId = await readFile(path.join(
     input.distDir ?? resolveHostedWebDevDistDir(input.env),
     "BUILD_ID",

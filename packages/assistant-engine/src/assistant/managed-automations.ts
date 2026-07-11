@@ -80,6 +80,7 @@ export const MURPH_WEEKLY_HEALTH_RESEARCH_SCOUT_AUTOMATION_ID =
   'automation_01K0EXA5C0VT9F7X3KG6JMPZ5A'
 export const MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID =
   'automation_01K0Z7X9Y8W6V5T4S3R2Q1P0NM'
+const MURPH_PRODUCT_NOTES_INTERVAL_MS = 14 * 24 * 60 * 60 * 1000
 export const MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID =
   'automation_01K4Y0Q5C8M9N2P3R4S5T6V7WX'
 export const MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_PRIVATE_SUMMARY =
@@ -124,12 +125,6 @@ const MURPH_MANAGED_WEEKLY_SCHEDULE_SPREADS: Partial<Record<
     startMinuteOfDay: 14 * 60,
     slotMinutes: 30,
     slotsPerDay: 12,
-  },
-  [MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID]: {
-    daysOfWeek: [4, 5],
-    startMinuteOfDay: 10 * 60,
-    slotMinutes: 30,
-    slotsPerDay: 14,
   },
 }
 
@@ -420,10 +415,10 @@ export const MURPH_MANAGED_AUTOMATIONS = [
     automationId: MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID,
     slug: 'weekly-product-updates',
     title: 'Murph product notes',
-    summary: 'A personalized note alternating what is new in Murph with things Murph can do for you.',
+    summary: 'A biweekly personalized note alternating what is new in Murph with things Murph can do for you.',
     schedule: {
-      kind: 'cron',
-      expression: '30 11 * * 4',
+      kind: 'every',
+      everyMs: MURPH_PRODUCT_NOTES_INTERVAL_MS,
     },
     continuityPolicy: 'fresh',
     assistantTargetOverride: {
@@ -433,7 +428,7 @@ export const MURPH_MANAGED_AUTOMATIONS = [
       'murph-managed:weekly-product-updates',
     ],
     instructions: [
-      'Goal: send one concise personalized in-chat product note. Each run is one of two kinds, alternating run to run: a changelog note with the 2-3 recently shipped Murph updates this user is most likely to find genuinely interesting, or a feature discovery note with the 2-3 things Murph can already do that this user has not tried and is most likely to value. Fallback is allowed at most once: attempt the initially chosen kind once; you may attempt the other kind once as the fallback; never fall back from a fallback. If both kinds are unavailable, invalid, empty, or below bar, return `{"kind":"skip","privateSummary":"No product note cleared the send bar."}`. A note with no substance is worse than no note.',
+      'Goal: every two weeks, send one concise personalized in-chat product note. Each run is one of two kinds, alternating run to run: a changelog note with the 2-3 recently shipped Murph updates this user is most likely to find genuinely interesting, or a feature discovery note with the 2-3 things Murph can already do that this user has not tried and is most likely to value. Fallback is allowed at most once: attempt the initially chosen kind once; you may attempt the other kind once as the fallback; never fall back from a fallback. If both kinds are unavailable, invalid, empty, or below bar, return `{"kind":"skip","privateSummary":"No product note cleared the send bar."}`. A note with no substance is worse than no note.',
       '',
       "Decide this run's kind first:",
       '- Read `vault-cli knowledge show murph-product-notes`. If the page is missing, treat that as no prior product notes and choose the feature discovery kind.',

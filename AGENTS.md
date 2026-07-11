@@ -48,7 +48,7 @@ Always read these before repo code/docs/test/config work:
 | Review-only inspection with no planned file edits | `agent-docs/operations/verification-and-runtime.md` | No repo ledger or repo-wide checks by default. Add runtime proof only when requested or when static inspection leaves a material gap. |
 | Docs or process only | `agent-docs/operations/verification-and-runtime.md` | Follow the docs/process task class in the workflow router. |
 | Repo code, tests, or config | `agent-docs/operations/completion-workflow.md`, `agent-docs/operations/verification-and-runtime.md` | Use the workflow router for task class, ledger/plan needs, audits, verification, and commit path. |
-| User-facing frontend/UI work in `apps/web` | `agent-docs/FRONTEND.md` | Implementation is Fable-only: non-Claude agents delegate it via the Claude Code (Fable) route in `agent-docs/operations/agent-workflow-routing.md` § Workflow Defaults. The completion workflow controls required frontend review. |
+| User-facing frontend/UI work in `apps/web` | `agent-docs/FRONTEND.md` | Prefer the Claude Code (Fable) route in `agent-docs/operations/agent-workflow-routing.md` § Workflow Defaults. After the required local Claude-session/profile sweep proves Fable unavailable, the parent agent may implement directly; the completion workflow still controls required frontend review. |
 | Auth, secrets, trust boundaries, or external runtime surfaces | `agent-docs/SECURITY.md` | Treat as higher risk by default. |
 | Retries, queues, cron, concurrency, or failure handling | `agent-docs/RELIABILITY.md` | Capture direct proof for operational changes. |
 | Cloudflare infrastructure, Workers, Durable Objects, R2, or deploy/runtime platform APIs | `agent-docs/SECURITY.md`, `agent-docs/RELIABILITY.md`, relevant official Cloudflare docs | Read Cloudflare docs thoroughly before designing; prefer the simplest canonical Cloudflare API or feature, and assume the platform likely already provides the needed primitive before rolling bespoke infrastructure. |
@@ -97,6 +97,15 @@ Always read these before repo code/docs/test/config work:
 - If a plan-bearing task is done or abandoned but a safe scoped commit is blocked by overlapping dirty work, clear the exact ledger row and archive the plan with `scripts/close-exec-plan.sh`.
 - Document architecture-significant changes in the matching durable docs, and update `agent-docs/index.md` when durable docs are added, removed, moved, or materially repurposed.
 - If a completed task could break or degrade production when Vercel (`apps/web`) and Cloudflare (`apps/cloudflare`) deploy out of sync, add a final-response section labeled `DEPLOYMENT CONCERNS:` with the recommended safe deployment order, required tandem deploy or compatibility window, and any post-deploy checks.
+
+## Model Complementarity (Fable ↔ Sol)
+
+Working hypothesis from a single collaboration (not a proven law): Fable and Sol (`gpt-5.6-sol`) tend to fail in opposite directions, so bounce a sub-problem to the other whenever you hit its apparent strength or your own known weakness, and reach for a second-model pass more as stakes rise. Detail: `agent-docs/operations/agent-workflow-routing.md` § Model Complementarity (Fable ↔ Sol).
+
+- Sol is the builder: strongest at concrete work — implementations, specific fixes, reproductions, failing tests, cases that settle a question. Apparent failure: overclaiming scope (code is sound, but "this handles X" exceeds what it covers). Lean on its concrete work, double-check its scope claims.
+- Fable is the architect: strongest at structure — reframing, root cause, the right abstraction, simplification, plus process hygiene. Apparent failure: overreach at polish (adds speculative refactors/abstractions/generalizations past the verified core). Lean on its framing, double-check its finishing extras.
+- Route by need: hand to Sol to build or verify something concrete; hand to Fable for reframing, root cause, the right abstraction, or scope discipline.
+- Referee across model when it's worth it: Fable checks Sol's scope, Sol checks Fable's added polish. Same-model self-review shares the blind spot.
 
 ## Notes
 

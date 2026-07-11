@@ -719,7 +719,6 @@ function createKernel(
     deleteBrowserByIdOrName: vi.fn(async () => {}),
     deleteManagedAuthConnection: vi.fn(async () => {}),
     deleteProfile: vi.fn(async () => {}),
-    ensureBrowserViewport: vi.fn(async () => {}),
     ensureManagedAuthConnection: vi.fn(
       async (
         input: Parameters<

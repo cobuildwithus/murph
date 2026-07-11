@@ -1315,6 +1315,7 @@ export interface MurphDynamicToolExecutionResult {
   computerRunPausedForUser?: boolean
   finalActionPatch?: MurphDynamicToolFinalActionPatch
   reactionPatch?: MurphDynamicToolReactionPatch
+  requiredComputerHandoffUrl?: string
   responseMediaPatch?: MurphDynamicToolResponseMediaPatch
   rpcResult: MurphDynamicToolRpcResult
   usageDraft?: AssistantProviderUsageDraft | null
@@ -2817,10 +2818,18 @@ async function executeHostedComputerPauseForUserTool(input: {
     return toolTextResult(false, apiResult.errorText)
   }
 
+  const payload = readSanitizedComputerPausePayload(apiResult.payload)
+  const handoffUrl = typeof payload.handoffUrl === 'string'
+    ? payload.handoffUrl
+    : null
+
   return toolTextResult(
     true,
-    safeToolPayloadText(readSanitizedComputerPausePayload(apiResult.payload)),
-    { computerRunPausedForUser: true },
+    safeToolPayloadText(payload),
+    {
+      computerRunPausedForUser: true,
+      ...(handoffUrl ? { requiredComputerHandoffUrl: handoffUrl } : {}),
+    },
   )
 }
 
@@ -3224,7 +3233,10 @@ function safeToolPayloadText(payload: unknown): string {
 function toolTextResult(
   success: boolean,
   text: string,
-  extra?: Pick<MurphDynamicToolExecutionResult, 'computerRunPausedForUser'>,
+  extra?: Pick<
+    MurphDynamicToolExecutionResult,
+    'computerRunPausedForUser' | 'requiredComputerHandoffUrl'
+  >,
 ): MurphDynamicToolExecutionResult {
   return {
     ...extra,

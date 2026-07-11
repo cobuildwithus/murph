@@ -15,7 +15,7 @@ import {
   TEST_HOSTED_WEB_CALLBACK_PRIVATE_JWK_JSON,
 } from "../hosted-execution-fixtures.ts";
 import {
-  wakeHostedWorkerForLatestPendingWake,
+  ensureProcessingAfterSyntheticMailboxAppendForTest,
 } from "./hosted-local-wake.ts";
 
 afterEach(() => {
@@ -33,7 +33,7 @@ it("ensures workspace processing through the signed callback-only control route"
   }));
   vi.stubGlobal("fetch", fetchMock);
 
-  await expect(wakeHostedWorkerForLatestPendingWake({
+  await expect(ensureProcessingAfterSyntheticMailboxAppendForTest({
     harness: {
       runtimeEnv: {
         HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK:
@@ -106,7 +106,7 @@ it("retries retry_later responses until processing is accepted", async () => {
   });
   vi.stubGlobal("fetch", fetchMock);
 
-  await expect(wakeHostedWorkerForLatestPendingWake({
+  await expect(ensureProcessingAfterSyntheticMailboxAppendForTest({
     harness: {
       runtimeEnv: {
         HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK:
@@ -172,7 +172,7 @@ it("backs off stale retry_later responses instead of spinning requests", async (
   });
   vi.stubGlobal("fetch", fetchMock);
 
-  const wakePromise = wakeHostedWorkerForLatestPendingWake({
+  const wakePromise = ensureProcessingAfterSyntheticMailboxAppendForTest({
     harness: {
       runtimeEnv: {
         HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK:
@@ -204,7 +204,7 @@ it("stops retrying retry_later responses when the wake timeout expires", async (
   }));
   vi.stubGlobal("fetch", fetchMock);
 
-  const wakePromise = wakeHostedWorkerForLatestPendingWake({
+  const wakePromise = ensureProcessingAfterSyntheticMailboxAppendForTest({
     harness: {
       runtimeEnv: {
         HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK:

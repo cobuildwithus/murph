@@ -263,9 +263,13 @@ inactive-fence replacement path. An inactive liveness proof must still send the
 identity-checked abort first so any queued exact retention invocation is
 canceled before the fence is cleared; an inactive result or queued matching
 abort is replacement-safe. Missing-pointer abort delivery without inactive
-proof is only an abort request and preserves the fence until a later liveness
-pass proves the old child inactive. Stale or failed status preserves the fence
-and retries.
+proof owns the container lifecycle while it delivers the identity-checked abort.
+A stale result preserves the fence and retries. An accepted or queued result, or
+an ambiguous delivery failure, recycles the old shell fail-closed before the
+container returns `accepted`; only that settled stop allows the controller to
+clear the exact fence and start a replacement. A deploy-skewed request-only
+`requested` result remains non-authoritative without inactive proof and
+preserves the fence for retry.
 
 The foreground-priority rule does not weaken correctness checks. Wrong-user
 authority, invalid auth, undecryptable mailbox payloads, stale leases, and
@@ -758,7 +762,10 @@ are uploaded. If that checkpoint has an ambiguous transport outcome, the
 Cloudflare workspace port retries the identical expected-version CAS once. It
 accepts a version-conflict response only when the active invocation fence still
 matches and the returned workspace is the exact requested successor, including
-the receipt fingerprint, snapshot ref, wake fields, and retention wake. Cold
+the receipt fingerprint, snapshot ref, wake fields, and retention wake.
+Cloudflare forwarding maps an unreadable successful checkpoint response to a
+server error so this bounded ambiguity path remains reachable; verified
+authority and fence rejections remain deterministic `401` failures. Cold
 restore replays that log over the prior snapshot and marks
 affected context domains dirty; when the restored log is at the hard entry
 bound, the runtime consolidates it through an idle snapshot before foreground

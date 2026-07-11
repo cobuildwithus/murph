@@ -3764,7 +3764,7 @@ test('sendAssistantMessageLocal keeps hosted progress wired in queue-only auto-r
 })
 
 test('sendAssistantMessageLocal routes hosted Linq model progress through progress delivery dependencies', async () => {
-  const refreshTyping = vi.fn(async () => undefined)
+  const refreshTypingAfterMessage = vi.fn(async () => undefined)
   const progressDeliveryDependencies = {
     sendLinq: vi.fn(async () => ({
       providerMessageId: 'progress-message',
@@ -3779,7 +3779,7 @@ test('sendAssistantMessageLocal routes hosted Linq model progress through progre
   const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
     adapter: {
       startTypingIndicator: vi.fn(async () => ({
-        refreshNow: refreshTyping,
+        refreshAfterMessage: refreshTypingAfterMessage,
         stop: vi.fn(async () => undefined),
       })),
     },
@@ -3851,7 +3851,7 @@ test('sendAssistantMessageLocal routes hosted Linq model progress through progre
     'Checking the iMessage thread.',
   )
   await vi.waitFor(() => {
-    expect(refreshTyping).toHaveBeenCalledTimes(1)
+    expect(refreshTypingAfterMessage).toHaveBeenCalledTimes(1)
   })
 
   releaseProviderTurn.resolve()

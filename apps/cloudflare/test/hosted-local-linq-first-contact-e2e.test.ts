@@ -864,6 +864,8 @@ testControlsDescribe("hosted local Linq stale scheduled wake e2e", () => {
   beforeAll(async () => {
     await restartLinqScenario({
       HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS: "1200",
+    }, {
+      faultInjection: true,
     });
   }, 300_000);
 
@@ -1196,6 +1198,9 @@ function createBrowserVaultReplicaRef(
 
 async function startLinqScenario(
   additionalEnv: NodeJS.ProcessEnv = {},
+  options: {
+    faultInjection?: boolean;
+  } = {},
 ): Promise<void> {
   linqStub = await startHostedLocalLinqStub({
     expectedAuthorizationToken: linqApiToken,
@@ -1215,6 +1220,7 @@ async function startLinqScenario(
       ...additionalEnv,
     },
     assistantProviderStubModelId: productionLikeAssistantModel,
+    faultInjection: options.faultInjection,
     localDatabaseUrl,
     persistDirOverride: workerPersistDirOverride,
     persistDirPrefix: "murph-hosted-local-linq-first-contact-",
@@ -1236,6 +1242,9 @@ async function ensureLinqScenario(): Promise<void> {
 
 async function restartLinqScenario(
   additionalEnv: NodeJS.ProcessEnv = {},
+  options: {
+    faultInjection?: boolean;
+  } = {},
 ): Promise<void> {
   await scenario?.stop();
   scenario = null;
@@ -1243,7 +1252,7 @@ async function restartLinqScenario(
   linqStub = null;
 
   await sleep(2_000);
-  await startLinqScenario(additionalEnv);
+  await startLinqScenario(additionalEnv, options);
 }
 
 function buildLinqFirstContactLocalInboundAllowlist(): string {
