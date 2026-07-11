@@ -10,6 +10,7 @@ import { appendHostedMailboxEnvelopeTx } from "../hosted-mailbox/store";
 import { readHostedMemberIdentity } from "../hosted-onboarding/hosted-member-identity-store";
 import { readHostedMemberRoutingState } from "../hosted-onboarding/hosted-member-routing-store";
 import { readHostedMemberEmailAuthorization } from "../hosted-onboarding/hosted-member-store";
+import { readHostedLinqHomeLineAuthority } from "../hosted-onboarding/linq-home-routing";
 import {
   resolveHostedMemberAssistantNotificationRoute,
   resolveHostedMemberMessagingState,
@@ -90,17 +91,27 @@ async function resolveHostedGroupJoinConfirmationRouteTx(input: {
       prisma: input.tx,
     }),
   ]);
-  const linqChatId = routing?.linqChatId ?? routing?.pendingLinqChatId ?? null;
-  const linqContactLookupKey =
-    routing?.pendingLinqParticipantContact?.lookupKey
-    ?? identity?.phoneLookupKey
+  const linqAuthority = readHostedLinqHomeLineAuthority(routing);
+  const currentMemberLookupKey =
+    identity?.phoneLookupKey
     ?? emailAuthorization?.verifiedEmail?.lookupKey
     ?? emailAuthorization?.directPublicSender?.lookupKey
     ?? null;
+  const linqRoute = linqAuthority.kind === "home" && currentMemberLookupKey
+    ? {
+        chatId: linqAuthority.chatId,
+        contactLookupKey: currentMemberLookupKey,
+      }
+    : linqAuthority.kind === "pending" && routing?.pendingLinqParticipantContact?.lookupKey
+      ? {
+          chatId: linqAuthority.chatId,
+          contactLookupKey: routing.pendingLinqParticipantContact.lookupKey,
+        }
+      : null;
 
   return resolveHostedMemberAssistantNotificationRoute({
-    linqChatId,
-    linqContactLookupKey,
+    linqChatId: linqRoute?.chatId ?? null,
+    linqContactLookupKey: linqRoute?.contactLookupKey ?? null,
     // Group-join confirmations may continue an existing private thread, but
     // must never use the participant-target first-contact delivery path.
     linqRecipientPhone: null,

@@ -1,4 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  createHostedAssistantConversationIdentifierBlind,
+  hashHostedAssistantConversationIdentifier,
+  hashNullableHostedAssistantConversationIdentifier,
+} from "@murphai/hosted-execution/assistant-identifiers";
 
 import { createPrismaClient } from "@/src/lib/prisma";
 
@@ -103,6 +108,172 @@ describe("appendHostedGroupJoinConfirmationTx", () => {
         }),
         occurredAt: occurredAt.toISOString(),
         userId: "member_joiner",
+      }),
+      tx,
+    });
+  });
+
+  it("keeps a home Linq thread on the current member identity when stale pending state remains", async () => {
+    mocks.readHostedMemberEmailAuthorization.mockResolvedValue(null);
+    mocks.readHostedMemberIdentity.mockResolvedValue({
+      phoneLookupKey: "home_phone_lookup_1",
+      phoneNumber: "+15550100001",
+    });
+    mocks.readHostedMemberRoutingState.mockResolvedValue({
+      linqChatId: "private_chat_home_1",
+      linqRecipientPhone: "+15550100002",
+      pendingLinqChatId: "private_chat_pending_1",
+      pendingLinqParticipantContact: {
+        kind: "phone",
+        lookupKey: "stale_pending_lookup_1",
+        value: "+15550100003",
+      },
+      telegramThreadId: null,
+      telegramUserId: null,
+    });
+    const tx = createPrismaClient({
+      databaseUrl: "postgresql://test:test@127.0.0.1:1/test",
+    });
+    const identifierBlind = createHostedAssistantConversationIdentifierBlind({
+      secret: "home_phone_lookup_1",
+      userId: "member_joiner",
+    });
+
+    await appendHostedGroupJoinConfirmationTx({
+      joinCode: "JOIN1",
+      memberId: "member_joiner",
+      membershipId: "membership_1",
+      occurredAt: new Date("2026-07-10T14:00:00.000Z"),
+      publicBaseUrl: "https://murph.example",
+      tx,
+    });
+
+    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledWith({
+      envelope: expect.objectContaining({
+        notification: expect.objectContaining({
+          route: {
+            actorId: hashNullableHostedAssistantConversationIdentifier(
+              identifierBlind,
+              "+15550100001",
+            ),
+            channel: "linq",
+            delivery: {
+              kind: "thread",
+              target: "private_chat_home_1",
+            },
+            identityId: hashHostedAssistantConversationIdentifier(
+              identifierBlind,
+              "home_phone_lookup_1",
+            ),
+            threadId: hashHostedAssistantConversationIdentifier(
+              identifierBlind,
+              "private_chat_home_1",
+            ),
+            threadIsDirect: true,
+          },
+        }),
+      }),
+      tx,
+    });
+  });
+
+  it("keeps a pending Linq thread on its pending participant identity", async () => {
+    mocks.readHostedMemberEmailAuthorization.mockResolvedValue(null);
+    mocks.readHostedMemberIdentity.mockResolvedValue(null);
+    mocks.readHostedMemberRoutingState.mockResolvedValue({
+      linqChatId: null,
+      linqRecipientPhone: "+15550100002",
+      pendingLinqChatId: "private_chat_pending_1",
+      pendingLinqParticipantContact: {
+        kind: "email",
+        lookupKey: "pending_email_lookup_1",
+        value: "member@example.test",
+      },
+      telegramThreadId: null,
+      telegramUserId: null,
+    });
+    const tx = createPrismaClient({
+      databaseUrl: "postgresql://test:test@127.0.0.1:1/test",
+    });
+    const identifierBlind = createHostedAssistantConversationIdentifierBlind({
+      secret: "pending_email_lookup_1",
+      userId: "member_joiner",
+    });
+
+    await appendHostedGroupJoinConfirmationTx({
+      joinCode: "JOIN1",
+      memberId: "member_joiner",
+      membershipId: "membership_1",
+      occurredAt: new Date("2026-07-10T14:00:00.000Z"),
+      publicBaseUrl: "https://murph.example",
+      tx,
+    });
+
+    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledWith({
+      envelope: expect.objectContaining({
+        notification: expect.objectContaining({
+          route: expect.objectContaining({
+            channel: "linq",
+            delivery: {
+              kind: "thread",
+              target: "private_chat_pending_1",
+            },
+            identityId: hashHostedAssistantConversationIdentifier(
+              identifierBlind,
+              "pending_email_lookup_1",
+            ),
+            threadId: hashHostedAssistantConversationIdentifier(
+              identifierBlind,
+              "private_chat_pending_1",
+            ),
+            threadIsDirect: true,
+          }),
+        }),
+      }),
+      tx,
+    });
+  });
+
+  it("falls back from a home Linq thread when only stale pending identity remains", async () => {
+    mocks.readHostedMemberEmailAuthorization.mockResolvedValue(null);
+    mocks.readHostedMemberIdentity.mockResolvedValue(null);
+    mocks.readHostedMemberRoutingState.mockResolvedValue({
+      linqChatId: "private_chat_home_1",
+      linqRecipientPhone: "+15550100002",
+      pendingLinqChatId: "private_chat_pending_1",
+      pendingLinqParticipantContact: {
+        kind: "phone",
+        lookupKey: "stale_pending_lookup_1",
+        value: "+15550100003",
+      },
+      telegramThreadId: "telegram_private_thread_1",
+      telegramUserId: "telegram_user_1",
+    });
+    const tx = createPrismaClient({
+      databaseUrl: "postgresql://test:test@127.0.0.1:1/test",
+    });
+
+    await appendHostedGroupJoinConfirmationTx({
+      joinCode: "JOIN1",
+      memberId: "member_joiner",
+      membershipId: "membership_1",
+      occurredAt: new Date("2026-07-10T14:00:00.000Z"),
+      publicBaseUrl: "https://murph.example",
+      tx,
+    });
+
+    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledWith({
+      envelope: expect.objectContaining({
+        notification: expect.objectContaining({
+          route: expect.objectContaining({
+            channel: "telegram",
+            delivery: {
+              kind: "thread",
+              target: "telegram_private_thread_1",
+            },
+            threadIsDirect: true,
+          }),
+        }),
       }),
       tx,
     });
