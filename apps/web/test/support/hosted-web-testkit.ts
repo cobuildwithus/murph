@@ -552,17 +552,21 @@ export async function approveHostedSensitiveActionChallengeForTest(input: {
   environment?: NodeJS.ProcessEnv;
   tokenHash: string;
 }): Promise<HostedSensitiveActionChallengeForTest> {
-  return withHostedWebTestkitDeps(input.environment, async (deps) =>
-    await deps.prisma.hostedSensitiveActionChallenge.update({
+  return withHostedWebTestkitDeps(input.environment, async (deps) => {
+    const decidedAt = new Date();
+    return await deps.prisma.hostedSensitiveActionChallenge.update({
       data: {
         approvalStatus: "approved",
-        decidedAt: new Date(),
+        consumedAt: null,
+        consumedBy: null,
+        decidedAt,
+        expiresAt: new Date(decidedAt.getTime() + 15 * 60 * 1_000),
       },
       where: {
         tokenHash: input.tokenHash,
       },
-    })
-  );
+    });
+  });
 }
 
 export async function listHostedAiUsageForTest(input: {

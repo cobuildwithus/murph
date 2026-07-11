@@ -259,6 +259,7 @@ describe("hosted local Junction wearable direct-resource replay e2e", () => {
     await activeScenario.bindActiveHostedLinqHomeChat({
       chatId: experimentAdherenceChatId,
       memberId: experimentAdherenceUserId,
+      recentInboundAt: new Date(),
       recipientPhone: memberPhone,
     });
 

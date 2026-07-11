@@ -124,6 +124,8 @@ describe("hosted local canonical receipt lost-ack recovery e2e", () => {
         "at",
         "--schedule-at",
         dueAt,
+        "--format",
+        "json",
       ]),
       replyText,
     ], {

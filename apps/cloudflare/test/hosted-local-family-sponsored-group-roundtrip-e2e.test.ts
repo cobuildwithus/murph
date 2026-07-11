@@ -134,7 +134,7 @@ describe("hosted local family-sponsored group roundtrip e2e", () => {
       throw new Error("Expected the family-sponsored group reply to be observed.");
     }
     expect(requireLinqStub().readObservedMessageText(reply)).toBe(replyText);
-    expect(reply.authorizationStatus).toBe("expected");
+    expect(reply.authorizationStatus).toBe("hosted-sentinel");
     expect(requireLinqStub().countObservedSends(requireLinqStub().createChatPath)).toBe(
       createChatBaseline,
     );

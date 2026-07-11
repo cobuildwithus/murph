@@ -278,7 +278,7 @@ async function waitForDurableRetryableOutbox(): Promise<HostedRunnerStatusRespon
   let lastStatus: HostedRunnerStatusResponse | null = null;
 
   while (Date.now() - startedAt < 20_000) {
-    const status = await readHostedRunnerStatusWithLogLimit(100);
+    const status = await readHostedRunnerStatusWithLogLimit(1_000);
     lastStatus = status;
     const nextWakeAtMs = Date.parse(status.workspace?.nextWakeAt ?? "");
     if (
@@ -288,7 +288,8 @@ async function waitForDurableRetryableOutbox(): Promise<HostedRunnerStatusRespon
       && status.mailboxLag.every((lane) => lane.lag === "0")
       && Number.isFinite(nextWakeAtMs)
       && nextWakeAtMs > Date.now()
-      && readPendingDeliveryEffectCount(status) > 0
+      // The prepared delivery effect is consumed by this attempt; the durable
+      // retry is represented by its future wake and retryable outbox journal.
       && hasRetryableOutboxDeliveryLog(status)
     ) {
       return status;

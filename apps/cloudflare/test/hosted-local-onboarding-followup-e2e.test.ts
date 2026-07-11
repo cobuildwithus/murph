@@ -270,7 +270,7 @@ async function startScenario(): Promise<void> {
 
 function buildActivationWake(memberId: string) {
   return buildHostedExecutionMemberActivatedWake({
-    eventId: `member.activated:local:${memberId}:evt_linq_onboarding_followup`,
+    eventId: `member.activated:local:${memberId}:evt_linq_onboarding_followup_setup`,
     memberChannels: {
       email: false,
       linq: true,

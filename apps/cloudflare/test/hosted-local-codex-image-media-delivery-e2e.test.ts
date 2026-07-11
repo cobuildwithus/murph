@@ -157,6 +157,14 @@ describe("hosted local Codex image media delivery e2e", () => {
         alt: "Generated mobility setup",
         prompt: "Render a simple synthetic mobility setup diagram.",
       }),
+      buildAssistantProviderMurphToolCall("attach_response_media", {
+        media: [{
+          alt: "Generated mobility setup",
+          kind: "image",
+          source: "hosted-local-generated-image",
+          url: generatedImageUrl,
+        }],
+      }),
       generatedImageReplyText,
     ], {
       matchInputContains: "Generate a fresh mobility setup image",
@@ -212,6 +220,14 @@ describe("hosted local Codex image media delivery e2e", () => {
         alt: "Reused mobility setup",
         prompt: "Create a synthetic variation that preserves the reference layout.",
         referenceImageRefs: [savedImageRef],
+      }),
+      buildAssistantProviderMurphToolCall("attach_response_media", {
+        media: [{
+          alt: "Reused mobility setup",
+          kind: "image",
+          source: "hosted-local-generated-image-reuse",
+          url: generatedImageUrl,
+        }],
       }),
       reuseReplyText,
     ], {
