@@ -461,24 +461,32 @@ periodic scheduler input. Historical `runtime.mailbox-lag-observed` and
 `runtime.device-sync-recovery-requested` control rows remain importable for
 deploy-skew and drain compatibility, but there is no active producer for them.
 
-`runtime.pending-effects-reconcile-requested` is the payload-free continuation
+`runtime.pending-effects-reconcile-requested` is the pointer-only continuation
 for a trusted owner-state change that may unblock an already-persisted runtime
-effect. The owner mutation and control row commit in one transaction; only the
-mailbox pointer is signaled afterward. The runtime records the control receipt
-and performs bounded delivery-effect reconciliation without continuing the
-assistant automation lane. Reconciliation uses an observation-only approval
-read that cannot create or refresh an approval cycle; only an explicit new
-action request may refresh a denied or expired cycle. The row is never
-authorization or outcome truth.
+effect. The owner mutation and control row commit in one transaction; the row
+carries only the stable approval action identity needed to select the matching
+parked effect. Attachment, destination, approval outcome, and authorization stay
+with their existing owners. The runtime records the control receipt and performs
+bounded delivery-effect reconciliation without continuing the assistant
+automation lane. Reconciliation uses an observation-only approval read that
+cannot create or refresh an approval cycle; only an explicit new action request
+may refresh a denied or expired cycle. The row is never authorization or outcome
+truth.
 Secure-action approval and denial use this shape because the exact attachment,
 destination, and delivery identity remain in the runtime-owned parked intent.
 External outcomes that require generated user-facing prose, such as phone-call
 results, continue to use `assistant.notification.requested` instead.
 
-Deploy consumers before the producer for this kind: the Cloudflare runner and
-runtime parser must accept it before web begins appending it. Old web against a
-new runtime is safe; new web against an old runtime would quarantine the system
-row and block system-lane progress.
+Deploy consumers before the producer for this kind: deploy Cloudflare with
+`container_rollout=immediate`, wait for the managed-container smoke to prove the
+new parser/runtime bundle is active, then deploy web immediately. Old web
+against the new runtime remains safe during that short window: observation-only
+approval reads may defer while the additive web read route is unavailable, and
+the old web confirmation path remains in place until web deploys. New web
+against an old runtime is not safe because the old parser quarantines the new
+system row and blocks system-lane progress. Roll back in the reverse order: web
+first so no new rows can be produced, verify system-lane lag is clear, then roll
+back Cloudflare. Do not roll the runtime back while the producer remains active.
 
 ### Hosted Runtime Maintenance Wake
 

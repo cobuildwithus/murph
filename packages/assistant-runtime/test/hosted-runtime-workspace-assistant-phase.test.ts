@@ -9429,6 +9429,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(mocks.collectHostedAssistantDeliverySideEffects).toHaveBeenCalledWith({
       actionApprovalPort: null,
       includeBackgroundDueIntents: true,
+      preferredEffectIds: [],
       preferredIntentIds: [],
       vaultRoot: "/tmp/murph-vault",
     });
@@ -9956,6 +9957,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(mocks.collectHostedAssistantDeliverySideEffects).toHaveBeenCalledWith({
       actionApprovalPort: null,
       includeBackgroundDueIntents: true,
+      preferredEffectIds: [pendingEffectsItem.wake.effectId],
       preferredIntentIds: [],
       vaultRoot: "/tmp/murph-vault",
     });
@@ -12766,6 +12768,7 @@ function createPendingEffectsReconcileSystemMailboxItem() {
     mailboxDedupeKey: "dedupe_system_mailbox_item_pending_effects_reconcile",
     routeAction: "apply-runtime-control-request" as const,
     wake: {
+      effectId: "vault-file-send:effect_pending",
       eventId: "evt_runtime_pending_effects_reconcile",
       kind: "runtime.pending-effects-reconcile-requested" as const,
       occurredAt: "2026-04-27T00:00:00.000Z",

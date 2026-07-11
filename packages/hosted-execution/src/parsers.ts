@@ -63,6 +63,7 @@ import {
   buildHostedExecutionCodexAuthRequestedWake,
   buildHostedExecutionDeviceSyncWake,
   buildHostedExecutionGroupNewsletterEmailNeededWake,
+  buildHostedExecutionPendingEffectsReconcileRequestedWake,
   buildHostedExecutionRuntimeControlWake,
   buildHostedExecutionTelegramConversationMessageWake,
 } from "./builders.ts";
@@ -305,14 +306,18 @@ export function parseHostedExecutionWake(value: unknown): HostedExecutionWake {
       });
     case "runtime.pending-effects-reconcile-requested":
       assertExactHostedExecutionKeys(record, [
+        "effectId",
         "eventId",
         "kind",
         "occurredAt",
         "userId",
       ], "Hosted execution runtime.pending-effects-reconcile-requested wake");
-      return buildHostedExecutionRuntimeControlWake({
+      return buildHostedExecutionPendingEffectsReconcileRequestedWake({
+        effectId: requireString(
+          record.effectId,
+          "Hosted execution runtime.pending-effects-reconcile-requested wake effectId",
+        ),
         eventId,
-        kind,
         occurredAt,
         userId: wireUserId,
       });
@@ -960,11 +965,16 @@ export function parseHostedExecutionEvent(value: unknown): HostedExecutionEvent 
       } satisfies HostedExecutionGroupNewsletterEmailNeededEvent;
     case "runtime.pending-effects-reconcile-requested":
       assertExactHostedExecutionKeys(record, [
+        "effectId",
         "kind",
         "userId",
       ], "Hosted execution runtime.pending-effects-reconcile-requested event");
       return {
-        kind: kind as HostedExecutionPlainRuntimeControlWakeKind,
+        effectId: requireString(
+          record.effectId,
+          "Hosted execution runtime.pending-effects-reconcile-requested event effectId",
+        ),
+        kind,
         userId,
       };
     case "runtime.manual-requested":

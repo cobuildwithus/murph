@@ -1175,6 +1175,100 @@ describe("hosted runtime callbacks", () => {
     }
   });
 
+  it("reconciles the causally selected approval even when it is older than the recent-intent cap", async () => {
+    const vaultFile = {
+      contentType: "application/pdf",
+      filename: "report.pdf",
+      kind: "vault_file" as const,
+      ref: "documents/report.pdf",
+      sha256: "a".repeat(64),
+      sizeBytes: 42,
+    };
+    const storedIntents = Array.from({ length: 5 }, (_, index) => ({
+      actorId: "actor_1",
+      bindingDelivery: { kind: "thread" as const, target: "linq_chat_1" },
+      channel: "linq",
+      createdAt: `2026-04-08T00:0${index}:00.000Z`,
+      dedupeKey: `dedupe_vault_file_${index}`,
+      delivery: null,
+      deliveryIdempotencyKey: `assistant-outbox:intent_vault_file_${index}`,
+      deliveryTransportIdempotent: true,
+      explicitTarget: "linq_chat_1",
+      identityId: "identity_1",
+      intentId: `intent_vault_file_${index}`,
+      lastAttemptAt: null,
+      lastError: null,
+      media: [vaultFile],
+      message: "Attached.",
+      nextAttemptAt: "2026-04-08T00:15:00.000Z",
+      replyToMessageId: "linq_message_1",
+      sessionId: "session_1",
+      status: "awaiting_approval" as const,
+      subject: null,
+      threadId: "thread_1",
+      threadIsDirect: true,
+      turnId: `turn_${index}`,
+      updatedAt: `2026-04-08T00:0${index}:00.000Z`,
+    }));
+    const selectedEffectId = "vault-file-send:intent_vault_file_0";
+    const actionApprovalPort = {
+      consume: vi.fn(),
+      read: vi.fn(async (request: { actionId: string }) =>
+        request.actionId === selectedEffectId
+          ? {
+              approvalGeneration: "b".repeat(64),
+              approvalId: `haa_${"b".repeat(32)}`,
+              status: "approved" as const,
+            }
+          : {
+              approvalId: `haa_${"c".repeat(32)}`,
+              approvalUrl: "https://murph.test/approve/pending",
+              expiresAt: "2026-04-08T00:15:00.000Z",
+              status: "pending" as const,
+            }),
+      request: vi.fn(),
+    };
+    mocks.listAssistantOutboxIntents.mockResolvedValueOnce(storedIntents);
+    mocks.readAssistantVaultFileMedia.mockReturnValue(vaultFile);
+    mocks.buildAssistantVaultFileSendApprovalRequest.mockImplementation(
+      (intent: { intentId: string }) => ({
+        actionFingerprint: "a".repeat(64),
+        actionId: `vault-file-send:${intent.intentId}`,
+        actionKind: "vault.file.send.v1",
+        presentation: {
+          body: "Send a vault file.",
+          title: "Send a file?",
+        },
+      }),
+    );
+    mocks.applyAssistantVaultFileSendApprovalResult.mockImplementation(
+      ({ approval, intent }) =>
+        approval.status === "approved"
+          ? {
+              ...intent,
+              nextAttemptAt: "2026-04-08T00:05:00.000Z",
+              status: "pending",
+              updatedAt: "2026-04-08T00:05:00.000Z",
+            }
+          : intent,
+    );
+
+    const sideEffects = await collectHostedAssistantDeliverySideEffects({
+      actionApprovalPort,
+      includeBackgroundDueIntents: true,
+      preferredEffectIds: [selectedEffectId],
+      preferredIntentIds: [],
+      vaultRoot: "/tmp/vault",
+    });
+
+    expect(actionApprovalPort.read).toHaveBeenCalledTimes(5);
+    expect(actionApprovalPort.read).toHaveBeenCalledWith(
+      expect.objectContaining({ actionId: selectedEffectId }),
+    );
+    expect(sideEffects).toHaveLength(1);
+    expect(sideEffects[0]?.effectId).toBe("intent_vault_file_0");
+  });
+
   it("abandons a queued signup welcome when a foreground reply targets the same route", async () => {
     mocks.listAssistantOutboxIntents.mockResolvedValue([
       {
@@ -8012,6 +8106,91 @@ describe("hosted runtime callbacks", () => {
       }),
     ]);
   });
+
+  it.each([
+    ["denied", "ASSISTANT_VAULT_FILE_APPROVAL_DENIED"],
+    ["expired", "ASSISTANT_VAULT_FILE_APPROVAL_EXPIRED"],
+  ] as const)(
+    "does not enter provider dispatch when vault-file approval consumption returns %s",
+    async (approvalStatus, expectedCode) => {
+      const vaultFile = {
+        approvalGeneration: "b".repeat(64),
+        approvalId: `haa_${"a".repeat(32)}`,
+        contentType: "application/pdf",
+        filename: "report.pdf",
+        kind: "vault_file" as const,
+        ref: "documents/report.pdf",
+        sha256: "a".repeat(64),
+        sizeBytes: 42,
+      };
+      const effect = createEffect({
+        bindingDeliveryKind: "thread",
+        bindingDeliveryTarget: "chat_123",
+        channel: "linq",
+        media: [vaultFile],
+        transportIdempotent: true,
+      });
+      const approvalRequest = {
+        actionFingerprint: "a".repeat(64),
+        actionId: "vault-file-send:approved",
+        actionKind: "vault.file.send.v1",
+        presentation: {
+          body: "Send a vault file.",
+          title: "Send a file?",
+        },
+        returnContactKind: "text" as const,
+      };
+      const actionApprovalPort = {
+        consume: vi.fn(async () => ({
+          approvalId: vaultFile.approvalId,
+          status: approvalStatus,
+        })),
+        read: vi.fn(),
+        request: vi.fn(),
+      };
+      mocks.buildAssistantVaultFileSendApprovalRequest.mockReturnValueOnce(
+        approvalRequest,
+      );
+      mocks.readAssistantOutboxIntent.mockResolvedValueOnce({
+        dedupeKey: "dedupe_123",
+        intentId: "intent_123",
+        media: [vaultFile],
+      });
+      mocks.readAssistantVaultFileMedia.mockReturnValueOnce(vaultFile);
+      mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(
+        async ({ dependencies }) => {
+          await dependencies.sendLinq({
+            idempotencyKey: "assistant-outbox:intent_123",
+            media: [vaultFile],
+            message: "Attached.",
+            replyToMessageId: null,
+            target: "chat_123",
+            targetKind: "thread",
+          });
+          throw new Error("Provider dispatch unexpectedly remained reachable.");
+        },
+      );
+
+      await expect(drainHostedPreparedAssistantDeliveries({
+        actionApprovalPort,
+        assistantDeliveryEffects: [effect],
+        effectsPort: createHostedRuntimeEffectsPortStub(),
+        providerFetch: vi.fn<typeof fetch>(
+          async () => new Response(null, { status: 204 }),
+        ),
+        vaultRoot: HOSTED_WAKE.vaultRoot,
+        wake: HOSTED_WAKE.wake,
+      })).rejects.toMatchObject({ code: expectedCode });
+
+      expect(actionApprovalPort.consume).toHaveBeenCalledWith({
+        approvalGeneration: vaultFile.approvalGeneration,
+        consumerId: "assistant-outbox:intent_123",
+        request: approvalRequest,
+      });
+      expect(mocks.readVerifiedAssistantVaultFileBytes).not.toHaveBeenCalled();
+      expect(mocks.sendLinqMessage).not.toHaveBeenCalled();
+    },
+  );
 
   it("uses providerFetch for hosted Linq voice memo deliveries when the runtime can intercept egress", async () => {
     const effect = createEffect({

@@ -3313,6 +3313,9 @@ async function runSystemMailboxMaintenancePhase(input: {
       ? await collectHostedAssistantDeliverySideEffects({
         actionApprovalPort: phaseInput.runtime.platform.actionApprovalPort ?? null,
         includeBackgroundDueIntents: true,
+        preferredEffectIds: resolveHostedSystemMailboxPreferredEffectIds(
+          systemMailboxPreparation,
+        ),
         preferredIntentIds: [],
         vaultRoot: phaseInput.restored.vaultRoot,
       })
@@ -6407,6 +6410,19 @@ function shouldCollectSystemMailboxDeliveryEffects(input: {
   return item.routeAction === "apply-member-activation"
     && item.wake.kind === "member.activated"
     && item.wake.signupWelcome != null;
+}
+
+function resolveHostedSystemMailboxPreferredEffectIds(
+  preparation: HostedSystemMailboxCheckpointPreparation,
+): readonly string[] {
+  if (
+    preparation.status !== "processed"
+    || preparation.item.wake.kind
+      !== "runtime.pending-effects-reconcile-requested"
+  ) {
+    return [];
+  }
+  return [preparation.item.wake.effectId];
 }
 
 function shouldFastDispatchAssistantDeliveryEffects(input: {

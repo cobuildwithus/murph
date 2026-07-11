@@ -32,7 +32,7 @@ afterEach(async () => {
 })
 
 describe('assistant vault-file send', () => {
-  it('requests approval without creating a separate outbox delivery', async () => {
+  it('parks one durable file delivery before returning a pending approval', async () => {
     const { parentRoot, vaultRoot } = await createTempVaultContext(
       'murph-vault-file-send-',
     )
@@ -55,36 +55,31 @@ describe('assistant vault-file send', () => {
         target: 'chat_123',
       },
       channel: 'linq',
+      deliveryIdempotencyKey: 'hosted-turn-delivery-123',
+      deliveryTransportIdempotent: true,
       identityId: 'member_123',
       ref: 'documents/report.pdf',
       replyToMessageId: 'original_message_123',
+      sessionId: 'session_123',
       threadId: 'chat_123',
       threadIsDirect: true,
+      turnId: 'turn_123',
       vault: vaultRoot,
     }
 
     const first = await requestAssistantVaultFileSend(request)
     const second = await requestAssistantVaultFileSend(request)
     const intents = await listAssistantOutboxIntents(vaultRoot)
-    const replyIntent = await createAssistantOutboxIntent({
-      actorId: null,
-      bindingDelivery: { kind: 'thread', target: 'chat_123' },
-      channel: 'linq',
-      deliveryIdempotencyKey: 'hosted-turn-delivery-123',
-      deliveryTransportIdempotent: true,
-      identityId: 'member_123',
-      media: [first.file],
-      message: 'Here is the file.',
-      replyToMessageId: 'approved_message_456',
-      sessionId: 'session_123',
-      threadId: 'chat_123',
-      threadIsDirect: true,
-      turnId: 'turn_123',
-      vault: vaultRoot,
-    })
-
     expect(second.file).toEqual(first.file)
-    expect(intents).toHaveLength(0)
+    expect(intents).toHaveLength(1)
+    expect(intents[0]).toMatchObject({
+      deliveryIdempotencyKey:
+        `hosted-turn-delivery-123:vault-file:haa_${'a'.repeat(32)}`,
+      media: [first.file],
+      message: 'Here it is: report.pdf',
+      nextAttemptAt: '2026-06-24T12:15:00.000Z',
+      status: 'awaiting_approval',
+    })
     expect(first).toMatchObject({
       approvalUrl: 'https://murph.test/approve/haa_test',
       filename: 'report.pdf',
@@ -99,7 +94,7 @@ describe('assistant vault-file send', () => {
       actionKind: 'vault.file.send.v1',
       actionFingerprint: expect.stringMatching(/^[0-9a-f]{64}$/u),
     })
-    expect(buildAssistantVaultFileSendApprovalRequest(replyIntent)).toEqual(
+    expect(buildAssistantVaultFileSendApprovalRequest(intents[0]!)).toEqual(
       approvalPort.request.mock.calls[0]?.[0],
     )
   })
@@ -178,6 +173,8 @@ describe('assistant vault-file send', () => {
       channel: 'linq',
       identityId: 'member_123',
       ref: 'documents/missing.pdf',
+      sessionId: 'session_123',
+      turnId: 'turn_123',
       vault: vaultRoot,
     })).rejects.toMatchObject({
       code: 'ASSISTANT_VAULT_FILE_TARGET_UNAVAILABLE',
@@ -251,11 +248,15 @@ describe('assistant vault-file send', () => {
     const baseRequest = {
       actionApprovalPort: approvalPort,
       channel: 'linq',
+      deliveryIdempotencyKey: 'hosted-turn-delivery-target-stable',
+      deliveryTransportIdempotent: true,
       identityId: 'member_123',
       ref: 'documents/report.pdf',
       replyToMessageId: 'original_message_target_stable',
+      sessionId: 'session_123',
       threadId: 'chat_123',
       threadIsDirect: true,
+      turnId: 'turn_123',
       vault: vaultRoot,
     }
 
@@ -277,7 +278,7 @@ describe('assistant vault-file send', () => {
       vault: vaultRoot,
     })
 
-    expect(await listAssistantOutboxIntents(vaultRoot)).toHaveLength(1)
+    expect(await listAssistantOutboxIntents(vaultRoot)).toHaveLength(2)
     expect(first.status).toBe('pending')
     expect(approved.status).toBe('approved')
     if (approved.status !== 'approved') {

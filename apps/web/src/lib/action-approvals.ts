@@ -8,7 +8,7 @@ import type {
   PrismaClient,
 } from "@prisma/client";
 import {
-  buildHostedExecutionRuntimeControlWake,
+  buildHostedExecutionPendingEffectsReconcileRequestedWake,
 } from "@murphai/hosted-execution";
 import {
   HOSTED_ACTION_APPROVAL_ID_PREFIX,
@@ -395,13 +395,13 @@ export async function decideHostedActionApprovalTx(input: {
     status: input.decision,
   };
   const mailboxItem = (await appendHostedMailboxEnvelopeTx({
-    envelope: buildHostedExecutionRuntimeControlWake({
+    envelope: buildHostedExecutionPendingEffectsReconcileRequestedWake({
+      effectId: input.approval.actionId,
       eventId: buildHostedActionApprovalOutcomeWakeEventId({
         approval: input.approval,
         decidedAt: now,
         decision: input.decision,
       }),
-      kind: "runtime.pending-effects-reconcile-requested",
       occurredAt: now.toISOString(),
       userId: input.memberId,
     }),

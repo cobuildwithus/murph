@@ -135,6 +135,7 @@ interface HostedAssistantDeliveryBoundaryFields {
 export interface CollectHostedAssistantDeliverySideEffectsInput {
   actionApprovalPort?: HostedRuntimeActionApprovalPort | null;
   includeBackgroundDueIntents: boolean;
+  preferredEffectIds?: readonly string[];
   preferredIntentIds?: readonly string[];
   vaultRoot: string;
 }
@@ -144,12 +145,14 @@ export async function collectHostedAssistantDeliverySideEffects(
 ): Promise<HostedAssistantDeliveryEffect[]> {
   const request = {
     includeBackgroundDueIntents: input.includeBackgroundDueIntents,
+    preferredEffectIds: input.preferredEffectIds ?? [],
     preferredIntentIds: input.preferredIntentIds ?? [],
     vaultRoot: input.vaultRoot,
   };
   const now = new Date();
   const storedIntents = await listAssistantOutboxIntents(request.vaultRoot);
   const reconcileTargetIds = selectHostedAssistantApprovalReconcileTargets({
+    preferredEffectIds: request.preferredEffectIds,
     preferredIntentIds: request.preferredIntentIds,
     storedIntents,
   });
@@ -289,10 +292,28 @@ export async function collectHostedAssistantDeliverySideEffects(
  * O(n) sequence of web-control round trips to the foreground delivery path.
  */
 function selectHostedAssistantApprovalReconcileTargets(input: {
+  preferredEffectIds: readonly string[];
   preferredIntentIds: readonly string[];
   storedIntents: readonly AssistantOutboxIntent[];
 }): Set<string> {
   const targets = new Set<string>(input.preferredIntentIds);
+  const preferredEffectIds = new Set(input.preferredEffectIds);
+  if (preferredEffectIds.size > 0) {
+    for (const intent of input.storedIntents) {
+      if (intent.status !== "awaiting_approval" || targets.has(intent.intentId)) {
+        continue;
+      }
+      try {
+        const request = buildAssistantVaultFileSendApprovalRequest(intent);
+        if (preferredEffectIds.has(request.actionId)) {
+          targets.add(intent.intentId);
+        }
+      } catch {
+        // The normal reconciliation path owns terminal handling for malformed
+        // vault-file intents; an opaque effect pointer must not broaden it.
+      }
+    }
+  }
   const recent = [...input.storedIntents]
     .filter((intent) =>
       intent.status === "awaiting_approval"

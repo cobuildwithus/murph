@@ -10,11 +10,15 @@ import {
   assistantOutboxIntentSchema,
   assistantVaultFileMaxBytes,
   type AssistantOutboxIntent,
+  type AssistantTurnTrigger,
   type AssistantVaultFileResponseMedia,
 } from '@murphai/operator-config/assistant-cli-contracts'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import { resolveAssistantVaultPath } from '@murphai/vault-usecases/assistant-vault-paths'
 
+import {
+  createAssistantOutboxIntent,
+} from './outbox.js'
 import {
   buildAssistantOutboxPersistedTarget,
   buildAssistantOutboxRawTargetIdentity,
@@ -61,15 +65,21 @@ export type AssistantVaultFileSendRequestResult =
 export async function requestAssistantVaultFileSend(input: {
   actionApprovalPort: AssistantActionApprovalPort
   actorId?: string | null
+  answeredMailboxItemIds?: readonly string[] | null
   bindingDelivery?: AssistantOutboxIntent['bindingDelivery']
   channel?: string | null
+  deliveryIdempotencyKey?: string | null
   deliverySource?: AssistantOutboxIntent['deliverySource']
+  deliveryTransportIdempotent?: boolean
   explicitTarget?: string | null
   identityId?: string | null
   ref: string
   replyToMessageId?: string | null
+  sessionId: string
   threadId?: string | null
   threadIsDirect?: boolean | null
+  turnId: string
+  turnTrigger?: AssistantTurnTrigger | null
   vault: string
 }): Promise<AssistantVaultFileSendRequestResult> {
   const targetFingerprint = requireAssistantVaultFileSendTargetFingerprint(input)
@@ -85,6 +95,39 @@ export async function requestAssistantVaultFileSend(input: {
       threadIsDirect: input.threadIsDirect ?? null,
     }),
   )
+
+  if (approval.status === 'pending') {
+    const deliveryIdempotencyKey = buildAssistantVaultFileDeliveryIdempotencyKey({
+      approvalId: approval.approvalId,
+      deliveryIdempotencyKey: input.deliveryIdempotencyKey ?? null,
+      turnId: input.turnId,
+    })
+    await createAssistantOutboxIntent({
+      actorId: input.actorId ?? null,
+      answeredMailboxItemIds: input.answeredMailboxItemIds ?? [],
+      bindingDelivery: input.bindingDelivery,
+      channel: input.channel ?? null,
+      dedupeToken: deliveryIdempotencyKey,
+      deliveryIdempotencyKey,
+      deliverySource: input.deliverySource ?? null,
+      deliveryTransportIdempotent: input.deliveryTransportIdempotent,
+      explicitTarget: input.explicitTarget ?? null,
+      identityId: input.identityId ?? null,
+      initialState: {
+        nextAttemptAt: approval.expiresAt,
+        status: 'awaiting_approval',
+      },
+      media: [file],
+      message: buildAssistantVaultFileDeliveryMessage(file.filename),
+      replyToMessageId: input.replyToMessageId ?? null,
+      sessionId: input.sessionId,
+      threadId: input.threadId ?? null,
+      threadIsDirect: input.threadIsDirect ?? null,
+      turnId: input.turnId,
+      turnTrigger: input.turnTrigger ?? null,
+      vault: input.vault,
+    })
+  }
 
   const approvedFile = approval.status === 'approved'
     ? applyAssistantVaultFileApprovalToMedia({ approval, file })
@@ -106,6 +149,20 @@ export async function requestAssistantVaultFileSend(input: {
           }
         : { status: approval.status }),
   }
+}
+
+export function buildAssistantVaultFileDeliveryIdempotencyKey(input: {
+  approvalId: string
+  deliveryIdempotencyKey?: string | null
+  turnId: string
+}): string {
+  const prefix = normalizeNullableString(input.deliveryIdempotencyKey)
+    ?? `assistant-vault-file:${input.turnId}`
+  return `${prefix}:vault-file:${input.approvalId}`
+}
+
+export function buildAssistantVaultFileDeliveryMessage(filename: string): string {
+  return `Here it is: ${filename}`
 }
 
 export async function resolveAssistantVaultFileResponseMedia(input: {

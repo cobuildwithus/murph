@@ -8,6 +8,7 @@ import {
   buildHostedExecutionLinqConversationMessageWake,
   buildHostedExecutionMemberActivatedWake,
   buildHostedExecutionMemberChannelsUpdatedWake,
+  buildHostedExecutionPendingEffectsReconcileRequestedWake,
   buildHostedExecutionRuntimeControlWake,
 } from "@murphai/hosted-execution";
 import {
@@ -2767,9 +2768,9 @@ describe("executeHostedMailboxEvent", () => {
   });
 
   it("receives pending-effects reconciliation requests without running assistant work", async () => {
-    const wake = buildHostedExecutionRuntimeControlWake({
+    const wake = buildHostedExecutionPendingEffectsReconcileRequestedWake({
+      effectId: "vault-file-send:effect_123",
       eventId: "evt_pending_effects_reconcile",
-      kind: "runtime.pending-effects-reconcile-requested",
       occurredAt: "2026-04-08T00:03:00.000Z",
       userId: "member_123",
     });

@@ -16,15 +16,18 @@ describe("parseHostedExecutionEvent", () => {
   it("parses runtime control events", () => {
     expect(
       parseHostedExecutionEvent({
+        effectId: "vault-file-send:effect-1",
         kind: "runtime.pending-effects-reconcile-requested",
         userId: "user-1",
       }),
     ).toEqual({
+      effectId: "vault-file-send:effect-1",
       kind: "runtime.pending-effects-reconcile-requested",
       userId: "user-1",
     });
     expect(() =>
       parseHostedExecutionEvent({
+        effectId: "vault-file-send:effect-1",
         kind: "runtime.pending-effects-reconcile-requested",
         payload: {},
         userId: "user-1",
@@ -1744,12 +1747,14 @@ describe("parseHostedExecutionWake", () => {
   it("parses runtime control wakes", () => {
     expect(
       parseHostedExecutionWake({
+        effectId: "vault-file-send:effect-1",
         eventId: "evt_runtime_control",
         kind: "runtime.pending-effects-reconcile-requested",
         occurredAt: "2026-04-18T00:00:00.000Z",
         userId: "user-1",
       }),
     ).toEqual({
+      effectId: "vault-file-send:effect-1",
       eventId: "evt_runtime_control",
       kind: "runtime.pending-effects-reconcile-requested",
       occurredAt: "2026-04-18T00:00:00.000Z",
@@ -1757,6 +1762,7 @@ describe("parseHostedExecutionWake", () => {
     });
     expect(() =>
       parseHostedExecutionWake({
+        effectId: "vault-file-send:effect-1",
         eventId: "evt_runtime_control",
         kind: "runtime.pending-effects-reconcile-requested",
         occurredAt: "2026-04-18T00:00:00.000Z",

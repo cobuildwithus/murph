@@ -28,6 +28,9 @@ import {
   requirePendingHostedActionApproval,
   requestHostedActionApproval,
 } from "@/src/lib/action-approvals";
+import {
+  decodeHostedMailboxStoredPayload,
+} from "@/src/lib/hosted-mailbox/store";
 
 const REQUEST: HostedActionApprovalRequest = {
   actionFingerprint: "b".repeat(64),
@@ -108,6 +111,21 @@ describe("hosted action approvals", () => {
       kind: "runtime.pending-effects-reconcile-requested",
       lane: "system",
       userId: memberId,
+    });
+    await expect(decodeHostedMailboxStoredPayload({
+      dedupeKey: firstWake.dedupeKey,
+      kind: firstWake.kind,
+      lane: firstWake.lane,
+      laneSeq: firstWake.laneSeq,
+      mailboxItemId: firstWake.id,
+      occurredAt: firstWake.occurredAt.toISOString(),
+      payloadInlineCiphertext: firstWake.payloadInlineCiphertext,
+      payloadSchema: firstWake.payloadSchema,
+      prisma: deps.prisma,
+      userId: firstWake.userId,
+    })).resolves.toMatchObject({
+      effectId: REQUEST.actionId,
+      kind: "runtime.pending-effects-reconcile-requested",
     });
 
     const firstApproved = await requestHostedActionApproval({
