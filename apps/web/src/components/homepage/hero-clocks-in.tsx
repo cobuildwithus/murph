@@ -1322,7 +1322,7 @@ export function HeroClocksIn({
           <h1 className="sr-only">{MURPH_TAGLINE}</h1>
           <div
             aria-hidden="true"
-            className="font-serif text-[clamp(2rem,4vw,3.25rem)] font-semibold leading-[1.08] tracking-[-0.03em] text-black [text-wrap:balance]"
+            className="font-serif text-[clamp(2.5rem,5vw,4rem)] font-semibold leading-[1.03] tracking-[-0.03em] text-black [text-wrap:balance]"
           >
             <span className="block">{HERO_HEADLINE.line1}</span>
             <span className="mt-2 block text-[#5a6e32]">
