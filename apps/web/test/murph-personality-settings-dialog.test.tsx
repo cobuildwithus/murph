@@ -346,8 +346,8 @@ test("submits every changed dial and never the untouched defaults", async () => 
   }
 });
 
-test("returning a dial to its initial value clears the change and disables save", async () => {
-  const savePersonality = vi.fn();
+test("returning a touched dial to its projected value still reasserts that intent", async () => {
+  const savePersonality = vi.fn(async () => ({ detail: 5, humor: 3, push: 3 }));
   const { MurphPersonalitySettingsDialog } = await import(
     "@/src/components/settings/murph-personality-settings-dialog"
   );
@@ -366,8 +366,9 @@ test("returning a dial to its initial value clears the change and disables save"
     assert.equal(findButton(rendered.container, "Save changes")?.disabled, false);
 
     await driveDial(rendered, "Humor", 3);
-    assert.equal(findButton(rendered.container, "Save changes")?.disabled, true);
-    assert.equal(savePersonality.mock.calls.length, 0);
+    assert.equal(findButton(rendered.container, "Save changes")?.disabled, false);
+    await clickButton(rendered, "Save changes");
+    assert.deepEqual(savePersonality.mock.calls, [[{ humor: 3 }]]);
   } finally {
     await rendered.cleanup();
   }

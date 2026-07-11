@@ -189,7 +189,7 @@ Settings-side display/write projection, not canonical preference truth;
 `bank/preferences.json` remains canonical.
 
 `POST /api/settings/assistant-style` validates the authenticated member's
-values, updates changed columns, appends one `member.preferences.updated`
+values, updates requested columns, appends one `member.preferences.updated`
 delta, and best-effort signals the runtime. Personality payloads are strict,
 non-empty sparse objects. They reject unknown keys, fractions, out-of-range
 scores, and mixed tone-or-voice plus personality requests before persistence.
@@ -198,9 +198,11 @@ without inventing a second readback service.
 
 Conversation-written personality values do not reverse-sync into the web
 projection. Settings therefore resolves missing columns to the shared defaults
-for display but submits only dials changed in that dialog. It must never submit
-all three displayed defaults automatically. The mailbox delta likewise carries
-only fields changed by the request, so a web save cannot overwrite an unseen
+for display but submits only dials deliberately touched in that dialog, even
+when a touched dial returns to its displayed value. Projection equality must
+not suppress that explicit canonical intent. The dialog must never submit all
+three displayed defaults automatically. The mailbox delta likewise carries
+only fields touched by the request, so a web save cannot overwrite an unseen
 canonical sibling preference.
 
 `member.preferences.updated` is a delta contract, not a replaceable snapshot.

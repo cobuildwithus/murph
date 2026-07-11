@@ -192,7 +192,7 @@ describe("hosted member assistant preferences", () => {
     });
   });
 
-  it("persists only changed personality dials and preserves sibling values", async () => {
+  it("persists sparse personality intent and preserves sibling values", async () => {
     const member = {
       assistantDetail: 8 as number | null,
       assistantHumor: 3 as number | null,
@@ -214,7 +214,6 @@ describe("hosted member assistant preferences", () => {
       occurredAt: "2026-07-08T12:00:00.000Z",
       preferences: {
         personality: {
-          detail: 8,
           humor: 7,
         },
       },
@@ -280,11 +279,23 @@ describe("hosted member assistant preferences", () => {
         humor: 7,
         push: 6,
       },
-      dispatch: null,
-      updated: false,
+      dispatch: {
+        mailboxItemId: "mailbox_item_123",
+      },
+      updated: true,
     });
-    expect(prisma.hostedMember.update).toHaveBeenCalledTimes(1);
-    expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+    expect(prisma.hostedMember.update).toHaveBeenCalledTimes(2);
+    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledWith({
+      envelope: expect.objectContaining({
+        kind: "member.preferences.updated",
+        preferences: {
+          personality: {
+            humor: 7,
+          },
+        },
+      }),
+      tx: prisma,
+    });
   });
 
   it("fails retryably when the preference wake identity conflicts", async () => {

@@ -96,13 +96,15 @@ export function MurphPersonalitySettingsDialog({
   savePersonality?: typeof saveAssistantPersonalityPreference;
 }) {
   const isMobile = useIsMobile();
-  // The effective scores shown when the editor opened are the draft baseline and
-  // the clean/dirty comparison anchor. Captured once so a later prop change can
-  // never silently reclassify a moved dial as unchanged.
+  // The displayed scores shown when the editor opened seed the draft. Captured
+  // once so a later prop change cannot replace a member's in-progress choices.
   const [initialScores] = useState<AssistantPersonalityScores>(() =>
     resolveAssistantPersonalitySnapshotScores(personality),
   );
   const [scores, setScores] = useState<AssistantPersonalityScores>(initialScores);
+  const [touchedDials, setTouchedDials] = useState<Set<AssistantPersonalitySettingId>>(
+    () => new Set(),
+  );
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // Dismissing the editor unmounts this component while a save may still be in
@@ -117,11 +119,19 @@ export function MurphPersonalitySettingsDialog({
     };
   }, []);
 
-  const changedDials = collectChangedDials(scores, initialScores);
-  const dirty = Object.keys(changedDials).length > 0;
+  const requestedDials = collectTouchedDials(scores, touchedDials);
+  const dirty = touchedDials.size > 0;
 
   const handleValueChange = (id: AssistantPersonalitySettingId, value: number) => {
     setScores((current) => ({ ...current, [id]: value }));
+    setTouchedDials((current) => {
+      if (current.has(id)) {
+        return current;
+      }
+      const next = new Set(current);
+      next.add(id);
+      return next;
+    });
   };
 
   const handleSave = async () => {
@@ -131,7 +141,7 @@ export function MurphPersonalitySettingsDialog({
     setSaving(true);
     setError(null);
     try {
-      const snapshot = await savePersonality(changedDials);
+      const snapshot = await savePersonality(requestedDials);
       if (!mountedRef.current) {
         return;
       }
@@ -375,13 +385,13 @@ function snapshotToPreferences(
   return preferences;
 }
 
-function collectChangedDials(
+function collectTouchedDials(
   scores: AssistantPersonalityScores,
-  initialScores: AssistantPersonalityScores,
+  touchedDials: ReadonlySet<AssistantPersonalitySettingId>,
 ): AssistantPersonalityDialUpdate {
   const changed: AssistantPersonalityDialUpdate = {};
   for (const id of assistantPersonalitySettingIds) {
-    if (scores[id] !== initialScores[id]) {
+    if (touchedDials.has(id)) {
       changed[id] = scores[id];
     }
   }

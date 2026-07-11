@@ -45,15 +45,6 @@ export interface HostedMemberAssistantPreferencesResult {
   updated: boolean;
 }
 
-const PERSONALITY_MEMBER_COLUMNS = {
-  detail: "assistantDetail",
-  humor: "assistantHumor",
-  push: "assistantPush",
-} as const satisfies Record<
-  AssistantPersonalitySettingId,
-  "assistantDetail" | "assistantHumor" | "assistantPush"
->;
-
 type HostedMemberPersonalityColumns = {
   assistantDetail: number | null;
   assistantHumor: number | null;
@@ -237,10 +228,10 @@ function resolveChangedAssistantPreferences(input: {
       continue;
     }
 
-    const column = PERSONALITY_MEMBER_COLUMNS[settingId];
-    if (requestedScore !== input.current.personality[column]) {
-      personality[settingId] = requestedScore;
-    }
+    // Postgres is only a display/write projection. An explicit sparse
+    // personality request must reach the canonical owner even when its value
+    // equals the potentially stale projection column.
+    personality[settingId] = requestedScore;
   }
   const personalityChanged = Object.keys(personality).length > 0;
 
