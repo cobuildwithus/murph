@@ -18,6 +18,11 @@ import {
   readConfiguredDeviceSyncProviderConfigs,
 } from "@murphai/device-syncd/config";
 import { shapeHostedDeviceSyncJobHintPayload } from "@murphai/device-syncd/hosted-hints";
+import {
+  JUNCTION_COMPANION_HEALTH_METADATA_EVENT_TYPE,
+  JUNCTION_COMPANION_HEALTH_METADATA_RESOURCE,
+  JUNCTION_COMPANION_HEALTH_METADATA_SOURCE_PROVIDER,
+} from "@murphai/device-syncd/junction-resources";
 import { listConfiguredDeviceSyncPublicProviderDescriptors } from "@murphai/device-syncd/public-provider-descriptors";
 import {
   configuredDeviceSyncProviderKeys as rootConfiguredDeviceSyncProviderKeys,
@@ -492,6 +497,37 @@ describe("deviceSyncProviderManifests", () => {
       sourceProviderSlug: "oura",
       windowEnd: "2026-04-22T00:00:00.000Z",
       windowStart: "2026-04-21T00:00:00.000Z",
+    });
+
+    const companionBatchJson = JSON.stringify({
+      schemaVersion: 1,
+      records: [{
+        recordId: "a".repeat(64),
+        kind: "recovery_score",
+        value: 72,
+        startAt: "2026-04-21T04:00:00.000Z",
+        endAt: "2026-04-21T12:00:00.000Z",
+      }],
+    });
+    expect(
+      shapeHostedDeviceSyncJobHintPayload("junction", {
+        kind: "resource",
+        payload: {
+          eventType: JUNCTION_COMPANION_HEALTH_METADATA_EVENT_TYPE,
+          occurredAt: "2026-04-22T00:00:00.000Z",
+          resource: JUNCTION_COMPANION_HEALTH_METADATA_RESOURCE,
+          resourceCategory: "summary",
+          sourceProviderSlug: JUNCTION_COMPANION_HEALTH_METADATA_SOURCE_PROVIDER,
+          webhookDataJson: companionBatchJson,
+        },
+      }),
+    ).toEqual({
+      eventType: JUNCTION_COMPANION_HEALTH_METADATA_EVENT_TYPE,
+      occurredAt: "2026-04-22T00:00:00.000Z",
+      resource: JUNCTION_COMPANION_HEALTH_METADATA_RESOURCE,
+      resourceCategory: "summary",
+      sourceProviderSlug: JUNCTION_COMPANION_HEALTH_METADATA_SOURCE_PROVIDER,
+      webhookDataJson: companionBatchJson,
     });
 
     expect(

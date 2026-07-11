@@ -7,6 +7,11 @@ import {
   readJunctionHistoricalBackfillProgress,
   readJunctionHistoricalBackfillStatus,
 } from "./junction-historical-backfill-progress.ts";
+import {
+  JUNCTION_COMPANION_HEALTH_METADATA_EVENT_TYPE,
+  JUNCTION_COMPANION_HEALTH_METADATA_RESOURCE,
+  JUNCTION_COMPANION_HEALTH_METADATA_SOURCE_PROVIDER,
+} from "./companion-health-metadata.ts";
 import type {
   DeviceConnectionSourceResourceAvailabilitySummary,
   DeviceConnectionSourceStatus,
@@ -407,9 +412,18 @@ export interface HostedExecutionDeviceSyncDirtyResource {
 export function serializeHostedExecutionDeviceSyncDirtyPayloadIdentity(
   payload: Record<string, unknown> | null | undefined,
 ): string | null {
+  const isCompanionHealthMetadata =
+    payload?.eventType === JUNCTION_COMPANION_HEALTH_METADATA_EVENT_TYPE
+    && payload.resource === JUNCTION_COMPANION_HEALTH_METADATA_RESOURCE
+    && payload.resourceCategory === "summary"
+    && payload.sourceProviderSlug === JUNCTION_COMPANION_HEALTH_METADATA_SOURCE_PROVIDER;
   const stablePayload = Object.fromEntries(
     Object.entries(payload ?? {})
-      .filter(([key]) => key !== "windowEnd" && key !== "windowStart")
+      .filter(([key]) =>
+        key !== "windowEnd"
+        && key !== "windowStart"
+        && !(isCompanionHealthMetadata && key === "occurredAt")
+      )
       .sort(([left], [right]) => left.localeCompare(right)),
   );
 

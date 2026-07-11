@@ -23,6 +23,15 @@ import {
 } from "../src/config/junction-connect-sources.ts";
 import { resolveDeviceConnectSourceIdForJunctionProviderSlug } from "../src/config/connect-routes.ts";
 import {
+  JUNCTION_COMPANION_HEALTH_METADATA_EVENT_TYPE,
+  JUNCTION_COMPANION_HEALTH_METADATA_MAX_BATCH_BYTES,
+  JUNCTION_COMPANION_HEALTH_METADATA_MAX_FUTURE_SKEW_MS,
+  JUNCTION_COMPANION_HEALTH_METADATA_MAX_HISTORY_MS,
+  JUNCTION_COMPANION_HEALTH_METADATA_MAX_RECORDS,
+  JUNCTION_COMPANION_HEALTH_METADATA_RESOURCE,
+  JUNCTION_COMPANION_HEALTH_METADATA_SOURCE_PROVIDER,
+} from "../src/junction-resources.ts";
+import {
   isAllowedJunctionLinkHost,
   JUNCTION_DEFAULT_ALLOWED_LINK_HOSTS,
   JunctionClient,
@@ -9733,6 +9742,355 @@ test("Junction queued large direct resource payloads import inline without REST 
   };
   assert.equal(snapshot.summaries?.activity?.[0]?.steps, 9999);
   assert.deepEqual(snapshot.timeseries, {});
+});
+
+test("Junction companion health metadata jobs import one closed unverified HealthKit observation batch", async () => {
+  const requests: string[] = [];
+  const importedSnapshots: unknown[] = [];
+  const provider = createJunctionProvider(async (input) => {
+    requests.push(readUrl(input));
+    throw new Error("Companion metadata must not call the Junction API.");
+  });
+
+  await executeJunctionJob(
+    provider,
+    createJunctionJobContext({
+      importSnapshot: async (snapshot) => {
+        importedSnapshots.push(snapshot);
+        return { imported: true };
+      },
+    }),
+    createJob("resource", {
+      eventType: JUNCTION_COMPANION_HEALTH_METADATA_EVENT_TYPE,
+      occurredAt: "2026-04-03T13:00:00.000Z",
+      resource: JUNCTION_COMPANION_HEALTH_METADATA_RESOURCE,
+      resourceCategory: "summary",
+      sourceProviderSlug: JUNCTION_COMPANION_HEALTH_METADATA_SOURCE_PROVIDER,
+      webhookDataJson: JSON.stringify({
+        schemaVersion: 1,
+        records: [
+          {
+            recordId: "a".repeat(64),
+            kind: "recovery_score",
+            value: 72,
+            startAt: "2026-04-02T04:00:00-04:00",
+            endAt: "2026-04-02T12:00:00-04:00",
+            syncVersion: 3,
+          },
+          {
+            recordId: "b".repeat(64),
+            kind: "workout_strain",
+            value: 11.3,
+            startAt: "2026-04-02T17:00:00-04:00",
+            endAt: "2026-04-02T17:45:00-04:00",
+            syncVersion: 4,
+          },
+        ],
+      }),
+    }),
+  );
+
+  assert.deepEqual(requests, []);
+  assert.equal(importedSnapshots.length, 1);
+  const snapshot = importedSnapshots[0] as {
+    connectionId?: string;
+    importedAt?: string;
+    windowStart?: string;
+    windowEnd?: string;
+    summaries?: Record<string, Array<Record<string, unknown>>>;
+    timeseries?: Record<string, unknown[]>;
+  };
+  assert.equal(snapshot.connectionId, undefined);
+  assert.equal(snapshot.importedAt, undefined);
+  assert.equal(snapshot.windowStart, "2026-04-02T08:00:00.000Z");
+  assert.equal(snapshot.windowEnd, "2026-04-02T21:45:00.000Z");
+  assert.deepEqual(snapshot.summaries?.sleep, [{
+    id: "a".repeat(64),
+    date: "2026-04-02T16:00:00.000Z",
+    companionStartAt: "2026-04-02T08:00:00.000Z",
+    companionEndAt: "2026-04-02T16:00:00.000Z",
+    companionSyncVersion: 3,
+    recovery_readiness_score: 72,
+    sourceProviderSlug: "apple_health_kit",
+    sourceType: "companion-whoop-metadata-unverified",
+  }]);
+  assert.deepEqual(snapshot.summaries?.activity, [{
+    id: "b".repeat(64),
+    date: "2026-04-02T21:45:00.000Z",
+    companionStartAt: "2026-04-02T21:00:00.000Z",
+    companionEndAt: "2026-04-02T21:45:00.000Z",
+    companionSyncVersion: 4,
+    workout_strain: 11.3,
+    sourceProviderSlug: "apple_health_kit",
+    sourceType: "companion-whoop-metadata-unverified",
+  }]);
+  assert.deepEqual(snapshot.timeseries, {});
+});
+
+test("Junction companion health metadata jobs accept exact closed parser boundaries", async () => {
+  const importedSnapshots: unknown[] = [];
+  const receivedAt = new Date("2026-04-03T13:00:00.000Z");
+  const provider = createJunctionProvider(async () => {
+    throw new Error("Companion metadata must not call the Junction API.");
+  });
+
+  await executeJunctionJob(
+    provider,
+    createJunctionJobContext({
+      importSnapshot: async (snapshot) => {
+        importedSnapshots.push(snapshot);
+        return { imported: true };
+      },
+    }),
+    createJob("resource", {
+      eventType: JUNCTION_COMPANION_HEALTH_METADATA_EVENT_TYPE,
+      occurredAt: receivedAt.toISOString(),
+      resource: JUNCTION_COMPANION_HEALTH_METADATA_RESOURCE,
+      resourceCategory: "summary",
+      sourceProviderSlug: JUNCTION_COMPANION_HEALTH_METADATA_SOURCE_PROVIDER,
+      webhookDataJson: JSON.stringify({
+        schemaVersion: 1,
+        records: [
+          {
+            recordId: "c".repeat(64),
+            kind: "recovery_score",
+            value: 0,
+            startAt: new Date(
+              receivedAt.getTime() - JUNCTION_COMPANION_HEALTH_METADATA_MAX_HISTORY_MS,
+            ).toISOString(),
+            endAt: new Date(
+              receivedAt.getTime() - JUNCTION_COMPANION_HEALTH_METADATA_MAX_HISTORY_MS + 1,
+            ).toISOString(),
+            syncVersion: Number.MAX_SAFE_INTEGER,
+          },
+          {
+            recordId: "d".repeat(64),
+            kind: "workout_strain",
+            value: 21,
+            startAt: new Date(
+              receivedAt.getTime() + JUNCTION_COMPANION_HEALTH_METADATA_MAX_FUTURE_SKEW_MS - 1,
+            ).toISOString(),
+            endAt: new Date(
+              receivedAt.getTime() + JUNCTION_COMPANION_HEALTH_METADATA_MAX_FUTURE_SKEW_MS,
+            ).toISOString(),
+            syncVersion: 0,
+          },
+        ],
+      }),
+    }),
+  );
+
+  assert.equal(importedSnapshots.length, 1);
+});
+
+test("Junction companion health metadata jobs reject malformed or broadened batches", async () => {
+  const record = {
+    recordId: "a".repeat(64),
+    kind: "recovery_score",
+    value: 72,
+    startAt: "2026-04-02T08:00:00.000Z",
+    endAt: "2026-04-02T16:00:00.000Z",
+    syncVersion: 1,
+  };
+  const cases: Array<{ label: string; payload: Record<string, unknown> }> = [
+    {
+      label: "wrong event type",
+      payload: { eventType: "daily.data.sleep.created" },
+    },
+    {
+      label: "wrong resource category",
+      payload: { resourceCategory: "timeseries" },
+    },
+    {
+      label: "wrong transport source",
+      payload: { sourceProviderSlug: "whoop" },
+    },
+    {
+      label: "unsupported schema version",
+      payload: {
+        webhookDataJson: JSON.stringify({ schemaVersion: 2, records: [record] }),
+      },
+    },
+    {
+      label: "empty batch",
+      payload: {
+        webhookDataJson: JSON.stringify({ schemaVersion: 1, records: [] }),
+      },
+    },
+    {
+      label: "too many records",
+      payload: {
+        webhookDataJson: JSON.stringify({
+          schemaVersion: 1,
+          records: Array.from(
+            { length: JUNCTION_COMPANION_HEALTH_METADATA_MAX_RECORDS + 1 },
+            () => record,
+          ),
+        }),
+      },
+    },
+    {
+      label: "malformed record identity",
+      payload: {
+        webhookDataJson: JSON.stringify({
+          schemaVersion: 1,
+          records: [{ ...record, recordId: "not-a-hash" }],
+        }),
+      },
+    },
+    {
+      label: "unknown record kind",
+      payload: {
+        webhookDataJson: JSON.stringify({
+          schemaVersion: 1,
+          records: [{ ...record, kind: "sleep_stage" }],
+        }),
+      },
+    },
+    {
+      label: "out-of-range value",
+      payload: {
+        webhookDataJson: JSON.stringify({
+          schemaVersion: 1,
+          records: [{ ...record, value: 101 }],
+        }),
+      },
+    },
+    {
+      label: "unexpected record field",
+      payload: {
+        webhookDataJson: JSON.stringify({
+          schemaVersion: 1,
+          records: [{ ...record, arbitraryMetric: 1 }],
+        }),
+      },
+    },
+    {
+      label: "unexpected batch field",
+      payload: {
+        webhookDataJson: JSON.stringify({
+          schemaVersion: 1,
+          records: [record],
+          arbitraryMetric: 1,
+        }),
+      },
+    },
+    {
+      label: "invalid interval",
+      payload: {
+        webhookDataJson: JSON.stringify({
+          schemaVersion: 1,
+          records: [{ ...record, endAt: record.startAt }],
+        }),
+      },
+    },
+    {
+      label: "non-ISO timestamp",
+      payload: {
+        webhookDataJson: JSON.stringify({
+          schemaVersion: 1,
+          records: [{ ...record, startAt: "April 2, 2026 08:00:00 UTC" }],
+        }),
+      },
+    },
+    {
+      label: "missing receipt timestamp",
+      payload: { occurredAt: undefined },
+    },
+    {
+      label: "history older than the server horizon",
+      payload: {
+        webhookDataJson: JSON.stringify({
+          schemaVersion: 1,
+          records: [{
+            ...record,
+            startAt: "2025-04-01T08:00:00.000Z",
+            endAt: "2025-04-01T16:00:00.000Z",
+          }],
+        }),
+      },
+    },
+    {
+      label: "timestamp beyond the future skew",
+      payload: {
+        webhookDataJson: JSON.stringify({
+          schemaVersion: 1,
+          records: [{
+            ...record,
+            startAt: "2026-04-04T12:30:00.000Z",
+            endAt: "2026-04-04T13:00:00.001Z",
+          }],
+        }),
+      },
+    },
+    {
+      label: "missing sync version",
+      payload: {
+        webhookDataJson: JSON.stringify({
+          schemaVersion: 1,
+          records: [{ ...record, syncVersion: undefined }],
+        }),
+      },
+    },
+    {
+      label: "invalid sync version",
+      payload: {
+        webhookDataJson: JSON.stringify({
+          schemaVersion: 1,
+          records: [{ ...record, syncVersion: -1 }],
+        }),
+      },
+    },
+    {
+      label: "duplicate record identity",
+      payload: {
+        webhookDataJson: JSON.stringify({
+          schemaVersion: 1,
+          records: [record, record],
+        }),
+      },
+    },
+    {
+      label: "oversized batch",
+      payload: {
+        webhookDataJson: "x".repeat(JUNCTION_COMPANION_HEALTH_METADATA_MAX_BATCH_BYTES + 1),
+      },
+    },
+  ];
+
+  for (const testCase of cases) {
+    let imported = false;
+    const provider = createJunctionProvider(async () => {
+      throw new Error("Invalid companion metadata must not call the Junction API.");
+    });
+    const payload = {
+      eventType: JUNCTION_COMPANION_HEALTH_METADATA_EVENT_TYPE,
+      occurredAt: "2026-04-03T13:00:00.000Z",
+      resource: JUNCTION_COMPANION_HEALTH_METADATA_RESOURCE,
+      resourceCategory: "summary",
+      sourceProviderSlug: JUNCTION_COMPANION_HEALTH_METADATA_SOURCE_PROVIDER,
+      webhookDataJson: JSON.stringify({ schemaVersion: 1, records: [record] }),
+      ...testCase.payload,
+    };
+
+    await assert.rejects(
+      executeJunctionJob(
+        provider,
+        createJunctionJobContext({
+          importSnapshot: async () => {
+            imported = true;
+            return { imported: true };
+          },
+        }),
+        createJob("resource", payload),
+      ),
+      (error: unknown) => error instanceof DeviceSyncError
+        && error.code === "DEVICE_SYNC_JOB_PAYLOAD_INVALID"
+        && error.retryable === false,
+      testCase.label,
+    );
+    assert.equal(imported, false, testCase.label);
+  }
 });
 
 test("Junction direct resource jobs import the payload under its own resolved source provenance", async () => {
