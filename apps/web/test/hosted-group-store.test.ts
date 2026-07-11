@@ -16,12 +16,17 @@ import {
 } from "@/src/lib/hosted-onboarding/contact-privacy";
 
 const mocks = vi.hoisted(() => ({
+  appendHostedGroupJoinConfirmationTx: vi.fn(),
   assertHostedLaunchRequiredConsentGranted: vi.fn(),
   readHostedMemberIdentity: vi.fn(),
   grantHostedVaultShareTx: vi.fn(),
   hasHostedRuntimeActiveAccess: vi.fn(),
   readActiveHostedVaultShareProjectionScopes: vi.fn(),
   revokeHostedVaultSharesWithCleanupTx: vi.fn(),
+}));
+
+vi.mock("@/src/lib/hosted-groups/group-join-confirmation", () => ({
+  appendHostedGroupJoinConfirmationTx: mocks.appendHostedGroupJoinConfirmationTx,
 }));
 
 vi.mock("@/src/lib/legal/consent", () => ({
@@ -246,6 +251,7 @@ function buildTx(input?: {
 describe("acceptHostedGroupJoinCodeTx", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.appendHostedGroupJoinConfirmationTx.mockResolvedValue(null);
     mocks.assertHostedLaunchRequiredConsentGranted.mockResolvedValue(undefined);
     mocks.grantHostedVaultShareTx.mockResolvedValue(undefined);
     mocks.hasHostedRuntimeActiveAccess.mockResolvedValue(true);
@@ -321,6 +327,78 @@ describe("acceptHostedGroupJoinCodeTx", () => {
       projectionScope: PROFILE_SCOPE,
       tx,
     });
+  });
+
+  it("appends a private confirmation in the first membership transaction", async () => {
+    const tx = buildTx();
+    const now = new Date("2026-07-01T00:00:00.000Z");
+    mocks.appendHostedGroupJoinConfirmationTx.mockResolvedValue({
+      mailboxItemId: "mailbox_item_join_confirmation_1",
+      memberId: "member_joiner",
+    });
+
+    await expect(acceptHostedGroupJoinCodeTx({
+      confirmationPublicBaseUrl: "https://murph.example",
+      joinCode: "join_1",
+      memberId: "member_joiner",
+      now,
+      selectedVaultShareProjectionKinds: [],
+      tx,
+    })).resolves.toMatchObject({
+      alreadyMember: false,
+      joinConfirmationSignal: {
+        mailboxItemId: "mailbox_item_join_confirmation_1",
+        memberId: "member_joiner",
+      },
+      membershipId: "membership_created",
+    });
+
+    expect(mocks.appendHostedGroupJoinConfirmationTx).toHaveBeenCalledWith({
+      joinCode: "join_1",
+      memberId: "member_joiner",
+      membershipId: "membership_created",
+      occurredAt: now,
+      publicBaseUrl: "https://murph.example",
+      tx,
+    });
+  });
+
+  it("propagates a confirmation append failure so the enclosing transaction can roll back", async () => {
+    const tx = buildTx();
+    const appendError = new Error("mailbox append failed");
+    mocks.appendHostedGroupJoinConfirmationTx.mockRejectedValueOnce(appendError);
+
+    await expect(acceptHostedGroupJoinCodeTx({
+      confirmationPublicBaseUrl: "https://murph.example",
+      joinCode: "join_1",
+      memberId: "member_joiner",
+      now: new Date("2026-07-01T00:00:00.000Z"),
+      selectedVaultShareProjectionKinds: [],
+      tx,
+    })).rejects.toBe(appendError);
+
+    expect(tx.hostedGroupMember.create).toHaveBeenCalledTimes(1);
+    expect(mocks.appendHostedGroupJoinConfirmationTx).toHaveBeenCalledWith(
+      expect.objectContaining({ tx }),
+    );
+  });
+
+  it("does not append another join confirmation for an existing membership", async () => {
+    const tx = buildTx({ existingMembershipId: "membership_existing" });
+
+    await expect(acceptHostedGroupJoinCodeTx({
+      confirmationPublicBaseUrl: "https://murph.example",
+      joinCode: "join_1",
+      memberId: "member_joiner",
+      now: new Date("2026-07-01T00:00:00.000Z"),
+      selectedVaultShareProjectionKinds: [],
+      tx,
+    })).resolves.toMatchObject({
+      alreadyMember: true,
+      membershipId: "membership_existing",
+    });
+
+    expect(mocks.appendHostedGroupJoinConfirmationTx).not.toHaveBeenCalled();
   });
 
   it("reports email sharing when a join grants it", async () => {
@@ -540,6 +618,40 @@ describe("acceptHostedGroupJoinCodeTx", () => {
       },
     });
     expect(mocks.revokeHostedVaultSharesWithCleanupTx).not.toHaveBeenCalled();
+  });
+
+  it("appends the same private confirmation for a first join through an offer", async () => {
+    const tx = buildTx({ activeGroupGrantCount: 0 });
+    const now = new Date("2026-07-01T00:00:00.000Z");
+    mocks.appendHostedGroupJoinConfirmationTx.mockResolvedValueOnce({
+      mailboxItemId: "mailbox_item_join_confirmation_1",
+      memberId: "member_grantor",
+    });
+
+    await expect(acceptHostedGroupJoinOfferTx({
+      confirmationPublicBaseUrl: "https://murph.example",
+      memberId: "member_grantor",
+      messageLookupKeyReadCandidates: ["hbidx:linq-message:v1:offer"],
+      now,
+      threadIdentityLookupKeyReadCandidates: ["hbidx:external-thread-identity:v1:thread"],
+      tx,
+    })).resolves.toMatchObject({
+      alreadyMember: false,
+      joinConfirmationSignal: {
+        mailboxItemId: "mailbox_item_join_confirmation_1",
+        memberId: "member_grantor",
+      },
+      membershipId: "membership_created",
+    });
+
+    expect(mocks.appendHostedGroupJoinConfirmationTx).toHaveBeenCalledWith({
+      joinCode: "join_1",
+      memberId: "member_grantor",
+      membershipId: "membership_created",
+      occurredAt: now,
+      publicBaseUrl: "https://murph.example",
+      tx,
+    });
   });
 
   it("reports email sharing when a join offer grants it", async () => {

@@ -19,6 +19,7 @@ import {
   signalHostedMailboxAppendRuntime,
   signalHostedRuntimeMaintenanceRuntime,
 } from "@/src/lib/hosted-orchestration/signal-runtime";
+import { resolveHostedPublicBaseUrl } from "@/src/lib/hosted-web/public-url";
 import { resolveDecodedRouteParam } from "@/src/lib/http";
 import { getPrisma } from "@/src/lib/prisma";
 
@@ -51,6 +52,7 @@ export const POST = withJsonError(async (
   const prisma = getPrisma();
   const now = new Date();
   const result = await prisma.$transaction(async (tx) => acceptHostedGroupJoinCodeTx({
+    confirmationPublicBaseUrl: resolveHostedPublicBaseUrl(),
     joinCode,
     memberId: auth.member.id,
     now,
@@ -58,6 +60,7 @@ export const POST = withJsonError(async (
     tx,
   }), HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
   const {
+    joinConfirmationSignal,
     vaultShareCleanupSignals,
     ...responseResult
   } = result;
@@ -78,12 +81,15 @@ export const POST = withJsonError(async (
     });
   }
 
-  await signalVaultShareCleanupRuntimesBestEffort(vaultShareCleanupSignals);
+  await signalMailboxAppendRuntimesBestEffort([
+    ...(joinConfirmationSignal ? [joinConfirmationSignal] : []),
+    ...vaultShareCleanupSignals,
+  ]);
 
   return jsonOk({ ok: true, ...responseResult });
 });
 
-async function signalVaultShareCleanupRuntimesBestEffort(
+async function signalMailboxAppendRuntimesBestEffort(
   signals: readonly { mailboxItemId: string; memberId: string }[],
 ): Promise<void> {
   await Promise.all(signals.map(async (signal) => {
@@ -93,8 +99,8 @@ async function signalVaultShareCleanupRuntimesBestEffort(
         mailboxItemId: signal.mailboxItemId,
       });
     } catch {
-      // The revoke mailbox item is durable; the destination runtime will import it on a
-      // later wake if this best-effort signal fails.
+      // The mailbox item is durable; the destination runtime will import it on a later
+      // wake if this best-effort signal fails.
     }
   }));
 }

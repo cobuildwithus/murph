@@ -17,6 +17,7 @@ import {
   signalHostedMailboxAppendRuntime,
   signalHostedRuntimeMaintenanceRuntime,
 } from "../hosted-orchestration/signal-runtime";
+import { resolveHostedPublicBaseUrl } from "../hosted-web/public-url";
 import {
   enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort,
 } from "./group-newsletter";
@@ -99,6 +100,7 @@ export async function handleHostedGroupJoinOfferReaction(input: {
   try {
     result = await input.prisma.$transaction(async (tx) =>
       acceptHostedGroupJoinOfferTx({
+        confirmationPublicBaseUrl: resolveHostedPublicBaseUrl(),
         memberId: member.id,
         messageLookupKeyReadCandidates,
         now: input.event.providerCreatedAt,
@@ -131,12 +133,15 @@ export async function handleHostedGroupJoinOfferReaction(input: {
     }
   }
 
-  await signalVaultShareCleanupRuntimesBestEffort(result.vaultShareCleanupSignals);
+  await signalMailboxAppendRuntimesBestEffort([
+    ...(result.joinConfirmationSignal ? [result.joinConfirmationSignal] : []),
+    ...result.vaultShareCleanupSignals,
+  ]);
 
   return { status: "accepted", reason: "accepted" };
 }
 
-async function signalVaultShareCleanupRuntimesBestEffort(
+async function signalMailboxAppendRuntimesBestEffort(
   signals: readonly { mailboxItemId: string; memberId: string }[],
 ): Promise<void> {
   await Promise.all(signals.map(async (signal) => {
@@ -146,8 +151,8 @@ async function signalVaultShareCleanupRuntimesBestEffort(
         mailboxItemId: signal.mailboxItemId,
       });
     } catch {
-      // The revoke mailbox item is durable; the destination runtime will import it on a
-      // later wake if this best-effort signal fails.
+      // The mailbox item is durable; the destination runtime will import it on a later
+      // wake if this best-effort signal fails.
     }
   }));
 }

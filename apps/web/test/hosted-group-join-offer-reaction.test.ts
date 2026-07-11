@@ -16,6 +16,7 @@ const mocks = vi.hoisted(() => ({
   enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort: vi.fn(),
   lookupHostedMemberIdentityByPhoneNumber: vi.fn(),
   readActiveHostedMemberAccess: vi.fn(),
+  resolveHostedPublicBaseUrl: vi.fn(),
   signalHostedMailboxAppendRuntime: vi.fn(),
   signalHostedRuntimeMaintenanceRuntime: vi.fn(),
 }));
@@ -42,6 +43,10 @@ vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
   signalHostedRuntimeMaintenanceRuntime: mocks.signalHostedRuntimeMaintenanceRuntime,
 }));
 
+vi.mock("@/src/lib/hosted-web/public-url", () => ({
+  resolveHostedPublicBaseUrl: mocks.resolveHostedPublicBaseUrl,
+}));
+
 import {
   handleHostedGroupJoinOfferReaction,
 } from "@/src/lib/hosted-groups/join-offer-reaction";
@@ -64,6 +69,10 @@ describe("handleHostedGroupJoinOfferReaction", () => {
       grantedVaultShareProjectionKinds: ["profile-name.v0", "sleep-times.v0"],
       groupId: "group_1",
       joinCode: "join_1",
+      joinConfirmationSignal: {
+        mailboxItemId: "mailbox_item_join_confirmation_1",
+        memberId: "member_reactor",
+      },
       messageLookupKey: "hbidx:linq-message:v1:offer",
       membershipId: "membership_1",
       revokedVaultShareProjectionKinds: [],
@@ -77,6 +86,7 @@ describe("handleHostedGroupJoinOfferReaction", () => {
       undefined,
     );
     mocks.readActiveHostedMemberAccess.mockResolvedValue(true);
+    mocks.resolveHostedPublicBaseUrl.mockReturnValue("https://murph.example");
     mocks.signalHostedMailboxAppendRuntime.mockResolvedValue(undefined);
     mocks.signalHostedRuntimeMaintenanceRuntime.mockResolvedValue(undefined);
   });
@@ -86,7 +96,7 @@ describe("handleHostedGroupJoinOfferReaction", () => {
     restoreKeyring = null;
   });
 
-  it("accepts a live liked offer without sending a confirmation reply", async () => {
+  it("accepts a live liked offer and wakes its private join confirmation", async () => {
     const event = parseReactionEvent({
       reactionType: "like",
     });
@@ -102,6 +112,7 @@ describe("handleHostedGroupJoinOfferReaction", () => {
 
     expect(mocks.acceptHostedGroupJoinOfferTx).toHaveBeenCalledWith(
       expect.objectContaining({
+        confirmationPublicBaseUrl: "https://murph.example",
         memberId: "member_reactor",
         messageLookupKeyReadCandidates: expect.arrayContaining([
           expect.stringMatching(/^hbidx:linq-message:/u),
@@ -116,6 +127,10 @@ describe("handleHostedGroupJoinOfferReaction", () => {
     expect(mocks.signalHostedRuntimeMaintenanceRuntime).toHaveBeenCalledTimes(1);
     expect(mocks.signalHostedRuntimeMaintenanceRuntime).toHaveBeenCalledWith({
       userId: "member_reactor",
+    });
+    expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
+      expectedUserId: "member_reactor",
+      mailboxItemId: "mailbox_item_join_confirmation_1",
     });
   });
 
@@ -160,6 +175,9 @@ describe("handleHostedGroupJoinOfferReaction", () => {
     mocks.signalHostedRuntimeMaintenanceRuntime.mockRejectedValueOnce(
       new Error("runtime unavailable"),
     );
+    mocks.signalHostedMailboxAppendRuntime.mockRejectedValueOnce(
+      new Error("mailbox runtime unavailable"),
+    );
     const event = parseReactionEvent({
       reactionType: "like",
     });
@@ -177,6 +195,10 @@ describe("handleHostedGroupJoinOfferReaction", () => {
       .not.toHaveBeenCalled();
     expect(mocks.signalHostedRuntimeMaintenanceRuntime).toHaveBeenCalledWith({
       userId: "member_reactor",
+    });
+    expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
+      expectedUserId: "member_reactor",
+      mailboxItemId: "mailbox_item_join_confirmation_1",
     });
   });
 

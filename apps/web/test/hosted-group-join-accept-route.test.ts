@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort: vi.fn(),
   getPrisma: vi.fn(),
   requireHostedAppSessionFromRequest: vi.fn(),
+  resolveHostedPublicBaseUrl: vi.fn(),
   signalHostedMailboxAppendRuntime: vi.fn(),
   signalHostedRuntimeMaintenanceRuntime: vi.fn(),
 }));
@@ -41,6 +42,10 @@ vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
   signalHostedRuntimeMaintenanceRuntime: mocks.signalHostedRuntimeMaintenanceRuntime,
 }));
 
+vi.mock("@/src/lib/hosted-web/public-url", () => ({
+  resolveHostedPublicBaseUrl: mocks.resolveHostedPublicBaseUrl,
+}));
+
 vi.mock("@/src/lib/prisma", () => ({
   getPrisma: mocks.getPrisma,
 }));
@@ -54,6 +59,7 @@ beforeEach(async () => {
   mocks.requireHostedAppSessionFromRequest.mockResolvedValue({
     member: { id: "member_grantor", suspendedAt: null },
   });
+  mocks.resolveHostedPublicBaseUrl.mockReturnValue("https://murph.example");
   const tx = { tx: true };
   mocks.getPrisma.mockReturnValue({
     $transaction: vi.fn(async (callback: (transaction: typeof tx) => Promise<unknown>) =>
@@ -105,6 +111,7 @@ test("signals destination cleanup wakes after a group permission revoke without 
     revokedVaultShareProjectionKinds: ["sleep-times.v0"],
   });
   expect(mocks.acceptHostedGroupJoinCodeTx).toHaveBeenCalledWith({
+    confirmationPublicBaseUrl: "https://murph.example",
     joinCode: "JOIN123",
     memberId: "member_grantor",
     now: expect.any(Date),
@@ -114,6 +121,101 @@ test("signals destination cleanup wakes after a group permission revoke without 
   expect(mocks.signalHostedRuntimeMaintenanceRuntime).not.toHaveBeenCalled();
   expect(mocks.enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort)
     .not.toHaveBeenCalled();
+  expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
+    expectedUserId: "member_group_runtime",
+    mailboxItemId: "mailbox_item_revoke_1",
+  });
+});
+
+test("signals a first-join confirmation without exposing mailbox metadata", async () => {
+  mocks.acceptHostedGroupJoinCodeTx.mockResolvedValueOnce({
+    alreadyMember: false,
+    grantedVaultShareProjectionKinds: ["profile-name.v0"],
+    groupId: "group_1",
+    joinConfirmationSignal: {
+      mailboxItemId: "mailbox_item_join_confirmation_1",
+      memberId: "member_grantor",
+    },
+    membershipId: "membership_created",
+    revokedVaultShareProjectionKinds: [],
+    vaultShareCleanupSignals: [],
+  });
+  const request = new Request("https://join.example.test/api/groups/join/JOIN123/accept", {
+    body: JSON.stringify({
+      selectedVaultShareProjectionKinds: [],
+    }),
+    headers: {
+      "content-type": "application/json",
+      origin: "https://join.example.test",
+    },
+    method: "POST",
+  });
+
+  const response = await route.POST(request, {
+    params: Promise.resolve({ joinCode: "JOIN123" }),
+  });
+
+  expect(response.status).toBe(200);
+  await expect(response.json()).resolves.toEqual({
+    alreadyMember: false,
+    grantedVaultShareProjectionKinds: ["profile-name.v0"],
+    groupId: "group_1",
+    membershipId: "membership_created",
+    ok: true,
+    revokedVaultShareProjectionKinds: [],
+  });
+  expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
+    expectedUserId: "member_grantor",
+    mailboxItemId: "mailbox_item_join_confirmation_1",
+  });
+});
+
+test("best-effort signals combined confirmation and cleanup wakes without exposing them", async () => {
+  mocks.acceptHostedGroupJoinCodeTx.mockResolvedValueOnce({
+    alreadyMember: false,
+    grantedVaultShareProjectionKinds: ["profile-name.v0"],
+    groupId: "group_1",
+    joinConfirmationSignal: {
+      mailboxItemId: "mailbox_item_join_confirmation_1",
+      memberId: "member_grantor",
+    },
+    membershipId: "membership_created",
+    revokedVaultShareProjectionKinds: ["sleep-times.v0"],
+    vaultShareCleanupSignals: [{
+      mailboxItemId: "mailbox_item_revoke_1",
+      memberId: "member_group_runtime",
+    }],
+  });
+  mocks.signalHostedMailboxAppendRuntime.mockRejectedValue(
+    new Error("runtime unavailable"),
+  );
+  const request = new Request("https://join.example.test/api/groups/join/JOIN123/accept", {
+    body: JSON.stringify({ selectedVaultShareProjectionKinds: [] }),
+    headers: {
+      "content-type": "application/json",
+      origin: "https://join.example.test",
+    },
+    method: "POST",
+  });
+
+  const response = await route.POST(request, {
+    params: Promise.resolve({ joinCode: "JOIN123" }),
+  });
+
+  expect(response.status).toBe(200);
+  await expect(response.json()).resolves.toEqual({
+    alreadyMember: false,
+    grantedVaultShareProjectionKinds: ["profile-name.v0"],
+    groupId: "group_1",
+    membershipId: "membership_created",
+    ok: true,
+    revokedVaultShareProjectionKinds: ["sleep-times.v0"],
+  });
+  expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledTimes(2);
+  expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
+    expectedUserId: "member_grantor",
+    mailboxItemId: "mailbox_item_join_confirmation_1",
+  });
   expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
     expectedUserId: "member_group_runtime",
     mailboxItemId: "mailbox_item_revoke_1",
@@ -171,6 +273,7 @@ test("accepts the full closed set of selectable vault-share permissions", async 
 
   expect(response.status).toBe(200);
   expect(mocks.acceptHostedGroupJoinCodeTx).toHaveBeenCalledWith({
+    confirmationPublicBaseUrl: "https://murph.example",
     joinCode: "JOIN123",
     memberId: "member_grantor",
     now: expect.any(Date),
