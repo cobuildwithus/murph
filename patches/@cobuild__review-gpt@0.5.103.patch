@@ -1,0 +1,59 @@
+diff --git a/src/prepare-chatgpt-draft.js b/src/prepare-chatgpt-draft.js
+index 77ac533f5ecd7f53278ba06130b868402795b08a..38641a08cf91d0d6bbe4a1fe1fd61284f60b858b 100644
+--- a/src/prepare-chatgpt-draft.js
++++ b/src/prepare-chatgpt-draft.js
+@@ -949,0 +950,3 @@
++    try {
++      await closeBackgroundTarget(created.targetId);
++    } catch {}
+@@ -954 +957 @@
+-async function createBackgroundTarget(browserWsUrl, desiredUrl) {
++async function sendBrowserCommand(browserWsUrl, method, params = {}) {
+@@ -995,5 +998,2 @@
+-      method: 'Target.createTarget',
+-      params: {
+-        url: desiredUrl,
+-        background: true,
+-      },
++      method,
++      params,
+@@ -1008,0 +1009,23 @@
++async function createBackgroundTarget(browserWsUrl, desiredUrl) {
++  return sendBrowserCommand(browserWsUrl, 'Target.createTarget', {
++    url: desiredUrl,
++    background: true,
++  });
++}
++
++async function closeBackgroundTarget(targetId) {
++  const normalizedTargetId = String(targetId || '').trim();
++  if (!normalizedTargetId) return;
++  const version = await fetchJson('/json/version');
++  const browserWsUrl = version?.webSocketDebuggerUrl;
++  if (!browserWsUrl) {
++    throw new Error('Browser debugging endpoint did not expose a browser websocket URL');
++  }
++  const result = await sendBrowserCommand(browserWsUrl, 'Target.closeTarget', {
++    targetId: normalizedTargetId,
++  });
++  if (result?.success === false) {
++    throw new Error(`Browser refused to close target ${normalizedTargetId}`);
++  }
++}
++
+@@ -1036,0 +1060,3 @@
++      try {
++        await closeBackgroundTarget(target?.id);
++      } catch {}
+@@ -1075,0 +1102 @@
++  const pageTargetId = String(target?.id || '');
+@@ -1167 +1193,0 @@
+-  const pageTargetId = String(target?.id || '');
+@@ -4905,0 +4932,7 @@
++    if (shouldWaitForResponse && pageTargetId) {
++      try {
++        await closeBackgroundTarget(pageTargetId);
++      } catch (error) {
++        console.warn(`ReviewGPT target cleanup failed: ${errorMessage(error)}`);
++      }
++    }

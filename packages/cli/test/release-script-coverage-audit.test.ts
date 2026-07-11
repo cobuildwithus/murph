@@ -246,6 +246,17 @@ describe('monorepo release flow coverage audit', () => {
       path.join(repoRoot, 'scripts', 'review-gpt.config.sh'),
       'utf8',
     )
+    const reviewGptDriver = readFileSync(
+      path.join(
+        repoRoot,
+        'node_modules',
+        '@cobuild',
+        'review-gpt',
+        'src',
+        'prepare-chatgpt-draft.js',
+      ),
+      'utf8',
+    )
     const removedScripts = [
       'review:gpt:full',
       'review:gpt:protocol',
@@ -280,11 +291,22 @@ describe('monorepo release flow coverage audit', () => {
     expect(existsSync(path.join(repoRoot, 'scripts', 'chatgpt-managed-browser.test.mjs'))).toBe(false)
     expect(existsSync(path.join(repoRoot, 'scripts', 'review-gpt.sh'))).toBe(false)
     expect(existsSync(path.join(repoRoot, 'scripts', 'review-gpt-cli.sh'))).toBe(false)
-    expect(rootPackageJson.devDependencies?.['@cobuild/review-gpt']).toBe('^0.5.102')
-    expect(pnpmWorkspace).toContain('@cobuild/review-gpt@0.5.102')
+    expect(rootPackageJson.devDependencies?.['@cobuild/review-gpt']).toBe('^0.5.103')
+    expect(pnpmWorkspace).toContain('@cobuild/review-gpt@0.5.103')
     expect(pnpmWorkspace.match(/^patchedDependencies:\n((?:  .+\n)+)/mu)?.[1]?.trim()).toBe(
-      'incur@0.4.5: patches/incur@0.4.5.patch',
+      "'@cobuild/review-gpt@0.5.103': patches/@cobuild__review-gpt@0.5.103.patch\n" +
+        '  incur@0.4.5: patches/incur@0.4.5.patch',
     )
+    expect(
+      existsSync(path.join(repoRoot, 'patches', '@cobuild__review-gpt@0.5.103.patch')),
+    ).toBe(true)
+    expect(reviewGptDriver).toContain('await closeBackgroundTarget(created.targetId)')
+    expect(reviewGptDriver).toContain('await closeBackgroundTarget(target?.id)')
+    expect(reviewGptDriver).toContain("sendBrowserCommand(browserWsUrl, 'Target.closeTarget', {")
+    expect(reviewGptDriver).toContain('targetId: normalizedTargetId')
+    expect(reviewGptDriver).toContain('if (shouldWaitForResponse && pageTargetId)')
+    expect(reviewGptDriver).toContain('await closeBackgroundTarget(pageTargetId)')
+    expect(reviewGptDriver).not.toContain('if (shouldSend && pageTargetId)')
     expect(existsSync(path.join(repoRoot, 'scripts', 'review-gpt-browser-profile.sh'))).toBe(false)
     expect(existsSync(path.join(repoRoot, 'scripts', 'review-gpt.config.sh'))).toBe(true)
     expect(existsSync(path.join(repoRoot, 'scripts', 'review-gpt-pr-head-preflight.sh'))).toBe(true)

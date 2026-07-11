@@ -20,6 +20,21 @@ additive and does not satisfy, replace, or reorder any required local pass.
 For non-trivial PR-lane work, do not call the PR good to merge until this loop
 has reached zero accepted findings and PR CI is green on the final head.
 
+## Managed Target Lifecycle
+
+ReviewGPT creates one fresh background ChatGPT target for each run. A waited
+run owns that target for response capture and must close that exact target when
+capture completes, times out, fails, or yields to a retry. A successful
+draft-only or send-without-wait run intentionally retains its target because
+the prepared draft or conversation is the user-facing result. Never implement
+this cleanup as a profile-wide tab sweep or close a target that the current run
+did not create.
+
+This ownership rule is required because the managed browser lanes disable
+background throttling and ReviewGPT pins the capture page lifecycle active.
+Leaving completed waited targets open accumulates active renderers across
+rounds even when ordinary browser history and site data have been cleared.
+
 ## When It Runs
 
 Run the loop when all of the following hold:
