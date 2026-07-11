@@ -538,6 +538,15 @@ describe("Retell phone-call result handling", () => {
       "hpc_123",
       "hpc_123",
     ]);
+    const notificationCall = store.appendResultNotificationCalls[0]!;
+    expect(notificationCall.resultJson).toBeNull();
+    expect(JSON.stringify(store.updateManyCalls[0]!.data)).not.toContain(
+      "The appointment is booked for Friday at 3:45 PM.",
+    );
+    await expect(readHostedPhoneCallResult({ call: notificationCall })).resolves.toEqual({
+      outcome: "completed",
+      summary: "The appointment is booked for Friday at 3:45 PM.",
+    });
   });
 
   it("bounds oversized Retell analysis text before finalizing the call", async () => {

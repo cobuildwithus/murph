@@ -1,8 +1,8 @@
 # Encrypt and minimize persisted private content
 
-Status: active
+Status: completed
 Created: 2026-07-10
-Updated: 2026-07-10
+Updated: 2026-07-11
 
 ## Goal
 
@@ -57,3 +57,4 @@ Updated: 2026-07-10
 
 - Commands to run: focused phone-call, secure-box, migration, account-data, backfill, and privacy-contract Vitest; `pnpm test:diff` for touched `apps/web`/docs/tooling paths; `pnpm verify:acceptance`; dry-run fixture scenario; `git diff --check`; required audits; PR ReviewGPT and CI.
 - Expected outcomes: sensitive markers occur only inside authenticated ciphertext during new writes and are removed by backfill, legacy rows still read, the guard rejects an unclassified fixture field, and all required gates pass without secret or identifier leakage.
+Completed: 2026-07-11

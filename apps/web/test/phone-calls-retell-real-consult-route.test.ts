@@ -5,6 +5,10 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { HostedPhoneCallBrief } from "@murphai/hosted-execution/phone-calls";
 
+import {
+  encryptHostedPhoneCallBrief,
+} from "@/src/lib/phone-calls/crypto";
+
 const mocks = vi.hoisted(() => ({
   findUnique: vi.fn(),
   updateMany: vi.fn(),
@@ -23,6 +27,7 @@ type AskMurphRouteModule =
   typeof import("../app/api/retell/functions/ask-murph/route");
 
 let askMurphRoute: AskMurphRouteModule;
+let validBriefEncrypted: string;
 
 const VALID_BRIEF: HostedPhoneCallBrief = {
   allowTransferToUser: true,
@@ -41,6 +46,11 @@ const VALID_BRIEF: HostedPhoneCallBrief = {
 
 describe("Retell ask_murph route with real consultation", () => {
   beforeAll(async () => {
+    validBriefEncrypted = await encryptHostedPhoneCallBrief({
+      callId: "hpc_123",
+      memberId: "member_123",
+      value: VALID_BRIEF,
+    });
     askMurphRoute = await import("../app/api/retell/functions/ask-murph/route");
   });
 
@@ -175,8 +185,8 @@ function buildHostedPhoneCall(overrides: Partial<HostedPhoneCall> = {}): HostedP
   const now = new Date("2026-06-25T00:00:00.000Z");
   return {
     analyzedAt: null,
-    briefEncrypted: null,
-    briefJson: VALID_BRIEF,
+    briefEncrypted: validBriefEncrypted,
+    briefJson: null,
     createdAt: now,
     endedAt: null,
     id: "hpc_123",

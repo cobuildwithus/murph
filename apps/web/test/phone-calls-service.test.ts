@@ -11,6 +11,9 @@ import {
 import { describe, expect, it } from "vitest";
 
 import {
+  encryptHostedPhoneCallBrief,
+} from "@/src/lib/phone-calls/crypto";
+import {
   createHostedPhoneCall as createHostedPhoneCallImpl,
 } from "@/src/lib/phone-calls/service";
 import type { PhoneCallRuntime } from "@/src/lib/phone-calls/types";
@@ -68,6 +71,8 @@ describe("createHostedPhoneCall", () => {
       requestKey: "phone_call_request_1",
       status: "starting",
     });
+    expect(store.createCalls[0]!.data).not.toHaveProperty("briefJson");
+    expect(JSON.stringify(store.createCalls[0]!.data)).not.toContain(VALID_BRIEF.goal);
     expect(runtime.startCalls).toEqual([{
       brief: VALID_BRIEF,
       id: createdCallId,
@@ -91,9 +96,15 @@ describe("createHostedPhoneCall", () => {
 
   it("replays duplicate request keys for the same member without starting another provider call", async () => {
     const existing = buildHostedPhoneCall({
+      briefJson: null,
       id: "hpc_existing",
       providerCallId: "retell_existing",
       status: "calling",
+    });
+    existing.briefEncrypted = await encryptHostedPhoneCallBrief({
+      callId: existing.id,
+      memberId: existing.memberId,
+      value: VALID_BRIEF,
     });
     const store = createPhoneCallStore({
       createError: createUniqueRequestKeyError(["requestKey"]),

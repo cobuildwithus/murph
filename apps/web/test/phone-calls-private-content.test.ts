@@ -195,6 +195,10 @@ describe("hosted phone-call private content", () => {
     const row = buildBackfillCandidate();
     const store = createBackfillStore([row]);
     const crypto = createTestCrypto();
+    const decryptBrief = vi.spyOn(crypto, "decryptBrief");
+    const decryptResult = vi.spyOn(crypto, "decryptResult");
+    const encryptBrief = vi.spyOn(crypto, "encryptBrief");
+    const encryptResult = vi.spyOn(crypto, "encryptResult");
 
     const summary = await backfillHostedPhoneCallPrivateContent({
       crypto,
@@ -215,6 +219,41 @@ describe("hosted phone-call private content", () => {
     });
     expect(store.applyCalls).toHaveLength(0);
     expect(store.rows[0]).toEqual(row);
+    expect(decryptBrief).not.toHaveBeenCalled();
+    expect(decryptResult).not.toHaveBeenCalled();
+    expect(encryptBrief).not.toHaveBeenCalled();
+    expect(encryptResult).not.toHaveBeenCalled();
+  });
+
+  it("selects at most one bounded batch and reports when more legacy rows remain", async () => {
+    const store = createBackfillStore([
+      buildBackfillCandidate({ id: "hpc_backfill_1" }),
+      buildBackfillCandidate({ id: "hpc_backfill_2" }),
+      buildBackfillCandidate({ id: "hpc_backfill_3" }),
+    ]);
+    const crypto = createTestCrypto();
+    const encryptBrief = vi.spyOn(crypto, "encryptBrief");
+    const encryptResult = vi.spyOn(crypto, "encryptResult");
+
+    const summary = await backfillHostedPhoneCallPrivateContent({
+      batchSize: 2,
+      crypto,
+      mode: "dry-run",
+      store: store.store,
+    });
+
+    expect(summary).toMatchObject({
+      batchSize: 2,
+      hasMore: true,
+      selectedRows: 2,
+    });
+    expect(summary.fields).toEqual({
+      brief: { encrypted: 0, scrubbed: 0, wouldEncrypt: 2, wouldScrub: 2 },
+      result: { encrypted: 0, scrubbed: 0, wouldEncrypt: 2, wouldScrub: 2 },
+    });
+    expect(store.applyCalls).toHaveLength(0);
+    expect(encryptBrief).not.toHaveBeenCalled();
+    expect(encryptResult).not.toHaveBeenCalled();
   });
 
   it("encrypts, verifies, scrubs atomically, and is idempotent on rerun", async () => {
