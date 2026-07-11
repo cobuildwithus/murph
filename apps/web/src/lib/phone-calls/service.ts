@@ -10,10 +10,12 @@ import type {
   HostedPhoneCallStartResponse,
 } from "@murphai/hosted-execution/phone-calls";
 import {
+  HOSTED_PHONE_CALL_START_SERVICE_TIMEOUT_MS,
   hostedPhoneCallBriefSchema,
 } from "@murphai/hosted-execution/phone-calls";
 
 import { getPrisma } from "../prisma";
+import { runWithHostedDomainRootUnwrapCache } from "../hosted-crypto/domain-root-unwrap-cache";
 import {
   hostedPhoneCallCrypto,
   readHostedPhoneCallBrief,
@@ -24,9 +26,10 @@ import {
 } from "./notification-route";
 import { createRetellPhoneCallRuntime } from "./retell-runtime";
 import { resolveVerifiedMemberTransferNumber } from "./transfer";
-import type { PhoneCallRuntime } from "./types";
-
-const HOSTED_PHONE_CALL_UNSTARTED_REPLAY_GRACE_MS = 2 * 60 * 1_000;
+import {
+  hasPhoneCallRuntimeNoActiveEffect,
+  type PhoneCallRuntime,
+} from "./types";
 
 interface HostedPhoneCallStore {
   hostedPhoneCall: {
@@ -78,10 +81,26 @@ export async function createHostedPhoneCall(input: {
     memberId: string;
   }) => Promise<void>;
   runtime?: PhoneCallRuntime;
+  signal?: AbortSignal;
   transferNumberResolver?: (resolverInput: {
     memberId: string;
   }) => Promise<string | null>;
 }): Promise<HostedPhoneCallStartResponse> {
+  const serviceSignal = input.signal
+    ? AbortSignal.any([
+        input.signal,
+        AbortSignal.timeout(HOSTED_PHONE_CALL_START_SERVICE_TIMEOUT_MS),
+      ])
+    : AbortSignal.timeout(HOSTED_PHONE_CALL_START_SERVICE_TIMEOUT_MS);
+  return runWithHostedDomainRootUnwrapCache(() => createHostedPhoneCallWithinDeadline({
+    ...input,
+    signal: serviceSignal,
+  }));
+}
+
+async function createHostedPhoneCallWithinDeadline(input: Parameters<
+  typeof createHostedPhoneCall
+>[0] & { signal: AbortSignal }): Promise<HostedPhoneCallStartResponse> {
   const prisma = input.prisma ?? getPrisma();
   const crypto = input.crypto ?? hostedPhoneCallCrypto;
   const runtime = input.runtime ?? createRetellPhoneCallRuntime();
@@ -95,12 +114,26 @@ export async function createHostedPhoneCall(input: {
       await requireHostedPhoneCallResultNotificationRoute({ memberId });
     });
 
+  input.signal.throwIfAborted();
+  await requireResultNotificationRoute({
+    memberId: input.memberId,
+  });
+  input.signal.throwIfAborted();
+  const transferNumber = input.brief.allowTransferToUser
+    ? await resolveTransferNumber({
+        memberId: input.memberId,
+      })
+    : null;
+  input.signal.throwIfAborted();
+
   const callId = createHostedPhoneCallId();
   const briefEncrypted = await crypto.encryptBrief({
     callId,
     memberId: input.memberId,
+    signal: input.signal,
     value: input.brief,
   });
+  input.signal.throwIfAborted();
   let call: HostedPhoneCall;
   try {
     call = await prisma.hostedPhoneCall.create({
@@ -132,33 +165,35 @@ export async function createHostedPhoneCall(input: {
       actual: await readHostedPhoneCallBrief({ call: existing, crypto }),
       expected: input.brief,
     });
-    const replayed = await failStaleUnstartedPhoneCallReservation({
-      call: existing,
-      crypto,
-      prisma,
-    });
+    if (hasPhoneCallAdvancedBeyondStart(existing)) {
+      return {
+        phoneCallId: existing.id,
+        status: toStartResponseStatus(existing.status),
+      };
+    }
     return {
-      phoneCallId: replayed.id,
-      status: toStartResponseStatus(replayed.status),
+      phoneCallId: existing.id,
+      status: "starting",
     };
   }
 
   let started: Awaited<ReturnType<PhoneCallRuntime["start"]>>;
   try {
-    await requireResultNotificationRoute({
-      memberId: input.memberId,
-    });
     started = await runtime.start({
       brief: input.brief,
       id: call.id,
       memberId: input.memberId,
-      transferNumber: input.brief.allowTransferToUser
-        ? await resolveTransferNumber({
-            memberId: input.memberId,
-          })
-        : null,
+      transferNumber,
+    }, {
+      signal: input.signal,
     });
   } catch (error) {
+    if (!hasPhoneCallRuntimeNoActiveEffect(error)) {
+      return {
+        phoneCallId: call.id,
+        status: "starting",
+      };
+    }
     const failedResult: HostedPhoneCallResult = {
       outcome: "not_completed",
       summary: "Murph could not start the phone call.",
@@ -247,58 +282,6 @@ function hasPhoneCallAdvancedBeyondStart(call: HostedPhoneCall): boolean {
     || call.providerCallId !== null
     || call.endedAt !== null
     || call.analyzedAt !== null;
-}
-
-async function failStaleUnstartedPhoneCallReservation(input: {
-  call: HostedPhoneCall;
-  crypto: HostedPhoneCallCrypto;
-  prisma: HostedPhoneCallStore;
-}): Promise<HostedPhoneCall> {
-  const resultJson: HostedPhoneCallResult = {
-    outcome: "not_completed",
-    summary: "Murph could not start the phone call.",
-  };
-  if (
-    input.call.status !== "starting"
-    || input.call.providerCallId !== null
-    || input.call.endedAt !== null
-    || input.call.analyzedAt !== null
-    || Date.now() - input.call.updatedAt.getTime() < HOSTED_PHONE_CALL_UNSTARTED_REPLAY_GRACE_MS
-  ) {
-    return input.call;
-  }
-
-  const resultEncrypted = await input.crypto.encryptResult({
-    callId: input.call.id,
-    memberId: input.call.memberId,
-    value: resultJson,
-  });
-  const updated = await input.prisma.hostedPhoneCall.updateMany({
-    data: {
-      resultEncrypted,
-      resultJson: Prisma.DbNull,
-      status: "failed",
-    },
-    where: {
-      analyzedAt: null,
-      id: input.call.id,
-      provider: "retell",
-      providerCallId: null,
-      status: "starting",
-    },
-  });
-  if (updated.count === 0) {
-    return input.prisma.hostedPhoneCall.findUniqueOrThrow({
-      where: { id: input.call.id },
-    });
-  }
-
-  return {
-    ...input.call,
-    resultEncrypted,
-    resultJson: null,
-    status: "failed",
-  };
 }
 
 function isRequestKeyUniqueConstraintError(error: unknown): boolean {

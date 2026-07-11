@@ -25,6 +25,7 @@ import {
   buildPhoneCallResultNotificationInstructions,
   handleRetellCallAnalyzed,
   handleRetellCallEnded,
+  HOSTED_PHONE_CALL_WEBHOOK_TRANSACTION_TIMEOUT_MS,
   mapRetellCallAnalysis,
 } from "@/src/lib/phone-calls/result";
 import { verifyRetellSignature } from "@/src/lib/phone-calls/retell-signature";
@@ -120,6 +121,10 @@ describe("Retell phone-call runtime", () => {
       to_number: "+12125550123",
     });
     expect(body).not.toHaveProperty("agent_override");
+  });
+
+  it("budgets the analyzed transaction for every sequential KMS lane", () => {
+    expect(HOSTED_PHONE_CALL_WEBHOOK_TRANSACTION_TIMEOUT_MS).toBe(50_000);
   });
 
   it("passes a configured Retell webhook public base as a per-call agent override", async () => {

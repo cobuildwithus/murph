@@ -150,7 +150,11 @@ The hosted Prisma schema keeps ownership sharp and nested:
   secure-box ciphertext; new writes never populate the nullable legacy JSON
   columns. Retell credentials stay in web env, transfer destinations are resolved
   from verified member identity, and raw transcripts/audio are not stored in
-  Murph.
+  Murph. The web owner bounds the aggregate start path at 40 seconds. Because
+  Retell create-call has no documented idempotency contract, a connection or
+  timeout ambiguity preserves the durable row as `starting`; the same request
+  key returns that reservation without blindly creating another provider call,
+  and a signed webhook may still bind the provider call id through Murph metadata.
 - `HostedComputerRun` and `HostedComputerHandoff`
   own member-scoped Kernel profile names, resumable run state, and durable
   `awaiting_user` checkpoints. Assistant dynamic tools receive only run handles;

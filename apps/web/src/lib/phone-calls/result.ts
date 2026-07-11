@@ -18,6 +18,7 @@ import {
   hostedOnboardingError,
 } from "../hosted-onboarding/errors";
 import { getPrisma } from "../prisma";
+import { HOSTED_GCP_KMS_OPERATION_TIMEOUT_MS } from "../hosted-crypto/gcp-kms";
 import {
   hostedPhoneCallCrypto,
   readHostedPhoneCallBrief,
@@ -110,6 +111,16 @@ const RETELL_CALL_ANALYZED_LIVE_STATUSES: HostedPhoneCallStatus[] = [
 const RETELL_CALL_ANALYZED_ENDED_FAILED_STATUSES: HostedPhoneCallStatus[] = [
   "failed",
 ];
+// call_analyzed can sequentially unwrap the active control root, a historical
+// brief/route root, and the ingress mailbox root. Each provider operation has
+// its own deadline, so the owning transaction must cover all of them plus
+// database work instead of inheriting Prisma's 15-second default.
+export const HOSTED_PHONE_CALL_WEBHOOK_TRANSACTION_TIMEOUT_MS =
+  (4 * HOSTED_GCP_KMS_OPERATION_TIMEOUT_MS) + 10_000;
+const HOSTED_PHONE_CALL_WEBHOOK_TRANSACTION_OPTIONS = {
+  maxWait: 10_000,
+  timeout: HOSTED_PHONE_CALL_WEBHOOK_TRANSACTION_TIMEOUT_MS,
+} as const;
 
 export async function handleRetellCallEnded(input: {
   call: RetellCallPayload;
@@ -398,7 +409,7 @@ function resolveHostedPhoneCallWebhookStore(
             },
           }),
         },
-      }))),
+      }), HOSTED_PHONE_CALL_WEBHOOK_TRANSACTION_OPTIONS)),
   };
 }
 

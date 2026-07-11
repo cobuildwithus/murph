@@ -13,7 +13,7 @@ const DEFAULT_STS_TOKEN_URI = "https://sts.googleapis.com/v1/token";
 const DEFAULT_IAM_CREDENTIALS_API_ROOT = "https://iamcredentials.googleapis.com/v1";
 // One deadline owns the complete token + KMS operation. Callers may abort
 // earlier. Provider failures are fail-closed and are never retried here.
-const HOSTED_GCP_KMS_OPERATION_TIMEOUT_MS = 10_000;
+export const HOSTED_GCP_KMS_OPERATION_TIMEOUT_MS = 10_000;
 const GOOGLE_RPC_STATUS_REASONS = new Set([
   "ABORTED",
   "ALREADY_EXISTS",

@@ -16,6 +16,7 @@ import type {
   PhoneCallRuntime,
   PhoneCallRuntimeStartResult,
 } from "./types";
+import { markPhoneCallRuntimeNoActiveEffect } from "./types";
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
 
 const RETELL_API_BASE_URL = "https://api.retellai.com";
@@ -34,10 +35,35 @@ export function createRetellPhoneCallRuntime(input: {
 class RetellPhoneCallRuntime implements PhoneCallRuntime {
   constructor(private readonly fetchImpl: typeof fetch | undefined) {}
 
-  async start(call: HostedPhoneCallRuntimeRecord): Promise<PhoneCallRuntimeStartResult> {
-    const params = buildRetellCreatePhoneCallRequest(call);
-    const client = this.buildClient();
-    const response = await client.call.createPhoneCall(params);
+  async start(
+    call: HostedPhoneCallRuntimeRecord,
+    options: { signal?: AbortSignal } = {},
+  ): Promise<PhoneCallRuntimeStartResult> {
+    let params: CallCreatePhoneCallParams;
+    let client: Retell;
+    try {
+      params = buildRetellCreatePhoneCallRequest(call);
+      client = this.buildClient();
+    } catch (error) {
+      throw markPhoneCallRuntimeNoActiveEffect(error);
+    }
+
+    let response: Awaited<ReturnType<typeof client.call.createPhoneCall>>;
+    try {
+      response = await client.call.createPhoneCall(params, {
+        signal: options.signal,
+      });
+    } catch (error) {
+      if (
+        error instanceof APIError
+        && typeof error.status === "number"
+        && error.status >= 400
+        && error.status < 500
+      ) {
+        throw markPhoneCallRuntimeNoActiveEffect(error);
+      }
+      throw error;
+    }
 
     const providerCallId = readRetellProviderCallId(response.call_id);
     if (!providerCallId) {
@@ -45,10 +71,12 @@ class RetellPhoneCallRuntime implements PhoneCallRuntime {
     }
     const storageSetting = readRetellDataStorageSetting(response.data_storage_setting);
     if (storageSetting !== RETELL_BASIC_ATTRIBUTES_ONLY_STORAGE_SETTING) {
-      throw buildRetellStorageModeMismatchError({
+      const stopFailure = await this.stopCallBestEffort(client, providerCallId);
+      const error = buildRetellStorageModeMismatchError({
         storageSetting,
-        stopFailure: await this.stopCallBestEffort(client, providerCallId),
+        stopFailure,
       });
+      throw stopFailure ? error : markPhoneCallRuntimeNoActiveEffect(error);
     }
 
     return { providerCallId };

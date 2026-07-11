@@ -183,8 +183,9 @@ export async function unwrapHostedDomainRootForWeb(input: {
   if (!WEB_UNWRAP_DOMAINS.has(input.domain)) {
     throw new Error(`Web is not allowed to unwrap hosted ${input.domain} domain roots.`);
   }
-  return unwrapWithScopedCache(
-    `${input.userId}|${input.domain}|@active`,
+  const activeCacheKey = `${input.userId}|${input.domain}|@active`;
+  const unwrapped = await unwrapWithScopedCache(
+    activeCacheKey,
     async () => {
       const envelope = await readActiveHostedDomainRootEnvelopeOrThrow({
         domain: input.domain,
@@ -195,6 +196,13 @@ export async function unwrapHostedDomainRootForWeb(input: {
       return { envelope, rootKey };
     },
   );
+  const cache = getHostedDomainRootUnwrapCache();
+  const active = cache?.get(activeCacheKey);
+  const concreteCacheKey = `${input.userId}|${input.domain}|${unwrapped.envelope.rootKeyId}`;
+  if (active && !cache?.has(concreteCacheKey)) {
+    cache?.set(concreteCacheKey, active);
+  }
+  return unwrapped;
 }
 
 export async function unwrapHostedDomainRootForWebByRootKeyId(input: {
