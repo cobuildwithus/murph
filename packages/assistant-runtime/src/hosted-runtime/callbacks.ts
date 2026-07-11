@@ -21,6 +21,9 @@ import type {
   HostedActionApprovalResult,
 } from "@murphai/hosted-execution/action-approval";
 import {
+  parseHostedActionApprovalOutcomeEffectId,
+} from "@murphai/hosted-execution/action-approval";
+import {
   applyAssistantVaultFileSendApprovalResult,
   beginAssistantOutboxIntentMirrorPreparedDispatch,
   buildAssistantVaultFileSendApprovalRequest,
@@ -147,7 +150,7 @@ export async function collectHostedAssistantDeliverySideEffects(
   };
   const now = new Date();
   const storedIntents = await listAssistantOutboxIntents(request.vaultRoot);
-  const reconcileTargetIds = selectHostedAssistantApprovalReconcileTargets({
+  const reconcileTargets = selectHostedAssistantApprovalReconcileTargets({
     includeBackgroundDueIntents: request.includeBackgroundDueIntents,
     now,
     preferredEffectIds: request.preferredEffectIds,
@@ -158,11 +161,12 @@ export async function collectHostedAssistantDeliverySideEffects(
     { blocked: boolean; intent: AssistantOutboxIntent }
   >();
   for (const intent of storedIntents) {
-    if (!reconcileTargetIds.has(intent.intentId)) {
+    if (!reconcileTargets.has(intent.intentId)) {
       continue;
     }
     const reconciliation = await reconcileHostedAssistantVaultFileApproval({
       actionApprovalPort: input.actionApprovalPort ?? null,
+      expectedApprovalCycle: reconcileTargets.get(intent.intentId) ?? null,
       intent,
       missingApprovalPort: "block",
       now,
@@ -181,7 +185,7 @@ export async function collectHostedAssistantDeliverySideEffects(
   const causalOnly = request.preferredEffectIds.length > 0;
   const preferredIntentIds = [
     ...new Set([
-      ...(causalOnly ? reconcileTargetIds : []),
+      ...(causalOnly ? reconcileTargets.keys() : []),
       ...request.preferredIntentIds,
     ]),
   ];
@@ -192,7 +196,7 @@ export async function collectHostedAssistantDeliverySideEffects(
   const candidates: AssistantOutboxIntent[] = [];
   const nowIso = now.toISOString();
   for (const intent of intents) {
-    if (causalOnly && !reconcileTargetIds.has(intent.intentId)) {
+    if (causalOnly && !reconcileTargets.has(intent.intentId)) {
       continue;
     }
     if (intent.status === "awaiting_approval") {
@@ -299,31 +303,36 @@ export async function collectHostedAssistantDeliverySideEffects(
  * identities are not approval-state identities, and must not replace a parked
  * effect's durable fallback wake before it is due.
  */
+interface HostedAssistantApprovalCycleIdentity {
+  approvalGeneration: string;
+  approvalId: string;
+  expiresAt: string;
+}
+
 function selectHostedAssistantApprovalReconcileTargets(input: {
   includeBackgroundDueIntents: boolean;
   now: Date;
   preferredEffectIds: readonly string[];
   storedIntents: readonly AssistantOutboxIntent[];
-}): Set<string> {
-  const targets = new Set<string>();
+}): Map<string, HostedAssistantApprovalCycleIdentity | null> {
+  const targets = new Map<string, HostedAssistantApprovalCycleIdentity | null>();
   if (input.preferredEffectIds.length > 0) {
     for (const effectId of input.preferredEffectIds) {
-      for (const intent of input.storedIntents) {
-        if (intent.status !== "awaiting_approval") {
-          continue;
-        }
-        try {
-          const request = buildAssistantVaultFileSendApprovalRequest(intent);
-          if (request.actionId === effectId) {
-            // A causal wake owns one approval cycle. Reconcile its canonical
-            // parked intent first and never mix unrelated due work into it.
-            targets.add(intent.intentId);
-            return targets;
-          }
-        } catch {
-          // The normal reconciliation path owns terminal handling for malformed
-          // vault-file intents; an opaque effect pointer must not broaden it.
-        }
+      const cycle = parseHostedActionApprovalOutcomeEffectId(effectId);
+      if (!cycle) {
+        continue;
+      }
+      const intent = input.storedIntents.find((candidate) =>
+        candidate.status === "awaiting_approval"
+        && candidate.deliveryIdempotencyKey === cycle.ownerKey
+      );
+      if (intent) {
+        targets.set(intent.intentId, {
+          approvalGeneration: cycle.approvalGeneration,
+          approvalId: cycle.approvalId,
+          expiresAt: cycle.expiresAt,
+        });
+        return targets;
       }
     }
     return targets;
@@ -348,13 +357,14 @@ function selectHostedAssistantApprovalReconcileTargets(input: {
     )
     .slice(0, HOSTED_MAX_DUE_APPROVAL_RECONCILE);
   for (const intent of due) {
-    targets.add(intent.intentId);
+    targets.set(intent.intentId, null);
   }
   return targets;
 }
 
 async function reconcileHostedAssistantVaultFileApproval(input: {
   actionApprovalPort: HostedRuntimeActionApprovalPort | null;
+  expectedApprovalCycle: HostedAssistantApprovalCycleIdentity | null;
   intent: AssistantOutboxIntent;
   missingApprovalPort: "block" | "skip";
   now: Date;
@@ -454,6 +464,24 @@ async function reconcileHostedAssistantVaultFileApproval(input: {
     };
   }
 
+  if (
+    input.expectedApprovalCycle
+    && (
+      approval.approvalId !== input.expectedApprovalCycle.approvalId
+      || (
+        approval.status === "approved"
+        && approval.approvalGeneration
+          !== input.expectedApprovalCycle.approvalGeneration
+      )
+      || (
+        approval.status === "pending"
+        && approval.expiresAt !== input.expectedApprovalCycle.expiresAt
+      )
+    )
+  ) {
+    return { blocked: true, intent: input.intent };
+  }
+
   const reconciled = applyAssistantVaultFileSendApprovalResult({
     approval,
     intent: input.intent,
@@ -480,6 +508,7 @@ async function preflightHostedAssistantVaultFileDispatch(input: {
 }): Promise<AssistantOutboxDispatchPreflightResult> {
   const reconciled = await reconcileHostedAssistantVaultFileApproval({
     actionApprovalPort: input.actionApprovalPort,
+    expectedApprovalCycle: null,
     intent: input.intent,
     missingApprovalPort: "block",
     now: input.now,

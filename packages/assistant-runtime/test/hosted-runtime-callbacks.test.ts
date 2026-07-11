@@ -17,6 +17,10 @@ import {
   type HostedAssistantDeliveryMedia,
   type HostedAssistantDeliveryPayload,
 } from "@murphai/hosted-execution/side-effects";
+import {
+  buildHostedActionApprovalCycleOwnerKey,
+  buildHostedActionApprovalOutcomeEffectId,
+} from "@murphai/hosted-execution/action-approval";
 import { VaultCliError } from "@murphai/operator-config/vault-cli-errors";
 import { serializeHostedEmailThreadTarget } from "@murphai/runtime-state";
 import type { HostedEmailSendRequest } from "../src/hosted-email.ts";
@@ -1053,7 +1057,10 @@ describe("hosted runtime callbacks", () => {
         createdAt: "2026-04-08T00:00:00.000Z",
         dedupeKey: "dedupe_vault_file_denied",
         delivery: null,
-        deliveryIdempotencyKey: "assistant-outbox:intent_vault_file_denied",
+        deliveryIdempotencyKey: buildHostedActionApprovalCycleOwnerKey({
+          approvalId: vaultFile.approvalId,
+          expiresAt: "2026-04-08T00:15:00.000Z",
+        }),
         deliveryTransportIdempotent: true,
         explicitTarget: "linq_chat_1",
         identityId: "identity_1",
@@ -1131,7 +1138,11 @@ describe("hosted runtime callbacks", () => {
       await expect(collectHostedAssistantDeliverySideEffects({
         actionApprovalPort,
         includeBackgroundDueIntents: true,
-        preferredEffectIds: [approvalRequest.actionId],
+        preferredEffectIds: [buildHostedActionApprovalOutcomeEffectId({
+          approvalGeneration: "b".repeat(64),
+          approvalId: vaultFile.approvalId,
+          expiresAt: "2026-04-08T00:15:00.000Z",
+        })],
         preferredIntentIds: [],
         vaultRoot: "/tmp/vault",
       })).resolves.toEqual([]);
@@ -1213,14 +1224,34 @@ describe("hosted runtime callbacks", () => {
       threadId: "thread_2",
       turnId: "turn_unrelated",
     };
-    const selectedEffectId = "vault-file-send:shared-approval-cycle";
+    const selectedActionId = "vault-file-send:shared-approval-cycle";
+    const approvalId = `haa_${"b".repeat(32)}`;
+    const selectedEffectId = buildHostedActionApprovalOutcomeEffectId({
+      approvalGeneration: "b".repeat(64),
+      approvalId,
+      expiresAt: "2026-04-08T00:30:00.000Z",
+    });
+    storedIntents[1] = {
+      ...storedIntents[1]!,
+      deliveryIdempotencyKey: buildHostedActionApprovalCycleOwnerKey({
+        approvalId,
+        expiresAt: "2026-04-08T00:15:00.000Z",
+      }),
+    };
+    storedIntents[2] = {
+      ...storedIntents[2]!,
+      deliveryIdempotencyKey: buildHostedActionApprovalCycleOwnerKey({
+        approvalId,
+        expiresAt: "2026-04-08T00:30:00.000Z",
+      }),
+    };
     const actionApprovalPort = {
       consume: vi.fn(),
       read: vi.fn(async (request: { actionId: string }) =>
-        request.actionId === selectedEffectId
+        request.actionId === selectedActionId
           ? {
               approvalGeneration: "b".repeat(64),
-              approvalId: `haa_${"b".repeat(32)}`,
+              approvalId,
               status: "approved" as const,
             }
           : {
@@ -1241,7 +1272,7 @@ describe("hosted runtime callbacks", () => {
         actionFingerprint: "a".repeat(64),
         actionId: intent.intentId === "intent_vault_file_1"
           || intent.intentId === "intent_vault_file_2"
-          ? selectedEffectId
+          ? selectedActionId
           : `vault-file-send:${intent.intentId}`,
         actionKind: "vault.file.send.v1",
         presentation: {
@@ -1272,13 +1303,32 @@ describe("hosted runtime callbacks", () => {
 
     expect(actionApprovalPort.read).toHaveBeenCalledTimes(1);
     expect(actionApprovalPort.read).toHaveBeenCalledWith(
-      expect.objectContaining({ actionId: selectedEffectId }),
+      expect.objectContaining({ actionId: selectedActionId }),
     );
     expect(sideEffects).toHaveLength(1);
-    expect(sideEffects[0]?.effectId).toBe("intent_vault_file_1");
+    expect(sideEffects[0]?.effectId).toBe("intent_vault_file_2");
+
+    actionApprovalPort.read.mockClear();
+    mocks.applyAssistantVaultFileSendApprovalResult.mockClear();
+    mocks.listAssistantOutboxIntents.mockResolvedValueOnce(storedIntents);
+    await expect(collectHostedAssistantDeliverySideEffects({
+      actionApprovalPort,
+      includeBackgroundDueIntents: true,
+      preferredEffectIds: [buildHostedActionApprovalOutcomeEffectId({
+        approvalGeneration: "c".repeat(64),
+        approvalId,
+        expiresAt: "2026-04-08T00:15:00.000Z",
+      })],
+      preferredIntentIds: [],
+      vaultRoot: "/tmp/vault",
+    })).resolves.toEqual([]);
+    expect(actionApprovalPort.read).toHaveBeenCalledTimes(1);
+    expect(mocks.applyAssistantVaultFileSendApprovalResult).not.toHaveBeenCalled();
   });
 
   it("defers one causal approval owner after a control-plane timeout", async () => {
+    const approvalId = `haa_${"d".repeat(32)}`;
+    const expiresAt = "2026-04-08T00:15:00.000Z";
     const storedIntent = {
       actorId: "actor_1",
       bindingDelivery: { kind: "thread" as const, target: "linq_chat_1" },
@@ -1286,7 +1336,10 @@ describe("hosted runtime callbacks", () => {
       createdAt: "2026-04-08T00:00:00.000Z",
       dedupeKey: "dedupe_vault_file_timeout",
       delivery: null,
-      deliveryIdempotencyKey: "approval-cycle-timeout",
+      deliveryIdempotencyKey: buildHostedActionApprovalCycleOwnerKey({
+        approvalId,
+        expiresAt,
+      }),
       deliveryTransportIdempotent: true,
       explicitTarget: "linq_chat_1",
       identityId: "identity_1",
@@ -1294,6 +1347,7 @@ describe("hosted runtime callbacks", () => {
       lastAttemptAt: null,
       lastError: null,
       media: [{
+        approvalId,
         contentType: "application/pdf",
         filename: "report.pdf",
         kind: "vault_file" as const,
@@ -1358,7 +1412,11 @@ describe("hosted runtime callbacks", () => {
     await expect(collectHostedAssistantDeliverySideEffects({
       actionApprovalPort,
       includeBackgroundDueIntents: true,
-      preferredEffectIds: ["vault-file-send:timeout"],
+      preferredEffectIds: [buildHostedActionApprovalOutcomeEffectId({
+        approvalGeneration: "d".repeat(64),
+        approvalId,
+        expiresAt,
+      })],
       preferredIntentIds: [],
       vaultRoot: "/tmp/vault",
     })).resolves.toEqual([]);
@@ -1378,7 +1436,11 @@ describe("hosted runtime callbacks", () => {
     await expect(collectHostedAssistantDeliverySideEffects({
       actionApprovalPort,
       includeBackgroundDueIntents: true,
-      preferredEffectIds: ["vault-file-send:unknown"],
+      preferredEffectIds: [buildHostedActionApprovalOutcomeEffectId({
+        approvalGeneration: "e".repeat(64),
+        approvalId: `haa_${"e".repeat(32)}`,
+        expiresAt,
+      })],
       preferredIntentIds: [],
       vaultRoot: "/tmp/vault",
     })).resolves.toEqual([]);

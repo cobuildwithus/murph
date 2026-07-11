@@ -13,6 +13,7 @@ import {
 import {
   HOSTED_ACTION_APPROVAL_ID_PREFIX,
   HOSTED_ACTION_APPROVAL_RETURN_CONTACT_KINDS,
+  buildHostedActionApprovalOutcomeEffectId,
   isHostedActionApprovalId,
   parseHostedActionApprovalConsumeRequest,
   parseHostedActionApprovalPresentation,
@@ -406,9 +407,16 @@ export async function decideHostedActionApprovalTx(input: {
     return { approval, runtimeResume: null };
   }
 
+  const approvalGeneration =
+    buildHostedActionApprovalIdentityGeneration(input.approval);
+
   const mailboxItem = (await appendHostedMailboxEnvelopeTx({
     envelope: buildHostedExecutionPendingEffectsReconcileRequestedWake({
-      effectId: input.approval.actionId,
+      effectId: buildHostedActionApprovalOutcomeEffectId({
+        approvalGeneration,
+        approvalId: input.approval.approvalId,
+        expiresAt: input.approval.expiresAt.toISOString(),
+      }),
       eventId: buildHostedActionApprovalOutcomeWakeEventId({
         approval: input.approval,
         decidedAt: now,

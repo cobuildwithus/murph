@@ -4,6 +4,11 @@ import type {
   HostedActionApprovalRequest,
   HostedActionApprovalResult,
 } from "@murphai/hosted-execution/action-approval";
+import {
+  buildHostedActionApprovalCycleOwnerKey,
+  parseHostedActionApprovalOutcomeEffectId,
+} from "@murphai/hosted-execution/action-approval";
+import { parseHostedExecutionWake } from "@murphai/hosted-execution/parsers";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type {
@@ -121,7 +126,8 @@ describe("hosted action approvals", () => {
       lane: "system",
       userId: memberId,
     });
-    await expect(decodeHostedMailboxStoredPayload({
+    const firstWakePayload = parseHostedExecutionWake(
+      await decodeHostedMailboxStoredPayload({
       dedupeKey: firstWake.dedupeKey,
       kind: firstWake.kind,
       lane: firstWake.lane,
@@ -130,11 +136,26 @@ describe("hosted action approvals", () => {
       occurredAt: firstWake.occurredAt.toISOString(),
       payloadInlineCiphertext: firstWake.payloadInlineCiphertext,
       payloadSchema: firstWake.payloadSchema,
-      userId: firstWake.userId,
-    })).resolves.toMatchObject({
-      effectId: REQUEST.actionId,
+        userId: firstWake.userId,
+      }),
+    );
+    expect(firstWakePayload).toMatchObject({
+      effectId: expect.any(String),
       kind: "runtime.pending-effects-reconcile-requested",
     });
+    if (firstWakePayload.kind !== "runtime.pending-effects-reconcile-requested") {
+      throw new Error("Expected an approval outcome wake.");
+    }
+    expect(parseHostedActionApprovalOutcomeEffectId(firstWakePayload.effectId))
+      .toEqual({
+        approvalGeneration: expect.stringMatching(/^[0-9a-f]{64}$/u),
+        approvalId: firstPending.approvalId,
+        expiresAt: firstPending.expiresAt.toISOString(),
+        ownerKey: buildHostedActionApprovalCycleOwnerKey({
+          approvalId: firstPending.approvalId,
+          expiresAt: firstPending.expiresAt.toISOString(),
+        }),
+      });
 
     const firstApproved = await requestHostedActionApproval({
       memberId,
@@ -184,6 +205,28 @@ describe("hosted action approvals", () => {
     const secondWake = await deps.prisma.hostedMailboxItem.findUniqueOrThrow({
       where: { id: secondRuntimeResume.mailboxItemId },
     });
+    const secondWakePayload = parseHostedExecutionWake(
+      await decodeHostedMailboxStoredPayload({
+      dedupeKey: secondWake.dedupeKey,
+      kind: secondWake.kind,
+      lane: secondWake.lane,
+      laneSeq: secondWake.laneSeq,
+      mailboxItemId: secondWake.id,
+      occurredAt: secondWake.occurredAt.toISOString(),
+      payloadInlineCiphertext: secondWake.payloadInlineCiphertext,
+      payloadSchema: secondWake.payloadSchema,
+        userId: secondWake.userId,
+      }),
+    );
+    if (secondWakePayload.kind !== "runtime.pending-effects-reconcile-requested") {
+      throw new Error("Expected a refreshed approval outcome wake.");
+    }
+    expect(parseHostedActionApprovalOutcomeEffectId(secondWakePayload.effectId))
+      .toMatchObject({
+        approvalId: secondPending.approvalId,
+        expiresAt: secondPending.expiresAt.toISOString(),
+      });
+    expect(secondWakePayload.effectId).not.toBe(firstWakePayload.effectId);
     expect(secondWake.dedupeKey).not.toBe(firstWake.dedupeKey);
     expect(BigInt(secondRuntimeResume.laneSeq)).toBeGreaterThan(
       BigInt(firstRuntimeResume.laneSeq),

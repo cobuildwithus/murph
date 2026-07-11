@@ -18,6 +18,8 @@ export type HostedActionApprovalReturnContactKind =
 
 const ACTION_ID_MAX_LENGTH = 200;
 const ACTION_KIND_MAX_LENGTH = 120;
+const ACTION_APPROVAL_CYCLE_OWNER_PREFIX = "assistant-vault-file:";
+const ACTION_APPROVAL_OUTCOME_GENERATION_MARKER = ":approval-generation:";
 const APPROVAL_ID_PATTERN = /^haa_[A-Za-z0-9_-]{32}$/u;
 const SHA256_HEX_PATTERN = /^[0-9a-f]{64}$/u;
 const PRESENTATION_TITLE_MAX_LENGTH = 120;
@@ -70,6 +72,79 @@ export interface HostedActionApprovalConsumeRequest {
 
 export function isHostedActionApprovalId(value: unknown): value is string {
   return typeof value === "string" && APPROVAL_ID_PATTERN.test(value);
+}
+
+export function buildHostedActionApprovalCycleOwnerKey(input: {
+  approvalId: string;
+  expiresAt: string;
+}): string {
+  const approvalId = requireApprovalId(input.approvalId);
+  requireIsoDateTime(input.expiresAt);
+  return `${ACTION_APPROVAL_CYCLE_OWNER_PREFIX}${approvalId}:${input.expiresAt}`;
+}
+
+export function buildHostedActionApprovalOutcomeEffectId(input: {
+  approvalGeneration: string;
+  approvalId: string;
+  expiresAt: string;
+}): string {
+  const ownerKey = buildHostedActionApprovalCycleOwnerKey(input);
+  const approvalGeneration = requireSha256Hex(
+    input.approvalGeneration,
+    "Hosted action approval outcome generation",
+  );
+  return `${ownerKey}${ACTION_APPROVAL_OUTCOME_GENERATION_MARKER}${approvalGeneration}`;
+}
+
+export function parseHostedActionApprovalOutcomeEffectId(value: unknown): {
+  approvalGeneration: string;
+  approvalId: string;
+  expiresAt: string;
+  ownerKey: string;
+} | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+  const generationMarkerIndex = value.lastIndexOf(
+    ACTION_APPROVAL_OUTCOME_GENERATION_MARKER,
+  );
+  if (generationMarkerIndex <= ACTION_APPROVAL_CYCLE_OWNER_PREFIX.length) {
+    return null;
+  }
+  const ownerKey = value.slice(0, generationMarkerIndex);
+  const approvalGeneration = value.slice(
+    generationMarkerIndex + ACTION_APPROVAL_OUTCOME_GENERATION_MARKER.length,
+  );
+  if (!SHA256_HEX_PATTERN.test(approvalGeneration)) {
+    return null;
+  }
+  if (!ownerKey.startsWith(ACTION_APPROVAL_CYCLE_OWNER_PREFIX)) {
+    return null;
+  }
+  const approvalIdStart = ACTION_APPROVAL_CYCLE_OWNER_PREFIX.length;
+  const approvalIdEnd = ownerKey.indexOf(":", approvalIdStart);
+  if (approvalIdEnd < 0) {
+    return null;
+  }
+  const approvalId = ownerKey.slice(approvalIdStart, approvalIdEnd);
+  const expiresAt = ownerKey.slice(approvalIdEnd + 1);
+  if (!isHostedActionApprovalId(approvalId)) {
+    return null;
+  }
+  try {
+    requireIsoDateTime(expiresAt);
+  } catch {
+    return null;
+  }
+  if (buildHostedActionApprovalCycleOwnerKey({ approvalId, expiresAt }) !== ownerKey) {
+    return null;
+  }
+  return {
+    approvalGeneration,
+    approvalId,
+    expiresAt,
+    ownerKey,
+  };
 }
 
 export function parseHostedActionApprovalRequest(

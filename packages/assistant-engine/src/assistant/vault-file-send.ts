@@ -7,6 +7,9 @@ import type {
   HostedActionApprovalResult,
 } from '@murphai/hosted-execution/action-approval'
 import {
+  buildHostedActionApprovalCycleOwnerKey,
+} from '@murphai/hosted-execution/action-approval'
+import {
   assistantOutboxIntentSchema,
   assistantVaultFileMaxBytes,
   type AssistantOutboxIntent,
@@ -157,7 +160,7 @@ export function buildAssistantVaultFileDeliveryIdempotencyKey(input: {
   approvalId: string
   expiresAt: string
 }): string {
-  return `assistant-vault-file:${input.approvalId}:${input.expiresAt}`
+  return buildHostedActionApprovalCycleOwnerKey(input)
 }
 
 export function buildAssistantVaultFileDeliveryMessage(filename: string): string {

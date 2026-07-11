@@ -479,11 +479,15 @@ target kind at final dispatch. Linq current-home fallback cannot substitute a
 different destination after approval; that intent fails before approval consume
 or provider entry, and the new destination requires a fresh action identity.
 One active approval cycle maps to one parked intent through a cycle-stable
-approval-ID-plus-expiry transport identity. A causal outcome wake reconciles one
-canonical matching owner, allowlists only that owner for dispatch, and does not
-mix unrelated due work into that control item. A missing, denied, or deferred
-causal owner produces no delivery effect; only the background fallback path scans
-its fixed due-item bound.
+approval-ID-plus-expiry transport identity. A causal outcome wake carries that
+exact owner identity plus the observed approval generation, reconciles only that
+owner, allowlists only it for dispatch, and does not mix unrelated due work into
+the control item. A delayed wake from an older cycle cannot apply a refreshed
+generation. If foreground input arrives after control-item preparation, the same
+pending mailbox item is retained for the next eligible pass instead of
+acknowledging an unreconciled obligation. A missing, denied, or deferred causal
+owner produces no delivery effect; only the background fallback path scans its
+fixed due-item bound.
 The parked intent arms one pre-expiry fallback wake ten minutes before the
 pending approval expires. A rejected post-commit Temporal signal is logged; the
 existing outbox wake then makes Temporal re-read mailbox lag while at least five

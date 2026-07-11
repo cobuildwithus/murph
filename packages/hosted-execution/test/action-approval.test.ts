@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  buildHostedActionApprovalCycleOwnerKey,
+  buildHostedActionApprovalOutcomeEffectId,
   parseHostedActionApprovalRequest,
+  parseHostedActionApprovalOutcomeEffectId,
   serializeHostedActionApprovalRequest,
 } from "../src/action-approval.js";
 
@@ -49,5 +52,24 @@ describe("hosted action approval contracts", () => {
       ...VALID_ACTION_APPROVAL_REQUEST,
       returnContactKind,
     }).returnContactKind).toBe(returnContactKind);
+  });
+
+  it("round-trips an exact approval-cycle owner pointer", () => {
+    const approvalId = `haa_${"a".repeat(32)}`;
+    const expiresAt = "2026-06-25T16:15:00.000Z";
+    const approvalGeneration = "b".repeat(64);
+    const effectId = buildHostedActionApprovalOutcomeEffectId({
+      approvalGeneration,
+      approvalId,
+      expiresAt,
+    });
+
+    expect(parseHostedActionApprovalOutcomeEffectId(effectId)).toEqual({
+      approvalGeneration,
+      approvalId,
+      expiresAt,
+      ownerKey: buildHostedActionApprovalCycleOwnerKey({ approvalId, expiresAt }),
+    });
+    expect(parseHostedActionApprovalOutcomeEffectId(`${effectId}x`)).toBeNull();
   });
 });

@@ -108,6 +108,7 @@ import {
   prepareHostedSystemMailboxItemForCheckpoint,
   recordHostedDeviceSyncDirtyPostCheckpointRecord,
   recordHostedSystemMailboxItemAfterCheckpoint,
+  retainHostedSystemMailboxItemAfterForegroundPreemption,
   resolveHostedSystemMailboxNextWakeAt,
   resolveHostedSystemMailboxNextWakeCandidate,
   type HostedSystemMailboxCheckpointPreparation,
@@ -3198,6 +3199,17 @@ async function runSystemMailboxMaintenancePhase(input: {
   });
   const shouldYieldAfterSystemMailboxPreparation =
     phaseInput.shouldYieldBackgroundMaintenance?.() === true;
+  if (
+    shouldYieldAfterSystemMailboxPreparation
+    && systemMailboxPreparation?.status === "processed"
+    && systemMailboxPreparation.item.wake.kind
+      === "runtime.pending-effects-reconcile-requested"
+  ) {
+    await retainHostedSystemMailboxItemAfterForegroundPreemption({
+      item: systemMailboxPreparation.item,
+      vaultRoot: phaseInput.restored.vaultRoot,
+    });
+  }
   if (!hasPendingAssistantInputWakeOverride && !pendingAssistantInputWakeAt) {
     pendingAssistantInputWakeAt = await resolvePendingAssistantInputWakeAt(phaseInput);
   }
