@@ -1569,7 +1569,7 @@ describe("fetchHostedRuntimeMailboxProjection", () => {
         itemDedupeKey: "conversation-dedupe-1",
         itemExpiresAt: null,
         itemId: "mailbox_conversation_12",
-        itemKind: "conversation.message",
+        itemKind: "member.channels.updated",
         itemLane: "conversation",
         itemLaneSeq: 12n,
         itemOccurredAt: new Date("2026-04-26T00:00:00.000Z"),
@@ -1658,6 +1658,233 @@ describe("fetchHostedRuntimeMailboxProjection", () => {
         payloadRef: "hosted-mailbox-payload:mailbox_system_3",
       },
     ]);
+  });
+
+  it("rehomes a projected personal Linq item when the durable route now owns the chat", async () => {
+    restoreDefaultHostedSecureBoxTestCodec();
+    const sourceUserId = "member_personal";
+    const containerUserId = "member_container";
+    const sourceWake = {
+      eventId: "evt_group_transition",
+      kind: "conversation.message",
+      message: {
+        channel: "linq",
+        contactKind: "phone",
+        contactLookupKey: "hbidx:phone:v1:sender",
+        linqMessage: {
+          chatId: "chat_group_transition",
+          from: "+15551234567",
+          isFromMe: false,
+          messageId: "message_group_transition",
+          parts: [{ type: "text", value: "hello group" }],
+          threadIsDirect: true,
+        },
+      },
+      occurredAt: "2026-04-26T00:00:00.000Z",
+      userId: sourceUserId,
+    };
+    const sourceCiphertext = buildHostedMailboxDefaultTestCiphertext({
+      userId: sourceUserId,
+      value: JSON.stringify(sourceWake),
+    });
+    const sourceRow = {
+      consumedSeq: 0n,
+      itemConsumedAt: new Date("2026-04-26T00:00:04.000Z"),
+      itemCreatedAt: new Date("2026-04-26T00:00:01.000Z"),
+      itemDedupeKey: sourceWake.eventId,
+      itemExpiresAt: null,
+      itemId: "mailbox_personal_group_transition",
+      itemKind: "conversation.message",
+      itemLane: "conversation",
+      itemLaneSeq: 1n,
+      itemOccurredAt: new Date(sourceWake.occurredAt),
+      itemPayloadBytes: Buffer.byteLength(JSON.stringify(sourceWake), "utf8"),
+      itemPayloadHash: "hash-personal-group-transition",
+      itemPayloadInlineCiphertext: sourceCiphertext,
+      itemPayloadRef: null,
+      itemPayloadSchema: HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA,
+      itemUpdatedAt: new Date("2026-04-26T00:00:02.000Z"),
+      itemUserId: sourceUserId,
+      maxSeq: 1n,
+      maxUpdatedAt: new Date("2026-04-26T00:00:02.000Z"),
+      requestedLane: "conversation",
+    };
+    const emptySourceProjection = {
+      consumedSeq: 0n,
+      itemConsumedAt: null,
+      itemCreatedAt: null,
+      itemDedupeKey: null,
+      itemExpiresAt: null,
+      itemId: null,
+      itemKind: null,
+      itemLane: null,
+      itemLaneSeq: null,
+      itemOccurredAt: null,
+      itemPayloadBytes: null,
+      itemPayloadHash: null,
+      itemPayloadInlineCiphertext: null,
+      itemPayloadRef: null,
+      itemPayloadSchema: null,
+      itemUpdatedAt: null,
+      itemUserId: null,
+      maxSeq: 0n,
+      maxUpdatedAt: null,
+      requestedLane: "conversation",
+    };
+    const queryRaw = vi.fn(async (...args: unknown[]) => {
+      switch (queryRaw.mock.calls.length) {
+        case 1:
+          return [sourceRow];
+        case 2:
+          return [{ seq: 1n }];
+        case 3: {
+          const values = args.slice(1);
+          return [buildHostedMailboxItemRow({
+            createdAt: FIXED_NOW,
+            dedupeKey: String(values[4]),
+            expiresAt: values[12] as Date | null,
+            id: String(values[0]),
+            kind: String(values[5]),
+            lane: String(values[2]),
+            laneSeq: values[3] as bigint,
+            occurredAt: values[6] as Date,
+            payloadBytes: values[10] as number,
+            payloadHash: values[11] as string,
+            payloadInlineCiphertext: values[8] as string,
+            payloadRef: values[9] as string | null,
+            payloadSchema: String(values[7]),
+            updatedAt: FIXED_NOW,
+            userId: String(values[1]),
+          })];
+        }
+        case 4:
+          return [emptySourceProjection];
+        default:
+          throw new Error("Unexpected hosted mailbox rehome query.");
+      }
+    });
+    const updateMany = vi.fn().mockResolvedValue({ count: 1 });
+    const deleteMany = vi.fn().mockResolvedValue({ count: 1 });
+    const routeTimestamp = new Date("2026-04-01T00:00:00.000Z");
+    const tx = Object.assign(Object.create(null), {
+      $executeRaw: vi.fn().mockResolvedValue(1),
+      $queryRaw: queryRaw,
+      hostedMailboxItem: {
+        deleteMany,
+        findUnique: vi.fn().mockResolvedValue(null),
+        updateMany,
+      },
+      hostedMailboxPayload: {
+        create: vi.fn(),
+        findUnique: vi.fn().mockResolvedValue(null),
+      },
+      hostedRuntimeLog: {
+        create: vi.fn(async (args: { data: Record<string, unknown> }) => ({
+          at: args.data.at as Date,
+          attemptId: args.data.attemptId as string | null,
+          checkpointVersion: args.data.checkpointVersion as bigint | null,
+          component: String(args.data.component),
+          createdAt: FIXED_NOW,
+          errorCode: args.data.errorCode as string | null,
+          eventCode: String(args.data.eventCode),
+          id: String(args.data.id),
+          leaseGeneration: args.data.leaseGeneration as bigint | null,
+          level: String(args.data.level),
+          mailboxLane: args.data.mailboxLane as string | null,
+          mailboxSeqEnd: args.data.mailboxSeqEnd as bigint | null,
+          mailboxSeqStart: args.data.mailboxSeqStart as bigint | null,
+          outboxIntentRef: args.data.outboxIntentRef as string | null,
+          phase: String(args.data.phase),
+          redactedJson: args.data.redactedJson,
+          userId: String(args.data.userId),
+          workspaceVersion: args.data.workspaceVersion as bigint | null,
+        })),
+      },
+      hostedThreadRoute: {
+        findFirst: vi.fn().mockResolvedValue({
+          containerMemberId: containerUserId,
+        }),
+        findMany: vi.fn().mockResolvedValue([{
+          channel: "linq",
+          container: {
+            member: {
+              billingStatus: "inactive",
+              createdAt: routeTimestamp,
+              id: containerUserId,
+              suspendedAt: null,
+              updatedAt: routeTimestamp,
+            },
+            owner: {
+              accountGroupMemberships: [],
+              billingStatus: "active",
+              createdAt: routeTimestamp,
+              id: "member_owner",
+              suspendedAt: null,
+              updatedAt: routeTimestamp,
+            },
+          },
+          containerMemberId: containerUserId,
+        }]),
+      },
+      hostedWorkspace: {
+        upsert: vi.fn().mockResolvedValue(null),
+      },
+    });
+    const transaction = vi.fn(async (
+      operation: (transactionClient: typeof tx) => Promise<unknown>,
+    ) => operation(tx));
+    const prisma = Object.assign(Object.create(null), {
+      $transaction: transaction,
+    }) as never;
+
+    const result = await fetchHostedRuntimeMailboxProjection({
+      lanes: [{ importedSeq: "0", lane: "conversation" }],
+      limitPerLane: 10,
+      now: FIXED_NOW,
+      prisma,
+      userId: sourceUserId,
+    });
+
+    expect(transaction).toHaveBeenCalledTimes(1);
+    expect(queryRaw).toHaveBeenCalledTimes(4);
+    expect(result.items).toEqual([]);
+    expect(JSON.stringify(result)).not.toContain(sourceCiphertext);
+    expect(deleteMany).toHaveBeenCalledWith({
+      where: {
+        id: sourceRow.itemId,
+        userId: sourceUserId,
+      },
+    });
+    expect(updateMany).toHaveBeenCalledWith({
+      data: {
+        consumedAt: sourceRow.itemConsumedAt,
+      },
+      where: {
+        consumedAt: null,
+        id: expect.any(String),
+        userId: containerUserId,
+      },
+    });
+    const insertValues = queryRaw.mock.calls[2]?.slice(1) ?? [];
+    expect(insertValues[1]).toBe(containerUserId);
+    const rehomedCiphertext = String(insertValues[8]);
+    const secureBox = parseHostedSecureBoxDefaultTestPayload(rehomedCiphertext);
+    expect(secureBox.userId).toBe(containerUserId);
+    expect(JSON.parse(String(secureBox.value))).toMatchObject({
+      eventId: sourceWake.eventId,
+      message: {
+        linqMessage: {
+          chatId: "chat_group_transition",
+          threadIsDirect: false,
+        },
+        routeAuthority: {
+          channel: "linq",
+          containerMemberId: containerUserId,
+          threadId: "chat_group_transition",
+        },
+      },
+      userId: containerUserId,
+    });
   });
 
   it("returns lane sentinels and rejects duplicate lane projections before querying", async () => {
@@ -2058,6 +2285,18 @@ function restoreDefaultHostedSecureBoxTestCodec(): void {
       }), "utf8").toString("base64url")}`;
     },
   });
+}
+
+function buildHostedMailboxDefaultTestCiphertext(input: {
+  userId: string;
+  value: string;
+}): string {
+  return `hsb-test:${Buffer.from(JSON.stringify({
+    lane: "mailbox-payload",
+    scope: "hosted-mailbox-payload:hosted-mailbox-inline-payload",
+    userId: input.userId,
+    value: input.value,
+  }), "utf8").toString("base64url")}`;
 }
 
 function parseHostedSecureBoxAadTestPayload(value: string): Record<string, unknown> {

@@ -159,8 +159,10 @@ describe("hosted Linq egress authority", () => {
     });
   });
 
-  it("allows same-user route authority without a DB route assertion", async () => {
-    const prisma = createPrismaStub({});
+  it("allows same-user route authority only while the durable route still matches", async () => {
+    const prisma = createPrismaStub({
+      threadRouteContainerMemberId: "member-1",
+    });
 
     await expect(assertHostedLinqRecentInboundEngagementForRuntime({
       memberId: "member-1",
@@ -175,7 +177,7 @@ describe("hosted Linq egress authority", () => {
       targetKind: "thread",
     })).resolves.toEqual({ targetOverride: null });
 
-    expect(prisma.hostedThreadRoute.findMany).not.toHaveBeenCalled();
+    expect(prisma.hostedThreadRoute.findMany).toHaveBeenCalled();
     expect(prisma.hostedMemberRouting.findUnique).not.toHaveBeenCalled();
     expect(prisma.hostedMember.findUnique).toHaveBeenCalled();
 
@@ -199,6 +201,7 @@ describe("hosted Linq egress authority", () => {
   it("rejects same-user route authority when hosted member access is inactive", async () => {
     const prisma = createPrismaStub({
       activeMemberAccess: false,
+      threadRouteContainerMemberId: "member-1",
     });
 
     await expect(assertHostedLinqRecentInboundEngagementForRuntime({
@@ -213,11 +216,11 @@ describe("hosted Linq egress authority", () => {
       target: "chat-authorized",
       targetKind: "thread",
     })).rejects.toMatchObject({
-      code: "HOSTED_LINQ_EGRESS_ACCESS_REQUIRED",
+      code: "HOSTED_THREAD_ROUTE_EGRESS_UNAUTHORIZED",
       httpStatus: 403,
     });
 
-    expect(prisma.hostedThreadRoute.findMany).not.toHaveBeenCalled();
+    expect(prisma.hostedThreadRoute.findMany).toHaveBeenCalled();
     expect(prisma.hostedMemberRouting.findUnique).not.toHaveBeenCalled();
     expect(prisma.hostedMember.findUnique).toHaveBeenCalled();
   });
@@ -392,6 +395,56 @@ describe("hosted Linq egress authority", () => {
     expect(response.status).toBe(200);
     expect(mocks.requireHostedCloudflareCallbackRequest).toHaveBeenCalled();
     expect(prisma.hostedMemberRouting.findUnique).not.toHaveBeenCalled();
+    expect(prisma.hostedLinqDelivery.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        linqChatLookupKey: createRequiredLinqChatLookupKey("chat-external"),
+        source: "hosted_runtime_linq_delivery",
+        status: "attempted",
+        targetKind: "thread",
+      }),
+      select: { id: true },
+    });
+  });
+
+  it("rejects a home-route override when that resolved chat became a group route", async () => {
+    const prisma = createPrismaStub({
+      homeChatId: "chat-current-home",
+    });
+    prisma.hostedThreadRoute.findMany
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([buildHostedLinqRouteRow("member-container")]);
+    mocks.readHostedMemberRoutingPrivateState.mockResolvedValueOnce({
+      linqChatId: "chat-current-home",
+      linqRecipientPhone: null,
+      pendingLinqChatId: null,
+      pendingLinqParticipantContact: null,
+      pendingLinqRecipientPhone: null,
+      telegramThreadId: null,
+      telegramUserId: null,
+    });
+    mocks.getPrisma.mockReturnValue(prisma);
+
+    const response = await postHostedLinqEgressEngagement(
+      new Request("https://internal.example.test/engagement", {
+        body: JSON.stringify({
+          homeRouteFallbackAllowed: true,
+          target: "chat-stale-home",
+          targetKind: "explicit",
+        }),
+        headers: {
+          "content-type": "application/json",
+        },
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toMatchObject({
+      error: {
+        code: "HOSTED_LINQ_EGRESS_ROUTE_AUTHORITY_MISMATCH",
+      },
+    });
+    expect(prisma.hostedLinqDelivery.create).not.toHaveBeenCalled();
   });
 });
 
@@ -401,8 +454,10 @@ function createPrismaStub(input: {
   homeLinePhone?: string;
   identityPhone?: string;
   pendingChatId?: string;
+  threadRouteContainerMemberId?: string;
 }) {
-  return {
+  const prisma = {
+    $executeRaw: vi.fn().mockResolvedValue(1),
     hostedMember: {
       findUnique: vi.fn().mockResolvedValue(input.activeMemberAccess === false
         ? null
@@ -434,8 +489,48 @@ function createPrismaStub(input: {
       }),
     },
     hostedThreadRoute: {
-      findMany: vi.fn().mockResolvedValue([]),
+      findMany: vi.fn().mockResolvedValue(input.threadRouteContainerMemberId
+        ? [buildHostedLinqRouteRow(input.threadRouteContainerMemberId)]
+        : []),
     },
+    hostedLinqDelivery: {
+      create: vi.fn().mockResolvedValue({ id: "delivery-1" }),
+      createMany: vi.fn().mockResolvedValue({ count: 1 }),
+      findUnique: vi.fn().mockResolvedValue(null),
+    },
+  };
+  const transaction = vi.fn(async (
+    operation: (tx: typeof prisma) => Promise<unknown>,
+  ) => operation(prisma));
+
+  return {
+    ...prisma,
+    $transaction: transaction,
+  };
+}
+
+function buildHostedLinqRouteRow(containerMemberId: string) {
+  const routeTimestamp = new Date("2026-06-01T00:00:00.000Z");
+  return {
+    channel: "linq",
+    container: {
+      member: {
+        billingStatus: "inactive",
+        createdAt: routeTimestamp,
+        id: containerMemberId,
+        suspendedAt: null,
+        updatedAt: routeTimestamp,
+      },
+      owner: {
+        accountGroupMemberships: [],
+        billingStatus: "active",
+        createdAt: routeTimestamp,
+        id: "owner-1",
+        suspendedAt: null,
+        updatedAt: routeTimestamp,
+      },
+    },
+    containerMemberId,
   };
 }
 

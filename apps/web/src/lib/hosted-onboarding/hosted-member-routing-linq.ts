@@ -20,11 +20,26 @@ import { buildHostedMemberRoutingPrivateColumns } from "./member-private-codecs"
 import { hostedOnboardingError } from "./errors";
 import { normalizePhoneNumber } from "./phone";
 import { type HostedOnboardingReadClient } from "./shared";
+import {
+  acquireHostedLinqChatOwnershipLockTx,
+} from "../hosted-routing/linq-chat-ownership-lock";
+import {
+  assertHostedLinqPersonalRuntimesIdle,
+} from "../hosted-routing/linq-group-transition-fence";
+import {
+  hasRecentHostedLinqProviderDispatchForChatTx,
+} from "./linq-delivery-store";
 
 export async function demoteHostedMemberLinqGroupChatBindingsTx(input: {
   linqChatId: string;
+  mailboxDedupeKey?: string | null;
   prisma: Prisma.TransactionClient;
-}): Promise<{ homeBindingCount: number; pendingBindingCount: number }> {
+}): Promise<{
+  homeBindingCount: number;
+  mailboxItemCount: number;
+  memberIds: string[];
+  pendingBindingCount: number;
+}> {
   const linqChatLookupKeys = createHostedLinqChatLookupKeyReadCandidates(
     input.linqChatId,
   );
@@ -37,6 +52,52 @@ export async function demoteHostedMemberLinqGroupChatBindingsTx(input: {
     namespace: "chat",
     tx: input.prisma,
   });
+
+  if (await hasRecentHostedLinqProviderDispatchForChatTx({
+    linqChatId: input.linqChatId,
+    prisma: input.prisma,
+  })) {
+    throw hostedOnboardingError({
+      code: "HOSTED_LINQ_GROUP_PROVIDER_DISPATCH_IN_FLIGHT",
+      httpStatus: 409,
+      message: "Linq provider dispatch is still active during group isolation.",
+      retryable: true,
+    });
+  }
+
+  const bindings = await input.prisma.hostedMemberRouting.findMany({
+    select: {
+      memberId: true,
+    },
+    where: {
+      OR: [
+        {
+          linqChatLookupKey: {
+            in: linqChatLookupKeys,
+          },
+        },
+        {
+          pendingLinqChatLookupKey: {
+            in: linqChatLookupKeys,
+          },
+        },
+      ],
+    },
+  });
+  const memberIds = [...new Set(bindings.map((binding) => binding.memberId))];
+  await assertHostedLinqPersonalRuntimesIdle(memberIds);
+
+  const mailboxDedupeKey = input.mailboxDedupeKey?.trim() ?? "";
+  const mailboxItems = mailboxDedupeKey && memberIds.length > 0
+    ? await input.prisma.hostedMailboxItem.deleteMany({
+        where: {
+          dedupeKey: mailboxDedupeKey,
+          userId: {
+            in: memberIds,
+          },
+        },
+      })
+    : { count: 0 };
 
   const homeBindings = await input.prisma.hostedMemberRouting.updateMany({
     where: {
@@ -69,6 +130,8 @@ export async function demoteHostedMemberLinqGroupChatBindingsTx(input: {
 
   return {
     homeBindingCount: homeBindings.count,
+    mailboxItemCount: mailboxItems.count,
+    memberIds,
     pendingBindingCount: pendingBindings.count,
   };
 }
@@ -850,6 +913,14 @@ async function acquireHostedLinqRoutingWriteLockTx(input: {
   const lockValue = input.lockValue?.trim() ?? "";
   if (!lockValue) {
     throw new TypeError("Hosted Linq routing lock requires a non-empty value.");
+  }
+
+  if (input.namespace === "chat") {
+    await acquireHostedLinqChatOwnershipLockTx({
+      chatId: lockValue,
+      tx: input.tx,
+    });
+    return;
   }
 
   await input.tx.$executeRaw`

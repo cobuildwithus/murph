@@ -1,17 +1,22 @@
 import { describe, expect, it, vi } from "vitest";
 
 import type { HostedLinqWebhookEvent } from "@/src/lib/hosted-onboarding/linq";
-import { createHostedPhoneLookupKey } from "@/src/lib/hosted-onboarding/contact-privacy";
+import {
+  createHostedLinqChatLookupKeyReadCandidates,
+  createHostedPhoneLookupKey,
+} from "@/src/lib/hosted-onboarding/contact-privacy";
 import {
   applyHostedLinqDeliveryReceiptTx,
   buildHostedAiUsageGateNoticeIdempotencyKey,
   startHostedAiUsageLimitNoticeDispatchTx,
   claimHostedLinqDeliveryProviderDispatchTx,
+  hasRecentHostedLinqProviderDispatchForChatTx,
   markHostedAiUsageLimitNoticeDeliveryRetryableTx,
   markHostedLinqDeliveryAcceptedTx,
   markHostedLinqDeliverySendFailedTx,
   markHostedLinqDeliverySkippedTx,
   recordHostedLinqDeliveryAttemptTx,
+  recordHostedLinqRuntimeProviderDispatchFenceTx,
   recordHostedLinqRuntimeDeliveryOutcomeTx,
   resolveHostedLinqInviteSignupDispatchEffectIdTx,
 } from "@/src/lib/hosted-onboarding/linq-delivery-store";
@@ -1142,6 +1147,60 @@ describe("hosted Linq observability stores", () => {
     expect(updateData?.messageLookupKey).not.toBe("provider_message_123");
   });
 
+  it("records a runtime provider-dispatch fence before the provider call", async () => {
+    const fixture = createObservabilityPrismaFixture();
+    const attemptedAt = new Date("2026-03-26T12:00:00.000Z");
+
+    await expect(recordHostedLinqRuntimeProviderDispatchFenceTx({
+      attemptedAt,
+      idempotencyKey: "assistant-outbox:intent-123",
+      linqChatId: "chat_123",
+      prisma: fixture.prisma as never,
+      sourceRef: "intent-123",
+      targetKind: "thread",
+    })).resolves.toBeUndefined();
+
+    expect(fixture.hostedLinqDeliveryCreateMany).toHaveBeenCalledWith({
+      data: [expect.objectContaining({
+        attemptedAt,
+        linqChatLookupKey: expect.stringMatching(/^hbidx:linq-chat:/u),
+        source: "hosted_runtime_linq_delivery",
+        status: "provider_dispatch_started",
+        targetKind: "thread",
+      })],
+      skipDuplicates: true,
+    });
+  });
+
+  it("detects a recent unresolved dispatch for a transitioning chat", async () => {
+    const fixture = createObservabilityPrismaFixture();
+    fixture.hostedLinqDeliveryFindFirst.mockResolvedValueOnce({
+      id: "hld_in_flight",
+    });
+    const now = new Date("2026-03-26T12:30:00.000Z");
+
+    await expect(hasRecentHostedLinqProviderDispatchForChatTx({
+      linqChatId: "chat_123",
+      now,
+      prisma: fixture.prisma as never,
+    })).resolves.toBe(true);
+
+    expect(fixture.hostedLinqDeliveryFindFirst).toHaveBeenCalledWith({
+      select: { id: true },
+      where: expect.objectContaining({
+        attemptedAt: {
+          gt: new Date("2026-03-26T12:15:00.000Z"),
+        },
+        linqChatLookupKey: {
+          in: createHostedLinqChatLookupKeyReadCandidates("chat_123"),
+        },
+        status: {
+          in: ["attempted", "failed", "provider_dispatch_started"],
+        },
+      }),
+    });
+  });
+
   it("claims provider dispatch by creating the delivery idempotency row", async () => {
     const fixture = createObservabilityPrismaFixture();
     const attemptedAt = new Date("2026-03-26T12:00:00.000Z");
@@ -1776,6 +1835,31 @@ describe("hosted Linq observability stores", () => {
     });
     expect(fixture.hostedAiUsagePeriodUpdateMany).toHaveBeenCalledOnce();
     expect(fixture.transaction).toHaveBeenCalledOnce();
+  });
+
+  it("locks and revalidates chat authority before claiming an AI usage dispatch", async () => {
+    const fixture = createObservabilityPrismaFixture();
+    const assertDispatchAuthority = vi.fn().mockResolvedValue(undefined);
+
+    await expect(startHostedAiUsageLimitNoticeDispatchTx({
+      assertDispatchAuthority,
+      attemptedAt: new Date("2026-03-26T12:30:00.000Z"),
+      linqChatId: "chat_123",
+      memberId: "member_123",
+      periodStart: new Date("2026-03-01T00:00:00.000Z"),
+      prisma: fixture.prisma as never,
+      source: "hosted_webhook_side_effect",
+      sourceRef: "linq-message:event-123",
+      targetKind: "thread",
+    })).resolves.toMatchObject({ status: "claimed" });
+
+    expect(fixture.executeRaw).toHaveBeenCalledOnce();
+    expect(assertDispatchAuthority).toHaveBeenCalledWith(fixture.prisma);
+    const [lockOrder] = fixture.executeRaw.mock.invocationCallOrder;
+    const [authorityOrder] = assertDispatchAuthority.mock.invocationCallOrder;
+    const [claimOrder] = fixture.hostedLinqDeliveryCreateMany.mock.invocationCallOrder;
+    expect(Number(lockOrder)).toBeLessThan(Number(authorityOrder));
+    expect(Number(authorityOrder)).toBeLessThan(Number(claimOrder));
   });
 
   it("rolls back a new delivery row when another marker owner wins", async () => {

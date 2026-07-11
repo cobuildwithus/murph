@@ -2,6 +2,7 @@ import type { Prisma, PrismaClient } from "@prisma/client";
 
 import {
   createHostedLinqChatLookupKey,
+  createHostedLinqChatLookupKeyReadCandidates,
   createHostedLinqMessageLookupKey,
   createHostedLinqMessageLookupKeyReadCandidates,
   createHostedPhoneLookupKey,
@@ -31,6 +32,9 @@ import type { ParsedHostedLinqProviderEvent } from "./linq-provider-events";
 import { toHostedOnboardingLogIdSuffix } from "./logging";
 import { normalizePhoneNumber } from "./phone";
 import { generateHostedRandomPrefixedId, sha256Hex } from "../primitives";
+import {
+  acquireHostedLinqChatOwnershipLockTx,
+} from "../hosted-routing/linq-chat-ownership-lock";
 
 type HostedLinqDeliveryClient = PrismaClient | Prisma.TransactionClient;
 const HOSTED_LINQ_DELIVERY_PROVIDER_DISPATCH_STARTED_STATUS =
@@ -355,7 +359,90 @@ export async function claimHostedLinqDeliveryProviderDispatchTx(input: {
   });
 }
 
+export async function recordHostedLinqRuntimeProviderDispatchFenceTx(input: {
+  attemptedAt?: Date;
+  idempotencyKey?: string | null;
+  linqChatId?: string | null;
+  phoneNumber?: string | null;
+  prisma: HostedLinqDeliveryClient;
+  sourceRef?: string | null;
+  targetKind?: string | null;
+}): Promise<void> {
+  const attemptedAt = input.attemptedAt ?? new Date();
+  if (!normalizeNullable(input.idempotencyKey)) {
+    await recordHostedLinqDeliveryAttemptTx({
+      attemptedAt,
+      idempotencyKey: null,
+      linqChatId: input.linqChatId,
+      phoneNumber: input.phoneNumber,
+      prisma: input.prisma,
+      source: "hosted_runtime_linq_delivery",
+      sourceRef: input.sourceRef,
+      targetKind: input.targetKind,
+    });
+    return;
+  }
+
+  await claimHostedLinqDeliveryProviderDispatchTx({
+    attemptedAt,
+    idempotencyKey: input.idempotencyKey,
+    linqChatId: input.linqChatId,
+    phoneNumber: input.phoneNumber,
+    prisma: input.prisma,
+    source: "hosted_runtime_linq_delivery",
+    sourceRef: input.sourceRef,
+    status: HOSTED_LINQ_DELIVERY_PROVIDER_DISPATCH_STARTED_STATUS,
+    targetKind: input.targetKind,
+  });
+}
+
+export async function hasRecentHostedLinqProviderDispatchForChatTx(input: {
+  linqChatId: string;
+  now?: Date;
+  prisma: HostedLinqDeliveryClient;
+}): Promise<boolean> {
+  const linqChatLookupKeys = createHostedLinqChatLookupKeyReadCandidates(
+    input.linqChatId,
+  );
+  if (linqChatLookupKeys.length === 0) {
+    return false;
+  }
+
+  const now = input.now ?? new Date();
+  const staleAttemptBefore = new Date(
+    now.getTime() - HOSTED_AI_USAGE_LIMIT_NOTICE_CLAIM_STALE_MS,
+  );
+  const delivery = await input.prisma.hostedLinqDelivery.findFirst({
+    select: { id: true },
+    where: {
+      acceptedAt: null,
+      attemptedAt: {
+        gt: staleAttemptBefore,
+      },
+      deliveredAt: null,
+      lastReceiptAt: null,
+      linqChatLookupKey: {
+        in: linqChatLookupKeys,
+      },
+      messageLookupKey: null,
+      skippedAt: null,
+      status: {
+        in: [
+          "attempted",
+          "failed",
+          HOSTED_LINQ_DELIVERY_PROVIDER_DISPATCH_STARTED_STATUS,
+        ],
+      },
+    },
+  });
+
+  return delivery !== null;
+}
+
 export async function startHostedAiUsageLimitNoticeDispatchTx(input: {
+  assertDispatchAuthority?: (
+    prisma: Prisma.TransactionClient,
+  ) => Promise<void>;
   attemptedAt: Date;
   linqChatId?: string | null;
   memberId: string;
@@ -372,6 +459,14 @@ export async function startHostedAiUsageLimitNoticeDispatchTx(input: {
 
   try {
     return await input.prisma.$transaction(async (prisma) => {
+      if (input.linqChatId) {
+        await acquireHostedLinqChatOwnershipLockTx({
+          chatId: input.linqChatId,
+          tx: prisma,
+        });
+      }
+      await input.assertDispatchAuthority?.(prisma);
+
       const candidates = buildHostedLinqDeliveryClaimCandidates({
         currentIdempotencyKey: buildHostedAiUsageGateNoticeIdempotencyKey(input),
         legacyIdempotencyKeys: buildHostedAiUsageGateLegacyNoticeIdempotencyKeys(input),

@@ -154,6 +154,7 @@ export async function planHostedOnboardingLinqWebhook(input: {
   if (isHostedLinqGroupChat(messageEvent)) {
     await demoteHostedMemberLinqGroupChatBindingsTx({
       linqChatId: summary.chatId,
+      mailboxDedupeKey: input.event.event_id,
       prisma: input.prisma,
     });
   }

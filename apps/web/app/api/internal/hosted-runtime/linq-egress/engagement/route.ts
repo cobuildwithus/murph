@@ -12,6 +12,9 @@ import {
   assertHostedLinqRecentInboundEngagementForRuntime,
 } from "@/src/lib/hosted-onboarding/linq-egress-engagement";
 import {
+  recordHostedLinqRuntimeProviderDispatchFenceTx,
+} from "@/src/lib/hosted-onboarding/linq-delivery-store";
+import {
   hostedOnboardingError,
 } from "@/src/lib/hosted-onboarding/errors";
 import {
@@ -20,6 +23,9 @@ import {
 } from "@/src/lib/hosted-onboarding/http";
 import { readOptionalJsonObject } from "@/src/lib/http";
 import { getPrisma } from "@/src/lib/prisma";
+import {
+  acquireHostedLinqChatOwnershipLockTx,
+} from "@/src/lib/hosted-routing/linq-chat-ownership-lock";
 
 const HOSTED_LINQ_EGRESS_ENGAGEMENT_BODY_LIMIT_BYTES = 8 * 1024;
 
@@ -29,19 +35,74 @@ export const POST = withJsonError(async (request: Request) => {
   });
   const body = await readOptionalJsonObject(request);
   const routeAuthority = parseHostedLinqEgressRouteAuthority(body.routeAuthority);
+  const currentInbound = parseHostedLinqLegacyCurrentInboundProof(body.currentInbound);
+  const directRecipientPhoneNumber = readOptionalBodyString(
+    body.directRecipientPhoneNumber,
+  );
+  const fromPhoneNumber = readOptionalBodyString(body.fromPhoneNumber);
+  const idempotencyKey = readOptionalBodyString(body.idempotencyKey);
+  const intentId = readOptionalBodyString(body.intentId);
+  const replyToMessageId = readOptionalBodyString(body.replyToMessageId);
+  const target = readOptionalBodyString(body.target);
+  const targetKind = readOptionalBodyString(body.targetKind);
+  const prisma = getPrisma();
 
-  const assertion = await assertHostedLinqRecentInboundEngagementForRuntime({
-    currentInbound: parseHostedLinqLegacyCurrentInboundProof(body.currentInbound),
-    directRecipientPhoneNumber: readOptionalBodyString(body.directRecipientPhoneNumber),
-    fromPhoneNumber: readOptionalBodyString(body.fromPhoneNumber),
-    homeRouteFallbackAllowed: body.homeRouteFallbackAllowed === true,
-    idempotencyKey: readOptionalBodyString(body.idempotencyKey),
-    memberId: userId,
-    prisma: getPrisma(),
-    replyToMessageId: readOptionalBodyString(body.replyToMessageId),
-    routeAuthority,
-    target: readOptionalBodyString(body.target),
-    targetKind: readOptionalBodyString(body.targetKind),
+  const assertion = await prisma.$transaction(async (tx) => {
+    if (targetKind !== "participant" && target) {
+      await acquireHostedLinqChatOwnershipLockTx({
+        chatId: target,
+        tx,
+      });
+    }
+
+    const asserted = await assertHostedLinqRecentInboundEngagementForRuntime({
+      currentInbound,
+      directRecipientPhoneNumber,
+      fromPhoneNumber,
+      homeRouteFallbackAllowed: body.homeRouteFallbackAllowed === true,
+      idempotencyKey,
+      memberId: userId,
+      prisma: tx,
+      replyToMessageId,
+      routeAuthority,
+      target,
+      targetKind,
+    });
+    const providerTarget = asserted.targetOverride?.target ?? target;
+    const providerTargetKind = asserted.targetOverride?.targetKind ?? targetKind;
+    if (
+      providerTargetKind !== "participant"
+      && providerTarget
+      && providerTarget !== target
+    ) {
+      await acquireHostedLinqChatOwnershipLockTx({
+        chatId: providerTarget,
+        tx,
+      });
+      await assertHostedLinqRecentInboundEngagementForRuntime({
+        currentInbound,
+        directRecipientPhoneNumber,
+        fromPhoneNumber,
+        homeRouteFallbackAllowed: false,
+        idempotencyKey,
+        memberId: userId,
+        prisma: tx,
+        replyToMessageId,
+        routeAuthority,
+        target: providerTarget,
+        targetKind: providerTargetKind,
+      });
+    }
+
+    await recordHostedLinqRuntimeProviderDispatchFenceTx({
+      idempotencyKey,
+      linqChatId: providerTargetKind === "participant" ? null : providerTarget,
+      phoneNumber: fromPhoneNumber,
+      prisma: tx,
+      sourceRef: intentId ?? idempotencyKey,
+      targetKind: providerTargetKind,
+    });
+    return asserted;
   });
 
   return jsonOk({

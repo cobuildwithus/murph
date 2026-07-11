@@ -154,6 +154,8 @@ beforeEach(() => {
   vi.mocked(memberRoutingStore.demoteHostedMemberLinqGroupChatBindingsTx).mockReset();
   vi.mocked(memberRoutingStore.demoteHostedMemberLinqGroupChatBindingsTx).mockResolvedValue({
     homeBindingCount: 0,
+    mailboxItemCount: 0,
+    memberIds: [],
     pendingBindingCount: 0,
   });
   vi.mocked(linqClient.getHostedLinqChatSummary).mockResolvedValue({
@@ -1673,6 +1675,7 @@ describe("Linq group chat auto-provision", () => {
           memberRoutingStore.demoteHostedMemberLinqGroupChatBindingsTx,
         ).toHaveBeenCalledWith({
           linqChatId: "chat_group_123",
+          mailboxDedupeKey: "evt_group_123",
           prisma,
         });
         expect(mailboxStore.appendHostedMailboxEnvelopeTx).toHaveBeenCalledWith({
@@ -1854,6 +1857,7 @@ describe("Linq group chat auto-provision", () => {
         memberRoutingStore.demoteHostedMemberLinqGroupChatBindingsTx,
       ).toHaveBeenCalledWith({
         linqChatId: "chat_group_123",
+        mailboxDedupeKey: "evt_group_123",
         prisma,
       });
       expect(prisma.hostedThreadContainer.create).toHaveBeenCalledTimes(1);
@@ -2220,6 +2224,7 @@ describe("Linq group chat auto-provision", () => {
       memberRoutingStore.demoteHostedMemberLinqGroupChatBindingsTx,
     ).toHaveBeenCalledWith({
       linqChatId: "chat_group_123",
+      mailboxDedupeKey: "evt_group_123",
       prisma,
     });
     expect(prisma.hostedThreadContainer.create).not.toHaveBeenCalled();
