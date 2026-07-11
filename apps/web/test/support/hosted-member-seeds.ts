@@ -8,7 +8,6 @@ import {
 import {
   decodeHostedDeviceRoutingIndexKey,
 } from "../../src/lib/device-sync/routing-index";
-import type { Prisma } from "@prisma/client";
 
 const prismaModuleSpecifier = new URL("../../src/lib/prisma.ts", import.meta.url).href;
 const deviceSyncPrismaStoreModuleSpecifier = new URL(
@@ -171,10 +170,28 @@ export interface HostedJunctionDeviceSyncReplayDrainStatus {
   historicalBackfillStatus: string | null;
 }
 
+interface HostedMemberSeedTransactionClient {
+  hostedAccountGroup: {
+    create(input: { data: Record<string, unknown> }): Promise<unknown>;
+  };
+  hostedMember: {
+    update(input: {
+      data: Record<string, unknown>;
+      where: { id: string };
+    }): Promise<unknown>;
+  };
+  hostedMemberIdentity: {
+    findMany(input: {
+      select: { memberId: true };
+      where: { phoneLookupKey: { in: readonly string[] } };
+    }): Promise<Array<{ memberId: string }>>;
+  };
+}
+
 interface HostedMemberSeedPrismaClient {
   $disconnect(): Promise<void>;
   $transaction<T>(
-    callback: (tx: Prisma.TransactionClient) => Promise<T>,
+    callback: (tx: HostedMemberSeedTransactionClient) => Promise<T>,
   ): Promise<T>;
 }
 
