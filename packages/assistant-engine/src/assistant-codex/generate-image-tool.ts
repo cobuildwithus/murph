@@ -295,29 +295,21 @@ export async function executeGenerateImageTool(input: {
             } else {
               return {
                 rpcSuccess: false,
-                rpcText: input.env.NODE_ENV === 'test'
-                  ? `image generated but vault save failed (${resolvedCapture.status})`
-                  : 'image generated but vault save failed',
+                rpcText: 'image generated but vault save failed',
                 usageDraft,
               }
             }
-          } catch (lookupError) {
+          } catch {
             return {
               rpcSuccess: false,
-              rpcText: buildGeneratedImageVaultSaveFailureText({
-                env: input.env,
-                error: lookupError,
-              }),
+              rpcText: 'image generated but vault save failed',
               usageDraft,
             }
           }
         } else {
           return {
             rpcSuccess: false,
-            rpcText: buildGeneratedImageVaultSaveFailureText({
-              env: input.env,
-              error,
-            }),
+            rpcText: 'image generated but vault save failed',
             usageDraft,
           }
         }
@@ -380,38 +372,6 @@ export async function executeGenerateImageTool(input: {
       usageDraft,
     }
   }
-}
-
-function buildGeneratedImageVaultSaveFailureText(input: {
-  env: NodeJS.ProcessEnv
-  error: unknown
-}): string {
-  const message = 'image generated but vault save failed'
-  if (input.env.NODE_ENV !== 'test') {
-    return message
-  }
-
-  const code = readGeneratedImageVaultSaveFailureCode(input.error)
-  return `${message} (${code})`
-}
-
-function readGeneratedImageVaultSaveFailureCode(error: unknown): string {
-  if (isVaultError(error)) {
-    return error.code
-  }
-  if (
-    error &&
-    typeof error === 'object' &&
-    'code' in error &&
-    typeof error.code === 'string' &&
-    /^[A-Z0-9_]{1,64}$/u.test(error.code)
-  ) {
-    return error.code
-  }
-  if (error instanceof Error && /^[A-Za-z][A-Za-z0-9_]{0,63}$/u.test(error.name)) {
-    return error.name
-  }
-  return 'unclassified'
 }
 
 function hasVaultReferenceImageRef(refs: readonly string[]): boolean {
