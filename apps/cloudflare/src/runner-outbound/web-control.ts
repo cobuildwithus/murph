@@ -300,7 +300,7 @@ export async function handleRunnerWebControlRequest(input: {
     try {
       parseHostedWorkspaceCheckpointResponse(await response.clone().json());
     } catch {
-      return unauthorized();
+      return jsonError("Hosted workspace checkpoint response was invalid.", 502);
     }
   }
 
