@@ -1,8 +1,8 @@
 # Bind hosted web sessions to server-held authority
 
-Status: active
+Status: completed
 Created: 2026-07-10
-Updated: 2026-07-10
+Updated: 2026-07-11
 
 ## Goal
 
@@ -53,3 +53,4 @@ Updated: 2026-07-10
 
 - Commands to run: focused hosted app-session and browser-vault Vitest; `pnpm test:diff` for the touched `apps/web` slice; `pnpm verify:acceptance`; `git diff --check`; required completion audits; PR ReviewGPT and CI.
 - Expected outcomes: synthetic or mutated database rows cannot authenticate, valid newly issued sessions retain current behavior, all required gates pass, and no secret or personal identifier appears in the diff.
+Completed: 2026-07-11
