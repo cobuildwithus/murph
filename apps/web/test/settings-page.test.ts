@@ -54,6 +54,7 @@ const mocks = vi.hoisted(() => ({
     currentCheckoutOffer?: unknown;
     currentBillingPlanCode?: unknown;
     familyState?: "none" | "owner" | "sponsored";
+    usageStatus?: unknown;
   }) =>
     React.createElement(
       "div",
@@ -83,6 +84,7 @@ const mocks = vi.hoisted(() => ({
   readHostedAccountSettingsSnapshot: vi.fn(),
   readHostedMemberStripeBillingRef: vi.fn(),
   readHostedMemberRoutingState: vi.fn(),
+  readHostedPersonalAiUsageStatus: vi.fn(),
   readHostedSecureApprovalStatus: vi.fn(),
   withServerApprovedPrivyAccountHints: vi.fn((input: {
     serverApprovedPrivyLinkedAccounts?: unknown;
@@ -118,6 +120,10 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-routing-store", () => ({
 
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-billing-store", () => ({
   readHostedMemberStripeBillingRef: mocks.readHostedMemberStripeBillingRef,
+}));
+
+vi.mock("@/src/lib/hosted-execution/usage-status", () => ({
+  readHostedPersonalAiUsageStatus: mocks.readHostedPersonalAiUsageStatus,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/account-settings-snapshot", () => ({
@@ -192,6 +198,12 @@ beforeEach(() => {
   vi.clearAllMocks();
   mocks.readHostedFamilyAccessForMember.mockResolvedValue(null);
   mocks.readHostedFamilyOwnerSnapshotForMember.mockResolvedValue(null);
+  mocks.readHostedPersonalAiUsageStatus.mockResolvedValue({
+    generatedAt: "2026-07-10T12:00:00.000Z",
+    reason: "hosted_access_inactive",
+    recommendedAction: null,
+    status: "unavailable",
+  });
   mocks.readHostedSecureApprovalStatus.mockResolvedValue({ status: "unavailable" });
 });
 
@@ -374,6 +386,21 @@ test("SettingsPage reads the app session and persisted account settings into the
   };
   mocks.readHostedAccountSettingsSnapshot.mockResolvedValue(accountSnapshot);
   mocks.readHostedSecureApprovalStatus.mockResolvedValue({ status: "configured" });
+  const usageStatus = {
+    accessKind: "paid",
+    forecast: null,
+    generatedAt: "2026-07-10T12:00:00.000Z",
+    periodEnd: "2026-08-01T00:00:00.000Z",
+    periodKind: "monthly",
+    periodStart: "2026-07-01T00:00:00.000Z",
+    planCode: "launch_monthly",
+    planName: "Pulse",
+    recommendedAction: null,
+    remainingPercent: 68,
+    status: "active",
+    usedPercent: 32,
+  } as const;
+  mocks.readHostedPersonalAiUsageStatus.mockResolvedValue(usageStatus);
 
   try {
     const { default: SettingsPage } = await import("../app/(dashboard)/settings/page");
@@ -391,6 +418,7 @@ test("SettingsPage reads the app session and persisted account settings into the
     assert.match(markup, /Hosted data privacy settings/);
     assert.match(markup, /Your account/);
     assert.match(markup, /Plan, model, connected accounts, and data privacy\./);
+    assert.match(markup, /id="subscription"/);
     assert.doesNotMatch(markup, /ChatGPT/);
     assert.doesNotMatch(markup, /Data sources/);
     for (const removedCopy of [
@@ -410,6 +438,7 @@ test("SettingsPage reads the app session and persisted account settings into the
       currentBillingPhase: "paid",
       currentCheckoutOffer: "standard",
       currentBillingPlanCode: "launch_monthly",
+      usageStatus,
     }), undefined);
     expect(mocks.HostedAssistantModelSettings).toHaveBeenCalledWith({
       canUpgradeToEdge: true,
@@ -426,6 +455,10 @@ test("SettingsPage reads the app session and persisted account settings into the
     });
     expect(mocks.readHostedAccountSettingsSnapshot).toHaveBeenCalledWith({
       memberId: "member_123",
+    });
+    expect(mocks.readHostedPersonalAiUsageStatus).toHaveBeenCalledWith({
+      memberId: "member_123",
+      prisma: mocks.prisma,
     });
     expect(mocks.readHostedSecureApprovalStatus).toHaveBeenCalledWith({
       privyUserId: "did:privy:user_123",

@@ -231,6 +231,9 @@ type RuntimeDeviceSyncPort = NonNullable<
 type RuntimeUsageRecordPort = NonNullable<
   HostedWorkspaceRuntimeAssistantPhaseInput["runtime"]["platform"]["usageRecordPort"]
 >;
+type RuntimePlanUsageToolPort = NonNullable<
+  HostedWorkspaceRuntimeAssistantPhaseInput["runtime"]["platform"]["planUsageToolPort"]
+>;
 type RuntimeDeviceSyncConnectLinkRequest = Parameters<
   RuntimeDeviceSyncPort["createConnectLink"]
 >[0];
@@ -921,6 +924,50 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       "checkpoint",
       "record:turn_direct_usage.attempt-1",
     ]);
+  });
+
+  it("projects the runtime plan-usage port into the hosted assistant context", async () => {
+    const read = vi.fn(async () => ({
+      accessKind: "paid" as const,
+      forecast: null,
+      generatedAt: "2026-07-10T12:00:00.000Z",
+      periodEnd: "2026-08-01T00:00:00.000Z",
+      periodKind: "monthly" as const,
+      periodStart: "2026-07-01T00:00:00.000Z",
+      planCode: "launch_monthly" as const,
+      planName: "Pulse" as const,
+      recommendedAction: null,
+      remainingPercent: 75,
+      status: "active" as const,
+      usedPercent: 25,
+    }));
+    const planUsageToolPort = { read } satisfies RuntimePlanUsageToolPort;
+
+    await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      runtimePlanUsageToolPort: planUsageToolPort,
+    }));
+
+    const hydratedContext = mocks.hydrateHostedExecutionDefaultTarget.mock.calls[0]?.[0];
+    const projectedPlanUsageTool = hydratedContext?.hosted?.planUsageTool;
+    expect(projectedPlanUsageTool).toBe(planUsageToolPort);
+    expect(mocks.runHostedAssistantAutomationLane).toHaveBeenCalledWith(
+      expect.objectContaining({
+        executionContext: expect.objectContaining({
+          hosted: expect.objectContaining({
+            planUsageTool: planUsageToolPort,
+          }),
+        }),
+      }),
+    );
+    if (!projectedPlanUsageTool) {
+      throw new Error("Expected the hosted plan-usage tool projection.");
+    }
+    await expect(projectedPlanUsageTool.read()).resolves.toMatchObject({
+      planName: "Pulse",
+      remainingPercent: 75,
+      usedPercent: 25,
+    });
+    expect(read).toHaveBeenCalledOnce();
   });
 
   it("flushes deferred usage after existing post-checkpoint work", async () => {
@@ -12177,6 +12224,7 @@ function createPhaseInput(input: {
   runtimeActionApprovalPort?: NonNullable<
     HostedWorkspaceRuntimeAssistantPhaseInput["runtime"]["platform"]["actionApprovalPort"]
   >;
+  runtimePlanUsageToolPort?: RuntimePlanUsageToolPort;
   runtimeUsageRecordPort?: RuntimeUsageRecordPort;
   runtimeUserEnv?: Record<string, string>;
   vaultRoot?: string;
@@ -12290,6 +12338,9 @@ function createPhaseInput(input: {
         ...(input.runtimeDeviceSyncPort ? { deviceSyncPort: input.runtimeDeviceSyncPort } : {}),
         ...(input.runtimeActionApprovalPort
           ? { actionApprovalPort: input.runtimeActionApprovalPort }
+          : {}),
+        ...(input.runtimePlanUsageToolPort
+          ? { planUsageToolPort: input.runtimePlanUsageToolPort }
           : {}),
         ...(input.runtimeUsageRecordPort ? { usageRecordPort: input.runtimeUsageRecordPort } : {}),
         ...(input.runtimeLatencyTraceRequests

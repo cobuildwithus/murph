@@ -1060,6 +1060,26 @@ describe("accountHostedAiUsageForAllowanceTx", () => {
     });
   });
 
+  it("accounts a thread-container crossing without creating a proactive notice", async () => {
+    const executeRaw = vi.fn<AllowanceExecuteRaw>(async () => 1);
+    const tx = createAllowanceTx({
+      executeRaw,
+      hostedAiUsageUpdateMany: vi.fn(async () => ({ count: 1 })),
+      limitUsdMicros: 4_500_000n,
+      spentUsdMicros: 4_499_000n,
+      threadContainerLimitUsdMicros: 4_500_000n,
+    });
+
+    await expect(accountHostedAiUsageForAllowanceTx({
+      memberId: "member_123",
+      now: new Date("2026-03-29T12:00:05.000Z"),
+      record: BASE_USAGE_RECORD,
+      tx: tx as never,
+    })).resolves.toBeNull();
+
+    expect(executeRaw).toHaveBeenCalledTimes(1);
+  });
+
   it("does not return a limit-notice candidate when the period was already blocked", async () => {
     const tx = createAllowanceTx({
       blockedAt: new Date("2026-03-29T11:59:00.000Z"),
@@ -2534,6 +2554,7 @@ describe("readHostedAiUsageGate", () => {
       prisma: prisma as never,
     })).resolves.toMatchObject({
       allowed: true,
+      allowanceSource: "thread_container",
       limitUsdMicros: 4_500_000n,
       remainingUsdMicros: 3_500_000n,
       spentUsdMicros: 1_000_000n,
@@ -2541,6 +2562,26 @@ describe("readHostedAiUsageGate", () => {
 
     expect(prisma.hostedAiUsagePeriod.createMany).not.toHaveBeenCalled();
     expect(prisma.hostedAiUsagePeriod.update).not.toHaveBeenCalled();
+  });
+
+  it("uses a thread-specific notice when a thread container reaches its cap", async () => {
+    const prisma = createGatePrisma({
+      spentUsdMicros: 4_500_000n,
+      threadContainerLimitUsdMicros: 4_500_000n,
+    });
+
+    await expect(readHostedAiUsageGate({
+      memberId: "member_123",
+      now: "2026-03-29T12:00:00.000Z",
+      prisma: prisma as never,
+    })).resolves.toMatchObject({
+      allowed: false,
+      reason: "ai_usage_limit_exceeded",
+      userNotice: {
+        code: "thread_usage_limit_reached",
+        message: expect.not.stringContaining("https://"),
+      },
+    });
   });
 
   it("allows a not_started container member through its active owner", async () => {
@@ -2595,6 +2636,7 @@ describe("readHostedAiUsageGate", () => {
       prisma: prisma as never,
     })).resolves.toMatchObject({
       allowed: false,
+      allowanceSource: "thread_container",
       reason: "hosted_access_inactive",
     });
   });
@@ -2613,6 +2655,7 @@ describe("readHostedAiUsageGate", () => {
       prisma: prisma as never,
     })).resolves.toMatchObject({
       allowed: false,
+      allowanceSource: "thread_container",
       limitUsdMicros: 4_500_000n,
       reason: "hosted_access_inactive",
       remainingUsdMicros: 0n,
@@ -2871,6 +2914,7 @@ function createAllowanceTx(input: {
   pulseTrialPolicyVersion?: string | null;
   pulseTrialRedeemedAt?: Date | null;
   spentUsdMicros?: bigint;
+  threadContainerLimitUsdMicros?: bigint | null;
   trialEndsAt?: Date | null;
   trialStartedAt?: Date | null;
 }) {
@@ -2891,6 +2935,16 @@ function createAllowanceTx(input: {
         allowanceCostUsdMicros: 1896n,
       },
     });
+  const threadContainer = input.threadContainerLimitUsdMicros == null
+    ? null
+    : {
+        monthlyUsageLimitUsdMicros: input.threadContainerLimitUsdMicros,
+        owner: {
+          accountGroupMemberships: [],
+          billingStatus: HostedBillingStatus.active,
+          suspendedAt: null,
+        },
+      };
 
   return {
     $executeRaw: input.executeRaw,
@@ -2976,6 +3030,7 @@ function createAllowanceTx(input: {
         billingStatus: HostedBillingStatus.active,
         id: "member_123",
         suspendedAt: null,
+        threadContainer,
       })),
     },
   };

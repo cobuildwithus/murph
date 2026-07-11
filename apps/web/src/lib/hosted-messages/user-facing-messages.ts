@@ -10,6 +10,7 @@ const USER_FACING_MESSAGE_TEMPLATE_KEYS = [
   "linq.ai_usage.trial_limit_reached",
   "linq.ai_usage.edge_limit_reached",
   "linq.ai_usage.family_limit_reached",
+  "linq.ai_usage.thread_limit_reached",
   "linq.ai_usage.pulse_upgrade_edge",
 ] as const
 
@@ -40,6 +41,7 @@ export interface UserFacingMessageContextByKey {
   "linq.ai_usage.family_limit_reached": {
     homeUrl: string
   }
+  "linq.ai_usage.thread_limit_reached": Record<string, never>
   "linq.ai_usage.pulse_upgrade_edge": {
     homeUrl: string
   }
@@ -485,46 +487,68 @@ Sound good?`,
 {homeUrl}`,
   ],
   "linq.ai_usage.family_limit_reached": [
-    `Hit the family plan's monthly allowance. I'll resume when that resets:
+    `I've reached the included usage on your Family access this month. I'll resume when it resets:
 {homeUrl}`,
-    `The family usage allowance is spent for the month. Replies pick back up at reset:
+    `Your included Family usage is spent for the month. Replies pick back up at reset:
 {homeUrl}`,
-    `Monthly family allowance reached. I come back when the plan resets:
+    `Monthly usage on your Family access is reached. I come back when it resets:
 {homeUrl}`,
-    `That's the family plan's AI allowance for this period. Back at reset:
+    `That's the included usage on your Family access for this period. Back at reset:
 {homeUrl}`,
-    `Out of family-plan usage for the month. I'll resume after the reset:
+    `Out of your included Family usage for the month. I'll resume after the reset:
 {homeUrl}`,
-    `Reached the family usage cap. Replies return when the allowance refreshes:
+    `Reached your Family usage limit. Replies return when the allowance refreshes:
 {homeUrl}`,
-    `The shared allowance is used this month. I'll be back after reset:
+    `Your included Family usage is used this month. I'll be back after reset:
 {homeUrl}`,
-    `Family plan usage is maxed for now. Reset brings replies back:
+    `Your Family usage is maxed for now. Reset brings replies back:
 {homeUrl}`,
-    `This month's family allowance is done. Account details are here:
+    `This month's included Family usage is done. Account details are here:
 {homeUrl}`,
-    `Heads up, the family plan hit its monthly usage cap. I resume at reset:
+    `Heads up, your Family access hit its monthly usage limit. I resume at reset:
 {homeUrl}`,
-    `The family allowance is tapped out for the month. I'll pick up after reset:
+    `Your included Family usage is tapped out for the month. I'll pick up after reset:
 {homeUrl}`,
-    `Shared usage is spent this period. Replies restart when it resets:
+    `Your Family usage is spent this period. Replies restart when it resets:
 {homeUrl}`,
-    `Family usage limit reached. I'll be ready again at the next reset:
+    `Your Family usage limit is reached. I'll be ready again at the next reset:
 {homeUrl}`,
-    `The family plan is through this month's allowance. Back when it refreshes:
+    `Your Family access is through this month's included usage. Back when it refreshes:
 {homeUrl}`,
-    `Used up the family plan's AI for this period. I return after reset:
+    `Used up your included Family usage for this period. I return after reset:
 {homeUrl}`,
-    `No more family-plan usage this month. The reset turns replies back on:
+    `No more included Family usage this month. The reset turns replies back on:
 {homeUrl}`,
-    `This period's family allowance is used. I'll resume when it renews:
+    `This period's included Family usage is used. I'll resume when it renews:
 {homeUrl}`,
-    `Family cap reached for the month. Check account details here:
+    `Your Family usage limit is reached for the month. Check account details here:
 {homeUrl}`,
-    `The shared monthly cap is hit. I'll pick this up after reset:
+    `Your monthly Family usage limit is hit. I'll pick this up after reset:
 {homeUrl}`,
-    `Family usage is done for this month. Reset is when I come back:
+    `Your included Family usage is done for this month. Reset is when I come back:
 {homeUrl}`,
+  ],
+  "linq.ai_usage.thread_limit_reached": [
+    `This chat has used its included Murph usage for the month. I'll reply again after it resets.`,
+    `The included Murph usage for this chat is used for the month. Replies pick back up at reset.`,
+    `This chat reached its monthly Murph usage limit. I'll be back after the reset.`,
+    `That's the included Murph usage for this chat this month. Replies resume when it resets.`,
+    `This chat is out of included Murph usage for the month. I'll reply again after reset.`,
+    `The monthly Murph usage for this chat is used. I come back when it refreshes.`,
+    `This chat hit its included usage limit for the month. Replies return at reset.`,
+    `Included Murph usage is maxed for this chat this month. Reset brings replies back.`,
+    `This month's included Murph usage for the chat is done. Replies resume after reset.`,
+    `Heads up, this chat reached its monthly included usage. I resume at reset.`,
+    `The chat's included Murph usage is tapped out for the month. I'll pick up after reset.`,
+    `This chat's monthly usage is spent. Replies restart when it resets.`,
+    `This chat reached its Murph usage limit. I'll be ready again at the next reset.`,
+    `The chat is through its included Murph usage for the month. Back when it refreshes.`,
+    `Used up the included Murph usage for this chat this month. I return after reset.`,
+    `No more included Murph usage in this chat this month. The reset turns replies back on.`,
+    `This chat's included usage is used for the period. I'll resume when it renews.`,
+    `This chat hit its monthly Murph limit. Replies return after reset.`,
+    `The chat's monthly included usage is reached. I'll pick this up after reset.`,
+    `Included Murph usage is done for this chat this month. Reset is when I come back.`,
   ],
   "linq.ai_usage.pulse_upgrade_edge": [
     `Hit this month's cap. Upgrade for more room if you want it: {homeUrl}`,

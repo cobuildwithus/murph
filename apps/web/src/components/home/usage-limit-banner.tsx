@@ -15,6 +15,7 @@ const resettableMonthlyNoticeCodes = new Set<HostedAiUsageGateNoticeCode>([
   "edge_usage_limit_reached",
   "family_usage_limit_reached",
   "pulse_upgrade_edge",
+  "thread_usage_limit_reached",
 ]);
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
@@ -42,6 +43,11 @@ const usageLimitBannerCopy: Record<
     body: "Upgrade to Edge for more, or wait for your reset.",
     title: "You've hit this month's limit",
   },
+  thread_usage_limit_reached: {
+    action: "View settings",
+    body: "Murph will start replying in this chat again when its included usage resets.",
+    title: "This chat has hit its monthly limit",
+  },
   trial_conversion_pending: {
     action: "Open billing",
     body: "Start Pulse to keep Murph replying.",
@@ -60,7 +66,11 @@ export function UsageLimitBanner({ noticeCode, now, resetAt }: UsageLimitBannerP
 
   return (
     <section
-      aria-label="Account notice"
+      aria-label={
+        noticeCode === "thread_usage_limit_reached"
+          ? "Chat usage notice"
+          : "Account notice"
+      }
       className="flex flex-col gap-5 rounded-lg border border-[#c4a882]/25 border-l-[3px] border-l-[#7a8c6e] bg-[rgba(255,252,246,0.9)] p-5 sm:flex-row sm:items-center sm:justify-between sm:p-6"
     >
       <div className="min-w-0">
@@ -77,7 +87,8 @@ export function UsageLimitBanner({ noticeCode, now, resetAt }: UsageLimitBannerP
         </p>
       </div>
 
-      {noticeCode === "pulse_upgrade_edge" ? (
+      {noticeCode === "thread_usage_limit_reached" ? null
+      : noticeCode === "pulse_upgrade_edge" ? (
         <UpgradeToEdgeButton presentation="banner">
           {copy.action}
         </UpgradeToEdgeButton>

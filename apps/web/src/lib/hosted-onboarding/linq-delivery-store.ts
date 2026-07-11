@@ -545,6 +545,7 @@ function buildHostedAiUsageGateLegacyNoticeIdempotencyKeys(input: {
     "edge_usage_limit_reached",
     "family_usage_limit_reached",
     "pulse_upgrade_edge",
+    "thread_usage_limit_reached",
     "trial_usage_limit_reached",
   ].map((noticeCode) => `ai-usage-gate:${sha256Hex(JSON.stringify({
     memberId: input.memberId,

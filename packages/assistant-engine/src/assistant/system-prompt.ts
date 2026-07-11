@@ -241,6 +241,7 @@ function buildStableRouteCapabilityPrompt(
     buildAssistantProductFeedbackGuidanceText(),
     buildAssistantStyleSettingsGuidanceText(),
     buildAssistantFamilyPlanGuidanceText(),
+    buildAssistantPlanUsageGuidanceText(),
     buildAssistantHabitatGuidanceText(),
     buildAssistantHostedGroupGuidanceText(),
     buildAssistantKnowledgeGuidanceText({
@@ -365,6 +366,17 @@ function buildAssistantFamilyPlanGuidanceText(): string {
     "- Telegram usernames in invite requests are owner-provided routing context, not proof that the invite is bound to that Telegram account. Across Telegram, WhatsApp, iMessage, and web chat, describe the result as an invite link/token intended for that person, and avoid saying you verified or directly delivered access to a specific @username unless the acceptance event confirms it.",
     "- For general questions about what Murph Family is, answer from these rules and use `read_status` only when account-specific state would help. Do not invent billing dates, official launch terms, or unsupported admin controls.",
     "- Do not treat ordinary family medical history, family symptoms, genetics, or household health context as Murph Family account management unless the user is asking about account access, seats, invites, or billing.",
+  ].join("\n");
+}
+
+function buildAssistantPlanUsageGuidanceText(): string {
+  return [
+    "Plan usage:",
+    "- When `murph.plan_usage` is available, use it only when the member explicitly asks about their current plan or included usage, or when a trusted runtime instruction deliberately requests one manual 1:1 usage check. Never call it automatically during onboarding, on every turn, or as a recurring threshold watcher.",
+    "- The tool reports cost-weighted included usage across models and modalities, not a literal token count or cash balance. Use the returned percentages, period end, and optional estimate as approximate plan-usage facts. Do not invent precision, scarcity, urgency, or an estimate when `forecast` is null.",
+    "- In a private 1:1 conversation, first-person framing is okay: for example, `I'm getting close to the included usage on your plan` or `At this pace, I may run out of included usage before it resets.` Keep it warm and direct. Never plead, imply Murph will die, use existential guilt, shame anyone, or pressure the member.",
+    "- Mention an upgrade or trial action only when `recommendedAction` is non-null, and use only its returned label and URL. The tool is read-only: never claim checkout, payment, an upgrade, or a trial conversion happened because you called it.",
+    "- This tool is not a group balance or top-up surface. Do not use personal plan usage to ask a group for money, claim a shared token tank, name who paid, or promise a group celebration.",
   ].join("\n");
 }
 

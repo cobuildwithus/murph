@@ -1,7 +1,9 @@
 import type { ReactNode } from "react";
 import { CheckIcon } from "lucide-react";
+import type { HostedPlanUsageStatus } from "@murphai/hosted-execution/plan-usage";
 
 import { Button } from "@/src/components/ui/button";
+import { Progress } from "@/src/components/ui/progress";
 import {
   HOSTED_FAMILY_PLAN_DISPLAY,
   HOSTED_PULSE_TRIAL_OFFER,
@@ -66,6 +68,7 @@ export function HostedBillingSettings(props: {
   familyState?: "none" | "owner" | "sponsored";
   scheduledBillingEffectiveAt?: Date | null;
   scheduledBillingPlanCode?: unknown;
+  usageStatus?: HostedPlanUsageStatus | null;
 }) {
   if (!props.authenticated) {
     return (
@@ -174,6 +177,11 @@ export function HostedBillingSettings(props: {
       {!planResolved ? (
         <p className="text-sm text-pretty text-muted-foreground">{noPlanText}</p>
       ) : null}
+      <PlanUsageBand
+        canStartPaidPulse={props.canStartPaidPulse === true}
+        canUpgradeToEdge={props.canUpgradeToEdge === true}
+        status={props.usageStatus}
+      />
       <div className="grid items-stretch gap-3 sm:grid-cols-3">
         {cards.map((card) => (
           <PlanCard key={card.key} card={card} />
@@ -191,6 +199,74 @@ export function HostedBillingSettings(props: {
             label={familyOwner ? "Manage Family billing" : "Manage billing"}
           />
         )}
+      </div>
+    </div>
+  );
+}
+
+function PlanUsageBand(props: {
+  canStartPaidPulse: boolean;
+  canUpgradeToEdge: boolean;
+  status?: HostedPlanUsageStatus | null;
+}) {
+  if (!props.status || props.status.status === "unavailable") {
+    return null;
+  }
+
+  const { status } = props;
+  const periodEndLabel = formatHostedBillingDate(new Date(status.periodEnd));
+  const periodLabel = status.periodKind === "trial"
+    ? `Trial ends ${periodEndLabel}`
+    : `Resets ${periodEndLabel}`;
+  const action = status.recommendedAction;
+  const forecast = status.forecast
+    ? `At your recent pace, included usage may run out in about ${status.forecast.estimatedDaysRemaining} ${status.forecast.estimatedDaysRemaining === 1 ? "day" : "days"}.`
+    : null;
+
+  return (
+    <div
+      aria-label={`${status.planName} included AI usage`}
+      className="flex flex-col gap-4 rounded-xl border border-border bg-card p-4 sm:p-5"
+    >
+      <div className="flex flex-col gap-1 sm:flex-row sm:items-baseline sm:justify-between sm:gap-4">
+        <div>
+          <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+            Included AI usage
+          </p>
+          <p className="mt-1 font-serif text-xl font-semibold tracking-tight text-foreground">
+            {status.planName}
+          </p>
+        </div>
+        <p className="text-sm text-muted-foreground">{periodLabel}</p>
+      </div>
+
+      <Progress
+        aria-label={`${status.usedPercent}% used, ${status.remainingPercent}% remaining`}
+        value={status.usedPercent}
+      />
+
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-6">
+        <div className="flex flex-col gap-1">
+          <p className="text-sm font-medium tabular-nums text-foreground">
+            {status.usedPercent}% used
+            <span className="font-normal text-muted-foreground">
+              {` · ${status.remainingPercent}% remaining`}
+            </span>
+          </p>
+          {status.status === "exhausted" ? (
+            <p className="text-sm text-muted-foreground">
+              Included usage is used up for this period.
+            </p>
+          ) : forecast ? (
+            <p className="text-sm text-pretty text-muted-foreground">{forecast}</p>
+          ) : null}
+        </div>
+
+        {action?.kind === "start_pulse" && props.canStartPaidPulse ? (
+          <StartPaidPulseButton>{action.label}</StartPaidPulseButton>
+        ) : action?.kind === "upgrade_edge" && props.canUpgradeToEdge ? (
+          <UpgradeToEdgeButton>{action.label}</UpgradeToEdgeButton>
+        ) : null}
       </div>
     </div>
   );

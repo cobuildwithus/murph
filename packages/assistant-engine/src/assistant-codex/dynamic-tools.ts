@@ -349,6 +349,18 @@ export const MURPH_FAMILY_PLAN_TOOL = {
   },
 } as const
 
+export const MURPH_PLAN_USAGE_TOOL = {
+  namespace: 'murph',
+  name: 'plan_usage',
+  description:
+    'Read the current hosted member\'s cost-weighted included usage, reset or trial-end date, and any server-authorized plan action. Use only for an explicit plan/usage question or a deliberately chosen manual 1:1 usage check. This read-only tool does not change billing. Do not use it for automatic onboarding nudges, group balances, or group top-ups.',
+  inputSchema: {
+    type: 'object',
+    additionalProperties: false,
+    properties: {},
+  },
+} as const
+
 const GROUP_VAULT_SHARE_FIXED_PROJECTION_SCOPE_SCHEMA = {
   type: 'object',
   additionalProperties: false,
@@ -807,6 +819,7 @@ const MURPH_BASE_DYNAMIC_TOOLS = [
   MURPH_GENERATE_IMAGE_TOOL,
   MURPH_GENERATE_VOICE_MEMO_TOOL,
   MURPH_FAMILY_PLAN_TOOL,
+  MURPH_PLAN_USAGE_TOOL,
   MURPH_GROUP_TOOL,
   MURPH_NEWSLETTER_TOOL,
   MURPH_GENERATE_SONG_TOOL,
@@ -840,6 +853,7 @@ export interface MurphDynamicToolAvailability {
   progressUpdatesAvailable?: boolean | null
   connectedAppsAvailable?: boolean | null
   familyPlanAvailable?: boolean | null
+  planUsageAvailable?: boolean | null
   groupAvailable?: boolean | null
   newsletterAvailable?: boolean | null
   productFeedbackAvailable?: boolean | null
@@ -871,6 +885,7 @@ const TOOL_AVAILABILITY: ReadonlyMap<MurphDynamicTool, AvailabilityPredicate> =
     [MURPH_REACT_TO_MESSAGE_TOOL, defaultOff((a) => a.allowMessageReactions)],
     [MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL, defaultOff((a) => a.productFeedbackAvailable)],
     [MURPH_FAMILY_PLAN_TOOL, defaultOff((a) => a.familyPlanAvailable)],
+    [MURPH_PLAN_USAGE_TOOL, defaultOff((a) => a.planUsageAvailable)],
     [MURPH_GROUP_TOOL, defaultOff((a) => a.groupAvailable)],
     [MURPH_NEWSLETTER_TOOL, defaultOff((a) => a.newsletterAvailable)],
     [MURPH_GENERATE_VOICE_MEMO_TOOL, defaultOff((a) => a.voiceMemoGenerationAvailable)],
@@ -1105,6 +1120,7 @@ const sendVaultFileArgumentsSchema = z
   .strict()
 
 const finishWithoutReplyArgumentsSchema = z.object({}).strict()
+const planUsageArgumentsSchema = z.object({}).strict()
 
 const submitProductFeedbackArgumentsSchema = z
   .object({
@@ -1454,6 +1470,10 @@ export type MurphDynamicToolRequest =
       validationDigest: SafeToolCallValidationDigest
     }
   | {
+      kind: 'invalid-plan-usage-arguments'
+      validationDigest: SafeToolCallValidationDigest
+    }
+  | {
       kind: 'invalid-group-arguments'
       validationDigest: SafeToolCallValidationDigest
     }
@@ -1464,6 +1484,9 @@ export type MurphDynamicToolRequest =
   | {
       kind: 'family-plan'
       request: HostedRuntimeFamilyPlanToolRequest
+    }
+  | {
+      kind: 'plan-usage'
     }
   | {
       kind: 'group'
@@ -1640,6 +1663,18 @@ export function readMurphDynamicToolRequest(
       return {
         kind: 'family-plan',
         request: parsed.request,
+      }
+    }
+    case MURPH_PLAN_USAGE_TOOL.name: {
+      const parsed = parsePlanUsageArguments(request.arguments)
+      if (!parsed.ok) {
+        return {
+          kind: 'invalid-plan-usage-arguments',
+          validationDigest: parsed.validationDigest,
+        }
+      }
+      return {
+        kind: 'plan-usage',
       }
     }
     case MURPH_GROUP_TOOL.name: {
@@ -1883,6 +1918,8 @@ export async function executeMurphDynamicToolRequest(input: {
       return toolTextResult(false, 'invalid product feedback arguments')
     case 'invalid-family-plan-arguments':
       return toolTextResult(false, 'invalid family plan arguments')
+    case 'invalid-plan-usage-arguments':
+      return toolTextResult(false, 'invalid plan usage arguments')
     case 'invalid-group-arguments':
       return toolTextResult(false, 'invalid group arguments')
     case 'invalid-newsletter-arguments':
@@ -2023,6 +2060,10 @@ export async function executeMurphDynamicToolRequest(input: {
       return await executeFamilyPlanTool({
         hostedToolContext: input.hostedToolContext ?? null,
         request: input.request.request,
+      })
+    case 'plan-usage':
+      return await executePlanUsageTool({
+        hostedToolContext: input.hostedToolContext ?? null,
       })
     case 'group':
       return await executeGroupTool({
@@ -2259,6 +2300,21 @@ async function executeFamilyPlanTool(input: {
     return toolTextResult(true, safeToolPayloadText(result))
   } catch {
     return toolTextResult(false, 'family plan tool request failed')
+  }
+}
+
+async function executePlanUsageTool(input: {
+  hostedToolContext: AssistantHostedToolContext | null
+}): Promise<MurphDynamicToolExecutionResult> {
+  const planUsageTool = input.hostedToolContext?.planUsageTool ?? null
+  if (!planUsageTool) {
+    return toolTextResult(false, 'plan usage is unavailable for this turn')
+  }
+
+  try {
+    return toolTextResult(true, safeToolPayloadText(await planUsageTool.read()))
+  } catch {
+    return toolTextResult(false, 'plan usage could not be read')
   }
 }
 
@@ -3421,6 +3477,27 @@ function parseFamilyPlanArguments(
       },
     },
   }
+}
+
+function parsePlanUsageArguments(
+  value: unknown,
+):
+  | { ok: true }
+  | { ok: false; validationDigest: SafeToolCallValidationDigest } {
+  const parsed = planUsageArgumentsSchema.safeParse(value)
+  if (!parsed.success) {
+    return {
+      ok: false,
+      validationDigest: buildDynamicToolValidationDigest({
+        error: parsed.error,
+        rawInput: value,
+        schemaName: 'murph.plan_usage.input',
+        schemaRootKeys: [],
+        toolName: 'murph.plan_usage',
+      }),
+    }
+  }
+  return { ok: true }
 }
 
 function parseGroupArguments(

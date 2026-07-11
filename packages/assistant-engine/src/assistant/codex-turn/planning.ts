@@ -629,6 +629,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
         progressUpdatesAvailable: input.progressDelivery != null,
         connectedAppsAvailable: input.hostedToolContext?.connectedApps != null,
         familyPlanAvailable: input.hostedToolContext?.familyPlanTool != null,
+        planUsageAvailable: input.hostedToolContext?.planUsageTool != null,
         groupAvailable: input.hostedToolContext?.groupTool != null,
         newsletterAvailable: input.hostedToolContext?.newsletterTool != null,
         productFeedbackAvailable:

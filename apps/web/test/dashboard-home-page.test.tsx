@@ -287,6 +287,40 @@ test("HomePage shows a monthly usage reset countdown when assistant usage is exh
   assert.match(markup, /Murph will start replying again when your plan resets/);
 });
 
+test("HomePage gives an exhausted group chat reset-only guidance", async () => {
+  mocks.resolveHostedAiUsageGate.mockResolvedValueOnce({
+    allowed: false,
+    allowanceSource: "thread_container",
+    billingPlanCode: "launch_monthly",
+    limitUsdMicros: 10_000_000n,
+    memberId: MEMBER.id,
+    periodEnd: new Date("2026-06-01T00:00:00.000Z"),
+    periodStart: new Date("2026-05-01T00:00:00.000Z"),
+    reason: "ai_usage_limit_exceeded",
+    remainingUsdMicros: 0n,
+    retryAfter: new Date("2026-06-01T00:00:00.000Z"),
+    spentUsdMicros: 10_000_000n,
+    userNotice: {
+      code: "thread_usage_limit_reached",
+      message: "This chat has reached its included usage limit for the month.",
+    },
+  });
+
+  const { default: HomePage } = await import("../app/(dashboard)/home/page");
+  const markup = renderToStaticMarkup(await HomePage());
+
+  assert.match(markup, /This chat has hit its monthly limit/);
+  assert.match(
+    markup,
+    /Murph will start replying in this chat again when its included usage resets\./,
+  );
+  assert.match(markup, /Resets in 6 days/);
+  assert.match(markup, /aria-label="Chat usage notice"/);
+  assert.doesNotMatch(markup, /View settings/);
+  assert.doesNotMatch(markup, /href="\/settings(?:#subscription)?"/);
+  assert.doesNotMatch(markup, /Start Pulse|Upgrade to Edge|trial|payer|billing/iu);
+});
+
 test("HomePage shows Start Pulse directly when trial credits are exhausted", async () => {
   mocks.resolveHostedAiUsageGate.mockResolvedValueOnce({
     allowed: false,

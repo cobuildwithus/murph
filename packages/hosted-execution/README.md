@@ -26,6 +26,8 @@ contracts live in `@murphai/hosted-execution/orchestration-control`. Use
 `@murphai/hosted-execution/routes` for stable route constants and builders.
 Use `@murphai/hosted-execution/assistant-usage` for the hosted assistant usage
 record contract, parser, id helper, and credential-source helper.
+Use `@murphai/hosted-execution/plan-usage` for the strict empty request and
+member plan-usage status codec.
 
 Run/cursor/drain contracts and parsers are not part of the active package
 surface. Historical completed plans and migration notes may still mention them
@@ -38,7 +40,8 @@ as deleted state.
 - vendor-neutral env naming stays canonical so hosted web and Cloudflare do not drift
 - this package owns only the shared hosted-execution transport seam: mailbox,
   workspace checkpoint, runtime log/status codecs, hosted usage record codecs,
-  route builders, auth header names, and canonicalization helpers
+  plan-usage request/status codecs, route builders, auth header names, and
+  canonicalization helpers; projection logic stays in `apps/web`
 - deployment topology stays app-local: shared packages must not own worker hostnames, callback base-url defaults, or proxy-vs-server inference
 - app-local auth adapters still own deployment-specific bearer token acquisition plus callback signing and verification
 - operator-facing hosted public-origin fallback and Cloudflare callback-key config stay app-local and are intentionally documented in `apps/web/README.md`, not here

@@ -1,10 +1,20 @@
 # Murph Architecture
 
-Last verified: 2026-07-09
+Last verified: 2026-07-10
 
 ## Hosted Connected Apps
 
 Connected apps expose exactly three assistant tools: account management, semantic tool search, and execution. `apps/web` owns the Composio API key, durable per-member Tool Router session id, short-lived member-bound connect intents, account verification, server-owned built-in service tool allowlist, server-held OpenWeather custom auth for the allowlisted weather tools, agent-approved calendar-create write allowlist, and branded OAuth completion UX. The hosted runner reaches that authority only through the existing signed `web-control.worker` boundary; Composio credentials, session ids, OAuth state, OpenWeather credentials, and connected-account provider tokens never enter Codex env or prompts. Composio owns provider schemas and raw execution results, while Murph applies a session-level read-only/non-destructive policy, explicit multi-account selection for connected-account tools, accountless execution only for server-allowlisted built-in service tools, one generic result-size bound rather than provider-specific tool or result adapters, direct custom-auth execution only for allowlisted OpenWeather read tools, and a separate direct-execute path only for agent-approved primary-calendar event creation with unsupported write arguments rejected before provider execution and failed or ambiguous provider outcomes marked non-retryable.
+
+## Hosted Plan Usage
+
+`apps/web` owns the member-scoped included-usage projection and any recommended
+billing action. `@murphai/hosted-execution/plan-usage` owns its strict transport
+contract. Cloudflare exposes a semantic `planUsageToolPort` over the existing
+signed `web-control.worker` boundary, and assistant-engine advertises the
+read-only `murph.plan_usage` tool only when that port exists. Cloudflare and the
+assistant runtime do not store or interpret billing truth, raw usage costs, or
+billing mutation authority.
 
 ## Hosted Computer Authentication
 
