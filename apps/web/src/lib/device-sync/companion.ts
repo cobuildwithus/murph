@@ -1,5 +1,9 @@
 import "server-only";
 
+import {
+  parseCompanionHrvRmssdObservation,
+  type CompanionHrvRmssdObservation,
+} from "@murphai/contracts";
 import { deviceSyncError } from "@murphai/device-syncd/errors";
 import { normalizeJunctionProviderSlug } from "@murphai/device-syncd/connect-config";
 import {
@@ -37,6 +41,8 @@ export const COMPANION_HEALTH_METADATA_BODY_LIMIT_BYTES =
 export type CompanionHealthMetadataKind = JunctionCompanionHealthMetadataKind;
 export type CompanionHealthMetadataRecord = JunctionCompanionHealthMetadataRecord;
 export type CompanionHealthMetadataBatch = JunctionCompanionHealthMetadataBatch;
+const COMPANION_HRV_MAXIMUM_AGE_MS = 24 * 60 * 60 * 1_000;
+const COMPANION_HRV_MAXIMUM_FUTURE_SKEW_MS = 5 * 60 * 1_000;
 const COMPANION_AUTH_DIAGNOSTIC_VERSION_PATTERN = /^[0-9]{1,3}(?:\.[0-9]{1,3}){1,3}$/u;
 const COMPANION_AUTH_DIAGNOSTIC_PROVIDER_CODES = new Set([
   "authentication_failure",
@@ -181,6 +187,29 @@ export function validateCompanionSignInRequestBody(body: Record<string, unknown>
     if (typeof value !== "string" || value.length > COMPANION_METADATA_STRING_MAX_LENGTH) {
       throw companionRequestInvalid("sdkVersions must be an object of string values.");
     }
+  }
+}
+
+export function validateCompanionHrvRmssdObservationRequestBody(
+  body: Record<string, unknown>,
+  options: { now?: Date } = {},
+): CompanionHrvRmssdObservation {
+  try {
+    const observation = parseCompanionHrvRmssdObservation(body);
+    const nowMs = (options.now ?? new Date()).getTime();
+    const observedAtMs = Date.parse(observation.observedAt);
+    const captureEndedAtMs = observedAtMs + observation.durationMs;
+
+    if (
+      observedAtMs < nowMs - COMPANION_HRV_MAXIMUM_AGE_MS
+      || captureEndedAtMs > nowMs + COMPANION_HRV_MAXIMUM_FUTURE_SKEW_MS
+    ) {
+      throw new TypeError("HRV observation time is outside the accepted window.");
+    }
+
+    return observation;
+  } catch {
+    throw companionRequestInvalid("HRV observation payload is invalid.");
   }
 }
 

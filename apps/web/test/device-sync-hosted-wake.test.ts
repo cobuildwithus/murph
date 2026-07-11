@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => {
     completeWebhookTrace: vi.fn(),
     createDeviceSyncPublicIngress: vi.fn(),
     createSignal: vi.fn(),
+    ensureSdkConnection: vi.fn(),
     ensureWebhookSubscriptions: vi.fn(),
     appendHostedMailboxEnvelope: vi.fn(),
     getConnectionForUser: vi.fn(),
@@ -411,6 +412,7 @@ describe("hosted device-sync wakes", () => {
           accepted: true,
         };
       }),
+      ensureSdkConnection: mocks.ensureSdkConnection,
       startConnection: vi.fn(),
     }));
     mocks.createSignal.mockResolvedValue({ id: 8 });
@@ -431,6 +433,10 @@ describe("hosted device-sync wakes", () => {
     });
     mocks.appendHostedMailboxEnvelope.mockResolvedValue(undefined);
     mocks.getConnectionForUser.mockResolvedValue(buildHostedConnection());
+    mocks.ensureSdkConnection.mockResolvedValue(buildHostedConnection({
+      id: "dsc_junction_123",
+      provider: "junction",
+    }));
     mocks.getConnectionOwnerId.mockResolvedValue("user-123");
     mocks.hasPendingDirtyConnection.mockResolvedValue(false);
     mocks.upsertDirtyConnection.mockResolvedValue({
@@ -2338,6 +2344,82 @@ describe("hosted device-sync wakes", () => {
       mailboxItemId: "mailbox_123",
     });
     expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
+  });
+
+  it("resolves the companion lane, stages a compact RMSSD job, and wakes the runtime", async () => {
+    mocks.getConnectionForUser.mockResolvedValue(buildHostedConnection({
+      id: "dsc_junction_123",
+      provider: "junction",
+    }));
+    const ingress = createHostedDeviceSyncPublicIngressService(
+      new Request("https://control.example.test/api/device-sync/companion/hrv-rmssd"),
+    );
+
+    await ingress.acceptCompanionHrvRmssdObservation({
+      acceptedAt: "2026-07-10T13:46:00.000Z",
+      observation: {
+        schema: "murph.companion.hrv-rmssd.v1",
+        captureId: "123e4567-e89b-42d3-a456-426614174000",
+        observedAt: "2026-07-10T13:45:00.000Z",
+        durationMs: 60_000,
+        rmssdMs: 48.25,
+        intervalCount: 72,
+        acceptedIntervalCount: 68,
+        successivePairCount: 63,
+        quality: "good",
+        methodVersion: "rmssd-pulse-interval-v1",
+      },
+      userId: "user-123",
+    });
+
+    expect(mocks.ensureSdkConnection).toHaveBeenCalledWith({
+      ownerId: "user-123",
+      provider: "junction",
+    });
+    expect(mocks.listConnectionsForUser).not.toHaveBeenCalled();
+    expect(mocks.upsertDirtyConnection).toHaveBeenCalledWith(expect.objectContaining({
+      connectionId: "dsc_junction_123",
+      dirtyAt: "2026-07-10T13:46:00.000Z",
+      eventType: "companion.hrv-rmssd.created",
+      provider: "junction",
+      resourceCategory: "derived",
+      userId: "user-123",
+      resources: [{
+        count: 1,
+        jobKind: "resource",
+        payload: {
+          companionObservationJson: expect.any(String),
+          resource: "companion_hrv_rmssd",
+          resourceCategory: "derived",
+          sourceProviderSlug: "whoop",
+        },
+        resource: "companion_hrv_rmssd",
+        resourceCategory: "derived",
+        sourceProviderSlug: "whoop",
+        windowEnd: null,
+        windowStart: null,
+      }],
+    }));
+    const staged = mocks.upsertDirtyConnection.mock.calls[0]?.[0]?.resources?.[0]?.payload
+      ?.companionObservationJson;
+    expect(JSON.parse(staged)).toEqual(expect.objectContaining({
+      captureId: "123e4567-e89b-42d3-a456-426614174000",
+      rmssdMs: 48.25,
+    }));
+    expect(staged).not.toContain("rrIntervals");
+    expect(staged).not.toContain("rawBleBytes");
+    expect(mocks.createSignal).not.toHaveBeenCalled();
+    expect(mocks.appendHostedMailboxEnvelope).toHaveBeenCalledWith(expect.objectContaining({
+      envelope: expect.objectContaining({
+        occurredAt: "2026-07-10T13:46:00.000Z",
+        hint: expect.objectContaining({
+          occurredAt: "2026-07-10T13:46:00.000Z",
+          reason: "companion_hrv_rmssd",
+        }),
+        reason: "webhook_hint",
+        userId: "user-123",
+      }),
+    }));
   });
 
   it("completes hosted webhook traces when audit and dirty state commit", async () => {

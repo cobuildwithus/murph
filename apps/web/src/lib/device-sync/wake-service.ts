@@ -31,6 +31,11 @@ import type {
   HostedExecutionDeviceSyncWakeEvent,
   HostedExecutionWake,
 } from "@murphai/hosted-execution";
+import {
+  COMPANION_HRV_RMSSD_RESOURCE,
+  serializeCompanionHrvRmssdObservation,
+  type CompanionHrvRmssdObservation,
+} from "@murphai/contracts";
 
 import { getPrisma } from "../prisma";
 import {
@@ -55,7 +60,7 @@ import {
 } from "./shared";
 
 const HOSTED_DEVICE_SYNC_WAKE_EVENT_SCHEMA = "v1";
-const COMPANION_HEALTH_METADATA_MAX_PENDING_PAYLOADS = 16;
+const COMPANION_HEALTH_MAX_PENDING_PAYLOADS = 16;
 
 const HISTORICAL_RESET_REVOKE_WARNING_MESSAGE =
   "Provider revoke did not complete while a historical data reset is pending. "
@@ -539,9 +544,9 @@ export async function handleHostedDeviceSyncWebhookAccepted(input: {
 }
 
 /**
- * Durably stages the companion's closed HealthKit metadata batch on the
- * member-owned Junction runtime lane. The encrypted dirty payload is the
- * handoff; health values never enter mailbox hints or signal rows.
+ * Durably stages a closed companion health payload on the member-owned
+ * Junction runtime lane. The encrypted dirty payload is the handoff; health
+ * values never enter mailbox hints or signal rows.
  */
 export async function persistHostedDeviceSyncCompanionMetadata(input: {
   connectionId: string;
@@ -549,6 +554,77 @@ export async function persistHostedDeviceSyncCompanionMetadata(input: {
   resource: HostedDeviceSyncDirtyResource;
   store: PrismaDeviceSyncControlPlaneStore;
   userId: string;
+}): Promise<void> {
+  await persistHostedDeviceSyncCompanionResource({
+    ...input,
+    eventType: JUNCTION_COMPANION_HEALTH_METADATA_EVENT_TYPE,
+    resourceCategory: "summary",
+    wakeReason: "companion_health_metadata",
+  });
+}
+
+export async function acceptHostedCompanionHrvRmssdObservation(input: {
+  acceptedAt: string;
+  account: Pick<PublicDeviceSyncAccount, "id" | "provider">;
+  observation: CompanionHrvRmssdObservation;
+  store: PrismaDeviceSyncControlPlaneStore;
+  userId: string;
+}): Promise<void> {
+  if (input.account.provider !== "junction") {
+    throw deviceSyncError({
+      code: "COMPANION_DEVICE_SYNC_CONNECTION_INVALID",
+      message: "Companion HRV ingestion requires the companion device-sync connection.",
+      retryable: false,
+      httpStatus: 409,
+    });
+  }
+
+  const dirtyResources = buildHostedWebhookDirtyResources({
+    provider: "junction",
+    jobs: [{
+      kind: "resource",
+      payload: {
+        companionObservationJson: serializeCompanionHrvRmssdObservation(input.observation),
+        resource: COMPANION_HRV_RMSSD_RESOURCE,
+        resourceCategory: "derived",
+        sourceProviderSlug: "whoop",
+      },
+    }],
+  });
+
+  const resource = dirtyResources[0];
+  if (!resource) {
+    throw deviceSyncError({
+      code: "COMPANION_HRV_RESOURCE_INVALID",
+      message: "Companion HRV ingestion could not build a runtime resource.",
+      retryable: false,
+      httpStatus: 400,
+    });
+  }
+
+  await persistHostedDeviceSyncCompanionResource({
+    connectionId: input.account.id,
+    eventType: "companion.hrv-rmssd.created",
+    // Dirty-state and mailbox freshness describe server acceptance. The
+    // physiological observation time remains inside the encrypted payload.
+    occurredAt: input.acceptedAt,
+    resource,
+    resourceCategory: "derived",
+    store: input.store,
+    userId: input.userId,
+    wakeReason: "companion_hrv_rmssd",
+  });
+}
+
+async function persistHostedDeviceSyncCompanionResource(input: {
+  connectionId: string;
+  eventType: string;
+  occurredAt: string;
+  resource: HostedDeviceSyncDirtyResource;
+  resourceCategory: string;
+  store: PrismaDeviceSyncControlPlaneStore;
+  userId: string;
+  wakeReason: string;
 }): Promise<void> {
   const result = await retryHostedDirtyStateContention(async () =>
     input.store.withConnectionMutationLock(input.connectionId, async (tx) => {
@@ -560,7 +636,7 @@ export async function persistHostedDeviceSyncCompanionMetadata(input: {
       if (!connection || connection.provider !== "junction" || connection.status !== "active") {
         throw deviceSyncError({
           code: "COMPANION_HEALTH_CONNECTION_REQUIRED",
-          message: "Connect Apple Health in the companion before syncing supplemental metadata.",
+          message: "Finish companion health setup before syncing health data.",
           retryable: false,
           httpStatus: 409,
         });
@@ -569,26 +645,25 @@ export async function persistHostedDeviceSyncCompanionMetadata(input: {
       const dirtyUpdate = await input.store.upsertDirtyConnection({
         connectionId: connection.id,
         dirtyAt: input.occurredAt,
-        eventType: JUNCTION_COMPANION_HEALTH_METADATA_EVENT_TYPE,
+        eventType: input.eventType,
         provider: connection.provider,
-        resourceCategory: "summary",
+        resourceCategory: input.resourceCategory,
         resources: [input.resource],
         tx,
         userId: input.userId,
       });
       // Insert/no-op first so an exact replay at the cap remains a successful
-      // no-op. A net-new 17th payload makes this transaction throw and roll
-      // back the insert, preserving the bounded queue.
+      // no-op. A net-new 17th payload rolls back, preserving the bounded queue.
       const pendingPayloadCount = await tx.deviceSyncDirtyPayload.count({
         where: {
           connectionId: connection.id,
           userId: input.userId,
         },
       });
-      if (pendingPayloadCount > COMPANION_HEALTH_METADATA_MAX_PENDING_PAYLOADS) {
+      if (pendingPayloadCount > COMPANION_HEALTH_MAX_PENDING_PAYLOADS) {
         throw deviceSyncError({
           code: "COMPANION_HEALTH_BACKLOG_FULL",
-          message: "Apple Health sync is still processing. Retry this batch later.",
+          message: "Companion health sync is still processing. Retry later.",
           retryable: true,
           httpStatus: 429,
         });
@@ -606,10 +681,10 @@ export async function persistHostedDeviceSyncCompanionMetadata(input: {
           userId: input.userId,
         }),
         hint: {
-          eventType: JUNCTION_COMPANION_HEALTH_METADATA_EVENT_TYPE,
+          eventType: input.eventType,
           occurredAt: input.occurredAt,
-          reason: "companion_health_metadata",
-          resourceCategory: "summary",
+          reason: input.wakeReason,
+          resourceCategory: input.resourceCategory,
         },
         occurredAt: input.occurredAt,
         provider: connection.provider,

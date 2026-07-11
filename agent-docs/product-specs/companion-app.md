@@ -1,6 +1,6 @@
 # iOS Companion App (Health Sync)
 
-Last verified: 2026-07-09
+Last verified: 2026-07-10
 
 ## Why This Exists
 
@@ -23,6 +23,13 @@ Strain` custom metadata on sleep/workout objects. The companion's bounded
 native reader can recover those two fields. Still unavailable: WHOOP HRV and
 the detailed five-stage sleep breakdown; sleep exports as in-bed/asleep/awake
 fragments without WHOOP's stage detail.
+
+An internal 2026-07-10 hardware spike also proved a separate foreground-only
+WHOOP 5/MG private BLE path with Heart Rate Broadcast off. The companion can
+now request one 60-second spot reading, derive RMSSD on-device, and upload only
+the compact result. This does not recreate WHOOP's overnight HRV, Recovery,
+strain, sleep, or history. The path stays debug-only until written WHOOP
+authorization plus legal and privacy approval permit distribution.
 
 A thin iOS companion app that reads Apple Health and feeds the existing
 Junction pipeline removes WHOOP's veto from the critical path, covers every
@@ -141,8 +148,9 @@ from day one. Constraints that keep this safe and maintainable:
 6. **Settings** — per-data-type toggles, disconnect, delete-my-data.
 7. **"Sync now"** foreground affordance + periodic-sync expectations copy.
 
-Out of scope for v1: chat surfaces, vault UI, BLE, widgets, Live Activities,
-watchOS, Android.
+Out of scope for the public v1: chat surfaces, vault UI, direct WHOOP BLE,
+widgets, Live Activities, watchOS, Android. The direct spot-HRV capability is
+internal-only and does not expand the App Store surface.
 
 ### App Store review requirements (verified June 2026)
 
@@ -166,7 +174,7 @@ watchOS, Android.
 | 2. MVP build | Scope above, on-device against real WHOOP history | Founder device daily-driving |
 | 3. TestFlight | Family challenge testers | Org enrollment cleared |
 | 4. App Store | Review checklist above, AI-disclosure question resolved | Approved listing |
-| 5. Native roadmap | BLE live HR, Live Activities, widgets, watchOS — pulled by challenge needs, not pushed | Per-feature product case |
+| 5. Native roadmap | Authorized direct spot HRV, Live Activities, widgets, watchOS — pulled by challenge needs, not pushed | Per-feature product case plus vendor/legal/privacy gate |
 
 ## Open Questions
 

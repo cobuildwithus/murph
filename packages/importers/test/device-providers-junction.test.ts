@@ -4,6 +4,8 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  COMPANION_HRV_RMSSD_METHOD_VERSION,
+  COMPANION_HRV_RMSSD_SCHEMA,
   eventRevisionFromLifecycle,
   isDeletedEventLifecycle,
   workoutSessionSchema,
@@ -2674,6 +2676,130 @@ test("Junction normalizer compacts HRV timeseries into daily average facts", () 
   assert.equal(dayOne?.dataOrigin?.sourceProviderSlug, "garmin");
   // 1200 is out of plausible range and must not skew the day-two average.
   assert.equal(dayTwo?.fields?.value, 61);
+});
+
+test("Junction normalizer maps companion WHOOP spot RMSSD with direct provenance", () => {
+  const payload = normalizeJunctionSnapshot({
+    accountId: "junction-account-hash-1",
+    importedAt: "2026-07-10T13:46:00.000Z",
+    companionHrvRmssd: [{
+      schema: COMPANION_HRV_RMSSD_SCHEMA,
+      captureId: "123e4567-e89b-42d3-a456-426614174000",
+      observedAt: "2026-07-10T13:45:00.000Z",
+      durationMs: 60_000,
+      rmssdMs: 48.25,
+      intervalCount: 72,
+      acceptedIntervalCount: 68,
+      successivePairCount: 63,
+      quality: "good",
+      methodVersion: COMPANION_HRV_RMSSD_METHOD_VERSION,
+    }],
+  });
+
+  const event = payload.events?.find((entry) => entry.fields?.metric === "hrv");
+  assert.equal(event?.title, "WHOOP BLE spot RMSSD");
+  assert.equal(event?.occurredAt, "2026-07-10T13:45:00.000Z");
+  assert.equal(event?.fields?.value, 48.25);
+  assert.equal(event?.fields?.unit, "ms");
+  assert.equal(event?.fields?.observationGrain, "derived_fact");
+  assert.equal(event?.externalRef?.system, "whoop");
+  assert.equal(event?.externalRef?.resourceType, "ble-hrv-rmssd");
+  assert.match(
+    event?.externalRef?.version ?? "",
+    /^rmssd-pulse-interval-v1:[a-f0-9]{64}$/u,
+  );
+  assert.equal(event?.externalRefUpdatePolicy, "immutable");
+  assert.equal(event?.dataOrigin?.aggregatorProvider, "murph-companion");
+  assert.equal(event?.dataOrigin?.sourceProviderSlug, "whoop");
+  assert.equal(event?.dataOrigin?.sourceType, "ble-pulse-interval");
+  assert.equal(payload.provenance?.companionHrvRmssdObservations, 1);
+  assert.equal(payload.samples?.length ?? 0, 0);
+});
+
+test("companion WHOOP spot RMSSD imports idempotently into the canonical vault", async () => {
+  const vaultRoot = await makeTempDirectory("murph-companion-hrv-rmssd");
+
+  try {
+    await coreRuntime.initializeVault({
+      createdAt: "2026-07-10T13:44:00.000Z",
+      timezone: "America/New_York",
+      vaultRoot,
+    });
+    const observation = {
+      schema: COMPANION_HRV_RMSSD_SCHEMA,
+      captureId: "123e4567-e89b-42d3-a456-426614174000",
+      observedAt: "2026-07-10T02:30:00.000Z",
+      durationMs: 60_000,
+      rmssdMs: 48.25,
+      intervalCount: 72,
+      acceptedIntervalCount: 68,
+      successivePairCount: 63,
+      quality: "good" as const,
+      methodVersion: COMPANION_HRV_RMSSD_METHOD_VERSION,
+    };
+    const input = {
+      provider: "junction" as const,
+      vaultRoot,
+      connectionId: "conn-junction-companion",
+      sourceKind: "webhook" as const,
+      deliveryMode: "full_payload" as const,
+      normalizerVersion: "junction-normalizer.v1",
+      snapshot: {
+        accountId: "junction-account-hash-1",
+        importedAt: "2026-07-10T13:46:00.000Z",
+        companionHrvRmssd: [observation],
+      },
+    };
+
+    const first = await importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
+      input,
+      { corePort: coreRuntime },
+    );
+    const replay = await importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
+      input,
+      { corePort: coreRuntime },
+    );
+
+    for (const changedObservation of [
+      { ...observation, rmssdMs: 49 },
+      { ...observation, intervalCount: 73 },
+    ]) {
+      await assert.rejects(
+        () => importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
+          {
+            ...input,
+            snapshot: {
+              ...input.snapshot,
+              companionHrvRmssd: [changedObservation],
+            },
+          },
+          { corePort: coreRuntime },
+        ),
+        (error: unknown) =>
+          error instanceof coreRuntime.VaultError
+          && error.code === "EVENT_IMMUTABLE_EXTERNAL_REF_CONFLICT",
+      );
+    }
+
+    const records = latestLiveRecords((await Promise.all(
+      [...new Set([...first.eventShardPaths, ...replay.eventShardPaths])].map((relativePath) =>
+        coreRuntime.readJsonlRecords({ vaultRoot, relativePath })
+      ),
+    )).flat());
+    const hrvRecords = records.filter((record) =>
+      storedExternalRefResourceType(record) === "ble-hrv-rmssd"
+    );
+
+    assert.equal(hrvRecords.length, 1);
+    assert.equal(storedObservationValue(hrvRecords[0]), 48.25);
+    assert.equal(hrvRecords[0]?.dayKey, "2026-07-09");
+    assert.equal(
+      storedExternalRefResourceId(hrvRecords[0]),
+      "123e4567-e89b-42d3-a456-426614174000",
+    );
+  } finally {
+    await rm(vaultRoot, { force: true, recursive: true });
+  }
 });
 
 test("Junction normalizer uses vault timezone for UTC-only daily aggregate days", () => {

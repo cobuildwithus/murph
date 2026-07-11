@@ -4,6 +4,11 @@ import {
   JUNCTION_DEFAULT_SUMMARY_RESOURCES,
   JUNCTION_DEFAULT_TIMESERIES_RESOURCES,
 } from "@murphai/importers/device-providers/junction-resources";
+import {
+  COMPANION_HRV_RMSSD_METHOD_VERSION,
+  COMPANION_HRV_RMSSD_RESOURCE,
+  COMPANION_HRV_RMSSD_SCHEMA,
+} from "@murphai/contracts";
 import { test } from "vitest";
 
 import { DeviceSyncError } from "../src/errors.ts";
@@ -8657,6 +8662,80 @@ test("Junction ambiguous skip detail is clamped to the stored-metadata string ca
   assert.ok(typeof detail === "string" && detail.length > 0 && detail.length <= 256);
   assert.ok(typeof detail === "string" && detail.startsWith("invalid_request: sleep cycle summaries are disabled"));
   assert.equal(warnings[0]?.responseDetail, detail);
+});
+
+test("Junction companion HRV jobs import the derived observation without Junction HTTP requests", async () => {
+  let fetchCalls = 0;
+  const importedSnapshots: unknown[] = [];
+  const provider = createJunctionProvider(async () => {
+    fetchCalls += 1;
+    throw new Error("Companion HRV jobs must not call Junction.");
+  });
+  const context = createJunctionJobContext({
+    importSnapshot: async (snapshot) => {
+      importedSnapshots.push(snapshot);
+      return { imported: true };
+    },
+  });
+  const observation = {
+    schema: COMPANION_HRV_RMSSD_SCHEMA,
+    captureId: "123e4567-e89b-42d3-a456-426614174000",
+    observedAt: "2026-04-02T23:59:00.000Z",
+    durationMs: 60_000,
+    rmssdMs: 48.25,
+    intervalCount: 72,
+    acceptedIntervalCount: 68,
+    successivePairCount: 63,
+    quality: "good",
+    methodVersion: COMPANION_HRV_RMSSD_METHOD_VERSION,
+  };
+
+  const result = await executeJunctionJob(
+    provider,
+    context,
+    createJob("resource", {
+      companionObservationJson: JSON.stringify(observation),
+      resource: COMPANION_HRV_RMSSD_RESOURCE,
+      resourceCategory: "derived",
+      sourceProviderSlug: "whoop",
+    }),
+  );
+
+  assert.deepEqual(result, {});
+  assert.equal(fetchCalls, 0);
+  assert.deepEqual(importedSnapshots, [{
+    provider: "junction",
+    accountId: `jxn_acct_${createHash("sha256")
+      .update(JSON.stringify(["junction-import-account", "junction-user-1"]))
+      .digest("hex")
+      .slice(0, 32)}`,
+    connectionId: "acct-junction-1",
+    importedAt: "2026-04-03T00:00:00.000Z",
+    companionHrvRmssd: [observation],
+  }]);
+});
+
+test("Junction companion HRV jobs reject malformed derived observations without network access", async () => {
+  let fetchCalls = 0;
+  const provider = createJunctionProvider(async () => {
+    fetchCalls += 1;
+    throw new Error("Unexpected Junction request.");
+  });
+
+  await assert.rejects(
+    () => executeJunctionJob(
+      provider,
+      createJunctionJobContext(),
+      createJob("resource", {
+        companionObservationJson: JSON.stringify({ rawBleBytes: [1, 2, 3] }),
+        resource: COMPANION_HRV_RMSSD_RESOURCE,
+      }),
+    ),
+    (error: unknown) =>
+      error instanceof DeviceSyncError
+      && error.code === "JUNCTION_COMPANION_HRV_OBSERVATION_INVALID",
+  );
+  assert.equal(fetchCalls, 0);
 });
 
 test("Junction resource jobs import direct daily data webhook payloads without Junction HTTP requests", async () => {

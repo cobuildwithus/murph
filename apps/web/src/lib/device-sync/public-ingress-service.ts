@@ -18,6 +18,7 @@ import {
   type SdkSignInSessionResult,
   type DeviceSyncRegistry,
 } from "@murphai/device-syncd/types";
+import type { CompanionHrvRmssdObservation } from "@murphai/contracts";
 
 import type { HostedDeviceSyncControlPlaneContext } from "./control-plane-context";
 import { createHostedDeviceSyncControlPlaneContext } from "./control-plane-context";
@@ -31,6 +32,7 @@ import {
   type HostedBrowserDeviceSyncConnection,
 } from "./public-connection";
 import {
+  acceptHostedCompanionHrvRmssdObservation,
   disconnectHostedDeviceSyncConnection,
   handleHostedDeviceSyncConnectionEstablished,
   handleHostedDeviceSyncUnknownWebhook,
@@ -175,6 +177,35 @@ export class HostedDeviceSyncPublicIngressService {
     return this.ingress.createSdkSignInSession({
       provider,
       ownerId: userId,
+    });
+  }
+
+  async ensureSdkConnection(
+    userId: string,
+    provider: string,
+  ): Promise<PublicDeviceSyncAccount> {
+    return this.ingress.ensureSdkConnection({
+      provider,
+      ownerId: userId,
+    });
+  }
+
+  async acceptCompanionHrvRmssdObservation(input: {
+    acceptedAt: string;
+    observation: CompanionHrvRmssdObservation;
+    userId: string;
+  }): Promise<void> {
+    // Resolve the deterministic companion/Junction account on every request.
+    // Picking an arbitrary active Junction row can cross lanes when a member
+    // has more than one historical or source-specific connection.
+    const account = await this.ensureSdkConnection(input.userId, "junction");
+
+    await acceptHostedCompanionHrvRmssdObservation({
+      acceptedAt: input.acceptedAt,
+      account,
+      observation: input.observation,
+      store: this.context.store,
+      userId: input.userId,
     });
   }
 

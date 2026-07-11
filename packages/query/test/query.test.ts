@@ -4982,6 +4982,61 @@ test("listMetricPointsRuntime keeps core-default sleep dayKey when only recorded
   }
 });
 
+test("direct WHOOP spot RMSSD resolves through the canonical HRV metric alias", async () => {
+  const dataOrigin = {
+    version: 1,
+    aggregatorProvider: "murph-companion",
+    sourceProviderSlug: "whoop",
+    sourceType: "ble-pulse-interval",
+    observedAtRaw: "2026-07-10T13:45:00.000Z",
+    timestampSemantics: "utc",
+    originConfidence: "low",
+    normalizerVersion: "companion-hrv-rmssd-normalizer.v1",
+  };
+  const vaultRoot = await createMetricObservationVault([{
+    id: "evt_metric_observation_whoop_spot_hrv_01",
+    occurredAt: "2026-07-10T13:45:00.000Z",
+    dayKey: "2026-07-10",
+    source: "device",
+    title: "WHOOP BLE spot RMSSD",
+    metric: "hrv",
+    observationGrain: "derived_fact",
+    value: 48.25,
+    unit: "ms",
+    dataOrigin,
+    externalRef: {
+      system: "whoop",
+      resourceType: "ble-hrv-rmssd",
+      resourceId: "01234567-89ab-4def-8123-456789abcdef",
+      facet: "rmssd-pulse-interval-v1:hrv",
+    },
+  }]);
+
+  try {
+    await rebuildQueryProjection(vaultRoot);
+    const points = await listMetricPointsRuntime(vaultRoot, {
+      from: "2026-07-10",
+      limit: null,
+      metricKey: "hrv-rmssd",
+      to: "2026-07-10",
+    });
+
+    assert.equal(points.length, 1);
+    assert.equal(points[0]?.metricKey, "hrv-rmssd");
+    assert.equal(points[0]?.value, 48.25);
+    assert.equal(points[0]?.unit, "ms");
+    assert.equal(points[0]?.source.kind, "observation");
+    assert.equal(points[0]?.source.recordId, "evt_metric_observation_whoop_spot_hrv_01");
+    assert.equal(points[0]?.confidence, "low");
+    assert.equal(points[0]?.context.observationGrain, "derived_fact");
+    assert.equal(points[0]?.context.measurementMethodKey, "ble-pulse-interval");
+    assert.equal(points[0]?.provenance.provider, "whoop");
+    assert.equal(points[0]?.provenance.dataOrigin, null);
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
 test("wearable summary metric points suppress same-day raw observation duplicates", async () => {
   const vaultRoot = await createMetricObservationVault([
     {

@@ -3,6 +3,10 @@ import { createHmac, createHash, timingSafeEqual } from "node:crypto";
 import type { Junction } from "@junction-api/sdk";
 import { HistoricalPullCompleted as JunctionHistoricalPullCompletedSchema } from "@junction-api/sdk/serialization";
 import type * as JunctionSerialization from "@junction-api/sdk/serialization";
+import {
+  COMPANION_HRV_RMSSD_RESOURCE,
+  parseSerializedCompanionHrvRmssdObservation,
+} from "@murphai/contracts";
 import { canNormalizeJunctionSleepCycleRecordToCompactStages } from "@murphai/importers";
 import { resolveJunctionOrigin } from "@murphai/importers/device-providers/junction-origin";
 import {
@@ -1445,6 +1449,30 @@ export function createJunctionDeviceSyncProvider(
     job: DeviceSyncJobRecord,
     skippedOptionalResources: JunctionSkippedOptionalResource[],
   ): Promise<ProviderJobResult> {
+    if (normalizeString(job.payload.resource) === COMPANION_HRV_RMSSD_RESOURCE) {
+      let observation;
+      try {
+        observation = parseSerializedCompanionHrvRmssdObservation(
+          job.payload.companionObservationJson,
+        );
+      } catch {
+        throw deviceSyncError({
+          code: "JUNCTION_COMPANION_HRV_OBSERVATION_INVALID",
+          message: "Companion HRV observation payload was invalid.",
+          retryable: false,
+        });
+      }
+
+      await context.importSnapshot({
+        provider: "junction",
+        accountId: buildJunctionImportAccountId(context.account.externalAccountId),
+        connectionId: context.account.id,
+        importedAt: context.now,
+        companionHrvRmssd: [observation],
+      });
+      return {};
+    }
+
     const window = resolveJobWindow(job, context.now, reconcileDays);
     if (normalizeString(job.payload.resource) === JUNCTION_COMPANION_HEALTH_METADATA_RESOURCE) {
       const records = parseJunctionCompanionHealthMetadataJob(job);

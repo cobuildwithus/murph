@@ -274,6 +274,7 @@ interface DeviceEventInput extends LooseRecord {
   links?: unknown;
   evidenceRoles?: unknown;
   externalRef?: unknown;
+  externalRefUpdatePolicy?: unknown;
   legacyExternalRefs?: unknown;
   dataOrigin?: unknown;
   fields?: unknown;
@@ -323,6 +324,7 @@ export interface ImportDeviceBatchResult {
 interface NormalizedDeviceEvent {
   seed: NormalizedEventSeed<EventKind>;
   evidenceRoles: string[];
+  externalRefUpdatePolicy?: "immutable";
   legacyExternalRefs: ExternalRef[];
   recordId: string;
 }
@@ -361,6 +363,7 @@ interface PreparedJsonlEntry<RecordType extends { id: string }> {
 }
 
 interface PreparedDeviceEventEntry extends PreparedJsonlEntry<EventRecord> {
+  externalRefUpdatePolicy?: "immutable";
   legacyExternalRefs: ExternalRef[];
 }
 
@@ -1215,6 +1218,13 @@ function normalizeDeviceEventInputs(
       errorMessage: `Device event ${index + 1} relatedIds is no longer supported; use links.`,
     });
     const normalizedLegacyExternalRefs = normalizeLegacyExternalRefs(eventInput.legacyExternalRefs, index);
+    const externalRefUpdatePolicy = eventInput.externalRefUpdatePolicy;
+    if (externalRefUpdatePolicy !== undefined && externalRefUpdatePolicy !== "immutable") {
+      throw new VaultError(
+        "VAULT_INVALID_EXTERNAL_REF",
+        `Device event ${index + 1} externalRefUpdatePolicy must be "immutable" when provided.`,
+      );
+    }
     const inputDayKey = typeof eventInput.dayKey === "string" ? eventInput.dayKey : undefined;
     const inputTimeZone = typeof eventInput.timeZone === "string" ? eventInput.timeZone : undefined;
     const preservesProviderDayWithoutTimeZone = Boolean(
@@ -1251,9 +1261,17 @@ function normalizeDeviceEventInputs(
       );
     }
 
+    if (externalRefUpdatePolicy === "immutable" && !seed.externalRef) {
+      throw new VaultError(
+        "VAULT_INVALID_EXTERNAL_REF",
+        `Device event ${index + 1} immutable externalRefUpdatePolicy requires externalRef.`,
+      );
+    }
+
     return {
       seed,
       evidenceRoles,
+      ...(externalRefUpdatePolicy === "immutable" ? { externalRefUpdatePolicy } : {}),
       legacyExternalRefs,
       recordId: deterministicContractId(
         ID_PREFIXES.event,
@@ -1541,6 +1559,9 @@ function prepareDeviceEventEntries(
     evidenceRolesByPreparedRecordId.set(event.recordId, uniqueRoles);
     return {
       ...prepareStoredEventLedgerEntry(event.seed, event.recordId),
+      ...(event.externalRefUpdatePolicy
+        ? { externalRefUpdatePolicy: event.externalRefUpdatePolicy }
+        : {}),
       legacyExternalRefs: event.legacyExternalRefs,
     };
   });
@@ -2216,8 +2237,9 @@ function buildLegacyExternalRefReservations(
 // externalRef, so overlapping push/pull re-imports of the same provider record
 // must not mint new events. Re-imports with identical content (ignoring
 // per-import identity such as id, rawRefs, lifecycle, and recordedAt) are
-// skipped; changed content appends an event-spine revision onto the existing
-// event id instead of a new event.
+// skipped; changed content normally appends an event-spine revision onto the
+// existing event id instead of a new event. Callers may mark a capture's
+// externalRef immutable when changed content must be rejected instead.
 async function reconcileDeviceEventEntriesByExternalRef(
   vaultRoot: string,
   entries: readonly PreparedDeviceEventEntry[],
@@ -2341,6 +2363,13 @@ async function reconcileDeviceEventEntriesByExternalRef(
       skippedDuplicateCount += 1;
       records.push(latest);
       continue;
+    }
+
+    if (entry.externalRefUpdatePolicy === "immutable") {
+      throw new VaultError(
+        "EVENT_IMMUTABLE_EXTERNAL_REF_CONFLICT",
+        "Immutable device event externalRef already exists with different content; nothing was imported.",
+      );
     }
 
     // Companion HealthKit sync versions are nonnegative monotonic integers.

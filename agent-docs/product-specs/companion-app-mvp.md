@@ -12,7 +12,10 @@ the existing device-syncd pipeline. Junction remains the broad sync path. One
 narrow native exception reads WHOOP's `WHOOP Recovery` and `WHOOP Strain`
 custom metadata because Junction and normal HealthKit quantity/category
 mapping omit those values. The exception is closed to those two keys and does
-not create a general native HealthKit ingestion engine.
+not create a general native HealthKit ingestion engine. A separately gated
+internal path also supports a direct WHOOP spot-RMSSD reading; it does not
+change the source-agnostic Apple Health sync or claim parity with WHOOP's
+proprietary overnight metrics.
 
 Growth framing: the nearest payoff is not WHOOP — it is **Apple Watch and
 iPhone-health members, who currently cannot connect to Murph at all**
@@ -213,12 +216,31 @@ verification (existing `@privy-io/node`):
 ### Deployment order and rollback floor
 
 Current companion volume is low, so the iOS release is the rollout gate. Do not
-add a runtime feature flag or capability handshake, and do not require an
-immediate container rollout, queue drain, or tandem deploy. Deploy the
+add a runtime feature flag or per-request availability probe, and do not require
+an immediate container rollout, queue drain, or tandem deploy. Deploy the
 Cloudflare/device-syncd and Vercel/web changes through their normal backend
 release paths, verify both, and release the iOS app last. After the iOS release,
 keep both backend surfaces on feature-aware versions while supported clients
 can upload companion metadata.
+4. `POST /api/device-sync/companion/hrv-rmssd`
+   — validate a strict, sub-512-byte `murph.companion.hrv-rmssd.v1`
+   observation, ensure/reuse the member's Junction device connection without
+   minting a sign-in token, stage one encrypted compact dirty job, and wake the
+   existing hosted device-sync runtime. The contract has no field for raw R-R
+   intervals, BLE packets, device identity, heart-rate samples, or Apple
+   Health values; unknown fields are rejected. Runtime import is idempotent by
+   client capture id and writes canonical `hrv` milliseconds with direct-WHOOP
+   provenance.
+
+### Direct spot-HRV deployment order and rollback floor
+
+Deploy the Cloudflare runtime first with `container_rollout=immediate`, require
+managed-container smoke to report the new runner-bundle fingerprint, and pass a
+functional compact-observation import smoke. Then deploy web acceptance and
+release iOS last. Do not probe runtime availability on each request for this
+low-volume, release-gated lane. Roll back web acceptance first, let
+already-staged jobs drain, and only then remove runtime support. This explicit
+order does not change the metadata lane's iOS-last rollout above.
 
 ### Why the account-ensure step is load-bearing (verified in repo)
 
@@ -304,8 +326,8 @@ licensing unresolved.
   description, 5.1.3(i) specific-data disclosure, privacy nutrition labels,
   and explicit consent for third-party AI processing of synced health data
   (Apple's Nov 2025 guideline) before public submission.
-- Android, BLE (`VitalDevices`), widgets, Live Activities, watchOS (parent
-  spec roadmap).
+- Android, `VitalDevices`, widgets, Live Activities, watchOS, background WHOOP
+  capture, and WHOOP historical offload (parent spec roadmap).
 - No analytics events containing health payloads.
 
 ## Open Items

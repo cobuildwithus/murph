@@ -1872,6 +1872,53 @@ test("importDeviceBatch dedupes overlapping re-imports by externalRef across uns
   );
 });
 
+test("importDeviceBatch rejects changed content for immutable externalRefs while keeping exact replay idempotent", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-import-immutable-externalref");
+  await initializeVault({ vaultRoot, createdAt: "2026-06-01T12:00:00.000Z" });
+
+  const immutableEvent = {
+    ...buildJunctionStyleWorkoutEvent(),
+    externalRefUpdatePolicy: "immutable" as const,
+  };
+  const first = await importDeviceBatch({
+    vaultRoot,
+    provider: "junction",
+    importedAt: "2026-06-03T21:00:00.000Z",
+    events: [immutableEvent],
+  });
+  const replay = await importDeviceBatch({
+    vaultRoot,
+    provider: "junction",
+    importedAt: "2026-06-04T21:00:00.000Z",
+    events: [immutableEvent],
+  });
+
+  assert.equal(replay.events[0]?.id, first.events[0]?.id);
+
+  await assert.rejects(
+    () => importDeviceBatch({
+      vaultRoot,
+      provider: "junction",
+      importedAt: "2026-06-05T21:00:00.000Z",
+      events: [{
+        ...immutableEvent,
+        fields: {
+          ...immutableEvent.fields,
+          durationMinutes: 35,
+        },
+      }],
+    }),
+    (error: unknown) =>
+      error instanceof VaultError && error.code === "EVENT_IMMUTABLE_EXTERNAL_REF_CONFLICT",
+  );
+
+  const eventRecords = (await readJsonlRecords({
+    vaultRoot,
+    relativePath: first.eventShardPaths[0] as string,
+  })) as EventRecord[];
+  assert.equal(eventRecords.length, 1);
+});
+
 test("importDeviceBatch updates changed provider records in place by externalRef", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-import-externalref-update");
   await initializeVault({ vaultRoot, createdAt: "2026-06-01T12:00:00.000Z" });

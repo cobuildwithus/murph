@@ -3966,6 +3966,47 @@ test("public ingress rejects built-in webhook jobs that drift from the provider 
   assert.equal(readRecordedWebhookTrace(store), null);
 });
 
+test("public ingress SDK connection ensure creates the account without minting a sign-in token", async () => {
+  const store = new InMemoryPublicIngressStore();
+  let mintedTokens = 0;
+  const ingress = createDeviceSyncPublicIngress({
+    publicBaseUrl: "https://sync.example.test/device-sync",
+    registry: createDeviceSyncRegistry([
+      createFakeProvider({
+        sdkConnectionHandler: {
+          async ensureConnection() {
+            return {
+              externalAccountId: "demo-sdk-user-1",
+              displayName: "Demo",
+              scopes: [],
+              tokens: {
+                accessToken: "<REDACTED_ACCESS_TOKEN>",
+              } satisfies ProviderAuthTokens,
+              setupPhase: "source_confirmed",
+            };
+          },
+          async createSignInToken() {
+            mintedTokens += 1;
+            return {
+              signInToken: "unused-sign-in-token",
+              environment: "sandbox",
+            };
+          },
+        },
+      }),
+    ]),
+    store,
+  });
+
+  const first = await ingress.ensureSdkConnection({ provider: "demo", ownerId: "member-1" });
+  const second = await ingress.ensureSdkConnection({ provider: "demo", ownerId: "member-1" });
+
+  assert.equal(first.id, second.id);
+  assert.equal(first.externalAccountId, "demo-sdk-user-1");
+  assert.equal(mintedTokens, 0);
+  assert.equal(store.upsertConnectionCalls, 1);
+});
+
 test("public ingress SDK sign-in session ensures the account before minting and stays idempotent", async () => {
   const store = new InMemoryPublicIngressStore();
   const connectionEvents: Array<{ accountId: string; initialJobs: number }> = [];

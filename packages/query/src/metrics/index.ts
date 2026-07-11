@@ -346,6 +346,7 @@ function observationMetricPoints(entity: CanonicalEntity): MetricPoint[] {
   return [scalarMetricPoint({
     confidence: eventConfidence(entity),
     context: {
+      measurementMethodKey: eventMeasurementMethodKey(entity),
       observationGrain: observationGrain ?? undefined,
       qualifiers: readQualifiers(entity.attributes.qualifiers),
       timeZone: readString(entity.attributes.timeZone) ?? undefined,
@@ -607,7 +608,17 @@ function providerForMetricSample(entity: CanonicalEntity): string | null {
 }
 
 function eventConfidence(entity: CanonicalEntity): MetricConfidence {
+  const dataOrigin = readRecord(entity.attributes.dataOrigin);
+  const originConfidence = readString(dataOrigin?.originConfidence);
+  if (originConfidence === "high" || originConfidence === "medium" || originConfidence === "low") {
+    return originConfidence;
+  }
   return readString(entity.attributes.source) === "manual" ? "medium" : "high";
+}
+
+function eventMeasurementMethodKey(entity: CanonicalEntity): string | undefined {
+  const dataOrigin = readRecord(entity.attributes.dataOrigin);
+  return readString(dataOrigin?.sourceType) ?? undefined;
 }
 
 function readArray(value: unknown): unknown[] {

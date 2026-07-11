@@ -11,8 +11,10 @@ import { createBearerRequest, createJsonPostRequest } from "./route-test-helpers
 vi.mock("server-only", () => ({}));
 
 const SIGN_IN_TOKEN = "junction-sdk-sign-in-token-do-not-log";
+const HRV_ROUTE_NOW = "2026-07-10T13:46:00.000Z";
 
 const mocks = vi.hoisted(() => ({
+  acceptCompanionHrvRmssdObservation: vi.fn(),
   assertHostedLaunchRequiredConsentGranted: vi.fn(),
   createHostedDeviceSyncControlPlane: vi.fn(),
   createHostedDeviceSyncPublicIngressService: vi.fn(),
@@ -78,12 +80,14 @@ vi.mock("@/src/lib/prisma", () => ({
 }));
 
 type SignInTokenRouteModule = typeof import("../app/api/device-sync/companion/sign-in-token/route");
+type HrvRmssdRouteModule = typeof import("../app/api/device-sync/companion/hrv-rmssd/route");
 type StatusRouteModule = typeof import("../app/api/device-sync/companion/status/route");
 type HealthMetadataRouteModule = typeof import("../app/api/device-sync/companion/health-metadata/route");
 type AuthDiagnosticsRouteModule =
   typeof import("../app/api/device-sync/companion/auth-diagnostics/route");
 
 let signInTokenRoute: SignInTokenRouteModule;
+let hrvRmssdRoute: HrvRmssdRouteModule;
 let statusRoute: StatusRouteModule;
 let healthMetadataRoute: HealthMetadataRouteModule;
 let authDiagnosticsRoute: AuthDiagnosticsRouteModule;
@@ -159,6 +163,32 @@ function healthMetadataRecord(overrides: Record<string, unknown> = {}) {
   };
 }
 
+const validHrvObservation = {
+  schema: "murph.companion.hrv-rmssd.v1",
+  captureId: "123e4567-e89b-42d3-a456-426614174000",
+  observedAt: "2026-07-10T13:45:00.000Z",
+  durationMs: 60_000,
+  rmssdMs: 48.25,
+  intervalCount: 72,
+  acceptedIntervalCount: 68,
+  successivePairCount: 63,
+  quality: "good",
+  methodVersion: "rmssd-pulse-interval-v1",
+};
+
+function hrvRmssdRequest(
+  body: unknown,
+  bearerToken: string | null = "privy-identity-token",
+) {
+  return createJsonPostRequest(
+    "https://app.example.test/api/device-sync/companion/hrv-rmssd",
+    body,
+    bearerToken === null
+      ? {}
+      : { headers: { authorization: `Bearer ${bearerToken}` } },
+  );
+}
+
 function authDiagnosticsRequest(
   body: unknown,
   init: Omit<RequestInit, "body" | "method"> = {},
@@ -187,6 +217,7 @@ async function withProductionAuthDiagnosticsEnv<T>(
 describe("device sync companion routes", () => {
   beforeAll(async () => {
     signInTokenRoute = await import("../app/api/device-sync/companion/sign-in-token/route");
+    hrvRmssdRoute = await import("../app/api/device-sync/companion/hrv-rmssd/route");
     statusRoute = await import("../app/api/device-sync/companion/status/route");
     healthMetadataRoute = await import("../app/api/device-sync/companion/health-metadata/route");
     authDiagnosticsRoute = await import("../app/api/device-sync/companion/auth-diagnostics/route");
@@ -220,6 +251,7 @@ describe("device sync companion routes", () => {
       },
     });
     mocks.createHostedDeviceSyncPublicIngressService.mockReturnValue({
+      acceptCompanionHrvRmssdObservation: mocks.acceptCompanionHrvRmssdObservation,
       createSdkSignInSession: mocks.createSdkSignInSession,
     });
   });
@@ -774,6 +806,159 @@ describe("device sync companion routes", () => {
       for (const spy of consoleSpies) {
         for (const callArgs of spy.mock.calls) {
           expect(JSON.stringify(callArgs)).not.toContain(SIGN_IN_TOKEN);
+        }
+      }
+    });
+  });
+
+  describe("POST /api/device-sync/companion/hrv-rmssd", () => {
+    beforeEach(() => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date(HRV_ROUTE_NOW));
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it("requires bearer auth before accepting an observation", async () => {
+      const response = await hrvRmssdRoute.POST(hrvRmssdRequest(validHrvObservation, null));
+
+      expect(response.status).toBe(401);
+      expect(mocks.acceptCompanionHrvRmssdObservation).not.toHaveBeenCalled();
+    });
+
+    it("requires launch health-data consent before accepting an observation", async () => {
+      mockVerifiedPrivyUser();
+      mocks.assertHostedLaunchRequiredConsentGranted.mockRejectedValue(hostedOnboardingError({
+        code: "HOSTED_CONSENT_REQUIRED",
+        httpStatus: 403,
+        message: "Accept the current Murph legal consent before continuing.",
+      }));
+
+      const response = await hrvRmssdRoute.POST(hrvRmssdRequest(validHrvObservation));
+
+      expect(response.status).toBe(403);
+      expect(mocks.acceptCompanionHrvRmssdObservation).not.toHaveBeenCalled();
+    });
+
+    it("accepts exactly one compact derived observation without echoing the value", async () => {
+      mockVerifiedPrivyUser();
+
+      const response = await hrvRmssdRoute.POST(hrvRmssdRequest(validHrvObservation));
+      const responseBody = await response.json();
+
+      expect(response.status).toBe(202);
+      expect(responseBody).toEqual({
+        acceptedAt: expect.any(String),
+        captureId: validHrvObservation.captureId,
+        status: "accepted",
+      });
+      expect(JSON.stringify(responseBody)).not.toContain(String(validHrvObservation.rmssdMs));
+      expect(mocks.acceptCompanionHrvRmssdObservation).toHaveBeenCalledWith({
+        acceptedAt: expect.any(String),
+        observation: validHrvObservation,
+        userId: ACTIVE_MEMBER.id,
+      });
+    });
+
+    it.each([
+      ["a stale observation", {
+        ...validHrvObservation,
+        observedAt: "2026-07-09T13:45:59.000Z",
+      }],
+      ["a future observation", {
+        ...validHrvObservation,
+        observedAt: "2026-07-10T13:50:01.000Z",
+      }],
+      ["an implausible interval count", {
+        ...validHrvObservation,
+        intervalCount: 206,
+        quality: "limited",
+      }],
+      ["quality inconsistent with the interval counts", {
+        ...validHrvObservation,
+        quality: "limited",
+      }],
+      ["an identifier-shaped capture id", {
+        ...validHrvObservation,
+        captureId: "wearable_serial_1234567890",
+      }],
+    ])("rejects %s before staging", async (_label, observation) => {
+      mockVerifiedPrivyUser();
+
+      const response = await hrvRmssdRoute.POST(hrvRmssdRequest(observation));
+
+      expect(response.status).toBe(400);
+      await expect(response.json()).resolves.toMatchObject({
+        error: { code: "COMPANION_REQUEST_INVALID" },
+      });
+      expect(mocks.createHostedDeviceSyncPublicIngressService).not.toHaveBeenCalled();
+      expect(mocks.acceptCompanionHrvRmssdObservation).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ["RR intervals", { rrIntervals: [800, 810] }],
+      ["BLE bytes", { rawBleBytes: "001122" }],
+      ["device identity", { deviceIdentifier: "wearable-identifier" }],
+      ["packet timestamps", { packetTimestamps: [1, 2] }],
+    ])("rejects raw %s fields before staging", async (_label, rawField) => {
+      mockVerifiedPrivyUser();
+
+      const response = await hrvRmssdRoute.POST(hrvRmssdRequest({
+        ...validHrvObservation,
+        ...rawField,
+      }));
+
+      expect(response.status).toBe(400);
+      await expect(response.json()).resolves.toMatchObject({
+        error: { code: "COMPANION_REQUEST_INVALID" },
+      });
+      expect(mocks.acceptCompanionHrvRmssdObservation).not.toHaveBeenCalled();
+    });
+
+    it("rejects oversized request bodies before staging", async () => {
+      mockVerifiedPrivyUser();
+
+      const response = await hrvRmssdRoute.POST(hrvRmssdRequest({
+        ...validHrvObservation,
+        padding: "x".repeat(2_100),
+      }));
+
+      expect(response.status).toBe(413);
+      expect(mocks.acceptCompanionHrvRmssdObservation).not.toHaveBeenCalled();
+    });
+
+    it("keeps malformed HRV JSON fragments out of logs", async () => {
+      mockVerifiedPrivyUser();
+      const rawHealthMarker = "raw-rr-interval-811ms-do-not-log";
+      const consoleSpies = (["debug", "error", "info", "log", "warn"] as const).map((level) =>
+        vi.spyOn(console, level).mockImplementation(() => {}),
+      );
+      const response = await hrvRmssdRoute.POST(new Request(
+        "https://app.example.test/api/device-sync/companion/hrv-rmssd",
+        {
+          body: `{"rrIntervals":[${rawHealthMarker}]}`,
+          headers: {
+            authorization: "Bearer privy-identity-token",
+            "content-type": "application/json",
+          },
+          method: "POST",
+        },
+      ));
+
+      expect(response.status).toBe(400);
+      expect(await response.json()).toEqual({
+        error: {
+          code: "COMPANION_REQUEST_INVALID",
+          message: "Companion HRV RMSSD observation must be valid JSON.",
+          retryable: false,
+        },
+      });
+      expect(mocks.acceptCompanionHrvRmssdObservation).not.toHaveBeenCalled();
+      for (const spy of consoleSpies) {
+        for (const callArgs of spy.mock.calls) {
+          expect(JSON.stringify(callArgs)).not.toContain(rawHealthMarker);
         }
       }
     });
