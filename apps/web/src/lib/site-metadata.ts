@@ -6,10 +6,10 @@ type TwitterMetadata = NonNullable<Metadata["twitter"]>;
 // Single source of truth for Murph's shared brand copy: the homepage and
 // default OG headline, the metadata title, and both descriptions. Edit the
 // copy here, nowhere else.
-export const MURPH_TAGLINE_LINE_1 = "Murph figures out what works for you—";
-export const MURPH_TAGLINE_LINE_2 = "and gets your friends in on it.";
+export const MURPH_TAGLINE_LINE_1 = "Health is hard.";
+export const MURPH_TAGLINE_LINE_2 = "Don’t do it alone.";
 export const MURPH_TAGLINE =
-  `${MURPH_TAGLINE_LINE_1}${MURPH_TAGLINE_LINE_2}`;
+  `${MURPH_TAGLINE_LINE_1} ${MURPH_TAGLINE_LINE_2}`;
 
 export const MURPH_DEFAULT_METADATA_TITLE =
   "Murph — Health is hard. Don’t do it alone.";
