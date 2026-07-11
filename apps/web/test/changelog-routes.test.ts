@@ -16,6 +16,7 @@ import { GET as getChangelogCard } from "../app/changelog/card/v1/[items]/route"
 import {
   CHANGELOG_FEED_SCHEMA,
   buildChangelogCardPath,
+  buildChangelogItemPath,
   listPublishedChangelogItems,
 } from "../src/lib/changelog";
 
@@ -43,7 +44,10 @@ describe("changelog routes", () => {
     });
     expect(body.items.filter((item: { kind: string }) => item.kind === "feature")).toHaveLength(1);
     expect(body.items.filter((item: { kind: string }) => item.kind === "improvement")).toHaveLength(1);
-    expect(body.items[0].url).toContain("/changelog#");
+    const itemUrl = new URL(body.items[0].url);
+    expect(`${itemUrl.pathname}${itemUrl.search}${itemUrl.hash}`).toBe(
+      buildChangelogItemPath(body.items[0].id),
+    );
   });
 
   it("rejects invalid feed windows and over-limit day windows", async () => {
