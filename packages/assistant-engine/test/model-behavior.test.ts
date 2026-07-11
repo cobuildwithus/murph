@@ -355,7 +355,13 @@ describe('assistant execution prompt contract', () => {
       'privacy/auth/billing/consent/irreversible actions',
     )
     expect(layers.stableRouteCapabilityPrompt).toContain(
-      'Never expose, mutate, or apply private dials in groups',
+      'In groups, never run style show/set/reset',
+    )
+    expect(layers.stableRouteCapabilityPrompt).toContain(
+      'receive, expose, mutate, or apply member-private dials',
+    )
+    expect(layers.stableRouteCapabilityPrompt).toContain(
+      'group rules own behavior',
     )
     expect(layers.threadContextPrompt).not.toContain('/settings?voice=true')
     expect(layers.dynamicTurnContextPrompt).not.toContain('/settings?voice=true')

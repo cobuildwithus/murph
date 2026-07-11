@@ -374,6 +374,15 @@ describe('assistant protocol index planning', () => {
     const plan = await resolveAssistantRouteTurnPlan({
       executionContext: null,
       input: createMessageInput(),
+      preferenceContext: {
+        assistantPersonality: {
+          detail: 7,
+          humor: 9,
+          push: 8,
+        },
+        assistantTone: null,
+        assistantVoice: null,
+      },
       profile: executionProfile,
       promptTimeContext: {
         currentLocalDate: '2026-05-04',
@@ -392,6 +401,15 @@ describe('assistant protocol index planning', () => {
     expect(plan.developerInstructions).not.toContain(
       'Before ending a normal reply while onboarding is open, keep onboarding moving unless a skip condition applies',
     )
+    expect(plan.developerInstructions).toContain(
+      'In groups, never run style show/set/reset',
+    )
+    expect(plan.developerInstructions).toContain(
+      'receive, expose, mutate, or apply member-private dials',
+    )
+    expect(plan.developerInstructions).not.toContain('Humor 9/10')
+    expect(plan.developerInstructions).not.toContain('Push 8/10')
+    expect(plan.developerInstructions).not.toContain('Detail 7/10')
   })
 
   it('resolves assistant voice preferences into ElevenLabs planning ids', async () => {

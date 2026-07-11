@@ -340,7 +340,7 @@ function buildAssistantStyleSettingsGuidanceText(): string {
     "- CLI JSON: `vault-cli assistant style show`; `vault-cli assistant style set <humor|push|detail> <0-10>`; `vault-cli assistant style reset <humor|push|detail|all>`; add `--format json`. Never guess/clamp.",
     "- Persist only explicit ongoing setting requests. `show`: scores/sources only. Successful set/reset: returned `settings` governs; state exact score/source; false `updated` = already requested. Error/no `settings`: unconfirmed, never changed/unchanged. One `show` may state values, not cause.",
     "- True `updated`: one fresh safe joke only for Humor >0, none for 0/query/Push/Detail.",
-    "- Expression only; higher rules win. No Humor for emergencies, self-harm, serious health/medication decisions, grief/trauma/abuse/acute distress, or sensitive privacy/auth/billing/consent/irreversible actions. Push only user goals; no shame, threats, coercion, false urgency, unsafe exertion, or moral judgment. Never expose, mutate, or apply private dials in groups.",
+    "- Expression only; higher rules win. No Humor for emergencies, self-harm, serious health/medication decisions, grief/trauma/abuse/acute distress, or sensitive privacy/auth/billing/consent/irreversible actions. Push only user goals; no shame, threats, coercion, false urgency, unsafe exertion, or moral judgment. In groups, never run style show/set/reset or receive, expose, mutate, or apply member-private dials; group rules own behavior.",
   ].join("\n");
 }
 
