@@ -233,7 +233,7 @@ describe("hosted action approvals", () => {
     );
   });
 
-  it("does not emit the new mailbox kind before its rollout gate is enabled", async () => {
+  it("keeps a near-expiry pre-cutover approval on the legacy continuation path", async () => {
     vi.stubEnv(OUTCOME_WAKE_ROLLOUT_ENV, "0");
     const { deps, memberId } = await setup();
     const requested = await requestHostedActionApproval({
@@ -245,7 +245,7 @@ describe("hosted action approvals", () => {
     const pending = await requirePendingHostedActionApproval({
       approvalId: requested.approvalId,
       memberId,
-      now: new Date("2026-06-25T18:01:00.000Z"),
+      now: new Date("2026-06-25T18:14:59.000Z"),
       prisma: deps.prisma,
     });
 
@@ -253,13 +253,18 @@ describe("hosted action approvals", () => {
       assertHostedActionApprovalTransactionClient(tx);
       return decideHostedActionApprovalTx({
         approval: pending,
-        decision: "denied",
+        challenge: verifiedApprovalChallenge(pending, memberId),
+        decision: "approved",
         memberId,
-        now: new Date("2026-06-25T18:01:00.000Z"),
+        now: new Date("2026-06-25T18:14:59.000Z"),
         tx,
       });
     });
 
+    expect(decision.approval).toMatchObject({
+      expiresAt: "2026-06-25T18:29:59.000Z",
+      status: "approved",
+    });
     expect(decision.runtimeResume).toBeNull();
     await expect(deps.prisma.hostedMailboxItem.count({
       where: {

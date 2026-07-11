@@ -248,4 +248,28 @@ describe("action approval page", () => {
     assert.match(markup, /I denied the request\./);
     expect(mocks.redirect).not.toHaveBeenCalled();
   });
+
+  it("retains an approved pre-cutover confirmation during the drain window", async () => {
+    mocks.isHostedActionApprovalOutcomeWakeEnabled.mockReturnValueOnce(false);
+    mocks.readHostedActionApproval.mockResolvedValueOnce({
+      approvalId: "haa_test",
+      expiresAt: "2026-07-09T16:15:00.000Z",
+      presentation: {
+        body: "Share the requested file.",
+        title: "Share this file?",
+      },
+      returnContactKind: null,
+      status: "approved",
+    });
+
+    const view = await actionApprovalPage.default({
+      params: Promise.resolve({ approvalId: "haa_test" }),
+    });
+    const stream = await renderToReadableStream(view);
+    await stream.allReady;
+    const markup = await new Response(stream).text();
+
+    assert.match(markup, /I approved the request\./);
+    expect(mocks.redirect).not.toHaveBeenCalled();
+  });
 });
