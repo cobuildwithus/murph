@@ -1324,7 +1324,7 @@ export async function readLatestBloodTestHistorySummaryInterruptible(
       vaultRoot: input.vaultRoot,
       visit: (shardRecord) => {
         const record = parseStoredHistoryEvent(shardRecord);
-        if (!record || record.kind !== "test") {
+        if (!record) {
           return;
         }
 

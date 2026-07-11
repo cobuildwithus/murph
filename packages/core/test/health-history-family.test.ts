@@ -1158,6 +1158,47 @@ test("latest blood-test summary collapses tombstones", async () => {
   });
 });
 
+test("latest blood-test summary collapses revisions before filtering by kind", async () => {
+  const vaultRoot = await makeTempDirectory("murph-blood-test-summary-kind-revision");
+  await initializeVault({ vaultRoot });
+
+  const reclassified = await appendBloodTest({
+    vaultRoot,
+    occurredAt: "2026-01-15T08:30:00.000Z",
+    recordedAt: "2026-01-15T08:31:00.000Z",
+    title: "Reclassified panel",
+    testName: "reclassified_panel",
+  });
+  await appendJsonlRecord({
+    vaultRoot,
+    relativePath: reclassified.relativePath,
+    record: {
+      schemaVersion: reclassified.record.schemaVersion,
+      id: reclassified.record.id,
+      kind: "procedure",
+      occurredAt: reclassified.record.occurredAt,
+      recordedAt: "2026-01-15T08:32:00.000Z",
+      dayKey: reclassified.record.dayKey,
+      source: reclassified.record.source,
+      title: "Reclassified procedure",
+      procedure: "Reclassified procedure",
+      status: "completed",
+      lifecycle: {
+        revision: 2,
+      },
+    },
+  });
+
+  const summary = await readLatestBloodTestHistorySummaryInterruptible({
+    vaultRoot,
+  });
+  assert.deepEqual(summary, {
+    interrupted: false,
+    latestOccurredAt: null,
+    present: false,
+  });
+});
+
 test("latest blood-test summary stops between JSONL records", async () => {
   const vaultRoot = await makeTempDirectory("murph-blood-test-summary-interrupt");
   await initializeVault({ vaultRoot });
