@@ -3,6 +3,7 @@ import "server-only";
 import { Prisma, type PrismaClient } from "@prisma/client";
 import {
   hostedCallCirclePreferencesSchema,
+  normalizeHostedCallCircleMemberName,
   type HostedCallCirclePreferences,
   type HostedCallCirclePreferencesPatch,
 } from "@murphai/hosted-execution/call-circle";
@@ -15,6 +16,10 @@ import {
   lockHostedGroupRow,
   lockHostedMemberRow,
 } from "../hosted-onboarding/shared";
+import {
+  createHostedCallCircleMemberNameLookupKey,
+  createHostedCallCircleMemberNameLookupKeyReadCandidates,
+} from "../hosted-onboarding/contact-privacy";
 import {
   activeHostedMemberAccessWithParticipantsWhere,
 } from "../hosted-onboarding/member-access";
@@ -197,16 +202,13 @@ export async function writeCallCirclePreferences(input: {
     return "incomplete";
   }
 
-  const memberCadenceUpdates = input.patch.memberCadenceUpdates ?? [];
-  const memberIds = memberCadenceUpdates.map((update) => update.memberId);
-  if (
-    memberIds.includes(input.memberId)
-    || !await areCurrentCallCircleGroupMembers({
-      groupId: input.groupId,
-      memberIds,
-      prisma,
-    })
-  ) {
+  const memberCadenceUpdates = await resolveCallCircleMemberCadenceUpdates({
+    groupId: input.groupId,
+    selfMemberId: input.memberId,
+    updates: input.patch.memberCadenceUpdates ?? [],
+    prisma,
+  });
+  if (!memberCadenceUpdates) {
     return "invalid_member_cadences";
   }
 
@@ -241,19 +243,112 @@ export async function writeCallCirclePreferences(input: {
   return result.count > 0 ? "updated" : "missing";
 }
 
-async function areCurrentCallCircleGroupMembers(input: {
+export async function refreshCallCircleParticipantMemberNameKey(input: {
   groupId: string;
-  memberIds: readonly string[];
+  memberId: string;
   prisma: Prisma.TransactionClient;
-}): Promise<boolean> {
-  if (input.memberIds.length === 0) return true;
-  const count = await input.prisma.hostedGroupMember.count({
+  selfMemberName: string | null | undefined;
+}): Promise<void> {
+  if (input.selfMemberName === undefined) return;
+  await input.prisma.hostedCallCircleParticipant.updateMany({
+    data: {
+      memberNameKey: input.selfMemberName === null
+        ? null
+        : buildCallCircleMemberNameKey(input.groupId, input.selfMemberName),
+    },
     where: {
       groupId: input.groupId,
-      memberId: { in: [...input.memberIds] },
+      memberId: input.memberId,
     },
   });
-  return count === input.memberIds.length;
+}
+
+async function resolveCallCircleMemberCadenceUpdates(input: {
+  groupId: string;
+  selfMemberId: string;
+  updates: HostedCallCirclePreferencesPatch["memberCadenceUpdates"];
+  prisma: Prisma.TransactionClient;
+}): Promise<Array<{
+  cadence: "weekly" | "biweekly" | "monthly" | "never" | "default";
+  memberId: string;
+}> | null> {
+  const updates = input.updates ?? [];
+  if (updates.length === 0) return [];
+  const keyedUpdates = updates.map((update) => ({
+    cadence: update.cadence,
+    memberNameKeys: readCallCircleMemberNameKeyCandidates(
+      input.groupId,
+      update.memberName,
+    ),
+  }));
+  const normalizedTargetKeys = keyedUpdates.map((update) => update.memberNameKeys.join("\0"));
+  if (new Set(normalizedTargetKeys).size !== keyedUpdates.length) return null;
+  const memberNameKeys = [...new Set(keyedUpdates.flatMap((update) => update.memberNameKeys))];
+
+  const participants = await input.prisma.hostedCallCircleParticipant.findMany({
+    select: {
+      memberId: true,
+      memberNameKey: true,
+    },
+    take: HOSTED_CALL_CIRCLE_PARTICIPANTS_MAX,
+    where: {
+      groupId: input.groupId,
+      member: {
+        ...activeHostedMemberAccessWithParticipantsWhere(),
+        hostedGroupMemberships: {
+          some: { groupId: input.groupId },
+        },
+      },
+      memberNameKey: { in: memberNameKeys },
+    },
+  });
+  const membersByNameKey = new Map<string, string[]>();
+  for (const participant of participants) {
+    if (!participant.memberNameKey) continue;
+    const memberIds = membersByNameKey.get(participant.memberNameKey) ?? [];
+    memberIds.push(participant.memberId);
+    membersByNameKey.set(participant.memberNameKey, memberIds);
+  }
+
+  const resolved: Array<{
+    cadence: "weekly" | "biweekly" | "monthly" | "never" | "default";
+    memberId: string;
+  }> = [];
+  for (const update of keyedUpdates) {
+    const memberIds = [...new Set(update.memberNameKeys.flatMap(
+      (memberNameKey) => membersByNameKey.get(memberNameKey) ?? [],
+    ))];
+    if (memberIds.length !== 1 || memberIds[0] === input.selfMemberId) return null;
+    const memberId = memberIds[0];
+    if (!memberId) return null;
+    resolved.push({ cadence: update.cadence, memberId });
+  }
+  return resolved;
+}
+
+function buildCallCircleMemberNameKey(groupId: string, memberName: string): string {
+  const memberNameKey = createHostedCallCircleMemberNameLookupKey({
+    groupId,
+    normalizedMemberName: normalizeHostedCallCircleMemberName(memberName),
+  });
+  if (!memberNameKey) {
+    throw new Error("Call Circle member name could not be indexed.");
+  }
+  return memberNameKey;
+}
+
+function readCallCircleMemberNameKeyCandidates(
+  groupId: string,
+  memberName: string,
+): string[] {
+  const candidates = createHostedCallCircleMemberNameLookupKeyReadCandidates({
+    groupId,
+    normalizedMemberName: normalizeHostedCallCircleMemberName(memberName),
+  });
+  if (candidates.length === 0) {
+    throw new Error("Call Circle member name could not be indexed.");
+  }
+  return candidates;
 }
 
 export async function pauseCallCircleParticipant(input: {

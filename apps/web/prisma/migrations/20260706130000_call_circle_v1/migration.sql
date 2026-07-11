@@ -10,6 +10,7 @@ CREATE TABLE "hosted_call_circle_participant" (
     "member_id" TEXT NOT NULL,
     "status" "HostedCallCircleParticipantStatus" NOT NULL DEFAULT 'enrolled',
     "preferences_json" JSONB,
+    "member_name_key" TEXT,
     "next_matching_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "paused_at" TIMESTAMP(3),
     "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,

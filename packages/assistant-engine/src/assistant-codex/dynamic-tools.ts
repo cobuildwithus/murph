@@ -1792,19 +1792,6 @@ function currentHostedDeliveryContext(
   return hostedToolContext?.currentHostedDeliveryContext() ?? null
 }
 
-function currentHostedMailboxItemId(
-  hostedToolContext: AssistantHostedToolContext | null,
-): string | null {
-  const itemIds = hostedToolContext?.currentHostedMailboxItemIds() ?? []
-  for (let index = itemIds.length - 1; index >= 0; index -= 1) {
-    const itemId = normalizeNullableString(itemIds[index])
-    if (itemId) {
-      return itemId
-    }
-  }
-  return null
-}
-
 function currentHostedTurnMailboxItemId(
   hostedToolContext: AssistantHostedToolContext | null,
 ): string | null {
@@ -2861,7 +2848,9 @@ function buildHostedComputerOpenBody(input: {
   hostedToolContext: AssistantHostedToolContext | null
 }): Record<string, unknown> {
   const { startUrl } = input.args
-  const resumeAfterMailboxItemId = currentHostedMailboxItemId(input.hostedToolContext)
+  const resumeAfterMailboxItemId = currentHostedTurnMailboxItemId(
+    input.hostedToolContext,
+  )
   return {
     goal: 'Hosted computer task.',
     resumeAfterMailboxItemId,

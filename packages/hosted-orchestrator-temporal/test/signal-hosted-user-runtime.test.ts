@@ -41,8 +41,14 @@ describe("signalHostedUserRuntimeWorkflow", () => {
       options: HostedUserRuntimeSignalWithStartOptions;
       workflowType: typeof HOSTED_USER_RUNTIME_WORKFLOW_TYPE;
     }> = [];
+    const deadlines: Array<number | Date> = [];
+    const signalRpcDeadline = new Date("2026-07-10T12:00:00.000Z");
 
     const client: HostedUserRuntimeSignalClient = {
+      async withDeadline(deadline, callback) {
+        deadlines.push(deadline);
+        return await callback();
+      },
       workflow: {
         async signalWithStart(workflowType, options) {
           calls.push({ options, workflowType });
@@ -60,10 +66,12 @@ describe("signalHostedUserRuntimeWorkflow", () => {
     const result = await signalHostedUserRuntimeWorkflow({
       client,
       signal,
+      signalRpcDeadline,
       userId: "user_test",
     });
 
     expect(result.workflowId).toBe("hosted-user-runtime:user_test");
+    expect(deadlines).toEqual([signalRpcDeadline]);
     expect(calls).toEqual([
       {
         options: {

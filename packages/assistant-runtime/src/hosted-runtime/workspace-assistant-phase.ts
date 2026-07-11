@@ -113,6 +113,9 @@ import {
   type HostedSystemMailboxCheckpointPreparation,
   type HostedSystemMailboxPendingItem,
 } from "./system-mailbox.ts";
+import {
+  readProjectableProfileName,
+} from "./vault-share-projection.ts";
 import type {
   HostedAssistantLinqDeliveryContext,
 } from "./linq-delivery-context.ts";
@@ -536,11 +539,17 @@ export async function runHostedWorkspaceAssistantPhase(
     }).catch(() => undefined);
   }
   const executionTargetHydrateStartedAt = Date.now();
+  const callCircle = input.runtime.platform.callCircle
+    ? createHostedCallCirclePortWithSelfMemberName({
+        callCircle: input.runtime.platform.callCircle,
+        vaultRoot: input.restored.vaultRoot,
+      })
+    : null;
   const executionContext: AssistantExecutionContext = await hydrateHostedExecutionDefaultTarget(
     {
       hosted: {
         actionApprovalPort: input.runtime.platform.actionApprovalPort ?? null,
-        callCircle: input.runtime.platform.callCircle ?? null,
+        callCircle,
         connectedApps: input.runtime.platform.connectedApps ?? null,
         phoneCalls: input.runtime.platform.phoneCalls ?? null,
         progressDeliveryDependencies: createHostedAssistantProgressDeliveryDependencies({
@@ -1318,6 +1327,38 @@ export async function runHostedWorkspaceAssistantPhase(
     releaseChannelAbortRelay();
     channelAbortController.abort();
   }
+}
+
+function createHostedCallCirclePortWithSelfMemberName(input: {
+  callCircle: NonNullable<HostedRuntimePlatform["callCircle"]>;
+  vaultRoot: string;
+}): NonNullable<HostedRuntimePlatform["callCircle"]> {
+  return {
+    async respond(request, context) {
+      let selfMemberName: string | null | undefined;
+      try {
+        const records = await readProjectableProfileName(input.vaultRoot);
+        const record = records.length === 1 ? records[0] : null;
+        selfMemberName = null;
+        if (
+          record
+          && "displayName" in record.data
+          && typeof record.data.displayName === "string"
+        ) {
+          selfMemberName = record.data.displayName;
+        }
+      } catch {
+        // A transient private-vault read failure must not clear a previously derived key.
+      }
+      return await input.callCircle.respond(request, {
+        ...(context?.inboundMailboxItemIds
+          ? { inboundMailboxItemIds: context.inboundMailboxItemIds }
+          : {}),
+        ...(selfMemberName !== undefined ? { selfMemberName } : {}),
+        signal: context?.signal ?? null,
+      });
+    },
+  };
 }
 
 function hasFreshHostedConversationInput(

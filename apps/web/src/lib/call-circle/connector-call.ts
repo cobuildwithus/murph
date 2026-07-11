@@ -25,9 +25,13 @@ import {
   isPreProviderFailedCallCircleBridgePhoneCall,
   isUnstartedCallCircleBridgePhoneCall,
 } from "./phone-call-state";
-import type { CallCircleMatchOutcome } from "./types";
+import type {
+  CallCircleMatchOutcome,
+  CallCirclePrismaClient,
+} from "./types";
 import {
   hasCallCircleBridgeWindowElapsed,
+  isWithinCallCircleDaytime,
   isWithinCallCircleBridgeWindow,
   readCallCircleBridgeWindowStartCutoff,
 } from "./time";
@@ -179,6 +183,7 @@ export async function startCallCircleConnectorCall(input: {
   if (!timeZones) {
     return { status: "ignored" };
   }
+  let providerStartTimeZones: typeof timeZones | null = null;
 
   try {
     const phoneCall = await createHostedPhoneCall({
@@ -186,15 +191,22 @@ export async function startCallCircleConnectorCall(input: {
         memberAPhone,
         timeZone: timeZones.memberATimeZone,
       }),
-      beforeStart: async ({ phoneCallId }) => {
+      beforeStart: async ({ phoneCallId, prisma: transactionPrisma }) => {
         if (!await canUseActiveCallCircleParticipantPair({
           groupId: match.groupId,
           memberAId: match.memberAId,
           memberBId: match.memberBId,
-          prisma,
+          prisma: transactionPrisma,
         })) {
           return false;
         }
+        providerStartTimeZones = await readCallCircleMatchParticipantTimeZones({
+          groupId: match.groupId,
+          memberAId: match.memberAId,
+          memberBId: match.memberBId,
+          prisma: transactionPrisma,
+        });
+        if (!providerStartTimeZones) return false;
         if (isRecoverableAttachedBridge) {
           return await canStartAttachedCallCircleBridge({
             groupId: match.groupId,
@@ -203,24 +215,39 @@ export async function startCallCircleConnectorCall(input: {
             memberBId: match.memberBId,
             now,
             phoneCallId,
-            prisma,
+            prisma: transactionPrisma,
           });
         }
         return await attachCallCirclePhoneCall({
           matchId: match.id,
           phoneCallId,
-          prisma,
+          prisma: transactionPrisma,
         });
       },
       memberId: match.memberAId,
-      providerStartGuardWhere: (attemptedAt) =>
-        buildCallCircleProviderStartGuardWhere({
+      providerStartGuardWhere: (attemptedAt) => {
+        if (!providerStartTimeZones) return null;
+        if (
+          !isWithinCallCircleDaytime({
+            now: attemptedAt,
+            timeZone: providerStartTimeZones.memberATimeZone,
+          })
+          || !isWithinCallCircleDaytime({
+            now: attemptedAt,
+            timeZone: providerStartTimeZones.memberBTimeZone,
+          })
+        ) {
+          return null;
+        }
+        return buildCallCircleProviderStartGuardWhere({
           groupId: match.groupId,
           matchId: match.id,
           memberAId: match.memberAId,
           memberBId: match.memberBId,
           now: attemptedAt,
-        }),
+        });
+      },
+      providerStartMemberIds: [match.memberAId, match.memberBId],
       requestKey: buildCallCircleConnectorRequestKey(match.id),
       resultNotificationRouteResolver: async () => undefined,
       runtimeOptions: {
@@ -309,7 +336,7 @@ async function canStartAttachedCallCircleBridge(input: {
   memberBId: string;
   now: Date;
   phoneCallId: string;
-  prisma: PrismaClient;
+  prisma: CallCirclePrismaClient;
 }): Promise<boolean> {
   const count = await input.prisma.hostedCallCircleMatch.count({
     where: {

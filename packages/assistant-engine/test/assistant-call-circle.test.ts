@@ -34,7 +34,7 @@ describe("assistant Call Circle dynamic tool", () => {
       "cadence as weekly, biweekly, or monthly",
     );
     expect(MURPH_CALL_CIRCLE_RESPOND_TOOL.description).toContain(
-      "never guess one from a name",
+      "never guess or send an opaque member id",
     );
   });
 
@@ -73,7 +73,7 @@ describe("assistant Call Circle dynamic tool", () => {
         kind: "preferences",
         memberCadenceUpdates: [{
           cadence: "never",
-          memberId: "member_housemate",
+          memberName: "Sam",
         }],
       },
       tool: MURPH_CALL_CIRCLE_RESPOND_TOOL.name,
@@ -86,9 +86,21 @@ describe("assistant Call Circle dynamic tool", () => {
         kind: "preferences",
         memberCadenceUpdates: [{
           cadence: "never",
-          memberId: "member_housemate",
+          memberName: "Sam",
         }],
       },
+    });
+  });
+
+  it("rejects model-supplied opaque ids for private cadence updates", () => {
+    expect(readMurphDynamicToolRequest(dynamicToolCall({
+      argumentsValue: {
+        kind: "preferences",
+        memberCadenceUpdates: [{ cadence: "never", memberId: "member_hidden" }],
+      },
+      tool: MURPH_CALL_CIRCLE_RESPOND_TOOL.name,
+    }))).toMatchObject({
+      kind: "invalid-call-circle-arguments",
     });
   });
 });

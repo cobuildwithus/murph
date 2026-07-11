@@ -609,6 +609,7 @@ model HostedCallCircleParticipant {
   memberId        String                            @map("member_id")
   status          HostedCallCircleParticipantStatus @default(enrolled)
   preferencesJson Json?                             @map("preferences_json")
+  memberNameKey   String?                           @map("member_name_key")
   nextMatchingAt  DateTime                          @default(now()) @map("next_matching_at")
   pausedAt        DateTime?                         @map("paused_at")
   createdAt       DateTime                          @default(now()) @map("created_at")

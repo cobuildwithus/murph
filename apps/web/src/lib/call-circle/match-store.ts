@@ -15,7 +15,7 @@ import {
   activeCallCircleParticipantPairMatchWhere,
   readActiveCallCircleParticipantPair,
 } from "./participant-store";
-import { canMatchCallCircleParticipantPair } from "./matcher";
+import { proposeCallCircleParticipantPair } from "./matcher";
 import {
   CALL_CIRCLE_FINAL_ASK_LEAD_MS,
   CALL_CIRCLE_MAX_MATCH_LOOKBACK_MS,
@@ -107,12 +107,17 @@ async function createCallCircleMatchProposalTx(input: {
     now: input.proposal.now,
     prisma,
   });
-  if (!canMatchCallCircleParticipantPair({
+  const currentProposal = proposeCallCircleParticipantPair({
     first: participants.memberA,
     now: input.proposal.now,
     recentMatches,
     second: participants.memberB,
-  })) {
+  });
+  if (
+    !currentProposal
+    || currentProposal.windowStartAt.getTime() !== input.proposal.windowStartAt.getTime()
+    || currentProposal.windowEndAt.getTime() !== input.proposal.windowEndAt.getTime()
+  ) {
     return null;
   }
 

@@ -18,11 +18,16 @@ export function createHostedWebCallCirclePort(input: {
   return {
     async respond(request, options) {
       const inboundMailboxItemIds = options?.inboundMailboxItemIds ?? [];
+      const selfMemberName = options?.selfMemberName;
+      const context = {
+        ...(inboundMailboxItemIds.length > 0
+          ? { inboundMailboxItemIds: [...inboundMailboxItemIds] }
+          : {}),
+        ...(selfMemberName !== undefined ? { selfMemberName } : {}),
+      };
       const response = await fetchHostedWebControlPlaneJson({
         body: {
-          context: inboundMailboxItemIds.length > 0
-            ? { inboundMailboxItemIds: [...inboundMailboxItemIds] }
-            : undefined,
+          context: Object.keys(context).length > 0 ? context : undefined,
           request,
         },
         boundUserId: input.boundUserId,

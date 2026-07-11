@@ -36,9 +36,13 @@ import {
   pauseCallCircleParticipant,
   readActiveCallCircleParticipantPair,
   readCallCircleMatchParticipantTimeZones,
+  refreshCallCircleParticipantMemberNameKey,
   resumeCallCircleParticipant,
   writeCallCirclePreferences,
 } from "@/src/lib/call-circle/participant-store";
+import {
+  createHostedCallCircleMemberNameLookupKey,
+} from "@/src/lib/hosted-onboarding/contact-privacy";
 
 describe("Call Circle conditional mutations", () => {
   const updateMany = vi.fn();
@@ -836,8 +840,8 @@ describe("Call Circle conditional mutations", () => {
         memberAId: "member_b",
         memberBId: "member_a",
         now,
-        windowEndAt: new Date("2026-07-06T15:30:00.000Z"),
-        windowStartAt: new Date("2026-07-06T15:00:00.000Z"),
+        windowEndAt: new Date("2026-07-06T17:15:00.000Z"),
+        windowStartAt: new Date("2026-07-06T17:00:00.000Z"),
       },
       prisma: prisma as never,
     })).resolves.toEqual({ id: "hccm_123" });
@@ -899,13 +903,45 @@ describe("Call Circle conditional mutations", () => {
         memberBId: "member_b",
         status: "proposed",
         updatedAt: now,
-        windowEndAt: new Date("2026-07-06T15:30:00.000Z"),
-        windowStartAt: new Date("2026-07-06T15:00:00.000Z"),
+        windowEndAt: new Date("2026-07-06T17:15:00.000Z"),
+        windowStartAt: new Date("2026-07-06T17:00:00.000Z"),
       },
     });
     expect(tx.$queryRaw).toHaveBeenCalledTimes(2);
     expect(tx.$queryRaw.mock.invocationCallOrder[1])
       .toBeLessThan(create.mock.invocationCallOrder[0] ?? 0);
+  });
+
+  it("rejects a staged window that no longer matches locked preferences", async () => {
+    const create = vi.fn();
+    const prisma = {
+      $queryRaw: vi.fn(),
+      hostedCallCircleMatch: {
+        create,
+        findMany: vi.fn(async () => []),
+      },
+      hostedCallCircleParticipant: {
+        findMany: vi.fn(async () => [
+          { memberId: "member_a", preferencesJson: storedPreferences() },
+          { memberId: "member_b", preferencesJson: storedPreferences() },
+        ]),
+      },
+    };
+
+    await expect(createCallCircleMatchProposal({
+      proposal: {
+        groupId: "hgrp_123",
+        memberAId: "member_a",
+        memberBId: "member_b",
+        now: new Date("2026-07-06T15:00:00.000Z"),
+        windowEndAt: new Date("2026-07-06T15:15:00.000Z"),
+        windowStartAt: new Date("2026-07-06T15:00:00.000Z"),
+      },
+      prisma: prisma as never,
+    })).resolves.toBeNull();
+
+    expect(prisma.$queryRaw).toHaveBeenCalledTimes(2);
+    expect(create).not.toHaveBeenCalled();
   });
 
   it("does not create a proposal when either member already has a recent match in another group", async () => {
@@ -1371,11 +1407,15 @@ describe("Call Circle conditional mutations", () => {
         }],
       },
     }));
-    const groupMemberCount = vi.fn(async () => 2);
+    const samKey = requireCallCircleMemberNameKey("hgrp_123", "sam");
+    const oldKey = requireCallCircleMemberNameKey("hgrp_123", "old");
+    const findMany = vi.fn(async () => [
+      { memberId: "member_housemate", memberNameKey: samKey },
+      { memberId: "member_old", memberNameKey: oldKey },
+    ]);
     const prisma = {
       $queryRaw: vi.fn(),
-      hostedCallCircleParticipant: { findUnique, updateMany },
-      hostedGroupMember: { count: groupMemberCount },
+      hostedCallCircleParticipant: { findMany, findUnique, updateMany },
     };
     const now = new Date("2026-07-06T15:00:00.000Z");
 
@@ -1386,8 +1426,8 @@ describe("Call Circle conditional mutations", () => {
       patch: {
         cadence: "biweekly",
         memberCadenceUpdates: [
-          { cadence: "never", memberId: "member_housemate" },
-          { cadence: "default", memberId: "member_old" },
+          { cadence: "never", memberName: "Sam" },
+          { cadence: "default", memberName: "Old" },
         ],
       },
       prisma: prisma as never,
@@ -1412,12 +1452,24 @@ describe("Call Circle conditional mutations", () => {
         memberId: "member_123",
       },
     });
-    expect(groupMemberCount).toHaveBeenCalledWith({
+    expect(findMany).toHaveBeenCalledWith({
+      select: {
+        memberId: true,
+        memberNameKey: true,
+      },
+      take: HOSTED_CALL_CIRCLE_PARTICIPANTS_MAX,
       where: {
         groupId: "hgrp_123",
-        memberId: { in: ["member_housemate", "member_old"] },
+        member: {
+          hostedGroupMemberships: {
+            some: { groupId: "hgrp_123" },
+          },
+          suspendedAt: null,
+        },
+        memberNameKey: { in: [samKey, oldKey] },
       },
     });
+    expect(JSON.stringify(updateMany.mock.calls[0]?.[0])).not.toMatch(/Sam|Old/u);
 
     findUnique.mockResolvedValueOnce(null);
     await expect(writeCallCirclePreferences({
@@ -1431,20 +1483,29 @@ describe("Call Circle conditional mutations", () => {
 
   it("rejects self and non-member cadence overrides without exposing which check failed", async () => {
     const update = vi.fn();
+    const alexKey = requireCallCircleMemberNameKey("hgrp_123", "alex");
+    const samKey = requireCallCircleMemberNameKey("hgrp_123", "sam");
+    const findMany = vi.fn()
+      .mockResolvedValueOnce([{ memberId: "member_a", memberNameKey: alexKey }])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        { memberId: "member_b", memberNameKey: samKey },
+        { memberId: "member_c", memberNameKey: samKey },
+      ]);
     const prisma = {
       $queryRaw: vi.fn(),
       hostedCallCircleParticipant: {
+        findMany,
         findUnique: vi.fn(async () => ({ preferencesJson: storedPreferences() })),
         updateMany: update,
       },
-      hostedGroupMember: { count: vi.fn(async () => 0) },
     };
 
     await expect(writeCallCirclePreferences({
       groupId: "hgrp_123",
       memberId: "member_a",
       patch: {
-        memberCadenceUpdates: [{ cadence: "never", memberId: "member_a" }],
+        memberCadenceUpdates: [{ cadence: "never", memberName: "Alex" }],
       },
       prisma: prisma as never,
     })).resolves.toBe("invalid_member_cadences");
@@ -1452,11 +1513,51 @@ describe("Call Circle conditional mutations", () => {
       groupId: "hgrp_123",
       memberId: "member_a",
       patch: {
-        memberCadenceUpdates: [{ cadence: "never", memberId: "member_unknown" }],
+        memberCadenceUpdates: [{ cadence: "never", memberName: "Unknown" }],
+      },
+      prisma: prisma as never,
+    })).resolves.toBe("invalid_member_cadences");
+    await expect(writeCallCirclePreferences({
+      groupId: "hgrp_123",
+      memberId: "member_a",
+      patch: {
+        memberCadenceUpdates: [{ cadence: "never", memberName: "Sam" }],
       },
       prisma: prisma as never,
     })).resolves.toBe("invalid_member_cadences");
     expect(update).not.toHaveBeenCalled();
+  });
+
+  it("stores only the current blind index for the runtime-derived member name", async () => {
+    const update = vi.fn<(input: {
+      data: { memberNameKey: string | null };
+      where: { groupId: string; memberId: string };
+    }) => Promise<{ count: number }>>().mockResolvedValue({ count: 1 });
+    const prisma = {
+      hostedCallCircleParticipant: { updateMany: update },
+    };
+
+    await refreshCallCircleParticipantMemberNameKey({
+      groupId: "hgrp_123",
+      memberId: "member_a",
+      prisma: prisma as never,
+      selfMemberName: "Sam",
+    });
+
+    const storedKey = update.mock.calls[0]?.[0]?.data?.memberNameKey;
+    expect(storedKey).toMatch(/^hbidx:call-circle-member-name:v1:/u);
+    expect(storedKey).not.toContain("Sam");
+
+    await refreshCallCircleParticipantMemberNameKey({
+      groupId: "hgrp_123",
+      memberId: "member_a",
+      prisma: prisma as never,
+      selfMemberName: null,
+    });
+    expect(update).toHaveBeenLastCalledWith({
+      data: { memberNameKey: null },
+      where: { groupId: "hgrp_123", memberId: "member_a" },
+    });
   });
 
   it("advances weekly matching cursors and preserves concurrent edits", async () => {
@@ -1711,4 +1812,13 @@ function storedPreferences(memberCadences: Array<{
       startLocalTime: "17:00",
     }],
   };
+}
+
+function requireCallCircleMemberNameKey(groupId: string, normalizedMemberName: string): string {
+  const key = createHostedCallCircleMemberNameLookupKey({
+    groupId,
+    normalizedMemberName,
+  });
+  if (!key) throw new Error("Expected a Call Circle member-name lookup key.");
+  return key;
 }

@@ -538,7 +538,7 @@ export async function deleteHostedAccountData(input: {
     ownerMemberId: input.memberId,
     prisma: input.prisma,
   });
-  const deletionMemberIds = uniqueStrings([
+  const deletionMemberIds = sortedUniqueStrings([
     input.memberId,
     ...ownedThreadContainerMemberIds,
   ]);
@@ -594,7 +594,7 @@ export async function deleteHostedAccountData(input: {
     });
   }
   const databaseDeletion: HostedAccountDeletionDatabaseResult = await input.prisma.$transaction(async (tx) => {
-    const transactionDeletionMemberIds = uniqueStrings([
+    const transactionDeletionMemberIds = sortedUniqueStrings([
       input.memberId,
       ...await listOwnedHostedThreadContainerMemberIds({
         ownerMemberId: input.memberId,
@@ -888,6 +888,10 @@ async function refreshHostedMembersAccountDeletionFenceTx(input: {
 
 function uniqueStrings(values: readonly string[]): string[] {
   return Array.from(new Set(values));
+}
+
+function sortedUniqueStrings(values: readonly string[]): string[] {
+  return uniqueStrings(values).sort();
 }
 
 function buildStringInFilter(values: readonly string[]): string | { in: string[] } {

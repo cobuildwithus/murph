@@ -18,6 +18,9 @@ import {
   activeHostedMemberAccessWithParticipantsWhere,
 } from "../hosted-onboarding/member-access";
 import {
+  lockHostedMemberRow,
+} from "../hosted-onboarding/shared";
+import {
   requireHostedPhoneCallResultNotificationRoute,
 } from "./notification-route";
 import { createRetellPhoneCallRuntime } from "./retell-runtime";
@@ -33,16 +36,20 @@ const HOSTED_PHONE_CALL_START_FAILED_RESULT: HostedPhoneCallResult = {
   summary: "Murph could not start the phone call.",
 };
 
-type HostedPhoneCallBeforeStart = (resolverInput: {
+interface HostedPhoneCallPreflightInput {
   memberId: string;
+  prisma: HostedPhoneCallTransactionStore;
+}
+
+type HostedPhoneCallBeforeStart = (resolverInput: HostedPhoneCallPreflightInput & {
   phoneCallId: string;
 }) => Promise<boolean>;
 
 type HostedPhoneCallProviderStartGuard = (
   attemptedAt: Date,
-) => Prisma.HostedPhoneCallWhereInput;
+) => Prisma.HostedPhoneCallWhereInput | null;
 
-interface HostedPhoneCallStore {
+interface HostedPhoneCallDataStore {
   hostedPhoneCall: {
     create(input: {
       data: {
@@ -76,32 +83,38 @@ interface HostedPhoneCallStore {
   };
 }
 
+type HostedPhoneCallTransactionStore = Prisma.TransactionClient;
+
+interface HostedPhoneCallStore extends HostedPhoneCallDataStore {
+  $transaction<T>(
+    callback: (tx: HostedPhoneCallTransactionStore) => Promise<T>,
+  ): Promise<T>;
+}
+
 interface HostedPhoneCallUpdateStore {
-  hostedPhoneCall: Pick<HostedPhoneCallStore["hostedPhoneCall"], "updateMany">;
+  hostedPhoneCall: Pick<HostedPhoneCallDataStore["hostedPhoneCall"], "updateMany">;
 }
 
 export async function createHostedPhoneCall(input: {
-  beforeStart?: (resolverInput: {
-    memberId: string;
-    phoneCallId: string;
-  }) => Promise<boolean>;
+  beforeStart?: HostedPhoneCallBeforeStart;
   brief: HostedPhoneCallBrief;
   memberId: string;
   prisma?: HostedPhoneCallStore;
   requestKey: string;
   providerStartGuardWhere?: HostedPhoneCallProviderStartGuard;
-  resultNotificationRouteResolver?: (resolverInput: {
-    memberId: string;
-  }) => Promise<void>;
+  providerStartMemberIds?: readonly string[];
+  resultNotificationRouteResolver?: (
+    resolverInput: HostedPhoneCallPreflightInput,
+  ) => Promise<void>;
   runtime?: PhoneCallRuntime;
   runtimeOptions?: {
     openingLine?: string | null;
     retellAgentId?: string | null;
     retellAgentVersion?: string | null;
   };
-  transferNumberResolver?: (resolverInput: {
-    memberId: string;
-  }) => Promise<string | null>;
+  transferNumberResolver?: (
+    resolverInput: HostedPhoneCallPreflightInput,
+  ) => Promise<string | null>;
 }): Promise<HostedPhoneCallStartResponse> {
   const prisma = input.prisma ?? getPrisma();
   const runtime = input.runtime ?? createRetellPhoneCallRuntime();
@@ -111,8 +124,11 @@ export async function createHostedPhoneCall(input: {
     typeof input.resultNotificationRouteResolver
   > =
     input.resultNotificationRouteResolver
-    ?? (async ({ memberId }) => {
-      await requireHostedPhoneCallResultNotificationRoute({ memberId });
+    ?? (async ({ memberId, prisma: transactionPrisma }) => {
+      await requireHostedPhoneCallResultNotificationRoute({
+        memberId,
+        prisma: transactionPrisma,
+      });
     });
 
   let call: HostedPhoneCall;
@@ -169,6 +185,10 @@ export async function createHostedPhoneCall(input: {
         memberId: input.memberId,
         prisma,
         providerStartGuardWhere: input.providerStartGuardWhere,
+        providerStartMemberIds: sortHostedPhoneCallProviderStartMemberIds({
+          memberId: input.memberId,
+          memberIds: input.providerStartMemberIds,
+        }),
         requireResultNotificationRoute,
         resolveTransferNumber,
         runtime,
@@ -193,6 +213,10 @@ export async function createHostedPhoneCall(input: {
     memberId: input.memberId,
     prisma,
     providerStartGuardWhere: input.providerStartGuardWhere,
+    providerStartMemberIds: sortHostedPhoneCallProviderStartMemberIds({
+      memberId: input.memberId,
+      memberIds: input.providerStartMemberIds,
+    }),
     requireResultNotificationRoute,
     resolveTransferNumber,
     runtime,
@@ -207,12 +231,13 @@ async function startHostedPhoneCallReservation(input: {
   memberId: string;
   prisma: HostedPhoneCallStore;
   providerStartGuardWhere?: HostedPhoneCallProviderStartGuard;
-  requireResultNotificationRoute: (resolverInput: {
-    memberId: string;
-  }) => Promise<void>;
-  resolveTransferNumber: (resolverInput: {
-    memberId: string;
-  }) => Promise<string | null>;
+  providerStartMemberIds: readonly string[];
+  requireResultNotificationRoute: (
+    resolverInput: HostedPhoneCallPreflightInput,
+  ) => Promise<void>;
+  resolveTransferNumber: (
+    resolverInput: HostedPhoneCallPreflightInput,
+  ) => Promise<string | null>;
   runtime: PhoneCallRuntime;
   runtimeOptions?: {
     openingLine?: string | null;
@@ -223,46 +248,55 @@ async function startHostedPhoneCallReservation(input: {
   let call = input.call;
   let started: Awaited<ReturnType<PhoneCallRuntime["start"]>>;
   try {
-    await input.requireResultNotificationRoute({
-      memberId: input.memberId,
-    });
-    if (
-      input.beforeStart &&
-      !await input.beforeStart({
+    const prepared = await input.prisma.$transaction(async (tx) => {
+      for (const memberId of input.providerStartMemberIds) {
+        await lockHostedMemberRow(tx, memberId);
+      }
+      await input.requireResultNotificationRoute({
         memberId: input.memberId,
-        phoneCallId: call.id,
-      })
-    ) {
-      throw new Error("Hosted phone call start aborted.");
-    }
-    const transferNumber = input.brief.allowTransferToUser
-      ? await input.resolveTransferNumber({
+        prisma: tx,
+      });
+      if (
+        input.beforeStart &&
+        !await input.beforeStart({
           memberId: input.memberId,
+          phoneCallId: call.id,
+          prisma: tx,
         })
-      : null;
-    const runtimeRecord = {
-      brief: input.brief,
-      id: call.id,
-      memberId: input.memberId,
-      openingLine: input.runtimeOptions?.openingLine ?? null,
-      retellAgentId: input.runtimeOptions?.retellAgentId ?? null,
-      retellAgentVersion: input.runtimeOptions?.retellAgentVersion ?? null,
-      transferNumber,
-    };
-    await input.runtime.validateStart?.(runtimeRecord);
-    const providerStartAttempt = await markHostedPhoneCallProviderStartAttempt({
-      call,
-      prisma: input.prisma,
-      providerStartGuardWhere: input.providerStartGuardWhere,
+      ) {
+        throw new Error("Hosted phone call start aborted.");
+      }
+      const transferNumber = input.brief.allowTransferToUser
+        ? await input.resolveTransferNumber({
+            memberId: input.memberId,
+            prisma: tx,
+          })
+        : null;
+      const runtimeRecord = {
+        brief: input.brief,
+        id: call.id,
+        memberId: input.memberId,
+        openingLine: input.runtimeOptions?.openingLine ?? null,
+        retellAgentId: input.runtimeOptions?.retellAgentId ?? null,
+        retellAgentVersion: input.runtimeOptions?.retellAgentVersion ?? null,
+        transferNumber,
+      };
+      await input.runtime.validateStart?.(runtimeRecord);
+      const providerStartAttempt = await markHostedPhoneCallProviderStartAttempt({
+        call,
+        prisma: tx,
+        providerStartGuardWhere: input.providerStartGuardWhere,
+      });
+      return { providerStartAttempt, runtimeRecord };
     });
-    if (!providerStartAttempt.marked) {
+    if (!prepared.providerStartAttempt.marked) {
       return {
-        phoneCallId: providerStartAttempt.call.id,
-        status: toStartResponseStatus(providerStartAttempt.call.status),
+        phoneCallId: prepared.providerStartAttempt.call.id,
+        status: toStartResponseStatus(prepared.providerStartAttempt.call.status),
       };
     }
-    call = providerStartAttempt.call;
-    started = await input.runtime.start(runtimeRecord);
+    call = prepared.providerStartAttempt.call;
+    started = await input.runtime.start(prepared.runtimeRecord);
   } catch (error) {
     if (hasProviderStartAttemptMarker(call)) {
       if (isPhoneCallRuntimeStartRejectedError(error)) {
@@ -472,7 +506,7 @@ function hasProviderStartAttemptMarker(call: HostedPhoneCall): boolean {
 
 async function markHostedPhoneCallProviderStartAttempt(input: {
   call: HostedPhoneCall;
-  prisma: HostedPhoneCallStore;
+  prisma: HostedPhoneCallTransactionStore;
   providerStartGuardWhere?: HostedPhoneCallProviderStartGuard;
 }): Promise<
   | { call: HostedPhoneCall; marked: true }
@@ -488,13 +522,16 @@ async function markHostedPhoneCallProviderStartAttempt(input: {
       },
     },
   ];
-  if (input.providerStartGuardWhere) {
-    authorityWhere.push(input.providerStartGuardWhere(markedAt));
+  const providerStartGuardWhere = input.providerStartGuardWhere?.(markedAt);
+  if (providerStartGuardWhere) {
+    authorityWhere.push(providerStartGuardWhere);
   }
-  const updated = await input.prisma.hostedPhoneCall.updateMany({
-    data: { providerStartAttemptedAt: markedAt },
-    where: { AND: authorityWhere },
-  });
+  const updated = input.providerStartGuardWhere && !providerStartGuardWhere
+    ? { count: 0 }
+    : await input.prisma.hostedPhoneCall.updateMany({
+        data: { providerStartAttemptedAt: markedAt },
+        where: { AND: authorityWhere },
+      });
   if (updated.count === 0) {
     let current = await input.prisma.hostedPhoneCall.findUniqueOrThrow({
       where: { id: input.call.id },
@@ -533,6 +570,13 @@ async function markHostedPhoneCallProviderStartAttempt(input: {
     },
     marked: true,
   };
+}
+
+function sortHostedPhoneCallProviderStartMemberIds(input: {
+  memberId: string;
+  memberIds?: readonly string[];
+}): string[] {
+  return [...new Set([input.memberId, ...(input.memberIds ?? [])])].sort();
 }
 
 async function failStaleUnstartedPhoneCallReservation(input: {

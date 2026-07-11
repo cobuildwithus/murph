@@ -207,11 +207,18 @@ async function expireDueCallCircleMatches(input: {
         prisma: tx,
       });
       if (count === 0) return { count, signals: [] };
+      const currentResponses = await tx.hostedCallCircleMatch.findUniqueOrThrow({
+        select: {
+          sideAResponse: true,
+          sideBResponse: true,
+        },
+        where: { id: match.id },
+      });
       const memberIds = [
-        ...(isAffirmativeCallCircleResponse(match.sideAResponse)
+        ...(isAffirmativeCallCircleResponse(currentResponses.sideAResponse)
           ? [match.memberAId]
           : []),
-        ...(isAffirmativeCallCircleResponse(match.sideBResponse)
+        ...(isAffirmativeCallCircleResponse(currentResponses.sideBResponse)
           ? [match.memberBId]
           : []),
       ];
@@ -248,6 +255,8 @@ async function createDueCallCircleProposals(input: {
       ],
       select: {
         groupId: true,
+        memberId: true,
+        preferencesJson: true,
       },
       take: CALL_CIRCLE_PROPOSAL_DUE_PARTICIPANT_LIMIT,
       where: {
@@ -301,7 +310,12 @@ async function createDueCallCircleProposals(input: {
 
     await advanceCallCircleParticipantMatchingCursors({
       now: proposalNow,
-      participants: dueGroupParticipants,
+      participants: mergeCallCircleProposalCursorParticipants({
+        activeParticipants: dueGroupParticipants,
+        seedParticipants: dueParticipants.filter(
+          (participant) => participant.groupId === groupId,
+        ),
+      }),
       prisma: input.prisma,
     });
   }
@@ -311,6 +325,30 @@ async function createDueCallCircleProposals(input: {
 
 interface CallCircleProposalDueParticipant {
   groupId: string;
+  memberId: string;
+  preferencesJson: Prisma.JsonValue;
+}
+
+function mergeCallCircleProposalCursorParticipants(input: {
+  activeParticipants: readonly CallCircleDueParticipant[];
+  seedParticipants: readonly CallCircleProposalDueParticipant[];
+}): CallCircleDueParticipant[] {
+  const participants = new Map(
+    input.activeParticipants.map((participant) => [
+      participant.memberId,
+      participant,
+    ]),
+  );
+  for (const participant of input.seedParticipants) {
+    if (participants.has(participant.memberId)) continue;
+    participants.set(participant.memberId, {
+      groupId: participant.groupId,
+      memberId: participant.memberId,
+      preferences: null,
+      storedPreferencesJson: participant.preferencesJson,
+    });
+  }
+  return [...participants.values()];
 }
 
 function isCallCircleEligibleParticipant(
@@ -682,11 +720,13 @@ async function startDueCallCircleBridges(input: {
   let attempts = 0;
 
   for (const match of matches) {
-    await starter({
+    const connectorResult = await startCallCircleConnectorMatch({
       matchId: match.id,
       now: input.clock(),
       prisma: input.prisma,
+      starter,
     });
+    if (!connectorResult) continue;
     attempts += 1;
   }
 
@@ -726,17 +766,38 @@ async function handoffElapsedCallCircleBridges(input: {
   let handedOff = 0;
 
   for (const match of matches) {
-    const result = await starter({
+    const connectorResult = await startCallCircleConnectorMatch({
       matchId: match.id,
       now: input.clock(),
       prisma: input.prisma,
+      starter,
     });
-    if (result.status === "handoff") {
+    if (connectorResult?.status === "handoff") {
       handedOff += 1;
     }
   }
 
   return handedOff;
+}
+
+async function startCallCircleConnectorMatch(input: {
+  matchId: string;
+  now: Date;
+  prisma: PrismaClient;
+  starter: CallCircleConnectorStarter;
+}): Promise<Awaited<ReturnType<CallCircleConnectorStarter>> | null> {
+  try {
+    return await input.starter({
+      matchId: input.matchId,
+      now: input.now,
+      prisma: input.prisma,
+    });
+  } catch {
+    console.error(
+      "Call Circle connector start failed; continuing scheduler batch.",
+    );
+    return null;
+  }
 }
 
 async function appendPendingCallCircleSetupNotifications(input: {

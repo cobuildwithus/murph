@@ -61,6 +61,7 @@ describe("Call Circle internal response route", () => {
     const payload = {
       context: {
         inboundMailboxItemIds: ["mailbox_reply"],
+        selfMemberName: "Sam",
       },
       request: {
         kind: "preferences",

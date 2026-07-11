@@ -43,6 +43,7 @@ describe("createHostedWebCallCirclePort", () => {
       kind: "confirm",
     }, {
       inboundMailboxItemIds: ["mailbox_reply"],
+      selfMemberName: "Sam",
       signal,
     })).resolves.toEqual({ status: "ok" });
 
@@ -50,6 +51,7 @@ describe("createHostedWebCallCirclePort", () => {
       body: {
         context: {
           inboundMailboxItemIds: ["mailbox_reply"],
+          selfMemberName: "Sam",
         },
         request: {
           kind: "confirm",

@@ -27,6 +27,7 @@ import {
   canUseActiveCallCircleParticipantPair,
   pauseCallCircleParticipant,
   readCallCircleMatchParticipantTimeZones,
+  refreshCallCircleParticipantMemberNameKey,
   resumeCallCircleParticipant,
   writeCallCirclePreferences,
 } from "./participant-store";
@@ -77,6 +78,14 @@ export async function handleCallCircleRespond(input: {
     });
     if (!authority.available) {
       return { status: "unavailable", unavailableReason: "member_unavailable" };
+    }
+    if (authority.participantStatus !== null) {
+      await refreshCallCircleParticipantMemberNameKey({
+        groupId: target.groupId,
+        memberId: input.memberId,
+        prisma: tx,
+        selfMemberName: input.context?.selfMemberName,
+      });
     }
 
     switch (input.request.kind) {

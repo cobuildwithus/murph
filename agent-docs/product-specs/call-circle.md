@@ -95,6 +95,19 @@ is the exclusion value rather than a second primitive. An override affects
 future proposals only; it does not cancel or alter a proposal that already
 exists. Setting it back to `default` removes the stored override.
 
+In a private conversation, the member identifies the peer by human name, not
+an opaque member id. The private runtime adapter derives the current member's
+canonical profile name server-side; the model cannot supply or override that
+self identity. Web normalizes each name, scopes it to the group, and uses the
+versioned keyed contact-privacy blind-index owner under the
+`call-circle-member-name` domain. It stores only the current non-plaintext key
+on the participant row and resolves requests across the keyring's readable
+versions during rotation. Exactly one other active participant in the same
+group must match. A missing, duplicate, or self match fails closed without
+returning a roster, candidate names, or member ids to the private runtime.
+Once resolved, preferences continue to store the peer's member id rather than
+the submitted name.
+
 ## Matching
 
 Matching is deterministic server code. The scheduler wakes weekly; eligibility
@@ -119,20 +132,28 @@ pair.
 - One scheduler run captures one `runNow` value for every phase, so phase order
   cannot move a match across the final-ask or expiry boundary. Opaque member ids
   use code-unit order for both canonical pair identity and lock order.
-- The matcher prefers someone other than each member's most recent partner.
-  It permits the repeat only when no other viable pairing remains, so partner
-  avoidance cannot starve a small group.
+- The matcher first finds the maximum number of disjoint eligible pairs. Among
+  maximum-cardinality solutions, its deterministic edge order prefers pairings
+  that avoid both members' most recent partner, then least-recent participant
+  rank and opaque-id order. Rotation is therefore secondary and can never
+  reduce the number of calls; input order does not change the result.
 - A pair is never proposed when either member set the other to `never`. The
   pure matcher applies this veto, and proposal creation rechecks it under the
   existing member-row locks so a concurrent preference update cannot create a
   stale proposal. The matcher continues looking for other viable partners.
 - Stated-window intersection, active access, group membership, notification
-  reachability, and valid timezones are hard eligibility gates.
+  reachability, and valid timezones are hard eligibility gates. Proposal
+  creation locks both member rows, re-reads current preferences and history,
+  recomputes the pair's askable window, and requires its exact start and end to
+  equal the staged interval before inserting the match.
 - Odd groups leave one member unmatched for that cycle. History ordering gives
   the least recently matched members priority next time.
 
 The group participant cap bounds every proposal scan. Scheduler phases also use
-bounded, ordered batches. No growing collection is scanned without a limit.
+bounded, ordered batches. Every enrolled stale seed selected into the bounded
+proposal page advances to the next weekly boundary even when malformed or
+otherwise ineligible, so a fixed early page cannot monopolize later scheduler
+runs. No growing collection is scanned without a limit.
 
 ## Confirmation And Response Authority
 
@@ -151,6 +172,9 @@ match; a member who had already said yes receives a private terminal note when
 the expiry lands inside their daytime window. The narrow expiry-at-quiet-hours
 case intentionally ends without another message: v1 preserves quiet hours
 instead of introducing delayed-delivery state solely for that terminal note.
+The transaction that wins expiry re-reads both responses after the terminal
+update and derives recipients from that in-transaction state; a stale scheduler
+snapshot cannot notify someone whose answer changed concurrently.
 If a final-stage delivery
 preflight fails, the match drops and every still-reachable member gets a private
 cancellation note. Pause, access loss, or group departure cancels open work
@@ -158,9 +182,10 @@ before the next user-visible effect.
 
 The assistant request is a strict discriminated union. It contains only the
 member's action-specific data. It never contains `groupId`, `matchId`, `side`,
-another member's answer, or a phone number. Per-member cadence ids are inert
-preference values from trusted group context: web validates current same-group
-membership and never treats them as authority.
+another member's answer, or a phone number. A cadence update carries only a
+human peer name; the server-owned lookup above maps it to an inert preference
+member id after same-group, active, unique, and non-self checks. Web never
+treats that name or resulting id as effect authority.
 
 Web derives the target from durable mailbox context:
 
@@ -219,6 +244,13 @@ linking the bridge to its phone call. Result handling never infers a match from
 the phone-call request key. The generic phone-call provider-start marker
 prevents duplicate Retell calls across retries.
 
+Immediately before provider startup, the phone-call owner locks both
+participants' hosted-member rows in canonical code-unit order. Under those
+locks it rechecks the active Call Circle pair, bridge authority, and both
+participants' local daytime using the actual provider-attempt timestamp, then
+commits the provider-start marker before Retell egress. A boundary crossing
+between scheduler selection and provider startup therefore fails closed.
+
 Retell webhook registration subscribes to exactly four events:
 `call_ended`, `call_analyzed`, `transfer_bridged`, and
 `transfer_cancelled`. `HostedPhoneCall.transferOutcome` stores the transfer
@@ -236,6 +268,11 @@ those reservations with conditional writes. Generic bounded stale-start and
 stale-analysis sweeps create the same
 durable result and notification path when Retell never delivers the expected
 webhook.
+
+Both ordered bridge scheduler loops isolate connector work per match. A phone
+resolution, decryption, provider preflight, or connector exception produces a
+fixed content-free error and skips only that match; later matches in the
+bounded batch still run.
 
 If the connector is unavailable, a verified phone is missing, or the transfer
 does not complete, the match ends as a text handoff. Each member gets a low-key
@@ -255,8 +292,12 @@ Call Circle adds two product tables:
 
 1. `HostedCallCircleParticipant`: group/member identity, enrollment status,
    private coarse preferences, and the `nextMatchingAt` due cursor. Availability,
-   default cadence, and per-member overrides compose inside the existing
-   preferences JSON; they do not add another table or column.
+   default cadence, and member-id cadence overrides compose inside the existing
+   preferences JSON; those preferences add no separate table or column. The
+   participant row also has a nullable `memberNameKey`: a derived, versioned,
+   keyed, group-scoped non-plaintext lookup key used only to resolve human peer
+   names. It is not a preference, display value, or independent product truth,
+   and plaintext names are not stored in Call Circle Postgres state.
 2. `HostedCallCircleMatch`: pair and window, confirmation state, counter caps,
    stage timestamps, terminal outcome, and the unique `phoneCallId` relation.
 
@@ -279,6 +320,9 @@ feature notification table, or scheduler-owned recovery state.
 - A member's cadence overrides remain private to that member. Other members and
   the group runtime receive neither the list nor a reason when the matcher
   chooses a different pair.
+- Peer-name lookup persists only the versioned keyed name key, searches only
+  active same-group participants across readable key versions, and fails closed
+  on no match, ambiguity, or self-match without roster disclosure.
 - No raw Retell transcript, recording, audio, or webhook body is persisted.
 
 ## Non-Goals

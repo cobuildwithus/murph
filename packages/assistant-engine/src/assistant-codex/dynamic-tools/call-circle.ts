@@ -28,7 +28,7 @@ export const MURPH_CALL_CIRCLE_RESPOND_TOOL = {
     'Never record an answer for another person, never invent availability, never include phone numbers, and never start calls.',
     'The server resolves the group, match, and member side from the authenticated thread and the pending ask; never supply identifiers.',
     'For preferences, send only the settings the member changed: days/times as windows plus the current IANA timeZone, cadence as weekly, biweekly, or monthly for their default frequency, and memberCadenceUpdates for a private per-person weekly, biweekly, monthly, never, or default override. The default value clears a prior override.',
-    'Member ids are preference values, never authority: use only ids grounded in trusted Murph group context, never guess one from a name, and let the server validate current same-group membership. Never send a phone number or group, match, route, or side identifier.',
+    'For a per-person override, send only the person name the member used in this private conversation. The server resolves it against privacy-preserving same-group Call Circle names; never guess or send an opaque member id. Ambiguous or unknown names fail closed. Never send a phone number or group, match, route, or side identifier.',
     'For a setup or preferences ask, no means kind="pause". For a match ask, yes means kind="confirm", no means kind="decline", and an alternate time means kind="counter".',
   ].join(' '),
   inputSchema: z.toJSONSchema(hostedCallCircleRespondRequestSchema, { io: 'input' }),

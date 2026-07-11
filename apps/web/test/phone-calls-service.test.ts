@@ -8,7 +8,7 @@ import type {
 import {
   hostedPhoneCallBriefSchema,
 } from "@murphai/hosted-execution/phone-calls";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   createHostedPhoneCall as createHostedPhoneCallImpl,
@@ -23,6 +23,18 @@ type PhoneCallStore = NonNullable<CreateHostedPhoneCallInput["prisma"]>;
 type PhoneCallCreateInput = Parameters<PhoneCallStore["hostedPhoneCall"]["create"]>[0];
 type PhoneCallFindInput = Parameters<PhoneCallStore["hostedPhoneCall"]["findUniqueOrThrow"]>[0];
 type PhoneCallUpdateManyInput = Parameters<PhoneCallStore["hostedPhoneCall"]["updateMany"]>[0];
+type PhoneCallTransactionStore = Parameters<
+  Parameters<PhoneCallStore["$transaction"]>[0]
+>[0];
+
+function isPhoneCallTransactionStore(
+  value: unknown,
+): value is PhoneCallTransactionStore {
+  return typeof value === "object"
+    && value !== null
+    && "$queryRaw" in value
+    && "hostedPhoneCall" in value;
+}
 
 const VALID_BRIEF: HostedPhoneCallBrief = {
   allowTransferToUser: true,
@@ -93,6 +105,46 @@ describe("createHostedPhoneCall", () => {
         status: "starting",
       },
     });
+  });
+
+  it("locks every deletion-relevant member through preflight and commits before provider start", async () => {
+    const created = buildHostedPhoneCall();
+    const store = createPhoneCallStore({ created });
+    const preflightPrismas: object[] = [];
+    const runtime = createPhoneCallRuntime({
+      onStart: () => {
+        expect(store.transactionEvents).toEqual(["begin", "commit"]);
+      },
+      onValidate: () => {
+        expect(store.transactionEvents).toEqual(["begin"]);
+      },
+      providerCallId: "retell_call_123",
+    });
+
+    await expect(createHostedPhoneCall({
+      beforeStart: async ({ prisma }) => {
+        preflightPrismas.push(prisma);
+        return true;
+      },
+      brief: VALID_BRIEF,
+      memberId: "member_b",
+      prisma: store.prisma,
+      providerStartMemberIds: ["member_b", "member_a", "member_b"],
+      requestKey: "phone_call_request_1",
+      resultNotificationRouteResolver: async ({ prisma }) => {
+        preflightPrismas.push(prisma);
+      },
+      runtime: runtime.runtime,
+      transferNumberResolver: async ({ prisma }) => {
+        preflightPrismas.push(prisma);
+        return "+12125550000";
+      },
+    })).resolves.toMatchObject({ status: "calling" });
+
+    expect(store.lockedMemberIds).toEqual(["member_a", "member_b"]);
+    expect(new Set(preflightPrismas).size).toBe(1);
+    expect(store.transactionEvents).toEqual(["begin", "commit"]);
+    expect(runtime.startCalls).toHaveLength(1);
   });
 
   it("does not start Retell when the caller-owned provider start guard no longer matches", async () => {
@@ -179,6 +231,37 @@ describe("createHostedPhoneCall", () => {
       },
       status: "failed",
     });
+  });
+
+  it("does not write a provider marker or start Retell when the start guard closes", async () => {
+    const created = buildHostedPhoneCall();
+    const store = createPhoneCallStore({ created });
+    const runtime = createPhoneCallRuntime({ providerCallId: "retell_unused" });
+
+    await expect(createHostedPhoneCall({
+      brief: VALID_BRIEF,
+      memberId: "member_1",
+      prisma: store.prisma,
+      providerStartGuardWhere: () => null,
+      requestKey: "phone_call_request_1",
+      runtime: runtime.runtime,
+      transferNumberResolver: createTransferNumberResolver("+12125550000"),
+    })).resolves.toMatchObject({ status: "failed" });
+
+    expect(runtime.startCalls).toEqual([]);
+    expect(store.updateManyCalls).toEqual([{
+      data: {
+        resultJson: {
+          outcome: "not_completed",
+          summary: "Murph could not start the phone call.",
+        },
+        status: "failed",
+      },
+      where: expect.objectContaining({
+        providerStartAttemptedAt: null,
+      }),
+    }]);
+    expect(store.currentCall().providerStartAttemptedAt).toBeNull();
   });
 
   it("does not start Retell after the member loses active access", async () => {
@@ -1215,57 +1298,94 @@ function createPhoneCallStore(input: {
 }) {
   const createCalls: PhoneCallCreateInput[] = [];
   const findCalls: PhoneCallFindInput[] = [];
+  const lockedMemberIds: string[] = [];
+  const transactionEvents: string[] = [];
   const updateManyCalls: PhoneCallUpdateManyInput[] = [];
   let current = input.created ?? input.existing ?? buildHostedPhoneCall();
   const existing = input.existing ?? current;
 
-  const prisma: PhoneCallStore = {
-    hostedPhoneCall: {
-      create: async (args) => {
-        createCalls.push(args);
-        if (input.createError) {
-          throw input.createError;
-        }
-        current = {
-          ...current,
-          ...args.data,
-          providerCallId: null,
-          resultJson: null,
-        };
-        return current;
-      },
-      findUniqueOrThrow: async (args) => {
-        findCalls.push(args);
-        if ("id" in args.where) {
-          if (args.where.id !== current.id) {
-            throw new Error("Hosted phone call not found.");
-          }
-          return current;
-        }
-
-        return existing;
-      },
-      updateMany: async (args) => {
-        updateManyCalls.push(args);
-        await input.beforeUpdateMany?.(args);
-        if (input.activeAccess === false && includesMemberAuthority(args.where)) {
-          return { count: 0 };
-        }
-        if (!matchesUpdateManyWhere(current, args.where)) {
-          return { count: 0 };
-        }
-
-        current = {
-          ...current,
-          providerCallId: args.data.providerCallId ?? current.providerCallId,
-          providerStartAttemptedAt:
-            args.data.providerStartAttemptedAt ?? current.providerStartAttemptedAt,
-          resultJson: args.data.resultJson ?? current.resultJson,
-          status: args.data.status ?? current.status,
-        };
-        return { count: 1 };
-      },
+  const hostedPhoneCall: PhoneCallStore["hostedPhoneCall"] = {
+    create: async (args) => {
+      createCalls.push(args);
+      if (input.createError) {
+        throw input.createError;
+      }
+      current = {
+        ...current,
+        ...args.data,
+        providerCallId: null,
+        resultJson: null,
+      };
+      return current;
     },
+    findUniqueOrThrow: async (args) => {
+      findCalls.push(args);
+      if ("id" in args.where) {
+        if (args.where.id !== current.id) {
+          throw new Error("Hosted phone call not found.");
+        }
+        return current;
+      }
+
+      return existing;
+    },
+    updateMany: async (args) => {
+      updateManyCalls.push(args);
+      await input.beforeUpdateMany?.(args);
+      if (input.activeAccess === false && includesMemberAuthority(args.where)) {
+        return { count: 0 };
+      }
+      if (!matchesUpdateManyWhere(current, args.where)) {
+        return { count: 0 };
+      }
+
+      current = {
+        ...current,
+        providerCallId: args.data.providerCallId ?? current.providerCallId,
+        providerStartAttemptedAt:
+          args.data.providerStartAttemptedAt ?? current.providerStartAttemptedAt,
+        resultJson: args.data.resultJson ?? current.resultJson,
+        status: args.data.status ?? current.status,
+      };
+      return { count: 1 };
+    },
+  };
+  const transactionStore = {
+    $queryRaw: vi.fn(async (...args: unknown[]) => {
+      const query = args[0];
+      const interpolatedMemberId = args.slice(1).find(
+        (value): value is string => typeof value === "string",
+      );
+      if (interpolatedMemberId) {
+        lockedMemberIds.push(interpolatedMemberId);
+        return [];
+      }
+      if (query && typeof query === "object" && "values" in query) {
+        const values = query.values;
+        if (Array.isArray(values) && typeof values[0] === "string") {
+          lockedMemberIds.push(values[0]);
+        }
+      }
+      return [];
+    }),
+    hostedPhoneCall,
+  };
+  const prisma: PhoneCallStore = {
+    $transaction: async (callback) => {
+      transactionEvents.push("begin");
+      try {
+        if (!isPhoneCallTransactionStore(transactionStore)) {
+          throw new Error("Invalid phone-call transaction test store.");
+        }
+        const result = await callback(transactionStore);
+        transactionEvents.push("commit");
+        return result;
+      } catch (error) {
+        transactionEvents.push("rollback");
+        throw error;
+      }
+    },
+    hostedPhoneCall,
   };
 
   return {
@@ -1278,7 +1398,9 @@ function createPhoneCallStore(input: {
     createCalls,
     currentCall: () => current,
     findCalls,
+    lockedMemberIds,
     prisma,
+    transactionEvents,
     updateManyCalls,
   };
 }
@@ -1286,6 +1408,7 @@ function createPhoneCallStore(input: {
 function createPhoneCallRuntime(input: {
   error?: Error;
   onStart?: (call: Parameters<PhoneCallRuntime["start"]>[0]) => Promise<void> | void;
+  onValidate?: (call: Parameters<NonNullable<PhoneCallRuntime["validateStart"]>>[0]) => Promise<void> | void;
   providerCallId: string;
   stopError?: Error;
   validateError?: Error;
@@ -1296,6 +1419,7 @@ function createPhoneCallRuntime(input: {
   const runtime: PhoneCallRuntime = {
     validateStart: async (call) => {
       validateCalls.push(call);
+      await input.onValidate?.(call);
       if (input.validateError) {
         throw input.validateError;
       }

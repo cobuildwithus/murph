@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import {
+  createHostedCallCircleMemberNameLookupKey,
+  createHostedCallCircleMemberNameLookupKeyReadCandidates,
   createHostedLinqChatLookupKey,
   createHostedPhoneLookupKey,
   createHostedPhoneLookupKeyReadCandidates,
@@ -38,6 +40,10 @@ describe("hosted member lookup keys", () => {
   });
 
   it("creates blind lookup keys that do not expose raw identifiers", () => {
+    const callCircleName = createHostedCallCircleMemberNameLookupKey({
+      groupId: "group_123",
+      normalizedMemberName: "sam",
+    });
     const privy = createHostedPrivyUserLookupKey("did:privy:abc123");
     const linq = createHostedLinqChatLookupKey("chat_123");
     const customer = createHostedStripeCustomerLookupKey("cus_123");
@@ -47,6 +53,7 @@ describe("hosted member lookup keys", () => {
     const event = createHostedStripeBillingEventLookupKey("evt_123");
 
     expect(privy).toMatch(/^hbidx:privy-user:v1:/u);
+    expect(callCircleName).toMatch(/^hbidx:call-circle-member-name:v1:/u);
     expect(linq).toMatch(/^hbidx:linq-chat:v1:/u);
     expect(customer).toMatch(/^hbidx:stripe-customer:v1:/u);
     expect(subscription).toMatch(/^hbidx:stripe-subscription:v1:/u);
@@ -55,12 +62,38 @@ describe("hosted member lookup keys", () => {
     expect(event).toMatch(/^hbidx:stripe-billing-event:v1:/u);
 
     expect(privy).not.toContain("did:privy:abc123");
+    expect(callCircleName).not.toContain("sam");
     expect(linq).not.toContain("chat_123");
     expect(customer).not.toContain("cus_123");
     expect(subscription).not.toContain("sub_123");
     expect(subscriptionSchedule).not.toContain("sched_123");
     expect(checkout).not.toContain("cs_123");
     expect(event).not.toContain("evt_123");
+  });
+
+  it("reads Call Circle name candidates across key versions and scopes them by group", () => {
+    const restore = configureHostedContactPrivacyKeyringForTest({
+      currentVersion: "v2",
+      entries: { ...TEST_KEYRING_ENTRIES },
+    });
+
+    try {
+      const candidates = createHostedCallCircleMemberNameLookupKeyReadCandidates({
+        groupId: "group_123",
+        normalizedMemberName: "sam",
+      });
+      const otherGroup = createHostedCallCircleMemberNameLookupKey({
+        groupId: "group_456",
+        normalizedMemberName: "sam",
+      });
+
+      expect(candidates).toHaveLength(2);
+      expect(parseHostedBlindIndex(candidates[0])?.version).toBe("v2");
+      expect(parseHostedBlindIndex(candidates[1])?.version).toBe("v1");
+      expect(candidates).not.toContain(otherGroup);
+    } finally {
+      restore();
+    }
   });
 
   it("normalizes wallet addresses before hashing", () => {

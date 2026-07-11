@@ -64,15 +64,15 @@ describe("hosted Call Circle contracts", () => {
       cadence: "monthly",
       kind: "preferences",
       memberCadenceUpdates: [
-        { cadence: "never", memberId: "member_housemate" },
-        { cadence: "weekly", memberId: "member_friend" },
+        { cadence: "never", memberName: "Sam" },
+        { cadence: "weekly", memberName: "Riley" },
       ],
     })).toEqual({
       cadence: "monthly",
       kind: "preferences",
       memberCadenceUpdates: [
-        { cadence: "never", memberId: "member_housemate" },
-        { cadence: "weekly", memberId: "member_friend" },
+        { cadence: "never", memberName: "Sam" },
+        { cadence: "weekly", memberName: "Riley" },
       ],
     });
   });
@@ -84,10 +84,32 @@ describe("hosted Call Circle contracts", () => {
     expect(() => hostedCallCircleRespondRequestSchema.parse({
       kind: "preferences",
       memberCadenceUpdates: [
-        { cadence: "never", memberId: "member_housemate" },
-        { cadence: "default", memberId: "member_housemate" },
+        { cadence: "never", memberName: "Sam" },
+        { cadence: "default", memberName: " sam " },
       ],
     })).toThrow(/at most once/u);
+  });
+
+  it("keeps the runtime-derived self name in the hidden control context", () => {
+    expect(hostedCallCircleRespondControlRequestSchema.parse({
+      context: {
+        inboundMailboxItemIds: ["mailbox_reply"],
+        selfMemberName: "Sam",
+      },
+      request: {
+        kind: "preferences",
+        memberCadenceUpdates: [{ cadence: "never", memberName: "Riley" }],
+      },
+    })).toEqual({
+      context: {
+        inboundMailboxItemIds: ["mailbox_reply"],
+        selfMemberName: "Sam",
+      },
+      request: {
+        kind: "preferences",
+        memberCadenceUpdates: [{ cadence: "never", memberName: "Riley" }],
+      },
+    });
   });
 
   it("rejects unknown stored preference fields", () => {

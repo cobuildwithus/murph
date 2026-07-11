@@ -19,6 +19,10 @@ export type {
 };
 
 export interface HostedRuntimeTemporalSignalClient {
+  withDeadline<Result>(
+    deadline: number | Date,
+    callback: () => Promise<Result>,
+  ): Promise<Result>;
   workflow: {
     getHandle?(workflowId: string): {
       query(queryName: string): Promise<unknown>;

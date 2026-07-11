@@ -1,4 +1,7 @@
-import { isValidIanaTimeZone } from "@murphai/contracts";
+import {
+  isValidIanaTimeZone,
+  memoryDisplayNameSchema,
+} from "@murphai/contracts";
 import { z } from "zod";
 
 import { HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX } from "./runtime-control.ts";
@@ -16,6 +19,7 @@ const hostedCallCircleTimeZoneSchema = z
   .max(100)
   .refine(isValidIanaTimeZone, "Call Circle timeZone must be a valid IANA time zone.");
 const hostedCallCircleMemberIdSchema = z.string().trim().min(1).max(200);
+const hostedCallCircleMemberNameSchema = memoryDisplayNameSchema;
 
 export const hostedCallCircleCadenceSchema = z.enum([
   "weekly",
@@ -33,7 +37,7 @@ export const hostedCallCircleMemberCadenceSchema = z
 export const hostedCallCircleMemberCadenceUpdateSchema = z
   .object({
     cadence: z.enum(["weekly", "biweekly", "monthly", "never", "default"]),
-    memberId: hostedCallCircleMemberIdSchema,
+    memberName: hostedCallCircleMemberNameSchema,
   })
   .strict();
 
@@ -84,7 +88,7 @@ export const hostedCallCirclePreferencesPatchSchema = z
     "Call Circle preference updates must change at least one setting.",
   )
   .refine(
-    (patch) => hasUniqueMemberIds(patch.memberCadenceUpdates ?? []),
+    (patch) => hasUniqueMemberNames(patch.memberCadenceUpdates ?? []),
     "Call Circle member cadence updates must name each member at most once.",
   );
 
@@ -112,7 +116,7 @@ export const hostedCallCircleRespondRequestSchema = z.discriminatedUnion("kind",
       "Call Circle preference updates must change at least one setting.",
     )
     .refine(
-      (request) => hasUniqueMemberIds(request.memberCadenceUpdates ?? []),
+      (request) => hasUniqueMemberNames(request.memberCadenceUpdates ?? []),
       "Call Circle member cadence updates must name each member at most once.",
     ),
   z
@@ -157,6 +161,7 @@ export const hostedCallCircleRespondResponseSchema = z.discriminatedUnion("statu
 export const hostedCallCircleRespondContextSchema = z
   .object({
     inboundMailboxItemIds: z.array(hostedCallCircleMailboxItemIdSchema).max(20).optional(),
+    selfMemberName: hostedCallCircleMemberNameSchema.nullable().optional(),
   })
   .strict();
 
@@ -203,4 +208,19 @@ function hasUniqueMemberIds(
   entries: readonly { memberId: string }[],
 ): boolean {
   return new Set(entries.map((entry) => entry.memberId)).size === entries.length;
+}
+
+export function normalizeHostedCallCircleMemberName(value: string): string {
+  return hostedCallCircleMemberNameSchema.parse(value)
+    .normalize("NFKC")
+    .replace(/\s+/gu, " ")
+    .toLowerCase();
+}
+
+function hasUniqueMemberNames(
+  entries: readonly { memberName: string }[],
+): boolean {
+  return new Set(
+    entries.map((entry) => normalizeHostedCallCircleMemberName(entry.memberName)),
+  ).size === entries.length;
 }

@@ -124,7 +124,7 @@ describe("runCallCircleScheduler", () => {
       eligibleParticipant("member_b"),
     ];
     const prisma = createSchedulerPrisma({
-      dueParticipants: [{ groupId: "hgrp_123", id: "hccp_a" }],
+      dueParticipants: [proposalSeed("member_a")],
     });
     mocks.listCallCircleDueParticipants.mockResolvedValue(participants);
     mocks.listRecentCallCircleMatches.mockResolvedValue(recentMatches);
@@ -147,7 +147,11 @@ describe("runCallCircleScheduler", () => {
         { nextMatchingAt: "asc" },
         { id: "asc" },
       ],
-      select: { groupId: true },
+      select: {
+        groupId: true,
+        memberId: true,
+        preferencesJson: true,
+      },
       take: 32,
       where: {
         nextMatchingAt: { lte: now },
@@ -182,7 +186,7 @@ describe("runCallCircleScheduler", () => {
   it("passes global recent history to the matcher for cadence decisions", async () => {
     const now = new Date("2026-07-06T09:30:00.000Z");
     const prisma = createSchedulerPrisma({
-      dueParticipants: [{ groupId: "hgrp_123", id: "hccp_a" }],
+      dueParticipants: [proposalSeed("member_a")],
     });
     mocks.listCallCircleDueParticipants.mockResolvedValue([
       eligibleParticipant("member_a"),
@@ -237,8 +241,8 @@ describe("runCallCircleScheduler", () => {
     const now = new Date("2026-07-06T09:30:00.000Z");
     const prisma = createSchedulerPrisma({
       dueParticipants: [
-        { groupId: "hgrp_blocked", id: "hccp_blocked" },
-        { groupId: "hgrp_single", id: "hccp_single" },
+        proposalSeed("member_blocked", "hgrp_blocked"),
+        proposalSeed("member_single", "hgrp_single"),
       ],
     });
     mocks.listCallCircleDueParticipants.mockImplementation(async ({ groupId }) =>
@@ -262,6 +266,28 @@ describe("runCallCircleScheduler", () => {
     expect(mocks.advanceCallCircleParticipantMatchingCursors).toHaveBeenCalledWith({
       now,
       participants: [eligibleParticipant("member_single", "hgrp_single")],
+      prisma: expect.any(Object),
+    });
+  });
+
+  it("advances inactive proposal seeds so a stale bounded page cannot starve later rows", async () => {
+    const now = new Date("2026-07-06T09:30:00.000Z");
+    const dueParticipants = Array.from({ length: 32 }, (_, index) =>
+      proposalSeed(`member_stale_${index}`, "hgrp_stale"));
+    const prisma = createSchedulerPrisma({ dueParticipants });
+    mocks.listCallCircleDueParticipants.mockResolvedValue([]);
+
+    await expect(runCallCircleScheduler({ now, prisma: prisma as never }))
+      .resolves.toMatchObject({ proposals: 0 });
+
+    expect(mocks.advanceCallCircleParticipantMatchingCursors).toHaveBeenCalledWith({
+      now,
+      participants: dueParticipants.map((participant) => ({
+        groupId: participant.groupId,
+        memberId: participant.memberId,
+        preferences: null,
+        storedPreferencesJson: participant.preferencesJson,
+      })),
       prisma: expect.any(Object),
     });
   });
@@ -345,6 +371,33 @@ describe("runCallCircleScheduler", () => {
       mailboxItemId: "mailbox_expired",
       memberId: match.memberAId,
     }]);
+  });
+
+  it("derives expiry recipients from the response state that wins the expiry transaction", async () => {
+    const now = new Date("2026-07-06T15:00:00.000Z");
+    const match = schedulerMatch({
+      sideAResponse: "pending",
+      sideBResponse: "pending",
+      status: "asking",
+      windowEndAt: now,
+      windowStartAt: now,
+    });
+    const prisma = createSchedulerPrisma({
+      expiredMatches: [match],
+      expiredResponses: {
+        [match.id]: {
+          sideAResponse: "confirmed",
+          sideBResponse: "pending",
+        },
+      },
+    });
+    mocks.expirePastCallCircleMatches.mockResolvedValue(1);
+
+    await runCallCircleScheduler({ now, prisma: prisma as never });
+
+    expect(mocks.appendCallCircleTerminalNotificationsTx).toHaveBeenCalledWith(
+      expect.objectContaining({ memberIds: [match.memberAId] }),
+    );
   });
 
   it("uses one confirmation implementation for a morning ask and only notifies pending sides", async () => {
@@ -614,6 +667,68 @@ describe("runCallCircleScheduler", () => {
     expect(mocks.markCallCircleMatchOutcome).not.toHaveBeenCalled();
   });
 
+  it("continues the due bridge batch after one connector preflight throws", async () => {
+    const now = new Date("2026-07-06T15:00:00.000Z");
+    const matches = ["hccm_failing", "hccm_next"].map((id) =>
+      schedulerMatch({
+        finalAskedAt: new Date("2026-07-06T14:45:00.000Z"),
+        id,
+        sideAResponse: "confirmed",
+        sideBResponse: "confirmed",
+        status: "both_confirmed",
+        windowEndAt: new Date("2026-07-06T15:15:00.000Z"),
+        windowStartAt: now,
+      }));
+    const prisma = createSchedulerPrisma({ bridgeMatches: matches });
+    const connectorStarter = vi.fn()
+      .mockRejectedValueOnce(new Error("synthetic connector failure"))
+      .mockResolvedValueOnce({ phoneCallId: "hpc_next", status: "calling" });
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    await expect(runCallCircleScheduler({
+      connectorStarter,
+      now,
+      prisma: prisma as never,
+    })).resolves.toMatchObject({ bridgeAttempts: 1 });
+
+    expect(connectorStarter).toHaveBeenCalledTimes(2);
+    expect(consoleError).toHaveBeenCalledWith(
+      "Call Circle connector start failed; continuing scheduler batch.",
+    );
+    consoleError.mockRestore();
+  });
+
+  it("continues the elapsed bridge batch after one connector preflight throws", async () => {
+    const now = new Date("2026-07-06T15:16:00.000Z");
+    const matches = ["hccm_failing", "hccm_next"].map((id) =>
+      schedulerMatch({
+        finalAskedAt: new Date("2026-07-06T14:45:00.000Z"),
+        id,
+        sideAResponse: "confirmed",
+        sideBResponse: "confirmed",
+        status: "bridging",
+        windowEndAt: new Date("2026-07-06T17:00:00.000Z"),
+        windowStartAt: new Date("2026-07-06T15:00:00.000Z"),
+      }));
+    const prisma = createSchedulerPrisma({ handoffMatches: matches });
+    const connectorStarter = vi.fn()
+      .mockRejectedValueOnce(new Error("synthetic connector failure"))
+      .mockResolvedValueOnce({ status: "handoff" });
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    await expect(runCallCircleScheduler({
+      connectorStarter,
+      now,
+      prisma: prisma as never,
+    })).resolves.toMatchObject({ handoffs: 1 });
+
+    expect(connectorStarter).toHaveBeenCalledTimes(2);
+    expect(consoleError).toHaveBeenCalledWith(
+      "Call Circle connector start failed; continuing scheduler batch.",
+    );
+    consoleError.mockRestore();
+  });
+
   it("processes at most one setup page per run", async () => {
     const now = new Date("2026-07-06T15:00:00.000Z");
     const setupParticipants = Array.from({ length: 100 }, (_, index) => ({
@@ -711,8 +826,12 @@ type SchedulerMatch = ReturnType<typeof schedulerMatch>;
 
 function createSchedulerPrisma(input: {
   bridgeMatches?: SchedulerMatch[];
-  dueParticipants?: Array<{ groupId: string; id: string }>;
+  dueParticipants?: Array<ReturnType<typeof proposalSeed>>;
   expiredMatches?: SchedulerMatch[];
+  expiredResponses?: Record<string, {
+    sideAResponse: SchedulerMatch["sideAResponse"];
+    sideBResponse: SchedulerMatch["sideBResponse"];
+  }>;
   finalMatches?: SchedulerMatch[];
   handoffMatches?: SchedulerMatch[];
   morningMatches?: SchedulerMatch[];
@@ -743,6 +862,17 @@ function createSchedulerPrisma(input: {
       ? input.setupParticipants ?? []
       : input.dueParticipants ?? []);
   const tx = {
+    hostedCallCircleMatch: {
+      findUniqueOrThrow: vi.fn(async (args: { where: { id: string } }) => {
+        const selected = input.expiredResponses?.[args.where.id]
+          ?? input.expiredMatches?.find((match) => match.id === args.where.id);
+        if (!selected) throw new Error("Call Circle match not found.");
+        return {
+          sideAResponse: selected.sideAResponse,
+          sideBResponse: selected.sideBResponse,
+        };
+      }),
+    },
     hostedMailboxItem: {
       findFirst: vi.fn(async () => null),
     },
@@ -853,6 +983,14 @@ function eligibleParticipant(memberId: string, groupId = "hgrp_123") {
     memberId,
     preferences: storedPreferencesJson,
     storedPreferencesJson,
+  };
+}
+
+function proposalSeed(memberId: string, groupId = "hgrp_123") {
+  return {
+    groupId,
+    memberId,
+    preferencesJson: eligibleParticipant(memberId, groupId).storedPreferencesJson,
   };
 }
 

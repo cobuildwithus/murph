@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
   pauseCallCircleParticipant: vi.fn(),
   readActiveHostedMemberAccess: vi.fn(),
   readCallCircleMatchParticipantTimeZones: vi.fn(),
+  refreshCallCircleParticipantMemberNameKey: vi.fn(),
   resumeCallCircleParticipant: vi.fn(),
   writeCallCirclePreferences: vi.fn(),
 }));
@@ -28,6 +29,7 @@ vi.mock("@/src/lib/call-circle/participant-store", () => ({
   canUseActiveCallCircleParticipantPair: mocks.canUseActiveCallCircleParticipantPair,
   pauseCallCircleParticipant: mocks.pauseCallCircleParticipant,
   readCallCircleMatchParticipantTimeZones: mocks.readCallCircleMatchParticipantTimeZones,
+  refreshCallCircleParticipantMemberNameKey: mocks.refreshCallCircleParticipantMemberNameKey,
   resumeCallCircleParticipant: mocks.resumeCallCircleParticipant,
   writeCallCirclePreferences: mocks.writeCallCirclePreferences,
 }));
@@ -42,6 +44,7 @@ const NOW = new Date("2026-07-06T14:00:00.000Z");
 const WINDOW_START = new Date("2026-07-06T16:00:00.000Z");
 const SETUP_CONTEXT = {
   inboundMailboxItemIds: ["mailbox_setup", "mailbox_reply"],
+  selfMemberName: "Alex",
 };
 const CONFIRM_CONTEXT = {
   inboundMailboxItemIds: ["mailbox_confirm", "mailbox_reply"],
@@ -96,6 +99,12 @@ describe("handleCallCircleRespond", () => {
       },
       prisma: prisma.tx,
     });
+    expect(mocks.refreshCallCircleParticipantMemberNameKey).toHaveBeenCalledWith({
+      groupId: "group_1",
+      memberId: "member_a",
+      prisma: prisma.tx,
+      selfMemberName: "Alex",
+    });
   });
 
   it("stores a private per-member cadence without canceling open work", async () => {
@@ -110,7 +119,7 @@ describe("handleCallCircleRespond", () => {
         kind: "preferences",
         memberCadenceUpdates: [{
           cadence: "never",
-          memberId: "member_housemate",
+          memberName: "Sam",
         }],
       },
     })).resolves.toEqual({ status: "ok" });
@@ -122,7 +131,7 @@ describe("handleCallCircleRespond", () => {
       patch: {
         memberCadenceUpdates: [{
           cadence: "never",
-          memberId: "member_housemate",
+          memberName: "Sam",
         }],
       },
       prisma: prisma.tx,
@@ -142,7 +151,7 @@ describe("handleCallCircleRespond", () => {
         kind: "preferences",
         memberCadenceUpdates: [{
           cadence: "never",
-          memberId: "member_unknown",
+          memberName: "Unknown",
         }],
       },
     })).resolves.toEqual({

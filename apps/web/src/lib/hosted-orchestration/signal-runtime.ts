@@ -17,6 +17,9 @@ import {
 import type {
   HostedMailboxLane,
 } from "@murphai/hosted-execution/runtime-control";
+import {
+  HOSTED_RUNTIME_TEMPORAL_SIGNAL_RPC_TIMEOUT_MS,
+} from "@murphai/hosted-execution/temporal-env";
 
 import {
   appendHostedMailboxEnvelopeTx,
@@ -55,6 +58,7 @@ export interface SignalHostedUserRuntimeWorkflowInput {
   environment?: NodeJS.ProcessEnv;
   ensureWorkspace?: boolean;
   prisma?: PrismaClient;
+  signalRpcDeadline?: number | Date;
   signal: HostedRuntimeSignal;
   taskQueue?: string | null;
   userId: string;
@@ -467,16 +471,24 @@ export async function signalHostedUserRuntimeWorkflow(
     || HOSTED_USER_RUNTIME_TASK_QUEUE;
   const signal = parseHostedRuntimeSignal(input.signal);
 
-  await client.workflow.signalWithStart(HOSTED_USER_RUNTIME_WORKFLOW_TYPE, {
-    args: [{
-      options: readHostedRuntimeTemporalWorkflowOptions(environment),
-      userId: input.userId,
-    }],
-    signal: HOSTED_USER_RUNTIME_SIGNAL_NAME,
-    signalArgs: [signal],
-    taskQueue,
-    workflowId,
-  });
+  const signalRpcDeadline = input.signalRpcDeadline
+    ?? Date.now() + HOSTED_RUNTIME_TEMPORAL_SIGNAL_RPC_TIMEOUT_MS;
+  await client.withDeadline(
+    signalRpcDeadline,
+    async () => await client.workflow.signalWithStart(
+      HOSTED_USER_RUNTIME_WORKFLOW_TYPE,
+      {
+        args: [{
+          options: readHostedRuntimeTemporalWorkflowOptions(environment),
+          userId: input.userId,
+        }],
+        signal: HOSTED_USER_RUNTIME_SIGNAL_NAME,
+        signalArgs: [signal],
+        taskQueue,
+        workflowId,
+      },
+    ),
+  );
 
   return {
     signalAccepted: true,

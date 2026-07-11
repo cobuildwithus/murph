@@ -1,6 +1,6 @@
 # Hosted account data deletion and vault export
 
-Last verified: 2026-07-09
+Last verified: 2026-07-10
 
 ## Purpose
 
@@ -24,11 +24,13 @@ Account deletion is intentionally stricter than normal settings reads. Vault exp
 6. `POST /api/settings/privacy/delete` keeps authenticated privacy access for members without active billing, requires the exact typed phrase, and consumes its distinct `account.delete` authorization before suspending the member or starting provider cleanup.
 7. All challenge and action routes enforce browser mutation-origin protection and bounded JSON request bodies.
 8. A signature is bound to one member, one app session, one action, and one challenge. Replays, cross-action use, and cross-session use fail closed.
-9. Provider revocation runs before local database deletion while local token references are still readable.
-10. Prisma deletion happens in a single hosted onboarding transaction and explicitly deletes child tables before the hosted member row.
-11. Account deletion revokes the current hosted app session and clears its browser cookie after the local delete succeeds.
-12. The per-user Temporal runtime workflow is terminated best-effort before deletion starts, again after the Prisma transaction commits, and again after Cloudflare runner/R2 cleanup, so live runtime writers are stopped before local rows are removed and stale wake state is neutralized after cleanup.
-13. The Stripe subscription is canceled before the Prisma transaction and fails closed: if the cancel call fails, deletion aborts with a retryable error so a deleted account can never keep an active subscription billing it. Stripe customer deletion and Privy user deletion run best-effort after the local wipe and are reported in the deletion result.
+9. Account suspension and hosted phone-call provider startup acquire the same hosted-member row locks in canonical code-unit order. A provider start either commits its attempt marker before suspension or observes the suspended member and stops before provider egress; deletion cannot miss an uncommitted Call Circle start through a Read Committed snapshot race.
+10. After suspension, deletion stops every known active provider call before local row deletion. A committed provider-start marker without a provider call id is ambiguous in-flight work, so deletion retains local rows and returns a retryable `503` until the start settles instead of orphaning a live call.
+11. Provider revocation runs before local database deletion while local token references are still readable.
+12. Prisma deletion happens in a single hosted onboarding transaction and explicitly deletes child tables before the hosted member row.
+13. Account deletion revokes the current hosted app session and clears its browser cookie after the local delete succeeds.
+14. The per-user Temporal runtime workflow is terminated best-effort before deletion starts, again after the Prisma transaction commits, and again after Cloudflare runner/R2 cleanup, so live runtime writers are stopped before local rows are removed and stale wake state is neutralized after cleanup.
+15. The Stripe subscription is canceled before the Prisma transaction and fails closed: if the cancel call fails, deletion aborts with a retryable error so a deleted account can never keep an active subscription billing it. Stripe customer deletion and Privy user deletion run best-effort after the local wipe and are reported in the deletion result.
 
 ## Export contract
 
@@ -57,16 +59,17 @@ The Settings vault export does not include:
 `deleteHostedAccountData` performs deletion in this order:
 
 1. Load the hosted member, decrypted Stripe/Privy vendor account references, and device connection identities.
-2. Suspend the hosted member for account deletion, then best-effort terminate the per-user hosted Temporal runtime workflow with reason `account-deleted` before provider revocation, billing cancellation, or local row deletion starts.
-3. Revoke wearable/device provider access with the existing device-sync provider `revokeAccess` hook before local device rows are deleted. Junction-routed Garmin and other Junction sources are deregistered through Junction when configured; providers without a revocation hook remain local-reference deletion only.
-4. Cancel the Stripe subscription fail-closed: a cancel failure or a missing Stripe client while a subscription reference exists aborts deletion with a structured error. An already-canceled or missing subscription counts as done.
-5. Cancel any Family plan Stripe subscriptions owned by the member before local Family group rows are removed. A family cancel failure also aborts deletion fail-closed.
-6. Delete Kernel browser sessions, every Managed Auth connection for the member's profile, and the profile before deleting Prisma-hosted account rows in a transaction.
-7. Best-effort terminate the per-user hosted Temporal runtime workflow again after the Prisma transaction commits.
-8. Best-effort call hosted execution control to delete Cloudflare Durable Object state and R2 user artifacts.
-9. Best-effort terminate the per-user hosted Temporal runtime workflow again after Cloudflare cleanup, so any sleeping workflow state that survived a concurrent wake attempt is neutralized.
-10. Best-effort delete the Stripe customer and the Privy user, reporting each outcome (`completed`, `failed`, `skipped_no_record`, `skipped_not_configured`) in the deletion result. Failures are logged as sanitized `[hosted-privacy]` console errors with the member id and error code only; operators reconcile leftover vendor records manually from those log lines because the local vendor references are already deleted.
-11. Return schema `murph.hosted-account-data-deletion-result.v2` with deletion counts, provider revocation outcomes, vendor account deletion outcomes, Cloudflare cleanup status, and retention notes.
+2. Suspend every account-owned hosted member while holding the same member-row locks used by phone-call provider startup, then best-effort terminate each per-user hosted Temporal runtime workflow with reason `account-deleted` before provider revocation, billing cancellation, or local row deletion starts.
+3. Re-read relevant member-owned and Call Circle phone calls after suspension. Stop each call with a provider id; if any start marker has committed without a provider id, return a retryable `503` and leave local rows intact until that provider attempt settles.
+4. Revoke wearable/device provider access with the existing device-sync provider `revokeAccess` hook before local device rows are deleted. Junction-routed Garmin and other Junction sources are deregistered through Junction when configured; providers without a revocation hook remain local-reference deletion only.
+5. Cancel the Stripe subscription fail-closed: a cancel failure or a missing Stripe client while a subscription reference exists aborts deletion with a structured error. An already-canceled or missing subscription counts as done.
+6. Cancel any Family plan Stripe subscriptions owned by the member before local Family group rows are removed. A family cancel failure also aborts deletion fail-closed.
+7. Delete Kernel browser sessions, every Managed Auth connection for the member's profile, and the profile before deleting Prisma-hosted account rows in a transaction.
+8. Best-effort terminate the per-user hosted Temporal runtime workflow again after the Prisma transaction commits.
+9. Best-effort call hosted execution control to delete Cloudflare Durable Object state and R2 user artifacts.
+10. Best-effort terminate the per-user hosted Temporal runtime workflow again after Cloudflare cleanup, so any sleeping workflow state that survived a concurrent wake attempt is neutralized.
+11. Best-effort delete the Stripe customer and the Privy user, reporting each outcome (`completed`, `failed`, `skipped_no_record`, `skipped_not_configured`) in the deletion result. Failures are logged as sanitized `[hosted-privacy]` console errors with the member id and error code only; operators reconcile leftover vendor records manually from those log lines because the local vendor references are already deleted.
+12. Return schema `murph.hosted-account-data-deletion-result.v2` with deletion counts, provider revocation outcomes, vendor account deletion outcomes, Cloudflare cleanup status, and retention notes.
 
 ## Store coverage
 
@@ -85,9 +88,9 @@ The Settings vault export does not include:
 | `prisma.hosted_account_group_billing_ref` | Local reference delete | Metadata/counts | Deletes local Family Stripe references for groups owned by the member after fail-closed Family subscription cancellation. |
 | `prisma.hosted_group` | Live delete | Metadata/counts | Deletes generic groups owned by the member or backed by the member's runtime. Export omits join codes and other members' private data. |
 | `prisma.hosted_group_member` | Live delete | Metadata/counts | Deletes the member's generic group memberships and memberships attached to a deleted group. Export reports role/status metadata only. |
-| `prisma.hosted_call_circle_participant` | Live delete | Metadata/counts | Deletes the member's Call Circle enrollment and enrollments attached to a deleted group before relation cascades run. |
+| `prisma.hosted_call_circle_participant` | Live delete | Metadata/counts | Deletes the member's Call Circle enrollment and its derived keyed peer-name lookup key, plus enrollments attached to a deleted group, before relation cascades run. The row never stores the plaintext profile name. |
 | `prisma.hosted_call_circle_match` | Live delete | Metadata/counts | Deletes matches involving the member or a deleted group after attached phone calls are removed and before relation cascades run. |
-| `prisma.hosted_phone_call` | Live delete | Metadata/counts | Deletes member-owned calls and Call Circle calls attached through either participant or a deleted group before their match relation is removed. |
+| `prisma.hosted_phone_call` | Live delete | Metadata/counts | Deletes member-owned calls and Call Circle calls attached through either participant or a deleted group before their match relation is removed. Shared member-row locking serializes provider startup with suspension; an attempt marker without a provider id blocks deletion retryably. |
 | `prisma.hosted_mailbox_item` | Live delete | Metadata/counts | Deletes mailbox envelopes, inline ciphertext refs, dedupe keys, and sequence data. Export includes envelope metadata and payload presence/byte counts while omitting dedupe keys and payload refs. |
 | `prisma.hosted_mailbox_payload` | Live delete | Not exported secret | Deletes encrypted mailbox payload ciphertext. Export reports payload presence and bytes while omitting ciphertext and arbitrary decoded payload JSON. |
 | `prisma.hosted_mailbox_lane_counter` | Live delete | Metadata/counts | Deletes per-lane counters so deleted users cannot resume old lanes. |
@@ -164,5 +167,12 @@ Stripe and Privy vendor accounts are actively deleted by the deletion workflow i
 - Temporal workflow termination ordering before deletion, after Prisma commit, and after Cloudflare cleanup, plus hosted reconciliation-facts blocking for deleted, inactive, or unconfigured users.
 - vendor account deletion: Stripe subscription cancel before the local wipe (and abort on failure), Stripe customer and Privy user deletion after it, already-canceled/missing-record skips, not-configured skips, and best-effort failure reporting.
 - Family account cleanup: owned Family subscriptions cancel fail-closed, Family memberships/invites/billing refs are deleted with account rows, and Family Stripe customer references are deduped with direct billing customer cleanup.
+
+`apps/web/test/phone-calls-account-deletion.db.test.ts` uses real PostgreSQL
+transactions and barriers to prove that provider startup and account suspension
+serialize on the same hosted-member rows: deletion either observes the committed
+start marker or wins first and prevents provider egress. The same suite proves
+that a concurrent Call Circle preference update that wins the shared member lock
+invalidates a proposal computed from the prior availability window.
 
 Any future account data store should update `HOSTED_ACCOUNT_DATA_STORE_COVERAGE`, the deletion/export implementation, this document, and the coverage test in the same change.

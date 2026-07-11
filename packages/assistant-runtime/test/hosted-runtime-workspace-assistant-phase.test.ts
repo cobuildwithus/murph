@@ -742,25 +742,61 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
   });
 
   it("forwards the hosted Call Circle port into the assistant context", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-call-circle-profile-"));
     const callCircle: RuntimeCallCirclePort = {
       respond: vi.fn(async () => ({ status: "ok" as const })),
     };
 
-    await runHostedWorkspaceAssistantPhase(createPhaseInput({
-      runtimeCallCirclePort: callCircle,
-    }));
+    try {
+      await mkdir(path.join(vaultRoot, "bank"), { recursive: true });
+      await writeFile(
+        path.join(vaultRoot, "bank", "profile.md"),
+        [
+          "---",
+          "docType: profile",
+          "schemaVersion: 1",
+          'displayName: "Sam"',
+          "updatedAt: 2026-07-01T00:00:00.000Z",
+          "---",
+          "# Profile",
+          "",
+        ].join("\n"),
+        "utf8",
+      );
 
-    expect(mocks.hydrateHostedExecutionDefaultTarget.mock.calls[0]?.[0])
-      .toEqual(expect.objectContaining({
-        hosted: expect.objectContaining({ callCircle }),
+      await runHostedWorkspaceAssistantPhase(createPhaseInput({
+        runtimeCallCirclePort: callCircle,
+        vaultRoot,
       }));
-    expect(mocks.runHostedAssistantAutomationLane).toHaveBeenCalledWith(
-      expect.objectContaining({
-        executionContext: expect.objectContaining({
-          hosted: expect.objectContaining({ callCircle }),
+
+      const hydratedContext = mocks.hydrateHostedExecutionDefaultTarget.mock.calls[0]?.[0];
+      const hydratedCallCircle = hydratedContext?.hosted?.callCircle;
+      expect(hydratedCallCircle).not.toBe(callCircle);
+      await expect(hydratedCallCircle?.respond(
+        { kind: "confirm" },
+        {
+          inboundMailboxItemIds: ["mailbox_call_circle_reply"],
+          signal: null,
+        },
+      )).resolves.toEqual({ status: "ok" });
+      expect(callCircle.respond).toHaveBeenCalledWith(
+        { kind: "confirm" },
+        {
+          inboundMailboxItemIds: ["mailbox_call_circle_reply"],
+          selfMemberName: "Sam",
+          signal: null,
+        },
+      );
+      expect(mocks.runHostedAssistantAutomationLane).toHaveBeenCalledWith(
+        expect.objectContaining({
+          executionContext: expect.objectContaining({
+            hosted: expect.objectContaining({ callCircle: hydratedCallCircle }),
+          }),
         }),
-      }),
-    );
+      );
+    } finally {
+      await rm(vaultRoot, { force: true, recursive: true });
+    }
   });
 
   it("prepares hosted assistant automation state before running scheduled automation", async () => {

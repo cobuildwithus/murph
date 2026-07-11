@@ -1,4 +1,8 @@
 import {
+  HOSTED_RUNTIME_TEMPORAL_SIGNAL_RPC_TIMEOUT_MS,
+} from "@murphai/hosted-execution/temporal-env";
+
+import {
   HOSTED_USER_RUNTIME_SIGNAL_NAME,
   HOSTED_USER_RUNTIME_TASK_QUEUE,
   HOSTED_USER_RUNTIME_WORKFLOW_TYPE,
@@ -19,6 +23,10 @@ export interface HostedUserRuntimeSignalWithStartOptions {
 }
 
 export interface HostedUserRuntimeSignalClient {
+  withDeadline<Result>(
+    deadline: number | Date,
+    callback: () => Promise<Result>,
+  ): Promise<Result>;
   workflow: {
     signalWithStart(
       workflowType: typeof HOSTED_USER_RUNTIME_WORKFLOW_TYPE,
@@ -29,6 +37,7 @@ export interface HostedUserRuntimeSignalClient {
 
 export interface SignalHostedUserRuntimeWorkflowInput {
   client: HostedUserRuntimeSignalClient;
+  signalRpcDeadline?: number | Date;
   signal: HostedRuntimeSignal;
   taskQueue?: string;
   userId: string;
@@ -55,18 +64,23 @@ export async function signalHostedUserRuntimeWorkflow(
   const workflowId =
     input.workflowId ?? hostedUserRuntimeWorkflowId(input.userId);
 
-  await input.client.workflow.signalWithStart(
-    HOSTED_USER_RUNTIME_WORKFLOW_TYPE,
-    {
-      args: [{
-        options: input.workflowOptions ?? readHostedUserRuntimeWorkflowOptions(),
-        userId: input.userId,
-      }],
-      signal: HOSTED_USER_RUNTIME_SIGNAL_NAME,
-      signalArgs: [input.signal],
-      taskQueue: input.taskQueue ?? HOSTED_USER_RUNTIME_TASK_QUEUE,
-      workflowId,
-    },
+  const signalRpcDeadline = input.signalRpcDeadline
+    ?? Date.now() + HOSTED_RUNTIME_TEMPORAL_SIGNAL_RPC_TIMEOUT_MS;
+  await input.client.withDeadline(
+    signalRpcDeadline,
+    async () => await input.client.workflow.signalWithStart(
+      HOSTED_USER_RUNTIME_WORKFLOW_TYPE,
+      {
+        args: [{
+          options: input.workflowOptions ?? readHostedUserRuntimeWorkflowOptions(),
+          userId: input.userId,
+        }],
+        signal: HOSTED_USER_RUNTIME_SIGNAL_NAME,
+        signalArgs: [input.signal],
+        taskQueue: input.taskQueue ?? HOSTED_USER_RUNTIME_TASK_QUEUE,
+        workflowId,
+      },
+    ),
   );
 
   return { workflowId };

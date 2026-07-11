@@ -58,6 +58,66 @@ describe("Call Circle matching and time windows", () => {
     ]);
   });
 
+  it("finds a maximum-cardinality pairing when the first eligible edge is a dead end", () => {
+    const now = new Date("2026-07-06T13:00:00.000Z");
+    const edgeAB = testWindow("14:00");
+    const edgeAC = testWindow("15:00");
+    const edgeBD = testWindow("16:00");
+    const participants = [
+      participant("member_a", [edgeAB, edgeAC]),
+      participant("member_b", [edgeAB, edgeBD]),
+      participant("member_c", edgeAC),
+      participant("member_d", edgeBD),
+    ];
+    const expected = [
+      {
+        memberAId: "member_a",
+        memberBId: "member_c",
+        windowEndAt: new Date("2026-07-06T15:15:00.000Z"),
+        windowStartAt: new Date("2026-07-06T15:00:00.000Z"),
+      },
+      {
+        memberAId: "member_b",
+        memberBId: "member_d",
+        windowEndAt: new Date("2026-07-06T16:15:00.000Z"),
+        windowStartAt: new Date("2026-07-06T16:00:00.000Z"),
+      },
+    ];
+
+    expect(proposeCallCircleMatches({
+      now,
+      participants,
+      recentMatches: [],
+    })).toEqual(expected);
+    expect(proposeCallCircleMatches({
+      now,
+      participants: [...participants].reverse(),
+      recentMatches: [],
+    })).toEqual(expected);
+  });
+
+  it("handles an odd-cycle candidate graph without losing a pair", () => {
+    const now = new Date("2026-07-06T13:00:00.000Z");
+    const edgeAB = testWindow("14:00");
+    const edgeAC = testWindow("15:00");
+    const edgeBC = testWindow("16:00");
+    const edgeCD = testWindow("17:00");
+
+    expect(proposeCallCircleMatches({
+      now,
+      participants: [
+        participant("member_a", [edgeAB, edgeAC]),
+        participant("member_b", [edgeAB, edgeBC]),
+        participant("member_c", [edgeAC, edgeBC, edgeCD]),
+        participant("member_d", edgeCD),
+      ],
+      recentMatches: [],
+    })).toEqual([
+      expect.objectContaining({ memberAId: "member_a", memberBId: "member_b" }),
+      expect.objectContaining({ memberAId: "member_c", memberBId: "member_d" }),
+    ]);
+  });
+
   it("canonicalizes opaque ids with code-unit order", () => {
     const now = new Date("2026-07-06T13:00:00.000Z");
     const sharedWindow = {
@@ -306,6 +366,35 @@ describe("Call Circle matching and time windows", () => {
         windowEndAt: new Date("2026-07-06T14:15:00.000Z"),
         windowStartAt: new Date("2026-07-06T14:00:00.000Z"),
       },
+    ]);
+  });
+
+  it("uses a repeat when avoiding it would reduce maximum cardinality", () => {
+    const now = new Date("2026-07-06T13:00:00.000Z");
+    const edgeAB = testWindow("14:00");
+    const edgeAC = testWindow("15:00");
+    const edgeCD = testWindow("16:00");
+    const proposals = proposeCallCircleMatches({
+      now,
+      participants: [
+        participant("member_a", [edgeAB, edgeAC]),
+        participant("member_b", edgeAB),
+        participant("member_c", [edgeAC, edgeCD]),
+        participant("member_d", edgeCD),
+      ],
+      recentMatches: [{
+        createdAt: new Date("2026-06-28T13:00:00.000Z"),
+        memberAId: "member_a",
+        memberBId: "member_b",
+      }],
+    });
+
+    expect(proposals).toHaveLength(2);
+    expect(proposals.map((proposal) =>
+      `${proposal.memberAId}:${proposal.memberBId}`
+    ).sort()).toEqual([
+      "member_a:member_b",
+      "member_c:member_d",
     ]);
   });
 
@@ -580,6 +669,18 @@ interface CallCircleTestWindow {
   dayOfWeek: 0 | 1 | 2 | 3 | 4 | 5 | 6;
   endLocalTime: string;
   startLocalTime: string;
+}
+
+function testWindow(startLocalTime: string): CallCircleTestWindow {
+  const [hourText, minuteText] = startLocalTime.split(":");
+  const hour = Number.parseInt(hourText ?? "", 10);
+  const minute = Number.parseInt(minuteText ?? "", 10) + 30;
+  const endHour = hour + Math.floor(minute / 60);
+  return {
+    dayOfWeek: 1,
+    endLocalTime: `${String(endHour).padStart(2, "0")}:${String(minute % 60).padStart(2, "0")}`,
+    startLocalTime,
+  };
 }
 
 function participant(

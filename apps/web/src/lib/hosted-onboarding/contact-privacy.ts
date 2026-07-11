@@ -3,6 +3,8 @@ export type {
   HostedBlindIndexParts,
 } from "./contact-privacy-core";
 export {
+  createHostedCallCircleMemberNameLookupKey,
+  createHostedCallCircleMemberNameLookupKeyReadCandidates,
   createHostedExternalThreadIdentityLookupKey,
   createHostedExternalThreadIdentityLookupKeyReadCandidates,
   createHostedExternalThreadLookupKey,

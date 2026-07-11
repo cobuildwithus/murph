@@ -383,6 +383,7 @@ export interface HostedRuntimeCallCirclePort {
     request: HostedCallCircleRespondRequest,
     context?: {
       inboundMailboxItemIds?: HostedCallCircleRespondContext["inboundMailboxItemIds"];
+      selfMemberName?: HostedCallCircleRespondContext["selfMemberName"];
       signal?: AbortSignal | null;
     },
   ): Promise<HostedCallCircleRespondResponse>;

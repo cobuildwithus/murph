@@ -21,6 +21,7 @@ const HOSTED_BLIND_INDEX_PATTERN =
   /^(?<prefix>hbidx):(?<kind>[a-z0-9-]+):(?<version>v[0-9]+):(?<digest>[0-9a-f]+)$/u;
 
 export type HostedBlindIndexKind =
+  | "call-circle-member-name"
   | "email"
   | "external-thread"
   | "external-thread-identity"
@@ -47,6 +48,26 @@ export interface HostedBlindIndexParts {
 
 export function createHostedPhoneLookupKey(value: string | null | undefined): string | null {
   return createHostedLookupKey("phone", normalizePhoneNumber(value));
+}
+
+export function createHostedCallCircleMemberNameLookupKey(input: {
+  groupId: string | null | undefined;
+  normalizedMemberName: string | null | undefined;
+}): string | null {
+  return createHostedLookupKey(
+    "call-circle-member-name",
+    normalizeHostedCallCircleMemberNameLookupInput(input),
+  );
+}
+
+export function createHostedCallCircleMemberNameLookupKeyReadCandidates(input: {
+  groupId: string | null | undefined;
+  normalizedMemberName: string | null | undefined;
+}): string[] {
+  return createHostedLookupKeyReadCandidates(
+    "call-circle-member-name",
+    normalizeHostedCallCircleMemberNameLookupInput(input),
+  );
 }
 
 export function createHostedPhoneLookupKeyReadCandidates(
@@ -350,6 +371,17 @@ function normalizeHostedExternalThreadLookupInput(input: {
 
   return accountLookupKey && channel && threadId
     ? `${channel}:${accountLookupKey}:${threadId}`
+    : null;
+}
+
+function normalizeHostedCallCircleMemberNameLookupInput(input: {
+  groupId: string | null | undefined;
+  normalizedMemberName: string | null | undefined;
+}): string | null {
+  const groupId = normalizeHostedOpaqueInput(input.groupId);
+  const normalizedMemberName = normalizeHostedOpaqueInput(input.normalizedMemberName);
+  return groupId && normalizedMemberName
+    ? JSON.stringify([groupId, normalizedMemberName])
     : null;
 }
 

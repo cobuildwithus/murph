@@ -187,7 +187,7 @@ describe("murph computer dynamic tools", () => {
     expect(fetchImpl).toHaveBeenCalledOnce();
   });
 
-  it("sends server-owned resume proof without model resume ids", async () => {
+  it("uses the current-turn mailbox item before carried notification context", async () => {
     const fetchImpl = vi.fn(async (
       url: string | URL | Request,
       init?: RequestInit,
@@ -234,7 +234,10 @@ describe("murph computer dynamic tools", () => {
           conversationId: "conversation-123",
           recipientKey: "recipient-123",
         },
-        hostedMailboxItemIds: ["hmi_prior_context", "hmi_latest_user_reply"],
+        hostedMailboxItemIds: [
+          "hmi_latest_user_reply",
+          "hmi_prior_notification",
+        ],
       }),
       nextUsageOrdinal: () => 1,
       progressDelivery: createProgressDelivery(),
