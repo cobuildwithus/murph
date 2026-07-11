@@ -1,6 +1,24 @@
 import { normalizeJunctionResourceName } from "@murphai/importers/device-providers/junction-resources";
 
 export { normalizeJunctionResourceName };
+export {
+  JUNCTION_COMPANION_HEALTH_METADATA_EVENT_TYPE,
+  JUNCTION_COMPANION_HEALTH_METADATA_MAX_BATCH_BYTES,
+  JUNCTION_COMPANION_HEALTH_METADATA_MAX_FUTURE_SKEW_MS,
+  JUNCTION_COMPANION_HEALTH_METADATA_MAX_HISTORY_MS,
+  JUNCTION_COMPANION_HEALTH_METADATA_MAX_RECORDS,
+  JUNCTION_COMPANION_HEALTH_METADATA_RESOURCE,
+  JUNCTION_COMPANION_HEALTH_METADATA_SCHEMA_VERSION,
+  JUNCTION_COMPANION_HEALTH_METADATA_SOURCE_PROVIDER,
+  JUNCTION_COMPANION_HEALTH_METADATA_SOURCE_TYPE,
+} from "./companion-health-metadata.ts";
+export {
+  JunctionCompanionHealthMetadataParseError,
+  parseJunctionCompanionHealthMetadataBatch,
+  type JunctionCompanionHealthMetadataBatch,
+  type JunctionCompanionHealthMetadataKind,
+  type JunctionCompanionHealthMetadataRecord,
+} from "./companion-health-metadata-parser.ts";
 
 /**
  * Resolves the normalized Junction resource name carried by a webhook event

@@ -56,6 +56,16 @@ import {
   subtractDays,
 } from "../shared.ts";
 import {
+  JUNCTION_COMPANION_HEALTH_METADATA_EVENT_TYPE,
+  JUNCTION_COMPANION_HEALTH_METADATA_MAX_BATCH_BYTES,
+  JUNCTION_COMPANION_HEALTH_METADATA_RESOURCE,
+  JUNCTION_COMPANION_HEALTH_METADATA_SOURCE_PROVIDER,
+  JUNCTION_COMPANION_HEALTH_METADATA_SOURCE_TYPE,
+  JunctionCompanionHealthMetadataParseError,
+  parseJunctionCompanionHealthMetadataBatch,
+  type JunctionCompanionHealthMetadataRecord,
+} from "../junction-resources.ts";
+import {
   JunctionClient,
   type JunctionClientConfig,
   type JunctionDateQueryFormat,
@@ -1436,6 +1446,14 @@ export function createJunctionDeviceSyncProvider(
     skippedOptionalResources: JunctionSkippedOptionalResource[],
   ): Promise<ProviderJobResult> {
     const window = resolveJobWindow(job, context.now, reconcileDays);
+    if (normalizeString(job.payload.resource) === JUNCTION_COMPANION_HEALTH_METADATA_RESOURCE) {
+      const records = parseJunctionCompanionHealthMetadataJob(job);
+      await importJunctionCompanionHealthMetadataSnapshot(context, records);
+      return {
+        nextReconcileAt: clampWebhookJobNextReconcileAt(context),
+      };
+    }
+
     const resource = normalizeJunctionResourceName(job.payload.resource);
     const resourceCategory = normalizeString(job.payload.resourceCategory);
     const sourceProviderSlug = normalizeProviderSlug(job.payload.sourceProviderSlug);
@@ -2126,6 +2144,42 @@ export function createJunctionDeviceSyncProvider(
       timeseries: {},
     });
     return readProviderSnapshotCanonicalEventCount(receipt);
+  }
+
+  async function importJunctionCompanionHealthMetadataSnapshot(
+    context: ProviderJobContext,
+    records: readonly JunctionCompanionHealthMetadataRecord[],
+  ): Promise<void> {
+    const summaries: Record<string, unknown[]> = {};
+    const sleep = records
+      .filter((record) => record.kind === "recovery_score")
+      .map(buildJunctionCompanionRecoverySummary);
+    const activity = records
+      .filter((record) => record.kind === "workout_strain")
+      .map(buildJunctionCompanionWorkoutStrainSummary);
+
+    if (sleep.length > 0) {
+      summaries.sleep = sleep;
+    }
+    if (activity.length > 0) {
+      summaries.activity = activity;
+    }
+
+    await context.importSnapshot({
+      provider: "junction",
+      accountId: buildJunctionImportAccountId(context.account.externalAccountId),
+      windowStart: records.reduce(
+        (earliest, record) => minIsoTimestamp(earliest, record.startAt),
+        records[0]!.startAt,
+      ),
+      windowEnd: records.reduce(
+        (latest, record) => maxIsoTimestamp(latest, record.endAt),
+        records[0]!.endAt,
+      ),
+      connections: [],
+      summaries: sanitizeJunctionImportSnapshots(summaries, []),
+      timeseries: {},
+    });
   }
 
   async function fetchOptionalJunctionResourceRecords(
@@ -5403,6 +5457,109 @@ function parseJunctionWebhookDataJobRecord(value: unknown): Record<string, unkno
   } catch {
     return null;
   }
+}
+
+const JUNCTION_COMPANION_HEALTH_METADATA_TIMESTAMP_PATTERN =
+  /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})$/u;
+
+function parseJunctionCompanionHealthMetadataJob(
+  job: DeviceSyncJobRecord,
+): JunctionCompanionHealthMetadataRecord[] {
+  if (job.payload.resource !== JUNCTION_COMPANION_HEALTH_METADATA_RESOURCE) {
+    throw invalidJunctionCompanionHealthMetadataJob("resource is invalid");
+  }
+  if (job.payload.eventType !== JUNCTION_COMPANION_HEALTH_METADATA_EVENT_TYPE) {
+    throw invalidJunctionCompanionHealthMetadataJob("eventType is invalid");
+  }
+  if (job.payload.resourceCategory !== "summary") {
+    throw invalidJunctionCompanionHealthMetadataJob("resourceCategory is invalid");
+  }
+  if (job.payload.sourceProviderSlug !== JUNCTION_COMPANION_HEALTH_METADATA_SOURCE_PROVIDER) {
+    throw invalidJunctionCompanionHealthMetadataJob("sourceProviderSlug is invalid");
+  }
+  const receivedAt = toJunctionCompanionHealthMetadataIsoTimestamp(job.payload.occurredAt);
+  if (!receivedAt) {
+    throw invalidJunctionCompanionHealthMetadataJob("occurredAt is invalid");
+  }
+  const receivedAtMs = Date.parse(receivedAt);
+
+  const json = typeof job.payload.webhookDataJson === "string"
+    ? job.payload.webhookDataJson
+    : null;
+  if (!json || Buffer.byteLength(json, "utf8") > JUNCTION_COMPANION_HEALTH_METADATA_MAX_BATCH_BYTES) {
+    throw invalidJunctionCompanionHealthMetadataJob("batch JSON is missing or too large");
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(json);
+  } catch {
+    throw invalidJunctionCompanionHealthMetadataJob("batch JSON is invalid");
+  }
+
+  try {
+    return parseJunctionCompanionHealthMetadataBatch(parsed, receivedAtMs).records;
+  } catch (error) {
+    if (error instanceof JunctionCompanionHealthMetadataParseError) {
+      throw invalidJunctionCompanionHealthMetadataJob(error.message);
+    }
+    throw error;
+  }
+}
+
+function invalidJunctionCompanionHealthMetadataJob(reason: string): DeviceSyncError {
+  return deviceSyncError({
+    code: "DEVICE_SYNC_JOB_PAYLOAD_INVALID",
+    message: `Junction companion health metadata ${reason}.`,
+    retryable: false,
+  });
+}
+
+function buildJunctionCompanionRecoverySummary(
+  record: JunctionCompanionHealthMetadataRecord,
+): Record<string, unknown> {
+  return stripUndefined({
+    id: record.recordId,
+    date: record.endAt,
+    companionStartAt: record.startAt,
+    companionEndAt: record.endAt,
+    companionSyncVersion: record.syncVersion,
+    recovery_readiness_score: record.value,
+    source: {
+      provider: JUNCTION_COMPANION_HEALTH_METADATA_SOURCE_PROVIDER,
+      type: JUNCTION_COMPANION_HEALTH_METADATA_SOURCE_TYPE,
+    },
+  });
+}
+
+function buildJunctionCompanionWorkoutStrainSummary(
+  record: JunctionCompanionHealthMetadataRecord,
+): Record<string, unknown> {
+  return stripUndefined({
+    id: record.recordId,
+    date: record.endAt,
+    companionStartAt: record.startAt,
+    companionEndAt: record.endAt,
+    companionSyncVersion: record.syncVersion,
+    workout_strain: record.value,
+    source: {
+      provider: JUNCTION_COMPANION_HEALTH_METADATA_SOURCE_PROVIDER,
+      type: JUNCTION_COMPANION_HEALTH_METADATA_SOURCE_TYPE,
+    },
+  });
+}
+
+function toJunctionCompanionHealthMetadataIsoTimestamp(value: unknown): string | null {
+  if (
+    typeof value !== "string"
+    || value.length > 64
+    || !JUNCTION_COMPANION_HEALTH_METADATA_TIMESTAMP_PATTERN.test(value)
+  ) {
+    return null;
+  }
+
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? new Date(parsed).toISOString() : null;
 }
 
 function resolveJunctionWebhookDataRecordSourceProviderSlug(
