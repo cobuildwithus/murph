@@ -146,7 +146,7 @@ test("BiomarkersPage metadata and route entrypoint filter generated biomarkers",
   );
   assert.deepEqual(biomarkersMetadata.twitter?.images, [
     {
-      alt: "Murph — Everyone has a health goal. Nobody does it alone.",
+      alt: "Murph figures out what works for you—and gets your friends in on it.",
       height: 630,
       type: "image/png",
       url: "/opengraph-image",
