@@ -1999,6 +1999,42 @@ function shouldKeepExistingJunctionSleepStageSummaryObservation(
     isJunctionSleepStageCycleFallbackObservation(incoming);
 }
 
+const JUNCTION_COMPANION_HEALTH_METADATA_SOURCE_TYPE =
+  "companion-whoop-metadata-unverified";
+
+function parseJunctionCompanionSyncVersion(version: string | undefined): number | undefined {
+  if (!version || !/^(?:0|[1-9]\d*)$/u.test(version)) {
+    return undefined;
+  }
+
+  const parsed = Number(version);
+  return Number.isSafeInteger(parsed) ? parsed : undefined;
+}
+
+function shouldKeepExistingJunctionCompanionHealthMetadata(
+  existing: EventRecord,
+  incoming: EventRecord,
+): boolean {
+  if (
+    existing.kind !== "observation"
+    || incoming.kind !== "observation"
+    || existing.externalRef?.system !== "junction"
+    || incoming.externalRef?.system !== "junction"
+    || existing.dataOrigin?.sourceType !== JUNCTION_COMPANION_HEALTH_METADATA_SOURCE_TYPE
+    || incoming.dataOrigin?.sourceType !== JUNCTION_COMPANION_HEALTH_METADATA_SOURCE_TYPE
+  ) {
+    return false;
+  }
+
+  const existingVersion = parseJunctionCompanionSyncVersion(existing.externalRef.version);
+  if (existingVersion === undefined) {
+    return false;
+  }
+
+  const incomingVersion = parseJunctionCompanionSyncVersion(incoming.externalRef.version);
+  return incomingVersion === undefined || incomingVersion <= existingVersion;
+}
+
 function hasStableLegacyOccurrenceProof(
   existing: IndexedEventExternalRefMatch,
   incoming: EventRecord,
@@ -2303,6 +2339,14 @@ async function reconcileDeviceEventEntriesByExternalRef(
 
     if (deviceEventContentKey(latest) === deviceEventContentKey(entry.record)) {
       skippedDuplicateCount += 1;
+      records.push(latest);
+      continue;
+    }
+
+    // Companion HealthKit sync versions are nonnegative monotonic integers.
+    // Keep this comparison scoped to that closed source type: other providers
+    // use timestamp-shaped versions whose ordering semantics are not universal.
+    if (shouldKeepExistingJunctionCompanionHealthMetadata(latest, entry.record)) {
       records.push(latest);
       continue;
     }

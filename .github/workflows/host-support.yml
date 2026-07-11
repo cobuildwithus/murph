@@ -188,8 +188,6 @@ jobs:
         run: pnpm exec tsx packages/cli/scripts/verify-package-shape.ts
 
       - name: Run package coverage shard
-        env:
-          NODE_OPTIONS: ${{ matrix.shard == 'assistant' && '--max-old-space-size=6144' || '' }}
         run: |
           for package_dir in ${{ matrix.packages }}; do
             if [[ "$package_dir" == "packages/cli" ]]; then
