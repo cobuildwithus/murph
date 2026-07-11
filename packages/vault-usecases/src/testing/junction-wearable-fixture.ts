@@ -24,6 +24,7 @@ import {
   createBrowserVaultQueryClient,
   createBrowserVaultReplica,
   parseBrowserVaultReplica,
+  selectBrowserVaultExperimentResults,
 } from "@murphai/query/browser";
 import {
   selectBrowserVaultBiomarkerPanel,
@@ -303,6 +304,17 @@ export interface JunctionWearableBrowserVaultReplicaSummary {
   sourceHealth: JunctionWearableFixtureSourceHealthSummary[];
 }
 
+export interface JunctionWearableBrowserVaultExperimentProgressSummary {
+  activityKind: string | null;
+  completedSessions: number;
+  eventKind: string | null;
+  expectedSessionsByNow: number | null;
+  loggedSessions: number;
+  sensedSessions: number | null;
+  status: "not_started" | "behind" | "on_track" | "met_minimum" | "met_target" | "unknown";
+  targetSessions: number | null;
+}
+
 export interface JunctionWearableHostedReplayPlan {
   connection: {
     displayName: string;
@@ -351,6 +363,35 @@ export function summarizeJunctionWearableBrowserVaultReplica(input: {
       selectedMetrics: row.selectedMetrics,
       sleepNights: row.sleepNights,
     })),
+  };
+}
+
+export function summarizeJunctionWearableBrowserVaultExperimentProgress(input: {
+  experimentSlug: string;
+  replica: unknown;
+}): JunctionWearableBrowserVaultExperimentProgressSummary {
+  const replica = parseBrowserVaultReplica(input.replica);
+  const result = selectBrowserVaultExperimentResults(
+    createBrowserVaultQueryClient(replica),
+    { slug: input.experimentSlug },
+  );
+  const progress = result?.progress?.adherence;
+  const evidence = result?.adherence?.targets[0]?.evidence;
+  if (!result || !progress || evidence?.kind !== "linkedEventCount") {
+    throw new Error(
+      `Expected linked-event browser-vault experiment progress for ${input.experimentSlug}.`,
+    );
+  }
+
+  return {
+    activityKind: evidence.activityKind ?? null,
+    completedSessions: progress.completedSessions,
+    eventKind: evidence.eventKind,
+    expectedSessionsByNow: progress.expectedSessionsByNow,
+    loggedSessions: progress.loggedSessions,
+    sensedSessions: progress.sensedSessions ?? null,
+    status: progress.status,
+    targetSessions: progress.targetSessions,
   };
 }
 
