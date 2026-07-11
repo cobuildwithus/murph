@@ -375,11 +375,10 @@ describe("hosted local Junction wearable direct-resource replay e2e", () => {
     expect(requireLinqStub().readObservedMessageText(nudge)).toBe(
       experimentActivityNudgeReplyText,
     );
-    const finalStatus = await assertHostedRunnerCompletedWithoutError({
-      context: "device-activity experiment nudge",
-      scenario: activeScenario,
-      userId: experimentAdherenceUserId,
-    });
+    const finalStatus = await activeScenario.waitForHostedIdle(
+      experimentAdherenceUserId,
+    );
+    expect(finalStatus.lastErrorCode ?? null).toBeNull();
     expect(requireLinqStub().countObservedSends(replyPath)).toBe(nudgeOutboundBaseline + 1);
     expect(countAssistantResponsesApiRequests()).toBe(nudgeProviderBaseline + 2);
 

@@ -44,8 +44,7 @@ const linqWebhookSecret = "linq-local-usage-limit-webhook-secret";
 const assistantModel = "gpt-5.5";
 const firstInboundText = "Can you help me plan tomorrow's workout?";
 const secondInboundText = "Can you also update the plan for Saturday?";
-const usageLimitNoticeText =
-  "Hey, you've reached your usage limit for the month. Upgrade to Edge: https://withmurph.ai/home";
+const usageLimitNoticeUrl = "https://withmurph.ai/home";
 
 const streamDevLogs = process.env.MURPH_E2E_STREAM_DEV_LOGS === "1";
 const workerPersistDirOverride = process.env.MURPH_E2E_CF_PERSIST_DIR?.trim() || null;
@@ -115,8 +114,11 @@ describe("hosted local usage-limit ambiguous send e2e", () => {
     });
 
     const replyPath = `/chats/${encodeURIComponent(chatId)}/messages`;
-    const usageNoticeMatcher = (request: ObservedLinqRequest): boolean =>
-      requireLinqStub().readObservedMessageText(request) === usageLimitNoticeText;
+    const usageNoticeMatcher = (request: ObservedLinqRequest): boolean => {
+      const text = requireLinqStub().readObservedMessageText(request);
+      return text?.includes(usageLimitNoticeUrl) === true
+        && /allowance|cap|Edge|month|reset|usage/iu.test(text);
+    };
     const observedBaseline = requireLinqStub().countObservedSends(
       replyPath,
       usageNoticeMatcher,

@@ -288,6 +288,8 @@ async function ensureScenario(): Promise<void> {
       LINQ_API_BASE_URL: requireLinqStub().runnerBaseUrl,
       LINQ_API_TOKEN: linqApiToken,
       LINQ_WEBHOOK_SECRET: linqWebhookSecret,
+      MURPH_E2E_DEBUG_ASSISTANT_PROVIDER_STUB:
+        process.env.MURPH_E2E_DEBUG_ASSISTANT_PROVIDER_STUB ?? "0",
       MURPH_DEV_SKIP_HEALTH_COMMONS_WATCH: "1",
       OPENAI_API_KEY: "stub-local-openai-key",
     },

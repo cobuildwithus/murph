@@ -111,7 +111,7 @@ describe("hosted local Linq unknown first-contact fallback e2e", () => {
       homeChatId: null,
       homeRecipientPhone: fallbackLinePhone,
       memberCount: 1,
-      memberId: expect.stringMatching(/^member_/u),
+      memberId: expect.stringMatching(/^hbm_/u),
       pendingChatId: null,
     });
     if (!memberState.memberId) {

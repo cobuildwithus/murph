@@ -548,6 +548,8 @@ function buildHostedAssistantArchiveAndSkipResponses(): readonly HostedLocalAssi
       "automation",
       "show",
       followupSlug,
+      "--format",
+      "json",
     ]),
     JSON.stringify({
       kind: "skip",

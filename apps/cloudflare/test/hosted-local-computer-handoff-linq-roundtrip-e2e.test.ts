@@ -137,7 +137,12 @@ describe("hosted local computer handoff Linq roundtrip e2e", () => {
       scenario: requireScenario(),
       userId: memberId,
     });
-    expect(requireLinqStub().readObservedMessageText(pausedReply)).toBe(pausedReplyText);
+    expect(requireLinqStub().readObservedMessageText(pausedReply)).toMatch(
+      new RegExp(
+        `^${escapeRegExp(pausedReplyText)}\\n\\nTake over here: http://127\\.0\\.0\\.1:\\d+/computer/handoff/[A-Za-z0-9_-]+$`,
+        "u",
+      ),
+    );
     await requireScenario().waitForHostedCompletion(memberId);
 
     const awaiting = await readHostedComputerRunHandoffForTest({
@@ -282,6 +287,10 @@ function readComputerHandoffToken(
     }
   }
   throw new Error("Hosted computer pause tool output did not include a handoff token.");
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
 }
 
 function readComputerOpenSucceeded(
