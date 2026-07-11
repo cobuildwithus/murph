@@ -9,6 +9,11 @@
     "url": "https://github.com/cobuildwithus/murph"
   },
   "exports": {
+    "./assistant-style-cli-contracts": {
+      "types": "./dist/assistant-style-cli-contracts.d.ts",
+      "import": "./dist/assistant-style-cli-contracts.js",
+      "default": "./dist/assistant-style-cli-contracts.js"
+    },
     "./assistant-cli-contracts": {
       "types": "./dist/assistant-cli-contracts.d.ts",
       "import": "./dist/assistant-cli-contracts.js",
