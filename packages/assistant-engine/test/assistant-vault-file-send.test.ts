@@ -174,6 +174,35 @@ describe('assistant vault-file send', () => {
     expect(groupRequest.actionFingerprint).not.toBe(directRequest.actionFingerprint)
   })
 
+  it('requires a new approval action when the delivery destination changes', async () => {
+    const { parentRoot, vaultRoot } = await createTempVaultContext(
+      'murph-vault-file-destination-change-',
+    )
+    tempRoots.push(parentRoot)
+    await mkdir(path.join(vaultRoot, 'documents'), { recursive: true })
+    await writeFile(path.join(vaultRoot, 'documents', 'report.pdf'), 'content')
+    const file = await resolveAssistantVaultFileResponseMedia({
+      ref: 'documents/report.pdf',
+      vaultRoot,
+    })
+
+    const oldTarget = buildAssistantVaultFileSendApprovalRequestForTarget({
+      channel: 'linq',
+      file,
+      targetFingerprint: 'chat_old',
+      threadIsDirect: true,
+    })
+    const newTarget = buildAssistantVaultFileSendApprovalRequestForTarget({
+      channel: 'linq',
+      file,
+      targetFingerprint: 'chat_new',
+      threadIsDirect: true,
+    })
+
+    expect(newTarget.actionId).not.toBe(oldTarget.actionId)
+    expect(newTarget.actionFingerprint).not.toBe(oldTarget.actionFingerprint)
+  })
+
   it('refuses to create a vault-file approval without a concrete destination', async () => {
     const { parentRoot, vaultRoot } = await createTempVaultContext(
       'murph-vault-file-targetless-',

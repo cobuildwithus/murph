@@ -2299,6 +2299,18 @@ function createHostedAssistantLinqSendDependency(input: {
       engagement.targetOverride?.target ?? deliveryContext?.target ?? request.target;
     const providerTargetKind =
       engagement.targetOverride?.targetKind ?? request.targetKind ?? null;
+    if (
+      request.media?.some((media) => media.kind === "vault_file")
+      && (
+        providerTarget !== request.target
+        || providerTargetKind !== (request.targetKind ?? null)
+      )
+    ) {
+      throw createAssistantDeliveryTerminalError(
+        "ASSISTANT_VAULT_FILE_IDENTITY_CONFLICT",
+        "Secure vault-file delivery target changed after approval.",
+      );
+    }
     const dependencies = requireHostedProviderFetchDependencies({
       env: input.linqEnv,
       fetchImplementation: input.providerFetch,

@@ -474,6 +474,10 @@ may refresh a denied or expired cycle. The row is never authorization or outcome
 truth.
 Secure-action approval and denial use this shape because the exact attachment,
 destination, and delivery identity remain in the runtime-owned parked intent.
+An approved vault-file intent is also bound to its persisted provider target and
+target kind at final dispatch. Linq current-home fallback cannot substitute a
+different destination after approval; that intent fails before approval consume
+or provider entry, and the new destination requires a fresh action identity.
 One active approval cycle maps to one parked intent through a cycle-stable
 approval-ID-plus-expiry transport identity. A causal outcome wake reconciles one
 canonical matching owner, allowlists only that owner for dispatch, and does not

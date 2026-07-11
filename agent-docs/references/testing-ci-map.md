@@ -109,6 +109,8 @@ Last verified: 2026-07-09
   approval confirmation fallback. Approval-outcome coverage also proves bare
   return links when enabled, one parked owner across repeated turns in the same
   approval cycle, one canonical causal observation read and dispatch allowlist,
+  vault-file final-target binding before approval consumption while ordinary
+  text delivery retains Linq current-home fallback,
   consumed authorization remaining approved in member-facing presentation while
   replay reads fail closed, and approval-link retry wakes taking precedence over
   a later parked fallback.

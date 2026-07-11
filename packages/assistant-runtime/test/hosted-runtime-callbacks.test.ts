@@ -8464,6 +8464,71 @@ describe("hosted runtime callbacks", () => {
     ]);
   });
 
+  it("does not consume vault-file approval after Linq re-homes the delivery target", async () => {
+    const vaultFile = {
+      approvalGeneration: "b".repeat(64),
+      approvalId: `haa_${"a".repeat(32)}`,
+      contentType: "application/pdf",
+      filename: "report.pdf",
+      kind: "vault_file" as const,
+      ref: "documents/report.pdf",
+      sha256: "a".repeat(64),
+      sizeBytes: 42,
+    };
+    const effect = createEffect({
+      bindingDeliveryKind: "thread",
+      bindingDeliveryTarget: "chat_old",
+      channel: "linq",
+      media: [vaultFile],
+      transportIdempotent: true,
+    });
+    const actionApprovalPort = {
+      consume: vi.fn(),
+      read: vi.fn(),
+      request: vi.fn(),
+    };
+    const assertRecentInbound = vi.fn(async () => ({
+      targetOverride: {
+        target: "chat_new",
+        targetKind: "thread" as const,
+      },
+    }));
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(
+      async ({ dependencies }) => {
+        await dependencies.sendLinq({
+          homeRouteFallbackAllowed: true,
+          idempotencyKey: "assistant-outbox:intent_123",
+          media: [vaultFile],
+          message: "Attached.",
+          replyToMessageId: null,
+          target: "chat_old",
+          targetKind: "thread",
+        });
+        throw new Error("Provider dispatch unexpectedly remained reachable.");
+      },
+    );
+
+    await expect(drainHostedPreparedAssistantDeliveries({
+      actionApprovalPort,
+      assistantDeliveryEffects: [effect],
+      effectsPort: createHostedRuntimeEffectsPortStub({
+        assertLinqRecentInboundEngagement: assertRecentInbound,
+      }),
+      providerFetch: vi.fn<typeof fetch>(),
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+      wake: HOSTED_WAKE.wake,
+    })).rejects.toMatchObject({
+      code: "ASSISTANT_VAULT_FILE_IDENTITY_CONFLICT",
+      retryable: false,
+    });
+
+    expect(assertRecentInbound).toHaveBeenCalled();
+    expect(actionApprovalPort.consume).not.toHaveBeenCalled();
+    expect(mocks.readAssistantOutboxIntent).not.toHaveBeenCalled();
+    expect(mocks.readVerifiedAssistantVaultFileBytes).not.toHaveBeenCalled();
+    expect(mocks.sendLinqMessage).not.toHaveBeenCalled();
+  });
+
   it.each([
     ["denied", "ASSISTANT_VAULT_FILE_APPROVAL_DENIED"],
     ["expired", "ASSISTANT_VAULT_FILE_APPROVAL_EXPIRED"],
