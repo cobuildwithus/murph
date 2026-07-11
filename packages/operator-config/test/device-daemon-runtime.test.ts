@@ -291,14 +291,10 @@ test('device CLI contracts normalize provider keys and parse result payloads', (
     accounts: [],
   }).accounts, [])
   assert.equal(deviceAccountShowResultSchema.parse({ baseUrl, account }).account.id, account.id)
-  assert.equal(
-    deviceAccountReconcileResultSchema.parse({ baseUrl, account, job }).job.id,
-    job.id,
-  )
-  assert.equal(
-    deviceAccountDisconnectResultSchema.parse({ baseUrl, account }).account.id,
-    account.id,
-  )
+  const parsedReconcile = deviceAccountReconcileResultSchema.parse({ baseUrl, account, job })
+  assert.equal('job' in parsedReconcile ? parsedReconcile.job.id : null, job.id)
+  const parsedDisconnect = deviceAccountDisconnectResultSchema.parse({ baseUrl, account })
+  assert.equal('account' in parsedDisconnect ? parsedDisconnect.account.id : null, account.id)
 })
 
 test('device-daemon path, env, process, and state helpers stay deterministic', async () => {

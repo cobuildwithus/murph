@@ -63,6 +63,7 @@ const HISTORICAL_RESET_REVOKE_WARNING_MESSAGE =
 
 export async function disconnectHostedDeviceSyncConnection(input: {
   connectionId: string;
+  expectedConnectedAt?: string;
   registry: DeviceSyncRegistry;
   store: PrismaDeviceSyncControlPlaneStore;
   userId: string;
@@ -80,6 +81,12 @@ export async function disconnectHostedDeviceSyncConnection(input: {
         httpStatus: 404,
       });
     }
+    if (
+      input.expectedConnectedAt !== undefined
+      && connection.connectedAt !== input.expectedConnectedAt
+    ) {
+      connectionChangedDuringDisconnectError();
+    }
 
     const storedAccount = await input.store.getStoredConnectionAccountForUser(
       input.userId,
@@ -92,8 +99,10 @@ export async function disconnectHostedDeviceSyncConnection(input: {
   const storedAccount = target.storedAccount;
 
   if (existing.status === "disconnected" && !storedAccount) {
+    const warning = readPersistedDisconnectWarning(existing);
     return {
       connection: existing,
+      ...(warning ? { warning } : {}),
     };
   }
 
@@ -297,6 +306,25 @@ export async function disconnectHostedDeviceSyncConnection(input: {
     connection: disconnectResult.connection,
     ...(disconnectResult.warning ? { warning: disconnectResult.warning } : {}),
   };
+}
+
+function readPersistedDisconnectWarning(
+  connection: PublicDeviceSyncAccount,
+): { code: string; message: string } | undefined {
+  const code = normalizeNullableString(connection.lastErrorCode);
+  if (!code) {
+    return undefined;
+  }
+
+  if (code === DEVICE_SYNC_HISTORICAL_RESET_REVOKE_FAILED_ERROR_CODE) {
+    return {
+      code,
+      message: HISTORICAL_RESET_REVOKE_WARNING_MESSAGE,
+    };
+  }
+
+  const message = normalizeNullableString(connection.lastErrorMessage);
+  return message ? { code, message } : undefined;
 }
 
 export function handleHostedDeviceSyncUnknownWebhook({

@@ -362,6 +362,9 @@ test('device commands route every verb through the registered device service gro
   )
   assert.equal(reconciled.exitCode, null)
   assert.equal(reconciled.envelope.ok, true)
+  if (!('job' in reconciled.envelope.data)) {
+    throw new TypeError('Expected local device account reconcile result.')
+  }
   assert.equal(reconciled.envelope.data.job.accountId, connectedAccount.id)
   assert.deepEqual(calls.reconcileAccount, {
     vault: vaultRoot,
@@ -384,6 +387,9 @@ test('device commands route every verb through the registered device service gro
   )
   assert.equal(disconnected.exitCode, null)
   assert.equal(disconnected.envelope.ok, true)
+  if (!('account' in disconnected.envelope.data)) {
+    throw new TypeError('Expected local device account disconnect result.')
+  }
   assert.equal(disconnected.envelope.data.account.status, 'disconnected')
   assert.deepEqual(calls.disconnectAccount, {
     vault: vaultRoot,

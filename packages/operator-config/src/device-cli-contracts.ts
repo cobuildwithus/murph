@@ -185,21 +185,62 @@ export const deviceAccountListResultSchema = z.object({
   accounts: z.array(deviceSyncAccountSchema),
 })
 
-export const deviceAccountShowResultSchema = z.object({
+const localDeviceAccountShowResultSchema = z.object({
   baseUrl: deviceSyncBaseUrlSchema,
   account: deviceSyncAccountSchema,
 })
 
-export const deviceAccountReconcileResultSchema = z.object({
+const hostedDeviceAccountShowResultSchema = z.object({
+  backend: z.literal('hosted'),
+  account: deviceSyncAccountSchema,
+})
+
+export const deviceAccountShowResultSchema = z.union([
+  localDeviceAccountShowResultSchema,
+  hostedDeviceAccountShowResultSchema,
+])
+
+const localDeviceAccountReconcileResultSchema = z.object({
   baseUrl: deviceSyncBaseUrlSchema,
   account: deviceSyncAccountSchema,
   job: deviceSyncJobSchema,
 })
 
-export const deviceAccountDisconnectResultSchema = z.object({
+const hostedDeviceAccountReconcileResultSchema = z.object({
+  backend: z.literal('hosted'),
+  accountId: z.string().min(1),
+  action: z.literal('reconcile'),
+  occurredAt: isoTimestampSchema,
+  status: z.literal('queued'),
+}).strict()
+
+export const deviceAccountReconcileResultSchema = z.union([
+  localDeviceAccountReconcileResultSchema,
+  hostedDeviceAccountReconcileResultSchema,
+])
+
+const localDeviceAccountDisconnectResultSchema = z.object({
   baseUrl: deviceSyncBaseUrlSchema,
   account: deviceSyncAccountSchema,
 })
+
+const hostedDeviceAccountDisconnectResultSchema = z.object({
+  backend: z.literal('hosted'),
+  accountId: z.string().min(1),
+  action: z.literal('disconnect'),
+  occurredAt: isoTimestampSchema,
+  status: z.literal('disconnected'),
+  warning: z.object({
+    code: z.string().min(1),
+    historicalResetIncomplete: z.literal(true).optional(),
+    message: z.string().min(1),
+  }).optional(),
+}).strict()
+
+export const deviceAccountDisconnectResultSchema = z.union([
+  localDeviceAccountDisconnectResultSchema,
+  hostedDeviceAccountDisconnectResultSchema,
+])
 
 export const deviceDaemonStatusResultSchema = z.object({
   baseUrl: deviceSyncBaseUrlSchema,

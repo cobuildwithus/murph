@@ -4551,6 +4551,85 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(headers.get("x-hosted-execution-signature")).toMatch(/^[A-Za-z0-9\-_]+$/u);
   });
 
+  it("binds hosted device account actions to the signed member callback", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      action: "reconcile",
+      connectionId: "dsc_current",
+      occurredAt: "2026-07-10T12:00:00.000Z",
+      status: "queued",
+    }), {
+      headers: { "content-type": "application/json; charset=utf-8" },
+      status: 200,
+    }));
+    const environment = readHostedExecutionEnvironment(createHostedExecutionTestEnv({
+      HOSTED_WEB_BASE_URL: "https://web.example.test",
+    }));
+    const platform = buildHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: fetchMock as typeof fetch,
+      webCallbackSigning: environment.webCallbackSigning,
+      webControlBaseUrl: "https://web.example.test",
+    });
+
+    const result = await platform.deviceSyncPort!.requestAccountAction!({
+      action: "reconcile",
+      connectionId: "dsc_current",
+    });
+
+    expect(result.status).toBe("queued");
+    const request = requireFetchRequest(
+      fetchMock.mock.calls[0],
+      "device-sync account action",
+    );
+    expect(request.url).toBe("https://web.example.test/api/internal/device-sync/account-action");
+    expect(request.method).toBe("POST");
+    await expect(request.json()).resolves.toEqual({
+      action: "reconcile",
+      connectionId: "dsc_current",
+    });
+    expect(request.headers.get("x-hosted-execution-user-id")).toBe("member_123");
+    expect(request.headers.get("x-hosted-execution-signature")).toMatch(/^[A-Za-z0-9\-_]+$/u);
+  });
+
+  it("forwards the approved connection epoch for hosted disconnect", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      action: "disconnect",
+      connectionId: "dsc_current",
+      occurredAt: "2026-07-10T12:00:00.000Z",
+      status: "disconnected",
+    }), {
+      headers: { "content-type": "application/json; charset=utf-8" },
+      status: 200,
+    }));
+    const environment = readHostedExecutionEnvironment(createHostedExecutionTestEnv({
+      HOSTED_WEB_BASE_URL: "https://web.example.test",
+    }));
+    const platform = buildHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: fetchMock as typeof fetch,
+      webCallbackSigning: environment.webCallbackSigning,
+      webControlBaseUrl: "https://web.example.test",
+    });
+
+    await platform.deviceSyncPort!.requestAccountAction!({
+      action: "disconnect",
+      confirmed: true,
+      connectionId: "dsc_current",
+      expectedConnectedAt: "2026-07-10T11:00:00.000Z",
+    });
+
+    const request = requireFetchRequest(
+      fetchMock.mock.calls[0],
+      "device-sync disconnect account action",
+    );
+    await expect(request.json()).resolves.toEqual({
+      action: "disconnect",
+      confirmed: true,
+      connectionId: "dsc_current",
+      expectedConnectedAt: "2026-07-10T11:00:00.000Z",
+    });
+  });
+
   it("passes messaging return targets through the signed hosted device-sync connect-link route", async () => {
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({
       authorizationUrl: "https://sync.example.test/oauth",

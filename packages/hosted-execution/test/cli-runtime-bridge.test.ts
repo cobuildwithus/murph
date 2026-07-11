@@ -7,6 +7,7 @@ import { describe, it } from "vitest";
 import {
   HostedCliBridgeRequestError,
   requestHostedCliAssistantCurrentRoute,
+  requestHostedCliDeviceAccountAction,
   requestHostedCliDeviceAccountList,
   requestHostedCliDeviceConnectLink,
 } from "../src/cli-runtime-bridge.ts";
@@ -275,6 +276,89 @@ describe("hosted CLI runtime bridge client", () => {
     assert.equal(result.accounts[0]?.provider, "whoop");
     assert.equal(result.accounts[0]?.status, "active");
     assert.equal(result.accounts[0]?.sources?.[0]?.sourceProviderSlug, "garmin");
+  });
+
+  it("requires disconnect confirmation and preserves manual-removal warnings", async () => {
+    const bridge = {
+      token: "bridge-token",
+      url: "http://127.0.0.1:8787/",
+    };
+    let requestedPath = "";
+    let requestBody: unknown = null;
+    const fetchImpl: typeof fetch = async (url, init) => {
+      requestedPath = new URL(String(url)).pathname;
+      requestBody = JSON.parse(String(init?.body));
+      return new Response(JSON.stringify({
+        accountId: "conn_junction",
+        action: "disconnect",
+        occurredAt: "2026-07-10T12:00:00.000Z",
+        status: "disconnected",
+        warning: {
+          code: "UPSTREAM_MANUAL_REMOVAL_REQUIRED",
+          historicalResetIncomplete: true,
+          message: "Manual upstream removal is required before reconnecting.",
+        },
+      }), { status: 200 });
+    };
+
+    await assert.rejects(requestHostedCliDeviceAccountAction({
+      accountId: "conn_junction",
+      action: "disconnect",
+      bridge,
+      fetchImpl,
+    }));
+
+    const result = await requestHostedCliDeviceAccountAction({
+      accountId: "conn_junction",
+      action: "disconnect",
+      bridge,
+      confirmed: true,
+      expectedConnectedAt: "2026-07-10T11:00:00.000Z",
+      fetchImpl,
+    });
+    assert.equal(requestedPath, "/device/accounts/action");
+    assert.deepEqual(requestBody, {
+      accountId: "conn_junction",
+      action: "disconnect",
+      confirmed: true,
+      expectedConnectedAt: "2026-07-10T11:00:00.000Z",
+    });
+    assert.equal(result.action, "disconnect");
+    assert.equal(result.warning?.historicalResetIncomplete, true);
+    assert.match(result.warning?.message ?? "", /Manual upstream removal/u);
+  });
+
+  it("preserves typed account-action retryability from bridge errors", async () => {
+    const fetchImpl: typeof fetch = async () =>
+      new Response(JSON.stringify({
+        error: {
+          code: "RECONCILE_WAKE_NOT_ACCEPTED",
+          message: "Hosted device reconcile could not be queued.",
+          retryable: true,
+        },
+      }), {
+        headers: { "content-type": "application/json" },
+        status: 503,
+      });
+
+    await assert.rejects(
+      requestHostedCliDeviceAccountAction({
+        accountId: "conn_junction",
+        action: "reconcile",
+        bridge: {
+          token: "bridge-token",
+          url: "http://127.0.0.1:8787/",
+        },
+        fetchImpl,
+      }),
+      (error: unknown) => {
+        assert.ok(error instanceof HostedCliBridgeRequestError);
+        assert.equal(error.code, "RECONCILE_WAKE_NOT_ACCEPTED");
+        assert.equal(error.retryable, true);
+        assert.equal(error.message, "Hosted device reconcile could not be queued.");
+        return true;
+      },
+    );
   });
 
   it("rejects hosted device account metadata in bridge responses", async () => {

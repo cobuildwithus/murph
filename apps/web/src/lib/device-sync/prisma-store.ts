@@ -330,6 +330,20 @@ export class PrismaDeviceSyncControlPlaneStore
     return this.connections.listDueReconcileConnectionsForSweep(input);
   }
 
+  async markConnectionReconcileDueForUser(input: {
+    connectionId: string;
+    dueAt: Date;
+    userId: string;
+  }): Promise<HostedDeviceSyncDueReconcileConnectionRecord | null> {
+    return this.withConnectionMutationLock(
+      input.connectionId,
+      async (tx) => this.connections.markConnectionReconcileDueForUser({
+        ...input,
+        tx,
+      }),
+    );
+  }
+
   async markDirtyConnectionProcessed(input: {
     connectionId: string;
     processedDirtyPayloadIds?: readonly string[];

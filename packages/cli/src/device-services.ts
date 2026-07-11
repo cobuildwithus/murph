@@ -13,6 +13,7 @@ import {
   HostedCliBridgeRequestError,
   isHostedRuntimeProcessEnv,
   readHostedCliBridgeEnv,
+  requestHostedCliDeviceAccountAction,
   requestHostedCliDeviceAccountList,
   requestHostedCliDeviceConnectLink,
 } from '@murphai/hosted-execution/cli-runtime-bridge'
@@ -76,6 +77,8 @@ export interface DeviceSyncServices {
     vault?: string
     baseUrl?: string
     accountId: string
+    confirm?: boolean
+    expectedConnectedAt?: string
   }): Promise<DeviceAccountDisconnectResult>
   daemonStatus(input: {
     vault: string
@@ -320,6 +323,22 @@ export function createIntegratedDeviceSyncServices(): DeviceSyncServices {
     },
     async showAccount(input) {
       assertHostedRuntimeDoesNotUseExplicitControlPlaneTarget(input, 'account show')
+      if (isHostedRuntimeProcessEnv(process.env)) {
+        const result = await accountActionViaHostedBridge({
+          accountId: input.accountId,
+          action: 'show',
+        })
+        if (result.action !== 'show') {
+          throw new VaultCliError(
+            'HOSTED_DEVICE_ACCOUNT_ACTION_RESPONSE_INVALID',
+            'Hosted device account show returned an invalid response.',
+          )
+        }
+        return {
+          backend: 'hosted',
+          account: result.account,
+        }
+      }
       const client = await createControlPlaneClient(input)
       const result = await client.showAccount(input.accountId)
 
@@ -330,6 +349,25 @@ export function createIntegratedDeviceSyncServices(): DeviceSyncServices {
     },
     async reconcileAccount(input) {
       assertHostedRuntimeDoesNotUseExplicitControlPlaneTarget(input, 'account reconcile')
+      if (isHostedRuntimeProcessEnv(process.env)) {
+        const result = await accountActionViaHostedBridge({
+          accountId: input.accountId,
+          action: 'reconcile',
+        })
+        if (result.action !== 'reconcile') {
+          throw new VaultCliError(
+            'HOSTED_DEVICE_ACCOUNT_ACTION_RESPONSE_INVALID',
+            'Hosted device account reconcile returned an invalid response.',
+          )
+        }
+        return {
+          backend: 'hosted',
+          accountId: result.accountId,
+          action: result.action,
+          occurredAt: result.occurredAt,
+          status: result.status,
+        }
+      }
       const client = await createControlPlaneClient(input)
       const result = await client.reconcileAccount(input.accountId)
 
@@ -341,6 +379,40 @@ export function createIntegratedDeviceSyncServices(): DeviceSyncServices {
     },
     async disconnectAccount(input) {
       assertHostedRuntimeDoesNotUseExplicitControlPlaneTarget(input, 'account disconnect')
+      if (isHostedRuntimeProcessEnv(process.env)) {
+        if (input.confirm !== true) {
+          throw new VaultCliError(
+            'HOSTED_DEVICE_DISCONNECT_CONFIRMATION_REQUIRED',
+            'Hosted device account disconnect requires explicit confirmation with --confirm.',
+          )
+        }
+        if (!input.expectedConnectedAt) {
+          throw new VaultCliError(
+            'HOSTED_DEVICE_DISCONNECT_SCOPE_REQUIRED',
+            'Hosted device account disconnect requires --expected-connected-at from the account show result.',
+          )
+        }
+        const result = await accountActionViaHostedBridge({
+          accountId: input.accountId,
+          action: 'disconnect',
+          confirmed: true,
+          expectedConnectedAt: input.expectedConnectedAt,
+        })
+        if (result.action !== 'disconnect') {
+          throw new VaultCliError(
+            'HOSTED_DEVICE_ACCOUNT_ACTION_RESPONSE_INVALID',
+            'Hosted device account disconnect returned an invalid response.',
+          )
+        }
+        return {
+          backend: 'hosted',
+          accountId: result.accountId,
+          action: result.action,
+          occurredAt: result.occurredAt,
+          status: result.status,
+          ...(result.warning ? { warning: result.warning } : {}),
+        }
+      }
       const client = await createControlPlaneClient(input)
       const current = await client.showAccount(input.accountId)
       const result = await client.disconnectAccount(
@@ -405,6 +477,65 @@ export function createIntegratedDeviceSyncServices(): DeviceSyncServices {
       sourceProvider: result.sourceProvider,
       accounts: result.accounts,
     }
+  }
+
+  async function accountActionViaHostedBridge(input: {
+    accountId: string
+    action: 'disconnect' | 'reconcile' | 'show'
+    confirmed?: true
+    expectedConnectedAt?: string
+  }) {
+    const bridge = readRequiredHostedBridge('account action')
+    return await requestHostedCliDeviceAccountAction({
+      accountId: input.accountId,
+      action: input.action,
+      bridge,
+      ...(input.confirmed === true ? { confirmed: true } : {}),
+      ...(input.expectedConnectedAt
+        ? { expectedConnectedAt: input.expectedConnectedAt }
+        : {}),
+    }).catch((error) => {
+      const bridgeCode = error instanceof HostedCliBridgeRequestError
+        ? error.code
+        : null
+      if (bridgeCode === 'HOSTED_CLI_BRIDGE_REQUEST_TIMEOUT') {
+        throw new VaultCliError(
+          'HOSTED_DEVICE_ACCOUNT_ACTION_BRIDGE_REQUEST_TIMEOUT',
+          error instanceof Error
+            ? error.message
+            : `Hosted device account ${input.action} bridge request timed out.`,
+          { retryable: false },
+        )
+      }
+      if (isHostedDeviceAccountActionErrorCode(bridgeCode)) {
+        throw new VaultCliError(
+          bridgeCode,
+          error instanceof Error
+            ? error.message
+            : `Hosted device account ${input.action} failed.`,
+          {
+            retryable: error instanceof HostedCliBridgeRequestError
+              && error.retryable === true,
+          },
+        )
+      }
+      throw new VaultCliError(
+        'HOSTED_DEVICE_ACCOUNT_ACTION_BRIDGE_REQUEST_FAILED',
+        `Hosted device account ${input.action} bridge request failed.`,
+        { retryable: false },
+      )
+    })
+  }
+
+  function isHostedDeviceAccountActionErrorCode(code: string | null): code is string {
+    return code === 'HOSTED_DEVICE_ACCOUNT_NOT_FOUND'
+      || code === 'HOSTED_DEVICE_ACCOUNT_ACTION_UNAVAILABLE'
+      || code === 'HOSTED_DEVICE_ACCOUNT_ACTION_FAILED'
+      || code === 'CONNECTION_NOT_FOUND'
+      || code === 'ACCOUNT_DISCONNECTED'
+      || code === 'ACCOUNT_REAUTHORIZATION_REQUIRED'
+      || code === 'RECONCILE_WAKE_NOT_ACCEPTED'
+      || code === 'CONNECTION_CHANGED_DURING_DISCONNECT'
   }
 
   function resolveDeviceConnectAuthority(input: {
@@ -551,7 +682,7 @@ export function createIntegratedDeviceSyncServices(): DeviceSyncServices {
   }
 
   function readRequiredHostedBridge(
-    operation: 'account list' | 'connect',
+    operation: 'account action' | 'account list' | 'connect',
   ): NonNullable<ReturnType<typeof readHostedCliBridgeEnv>> {
     let bridge
     try {
@@ -560,7 +691,9 @@ export function createIntegratedDeviceSyncServices(): DeviceSyncServices {
       throw new VaultCliError(
         operation === 'connect'
           ? 'HOSTED_DEVICE_CONNECT_BRIDGE_INVALID'
-          : 'HOSTED_DEVICE_ACCOUNT_LIST_BRIDGE_INVALID',
+          : operation === 'account list'
+            ? 'HOSTED_DEVICE_ACCOUNT_LIST_BRIDGE_INVALID'
+            : 'HOSTED_DEVICE_ACCOUNT_ACTION_BRIDGE_INVALID',
         error instanceof Error
           ? error.message
           : `Hosted device ${operation} bridge configuration is invalid.`,
@@ -571,7 +704,9 @@ export function createIntegratedDeviceSyncServices(): DeviceSyncServices {
       throw new VaultCliError(
         operation === 'connect'
           ? 'HOSTED_DEVICE_CONNECT_BRIDGE_UNAVAILABLE'
-          : 'HOSTED_DEVICE_ACCOUNT_LIST_BRIDGE_UNAVAILABLE',
+          : operation === 'account list'
+            ? 'HOSTED_DEVICE_ACCOUNT_LIST_BRIDGE_UNAVAILABLE'
+            : 'HOSTED_DEVICE_ACCOUNT_ACTION_BRIDGE_UNAVAILABLE',
         `Hosted device ${operation} is unavailable in this runtime.`,
       )
     }

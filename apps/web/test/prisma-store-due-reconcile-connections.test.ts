@@ -3,6 +3,58 @@ import { describe, expect, it, vi } from "vitest";
 import { PrismaDeviceSyncControlPlaneStore } from "@/src/lib/device-sync/prisma-store";
 
 describe("PrismaDeviceSyncControlPlaneStore due reconcile connection sweep", () => {
+  it("persists the earliest manual due time and reuses it across retries", async () => {
+    let nextReconcileAt = new Date("2026-07-10T18:00:00.000Z");
+    const findFirst = vi.fn(async () => ({
+      id: "dsc_manual_1",
+      nextReconcileAt,
+      provider: "oura",
+      status: "active",
+      userId: "member_manual_1",
+    }));
+    const update = vi.fn(async (input: {
+      data: { nextReconcileAt: Date };
+    }) => {
+      nextReconcileAt = input.data.nextReconcileAt;
+      return { id: "dsc_manual_1" };
+    });
+    const tx = {
+      $executeRaw: vi.fn(async () => 1),
+      deviceConnection: {
+        findFirst,
+        update,
+      },
+    };
+    const prisma = {
+      $transaction: vi.fn(async (callback: (transaction: typeof tx) => Promise<unknown>) =>
+        callback(tx)),
+    };
+    const store = new PrismaDeviceSyncControlPlaneStore({
+      prisma: prisma as never,
+    });
+
+    const first = await store.markConnectionReconcileDueForUser({
+      connectionId: "dsc_manual_1",
+      dueAt: new Date("2026-07-10T12:00:00.000Z"),
+      userId: "member_manual_1",
+    });
+    const retry = await store.markConnectionReconcileDueForUser({
+      connectionId: "dsc_manual_1",
+      dueAt: new Date("2026-07-10T12:01:00.000Z"),
+      userId: "member_manual_1",
+    });
+
+    expect(first).toEqual({
+      connectionId: "dsc_manual_1",
+      nextReconcileAt: "2026-07-10T12:00:00.000Z",
+      provider: "oura",
+      userId: "member_manual_1",
+    });
+    expect(retry).toEqual(first);
+    expect(update).toHaveBeenCalledTimes(1);
+    expect(tx.$executeRaw).toHaveBeenCalledTimes(2);
+  });
+
   it("scans active due connections without excluding pending dirty state", async () => {
     const dueAt = new Date("2026-05-05T00:01:00.000Z");
     const recoveryBucketStartedAt = new Date("2026-05-05T00:00:00.000Z");

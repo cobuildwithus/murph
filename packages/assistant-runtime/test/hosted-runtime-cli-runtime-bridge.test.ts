@@ -3,12 +3,15 @@ import { createConnection } from "node:net";
 
 import {
   HOSTED_CLI_BRIDGE_ASSISTANT_CURRENT_ROUTE_PATH,
+  HOSTED_CLI_BRIDGE_DEVICE_ACCOUNT_ACTION_PATH,
   HOSTED_CLI_BRIDGE_DEVICE_ACCOUNT_LIST_PATH,
   HOSTED_CLI_BRIDGE_REQUEST_TIMEOUT_MS,
   HOSTED_CLI_BRIDGE_TOKEN_ENV,
   HOSTED_CLI_BRIDGE_URL_ENV,
   HOSTED_CLI_BRIDGE_DEVICE_CONNECT_LINK_PATH,
+  HostedCliBridgeRequestError,
   requestHostedCliAssistantCurrentRoute,
+  requestHostedCliDeviceAccountAction,
   requestHostedCliDeviceAccountList,
   requestHostedCliDeviceConnectLink,
 } from "@murphai/hosted-execution/cli-runtime-bridge";
@@ -58,6 +61,53 @@ function createDeviceSyncPortStub(): HostedRuntimeDeviceSyncPort {
         userId: "member_test",
       };
     },
+  };
+}
+
+function buildHostedDeviceSnapshot(
+  status: "active" | "disconnected" = "active",
+) {
+  return {
+    connections: [{
+      connection: {
+        accessTokenExpiresAt: "2026-05-04T00:00:00.000Z",
+        connectedAt: "2026-05-03T20:00:00.000Z",
+        createdAt: "2026-05-03T20:00:00.000Z",
+        displayName: "Junction",
+        externalAccountId: "external_junction",
+        id: "dsc_junction",
+        metadata: {},
+        provider: "junction",
+        scopes: [],
+        status,
+        updatedAt: "2026-05-03T21:00:00.000Z",
+      },
+      credential: {
+        credentialMetadata: {},
+        kind: "none" as const,
+      },
+      localState: {
+        lastErrorCode: null,
+        lastErrorMessage: null,
+        lastSyncCompletedAt: "2026-05-03T21:00:00.000Z",
+        lastSyncErrorAt: null,
+        lastSyncStartedAt: "2026-05-03T21:00:00.000Z",
+        lastWebhookAt: null,
+        nextReconcileAt: "2026-05-04T03:00:00.000Z",
+      },
+      sources: [{
+        displayName: "Garmin",
+        firstSeenAt: "2026-05-03T20:00:00.000Z",
+        lastErrorCode: null,
+        lastErrorMessage: null,
+        lastSeenAt: "2026-05-03T21:00:00.000Z",
+        resourceCount: 2,
+        sourceProviderSlug: "garmin",
+        status: status === "disconnected" ? "disconnected" as const : "connected" as const,
+      }],
+    }],
+    generatedAt: "2026-05-03T21:00:00.000Z",
+    userId: "member_test",
   };
 }
 
@@ -717,6 +767,7 @@ test("hosted CLI runtime bridge lists device accounts from runtime snapshots", a
     });
 
     expect(deviceSyncPort.fetchSnapshot).toHaveBeenCalledWith({
+      includeCredentialMaterial: false,
       provider: "whoop",
       sourceProviderSlug: "garmin",
     });
@@ -741,6 +792,161 @@ test("hosted CLI runtime bridge lists device accounts from runtime snapshots", a
     assert.doesNotMatch(
       JSON.stringify(result),
       /redacted-token|redacted-refresh|state_that_must_not_cross_bridge|provider_user_that_must_not_cross_bridge/u,
+    );
+  });
+});
+
+test("hosted CLI runtime bridge shows, reconciles, and confirmed-disconnects through one authority", async () => {
+  const requestAccountAction = vi.fn(async (input: {
+    action: "disconnect";
+    confirmed: true;
+    connectionId: string;
+    expectedConnectedAt: string;
+  } | {
+    action: "reconcile";
+    connectionId: string;
+  }) => {
+    if (input.action === "disconnect") {
+      return {
+        action: "disconnect" as const,
+        connectionId: input.connectionId,
+        occurredAt: "2026-07-10T12:00:00.000Z",
+        status: "disconnected" as const,
+        warning: {
+          code: "UPSTREAM_MANUAL_REMOVAL_REQUIRED",
+          historicalResetIncomplete: true as const,
+          message: "Manual upstream removal is required before reconnecting.",
+        },
+      };
+    }
+    return {
+      action: "reconcile" as const,
+      connectionId: input.connectionId,
+      occurredAt: "2026-07-10T11:00:00.000Z",
+      status: "queued" as const,
+    };
+  });
+  const deviceSyncPort = {
+    ...createDeviceSyncPortStub(),
+    fetchSnapshot: vi.fn(async () => buildHostedDeviceSnapshot("active")),
+    requestAccountAction,
+  } satisfies HostedRuntimeDeviceSyncPort;
+
+  await withHostedCliBridgeInvocation({ deviceSyncPort }, async (bridge) => {
+    const client = {
+      bridge: {
+        token: bridge.env[HOSTED_CLI_BRIDGE_TOKEN_ENV],
+        url: bridge.env[HOSTED_CLI_BRIDGE_URL_ENV],
+      },
+      accountId: "dsc_junction",
+    };
+    const shown = await requestHostedCliDeviceAccountAction({
+      ...client,
+      action: "show",
+    });
+    assert.equal(shown.action, "show");
+    assert.equal(shown.account.sources?.[0]?.sourceProviderSlug, "garmin");
+    expect(requestAccountAction).not.toHaveBeenCalled();
+
+    const reconciled = await requestHostedCliDeviceAccountAction({
+      ...client,
+      action: "reconcile",
+    });
+    assert.equal(reconciled.action, "reconcile");
+    assert.equal(reconciled.accountId, "dsc_junction");
+    assert.equal(reconciled.status, "queued");
+
+    const disconnected = await requestHostedCliDeviceAccountAction({
+      ...client,
+      action: "disconnect",
+      confirmed: true,
+      expectedConnectedAt: "2026-05-03T00:00:00.000Z",
+    });
+    assert.equal(disconnected.action, "disconnect");
+    assert.equal(disconnected.accountId, "dsc_junction");
+    assert.equal(disconnected.status, "disconnected");
+    assert.equal(disconnected.warning?.historicalResetIncomplete, true);
+    expect(requestAccountAction).toHaveBeenLastCalledWith({
+      action: "disconnect",
+      confirmed: true,
+      connectionId: "dsc_junction",
+      expectedConnectedAt: "2026-05-03T00:00:00.000Z",
+      signal: null,
+    });
+    expect(deviceSyncPort.fetchSnapshot).toHaveBeenCalledWith({
+      connectionId: "dsc_junction",
+      includeCredentialMaterial: false,
+      signal: null,
+    });
+    expect(deviceSyncPort.fetchSnapshot).toHaveBeenCalledTimes(1);
+  });
+});
+
+test("hosted CLI runtime bridge exposes only allowlisted typed account-action failures", async () => {
+  const requestAccountAction = vi.fn(async (input: {
+    action: "disconnect";
+    confirmed: true;
+    connectionId: string;
+    expectedConnectedAt: string;
+  } | {
+    action: "reconcile";
+    connectionId: string;
+  }) => {
+    if (input.action === "disconnect") {
+      throw Object.assign(new Error("private upstream disconnect failure"), {
+        code: "CONNECTION_CHANGED_DURING_DISCONNECT",
+        retryable: true,
+      });
+    }
+    throw Object.assign(new Error("private upstream reconcile failure"), {
+      code: "RECONCILE_WAKE_NOT_ACCEPTED",
+      retryable: true,
+    });
+  });
+  const deviceSyncPort = {
+    ...createDeviceSyncPortStub(),
+    requestAccountAction,
+  } satisfies HostedRuntimeDeviceSyncPort;
+
+  await withHostedCliBridgeInvocation({ deviceSyncPort }, async (bridge) => {
+    const client = {
+      accountId: "dsc_junction",
+      bridge: {
+        token: bridge.env[HOSTED_CLI_BRIDGE_TOKEN_ENV],
+        url: bridge.env[HOSTED_CLI_BRIDGE_URL_ENV],
+      },
+    };
+
+    await assert.rejects(
+      requestHostedCliDeviceAccountAction({
+        ...client,
+        action: "reconcile",
+      }),
+      (error: unknown) => {
+        assert.ok(error instanceof HostedCliBridgeRequestError);
+        assert.equal(error.code, "RECONCILE_WAKE_NOT_ACCEPTED");
+        assert.equal(error.retryable, true);
+        assert.equal(error.message, "Hosted device reconcile could not be queued.");
+        assert.doesNotMatch(error.message, /private upstream/u);
+        return true;
+      },
+    );
+
+    await assert.rejects(
+      requestHostedCliDeviceAccountAction({
+        ...client,
+        action: "disconnect",
+        confirmed: true,
+        expectedConnectedAt: "2026-05-03T00:00:00.000Z",
+      }),
+      (error: unknown) => {
+        assert.ok(error instanceof HostedCliBridgeRequestError);
+        assert.equal(error.code, "CONNECTION_CHANGED_DURING_DISCONNECT");
+        assert.equal(error.retryable, true);
+        assert.match(error.message, /fresh confirmation/u);
+        assert.doesNotMatch(error.message, /private upstream/u);
+        return true;
+      },
     );
   });
 });

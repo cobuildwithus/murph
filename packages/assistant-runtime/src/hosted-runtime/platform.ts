@@ -62,6 +62,8 @@ import type {
   HostedPhoneCallStartResponse,
 } from "@murphai/hosted-execution/phone-calls";
 import type {
+  HostedExecutionDeviceSyncAccountActionRequest,
+  HostedExecutionDeviceSyncAccountActionResponse,
   HostedExecutionDeviceSyncConnectLinkResponse,
   HostedExecutionDeviceSyncDirtyAckRequest,
   HostedExecutionDeviceSyncDirtyAckResponse,
@@ -303,6 +305,11 @@ export type HostedRuntimeEffectsPort = HostedRuntimeEffectsPortBase;
 export type HostedRuntimeDeviceSyncMessagingReturnTarget = "imessage" | "telegram";
 
 export interface HostedRuntimeDeviceSyncPort {
+  requestAccountAction?(
+    input: HostedExecutionDeviceSyncAccountActionRequest & {
+      signal?: AbortSignal | null;
+    },
+  ): Promise<HostedExecutionDeviceSyncAccountActionResponse>;
   applyUpdates(input: {
     occurredAt?: string | null;
     signal?: AbortSignal | null;

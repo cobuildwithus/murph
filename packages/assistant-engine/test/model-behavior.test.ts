@@ -682,19 +682,31 @@ describe('assistant local PDF evidence guidance', () => {
     }))
 
     expect(prompt).toContain(
-      'Hosted wearable connection links are available for Oura (`oura`) and WHOOP (`whoop`)',
+      'Hosted wearable links are available for Oura (`oura`) and WHOOP (`whoop`)',
     )
     expect(prompt).toContain(
-      'When offering examples, mention about six supported choices from this list, not the full provider list',
+      'Give about six supported examples, not the full list',
     )
     expect(prompt).toContain(
-      'Do not add generic consumer-health app examples or proactively name unsupported sources as caveats',
+      'do not add unsupported consumer-health apps as caveats',
     )
     expect(prompt).toContain(
-      'If the user asks for a wearable/source not in this list, say it is not supported yet',
+      'For an unsupported source, say so and suggest a supported source or text notes',
     )
     expect(prompt).toContain(
-      'For supported wearable connection requests that need a link, use `vault-cli device connect <provider> --format json`',
+      'To connect a supported source, run `vault-cli device connect <provider> --format json`',
+    )
+    expect(prompt).toContain(
+      'For accounts, use `vault-cli device account list --format json`, `vault-cli device account show <account-id> --format json`, or `vault-cli device account reconcile <account-id> --format json`',
+    )
+    expect(prompt).toContain(
+      'If its provider is `junction`, say the whole shared connection—including all upstream sources on it, not only the sources currently listed—will reset',
+    )
+    expect(prompt).toContain(
+      'Only then run `vault-cli device account disconnect <account-id> --confirm --expected-connected-at <shown-connectedAt> --format json`',
+    )
+    expect(prompt).toContain(
+      '`historicalResetIncomplete: true` means manual upstream removal remains required before reconnecting',
     )
     for (const unsupportedSource of [
       'Apple Health',
@@ -706,7 +718,7 @@ describe('assistant local PDF evidence guidance', () => {
     expect(prompt).not.toContain('Before creating a connection link')
     expect(prompt).not.toContain('empty `--provider garmin`')
     expect(prompt).toContain(
-      'put it on its own final line with no text after it',
+      'on its own final line with no text after it',
     )
     expect(prompt).not.toContain('Do not route supported hosted connect flows through local `device connect`')
     expect(prompt).toContain(
@@ -743,7 +755,19 @@ describe('assistant local PDF evidence guidance', () => {
       'Ask for subjective or protocol-specific details only when the wearable cannot answer them',
     )
     expect(prompt).toContain(
-      'mention Junction only when explicitly debugging low-level connection or runtime state',
+      'Name Junction only to disclose full disconnect scope or debug low-level connection/runtime state',
+    )
+    expect(prompt).toContain(
+      'If an account action fails or times out, do not claim success or repeat blindly',
+    )
+    expect(prompt).toContain(
+      'retry only if the error says `retryable: true` and the account still matches the approved scope',
+    )
+    expect(prompt).toContain(
+      'A changed disconnect target requires a new show and confirmation',
+    )
+    expect(prompt).toContain(
+      'If show cannot establish state, say the outcome is uncertain and stop',
     )
     expect(prompt).toContain(
       'Never invent or guess wearable connect, invite, share, OAuth, or authorization URLs',
@@ -1945,17 +1969,16 @@ describe('assistant Murph onboarding guidance', () => {
       'Before replying, read `$MURPH_ASSISTANT_SKILLS_ROOT/murph-onboarding/SKILL.md`',
     )
     expect(prompt).toContain(
-      'Hosted wearable connection links are available for WHOOP (`whoop`)',
+      'Hosted wearable links are available for WHOOP (`whoop`)',
     )
     expect(prompt).toContain(
-      'When offering examples, mention about six supported choices from this list, not the full provider list',
+      'Give about six supported examples, not the full list',
     )
     expect(prompt).not.toContain('roughly 3-4 short assistant messages')
     expect(prompt).not.toContain(
       'Do not compress the whole orientation into one "send me things" reply',
     )
     expect(prompt).not.toContain('Natural first-run flow')
-    expect(prompt).not.toContain('vault-cli device account list --format json')
     for (const unsupportedSource of [
       'Apple Health',
       'HealthKit',

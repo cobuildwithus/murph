@@ -243,15 +243,32 @@ export class HostedDeviceSyncPublicIngressService {
     warning?: { code: string; historicalResetIncomplete?: true; message: string };
   }> {
     const connection = await this.requireOwnedBrowserConnection(userId, connectionId);
+    const disconnected = await this.disconnectTrustedConnection(userId, connection.id);
+
+    return {
+      connection: this.toBrowserConnection(disconnected.connection),
+      ...(disconnected.warning ? { warning: disconnected.warning } : {}),
+    };
+  }
+
+  async disconnectTrustedConnection(
+    userId: string,
+    connectionId: string,
+    expectedConnectedAt?: string,
+  ): Promise<{
+    connection: PublicDeviceSyncAccount;
+    warning?: { code: string; historicalResetIncomplete?: true; message: string };
+  }> {
     const disconnected = await disconnectHostedDeviceSyncConnection({
-      connectionId: connection.id,
+      connectionId,
+      ...(expectedConnectedAt ? { expectedConnectedAt } : {}),
       registry: this.registry,
       store: this.context.store,
       userId,
     });
 
     return {
-      connection: this.toBrowserConnection(disconnected.connection),
+      connection: disconnected.connection,
       // The browser chooses the manual-removal-before-reconnect guidance from this
       // semantic flag instead of matching internal warning codes.
       ...(disconnected.warning

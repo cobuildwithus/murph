@@ -219,13 +219,24 @@ export function registerDeviceCommands(
     args: z.object({
       accountId: accountIdSchema,
     }),
-    options: deviceControlOptionsSchema,
+    options: deviceControlOptionsSchema.extend({
+      confirm: z.boolean().optional().describe(
+        'Confirm only after the user approves the shown connection scope; Junction approval must cover its entire shared connection and every upstream wearable source.',
+      ),
+      expectedConnectedAt: z.string().datetime({ offset: true }).optional().describe(
+        'Bind hosted disconnect confirmation to the connectedAt value returned by account show.',
+      ),
+    }),
     output: deviceAccountDisconnectResultSchema,
     async run({ args, options }) {
       return services.disconnectAccount({
         vault: options.vault,
         baseUrl: options.baseUrl,
         accountId: args.accountId,
+        ...(options.confirm === undefined ? {} : { confirm: options.confirm }),
+        ...(options.expectedConnectedAt === undefined
+          ? {}
+          : { expectedConnectedAt: options.expectedConnectedAt }),
       })
     },
   })

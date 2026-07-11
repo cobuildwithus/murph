@@ -11,6 +11,18 @@ const mocks = vi.hoisted(() => ({
       externalAccountId: input.record.externalAccountId ?? input.fallback?.externalAccountId ?? null,
     })),
   createHostedDeviceSyncControlPlane: vi.fn(),
+  disconnectTrustedConnection: vi.fn(),
+  appendHostedDeviceSyncScheduledReconcileWake: vi.fn(),
+  buildHostedDeviceSyncScheduledReconcileWakeEventId: vi.fn((input: {
+    connectionId: string;
+    nextReconcileAt: string;
+  }) => [
+    "device-sync",
+    "scheduled-reconcile",
+    "v1",
+    input.connectionId,
+    input.nextReconcileAt,
+  ].join(":")),
   mapHostedConnectionRecord: vi.fn((record: ReturnType<typeof buildHostedRecord>) => ({
     ...record,
     externalAccountId: null,
@@ -24,6 +36,19 @@ vi.mock("@/src/lib/device-sync/control-plane", () => ({
 
 vi.mock("@/src/lib/device-sync/internal-runtime", () => ({
   buildHostedPublicDeviceSyncAccount: mocks.buildHostedPublicDeviceSyncAccount,
+}));
+
+vi.mock("@/src/lib/device-sync/public-ingress-service", () => ({
+  createHostedDeviceSyncPublicIngressService: () => ({
+    disconnectTrustedConnection: mocks.disconnectTrustedConnection,
+  }),
+}));
+
+vi.mock("@/src/lib/device-sync/wake-service", () => ({
+  appendHostedDeviceSyncScheduledReconcileWake:
+    mocks.appendHostedDeviceSyncScheduledReconcileWake,
+  buildHostedDeviceSyncScheduledReconcileWakeEventId:
+    mocks.buildHostedDeviceSyncScheduledReconcileWakeEventId,
 }));
 
 vi.mock("@/src/lib/device-sync/prisma-store", () => ({
@@ -239,6 +264,41 @@ function createAuthorityHarness(input: {
     currentStoredAccount = null;
     return currentRecord;
   });
+  const markConnectionReconcileDueForUser = vi.fn(async (markInput: {
+    connectionId: string;
+    dueAt: Date;
+    userId: string;
+  }) => {
+    if (
+      currentRecord.id !== markInput.connectionId
+      || currentRecord.userId !== markInput.userId
+      || currentRecord.status !== "active"
+    ) {
+      return null;
+    }
+
+    const existingDueAt = currentRecord.nextReconcileAt
+      ? new Date(currentRecord.nextReconcileAt)
+      : null;
+    const effectiveDueAt = !existingDueAt
+      || existingDueAt.getTime() > markInput.dueAt.getTime()
+      ? markInput.dueAt
+      : existingDueAt;
+    if (effectiveDueAt !== existingDueAt) {
+      currentRecord = {
+        ...currentRecord,
+        nextReconcileAt: effectiveDueAt.toISOString(),
+        updatedAt: markInput.dueAt.toISOString(),
+      };
+    }
+
+    return {
+      connectionId: currentRecord.id,
+      nextReconcileAt: effectiveDueAt.toISOString(),
+      provider: currentRecord.provider,
+      userId: currentRecord.userId,
+    };
+  });
   const tx = {
     deviceConnection: {
       findFirst,
@@ -265,6 +325,7 @@ function createAuthorityHarness(input: {
         sourceInstanceKey: source.sourceInstanceKey ?? source.sourceProviderSlug,
       }))
     ),
+    markConnectionReconcileDueForUser,
     persistStoredConnectionTokenBundle,
     prisma: {
       deviceConnection: {
@@ -292,12 +353,173 @@ function createAuthorityHarness(input: {
       return currentStoredAccount;
     },
     persistStoredConnectionTokenBundle,
+    markConnectionReconcileDueForUser,
     store,
     syncDurableConnectionState,
     upsertConnectionSource,
     updateConnectionRecord: update,
   };
 }
+
+describe("runHostedDeviceSyncAccountAction", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("queues reconcile through the canonical hosted wake authority", async () => {
+    const harness = createAuthorityHarness();
+    mocks.appendHostedDeviceSyncScheduledReconcileWake.mockResolvedValue({
+      wakeAccepted: true,
+    });
+    const { runHostedDeviceSyncAccountAction } = await import(
+      "@/src/lib/device-sync/hosted-runtime-account-action"
+    );
+
+    const response = await runHostedDeviceSyncAccountAction({
+      request: new Request("https://example.test/device-sync/account-action", {
+        body: JSON.stringify({
+          action: "reconcile",
+          connectionId: "conn_123",
+        }),
+        method: "POST",
+      }),
+      trustedUserId: "user_123",
+    });
+
+    expect(response).toMatchObject({
+      action: "reconcile",
+      connectionId: "conn_123",
+      status: "queued",
+    });
+    expect(mocks.appendHostedDeviceSyncScheduledReconcileWake).toHaveBeenCalledWith(
+      expect.objectContaining({
+        connectionId: "conn_123",
+        provider: "oura",
+        userId: "user_123",
+      }),
+    );
+    expect(harness.markConnectionReconcileDueForUser).toHaveBeenCalledWith({
+      connectionId: "conn_123",
+      dueAt: expect.any(Date),
+      userId: "user_123",
+    });
+    const wakeInput = mocks.appendHostedDeviceSyncScheduledReconcileWake.mock.calls[0]![0];
+    expect(wakeInput.eventId).toBe(
+      `device-sync:scheduled-reconcile:v1:conn_123:${wakeInput.nextReconcileAt}`,
+    );
+  });
+
+  it("reuses the durable due timestamp when a post-append signal failure is retried", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-07-10T12:00:00.000Z"));
+      createAuthorityHarness({
+        record: buildHostedRecord({
+          nextReconcileAt: "2026-07-10T18:00:00.000Z",
+        }),
+      });
+      mocks.appendHostedDeviceSyncScheduledReconcileWake
+        .mockRejectedValueOnce(new Error("Temporal signal failed after durable mailbox append."))
+        .mockResolvedValueOnce({
+          wakeAccepted: true,
+        });
+      const { runHostedDeviceSyncAccountAction } = await import(
+        "@/src/lib/device-sync/hosted-runtime-account-action"
+      );
+      const buildRequest = () => new Request("https://example.test/device-sync/account-action", {
+        body: JSON.stringify({
+          action: "reconcile",
+          connectionId: "conn_123",
+        }),
+        method: "POST",
+      });
+
+      await expect(runHostedDeviceSyncAccountAction({
+        request: buildRequest(),
+        trustedUserId: "user_123",
+      })).rejects.toThrow("Temporal signal failed after durable mailbox append.");
+
+      vi.setSystemTime(new Date("2026-07-10T12:01:00.000Z"));
+      await expect(runHostedDeviceSyncAccountAction({
+        request: buildRequest(),
+        trustedUserId: "user_123",
+      })).resolves.toMatchObject({
+        action: "reconcile",
+        status: "queued",
+      });
+
+      const firstWake = mocks.appendHostedDeviceSyncScheduledReconcileWake.mock.calls[0]![0];
+      const retriedWake = mocks.appendHostedDeviceSyncScheduledReconcileWake.mock.calls[1]![0];
+      expect(firstWake.nextReconcileAt).toBe("2026-07-10T12:00:00.000Z");
+      expect(retriedWake).toMatchObject({
+        eventId: firstWake.eventId,
+        nextReconcileAt: firstWake.nextReconcileAt,
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("requires confirmation and preserves the canonical disconnect warning", async () => {
+    createAuthorityHarness({
+      record: buildHostedRecord({ provider: "junction" }),
+    });
+    mocks.disconnectTrustedConnection.mockResolvedValue({
+      connection: buildPublicConnection(buildHostedRecord({
+        provider: "junction",
+        status: "disconnected",
+        updatedAt: "2026-07-10T12:00:00.000Z",
+      })),
+      warning: {
+        code: "UPSTREAM_MANUAL_REMOVAL_REQUIRED",
+        historicalResetIncomplete: true,
+        message: "Manual upstream removal is required before reconnecting.",
+      },
+    });
+    const { runHostedDeviceSyncAccountAction } = await import(
+      "@/src/lib/device-sync/hosted-runtime-account-action"
+    );
+
+    await expect(runHostedDeviceSyncAccountAction({
+      request: new Request("https://example.test/device-sync/account-action", {
+        body: JSON.stringify({
+          action: "disconnect",
+          connectionId: "conn_123",
+        }),
+        method: "POST",
+      }),
+      trustedUserId: "user_123",
+    })).rejects.toThrow(/confirmed must be literal true/u);
+    expect(mocks.disconnectTrustedConnection).not.toHaveBeenCalled();
+
+    const response = await runHostedDeviceSyncAccountAction({
+      request: new Request("https://example.test/device-sync/account-action", {
+        body: JSON.stringify({
+          action: "disconnect",
+          confirmed: true,
+          connectionId: "conn_123",
+          expectedConnectedAt: "2026-07-10T11:00:00.000Z",
+        }),
+        method: "POST",
+      }),
+      trustedUserId: "user_123",
+    });
+    expect(mocks.disconnectTrustedConnection).toHaveBeenCalledWith(
+      "user_123",
+      "conn_123",
+      "2026-07-10T11:00:00.000Z",
+    );
+    expect(response.action).toBe("disconnect");
+    if (response.action !== "disconnect") {
+      throw new TypeError("Expected disconnect account action response.");
+    }
+    expect(response.warning).toEqual({
+      code: "UPSTREAM_MANUAL_REMOVAL_REQUIRED",
+      historicalResetIncomplete: true,
+      message: "Manual upstream removal is required before reconnecting.",
+    });
+  });
+});
 
 describe("ackHostedDeviceSyncDirtyStateProcessed", () => {
   beforeEach(() => {

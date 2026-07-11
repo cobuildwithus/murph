@@ -52,6 +52,28 @@ const connectedAccount = {
   updatedAt: '2026-03-17T12:00:00.000Z',
 } as const
 
+const hostedBridgeAccount = {
+  ...connectedAccount,
+  displayName: 'Junction',
+  externalAccountId: 'junction-user-1',
+  id: 'dsc_junction',
+  metadata: {},
+  provider: 'junction',
+  scopes: [],
+  sources: [{
+    displayName: 'Garmin',
+    firstSeenAt: '2026-03-17T12:00:00.000Z',
+    lastErrorCode: null,
+    lastErrorMessage: null,
+    lastSeenAt: '2026-03-17T13:00:00.000Z',
+    resourceCount: 2,
+    sourceProviderSlug: 'garmin',
+    status: 'connected',
+  }],
+  setupExpiresAt: null,
+  setupPhase: null,
+} as const
+
 const supportsLoopbackListen = (() => {
   const probe = spawnSync(
     process.execPath,
@@ -517,6 +539,205 @@ test('device account list service uses hosted CLI bridge in hosted runtime witho
       })
     })
     await rm(vaultRoot, { recursive: true, force: true })
+  }
+})
+
+test('hosted device account lifecycle uses the bridge and requires scoped disconnect confirmation', async () => {
+  const bridgeToken = 'bridge-token'
+  const requestBodies: unknown[] = []
+  const server = createServer((request, response) => {
+    const chunks: Buffer[] = []
+    request.on('data', (chunk) => {
+      chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk))
+    })
+    request.on('end', () => {
+      const body = JSON.parse(Buffer.concat(chunks).toString('utf8')) as {
+        action: 'disconnect' | 'reconcile' | 'show'
+      }
+      requestBodies.push(body)
+      const account = body.action === 'disconnect'
+        ? { ...hostedBridgeAccount, status: 'disconnected' }
+        : hostedBridgeAccount
+      response.writeHead(200, { 'content-type': 'application/json' })
+      response.end(JSON.stringify(body.action === 'show'
+        ? { account, action: 'show' }
+        : {
+            accountId: 'dsc_junction',
+            action: body.action,
+            occurredAt: '2026-07-10T12:00:00.000Z',
+            status: body.action === 'disconnect' ? 'disconnected' : 'queued',
+            ...(body.action === 'disconnect'
+              ? {
+                  warning: {
+                    code: 'UPSTREAM_MANUAL_REMOVAL_REQUIRED',
+                    historicalResetIncomplete: true,
+                    message: 'Manual upstream removal is required before reconnecting.',
+                  },
+                }
+              : {}),
+          }))
+    })
+  })
+
+  try {
+    server.listen(0, '127.0.0.1')
+    await once(server, 'listening')
+    const address = server.address()
+    if (!address || typeof address === 'string') {
+      throw new Error('Expected a TCP listening address for hosted account action test.')
+    }
+    vi.stubEnv('MURPH_HOSTED_RUNTIME_PROCESS', '1')
+    vi.stubEnv('MURPH_HOSTED_CLI_BRIDGE_TOKEN', bridgeToken)
+    vi.stubEnv('MURPH_HOSTED_CLI_BRIDGE_URL', `http://127.0.0.1:${address.port}/`)
+    const services = createIntegratedDeviceSyncServices()
+
+    const shown = await services.showAccount({ accountId: 'dsc_junction' })
+    if (!('backend' in shown)) {
+      throw new TypeError('Expected hosted device account show result.')
+    }
+    assert.equal(shown.backend, 'hosted')
+    assert.equal(shown.account.sources?.[0]?.sourceProviderSlug, 'garmin')
+
+    const reconciled = await services.reconcileAccount({ accountId: 'dsc_junction' })
+    if (!('backend' in reconciled)) {
+      throw new TypeError('Expected hosted device account reconcile result.')
+    }
+    assert.equal(reconciled.backend, 'hosted')
+    assert.equal(reconciled.accountId, 'dsc_junction')
+    assert.equal(reconciled.action, 'reconcile')
+    assert.equal(reconciled.occurredAt, '2026-07-10T12:00:00.000Z')
+    assert.equal(reconciled.status, 'queued')
+
+    await assert.rejects(
+      services.disconnectAccount({ accountId: 'dsc_junction' }),
+      (error: unknown) => {
+        assert.equal(
+          (error as { code?: string }).code,
+          'HOSTED_DEVICE_DISCONNECT_CONFIRMATION_REQUIRED',
+        )
+        assert.match(error instanceof Error ? error.message : '', /--confirm/u)
+        return true
+      },
+    )
+    assert.equal(requestBodies.length, 2)
+
+    await assert.rejects(
+      services.disconnectAccount({
+        accountId: 'dsc_junction',
+        confirm: true,
+      }),
+      (error: unknown) => {
+        assert.equal(
+          (error as { code?: string }).code,
+          'HOSTED_DEVICE_DISCONNECT_SCOPE_REQUIRED',
+        )
+        assert.match(error instanceof Error ? error.message : '', /--expected-connected-at/u)
+        return true
+      },
+    )
+    assert.equal(requestBodies.length, 2)
+
+    const disconnected = await services.disconnectAccount({
+      accountId: 'dsc_junction',
+      confirm: true,
+      expectedConnectedAt: hostedBridgeAccount.connectedAt,
+    })
+    if (!('backend' in disconnected)) {
+      throw new TypeError('Expected hosted device account disconnect result.')
+    }
+    assert.equal(disconnected.backend, 'hosted')
+    assert.equal(disconnected.accountId, 'dsc_junction')
+    assert.equal(disconnected.action, 'disconnect')
+    assert.equal(disconnected.occurredAt, '2026-07-10T12:00:00.000Z')
+    assert.equal(disconnected.status, 'disconnected')
+    assert.equal(disconnected.warning?.historicalResetIncomplete, true)
+    assert.match(disconnected.warning?.message ?? '', /Manual upstream removal/u)
+    assert.deepEqual(requestBodies, [
+      { accountId: 'dsc_junction', action: 'show' },
+      { accountId: 'dsc_junction', action: 'reconcile' },
+      {
+        accountId: 'dsc_junction',
+        action: 'disconnect',
+        confirmed: true,
+        expectedConnectedAt: hostedBridgeAccount.connectedAt,
+      },
+    ])
+  } finally {
+    vi.unstubAllEnvs()
+    await new Promise<void>((resolve, reject) => {
+      server.close((error) => error ? reject(error) : resolve())
+    })
+  }
+})
+
+deviceControlPlaneTest('hosted device account actions preserve safe typed failure retryability', async () => {
+  let bridgeError: {
+    code: string
+    message: string
+    retryable: boolean
+  } = {
+    code: 'ACCOUNT_REAUTHORIZATION_REQUIRED',
+    message: 'This device sync account must be reconnected before it can be reconciled.',
+    retryable: false,
+  }
+  const server = createServer((_request, response) => {
+    respondJson(response, bridgeError.retryable ? 503 : 409, {
+      error: bridgeError,
+    })
+  })
+
+  try {
+    server.listen(0, '127.0.0.1')
+    await once(server, 'listening')
+    const address = server.address()
+    if (!address || typeof address === 'string') {
+      throw new Error('Expected a TCP listening address for hosted account action failure test.')
+    }
+    vi.stubEnv('MURPH_HOSTED_RUNTIME_PROCESS', '1')
+    vi.stubEnv('MURPH_HOSTED_CLI_BRIDGE_TOKEN', 'bridge-token')
+    vi.stubEnv('MURPH_HOSTED_CLI_BRIDGE_URL', `http://127.0.0.1:${address.port}/`)
+    const services = createIntegratedDeviceSyncServices()
+
+    await assert.rejects(
+      services.reconcileAccount({ accountId: 'dsc_junction' }),
+      (error: unknown) => {
+        assert.equal(
+          (error as { code?: string }).code,
+          'ACCOUNT_REAUTHORIZATION_REQUIRED',
+        )
+        assert.equal(
+          (error as { context?: { retryable?: boolean } }).context?.retryable,
+          false,
+        )
+        assert.match(error instanceof Error ? error.message : '', /reconnected/u)
+        return true
+      },
+    )
+
+    bridgeError = {
+      code: 'RECONCILE_WAKE_NOT_ACCEPTED',
+      message: 'Hosted device reconcile could not be queued.',
+      retryable: true,
+    }
+    await assert.rejects(
+      services.reconcileAccount({ accountId: 'dsc_junction' }),
+      (error: unknown) => {
+        assert.equal(
+          (error as { code?: string }).code,
+          'RECONCILE_WAKE_NOT_ACCEPTED',
+        )
+        assert.equal(
+          (error as { context?: { retryable?: boolean } }).context?.retryable,
+          true,
+        )
+        return true
+      },
+    )
+  } finally {
+    vi.unstubAllEnvs()
+    await new Promise<void>((resolve, reject) => {
+      server.close((error) => error ? reject(error) : resolve())
+    })
   }
 })
 
@@ -1100,6 +1321,9 @@ test('device provider and account operations reuse a healthy managed daemon with
       vault: vaultRoot,
       accountId: liveAccountList[0]!.id,
     })
+    if (!('account' in disconnected)) {
+      throw new TypeError('Expected local device account disconnect result.')
+    }
     assert.equal(disconnected.account.status, 'disconnected')
     assert.deepEqual(ensureManagedDeviceSyncControlPlaneMock.mock.calls, [[{
       vault: vaultRoot,

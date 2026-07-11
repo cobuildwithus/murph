@@ -75,7 +75,7 @@ declare module 'incur' {
       'condition save': { args: { title: string }; options: { requestId?: string; id?: string; slug?: string; clinicalStatus?: "active" | "inactive" | "resolved"; verificationStatus?: "unconfirmed" | "provisional" | "confirmed" | "refuted"; assertedOn?: string; resolvedOn?: string; severity?: "mild" | "moderate" | "severe"; bodySite?: string[]; relatedGoalId?: string[]; relatedRegimenId?: string[]; note?: string } }
       'condition scaffold': { args: {}; options: { requestId?: string } }
       'condition show': { args: { id: string }; options: { requestId?: string } }
-      'device account disconnect': { args: { accountId: string }; options: { requestId?: string; baseUrl?: string } }
+      'device account disconnect': { args: { accountId: string }; options: { requestId?: string; baseUrl?: string; confirm?: boolean; expectedConnectedAt?: string } }
       'device account list': { args: {}; options: { requestId?: string; baseUrl?: string; provider?: string; "source-provider"?: string } }
       'device account reconcile': { args: { accountId: string }; options: { requestId?: string; baseUrl?: string } }
       'device account show': { args: { accountId: string }; options: { requestId?: string; baseUrl?: string } }

@@ -4159,6 +4159,12 @@ function createAbortGuardedHostedRuntimePlatform(
     ...(platform.deviceSyncPort
       ? {
           deviceSyncPort: {
+            ...(platform.deviceSyncPort.requestAccountAction
+              ? {
+                  requestAccountAction: (actionInput) =>
+                    guard(() => platform.deviceSyncPort!.requestAccountAction!(actionInput)),
+                }
+              : {}),
             ackDirtyStateProcessed: (ackInput) =>
               guard(() => platform.deviceSyncPort!.ackDirtyStateProcessed(ackInput)),
             applyUpdates: (applyInput) =>

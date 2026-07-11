@@ -5,6 +5,7 @@ import {
   HOSTED_PHONE_CALLS_PATH,
 } from "@murphai/hosted-execution/phone-calls";
 import {
+  HOSTED_EXECUTION_DEVICE_SYNC_ACCOUNT_ACTION_PATH,
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_PATH,
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_DIRTY_ACK_PATH,
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_DIRTY_PENDING_PATH,
@@ -40,6 +41,7 @@ import {
 } from "../runtime-mailbox-payload-decode-contract.ts";
 
 export {
+  HOSTED_EXECUTION_DEVICE_SYNC_ACCOUNT_ACTION_PATH,
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_PATH,
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_DIRTY_ACK_PATH,
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_DIRTY_PENDING_PATH,
@@ -58,6 +60,7 @@ export type HostedRunnerWebControlOperation =
   | "computer_use"
   | "connected_apps"
   | "device_sync_connect_link"
+  | "device_sync_account_action"
   | "device_sync_dirty_ack"
   | "device_sync_pending_dirty_state"
   | "device_sync_runtime_apply"
@@ -90,6 +93,7 @@ const HOSTED_RUNNER_WEB_CONTROL_POST_POLICY = new Map<string, HostedRunnerWebCon
   [HOSTED_RUNTIME_ACTION_APPROVAL_CONSUME_PATH, "action_approval_consume"],
   [HOSTED_RUNTIME_ACTION_APPROVAL_REQUEST_PATH, "action_approval_request"],
   [HOSTED_CONNECTED_APPS_PATH, "connected_apps"],
+  [HOSTED_EXECUTION_DEVICE_SYNC_ACCOUNT_ACTION_PATH, "device_sync_account_action"],
   [HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_PATH, "device_sync_runtime_apply"],
   [HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_DIRTY_ACK_PATH, "device_sync_dirty_ack"],
   [HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_DIRTY_PENDING_PATH, "device_sync_pending_dirty_state"],

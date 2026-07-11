@@ -12,6 +12,7 @@ export const HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV =
 export const HOSTED_CLI_BRIDGE_ASSISTANT_CURRENT_ROUTE_PATH = "/assistant/current-route";
 export const HOSTED_CLI_BRIDGE_DEVICE_CONNECT_LINK_PATH = "/device/connect-link";
 export const HOSTED_CLI_BRIDGE_DEVICE_ACCOUNT_LIST_PATH = "/device/accounts/list";
+export const HOSTED_CLI_BRIDGE_DEVICE_ACCOUNT_ACTION_PATH = "/device/accounts/action";
 export const HOSTED_CLI_BRIDGE_REQUEST_TIMEOUT_MS = 10_000;
 
 export const HOSTED_CLI_BRIDGE_ENV_NAMES = [
@@ -40,6 +41,23 @@ const hostedCliDeviceAccountListRequestSchema = z.object({
   provider: z.string().trim().min(1).nullable().optional(),
   sourceProvider: z.string().trim().min(1).nullable().optional(),
 }).strict();
+
+const hostedCliDeviceAccountActionRequestSchema = z.discriminatedUnion("action", [
+  z.object({
+    accountId: z.string().trim().min(1),
+    action: z.literal("show"),
+  }).strict(),
+  z.object({
+    accountId: z.string().trim().min(1),
+    action: z.literal("reconcile"),
+  }).strict(),
+  z.object({
+    accountId: z.string().trim().min(1),
+    action: z.literal("disconnect"),
+    confirmed: z.literal(true),
+    expectedConnectedAt: z.string().datetime({ offset: true }),
+  }).strict(),
+]);
 
 const hostedCliAssistantCurrentRouteRequestSchema = z.object({}).strict();
 
@@ -115,11 +133,43 @@ const hostedCliDeviceAccountListResponseSchema = z.object({
   sourceProvider: z.string().min(1).nullable().optional(),
 }).strict();
 
+const hostedCliDeviceAccountActionWarningSchema = z.object({
+  code: z.string().trim().min(1),
+  historicalResetIncomplete: z.literal(true).optional(),
+  message: z.string().trim().min(1),
+}).strict();
+
+const hostedCliDeviceAccountActionResponseSchema = z.discriminatedUnion("action", [
+  z.object({
+    account: hostedCliDeviceSyncAccountSchema,
+    action: z.literal("show"),
+  }).strict(),
+  z.object({
+    accountId: z.string().trim().min(1),
+    action: z.literal("reconcile"),
+    occurredAt: z.string().datetime({ offset: true }),
+    status: z.literal("queued"),
+  }).strict(),
+  z.object({
+    accountId: z.string().trim().min(1),
+    action: z.literal("disconnect"),
+    occurredAt: z.string().datetime({ offset: true }),
+    status: z.literal("disconnected"),
+    warning: hostedCliDeviceAccountActionWarningSchema.optional(),
+  }).strict(),
+]);
+
 export type HostedCliDeviceConnectLinkRequest =
   z.infer<typeof hostedCliDeviceConnectLinkRequestSchema>;
 
 export type HostedCliDeviceAccountListRequest =
   z.infer<typeof hostedCliDeviceAccountListRequestSchema>;
+
+export type HostedCliDeviceAccountActionRequest =
+  z.infer<typeof hostedCliDeviceAccountActionRequestSchema>;
+
+export type HostedCliDeviceAccountActionResponse =
+  z.infer<typeof hostedCliDeviceAccountActionResponseSchema>;
 
 export type HostedCliAssistantCurrentRouteRequest =
   z.infer<typeof hostedCliAssistantCurrentRouteRequestSchema>;
@@ -155,11 +205,17 @@ export interface HostedCliBridgeEnvConfig extends HostedCliBridgeClientConfig {
 
 export class HostedCliBridgeRequestError extends Error {
   readonly code: string;
+  readonly retryable: boolean | undefined;
 
-  constructor(code: string, message: string, options?: { cause?: unknown }) {
-    super(message, options);
+  constructor(
+    code: string,
+    message: string,
+    options?: { cause?: unknown; retryable?: boolean },
+  ) {
+    super(message, options && "cause" in options ? { cause: options.cause } : undefined);
     this.name = "HostedCliBridgeRequestError";
     this.code = code;
+    this.retryable = options?.retryable;
   }
 }
 
@@ -206,6 +262,18 @@ export function parseHostedCliDeviceAccountListRequest(
   value: unknown,
 ): HostedCliDeviceAccountListRequest {
   return hostedCliDeviceAccountListRequestSchema.parse(value);
+}
+
+export function parseHostedCliDeviceAccountActionRequest(
+  value: unknown,
+): HostedCliDeviceAccountActionRequest {
+  return hostedCliDeviceAccountActionRequestSchema.parse(value);
+}
+
+export function parseHostedCliDeviceAccountActionResponse(
+  value: unknown,
+): HostedCliDeviceAccountActionResponse {
+  return hostedCliDeviceAccountActionResponseSchema.parse(value);
 }
 
 export function parseHostedCliAssistantCurrentRouteRequest(
@@ -278,6 +346,34 @@ export async function requestHostedCliDeviceAccountList(input: {
   return hostedCliDeviceAccountListResponseSchema.parse(payload);
 }
 
+export async function requestHostedCliDeviceAccountAction(input: {
+  action: "disconnect" | "reconcile" | "show";
+  accountId: string;
+  bridge: HostedCliBridgeClientConfig;
+  confirmed?: true;
+  expectedConnectedAt?: string;
+  fetchImpl?: typeof fetch;
+  timeoutMs?: number;
+}): Promise<HostedCliDeviceAccountActionResponse> {
+  const body = parseHostedCliDeviceAccountActionRequest({
+    action: input.action,
+    accountId: input.accountId,
+    ...(input.confirmed === true ? { confirmed: true } : {}),
+    ...(input.expectedConnectedAt
+      ? { expectedConnectedAt: input.expectedConnectedAt }
+      : {}),
+  });
+  const payload = await requestHostedCliBridgeJson({
+    body,
+    bridge: input.bridge,
+    fetchImpl: input.fetchImpl,
+    path: HOSTED_CLI_BRIDGE_DEVICE_ACCOUNT_ACTION_PATH,
+    timeoutMs: input.timeoutMs,
+  });
+
+  return parseHostedCliDeviceAccountActionResponse(payload);
+}
+
 async function requestHostedCliBridgeJson(input: {
   body: Record<string, unknown>;
   bridge: HostedCliBridgeClientConfig;
@@ -317,7 +413,11 @@ async function requestHostedCliBridgeJson(input: {
 
   if (!response.ok) {
     const error = readHostedCliBridgeError(payload);
-    throw new HostedCliBridgeRequestError(error.code, error.message);
+    throw new HostedCliBridgeRequestError(
+      error.code,
+      error.message,
+      error.retryable === undefined ? undefined : { retryable: error.retryable },
+    );
   }
 
   return payload;
@@ -360,6 +460,7 @@ function getHostedCliBridgeErrorName(error: unknown): string | null {
 function readHostedCliBridgeError(value: unknown): {
   code: string;
   message: string;
+  retryable?: boolean;
 } {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return {
@@ -378,12 +479,14 @@ function readHostedCliBridgeError(value: unknown): {
 
   const code = (error as { code?: unknown }).code;
   const message = (error as { message?: unknown }).message;
+  const retryable = (error as { retryable?: unknown }).retryable;
 
   return {
     code: typeof code === "string" && code.trim() ? code.trim() : "HOSTED_CLI_BRIDGE_REQUEST_FAILED",
     message: typeof message === "string" && message.trim()
       ? message.trim()
       : "Hosted CLI bridge request failed.",
+    ...(typeof retryable === "boolean" ? { retryable } : {}),
   };
 }
 

@@ -97,6 +97,7 @@ import {
   resetRunnerOutboundSharedCachesForTest,
 } from "../src/runner-outbound/shared.ts";
 import {
+  HOSTED_EXECUTION_DEVICE_SYNC_ACCOUNT_ACTION_PATH,
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PATH,
   isAllowedHostedRunnerWebControlRequest,
   readHostedRunnerWebControlRoute,
@@ -745,6 +746,77 @@ describe("handleRunnerOutboundRequest", () => {
     expect(response.status).toBe(401);
     expect(validateRuntimeWriteFence).not.toHaveBeenCalled();
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects device-sync account actions without the active runtime fence", async () => {
+    const validateRuntimeWriteFence = vi.fn(async () => true);
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await handleRunnerOutboundRequest(
+      new Request(`http://web-control.worker${HOSTED_EXECUTION_DEVICE_SYNC_ACCOUNT_ACTION_PATH}`, {
+        body: JSON.stringify({ action: "reconcile", connectionId: "conn_123" }),
+        headers: createRunnerProxyHeaders({
+          "content-type": "application/json; charset=utf-8",
+        }),
+        method: "POST",
+      }),
+      createRunnerOutboundEnv({
+        HOSTED_WEB_BASE_URL: "https://web.example.test",
+        USER_RUNNER: {
+          getByName() {
+            return { validateRuntimeWriteFence };
+          },
+        },
+      }),
+      "member_123",
+    );
+
+    expect(response.status).toBe(401);
+    expect(validateRuntimeWriteFence).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("forwards device-sync account actions with the matching active runtime fence", async () => {
+    const validateRuntimeWriteFence = vi.fn(async () => true);
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({
+      action: "reconcile",
+      connectionId: "conn_123",
+      occurredAt: "2026-07-10T12:00:00.000Z",
+      status: "queued",
+    }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const body = { action: "reconcile", connectionId: "conn_123" };
+
+    const response = await handleRunnerOutboundRequest(
+      new Request(`http://web-control.worker${HOSTED_EXECUTION_DEVICE_SYNC_ACCOUNT_ACTION_PATH}`, {
+        body: JSON.stringify(body),
+        headers: createRunnerProxyHeaders({
+          "content-type": "application/json; charset=utf-8",
+          "x-hosted-runtime-attempt-id": "attempt_1",
+          "x-hosted-runtime-lease-generation": "9",
+        }),
+        method: "POST",
+      }),
+      createRunnerOutboundEnv({
+        HOSTED_WEB_BASE_URL: "https://web.example.test",
+        USER_RUNNER: {
+          getByName() {
+            return { validateRuntimeWriteFence };
+          },
+        },
+      }),
+      "member_123",
+    );
+
+    expect(response.status).toBe(200);
+    expect(validateRuntimeWriteFence).toHaveBeenCalledWith({
+      attemptId: "attempt_1",
+      generation: "9",
+      userId: "member_123",
+    });
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(fetchMock.mock.calls[0]?.[1]?.body).toBe(JSON.stringify(body));
   });
 
   it("rejects runtime latency traces without the active runtime fence", async () => {

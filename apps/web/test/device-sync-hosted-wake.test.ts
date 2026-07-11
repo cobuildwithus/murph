@@ -1084,6 +1084,46 @@ describe("hosted device-sync wakes", () => {
     expect(mocks.appendHostedMailboxEnvelope).toHaveBeenCalledTimes(1);
   });
 
+  it("rejects a shown connection epoch that changed before hosted disconnect began", async () => {
+    const controlPlane = createHostedDeviceSyncPublicIngressService(
+      new Request("https://control.example.test/api/internal/device-sync/account-action"),
+    );
+    const reconnected = buildHostedConnection({
+      connectedAt: "2026-03-26T12:01:00.000Z",
+      updatedAt: "2026-03-26T12:01:00.000Z",
+    });
+    mocks.getConnectionForUser.mockResolvedValue(reconnected);
+    mocks.getStoredConnectionAccountForUser.mockResolvedValue(buildStoredConnection({
+      connectedAt: reconnected.connectedAt,
+      updatedAt: reconnected.updatedAt,
+    }));
+
+    await expect(controlPlane.disconnectTrustedConnection(
+      "user-123",
+      "dsc_123",
+      "2026-03-26T12:00:00.000Z",
+    )).rejects.toMatchObject({
+      code: "CONNECTION_CHANGED_DURING_DISCONNECT",
+      httpStatus: 409,
+      retryable: true,
+    });
+
+    expect(mocks.withConnectionMutationLock).toHaveBeenCalledWith(
+      "dsc_123",
+      expect.any(Function),
+    );
+    expect(mocks.getConnectionForUser).toHaveBeenCalledWith(
+      "user-123",
+      "dsc_123",
+      mocks.prismaTx,
+    );
+    expect(mocks.registryGet).not.toHaveBeenCalled();
+    expect(mocks.getStoredConnectionAccountForUser).not.toHaveBeenCalled();
+    expect(mocks.syncDurableConnectionState).not.toHaveBeenCalled();
+    expect(mocks.persistStoredConnectionTokenBundle).not.toHaveBeenCalled();
+    expect(mocks.appendHostedMailboxEnvelope).not.toHaveBeenCalled();
+  });
+
   it("rejects a stale disconnect when OAuth tokens rotate during provider revoke", async () => {
     const controlPlane = createHostedDeviceSyncPublicIngressService(
       new Request("https://control.example.test/api/settings/device-sync/connections/dsc_123/disconnect"),
@@ -1579,6 +1619,69 @@ describe("hosted device-sync wakes", () => {
       }),
     );
     expect(JSON.stringify(result)).not.toContain("deregistration failed upstream");
+  });
+
+  it("retains the historical-reset warning when a tokenless retry follows a committed disconnect", async () => {
+    const controlPlane = createHostedDeviceSyncPublicIngressService(
+      new Request("https://control.example.test/api/settings/device-sync/connections/dsc_123/disconnect"),
+    );
+    let currentConnection = buildHostedConnection({
+      provider: "junction",
+    });
+    let currentStoredConnection: ReturnType<typeof buildStoredConnection> | null =
+      buildStoredConnection({
+        provider: "junction",
+      });
+    const revokeAccess = vi.fn(async () => {
+      throw new Error("junction deregistration failed upstream");
+    });
+    mocks.registryGet.mockReturnValue({
+      connectionHandler: {
+        revokeAccess,
+      },
+    });
+    mocks.listConnectionsForUser.mockImplementation(async () => [currentConnection]);
+    mocks.getConnectionForUser.mockImplementation(async () => currentConnection);
+    mocks.getStoredConnectionAccountForUser.mockImplementation(
+      async () => currentStoredConnection,
+    );
+    mocks.listConnectionSources.mockResolvedValue([{
+      lastErrorCode: DEVICE_SYNC_HISTORICAL_DATA_RECONNECT_REQUIRED_ERROR_CODE,
+      status: "error",
+    }]);
+    mocks.syncDurableConnectionState.mockImplementation(async (
+      connection: ReturnType<typeof buildHostedConnection>,
+    ) => {
+      currentConnection = connection;
+    });
+    mocks.persistStoredConnectionTokenBundle.mockImplementation(async (
+      input: { tokenBundle: unknown | null },
+    ) => {
+      if (input.tokenBundle === null) {
+        currentStoredConnection = null;
+      }
+    });
+    const publicConnectionId = buildPublicConnectionId("dsc_123");
+
+    const firstResult = await controlPlane.disconnectConnection("user-123", publicConnectionId);
+    const retryResult = await controlPlane.disconnectConnection("user-123", publicConnectionId);
+
+    const expectedWarning = {
+      code: "HISTORICAL_RESET_REVOKE_FAILED",
+      historicalResetIncomplete: true,
+      message: "Provider revoke did not complete while a historical data reset is pending. "
+        + "Remove the connection in the provider account before reconnecting.",
+    };
+    expect(firstResult.warning).toEqual(expectedWarning);
+    expect(retryResult.warning).toEqual(expectedWarning);
+    expect(retryResult.connection).toMatchObject({
+      lastErrorCode: "HISTORICAL_RESET_REVOKE_FAILED",
+      status: "disconnected",
+    });
+    expect(revokeAccess).toHaveBeenCalledTimes(1);
+    expect(mocks.syncDurableConnectionState).toHaveBeenCalledTimes(1);
+    expect(mocks.persistStoredConnectionTokenBundle).toHaveBeenCalledTimes(1);
+    expect(mocks.appendHostedMailboxEnvelope).toHaveBeenCalledTimes(1);
   });
 
   it("keeps the historical-reset warning when a repeated disconnect fails revoke after sources were cleared", async () => {

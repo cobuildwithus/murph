@@ -12,6 +12,8 @@ import {
   mergeGuardedJunctionHistoricalBackfillMetadata,
   mergeHostedDeviceSyncConnectionMetadata,
   normalizeHostedDeviceSyncJobHints,
+  parseHostedExecutionDeviceSyncAccountActionRequest,
+  parseHostedExecutionDeviceSyncAccountActionResponse,
   parseHostedExecutionDeviceSyncConnectLinkResponse,
   parseHostedExecutionDeviceSyncDirtyAckRequest,
   parseHostedExecutionDeviceSyncWakeHint,
@@ -59,6 +61,85 @@ describe("serializeHostedExecutionDeviceSyncDirtyPayloadIdentity", () => {
         ...companionPayload,
         webhookDataJson: JSON.stringify({ records: [{ recordId: "b".repeat(64) }] }),
       }));
+  });
+});
+
+describe("hosted device-sync account action contracts", () => {
+  it("accepts only strict action-discriminated requests", () => {
+    expect(parseHostedExecutionDeviceSyncAccountActionRequest({
+      action: "disconnect",
+      confirmed: true,
+      connectionId: "conn_123",
+      expectedConnectedAt: "2026-07-10T11:00:00.000Z",
+    })).toEqual({
+      action: "disconnect",
+      confirmed: true,
+      connectionId: "conn_123",
+      expectedConnectedAt: "2026-07-10T11:00:00.000Z",
+    });
+
+    expect(() => parseHostedExecutionDeviceSyncAccountActionRequest({
+      action: "disconnect",
+      confirmed: false,
+      connectionId: "conn_123",
+      expectedConnectedAt: "2026-07-10T11:00:00.000Z",
+    })).toThrow(/confirmed must be literal true/u);
+    expect(() => parseHostedExecutionDeviceSyncAccountActionRequest({
+      action: "disconnect",
+      confirmed: true,
+      connectionId: "conn_123",
+    })).toThrow(/expectedConnectedAt/u);
+    expect(() => parseHostedExecutionDeviceSyncAccountActionRequest({
+      action: "reconcile",
+      confirmed: true,
+      connectionId: "conn_123",
+    })).toThrow(/unsupported fields/u);
+    expect(() => parseHostedExecutionDeviceSyncAccountActionRequest({
+      action: "reconcile",
+      connectionId: "conn_123",
+      userId: "other_user",
+    })).toThrow(/unsupported fields/u);
+  });
+
+  it("preserves disconnect warnings and rejects action/status mismatches", () => {
+    const disconnected = parseHostedExecutionDeviceSyncAccountActionResponse({
+      action: "disconnect",
+      connectionId: "conn_123",
+      occurredAt: "2026-07-10T12:00:00.000Z",
+      status: "disconnected",
+      warning: {
+        code: "UPSTREAM_MANUAL_REMOVAL_REQUIRED",
+        historicalResetIncomplete: true,
+        message: "Remove the upstream connection manually before reconnecting.",
+      },
+    });
+    expect(disconnected.action).toBe("disconnect");
+    if (disconnected.action !== "disconnect") {
+      throw new TypeError("Expected disconnect account action response.");
+    }
+    expect(disconnected.warning).toEqual({
+      code: "UPSTREAM_MANUAL_REMOVAL_REQUIRED",
+      historicalResetIncomplete: true,
+      message: "Remove the upstream connection manually before reconnecting.",
+    });
+
+    expect(() => parseHostedExecutionDeviceSyncAccountActionResponse({
+      action: "reconcile",
+      connectionId: "conn_123",
+      occurredAt: "2026-07-10T12:00:00.000Z",
+      status: "disconnected",
+    })).toThrow(/status does not match/u);
+
+    expect(() => parseHostedExecutionDeviceSyncAccountActionResponse({
+      action: "reconcile",
+      connectionId: "conn_123",
+      occurredAt: "2026-07-10T12:00:00.000Z",
+      status: "queued",
+      warning: {
+        code: "UNEXPECTED_WARNING",
+        message: "Warnings belong only to disconnect results.",
+      },
+    })).toThrow(/unsupported fields/u);
   });
 });
 

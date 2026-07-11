@@ -4,12 +4,14 @@ import type { Socket } from "node:net";
 
 import {
   HOSTED_CLI_BRIDGE_ASSISTANT_CURRENT_ROUTE_PATH,
+  HOSTED_CLI_BRIDGE_DEVICE_ACCOUNT_ACTION_PATH,
   HOSTED_CLI_BRIDGE_DEVICE_ACCOUNT_LIST_PATH,
   HOSTED_CLI_BRIDGE_DEVICE_CONNECT_LINK_PATH,
   HOSTED_CLI_BRIDGE_REQUEST_TIMEOUT_MS,
   HOSTED_CLI_BRIDGE_TOKEN_ENV,
   HOSTED_CLI_BRIDGE_URL_ENV,
   parseHostedCliAssistantCurrentRouteRequest,
+  parseHostedCliDeviceAccountActionRequest,
   parseHostedCliDeviceAccountListRequest,
   parseHostedCliDeviceConnectLinkRequest,
   type HostedCliAssistantCurrentRoute,
@@ -243,6 +245,7 @@ async function handleHostedCliBridgeRequest(input: {
       path !== HOSTED_CLI_BRIDGE_ASSISTANT_CURRENT_ROUTE_PATH
       && path !== HOSTED_CLI_BRIDGE_DEVICE_CONNECT_LINK_PATH
       && path !== HOSTED_CLI_BRIDGE_DEVICE_ACCOUNT_LIST_PATH
+      && path !== HOSTED_CLI_BRIDGE_DEVICE_ACCOUNT_ACTION_PATH
     ) {
       writeHostedCliBridgeError(
         input.response,
@@ -332,6 +335,7 @@ async function handleActiveHostedCliBridgeRequest(input: {
     const request = parseHostedCliDeviceAccountListRequest(body);
     try {
       const snapshot = await input.active.deviceSyncPort.fetchSnapshot({
+        includeCredentialMaterial: false,
         ...(request.provider ? { provider: request.provider } : {}),
         ...(request.sourceProvider ? { sourceProviderSlug: request.sourceProvider } : {}),
       });
@@ -346,6 +350,83 @@ async function handleActiveHostedCliBridgeRequest(input: {
         502,
         "HOSTED_DEVICE_ACCOUNT_LIST_FAILED",
         "Hosted device account list failed.",
+      );
+    }
+    return;
+  }
+
+  if (input.path === HOSTED_CLI_BRIDGE_DEVICE_ACCOUNT_ACTION_PATH) {
+    const request = parseHostedCliDeviceAccountActionRequest(body);
+    try {
+      if (request.action === "show") {
+        const account = await fetchHostedCliDeviceAccount(
+          input.active.deviceSyncPort,
+          request.accountId,
+          input.active.signal,
+        );
+        if (!account) {
+          writeHostedCliBridgeError(
+            input.response,
+            404,
+            "HOSTED_DEVICE_ACCOUNT_NOT_FOUND",
+            "Hosted device account was not found.",
+            false,
+          );
+          return;
+        }
+        writeHostedCliBridgeJson(input.response, 200, {
+          account,
+          action: "show",
+        });
+        return;
+      }
+
+      if (!input.active.deviceSyncPort.requestAccountAction) {
+        writeHostedCliBridgeError(
+          input.response,
+          503,
+          "HOSTED_DEVICE_ACCOUNT_ACTION_UNAVAILABLE",
+          "Hosted device account actions are unavailable.",
+          false,
+        );
+        return;
+      }
+
+      const result = request.action === "disconnect"
+        ? await input.active.deviceSyncPort.requestAccountAction({
+            action: "disconnect",
+            confirmed: request.confirmed,
+            connectionId: request.accountId,
+            expectedConnectedAt: request.expectedConnectedAt,
+            signal: input.active.signal,
+          })
+        : await input.active.deviceSyncPort.requestAccountAction({
+            action: "reconcile",
+            connectionId: request.accountId,
+            signal: input.active.signal,
+          });
+      writeHostedCliBridgeJson(input.response, 200, result.action === "disconnect"
+        ? {
+            accountId: result.connectionId,
+            action: result.action,
+            occurredAt: result.occurredAt,
+            status: result.status,
+            ...(result.warning ? { warning: result.warning } : {}),
+          }
+        : {
+            accountId: result.connectionId,
+            action: result.action,
+            occurredAt: result.occurredAt,
+            status: result.status,
+          });
+    } catch (error) {
+      const failure = readHostedCliDeviceAccountActionFailure(error, request.action);
+      writeHostedCliBridgeError(
+        input.response,
+        failure.statusCode,
+        failure.code,
+        failure.message,
+        failure.retryable,
       );
     }
     return;
@@ -409,6 +490,22 @@ async function waitForInFlightBridgeRequests(
 
 type HostedDeviceSyncSnapshotEntry =
   Awaited<ReturnType<HostedRuntimeDeviceSyncPort["fetchSnapshot"]>>["connections"][number];
+
+async function fetchHostedCliDeviceAccount(
+  port: HostedRuntimeDeviceSyncPort,
+  accountId: string,
+  signal: AbortSignal | null,
+) {
+  const snapshot = await port.fetchSnapshot({
+    connectionId: accountId,
+    includeCredentialMaterial: false,
+    signal,
+  });
+  const entry = snapshot.connections.find(
+    (candidate) => candidate.connection.id === accountId,
+  );
+  return entry ? hostedDeviceSyncSnapshotToAccount(entry) : null;
+}
 
 function hostedDeviceSyncSnapshotToAccount(entry: HostedDeviceSyncSnapshotEntry) {
   return {
@@ -526,13 +623,88 @@ function writeHostedCliBridgeError(
   statusCode: number,
   code: string,
   message: string,
+  retryable?: boolean,
 ): void {
   writeHostedCliBridgeJson(response, statusCode, {
     error: {
       code,
       message,
+      ...(typeof retryable === "boolean" ? { retryable } : {}),
     },
   });
+}
+
+function readHostedCliDeviceAccountActionFailure(
+  error: unknown,
+  action: "disconnect" | "reconcile" | "show",
+): {
+  code: string;
+  message: string;
+  retryable: boolean;
+  statusCode: number;
+} {
+  const code = error && typeof error === "object"
+    ? Reflect.get(error, "code")
+    : null;
+  const retryable = error && typeof error === "object"
+    ? Reflect.get(error, "retryable")
+    : null;
+
+  if (code === "CONNECTION_NOT_FOUND" && retryable === false) {
+    return {
+      code,
+      message: "Hosted device account was not found.",
+      retryable,
+      statusCode: 404,
+    };
+  }
+  if (action === "reconcile" && code === "ACCOUNT_DISCONNECTED" && retryable === false) {
+    return {
+      code,
+      message: "Disconnected device sync accounts must be reconnected before they can be reconciled.",
+      retryable,
+      statusCode: 409,
+    };
+  }
+  if (
+    action === "reconcile"
+    && code === "ACCOUNT_REAUTHORIZATION_REQUIRED"
+    && retryable === false
+  ) {
+    return {
+      code,
+      message: "This device sync account must be reconnected before it can be reconciled.",
+      retryable,
+      statusCode: 409,
+    };
+  }
+  if (action === "reconcile" && code === "RECONCILE_WAKE_NOT_ACCEPTED" && retryable === true) {
+    return {
+      code,
+      message: "Hosted device reconcile could not be queued.",
+      retryable,
+      statusCode: 503,
+    };
+  }
+  if (
+    action === "disconnect"
+    && code === "CONNECTION_CHANGED_DURING_DISCONNECT"
+    && retryable === true
+  ) {
+    return {
+      code,
+      message: "Hosted device-sync connection changed while disconnect was in progress. Show the account again and obtain fresh confirmation before retrying.",
+      retryable,
+      statusCode: 409,
+    };
+  }
+
+  return {
+    code: "HOSTED_DEVICE_ACCOUNT_ACTION_FAILED",
+    message: `Hosted device account ${action} failed.`,
+    retryable: false,
+    statusCode: 502,
+  };
 }
 
 function closeHostedCliBridgeServer(

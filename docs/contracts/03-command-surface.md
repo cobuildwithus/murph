@@ -69,7 +69,7 @@ vault-cli device connect <target> --vault <path> [--baseUrl <url>] [--returnTo <
 vault-cli device account list --vault <path> [--baseUrl <url>] [--provider <provider>]
 vault-cli device account show <accountId> --vault <path> [--baseUrl <url>]
 vault-cli device account reconcile <accountId> --vault <path> [--baseUrl <url>]
-vault-cli device account disconnect <accountId> --vault <path> [--baseUrl <url>]
+vault-cli device account disconnect <accountId> --vault <path> [--baseUrl <url>] [--confirm] [--expectedConnectedAt <iso-timestamp>]
 vault-cli device daemon status --vault <path> [--baseUrl <url>]
 vault-cli device daemon start --vault <path> [--baseUrl <url>]
 vault-cli device daemon stop --vault <path> [--baseUrl <url>]
@@ -388,6 +388,7 @@ Read surfaces intentionally separate summary from detail:
 - `sample-summary:<date>:<stream>` ids emitted by `timeline` are derived context handles, not valid `show` targets.
 - A successful `show` response surfaces the canonical read id in `entity.id`.
 - `device account show|reconcile|disconnect` accept the device-sync control-plane account ids returned by `device account list`; they are not canonical vault ids.
+- In hosted runtime, `device account show|reconcile|disconnect` use the signed hosted bridge and the same web-owned connection authority as browser settings. `disconnect --confirm --expectedConnectedAt <shown-connectedAt>` is accepted only after conversational approval of the shown connection scope and only while that exact connection epoch remains current; for a Junction account, approval covers the entire shared Junction connection and every upstream wearable source on it. The result preserves upstream revoke warnings and `historicalResetIncomplete` manual-removal guidance.
 
 ## Success Output
 

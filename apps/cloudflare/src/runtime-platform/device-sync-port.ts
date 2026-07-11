@@ -1,15 +1,18 @@
 import type { HostedRuntimeDeviceSyncMessagingReturnTarget } from "@murphai/assistant-runtime/hosted-runtime-contracts";
 import {
+  HOSTED_EXECUTION_DEVICE_SYNC_ACCOUNT_ACTION_PATH,
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_PATH,
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_DIRTY_ACK_PATH,
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_DIRTY_PENDING_PATH,
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PATH,
   buildHostedExecutionDeviceSyncConnectLinkPath,
   parseHostedExecutionDeviceSyncConnectLinkResponse,
+  parseHostedExecutionDeviceSyncAccountActionResponse,
   parseHostedExecutionDeviceSyncDirtyAckResponse,
   parseHostedExecutionDeviceSyncDirtyPendingResponse,
   parseHostedExecutionDeviceSyncRuntimeApplyResponse,
   parseHostedExecutionDeviceSyncRuntimeSnapshotResponse,
+  type HostedExecutionDeviceSyncAccountActionRequest,
 } from "@murphai/device-syncd/hosted-runtime";
 
 import { fetchHostedWebControlPlaneJson, type HostedWebControlTransport } from "./web-control-transport.ts";
@@ -21,6 +24,33 @@ export function createHostedWebDeviceSyncPort(input: {
   transport: HostedWebControlTransport;
 }) {
   return {
+    async requestAccountAction(
+      runtimeInput: HostedExecutionDeviceSyncAccountActionRequest & {
+        signal?: AbortSignal | null;
+      },
+    ) {
+      const payload = await fetchHostedWebControlPlaneJson({
+        body: {
+          action: runtimeInput.action,
+          ...(runtimeInput.action === "disconnect"
+            ? {
+                confirmed: runtimeInput.confirmed,
+                expectedConnectedAt: runtimeInput.expectedConnectedAt,
+              }
+            : {}),
+          connectionId: runtimeInput.connectionId,
+        },
+        boundUserId: input.boundUserId,
+        description: `Hosted device-sync account ${runtimeInput.action}`,
+        fetchImpl: input.fetchImpl,
+        path: HOSTED_EXECUTION_DEVICE_SYNC_ACCOUNT_ACTION_PATH,
+        signal: runtimeInput.signal ?? null,
+        timeoutMs: input.timeoutMs,
+        transport: input.transport,
+      });
+
+      return parseHostedExecutionDeviceSyncAccountActionResponse(payload);
+    },
     async applyUpdates(runtimeInput: {
       occurredAt?: string | null;
       signal?: AbortSignal | null;

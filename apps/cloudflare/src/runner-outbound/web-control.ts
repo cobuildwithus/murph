@@ -41,6 +41,7 @@ import {
   handleRunnerMailboxPayloadDecodeRequest,
 } from "./mailbox-payload-decode.ts";
 import {
+  HOSTED_EXECUTION_DEVICE_SYNC_ACCOUNT_ACTION_PATH,
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PATH,
   readHostedRunnerWebControlPolicy,
 } from "./shared-web-control-policy.ts";
@@ -134,6 +135,9 @@ export async function handleRunnerWebControlRequest(input: {
   const isDeviceSyncRuntimeSnapshotRequest =
     input.url.pathname === HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PATH
     && input.request.method === "POST";
+  const isDeviceSyncAccountActionRequest =
+    input.url.pathname === HOSTED_EXECUTION_DEVICE_SYNC_ACCOUNT_ACTION_PATH
+    && input.request.method === "POST";
   const isRuntimeLatencyTraceRequest =
     input.url.pathname === HOSTED_RUNTIME_LATENCY_TRACE_PATH
     && input.request.method === "POST";
@@ -165,6 +169,7 @@ export async function handleRunnerWebControlRequest(input: {
     || isCheckpointRequest
     || isBrowserVaultReplicaPublishRequest
     || isDeviceSyncRuntimeSnapshotRequest
+    || isDeviceSyncAccountActionRequest
     || isRuntimeLatencyTraceRequest
     || isLinqDeliveryOutcomeRequest
     || isLinqEgressEngagementRequest

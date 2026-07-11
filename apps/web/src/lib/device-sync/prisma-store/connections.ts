@@ -880,6 +880,48 @@ export class PrismaHostedConnectionStore {
     }));
   }
 
+  async markConnectionReconcileDueForUser(input: {
+    connectionId: string;
+    dueAt: Date;
+    tx: HostedPrismaTransactionClient;
+    userId: string;
+  }): Promise<HostedDeviceSyncDueReconcileConnectionRecord | null> {
+    const record = await this.getConnectionRecordForUser(
+      input.userId,
+      input.connectionId,
+      input.tx,
+    );
+    if (
+      !record
+      || normalizeHostedDeviceSyncLifecycleStatus(record.status) !== "active"
+    ) {
+      return null;
+    }
+
+    const existingDueAt = record.nextReconcileAt;
+    const shouldMoveDueAt = !existingDueAt
+      || existingDueAt.getTime() > input.dueAt.getTime();
+    const effectiveDueAt = shouldMoveDueAt ? input.dueAt : existingDueAt;
+
+    if (shouldMoveDueAt) {
+      await input.tx.deviceConnection.update({
+        where: {
+          id: record.id,
+        },
+        data: {
+          nextReconcileAt: effectiveDueAt,
+        },
+      });
+    }
+
+    return {
+      connectionId: record.id,
+      nextReconcileAt: toIsoTimestamp(effectiveDueAt),
+      provider: record.provider,
+      userId: record.userId,
+    };
+  }
+
   async getConnectionRecordForUser(
     userId: string,
     connectionId: string,
