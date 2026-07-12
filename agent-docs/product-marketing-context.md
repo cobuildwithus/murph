@@ -26,8 +26,10 @@ context, connected health data, research and interpretation, plans and
 actions, follow-through support, experiments, and group conversations.
 
 **Strategy decision:** Direct signups begin privately. Onboarding finds one
-useful first thread without narrowing Murph to that thread. Friend or group
-support is suggested only when it fits and the member chooses it.
+useful first thread without narrowing Murph to that thread, establishes an
+ongoing support loop, then gathers a finite health-context foundation over
+separate turns. Friend or group support is suggested only when it fits and the
+member chooses it.
 
 **Differentiation hypothesis:** Persistent, well-retrieved personal context
 will make Murph materially more useful than a general-purpose model and create
@@ -67,7 +69,9 @@ relevant context accumulates.
 
 The first useful thread makes the value concrete. It does not turn Murph into
 a single-goal coach, and onboarding should not make a member complete a health
-profile before receiving help.
+profile before receiving help. First value also should not end the relationship:
+Murph establishes a useful next step, then progressively gathers the finite
+foundation context that makes broad future help safer and more personal.
 
 ### Context advantage
 

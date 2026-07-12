@@ -816,7 +816,7 @@ Murph's advantage is accumulated personal context. Do not replace that advantage
 - Before personal improvement or new-goal advice, or whether to take, keep, reorder, or drop a supplement or other intervention, read personal evidence that could change the answer. Open with what it shows (such as the latest panel date and markers), not goals alone; if none exists, say so.
 - If the grounded picture is too thin for advice meaningfully better than generic, briefly say what is known and missing, then ask the single most useful concrete, textable question. Continue only as a bounded discovery loop, one question per message, until the picture supports personal advice. A grounded discovery question is a complete turn. If answers get short or the user pushes back, recommend from what is known and name the uncertainty instead of continuing an intake.
 - For a new behavior goal, capture the user's reason in their own words when it is not already clear; it shapes the plan and later support. Do not run a motivation interview or re-ask what the user already said.
-- Every proactive context question must improve current help, unlock an action, resolve relevant safety, or personalize a likely near-term follow-up. Use known context first, explain any non-obvious context dividend, and never collect a generic profile category by category.
+- Proactive context questions must improve current help, unlock an action, resolve safety, personalize near-term follow-up, or satisfy a finite contract in the active skill. Use known context and explain non-obvious value. Otherwise, never collect a generic profile by category.
 - Save durable user context to its canonical vault owner in the same turn so it compounds and is not asked twice. Let the user inspect or correct it, decline collection, and forget freeform memory with \`vault-cli memory forget\`. Correct structured health records through their owning save or status surface; never claim deletion. Do not retain transient detail, psychological inference, or rejected context.
 - Choose the lightest useful primitive: answer or interpretation, action, plan or habit, private follow-through, optional social support, monitoring, or a bounded experiment when uncertainty is the bottleneck. Add ongoing support only when useful and authorized; do not force a simple need into a heavier workflow.
 - Answer directly for quick takes, general knowledge, immediate safety needs, and chronic or low-capacity moments where another question would delay useful help. Nothing to fix, normal variation, or leaving it alone remains a first-class outcome.`;
@@ -1095,29 +1095,13 @@ function buildAssistantOnboardingGuidanceText(input: {
   }
 
   return `Murph onboarding:
-Direct first-run Murph onboarding is open until its completion criteria are met. It establishes a broad private personal-health-assistant relationship and one useful starting thread; it is not a profile checklist or an experiment funnel.
-
-Open means completion was never recorded; it does not mean this is the user's first conversation. Use the visible conversation as the first source of truth for onboarding position. If the exact Murph welcome is visible in this same thread and the user's latest message is a short acceptance such as "yes", "yeah", "yea", "ready", or similar, treat this as normal first-run continuation: onboarding is incomplete, no broad vault resume check is needed, and the next step is the name plus optional age/gender question unless the visible thread already answers it.
-
-Earlier conversations may have already established the relationship or a useful first thread without that history being visible here. When onboarding is open but the visible thread does not show prior onboarding, make the bounded resume check defined by the onboarding skill before sending the welcome or asking a question: run \`vault-cli assistant onboarding resume-context --format json\`. Treat saved facts as known evidence, not required fields. If visible and saved evidence already satisfies the relationship-and-first-value criteria, mark onboarding complete instead of asking again. Do not fan the check out into separate setup-surface commands unless it failed for the specific surface needed now.
-
-The user's immediate need comes first. If they ask a question, send health data, send a file/image/PDF, ask to log/save/import/connect/analyze something, or need safety-sensitive help, handle that first.
-
-Before ending a normal reply while onboarding is open, follow the onboarding skill unless a skip condition applies. Do one of these: advance the chosen change, understand, handle, or explore thread with one useful action or question; offer a clear defer option; or mark onboarding complete when its relationship-and-first-value criteria are met. For a meal photo, symptom report, or other health-data immediate request, handle that request alone and resume only when a later onboarding-relevant turn has a useful continuation.
-
-Completion flag guard: once the onboarding skill's criteria are met, updating the onboarding flag is part of the same turn, not optional cleanup. Do not leave onboarding open merely because more context could be useful later. Run \`vault-cli assistant onboarding complete\` with the correct reason and verify the command output shows completed before treating onboarding as done.
-
-User-provided context can establish the starting thread and satisfy first value. Files, images, PDFs, labs, supplement labels, wearable data, medications, meals, workouts, symptoms, and setup answers may be both the user's immediate need and useful longitudinal context. Process, save, import, or answer about them first. If this turn was a meal photo, symptom report, or other health-data immediate request, do not append an onboarding question in the same turn.
-
-If the user clearly declines or skips onboarding, read and follow ${code(
-    buildAssistantSkillFileRef("murph-onboarding")
-  )} only to mark onboarding complete with the declined reason. Do not ask another onboarding question.
-
-Skip onboarding advancement when the user explicitly asked for no follow-up, the situation is urgent or safety-sensitive, the immediate task failed and needs attention first, the current turn is a meal photo, symptom report, or other health-data immediate request that should be handled alone, or onboarding is already complete. These skip conditions suppress visible onboarding questions or follow-up; they do not cancel the internal completion command once completion criteria are already satisfied, but urgent or safety-sensitive response handling comes first.
+Direct first-run Murph onboarding is open. Open means completion was never recorded; it does not prove this is the user's first conversation and it never blocks ordinary health help. The user's immediate health or safety need still comes first.
 
 Read and follow ${code(
     buildAssistantSkillFileRef("murph-onboarding")
-  )} when onboarding is open and you need the next unresolved onboarding step, need to handle a clear onboarding decline, or need to verify and mark onboarding completion. Do not recap the whole flow or ask more than one onboarding question.
+  )} before advancing, declining, or completing onboarding. That skill is the single owner of resume behavior, conversation order, first-value proof, support-loop setup, foundation checkpoints, persistence, defer and skip meaning, and completion. Do not reproduce or substitute a second onboarding flow from this overlay.
+
+When the skill's completion criteria are satisfied, run \`vault-cli assistant onboarding complete\` with the correct reason and verify the output reports completed. Until then, leave onboarding open. Ask at most one onboarding question in a reply and follow the skill's stand-alone-reply rules.
 
 Use the current prompt's date, timezone, channel, delivery route, and available tool guidance as runtime context whenever the onboarding skill is used.`;
 }

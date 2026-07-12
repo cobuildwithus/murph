@@ -1379,47 +1379,6 @@ Execution context:
     expect(closedDynamicSuffix).not.toContain('Murph onboarding:')
   })
 
-  it('guards open onboarding against stale resumes without slowing visible welcome continuation', () => {
-    const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput({
-      onboardingGuidance: true,
-    }))
-
-    expect(prompt).toContain(
-      "Open means completion was never recorded; it does not mean this is the user's first conversation.",
-    )
-    expect(prompt).toContain(
-      'Use the visible conversation as the first source of truth for onboarding position.',
-    )
-    expect(prompt).toContain(
-      'If the exact Murph welcome is visible in this same thread and the user\'s latest message is a short acceptance',
-    )
-    expect(prompt).toContain(
-      'no broad vault resume check is needed, and the next step is the name plus optional age/gender question unless the visible thread already answers it.',
-    )
-    expect(prompt).toContain(
-      'When onboarding is open but the visible thread does not show prior onboarding, make the bounded resume check defined by the onboarding skill before sending the welcome or asking a question',
-    )
-    expect(prompt).toContain(
-      'run `vault-cli assistant onboarding resume-context --format json`',
-    )
-    expect(prompt).toContain(
-      'Treat saved facts as known evidence, not required fields.',
-    )
-    expect(prompt).toContain(
-      'Do not fan the check out into separate setup-surface commands unless it failed for the specific surface needed now.',
-    )
-    expect(prompt).toContain(
-      'If visible and saved evidence already satisfies the relationship-and-first-value criteria, mark onboarding complete instead of asking again.',
-    )
-
-    const closedPrompt = buildAssistantSystemPrompt(createCommonCodexPromptInput({
-      onboardingGuidance: false,
-    }))
-    expect(closedPrompt).not.toContain(
-      "Open means completion was never recorded; it does not mean this is the user's first conversation.",
-    )
-  })
-
   it('keeps the notification decision prefix stable across dynamic turn context', () => {
     const cacheInput = {
       toolSchemaHash: 'assistant-notification-tools-test',
@@ -1597,10 +1556,10 @@ describe('assistant experiment onboarding guidance', () => {
 
     // Context questions earn their place and durable discoveries remain controllable.
     expect(prompt).toContain(
-      'Every proactive context question must improve current help, unlock an action, resolve relevant safety, or personalize a likely near-term follow-up.',
+      'Proactive context questions must improve current help, unlock an action, resolve safety, personalize near-term follow-up, or satisfy a finite contract in the active skill.',
     )
     expect(prompt).toContain(
-      'Use known context first, explain any non-obvious context dividend, and never collect a generic profile category by category.',
+      'Otherwise, never collect a generic profile by category.',
     )
     expect(prompt).toContain(
       'Save durable user context to its canonical vault owner in the same turn so it compounds and is not asked twice.',
@@ -1849,7 +1808,7 @@ describe('assistant notification decision guidance', () => {
 })
 
 describe('assistant Murph onboarding guidance', () => {
-  it('injects a thin context-first Murph onboarding router', () => {
+  it('injects a thin, skill-owned Murph onboarding router', () => {
     const prompt = buildAssistantSystemPrompt({
       assistantCliContract: null,
       assistantHostedDeviceConnectAvailable: true,
@@ -1875,45 +1834,40 @@ describe('assistant Murph onboarding guidance', () => {
       '$MURPH_ASSISTANT_SKILLS_ROOT/murph-onboarding/SKILL.md',
     )
     expect(prompt).toContain(
-      'Direct first-run Murph onboarding is open until its completion criteria are met.',
+      'Direct first-run Murph onboarding is open.',
     )
     expect(prompt).toContain(
-      'a broad private personal-health-assistant relationship and one useful starting thread',
+      'Open means completion was never recorded; it does not prove this is the user\'s first conversation and it never blocks ordinary health help.',
     )
     expect(prompt).toContain(
-      'it is not a profile checklist or an experiment funnel',
-    )
-    expect(prompt).toContain("The user's immediate need comes first")
-    expect(prompt).toContain(
-      'advance the chosen change, understand, handle, or explore thread with one useful action or question',
+      "The user's immediate health or safety need still comes first.",
     )
     expect(prompt).toContain(
-      "Completion flag guard: once the onboarding skill's criteria are met",
+      'before advancing, declining, or completing onboarding',
     )
     expect(prompt).toContain(
-      'Do not leave onboarding open merely because more context could be useful later.',
+      'That skill is the single owner of resume behavior, conversation order, first-value proof, support-loop setup, foundation checkpoints, persistence, defer and skip meaning, and completion.',
     )
     expect(prompt).toContain(
-      'Run `vault-cli assistant onboarding complete` with the correct reason and verify the command output shows completed',
+      'Do not reproduce or substitute a second onboarding flow from this overlay.',
     )
     expect(prompt).toContain(
-      'User-provided context can establish the starting thread and satisfy first value.',
+      "When the skill's completion criteria are satisfied, run `vault-cli assistant onboarding complete` with the correct reason and verify the output reports completed.",
     )
     expect(prompt).toContain(
-      'If this turn was a meal photo, symptom report, or other health-data immediate request, do not append an onboarding question in the same turn',
+      'Until then, leave onboarding open.',
     )
     expect(prompt).toContain(
-      'If the user clearly declines or skips onboarding',
-    )
-    expect(prompt).toContain(
-      'only to mark onboarding complete with the declined reason',
-    )
-    expect(prompt).toContain(
-      'Do not recap the whole flow or ask more than one onboarding question.',
+      'Ask at most one onboarding question in a reply and follow the skill\'s stand-alone-reply rules.',
     )
     expect(prompt).toContain(
       "Use the current prompt's date, timezone, channel, delivery route, and available tool guidance as runtime context whenever the onboarding skill is used",
     )
+    expect(prompt).not.toContain(
+      'vault-cli assistant onboarding resume-context --format json',
+    )
+    expect(prompt).not.toContain('all six foundation checkpoints')
+    expect(prompt).not.toContain('offer to continue now or another day')
     expect(prompt).not.toContain(
       'including a resolved first experiment setup',
     )

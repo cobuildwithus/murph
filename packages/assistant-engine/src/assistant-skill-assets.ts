@@ -17,7 +17,7 @@ export const ASSISTANT_SKILLS = [
     slug: 'murph-onboarding',
     name: 'murph-onboarding',
     triggerHint:
-      'Use when direct first-run Murph onboarding is open and the assistant needs to establish the broad private relationship, continue one useful change/understand/handle/explore thread, use progressive context, mark first-value completion, or record a clear onboarding decline. Immediate health needs come first; no wearable, profile checklist, or experiment is universally required.',
+      'Use when direct first-run Murph onboarding is open and the assistant needs to establish the broad private relationship, understand a meaningful change/understand/handle/explore direction, begin an ongoing support loop, resolve the six progressive foundation-context checkpoints, mark completion, or record an overall decline. Immediate health needs come first; first value alone does not complete onboarding, and no experiment or positive health fact is required.',
   },
   {
     slug: 'experiment-onboarding',

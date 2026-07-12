@@ -22,7 +22,8 @@ Last verified: 2026-07-12
 - New-member onboarding begins with one useful thread: something the member
   wants to change, understand, handle, or explore. Focus makes first value
   legible; the first thread starts the relationship but does not bound Murph's
-  future help.
+  future help. First value is followed by a finite health-context foundation
+  over separate turns, not by immediate completion or an upfront profile.
 - Direct signups begin in a private relationship. Murph may suggest involving
   a friend or group only when social support fits the current thread and the
   member explicitly chooses it.
@@ -50,9 +51,10 @@ answer, interpretation, action, plan, support, or next question.
 
 Useful interactions and connected sources add canonical member context. Murph
 retrieves that context in a later moment, gives more personal help, and earns
-the trust required for the member to share more. Context collection is not a
-separate chore or an engagement target; each request for context should have a
-clear dividend in present or likely future help.
+the trust required for the member to share more. The finite new-member
+foundation can be gathered progressively after first value; beyond it, context
+collection is not a separate chore or an engagement target. Each request for
+context should have a clear dividend in present or likely future help.
 
 Do not turn the target depth of this loop into a data-point counter, profile
 completion score, or onboarding quota. Measure whether Murph delivered

@@ -1377,7 +1377,7 @@ describe('assistant skill assets', () => {
     )
   })
 
-  it('keeps context-first Murph onboarding details in the skill file', async () => {
+  it('keeps value-first, foundation-complete Murph onboarding details in the skill file', async () => {
     const murphOnboardingSkill = ASSISTANT_SKILLS.find(
       (skill) => skill.slug === 'murph-onboarding',
     )
@@ -1396,10 +1396,13 @@ describe('assistant skill assets', () => {
       'broad private relationship',
     )
     expect(murphOnboardingSkill.triggerHint).toContain(
-      'change/understand/handle/explore thread',
+      'ongoing support loop',
     )
     expect(murphOnboardingSkill.triggerHint).toContain(
-      'no wearable, profile checklist, or experiment is universally required',
+      'six progressive foundation-context checkpoints',
+    )
+    expect(murphOnboardingSkill.triggerHint).toContain(
+      'first value alone does not complete onboarding',
     )
 
     expect(raw).toContain(ASSISTANT_FIRST_CONTACT_WELCOME_MESSAGE)
@@ -1410,10 +1413,17 @@ describe('assistant skill assets', () => {
     expect(raw).toContain(
       'vault-cli assistant onboarding resume-context --format json',
     )
-    expect(compact).toContain('The snapshot is evidence, not a checklist.')
+    expect(compact).toContain(
+      'Make one targeted owning read only when the checkpoint needed now is omitted, truncated, or errored in the snapshot.',
+    )
+    expect(raw).toContain('vault-cli memory show --format json')
+    expect(compact).toContain('vault-cli blood-test list --format json')
+    expect(compact).toContain(
+      'Missing evidence is unresolved unless the visible conversation shows that the user said it was not relevant or explicitly skipped it.',
+    )
     expect(raw).toContain('## The immediate need wins')
     expect(compact).toContain(
-      'That request can become the starting thread and can satisfy first-value onboarding.',
+      'That request can establish first value and may answer one or more onboarding checkpoints, but it does not complete onboarding by itself.',
     )
     expect(raw).toContain('### 2. Minimal identity')
     expect(compact).toContain('age and relevant sex or gender context optional')
@@ -1425,53 +1435,79 @@ describe('assistant skill assets', () => {
     expect(raw).toContain('**Understand:**')
     expect(raw).toContain('**Handle:**')
     expect(raw).toContain('**Explore:**')
+    expect(raw).toContain('### 3. Find the meaningful direction')
     expect(compact).toContain(
-      'Normally learn why it matters and the main obstacle or failed attempt',
-    )
-    expect(raw).toContain('Do not run a motivation interview.')
-    expect(compact).toContain(
-      'Offer one optional baseline review of their priorities, existing data, routines, and available sources.',
+      'Understand the desired outcome in the user\'s own words, why it matters, and the main obstacle, constraint, or failed attempt.',
     )
     expect(compact).toContain(
-      'If they decline or prefer to wait, accept that choice and complete onboarding without pressure.',
+      'Offer one optional baseline review of priorities, available data, routines, and sources.',
     )
-    expect(raw).toContain('### 5. Use the lightest useful primitive')
+    expect(compact).toContain(
+      'Declining the review does not complete onboarding unless the user is declining onboarding or further setup overall.',
+    )
+    expect(raw).toContain('### 4. Establish the first ongoing support loop')
     expect(raw).toContain(
       'a bounded experiment when uncertainty about what works is the bottleneck',
     )
     expect(raw).toContain(
       'friend or group support with explicit user choice',
     )
-    expect(raw).toContain(
+    expect(compact).toContain(
       'Direct signup remains private unless the user chooses otherwise.',
     )
-    expect(raw).toContain(
-      'Every proactive context question must earn its place',
-    )
-    expect(raw).toContain(
-      'briefly explain what better help the answer enables',
-    )
+    expect(raw).toContain('### 5. Bridge from value into foundation context')
     expect(compact).toContain(
-      'A wearable can be offered when it improves the current thread or accepted baseline review; it is never a universal checkpoint.',
+      'If the user chooses later, leave onboarding open. The existing managed onboarding follow-up automation owns continuation.',
+    )
+    expect(raw).toContain('### 6. Resolve the foundation checkpoints')
+    expect(raw).toContain('1. **Data sources and wearables.**')
+    expect(raw).toContain('2. **Movement and training.**')
+    expect(raw).toContain('3. **Current protocols or experiments.**')
+    expect(raw).toContain('4. **Supplements.**')
+    expect(raw).toContain('5. **Medical and safety context.**')
+    expect(raw).toContain('6. **Recent blood tests or lab panels.**')
+    expect(compact).toContain('Feel free to send me a voice memo.')
+    expect(compact).toContain(
+      'a photo of bottles or labels is welcome if easier',
     )
     expect(raw).toContain(
       'Save useful answers in the same turn to their existing canonical owner',
+    )
+    expect(compact).toContain(
+      'Save a durable request not to discuss a category as a Preferences memory in the user\'s words.',
+    )
+    expect(compact).toContain(
+      'Do not create a fake health record or an opaque onboarding step marker merely to track coverage.',
     )
     expect(raw).toContain('## Completion')
     expect(raw).toContain(
       'The broad role, private default, and memory-control promise were delivered.',
     )
     expect(compact).toContain(
-      'Completion does not require a goal, wearable, supplement or medication inventory, medical history, lab upload, group chat, protocol, or experiment.',
+      'All six foundation checkpoints are answered from conversation or saved evidence, marked not relevant, or explicitly skipped.',
+    )
+    expect(compact).toContain(
+      'Murph delivered first value: a useful answer, interpretation, completed action, plan, baseline result, or other concrete help.',
+    )
+    expect(compact).toContain(
+      'Agreement to a future review or support loop alone does not count.',
+    )
+    expect(compact).toContain(
+      'An experiment, wearable connection, lab upload, group, or specific positive health fact is not required.',
+    )
+    expect(compact).toContain(
+      '“Later,” “tomorrow,” or “I don\'t have it handy” leaves onboarding open.',
     )
     expect(raw).toContain(
       'vault-cli assistant onboarding complete --reason user_answered',
     )
     expect(raw).toContain('--reason user_declined')
-    expect(raw).toContain('One question per reply.')
+    expect(raw).toContain('Ask at most one question per reply.')
+    expect(compact).toContain(
+      'If the last onboarding question is still unanswered, do not send a different setup question.',
+    )
 
     expect(raw).not.toContain('roughly 9-10 short assistant messages')
-    expect(raw).not.toContain('required onboarding checkpoint')
     expect(raw).not.toContain('## First-experiment outcome quality bar')
     expect(raw).not.toContain(
       'Do not mark onboarding complete until first experiment setup is resolved',

@@ -1531,7 +1531,7 @@ describe("executeHostedMailboxEvent", () => {
         localTime: "13:30",
       },
       slug: "finish-onboarding-followup",
-      summary: "Daily first-thread continuation check until Murph onboarding is complete.",
+      summary: "Daily value-and-foundation continuation check until Murph onboarding is complete.",
       tags: [
         "assistant",
         "scheduled",
@@ -1547,42 +1547,36 @@ describe("executeHostedMailboxEvent", () => {
       "vault-cli automation set-status finish-onboarding-followup --status archived",
     );
     expect(seedInput?.instructions).toContain(
-      "Goal: close or gently advance Murph onboarding after hosted signup without turning it into a drip questionnaire.",
+      "Goal: advance Murph onboarding through useful support and a finite health-context foundation without turning it into a drip questionnaire.",
     );
     expect(seedInput?.instructions).toContain("Success criteria:");
     expect(seedInput?.instructions).toContain("If `onboarding.status` is `completed`");
     expect(seedInput?.instructions).toContain(
-      "If `onboarding.status` is `open` but the relationship promise, minimal identity or decline, starting mode, and first useful result or defer are already established, run `vault-cli assistant onboarding complete --reason user_answered`.",
+      "$MURPH_ASSISTANT_SKILLS_ROOT/murph-onboarding/SKILL.md",
     );
     expect(seedInput?.instructions).toContain(
-      "If recent messages show a clear overall onboarding opt-out, use `--reason user_declined`.",
+      "The skill is the single owner of conversation order, checkpoint meaning, persistence, and completion; do not create a second state machine in this automation.",
     );
     expect(seedInput?.instructions).toContain(
-      "If the output shows completed, archive this automation, then return skip.",
+      "If the onboarding skill says the visible and saved evidence satisfies answered completion, or shows an overall decline, run its required completion command.",
     );
     expect(seedInput?.instructions).toContain(
-      "treat resume-context as evidence rather than required fields",
+      "If completion succeeds, archive this automation, then return skip.",
     );
     expect(seedInput?.instructions).toContain(
-      "Continue the current goal, question, task, or accepted baseline review with the smallest useful action or one high-value question.",
+      "If a promised follow-through or next step in the member's agreed support loop is due, do that first.",
     );
     expect(seedInput?.instructions).toContain(
-      "Never rotate through missing profile categories.",
+      "Otherwise use exactly the next unresolved step from the onboarding skill, including its required bridge before foundation questions and its targeted-read rules for omitted, truncated, or errored evidence.",
     );
     expect(seedInput?.instructions).toContain(
-      "gently offer the one-time baseline review only when it has not already been offered; honor any defer or decline without asking again.",
+      "If the latest onboarding question is unanswered, do not rotate to another setup question or repeat it through this daily automation; return skip unless a separate agreed support action is due.",
     );
     expect(seedInput?.instructions).toContain(
-      "Before sending, triple-check the snapshot and recent messages for an answer or decline.",
+      "Honor requested timing, and return skip whenever there is no timely, useful continuation.",
     );
     expect(seedInput?.instructions).toContain(
-      "If there is no timely, useful continuation",
-    );
-    expect(seedInput?.instructions).toContain(
-      "return skip rather than sending a generic setup nudge",
-    );
-    expect(seedInput?.instructions).toContain(
-      "Output: send one brief, natural, low-pressure in-chat continuation only when it advances the member's current thread.",
+      "Output: send one brief, natural, low-pressure in-chat continuation only when it advances the member's support or foundation.",
     );
     expect(seedInput?.instructions).toContain("Ask at most one question.");
     expect(seedInput?.instructions).toContain(
@@ -1590,8 +1584,9 @@ describe("executeHostedMailboxEvent", () => {
     );
     expect(seedInput?.instructions).toContain("available recent user messages");
     expect(seedInput?.instructions).toContain(
-      "one useful action or question advances the member's chosen change, understand, handle, or explore thread",
+      "one skill-approved support action or question usefully advances the relationship",
     );
+    expect(seedInput?.instructions).not.toContain("The six checkpoints are");
     expect(seedInput?.instructions).toContain("return skip");
     expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenNthCalledWith(
       1,

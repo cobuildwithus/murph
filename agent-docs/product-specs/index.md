@@ -11,7 +11,7 @@ Last verified: 2026-07-12
 | `agent-docs/product-specs/hosted-family-plan.md` | Hosted Family plan MVP: fixed four-person sponsored access, private member accounts, chat-first invites, and privacy boundaries. | Active |
 | `agent-docs/product-specs/health-commons.md` | Health Commons page graph, catalog, versioning, future aggregate outcome summaries, and artifact-storage product boundary. | Active |
 | `agent-docs/product-specs/protocol-summary-copy.md` | Source-of-truth copy rules for Health Commons protocol `summary:` fields shown on `/experiments` cards. | Active |
-| `agent-docs/product-specs/murph-onboarding.md` | New-member onboarding for a private broad-assistant relationship, one useful first thread, progressive context, optional baseline review, and simple completion. | Active |
+| `agent-docs/product-specs/murph-onboarding.md` | Value-first onboarding for a private broad-assistant relationship, an ongoing support loop, progressive health-foundation checkpoints, optional baseline review, and finite completion. | Active |
 | `agent-docs/product-specs/experiment-onboarding.md` | Experiment-only start, protocol onboarding contracts, assistant setup behavior, and private run handoff. | Active |
 | `agent-docs/product-specs/experiment-adherence-confidence.md` | Read-time assumed adherence, sensed/confirmed/assumed confidence ladder, correction semantics, and category-scoped activity evidence. | Active |
 | `agent-docs/product-specs/experiment-outcome-selection.md` | Experiment-only choice rules for member-valued outcomes, credible evidence, timeframe integrity, and setup handoff. | Active |
