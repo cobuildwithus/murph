@@ -885,10 +885,7 @@ describe('assistant consumption lookup guidance', () => {
       'When logging meals, supplements, workouts, activities, symptoms, body data, or lab results, recover the useful structure',
     )
     expect(prompt).toContain(
-      'Use the minimum evidence and tool loops sufficient for a correct answer.',
-    )
-    expect(prompt).toContain(
-      'Do not perform extra searches, scans, nudges, or optimization work that does not change the requested outcome.',
+      'Relevant personal records are core evidence. Read them before answering from general knowledge. Do not repeat reads or add work that cannot change the outcome.',
     )
   })
 
@@ -1326,7 +1323,7 @@ Execution context:
       'Current Murph product base URL for user-facing app links: http://localhost:3000',
     )
     expect(promptA.cacheMetadata.staticPromptHash).toBe(
-      '4c11734ffa297abe12a824865f091203d38349f0eda8405c7be464040705c5ad',
+      '20853edda4236e89e3905a030cfeda6c5cb03c1a6a579de678dfdf85ee5a70e7',
     )
     expect(promptA.cacheMetadata.toolSchemaHash).toBe(
       'assistant-tool-schema-common-codex-test',
@@ -1588,10 +1585,7 @@ describe('assistant experiment onboarding guidance', () => {
 
     // Data-first grounding opens with evidence rather than generic advice.
     expect(prompt).toContain(
-      'first read the minimum relevant conversation, vault, wearable, attachment, memory, or connected-source evidence that could change the answer.',
-    )
-    expect(prompt).toContain(
-      'Open with what you actually found; if none exists, say so.',
+      'Before personal improvement or new-goal advice, or whether to take, keep, reorder, or drop a supplement or other intervention, read personal evidence that could change the answer. Open with what it shows (such as the latest panel date and markers), not goals alone; if none exists, say so.',
     )
 
     // Discovery stays bounded across turns: one concrete question per message.
@@ -1599,7 +1593,7 @@ describe('assistant experiment onboarding guidance', () => {
       'ask the single most useful concrete, textable question.',
     )
     expect(prompt).toContain(
-      'Continue only as a short bounded discovery loop, one question per message, until the picture supports personal advice.',
+      'Continue only as a bounded discovery loop, one question per message, until the picture supports personal advice.',
     )
     expect(prompt).toContain(
       'A grounded discovery question is a complete turn.',
