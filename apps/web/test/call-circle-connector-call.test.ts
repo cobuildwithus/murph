@@ -14,6 +14,9 @@ const mocks = vi.hoisted(() => ({
     hostedCallCircleMatch: {
       count: vi.fn(),
     },
+    hostedGroup: {
+      findUnique: vi.fn(),
+    },
   },
   readCallCircleMatchParticipantTimeZones: vi.fn(),
   resolveVerifiedMemberTransferNumber: vi.fn(),
@@ -133,6 +136,12 @@ describe("startCallCircleConnectorCall", () => {
     });
     mocks.markCallCircleMatchOutcome.mockResolvedValue(true);
     mocks.phoneCallPreflightPrisma.hostedCallCircleMatch.count.mockResolvedValue(1);
+    mocks.phoneCallPreflightPrisma.hostedGroup.findUnique.mockResolvedValue({
+      owner: { suspendedAt: null },
+      ownerMemberId: "member_owner",
+      runtimeMember: { suspendedAt: null },
+      runtimeMemberId: "member_runtime",
+    });
     mocks.appendCallCircleTerminalNotificationsTx.mockResolvedValue([
       { mailboxItemId: "mailbox_handoff_a", memberId: "member_a" },
       { mailboxItemId: "mailbox_handoff_b", memberId: "member_b" },
@@ -143,9 +152,9 @@ describe("startCallCircleConnectorCall", () => {
     });
     mocks.signalHostedAssistantNotificationsBestEffort.mockResolvedValue(undefined);
     mocks.terminalizeUnstartedHostedPhoneCall.mockResolvedValue(true);
-    mocks.resolveVerifiedMemberTransferNumber
-      .mockResolvedValueOnce("+15551110000")
-      .mockResolvedValueOnce("+15552220000");
+    mocks.resolveVerifiedMemberTransferNumber.mockImplementation(async (
+      input: { memberId: string },
+    ) => input.memberId === "member_a" ? "+15551110000" : "+15552220000");
   });
 
   afterEach(() => {
@@ -183,7 +192,12 @@ describe("startCallCircleConnectorCall", () => {
         successCriteria: "The call transfers to the matched group member.",
       }),
       memberId: "member_a",
-      providerStartMemberIds: ["member_a", "member_b"],
+      providerStartMemberIds: [
+        "member_a",
+        "member_b",
+        "member_owner",
+        "member_runtime",
+      ],
       requestKey: "call-circle:hccm_123",
       runtimeOptions: expect.objectContaining({
         openingLine:
@@ -194,6 +208,51 @@ describe("startCallCircleConnectorCall", () => {
       matchId: "hccm_123",
       phoneCallId: "hpc_123",
       prisma: mocks.phoneCallPreflightPrisma,
+    });
+    const transferNumberResolver = mocks.createHostedPhoneCall.mock.calls[0]?.[0]
+      .transferNumberResolver;
+    await expect(transferNumberResolver?.({
+      memberId: "member_a",
+      prisma: mocks.phoneCallPreflightPrisma,
+    })).resolves.toBe("+15552220000");
+    expect(mocks.resolveVerifiedMemberTransferNumber).toHaveBeenCalledWith({
+      memberId: "member_a",
+      prisma: mocks.phoneCallPreflightPrisma,
+    });
+    expect(mocks.resolveVerifiedMemberTransferNumber).toHaveBeenCalledWith({
+      memberId: "member_b",
+      prisma: mocks.phoneCallPreflightPrisma,
+    });
+  });
+
+  it("hands off when a verified phone changes before locked provider preflight", async () => {
+    const now = new Date("2026-07-06T15:00:00.000Z");
+    const prisma = createPrisma({
+      finalAskedAt: new Date("2026-07-06T14:45:00.000Z"),
+      phoneCallId: null,
+      status: "both_confirmed",
+      windowEndAt: new Date("2026-07-06T15:30:00.000Z"),
+      windowStartAt: now,
+    });
+    mocks.getPrisma.mockReturnValue(prisma);
+    mocks.resolveVerifiedMemberTransferNumber
+      .mockResolvedValueOnce("+15551110000")
+      .mockResolvedValueOnce("+15552220000")
+      .mockResolvedValueOnce("+15553330000")
+      .mockResolvedValueOnce("+15552220000");
+
+    await expect(startCallCircleConnectorCall({
+      matchId: "hccm_123",
+      now,
+    })).resolves.toEqual({ status: "handoff" });
+
+    expect(mocks.attachCallCirclePhoneCall).not.toHaveBeenCalled();
+    expect(mocks.markCallCircleMatchOutcome).toHaveBeenCalledWith({
+      matchId: "hccm_123",
+      outcome: "connector_start_failed",
+      phoneCallId: null,
+      prisma: expect.any(Object),
+      status: "dropped",
     });
   });
 
@@ -355,7 +414,12 @@ describe("startCallCircleConnectorCall", () => {
 
     expect(mocks.createHostedPhoneCall).toHaveBeenCalledWith(expect.objectContaining({
       providerStartGuardWhere: expect.any(Function),
-      providerStartMemberIds: ["member_a", "member_b"],
+      providerStartMemberIds: [
+        "member_a",
+        "member_b",
+        "member_owner",
+        "member_runtime",
+      ],
       requestKey: "call-circle:hccm_123",
     }));
     const attemptedAt = new Date("2026-07-06T15:05:00.000Z");
@@ -979,6 +1043,14 @@ function createPrisma(input: {
             }],
           },
         }))),
+    },
+    hostedGroup: {
+      findUnique: vi.fn(async () => ({
+        owner: { suspendedAt: null },
+        ownerMemberId: "member_owner",
+        runtimeMember: { suspendedAt: null },
+        runtimeMemberId: "member_runtime",
+      })),
     },
   };
 }

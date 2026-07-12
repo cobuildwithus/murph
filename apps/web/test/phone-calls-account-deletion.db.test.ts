@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 
-import type { PrismaClient } from "@prisma/client";
+import type { Prisma, PrismaClient } from "@prisma/client";
 import type { HostedPhoneCallBrief } from "@murphai/hosted-execution/phone-calls";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -8,8 +8,13 @@ vi.mock("server-only", () => ({}));
 
 import { createCallCircleMatchProposal } from "@/src/lib/call-circle/match-store";
 import { writeCallCirclePreferences } from "@/src/lib/call-circle/participant-store";
+import {
+  createHostedPhoneLookupKey,
+  readHostedPhoneHint,
+} from "@/src/lib/hosted-onboarding/contact-privacy";
 import { lockHostedMemberRow } from "@/src/lib/hosted-onboarding/shared";
 import { createHostedPhoneCall } from "@/src/lib/phone-calls/service";
+import { resolveVerifiedMemberTransferNumber } from "@/src/lib/phone-calls/transfer";
 import type { PhoneCallRuntime } from "@/src/lib/phone-calls/types";
 import { createPrismaClient } from "@/src/lib/prisma";
 
@@ -56,10 +61,20 @@ describe("hosted phone-call account-deletion fence", () => {
     await Promise.all(clients.splice(0).map((client) => client.$disconnect()));
   });
 
-  it("makes deletion wait for the provider marker transaction and observe its committed marker", async () => {
+  it("makes distinct group-owner deletion wait for the provider marker transaction", async () => {
     const startupPrisma = clients[0]!;
     const deletionPrisma = clients[1]!;
     const observerPrisma = clients[2]!;
+    const ownerMemberId = `member_phone_owner_${randomUUID().replaceAll("-", "")}`;
+    const runtimeMemberId = `member_phone_runtime_${randomUUID().replaceAll("-", "")}`;
+    const partnerMemberId = `member_phone_partner_${randomUUID().replaceAll("-", "")}`;
+    memberIds.push(ownerMemberId, runtimeMemberId, partnerMemberId);
+    await startupPrisma.hostedMember.createMany({
+      data: [ownerMemberId, runtimeMemberId, partnerMemberId].map((id) => ({
+        billingStatus: "active" as const,
+        id,
+      })),
+    });
     const preflightEntered = createDeferred<{ phoneCallId: string }>();
     const releasePreflight = createDeferred<void>();
     const providerStartEntered = createDeferred<void>();
@@ -90,6 +105,12 @@ describe("hosted phone-call account-deletion fence", () => {
       brief: BRIEF,
       memberId,
       prisma: startupPrisma,
+      providerStartMemberIds: [
+        memberId,
+        partnerMemberId,
+        ownerMemberId,
+        runtimeMemberId,
+      ],
       requestKey: "account-deletion-barrier",
       resultNotificationRouteResolver: async () => {},
       runtime,
@@ -104,11 +125,11 @@ describe("hosted phone-call account-deletion fence", () => {
         if (!backend) throw new Error("Missing PostgreSQL backend pid.");
         deletionBackendPid.resolve(backend.pid);
         await tx.$queryRaw`
-          select 1 from "hosted_member" where "id" = ${memberId} for update
+          select 1 from "hosted_member" where "id" = ${ownerMemberId} for update
         `;
         await tx.hostedMember.update({
           data: { suspendedAt: new Date() },
-          where: { id: memberId },
+          where: { id: ownerMemberId },
         });
       });
       const snapshot = await deletionPrisma.hostedPhoneCall.findUniqueOrThrow({
@@ -125,7 +146,7 @@ describe("hosted phone-call account-deletion fence", () => {
       ) {
         throw new Error("Phone call provider start is still in progress.");
       }
-      await deletionPrisma.hostedMember.delete({ where: { id: memberId } });
+      await deletionPrisma.hostedMember.delete({ where: { id: ownerMemberId } });
     })();
     const deletionOutcome = deletion.then(
       () => ({ status: "deleted" as const }),
@@ -154,7 +175,7 @@ describe("hosted phone-call account-deletion fence", () => {
       "Phone call provider start is still in progress.",
     ));
     await expect(deletionPrisma.hostedMember.findUnique({
-      where: { id: memberId },
+      where: { id: ownerMemberId },
     })).resolves.not.toBeNull();
     await expect(deletionPrisma.hostedPhoneCall.findUnique({
       where: { id: phoneCallId },
@@ -165,6 +186,112 @@ describe("hosted phone-call account-deletion fence", () => {
     releaseProviderStart.resolve();
     await expect(startup).resolves.toMatchObject({ status: "calling" });
   });
+
+  it.each(["member_a", "member_b"] as const)(
+    "makes provider preflight observe a verified phone update that wins the %s lock",
+    async (changedSide) => {
+      const phoneWritePrisma = clients[0]!;
+      const providerPrisma = clients[1]!;
+      const observerPrisma = clients[2]!;
+      const memberBId = `member_phone_peer_${randomUUID().replaceAll("-", "")}`;
+      memberIds.push(memberBId);
+      await phoneWritePrisma.hostedMember.create({
+        data: {
+          billingStatus: "active",
+          id: memberBId,
+        },
+      });
+      const originalPhones = {
+        member_a: "+15551001001",
+        member_b: "+15551001002",
+      } as const;
+      const updatedPhone = changedSide === "member_a"
+        ? "+15551001003"
+        : "+15551001004";
+      await phoneWritePrisma.$transaction(async (tx) => {
+        await writeVerifiedPhoneTx({
+          memberId,
+          phoneNumber: originalPhones.member_a,
+          prisma: tx,
+        });
+        await writeVerifiedPhoneTx({
+          memberId: memberBId,
+          phoneNumber: originalPhones.member_b,
+          prisma: tx,
+        });
+      });
+      const initialMemberAPhone = await resolveVerifiedMemberTransferNumber({
+        memberId,
+        prisma: providerPrisma,
+      });
+      const initialMemberBPhone = await resolveVerifiedMemberTransferNumber({
+        memberId: memberBId,
+        prisma: providerPrisma,
+      });
+      expect(initialMemberAPhone).toBe(originalPhones.member_a);
+      expect(initialMemberBPhone).toBe(originalPhones.member_b);
+
+      const changedMemberId = changedSide === "member_a" ? memberId : memberBId;
+      const phoneWriteLocked = createDeferred<void>();
+      const releasePhoneWrite = createDeferred<void>();
+      const phoneWrite = phoneWritePrisma.$transaction(async (tx) => {
+        await lockHostedMemberRow(tx, changedMemberId);
+        await writeVerifiedPhoneTx({
+          memberId: changedMemberId,
+          phoneNumber: updatedPhone,
+          prisma: tx,
+        });
+        phoneWriteLocked.resolve();
+        await releasePhoneWrite.promise;
+      });
+      await phoneWriteLocked.promise;
+
+      const providerBackendPid = createDeferred<number>();
+      const providerPreflight = providerPrisma.$transaction(async (tx) => {
+        const [backend] = await tx.$queryRaw<Array<{ pid: number }>>`
+          select pg_backend_pid()::int as pid
+        `;
+        if (!backend) throw new Error("Missing PostgreSQL backend pid.");
+        providerBackendPid.resolve(backend.pid);
+        for (const currentMemberId of [memberId, memberBId].sort()) {
+          await lockHostedMemberRow(tx, currentMemberId);
+        }
+        const [currentMemberAPhone, currentMemberBPhone] = await Promise.all([
+          resolveVerifiedMemberTransferNumber({
+            memberId,
+            prisma: tx,
+          }),
+          resolveVerifiedMemberTransferNumber({
+            memberId: memberBId,
+            prisma: tx,
+          }),
+        ]);
+        return {
+          accepted:
+            currentMemberAPhone === initialMemberAPhone
+            && currentMemberBPhone === initialMemberBPhone,
+          currentMemberAPhone,
+          currentMemberBPhone,
+        };
+      });
+
+      expect(await waitForPostgresBlock({
+        backendPid: await providerBackendPid.promise,
+        prisma: observerPrisma,
+      })).toBe(true);
+      releasePhoneWrite.resolve();
+      await expect(phoneWrite).resolves.toBeUndefined();
+      await expect(providerPreflight).resolves.toEqual({
+        accepted: false,
+        currentMemberAPhone: changedSide === "member_a"
+          ? updatedPhone
+          : originalPhones.member_a,
+        currentMemberBPhone: changedSide === "member_b"
+          ? updatedPhone
+          : originalPhones.member_b,
+      });
+    },
+  );
 
   it("makes proposal creation observe a preference update that wins the member lock", async () => {
     const preferencePrisma = clients[0]!;
@@ -289,6 +416,38 @@ describe("hosted phone-call account-deletion fence", () => {
     });
   });
 });
+
+async function writeVerifiedPhoneTx(input: {
+  memberId: string;
+  phoneNumber: string;
+  prisma: Prisma.TransactionClient;
+}): Promise<void> {
+  const phoneLookupKey = createHostedPhoneLookupKey(input.phoneNumber);
+  if (!phoneLookupKey) throw new Error("Verified phone test seed requires a lookup key.");
+  const phoneNumberEncrypted = `hsb-test:${Buffer.from(JSON.stringify({
+    lane: "hosted-member-private-field",
+    scope:
+      "hosted-member-private-field:hosted-member-identity.phone-number",
+    userId: input.memberId,
+    value: input.phoneNumber,
+  }), "utf8").toString("base64url")}`;
+  await input.prisma.hostedMemberIdentity.upsert({
+    create: {
+      maskedPhoneNumberHint: readHostedPhoneHint(input.phoneNumber),
+      memberId: input.memberId,
+      phoneLookupKey,
+      phoneNumberEncrypted,
+      phoneNumberVerifiedAt: new Date("2026-07-06T14:00:00.000Z"),
+    },
+    update: {
+      maskedPhoneNumberHint: readHostedPhoneHint(input.phoneNumber),
+      phoneLookupKey,
+      phoneNumberEncrypted,
+      phoneNumberVerifiedAt: new Date("2026-07-06T14:00:00.000Z"),
+    },
+    where: { memberId: input.memberId },
+  });
+}
 
 async function waitForPostgresBlock(input: {
   backendPid: number;

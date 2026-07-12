@@ -58,6 +58,11 @@ export type CallCircleConnectorStarter = (input: {
 const RETELL_CONNECTOR_AGENT_ID_ENV = "RETELL_CONNECTOR_AGENT_ID";
 const RETELL_CONNECTOR_AGENT_VERSION_ENV = "RETELL_CONNECTOR_AGENT_VERSION";
 
+interface CallCircleProviderStartGroupAuthority {
+  ownerMemberId: string;
+  runtimeMemberId: string;
+}
+
 export async function startCallCircleConnectorCall(input: {
   matchId: string;
   now?: Date;
@@ -161,6 +166,20 @@ export async function startCallCircleConnectorCall(input: {
     return { status: "ignored" };
   }
 
+  const providerStartGroupAuthority = await readCallCircleProviderStartGroupAuthority({
+    groupId: match.groupId,
+    prisma,
+  });
+  if (!providerStartGroupAuthority) {
+    const handedOff = await markCallCircleConnectorHandoff({
+      match,
+      now,
+      outcome: "connector_start_failed",
+      prisma,
+    });
+    return { status: handedOff ? "handoff" : "ignored" };
+  }
+
   const [memberAPhone, memberBPhone] = await Promise.all([
     resolveVerifiedMemberTransferNumber({ memberId: match.memberAId }),
     resolveVerifiedMemberTransferNumber({ memberId: match.memberBId }),
@@ -184,6 +203,7 @@ export async function startCallCircleConnectorCall(input: {
     return { status: "ignored" };
   }
   let providerStartTimeZones: typeof timeZones | null = null;
+  let providerStartMemberBPhone: string | null = null;
 
   try {
     const phoneCall = await createHostedPhoneCall({
@@ -192,6 +212,18 @@ export async function startCallCircleConnectorCall(input: {
         timeZone: timeZones.memberATimeZone,
       }),
       beforeStart: async ({ phoneCallId, prisma: transactionPrisma }) => {
+        providerStartMemberBPhone = null;
+        const currentGroupAuthority = await readCallCircleProviderStartGroupAuthority({
+          groupId: match.groupId,
+          prisma: transactionPrisma,
+        });
+        if (
+          !currentGroupAuthority
+          || currentGroupAuthority.ownerMemberId !== providerStartGroupAuthority.ownerMemberId
+          || currentGroupAuthority.runtimeMemberId !== providerStartGroupAuthority.runtimeMemberId
+        ) {
+          return false;
+        }
         if (!await canUseActiveCallCircleParticipantPair({
           groupId: match.groupId,
           memberAId: match.memberAId,
@@ -207,8 +239,21 @@ export async function startCallCircleConnectorCall(input: {
           prisma: transactionPrisma,
         });
         if (!providerStartTimeZones) return false;
+        const [currentMemberAPhone, currentMemberBPhone] = await Promise.all([
+          resolveVerifiedMemberTransferNumber({
+            memberId: match.memberAId,
+            prisma: transactionPrisma,
+          }),
+          resolveVerifiedMemberTransferNumber({
+            memberId: match.memberBId,
+            prisma: transactionPrisma,
+          }),
+        ]);
+        if (currentMemberAPhone !== memberAPhone || !currentMemberBPhone) {
+          return false;
+        }
         if (isRecoverableAttachedBridge) {
-          return await canStartAttachedCallCircleBridge({
+          const canStart = await canStartAttachedCallCircleBridge({
             groupId: match.groupId,
             matchId: match.id,
             memberAId: match.memberAId,
@@ -217,12 +262,16 @@ export async function startCallCircleConnectorCall(input: {
             phoneCallId,
             prisma: transactionPrisma,
           });
+          if (canStart) providerStartMemberBPhone = currentMemberBPhone;
+          return canStart;
         }
-        return await attachCallCirclePhoneCall({
+        const attached = await attachCallCirclePhoneCall({
           matchId: match.id,
           phoneCallId,
           prisma: transactionPrisma,
         });
+        if (attached) providerStartMemberBPhone = currentMemberBPhone;
+        return attached;
       },
       memberId: match.memberAId,
       providerStartGuardWhere: (attemptedAt) => {
@@ -247,7 +296,12 @@ export async function startCallCircleConnectorCall(input: {
           now: attemptedAt,
         });
       },
-      providerStartMemberIds: [match.memberAId, match.memberBId],
+      providerStartMemberIds: [
+        match.memberAId,
+        match.memberBId,
+        providerStartGroupAuthority.ownerMemberId,
+        providerStartGroupAuthority.runtimeMemberId,
+      ],
       requestKey: buildCallCircleConnectorRequestKey(match.id),
       resultNotificationRouteResolver: async () => undefined,
       runtimeOptions: {
@@ -256,7 +310,7 @@ export async function startCallCircleConnectorCall(input: {
         retellAgentId: connectorConfig.agentId,
         retellAgentVersion: connectorConfig.agentVersion,
       },
-      transferNumberResolver: async () => memberBPhone,
+      transferNumberResolver: async () => providerStartMemberBPhone,
     });
     if (phoneCall.status !== "calling") {
       if (phoneCall.status === "starting") {
@@ -299,6 +353,32 @@ export async function startCallCircleConnectorCall(input: {
     });
     return { status: handedOff ? "handoff" : "ignored" };
   }
+}
+
+async function readCallCircleProviderStartGroupAuthority(input: {
+  groupId: string;
+  prisma: CallCirclePrismaClient;
+}): Promise<CallCircleProviderStartGroupAuthority | null> {
+  const group = await input.prisma.hostedGroup.findUnique({
+    select: {
+      owner: { select: { suspendedAt: true } },
+      ownerMemberId: true,
+      runtimeMember: { select: { suspendedAt: true } },
+      runtimeMemberId: true,
+    },
+    where: { id: input.groupId },
+  });
+  if (
+    !group?.runtimeMemberId
+    || group.owner.suspendedAt
+    || group.runtimeMember?.suspendedAt
+  ) {
+    return null;
+  }
+  return {
+    ownerMemberId: group.ownerMemberId,
+    runtimeMemberId: group.runtimeMemberId,
+  };
 }
 
 function buildCallCircleProviderStartGuardWhere(input: {
