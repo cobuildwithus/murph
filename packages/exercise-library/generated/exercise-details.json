@@ -1,5 +1,5 @@
 {
-  "catalogHash": "sha256:c999a3116f9dd14068fa17a76c09156826c51a6850ce762d4466487b7dbe14e1",
+  "catalogHash": "sha256:f2920ef97884f53a0841d442112b5afe442b373cb4676b0d9409102ae1edbad6",
   "generatedAt": null,
   "items": [
     {
@@ -19347,7 +19347,18 @@
       ],
       "equipment": [],
       "id": "EX652",
-      "images": [],
+      "images": [
+        {
+          "alt": "The exerciser holds a right forearm side plank with feet stacked, hips lifted, and the top arm vertical.",
+          "step": "Set the side plank",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/8e232bf4-4f5a-4cbb-f012-ac3846815800/public"
+        },
+        {
+          "alt": "The exerciser marches the bent top knee toward the chest, then follows the arrow to return with the pelvis steady.",
+          "step": "March and return",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/eb8e5e9f-984f-49e0-abb9-576005d28400/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
