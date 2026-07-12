@@ -1,9 +1,8 @@
 import { createHash } from 'node:crypto'
 import {
-  listAutomations,
   loadVault,
   patchAutomation,
-  patchAutomationRoutesIfUnchanged,
+  repairLegacyPersonalHomeAutomationRoutes,
   showAutomation,
   upsertAutomation,
   type AutomationRecord,
@@ -30,6 +29,7 @@ import {
   type AssistantCronDeliveryRouteValidationProfile,
 } from './cron/targets.js'
 import { buildExperimentFinalResultsSeeds } from './experiment-support-automations.js'
+import { listAssistantInputEvents } from './input-store.js'
 import { MURPH_ONBOARDING_FOLLOWUP_AUTOMATION } from './onboarding-followup-automation.js'
 
 export { MURPH_ONBOARDING_FOLLOWUP_AUTOMATION }
@@ -747,7 +747,6 @@ export async function applyMurphManagedAutomations(
   result.updated += await reconcileLegacyPersonalHomeAutomationRoutes({
     input,
     now,
-    seeds,
   })
 
   return result
@@ -756,7 +755,6 @@ export async function applyMurphManagedAutomations(
 async function reconcileLegacyPersonalHomeAutomationRoutes(input: {
   input: ApplyMurphManagedAutomationsInput
   now: Date
-  seeds: readonly MurphManagedAutomationSeed[]
 }): Promise<number> {
   if (
     input.input.seeds !== undefined ||
@@ -765,67 +763,40 @@ async function reconcileLegacyPersonalHomeAutomationRoutes(input: {
     return 0
   }
 
-  const records = (await listAutomations({
-    vaultRoot: input.input.vaultRoot,
-  })).items
-  const managedAutomationIds = new Set(
-    input.seeds.map((seed) => seed.automationId),
-  )
-  const legacyManagedAnchors = records.filter((record) =>
-    managedAutomationIds.has(record.automationId) &&
-    record.status !== 'archived' &&
-    isLegacyBareLinqHomeRoute(record.route)
-  )
-  const legacyManagedTargets = new Set(
-    legacyManagedAnchors.map((record) => record.route.deliveryTarget),
-  )
-  if (legacyManagedAnchors.length < 2 || legacyManagedTargets.size !== 1) {
+  const currentTarget = input.input.defaultRoute?.deliveryTarget
+  if (!currentTarget) {
     return 0
   }
-
-  const [legacyHomeTarget] = legacyManagedTargets
-  if (!legacyHomeTarget) {
-    return 0
+  const confirmedDirectDeliveryTargets = new Set([currentTarget])
+  const { events } = await listAssistantInputEvents({
+    limit: 100,
+    skipInvalidRecords: true,
+    vault: input.input.vaultRoot,
+  })
+  for (const event of events) {
+    const conversation = event.conversation
+    const replyTarget = event.replyTarget
+    const eventTarget = replyTarget?.threadId
+    if (
+      event.sourceMetadata?.kind === 'linq' &&
+      conversation?.actorIsSelf === false &&
+      conversation.source === 'linq' &&
+      conversation.threadIsDirect === true &&
+      typeof eventTarget === 'string' &&
+      eventTarget.length > 0 &&
+      replyTarget?.channel === 'linq'
+    ) {
+      confirmedDirectDeliveryTargets.add(eventTarget)
+    }
   }
 
-  const migratableRecords = records.filter((record) =>
-    record.status !== 'archived' &&
-    record.route.deliveryTarget === legacyHomeTarget &&
-    isLegacyBareLinqHomeRoute(record.route)
-  )
-  // Patch the managed anchor records last: an abort mid-loop then always
-  // leaves a bare managed anchor behind, so the next apply still passes the
-  // single-anchor gate above and resumes the migration instead of stranding
-  // the remaining legacy routes.
-  const orderedRecords = [
-    ...migratableRecords.filter((record) =>
-      !managedAutomationIds.has(record.automationId)
-    ),
-    ...migratableRecords.filter((record) =>
-      managedAutomationIds.has(record.automationId)
-    ),
-  ]
-
-  if (orderedRecords.length === 0) {
-    return 0
-  }
-
-  const result = await patchAutomationRoutesIfUnchanged({
+  const result = await repairLegacyPersonalHomeAutomationRoutes({
+    confirmedDirectDeliveryTargets: [...confirmedDirectDeliveryTargets],
     now: input.now,
-    patches: orderedRecords.map((record) => ({
-      expectedRoute: record.route,
-      expectedStatus: record.status,
-      lookup: record.automationId,
-      route: {
-        ...record.route,
-        currentRouteSnapshot: true,
-        threadIsDirect: true,
-      },
-    })),
     vaultRoot: input.input.vaultRoot,
   })
 
-  return result.updated ? orderedRecords.length : 0
+  return result.updated
 }
 
 function isCurrentDirectLinqHomeRoute(
@@ -835,17 +806,6 @@ function isCurrentDirectLinqHomeRoute(
     route.currentRouteSnapshot === true &&
     route.threadIsDirect === true &&
     Boolean(route.deliveryTarget)
-}
-
-function isLegacyBareLinqHomeRoute(route: AutomationRoute): boolean {
-  return route.channel === 'linq' &&
-    route.currentRouteSnapshot !== true &&
-    route.deliverySource === null &&
-    Boolean(route.deliveryTarget) &&
-    route.identityId === null &&
-    route.participantId === null &&
-    route.threadId === null &&
-    route.threadIsDirect == null
 }
 
 function markPersonalMurphManagedAutomationSeeds(

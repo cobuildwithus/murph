@@ -650,7 +650,8 @@ export async function runHostedWorkspaceAssistantPhase(
         systemMailboxMaintenance.deviceSyncMaintenanceRan,
       );
     }
-    const managedAutomationsResult = hasFreshConversationInput || shouldRunPendingAssistantInputFirst
+    const managedAutomationsResult = hasFreshConversationInput
+      || systemMailboxMaintenance.pendingAssistantInputWakeAt !== null
       ? null
       : await applyHostedManagedAutomationsBestEffort({
         input,

@@ -4772,7 +4772,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       runtimeDeviceSyncPort: deviceSyncPort,
     }));
 
-    expect(mocks.applyMurphManagedAutomations).toHaveBeenCalledTimes(1);
+    expect(mocks.applyMurphManagedAutomations).not.toHaveBeenCalled();
     expect(mocks.runHostedAssistantAutomationLane).toHaveBeenCalledTimes(1);
     expect(mocks.runHostedAssistantAutomationLane).toHaveBeenCalledWith(
       expect.objectContaining({

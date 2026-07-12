@@ -23,10 +23,12 @@ import {
   MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID,
   applyMurphManagedAutomations,
 } from '../src/assistant/managed-automations.ts'
+import { upsertAssistantInputEvent } from '../src/assistant/automation.ts'
 import { ASSISTANT_REQUIRE_SEND_AUTOMATION_TAG } from '../src/assistant/automation-tags.ts'
 import { createTempVaultContext } from './test-helpers.ts'
 
 const tempRoots: string[] = []
+let directRouteEvidenceOrdinal = 0
 
 const defaultRoute = {
   channel: 'telegram',
@@ -74,6 +76,55 @@ async function createVaultRoot(): Promise<string> {
   tempRoots.push(context.parentRoot)
   await initializeVault({ vaultRoot: context.vaultRoot })
   return context.vaultRoot
+}
+
+async function stageDirectLinqRouteEvidence(input: {
+  deliveryTarget: string
+  threadIsDirect?: boolean
+  vaultRoot: string
+}): Promise<void> {
+  directRouteEvidenceOrdinal += 1
+  const ordinal = String(directRouteEvidenceOrdinal)
+  await upsertAssistantInputEvent({
+    vault: input.vaultRoot,
+    event: {
+      content: { text: 'Stored route authority evidence.' },
+      conversation: {
+        accountId: 'linq-account',
+        actorId: 'member-actor',
+        actorIsSelf: false,
+        source: 'linq',
+        threadId: `blinded-thread-${ordinal}`,
+        threadIsDirect: input.threadIsDirect ?? true,
+      },
+      occurredAt: `2026-07-10T12:00:${ordinal.padStart(2, '0')}.000Z`,
+      replyTarget: {
+        channel: 'linq',
+        messageId: `message-${ordinal}`,
+        threadId: input.deliveryTarget,
+      },
+      sourceMetadata: {
+        kind: 'linq',
+        partCount: 1,
+        reactionEligible: false,
+        replyToMessageId: null,
+        senderHandle: null,
+        service: 'imessage',
+      },
+      sourceRef: {
+        dedupeKey: `route-evidence-${ordinal}`,
+        eventId: `route-event-${ordinal}`,
+        itemId: `route-item-${ordinal}`,
+        kind: 'hosted-mailbox',
+        lane: 'conversation',
+        laneSeq: ordinal,
+        payloadSchema: 'hosted-mailbox-item-v1',
+        payloadSource: 'inline',
+        source: 'hosted-mailbox',
+        wakeSchema: 'hosted-workspace-wake-v1',
+      },
+    },
+  })
 }
 
 describe('applyMurphManagedAutomations core integration', () => {
@@ -341,7 +392,7 @@ describe('applyMurphManagedAutomations core integration', () => {
     })).resolves.toBeNull()
   })
 
-  it('upgrades only legacy routes anchored to the personal managed home target', async () => {
+  it('upgrades only legacy routes with stored direct Linq route evidence', async () => {
     const vaultRoot = await createVaultRoot()
     const legacyHomeRoute = {
       channel: 'linq',
@@ -419,6 +470,10 @@ describe('applyMurphManagedAutomations core integration', () => {
       title: 'Group reminder',
       vaultRoot,
     })
+    await stageDirectLinqRouteEvidence({
+      deliveryTarget: 'legacy-home-chat',
+      vaultRoot,
+    })
 
     const currentHomeRoute = {
       ...legacyHomeRoute,
@@ -477,7 +532,7 @@ describe('applyMurphManagedAutomations core integration', () => {
     })
   })
 
-  it('does not infer a personal home route from ambiguous managed legacy targets', async () => {
+  it('does not infer personal authority from managed rows or stored group evidence', async () => {
     const vaultRoot = await createVaultRoot()
     const firstLegacyRoute = {
       channel: 'linq',
@@ -525,6 +580,11 @@ describe('applyMurphManagedAutomations core integration', () => {
       summary: null,
       tags: ['assistant', 'scheduled'],
       title: 'Ambiguous user reminder',
+      vaultRoot,
+    })
+    await stageDirectLinqRouteEvidence({
+      deliveryTarget: 'first-legacy-chat',
+      threadIsDirect: false,
       vaultRoot,
     })
 
@@ -756,7 +816,7 @@ describe('applyMurphManagedAutomations core integration', () => {
     })).resolves.toMatchObject({ status: 'archived' })
   })
 
-  it('resumes a partially applied migration while a bare managed anchor remains', async () => {
+  it('does not treat two bare managed records as personal-route authority', async () => {
     const vaultRoot = await createVaultRoot()
     const legacyHomeRoute = {
       channel: 'linq',
@@ -782,9 +842,6 @@ describe('applyMurphManagedAutomations core integration', () => {
       seeds: [digestSeed, insightSeed],
       vaultRoot,
     })
-    // A user reminder that an earlier interrupted migration already patched:
-    // migration patches non-managed records before the managed anchors, so
-    // this is the only reachable partial state.
     await upsertAutomation({
       automationId: 'automation_01KZ0000000000000000000030',
       continuityPolicy: 'fresh',
@@ -815,7 +872,7 @@ describe('applyMurphManagedAutomations core integration', () => {
       now: new Date('2026-07-10T12:05:00.000Z'),
       vaultRoot,
     })).resolves.toMatchObject({
-      updated: 2,
+      updated: 0,
     })
 
     await expect(showAutomation({
@@ -823,9 +880,7 @@ describe('applyMurphManagedAutomations core integration', () => {
       vaultRoot,
     })).resolves.toMatchObject({
       route: {
-        currentRouteSnapshot: true,
         deliveryTarget: 'legacy-home-chat',
-        threadIsDirect: true,
       },
     })
     await expect(showAutomation({
@@ -833,11 +888,17 @@ describe('applyMurphManagedAutomations core integration', () => {
       vaultRoot,
     })).resolves.toMatchObject({
       route: {
-        currentRouteSnapshot: true,
         deliveryTarget: 'legacy-home-chat',
-        threadIsDirect: true,
       },
     })
+    expect((await showAutomation({
+      automationId: MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID,
+      vaultRoot,
+    }))?.route).not.toHaveProperty('currentRouteSnapshot')
+    expect((await showAutomation({
+      automationId: MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID,
+      vaultRoot,
+    }))?.route).not.toHaveProperty('currentRouteSnapshot')
     await expect(applyMurphManagedAutomations({
       defaultRoute: currentHomeRoute,
       now: new Date('2026-07-10T12:10:00.000Z'),

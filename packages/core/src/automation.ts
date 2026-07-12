@@ -24,8 +24,10 @@ import {
 } from "@murphai/contracts";
 
 import { VAULT_LAYOUT } from "./constants.ts";
+import { commitAuditedCanonicalWrite } from "./audited-write.ts";
 import { generateRecordId } from "./ids.ts";
 import { VaultError } from "./errors.ts";
+import { stageMarkdownDocumentWrite } from "./markdown-documents.ts";
 import {
   loadMarkdownRegistryDocuments,
   readRegistryRecord,
@@ -46,7 +48,7 @@ import {
   canonicalLogicalResource,
   withCanonicalResourceLocks,
 } from "./operations/index.ts";
-import type { FrontmatterObject } from "./types.ts";
+import type { FileChange, FrontmatterObject } from "./types.ts";
 
 const AUTOMATIONS_DIRECTORY = VAULT_LAYOUT.automationsDirectory;
 const automationRegistryResource = canonicalLogicalResource(
@@ -123,21 +125,14 @@ export interface PatchAutomationInput {
   vaultRoot: string;
 }
 
-export interface AutomationRoutePatchPrecondition {
-  expectedRoute: AutomationRoute;
-  expectedStatus: AutomationStatus;
-  lookup: string;
-  route: AutomationRoute;
-}
-
-export interface PatchAutomationRoutesIfUnchangedInput {
+export interface RepairLegacyPersonalHomeAutomationRoutesInput {
+  confirmedDirectDeliveryTargets: readonly string[];
   now?: Date;
-  patches: readonly AutomationRoutePatchPrecondition[];
   vaultRoot: string;
 }
 
-export interface PatchAutomationRoutesIfUnchangedResult {
-  updated: boolean;
+export interface RepairLegacyPersonalHomeAutomationRoutesResult {
+  updated: number;
 }
 
 export interface AdvanceAutomationDeviceActivityCursorInput {
@@ -819,48 +814,89 @@ export async function patchAutomation(
   });
 }
 
-export async function patchAutomationRoutesIfUnchanged(
-  input: PatchAutomationRoutesIfUnchangedInput,
-): Promise<PatchAutomationRoutesIfUnchangedResult> {
+export async function repairLegacyPersonalHomeAutomationRoutes(
+  input: RepairLegacyPersonalHomeAutomationRoutesInput,
+): Promise<RepairLegacyPersonalHomeAutomationRoutesResult> {
+  const confirmedTargets = new Set(
+    input.confirmedDirectDeliveryTargets.flatMap((target) => {
+      const normalized = normalizeNullableString(target);
+      return normalized ? [normalized] : [];
+    }),
+  );
+  if (confirmedTargets.size === 0) {
+    return { updated: 0 };
+  }
+
   return withAutomationRegistryLock(input.vaultRoot, async () => {
     const records = await loadAutomationRecords(input.vaultRoot);
-    const planned = input.patches.flatMap((patch) => {
-      const existingRecord = selectAutomationRecord(records, {
-        automationId: patch.lookup,
-        slug: patch.lookup,
-      });
-      return existingRecord ? [{ existingRecord, patch }] : [];
-    });
-    if (
-      planned.length !== input.patches.length
-      || planned.some(({ existingRecord, patch }) =>
-        existingRecord.status !== patch.expectedStatus
-        || !automationRoutesEqual(existingRecord.route, patch.expectedRoute)
+    const updatedAt = (input.now ?? new Date()).toISOString();
+    const planned = records
+      .filter((record) =>
+        record.status !== "archived"
+        && confirmedTargets.has(record.route.deliveryTarget ?? "")
+        && isLegacyBareLinqPersonalHomeRoute(record.route)
       )
-    ) {
-      return { updated: false };
+      .map((record): AutomationRecord => ({
+        ...record,
+        route: {
+          ...record.route,
+          currentRouteSnapshot: true,
+          threadIsDirect: true,
+        },
+        updatedAt,
+      }));
+    if (planned.length === 0) {
+      return { updated: 0 };
     }
 
-    for (const { existingRecord, patch } of planned) {
-      await upsertAutomationWithLatestRegistry({
-        automationId: existingRecord.automationId,
-        assistantTargetOverride: existingRecord.assistantTargetOverride,
-        continuityPolicy: existingRecord.continuityPolicy,
-        instructions: existingRecord.instructions,
-        now: input.now,
-        route: patch.route,
-        schedule: existingRecord.schedule,
-        slug: existingRecord.slug,
-        status: existingRecord.status,
-        summary: existingRecord.summary,
-        tags: existingRecord.tags,
-        title: existingRecord.title,
-        vaultRoot: input.vaultRoot,
-      }, records);
-    }
+    const targetIds = planned.map((record) => record.automationId);
+    await commitAuditedCanonicalWrite({
+      vaultRoot: input.vaultRoot,
+      operationType: "automation_legacy_personal_home_route_repair",
+      summary: `Repair ${planned.length} legacy personal-home automation route(s)`,
+      occurredAt: updatedAt,
+      audit: {
+        action: "automation_upsert",
+        commandName: "core.repairLegacyPersonalHomeAutomationRoutes",
+        summary: `Repaired ${planned.length} legacy personal-home automation route(s).`,
+        targetIds,
+        occurredAt: updatedAt,
+      },
+      mutate: async ({ batch }) => {
+        const changes: FileChange[] = [];
+        for (const record of planned) {
+          const write = await stageMarkdownDocumentWrite(
+            batch,
+            {
+              created: false,
+              relativePath: record.relativePath,
+            },
+            buildAutomationMarkdown(record),
+            { overwrite: true },
+          );
+          changes.push(...write.changes);
+        }
+        return {
+          result: null,
+          changes,
+          targetIds,
+        };
+      },
+    });
 
-    return { updated: true };
+    return { updated: planned.length };
   });
+}
+
+function isLegacyBareLinqPersonalHomeRoute(route: AutomationRoute): boolean {
+  return route.channel === "linq"
+    && route.currentRouteSnapshot !== true
+    && route.deliverySource === null
+    && Boolean(route.deliveryTarget)
+    && route.identityId === null
+    && route.participantId === null
+    && route.threadId === null
+    && route.threadIsDirect == null;
 }
 
 export async function advanceAutomationDeviceActivityCursor(
