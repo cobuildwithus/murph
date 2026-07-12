@@ -103,6 +103,12 @@
       "@murphai/hosted-execution/phone-calls": [
         "packages/hosted-execution/src/phone-calls.ts"
       ],
+      "@murphai/hosted-execution/clinical-records": [
+        "packages/hosted-execution/src/clinical-records.ts"
+      ],
+      "@murphai/hosted-execution/plan-usage": [
+        "packages/hosted-execution/src/plan-usage.ts"
+      ],
       "@murphai/hosted-execution/routes": [
         "packages/hosted-execution/src/routes.ts"
       ],
