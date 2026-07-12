@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { once } from "node:events";
-import { rm } from "node:fs/promises";
+import { rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
+import path from "node:path";
 
 import { Cli } from "incur";
 import { afterEach, test, vi } from "vitest";
@@ -12,6 +13,7 @@ import {
   HOSTED_CLI_BRIDGE_URL_ENV,
   HOSTED_RUNTIME_PROCESS_ENV,
 } from "@murphai/hosted-execution/cli-runtime-bridge";
+import { upsertAutomation } from "@murphai/core";
 import { registerAutomationCommands } from "../src/commands/automation.js";
 import {
   createTempVaultContext,
@@ -30,7 +32,7 @@ interface AssistantCurrentRouteBridgeResponse {
     participantId: string | null;
     threadId: string | null;
     threadIsDirect?: boolean | null;
-  };
+  } | null;
 }
 
 async function startAssistantCurrentRouteBridgeStub(input: {
@@ -282,7 +284,7 @@ test("automation save enriches an explicit same-conversation target with blinded
     assert.equal(shown.envelope.data?.automation?.route.channel, "linq");
     assert.equal(
       shown.envelope.data?.automation?.route.currentRouteSnapshot,
-      undefined,
+      true,
     );
     assert.equal(
       shown.envelope.data?.automation?.route.deliveryTarget,
@@ -310,9 +312,261 @@ test("automation save enriches an explicit same-conversation target with blinded
   }
 });
 
-// A different conversation's explicit target must not absorb the current
-// conversation's locators.
-test("automation save does not enrich an explicit different-conversation target", async () => {
+test("group automation writes are restricted to a canonical snapshot of the current room", async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    "murph-automation-group-route-authority-",
+  );
+  const bridge = await startAssistantCurrentRouteBridgeStub({
+    response: {
+      route: {
+        channel: "linq",
+        deliveryTarget: "linq_group_current",
+        identityId: "hid_group_identity",
+        participantId: "hid_group_participant",
+        threadId: "hid_group_thread",
+        threadIsDirect: false,
+      },
+    },
+    token: "test-bridge-token",
+  });
+
+  try {
+    const cli = Cli.create("vault-cli", {
+      description: "automation group route authority test cli",
+      version: "0.0.0-test",
+    });
+    registerAutomationCommands(cli);
+    vi.stubEnv(HOSTED_RUNTIME_PROCESS_ENV, "1");
+    vi.stubEnv(HOSTED_CLI_BRIDGE_TOKEN_ENV, "test-bridge-token");
+    vi.stubEnv(HOSTED_CLI_BRIDGE_URL_ENV, bridge.url);
+
+    await upsertAutomation({
+      automationId: "automation_01HZXW2Y6Y8QWQ8QWQ8QWQ8QWY",
+      continuityPolicy: "preserve",
+      instructions: "Send the other room reminder.",
+      route: {
+        channel: "linq",
+        deliverySource: null,
+        deliveryTarget: "linq_group_other",
+        identityId: null,
+        participantId: null,
+        threadId: null,
+        threadIsDirect: false,
+      },
+      schedule: { kind: "at", at: "2026-12-06T12:00:00.000Z" },
+      slug: "foreign-room-reminder",
+      status: "active",
+      tags: [],
+      title: "Foreign room reminder",
+      vaultRoot,
+    });
+
+    const saved = await runInProcessJsonCli(cli, [
+      "automation",
+      "save",
+      "Current room reminder",
+      "--slug",
+      "current-room-reminder",
+      "--instructions",
+      "Send the reminder.",
+      "--schedule-kind",
+      "at",
+      "--schedule-at",
+      "2026-12-06T12:00:00.000Z",
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(saved.envelope.ok, true);
+
+    const alternateSave = await runInProcessJsonCli(cli, [
+      "automation",
+      "save",
+      "Other route reminder",
+      "--slug",
+      "other-route-reminder",
+      "--instructions",
+      "Send the reminder.",
+      "--schedule-kind",
+      "at",
+      "--schedule-at",
+      "2026-12-06T12:00:00.000Z",
+      "--channel",
+      "linq",
+      "--delivery-target",
+      "linq_group_other",
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(alternateSave.envelope.ok, false);
+    assert.equal(
+      alternateSave.envelope.ok ? null : alternateSave.envelope.error.code,
+      "UNKNOWN",
+      JSON.stringify(alternateSave.envelope),
+    );
+
+    const alternateEdit = await runInProcessJsonCli(cli, [
+      "automation",
+      "edit",
+      "current-room-reminder",
+      "--channel",
+      "linq",
+      "--delivery-target",
+      "linq_group_other",
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(alternateEdit.envelope.ok, false);
+    assert.equal(
+      alternateEdit.envelope.ok ? null : alternateEdit.envelope.error.code,
+      "UNKNOWN",
+    );
+
+    const importPath = path.join(parentRoot, "alternate-route.json");
+    await writeFile(importPath, JSON.stringify({
+      title: "Imported other route",
+      slug: "imported-other-route",
+      status: "active",
+      continuityPolicy: "preserve",
+      schedule: { kind: "at", at: "2026-12-06T12:00:00.000Z" },
+      route: {
+        channel: "linq",
+        deliveryTarget: "linq_group_other",
+        threadIsDirect: true,
+      },
+      instructions: "Send the reminder.",
+      tags: [],
+    }));
+    const imported = await runInProcessJsonCli(cli, [
+      "automation",
+      "import-json",
+      "--input",
+      `@${importPath}`,
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(imported.envelope.ok, false);
+    assert.equal(
+      imported.envelope.ok ? null : imported.envelope.error.code,
+      "UNKNOWN",
+    );
+
+    const collidedSave = await runInProcessJsonCli(cli, [
+      "automation",
+      "save",
+      "Foreign room replacement",
+      "--slug",
+      "foreign-room-reminder",
+      "--instructions",
+      "Replace it.",
+      "--schedule-kind",
+      "at",
+      "--schedule-at",
+      "2026-12-06T12:00:00.000Z",
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(collidedSave.envelope.ok, false);
+
+    const collidedEdit = await runInProcessJsonCli(cli, [
+      "automation",
+      "edit",
+      "foreign-room-reminder",
+      "--channel",
+      "linq",
+      "--delivery-target",
+      "linq_group_current",
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(collidedEdit.envelope.ok, false);
+
+    const collidedImportPath = path.join(parentRoot, "collided-route.json");
+    await writeFile(collidedImportPath, JSON.stringify({
+      title: "Foreign room import replacement",
+      automationId: "automation_01HZXW2Y6Y8QWQ8QWQ8QWQ8QWY",
+      slug: "foreign-room-reminder",
+      status: "active",
+      continuityPolicy: "preserve",
+      schedule: { kind: "at", at: "2026-12-06T12:00:00.000Z" },
+      route: {
+        channel: "linq",
+        deliveryTarget: "linq_group_current",
+        threadIsDirect: false,
+      },
+      instructions: "Replace it.",
+      tags: [],
+    }));
+    const collidedImport = await runInProcessJsonCli(cli, [
+      "automation",
+      "import-json",
+      "--input",
+      `@${collidedImportPath}`,
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(collidedImport.envelope.ok, false);
+
+    const collidedStatus = await runInProcessJsonCli(cli, [
+      "automation",
+      "set-status",
+      "foreign-room-reminder",
+      "--status",
+      "paused",
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(collidedStatus.envelope.ok, false);
+
+    for (const status of ["paused", "active"] as const) {
+      const updated = await runInProcessJsonCli(cli, [
+        "automation",
+        "set-status",
+        "current-room-reminder",
+        "--status",
+        status,
+        "--vault",
+        vaultRoot,
+      ]);
+      assert.equal(updated.envelope.ok, true);
+    }
+
+    const shown = await runInProcessJsonCli<{
+      automation: {
+        route: {
+          channel: string;
+          currentRouteSnapshot?: boolean | null;
+          deliveryTarget: string | null;
+          identityId: string | null;
+          participantId: string | null;
+          threadId: string | null;
+          threadIsDirect?: boolean | null;
+        };
+      } | null;
+    }>(cli, [
+      "automation",
+      "show",
+      "current-room-reminder",
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(shown.envelope.ok, true);
+    assert.deepEqual(shown.envelope.data?.automation?.route, {
+      channel: "linq",
+      currentRouteSnapshot: true,
+      deliverySource: null,
+      deliveryTarget: "linq_group_current",
+      identityId: "hid_group_identity",
+      participantId: "hid_group_participant",
+      threadId: "hid_group_thread",
+      threadIsDirect: false,
+    });
+  } finally {
+    await bridge.stop();
+    await rm(parentRoot, { recursive: true, force: true });
+  }
+});
+
+test("hosted automation save rejects an explicit different-conversation target", async () => {
   const { parentRoot, vaultRoot } = await createTempVaultContext(
     "murph-automation-current-route-no-enrich-",
   );
@@ -324,6 +578,7 @@ test("automation save does not enrich an explicit different-conversation target"
         identityId: "hid_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
         participantId: "hid_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
         threadId: "hid_cccccccccccccccccccccccccccccccc",
+        threadIsDirect: true,
       },
     },
     token: "test-bridge-token",
@@ -358,8 +613,7 @@ test("automation save does not enrich an explicit different-conversation target"
       "--vault",
       vaultRoot,
     ]);
-    assert.equal(saved.envelope.ok, true);
-    assert.equal(saved.exitCode, null);
+    assert.equal(saved.envelope.ok, false);
 
     const shown = await runInProcessJsonCli<{
       automation: {
@@ -379,15 +633,84 @@ test("automation save does not enrich an explicit different-conversation target"
       "--vault",
       vaultRoot,
     ]);
-    assert.equal(shown.exitCode, null);
     assert.equal(shown.envelope.ok, true);
+    assert.equal(shown.envelope.data?.automation, null);
+  } finally {
+    await bridge.stop();
+    await rm(parentRoot, { recursive: true, force: true });
+  }
+});
+
+test("hosted automation writes fail closed when the current route is unavailable", async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    "murph-automation-current-route-unavailable-",
+  );
+  const bridge = await startAssistantCurrentRouteBridgeStub({
+    response: { route: null },
+    token: "test-bridge-token",
+  });
+
+  try {
+    const cli = Cli.create("vault-cli", {
+      description: "automation unavailable current route test cli",
+      version: "0.0.0-test",
+    });
+    registerAutomationCommands(cli);
+    vi.stubEnv(HOSTED_RUNTIME_PROCESS_ENV, "1");
+    vi.stubEnv(HOSTED_CLI_BRIDGE_TOKEN_ENV, "test-bridge-token");
+    vi.stubEnv(HOSTED_CLI_BRIDGE_URL_ENV, bridge.url);
+
+    const saved = await runInProcessJsonCli(cli, [
+      "automation",
+      "save",
+      "Unavailable route reminder",
+      "--slug",
+      "unavailable-route-reminder",
+      "--instructions",
+      "Send the reminder.",
+      "--schedule-kind",
+      "at",
+      "--schedule-at",
+      "2026-12-06T12:00:00.000Z",
+      "--channel",
+      "linq",
+      "--delivery-target",
+      "linq_group_unverified",
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(saved.envelope.ok, false);
     assert.equal(
-      shown.envelope.data?.automation?.route.deliveryTarget,
-      "linq_chat_other",
+      saved.envelope.ok ? null : saved.envelope.error.message,
+      "Hosted automation changes require one verified current conversation.",
     );
-    assert.equal(shown.envelope.data?.automation?.route.identityId, null);
-    assert.equal(shown.envelope.data?.automation?.route.participantId, null);
-    assert.equal(shown.envelope.data?.automation?.route.threadId, null);
+
+    vi.stubEnv(HOSTED_CLI_BRIDGE_TOKEN_ENV, "");
+    vi.stubEnv(HOSTED_CLI_BRIDGE_URL_ENV, "");
+    const missingBridge = await runInProcessJsonCli(cli, [
+      "automation",
+      "save",
+      "Missing bridge reminder",
+      "--slug",
+      "missing-bridge-reminder",
+      "--instructions",
+      "Send the reminder.",
+      "--schedule-kind",
+      "at",
+      "--schedule-at",
+      "2026-12-06T12:00:00.000Z",
+      "--channel",
+      "linq",
+      "--delivery-target",
+      "linq_group_unverified",
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(missingBridge.envelope.ok, false);
+    assert.equal(
+      missingBridge.envelope.ok ? null : missingBridge.envelope.error.message,
+      "Hosted automation changes require one verified current conversation.",
+    );
   } finally {
     await bridge.stop();
     await rm(parentRoot, { recursive: true, force: true });

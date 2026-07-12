@@ -2,6 +2,7 @@ import { Cli, z } from "incur";
 
 import {
   HostedCliBridgeRequestError,
+  isHostedRuntimeProcessEnv,
   readHostedCliBridgeEnv,
   requestHostedCliAssistantCurrentRoute,
   type HostedCliAssistantCurrentRoute,
@@ -88,6 +89,11 @@ interface AutomationAssistantTargetOverrideOptions {
 interface AutomationAssistantTargetOverrideEditOptions
   extends AutomationAssistantTargetOverrideOptions {
   clearAssistantTargetOverride?: boolean;
+}
+
+interface AutomationCurrentRouteContext {
+  hosted: boolean;
+  route: HostedCliAssistantCurrentRoute | null;
 }
 
 export const automationRecordSchema = z
@@ -238,15 +244,6 @@ function hasDefinedAutomationOption(options: object): boolean {
   return Object.values(options).some((value) => value !== undefined);
 }
 
-// Only save/create may inherit the hosted assistant's current conversation as
-// the route; edit always requires a complete explicit route.
-async function buildAutomationSaveRouteFromOptions(input: AutomationRouteOptions): Promise<AutomationRoute> {
-  return buildAutomationRouteFromOptions(
-    input,
-    await readAutomationSaveCurrentRoute(input),
-  );
-}
-
 function buildAutomationRouteFromOptions(
   input: AutomationRouteOptions,
   currentRoute: HostedCliAssistantCurrentRoute | null,
@@ -284,16 +281,16 @@ function buildAutomationRouteFromOptions(
   return parsed;
 }
 
-async function readAutomationSaveCurrentRoute(input: AutomationRouteOptions): Promise<HostedCliAssistantCurrentRoute | null> {
-  if (!automationSaveNeedsCurrentRoute(input)) {
-    return null;
-  }
-
+async function readAutomationCurrentRoute(): Promise<AutomationCurrentRouteContext> {
+  const hosted = isHostedRuntimeProcessEnv(process.env);
   const bridge = readHostedCliBridgeEnv(process.env);
   if (bridge) {
     try {
       const response = await requestHostedCliAssistantCurrentRoute({ bridge });
-      return response.route;
+      return {
+        hosted: true,
+        route: response.route,
+      };
     } catch (error) {
       if (error instanceof HostedCliBridgeRequestError) {
         throw new VaultCliError(
@@ -305,17 +302,73 @@ async function readAutomationSaveCurrentRoute(input: AutomationRouteOptions): Pr
     }
   }
 
-  return null;
+  return {
+    hosted,
+    route: null,
+  };
 }
 
-// The current route both fills a fully omitted route and enriches an explicit
-// same-conversation target with its missing conversation locators, so it is
-// needed whenever any of those fields is still unset.
-function automationSaveNeedsCurrentRoute(input: AutomationRouteOptions): boolean {
-  return !normalizeAutomationRouteOption(input.channel)
-    || !normalizeAutomationRouteOption(input.identityId)
-    || !normalizeAutomationRouteOption(input.participantId)
-    || !normalizeAutomationRouteOption(input.threadId);
+function authorizeAutomationRouteForCurrentContext(
+  route: AutomationRoute,
+  currentRouteContext: AutomationCurrentRouteContext,
+): AutomationRoute {
+  const currentRoute = currentRouteContext.route;
+  if (!currentRouteContext.hosted) {
+    return route;
+  }
+
+  if (!currentRoute || typeof currentRoute.threadIsDirect !== "boolean") {
+    return invalidAutomationOption(
+      "Hosted automation changes require one verified current conversation.",
+    );
+  }
+
+  const currentChannel = normalizeAutomationRouteOption(currentRoute.channel);
+  const currentDeliveryTarget = normalizeAutomationRouteOption(
+    currentRoute.deliveryTarget,
+  );
+  if (
+    normalizeAutomationRouteOption(route.channel) !== currentChannel ||
+    normalizeAutomationRouteOption(route.deliveryTarget) !== currentDeliveryTarget
+  ) {
+    return invalidAutomationOption(
+      "A hosted conversation can create or update automations only for its current chat.",
+    );
+  }
+
+  return automationRouteSchema.parse({
+    ...resolveAssistantDeliveryRouteWithCurrentRoute({}, currentRoute),
+    currentRouteSnapshot: true,
+    threadIsDirect: currentRoute.threadIsDirect,
+  });
+}
+
+async function authorizeExistingAutomationForUpsert(input: {
+  currentRouteContext: AutomationCurrentRouteContext;
+  lookups: readonly (string | null | undefined)[];
+  vaultRoot: string;
+}): Promise<void> {
+  if (!input.currentRouteContext.hosted) {
+    return;
+  }
+
+  for (const lookup of new Set(input.lookups.map((value) => value?.trim()).filter(Boolean))) {
+    const existing = await showAutomation(input.vaultRoot, lookup as string);
+    if (existing) {
+      authorizeAutomationRouteForCurrentContext(
+        existing.route,
+        input.currentRouteContext,
+      );
+    }
+  }
+}
+
+function normalizeAutomationSlugLookup(title: string): string {
+  return title
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/gu, "-")
+    .replace(/^-+|-+$/gu, "");
 }
 
 function assertAutomationRouteCanDeliver(
@@ -637,13 +690,25 @@ export function registerAutomationCommands(cli: Cli.Cli) {
     output: automationSaveResultSchema,
     async run(context) {
       const now = new Date().toISOString();
-      const route = await buildAutomationSaveRouteFromOptions({
-        channel: context.options.channel,
-        deliveryTarget: context.options.deliveryTarget,
-        identityId: context.options.identityId,
-        participantId: context.options.participantId,
-        threadId: context.options.threadId,
+      const currentRouteContext = await readAutomationCurrentRoute();
+      await authorizeExistingAutomationForUpsert({
+        currentRouteContext,
+        lookups: [
+          context.options.id,
+          context.options.slug ?? normalizeAutomationSlugLookup(context.args.title),
+        ],
+        vaultRoot: context.options.vault,
       });
+      const route = authorizeAutomationRouteForCurrentContext(
+        buildAutomationRouteFromOptions({
+          channel: context.options.channel,
+          deliveryTarget: context.options.deliveryTarget,
+          identityId: context.options.identityId,
+          participantId: context.options.participantId,
+          threadId: context.options.threadId,
+        }, currentRouteContext.route),
+        currentRouteContext,
+      );
       if (automationStatusIsActive(context.options.status)) {
         assertActiveAutomationRouteCanDeliver(route);
       }
@@ -717,6 +782,18 @@ export function registerAutomationCommands(cli: Cli.Cli) {
     output: automationSaveResultSchema,
     async run(context) {
       const now = new Date().toISOString();
+      const currentRouteContext = await readAutomationCurrentRoute();
+      const existing = await showAutomation(context.options.vault, context.args.lookup);
+      if (!existing) {
+        throw new VaultCliError(
+          "automation_not_found",
+          "Automation was not found.",
+        );
+      }
+      authorizeAutomationRouteForCurrentContext(
+        existing.route,
+        currentRouteContext,
+      );
       const routeOptions = {
         channel: context.options.channel,
         deliveryTarget: context.options.deliveryTarget,
@@ -730,11 +807,6 @@ export function registerAutomationCommands(cli: Cli.Cli) {
         assistantTargetOverrideReasoningEffort: context.options.assistantTargetOverrideReasoningEffort,
         clearAssistantTargetOverride: context.options.clearAssistantTargetOverride,
       };
-      const needsExistingForAssistantTargetOverride =
-        context.options.clearAssistantTargetOverride === true ||
-        buildAutomationAssistantTargetOverrideFromOptions(
-          assistantTargetOverrideOptions,
-        ) !== undefined;
       const scheduleOptions = {
         activityKind: context.options.activityKind,
         deviceSource: context.options.deviceSource,
@@ -749,44 +821,37 @@ export function registerAutomationCommands(cli: Cli.Cli) {
         triggerKind: context.options.triggerKind,
         triggerLocalTime: context.options.triggerLocalTime,
       };
-      const route = hasDefinedAutomationOption(routeOptions)
-        ? buildAutomationRouteFromOptions(routeOptions, null)
-        : undefined;
-      const needsExisting =
-        context.options.status === "active" ||
-        needsExistingForAssistantTargetOverride ||
-        (
-          route !== undefined &&
-          context.options.status !== "paused" &&
-          context.options.status !== "archived"
-        );
-      const existing = needsExisting
-        ? await showAutomation(context.options.vault, context.args.lookup)
-        : null;
-      if (needsExisting && !existing) {
-        throw new VaultCliError(
-          "automation_not_found",
-          "Automation was not found.",
-        );
-      }
+      const requestedRoute = hasDefinedAutomationOption(routeOptions)
+        ? buildAutomationRouteFromOptions(
+            routeOptions,
+            currentRouteContext.route,
+          )
+        : existing.route;
+      const authorizedRoute = authorizeAutomationRouteForCurrentContext(
+        requestedRoute,
+        currentRouteContext,
+      );
+      const route =
+        hasDefinedAutomationOption(routeOptions) ||
+        currentRouteContext.hosted
+          ? authorizedRoute
+          : undefined;
       if (
-        existing &&
         (context.options.status ?? existing.status) === "active"
       ) {
-        assertActiveAutomationRouteCanDeliver(route ?? existing.route);
+        assertActiveAutomationRouteCanDeliver(authorizedRoute);
       }
       const assistantTargetOverride = buildAutomationAssistantTargetOverridePatchFromOptions({
         ...assistantTargetOverrideOptions,
-        existingAssistantTargetOverride: existing?.assistantTargetOverride ?? null,
+        existingAssistantTargetOverride: existing.assistantTargetOverride,
       });
       const result = await patchAutomation({
         assistantTargetOverride,
         continuityPolicy: context.options.continuityPolicy,
         instructions: context.options.instructions,
         lookup: context.args.lookup,
-        // Route flags replace the stored route wholesale: a route names one
-        // conversation, so it is never merged field-wise or inherited from the
-        // assistant's current conversation.
+        // Local callers may replace the stored route. Hosted callers are
+        // restricted above to a canonical snapshot of the current chat.
         route,
         schedule: hasDefinedAutomationOption(scheduleOptions)
           ? buildAutomationScheduleFromOptions(scheduleOptions, { now })
@@ -837,6 +902,7 @@ export function registerAutomationCommands(cli: Cli.Cli) {
     }),
     output: automationSaveResultSchema,
     async run(context) {
+      const currentRouteContext = await readAutomationCurrentRoute();
       const existing = await showAutomation(context.options.vault, context.args.lookup);
       if (!existing) {
         throw new VaultCliError(
@@ -844,15 +910,19 @@ export function registerAutomationCommands(cli: Cli.Cli) {
           "Automation was not found.",
         );
       }
+      const route = authorizeAutomationRouteForCurrentContext(
+        existing.route,
+        currentRouteContext,
+      );
       if (context.options.status === "active") {
-        assertActiveAutomationRouteCanDeliver(existing.route);
+        assertActiveAutomationRouteCanDeliver(route);
       }
 
       const result = await upsertAutomation({
         automationId: existing.automationId,
         continuityPolicy: existing.continuityPolicy,
         instructions: existing.instructions,
-        route: existing.route,
+        route,
         schedule: existing.schedule,
         slug: existing.slug,
         status: context.options.status,
@@ -919,13 +989,22 @@ export function registerAutomationCommands(cli: Cli.Cli) {
     }),
     output: automationSaveResultSchema,
     async run(context) {
+      const currentRouteContext = await readAutomationCurrentRoute();
       const input = automationScaffoldPayloadSchema.parse(
         await loadJsonInputObject(
           context.options.input,
           "automation payload",
         ),
       );
-      const route = normalizeAutomationRouteFieldsForSave(input.route);
+      await authorizeExistingAutomationForUpsert({
+        currentRouteContext,
+        lookups: [input.automationId, input.slug],
+        vaultRoot: context.options.vault,
+      });
+      const route = authorizeAutomationRouteForCurrentContext(
+        normalizeAutomationRouteFieldsForSave(input.route),
+        currentRouteContext,
+      );
       if (automationStatusIsActive(input.status)) {
         assertActiveAutomationRouteCanDeliver(route);
       }

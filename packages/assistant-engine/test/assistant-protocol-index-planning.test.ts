@@ -291,7 +291,7 @@ describe('assistant protocol index planning', () => {
         threadIsDirect: null,
       }),
     })).rejects.toThrow(
-      'Cannot execute a notification decision for an unverified external audience.',
+      'Cannot plan a provider turn for an unverified external audience.',
     )
   })
 
@@ -326,16 +326,10 @@ describe('assistant protocol index planning', () => {
     expect(plan.systemPrompt).not.toContain('Supported experiment protocols:')
   })
 
-  it.each([
-    {
-      effectiveThreadIsDirect: true,
-      label: 'direct',
-    },
-    {
-      effectiveThreadIsDirect: null,
-      label: 'unknown-directness',
-    },
-  ] as const)('injects Murph onboarding skill activation for a $label conversation through route planning', async ({
+  it.each([{
+    effectiveThreadIsDirect: true,
+    label: 'direct',
+  }] as const)('injects Murph onboarding skill activation for a $label conversation through route planning', async ({
     effectiveThreadIsDirect,
   }) => {
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
@@ -606,21 +600,17 @@ describe('assistant protocol index planning', () => {
         turnCreatedAt: '2026-05-04T00:03:00.000Z',
         turnId: 'turn-personality-unknown-external',
       })
-      const unknownExternalAttemptPlan = await buildCodexTurnAttemptPlan({
+      await expect(buildCodexTurnAttemptPlan({
         attemptCount: 1,
         executionPlan: unknownExternalExecutionPlan,
         session: unknownExternalSession,
-      })
+      })).rejects.toThrow(
+        'Cannot plan a provider turn for an unverified external audience.',
+      )
       expect(
         unknownExternalExecutionPlan.sharedPlan.conversationPolicy.audience
           .effectiveThreadIsDirect,
       ).toBeNull()
-      expect(
-        unknownExternalAttemptPlan.routePlan.developerInstructions,
-      ).not.toContain(
-        'Assistant personality preferences for this private conversation',
-      )
-
       const localSession = createSession()
       const localExecutionPlan = await buildCodexTurnExecutionPlan({
         input: {
@@ -1067,6 +1057,15 @@ describe('assistant protocol index planning', () => {
     expect(plan.developerInstructions).not.toContain('bootstrap contract')
     expect(plan.developerInstructions).not.toContain('/settings?voice=true')
     expect(plan.developerInstructions).not.toContain('Hosted wearable connection links are available')
+    expect(plan.developerInstructions).toContain(
+      'Group automation writes are current-room-only',
+    )
+    expect(plan.developerInstructions).toContain(
+      'never use saved personal/self targets',
+    )
+    expect(plan.developerInstructions).not.toContain(
+      'explicit route flags',
+    )
     expect(plan.dynamicTools.map((tool) => tool.name)).toEqual(
       expect.arrayContaining([
         'connected_apps_search',
@@ -1099,7 +1098,7 @@ describe('assistant protocol index planning', () => {
       newsletterTool: { request: vi.fn() },
       phoneCalls: { start: vi.fn() },
     }
-    const plan = await resolveAssistantRouteTurnPlan({
+    await expect(resolveAssistantRouteTurnPlan({
       acceptedInputItems: [{ id: 'external-phone-request', source: 'manual' }],
       executionContext: {
         hosted: {
@@ -1135,33 +1134,7 @@ describe('assistant protocol index planning', () => {
         threadId: 'external-thread',
         threadIsDirect: null,
       }),
-    })
-
-    expect(plan.developerInstructions).toContain(
-      'Conversation scope: unverified external audience.',
-    )
-    expect(plan.developerInstructions).not.toContain(
-      'Conversation scope: private Murph conversation.',
-    )
-    expect(plan.developerInstructions).not.toContain('PERSONAL_CLI_CONTRACT')
-    expect(plan.developerInstructions).not.toContain('PERSONAL_CONTEXT_SNAPSHOT')
-    expect(plan.developerInstructions).not.toContain('PERSONAL_HOSTED_CONTEXT')
-    expect(plan.developerInstructions).not.toContain('/settings?voice=true')
-    expect(plan.developerInstructions).not.toContain('Murph onboarding:')
-    expect(plan.developerInstructions).not.toContain('Murph Family:')
-    expect(plan.developerInstructions).not.toContain('Connected-app tools:')
-    expect(plan.dynamicTools.map((tool) => tool.name)).not.toEqual(
-      expect.arrayContaining([
-        'computer_open',
-        'connected_apps_execute',
-        'connected_apps_manage',
-        'connected_apps_search',
-        'create_phone_call',
-        'family_plan',
-        'group',
-        'newsletter',
-      ]),
-    )
+    })).rejects.toThrow('Cannot plan a provider turn for an unverified external audience.')
     expect(planningMocks.readAssistantCliSurfaceBootstrapContext).not.toHaveBeenCalled()
     expect(planningMocks.readAssistantContextSnapshotPrompt).not.toHaveBeenCalled()
   })
@@ -1190,7 +1163,7 @@ describe('assistant protocol index planning', () => {
         text: 'PRIVATE_TRANSCRIPT_MESSAGE',
       }])
 
-      const plan = await resolveAssistantRouteTurnPlan({
+      await expect(resolveAssistantRouteTurnPlan({
         executionContext: null,
         input: {
           ...createMessageInput(),
@@ -1218,16 +1191,9 @@ describe('assistant protocol index planning', () => {
           threadId: 'external-thread',
           threadIsDirect: null,
         }),
-      })
-
-      expect(plan.resume).toBeNull()
-      expect(plan.conversationHistoryMessages).toBeUndefined()
-      expect(plan.sessionContext).toBeUndefined()
-      expect(plan.turnContextPrompt).not.toContain('PRIVATE_HIDDEN_TURN_CONTEXT')
-      expect(plan.turnContextPrompt).not.toContain('PRIVATE_TRANSCRIPT_MESSAGE')
-      expect(plan.developerInstructions).not.toContain('PRIVATE_ACTOR_ID')
-      expect(plan.developerInstructions).not.toContain('PRIVATE_IDENTITY_ID')
-      expect(plan.developerInstructions).not.toContain('America/New_York')
+      })).rejects.toThrow('Cannot plan a provider turn for an unverified external audience.')
+      expect(planningMocks.readAssistantCliSurfaceBootstrapContext).not.toHaveBeenCalled()
+      expect(planningMocks.readAssistantContextSnapshotPrompt).not.toHaveBeenCalled()
     } finally {
       await rm(vault, { force: true, recursive: true })
     }

@@ -60,6 +60,7 @@ export function resolveAssistantConversationScope(
 export function resolveAssistantConversationPolicy(input: {
   message: Pick<
     AssistantMessageInput,
+    | 'bindingDeliveryTarget'
     | 'conversation'
     | 'channel'
     | 'deliverResponse'
@@ -88,6 +89,7 @@ export function resolveAssistantConversationPolicy(input: {
 export function resolveAssistantConversationAudience(input: {
   message: Pick<
     AssistantMessageInput,
+    | 'bindingDeliveryTarget'
     | 'conversation'
     | 'channel'
     | 'deliverResponse'
@@ -119,6 +121,9 @@ export function resolveAssistantConversationAudience(input: {
     normalizeNullableString(conversation?.threadId) ??
     normalizeNullableString(binding.threadId)
   const explicitTarget = normalizeNullableString(input.message.deliveryTarget)
+  const messageBindingDeliveryTarget = normalizeNullableString(
+    input.message.bindingDeliveryTarget,
+  )
   const replyToMessageId = normalizeNullableString(
     input.message.deliveryReplyToMessageId,
   )
@@ -147,6 +152,7 @@ export function resolveAssistantConversationAudience(input: {
     effectiveThreadIsDirect: resolveAssistantConversationAudienceDirectness({
       actorId,
       bindingDelivery,
+      messageBindingDeliveryTarget,
       explicitTarget,
       sessionThreadId: normalizeNullableString(binding.threadId),
       threadId,
@@ -164,12 +170,21 @@ export function resolveAssistantConversationAudience(input: {
 function resolveAssistantConversationAudienceDirectness(input: {
   actorId: string | null
   bindingDelivery: AssistantBindingDelivery | null
+  messageBindingDeliveryTarget: string | null
   explicitTarget: string | null
   sessionThreadId: string | null
   storedThreadIsDirect: boolean | null
   threadId: string | null
   threadIsDirect: boolean | null | undefined
 }): boolean | null {
+  if (
+    input.explicitTarget !== null &&
+    input.explicitTarget === input.messageBindingDeliveryTarget &&
+    typeof input.threadIsDirect === 'boolean'
+  ) {
+    return input.threadIsDirect
+  }
+
   const explicitTargetDirectness = inferDirectAudienceFromTarget({
     actorId: input.actorId,
     bindingDelivery: input.bindingDelivery,

@@ -49,6 +49,7 @@ export interface AssistantSystemPromptInput {
   currentLocalDate: string;
   currentTimeZone: string;
   conversationScope?: AssistantConversationScope;
+  hostedRuntime?: boolean;
   murphProductBaseUrl?: string | null;
   onboardingGuidance: boolean;
   modelBehaviorProfile: AssistantModelBehaviorProfile;
@@ -265,7 +266,10 @@ function buildStableRouteCapabilityPrompt(
       assistantKnowledgeToolsAvailable:
         input.assistantKnowledgeToolsAvailable ?? false,
     }),
-    buildAssistantCronGuidanceText(),
+    buildAssistantCronGuidanceText(
+      conversationScope,
+      input.hostedRuntime ?? false
+    ),
     buildAssistantCliGuidanceText(input.cliAccess),
     conversationScope === "direct"
       ? buildAssistantCliContractText(input.assistantCliContract)
@@ -1236,55 +1240,80 @@ function buildAssistantCliContractText(contract: string | null): string | null {
   return contract;
 }
 
-function buildAssistantCronGuidanceText(): string {
+function buildAssistantCronGuidanceText(
+  conversationScope: AssistantConversationScope,
+  hostedRuntime: boolean
+): string {
   return buildAssistantAvailableAutomationGuidanceText(
-    "Scheduled assistant automation commands are available directly through `vault-cli automation ...` in this privileged local route."
+    conversationScope,
+    hostedRuntime
   );
 }
 
 function buildAssistantAvailableAutomationGuidanceText(
-  accessLine: string
+  conversationScope: AssistantConversationScope,
+  hostedRuntime: boolean
 ): string {
   return joinPromptSections(
-    accessLine,
-    buildAssistantSharedAutomationActionText("vault-cli assistant run")
+    hostedRuntime && conversationScope === "group"
+      ? "Scheduled automation commands are available for this group room through `vault-cli automation ...`."
+      : hostedRuntime
+        ? "Scheduled automation commands are available for this conversation through `vault-cli automation ...`."
+        : "Scheduled assistant automation commands are available directly through `vault-cli automation ...` in this privileged local route.",
+    buildAssistantSharedAutomationActionText(
+      "vault-cli assistant run",
+      conversationScope,
+      hostedRuntime
+    )
   );
 }
 
 function buildAssistantSharedAutomationActionText(
-  assistantRunCommand: string
+  assistantRunCommand: string,
+  conversationScope: AssistantConversationScope,
+  hostedRuntime: boolean
 ): string {
+  const routeGuidance = hostedRuntime
+    ? conversationScope === "group"
+      ? "Group automation writes are current-room-only: omit route flags so the trusted room route is inherited, never use saved personal/self targets, and do not try to create, edit, import, pause, or reactivate an automation owned by another conversation."
+      : "Hosted chat automation writes are current-conversation-only: omit route flags so the trusted route is inherited."
+    : `Pass ${code("--channel")} with ${code("--delivery-target")}, ${code("--thread-id")}, or ${code("--participant-id")} for the intended destination.`;
   return `Use ${code(
     "vault-cli automation save"
-  )} with typed schedule, instruction, and explicit route flags to create or update ordinary automations. Pass ${code(
-    "--channel"
-  )} with ${code("--delivery-target")}, ${code("--thread-id")}, or ${code(
-    "--participant-id"
-  )} for the intended destination. Reserve ${code(
+  )} with typed schedule and instruction fields to create or update ordinary automations. ${routeGuidance} Reserve ${code(
     "vault-cli automation import-json"
   )} for advanced payload imports that the typed surface cannot express.
 
-${buildAssistantSharedAutomationPreferenceText()}
+${buildAssistantSharedAutomationPreferenceText(conversationScope, hostedRuntime)}
 
 Automation schedules execute while ${code(
     assistantRunCommand
   )} is active for the vault.`;
 }
 
-function buildAssistantSharedAutomationPreferenceText(): string {
+function buildAssistantSharedAutomationPreferenceText(
+  conversationScope: AssistantConversationScope,
+  hostedRuntime: boolean
+): string {
+  const routePreference = hostedRuntime
+    ? `Omit route flags so the automation inherits ${conversationScope === "group" ? "this group room" : "this conversation"}; a preserve automation continues that conversation instead of starting a separate thread.`
+    : "Use explicit route flags for the intended destination; a preserve automation continues the resolved conversation instead of starting a separate thread.";
+  const selfTargetPreference = hostedRuntime || conversationScope === "group"
+    ? "Do not inspect or reuse saved personal phone, Telegram, or email self-targets for this chat-authored automation."
+    : "Before asking the user to repeat phone, Telegram, or email routing details for an automation route, inspect saved local self-targets. If the needed route is not already saved, ask for the missing details explicitly instead of guessing.";
   return `Prefer bounded, context-aware automations over nagging coaching. Default to digest-style or summary-style automation for passive monitoring. For repeated behavior support, include skip/repair rules and a review point, and avoid open-ended reminders unless the user explicitly asks.
 
 When creating automations, choose continuity deliberately. Use ${code(
     "--continuity-policy preserve"
   )} for simple reminders, check-ins, and lightweight support where recent prior automation context can help. Use ${code(
     "--continuity-policy fresh"
-  )} for larger automations such as research, audits, roundups, content inspection, or any recurring task likely to need multiple tool calls, so each run starts from current vault/tool evidence instead of prior run transcript context. For an automation meant for the current conversation, route flags may name this conversation or be omitted entirely; the route then inherits this conversation, and a preserve automation continues it instead of starting a separate thread.
+  )} for larger automations such as research, audits, roundups, content inspection, or any recurring task likely to need multiple tool calls, so each run starts from current vault/tool evidence instead of prior run transcript context. ${routePreference}
 
 Linq/iMessage off-hours reminder guard: before creating or updating a user-facing reminder/check-in automation that will deliver through Linq/iMessage (${code(
     "channel=linq"
   )}, or an inherited current route whose channel is Linq/iMessage), avoid scheduling sends from 23:00 through 04:59 in the recipient's local timezone. If recipient-local timezone is unknown, use the vault/user timezone as the best available local-time proxy and say so if asking the user. Off-hours iMessage sends can add spam-risk signal and compound with other delivery-risk factors, so prefer the nearest reasonable waking-time alternative by default. If the user explicitly asks for an off-hours Linq/iMessage reminder, or the reminder's health/safety/logistical purpose genuinely requires overnight delivery, do not silently block it. Before saving the automation, briefly warn that 11pm-5am recipient-local iMessage reminders are more likely to look spammy to Apple/Linq delivery, suggest a safer nearby time, and ask for confirmation. A clear user confirmation for that exact off-hours time is enough to proceed. Do not add this extra confirmation for non-Linq channels.
 
-Before asking the user to repeat phone, Telegram, or email routing details for an automation route, inspect saved local self-targets. If the needed route is not already saved, ask for the missing details explicitly instead of guessing.`;
+${selfTargetPreference}`;
 }
 
 function buildAssistantKnowledgeGuidanceText(input: {

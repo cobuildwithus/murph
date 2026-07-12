@@ -213,6 +213,78 @@ describe('assistant product small seams', () => {
       'direct',
     )
 
+    const blindedHostedDirectAudience = resolveAssistantConversationPolicy({
+      message: {
+        bindingDeliveryTarget: 'provider-direct-thread',
+        channel: 'linq',
+        conversation: {
+          channel: 'linq',
+          directness: 'direct',
+          threadId: 'blinded-direct-thread',
+        },
+        deliverResponse: true,
+        deliveryReplyToMessageId: null,
+        deliveryTarget: 'provider-direct-thread',
+        operatorAuthority: 'direct-operator',
+        threadId: null,
+        threadIsDirect: null,
+      },
+      session: {
+        binding: {
+          actorId: 'blinded-direct-actor',
+          channel: 'linq',
+          conversationKey: null,
+          delivery: {
+            kind: 'thread',
+            target: 'blinded-direct-thread',
+          },
+          identityId: 'blinded-direct-identity',
+          threadId: 'blinded-direct-thread',
+          threadIsDirect: true,
+        },
+      },
+    })
+    expect(blindedHostedDirectAudience.audience.effectiveThreadIsDirect).toBe(true)
+    expect(resolveAssistantConversationScope(blindedHostedDirectAudience.audience)).toBe(
+      'direct',
+    )
+
+    const blindedHostedGroupAudience = resolveAssistantConversationPolicy({
+      message: {
+        bindingDeliveryTarget: 'provider-group-thread',
+        channel: 'linq',
+        conversation: {
+          channel: 'linq',
+          directness: 'group',
+          threadId: 'blinded-group-thread',
+        },
+        deliverResponse: true,
+        deliveryReplyToMessageId: null,
+        deliveryTarget: 'provider-group-thread',
+        operatorAuthority: 'direct-operator',
+        threadId: null,
+        threadIsDirect: null,
+      },
+      session: {
+        binding: {
+          actorId: 'blinded-group-actor',
+          channel: 'linq',
+          conversationKey: null,
+          delivery: {
+            kind: 'thread',
+            target: 'blinded-group-thread',
+          },
+          identityId: 'blinded-group-identity',
+          threadId: 'blinded-group-thread',
+          threadIsDirect: false,
+        },
+      },
+    })
+    expect(blindedHostedGroupAudience.audience.effectiveThreadIsDirect).toBe(false)
+    expect(resolveAssistantConversationScope(blindedHostedGroupAudience.audience)).toBe(
+      'group',
+    )
+
     const unverifiedExternalAudience = resolveAssistantConversationPolicy({
       message: {
         channel: 'telegram',
@@ -271,6 +343,7 @@ describe('assistant product small seams', () => {
 
     const mismatchedExplicitDirectTarget = resolveAssistantConversationPolicy({
       message: {
+        bindingDeliveryTarget: 'current-direct-thread',
         channel: 'telegram',
         deliverResponse: true,
         deliveryReplyToMessageId: null,

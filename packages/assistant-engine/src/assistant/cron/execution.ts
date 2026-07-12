@@ -599,6 +599,16 @@ export async function executeClaimedAssistantCronJob(input: {
         const deliveryRoute = resolveAssistantCronNotificationDeliveryRoute(
           claimedJob.target,
         )
+        if (
+          !maintenanceJob &&
+          assistantCronExecutionDeliveryTargetProfile(input) === 'hosted' &&
+          typeof claimedJob.target.threadIsDirect !== 'boolean'
+        ) {
+          throw new VaultCliError(
+            'ASSISTANT_CRON_AUDIENCE_UNVERIFIED',
+            'This hosted automation has no verified direct-or-group audience. Edit or reactivate it from the intended conversation before it can run.',
+          )
+        }
         // Run lifecycle-owned deterministic eligibility + persistence BEFORE
         // the LLM turn. The precondition reads canonical experiment state
         // once and decides:

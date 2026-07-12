@@ -2007,6 +2007,7 @@ describe('assistant conversation scope', () => {
         'vault-cli assistant style set humor 10 --format json',
       ].join('\n'),
       conversationScope: 'group',
+      hostedRuntime: true,
     }))
 
     expect(prompt).toContain('Conversation scope: hosted group chat.')
@@ -2048,6 +2049,20 @@ describe('assistant conversation scope', () => {
     expect(prompt).toContain('agentApproved: true')
     expect(prompt).toContain('event_duration_minutes')
     expect(prompt).toContain('do not retry the create call')
+    expect(prompt).toContain('Pass `--channel` with `--delivery-target`')
+    expect(prompt).toContain('inspect saved local self-targets')
+    expect(prompt).not.toContain('current-conversation-only')
+  })
+
+  it('keeps hosted direct automation writes in the current conversation', () => {
+    const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput({
+      conversationScope: 'direct',
+      hostedRuntime: true,
+    }))
+
+    expect(prompt).toContain('Hosted chat automation writes are current-conversation-only')
+    expect(prompt).toContain('omit route flags so the trusted route is inherited')
+    expect(prompt).not.toContain('inspect saved local self-targets')
   })
 
   it('fails closed without claiming that an unknown external audience is private or a group', () => {
