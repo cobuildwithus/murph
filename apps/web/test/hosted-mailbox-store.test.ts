@@ -1542,6 +1542,7 @@ describe("fetchHostedRuntimeMailboxProjection", () => {
 
 interface HostedMailboxCreateArgs {
   data: {
+    causalSeq: bigint;
     dedupeKey: string;
     expiresAt: Date | null;
     id: string;
