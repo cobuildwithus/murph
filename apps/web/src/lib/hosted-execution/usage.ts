@@ -10,8 +10,6 @@ import {
 import { getPrisma } from "../prisma";
 import {
   accountHostedAiUsageForAllowanceTx,
-  claimHostedAiUsageLimitNotice,
-  releaseHostedAiUsageLimitNotice,
   type HostedAiUsageLimitNoticeCandidate,
 } from "./usage-allowance";
 import {
@@ -177,20 +175,11 @@ async function sendHostedAiUsageLimitNoticeAtCrossing(input: {
   prisma: HostedAiUsageClient;
 }): Promise<void> {
   const sentAt = new Date();
-  let claimed = false;
-  try {
-    claimed = await claimHostedAiUsageLimitNotice({
-      memberId: input.candidate.memberId,
-      periodStart: input.candidate.periodStart,
-      prisma: input.prisma,
-      sentAt,
-    });
-  } catch (error) {
-    logHostedAiUsageLimitNoticeAtCrossing("claim_failed", input.candidate, error);
-    return;
-  }
-
-  if (!claimed) {
+  if (
+    sentAt < input.candidate.periodStart
+    || sentAt >= input.candidate.periodEnd
+  ) {
+    logHostedAiUsageLimitNoticeAtCrossing("period_not_current", input.candidate);
     return;
   }
 
@@ -202,11 +191,6 @@ async function sendHostedAiUsageLimitNoticeAtCrossing(input: {
       }),
     );
     if (!("chatId" in route) || !route.chatId) {
-      await releaseHostedAiUsageLimitNoticeAtCrossingClaim({
-        candidate: input.candidate,
-        prisma: input.prisma,
-        sentAt,
-      });
       logHostedAiUsageLimitNoticeAtCrossing("home_route_missing", input.candidate);
       return;
     }
@@ -225,34 +209,12 @@ async function sendHostedAiUsageLimitNoticeAtCrossing(input: {
       sourceEventId: input.candidate.sourceUsageId,
     });
   } catch (error) {
-    await releaseHostedAiUsageLimitNoticeAtCrossingClaim({
-      candidate: input.candidate,
-      prisma: input.prisma,
-      sentAt,
-    });
     logHostedAiUsageLimitNoticeAtCrossing("send_failed", input.candidate, error);
   }
 }
 
-async function releaseHostedAiUsageLimitNoticeAtCrossingClaim(input: {
-  candidate: HostedAiUsageLimitNoticeCandidate;
-  prisma: HostedAiUsageClient;
-  sentAt: Date;
-}): Promise<void> {
-  try {
-    await releaseHostedAiUsageLimitNotice({
-      memberId: input.candidate.memberId,
-      periodStart: input.candidate.periodStart,
-      prisma: input.prisma,
-      sentAt: input.sentAt,
-    });
-  } catch (error) {
-    logHostedAiUsageLimitNoticeAtCrossing("release_failed", input.candidate, error);
-  }
-}
-
 function logHostedAiUsageLimitNoticeAtCrossing(
-  reason: "claim_failed" | "home_route_missing" | "release_failed" | "send_failed",
+  reason: "home_route_missing" | "period_not_current" | "send_failed",
   candidate: HostedAiUsageLimitNoticeCandidate,
   error?: unknown,
 ): void {

@@ -157,8 +157,6 @@ const RUNNER_PROXY_TOKEN = "proxy-token";
 const RUNNER_PROXY_TOKEN_HEADER = "x-hosted-execution-runner-proxy-token";
 const MISSING_ARTIFACT_URL = `http://artifacts.worker/objects/${"a".repeat(64)}`;
 const HEARTBEAT_URL = "http://runner-control.worker/internal/active-invocation/heartbeat";
-const LEGACY_HOSTED_RUNTIME_LINQ_CONTACT_CARD_SHARE_AFTER_OUTBOUND_PATH =
-  "/api/internal/hosted-runtime/linq/contact-card/share-after-outbound";
 const ALLOWLISTED_WEB_CONTROL_CASES = [
   {
     body: {
@@ -231,21 +229,6 @@ const ALLOWLISTED_WEB_CONTROL_CASES = [
     },
     name: "hosted Linq egress authority",
     path: HOSTED_RUNTIME_LINQ_EGRESS_ENGAGEMENT_PATH,
-  },
-  {
-    body: {
-      authority: {
-        accountLookupKey: "hbidx:phone:v1:account",
-        channel: "linq",
-        containerMemberId: "member_123",
-        threadId: "linq_chat_123",
-      },
-      chatId: "linq_chat_123",
-      service: "iMessage",
-      threadIsDirect: true,
-    },
-    name: "legacy hosted Linq contact-card share after outbound",
-    path: LEGACY_HOSTED_RUNTIME_LINQ_CONTACT_CARD_SHARE_AFTER_OUTBOUND_PATH,
   },
   {
     body: {
@@ -657,7 +640,6 @@ describe("handleRunnerOutboundRequest", () => {
                     || path === HOSTED_RUNTIME_LATENCY_TRACE_PATH
                     || path === HOSTED_RUNTIME_LINQ_EGRESS_DELIVERY_PATH
                     || path === HOSTED_RUNTIME_LINQ_EGRESS_ENGAGEMENT_PATH
-                    || path === LEGACY_HOSTED_RUNTIME_LINQ_CONTACT_CARD_SHARE_AFTER_OUTBOUND_PATH
                     || path === HOSTED_RUNTIME_CODEX_AUTH_PATH
                     || isHostedComputerWebControlRequest({ method: "POST", path })
                     ? {
@@ -815,47 +797,6 @@ describe("handleRunnerOutboundRequest", () => {
         body: JSON.stringify({
           target: "chat_123",
           targetKind: "thread",
-        }),
-        headers: createRunnerProxyHeaders({
-          "content-type": "application/json; charset=utf-8",
-        }),
-        method: "POST",
-      }),
-      createRunnerOutboundEnv({
-        HOSTED_WEB_BASE_URL: "https://web.example.test",
-        USER_RUNNER: {
-          getByName() {
-            return {
-              validateRuntimeWriteFence,
-            };
-          },
-        },
-      }),
-      "member_123" ,
-    );
-
-    expect(response.status).toBe(401);
-    expect(validateRuntimeWriteFence).not.toHaveBeenCalled();
-    expect(fetchMock).not.toHaveBeenCalled();
-  });
-
-  it("rejects legacy Linq contact-card share-after-outbound without the active runtime fence", async () => {
-    const validateRuntimeWriteFence = vi.fn(async () => true);
-    const fetchMock = vi.fn();
-    vi.stubGlobal("fetch", fetchMock);
-
-    const response = await handleRunnerOutboundRequest(
-      new Request(`http://web-control.worker${LEGACY_HOSTED_RUNTIME_LINQ_CONTACT_CARD_SHARE_AFTER_OUTBOUND_PATH}`, {
-        body: JSON.stringify({
-          authority: {
-            accountLookupKey: "hbidx:phone:v1:account",
-            channel: "linq",
-            containerMemberId: "member_123",
-            threadId: "linq_chat_123",
-          },
-          chatId: "linq_chat_123",
-          service: "iMessage",
-          threadIsDirect: true,
         }),
         headers: createRunnerProxyHeaders({
           "content-type": "application/json; charset=utf-8",
@@ -3608,6 +3549,36 @@ describe("handleRunnerOutboundRequest", () => {
       secondBody.snapshotId,
       "second workspace snapshot id",
     ))).toBe(true);
+  });
+
+  it("rejects direct-R2 workspace snapshot sessions for canonical runtime commits", async () => {
+    const fixture = await createHostedRuntimeCryptoContextFixture();
+    const runner = createWorkspaceVersionAwareUserRunner();
+    const env = createRunnerOutboundEnv({
+      ...fixture.env,
+      USER_RUNNER: {
+        getByName: runner.getByName,
+      },
+    });
+    vi.stubGlobal("fetch", fixture.fetchMock);
+
+    const response = await handleRunnerOutboundRequest(
+      createWorkspaceSnapshotStartRequest({
+        expectedWorkspaceVersion: "4",
+        reason: "canonical_runtime_commit",
+        workspaceVersion: "4",
+      }),
+      env,
+      "member_123",
+    );
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      error: "Hosted workspace snapshot start reason must be idle_shutdown.",
+    });
+    expect(runner.ownsActiveInvocationLease).toHaveBeenCalledOnce();
+    expect(runner.createHostedWorkspaceSnapshotUploadSession).not.toHaveBeenCalled();
+    expect(runner.workspaceSnapshotUploadSessions.size).toBe(0);
   });
 
   it("presigns direct-R2 workspace snapshot PUT URLs only after encrypted metadata is known", async () => {
@@ -7534,7 +7505,7 @@ it("returns foreground-pending checkpoint responses from snapshot completion wit
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("rejects workspace snapshot completion when checkpoint reason is not idle_shutdown", async () => {
+  it("rejects canonical runtime commit workspace snapshot completion", async () => {
     const runner = createWorkspaceVersionAwareUserRunner();
     const snapshotId = "snapshot_complete_non_idle";
     const objectKey = await hostedWorkspaceSnapshotObjectKey({
@@ -7570,7 +7541,7 @@ it("returns foreground-pending checkpoint responses from snapshot completion wit
 
     const response = await handleRunnerOutboundRequest(
       createWorkspaceSnapshotCompleteRequest({
-        reason: "import",
+        reason: "canonical_runtime_commit",
         snapshotId,
         snapshotRef,
         workspaceVersion: "4",
@@ -8223,6 +8194,46 @@ it("returns foreground-pending checkpoint responses from snapshot completion wit
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it("rejects the retired Linq contact-card callback before proxying", async () => {
+    const fetchMock = vi.fn(async (
+      ..._args: Parameters<typeof fetch>
+    ): Promise<Response> => new Response("unexpected", { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await handleRunnerOutboundRequest(
+      new Request(
+        "http://web-control.worker/api/internal/hosted-runtime/linq/contact-card/share-after-outbound",
+        {
+          body: JSON.stringify({
+            authority: {
+              accountLookupKey: "hbidx:phone:v1:account",
+              channel: "linq",
+              containerMemberId: "member_123",
+              threadId: "linq_chat_123",
+            },
+            chatId: "linq_chat_123",
+            service: "iMessage",
+            threadIsDirect: true,
+          }),
+          headers: createRunnerProxyHeaders({
+            "content-type": "application/json; charset=utf-8",
+          }),
+          method: "POST",
+        },
+      ),
+      createRunnerOutboundEnv({
+        HOSTED_WEB_BASE_URL: "https://web.example.test",
+      }),
+      "member_123",
+    );
+
+    expect(response.status).toBe(404);
+    await expect(response.json()).resolves.toEqual({
+      error: "Not found",
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("ignores legacy signed-user override headers on web-control proxy paths", async () => {
     const fetchMock = vi.fn(async (
       ..._args: Parameters<typeof fetch>
@@ -8476,6 +8487,7 @@ function createArtifactPutRequest(input: {
 
 function createWorkspaceSnapshotStartRequest(input: {
   expectedWorkspaceVersion: string;
+  reason?: "canonical_runtime_commit" | "idle_shutdown";
   workspaceVersion: string;
 }): Request {
   return new Request("http://workspace-snapshots.worker/workspace-snapshots/start", {
@@ -8483,7 +8495,7 @@ function createWorkspaceSnapshotStartRequest(input: {
       expectedWorkspaceVersion: input.expectedWorkspaceVersion,
       nextWakeAt: null,
       nextWakeReason: null,
-      reason: "idle_shutdown",
+      reason: input.reason ?? "idle_shutdown",
     }),
     headers: createRunnerProxyHeaders({
       "content-type": "application/json; charset=utf-8",
@@ -8499,7 +8511,7 @@ function createWorkspaceSnapshotCompleteRequest(input: {
   snapshotId: string;
   snapshotRef: HostedWorkspaceSnapshotV2Ref;
   workspaceVersion: string;
-  reason?: "idle_shutdown" | "import";
+  reason?: "canonical_runtime_commit" | "idle_shutdown" | "import";
 }): Request {
   return new Request(
     `http://workspace-snapshots.worker/workspace-snapshots/${input.snapshotId}/complete`,

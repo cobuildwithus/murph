@@ -14,6 +14,7 @@ Status: frozen current contract plus health extension fence
   bank/automations/<slug>.md
   bank/scheduled-logs/<slug>.md
   bank/experiments/<slug>.md
+  bank/experiments/outcomes/<filename>.json
   bank/goals/<slug>.md
   bank/conditions/<slug>.md
   bank/allergies/<slug>.md
@@ -86,7 +87,7 @@ Generated artifact: `packages/contracts/generated/vault-metadata.schema.json`
 - Inbox-capture shards use `occurredAt`: `ledger/inbox-captures/YYYY/YYYY-MM.jsonl`.
 - Inbox attachment retention shards use `purgedAt`: `ledger/inbox-attachment-retention/YYYY/YYYY-MM.jsonl`.
 - Event shards use `occurredAt`: `ledger/events/YYYY/YYYY-MM.jsonl`.
-- Integration-ingest shards use `importedAt`: `ledger/integration-ingests/YYYY/YYYY-MM.jsonl`. Device/provider evidence is retained inline in these append-only records with exact UTF-8 bytes, byte counts, SHA-256 hashes, receipts, logical roles, and canonical output ids. Closed months may replace that logical JSONL shard with `ledger/integration-ingests/YYYY/YYYY-MM.jsonl.gz` or `ledger/integration-ingests/YYYY/YYYY-MM.jsonl.zip`; readers treat the uncompressed `.jsonl` path as the logical shard path and write paths must not append new rows to archived months. Each logical month must have exactly one physical representation, so archiving is a replacement operation rather than copy-and-leave. ZIP archives are bounded before inflate and must contain one matching JSONL entry.
+- Integration-ingest shards use `importedAt`: `ledger/integration-ingests/YYYY/YYYY-MM.jsonl`. Device/provider evidence is retained inline in these append-only records with exact UTF-8 bytes, byte counts, SHA-256 hashes, receipts, logical roles, and canonical output ids. Closed months may replace that logical JSONL shard with `ledger/integration-ingests/YYYY/YYYY-MM.jsonl.gz` or `ledger/integration-ingests/YYYY/YYYY-MM.jsonl.zip`; readers treat the uncompressed `.jsonl` path as the logical shard path. Generic write paths must not mutate archived integration-ingest months, but the core integration-ingest append planner may explicitly amend an archived month by replacing the single physical archive representation after shard, id, size/hash, replay, and rollback checks pass. Each logical month must have exactly one physical representation, so archiving and amendments are replacement operations rather than copy-and-leave. ZIP archives are bounded before inflate and must contain exactly one entry whose name is the JSONL shard filename, with no path components.
 - Metric-sample shards use `recordedAt`: `ledger/metric-samples/<metric>/YYYY/YYYY-MM.jsonl`.
 - Sample shards use `recordedAt`: `ledger/samples/<stream>/YYYY/YYYY-MM.jsonl`. These shards are explicit import/debug ledgers; default query/read/browser paths use sparse entities and compact metric rows instead.
 - Audit shards use `occurredAt`: `audit/YYYY/YYYY-MM.jsonl`.
@@ -95,6 +96,7 @@ Generated artifact: `packages/contracts/generated/vault-metadata.schema.json`
 - `bank/preferences.json` is the canonical typed preferences singleton for compact machine-readable defaults such as workout units.
 - `bank/automations/*.md` stores canonical assistant automation definitions, including schedule, route, optional assistant target override, and continuity policy frontmatter alongside the authored prompt body.
 - `bank/scheduled-logs/*.md` stores canonical scheduled log definitions that later mint canonical events when the schedule executes.
+- Experiment storage has an exact allowlist: canonical experiment records are direct `bank/experiments/<slug>.md` files, and reserved machine-written outcomes are direct `bank/experiments/outcomes/*.json` files. Query and assistant readers inspect only the direct canonical Markdown documents. Media, nested Markdown, symlinks, and other files under `bank/experiments/**` are invalid storage.
 - `bank/goals`, `bank/conditions`, `bank/allergies`, `bank/foods`, `bank/recipes`, `bank/providers`, `bank/workout-formats`, `bank/family`, and `bank/genetics` store one Markdown document per canonical record id or slug-safe alias or saved-default lookup key.
 - `bank/library/**/*.md` is the stable health reference layer for reusable entities such as biomarkers, domains, protocol variants, and source artifacts. It is durable reference context, not the user-specific synthesized wiki.
 - `bank/foods` stores long-lived remembered foods such as regular restaurant orders, smoothie presets, and grocery staples so assistants can resolve shorthand references without re-scraping menus or ingredient lists, and food records may optionally carry a narrow `autoLogDaily.time` rule for daily note-only meal auto-logging.
@@ -112,6 +114,7 @@ Generated artifact: `packages/contracts/generated/vault-metadata.schema.json`
 - Auto-preserved inbox document attachments reuse the same `raw/documents/YYYY/MM/<documentId>/<filename>` contract instead of introducing a second evidence folder family.
 - Assessment imports use `raw/assessments/YYYY/MM/<assessmentId>/source.json`.
 - Capture imports use `raw/captures/YYYY/MM/<eventId>/<filename>`.
+- `vault repair-experiment-media` is the proof-driven recovery path for supported legacy media under `bank/experiments/**`. A candidate qualifies only when its boundary-safe, byte-exact full vault-relative source path appears in exactly one direct canonical experiment document. Basenames, relative or encoded paths, substrings, case or Unicode normalization variants, residual alternate spellings, or owners in multiple documents do not qualify. The command dry-runs by default. Explicit apply copies through the canonical capture owner, verifies the event, attachment, raw byte, and manifest, replaces only the proved full-path literals with the canonical capture path, then atomically quarantines and verifies the inspected note and legacy source before replacing or deleting either path. A concurrent edit or interruption preserves recoverable bytes rather than overwriting them. Unsupported, unassociated, multiply-associated, ambiguous-reference, symlink, special, or conflicting files block apply.
 - Inbox captures use `raw/inbox/<source>/<account>/YYYY/MM/<captureId>/envelope.json` plus canonical attachments under `raw/inbox/<source>/<account>/YYYY/MM/<captureId>/attachments/`.
 - Body-measurement attachments use `raw/measurements/YYYY/MM/<eventId>/<filename>`.
 - Meal attachments use `raw/meals/YYYY/MM/<mealId>/<slot>-<filename>`.

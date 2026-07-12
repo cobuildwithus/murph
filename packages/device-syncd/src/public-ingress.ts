@@ -41,6 +41,7 @@ import type {
   HandleConnectionCallbackInput,
   HandleOAuthCallbackInput,
   HandleWebhookResult,
+  MarkPublicDeviceSyncConnectionSetupFailedResult,
   ProviderAuthTokens,
   ProviderConnectionResult,
   ProviderBeginConnectionResult,
@@ -69,6 +70,8 @@ const SEEDED_CONNECTION_EXTERNAL_ACCOUNT_ID_STATE_METADATA_KEY =
   "__murphSeededConnectionExternalAccountId";
 const SEEDED_CONNECTION_SETUP_EXPIRES_AT_STATE_METADATA_KEY =
   "__murphSeededConnectionSetupExpiresAt";
+const LEGACY_SEEDED_CONNECTION_UPDATED_AT_STATE_METADATA_KEY =
+  "__murphSeededConnectionUpdatedAt";
 const CONNECT_SOURCE_ID_STATE_METADATA_KEY =
   "__murphConnectSourceId";
 const CONNECT_TARGET_STATE_METADATA_KEY =
@@ -250,6 +253,33 @@ function buildConnectionCallbackQuery(input: HandleConnectionCallbackInput): URL
   return query;
 }
 
+function prepareConnectionCallback(input: HandleConnectionCallbackInput): {
+  query: URLSearchParams;
+  receivedAt: string;
+  state: string;
+} {
+  const query = buildConnectionCallbackQuery(input);
+  const state =
+    normalizeString(input.state)
+    ?? normalizeString(query.get("murph_state"))
+    ?? normalizeString(query.get("state"));
+
+  if (!state) {
+    throw deviceSyncError({
+      code: "OAUTH_STATE_MISSING",
+      message: "Device connection callback is missing the state parameter.",
+      retryable: false,
+      httpStatus: 400,
+    });
+  }
+
+  return {
+    query,
+    receivedAt: toIsoTimestamp(new Date()),
+    state,
+  };
+}
+
 function buildConnectionStateMetadata(input: {
   providerMetadata: Record<string, unknown> | undefined;
   connectSourceId?: string | null;
@@ -277,6 +307,7 @@ function buildProviderConnectionStateMetadata(
   delete providerMetadata[SEEDED_CONNECTION_ACCOUNT_ID_STATE_METADATA_KEY];
   delete providerMetadata[SEEDED_CONNECTION_EXTERNAL_ACCOUNT_ID_STATE_METADATA_KEY];
   delete providerMetadata[SEEDED_CONNECTION_SETUP_EXPIRES_AT_STATE_METADATA_KEY];
+  delete providerMetadata[LEGACY_SEEDED_CONNECTION_UPDATED_AT_STATE_METADATA_KEY];
   delete providerMetadata[CONNECT_SOURCE_ID_STATE_METADATA_KEY];
   delete providerMetadata[CONNECT_TARGET_STATE_METADATA_KEY];
   delete providerMetadata[SOURCE_PROVIDER_SLUG_STATE_METADATA_KEY];
@@ -290,6 +321,7 @@ function sanitizeConnectionStateMetadata(
   delete metadata[SEEDED_CONNECTION_ACCOUNT_ID_STATE_METADATA_KEY];
   delete metadata[SEEDED_CONNECTION_EXTERNAL_ACCOUNT_ID_STATE_METADATA_KEY];
   delete metadata[SEEDED_CONNECTION_SETUP_EXPIRES_AT_STATE_METADATA_KEY];
+  delete metadata[LEGACY_SEEDED_CONNECTION_UPDATED_AT_STATE_METADATA_KEY];
   delete metadata[CONNECT_SOURCE_ID_STATE_METADATA_KEY];
   delete metadata[CONNECT_TARGET_STATE_METADATA_KEY];
   delete metadata[SOURCE_PROVIDER_SLUG_STATE_METADATA_KEY];
@@ -450,6 +482,15 @@ export class DeviceSyncPublicIngress {
     this.logger = input.log ?? console;
   }
 
+  private async runConnectionMutation<Result>(
+    provider: string,
+    operation: () => Promise<Result>,
+  ): Promise<Result> {
+    return this.hooks.runConnectionMutation
+      ? await this.hooks.runConnectionMutation({ provider }, operation)
+      : await operation();
+  }
+
   describeProviders(): PublicProviderDescriptor[] {
     return this.registry.list().map((provider) => this.describeProvider(provider));
   }
@@ -474,8 +515,17 @@ export class DeviceSyncPublicIngress {
   }
 
   async startConnection(input: StartConnectionInput): Promise<BeginConnectionResult> {
-    const now = toIsoTimestamp(new Date());
     const provider = this.requireProvider(input.provider);
+    return await this.runConnectionMutation(provider.provider, () =>
+      this.startConnectionForProvider(provider, input)
+    );
+  }
+
+  private async startConnectionForProvider(
+    provider: DeviceSyncProvider,
+    input: StartConnectionInput,
+  ): Promise<BeginConnectionResult> {
+    const now = toIsoTimestamp(new Date());
     const descriptor = this.describeProvider(provider);
     const returnTo = this.resolveReturnTo(input.returnTo ?? null);
     const state = generateStateCode();
@@ -551,7 +601,14 @@ export class DeviceSyncPublicIngress {
       });
     } catch (error) {
       if (seededAccount) {
-        await this.markSeededConnectionSetupFailed(provider, seededAccount.id, null, now, error);
+        await this.markSeededConnectionSetupFailed(
+          provider,
+          seededAccount.id,
+          seededAccount.connectedAt,
+          null,
+          now,
+          error,
+        );
       }
       throw error;
     }
@@ -586,6 +643,18 @@ export class DeviceSyncPublicIngress {
     ownerId: string;
   }): Promise<SdkSignInSessionResult> {
     const provider = this.requireProvider(input.provider);
+    return await this.runConnectionMutation(provider.provider, () =>
+      this.createSdkSignInSessionForProvider(provider, input)
+    );
+  }
+
+  private async createSdkSignInSessionForProvider(
+    provider: DeviceSyncProvider,
+    input: {
+      provider: string;
+      ownerId: string;
+    },
+  ): Promise<SdkSignInSessionResult> {
     const handler = provider.sdkConnectionHandler;
 
     if (!handler) {
@@ -632,6 +701,7 @@ export class DeviceSyncPublicIngress {
         provider: provider.provider,
         externalAccountId: connection.externalAccountId,
         displayName: connection.displayName ?? null,
+        status: "active",
         setupPhase,
         setupExpiresAt: resolveConnectionSetupExpiresAt({
           connection,
@@ -724,22 +794,21 @@ export class DeviceSyncPublicIngress {
 
   async handleConnectionCallback(input: HandleConnectionCallbackInput): Promise<CompleteConnectionResult> {
     const provider = this.requireProvider(input.provider);
-    const now = toIsoTimestamp(new Date());
-    const descriptor = this.describeProvider(provider);
-    const callbackQuery = buildConnectionCallbackQuery(input);
-    const state =
-      normalizeString(input.state)
-      ?? normalizeString(callbackQuery.get("murph_state"))
-      ?? normalizeString(callbackQuery.get("state"));
+    const callback = prepareConnectionCallback(input);
+    return await this.runConnectionMutation(provider.provider, () =>
+      this.handleConnectionCallbackForProvider(provider, input, callback)
+    );
+  }
 
-    if (!state) {
-      throw deviceSyncError({
-        code: "OAUTH_STATE_MISSING",
-        message: "Device connection callback is missing the state parameter.",
-        retryable: false,
-        httpStatus: 400,
-      });
-    }
+  private async handleConnectionCallbackForProvider(
+    provider: DeviceSyncProvider,
+    input: HandleConnectionCallbackInput,
+    callback: ReturnType<typeof prepareConnectionCallback>,
+  ): Promise<CompleteConnectionResult> {
+    const now = callback.receivedAt;
+    const descriptor = this.describeProvider(provider);
+    const callbackQuery = callback.query;
+    const state = callback.state;
 
     const expectedOwnerId = normalizeString(input.expectedOwnerId);
     const stateResult = await this.store.consumeOAuthState(
@@ -803,6 +872,7 @@ export class DeviceSyncPublicIngress {
     const seededAccountId = readSeededConnectionAccountId(stateRecord.metadata);
     let seededExternalAccountId = readSeededConnectionExternalAccountId(stateRecord.metadata);
     const seededSetupExpiresAt = readSeededConnectionSetupExpiresAt(stateRecord.metadata);
+    const seededConnectedAt = seededAccountId ? stateRecord.createdAt : null;
     const connectSourceId = readConnectSourceId(stateRecord.metadata);
     const connectTarget = readConnectTarget(stateRecord.metadata);
     const sourceProviderSlug = readSourceProviderSlug(stateRecord.metadata);
@@ -825,6 +895,42 @@ export class DeviceSyncPublicIngress {
           message: "Device sync connection callback referenced a seeded account for another provider.",
           retryable: false,
           httpStatus: 400,
+        }),
+        callbackContext,
+      );
+    }
+
+    if (seededAccountId && !seededAccount) {
+      throw attachOAuthCallbackContext(
+        deviceSyncError({
+          code: "CONNECTION_SEEDED_ACCOUNT_MISMATCH",
+          message: "Device sync connection callback referenced an unexpected seeded account.",
+          retryable: false,
+          httpStatus: 400,
+        }),
+        callbackContext,
+      );
+    }
+
+    if (seededAccount?.status === "disconnected") {
+      throw attachOAuthCallbackContext(
+        deviceSyncError({
+          code: "CONNECTION_ALREADY_DISCONNECTED",
+          message: "Device sync connection callback was received after the seeded account was disconnected.",
+          retryable: false,
+          httpStatus: 409,
+        }),
+        callbackContext,
+      );
+    }
+
+    if (seededAccount && seededAccount.connectedAt !== seededConnectedAt) {
+      throw attachOAuthCallbackContext(
+        deviceSyncError({
+          code: "CONNECTION_SEEDED_ACCOUNT_CHANGED",
+          message: "Device sync connection changed after this connection flow started.",
+          retryable: false,
+          httpStatus: 409,
         }),
         callbackContext,
       );
@@ -907,6 +1013,7 @@ export class DeviceSyncPublicIngress {
         provider: provider.provider,
         externalAccountId: connection.externalAccountId,
         displayName: connection.displayName ?? null,
+        status: "active",
         setupPhase,
         setupExpiresAt: resolveConnectionSetupExpiresAt({
           connection,
@@ -923,6 +1030,7 @@ export class DeviceSyncPublicIngress {
         existingAccountGuard: seededAccountId
           ? {
               expectedAccountId: seededAccountId,
+              expectedConnectedAt: seededConnectedAt!,
               rejectIfDisconnected: true,
             }
           : null,
@@ -959,7 +1067,14 @@ export class DeviceSyncPublicIngress {
           } else if (isSeededAccountDisconnectedGuardError(error)) {
             await this.cleanupFailedOAuthConnection(provider, connection, now);
           } else if (seededAccountId) {
-            await this.markSeededConnectionSetupFailed(provider, seededAccountId, connection, now, error);
+            await this.markSeededConnectionSetupFailed(
+              provider,
+              seededAccountId,
+              seededConnectedAt,
+              connection,
+              now,
+              error,
+            );
           } else {
             await this.cleanupFailedOAuthConnection(provider, connection, now);
           }
@@ -968,7 +1083,14 @@ export class DeviceSyncPublicIngress {
         }
       } else if (seededAccountId) {
         try {
-          await this.markSeededConnectionSetupFailed(provider, seededAccountId, null, now, error);
+          await this.markSeededConnectionSetupFailed(
+            provider,
+            seededAccountId,
+            seededConnectedAt,
+            null,
+            now,
+            error,
+          );
         } catch (cleanupError) {
           throw attachOAuthCallbackContext(cleanupError, callbackContext);
         }
@@ -1303,13 +1425,12 @@ export class DeviceSyncPublicIngress {
     now: string,
     error: unknown,
   ): Promise<void> {
-    await this.cleanupFailedOAuthConnection(provider, connection, now);
-
     const failure = summarizeOAuthSetupFailure(error);
-    let markedAccount: PublicDeviceSyncAccount | null;
+    let markResult: MarkPublicDeviceSyncConnectionSetupFailedResult;
     try {
-      markedAccount = await this.store.markConnectionSetupFailed({
+      markResult = await this.store.markConnectionSetupFailed({
         accountId: account.id,
+        expectedConnectedAt: account.connectedAt,
         now,
         code: failure.code,
         message: failure.message,
@@ -1334,7 +1455,7 @@ export class DeviceSyncPublicIngress {
       });
     }
 
-    if (!markedAccount) {
+    if (!markResult.account) {
       throw deviceSyncError({
         code: "OAUTH_SETUP_CLEANUP_FAILED",
         message: "OAuth connection setup failed after persistence, and stored-token cleanup could not confirm the account.",
@@ -1345,24 +1466,26 @@ export class DeviceSyncPublicIngress {
         },
       });
     }
+
+    if (markResult.applied) {
+      await this.cleanupFailedOAuthConnection(provider, connection, now);
+    }
   }
 
   private async markSeededConnectionSetupFailed(
     provider: DeviceSyncProvider,
     accountId: string,
+    expectedConnectedAt: string | null,
     connection: ProviderConnectionResult | null,
     now: string,
     error: unknown,
   ): Promise<void> {
-    if (connection) {
-      await this.cleanupFailedOAuthConnection(provider, connection, now);
-    }
-
     const failure = summarizeOAuthSetupFailure(error);
-    let markedAccount: PublicDeviceSyncAccount | null;
+    let markResult: MarkPublicDeviceSyncConnectionSetupFailedResult;
     try {
-      markedAccount = await this.store.markConnectionSetupFailed({
+      markResult = await this.store.markConnectionSetupFailed({
         accountId,
+        expectedConnectedAt,
         now,
         code: failure.code,
         message: failure.message,
@@ -1386,7 +1509,7 @@ export class DeviceSyncPublicIngress {
       });
     }
 
-    if (!markedAccount) {
+    if (!markResult.account) {
       throw deviceSyncError({
         code: "CONNECTION_SETUP_CLEANUP_FAILED",
         message: "Seeded device sync connection setup failed, and setup failure could not confirm the account.",
@@ -1396,6 +1519,9 @@ export class DeviceSyncPublicIngress {
           setupFailureCode: failure.code,
         },
       });
+    }
+    if (markResult.applied && connection) {
+      await this.cleanupFailedOAuthConnection(provider, connection, now);
     }
   }
 }

@@ -146,7 +146,7 @@ test("BiomarkersPage metadata and route entrypoint filter generated biomarkers",
   );
   assert.deepEqual(biomarkersMetadata.twitter?.images, [
     {
-      alt: "Murph — Wearable data, made useful.",
+      alt: "Health is hard. Don’t do it alone.",
       height: 630,
       type: "image/png",
       url: "/opengraph-image",

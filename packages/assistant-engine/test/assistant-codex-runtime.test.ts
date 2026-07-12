@@ -10,6 +10,11 @@ import {
   HOSTED_RUNTIME_CODEX_APP_SERVER_COMMAND_ENV,
   HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV,
 } from '@murphai/hosted-execution/cli-runtime-bridge'
+import {
+  initializeVault,
+  withHostedCanonicalWritePort,
+  type HostedCanonicalWritePort,
+} from '@murphai/core'
 import { normalizeAssistantProviderConfig } from '@murphai/operator-config/assistant/provider-config'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -304,7 +309,11 @@ async function runCodexResponseMediaToolTurn(
   })
 }
 
-async function runCodexTelegramVoiceMemoOnlyTurn() {
+async function runCodexTelegramVoiceMemoOnlyTurn(input: {
+  commentaryText?: string
+  precedingFinalText?: string
+  progressDelivery?: CodexAppServerTurnInput['progressDelivery']
+} = {}) {
   const workingDirectory = await createTempDir('assistant-codex-voice-memo-only-work-')
   const codexHome = await createTempDir('assistant-codex-voice-memo-only-home-')
   const voiceMemoText = 'Voice-only reply.'
@@ -357,6 +366,62 @@ async function runCodexTelegramVoiceMemoOnlyTurn() {
             },
           },
         }))
+
+        if (input.precedingFinalText) {
+          child.stdout.write(jsonLine({
+            method: 'item/completed',
+            params: {
+              item: {
+                id: 'user-before-voice-memo-steer',
+                type: 'user_message',
+                message: 'Answer this first',
+              },
+            },
+          }))
+          child.stdout.write(jsonLine({
+            method: 'item/completed',
+            params: {
+              item: {
+                id: 'assistant-before-voice-memo-steer',
+                type: 'assistant_message',
+                message: input.precedingFinalText,
+              },
+            },
+          }))
+          child.stdout.write(jsonLine({
+            method: 'item/completed',
+            params: {
+              item: {
+                id: 'user-voice-memo-steer',
+                type: 'user_message',
+                message: 'Send that as a voice memo instead',
+              },
+            },
+          }))
+        }
+
+        if (input.commentaryText) {
+          child.stdout.write(jsonLine({
+            method: 'item/agentMessage/delta',
+            params: {
+              delta: input.commentaryText,
+              itemId: 'assistant-voice-memo-commentary',
+              threadId: 'thread-voice-memo-only',
+              turnId: 'turn-voice-memo-only',
+            },
+          }))
+          child.stdout.write(jsonLine({
+            method: 'item/completed',
+            params: {
+              item: {
+                id: 'assistant-voice-memo-commentary',
+                type: 'assistant_message',
+                phase: 'commentary',
+                message: input.commentaryText,
+              },
+            },
+          }))
+        }
 
         child.stdout.write(jsonLine({
           id: 61,
@@ -420,6 +485,7 @@ async function runCodexTelegramVoiceMemoOnlyTurn() {
     codexCommand: 'codex',
     codexHome,
     env,
+    progressDelivery: input.progressDelivery,
     prompt: 'Send only a voice memo',
     sandbox: 'workspace-write',
     voiceMemoRuntime: createVoiceMemoToolRuntimeFromEnv({
@@ -1184,6 +1250,51 @@ describe('assistant codex runtime', () => {
     })
   })
 
+  it('keeps commentary internal for a voice-only response', async () => {
+    const commentaryText = 'I’ll record that now.'
+    const progressDelivery = createProgressDeliveryMock()
+
+    const result = await runCodexTelegramVoiceMemoOnlyTurn({
+      commentaryText,
+      progressDelivery,
+    })
+
+    expect(progressDelivery.send).not.toHaveBeenCalled()
+    expect(result.finalMessage).toBe('')
+    expect(result.responseMedia).toEqual([
+      expect.objectContaining({
+        kind: 'voice_memo',
+      }),
+    ])
+  })
+
+  it('keeps a steered voice-only response in the current response segment', async () => {
+    const commentaryText = 'I’ll record that now.'
+    const precedingFinalText = 'Earlier answer.'
+    const progressDelivery = createProgressDeliveryMock()
+
+    const result = await runCodexTelegramVoiceMemoOnlyTurn({
+      commentaryText,
+      precedingFinalText,
+      progressDelivery,
+    })
+
+    expect(progressDelivery.send).not.toHaveBeenCalled()
+    expect(result.finalMessage).toBe('')
+    expect(result.precedingAgentMessageSegments).toEqual([
+      {
+        deliveryContextOrdinal: 0,
+        response: precedingFinalText,
+        media: [],
+      },
+    ])
+    expect(result.responseMedia).toEqual([
+      expect.objectContaining({
+        kind: 'voice_memo',
+      }),
+    ])
+  })
+
   it('applies overlapping dynamic media tools in request order', async () => {
     const workingDirectory = await createTempDir('assistant-codex-image-order-work-')
     const releaseImageFetch = createDeferred<void>()
@@ -1326,7 +1437,25 @@ describe('assistant codex runtime', () => {
     expect(uploader.uploadGeneratedImage).toHaveBeenCalledOnce()
   })
 
-  it('serializes overlapping computer tools so pause waits for prior navigation completion', async () => {
+  const computerPauseFinalMessageScenarios = [
+    {
+      expectedFinalMessage:
+        'Paused for confirmation.\n\nTake over here: https://web.example.test/computer/handoff/raw-token',
+      modelMessage: 'Paused for confirmation.',
+      name: 'appends an omitted handoff URL',
+    },
+    {
+      expectedFinalMessage:
+        'Paused for confirmation. Take over here: https://web.example.test/computer/handoff/raw-token',
+      modelMessage:
+        'Paused for confirmation. Take over here: https://web.example.test/computer/handoff/raw-token',
+      name: 'preserves a model-supplied handoff URL once',
+    },
+  ] as const
+
+  const runComputerPauseFinalMessageScenario = async (
+    scenario: (typeof computerPauseFinalMessageScenarios)[number],
+  ): Promise<void> => {
     const workingDirectory = await createTempDir('assistant-codex-computer-order-work-')
     const releaseAct = createDeferred<void>()
     const actStarted = createDeferred<void>()
@@ -1455,7 +1584,7 @@ describe('assistant codex runtime', () => {
                 item: {
                   id: 'assistant-computer-order',
                   type: 'assistant_message',
-                  message: 'Paused for confirmation.',
+                  message: scenario.modelMessage,
                 },
               },
             }),
@@ -1486,10 +1615,15 @@ describe('assistant codex runtime', () => {
         workingDirectory,
       }),
     ).resolves.toMatchObject({
-      finalMessage: 'Paused for confirmation.',
+      finalMessage: scenario.expectedFinalMessage,
     })
     expect(fetchOrder).toEqual(['act:start', 'act:end', 'pause'])
-  })
+  }
+
+  it.each(computerPauseFinalMessageScenarios)(
+    'serializes overlapping computer tools and $name',
+    runComputerPauseFinalMessageScenario,
+  )
 
   it('closes live steering before saving a computer pause', async () => {
     const workingDirectory = await createTempDir('assistant-codex-computer-pause-live-turn-work-')
@@ -1647,7 +1781,7 @@ describe('assistant codex runtime', () => {
     expect(liveTurnReleased).toBe(1)
   })
 
-  it('allows finish_without_reply after pausing a computer run for the user', async () => {
+  it('overrides an earlier no-reply and rejects a later one when a handoff URL must be delivered', async () => {
     const workingDirectory = await createTempDir('assistant-codex-computer-pause-no-reply-work-')
     const progressDelivery = createProgressDeliveryMock()
     const hostedToolContext = createHostedToolContext()
@@ -1707,6 +1841,22 @@ describe('assistant codex runtime', () => {
           )
           child.stdout.write(
             jsonLine({
+              id: 60,
+              method: 'item/tool/call',
+              params: {
+                namespace: 'murph',
+                tool: 'finish_without_reply',
+                arguments: {},
+              },
+            }),
+          )
+          await expect(waitForRpcResponse(child, 60)).resolves.toMatchObject({
+            id: 60,
+            result: { success: true },
+          })
+
+          child.stdout.write(
+            jsonLine({
               id: 61,
               method: 'item/tool/call',
               params: {
@@ -1740,11 +1890,11 @@ describe('assistant codex runtime', () => {
           await expect(waitForRpcResponse(child, 62)).resolves.toEqual({
             id: 62,
             result: {
-              success: true,
+              success: false,
               contentItems: [
                 {
                   type: 'inputText',
-                  text: 'finished without reply',
+                  text: 'finish_without_reply is unavailable after pausing a computer run for the user',
                 },
               ],
             },
@@ -1776,9 +1926,9 @@ describe('assistant codex runtime', () => {
         workingDirectory,
       }),
     ).resolves.toMatchObject({
-      acceptedNoReplyDeliveryContextOrdinals: [0],
-      finalAction: { kind: 'none' },
-      finalMessage: '',
+      acceptedNoReplyDeliveryContextOrdinals: [],
+      finalAction: null,
+      finalMessage: 'Take over here: https://web.example.test/computer/handoff/raw-token',
     })
   })
 
@@ -4323,6 +4473,145 @@ describe('assistant codex runtime', () => {
       sessionId: 'thread-local-turn-id-shape-2',
       turnId: 'turn-local-turn-id-shape-2',
     })
+  })
+
+  it('rebinds canonical writes to the current turn on a reused warm process', async () => {
+    const workingDirectory = await createTempDir('assistant-codex-warm-write-work-')
+    const codexHome = await createTempDir('assistant-codex-warm-write-home-')
+    const vaultRoot = await createTempDir('assistant-codex-warm-write-vault-')
+    await initializeVault({ vaultRoot })
+    const firstPersistCanonicalWrite = vi.fn(async () => undefined)
+    const secondPersistCanonicalWrite = vi.fn(async () => undefined)
+    const firstPort: HostedCanonicalWritePort = {
+      persistCanonicalWrite: firstPersistCanonicalWrite,
+    }
+    const secondPort: HostedCanonicalWritePort = {
+      persistCanonicalWrite: secondPersistCanonicalWrite,
+    }
+    const webpBytes = new Uint8Array([
+      0x52, 0x49, 0x46, 0x46,
+      0x00, 0x00, 0x00, 0x00,
+      0x57, 0x45, 0x42, 0x50,
+    ])
+    const fetchImpl = vi.fn(async () =>
+      new Response(JSON.stringify({
+        data: [{ b64_json: Buffer.from(webpBytes).toString('base64') }],
+        usage: { input_tokens: 1, output_tokens: 2, total_tokens: 3 },
+      }), {
+        headers: { 'content-type': 'application/json' },
+        status: 200,
+      }))
+    const uploader = {
+      uploadGeneratedImage: vi.fn(async () => ({
+        alt: 'Generated image',
+        kind: 'image' as const,
+        source: 'gpt-image-2',
+        url: 'https://imagedelivery.net/account/generated/public',
+      })),
+    }
+
+    codexMocks.spawn.mockImplementation(() => {
+      const child = new MockChildProcess()
+
+      queueMicrotask(() => {
+        void (async () => {
+          const initialize = await waitForRpcMethod(child, 'initialize')
+          child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
+          await writeWarmTurnStarted({
+            child,
+            requestCount: 1,
+            threadId: 'thread-warm-write-1',
+            turnId: 'turn-warm-write-1',
+          })
+          writeCodexV2AssistantEventTurn({
+            child,
+            finalMessage: 'First warm turn complete',
+            threadId: 'thread-warm-write-1',
+            turnId: 'turn-warm-write-1',
+          })
+
+          await writeWarmTurnStarted({
+            child,
+            requestCount: 2,
+            threadId: 'thread-warm-write-2',
+            turnId: 'turn-warm-write-2',
+          })
+          child.stdout.write(jsonLine({
+            id: 91,
+            method: 'item/tool/call',
+            params: {
+              namespace: 'murph',
+              tool: 'generate_image',
+              arguments: {
+                prompt: 'Render the current turn.',
+              },
+              threadId: 'thread-warm-write-2',
+              turnId: 'turn-warm-write-2',
+            },
+          }))
+          await expect(waitForRpcResponse(child, 91)).resolves.toMatchObject({
+            id: 91,
+            result: {
+              success: true,
+            },
+          })
+          writeCodexV2AssistantEventTurn({
+            child,
+            finalMessage: 'Second warm turn complete',
+            threadId: 'thread-warm-write-2',
+            turnId: 'turn-warm-write-2',
+          })
+        })()
+      })
+
+      return child
+    })
+
+    await expect(withHostedCanonicalWritePort(
+      firstPort,
+      async () => await executeCodexAppServerTurn({
+        approvalPolicy: 'never',
+        codexHome,
+        env: {
+          OPENAI_API_KEY: 'openai-test-key',
+          PATH: '/custom/bin',
+        },
+        fetchImpl,
+        hostedGeneratedImageUploader: uploader,
+        prompt: 'start the warm process',
+        requireHostedGeneratedImageUploader: true,
+        sandbox: 'workspace-write',
+        vaultRoot,
+        workingDirectory,
+      }),
+    )).resolves.toMatchObject({
+      finalMessage: 'First warm turn complete',
+    })
+
+    await expect(withHostedCanonicalWritePort(
+      secondPort,
+      async () => await executeCodexAppServerTurn({
+        approvalPolicy: 'never',
+        codexHome,
+        env: {
+          OPENAI_API_KEY: 'openai-test-key',
+          PATH: '/custom/bin',
+        },
+        fetchImpl,
+        hostedGeneratedImageUploader: uploader,
+        prompt: 'write from the current warm turn',
+        requireHostedGeneratedImageUploader: true,
+        sandbox: 'workspace-write',
+        vaultRoot,
+        workingDirectory,
+      }),
+    )).resolves.toMatchObject({
+      finalMessage: 'Second warm turn complete',
+    })
+
+    expect(firstPersistCanonicalWrite).not.toHaveBeenCalled()
+    expect(secondPersistCanonicalWrite).toHaveBeenCalled()
+    expect(uploader.uploadGeneratedImage).toHaveBeenCalledOnce()
   })
 
   it('trusts tagged turn/started when the turn/start response omits the turn id', async () => {
@@ -9695,25 +9984,10 @@ describe('assistant codex runtime', () => {
     )
   })
 
-  it('counts commentary progress and progress tool calls against the same model budget', async () => {
+  it('keeps commentary internal and reserves outbound progress for the explicit tool', async () => {
     const workingDirectory = await createTempDir('assistant-codex-commentary-progress-')
-    let sendCount = 0
-    const progressDelivery = {
-      send: vi.fn(async (_text: string, options?: { source?: 'model' | 'system' }) => {
-        sendCount += 1
-        const source = options?.source ?? 'model'
-        return sendCount === 1
-          ? {
-              kind: 'sent' as const,
-              source,
-            }
-          : {
-              kind: 'skipped' as const,
-              reason: 'limit' as const,
-              source,
-            }
-      }),
-    }
+    const onProgress = vi.fn()
+    const progressDelivery = createProgressDeliveryMock()
 
     codexMocks.spawn.mockImplementation(() => {
       const child = new MockChildProcess()
@@ -9775,11 +10049,11 @@ describe('assistant codex runtime', () => {
           expect(messages[4]).toEqual({
             id: 99,
             result: {
-              success: false,
+              success: true,
               contentItems: [
                 {
                   type: 'inputText',
-                  text: 'progress update skipped: progress update limit reached',
+                  text: 'progress update sent',
                 },
               ],
             },
@@ -9817,6 +10091,7 @@ describe('assistant codex runtime', () => {
 
     await expect(
       executeCodexAppServerTurn({
+        onProgress,
         prompt: 'answer with commentary progress',
         progressDelivery,
         workingDirectory,
@@ -9825,16 +10100,20 @@ describe('assistant codex runtime', () => {
       finalMessage: 'Final answer after commentary.',
       sessionId: 'thread-commentary-progress',
     })
-    expect(progressDelivery.send).toHaveBeenNthCalledWith(
-      1,
-      'Reading the report now.',
-      { source: 'model' },
-    )
-    expect(progressDelivery.send).toHaveBeenNthCalledWith(
-      2,
+    expect(progressDelivery.send).toHaveBeenCalledTimes(1)
+    expect(progressDelivery.send).toHaveBeenCalledWith(
       'Checking the saved context now.',
       { source: 'model' },
     )
+    expect(progressDelivery.send).not.toHaveBeenCalledWith(
+      'Reading the report now.',
+      { source: 'model' },
+    )
+    expect(onProgress).toHaveBeenCalledWith(expect.objectContaining({
+      kind: 'message',
+      state: 'completed',
+      text: 'Reading the report now.',
+    }))
   })
 
   it('waits for in-flight current-channel progress before returning the final turn result', async () => {
@@ -9876,19 +10155,11 @@ describe('assistant codex runtime', () => {
               },
             }),
           )
-          child.stdout.write(
-            jsonLine({
-              method: 'item/completed',
-              params: {
-                item: {
-                  id: 'assistant-progress-drain',
-                  type: 'assistant_message',
-                  phase: 'commentary',
-                  message: 'Checking the thread now.',
-                },
-              },
-            }),
-          )
+          writeContextCompactionStarted({
+            child,
+            itemId: 'context-progress-drain',
+            threadId: 'thread-progress-drain',
+          })
           child.stdout.write(
             jsonLine({
               method: 'item/completed',
@@ -9936,14 +10207,14 @@ describe('assistant codex runtime', () => {
       await new Promise((resolve) => setTimeout(resolve, 0))
     }
     expect(progressDelivery.send).toHaveBeenCalledWith(
-      'Checking the thread now.',
-      { source: 'model' },
+      expect.any(String),
+      { required: true, source: 'system' },
     )
 
     await new Promise((resolve) => setTimeout(resolve, 0))
     expect(settled).toBe(false)
 
-    progressSent.resolve(sentProgressResult())
+    progressSent.resolve(sentProgressResult('system'))
     await expect(turnPromise).resolves.toMatchObject({
       finalMessage: 'Final answer after progress.',
       sessionId: 'thread-progress-drain',
@@ -9993,19 +10264,11 @@ describe('assistant codex runtime', () => {
               },
             }),
           )
-          child.stdout.write(
-            jsonLine({
-              method: 'item/completed',
-              params: {
-                item: {
-                  id: 'assistant-progress-drain-failure',
-                  type: 'assistant_message',
-                  phase: 'commentary',
-                  message: 'Checking the thread now.',
-                },
-              },
-            }),
-          )
+          writeContextCompactionStarted({
+            child,
+            itemId: 'context-progress-drain-failure',
+            threadId: 'thread-progress-drain-failure',
+          })
           child.stdout.write(
             jsonLine({
               method: 'turn/completed',
@@ -10042,14 +10305,14 @@ describe('assistant codex runtime', () => {
       await new Promise((resolve) => setTimeout(resolve, 0))
     }
     expect(progressDelivery.send).toHaveBeenCalledWith(
-      'Checking the thread now.',
-      { source: 'model' },
+      expect.any(String),
+      { required: true, source: 'system' },
     )
 
     await new Promise((resolve) => setTimeout(resolve, 0))
     expect(settled).toBe(false)
 
-    progressSent.resolve(sentProgressResult())
+    progressSent.resolve(sentProgressResult('system'))
     const error: unknown = await turnPromise.then(
       () => {
         throw new Error('expected the Codex turn to fail')
@@ -10106,19 +10369,11 @@ describe('assistant codex runtime', () => {
               },
             }),
           )
-          child.stdout.write(
-            jsonLine({
-              method: 'item/completed',
-              params: {
-                item: {
-                  id: 'assistant-progress-drain-timeout',
-                  type: 'assistant_message',
-                  phase: 'commentary',
-                  message: 'Checking the thread now.',
-                },
-              },
-            }),
-          )
+          writeContextCompactionStarted({
+            child,
+            itemId: 'context-progress-drain-timeout',
+            threadId: 'thread-progress-drain-timeout',
+          })
           child.stdout.write(
             jsonLine({
               method: 'item/completed',
@@ -10166,14 +10421,14 @@ describe('assistant codex runtime', () => {
       await new Promise((resolve) => setTimeout(resolve, 0))
     }
     expect(progressDelivery.send).toHaveBeenCalledWith(
-      'Checking the thread now.',
-      { source: 'model' },
+      expect.any(String),
+      { required: true, source: 'system' },
     )
 
     await new Promise((resolve) => setTimeout(resolve, 2_100))
     expect(settled).toBe(false)
 
-    stalledProgress.resolve(sentProgressResult())
+    stalledProgress.resolve(sentProgressResult('system'))
     await expect(turnPromise).resolves.toMatchObject({
       finalMessage: 'Final answer after stalled progress.',
       sessionId: 'thread-progress-drain-timeout',
@@ -13490,6 +13745,11 @@ describe('steered final segments', () => {
 
   async function runScriptedSteeredFinalSegmentsTurn(
     steps: Array<Record<string, unknown> | ScriptedSteeredFinalStep>,
+    input: {
+      onProgress?: CodexAppServerTurnInput['onProgress']
+      onTraceEvent?: CodexAppServerTurnInput['onTraceEvent']
+      progressDelivery?: CodexAppServerTurnInput['progressDelivery']
+    } = {},
   ) {
     const workingDirectory = await createTempDir('assistant-codex-steered-finals-work-')
     const codexHome = await createTempDir('assistant-codex-steered-finals-home-')
@@ -13607,6 +13867,9 @@ describe('steered final segments', () => {
       approvalPolicy: 'never',
       codexCommand: 'codex',
       codexHome,
+      onProgress: input.onProgress,
+      onTraceEvent: input.onTraceEvent,
+      progressDelivery: input.progressDelivery,
       prompt: 'First question',
       sandbox: 'workspace-write',
       workingDirectory,
@@ -13622,7 +13885,73 @@ describe('steered final segments', () => {
     }
   }
 
-  it('keeps final answers completed before a steered user message as preceding messages', async () => {
+  it('returns no final text or outbound progress for a commentary-only turn', async () => {
+    const progressDelivery = createProgressDeliveryMock()
+    const result = await runScriptedSteeredFinalSegmentsTurn([
+      completedItemEvent({
+        id: 'assistant-commentary-only',
+        type: 'assistant_message',
+        message: 'Internal status only.',
+        phase: 'commentary',
+      }),
+    ], { progressDelivery })
+
+    expect(progressDelivery.send).not.toHaveBeenCalled()
+    expect(result.finalMessage).toBe('')
+    expect(result.precedingAgentMessageSegments).toEqual([])
+  })
+
+  it('keeps a pre-steer final when only commentary follows the steer', async () => {
+    const progressDelivery = createProgressDeliveryMock()
+    const retainedMedia = {
+      url: 'https://cdn.example.test/assistant/retained-final.png',
+      alt: 'Retained final image',
+      source: 'retained-final',
+    }
+    const result = await runScriptedSteeredFinalSegmentsTurn([
+      completedItemEvent({
+        id: 'user-1',
+        type: 'user_message',
+        message: 'First question',
+      }),
+      {
+        kind: 'attach-response-media',
+        id: 81,
+        expectedText: '1 response image attached',
+        media: [retainedMedia],
+      },
+      completedItemEvent({
+        id: 'assistant-1',
+        type: 'assistant_message',
+        message: 'Answer one.',
+      }),
+      completedItemEvent({
+        id: 'user-2',
+        type: 'user_message',
+        message: 'One more thought',
+      }),
+      completedItemEvent({
+        id: 'assistant-2-commentary',
+        type: 'assistant_message',
+        message: 'Considering that.',
+        phase: 'commentary',
+      }),
+    ], { progressDelivery })
+
+    expect(progressDelivery.send).not.toHaveBeenCalled()
+    expect(result.finalMessage).toBe('Answer one.')
+    expect(result.responseDeliveryContextOrdinal).toBe(0)
+    expect(result.responseMedia).toEqual([
+      {
+        ...retainedMedia,
+        kind: 'image',
+      },
+    ])
+    expect(result.precedingAgentMessageSegments).toEqual([])
+  })
+
+  it('keeps steered final answers while commentary remains internal', async () => {
+    const progressDelivery = createProgressDeliveryMock()
     const result = await runScriptedSteeredFinalSegmentsTurn([
       completedItemEvent({
         id: 'user-1',
@@ -13640,12 +13969,19 @@ describe('steered final segments', () => {
         message: 'Thanks mate I appreciate all this',
       }),
       completedItemEvent({
+        id: 'assistant-2-commentary',
+        type: 'assistant_message',
+        message: 'Reworking that now.',
+        phase: 'commentary',
+      }),
+      completedItemEvent({
         id: 'assistant-2',
         type: 'assistant_message',
         message: 'Answer two.',
       }),
-    ])
+    ], { progressDelivery })
 
+    expect(progressDelivery.send).not.toHaveBeenCalled()
     expect(result.finalMessage).toBe('Answer two.')
     expect(result.precedingAgentMessageSegments).toEqual([
       {
@@ -13709,6 +14045,11 @@ describe('steered final segments', () => {
   it('does not return a trailing-steer final answer as a preceding segment', async () => {
     const result = await runScriptedSteeredFinalSegmentsTurn([
       completedItemEvent({
+        id: 'user-1',
+        type: 'user_message',
+        message: 'First question',
+      }),
+      completedItemEvent({
         id: 'assistant-1',
         type: 'assistant_message',
         message: 'Answer one.',
@@ -13721,7 +14062,47 @@ describe('steered final segments', () => {
     ])
 
     expect(result.finalMessage).toBe('Answer one.')
+    expect(result.responseDeliveryContextOrdinal).toBe(0)
     expect(result.precedingAgentMessageSegments).toEqual([])
+  })
+
+  it('promotes a trailing-steer answer when the current segment has fallback text', async () => {
+    const result = await runScriptedSteeredFinalSegmentsTurn([
+      completedItemEvent({
+        id: 'user-1',
+        type: 'user_message',
+        message: 'First question',
+      }),
+      completedItemEvent({
+        id: 'assistant-1',
+        type: 'assistant_message',
+        message: 'Answer one.',
+      }),
+      completedItemEvent({
+        id: 'user-2',
+        type: 'user_message',
+        message: 'Answer this differently',
+      }),
+      {
+        method: 'item/agentMessage/delta',
+        params: {
+          delta: 'Answer two from fallback.',
+          itemId: 'assistant-2',
+          threadId: 'thread-steered-finals',
+          turnId: 'turn-steered-finals',
+        },
+      },
+    ])
+
+    expect(result.finalMessage).toBe('Answer two from fallback.')
+    expect(result.responseDeliveryContextOrdinal).toBe(1)
+    expect(result.precedingAgentMessageSegments).toEqual([
+      {
+        deliveryContextOrdinal: 0,
+        response: 'Answer one.',
+        media: [],
+      },
+    ])
   })
 
   it('keeps repeated same-text final answers when they are distinct steered segments', async () => {
@@ -13871,6 +14252,7 @@ describe('steered final segments', () => {
   })
 
   it('ignores commentary messages and steers that arrive before any final answer', async () => {
+    const progressDelivery = createProgressDeliveryMock()
     const result = await runScriptedSteeredFinalSegmentsTurn([
       completedItemEvent({
         id: 'user-1',
@@ -13893,8 +14275,9 @@ describe('steered final segments', () => {
         type: 'assistant_message',
         message: 'Consolidated answer.',
       }),
-    ])
+    ], { progressDelivery })
 
+    expect(progressDelivery.send).not.toHaveBeenCalled()
     expect(result.finalMessage).toBe('Consolidated answer.')
     expect(result.precedingAgentMessageSegments).toEqual([])
   })

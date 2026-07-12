@@ -1,6 +1,11 @@
 import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
-import { createServer, type IncomingMessage, type Server as HttpServer } from "node:http";
+import {
+  createServer,
+  type IncomingMessage,
+  type Server as HttpServer,
+  type ServerResponse,
+} from "node:http";
 import { deflateSync } from "node:zlib";
 
 import { MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE } from "@murphai/contracts";
@@ -11,10 +16,6 @@ import {
   createHostedAssistantConversationIdentifierBlind,
   hashHostedAssistantConversationIdentifier,
 } from "@murphai/hosted-execution/assistant-identifiers";
-import type {
-  HostedRunnerStatusResponse,
-} from "@murphai/hosted-execution/runtime-control";
-
 import { createHostedPhoneLookupKey } from "./hosted-contact-privacy.js";
 import {
   buildStableNumericSuffix,
@@ -36,14 +37,45 @@ export interface ObservedLinqRequest {
 }
 
 export type ObservedLinqRequestMatcher = (request: ObservedLinqRequest) => boolean;
+export type HostedLocalLinqWaitScenario = Pick<
+  HostedLocalFullStackScenario,
+  "buildFailureMessage"
+>;
+
+export interface HostedLocalLinqCanonicalChatHandle {
+  handle: string;
+  isMe: boolean;
+  status?: string | null;
+}
+
+export interface HostedLocalLinqCanonicalChat {
+  chatId: string;
+  handles?: readonly HostedLocalLinqCanonicalChatHandle[];
+  isGroup: boolean;
+}
 
 const linqCreateChatPath = "/chats";
+const linqCreateAttachmentPath = "/attachments";
 const linqAttachmentDownloadBasePath = "/attachment-downloads";
 const hostedLocalLinqObservedRequestWaitTimeoutMs = 180_000;
-const hostedLocalLinqWaitExpireAfterInFlightMs = 30_000;
-const hostedLocalLinqWaitNudgeAfterMailboxLagMs = 15_000;
-const hostedLocalLinqWaitAlarmAfterPendingDeliveryMs = 2_000;
 const hostedLocalRunnerProviderHost = "host.docker.internal";
+// Linq's production client makes three attempts for retry-safe POSTs. The
+// controls span that provider-local loop so one logical send fails. The
+// post-accept control records only its first provider acceptance; a later
+// logical retry observes that already-accepted result.
+const hostedLocalLinqHttpAttemptsPerLogicalSend = 3;
+
+interface HostedLocalLinqArmedSendFailure {
+  expectedPath: string;
+  matchRequest: ObservedLinqRequestMatcher;
+  remainingResponses: number;
+}
+
+interface HostedLocalLinqAcceptedMessage {
+  chatId: string;
+  messageId: string;
+  request: ObservedLinqRequest;
+}
 
 type HostedLinqInboundPartInput =
   | {
@@ -60,10 +92,22 @@ type HostedLinqInboundPartInput =
     };
 
 export interface HostedLocalLinqStub {
+  acceptedSendRequests: ObservedLinqRequest[];
+  armNextPostAcceptLostAcknowledgment(input: {
+    expectedPath: string;
+    matchRequest: ObservedLinqRequestMatcher;
+    responseCount?: number;
+  }): void;
+  armNextPreAcceptRetryableSendFailure(input: {
+    expectedPath: string;
+    matchRequest: ObservedLinqRequestMatcher;
+    responseCount?: number;
+  }): void;
   attachmentDownloadContainerBaseUrl: string;
   attachmentDownloadBaseUrl: string;
   baseUrl: string;
   containerBaseUrl: string;
+  countAcceptedSends(expectedPath: string, matchRequest?: ObservedLinqRequestMatcher): number;
   countObservedSends(expectedPath: string, matchRequest?: ObservedLinqRequestMatcher): number;
   countObservedRequests(input: {
     expectedMethod: string;
@@ -84,14 +128,21 @@ export interface HostedLocalLinqStub {
     expectedMethod: string;
     expectedPath: string;
     matchRequest?: ObservedLinqRequestMatcher;
-    scenario: HostedLocalFullStackScenario;
+    scenario: HostedLocalLinqWaitScenario;
+    userId: string;
+  }): Promise<ObservedLinqRequest>;
+  waitForAdditionalAcceptedSend(input: {
+    baselineCount: number;
+    expectedPath: string;
+    matchRequest?: ObservedLinqRequestMatcher;
+    scenario: HostedLocalLinqWaitScenario;
     userId: string;
   }): Promise<ObservedLinqRequest>;
   waitForAdditionalSend(input: {
     baselineCount: number;
     expectedPath: string;
     matchRequest?: ObservedLinqRequestMatcher;
-    scenario: HostedLocalFullStackScenario;
+    scenario: HostedLocalLinqWaitScenario;
     userId: string;
   }): Promise<ObservedLinqRequest>;
   waitForMatchingRequestCount(input: {
@@ -99,20 +150,27 @@ export interface HostedLocalLinqStub {
     expectedMethod: string;
     expectedPath: string;
     matchRequest?: ObservedLinqRequestMatcher;
-    scenario: HostedLocalFullStackScenario;
+    scenario: HostedLocalLinqWaitScenario;
+    userId: string;
+  }): Promise<ObservedLinqRequest[]>;
+  waitForMatchingAcceptedSendCount(input: {
+    expectedCount: number;
+    expectedPath: string;
+    matchRequest?: ObservedLinqRequestMatcher;
+    scenario: HostedLocalLinqWaitScenario;
     userId: string;
   }): Promise<ObservedLinqRequest[]>;
   waitForMatchingSendCount(input: {
     expectedCount: number;
     expectedPath: string;
     matchRequest?: ObservedLinqRequestMatcher;
-    scenario: HostedLocalFullStackScenario;
+    scenario: HostedLocalLinqWaitScenario;
     userId: string;
   }): Promise<ObservedLinqRequest[]>;
   waitForSend(input: {
     expectedPath: string;
     matchRequest?: ObservedLinqRequestMatcher;
-    scenario: HostedLocalFullStackScenario;
+    scenario: HostedLocalLinqWaitScenario;
     userId: string;
   }): Promise<ObservedLinqRequest>;
 }
@@ -147,22 +205,31 @@ export function readHostedLocalLinqImagePngBytes(): Uint8Array {
 }
 
 export async function startHostedLocalLinqStub(input: {
+  canonicalChats?: readonly HostedLocalLinqCanonicalChat[];
   expectedAuthorizationToken?: string | null;
 } = {}): Promise<HostedLocalLinqStub> {
   const observedRequests: ObservedLinqRequest[] = [];
+  const acceptedSendRequests: ObservedLinqRequest[] = [];
+  const canonicalChats = new Map(
+    (input.canonicalChats ?? []).map((chat) => [chat.chatId, chat] as const),
+  );
   const observedChatIdsByRecipient = new Map<string, string>();
   const observedMessageIdsByChat = new Map<string, string[]>();
   const voiceMemoBytes = buildHostedLocalLinqVoiceMemoBytes();
   const pdfBytes = HOSTED_LOCAL_LINQ_PDF_BYTES;
   let nextObservedChatSequence = 0;
+  let nextObservedAttachmentSequence = 0;
   let nextObservedMessageSequence = 0;
   let attachmentDownloadBaseUrl = "";
   let attachmentDownloadContainerBaseUrl = "";
+  let nextPostAcceptLostAcknowledgment: HostedLocalLinqArmedSendFailure | null = null;
+  let nextPreAcceptRetryableSendFailure: HostedLocalLinqArmedSendFailure | null = null;
+  let postAcceptLostAcknowledgmentAcceptedMessage: HostedLocalLinqAcceptedMessage | null = null;
   let server: HttpServer | null = null;
 
   server = createServer(async (request, response) => {
     const body = await readRequestBody(request);
-    observedRequests.push({
+    const observedRequest: ObservedLinqRequest = {
       authorizationStatus: classifyObservedLinqAuthorization(
         request.headers.authorization,
         input.expectedAuthorizationToken,
@@ -171,7 +238,8 @@ export async function startHostedLocalLinqStub(input: {
       host: request.headers.host?.trim() || null,
       method: request.method ?? "GET",
       url: request.url ?? "/",
-    });
+    };
+    observedRequests.push(observedRequest);
     if (process.env.MURPH_E2E_DEBUG_LINQ_STUB === "1") {
       console.log(`[linq-stub] ${request.method ?? "GET"} ${request.url ?? "/"}`);
     }
@@ -201,6 +269,44 @@ export async function startHostedLocalLinqStub(input: {
       return;
     }
 
+    if (request.method === "POST" && request.url === linqCreateAttachmentPath) {
+      const parsedBody = parseObservedLinqJson(body);
+      if (!isObservedLinqCreateAttachmentPayload(parsedBody)) {
+        writeJsonResponse(response, 400, {
+          error: "Expected a Linq attachment payload with content_type, filename, and size_bytes.",
+        });
+        return;
+      }
+
+      const attachmentId = `attachment_local_${++nextObservedAttachmentSequence}`;
+      writeJsonResponse(response, 200, {
+        attachment_id: attachmentId,
+        download_url: `https://cdn.example.test/linq-attachments/${attachmentId}`,
+        expires_at: new Date(Date.now() + 300_000).toISOString(),
+        http_method: "PUT",
+        required_headers: {
+          "content-type": parsedBody.content_type,
+        },
+        upload_url: `https://uploads.example.test/linq-attachments/${attachmentId}`,
+      });
+      return;
+    }
+
+    if (request.method === "GET" && request.url && /^\/chats\/[^/]+$/u.test(request.url)) {
+      const chatId = decodeURIComponent(request.url.split("/")[2] ?? "unknown");
+      const canonicalChat = canonicalChats.get(chatId);
+      writeJsonResponse(response, 200, {
+        handles: (canonicalChat?.handles ?? []).map((handle) => ({
+          handle: handle.handle,
+          is_me: handle.isMe,
+          status: handle.status ?? null,
+        })),
+        id: chatId,
+        is_group: canonicalChat?.isGroup ?? false,
+      });
+      return;
+    }
+
     if (
       request.method === "POST"
       && request.url
@@ -213,21 +319,54 @@ export async function startHostedLocalLinqStub(input: {
         return;
       }
 
+      if (
+        consumeHostedLocalLinqArmedSendFailure(
+          nextPreAcceptRetryableSendFailure,
+          observedRequest,
+        )
+      ) {
+        if (nextPreAcceptRetryableSendFailure?.remainingResponses === 0) {
+          nextPreAcceptRetryableSendFailure = null;
+        }
+        writeHostedLocalLinqRetryableSendFailure(response);
+        return;
+      }
+
       const chatId = request.url.split("/")[2] ?? "unknown";
-      const messageId = `linq_msg_local_${++nextObservedMessageSequence}`;
-      const observedMessageIds = observedMessageIdsByChat.get(chatId) ?? [];
-      observedMessageIds.push(messageId);
-      observedMessageIdsByChat.set(chatId, observedMessageIds);
-      writeJsonResponse(response, 200, {
-        chat_id: chatId,
-        data: {
-          chat_id: chatId,
-          id: messageId,
-        },
-        message: {
-          id: messageId,
-        },
-      });
+      const replayedAcceptedMessage = postAcceptLostAcknowledgmentAcceptedMessage
+        && postAcceptLostAcknowledgmentAcceptedMessage.chatId === chatId
+        && postAcceptLostAcknowledgmentAcceptedMessage.request.body === observedRequest.body
+        && postAcceptLostAcknowledgmentAcceptedMessage.request.url === observedRequest.url
+        ? postAcceptLostAcknowledgmentAcceptedMessage
+        : null;
+      const acceptedMessage = replayedAcceptedMessage ?? (() => {
+        const messageId = `linq_msg_local_${++nextObservedMessageSequence}`;
+        const observedMessageIds = observedMessageIdsByChat.get(chatId) ?? [];
+        observedMessageIds.push(messageId);
+        observedMessageIdsByChat.set(chatId, observedMessageIds);
+        acceptedSendRequests.push(observedRequest);
+        return {
+          chatId,
+          messageId,
+          request: observedRequest,
+        };
+      })();
+
+      if (
+        consumeHostedLocalLinqArmedSendFailure(
+          nextPostAcceptLostAcknowledgment,
+          observedRequest,
+        )
+      ) {
+        postAcceptLostAcknowledgmentAcceptedMessage = acceptedMessage;
+        if (nextPostAcceptLostAcknowledgment?.remainingResponses === 0) {
+          nextPostAcceptLostAcknowledgment = null;
+        }
+        writeHostedLocalLinqRetryableSendFailure(response);
+        return;
+      }
+
+      writeHostedLocalLinqAcceptedMessage(response, acceptedMessage);
       return;
     }
 
@@ -320,17 +459,15 @@ export async function startHostedLocalLinqStub(input: {
     expectedMethod: string;
     expectedPath: string;
     matchRequest?: ObservedLinqRequestMatcher;
-    scenario: HostedLocalFullStackScenario;
+    requests?: ObservedLinqRequest[];
+    scenario: HostedLocalLinqWaitScenario;
     userId: string;
   }): Promise<ObservedLinqRequest[]> => {
+    const requests = input.requests ?? observedRequests;
     const startedAt = Date.now();
-    let nextNudgeAt = startedAt;
-    let mailboxLagFirstObservedAt: number | null = null;
-    let pendingDeliveryFirstObservedAt: number | null = null;
-    let latestStatusReadError: string | null = null;
 
     while ((Date.now() - startedAt) < hostedLocalLinqObservedRequestWaitTimeoutMs) {
-      const matchingRequests = observedRequests.filter((request) =>
+      const matchingRequests = requests.filter((request) =>
         isMatchingObservedLinqRequest(
           request,
           input.expectedMethod,
@@ -343,47 +480,6 @@ export async function startHostedLocalLinqStub(input: {
         return matchingRequests;
       }
 
-      const now = Date.now();
-      if (now >= nextNudgeAt) {
-        nextNudgeAt = now + 2_000;
-        const status = await input.scenario.harness.readUserStatus(input.userId)
-          .catch((error: unknown) => {
-            latestStatusReadError = error instanceof Error ? error.message : String(error);
-            return null;
-          });
-        mailboxLagFirstObservedAt = updateHostedLocalLinqMailboxLagFirstObservedAt({
-          firstObservedAt: mailboxLagFirstObservedAt,
-          now,
-          status,
-        });
-        pendingDeliveryFirstObservedAt =
-          updateHostedLocalLinqPendingDeliveryFirstObservedAt({
-            firstObservedAt: pendingDeliveryFirstObservedAt,
-            now,
-            status,
-          });
-        if (status) {
-          if (shouldExpireHostedLocalLinqWaitInFlightForStatus({ now, status })) {
-            await input.scenario.harness.expireRunnerActivityForTest(input.userId)
-              .catch(() => {});
-            await input.scenario.harness.nudgeUserBestEffort(input.userId);
-          } else if (shouldRunHostedLocalLinqWaitAlarmInvocationForStatus({
-            now,
-            pendingDeliveryFirstObservedAt,
-            status,
-          })) {
-            await input.scenario.harness.runHostedAlarmInvocationForTest(input.userId)
-              .catch(() => input.scenario.harness.nudgeUserBestEffort(input.userId));
-          } else if (shouldNudgeHostedLocalLinqWaitForStatus({
-            mailboxLagFirstObservedAt,
-            now,
-            status,
-          })) {
-            await input.scenario.harness.nudgeUserBestEffort(input.userId);
-          }
-        }
-      }
-
       await sleep(250);
     }
 
@@ -392,16 +488,59 @@ export async function startHostedLocalLinqStub(input: {
         `Timed out waiting for ${input.expectedCount} Linq request(s) for ${input.userId}.`,
         `expected path: ${input.expectedPath}`,
         `observed requests: ${JSON.stringify(summarizeObservedLinqRequests(observedRequests))}`,
-        latestStatusReadError ? `latest status read error: ${latestStatusReadError}` : null,
-      ].filter((line): line is string => Boolean(line))),
+      ]),
     );
   };
 
   return {
+    acceptedSendRequests,
+    armNextPostAcceptLostAcknowledgment: ({
+      expectedPath,
+      matchRequest,
+      responseCount = hostedLocalLinqHttpAttemptsPerLogicalSend,
+    }) => {
+      if (nextPostAcceptLostAcknowledgment) {
+        throw new Error("A post-accept Linq lost-acknowledgment control is already armed.");
+      }
+      if (!Number.isSafeInteger(responseCount) || responseCount < 1) {
+        throw new Error(
+          "A post-accept Linq lost-acknowledgment control requires a positive response count.",
+        );
+      }
+      postAcceptLostAcknowledgmentAcceptedMessage = null;
+      nextPostAcceptLostAcknowledgment = {
+        expectedPath,
+        matchRequest,
+        remainingResponses: responseCount,
+      };
+    },
+    armNextPreAcceptRetryableSendFailure: ({
+      expectedPath,
+      matchRequest,
+      responseCount = hostedLocalLinqHttpAttemptsPerLogicalSend,
+    }) => {
+      if (nextPreAcceptRetryableSendFailure) {
+        throw new Error("A pre-accept Linq retryable-send control is already armed.");
+      }
+      if (!Number.isSafeInteger(responseCount) || responseCount < 1) {
+        throw new Error(
+          "A pre-accept Linq retryable-send control requires a positive response count.",
+        );
+      }
+      nextPreAcceptRetryableSendFailure = {
+        expectedPath,
+        matchRequest,
+        remainingResponses: responseCount,
+      };
+    },
     attachmentDownloadContainerBaseUrl,
     attachmentDownloadBaseUrl,
     baseUrl,
     containerBaseUrl,
+    countAcceptedSends: (expectedPath, matchRequest) =>
+      acceptedSendRequests.filter((request) =>
+        isMatchingObservedLinqRequest(request, "POST", expectedPath, matchRequest)
+      ).length,
     countObservedSends: (expectedPath, matchRequest) =>
       observedRequests.filter((request) =>
         isMatchingObservedLinqRequest(request, "POST", expectedPath, matchRequest)
@@ -446,6 +585,18 @@ export async function startHostedLocalLinqStub(input: {
       await stopHttpStubServer(activeServer);
       server = null;
     },
+    waitForAdditionalAcceptedSend: async (input) => {
+      const matchingRequests = await waitForObservedRequests({
+        expectedCount: input.baselineCount + 1,
+        expectedMethod: "POST",
+        expectedPath: input.expectedPath,
+        matchRequest: input.matchRequest,
+        requests: acceptedSendRequests,
+        scenario: input.scenario,
+        userId: input.userId,
+      });
+      return matchingRequests.at(-1)!;
+    },
     waitForAdditionalRequest: async (input) => {
       const matchingRequests = await waitForObservedRequests({
         expectedCount: input.baselineCount + 1,
@@ -477,6 +628,16 @@ export async function startHostedLocalLinqStub(input: {
         scenario: input.scenario,
         userId: input.userId,
       }),
+    waitForMatchingAcceptedSendCount: async (input) =>
+      await waitForObservedRequests({
+        expectedCount: input.expectedCount,
+        expectedMethod: "POST",
+        expectedPath: input.expectedPath,
+        matchRequest: input.matchRequest,
+        requests: acceptedSendRequests,
+        scenario: input.scenario,
+        userId: input.userId,
+      }),
     waitForMatchingSendCount: async (input) =>
       await waitForObservedRequests({
         expectedCount: input.expectedCount,
@@ -500,136 +661,19 @@ export async function startHostedLocalLinqStub(input: {
   };
 }
 
-export function shouldExpireHostedLocalLinqWaitInFlightForStatus(input: {
-  now: number;
-  status: HostedRunnerStatusResponse;
-}): boolean {
-  if (!input.status.inFlight) {
-    return false;
-  }
-
-  const activityAt = readHostedLocalLinqStatusActivityAtMs(input.status);
-  return activityAt !== null
-    && input.now - activityAt >= hostedLocalLinqWaitExpireAfterInFlightMs;
-}
-
-export function shouldNudgeHostedLocalLinqWaitForStatus(input: {
-  mailboxLagFirstObservedAt: number | null;
-  now: number;
-  status: HostedRunnerStatusResponse;
-}): boolean {
-  if (input.status.inFlight || input.status.lastErrorCode) {
-    return false;
-  }
-
-  return hostedLocalLinqStatusHasMailboxLag(input.status)
-    && input.mailboxLagFirstObservedAt !== null
-    && input.now - input.mailboxLagFirstObservedAt
-      >= hostedLocalLinqWaitNudgeAfterMailboxLagMs;
-}
-
-export function shouldRunHostedLocalLinqWaitAlarmInvocationForStatus(input: {
-  now: number;
-  pendingDeliveryFirstObservedAt: number | null;
-  status: HostedRunnerStatusResponse;
-}): boolean {
-  if (input.status.inFlight || input.status.lastErrorCode) {
-    return false;
-  }
-
-  return hostedLocalLinqStatusHasPendingDelivery(input.status)
-    && input.pendingDeliveryFirstObservedAt !== null
-    && input.now - input.pendingDeliveryFirstObservedAt
-      >= hostedLocalLinqWaitAlarmAfterPendingDeliveryMs
-    && hostedLocalLinqStatusNextWakeIsDue(input.status, input.now);
-}
-
-function readHostedLocalLinqStatusActivityAtMs(status: HostedRunnerStatusResponse): number | null {
-  const rawActivityAt = status.heartbeatAt ?? status.lastInvocationAt ?? null;
-  if (rawActivityAt === null) {
-    return null;
-  }
-
-  const activityAt = Date.parse(rawActivityAt);
-  return Number.isFinite(activityAt) ? activityAt : null;
-}
-
-function updateHostedLocalLinqMailboxLagFirstObservedAt(input: {
-  firstObservedAt: number | null;
-  now: number;
-  status: HostedRunnerStatusResponse | null;
-}): number | null {
-  if (!input.status || !hostedLocalLinqStatusHasMailboxLag(input.status)) {
-    return null;
-  }
-
-  return input.firstObservedAt ?? input.now;
-}
-
-function hostedLocalLinqStatusHasMailboxLag(status: HostedRunnerStatusResponse): boolean {
-  return status.mailboxLag.some((lane) => {
-    try {
-      return BigInt(lane.lag) > 0n;
-    } catch {
-      return lane.lag !== "0";
-    }
-  });
-}
-
-function updateHostedLocalLinqPendingDeliveryFirstObservedAt(input: {
-  firstObservedAt: number | null;
-  now: number;
-  status: HostedRunnerStatusResponse | null;
-}): number | null {
-  if (!input.status || !hostedLocalLinqStatusHasPendingDelivery(input.status)) {
-    return null;
-  }
-
-  return input.firstObservedAt ?? input.now;
-}
-
-function hostedLocalLinqStatusHasPendingDelivery(status: HostedRunnerStatusResponse): boolean {
-  const pendingDeliveryEffects =
-    status.workspace?.redactedStatus?.hostedOutboxPendingDeliveryEffects;
-
-  if (typeof pendingDeliveryEffects === "number") {
-    return pendingDeliveryEffects > 0;
-  }
-
-  if (typeof pendingDeliveryEffects === "string") {
-    try {
-      return BigInt(pendingDeliveryEffects) > 0n;
-    } catch {
-      return pendingDeliveryEffects !== "0";
-    }
-  }
-
-  return false;
-}
-
-function hostedLocalLinqStatusNextWakeIsDue(
-  status: HostedRunnerStatusResponse,
-  now: number,
-): boolean {
-  const rawNextWakeAt = status.workspace?.nextWakeAt ?? null;
-  if (!rawNextWakeAt) {
-    return false;
-  }
-
-  const nextWakeAt = Date.parse(rawNextWakeAt);
-  return Number.isFinite(nextWakeAt) && nextWakeAt <= now;
-}
-
 export function buildHostedLinqInboundEvent(
   userId: string,
   chatId: string,
   input: {
     eventId?: string;
+    isGroup?: boolean | null;
     messageId?: string;
     parts?: HostedLinqInboundPartInput[];
+    service?: string;
     text?: string;
   } = {},
 ): Record<string, unknown> {
+  const service = input.service ?? "SMS";
   const parts = input.parts?.map(buildHostedLinqInboundPart) ?? [
     {
       type: "text",
@@ -643,12 +687,12 @@ export function buildHostedLinqInboundEvent(
     data: {
       chat: {
         id: chatId,
-        is_group: false,
+        ...(input.isGroup === null ? {} : { is_group: input.isGroup ?? false }),
         owner_handle: {
           handle: buildLinqHomePhoneNumber(userId),
           id: `handle_owner_${userId}`,
           is_me: true,
-          service: "SMS",
+          service,
         },
       },
       chat_id: chatId,
@@ -657,7 +701,7 @@ export function buildHostedLinqInboundEvent(
       from_handle: {
         handle: buildLinqRecipientPhoneNumber(userId),
         id: `handle_sender_${userId}`,
-        service: "SMS",
+        service,
       },
       is_from_me: false,
       message: {
@@ -668,17 +712,17 @@ export function buildHostedLinqInboundEvent(
         handle: buildLinqHomePhoneNumber(userId),
         id: `handle_owner_${userId}`,
         is_me: true,
-        service: "SMS",
+        service,
       },
       recipient_phone: buildLinqHomePhoneNumber(userId),
       received_at: new Date().toISOString(),
       sender_handle: {
         handle: buildLinqRecipientPhoneNumber(userId),
         id: `handle_sender_${userId}`,
-        service: "SMS",
+        service,
       },
       sent_at: new Date().toISOString(),
-      service: "SMS",
+      service,
     },
     event_id: input.eventId ?? `evt_linq_inbound_${userId}`,
     event_type: "message.received",
@@ -768,6 +812,47 @@ function isMatchingObservedLinqRequest(
   );
 }
 
+function consumeHostedLocalLinqArmedSendFailure(
+  failure: HostedLocalLinqArmedSendFailure | null,
+  request: ObservedLinqRequest,
+): boolean {
+  if (
+    !failure
+    || request.method !== "POST"
+    || request.url !== failure.expectedPath
+    || !failure.matchRequest(request)
+  ) {
+    return false;
+  }
+
+  failure.remainingResponses -= 1;
+  return true;
+}
+
+function writeHostedLocalLinqRetryableSendFailure(
+  response: ServerResponse<IncomingMessage>,
+): void {
+  writeJsonResponse(response, 503, {
+    error: "Synthetic hosted-local retryable Linq send failure.",
+  });
+}
+
+function writeHostedLocalLinqAcceptedMessage(
+  response: ServerResponse<IncomingMessage>,
+  acceptedMessage: HostedLocalLinqAcceptedMessage,
+): void {
+  writeJsonResponse(response, 200, {
+    chat_id: acceptedMessage.chatId,
+    data: {
+      chat_id: acceptedMessage.chatId,
+      id: acceptedMessage.messageId,
+    },
+    message: {
+      id: acceptedMessage.messageId,
+    },
+  });
+}
+
 function parseObservedLinqJson(body: string): Record<string, unknown> | null {
   try {
     return JSON.parse(body) as Record<string, unknown>;
@@ -804,6 +889,25 @@ function isObservedLinqCreateChatPayload(payload: Record<string, unknown> | null
     && Array.isArray(payload.to)
     && payload.to.every((recipient) => typeof recipient === "string" && recipient.length > 0)
     && isObservedLinqMessagePayload(payload),
+  );
+}
+
+function isObservedLinqCreateAttachmentPayload(
+  payload: Record<string, unknown> | null,
+): payload is Record<string, unknown> & {
+  content_type: string;
+  filename: string;
+  size_bytes: number;
+} {
+  return Boolean(
+    payload
+    && typeof payload.content_type === "string"
+    && payload.content_type.trim().length > 0
+    && typeof payload.filename === "string"
+    && payload.filename.trim().length > 0
+    && typeof payload.size_bytes === "number"
+    && Number.isSafeInteger(payload.size_bytes)
+    && payload.size_bytes > 0,
   );
 }
 

@@ -437,6 +437,90 @@ describe('assistant channels runtime seam', () => {
     expect(fetchImplementation).toHaveBeenCalledTimes(1)
   })
 
+  it('keeps the Telegram provider deadline active through response body consumption', async () => {
+    vi.useFakeTimers()
+    const fetchImplementation = vi.fn<typeof fetch>((_input, init) => {
+      if (fetchImplementation.mock.calls.length > 1) {
+        return Promise.resolve(new Response(JSON.stringify({
+          ok: true,
+          result: {
+            message_id: 1001,
+          },
+        }), {
+          headers: {
+            'content-type': 'application/json',
+          },
+          status: 200,
+        }))
+      }
+      const signal = init?.signal
+      if (!signal) {
+        throw new Error('expected Telegram request abort signal')
+      }
+
+      return new Promise((resolve) => {
+        setTimeout(() => {
+          const body = new ReadableStream<Uint8Array>({
+            start(controller) {
+              const bodyTimer = setTimeout(() => {
+                controller.enqueue(new TextEncoder().encode(JSON.stringify({
+                  description: 'retry later',
+                  error_code: 429,
+                  ok: false,
+                  parameters: {
+                    retry_after: 0,
+                  },
+                })))
+                controller.close()
+              }, 2_000)
+              signal.addEventListener('abort', () => {
+                clearTimeout(bodyTimer)
+                controller.error(new Error('Telegram response body aborted'))
+              }, { once: true })
+            },
+          })
+          resolve(new Response(body, {
+            headers: {
+              'content-type': 'application/json',
+            },
+            status: 429,
+          }))
+        }, 29_000)
+      })
+    })
+
+    const delivery = sendTelegramMessage(
+      {
+        message: 'hello',
+        target: '123',
+      },
+      {
+        env: {
+          TELEGRAM_API_BASE_URL: 'https://telegram.test/',
+          TELEGRAM_BOT_TOKEN: 'bot-token',
+        },
+        fetchImplementation,
+      },
+    )
+    const outcome = delivery.then(
+      (value) => ({ status: 'resolved' as const, value }),
+      (error: unknown) => ({ error, status: 'rejected' as const }),
+    )
+
+    await vi.advanceTimersByTimeAsync(31_010)
+    await expect(outcome).resolves.toMatchObject({
+      error: {
+        code: 'ASSISTANT_TELEGRAM_DELIVERY_AMBIGUOUS',
+        deliveryMayHaveSucceeded: true,
+        providerMessageId: null,
+        providerMessageIds: [],
+        target: '123',
+      },
+      status: 'rejected',
+    })
+    expect(fetchImplementation).toHaveBeenCalledTimes(1)
+  })
+
   it('rolls back Telegram partial sends against the migrated target when a later chunk fails', async () => {
     const fetchImplementation = createQueuedFetch([
       createTelegramResponse(400, {
@@ -1462,6 +1546,131 @@ describe('assistant channels runtime seam', () => {
     await vi.advanceTimersByTimeAsync(44_999)
     expect(runtimeMocks.startLinqChatTypingIndicator).toHaveBeenCalledTimes(2)
 
+    await vi.advanceTimersByTimeAsync(1)
+    expect(runtimeMocks.startLinqChatTypingIndicator).toHaveBeenCalledTimes(3)
+    await handle.stop()
+  })
+
+  it('restarts Linq typing after the provider message settle window', async () => {
+    vi.useFakeTimers()
+    runtimeMocks.startLinqChatTypingIndicator.mockResolvedValue(undefined)
+    runtimeMocks.stopLinqChatTypingIndicator.mockResolvedValue(undefined)
+
+    const handle = await startLinqTypingIndicator(
+      {
+        target: 'chat-typing',
+      },
+      {
+        env: {
+          LINQ_API_TOKEN: 'linq-token',
+        },
+      },
+    )
+
+    await handle.refreshAfterMessage?.()
+    await vi.advanceTimersByTimeAsync(999)
+    expect(runtimeMocks.startLinqChatTypingIndicator).toHaveBeenCalledTimes(1)
+
+    await vi.advanceTimersByTimeAsync(1)
+    expect(runtimeMocks.startLinqChatTypingIndicator).toHaveBeenCalledTimes(2)
+
+    await vi.advanceTimersByTimeAsync(44_999)
+    expect(runtimeMocks.startLinqChatTypingIndicator).toHaveBeenCalledTimes(2)
+    await vi.advanceTimersByTimeAsync(1)
+    expect(runtimeMocks.startLinqChatTypingIndicator).toHaveBeenCalledTimes(3)
+    await handle.stop()
+  })
+
+  it('cancels a pending post-message Linq typing restart on stop', async () => {
+    vi.useFakeTimers()
+    runtimeMocks.startLinqChatTypingIndicator.mockResolvedValue(undefined)
+    runtimeMocks.stopLinqChatTypingIndicator.mockResolvedValue(undefined)
+
+    const handle = await startLinqTypingIndicator(
+      {
+        target: 'chat-typing',
+      },
+      {
+        env: {
+          LINQ_API_TOKEN: 'linq-token',
+        },
+      },
+    )
+
+    await handle.refreshAfterMessage?.()
+    await vi.advanceTimersByTimeAsync(500)
+    await handle.stop()
+    await vi.advanceTimersByTimeAsync(1_000)
+
+    expect(runtimeMocks.startLinqChatTypingIndicator).toHaveBeenCalledTimes(1)
+    expect(runtimeMocks.stopLinqChatTypingIndicator).toHaveBeenCalledTimes(1)
+  })
+
+  it('coalesces overlapping post-message Linq typing restarts', async () => {
+    vi.useFakeTimers()
+    runtimeMocks.startLinqChatTypingIndicator.mockResolvedValue(undefined)
+    runtimeMocks.stopLinqChatTypingIndicator.mockResolvedValue(undefined)
+
+    const handle = await startLinqTypingIndicator(
+      {
+        target: 'chat-typing',
+      },
+      {
+        env: {
+          LINQ_API_TOKEN: 'linq-token',
+        },
+      },
+    )
+
+    await handle.refreshAfterMessage?.()
+    await vi.advanceTimersByTimeAsync(500)
+    await handle.refreshAfterMessage?.()
+    await vi.advanceTimersByTimeAsync(999)
+    expect(runtimeMocks.startLinqChatTypingIndicator).toHaveBeenCalledTimes(1)
+
+    await vi.advanceTimersByTimeAsync(1)
+    expect(runtimeMocks.startLinqChatTypingIndicator).toHaveBeenCalledTimes(2)
+    await handle.stop()
+  })
+
+  it('preserves a post-message Linq restart across an older in-flight refresh', async () => {
+    vi.useFakeTimers()
+    let resolveInFlightRefresh: () => void = () => {
+      throw new Error('in-flight refresh was not started')
+    }
+    runtimeMocks.startLinqChatTypingIndicator
+      .mockResolvedValueOnce(undefined)
+      .mockImplementationOnce(async () => {
+        await new Promise<void>((resolve) => {
+          resolveInFlightRefresh = resolve
+        })
+      })
+      .mockResolvedValue(undefined)
+    runtimeMocks.stopLinqChatTypingIndicator.mockResolvedValue(undefined)
+
+    const handle = await startLinqTypingIndicator(
+      {
+        target: 'chat-typing',
+      },
+      {
+        env: {
+          LINQ_API_TOKEN: 'linq-token',
+        },
+      },
+    )
+
+    vi.advanceTimersByTime(45_000)
+    await Promise.resolve()
+    expect(runtimeMocks.startLinqChatTypingIndicator).toHaveBeenCalledTimes(2)
+
+    await handle.refreshAfterMessage?.()
+    await vi.advanceTimersByTimeAsync(500)
+    resolveInFlightRefresh()
+    await Promise.resolve()
+    await Promise.resolve()
+
+    await vi.advanceTimersByTimeAsync(499)
+    expect(runtimeMocks.startLinqChatTypingIndicator).toHaveBeenCalledTimes(2)
     await vi.advanceTimersByTimeAsync(1)
     expect(runtimeMocks.startLinqChatTypingIndicator).toHaveBeenCalledTimes(3)
     await handle.stop()

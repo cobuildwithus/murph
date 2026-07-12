@@ -56,7 +56,16 @@ export function resolveTelegramBotToken(
 export function resolveTelegramApiBaseUrl(
   env: NodeJS.ProcessEnv,
 ): string | null {
-  return normalizeNullableString(env.TELEGRAM_API_BASE_URL)
+  const value = normalizeNullableString(env.TELEGRAM_API_BASE_URL)
+  if (!value) {
+    return null
+  }
+  try {
+    const url = new URL(value)
+    return url.protocol === 'http:' || url.protocol === 'https:' ? value : null
+  } catch {
+    return null
+  }
 }
 
 export function resolveTelegramFileBaseUrl(

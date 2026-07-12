@@ -4,12 +4,10 @@ import os from "node:os";
 import path from "node:path";
 
 import {
-  buildCloudflareHostedControlRuntimeEnsureProcessingPath,
   buildCloudflareHostedControlUserStatusPath,
 } from "@murphai/cloudflare-hosted-control/routes";
 import {
   parseHostedRunnerStatusResponse,
-  parseHostedRuntimeEnsureProcessingRequest,
 } from "@murphai/hosted-execution/parsers";
 import type {
   HostedRunnerStatusResponse,
@@ -29,31 +27,34 @@ import {
   resolveHostedWebDevDistDirName,
   shouldUseHostedWebProductionStart,
 } from "@murphai/hosted-local-harness/dev-hosted-local/web-production-start";
-import {
-  createHostedWebCallbackSignatureHeaders,
-  readHostedWebCallbackSigningEnvironment,
-} from "../../src/web-callback-auth.ts";
-
 const hostedLocalStatusTimeoutMs = 180_000;
 const hostedLocalStatusRequestTimeoutMs = 10_000;
 const hostedLocalStatusPollIntervalMs = 250;
-const hostedLocalNudgeTimeoutMs = 2_000;
 const hostedLocalActivityExpiryTimeoutMs = 15_000;
-const hostedLocalCompletionRetryMs = 1_000;
+const hostedLocalShutdownCheckpointControlTimeoutMs = 120_000;
 const hostedLocalRunUntilIdleTimeoutMs = 30_000;
-const hostedLocalMailboxLagRecoveryNudgeAfterMs = 15_000;
-const hostedLocalStaleInFlightRecoveryAfterMs = 90_000;
 
 export interface HostedLocalDevHarness {
+  assertNoInterventions(): void;
   config: ReturnType<typeof resolveHostedLocalDevConfig>;
+  interventionCount: number;
   oidcToken: string;
   persistDir: string;
   request(pathname: string, init?: RequestInit): Promise<Response>;
   requestJson<T>(pathname: string, init?: RequestInit): Promise<T>;
   readUserStatus(userId: string): Promise<HostedRunnerStatusResponse>;
-  nudgeUserBestEffort(userId: string): Promise<void>;
+  armCanonicalCheckpointLostAckForTest(userId: string): Promise<{ ok: true }>;
+  armSnapshotPublicationCorruptionForTest(userId: string): Promise<{ ok: true }>;
+  armShutdownCheckpointPublicationBarrierForTest(userId: string): Promise<{ ok: true }>;
+  beginShutdownCheckpointGracefulStopForTest(userId: string): Promise<{ ok: true }>;
   expireRunnerActivityForTest(userId: string): Promise<{ ok: true }>;
   dropRunnerActiveOperationForTest(userId: string): Promise<{ ok: true }>;
+  readShutdownCheckpointPublicationBarrierForTest(
+    userId: string,
+  ): Promise<{ state: "armed" | "entered" | "unarmed" }>;
+  releaseShutdownCheckpointPublicationBarrierForTest(
+    userId: string,
+  ): Promise<{ ok: true; released: boolean }>;
   runHostedAlarmInvocationForTest(userId: string): Promise<HostedWorkspaceInvocationResult>;
   runHostedManualInvocationForTest(userId: string): Promise<HostedWorkspaceInvocationResult>;
   runHostedAlarmForTest(userId: string): Promise<{ ok: true }>;
@@ -84,6 +85,14 @@ export interface HostedLocalDevHarness {
       timeoutMs?: number;
     },
   ): Promise<HostedRunnerStatusResponse>;
+  waitForHostedProgress(
+    userId: string,
+    input?: {
+      afterStatus?: HostedRunnerStatusResponse;
+      pollIntervalMs?: number;
+      timeoutMs?: number;
+    },
+  ): Promise<HostedRunnerStatusResponse>;
   webBaseUrl: string;
   workerBaseUrl: string;
 }
@@ -97,6 +106,7 @@ export async function startHostedLocalDevHarness(input: {
   statusPath?: (userId: string) => string;
   streamLogs?: boolean;
   testControls?: boolean;
+  webProcessEnvOverrides?: NodeJS.ProcessEnv;
 }): Promise<HostedLocalDevHarness> {
   const config = resolveHostedLocalDevConfig(input.env);
   const workerBaseUrl =
@@ -116,6 +126,7 @@ export async function startHostedLocalDevHarness(input: {
   const nextEnvPath = path.join(repoRoot, "apps/web/next-env.d.ts");
   const originalNextEnvContents = await readFile(nextEnvPath, "utf8").catch(() => null);
   let harnessRuntimeEnv: NodeJS.ProcessEnv | null = null;
+  let interventionCount = 0;
   let nextDistDir: string | null = null;
   let stack: HostedLocalDevStack | null = null;
 
@@ -155,6 +166,9 @@ export async function startHostedLocalDevHarness(input: {
     stack = await startHostedLocalDevStack({
       env: runtimeEnv,
       pipeOutput: streamLogs,
+      ...(input.webProcessEnvOverrides
+        ? { webProcessEnvOverrides: input.webProcessEnvOverrides }
+        : {}),
     });
 
     try {
@@ -173,11 +187,22 @@ export async function startHostedLocalDevHarness(input: {
     }
 
     return {
+      assertNoInterventions: (): void => {
+        if (interventionCount === 0) {
+          return;
+        }
+        throw new Error(
+          `Expected a passive hosted-local scenario, but the harness issued ${interventionCount} mutating intervention request(s). Deliberate recovery controls require faultInjection: true.`,
+        );
+      },
       config: {
         ...config,
         workerPersistDir: persistDir,
       },
       oidcToken: stack.oidcToken,
+      get interventionCount(): number {
+        return interventionCount;
+      },
       persistDir,
       readUserStatus: async (userId: string): Promise<HostedRunnerStatusResponse> => {
         return await readHostedUserStatus({
@@ -187,9 +212,14 @@ export async function startHostedLocalDevHarness(input: {
           userId,
         });
       },
-      nudgeUserBestEffort: nudgeHostedUserBestEffort,
+      armCanonicalCheckpointLostAckForTest,
+      armSnapshotPublicationCorruptionForTest,
+      armShutdownCheckpointPublicationBarrierForTest,
+      beginShutdownCheckpointGracefulStopForTest,
       dropRunnerActiveOperationForTest,
       expireRunnerActivityForTest,
+      readShutdownCheckpointPublicationBarrierForTest,
+      releaseShutdownCheckpointPublicationBarrierForTest,
       runHostedAlarmInvocationForTest: requireTestControls(runHostedAlarmInvocationForTest),
       runHostedManualInvocationForTest: requireTestControls(runHostedManualInvocationForTest),
       request: requestForRuntime,
@@ -248,10 +278,6 @@ export async function startHostedLocalDevHarness(input: {
         const timeoutMs = pollInput.timeoutMs ?? hostedLocalStatusTimeoutMs;
         const pollIntervalMs = pollInput.pollIntervalMs ?? hostedLocalStatusPollIntervalMs;
         const startedAt = Date.now();
-        let nextRecoveryNudgeAt = startedAt;
-        let nextCompletionRetryAt = startedAt;
-        let nextStaleInFlightRecoveryAt = startedAt;
-        let mailboxLagFirstObservedAt: number | null = null;
         let lastStatus: HostedRunnerStatusResponse | null = null;
         let lastStatusReadError: string | null = null;
 
@@ -282,64 +308,6 @@ export async function startHostedLocalDevHarness(input: {
           const completedStatus = resolveHostedCompletionStatus(status);
           if (completedStatus) {
             return completedStatus;
-          }
-
-          const now = Date.now();
-          const hasDueWorkspaceWake = hostedStatusHasDueWorkspaceWake(status, now);
-          if (
-            hasDueWorkspaceWake
-            && !status.inFlight
-            && !status.lastErrorCode
-            && now >= nextCompletionRetryAt
-          ) {
-            nextCompletionRetryAt = now + hostedLocalCompletionRetryMs;
-            await maybeRunHostedManualRecovery(userId)
-              .catch(() => nudgeHostedUserBestEffort(userId));
-            await sleep(pollIntervalMs);
-            continue;
-          }
-
-          const hasMailboxLag = hostedStatusHasMailboxLag(status);
-          mailboxLagFirstObservedAt = hasMailboxLag
-            ? mailboxLagFirstObservedAt ?? now
-            : null;
-          if (
-            hasMailboxLag
-            && !status.inFlight
-            && !status.lastErrorCode
-            && now >= nextCompletionRetryAt
-            && hasLocalMailboxDrainEvidence(status)
-          ) {
-            nextCompletionRetryAt = now + hostedLocalCompletionRetryMs;
-            await maybeRunHostedManualRecovery(userId)
-              .catch(() => expireRunnerActivityForTest(userId).catch(() => {}));
-            await sleep(pollIntervalMs);
-            continue;
-          }
-          if (
-            now >= nextRecoveryNudgeAt
-            && hostedStatusHasStaleMailboxLag({
-              firstObservedAt: mailboxLagFirstObservedAt,
-              now,
-              status,
-            })
-          ) {
-            nextRecoveryNudgeAt = now + 2_000;
-            await nudgeHostedUserBestEffort(userId);
-          }
-          if (
-            now >= nextStaleInFlightRecoveryAt
-            && hostedStatusHasStaleInFlight({
-              now,
-              status,
-            })
-          ) {
-            nextStaleInFlightRecoveryAt = now + hostedLocalCompletionRetryMs;
-            await maybeExpireRunnerActivityForRecovery(userId)
-              .then(() => maybeRunHostedManualRecovery(userId))
-              .catch(() => nudgeHostedUserBestEffort(userId));
-            await sleep(pollIntervalMs);
-            continue;
           }
 
           await sleep(pollIntervalMs);
@@ -393,6 +361,65 @@ export async function startHostedLocalDevHarness(input: {
           ...(lastStatusReadError ? [`last status read error: ${lastStatusReadError}`] : []),
         ], stack?.stdoutTail() ?? "", stack?.stderrTail() ?? ""));
       },
+      waitForHostedProgress: async (
+        userId: string,
+        pollInput: {
+          afterStatus?: HostedRunnerStatusResponse;
+          pollIntervalMs?: number;
+          timeoutMs?: number;
+        } = {},
+      ): Promise<HostedRunnerStatusResponse> => {
+        const timeoutMs = pollInput.timeoutMs ?? hostedLocalStatusTimeoutMs;
+        const pollIntervalMs = pollInput.pollIntervalMs ?? hostedLocalStatusPollIntervalMs;
+        const startedAt = Date.now();
+        let baselineStatus = pollInput.afterStatus;
+        let lastStatus: HostedRunnerStatusResponse | null = null;
+        let lastStatusReadError: string | null = null;
+
+        while ((Date.now() - startedAt) < timeoutMs) {
+          let status: HostedRunnerStatusResponse;
+          try {
+            status = await readHostedUserStatus({
+              requestJson: requestJsonForRuntime,
+              statusHeaders,
+              statusPath,
+              userId,
+            });
+          } catch (error) {
+            lastStatusReadError = error instanceof Error ? error.message : String(error);
+            await sleep(pollIntervalMs);
+            continue;
+          }
+          lastStatus = status;
+          lastStatusReadError = null;
+
+          if (hostedStatusHasCompletedWithError(status)) {
+            throw new Error(formatFailure([
+              `Hosted runner reported terminal error for ${userId}.`,
+              `last status: ${JSON.stringify(sanitizeHostedStatusForFailureLog(status))}`,
+            ], stack?.stdoutTail() ?? "", stack?.stderrTail() ?? ""));
+          }
+
+          if (baselineStatus === undefined) {
+            if (hostedStatusHasObservableWork(status)) {
+              return status;
+            }
+            baselineStatus = status;
+          } else if (hostedStatusHasProgressedSince(status, baselineStatus)) {
+            return status;
+          }
+
+          await sleep(pollIntervalMs);
+        }
+
+        throw new Error(formatFailure([
+          `Timed out waiting for hosted production-path progress for ${userId}.`,
+          ...(lastStatus
+            ? [`last status: ${JSON.stringify(sanitizeHostedStatusForFailureLog(lastStatus))}`]
+            : []),
+          ...(lastStatusReadError ? [`last status read error: ${lastStatusReadError}`] : []),
+        ], stack?.stdoutTail() ?? "", stack?.stderrTail() ?? ""));
+      },
       webBaseUrl,
       workerBaseUrl,
     };
@@ -403,6 +430,7 @@ export async function startHostedLocalDevHarness(input: {
 
   async function requestForRuntime(pathname: string, init?: RequestInit): Promise<Response> {
     let response: Response;
+    interventionCount += countHostedLocalInterventionRequest(pathname, init?.method);
 
     try {
       response = await fetch(new URL(pathname, `${workerBaseUrl}/`), {
@@ -428,6 +456,7 @@ export async function startHostedLocalDevHarness(input: {
 
   async function requestJsonForRuntime<T>(pathname: string, init?: RequestInit): Promise<T> {
     let response: Response;
+    interventionCount += countHostedLocalInterventionRequest(pathname, init?.method);
 
     try {
       response = await fetch(new URL(pathname, `${workerBaseUrl}/`), {
@@ -492,35 +521,6 @@ export async function startHostedLocalDevHarness(input: {
     }
   }
 
-  async function nudgeHostedUserBestEffort(userId: string): Promise<void> {
-    const pathname = buildCloudflareHostedControlRuntimeEnsureProcessingPath(userId);
-    const url = new URL(pathname, `${workerBaseUrl}/`);
-    const requestBody = JSON.stringify(parseHostedRuntimeEnsureProcessingRequest({
-      orchestrationAttemptId: `hosted-local-nudge:${userId}`,
-    }));
-    const headers = {
-      [HOSTED_EXECUTION_USER_ID_HEADER]: userId,
-      "content-type": "application/json; charset=utf-8",
-      ...await createHostedWebCallbackSignatureHeaders({
-        environment: readHostedWebCallbackSigningEnvironment(
-          stack?.workerRuntimeEnv ?? stack?.runtimeEnv ?? input.env,
-        ),
-        method: "POST",
-        path: url.pathname,
-        payload: requestBody,
-        search: url.search,
-        userId,
-      }),
-    };
-
-    await requestJsonForRuntime(pathname, {
-      body: requestBody,
-      headers,
-      method: "POST",
-      signal: AbortSignal.timeout(hostedLocalNudgeTimeoutMs),
-    }).catch(() => {});
-  }
-
   async function expireRunnerActivityForTest(userId: string): Promise<{ ok: true }> {
     assertHostedLocalTestControlsAvailable("expireRunnerActivityForTest");
     return await requestJsonForRuntime<{ ok: true }>(
@@ -532,6 +532,97 @@ export async function startHostedLocalDevHarness(input: {
         },
         method: "POST",
         signal: AbortSignal.timeout(hostedLocalActivityExpiryTimeoutMs),
+      },
+    );
+  }
+
+  async function armCanonicalCheckpointLostAckForTest(
+    userId: string,
+  ): Promise<{ ok: true }> {
+    assertHostedLocalTestControlsAvailable("armCanonicalCheckpointLostAckForTest");
+    return await requestJsonForRuntime<{ ok: true }>(
+      `/__test/users/${encodeURIComponent(userId)}/canonical-checkpoint-lost-ack`,
+      {
+        headers: {
+          [HOSTED_EXECUTION_USER_ID_HEADER]: userId,
+          ...statusHeaders(userId),
+        },
+        method: "POST",
+        signal: AbortSignal.timeout(hostedLocalActivityExpiryTimeoutMs),
+      },
+    );
+  }
+
+  async function armSnapshotPublicationCorruptionForTest(
+    userId: string,
+  ): Promise<{ ok: true }> {
+    assertHostedLocalTestControlsAvailable("armSnapshotPublicationCorruptionForTest");
+    return await requestJsonForRuntime<{ ok: true }>(
+      `/__test/users/${encodeURIComponent(userId)}/snapshot-publication-corruption`,
+      {
+        headers: {
+          [HOSTED_EXECUTION_USER_ID_HEADER]: userId,
+          ...statusHeaders(userId),
+        },
+        method: "POST",
+        signal: AbortSignal.timeout(hostedLocalActivityExpiryTimeoutMs),
+      },
+    );
+  }
+
+  async function armShutdownCheckpointPublicationBarrierForTest(
+    userId: string,
+  ): Promise<{ ok: true }> {
+    assertHostedLocalTestControlsAvailable("armShutdownCheckpointPublicationBarrierForTest");
+    return await requestShutdownCheckpointPublicationBarrierForTest<{ ok: true }>(
+      userId,
+      "arm",
+    );
+  }
+
+  async function beginShutdownCheckpointGracefulStopForTest(
+    userId: string,
+  ): Promise<{ ok: true }> {
+    assertHostedLocalTestControlsAvailable("beginShutdownCheckpointGracefulStopForTest");
+    return await requestShutdownCheckpointPublicationBarrierForTest<{ ok: true }>(
+      userId,
+      "shutdown",
+    );
+  }
+
+  async function readShutdownCheckpointPublicationBarrierForTest(
+    userId: string,
+  ): Promise<{ state: "armed" | "entered" | "unarmed" }> {
+    assertHostedLocalTestControlsAvailable("readShutdownCheckpointPublicationBarrierForTest");
+    return await requestShutdownCheckpointPublicationBarrierForTest<{
+      state: "armed" | "entered" | "unarmed";
+    }>(userId, "status");
+  }
+
+  async function releaseShutdownCheckpointPublicationBarrierForTest(
+    userId: string,
+  ): Promise<{ ok: true; released: boolean }> {
+    assertHostedLocalTestControlsAvailable("releaseShutdownCheckpointPublicationBarrierForTest");
+    return await requestShutdownCheckpointPublicationBarrierForTest<{
+      ok: true;
+      released: boolean;
+    }>(userId, "release");
+  }
+
+  async function requestShutdownCheckpointPublicationBarrierForTest<T>(
+    userId: string,
+    action: "arm" | "release" | "shutdown" | "status",
+  ): Promise<T> {
+    return await requestJsonForRuntime<T>(
+      `/__test/users/${encodeURIComponent(userId)}`
+        + `/shutdown-checkpoint-publication-barrier?action=${action}`,
+      {
+        headers: {
+          [HOSTED_EXECUTION_USER_ID_HEADER]: userId,
+          ...statusHeaders(userId),
+        },
+        method: "POST",
+        signal: AbortSignal.timeout(hostedLocalShutdownCheckpointControlTimeoutMs),
       },
     );
   }
@@ -579,22 +670,6 @@ export async function startHostedLocalDevHarness(input: {
     );
   }
 
-  async function maybeRunHostedManualRecovery(userId: string): Promise<unknown> {
-    if (!testControls) {
-      await nudgeHostedUserBestEffort(userId);
-      return null;
-    }
-    return await runHostedManualInvocationForTest(userId);
-  }
-
-  async function maybeExpireRunnerActivityForRecovery(userId: string): Promise<unknown> {
-    if (!testControls) {
-      await nudgeHostedUserBestEffort(userId);
-      return null;
-    }
-    return await expireRunnerActivityForTest(userId);
-  }
-
   function requireTestControls<TArgs extends unknown[], TResult>(
     fn: (...args: TArgs) => Promise<TResult>,
   ): (...args: TArgs) => Promise<TResult> {
@@ -614,16 +689,6 @@ export async function startHostedLocalDevHarness(input: {
 
 function resolveLocalHarnessBaseHost(host: string): string {
   return host === "0.0.0.0" ? "127.0.0.1" : host;
-}
-
-function hostedStatusHasMailboxLag(status: HostedRunnerStatusResponse): boolean {
-  return status.mailboxLag.some((lane) => {
-    try {
-      return BigInt(lane.lag) > 0n;
-    } catch {
-      return lane.lag !== "0";
-    }
-  });
 }
 
 function resolveHostedCompletionStatus(
@@ -657,138 +722,72 @@ function hostedStatusHasDueWorkspaceWake(
   return Number.isFinite(nextWakeAt) && nextWakeAt <= now;
 }
 
-function hasLocalMailboxDrainEvidence(
-  status: HostedRunnerStatusResponse,
-): boolean {
-  const importedLogs: Array<{
-    index: number;
-    lane: HostedRunnerStatusResponse["mailboxLag"][number]["lane"];
-  }> = [];
-
-  for (const lane of status.mailboxLag) {
-    if (lane.lag === "0") {
-      continue;
-    }
-
-    const imported = readRecentMailboxImportedSeq(status, lane.lane);
-    if (!imported || compareMailboxSeq(imported.seq, lane.maxSeq) < 0) {
-      return false;
-    }
-    importedLogs.push({
-      index: imported.index,
-      lane: lane.lane,
-    });
-  }
-
-  return hasLocalCompletionAfterMailboxImports(status, importedLogs);
+function hostedStatusHasObservableWork(status: HostedRunnerStatusResponse): boolean {
+  return status.inFlight
+    || status.mailboxLag.some((lane) => lane.lag !== "0")
+    || hostedStatusHasDueWorkspaceWake(status);
 }
 
-function readRecentMailboxImportedSeq(
+function hostedStatusHasProgressedSince(
   status: HostedRunnerStatusResponse,
-  lane: HostedRunnerStatusResponse["mailboxLag"][number]["lane"],
-): { index: number; seq: string } | null {
-  const logs = status.recentLogs ?? [];
-  for (const [index, log] of logs.entries()) {
-    if (log.eventCode !== "mailbox.imported") {
-      continue;
-    }
-    const value = lane === "system"
-      ? log.redactedJson?.systemSeqEnd
-      : log.redactedJson?.conversationSeqEnd;
-    if (typeof value === "string" && value.trim().length > 0) {
-      return { index, seq: value };
-    }
-  }
-
-  return null;
-}
-
-function hasLocalCompletionAfterMailboxImports(
-  status: HostedRunnerStatusResponse,
-  imports: readonly {
-    index: number;
-    lane: HostedRunnerStatusResponse["mailboxLag"][number]["lane"];
-  }[],
+  baseline: HostedRunnerStatusResponse,
 ): boolean {
-  if (imports.length === 0) {
+  if (status.inFlight !== baseline.inFlight) {
+    return true;
+  }
+  if (status.lastInvocationAt !== baseline.lastInvocationAt) {
+    return true;
+  }
+  if (status.lastErrorCode !== baseline.lastErrorCode) {
     return true;
   }
 
-  const logs = status.recentLogs ?? [];
-  return imports.every((imported) => logs.some((log, logIndex) => {
-    if (imported.lane === "system") {
-      return logIndex === imported.index
-        || (
-          logIndex < imported.index &&
-          log.eventCode === "mailbox.system_processed"
-          && (
-            log.redactedJson?.status === "processed"
-            || log.redactedJson?.status === "recorded"
-          )
-        );
-    }
+  const statusWorkspace = status.workspace;
+  const baselineWorkspace = baseline.workspace;
+  if ((statusWorkspace === null) !== (baselineWorkspace === null)) {
+    return true;
+  }
+  if (
+    statusWorkspace !== null
+    && baselineWorkspace !== null
+    && (
+      statusWorkspace.version !== baselineWorkspace.version
+      || statusWorkspace.updatedAt !== baselineWorkspace.updatedAt
+      || statusWorkspace.checkpointedAt !== baselineWorkspace.checkpointedAt
+      || statusWorkspace.nextWakeAt !== baselineWorkspace.nextWakeAt
+      || statusWorkspace.nextWakeReason !== baselineWorkspace.nextWakeReason
+    )
+  ) {
+    return true;
+  }
 
-    if (logIndex >= imported.index) {
-      return false;
-    }
-
-    return log.eventCode === "assistant.pass_finished";
-  }));
+  if (status.mailboxLag.length !== baseline.mailboxLag.length) {
+    return true;
+  }
+  return status.mailboxLag.some((lane, index) => {
+    const baselineLane = baseline.mailboxLag[index];
+    return baselineLane === undefined
+      || lane.lane !== baselineLane.lane
+      || lane.importedSeq !== baselineLane.importedSeq
+      || lane.maxSeq !== baselineLane.maxSeq
+      || lane.lag !== baselineLane.lag;
+  });
 }
 
-function compareMailboxSeq(left: string, right: string): number {
-  try {
-    const leftSeq = BigInt(left);
-    const rightSeq = BigInt(right);
-    return leftSeq === rightSeq ? 0 : leftSeq > rightSeq ? 1 : -1;
-  } catch {
-    return left.localeCompare(right);
-  }
-}
-
-function hostedStatusHasStaleMailboxLag(input: {
-  firstObservedAt: number | null;
-  now: number;
-  status: HostedRunnerStatusResponse;
-}): boolean {
-  if (!hostedStatusHasMailboxLag(input.status)) {
-    return false;
+function countHostedLocalInterventionRequest(
+  pathname: string,
+  method: string | undefined,
+): number {
+  const normalizedMethod = (method ?? "GET").toUpperCase();
+  if (normalizedMethod === "GET" || normalizedMethod === "HEAD") {
+    return 0;
   }
 
-  if (input.status.lastErrorCode) {
-    return false;
-  }
-
-  if (input.firstObservedAt === null) {
-    return false;
-  }
-
-  return input.now - input.firstObservedAt >= hostedLocalMailboxLagRecoveryNudgeAfterMs;
-}
-
-function hostedStatusHasStaleInFlight(input: {
-  now: number;
-  status: HostedRunnerStatusResponse;
-}): boolean {
-  if (!input.status.inFlight || input.status.lastErrorCode) {
-    return false;
-  }
-
-  const activityAt = readHostedStatusActivityAtMs(input.status);
-  return activityAt !== null
-    && input.now - activityAt >= hostedLocalStaleInFlightRecoveryAfterMs;
-}
-
-function readHostedStatusActivityAtMs(
-  status: Pick<HostedRunnerStatusResponse, "heartbeatAt" | "lastInvocationAt">,
-): number | null {
-  const rawActivityAt = status.heartbeatAt ?? status.lastInvocationAt ?? null;
-  if (rawActivityAt === null) {
-    return null;
-  }
-
-  const activityAt = Date.parse(rawActivityAt);
-  return Number.isFinite(activityAt) ? activityAt : null;
+  const normalizedPathname = new URL(pathname, "https://hosted-local.invalid").pathname;
+  return normalizedPathname.startsWith("/__test/users/")
+    || normalizedPathname.endsWith("/runtime/ensure-processing")
+    ? 1
+    : 0;
 }
 
 function hostedStatusHasCompletedWithError(status: HostedRunnerStatusResponse): boolean {

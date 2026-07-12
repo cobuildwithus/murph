@@ -1,11 +1,29 @@
 import { sanitizeStoredDeviceSyncMetadata } from "./metadata.ts";
 import {
+  canCurrentRuntimeMutateJunctionHistoricalBackfillProgress,
+  JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS,
+  mergeGuardedJunctionHistoricalBackfillMetadata,
   mergeHostedJunctionHistoricalBackfillMetadata,
+  readJunctionHistoricalBackfillProgress,
+  readJunctionHistoricalBackfillStatus,
 } from "./junction-historical-backfill-progress.ts";
+import {
+  JUNCTION_COMPANION_HEALTH_METADATA_EVENT_TYPE,
+  JUNCTION_COMPANION_HEALTH_METADATA_RESOURCE,
+  JUNCTION_COMPANION_HEALTH_METADATA_SOURCE_PROVIDER,
+} from "./companion-health-metadata.ts";
 import type {
   DeviceConnectionSourceResourceAvailabilitySummary,
   DeviceConnectionSourceStatus,
 } from "./client.ts";
+
+export {
+  canCurrentRuntimeMutateJunctionHistoricalBackfillProgress,
+  JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS,
+  mergeGuardedJunctionHistoricalBackfillMetadata,
+  readJunctionHistoricalBackfillProgress,
+  readJunctionHistoricalBackfillStatus,
+};
 
 export const HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PATH =
   "/api/internal/device-sync/runtime/snapshot";
@@ -25,6 +43,8 @@ const HOSTED_RUNTIME_ERROR_CONTROL_CHAR_PATTERN = /[\u0000-\u001F\u007F]+/gu;
 const HOSTED_RUNTIME_ERROR_WHITESPACE_PATTERN = /\s+/gu;
 const HOSTED_RUNTIME_ERROR_INLINE_BEARER_PATTERN =
   /\bBearer\s+(?=\S{8,})[^\s,;]+/giu;
+const HOSTED_RUNTIME_ERROR_AUTH_HEADER_PATTERN =
+  /\b((?:proxy-)?authorization)\b(\s*:\s*)[^\r\n]*/giu;
 const HOSTED_RUNTIME_ERROR_JWT_PATTERN = /\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9._-]+\.[A-Za-z0-9._-]+\b/gu;
 const HOSTED_RUNTIME_ERROR_QUERY_SECRET_PATTERN =
   /([?&](?:access_token|refresh_token|id_token|token|apikey|api_key|client_secret|session|session_token|code|state)=)[^&#\s]+/giu;
@@ -392,9 +412,18 @@ export interface HostedExecutionDeviceSyncDirtyResource {
 export function serializeHostedExecutionDeviceSyncDirtyPayloadIdentity(
   payload: Record<string, unknown> | null | undefined,
 ): string | null {
+  const isCompanionHealthMetadata =
+    payload?.eventType === JUNCTION_COMPANION_HEALTH_METADATA_EVENT_TYPE
+    && payload.resource === JUNCTION_COMPANION_HEALTH_METADATA_RESOURCE
+    && payload.resourceCategory === "summary"
+    && payload.sourceProviderSlug === JUNCTION_COMPANION_HEALTH_METADATA_SOURCE_PROVIDER;
   const stablePayload = Object.fromEntries(
     Object.entries(payload ?? {})
-      .filter(([key]) => key !== "windowEnd" && key !== "windowStart")
+      .filter(([key]) =>
+        key !== "windowEnd"
+        && key !== "windowStart"
+        && !(isCompanionHealthMetadata && key === "occurredAt")
+      )
       .sort(([left], [right]) => left.localeCompare(right)),
   );
 
@@ -2266,6 +2295,7 @@ function sanitizeHostedRuntimeErrorString(
   }
 
   let sanitized = value
+    .replace(HOSTED_RUNTIME_ERROR_AUTH_HEADER_PATTERN, "$1$2[redacted]")
     .replace(HOSTED_RUNTIME_ERROR_CONTROL_CHAR_PATTERN, " ")
     .replace(HOSTED_RUNTIME_ERROR_QUERY_SECRET_PATTERN, "$1[redacted]")
     .replace(HOSTED_RUNTIME_ERROR_NAMED_SECRET_PATTERN, "$1$2[redacted]")

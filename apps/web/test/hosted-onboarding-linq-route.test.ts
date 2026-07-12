@@ -128,6 +128,29 @@ describe("hosted onboarding Linq webhook route", () => {
     );
   });
 
+  it("returns a retryable server response when Linq chat classification is unavailable", async () => {
+    mocks.handleHostedOnboardingLinqWebhook.mockRejectedValueOnce(hostedOnboardingError({
+      code: "LINQ_CHAT_CLASSIFICATION_UNAVAILABLE",
+      httpStatus: 502,
+      message: "Linq chat classification is unavailable.",
+      retryable: true,
+    }));
+
+    const response = await hostedOnboardingLinqRoute.POST(
+      new Request("https://join.example.test/api/hosted-onboarding/linq/webhook", {
+        body: JSON.stringify({ ok: true }),
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(502);
+    await expect(response.json()).resolves.toMatchObject({
+      error: {
+        code: "LINQ_CHAT_CLASSIFICATION_UNAVAILABLE",
+      },
+    });
+  });
+
   it("logs redacted Linq ingress timing deltas for message webhooks", async () => {
     const routeStartedAtMs = Date.parse("2026-06-24T18:46:10.522Z");
     vi.spyOn(Date, "now").mockReturnValue(routeStartedAtMs);

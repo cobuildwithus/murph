@@ -7,6 +7,36 @@ export const preferencesDocumentSchemaVersion = 1;
 
 export const assistantTonePreferenceValues = ["casual", "formal"] as const;
 export const assistantTonePreferenceSchema = z.enum(assistantTonePreferenceValues);
+export const defaultAssistantTonePreference = "formal" satisfies
+  (typeof assistantTonePreferenceValues)[number];
+
+export const assistantPersonalitySettingIds = ["humor", "push", "detail"] as const;
+export const assistantPersonalitySettingSchema = z.enum(assistantPersonalitySettingIds);
+export const assistantPersonalityScoreSchema = z.number().int().min(0).max(10);
+export const assistantPersonalityPreferencesSchema = z
+  .object({
+    humor: assistantPersonalityScoreSchema.optional(),
+    push: assistantPersonalityScoreSchema.optional(),
+    detail: assistantPersonalityScoreSchema.optional(),
+  })
+  .strict();
+export const assistantPersonalityScoresSchema = z
+  .object({
+    humor: assistantPersonalityScoreSchema,
+    push: assistantPersonalityScoreSchema,
+    detail: assistantPersonalityScoreSchema,
+  })
+  .strict();
+
+export type AssistantPersonalitySettingId = z.infer<typeof assistantPersonalitySettingSchema>;
+export type AssistantPersonalityPreferences = z.infer<typeof assistantPersonalityPreferencesSchema>;
+export type AssistantPersonalityScores = z.infer<typeof assistantPersonalityScoresSchema>;
+
+export const defaultAssistantPersonalityScores = Object.freeze({
+  humor: 3,
+  push: 3,
+  detail: 5,
+}) satisfies AssistantPersonalityScores;
 
 export const assistantVoiceOptionIdValues = [
   "classic",
@@ -47,11 +77,19 @@ export interface AssistantVoiceOption {
 
 export const assistantVoiceOptions = [
   {
-    description: "Murph's default voice from this workspace.",
+    description: "Clear, positive, and energetic.",
+    elevenLabsVoiceId: "tnSpp4vdxKPjI9w0GnoV",
+    gender: "female",
+    id: "upbeat",
+    label: "Classic Murph",
+    previewPath: "/audio/murph-voices/upbeat.mp3",
+  },
+  {
+    description: "Quick, wry, and a little nerdy.",
     elevenLabsVoiceId: null,
     gender: "male",
     id: "classic",
-    label: "Classic Murph",
+    label: "New York",
     previewPath: "/audio/murph-voices/classic.mp3",
   },
   {
@@ -183,14 +221,6 @@ export const assistantVoiceOptions = [
     previewPath: "/audio/murph-voices/mysterious.mp3",
   },
   {
-    description: "Clear, positive, and energetic.",
-    elevenLabsVoiceId: "tnSpp4vdxKPjI9w0GnoV",
-    gender: "female",
-    id: "upbeat",
-    label: "Upbeat",
-    previewPath: "/audio/murph-voices/upbeat.mp3",
-  },
-  {
     description: "Steady, clear, and bookish.",
     elevenLabsVoiceId: "RILOU7YmBhvwJGDGjNmP",
     gender: "female",
@@ -224,6 +254,8 @@ export const assistantVoiceOptions = [
   },
 ] as const satisfies readonly AssistantVoiceOption[];
 
+export const defaultAssistantVoiceOptionId = "upbeat" satisfies AssistantVoiceOptionId;
+
 export const workoutUnitPreferencesSchema = z
   .object({
     weight: z.enum(["lb", "kg"]).optional(),
@@ -247,6 +279,7 @@ export const assistantPreferencesSchema = z
   .object({
     tone: assistantTonePreferenceSchema.optional(),
     voice: z.string().min(1).optional(),
+    personality: assistantPersonalityPreferencesSchema.optional(),
   })
   .strict();
 
@@ -281,6 +314,24 @@ export function isAssistantTonePreference(value: unknown): value is AssistantTon
   return typeof value === "string" && assistantTonePreferenceValues.includes(value as AssistantTonePreference);
 }
 
+export function isAssistantPersonalitySettingId(
+  value: unknown,
+): value is AssistantPersonalitySettingId {
+  return (
+    typeof value === "string" &&
+    assistantPersonalitySettingIds.includes(value as AssistantPersonalitySettingId)
+  );
+}
+
+export function resolveAssistantPersonalityScores(
+  preferences?: AssistantPersonalityPreferences | null,
+): AssistantPersonalityScores {
+  return assistantPersonalityScoresSchema.parse({
+    ...defaultAssistantPersonalityScores,
+    ...(preferences ?? {}),
+  });
+}
+
 export function isAssistantVoiceOptionId(value: unknown): value is AssistantVoiceOptionId {
   return typeof value === "string" && assistantVoiceOptionIdValues.includes(value as AssistantVoiceOptionId);
 }
@@ -298,7 +349,12 @@ export function resolveAssistantVoiceOption(
 export function resolveAssistantVoiceOptionElevenLabsVoiceId(
   voiceId: string | null | undefined,
 ): string | null {
-  return resolveAssistantVoiceOption(voiceId)?.elevenLabsVoiceId ?? null;
+  // No stored preference means the shared default voice; explicit `classic`
+  // and stale roster ids stay null so callers fall back to the env voice.
+  return (
+    resolveAssistantVoiceOption(voiceId ?? defaultAssistantVoiceOptionId)?.elevenLabsVoiceId ??
+    null
+  );
 }
 
 export function normalizeWearablePreferenceProviders(

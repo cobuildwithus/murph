@@ -18,11 +18,11 @@ import {
   readIntegrationIngestById,
   readJsonlRecords,
   repairJunctionWorkoutHeartRateZones,
-  selectNovelIntegrationIngestEvidence,
   updateVaultSummary,
   upsertEvent,
   VaultError,
 } from "../src/index.ts";
+import { selectNovelIntegrationIngestEvidence } from "../src/integration-ingests.ts";
 import { prepareInlineRawArtifact, prepareRawArtifact } from "../src/raw.ts";
 
 async function makeTempDirectory(name: string): Promise<string> {

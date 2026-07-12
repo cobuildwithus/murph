@@ -20,6 +20,11 @@
       "import": "./dist/index.js",
       "default": "./dist/index.js"
     },
+    "./clinical-records": {
+      "types": "./dist/clinical-records/index.d.ts",
+      "import": "./dist/clinical-records/index.js",
+      "default": "./dist/clinical-records/index.js"
+    },
     "./device-providers/provider-descriptors": {
       "types": "./dist/device-providers/provider-descriptors.d.ts",
       "import": "./dist/device-providers/provider-descriptors.js",
@@ -58,9 +63,13 @@
     "test:coverage": "pnpm exec vitest run --config vitest.config.ts --coverage"
   },
   "dependencies": {
+    "@murphai/clinical-records": "workspace:*",
     "@murphai/contracts": "workspace:*",
     "@murphai/core": "workspace:*",
     "@murphai/health-metrics": "workspace:*",
     "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@medplum/fhirtypes": "^5.1.24"
   }
 }

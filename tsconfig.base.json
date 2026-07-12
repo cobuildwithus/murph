@@ -25,6 +25,9 @@
       "@murphai/contracts/schemas": [
         "packages/contracts/src/schemas.ts"
       ],
+      "@murphai/clinical-records": [
+        "packages/clinical-records/src/index.ts"
+      ],
       "@murphai/health-commons": [
         "packages/health-commons/src/index.ts"
       ],
@@ -48,6 +51,9 @@
       ],
       "@murphai/hosted-execution/assistant-identifiers": [
         "packages/hosted-execution/src/assistant-identifiers.ts"
+      ],
+      "@murphai/hosted-execution/assistant-model": [
+        "packages/hosted-execution/src/assistant-model.ts"
       ],
       "@murphai/hosted-execution/assistant-usage": [
         "packages/hosted-execution/src/assistant-usage.ts"

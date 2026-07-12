@@ -105,9 +105,12 @@ Unchanged and still binding:
 
 - **Curiosity beats compliance.** The right feeling is "huh, interesting."
 - **Silence is a feature.** A good health product knows when not to speak.
-- **Compare interventions, not bodies.** Challenges score adherence and
-  change-vs-your-own-baseline, never raw body stats. A challenge has a winner;
-  it must not have a "best body."
+- **Compare interventions, not bodies — by default.** Challenges score
+  adherence and change-vs-your-own-baseline; Murph never proposes body
+  ranking or a "best body" prize. The line is what Murph originates and how
+  it speaks, not what consenting friends choose: a private group that
+  explicitly and individually opts into a physique frame gets it run without
+  a lecture.
 - **Protocols are temporary tools, not identities.**
 - **Numbers are clues, not verdicts.**
 - **Private by default, sharing by consent.** In groups this means

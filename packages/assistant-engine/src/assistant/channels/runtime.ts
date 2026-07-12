@@ -71,6 +71,10 @@ const TELEGRAM_SEND_TIMEOUT_MS = 30_000
 const TELEGRAM_MAX_VOICE_MEMO_BYTES = 10 * 1024 * 1024
 const LINQ_TYPING_REFRESH_MS = 45_000
 const LINQ_TYPING_MAX_SESSION_MS = 5 * 60_000
+// Linq accepts message sends asynchronously and clears typing when the message
+// actually sends. Restart after that short provider settle window instead of
+// racing the auto-clear immediately after the HTTP acceptance response.
+const LINQ_TYPING_POST_MESSAGE_REFRESH_MS = 1_000
 
 type TelegramParsedTarget = TelegramThreadTarget
 type TelegramSendOperation = 'sendMessage' | 'sendPhoto' | 'sendVoice'
@@ -706,6 +710,7 @@ export async function startTelegramTypingIndicator(
 }
 
 export async function startAssistantChannelActivitySession(input: {
+  afterMessageRefreshMs?: number | null
   refresh?: ((signal: AbortSignal) => Promise<void>) | null
   refreshMs: number
   maxSessionMs?: number | null
@@ -722,6 +727,9 @@ export async function startAssistantChannelActivitySession(input: {
   }
 
   const refreshMs = Math.max(1, Math.trunc(input.refreshMs))
+  const afterMessageRefreshMs = input.afterMessageRefreshMs == null
+    ? null
+    : Math.max(0, Math.trunc(input.afterMessageRefreshMs))
   const maxSessionMs = normalizeAssistantChannelActivityMaxSessionMs(
     input.maxSessionMs ?? null,
   )
@@ -729,11 +737,12 @@ export async function startAssistantChannelActivitySession(input: {
   let refreshTimer: ReturnType<typeof setTimeout> | null = null
   let maxSessionTimer: ReturnType<typeof setTimeout> | null = null
   let refreshFailure: unknown = null
+  let refreshScheduleVersion = 0
   let refreshTail: Promise<void> = Promise.resolve()
   let stopped = false
   let stopPromise: Promise<void> | null = null
 
-  scheduleNextRefresh()
+  scheduleRefresh(refreshMs)
   if (maxSessionMs !== null) {
     maxSessionTimer = setTimeout(() => {
       void stopActivity({
@@ -744,26 +753,37 @@ export async function startAssistantChannelActivitySession(input: {
   }
 
   return {
+    ...(afterMessageRefreshMs === null
+      ? {}
+      : {
+          refreshAfterMessage: async () => scheduleRefresh(afterMessageRefreshMs),
+        }),
     refreshNow: async () => {
       clearRefreshTimer()
+      const scheduleVersion = ++refreshScheduleVersion
       await enqueueRefresh()
-      scheduleNextRefresh()
+      if (scheduleVersion === refreshScheduleVersion) {
+        scheduleRefresh(refreshMs)
+      }
     },
     stop: stopActivity,
   }
 
-  function scheduleNextRefresh(): void {
+  function scheduleRefresh(delayMs: number): void {
     if (stopped || linkedStopSignal.signal.aborted || refreshFailure) {
       return
     }
 
     clearRefreshTimer()
+    const scheduleVersion = ++refreshScheduleVersion
     refreshTimer = setTimeout(() => {
       refreshTimer = null
       void enqueueRefresh().then(() => {
-        scheduleNextRefresh()
+        if (scheduleVersion === refreshScheduleVersion) {
+          scheduleRefresh(refreshMs)
+        }
       })
-    }, refreshMs)
+    }, delayMs)
     unrefAssistantChannelActivityTimer(refreshTimer)
   }
 
@@ -893,6 +913,7 @@ export async function startLinqTypingIndicator(
   }
 
   return startAssistantChannelActivitySession({
+    afterMessageRefreshMs: LINQ_TYPING_POST_MESSAGE_REFRESH_MS,
     refreshMs: dependencies.refreshMs ?? LINQ_TYPING_REFRESH_MS,
     maxSessionMs: dependencies.maxSessionMs ?? LINQ_TYPING_MAX_SESSION_MS,
     signal: dependencies.signal,
@@ -1102,12 +1123,16 @@ async function sendTelegramMessageDetailed(
 
   const renderedMessage = renderMarkdownMessageText(input.message)
   const chunks = splitDecoratedMessageText(renderedMessage, TELEGRAM_MAX_TEXT_LENGTH)
+  const maxDeliveryAttempts = requireTelegramMaxDeliveryAttempts(
+    dependencies.maxDeliveryAttempts,
+  )
   for (const chunk of chunks) {
     try {
       const delivered = await sendTelegramTextChunk({
         baseUrl,
         entities: buildTelegramMessageEntities(chunk.decorations),
         fetchImplementation,
+        maxDeliveryAttempts,
         replyToMessageId,
         signal: dependencies.signal,
         target,
@@ -1308,6 +1333,7 @@ async function sendTelegramTextChunk(input: {
   baseUrl: string
   entities: TelegramMessageEntity[]
   fetchImplementation: TelegramFetchImplementation
+  maxDeliveryAttempts: number
   replyToMessageId: string | null
   signal?: AbortSignal
   target: TelegramParsedTarget
@@ -1365,7 +1391,7 @@ async function sendTelegramTextChunk(input: {
 
     if (
       outcome.kind === 'failed' ||
-      retryCount >= TELEGRAM_MAX_DELIVERY_ATTEMPTS - 1
+      retryCount >= input.maxDeliveryAttempts - 1
     ) {
       throw outcome.failure
     }
@@ -1538,16 +1564,6 @@ async function sendTelegramVoiceMemo(input: {
   }
 }
 
-async function readTelegramResponsePayload(
-  response: TelegramFetchResponse,
-): Promise<unknown> {
-  try {
-    return await response.json()
-  } catch {
-    return null
-  }
-}
-
 function isTelegramSuccessResponse(
   value: unknown,
 ): value is {
@@ -1603,33 +1619,47 @@ async function sendTelegramBotApiRequest(input: {
   baseUrl: string
   body?: string | Blob | FormData
   fetchImplementation: TelegramFetchImplementation
-  headers?: Record<string, string>
-  method: 'POST'
-  operation: 'sendChatAction' | 'sendMessage' | 'sendPhoto' | 'sendVoice'
+  operation: TelegramSendOperation
   payload?: Record<string, unknown>
   signal?: AbortSignal
   token: string
-}): Promise<TelegramFetchResponse> {
+}): Promise<{
+  payload: unknown
+  response: TelegramFetchResponse
+}> {
   const timeout = createTimeoutAbortController(
     input.signal,
     TELEGRAM_SEND_TIMEOUT_MS,
   )
 
   try {
-    return await input.fetchImplementation(
+    const response = await input.fetchImplementation(
       `${input.baseUrl}/bot${input.token}/${input.operation}`,
       {
-        method: input.method,
-        headers: input.headers ??
-          (input.payload
-            ? {
-                'content-type': 'application/json',
-              }
-            : undefined),
+        method: 'POST',
+        headers: input.payload
+          ? {
+              'content-type': 'application/json',
+            }
+          : undefined,
         body: input.body ?? (input.payload ? JSON.stringify(input.payload) : undefined),
         signal: timeout.signal,
       },
     )
+    timeout.signal.throwIfAborted()
+    let payload: unknown = null
+    try {
+      payload = await response.json()
+    } catch (error) {
+      if (timeout.signal.aborted) {
+        throw error
+      }
+    }
+    timeout.signal.throwIfAborted()
+    return {
+      payload,
+      response,
+    }
   } finally {
     timeout.cleanup()
   }
@@ -1775,6 +1805,16 @@ function extractTelegramRetryAfter(value: Record<string, unknown>): number | nul
     : null
 }
 
+function requireTelegramMaxDeliveryAttempts(value: number | undefined): number {
+  if (value === undefined) {
+    return TELEGRAM_MAX_DELIVERY_ATTEMPTS
+  }
+  if (!Number.isSafeInteger(value) || value < 1) {
+    throw new TypeError('Telegram maxDeliveryAttempts must be a positive integer.')
+  }
+  return Math.min(value, TELEGRAM_MAX_DELIVERY_ATTEMPTS)
+}
+
 async function waitForTelegramRetryDelay(
   attempt: number,
   retryAfterSeconds: number | null,
@@ -1831,10 +1871,9 @@ async function sendTelegramTextChunkOnce(input: {
   token: string
 }): Promise<TelegramSendAttemptResult> {
   try {
-    const response = await sendTelegramBotApiRequest({
+    const result = await sendTelegramBotApiRequest({
       baseUrl: input.baseUrl,
       fetchImplementation: input.fetchImplementation,
-      method: 'POST',
       operation: 'sendMessage',
       payload: {
         ...buildTelegramTargetPayload(input.target),
@@ -1852,8 +1891,7 @@ async function sendTelegramTextChunkOnce(input: {
 
     return {
       kind: 'response',
-      payload: await readTelegramResponsePayload(response),
-      response,
+      ...result,
     }
   } catch (error) {
     return {
@@ -1922,10 +1960,9 @@ async function sendTelegramPhotoOnce(input: {
   token: string
 }): Promise<TelegramSendAttemptResult> {
   try {
-    const response = await sendTelegramBotApiRequest({
+    const result = await sendTelegramBotApiRequest({
       baseUrl: input.baseUrl,
       fetchImplementation: input.fetchImplementation,
-      method: 'POST',
       operation: 'sendPhoto',
       payload: {
         ...buildTelegramTargetPayload(input.target),
@@ -1948,8 +1985,7 @@ async function sendTelegramPhotoOnce(input: {
 
     return {
       kind: 'response',
-      payload: await readTelegramResponsePayload(response),
-      response,
+      ...result,
     }
   } catch (error) {
     return {
@@ -1987,7 +2023,7 @@ async function sendTelegramVoiceMemoOnce(input: {
   token: string
 }): Promise<TelegramSendAttemptResult> {
   try {
-    const response = await sendTelegramBotApiRequest({
+    const result = await sendTelegramBotApiRequest({
       baseUrl: input.baseUrl,
       body: buildTelegramVoiceMemoFormData({
         bytes: input.bytes,
@@ -1997,7 +2033,6 @@ async function sendTelegramVoiceMemoOnce(input: {
         target: input.target,
       }),
       fetchImplementation: input.fetchImplementation,
-      method: 'POST',
       operation: 'sendVoice',
       signal: input.signal,
       token: input.token,
@@ -2005,8 +2040,7 @@ async function sendTelegramVoiceMemoOnce(input: {
 
     return {
       kind: 'response',
-      payload: await readTelegramResponsePayload(response),
-      response,
+      ...result,
     }
   } catch (error) {
     return {
@@ -2098,6 +2132,7 @@ function resolveTelegramSendAttemptOutcome(input: {
     errorCode: errorContext.errorCode,
     migrateToChatId: errorContext.migrateToChatId,
     operation: input.operation,
+    retryAfterSeconds: errorContext.retryAfterSeconds,
     status: input.result.response.status,
     target: input.targetLabel,
   }

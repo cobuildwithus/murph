@@ -30,6 +30,10 @@
       "types": "./dist/assistant-identifiers.d.ts",
       "default": "./dist/assistant-identifiers.js"
     },
+    "./assistant-model": {
+      "types": "./dist/assistant-model.d.ts",
+      "default": "./dist/assistant-model.js"
+    },
     "./assistant-capabilities": {
       "types": "./dist/assistant-capabilities.d.ts",
       "default": "./dist/assistant-capabilities.js"
@@ -139,6 +143,7 @@
   },
   "dependencies": {
     "@junction-api/sdk": "1.2.0",
+    "@murphai/clinical-records": "workspace:*",
     "@murphai/contracts": "workspace:*",
     "@murphai/core": "workspace:*",
     "@murphai/device-syncd": "workspace:*",
@@ -149,6 +154,7 @@
     "zod": "^4.4.3"
   },
   "bundleDependencies": [
+    "@murphai/clinical-records",
     "@murphai/core",
     "@murphai/device-syncd",
     "@murphai/health-metrics",

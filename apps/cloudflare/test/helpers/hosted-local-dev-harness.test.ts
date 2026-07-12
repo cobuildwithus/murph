@@ -93,7 +93,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-it("passes the harness process pid to hosted web dev for orphan cleanup", async () => {
+it("passes host-only web overrides with the harness process pid", async () => {
   const { startHostedLocalDevHarness } = await import("./hosted-local-dev-harness.js");
 
   const harness = await startHostedLocalDevHarness({
@@ -102,6 +102,9 @@ it("passes the harness process pid to hosted web dev for orphan cleanup", async 
       NEXT_DIST_DIR_MODE: "smoke",
     },
     persistDirPrefix: "murph-hosted-local-test-",
+    webProcessEnvOverrides: {
+      LINQ_API_BASE_URL: "http://127.0.0.1:4011",
+    },
   });
 
   await harness.stop();
@@ -113,6 +116,9 @@ it("passes the harness process pid to hosted web dev for orphan cleanup", async 
       NEXT_DIST_DIR_SUFFIX: expect.stringMatching(/^e2e-[a-f0-9-]+$/),
     }),
     pipeOutput: false,
+    webProcessEnvOverrides: {
+      LINQ_API_BASE_URL: "http://127.0.0.1:4011",
+    },
   });
 });
 
@@ -327,7 +333,7 @@ it("keeps polling hosted completion after a transient status read abort", async 
   }
 });
 
-it("lets fresh mailbox lag settle before recovery nudging", async () => {
+it("waits passively for fresh mailbox lag to clear", async () => {
   const { startHostedLocalDevHarness } = await import("./hosted-local-dev-harness.js");
   const laggedStatus = {
     inFlight: false,
@@ -404,6 +410,77 @@ it("lets fresh mailbox lag settle before recovery nudging", async () => {
   }
 });
 
+it("observes hosted production-path progress with status reads only", async () => {
+  const { startHostedLocalDevHarness } = await import("./hosted-local-dev-harness.js");
+  const baselineStatus = {
+    inFlight: false,
+    lastErrorCode: null,
+    lastInvocationAt: "2026-05-08T00:00:00.000Z",
+    mailboxLag: [{
+      importedSeq: "1",
+      lag: "0",
+      lane: "conversation",
+      maxSeq: "1",
+    }],
+    recentLogs: [],
+    userId: "member_passive_progress",
+    workspace: {
+      browserVaultReplicaRef: null,
+      checkpointedAt: "2026-05-08T00:00:01.000Z",
+      createdAt: "2026-05-08T00:00:00.000Z",
+      nextWakeAt: null,
+      nextWakeReason: null,
+      redactedStatus: null,
+      snapshotRef: null,
+      updatedAt: "2026-05-08T00:00:01.000Z",
+      userId: "member_passive_progress",
+      version: "1",
+    },
+  } satisfies HostedRunnerStatusResponse;
+  const progressedStatus = {
+    ...baselineStatus,
+    lastInvocationAt: "2026-05-08T00:00:02.000Z",
+    workspace: {
+      ...baselineStatus.workspace,
+      checkpointedAt: "2026-05-08T00:00:02.000Z",
+      updatedAt: "2026-05-08T00:00:02.000Z",
+      version: "2",
+    },
+  } satisfies HostedRunnerStatusResponse;
+  const statuses = [baselineStatus, progressedStatus];
+  const fetch = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) =>
+    Response.json(statuses.shift() ?? progressedStatus)
+  );
+  vi.stubGlobal("fetch", fetch);
+
+  const harness = await startHostedLocalDevHarness({
+    env: {
+      DATABASE_URL: "postgresql://postgres:postgres@127.0.0.1:5432/murph_test",
+      NEXT_DIST_DIR_MODE: "smoke",
+    },
+    persistDirPrefix: "murph-hosted-local-test-",
+    statusPath: (userId) => `/status/${userId}`,
+  });
+
+  try {
+    await expect(harness.waitForHostedProgress("member_passive_progress", {
+      afterStatus: baselineStatus,
+      pollIntervalMs: 1,
+      timeoutMs: 5_000,
+    })).resolves.toMatchObject({
+      lastInvocationAt: "2026-05-08T00:00:02.000Z",
+      workspace: { version: "2" },
+    });
+
+    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(fetch.mock.calls.every(([, init]) => init?.method === undefined)).toBe(true);
+    expect(harness.interventionCount).toBe(0);
+    expect(() => harness.assertNoInterventions()).not.toThrow();
+  } finally {
+    await harness.stop();
+  }
+});
+
 it("keeps polling hosted completion while a workspace wake is due", async () => {
   const { startHostedLocalDevHarness } = await import("./hosted-local-dev-harness.js");
   const dueWakeStatus = {
@@ -475,7 +552,7 @@ it("keeps polling hosted completion while a workspace wake is due", async () => 
     expect(fetch.mock.calls.some(([request, init]) =>
       String(request) === "http://127.0.0.1:8787/internal/users/member_due_wake_completion/runtime/ensure-processing"
       && init?.method === "POST"
-    )).toBe(true);
+    )).toBe(false);
   } finally {
     await harness.stop();
   }
@@ -555,7 +632,7 @@ it("does not treat recent foreground conversation imports as completion while du
     expect(fetch.mock.calls.some(([request, init]) =>
       String(request) === "http://127.0.0.1:8787/internal/users/member_local_import/runtime/ensure-processing"
       && init?.method === "POST"
-    )).toBe(true);
+    )).toBe(false);
     expect(fetch.mock.calls.some(([request]) =>
       String(request).includes("/__test/users/member_local_import/")
     )).toBe(false);
@@ -675,7 +752,7 @@ it("waits for durable conversation lag to clear after local import evidence", as
     expect(fetch.mock.calls.some(([request, init]) =>
       String(request) === "http://127.0.0.1:8787/internal/users/member_local_import_wait/runtime/ensure-processing"
       && init?.method === "POST"
-    )).toBe(true);
+    )).toBe(false);
     expect(fetch.mock.calls.some(([request]) =>
       String(request).includes("/__test/users/member_local_import_wait/")
     )).toBe(false);
@@ -684,7 +761,7 @@ it("waits for durable conversation lag to clear after local import evidence", as
   }
 });
 
-it("recovers stale in-flight hosted completion by expiring activity and running until idle", async () => {
+it("waits passively for stale in-flight hosted completion to clear", async () => {
   const { startHostedLocalDevHarness } = await import("./hosted-local-dev-harness.js");
   const staleInFlightStatus = {
     heartbeatAt: null,
@@ -757,7 +834,7 @@ it("recovers stale in-flight hosted completion by expiring activity and running 
     expect(fetch.mock.calls.some(([request, init]) =>
       String(request) === "http://127.0.0.1:8787/internal/users/member_stale_in_flight_completion/runtime/ensure-processing"
       && init?.method === "POST"
-    )).toBe(true);
+    )).toBe(false);
     expect(fetch.mock.calls.some(([request]) =>
       String(request).includes("/__test/users/member_stale_in_flight_completion/")
     )).toBe(false);
@@ -842,7 +919,7 @@ it("does not treat processed foreground system imports as completion while durab
     expect(fetch.mock.calls.some(([request, init]) =>
       String(request) === "http://127.0.0.1:8787/internal/users/member_local_system_import/runtime/ensure-processing"
       && init?.method === "POST"
-    )).toBe(true);
+    )).toBe(false);
     expect(fetch.mock.calls.some(([request]) =>
       String(request).includes("/__test/users/member_local_system_import/")
     )).toBe(false);
@@ -917,7 +994,7 @@ it("does not treat foreground system imports as completion without a durable che
     expect(fetch.mock.calls.some(([request, init]) =>
       String(request) === "http://127.0.0.1:8787/internal/users/member_local_import_checkpoint/runtime/ensure-processing"
       && init?.method === "POST"
-    )).toBe(true);
+    )).toBe(false);
     expect(fetch.mock.calls.some(([request]) =>
       String(request).includes("/__test/users/member_local_import_checkpoint/")
     )).toBe(false);
@@ -957,6 +1034,8 @@ it("calls the hosted-local alarm test route with the bound user headers", async 
     expect(init).toMatchObject({
       method: "POST",
     });
+    expect(harness.interventionCount).toBe(1);
+    expect(() => harness.assertNoInterventions()).toThrow(/1 mutating intervention request/u);
   } finally {
     await harness.stop();
   }
@@ -1025,6 +1104,62 @@ it("calls the hosted-local active-operation drop route with bound user headers a
     expect(init).toMatchObject({
       method: "POST",
     });
+  } finally {
+    await harness.stop();
+  }
+});
+
+it("controls the hosted-local shutdown checkpoint publication barrier", async () => {
+  const fetch = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
+    const action = new URL(String(input)).searchParams.get("action");
+    return Response.json(
+      action === "status"
+        ? { state: "entered" }
+        : action === "release"
+          ? { ok: true, released: true }
+          : { ok: true },
+    );
+  });
+  vi.stubGlobal("fetch", fetch);
+
+  const { startHostedLocalDevHarness } = await import("./hosted-local-dev-harness.js");
+  const harness = await startHostedLocalDevHarness({
+    env: {
+      DATABASE_URL: "postgresql://127.0.0.1:5432/murph_test",
+      NEXT_DIST_DIR_MODE: "smoke",
+    },
+    persistDirPrefix: "murph-hosted-local-test-",
+    testControls: true,
+  });
+
+  try {
+    await expect(harness.armShutdownCheckpointPublicationBarrierForTest("member_barrier"))
+      .resolves.toEqual({ ok: true });
+    await expect(harness.readShutdownCheckpointPublicationBarrierForTest("member_barrier"))
+      .resolves.toEqual({ state: "entered" });
+    await expect(harness.beginShutdownCheckpointGracefulStopForTest("member_barrier"))
+      .resolves.toEqual({ ok: true });
+    await expect(harness.releaseShutdownCheckpointPublicationBarrierForTest("member_barrier"))
+      .resolves.toEqual({ ok: true, released: true });
+
+    expect(fetch).toHaveBeenCalledTimes(4);
+    expect(fetch.mock.calls.map(([request]) => String(request))).toEqual([
+      "http://127.0.0.1:8787/__test/users/member_barrier"
+        + "/shutdown-checkpoint-publication-barrier?action=arm",
+      "http://127.0.0.1:8787/__test/users/member_barrier"
+        + "/shutdown-checkpoint-publication-barrier?action=status",
+      "http://127.0.0.1:8787/__test/users/member_barrier"
+        + "/shutdown-checkpoint-publication-barrier?action=shutdown",
+      "http://127.0.0.1:8787/__test/users/member_barrier"
+        + "/shutdown-checkpoint-publication-barrier?action=release",
+    ]);
+    for (const [, init] of fetch.mock.calls) {
+      const headers = new Headers(init?.headers);
+      expect(headers.get("authorization")).toBe("Bearer oidc-token");
+      expect(headers.get(HOSTED_EXECUTION_USER_ID_HEADER)).toBe("member_barrier");
+      expect(init?.signal).toBeInstanceOf(AbortSignal);
+      expect(init).toMatchObject({ method: "POST" });
+    }
   } finally {
     await harness.stop();
   }

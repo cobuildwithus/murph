@@ -5300,8 +5300,8 @@ async function writeHostedSystemMailboxRuntimeLog(input: {
 // Hot-path-safe: writeHostedRuntimeLogBestEffort queues info-level entries
 // and returns synchronously, so foreground delivery is never blocked on the
 // underlying log port write (invariant: "observability writes are never
-// user latency", docs/contracts/00-invariants.md § Hosted Foreground
-// Priority).
+// user latency", docs/contracts/00-invariants.md § Foreground Reply Critical
+// Path).
 function writeHostedAssistantTurnTimingRuntimeLog(input: {
   currentTurnDeliveryIntentCount?: number | null;
   elapsedMs: number;
@@ -5361,8 +5361,6 @@ async function writeHostedAssistantPassRuntimeLog(input: {
       phase: "invoke",
       redactedJson: {
         automationLogCount: input.assistantMetrics.redactedLogEntries?.length ?? 0,
-        assistantAutomationAfterStateElapsedMs:
-          input.assistantMetrics.assistantAutomationAfterStateElapsedMs ?? null,
         assistantAutomationElapsedMs: input.assistantMetrics.assistantAutomationElapsedMs ?? null,
         assistantAutomationPassElapsedMs:
           input.assistantMetrics.assistantAutomationPassElapsedMs ?? null,

@@ -570,26 +570,45 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
     expect(createCalled).toBe(false);
   });
 
-  it("updates an existing connection without writing a Prisma secret row", async () => {
-    const existing = createConnection({
+  it("atomically preserves Junction historical progress during a guarded callback", async () => {
+    let stored = createConnection({
+      credentialKind: "provider_config",
+      externalAccountIdEncrypted: "enc:junction-user-123",
       id: "dsc_123",
-      provider: "oura",
+      metadataJson: {
+        callbackOutcome: "seeded",
+        junctionHistoricalBackfillStatus: "coverage_v2_retrying",
+        junctionHistoricalBackfillEmptyAttempts: 2,
+        junctionHistoricalBackfillLastEmptyAt: "2026-03-25T00:30:00.000Z",
+        junctionHistoricalBackfillWindowStart: "2026-03-23T00:00:00.000Z",
+        junctionHistoricalBackfillWindowEnd: "2026-03-25T00:00:00.000Z",
+        junctionHistoricalBackfillEvidence:
+          "e1|2026-03-23T00:00:00.000Z|2026-03-25T00:00:00.000Z|garmin:1",
+        seedOnlyState: "discard",
+      },
+      provider: "junction",
+      providerConfigKey: "junction",
+      setupPhase: "pending_link",
       status: "active",
-      userId: "user-123",
-    });
-    const updated = createConnection({
-      id: "dsc_123",
-      nextReconcileAt: new Date("2026-03-25T05:00:00.000Z"),
-      provider: "oura",
-      status: "active",
-      updatedAt: new Date("2026-03-26T04:00:00.000Z"),
+      updatedAt: new Date("2026-03-25T00:30:00.000Z"),
       userId: "user-123",
     });
 
+    const lockConnectionMutation = vi.fn(async () => 0);
+    const findConnection = vi.fn(async () => cloneConnection(stored));
+    const updateConnection = vi.fn(async ({ data }: { data: Partial<MutableConnectionRecord> }) => {
+      stored = {
+        ...stored,
+        ...data,
+        updatedAt: new Date("2026-03-26T04:00:00.000Z"),
+      };
+      return cloneConnection(stored);
+    });
     const tx = {
+      $executeRaw: lockConnectionMutation,
       deviceConnection: {
-        findUnique: async () => cloneConnection(existing),
-        update: async () => cloneConnection(updated),
+        findUnique: findConnection,
+        update: updateConnection,
       },
       deviceConnectionSecret: {
         upsert: vi.fn(async () => {
@@ -608,23 +627,49 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
 
     await expect(store.upsertConnection({
       ownerId: "user-123",
-      provider: "oura",
-      externalAccountId: "acct_456",
-      displayName: "Updated Oura ring",
-      scopes: ["daily"],
-      tokens: {
-        accessToken: "new-access-token",
-        refreshToken: "new-refresh-token",
-        accessTokenExpiresAt: "2026-03-26T04:00:00.000Z",
+      provider: "junction",
+      externalAccountId: "junction-user-123",
+      displayName: "Junction",
+      scopes: [],
+      credential: {
+        kind: "provider_config",
+        providerConfigKey: "junction",
       },
       metadata: {
-        region: "ca",
+        callbackOutcome: "complete",
+      },
+      existingAccountGuard: {
+        expectedAccountId: "dsc_123",
+        expectedConnectedAt: "2026-03-25T00:00:00.000Z",
+        rejectIfDisconnected: true,
       },
       connectedAt: "2026-03-25T00:00:00.000Z",
       nextReconcileAt: "2026-03-25T05:00:00.000Z",
     })).resolves.toEqual(expect.objectContaining({
       id: "dsc_123",
       metadata: {},
+    }));
+    expect(lockConnectionMutation).toHaveBeenCalledWith(
+      ["select pg_advisory_xact_lock(hashtext(", "))"],
+      "dsc_123",
+    );
+    expect(findConnection).toHaveBeenCalledTimes(2);
+    expect(lockConnectionMutation.mock.invocationCallOrder[0]).toBeLessThan(
+      updateConnection.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY,
+    );
+    expect(updateConnection).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        metadataJson: {
+          junctionHistoricalBackfillStatus: "coverage_v2_retrying",
+          junctionHistoricalBackfillEmptyAttempts: 2,
+          junctionHistoricalBackfillLastEmptyAt: "2026-03-25T00:30:00.000Z",
+          junctionHistoricalBackfillWindowStart: "2026-03-23T00:00:00.000Z",
+          junctionHistoricalBackfillWindowEnd: "2026-03-25T00:00:00.000Z",
+          junctionHistoricalBackfillEvidence:
+            "e1|2026-03-23T00:00:00.000Z|2026-03-25T00:00:00.000Z|garmin:1",
+          callbackOutcome: "complete",
+        },
+      }),
     }));
     expect(tx.deviceConnectionSecret.upsert).not.toHaveBeenCalled();
   });
@@ -648,6 +693,7 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
     });
 
     const tx = {
+      $executeRaw: vi.fn(async () => 0),
       deviceConnection: {
         findUnique: vi.fn(async () => cloneConnection(existing)),
         create: vi.fn(async () => {
@@ -729,6 +775,7 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
     });
 
     const tx = {
+      $executeRaw: vi.fn(async () => 0),
       deviceConnection: {
         findUnique: async () => cloneConnection(stored),
         update: updateConnection,
@@ -805,6 +852,7 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
     });
 
     const tx = {
+      $executeRaw: vi.fn(async () => 0),
       deviceConnection: {
         findUnique: vi.fn(async () => cloneConnection(existing)),
         update: updateConnection,
@@ -854,6 +902,7 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
     });
 
     const tx = {
+      $executeRaw: vi.fn(async () => 0),
       deviceConnection: {
         findUnique: vi.fn(async () => cloneConnection(existing)),
         update: vi.fn(async () => {
@@ -884,12 +933,69 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
       metadata: {},
       existingAccountGuard: {
         expectedAccountId: "dsc_123",
+        expectedConnectedAt: existing.connectedAt.toISOString(),
         rejectIfDisconnected: true,
       },
       connectedAt: "2026-03-26T03:00:00.000Z",
       nextReconcileAt: "2026-03-26T09:00:00.000Z",
     })).rejects.toMatchObject({
       code: "CONNECTION_ALREADY_DISCONNECTED",
+      httpStatus: 409,
+    });
+    expect(tx.deviceConnection.update).not.toHaveBeenCalled();
+  });
+
+  it("rejects guarded hosted callback upserts after the seeded connection epoch changes", async () => {
+    const existing = createConnection({
+      accessTokenEncrypted: null,
+      id: "dsc_123",
+      keyVersion: null,
+      provider: "junction",
+      refreshTokenEncrypted: null,
+      setupPhase: "source_confirmed",
+      status: "active",
+      tokenVersion: null,
+      connectedAt: new Date("2026-03-26T03:30:00.000Z"),
+      updatedAt: new Date("2026-03-26T03:30:00.000Z"),
+      userId: "user-123",
+    });
+    const tx = {
+      $executeRaw: vi.fn(async () => 0),
+      deviceConnection: {
+        findUnique: vi.fn(async () => cloneConnection(existing)),
+        update: vi.fn(async () => {
+          throw new Error("stale seeded callbacks should not update the newer connection");
+        }),
+      },
+    };
+    const store = new PrismaDeviceSyncControlPlaneStore({
+      codec: TEST_CODEC,
+      prisma: {
+        $transaction: async <TResult>(callback: (transaction: typeof tx) => Promise<TResult>) => callback(tx),
+      } as never,
+      providerAccountBlindIndexKey: BLIND_INDEX_KEY,
+    });
+
+    await expect(store.upsertConnection({
+      ownerId: "user-123",
+      provider: "junction",
+      externalAccountId: "acct_456",
+      displayName: "Garmin",
+      scopes: [],
+      credential: {
+        kind: "provider_config",
+        providerConfigKey: "junction",
+      },
+      metadata: {},
+      existingAccountGuard: {
+        expectedAccountId: "dsc_123",
+        expectedConnectedAt: "2026-03-26T03:00:00.000Z",
+        rejectIfDisconnected: true,
+      },
+      connectedAt: "2026-03-26T04:00:00.000Z",
+      nextReconcileAt: null,
+    })).rejects.toMatchObject({
+      code: "CONNECTION_SEEDED_ACCOUNT_CHANGED",
       httpStatus: 409,
     });
     expect(tx.deviceConnection.update).not.toHaveBeenCalled();
@@ -907,9 +1013,12 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
       refreshTokenEncrypted: "enc:refresh-token",
       status: "active",
       tokenVersion: 3,
+      updatedAt: new Date("2026-03-25T00:30:00.000Z"),
     });
 
+    const lockConnectionMutation = vi.fn(async () => 0);
     const tx = {
+      $executeRaw: lockConnectionMutation,
       deviceConnection: {
         findUnique: vi.fn(async () => cloneConnection(stored)),
         update: vi.fn(async ({ data }: { data: Partial<MutableConnectionRecord> }) => {
@@ -933,6 +1042,7 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
 
     const result = await store.markConnectionSetupFailed({
       accountId: "dsc_123",
+      expectedConnectedAt: "2026-03-25T00:00:00.000Z",
       now: "2026-03-26T06:00:00.000Z",
       code: "OAUTH_SETUP_FAILED",
       message: "post-connect setup failed",
@@ -956,13 +1066,23 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
         tokenVersion: null,
       }),
     }));
-    expect(result).toEqual(expect.objectContaining({
+    expect(lockConnectionMutation).toHaveBeenCalledWith(
+      ["select pg_advisory_xact_lock(hashtext(", "))"],
+      "dsc_123",
+    );
+    expect(lockConnectionMutation.mock.invocationCallOrder[0]).toBeLessThan(
+      tx.deviceConnection.findUnique.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY,
+    );
+    expect(result).toEqual({
+      applied: true,
+      account: expect.objectContaining({
       accessTokenExpiresAt: null,
       lastErrorCode: "OAUTH_SETUP_FAILED",
       lastErrorMessage: "post-connect setup failed",
       nextReconcileAt: null,
       status: "reauthorization_required",
-    }));
+      }),
+    });
     expect(stored.accessTokenEncrypted).toBeNull();
     expect(stored.refreshTokenEncrypted).toBeNull();
     expect(stored.refreshLeaseOwner).toBeNull();
@@ -980,6 +1100,7 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
     });
 
     const tx = {
+      $executeRaw: vi.fn(async () => 0),
       deviceConnection: {
         findUnique: vi.fn(async () => cloneConnection(stored)),
         update: vi.fn(async ({ data }: { data: Partial<MutableConnectionRecord> }) => {
@@ -1003,6 +1124,7 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
 
     const result = await store.markConnectionSetupFailed({
       accountId: "dsc_123",
+      expectedConnectedAt: "2026-03-25T00:00:00.000Z",
       now: "2026-03-26T06:00:00.000Z",
       code: "OAUTH_SETUP_FAILED",
       message:
@@ -1014,11 +1136,99 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
         lastErrorMessage: null,
       }),
     }));
-    expect(result?.lastErrorMessage).toBeNull();
+    expect(result.account?.lastErrorMessage).toBeNull();
     const serialized = JSON.stringify(result);
     expect(serialized).not.toContain("api.example.test");
     expect(serialized).not.toContain("owner@example.test");
     expect(serialized).not.toContain("secret-token");
+  });
+
+  it("leaves a newer connection epoch unchanged when setup cleanup is stale", async () => {
+    const stored = createConnection({
+      accessTokenEncrypted: "enc:new-access-token",
+      accessTokenExpiresAt: new Date("2026-03-26T08:00:00.000Z"),
+      keyVersion: "v1",
+      refreshTokenEncrypted: "enc:new-refresh-token",
+      status: "active",
+      tokenVersion: 4,
+      updatedAt: new Date("2026-03-26T07:00:00.000Z"),
+    });
+    const update = vi.fn();
+    const tx = {
+      $executeRaw: vi.fn(async () => 0),
+      deviceConnection: {
+        findUnique: vi.fn(async () => cloneConnection(stored)),
+        update,
+      },
+    };
+    const store = new PrismaDeviceSyncControlPlaneStore({
+      codec: TEST_CODEC,
+      prisma: {
+        $transaction: async <TResult>(callback: (transaction: typeof tx) => Promise<TResult>) => callback(tx),
+      } as never,
+      providerAccountBlindIndexKey: BLIND_INDEX_KEY,
+    });
+
+    const result = await store.markConnectionSetupFailed({
+      accountId: stored.id,
+      expectedConnectedAt: "2026-03-26T06:00:00.000Z",
+      now: "2026-03-26T07:05:00.000Z",
+      code: "OAUTH_SETUP_FAILED",
+      message: "stale setup failure",
+    });
+
+    expect(update).not.toHaveBeenCalled();
+    expect(result).toEqual({
+      applied: false,
+      account: expect.objectContaining({
+        accessTokenExpiresAt: "2026-03-26T08:00:00.000Z",
+        lastErrorCode: null,
+        status: "active",
+      }),
+    });
+  });
+
+  it("leaves a disconnected connection unchanged when setup cleanup has the same timestamp", async () => {
+    const stored = createConnection({
+      accessTokenEncrypted: null,
+      keyVersion: null,
+      refreshTokenEncrypted: null,
+      status: "disconnected",
+      tokenVersion: null,
+      updatedAt: new Date("2026-03-26T07:00:00.000Z"),
+    });
+    const update = vi.fn();
+    const tx = {
+      $executeRaw: vi.fn(async () => 0),
+      deviceConnection: {
+        findUnique: vi.fn(async () => cloneConnection(stored)),
+        update,
+      },
+    };
+    const store = new PrismaDeviceSyncControlPlaneStore({
+      codec: TEST_CODEC,
+      prisma: {
+        $transaction: async <TResult>(callback: (transaction: typeof tx) => Promise<TResult>) => callback(tx),
+      } as never,
+      providerAccountBlindIndexKey: BLIND_INDEX_KEY,
+    });
+
+    const result = await store.markConnectionSetupFailed({
+      accountId: stored.id,
+      expectedConnectedAt: stored.connectedAt.toISOString(),
+      now: "2026-03-26T07:05:00.000Z",
+      code: "OAUTH_SETUP_FAILED",
+      message: "late setup failure",
+    });
+
+    expect(update).not.toHaveBeenCalled();
+    expect(result).toEqual({
+      applied: false,
+      account: expect.objectContaining({
+        lastErrorCode: null,
+        status: "disconnected",
+      }),
+    });
   });
 
   it("serves ordinary hosted connection lists from durable Prisma metadata without live runtime reads", async () => {

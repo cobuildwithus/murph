@@ -71,6 +71,19 @@ describe('host support workflow guards', () => {
     }
   })
 
+  it('bounds only assistant-engine coverage above the default Node heap', () => {
+    const workflow = readFileSync(hostSupportWorkflowPath, 'utf8')
+
+    expect(workflow).toContain('elif [[ "$package_dir" == "packages/assistant-engine" ]]')
+    expect(workflow).toContain(
+      'env NODE_OPTIONS=--max-old-space-size=6144 MURPH_VITEST_MAX_WORKERS=50% pnpm --dir "$package_dir" test:coverage',
+    )
+    expect(workflow).toContain(
+      'env MURPH_VITEST_MAX_WORKERS=50% pnpm --dir "$package_dir" test:coverage',
+    )
+    expect(workflow.match(/NODE_OPTIONS=--max-old-space-size=6144/gu) ?? []).toHaveLength(1)
+  })
+
   it('prepares built CLI runtime artifacts before the host-support setup suite', () => {
     const workflow = readFileSync(hostSupportWorkflowPath, 'utf8')
 

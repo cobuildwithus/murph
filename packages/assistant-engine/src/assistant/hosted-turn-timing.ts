@@ -30,6 +30,7 @@ export type HostedAssistantTurnTimingDeliveryOutcomeKind =
 export interface HostedAssistantTurnTimingTraceInput {
   currentTurnDeliveryIntentCount?: number | null
   deliveryAttempted?: boolean | null
+  deliveryIntentId?: string | null
   deliveryIntentPresent?: boolean | null
   deliveryOutcomeKind?: HostedAssistantTurnTimingDeliveryOutcomeKind | null
   elapsedMs?: number | null
@@ -83,6 +84,11 @@ function buildHostedAssistantTurnTimingRawEvent(
     rawEvent,
     'deliveryAttempted',
     input.deliveryAttempted,
+  )
+  maybeAssignHostedAssistantTurnTimingValue(
+    rawEvent,
+    'turnTimingDeliveryIntentId',
+    input.deliveryIntentId,
   )
   maybeAssignHostedAssistantTurnTimingValue(
     rawEvent,

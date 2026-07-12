@@ -1,6 +1,6 @@
 # Device Sync Ingestion Invariants
 
-Last verified: 2026-07-09
+Last verified: 2026-07-10
 
 ## Purpose
 
@@ -12,7 +12,7 @@ quietly completed without importing or fetching anything.
 
 The ingestion model is now additive: push and pull are complementary, neither
 gates the other, and no branch can complete without import-or-fetch. Treat the
-five invariants below as constraints that any change to webhook construction,
+six invariants below as constraints that any change to webhook construction,
 resource-job execution, or scheduled reconcile must preserve.
 
 These are durable behavioral invariants. The current owning code lives in
@@ -77,6 +77,59 @@ drain/batch service seam in `packages/device-syncd/src/service.ts`.
    (more imports, more visible skips); it must never make it quieter (a new
    silent skip, a deferred floor, a gated import).
 
+6. **Historical completion is source/resource coverage, not account-level
+   traffic.** A useful activity record cannot complete an advertised sleep
+   obligation, and one connected source cannot satisfy another source's
+   obligation. Junction connect-window backfills derive high-signal daily
+   `(source provider, resource)` obligations for activity, sleep, and
+   `sleep_cycle` from fresh availability. Availability is capability evidence,
+   not proof that sparse resources such as workouts or body measurements should
+   contain a row, so those resources do not become absence obligations. The
+   coverage-policy version is encoded in the existing status scalar, alongside
+   the existing bounded retry progress; there is no separate policy metadata
+   field or second retry store. Garmin sends requested history asynchronously
+   and incrementally through daily-data webhooks, so the bounded ladder observes
+   for that arrival and late webhooks remain importable after `exhausted` ends
+   polling. After an authenticated old-window webhook produces canonical events,
+   one bounded, window-scoped scalar records exactly that source/resource proof.
+   The existing deduplicated coverage verification unions the proof with fresh
+   REST rows; complete late coverage clears the source error even when Garmin's
+   REST sleep response remains empty. If Garmin coverage is still incomplete,
+   only the pending source is marked reconnect-required while current ingestion
+   remains active. Hosted
+   execution hydrates the control plane's persisted connection-source rows
+   before running provider jobs, so an entirely empty provider response can
+   still be attributed to the source the member connected. Restarting the
+   export is an explicit member choice through the existing settings flow:
+   confirm the connection-wide disconnect, then reconnect Garmin. That reset
+   can disconnect other wearables on the same Junction connection, so the UI and
+   assistant must explain the scope before confirmation. If provider-side
+   deregistration fails, local disconnect still completes, but the member must
+   remove the connection in the wearable provider account before reconnecting.
+   That unfinished-reset state rides the disconnected connection's existing
+   durable error code (`HISTORICAL_RESET_REVOKE_FAILED`), so the settings and
+   connect surfaces keep projecting the manual-removal guidance across refresh
+   until a fresh established connection clears it; there is no separate warning
+   store. At the hosted authority boundary, coverage metadata and the source
+   reset signal are one coupled decision: legacy runners cannot replace
+   current/future progress, reset-required is valid exactly while progress is
+   `exhausted`, and a stale participating source rejects the account transition
+   for retry from a fresh snapshot. Junction source-only writes carry the same
+   connection-epoch fence as account writes. Hydration resolves Junction
+   sources by semantic provider identity and lets an accepted reconnect epoch
+   replace older local source state, so hosted/local keys or timestamps cannot
+   create competing source owners. Future ownership comes from the versioned
+   status scalar rather than today's window fields; opaque future progress and
+   evidence remain unchanged while canonical webhook import continues.
+   Disconnect captures its connection and credential epoch atomically, then
+   rechecks `connectedAt` and OAuth `tokenVersion` under the existing mutation
+   lock. Setup-failure cleanup similarly compare-and-sets the captured
+   `updatedAt` epoch. Seeded connection flows carry that same revision in their
+   one-time state and recheck it inside the existing upsert transaction, so an
+   old callback cannot adopt, replace, or fail a newer reconnect. Stale work
+   therefore cannot clear a newer local connection or token. Recovery does not
+   use an automatic export endpoint, operator action, or vendor support.
+
 ## Consequences for changes
 
 - Do not reintroduce a usefulness/import-vs-skip gate on the webhook path. The
@@ -92,6 +145,10 @@ drain/batch service seam in `packages/device-syncd/src/service.ts`.
 - Per-resource webhook recovery must coalesce on the shared dirty-state key
   (one floor wake per clean→dirty transition), not emit a unique-window job per
   webhook, so bursts do not fight storm-coalescing.
+- Do not replace historical coverage with a single `has any records` flag, a
+  per-resource job fan-out, or another retry store. The exact-window job,
+  scalar connection metadata, and provider-owned bounded ladder are the one
+  recovery path.
 
 ## Related docs
 

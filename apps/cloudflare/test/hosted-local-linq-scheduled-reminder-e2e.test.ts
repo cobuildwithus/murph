@@ -39,8 +39,9 @@ const reminderText = "Time to sleep. Put the phone down and get some rest.";
 const overlapReminderText = "Time to sleep. This is the overlap reminder.";
 const overlapForegroundInboundText = "still there while the bedtime reminder is due?";
 const overlapForegroundReplyText = "Yep mate, I am here.";
-const scheduledReminderLeadMs = 60_000;
-const setupLeadText = "about one minute";
+const scheduledReminderTiming = resolveScheduledReminderTiming();
+const scheduledReminderLeadMs = scheduledReminderTiming.leadMs;
+const setupLeadText = scheduledReminderTiming.setupLeadText;
 const setupReplyText = `Done - I will remind you here in ${setupLeadText}.`;
 const setupRequestText = `Remind me here in ${setupLeadText} to go to sleep.`;
 const scheduledReminderInstructions =
@@ -252,7 +253,7 @@ describe("hosted local Linq scheduled reminder e2e", () => {
       await sleepUntil(overlapSetupTimes.dueAtIso);
 
       const overlapScheduledWakeResult = await requireScenario().waitForLatestPendingWake(userId);
-      expect(overlapScheduledWakeResult.kind).toBe("runtime_processing_accepted");
+      expect(overlapScheduledWakeResult.lastErrorCode ?? null).toBeNull();
       await heldOverlapReminderResponse.started;
       const overlapForegroundWebhookResponse = await postSignedLinqWebhook(
         buildHostedLinqInboundEvent(
@@ -321,11 +322,28 @@ describe("hosted local Linq scheduled reminder e2e", () => {
 });
 
 describe("hosted local Linq scheduled reminder timing helpers", () => {
-  it("uses a one-minute lead", () => {
+  it("keeps the full timing profile while shortening the pull-request gate", () => {
     const now = new Date("2026-06-18T12:00:00.000Z");
+    const fullTiming = resolveScheduledReminderTiming({});
+    const fastTiming = resolveScheduledReminderTiming({
+      MURPH_HOSTED_LOCAL_E2E_FAST_GATE: "1",
+    });
 
-    expect(resolveScheduledReminderTimes(now)).toEqual({
+    expect(fullTiming).toEqual({
+      idleCheckpointDelayMs: 10_000,
+      leadMs: 60_000,
+      setupLeadText: "about one minute",
+    });
+    expect(fastTiming).toEqual({
+      idleCheckpointDelayMs: 1,
+      leadMs: 30_000,
+      setupLeadText: "about thirty seconds",
+    });
+    expect(resolveScheduledReminderTimes(now, fullTiming.leadMs)).toEqual({
       dueAtIso: "2026-06-18T12:01:00.000Z",
+    });
+    expect(resolveScheduledReminderTimes(now, fastTiming.leadMs)).toEqual({
+      dueAtIso: "2026-06-18T12:00:30.000Z",
     });
     expect(scheduledReminderLeadMs).toBeGreaterThan(scheduledReminderMinimumRunwayMs);
   });
@@ -522,7 +540,8 @@ async function startScenario(): Promise<void> {
     additionalEnv: {
       HOSTED_ASSISTANT_MODEL: productionLikeAssistantModel,
       HOSTED_ASSISTANT_PROVIDER: "openai",
-      HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS: "10000",
+      HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS:
+        String(scheduledReminderTiming.idleCheckpointDelayMs),
       HOSTED_ONBOARDING_LINQ_LOCAL_ALLOWED_INBOUND_PHONE_NUMBERS:
         buildLinqRecipientPhoneNumber(userId),
       LINQ_API_BASE_URL: requireLinqStub().runnerBaseUrl,
@@ -766,6 +785,27 @@ function resolveScheduledReminderTimes(
   const dueAtMs = now.getTime() + leadMs;
   return {
     dueAtIso: new Date(dueAtMs).toISOString(),
+  };
+}
+
+function resolveScheduledReminderTiming(
+  env: NodeJS.ProcessEnv = process.env,
+): {
+  idleCheckpointDelayMs: number;
+  leadMs: number;
+  setupLeadText: string;
+} {
+  if (env.MURPH_HOSTED_LOCAL_E2E_FAST_GATE === "1") {
+    return {
+      idleCheckpointDelayMs: 1,
+      leadMs: 30_000,
+      setupLeadText: "about thirty seconds",
+    };
+  }
+  return {
+    idleCheckpointDelayMs: 10_000,
+    leadMs: 60_000,
+    setupLeadText: "about one minute",
   };
 }
 

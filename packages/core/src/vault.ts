@@ -2,6 +2,8 @@ import path from "node:path";
 
 import {
   collectEventRawReferencePaths,
+  experimentDocumentRelativePath,
+  isExperimentDocumentRelativePath,
   rawImportManifestSchema,
   safeParseContract,
   type ContractSchema,
@@ -36,8 +38,13 @@ import {
   walkVaultFiles,
 } from "./fs.ts";
 import { VaultError } from "./errors.ts";
+import {
+  listCanonicalExperimentDocumentPaths,
+  scanExperimentStorage,
+} from "./experiment-storage.ts";
 import { parseFrontmatterDocument } from "./frontmatter.ts";
 import { generateVaultId } from "./ids.ts";
+import { readIntegrationIngestEntries } from "./integration-ingests.ts";
 import { readJsonlRecords } from "./jsonl.ts";
 import { stageMarkdownDocumentWrite } from "./markdown-documents.ts";
 import { isRawManifestFileName } from "./operations/raw-manifests.ts";
@@ -354,6 +361,29 @@ async function validateFrontmatterFile({
     if (!result.success) {
       return [validationIssue(code, result.errors.join("; "), relativePath)];
     }
+    if (
+      isExperimentDocumentRelativePath(relativePath)
+      && typeof result.data === "object"
+      && result.data !== null
+      && !Array.isArray(result.data)
+    ) {
+      const slug = Reflect.get(result.data, "slug");
+      let expectedPath: string | null = null;
+      if (typeof slug === "string") {
+        try {
+          expectedPath = experimentDocumentRelativePath(slug);
+        } catch {
+          expectedPath = null;
+        }
+      }
+      if (expectedPath !== relativePath) {
+        return [validationIssue(
+          "EXPERIMENT_DOCUMENT_PATH_MISMATCH",
+          "An experiment document filename must match its frontmatter slug.",
+          relativePath,
+        )];
+      }
+    }
   } catch (error) {
     if (optional && error instanceof VaultError && error.code === "VAULT_FILE_MISSING") {
       return [];
@@ -377,9 +407,11 @@ async function validateFrontmatterDirectory({
   schema,
   code,
 }: ValidateFrontmatterDirectoryInput): Promise<ValidationIssue[]> {
-  const relativePaths = await walkVaultFiles(vaultRoot, relativeDirectory, {
-    extension: ".md",
-  });
+  const relativePaths = relativeDirectory === VAULT_LAYOUT.experimentsDirectory
+    ? await listCanonicalExperimentDocumentPaths(vaultRoot)
+    : await walkVaultFiles(vaultRoot, relativeDirectory, {
+        extension: ".md",
+      });
   const issues: ValidationIssue[] = [];
 
   for (const relativePath of relativePaths) {
@@ -394,6 +426,30 @@ async function validateFrontmatterDirectory({
   }
 
   return issues;
+}
+
+async function validateExperimentStorageLayout(
+  vaultRoot: string,
+): Promise<ValidationIssue[]> {
+  try {
+    return (await scanExperimentStorage(vaultRoot))
+      .filter((entry) => entry.entryKind !== "file" || entry.fileKind === "unsupported")
+      .map((entry) => validationIssue(
+        "EXPERIMENT_STORAGE_INVALID",
+        entry.entryKind === "symlink"
+          ? "Experiment storage may not contain symbolic links."
+          : entry.entryKind === "special"
+            ? "Experiment storage may contain only regular files."
+            : "Experiment storage accepts only direct slug-named Markdown documents and direct JSON outcome records under the reserved outcomes directory.",
+        entry.relativePath,
+      ));
+  } catch (error) {
+    return [validationIssue(
+      error instanceof VaultError ? error.code : "EXPERIMENT_STORAGE_INVALID",
+      error instanceof Error ? error.message : String(error),
+      VAULT_LAYOUT.experimentsDirectory,
+    )];
+  }
 }
 
 async function validateJsonFile({
@@ -519,6 +575,9 @@ async function validateJsonlValidationFamily(
   vaultRoot: string,
   family: VaultJsonlValidationFamilyDescriptor,
 ): Promise<ValidationIssue[]> {
+  if (family.id === "integrationIngests") {
+    return validateIntegrationIngestValidationFamily(vaultRoot, family);
+  }
   const postValidateRecord = resolveJsonlFamilyPostValidator(vaultRoot, family.id);
   return validateJsonlFamily({
     vaultRoot,
@@ -527,6 +586,27 @@ async function validateJsonlValidationFamily(
     code: family.validation.issueCode,
     postValidateRecord,
   });
+}
+
+async function validateIntegrationIngestValidationFamily(
+  vaultRoot: string,
+  family: VaultJsonlValidationFamilyDescriptor,
+): Promise<ValidationIssue[]> {
+  try {
+    await readIntegrationIngestEntries(vaultRoot);
+    return [];
+  } catch (error) {
+    const relativePath = error instanceof VaultError && typeof error.details.relativePath === "string"
+      ? error.details.relativePath
+      : family.directory;
+    return [
+      validationIssue(
+        error instanceof VaultError ? error.code : family.validation.issueCode,
+        error instanceof Error ? error.message : String(error),
+        relativePath,
+      ),
+    ];
+  }
 }
 
 export async function validateJsonlRecordAgainstVault(input: {
@@ -1135,6 +1215,8 @@ export async function validateVault({ vaultRoot }: LoadVaultInput = {}): Promise
   for (const family of VAULT_FRONTMATTER_FAMILIES) {
     issues.push(...(await validateFrontmatterFamily(absoluteRoot, family)));
   }
+
+  issues.push(...(await validateExperimentStorageLayout(absoluteRoot)));
 
   for (const family of VAULT_JSON_VALIDATION_FAMILIES) {
     if (family.relativePath === VAULT_LAYOUT.metadata) {

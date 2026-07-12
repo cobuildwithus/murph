@@ -20,10 +20,12 @@ import {
 import {
   upsertAssistantInputEvent,
 } from "@murphai/assistant-engine";
+import {
+  withCanonicalWriteLock,
+} from "@murphai/core";
 
 import {
   type HostedRuntimePlatform,
-  type RuntimeWakeNotification,
   type HostedWorkspaceRuntimeJobOptions,
 } from "../src/hosted-runtime.ts";
 import {
@@ -81,8 +83,16 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     });
 
     await expect(options.createCheckpointSnapshot(
+      createCheckpointInput("import"),
+    )).rejects.toThrow(
+      "Hosted workspace snapshot construction is idle-shutdown only.",
+    );
+    await expect(options.createCheckpointSnapshot(
+      // @ts-expect-error Intentionally verifies the JavaScript boundary fails closed.
       createCheckpointInput("canonical_runtime_commit"),
-    )).rejects.toThrow("Hosted workspace snapshot construction is idle-shutdown only.");
+    )).rejects.toThrow(
+      "Hosted workspace snapshot construction is idle-shutdown only.",
+    );
 
     expect(calls.startSnapshotSession).not.toHaveBeenCalled();
     expect(calls.putSnapshotObjectDirect).not.toHaveBeenCalled();
@@ -201,35 +211,6 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     }
   }
 
-  for (const wakeCallIndex of [1, 2]) {
-    it(`interrupts checkpoint publication when runtime wake is pending on check ${wakeCallIndex}`, async () => {
-      const vaultRoot = await createVaultRoot();
-      const { calls, platform } = createRuntimePlatform();
-      let wakeReadCount = 0;
-      const wakeNotification = { notifiedAtEpochMs: 1_777_010_000_000 + wakeCallIndex };
-      const consumePendingRuntimeWake = vi.fn(() => {
-        wakeReadCount += 1;
-        return wakeReadCount === wakeCallIndex ? wakeNotification : null;
-      });
-      const options = createBridgeOptions({
-        consumePendingRuntimeWake,
-        platform,
-        vaultRoot,
-      });
-
-      await expect(options.createCheckpointSnapshot(
-        createCheckpointInput("idle_shutdown"),
-      )).rejects.toMatchObject({
-        notification: wakeNotification,
-      });
-
-      expect(consumePendingRuntimeWake).toHaveBeenCalledTimes(wakeCallIndex);
-      expect(calls.putSnapshotObjectDirect).toHaveBeenCalledOnce();
-      expect(calls.completeSnapshotSession).not.toHaveBeenCalled();
-      expect(calls.abortSnapshotSession).toHaveBeenCalledOnce();
-    });
-  }
-
   it("aborts the snapshot session when archive construction fails before checkpoint", async () => {
     const vaultRoot = await createVaultRoot();
     const { calls, platform } = createRuntimePlatform();
@@ -299,6 +280,73 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     expect(calls.putSnapshotObjectDirect).toHaveBeenCalledOnce();
     expect(calls.completeSnapshotSession).toHaveBeenCalledOnce();
     expect(calls.abortSnapshotSession).not.toHaveBeenCalled();
+  });
+
+  it("holds the canonical write lock through snapshot publication", async () => {
+    const vaultRoot = await createVaultRoot();
+    const { calls, platform } = createRuntimePlatform();
+    let signalArchiveStarted: () => void = () => undefined;
+    const archiveStarted = new Promise<void>((resolve) => {
+      signalArchiveStarted = resolve;
+    });
+    let releaseArchive: () => void = () => undefined;
+    const archiveBlocked = new Promise<void>((resolve) => {
+      releaseArchive = resolve;
+    });
+    const baseArchiveBuilder = createSnapshotArchiveBuilder();
+    const snapshotArchiveBuilder: HostedWorkspaceSnapshotArchiveBuilder = {
+      buildEncryptedSnapshot: vi.fn(async (input) => {
+        signalArchiveStarted();
+        await archiveBlocked;
+        return await baseArchiveBuilder.buildEncryptedSnapshot(input);
+      }),
+    };
+    let signalPublicationStarted: () => void = () => undefined;
+    const publicationStarted = new Promise<void>((resolve) => {
+      signalPublicationStarted = resolve;
+    });
+    let releasePublication: () => void = () => undefined;
+    const publicationBlocked = new Promise<void>((resolve) => {
+      releasePublication = resolve;
+    });
+    calls.completeSnapshotSession.mockImplementationOnce(async (input) => {
+      signalPublicationStarted();
+      await publicationBlocked;
+      return {
+        checkpoint: createCheckpointResponse({
+          snapshotRef: input.ref,
+          userId: TEST_REQUEST.userId,
+          version: TEST_REQUEST.workspaceVersion,
+        }),
+        snapshotRef: input.ref,
+      };
+    });
+    const options = createBridgeOptions({
+      platform,
+      snapshotArchiveBuilder,
+      vaultRoot,
+    });
+
+    const snapshot = options.createCheckpointSnapshot(
+      createCheckpointInput("idle_shutdown"),
+    );
+    await archiveStarted;
+
+    let canonicalWriterEntered = false;
+    const canonicalWrite = withCanonicalWriteLock(vaultRoot, async () => {
+      canonicalWriterEntered = true;
+    });
+    await new Promise<void>((resolve) => setTimeout(resolve, 25));
+    expect(canonicalWriterEntered).toBe(false);
+
+    releaseArchive();
+    await publicationStarted;
+    expect(canonicalWriterEntered).toBe(false);
+
+    releasePublication();
+    await snapshot;
+    await canonicalWrite;
+    expect(canonicalWriterEntered).toBe(true);
   });
 
   it("carries idle checkpoint trigger metadata through the production bridge snapshot path", async () => {
@@ -372,6 +420,23 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
       status: "staged",
       updatedAt: "2026-06-01T00:00:00.000Z",
     });
+    const uncheckpointedCommittedOperationPath = await writeOperationRecord(vaultRoot, {
+      operationId: "op_uncheckpointed_committed",
+      status: "committed",
+      updatedAt: "2026-06-10T00:00:00.000Z",
+    });
+    const uncheckpointedCommittedStageRoot =
+      ".runtime/operations/op_uncheckpointed_committed";
+    const uncheckpointedCommittedPayloadPath =
+      `${uncheckpointedCommittedStageRoot}/payloads/residue.txt`;
+    await mkdir(path.join(vaultRoot, uncheckpointedCommittedStageRoot, "payloads"), {
+      recursive: true,
+    });
+    await writeFile(
+      path.join(vaultRoot, uncheckpointedCommittedPayloadPath),
+      "uncheckpointed residue\n",
+      "utf8",
+    );
     const request = createInvocationRequestWithWorkspaceCheckpoint("2026-06-10T00:00:00.000Z");
     const options = createBridgeOptions({
       platform,
@@ -388,9 +453,13 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     expect(archiveEntries.some((entry) => entry.relativePath === staleOperationPaths.oldest)).toBe(false);
     expect(archiveEntries.some((entry) => entry.relativePath === staleOperationPaths.newest)).toBe(true);
     expect(archiveEntries.some((entry) => entry.relativePath === activeOperationPath)).toBe(true);
+    expect(archiveEntries.some((entry) => entry.relativePath === uncheckpointedCommittedOperationPath)).toBe(true);
+    expect(archiveEntries.some((entry) => entry.relativePath === uncheckpointedCommittedPayloadPath)).toBe(true);
     await expectMissing(path.join(vaultRoot, staleOperationPaths.oldest));
     await expectPresent(path.join(vaultRoot, staleOperationPaths.newest));
     await expectPresent(path.join(vaultRoot, activeOperationPath));
+    await expectPresent(path.join(vaultRoot, uncheckpointedCommittedOperationPath));
+    await expectPresent(path.join(vaultRoot, uncheckpointedCommittedStageRoot));
   });
 
   it("prunes settled assistant runtime residue before v2 snapshot archive planning", async () => {
@@ -512,7 +581,6 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
 });
 
 function createBridgeOptions(input: {
-  consumePendingRuntimeWake?: () => RuntimeWakeNotification | null;
   mailboxPayloadDecoder?: HostedWorkspaceMailboxPayloadDecoder;
   platform: HostedRuntimePlatform;
   readCurrentLease?: HostedRuntimeBridgeReadCurrentLease;
@@ -522,7 +590,6 @@ function createBridgeOptions(input: {
 }): HostedWorkspaceRuntimeJobOptions {
   const request = input.request ?? TEST_REQUEST;
   return createHostedWorkspaceRuntimeBridgeJobOptions({
-    consumePendingRuntimeWake: input.consumePendingRuntimeWake,
     decodeMailboxPayload: input.mailboxPayloadDecoder ?? createMailboxPayloadDecoder({
       status: "decoded",
       wake: createMemberChannelsWake(),
@@ -706,8 +773,8 @@ function createLease(
   };
 }
 
-function createCheckpointInput(
-  reason: "canonical_runtime_commit" | "idle_shutdown" = "idle_shutdown",
+function createCheckpointInput<const Reason extends HostedWorkspaceCheckpointRequest["reason"]>(
+  reason: Reason,
 ) {
   const state = {
     recentStatuses: [],

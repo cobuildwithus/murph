@@ -11,12 +11,25 @@ import {
   ASSISTANT_USAGE_SCHEMA,
   type AssistantUsageRecord,
 } from "../src/assistant-usage.ts";
+import {
+  HOSTED_ASSISTANT_MODEL_OVERRIDES,
+  HOSTED_ASSISTANT_PRODUCT_MODELS,
+  HOSTED_ASSISTANT_SOL_MODEL,
+  HOSTED_ASSISTANT_TERRA_MODEL,
+  isHostedAssistantProductModel,
+  parseHostedAssistantModelOverride,
+} from "../src/assistant-model.ts";
 
 import {
   HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA,
   HOSTED_MAILBOX_PAYLOAD_SCHEMA,
   HOSTED_MAILBOX_KINDS,
   HOSTED_MAILBOX_LANES,
+  HOSTED_CANONICAL_WRITE_RECEIPT_LOG_BYTE_SIZE_STATUS_KEY,
+  HOSTED_CANONICAL_WRITE_RECEIPT_LOG_SHA_STATUS_KEY,
+  HOSTED_CANONICAL_WRITE_RECEIPT_RECOVERY_PRIOR_WAKE_AT_STATUS_KEY,
+  HOSTED_CANONICAL_WRITE_RECEIPT_RECOVERY_PRIOR_WAKE_REASON_STATUS_KEY,
+  HOSTED_CANONICAL_WRITE_RECEIPT_RECOVERY_STATUS_KEY,
   HOSTED_RUNTIME_LOG_EVENT_CODES,
   HOSTED_RUNTIME_ORCHESTRATION_LATENCY_DIAGNOSTICS_HEADER,
   HOSTED_WORKSPACE_CHECKPOINT_REASONS,
@@ -26,6 +39,8 @@ import {
   buildHostedAiUsageAllowDecisionBody,
   isHostedMailboxKind,
   isHostedMailboxLane,
+  isHostedRuntimeFutureMailboxContinuation,
+  isHostedRuntimeMailboxContinuation,
   normalizeHostedAiUsageAllowanceElevenLabsTtsModelId,
   normalizeHostedAiUsageAllowanceOpenAiImageModelId,
   normalizeHostedAiUsageAllowancePricedModelId,
@@ -71,6 +86,63 @@ import {
 } from "../src/parsers.ts";
 
 describe("hosted runtime control contracts", () => {
+  it("classifies typed and retryable mailbox continuations", () => {
+    expect(isHostedRuntimeMailboxContinuation({
+      nextWakeAt: "2026-04-27T00:00:15.000Z",
+      nextWakeReason: "mailbox",
+    })).toBe(true);
+    expect(isHostedRuntimeMailboxContinuation({
+      nextWakeAt: "2026-04-27T00:00:05.000Z",
+      nextWakeReason: "assistant",
+      redactedStatus: {
+        hostedMailboxRetryableBlockedCount: 1,
+      },
+    })).toBe(true);
+    expect(isHostedRuntimeMailboxContinuation({
+      nextWakeAt: "2026-04-27T00:00:05.000Z",
+      nextWakeReason: "assistant",
+      redactedStatus: {
+        hostedMailboxRetryableBlockedCount: 0,
+      },
+    })).toBe(false);
+    expect(() => isHostedRuntimeMailboxContinuation({
+      nextWakeAt: "2026-04-27T00:00:05.000Z",
+      redactedStatus: {
+        hostedMailboxRetryableBlockedCount: -1,
+      },
+    })).toThrow(/must be a non-negative integer/u);
+    expect(() => isHostedRuntimeMailboxContinuation({
+      nextWakeAt: "2026-04-27T00:00:05.000Z",
+      redactedStatus: {
+        hostedMailboxRetryableBlockedCount: false,
+      },
+    })).toThrow(/must be a non-negative integer/u);
+  });
+
+  it("classifies only future mailbox continuations for retry deferral", () => {
+    const nowMs = Date.parse("2026-04-27T00:00:10.000Z");
+
+    expect(isHostedRuntimeFutureMailboxContinuation({
+      nextWakeAt: "2026-04-27T00:00:15.000Z",
+      nextWakeReason: "mailbox",
+    }, nowMs)).toBe(true);
+    expect(isHostedRuntimeFutureMailboxContinuation({
+      nextWakeAt: "2026-04-27T00:00:10.000Z",
+      nextWakeReason: "mailbox",
+    }, nowMs)).toBe(false);
+    expect(isHostedRuntimeFutureMailboxContinuation({
+      nextWakeAt: "2026-04-27T00:00:15.000Z",
+      nextWakeReason: "assistant",
+    }, nowMs)).toBe(false);
+    expect(isHostedRuntimeFutureMailboxContinuation({
+      nextWakeAt: new Date("2026-04-27T00:00:15.000Z"),
+      nextWakeReason: "assistant",
+      redactedStatus: {
+        hostedMailboxRetryableBlockedCount: 1,
+      },
+    }, nowMs)).toBe(true);
+  });
+
   it("signs hosted AI usage allow decisions over the canonical decision body", async () => {
     const body = buildHostedAiUsageAllowDecisionBody({
       expiresAt: "2026-04-27T00:00:30.000Z",
@@ -142,9 +214,6 @@ describe("hosted runtime control contracts", () => {
     expect(HOSTED_RUNTIME_LOG_EVENT_CODES).toContain("device-sync.legacy_platform_env_present");
     expect(HOSTED_RUNTIME_LOG_EVENT_CODES).toContain("device-sync.module_load_failed");
     expect(HOSTED_RUNTIME_LOG_EVENT_CODES).toContain("device-sync.wake_projection_failed");
-    expect(HOSTED_RUNTIME_LOG_EVENT_CODES).toContain("device-sync.reconnect_notice_created");
-    expect(HOSTED_RUNTIME_LOG_EVENT_CODES).toContain("device-sync.reconnect_notice_duplicate");
-    expect(HOSTED_RUNTIME_LOG_EVENT_CODES).toContain("device-sync.reconnect_notice_skipped");
     expect(HOSTED_RUNTIME_LOG_EVENT_CODES).toContain("checkpoint.cas_conflict");
     expect(HOSTED_RUNTIME_LOG_EVENT_CODES).toContain("checkpoint.optional_sidecar_degraded");
     expect(HOSTED_RUNTIME_LOG_EVENT_CODES).toContain("checkpoint.idle_shutdown_snapshot_skipped");
@@ -227,6 +296,24 @@ describe("hosted runtime control contracts", () => {
     expect(normalizeHostedAiUsageAllowancePricedModelId("gpt-image-2")).toBeNull();
     expect(normalizeHostedAiUsageAllowancePricedModelId("gpt-5.4-mini")).toBeNull();
     expect(normalizeHostedAiUsageAllowancePricedModelId("gpt-4.1-mini-2026-04-23")).toBeNull();
+  });
+
+  it("keeps the hosted assistant product models narrower than deploy pricing support", () => {
+    expect(HOSTED_ASSISTANT_PRODUCT_MODELS).toEqual([
+      HOSTED_ASSISTANT_TERRA_MODEL,
+      HOSTED_ASSISTANT_SOL_MODEL,
+    ]);
+    expect(HOSTED_ASSISTANT_MODEL_OVERRIDES).toEqual([
+      HOSTED_ASSISTANT_SOL_MODEL,
+    ]);
+    expect(isHostedAssistantProductModel(HOSTED_ASSISTANT_TERRA_MODEL)).toBe(true);
+    expect(isHostedAssistantProductModel(HOSTED_ASSISTANT_SOL_MODEL)).toBe(true);
+    expect(isHostedAssistantProductModel("gpt-5.6-luna")).toBe(false);
+    expect(parseHostedAssistantModelOverride(HOSTED_ASSISTANT_SOL_MODEL))
+      .toBe(HOSTED_ASSISTANT_SOL_MODEL);
+    expect(parseHostedAssistantModelOverride(HOSTED_ASSISTANT_TERRA_MODEL))
+      .toBeNull();
+    expect(parseHostedAssistantModelOverride(" gpt-5.6-sol ")).toBeNull();
   });
 
   it("normalizes OpenAI image usage priced model aliases separately", () => {
@@ -402,14 +489,22 @@ describe("hosted runtime control contracts", () => {
       status: "scheduled",
     });
     expect(parseHostedWorkspaceInvocationResult({
+      immediateRecheckRequested: true,
       nextWakeAt: "2026-04-26T00:00:05.000Z",
       nextWakeReason: "assistant",
       status: "idle",
     })).toEqual({
+      immediateRecheckRequested: true,
       nextWakeAt: "2026-04-26T00:00:05.000Z",
       nextWakeReason: "assistant",
       status: "idle",
     });
+    expect(() => parseHostedWorkspaceInvocationResult({
+      immediateRecheckRequested: false,
+      status: "idle",
+    })).toThrow(
+      "Hosted workspace invocation result immediateRecheckRequested must be true when present.",
+    );
     expect(() => parseHostedWorkspaceInvocationResult({
       idleShutdownCheckpointed: true,
       status: "idle",
@@ -1014,6 +1109,13 @@ describe("hosted runtime control contracts", () => {
         systemMailboxMaintenanceMs: 3,
         memberPreferencesPrePlanningMs: 4,
         automationBootstrapMs: 5,
+        outboxScanElapsedMs: 23,
+        outboxScanPerformed: true,
+        receiptScanBytesRead: 4_096,
+        receiptScanElapsedMs: 19,
+        receiptScanFilesRead: 12,
+        receiptScanLockWaitMs: 3,
+        receiptScanPerformed: false,
       },
       provider: {
         codexAppServerInitializeMs: 7,
@@ -1067,6 +1169,26 @@ describe("hosted runtime control contracts", () => {
           assistantInputIds: ["input_1"],
           at: "2026-04-26T00:00:01.000Z",
           phaseBreakdown: { schemaVersion: 1, provider: unsafeProvider },
+          providerRequestOrdinal: 0,
+          source: "linq",
+          type: "provider_started",
+        },
+      });
+      expect(parsed.event.type).toBe("provider_started");
+      expect("phaseBreakdown" in parsed.event).toBe(false);
+    }
+
+    for (const unsafePreProvider of [
+      { receiptScanPerformed: 1 }, // boolean leaf must stay boolean
+      { receiptScanBytesRead: -1 }, // counts must be non-negative
+      { outboxScanElapsedMs: "23" }, // durations must stay numeric
+      { receiptScanFilesRead: 12, receiptScanPath: 1 }, // arbitrary metadata is forbidden
+    ]) {
+      const parsed = parseHostedRuntimeLatencyTraceRequest({
+        event: {
+          assistantInputIds: ["input_1"],
+          at: "2026-04-26T00:00:01.000Z",
+          phaseBreakdown: { schemaVersion: 1, preProvider: unsafePreProvider },
           providerRequestOrdinal: 0,
           source: "linq",
           type: "provider_started",
@@ -1284,6 +1406,35 @@ describe("hosted runtime control contracts", () => {
       codexAppServerWarmReuseMs: 0,
       turnLockWaitMs: 2,
     });
+
+    const historyMerged = mergeHostedRuntimeLatencyPhaseBreakdownJson({
+      existing: {
+        schemaVersion: 1,
+        preProvider: {
+          outboxScanPerformed: true,
+          receiptScanBytesRead: -1,
+          receiptScanPath: 1,
+          receiptScanPerformed: "false",
+        },
+      },
+      incoming: {
+        schemaVersion: 1,
+        preProvider: {
+          outboxScanPerformed: false,
+          receiptScanBytesRead: 4_096,
+          receiptScanFilesRead: 12,
+          receiptScanPerformed: false,
+        },
+      },
+      phases: ["preProvider"],
+    });
+
+    expect(historyMerged.value.preProvider).toEqual({
+      outboxScanPerformed: true,
+      receiptScanBytesRead: 4_096,
+      receiptScanFilesRead: 12,
+      receiptScanPerformed: false,
+    });
   });
 
   it("sanitizes orchestration diagnostics with the package-owned phase schema", () => {
@@ -1366,11 +1517,29 @@ describe("hosted runtime control contracts", () => {
     });
     expect(parseHostedWorkspaceReadResponse({
       fetchedAt: "2026-04-26T00:00:02.000Z",
+      hostedAssistantModelOverride: HOSTED_ASSISTANT_SOL_MODEL,
       workspace: null,
     })).toEqual({
       fetchedAt: "2026-04-26T00:00:02.000Z",
+      hostedAssistantModelOverride: HOSTED_ASSISTANT_SOL_MODEL,
       workspace: null,
     });
+    for (const invalidOverride of [
+      null,
+      HOSTED_ASSISTANT_TERRA_MODEL,
+      "gpt-5.6-luna",
+      " gpt-5.6-sol ",
+      56,
+    ]) {
+      expect(parseHostedWorkspaceReadResponse({
+        fetchedAt: "2026-04-26T00:00:02.000Z",
+        hostedAssistantModelOverride: invalidOverride,
+        workspace: null,
+      })).toEqual({
+        fetchedAt: "2026-04-26T00:00:02.000Z",
+        workspace: null,
+      });
+    }
     expect(parseHostedWorkspaceCheckpointRequest({
       attemptId: "attempt_1",
       expectedWorkspaceVersion: "4",
@@ -1423,13 +1592,29 @@ describe("hosted runtime control contracts", () => {
     }
     expect(parseHostedWorkspaceCheckpointResponse({
       checkpointed: true,
+      conversationInputAhead: true,
       replacedSnapshotRef: null,
       workspace,
     })).toEqual({
       checkpointed: true,
+      conversationInputAhead: true,
       replacedSnapshotRef: null,
       workspace,
     });
+    expect(parseHostedWorkspaceCheckpointResponse({
+      checkpointed: true,
+      conversationInputAhead: false,
+      workspace,
+    })).toEqual({
+      checkpointed: true,
+      conversationInputAhead: false,
+      workspace,
+    });
+    expect(() => parseHostedWorkspaceCheckpointResponse({
+      checkpointed: true,
+      conversationInputAhead: null,
+      workspace,
+    })).toThrow(/conversationInputAhead must be a boolean/u);
     expect(parseHostedWorkspaceCheckpointResponse({
       checkpointConflictReason: "foreground_pending",
       checkpointed: false,
@@ -1457,13 +1642,17 @@ describe("hosted runtime control contracts", () => {
       schema: "murph.hosted-browser-vault-replica-ref.v1",
       sourceBundleHash: "snapshot_1_hash",
     };
-    expect(parseHostedBrowserVaultReplicaPublishRequest({
-      expectedSourceStateHash: "legacy_source_hash",
-      replicaRef,
-    })).toEqual({
-      expectedSourceStateHash: "legacy_source_hash",
+    expect(parseHostedBrowserVaultReplicaPublishRequest({ replicaRef })).toEqual({
       replicaRef,
     });
+    expect(() => parseHostedBrowserVaultReplicaPublishRequest({
+      replicaRef,
+      unexpectedField: true,
+    })).toThrow(/not allowed/u);
+    expect(() => parseHostedBrowserVaultReplicaPublishRequest({
+      expectedSourceStateHash: "snapshot_1_hash",
+      replicaRef,
+    })).toThrow(/expectedSourceStateHash is not allowed/u);
     expect(() => parseHostedBrowserVaultReplicaPublishRequest({
       replicaRef: {
         ...replicaRef,
@@ -1527,6 +1716,43 @@ describe("hosted runtime control contracts", () => {
       reason: "canonical_runtime_commit",
       snapshotRef: null,
     });
+  });
+
+  it("reserves canonical receipt protocol fields outside the ordinary status budget", () => {
+    const ordinaryStatus = Object.fromEntries(
+      Array.from({ length: 96 }, (_, index) => [`diagnostic${index}Count`, index]),
+    );
+    const receiptStatus = {
+      ...ordinaryStatus,
+      [HOSTED_CANONICAL_WRITE_RECEIPT_LOG_BYTE_SIZE_STATUS_KEY]: 1,
+      [HOSTED_CANONICAL_WRITE_RECEIPT_LOG_SHA_STATUS_KEY]: "a".repeat(64),
+    };
+    const recoveryStatus = {
+      ...receiptStatus,
+      [HOSTED_CANONICAL_WRITE_RECEIPT_RECOVERY_PRIOR_WAKE_AT_STATUS_KEY]:
+        "2099-07-09T00:00:00.000Z",
+      [HOSTED_CANONICAL_WRITE_RECEIPT_RECOVERY_PRIOR_WAKE_REASON_STATUS_KEY]:
+        "assistant",
+      [HOSTED_CANONICAL_WRITE_RECEIPT_RECOVERY_STATUS_KEY]: "pending",
+    };
+    const request = {
+      attemptId: "attempt_receipt_recovery_status_budget",
+      expectedWorkspaceVersion: "4",
+      leaseGeneration: "9",
+      reason: "idle_shutdown",
+      redactedStatus: recoveryStatus,
+      snapshotRef: null,
+    };
+
+    expect(parseHostedWorkspaceCheckpointRequest(request).redactedStatus)
+      .toEqual(recoveryStatus);
+    expect(() => parseHostedWorkspaceCheckpointRequest({
+      ...request,
+      redactedStatus: {
+        ...recoveryStatus,
+        overflowCount: 1,
+      },
+    })).toThrow(/at most 96 fields/u);
   });
 
   it("keeps runtime logs structured and privacy-bounded", () => {
@@ -1647,17 +1873,7 @@ describe("hosted runtime control contracts", () => {
         nestedErrorCode: "runtime_error",
       },
     }).errorCode).toBe("post_checkpoint_failed");
-    expect(parseHostedRuntimeLogEntry({
-      ...entry,
-      component: "runner",
-      errorCode: "runner_child_failed",
-      eventCode: "runner.accepted_attempt_failed",
-      level: "warn",
-      phase: "error",
-      redactedJson: {
-        attemptStillActive: true,
-      },
-    })).toEqual({
+    const acceptedAttemptFailureEntry = {
       ...entry,
       component: "runner",
       errorCode: "runner_child_failed",
@@ -1668,7 +1884,16 @@ describe("hosted runtime control contracts", () => {
         attemptStillActive: true,
         safeErrorMessage: "Hosted runtime accepted attempt failed.",
       },
-    });
+    };
+    expect(parseHostedRuntimeLogEntry(acceptedAttemptFailureEntry)).toEqual(
+      acceptedAttemptFailureEntry,
+    );
+    expect(() => parseHostedRuntimeLogEntry({
+      ...acceptedAttemptFailureEntry,
+      redactedJson: {
+        attemptStillActive: true,
+      },
+    })).toThrow(/redacted safe error message/u);
     const computerToolFailureEntry = {
       ...entry,
       component: "assistant",
@@ -2165,13 +2390,17 @@ describe("hosted runtime control contracts", () => {
       level: "info",
       phase: "outbox",
     }).eventCode).toBe("outbox.delivery_finished");
-    expect(parseHostedRuntimeLogEntry({
-      at: "2026-04-26T00:00:07.000Z",
-      component: "workspace",
-      eventCode: "workspace.codex_continuity_repaired",
-      level: "warn",
-      phase: "restore",
-    }).eventCode).toBe("workspace.codex_continuity_repaired");
+    for (const retiredEventCode of [
+      "workspace.codex_continuity_repaired",
+      "device-sync.reconnect_notice_created",
+      "device-sync.reconnect_notice_duplicate",
+      "device-sync.reconnect_notice_skipped",
+    ]) {
+      expect(() => parseHostedRuntimeLogEntry({
+        ...entry,
+        eventCode: retiredEventCode,
+      })).toThrow(/Hosted runtime log eventCode/u);
+    }
   });
 
   it("parses runner nudge and status without run identifiers or committed sequence targets", () => {

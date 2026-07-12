@@ -495,7 +495,7 @@ describe('assistant store persistence seams', () => {
       updatedAt: '2026-04-08T00:07:00.000Z',
     }), null)
 
-    await expect(readAssistantIndexStore(paths, { fresh: true })).resolves.toEqual({
+    await expect(readAssistantIndexStore(paths)).resolves.toEqual({
       version: 1,
       aliases: {
         external: 'session-external',

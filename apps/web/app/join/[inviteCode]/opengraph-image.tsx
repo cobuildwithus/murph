@@ -6,21 +6,25 @@ import {
   OG_CONTENT_TYPE,
   OG_SIZE,
 } from "../../_og/og-shared";
+import {
+  MURPH_TAGLINE_LINE_1,
+  MURPH_TAGLINE_LINE_2,
+} from "@/src/lib/site-metadata";
 
 export const alt = "You’re invited to Murph.";
 export const size = OG_SIZE;
 export const contentType = OG_CONTENT_TYPE;
 
 export default async function JoinInviteOGImage() {
-  const { fonts, heroDataUri } = await loadMurphHeroOgAssets();
+  const { fonts, logoDataUri } = await loadMurphHeroOgAssets();
 
   return new ImageResponse(
     (
       <MurphHeroOg
-        heroDataUri={heroDataUri}
+        logoDataUri={logoDataUri}
         eyebrow="MURPH"
         headline="You’re invited."
-        subtext="Your personal health assistant. See what actually makes you healthier."
+        subtext={`${MURPH_TAGLINE_LINE_1} ${MURPH_TAGLINE_LINE_2}`}
       />
     ),
     { ...OG_SIZE, fonts }

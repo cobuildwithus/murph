@@ -49,7 +49,6 @@
     "health-commons:generate": "node scripts/ensure-health-commons-generated.mjs",
     "health-commons:generate:watch": "node scripts/watch-health-commons-generated.mjs",
     "test:scenario-integrity": "tsx e2e/smoke/verify-scenario-integrity.ts",
-    "test:smoke": "pnpm test:scenario-integrity",
     "verify:cli": "bash scripts/workspace-verify.sh verify:cli",
     "hosted-crypto:guard": "node scripts/check-hosted-crypto-hardcut.mjs",
     "hosted-temporal:guard": "tsx scripts/check-hosted-temporal-orchestration-guards.ts",
@@ -86,7 +85,7 @@
   },
   "devDependencies": {
     "@cobuild/repo-tools": "^0.1.15",
-    "@cobuild/review-gpt": "^0.5.100",
+    "@cobuild/review-gpt": "^0.5.104",
     "@murphai/hosted-local-harness": "workspace:*",
     "@murphai/health-metrics": "workspace:*",
     "@types/node": "^25.6.2",

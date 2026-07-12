@@ -9,6 +9,10 @@ import type {
 } from '@murphai/hosted-execution/contracts'
 import { normalizeNullableString } from '@murphai/operator-config/text/shared'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
+import {
+  readHostedCanonicalWritePort,
+  withHostedCanonicalWritePort,
+} from '@murphai/core'
 
 import type {
   AssistantResponseMedia,
@@ -29,7 +33,7 @@ import {
   extractCodexSessionId,
   extractCodexStatusEventFromStderrLine,
   extractCodexTraceUpdatesFromNormalized,
-  extractCodexCurrentChannelProgressTextFromNormalized,
+  extractCodexContextCompactionProgressTextFromNormalized,
   normalizeCodexEvent,
   normalizeStreamingText,
 } from './assistant-codex-events.js'
@@ -136,7 +140,6 @@ import type {
 import type {
   AssistantProgressDelivery,
   AssistantProgressDeliveryResult,
-  AssistantProgressDeliverySource,
   AssistantTurnProductFeedbackRecorder,
 } from './assistant/turn-progress.js'
 
@@ -387,28 +390,6 @@ async function waitForCodexProgressDrain(
   await Promise.allSettled(pending)
 }
 
-function resolveCodexCurrentChannelProgressSource(
-  normalizedEvent: CodexNormalizedEvent,
-): AssistantProgressDeliverySource | null {
-  if (
-    normalizedEvent.kind === 'assistant_message' &&
-    normalizedEvent.itemState === 'completed' &&
-    normalizedEvent.messagePhase === 'commentary'
-  ) {
-    return 'model'
-  }
-
-  if (
-    normalizedEvent.kind === 'status_item' &&
-    normalizedEvent.itemType === 'context.compaction' &&
-    normalizedEvent.itemState === 'running'
-  ) {
-    return 'system'
-  }
-
-  return null
-}
-
 export interface CodexAppServerTurnInput {
   allowFinishWithoutReply?: boolean | null
   allowMessageReactions?: boolean | null
@@ -523,10 +504,12 @@ export interface CodexAppServerTurnResult {
     reaction: MurphDynamicToolReactionPatch['reaction']
   }[]
   // Completed final-phase agent messages that were followed by a steered user
-  // message and later superseded by another final message in the same turn, in
-  // completion order. Empty unless the turn was steered after the model had
+  // message and later superseded by another response segment in the same turn,
+  // in completion order. Empty unless the turn was steered after the model had
   // already finished an answer.
   precedingAgentMessageSegments: readonly CodexAppServerResponseSegment[]
+  /** Accepted-input ordinal whose delivery context owns the selected final reply. */
+  responseDeliveryContextOrdinal?: number
   additionalUsages: AssistantProviderUsageDraft[]
   responseMedia: AssistantResponseMedia[]
   jsonEvents: unknown[]
@@ -579,6 +562,19 @@ export function buildCodexAppServerSteerRequest(
     method: 'turn/steer',
     params: buildCodexTurnSteerParams(input),
   }
+}
+
+function appendRequiredComputerHandoffUrl(
+  message: string,
+  handoffUrl: string,
+): string {
+  const normalizedMessage = normalizeNullableString(message)
+  if (normalizedMessage?.includes(handoffUrl)) {
+    return normalizedMessage
+  }
+  return normalizedMessage
+    ? `${normalizedMessage}\n\nTake over here: ${handoffUrl}`
+    : `Take over here: ${handoffUrl}`
 }
 
 export async function executeCodexAppServerTurn(
@@ -2259,6 +2255,7 @@ async function runCodexAppServerTurnOnProcess(
   codexProcess: CodexAppServerProcess,
   input: CodexAppServerPreparedTurnInput,
 ): Promise<CodexAppServerTurnResult> {
+  const hostedCanonicalWritePort = readHostedCanonicalWritePort()
   let stdout = ''
   let stderr = ''
   let settled = false
@@ -2269,17 +2266,14 @@ async function runCodexAppServerTurnOnProcess(
   let codexThreadId = normalizeNullableString(input.resumeSessionId) ?? null
   let turnId: string | null = null
   const isReusedWarmProcess = codexProcess.initializedForRpc
-  let lastAgentMessage: string | null = null
   // Completed final-phase agent messages that were followed by a steered
-  // user-message item and then superseded by a newer final message in the
-  // same turn. A closed segment is held as a candidate until a later final
-  // appears; if the turn ends at the steer boundary, that segment remains the
-  // final reply rather than a preceding duplicate.
+  // user-message item and then superseded by a newer response segment in the
+  // same turn. A closed segment is held as a candidate until newer text or
+  // media appears; if the turn ends at the steer boundary, that segment remains
+  // the final reply rather than a preceding duplicate.
   const precedingAgentMessageSegments: CodexAppServerResponseSegment[] = []
   let completedFinalAgentMessage: string | null = null
   let trailingSteerCandidate: CodexAppServerResponseSegment | null = null
-  let trailingSteerCandidateDeliveryContextOrdinal: number | null = null
-  let trailingSteerCandidateMedia: AssistantResponseMedia[] | null = null
   let completedUserMessageOrdinal = -1
   let lastEventError: string | null = null
   let lastEventErrorInfo: CodexStructuredErrorInfo | null = null
@@ -2308,6 +2302,7 @@ async function runCodexAppServerTurnOnProcess(
   const jsonEvents: unknown[] = []
   const runtimeIssueInputs: AssistantRuntimeIssueInput[] = []
   let computerToolsLockedAfterUserPause = false
+  let requiredComputerHandoffUrl: string | null = null
   const actionDiagnostics = input.onTraceEvent
     ? createCodexActionDiagnosticsReducer()
     : null
@@ -2682,6 +2677,35 @@ async function runCodexAppServerTurnOnProcess(
     )
   }
 
+  const removeAssistantTraceUpdateFromFinalFallback = (
+    update: AssistantProviderTraceUpdate,
+  ): void => {
+    if (update.kind !== 'assistant') {
+      return
+    }
+
+    const streamKey = normalizeAssistantTraceStreamKey(update)
+    assistantStreams.delete(streamKey)
+    const streamOrderIndex = assistantStreamOrder.indexOf(streamKey)
+    if (streamOrderIndex >= 0) {
+      assistantStreamOrder.splice(streamOrderIndex, 1)
+    }
+  }
+
+  // App-server events mutate this state inside the asynchronous message
+  // handler, so finalization reads it through an explicitly typed boundary.
+  const readTrailingSteerCandidate = (): CodexAppServerResponseSegment | null =>
+    trailingSteerCandidate
+
+  const promoteTrailingSteerCandidate = (): void => {
+    if (!trailingSteerCandidate) {
+      return
+    }
+
+    precedingAgentMessageSegments.push(trailingSteerCandidate)
+    trailingSteerCandidate = null
+  }
+
   const notifyProviderRequestStarted = () => {
     if (providerRequestStartedNotified) {
       return
@@ -2720,48 +2744,41 @@ async function runCodexAppServerTurnOnProcess(
       })
   }
 
-  const notifyCurrentChannelProgress = (
+  const notifyContextCompactionProgress = (
     deliveryContextOrdinal: number,
     text: string,
-    source: AssistantProgressDeliverySource,
   ): boolean => {
     const progressDelivery = resolveCodexAppServerProgressDelivery(input)
     if (
       !progressDelivery ||
-      (source === 'system' &&
-        (contextCompactionProgressNotified || contextCompactionProgressPending))
+      contextCompactionProgressNotified ||
+      contextCompactionProgressPending
     ) {
       return false
     }
 
     let progressPromise: Promise<AssistantProgressDeliveryResult>
     try {
-      if (source === 'system') {
-        contextCompactionProgressPending = true
-      }
+      contextCompactionProgressPending = true
       progressPromise = progressDelivery.send(text, {
-        ...(source === 'system' ? { required: true } : {}),
-        source,
+        required: true,
+        source: 'system',
       })
     } catch {
-      if (source === 'system') {
-        contextCompactionProgressPending = false
-      }
+      contextCompactionProgressPending = false
       return false
     }
-    if (source === 'system') {
-      progressPromise = progressPromise.then((result) => {
-        if (result.kind === 'sent') {
-          contextCompactionProgressNotified = true
-        } else {
-          contextCompactionProgressPending = false
-        }
-        return result
-      }, (error: unknown) => {
+    progressPromise = progressPromise.then((result) => {
+      if (result.kind === 'sent') {
+        contextCompactionProgressNotified = true
+      } else {
         contextCompactionProgressPending = false
-        throw error
-      })
-    }
+      }
+      return result
+    }, (error: unknown) => {
+      contextCompactionProgressPending = false
+      throw error
+    })
     trackProgressDelivery(
       trackExternallyVisibleProgressDelivery({
         deliveryContextOrdinal,
@@ -2837,6 +2854,8 @@ async function runCodexAppServerTurnOnProcess(
   }
 
   const canApplyNoReplyPatch = (deliveryContextOrdinal: number): boolean => {
+    const trailingSteerCandidateOrdinal =
+      trailingSteerCandidate?.deliveryContextOrdinal
     if (
       externallyVisibleAssistantOutputDeliveryContexts.has(deliveryContextOrdinal) ||
       hasPendingExternallyVisibleAssistantOutput(deliveryContextOrdinal)
@@ -2844,9 +2863,8 @@ async function runCodexAppServerTurnOnProcess(
       return false
     }
     if (
-      trailingSteerCandidate !== null &&
-      trailingSteerCandidateDeliveryContextOrdinal !== null &&
-      trailingSteerCandidateDeliveryContextOrdinal < deliveryContextOrdinal
+      typeof trailingSteerCandidateOrdinal === 'number' &&
+      trailingSteerCandidateOrdinal < deliveryContextOrdinal
     ) {
       return false
     }
@@ -3039,6 +3057,25 @@ async function runCodexAppServerTurnOnProcess(
 
     if (
       computerToolsLockedAfterUserPause &&
+      dynamicToolRequest.kind === 'finish-without-reply'
+    ) {
+      void tryWriteRpcMessage({
+        id: requestId,
+        result: {
+          success: false,
+          contentItems: [
+            {
+              type: 'inputText',
+              text: 'finish_without_reply is unavailable after pausing a computer run for the user',
+            },
+          ],
+        },
+      })
+      return
+    }
+
+    if (
+      computerToolsLockedAfterUserPause &&
       isComputerDynamicToolRequest(dynamicToolRequest)
     ) {
       void tryWriteRpcMessage({
@@ -3111,34 +3148,37 @@ async function runCodexAppServerTurnOnProcess(
       closeLiveTurn()
     }
 
-    const runDynamicTool = () => executeMurphDynamicToolRequest({
-      abortSignal: input.abortSignal
-        ? AbortSignal.any([input.abortSignal, dynamicToolAbortController.signal])
-        : dynamicToolAbortController.signal,
-      codexHome: input.codexHome ?? input.env.CODEX_HOME ?? null,
-      env: input.env,
-      fetchImpl: input.fetchImpl,
-      hostedGeneratedImageUploader: input.hostedGeneratedImageUploader,
-      hostedToolContext: resolveCodexAppServerHostedToolContext(input),
-      materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts ?? null,
-      currentResponseMedia: responseMedia,
-      nextUsageOrdinal: () => nextDynamicToolUsageOrdinal++,
-      productFeedbackRecorder: input.productFeedbackRecorder ?? null,
-      progressDelivery:
-        dynamicToolRequest.kind === 'send-progress-update'
-          ? dynamicToolProgressDelivery
-          : null,
-      publicFetchImpl: input.publicInternetFetch ?? null,
-      request: dynamicToolRequest,
-      requireHostedGeneratedImageUploader:
-        input.requireHostedGeneratedImageUploader ?? false,
-      vaultRoot: input.vaultRoot ?? null,
-      voiceMemoRuntime:
-        dynamicToolRequest.kind === 'generate-voice-memo' ||
-        dynamicToolRequest.kind === 'generate-song'
-          ? input.voiceMemoRuntime ?? null
-          : null,
-    }).then(async (result) => {
+    const runDynamicTool = () => withHostedCanonicalWritePort(
+      hostedCanonicalWritePort,
+      async () => await executeMurphDynamicToolRequest({
+        abortSignal: input.abortSignal
+          ? AbortSignal.any([input.abortSignal, dynamicToolAbortController.signal])
+          : dynamicToolAbortController.signal,
+        codexHome: input.codexHome ?? input.env.CODEX_HOME ?? null,
+        env: input.env,
+        fetchImpl: input.fetchImpl,
+        hostedGeneratedImageUploader: input.hostedGeneratedImageUploader,
+        hostedToolContext: resolveCodexAppServerHostedToolContext(input),
+        materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts ?? null,
+        currentResponseMedia: responseMedia,
+        nextUsageOrdinal: () => nextDynamicToolUsageOrdinal++,
+        productFeedbackRecorder: input.productFeedbackRecorder ?? null,
+        progressDelivery:
+          dynamicToolRequest.kind === 'send-progress-update'
+            ? dynamicToolProgressDelivery
+            : null,
+        publicFetchImpl: input.publicInternetFetch ?? null,
+        request: dynamicToolRequest,
+        requireHostedGeneratedImageUploader:
+          input.requireHostedGeneratedImageUploader ?? false,
+        vaultRoot: input.vaultRoot ?? null,
+        voiceMemoRuntime:
+          dynamicToolRequest.kind === 'generate-voice-memo' ||
+          dynamicToolRequest.kind === 'generate-song'
+            ? input.voiceMemoRuntime ?? null
+            : null,
+      }),
+    ).then(async (result) => {
       if (dynamicToolRequest.kind === 'send-progress-update') {
         releaseDynamicProgressPending?.()
       }
@@ -3147,6 +3187,9 @@ async function runCodexAppServerTurnOnProcess(
       }
       if (result.computerRunPausedForUser) {
         computerToolsLockedAfterUserPause = true
+      }
+      if (result.requiredComputerHandoffUrl) {
+        requiredComputerHandoffUrl = result.requiredComputerHandoffUrl
       }
       if (result.responseMediaPatch) {
         try {
@@ -3312,10 +3355,22 @@ async function runCodexAppServerTurnOnProcess(
     const deliveryContextOrdinal = currentDeliveryContextOrdinal()
     const suppressDeliveryContext =
       shouldSuppressDeliveryContext(deliveryContextOrdinal)
-    const updates = extractCodexTraceUpdatesFromNormalized(normalizedEvent)
+    const isCommentaryAssistantMessage =
+      normalizedEvent.kind === 'assistant_message' &&
+      normalizedEvent.messagePhase === 'commentary'
+    const rawUpdates = extractCodexTraceUpdatesFromNormalized(normalizedEvent)
+    const updates = rawUpdates
       .filter((update) => !(suppressDeliveryContext && update.kind === 'assistant'))
     for (const update of updates) {
       recordAssistantTraceUpdate(update, deliveryContextOrdinal)
+    }
+    if (isCommentaryAssistantMessage) {
+      // Commentary is internal progress, not a member-facing message. Remove
+      // its stream, including any earlier deltas for the same item, so a
+      // media-only response cannot reuse it as final reply text.
+      for (const update of rawUpdates) {
+        removeAssistantTraceUpdateFromFinalFallback(update)
+      }
     }
 
     if (
@@ -3335,32 +3390,22 @@ async function runCodexAppServerTurnOnProcess(
       }
     }
 
-    const progressDeliveryText =
-      extractCodexCurrentChannelProgressTextFromNormalized(normalizedEvent)
-    const progressDeliverySource = progressDeliveryText
-      ? resolveCodexCurrentChannelProgressSource(normalizedEvent)
-      : null
+    const contextCompactionProgressText =
+      extractCodexContextCompactionProgressTextFromNormalized(normalizedEvent)
     if (
-      progressDeliveryText &&
-      progressDeliverySource &&
+      contextCompactionProgressText &&
       !suppressDeliveryContext
     ) {
-      notifyCurrentChannelProgress(
+      notifyContextCompactionProgress(
         deliveryContextOrdinal,
-        progressDeliveryText,
-        progressDeliverySource,
+        contextCompactionProgressText,
       )
     }
 
     const completedFinalAgentMessageText =
       extractCodexCompletedFinalAgentMessageTextFromNormalized(normalizedEvent)
     if (completedFinalAgentMessageText !== null && !suppressDeliveryContext) {
-      if (trailingSteerCandidate) {
-        precedingAgentMessageSegments.push(trailingSteerCandidate)
-        trailingSteerCandidate = null
-        trailingSteerCandidateDeliveryContextOrdinal = null
-        trailingSteerCandidateMedia = null
-      }
+      promoteTrailingSteerCandidate()
       completedFinalAgentMessage = completedFinalAgentMessageText
     } else if (isCodexCompletedUserMessageItemFromNormalized(normalizedEvent)) {
       if (completedFinalAgentMessage !== null) {
@@ -3369,10 +3414,9 @@ async function runCodexAppServerTurnOnProcess(
           response: completedFinalAgentMessage,
           media: [...responseMedia],
         }
-        trailingSteerCandidateDeliveryContextOrdinal =
-          trailingSteerCandidate.deliveryContextOrdinal ?? 0
-        trailingSteerCandidateMedia = trailingSteerCandidate.media
         completedFinalAgentMessage = null
+        assistantStreams.clear()
+        assistantStreamOrder.length = 0
         responseMedia = []
       }
       completedUserMessageOrdinal += 1
@@ -3384,8 +3428,10 @@ async function runCodexAppServerTurnOnProcess(
         // A completed no-reply context must not leak later text progress.
       } else {
         if (progressEvent.kind === 'message') {
-          lastAgentMessage = progressEvent.text
-          if (input.onProgress && normalizeStreamingText(progressEvent.text)) {
+          if (
+            input.onProgress &&
+            normalizeStreamingText(progressEvent.text)
+          ) {
             markExternallyVisibleAssistantOutput(deliveryContextOrdinal)
           }
         }
@@ -3886,47 +3932,69 @@ async function runCodexAppServerTurnOnProcess(
     extractAssistantMessageFallback({
       assistantStreams,
       assistantStreamOrder,
-    }) ??
-    lastAgentMessage ??
-    ''
+    }) ?? ''
   const latestDeliveryContextOrdinal = Math.max(0, completedUserMessageOrdinal)
   const latestFinalActionPatch = resolveFinalActionPatch(
     latestDeliveryContextOrdinal,
   )
+  let finalTrailingSteerCandidate = readTrailingSteerCandidate()
+  const trailingSteerCandidateDeliveryContextOrdinal =
+    finalTrailingSteerCandidate?.deliveryContextOrdinal ?? null
   const trailingSteerCandidateFinalActionPatch =
     trailingSteerCandidateDeliveryContextOrdinal !== null
       ? resolveFinalActionPatch(trailingSteerCandidateDeliveryContextOrdinal)
       : null
   const suppressTrailingSteerCandidateForEarlierNoReply =
     latestFinalActionPatch === null &&
-    trailingSteerCandidate !== null &&
+    finalTrailingSteerCandidate !== null &&
     trailingSteerCandidateFinalActionPatch?.kind === 'none'
-  const finalPrecedingAgentMessageSegments =
-    latestFinalActionPatch?.kind === 'none' && trailingSteerCandidate
-      ? [...precedingAgentMessageSegments, trailingSteerCandidate]
-      : precedingAgentMessageSegments
+  const shouldPromoteTrailingSteerCandidate =
+    finalTrailingSteerCandidate !== null &&
+    (
+      latestFinalActionPatch?.kind === 'none' ||
+      (
+        !suppressTrailingSteerCandidateForEarlierNoReply &&
+        (
+          normalizeNullableString(extractedFinalMessage) !== null ||
+          responseMedia.length > 0
+        )
+      )
+    )
+  if (shouldPromoteTrailingSteerCandidate) {
+    promoteTrailingSteerCandidate()
+    finalTrailingSteerCandidate = null
+  }
+  const selectedFinalMessage =
+    finalTrailingSteerCandidate?.response ?? extractedFinalMessage
   const finalResponseMedia =
     latestFinalActionPatch?.kind === 'none'
       ? responseMedia
       : suppressTrailingSteerCandidateForEarlierNoReply
         ? responseMedia
-        : trailingSteerCandidateMedia ?? responseMedia
+        : finalTrailingSteerCandidate?.media ?? responseMedia
   const finalDeliveryContextOrdinal =
     latestFinalActionPatch?.kind === 'none'
       ? latestDeliveryContextOrdinal
       : suppressTrailingSteerCandidateForEarlierNoReply
         ? latestDeliveryContextOrdinal
-        : trailingSteerCandidateDeliveryContextOrdinal ??
+        : finalTrailingSteerCandidate?.deliveryContextOrdinal ??
           latestDeliveryContextOrdinal
   const finalActionPatch = resolveFinalActionPatch(finalDeliveryContextOrdinal)
-  const noReplySelected = finalActionPatch?.kind === 'none'
+  const noReplySelected =
+    finalActionPatch?.kind === 'none' && !requiredComputerHandoffUrl
   const finalAction: AssistantNoReplyDisposition | null = noReplySelected
     ? { kind: 'none' }
     : null
-  const finalMessage =
+  const modelFinalMessage =
     noReplySelected || suppressTrailingSteerCandidateForEarlierNoReply
       ? ''
-      : extractedFinalMessage
+      : selectedFinalMessage
+  const finalMessage = requiredComputerHandoffUrl
+    ? appendRequiredComputerHandoffUrl(
+        modelFinalMessage,
+        requiredComputerHandoffUrl,
+      )
+    : modelFinalMessage
   if (
     noReplySelected &&
     normalizeNullableString(extractedFinalMessage) !== null
@@ -3938,7 +4006,7 @@ async function runCodexAppServerTurnOnProcess(
       suppressedTextLength: extractedFinalMessage.length,
     })
   }
-  const filteredPrecedingAgentMessageSegments = finalPrecedingAgentMessageSegments
+  const filteredPrecedingAgentMessageSegments = precedingAgentMessageSegments
     .filter((segment) => !shouldSuppressDeliveryContext(
       segment.deliveryContextOrdinal,
     ))
@@ -3946,17 +4014,18 @@ async function runCodexAppServerTurnOnProcess(
     finalActionPatches.some((entry) => entry.patch.kind === 'none') ||
     suppressTrailingSteerCandidateForEarlierNoReply ||
     filteredPrecedingAgentMessageSegments.length !==
-      finalPrecedingAgentMessageSegments.length
+      precedingAgentMessageSegments.length
   const finalHasDeliverableOutput =
     normalizeNullableString(finalMessage) !== null ||
     (!noReplySelected && finalResponseMedia.length > 0)
 
   return {
     acceptedNoReplyDeliveryContextOrdinals:
-      listNoReplyFinalActionPatchOrdinals(),
+      requiredComputerHandoffUrl ? [] : listNoReplyFinalActionPatchOrdinals(),
     codexThreadHistoryUnsafe,
     finalAction,
-    finalActionExplicit: finalActionPatch !== null,
+    finalActionExplicit:
+      finalActionPatch !== null && !requiredComputerHandoffUrl,
     finalMessage,
     reactions: reactionPatches.map((entry) => ({
       deliveryContextOrdinal: entry.deliveryContextOrdinal,
@@ -3969,6 +4038,7 @@ async function runCodexAppServerTurnOnProcess(
       response: segment.response,
       media: [...segment.media],
     })),
+    responseDeliveryContextOrdinal: finalDeliveryContextOrdinal,
     additionalUsages: [...additionalUsages, ...buildSubagentUsageDrafts()],
     responseMedia: finalHasDeliverableOutput ? [...finalResponseMedia] : [],
     jsonEvents,

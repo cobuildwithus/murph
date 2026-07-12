@@ -40,7 +40,7 @@ export async function appendHostedWakeAndWakeWorker(input: {
   wakeResult: HostedRuntimeEnsureProcessingResponse;
 }> {
   const append = await appendHostedWake(input);
-  const wakeResult = await wakeHostedWorkerForLatestPendingWake({
+  const wakeResult = await ensureProcessingAfterSyntheticMailboxAppendForTest({
     harness: input.harness,
     timeoutMs: input.timeoutMs,
     userId: input.userId,
@@ -65,7 +65,7 @@ export async function appendHostedWake(input: {
   });
 }
 
-export async function wakeHostedWorker(input: {
+async function wakeHostedWorker(input: {
   harness: HostedLocalDevHarness;
   timeoutMs?: number;
   userId: string;
@@ -107,7 +107,7 @@ export async function wakeHostedWorker(input: {
   return parseHostedRuntimeEnsureProcessingResponse(await response.json());
 }
 
-export async function wakeHostedWorkerForLatestPendingWake(input: {
+export async function ensureProcessingAfterSyntheticMailboxAppendForTest(input: {
   harness: HostedLocalDevHarness;
   timeoutMs?: number;
   userId: string;

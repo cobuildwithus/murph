@@ -15,14 +15,15 @@ export {
 export const HOSTED_RUNTIME_TEMPORAL_DEFAULT_ADDRESS = "localhost:7233";
 export const HOSTED_RUNTIME_TEMPORAL_DEFAULT_NAMESPACE = "default";
 
-const HOSTED_RUNTIME_RECONCILIATION_FACTS_TIMEOUT_ENV =
-  "HOSTED_RUNTIME_RECONCILIATION_FACTS_TIMEOUT_MS";
-const HOSTED_RUNTIME_DEMAND_TIMEOUT_ENV = "HOSTED_RUNTIME_DEMAND_TIMEOUT_MS";
-const DEFAULT_HOSTED_RUNTIME_RECONCILIATION_FACTS_TIMEOUT_MS = 10_000;
-const MAX_HOSTED_RUNTIME_RECONCILIATION_FACTS_TIMEOUT_MS = 30_000;
 const MAX_HOSTED_RUNTIME_PROCESSING_TIMEOUT_MS = 30_000;
 const MAX_HOSTED_RUNTIME_PROCESSING_START_TO_CLOSE_TIMEOUT_MS = 3_600_000;
-export const HOSTED_TEMPORAL_ENSURE_PROCESSING_REPORTING_SLACK_MS = 5_000;
+const HOSTED_TEMPORAL_ACTIVITY_REPORTING_SLACK_MS = 5_000;
+export const HOSTED_TEMPORAL_ENSURE_PROCESSING_REPORTING_SLACK_MS =
+  HOSTED_TEMPORAL_ACTIVITY_REPORTING_SLACK_MS;
+export const HOSTED_RUNTIME_RECONCILIATION_FACTS_HTTP_TIMEOUT_MS = 55_000;
+export const HOSTED_RUNTIME_RECONCILIATION_FACTS_START_TO_CLOSE_TIMEOUT_MS =
+  HOSTED_RUNTIME_RECONCILIATION_FACTS_HTTP_TIMEOUT_MS
+  + HOSTED_TEMPORAL_ACTIVITY_REPORTING_SLACK_MS;
 
 export type HostedRuntimeTemporalEnvSource =
   Readonly<Record<string, string | undefined>>;
@@ -94,21 +95,11 @@ export function readHostedRuntimeTemporalWorkflowOptions(
 ): HostedRuntimeTemporalWorkflowOptions {
   const ensureRuntimeProcessingTimeouts =
     readHostedRuntimeEnsureProcessingTimeouts(source);
-  const reconciliationFactsTimeout = readOptionalEnvEntry(
-    source,
-    HOSTED_RUNTIME_RECONCILIATION_FACTS_TIMEOUT_ENV,
-    HOSTED_RUNTIME_DEMAND_TIMEOUT_ENV,
-  );
   return {
     ensureRuntimeProcessingStartToCloseTimeoutMs:
       ensureRuntimeProcessingTimeouts.ensureRuntimeProcessingStartToCloseTimeoutMs,
-    readRuntimeReconciliationFactsStartToCloseTimeoutMs: parseBoundedPositiveInteger(
-      reconciliationFactsTimeout?.value ?? null,
-      DEFAULT_HOSTED_RUNTIME_RECONCILIATION_FACTS_TIMEOUT_MS,
-      MAX_HOSTED_RUNTIME_RECONCILIATION_FACTS_TIMEOUT_MS,
-      reconciliationFactsTimeout?.key
-        ?? HOSTED_RUNTIME_RECONCILIATION_FACTS_TIMEOUT_ENV,
-    ),
+    readRuntimeReconciliationFactsStartToCloseTimeoutMs:
+      HOSTED_RUNTIME_RECONCILIATION_FACTS_START_TO_CLOSE_TIMEOUT_MS,
   };
 }
 
@@ -127,7 +118,7 @@ export function readHostedRuntimeEnsureProcessingTimeouts(
   );
   const ensureRuntimeProcessingStartToCloseTimeoutMs =
     ensureRuntimeProcessingHttpTimeoutMs
-    + HOSTED_TEMPORAL_ENSURE_PROCESSING_REPORTING_SLACK_MS;
+    + HOSTED_TEMPORAL_ACTIVITY_REPORTING_SLACK_MS;
   if (
     !Number.isSafeInteger(ensureRuntimeProcessingStartToCloseTimeoutMs)
     || ensureRuntimeProcessingStartToCloseTimeoutMs

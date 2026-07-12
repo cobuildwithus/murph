@@ -404,6 +404,7 @@ test("assertDeviceSyncControlRequest rejects malformed loopback-like host header
 
 test("device sync http handler routes control and public requests without sockets", async () => {
   const observedWebhooks: Array<{ provider: string; body: string }> = [];
+  const observedDisconnects: Array<{ accountId: string; expectedConnectedAt: string }> = [];
   const service = createStubService({
     async handleWebhook(provider, _headers, rawBody) {
       observedWebhooks.push({
@@ -416,6 +417,15 @@ test("device sync http handler routes control and public requests without socket
         duplicate: false,
         provider,
         eventType: "demo.updated",
+      };
+    },
+    async disconnectAccount(accountId, expectedConnectedAt) {
+      observedDisconnects.push({ accountId, expectedConnectedAt });
+      return {
+        account: {
+          ...accountRecord,
+          status: "disconnected" as const,
+        },
       };
     },
   });
@@ -648,14 +658,48 @@ test("device sync http handler routes control and public requests without socket
     jobs: [],
   });
 
-  const disconnect = await invokeHandler({
+  const legacyDisconnect = await invokeHandler({
     service,
     method: "POST",
     url: `/device-sync/accounts/${accountRecord.id}/disconnect`,
     surface: "combined",
     headers: {
       authorization: CONTROL_AUTHORIZATION,
+      "content-type": "application/json; charset=utf-8",
     },
+    body: JSON.stringify({ expectedConnectedAt: accountRecord.connectedAt }),
+  });
+  assert.equal(legacyDisconnect.statusCode, 404);
+  assert.deepEqual(observedDisconnects, []);
+
+  const disconnectWithoutGeneration = await invokeHandler({
+    service,
+    method: "POST",
+    url: `/device-sync/accounts/${accountRecord.id}/disconnect-if-connected-at`,
+    surface: "combined",
+    headers: {
+      authorization: CONTROL_AUTHORIZATION,
+    },
+  });
+  assert.equal(disconnectWithoutGeneration.statusCode, 400);
+  assert.deepEqual(disconnectWithoutGeneration.readJson(), {
+    error: {
+      code: "CONNECTION_GENERATION_REQUIRED",
+      message: "Device account disconnect requires the expected connection generation.",
+      retryable: false,
+    },
+  });
+
+  const disconnect = await invokeHandler({
+    service,
+    method: "POST",
+    url: `/device-sync/accounts/${accountRecord.id}/disconnect-if-connected-at`,
+    surface: "combined",
+    headers: {
+      authorization: CONTROL_AUTHORIZATION,
+      "content-type": "application/json; charset=utf-8",
+    },
+    body: JSON.stringify({ expectedConnectedAt: accountRecord.connectedAt }),
   });
   assert.equal(disconnect.statusCode, 200);
   assert.deepEqual(disconnect.readJson(), {
@@ -664,6 +708,10 @@ test("device sync http handler routes control and public requests without socket
       status: "disconnected",
     },
   });
+  assert.deepEqual(observedDisconnects, [{
+    accountId: accountRecord.id,
+    expectedConnectedAt: accountRecord.connectedAt,
+  }]);
 
   const publicControlRoute = await invokeHandler({
     service,

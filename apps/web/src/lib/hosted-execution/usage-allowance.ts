@@ -47,11 +47,9 @@ import {
   readActiveHostedMemberAccess,
 } from "../hosted-onboarding/member-access";
 import { getPrisma } from "../prisma";
-import { sha256Hex } from "../primitives";
 import { renderUserFacingMessage } from "../hosted-messages/user-facing-messages";
 
 type HostedAiUsageAllowanceClient = PrismaClient | Prisma.TransactionClient;
-
 export type HostedAiUsageGateDeniedReason =
   | "ai_usage_limit_exceeded"
   | "hosted_access_inactive"
@@ -1178,79 +1176,6 @@ export async function checkHostedAiUsageGate(input: {
   return resolveHostedAiUsageGate(input);
 }
 
-export function buildHostedAiUsageGateNoticeIdempotencyKey(input: {
-  memberId: string;
-  noticeCode: HostedAiUsageGateNoticeCode | string;
-  periodStart: Date | string;
-}): string {
-  const periodStart = normalizeHostedAiUsageAllowanceDate(input.periodStart);
-
-  return `ai-usage-gate:${sha256Hex(JSON.stringify({
-    memberId: input.memberId,
-    noticeCode: input.noticeCode,
-    periodStart: periodStart.toISOString(),
-  })).slice(0, 32)}`;
-}
-
-export async function claimHostedAiUsageLimitNotice(input: {
-  memberId: string;
-  periodStart: Date | string;
-  prisma?: HostedAiUsageAllowanceClient;
-  sentAt?: Date | string;
-}): Promise<boolean> {
-  const prisma = input.prisma ?? getPrisma();
-  const periodStart = normalizeHostedAiUsageAllowanceDate(input.periodStart);
-  const sentAt = normalizeHostedAiUsageAllowanceDate(input.sentAt ?? new Date());
-
-  const claimed = await prisma.hostedAiUsagePeriod.updateMany({
-    where: {
-      AND: [
-        {
-          periodStart: {
-            lte: sentAt,
-          },
-        },
-        {
-          periodEnd: {
-            gt: sentAt,
-          },
-        },
-      ],
-      blockedAt: {
-        not: null,
-      },
-      limitNoticeSentAt: null,
-      memberId: input.memberId,
-      periodStart,
-    },
-    data: {
-      limitNoticeSentAt: sentAt,
-    },
-  });
-
-  return claimed.count === 1;
-}
-
-export async function releaseHostedAiUsageLimitNotice(input: {
-  memberId: string;
-  periodStart: Date | string;
-  prisma?: HostedAiUsageAllowanceClient;
-  sentAt: Date | string;
-}): Promise<void> {
-  const prisma = input.prisma ?? getPrisma();
-
-  await prisma.hostedAiUsagePeriod.updateMany({
-    where: {
-      limitNoticeSentAt: normalizeHostedAiUsageAllowanceDate(input.sentAt),
-      memberId: input.memberId,
-      periodStart: normalizeHostedAiUsageAllowanceDate(input.periodStart),
-    },
-    data: {
-      limitNoticeSentAt: null,
-    },
-  });
-}
-
 function resolveHostedAiUsageInactiveGateDecision(input: {
   at: Date;
   billingRef: HostedAiUsageAllowanceBillingRef | null;
@@ -1349,6 +1274,53 @@ function buildHostedAiUsageGateDecision(input: {
     remainingUsdMicros,
     spentUsdMicros: period.spentUsdMicros,
   };
+}
+
+export async function reconcileHostedAiUsageAllowancePeriodForMemberTx(input: {
+  memberId: string;
+  now: Date;
+  tx: Prisma.TransactionClient;
+}): Promise<void> {
+  const memberState = await input.tx.hostedMember.findUnique({
+    where: {
+      id: input.memberId,
+    },
+    select: {
+      billingRef: {
+        select: {
+          currentBillingPhase: true,
+          currentBillingPlanCode: true,
+          currentCheckoutOffer: true,
+          currentPeriodEnd: true,
+          currentPeriodStart: true,
+          currentTrialEndsAt: true,
+          currentTrialStartedAt: true,
+          pulseTrialPolicyVersion: true,
+          pulseTrialRedeemedAt: true,
+        },
+      },
+      billingStatus: true,
+      suspendedAt: true,
+    },
+  });
+  if (
+    !memberState ||
+    memberState.billingStatus !== HostedBillingStatus.active ||
+    memberState.suspendedAt !== null
+  ) {
+    throw new Error("Hosted AI usage allowance member is not active.");
+  }
+
+  const period = await ensureHostedAiUsageAllowancePeriodTx({
+    at: input.now,
+    billingRef: memberState.billingRef,
+    memberId: input.memberId,
+    now: input.now,
+    tx: input.tx,
+  });
+  if (period.kind === "denied") {
+    throw new Error("Hosted AI usage allowance period could not be reconciled.");
+  }
 }
 
 async function ensureHostedAiUsageAllowancePeriodTx(input: {
@@ -2611,12 +2583,15 @@ function buildHostedAiUsageGateLimitNotice(input: {
     };
   }
 
-  const base = "Hey, you've reached your usage limit for the month.";
-
   if (input.allowanceSource === "family_sponsored_pulse") {
     return {
       code: "family_usage_limit_reached",
-      message: `${base} Murph will resume when your Family usage resets.`,
+      message: renderHostedAiUsageGateLimitNoticeMessage({
+        key: "linq.ai_usage.family_limit_reached",
+        memberId: input.memberId,
+        noticeCode: "family_usage_limit_reached",
+        periodStart: input.periodStart,
+      }),
     };
   }
 
@@ -2646,6 +2621,7 @@ function buildHostedAiUsageGateLimitNotice(input: {
 function renderHostedAiUsageGateLimitNoticeMessage(input: {
   key:
     | "linq.ai_usage.edge_limit_reached"
+    | "linq.ai_usage.family_limit_reached"
     | "linq.ai_usage.pulse_upgrade_edge"
     | "linq.ai_usage.trial_limit_reached";
   memberId: string;

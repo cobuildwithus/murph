@@ -50,8 +50,15 @@ export function readHostedRuntimeTemporalEnvironment(
 
 export function readHostedRuntimeTemporalWorkflowOptions(
   source: NodeJS.ProcessEnv = process.env,
-): HostedRuntimeTemporalWorkflowOptions {
-  return readSharedHostedRuntimeTemporalWorkflowOptions(source);
+): Pick<
+  HostedRuntimeTemporalWorkflowOptions,
+  "ensureRuntimeProcessingStartToCloseTimeoutMs"
+> {
+  const options = readSharedHostedRuntimeTemporalWorkflowOptions(source);
+  return {
+    ensureRuntimeProcessingStartToCloseTimeoutMs:
+      options.ensureRuntimeProcessingStartToCloseTimeoutMs,
+  };
 }
 
 export async function readHostedRuntimeTemporalSignalClientIfConfigured(): Promise<

@@ -59,7 +59,6 @@ import {
   readHostedExecutionSnapshotDeltaRef,
   readHostedExecutionSnapshotHotRef,
 } from "../src/parsers.ts";
-import { readHostedBrowserVaultSourceStateHash } from "../src/parsers/cursor.ts";
 
 function decodeUtf8(buffer: ArrayBuffer): string {
   return new TextDecoder().decode(buffer);
@@ -300,8 +299,6 @@ describe("hosted execution coverage gaps", () => {
       sourceBundleHash: delta.hash,
     } satisfies HostedBrowserVaultReplicaRef;
 
-    expect(readHostedBrowserVaultSourceStateHash(working)).toBe(delta.hash);
-    expect(readHostedBrowserVaultSourceStateHash(base)).toBe(base.hash);
     expect(assessBrowserVaultReplicaFreshness({
       currentSourceHash: delta.hash,
       now: "2026-05-04T00:03:30.000Z",
@@ -506,6 +503,7 @@ describe("hosted execution coverage gaps", () => {
       "./action-approval",
       "./assistant-capabilities",
       "./assistant-identifiers",
+      "./assistant-model",
       "./assistant-usage",
       "./auth",
       "./browser-vault",
@@ -539,6 +537,8 @@ describe("hosted execution coverage gaps", () => {
     const rootModule = await import("@murphai/hosted-execution");
     const assistantCapabilitiesModule =
       await import("@murphai/hosted-execution/assistant-capabilities") as Record<string, unknown>;
+    const assistantModelModule =
+      await import("@murphai/hosted-execution/assistant-model") as Record<string, unknown>;
     const assistantUsageModule =
       await import("@murphai/hosted-execution/assistant-usage") as Record<string, unknown>;
     const browserVaultModule =
@@ -557,6 +557,10 @@ describe("hosted execution coverage gaps", () => {
     expect("buildHostedWakeLinqMessageReceivedPayload" in rootModule).toBe(false);
     expect("buildHostedWakeTelegramMessageReceivedPayload" in rootModule).toBe(false);
     expect("buildHostedWakeEmailMessageReceivedPayload" in rootModule).toBe(false);
+    expect(assistantModelModule.HOSTED_ASSISTANT_PRODUCT_MODELS).toEqual([
+      "gpt-5.6-terra",
+      "gpt-5.6-sol",
+    ]);
     expect("parseHostedWakeLinqMessageReceivedPayload" in rootModule).toBe(false);
     expect("parseHostedWakeTelegramMessageReceivedPayload" in rootModule).toBe(false);
     expect("parseHostedWakeEmailMessageReceivedPayload" in rootModule).toBe(false);
@@ -583,6 +587,7 @@ describe("hosted execution coverage gaps", () => {
       currentReplicaRef: null,
       currentSnapshotRef: null,
     })).toBeNull();
+    expect(legacyDashboardReplicaModule.readDashboardReplicaSourceStateHash(null)).toBeNull();
     expect(typeof legacyDashboardReplicaCompatibilityModule.getDashboardReplicaFreshness)
       .toBe("function");
     expect("getDashboardReplicaFreshness" in rootModule).toBe(false);
@@ -623,6 +628,8 @@ describe("hosted execution coverage gaps", () => {
       "HOSTED_RUNTIME_MAILBOX_FETCH_PATH",
       "HOSTED_RUNTIME_MAILBOX_PAYLOAD_FETCH_PATH",
       "HOSTED_RUNTIME_NEWSLETTER_TOOL_PATH",
+      "HOSTED_RUNTIME_OWNER_RELEASED_PATH",
+      "HOSTED_RUNTIME_OWNER_RELEASE_IMMEDIATE_RECHECK_QUERY",
       "HOSTED_RUNTIME_PRODUCT_FEEDBACK_RECORD_PATH",
       "HOSTED_RUNTIME_STATUS_PATH",
       "HOSTED_RUNTIME_USAGE_RECORD_PATH",

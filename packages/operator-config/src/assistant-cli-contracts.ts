@@ -897,10 +897,14 @@ export const assistantDiagnosticEventSchema = z
 
 export const assistantDiagnosticsCountersSchema = z
   .object({
+    // Deprecated in v1: retained to parse existing snapshots. New turns do not
+    // increment this field because foreground reply priority wins.
     turnsStarted: z.number().int().nonnegative(),
     turnsCompleted: z.number().int().nonnegative(),
     turnsDeferred: z.number().int().nonnegative(),
     turnsFailed: z.number().int().nonnegative(),
+    // Deprecated in v1: retained to parse existing snapshots. Durable turn
+    // receipts own provider-attempt evidence for new turns.
     providerAttempts: z.number().int().nonnegative(),
     providerFailures: z.number().int().nonnegative(),
     deliveriesQueued: z.number().int().nonnegative(),
@@ -909,6 +913,8 @@ export const assistantDiagnosticsCountersSchema = z
     deliveriesRetryable: z.number().int().nonnegative(),
     outboxDrains: z.number().int().nonnegative(),
     outboxRetries: z.number().int().nonnegative(),
+    // Deprecated in v1: retained to parse existing snapshots. New automation
+    // scans do not increment this field because foreground reply priority wins.
     automationScans: z.number().int().nonnegative(),
   })
   .strict()

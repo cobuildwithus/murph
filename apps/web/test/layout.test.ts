@@ -121,14 +121,14 @@ test("footer ownership stays on explicit public surfaces", () => {
 
 test("RootLayout provides default title, description, and preview image metadata", () => {
   assert.ok(metadata.metadataBase instanceof URL);
-  assert.equal(metadata.title, "Murph — Discover what actually makes you healthier");
+  assert.equal(metadata.title, "Murph — Health is hard. Don’t do it alone.");
   assert.equal(
     metadata.description,
-    "Your personal health assistant. Sync your signals, pick a protocol, see what actually makes you healthier.",
+    "Murph figures out what works for you—and gets your friends in on it. A personal health AI that runs experiments with you and challenges with your friends.",
   );
   assert.deepEqual(metadata.openGraph?.images, [
     {
-      alt: "Murph — Wearable data, made useful.",
+      alt: "Health is hard. Don’t do it alone.",
       height: 630,
       type: "image/png",
       url: "/opengraph-image",
@@ -137,7 +137,7 @@ test("RootLayout provides default title, description, and preview image metadata
   ]);
   assert.deepEqual(metadata.twitter?.images, [
     {
-      alt: "Murph — Wearable data, made useful.",
+      alt: "Health is hard. Don’t do it alone.",
       height: 630,
       type: "image/png",
       url: "/opengraph-image",

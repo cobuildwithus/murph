@@ -601,7 +601,7 @@ export async function planHostedOnboardingLinqWebhook(input: {
           parts: messageEvent.data.message.parts,
           service: messageEvent.data.service ?? null,
         }),
-        threadIsDirect: isHostedLinqDirectChatAttested(messageEvent),
+        threadIsDirect: resolveHostedLinqThreadIsDirect(messageEvent),
         ...(messageEvent.data.message.reply_to?.message_id === undefined
           ? {}
           : { replyToMessageId: messageEvent.data.message.reply_to.message_id }),
@@ -902,7 +902,7 @@ export async function planHostedOnboardingLinqWebhook(input: {
       occurredAt,
       service: messageEvent.data.service ?? null,
       sourceEventId: input.event.event_id,
-      threadIsDirect: isHostedLinqDirectChatAttested(messageEvent),
+      threadIsDirect: resolveHostedLinqThreadIsDirect(messageEvent),
     }),
     buildHostedLinqWebhookPlannerDetails(input.event, context, {
       chatDirectAttested: isHostedLinqDirectChatAttested(messageEvent),
@@ -1137,7 +1137,7 @@ async function planHostedLinqExplicitThreadRouteWebhook(input: {
         parts: messageEvent.data.message.parts,
         service: messageEvent.data.service ?? null,
       }),
-      threadIsDirect: isHostedLinqDirectChatAttested(messageEvent),
+      threadIsDirect: false,
       ...(messageEvent.data.message.reply_to?.message_id === undefined
         ? {}
         : { replyToMessageId: messageEvent.data.message.reply_to.message_id }),
@@ -1344,7 +1344,7 @@ async function planHostedLinqGroupChatWebhook(input: {
 
 async function planHostedLinqDailyQuotaAdmissionDenied(input: {
   context: ReturnType<typeof resolveHostedOnboardingLinqMessageContext>;
-  dailyState: HostedLinqDailyState;
+  dailyState: HostedLinqDailyState | null;
   event: HostedLinqWebhookEvent;
   logDetails: HostedOnboardingStructuredLogDetails;
   memberId: string;
@@ -1354,13 +1354,18 @@ async function planHostedLinqDailyQuotaAdmissionDenied(input: {
     dailyQuotaReply: string;
   };
 }): Promise<HostedOnboardingLinqDirectPlan | null> {
-  if (input.dailyState.inboundCount > HOSTED_LINQ_DAILY_TEXT_LIMIT) {
-    if (input.dailyState.quotaReplySentAt) {
+  const dailyState = input.dailyState;
+  if (!dailyState) {
+    return null;
+  }
+
+  if (dailyState.inboundCount > HOSTED_LINQ_DAILY_TEXT_LIMIT) {
+    if (dailyState.quotaReplySentAt) {
       return logHostedLinqWebhookPlannerDecisionAndReturn(
         buildIgnoredLinqWebhookPlan("daily-quota-reached"),
         buildHostedLinqWebhookPlannerDetails(input.event, input.context, {
           ...input.logDetails,
-          dailyInboundCount: input.dailyState.inboundCount,
+          dailyInboundCount: dailyState.inboundCount,
           reason: "daily-quota-reached",
           routeStage: input.routeStages.dailyQuotaReached,
         }),
@@ -1378,7 +1383,7 @@ async function planHostedLinqDailyQuotaAdmissionDenied(input: {
       }),
       buildHostedLinqWebhookPlannerDetails(input.event, input.context, {
         ...input.logDetails,
-        dailyInboundCount: input.dailyState.inboundCount,
+        dailyInboundCount: dailyState.inboundCount,
         reason: "sent-daily-quota-reply",
         routeStage: input.routeStages.dailyQuotaReply,
       }),
@@ -1883,6 +1888,13 @@ function isHostedLinqDirectChatAttested(
   messageEvent: HostedLinqMessageReceivedEvent,
 ): boolean {
   return messageEvent.data.chat?.is_group === false;
+}
+
+function resolveHostedLinqThreadIsDirect(
+  messageEvent: HostedLinqMessageReceivedEvent,
+): boolean | null {
+  const isGroup = messageEvent.data.chat?.is_group;
+  return typeof isGroup === "boolean" ? !isGroup : null;
 }
 
 async function readRetryableUnsentFallbackRecipientPhone(input: {

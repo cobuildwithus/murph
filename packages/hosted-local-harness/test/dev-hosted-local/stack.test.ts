@@ -566,7 +566,7 @@ describe("hosted local dev stack", () => {
     vi.unstubAllGlobals();
   });
 
-  it("starts Cloudflare through the prepared app-owned dev entrypoint", async () => {
+  it("starts Cloudflare with web-only process environment overrides", async () => {
     vi.stubEnv("OPENAI_API_KEY", "local-openai-key");
     spawnChildProcess
       .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "cloudflare", pid: 101 }))
@@ -589,10 +589,27 @@ describe("hosted local dev stack", () => {
     const { startHostedLocalDevStack } = await import("../../src/dev-hosted-local/stack.ts");
 
     const stack = await startHostedLocalDevStack({
-      env: process.env,
+      env: {
+        ...process.env,
+        LINQ_API_BASE_URL: "http://host.docker.internal:4011",
+      },
+      webProcessEnvOverrides: {
+        LINQ_API_BASE_URL: "http://127.0.0.1:4011",
+      },
     });
     await stack.ready;
     await stack.stop();
+
+    expect(stack.runtimeEnv.LINQ_API_BASE_URL).toBe(
+      "http://host.docker.internal:4011",
+    );
+    expect(startHostedLocalTemporalRuntime).toHaveBeenCalledWith(
+      expect.objectContaining({
+        env: expect.objectContaining({
+          LINQ_API_BASE_URL: "http://host.docker.internal:4011",
+        }),
+      }),
+    );
 
     expect(spawnChildProcess).toHaveBeenCalledWith(
       "cloudflare",
@@ -628,6 +645,7 @@ describe("hosted local dev stack", () => {
         MURPH_DEV_SKIP_RUNNER_BUNDLE: "1",
         NODE_ENV: "development",
         TSX_TSCONFIG_PATH: expect.stringMatching(/tsconfig\.base\.json$/),
+        LINQ_API_BASE_URL: "http://host.docker.internal:4011",
         OPENAI_API_KEY: "local-openai-key",
         VERCEL_OIDC_TOKEN: "oidc-token",
       }),
@@ -645,6 +663,7 @@ describe("hosted local dev stack", () => {
         "3000",
       ]),
       expect.objectContaining({
+        LINQ_API_BASE_URL: "http://127.0.0.1:4011",
         MURPH_HOSTED_WEB_DEV_OWNER_PID: String(process.pid),
       }),
       expect.any(Object),
@@ -2298,6 +2317,10 @@ describe("hosted local dev stack", () => {
     );
     expect(process.env[hostedLocalE2eRunnerSmokeProvedBuildIdEnv])
       .toBe(expectedBuildId);
+    expect(cleanupHostedRunnerContainers).toHaveBeenCalledWith(expect.objectContaining({
+      scope: "current-build",
+    }));
+    expect(cleanupHostedRunnerImages).not.toHaveBeenCalled();
   });
 
   it("skips repeated aggregate E2E runner container smoke only for the proved build id", async () => {
@@ -2349,6 +2372,7 @@ describe("hosted local dev stack", () => {
     expect(stderrTarget.text()).toContain(
       "Skipping runner container deploy-smoke; already proved for this hosted-local E2E run.",
     );
+    expect(cleanupHostedRunnerImages).not.toHaveBeenCalled();
   });
 
   it("keeps interactive dev running when the runner container smoke proof fails", async () => {
@@ -2386,6 +2410,7 @@ describe("hosted local dev stack", () => {
 
   it("keeps the runner container smoke proof fatal for E2E profiles", async () => {
     vi.stubEnv("OPENAI_API_KEY", "local-openai-key");
+    vi.stubEnv(hostedLocalE2eRunnerSmokeOnceEnv, "1");
     const configModule = await import("../../src/dev-hosted-local/config.ts");
     vi.mocked(configModule.resolveHostedLocalDevConfig).mockReturnValueOnce({
       ...defaultConfig,
@@ -2414,6 +2439,7 @@ describe("hosted local dev stack", () => {
 
     await expect(stack.ready).rejects.toThrow("fetch failed");
     expect(terminateChildProcessAndWait).toHaveBeenCalledTimes(2);
+    expect(cleanupHostedRunnerImages).not.toHaveBeenCalled();
   });
 
   it("starts a managed Linq cloudflared tunnel and registers the local webhook target", async () => {

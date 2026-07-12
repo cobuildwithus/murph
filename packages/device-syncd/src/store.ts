@@ -9,6 +9,7 @@ import {
 import {
   decodeDeviceSyncSummaryRow,
   disconnectAccount as disconnectStoredAccount,
+  disconnectAccountIfCurrentInTransaction as disconnectStoredAccountIfCurrentInTransaction,
   getAccountByExternalAccount as getStoredAccountByExternalAccount,
   getAccountById as getStoredAccountById,
   listAccounts as listStoredAccounts,
@@ -40,6 +41,7 @@ import {
   getDeviceSyncJobById,
   listDueDeviceSyncJobBatchCandidates,
   markPendingDeviceSyncJobsDeadForAccount,
+  markPendingDeviceSyncJobsDeadForAccountIfCurrent,
   readNextDeviceSyncJobWakeAt,
   readNextDeviceSyncJobWakeAtForAccount,
   releaseDeviceSyncJobIfOwned,
@@ -241,6 +243,79 @@ export class SqliteDeviceSyncStore {
     return disconnectStoredAccount(this.database, accountId, now);
   }
 
+  disconnectAccountAndMarkPendingJobsDeadIfConnectedAt(input: {
+    accountId: string;
+    code: string;
+    expectedConnectedAt: string;
+    message: string;
+    now: string;
+  }): StoredDeviceSyncAccount | null {
+    return withImmediateTransaction(this.database, () => {
+      const existing = getStoredAccountById(this.database, input.accountId);
+      if (!existing) {
+        return null;
+      }
+      if (existing.connectedAt !== input.expectedConnectedAt) {
+        return null;
+      }
+
+      const disconnected = existing.status === "disconnected"
+        ? existing
+        : disconnectStoredAccountIfCurrentInTransaction(
+            this.database,
+            input.accountId,
+            input.now,
+            null,
+            null,
+            input.expectedConnectedAt,
+          );
+
+      if (!disconnected) {
+        return null;
+      }
+
+      markPendingDeviceSyncJobsDeadForAccount(this.database, {
+        accountId: input.accountId,
+        code: input.code,
+        message: input.message,
+        now: input.now,
+      });
+      return disconnected;
+    });
+  }
+
+  disconnectAccountAndMarkPendingJobsDeadIfCurrent(input: {
+    accountId: string;
+    code: string;
+    expectedLocalConnectionRevision: number;
+    expectedStatus: Exclude<DeviceSyncAccountStatus, "disconnected">;
+    message: string;
+    now: string;
+  }): StoredDeviceSyncAccount | null {
+    return withImmediateTransaction(this.database, () => {
+      const disconnected = disconnectStoredAccountIfCurrentInTransaction(
+        this.database,
+        input.accountId,
+        input.now,
+        input.expectedLocalConnectionRevision,
+        input.expectedStatus,
+        null,
+      );
+
+      if (!disconnected) {
+        return null;
+      }
+
+      markPendingDeviceSyncJobsDeadForAccount(this.database, {
+        accountId: input.accountId,
+        code: input.code,
+        message: input.message,
+        now: input.now,
+      });
+      return disconnected;
+    });
+  }
+
   markWebhookReceived(accountId: string, now: string): void {
     markStoredWebhookReceived(this.database, accountId, now);
   }
@@ -279,11 +354,19 @@ export class SqliteDeviceSyncStore {
 
   markConnectionSetupFailed(
     accountId: string,
+    expectedConnectedAt: string | null,
     now: string,
     code: string,
     message: string,
-  ): StoredDeviceSyncAccount | null {
-    return markStoredConnectionSetupFailed(this.database, accountId, now, code, message);
+  ): { account: StoredDeviceSyncAccount | null; applied: boolean } {
+    return markStoredConnectionSetupFailed(
+      this.database,
+      accountId,
+      expectedConnectedAt,
+      now,
+      code,
+      message,
+    );
   }
 
   enqueueJob(input: DeviceSyncEnqueueJobInput): DeviceSyncJobRecord {
@@ -500,6 +583,17 @@ export class SqliteDeviceSyncStore {
       message,
       now,
     });
+  }
+
+  markPendingJobsDeadForAccountIfCurrent(input: {
+    accountId: string;
+    code: string;
+    expectedLocalConnectionRevision: number;
+    expectedStatus: Extract<DeviceSyncAccountStatus, "disconnected" | "reauthorization_required">;
+    message: string;
+    now: string;
+  }): number {
+    return markPendingDeviceSyncJobsDeadForAccountIfCurrent(this.database, input);
   }
 
   claimWebhookTrace(input: ClaimDeviceSyncWebhookTraceInput): DeviceSyncWebhookTraceClaimResult {
