@@ -1,7 +1,7 @@
 # Call Circle Deep-Review Finding Fixes
 
 Date: 2026-07-10
-Status: active
+Status: completed
 Branch: `feat/call-circle-v1-f5`
 PR: #444
 Spec: `agent-docs/product-specs/call-circle.md`
@@ -74,21 +74,28 @@ Success means:
 ## State
 
 - Done: recovered the prior review, confirmed and mapped all ten findings,
-  located the clean PR worktree at reviewed head `2b8f438fe5`, loaded required
-  guidance, implemented all ten fixes, passed focused regressions plus real
-  PostgreSQL barriers for provider-start/deletion ordering and preference-write
-  proposal invalidation, passed the truthful affected cross-owner verification
-  lane including package/app typechecks, tests, lint, smoke, and production
-  builds, merged the current `origin/main` through ordinary Git history, and
-  proved the merged base's two assistant-style CLI tests after rebuilding its
-  prepared runtime artifacts.
-- Now: wait for physical unused memory to recover above the 12 GiB heavy-command
-  floor, rerun the full affected lane on the merged head, and complete the
-  controller-gated local security, coverage, and deep-review audits while the
-  parent performs final diff and privacy review.
-- Next: resolve accepted audit findings, finish and push the scoped commit, then
-  confirm exact-head CI, thread resolution, and mergeability before the
-  controller-gated ReviewGPT handoff.
+  implemented the fixes, and retained the real PostgreSQL barriers for
+  provider-start/deletion ordering and preference-write proposal invalidation.
+  Merged `origin/main` at `f781d6f77069654f102199a7a249ceec003c2b2e`
+  through ordinary Git history and resolved only the two proven assistant group
+  tool conflicts, preserving Call Circle's server-owned offer contract while
+  incorporating the current uncreated-group guidance. The merged head
+  `4b839e22c2cc292b921f24bcb0124a45f9ad7c1a` passed the focused assistant group
+  tool suite (22 tests), assistant-engine typecheck, prepared test-runtime build,
+  and the authoritative affected cross-owner lane: repository policy guards,
+  affected typechecks and package tests, hosted-local package-boundary proof,
+  web lint/dev smoke/production build with 4,500 passing tests, and Cloudflare
+  verification with 1,737 passing tests.
+- Done: completed parent-only security/privacy, coverage, Feynman deep-review,
+  final diff, and privacy passes because the recovery controller prohibited
+  helper launches. No actionable finding remained. Every finding is covered by
+  a direct regression, including exhaustive bounded matching cardinality,
+  group-scoped keyed name lookup, both PostgreSQL barriers, current-state expiry
+  recipients, provider daytime revalidation, and a native Temporal RPC deadline.
+- Next: archive this plan with `scripts/finish-task`, push the final scoped head,
+  and confirm exact-head CI, review-thread state, and mergeability. ReviewGPT and
+  browser work remain controller-gated until PR #557 is merged and a slot is
+  granted.
 
 ## Working Set
 
@@ -97,3 +104,5 @@ Success means:
 - `packages/{hosted-execution,assistant-engine}/src/**`
 - matching package tests and Call Circle/product/architecture docs when behavior
   or durable contracts materially change.
+Updated: 2026-07-12
+Completed: 2026-07-12
