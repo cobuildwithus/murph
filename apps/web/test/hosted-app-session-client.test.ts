@@ -1,17 +1,15 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
-  clearBrowserVaultWarmState: vi.fn(),
+  publishBrowserVaultSessionEnding: vi.fn(),
   publishBrowserVaultSessionInvalidation: vi.fn(),
   reloadCurrentHostedAuthDocument: vi.fn(),
   requestHostedOnboardingJson: vi.fn(),
 }));
 
-vi.mock("@/src/lib/browser-vault/warm-store", () => ({
-  clearBrowserVaultWarmState: mocks.clearBrowserVaultWarmState,
-}));
-
 vi.mock("@/src/lib/browser-vault/session-invalidation", () => ({
+  publishBrowserVaultSessionEnding:
+    mocks.publishBrowserVaultSessionEnding,
   publishBrowserVaultSessionInvalidation:
     mocks.publishBrowserVaultSessionInvalidation,
 }));
@@ -29,9 +27,9 @@ describe("logoutHostedAppSession", () => {
     vi.clearAllMocks();
   });
 
-  it("clears decrypted browser-vault memory before invalidating the server session", async () => {
+  it("clears decrypted browser-vault memory in every tab before invalidating the server session", async () => {
     const events: string[] = [];
-    mocks.clearBrowserVaultWarmState.mockImplementation(() => {
+    mocks.publishBrowserVaultSessionEnding.mockImplementation(() => {
       events.push("clear");
     });
     mocks.publishBrowserVaultSessionInvalidation.mockImplementation(() => {
@@ -55,9 +53,33 @@ describe("logoutHostedAppSession", () => {
     expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledWith({
       method: "POST",
       onSuccessfulResponseError: mocks.reloadCurrentHostedAuthDocument,
-      onSuccessfulResponseHeaders: mocks.publishBrowserVaultSessionInvalidation,
+      onSuccessfulResponseHeaders: expect.any(Function),
       url: "/api/hosted-onboarding/session/logout",
     });
+  });
+
+  it("revalidates every tab when logout rejects before replacement headers arrive", async () => {
+    const events: string[] = [];
+    mocks.publishBrowserVaultSessionEnding.mockImplementation(() => {
+      events.push("clear");
+    });
+    mocks.requestHostedOnboardingJson.mockImplementationOnce(async () => {
+      events.push("logout");
+      throw new TypeError("network unavailable");
+    });
+    mocks.publishBrowserVaultSessionInvalidation.mockImplementation(() => {
+      events.push("revalidate");
+    });
+    mocks.reloadCurrentHostedAuthDocument.mockImplementation(() => {
+      events.push("reload");
+    });
+
+    const { logoutHostedAppSession } = await import(
+      "@/src/components/hosted-onboarding/hosted-app-session-client"
+    );
+
+    await expect(logoutHostedAppSession()).rejects.toThrow("network unavailable");
+    expect(events).toEqual(["clear", "logout", "revalidate", "reload"]);
   });
 
   it("publishes again when successful logout headers precede a body-read failure", async () => {
@@ -75,7 +97,7 @@ describe("logoutHostedAppSession", () => {
     );
 
     await expect(logoutHostedAppSession()).rejects.toThrow("response body unavailable");
-    expect(mocks.clearBrowserVaultWarmState).toHaveBeenCalledTimes(1);
+    expect(mocks.publishBrowserVaultSessionEnding).toHaveBeenCalledTimes(1);
     expect(mocks.publishBrowserVaultSessionInvalidation).toHaveBeenCalledTimes(1);
     expect(mocks.reloadCurrentHostedAuthDocument).toHaveBeenCalledTimes(1);
   });

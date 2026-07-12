@@ -14,7 +14,7 @@ const mocks = vi.hoisted(() => ({
     open?: boolean;
   } | null,
   sessionInvalidationListener: null as null | ((
-    source: "same-document" | "cross-document"
+    source: "same-document" | "cross-document" | "cross-document-clear"
   ) => void),
 }));
 
@@ -50,7 +50,7 @@ vi.mock("@/src/components/hosted-onboarding/auth-dialog", () => ({
 
 vi.mock("@/src/lib/browser-vault/session-invalidation", () => ({
   subscribeBrowserVaultSessionInvalidation(listener: (
-    source: "same-document" | "cross-document"
+    source: "same-document" | "cross-document" | "cross-document-clear"
   ) => void) {
     mocks.sessionInvalidationListener = listener;
     return () => {
@@ -94,6 +94,11 @@ test("AuthProvider reloads a document that receives a cross-tab session transiti
 
   await act(async () => {
     mocks.sessionInvalidationListener?.("same-document");
+  });
+  expect(reload).not.toHaveBeenCalled();
+
+  await act(async () => {
+    mocks.sessionInvalidationListener?.("cross-document-clear");
   });
   expect(reload).not.toHaveBeenCalled();
 

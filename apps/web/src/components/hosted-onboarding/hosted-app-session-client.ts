@@ -1,7 +1,9 @@
 "use client";
 
-import { clearBrowserVaultWarmState } from "@/src/lib/browser-vault/warm-store";
-import { publishBrowserVaultSessionInvalidation } from "@/src/lib/browser-vault/session-invalidation";
+import {
+  publishBrowserVaultSessionEnding,
+  publishBrowserVaultSessionInvalidation,
+} from "@/src/lib/browser-vault/session-invalidation";
 
 import { requestHostedOnboardingJson } from "./client-api";
 import { reloadCurrentHostedAuthDocument } from "./hosted-auth-navigation";
@@ -9,14 +11,26 @@ import { reloadCurrentHostedAuthDocument } from "./hosted-auth-navigation";
 export async function logoutHostedAppSession(input: {
   logoutPrivy?: () => Promise<void> | void;
 } = {}): Promise<void> {
-  clearBrowserVaultWarmState();
+  publishBrowserVaultSessionEnding();
+  let receivedReplacementHeaders = false;
 
-  await requestHostedOnboardingJson<{ ok: true }>({
-    method: "POST",
-    onSuccessfulResponseError: reloadCurrentHostedAuthDocument,
-    onSuccessfulResponseHeaders: publishBrowserVaultSessionInvalidation,
-    url: "/api/hosted-onboarding/session/logout",
-  });
+  try {
+    await requestHostedOnboardingJson<{ ok: true }>({
+      method: "POST",
+      onSuccessfulResponseError: reloadCurrentHostedAuthDocument,
+      onSuccessfulResponseHeaders: () => {
+        receivedReplacementHeaders = true;
+        publishBrowserVaultSessionInvalidation();
+      },
+      url: "/api/hosted-onboarding/session/logout",
+    });
+  } catch (error) {
+    if (!receivedReplacementHeaders) {
+      publishBrowserVaultSessionInvalidation();
+      reloadCurrentHostedAuthDocument();
+    }
+    throw error;
+  }
 
   if (!input.logoutPrivy) {
     return;

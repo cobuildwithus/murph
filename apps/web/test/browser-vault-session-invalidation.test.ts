@@ -53,6 +53,55 @@ test("cross-tab app-session invalidation reaches the browser-vault subscriber", 
   otherTab.close();
 });
 
+test("a session-ending publication clears other tabs without asking them to reload yet", async () => {
+  vi.stubGlobal("window", new EventTarget());
+  vi.stubGlobal("BroadcastChannel", FakeBroadcastChannel);
+  const {
+    publishBrowserVaultSessionEnding,
+    subscribeBrowserVaultSessionInvalidation,
+  } = await import("@/src/lib/browser-vault/session-invalidation");
+
+  const onInvalidate = vi.fn();
+  const unsubscribe = subscribeBrowserVaultSessionInvalidation(onInvalidate);
+  const subscriber = [...FakeBroadcastChannel.instances][0];
+  expect(subscriber).toBeDefined();
+
+  const otherTabListener = vi.fn();
+  const otherTab = new FakeBroadcastChannel(subscriber?.name ?? "missing");
+  otherTab.addEventListener("message", otherTabListener);
+
+  publishBrowserVaultSessionEnding();
+
+  expect(FakeBroadcastChannel.postedMessages).toEqual(["clear"]);
+  expect(onInvalidate.mock.calls).toEqual([["same-document"]]);
+  expect(otherTabListener).toHaveBeenCalledTimes(1);
+  expect((otherTabListener.mock.calls[0]?.[0] as MessageEvent).data).toBe("clear");
+
+  unsubscribe();
+  otherTab.close();
+});
+
+test("a clear-only cross-tab signal is classified separately from revalidation", async () => {
+  vi.stubGlobal("window", new EventTarget());
+  vi.stubGlobal("BroadcastChannel", FakeBroadcastChannel);
+  const { subscribeBrowserVaultSessionInvalidation } = await import(
+    "@/src/lib/browser-vault/session-invalidation"
+  );
+
+  const onInvalidate = vi.fn();
+  const unsubscribe = subscribeBrowserVaultSessionInvalidation(onInvalidate);
+  const subscriber = [...FakeBroadcastChannel.instances][0];
+  expect(subscriber).toBeDefined();
+
+  const otherTab = new FakeBroadcastChannel(subscriber?.name ?? "missing");
+  otherTab.postMessage("clear");
+
+  expect(onInvalidate).toHaveBeenCalledWith("cross-document-clear");
+
+  unsubscribe();
+  otherTab.close();
+});
+
 test("a local publication reaches each subscriber exactly once without a cross-document echo", async () => {
   vi.stubGlobal("window", new EventTarget());
   vi.stubGlobal("BroadcastChannel", FakeBroadcastChannel);

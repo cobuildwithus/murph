@@ -27,6 +27,7 @@ const mocks = vi.hoisted(() => ({
     }),
   ),
   authorize: vi.fn(),
+  publishBrowserVaultSessionEnding: vi.fn(),
   publishBrowserVaultSessionInvalidation: vi.fn(),
   reloadCurrentHostedAuthDocument: vi.fn(),
   requestHostedOnboardingJson: vi.fn(),
@@ -61,6 +62,8 @@ vi.mock("@/src/components/hosted-onboarding/client-api", async (importOriginal) 
 });
 
 vi.mock("@/src/lib/browser-vault/session-invalidation", () => ({
+  publishBrowserVaultSessionEnding:
+    mocks.publishBrowserVaultSessionEnding,
   publishBrowserVaultSessionInvalidation:
     mocks.publishBrowserVaultSessionInvalidation,
 }));
@@ -358,7 +361,7 @@ describe("HostedDataPrivacySettings", () => {
     expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledWith({
       method: "POST",
       onSuccessfulResponseError: mocks.reloadCurrentHostedAuthDocument,
-      onSuccessfulResponseHeaders: mocks.publishBrowserVaultSessionInvalidation,
+      onSuccessfulResponseHeaders: expect.any(Function),
       payload: {
         authorization: {
           signature: `0x${"11".repeat(65)}`,
@@ -368,6 +371,10 @@ describe("HostedDataPrivacySettings", () => {
       },
       url: "/api/settings/privacy/delete",
     });
+    expect(mocks.publishBrowserVaultSessionEnding).toHaveBeenCalledTimes(1);
+    expect(
+      mocks.publishBrowserVaultSessionEnding.mock.invocationCallOrder[0],
+    ).toBeLessThan(mocks.requestHostedOnboardingJson.mock.invocationCallOrder[0]);
   });
 
   test("publishes deletion invalidation before a successful response body can fail", async () => {
@@ -401,8 +408,70 @@ describe("HostedDataPrivacySettings", () => {
 
     await clickButton(container, "Delete account", window);
 
+    expect(mocks.publishBrowserVaultSessionEnding).toHaveBeenCalledTimes(1);
     expect(mocks.publishBrowserVaultSessionInvalidation).toHaveBeenCalledTimes(1);
     expect(mocks.reloadCurrentHostedAuthDocument).toHaveBeenCalledTimes(1);
+  });
+
+  test("revalidates every tab when deletion rejects before replacement headers arrive", async () => {
+    mockHostedDataPrivacyDeleteFlowState();
+    mocks.requestHostedOnboardingJson.mockRejectedValueOnce(
+      new TypeError("network unavailable"),
+    );
+
+    const { document, window } = loadLinkedom().parseHTML(
+      "<html><body><div id='root'></div></body></html>",
+    );
+    installGlobals(window, document);
+    const container = document.getElementById("root");
+    assert.ok(container);
+
+    const root: Root = createRoot(container);
+    cleanupRender = async () => {
+      await act(async () => {
+        root.unmount();
+      });
+    };
+
+    await act(async () => {
+      root.render(createElement(HostedDataPrivacySettings, { authenticated: true }));
+    });
+
+    await clickButton(container, "Delete account", window);
+
+    expect(mocks.publishBrowserVaultSessionEnding).toHaveBeenCalledTimes(1);
+    expect(mocks.publishBrowserVaultSessionInvalidation).toHaveBeenCalledTimes(1);
+    expect(mocks.reloadCurrentHostedAuthDocument).toHaveBeenCalledTimes(1);
+  });
+
+  test("an authorization failure does not invalidate an unchanged session", async () => {
+    mockHostedDataPrivacyDeleteFlowState();
+    mocks.authorize.mockRejectedValueOnce(new Error("authorization unavailable"));
+
+    const { document, window } = loadLinkedom().parseHTML(
+      "<html><body><div id='root'></div></body></html>",
+    );
+    installGlobals(window, document);
+    const container = document.getElementById("root");
+    assert.ok(container);
+
+    const root: Root = createRoot(container);
+    cleanupRender = async () => {
+      await act(async () => {
+        root.unmount();
+      });
+    };
+
+    await act(async () => {
+      root.render(createElement(HostedDataPrivacySettings, { authenticated: true }));
+    });
+
+    await clickButton(container, "Delete account", window);
+
+    expect(mocks.requestHostedOnboardingJson).not.toHaveBeenCalled();
+    expect(mocks.publishBrowserVaultSessionEnding).not.toHaveBeenCalled();
+    expect(mocks.publishBrowserVaultSessionInvalidation).not.toHaveBeenCalled();
+    expect(mocks.reloadCurrentHostedAuthDocument).not.toHaveBeenCalled();
   });
 
   test("does not submit deletion until the exact confirmation phrase is typed", async () => {

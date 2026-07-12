@@ -159,7 +159,7 @@ export async function revokeHostedAppSessionFromRequest(input: {
   return buildHostedAppSessionClearCookie();
 }
 
-function buildHostedAppSessionClearCookie(): string {
+export function buildHostedAppSessionClearCookie(): string {
   return buildCookie({
     maxAgeSeconds: 0,
     name: HOSTED_APP_SESSION_COOKIE_NAME,

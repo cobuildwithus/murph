@@ -14,7 +14,14 @@ import { renderClientComponent } from "./render-client-component";
 
 const mocks = vi.hoisted(() => {
   const sessionInvalidation = {
-    listeners: new Set<(source?: "same-document" | "cross-document") => void>(),
+    listeners: new Set<(
+      source?: "same-document" | "cross-document" | "cross-document-clear"
+    ) => void>(),
+  };
+  const publishSessionSignal = () => {
+    for (const listener of [...sessionInvalidation.listeners]) {
+      listener("same-document");
+    }
   };
 
   return {
@@ -22,11 +29,8 @@ const mocks = vi.hoisted(() => {
     generateHostedUserRecipientKeyPair: vi.fn(),
     navigateHostedAuthRedirect: vi.fn(),
     reloadCurrentHostedAuthDocument: vi.fn(),
-    publishBrowserVaultSessionInvalidation: vi.fn(() => {
-      for (const listener of [...sessionInvalidation.listeners]) {
-        listener("same-document");
-      }
-    }),
+    publishBrowserVaultSessionEnding: vi.fn(publishSessionSignal),
+    publishBrowserVaultSessionInvalidation: vi.fn(publishSessionSignal),
     sessionInvalidation,
     subscribeBrowserVaultSessionInvalidation: vi.fn((listener: () => void) => {
       sessionInvalidation.listeners.add(listener);
@@ -61,6 +65,8 @@ vi.mock("@murphai/runtime-state", async () => {
 });
 
 vi.mock("@/src/lib/browser-vault/session-invalidation", () => ({
+  publishBrowserVaultSessionEnding:
+    mocks.publishBrowserVaultSessionEnding,
   publishBrowserVaultSessionInvalidation:
     mocks.publishBrowserVaultSessionInvalidation,
   subscribeBrowserVaultSessionInvalidation:
@@ -81,6 +87,7 @@ import {
 } from "@/src/lib/browser-vault/warm-store";
 import { AuthProvider } from "@/src/components/hosted-onboarding/auth-dialog-provider";
 import { requestHostedPrivyCompletionWithRetry } from "@/src/components/hosted-onboarding/hosted-privy-auth-support";
+import { logoutHostedAppSession } from "@/src/components/hosted-onboarding/hosted-app-session-client";
 
 beforeEach(() => {
   // The warm path lives in module memory; reset it so ready snapshots and
@@ -89,6 +96,7 @@ beforeEach(() => {
   mocks.sessionInvalidation.listeners.clear();
   mocks.navigateHostedAuthRedirect.mockClear();
   mocks.reloadCurrentHostedAuthDocument.mockClear();
+  mocks.publishBrowserVaultSessionEnding.mockClear();
   mocks.publishBrowserVaultSessionInvalidation.mockClear();
   mocks.usePathname.mockReset();
   mocks.usePathname.mockReturnValue("/home");
@@ -604,6 +612,52 @@ test("an invalidation before provider adoption makes an already-resolved ready o
   assert.equal(mocks.publishBrowserVaultSessionInvalidation.mock.calls.length, 1);
   assert.equal(getBrowserVaultReadySnapshot(), null);
   assert.equal(rendered.container.textContent?.startsWith("ready:"), false);
+
+  await rendered.cleanup();
+});
+
+test("a dispatched logout clears cached and live data before an ambiguous request failure settles", async () => {
+  const ref = createReplicaRef();
+  const logoutResponse = createDeferred<Response>();
+  const fetchMock = vi.fn()
+    .mockResolvedValueOnce(jsonResponse({
+      encryptedReplica: createReplicaEnvelope(),
+      replicaAad: createReplicaAad(),
+      replicaKeyEnvelope: createReplicaKeyEnvelope(),
+      replicaRef: ref,
+      state: "ready",
+    }))
+    .mockImplementationOnce(() => logoutResponse.promise);
+
+  installBrowserVaultCryptoMocks();
+  vi.stubGlobal("fetch", fetchMock);
+
+  const rendered = await renderClientComponent(
+    createAuthenticatedBrowserVaultElement(createElement(BrowserVaultStatusProbe)),
+    { requireButton: false },
+  );
+
+  await waitForText(rendered.container, `ready:${ref.dataVersion}`);
+  assert.ok(getBrowserVaultReadySnapshot());
+
+  let logoutPromise!: Promise<void>;
+  act(() => {
+    logoutPromise = logoutHostedAppSession();
+  });
+
+  await waitForText(rendered.container, "empty:none");
+  assert.equal(getBrowserVaultReadySnapshot(), null);
+  assert.equal(mocks.publishBrowserVaultSessionEnding.mock.calls.length, 1);
+  assert.equal(mocks.publishBrowserVaultSessionInvalidation.mock.calls.length, 0);
+
+  logoutResponse.reject(new TypeError("network unavailable"));
+  await act(async () => {
+    await assert.rejects(logoutPromise, /network unavailable/u);
+  });
+
+  assert.equal(mocks.publishBrowserVaultSessionInvalidation.mock.calls.length, 1);
+  assert.equal(mocks.reloadCurrentHostedAuthDocument.mock.calls.length, 1);
+  assert.equal(rendered.container.textContent, "empty:none");
 
   await rendered.cleanup();
 });
@@ -1126,12 +1180,14 @@ function jsonResponse(value: unknown): Response {
 }
 
 function createDeferred<T>() {
+  let reject: (reason?: unknown) => void = () => {};
   let resolve: (value: T) => void = () => {};
-  const promise = new Promise<T>((resolvePromise) => {
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    reject = rejectPromise;
     resolve = resolvePromise;
   });
 
-  return { promise, resolve };
+  return { promise, reject, resolve };
 }
 
 function createReplicaRef() {
