@@ -1,8 +1,8 @@
 # PR 548 ReviewGPT lifecycle fixes
 
-Status: active
+Status: completed
 Created: 2026-07-10
-Updated: 2026-07-11
+Updated: 2026-07-12
 
 ## Goal
 
@@ -47,10 +47,20 @@ Success criteria:
 ## Verification
 
 - `assistant-codex-runtime.test.ts` focused lifecycle selectors: 3 passed,
-  160 skipped, one worker.
-- `packages/assistant-engine/tsconfig.typecheck.json`: passed.
-- Completion audits and exact-head ReviewGPT remain deferred while the recovery
-  controller's RAM/browser guard is active.
+  162 skipped, one worker.
+- Hosted runtime timing/redaction selectors: 2 passed, 29 skipped, one worker.
+- `packages/assistant-engine/tsconfig.typecheck.json` and
+  `packages/assistant-runtime/tsconfig.typecheck.json`: passed.
+- Assistant-engine owner coverage: 143 test files passed, 1 skipped; 2,045 tests
+  passed, 4 skipped; 89.46% statements, 80.76% branches, 94.01% functions,
+  and 89.49% lines.
+- `git diff --check`: passed.
+- Security/privacy re-audit: clean. Coverage-write follow-up: no edits and no
+  remaining accepted or actionable proof findings; the concurrent teardown
+  branch is exercised directly.
+- Parent final scope/call-path review: no remaining accepted or actionable
+  findings. The PR-lane ReviewGPT slot and clean-machine CI remain external
+  merge-readiness gates on the stable pushed head.
 
 ## Decisions
 
@@ -59,3 +69,7 @@ Success criteria:
 - The lifecycle simplification is accepted only if existing behavior tests
   prove the stopped prior process can replace the pending scalar without adding
   another owner or cleanup path.
+- The local-ahead history is accepted as the one lifecycle-fix commit plus the
+  previously completed ordinary `main` reconciliation; remerge inspection found
+  no manual conflict-resolution delta and no unresolved GitHub review thread.
+Completed: 2026-07-12
