@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { describe, test } from "vitest";
+import { describe, test, vi } from "vitest";
 
 import {
   applyHostedWebContractMigrations,
@@ -144,7 +144,7 @@ describe("hosted web production migration guard", () => {
     for (const message of [
       "Missing HOSTED_WEB_VERCEL_TOKEN",
       "Malformed Vercel response",
-      "Standard or All Deployment Protection is required",
+      "Standard or All Except Custom Domains protection is required",
     ]) {
       let commandRan = false;
       await assert.rejects(
@@ -167,6 +167,21 @@ describe("hosted web production migration guard", () => {
       );
       assert.equal(commandRan, false);
     }
+  });
+
+  test("preflights the canonical session key before verification or migrations", async () => {
+    let verified = false;
+    let commands = 0;
+    await assert.rejects(
+      () => runHostedWebProductionMigrationsIfNeeded(
+        { VERCEL: "1", VERCEL_ENV: "production", VERCEL_GIT_COMMIT_REF: "main", HOSTED_APP_SESSION_HMAC_KEY: "not-canonical" },
+        async () => { commands += 1; },
+        async () => { verified = true; return "verified"; },
+      ),
+      /HOSTED_APP_SESSION_HMAC_KEY/u,
+    );
+    assert.equal(verified, false);
+    assert.equal(commands, 0);
   });
 
   test("blocks future destructive Prisma migrations before Vercel deploy promotion", async () => {
@@ -748,8 +763,48 @@ describe("hosted web production migration guard", () => {
               return jsonFetchResponse(response);
             },
           ),
-        /Standard or All Deployment Protection/u,
+        /Standard or All Except Custom Domains protection/u,
       );
+    }
+  });
+
+  test("rejects an alias deployment from a different project before protection lookup", async () => {
+    const environment = {
+      HOSTED_WEB_PRODUCTION_BASE_URL: "https://www.withmurph.ai",
+      HOSTED_WEB_VERCEL_PROJECT_ID: "expected-project",
+      HOSTED_WEB_VERCEL_TOKEN: "token",
+    };
+    let projectRequested = false;
+    await assert.rejects(
+      () => verifyVercelProductionDeploymentProtection(environment, async (url) => {
+        if (url.includes("/v4/aliases/")) return jsonFetchResponse({ deploymentId: "dpl_123" });
+        if (url.includes("/v13/deployments/")) return jsonFetchResponse({ projectId: "actual-project" });
+        projectRequested = true;
+        return jsonFetchResponse({ ssoProtection: { deploymentType: "all_except_custom_domains" } });
+      }),
+      /different project/u,
+    );
+    assert.equal(projectRequested, false);
+  });
+
+  test("aborts a hung Vercel fetch at the bounded deadline", async () => {
+    vi.useFakeTimers();
+    try {
+      let aborted = false;
+      const pendingFetch = (_url: string, init?: { signal?: AbortSignal }) => new Promise<never>((_resolve, reject) => {
+        init?.signal?.addEventListener("abort", () => { aborted = true; reject(new Error("aborted")); }, { once: true });
+      });
+      const request = resolveVercelProductionAliasSha({
+        HOSTED_WEB_PRODUCTION_BASE_URL: "https://www.withmurph.ai",
+        HOSTED_WEB_VERCEL_PROJECT_ID: "project-id",
+        HOSTED_WEB_VERCEL_TOKEN: "token",
+      }, pendingFetch);
+      const outcome = request.catch((error: unknown) => error);
+      await vi.advanceTimersByTimeAsync(15_000);
+      await assert.match((await outcome as Error).message, /timed out after 15000ms/u);
+      assert.equal(aborted, true);
+    } finally {
+      vi.useRealTimers();
     }
   });
 

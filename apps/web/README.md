@@ -533,8 +533,8 @@ is required for this cutover.
 
 Before deploying, enable Vercel Authentication with Standard Protection (or
 `All Except Custom Domains`) for the project. Do not use `All Deployments`,
-which would make the custom
-production domain public while protecting every generated production URL,
+which would also protect (and make private) the custom production domain,
+while protecting every generated production URL,
 including URLs for historical deployments that still accept legacy sessions.
 With the secure `HOSTED_WEB_VERCEL_*` operator environment loaded, require this
 check to pass before cutover:

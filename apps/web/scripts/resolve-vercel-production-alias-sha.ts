@@ -133,7 +133,7 @@ export async function verifyVercelProductionDeploymentProtection(
     || !PROTECTED_PRODUCTION_DEPLOYMENT_TYPES.has(deploymentType)
   ) {
     throw new Error(
-      "Vercel Standard or All Deployment Protection must protect generated production deployment URLs before the strict app-session cutover.",
+      "Vercel Standard or All Except Custom Domains protection must protect generated production deployment URLs before the strict app-session cutover.",
     );
   }
 
