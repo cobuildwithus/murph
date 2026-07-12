@@ -1,5 +1,5 @@
 {
-  "catalogHash": "sha256:6688264c2d51a3944acc188e725e95e2d897228e05bf639418bcd1e7311d5c9f",
+  "catalogHash": "sha256:c999a3116f9dd14068fa17a76c09156826c51a6850ce762d4466487b7dbe14e1",
   "generatedAt": null,
   "items": [
     {
@@ -19293,7 +19293,23 @@
       ],
       "equipment": [],
       "id": "EX651",
-      "images": [],
+      "images": [
+        {
+          "alt": "The exerciser holds a left forearm side plank with feet stacked, hips lifted, and the top arm vertical.",
+          "step": "Set the side plank",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/583536da-b867-49a0-9f15-3f2ec401cb00/public"
+        },
+        {
+          "alt": "The exerciser keeps the side plank steady while bending and lifting only the top leg.",
+          "step": "Unstack and bend",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/0f8f7547-aacf-4d3b-3b0c-b0d9446bb200/public"
+        },
+        {
+          "alt": "The exerciser drives the bent top knee forward toward the chest while the bottom leg and pelvis stay stable.",
+          "step": "Drive the knee",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/92d5c775-0b30-4a54-deb9-59eab2795e00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "advanced",
       "modality": "Strength",
