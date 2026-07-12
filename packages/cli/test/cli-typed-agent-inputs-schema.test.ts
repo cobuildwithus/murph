@@ -661,6 +661,21 @@ test('murph age submitted-data commands stay in generated agent artifacts', asyn
   assert.deepEqual(commandConfigOptionNames(configSchema, 'age scaffold'), [])
 })
 
+test('group shared accepts the separately consented sleep duration projection kind', async () => {
+  const schema = await loadCommandSchema('group shared')
+  const kindSchema = requireRecord(
+    schemaProperties(schema, 'options').kind,
+    'group shared options.kind',
+  )
+  const kindItems = requireRecord(kindSchema.items, 'group shared options.kind.items')
+  const projectionKinds = requireArray(
+    kindItems.enum,
+    'group shared options.kind.items.enum',
+  )
+
+  assert.equal(projectionKinds.includes('sleep-duration-days.v0'), true)
+})
+
 test('patch-style edit commands expose typed fields instead of generic patch flags', async () => {
   const commands = await loadFullLlmCommands()
   const generatedTypes = await readFile(
