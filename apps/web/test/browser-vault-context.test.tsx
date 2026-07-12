@@ -152,11 +152,9 @@ test("browser-vault provider skips the session route when auth context is anonym
   vi.stubGlobal("fetch", fetchMock);
 
   const rendered = await renderClientComponent(
-    createElement(
-      BrowserVaultProvider,
-      { authenticated: false },
-      createElement(BrowserVaultStatusProbe),
-    ),
+    <BrowserVaultProvider authenticated={false}>
+      <BrowserVaultStatusProbe />
+    </BrowserVaultProvider>,
     { requireButton: false },
   );
 
@@ -173,11 +171,9 @@ test("browser-vault provider refresh skips the session route when auth context i
   vi.stubGlobal("fetch", fetchMock);
 
   const rendered = await renderClientComponent(
-    createElement(
-      BrowserVaultProvider,
-      { authenticated: false },
-      createElement(BrowserVaultStatusProbe),
-    ),
+    <BrowserVaultProvider authenticated={false}>
+      <BrowserVaultStatusProbe />
+    </BrowserVaultProvider>,
     { requireButton: false },
   );
 
@@ -315,16 +311,14 @@ test("current dashboard authority hides ready data even while root auth remains 
   function AuthTransitionHarness() {
     const [dashboardAuthenticated, setDashboardAuthenticated] = useState(true);
 
-    return createElement(
-      AuthProvider,
-      { authenticated: true },
-      createElement(
-        BrowserVaultProvider,
-        { authenticated: dashboardAuthenticated },
-        createElement(BrowserVaultStatusProbe, {
-          onClick: () => setDashboardAuthenticated(false),
-        }),
-      ),
+    return (
+      <AuthProvider authenticated>
+        <BrowserVaultProvider authenticated={dashboardAuthenticated}>
+          <BrowserVaultStatusProbe
+            onClick={() => setDashboardAuthenticated(false)}
+          />
+        </BrowserVaultProvider>
+      </AuthProvider>
     );
   }
 
@@ -1053,10 +1047,10 @@ test("aborting an older load cannot clobber a newer in-flight load", async () =>
 });
 
 function createAuthenticatedBrowserVaultElement(child: ReactNode) {
-  return createElement(
-    AuthProvider,
-    { authenticated: true },
-    createElement(BrowserVaultProvider, { authenticated: true }, child),
+  return (
+    <AuthProvider authenticated>
+      <BrowserVaultProvider authenticated>{child}</BrowserVaultProvider>
+    </AuthProvider>
   );
 }
 
