@@ -13,6 +13,7 @@ import {
   type ClinicalRawManifest,
   type ClinicalSourceSystem,
 } from "@murphai/clinical-records";
+import type { EventImportDecision } from "@murphai/contracts";
 import {
   applyCanonicalWriteBatch,
   importEventBatch,
@@ -32,6 +33,9 @@ type ClinicalImporterModule = {
       relativePath: string;
     }>;
   }): ClinicalImportPlan;
+  clinicalPlanToEventImportDecisions(
+    input: ClinicalImportPlan,
+  ): EventImportDecision[];
 };
 
 export interface ClinicalFhirSnapshotPage {
@@ -91,6 +95,10 @@ export async function importClinicalFhirSnapshot(
       relativePath: page.relativePath,
     })),
   });
+  const executableDecisions = importer.clinicalPlanToEventImportDecisions(plan);
+  const reviewDecisionCount = plan.decisions.filter(
+    (decision) => decision.action === "review",
+  ).length;
   const rawContents = [
     ...prepared.pages.map((page) => ({
       allowExistingMatch: true,
@@ -119,11 +127,6 @@ export async function importClinicalFhirSnapshot(
     summary: "Persist clinical FHIR retrieval snapshot",
     vaultRoot: input.vaultRoot,
   });
-
-  const executableDecisions = plan.decisions.flatMap((decision) =>
-    decision.action === "review" ? [] : [{ ...decision }]
-  );
-  const reviewDecisionCount = plan.decisions.length - executableDecisions.length;
 
   const canonical = executableDecisions.length === 0
     ? {

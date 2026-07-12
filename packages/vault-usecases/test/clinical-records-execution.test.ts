@@ -86,6 +86,107 @@ describe("importClinicalFhirSnapshot", () => {
     })).rejects.toThrow();
   });
 
+  it("applies importer-owned review holds across delayed clinical revisions", async () => {
+    const resourceId = "review-held-heart-rate";
+    const initial = await createSnapshotInput({
+      pages: [{
+        content: fhirBundle([{
+          ...heartRateObservation(resourceId),
+          meta: { lastUpdated: "2026-07-10T12:01:00.000Z" },
+        }]),
+        resourceType: "Observation",
+      }],
+      resourceTypes: ["Observation"],
+    });
+    const review = {
+      ...initial,
+      fetchedAt: "2026-07-10T12:03:00.000Z",
+      pages: [{
+        content: fhirBundle([{
+          ...heartRateObservation(resourceId),
+          meta: { lastUpdated: "2026-07-10T12:03:00.000Z" },
+          modifierExtension: [{
+            url: "https://ehr.example.test/fhir/StructureDefinition/negated",
+            valueBoolean: true,
+          }],
+        }]),
+        resourceType: "Observation",
+      }],
+      retrievalJobId: "retrieval-job-2",
+    } satisfies ClinicalFhirSnapshotImportInput;
+    const delayed = {
+      ...initial,
+      fetchedAt: "2026-07-10T12:02:00.000Z",
+      pages: [{
+        content: fhirBundle([{
+          ...heartRateObservation(resourceId),
+          meta: { lastUpdated: "2026-07-10T12:02:00.000Z" },
+        }]),
+        resourceType: "Observation",
+      }],
+      retrievalJobId: "retrieval-job-3",
+    } satisfies ClinicalFhirSnapshotImportInput;
+    const recovery = {
+      ...initial,
+      fetchedAt: "2026-07-10T12:04:00.000Z",
+      pages: [{
+        content: fhirBundle([{
+          ...heartRateObservation(resourceId),
+          meta: { lastUpdated: "2026-07-10T12:04:00.000Z" },
+        }]),
+        resourceType: "Observation",
+      }],
+      retrievalJobId: "retrieval-job-4",
+    } satisfies ClinicalFhirSnapshotImportInput;
+
+    await importClinicalFhirSnapshot(initial);
+    const hold = await importClinicalFhirSnapshot(review);
+    const delayedResult = await importClinicalFhirSnapshot(delayed);
+
+    expect(hold).toEqual(expect.objectContaining({
+      canonical: expect.objectContaining({ retractedCount: 1 }),
+      executableDecisionCount: 1,
+      reviewDecisionCount: 1,
+    }));
+    expect(delayedResult.canonical).toEqual(expect.objectContaining({
+      applied: false,
+      skippedExistingCount: 1,
+    }));
+    expect(await findEventByExternalRef({
+      vaultRoot: initial.vaultRoot,
+      system: `epic-fhir-${FHIR_BASE_URL_HASH}-${PATIENT_ID_HASH}`,
+      resourceType: "observation",
+      resourceId,
+    })).toBeNull();
+
+    const recoveryResult = await importClinicalFhirSnapshot(recovery);
+    expect(recoveryResult.canonical.createdCount).toBe(1);
+    expect(await findEventByExternalRef({
+      vaultRoot: initial.vaultRoot,
+      system: `epic-fhir-${FHIR_BASE_URL_HASH}-${PATIENT_ID_HASH}`,
+      resourceType: "observation",
+      resourceId,
+    })).toEqual(expect.objectContaining({
+      externalRef: expect.objectContaining({ version: "2026-07-10T12:04:00.000Z" }),
+    }));
+  });
+
+  it("rejects a supported review without a source revision before raw persistence", async () => {
+    const observation: Record<string, unknown> = heartRateObservation("missing-source-revision");
+    delete observation.meta;
+    const input = await createSnapshotInput({
+      pages: [{
+        content: fhirBundle([observation]),
+        resourceType: "Observation",
+      }],
+      resourceTypes: ["Observation"],
+    });
+
+    await expect(importClinicalFhirSnapshot(input))
+      .rejects.toThrow("has no comparable source revision");
+    await expectClinicalRawSnapshotAbsent(input);
+  });
+
   it("rejects a wrong-patient page before persisting raw evidence", async () => {
     const input = await createSnapshotInput({
       pages: [{
