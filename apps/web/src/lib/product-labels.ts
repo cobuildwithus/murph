@@ -13,6 +13,7 @@ const DEFAULT_POOL_MAX = 3;
 const DEFAULT_POOL_STATEMENT_TIMEOUT_MS = 8_000;
 const PRODUCT_LABEL_BRAND_INDEX_TTL_MS = 10 * 60 * 1000;
 const MAX_PRODUCT_LABEL_BRAND_SCOPES = 12;
+const PRODUCT_LABEL_GTIN_LENGTHS = new Set([8, 12, 13, 14]);
 const PRODUCT_CONTAMINANT_ALERT_LIMIT = 5;
 const PRODUCT_CONTAMINANT_OBSERVATION_LIMIT = 20;
 const PRODUCT_CONTAMINANT_CONCERN_RANK: Record<
@@ -355,12 +356,14 @@ export function createProductLabelsQueries(
     },
 
     async search(input) {
-      const q = input.q.trim();
+      const q = brandScoping
+        ? normalizeProductLabelSearchInput(input.q)
+        : input.q.trim();
       const searchQ = removeWeakProductLabelQueryTokens(q, weakQueryTokens);
       const genericOnly =
         input.genericOnly === true && genericSearchDataOrigins !== null;
 
-      if (!q) {
+      if (!q || !searchQ) {
         return [];
       }
 
@@ -1559,6 +1562,7 @@ function hasLongerContainingBrandMatch(
   return matches.some(
     (other) =>
       other !== entry &&
+      other.normalizedBrand.length > entry.normalizedBrand.length &&
       containsNormalizedPhrase(other.normalizedBrand, entry.normalizedBrand),
   );
 }
@@ -1644,10 +1648,11 @@ function removeWeakProductLabelQueryTokens(
     (token) => !weakQueryTokens.has(token),
   );
 
-  if (
-    strongQueryTokens.length === 0 ||
-    strongQueryTokens.length === queryTokens.length
-  ) {
+  if (strongQueryTokens.length === 0) {
+    return "";
+  }
+
+  if (strongQueryTokens.length === queryTokens.length) {
     return q;
   }
 
@@ -1699,10 +1704,20 @@ function containsNormalizedEdgePhrase(haystack: string, needle: string): boolean
 }
 
 function normalizeProductLabelSearchPhrase(value: string): string {
-  return value
+  return normalizeProductLabelSearchInput(value)
+    .normalize("NFKD")
+    .replace(/\p{M}+/gu, "")
     .toLowerCase()
-    .replace(/'/gu, "")
     .replace(/[^a-z0-9]+/gu, " ")
+    .trim()
+    .replace(/\s+/gu, " ");
+}
+
+function normalizeProductLabelSearchInput(value: string): string {
+  return value
+    .normalize("NFKC")
+    .replace(/['‘’‛ʻʼʹ]/gu, "")
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
     .trim()
     .replace(/\s+/gu, " ");
 }
@@ -1722,7 +1737,7 @@ function buildUpcLookupVariants(upc: string): string[] {
 
   const variants = new Set([upc]);
   const addVariant = (variant: string) => {
-    if (variant) {
+    if (PRODUCT_LABEL_GTIN_LENGTHS.has(variant.length)) {
       variants.add(variant);
     }
   };

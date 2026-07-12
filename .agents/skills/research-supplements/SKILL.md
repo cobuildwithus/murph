@@ -40,6 +40,7 @@ Never print `.env`, `.env.local`, database URLs, credentials, tokens, or raw con
 
 4. **Dry-run against the DB**
    - Read `.agents/skills/research-supplements/references/database-contract.md` before writing.
+   - For whole-corpus cleanup, run `supplement-db-audit.mjs` first. It audits the complete table in PostgreSQL `READ ONLY` transactions and prints aggregate JSON by default; use `--candidate-limit <n>` only when a bounded ID-only review sample is needed. Treat missing normalized arrays and duplicate groups as origin-specific review candidates, not automatic corruption or deletion proof.
    - Always run `supplement-db-brand-site-labels.mjs dry-run` before `upsert`.
    - Treat dry-run `productionBlockedRows` as blockers. The helper blocks production upserts for missing `ingredientRows`, missing `servingSizes`, manual-review rows, obvious non-standalone products, likely food/snack products such as protein bars, oversized page-body text, raw page text, or oversized search text.
    - For existing-row cleanup, run `supplement-db-brand-site-repair-preview.mjs` first. It is read-only and writes review artifacts showing proposed compact search text, parser coverage, normalized row additions, and superfluous field candidates. Do not write repair updates until the preview has been reviewed.
@@ -92,6 +93,7 @@ Report skipped products and why. Put snack, protein-bar, ready-to-eat, and ready
 
 ## Resources
 
+- `scripts/supplement-db-audit.mjs`: deterministic whole-table schema, identity, canonical-link, label-shape, provenance, duplicate-candidate, search-document, timestamp, and product-test integrity audit; read-only with bounded optional candidate IDs.
 - `scripts/supplement-db-brand-site-labels.mjs`: DB schema inspect, dry-run, and upsert helper for `supplements` rows where `data_origin = 'brand_site'`.
 - `scripts/supplement-db-brand-site-repair-preview.mjs`: read-only existing-row repair preview for compact search text, normalized facts parsing, automated-backfill readiness, and official refetch/OCR queue artifacts.
 - `scripts/supplement-db-brand-site-refetch-preview.mjs`: read-only recovery-queue refetch preview for official product JSON/media evidence, reusable Shopify variant/Supplement Facts image selection, and optional exact-UPC DSLD structured-facts hydration.
