@@ -21,6 +21,8 @@ For user-facing `apps/web` work, apply the Fable-first routing in `agent-docs/op
 
 ## Sequence
 
+**CI and ReviewGPT are concurrent gates.** As soon as an exact PR head is pushed and no PR-specific code, test, config, or durable-doc change is already known to be required, start its ReviewGPT round. Pending or running CI is never a reason to queue or delay ReviewGPT. If CI later finds a defect that requires a new PR head, fix it, push it, and review the corrected head. Do not serialize the two gates.
+
 1. Finish the functional implementation first.
    During local iteration, prefer the narrowest truthful verification loop for the task. In practice that is usually `pnpm test:diff <path ...>` for package, app, or low-risk repo-internal workflow/tooling work, or `pnpm verify:acceptance` when the task already clearly needs the full lane.
    A truthful `pnpm test:diff <path ...>` already typechecks the touched owners and reverse dependents; do not run a separate root `pnpm typecheck` before it unless the verification matrix selects the full-workspace fallback.
