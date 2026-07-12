@@ -631,6 +631,50 @@ export function markPendingDeviceSyncJobsDeadForAccount(
   return result.changes ?? 0;
 }
 
+export function markPendingDeviceSyncJobsDeadForAccountIfCurrent(
+  database: DatabaseSync,
+  input: {
+    accountId: string;
+    code: string;
+    expectedLocalConnectionRevision: number;
+    expectedStatus: "disconnected" | "reauthorization_required";
+    message: string;
+    now: string;
+  },
+): number {
+  const result = database.prepare(`
+    update device_job
+    set status = 'dead',
+        lease_owner = null,
+        lease_expires_at = null,
+        last_error_code = ?,
+        last_error_message = ?,
+        finished_at = ?,
+        updated_at = ?
+    where account_id = ?
+      and status in ('queued', 'running')
+      and exists (
+        select 1
+        from device_connection
+        join device_observation_state
+          on device_observation_state.account_id = device_connection.id
+        where device_connection.id = device_job.account_id
+          and device_connection.status = ?
+          and device_observation_state.local_connection_revision = ?
+      )
+  `).run(
+    input.code,
+    input.message,
+    input.now,
+    input.now,
+    input.accountId,
+    input.expectedStatus,
+    input.expectedLocalConnectionRevision,
+  ) as { changes: number };
+
+  return result.changes ?? 0;
+}
+
 export function enqueueDeviceSyncJobInTransaction(
   database: DatabaseSync,
   input: DeviceSyncEnqueueJobInput,

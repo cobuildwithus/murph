@@ -944,7 +944,7 @@ test('device provider and account list tolerate partial local provider credentia
   }
 })
 
-test('device provider and account list reuse a healthy managed daemon without an explicit base URL', async () => {
+test('device provider and account operations reuse a healthy managed daemon without an explicit base URL', async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-device-cli-managed-local-'))
   const baseUrl = 'http://localhost:8788'
   const provider = 'whoop'
@@ -1005,22 +1005,32 @@ test('device provider and account list reuse a healthy managed daemon without an
   const getManagedDeviceSyncDaemonStatusMock = vi.fn(
     async (_input: { vault: string; baseUrl?: string }) => managedDaemonStatus,
   )
+  const ensureManagedDeviceSyncControlPlaneMock = vi.fn(
+    async (_input: { vault?: string; baseUrl?: string }) => managedControlPlane,
+  )
   const resolveExistingManagedDeviceSyncControlPlaneMock = vi.fn(
     async (_input: { vault: string; baseUrl?: string }) => managedControlPlane,
   )
   const startManagedDeviceSyncDaemonMock = vi.fn(async () => {
-    throw new Error('startManagedDeviceSyncDaemon should not be called for list commands.')
+    throw new Error('startManagedDeviceSyncDaemon should not be called for an existing healthy daemon.')
   })
   const listProvidersMock = vi.fn(async () => ({ providers: liveProviderList }))
   const listAccountsMock = vi.fn(async () => ({ accounts: liveAccountList }))
+  const showAccountMock = vi.fn(async () => ({ account: liveAccountList[0]! }))
+  const disconnectAccountMock = vi.fn(async () => ({
+    account: {
+      ...liveAccountList[0]!,
+      status: 'disconnected',
+    },
+  }))
   const createDeviceSyncClientMock = vi.fn(() => ({
     baseUrl,
     beginConnection: vi.fn(),
-    disconnectAccount: vi.fn(),
+    disconnectAccount: disconnectAccountMock,
     listAccounts: listAccountsMock,
     listProviders: listProvidersMock,
     reconcileAccount: vi.fn(),
-    showAccount: vi.fn(),
+    showAccount: showAccountMock,
   }))
   const readConfiguredDeviceSyncProviderConfigsMock = vi.fn(() => ({}))
   const listConfiguredDeviceSyncProviderNamesMock = vi.fn(() => [])
@@ -1034,6 +1044,7 @@ test('device provider and account list reuse a healthy managed daemon without an
 
       return {
         ...actual,
+        ensureManagedDeviceSyncControlPlane: ensureManagedDeviceSyncControlPlaneMock,
         getManagedDeviceSyncDaemonStatus: getManagedDeviceSyncDaemonStatusMock,
         resolveExistingManagedDeviceSyncControlPlane:
           resolveExistingManagedDeviceSyncControlPlaneMock,
@@ -1084,6 +1095,26 @@ test('device provider and account list reuse a healthy managed daemon without an
     assert.equal(accounts.provider, null)
     assert.equal(accounts.accounts[0]?.id, 'acct_whoop_01')
     assert.equal(accounts.accounts[0]?.provider, provider)
+
+    const disconnected = await services.disconnectAccount({
+      vault: vaultRoot,
+      accountId: liveAccountList[0]!.id,
+    })
+    assert.equal(disconnected.account.status, 'disconnected')
+    assert.deepEqual(ensureManagedDeviceSyncControlPlaneMock.mock.calls, [[{
+      vault: vaultRoot,
+      baseUrl: undefined,
+    }]])
+    assert.deepEqual(showAccountMock.mock.calls, [[liveAccountList[0]!.id]])
+    assert.deepEqual(disconnectAccountMock.mock.calls, [[
+      liveAccountList[0]!.id,
+      liveAccountList[0]!.connectedAt,
+    ]])
+    assert.equal(
+      showAccountMock.mock.invocationCallOrder[0]! <
+        disconnectAccountMock.mock.invocationCallOrder[0]!,
+      true,
+    )
 
     assert.equal(getManagedDeviceSyncDaemonStatusMock.mock.calls.length >= 2, true)
     assert.deepEqual(getManagedDeviceSyncDaemonStatusMock.mock.calls[0]?.[0], {
@@ -1218,7 +1249,7 @@ deviceControlPlaneTest(
 
       if (
         request.method === 'POST' &&
-        requestUrl.pathname === '/accounts/acct_whoop_01/disconnect'
+        requestUrl.pathname === '/accounts/acct_whoop_01/disconnect-if-connected-at'
       ) {
         respondJson(response, 200, {
           account: {

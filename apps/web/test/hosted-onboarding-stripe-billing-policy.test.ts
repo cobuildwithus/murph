@@ -41,7 +41,6 @@ import {
   prepareHostedMemberStripeBillingWrite,
   writeHostedMemberStripeBillingRefIfFreshTx,
   writeHostedMemberStripeBillingTx,
-  updateHostedMemberStripeBillingIfFreshTx,
 } from "@/src/lib/hosted-onboarding/stripe-billing-policy";
 
 describe("hosted onboarding stripe billing policy", () => {
@@ -1026,9 +1025,6 @@ describe("hosted onboarding stripe billing policy", () => {
     });
   });
 
-  it("keeps the legacy freshness-named export as an alias of the locked write helper", () => {
-    expect(updateHostedMemberStripeBillingIfFreshTx).toBe(writeHostedMemberStripeBillingTx);
-  });
 });
 
 function makeMemberSnapshot(overrides?: {

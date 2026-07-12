@@ -4,6 +4,7 @@ import type {
 } from '@murphai/operator-config/assistant-cli-contracts'
 import {
   resolveAssistantVoiceOptionElevenLabsVoiceId,
+  type AssistantPersonalityPreferences,
   type AssistantTonePreference,
   normalizeIanaTimeZone,
   resolveSystemTimeZone,
@@ -275,11 +276,13 @@ export interface AssistantCodexAttemptPlan {
 }
 
 export interface AssistantTurnPreferenceContext {
+  assistantPersonality: AssistantPersonalityPreferences | null
   assistantTone: AssistantTonePreference | null
   assistantVoice: string | null
 }
 
 const DEFAULT_ASSISTANT_TURN_PREFERENCE_CONTEXT: AssistantTurnPreferenceContext = {
+  assistantPersonality: null,
   assistantTone: null,
   assistantVoice: null,
 }
@@ -451,13 +454,22 @@ export async function resolveAssistantRouteTurnPlan(input: {
         })
       : []
   const resolvedChannel = input.input.channel ?? input.session.binding.channel
+  const audience = input.sharedPlan.conversationPolicy.audience
+  const privateInteractiveAudience =
+    audience.effectiveThreadIsDirect === true ||
+    (audience.effectiveThreadIsDirect === null &&
+      audience.bindingDelivery === null &&
+      audience.channel === null &&
+      audience.explicitTarget === null &&
+      audience.threadId === null)
   const diagnosticsPolicy = resolveAssistantDiagnosticsPolicy({
     channel: resolvedChannel,
     executionContext: input.input.executionContext,
   })
   const shouldInjectOnboardingGuidance =
     input.profile.promptProfile === 'conversation' &&
-    input.sharedPlan.onboardingGuidanceOpen
+    input.sharedPlan.onboardingGuidanceOpen &&
+    input.sharedPlan.conversationPolicy.audience.effectiveThreadIsDirect !== false
   const assistantToolNameAliases = null
   // Maintenance turns consume only the engine-supplied conversation evidence
   // plus canonical memory; the context snapshot (which carries health
@@ -549,6 +561,11 @@ export async function resolveAssistantRouteTurnPlan(input: {
               promptCapabilityAvailability.assistantKnowledgeToolsAvailable,
             assistantSupportedExperimentProtocols,
             assistantToolNameAliases,
+            assistantPersonality:
+              input.profile.toolProfile === 'provider-turn' &&
+              privateInteractiveAudience
+                ? preferenceContext.assistantPersonality
+                : null,
             assistantTone: preferenceContext.assistantTone,
             cliAccess: input.sharedPlan.cliAccess,
             channel: resolvedChannel,
@@ -1032,11 +1049,13 @@ export async function resolveAssistantTurnPreferenceContext(
   try {
     const preferences = await readPreferencesDocument(vaultRoot)
     return {
+      assistantPersonality: preferences.assistant?.personality ?? null,
       assistantTone: preferences.assistant?.tone ?? null,
       assistantVoice: preferences.assistant?.voice ?? null,
     }
   } catch {
     return {
+      assistantPersonality: null,
       assistantTone: null,
       assistantVoice: null,
     }

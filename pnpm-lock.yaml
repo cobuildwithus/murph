@@ -67,8 +67,8 @@ importers:
         specifier: ^0.1.15
         version: 0.1.15
       '@cobuild/review-gpt':
-        specifier: ^0.5.102
-        version: 0.5.102(@cfworker/json-schema@4.1.1)(typescript@5.9.3)
+        specifier: ^0.5.104
+        version: 0.5.104(@cfworker/json-schema@4.1.1)(typescript@5.9.3)
       '@murphai/health-metrics':
         specifier: workspace:*
         version: link:packages/health-metrics
@@ -194,8 +194,8 @@ importers:
         specifier: workspace:*
         version: link:../../packages/runtime-state
       '@onkernel/sdk':
-        specifier: ^0.68.0
-        version: 0.68.0
+        specifier: ^0.76.0
+        version: 0.76.0
       '@prisma/adapter-pg':
         specifier: ^7.8.0
         version: 7.8.0
@@ -208,9 +208,6 @@ importers:
       '@privy-io/react-auth':
         specifier: ^3.24.0
         version: 3.24.0(@solana-program/system@0.10.0(@solana/kit@5.5.1(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@5.0.10)))(@solana-program/token@0.9.0(@solana/kit@5.5.1(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@5.0.10)))(@solana/kit@5.5.1(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@5.0.10))(@solana/sysvars@5.5.1(typescript@5.9.3))(@tanstack/query-core@5.95.2)(@tanstack/react-query@5.95.2(react@19.2.6))(@types/react@19.2.14)(@vercel/functions@3.4.6(@aws-sdk/credential-provider-web-identity@3.972.13))(bufferutil@4.1.0)(css-to-react-native@3.2.0)(immer@11.1.8)(react-dom@19.2.6(react@19.2.6))(react@19.2.6)(typescript@5.9.3)(use-sync-external-store@1.4.0(react@19.2.6))(utf-8-validate@5.0.10)(zod@4.4.3)
-      '@radix-ui/react-dialog':
-        specifier: ^1.1.15
-        version: 1.1.15(@types/react-dom@19.2.3(@types/react@19.2.14))(@types/react@19.2.14)(react-dom@19.2.6(react@19.2.6))(react@19.2.6)
       '@temporalio/client':
         specifier: ~1.16.3
         version: 1.16.3
@@ -484,6 +481,9 @@ importers:
       '@murphai/assistantd':
         specifier: workspace:*
         version: link:../assistantd
+      '@murphai/clinical-records':
+        specifier: workspace:*
+        version: link:../clinical-records
       '@murphai/contracts':
         specifier: workspace:*
         version: link:../contracts
@@ -575,6 +575,15 @@ importers:
       typescript:
         specifier: ^5.9.3
         version: 5.9.3
+
+  packages/clinical-records:
+    dependencies:
+      '@murphai/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+      zod:
+        specifier: ^4.4.3
+        version: 4.4.3
 
   packages/cloudflare-hosted-control:
     dependencies:
@@ -669,6 +678,9 @@ importers:
       '@junction-api/sdk':
         specifier: 1.2.0
         version: 1.2.0
+      '@murphai/clinical-records':
+        specifier: workspace:*
+        version: link:../clinical-records
       '@murphai/contracts':
         specifier: workspace:*
         version: link:../contracts
@@ -729,6 +741,9 @@ importers:
 
   packages/importers:
     dependencies:
+      '@murphai/clinical-records':
+        specifier: workspace:*
+        version: link:../clinical-records
       '@murphai/contracts':
         specifier: workspace:*
         version: link:../contracts
@@ -741,6 +756,10 @@ importers:
       zod:
         specifier: ^4.4.3
         version: 4.4.3
+    devDependencies:
+      '@medplum/fhirtypes':
+        specifier: ^5.1.24
+        version: 5.1.24
 
   packages/inbox-services:
     dependencies:
@@ -1289,8 +1308,8 @@ packages:
     resolution: {integrity: sha512-CjzP5OHu6RhOOjmPl/1djZNVEbjttt62rBSzvuPK7u9NrZ37F2lkHT+QmZ4Lb+ZDmMhPTqlwdyqnzwD0Gkhm1Q==}
     hasBin: true
 
-  '@cobuild/review-gpt@0.5.102':
-    resolution: {integrity: sha512-VmuiWx4Pzmy0w/45FYLm5hk9+OmzSiO0EpDC9/uiD/tUGNBmJbMeDEuu56IsKd816CrwPSJlddwqb6+SWWsvOw==}
+  '@cobuild/review-gpt@0.5.104':
+    resolution: {integrity: sha512-qjc8ItJhoB6S53fZX4Oowcj9WyjkVDVbIJ/kTPfOzqS0a33/rI7bEYPUuar1CI/Q6VqquM5ugrdnKgUhcngaww==}
     hasBin: true
 
   '@coinbase/cdp-sdk@1.48.3':
@@ -2037,6 +2056,10 @@ packages:
       react: ^17.0.2 || ^18.0.0 || ^19.0
       react-dom: ^17.0.2 || ^18.0.0 || ^19.0
 
+  '@medplum/fhirtypes@5.1.24':
+    resolution: {integrity: sha512-22TsFeSJOzchtAZdqfKBV12hvgari477BnHI6Lx9ZrX3kgnCjH79MKrfS5B8SchEKDQ8iVjow1Px9RZihKX5AQ==}
+    engines: {node: ^22.18.0 || >=24.2.0}
+
   '@metamask/eth-json-rpc-provider@1.0.1':
     resolution: {integrity: sha512-whiUMPlAOrVGmX8aKYVPvlKyG4CpQXiNNyt74vE1xb5sPvmx5oA7B/kOi/JdBvhGQq97U1/AVdXEdk2zkP8qyA==}
     engines: {node: '>=14.0.0'}
@@ -2442,8 +2465,8 @@ packages:
     resolution: {integrity: sha512-5N/X/FzlJaYfpaHwDC0YHzOzKDWa41s9t+4FpCDu4f9OMReds4JeNBaaWk9rlIzdKjh2M6AC5Q18ORfECRkHGA==}
     engines: {node: '>=18.0.0'}
 
-  '@onkernel/sdk@0.68.0':
-    resolution: {integrity: sha512-mTB/WX6eGem1Hv3/qCY9NhwzzEY1xN78YoM49RkdHelVeQoh5JVg15JD2rBjtIQ9hAe2Z7iz3edLn9ruMk7pMw==}
+  '@onkernel/sdk@0.76.0':
+    resolution: {integrity: sha512-jswopogv6wJEyvhPgZu+XJZgN87Heuo8nO+gpxsdvJtWFhUbAZME/oLjpIdtS57CRqHQLEf+p0+bavXCMYi72w==}
 
   '@open-draft/deferred-promise@2.2.0':
     resolution: {integrity: sha512-CecwLWx3rhxVQF6V4bAgPS5t+So2sTbPgAzafKkVizyi7tlwpcFpdFqq+wqF2OwNBmqFuu6tOyouTuxgpMfzmA==}
@@ -10443,7 +10466,7 @@ snapshots:
 
   '@cobuild/repo-tools@0.1.15': {}
 
-  '@cobuild/review-gpt@0.5.102(@cfworker/json-schema@4.1.1)(typescript@5.9.3)':
+  '@cobuild/review-gpt@0.5.104(@cfworker/json-schema@4.1.1)(typescript@5.9.3)':
     dependencies:
       '@cobuild/repo-tools': 0.1.15
       incur: 0.4.5(patch_hash=a4a70545bebf677aebb5ab89bf04d130ba1469d166e0e08e00096f4158f73a2e)
@@ -11163,6 +11186,8 @@ snapshots:
       react: 19.2.6
       react-dom: 19.2.6(react@19.2.6)
 
+  '@medplum/fhirtypes@5.1.24': {}
+
   '@metamask/eth-json-rpc-provider@1.0.1':
     dependencies:
       '@metamask/json-rpc-engine': 7.3.3
@@ -11659,7 +11684,7 @@ snapshots:
     dependencies:
       '@oclif/core': 4.8.1
 
-  '@onkernel/sdk@0.68.0': {}
+  '@onkernel/sdk@0.76.0': {}
 
   '@open-draft/deferred-promise@2.2.0': {}
 

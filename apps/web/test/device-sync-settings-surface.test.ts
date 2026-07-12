@@ -276,6 +276,8 @@ describe("buildHostedDeviceSyncSettingsSources", () => {
         sourceProviderSlug: null,
       }],
       connections: [buildConnection({
+        lastErrorCode: "PROVIDER_REVOKE_FAILED",
+        lastErrorMessage: "Provider revoke request failed during disconnect.",
         lastSyncCompletedAt: "2026-03-28T07:00:00.000Z",
         status: "disconnected",
       })],
@@ -290,7 +292,54 @@ describe("buildHostedDeviceSyncSettingsSources", () => {
       secondaryAction: null,
       state: "disconnected",
       statusLabel: "Disconnected",
+      tone: "muted",
     });
+    expect(source?.historicalResetIncomplete).toBeUndefined();
+  });
+
+  it("projects an unfinished historical reset on the disconnected source", () => {
+    const [source] = buildHostedDeviceSyncSettingsSources({
+      connectionSources: [{
+        connectionId: "dspc_junction_garmin",
+        firstSeenAt: "2026-04-01T08:00:00.000Z",
+        lastSeenAt: "2026-07-09T09:00:00.000Z",
+        resourceCount: 0,
+        sourceProviderSlug: "garmin",
+        status: "disconnected",
+      }],
+      connectTargets: [{
+        connectSourceId: "garmin",
+        connectTarget: "garmin",
+        provider: "junction",
+        sourceProviderSlug: "garmin",
+      }],
+      connections: [buildConnection({
+        id: "dspc_junction_garmin",
+        lastErrorCode: "HISTORICAL_RESET_REVOKE_FAILED",
+        lastErrorMessage: "Provider revoke did not complete while a historical data reset is pending. "
+          + "Remove the connection in the provider account before reconnecting.",
+        lastSyncCompletedAt: "2026-07-09T07:00:00.000Z",
+        provider: "junction",
+        status: "disconnected",
+        updatedAt: "2026-07-09T09:00:00.000Z",
+      })],
+      now: new Date("2026-07-09T12:00:00.000Z"),
+      providers: [JUNCTION_PROVIDER],
+    });
+
+    expect(source).toMatchObject({
+      detail: "This source is disconnected, but the last reset did not finish in your wearable provider account.",
+      guidance: "Remove the old connection in your wearable provider account, then connect it again here.",
+      headline: "Disconnected",
+      historicalResetIncomplete: true,
+      primaryAction: null,
+      secondaryAction: null,
+      state: "disconnected",
+      statusLabel: "Needs attention",
+      tone: "attention",
+    });
+    expect(JSON.stringify(source)).not.toContain("HISTORICAL_RESET_REVOKE_FAILED");
+    expect(JSON.stringify(source)).not.toContain("Provider revoke did not complete");
   });
 
   it("uses the Junction reconnect target when direct and Junction targets share a visible source", () => {
@@ -377,6 +426,59 @@ describe("buildHostedDeviceSyncSettingsSources", () => {
       statusLabel: "Needs access",
       tone: "attention",
     });
+  });
+
+  it("surfaces Junction historical connection resets as disconnect-first recovery", () => {
+    const [source] = buildHostedDeviceSyncSettingsSources({
+      connectionSources: [{
+        connectionId: "dspc_junction_garmin",
+        firstSeenAt: "2026-04-01T08:00:00.000Z",
+        lastSeenAt: "2026-07-09T08:50:48.000Z",
+        recoveryKind: "connection_reset",
+        resourceCount: 3,
+        sourceProviderSlug: "garmin",
+        status: "error",
+      }],
+      connectTargets: [{
+        connectSourceId: "garmin",
+        connectTarget: "garmin",
+        provider: "junction",
+        sourceProviderSlug: "garmin",
+      }],
+      connections: [buildConnection({
+        id: "dspc_junction_garmin",
+        lastSyncCompletedAt: "2026-07-09T07:00:00.000Z",
+        provider: "junction",
+        status: "active",
+        updatedAt: "2026-07-09T08:50:48.000Z",
+      })],
+      now: new Date("2026-07-09T12:00:00.000Z"),
+      providers: [JUNCTION_PROVIDER],
+    });
+
+    expect(source).toMatchObject({
+      detail: "Garmin needs a fresh connection before Murph can bring in its history.",
+      guidance: "Disconnect this source first, then connect it again to start a fresh sync.",
+      headline: "Access needs attention",
+      primaryAction: null,
+      providerLabel: "Garmin",
+      secondaryAction: { kind: "disconnect", label: "Disconnect" },
+      state: "active",
+      statusLabel: "Needs attention",
+      tone: "attention",
+    });
+    expect(source?.upstreamSources).toEqual([
+      {
+        connectProvider: "junction",
+        connectSourceId: "garmin",
+        connectTarget: "garmin",
+        providerLabel: "Garmin",
+        recoveryKind: "connection_reset",
+        resourceCount: 3,
+        sourceProviderSlug: "garmin",
+        status: "error",
+      },
+    ]);
   });
 
   it("targets the reconnect-required Junction source when another child source is connected", () => {

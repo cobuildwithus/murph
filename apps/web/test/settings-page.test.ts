@@ -36,6 +36,7 @@ const mocks = vi.hoisted(() => ({
     label: "Messages",
   })),
   HostedAssistantModelSettings: vi.fn((props: {
+    canUpgradeToEdge: boolean;
     initialModel: string;
     solAvailable: boolean;
   }) =>
@@ -245,7 +246,7 @@ test("SettingsPage metadata uses the shared preview image", async () => {
   assert.equal(metadata.description, "Manage your Murph account settings.");
   assert.deepEqual(metadata.openGraph?.images, [
     {
-      alt: "Murph — Wearable data, made useful.",
+      alt: "Health is hard. Don’t do it alone.",
       height: 630,
       type: "image/png",
       url: "/opengraph-image",
@@ -254,7 +255,7 @@ test("SettingsPage metadata uses the shared preview image", async () => {
   ]);
   assert.deepEqual(metadata.twitter?.images, [
     {
-      alt: "Murph — Wearable data, made useful.",
+      alt: "Health is hard. Don’t do it alone.",
       height: 630,
       type: "image/png",
       url: "/opengraph-image",
@@ -411,6 +412,7 @@ test("SettingsPage reads the app session and persisted account settings into the
       currentBillingPlanCode: "launch_monthly",
     }), undefined);
     expect(mocks.HostedAssistantModelSettings).toHaveBeenCalledWith({
+      canUpgradeToEdge: true,
       initialModel: "gpt-5.6-sol",
       solAvailable: true,
     }, undefined);
@@ -473,6 +475,61 @@ test("SettingsPage reads the app session and persisted account settings into the
       process.env.NEXT_PUBLIC_PRIVY_APP_ID = originalPrivyAppId;
     }
   }
+});
+
+test.each([
+  {
+    billingStatus: HostedBillingStatus.past_due,
+    label: "inactive",
+    suspendedAt: null,
+  },
+  {
+    billingStatus: HostedBillingStatus.active,
+    label: "suspended",
+    suspendedAt: new Date("2026-07-10T12:00:00.000Z"),
+  },
+])("SettingsPage hides Edge upgrade actions for an $label paid Pulse member", async ({
+  billingStatus,
+  suspendedAt,
+}) => {
+  mocks.getPrisma.mockReturnValue(mocks.prisma);
+  mocks.getHostedPrivySession.mockResolvedValue(null);
+  mocks.getHostedPageAuthSnapshot.mockResolvedValue({
+    authenticated: true,
+    authenticatedMember: {
+      billingStatus,
+      id: "member_123",
+      suspendedAt,
+    },
+    linkedAccounts: [],
+    memberLookup: null,
+    session: {
+      privyUserId: "did:privy:user_123",
+    },
+  });
+  mocks.readHostedMemberRoutingState.mockResolvedValue(null);
+  mocks.readHostedMemberStripeBillingRef.mockResolvedValue({
+    currentBillingPhase: "paid",
+    currentBillingPlanCode: "launch_monthly",
+    currentCheckoutOffer: "standard",
+    memberId: "member_123",
+    stripeCustomerId: "cus_123",
+    stripeSubscriptionId: "sub_123",
+  });
+  mocks.readHostedAccountSettingsSnapshot.mockResolvedValue(null);
+
+  const { default: SettingsPage } = await import("../app/(dashboard)/settings/page");
+
+  renderToStaticMarkup(await SettingsPage());
+
+  expect(mocks.HostedBillingSettings).toHaveBeenCalledWith(
+    expect.objectContaining({ canUpgradeToEdge: false }),
+    undefined,
+  );
+  expect(mocks.HostedAssistantModelSettings).toHaveBeenCalledWith(
+    expect.objectContaining({ canUpgradeToEdge: false }),
+    undefined,
+  );
 });
 
 test("SettingsPage passes a pending Murph text line to account settings", async () => {

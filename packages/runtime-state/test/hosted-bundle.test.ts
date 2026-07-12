@@ -2959,6 +2959,11 @@ test("hosted assistant hot-state snapshots restore as authoritative latest state
       "utf8",
     );
     await writeFile(
+      path.join(hotAssistantRoot, "context-snapshot.json"),
+      "{\"pendingDirtyDomains\":[\"health_context\"]}\n",
+      "utf8",
+    );
+    await writeFile(
       path.join(hotAssistantRoot, "state", "accepted-turn-inputs", "turn_state.json"),
       "{\"schema\":\"murph.assistant-active-turn-input-state.v1\"}\n",
       "utf8",
@@ -2978,7 +2983,7 @@ test("hosted assistant hot-state snapshots restore as authoritative latest state
     const hotSnapshot = await snapshotHostedAssistantRuntimeHotState({
       vaultRoot: hotVaultRoot,
     });
-    assert.equal(hotSnapshot.fileCount, 2);
+    assert.equal(hotSnapshot.fileCount, 3);
     assert.equal(
       readHostedBundleTextFile({
         bytes: hotSnapshot.bundle,
@@ -2987,6 +2992,15 @@ test("hosted assistant hot-state snapshots restore as authoritative latest state
         root: "vault",
       }),
       "{\"schema\":\"murph.assistant-active-turn-input-state.v1\"}\n",
+    );
+    assert.equal(
+      readHostedBundleTextFile({
+        bytes: hotSnapshot.bundle,
+        expectedKind: "vault",
+        path: ".runtime/operations/assistant/context-snapshot.json",
+        root: "vault",
+      }),
+      "{\"pendingDirtyDomains\":[\"health_context\"]}\n",
     );
     assert.equal(
       readHostedBundleTextFile({
@@ -3072,6 +3086,19 @@ test("hosted assistant hot-state snapshots restore as authoritative latest state
     assert.equal(
       await readFile(path.join(restored.vaultRoot, ".runtime", "operations", "assistant", "sessions", "session.json"), "utf8"),
       "{\"session\":\"latest\"}\n",
+    );
+    assert.equal(
+      await readFile(
+        path.join(
+          restored.vaultRoot,
+          ".runtime",
+          "operations",
+          "assistant",
+          "context-snapshot.json",
+        ),
+        "utf8",
+      ),
+      "{\"pendingDirtyDomains\":[\"health_context\"]}\n",
     );
     assert.equal(await readFile(path.join(restored.vaultRoot, "note.md"), "utf8"), "base note\n");
   } finally {

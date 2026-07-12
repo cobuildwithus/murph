@@ -1551,6 +1551,131 @@ describe('assistant channels runtime seam', () => {
     await handle.stop()
   })
 
+  it('restarts Linq typing after the provider message settle window', async () => {
+    vi.useFakeTimers()
+    runtimeMocks.startLinqChatTypingIndicator.mockResolvedValue(undefined)
+    runtimeMocks.stopLinqChatTypingIndicator.mockResolvedValue(undefined)
+
+    const handle = await startLinqTypingIndicator(
+      {
+        target: 'chat-typing',
+      },
+      {
+        env: {
+          LINQ_API_TOKEN: 'linq-token',
+        },
+      },
+    )
+
+    await handle.refreshAfterMessage?.()
+    await vi.advanceTimersByTimeAsync(999)
+    expect(runtimeMocks.startLinqChatTypingIndicator).toHaveBeenCalledTimes(1)
+
+    await vi.advanceTimersByTimeAsync(1)
+    expect(runtimeMocks.startLinqChatTypingIndicator).toHaveBeenCalledTimes(2)
+
+    await vi.advanceTimersByTimeAsync(44_999)
+    expect(runtimeMocks.startLinqChatTypingIndicator).toHaveBeenCalledTimes(2)
+    await vi.advanceTimersByTimeAsync(1)
+    expect(runtimeMocks.startLinqChatTypingIndicator).toHaveBeenCalledTimes(3)
+    await handle.stop()
+  })
+
+  it('cancels a pending post-message Linq typing restart on stop', async () => {
+    vi.useFakeTimers()
+    runtimeMocks.startLinqChatTypingIndicator.mockResolvedValue(undefined)
+    runtimeMocks.stopLinqChatTypingIndicator.mockResolvedValue(undefined)
+
+    const handle = await startLinqTypingIndicator(
+      {
+        target: 'chat-typing',
+      },
+      {
+        env: {
+          LINQ_API_TOKEN: 'linq-token',
+        },
+      },
+    )
+
+    await handle.refreshAfterMessage?.()
+    await vi.advanceTimersByTimeAsync(500)
+    await handle.stop()
+    await vi.advanceTimersByTimeAsync(1_000)
+
+    expect(runtimeMocks.startLinqChatTypingIndicator).toHaveBeenCalledTimes(1)
+    expect(runtimeMocks.stopLinqChatTypingIndicator).toHaveBeenCalledTimes(1)
+  })
+
+  it('coalesces overlapping post-message Linq typing restarts', async () => {
+    vi.useFakeTimers()
+    runtimeMocks.startLinqChatTypingIndicator.mockResolvedValue(undefined)
+    runtimeMocks.stopLinqChatTypingIndicator.mockResolvedValue(undefined)
+
+    const handle = await startLinqTypingIndicator(
+      {
+        target: 'chat-typing',
+      },
+      {
+        env: {
+          LINQ_API_TOKEN: 'linq-token',
+        },
+      },
+    )
+
+    await handle.refreshAfterMessage?.()
+    await vi.advanceTimersByTimeAsync(500)
+    await handle.refreshAfterMessage?.()
+    await vi.advanceTimersByTimeAsync(999)
+    expect(runtimeMocks.startLinqChatTypingIndicator).toHaveBeenCalledTimes(1)
+
+    await vi.advanceTimersByTimeAsync(1)
+    expect(runtimeMocks.startLinqChatTypingIndicator).toHaveBeenCalledTimes(2)
+    await handle.stop()
+  })
+
+  it('preserves a post-message Linq restart across an older in-flight refresh', async () => {
+    vi.useFakeTimers()
+    let resolveInFlightRefresh: () => void = () => {
+      throw new Error('in-flight refresh was not started')
+    }
+    runtimeMocks.startLinqChatTypingIndicator
+      .mockResolvedValueOnce(undefined)
+      .mockImplementationOnce(async () => {
+        await new Promise<void>((resolve) => {
+          resolveInFlightRefresh = resolve
+        })
+      })
+      .mockResolvedValue(undefined)
+    runtimeMocks.stopLinqChatTypingIndicator.mockResolvedValue(undefined)
+
+    const handle = await startLinqTypingIndicator(
+      {
+        target: 'chat-typing',
+      },
+      {
+        env: {
+          LINQ_API_TOKEN: 'linq-token',
+        },
+      },
+    )
+
+    vi.advanceTimersByTime(45_000)
+    await Promise.resolve()
+    expect(runtimeMocks.startLinqChatTypingIndicator).toHaveBeenCalledTimes(2)
+
+    await handle.refreshAfterMessage?.()
+    await vi.advanceTimersByTimeAsync(500)
+    resolveInFlightRefresh()
+    await Promise.resolve()
+    await Promise.resolve()
+
+    await vi.advanceTimersByTimeAsync(499)
+    expect(runtimeMocks.startLinqChatTypingIndicator).toHaveBeenCalledTimes(2)
+    await vi.advanceTimersByTimeAsync(1)
+    expect(runtimeMocks.startLinqChatTypingIndicator).toHaveBeenCalledTimes(3)
+    await handle.stop()
+  })
+
   it('serializes explicit Linq typing refreshes after an in-flight refresh', async () => {
     vi.useFakeTimers()
     let resolveInFlightRefresh: () => void = () => {

@@ -101,6 +101,10 @@ executable tests.
   not release the claim or permit blind resend without provider idempotency or
   proof that the effect did not begin. Acknowledge, clean up, or advance
   progress only after terminal or durable pending evidence.
+- Any path that suppresses or defers a user-visible effect records a typed
+  durable outcome. A persisted pending effect names its current validity
+  predicate and is durably superseded instead of delivered when that predicate
+  fails.
 
 ## Authority, Ownership, And State
 
@@ -127,11 +131,36 @@ executable tests.
 - A guard or authority change is complete only when every path to the protected
   effect routes through it durably or is proved unreachable.
 
+## Conversation-First Product Control
+
+- A new or materially changed member-facing setting, query, or user-initiated
+  product action is complete only when the member can request and complete its
+  discrete outcome in a normal supported conversation, then receive a
+  trustworthy result or durable confirmation. The assistant reaches the
+  capability through an assistant-accessible typed CLI command or headless
+  product operation; an otherwise routine outcome cannot require a web page as
+  its only control path.
+- Web and conversation adapters route through the same canonical owner and its
+  applicable validation, authorization, confirmation, and audit rules. Neither
+  may create a second mutation owner, source of truth, or surface-specific
+  business policy. A command that the production assistant cannot discover or
+  invoke does not satisfy this rule.
+- If an irreducible step needs another surface, the owning product spec records
+  the narrow exception allowed by `agent-docs/PRODUCT_SENSE.md`. Conversation
+  still handles every safe surrounding step and the smallest authorized
+  handoff. Capability parity does not require reproducing browser presentation
+  in chat.
+- Conversation access never weakens identity, authentication, consent, privacy,
+  recipient, payment, confirmation, or irreversible-effect controls.
+
 ## Ordered Progress And Bounded Work
 
 - Cursors, watermarks, sequences, pending-input indexes, and pagination use one
   total, transitive, owner-shared ordering primitive. Import progress is not
   handling progress.
+- Explicit owner or provider causal identifiers take precedence over
+  positional, "latest," grouping, watermark, and time-window heuristics. Work
+  with distinct causal anchors must not be merged into one turn.
 - Progress never advances past accepted work without terminal or durable
   pending evidence. A checkpoint cannot make an unhandled obligation disappear.
 - Commit durable work before signaling. A wake is a droppable, replayable
@@ -155,6 +184,9 @@ executable tests.
   current input needs its result. Each provider or network wait declares the
   applicable deadline, idle timeout, abort, fallback, and retry behavior in its
   owner contract.
+- A decision derived from provider data covers every documented accepted
+  payload variant with exact-shape regressions. Unknown or unsupported shapes
+  take the flow's declared safe disposition.
 - Execution planes stay thin. Platform coordination, secret injection,
   workspace transport, and write fences remain separate from assistant business
   logic, canonical data semantics, and product state.

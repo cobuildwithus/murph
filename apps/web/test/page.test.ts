@@ -180,33 +180,36 @@ test("HomePage renders the canonical landing page at the root route", async () =
   assert.match(markup, /data-root-landing-auth-actions-context="footer"/);
   assert.match(
     markup,
-    /font-serif text-\[clamp\(2\.25rem,4\.8vw,4\.25rem\)\][^"]* text-black/,
+    /font-serif text-\[clamp\(2\.5rem,5vw,4rem\)\][^"]* text-black/,
   );
-  assert.match(markup, /<span class="block">Health is overwhelming\.<\/span>/);
-  assert.match(markup, /Murph makes it easy\./);
+  assert.match(markup, /<span class="block">Health is hard\.<\/span>/);
+  assert.match(markup, /Don’t do it alone\./);
   assert.equal((markup.match(/<h1\b/g) ?? []).length, 1);
   assert.match(
     markup,
-    /<h1 class="sr-only">Health is overwhelming\. Murph makes it easy\.<\/h1>/,
+    /<h1 class="sr-only">Health is hard\. Don’t do it alone\.<\/h1>/,
   );
   assert.match(
     markup,
-    /Murph is your personal health assistant\. Wearables, bloodwork/,
+    /Wearables, bloodwork, doctor visits, supplements, blood pressure, sleep\. Murph reads it all/,
   );
-  assert.match(markup, /Get healthy with your people\./);
-  assert.match(markup, /Murph keeps score\./);
+  assert.match(markup, /Start a health challenge with your friends/);
   assert.match(markup, /referees the week/);
   assert.match(markup, /Better together/);
   assert.match(markup, /Do it with your people\./);
   assert.match(markup, /Walk challenge · Day 5 of 7/);
   assert.match(markup, /Weekly newsletter · Sunday 8:02 AM/);
-  assert.match(markup, /Your personal health assistant, too\./);
+  assert.match(markup, /No group\? You’re still not doing this alone\./);
   assert.match(markup, /data-root-landing-auth-actions-label="Dashboard"/);
   assert.match(
     markup,
     /data-root-landing-auth-actions-label="Meet Murph"/
   );
-  assert.match(markup, /Discover what actually makes you healthier\./);
+  assert.match(markup, /Everyone’s working on something\./);
+  assert.match(markup, /Whatever your goal, you don’t have to hit it alone\./);
+  assert.match(markup, /Do I need friends on Murph\?/);
+  assert.doesNotMatch(markup, /personal health assistant/);
+  assert.doesNotMatch(markup, /Discover what actually makes you healthier/);
   assert.match(markup, /data-root-landing-auth-actions-label="Get started"/);
   assert.match(markup, /You can also install it locally\./);
   assert.match(
@@ -264,10 +267,14 @@ test("SecurityPage splits the shared sticky nav into Log in + Signup when logged
 test("HomePage metadata keeps the root route as the canonical landing URL", async () => {
   const { metadata } = await import("../app/page");
 
-  expect(metadata.title).toBe("Murph — Discover what actually makes you healthier");
-  expect(metadata.description).toBe(
-    "Your health assistant for you and your people. Run health challenges with friends, get a weekly family health newsletter, and discover what actually makes you healthier.",
-  );
+  const {
+    MURPH_DEFAULT_METADATA_DESCRIPTION,
+    MURPH_DEFAULT_METADATA_TITLE,
+    MURPH_DEFAULT_OPEN_GRAPH_DESCRIPTION,
+  } = await import("../src/lib/site-metadata");
+
+  expect(metadata.title).toBe(MURPH_DEFAULT_METADATA_TITLE);
+  expect(metadata.description).toBe(MURPH_DEFAULT_METADATA_DESCRIPTION);
   expect(metadata.alternates?.canonical).toBe("/");
   expect(metadata.openGraph?.images).toEqual([
     expect.objectContaining({
@@ -284,10 +291,10 @@ test("HomePage metadata keeps the root route as the canonical landing URL", asyn
     }),
   ]);
   expect(metadata.openGraph?.description).toBe(
-    "Text Murph over iMessage. Run health challenges with friends, get a weekly family health newsletter, and see what actually makes you healthier.",
+    MURPH_DEFAULT_OPEN_GRAPH_DESCRIPTION,
   );
   expect(metadata.twitter?.description).toBe(
-    "Text Murph over iMessage. Run health challenges with friends, get a weekly family health newsletter, and see what actually makes you healthier.",
+    MURPH_DEFAULT_OPEN_GRAPH_DESCRIPTION,
   );
 });
 

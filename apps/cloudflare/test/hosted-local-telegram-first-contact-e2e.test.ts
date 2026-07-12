@@ -169,6 +169,8 @@ describe("hosted local Telegram auto-reply e2e", () => {
         response: HOSTED_TELEGRAM_GROUPED_ASSISTANT_REPLY_TEXT,
       },
     ]);
+    // Queue both synthetic rows before the explicit wake so the passive waiter
+    // only observes the grouped-input run instead of starting it.
     await requireScenario().enqueueWake(
       buildInboundTelegramWake(fastReplyUserId, {
         eventId: `telegram.message.received:local:${fastReplyUserId}:evt_telegram_name`,
@@ -178,7 +180,7 @@ describe("hosted local Telegram auto-reply e2e", () => {
       fastReplyUserId,
     );
 
-    await requireScenario().enqueueWake(
+    await requireScenario().runWake(
       buildInboundTelegramWake(fastReplyUserId, {
         eventId: `telegram.message.received:local:${fastReplyUserId}:evt_telegram_goals`,
         messageId: `${buildTelegramMessageId(fastReplyUserId)}2`,

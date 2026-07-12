@@ -359,16 +359,6 @@ export async function sendAssistantMessageLocal(
     }
   }
 
-  // The automation pass already runs maintenance before scanning auto-replies.
-  // Keep this boundary for every independently-started turn.
-  if (input.turnTrigger !== 'automation-auto-reply') {
-    await runAssistantTurnBestEffort(() =>
-      maybeRunAssistantRuntimeMaintenance({
-        vault: input.vault,
-      })
-    )
-  }
-
   const executionContext = normalizeAssistantExecutionContext(input.executionContext)
   const boundaryDefaultTarget = resolveAssistantExecutionDefaultTarget({
     executionContext,
@@ -379,7 +369,7 @@ export async function sendAssistantMessageLocal(
     executionContext,
   })
   const turnLockWaitStartedAt = Date.now()
-  return withAssistantTurnLock({
+  const runLockedTurn = () => withAssistantTurnLock({
     abortSignal: input.abortSignal,
     vault: input.vault,
     run: async () => {
@@ -443,18 +433,6 @@ export async function sendAssistantMessageLocal(
       let deliverySupersededTypingIndicator = false
 
       try {
-        await recordAssistantDiagnosticEvent({
-          vault: input.vault,
-          component: 'assistant',
-          kind: 'turn.started',
-          message: `Started assistant turn for session ${resolved.session.sessionId}.`,
-          sessionId: resolved.session.sessionId,
-          turnId: receipt.turnId,
-          counterDeltas: {
-            turnsStarted: 1,
-          },
-        })
-
         const turnInputController = createAssistantActiveTurnInputController({
           acceptedInputValidator: async ({ acceptedInputs }) => {
             await assertAssistantAcceptedTurnInputItemInputsAssistantInputEventsExist({
@@ -524,7 +502,7 @@ export async function sendAssistantMessageLocal(
           initialAcceptedInputJournal.inputs
         const refreshTypingIndicatorAfterProgress = () => {
           void runAssistantTurnBestEffort(async () => {
-            await typingIndicator?.refreshNow?.()
+            await typingIndicator?.refreshAfterMessage?.()
           })
         }
         const progressDelivery =
@@ -1344,6 +1322,33 @@ export async function sendAssistantMessageLocal(
           sessionId: providerResult.session.sessionId,
         })
 
+        const resolvedFinalReplyDeliveryContext =
+          typeof providerResult.responseDeliveryContextOrdinal === 'number'
+            ? resolveAssistantReplyDeliveryContextForSegment({
+                contexts: replyDeliveryContexts,
+                deliveryContextOrdinal:
+                  providerResult.responseDeliveryContextOrdinal,
+              })
+            : {
+                context: null,
+                invalidDeliveryContextOrdinal: null,
+              }
+        if (
+          resolvedFinalReplyDeliveryContext.invalidDeliveryContextOrdinal !==
+          null
+        ) {
+          throw new VaultCliError(
+            'ASSISTANT_DELIVERY_CONTEXT_ORDINAL_INVALID',
+            'Assistant final reply referenced an invalid delivery context ordinal.',
+          )
+        }
+        const finalReplyInput = resolvedFinalReplyDeliveryContext.context
+          ? applyAssistantReplyDeliveryContext({
+              context: resolvedFinalReplyDeliveryContext.context,
+              input: currentInput,
+            })
+          : currentInput
+
         turnInputController.close()
         await runtimeState.turns.acceptedInputs.updateAdmissionState({
           admissionState: 'commit-started',
@@ -1420,7 +1425,7 @@ export async function sendAssistantMessageLocal(
           rawFinalResponseText === null
             ? null
             : resolveAssistantPersistedReplyText({
-                messageInput: currentInput,
+                messageInput: finalReplyInput,
                 rawResponse: rawFinalResponseText,
                 session: currentSession,
                 sharedPlan,
@@ -1538,7 +1543,7 @@ export async function sendAssistantMessageLocal(
         const deliveryOutcome =
           finalResponseText !== null
             ? await dispatchAssistantReply({
-                input: currentInput,
+                input: finalReplyInput,
                 media: providerResult.responseMedia ?? [],
                 response: rawFinalResponseText ?? '',
                 session: deliverySession,
@@ -1549,10 +1554,11 @@ export async function sendAssistantMessageLocal(
                 precedingDeliveryOutcomes,
                 session: deliverySession,
               })
+        const replyIntentReadyAt = finalResponseText === null ? null : Date.now()
         const finalReplyDeliveryFields =
           finalResponseText !== null
             ? resolveAssistantCurrentAudienceDeliveryFields({
-                input: currentInput,
+                input: finalReplyInput,
                 session: deliveryOutcome.session,
                 sharedPlan,
               })
@@ -1601,16 +1607,24 @@ export async function sendAssistantMessageLocal(
         emitTurnTiming({
           deliveryAttempted:
             finalResponseText !== null || reactionDeliveryOutcomes.length > 0,
+          deliveryIntentId: 'intentId' in finalDeliveryOutcome
+            ? finalDeliveryOutcome.intentId
+            : null,
           deliveryIntentPresent: 'intentId' in finalDeliveryOutcome
             ? finalDeliveryOutcome.intentId !== null
             : false,
           deliveryOutcomeKind: finalDeliveryOutcome.kind,
           elapsedMs: elapsedSince(turnTimingStartedAt),
           finalReplySelected: finalResponseText !== null,
+          providerRequestElapsedMs:
+            providerRequestStartedAtMs === null || providerResultReturnedAt === null
+              ? null
+              : Math.max(0, providerResultReturnedAt - providerRequestStartedAtMs),
           providerRequestOrdinal,
-          sinceProviderResultMs: providerResultReturnedAt === null
-            ? null
-            : elapsedSince(providerResultReturnedAt),
+          sinceProviderResultMs:
+            providerResultReturnedAt === null || replyIntentReadyAt === null
+              ? null
+              : Math.max(0, replyIntentReadyAt - providerResultReturnedAt),
           stage: 'reply-dispatched',
           stepElapsedMs: elapsedSince(replyDispatchStartedAt),
         })
@@ -1732,6 +1746,23 @@ export async function sendAssistantMessageLocal(
       }
     },
   })
+
+  try {
+    return await runLockedTurn()
+  } finally {
+    // The automation pass owns maintenance for auto-reply turns; every
+    // independently-started turn keeps a post-turn owner so direct ask/chat/
+    // assistantd use cannot grow runtime state (transcripts, event logs)
+    // without bound. Post-turn keeps it off the foreground reply path.
+    if (input.turnTrigger !== 'automation-auto-reply') {
+      await runAssistantTurnBestEffort(() =>
+        maybeRunAssistantRuntimeMaintenance({
+          signal: input.abortSignal ?? null,
+          vault: input.vault,
+        })
+      )
+    }
+  }
 }
 
 function assistantDeliveryOutcomeSupersedesTypingIndicatorForTarget(input: {

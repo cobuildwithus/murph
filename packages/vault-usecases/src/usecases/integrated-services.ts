@@ -470,6 +470,14 @@ function createIntegratedCoreServices(): CoreWriteServices {
         auditPath: result.auditPath,
       }
     },
+    async repairExperimentMedia(input) {
+      const { vault } = input
+      const core = await loadCoreRuntime()
+      return core.repairExperimentMedia({
+        apply: input.apply,
+        vaultRoot: vault,
+      })
+    },
     async repairJunctionWorkoutHeartRateZones(input) {
       const { vault } = input
       const core = await loadCoreRuntime()

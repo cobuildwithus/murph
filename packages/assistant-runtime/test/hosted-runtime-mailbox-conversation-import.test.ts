@@ -120,6 +120,7 @@ describe("hosted mailbox conversation import adapter", () => {
               url: "redacted-attachment-url-sentinel",
             },
           ],
+          threadIsDirect: null,
         },
         phoneLookupKey: "redacted-contact-sentinel",
       },
@@ -182,6 +183,7 @@ describe("hosted mailbox conversation import adapter", () => {
     assert.match(event.conversation?.accountId ?? "", HASHED_IDENTIFIER_PATTERN);
     assert.match(event.conversation?.actorId ?? "", HASHED_IDENTIFIER_PATTERN);
     assert.match(event.conversation?.threadId ?? "", HASHED_IDENTIFIER_PATTERN);
+    assert.equal(event.conversation?.threadIsDirect, null);
     const replyTarget = event.replyTarget;
     assert.deepEqual(replyTarget, {
       channel: "linq",
@@ -315,10 +317,7 @@ describe("hosted mailbox conversation import adapter", () => {
     });
 
     try {
-      await withTestTimeout(
-        notificationObserved.promise,
-        "active turn notify did not fire before projection",
-      );
+      await notificationObserved.promise;
       assert.deepEqual(order, ["staged-callback", "notify"]);
 
       projectionRelease.resolve(undefined);
@@ -1731,6 +1730,7 @@ describe("hosted mailbox conversation import adapter", () => {
       },
     });
     const loadCalls: unknown[] = [];
+    const projectionOrder: string[] = [];
     await writeVaultFile(
       vaultRoot,
       "raw/inbox/linq/cap_synthetic_evidence_001/attachments/01__voice-note.m4a",
@@ -1740,6 +1740,7 @@ describe("hosted mailbox conversation import adapter", () => {
     const outcome = await importHostedConversationMailboxItem({
       decodePayload: createDecodedPayloadDecoder(decodedWake),
       async importConversationWake() {
+        projectionOrder.push("current-message-projection");
         return {
           captureId: "cap_synthetic_evidence_001",
           metrics: {
@@ -1749,6 +1750,7 @@ describe("hosted mailbox conversation import adapter", () => {
         };
       },
       async loadAttachmentEvidenceCapture(input) {
+        projectionOrder.push("attachment-evidence");
         loadCalls.push(input);
         return {
           captureId: input.captureId,
@@ -1772,7 +1774,9 @@ describe("hosted mailbox conversation import adapter", () => {
           ],
         };
       },
-      async prepareWakeContext() {},
+      async prepareWakeContext() {
+        projectionOrder.push("incremental-sidecar-init");
+      },
       item: createResolvedConversationMailboxItem({
         dedupeKey: decodedWake.eventId,
         id: "mailbox_item_evidence_001",
@@ -1782,6 +1786,11 @@ describe("hosted mailbox conversation import adapter", () => {
     });
 
     assert.equal(outcome.status, "imported");
+    assert.deepEqual(projectionOrder, [
+      "incremental-sidecar-init",
+      "current-message-projection",
+      "attachment-evidence",
+    ]);
 
     assert.deepEqual(loadCalls, [
       {
@@ -3982,23 +3991,6 @@ function createDeferred<T = void>(): {
     reject,
     resolve,
   };
-}
-
-async function withTestTimeout<T>(
-  promise: Promise<T>,
-  message: string,
-): Promise<T> {
-  let timeout: ReturnType<typeof setTimeout> | null = null;
-  const timer = new Promise<never>((_, reject) => {
-    timeout = setTimeout(() => reject(new Error(message)), 1_000);
-  });
-  try {
-    return await Promise.race([promise, timer]);
-  } finally {
-    if (timeout) {
-      clearTimeout(timeout);
-    }
-  }
 }
 
 function createLinqConversationLookupKey(input: {

@@ -259,7 +259,7 @@ Touch: `webhook-service-types.ts:17-26`;
 - PR 2: Phase 1 package tests plus `hosted-temporal:guard` for the
   `deprecatePatch` marker, then Temporal orchestration E2E; full webhook owner
   suites for the wake-field collapse.
-- Each PR: c1 (codex gpt-5.5 xhigh) deep-review rounds to completion.
+- Each PR: Codex `gpt-5.6-sol` with xhigh reasoning for deep-review rounds to completion; pin the model explicitly instead of inheriting the `c1` profile default.
 
 ## Deletion ledger (running total)
 

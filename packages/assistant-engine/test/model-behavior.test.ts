@@ -110,12 +110,21 @@ describe('assistant execution prompt contract', () => {
     )
   })
 
-  it('adds assistant tone preference only when a saved tone exists', () => {
+  it('uses formal by default and applies a saved tone as a strict writing contract', () => {
     const defaultLayers = buildAssistantSystemPromptLayers(
       createCommonCodexPromptInput(),
     )
-    expect(defaultLayers.threadContextPrompt).not.toContain(
+    expect(defaultLayers.threadContextPrompt).toContain(
       'Assistant tone preference:',
+    )
+    expect(defaultLayers.threadContextPrompt).toContain(
+      'Formal is the default',
+    )
+    expect(defaultLayers.threadContextPrompt).toContain(
+      'standard capitalization and punctuation',
+    )
+    expect(defaultLayers.threadContextPrompt).toContain(
+      'progress notes, action or tool confirmations, blockers and errors',
     )
 
     const casualLayers = buildAssistantSystemPromptLayers(
@@ -130,7 +139,22 @@ describe('assistant execution prompt contract', () => {
       'relaxed and conversational',
     )
     expect(casualLayers.threadContextPrompt).toContain(
-      'lowercase is okay',
+      'progress notes, action or tool confirmations, blockers and errors, follow-up questions, notifications, and final answers',
+    )
+    expect(casualLayers.threadContextPrompt).toContain(
+      'Write all Murph-authored natural-language prose in lowercase',
+    )
+    expect(casualLayers.threadContextPrompt).toContain(
+      'Do not drift into sentence case after tool use',
+    )
+    expect(casualLayers.threadContextPrompt).toContain(
+      'medical or technical acronyms',
+    )
+    expect(casualLayers.threadContextPrompt).toContain(
+      'URLs, file paths, commands, code, identifiers, case-sensitive values',
+    )
+    expect(casualLayers.threadContextPrompt).toContain(
+      'exact quotations or source text',
     )
 
     const formalLayers = buildAssistantSystemPromptLayers(
@@ -142,9 +166,113 @@ describe('assistant execution prompt contract', () => {
       'Assistant tone preference:',
     )
     expect(formalLayers.threadContextPrompt).toContain(
-      'complete sentences',
+      'Use complete sentences',
     )
-    expect(formalLayers.threadContextPrompt).toContain('no slang')
+    expect(formalLayers.threadContextPrompt).toContain(
+      'Do not use lowercase sentence starts',
+    )
+    expect(formalLayers.threadContextPrompt).toContain(
+      '`yep`, `wanna`, `on it`, or `mate`',
+    )
+  })
+
+  it('adds only saved personality dials to private thread context', () => {
+    const defaultLayers = buildAssistantSystemPromptLayers(
+      createCommonCodexPromptInput(),
+    )
+    expect(defaultLayers.threadContextPrompt).not.toContain(
+      'Assistant personality preferences',
+    )
+    expect(defaultLayers.staticCacheableCorePrompt).toContain(
+      'Defaults: light dry humor when fitting, supportive teammate energy with small reversible steps, and balanced useful detail.',
+    )
+    expect(defaultLayers.staticCacheableCorePrompt).toContain(
+      'Be a peer, not an authority',
+    )
+
+    const layers = buildAssistantSystemPromptLayers(
+      createCommonCodexPromptInput({
+        assistantPersonality: {
+          humor: 9,
+        },
+      }),
+    )
+
+    expect(layers.threadContextPrompt).toContain(
+      'Assistant personality preferences for this private conversation:',
+    )
+    expect(layers.threadContextPrompt).toContain(
+      'Humor 9/10: use prominent, bold, dry humor',
+    )
+    expect(layers.threadContextPrompt).not.toContain('Push 3/10')
+    expect(layers.threadContextPrompt).not.toContain('Detail 5/10')
+    expect(layers.threadContextPrompt).toContain(
+      "the user's explicit current-turn instruction always win",
+    )
+    expect(layers.stableRouteCapabilityPrompt).not.toContain('Humor 9/10')
+    expect(layers.dynamicTurnContextPrompt).not.toContain('Humor 9/10')
+  })
+
+  it('maps exact personality scores into the reviewed behavior bands', () => {
+    const humorCases = [
+      [0, 'use no intentional jokes'],
+      [1, 'use occasional light, dry humor'],
+      [3, 'use occasional light, dry humor'],
+      [4, 'use regular wit when it helps'],
+      [6, 'use regular wit when it helps'],
+      [7, 'use prominent, bold, dry humor'],
+      [9, 'use prominent, bold, dry humor'],
+      [10, 'use maximum safe comedic ambition'],
+    ] as const
+    for (const [score, expected] of humorCases) {
+      const prompt = buildAssistantSystemPrompt(
+        createCommonCodexPromptInput({
+          assistantPersonality: { humor: score },
+        }),
+      )
+      expect(prompt).toContain(`Humor ${score}/10`)
+      expect(prompt).toContain(expected)
+    }
+
+    const pushCases = [
+      [0, 'use no motivational pressure'],
+      [1, 'use supportive teammate energy'],
+      [3, 'use supportive teammate energy'],
+      [4, 'use focused high-school-coach energy'],
+      [6, 'use focused high-school-coach energy'],
+      [7, 'use strict college-coach energy'],
+      [9, 'use strict college-coach energy'],
+      [10, 'use terse, theatrical drill-sergeant energy'],
+    ] as const
+    for (const [score, expected] of pushCases) {
+      const prompt = buildAssistantSystemPrompt(
+        createCommonCodexPromptInput({
+          assistantPersonality: { push: score },
+        }),
+      )
+      expect(prompt).toContain(`Push ${score}/10`)
+      expect(prompt).toContain(expected)
+    }
+
+    const detailCases = [
+      [0, 'give the shortest complete answer'],
+      [1, 'stay concise and include only the essential reason'],
+      [3, 'stay concise and include only the essential reason'],
+      [4, 'give a balanced explanation'],
+      [6, 'give a balanced explanation'],
+      [7, 'cover relevant context, tradeoffs, uncertainty'],
+      [9, 'cover relevant context, tradeoffs, uncertainty'],
+      [10, 'be comprehensive when warranted'],
+    ] as const
+    for (const [score, expected] of detailCases) {
+      const prompt = buildAssistantSystemPrompt(
+        createCommonCodexPromptInput({
+          assistantPersonality: { detail: score },
+        }),
+      )
+      expect(prompt).toContain(`Detail ${score}/10`)
+      expect(prompt).toContain(expected)
+    }
   })
 
   it('keeps the assistant style settings fact in the stable route prompt', () => {
@@ -155,7 +283,43 @@ describe('assistant execution prompt contract', () => {
       '/settings?voice=true',
     )
     expect(layers.stableRouteCapabilityPrompt).toContain(
-      'when they ask how to change how Murph sounds or writes',
+      'only mention when asked',
+    )
+    expect(layers.stableRouteCapabilityPrompt).toContain(
+      '`vault-cli assistant style show --format json`',
+    )
+    expect(layers.stableRouteCapabilityPrompt).toContain(
+      '`vault-cli assistant style set <humor|push|detail> <0-10> --format json`',
+    )
+    expect(layers.stableRouteCapabilityPrompt).toContain(
+      '`vault-cli assistant style reset <humor|push|detail|all> --format json`',
+    )
+    expect(layers.stableRouteCapabilityPrompt).toContain(
+      '`intensity`/`coach`/`strictness` = Push',
+    )
+    expect(layers.stableRouteCapabilityPrompt).toContain(
+      '`brief`/`wordy`/`thorough` = Detail when clearly discussing a setting',
+    )
+    expect(layers.stableRouteCapabilityPrompt).toContain(
+      '`jokes`/`funny` = Humor',
+    )
+    expect(layers.stableRouteCapabilityPrompt).toContain(
+      'Returned `settings` is authoritative for that reply',
+    )
+    expect(layers.stableRouteCapabilityPrompt).toContain(
+      'One fresh safe joke only if Humor changed above 0',
+    )
+    expect(layers.stableRouteCapabilityPrompt).toContain(
+      'none at 0, queries, or Push/Detail',
+    )
+    expect(layers.stableRouteCapabilityPrompt).toContain(
+      'Do not persist one-reply instructions or complaints',
+    )
+    expect(layers.stableRouteCapabilityPrompt).toContain(
+      'no shame, threats, coercion, false urgency',
+    )
+    expect(layers.stableRouteCapabilityPrompt).toContain(
+      'Group prompts never receive dial values or expose, mutate, or apply private dials',
     )
     expect(layers.threadContextPrompt).not.toContain('/settings?voice=true')
     expect(layers.dynamicTurnContextPrompt).not.toContain('/settings?voice=true')
@@ -359,6 +523,9 @@ describe('assistant execution prompt contract', () => {
 
     expect(prompt).toContain(
       '$MURPH_ASSISTANT_SKILLS_ROOT/computer-use/SKILL.md',
+    )
+    expect(prompt).toContain(
+      "default to the marketplace where the user is already signed in, usually Amazon, over a brand's own storefront",
     )
     expect(prompt).toContain(
       'booking, rescheduling, or canceling health and dental care',
@@ -897,7 +1064,7 @@ describe('assistant system prompt cache stability', () => {
     )
 
     expect(layers.staticCacheableCorePrompt.length).toBeLessThanOrEqual(7_500)
-    expect(layers.stableRouteCapabilityPrompt.length).toBeLessThanOrEqual(60_000)
+    expect(layers.stableRouteCapabilityPrompt.length).toBeLessThanOrEqual(61_000)
   })
 
   it('passes the injected CLI contract through byte-for-byte at the stable-route tail', () => {
@@ -1027,13 +1194,18 @@ Execution context:
       ).prompt
 
     expect(prompt).toContain('Assistant tone preference:')
-    expect(prompt).toContain('The user chose casual.')
+    expect(prompt).toContain('Casual is a persistent user-facing writing invariant.')
+    expect(prompt).toContain(
+      'Write all Murph-authored natural-language prose in lowercase',
+    )
 
     const defaultPrompt =
       buildAssistantNotificationDecisionSystemPromptWithCacheMetadata(
         createCommonNotificationPromptInput(),
       ).prompt
-    expect(defaultPrompt).not.toContain('Assistant tone preference:')
+    expect(defaultPrompt).toContain('Assistant tone preference:')
+    expect(defaultPrompt).toContain('Formal is the default')
+    expect(defaultPrompt).toContain('standard capitalization and punctuation')
 
     const maintenancePrompt =
       buildAssistantNotificationDecisionSystemPromptWithCacheMetadata(
@@ -1142,7 +1314,7 @@ Execution context:
       'Current Murph product base URL for user-facing app links: http://localhost:3000',
     )
     expect(promptA.cacheMetadata.staticPromptHash).toBe(
-      'b674d5f04027ef99facb4fca90c8981ceb77c26fa721863c8f07d55ba80df8c8',
+      '4c11734ffa297abe12a824865f091203d38349f0eda8405c7be464040705c5ad',
     )
     expect(promptA.cacheMetadata.toolSchemaHash).toBe(
       'assistant-tool-schema-common-codex-test',

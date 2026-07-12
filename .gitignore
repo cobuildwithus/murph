@@ -51,6 +51,7 @@ apps/web/next-env.d.ts
 /skills/
 /skills-lock.json
 *.log
+.research-run-logs/*.pid
 *.tsbuildinfo
 .test-dist/
 .codex-runs/

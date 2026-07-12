@@ -52,7 +52,7 @@ const DEFAULT_TEST_ATTACHMENT_EVIDENCE = {
 const scannerReplyMocks = vi.hoisted(() => ({
   applyAssistantAutoReplyProcessResult: vi.fn(),
   createAssistantAutoReplyGroupContext: vi.fn(),
-  createAssistantAutoReplyReceiptReader: vi.fn(),
+  createAssistantAutoReplyHistoryReader: vi.fn(),
   processAssistantAutoReplyGroup: vi.fn(),
 }))
 
@@ -138,8 +138,8 @@ vi.mock('../src/assistant/automation/reply.ts', () => ({
     scannerReplyMocks.applyAssistantAutoReplyProcessResult,
   createAssistantAutoReplyGroupContext:
     scannerReplyMocks.createAssistantAutoReplyGroupContext,
-  createAssistantAutoReplyReceiptReader:
-    scannerReplyMocks.createAssistantAutoReplyReceiptReader,
+  createAssistantAutoReplyHistoryReader:
+    scannerReplyMocks.createAssistantAutoReplyHistoryReader,
   processAssistantAutoReplyGroup: scannerReplyMocks.processAssistantAutoReplyGroup,
 }))
 
@@ -1009,9 +1009,14 @@ beforeEach(() => {
   scannerReplyMocks.createAssistantAutoReplyGroupContext
     .mockReset()
     .mockImplementation(createAutoReplyContextForTest)
-  scannerReplyMocks.createAssistantAutoReplyReceiptReader
+  scannerReplyMocks.createAssistantAutoReplyHistoryReader
     .mockReset()
     .mockImplementation(() => ({
+      readMetrics: vi.fn(() => ({
+        outboxScanPerformed: false,
+        receiptScanPerformed: false,
+      })),
+      readOutboxIntents: vi.fn(async () => []),
       readReceipts: vi.fn(async () => []),
     }))
   scannerReplyMocks.processAssistantAutoReplyGroup.mockReset().mockResolvedValue({
@@ -1525,6 +1530,51 @@ describe('assistant automation scanner', () => {
         type: 'reply.scan.primed',
       }),
     )
+  })
+
+  it('shares one history reader across every group in an automation pass', async () => {
+    const first = createCaptureSummary({
+      captureId: 'capture-history-first',
+      occurredAt: '2026-04-08T00:01:00.000Z',
+    })
+    const second = createCaptureSummary({
+      captureId: 'capture-history-second',
+      occurredAt: '2026-04-08T00:02:00.000Z',
+    })
+    const historyReader = {
+      readMetrics: vi.fn(() => ({
+        outboxScanPerformed: false,
+        receiptScanPerformed: false,
+      })),
+      readOutboxIntents: vi.fn(async () => []),
+      readReceipts: vi.fn(async () => []),
+    }
+    scannerReplyMocks.createAssistantAutoReplyHistoryReader
+      .mockReturnValueOnce(historyReader)
+    const scanner = await vi.importActual<typeof import('../src/assistant/automation/scanner.ts')>(
+      '../src/assistant/automation/scanner.ts',
+    )
+
+    await scanner.scanAssistantAutomationOnce({
+      inboxServices: createInboxServices(),
+      inputSource: createAssistantInputSourceForCaptures([first, second]),
+      state: createAutomationState({
+        autoReplyChannels: ['telegram'],
+      }),
+      vault: '/tmp/assistant-automation-vault',
+    })
+
+    expect(scannerReplyMocks.createAssistantAutoReplyHistoryReader)
+      .toHaveBeenCalledOnce()
+    expect(scannerReplyMocks.createAssistantAutoReplyHistoryReader)
+      .toHaveBeenCalledWith({
+        vault: '/tmp/assistant-automation-vault',
+      })
+    expect(scannerReplyMocks.processAssistantAutoReplyGroup)
+      .toHaveBeenCalledTimes(2)
+    for (const [input] of scannerReplyMocks.processAssistantAutoReplyGroup.mock.calls) {
+      expect(input.historyReader).toBe(historyReader)
+    }
   })
 
   it('advances the auto-reply channel cursor with the processed assistant input cursor', async () => {
@@ -2659,6 +2709,17 @@ describe('assistant auto-reply runtime', () => {
 
   it('writes result artifacts for successful replies', async () => {
     const onProviderEvent = vi.fn()
+    const onProviderRequestStarted = vi.fn()
+    const historyMetrics = {
+      outboxScanElapsedMs: 7,
+      outboxScanPerformed: true,
+      receiptScanPerformed: false,
+    }
+    const historyReader = {
+      readMetrics: vi.fn(() => historyMetrics),
+      readOutboxIntents: vi.fn(async () => []),
+      readReceipts: vi.fn(async () => []),
+    }
     const inboxServices = createInboxServices({
       show: vi
         .fn()
@@ -2697,7 +2758,9 @@ describe('assistant auto-reply runtime', () => {
       onEvent: (event) => {
         events.push(toSnapshotRecord(event))
       },
+      historyReader,
       onProviderEvent,
+      onProviderRequestStarted,
       requestId: null,
       sessionMaxAgeMs: null,
       vault: '/tmp/assistant-automation-vault',
@@ -2732,12 +2795,28 @@ describe('assistant auto-reply runtime', () => {
     }
     const sendInput = replyMocks.sendAssistantMessage.mock.calls[0]?.[0] as {
       onProviderEvent?: (event: typeof providerEvent) => void
+      onProviderRequestStarted?: (event: {
+        acceptedInputIds: readonly string[]
+        providerRequestOrdinal: number
+        startedAt: string
+      }) => void
     }
     sendInput.onProviderEvent?.(providerEvent)
     expect(onProviderEvent).toHaveBeenCalledWith(providerEvent)
     expect(
       replyMocks.createAssistantProviderWatchdog.mock.results[0]?.value.onProviderEvent,
     ).toHaveBeenCalledWith(providerEvent)
+    sendInput.onProviderRequestStarted?.({
+      acceptedInputIds: context.inputIds,
+      providerRequestOrdinal: 0,
+      startedAt: '2026-04-08T00:10:00.000Z',
+    })
+    expect(onProviderRequestStarted).toHaveBeenCalledWith(expect.objectContaining({
+      assistantInputIds: context.inputIds,
+      autoReplyHistory: historyMetrics,
+      providerRequestOrdinal: 0,
+    }))
+    expect(historyReader.readMetrics).toHaveBeenCalledOnce()
     expect(evidenceMocks.writeAssistantAutoReplyReplyIntentEvidence).toHaveBeenCalledOnce()
     expect(evidenceMocks.writeAssistantAutoReplyReplyIntentEvidence).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -5607,6 +5686,7 @@ describe('assistant auto-reply runtime', () => {
       })
 
       expect(shouldDeferCron).toHaveBeenCalledOnce()
+      expect(runLoopMocks.maybeRunAssistantRuntimeMaintenance).not.toHaveBeenCalled()
       expect(runLoopMocks.processDueAssistantCronJobs).not.toHaveBeenCalled()
       expect(result.cronProcessed).toBe(0)
       expect(result.nextWakeAt).toBe('2026-05-08T16:00:10.000Z')
@@ -8249,9 +8329,9 @@ describe('assistant auto-reply runtime', () => {
     expect(inputSource.checkpointAcceptedInput).not.toHaveBeenCalled()
     expect(inputSource.refresh).not.toHaveBeenCalled()
     expect(inputSource.listNewConversationInputs).not.toHaveBeenCalled()
-    // Receipts are read to drive cross-session context suppression even
-    // when the terminal receipt fallback is gated off.
-    expect(replyMocks.listAssistantTurnReceipts).toHaveBeenCalled()
+    // No sent cross-session delivery exists, so hosted queue-only reply
+    // admission must not pay for a receipt scan.
+    expect(replyMocks.listAssistantTurnReceipts).not.toHaveBeenCalled()
     expect(replyMocks.sendAssistantMessage).toHaveBeenCalledTimes(1)
   })
 
@@ -9317,15 +9397,8 @@ describe('assistant automation run loop', () => {
       signal: expect.any(AbortSignal),
     })
     expect(runLoopMocks.processDueAssistantCronJobs).toHaveBeenCalledOnce()
-    expect(runLoopMocks.recordAssistantDiagnosticEvent).toHaveBeenCalledOnce()
-    expect(runLoopMocks.maybeRunAssistantRuntimeMaintenance).toHaveBeenCalledWith({
-      vault: '/tmp/assistant-automation-vault',
-    })
-    expect(
-      runLoopMocks.maybeRunAssistantRuntimeMaintenance.mock.invocationCallOrder[0],
-    ).toBeLessThan(
-      runLoopMocks.recordAssistantDiagnosticEvent.mock.invocationCallOrder[0] ?? 0,
-    )
+    expect(runLoopMocks.recordAssistantDiagnosticEvent).not.toHaveBeenCalled()
+    expect(runLoopMocks.maybeRunAssistantRuntimeMaintenance).not.toHaveBeenCalled()
     expect(release).toHaveBeenCalledOnce()
   })
 
@@ -9337,6 +9410,25 @@ describe('assistant automation run loop', () => {
       '../src/assistant/automation/run-loop.ts',
     )
 
+    runLoopMocks.scanAssistantAutomationOnce.mockResolvedValueOnce({
+      currentTurnDeliveryIntentIds: [],
+      routing: {
+        considered: 0,
+        failed: 0,
+        nextWakeAt: null,
+        noAction: 0,
+        routed: 0,
+        skipped: 0,
+      },
+      replies: {
+        considered: 0,
+        failed: 0,
+        nextWakeAt: null,
+        replied: 0,
+        skipped: 0,
+      },
+    })
+
     await runLoop.runAssistantAutomation({
       drainOutbox: true,
       inboxServices,
@@ -9346,11 +9438,103 @@ describe('assistant automation run loop', () => {
     })
 
     expect(runLoopMocks.scanAssistantAutomationOnce).toHaveBeenCalledOnce()
+    expect(runLoopMocks.maybeRunAssistantRuntimeMaintenance).toHaveBeenCalledOnce()
     expect(runLoopMocks.processDueAssistantCronJobs).toHaveBeenCalledOnce()
     expect(
       runLoopMocks.scanAssistantAutomationOnce.mock.invocationCallOrder[0],
     ).toBeLessThan(
       runLoopMocks.processDueAssistantCronJobs.mock.invocationCallOrder[0] ?? 0,
+    )
+    expect(
+      runLoopMocks.scanAssistantAutomationOnce.mock.invocationCallOrder[0],
+    ).toBeLessThan(
+      runLoopMocks.maybeRunAssistantRuntimeMaintenance.mock.invocationCallOrder[0] ?? 0,
+    )
+  })
+
+  it('skips idle maintenance when foreground work asks background tasks to yield', async () => {
+    const inboxServices = createInboxServices({
+      run: vi.fn().mockResolvedValue(undefined),
+    })
+    runLoopMocks.scanAssistantAutomationOnce.mockResolvedValueOnce({
+      currentTurnDeliveryIntentIds: [],
+      routing: {
+        considered: 0,
+        failed: 0,
+        nextWakeAt: null,
+        noAction: 0,
+        routed: 0,
+        skipped: 0,
+      },
+      replies: {
+        considered: 0,
+        failed: 0,
+        nextWakeAt: null,
+        replied: 0,
+        skipped: 0,
+      },
+    })
+    const runLoop = await vi.importActual<typeof import('../src/assistant/automation/run-loop.ts')>(
+      '../src/assistant/automation/run-loop.ts',
+    )
+
+    await runLoop.runAssistantAutomation({
+      drainOutbox: true,
+      inboxServices,
+      once: true,
+      shouldYieldBackgroundMaintenance: () => true,
+      startDaemon: false,
+      vault: '/tmp/assistant-automation-vault',
+    })
+
+    expect(runLoopMocks.maybeRunAssistantRuntimeMaintenance).not.toHaveBeenCalled()
+  })
+
+  it('threads the foreground yield check into an in-flight maintenance pass', async () => {
+    const inboxServices = createInboxServices({
+      run: vi.fn().mockResolvedValue(undefined),
+    })
+    runLoopMocks.scanAssistantAutomationOnce.mockResolvedValueOnce({
+      currentTurnDeliveryIntentIds: [],
+      routing: {
+        considered: 0,
+        failed: 0,
+        nextWakeAt: null,
+        noAction: 0,
+        routed: 0,
+        skipped: 0,
+      },
+      replies: {
+        considered: 0,
+        failed: 0,
+        nextWakeAt: null,
+        replied: 0,
+        skipped: 0,
+      },
+    })
+    const runLoop = await vi.importActual<typeof import('../src/assistant/automation/run-loop.ts')>(
+      '../src/assistant/automation/run-loop.ts',
+    )
+    const shouldYieldBackgroundMaintenance = vi.fn(() => false)
+
+    await runLoop.runAssistantAutomation({
+      drainOutbox: true,
+      inboxServices,
+      once: true,
+      shouldYieldBackgroundMaintenance,
+      startDaemon: false,
+      vault: '/tmp/assistant-automation-vault',
+    })
+
+    // A wake arriving after maintenance starts must be able to stop it: the
+    // pass receives the same yield predicate the pre-start gate consulted,
+    // plus the run's abort signal.
+    expect(runLoopMocks.maybeRunAssistantRuntimeMaintenance).toHaveBeenCalledWith(
+      expect.objectContaining({
+        shouldYield: shouldYieldBackgroundMaintenance,
+        signal: expect.any(AbortSignal),
+        vault: '/tmp/assistant-automation-vault',
+      }),
     )
   })
 
@@ -10664,9 +10848,6 @@ describe('assistant automation run loop', () => {
       .mockRejectedValueOnce(new Error('status start failed'))
       .mockResolvedValueOnce(undefined)
       .mockRejectedValueOnce(new Error('status end failed'))
-    runLoopMocks.maybeRunAssistantRuntimeMaintenance.mockRejectedValueOnce(
-      new Error('maintenance failed'),
-    )
     runLoopMocks.scanAssistantAutomationOnce.mockImplementationOnce(
       async (input: {
         onStateProgress: (next: {
@@ -10730,12 +10911,7 @@ describe('assistant automation run loop', () => {
       }),
       operation: 'status snapshot refresh',
     })
-    expect(runLoopMocks.warnAssistantBestEffortFailure).toHaveBeenCalledWith({
-      error: expect.objectContaining({
-        message: 'maintenance failed',
-      }),
-      operation: 'runtime maintenance',
-    })
+    expect(runLoopMocks.maybeRunAssistantRuntimeMaintenance).not.toHaveBeenCalled()
     expect(runLoopMocks.warnAssistantBestEffortFailure).toHaveBeenCalledWith({
       error: expect.objectContaining({
         message: 'release failed',

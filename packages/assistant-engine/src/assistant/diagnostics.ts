@@ -31,10 +31,14 @@ const RECENT_WARNING_LIMIT = 12
 
 export function createEmptyAssistantDiagnosticsCounters(): AssistantDiagnosticsCounters {
   return {
+    // Legacy v1 compatibility field. Counting starts required an extra
+    // synchronous write before useful work, so new turns no longer mutate it.
     turnsStarted: 0,
     turnsCompleted: 0,
     turnsDeferred: 0,
     turnsFailed: 0,
+    // Legacy v1 compatibility field. Durable turn receipts preserve attempt
+    // evidence without a second diagnostics write on the reply critical path.
     providerAttempts: 0,
     providerFailures: 0,
     deliveriesQueued: 0,
@@ -43,6 +47,8 @@ export function createEmptyAssistantDiagnosticsCounters(): AssistantDiagnosticsC
     deliveriesRetryable: 0,
     outboxDrains: 0,
     outboxRetries: 0,
+    // Legacy v1 compatibility field. Synchronously counting scan starts
+    // delayed foreground reply delivery, so new scans no longer mutate it.
     automationScans: 0,
   }
 }

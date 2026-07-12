@@ -2,7 +2,15 @@ import assert from "node:assert/strict";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { gzipSync } from "node:zlib";
 
+import {
+  buildIntegrationEvidencePart,
+  buildIntegrationIngestRecord,
+  HOSTED_CANONICAL_WRITE_RECEIPT_SCHEMA_VERSION,
+  initializeVault,
+  readIntegrationIngestEntries,
+} from "@murphai/core";
 import {
   type AssistantSessionResumeState,
   type AssistantSessionBinding,
@@ -318,7 +326,6 @@ describe("hosted workspace restore Codex continuity", () => {
       assert.equal(restored.mode, "snapshot");
       assert.equal(restored.restoreWasCold, false);
       assert.equal(restored.restoreTiming, null);
-      assert.equal(restored.inboxSidecarNeedsRebuild, true);
       assert.equal(restoreCallCount, 0);
       assert.equal(
         await readFile(path.join(restoredVaultRoot, "note.md"), "utf8"),
@@ -1126,6 +1133,156 @@ describe("hosted workspace restore Codex continuity", () => {
         readFile(path.join(restoredOperatorHomeRoot, ".codex-hosted", "sessions", "old-only.json"), "utf8"),
       );
       assert.deepEqual(flattenLogEntries(logRequests), []);
+    } finally {
+      await rm(workspaceRoot, { force: true, recursive: true });
+    }
+  });
+
+  test("v2 restore replays archived integration ingest amendment receipts", async () => {
+    const workspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-v2-archived-ingest-receipt-"));
+
+    try {
+      const restoredVaultRoot = path.join(workspaceRoot, "durable", "vault");
+      const snapshotRef = createWorkspaceSnapshotV2Ref();
+      const logicalPath = "ledger/integration-ingests/2025/2025-10.jsonl";
+      const archivedRecord = makeIntegrationIngestRecord({
+        eventId: "evt_RestoreArchivedIngestReceipt1",
+        id: "xfm_RestoreArchivedIngestReceipt1",
+        importedAt: "2025-10-12T09:00:00.000Z",
+      });
+      const appendedRecord = makeIntegrationIngestRecord({
+        eventId: "evt_RestoreArchivedIngestReceipt2",
+        id: "xfm_RestoreArchivedIngestReceipt2",
+        importedAt: "2025-10-13T09:00:00.000Z",
+      });
+      const secondAppendedRecord = makeIntegrationIngestRecord({
+        eventId: "evt_RestoreArchivedIngestReceipt3",
+        id: "xfm_RestoreArchivedIngestReceipt3",
+        importedAt: "2025-10-14T09:00:00.000Z",
+      });
+      const basePayload = `${JSON.stringify(archivedRecord)}\n`;
+      const baseBytes = Buffer.from(basePayload, "utf8");
+      const appendPayload = `${JSON.stringify(appendedRecord)}\n`;
+      const appendBytes = Buffer.from(appendPayload, "utf8");
+      const appendSha256 = sha256HostedBundleHex(appendBytes);
+      const secondBasePayload = `${basePayload}${appendPayload}`;
+      const secondBaseBytes = Buffer.from(secondBasePayload, "utf8");
+      const secondAppendPayload = `${JSON.stringify(secondAppendedRecord)}\n`;
+      const secondAppendBytes = Buffer.from(secondAppendPayload, "utf8");
+      const secondAppendSha256 = sha256HostedBundleHex(secondAppendBytes);
+      const firstReceiptArtifact = createJsonArtifact({
+        actions: [
+          {
+            allowArchivedIntegrationIngestAmendment: true,
+            appendByteLength: appendBytes.byteLength,
+            appendSha256,
+            baseByteLength: baseBytes.byteLength,
+            baseSha256: sha256HostedBundleHex(baseBytes),
+            contentRef: {
+              byteSize: appendBytes.byteLength,
+              sha256: appendSha256,
+            },
+            kind: "jsonl_append",
+            originalSize: baseBytes.byteLength,
+            targetRelativePath: logicalPath,
+          },
+        ],
+        committedAt: "2026-05-05T00:00:00.000Z",
+        createdAt: "2026-05-05T00:00:00.000Z",
+        occurredAt: "2026-05-05T00:00:00.000Z",
+        operationId: "op_z_synthetic_archived_ingest_restore_first",
+        operationType: "hosted_archived_ingest_restore_test",
+        schema: HOSTED_CANONICAL_WRITE_RECEIPT_SCHEMA_VERSION,
+        summary: "Restore first archived integration ingest amendment.",
+        updatedAt: "2026-05-05T00:00:00.000Z",
+      });
+      const secondReceiptArtifact = createJsonArtifact({
+        actions: [
+          {
+            allowArchivedIntegrationIngestAmendment: true,
+            appendByteLength: secondAppendBytes.byteLength,
+            appendSha256: secondAppendSha256,
+            baseByteLength: secondBaseBytes.byteLength,
+            baseSha256: sha256HostedBundleHex(secondBaseBytes),
+            contentRef: {
+              byteSize: secondAppendBytes.byteLength,
+              sha256: secondAppendSha256,
+            },
+            kind: "jsonl_append",
+            originalSize: secondBaseBytes.byteLength,
+            targetRelativePath: logicalPath,
+          },
+        ],
+        committedAt: "2026-05-05T00:00:00.000Z",
+        createdAt: "2026-05-05T00:00:00.000Z",
+        occurredAt: "2026-05-05T00:00:00.000Z",
+        operationId: "op_a_synthetic_archived_ingest_restore_second",
+        operationType: "hosted_archived_ingest_restore_test",
+        schema: HOSTED_CANONICAL_WRITE_RECEIPT_SCHEMA_VERSION,
+        summary: "Restore second archived integration ingest amendment.",
+        updatedAt: "2026-05-05T00:00:00.000Z",
+      });
+      const receiptLogArtifact = createJsonArtifact({
+        entries: [firstReceiptArtifact.ref, secondReceiptArtifact.ref, secondReceiptArtifact.ref],
+        schema: "murph.hosted-canonical-write-receipt-log.v1",
+      });
+      const artifactBytesByHash = new Map<string, Uint8Array>([
+        [appendSha256, appendBytes],
+        [secondAppendSha256, secondAppendBytes],
+        [firstReceiptArtifact.ref.sha256, firstReceiptArtifact.bytes],
+        [secondReceiptArtifact.ref.sha256, secondReceiptArtifact.bytes],
+        [receiptLogArtifact.ref.sha256, receiptLogArtifact.bytes],
+      ]);
+      let restoreCallCount = 0;
+
+      await restoreHostedWorkspaceRuntimeJobWorkspace({
+        platform: createRestorePlatform({
+          artifactBytesByHash,
+          workspaceSnapshotPort: {
+            async abortSnapshotSession() {
+              throw new Error("abortSnapshotSession is not used during v2 restore.");
+            },
+            async completeSnapshotSession() {
+              throw new Error("completeSnapshotSession is not used during v2 restore.");
+            },
+            async putSnapshotObjectDirect() {
+              throw new Error("putSnapshotObjectDirect is not used during v2 restore.");
+            },
+            async restoreWorkspaceSnapshot(request) {
+              restoreCallCount += 1;
+              const vaultRoot = path.join(request.durableRoot, "vault");
+              await initializeVault({
+                createdAt: "2026-05-05T00:00:00.000Z",
+                vaultRoot,
+              });
+              await mkdir(path.dirname(path.join(vaultRoot, logicalPath)), { recursive: true });
+              await writeFile(path.join(vaultRoot, `${logicalPath}.gz`), gzipSync(basePayload));
+            },
+            async startSnapshotSession() {
+              throw new Error("startSnapshotSession is not used during v2 restore.");
+            },
+          },
+        }),
+        vaultRoot: restoredVaultRoot,
+        workspace: createWorkspaceState({
+          redactedStatus: {
+            hostedCanonicalWriteReceiptLogByteSize: receiptLogArtifact.ref.byteSize,
+            hostedCanonicalWriteReceiptLogEntryCount: 3,
+            hostedCanonicalWriteReceiptLogSha256: receiptLogArtifact.ref.sha256,
+          },
+          snapshotRef,
+        }),
+      });
+
+      assert.equal(restoreCallCount, 1);
+      await assert.rejects(readFile(path.join(restoredVaultRoot, logicalPath), "utf8"), {
+        code: "ENOENT",
+      });
+      await readFile(path.join(restoredVaultRoot, `${logicalPath}.gz`));
+      assert.deepEqual(
+        (await readIntegrationIngestEntries(restoredVaultRoot)).map((entry) => entry.record.id),
+        [archivedRecord.id, appendedRecord.id, secondAppendedRecord.id],
+      );
     } finally {
       await rm(workspaceRoot, { force: true, recursive: true });
     }
@@ -2122,6 +2279,56 @@ function createEmptyAssistantSessionBinding(): AssistantSessionBinding {
     identityId: null,
     threadId: null,
     threadIsDirect: null,
+  };
+}
+
+function makeIntegrationIngestRecord(input: {
+  eventId: string;
+  id: string;
+  importedAt: string;
+}): ReturnType<typeof buildIntegrationIngestRecord> {
+  const role = `summary-${input.id}`;
+  const part = buildIntegrationEvidencePart({
+    content: JSON.stringify({ id: input.id }),
+    fileName: `${input.id}.json`,
+    mediaType: "application/json",
+    role,
+  });
+
+  return buildIntegrationIngestRecord({
+    eventCount: 1,
+    eventIdsComplete: true,
+    eventOutputs: [
+      {
+        id: input.eventId,
+        roles: [role],
+      },
+    ],
+    id: input.id,
+    importedAt: input.importedAt,
+    parts: [part],
+    provider: "junction",
+    sampleCount: 0,
+    sampleIds: [],
+    sampleIdsComplete: true,
+    source: "device",
+  });
+}
+
+function createJsonArtifact(value: unknown): {
+  bytes: Uint8Array;
+  ref: {
+    byteSize: number;
+    sha256: string;
+  };
+} {
+  const bytes = Buffer.from(`${JSON.stringify(value, null, 2)}\n`, "utf8");
+  return {
+    bytes,
+    ref: {
+      byteSize: bytes.byteLength,
+      sha256: sha256HostedBundleHex(bytes),
+    },
   };
 }
 

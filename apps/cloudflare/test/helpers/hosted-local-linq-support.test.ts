@@ -1,208 +1,303 @@
-import { describe, expect, it } from "vitest";
-
-import type {
-  HostedRunnerStatusResponse,
-} from "@murphai/hosted-execution/runtime-control";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
-  shouldExpireHostedLocalLinqWaitInFlightForStatus,
-  shouldNudgeHostedLocalLinqWaitForStatus,
-  shouldRunHostedLocalLinqWaitAlarmInvocationForStatus,
+  buildHostedLinqInboundEvent,
+  startHostedLocalLinqStub,
+  type HostedLocalLinqWaitScenario,
 } from "./hosted-local-linq-support.js";
 
-describe("hosted local Linq wait recovery policy", () => {
-  it("does not nudge active, errored, or caught-up runner status", () => {
-    const now = Date.now();
+afterEach(() => {
+  vi.useRealTimers();
+});
 
-    expect(shouldNudgeHostedLocalLinqWaitForStatus({
-      mailboxLagFirstObservedAt: now - 20_000,
-      now,
-      status: createStatus({ inFlight: true, lag: "1" }),
-    })).toBe(false);
-    expect(shouldNudgeHostedLocalLinqWaitForStatus({
-      mailboxLagFirstObservedAt: now - 20_000,
-      now,
-      status: createStatus({ lag: "1", lastErrorCode: "runtime_error" }),
-    })).toBe(false);
-    expect(shouldNudgeHostedLocalLinqWaitForStatus({
-      mailboxLagFirstObservedAt: now - 20_000,
-      now,
-      status: createStatus({ lag: "0" }),
-    })).toBe(false);
-    expect(shouldNudgeHostedLocalLinqWaitForStatus({
-      mailboxLagFirstObservedAt: now - 20_000,
-      now,
-      status: createStatus({ inFlight: true, lag: "0", pendingDeliveryEffects: 1 }),
-    })).toBe(false);
-    expect(shouldRunHostedLocalLinqWaitAlarmInvocationForStatus({
-      now,
-      pendingDeliveryFirstObservedAt: now - 20_000,
-      status: createStatus({
-        inFlight: true,
-        lag: "0",
-        nextWakeAt: new Date(now - 1).toISOString(),
-        pendingDeliveryEffects: 1,
-      }),
-    })).toBe(false);
-    expect(shouldExpireHostedLocalLinqWaitInFlightForStatus({
-      now,
-      status: createStatus({
-        inFlight: false,
-        lag: "0",
-        lastInvocationAt: new Date(now - 30_000).toISOString(),
-      }),
-    })).toBe(false);
+const passiveWaitScenario = {
+  buildFailureMessage: async (_userId: string, summaryLines: readonly string[]) =>
+    summaryLines.join("\n"),
+} satisfies HostedLocalLinqWaitScenario;
+
+describe("hosted local Linq provider stub", () => {
+  it("serves canonical direct-chat summaries through its shared runtime URL", async () => {
+    const stub = await startHostedLocalLinqStub();
+
+    try {
+      expect(new URL(stub.runnerBaseUrl).hostname).toBe("host.docker.internal");
+      const response = await fetch(`${stub.baseUrl}/chats/chat_direct`);
+
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toEqual({
+        handles: [],
+        id: "chat_direct",
+        is_group: false,
+      });
+    } finally {
+      await stub.stop();
+    }
   });
 
-  it("nudges only after mailbox lag has remained recoverable", () => {
-    const now = Date.now();
+  it("serves configured canonical group-chat summaries for route-drift scenarios", async () => {
+    const stub = await startHostedLocalLinqStub({
+      canonicalChats: [
+        {
+          chatId: "chat_group",
+          handles: [
+            {
+              handle: "+15550000000",
+              isMe: true,
+              status: "active",
+            },
+            {
+              handle: "+15551112222",
+              isMe: false,
+              status: "active",
+            },
+          ],
+          isGroup: true,
+        },
+      ],
+    });
 
-    expect(shouldNudgeHostedLocalLinqWaitForStatus({
-      mailboxLagFirstObservedAt: now - 14_999,
-      now,
-      status: createStatus({ lag: "1" }),
-    })).toBe(false);
-    expect(shouldNudgeHostedLocalLinqWaitForStatus({
-      mailboxLagFirstObservedAt: now - 15_000,
-      now,
-      status: createStatus({ lag: "1" }),
-    })).toBe(true);
+    try {
+      const response = await fetch(`${stub.baseUrl}/chats/chat_group`);
+
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toEqual({
+        handles: [
+          {
+            handle: "+15550000000",
+            is_me: true,
+            status: "active",
+          },
+          {
+            handle: "+15551112222",
+            is_me: false,
+            status: "active",
+          },
+        ],
+        id: "chat_group",
+        is_group: true,
+      });
+      await expect(stub.waitForMatchingRequestCount({
+        expectedCount: 1,
+        expectedMethod: "GET",
+        expectedPath: "/chats/chat_group",
+        scenario: passiveWaitScenario,
+        userId: "member_group_chat_summary",
+      })).resolves.toHaveLength(1);
+    } finally {
+      await stub.stop();
+    }
   });
 
-  it("runs an alarm invocation after pending delivery effects have remained recoverable and due", () => {
-    const now = Date.now();
+  it("creates deterministic presigned attachment uploads for outbound file scenarios", async () => {
+    const stub = await startHostedLocalLinqStub();
 
-    expect(shouldRunHostedLocalLinqWaitAlarmInvocationForStatus({
-      now,
-      pendingDeliveryFirstObservedAt: now - 1_999,
-      status: createStatus({
-        lag: "0",
-        nextWakeAt: new Date(now - 1).toISOString(),
-        pendingDeliveryEffects: 1,
-      }),
-    })).toBe(false);
-    expect(shouldRunHostedLocalLinqWaitAlarmInvocationForStatus({
-      now,
-      pendingDeliveryFirstObservedAt: now - 2_000,
-      status: createStatus({
-        lag: "0",
-        nextWakeAt: new Date(now + 1).toISOString(),
-        pendingDeliveryEffects: 1,
-      }),
-    })).toBe(false);
-    expect(shouldRunHostedLocalLinqWaitAlarmInvocationForStatus({
-      now,
-      pendingDeliveryFirstObservedAt: now - 2_000,
-      status: createStatus({
-        lag: "0",
-        nextWakeAt: new Date(now).toISOString(),
-        pendingDeliveryEffects: 1,
-      }),
-    })).toBe(true);
-    expect(shouldNudgeHostedLocalLinqWaitForStatus({
-      mailboxLagFirstObservedAt: null,
-      now,
-      status: createStatus({ lag: "0", pendingDeliveryEffects: 1 }),
-    })).toBe(false);
+    try {
+      const response = await fetch(`${stub.baseUrl}/attachments`, {
+        body: JSON.stringify({
+          content_type: "application/pdf",
+          filename: "report.pdf",
+          size_bytes: 128,
+        }),
+        headers: {
+          authorization: "Bearer hosted-local",
+          "content-type": "application/json",
+        },
+        method: "POST",
+      });
+
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toMatchObject({
+        attachment_id: "attachment_local_1",
+        http_method: "PUT",
+        required_headers: {
+          "content-type": "application/pdf",
+        },
+        upload_url:
+          "https://uploads.example.test/linq-attachments/attachment_local_1",
+      });
+      await expect(stub.waitForMatchingRequestCount({
+        expectedCount: 1,
+        expectedMethod: "POST",
+        expectedPath: "/attachments",
+        scenario: passiveWaitScenario,
+        userId: "member_attachment_upload",
+      })).resolves.toHaveLength(1);
+    } finally {
+      await stub.stop();
+    }
   });
 
-  it("preserves stale mailbox lag nudges while pending delivery recovery is fresh", () => {
-    const now = Date.now();
+  it("fails one matching logical send before provider acceptance", async () => {
+    const stub = await startHostedLocalLinqStub();
+    const expectedPath = "/chats/chat_retry/messages";
+    const matchRequest = (request: { body: string }) =>
+      JSON.parse(request.body).message?.parts?.[0]?.value === "retry this";
 
-    expect(shouldNudgeHostedLocalLinqWaitForStatus({
-      mailboxLagFirstObservedAt: now - 15_000,
-      now,
-      status: createStatus({ lag: "1", pendingDeliveryEffects: 1 }),
-    })).toBe(true);
-    expect(shouldRunHostedLocalLinqWaitAlarmInvocationForStatus({
-      now,
-      pendingDeliveryFirstObservedAt: now - 1,
-      status: createStatus({
-        lag: "1",
-        nextWakeAt: new Date(now - 1).toISOString(),
-        pendingDeliveryEffects: 1,
-      }),
-    })).toBe(false);
+    try {
+      stub.armNextPreAcceptRetryableSendFailure({
+        expectedPath,
+        matchRequest,
+      });
+
+      const unrelatedResponse = await postLinqStubMessage({
+        baseUrl: stub.baseUrl,
+        message: "unrelated",
+        path: expectedPath,
+      });
+      expect(unrelatedResponse.status).toBe(200);
+
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        const response = await postLinqStubMessage({
+          baseUrl: stub.baseUrl,
+          message: "retry this",
+          path: expectedPath,
+        });
+        expect(response.status).toBe(503);
+      }
+
+      expect(stub.countObservedSends(expectedPath, matchRequest)).toBe(3);
+      expect(stub.countAcceptedSends(expectedPath, matchRequest)).toBe(0);
+
+      const retryResponse = await postLinqStubMessage({
+        baseUrl: stub.baseUrl,
+        message: "retry this",
+        path: expectedPath,
+      });
+      expect(retryResponse.status).toBe(200);
+      expect(stub.countAcceptedSends(expectedPath, matchRequest)).toBe(1);
+      expect(stub.listObservedMessageIds("chat_retry")).toHaveLength(2);
+    } finally {
+      await stub.stop();
+    }
   });
 
-  it("expires stale in-flight status only when activity is old enough", () => {
-    const now = Date.parse("2026-05-08T00:00:30.000Z");
+  it("loses one matching acknowledgment after one provider acceptance", async () => {
+    const stub = await startHostedLocalLinqStub();
+    const expectedPath = "/chats/chat_lost_ack/messages";
+    const matchRequest = (request: { body: string }) =>
+      JSON.parse(request.body).message?.parts?.[0]?.value === "accept once";
 
-    expect(shouldExpireHostedLocalLinqWaitInFlightForStatus({
-      now,
-      status: createStatus({
-        inFlight: true,
-        lag: "0",
-        lastInvocationAt: "2026-05-08T00:00:00.001Z",
-      }),
-    })).toBe(false);
-    expect(shouldExpireHostedLocalLinqWaitInFlightForStatus({
-      now,
-      status: createStatus({
-        inFlight: true,
-        lag: "0",
-        lastErrorCode: "runtime_error",
-        lastInvocationAt: "2026-05-08T00:00:00.000Z",
-      }),
-    })).toBe(true);
-    expect(shouldExpireHostedLocalLinqWaitInFlightForStatus({
-      now,
-      status: createStatus({
-        inFlight: true,
-        lag: "0",
-        lastInvocationAt: "2026-05-08T00:00:00.000Z",
-      }),
-    })).toBe(true);
-    expect(shouldExpireHostedLocalLinqWaitInFlightForStatus({
-      now,
-      status: createStatus({
-        heartbeatAt: "2026-05-08T00:00:29.000Z",
-        inFlight: true,
-        lag: "0",
-        lastInvocationAt: "2026-05-08T00:00:00.000Z",
-      }),
-    })).toBe(false);
+    try {
+      stub.armNextPostAcceptLostAcknowledgment({
+        expectedPath,
+        matchRequest,
+      });
+
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        const lostAcknowledgment = await postLinqStubMessage({
+          baseUrl: stub.baseUrl,
+          idempotencyKey: "delivery-lost-ack",
+          message: "accept once",
+          path: expectedPath,
+        });
+        expect(lostAcknowledgment.status).toBe(503);
+      }
+      expect(stub.countObservedSends(expectedPath, matchRequest)).toBe(3);
+      expect(stub.countAcceptedSends(expectedPath, matchRequest)).toBe(1);
+      expect(stub.listObservedMessageIds("chat_lost_ack")).toHaveLength(1);
+      const acceptedMessageId = stub.requireLatestObservedMessageId("chat_lost_ack");
+
+      const recoveredAcknowledgment = await postLinqStubMessage({
+        baseUrl: stub.baseUrl,
+        idempotencyKey: "delivery-lost-ack",
+        message: "accept once",
+        path: expectedPath,
+      });
+      expect(recoveredAcknowledgment.status).toBe(200);
+      expect(stub.countObservedSends(expectedPath, matchRequest)).toBe(4);
+      expect(stub.countAcceptedSends(expectedPath, matchRequest)).toBe(1);
+      expect(stub.acceptedSendRequests.filter(matchRequest)).toHaveLength(1);
+      expect(stub.listObservedMessageIds("chat_lost_ack")).toHaveLength(1);
+      await expect(recoveredAcknowledgment.json()).resolves.toMatchObject({
+        message: {
+          id: acceptedMessageId,
+        },
+      });
+    } finally {
+      await stub.stop();
+    }
+  });
+
+  it("builds group-drift webhook payloads with explicit or omitted directness", () => {
+    const explicitDirect = buildHostedLinqInboundEvent(
+      "member_local_group_route",
+      "chat_group_route",
+      {
+        isGroup: false,
+        service: "iMessage",
+      },
+    );
+    const omitted = buildHostedLinqInboundEvent(
+      "member_local_group_route",
+      "chat_group_route",
+      {
+        isGroup: null,
+        service: "iMessage",
+      },
+    );
+
+    expect(explicitDirect).toMatchObject({
+      data: {
+        chat: {
+          id: "chat_group_route",
+          is_group: false,
+        },
+        service: "iMessage",
+      },
+    });
+    expect(JSON.stringify(omitted)).not.toContain('"is_group"');
+    expect(omitted).toMatchObject({
+      data: {
+        chat: {
+          id: "chat_group_route",
+        },
+        service: "iMessage",
+      },
+    });
   });
 });
 
-function createStatus(input: {
-  heartbeatAt?: string | null;
-  inFlight?: boolean;
-  lag: string;
-  lastInvocationAt?: string | null;
-  lastErrorCode?: string | null;
-  nextWakeAt?: string | null;
-  pendingDeliveryEffects?: number | string;
-}): HostedRunnerStatusResponse {
-  return {
-    ...(input.heartbeatAt === undefined ? {} : { heartbeatAt: input.heartbeatAt }),
-    inFlight: input.inFlight ?? false,
-    ...(input.lastInvocationAt === undefined ? {} : { lastInvocationAt: input.lastInvocationAt }),
-    lastErrorCode: input.lastErrorCode ?? null,
-    mailboxLag: [
-      {
-        importedSeq: "0",
-        lag: input.lag,
-        lane: "conversation",
-        maxSeq: input.lag === "0" ? "0" : "1",
+async function postLinqStubMessage(input: {
+  baseUrl: string;
+  idempotencyKey?: string;
+  message: string;
+  path: string;
+}): Promise<Response> {
+  return await fetch(`${input.baseUrl}${input.path}`, {
+    body: JSON.stringify({
+      message: {
+        ...(input.idempotencyKey ? { idempotency_key: input.idempotencyKey } : {}),
+        parts: [{
+          type: "text",
+          value: input.message,
+        }],
       },
-    ],
-    userId: "member_local_linq_wait_policy",
-    workspace: input.pendingDeliveryEffects === undefined
-      ? null
-      : {
-          browserVaultReplicaRef: null,
-          checkpointedAt: "2026-05-08T00:00:04.000Z",
-          createdAt: "2026-05-08T00:00:00.000Z",
-          nextWakeAt: input.nextWakeAt ?? null,
-          nextWakeReason: null,
-          redactedStatus: {
-            hostedOutboxPendingDeliveryEffects: input.pendingDeliveryEffects,
-          },
-          snapshotRef: null,
-          updatedAt: "2026-05-08T00:00:04.000Z",
-          userId: "member_local_linq_wait_policy",
-          version: "1",
-        },
-  };
+    }),
+    headers: {
+      "content-type": "application/json",
+    },
+    method: "POST",
+  });
 }
+
+it("times out passively without access to runtime recovery controls", async () => {
+  const stub = await startHostedLocalLinqStub();
+
+  vi.useFakeTimers();
+  try {
+    const waitPromise = stub.waitForSend({
+      expectedPath: "/chats/passive/messages",
+      scenario: passiveWaitScenario,
+      userId: "member_passive_linq_wait",
+    });
+    const rejection = expect(waitPromise).rejects.toThrow(
+      /Timed out waiting for 1 Linq request/u,
+    );
+
+    await vi.advanceTimersByTimeAsync(180_250);
+    await rejection;
+  } finally {
+    vi.useRealTimers();
+    await stub.stop();
+  }
+});

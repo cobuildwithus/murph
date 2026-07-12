@@ -7,7 +7,7 @@ import { inspectProviderErrorBody } from "../src/providers/provider-diagnostics.
 test("provider diagnostics drop id-shaped error codes while preserving safe descriptions", () => {
   assert.deepEqual(
     inspectProviderErrorBody(JSON.stringify({
-      code: "11649ed4-27e2-4718-959f-d68de1d1a120",
+      code: "00000000-0000-4000-8000-000000000004",
       message: "sleep_cycle disabled",
     })),
     {

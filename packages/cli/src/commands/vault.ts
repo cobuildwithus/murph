@@ -102,6 +102,32 @@ const wearableStorageRepairResultSchema = z.object({
   touchedPathCount: z.number().int().nonnegative(),
 })
 
+const experimentMediaRepairResultSchema = z.object({
+  mode: z.enum(['dry-run', 'apply']),
+  hasWork: z.boolean(),
+  candidateCount: z.number().int().nonnegative(),
+  candidateBytes: z.number().int().nonnegative(),
+  candidateExamples: z.array(z.object({
+    experimentSlug: z.string().min(1),
+    relativePath: pathSchema,
+    sizeBytes: z.number().int().nonnegative(),
+  })),
+  blockerCount: z.number().int().nonnegative(),
+  blockersByCode: z.record(z.string(), z.number().int().nonnegative()),
+  blockerExamples: z.array(z.object({
+    code: z.string().min(1),
+    relativePath: pathSchema.optional(),
+    message: z.string().min(1),
+  })),
+  mutated: z.boolean(),
+  createdCaptureCount: z.number().int().nonnegative(),
+  reusedCaptureCount: z.number().int().nonnegative(),
+  deletedFileCount: z.number().int().nonnegative(),
+  removedLegacyBytes: z.number().int().nonnegative(),
+  rewrittenDocumentCount: z.number().int().nonnegative(),
+  auditPaths: z.array(pathSchema),
+})
+
 const junctionWorkoutHeartRateZoneRepairResultSchema = z.object({
   mode: z.enum(['dry-run', 'apply']),
   hasWork: z.boolean(),
@@ -255,6 +281,40 @@ export function registerVaultCommands(cli: Cli.Cli, services: VaultServices) {
       return services.core.repairVault({
         vault: options.vault,
         requestId: requestIdFromOptions(options),
+      })
+    },
+  })
+
+  vaultGroup.command('repair-experiment-media', {
+    description:
+      'Dry-run or apply canonical capture promotion for legacy media misplaced under experiment storage.',
+    args: emptyArgsSchema,
+    options: withBaseOptions({
+      dryRun: z.boolean().default(false).describe('Show candidates and blockers without mutating the vault. This is also the default when --apply is omitted.'),
+      apply: z.boolean().default(false).describe('Copy and verify canonical captures, rewrite exact references, then delete legacy copies.'),
+    }),
+    output: experimentMediaRepairResultSchema,
+    async run({ options }) {
+      const applyWasExplicit = currentCommandIncludesFlag('--apply')
+
+      if (options.apply && !applyWasExplicit) {
+        throw new VaultCliError(
+          'invalid_options',
+          'Experiment media repair apply mode must be requested with --apply on the command line.',
+        )
+      }
+      if (options.apply && options.dryRun) {
+        throw new VaultCliError(
+          'invalid_options',
+          'Use either --apply or --dry-run for experiment media repair, not both.',
+        )
+      }
+
+      await assertInitializedVaultRoot(options.vault)
+      return services.core.repairExperimentMedia({
+        apply: options.apply,
+        requestId: requestIdFromOptions(options),
+        vault: options.vault,
       })
     },
   })

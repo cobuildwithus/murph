@@ -5,9 +5,6 @@ import path from "node:path";
 import { describe, expect, test } from "vitest";
 
 import {
-  normalizeLegacyCloudflareHostedLocalE2eArgs,
-} from "../src/compat.ts";
-import {
   listHostedLocalE2eScenarios,
   resolveHostedLocalE2eScenarios,
 } from "../src/e2e.ts";
@@ -36,20 +33,6 @@ describe("hosted-local harness", () => {
     expect(workflow).toContain('echo "${npm_prefix}/bin" >> "$GITHUB_PATH"');
     expect(workflow).toContain('"${npm_prefix}/bin/codex" --version');
   }
-
-  test("keeps legacy Cloudflare E2E entrypoint on the no-bundle path", () => {
-    expect(normalizeLegacyCloudflareHostedLocalE2eArgs([])).toEqual([
-      "all",
-      "--no-bundle",
-    ]);
-    expect(normalizeLegacyCloudflareHostedLocalE2eArgs(["linq-webhook"])).toEqual([
-      "linq-webhook",
-      "--no-bundle",
-    ]);
-    expect(normalizeLegacyCloudflareHostedLocalE2eArgs(["--bundle"])).toEqual([
-      "all",
-    ]);
-  });
 
   test("keeps root hosted-local scripts canonical", async () => {
     const rootPackage = JSON.parse(
@@ -84,8 +67,6 @@ describe("hosted-local harness", () => {
       "test:e2e:local",
       "test:e2e:hosted-local",
       "test:e2e:workers:local",
-      "test:e2e:full-stack:local",
-      "test:e2e:smoke:local",
       "test:e2e:runner-python:local",
     ]);
 
@@ -112,18 +93,93 @@ describe("hosted-local harness", () => {
     expect(resolveHostedLocalE2eScenarios("linq-delivery")[0]?.name).toBe(
       "linq-first-contact",
     );
+    expect(resolveHostedLocalE2eScenarios("linq-group-route-drift")[0]?.file).toBe(
+      "apps/cloudflare/test/hosted-local-linq-group-route-drift-e2e.test.ts",
+    );
+    expect(
+      resolveHostedLocalE2eScenarios("linq-home-line-reroute-retry")[0]?.file,
+    ).toBe(
+      "apps/cloudflare/test/hosted-local-linq-home-line-reroute-retry-e2e.test.ts",
+    );
+    expect(
+      resolveHostedLocalE2eScenarios("family-sponsored-group-roundtrip")[0]?.file,
+    ).toBe(
+      "apps/cloudflare/test/hosted-local-family-sponsored-group-roundtrip-e2e.test.ts",
+    );
+    expect(
+      resolveHostedLocalE2eScenarios("linq-unknown-first-contact-fallback")[0]?.file,
+    ).toBe(
+      "apps/cloudflare/test/hosted-local-linq-unknown-first-contact-fallback-e2e.test.ts",
+    );
     expect(resolveHostedLocalE2eScenarios("temporal-orchestration")[0]?.file).toBe(
       "apps/cloudflare/test/hosted-local-temporal-orchestration-e2e.test.ts",
     );
     expect(resolveHostedLocalE2eScenarios("timezone-injection")[0]?.file).toBe(
       "apps/cloudflare/test/hosted-local-timezone-injection-e2e.test.ts",
     );
+    expect(resolveHostedLocalE2eScenarios("snapshot-publication-fallback")[0]).toEqual({
+      file: "apps/cloudflare/test/hosted-local-snapshot-publication-fallback-e2e.test.ts",
+      name: "snapshot-publication-fallback",
+      testControls: true,
+    });
+    for (const [name, file] of [
+      ["canonical-receipt-lost-ack-recovery", "hosted-local-canonical-receipt-lost-ack-recovery"],
+      ["computer-handoff-linq-roundtrip", "hosted-local-computer-handoff-linq-roundtrip"],
+      ["retell-call-result-roundtrip", "hosted-local-retell-call-result-roundtrip"],
+      ["retryable-outbox-foreground-restart", "hosted-local-retryable-outbox-foreground-restart"],
+      ["shutdown-checkpoint-conversation-ahead", "hosted-local-shutdown-checkpoint-conversation-ahead"],
+      ["usage-limit-ambiguous-send", "hosted-local-usage-limit-ambiguous-send"],
+      ["vault-file-approval-resume", "hosted-local-vault-file-approval-resume"],
+    ] as const) {
+      expect(resolveHostedLocalE2eScenarios(name)[0]?.file).toBe(
+        `apps/cloudflare/test/${file}-e2e.test.ts`,
+      );
+    }
     expect(resolveHostedLocalE2eScenarios("all").map((scenario) => scenario.name)).toContain(
       "temporal-orchestration",
     );
     expect(resolveHostedLocalE2eScenarios("all").map((scenario) => scenario.name)).toContain(
       "timezone-injection",
     );
+    expect(resolveHostedLocalE2eScenarios([
+      "linq-delivery",
+      "temporal-orchestration",
+    ]).map((scenario) => scenario.name)).toEqual([
+      "linq-first-contact",
+      "temporal-orchestration",
+    ]);
+    expect(() => resolveHostedLocalE2eScenarios(["linq-delivery", "linq-first-contact"]))
+      .toThrow("Duplicate hosted-local E2E scenario selection");
+    expect(() => resolveHostedLocalE2eScenarios(["all", "telegram"]))
+      .toThrow("cannot be combined");
+    expect(resolveHostedLocalE2eScenarios("all").map((scenario) => scenario.name)).toContain(
+      "linq-group-route-drift",
+    );
+    expect(resolveHostedLocalE2eScenarios("all").map((scenario) => scenario.name)).toContain(
+      "linq-home-line-reroute-retry",
+    );
+    expect(resolveHostedLocalE2eScenarios("all").map((scenario) => scenario.name)).toContain(
+      "family-sponsored-group-roundtrip",
+    );
+    expect(resolveHostedLocalE2eScenarios("all").map((scenario) => scenario.name)).toContain(
+      "linq-unknown-first-contact-fallback",
+    );
+    expect(resolveHostedLocalE2eScenarios("all").map((scenario) => scenario.name)).toContain(
+      "snapshot-publication-fallback",
+    );
+    for (const name of [
+      "canonical-receipt-lost-ack-recovery",
+      "computer-handoff-linq-roundtrip",
+      "retell-call-result-roundtrip",
+      "retryable-outbox-foreground-restart",
+      "shutdown-checkpoint-conversation-ahead",
+      "usage-limit-ambiguous-send",
+      "vault-file-approval-resume",
+    ] as const) {
+      expect(resolveHostedLocalE2eScenarios("all").map((scenario) => scenario.name)).toContain(
+        name,
+      );
+    }
   });
 
   test("keeps registered hosted-local E2E scenario files present", () => {
@@ -134,17 +190,57 @@ describe("hosted-local harness", () => {
     expect(missingScenarios).toEqual([]);
   });
 
-  test("keeps the hosted device-sync CI workflow wired to the registered scenario", async () => {
-    const workflow = await readFile(
-      path.join(repoRoot, ".github", "workflows", "cloudflare-hosted-device-sync-e2e.yml"),
-      "utf8",
-    );
-    const workflowScenarios = Array.from(
-      workflow.matchAll(/pnpm hosted-local e2e ([^\s\\]+)/g),
-      (match) => match[1],
+  test("keeps promoted hosted E2E scenarios on their required registry boundaries", () => {
+    const scenarios = new Map(
+      listHostedLocalE2eScenarios().map((scenario) => [scenario.name, scenario]),
     );
 
-    expect(workflowScenarios).toEqual(["device-sync-junction-wearable-direct-resource-replay"]);
+    expect(scenarios.get("linq-webhook-audio")).toMatchObject({
+      requiresParserToolchain: true,
+      testControls: true,
+    });
+    expect(scenarios.get("linq-lost-active-operation")).toMatchObject({
+      manualOnly: true,
+      testControls: true,
+    });
+    for (const name of [
+      "canonical-receipt-lost-ack-recovery",
+      "codex-image-media-delivery",
+      "retryable-outbox-foreground-restart",
+      "shutdown-checkpoint-conversation-ahead",
+      "snapshot-publication-fallback",
+      "vault-file-approval-resume",
+    ] as const) {
+      expect(scenarios.get(name)).toMatchObject({
+        testControls: true,
+      });
+    }
+    for (const name of [
+      "linq-onboarding-followup",
+      "openai-egress-authority",
+      "provider-egress-token-bridge",
+      "warm-reuse-egress",
+    ] as const) {
+      expect(scenarios.get(name)).toMatchObject({
+        dedicatedVitestProcess: true,
+      });
+    }
+    expect(scenarios.get("timezone-injection")).toEqual({
+      file: "apps/cloudflare/test/hosted-local-timezone-injection-e2e.test.ts",
+      name: "timezone-injection",
+    });
+  });
+
+  test("keeps the Junction replay scenario on the shared hosted E2E artifact lane", async () => {
+    const workflow = await readFile(
+      path.join(repoRoot, ".github", "workflows", "cloudflare-hosted-e2e.yml"),
+      "utf8",
+    );
+
+    expect(workflow).toContain(
+      "scenarios: device-sync-junction-wearable-direct-resource-replay",
+    );
+    expect(workflow).toContain("timeoutMinutes: 35");
     expect(resolveHostedLocalE2eScenarios("device-sync-junction-wearable-direct-resource-replay")[0]?.file).toBe(
       "apps/cloudflare/test/hosted-local-device-sync-junction-wearable-direct-resource-replay-e2e.test.ts",
     );
@@ -153,6 +249,12 @@ describe("hosted-local harness", () => {
     );
     expectCodexCliInstallContract(workflow);
     expect(workflow).toContain(".artifacts/hosted-local/**/state.json");
+    expect(existsSync(path.join(
+      repoRoot,
+      ".github",
+      "workflows",
+      "cloudflare-hosted-device-sync-e2e.yml",
+    ))).toBe(false);
   });
 
   test("keeps Cloudflare hosted E2E jobs provisioned with Codex CLI", async () => {
@@ -161,7 +263,11 @@ describe("hosted-local harness", () => {
       "utf8",
     );
 
-    expect(workflow).toContain('pnpm hosted-local e2e "$scenario" --no-bundle');
+    expect(workflow).toContain('pnpm hosted-local e2e "${scenarios[@]}" --no-bundle');
+    expect(workflow).toContain([
+      "- name: Linq reminder + onboarding follow-up E2E",
+      '            fastGate: "1"',
+    ].join("\n"));
     expectCodexCliInstallContract(workflow);
   });
 

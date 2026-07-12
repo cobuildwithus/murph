@@ -5,6 +5,8 @@ import type {
   DeviceDataOrigin,
   DocumentEventRecord,
   EventAttachment,
+  EventImportDecision,
+  EventImportRetractionDecision,
   ExternalRef,
   EventKind,
   EventRecord,
@@ -19,11 +21,14 @@ import type {
 } from "@murphai/contracts";
 import {
   assertContractId,
+  compareIsoTimestampsAscending,
   deviceDataOriginSchema,
   experimentFrontmatterSchema,
   externalRefSchema,
   journalDayFrontmatterSchema,
   eventRecordSchema,
+  eventImportDecisionSchema,
+  isWritableIsoDateTime,
   safeParseContract,
   sampleRecordSchema,
 } from "@murphai/contracts";
@@ -1571,6 +1576,24 @@ function eventExternalRefKey(externalRef: ExternalRef): string {
   });
 }
 
+function compareIncomingExternalRefVersion(
+  existing: ExternalRef,
+  incoming: ExternalRef,
+): number | null {
+  const existingVersion = existing.version;
+  const incomingVersion = incoming.version;
+  if (
+    !existingVersion
+    || !incomingVersion
+    || !isWritableIsoDateTime(existingVersion)
+    || !isWritableIsoDateTime(incomingVersion)
+  ) {
+    return null;
+  }
+
+  return compareIsoTimestampsAscending(incomingVersion, existingVersion);
+}
+
 // Device-sync content equality ignores per-import identity (id, lifecycle,
 // recordedAt) AND rawRefs, because device imports mint fresh raw-artifact
 // paths on every sync run.
@@ -1587,9 +1610,10 @@ function deviceEventContentKey(record: EventRecord): string {
 
 // Public bulk-import content equality also ignores per-import identity (id,
 // lifecycle, and recordedAt, which defaults to the import wall clock), but it
-// keeps rawRefs: import payloads carry caller-supplied provenance there, so a
-// rawRefs-only correction must supersede the stored event instead of being
-// skipped as identical.
+// keeps rawRefs. For unversioned rows, a rawRefs-only correction supersedes the
+// stored event. Comparable versioned rows are ordered by source revision:
+// older revisions are skipped, equal revisions must replay-match or the batch
+// is rejected as a conflict, and newer revisions supersede.
 function eventImportContentKey(record: EventRecord): string {
   const {
     id: _id,
@@ -1598,6 +1622,129 @@ function eventImportContentKey(record: EventRecord): string {
     ...content
   } = record;
   return stableStringify(content);
+}
+
+// Equal source revisions must compare caller-supplied provenance while
+// ignoring vault-local day placement and equivalent version lexemes.
+function eventImportVersionedReplayContentKey(record: EventRecord): string {
+  const {
+    id: _id,
+    dayKey: _dayKey,
+    lifecycle: _lifecycle,
+    recordedAt: _recordedAt,
+    externalRef,
+    ...content
+  } = record;
+  const semanticExternalRef = externalRef
+    ? {
+        system: externalRef.system,
+        resourceType: externalRef.resourceType,
+        resourceId: externalRef.resourceId,
+        facet: externalRef.facet,
+      }
+    : undefined;
+  return stableStringify({ ...content, externalRef: semanticExternalRef });
+}
+
+// Comparable source revisions describe the provider resource, not the local
+// retrieval that happened to carry it. Ignore capture-local provenance, the
+// vault-timezone-derived day key, and the version lexeme while deciding
+// whether an equal revision is a replay.
+function eventImportSourceSemanticContentKey(record: EventRecord): string {
+  const {
+    id: _id,
+    dayKey: _dayKey,
+    lifecycle: _lifecycle,
+    recordedAt: _recordedAt,
+    rawRefs: _rawRefs,
+    evidence: _evidence,
+    externalRef,
+    ...content
+  } = record;
+  const semanticExternalRef = externalRef
+    ? {
+        system: externalRef.system,
+        resourceType: externalRef.resourceType,
+        resourceId: externalRef.resourceId,
+        facet: externalRef.facet,
+      }
+    : undefined;
+  return stableStringify({ ...content, externalRef: semanticExternalRef });
+}
+
+type PreparedEventImportDecision =
+  | {
+      action: "upsert";
+      allowsKindReplacement: boolean;
+      entry: PreparedJsonlEntry<EventRecord>;
+    }
+  | {
+      action: "retract";
+      externalRef: EventImportRetractionDecision["externalRef"];
+      evidence?: EventRecord["evidence"];
+      reason: EventImportRetractionDecision["reason"];
+      markerEntry: PreparedJsonlEntry<EventRecord>;
+    };
+
+const EVENT_IMPORT_RETRACTION_MARKER_NOTE_TYPE = "event_import_retraction_marker";
+
+interface EventImportReconciliation {
+  appendEntries: PreparedJsonlEntry<EventRecord>[];
+  forceAppendIds: ReadonlySet<string>;
+  createdCount: number;
+  skippedExistingCount: number;
+  supersededCount: number;
+  retractedCount: number;
+  eventIds: string[];
+  retractedEventIds: string[];
+  eventShardPaths: string[];
+}
+
+function preparedEventImportDecisionExternalRef(
+  decision: PreparedEventImportDecision,
+): ExternalRef | undefined {
+  return decision.action === "retract"
+    ? decision.externalRef
+    : decision.entry.record.externalRef;
+}
+
+function orderEventImportDecisionsBySourceVersion(
+  decisions: readonly PreparedEventImportDecision[],
+): PreparedEventImportDecision[] {
+  const ordered = [...decisions];
+  const groups = new Map<string, Array<{ decision: PreparedEventImportDecision; index: number }>>();
+
+  decisions.forEach((decision, index) => {
+    const externalRef = preparedEventImportDecisionExternalRef(decision);
+    const isExplicitDecision = decision.action === "retract" || decision.allowsKindReplacement;
+    if (
+      !isExplicitDecision
+      || !externalRef?.version
+      || !isWritableIsoDateTime(externalRef.version)
+    ) {
+      return;
+    }
+
+    const refKey = eventExternalRefKey(externalRef);
+    const group = groups.get(refKey) ?? [];
+    group.push({ decision, index });
+    groups.set(refKey, group);
+  });
+
+  for (const group of groups.values()) {
+    const sortedDecisions = group
+      .map(({ decision }) => decision)
+      .sort((left, right) => {
+        const leftRef = preparedEventImportDecisionExternalRef(left);
+        const rightRef = preparedEventImportDecisionExternalRef(right);
+        return compareIsoTimestampsAscending(leftRef?.version ?? "", rightRef?.version ?? "");
+      });
+    group.forEach(({ index }, groupIndex) => {
+      ordered[index] = sortedDecisions[groupIndex]!;
+    });
+  }
+
+  return ordered;
 }
 
 interface EventExternalRefIndex {
@@ -1852,6 +1999,42 @@ function shouldKeepExistingJunctionSleepStageSummaryObservation(
     isJunctionSleepStageCycleFallbackObservation(incoming);
 }
 
+const JUNCTION_COMPANION_HEALTH_METADATA_SOURCE_TYPE =
+  "companion-whoop-metadata-unverified";
+
+function parseJunctionCompanionSyncVersion(version: string | undefined): number | undefined {
+  if (!version || !/^(?:0|[1-9]\d*)$/u.test(version)) {
+    return undefined;
+  }
+
+  const parsed = Number(version);
+  return Number.isSafeInteger(parsed) ? parsed : undefined;
+}
+
+function shouldKeepExistingJunctionCompanionHealthMetadata(
+  existing: EventRecord,
+  incoming: EventRecord,
+): boolean {
+  if (
+    existing.kind !== "observation"
+    || incoming.kind !== "observation"
+    || existing.externalRef?.system !== "junction"
+    || incoming.externalRef?.system !== "junction"
+    || existing.dataOrigin?.sourceType !== JUNCTION_COMPANION_HEALTH_METADATA_SOURCE_TYPE
+    || incoming.dataOrigin?.sourceType !== JUNCTION_COMPANION_HEALTH_METADATA_SOURCE_TYPE
+  ) {
+    return false;
+  }
+
+  const existingVersion = parseJunctionCompanionSyncVersion(existing.externalRef.version);
+  if (existingVersion === undefined) {
+    return false;
+  }
+
+  const incomingVersion = parseJunctionCompanionSyncVersion(incoming.externalRef.version);
+  return incomingVersion === undefined || incomingVersion <= existingVersion;
+}
+
 function hasStableLegacyOccurrenceProof(
   existing: IndexedEventExternalRefMatch,
   incoming: EventRecord,
@@ -1912,6 +2095,41 @@ function selectLatestIndexedEventExternalRefMatch(
 ): IndexedEventExternalRefMatch | null {
   if (entries.length === 0) {
     return null;
+  }
+
+  const hasOrderedImportSourceVersions = entries.every((entry) =>
+    entry.record.source === "import"
+    && entry.indexedExternalRef.version !== undefined
+    && isWritableIsoDateTime(entry.indexedExternalRef.version)
+  );
+  if (hasOrderedImportSourceVersions) {
+    return entries.reduce((latest, candidate) => {
+      const sourceVersionComparison = compareIncomingExternalRefVersion(
+        latest.indexedExternalRef,
+        candidate.indexedExternalRef,
+      );
+      if (sourceVersionComparison !== null && sourceVersionComparison !== 0) {
+        return sourceVersionComparison > 0 ? candidate : latest;
+      }
+
+      const latestDeleted = isDeletedEventSpineRecord(latest.record);
+      const candidateDeleted = isDeletedEventSpineRecord(candidate.record);
+      if (latestDeleted !== candidateDeleted) {
+        return candidateDeleted ? latest : candidate;
+      }
+
+      const recordedAtComparison = compareIsoTimestampsAscending(
+        candidate.record.recordedAt,
+        latest.record.recordedAt,
+      );
+      if (recordedAtComparison !== 0) {
+        return recordedAtComparison > 0 ? candidate : latest;
+      }
+      if (candidate.relativePath !== latest.relativePath) {
+        return candidate.relativePath > latest.relativePath ? candidate : latest;
+      }
+      return candidate.record.id > latest.record.id ? candidate : latest;
+    });
   }
 
   const liveEntries = entries.filter((entry) => !isDeletedEventSpineRecord(entry.record));
@@ -2125,6 +2343,14 @@ async function reconcileDeviceEventEntriesByExternalRef(
       continue;
     }
 
+    // Companion HealthKit sync versions are nonnegative monotonic integers.
+    // Keep this comparison scoped to that closed source type: other providers
+    // use timestamp-shaped versions whose ordering semantics are not universal.
+    if (shouldKeepExistingJunctionCompanionHealthMetadata(latest, entry.record)) {
+      records.push(latest);
+      continue;
+    }
+
     if (isDeletedEventSpineRecord(latest)) {
       index.latestByRefKey.set(refKey, toIndexedExternalRefMatch(entry.record, externalRef));
       appendEntries.push(entry);
@@ -2192,10 +2418,10 @@ async function reconcileDeviceEventEntriesByExternalRef(
 // minting a duplicate. This mirrors upsertEvent, which resolves an event id
 // across every shard and writes the new revision into the shard for the new
 // occurredAt, so an event spine may span shards and readers collapse it by id.
-async function reconcileEventImportEntriesByExternalRef(
+async function reconcileEventImportDecisionsByExternalRef(
   vaultRoot: string,
-  entries: readonly PreparedJsonlEntry<EventRecord>[],
-): Promise<EventExternalRefReconciliation> {
+  decisions: readonly PreparedEventImportDecision[],
+): Promise<EventImportReconciliation> {
   assertCanonicalWriteLockScope(vaultRoot);
 
   const shardPaths = await walkVaultFiles(vaultRoot, VAULT_LAYOUT.eventLedgerDirectory, {
@@ -2203,36 +2429,158 @@ async function reconcileEventImportEntriesByExternalRef(
   });
   const index = await indexLatestEventsByExternalRef(vaultRoot, shardPaths);
   const appendEntries: PreparedJsonlEntry<EventRecord>[] = [];
-  const records: EventRecord[] = [];
   const forceAppendIds = new Set<string>();
-  let skippedDuplicateCount = 0;
+  const eventIds: string[] = [];
+  const retractedEventIds: string[] = [];
+  const eventShardPaths = new Set<string>();
+  const orderedDecisions = orderEventImportDecisionsBySourceVersion(decisions);
+  let createdCount = 0;
+  let skippedExistingCount = 0;
   let supersededCount = 0;
+  let retractedCount = 0;
 
-  for (const entry of entries) {
+  for (const decision of orderedDecisions) {
+    if (decision.action === "retract") {
+      const refKey = eventExternalRefKey(decision.externalRef);
+      const latestMatch = index.latestByRefKey.get(refKey);
+      const latest = latestMatch?.record;
+      if (!latestMatch || !latest) {
+        const marker: EventRecord = {
+          ...decision.markerEntry.record,
+          lifecycle: buildEventSpineLifecycle(1, "deleted"),
+        };
+        eventShardPaths.add(decision.markerEntry.relativePath);
+        index.latestByRefKey.set(
+          refKey,
+          toIndexedExternalRefMatch(marker, decision.externalRef, decision.markerEntry.relativePath),
+        );
+        index.maxRevisionById.set(marker.id, 1);
+        appendEntries.push({ relativePath: decision.markerEntry.relativePath, record: marker });
+        retractedEventIds.push(marker.id);
+        retractedCount += 1;
+        continue;
+      }
+
+      const latestPath = latestMatch?.relativePath || toEventLedgerFile(latest.occurredAt);
+      eventShardPaths.add(latestPath);
+      const sourceVersionComparison = compareIncomingExternalRefVersion(
+        latestMatch.indexedExternalRef,
+        decision.externalRef,
+      );
+      if (sourceVersionComparison === null) {
+        throw new VaultError(
+          "EVENT_SOURCE_REVISION_UNORDERED",
+          `Event externalRef "${decision.externalRef.system}/${decision.externalRef.resourceType}/` +
+            `${decision.externalRef.resourceId}${decision.externalRef.facet ? `#${decision.externalRef.facet}` : ""}" ` +
+            "cannot be retracted without comparable source revisions; nothing was imported.",
+        );
+      }
+      if (sourceVersionComparison < 0 || (sourceVersionComparison === 0 && isDeletedEventSpineRecord(latest))) {
+        skippedExistingCount += 1;
+        continue;
+      }
+      if (sourceVersionComparison === 0) {
+        throw new VaultError(
+          "EVENT_SOURCE_REVISION_CONFLICT",
+          `Event externalRef "${decision.externalRef.system}/${decision.externalRef.resourceType}/` +
+            `${decision.externalRef.resourceId}${decision.externalRef.facet ? `#${decision.externalRef.facet}` : ""}" ` +
+            `has conflicting content for source revision "${decision.externalRef.version}"; nothing was imported.`,
+        );
+      }
+
+      const revision = Math.max(
+        eventSpineRevision(latest),
+        index.maxRevisionById.get(latest.id) ?? 0,
+      ) + 1;
+      const tombstone: EventRecord = {
+        ...latest,
+        recordedAt: decision.markerEntry.record.recordedAt,
+        externalRef: decision.externalRef,
+        ...(decision.evidence ? { evidence: decision.evidence } : {}),
+        ...(latest.kind === "note" && latest.noteType === EVENT_IMPORT_RETRACTION_MARKER_NOTE_TYPE
+          ? { note: decision.reason }
+          : {}),
+        lifecycle: buildEventSpineLifecycle(revision, "deleted"),
+      };
+
+      forceAppendIds.add(latest.id);
+      index.latestByRefKey.set(refKey, toIndexedExternalRefMatch(tombstone, decision.externalRef, latestPath));
+      index.maxRevisionById.set(latest.id, revision);
+      appendEntries.push({ relativePath: latestPath, record: tombstone });
+      retractedEventIds.push(latest.id);
+      retractedCount += 1;
+      continue;
+    }
+
+    const entry = decision.entry;
+    eventShardPaths.add(entry.relativePath);
     const externalRef = entry.record.externalRef;
 
     if (!externalRef) {
       appendEntries.push(entry);
-      records.push(entry.record);
+      eventIds.push(entry.record.id);
+      createdCount += 1;
       continue;
     }
 
     const refKey = eventExternalRefKey(externalRef);
-    const latest = index.latestByRefKey.get(refKey)?.record;
+    const latestMatch = index.latestByRefKey.get(refKey);
+    const latest = latestMatch?.record;
 
     if (!latest) {
-      index.latestByRefKey.set(refKey, toIndexedExternalRefMatch(entry.record, externalRef));
+      index.latestByRefKey.set(refKey, toIndexedExternalRefMatch(entry.record, externalRef, entry.relativePath));
       appendEntries.push(entry);
-      records.push(entry.record);
+      eventIds.push(entry.record.id);
+      createdCount += 1;
       continue;
     }
 
-    // externalRef identity does not include kind, so an under-faceted or
-    // malformed row could otherwise rewrite an existing event into a
-    // different kind. Event spines are kind-stable (upsertEvent enforces the
-    // same invariant per id), so reject the whole batch before anything is
-    // staged instead of superseding across kinds.
-    if (latest.kind !== entry.record.kind) {
+    const sourceVersionComparison = compareIncomingExternalRefVersion(
+      latestMatch.indexedExternalRef,
+      externalRef,
+    );
+    if (sourceVersionComparison !== null) {
+      if (sourceVersionComparison < 0) {
+        skippedExistingCount += 1;
+        continue;
+      }
+      if (sourceVersionComparison === 0) {
+        const existingContentKey = decision.allowsKindReplacement
+          ? eventImportSourceSemanticContentKey(latest)
+          : eventImportVersionedReplayContentKey(latest);
+        const incomingContentKey = decision.allowsKindReplacement
+          ? eventImportSourceSemanticContentKey(entry.record)
+          : eventImportVersionedReplayContentKey(entry.record);
+        if (existingContentKey === incomingContentKey) {
+          skippedExistingCount += 1;
+          continue;
+        }
+        throw new VaultError(
+          "EVENT_SOURCE_REVISION_CONFLICT",
+          `Event externalRef "${externalRef.system}/${externalRef.resourceType}/${externalRef.resourceId}` +
+            `${externalRef.facet ? `#${externalRef.facet}` : ""}" has conflicting content for source revision ` +
+            `"${externalRef.version}"; nothing was imported.`,
+        );
+      }
+    } else {
+      // Preserve the legacy public-import contract for unversioned or
+      // non-temporal sources: provenance changes remain content changes and a
+      // kind mismatch remains invalid.
+      if (latest.kind !== entry.record.kind) {
+        throw new VaultError(
+          "EVENT_KIND_MISMATCH",
+          `Event externalRef "${externalRef.system}/${externalRef.resourceType}/${externalRef.resourceId}` +
+            `${externalRef.facet ? `#${externalRef.facet}` : ""}" already belongs to kind ` +
+            `"${latest.kind}" and cannot be rewritten as "${entry.record.kind}"; nothing was imported.`,
+        );
+      }
+      if (eventImportContentKey(latest) === eventImportContentKey(entry.record)) {
+        skippedExistingCount += 1;
+        continue;
+      }
+    }
+
+    if (latest.kind !== entry.record.kind && !decision.allowsKindReplacement) {
       throw new VaultError(
         "EVENT_KIND_MISMATCH",
         `Event externalRef "${externalRef.system}/${externalRef.resourceType}/${externalRef.resourceId}` +
@@ -2241,16 +2589,36 @@ async function reconcileEventImportEntriesByExternalRef(
       );
     }
 
-    if (eventImportContentKey(latest) === eventImportContentKey(entry.record)) {
-      skippedDuplicateCount += 1;
-      records.push(latest);
+    if (isDeletedEventSpineRecord(latest)) {
+      index.latestByRefKey.set(refKey, toIndexedExternalRefMatch(entry.record, externalRef, entry.relativePath));
+      appendEntries.push(entry);
+      eventIds.push(entry.record.id);
+      createdCount += 1;
       continue;
     }
 
-    if (isDeletedEventSpineRecord(latest)) {
-      index.latestByRefKey.set(refKey, toIndexedExternalRefMatch(entry.record, externalRef));
-      appendEntries.push(entry);
-      records.push(entry.record);
+    if (latest.kind !== entry.record.kind) {
+      const latestPath = latestMatch?.relativePath || toEventLedgerFile(latest.occurredAt);
+      const revision = Math.max(
+        eventSpineRevision(latest),
+        index.maxRevisionById.get(latest.id) ?? 0,
+      ) + 1;
+      const tombstone: EventRecord = {
+        ...latest,
+        recordedAt: entry.record.recordedAt,
+        externalRef,
+        ...(entry.record.evidence ? { evidence: entry.record.evidence } : {}),
+        lifecycle: buildEventSpineLifecycle(revision, "deleted"),
+      };
+
+      forceAppendIds.add(latest.id);
+      index.maxRevisionById.set(latest.id, revision);
+      index.latestByRefKey.set(refKey, toIndexedExternalRefMatch(entry.record, externalRef, entry.relativePath));
+      appendEntries.push({ relativePath: latestPath, record: tombstone }, entry);
+      eventShardPaths.add(latestPath);
+      eventIds.push(entry.record.id);
+      createdCount += 1;
+      supersededCount += 1;
       continue;
     }
 
@@ -2265,19 +2633,23 @@ async function reconcileEventImportEntriesByExternalRef(
     };
 
     forceAppendIds.add(latest.id);
-    index.latestByRefKey.set(refKey, toIndexedExternalRefMatch(superseding, externalRef));
+    index.latestByRefKey.set(refKey, toIndexedExternalRefMatch(superseding, externalRef, entry.relativePath));
     index.maxRevisionById.set(latest.id, revision);
     appendEntries.push({ relativePath: entry.relativePath, record: superseding });
-    records.push(superseding);
+    eventIds.push(superseding.id);
     supersededCount += 1;
   }
 
   return {
     appendEntries,
-    records,
     forceAppendIds,
-    skippedDuplicateCount,
+    createdCount,
+    skippedExistingCount,
     supersededCount,
+    retractedCount,
+    eventIds,
+    retractedEventIds,
+    eventShardPaths: [...eventShardPaths].sort(),
   };
 }
 
@@ -3206,7 +3578,9 @@ export async function importDeviceBatch({
     sampleCount: sampleRecords.length,
     provenance: deviceBatchPlan.provenance,
   });
-  const ingestAppendPlan = await buildIntegrationIngestAppendPlan(vaultRoot, [ingestRecord]);
+  const ingestAppendPlan = await buildIntegrationIngestAppendPlan(vaultRoot, [ingestRecord], {
+    allowArchivedShardAmendments: true,
+  });
   const [ingestShardPath] = ingestAppendPlan.targetShardPaths;
   if (!ingestShardPath) {
     throw new VaultError(
@@ -3264,11 +3638,21 @@ export async function importDeviceBatch({
   });
 }
 
-export interface ImportEventBatchInput {
+export interface ImportEventPayloadBatchInput {
   vaultRoot: string;
   payloads: readonly LooseRecord[];
+  decisions?: never;
   apply?: boolean;
 }
+
+export interface ImportEventDecisionBatchInput {
+  vaultRoot: string;
+  decisions: readonly LooseRecord[];
+  payloads?: never;
+  apply?: boolean;
+}
+
+export type ImportEventBatchInput = ImportEventPayloadBatchInput | ImportEventDecisionBatchInput;
 
 type ImportEventBatchFailure = {
   index: number;
@@ -3281,7 +3665,9 @@ export interface ImportEventBatchResult {
   createdCount: number;
   skippedExistingCount: number;
   supersededCount: number;
+  retractedCount: number;
   eventIds: string[];
+  retractedEventIds: string[];
   // Monthly event shards targeted by the batch, including shards where every
   // row was skipped as existing — same semantics as importDeviceBatch.
   eventShardPaths: string[];
@@ -3311,6 +3697,24 @@ function normalizeImportEventBatchPayloads(value: unknown): LooseRecord[] {
   );
 }
 
+function normalizeImportEventBatchDecisions(value: unknown): LooseRecord[] {
+  if (!Array.isArray(value)) {
+    throw new VaultError("EVENT_BATCH_INVALID", "Event batch decisions must be an array.");
+  }
+
+  if (value.length === 0) {
+    throw new VaultError("EVENT_BATCH_EMPTY", "Event batch decisions must not be empty.");
+  }
+
+  return value.map((entry, index) =>
+    assertPlainObject<LooseRecord>(
+      entry,
+      "EVENT_BATCH_INVALID",
+      `Event batch decision ${index + 1} must be a plain object.`,
+    ),
+  );
+}
+
 // Bulk canonical event import: every payload is validated through the same
 // strict contract path as the single-event upsert before anything is staged,
 // so one invalid payload rejects the whole batch. Valid rows reconcile on
@@ -3318,20 +3722,73 @@ function normalizeImportEventBatchPayloads(value: unknown): LooseRecord[] {
 // resourceType + resourceId + facet, even when a corrected occurredAt moves
 // the row to another monthly shard) and land in one canonical write with one
 // audit record. Dry-run by default; `apply` commits.
-export async function importEventBatch({
-  vaultRoot,
-  payloads,
-  apply = false,
-}: ImportEventBatchInput): Promise<ImportEventBatchResult> {
-  const normalizedPayloads = normalizeImportEventBatchPayloads(payloads);
+export async function importEventBatch(input: ImportEventBatchInput): Promise<ImportEventBatchResult> {
+  const { vaultRoot, apply = false } = input;
+  const usesPayloads = "payloads" in input && input.payloads !== undefined;
+  const usesDecisions = "decisions" in input && input.decisions !== undefined;
+  if (usesPayloads === usesDecisions) {
+    throw new VaultError(
+      "EVENT_BATCH_INVALID",
+      "Event batch must define exactly one of payloads or decisions.",
+    );
+  }
+  const normalizedRows = usesDecisions
+    ? normalizeImportEventBatchDecisions(input.decisions)
+    : normalizeImportEventBatchPayloads(input.payloads);
   const vault = await loadVault({ vaultRoot });
-  const entries: PreparedJsonlEntry<EventRecord>[] = [];
+  const decisions: PreparedEventImportDecision[] = [];
   const failures: ImportEventBatchFailure[] = [];
+  const recordedAt = new Date().toISOString();
 
-  normalizedPayloads.forEach((payload, index) => {
+  normalizedRows.forEach((row, index) => {
     try {
-      const record = buildPublicEventImportRecord(payload, vault.metadata.timezone);
-      entries.push({ relativePath: toEventLedgerFile(record.occurredAt), record });
+      if (!usesDecisions) {
+        const record = buildPublicEventImportRecord(row, vault.metadata.timezone);
+        decisions.push({
+          action: "upsert",
+          allowsKindReplacement: false,
+          entry: { relativePath: toEventLedgerFile(record.occurredAt), record },
+        });
+        return;
+      }
+
+      const parsed = safeParseContract(eventImportDecisionSchema, row);
+      if (!parsed.success) {
+        throw new Error(parsed.errors.join("; "));
+      }
+      const decision: EventImportDecision = parsed.data;
+
+      if (decision.action === "retract") {
+        const markerRecord = buildPublicEventImportRecord({
+          kind: "note",
+          occurredAt: decision.externalRef.version,
+          recordedAt,
+          source: "import",
+          title: "Retracted imported source record",
+          note: decision.reason,
+          noteType: EVENT_IMPORT_RETRACTION_MARKER_NOTE_TYPE,
+          ...(decision.evidence ? { evidence: decision.evidence } : {}),
+          externalRef: decision.externalRef,
+        }, vault.metadata.timezone);
+        decisions.push({
+          action: "retract",
+          externalRef: decision.externalRef,
+          evidence: decision.evidence,
+          reason: decision.reason,
+          markerEntry: {
+            relativePath: toEventLedgerFile(markerRecord.occurredAt),
+            record: markerRecord,
+          },
+        });
+        return;
+      }
+
+      const record = buildPublicEventImportRecord({ ...decision.payload }, vault.metadata.timezone);
+      decisions.push({
+        action: "upsert",
+        allowsKindReplacement: true,
+        entry: { relativePath: toEventLedgerFile(record.occurredAt), record },
+      });
     } catch (error) {
       failures.push({
         index,
@@ -3343,7 +3800,7 @@ export async function importEventBatch({
   if (failures.length > 0) {
     throw new VaultError(
       "EVENT_BATCH_INVALID",
-      `${failures.length} of ${normalizedPayloads.length} event payload(s) failed validation; nothing was imported.`,
+      `${failures.length} of ${normalizedRows.length} event import decision(s) failed validation; nothing was imported.`,
       {
         failureCount: failures.length,
         failures: failures.slice(0, EVENT_BATCH_FAILURE_REPORT_LIMIT),
@@ -3351,7 +3808,7 @@ export async function importEventBatch({
     );
   }
 
-  const reconciliation = await reconcileEventImportEntriesByExternalRef(vaultRoot, entries);
+  const reconciliation = await reconcileEventImportDecisionsByExternalRef(vaultRoot, decisions);
   const appendPlan = await buildJsonlAppendPlan(vaultRoot, reconciliation.appendEntries, {
     dedupeWithinPlan: true,
     forceAppendIds: reconciliation.forceAppendIds,
@@ -3359,35 +3816,34 @@ export async function importEventBatch({
   // Target shards come from the prepared rows (pre-reconcile), matching
   // importDeviceBatch: an all-skipped batch still reports the shards it
   // evaluated.
-  const eventTargetShardPaths = [
-    ...new Set(entries.map((entry) => entry.relativePath)),
-  ].sort();
   const appendedCount = appendPlan.appendedRecordIds.length;
-  const eventIds = appendPlan.appendedRecordIds;
-  const supersededCount = reconciliation.supersededCount;
   const counts = {
-    receivedCount: normalizedPayloads.length,
-    createdCount: appendedCount - supersededCount,
-    skippedExistingCount: normalizedPayloads.length - appendedCount,
-    supersededCount,
-    eventIds,
+    receivedCount: normalizedRows.length,
+    createdCount: reconciliation.createdCount,
+    skippedExistingCount: reconciliation.skippedExistingCount,
+    supersededCount: reconciliation.supersededCount,
+    retractedCount: reconciliation.retractedCount,
+    eventIds: reconciliation.eventIds,
+    retractedEventIds: reconciliation.retractedEventIds,
   };
 
   if (!apply || appendedCount === 0) {
     return {
       applied: false,
       ...counts,
-      eventShardPaths: eventTargetShardPaths,
+      eventShardPaths: reconciliation.eventShardPaths,
       auditPath: null,
     };
   }
 
-  const occurredAt = earliestTimestamp(entries.map((entry) => entry.record.occurredAt));
+  const occurredAt = earliestTimestamp(
+    reconciliation.appendEntries.map((entry) => entry.record.occurredAt),
+  );
 
   return runCanonicalWrite({
     vaultRoot,
     operationType: "event_batch_import",
-    summary: `Import event batch with ${appendedCount} appended event(s)`,
+    summary: `Import event batch with ${normalizedRows.length} decision(s)`,
     occurredAt,
     mutate: async ({ batch }) => {
       await stageJsonlAppendPlan(batch, appendPlan);
@@ -3397,17 +3853,18 @@ export async function importEventBatch({
         action: "event_upsert",
         commandName: "core.importEventBatch",
         summary: `Imported event batch: ${counts.createdCount} created, ` +
-          `${counts.supersededCount} updated in place, ` +
+          `${counts.supersededCount} superseded, ` +
+          `${counts.retractedCount} retracted, ` +
           `${counts.skippedExistingCount} skipped existing of ${counts.receivedCount} received.`,
         occurredAt,
         files: appendPlan.appendedShardPaths,
-        targetIds: appendPlan.appendedRecordIds.slice(0, AUDIT_TARGET_ID_LIMIT),
+        targetIds: [...new Set(appendPlan.appendedRecordIds)].slice(0, AUDIT_TARGET_ID_LIMIT),
       });
 
       return {
         applied: true,
         ...counts,
-        eventShardPaths: eventTargetShardPaths,
+        eventShardPaths: reconciliation.eventShardPaths,
         auditPath: audit.relativePath,
       };
     },

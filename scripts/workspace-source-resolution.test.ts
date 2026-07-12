@@ -28,6 +28,9 @@ describe("workspace source resolution", () => {
     expect(resolveAliasReplacement(aliases, "@murphai/hosted-execution")).toBe(
       path.join(repoRoot, "packages/hosted-execution/src/index.ts"),
     );
+    expect(resolveAliasReplacement(aliases, "@murphai/clinical-records")).toBe(
+      path.join(repoRoot, "packages/clinical-records/src/index.ts"),
+    );
     expect(resolveAliasReplacement(aliases, "@murphai/hosted-execution/hosted-email")).toBe(
       path.join(repoRoot, "packages/hosted-execution/src/hosted-email.ts"),
     );

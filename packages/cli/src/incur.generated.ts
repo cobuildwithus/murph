@@ -36,6 +36,9 @@ declare module 'incur' {
       'assistant session show': { args: { sessionId: string }; options: { requestId?: string } }
       'assistant status': { args: {}; options: { requestId?: string; session?: string; limit: number } }
       'assistant stop': { args: {}; options: { requestId?: string } }
+      'assistant style reset': { args: { setting: "humor" | "push" | "detail" | "all" }; options: { requestId?: string } }
+      'assistant style set': { args: { setting: "humor" | "push" | "detail"; value: number }; options: { requestId?: string } }
+      'assistant style show': { args: {}; options: { requestId?: string } }
       'audit list': { args: {}; options: { requestId?: string; action?: string; actor?: string; status?: string; from?: string; to?: string; sort: "asc" | "desc"; limit: number } }
       'audit show': { args: { id: string }; options: { requestId?: string } }
       'audit tail': { args: {}; options: { requestId?: string; limit: number } }
@@ -285,6 +288,7 @@ declare module 'incur' {
       'timeline': { args: {}; options: { requestId?: string; from?: string; to?: string; experiment?: string; kind?: string[]; stream?: string[]; entryType?: string[]; limit: number } }
       'validate': { args: {}; options: { requestId?: string } }
       'vault repair': { args: {}; options: { requestId?: string } }
+      'vault repair-experiment-media': { args: {}; options: { requestId?: string; dryRun: boolean; apply: boolean } }
       'vault repair-integration-ingests': { args: {}; options: { requestId?: string; dryRun: boolean; apply: boolean; finalize: boolean; maxBundles?: number; maxBytes?: number } }
       'vault repair-junction-hr-zones': { args: {}; options: { requestId?: string; dryRun: boolean; apply: boolean } }
       'vault repair-wearable-storage': { args: {}; options: { requestId?: string; dryRun: boolean; apply: boolean; pruneDenseRaw: boolean; includeRecentDenseRaw: boolean; maxFiles?: number; maxBytes?: number } }

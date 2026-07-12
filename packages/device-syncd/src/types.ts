@@ -264,6 +264,7 @@ export interface ProviderConnectionSeed {
 
 export interface UpsertPublicDeviceSyncExistingAccountGuard {
   expectedAccountId: string;
+  expectedConnectedAt: string;
   rejectIfDisconnected?: boolean;
 }
 
@@ -287,9 +288,15 @@ export interface UpsertPublicDeviceSyncConnectionInput {
 
 export interface MarkPublicDeviceSyncConnectionSetupFailedInput {
   accountId: string;
+  expectedConnectedAt: string | null;
   now: string;
   code: string;
   message: string;
+}
+
+export interface MarkPublicDeviceSyncConnectionSetupFailedResult {
+  account: PublicDeviceSyncAccount | null;
+  applied: boolean;
 }
 
 export interface UpsertPublicDeviceSyncConnectionResult {
@@ -356,7 +363,8 @@ export interface DeviceSyncPublicIngressStore {
   ): UpsertPublicDeviceSyncConnectionResult | Promise<UpsertPublicDeviceSyncConnectionResult>;
   markConnectionSetupFailed(
     input: MarkPublicDeviceSyncConnectionSetupFailedInput,
-  ): PublicDeviceSyncAccount | null | Promise<PublicDeviceSyncAccount | null>;
+  ): MarkPublicDeviceSyncConnectionSetupFailedResult
+    | Promise<MarkPublicDeviceSyncConnectionSetupFailedResult>;
   getConnectionById(
     accountId: string,
   ): PublicDeviceSyncAccount | null | Promise<PublicDeviceSyncAccount | null>;
@@ -591,7 +599,15 @@ export interface DeviceSyncPublicIngressUnknownWebhookInput {
   now: string;
 }
 
+export interface DeviceSyncPublicIngressConnectionMutationInput {
+  provider: string;
+}
+
 export interface DeviceSyncPublicIngressHooks {
+  runConnectionMutation?<Result>(
+    input: DeviceSyncPublicIngressConnectionMutationInput,
+    operation: () => Promise<Result>,
+  ): Promise<Result>;
   onConnectionEstablished?(input: DeviceSyncPublicIngressConnectionEstablishedInput): void | Promise<void>;
   onLevelDirtyWebhookAlreadySatisfied?(
     input: DeviceSyncPublicIngressWebhookAlreadySatisfiedInput,
@@ -610,6 +626,10 @@ export interface DeviceSyncPublicIngressHooks {
 export interface ProviderScheduleResult {
   jobs: DeviceSyncJobInput[];
   nextReconcileAt?: string | null;
+}
+
+export interface ProviderSnapshotImportReceipt {
+  canonicalEventCount: number;
 }
 
 export interface ProviderJobContext {

@@ -7,6 +7,36 @@ export const preferencesDocumentSchemaVersion = 1;
 
 export const assistantTonePreferenceValues = ["casual", "formal"] as const;
 export const assistantTonePreferenceSchema = z.enum(assistantTonePreferenceValues);
+export const defaultAssistantTonePreference = "formal" satisfies
+  (typeof assistantTonePreferenceValues)[number];
+
+export const assistantPersonalitySettingIds = ["humor", "push", "detail"] as const;
+export const assistantPersonalitySettingSchema = z.enum(assistantPersonalitySettingIds);
+export const assistantPersonalityScoreSchema = z.number().int().min(0).max(10);
+export const assistantPersonalityPreferencesSchema = z
+  .object({
+    humor: assistantPersonalityScoreSchema.optional(),
+    push: assistantPersonalityScoreSchema.optional(),
+    detail: assistantPersonalityScoreSchema.optional(),
+  })
+  .strict();
+export const assistantPersonalityScoresSchema = z
+  .object({
+    humor: assistantPersonalityScoreSchema,
+    push: assistantPersonalityScoreSchema,
+    detail: assistantPersonalityScoreSchema,
+  })
+  .strict();
+
+export type AssistantPersonalitySettingId = z.infer<typeof assistantPersonalitySettingSchema>;
+export type AssistantPersonalityPreferences = z.infer<typeof assistantPersonalityPreferencesSchema>;
+export type AssistantPersonalityScores = z.infer<typeof assistantPersonalityScoresSchema>;
+
+export const defaultAssistantPersonalityScores = Object.freeze({
+  humor: 3,
+  push: 3,
+  detail: 5,
+}) satisfies AssistantPersonalityScores;
 
 export const assistantVoiceOptionIdValues = [
   "classic",
@@ -249,6 +279,7 @@ export const assistantPreferencesSchema = z
   .object({
     tone: assistantTonePreferenceSchema.optional(),
     voice: z.string().min(1).optional(),
+    personality: assistantPersonalityPreferencesSchema.optional(),
   })
   .strict();
 
@@ -281,6 +312,24 @@ export function isWearablePreferenceProvider(value: unknown): value is WearableP
 
 export function isAssistantTonePreference(value: unknown): value is AssistantTonePreference {
   return typeof value === "string" && assistantTonePreferenceValues.includes(value as AssistantTonePreference);
+}
+
+export function isAssistantPersonalitySettingId(
+  value: unknown,
+): value is AssistantPersonalitySettingId {
+  return (
+    typeof value === "string" &&
+    assistantPersonalitySettingIds.includes(value as AssistantPersonalitySettingId)
+  );
+}
+
+export function resolveAssistantPersonalityScores(
+  preferences?: AssistantPersonalityPreferences | null,
+): AssistantPersonalityScores {
+  return assistantPersonalityScoresSchema.parse({
+    ...defaultAssistantPersonalityScores,
+    ...(preferences ?? {}),
+  });
 }
 
 export function isAssistantVoiceOptionId(value: unknown): value is AssistantVoiceOptionId {

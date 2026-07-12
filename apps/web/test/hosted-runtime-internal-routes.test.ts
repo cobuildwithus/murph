@@ -23,7 +23,6 @@ const mocks = vi.hoisted(() => ({
   hostedThreadContainerParticipantFindFirst: vi.fn(),
   getPrisma: vi.fn(),
   listHostedRuntimeLogs: vi.fn(),
-  publishLegacySourceHashBrowserVaultReplicaRef: vi.fn(),
   publishLatestBrowserVaultReplicaRef: vi.fn(),
   readAcceptedRuntimeAttemptFailureSignalOwnerLogId: vi.fn(),
   readHostedMailboxConsumedSeqByLane: vi.fn(),
@@ -31,6 +30,7 @@ const mocks = vi.hoisted(() => ({
   readHostedMailboxMaxSeqByLane: vi.fn(),
   readHostedMemberAssistantModelPreference: vi.fn(),
   readHostedMemberCoreState: vi.fn(),
+  readHostedRuntimeOwnerReleaseMailboxLagActionable: vi.fn(),
   readHostedWorkspace: vi.fn(),
   recordHostedIngressAssistantInputStaged: vi.fn(),
   recordHostedIngressAssistantMilestone: vi.fn(),
@@ -101,20 +101,9 @@ vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
   signalHostedRuntimeRecheckRuntime: mocks.signalHostedRuntimeRecheckRuntime,
 }));
 
-vi.mock("@/src/lib/hosted-workspace/legacy-source-hash-browser-vault", () => ({
-  publishLegacySourceHashBrowserVaultReplicaRef:
-    mocks.publishLegacySourceHashBrowserVaultReplicaRef,
-  readLegacyExpectedSourceStateHash: (body: Record<string, unknown>) => {
-    if (!Object.hasOwn(body, "expectedSourceStateHash")) {
-      return null;
-    }
-    if (typeof body.expectedSourceStateHash !== "string" || !body.expectedSourceStateHash.trim()) {
-      throw new TypeError(
-        "Legacy hosted browser-vault replica publish expectedSourceStateHash must be a non-empty string.",
-      );
-    }
-    return body.expectedSourceStateHash;
-  },
+vi.mock("@/src/lib/hosted-orchestration/runtime-reconciliation-facts", () => ({
+  readHostedRuntimeOwnerReleaseMailboxLagActionable:
+    mocks.readHostedRuntimeOwnerReleaseMailboxLagActionable,
 }));
 
 type MailboxFetchRoute = typeof import("../app/api/internal/hosted-mailbox/fetch/route");
@@ -126,6 +115,8 @@ type WorkspaceCheckpointRoute =
 type BrowserVaultReplicaRoute =
   typeof import("../app/api/internal/hosted-workspace/browser-vault-replica/route");
 type RuntimeLogRoute = typeof import("../app/api/internal/hosted-runtime/log/route");
+type RuntimeOwnerReleasedRoute =
+  typeof import("../app/api/internal/hosted-runtime/owner-released/route");
 type RuntimeLatencyRoute = typeof import("../app/api/internal/hosted-runtime/latency/route");
 type RuntimeStatusRoute = typeof import("../app/api/internal/hosted-runtime/status/route");
 
@@ -135,6 +126,7 @@ let workspaceRoute: WorkspaceRoute;
 let workspaceCheckpointRoute: WorkspaceCheckpointRoute;
 let browserVaultReplicaRoute: BrowserVaultReplicaRoute;
 let runtimeLogRoute: RuntimeLogRoute;
+let runtimeOwnerReleasedRoute: RuntimeOwnerReleasedRoute;
 let runtimeLatencyRoute: RuntimeLatencyRoute;
 let runtimeStatusRoute: RuntimeStatusRoute;
 
@@ -152,6 +144,9 @@ describe("hosted runtime internal web routes", () => {
       "../app/api/internal/hosted-workspace/browser-vault-replica/route"
     );
     runtimeLogRoute = await import("../app/api/internal/hosted-runtime/log/route");
+    runtimeOwnerReleasedRoute = await import(
+      "../app/api/internal/hosted-runtime/owner-released/route"
+    );
     runtimeLatencyRoute = await import("../app/api/internal/hosted-runtime/latency/route");
     runtimeStatusRoute = await import("../app/api/internal/hosted-runtime/status/route");
   });
@@ -220,6 +215,7 @@ describe("hosted runtime internal web routes", () => {
       solAvailable: false,
     });
     mocks.readHostedMemberCoreState.mockResolvedValue(buildActiveHostedMemberRecord());
+    mocks.readHostedRuntimeOwnerReleaseMailboxLagActionable.mockResolvedValue(true);
     mocks.readAcceptedRuntimeAttemptFailureSignalOwnerLogId.mockResolvedValue(null);
     mocks.resolveHostedRuntimeAiUsageGate.mockResolvedValue({
       status: "allowed",
@@ -228,6 +224,93 @@ describe("hosted runtime internal web routes", () => {
       signalAccepted: true,
       workflowId: "hosted-user-runtime:member_routes_1",
     });
+  });
+
+  it("signals a facts recheck after an authenticated runtime owner release", async () => {
+    const request = new Request(
+      "https://join.example.test/api/internal/hosted-runtime/owner-released",
+      { method: "POST" },
+    );
+
+    const response = await runtimeOwnerReleasedRoute.POST(request);
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ signaled: true });
+    expect(mocks.requireHostedCloudflareCallbackRequest).toHaveBeenCalledWith(
+      request,
+      { maxBodyBytes: 0 },
+    );
+    expect(mocks.readHostedRuntimeOwnerReleaseMailboxLagActionable).toHaveBeenCalledWith({
+      userId: "member_routes_1",
+    });
+    expect(mocks.signalHostedRuntimeRecheckRuntime).toHaveBeenCalledWith({
+      userId: "member_routes_1",
+    });
+  });
+
+  it("signals an authenticated explicit immediate recheck without a mailbox read", async () => {
+    mocks.readHostedRuntimeOwnerReleaseMailboxLagActionable.mockResolvedValue(false);
+    const request = new Request(
+      "https://join.example.test/api/internal/hosted-runtime/owner-released"
+        + "?immediateRecheckRequested=1",
+      { method: "POST" },
+    );
+
+    const response = await runtimeOwnerReleasedRoute.POST(request);
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ signaled: true });
+    expect(mocks.requireHostedCloudflareCallbackRequest).toHaveBeenCalledWith(
+      request,
+      { maxBodyBytes: 0 },
+    );
+    expect(mocks.readHostedRuntimeOwnerReleaseMailboxLagActionable).not.toHaveBeenCalled();
+    expect(mocks.signalHostedRuntimeRecheckRuntime).toHaveBeenCalledWith({
+      userId: "member_routes_1",
+    });
+  });
+
+  it("rejects noncanonical owner-release queries after authentication", async () => {
+    const request = new Request(
+      "https://join.example.test/api/internal/hosted-runtime/owner-released"
+        + "?immediateRecheckRequested=1&immediateRecheckRequested=1",
+      { method: "POST" },
+    );
+
+    const response = await runtimeOwnerReleasedRoute.POST(request);
+
+    expect(response.status).toBe(400);
+    expect(mocks.requireHostedCloudflareCallbackRequest).toHaveBeenCalledWith(
+      request,
+      { maxBodyBytes: 0 },
+    );
+    expect(mocks.signalHostedRuntimeRecheckRuntime).not.toHaveBeenCalled();
+  });
+
+  it("preserves the owner horizon when no durable work is visible", async () => {
+    mocks.readHostedRuntimeOwnerReleaseMailboxLagActionable.mockResolvedValue(false);
+
+    const response = await runtimeOwnerReleasedRoute.POST(new Request(
+      "https://join.example.test/api/internal/hosted-runtime/owner-released",
+      { method: "POST" },
+    ));
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ signaled: false });
+    expect(mocks.signalHostedRuntimeRecheckRuntime).not.toHaveBeenCalled();
+  });
+
+  it("surfaces runtime owner-release signal failures to Cloudflare", async () => {
+    mocks.signalHostedRuntimeRecheckRuntime.mockRejectedValueOnce(
+      new Error("Temporal unavailable"),
+    );
+
+    const response = await runtimeOwnerReleasedRoute.POST(new Request(
+      "https://join.example.test/api/internal/hosted-runtime/owner-released",
+      { method: "POST" },
+    ));
+
+    expect(response.status).toBe(500);
   });
 
   it("fetches mailbox DTOs by lane cursor without hydrating sidecar payload bodies", async () => {
@@ -1503,12 +1586,14 @@ describe("hosted runtime internal web routes", () => {
     expect(JSON.stringify(conflictPayload)).not.toMatch(/runId|committedSeq|finalizeRequired|source_cursor/u);
   });
 
-  it("returns a typed foreground-pending checkpoint conflict for idle shutdown races", async () => {
+  it("returns an ahead-input observation while committing an idle shutdown checkpoint", async () => {
     mocks.checkpointHostedWorkspace.mockResolvedValue({
-      status: "foreground_pending",
+      conversationInputAhead: true,
+      replacedSnapshotRef: createBundleRef("snapshot_current"),
+      status: "updated",
       workspace: buildWorkspaceRecord({
-        snapshotRef: createBundleRef("snapshot_current"),
-        version: "4",
+        snapshotRef: createBundleRef("snapshot_idle_shutdown"),
+        version: "5",
       }),
     });
 
@@ -1529,11 +1614,12 @@ describe("hosted runtime internal web routes", () => {
 
     expect(response.status).toBe(200);
     expect(payload).toMatchObject({
-      checkpointed: false,
-      checkpointConflictReason: "foreground_pending",
+      checkpointed: true,
+      conversationInputAhead: true,
+      replacedSnapshotRef: createBundleRef("snapshot_current"),
       workspace: {
-        snapshotRef: createBundleRef("snapshot_current"),
-        version: "4",
+        snapshotRef: createBundleRef("snapshot_idle_shutdown"),
+        version: "5",
       },
     });
     expect(mocks.checkpointHostedWorkspace).toHaveBeenCalledWith({
@@ -1550,10 +1636,12 @@ describe("hosted runtime internal web routes", () => {
 
   it("keeps old idle checkpoint callers compatible with the redacted mailbox imported seq", async () => {
     mocks.checkpointHostedWorkspace.mockResolvedValue({
-      status: "foreground_pending",
+      conversationInputAhead: true,
+      replacedSnapshotRef: createBundleRef("snapshot_current"),
+      status: "updated",
       workspace: buildWorkspaceRecord({
-        snapshotRef: createBundleRef("snapshot_current"),
-        version: "4",
+        snapshotRef: createBundleRef("snapshot_idle_shutdown"),
+        version: "5",
       }),
     });
 
@@ -1575,11 +1663,12 @@ describe("hosted runtime internal web routes", () => {
 
     expect(response.status).toBe(200);
     expect(payload).toMatchObject({
-      checkpointed: false,
-      checkpointConflictReason: "foreground_pending",
+      checkpointed: true,
+      conversationInputAhead: true,
+      replacedSnapshotRef: createBundleRef("snapshot_current"),
       workspace: {
-        snapshotRef: createBundleRef("snapshot_current"),
-        version: "4",
+        snapshotRef: createBundleRef("snapshot_idle_shutdown"),
+        version: "5",
       },
     });
     expect(mocks.checkpointHostedWorkspace).toHaveBeenCalledWith({
@@ -1927,48 +2016,15 @@ describe("hosted runtime internal web routes", () => {
       },
     });
     expect(mocks.publishLatestBrowserVaultReplicaRef).not.toHaveBeenCalled();
-    expect(mocks.publishLegacySourceHashBrowserVaultReplicaRef)
-      .not.toHaveBeenCalled();
   });
 
-  it("fences legacy source-hash browser-vault publishes behind the compatibility helper", async () => {
-    const replicaRef = createBrowserVaultReplicaRef("snapshot_2_hash");
-    mocks.publishLegacySourceHashBrowserVaultReplicaRef.mockResolvedValue({
-      status: "published",
-      workspace: buildWorkspaceRecord({
-        browserVaultReplicaRef: replicaRef,
-        snapshotRef: createBundleRef("snapshot_2"),
-        version: "5",
-      }),
-    });
-
-    const response = await browserVaultReplicaRoute.POST(jsonRequest(
-      "/api/internal/hosted-workspace/browser-vault-replica",
-      {
-        expectedSourceStateHash: "snapshot_2_hash",
-        replicaRef,
-      },
-      runtimeWriteFenceHeaders(),
-    ));
-
-    expect(response.status).toBe(200);
-    expect(mocks.publishLegacySourceHashBrowserVaultReplicaRef)
-      .toHaveBeenCalledWith({
-        expectedSourceStateHash: "snapshot_2_hash",
-        expectedWorkspaceVersion: "4",
-        replicaRef,
-        userId: "member_routes_1",
-      });
-    expect(mocks.publishLatestBrowserVaultReplicaRef).not.toHaveBeenCalled();
-  });
-
-  it("rejects malformed legacy source-hash browser-vault publish fields before publishing", async () => {
+  it("rejects the retired source-hash browser-vault publish field", async () => {
     const replicaRef = createBrowserVaultReplicaRef("snapshot_2_hash");
 
     const response = await browserVaultReplicaRoute.POST(jsonRequest(
       "/api/internal/hosted-workspace/browser-vault-replica",
       {
-        expectedSourceStateHash: "",
+        expectedSourceStateHash: "snapshot_2_hash",
         replicaRef,
       },
       runtimeWriteFenceHeaders(),
@@ -1980,8 +2036,6 @@ describe("hosted runtime internal web routes", () => {
         message: "Invalid request.",
       },
     });
-    expect(mocks.publishLegacySourceHashBrowserVaultReplicaRef)
-      .not.toHaveBeenCalled();
     expect(mocks.publishLatestBrowserVaultReplicaRef).not.toHaveBeenCalled();
   });
 
