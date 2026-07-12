@@ -1,6 +1,6 @@
 import { Cli, z } from "incur";
 import { ALLERGY_CRITICALITIES, ALLERGY_STATUSES } from "@murphai/contracts";
-import { upsertAllergy } from "@murphai/core";
+import type { upsertAllergy } from "@murphai/core";
 import { withBaseOptions } from "@murphai/operator-config/command-helpers";
 import { localDateSchema, pathSchema } from "@murphai/operator-config/vault-cli-contracts";
 import {
@@ -139,6 +139,7 @@ export function registerAllergyCommands(
     }),
     output: allergySaveResultSchema,
     async run(context) {
+      const { upsertAllergy } = await import("@murphai/core");
       const result = await upsertAllergy(
         buildAllergySaveInput({
           allergyId: context.options.id,

@@ -13,6 +13,7 @@ import { afterEach, test, vi } from 'vitest'
 const forbiddenStartupModules = [
   '../src/vault-cli-command-manifest.js',
   '@murphai/setup-cli/setup-assistant-wizard',
+  '@murphai/core',
 ] as const
 
 // Modules installed on every scoped invocation by `cli-entry.ts`, plus the
@@ -87,7 +88,14 @@ test('scoped command registration stays off the manifest and wizard surfaces', a
       import('../src/vault-cli-command-routing.js'),
     ])
 
-  for (const root of ['list', 'meal', 'wearables'] as const) {
+  for (const root of [
+    'allergy',
+    'condition',
+    'goal',
+    'list',
+    'meal',
+    'wearables',
+  ] as const) {
     await registerScopedVaultCliCommand({
       cli: createVaultCliShell('vault-cli'),
       root,
