@@ -1,5 +1,5 @@
 {
-  "catalogHash": "sha256:d97a030b59a204a28616f92bbeb6a82f4753ed1c7c4228ce84044b26d7151fe1",
+  "catalogHash": "sha256:357cd38580d81214fc633a08f8e58adf3b7cbba80f90605d7fda94aeed1ec85e",
   "generatedAt": null,
   "items": [
     {
@@ -7139,7 +7139,28 @@
         "Dumbbell"
       ],
       "id": "EX908",
-      "images": [],
+      "images": [
+        {
+          "alt": "Athlete lies on the back in tabletop while both straight arms hold one dumbbell above the center of the chest.",
+          "step": "Two-hand tabletop setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/7b59c423-db23-41f3-e4ea-203dd2742800/public"
+        },
+        {
+          "alt": "Athlete lowers one dumbbell behind the head with both hands while extending the right heel toward the floor and keeping the left leg in tabletop.",
+          "step": "Right-heel pullover endpoint",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/80e981ad-c412-4e6f-d4b9-d94f7fd36b00/public"
+        },
+        {
+          "alt": "Athlete returns one dumbbell over the chest with both arms straight and resets both legs to tabletop before alternating sides.",
+          "step": "Centered tabletop reset",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/28fb6159-3364-4c7b-5676-d657eac9f500/public"
+        },
+        {
+          "alt": "Athlete lowers one dumbbell behind the head with both hands while reaching the left heel toward the floor and keeping the opposite leg in tabletop.",
+          "step": "Left-heel pullover endpoint",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/962c3f2c-2ba4-4078-bf1d-daf6e71ca100/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Core strength",
@@ -20271,7 +20292,23 @@
       ],
       "equipment": [],
       "id": "EX657",
-      "images": [],
+      "images": [
+        {
+          "alt": "The exerciser holds a level high plank with both palms and both sets of toes grounded before the knee drive.",
+          "step": "Set the high plank",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/db88d50a-1646-4a58-d4b0-d25751ea1300/public"
+        },
+        {
+          "alt": "The exerciser draws the foreground knee toward the same-side elbow while keeping both palms and the far toes fixed.",
+          "step": "Drive the same-side knee",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/e7405610-140a-4987-0c11-6449abcb8700/public"
+        },
+        {
+          "alt": "The exerciser brings the foreground knee close to the same-side elbow while maintaining straight-arm and far-toe support.",
+          "step": "Reach the same-side elbow",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/c9f92dd8-f1ca-4c93-085f-58bc72265100/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
