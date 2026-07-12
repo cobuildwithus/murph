@@ -125,8 +125,7 @@ function TrialExtensionSection({
         campaign: null,
         candidatePreviewTokens: null,
         candidateSnapshotDigest: null,
-        continuationToken:
-          scope === "all" ? requestedContinuationToken : null,
+        continuationToken: requestedContinuationToken,
         memberId: requestedMemberId,
         mode: "dry-run",
       });
@@ -321,6 +320,8 @@ function TrialExtensionSection({
               <p className="border-t border-border/70 pt-4 text-sm text-muted-foreground">
                 {scope === "all"
                   ? "Nothing to change in this batch. This is complete only after every batch in a fresh pass shows zero provider trials to recover or clean up, zero trials to extend, and zero records to reconcile."
+                  : preview.summary.hasMoreCandidates
+                    ? "Nothing to change in this batch. Preview the next batch to continue the member search."
                   : "Nothing to change right now."}
               </p>
             )}
@@ -348,7 +349,7 @@ function TrialExtensionSection({
           </div>
         ) : null}
 
-        {scope === "all" && (displayedSummary || batchIndex > 0) ? (
+        {displayedSummary || batchIndex > 0 ? (
           <div className="flex flex-wrap items-center gap-2 border-t border-border/70 pt-4">
             {batchIndex > 0 ? (
               <Button
@@ -445,7 +446,7 @@ function TrialExtensionSummaryPanel({
         <span className="font-mono text-[11px] text-muted-foreground">
           Run key {summary.campaign}
         </span>
-        {scope === "all" ? (
+        {scope === "all" || summary.hasMoreCandidates || batchNumber > 1 ? (
           <span className="font-mono text-[11px] text-muted-foreground">
             Batch {batchNumber}
             {summary.hasMoreCandidates ? " · more batches" : " · final batch"}
@@ -455,7 +456,11 @@ function TrialExtensionSummaryPanel({
 
       {scope === "member" && summary.candidates === 0 ? (
         <p className="text-sm text-muted-foreground">
-          No eligible campaign trial found for that member id.
+          {summary.hasMoreCandidates
+            ? "No eligible campaign trial in this batch. Preview the next batch to continue the member search."
+            : batchNumber > 1
+              ? "Member search complete. No additional eligible campaign trial was found."
+              : "No eligible campaign trial found for that member id."}
         </p>
       ) : (
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">

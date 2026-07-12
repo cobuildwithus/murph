@@ -45,7 +45,7 @@ const OPERATOR_MEMBER_ID = "member_operator";
 const CANDIDATE_SNAPSHOT_DIGEST = `pulse-candidates-v4.${"a".repeat(43)}`;
 const CANDIDATE_PREVIEW_TOKEN = `pulse-target-v3.${"b".repeat(43)}`;
 const CONTINUATION_TOKEN =
-  `pulse-cursor-v2.v1.${"a".repeat(16)}.${"b".repeat(8)}.${"c".repeat(22)}`;
+  `pulse-cursor-v3.v1.${"a".repeat(16)}.${"b".repeat(8)}.${"c".repeat(22)}`;
 
 let consoleInfoSpy: ReturnType<typeof vi.spyOn>;
 
@@ -216,7 +216,7 @@ describe("hosted ops Pulse Trial extension route", () => {
     assert.equal(consoleInfoSpy.mock.calls.length, 0);
   });
 
-  test("passes opaque all-member continuation and rejects invalid or member-scoped tokens", async () => {
+  test("passes opaque continuations for all-member and member-scoped traversal", async () => {
     const continuationResponse = await route.POST(makeRequest({
       continuationToken: CONTINUATION_TOKEN,
     }));
@@ -235,7 +235,13 @@ describe("hosted ops Pulse Trial extension route", () => {
       memberId: undefined,
       mode: "dry-run",
     });
-    assert.equal(memberContinuationResponse.status, 400);
+    assert.equal(memberContinuationResponse.status, 200);
+    expect(mocks.extendHostedPulseTrialsForCampaign).toHaveBeenCalledWith({
+      continuationToken: CONTINUATION_TOKEN,
+      maxCandidates: 4,
+      memberId: "member_target",
+      mode: "dry-run",
+    });
     assert.equal(malformedContinuationResponse.status, 400);
   });
 

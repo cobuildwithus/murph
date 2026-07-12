@@ -71,19 +71,48 @@ export interface HostedAutoPulseTrialEnrollmentResult {
   status: HostedAutoPulseTrialEnrollmentStatus;
 }
 
+export type HostedAutoPulseTrialCampaignSubscription = Pick<
+  Stripe.Subscription,
+  | "cancel_at"
+  | "cancel_at_period_end"
+  | "customer"
+  | "id"
+  | "metadata"
+  | "status"
+  | "trial_end"
+  | "trial_start"
+> & {
+  created?: number;
+  items?: {
+    data: ReadonlyArray<{
+      id: string;
+      price?: {
+        id?: string;
+        metadata?: Record<string, string> | null;
+        recurring?: {
+          interval?: string;
+          interval_count?: number;
+          usage_type?: string;
+        } | null;
+      } | null;
+      quantity?: number | null;
+    }>;
+  };
+};
+
 export type HostedAutoPulseTrialCampaignDisposition =
   | {
       kind: "cleanup-obsolete";
-      subscription: Stripe.Subscription;
+      subscription: HostedAutoPulseTrialCampaignSubscription;
     }
   | {
       kind: "not-applicable";
       reason: "provider-trial-ended" | "provider-trial-not-found";
-      subscription: Stripe.Subscription | null;
+      subscription: HostedAutoPulseTrialCampaignSubscription | null;
     }
   | {
       kind: "recoverable";
-      subscription: Stripe.Subscription;
+      subscription: HostedAutoPulseTrialCampaignSubscription;
     };
 
 export type HostedAutoPulseTrialCampaignApplyTxResult =
@@ -273,6 +302,7 @@ export async function inspectHostedAutoPulseTrialCampaignDisposition(input: {
   requestOptions: Stripe.RequestOptions;
   stripe: Stripe;
   stripeCustomerId: string;
+  targetStripeSubscriptionId?: string;
   trialStartedBefore: Date;
 }): Promise<HostedAutoPulseTrialCampaignDisposition> {
   const hasCurrentActiveBilling =
@@ -294,14 +324,18 @@ export async function inspectHostedAutoPulseTrialCampaignDisposition(input: {
       !isTerminalHostedAutoPulseTrialStripeSubscription(subscription)
     )
     .sort(compareHostedStripeSubscriptionsNewestFirst);
-  if (matchingSubscriptions.length > 1) {
+  if (!input.targetStripeSubscriptionId && matchingSubscriptions.length > 1) {
     throw hostedOnboardingError({
       code: "HOSTED_AUTO_PULSE_TRIAL_RECOVERY_REQUIRED",
       httpStatus: 409,
       message: "Murph found an unfinished trial setup. Contact support to restore access.",
     });
   }
-  const subscription = matchingSubscriptions[0] ?? null;
+  const subscription = input.targetStripeSubscriptionId
+    ? matchingSubscriptions.find(
+        (candidate) => candidate.id === input.targetStripeSubscriptionId,
+      ) ?? null
+    : matchingSubscriptions[0] ?? null;
   if (!subscription) {
     return {
       kind: "not-applicable",
@@ -357,10 +391,21 @@ export async function applyHostedAutoPulseTrialCampaignDispositionTx(input: {
   tx: Prisma.TransactionClient;
 }): Promise<HostedAutoPulseTrialCampaignApplyTxResult> {
   if (input.disposition.kind === "cleanup-obsolete") {
+    const cleanupSubscriptionId = readHostedAutoPulseTrialCleanupSubscriptionId({
+      currentMember: input.currentMember,
+      subscription: input.disposition.subscription,
+    });
+    if (!cleanupSubscriptionId) {
+      throw hostedOnboardingError({
+        code: "HOSTED_AUTO_PULSE_TRIAL_RECOVERY_REQUIRED",
+        httpStatus: 409,
+        message: "Murph found an unfinished trial setup. Contact support to restore access.",
+      });
+    }
     await cancelHostedAutoPulseTrialStripeSubscriptionIfNeeded({
       requestOptions: input.requestOptions,
       stripe: input.stripe,
-      subscriptionId: input.disposition.subscription.id,
+      subscriptionId: cleanupSubscriptionId,
     });
     return {
       kind: "cleaned-up",
@@ -407,7 +452,7 @@ function assertHostedAutoPulseTrialCampaignSubscriptionEligible(input: {
   now: Date;
   priceId: string;
   stripeCustomerId: string;
-  subscription: Stripe.Subscription;
+  subscription: HostedAutoPulseTrialCampaignSubscription;
   trialStartedBefore: Date;
 }): void {
   const subscription = input.subscription;
@@ -497,7 +542,7 @@ async function finalizeHostedAutoPulseTrialEnrollment(input: {
   prisma: PrismaClient;
   stripe: Stripe;
   stripeCustomerId: string;
-  subscription: Stripe.Subscription;
+  subscription: HostedAutoPulseTrialCampaignSubscription;
 }): Promise<HostedAutoPulseTrialEnrollmentResult> {
   const trialSnapshot = readHostedAutoPulseTrialSubscriptionSnapshot(input.subscription);
   const outcome = await input.prisma.$transaction(
@@ -542,7 +587,7 @@ async function finalizeHostedAutoPulseTrialEnrollmentTx(input: {
   memberId: string;
   now: Date;
   stripeCustomerId: string;
-  subscription: Stripe.Subscription;
+  subscription: HostedAutoPulseTrialCampaignSubscription;
   trialSnapshot: ReturnType<typeof readHostedAutoPulseTrialSubscriptionSnapshot>;
   tx: Prisma.TransactionClient;
 }): Promise<HostedAutoPulseTrialFinalizationOutcome> {
@@ -946,7 +991,7 @@ async function listHostedAutoPulseTrialStripeSubscriptionsForRecovery(input: {
 function isHostedAutoPulseTrialStripeSubscriptionForMember(input: {
   memberId: string;
   priceId: string;
-  subscription: Stripe.Subscription;
+  subscription: HostedAutoPulseTrialCampaignSubscription;
   trialStartedBefore?: Date;
 }): boolean {
   const trialStart = readHostedStripeObjectDate(input.subscription, "trial_start");
@@ -969,7 +1014,7 @@ function isHostedAutoPulseTrialStripeSubscriptionForMember(input: {
 
 function isReusableHostedAutoPulseTrialStripeSubscription(input: {
   priceId: string;
-  subscription: Stripe.Subscription;
+  subscription: HostedAutoPulseTrialCampaignSubscription;
 }): boolean {
   return input.subscription.status === "trialing" &&
     input.subscription.metadata?.billingPlanCode === "launch_monthly" &&
@@ -983,7 +1028,7 @@ function isReusableHostedAutoPulseTrialStripeSubscription(input: {
 }
 
 function isTerminalHostedAutoPulseTrialStripeSubscription(
-  subscription: Stripe.Subscription,
+  subscription: HostedAutoPulseTrialCampaignSubscription,
 ): boolean {
   return subscription.status === "canceled" ||
     subscription.status === "incomplete_expired";
@@ -997,7 +1042,7 @@ function compareHostedStripeSubscriptionsNewestFirst(
 }
 
 function readHostedAutoPulseTrialSubscriptionSnapshot(
-  subscription: Stripe.Subscription,
+  subscription: HostedAutoPulseTrialCampaignSubscription,
 ): {
   currentPeriodEnd?: Date | null;
   currentPeriodStart?: Date | null;
@@ -1032,7 +1077,7 @@ function readHostedAutoPulseTrialSubscriptionSnapshot(
 }
 
 function readHostedAutoPulseTrialCurrentPeriod(
-  subscription: Stripe.Subscription,
+  subscription: HostedAutoPulseTrialCampaignSubscription,
 ): {
   currentPeriodEnd?: Date | null;
   currentPeriodStart?: Date | null;
@@ -1053,7 +1098,7 @@ function readHostedAutoPulseTrialCurrentPeriod(
 }
 
 function readHostedStripeSubscriptionItemDate(
-  subscription: Stripe.Subscription,
+  subscription: HostedAutoPulseTrialCampaignSubscription,
   field: string,
 ): Date | null {
   for (const item of subscription.items?.data ?? []) {
@@ -1069,7 +1114,7 @@ function readHostedStripeSubscriptionItemDate(
 function buildHostedAutoPulseTrialDispatchContext(input: {
   billingRefLastStripeEventCreatedAt: Date | null;
   now: Date;
-  subscription: Stripe.Subscription;
+  subscription: HostedAutoPulseTrialCampaignSubscription;
 }): HostedStripeDispatchContext {
   const eventCreatedAt = maxHostedAutoPulseTrialDate([
     input.now,
@@ -1086,7 +1131,7 @@ function buildHostedAutoPulseTrialDispatchContext(input: {
 
 function readHostedAutoPulseTrialCleanupSubscriptionId(input: {
   currentMember: HostedMemberBillingSnapshot;
-  subscription: Stripe.Subscription;
+  subscription: HostedAutoPulseTrialCampaignSubscription;
 }): string | null {
   return input.currentMember.billingRef?.stripeSubscriptionId === input.subscription.id
     ? null

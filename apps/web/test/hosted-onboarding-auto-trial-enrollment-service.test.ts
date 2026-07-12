@@ -695,6 +695,48 @@ describe("ensureHostedAutoPulseTrialEnrollment", () => {
     expect(mocks.writeHostedMemberStripeBillingTx).not.toHaveBeenCalled();
   });
 
+  it("campaign cleanup refuses to cancel the current durable subscription", async () => {
+    const currentMember = makeBillingSnapshot({
+      billingRef: {
+        ...makePulseTrialBillingRef(),
+        currentBillingPhase: "paid",
+        currentCheckoutOffer: "standard",
+        pulseTrialPolicyVersion: null,
+        pulseTrialRedeemedAt: null,
+        stripeCustomerId: "cus_auto_trial_123",
+        stripeSubscriptionId: "sub_auto_trial_123",
+      },
+      billingStatus: HostedBillingStatus.active,
+    });
+
+    await expect(applyHostedAutoPulseTrialCampaignDispositionTx({
+      campaignPolicy: {
+        minimumTrialRunwaySeconds: 81,
+        priceId: "price_pulse_monthly_123",
+        trialStartedBefore: new Date("2026-07-10T00:00:00.000Z"),
+      },
+      currentMember,
+      disposition: {
+        kind: "cleanup-obsolete",
+        subscription: makeTrialSubscription() as never,
+      },
+      now: new Date("2026-07-12T12:00:00.000Z"),
+      requestOptions: {
+        maxNetworkRetries: 0,
+        timeout: 80_000,
+      },
+      stripe: mocks.stripe as never,
+      stripeCustomerId: "cus_auto_trial_123",
+      tx: { tx: true } as never,
+    })).rejects.toMatchObject({
+      code: "HOSTED_AUTO_PULSE_TRIAL_RECOVERY_REQUIRED",
+      httpStatus: 409,
+    });
+
+    expect(mocks.stripe.subscriptions.cancel).not.toHaveBeenCalled();
+    expect(mocks.writeHostedMemberStripeBillingTx).not.toHaveBeenCalled();
+  });
+
   it("campaign owner fails closed instead of scanning beyond one provider page", async () => {
     mocks.stripe.subscriptions.list.mockResolvedValueOnce({
       data: [makeTrialSubscription()],

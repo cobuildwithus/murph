@@ -54,7 +54,7 @@ const fetchMock = vi.fn<typeof fetch>();
 const CANDIDATE_SNAPSHOT_DIGEST = `pulse-candidates-v4.${"a".repeat(43)}`;
 const CANDIDATE_PREVIEW_TOKEN = `pulse-target-v3.${"b".repeat(43)}`;
 const CONTINUATION_TOKEN =
-  `pulse-cursor-v2.v1.${"a".repeat(16)}.${"b".repeat(8)}.${"c".repeat(22)}`;
+  `pulse-cursor-v3.v1.${"a".repeat(16)}.${"b".repeat(8)}.${"c".repeat(22)}`;
 let cleanupRender: (() => Promise<void>) | null = null;
 
 beforeEach(() => {
@@ -263,6 +263,85 @@ describe("TrialExtensionClient", () => {
     expect(readRequestBody(2)).toEqual({ mode: "dry-run" });
     expect(allSection.textContent).toContain("Batch 1 · more batches");
     expect(focusMock).toHaveBeenCalledTimes(3);
+  });
+
+  test("continues member-scoped Preview through an empty provider batch", async () => {
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse(buildSummary("dry-run", {
+        candidatePreviewTokens: [],
+        candidates: 0,
+        hasMoreCandidates: true,
+        nextContinuationToken: CONTINUATION_TOKEN,
+      })))
+      .mockResolvedValueOnce(jsonResponse(buildSummary("dry-run", {
+        wouldExtend: 1,
+      })));
+
+    const rendered = await renderClientComponent(createElement(TrialExtensionClient));
+    cleanupRender = rendered.cleanup;
+    const memberSection = getSection(rendered.container, 1);
+    await changeInput(rendered.window, getInput(memberSection, 0), "member_target");
+
+    await clickButton(rendered.window, getButton(memberSection, "Preview"));
+    expect(memberSection.textContent).toContain("Batch 1 · more batches");
+    expect(memberSection.textContent).toContain(
+      "Preview the next batch to continue the member search",
+    );
+    await clickButton(rendered.window, getButton(memberSection, "Preview next batch"));
+
+    expect(readRequestBody(1)).toEqual({
+      continuationToken: CONTINUATION_TOKEN,
+      memberId: "member_target",
+      mode: "dry-run",
+    });
+    expect(memberSection.textContent).toContain("Batch 2 · final batch");
+    expect(memberSection.textContent).toContain("Would get 7 days1");
+  });
+
+  test("keeps a non-actionable member batch non-terminal while more pages remain", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(buildSummary("dry-run", {
+      hasMoreCandidates: true,
+      nextContinuationToken: CONTINUATION_TOKEN,
+    })));
+
+    const rendered = await renderClientComponent(createElement(TrialExtensionClient));
+    cleanupRender = rendered.cleanup;
+    const memberSection = getSection(rendered.container, 1);
+    await changeInput(rendered.window, getInput(memberSection, 0), "member_target");
+
+    await clickButton(rendered.window, getButton(memberSection, "Preview"));
+
+    expect(memberSection.textContent).toContain(
+      "Nothing to change in this batch. Preview the next batch to continue the member search.",
+    );
+    expect(memberSection.textContent).not.toContain("Nothing to change right now.");
+  });
+
+  test("describes a later empty member batch as no additional match", async () => {
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse(buildSummary("dry-run", {
+        hasMoreCandidates: true,
+        nextContinuationToken: CONTINUATION_TOKEN,
+        wouldExtend: 1,
+      })))
+      .mockResolvedValueOnce(jsonResponse(buildSummary("dry-run", {
+        candidatePreviewTokens: [],
+        candidates: 0,
+      })));
+
+    const rendered = await renderClientComponent(createElement(TrialExtensionClient));
+    cleanupRender = rendered.cleanup;
+    const memberSection = getSection(rendered.container, 1);
+    await changeInput(rendered.window, getInput(memberSection, 0), "member_target");
+    await clickButton(rendered.window, getButton(memberSection, "Preview"));
+    await clickButton(rendered.window, getButton(memberSection, "Preview next batch"));
+
+    expect(memberSection.textContent).toContain(
+      "Member search complete. No additional eligible campaign trial was found.",
+    );
+    expect(memberSection.textContent).not.toContain(
+      "No eligible campaign trial found for that member id.",
+    );
   });
 
   test("restarts a later batch at Batch 1 without replaying its continuation", async () => {

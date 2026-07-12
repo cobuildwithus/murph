@@ -35,7 +35,7 @@ export const POST = withJsonError(async (request: Request) => {
 
   const mode = readMode(body);
   const memberId = readMemberId(body);
-  const continuationToken = readContinuationToken(body, memberId);
+  const continuationToken = readContinuationToken(body);
   if (
     mode === "apply" &&
     readOptionalString(body.campaign) !== HOSTED_PULSE_TRIAL_EXTENSION_CAMPAIGN
@@ -177,14 +177,12 @@ function readRequiredCandidatePreviewTokens(body: Record<string, unknown>): read
 
 function readContinuationToken(
   body: Record<string, unknown>,
-  memberId: string | undefined,
 ): string | null {
   if (!Object.hasOwn(body, "continuationToken") || body.continuationToken === null) {
     return null;
   }
   const token = readOptionalString(body.continuationToken);
   if (
-    !memberId &&
     token &&
     isHostedPulseTrialExtensionContinuationTokenShape(token)
   ) {
