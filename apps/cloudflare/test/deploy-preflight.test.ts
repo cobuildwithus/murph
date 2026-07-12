@@ -15,8 +15,8 @@ const HOSTED_ASSISTANT_MODEL_PRICING_ERROR =
   "HOSTED_ASSISTANT_MODEL must be one of gpt-5.5, gpt-5.6-sol, gpt-5.6-terra, gpt-5.6-luna for hosted AI usage allowance pricing.";
 const HOSTED_ASSISTANT_GPT_56_ROLLOUT_ERROR =
   "production hosted assistant GPT-5.6 deploys must set HOSTED_EXECUTION_CONTAINER_ROLLOUT=immediate; rollback floor is HOSTED_ASSISTANT_MODEL=gpt-5.5.";
-const HOSTED_SELECTOR_SCOPE_ROLLOUT_ERROR =
-  "production vault-share selector-scope deploys must use HOSTED_EXECUTION_CONTAINER_ROLLOUT=immediate; rollback floor is the selector-scope runner bundle.";
+const HOSTED_SLEEP_DURATION_STORE_ROLLOUT_ERROR =
+  "production vault-share sleep-duration store deploys must use HOSTED_EXECUTION_CONTAINER_ROLLOUT=immediate; rollback floor is the sleep-duration-capable runner bundle.";
 
 function createRequiredWorkerDeployEnv(overrides: Record<string, string | undefined> = {}): EnvSource {
   return {
@@ -457,7 +457,7 @@ describe("deploy preflight helpers", () => {
     ]));
   });
 
-  it("requires immediate production container rollout while selector scopes migrate", () => {
+  it("requires immediate production container rollout for the sleep-duration store floor", () => {
     expect(
       listHostedDeployEnvironmentInvariantErrors(
         createRequiredWorkerDeployEnv({
@@ -465,7 +465,7 @@ describe("deploy preflight helpers", () => {
         }),
         { deployWorker: true },
       ),
-    ).toContain(HOSTED_SELECTOR_SCOPE_ROLLOUT_ERROR);
+    ).toContain(HOSTED_SLEEP_DURATION_STORE_ROLLOUT_ERROR);
 
     expect(
       listHostedDeployEnvironmentInvariantErrors(
@@ -474,14 +474,14 @@ describe("deploy preflight helpers", () => {
         }),
         { deployWorker: true },
       ),
-    ).not.toContain(HOSTED_SELECTOR_SCOPE_ROLLOUT_ERROR);
+    ).not.toContain(HOSTED_SLEEP_DURATION_STORE_ROLLOUT_ERROR);
 
     expect(
       listHostedDeployEnvironmentInvariantErrors(
         createRequiredWorkerDeployEnv(),
         { deployWorker: true },
       ),
-    ).not.toContain(HOSTED_SELECTOR_SCOPE_ROLLOUT_ERROR);
+    ).not.toContain(HOSTED_SLEEP_DURATION_STORE_ROLLOUT_ERROR);
 
     expect(
       listHostedDeployEnvironmentInvariantErrors(
@@ -495,7 +495,7 @@ describe("deploy preflight helpers", () => {
         }),
         { deployWorker: true },
       ),
-    ).not.toContain(HOSTED_SELECTOR_SCOPE_ROLLOUT_ERROR);
+    ).not.toContain(HOSTED_SLEEP_DURATION_STORE_ROLLOUT_ERROR);
   });
 
   it("allows deploys without Junction runtime env", () => {
