@@ -28,7 +28,7 @@ Read `references/triage-and-contact-lenses.md` before answering any active eye s
 
 ## Safety Pass
 
-- Apply the Decision Order in `references/triage-and-contact-lenses.md` before selecting a care level or immediate action. Do not restate, weaken, or bypass its predicates.
+- Apply Prerequisite First Aid and then the Decision Order in `references/triage-and-contact-lenses.md` before selecting a care destination or any further action. Do not restate, weaken, or bypass its predicates.
 - Do not let follow-up questions delay action after the Decision Order assigns emergency or prompt same-day care.
 
 ## Data First
@@ -45,7 +45,7 @@ Read `references/triage-and-contact-lenses.md` before answering any active eye s
 
 ## Low-Burden Comfort Plan
 
-Only after the safety pass is negative:
+Only when the Decision Order assigns `Brief self-care trial is reasonable`:
 
 1. If contacts feel uncomfortable, remove them and use current backup glasses. Do not change the prescription or lens brand.
 2. Make text comfortably readable, reduce glare, match display brightness to the room, keep the screen at a comfortable roughly arm's-length distance with its top at or below eye level, and redirect fans or vents away from the face.
@@ -74,4 +74,4 @@ Only after the safety pass is negative:
 - Give one immediate action, then one short comfort plan or care destination.
 - State the exact threshold and timing for eye care; do not bury it in a long differential or disclaimer.
 - If the user asks about a product or popular rule, give the evidence bottom line plainly and offer a lower-cost alternative when one exists.
-- For non-urgent symptoms, end with one reassessment window and what would make the user stop self-care.
+- When the Decision Order assigns brief self-care, end with one reassessment window and what would make the user stop. When it assigns a prompt or routine exam, state that timing without substituting the multi-day comfort trial.

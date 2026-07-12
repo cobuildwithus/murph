@@ -2,6 +2,13 @@
 
 Use this reference for active symptoms, vision changes, contact-lens problems, injury, or chemical exposure. It routes care; it does not diagnose a cause.
 
+## Prerequisite First Aid
+
+Before assigning a care level:
+
+- For unusual contact-lens discomfort, redness, or irritation, remove the lens or lenses immediately and use current backup glasses.
+- For a known mild irritant or loose superficial particle, rinse gently with clean lukewarm water. Do not rinse, rub, press, or remove anything when a penetrating or high-velocity injury, embedded object, cut, or puncture is possible.
+
 ## Decision Order
 
 ### Emergency now
@@ -35,12 +42,12 @@ Use a lower threshold for prompt clinician input when the user has diabetes, imm
 
 ### Brief self-care trial is reasonable
 
-Self-care is reasonable only for mild, gradual, bilateral tired, dry, burning, gritty, or intermittently blurry symptoms after sustained near work that improve with complete blinking, rest, or lens removal, with no pain, marked redness, light sensitivity, discharge, sudden or persistent vision change, new flashes, a sudden increase in or many new floaters, trauma, or chemical exposure. A contact-lens wearer with redness or a new vision change is not eligible for this pathway even when symptoms improve after blinking, rest, or lens removal. This is eligibility for a trial, not a diagnosis.
+Self-care is reasonable for mild, gradual, bilateral tired, dry, burning, gritty, or intermittently blurry symptoms after sustained near work that improve with complete blinking, rest, or lens removal, with no pain, marked redness, light sensitivity, discharge, sudden or persistent vision change, new flashes, a sudden increase in or many new floaters, trauma, or chemical exposure. It is also reasonable for a known mild irritant or loose superficial particle that fully resolves after thorough rinsing, with normal vision and no pain or other warning feature. A contact-lens wearer with redness or a new vision change is not eligible for this pathway even when symptoms improve after blinking, rest, or lens removal. This is eligibility for a trial, not a diagnosis.
 
 ## Contact-Lens Action Rules
 
-- At unusual discomfort, redness, or irritation, remove the lens or lenses immediately and use current backup glasses. When the Decision Order assigns prompt same-day eye care, do not reinsert the lenses until an eye clinician says it is safe. Do not discard the lenses or case until asking whether the clinician wants them for evaluation; isolate them so they cannot be reused accidentally.
-- When the Decision Order assigns brief self-care for mild contact-lens dryness, do not wear the lenses again that day. Follow the prescribed replacement and wear schedule at the next wear window; if symptoms return, stop lens wear and arrange a contact-lens-fit exam.
+- After prerequisite lens removal, use current backup glasses. When the Decision Order assigns prompt same-day eye care, do not reinsert the lenses until an eye clinician says it is safe. Do not discard the lenses or case until asking whether the clinician wants them for evaluation; isolate them so they cannot be reused accidentally.
+- When the Decision Order assigns brief self-care for mild contact-lens dryness, do not wear the lenses again that day. Follow the prescribed replacement and wear schedule at the next wear window; if symptoms return, stop lens wear and apply the Decision Order again.
 - Never sleep in lenses unless the prescribing clinician specifically directed it. Remove lenses before showering, swimming, or using a hot tub.
 - If water contacts lenses, remove them as soon as possible. Discard daily disposables; for reusable lenses, follow the lens and solution instructions for cleaning and overnight disinfection. Never rinse or store lenses in any water or saliva.
 - Wash and thoroughly dry hands before handling lenses. Rub and rinse reusable lenses with the recommended disinfecting solution, use fresh solution every time, never top off, clean the case with solution, air-dry it face down with caps off, and replace it at least every three months.

@@ -297,8 +297,12 @@ describe('assistant skill assets', () => {
     expect(eyeSkillText).toContain('optional memory cue, not a proven treatment dose')
     expect(eyeSkillText).toContain('Do not recommend blue-light-filtering glasses')
     expect(eyeSkillText).toContain(
-      'Apply the Decision Order in `references/triage-and-contact-lenses.md` before selecting a care level or immediate action.',
+      'Apply Prerequisite First Aid and then the Decision Order in `references/triage-and-contact-lenses.md` before selecting a care destination or any further action.',
     )
+    expect(eyeSkillText).toContain(
+      'Only when the Decision Order assigns `Brief self-care trial is reasonable`:',
+    )
+    expect(eyeSkillText).not.toContain('safety pass is negative')
     expect(eyeSkillText).not.toContain('A contact-lens wearer with pain')
     expect(eyeSkillText).not.toContain('gradual, mild, in both eyes')
     expect(eyeSkillText).not.toContain('still hurts after removal')
@@ -329,6 +333,13 @@ describe('assistant skill assets', () => {
     ])
     expect(triageText).toContain('### Emergency now')
     expect(triageText).toContain('### Prompt same-day eye care')
+    expect(triageText).toContain('## Prerequisite First Aid')
+    expect(triageText).toContain(
+      'For a known mild irritant or loose superficial particle, rinse gently with clean lukewarm water.',
+    )
+    expect(triageText).toContain(
+      'known mild irritant or loose superficial particle that fully resolves after thorough rinsing',
+    )
     expect(triageText).toContain('new flashes of light')
     expect(triageText).toContain('a sudden increase in or many new floaters')
     const triageContactLensSameDayRule = triageText
@@ -346,6 +357,12 @@ describe('assistant skill assets', () => {
     )
     expect(triageText).toContain(
       'When the Decision Order assigns brief self-care for mild contact-lens dryness, do not wear the lenses again that day.',
+    )
+    expect(triageText).toContain(
+      'if symptoms return, stop lens wear and apply the Decision Order again.',
+    )
+    expect(triageText).not.toContain(
+      'if symptoms return, stop lens wear and arrange a contact-lens-fit exam',
     )
     expect(triageText).not.toContain(
       'For mild end-of-day dryness that fully resolves after removal',
