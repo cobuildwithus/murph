@@ -22,6 +22,7 @@
   },
   "scripts": {
     "build": "node ../../scripts/rm-paths.mjs dist && tsc -b tsconfig.build.json --pretty false",
+    "benchmark:snapshot-validation": "pnpm --dir ../.. exec tsx --tsconfig apps/cloudflare/tsconfig.scripts.json apps/cloudflare/scripts/benchmark-workspace-snapshot-validation.ts",
     "typecheck": "tsc -p tsconfig.typecheck.json --pretty false",
     "test": "pnpm typecheck && pnpm test:node",
     "test:node": "pnpm --dir ../.. exec vitest run --config apps/cloudflare/vitest.node.workspace.ts --no-coverage",

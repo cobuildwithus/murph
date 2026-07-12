@@ -1022,7 +1022,7 @@ interface HostedWorkspaceSnapshotTarInventory {
   totalPlainBytes: number;
 }
 
-export function readHostedWorkspaceSnapshotTarInventory(
+function readHostedWorkspaceSnapshotTarInventory(
   entries: readonly string[],
   options: {
     enforcePortableEntries: boolean;
