@@ -80,14 +80,15 @@ Updated: 2026-07-12
 - Consumed the stopped 200-range tail at sequences 213–215: validated, uploaded, and publicly verified 11 images for three movements. Rejected unilateral sequence 216 because it does not depict a bilateral heel-to-toe rock, and persisted sequence 217's unsupported stair-edge heel-drop blocker without uploading either invalid movement.
 - Completed manifest sequence 6 (`EX654`, Side Plank Star Prep): generated and inspected a three-frame setup, transition, and star endpoint with fixed subject/camera/support continuity; uploaded three images through metadata identity preflight; verified hosted bytes and public variants; and updated only the owning seed `Images` field.
 - Completed manifest sequence 7 (`EX655`, Copenhagen Plank Adduction Squeeze): rejected two invalid transition renders before accepting a three-frame knee-supported setup, lifted plank, and bottom-leg adduction squeeze; uploaded the three accepted images with hosted-byte and public-variant proof; and updated only the owning seed `Images` field.
+- Completed manifest sequence 8 (`EX656`, Forearm Plank Knee-to-Elbow): rejected one overlapped-foot setup, then accepted a three-frame fixed-camera forearm-plank setup, same-side knee transition, and knee-near-elbow endpoint; uploaded and verified three images and updated only the owning seed `Images` field.
 
 ## Now
 
-- Valid ready handoff work is consumed through sequence 215, with invalid/incomplete movements left pending; direct sequences 6–7 are cataloged and 367 image-less movements remain.
+- Valid ready handoff work is consumed through sequence 215, with invalid/incomplete movements left pending; direct sequences 6–8 are cataloged and 366 image-less movements remain.
 
 ## Next
 
-- Resume direct generation at manifest sequence 8, preserving all reserved ranges and consuming later corrected or completed handoffs only at safe boundaries.
+- Resume direct generation at manifest sequence 9, preserving all reserved ranges and consuming later corrected or completed handoffs only at safe boundaries.
 - Keep ReviewGPT blocked until generation is complete, PR #557 is merged, and the controller grants the single patched 0.5.103 exact-head audit.
 
 ## Verification
@@ -95,7 +96,7 @@ Updated: 2026-07-12
 - `pnpm --dir packages/exercise-library generate`: passed after reconciliation and alt correction.
 - `pnpm --dir packages/exercise-library generate:check`: passed.
 - `pnpm --dir packages/exercise-library verify`: passed; 1 test file and 6 tests passed, including exact catalog counts, URL uniqueness, and the 500-character alt bound.
-- Current direct catalog proof: 1,748 total; 1,381 with images; 367 without images; 4,183 images; 4,183 unique public URLs.
+- Current direct catalog proof: 1,748 total; 1,382 with images; 366 without images; 4,186 images; 4,186 unique public URLs.
 - The latest handoff batch passes `pnpm --dir packages/exercise-library verify`: typecheck, all 6 tests, and deterministic generated-artifact checks are green; seed drift is limited to the 14 intended `Images` fields.
 - The subsequent 175/200-range batch also passes `pnpm --dir packages/exercise-library verify`; seed drift is limited to nine intended `Images` fields across two owning seed files, and 4,172 public URLs are unique.
 - Remaining generation, upload, full repository verification, completion audits, and final-head CI are pending.

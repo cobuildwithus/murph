@@ -1,5 +1,5 @@
 {
-  "catalogHash": "sha256:b12383f0e5577e8f4d27714d58a597b193117588c6cecb620822da78c0b54101",
+  "catalogHash": "sha256:9bc81b2a2de909071d4705db8433bc96b35cf0aecf4c1d5b09d19383e68705ac",
   "generatedAt": null,
   "items": [
     {
@@ -19955,7 +19955,23 @@
       ],
       "equipment": [],
       "id": "EX656",
-      "images": [],
+      "images": [
+        {
+          "alt": "The exerciser holds a level forearm plank with both forearms and both sets of toes grounded before the knee drive.",
+          "step": "Set the forearm plank",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/2518886c-4f18-4e95-30c3-bb0df618ac00/public"
+        },
+        {
+          "alt": "The exerciser draws the near-side knee forward in a controlled transition while keeping the far leg and both forearms fixed.",
+          "step": "Drive the knee forward",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/2c33fd18-dec8-49e9-d19c-e860f2ee8700/public"
+        },
+        {
+          "alt": "The exerciser brings the near-side knee close to the same-side elbow while maintaining forearm and far-toe support.",
+          "step": "Reach the same-side elbow",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/fe66bfa2-0f66-492b-0a63-a02639789200/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
