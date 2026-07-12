@@ -206,6 +206,12 @@ export const ASSISTANT_SKILLS = [
       'Use for running, walking, cycling, aerobic-base or Zone 2 work, cardio conditioning, low-impact conditioning, cardio around strength or sport, limited-time maintenance, and non-event speed development. For a named event, date, competition category, qualifying target, concrete benchmark, or event-specific performance goal, use competition-training when registered; otherwise read running-cardio and keep support bounded to general capacity and preparation rather than event-specific tapering, peaking, race rules, or benchmark-specific progression. Use physical-therapy first for active pain, injury, rehabilitation, or return-to-run clearance. Use chronic-illness-support when illness determines capacity and behavior-followthrough when recurring support is central.',
   },
   {
+    slug: 'group-newsletter',
+    name: 'group-newsletter',
+    triggerHint:
+      'Read when a group asks to set up, edit, stop, or write its recurring health newsletter, and on every scheduled group-health-newsletter run. Owns the weekly editorial story, human-readable exercise and sleep comparisons, exact group-name subjects, tone, and the final shared email. Use group-chat alongside it for room etiquette, consent offers, and opt-out behavior.',
+  },
+  {
     slug: 'group-chat',
     name: 'group-chat',
     triggerHint:
