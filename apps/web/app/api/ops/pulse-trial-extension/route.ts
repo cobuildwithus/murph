@@ -46,23 +46,31 @@ export const POST = withJsonError(async (request: Request) => {
       retryable: false,
     });
   }
-  const expectedCandidateSnapshotDigest = mode === "apply"
-    ? readRequiredCandidateSnapshotDigest(body)
-    : undefined;
-  const expectedCandidatePreviewTokens = mode === "apply"
-    ? readRequiredCandidatePreviewTokens(body)
-    : undefined;
+  const previewProof = mode === "apply"
+    ? {
+        candidatePreviewTokens: readRequiredCandidatePreviewTokens(body),
+        candidateSnapshotDigest: readRequiredCandidateSnapshotDigest(body),
+      }
+    : null;
 
   let summary: HostedPulseTrialExtensionSummary;
   try {
-    summary = await extendHostedPulseTrialsForCampaign({
-      expectedCandidatePreviewTokens,
-      expectedCandidateSnapshotDigest,
+    const commonInput = {
       maxCandidates: HOSTED_OPS_PULSE_TRIAL_EXTENSION_MAX_CANDIDATES,
       memberId,
-      mode,
       page,
-    });
+    };
+    summary = previewProof
+      ? await extendHostedPulseTrialsForCampaign({
+          ...commonInput,
+          expectedCandidatePreviewTokens: previewProof.candidatePreviewTokens,
+          expectedCandidateSnapshotDigest: previewProof.candidateSnapshotDigest,
+          mode: "apply",
+        })
+      : await extendHostedPulseTrialsForCampaign({
+          ...commonInput,
+          mode: "dry-run",
+        });
   } catch (error) {
     if (error instanceof HostedPulseTrialExtensionPreviewMismatchError) {
       throw hostedOnboardingError({
@@ -78,6 +86,7 @@ export const POST = withJsonError(async (request: Request) => {
     console.info("Hosted ops Pulse Trial extension applied.", {
       campaign: HOSTED_PULSE_TRIAL_EXTENSION_CAMPAIGN,
       localWindowsReconciled: summary.localWindowsReconciled,
+      providerTrialsRecovered: summary.providerTrialsRecovered,
       scope: memberId ? "member" : "all",
       stripeTrialsExtended: summary.stripeTrialsExtended,
       timestamp: new Date().toISOString(),
@@ -123,7 +132,7 @@ function readMemberId(body: Record<string, unknown>): string | undefined {
 
 function readRequiredCandidateSnapshotDigest(body: Record<string, unknown>): string {
   const digest = readOptionalString(body.candidateSnapshotDigest);
-  if (digest && /^pulse-candidates-v2\.[A-Za-z0-9_-]{43}$/u.test(digest)) {
+  if (digest && /^pulse-candidates-v3\.[A-Za-z0-9_-]{43}$/u.test(digest)) {
     return digest;
   }
 
@@ -141,7 +150,7 @@ function readRequiredCandidatePreviewTokens(body: Record<string, unknown>): read
     Array.isArray(value) &&
     value.length <= HOSTED_OPS_PULSE_TRIAL_EXTENSION_MAX_CANDIDATES &&
     value.every((token): token is string =>
-      typeof token === "string" && /^pulse-target-v1\.[A-Za-z0-9_-]{43}$/u.test(token)
+      typeof token === "string" && /^pulse-target-v2\.[A-Za-z0-9_-]{43}$/u.test(token)
     )
   ) {
     return value;

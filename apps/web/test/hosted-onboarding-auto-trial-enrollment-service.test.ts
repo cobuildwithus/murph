@@ -140,6 +140,7 @@ import {
   buildHostedAutoPulseTrialCustomerIdempotencyKey,
   buildHostedAutoPulseTrialSubscriptionIdempotencyKey,
   ensureHostedAutoPulseTrialEnrollment,
+  recoverHostedAutoPulseTrialEnrollmentForCampaign,
 } from "@/src/lib/hosted-onboarding/auto-trial-enrollment-service";
 
 describe("ensureHostedAutoPulseTrialEnrollment", () => {
@@ -422,6 +423,157 @@ describe("ensureHostedAutoPulseTrialEnrollment", () => {
         stripeSubscriptionId: "sub_recovered_trial_123",
       }),
     );
+  });
+
+  it("campaign recovery finalizes a proved provider-only trial through the enrollment owner", async () => {
+    const providerOnlyBillingRef = {
+      currentBillingPhase: null,
+      currentBillingPlanCode: null,
+      currentCheckoutOffer: null,
+      currentPeriodEnd: null,
+      currentPeriodStart: null,
+      currentTrialEndsAt: null,
+      currentTrialStartedAt: null,
+      lastStripeEventCreatedAt: null,
+      memberId: "member_123",
+      pulseTrialPolicyVersion: null,
+      pulseTrialRedeemedAt: null,
+      stripeCustomerId: "cus_auto_trial_123",
+      stripeSubscriptionId: null,
+    };
+    mocks.readHostedMemberBillingSnapshot.mockResolvedValue(
+      makeBillingSnapshot({ billingRef: providerOnlyBillingRef }),
+    );
+    mocks.stripe.subscriptions.list.mockResolvedValueOnce({
+      data: [makeTrialSubscription()],
+      has_more: false,
+    });
+    const prisma = makePrisma();
+
+    await expect(
+      recoverHostedAutoPulseTrialEnrollmentForCampaign({
+        expectedSubscriptionId: "sub_auto_trial_123",
+        matchesExpectedSubscription: () => true,
+        memberId: "member_123",
+        now: new Date("2026-07-12T12:00:00.000Z"),
+        priceId: "price_pulse_monthly_123",
+        prisma: prisma as never,
+        requestOptions: {
+          maxNetworkRetries: 0,
+          timeout: 80_000,
+        },
+        stripe: mocks.stripe as never,
+        stripeCustomerId: "cus_auto_trial_123",
+      }),
+    ).resolves.toBe("recovered");
+
+    expect(mocks.stripe.subscriptions.list).toHaveBeenCalledWith({
+      customer: "cus_auto_trial_123",
+      limit: 100,
+      status: "all",
+    }, {
+      maxNetworkRetries: 0,
+      timeout: 80_000,
+    });
+    expect(mocks.stripe.subscriptions.create).not.toHaveBeenCalled();
+    expect(mocks.writeHostedMemberStripeBillingTx).toHaveBeenCalledWith(
+      expect.objectContaining({
+        pulseTrialRedeemedAt: new Date("2026-06-14T12:00:00.000Z"),
+        stripeSubscriptionId: "sub_auto_trial_123",
+      }),
+    );
+    expect(mocks.activateHostedMemberForPositiveSourceTx).toHaveBeenCalled();
+  });
+
+  it("campaign recovery rejects changed provider state before local finalization", async () => {
+    mocks.readHostedMemberBillingSnapshot.mockResolvedValue(makeBillingSnapshot({
+      billingRef: {
+        currentBillingPhase: null,
+        currentBillingPlanCode: null,
+        currentCheckoutOffer: null,
+        currentPeriodEnd: null,
+        currentPeriodStart: null,
+        currentTrialEndsAt: null,
+        currentTrialStartedAt: null,
+        lastStripeEventCreatedAt: null,
+        memberId: "member_123",
+        pulseTrialPolicyVersion: null,
+        pulseTrialRedeemedAt: null,
+        stripeCustomerId: "cus_auto_trial_123",
+        stripeSubscriptionId: null,
+      },
+    }));
+    mocks.stripe.subscriptions.list.mockResolvedValueOnce({
+      data: [makeTrialSubscription()],
+      has_more: false,
+    });
+
+    await expect(recoverHostedAutoPulseTrialEnrollmentForCampaign({
+      expectedSubscriptionId: "sub_auto_trial_123",
+      matchesExpectedSubscription: () => false,
+      memberId: "member_123",
+      now: new Date("2026-07-12T12:00:00.000Z"),
+      priceId: "price_pulse_monthly_123",
+      prisma: makePrisma() as never,
+      requestOptions: {
+        maxNetworkRetries: 0,
+        timeout: 80_000,
+      },
+      stripe: mocks.stripe as never,
+      stripeCustomerId: "cus_auto_trial_123",
+    })).resolves.toBe("provider-state-changed");
+
+    expect(mocks.writeHostedMemberStripeBillingTx).not.toHaveBeenCalled();
+    expect(mocks.activateHostedMemberForPositiveSourceTx).not.toHaveBeenCalled();
+  });
+
+  it("campaign recovery fails closed instead of scanning beyond one provider page", async () => {
+    mocks.readHostedMemberBillingSnapshot.mockResolvedValue(makeBillingSnapshot({
+      billingRef: {
+        currentBillingPhase: null,
+        currentBillingPlanCode: null,
+        currentCheckoutOffer: null,
+        currentPeriodEnd: null,
+        currentPeriodStart: null,
+        currentTrialEndsAt: null,
+        currentTrialStartedAt: null,
+        lastStripeEventCreatedAt: null,
+        memberId: "member_123",
+        pulseTrialPolicyVersion: null,
+        pulseTrialRedeemedAt: null,
+        stripeCustomerId: "cus_auto_trial_123",
+        stripeSubscriptionId: null,
+      },
+    }));
+    mocks.stripe.subscriptions.list.mockResolvedValueOnce({
+      data: [makeTrialSubscription()],
+      has_more: true,
+      object: "list",
+      url: "/v1/subscriptions",
+    });
+
+    await expect(recoverHostedAutoPulseTrialEnrollmentForCampaign({
+      expectedSubscriptionId: "sub_auto_trial_123",
+      matchesExpectedSubscription: () => true,
+      memberId: "member_123",
+      now: new Date("2026-07-12T12:00:00.000Z"),
+      priceId: "price_pulse_monthly_123",
+      prisma: makePrisma() as never,
+      requestOptions: {
+        maxNetworkRetries: 0,
+        timeout: 80_000,
+      },
+      stripe: mocks.stripe as never,
+      stripeCustomerId: "cus_auto_trial_123",
+    })).rejects.toMatchObject({
+      code: "HOSTED_AUTO_PULSE_TRIAL_RECOVERY_LOOKUP_INCOMPLETE",
+      httpStatus: 409,
+      retryable: false,
+    });
+
+    expect(mocks.stripe.subscriptions.list).toHaveBeenCalledTimes(1);
+    expect(mocks.writeHostedMemberStripeBillingTx).not.toHaveBeenCalled();
+    expect(mocks.activateHostedMemberForPositiveSourceTx).not.toHaveBeenCalled();
   });
 
   it("blocks retry recovery when an existing matching subscription is no longer trialing", async () => {

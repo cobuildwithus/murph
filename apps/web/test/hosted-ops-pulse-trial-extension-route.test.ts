@@ -42,8 +42,8 @@ let route: PulseTrialExtensionRouteModule;
 const originalHostedOpsMemberIds = process.env.HOSTED_OPS_MEMBER_IDS;
 const NOW = new Date("2026-07-10T12:00:00.000Z");
 const OPERATOR_MEMBER_ID = "member_operator";
-const CANDIDATE_SNAPSHOT_DIGEST = `pulse-candidates-v2.${"a".repeat(43)}`;
-const CANDIDATE_PREVIEW_TOKEN = `pulse-target-v1.${"b".repeat(43)}`;
+const CANDIDATE_SNAPSHOT_DIGEST = `pulse-candidates-v3.${"a".repeat(43)}`;
+const CANDIDATE_PREVIEW_TOKEN = `pulse-target-v2.${"b".repeat(43)}`;
 
 let consoleInfoSpy: ReturnType<typeof vi.spyOn>;
 
@@ -168,6 +168,7 @@ describe("hosted ops Pulse Trial extension route", () => {
     assert.deepEqual(consoleInfoSpy.mock.calls[0]?.[1], {
       campaign: HOSTED_PULSE_TRIAL_EXTENSION_CAMPAIGN,
       localWindowsReconciled: 0,
+      providerTrialsRecovered: 0,
       scope: "member",
       stripeTrialsExtended: 0,
       timestamp: NOW.toISOString(),
@@ -271,7 +272,11 @@ function makeSummary(
     extensionDays: 7,
     failures: {
       db_update_failed: 0,
+      member_lock_busy: 0,
       preview_state_changed: 0,
+      provider_recovery_failed: 0,
+      provider_recovery_lookup_failed: 0,
+      route_runway_exhausted: 0,
       stripe_retrieve_failed: 0,
       stripe_update_failed: 0,
       stripe_update_result_invalid: 0,
@@ -280,10 +285,13 @@ function makeSummary(
     localWindowsReconciled: 0,
     mode: "dry-run",
     page: 0,
+    providerTrialsRecovered: 0,
     skipped: {
       local_candidate_changed: 0,
       local_trial_window_invalid: 0,
       missing_stripe_refs: 0,
+      outside_campaign_cohort: 0,
+      provider_recovery_not_found: 0,
       stripe_billing_plan_mismatch: 0,
       stripe_campaign_marker_conflict: 0,
       stripe_checkout_offer_mismatch: 0,
@@ -296,6 +304,7 @@ function makeSummary(
     },
     stripeTrialsExtended: 0,
     wouldExtend: 0,
+    wouldRecoverProviderTrial: 0,
     wouldReconcile: 0,
     ...overrides,
   };

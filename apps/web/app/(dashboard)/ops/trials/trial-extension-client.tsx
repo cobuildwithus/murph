@@ -30,21 +30,22 @@ export function TrialExtensionClient() {
             Trials
           </h1>
           <p className="mt-3 max-w-2xl text-sm leading-6 text-muted-foreground">
-            Give Pulse Trial members 7 more days. Preview shows what would change
-            without touching anything; applying asks you to type the run key from
-            the preview. Retries are safe: already extended trials are not
-            extended again, and unfinished local records can still be reconciled.
+            Recover unfinished provider trials, reconcile local records, and give
+            eligible Pulse Trial members 7 more days. Preview shows what would
+            change without touching anything; applying asks you to type the run
+            key from the preview. Retries are safe: already extended trials are
+            not extended again.
           </p>
         </div>
       </header>
 
       <TrialExtensionSection
-        description="Adds 7 days to the fixed campaign cohort—Pulse Trials redeemed before July 10 UTC—in ordered batches of up to four. After applying every batch, restart at Batch 1 and Preview every batch again. Retire the campaign only when every batch shows zero trials to extend or reconcile."
+        description="Closes the fixed pre-July 10 reservation cohort, recovers any provider trial that did not finish local enrollment, then adds 7 days to eligible Pulse Trials in ordered batches of up to four. A recovered provider trial needs a fresh Preview before extension. After applying every batch, restart at Batch 1 and Preview every batch again. Retire the campaign only when every batch shows zero trials to recover, extend, or reconcile."
         scope="all"
         title="Fixed campaign cohort"
       />
       <TrialExtensionSection
-        description="Adds 7 days to one member's active Pulse Trial."
+        description="Recovers an unfinished provider trial when needed, then adds 7 days to one member's active Pulse Trial. A recovered trial needs a fresh Preview before extension."
         scope="member"
         title="One member"
       />
@@ -154,6 +155,7 @@ function TrialExtensionSection({
         !hasTrialExtensionFailures(summary) ||
         summary.localWindowsReconciled > 0 ||
         summary.failures.preview_state_changed > 0 ||
+        summary.providerTrialsRecovered > 0 ||
         summary.stripeTrialsExtended > 0 ||
         summary.skipped.local_candidate_changed > 0
       ) {
@@ -249,6 +251,7 @@ function TrialExtensionSection({
                 Apply is unavailable until Preview completes without failures.
               </p>
             ) : preview.summary.wouldExtend > 0 ||
+              preview.summary.wouldRecoverProviderTrial > 0 ||
               preview.summary.wouldReconcile > 0 ? (
               <div className="flex flex-col gap-3 border-t border-border/70 pt-4">
                 <div className="flex max-w-sm flex-col gap-2">
@@ -276,14 +279,14 @@ function TrialExtensionSection({
                     type="button"
                   >
                     <CalendarPlusIcon data-icon="inline-start" />
-                    {pending === "apply" ? "Extending..." : "Add 7 days"}
+                    {pending === "apply" ? "Applying..." : "Apply batch"}
                   </Button>
                 </div>
               </div>
             ) : (
               <p className="border-t border-border/70 pt-4 text-sm text-muted-foreground">
                 {scope === "all"
-                  ? "Nothing to change in this batch. This is complete only after every batch in a fresh pass shows zero trials to extend or reconcile."
+                  ? "Nothing to change in this batch. This is complete only after every batch in a fresh pass shows zero provider trials to recover, zero trials to extend, and zero records to reconcile."
                   : "Nothing to change right now."}
               </p>
             )}
@@ -299,6 +302,12 @@ function TrialExtensionSection({
             tabIndex={-1}
           >
             <TrialExtensionSummaryPanel scope={scope} summary={applied} />
+            {applied.providerTrialsRecovered > 0 ? (
+              <p className="border-t border-border/70 pt-4 text-sm text-muted-foreground">
+                Trial recovered. Preview {scope === "member" ? "this member" : "this batch"}
+                {" "}again to add the 7-day extension.
+              </p>
+            ) : null}
           </div>
         ) : null}
 
@@ -378,6 +387,10 @@ function TrialExtensionSummaryPanel({
           {isPreview ? (
             <>
               <TrialExtensionMetricTile label="Would get 7 days" value={summary.wouldExtend} />
+              <TrialExtensionMetricTile
+                label="Would recover trial"
+                value={summary.wouldRecoverProviderTrial}
+              />
               <TrialExtensionMetricTile label="Would fix records" value={summary.wouldReconcile} />
             </>
           ) : (
@@ -389,6 +402,10 @@ function TrialExtensionSummaryPanel({
               <TrialExtensionMetricTile
                 label="Records updated"
                 value={summary.localWindowsReconciled}
+              />
+              <TrialExtensionMetricTile
+                label="Provider trials recovered"
+                value={summary.providerTrialsRecovered}
               />
             </>
           )}

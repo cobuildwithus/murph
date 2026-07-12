@@ -51,8 +51,8 @@ import {
 import { renderClientComponent } from "./render-client-component";
 
 const fetchMock = vi.fn<typeof fetch>();
-const CANDIDATE_SNAPSHOT_DIGEST = `pulse-candidates-v2.${"a".repeat(43)}`;
-const CANDIDATE_PREVIEW_TOKEN = `pulse-target-v1.${"b".repeat(43)}`;
+const CANDIDATE_SNAPSHOT_DIGEST = `pulse-candidates-v3.${"a".repeat(43)}`;
+const CANDIDATE_PREVIEW_TOKEN = `pulse-target-v2.${"b".repeat(43)}`;
 let cleanupRender: (() => Promise<void>) | null = null;
 
 beforeEach(() => {
@@ -115,7 +115,7 @@ describe("TrialExtensionClient", () => {
       confirmationInput,
       HOSTED_PULSE_TRIAL_EXTENSION_CAMPAIGN,
     );
-    await clickButton(rendered.window, getButton(memberSection, "Add 7 days"));
+    await clickButton(rendered.window, getButton(memberSection, "Apply batch"));
 
     expect(readRequestBody(1)).toEqual({
       campaign: HOSTED_PULSE_TRIAL_EXTENSION_CAMPAIGN,
@@ -150,11 +150,11 @@ describe("TrialExtensionClient", () => {
 
     await changeInput(rendered.window, memberInput, "member_one");
     await clickButton(rendered.window, getButton(memberSection, "Preview"));
-    expect(getButton(memberSection, "Add 7 days")).toBeDefined();
+    expect(getButton(memberSection, "Apply batch")).toBeDefined();
 
     await changeInput(rendered.window, memberInput, "member_two");
 
-    expect(findButton(memberSection, "Add 7 days")).toBeUndefined();
+    expect(findButton(memberSection, "Apply batch")).toBeUndefined();
     expect(memberSection.querySelectorAll("input")).toHaveLength(1);
     expect(memberSection.textContent).not.toContain("Run key");
   });
@@ -180,12 +180,12 @@ describe("TrialExtensionClient", () => {
       getInput(memberSection, 1),
       HOSTED_PULSE_TRIAL_EXTENSION_CAMPAIGN,
     );
-    expect(getButton(memberSection, "Add 7 days")).toBeDefined();
+    expect(getButton(memberSection, "Apply batch")).toBeDefined();
 
     await clickButton(rendered.window, getButton(memberSection, "Preview"));
 
     expect(memberSection.textContent).toContain("Preview could not be refreshed.");
-    expect(findButton(memberSection, "Add 7 days")).toBeUndefined();
+    expect(findButton(memberSection, "Apply batch")).toBeUndefined();
     expect(memberSection.querySelectorAll("input")).toHaveLength(1);
   });
 
@@ -204,7 +204,7 @@ describe("TrialExtensionClient", () => {
     await clickButton(rendered.window, getButton(allSection, "Preview"));
 
     expect(allSection.textContent).toContain("Preview could not be verified");
-    expect(findButton(allSection, "Add 7 days")).toBeUndefined();
+    expect(findButton(allSection, "Apply batch")).toBeUndefined();
     expect(allSection.textContent).not.toContain("Type pulse-beta-extension");
   });
 
@@ -223,7 +223,7 @@ describe("TrialExtensionClient", () => {
     expect(allSection.textContent).toContain("Preview incomplete");
     expect(allSection.textContent).toContain("stripe_retrieve_failed: 1");
     expect(allSection.textContent).toContain("Apply is unavailable");
-    expect(findButton(allSection, "Add 7 days")).toBeUndefined();
+    expect(findButton(allSection, "Apply batch")).toBeUndefined();
   });
 
   test("navigates bounded all-member batches without exposing a cursor", async () => {
@@ -281,10 +281,10 @@ describe("TrialExtensionClient", () => {
       confirmationInput,
       HOSTED_PULSE_TRIAL_EXTENSION_CAMPAIGN,
     );
-    await clickButton(rendered.window, getButton(memberSection, "Add 7 days"));
+    await clickButton(rendered.window, getButton(memberSection, "Apply batch"));
 
     expect(memberSection.textContent).toContain("Apply failed safely.");
-    expect(getButton(memberSection, "Add 7 days")).toBeDefined();
+    expect(getButton(memberSection, "Apply batch")).toBeDefined();
     expect(confirmationInput.value).toBe(HOSTED_PULSE_TRIAL_EXTENSION_CAMPAIGN);
   });
 
@@ -310,10 +310,10 @@ describe("TrialExtensionClient", () => {
       getInput(allSection, 0),
       HOSTED_PULSE_TRIAL_EXTENSION_CAMPAIGN,
     );
-    await clickButton(rendered.window, getButton(allSection, "Add 7 days"));
+    await clickButton(rendered.window, getButton(allSection, "Apply batch"));
 
     expect(allSection.textContent).toContain("Eligible trials changed since Preview");
-    expect(findButton(allSection, "Add 7 days")).toBeUndefined();
+    expect(findButton(allSection, "Apply batch")).toBeUndefined();
     expect(allSection.querySelectorAll("input")).toHaveLength(0);
   });
 
@@ -336,11 +336,11 @@ describe("TrialExtensionClient", () => {
       confirmationInput,
       HOSTED_PULSE_TRIAL_EXTENSION_CAMPAIGN,
     );
-    await clickButton(rendered.window, getButton(memberSection, "Add 7 days"));
+    await clickButton(rendered.window, getButton(memberSection, "Apply batch"));
 
     expect(memberSection.textContent).toContain("Needs retry");
     expect(memberSection.textContent).toContain("stripe_update_failed: 1");
-    expect(getButton(memberSection, "Add 7 days")).toBeDefined();
+    expect(getButton(memberSection, "Apply batch")).toBeDefined();
     expect(confirmationInput.value).toBe(HOSTED_PULSE_TRIAL_EXTENSION_CAMPAIGN);
   });
 
@@ -361,10 +361,10 @@ describe("TrialExtensionClient", () => {
       getInput(allSection, 0),
       HOSTED_PULSE_TRIAL_EXTENSION_CAMPAIGN,
     );
-    await clickButton(rendered.window, getButton(allSection, "Add 7 days"));
+    await clickButton(rendered.window, getButton(allSection, "Apply batch"));
 
     expect(allSection.textContent).toContain("Needs retry");
-    expect(findButton(allSection, "Add 7 days")).toBeUndefined();
+    expect(findButton(allSection, "Apply batch")).toBeUndefined();
     expect(allSection.querySelectorAll("input")).toHaveLength(0);
   });
 
@@ -386,12 +386,46 @@ describe("TrialExtensionClient", () => {
       getInput(allSection, 0),
       HOSTED_PULSE_TRIAL_EXTENSION_CAMPAIGN,
     );
-    await clickButton(rendered.window, getButton(allSection, "Add 7 days"));
+    await clickButton(rendered.window, getButton(allSection, "Apply batch"));
 
     expect(allSection.textContent).toContain("Needs retry");
     expect(allSection.textContent).toContain("local_candidate_changed (1)");
-    expect(findButton(allSection, "Add 7 days")).toBeUndefined();
+    expect(findButton(allSection, "Apply batch")).toBeUndefined();
     expect(allSection.querySelectorAll("input")).toHaveLength(0);
+  });
+
+  test("a targeted provider-only recovery requires a fresh Preview before extension", async () => {
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse(buildSummary("dry-run", {
+        wouldRecoverProviderTrial: 1,
+      })))
+      .mockResolvedValueOnce(jsonResponse(buildSummary("apply", {
+        providerTrialsRecovered: 1,
+      })));
+
+    const rendered = await renderClientComponent(createElement(TrialExtensionClient));
+    cleanupRender = rendered.cleanup;
+    const memberSection = getSection(rendered.container, 1);
+
+    expect(memberSection.textContent).toContain(
+      "A recovered trial needs a fresh Preview before extension.",
+    );
+    await changeInput(rendered.window, getInput(memberSection, 0), "member_one");
+    await clickButton(rendered.window, getButton(memberSection, "Preview"));
+    expect(memberSection.textContent).toContain("Would recover trial");
+    await changeInput(
+      rendered.window,
+      getInput(memberSection, 1),
+      HOSTED_PULSE_TRIAL_EXTENSION_CAMPAIGN,
+    );
+    await clickButton(rendered.window, getButton(memberSection, "Apply batch"));
+
+    expect(memberSection.textContent).toContain("Provider trials recovered");
+    expect(memberSection.textContent).toContain(
+      "Trial recovered. Preview this member again to add the 7-day extension.",
+    );
+    expect(findButton(memberSection, "Apply batch")).toBeUndefined();
+    expect(memberSection.querySelectorAll("input")).toHaveLength(1);
   });
 
   test("the all-member preview omits memberId and explains bounded batches", async () => {
@@ -428,7 +462,11 @@ function buildSummary(
     extensionDays: 7,
     failures: {
       db_update_failed: 0,
+      member_lock_busy: 0,
       preview_state_changed: 0,
+      provider_recovery_failed: 0,
+      provider_recovery_lookup_failed: 0,
+      route_runway_exhausted: 0,
       stripe_retrieve_failed: 0,
       stripe_update_failed: 0,
       stripe_update_result_invalid: 0,
@@ -437,10 +475,13 @@ function buildSummary(
     localWindowsReconciled: 0,
     mode,
     page: 0,
+    providerTrialsRecovered: 0,
     skipped: {
       local_candidate_changed: 0,
       local_trial_window_invalid: 0,
       missing_stripe_refs: 0,
+      outside_campaign_cohort: 0,
+      provider_recovery_not_found: 0,
       stripe_billing_plan_mismatch: 0,
       stripe_campaign_marker_conflict: 0,
       stripe_checkout_offer_mismatch: 0,
@@ -453,6 +494,7 @@ function buildSummary(
     },
     stripeTrialsExtended: 0,
     wouldExtend: 0,
+    wouldRecoverProviderTrial: 0,
     wouldReconcile: 0,
     ...overrides,
   };

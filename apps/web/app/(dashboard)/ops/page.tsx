@@ -34,7 +34,7 @@ const OPS_TOOLS = [
   },
   {
     description:
-      "Preview and add 7 trial days for the fixed pre–July 10 UTC cohort or one eligible member.",
+      "Recover and extend the fixed pre–July 10 UTC Pulse Trial cohort, or handle one eligible member.",
     href: "/ops/trials",
     label: "Trials",
   },
