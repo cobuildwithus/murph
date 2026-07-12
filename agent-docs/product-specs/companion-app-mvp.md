@@ -224,9 +224,12 @@ keep both backend surfaces on feature-aware versions while supported clients
 can upload companion metadata.
 4. `POST /api/device-sync/companion/hrv-rmssd`
    — validate a strict, sub-512-byte `murph.companion.hrv-rmssd.v1`
-   observation, ensure/reuse the member's Junction device connection without
-   minting a sign-in token, stage one encrypted compact dirty job, and wake the
-   existing hosted device-sync runtime. The contract has no field for raw R-R
+   observation, reuse the single active member-owned Junction device
+   connection established by the explicit sign-in-token flow, stage one
+   encrypted compact dirty job, and wake the existing hosted device-sync
+   runtime. Missing, terminal, or ambiguous connection state fails closed;
+   data upload never establishes or reconnects a Junction account. The
+   contract has no field for raw R-R
    intervals, BLE packets, device identity, heart-rate samples, or Apple
    Health values; unknown fields are rejected. Runtime import is idempotent by
    client capture id and writes canonical `hrv` milliseconds with direct-WHOOP

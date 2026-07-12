@@ -2347,10 +2347,12 @@ describe("hosted device-sync wakes", () => {
   });
 
   it("resolves the companion lane, stages a compact RMSSD job, and wakes the runtime", async () => {
-    mocks.getConnectionForUser.mockResolvedValue(buildHostedConnection({
+    const connection = buildHostedConnection({
       id: "dsc_junction_123",
       provider: "junction",
-    }));
+    });
+    mocks.listConnectionsForUser.mockResolvedValue([connection]);
+    mocks.getConnectionForUser.mockResolvedValue(connection);
     const ingress = createHostedDeviceSyncPublicIngressService(
       new Request("https://control.example.test/api/device-sync/companion/hrv-rmssd"),
     );
@@ -2372,11 +2374,8 @@ describe("hosted device-sync wakes", () => {
       userId: "user-123",
     });
 
-    expect(mocks.ensureSdkConnection).toHaveBeenCalledWith({
-      ownerId: "user-123",
-      provider: "junction",
-    });
-    expect(mocks.listConnectionsForUser).not.toHaveBeenCalled();
+    expect(mocks.listConnectionsForUser).toHaveBeenCalledWith("user-123");
+    expect(mocks.ensureSdkConnection).not.toHaveBeenCalled();
     expect(mocks.upsertDirtyConnection).toHaveBeenCalledWith(expect.objectContaining({
       connectionId: "dsc_junction_123",
       dirtyAt: "2026-07-10T13:46:00.000Z",
@@ -2420,6 +2419,95 @@ describe("hosted device-sync wakes", () => {
         userId: "user-123",
       }),
     }));
+  });
+
+  it.each([
+    ["a disconnected connection with retained provider identity", buildHostedConnection({
+      externalAccountId: "junction-user-retained",
+      id: "dsc_junction_retained",
+      provider: "junction",
+      status: "disconnected",
+    })],
+    ["a disconnected connection with scrubbed provider identity", buildHostedConnection({
+      externalAccountId: "opaque:dsc_junction_scrubbed",
+      id: "dsc_junction_scrubbed",
+      provider: "junction",
+      status: "disconnected",
+    })],
+    ["a connection awaiting reauthorization", buildHostedConnection({
+      externalAccountId: "junction-user-reauthorization",
+      id: "dsc_junction_reauthorization",
+      provider: "junction",
+      status: "reauthorization_required",
+    })],
+  ])("does not establish or stage HRV over %s", async (_label, connection) => {
+    mocks.listConnectionsForUser.mockResolvedValue([connection]);
+    const ingress = createHostedDeviceSyncPublicIngressService(
+      new Request("https://control.example.test/api/device-sync/companion/hrv-rmssd"),
+    );
+
+    await expect(ingress.acceptCompanionHrvRmssdObservation({
+      acceptedAt: "2026-07-10T13:46:00.000Z",
+      observation: {
+        schema: "murph.companion.hrv-rmssd.v1",
+        captureId: "123e4567-e89b-42d3-a456-426614174000",
+        observedAt: "2026-07-10T13:45:00.000Z",
+        durationMs: 60_000,
+        rmssdMs: 48.25,
+        intervalCount: 72,
+        acceptedIntervalCount: 68,
+        successivePairCount: 63,
+        quality: "good",
+        methodVersion: "rmssd-pulse-interval-v1",
+      },
+      userId: "user-123",
+    })).rejects.toMatchObject({
+      code: "COMPANION_HRV_CONNECTION_REQUIRED",
+      httpStatus: 409,
+      retryable: false,
+    });
+
+    expect(mocks.ensureSdkConnection).not.toHaveBeenCalled();
+    expect(mocks.getConnectionForUser).not.toHaveBeenCalled();
+    expect(mocks.upsertDirtyConnection).not.toHaveBeenCalled();
+    expect(mocks.appendHostedMailboxEnvelope).not.toHaveBeenCalled();
+    expect(mocks.signalHostedDeviceSyncMailboxRuntime).not.toHaveBeenCalled();
+  });
+
+  it("rejects ambiguous active Junction lanes without staging HRV", async () => {
+    mocks.listConnectionsForUser.mockResolvedValue([
+      buildHostedConnection({ id: "dsc_junction_1", provider: "junction" }),
+      buildHostedConnection({ id: "dsc_junction_2", provider: "junction" }),
+    ]);
+    const ingress = createHostedDeviceSyncPublicIngressService(
+      new Request("https://control.example.test/api/device-sync/companion/hrv-rmssd"),
+    );
+
+    await expect(ingress.acceptCompanionHrvRmssdObservation({
+      acceptedAt: "2026-07-10T13:46:00.000Z",
+      observation: {
+        schema: "murph.companion.hrv-rmssd.v1",
+        captureId: "123e4567-e89b-42d3-a456-426614174000",
+        observedAt: "2026-07-10T13:45:00.000Z",
+        durationMs: 60_000,
+        rmssdMs: 48.25,
+        intervalCount: 72,
+        acceptedIntervalCount: 68,
+        successivePairCount: 63,
+        quality: "good",
+        methodVersion: "rmssd-pulse-interval-v1",
+      },
+      userId: "user-123",
+    })).rejects.toMatchObject({
+      code: "COMPANION_HRV_CONNECTION_AMBIGUOUS",
+      httpStatus: 409,
+      retryable: false,
+    });
+
+    expect(mocks.ensureSdkConnection).not.toHaveBeenCalled();
+    expect(mocks.getConnectionForUser).not.toHaveBeenCalled();
+    expect(mocks.upsertDirtyConnection).not.toHaveBeenCalled();
+    expect(mocks.appendHostedMailboxEnvelope).not.toHaveBeenCalled();
   });
 
   it("completes hosted webhook traces when audit and dirty state commit", async () => {

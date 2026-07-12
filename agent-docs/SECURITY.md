@@ -39,7 +39,11 @@ Last verified: 2026-07-10
   device identity, heart-rate samples, Apple Health values, or WHOOP account
   data. Accepted envelopes enter the normal encrypted device-sync dirty-job
   handoff and canonical importer path; capture id is a strict opaque UUIDv4
-  replay identity, not a device identifier. Do not probe runtime availability on
+  replay identity, not a device identifier. The route must reuse one existing
+  active member-owned Junction connection and must never establish, recreate,
+  or reactivate a connection from data ingress; disconnected,
+  reauthorization-required, missing, and ambiguous state fails closed until
+  the explicit sign-in/setup flow runs. Do not probe runtime availability on
   each request. Deploy the runtime consumer first with an immediate
   container rollout, verify the managed runner-bundle fingerprint and a
   functional import smoke, then deploy web acceptance and release iOS last. For

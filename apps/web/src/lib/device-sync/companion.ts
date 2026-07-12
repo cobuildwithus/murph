@@ -213,6 +213,36 @@ export function validateCompanionHrvRmssdObservationRequestBody(
   }
 }
 
+export async function resolveCompanionHrvRmssdConnection(input: {
+  memberId: string;
+  store: PrismaDeviceSyncControlPlaneStore;
+}): Promise<{ id: string; provider: string }> {
+  const activeConnections = (await input.store.listConnectionsForUser(input.memberId)).filter(
+    (connection) =>
+      connection.provider === COMPANION_DEVICE_SYNC_PROVIDER
+      && connection.status === "active",
+  );
+
+  if (activeConnections.length === 0) {
+    throw deviceSyncError({
+      code: "COMPANION_HRV_CONNECTION_REQUIRED",
+      message: "Finish companion setup before uploading a spot HRV reading.",
+      retryable: false,
+      httpStatus: 409,
+    });
+  }
+  if (activeConnections.length > 1) {
+    throw deviceSyncError({
+      code: "COMPANION_HRV_CONNECTION_AMBIGUOUS",
+      message: "The companion could not identify one active device-sync connection. Sign in again and retry.",
+      retryable: false,
+      httpStatus: 409,
+    });
+  }
+
+  return activeConnections[0]!;
+}
+
 /**
  * Parse the companion's deliberately closed HealthKit metadata envelope.
  *

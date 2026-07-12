@@ -667,16 +667,6 @@ export class DeviceSyncPublicIngress {
     };
   }
 
-  async ensureSdkConnection(input: {
-    provider: string;
-    ownerId: string;
-  }): Promise<PublicDeviceSyncAccount> {
-    const provider = this.requireProvider(input.provider);
-    return await this.runConnectionMutation(provider.provider, async () =>
-      (await this.ensureSdkConnectionForProvider(provider, input)).account
-    );
-  }
-
   private async ensureSdkConnectionForProvider(
     provider: DeviceSyncProvider,
     input: {
