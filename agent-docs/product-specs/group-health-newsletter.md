@@ -155,6 +155,13 @@ includes them automatically**. The `?addEmail=true` deep-link is a small web
 addition (copy the `home`/`connect` searchParams pattern; the settings dialog
 already auto-routes headless-vs-Privy-modal).
 
+Privy's client-side link callback is provisional, not the success boundary.
+Settings reports success and updates its verified-email display only after the
+authenticated `/api/settings/email/sync` route returns the canonical address it
+verified and persisted. If the callback omits an address, Settings asks that
+route to resolve the member's server-side verified Privy email; it never falls
+back to an initial unverified Stripe billing-contact hint.
+
 ## Opt-out
 
 Individual and self-service. A member says "take me off the newsletter" **in the group chat**; Murph maps the authenticated sender (Linq `senderHandle`) to their member id and revokes **only that member's own** `group-email.v0` grant via `revokeHostedVaultSharesWithCleanupTx`. An **email-thread reply cannot revoke**: the email `From` header is unauthenticated and spoofable, so email-sourced opt-out fails closed and Murph instead directs the member to the group chat or settings. Revoking removes them from the thread and from being featured, while their challenge/health-sharing (a separate grant) stays intact. Opt-out is **forward-only** — editions already delivered are already in inboxes.

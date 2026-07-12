@@ -1832,7 +1832,7 @@ describe("completeHostedPrivyVerification", () => {
     expect(prisma.hostedMemberRouting.upsert).not.toHaveBeenCalled();
   });
 
-  it("does not block phone auth when a linked email belongs to another member", async () => {
+  it("does not promote a secondary Privy email during phone authentication", async () => {
     const phoneMember = makeMember({ id: "member_phone_secondary_email" });
     const activeInvite = makeInvite(phoneMember, {
       channel: "web",
@@ -1840,7 +1840,6 @@ describe("completeHostedPrivyVerification", () => {
       inviteCode: "invite-phone-secondary-email",
       memberId: phoneMember.id,
     });
-    const consoleWarn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const prisma = asCompleteHostedPrivyVerificationPrisma({
       hostedInvite: {
         create: vi.fn().mockResolvedValue(activeInvite),
@@ -1855,80 +1854,7 @@ describe("completeHostedPrivyVerification", () => {
       },
       hostedMemberEmailAuthorization: {
         findUnique: vi.fn(),
-        upsert: vi.fn().mockRejectedValue(new Prisma.PrismaClientKnownRequestError(
-          "duplicate verified email",
-          {
-            clientVersion: "test",
-            code: "P2002",
-            meta: {
-              target: ["verifiedEmailLookupKey"],
-            },
-          },
-        )),
-      },
-    });
-
-    try {
-      await expect(
-        completeHostedPrivyVerification({
-          authMethod: "phone",
-          identity: makeIdentity({
-            email: {
-              address: "secondary@example.com",
-              verifiedAt: 1743064200,
-            },
-          }),
-          now: NOW,
-          prisma,
-        }),
-      ).resolves.toMatchObject({
-        inviteCode: "invite-phone-secondary-email",
-        memberId: phoneMember.id,
-        stage: "checkout",
-      });
-      expect(consoleWarn).toHaveBeenCalledWith(
-        "Hosted Privy secondary email binding sync failed.",
-      );
-    } finally {
-      consoleWarn.mockRestore();
-    }
-
-    expect(prisma.hostedMember.create).not.toHaveBeenCalled();
-    expect(prisma.hostedMemberEmailAuthorization.upsert).toHaveBeenCalled();
-  });
-
-  it("does not swallow unexpected secondary email uniqueness failures", async () => {
-    const phoneMember = makeMember({ id: "member_phone_secondary_email_unexpected" });
-    const activeInvite = makeInvite(phoneMember, {
-      channel: "web",
-      id: "invite_phone_secondary_email_unexpected",
-      inviteCode: "invite-phone-secondary-email-unexpected",
-      memberId: phoneMember.id,
-    });
-    const prisma = asCompleteHostedPrivyVerificationPrisma({
-      hostedInvite: {
-        create: vi.fn().mockResolvedValue(activeInvite),
-        findFirst: vi.fn().mockResolvedValue(null),
-        update: vi.fn(),
-      },
-      hostedMember: {
-        create: vi.fn(),
-        findUnique: vi.fn().mockImplementation(async ({ where }: { where: Record<string, unknown> }) => (
-          where.id === phoneMember.id || where.phoneLookupKey ? phoneMember : null
-        )),
-      },
-      hostedMemberEmailAuthorization: {
-        findUnique: vi.fn(),
-        upsert: vi.fn().mockRejectedValue(new Prisma.PrismaClientKnownRequestError(
-          "duplicate member email authorization",
-          {
-            clientVersion: "test",
-            code: "P2002",
-            meta: {
-              target: ["memberId"],
-            },
-          },
-        )),
+        upsert: vi.fn(),
       },
     });
 
@@ -1937,18 +1863,21 @@ describe("completeHostedPrivyVerification", () => {
         authMethod: "phone",
         identity: makeIdentity({
           email: {
-            address: "secondary-unexpected@example.com",
+            address: "secondary@example.com",
             verifiedAt: 1743064200,
           },
         }),
         now: NOW,
         prisma,
       }),
-    ).rejects.toMatchObject({
-      code: "P2002",
+    ).resolves.toMatchObject({
+      inviteCode: "invite-phone-secondary-email",
+      memberId: phoneMember.id,
+      stage: "checkout",
     });
 
-    expect(prisma.hostedInvite.create).not.toHaveBeenCalled();
+    expect(prisma.hostedMember.create).not.toHaveBeenCalled();
+    expect(prisma.hostedMemberEmailAuthorization.upsert).not.toHaveBeenCalled();
   });
 
   it("rejects invite verification when the Privy phone number does not match the invited number", async () => {

@@ -8,12 +8,30 @@ const ORIGINAL_PRIVY_CLIENT_ID = process.env.NEXT_PUBLIC_PRIVY_CLIENT_ID;
 
 const mocks = vi.hoisted(() => ({
   onOpenChange: vi.fn(),
+  openAuthDialog: vi.fn(),
+  privyUserId: "privy-user-expected",
   refresh: vi.fn(),
   telegramCardProps: [] as Array<{
     autoLink?: boolean;
     initialTelegramAccount?: { telegramUserId: string; username: string | null } | null;
     showHeading?: boolean;
   }>,
+}));
+
+vi.mock("@privy-io/react-auth", () => ({
+  usePrivy: () => ({
+    authenticated: true,
+    ready: true,
+  }),
+  useUser: () => ({
+    user: mocks.privyUserId ? { id: mocks.privyUserId } : null,
+  }),
+}));
+
+vi.mock("@/src/components/hosted-onboarding/auth-dialog-provider", () => ({
+  useAuth: () => ({
+    openAuthDialog: mocks.openAuthDialog,
+  }),
 }));
 
 vi.mock("next/navigation", () => ({
@@ -117,6 +135,7 @@ vi.mock("@/src/components/settings/hosted-telegram-card-settings", () => ({
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.telegramCardProps = [];
+  mocks.privyUserId = "privy-user-expected";
   process.env.NEXT_PUBLIC_PRIVY_APP_ID = "app_test";
   process.env.NEXT_PUBLIC_PRIVY_CLIENT_ID = "client_test";
 });
@@ -139,6 +158,7 @@ describe("HostedSettingsIdentityLinkDialog", () => {
     const { cleanup, container } = await renderClientComponent(
       createElement(HostedSettingsIdentityLinkDialog, {
         account: makeAccountSnapshot(),
+        expectedPrivyUserId: "privy-user-expected",
         initialMode,
         onOpenChange: mocks.onOpenChange,
       }),
@@ -178,6 +198,7 @@ describe("HostedSettingsIdentityLinkDialog", () => {
             verifiedAt: null,
           },
         },
+        expectedPrivyUserId: "privy-user-expected",
         initialMode: "email",
         onOpenChange: mocks.onOpenChange,
       }),
@@ -218,6 +239,7 @@ describe("HostedSettingsIdentityLinkDialog", () => {
             verifiedAt: "2026-05-02T00:00:00.000Z",
           },
         },
+        expectedPrivyUserId: "privy-user-expected",
         initialMode: "email",
         onOpenChange: mocks.onOpenChange,
       }),
@@ -245,6 +267,7 @@ describe("HostedSettingsIdentityLinkDialog", () => {
             telegramUserId: null,
           },
         },
+        expectedPrivyUserId: "privy-user-expected",
         initialMode: "telegram",
         onOpenChange: mocks.onOpenChange,
       }),
@@ -277,6 +300,7 @@ describe("HostedSettingsIdentityLinkDialog", () => {
             username: "sample_user",
           },
         },
+        expectedPrivyUserId: "privy-user-expected",
         initialMode: "telegram",
         onOpenChange: mocks.onOpenChange,
       }),
@@ -297,6 +321,54 @@ describe("HostedSettingsIdentityLinkDialog", () => {
       await cleanup();
     }
   });
+
+  it.each(["phone", "email", "telegram"] as const)(
+    "blocks %s provider mutation when the Privy principal does not match the app session",
+    async (initialMode) => {
+      mocks.privyUserId = "privy-user-other";
+      const { HostedSettingsIdentityLinkDialog } = await import(
+        "@/src/components/settings/hosted-settings-identity-link-dialog"
+      );
+
+      const { cleanup, container } = await renderClientComponent(
+        createElement(HostedSettingsIdentityLinkDialog, {
+          account: initialMode === "email"
+            ? {
+                ...makeAccountSnapshot(),
+                email: {
+                  address: "member@example.com",
+                  privyEmailLinked: false,
+                  verifiedAt: null,
+                },
+              }
+            : makeAccountSnapshot(),
+          expectedPrivyUserId: "privy-user-expected",
+          initialMode,
+          onOpenChange: mocks.onOpenChange,
+        }),
+      );
+
+      try {
+        expect(container.textContent).toContain("Sign in again before changing a connected account.");
+        expect(container.textContent).not.toContain("Link phone child");
+        expect(container.textContent).not.toContain("Link email child");
+        expect(container.textContent).not.toContain("Link telegram child");
+        expect(container.textContent).not.toContain("Privy hand-off child");
+
+        const signInButton = Array.from(container.querySelectorAll("button")).find(
+          (candidate) => candidate.textContent?.includes("Sign in again"),
+        );
+        await act(async () => {
+          signInButton?.dispatchEvent(new Event("click", { bubbles: true }));
+        });
+
+        expect(mocks.onOpenChange).toHaveBeenCalledWith(false);
+        expect(mocks.openAuthDialog).toHaveBeenCalledTimes(1);
+      } finally {
+        await cleanup();
+      }
+    },
+  );
 });
 
 function makeAccountSnapshot() {

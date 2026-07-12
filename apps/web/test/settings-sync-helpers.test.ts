@@ -78,8 +78,8 @@ describe("hosted settings sync helpers", () => {
     });
 
     await expect(syncHostedVerifiedEmailAddress({
+      expectedEmailAddress: "verified@example.com",
       mode: "resync",
-      verifiedEmailAddress: "verified@example.com",
     })).resolves.toEqual({
       errorMessage: null,
       successMessage: "Email connected: verified@example.com",

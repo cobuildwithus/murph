@@ -28,12 +28,14 @@ describe("HostedAccountSettingsCards", () => {
     const withoutPhone = renderToStaticMarkup(
       React.createElement(HostedAccountSettingsCards, {
         account: makeAccountSnapshot({ phoneNumber: null }),
+        expectedPrivyUserId: "privy-user-expected",
         murphPhoneNumber: "+15550100001",
       }),
     );
     const withPhone = renderToStaticMarkup(
       React.createElement(HostedAccountSettingsCards, {
         account: makeAccountSnapshot({ phoneNumber: "+14045550123" }),
+        expectedPrivyUserId: "privy-user-expected",
         murphPhoneNumber: "+15550100001",
       }),
     );
@@ -55,6 +57,7 @@ describe("HostedAccountSettingsCards", () => {
             verifiedAt: "2026-05-02T00:00:00.000Z",
           },
         },
+        expectedPrivyUserId: "privy-user-expected",
       }),
     );
 
@@ -76,6 +79,7 @@ describe("HostedAccountSettingsCards", () => {
             username: "sample_user",
           },
         },
+        expectedPrivyUserId: "privy-user-expected",
       }),
     );
 
@@ -89,6 +93,7 @@ describe("HostedAccountSettingsCards", () => {
     const markup = renderToStaticMarkup(
       React.createElement(HostedAccountSettingsCards, {
         account: makeAccountSnapshot({ phoneNumber: null }),
+        expectedPrivyUserId: "privy-user-expected",
       }),
     );
 
@@ -106,6 +111,7 @@ describe("HostedAccountSettingsCards", () => {
             username: null,
           },
         },
+        expectedPrivyUserId: "privy-user-expected",
       }),
     );
 
@@ -117,6 +123,7 @@ describe("HostedAccountSettingsCards", () => {
     const rendered = await renderClientComponent(
       React.createElement(HostedAccountSettingsCards, {
         account: makeAccountSnapshot({ phoneNumber: null }),
+        expectedPrivyUserId: "privy-user-expected",
         openEmailLink: true,
       }),
       {
@@ -138,6 +145,7 @@ describe("HostedAccountSettingsCards", () => {
     const rendered = await renderClientComponent(
       React.createElement(HostedAccountSettingsCards, {
         account,
+        expectedPrivyUserId: "privy-user-expected",
         openEmailLink: false,
       }),
       {
@@ -153,6 +161,7 @@ describe("HostedAccountSettingsCards", () => {
     await rendered.rerender(
       React.createElement(HostedAccountSettingsCards, {
         account,
+        expectedPrivyUserId: "privy-user-expected",
         openEmailLink: true,
       }),
     );
@@ -171,6 +180,7 @@ describe("HostedAccountSettingsCards", () => {
     await rendered.rerender(
       React.createElement(HostedAccountSettingsCards, {
         account,
+        expectedPrivyUserId: "privy-user-expected",
         openEmailLink: true,
       }),
     );

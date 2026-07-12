@@ -28,7 +28,7 @@ import { useHostedEmailSettingsController } from "./hosted-email-settings-contro
  */
 export function HostedEmailPrivyLinkHandOff(props: {
   onAborted: () => void;
-  onSynced?: (payload: HostedEmailSyncResult) => Promise<void> | void;
+  onSynced: (payload: HostedEmailSyncResult) => Promise<void> | void;
 }) {
   const { onAborted, onSynced } = props;
   const { openAuthDialog } = useAuth();
@@ -58,16 +58,6 @@ export function HostedEmailPrivyLinkHandOff(props: {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ready]);
 
-  // Defensive: if linking finished without a route sync (no verified email in
-  // the linked payload), there is nothing further to show — close the flow.
-  const completedWithoutSync =
-    Boolean(controller.successMessage) && !controller.isSyncingEmailRoute;
-  useEffect(() => {
-    if (completedWithoutSync) {
-      onAborted();
-    }
-  }, [completedWithoutSync, onAborted]);
-
   if (controller.errorMessage) {
     return (
       <Dialog
@@ -92,9 +82,11 @@ export function HostedEmailPrivyLinkHandOff(props: {
             size="xl"
             className="w-full"
             disabled={controller.isBusy || controller.isPrivyLinkModalActive}
-            onClick={controller.handleLinkEmail}
+            onClick={controller.hasPendingEmailSync
+              ? controller.handleRetryEmailSync
+              : controller.handleLinkEmail}
           >
-            Try again
+            {controller.hasPendingEmailSync ? "Try saving again" : "Try again"}
           </Button>
         </DialogContent>
       </Dialog>
@@ -116,7 +108,9 @@ export function HostedEmailPrivyLinkHandOff(props: {
       >
         <MurphPulseLoader className="h-16 w-auto" />
         <span>
-          {controller.isSyncingEmailRoute || controller.successMessage
+          {controller.isSyncingEmailRoute
+            || controller.hasPendingEmailSync
+            || controller.successMessage
             ? "Saving your email…"
             : "Opening secure window…"}
         </span>

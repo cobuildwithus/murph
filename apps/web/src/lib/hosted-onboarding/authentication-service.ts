@@ -282,8 +282,9 @@ async function syncHostedPrivyBindings(input: {
   verifiedPrivyUser: HostedPrivyUser | null;
 }): Promise<void> {
   if (
+    input.authMethod === "email" &&
     input.identity.email?.verifiedAt &&
-    !(input.authMethod === "email" && input.primaryBindingSynced)
+    !input.primaryBindingSynced
   ) {
     const email = input.identity.email;
     const syncEmailBinding = async () => {
@@ -299,11 +300,7 @@ async function syncHostedPrivyBindings(input: {
       });
     };
 
-    if (input.authMethod === "email") {
-      await syncEmailBinding().catch(mapHostedPrivyPrimaryEmailBindingError);
-    } else {
-      await syncHostedPrivySecondaryBindingBestEffort("email", syncEmailBinding);
-    }
+    await syncEmailBinding().catch(mapHostedPrivyPrimaryEmailBindingError);
   }
 
   if (
@@ -332,7 +329,7 @@ async function syncHostedPrivyBindings(input: {
 }
 
 async function syncHostedPrivySecondaryBindingBestEffort(
-  binding: "email" | "telegram",
+  binding: "telegram",
   syncBinding: () => Promise<void>,
 ): Promise<void> {
   try {

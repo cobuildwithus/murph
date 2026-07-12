@@ -1,9 +1,12 @@
 "use client";
 
+import { usePrivy, useUser } from "@privy-io/react-auth";
 import { useRouter } from "next/navigation";
+import type { ReactNode } from "react";
 
 import { useAuth } from "@/src/components/hosted-onboarding/auth-dialog-provider";
 import { HostedPrivyProvider } from "@/src/components/hosted-onboarding/privy-provider";
+import { Button } from "@/src/components/ui/button";
 import {
   Dialog,
   DialogContent,
@@ -23,10 +26,12 @@ type HostedSettingsIdentityLinkMode = "phone" | "email" | "telegram";
 
 export function HostedSettingsIdentityLinkDialog({
   account,
+  expectedPrivyUserId,
   initialMode,
   onOpenChange,
 }: {
   account: HostedAccountSettingsSnapshot;
+  expectedPrivyUserId: string | null;
   initialMode: HostedSettingsIdentityLinkMode;
   onOpenChange: (open: boolean) => void;
 }) {
@@ -58,10 +63,17 @@ export function HostedSettingsIdentityLinkDialog({
   if (initialMode === "email" && account.email.privyEmailLinked === false && appId) {
     return (
       <HostedPrivyProvider appId={appId} clientId={clientId}>
-        <HostedEmailPrivyLinkHandOff
-          onAborted={() => onOpenChange(false)}
-          onSynced={closeAndRefresh}
-        />
+        <HostedSettingsIdentityMutationGate
+          expectedPrivyUserId={expectedPrivyUserId}
+          onAuthRequired={promptClientAuth}
+          onDismiss={() => onOpenChange(false)}
+          standalone
+        >
+          <HostedEmailPrivyLinkHandOff
+            onAborted={() => onOpenChange(false)}
+            onSynced={closeAndRefresh}
+          />
+        </HostedSettingsIdentityMutationGate>
       </HostedPrivyProvider>
     );
   }
@@ -83,40 +95,119 @@ export function HostedSettingsIdentityLinkDialog({
           </div>
         ) : (
           <HostedPrivyProvider appId={appId} clientId={clientId}>
-            {initialMode === "phone" ? (
-              <HostedPhoneSettings
-                authenticated
-                autoOpen
-                initialPhoneNumber={account.phone.number}
-                onLinked={closeAndRefresh}
-              />
-            ) : null}
-            {initialMode === "telegram" ? (
-              <HostedTelegramCardSettings
-                authenticated
-                autoLink={!hasExisting}
-                initialTelegramAccount={account.telegram.telegramUserId
-                  ? {
-                      telegramUserId: account.telegram.telegramUserId,
-                      username: account.telegram.username ?? null,
-                    }
-                  : null}
-                onSynced={closeAndRefresh}
-                showHeading={false}
-              />
-            ) : null}
-            {initialMode === "email" ? (
-              <HostedEmailSettings
-                authenticated
-                changeFlow={hasExisting}
-                initialEmail={toInitialEmail(account.email)}
-                murphEmailAddress={account.email.murphEmailAddress}
-                onClientAuthRequired={promptClientAuth}
-                onSynced={closeAndRefresh}
-              />
-            ) : null}
+            <HostedSettingsIdentityMutationGate
+              expectedPrivyUserId={expectedPrivyUserId}
+              onAuthRequired={promptClientAuth}
+            >
+              {initialMode === "phone" ? (
+                <HostedPhoneSettings
+                  authenticated
+                  autoOpen
+                  initialPhoneNumber={account.phone.number}
+                  onLinked={closeAndRefresh}
+                />
+              ) : null}
+              {initialMode === "telegram" ? (
+                <HostedTelegramCardSettings
+                  authenticated
+                  autoLink={!hasExisting}
+                  initialTelegramAccount={account.telegram.telegramUserId
+                    ? {
+                        telegramUserId: account.telegram.telegramUserId,
+                        username: account.telegram.username ?? null,
+                      }
+                    : null}
+                  onSynced={closeAndRefresh}
+                  showHeading={false}
+                />
+              ) : null}
+              {initialMode === "email" ? (
+                <HostedEmailSettings
+                  authenticated
+                  changeFlow={hasExisting}
+                  initialEmail={toInitialEmail(account.email)}
+                  murphEmailAddress={account.email.murphEmailAddress}
+                  onClientAuthRequired={promptClientAuth}
+                  onSynced={closeAndRefresh}
+                  privyEmailLinked={account.email.privyEmailLinked}
+                  privyEmailSyncRequired={account.email.privyEmailSyncRequired}
+                />
+              ) : null}
+            </HostedSettingsIdentityMutationGate>
           </HostedPrivyProvider>
         )}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function HostedSettingsIdentityMutationGate(props: {
+  children: ReactNode;
+  expectedPrivyUserId: string | null;
+  onAuthRequired: () => void;
+  onDismiss?: () => void;
+  standalone?: boolean;
+}) {
+  const { authenticated, ready } = usePrivy();
+  const { user } = useUser();
+  const sessionMatches = Boolean(
+    props.expectedPrivyUserId
+    && authenticated
+    && user?.id === props.expectedPrivyUserId,
+  );
+
+  if (sessionMatches) {
+    return props.children;
+  }
+
+  if (!ready) {
+    const loading = (
+      <div aria-live="polite" className="text-sm text-muted-foreground" role="status">
+        Checking your secure session…
+      </div>
+    );
+
+    return props.standalone ? (
+      <div className="fixed inset-0 z-50 grid place-items-center bg-black/10 supports-backdrop-filter:backdrop-blur-xs">
+        {loading}
+      </div>
+    ) : loading;
+  }
+
+  const mismatch = (
+    <div className="space-y-4" role="alert">
+      <p className="text-sm/6 text-muted-foreground">
+        Sign in again before changing a connected account.
+      </p>
+      <Button type="button" onClick={props.onAuthRequired}>
+        Sign in again
+      </Button>
+    </div>
+  );
+
+  if (!props.standalone) {
+    return mismatch;
+  }
+
+  return (
+    <Dialog
+      open
+      onOpenChange={(open) => {
+        if (!open) props.onDismiss?.();
+      }}
+    >
+      <DialogContent className="max-w-[min(24rem,calc(100vw-2rem))] gap-6 border border-border/80 bg-popover p-6 text-popover-foreground ring-border sm:max-w-[24rem] md:p-8">
+        <DialogHeader className="gap-2 pr-10">
+          <DialogTitle className="font-serif text-2xl/8 font-semibold tracking-normal text-popover-foreground">
+            Secure session required
+          </DialogTitle>
+          <DialogDescription>
+            Sign in again before changing a connected account.
+          </DialogDescription>
+        </DialogHeader>
+        <Button type="button" onClick={props.onAuthRequired}>
+          Sign in again
+        </Button>
       </DialogContent>
     </Dialog>
   );

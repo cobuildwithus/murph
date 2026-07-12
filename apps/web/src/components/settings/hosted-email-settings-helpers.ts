@@ -55,13 +55,13 @@ export function resolveHostedEmailSettingsDisplayState(input: {
 }
 
 export async function syncHostedVerifiedEmailAddress(input: {
+  expectedEmailAddress: string | null;
   fetchImpl?: typeof fetch;
   mode: HostedEmailSyncMode;
   sleepImpl?: (delayMs: number) => Promise<void>;
-  verifiedEmailAddress: string;
 }): Promise<HostedEmailSyncPresentation> {
   try {
-    const syncResult = await syncHostedEmailConnectionWithRetry(input.verifiedEmailAddress, {
+    const syncResult = await syncHostedEmailConnectionWithRetry(input.expectedEmailAddress, {
       fetchImpl: input.fetchImpl,
       sleepImpl: input.sleepImpl,
     });
@@ -74,7 +74,7 @@ export async function syncHostedVerifiedEmailAddress(input: {
   } catch (error) {
     return {
       errorMessage: toHostedEmailSyncErrorMessage(error),
-      successMessage: input.mode === "verify" ? `Email verified: ${input.verifiedEmailAddress}` : null,
+      successMessage: null,
       syncResult: null,
     };
   }
@@ -99,7 +99,7 @@ export function isValidEmailAddress(value: string): boolean {
 }
 
 export async function syncHostedEmailConnectionWithRetry(
-  expectedEmailAddress: string,
+  expectedEmailAddress: string | null,
   input: {
     fetchImpl?: typeof fetch;
     sleepImpl?: (delayMs: number) => Promise<void>;
@@ -141,26 +141,26 @@ function formatHostedEmailSyncSuccessMessage(
 }
 
 async function syncHostedEmailConnection(
-  expectedEmailAddress: string,
+  expectedEmailAddress: string | null,
   fetchImpl: typeof fetch,
 ): Promise<HostedEmailSyncResult> {
+  const requestPayload = expectedEmailAddress ? { expectedEmailAddress } : {};
+
   if (fetchImpl === fetch) {
     try {
-      const payload = await requestHostedOnboardingJson<{
+      const responsePayload = await requestHostedOnboardingJson<{
         emailAddress: string;
         runTriggered?: boolean;
         verifiedAt: string;
       }>({
-        payload: {
-          expectedEmailAddress,
-        },
+        payload: requestPayload,
         url: "/api/settings/email/sync",
       });
 
       return {
-        emailAddress: payload.emailAddress,
-        runTriggered: payload.runTriggered !== false,
-        verifiedAt: payload.verifiedAt,
+        emailAddress: responsePayload.emailAddress,
+        runTriggered: responsePayload.runTriggered !== false,
+        verifiedAt: responsePayload.verifiedAt,
       };
     } catch (error) {
       if (error instanceof HostedOnboardingApiError) {
@@ -174,9 +174,7 @@ async function syncHostedEmailConnection(
   }
 
   const response = await fetchImpl("/api/settings/email/sync", {
-    body: JSON.stringify({
-      expectedEmailAddress,
-    }),
+    body: JSON.stringify(requestPayload),
     headers: {
       "content-type": "application/json; charset=utf-8",
     },

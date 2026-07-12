@@ -14,6 +14,7 @@ import { readHostedMemberAssistantPreferences } from "./member-preferences";
 import {
   extractHostedPrivyEmailAccount,
   extractHostedPrivyTelegramAccount,
+  isHostedPrivyEmailAccountVerified,
   type PrivyLinkedAccountLike,
 } from "./privy-shared";
 
@@ -34,6 +35,11 @@ export interface HostedAccountSettingsSnapshot {
      * session could not be confirmed server-side.
      */
     privyEmailLinked?: boolean | null;
+    /**
+     * Whether the fresh server-approved Privy email differs from canonical
+     * member authorization and needs the explicit Settings sync boundary.
+     */
+    privyEmailSyncRequired?: boolean | null;
     verifiedAt: string | null;
   };
   phone: {
@@ -99,12 +105,23 @@ export function withServerApprovedPrivyAccountHints(input: {
   serverApprovedPrivyLinkedAccounts?: PrivyLinkedAccountLike[] | null;
   snapshot: HostedAccountSettingsSnapshot;
 }): HostedAccountSettingsSnapshot {
+  const serverApprovedPrivyEmail = input.serverApprovedPrivyLinkedAccounts
+    ? extractHostedPrivyEmailAccount(input.serverApprovedPrivyLinkedAccounts)
+    : null;
+
   return {
     ...input.snapshot,
     email: {
       ...input.snapshot.email,
       privyEmailLinked: input.serverApprovedPrivyLinkedAccounts
-        ? extractHostedPrivyEmailAccount(input.serverApprovedPrivyLinkedAccounts) !== null
+        ? serverApprovedPrivyEmail !== null
+        : null,
+      privyEmailSyncRequired: input.serverApprovedPrivyLinkedAccounts
+        ? isHostedPrivyEmailAccountVerified(serverApprovedPrivyEmail)
+          && normalizeComparableEmail(serverApprovedPrivyEmail.address)
+            !== normalizeComparableEmail(
+              input.snapshot.email.verifiedAt ? input.snapshot.email.address : null,
+            )
         : null,
     },
     telegram: {
@@ -115,6 +132,11 @@ export function withServerApprovedPrivyAccountHints(input: {
       }),
     },
   };
+}
+
+function normalizeComparableEmail(value: string | null | undefined): string | null {
+  const normalized = value?.trim().toLowerCase();
+  return normalized || null;
 }
 
 function resolveHostedAccountTelegramUsername(input: {

@@ -22,16 +22,20 @@ export function HostedEmailSettingsContent(props: {
   emailInputRef: RefObject<HTMLInputElement | null>;
   murphEmailAddress?: string | null;
   authSatisfied: boolean;
+  canRecoverEmailSync: boolean;
   canSendEmailUpdateCode: boolean;
   isBusy: boolean;
   isSendingCode: boolean;
   isSubmittingCode: boolean;
   isSyncingEmailRoute: boolean;
+  hasPendingEmailSync: boolean;
   pendingEmailAddress: string | null;
   onChangeCode: (value: string) => void;
   onChangeEmailAddress: (value: string) => void;
   onAuthRequired: () => void;
   onResendCode: () => Promise<void>;
+  onRecoverEmailSync: () => Promise<void>;
+  onRetryEmailSync: () => Promise<void>;
   onSendCode: (emailAddress?: string) => Promise<void>;
   onSyncVerifiedEmail: () => Promise<void>;
   onUseAnotherEmail: () => void;
@@ -44,16 +48,20 @@ export function HostedEmailSettingsContent(props: {
     emailInputRef,
     murphEmailAddress,
     authSatisfied,
+    canRecoverEmailSync,
     canSendEmailUpdateCode,
     isBusy,
     isSendingCode,
     isSubmittingCode,
     isSyncingEmailRoute,
+    hasPendingEmailSync,
     pendingEmailAddress,
     onChangeCode,
     onChangeEmailAddress,
     onAuthRequired,
     onResendCode,
+    onRecoverEmailSync,
+    onRetryEmailSync,
     onSendCode,
     onSyncVerifiedEmail,
     onUseAnotherEmail,
@@ -62,6 +70,8 @@ export function HostedEmailSettingsContent(props: {
 
   const codeInputRef = useRef<HTMLInputElement | null>(null);
   const isVerified = currentEmail ? isHostedPrivyEmailAccountVerified(currentEmail) : false;
+  const changeFlowNeedsCanonicalSync = props.changeFlow
+    && (hasPendingEmailSync || canRecoverEmailSync);
 
   if (pendingEmailAddress) {
     return (
@@ -112,7 +122,25 @@ export function HostedEmailSettingsContent(props: {
           value={currentEmail.address}
           meta={isVerified ? null : "Unverified"}
           action={
-            currentVerifiedEmail ? (
+            hasPendingEmailSync ? (
+              <Button
+                type="button"
+                onClick={() => void onRetryEmailSync()}
+                disabled={isBusy}
+                variant="outline"
+              >
+                {isSyncingEmailRoute ? "Saving..." : "Try saving again"}
+              </Button>
+            ) : canRecoverEmailSync ? (
+              <Button
+                type="button"
+                onClick={() => void onRecoverEmailSync()}
+                disabled={isBusy}
+                variant="outline"
+              >
+                {isSyncingEmailRoute ? "Saving..." : "Save linked email"}
+              </Button>
+            ) : currentVerifiedEmail ? (
               <Button
                 type="button"
                 onClick={() => void onSyncVerifiedEmail()}
@@ -129,7 +157,25 @@ export function HostedEmailSettingsContent(props: {
           value="Not connected"
           variant="empty"
           action={
-            !canSendEmailUpdateCode ? (
+            hasPendingEmailSync ? (
+              <Button
+                type="button"
+                onClick={() => void onRetryEmailSync()}
+                disabled={isBusy}
+                variant="outline"
+              >
+                {isSyncingEmailRoute ? "Saving..." : "Try saving again"}
+              </Button>
+            ) : canRecoverEmailSync ? (
+              <Button
+                type="button"
+                onClick={() => void onRecoverEmailSync()}
+                disabled={isBusy}
+                variant="outline"
+              >
+                {isSyncingEmailRoute ? "Saving..." : "Save linked email"}
+              </Button>
+            ) : !canSendEmailUpdateCode ? (
               <AuthButton
                 authSatisfied={authSatisfied}
                 type="button"
@@ -154,29 +200,44 @@ export function HostedEmailSettingsContent(props: {
 
       {canSendEmailUpdateCode ? (
         <div className="space-y-3">
-          <Label htmlFor="settings-email-address">{props.changeFlow ? "New email address" : "Email address"}</Label>
-          <Input
-            id="settings-email-address"
-            autoComplete="email"
-            inputMode="email"
-            inputSize="xl"
-            placeholder="user@example.com"
-            ref={emailInputRef}
-            type="email"
-            value={emailAddress}
-            onChange={(event) => onChangeEmailAddress(event.currentTarget.value)}
-          />
+          {changeFlowNeedsCanonicalSync ? null : (
+            <>
+              <Label htmlFor="settings-email-address">{props.changeFlow ? "New email address" : "Email address"}</Label>
+              <Input
+                id="settings-email-address"
+                autoComplete="email"
+                inputMode="email"
+                inputSize="xl"
+                placeholder="user@example.com"
+                ref={emailInputRef}
+                type="email"
+                value={emailAddress}
+                onChange={(event) => onChangeEmailAddress(event.currentTarget.value)}
+              />
+            </>
+          )}
           <AuthButton
             authSatisfied={authSatisfied}
             type="button"
             onAuthRequired={onAuthRequired}
-            onClick={() => void onSendCode(emailInputRef.current?.value ?? emailAddress)}
+            onClick={() => {
+              if (changeFlowNeedsCanonicalSync) {
+                void (hasPendingEmailSync ? onRetryEmailSync() : onRecoverEmailSync());
+                return;
+              }
+
+              void onSendCode(emailInputRef.current?.value ?? emailAddress);
+            }}
             disabled={isBusy}
             size="xl"
             className="w-full"
           >
             {isSyncingEmailRoute
               ? "Saving..."
+              : changeFlowNeedsCanonicalSync
+                ? hasPendingEmailSync
+                  ? "Try saving again"
+                  : "Save linked email"
               : isSendingCode
                 ? "Sending..."
                 : "Send verification code"}

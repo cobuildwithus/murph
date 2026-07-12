@@ -22,6 +22,7 @@ const mocks = vi.hoisted(() => ({
     )),
   HostedAccountSettingsCards: vi.fn((props: {
     account: unknown;
+    expectedPrivyUserId: string | null;
     murphPhoneNumber?: string | null;
     openEmailLink?: boolean;
   }) =>
@@ -443,6 +444,7 @@ test("SettingsPage reads the app session and persisted account settings into the
     });
     expect(mocks.HostedAccountSettingsCards).toHaveBeenCalledWith(expect.objectContaining({
       account: accountSnapshot,
+      expectedPrivyUserId: "did:privy:user_123",
       murphPhoneNumber: "+15550100001",
       openEmailLink: true,
     }), undefined);
@@ -581,6 +583,7 @@ test("SettingsPage passes a pending Murph text line to account settings", async 
   assert.match(markup, /Hosted account settings \+15550100003/);
   expect(mocks.HostedAccountSettingsCards).toHaveBeenCalledWith(expect.objectContaining({
     account: accountSnapshot,
+    expectedPrivyUserId: null,
     murphPhoneNumber: "+15550100003",
   }), undefined);
 });
@@ -811,4 +814,7 @@ test("SettingsPage ignores Privy Telegram display hints from a stale Privy sessi
     snapshot: accountSnapshot,
     serverApprovedPrivyLinkedAccounts: null,
   });
+  expect(mocks.HostedAccountSettingsCards).toHaveBeenCalledWith(expect.objectContaining({
+    expectedPrivyUserId: null,
+  }), undefined);
 });

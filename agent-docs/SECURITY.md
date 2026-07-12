@@ -27,6 +27,14 @@ Last verified: 2026-07-10
 - Runtime trust boundaries exist for local loopback daemons, hosted web, Cloudflare-hosted execution, provider ingress, billing, device sync, and assistant runtime state. `ARCHITECTURE.md`, this file, and the relevant app/package docs must change together when those boundaries change.
 - Before adding a new external API, auth surface, wallet surface, storage authority, webhook, or runtime ingress path, document the trust boundary in `ARCHITECTURE.md` and the concrete rules here.
 - Prefer least-privilege defaults and explicit validation at system boundaries.
+- Hosted Settings must prove the current client Privy user matches the
+  first-party Murph app session before mounting any provider identity-mutation
+  flow. A later server sync rejection is too late because the provider may
+  already have linked or replaced a credential. Privy secondary credentials
+  are not automatic Murph person identity: phone or Telegram authentication
+  must not promote a linked secondary email into canonical member email
+  authorization. Canonical email writes require selected email authentication
+  or the explicit fresh-session `/api/settings/email/sync` boundary.
 - Rebuildable inbox-derived artifacts can still contain sensitive health data and must be treated as high-sensitivity runtime material. Never persist provider secrets alongside those artifacts.
 - `vault-cli route estimate` is an env-gated external egress surface backed by `MAPBOX_ACCESS_TOKEN`. Keep the token in env only, treat any Mapbox geocoding or Search Box lookup as temporary/non-persistent, do not persist route inputs or outputs in Murph state, and only return route geometry when the caller explicitly asks for it. Hosted execution may expose that same CLI path only when the Worker secret is intentionally configured for Cloudflare's runner egress intercept; the raw token must not be copied into the hosted runtime env.
 - `vault-cli research scout` is an env-gated external egress surface backed by `EXA_API_KEY`. It may send only a compact, non-identifying tag profile to Exa Search, never raw lab values, names, dates of birth, full notes, medical records, or precise private identifiers. The tool must not persist Exa output or profile payloads; assistant flows may append only curated, deduplicated, non-diagnostic research-scout summaries through the normal knowledge surface.

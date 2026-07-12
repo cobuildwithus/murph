@@ -261,12 +261,14 @@ describe("hosted account settings snapshot", () => {
       serverApprovedPrivyLinkedAccounts: [
         {
           address: "member@example.com",
+          latest_verified_at: 1771891200,
           type: "email",
         },
       ],
     })).toMatchObject({
       email: {
         privyEmailLinked: true,
+        privyEmailSyncRequired: true,
       },
     });
 
@@ -276,6 +278,7 @@ describe("hosted account settings snapshot", () => {
     })).toMatchObject({
       email: {
         privyEmailLinked: false,
+        privyEmailSyncRequired: false,
       },
     });
 
@@ -285,8 +288,41 @@ describe("hosted account settings snapshot", () => {
     })).toMatchObject({
       email: {
         privyEmailLinked: null,
+        privyEmailSyncRequired: null,
       },
     });
+  });
+
+  it("detects when the fresh verified Privy email differs from canonical authorization", () => {
+    const snapshot = {
+      ...makeAccountSettingsSnapshot({ telegramUserId: null }),
+      email: {
+        address: "canonical@example.com",
+        verifiedAt: "2026-07-01T00:00:00.000Z",
+      },
+    };
+
+    expect(withServerApprovedPrivyAccountHints({
+      snapshot,
+      serverApprovedPrivyLinkedAccounts: [
+        {
+          address: "canonical@example.com",
+          latest_verified_at: 1771891200,
+          type: "email",
+        },
+      ],
+    }).email.privyEmailSyncRequired).toBe(false);
+
+    expect(withServerApprovedPrivyAccountHints({
+      snapshot,
+      serverApprovedPrivyLinkedAccounts: [
+        {
+          address: "replacement@example.com",
+          latest_verified_at: 1771891200,
+          type: "email",
+        },
+      ],
+    }).email.privyEmailSyncRequired).toBe(true);
   });
 });
 

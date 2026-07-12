@@ -20,6 +20,8 @@ export function HostedEmailSettings(props: {
   murphEmailAddress?: string | null;
   onClientAuthRequired?: () => void;
   onSynced?: (payload: HostedEmailSyncResult) => Promise<void> | void;
+  privyEmailLinked?: boolean | null;
+  privyEmailSyncRequired?: boolean | null;
 }) {
   const { openAuthDialog } = useAuth();
   const emailInputRef = useRef<HTMLInputElement | null>(null);
@@ -28,6 +30,8 @@ export function HostedEmailSettings(props: {
     initialEmail: props.initialEmail ?? null,
     onClientAuthRequired: props.onClientAuthRequired ?? openAuthDialog,
     onSynced: props.onSynced,
+    privyEmailLinked: props.privyEmailLinked,
+    privyEmailSyncRequired: props.privyEmailSyncRequired,
   });
 
   if (!controller.canManageEmail) {
@@ -63,16 +67,20 @@ export function HostedEmailSettings(props: {
         emailInputRef={emailInputRef}
         murphEmailAddress={props.murphEmailAddress ?? null}
         authSatisfied={controller.authenticated && controller.clientAuthenticated}
+        canRecoverEmailSync={controller.canRecoverEmailSync}
         canSendEmailUpdateCode={controller.canSendEmailUpdateCode}
         isBusy={controller.isBusy}
         isSendingCode={controller.isSendingCode}
         isSubmittingCode={controller.isSubmittingCode}
         isSyncingEmailRoute={controller.isSyncingEmailRoute}
+        hasPendingEmailSync={controller.hasPendingEmailSync}
         pendingEmailAddress={controller.pendingEmailAddress}
         onChangeCode={controller.setCode}
         onChangeEmailAddress={controller.setEmailAddress}
         onAuthRequired={controller.handleClientAuthRequired}
         onResendCode={controller.handleResendCode}
+        onRecoverEmailSync={controller.handleRecoverEmailSync}
+        onRetryEmailSync={controller.handleRetryEmailSync}
         onSendCode={controller.handleSendCode}
         onSyncVerifiedEmail={controller.handleSyncVerifiedEmail}
         onUseAnotherEmail={controller.handleUseAnotherEmail}
