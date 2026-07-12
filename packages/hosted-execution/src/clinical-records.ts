@@ -5,6 +5,14 @@ export const HOSTED_CLINICAL_RECORDS_MAX_TOTAL_BODY_BYTES = 32 * 1024 * 1024;
 export const HOSTED_CLINICAL_RECORDS_MAX_PAGES = 500;
 export const HOSTED_CLINICAL_RECORDS_MAX_RESOURCE_FAMILIES = 14;
 export const HOSTED_CLINICAL_RECORDS_MAX_CURSOR_CHARS = 2_048;
+export const HOSTED_CLINICAL_RECORDS_AUTHORIZATION_REQUIRED_ERROR_CODE =
+  "authorization-required";
+export const HOSTED_CLINICAL_RECORDS_RUNTIME_READ_RUN_PATH =
+  "/api/internal/clinical-records/runtime/read-run";
+export const HOSTED_CLINICAL_RECORDS_RUNTIME_FETCH_PAGE_PATH =
+  "/api/internal/clinical-records/runtime/fetch-page";
+export const HOSTED_CLINICAL_RECORDS_RUNTIME_RECORD_OUTCOME_PATH =
+  "/api/internal/clinical-records/runtime/record-outcome";
 
 const identifierSchema = z
   .string()
@@ -139,6 +147,10 @@ export const hostedClinicalRecordsRecordOutcomeRequestSchema = z.object({
   status: z.enum(["completed", "partial", "failed", "preempted"]),
 }).strict();
 
+export const hostedClinicalRecordsRecordOutcomeResponseSchema = z.object({
+  ok: z.literal(true),
+}).strict();
+
 export type HostedClinicalRecordsRetrievalScope = z.infer<
   typeof hostedClinicalRecordsRetrievalScopeSchema
 >;
@@ -177,4 +189,10 @@ export function parseHostedClinicalRecordsFetchPageResponse(
   value: unknown,
 ): HostedClinicalRecordsFetchPageResponse {
   return hostedClinicalRecordsFetchPageResponseSchema.parse(value);
+}
+
+export function parseHostedClinicalRecordsRecordOutcomeResponse(
+  value: unknown,
+): { ok: true } {
+  return hostedClinicalRecordsRecordOutcomeResponseSchema.parse(value);
 }
