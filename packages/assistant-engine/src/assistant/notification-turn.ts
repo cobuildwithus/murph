@@ -205,6 +205,7 @@ export interface AssistantNotificationInput
 }
 
 export interface AssistantNotificationResult {
+  audienceVerification?: 'unverified'
   decision: AssistantNotificationDecision
   deliveryOutcome?: AssistantDeliveryOutcome | null
   postTurnDeliveryExpectations?: AssistantNotificationPostTurnDeliveryExpectations | null
@@ -295,6 +296,7 @@ export async function sendAssistantNotificationLocal(
         ) === 'unverified-external'
       ) {
         return {
+          audienceVerification: 'unverified',
           decision: {
             kind: 'skip',
             privateSummary:

@@ -53,6 +53,28 @@ export interface AssistantCurrentDeliveryRoute {
 
 export type AssistantAutomationRouteValidationProfile = 'hosted' | 'local'
 
+// Most delivery targets are stable conversation identifiers. Hosted email
+// targets are reply envelopes that change with every message, so email
+// conversation authority follows the stable thread locator within one sender
+// identity instead of comparing serialized envelopes.
+export function resolveAssistantDeliveryRouteConversationKey(
+  route: AssistantDeliveryRouteFields,
+): string | null {
+  const channel = normalizeAssistantRouteString(route.channel)
+  if (!channel) {
+    return null
+  }
+
+  const threadId = normalizeAssistantRouteString(route.threadId)
+  if (channel === 'email' && threadId) {
+    const identityId = normalizeAssistantRouteString(route.identityId) ?? ''
+    return `${channel}\0${identityId}\0thread:${threadId}`
+  }
+
+  const deliveryTarget = normalizeAssistantRouteString(route.deliveryTarget)
+  return deliveryTarget ? `${channel}\0${deliveryTarget}` : null
+}
+
 export function resolveAssistantDeliveryRouteWithCurrentRoute(
   input: AssistantDeliveryRouteFields,
   currentRoute: AssistantCurrentDeliveryRoute | null | undefined,

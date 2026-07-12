@@ -12,6 +12,7 @@ import {
 } from '@murphai/operator-config/assistant-cli-contracts'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import type { ScheduledLogQueryRecord } from '@murphai/query'
+import { serializeHostedEmailThreadTarget } from '@murphai/runtime-state'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 type MockAutomationRecord = {
@@ -5200,6 +5201,173 @@ describe('assistant cron runtime orchestration', () => {
         threadIsDirect: true,
       }),
     )
+  })
+
+  it('executes hosted email current-route snapshots through their trusted reply envelope binding', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-08T10:20:00.000Z'))
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-email-current-route-binding-',
+    )
+    const deliveryTarget = serializeHostedEmailThreadTarget({
+      cc: [],
+      lastMessageId: '<latest@example.test>',
+      references: ['<first@example.test>'],
+      subject: 'Re: Group check-in',
+      to: ['group@example.test'],
+    })
+    getVaultAutomationStore(vaultRoot).push({
+      automationId: 'automation-email-current-route-binding',
+      continuityPolicy: 'fresh',
+      createdAt: '2026-04-08T08:00:00.000Z',
+      instructions: 'Send the group check-in reminder.',
+      route: {
+        channel: 'email',
+        currentRouteSnapshot: true,
+        deliverySource: null,
+        deliveryTarget,
+        identityId: 'email-sender-identity',
+        participantId: null,
+        threadId: 'stable-email-thread',
+        threadIsDirect: false,
+      },
+      schedule: {
+        at: '2026-04-08T10:00:00.000Z',
+        kind: 'at',
+      },
+      slug: 'email-current-route-binding-reminder',
+      status: 'active',
+      summary: null,
+      tags: ['assistant', 'scheduled'],
+      title: 'Email current route binding reminder',
+      updatedAt: '2026-04-08T08:00:00.000Z',
+    })
+    const paths = resolveAssistantStatePaths(vaultRoot)
+    const source = (await listCanonicalAssistantCronRecords(vaultRoot))[0]
+
+    if (!source) {
+      throw new Error('Expected canonical source to exist.')
+    }
+
+    const runtimeStore = await readAssistantCronCanonicalRuntimeStore(paths)
+    const runtimeState = resolveCanonicalRuntimeState(source, runtimeStore)
+    const claimed = await claimResolvedAssistantCronJob({
+      job: {
+        kind: 'canonical',
+        source,
+        runtimeState,
+        job: projectCanonicalAssistantCronJob({ source, runtimeState }),
+      },
+      paths,
+    })
+    const result = await executeClaimedAssistantCronJob({
+      deliveryDispatchMode: 'queue-only',
+      executionContext: {
+        hosted: {
+          memberId: 'member-email-current-route',
+          userEnvKeys: [],
+        },
+      },
+      job: claimed,
+      paths,
+      trigger: 'scheduled',
+      vault: vaultRoot,
+    })
+
+    expect(result.run.status).toBe('succeeded')
+    expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledWith(
+      expect.objectContaining({
+        bindingDeliveryTarget: deliveryTarget,
+        channel: 'email',
+        deliveryKind: 'thread',
+        deliveryTarget: null,
+        identityId: 'email-sender-identity',
+        threadId: 'stable-email-thread',
+        threadIsDirect: false,
+      }),
+    )
+  })
+
+  it('keeps a hosted one-shot pending when notification audience verification fails', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-08T10:20:00.000Z'))
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-unverified-notification-',
+    )
+    getVaultAutomationStore(vaultRoot).push({
+      automationId: 'automation-unverified-notification',
+      continuityPolicy: 'fresh',
+      createdAt: '2026-04-08T08:00:00.000Z',
+      instructions: 'Send the reminder.',
+      route: {
+        channel: 'telegram',
+        currentRouteSnapshot: true,
+        deliverySource: null,
+        deliveryTarget: 'telegram-group',
+        identityId: 'telegram-identity',
+        participantId: null,
+        threadId: 'telegram-group',
+        threadIsDirect: false,
+      },
+      schedule: {
+        at: '2026-04-08T10:00:00.000Z',
+        kind: 'at',
+      },
+      slug: 'unverified-notification-reminder',
+      status: 'active',
+      summary: null,
+      tags: ['assistant', 'scheduled'],
+      title: 'Unverified notification reminder',
+      updatedAt: '2026-04-08T08:00:00.000Z',
+    })
+    cronMocks.sendAssistantMessageLocal.mockResolvedValueOnce({
+      audienceVerification: 'unverified',
+      decision: {
+        kind: 'skip',
+        privateSummary: 'Audience was not verified.',
+      },
+      response: null,
+      session: { sessionId: 'session-unverified' },
+    })
+    const paths = resolveAssistantStatePaths(vaultRoot)
+    const source = (await listCanonicalAssistantCronRecords(vaultRoot))[0]
+
+    if (!source) {
+      throw new Error('Expected canonical source to exist.')
+    }
+
+    const runtimeStore = await readAssistantCronCanonicalRuntimeStore(paths)
+    const runtimeState = resolveCanonicalRuntimeState(source, runtimeStore)
+    const claimed = await claimResolvedAssistantCronJob({
+      job: {
+        kind: 'canonical',
+        source,
+        runtimeState,
+        job: projectCanonicalAssistantCronJob({ source, runtimeState }),
+      },
+      paths,
+    })
+    const result = await executeClaimedAssistantCronJob({
+      executionContext: {
+        hosted: {
+          memberId: 'member-unverified-notification',
+          userEnvKeys: [],
+        },
+      },
+      job: claimed,
+      paths,
+      trigger: 'scheduled',
+      vault: vaultRoot,
+    })
+
+    expect(result.removedAfterRun).toBe(false)
+    expect(result.run).toMatchObject({
+      outcome: 'failed',
+      reason: 'ASSISTANT_CRON_AUDIENCE_UNVERIFIED',
+      status: 'failed',
+    })
+    expect(result.runErrorCode).toBe('ASSISTANT_CRON_AUDIENCE_UNVERIFIED')
+    expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledOnce()
   })
 
   it('keeps hosted Linq current-route snapshots pending without stored directness', async () => {

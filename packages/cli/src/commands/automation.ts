@@ -30,6 +30,7 @@ import {
 import {
   type AssistantAutomationRouteValidationProfile,
   getAssistantAutomationRouteDeliverabilityIssue,
+  resolveAssistantDeliveryRouteConversationKey,
   resolveAssistantDeliveryRouteWithCurrentRoute,
   stripPrivateAssistantRoutePlaceholders,
 } from "@murphai/operator-config/assistant/current-delivery-route";
@@ -323,13 +324,13 @@ function authorizeAutomationRouteForCurrentContext(
     );
   }
 
-  const currentChannel = normalizeAutomationRouteOption(currentRoute.channel);
-  const currentDeliveryTarget = normalizeAutomationRouteOption(
-    currentRoute.deliveryTarget,
+  const routeConversationKey = resolveAssistantDeliveryRouteConversationKey(route);
+  const currentConversationKey = resolveAssistantDeliveryRouteConversationKey(
+    currentRoute,
   );
   if (
-    normalizeAutomationRouteOption(route.channel) !== currentChannel ||
-    normalizeAutomationRouteOption(route.deliveryTarget) !== currentDeliveryTarget
+    routeConversationKey === null ||
+    routeConversationKey !== currentConversationKey
   ) {
     return invalidAutomationOption(
       "A hosted conversation can create or update automations only for its current chat.",

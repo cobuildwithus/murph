@@ -493,6 +493,7 @@ test('sendAssistantNotificationLocal skips exact text before delivery when the e
   })
 
   expect(result).toEqual({
+    audienceVerification: 'unverified',
     decision: {
       kind: 'skip',
       privateSummary:

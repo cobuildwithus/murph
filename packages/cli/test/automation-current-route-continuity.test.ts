@@ -14,6 +14,7 @@ import {
   HOSTED_RUNTIME_PROCESS_ENV,
 } from "@murphai/hosted-execution/cli-runtime-bridge";
 import { upsertAutomation } from "@murphai/core";
+import { serializeHostedEmailThreadTarget } from "@murphai/runtime-state";
 import { registerAutomationCommands } from "../src/commands/automation.js";
 import {
   createTempVaultContext,
@@ -560,6 +561,186 @@ test("group automation writes are restricted to a canonical snapshot of the curr
       threadId: "hid_group_thread",
       threadIsDirect: false,
     });
+  } finally {
+    await bridge.stop();
+    await rm(parentRoot, { recursive: true, force: true });
+  }
+});
+
+test("hosted email automation writes follow a stable thread across changing reply envelopes", async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    "murph-automation-email-route-continuity-",
+  );
+  const firstEnvelope = serializeHostedEmailThreadTarget({
+    cc: [],
+    lastMessageId: "<first@example.test>",
+    references: [],
+    subject: "Weekly check-in",
+    to: ["group@example.test"],
+  });
+  const laterEnvelope = serializeHostedEmailThreadTarget({
+    cc: [],
+    lastMessageId: "<later@example.test>",
+    references: ["<first@example.test>"],
+    subject: "Re: Weekly check-in",
+    to: ["group@example.test"],
+  });
+  const bridgeResponse: AssistantCurrentRouteBridgeResponse = {
+    route: {
+      channel: "email",
+      deliveryTarget: firstEnvelope,
+      identityId: "email-sender-identity",
+      participantId: null,
+      threadId: "stable-email-thread",
+      threadIsDirect: false,
+    },
+  };
+  const bridge = await startAssistantCurrentRouteBridgeStub({
+    response: bridgeResponse,
+    token: "test-bridge-token",
+  });
+
+  try {
+    const cli = Cli.create("vault-cli", {
+      description: "automation email route continuity test cli",
+      version: "0.0.0-test",
+    });
+    registerAutomationCommands(cli);
+    vi.stubEnv(HOSTED_RUNTIME_PROCESS_ENV, "1");
+    vi.stubEnv(HOSTED_CLI_BRIDGE_TOKEN_ENV, "test-bridge-token");
+    vi.stubEnv(HOSTED_CLI_BRIDGE_URL_ENV, bridge.url);
+
+    const initialSave = await runInProcessJsonCli(cli, [
+      "automation",
+      "save",
+      "Email thread reminder",
+      "--slug",
+      "email-thread-reminder",
+      "--instructions",
+      "Send the reminder.",
+      "--schedule-kind",
+      "at",
+      "--schedule-at",
+      "2026-12-06T12:00:00.000Z",
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(initialSave.envelope.ok, true);
+
+    bridgeResponse.route = {
+      channel: "email",
+      deliveryTarget: laterEnvelope,
+      identityId: "email-sender-identity",
+      participantId: null,
+      threadId: "stable-email-thread",
+      threadIsDirect: false,
+    };
+
+    const edited = await runInProcessJsonCli(cli, [
+      "automation",
+      "edit",
+      "email-thread-reminder",
+      "--summary",
+      "Updated after a reply.",
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(edited.envelope.ok, true);
+
+    const savedAgain = await runInProcessJsonCli(cli, [
+      "automation",
+      "save",
+      "Email thread reminder",
+      "--slug",
+      "email-thread-reminder",
+      "--instructions",
+      "Send the updated reminder.",
+      "--schedule-kind",
+      "at",
+      "--schedule-at",
+      "2026-12-07T12:00:00.000Z",
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(savedAgain.envelope.ok, true);
+
+    const statusUpdated = await runInProcessJsonCli(cli, [
+      "automation",
+      "set-status",
+      "email-thread-reminder",
+      "--status",
+      "paused",
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(statusUpdated.envelope.ok, true);
+
+    const importPath = path.join(parentRoot, "same-email-thread.json");
+    await writeFile(importPath, JSON.stringify({
+      title: "Email thread reminder",
+      slug: "email-thread-reminder",
+      status: "active",
+      continuityPolicy: "fresh",
+      schedule: { kind: "at", at: "2026-12-08T12:00:00.000Z" },
+      route: {
+        channel: "email",
+        deliveryTarget: firstEnvelope,
+        identityId: "email-sender-identity",
+        participantId: null,
+        threadId: "stable-email-thread",
+        threadIsDirect: false,
+      },
+      instructions: "Send the imported reminder.",
+      tags: [],
+    }));
+    const imported = await runInProcessJsonCli(cli, [
+      "automation",
+      "import-json",
+      "--input",
+      `@${importPath}`,
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(
+      imported.envelope.ok,
+      true,
+      imported.envelope.ok
+        ? undefined
+        : `${imported.envelope.error.code ?? "unknown"}: ${
+            imported.envelope.error.message ?? "unknown error"
+          }`,
+    );
+
+    const shown = await runInProcessJsonCli<{
+      automation: { route: { deliveryTarget: string | null } } | null;
+    }>(cli, [
+      "automation",
+      "show",
+      "email-thread-reminder",
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(shown.envelope.ok, true);
+    assert.equal(shown.envelope.data?.automation?.route.deliveryTarget, laterEnvelope);
+
+    bridgeResponse.route = {
+      channel: "email",
+      deliveryTarget: laterEnvelope,
+      identityId: "email-sender-identity",
+      participantId: null,
+      threadId: "different-email-thread",
+      threadIsDirect: false,
+    };
+    const differentThreadEdit = await runInProcessJsonCli(cli, [
+      "automation",
+      "edit",
+      "email-thread-reminder",
+      "--summary",
+      "Must not cross threads.",
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(differentThreadEdit.envelope.ok, false);
   } finally {
     await bridge.stop();
     await rm(parentRoot, { recursive: true, force: true });

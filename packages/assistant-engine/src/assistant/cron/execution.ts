@@ -715,6 +715,17 @@ export async function executeClaimedAssistantCronJob(input: {
             workingDirectory: input.vault,
           })
 
+          if (
+            !maintenanceJob &&
+            assistantCronExecutionDeliveryTargetProfile(input) === 'hosted' &&
+            result.audienceVerification === 'unverified'
+          ) {
+            throw new VaultCliError(
+              'ASSISTANT_CRON_AUDIENCE_UNVERIFIED',
+              'This hosted automation could not verify its saved audience. Edit or reactivate it from the intended conversation before it can run.',
+            )
+          }
+
           sessionId = result.session.sessionId
           response = result.response ?? result.decision.privateSummary
           const postTurnDeliveryFailure =
