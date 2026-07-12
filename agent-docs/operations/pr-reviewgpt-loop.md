@@ -20,6 +20,21 @@ additive and does not satisfy, replace, or reorder any required local pass.
 For non-trivial PR-lane work, do not call the PR good to merge until this loop
 has reached zero accepted findings and PR CI is green on the final head.
 
+## Managed Target Lifecycle
+
+ReviewGPT creates one fresh background ChatGPT target for each run. A waited
+run owns that target for response capture and must close that exact target when
+capture completes, times out, fails, or yields to a retry. A successful
+draft-only or send-without-wait run intentionally retains its target because
+the prepared draft or conversation is the user-facing result. Never implement
+this cleanup as a profile-wide tab sweep or close a target that the current run
+did not create.
+
+This ownership rule is required because the managed browser lanes disable
+background throttling and ReviewGPT pins the capture page lifecycle active.
+Leaving completed waited targets open accumulates active renderers across
+rounds even when ordinary browser history and site data have been cleared.
+
 ## When It Runs
 
 Run the loop when all of the following hold:
@@ -95,10 +110,13 @@ current-task user opt-out.
    PR-review rounds.
 
 3. Confirm the captured output is an actual completed review before triaging
-   it. If the run dies, times out, leaves an empty/preliminary file, lacks
+   it. If the run leaves an empty/preliminary response, lacks
    `REVIEW_COMPLETE`, or reports a missing/unreadable `codebase.zip`, the round
-   does not count. Rerun it against the same pushed head after fixing the
-   concrete tooling/profile problem.
+   does not count. A response that passed exact-turn and completion checks does
+   count even when optional model-evidence persistence or bounded owned-target
+   cleanup later emits a warning; those post-completion diagnostics must never
+   relaunch the model audit. Fix a concrete pre-completion tooling/profile
+   failure before considering another run against the same pushed head.
 
    Treat a suspiciously fast turnaround as the same kind of invalid round. A
    genuine `pr-review` sweep on the intended reasoning model takes several
