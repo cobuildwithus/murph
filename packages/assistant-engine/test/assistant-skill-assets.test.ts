@@ -440,8 +440,9 @@ describe('assistant skill assets', () => {
       'For asymptomatic general vision or prevention without that risk or direction, use a routine comprehensive eye or vision exam.',
     )
     expect(examTypeResolver).toContain(
-      'Add a contact-lens-fit review only when the user currently wears contacts',
+      'Add a contact-lens-fit review when the user currently wears contacts.',
     )
+    expect(examTypeResolver).not.toContain('fit or prescription is due')
     expect(examTypeResolver).toContain(
       'A past contact prescription by itself does not justify a contact-lens fitting for someone who no longer wears contacts.',
     )

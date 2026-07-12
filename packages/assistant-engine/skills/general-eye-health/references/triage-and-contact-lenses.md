@@ -70,7 +70,7 @@ As part of selecting `Arrange a prompt eye exam` or `Arrange a routine eye exam`
 3. For asymptomatic general vision or prevention without that risk or direction, use a routine comprehensive eye or vision exam.
 4. If the known facts do not establish one type, do not select an exam outcome yet; use `Ask one decision-changing question`.
 
-Add a contact-lens-fit review only when the user currently wears contacts and the fit or prescription is due for review. A past contact prescription by itself does not justify a contact-lens fitting for someone who no longer wears contacts. Do not select dilation or another procedure unless it is already directed.
+Add a contact-lens-fit review when the user currently wears contacts. A past contact prescription by itself does not justify a contact-lens fitting for someone who no longer wears contacts. Do not select dilation or another procedure unless it is already directed.
 
 ## Contact-Lens Action Rules
 
