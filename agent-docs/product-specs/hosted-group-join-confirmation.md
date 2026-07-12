@@ -80,6 +80,12 @@ member runtime. The pointer is a latency hint; the encrypted mailbox item is
 the durable source of truth. A signal failure does not turn a successful join
 into an error.
 
+When activation materializes a deferred confirmation, Family acceptance uses
+the already-appended `member.activated` mailbox item as the single post-commit
+runtime signal. Runtime mailbox reconciliation imports the preceding group
+confirmation from the same lane; no second scheduler or confirmation-specific
+signal is required.
+
 ## Deployment concerns
 
 Apply the additive `hosted_member_routing` and `hosted_group_member`

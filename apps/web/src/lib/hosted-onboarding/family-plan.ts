@@ -81,6 +81,9 @@ import {
   activateHostedMemberForFamilySponsorshipTx,
   type HostedMemberActivationResult,
 } from "./member-activation";
+import {
+  signalHostedMemberActivationRuntimeWakeBestEffortResult,
+} from "./member-activation-runtime-wake";
 import { createHostedMember } from "./hosted-member-store";
 import { readHostedMemberStripeBillingRef } from "./hosted-member-billing-store";
 import {
@@ -101,6 +104,7 @@ import {
   resolveHostedMemberAssistantNotificationRoute,
   resolveHostedMemberMessagingState,
 } from "./messaging-state";
+import { readHostedLinqHomeLineAuthority } from "./linq-home-routing";
 
 export { HOSTED_FAMILY_MAX_SEATS, HOSTED_FAMILY_MIN_SEATS } from "./billing-plans";
 
@@ -2531,14 +2535,15 @@ export async function resolveHostedFamilyChatNotificationRouteTx(input: {
       prisma: input.tx,
     }),
   ]);
+  const linqAuthority = readHostedLinqHomeLineAuthority(routing);
+  const linqThreadAuthority = linqAuthority.kind === "home" || linqAuthority.kind === "pending"
+    ? linqAuthority
+    : null;
 
   return resolveHostedMemberAssistantNotificationRoute({
-    linqChatId: routing?.linqChatId ?? routing?.pendingLinqChatId ?? null,
-    linqContactLookupKey:
-      routing?.pendingLinqParticipantContact?.lookupKey
-      ?? identity?.phoneLookupKey
-      ?? null,
-    linqRecipientPhone: routing?.linqRecipientPhone ?? null,
+    linqChatId: linqThreadAuthority?.chatId ?? null,
+    linqContactLookupKey: linqThreadAuthority?.participantContact?.lookupKey ?? null,
+    linqRecipientPhone: linqAuthority.kind === "none" ? null : linqAuthority.recipientPhone,
     memberId: input.memberId,
     memberPhoneNumber: identity?.phoneNumber ?? null,
     messaging: resolveHostedMemberMessagingState({
@@ -2547,6 +2552,7 @@ export async function resolveHostedFamilyChatNotificationRouteTx(input: {
       },
       routing: {
         linqChatId: routing?.linqChatId ?? null,
+        linqParticipantContact: routing?.linqParticipantContact ?? null,
         pendingLinqChatId: routing?.pendingLinqChatId ?? null,
         pendingLinqParticipantContact: routing?.pendingLinqParticipantContact ?? null,
         telegramThreadId:
@@ -2572,11 +2578,30 @@ export async function acceptHostedFamilyInvite(input: {
   requireWebBinding?: boolean;
 }): Promise<HostedAccountGroupMembershipAccessSnapshot> {
   const prisma = input.prisma ?? getPrisma();
+  const activationHolder: { value: HostedMemberActivationResult | null } = {
+    value: null,
+  };
 
-  return prisma.$transaction((tx) => acceptHostedFamilyInviteTx({
+  const membership = await prisma.$transaction((tx) => acceptHostedFamilyInviteTx({
     ...input,
+    onAcceptedMemberActivated: (result) => {
+      activationHolder.value = result;
+    },
     tx,
   }), HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+  const activation = activationHolder.value;
+
+  if (activation?.hostedExecutionEventId) {
+    await signalHostedMemberActivationRuntimeWakeBestEffortResult({
+      hostedExecutionEventId: activation.hostedExecutionEventId,
+      mailboxItemId: activation.hostedExecutionMailboxItemId ?? null,
+      memberId: activation.memberId,
+      prisma,
+      source: "family-invite-web-accept",
+    });
+  }
+
+  return membership;
 }
 
 export function parseHostedFamilyInviteStartToken(text: string | null | undefined): string | null {
@@ -2787,6 +2812,7 @@ export async function acceptHostedFamilyInviteFromPhoneTx(input: {
     acceptedMemberId: string;
     invite: HostedAccountGroupInviteSnapshot;
   }) => Promise<void>;
+  onAcceptedMemberActivated?: (result: HostedMemberActivationResult) => Promise<void> | void;
   phoneNumber: string;
   text: string | null | undefined;
   tx: Prisma.TransactionClient;
@@ -2843,6 +2869,7 @@ export async function acceptHostedFamilyInviteFromPhoneTx(input: {
     inviteCode,
     now,
     onAcceptedMemberValidated: input.onAcceptedMemberValidated,
+    onAcceptedMemberActivated: input.onAcceptedMemberActivated,
     phoneNumber: input.phoneNumber,
     requirePhoneBinding: !isFullyUnbound,
     tx: input.tx,
@@ -2858,6 +2885,7 @@ export async function acceptHostedFamilyInviteTx(input: {
     acceptedMemberId: string;
     invite: HostedAccountGroupInviteSnapshot;
   }) => Promise<void>;
+  onAcceptedMemberActivated?: (result: HostedMemberActivationResult) => Promise<void> | void;
   phoneNumber?: string | null;
   requirePhoneBinding?: boolean;
   requireWebBinding?: boolean;
@@ -3101,12 +3129,13 @@ export async function acceptHostedFamilyInviteTx(input: {
   });
 
   if (hasHostedAccountGroupAccess(invite.group)) {
-    await activateHostedMemberForFamilySponsorshipTx({
+    const activation = await activateHostedMemberForFamilySponsorshipTx({
       memberId: input.acceptedMemberId,
       occurredAt: now,
       prisma: input.tx,
       sourceEventId: `family-invite:${invite.id}`,
     });
+    await input.onAcceptedMemberActivated?.(activation);
   }
 
   await notifyHostedFamilyOwnerOfInviteClaimTx({

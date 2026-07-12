@@ -16,6 +16,9 @@ interface HostedMemberMessagingIdentitySlice {
 
 interface HostedMemberMessagingRoutingSlice {
   linqChatId?: string | null;
+  linqParticipantContact?: {
+    lookupKey?: string | null;
+  } | null;
   pendingLinqChatId?: string | null;
   pendingLinqParticipantContact?: {
     lookupKey?: string | null;
@@ -48,7 +51,7 @@ export function resolveHostedMemberMessagingState(input: {
     normalizeMessagingIdentity(input.routing?.linqChatId)
     ?? normalizeMessagingIdentity(input.routing?.pendingLinqChatId);
   const linqContactLookupKey =
-    phoneLookupKey
+    normalizeMessagingIdentity(input.routing?.linqParticipantContact?.lookupKey)
     ?? normalizeMessagingIdentity(input.routing?.pendingLinqParticipantContact?.lookupKey);
   const telegramThreadId = normalizeMessagingIdentity(input.routing?.telegramThreadId);
   const hasPhone = phoneLookupKey !== null;
@@ -100,8 +103,7 @@ export function resolveHostedMemberAssistantNotificationRoute(input: {
   const linqRecipientPhone = normalizePhoneNumber(input.linqRecipientPhone);
   const linqContactLookupKey =
     normalizeMessagingIdentity(input.linqContactLookupKey)
-    ?? input.messaging.linqContactLookupKey
-    ?? input.messaging.phoneLookupKey;
+    ?? input.messaging.linqContactLookupKey;
 
   if (input.linqChatId && linqContactLookupKey) {
     const identifierBlind = createHostedAssistantConversationIdentifierBlind({

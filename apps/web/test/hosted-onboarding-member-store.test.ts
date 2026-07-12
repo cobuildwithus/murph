@@ -1219,12 +1219,14 @@ describe("hosted-member-store", () => {
   it("upserts home Linq chat bindings into the routing table with encrypted local storage", async () => {
     const executeRaw = vi.fn().mockResolvedValue(0);
     const findFirst = vi.fn().mockResolvedValue(null);
+    const findUnique = vi.fn().mockResolvedValue(null);
     const updateMany = vi.fn().mockResolvedValue({ count: 0 });
     const upsert = vi.fn().mockResolvedValue({});
     const prisma = {
       $executeRaw: executeRaw,
       hostedMemberRouting: {
         findFirst,
+        findUnique,
         updateMany,
         upsert,
       },
@@ -1337,6 +1339,44 @@ describe("hosted-member-store", () => {
     });
   });
 
+  it("enriches home participant authority once and does not replace it from later inbound identity", async () => {
+    const establishedParticipant = {
+      kind: "email" as const,
+      lookupKey: "hbidx:email:v1:established-participant",
+    };
+    const upsert = vi.fn().mockResolvedValue({});
+    const prisma = {
+      $executeRaw: vi.fn().mockResolvedValue(0),
+      hostedMemberRouting: {
+        findFirst: vi.fn().mockResolvedValue(null),
+        findUnique: vi.fn().mockResolvedValue({
+          linqParticipantContactKind: establishedParticipant.kind,
+          linqParticipantContactLookupKey: establishedParticipant.lookupKey,
+        }),
+        updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+        upsert,
+      },
+    } as never;
+
+    await expect(upsertHostedMemberHomeLinqBindingTx({
+      linqChatId: "chat_123",
+      memberId: "member_123",
+      participantContact: {
+        kind: "phone",
+        lookupKey: "hbidx:phone:v1:later-participant",
+      },
+      prisma,
+      recipientPhone: "+15550100001",
+    })).resolves.toEqual(establishedParticipant);
+
+    expect(upsert).toHaveBeenCalledWith(expect.objectContaining({
+      update: expect.objectContaining({
+        linqParticipantContactKind: establishedParticipant.kind,
+        linqParticipantContactLookupKey: establishedParticipant.lookupKey,
+      }),
+    }));
+  });
+
   it("clears pending Linq route state when pending chat binding becomes home", async () => {
     const executeRaw = vi.fn().mockResolvedValue(0);
     const updateMany = vi.fn().mockResolvedValue({ count: 0 });
@@ -1366,7 +1406,15 @@ describe("hosted-member-store", () => {
       recipientPhone: "+15550100001",
     });
 
-    expect(findUnique).not.toHaveBeenCalled();
+    expect(findUnique).toHaveBeenCalledWith({
+      select: {
+        linqParticipantContactKind: true,
+        linqParticipantContactLookupKey: true,
+      },
+      where: {
+        memberId: "member_123",
+      },
+    });
     const upsertUpdate = upsert.mock.calls[0]?.[0]?.update;
     expect(upsertUpdate).toEqual(expect.objectContaining({
       pendingLinqChatIdEncrypted: null,
@@ -1408,7 +1456,15 @@ describe("hosted-member-store", () => {
       linqChatLookupKey: createHostedLinqChatLookupKeyReadCandidates("chat_c")[0],
       pendingLinqChatLookupKey: null,
     }));
-    expect(findUnique).not.toHaveBeenCalled();
+    expect(findUnique).toHaveBeenCalledWith({
+      select: {
+        linqParticipantContactKind: true,
+        linqParticipantContactLookupKey: true,
+      },
+      where: {
+        memberId: "member_123",
+      },
+    });
     expect(updateMany).toHaveBeenCalledTimes(2);
   });
 
@@ -1455,12 +1511,14 @@ describe("hosted-member-store", () => {
 
     const executeRaw = vi.fn().mockResolvedValue(0);
     const findFirst = vi.fn().mockResolvedValue(null);
+    const findUnique = vi.fn().mockResolvedValue(null);
     const updateMany = vi.fn().mockResolvedValue({ count: 0 });
     const upsert = vi.fn().mockResolvedValue({});
     const prisma = {
       $executeRaw: executeRaw,
       hostedMemberRouting: {
         findFirst,
+        findUnique,
         updateMany,
         upsert,
       },
@@ -1624,6 +1682,7 @@ describe("hosted-member-store", () => {
       $executeRaw: executeRaw,
       hostedMemberRouting: {
         findFirst: vi.fn().mockResolvedValue(null),
+        findUnique: vi.fn().mockResolvedValue(null),
         updateMany,
         upsert,
       },

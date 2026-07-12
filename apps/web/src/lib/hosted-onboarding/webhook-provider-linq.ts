@@ -86,6 +86,7 @@ import {
 import type {
   HostedLinqFirstContactAdmissionRequest,
 } from "./linq-first-contact-admission";
+import type { HostedWebhookWakeHandoff } from "./webhook-service-types";
 import {
   readHostedThreadRouteByThreadIdentity,
   type HostedLinqThreadRouteEgressAuthority,
@@ -98,7 +99,10 @@ export type {
 import type {
   HostedOnboardingLinqDirectPlan,
 } from "./webhook-provider-linq-types";
-import { type HostedLinqParticipantContact } from "./linq-participant-contact";
+import {
+  type HostedLinqParticipantContact,
+  type HostedLinqParticipantIdentity,
+} from "./linq-participant-contact";
 
 const HOSTED_LINQ_MESSAGE_MAX_PARTS = 32;
 const HOSTED_LINQ_CONVERSATION_WAKE_INLINE_TARGET_BYTES = 128 * 1024;
@@ -408,6 +412,7 @@ export async function planHostedOnboardingLinqWebhook(input: {
     text: summary.text,
   }) !== null;
   let familyAcceptance: Awaited<ReturnType<typeof acceptHostedFamilyInviteFromPhoneTx>> = null;
+  let familyActivationWake: HostedWebhookWakeHandoff | null = null;
   let familyHomeLineAssignedAt: Date | null = null;
   let familyHomeRecipientPhone: string | null = recipientPhoneNumber;
   if (participantContact.kind === "phone") {
@@ -448,9 +453,20 @@ export async function planHostedOnboardingLinqWebhook(input: {
             homeLineAssignedAt: familyHomeLineAssignedAt,
             linqChatId: summary.chatId,
             memberId: acceptedMemberId,
+            participantContact,
             prisma: input.prisma,
             recipientPhone: familyHomeRecipientPhone,
           });
+        },
+        onAcceptedMemberActivated: (activation) => {
+          if (activation.hostedExecutionEventId && activation.hostedExecutionMailboxItemId) {
+            familyActivationWake = {
+              eventId: activation.hostedExecutionEventId,
+              mailboxItemId: activation.hostedExecutionMailboxItemId,
+              source: "linq",
+              userId: activation.memberId,
+            };
+          }
         },
         phoneNumber: participantContact.value,
         text: summary.text,
@@ -484,6 +500,7 @@ export async function planHostedOnboardingLinqWebhook(input: {
         messageId: summary.messageId,
         occurredAt,
         sourceEventId: input.event.event_id,
+        ...(familyActivationWake ? { wakeHandoff: familyActivationWake } : {}),
       }),
       buildHostedLinqWebhookPlannerDetails(input.event, context, {
         dailyInboundCount: dailyState.inboundCount,
@@ -613,7 +630,7 @@ export async function planHostedOnboardingLinqWebhook(input: {
         ...(messageEvent.data.service === undefined ? {} : { service: messageEvent.data.service }),
       },
       occurredAt,
-      participantContact,
+      participantContact: dailyState.participantIdentity ?? participantContact,
       rawParts: messageEvent.data.message.parts,
       userId: existingMember.id,
     });
@@ -1574,7 +1591,7 @@ function buildHostedLinqConversationWakeForMailbox(input: {
   eventId: string;
   linqMessage: Omit<HostedExecutionLinqConversationMessage, "parts">;
   occurredAt: string;
-  participantContact: HostedLinqParticipantContact;
+  participantContact: HostedLinqParticipantIdentity;
   rawParts: HostedLinqMessageReceivedEvent["data"]["message"]["parts"];
   routeAuthority?: HostedLinqThreadRouteEgressAuthority | null;
   userId: string;

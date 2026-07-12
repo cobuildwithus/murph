@@ -32,7 +32,10 @@ import type {
   HostedOnboardingLinqDirectPlan,
   HostedOnboardingLinqWebhookResponse,
 } from "./webhook-provider-linq-types";
-import type { HostedWebhookPlan } from "./webhook-service-types";
+import type {
+  HostedWebhookPlan,
+  HostedWebhookWakeHandoff,
+} from "./webhook-service-types";
 
 type HostedLinqMessageReceivedEvent = ReturnType<typeof requireHostedLinqMessageReceivedEvent>;
 
@@ -194,6 +197,7 @@ export function buildFamilyInviteAcceptedResponse(input: {
   messageId: string;
   occurredAt: string;
   sourceEventId: string;
+  wakeHandoff?: HostedWebhookWakeHandoff;
 }): HostedOnboardingLinqDirectPlan {
   return buildActiveMemberDirectPlan({
     desiredSideEffects: [
@@ -211,6 +215,7 @@ export function buildFamilyInviteAcceptedResponse(input: {
       ok: true,
       reason: "family-invite-accepted",
     },
+    ...(input.wakeHandoff ? { wakeHandoffs: [input.wakeHandoff] } : {}),
   });
 }
 
@@ -283,7 +288,7 @@ export async function bindHostedMemberHomeLinqChatAndTrackInbound(input: {
   prisma: Prisma.TransactionClient;
   recipientPhone: string | null;
 }) {
-  await upsertHostedMemberHomeLinqBindingTx({
+  const participantIdentity = await upsertHostedMemberHomeLinqBindingTx({
     clearPending: true,
     homeLineAssignedAt: input.homeLineAssignedAt ?? null,
     linqChatId: input.chatId,
@@ -293,11 +298,16 @@ export async function bindHostedMemberHomeLinqChatAndTrackInbound(input: {
     recipientPhone: input.recipientPhone,
   });
 
-  return incrementHostedLinqInboundDailyState({
+  const dailyState = await incrementHostedLinqInboundDailyState({
     memberId: input.memberId,
     occurredAt: input.occurredAt,
     prisma: input.prisma,
   });
+
+  return {
+    ...dailyState,
+    participantIdentity,
+  };
 }
 
 export async function bindHostedMemberPendingLinqChatAndTrackInbound(input: {

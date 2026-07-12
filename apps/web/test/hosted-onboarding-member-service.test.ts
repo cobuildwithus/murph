@@ -661,12 +661,14 @@ describe("upsertHostedMemberHomeLinqBinding", () => {
   it("stores the latest Linq home chat id in the routing table for future activation welcomes", async () => {
     const executeRaw = vi.fn().mockResolvedValue(0);
     const findFirst = vi.fn().mockResolvedValue(null);
+    const findUnique = vi.fn().mockResolvedValue(null);
     const updateMany = vi.fn().mockResolvedValue({ count: 0 });
     const upsert = vi.fn().mockResolvedValue({});
     const prisma = asRootPrisma({
       $executeRaw: executeRaw,
       hostedMemberRouting: {
         findFirst,
+        findUnique,
         updateMany,
         upsert,
       },

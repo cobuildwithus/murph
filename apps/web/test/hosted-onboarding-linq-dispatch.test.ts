@@ -2555,6 +2555,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
   });
 
   it("keeps a matching active home chat without filling a missing recipient from inbound metadata", async () => {
+    const establishedParticipantLookupKey = "hbidx:email:v1:established-participant";
     const hostedMemberRouting = createStatefulHostedMemberRoutingMock({
       linqChatIdEncrypted: await encryptHostedWebNullableString({
         field: "hosted-member-routing.home-linq-chat-id",
@@ -2562,6 +2563,8 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         value: "chat_123",
       }),
       linqChatLookupKey: createHostedLinqChatLookupKey("chat_123"),
+      linqParticipantContactKind: "email",
+      linqParticipantContactLookupKey: establishedParticipantLookupKey,
       linqRecipientPhoneEncrypted: null,
       linqRecipientPhoneLookupKey: null,
       memberId: "member_123",
@@ -2619,6 +2622,8 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         linqRecipientPhoneLookupKey: null,
       }),
       update: expect.objectContaining({
+        linqParticipantContactKind: "email",
+        linqParticipantContactLookupKey: establishedParticipantLookupKey,
         linqRecipientPhoneLookupKey: null,
       }),
       where: {
@@ -2628,6 +2633,15 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(hostedMemberRouting.groupBy).not.toHaveBeenCalled();
     expect(mocks.incrementHostedLinqInboundDailyState).toHaveBeenCalled();
     expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalled();
+    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledWith({
+      envelope: expect.objectContaining({
+        message: expect.objectContaining({
+          contactKind: "email",
+          contactLookupKey: establishedParticipantLookupKey,
+        }),
+      }),
+      tx: prisma,
+    });
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
   });
 
@@ -2949,11 +2963,34 @@ describe("handleHostedOnboardingLinqWebhook", () => {
   });
 
   it("accepts a phone-bound Family invite token from inbound iMessage", async () => {
-    mocks.acceptHostedFamilyInviteFromPhoneTx.mockResolvedValueOnce({
-      groupId: "group_family",
-      memberId: "member_family",
-      role: "member",
-      status: "active",
+    mocks.acceptHostedFamilyInviteFromPhoneTx.mockImplementationOnce(async (input: {
+      onAcceptedMemberActivated: (result: {
+        activated: boolean;
+        hostedExecutionEventId: string;
+        hostedExecutionMailboxItemId: string;
+        memberId: string;
+      }) => Promise<void> | void;
+      onAcceptedMemberValidated: (result: {
+        acceptedMemberId: string;
+        invite: { id: string };
+      }) => Promise<void>;
+    }) => {
+      await input.onAcceptedMemberValidated({
+        acceptedMemberId: "member_family",
+        invite: { id: "family_invite" },
+      });
+      await input.onAcceptedMemberActivated({
+        activated: true,
+        hostedExecutionEventId: "member.activated:family:member_family",
+        hostedExecutionMailboxItemId: "mailbox_member_family_activation",
+        memberId: "member_family",
+      });
+      return {
+        groupId: "group_family",
+        memberId: "member_family",
+        role: "member",
+        status: "active",
+      };
     });
 
     const prismaMocks = {
@@ -3002,6 +3039,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     });
     expect(mocks.acceptHostedFamilyInviteFromPhoneTx).toHaveBeenCalledWith({
       now: new Date("2026-03-26T12:00:00.000Z"),
+      onAcceptedMemberActivated: expect.any(Function),
       onAcceptedMemberValidated: expect.any(Function),
       phoneNumber: "+15551234567",
       text: "family_phone_token",
@@ -3027,6 +3065,16 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         memberId: "member_family",
       },
     }));
+    expect(hostedMemberRouting.upsert).toHaveBeenNthCalledWith(1, expect.objectContaining({
+      create: expect.objectContaining({
+        linqParticipantContactKind: "phone",
+        linqParticipantContactLookupKey: expect.stringContaining("hbidx:phone:v1:"),
+      }),
+      update: expect.objectContaining({
+        linqParticipantContactKind: "phone",
+        linqParticipantContactLookupKey: expect.stringContaining("hbidx:phone:v1:"),
+      }),
+    }));
     expect(mocks.incrementHostedLinqInboundDailyState).toHaveBeenCalledWith({
       memberId: "member_family",
       occurredAt: "2026-03-26T12:00:00.000Z",
@@ -3045,6 +3093,10 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       signal: undefined,
     });
     expect(mocks.sendHostedLinqReadReceipt).not.toHaveBeenCalled();
+    expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
+      expectedUserId: "member_family",
+      mailboxItemId: "mailbox_member_family_activation",
+    });
   });
 
   it("accepts a Family invite token from an existing saved home chat with sparse line metadata", async () => {
@@ -3126,6 +3178,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     });
     expect(mocks.acceptHostedFamilyInviteFromPhoneTx).toHaveBeenCalledWith({
       now: new Date("2026-03-26T12:00:00.000Z"),
+      onAcceptedMemberActivated: expect.any(Function),
       onAcceptedMemberValidated: expect.any(Function),
       phoneNumber: "+15551234567",
       text: "family_sparse_token",
@@ -3478,6 +3531,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     });
     expect(mocks.acceptHostedFamilyInviteFromPhoneTx).toHaveBeenCalledWith({
       now: new Date("2026-03-26T12:00:00.000Z"),
+      onAcceptedMemberActivated: expect.any(Function),
       onAcceptedMemberValidated: expect.any(Function),
       phoneNumber: "+15551234567",
       text: "family_expired_or_wrong_line",
@@ -3621,6 +3675,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     });
     expect(mocks.acceptHostedFamilyInviteFromPhoneTx).toHaveBeenCalledWith({
       now: new Date("2026-03-26T12:00:00.000Z"),
+      onAcceptedMemberActivated: expect.any(Function),
       onAcceptedMemberValidated: expect.any(Function),
       phoneNumber: "+15551234567",
       text: "family_wrong_phone",

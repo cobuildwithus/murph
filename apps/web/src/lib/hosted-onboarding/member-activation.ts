@@ -57,6 +57,7 @@ import { lockHostedMemberRow } from "./shared";
 export type HostedMemberActivationResult = {
   activated: boolean;
   hostedExecutionEventId: string | null;
+  hostedExecutionMailboxItemId?: string | null;
   memberId: string;
 };
 
@@ -255,6 +256,9 @@ async function activateHostedMemberForPositiveSourceTxInner(input: {
   return {
     activated: true,
     hostedExecutionEventId: appendedWake.eventId,
+    ...(appendedWake.mailboxItemId
+      ? { hostedExecutionMailboxItemId: appendedWake.mailboxItemId }
+      : {}),
     memberId: currentMember.core.id,
   };
 }
@@ -442,7 +446,7 @@ async function materializeHostedMemberActivationWakesTx(input: {
   activationWake: HostedExecutionMemberActivatedWake;
   legacyWelcomeWake: HostedExecutionWake | null;
   prisma: Prisma.TransactionClient;
-}): Promise<{ eventId: string }> {
+}): Promise<{ eventId: string; mailboxItemId: string }> {
   const appendedWake = await appendHostedMailboxEnvelopeTx({
     envelope: input.activationWake,
     tx: input.prisma,
@@ -457,6 +461,7 @@ async function materializeHostedMemberActivationWakesTx(input: {
 
   return {
     eventId: appendedWake.item.dedupeKey,
+    mailboxItemId: appendedWake.item.id,
   };
 }
 

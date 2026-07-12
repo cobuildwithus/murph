@@ -26,6 +26,9 @@ const runtimeMocks = vi.hoisted(() => ({
   requireHostedStripeApi: vi.fn(),
   requireHostedStripeBillingPlanConfig: vi.fn(),
 }));
+const activationWakeMocks = vi.hoisted(() => ({
+  signalHostedMemberActivationRuntimeWakeBestEffortResult: vi.fn(),
+}));
 
 vi.mock("@/src/lib/hosted-web/encryption", () => ({
   decryptHostedWebNullableString: encryptionMocks.decryptHostedWebNullableString,
@@ -34,6 +37,10 @@ vi.mock("@/src/lib/hosted-web/encryption", () => ({
 vi.mock("@/src/lib/hosted-onboarding/member-activation", () => ({
   activateHostedMemberForFamilySponsorshipTx:
     activationMocks.activateHostedMemberForFamilySponsorshipTx,
+}));
+vi.mock("@/src/lib/hosted-onboarding/member-activation-runtime-wake", () => ({
+  signalHostedMemberActivationRuntimeWakeBestEffortResult:
+    activationWakeMocks.signalHostedMemberActivationRuntimeWakeBestEffortResult,
 }));
 vi.mock("@/src/lib/hosted-crypto/domain-root-store", () => ({
   provisionActiveHostedDomainRootEnvelopeForUserOnly:
@@ -57,6 +64,7 @@ import {
   createHostedTelegramUsernameLookupKey,
 } from "@/src/lib/hosted-onboarding/contact-privacy";
 import {
+  acceptHostedFamilyInvite,
   acceptHostedFamilyInviteFromTelegramTx,
   acceptHostedFamilyInviteFromPhoneTx,
   acceptHostedFamilyInviteTx,
@@ -173,8 +181,17 @@ describe("hosted Family plan", () => {
     activationMocks.activateHostedMemberForFamilySponsorshipTx.mockImplementation(async ({ memberId }) => ({
       activated: true,
       hostedExecutionEventId: "member.activated:family",
+      hostedExecutionMailboxItemId: "mailbox_member_activation",
       memberId,
     }));
+    activationWakeMocks.signalHostedMemberActivationRuntimeWakeBestEffortResult.mockResolvedValue({
+      accepted: true,
+      configured: true,
+      errorCode: null,
+      mailboxItemIdPresent: true,
+      signalAccepted: true,
+      workflowIdPresent: true,
+    });
     mailboxMocks.appendHostedMailboxEnvelopeTx.mockResolvedValue({
       item: { id: "mailbox_item_owner_notification" },
     });
@@ -1423,6 +1440,33 @@ describe("hosted Family plan", () => {
       role: "member",
       status: "active",
     });
+  });
+
+  it("signals the accepted member activation mailbox after browser acceptance commits", async () => {
+    const tx = createTxMock();
+    tx.hostedAccountGroupInvite.findUnique.mockResolvedValueOnce(createPendingInvite());
+    const prisma = tx as FamilyPlanTxMock & {
+      $transaction: ReturnType<typeof vi.fn>;
+    };
+    prisma.$transaction = vi.fn((callback) => callback(tx));
+
+    await expect(acceptHostedFamilyInvite({
+      acceptedMemberId: "member_mom",
+      inviteCode: "invite_phone",
+      prisma: prisma as never,
+    })).resolves.toMatchObject({
+      memberId: "member_mom",
+      status: "active",
+    });
+
+    expect(activationWakeMocks.signalHostedMemberActivationRuntimeWakeBestEffortResult)
+      .toHaveBeenCalledWith({
+        hostedExecutionEventId: "member.activated:family",
+        mailboxItemId: "mailbox_member_activation",
+        memberId: "member_mom",
+        prisma,
+        source: "family-invite-web-accept",
+      });
   });
 
   it("does not let one member use active sponsorship from two family plans", async () => {

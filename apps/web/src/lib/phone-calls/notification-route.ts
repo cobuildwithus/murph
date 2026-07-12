@@ -11,6 +11,7 @@ import {
   resolveHostedMemberAssistantNotificationRoute,
   resolveHostedMemberMessagingState,
 } from "../hosted-onboarding/messaging-state";
+import { readHostedLinqHomeLineAuthority } from "../hosted-onboarding/linq-home-routing";
 import type { HostedOnboardingReadClient } from "../hosted-onboarding/shared";
 import { getPrisma } from "../prisma";
 
@@ -27,11 +28,15 @@ export function resolveHostedPhoneCallResultNotificationRoute(input: {
     identity: member.identity,
     routing: member.routing,
   });
+  const linqAuthority = readHostedLinqHomeLineAuthority(member.routing);
+  const linqThreadAuthority = linqAuthority.kind === "home" || linqAuthority.kind === "pending"
+    ? linqAuthority
+    : null;
 
   return resolveHostedMemberAssistantNotificationRoute({
-    linqChatId: member.routing?.linqChatId ?? member.routing?.pendingLinqChatId ?? null,
-    linqContactLookupKey: member.routing?.pendingLinqParticipantContact?.lookupKey ?? null,
-    linqRecipientPhone: member.routing?.linqRecipientPhone ?? member.routing?.pendingLinqRecipientPhone ?? null,
+    linqChatId: linqThreadAuthority?.chatId ?? null,
+    linqContactLookupKey: linqThreadAuthority?.participantContact?.lookupKey ?? null,
+    linqRecipientPhone: linqAuthority.kind === "none" ? null : linqAuthority.recipientPhone,
     memberId: input.memberId,
     memberPhoneNumber: member.identity?.phoneNumber ?? null,
     messaging,

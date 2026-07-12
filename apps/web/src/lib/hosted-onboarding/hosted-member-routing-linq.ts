@@ -181,8 +181,8 @@ export async function upsertHostedMemberHomeLinqBindingTx(input: {
   participantContact?: HostedLinqParticipantIdentity | null;
   prisma: Prisma.TransactionClient;
   recipientPhone: string | null;
-}): Promise<void> {
-  await writeHostedMemberLinqBindingTx({
+}): Promise<HostedLinqParticipantIdentity | null> {
+  return await writeHostedMemberLinqBindingTx({
     clearPending: input.clearPending ?? false,
     kind: "home",
     linqChatId: input.linqChatId,
@@ -453,7 +453,7 @@ async function writeHostedMemberLinqBindingTx(input: {
   participantContactObservedAt: Date | null;
   prisma: Prisma.TransactionClient;
   recipientPhone: string | null;
-}): Promise<void> {
+}): Promise<HostedLinqParticipantIdentity | null> {
   const linqChatLookupKey = createHostedLinqChatLookupKey(input.linqChatId);
   const linqChatLookupKeys = createHostedLinqChatLookupKeyReadCandidates(input.linqChatId);
 
@@ -504,6 +504,13 @@ async function writeHostedMemberLinqBindingTx(input: {
     memberId: input.memberId,
     tx: input.prisma,
   });
+  const existingHomeParticipant = input.kind === "home"
+    ? await readHostedMemberHomeLinqParticipantIdentityTx({
+        memberId: input.memberId,
+        tx: input.prisma,
+      })
+    : null;
+  const participantContact = existingHomeParticipant ?? input.participantContact;
   await input.prisma.hostedMemberRouting.upsert({
     where: {
       memberId: input.memberId,
@@ -513,7 +520,7 @@ async function writeHostedMemberLinqBindingTx(input: {
       homeLineAssignedAt: input.homeLineAssignedAt,
       linqChatLookupKey,
       memberId: input.memberId,
-      participantContact: input.participantContact,
+      participantContact,
       participantContactObservedAt: input.participantContactObservedAt,
       recipientPhoneLookupKey,
       routingPrivateColumns,
@@ -523,12 +530,37 @@ async function writeHostedMemberLinqBindingTx(input: {
       kind: input.kind,
       homeLineAssignedAt: input.homeLineAssignedAt,
       linqChatLookupKey,
-      participantContact: input.participantContact,
+      participantContact,
       participantContactObservedAt: input.participantContactObservedAt,
       recipientPhoneLookupKey,
       routingPrivateColumns,
     }),
   });
+
+  return participantContact;
+}
+
+async function readHostedMemberHomeLinqParticipantIdentityTx(input: {
+  memberId: string;
+  tx: Prisma.TransactionClient;
+}): Promise<HostedLinqParticipantIdentity | null> {
+  const routing = await input.tx.hostedMemberRouting.findUnique({
+    select: {
+      linqParticipantContactKind: true,
+      linqParticipantContactLookupKey: true,
+    },
+    where: {
+      memberId: input.memberId,
+    },
+  });
+  const kind = routing?.linqParticipantContactKind;
+  const lookupKey = routing?.linqParticipantContactLookupKey?.trim() ?? "";
+
+  if ((kind !== "email" && kind !== "phone") || !lookupKey) {
+    return null;
+  }
+
+  return { kind, lookupKey };
 }
 
 function buildHostedMemberLinqBindingCreateData(input: {
