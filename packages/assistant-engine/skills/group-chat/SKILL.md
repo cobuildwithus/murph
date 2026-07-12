@@ -168,8 +168,9 @@ and any tone preference if they care. For an email health newsletter, also
 propose the default reaction-share scope: name, email, sleep timing, activity
 minutes, workout summaries, resting heart rate, and HRV. Let the group widen
 or narrow that set. If they already gave some of that, or say "just set it up,"
-do not re-interrogate them. Use the sensible defaults and confirm the
-essentials in one line.
+do not re-interrogate them. Use the current group's non-blank `displayName` from
+`murph.group action="read_current"` as the newsletter name before inventing a
+generic default, and confirm the essentials in one line.
 
 Apply the answers directly. The chosen name is the automation title, the name
 used in the setup notice, and the group display name for the join surface. For
@@ -195,7 +196,10 @@ Set up or edit it with `vault-cli automation save` using:
 - `--continuity-policy fresh`
 - the current group channel
 - instructions that say this is the group health newsletter, include the
-  chosen tone, and include any optional custom note
+  exact chosen name, chosen tone, and any optional custom note, and explicitly
+  require every email subject to start with that exact name instead of a generic
+  newsletter label. Future notification turns may not read this skill, so keep
+  that complete naming rule in the saved instructions.
 
 Stop it with `vault-cli automation set-status group-health-newsletter --status archived`.
 
@@ -222,8 +226,9 @@ On each scheduled run:
    for it, such as "be hard on us like a coach." Even then roast upward at the
    organizer, loudest, or most confident person, and roast the effort or
    challenge, never bodies, weight, diagnoses, or whoever is struggling.
-4. Call `murph.newsletter` with `action="send"` only after composing the final
-   subject, HTML, and optional text body.
+4. Follow the subject-naming rule on `murph.newsletter`, then call it with
+   `action="send"` only after composing the final subject, HTML, and optional
+   text body.
 
 If a member never granted email sharing and expresses interest, or the group
 asks how someone can join the newsletter, post a join offer scoped to
