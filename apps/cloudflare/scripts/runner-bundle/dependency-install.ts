@@ -103,21 +103,15 @@ export async function installPackedRunnerDependencies(
     input.runtimePackageRoot,
     { allowMissing: true, dropMissing: true },
   );
-  const stagedPatchedDependencies = await stageWorkspacePatchedDependencies(
-    bundleDir,
-    input.repoRoot,
-    workspaceInstallPolicy.patchedDependencies,
-  );
+  const inheritedPnpmPolicy = { ...packageJson.pnpm };
+  delete inheritedPnpmPolicy.patchedDependencies;
   packageJson.pnpm = {
-    ...packageJson.pnpm,
+    ...inheritedPnpmPolicy,
     overrides: {
       ...workspaceInstallPolicy.overrides,
-      ...(packageJson.pnpm?.overrides ?? {}),
+      ...(inheritedPnpmPolicy.overrides ?? {}),
       ...workspaceTarballOverrides,
     },
-    ...(Object.keys(stagedPatchedDependencies).length > 0
-      ? { patchedDependencies: stagedPatchedDependencies }
-      : {}),
     supportedArchitectures: runnerBundleSupportedArchitectures,
   };
 
@@ -140,22 +134,27 @@ export async function assertInstalledRunnerHealthCommonsRuntimeImport(
 }
 
 /**
- * Copies the workspace's pnpm patch files into the bundle install root so the
- * standalone install applies the same patches as the workspace. The runner
- * bundle must resolve exactly one (patched) copy of each patched dependency:
- * shipping a second physical copy (for example nested inside a packed
- * tarball's node_modules) would get inlined twice by the vault-cli esbuild
- * bundle and split module-level state such as incur's command-registry
- * WeakMaps, which breaks grouped commands at runtime.
+ * Copies the resolved production graph's pnpm patch files into the bundle
+ * install root so the standalone install applies the same relevant patches as
+ * the workspace. The runner bundle must resolve exactly one (patched) copy of
+ * each retained dependency: shipping a second physical copy (for example
+ * inside a packed tarball's node_modules) would get inlined twice by the
+ * vault-cli esbuild bundle and split module-level state such as incur's
+ * command-registry WeakMaps, which breaks grouped commands at runtime.
  */
 async function stageWorkspacePatchedDependencies(
   installRoot: string,
   repoRoot: string,
   patchedDependencies: Record<string, string>,
+  resolvedDependencyNames: ReadonlySet<string>,
 ): Promise<Record<string, string>> {
   const staged: Record<string, string> = {};
 
   for (const [dependencySpec, patchPath] of Object.entries(patchedDependencies)) {
+    if (!resolvedDependencyNames.has(readPatchedDependencyPackageName(dependencySpec))) {
+      continue;
+    }
+
     const targetPatchPath = path.join(installRoot, patchPath);
 
     await mkdir(path.dirname(targetPatchPath), { recursive: true });
@@ -164,6 +163,10 @@ async function stageWorkspacePatchedDependencies(
   }
 
   return staged;
+}
+
+function readPatchedDependencyPackageName(dependencySpec: string): string {
+  return /^(@[^/]+\/[^@]+|[^@]+)@/u.exec(dependencySpec)?.[1] ?? dependencySpec;
 }
 
 function buildWorkspaceTarballOverrides(
@@ -293,11 +296,34 @@ async function installPinnedProductionDependencies(
     cwd: installRoot,
     env: installEnv,
   });
+  const lockfilePath = path.join(installRoot, "pnpm-lock.yaml");
+  const resolvedDependencyNames = extractPnpmLockPackageNames(
+    await readFile(lockfilePath, "utf8"),
+  );
+  const stagedPatchedDependencies = await stageWorkspacePatchedDependencies(
+    installRoot,
+    input.repoRoot,
+    input.policy.patchedDependencies,
+    resolvedDependencyNames,
+  );
+
+  if (Object.keys(stagedPatchedDependencies).length > 0) {
+    await writeRunnerBundlePatchedDependencies(
+      installRoot,
+      stagedPatchedDependencies,
+    );
+    // The discovery pass resolves the complete production graph without root-only
+    // patches. This second pass makes pnpm validate every retained patch exactly.
+    await runPnpmCommand(["install", "--prod", "--lockfile-only"], {
+      cwd: installRoot,
+      env: installEnv,
+    });
+  }
   await assertRunnerBundleLockfileUsesOnlyBundleImporter(
-    path.join(installRoot, "pnpm-lock.yaml"),
+    lockfilePath,
   );
   await assertRunnerBundleLockfileUsesCommittedResolutions({
-    bundleLockfilePath: path.join(installRoot, "pnpm-lock.yaml"),
+    bundleLockfilePath: lockfilePath,
     rootLockfilePath: path.join(input.repoRoot, "pnpm-lock.yaml"),
   });
   await runPnpmCommand(["install", "--prod", "--frozen-lockfile"], {
@@ -306,6 +332,30 @@ async function installPinnedProductionDependencies(
   });
   await pruneRunnerBundleUnsupportedPlatformPackages(installRoot);
   await assertRunnerBundleHasNoForbiddenInstallArtifacts(installRoot);
+}
+
+async function writeRunnerBundlePatchedDependencies(
+  installRoot: string,
+  patchedDependencies: Record<string, string>,
+): Promise<void> {
+  const packageJsonPath = path.join(installRoot, "package.json");
+  const packageJson = JSON.parse(
+    await readFile(packageJsonPath, "utf8"),
+  ) as {
+    pnpm?: {
+      patchedDependencies?: Record<string, string>;
+    };
+  };
+
+  packageJson.pnpm = {
+    ...packageJson.pnpm,
+    patchedDependencies,
+  };
+  await writeFile(
+    packageJsonPath,
+    `${JSON.stringify(packageJson, null, 2)}\n`,
+    "utf8",
+  );
 }
 
 async function seedRunnerBundleResolutionLockfileFromRoot(
@@ -579,6 +629,19 @@ function extractPnpmLockPackageResolutions(lockfile: string): Map<string, string
   }
 
   return packages;
+}
+
+function extractPnpmLockPackageNames(lockfile: string): ReadonlySet<string> {
+  const packageNames = new Set<string>();
+
+  for (const packageKey of extractPnpmLockPackageResolutions(lockfile).keys()) {
+    const match = /^(@[^/]+\/[^@]+|[^@]+)@/u.exec(packageKey);
+    if (match) {
+      packageNames.add(match[1]!);
+    }
+  }
+
+  return packageNames;
 }
 
 function isLocalRunnerBundlePackageKey(key: string): boolean {

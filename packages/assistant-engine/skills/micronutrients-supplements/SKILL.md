@@ -23,6 +23,8 @@ Use this as Murph operating guidance, not as a consumer article. Ground the answ
 ## Data First
 
 - Check diet pattern, labs with dates, supplement list, meds, symptoms, pregnancy status if relevant, kidney/liver disease, and reason for taking it.
+- Read saved labs before any should-I-take, keep-taking, or reorder verdict: `vault-cli blood-test list --format json`, then `vault-cli blood-test show <id> --format json` for the relevant panel, and `vault-cli search query "<biomarker>" --format json` or `vault-cli timeline --format json` for history. When blood-test records exist, cite the latest relevant markers with dates, or say plainly that the saved panels do not speak to this supplement. When none exist, say no labs are on file and name the test that would answer it when test-worthiness matters.
+- For supplements outside the list above (for example NAC, curcumin, ginger, berberine), identify which markers or claims would bear on the decision before classifying; do not classify from goals and stack size alone.
 - For iron, ask about ferritin plus inflammation context when available; ferritin can rise with inflammation.
 - For B12, check vegan diet, metformin, PPIs, bariatric surgery, neuropathy symptoms, and lab status.
 
@@ -73,5 +75,6 @@ absence of an exact test is not proof that a product is clean or safe.
 ## Answer Shape
 
 - Classify as strong, conditional, weak, or avoid/clinician-first for this user.
+- Name the personal evidence the classification rests on (latest panel date, current regimen, symptoms, goals). If the verdict rests only on generic evidence, say so.
 - Give dose range only when appropriate and include safety/interaction flags.
 - If product shopping follows, state the active ingredient, dose, form, third-party testing preference, and avoid proprietary blends when dose matters.

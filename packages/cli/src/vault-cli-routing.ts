@@ -8,25 +8,32 @@ import {
 export type VaultCliProgramName = 'murph' | 'vault-cli'
 
 const lazyRootCommands = [
+  'allergy',
   'assistant',
   'assertion',
   'automation',
   'batch',
   'blood-test',
+  'capture',
   'chat',
   'commons',
+  'condition',
   'device',
   'clinical-note',
   'diagnostic-test',
   'doctor',
   'encounter',
+  'event',
   'experiment',
   'exercise',
+  'food',
   'goal',
   'habitat',
   'group',
   'immunization',
   'init',
+  'journal',
+  'knowledge',
   'list',
   'meal',
   'medication',
@@ -36,6 +43,7 @@ const lazyRootCommands = [
   'query',
   'regimen',
   'research',
+  'route',
   'run',
   'search',
   'show',
@@ -48,12 +56,14 @@ const lazyRootCommands = [
   'vault',
   'vitals',
   'wearables',
+  'workout',
 ] as const
 const lazyRootCommandSet = new Set<string>(lazyRootCommands)
 
 export type KnownLazyRootCommand = (typeof lazyRootCommands)[number]
 
 export type CliInvocationPlan =
+  | { kind: 'version' }
   | { kind: 'setup' }
   | { kind: 'scoped'; root: KnownLazyRootCommand }
   | { kind: 'full'; reason: string }
@@ -83,7 +93,6 @@ const rootDiscoveryFlags = new Set([
   '-h',
   '--llms',
   '--llms-full',
-  '--mcp',
   '--schema',
 ])
 
@@ -108,13 +117,17 @@ export function planVaultCliInvocation(
   } = {},
 ): PlannedVaultCliInvocation {
   const vaultOverride = extractVaultOverride(args)
+  const plan = classifyVaultCliInvocation(vaultOverride.argv, {
+    env: input.env,
+    programName: input.programName,
+  })
 
   return {
     vaultOverride,
-    plan: classifyVaultCliInvocation(vaultOverride.argv, {
-      env: input.env,
-      programName: input.programName,
-    }),
+    plan:
+      vaultOverride.explicit && plan.kind === 'version'
+        ? { kind: 'full', reason: 'version-with-vault-override' }
+        : plan,
   }
 }
 
@@ -129,6 +142,17 @@ export function classifyVaultCliInvocation(
     return {
       kind: 'full',
       reason: 'completion-environment',
+    }
+  }
+
+  if (argv.length === 1 && argv[0] === '--version') {
+    return { kind: 'version' }
+  }
+
+  if (hasEffectiveMcpFlag(argv)) {
+    return {
+      kind: 'full',
+      reason: 'mcp-invocation',
     }
   }
 
@@ -226,6 +250,28 @@ function classifyRootToken(
 function isRootOptionWithValue(token: string): boolean {
   const optionToken = token.split('=', 1)[0] ?? token
   return rootOptionsWithValues.has(optionToken)
+}
+
+export function hasEffectiveMcpFlag(argv: readonly string[]): boolean {
+  for (let index = 0; index < argv.length; index += 1) {
+    const token = argv[index]
+    if (!token) {
+      continue
+    }
+
+    if (isRootOptionWithValue(token)) {
+      if (!token.includes('=')) {
+        index += 1
+      }
+      continue
+    }
+
+    if (token === '--mcp') {
+      return true
+    }
+  }
+
+  return false
 }
 
 function isKnownLazyRoot(root: string): root is KnownLazyRootCommand {

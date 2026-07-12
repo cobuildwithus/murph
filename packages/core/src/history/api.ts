@@ -21,11 +21,19 @@ import {
   normalizeCanonicalEventLinks,
 } from "../event-links.ts";
 import { VaultError } from "../errors.ts";
-import { readJsonlRecords, toMonthlyShardRelativePath } from "../jsonl.ts";
+import {
+  readJsonlRecords,
+  toMonthlyShardRelativePath,
+  visitJsonlRecordsInterruptible,
+} from "../jsonl.ts";
 import { generateRecordId } from "../ids.ts";
 import { runCanonicalWrite } from "../operations/index.ts";
 import { normalizeTimeZone, toDateOnly } from "../time.ts";
-import { readUtf8File, walkVaultFiles } from "../fs.ts";
+import {
+  readUtf8File,
+  walkVaultFiles,
+  walkVaultFilesInterruptible,
+} from "../fs.ts";
 import { loadVault } from "../vault.ts";
 import { buildMeasurementEventDraft } from "../domains/events.ts";
 import { buildTypedEventRecord } from "../domains/events/drafts.ts";
@@ -33,6 +41,8 @@ import {
   buildEventSpineEnvelope,
   buildEventSpineLifecycle,
   collapseEventSpineEntries,
+  compareEventSpineEntries,
+  isDeletedEventSpineRecord,
   parseStoredEventSpineLifecycle,
 } from "./event-spine.ts";
 
@@ -100,6 +110,18 @@ type StoredHistoryEventEntry = {
   relativePath: string;
   record: HistoryEventRecord;
 };
+
+export interface ReadLatestBloodTestHistorySummaryInput {
+  vaultRoot: string;
+  shouldContinue?: () => boolean;
+  signal?: AbortSignal | null;
+}
+
+export interface LatestBloodTestHistorySummary {
+  interrupted: boolean;
+  latestOccurredAt: string | null;
+  present: boolean;
+}
 
 type EncounterHistoryFields = Pick<
   EncounterHistoryEventRecord,
@@ -1274,6 +1296,78 @@ export async function listHistoryEvents({
   records.sort((left, right) => compareIsoTimestamps(left, right, normalizedOrder));
 
   return normalizedLimit ? records.slice(0, normalizedLimit) : records;
+}
+
+export async function readLatestBloodTestHistorySummaryInterruptible(
+  input: ReadLatestBloodTestHistorySummaryInput,
+): Promise<LatestBloodTestHistorySummary> {
+  const shouldContinue = () =>
+    !input.signal?.aborted && input.shouldContinue?.() !== false;
+  const walked = await walkVaultFilesInterruptible(
+    input.vaultRoot,
+    VAULT_LAYOUT.eventLedgerDirectory,
+    {
+      extension: ".jsonl",
+      shouldContinue,
+    },
+  );
+  if (walked.interrupted) {
+    return interruptedBloodTestHistorySummary();
+  }
+
+  const latestByEventId = new Map<string, StoredHistoryEventEntry>();
+  for (const relativePath of walked.relativePaths) {
+    const read = await visitJsonlRecordsInterruptible({
+      relativePath,
+      shouldContinue,
+      signal: input.signal,
+      vaultRoot: input.vaultRoot,
+      visit: (shardRecord) => {
+        const record = parseStoredHistoryEvent(shardRecord);
+        if (!record) {
+          return;
+        }
+
+        const candidate = { relativePath, record };
+        const current = latestByEventId.get(record.id);
+        if (!current || compareEventSpineEntries(current, candidate) < 0) {
+          latestByEventId.set(record.id, candidate);
+        }
+      },
+    });
+    if (read.interrupted) {
+      return interruptedBloodTestHistorySummary();
+    }
+  }
+
+  let latestOccurredAt: string | null = null;
+  for (const { record } of latestByEventId.values()) {
+    if (!shouldContinue()) {
+      return interruptedBloodTestHistorySummary();
+    }
+    if (
+      !isDeletedEventSpineRecord(record)
+      && record.kind === "test"
+      && isBloodTestHistoryRecord(record)
+      && (latestOccurredAt === null || record.occurredAt > latestOccurredAt)
+    ) {
+      latestOccurredAt = record.occurredAt;
+    }
+  }
+
+  return {
+    interrupted: false,
+    latestOccurredAt,
+    present: latestOccurredAt !== null,
+  };
+}
+
+function interruptedBloodTestHistorySummary(): LatestBloodTestHistorySummary {
+  return {
+    interrupted: true,
+    latestOccurredAt: null,
+    present: false,
+  };
 }
 
 export async function readHistoryEvent({
