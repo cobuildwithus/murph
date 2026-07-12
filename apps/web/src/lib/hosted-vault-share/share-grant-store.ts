@@ -8,8 +8,6 @@ import {
   buildHostedVaultShareProjectionScopeKey,
   buildHostedVaultShareRevokeDedupeKey,
   HOSTED_VAULT_SHARE_REVOKE_PAYLOAD_SCHEMA,
-  hostedVaultShareProjectionKindToScope,
-  isHostedVaultShareFixedProjectionKind,
   parseHostedVaultShareProjectionScope,
   parseHostedVaultShareProjectionScopeKey,
   type HostedVaultShareProjectionScope,
@@ -166,8 +164,6 @@ export async function revokeHostedVaultSharesWithCleanupTx(input: {
       destinationMemberId: true,
       grantorMemberId: true,
       id: true,
-      projectionKind: true,
-      projectionScopeJson: true,
       projectionScopeKey: true,
     },
     where: {
@@ -210,8 +206,6 @@ export async function revokeOutgoingHostedVaultSharesForMemberDeletionTx(input: 
       destinationMemberId: true,
       grantorMemberId: true,
       id: true,
-      projectionKind: true,
-      projectionScopeJson: true,
       projectionScopeKey: true,
     },
     where: {
@@ -317,8 +311,6 @@ function normalizeRevocableHostedVaultShareRows(rows: readonly {
   destinationMemberId: string;
   grantorMemberId: string;
   id: string;
-  projectionKind: string;
-  projectionScopeJson: unknown;
   projectionScopeKey: string;
 }[]): RevocableHostedVaultShare[] {
   return rows.map((row) => {
@@ -338,45 +330,22 @@ function normalizeRevocableHostedVaultShareRows(rows: readonly {
 
 function resolveRevocableHostedVaultShareProjectionScope(row: {
   id: string;
-  projectionKind: string;
-  projectionScopeJson: unknown;
   projectionScopeKey: string;
 }): HostedVaultShareProjectionScope {
   try {
-    const scope = parseHostedVaultShareProjectionScope(
-      row.projectionScopeJson,
-      "Hosted vault-share row projection scope",
-    );
-    if (scope.projectionKind === row.projectionKind) {
-      return scope;
-    }
-  } catch {
-    // Recover from another authoritative scope field below.
-  }
-
-  try {
-    const scope = parseHostedVaultShareProjectionScopeKey(
+    return parseHostedVaultShareProjectionScopeKey(
       row.projectionScopeKey,
       "Hosted vault-share row projection scope key",
     );
-    if (scope.projectionKind === row.projectionKind) {
-      return scope;
-    }
   } catch {
-    // Fixed projection kinds remain recoverable from the kind alone.
+    throw hostedOnboardingError({
+      code: "HOSTED_VAULT_SHARE_PROJECTION_INTEGRITY_INVALID",
+      details: { shareId: row.id },
+      httpStatus: 500,
+      message: "An active vault share has invalid projection metadata.",
+      retryable: false,
+    });
   }
-
-  if (isHostedVaultShareFixedProjectionKind(row.projectionKind)) {
-    return hostedVaultShareProjectionKindToScope(row.projectionKind);
-  }
-
-  throw hostedOnboardingError({
-    code: "HOSTED_VAULT_SHARE_PROJECTION_INTEGRITY_INVALID",
-    details: { shareId: row.id },
-    httpStatus: 500,
-    message: "An active vault share has invalid projection metadata.",
-    retryable: false,
-  });
 }
 
 export async function readActiveHostedVaultShareProjectionScopes(input: {

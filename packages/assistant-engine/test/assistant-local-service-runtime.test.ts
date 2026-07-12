@@ -3812,6 +3812,74 @@ test('sendAssistantMessageLocal probes active-turn input once before provider st
   ])
 })
 
+test('sendAssistantMessageLocal keeps pre-provider group sender proof in a separate delivery context', async () => {
+  const groupRequest = vi.fn(async () => ({
+    action: 'leave_current' as const,
+    result: { status: 'already_left' as const },
+  }))
+  const activeTurnInput = vi.fn<AssistantActiveTurnInputAdmissionHook>(async () => ({
+    acceptedInputs: [
+      {
+        id: 'mailbox-bob-input',
+        promptFallbackReason: 'manual-input',
+        promptFallbackText: 'Leave this group.',
+        source: 'manual',
+      },
+    ],
+    hostedDeliveryIdempotency: {
+      assistantTurnOrdinal: 'assistant-reply:2',
+      conversationId: 'conversation-group',
+      inboundMailboxItemIds: ['mailbox-bob'],
+      recipientKey: 'recipient-group',
+    },
+    kind: 'accepted' as const,
+    prompt: 'Leave this group.',
+    transcriptText: 'Leave this group.',
+  }))
+  const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule()
+  mocks.executeCodexTurnWithRecovery.mockImplementationOnce(async (providerInput) => {
+    await providerInput.hostedToolContext?.groupTool?.request(
+      { action: 'leave_current' },
+      { deliveryContextOrdinal: 1 },
+    )
+    return {
+      kind: 'succeeded',
+      providerTurn: {
+        onboardingGuidanceInjected: true,
+        codexContinuation: {
+          kind: 'explicit-structured-history',
+        },
+        response: 'You have left the group.',
+        session: createAssistantSession(),
+      },
+    }
+  })
+
+  await sendAssistantMessageLocal({
+    activeTurnInput,
+    executionContext: {
+      hosted: {
+        groupTool: { request: groupRequest },
+        memberId: 'member-hosted',
+        userEnvKeys: [],
+      },
+    },
+    hostedDeliveryIdempotency: {
+      assistantTurnOrdinal: 'assistant-reply:1',
+      conversationId: 'conversation-group',
+      inboundMailboxItemIds: ['mailbox-alice'],
+      recipientKey: 'recipient-group',
+    },
+    prompt: 'Alice starts the turn.',
+    vault: '/vaults/test',
+  })
+
+  expect(groupRequest).toHaveBeenCalledWith(
+    { action: 'leave_current' },
+    { currentHostedMailboxItemIds: ['mailbox-bob'] },
+  )
+})
+
 // Hosted-runner turns always run queue-only (the outbox owns final-reply
 // delivery), including interactive auto-replies where a member is actively
 // waiting. Progress delivery stays wired there for explicit model progress and

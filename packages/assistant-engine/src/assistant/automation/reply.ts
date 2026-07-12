@@ -8,7 +8,10 @@ import type {
 import type { AssistantUserMessageContentPart } from '../content-types.js'
 import type { AssistantAcceptedTurnInputItemInput } from '../active-turn-input-journal.js'
 import { getAssistantChannelAdapter } from '../channel-adapters.js'
-import { conversationRefFromAssistantInputConversation } from '../conversation-ref.js'
+import {
+  conversationRefFromAssistantInputConversation,
+  isSameAssistantConversationRef,
+} from '../conversation-ref.js'
 import type { AssistantOperatorAuthority } from '../operator-authority.js'
 import type { AssistantExecutionContext } from '../execution-context.js'
 import { createHostedDeliveryId } from '../hosted-delivery-id.js'
@@ -1996,15 +1999,33 @@ async function listAutoReplyActiveTurnInputs(input: {
       }),
     )
 
-  return mergeAssistantInputCandidateBatches([
+  const eligible = mergeAssistantInputCandidateBatches([
     strict,
     {
       inputs: routeInputs,
-      nextCursor: routeInputs[0]
-        ? routeInputs[routeInputs.length - 1]!.event.cursor
-        : strict.nextCursor,
+      nextCursor: null,
     },
-  ])
+  ]).inputs
+  const firstConversation = eligible[0]?.event.conversation
+  if (!firstConversation) {
+    return strict
+  }
+
+  const inputs: AssistantInputCandidate[] = []
+  for (const candidate of eligible) {
+    if (!isSameAssistantConversationRef(
+      candidate.event.conversation,
+      firstConversation,
+    )) {
+      break
+    }
+    inputs.push(candidate)
+  }
+
+  return {
+    inputs,
+    nextCursor: inputs[inputs.length - 1]?.event.cursor ?? strict.nextCursor,
+  }
 }
 
 function mergeAssistantInputCandidateBatches(

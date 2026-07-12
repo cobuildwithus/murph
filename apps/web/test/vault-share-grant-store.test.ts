@@ -131,7 +131,7 @@ describe("revokeHostedVaultSharesTx", () => {
     expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
   });
 
-  it("canonicalizes a recoverable granted row before revocation cleanup", async () => {
+  it("uses the canonical scope key for revocation cleanup", async () => {
     const tx = buildTx();
     tx.hostedVaultShare.findMany.mockResolvedValue([{
       destinationMemberId: "member_referee",

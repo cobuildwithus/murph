@@ -7163,7 +7163,163 @@ describe('assistant auto-reply runtime', () => {
           linqMessageIds: ['real_msg_initial', 'real_msg_late'],
           outcome: 'result',
         }),
-      )
+    )
+  })
+
+  it('admits one contiguous sender cohort per active-turn delivery route batch', async () => {
+    const conversationWithActor = (
+      candidate: AssistantInputCandidate,
+      actorId: string,
+    ) => {
+      const conversation = candidate.event.conversation
+      if (!conversation) {
+        throw new Error('expected input conversation')
+      }
+      return { ...conversation, actorId }
+    }
+    const initialCapture = createCaptureSummary({
+      captureId: 'capture-sender-cohort-initial',
+      occurredAt: '2026-04-08T00:03:00.000Z',
+      receivedAt: '2026-04-08T00:03:01.000Z',
+      source: 'linq',
+      text: 'Alice starts the group turn',
+      threadId: 'real_thread_sender_cohort',
+    })
+    const projectedInitialCandidate = assistantInputCandidateFromInboxCapture(
+      initialCapture,
+    )
+    const initialInput: AssistantInputCandidate = {
+      ...projectedInitialCandidate,
+      event: {
+        ...projectedInitialCandidate.event,
+        conversation: conversationWithActor(
+          projectedInitialCandidate,
+          'actor-alice',
+        ),
+        replyTarget: {
+          channel: 'linq',
+          messageId: 'real_msg_alice',
+          threadId: 'real_thread_sender_cohort',
+        },
+      },
+    }
+    const bobInputBase = createCapturelessAssistantInputCandidate({
+      conversationThreadId: 'hid_thread_bob',
+      inputId: 'ain_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+      occurredAt: '2026-04-08T00:04:00.000Z',
+      receivedAt: '2026-04-08T00:04:01.000Z',
+      replyTarget: {
+        channel: 'linq',
+        messageId: 'real_msg_bob',
+        threadId: 'real_thread_sender_cohort',
+      },
+      source: 'linq',
+      text: 'Leave this group',
+    })
+    const bobInput: AssistantInputCandidate = {
+      ...bobInputBase,
+      event: {
+        ...bobInputBase.event,
+        conversation: conversationWithActor(bobInputBase, 'actor-bob'),
+      },
+    }
+    const carolInputBase = createCapturelessAssistantInputCandidate({
+      conversationThreadId: 'hid_thread_carol',
+      inputId: 'ain_cccccccccccccccccccccccccccccccc',
+      occurredAt: '2026-04-08T00:05:00.000Z',
+      receivedAt: '2026-04-08T00:05:01.000Z',
+      replyTarget: {
+        channel: 'linq',
+        messageId: 'real_msg_carol',
+        threadId: 'real_thread_sender_cohort',
+      },
+      source: 'linq',
+      text: 'What did I miss?',
+    })
+    const carolInput: AssistantInputCandidate = {
+      ...carolInputBase,
+      event: {
+        ...carolInputBase.event,
+        conversation: conversationWithActor(carolInputBase, 'actor-carol'),
+      },
+    }
+    const inputSource = {
+      async listInputCandidates() {
+        return {
+          inputs: [bobInput, carolInput],
+          nextCursor: carolInput.event.cursor,
+        }
+      },
+      async listNewConversationInputs(input: AssistantTurnConversationInputQuery) {
+        return {
+          inputs: [],
+          nextCursor: input.afterCursor ?? null,
+        }
+      },
+      async refresh() {
+        return {
+          progressed: true,
+          reason: 'ingested_input' as const,
+        }
+      },
+    }
+    replyMocks.sendAssistantMessage.mockImplementation(async (input: {
+      activeTurnInput?: (admission: {
+        sessionId: string
+        turnId: string
+        vault: string
+      }) => Promise<unknown>
+    }) => {
+      await expect(input.activeTurnInput?.({
+        sessionId: 'session-1',
+        turnId: 'turn-1',
+        vault: '/tmp/assistant-automation-vault',
+      })).resolves.toMatchObject({
+        acceptedInputs: [expect.objectContaining({ id: bobInput.event.inputId })],
+        kind: 'accepted',
+      })
+      await expect(input.activeTurnInput?.({
+        sessionId: 'session-1',
+        turnId: 'turn-1',
+        vault: '/tmp/assistant-automation-vault',
+      })).resolves.toMatchObject({
+        acceptedInputs: [expect.objectContaining({ id: carolInput.event.inputId })],
+        kind: 'accepted',
+      })
+      return {
+        delivery: {
+          channel: 'linq',
+          target: 'real_thread_sender_cohort',
+          sentAt: '2026-04-08T00:10:00.000Z',
+        },
+        deliveryDeferred: false,
+        deliveryError: null,
+        deliveryIntentId: 'intent-1',
+        response: 'response text',
+        session: { sessionId: 'session-1' },
+      }
+    })
+    const reply = await vi.importActual<typeof import('../src/assistant/automation/reply.ts')>(
+      '../src/assistant/automation/reply.ts',
+    )
+    const initialItem = createReplyGroupItem(initialCapture)
+    const context = reply.createAssistantAutoReplyGroupContext([
+      { ...initialItem, inputCandidate: initialInput },
+    ])
+    if (!context) {
+      throw new Error('expected reply context')
+    }
+
+    await reply.processAssistantAutoReplyGroup({
+      allowSelfAuthored: false,
+      context,
+      enabledChannels: ['linq'],
+      inboxServices: createInboxServices({ show: vi.fn() }),
+      inputSource,
+      requestId: null,
+      sessionMaxAgeMs: null,
+      vault: '/tmp/assistant-automation-vault',
+    })
   })
 
   it('ignores captureless assistant input reply targets from another channel', async () => {

@@ -563,7 +563,12 @@ export async function sendAssistantMessageLocal(
           session: currentSession,
           sharedPlan,
         })
-        const replyDeliveryContexts: AssistantReplyDeliveryContext[] = []
+        const replyDeliveryContexts: AssistantReplyDeliveryContext[] = [
+          pickAssistantReplyDeliveryContext(currentInput),
+        ]
+        const acceptedInputIdsByDeliveryContextOrdinal: string[][] = [
+          [...acceptedInputIdsForProviderRequest],
+        ]
         let admitLiveSteeredDeliveryContextThrough = async (
           _deliveryContextOrdinal: number,
         ): Promise<void> => undefined
@@ -800,17 +805,19 @@ export async function sendAssistantMessageLocal(
         const preProviderAdmissionCount =
           preProviderInput?.kind === 'accepted' ? 1 : 0
         if (preProviderInput?.kind === 'accepted') {
-          await acceptActiveTurnInput({
+          const accepted = await acceptActiveTurnInput({
             activeTurnInput: preProviderInput,
             providerRequestAcceptedInputIds: acceptedInputIdsForProviderRequest,
             providerRequestOrdinal,
             sessionId: currentSession.sessionId,
           })
+          replyDeliveryContexts.push(
+            pickAssistantReplyDeliveryContext(currentInput),
+          )
+          acceptedInputIdsByDeliveryContextOrdinal[
+            replyDeliveryContexts.length - 1
+          ] = [...accepted.acceptedInputJournal.inputIds]
         }
-        replyDeliveryContexts.push(pickAssistantReplyDeliveryContext(currentInput))
-        const acceptedInputIdsByDeliveryContextOrdinal: string[][] = [
-          [...acceptedInputIdsForProviderRequest],
-        ]
         const resolveAcceptedInputIdsForDeliveryContextOrdinal = (
           deliveryContextOrdinal: number,
         ): readonly string[] => [
