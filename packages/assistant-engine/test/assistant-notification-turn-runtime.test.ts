@@ -437,6 +437,76 @@ test('sendAssistantNotificationLocal aborts before outbound delivery when the pr
   expect(mocks.createAssistantRuntimeStateService).not.toHaveBeenCalled()
 })
 
+test('sendAssistantNotificationLocal skips exact text before delivery when the external audience is unverified', async () => {
+  const session = createAssistantSession({
+    binding: {
+      actorId: 'stored-direct-actor',
+      channel: 'telegram',
+      conversationKey: null,
+      delivery: {
+        kind: 'thread',
+        target: 'stored-direct-thread',
+      },
+      identityId: 'stored-direct-identity',
+      threadId: 'stored-direct-thread',
+      threadIsDirect: true,
+    },
+  })
+  const sharedPlan = createSharedPlan()
+  sharedPlan.conversationPolicy.audience = {
+    actorId: 'stored-direct-actor',
+    bindingDelivery: {
+      kind: 'thread',
+      target: 'stored-direct-thread',
+    },
+    channel: 'telegram',
+    deliveryPolicy: 'explicit-target-override',
+    effectiveThreadIsDirect: null,
+    explicitTarget: 'external-thread',
+    identityId: 'stored-direct-identity',
+    replyToMessageId: null,
+    threadId: 'external-thread',
+    threadIsDirect: null,
+  }
+  const providerResult = createProviderResult({ session })
+  const {
+    deliverMessage,
+    mocks,
+    sendAssistantNotificationLocal,
+  } = await loadNotificationTurnHarness({
+    providerResult,
+    sharedPlan,
+    turnId: 'turn-unverified-exact-text',
+  })
+
+  const result = await sendAssistantNotificationLocal({
+    channel: 'telegram',
+    deliveryTarget: 'external-thread',
+    instructions: 'Send the fixed notification.',
+    responsePolicy: {
+      kind: 'require_send_exact_text',
+      text: 'Fixed notification text',
+    },
+    threadId: 'external-thread',
+    threadIsDirect: null,
+    vault: '/vaults/unverified-exact-text',
+  })
+
+  expect(result).toEqual({
+    decision: {
+      kind: 'skip',
+      privateSummary:
+        'Notification skipped because the external audience could not be verified as direct or group.',
+    },
+    response: null,
+    session,
+  })
+  expect(mocks.executeCodexTurnWithRecovery).not.toHaveBeenCalled()
+  expect(mocks.resolveAssistantTurnRoute).not.toHaveBeenCalled()
+  expect(mocks.createAssistantRuntimeStateService).not.toHaveBeenCalled()
+  expect(deliverMessage).not.toHaveBeenCalled()
+})
+
 test('sendAssistantNotificationLocal sends required exact text without a provider turn', async () => {
   const order: string[] = []
   const initialSession = createAssistantSession({
@@ -3331,7 +3401,7 @@ function createSharedPlan(): AssistantTurnSharedPlan {
         bindingDelivery: null,
         channel: null,
         deliveryPolicy: 'not-requested',
-        effectiveThreadIsDirect: null,
+        effectiveThreadIsDirect: true,
         explicitTarget: null,
         identityId: null,
         replyToMessageId: null,
@@ -3354,6 +3424,7 @@ async function loadNotificationTurnHarness(input: {
   ) => Promise<AssistantCodexTurnRecoveryOutcome>
   providerOutcome?: AssistantCodexTurnRecoveryOutcome
   providerResult: ExecutedAssistantProviderTurnResult
+  sharedPlan?: AssistantTurnSharedPlan
   turnId: string
 }) {
   const deliverMessage = vi.fn(async (): Promise<NotificationTurnDeliverMessageResult> => ({
@@ -3364,7 +3435,7 @@ async function loadNotificationTurnHarness(input: {
     kind: 'sent' as const,
     session: null,
   }))
-  const sharedPlan = createSharedPlan()
+  const sharedPlan = input.sharedPlan ?? createSharedPlan()
   const mocks = {
     createAssistantRuntimeStateService: vi.fn(() => ({
       outbox: {

@@ -1733,6 +1733,27 @@ describe('assistant experiment onboarding guidance', () => {
 })
 
 describe('assistant notification decision guidance', () => {
+  it('renders only a fail-closed skip contract for an unverified external audience', () => {
+    const prompt = buildAssistantNotificationDecisionSystemPromptWithCacheMetadata(
+      createCommonNotificationPromptInput({
+        assistantContextSnapshotPrompt: 'PRIVATE_NOTIFICATION_CONTEXT',
+        assistantDynamicContextPrompts: ['PRIVATE_DYNAMIC_CONTEXT'],
+        conversationScope: 'unverified-external',
+        currentTimeZone: 'America/New_York',
+      }),
+    ).prompt
+
+    expect(prompt).toContain(
+      '{"kind":"skip","privateSummary":"audience directness is unverified"}',
+    )
+    expect(prompt).not.toContain('same full read and write tools')
+    expect(prompt).not.toContain('PRIVATE_NOTIFICATION_CONTEXT')
+    expect(prompt).not.toContain('PRIVATE_DYNAMIC_CONTEXT')
+    expect(prompt).not.toContain('America/New_York')
+    expect(prompt).not.toContain('canonical timezone for this vault')
+    expect(prompt).not.toContain('vault-cli automation')
+  })
+
   it('grants full read and write capability without the interactive chat logging-intent block', () => {
     const prompt = buildAssistantNotificationDecisionSystemPromptWithCacheMetadata(
       createCommonNotificationPromptInput(),
@@ -2001,6 +2022,8 @@ describe('assistant conversation scope', () => {
     expect(prompt).not.toContain('Computer-use tools:')
     expect(prompt).not.toContain('Phone calls:')
     expect(prompt).not.toContain('action="start_checkout"')
+    expect(prompt).not.toContain('GOOGLECALENDAR_CREATE_EVENT')
+    expect(prompt).not.toContain('OUTLOOK_CALENDAR_CREATE_EVENT')
 
     // This is a private, explicitly per-person enrollment reminder owned by
     // the group newsletter workflow, not a room-settings destination.
@@ -2020,6 +2043,37 @@ describe('assistant conversation scope', () => {
     expect(prompt).toContain('Computer-use tools:')
     expect(prompt).toContain('Phone calls:')
     expect(prompt).toContain('action="start_checkout"')
+    expect(prompt).toContain('GOOGLECALENDAR_CREATE_EVENT')
+    expect(prompt).toContain('OUTLOOK_CALENDAR_CREATE_EVENT')
+    expect(prompt).toContain('agentApproved: true')
+    expect(prompt).toContain('event_duration_minutes')
+    expect(prompt).toContain('do not retry the create call')
+  })
+
+  it('fails closed without claiming that an unknown external audience is private or a group', () => {
+    const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput({
+      assistantCliContract: 'PERSONAL_CLI_CONTRACT',
+      assistantContextSnapshotPrompt: 'PERSONAL_CONTEXT_SNAPSHOT',
+      conversationScope: 'unverified-external',
+    }))
+
+    expect(prompt).toContain('Conversation scope: unverified external audience.')
+    expect(prompt).toContain('do not describe this as a private conversation or a hosted group container')
+    expect(prompt).not.toContain('Conversation scope: private Murph conversation.')
+    expect(prompt).not.toContain('Conversation scope: hosted group chat.')
+    expect(prompt).not.toContain('PERSONAL_CLI_CONTRACT')
+    expect(prompt).not.toContain('PERSONAL_CONTEXT_SNAPSHOT')
+    expect(prompt).not.toContain('Assistant tone preference:')
+    expect(prompt).not.toContain('Murph onboarding:')
+    expect(prompt).not.toContain('/settings?voice=true')
+    expect(prompt).not.toContain('Murph Family:')
+    expect(prompt).not.toContain('Connected-app tools:')
+    expect(prompt).not.toContain('vault-cli habitat')
+    expect(prompt).not.toContain('keep their vault current')
+    expect(prompt).not.toContain('first read the minimum relevant conversation, vault')
+    expect(prompt).not.toContain('same full read and write tools')
+    expect(prompt).not.toContain('Asia/Kuala_Lumpur')
+    expect(prompt).not.toContain('canonical timezone for this vault')
   })
 })
 

@@ -84,6 +84,7 @@ import { normalizeNullableString } from '../shared.js'
 import {
   supportsAssistantCurrentAudienceMessageReaction,
 } from '../delivery-service.js'
+import { resolveAssistantConversationScope } from '../conversation-policy.js'
 import {
   resolveMurphDynamicTools,
   type MurphDynamicTool,
@@ -443,8 +444,21 @@ export async function resolveAssistantRouteTurnPlan(input: {
     }),
   )
   const routeFingerprint = readCodexThreadRouteFingerprint(input.route)
+  const resolvedChannel = input.input.channel ?? input.session.binding.channel
+  const audience = input.sharedPlan.conversationPolicy.audience
+  const conversationScope = resolveAssistantConversationScope(audience)
+  if (
+    conversationScope === 'unverified-external' &&
+    input.profile.promptProfile === 'notification-decision'
+  ) {
+    throw new Error(
+      'Cannot execute a notification decision for an unverified external audience.',
+    )
+  }
+  const privateInteractiveAudience = conversationScope === 'direct'
+  const verifiedInteractiveAudience = conversationScope !== 'unverified-external'
   const shouldUseCommittedTranscriptHistory =
-    input.profile.threadScope === 'session-thread'
+    verifiedInteractiveAudience && input.profile.threadScope === 'session-thread'
   const resolveCommittedTranscriptHistoryMessages = async () =>
     shouldUseCommittedTranscriptHistory
       ? await resolveAssistantCommittedTranscriptHistoryMessages({
@@ -453,18 +467,6 @@ export async function resolveAssistantRouteTurnPlan(input: {
           vault: input.input.vault,
         })
       : []
-  const resolvedChannel = input.input.channel ?? input.session.binding.channel
-  const audience = input.sharedPlan.conversationPolicy.audience
-  const privateInteractiveAudience =
-    audience.effectiveThreadIsDirect === true ||
-    (audience.effectiveThreadIsDirect === null &&
-      audience.bindingDelivery === null &&
-      audience.channel === null &&
-      audience.explicitTarget === null &&
-      audience.threadId === null)
-  const conversationScope = audience.effectiveThreadIsDirect === false
-    ? 'group'
-    : 'direct'
   const diagnosticsPolicy = resolveAssistantDiagnosticsPolicy({
     channel: resolvedChannel,
     executionContext: input.input.executionContext,
@@ -472,14 +474,14 @@ export async function resolveAssistantRouteTurnPlan(input: {
   const shouldInjectOnboardingGuidance =
     input.profile.promptProfile === 'conversation' &&
     input.sharedPlan.onboardingGuidanceOpen &&
-    input.sharedPlan.conversationPolicy.audience.effectiveThreadIsDirect !== false
+    privateInteractiveAudience
   const assistantToolNameAliases = null
   // Maintenance turns consume only the engine-supplied conversation evidence
   // plus canonical memory; the context snapshot (which carries health
   // domains) and hosted dynamic context prompts must not reach their system
   // prompt, or the prompt itself would hand the model forbidden sources.
   const maintenanceTurn = input.profile.toolProfile === 'maintenance-turn'
-  const hostedDynamicContextPrompts = maintenanceTurn
+  const hostedDynamicContextPrompts = maintenanceTurn || !verifiedInteractiveAudience
     ? []
     : input.executionContext?.hosted?.dynamicContextPrompts ?? []
   const promptCapabilityAvailability = resolveAssistantPromptCapabilityAvailability({
@@ -491,7 +493,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
     sharedPlan: input.sharedPlan,
   })
   const shouldPrepareConversationThreadInstructions =
-    input.profile.promptProfile === 'conversation'
+    input.profile.promptProfile === 'conversation' && privateInteractiveAudience
   let cliBootstrapElapsedMs: number | null = null
   const bootstrapAssistantCliContract = shouldPrepareConversationThreadInstructions
     ? await measureRoutePlanningAsync(
@@ -515,7 +517,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
         )
       : []
   let assistantContextSnapshotElapsedMs: number | null = null
-  const assistantContextSnapshotPrompt = maintenanceTurn
+  const assistantContextSnapshotPrompt = maintenanceTurn || !verifiedInteractiveAudience
     ? null
     : await measureRoutePlanningAsync(
         routePlanningSpans,
@@ -635,14 +637,21 @@ export async function resolveAssistantRouteTurnPlan(input: {
           privateInteractiveAudience &&
           input.hostedToolContext?.computerToolsAvailable === true,
         progressUpdatesAvailable: input.progressDelivery != null,
-        connectedAppsAvailable: input.hostedToolContext?.connectedApps != null,
+        connectedAppsAvailable:
+          verifiedInteractiveAudience &&
+          input.hostedToolContext?.connectedApps != null,
         connectedAppsManageAvailable: privateInteractiveAudience,
         familyPlanAvailable:
           privateInteractiveAudience &&
           input.hostedToolContext?.familyPlanTool != null,
-        groupAvailable: input.hostedToolContext?.groupTool != null,
-        newsletterAvailable: input.hostedToolContext?.newsletterTool != null,
+        groupAvailable:
+          verifiedInteractiveAudience &&
+          input.hostedToolContext?.groupTool != null,
+        newsletterAvailable:
+          verifiedInteractiveAudience &&
+          input.hostedToolContext?.newsletterTool != null,
         productFeedbackAvailable:
+          verifiedInteractiveAudience &&
           productFeedbackAcceptedInputIds.length > 0 &&
           typeof input.executionContext?.hosted?.productFeedbackRecorder?.recordProductFeedback === 'function',
         phoneCallsAvailable:
@@ -651,6 +660,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
           input.hostedToolContext?.phoneCalls != null,
         voiceMemoGenerationAvailable: voiceMemoDeliveryChannel !== null,
         vaultFileSendAvailable:
+          verifiedInteractiveAudience &&
           input.hostedToolContext?.vaultFileSendAvailable === true,
       })
   const reactionDynamicToolAvailable = dynamicTools.some(
@@ -662,7 +672,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
     routeFingerprint,
   })
   const nativeResumeEnabled =
-    input.profile.threadScope === 'session-thread'
+    verifiedInteractiveAudience && input.profile.threadScope === 'session-thread'
   const candidateResumeCodexThreadId =
     nativeResumeEnabled &&
     routeProviderCapabilities.supportsNativeResume &&
@@ -689,7 +699,9 @@ export async function resolveAssistantRouteTurnPlan(input: {
       normalizeNullableString(
         threadStartPromptResult.layers.dynamicTurnContextPrompt,
       ),
-      normalizeNullableString(input.input.turnContext),
+      verifiedInteractiveAudience
+        ? normalizeNullableString(input.input.turnContext)
+        : null,
     ].filter((section): section is string => section !== null).join('\n\n'),
   )
   const buildFreshThreadFallbackPlan = async () => {
@@ -705,7 +717,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
       // Maintenance turns must not receive binding context: the provider
       // prepends it to the prompt as identity/actor/thread/delivery lines,
       // which are forbidden source material for canonical memory writes.
-      sessionContext: maintenanceTurn
+      sessionContext: maintenanceTurn || !verifiedInteractiveAudience
         ? undefined
         : {
             binding: input.session.binding,
@@ -774,7 +786,10 @@ export async function resolveAssistantRouteTurnPlan(input: {
         routePlanningSpans.supportedExperimentProtocolsElapsedMs ?? null,
     },
     resume,
-    sessionContext: shouldPrepareBootstrapContext && !maintenanceTurn
+    sessionContext:
+      shouldPrepareBootstrapContext &&
+      !maintenanceTurn &&
+      verifiedInteractiveAudience
       ? {
           binding: input.session.binding,
         }

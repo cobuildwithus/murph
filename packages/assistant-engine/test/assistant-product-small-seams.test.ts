@@ -13,6 +13,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import {
   resolveAssistantConversationPolicy,
+  resolveAssistantConversationScope,
 } from '../src/assistant/conversation-policy.ts'
 import {
   flushPendingAssistantRuntimeIssueWrites,
@@ -142,6 +143,7 @@ describe('assistant product small seams', () => {
       threadIsDirect: true,
     })
     expect(explicitOverride.operatorAuthority).toBe('direct-operator')
+    expect(resolveAssistantConversationScope(explicitOverride.audience)).toBe('direct')
 
     const publicAudience = resolveAssistantConversationPolicy({
       message: {
@@ -171,6 +173,7 @@ describe('assistant product small seams', () => {
       threadId: 'group-thread',
       threadIsDirect: false,
     })
+    expect(resolveAssistantConversationScope(publicAudience.audience)).toBe('group')
 
     const messageChannelFallback = resolveAssistantConversationPolicy({
       message: {
@@ -206,6 +209,95 @@ describe('assistant product small seams', () => {
       threadId: 'telegram-thread',
       threadIsDirect: true,
     })
+    expect(resolveAssistantConversationScope(messageChannelFallback.audience)).toBe(
+      'direct',
+    )
+
+    const unverifiedExternalAudience = resolveAssistantConversationPolicy({
+      message: {
+        channel: 'telegram',
+        deliverResponse: true,
+        deliveryReplyToMessageId: null,
+        deliveryTarget: 'external-thread',
+        operatorAuthority: 'direct-operator',
+        threadId: 'external-thread',
+        threadIsDirect: null,
+      },
+      session: {
+        binding: {
+          actorId: null,
+          channel: 'telegram',
+          conversationKey: null,
+          delivery: null,
+          identityId: null,
+          threadId: 'external-thread',
+          threadIsDirect: null,
+        },
+      },
+    })
+    expect(
+      resolveAssistantConversationScope(unverifiedExternalAudience.audience),
+    ).toBe('unverified-external')
+
+    const mismatchedDirectTarget = resolveAssistantConversationPolicy({
+      message: {
+        channel: 'telegram',
+        deliverResponse: true,
+        deliveryReplyToMessageId: null,
+        deliveryTarget: 'different-thread',
+        operatorAuthority: 'direct-operator',
+        threadId: 'different-thread',
+        threadIsDirect: null,
+      },
+      session: {
+        binding: {
+          actorId: 'direct-actor',
+          channel: 'telegram',
+          conversationKey: null,
+          delivery: {
+            kind: 'thread',
+            target: 'stored-direct-thread',
+          },
+          identityId: 'direct-identity',
+          threadId: 'stored-direct-thread',
+          threadIsDirect: true,
+        },
+      },
+    })
+    expect(mismatchedDirectTarget.audience.effectiveThreadIsDirect).toBeNull()
+    expect(resolveAssistantConversationScope(mismatchedDirectTarget.audience)).toBe(
+      'unverified-external',
+    )
+
+    const mismatchedExplicitDirectTarget = resolveAssistantConversationPolicy({
+      message: {
+        channel: 'telegram',
+        deliverResponse: true,
+        deliveryReplyToMessageId: null,
+        deliveryTarget: 'different-target',
+        operatorAuthority: 'direct-operator',
+        threadId: 'current-direct-thread',
+        threadIsDirect: true,
+      },
+      session: {
+        binding: {
+          actorId: 'direct-actor',
+          channel: 'telegram',
+          conversationKey: null,
+          delivery: {
+            kind: 'thread',
+            target: 'current-direct-thread',
+          },
+          identityId: 'direct-identity',
+          threadId: 'current-direct-thread',
+          threadIsDirect: true,
+        },
+      },
+    })
+    expect(mismatchedExplicitDirectTarget.audience.effectiveThreadIsDirect).toBeNull()
+    expect(
+      resolveAssistantConversationScope(mismatchedExplicitDirectTarget.audience),
+    ).toBe('unverified-external')
 
     const bindingTargetOnly = resolveAssistantConversationPolicy({
       message: {

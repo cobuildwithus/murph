@@ -16,7 +16,7 @@ receives an individual Pulse-equivalent monthly usage cap.
 ## Product Contract
 
 - One owner pays for the hosted Family plan.
-- A Family owner is a real hosted member. A synthetic group-chat thread container cannot own a Family plan, inspect Family account state, begin checkout, or issue invites; those operations belong in a participant's private Murph conversation.
+- A Family owner is a real hosted member. A synthetic group-chat thread container cannot own a Family plan, inspect Family account state, begin checkout, or issue invites; those operations belong in a participant's private Murph conversation. This invariant is enforced at canonical group creation and billing authorization and is rechecked before checkout redirects or Stripe reconciliation can bind or activate Family billing state; assistant-tool guards are only an earlier user-facing rejection.
 - The owner buys 2-6 reserved sponsored seats. Active members and pending
   invites consume those seats.
 - Family members receive sponsored hosted access while the plan and their

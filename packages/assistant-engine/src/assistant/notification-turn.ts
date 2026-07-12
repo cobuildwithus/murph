@@ -19,6 +19,7 @@ import { resolveAssistantExecutionOperatorDefaults } from './execution-context.j
 import { resolveAssistantSessionForMessage } from './session-resolution.js'
 import { resolveAssistantSessionTarget } from './session-resolution.js'
 import { resolveAssistantTurnSharedPlan } from './turn-plan.js'
+import { resolveAssistantConversationScope } from './conversation-policy.js'
 import {
   executeCodexTurnWithRecovery,
   type AssistantCodexTurnThreadScopeProfile,
@@ -288,6 +289,21 @@ export async function sendAssistantNotificationLocal(
             }
           : result
       const sharedPlan = await resolveAssistantTurnSharedPlan(messageInput, resolved)
+      if (
+        resolveAssistantConversationScope(
+          sharedPlan.conversationPolicy.audience,
+        ) === 'unverified-external'
+      ) {
+        return {
+          decision: {
+            kind: 'skip',
+            privateSummary:
+              'Notification skipped because the external audience could not be verified as direct or group.',
+          },
+          response: null,
+          session: resolved.session,
+        }
+      }
       const firstContactDocIds = resolveAssistantNotificationFirstContactDocIds({
         input: messageInput,
         session: resolved.session,
