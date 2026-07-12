@@ -41,7 +41,7 @@ If an eye clinician is unreachable and symptoms are worsening or vision-threaten
 
 ### Arrange a prompt eye exam
 
-Arrange the next available eye exam or medical eye visit when symptoms are persistent, recurring, worsening, one-sided, function-limiting, present away from near work, or not improving after lens removal and basic work changes; when double vision or frequent blur is present; or when a headache is persistent, recurring, worsening, function-limiting, or present away from near work. Add a contact-lens-fit review only when the user currently wears contacts and fit review is relevant.
+Arrange the next available eye-care visit when symptoms are persistent, recurring, worsening, one-sided, function-limiting, present away from near work, or not improving after lens removal and basic work changes; when double vision or frequent blur is present; or when a headache is persistent, recurring, worsening, function-limiting, or present away from near work.
 
 Use a lower threshold for prompt clinician input when the user has diabetes, immune suppression, inflammatory disease, recent eye surgery or injection, or prescription eye medicines, without inventing a diagnosis.
 
@@ -55,15 +55,22 @@ When no earlier outcome matches and there is no active eye symptom or warning fe
 
 ### Arrange a routine eye exam
 
-When no earlier outcome matches and there is no active eye symptom or warning feature, choose this outcome for an asymptomatic screening or routine-care question, or when known age, eye or medical risk, last-exam timing, or an established clinician schedule makes routine review relevant. Use those known inputs to state the timing and exam type, and use the evidence register only as evidence for this outcome. Do not ask another question when the known inputs already determine the routine guidance. If one missing input would change the timing or type, use `Ask one decision-changing question` instead. When elevated risk makes the interval individualized and no schedule is known, recommend the next available routine eye exam to establish one rather than inventing an interval.
-
-Resolve the type before handing off to computer-use: use a medical eye visit for known eye or medical risk that requires risk-based screening or clinician-directed follow-up; otherwise use a routine comprehensive eye or vision exam for asymptomatic general vision or prevention. Follow a known clinician-specified type. Do not select dilation or another procedure unless it is already directed. If the known facts do not establish routine versus medical, use `Ask one decision-changing question`.
-
-Add a contact-lens-fit review only when the user currently wears contacts and the fit or prescription is due for review. A past contact prescription by itself does not justify a contact-lens fitting for someone who no longer wears contacts.
+When no earlier outcome matches and there is no active eye symptom or warning feature, choose this outcome for an asymptomatic screening or routine-care question, or when known age, eye or medical risk, last-exam timing, or an established clinician schedule makes routine review relevant. Use those known inputs to state the timing, and use the evidence register only as evidence for this outcome. Do not ask another question when the known inputs already determine the routine guidance. If one missing input would change the timing, use `Ask one decision-changing question` instead. When elevated risk makes the interval individualized and no schedule is known, recommend the next available visit of the resolved type to establish one rather than inventing an interval.
 
 ### Ask one decision-changing question
 
 When the available facts do not support any earlier outcome, ask at most one question whose answer would change the immediate action or care level. Give any time-sensitive Prerequisite First Aid before asking, and do not default to self-care.
+
+## Exam Type Resolver
+
+As part of selecting `Arrange a prompt eye exam` or `Arrange a routine eye exam`, resolve one booking type before handing off to computer-use. Use this order and stop at the first match:
+
+1. Follow a known clinician-specified exam or visit type.
+2. For active symptom evaluation or known eye or medical risk that requires risk-based screening or clinician-directed follow-up, use a medical eye visit.
+3. For asymptomatic general vision or prevention without that risk or direction, use a routine comprehensive eye or vision exam.
+4. If the known facts do not establish one type, do not select an exam outcome yet; use `Ask one decision-changing question`.
+
+Add a contact-lens-fit review only when the user currently wears contacts and the fit or prescription is due for review. A past contact prescription by itself does not justify a contact-lens fitting for someone who no longer wears contacts. Do not select dilation or another procedure unless it is already directed.
 
 ## Contact-Lens Action Rules
 

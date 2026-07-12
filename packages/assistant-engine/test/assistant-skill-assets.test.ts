@@ -391,18 +391,11 @@ describe('assistant skill assets', () => {
       triageText.indexOf('### Arrange a prompt eye exam'),
       triageText.indexOf('### Brief self-care trial is reasonable'),
     )
-    expect(promptExamRule).toContain(
-      'Arrange the next available eye exam or medical eye visit',
-    )
+    expect(promptExamRule).toContain('Arrange the next available eye-care visit')
     expect(promptExamRule).toContain(
       'when a headache is persistent, recurring, worsening, function-limiting, or present away from near work',
     )
-    expect(promptExamRule).toContain(
-      'Add a contact-lens-fit review only when the user currently wears contacts and fit review is relevant.',
-    )
-    expect(promptExamRule).not.toContain(
-      'Arrange the next available eye and contact-lens-fit exam',
-    )
+    expect(promptExamRule).not.toContain(' or medical eye visit')
     expect(triageText).toContain(
       'This may include a mild headache confined to near work that improves with rest.',
     )
@@ -424,22 +417,36 @@ describe('assistant skill assets', () => {
       'Do not ask another question when the known inputs already determine the routine guidance.',
     )
     expect(routineExamRule).toContain(
-      'If one missing input would change the timing or type, use `Ask one decision-changing question` instead.',
+      'If one missing input would change the timing, use `Ask one decision-changing question` instead.',
     )
     expect(routineExamRule).toContain(
-      'use a medical eye visit for known eye or medical risk that requires risk-based screening or clinician-directed follow-up',
+      'recommend the next available visit of the resolved type',
     )
-    expect(routineExamRule).toContain(
-      'otherwise use a routine comprehensive eye or vision exam for asymptomatic general vision or prevention',
+    expect(routineExamRule).not.toContain('next available routine eye exam')
+    const examTypeResolver = triageText.slice(
+      triageText.indexOf('## Exam Type Resolver'),
+      triageText.indexOf('## Contact-Lens Action Rules'),
     )
-    expect(routineExamRule).toContain(
-      'Do not select dilation or another procedure unless it is already directed.',
+    expect(examTypeResolver).toContain(
+      'resolve one booking type before handing off to computer-use',
     )
-    expect(routineExamRule).toContain(
+    expect(examTypeResolver).toContain(
+      'Follow a known clinician-specified exam or visit type.',
+    )
+    expect(examTypeResolver).toContain(
+      'For active symptom evaluation or known eye or medical risk that requires risk-based screening or clinician-directed follow-up, use a medical eye visit.',
+    )
+    expect(examTypeResolver).toContain(
+      'For asymptomatic general vision or prevention without that risk or direction, use a routine comprehensive eye or vision exam.',
+    )
+    expect(examTypeResolver).toContain(
       'Add a contact-lens-fit review only when the user currently wears contacts',
     )
-    expect(routineExamRule).toContain(
+    expect(examTypeResolver).toContain(
       'A past contact prescription by itself does not justify a contact-lens fitting for someone who no longer wears contacts.',
+    )
+    expect(examTypeResolver).toContain(
+      'Do not select dilation or another procedure unless it is already directed.',
     )
     expect(triageText).toContain('new flashes of light')
     expect(triageText).toContain('a sudden increase in or many new floaters')
