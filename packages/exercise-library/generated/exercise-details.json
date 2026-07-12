@@ -1,5 +1,5 @@
 {
-  "catalogHash": "sha256:3a7c1eb8ff840ba8a066756f368138e234e262e078bf260ed7c0333e09357c47",
+  "catalogHash": "sha256:be9367dfaa694df48c60604aa18fc1eb5afcfb7aaa08b6fa11b8ffe98a6b4941",
   "generatedAt": null,
   "items": [
     {
@@ -9556,7 +9556,18 @@
         "Agility ladder or tape lines"
       ],
       "id": "EX968",
-      "images": [],
+      "images": [
+        {
+          "alt": "Agility Ladder Lateral In-Out setup with both feet together outside the first square and the body facing sideways.",
+          "step": "Sideways setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/1adb12a8-7a45-4e4f-1629-48f0ebd22a00/public"
+        },
+        {
+          "alt": "Agility Ladder Lateral In-Out with both shoes inside one square and arrows directing the next step out and down the ladder.",
+          "step": "Both feet in, then out",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/d140d296-ce75-4abb-daf5-a90c69589400/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Conditioning",
@@ -9632,7 +9643,23 @@
         "Low step"
       ],
       "id": "EX970",
-      "images": [],
+      "images": [
+        {
+          "alt": "Step-Up Burpee transition with both hands planted on a low platform and both feet grounded in a compact crouch.",
+          "step": "Hands on the step",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/5bcd08ef-e5f4-4411-2408-fa4ca68bff00/public"
+        },
+        {
+          "alt": "Step-Up Burpee elevated plank with both palms on the platform and a straight shoulder-to-heel line.",
+          "step": "Elevated plank",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/486df33b-791c-44e5-b7b9-b42eca3ec000/public"
+        },
+        {
+          "alt": "Step-Up Burpee finish standing tall on the platform with both feet planted and both arms overhead.",
+          "step": "Step up and stand tall",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/6fdcb765-baaa-4cb0-23a5-d6c6a7f95400/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Conditioning",
@@ -9704,7 +9731,18 @@
       ],
       "equipment": [],
       "id": "EX972",
-      "images": [],
+      "images": [
+        {
+          "alt": "Invisible Rope Double-Under Hop setup standing tall with feet together and elbows held close to the sides.",
+          "step": "Ready stance",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/48c09b75-b9e8-420a-7e0a-fd59717c0d00/public"
+        },
+        {
+          "alt": "Invisible Rope Double-Under Hop airborne with both feet together and two wrist-turn cues shown without a rope.",
+          "step": "Higher hop, double wrist turn",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/e91b3438-40d4-4420-2793-f4cf118f8b00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "advanced",
       "modality": "Conditioning",
@@ -9740,7 +9778,18 @@
       ],
       "equipment": [],
       "id": "EX973",
-      "images": [],
+      "images": [
+        {
+          "alt": "Shadow Boxing Sprawl boxing phase with a straight lead jab and the opposite hand held at the cheek in guard.",
+          "step": "Quick punch combo",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/79ec7fe3-deb2-4d70-f666-c1ae76e51900/public"
+        },
+        {
+          "alt": "Shadow Boxing Sprawl endpoint with both hands on the floor and both legs extended back in a controlled plank.",
+          "step": "Hands down, feet back",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/80470cd1-0cd6-4324-ff73-4d0f4019b000/public"
+        }
+      ],
       "kind": "exercise",
       "level": "advanced",
       "modality": "Conditioning",
@@ -9778,7 +9827,28 @@
         "Light dumbbells"
       ],
       "id": "EX974",
-      "images": [],
+      "images": [
+        {
+          "alt": "Low-Impact Dumbbell Step Jack start with feet together and one very light dumbbell held at each side.",
+          "step": "Neutral start",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/688e7541-240d-42a8-30d0-8c8a2ca1f300/public"
+        },
+        {
+          "alt": "Low-Impact Dumbbell Step Jack with the right foot stepped out and two light dumbbells raised above shoulder height.",
+          "step": "Step right and raise",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/51105c1a-c287-43a5-ddb3-0398d13d7200/public"
+        },
+        {
+          "alt": "Low-Impact Dumbbell Step Jack reset with feet together and two light dumbbells lowered under control to the shoulders.",
+          "step": "Return to center",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/60c6c338-70bc-457f-4f55-a576af1f5700/public"
+        },
+        {
+          "alt": "Low-Impact Dumbbell Step Jack with the left foot stepped out and two light dumbbells raised above shoulder height.",
+          "step": "Step left and raise",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/e89bef36-1958-4591-6961-65bad491b000/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Conditioning",
@@ -9816,7 +9886,23 @@
         "Kettlebell"
       ],
       "id": "EX975",
-      "images": [],
+      "images": [
+        {
+          "alt": "Kettlebell Deadlift High Pull setup with one bell on the floor, both hands on the handle, and a neutral hip hinge.",
+          "step": "Floor hinge",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/e38a57f4-6f1d-4612-30bd-d92819c96a00/public"
+        },
+        {
+          "alt": "Kettlebell Deadlift High Pull standing phase with one bell held in long arms in front of the thighs.",
+          "step": "Stand tall",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/924f22ab-e653-46cb-3c70-ef43f1888e00/public"
+        },
+        {
+          "alt": "Kettlebell Deadlift High Pull endpoint with one bell close at chest height and both elbows leading above the hands.",
+          "step": "High pull",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/f7706d4b-f875-43fd-c18b-65f35be4ba00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Power conditioning",
@@ -9892,7 +9978,28 @@
         "Dumbbell or bottle"
       ],
       "id": "EX977",
-      "images": [],
+      "images": [
+        {
+          "alt": "Single-Leg Balance with Overhead Press ready position balancing on one leg with one dumbbell at the shoulder.",
+          "step": "Shoulder-ready balance",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/f6b72465-95ab-42a2-c7b7-4a8ddd56e800/public"
+        },
+        {
+          "alt": "Single-Leg Balance with Overhead Press with one dumbbell stacked overhead while the opposite knee stays lifted.",
+          "step": "Overhead press",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/8cc1698b-bb52-42af-10ef-9db83271c900/public"
+        },
+        {
+          "alt": "Single-Leg Balance with Overhead Press lowering one dumbbell to the shoulder while maintaining the lifted-knee balance.",
+          "step": "Controlled lower",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/d7a7f6c9-0e32-4c86-a7fc-a3696386ad00/public"
+        },
+        {
+          "alt": "Single-Leg Balance with Overhead Press reset on the opposite support leg with the dumbbell at the opposite shoulder.",
+          "step": "Switch sides",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/19e5ffac-cd75-4f49-2d03-07e3cc6a0500/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Balance strength",
@@ -9931,7 +10038,18 @@
         "Kettlebell or dumbbell"
       ],
       "id": "EX978",
-      "images": [],
+      "images": [
+        {
+          "alt": "Single-Leg Halo setup balancing on one leg with one kettlebell held in both hands at the chest.",
+          "step": "Chest-hold balance",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/ee60698e-b6e1-4b99-5aad-c65f6063e000/public"
+        },
+        {
+          "alt": "Single-Leg Halo with one kettlebell guided beside the head in both hands and arrows showing the circular path and reversal.",
+          "step": "Halo around the head",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/9c62334f-e6cb-42e2-b59f-cb3256b73300/public"
+        }
+      ],
       "kind": "exercise",
       "level": "advanced",
       "modality": "Balance strength",
@@ -9970,7 +10088,18 @@
         "Resistance band and anchor"
       ],
       "id": "EX979",
-      "images": [],
+      "images": [
+        {
+          "alt": "Single-Leg Pallof Press setup sideways to the anchor, balancing on the farther leg with the taut band at the chest.",
+          "step": "Band-at-chest balance",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/3925d8c6-faff-4c93-8eca-33e063478500/public"
+        },
+        {
+          "alt": "Single-Leg Pallof Press facing forward with both hands pressed toward the viewer while resisting the band's side pull.",
+          "step": "Forward anti-rotation press",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/cfc454e8-d223-4989-37ca-f82b78641e00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "advanced",
       "modality": "Balance strength",
@@ -10008,7 +10137,18 @@
         "Resistance band and anchor"
       ],
       "id": "EX980",
-      "images": [],
+      "images": [
+        {
+          "alt": "Tandem Pallof Press setup in a heel-to-toe stance with one side-anchored band held at the chest.",
+          "step": "Heel-to-toe setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/ddfc826a-01e2-43ca-99a2-21e566715600/public"
+        },
+        {
+          "alt": "Tandem Pallof Press with the lead foot switched and both hands pressed forward against the band's side pull.",
+          "step": "Switched-stance forward press",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/fc697303-1c0f-47c0-82b6-197a05630e00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Balance strength",
@@ -10046,7 +10186,18 @@
         "Low step"
       ],
       "id": "EX981",
-      "images": [],
+      "images": [
+        {
+          "alt": "Lateral Step-Down with Forward Reach setup with one foot planted on the step and the free heel hovering beside the edge.",
+          "step": "Edge setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/fbb44007-635f-4e87-06d0-bb72573f6b00/public"
+        },
+        {
+          "alt": "Lateral Step-Down with Forward Reach with the support knee bent and the free heel tapping softly while the forefoot stays lifted.",
+          "step": "Controlled heel tap",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/1fd82893-b35a-4d2c-765d-ad85d3eb2500/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Balance strength",
@@ -10082,7 +10233,18 @@
       ],
       "equipment": [],
       "id": "EX982",
-      "images": [],
+      "images": [
+        {
+          "alt": "Single-Leg Squat to Lateral Reach ready position balancing on one foot with both arms reaching forward.",
+          "step": "One-leg ready balance",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/aa379cfc-9529-457b-1817-f996083b2a00/public"
+        },
+        {
+          "alt": "Single-Leg Squat to Lateral Reach with the support leg in a small squat and the free leg extended sideways above the floor.",
+          "step": "Small squat with lateral reach",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/ce5fdec1-8168-451f-46d0-34ce6434e500/public"
+        }
+      ],
       "kind": "exercise",
       "level": "advanced",
       "modality": "Balance strength",
@@ -10120,7 +10282,18 @@
         "Mini band"
       ],
       "id": "EX983",
-      "images": [],
+      "images": [
+        {
+          "alt": "Banded Star Balance centered on one foot with one loop band held taut above the ankles and the free foot hovering.",
+          "step": "Center balance",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/d214cc47-ba1a-467b-16e5-7acb6f542600/public"
+        },
+        {
+          "alt": "Banded Star Balance with the free leg reaching sideways against one loop and arrows showing forward, side, and back directions.",
+          "step": "Star-direction reach",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/0d42e85a-5034-4418-1752-c190da69f000/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Balance strength",
@@ -10256,7 +10429,18 @@
         "Wall support optional"
       ],
       "id": "EX986",
-      "images": [],
+      "images": [
+        {
+          "alt": "Single-Leg Calf Raise Eyes Closed setup on one flat foot with eyes open and light fingertip support at the wall.",
+          "step": "Eyes-open safety setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/b870f010-81a8-47d0-7661-e0b87930ee00/public"
+        },
+        {
+          "alt": "Single-Leg Calf Raise Eyes Closed with the support heel raised, eyes closed, and fingertips lightly touching the wall.",
+          "step": "Eyes-closed calf raise",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/0a206003-cf21-4bce-f3d2-06a790d5db00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "advanced",
       "modality": "Balance strength",
