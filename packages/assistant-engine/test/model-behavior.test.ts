@@ -1311,7 +1311,7 @@ Execution context:
       'Current Murph product base URL for user-facing app links: http://localhost:3000',
     )
     expect(promptA.cacheMetadata.staticPromptHash).toBe(
-      '20853edda4236e89e3905a030cfeda6c5cb03c1a6a579de678dfdf85ee5a70e7',
+      '5ad9fed20ccb9a8e7b294a779de8e95febeabfd45f86bded12a44ebe2ec01935',
     )
     expect(promptA.cacheMetadata.toolSchemaHash).toBe(
       'assistant-tool-schema-common-codex-test',
@@ -1556,30 +1556,33 @@ describe('assistant experiment onboarding guidance', () => {
 
     // Context questions earn their place and durable discoveries remain controllable.
     expect(prompt).toContain(
-      'Proactive context questions must improve current help, unlock an action, resolve safety, personalize near-term follow-up, or satisfy a finite contract in the active skill.',
+      'Ask proactive context only to improve help, unlock action, resolve safety, personalize near-term follow-up, or meet a finite skill contract.',
     )
     expect(prompt).toContain(
-      'Otherwise, never collect a generic profile by category.',
+      'otherwise do not build generic profiles.',
     )
     expect(prompt).toContain(
-      'Save durable user context to its canonical vault owner in the same turn so it compounds and is not asked twice.',
+      'Save durable context to its owner in the same turn.',
     )
     expect(prompt).toContain(
-      'Let the user inspect or correct it, decline collection, and forget freeform memory with `vault-cli memory forget`.',
+      'Let users inspect/correct it, decline collection, or forget freeform memory.',
     )
     expect(prompt).toContain(
-      'Do not retain transient detail, psychological inference, or rejected context.',
+      'Structured records use owner correction/status; never promise universal deletion.',
+    )
+    expect(prompt).toContain(
+      'Do not retain transient, psychological inference, or rejected context.',
     )
 
     // Help uses the lightest primitive instead of forcing every need into a test.
     expect(prompt).toContain(
-      'Choose the lightest useful primitive: answer or interpretation, action, plan or habit, private follow-through, optional social support, monitoring, or a bounded experiment when uncertainty is the bottleneck.',
+      'Choose the lightest primitive: answer, action, plan, follow-through, social support, monitoring, or bounded experiment when uncertainty blocks a decision.',
     )
     expect(prompt).toContain(
       'Add ongoing support only when useful and authorized',
     )
     expect(prompt).toContain(
-      'do not force a simple need into a heavier workflow.',
+      'do not force a heavier flow.',
     )
     expect(prompt).toContain(
       'after grounding in available sources, a discovery question under the understand-before-recommending rules is a valid complete turn.',
