@@ -164,6 +164,12 @@ pre-consented; send them on schedule with confidence. Etiquette:
 
 ## Group health newsletter
 
+Read and follow
+`$MURPH_ASSISTANT_SKILLS_ROOT/group-newsletter/SKILL.md` whenever setting up,
+editing, or composing the email newsletter. That skill owns the editorial
+story, human-readable units, comparisons, tone, subject, and final email. This
+section owns the group-room setup, consent, notice, and opt-out behavior.
+
 The group health newsletter is a single cron automation in the group runtime's
 vault, not a new scheduler or private data store. Any member can set it up,
 edit it, or stop it. One automation per group wins, and the latest request
@@ -177,8 +183,9 @@ and any tone preference if they care. For an email health newsletter, also
 propose the default reaction-share scope: name, email, sleep timing, activity
 minutes, workout summaries, resting heart rate, and HRV. Let the group widen
 or narrow that set. If they already gave some of that, or say "just set it up,"
-do not re-interrogate them. Use the sensible defaults and confirm the
-essentials in one line.
+do not re-interrogate them. Use the current group's non-blank `displayName` from
+`murph.group action="read_current"` as the newsletter name before inventing a
+generic default, and confirm the essentials in one line.
 
 Apply the answers directly. The chosen name is the automation title, the name
 used in the setup notice, and the group display name for the join surface. For
@@ -204,7 +211,12 @@ Set up or edit it with `vault-cli automation save` using:
 - `--continuity-policy fresh`
 - the current group channel
 - instructions that say this is the group health newsletter, include the
-  chosen tone, and include any optional custom note
+  exact chosen name, chosen tone, and any optional custom note, and explicitly
+  require the scheduled run to read and follow
+  `$MURPH_ASSISTANT_SKILLS_ROOT/group-newsletter/SKILL.md` before composing, and
+  require every email subject to start with that exact name instead of a generic
+  newsletter label. Future notification turns may not read this skill, so keep
+  that complete naming rule in the saved instructions.
 
 Stop it with `vault-cli automation set-status group-health-newsletter --status archived`.
 
@@ -216,23 +228,9 @@ edition must wait for the next natural cron occurrence. Never create an
 immediate `at` automation and never call `murph.newsletter` `send` right after
 setup.
 
-On each scheduled run:
-
-1. Call `murph.newsletter` with `action="read_stats"` for the group.
-   If it returns zero participants because nobody has enabled email sharing,
-   do not send an empty newsletter; tell the group that nobody has enabled
-   email sharing, point them to `/settings?addEmail=true`, then stop for that
-   run.
-2. Compose one shared digest from the returned participants, weekly stats, and
-   superlatives. Stay silent in the group about participants who are missing a
-   verified email.
-3. Use supportive tone by default. Never shame, moralize, or use purity
-   language. Coach-style roast is allowed only when the group explicitly asked
-   for it, such as "be hard on us like a coach." Even then roast upward at the
-   organizer, loudest, or most confident person, and roast the effort or
-   challenge, never bodies, weight, diagnoses, or whoever is struggling.
-4. Call `murph.newsletter` with `action="send"` only after composing the final
-   subject, HTML, and optional text body.
+On each scheduled run, follow the complete read-compose-send and notification
+decision sequence in the `group-newsletter` skill. Do not duplicate or
+improvise a second run sequence from this setup section.
 
 If a member never granted email sharing and expresses interest, or the group
 asks how someone can join the newsletter, post a join offer scoped to

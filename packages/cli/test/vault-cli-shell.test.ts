@@ -32,3 +32,18 @@ test('createVaultCliShell forwards the selected command name to incur', () => {
     }),
   )
 })
+
+test('createVaultCliShell forwards an optional canonical skill hash to incur', () => {
+  createVaultCliShell('murph', {
+    expectedSkillHash: 'canonical-full-tree-hash',
+  })
+
+  expect(createMock).toHaveBeenCalledWith(
+    'murph',
+    expect.objectContaining({
+      sync: expect.objectContaining({
+        expectedHash: 'canonical-full-tree-hash',
+      }),
+    }),
+  )
+})
