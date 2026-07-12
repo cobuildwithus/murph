@@ -74,14 +74,15 @@ Updated: 2026-07-12
 - Consumed the controller-ready handoff batch for sequences 100–102, 150–155, 175–177, and 200: revalidated 38 hosted or local originals at full resolution, reused 11 exact public mappings, uploaded 27 pending originals with metadata identity preflight, verified hosted original bytes and public variants, and changed only the 13 owning seed `Images` fields. The rebuilt catalog now has 1,353 imaged movements and 4,102 unique images.
 - Rejected handoff sequence 156 (`EX965`, Mini-Band Fast Feet) without uploading it because slide 3 changes the subject and entire outfit from slides 1–2; the exact blocker is persisted in the ignored recovery state and the canonical manifest item remains pending.
 - Completed manifest sequence 6 (`EX654`, Side Plank Star Prep): generated and inspected a three-frame setup, transition, and star endpoint with fixed subject/camera/support continuity; uploaded three images through metadata identity preflight; verified hosted bytes and public variants; and updated only the owning seed `Images` field.
+- Completed manifest sequence 7 (`EX655`, Copenhagen Plank Adduction Squeeze): rejected two invalid transition renders before accepting a three-frame knee-supported setup, lifted plank, and bottom-leg adduction squeeze; uploaded the three accepted images with hosted-byte and public-variant proof; and updated only the owning seed `Images` field.
 
 ## Now
 
-- The ready handoff batch is consumed except for rejected sequence 156, and direct sequence 6 is cataloged; 394 image-less movements remain.
+- The ready handoff batch is consumed except for rejected sequence 156, and direct sequences 6–7 are cataloged; 393 image-less movements remain.
 
 ## Next
 
-- Resume direct generation at manifest sequence 7, preserving all reserved ranges and consuming later corrected or completed handoffs only at safe boundaries.
+- Resume direct generation at manifest sequence 8, preserving all reserved ranges and consuming later corrected or completed handoffs only at safe boundaries.
 - Keep ReviewGPT blocked until generation is complete, PR #557 is merged, and the controller grants the single patched 0.5.103 exact-head audit.
 
 ## Verification
@@ -89,7 +90,7 @@ Updated: 2026-07-12
 - `pnpm --dir packages/exercise-library generate`: passed after reconciliation and alt correction.
 - `pnpm --dir packages/exercise-library generate:check`: passed.
 - `pnpm --dir packages/exercise-library verify`: passed; 1 test file and 6 tests passed, including exact catalog counts, URL uniqueness, and the 500-character alt bound.
-- Current direct catalog proof: 1,748 total; 1,354 with images; 394 without images; 4,105 images; 4,105 unique URLs.
+- Current direct catalog proof: 1,748 total; 1,355 with images; 393 without images; 4,108 images; 4,108 unique URLs.
 - Remaining generation, upload, full repository verification, completion audits, and final-head CI are pending.
 - The controller-ready handoff batch passes `pnpm --dir packages/exercise-library verify`: typecheck, all 6 tests, and deterministic generated-artifact checks are green.
 - Sequence 6 also passes `pnpm --dir packages/exercise-library verify`; direct drift proof shows only `EX654.images` changed, with 4,105 unique valid public URLs and no invalid alt records.
