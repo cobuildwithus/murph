@@ -110,10 +110,13 @@ current-task user opt-out.
    PR-review rounds.
 
 3. Confirm the captured output is an actual completed review before triaging
-   it. If the run dies, times out, leaves an empty/preliminary file, lacks
+   it. If the run leaves an empty/preliminary response, lacks
    `REVIEW_COMPLETE`, or reports a missing/unreadable `codebase.zip`, the round
-   does not count. Rerun it against the same pushed head after fixing the
-   concrete tooling/profile problem.
+   does not count. A response that passed exact-turn and completion checks does
+   count even when optional model-evidence persistence or bounded owned-target
+   cleanup later emits a warning; those post-completion diagnostics must never
+   relaunch the model audit. Fix a concrete pre-completion tooling/profile
+   failure before considering another run against the same pushed head.
 
    Treat a suspiciously fast turnaround as the same kind of invalid round. A
    genuine `pr-review` sweep on the intended reasoning model takes several

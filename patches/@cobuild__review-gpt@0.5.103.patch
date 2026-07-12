@@ -1,5 +1,5 @@
 diff --git a/README.md b/README.md
-index 7895f2f6b13bcfcb2e22a5eaca8b0c794445e90a..ffa363e3611464ec52e193ba25f017a353788c06 100644
+index 7895f2f6b13bcfcb2e22a5eaca8b0c794445e90a..30a3bf771278e96875b8abc80b770208fbc78869 100644
 --- a/README.md
 +++ b/README.md
 @@ -212,7 +212,7 @@ In addition to the review workflow, the incur runtime also exposes:
@@ -7,7 +7,7 @@ index 7895f2f6b13bcfcb2e22a5eaca8b0c794445e90a..ffa363e3611464ec52e193ba25f017a3
  - When `--wait` is enabled, `review-gpt` stays attached until the assistant finishes or the wait timeout is hit. Deep Research runs can stay quiet for a long time before the final report arrives.
  - A response is only captured after it stays unchanged across consecutive quiet polls (no busy status, no stop control) for several seconds, so interim assistant status messages emitted before long tool/connector work are not mistaken for the final reply.
 -- Waited runs that request a concrete model require an explicit `MODEL_CONFIRMATION` line. Matching confirmation passes normally; `UNKNOWN` is also accepted after at least 10 minutes of observed generation because reviewers cannot always inspect their own model identity. Missing confirmation and named model mismatches still fail closed. When ChatGPT model metadata is available, capture also validates it, including the UI-only GPT-5.6 Sol name's `gpt-5-6-pro` backend slug, and a known metadata mismatch always fails.
-+- Waited runs that request a concrete model require exactly one unfenced, unquoted `MODEL_CONFIRMATION` line outside rendered quote and code containers in an assistant turn whose immediately preceding user turn is the exact turn committed by this run. An ephemeral per-run nonce at the start of the sent prompt disambiguates concurrent lanes and is used only for DOM turn binding; it is never written to attestation evidence. A matching textual name passes. `UNKNOWN` passes immediately when the same assistant snapshot exposes the matching ChatGPT response-model slug, including the UI-only GPT-5.6 Sol name's `gpt-5-6-pro` backend slug, or after at least 10 minutes of observed generation when model metadata is unavailable. Any present GPT slug mismatch still fails, as do missing or multiple confirmation lines, pre-prompt or concurrently authored turns, named model mismatches, and an unverified `UNKNOWN` below the elapsed-time threshold. A completed concrete-GPT capture with matching platform metadata emits a versioned `REVIEW_GPT_MODEL_VERIFICATION` JSON record with `requestedModel`, `responseModelSlug`, and `responseSha256`; the digest covers the exact normalized UTF-8 response-file bytes. The elapsed-time fallback does not claim platform-model evidence. With `--response-file`, the response and any evidence sidecar are written atomically with owner-only permissions before the success record is emitted. A new waited response-file attempt removes only that derived sidecar before browser work, and partial or failed captures never create attestation evidence.
++- Waited runs that request a concrete model require exactly one unfenced, unquoted `MODEL_CONFIRMATION` line outside rendered quote and code containers in an assistant turn whose immediately preceding user turn is the exact turn committed by this run. An ephemeral per-run nonce at the start of the sent prompt disambiguates concurrent lanes and is the package-owned sentinel that prevents duplicate protocol insertion; ordinary task text cannot suppress the confirmation instructions. The nonce is never written to attestation evidence. A matching textual name passes. `UNKNOWN` passes immediately when the same assistant snapshot exposes the matching ChatGPT response-model slug, including the UI-only GPT-5.6 Sol name's `gpt-5-6-pro` backend slug, or after at least 10 minutes of observed generation when model metadata is unavailable. Any present GPT slug mismatch still fails, as do missing or multiple confirmation lines, pre-prompt or concurrently authored turns, named model mismatches, and an unverified `UNKNOWN` below the elapsed-time threshold. A completed concrete-GPT capture with matching platform metadata emits a versioned `REVIEW_GPT_MODEL_VERIFICATION` JSON record with `requestedModel`, `responseModelSlug`, and `responseSha256`; the digest covers the exact normalized UTF-8 response-file bytes. The elapsed-time fallback does not claim platform-model evidence. With `--response-file`, the mandatory response is written atomically with owner-only permissions before completion is emitted. The evidence sidecar is optional: a sidecar-only persistence failure produces a warning, omits the verification record, and never invalidates or repeats the completed response. Exact-target cleanup remains bounded; cleanup uncertainty after a completed capture is reported separately and does not turn that capture into a retryable model failure. A new waited response-file attempt removes only the derived sidecar before browser work, and partial or failed captures never create attestation evidence.
  - `--response-marker <text>` makes capture contract-based instead of heuristic: the wait only accepts a response containing that exact text, so prompts that instruct the assistant to end its final message with the marker are immune to interim status messages even across minutes-long quiet gaps. If the marker never appears, capture fails after writing the best snapshot to `--response-file` when one was configured.
  - Browsers throttle background-tab rendering, which can freeze the DOM the capture reads mid-stream. The managed browser launches with backgrounding disabled and the capture session pins focus emulation and an active page lifecycle over CDP, so polling works with the tab fully in the background and never steals OS focus.
  - Deep Research auto-send gives the product up to 60 seconds to auto-start, then only falls back to the approval-card `Start` action if that gate is still present.
@@ -182,7 +182,7 @@ index f8852beb36388b1a24218121a4876194383e02ac..d0e46ef82a91d6277ee81314335b8b3b
    text: string;
  };
 diff --git a/src/prepare-chatgpt-draft.js b/src/prepare-chatgpt-draft.js
-index 77ac533f5ecd7f53278ba06130b868402795b08a..bd14a0798c0fead748fe9260e80c958db02e07c3 100644
+index 77ac533f5ecd7f53278ba06130b868402795b08a..e0d5aa47aa12a32b91e7e33e84408cfbcce01afa 100644
 --- a/src/prepare-chatgpt-draft.js
 +++ b/src/prepare-chatgpt-draft.js
 @@ -1,5 +1,6 @@
@@ -298,25 +298,22 @@ index 77ac533f5ecd7f53278ba06130b868402795b08a..bd14a0798c0fead748fe9260e80c958d
    if (responseMarkerValue) {
      lines.push(`Include ${responseMarkerValue} only after the requested work is complete.`);
    }
-@@ -784,44 +835,207 @@ function modelConfirmationPromptBlock(targetModel, responseMarkerValue = '') {
+@@ -784,44 +835,221 @@ function modelConfirmationPromptBlock(targetModel, responseMarkerValue = '') {
 
  function appendModelConfirmationPrompt(prompt, input) {
    const value = String(prompt || '');
 -  if (!modelConfirmationRequired(input) || value.includes('MODEL_CONFIRMATION:')) {
 +  if (!modelConfirmationRequired(input)) {
-     return value;
-   }
--  return `${modelConfirmationPromptBlock(input.targetModel, input.responseMarker)}\n\n${value}`;
++    return value;
++  }
 +  const normalizedTurnNonce = String(input?.turnNonce || '').trim();
 +  const turnNonceLine = normalizedTurnNonce
 +    ? `REVIEW_GPT_TURN_NONCE: ${normalizedTurnNonce}`
 +    : '';
 +  if (turnNonceLine && value.includes(turnNonceLine)) {
-+    return value;
-+  }
-+  if (value.includes('MODEL_CONFIRMATION:')) {
-+    return turnNonceLine ? `${turnNonceLine}\n\n${value}` : value;
-+  }
+     return value;
+   }
+-  return `${modelConfirmationPromptBlock(input.targetModel, input.responseMarker)}\n\n${value}`;
 +  return `${modelConfirmationPromptBlock(
 +    input.targetModel,
 +    input.responseMarker,
@@ -483,7 +480,9 @@ index 77ac533f5ecd7f53278ba06130b868402795b08a..bd14a0798c0fead748fe9260e80c958d
 +}
 +
 +function writeCompletedResponseArtifacts(responseFilePath, responseText, evidence) {
-+  if (!responseFilePath) return { evidencePath: '', responseFilePath: '' };
++  if (!responseFilePath) {
++    return { evidencePath: '', evidenceWarning: '', responseFilePath: '' };
++  }
 +  const responseBytes = capturedResponseFileText(responseText);
 +  const responseSha256 = createHash('sha256').update(responseBytes, 'utf8').digest('hex');
 +  if (evidence && evidence.responseSha256 !== responseSha256) {
@@ -492,11 +491,26 @@ index 77ac533f5ecd7f53278ba06130b868402795b08a..bd14a0798c0fead748fe9260e80c958d
 +
 +  writePrivateFileAtomically(responseFilePath, responseBytes);
 +  let evidencePath = '';
++  let evidenceWarning = '';
 +  if (evidence) {
 +    evidencePath = `${responseFilePath}.model-verification.json`;
-+    writePrivateFileAtomically(evidencePath, `${JSON.stringify(evidence)}\n`);
++    try {
++      writePrivateFileAtomically(evidencePath, `${JSON.stringify(evidence)}\n`);
++    } catch (error) {
++      let staleEvidenceCleanupWarning = '';
++      try {
++        const status = fs.lstatSync(evidencePath, { throwIfNoEntry: false });
++        if (status?.isFile() || status?.isSymbolicLink()) {
++          fs.rmSync(evidencePath, { force: true });
++        }
++      } catch (cleanupError) {
++        staleEvidenceCleanupWarning = ` Stale evidence cleanup also failed: ${errorMessage(cleanupError)}`;
++      }
++      evidencePath = '';
++      evidenceWarning = `Optional model verification was not persisted: ${errorMessage(error)}.${staleEvidenceCleanupWarning}`;
++    }
 +  }
-+  return { evidencePath, responseFilePath };
++  return { evidencePath, evidenceWarning, responseFilePath };
 +}
 +
 +function removeModelVerificationEvidenceFile(responseFilePath) {
@@ -516,7 +530,7 @@ index 77ac533f5ecd7f53278ba06130b868402795b08a..bd14a0798c0fead748fe9260e80c958d
    const assistantSnapshots = Array.isArray(state?.assistantSnapshots)
      ? state.assistantSnapshots
          .filter((snapshot) => snapshot && typeof snapshot.signature === 'string')
-@@ -836,8 +1050,20 @@ function selectAssistantResponseCandidate(state, baselineAssistantSignatures, pr
+@@ -836,8 +1064,20 @@ function selectAssistantResponseCandidate(state, baselineAssistantSignatures, pr
        ? baselineAssistantSignatures.filter((value) => typeof value === 'string' && value.length > 0)
        : []
    );
@@ -539,7 +553,7 @@ index 77ac533f5ecd7f53278ba06130b868402795b08a..bd14a0798c0fead748fe9260e80c958d
    let promptEchoSnapshot = null;
 
    for (let index = ordered.length - 1; index >= 0; index -= 1) {
-@@ -936,22 +1162,87 @@ async function openNewTarget(desiredUrl) {
+@@ -936,22 +1176,87 @@ async function openNewTarget(desiredUrl) {
    if (!browserWsUrl) {
      throw new Error('Browser debugging endpoint did not expose a browser websocket URL');
    }
@@ -597,9 +611,9 @@ index 77ac533f5ecd7f53278ba06130b868402795b08a..bd14a0798c0fead748fe9260e80c958d
 +    } catch (error) {
 +      lastListConfirmedNoMarker = false;
 +      discoveryError = error;
-+    }
+     }
 +    if (Date.now() < discoveryDeadline) await sleep(200);
-+  }
+   }
 +
 +  if (createdTargetId) recoveredTargetIds.add(createdTargetId);
 +  let cleanupError = null;
@@ -618,10 +632,10 @@ index 77ac533f5ecd7f53278ba06130b868402795b08a..bd14a0798c0fead748fe9260e80c958d
 +  if (creationError) {
 +    if (recoveredTargetIds.size > 0) {
 +      throw creationError.cause || creationError;
-     }
++    }
 +    if (lastListConfirmedNoMarker && !discoveryError) throw creationError;
 +    throw createTargetOwnershipFailure(discoveryError || creationError);
-   }
++  }
 +  if (discoveryError) throw discoveryError;
    throw new Error(`Created ChatGPT target did not expose a debuggable page for ${desiredUrl}`);
  }
@@ -636,7 +650,7 @@ index 77ac533f5ecd7f53278ba06130b868402795b08a..bd14a0798c0fead748fe9260e80c958d
    const ws = new WebSocket(browserWsUrl);
    const pending = new Map();
    let nextId = 0;
-@@ -959,6 +1250,7 @@ async function createBackgroundTarget(browserWsUrl, desiredUrl) {
+@@ -959,6 +1264,7 @@ async function createBackgroundTarget(browserWsUrl, desiredUrl) {
      ws.addEventListener('close', () => reject(new Error('Browser CDP socket closed unexpectedly')));
      ws.addEventListener('error', (event) => reject(event.error || new Error('Browser CDP socket error')));
    });
@@ -644,7 +658,7 @@ index 77ac533f5ecd7f53278ba06130b868402795b08a..bd14a0798c0fead748fe9260e80c958d
 
    ws.addEventListener('message', (event) => {
      let message;
-@@ -974,31 +1266,63 @@ async function createBackgroundTarget(browserWsUrl, desiredUrl) {
+@@ -974,31 +1280,63 @@ async function createBackgroundTarget(browserWsUrl, desiredUrl) {
      if (!slot) return;
      pending.delete(message.id);
      if (message.error) {
@@ -722,7 +736,7 @@ index 77ac533f5ecd7f53278ba06130b868402795b08a..bd14a0798c0fead748fe9260e80c958d
    } finally {
      try {
        ws.close();
-@@ -1006,6 +1330,128 @@ async function createBackgroundTarget(browserWsUrl, desiredUrl) {
+@@ -1006,6 +1344,128 @@ async function createBackgroundTarget(browserWsUrl, desiredUrl) {
    }
  }
 
@@ -851,7 +865,7 @@ index 77ac533f5ecd7f53278ba06130b868402795b08a..bd14a0798c0fead748fe9260e80c958d
  async function ensureTarget(desiredUrl) {
    const deadline = Date.now() + timeoutMs;
    let lastError = null;
-@@ -1013,6 +1459,12 @@ async function ensureTarget(desiredUrl) {
+@@ -1013,6 +1473,12 @@ async function ensureTarget(desiredUrl) {
      try {
        return await openNewTarget(desiredUrl);
      } catch (error) {
@@ -864,7 +878,7 @@ index 77ac533f5ecd7f53278ba06130b868402795b08a..bd14a0798c0fead748fe9260e80c958d
        lastError = error;
      }
      await sleep(300);
-@@ -1024,15 +1476,32 @@ async function connectTargetWebSocket(desiredUrl) {
+@@ -1024,15 +1490,32 @@ async function connectTargetWebSocket(desiredUrl) {
    let lastError = null;
    for (let attempt = 0; attempt < 6; attempt += 1) {
      const target = await ensureTarget(desiredUrl);
@@ -903,7 +917,7 @@ index 77ac533f5ecd7f53278ba06130b868402795b08a..bd14a0798c0fead748fe9260e80c958d
        lastError = error;
        await sleep(250);
      }
-@@ -1055,6 +1524,7 @@ function isRetryableSocketError(error) {
+@@ -1055,6 +1538,7 @@ function isRetryableSocketError(error) {
    return (
      message.includes('cdp socket closed unexpectedly') ||
      message.includes('cdp socket error') ||
@@ -911,19 +925,20 @@ index 77ac533f5ecd7f53278ba06130b868402795b08a..bd14a0798c0fead748fe9260e80c958d
      message.includes('websocket') ||
      message.includes('target closed') ||
      message.includes('promise was collected')
-@@ -1073,8 +1543,10 @@ async function main() {
+@@ -1073,8 +1557,11 @@ async function main() {
    const { ws, target } = await connectTargetWebSocket(chatgptUrl).catch((error) => {
      throw tagStageError(error);
    });
 +  const pageTargetId = String(target?.id || '');
 +  let ownedTargetId = pageTargetId;
 +  let operationError = null;
++  let completedResponseCapture = null;
    try {
 -    try {
 
    const pending = new Map();
    let nextId = 0;
-@@ -1083,6 +1555,7 @@ async function main() {
+@@ -1083,6 +1570,7 @@ async function main() {
      ws.addEventListener('close', () => reject(new Error('CDP socket closed unexpectedly')));
      ws.addEventListener('error', (event) => reject(event.error || new Error('CDP socket error')));
    });
@@ -931,7 +946,7 @@ index 77ac533f5ecd7f53278ba06130b868402795b08a..bd14a0798c0fead748fe9260e80c958d
 
    ws.addEventListener('message', (event) => {
      let message;
-@@ -1111,7 +1584,11 @@ async function main() {
+@@ -1111,7 +1599,11 @@ async function main() {
        pending.set(id, { resolve, reject });
      });
      ws.send(payload);
@@ -944,7 +959,7 @@ index 77ac533f5ecd7f53278ba06130b868402795b08a..bd14a0798c0fead748fe9260e80c958d
    };
 
    const evaluate = async (expression) => {
-@@ -1164,7 +1641,6 @@ async function main() {
+@@ -1164,7 +1656,6 @@ async function main() {
    const desiredTargetChatId = extractChatId(desiredTargetUrl?.pathname || '').toLowerCase();
    const desiredTargetOriginLiteral = JSON.stringify(desiredTargetOrigin);
    const desiredTargetChatIdLiteral = JSON.stringify(desiredTargetChatId);
@@ -952,7 +967,7 @@ index 77ac533f5ecd7f53278ba06130b868402795b08a..bd14a0798c0fead748fe9260e80c958d
    const activateCurrentPageForNativeInput = async () => {
      try {
        await cdp('Page.bringToFront');
-@@ -3550,15 +4026,30 @@ async function main() {
+@@ -3550,15 +4041,30 @@ async function main() {
      };
    };
 
@@ -984,7 +999,7 @@ index 77ac533f5ecd7f53278ba06130b868402795b08a..bd14a0798c0fead748fe9260e80c958d
      let lastState = null;
      let bestSnapshot = null;
      let stableSignature = '';
-@@ -3576,7 +4067,13 @@ async function main() {
+@@ -3576,7 +4082,13 @@ async function main() {
        const deepResearchState = isDeepResearchMode ? await readDeepResearchResponseCaptureState() : null;
        const state = mergeResponseCaptureStates(pageState, deepResearchState);
        lastState = state;
@@ -999,7 +1014,7 @@ index 77ac533f5ecd7f53278ba06130b868402795b08a..bd14a0798c0fead748fe9260e80c958d
        if (candidate?.text) {
          bestSnapshot = candidate;
        }
-@@ -3620,16 +4117,17 @@ async function main() {
+@@ -3620,16 +4132,17 @@ async function main() {
            responseMarker,
          })
        ) {
@@ -1022,7 +1037,7 @@ index 77ac533f5ecd7f53278ba06130b868402795b08a..bd14a0798c0fead748fe9260e80c958d
              responseText: candidate.text,
              href: state?.href || '',
            };
-@@ -3638,6 +4136,7 @@ async function main() {
+@@ -3638,6 +4151,7 @@ async function main() {
            status: 'completed',
            responseText: candidate.text,
            href: state?.href || '',
@@ -1030,7 +1045,7 @@ index 77ac533f5ecd7f53278ba06130b868402795b08a..bd14a0798c0fead748fe9260e80c958d
          };
        }
 
-@@ -3645,16 +4144,17 @@ async function main() {
+@@ -3645,16 +4159,17 @@ async function main() {
      }
 
      if (bestSnapshot?.text) {
@@ -1053,7 +1068,7 @@ index 77ac533f5ecd7f53278ba06130b868402795b08a..bd14a0798c0fead748fe9260e80c958d
            responseText: bestSnapshot.text,
            href: lastState?.href || '',
            partial: true,
-@@ -4079,45 +4579,58 @@ async function main() {
+@@ -4079,45 +4594,58 @@ async function main() {
    const evaluateInTargetWebSocket = async (webSocketUrl, expression) => {
      if (!webSocketUrl) return null;
      const targetWs = new WebSocket(webSocketUrl);
@@ -1150,7 +1165,7 @@ index 77ac533f5ecd7f53278ba06130b868402795b08a..bd14a0798c0fead748fe9260e80c958d
        await targetCdp('Runtime.enable');
        const result = await targetCdp('Runtime.evaluate', {
          expression,
-@@ -4668,6 +5181,10 @@ async function main() {
+@@ -4668,6 +5196,10 @@ async function main() {
    };
 
    await cdp('Page.enable');
@@ -1161,7 +1176,7 @@ index 77ac533f5ecd7f53278ba06130b868402795b08a..bd14a0798c0fead748fe9260e80c958d
    await cdp('Runtime.enable');
    await cdp('DOM.enable');
    await keepPageRenderingWhileBackgrounded();
-@@ -4833,13 +5350,17 @@ async function main() {
+@@ -4833,13 +5365,17 @@ async function main() {
      console.log(
        `Draft prepared in ChatGPT tab: attachments confirmed (${formatAttachmentVerificationSummary(verification.summary)}).`
      );
@@ -1182,7 +1197,7 @@ index 77ac533f5ecd7f53278ba06130b868402795b08a..bd14a0798c0fead748fe9260e80c958d
    if (shouldSend) {
      currentStage = 'send';
      const sendResult = await autoSendDraftMessage();
-@@ -4865,12 +5386,30 @@ async function main() {
+@@ -4865,12 +5401,29 @@ async function main() {
            console.log(`Assistant wait in progress: staying attached until the response completes or the wait timeout is hit (${responseTimeoutMs}ms).`);
          }
          currentStage = 'wait-response';
@@ -1194,30 +1209,29 @@ index 77ac533f5ecd7f53278ba06130b868402795b08a..bd14a0798c0fead748fe9260e80c958d
 +          sendResult.committedUserTurnSignature,
 +        );
 +        if (responseResult?.status === 'completed') {
-+          emitCapturedResponse(responseResult.responseText, responseResult.href, false);
-           if (responseFile) {
--            writeCapturedResponseFile(responseFile, responseResult.responseText);
-+            const artifacts = writeCompletedResponseArtifacts(
++          let artifacts = { evidencePath: '', evidenceWarning: '', responseFilePath: '' };
++          if (responseFile) {
++            artifacts = writeCompletedResponseArtifacts(
 +              responseFile,
 +              responseResult.responseText,
 +              responseResult.modelVerification,
 +            );
-             console.log(`Assistant response written to ${responseFile}`);
-+            if (artifacts.evidencePath) {
-+              console.log('Assistant model verification written beside the response file.');
-+            }
 +          }
-+          if (responseResult.modelVerification) {
-+            console.log(`REVIEW_GPT_MODEL_VERIFICATION ${JSON.stringify(responseResult.modelVerification)}`);
-+          }
++          completedResponseCapture = {
++            artifacts,
++            href: responseResult.href,
++            modelVerification: responseResult.modelVerification,
++            responseText: responseResult.responseText,
++          };
 +        } else if (responseResult?.status === 'timeout-partial') {
 +          emitCapturedResponse(responseResult.responseText, responseResult.href, true);
-+          if (responseFile) {
-+            writeCapturedResponseFile(responseFile, responseResult.responseText);
+           if (responseFile) {
+             writeCapturedResponseFile(responseFile, responseResult.responseText);
+-            console.log(`Assistant response written to ${responseFile}`);
            }
          } else if (responseResult?.status === 'timeout-missing-marker') {
            if (responseFile) {
-@@ -4892,18 +5431,30 @@ async function main() {
+@@ -4892,18 +5445,61 @@ async function main() {
            throw new Error(`Assistant response capture failed: ${JSON.stringify(responseResult || { status: 'unknown' })}`);
          }
        }
@@ -1244,16 +1258,47 @@ index 77ac533f5ecd7f53278ba06130b868402795b08a..bd14a0798c0fead748fe9260e80c958d
 +    } catch (error) {
 +      cleanupError = addTargetCleanupContext(error, operationError);
 +    }
-   }
++  }
 +  try {
 +    ws.close();
 +  } catch {}
++  if (completedResponseCapture && !operationError) {
++    if (cleanupError) {
++      console.warn(
++        `Completed assistant response preserved despite unconfirmed cleanup for browser target ${ownedTargetId}: ${errorMessage(cleanupError)}`
++      );
++    }
++    if (completedResponseCapture.artifacts.evidenceWarning) {
++      console.warn(completedResponseCapture.artifacts.evidenceWarning);
++    }
++    emitCapturedResponse(
++      completedResponseCapture.responseText,
++      completedResponseCapture.href,
++      false,
++    );
++    if (completedResponseCapture.artifacts.responseFilePath) {
++      console.log(`Assistant response written to ${completedResponseCapture.artifacts.responseFilePath}`);
++      if (completedResponseCapture.artifacts.evidencePath) {
++        console.log('Assistant model verification written beside the response file.');
++      }
++    }
++    if (
++      completedResponseCapture.modelVerification &&
++      (!completedResponseCapture.artifacts.responseFilePath ||
++        completedResponseCapture.artifacts.evidencePath)
++    ) {
++      console.log(
++        `REVIEW_GPT_MODEL_VERIFICATION ${JSON.stringify(completedResponseCapture.modelVerification)}`
++      );
++    }
++    return;
+   }
 +  if (cleanupError) throw cleanupError;
 +  if (operationError) throw operationError;
  }
 
  async function mainWithRetry() {
-@@ -4920,6 +5471,8 @@ async function mainWithRetry() {
+@@ -4920,6 +5516,8 @@ async function mainWithRetry() {
      } catch (error) {
        lastError = error;
        if (
@@ -1262,7 +1307,7 @@ index 77ac533f5ecd7f53278ba06130b868402795b08a..bd14a0798c0fead748fe9260e80c958d
          !isRetryableSocketError(error) ||
          attempt === maxAttempts ||
          !SAFE_RETRY_STAGES.has(String(error?.reviewGptStage || ''))
-@@ -4949,8 +5502,15 @@ function validateRuntimeConfig() {
+@@ -4949,8 +5547,15 @@ function validateRuntimeConfig() {
    }
  }
 

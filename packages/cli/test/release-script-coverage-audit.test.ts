@@ -76,6 +76,7 @@ type ReviewGptHarnessOptions = {
   hangListAfterClose?: boolean
   hangPageSocketOpenAttempts?: number
   hangVersionAtCall?: number
+  prompt?: string
   remotePort?: string
   responseFile?: string
   shouldSend?: boolean
@@ -416,7 +417,7 @@ function loadReviewGptOpenTargetHarness(
       ...process.env,
       ORACLE_DRAFT_FILES: '',
       ORACLE_DRAFT_MODEL: 'gpt-5.6-sol',
-      ORACLE_DRAFT_PROMPT: 'Review the requested changes.',
+      ORACLE_DRAFT_PROMPT: options.prompt ?? 'Review the requested changes.',
       ORACLE_DRAFT_REMOTE_PORT: options.remotePort ?? '9999',
       ORACLE_DRAFT_RESPONSE_FILE: options.responseFile ?? '',
       ORACLE_DRAFT_SEND: options.shouldSend ? '1' : '0',
@@ -592,7 +593,7 @@ function loadReviewGptOpenTargetHarness(
       responseFilePath,
       responseText,
       evidence,
-    ]) as { evidencePath: string; responseFilePath: string },
+    ]) as { evidencePath: string; evidenceWarning: string; responseFilePath: string },
   }
 }
 
@@ -982,6 +983,7 @@ describe('monorepo release flow coverage audit', () => {
     expect(reviewGptReadme).toContain('An ephemeral per-run nonce')
     expect(reviewGptReadme).toContain('after at least 10 minutes of observed generation')
     expect(reviewGptDriver).toContain('REVIEW_GPT_TURN_NONCE:')
+    expect(reviewGptDriver).not.toContain("value.includes('MODEL_CONFIRMATION:')")
     expect(reviewGptDriver).toContain('precedingUserMessageSignature')
     expect(reviewGptDriver).toContain('sendResult.committedUserTurnSignature')
     expect(reviewGptDriver).toContain('schemaVersion: 1')
@@ -995,10 +997,15 @@ describe('monorepo release flow coverage audit', () => {
         '  mainWithRetry().catch((error) => {',
       ].join('\n'),
     )
-    expect(
-      reviewGptDriver.indexOf('const artifacts = writeCompletedResponseArtifacts('),
-    ).toBeLessThan(
+    const completedArtifactWriteStart = reviewGptDriver.indexOf(
+      'artifacts = writeCompletedResponseArtifacts(',
+    )
+    expect(completedArtifactWriteStart).toBeGreaterThan(-1)
+    expect(completedArtifactWriteStart).toBeLessThan(
       reviewGptDriver.indexOf('REVIEW_GPT_MODEL_VERIFICATION ${JSON.stringify'),
+    )
+    expect(completedArtifactWriteStart).toBeLessThan(
+      reviewGptDriver.indexOf('emitCapturedResponse(\n      completedResponseCapture.responseText'),
     )
     const timeoutPartialStart = reviewGptDriver.indexOf("status: 'timeout-partial'")
     expect(timeoutPartialStart).toBeGreaterThan(-1)
@@ -1011,6 +1018,7 @@ describe('monorepo release flow coverage audit', () => {
         "  const pageTargetId = String(target?.id || '');",
         '  let ownedTargetId = pageTargetId;',
         '  let operationError = null;',
+        '  let completedResponseCapture = null;',
         '  try {',
       ].join('\n'),
     )
@@ -1045,10 +1053,14 @@ describe('monorepo release flow coverage audit', () => {
         '  try {',
         '    ws.close();',
         '  } catch {}',
-        '  if (cleanupError) throw cleanupError;',
-        '  if (operationError) throw operationError;',
       ].join('\n'),
     )
+    expect(reviewGptDriver).toContain('if (completedResponseCapture && !operationError)')
+    expect(reviewGptDriver).toContain(
+      'Completed assistant response preserved despite unconfirmed cleanup for browser target',
+    )
+    expect(reviewGptDriver).toContain('if (cleanupError) throw cleanupError;')
+    expect(reviewGptDriver).toContain('if (operationError) throw operationError;')
     expect(reviewGptDriver).toContain(
       [
         'error?.reviewGptTargetCleanupFailure ||',
@@ -1467,6 +1479,11 @@ describe('monorepo release flow coverage audit', () => {
       shouldSend: true,
       shouldWaitForResponse: true,
     })
+    const collisionHarness = loadReviewGptOpenTargetHarness(1, undefined, {
+      prompt: 'Review MODEL_CONFIRMATION: UNKNOWN handling while rejecting the contradictory gpt-5-5-pro response slug.',
+      shouldSend: true,
+      shouldWaitForResponse: true,
+    })
     const normalizePromptSignature = (value: string) => value
       .toLowerCase()
       .replace(/[^a-z0-9]+/gu, ' ')
@@ -1475,6 +1492,7 @@ describe('monorepo release flow coverage audit', () => {
       .slice(0, 320)
     const committedPrompt = harness.getDraftPrompt()
     const concurrentPrompt = concurrentHarness.getDraftPrompt()
+    const collisionPrompt = collisionHarness.getDraftPrompt()
     const committedUserTurnSignature = normalizePromptSignature(committedPrompt)
     const concurrentUserTurnSignature = normalizePromptSignature(concurrentPrompt)
     expect(harness.getModelAttestationTurnNonce()).toMatch(/^[0-9a-f-]{36}$/u)
@@ -1485,6 +1503,19 @@ describe('monorepo release flow coverage audit', () => {
     expect(concurrentPrompt.split('\n').slice(1)).toEqual(
       committedPrompt.split('\n').slice(1),
     )
+    expect(collisionPrompt).toContain(
+      'Review MODEL_CONFIRMATION: UNKNOWN handling while rejecting the contradictory gpt-5-5-pro response slug.',
+    )
+    expect(collisionPrompt.match(/Complete the requested work even if you cannot independently identify the active model\./gu)).toHaveLength(1)
+    expect(collisionPrompt).toContain('MODEL_CONFIRMATION: gpt-5.6-sol')
+    expect(collisionHarness.modelConfirmationFailure(
+      'gpt-5.6-sol',
+      'Review complete without the package-owned final line.',
+    )).toContain('did not include MODEL_CONFIRMATION')
+    expect(collisionHarness.modelConfirmationFailure(
+      'gpt-5.6-sol',
+      'Review complete\nMODEL_CONFIRMATION: gpt-5.6-sol',
+    )).toBe('')
     expect(concurrentUserTurnSignature).not.toBe(committedUserTurnSignature)
     const responseText = 'Report\r\nDone\u00a0'
     const exactResponseBytes = 'Report\nDone\n'
@@ -1626,7 +1657,11 @@ describe('monorepo release flow coverage audit', () => {
       writeFileSync(unrelatedFile, 'keep', 'utf8')
       expect(
         harness.writeCompletedResponseArtifacts(responseFile, responseText, evidence),
-      ).toEqual({ evidencePath: evidenceFile, responseFilePath: responseFile })
+      ).toEqual({
+        evidencePath: evidenceFile,
+        evidenceWarning: '',
+        responseFilePath: responseFile,
+      })
       expect(readFileSync(responseFile, 'utf8')).toBe(exactResponseBytes)
       expect(JSON.parse(readFileSync(evidenceFile, 'utf8'))).toEqual(evidence)
       expect(statSync(responseFile).mode & 0o777).toBe(0o600)
@@ -1640,11 +1675,21 @@ describe('monorepo release flow coverage audit', () => {
       const failedResponseFile = path.join(outputDirectory, 'failed-response.md')
       const failedEvidenceFile = `${failedResponseFile}.model-verification.json`
       mkdirSync(failedEvidenceFile)
-      expect(() => {
-        harness.writeCompletedResponseArtifacts(failedResponseFile, responseText, evidence)
-      }).toThrow()
+      expect(
+        harness.writeCompletedResponseArtifacts(failedResponseFile, responseText, evidence),
+      ).toEqual({
+        evidencePath: '',
+        evidenceWarning: expect.stringContaining('Optional model verification was not persisted'),
+        responseFilePath: failedResponseFile,
+      })
       expect(readFileSync(failedResponseFile, 'utf8')).toBe(exactResponseBytes)
       expect(existsSync(failedEvidenceFile)).toBe(true)
+
+      const unavailableResponseFile = path.join(outputDirectory, 'unavailable-response.md')
+      mkdirSync(unavailableResponseFile)
+      expect(() => {
+        harness.writeCompletedResponseArtifacts(unavailableResponseFile, responseText, evidence)
+      }).toThrow()
       expect(readdirSync(outputDirectory).filter((entry) => entry.endsWith('.tmp'))).toEqual([])
 
       const staleResponseFile = path.join(outputDirectory, 'stale-response.md')
