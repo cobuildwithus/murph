@@ -1,7 +1,7 @@
 import { readFile, stat } from 'node:fs/promises'
 import path from 'node:path'
 import { z } from 'zod'
-import { readParserResult, type ParserOutput } from '@murphai/parsers'
+import type { ParserOutput } from '@murphai/parsers'
 import { resolveAssistantVaultPath } from '@murphai/vault-usecases/assistant-vault-paths'
 import { normalizeNullableString } from '@murphai/operator-config/text/shared'
 import type {
@@ -534,6 +534,7 @@ async function readBoundedParserResult(input: {
   vaultRoot: string
 }): Promise<ParserOutput | null> {
   try {
+    const { readParserResult } = await import('@murphai/parsers/parser-result')
     return await readParserResult(input)
   } catch {
     return null

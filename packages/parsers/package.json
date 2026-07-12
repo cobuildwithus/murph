@@ -14,6 +14,10 @@
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./parser-result": {
+      "types": "./dist/publish/writer.d.ts",
+      "default": "./dist/publish/writer.js"
     }
   },
   "files": [

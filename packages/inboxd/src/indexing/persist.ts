@@ -22,8 +22,6 @@ import {
   walkVaultFiles,
   withCanonicalWriteLockScope,
 } from "@murphai/core";
-import { readParserResult } from "@murphai/parsers";
-
 import type { InboundCapture, StoredAttachment, StoredCapture } from "../contracts/capture.ts";
 import {
   buildAttachmentId,
@@ -718,6 +716,7 @@ async function readAttachmentParserProjectionFromArtifact(input: {
 }): Promise<ParserProjection | null> {
   if (path.posix.basename(input.artifactPath) === "result.json") {
     try {
+      const { readParserResult } = await import("@murphai/parsers/parser-result");
       const result = await readParserResult({
         resultPath: input.artifactPath,
         vaultRoot: input.vaultRoot,
