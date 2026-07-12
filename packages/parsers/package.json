@@ -16,8 +16,8 @@
       "default": "./dist/index.js"
     },
     "./parser-result": {
-      "types": "./dist/publish/writer.d.ts",
-      "default": "./dist/publish/writer.js"
+      "types": "./dist/parser-result.d.ts",
+      "default": "./dist/parser-result.js"
     }
   },
   "files": [
