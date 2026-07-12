@@ -92,8 +92,7 @@ test('readPrebuiltAssistantCliSurfaceContract accepts a generated artifact paylo
     artifactPath,
     JSON.stringify({
       contract: prebuiltContract,
-      manifestFingerprint: '4'.repeat(64),
-      schemaVersion: 'murph.assistant-cli-surface-prebuilt.v2',
+      schemaVersion: 'murph.assistant-cli-surface-prebuilt.v3',
     }),
     'utf8',
   )
@@ -106,10 +105,7 @@ test('readPrebuiltAssistantCliSurfaceContract accepts a generated artifact paylo
     artifactPath,
   })
 
-  assert.deepEqual(artifact, {
-    contract: prebuiltContract,
-    manifestFingerprint: '4'.repeat(64),
-  })
+  assert.equal(artifact, prebuiltContract)
 })
 
 test('readAssistantCliSurfaceBootstrapContext reads only the generated artifact', async () => {
@@ -124,8 +120,7 @@ test('readAssistantCliSurfaceBootstrapContext reads only the generated artifact'
     artifactPath,
     JSON.stringify({
       contract: prebuiltContract,
-      manifestFingerprint: '5'.repeat(64),
-      schemaVersion: 'murph.assistant-cli-surface-prebuilt.v2',
+      schemaVersion: 'murph.assistant-cli-surface-prebuilt.v3',
     }),
     'utf8',
   )
@@ -146,34 +141,42 @@ test('readAssistantCliSurfaceBootstrapContext returns null when the generated ar
   assert.equal(await readAssistantCliSurfaceBootstrapContext(), null)
 })
 
-test('readPrebuiltAssistantCliSurfaceContract rejects malformed generated artifacts', async () => {
+test('readPrebuiltAssistantCliSurfaceContract rejects malformed, oversized, and obsolete artifacts', async () => {
   const { parentRoot } = await createTempVaultContext(
     'murph-assistant-cli-surface-contract-invalid-prebuilt-',
   )
   cleanupPaths.push(parentRoot)
 
   const artifactPath = path.join(parentRoot, 'cli-surface-contract.generated.json')
-  await writeFile(
-    artifactPath,
-    JSON.stringify({
-      contract: 'Murph CLI Contract:\nPrebuilt assistant cli contract',
-      manifestFingerprint: '4'.repeat(64),
-      schemaVersion: 'murph.assistant-cli-surface-prebuilt.v2',
-      sourceDetail: 'compact',
-    }),
-    'utf8',
-  )
-
   const {
     readPrebuiltAssistantCliSurfaceContract,
   } = await import('../src/assistant/cli-surface-bootstrap.ts')
 
-  await assert.rejects(
-    () => readPrebuiltAssistantCliSurfaceContract({
-      artifactPath,
-    }),
-    /Generated assistant CLI surface contract artifact is invalid/u,
-  )
+  const invalidArtifacts = [
+    {
+      contract: 'not a Murph CLI contract',
+      schemaVersion: 'murph.assistant-cli-surface-prebuilt.v3',
+    },
+    {
+      contract: `Murph CLI Contract:\n${'x'.repeat(45_000)}`,
+      schemaVersion: 'murph.assistant-cli-surface-prebuilt.v3',
+    },
+    {
+      contract: 'Murph CLI Contract:\nObsolete assistant cli contract',
+      manifestFingerprint: '4'.repeat(64),
+      schemaVersion: 'murph.assistant-cli-surface-prebuilt.v2',
+    },
+  ]
+
+  for (const invalidArtifact of invalidArtifacts) {
+    await writeFile(artifactPath, JSON.stringify(invalidArtifact), 'utf8')
+    await assert.rejects(
+      () => readPrebuiltAssistantCliSurfaceContract({
+        artifactPath,
+      }),
+      /Generated assistant CLI surface contract artifact is invalid/u,
+    )
+  }
 })
 
 test('readPrebuiltAssistantCliSurfaceContract falls back from source mode to the built dist artifact', async () => {
@@ -212,8 +215,7 @@ test('readPrebuiltAssistantCliSurfaceContract falls back from source mode to the
         ) {
           return JSON.stringify({
             contract: distContract,
-            manifestFingerprint: '4'.repeat(64),
-            schemaVersion: 'murph.assistant-cli-surface-prebuilt.v2',
+            schemaVersion: 'murph.assistant-cli-surface-prebuilt.v3',
           })
         }
 
@@ -228,10 +230,7 @@ test('readPrebuiltAssistantCliSurfaceContract falls back from source mode to the
     readPrebuiltAssistantCliSurfaceContract,
   } = await import('../src/assistant/cli-surface-bootstrap.ts')
 
-  assert.deepEqual(await readPrebuiltAssistantCliSurfaceContract(), {
-    contract: distContract,
-    manifestFingerprint: '4'.repeat(64),
-  })
+  assert.equal(await readPrebuiltAssistantCliSurfaceContract(), distContract)
 })
 
 test('buildAssistantCliSurfaceContract normalizes commands into a compact index with detailed hot paths', async () => {
@@ -665,14 +664,13 @@ test('generate-cli-surface-contract builds the prebuilt artifact from the full m
 
   const artifact = JSON.parse(String(rawArtifact)) as {
     contract: string
-    manifestFingerprint: string
     schemaVersion: string
   }
   assert.equal(
     artifact.schemaVersion,
-    'murph.assistant-cli-surface-prebuilt.v2',
+    'murph.assistant-cli-surface-prebuilt.v3',
   )
-  assert.match(artifact.manifestFingerprint, /^[a-f0-9]{64}$/u)
+  assert.deepEqual(Object.keys(artifact).sort(), ['contract', 'schemaVersion'])
   assert.match(
     artifact.contract,
     /- `goal save`: Create or update one goal from typed command fields\.; args <title>; options --horizon=short_term\|medium_term\|long_term\|ongoing, --status=active\|paused\|completed\|abandoned\./u,

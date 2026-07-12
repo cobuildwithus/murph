@@ -1280,7 +1280,7 @@ exit 1
           schemaVersion?: string
         }
         expect(installedArtifact.schemaVersion).toBe(
-          'murph.assistant-cli-surface-prebuilt.v2',
+          'murph.assistant-cli-surface-prebuilt.v3',
         )
         const index = installedArtifact.contract?.split('\nCommand index:\n')[1]
         if (!index) {

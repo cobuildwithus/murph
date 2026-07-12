@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -10,9 +9,7 @@ import {
 import { isMissingFileError } from './shared.js'
 
 export const assistantCliSurfacePrebuiltSchemaVersion =
-  'murph.assistant-cli-surface-prebuilt.v2'
-const assistantCliSurfaceBootstrapRenderPolicyVersion =
-  'murph.assistant-cli-surface-render-policy.v5'
+  'murph.assistant-cli-surface-prebuilt.v3'
 const assistantCliSurfaceBootstrapContractCharBudget = 45_000
 // Hot-path commands keep full option signatures while every other command is
 // represented once in the compact family index. The hosted deploy smoke fails
@@ -63,28 +60,21 @@ const assistantCliSurfaceBootstrapIgnoredCommandNames = new Set([
 ])
 
 let cachedPrebuiltAssistantCliSurfaceContractPromise:
-  | Promise<AssistantCliSurfaceContractSnapshot | null>
+  | Promise<string | null>
   | null = null
-
-type AssistantCliSurfaceContractSnapshot = {
-  contract: string
-  manifestFingerprint: string
-}
 
 export type AssistantCliSurfacePrebuiltArtifact = {
   contract: string
-  manifestFingerprint: string
   schemaVersion: typeof assistantCliSurfacePrebuiltSchemaVersion
 }
 
 export async function readAssistantCliSurfaceBootstrapContext(): Promise<string | null> {
-  const prebuiltContract = await readPrebuiltAssistantCliSurfaceContract()
-  return prebuiltContract?.contract ?? null
+  return await readPrebuiltAssistantCliSurfaceContract()
 }
 
 export async function readPrebuiltAssistantCliSurfaceContract(input: {
   artifactPath?: string | null
-} = {}): Promise<AssistantCliSurfaceContractSnapshot | null> {
+} = {}): Promise<string | null> {
   if (input.artifactPath) {
     return await readPrebuiltAssistantCliSurfaceContractFromPath(input.artifactPath)
   }
@@ -128,7 +118,7 @@ export function buildAssistantCliSurfaceContract(
 
 async function readPrebuiltAssistantCliSurfaceContractFromPath(
   artifactPath: string,
-): Promise<AssistantCliSurfaceContractSnapshot | null> {
+): Promise<string | null> {
   try {
     const raw = await readFile(artifactPath, 'utf8')
     let value: unknown
@@ -159,15 +149,11 @@ async function readPrebuiltAssistantCliSurfaceContractFromPath(
 
 function parseAssistantCliSurfacePrebuiltArtifact(
   value: Record<string, unknown>,
-): AssistantCliSurfaceContractSnapshot | null {
+): string | null {
   const contract = value.contract
-  const manifestFingerprint = value.manifestFingerprint
   if (
     value.schemaVersion !== assistantCliSurfacePrebuiltSchemaVersion ||
-    typeof contract !== 'string' ||
-    typeof manifestFingerprint !== 'string' ||
-    !/^[a-f0-9]{64}$/u.test(manifestFingerprint) ||
-    value.sourceDetail !== undefined
+    typeof contract !== 'string'
   ) {
     return null
   }
@@ -181,10 +167,7 @@ function parseAssistantCliSurfacePrebuiltArtifact(
     return null
   }
 
-  return {
-    contract: normalizedContract,
-    manifestFingerprint,
-  }
+  return normalizedContract
 }
 
 function createInvalidAssistantCliSurfacePrebuiltArtifactError(
@@ -223,7 +206,7 @@ function resolveAssistantCliSurfacePrebuiltArtifactPaths(): string[] {
 
 async function readFirstPrebuiltAssistantCliSurfaceContract(
   artifactPaths: readonly string[],
-): Promise<AssistantCliSurfaceContractSnapshot | null> {
+): Promise<string | null> {
   for (const artifactPath of artifactPaths) {
     const contract = await readPrebuiltAssistantCliSurfaceContractFromPath(artifactPath)
     if (contract !== null) {
@@ -232,16 +215,6 @@ async function readFirstPrebuiltAssistantCliSurfaceContract(
   }
 
   return null
-}
-
-export function hashAssistantCliSurfaceManifest(
-  manifest: AssistantCliLlmsManifest,
-): string {
-  return createHash('sha256')
-    .update(assistantCliSurfaceBootstrapRenderPolicyVersion)
-    .update('\0')
-    .update(JSON.stringify(manifest))
-    .digest('hex')
 }
 
 function normalizeAssistantCliManifestCommands(
