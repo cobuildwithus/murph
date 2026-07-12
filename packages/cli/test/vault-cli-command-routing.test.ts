@@ -9,6 +9,7 @@ import {
 
 const mockedModules = [
   '@murphai/assistant-cli/commands/assistant',
+  '../src/commands/capture.js',
   '../src/commands/automation.js',
   '../src/commands/batch.js',
   '../src/commands/health-blood-test-save.js',
@@ -19,19 +20,27 @@ const mockedModules = [
   '../src/commands/encounter.js',
   '../src/commands/experiment.js',
   '../src/commands/exercise.js',
+  '../src/commands/event.js',
+  '../src/commands/food.js',
+  '../src/commands/health-allergy-save.js',
+  '../src/commands/health-condition-save.js',
   '../src/commands/health-goal-save.js',
   '../src/commands/group.js',
   '../src/commands/meal.js',
   '../src/commands/medication.js',
   '../src/commands/measurement.js',
   '../src/commands/memory.js',
+  '../src/commands/journal.js',
+  '../src/commands/knowledge.js',
   '../src/commands/protocol.js',
   '../src/commands/read.js',
   '../src/commands/research.js',
+  '../src/commands/route.js',
   '../src/commands/search.js',
   '../src/commands/supplement.js',
   '../src/commands/vault.js',
   '../src/commands/wearables.js',
+  '../src/commands/workout.js',
   '../src/device-services.js',
   '../src/vault-cli-inbox-services.js',
   '@murphai/vault-usecases/vault-services',
@@ -215,6 +224,16 @@ for (const root of ['chat', 'doctor', 'run', 'status', 'stop'] as const) {
 
 for (const input of [
   {
+    moduleId: '../src/commands/knowledge.js',
+    registerName: 'registerKnowledgeCommands',
+    root: 'knowledge',
+  },
+  {
+    moduleId: '../src/commands/route.js',
+    registerName: 'registerRouteCommands',
+    root: 'route',
+  },
+  {
     moduleId: '../src/commands/clinical-imports.js',
     registerName: 'registerAssertionCommands',
     root: 'assertion',
@@ -355,14 +374,44 @@ test('scoped command routing mounts experiment commands with vault services', as
 
 for (const input of [
   {
+    moduleId: '../src/commands/health-allergy-save.js',
+    registerName: 'registerAllergyCommands',
+    root: 'allergy',
+  },
+  {
     moduleId: '../src/commands/health-blood-test-save.js',
     registerName: 'registerBloodTestCommands',
     root: 'blood-test',
   },
   {
+    moduleId: '../src/commands/capture.js',
+    registerName: 'registerCaptureCommands',
+    root: 'capture',
+  },
+  {
+    moduleId: '../src/commands/health-condition-save.js',
+    registerName: 'registerConditionCommands',
+    root: 'condition',
+  },
+  {
+    moduleId: '../src/commands/event.js',
+    registerName: 'registerEventCommands',
+    root: 'event',
+  },
+  {
+    moduleId: '../src/commands/food.js',
+    registerName: 'registerFoodCommands',
+    root: 'food',
+  },
+  {
     moduleId: '../src/commands/health-immunization-save.js',
     registerName: 'registerImmunizationCommands',
     root: 'immunization',
+  },
+  {
+    moduleId: '../src/commands/journal.js',
+    registerName: 'registerJournalCommands',
+    root: 'journal',
   },
   {
     moduleId: '../src/commands/health-goal-save.js',
@@ -388,6 +437,11 @@ for (const input of [
     moduleId: '../src/commands/wearables.js',
     registerName: 'registerWearablesCommands',
     root: 'wearables',
+  },
+  {
+    moduleId: '../src/commands/workout.js',
+    registerName: 'registerWorkoutCommands',
+    root: 'workout',
   },
 ] as const) {
   test(`scoped command routing maps ${input.root} to its command family`, async () => {
@@ -459,27 +513,18 @@ for (const root of ['init', 'validate', 'vault'] as const) {
 
 const intentionallyFullOnlyRootCommandReasons = {
   age: 'Murph Age imports model/readiness surfaces and is not a common onboarding path.',
-  allergy: 'Generic health CRUD root not currently a measured hot path.',
   audit: 'Audit commands are operator/maintenance oriented and can keep full discovery.',
-  capture: 'Capture commands are broad media/attachment ingestion commands.',
-  condition: 'Generic health CRUD root not currently a measured hot path.',
   document: 'Document import/show/list is not part of the optimized onboarding path.',
-  event: 'Generic event command family has many typed subcommands and is not a hot path.',
   export: 'Export is an occasional full-vault operator path.',
   family: 'Generic health CRUD root not currently a measured hot path.',
-  food: 'Food commands are not currently part of the frequent lazy-read path.',
   genetics: 'Generic health CRUD root not currently a measured hot path.',
   intake: 'Intake helper commands are not currently a frequent agent path.',
   intervention: 'Intervention helper commands are not currently a frequent agent path.',
-  journal: 'Journal commands are not currently part of the optimized onboarding path.',
-  knowledge: 'Knowledge writes are assistant-authored derived-page flows, not ordinary reads.',
   model: 'Model commands are runtime/model-card operator diagnostics.',
   provider: 'Provider registry commands are not currently a frequent agent path.',
   recipe: 'Recipe commands are not currently part of the optimized onboarding path.',
-  route: 'Route commands depend on optional Mapbox routing behavior.',
   samples: 'Samples commands cover explicit raw/debug sample paths.',
   'scheduled-log': 'Scheduled-log commands are older operational helpers.',
-  workout: 'Workout commands include richer capture/import surfaces.',
 } as const satisfies Record<string, string>
 
 test('lazy route table accounts for every full manifest root command', async () => {
