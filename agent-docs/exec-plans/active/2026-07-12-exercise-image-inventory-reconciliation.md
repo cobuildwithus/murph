@@ -65,14 +65,15 @@ Updated: 2026-07-12
 - Materialized the ignored deterministic recovery manifest: 184 variant exercises, 109 variant stretches, and 120 common stretches; the initial movement-specific slide plan totals 1,294 images pending per-movement validation.
 - Preserved the separate dirty historical variant-plan worktree without edits.
 - Completed manifest sequence 1 (`EX649`, Hollow Body Scissor): reduced the heuristic plan to two distinct frames after full-resolution QA rejected a vertical interpretation and redundant mirrored-cross frames; uploaded two unique public images; updated only the owning seed `Images` field; and rebuilt the catalog to 1,336 imaged movements with 4,054 unique images.
+- Completed manifest sequence 2 (`EX650`, Hollow Body Tuck Rock): validated three distinct tuck/rock positions, rejected three anatomically or stylistically incorrect backward-rock drafts, uploaded three full-resolution accepted images, updated only the owning seed `Images` field, and rebuilt the catalog to 1,337 imaged movements with 4,057 unique images.
 
 ## Now
 
-- Continue serialized built-in generation, visual QA, idempotent upload, and seed reconciliation from manifest sequence 2; 412 image-less movements remain.
+- Continue serialized built-in generation, visual QA, idempotent upload, and seed reconciliation from manifest sequence 3; 411 image-less movements remain.
 
 ## Next
 
-- Resume at manifest sequence 2, validate its movement map and slide count, then persist each accepted/uploaded slide before advancing.
+- Resume at manifest sequence 3, validate its movement map and slide count, then persist each accepted/uploaded slide before advancing.
 - Keep ReviewGPT blocked until generation is complete, PR #557 is merged, and the controller grants the single patched 0.5.103 exact-head audit.
 
 ## Verification
@@ -82,4 +83,4 @@ Updated: 2026-07-12
 - `pnpm --dir packages/exercise-library verify`: passed; 1 test file and 6 tests passed, including exact catalog counts, URL uniqueness, and the 500-character alt bound.
 - Direct catalog proof: 1,748 total; 1,335 with images; 413 without images; 4,052 images; 4,052 unique URLs; zero invalid public URLs; zero alts over 500 characters; zero non-image item drift.
 - Remaining generation, upload, full repository verification, completion audits, and final-head CI are pending.
-- After sequence 1, `pnpm --dir packages/exercise-library verify` passes: typecheck, 6 tests, deterministic generation, and generation drift check.
+- After sequence 2, `pnpm --dir packages/exercise-library verify` passes: typecheck, 6 tests, deterministic generation, and generation drift check.

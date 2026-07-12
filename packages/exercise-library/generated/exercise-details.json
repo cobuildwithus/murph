@@ -1,5 +1,5 @@
 {
-  "catalogHash": "sha256:cfddaccb413594919cd53076bb4444ed3b11cc72abfe4ce013e87797abd4162c",
+  "catalogHash": "sha256:6688264c2d51a3944acc188e725e95e2d897228e05bf639418bcd1e7311d5c9f",
   "generatedAt": null,
   "items": [
     {
@@ -19239,7 +19239,23 @@
       ],
       "equipment": [],
       "id": "EX650",
-      "images": [],
+      "images": [
+        {
+          "alt": "The exerciser holds a compact rounded tuck with shoulders and feet lifted and arms reaching outside the shins.",
+          "step": "Set the tuck",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/bb3e9805-f3ca-493a-14a4-17698c284800/public"
+        },
+        {
+          "alt": "The exerciser rocks the unchanged tuck onto the shoulder blades while keeping the hips and neck clear of the mat.",
+          "step": "Rock back",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/396ea77c-2ae4-4833-b5cc-c162ce35f400/public"
+        },
+        {
+          "alt": "The exerciser rocks forward to balance on the sacrum without sitting up or letting the feet touch.",
+          "step": "Rock forward",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/ea8ececb-9869-4c0c-9d91-2df168194e00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "advanced",
       "modality": "Strength",
