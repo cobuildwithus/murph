@@ -8,6 +8,9 @@
   },
   "references": [
     {
+      "path": "../clinical-records"
+    },
+    {
       "path": "../contracts/tsconfig.build.json"
     },
     {
