@@ -125,7 +125,7 @@ export const ASSISTANT_SKILLS = [
     slug: 'general-eye-health',
     name: 'general-eye-health',
     triggerHint:
-      'Use for digital eye strain, dry or irritated eyes, contact-lens comfort and safety, myopia or refractive questions, eye-health prevention, eye exams, and triage of eye pain, redness, light sensitivity, discharge, vision changes, flashes, floaters, injury, or chemical exposure. Use red-light-therapy for photobiomodulation devices and computer-use only for booking or ordering after the safe eye-health action is clear.',
+      'Use for digital eye strain, dry or irritated eyes, contact-lens comfort and safety, myopia or refractive questions, eye-health prevention, eye exams, and triage of eye pain, redness, light sensitivity, discharge, vision changes, flashes, floaters, injury, or chemical exposure.',
   },
   {
     slug: 'behavior-followthrough',

@@ -41,10 +41,6 @@ Read `references/triage-and-contact-lenses.md` before answering any active eye s
 - For non-urgent screen discomfort, check task duration, text size, glare, screen position, direct fan or air-conditioning, symptom timing, and whether the problem also occurs away from screens.
 - If the user has diabetes, immune suppression, inflammatory disease, recent eye surgery or injection, or prescription eye medicines, lower the threshold for clinician input without inventing a diagnosis.
 
-## If Context Is Thin
-
-Ask: "Is this mild tired or dry discomfort in both eyes that improves with blinking or rest, or is there pain, redness, light sensitivity, discharge, a sudden vision change, new flashes or floaters, injury, or a contact lens that still hurts after removal?"
-
 ## Interpretation Rules
 
 - A value such as `-2.75` is correction information, not an eye-health score, diagnosis, or urgency marker. Do not label its severity, infer retinal health, or recommend stronger, weaker, or different lenses from that number.

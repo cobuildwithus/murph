@@ -298,6 +298,9 @@ describe('assistant skill assets', () => {
     expect(eyeSkillText).toContain('Do not recommend blue-light-filtering glasses')
     expect(eyeSkillText).toContain('new flashes of light')
     expect(eyeSkillText).toContain('a sudden increase in or many new floaters')
+    expect(eyeSkillText).toContain('A contact-lens wearer with pain')
+    expect(eyeSkillText).not.toContain('still hurts after removal')
+    expect(eyeSkillText).not.toContain('pain that persists or worsens after removal')
     expect(eyeSkillText).toContain('gradual, mild, in both eyes')
     expect(eyeSkillText).not.toContain('usually in both eyes')
     expect(eyeSkillText).toContain('Stop the trial')
@@ -364,6 +367,12 @@ describe('assistant skill assets', () => {
     })
     expect(systemPrompt).toContain(
       'Eye health: general-eye-health for screen-linked discomfort, contact-lens safety, refractive questions, prevention, and symptom triage.',
+    )
+    expect(systemPrompt).toContain(
+      'Route any active eye pain, redness, light sensitivity, discharge, vision change, flashes, floaters, injury, or chemical exposure to general-eye-health first',
+    )
+    expect(systemPrompt).toContain(
+      'Load secondary skills only after establishing the care level and immediate action.',
     )
   })
 
