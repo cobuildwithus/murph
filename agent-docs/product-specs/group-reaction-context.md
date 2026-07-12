@@ -1,14 +1,16 @@
-# Deferred Group Reaction Context
+# Group Reaction Context And Affirmative Replies
 
-Last verified: 2026-07-10
+Last verified: 2026-07-12
 Status: Implemented
 
 ## Product Goal
 
 Murph should notice when people add or remove reactions in an established group
-chat so the next real group exchange can reflect what landed, what did not, and
-the room's developing taste. A reaction is background context, not a new turn:
-it must never wake Murph or produce a standalone reply.
+chat so the conversation can reflect what landed, what did not, and the room's
+developing taste. Most reactions are background context, not a new turn. An
+affirmative reaction to Murph's own exact message is the narrow exception: it
+can answer the question or accept the action Murph just offered without forcing
+the member to send a second text.
 
 ## Product Contract
 
@@ -22,17 +24,27 @@ it must never wake Murph or produce a standalone reply.
 - Preserve a bounded representation of the referenced content rather than
   guessing from webhook metadata. Truncation must be explicit, and media must
   use safe descriptors rather than provider URLs or attachment identifiers.
-- Append the observation as encrypted conversation context in the existing
-  hosted mailbox. It is deduplicated by provider event id and does not create a
-  reaction store, queue, scheduler, or second memory system.
+- Append the observation in the existing encrypted conversation mailbox. It is
+  deduplicated by provider event id and does not create a reaction store, queue,
+  scheduler, classifier, or second memory system.
 - A reaction-context row is non-wakeable. It emits no Temporal signal or direct
   ensure request, does not count as runnable mailbox lag, and cannot start,
   restart, or keep a hosted runtime alive.
-- Hold the observation until the next natural message in the same group. That
-  message remains the actionable reply anchor; reaction context alone is never
-  eligible for a response. Pair by provider occurrence time, using mailbox
-  order only as a deterministic tie-break; delivery skew must not attach a
-  later reaction to an earlier message.
+- When the canonical target is Murph-authored and the reaction is like, love,
+  heart, thumbs-up, or its supported emoji equivalent, represent the add as an
+  ordinary wakeable group reply anchored to that exact target message and part.
+  The assistant interprets the reacted-to content: when the reaction clearly
+  confirms the exact question or offered action, it follows through without
+  asking the same confirmation again. Separate authorization, payment, and
+  irreversible-effect safeguards not covered by that exact question remain.
+- Represent removal of that same affirmative reply as a wakeable withdrawal so
+  pending follow-through can stop before an irreversible effect. Do not infer
+  any unrelated request from either the add or removal.
+- Hold context-only observations until the next natural message in the same
+  group. That message remains their actionable reply anchor; deferred reaction
+  context alone is never eligible for a response. Pair by provider occurrence
+  time, using mailbox order only as a deterministic tie-break; delivery skew
+  must not attach a later reaction to an earlier message.
 - Bound deferred context to the newest 32 observations per group and 256 across
   the hosted pending set. Older overflow is terminally suppressed so reaction
   floods cannot create unbounded foreground reads or prompts.
@@ -42,15 +54,18 @@ it must never wake Murph or produce a standalone reply.
   and imported source metadata retain one opaque target key derived from the
   canonical message id plus optional part index so identical rendered text
   cannot merge distinct targets.
-- Keep the existing disclosed react-to-join flow intact. Observational reaction
-  ingestion must not weaken group admission, sharing consent, ordinary message
-  replies, or any other product-critical flow.
+- Keep the existing disclosed react-to-join flow intact and give it priority:
+  its accepted reaction remains context-only for assistant automation so one
+  tap does not both accept membership and create a second assistant turn.
+  Reaction ingestion must not weaken group admission, sharing consent, ordinary
+  message replies, or any other product-critical flow.
 
 ## Interpretation And Memory
 
-Reactions are weak, contextual evidence. A single like, laugh, dislike, or
-custom emoji is not a durable personality claim and must not outweigh explicit
-messages. Ambiguous reactions should remain ambiguous.
+Reactions are weak, contextual evidence. The affirmative-reply exception is
+only turn intent for Murph's exact reacted-to message; it is not a durable
+personality claim and must not outweigh explicit messages. Ambiguous reactions
+should remain ambiguous.
 
 Repeated patterns across separate occasions may cautiously refine the existing
 group-scoped Knowledge Wiki with facts such as recurring shared humor, content
@@ -70,16 +85,20 @@ preferences, or a participant's apparent tastes. Any such synthesis must:
 2. Web fetches the canonical target message from Linq because the reaction
    webhook does not carry the reacted-to content. Identity, group, target, and
    optional part-index agreement are checked before persistence.
-3. Web writes one encrypted, mailbox-only context item through the existing
-   conversation lane without signaling orchestration.
-4. The hosted runtime may import that item only through normal mailbox
-   processing. The mailbox projection exposes the earliest wakeable message
-   with only the bounded newest reaction suffix before it and advances existing
-   durable progress over the omitted non-wakeable prefix. Assistant automation
-   keeps context-only input deferred until a causally subsequent actionable
-   message from the same group arrives.
-5. The ordinary group turn sees the pending reaction observations alongside the
-   new message and applies the group-chat behavior rules.
+3. Web writes either a non-wakeable `conversation.reaction` context item or,
+   for an affirmative reaction to Murph's own target, an ordinary
+   `conversation.message` reply with the exact native reply anchor.
+4. Web signals the existing Temporal/direct-ensure handoff only for the
+   wakeable reply. Duplicate provider delivery re-hands off the existing
+   actionable row without treating stale lane facts as fresh authority.
+5. The hosted runtime imports both shapes through normal mailbox processing.
+   The mailbox projection exposes the earliest wakeable message with only the
+   bounded newest reaction suffix before it and advances existing durable
+   progress over the omitted non-wakeable prefix. Assistant automation keeps
+   context-only input deferred until a causally subsequent actionable message
+   from the same group arrives.
+6. The group turn interprets the exact target and reaction through the group-chat
+   behavior rules; the reaction itself never bypasses effect authority.
 
 The encrypted mailbox is transient ingress evidence, not canonical product
 truth. If repeated observations merit durable synthesis, the existing
@@ -95,7 +114,8 @@ group-scoped Knowledge Wiki is the sole owner.
 - Permanent unsupported or missing targets are ignored safely. Transient Linq
   read failures remain retryable so provider retry can complete enrichment.
 - Duplicate delivery may repeat validation and target lookup, but mailbox
-  event-id dedupe prevents duplicate context.
+  event-id dedupe prevents duplicate input; duplicate actionable rows repeat
+  only the idempotent runtime handoff.
 - Overflow suppression records opaque input evidence only; it must not copy raw
   reacted-to content into logs or control-plane state.
 - Provider payloads and target content must not enter Temporal workflow state,
@@ -104,10 +124,12 @@ group-scoped Knowledge Wiki is the sole owner.
 ## Acceptance Criteria
 
 - Adding a supported reaction in an active Linq group persists one encrypted
-  context item containing the reactor, reaction, and correct target content.
-- Removing it persists a retraction that cancels the earlier weak signal.
-- Neither event starts runtime work, changes wakeable mailbox high-water, or
-  causes Murph to reply.
+  item containing the reactor, reaction, and correct target content.
+- Ordinary reactions remain non-wakeable deferred context, and removal retracts
+  the earlier weak signal.
+- An affirmative add to Murph's own target becomes one wakeable exact reply; its
+  removal becomes one wakeable withdrawal. Both retain the target message/part
+  anchor and the normal effect safeguards.
 - The next natural message in that group exposes pending reaction context and
   remains the response target.
 - Invalid targets fail closed, transient provider reads retry, duplicates are
@@ -143,5 +165,7 @@ the same bounded pass without moving retention policy into SQL.
 Before enabling production ingestion, verify the Linq webhook subscription
 includes both `reaction.added` and `reaction.removed`; source configuration or a
 local tunnel is not proof of the production dashboard state. Post-deploy, prove
-that an add and removal produce no invocation, then send one natural group
-message and confirm both the deferred context and existing join-offer behavior.
+that ordinary add/removal events produce no invocation, an affirmative reaction
+to Murph's own question invokes one exact anchored turn, removal can withdraw
+pending follow-through, and existing join-offer behavior does not create a
+second assistant turn.

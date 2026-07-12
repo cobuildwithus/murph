@@ -68,7 +68,7 @@ describe("stageHostedLinqGroupReactionContext", () => {
     });
     mocks.appendHostedMailboxEnvelopeTx.mockResolvedValue({
       duplicate: false,
-      item: { id: "mailbox_reaction_1" },
+      item: { id: "mailbox_reaction_1", laneSeq: 17n },
     });
   });
 
@@ -83,9 +83,11 @@ describe("stageHostedLinqGroupReactionContext", () => {
 
     expect(result).toEqual({
       duplicate: false,
+      laneSeq: "17",
       mailboxItemId: "mailbox_reaction_1",
       status: "staged",
       userId: "member_group_1",
+      wakeable: false,
     });
     expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledTimes(1);
     expect(mocks.getHostedLinqChatSummary).toHaveBeenCalledWith({
@@ -149,6 +151,99 @@ describe("stageHostedLinqGroupReactionContext", () => {
       prisma,
     })).resolves.toEqual({ reason: "invalid_actor", status: "ignored" });
     expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledTimes(1);
+  });
+
+  it("turns an affirmative reaction to Murph's message into an exact wakeable reply", async () => {
+    const prisma = createPrismaStub();
+    mocks.getHostedLinqReactionTargetMessage.mockResolvedValueOnce({
+      chatId: "chat_group_1",
+      id: "message_target_1",
+      isFromMe: true,
+      parts: [{ type: "text", value: "I have your supplements in checkout. Want me to order?" }],
+      service: "iMessage",
+    });
+
+    await expect(stageHostedLinqGroupReactionContext({
+      event: buildReactionEvent({ partIndex: 0 }),
+      prisma,
+    })).resolves.toEqual({
+      duplicate: false,
+      laneSeq: "17",
+      mailboxItemId: "mailbox_reaction_1",
+      status: "staged",
+      userId: "member_group_1",
+      wakeable: true,
+    });
+
+    const envelope = mocks.appendHostedMailboxEnvelopeTx.mock.calls[0]?.[0]?.envelope;
+    expect(envelope).toMatchObject({
+      kind: "conversation.message",
+      message: {
+        linqMessage: {
+          messageId: "event_reaction_1",
+          reactionEligible: false,
+          replyToMessageId: "message_target_1",
+          replyToPartIndex: 0,
+          threadIsDirect: false,
+        },
+      },
+    });
+    expect(envelope.message.linqMessage).not.toHaveProperty("reactionOperation");
+    expect(envelope.message.linqMessage).not.toHaveProperty("reactionTargetKey");
+    const text = envelope.message.linqMessage.parts[0].value;
+    expect(text).toContain("Group affirmative reaction reply to Murph's own message.");
+    expect(text).toContain("Action: added reaction like");
+    expect(text).toContain("Want me to order?");
+    expect(text).toContain("treat this as yes or confirmation of that exact action");
+    expect(text).toContain("do not ask the same question again");
+    expect(text).toContain("Otherwise keep it as context only");
+  });
+
+  it("makes removal of an affirmative reply wakeable withdrawal", async () => {
+    const prisma = createPrismaStub();
+    mocks.getHostedLinqReactionTargetMessage.mockResolvedValueOnce({
+      chatId: "chat_group_1",
+      id: "message_target_1",
+      isFromMe: true,
+      parts: [{ type: "text", value: "Want me to order?" }],
+      service: "iMessage",
+    });
+
+    await expect(stageHostedLinqGroupReactionContext({
+      event: buildReactionEvent({ eventType: "reaction.removed" }),
+      prisma,
+    })).resolves.toMatchObject({ wakeable: true });
+
+    const envelope = mocks.appendHostedMailboxEnvelopeTx.mock.calls[0]?.[0]?.envelope;
+    expect(envelope.kind).toBe("conversation.message");
+    expect(envelope.message.linqMessage.parts[0].value).toContain(
+      "Stop any pending follow-through that has not become irreversible",
+    );
+  });
+
+  it("keeps non-affirmative and join-acceptance reactions deferred", async () => {
+    const prisma = createPrismaStub();
+    mocks.getHostedLinqReactionTargetMessage.mockResolvedValue({
+      chatId: "chat_group_1",
+      id: "message_target_1",
+      isFromMe: true,
+      parts: [{ type: "text", value: "Murph-authored target" }],
+      service: "iMessage",
+    });
+
+    await expect(stageHostedLinqGroupReactionContext({
+      event: buildReactionEvent({ eventId: "event_laugh", reactionType: "laugh" }),
+      prisma,
+    })).resolves.toMatchObject({ wakeable: false });
+    await expect(stageHostedLinqGroupReactionContext({
+      allowActionableReply: false,
+      event: buildReactionEvent({ eventId: "event_join_acceptance" }),
+      prisma,
+    })).resolves.toMatchObject({ wakeable: false });
+
+    expect(mocks.appendHostedMailboxEnvelopeTx.mock.calls.map(
+      (call) => call[0].envelope.kind,
+    )).toEqual(["conversation.reaction", "conversation.reaction"]);
   });
 
   it("keeps a stable target key across add/remove while separating parts", async () => {
@@ -453,6 +548,8 @@ describe("stageHostedLinqGroupReactionContext", () => {
     const prisma = createPrismaStub();
     mocks.readHostedMailboxItemByDedupeKey.mockResolvedValueOnce({
       id: "mailbox_existing_reaction",
+      kind: "conversation.message",
+      laneSeq: 23n,
     });
 
     await expect(stageHostedLinqGroupReactionContext({
@@ -460,9 +557,11 @@ describe("stageHostedLinqGroupReactionContext", () => {
       prisma,
     })).resolves.toEqual({
       duplicate: true,
+      laneSeq: "23",
       mailboxItemId: "mailbox_existing_reaction",
       status: "staged",
       userId: "member_group_1",
+      wakeable: true,
     });
     expect(mocks.getHostedLinqReactionTargetMessage).not.toHaveBeenCalled();
     expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
@@ -477,6 +576,7 @@ function buildReactionEvent(input: {
   isFromMe?: boolean;
   linePhoneNumber?: string;
   partIndex?: number | null;
+  reactionType?: string;
 }) {
   const event = parseHostedLinqProviderEvent({
     event: {
@@ -495,7 +595,7 @@ function buildReactionEvent(input: {
         message_id: "message_target_1",
         part_index: input.partIndex === undefined ? 0 : input.partIndex,
         reacted_at: "2026-07-10T12:00:00.000Z",
-        reaction_type: "like",
+        reaction_type: input.reactionType ?? "like",
       },
       event_id: input.eventId ?? "event_reaction_1",
       event_type: input.eventType ?? "reaction.added",

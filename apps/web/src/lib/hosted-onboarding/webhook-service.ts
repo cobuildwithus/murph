@@ -194,6 +194,7 @@ export async function handleHostedOnboardingLinqWebhook(input: {
       }
       const contextResult = reactionContextEnabled
         ? await stageHostedLinqGroupReactionContext({
+            allowActionableReply: !joinAccepted,
             event: providerEvent,
             prisma,
             ...(input.signal ? { signal: input.signal } : {}),
@@ -201,7 +202,9 @@ export async function handleHostedOnboardingLinqWebhook(input: {
         : null;
       const contextStaged = contextResult?.status === "staged";
       const contextReason = contextStaged
-        ? "staged-linq-group-reaction-context"
+        ? contextResult.wakeable
+          ? "wake-appended-linq-group-reaction-reply"
+          : "staged-linq-group-reaction-context"
         : `skipped-linq-group-reaction-context:${
             contextResult?.reason ?? "rollout-disabled"
           }`;
@@ -216,6 +219,27 @@ export async function handleHostedOnboardingLinqWebhook(input: {
           ? "accepted-linq-group-join-offer-reaction"
           : contextReason,
       };
+      if (contextResult?.status === "staged" && contextResult.wakeable) {
+        await maybeHandoffHostedExecutionWebhookWake({
+          response,
+          scheduleAfterResponse: input.scheduleAfterResponse,
+          wakeHandoff: {
+            eventId: providerEvent.eventId,
+            linqChatId: providerEvent.linqChatId,
+            mailboxItemId: contextResult.mailboxItemId,
+            source: "linq",
+            userId: contextResult.userId,
+            ...(contextResult.duplicate
+              ? {}
+              : {
+                  wakeMailboxCheckpoint: {
+                    lane: "conversation",
+                    laneSeq: contextResult.laneSeq,
+                  },
+                }),
+          },
+        });
+      }
       responseReason = response.reason ?? null;
       finishHostedOnboardingTiming(timing, "completed", {
         duplicate: providerResult.duplicate,

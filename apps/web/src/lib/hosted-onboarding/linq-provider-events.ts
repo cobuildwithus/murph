@@ -135,6 +135,13 @@ export function normalizeHostedLinqGroupJoinOfferReaction(input: {
   if (input.eventType !== "reaction.added") {
     return null;
   }
+  return isHostedLinqAffirmativeReaction(input) ? "accept" : null;
+}
+
+export function isHostedLinqAffirmativeReaction(input: {
+  customEmoji?: string | null;
+  reactionType?: string | null;
+}): boolean {
   const reactionType = normalizeReactionToken(input.reactionType);
   if (
     reactionType === "like"
@@ -143,11 +150,11 @@ export function normalizeHostedLinqGroupJoinOfferReaction(input: {
     || reactionType === "thumbsup"
     || reactionType === "heart"
   ) {
-    return "accept";
+    return true;
   }
 
   const customEmoji = normalizeReactionEmoji(input.customEmoji);
-  return customEmoji === "👍" || customEmoji === "❤" ? "accept" : null;
+  return customEmoji === "👍" || customEmoji === "❤";
 }
 
 function parseHostedLinqMessageReceivedProviderEvent(input: {

@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 
 import type { Prisma, PrismaClient } from "@prisma/client";
 import {
+  buildHostedExecutionLinqConversationMessageWake,
   buildHostedExecutionLinqConversationReactionWake,
 } from "@murphai/hosted-execution";
 
@@ -24,6 +25,7 @@ import {
 import { readActiveHostedMemberAccess } from "./member-access";
 import { createHostedLinqParticipantContact } from "./linq-participant-contact";
 import type { ParsedHostedLinqProviderEvent } from "./linq-provider-events";
+import { isHostedLinqAffirmativeReaction } from "./linq-provider-events";
 import { HOSTED_ONBOARDING_TRANSACTION_OPTIONS } from "./shared";
 
 const HOSTED_LINQ_REACTION_TARGET_TEXT_MAX_CHARS = 2_000;
@@ -41,9 +43,11 @@ type HostedLinqGroupReactionContextSkipReason =
 export type HostedLinqGroupReactionContextResult =
   | {
       duplicate: boolean;
+      laneSeq: string;
       mailboxItemId: string;
       status: "staged";
       userId: string;
+      wakeable: boolean;
     }
   | {
       reason: HostedLinqGroupReactionContextSkipReason;
@@ -51,6 +55,7 @@ export type HostedLinqGroupReactionContextResult =
     };
 
 export async function stageHostedLinqGroupReactionContext(input: {
+  allowActionableReply?: boolean;
   event: ParsedHostedLinqProviderEvent;
   prisma: PrismaClient;
   signal?: AbortSignal;
@@ -76,9 +81,11 @@ export async function stageHostedLinqGroupReactionContext(input: {
   if (existing) {
     return {
       duplicate: true,
+      laneSeq: existing.laneSeq.toString(),
       mailboxItemId: existing.id,
       status: "staged",
       userId: route.route.containerMemberId,
+      wakeable: existing.kind === "conversation.message",
     };
   }
 
@@ -139,8 +146,17 @@ export async function stageHostedLinqGroupReactionContext(input: {
   const reactionOperation = input.event.eventType === "reaction.removed"
     ? "removed"
     : "added";
+  const wakeable = input.allowActionableReply !== false
+    && target.isFromMe
+    && isHostedLinqAffirmativeReaction({
+      customEmoji: input.event.reactionCustomEmoji,
+      reactionType: input.event.reactionType,
+    });
 
-  const envelope = buildHostedExecutionLinqConversationReactionWake({
+  const buildWake = wakeable
+    ? buildHostedExecutionLinqConversationMessageWake
+    : buildHostedExecutionLinqConversationReactionWake;
+  const envelope = buildWake({
     accountLookupKey,
     contactKind: context.actor.kind,
     contactLookupKey: context.actor.lookupKey,
@@ -152,17 +168,33 @@ export async function stageHostedLinqGroupReactionContext(input: {
       messageId: input.event.eventId,
       parts: [{
         type: "text",
-        value: buildHostedLinqReactionContextText({
-          operation: reactionOperation,
-          reactionCustomEmoji: input.event.reactionCustomEmoji,
-          reactionType: input.event.reactionType,
-          reactionTargetKey,
-          targetText,
-        }),
+        value: wakeable
+          ? buildHostedLinqAffirmativeReactionReplyText({
+            operation: reactionOperation,
+            reactionCustomEmoji: input.event.reactionCustomEmoji,
+            reactionType: input.event.reactionType,
+            targetText,
+          })
+          : buildHostedLinqReactionContextText({
+            operation: reactionOperation,
+            reactionCustomEmoji: input.event.reactionCustomEmoji,
+            reactionType: input.event.reactionType,
+            reactionTargetKey,
+            targetText,
+          }),
       }],
       reactionEligible: false,
-      reactionOperation,
-      reactionTargetKey,
+      ...(wakeable
+        ? {
+            replyToMessageId: context.messageId,
+            ...(context.partIndex === null
+              ? {}
+              : { replyToPartIndex: context.partIndex }),
+          }
+        : {
+            reactionOperation,
+            reactionTargetKey,
+          }),
       service: input.event.service ?? target.service,
       threadIsDirect: false,
     },
@@ -200,9 +232,11 @@ export async function stageHostedLinqGroupReactionContext(input: {
     });
     return {
       duplicate: append.duplicate,
+      laneSeq: append.item.laneSeq.toString(),
       mailboxItemId: append.item.id,
       status: "staged",
       userId: route.route.containerMemberId,
+      wakeable,
     };
   }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
 }
@@ -417,6 +451,28 @@ function buildHostedLinqReactionContextText(input: {
     "Group reaction context (weak evidence; do not reply to this item alone).",
     `Action: ${input.operation} reaction ${reaction}`,
     `Reaction target: ${input.reactionTargetKey}`,
+    "Reacted-to content:",
+    input.targetText,
+  ].join("\n");
+}
+
+function buildHostedLinqAffirmativeReactionReplyText(input: {
+  operation: "added" | "removed";
+  reactionCustomEmoji: string | null;
+  reactionType: string | null;
+  targetText: string;
+}): string {
+  const reaction = truncateHostedLinqReactionContextText(
+    input.reactionCustomEmoji ?? input.reactionType ?? "reaction",
+    HOSTED_LINQ_REACTION_LABEL_MAX_CHARS,
+  );
+  const interpretation = input.operation === "added"
+    ? "The member used this as an affirmative reply to your exact message. If that message clearly asked a yes/no question or offered a specific action, treat this as yes or confirmation of that exact action, continue it, and do not ask the same question again. Otherwise keep it as context only and do not reply or act solely because of the reaction. Preserve any separate authorization, payment, or irreversible-effect safeguard not covered by the exact question. Do not infer unrelated intent."
+    : "The member withdrew this reply to your exact message. Stop any pending follow-through that has not become irreversible, and do not infer unrelated intent.";
+  return [
+    "Group affirmative reaction reply to Murph's own message.",
+    `Action: ${input.operation} reaction ${reaction}`,
+    interpretation,
     "Reacted-to content:",
     input.targetText,
   ].join("\n");
