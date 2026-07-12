@@ -37,7 +37,7 @@ Self-care is reasonable only for mild, gradual, bilateral tired, dry, burning, g
 
 ## Contact-Lens Action Rules
 
-- At unusual discomfort, redness, or irritation, remove the lens or lenses immediately and use current backup glasses. With pain, redness, light sensitivity, discharge, a new vision change, or symptoms that persist after removal, do not reinsert them until an eye clinician says it is safe and obtain prompt same-day eye care. Do not discard the lenses or case until asking whether the clinician wants them for evaluation; isolate them so they cannot be reused accidentally.
+- At unusual discomfort, redness, or irritation, remove the lens or lenses immediately and use current backup glasses. When the Decision Order assigns prompt same-day eye care, do not reinsert the lenses until an eye clinician says it is safe. Do not discard the lenses or case until asking whether the clinician wants them for evaluation; isolate them so they cannot be reused accidentally.
 - For mild end-of-day dryness that fully resolves after removal and has no warning feature, do not wear the lenses again that day. Follow the prescribed replacement and wear schedule at the next wear window; if symptoms return, stop lens wear and arrange a contact-lens-fit exam.
 - Never sleep in lenses unless the prescribing clinician specifically directed it. Remove lenses before showering, swimming, or using a hot tub.
 - If water contacts lenses, remove them as soon as possible. Discard daily disposables; for reusable lenses, follow the lens and solution instructions for cleaning and overnight disinfection. Never rinse or store lenses in any water or saliva.

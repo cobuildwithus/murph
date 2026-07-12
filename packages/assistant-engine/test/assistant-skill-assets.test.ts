@@ -350,7 +350,16 @@ describe('assistant skill assets', () => {
       'A contact-lens wearer with redness or a new vision change is not eligible for this pathway',
     )
     expect(triageText).toContain(
-      'a new vision change, or symptoms that persist after removal, do not reinsert them until an eye clinician says it is safe and obtain prompt same-day eye care',
+      'When the Decision Order assigns prompt same-day eye care, do not reinsert the lenses until an eye clinician says it is safe.',
+    )
+    expect(triageText).not.toContain(
+      'or symptoms that persist after removal, do not reinsert',
+    )
+    expect(triageText).toContain(
+      'mild, gradual, bilateral tired, dry, burning, gritty, or intermittently blurry symptoms',
+    )
+    expect(triageText).toContain(
+      'improve with complete blinking, rest, or lens removal',
     )
     expect(triageText).not.toContain('pain that persists or worsens after removal')
     expect(triageText).toContain('mild, gradual, bilateral')
