@@ -18,6 +18,7 @@ import type {
   HostedRuntimeRedactedJson,
   HostedRuntimeLatencyPhaseBreakdown,
   HostedRuntimeLatencyTraceStagedMilestones,
+  HostedRuntimeUsageNoticeDeliveryTarget,
   HostedWorkspaceCheckpointReason,
   HostedWorkspaceCheckpointRequest,
   HostedWorkspaceCheckpointResponse,
@@ -204,7 +205,10 @@ export interface HostedWorkspaceRunnerAssistantPhaseInput {
   now?: () => string;
   platform: HostedRuntimePlatform;
   prepareAutoReplyDelivery?: (() => Promise<HostedWorkspaceRunnerAssistantPhaseDeliveryBarrier | null>) | null;
-  recordDeferredUsage?: ((record: AssistantUsageRecord) => void) | null;
+  recordDeferredUsage?: ((
+    record: AssistantUsageRecord,
+    noticeDeliveryTarget?: HostedRuntimeUsageNoticeDeliveryTarget | null,
+  ) => void) | null;
   shouldYieldBackgroundMaintenance?: (() => boolean) | null;
   workspace: HostedWorkspaceState | null;
 }
@@ -213,6 +217,14 @@ export interface HostedWorkspaceRunnerAssistantInputBatch {
   assistantInputIds: readonly string[];
   emailDeliveryContexts: readonly HostedAssistantEmailDeliveryContext[];
   linqDeliveryContexts: readonly HostedAssistantLinqDeliveryContext[];
+  usageNoticeDeliveryTargets?: readonly (
+    HostedRuntimeUsageNoticeDeliveryTarget | null
+  )[];
+}
+
+interface HostedDeferredAssistantUsageRecord {
+  noticeDeliveryTarget: HostedRuntimeUsageNoticeDeliveryTarget | null;
+  record: AssistantUsageRecord;
 }
 
 export interface HostedWorkspaceRunnerHandledDeviceSyncWake {
@@ -727,7 +739,7 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
   }
 
   const runAssistantPhase = input.runAssistantPhase;
-  const deferredUsageRecords: AssistantUsageRecord[] = [];
+  const deferredUsageRecords: HostedDeferredAssistantUsageRecord[] = [];
   const pendingDeferredUsageWrites = new Set<Promise<void>>();
   let deferredUsageCaptureClosed = false;
   let deferredUsageCaptureStarted = false;
@@ -750,7 +762,7 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
     }
   };
   const startDeferredUsageRecords = (
-    records: readonly AssistantUsageRecord[],
+    records: readonly HostedDeferredAssistantUsageRecord[],
   ): void => {
     if (records.length === 0) {
       maybeResolveDeferredUsageCompletion();
@@ -889,13 +901,20 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
         input,
         stopForegroundMailboxImportLoop,
       }),
-    recordDeferredUsage(record: AssistantUsageRecord): void {
+    recordDeferredUsage(
+      record: AssistantUsageRecord,
+      noticeDeliveryTarget?: HostedRuntimeUsageNoticeDeliveryTarget | null,
+    ): void {
+      const deferredRecord = {
+        noticeDeliveryTarget: noticeDeliveryTarget ?? null,
+        record,
+      };
       if (deferredUsageCaptureStarted) {
-        startDeferredUsageRecords([record]);
+        startDeferredUsageRecords([deferredRecord]);
         return;
       }
 
-      deferredUsageRecords.push(record);
+      deferredUsageRecords.push(deferredRecord);
     },
     shouldYieldBackgroundMaintenance,
     workspace: input.workspace,
@@ -1574,6 +1593,9 @@ function accumulateHostedWorkspaceRunnerAssistantInputBatch(input: {
       linqDeliveryContexts: acceptedRecords.flatMap((record) =>
         record.linqDeliveryContext ? [record.linqDeliveryContext] : []
       ),
+      usageNoticeDeliveryTargets: acceptedRecords.map(
+        (record) => record.usageNoticeDeliveryTarget ?? null,
+      ),
     };
   }
 
@@ -1613,11 +1635,16 @@ function accumulateHostedWorkspaceRunnerAssistantInputBatch(input: {
       record.emailDeliveryContext ? [record.emailDeliveryContext] : []
     ),
   ];
+  const mergedUsageNoticeDeliveryTargets = [
+    ...(input.current.usageNoticeDeliveryTargets ?? input.current.assistantInputIds.map(() => null)),
+    ...acceptedRecords.map((record) => record.usageNoticeDeliveryTarget ?? null),
+  ];
 
   return {
     assistantInputIds: mergedAssistantInputIds,
     emailDeliveryContexts: mergedEmailDeliveryContexts,
     linqDeliveryContexts: mergedLinqDeliveryContexts,
+    usageNoticeDeliveryTargets: mergedUsageNoticeDeliveryTargets,
   };
 }
 
@@ -1876,16 +1903,16 @@ async function writeHostedWorkspaceAssistantPostCheckpointFailureRuntimeLog(cont
 
 async function flushHostedAssistantUsageRecordsBestEffort(input: {
   input: HostedWorkspaceRunnerInput;
-  records: readonly AssistantUsageRecord[];
+  records: readonly HostedDeferredAssistantUsageRecord[];
 }): Promise<void> {
   const usageRecordPort = input.input.platform.usageRecordPort ?? null;
   if (!usageRecordPort || input.records.length === 0) {
     return;
   }
 
-  const recordFlushes = input.records.map(async (record) => {
+  const recordFlushes = input.records.map(async ({ noticeDeliveryTarget, record }) => {
     try {
-      await usageRecordPort.recordUsage(record);
+      await usageRecordPort.recordUsage(record, noticeDeliveryTarget);
     } catch (error) {
       const diagnostics = buildHostedExecutionSafeErrorDiagnostics(error);
       const safeErrorMessage =

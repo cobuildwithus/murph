@@ -262,6 +262,7 @@ describe("hosted assistant configuration tool port", () => {
         availableModels: [...HOSTED_ASSISTANT_PRODUCT_MODELS],
         availableReasoningEfforts: [...HOSTED_ASSISTANT_REASONING_EFFORTS],
         configurationAvailable: true,
+        dormantSolPreference: false,
         model: HOSTED_ASSISTANT_LUNA_MODEL,
         reasoningEffort: "high",
         solAvailable: false,

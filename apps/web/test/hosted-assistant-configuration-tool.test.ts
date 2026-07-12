@@ -281,6 +281,7 @@ function buildUpdateRequest(input: {
 }
 
 function buildSnapshot(overrides: {
+  dormantSolPreference?: boolean;
   model?: "gpt-5.6-luna" | "gpt-5.6-terra" | "gpt-5.6-sol";
   reasoningEffort?: "low" | "medium" | "high" | "xhigh";
 } = {}) {
@@ -288,6 +289,7 @@ function buildSnapshot(overrides: {
     availableModels: ["gpt-5.6-luna", "gpt-5.6-terra"] as const,
     availableReasoningEfforts: ["low", "medium", "high", "xhigh"] as const,
     configurationAvailable: true,
+    dormantSolPreference: overrides.dormantSolPreference ?? false,
     model: overrides.model ?? "gpt-5.6-terra",
     reasoningEffort: overrides.reasoningEffort ?? "low",
     solAvailable: false,

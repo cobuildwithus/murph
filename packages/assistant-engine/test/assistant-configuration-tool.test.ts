@@ -300,6 +300,83 @@ describe("assistant configuration tool", () => {
     });
   });
 
+  it("clears dormant Sol intent when the member explicitly chooses Terra", async () => {
+    const request = readMurphDynamicToolRequest({
+      method: "item/tool/call",
+      params: {
+        arguments: {
+          action: "update",
+          model: HOSTED_ASSISTANT_TERRA_MODEL,
+        },
+        namespace: "murph",
+        tool: "assistant_configuration",
+      },
+    });
+    if (!request) {
+      throw new Error("Expected an assistant configuration dynamic tool request.");
+    }
+    const currentSaved = {
+      ...createSavedConfiguration({
+        model: HOSTED_ASSISTANT_TERRA_MODEL,
+        reasoningEffort: "low",
+      }),
+      dormantSolPreference: true,
+      solAvailable: false,
+    };
+    const updatedSaved = {
+      ...currentSaved,
+      appliesAt: "next_turn" as const,
+      dormantSolPreference: false,
+      requiredPlan: null,
+      status: "updated" as const,
+    };
+    const assistantConfigurationTool = {
+      request: vi.fn()
+        .mockResolvedValueOnce({ action: "read", result: currentSaved })
+        .mockResolvedValueOnce({ action: "update", result: updatedSaved }),
+    };
+    const actionApprovalPort = {
+      request: vi.fn(async () => ({
+        approvalGeneration: "b".repeat(64),
+        approvalId: `haa_${"a".repeat(32)}`,
+        status: "approved" as const,
+      })),
+    };
+
+    const result = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext: createHostedToolContext({
+        actionApprovalPort,
+        assistantConfigurationTool,
+        currentModel: HOSTED_ASSISTANT_TERRA_MODEL,
+        currentReasoningEffort: "low",
+        userActionApproved: true,
+      }),
+      nextUsageOrdinal: () => 0,
+      progressDelivery: null,
+      request,
+    });
+
+    expect(result.rpcResult).toMatchObject({ success: true });
+    expect(actionApprovalPort.request).toHaveBeenCalledOnce();
+    expect(assistantConfigurationTool.request).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      action: "update",
+      model: HOSTED_ASSISTANT_TERRA_MODEL,
+      target: {
+        model: HOSTED_ASSISTANT_TERRA_MODEL,
+        reasoningEffort: "low",
+      },
+    }));
+    expect(readToolPayload(result)).toEqual({
+      currentTurn: {
+        model: HOSTED_ASSISTANT_TERRA_MODEL,
+        reasoningEffort: "low",
+      },
+      savedForNextTurn: updatedSaved,
+    });
+  });
+
   it("rejects empty updates and unsupported reasoning effort", () => {
     expect(readMurphDynamicToolRequest({
       method: "item/tool/call",
@@ -333,6 +410,7 @@ function createSavedConfiguration(input: {
     availableModels: [...HOSTED_ASSISTANT_PRODUCT_MODELS],
     availableReasoningEfforts: [...HOSTED_ASSISTANT_REASONING_EFFORTS],
     configurationAvailable: true,
+    dormantSolPreference: false,
     model: input.model,
     reasoningEffort: input.reasoningEffort,
     solAvailable: true,

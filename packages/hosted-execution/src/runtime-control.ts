@@ -771,7 +771,21 @@ export type HostedRuntimeDeviceSyncBridgeEnvelope =
   | HostedRuntimeDeviceSyncSnapshotBridgeEnvelope
   | HostedRuntimeDeviceSyncApplyBridgeEnvelope;
 
+export type HostedRuntimeUsageNoticeDeliveryTarget =
+  | {
+      channel: "linq";
+      replyToMessageId: string | null;
+      routeAuthority: HostedExecutionLinqExternalThreadRouteAuthority | null;
+      target: string;
+    }
+  | {
+      channel: "telegram";
+      replyToMessageId: string;
+      target: string;
+    };
+
 export interface HostedRuntimeUsageRecordRequest {
+  noticeDeliveryTarget?: HostedRuntimeUsageNoticeDeliveryTarget | null;
   usage: AssistantUsageRecord;
 }
 
@@ -1204,6 +1218,7 @@ export interface HostedRuntimeAssistantConfigurationSnapshot {
   availableModels: HostedAssistantProductModel[];
   availableReasoningEfforts: HostedAssistantReasoningEffort[];
   configurationAvailable: boolean;
+  dormantSolPreference: boolean;
   model: HostedAssistantProductModel;
   reasoningEffort: HostedAssistantReasoningEffort;
   solAvailable: boolean;

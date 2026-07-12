@@ -4313,9 +4313,15 @@ describe("buildHostedExecutionRuntimePlatform", () => {
 
   it("records hosted usage through the signed web callback seam", async () => {
     const usageRecord = createAssistantUsageRecord();
+    const noticeDeliveryTarget = {
+      channel: "telegram" as const,
+      replyToMessageId: "telegram_message_usage_1",
+      target: "telegram_thread_usage_1",
+    };
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const request = input instanceof Request ? input : new Request(input, init);
       await expect(request.clone().json()).resolves.toEqual({
+        noticeDeliveryTarget,
         usage: usageRecord,
       });
 
@@ -4340,7 +4346,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     });
 
     await expect(
-      platform.usageRecordPort!.recordUsage(usageRecord),
+      platform.usageRecordPort!.recordUsage(usageRecord, noticeDeliveryTarget),
     ).resolves.toEqual({
       recorded: true,
       usageId: "turn_usage.attempt-1",

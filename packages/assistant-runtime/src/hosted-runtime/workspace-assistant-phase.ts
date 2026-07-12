@@ -18,6 +18,7 @@ import {
   type HostedRuntimeRedactedJson,
   type HostedRuntimeRedactedObject,
   type HostedRuntimeRedactedScalar,
+  type HostedRuntimeUsageNoticeDeliveryTarget,
 } from "@murphai/hosted-execution/runtime-control";
 import type { AssistantUsageRecord } from "@murphai/hosted-execution/assistant-usage";
 import {
@@ -522,8 +523,9 @@ export async function runHostedWorkspaceAssistantPhase(
   const initialLinqDeliveryContexts = resolveHostedInitialLinqDeliveryContexts(input);
   const initialEmailDeliveryContexts = resolveHostedInitialEmailDeliveryContexts(input);
   const initialAssistantInputIds = readHostedInitialAssistantInputIds(input);
+  const usageNoticeDeliveryTarget = resolveHostedUsageNoticeDeliveryTarget(input);
   const recordDeferredUsage = (record: AssistantUsageRecord): Promise<void> => {
-    input.recordDeferredUsage?.(record);
+    input.recordDeferredUsage?.(record, usageNoticeDeliveryTarget);
     return Promise.resolve();
   };
   if (shouldWriteHostedDeviceConnectContextLog({ deviceConnectProviders, input })) {
@@ -1319,6 +1321,18 @@ export async function runHostedWorkspaceAssistantPhase(
     releaseChannelAbortRelay();
     channelAbortController.abort();
   }
+}
+
+function resolveHostedUsageNoticeDeliveryTarget(
+  input: HostedWorkspaceRuntimeAssistantPhaseInput,
+): HostedRuntimeUsageNoticeDeliveryTarget | null {
+  const batchTargets = input.initialAssistantInputBatch?.usageNoticeDeliveryTargets;
+  if (batchTargets && batchTargets.length > 0) {
+    return batchTargets.at(-1) ?? null;
+  }
+
+  return input.initialMailboxImport.importResult.assistantInputRecords?.at(-1)
+    ?.usageNoticeDeliveryTarget ?? null;
 }
 
 function hasFreshHostedConversationInput(

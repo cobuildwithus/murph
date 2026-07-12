@@ -5263,7 +5263,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     let resultResolved = false;
     let flushSawPostAssistantCheckpointLog = false;
     const usageRecordPort: HostedRuntimeUsageRecordPort = {
-      async recordUsage(record) {
+      async recordUsage(record, noticeDeliveryTarget) {
         flushSawPostAssistantCheckpointLog = logRequests
           .flatMap((request) => request.entries)
           .some((entry) =>
@@ -5272,6 +5272,12 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
           );
         events.push("usage:flush:start");
         assert.equal(record.usageId, "turn_runner_usage.attempt-1");
+        assert.deepEqual(noticeDeliveryTarget, {
+          channel: "linq",
+          replyToMessageId: "linq_message_runner_usage",
+          routeAuthority: null,
+          target: "linq_chat_runner_usage",
+        });
         await usageFlushGate;
         events.push("usage:flush:done");
         resolveUsageFlushDone();
@@ -5311,7 +5317,12 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
           workspaceVersion: "0",
         },
         async runAssistantPhase(input) {
-          input.recordDeferredUsage?.(createAssistantUsageRecord());
+          input.recordDeferredUsage?.(createAssistantUsageRecord(), {
+            channel: "linq",
+            replyToMessageId: "linq_message_runner_usage",
+            routeAuthority: null,
+            target: "linq_chat_runner_usage",
+          });
           return {
             afterCheckpoint: async () => {
               events.push("reply:deliver");

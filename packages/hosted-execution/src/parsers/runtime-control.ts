@@ -634,10 +634,70 @@ export function parseHostedRuntimeUsageRecordRequest(
   value: unknown,
 ): HostedRuntimeUsageRecordRequest {
   const record = requireObject(value, "Hosted runtime usage record request");
+  assertAllowedObjectKeys(
+    record,
+    new Set(["noticeDeliveryTarget", "usage"]),
+    "Hosted runtime usage record request",
+  );
 
   return {
+    ...(record.noticeDeliveryTarget === undefined
+      ? {}
+      : {
+          noticeDeliveryTarget: record.noticeDeliveryTarget === null
+            ? null
+            : parseHostedRuntimeUsageNoticeDeliveryTarget(
+                record.noticeDeliveryTarget,
+              ),
+        }),
     usage: parseAssistantUsageRecord(record.usage),
   };
+}
+
+function parseHostedRuntimeUsageNoticeDeliveryTarget(
+  value: unknown,
+): NonNullable<HostedRuntimeUsageRecordRequest["noticeDeliveryTarget"]> {
+  const label = "Hosted runtime usage notice delivery target";
+  const record = requireObject(value, label);
+  const channel = requireString(record.channel, `${label} channel`);
+  if (channel === "linq") {
+    assertAllowedObjectKeys(
+      record,
+      new Set(["channel", "replyToMessageId", "routeAuthority", "target"]),
+      label,
+    );
+    return {
+      channel,
+      replyToMessageId: readNullableString(
+        record.replyToMessageId,
+        `${label} replyToMessageId`,
+      ),
+      routeAuthority: record.routeAuthority === null
+        ? null
+        : parseHostedRuntimeLinqExternalThreadRouteAuthority(
+            record.routeAuthority,
+            `${label} routeAuthority`,
+          ),
+      target: requireString(record.target, `${label} target`),
+    };
+  }
+  if (channel === "telegram") {
+    assertAllowedObjectKeys(
+      record,
+      new Set(["channel", "replyToMessageId", "target"]),
+      label,
+    );
+    return {
+      channel,
+      replyToMessageId: requireString(
+        record.replyToMessageId,
+        `${label} replyToMessageId`,
+      ),
+      target: requireString(record.target, `${label} target`),
+    };
+  }
+
+  throw new TypeError(`${label} channel is not supported.`);
 }
 
 export function parseHostedRuntimeUsageRecordResponse(
@@ -2041,6 +2101,7 @@ function parseHostedRuntimeAssistantConfigurationSnapshot(
       "availableModels",
       "availableReasoningEfforts",
       "configurationAvailable",
+      "dormantSolPreference",
       "model",
       "reasoningEffort",
       "solAvailable",
@@ -2069,6 +2130,10 @@ function parseHostedRuntimeAssistantConfigurationSnapshot(
     configurationAvailable: requireBoolean(
       record.configurationAvailable,
       "Hosted runtime assistant configuration configurationAvailable",
+    ),
+    dormantSolPreference: requireBoolean(
+      record.dormantSolPreference,
+      "Hosted runtime assistant configuration dormantSolPreference",
     ),
     model: parseHostedRuntimeAssistantProductModel(
       record.model,

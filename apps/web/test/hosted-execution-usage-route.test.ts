@@ -49,10 +49,20 @@ describe("hosted execution usage record route", () => {
       usageId: "turn_123.attempt-1",
       usageExtractionVersion: "legacy",
     };
+    const noticeDeliveryTarget = {
+      channel: "linq",
+      replyToMessageId: "linq_message_usage_1",
+      routeAuthority: {
+        channel: "linq",
+        containerMemberId: "container_member_usage_1",
+        threadId: "linq_thread_usage_1",
+      },
+      target: "linq_chat_usage_1",
+    };
 
     const response = await hostedExecutionUsageRecordRoute.POST(
       new Request("https://join.example.test/api/internal/hosted-execution/usage/record", {
-        body: JSON.stringify({ usage }),
+        body: JSON.stringify({ noticeDeliveryTarget, usage }),
         headers: {
           "content-type": "application/json",
         },
@@ -70,6 +80,7 @@ describe("hosted execution usage record route", () => {
     );
     expect(mocks.recordHostedAiUsageRecordsAndSendLimitNotices).toHaveBeenCalledWith({
       accountAllowance: true,
+      noticeDeliveryTarget,
       trustedUserId: "member_123",
       usage: [
         expect.objectContaining({

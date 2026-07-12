@@ -32,6 +32,7 @@ import type {
   HostedRuntimeProductFeedbackRecordResponse,
   HostedCodexAuthUpdate,
   HostedCodexAuthUpdateResponse,
+  HostedRuntimeUsageNoticeDeliveryTarget,
   HostedRuntimeUsageRecordResponse as HostedExecutionRuntimeUsageRecordResponse,
   HostedWorkspaceCheckpointRequest,
   HostedWorkspaceCheckpointResponse,
@@ -339,7 +340,10 @@ export interface HostedRuntimeDeviceSyncPort {
 }
 
 export interface HostedRuntimeUsageRecordPort {
-  recordUsage(record: AssistantUsageRecord): Promise<HostedRuntimeUsageRecordResponse>;
+  recordUsage(
+    record: AssistantUsageRecord,
+    noticeDeliveryTarget?: HostedRuntimeUsageNoticeDeliveryTarget | null,
+  ): Promise<HostedRuntimeUsageRecordResponse>;
 }
 
 export interface HostedRuntimeIssueExportPort {

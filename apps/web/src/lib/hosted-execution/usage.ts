@@ -6,6 +6,9 @@ import {
   parseAssistantUsageRecord,
   type AssistantUsageRecord,
 } from "@murphai/hosted-execution/assistant-usage";
+import type {
+  HostedRuntimeUsageNoticeDeliveryTarget,
+} from "@murphai/hosted-execution/runtime-control";
 
 import { getPrisma } from "../prisma";
 import {
@@ -14,6 +17,7 @@ import {
 } from "./usage-allowance";
 import {
   sendClaimedHostedAiUsageLimitNoticeToLinqChat,
+  sendClaimedHostedAiUsageLimitNoticeToTelegramThread,
 } from "./usage-limit-notice";
 import {
   readHostedMemberRoutingState,
@@ -94,7 +98,8 @@ export async function recordHostedAiUsageRecords(input: {
 
 export async function recordHostedAiUsageRecordsAndSendLimitNotices(input: {
   accountAllowance?: boolean;
-  prisma?: HostedAiUsageClient;
+  noticeDeliveryTarget?: HostedRuntimeUsageNoticeDeliveryTarget | null;
+  prisma?: PrismaClient;
   trustedUserId?: string | null;
   usage: readonly unknown[];
 }): Promise<RecordHostedAiUsageResult> {
@@ -105,6 +110,7 @@ export async function recordHostedAiUsageRecordsAndSendLimitNotices(input: {
   )) {
     await sendHostedAiUsageLimitNoticeCandidate({
       candidate,
+      noticeDeliveryTarget: input.noticeDeliveryTarget ?? null,
       prisma,
     });
   }
@@ -172,7 +178,8 @@ function dedupeHostedAiUsageLimitNoticeCandidates(
 
 async function sendHostedAiUsageLimitNoticeCandidate(input: {
   candidate: HostedAiUsageLimitNoticeCandidate;
-  prisma: HostedAiUsageClient;
+  noticeDeliveryTarget: HostedRuntimeUsageNoticeDeliveryTarget | null;
+  prisma: PrismaClient;
 }): Promise<void> {
   const sentAt = new Date();
   if (
@@ -184,6 +191,52 @@ async function sendHostedAiUsageLimitNoticeCandidate(input: {
   }
 
   try {
+    if (input.noticeDeliveryTarget?.channel === "linq") {
+      await assertHostedAiUsageNoticeDeliveryTargetAuthorized({
+        memberId: input.candidate.memberId,
+        noticeDeliveryTarget: input.noticeDeliveryTarget,
+        prisma: input.prisma,
+      });
+      await sendClaimedHostedAiUsageLimitNoticeToLinqChat({
+        chatId: input.noticeDeliveryTarget.target,
+        claimToken: {
+          periodStart: input.candidate.periodStart.toISOString(),
+          sentAt: sentAt.toISOString(),
+        },
+        memberId: input.candidate.memberId,
+        message: input.candidate.userNotice.message,
+        noticeCode: input.candidate.userNotice.code,
+        occurredAt: input.candidate.crossedAt.toISOString(),
+        prisma: input.prisma,
+        replyToMessageId: input.noticeDeliveryTarget.replyToMessageId,
+        routeAuthority: input.noticeDeliveryTarget.routeAuthority,
+        sourceEventId: input.candidate.sourceUsageId,
+      });
+      return;
+    }
+
+    if (input.noticeDeliveryTarget?.channel === "telegram") {
+      await assertHostedAiUsageNoticeDeliveryTargetAuthorized({
+        memberId: input.candidate.memberId,
+        noticeDeliveryTarget: input.noticeDeliveryTarget,
+        prisma: input.prisma,
+      });
+      const result = await sendClaimedHostedAiUsageLimitNoticeToTelegramThread({
+        memberId: input.candidate.memberId,
+        message: input.candidate.userNotice.message,
+        periodStart: input.candidate.periodStart,
+        prisma: input.prisma,
+        replyToMessageId: input.noticeDeliveryTarget.replyToMessageId,
+        sentAt,
+        sourceEventId: input.candidate.sourceUsageId,
+        target: input.noticeDeliveryTarget.target,
+      });
+      if (result.status === "not_applicable") {
+        throw new Error("Hosted Telegram usage-limit delivery target is invalid.");
+      }
+      return;
+    }
+
     const route = readHostedLinqHomeLineAuthority(
       await readHostedMemberRoutingState({
         memberId: input.candidate.memberId,
@@ -210,6 +263,32 @@ async function sendHostedAiUsageLimitNoticeCandidate(input: {
     });
   } catch (error) {
     logHostedAiUsageLimitNoticeDelivery("send_failed", input.candidate, error);
+  }
+}
+
+async function assertHostedAiUsageNoticeDeliveryTargetAuthorized(input: {
+  memberId: string;
+  noticeDeliveryTarget: HostedRuntimeUsageNoticeDeliveryTarget;
+  prisma: PrismaClient;
+}): Promise<void> {
+  if (
+    input.noticeDeliveryTarget.channel === "linq"
+    && input.noticeDeliveryTarget.routeAuthority
+  ) {
+    // The Linq delivery owner validates this persisted external-thread
+    // authority against the target immediately before claiming the send.
+    return;
+  }
+
+  const routing = await readHostedMemberRoutingState({
+    memberId: input.memberId,
+    prisma: input.prisma,
+  });
+  const authorizedTarget = input.noticeDeliveryTarget.channel === "linq"
+    ? routing?.linqChatId
+    : routing?.telegramThreadId;
+  if (!authorizedTarget || authorizedTarget !== input.noticeDeliveryTarget.target) {
+    throw new Error("Hosted AI usage-limit notice delivery target is not authorized.");
   }
 }
 

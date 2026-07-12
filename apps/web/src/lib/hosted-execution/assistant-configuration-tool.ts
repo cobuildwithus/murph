@@ -141,6 +141,7 @@ function projectHostedRuntimeAssistantConfigurationSnapshot(input: {
   availableModels: readonly HostedRuntimeAssistantConfigurationSnapshot["model"][];
   availableReasoningEfforts: readonly HostedRuntimeAssistantConfigurationSnapshot["reasoningEffort"][];
   configurationAvailable: boolean;
+  dormantSolPreference: boolean;
   model: HostedRuntimeAssistantConfigurationSnapshot["model"];
   reasoningEffort: HostedRuntimeAssistantConfigurationSnapshot["reasoningEffort"];
   solAvailable: boolean;
@@ -149,6 +150,7 @@ function projectHostedRuntimeAssistantConfigurationSnapshot(input: {
     availableModels: [...input.availableModels],
     availableReasoningEfforts: [...input.availableReasoningEfforts],
     configurationAvailable: input.configurationAvailable,
+    dormantSolPreference: input.dormantSolPreference,
     model: input.model,
     reasoningEffort: input.reasoningEffort,
     solAvailable: input.solAvailable,

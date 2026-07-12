@@ -434,6 +434,7 @@ describe("hosted runtime control contracts", () => {
       availableModels: [...HOSTED_ASSISTANT_PRODUCT_MODELS],
       availableReasoningEfforts: [...HOSTED_ASSISTANT_REASONING_EFFORTS],
       configurationAvailable: true,
+      dormantSolPreference: false,
       model: HOSTED_ASSISTANT_TERRA_MODEL,
       reasoningEffort: "low" as const,
       solAvailable: false,
@@ -929,6 +930,46 @@ describe("hosted runtime control contracts", () => {
     expect(parseHostedRuntimeUsageRecordRequest({
       usage,
     })).toEqual({
+      usage,
+    });
+    expect(parseHostedRuntimeUsageRecordRequest({
+      noticeDeliveryTarget: {
+        channel: "linq",
+        replyToMessageId: "linq_message_1",
+        routeAuthority: {
+          channel: "linq",
+          containerMemberId: "container_member_1",
+          threadId: "linq_thread_1",
+        },
+        target: "linq_chat_1",
+      },
+      usage,
+    })).toEqual({
+      noticeDeliveryTarget: {
+        channel: "linq",
+        replyToMessageId: "linq_message_1",
+        routeAuthority: {
+          channel: "linq",
+          containerMemberId: "container_member_1",
+          threadId: "linq_thread_1",
+        },
+        target: "linq_chat_1",
+      },
+      usage,
+    });
+    expect(parseHostedRuntimeUsageRecordRequest({
+      noticeDeliveryTarget: {
+        channel: "telegram",
+        replyToMessageId: "telegram_message_1",
+        target: "telegram_thread_1",
+      },
+      usage,
+    })).toEqual({
+      noticeDeliveryTarget: {
+        channel: "telegram",
+        replyToMessageId: "telegram_message_1",
+        target: "telegram_thread_1",
+      },
       usage,
     });
     expect(parseHostedRuntimeUsageRecordResponse({

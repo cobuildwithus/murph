@@ -82,6 +82,14 @@ not a runtime access gate for an otherwise active member. Murph continues to
 record usage, attribute the requested and served model reported by Codex App
 Server, and send the existing period-scoped usage notice, while conversation
 and eligible system work continue after the allowance is exhausted.
+Message-triggered usage carries its originating Linq or Telegram reply target
+only through the current invocation and signed usage-record seam so the notice
+returns to that conversation. Before claiming delivery, web re-authorizes a
+personal Linq or Telegram target against the member's current routing binding
+and an external Linq target against its persisted thread authority. Automation
+and system work without an originating conversation retain the personal
+Linq-home fallback; the delivery target is not persisted as a second routing
+authority.
 If a notice attempt fails, later counted usage in the same over-limit period may
 retry the same period-scoped claim; the existing delivery idempotency boundary
 still permits at most one completed notice.
@@ -98,6 +106,13 @@ Deploy this additive path in the following order:
 2. Deploy the Cloudflare consumer.
 3. Deploy the web workspace and signed configuration-control producer plus the
    Settings control.
+4. After the new web deployment is current, run the count-only dry run and then
+   the fixed-campaign apply form of
+   `pnpm --dir apps/web runtime:recheck-usage-advisory`. This sends the existing
+   `runtime_recheck_requested` signal to every active hosted workspace so a
+   workflow that entered a durable monthly-allowance wait before rollout
+   immediately re-reads the now-advisory gate. A nonzero failed-signal count is
+   a failed rollout step; rerun the idempotent operation until it reports zero.
 
 An old web response omits the optional overrides, so the new consumer preserves
 the fleet model and reasoning effort. Deploying Cloudflare before web can make

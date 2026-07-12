@@ -24,6 +24,7 @@ import {
   HOSTED_ASSISTANT_PRODUCT_MODELS,
   HOSTED_ASSISTANT_REASONING_EFFORTS,
   HOSTED_ASSISTANT_SOL_MODEL,
+  HOSTED_ASSISTANT_TERRA_MODEL,
 } from '@murphai/hosted-execution/assistant-model'
 import {
   buildHostedAssistantConfigurationApprovalConsumerId,
@@ -2423,7 +2424,11 @@ async function executeAssistantConfigurationTool(input: {
     }
     if (
       requestedForNextTurn.model === savedForNextTurn.model &&
-      requestedForNextTurn.reasoningEffort === savedForNextTurn.reasoningEffort
+      requestedForNextTurn.reasoningEffort === savedForNextTurn.reasoningEffort &&
+      !(
+        input.request.model === HOSTED_ASSISTANT_TERRA_MODEL &&
+        savedForNextTurn.dormantSolPreference
+      )
     ) {
       return toolTextResult(true, safeToolPayloadText({
         currentTurn,

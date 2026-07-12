@@ -945,6 +945,51 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     ]);
   });
 
+  it("associates deferred usage with the originating conversation target", async () => {
+    const deferredTargets: unknown[] = [];
+    mocks.runHostedAssistantAutomationLane.mockImplementationOnce(async (laneInput) => {
+      await laneInput.executionContext.hosted?.usageRecorder?.recordUsage(
+        createAssistantUsageRecord(),
+      );
+      return {
+        assistantAutomationCurrentTurnDeliveryIntentIds: [],
+        assistantAutomationProgressed: true,
+        nextWakeAt: null,
+        redactedLogEntries: [],
+      };
+    });
+
+    await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      initialAssistantInputBatch: {
+        assistantInputIds: ["assistant_input_telegram_usage_target"],
+        emailDeliveryContexts: [],
+        linqDeliveryContexts: [],
+        usageNoticeDeliveryTargets: [{
+          channel: "telegram",
+          replyToMessageId: "telegram_message_usage_target",
+          target: "telegram_thread_usage_target",
+        }],
+      },
+      recordDeferredUsage: (_record, noticeDeliveryTarget) => {
+        deferredTargets.push(noticeDeliveryTarget);
+      },
+      runtimeUsageRecordPort: {
+        async recordUsage(record) {
+          return {
+            recorded: true,
+            usageId: record.usageId,
+          };
+        },
+      },
+    }));
+
+    expect(deferredTargets).toEqual([{
+      channel: "telegram",
+      replyToMessageId: "telegram_message_usage_target",
+      target: "telegram_thread_usage_target",
+    }]);
+  });
+
   it("flushes deferred usage after existing post-checkpoint work", async () => {
     const events: string[] = [];
     const deferredUsageRecords: AssistantUsageRecord[] = [];
@@ -12176,6 +12221,7 @@ function createPhaseInput(input: {
   conversationImportedCount?: number;
   deviceSyncWorkspaceWakeHandled?: HostedWorkspaceRuntimeAssistantPhaseInput["deviceSyncWorkspaceWakeHandled"];
   importedCount?: number;
+  initialAssistantInputBatch?: HostedWorkspaceRuntimeAssistantPhaseInput["initialAssistantInputBatch"];
   linqDeliveryContext?: {
     directRecipientPhoneNumber: string | null;
     fromPhoneNumber: string | null;
@@ -12209,6 +12255,7 @@ function createPhaseInput(input: {
     ?? (input.importedCount ? ["ain_00000000000000000000000000000001"] : []);
   return {
     deviceSyncWorkspaceWakeHandled: input.deviceSyncWorkspaceWakeHandled,
+    initialAssistantInputBatch: input.initialAssistantInputBatch,
     initialMailboxImport: {
       afterCheckpointEffects: [],
       checkpoint: null,
