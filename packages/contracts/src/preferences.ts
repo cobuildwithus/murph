@@ -32,6 +32,51 @@ export type AssistantPersonalitySettingId = z.infer<typeof assistantPersonalityS
 export type AssistantPersonalityPreferences = z.infer<typeof assistantPersonalityPreferencesSchema>;
 export type AssistantPersonalityScores = z.infer<typeof assistantPersonalityScoresSchema>;
 
+export const assistantPreferenceFieldIds = [
+  "tone",
+  "voice",
+  ...assistantPersonalitySettingIds,
+] as const;
+export const assistantPreferenceFieldIdSchema = z.enum(assistantPreferenceFieldIds);
+export const assistantPreferenceRevisionSchema = z
+  .string()
+  .regex(/^[1-9][0-9]{0,38}$/u);
+export const assistantPreferenceMutationStateSchema = z
+  .object({
+    nextRevision: assistantPreferenceRevisionSchema,
+    applied: z
+      .object({
+        tone: assistantPreferenceRevisionSchema.optional(),
+        voice: assistantPreferenceRevisionSchema.optional(),
+        humor: assistantPreferenceRevisionSchema.optional(),
+        push: assistantPreferenceRevisionSchema.optional(),
+        detail: assistantPreferenceRevisionSchema.optional(),
+      })
+      .strict(),
+    reservations: z
+      .array(
+        z
+          .object({
+            eventId: z.string().min(1).max(512),
+            fields: z
+              .array(assistantPreferenceFieldIdSchema)
+              .min(1)
+              .max(5)
+              .refine((fields) => new Set(fields).size === fields.length),
+            revision: assistantPreferenceRevisionSchema,
+            status: z.enum(["pending", "handled"]),
+          })
+          .strict(),
+      )
+      .max(128),
+  })
+  .strict();
+
+export type AssistantPreferenceFieldId = z.infer<typeof assistantPreferenceFieldIdSchema>;
+export type AssistantPreferenceMutationState = z.infer<
+  typeof assistantPreferenceMutationStateSchema
+>;
+
 export const defaultAssistantPersonalityScores = Object.freeze({
   humor: 3,
   push: 3,
@@ -289,6 +334,7 @@ export const preferencesDocumentSchema = withContractMetadata(
       schemaVersion: z.literal(preferencesDocumentSchemaVersion),
       updatedAt: z.string().min(1),
       assistant: assistantPreferencesSchema.optional(),
+      assistantMutationState: assistantPreferenceMutationStateSchema.optional(),
       workoutUnitPreferences: workoutUnitPreferencesSchema.default({}),
       wearablePreferences: wearablePreferencesSchema,
     })

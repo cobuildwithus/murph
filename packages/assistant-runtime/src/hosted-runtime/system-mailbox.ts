@@ -13,6 +13,7 @@ import {
 } from "./channel-activity.ts";
 import {
   bootstrapHostedMemberContext,
+  reserveHostedMemberPreferences,
 } from "./context.ts";
 import {
   executeHostedMailboxEvent,
@@ -108,6 +109,12 @@ export async function enqueueHostedSystemMailboxItem(input: {
 
   if (routeAction === "apply-member-activation" && input.wake.kind === "member.activated") {
     await bootstrapHostedMemberContext(input.vaultRoot, input.wake);
+  }
+  if (
+    routeAction === "apply-member-preferences"
+    && input.wake.kind === "member.preferences.updated"
+  ) {
+    await reserveHostedMemberPreferences(input.vaultRoot, input.wake);
   }
 
   const nextItem: HostedSystemMailboxPendingItem = {
@@ -394,6 +401,7 @@ async function executePendingHostedSystemMailboxItem(input: {
     executionContext,
     forceQueueOnlyAssistantNotification: true,
     operatorHomeRoot: input.operatorHomeRoot ?? undefined,
+    preferenceAppliedAt: input.pendingItem.lastAttemptAt ?? undefined,
     runtime: input.runtime,
     runtimeEnv: input.runtimeEnv,
     ...(input.shouldYieldBackgroundMaintenance

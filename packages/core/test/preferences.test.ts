@@ -9,6 +9,7 @@ import {
   initializeVault,
   readJsonlRecords,
   readPreferencesDocument,
+  reserveAssistantPreferenceMutation,
   resolvePreferencesDocumentPath,
   updateAssistantPreferences,
   updateWearablePreferences,
@@ -475,6 +476,141 @@ test("stores sparse personality overrides while preserving every unrelated prefe
     detail: 5,
     push: 3,
   });
+});
+
+test("uses one per-setting revision owner for hosted reservations and conversational writes", async () => {
+  const vaultRoot = await createTempVault();
+  const eventId = "member.preferences.updated:older-retry";
+  const preferences = {
+    personality: {
+      detail: 7 as const,
+      humor: 2 as const,
+    },
+  };
+
+  const firstReservation = await reserveAssistantPreferenceMutation({
+    eventId,
+    preferences,
+    updatedAt: "2026-07-12T01:00:00.000Z",
+    vaultRoot,
+  });
+  const repeatedReservation = await reserveAssistantPreferenceMutation({
+    eventId,
+    preferences,
+    updatedAt: "2026-07-12T01:00:01.000Z",
+    vaultRoot,
+  });
+  assert.deepEqual(repeatedReservation, firstReservation);
+  assert.equal(
+    (await readPreferencesDocument(vaultRoot)).assistantMutationState?.reservations.length,
+    1,
+  );
+
+  await updateAssistantPreferences({
+    preferences: {
+      personality: {
+        humor: 9,
+      },
+    },
+    updatedAt: "2026-07-12T01:01:00.000Z",
+    vaultRoot,
+  });
+  const retried = await updateAssistantPreferences({
+    preferences,
+    reservationEventId: eventId,
+    updatedAt: "2026-07-12T01:02:00.000Z",
+    vaultRoot,
+  });
+
+  assert.equal(retried.updated, true);
+  assert.deepEqual(retried.document.assistant?.personality, {
+    detail: 7,
+    humor: 9,
+  });
+  assert.equal(retried.document.updatedAt, "2026-07-12T01:02:00.000Z");
+  assert.deepEqual(retried.document.assistantMutationState?.reservations, [
+    {
+      eventId,
+      fields: ["humor", "detail"],
+      revision: firstReservation.revision,
+      status: "handled",
+    },
+  ]);
+  assert.equal(
+    retried.document.assistantMutationState?.applied.detail,
+    firstReservation.revision,
+  );
+  assert.notEqual(
+    retried.document.assistantMutationState?.applied.humor,
+    firstReservation.revision,
+  );
+
+  const replayed = await updateAssistantPreferences({
+    preferences,
+    reservationEventId: eventId,
+    updatedAt: "2026-07-12T01:03:00.000Z",
+    vaultRoot,
+  });
+  assert.equal(replayed.updated, false);
+  assert.equal(replayed.document.updatedAt, "2026-07-12T01:02:00.000Z");
+  assert.deepEqual(replayed.document.assistant?.personality, {
+    detail: 7,
+    humor: 9,
+  });
+});
+
+test("bounds assistant preference receipts while retaining pending reservations", async () => {
+  const vaultRoot = await createTempVault();
+  const reservations = Array.from({ length: 128 }, (_, index) => ({
+    eventId: `member.preferences.updated:${index}`,
+    fields: ["humor"] as const,
+    revision: String(index + 1),
+    status: index === 0 ? "handled" as const : "pending" as const,
+  }));
+  await writeFile(
+    resolvePreferencesDocumentPath(vaultRoot),
+    `${JSON.stringify({
+      schemaVersion: 1,
+      updatedAt: "2026-07-12T02:00:00.000Z",
+      assistantMutationState: {
+        applied: {},
+        nextRevision: "129",
+        reservations,
+      },
+      workoutUnitPreferences: {},
+      wearablePreferences: {
+        desiredProviders: [],
+      },
+    }, null, 2)}\n`,
+    "utf8",
+  );
+
+  await reserveAssistantPreferenceMutation({
+    eventId: "member.preferences.updated:replacement",
+    preferences: { personality: { humor: 4 } },
+    vaultRoot,
+  });
+  const afterReplacement = await readPreferencesDocument(vaultRoot);
+  assert.equal(afterReplacement.assistantMutationState?.reservations.length, 128);
+  assert.equal(
+    afterReplacement.assistantMutationState?.reservations.some(
+      (reservation) => reservation.eventId === "member.preferences.updated:0",
+    ),
+    false,
+  );
+  assert.equal(
+    afterReplacement.assistantMutationState?.reservations.at(-1)?.status,
+    "pending",
+  );
+
+  await assert.rejects(
+    reserveAssistantPreferenceMutation({
+      eventId: "member.preferences.updated:over-limit",
+      preferences: { personality: { humor: 5 } },
+      vaultRoot,
+    }),
+    /reservation limit reached/u,
+  );
 });
 
 test("clears individual personality overrides and removes the empty personality object", async () => {

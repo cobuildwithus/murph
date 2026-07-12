@@ -210,6 +210,19 @@ The hosted system mailbox applies every preference item in mailbox order. An
 older retry blocks newer preference deltas until it succeeds; preference items
 must not be latest-wins coalesced or superseded.
 
+The canonical preference owner also keeps bounded per-setting mutation
+revisions in `bank/preferences.json`. Importing a hosted preference item
+idempotently reserves one revision for its exact fields and event id before the
+item may wait or retry. Conversational writes advance the same field revisions.
+On retry, the owner terminally ignores only fields whose reserved revision is
+older than the field's applied revision, still applies non-stale siblings, and
+marks the record handled in the same canonical write. That bounded handled
+receipt makes replay idempotent if the process stops before the mailbox removes
+its pending item. Ordering never uses the web projection or wall-clock
+comparison. Pending and recent handled records share a 128-record cap; new
+events evict only the oldest handled receipt, never a pending reservation, and
+retrying the same event id reuses its existing record.
+
 Tone is read from the canonical vault during turn planning. An absent saved tone resolves to the shared `formal` default, and prompt assembly adds one persistent user-facing writing contract (casual lowercases all Murph-authored prose except casing-sensitive literals; formal keeps standard capitalization and no slang, staying warm and direct). Voice memo defaults resolve in this order:
 
 1. Explicit tool argument `voiceId`.
@@ -221,7 +234,11 @@ Explicit `classic` and unknown stale vault voice ids fall through to the environ
 
 ## Deploy And Rollback
 
-The personality field is additive but existing preferences readers are strict. Deploy readers that accept and preserve `assistant.personality` before any command can write it. After the first personality override is stored, a binary that predates personality support may reject that preferences document.
+The personality field and optional assistant mutation state are additive but
+existing preferences readers are strict. Deploy readers that accept and
+preserve both fields before any command can write them. After the first
+personality override or hosted mutation reservation is stored, a binary that
+predates this support may reject that preferences document.
 
 The rollback floor is therefore the first deployed runtime and CLI version that understands the optional personality field. Rollback below that floor requires removing the new field with a current compatible binary or forward-deploying a compatible reader. Do not hand-edit canonical preferences files.
 

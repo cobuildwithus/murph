@@ -130,7 +130,9 @@ The hosted Prisma schema keeps ownership sharp and nested:
   authenticated Settings display/write projection; canonical assistant
   preferences remain in `bank/preferences.json`. Settings writes strict sparse
   deltas through the hosted mailbox instead of treating these columns as a
-  canonical snapshot.
+  canonical snapshot. The canonical owner reserves bounded per-setting
+  revisions for those events and conversational writes, so retries never use
+  this projection or timestamps as conflict authority.
 - `HostedMemberIdentity` owns recoverable member identity facts
 - `HostedMemberRouting` owns hosted channel routing facts
 - `HostedMemberBillingRef` owns Stripe/customer subscription references

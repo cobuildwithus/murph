@@ -20,6 +20,10 @@ import {
 import type {
   AssistantExecutionContext,
 } from "@murphai/assistant-engine";
+import {
+  readPreferencesDocument,
+  updateAssistantPreferences,
+} from "@murphai/core";
 import type {
   HostedRuntimePlatform,
 } from "../src/hosted-runtime/platform.ts";
@@ -1384,6 +1388,8 @@ describe("hosted system mailbox notification execution context", () => {
     });
 
     try {
+      await mkdir(workspace.vaultRoot, { recursive: true });
+      await writeFile(path.join(workspace.vaultRoot, VAULT_LAYOUT.metadata), "{}", "utf8");
       await enqueueHostedSystemMailboxItem({
         item: createResolvedMemberPreferencesItem({
           id: "mailbox_item_system_member_preferences_001",
@@ -1553,6 +1559,8 @@ describe("hosted system mailbox notification execution context", () => {
     });
 
     try {
+      await mkdir(workspace.vaultRoot, { recursive: true });
+      await writeFile(path.join(workspace.vaultRoot, VAULT_LAYOUT.metadata), "{}", "utf8");
       await enqueueHostedSystemMailboxItem({
         item: createResolvedMemberPreferencesItem({
           id: "mailbox_item_system_member_preferences_retry_001",
@@ -1638,6 +1646,139 @@ describe("hosted system mailbox notification execution context", () => {
         "member.preferences.updated:older-retry",
         "member.preferences.updated:newer-due",
       ]);
+    } finally {
+      await workspace.cleanup();
+    }
+  });
+
+  it("replays a canonical preference commit after a mailbox crash without regressing siblings", async () => {
+    const workspace = await createHostedRuntimeWorkspace("murph-hosted-system-mailbox-");
+    const olderWake = buildHostedExecutionMemberPreferencesUpdatedWake({
+      eventId: "member.preferences.updated:older-cross-lane-retry",
+      memberId: "member_123",
+      occurredAt: FIXED_NOW,
+      preferences: {
+        personality: {
+          detail: 7,
+          humor: 2,
+        },
+      },
+    });
+
+    try {
+      await mkdir(workspace.vaultRoot, { recursive: true });
+      await writeFile(path.join(workspace.vaultRoot, VAULT_LAYOUT.metadata), "{}", "utf8");
+      await enqueueHostedSystemMailboxItem({
+        item: createResolvedMemberPreferencesItem({
+          id: "mailbox_item_system_member_preferences_cross_lane",
+          laneSeq: "1",
+        }),
+        vaultRoot: workspace.vaultRoot,
+        wake: olderWake,
+      });
+      mocks.executeHostedMailboxEvent.mockRejectedValueOnce(
+        Object.assign(new Error("transient preference failure"), {
+          code: "HOSTED_MEMBER_PREFERENCES_TRANSIENT",
+        }),
+      );
+
+      const failed = await prepareHostedSystemMailboxItemForCheckpoint({
+        allowedRouteActions: ["apply-member-preferences"],
+        executionContext: null,
+        now: () => FIXED_NOW,
+        runtime: createRuntime({}),
+        runtimeEnv: {},
+        vaultRoot: workspace.vaultRoot,
+      });
+      assert.equal(failed?.status, "retryable_failed");
+
+      await updateAssistantPreferences({
+        preferences: {
+          personality: {
+            humor: 9,
+          },
+        },
+        updatedAt: "2026-04-27T00:00:30.000Z",
+        vaultRoot: workspace.vaultRoot,
+      });
+
+      mocks.executeHostedMailboxEvent.mockImplementationOnce(async (input) => {
+        const { applyHostedMemberPreferences } = await import(
+          "../src/hosted-runtime/context.ts"
+        );
+        await applyHostedMemberPreferences(
+          input.vaultRoot,
+          olderWake,
+          input.preferenceAppliedAt,
+        );
+        throw Object.assign(new Error("crash after canonical preference commit"), {
+          code: "HOSTED_MEMBER_PREFERENCES_POST_COMMIT_CRASH",
+        });
+      });
+
+      const crashed = await prepareHostedSystemMailboxItemForCheckpoint({
+        allowedRouteActions: ["apply-member-preferences"],
+        executionContext: null,
+        now: () => "2026-04-27T00:01:00.000Z",
+        runtime: createRuntime({}),
+        runtimeEnv: {},
+        vaultRoot: workspace.vaultRoot,
+      });
+
+      assert.equal(crashed?.status, "retryable_failed");
+      const afterCrash = await readPreferencesDocument(workspace.vaultRoot);
+      assert.deepEqual(afterCrash.assistant?.personality, {
+        detail: 7,
+        humor: 9,
+      });
+      assert.equal(afterCrash.updatedAt, "2026-04-27T00:01:00.000Z");
+      assert.equal(
+        (await readHostedSystemMailboxState(workspace.vaultRoot)).pending.length,
+        1,
+      );
+
+      mocks.executeHostedMailboxEvent.mockImplementationOnce(async (input) => {
+        const { applyHostedMemberPreferences } = await import(
+          "../src/hosted-runtime/context.ts"
+        );
+        await applyHostedMemberPreferences(
+          input.vaultRoot,
+          olderWake,
+          input.preferenceAppliedAt,
+        );
+        return {
+          bootstrapResult: null,
+          conversationMetrics: null,
+          mailboxLane: "member-preferences-updated",
+          nextWakeAt: null,
+          postCheckpointRecord: null,
+          redactedLogEntries: [],
+        };
+      });
+
+      const retried = await prepareHostedSystemMailboxItemForCheckpoint({
+        allowedRouteActions: ["apply-member-preferences"],
+        executionContext: null,
+        now: () => "2026-04-27T00:02:00.000Z",
+        runtime: createRuntime({}),
+        runtimeEnv: {},
+        vaultRoot: workspace.vaultRoot,
+      });
+
+      assert.equal(retried?.status, "processed");
+      const preferences = await readPreferencesDocument(workspace.vaultRoot);
+      assert.deepEqual(
+        preferences.assistant?.personality,
+        {
+          detail: 7,
+          humor: 9,
+        },
+      );
+      assert.equal(preferences.updatedAt, "2026-04-27T00:01:00.000Z");
+      assert.deepEqual(
+        (await readHostedSystemMailboxState(workspace.vaultRoot)).pending,
+        [],
+      );
     } finally {
       await workspace.cleanup();
     }

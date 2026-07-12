@@ -146,4 +146,47 @@ describe("assistant personality preference contracts", () => {
       }).success,
     ).toBe(false);
   });
+
+  it("accepts bounded per-setting assistant mutation state and rejects duplicate fields", () => {
+    const document = {
+      schemaVersion: 1,
+      updatedAt: "2026-07-12T01:00:00.000Z",
+      assistantMutationState: {
+        applied: {
+          humor: "2",
+        },
+        nextRevision: "3",
+        reservations: [
+          {
+            eventId: "member.preferences.updated:older",
+            fields: ["humor", "detail"],
+            revision: "1",
+            status: "pending",
+          },
+        ],
+      },
+      workoutUnitPreferences: {},
+      wearablePreferences: {
+        desiredProviders: [],
+      },
+    };
+
+    expect(preferencesDocumentSchema.parse(document)).toEqual(document);
+    expect(
+      preferencesDocumentSchema.safeParse({
+        ...document,
+        assistantMutationState: {
+          ...document.assistantMutationState,
+          reservations: [
+            {
+              eventId: "member.preferences.updated:duplicate-field",
+              fields: ["humor", "humor"],
+              revision: "1",
+              status: "pending",
+            },
+          ],
+        },
+      }).success,
+    ).toBe(false);
+  });
 });

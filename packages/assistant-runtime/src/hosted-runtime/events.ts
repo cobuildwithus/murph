@@ -50,6 +50,7 @@ export async function executeHostedMailboxEvent(input: {
   executionContext: AssistantExecutionContext;
   forceQueueOnlyAssistantNotification?: boolean;
   operatorHomeRoot?: string | null;
+  preferenceAppliedAt?: string;
   shouldYieldDeviceSync?: (() => boolean) | null;
   sourceMailboxItemId?: string | null;
   runtime: Pick<
@@ -84,6 +85,7 @@ export async function executeHostedMailboxEvent(input: {
     executionContext: bootstrappedExecutionContext,
     forceQueueOnlyAssistantNotification: input.forceQueueOnlyAssistantNotification === true,
     operatorHomeRoot: input.operatorHomeRoot ?? null,
+    preferenceAppliedAt: input.preferenceAppliedAt,
     runtime: input.runtime,
     runtimeEnv: input.runtimeEnv,
     ...(input.shouldYieldDeviceSync
@@ -111,6 +113,7 @@ async function handleHostedMailboxEvent(input: {
   executionContext: AssistantExecutionContext;
   forceQueueOnlyAssistantNotification: boolean;
   operatorHomeRoot: string | null;
+  preferenceAppliedAt?: string;
   runtime: Pick<
     NormalizedHostedAssistantRuntimeConfig,
     "commitTimeoutMs" | "forwardedEnv" | "platform" | "platformEnv" | "resolvedConfig" | "userEnv"
@@ -129,6 +132,7 @@ async function handleHostedMailboxEvent(input: {
     executionContext: input.executionContext,
     forceQueueOnlyAssistantNotification: input.forceQueueOnlyAssistantNotification,
     operatorHomeRoot: input.operatorHomeRoot,
+    preferenceAppliedAt: input.preferenceAppliedAt,
     runtime: input.runtime,
     runtimeEnv: input.runtimeEnv,
     ...(input.shouldYieldDeviceSync
@@ -144,6 +148,7 @@ async function executeHostedSystemWake(input: {
   executionContext: AssistantExecutionContext;
   forceQueueOnlyAssistantNotification: boolean;
   operatorHomeRoot: string | null;
+  preferenceAppliedAt?: string;
   runtime: Pick<
     NormalizedHostedAssistantRuntimeConfig,
     "commitTimeoutMs" | "platform" | "platformEnv" | "resolvedConfig"
@@ -172,7 +177,11 @@ async function executeHostedSystemWake(input: {
         mailboxLane: "member-channels-updated",
       });
     case "member.preferences.updated":
-      await applyHostedMemberPreferences(input.vaultRoot, input.wake);
+      await applyHostedMemberPreferences(
+        input.vaultRoot,
+        input.wake,
+        input.preferenceAppliedAt,
+      );
       return createNoopMailboxEffect({
         conversationMetrics: null,
         mailboxLane: "member-preferences-updated",

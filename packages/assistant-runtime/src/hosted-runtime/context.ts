@@ -3,6 +3,7 @@ import path from "node:path";
 
 import { VAULT_LAYOUT } from "@murphai/contracts";
 import {
+  reserveAssistantPreferenceMutation,
   updateAssistantPreferences,
 } from "@murphai/core";
 import {
@@ -219,6 +220,7 @@ export async function bootstrapHostedMemberContext(
 export async function applyHostedMemberPreferences(
   vaultRoot: string,
   wake: HostedExecutionMemberPreferencesUpdatedWake,
+  appliedAt: string = wake.occurredAt,
 ): Promise<void> {
   if (!existsSync(path.join(vaultRoot, VAULT_LAYOUT.metadata))) {
     throw new Error(
@@ -227,6 +229,25 @@ export async function applyHostedMemberPreferences(
   }
 
   await updateAssistantPreferences({
+    preferences: wake.preferences,
+    reservationEventId: wake.eventId,
+    updatedAt: appliedAt,
+    vaultRoot,
+  });
+}
+
+export async function reserveHostedMemberPreferences(
+  vaultRoot: string,
+  wake: HostedExecutionMemberPreferencesUpdatedWake,
+): Promise<void> {
+  if (!existsSync(path.join(vaultRoot, VAULT_LAYOUT.metadata))) {
+    throw new Error(
+      "Hosted member preferences require member.activated bootstrap first.",
+    );
+  }
+
+  await reserveAssistantPreferenceMutation({
+    eventId: wake.eventId,
     preferences: wake.preferences,
     updatedAt: wake.occurredAt,
     vaultRoot,

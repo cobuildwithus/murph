@@ -1,6 +1,6 @@
 # Murph Agent Docs Index
 
-Last verified: 2026-07-11
+Last verified: 2026-07-12
 
 ## Purpose
 
@@ -12,7 +12,7 @@ It intentionally lists live architecture, product, verification, and package-bou
 | Path | Purpose | Source of truth | Criticality | Last verified |
 | --- | --- | --- | --- | --- |
 | `README.md` | Human-facing repo overview, install path, public package posture, local/hosted runtime tiers, and verification entrypoints. | Current repository state | High | 2026-05-02 |
-| `ARCHITECTURE.md` | Top-level module map, trust boundaries, persisted-state rules, hosted mailbox/checkpoint ownership including ordered non-superseding assistant-preference deltas, the single-snapshot conversation-ahead handoff and owner-release Temporal recheck, managed hosted Codex auth snapshot boundary, hosted provider egress credential boundary, hosted computer-use ownership, hosted generated-image ownership, hosted Retell phone-call ownership, hosted Linq first-contact admission fail-open policy plus deploy-skew compatibility column, hosted Temporal hard-cut pointer, bounded device-sync mailbox handoff ownership, active-turn targeting lifecycle, control-flow contracts, and package-boundary rules. | Current runtime architecture | High | 2026-07-11 |
+| `ARCHITECTURE.md` | Top-level module map, trust boundaries, persisted-state rules, hosted mailbox/checkpoint ownership including ordered non-superseding assistant-preference deltas and canonical per-setting causal revisions, the single-snapshot conversation-ahead handoff and owner-release Temporal recheck, managed hosted Codex auth snapshot boundary, hosted provider egress credential boundary, hosted computer-use ownership, hosted generated-image ownership, hosted Retell phone-call ownership, hosted Linq first-contact admission fail-open policy plus deploy-skew compatibility column, hosted Temporal hard-cut pointer, bounded device-sync mailbox handoff ownership, active-turn targeting lifecycle, control-flow contracts, and package-boundary rules. | Current runtime architecture | High | 2026-07-12 |
 | `PRODUCT.md` | Strategic design context: register, users, brand personality, anti-references, design principles. Loaded by the impeccable skill before any UI work. | Product/brand strategic context | High | 2026-04-24 |
 | `DESIGN.md` | Visual design system in Google Stitch DESIGN.md format: color, typography, elevation, components, do's/don'ts, YAML token frontmatter. Loaded by the impeccable skill before any UI work. | Visual design system | High | 2026-04-24 |
 | `docs/architecture.md` | Concise architecture summary, repo-shape overview, package-boundary hygiene notes, and hosted ownership baseline. | Current architectural baseline | High | 2026-05-13 |
@@ -57,7 +57,7 @@ It intentionally lists live architecture, product, verification, and package-bou
 | `agent-docs/product-specs/companion-app-mvp.md` | Two-screen companion build spec: Privy login, Connect Apple Health, Junction sync, bounded WHOOP metadata enrichment, and backend-before-iOS release order. | Companion app build plan | High | 2026-07-10 |
 | `agent-docs/product-specs/habitat.md` | Habitat progressive member life-context: domains, `habitat` bank family, domain catalog, coverage derivation, collection rules, environment/workspace v1 indicators. | Habitat product spec | High | 2026-07-07 |
 | `agent-docs/product-specs/murph-contact-card-picker.md` | Post-signup add-Murph-to-contacts step with member-chosen contact-card avatar. | Contact-card picker spec | Medium | 2026-07-08 |
-| `agent-docs/product-specs/murph-tone-and-voice.md` | Five-control contract for how Murph talks: hosted tone and voice plus private Humor, Push, and Detail controls in conversation and Settings, including canonical storage, sparse web projection, commands, prompt behavior, and rollout rules. | Murph speaking-style preference spec | Medium | 2026-07-11 |
+| `agent-docs/product-specs/murph-tone-and-voice.md` | Five-control contract for how Murph talks: hosted tone and voice plus private Humor, Push, and Detail controls in conversation and Settings, including canonical storage, sparse web projection, per-setting causal ordering, commands, prompt behavior, and rollout rules. | Murph speaking-style preference spec | Medium | 2026-07-12 |
 | `agent-docs/product-specs/group-health-newsletter.md` | Recurring group health newsletter from a group chat: setup questions before creation, group-chosen naming, react-to-join offers, latest-7-record share projection retention, cron automation in the group vault, a reusable email-sharing grant, and Cloudflare `HOSTED_EMAIL` delivery with web-side address resolution. | Group newsletter behavior | Medium | 2026-07-07 |
 | `agent-docs/phone-calls/retell-phone-agent.md` | Retell hosted phone agent prompt, authority, transfer, and call-brief handling rules. | Hosted phone-call provider setup | Medium | 2026-06-25 |
 | `agent-docs/phone-calls/retell-analysis-fields.md` | Retell post-call analysis field contract and transcript-retention boundary. | Hosted phone-call provider setup | Medium | 2026-06-25 |
