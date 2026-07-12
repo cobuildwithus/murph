@@ -145,7 +145,7 @@ const cliVitestProjectSeeds: readonly CliVitestProjectSeed[] = [
   {
     fileParallelism: false,
     name: "cli-incur-smoke",
-    patterns: ["incur-smoke.test.ts"],
+    patterns: ["incur-smoke.test.ts", "incur-skill-hash.test.ts"],
   },
   {
     fileParallelism: false,

@@ -25,14 +25,12 @@ const SOL_REQUIRES_EDGE_ERROR_CODE = "ASSISTANT_MODEL_SOL_REQUIRES_EDGE";
 
 const MODEL_OPTIONS = [
   {
-    description:
-      "For everyday check-ins, questions, planning, and follow-through with Murph.",
+    description: "Everyday check-ins, questions, and planning.",
     model: HOSTED_ASSISTANT_TERRA_MODEL,
     name: "GPT-5.6 Terra",
   },
   {
-    description:
-      "When you want Murph to dig deeper on complex questions, research, and demanding tasks. Counts more toward your Edge usage limit.",
+    description: "Deeper research and harder tasks. Uses more of your Edge limit.",
     model: HOSTED_ASSISTANT_SOL_MODEL,
     name: "GPT-5.6 Sol",
   },
@@ -203,9 +201,8 @@ function HostedAssistantModelSettingsForm(
       }}
     >
       <p className="text-sm text-pretty text-muted-foreground">
-        Choose Murph’s default model. You can switch back at any time. New work
-        uses the change after the current run closes. An idle run can take up
-        to three minutes to close.
+        Choose Murph’s default model. Changes apply to new work and can take a
+        few minutes.
       </p>
 
       <fieldset
