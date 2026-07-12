@@ -5,6 +5,7 @@ import {
   configSchemaPath,
   generateIncurArtifacts,
   incurGeneratedTypesPath,
+  vaultCliSkillHashPath,
 } from './incur-config-schema.js'
 
 interface PackageJsonShape {
@@ -371,6 +372,7 @@ function assertConfigSchemaSmoke(configSchema: {
 
 async function assertGeneratedArtifactsFresh(configSchema: object): Promise<void> {
   const generatedTypes = await readFile(incurGeneratedTypesPath, 'utf8')
+  const generatedSkillHashModule = await readFile(vaultCliSkillHashPath, 'utf8')
   const generatedArtifacts = await generateIncurArtifacts({ rebuildCli: false })
 
   assert(
@@ -381,6 +383,10 @@ async function assertGeneratedArtifactsFresh(configSchema: object): Promise<void
   assert(
     generatedTypes === generatedArtifacts.types,
     'src/incur.generated.ts must stay in sync with the current built CLI entrypoint. Regenerate it from the built CLI after command topology changes.',
+  )
+  assert(
+    generatedSkillHashModule === generatedArtifacts.skillHashModule,
+    'src/vault-cli-skill-hash.generated.ts must stay in sync with the current built CLI entrypoint. Regenerate it from the built CLI after command topology changes.',
   )
 }
 
