@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { access, mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -20,6 +20,7 @@ import { afterEach, describe, expect, it } from "vitest";
 const FHIR_BASE_URL = "https://ehr.example.test/fhir";
 const FHIR_BASE_URL_HASH = hashClinicalFhirBaseUrl(FHIR_BASE_URL);
 const PATIENT_ID = "patient-1";
+const OTHER_PATIENT_ID = "patient-2";
 const PATIENT_ID_HASH = hashClinicalFhirPatientId(PATIENT_ID);
 const QUERY_FINGERPRINT = "a".repeat(64);
 const tempRoots: string[] = [];
@@ -83,6 +84,67 @@ describe("importClinicalFhirSnapshot", () => {
         resourceType: "Observation",
       }],
     })).rejects.toThrow();
+  });
+
+  it("rejects a wrong-patient page before persisting raw evidence", async () => {
+    const input = await createSnapshotInput({
+      pages: [{
+        content: fhirBundle([
+          heartRateObservation("wrong-patient", 70, `Patient/${OTHER_PATIENT_ID}`),
+        ]),
+        resourceType: "Observation",
+      }],
+      resourceTypes: ["Observation"],
+    });
+
+    await expect(importClinicalFhirSnapshot(input)).rejects.toThrow("does not match manifest patient");
+    await expectClinicalRawSnapshotAbsent(input);
+  });
+
+  it("rejects a wrong resource family before persisting raw evidence", async () => {
+    const input = await createSnapshotInput({
+      pages: [{
+        content: fhirBundle([heartRateObservation("wrong-resource-family")]),
+        resourceType: "Condition",
+      }],
+      resourceTypes: ["Condition"],
+    });
+
+    await expect(importClinicalFhirSnapshot(input)).rejects.toThrow("declared resource type");
+    await expectClinicalRawSnapshotAbsent(input);
+  });
+
+  it("rejects a foreign FHIR base before persisting raw evidence", async () => {
+    const input = await createSnapshotInput({
+      pages: [{
+        content: fhirBundle([
+          heartRateObservation(
+            "foreign-fhir-base",
+            70,
+            "https://foreign.example.test/fhir/Patient/patient-1",
+          ),
+        ]),
+        resourceType: "Observation",
+      }],
+      resourceTypes: ["Observation"],
+    });
+
+    await expect(importClinicalFhirSnapshot(input)).rejects.toThrow("invalid manifest patient reference");
+    await expectClinicalRawSnapshotAbsent(input);
+  });
+
+  it("rejects invalid pagination before persisting raw evidence", async () => {
+    const input = await createSnapshotInput({
+      pages: [{
+        content: fhirBundle([heartRateObservation("unresolved-pagination")]),
+        nextPageUrlHash: "b".repeat(64),
+        resourceType: "Observation",
+      }],
+      resourceTypes: ["Observation"],
+    });
+
+    await expect(importClinicalFhirSnapshot(input)).rejects.toThrow("unresolved pagination");
+    await expectClinicalRawSnapshotAbsent(input);
   });
 
   it("preserves review-only evidence without attempting an empty canonical batch", async () => {
@@ -177,6 +239,31 @@ async function createSnapshotInput(input: {
   };
 }
 
+async function expectClinicalRawSnapshotAbsent(
+  input: ClinicalFhirSnapshotImportInput,
+): Promise<void> {
+  const snapshotRoot = path.join(
+    input.vaultRoot,
+    "raw",
+    "clinical",
+    "fhir",
+    input.connectionId,
+    input.retrievalJobId,
+  );
+  await expect(access(path.join(snapshotRoot, "manifest.json"))).rejects.toMatchObject({ code: "ENOENT" });
+
+  const ordinalsByResourceType = new Map<string, number>();
+  for (const page of input.pages) {
+    const ordinal = (ordinalsByResourceType.get(page.resourceType) ?? 0) + 1;
+    ordinalsByResourceType.set(page.resourceType, ordinal);
+    await expect(access(path.join(
+      snapshotRoot,
+      page.resourceType,
+      `page-${String(ordinal).padStart(4, "0")}.json`,
+    ))).rejects.toMatchObject({ code: "ENOENT" });
+  }
+}
+
 function fhirBundle(resources: unknown[]): string {
   return `${JSON.stringify({
     resourceType: "Bundle",
@@ -185,13 +272,17 @@ function fhirBundle(resources: unknown[]): string {
   })}\n`;
 }
 
-function heartRateObservation(resourceId: string, value = 70) {
+function heartRateObservation(
+  resourceId: string,
+  value = 70,
+  patientReference = `Patient/${PATIENT_ID}`,
+) {
   return {
     resourceType: "Observation",
     id: resourceId,
     meta: { lastUpdated: "2026-07-10T12:00:00.000Z" },
     status: "final",
-    subject: { reference: `Patient/${PATIENT_ID}` },
+    subject: { reference: patientReference },
     effectiveDateTime: "2026-07-10T11:59:00.000Z",
     code: {
       coding: [{

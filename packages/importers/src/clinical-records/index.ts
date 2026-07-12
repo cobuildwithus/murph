@@ -53,6 +53,17 @@ export interface BuildClinicalImportPlanInput {
   manifestPath: string;
 }
 
+export interface ClinicalImportSnapshotPage {
+  content: string;
+  relativePath: string;
+}
+
+export interface BuildClinicalImportPlanFromSnapshotInput {
+  manifest: unknown;
+  manifestPath: string;
+  pages: readonly ClinicalImportSnapshotPage[];
+}
+
 type FhirResourceContext<TResource extends Resource = Resource> = {
   manifest: ClinicalRawManifest;
   rawRef: string;
@@ -179,24 +190,54 @@ export async function buildClinicalImportPlan(input: BuildClinicalImportPlanInpu
       maxBytes: CLINICAL_RAW_MANIFEST_MAX_BYTES,
     })),
   );
-  const manifestPathParts = manifestPath.split("/");
-  if (manifestPathParts[3] !== manifest.connectionId || manifestPathParts[4] !== manifest.retrievalJobId) {
-    throw new Error("Clinical FHIR raw manifest path does not match manifest identity.");
-  }
+  assertClinicalRawManifestPathIdentity({ manifest, manifestPath });
   await assertRawResourceFileByteBounds({
     manifest,
     manifestPath,
     vaultRoot: input.vaultRoot,
   });
+  const pages: ClinicalImportSnapshotPage[] = [];
+  for (const resourceFile of manifest.resourceFiles) {
+    const rawRef = rawRefForClinicalManifestFile({
+      manifestPath,
+      resourceFile,
+    });
+    pages.push({
+      content: await readVaultRelativeText(input.vaultRoot, rawRef, {
+        maxBytes: CLINICAL_RAW_RESOURCE_FILE_MAX_BYTES,
+      }),
+      relativePath: resourceFile.relativePath,
+    });
+  }
+
+  return buildClinicalImportPlanFromSnapshot({
+    manifest,
+    manifestPath,
+    pages,
+  });
+}
+
+export function buildClinicalImportPlanFromSnapshot(
+  input: BuildClinicalImportPlanFromSnapshotInput,
+): ClinicalImportPlan {
+  const manifestPath = clinicalFhirManifestPathSchema.parse(input.manifestPath);
+  const manifest = clinicalRawManifestSchema.parse(input.manifest);
+  assertClinicalRawManifestPathIdentity({ manifest, manifestPath });
+  const pageContents = indexClinicalImportSnapshotPages({ manifest, pages: input.pages });
+  assertClinicalImportSnapshotPageByteBounds({ manifest, manifestPath, pageContents });
   const decisions: ClinicalImportDecision[] = [];
   const resourcePages: FhirResourcePage[] = [];
 
   for (const resourceFile of manifest.resourceFiles) {
-    const page = await readClinicalResourcePage({
+    const pageText = pageContents.get(resourceFile.relativePath);
+    if (pageText === undefined) {
+      throw new Error(`Clinical FHIR snapshot is missing ${resourceFile.relativePath}.`);
+    }
+    const page = parseClinicalResourcePage({
       manifest,
       manifestPath,
+      pageText,
       resourceFile,
-      vaultRoot: input.vaultRoot,
     });
     resourcePages.push(page);
   }
@@ -239,6 +280,70 @@ export async function buildClinicalImportPlan(input: BuildClinicalImportPlanInpu
     },
     decisions,
   });
+}
+
+function indexClinicalImportSnapshotPages(input: {
+  manifest: ClinicalRawManifest;
+  pages: readonly ClinicalImportSnapshotPage[];
+}): ReadonlyMap<string, string> {
+  if (input.pages.length !== input.manifest.resourceFiles.length) {
+    throw new Error("Clinical FHIR snapshot pages do not match the manifest resource files.");
+  }
+
+  const pageContents = new Map<string, string>();
+  for (const page of input.pages) {
+    if (pageContents.has(page.relativePath)) {
+      throw new Error(`Clinical FHIR snapshot has duplicate page content for ${page.relativePath}.`);
+    }
+    pageContents.set(page.relativePath, page.content);
+  }
+
+  for (const resourceFile of input.manifest.resourceFiles) {
+    if (!pageContents.has(resourceFile.relativePath)) {
+      throw new Error(`Clinical FHIR snapshot is missing ${resourceFile.relativePath}.`);
+    }
+  }
+  return pageContents;
+}
+
+function assertClinicalRawManifestPathIdentity(input: {
+  manifest: ClinicalRawManifest;
+  manifestPath: string;
+}): void {
+  const manifestPathParts = input.manifestPath.split("/");
+  if (
+    manifestPathParts[3] !== input.manifest.connectionId
+    || manifestPathParts[4] !== input.manifest.retrievalJobId
+  ) {
+    throw new Error("Clinical FHIR raw manifest path does not match manifest identity.");
+  }
+}
+
+function assertClinicalImportSnapshotPageByteBounds(input: {
+  manifest: ClinicalRawManifest;
+  manifestPath: string;
+  pageContents: ReadonlyMap<string, string>;
+}): void {
+  let totalBytes = 0;
+  for (const resourceFile of input.manifest.resourceFiles) {
+    const rawRef = rawRefForClinicalManifestFile({
+      manifestPath: input.manifestPath,
+      resourceFile,
+    });
+    const content = input.pageContents.get(resourceFile.relativePath);
+    if (content === undefined) {
+      throw new Error(`Clinical FHIR snapshot is missing ${resourceFile.relativePath}.`);
+    }
+    const byteSize = Buffer.byteLength(content, "utf8");
+    if (byteSize > CLINICAL_RAW_RESOURCE_FILE_MAX_BYTES) {
+      throw new Error(`Clinical FHIR raw resource file exceeds ${CLINICAL_RAW_RESOURCE_FILE_MAX_BYTES} bytes for ${rawRef}.`);
+    }
+
+    totalBytes += byteSize;
+    if (totalBytes > CLINICAL_RAW_RESOURCE_FILES_MAX_TOTAL_BYTES) {
+      throw new Error(`Clinical FHIR raw resource files exceed ${CLINICAL_RAW_RESOURCE_FILES_MAX_TOTAL_BYTES} total bytes.`);
+    }
+  }
 }
 
 export function clinicalPlanToEventImportDecisions(
@@ -413,21 +518,18 @@ async function assertRawResourceFileByteBounds(input: {
   }
 }
 
-async function readClinicalResourcePage(input: {
+function parseClinicalResourcePage(input: {
   manifest: ClinicalRawManifest;
   manifestPath: string;
+  pageText: string;
   resourceFile: ClinicalRawManifestResourceFile;
-  vaultRoot: string;
-}): Promise<FhirResourcePage> {
+}): FhirResourcePage {
   const rawRef = rawRefForClinicalManifestFile({
     manifestPath: input.manifestPath,
     resourceFile: input.resourceFile,
   });
-  const pageText = await readVaultRelativeText(input.vaultRoot, rawRef, {
-    maxBytes: CLINICAL_RAW_RESOURCE_FILE_MAX_BYTES,
-  });
-  assertRawResourceFileHash({ rawRef, resourceFile: input.resourceFile, text: pageText });
-  const page = JSON.parse(pageText);
+  assertRawResourceFileHash({ rawRef, resourceFile: input.resourceFile, text: input.pageText });
+  const page = JSON.parse(input.pageText);
   const resources = extractFhirResources(page, {
     maxResources: input.resourceFile.count,
     rawRef,

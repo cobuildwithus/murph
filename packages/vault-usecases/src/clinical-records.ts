@@ -24,10 +24,14 @@ const CLINICAL_IMPORTER_MODULE_SPECIFIER = "@murphai/importers/clinical-records"
 const JSON_MEDIA_TYPE = "application/fhir+json";
 
 type ClinicalImporterModule = {
-  buildClinicalImportPlan(input: {
+  buildClinicalImportPlanFromSnapshot(input: {
+    manifest: unknown;
     manifestPath: string;
-    vaultRoot: string;
-  }): Promise<ClinicalImportPlan>;
+    pages: ReadonlyArray<{
+      content: string;
+      relativePath: string;
+    }>;
+  }): ClinicalImportPlan;
 };
 
 export interface ClinicalFhirSnapshotPage {
@@ -76,6 +80,17 @@ export async function importClinicalFhirSnapshot(
   input: ClinicalFhirSnapshotImportInput,
 ): Promise<ClinicalFhirSnapshotImportResult> {
   const prepared = prepareClinicalFhirSnapshot(input);
+  const importer = await loadRuntimeModule<ClinicalImporterModule>(
+    CLINICAL_IMPORTER_MODULE_SPECIFIER,
+  );
+  const plan = importer.buildClinicalImportPlanFromSnapshot({
+    manifest: prepared.manifest,
+    manifestPath: prepared.manifestPath,
+    pages: prepared.pages.map((page) => ({
+      content: page.content,
+      relativePath: page.relativePath,
+    })),
+  });
   const rawContents = [
     ...prepared.pages.map((page) => ({
       allowExistingMatch: true,
@@ -105,13 +120,6 @@ export async function importClinicalFhirSnapshot(
     vaultRoot: input.vaultRoot,
   });
 
-  const importer = await loadRuntimeModule<ClinicalImporterModule>(
-    CLINICAL_IMPORTER_MODULE_SPECIFIER,
-  );
-  const plan = await importer.buildClinicalImportPlan({
-    manifestPath: prepared.manifestPath,
-    vaultRoot: input.vaultRoot,
-  });
   const executableDecisions = plan.decisions.flatMap((decision) =>
     decision.action === "review" ? [] : [{ ...decision }]
   );
