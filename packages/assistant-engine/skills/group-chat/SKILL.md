@@ -23,6 +23,12 @@ are (display name), and whose shared data is whose (grantor member id). If a
 member's name has not arrived yet, use context gracefully and never guess;
 their name usually lands after their runtime's next wake.
 
+`read_current` can return `status="none"` before this connected chat has a
+hosted group record. That means the group is ready to be created here, not that
+someone must link an external workspace. If the room asks to create the group,
+join it, or approve sharing, call `create_join_link` or `post_join_offer`; those
+actions create the hosted group record as part of the existing flow.
+
 ## The decision ladder
 
 Run this on every inbound group message, top to bottom, and take the first
@@ -142,6 +148,10 @@ pre-consented; send them on schedule with confidence. Etiquette:
   sustained silence, reduce frequency rather than escalating.
 - Automations do not override the ladder: between scheduled sends, the normal
   reply rules above still apply.
+- Do not say an update is saved, scheduled, or active until the
+  `vault-cli automation save` command succeeds. If it fails, correct the
+  command or tell the group plainly that setup did not complete; never turn a
+  failed command into a confirmation.
 
 ## Group health newsletter
 
