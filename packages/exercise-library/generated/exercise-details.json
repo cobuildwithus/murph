@@ -1,5 +1,5 @@
 {
-  "catalogHash": "sha256:9bc81b2a2de909071d4705db8433bc96b35cf0aecf4c1d5b09d19383e68705ac",
+  "catalogHash": "sha256:639211830a567ee64a816bc20e344685923cf9de3d92e8093b2e5817182f7bc3",
   "generatedAt": null,
   "items": [
     {
@@ -4860,7 +4860,28 @@
         "Wall"
       ],
       "id": "EX862",
-      "images": [],
+      "images": [
+        {
+          "alt": "Athlete holds a wall-supported handstand with both hands shoulder-width and feet on the wall.",
+          "step": "Wall handstand setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/5c99bf20-240f-4790-7f9d-8ce6f1985f00/public"
+        },
+        {
+          "alt": "Athlete shifts into the viewer-right hand and taps the opposite shoulder in a wall handstand.",
+          "step": "First shoulder tap",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/faa3cc55-8d02-42ef-0a38-623f535a6100/public"
+        },
+        {
+          "alt": "Athlete returns the tapping hand to the floor and recenters in the wall handstand.",
+          "step": "Two-hand reset",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/7967516f-5bf0-48a8-1992-b4c7947ecc00/public"
+        },
+        {
+          "alt": "Athlete supports with the hand farther from the wall and taps the opposite shoulder with the wall-side hand.",
+          "step": "Opposite shoulder tap",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/6e9b24a6-5444-4582-168b-f4b825079100/public"
+        }
+      ],
       "kind": "exercise",
       "level": "advanced",
       "modality": "Strength",
@@ -4896,7 +4917,28 @@
       ],
       "equipment": [],
       "id": "EX863",
-      "images": [],
+      "images": [
+        {
+          "alt": "Athlete holds an inverted-V pike with hips high, arms straight, and both feet planted.",
+          "step": "Pike setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/7511ba79-5c7e-41f3-9147-d7f53041fa00/public"
+        },
+        {
+          "alt": "Athlete bends both elbows and lowers the head toward the floor while keeping hips high.",
+          "step": "Pike push-up bottom",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/63b4e608-347b-4b13-a4b0-4efe2fb10600/public"
+        },
+        {
+          "alt": "Athlete supports with the left hand and reaches the right hand across to the opposite left toe while keeping hips high.",
+          "step": "Right hand to left toe",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/7a53ab9b-a326-4fdf-e5a5-63d839708100/public"
+        },
+        {
+          "alt": "Athlete supports with the right hand and reaches the left hand across to the opposite right toe while keeping hips high.",
+          "step": "Left hand to right toe",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/299dfa3a-a7ea-4876-42b7-b1bed9c29500/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -5291,7 +5333,18 @@
         "Dumbbells"
       ],
       "id": "EX871",
-      "images": [],
+      "images": [
+        {
+          "alt": "Athlete hinges forward with a neutral spine and holds two dumbbells beneath straight arms.",
+          "step": "Hinged arms-long setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/2ff00e0f-affd-4131-e5f4-771cf9e0dc00/public"
+        },
+        {
+          "alt": "Athlete rows two dumbbells outward with elbows high and wide while holding the hip hinge still.",
+          "step": "Elbows-wide row endpoint",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/7850e857-d904-4ddd-0612-f68d04d06900/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -5377,7 +5430,18 @@
         "Dumbbells"
       ],
       "id": "EX873",
-      "images": [],
+      "images": [
+        {
+          "alt": "Athlete stands tall with feet hip-width and holds two dumbbells close in front of the thighs.",
+          "step": "Standing weights-close setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/7b932229-ebbb-4c81-2f4a-0bee5639c100/public"
+        },
+        {
+          "alt": "Athlete drives tall and pulls two dumbbells close to the lower chest with elbows leading high.",
+          "step": "Elbows-high power endpoint",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/79173b42-7b07-4137-6ad6-d8618f210700/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Power strength",
@@ -5606,7 +5670,18 @@
         "Dumbbells"
       ],
       "id": "EX878",
-      "images": [],
+      "images": [
+        {
+          "alt": "Athlete stands tall with two dumbbells at the bottom of a curl and both palms facing forward.",
+          "step": "Palms-up bottom setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/e11f1829-807c-42d2-19a6-66232e7f0c00/public"
+        },
+        {
+          "alt": "Athlete reaches the top of the curl and rotates both forearms so the palms face down before lowering.",
+          "step": "Top curl with palms-down rotation",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/a68b2308-4740-45e3-4007-c477ae0fc700/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -5643,7 +5718,18 @@
         "Dumbbells"
       ],
       "id": "EX879",
-      "images": [],
+      "images": [
+        {
+          "alt": "Athlete stands tall with two dumbbells at thigh level in a palms-down reverse-curl grip.",
+          "step": "Palms-down bottom setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/0037f795-7794-4689-7b9d-5675c66b8900/public"
+        },
+        {
+          "alt": "Athlete curls two dumbbells to the lower chest while maintaining a palms-down grip and close elbows.",
+          "step": "Palms-down curl endpoint",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/182f0a56-1cf5-4b02-4d1b-abebcf94a600/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -5876,7 +5962,23 @@
         "Neutral-grip pull-up bar"
       ],
       "id": "EX884",
-      "images": [],
+      "images": [
+        {
+          "alt": "Athlete hangs from parallel pull-up handles with palms facing inward and shoulders active.",
+          "step": "Active neutral-grip hang",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/cf1d37f9-dfc4-4c63-6972-768f2bb2aa00/public"
+        },
+        {
+          "alt": "Athlete bends both elbows and rises through the middle of a neutral-grip pull-up without swinging.",
+          "step": "Controlled mid-pull",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/87c23bf3-3b92-45e8-61fa-d12472392e00/public"
+        },
+        {
+          "alt": "Athlete reaches the top of a neutral-grip pull-up with chin above hand level and elbows driven to the ribs.",
+          "step": "Top pull-up endpoint",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/30328d1c-796a-46a4-eeee-5739df1ed800/public"
+        }
+      ],
       "kind": "exercise",
       "level": "advanced",
       "modality": "Strength",
@@ -6110,7 +6212,23 @@
         "Pull-up bar and towel"
       ],
       "id": "EX889",
-      "images": [],
+      "images": [
+        {
+          "alt": "Athlete stands beneath a pull-up bar and grips the two even ends of one towel looped over the bar.",
+          "step": "Secure towel and grip",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/958713b5-ea2d-4451-fa72-04501053ff00/public"
+        },
+        {
+          "alt": "Athlete keeps both towel grips and gently lifts the feet off the floor with arms long.",
+          "step": "Controlled lift into the hang",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/4659a650-c8ff-4a12-b6f8-2f4540b5ec00/public"
+        },
+        {
+          "alt": "Athlete holds a still towel hang with straight legs, active shoulders, and both feet clear of the floor.",
+          "step": "Steady towel hang hold",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/f6829a94-ccfb-47a3-3517-6c0d25f3c300/public"
+        }
+      ],
       "kind": "exercise",
       "level": "advanced",
       "modality": "Isometric strength",
@@ -6148,7 +6266,18 @@
         "Sturdy table"
       ],
       "id": "EX890",
-      "images": [],
+      "images": [
+        {
+          "alt": "Athlete lies beneath a sturdy table, grips one solid edge with both hands, plants both feet, and lifts the hips.",
+          "step": "Bent-knee row setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/bd7e5276-9eb0-4ac5-9dfa-6fbe6b9bc500/public"
+        },
+        {
+          "alt": "Athlete pulls the chest toward the sturdy table edge while keeping feet planted and the body rigid.",
+          "step": "Chest-to-edge row endpoint",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/1ed477ac-643b-4388-ea41-e4cf8cc62e00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -6186,7 +6315,18 @@
         "Sturdy table and chair"
       ],
       "id": "EX891",
-      "images": [],
+      "images": [
+        {
+          "alt": "Athlete grips a sturdy table edge with straight arms and holds a rigid body line with both heels centered on a stable chair.",
+          "step": "Feet-elevated row setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/a48d5bae-6095-47ba-6735-fb9a0e016200/public"
+        },
+        {
+          "alt": "Athlete pulls the chest toward the sturdy table edge while both heels remain planted on the chair and the body stays straight.",
+          "step": "Feet-elevated row endpoint",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/fd4ec07e-9cb8-40ce-7d0d-eebbb753db00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "advanced",
       "modality": "Strength",
@@ -6273,7 +6413,18 @@
         "Suspension trainer"
       ],
       "id": "EX893",
-      "images": [],
+      "images": [
+        {
+          "alt": "Athlete leans back in one straight line with arms extended and two suspension straps taut.",
+          "step": "Lean-back high-row setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/9a5c650d-fbaf-41ef-0561-ca7c84c54500/public"
+        },
+        {
+          "alt": "Athlete pulls the suspension handles to the upper chest with elbows high and wide while keeping a rigid lean.",
+          "step": "High-row endpoint",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/82d23d39-48b9-42d8-a99e-29e7668bec00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",

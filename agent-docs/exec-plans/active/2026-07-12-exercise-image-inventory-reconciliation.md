@@ -81,10 +81,11 @@ Updated: 2026-07-12
 - Completed manifest sequence 6 (`EX654`, Side Plank Star Prep): generated and inspected a three-frame setup, transition, and star endpoint with fixed subject/camera/support continuity; uploaded three images through metadata identity preflight; verified hosted bytes and public variants; and updated only the owning seed `Images` field.
 - Completed manifest sequence 7 (`EX655`, Copenhagen Plank Adduction Squeeze): rejected two invalid transition renders before accepting a three-frame knee-supported setup, lifted plank, and bottom-leg adduction squeeze; uploaded the three accepted images with hosted-byte and public-variant proof; and updated only the owning seed `Images` field.
 - Completed manifest sequence 8 (`EX656`, Forearm Plank Knee-to-Elbow): rejected one overlapped-foot setup, then accepted a three-frame fixed-camera forearm-plank setup, same-side knee transition, and knee-near-elbow endpoint; uploaded and verified three images and updated only the owning seed `Images` field.
+- Consumed newly completed handoff sequences 103–113: revalidated the source head, current canonical identities, 28 original checksums and dimensions, ordering, full-resolution anatomy, equipment, and continuity; uploaded each image through idempotent identity preflight; verified hosted bytes and public delivery; and updated only the 11 owning seed `Images` fields. Incomplete sequence 114 remains pending and untouched.
 
 ## Now
 
-- Valid ready handoff work is consumed through sequence 215, with invalid/incomplete movements left pending; direct sequences 6–8 are cataloged and 366 image-less movements remain.
+- Valid ready handoff work is consumed through sequences 103–113 and the previously accepted out-of-order ranges through 215, with invalid/incomplete movements left pending; direct sequences 6–8 are cataloged and 355 image-less movements remain.
 
 ## Next
 
@@ -96,7 +97,7 @@ Updated: 2026-07-12
 - `pnpm --dir packages/exercise-library generate`: passed after reconciliation and alt correction.
 - `pnpm --dir packages/exercise-library generate:check`: passed.
 - `pnpm --dir packages/exercise-library verify`: passed; 1 test file and 6 tests passed, including exact catalog counts, URL uniqueness, and the 500-character alt bound.
-- Current direct catalog proof: 1,748 total; 1,382 with images; 366 without images; 4,186 images; 4,186 unique public URLs.
+- Current catalog proof: 1,748 total; 1,393 with images; 355 without images; 4,214 images; 4,214 unique public URLs.
 - The latest handoff batch passes `pnpm --dir packages/exercise-library verify`: typecheck, all 6 tests, and deterministic generated-artifact checks are green; seed drift is limited to the 14 intended `Images` fields.
 - The subsequent 175/200-range batch also passes `pnpm --dir packages/exercise-library verify`; seed drift is limited to nine intended `Images` fields across two owning seed files, and 4,172 public URLs are unique.
 - Remaining generation, upload, full repository verification, completion audits, and final-head CI are pending.
