@@ -19,6 +19,8 @@ import {
 
 export interface HostedAccountSettingsSnapshot {
   assistant?: {
+    configurationAvailable: boolean;
+    dormantSolPreference: boolean;
     model: HostedAssistantProductModel;
     solAvailable: boolean;
     tone: AssistantTonePreference | null;
@@ -74,6 +76,8 @@ export async function readHostedAccountSettingsSnapshot(input: {
 
   return {
     assistant: {
+      configurationAvailable: assistantModel.configurationAvailable,
+      dormantSolPreference: assistantModel.dormantSolPreference,
       model: assistantModel.model,
       solAvailable: assistantModel.solAvailable,
       ...assistantPreferences,

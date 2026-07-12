@@ -7,7 +7,7 @@ import type {
 import {
   MURPH_CREATE_PHONE_CALL_TOOL,
   createPhoneCallRequestKey,
-  resolveAssistantPhoneCallAcceptedInputIds,
+  resolveAssistantUserActionAcceptedInputIds,
 } from "../src/assistant-codex/dynamic-tools/phone-calls.js";
 import {
   executeMurphDynamicToolRequest,
@@ -79,15 +79,15 @@ describe("assistant phone calls", () => {
       { id: "system_input", source: "system" as const },
     ];
 
-    expect(resolveAssistantPhoneCallAcceptedInputIds({
+    expect(resolveAssistantUserActionAcceptedInputIds({
       acceptedInputItems,
       turnTrigger: null,
     })).toEqual(["assistant_input", "manual_input"]);
-    expect(resolveAssistantPhoneCallAcceptedInputIds({
+    expect(resolveAssistantUserActionAcceptedInputIds({
       acceptedInputItems,
       turnTrigger: "automation-cron",
     })).toEqual([]);
-    expect(resolveAssistantPhoneCallAcceptedInputIds({
+    expect(resolveAssistantUserActionAcceptedInputIds({
       acceptedInputItems,
       turnTrigger: "automation-auto-reply",
     })).toEqual(["assistant_input", "manual_input"]);

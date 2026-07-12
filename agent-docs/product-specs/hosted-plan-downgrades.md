@@ -1,6 +1,6 @@
 # Hosted Plan Downgrades
 
-Last verified: 2026-07-10
+Last verified: 2026-07-12
 
 ## Goal
 
@@ -28,41 +28,67 @@ scheduled switch:
 The app-owned Edge-to-Pulse path is intentionally narrow; arbitrary plan
 transitions still stay out of scope.
 
-## Hosted Assistant Model Selection
+## Hosted Assistant Configuration
 
-The current paid Edge plan also unlocks an explicit assistant-model choice in
-Settings:
+Active personal members can inspect and explicitly choose the assistant target
+that Murph should use on the next hosted turn:
 
-- Terra remains the default for person members, including Edge members who do
-  nothing. Synthetic thread-container runtimes for group chats use Sol by
-  default so group behavior does not depend on a person member's billing or
-  saved model preference.
-- Settings keeps both Terra and Sol visible to non-Edge members. A paid Pulse
-  member who is eligible for the direct upgrade sees Sol locked with the
-  existing Edge upgrade action; other ineligible members see the Edge
-  requirement without a billing action.
-- Only an active, unsuspended person member whose own current billing state is
-  paid Edge can opt into Sol. Sponsored Family access, Pulse, and trials do not
-  qualify. Synthetic thread-container members cannot mutate a model preference;
-  their runtime resolves directly to Sol.
-- Postgres stores only the nullable Sol intent for person members. Terra is the
-  normal absence of a person-member override; person members who do not opt in
-  use the platform-configured model, normally Terra. Thread-container Sol is
-  derived from the existing thread-container relation and adds no persisted
-  preference.
+- Luna and Terra are available to every active personal member. Terra remains
+  the default when no personal model override is stored.
+- Synthetic thread-container runtimes use Sol by default from the existing
+  thread-container relation. They have no writable or persisted model or
+  reasoning preference.
+- Settings keeps Luna and Terra editable for non-Edge personal members and
+  explains that Sol requires paid Edge access. A paid Pulse member who is
+  eligible for the direct upgrade sees the existing Edge upgrade action; other
+  ineligible members see the Edge requirement without a billing action.
+- Only an active, unsuspended personal member whose own current billing state is
+  paid Edge can choose Sol. Sponsored Family access, Pulse, and trials do not
+  qualify. Synthetic thread-container members receive their derived Sol target
+  but cannot mutate or persist a preference.
+- The common reasoning choices are `low`, `medium`, `high`, and `xhigh`. `low`
+  is the default when no reasoning override is stored.
+- Postgres stores nullable non-default model and reasoning intent only for the
+  personal member. It is the only durable owner; the vault, hosted workspace
+  snapshot, and assistant runtime do not keep a second preference. The
+  thread-container Sol target remains derived rather than stored.
 - A scheduled switch to Pulse keeps Sol available until Stripe applies the
   Pulse phase and reconciliation changes the current billing state. After that
   boundary, Terra is effective while the stored Sol intent remains available
   for a later Edge reactivation.
-- The single web-owned resolver projects either an eligible person-member Sol
-  intent or the derived thread-container Sol default through the existing signed
-  workspace read at the next hosted invocation boundary. Cloudflare only
-  consumes that resolved optional override. An already-active invocation can
-  retain its model snapshot through its bounded 180-second idle window. Settings
-  states that an idle run can take up to three minutes to close so a person
-  member does not mistake that bounded delay for a failed save.
+- The signed workspace read projects either an eligible personal member's
+  non-default model and reasoning effort or the relation-derived thread-container
+  Sol model to the runner at the next hosted invocation boundary. The running
+  turn keeps the target it started with; a tool call never mutates that turn in
+  place. An already-active invocation can retain its model snapshot through its
+  bounded 180-second idle window. Settings states that an idle run can take up
+  to three minutes to close so a member does not mistake that bounded delay for
+  a failed save.
+- Configuration updates require an explicit personal-member choice. The
+  authenticated Settings form uses its normal session and CSRF boundary. An
+  assistant-driven update additionally requires eligible accepted user input
+  for that turn and passkey approval bound to both the explicitly requested
+  fields and the exact fully resolved model and reasoning target; web consumes
+  that approval in the matching field-level preference-write transaction.
+  Murph may suggest Luna or an Edge upgrade, but it must not switch model or
+  reasoning effort automatically because usage is low or exhausted.
 - Changing the preference does not create a mailbox item, wake, queue, or a
-  second copy in the vault or hosted workspace snapshot.
+  second runtime state machine.
+
+## Included Usage Behavior
+
+Monthly included AI allowance remains a measured billing and product signal,
+not a runtime access gate for an otherwise active member. Murph continues to
+record usage, attribute the requested and served model reported by Codex App
+Server, and send the existing period-scoped usage notice, while conversation
+and eligible system work continue after the allowance is exhausted.
+If a notice attempt fails, later counted usage in the same over-limit period may
+retry the same period-scoped claim; the existing delivery idempotency boundary
+still permits at most one completed notice.
+
+This advisory policy does not weaken other access or abuse controls. Inactive,
+suspended, and expired-trial states continue to fail closed, and the separate
+daily Linq anti-abuse quota remains enforceable.
 
 ### Deployment And Compatibility
 
@@ -70,38 +96,41 @@ Deploy this additive path in the following order:
 
 1. Apply the nullable Postgres migration.
 2. Deploy the Cloudflare consumer.
-3. Deploy the web workspace producer and Settings control.
+3. Deploy the web workspace and signed configuration-control producer plus the
+   Settings control.
 
-An old web response omits the optional override, so the new consumer preserves
-the fleet model. An old Cloudflare consumer ignores the new response field, so
-a web-first deploy is compatible but a saved Sol choice remains temporarily
-ineffective.
+An old web response omits the optional overrides, so the new consumer preserves
+the fleet model and reasoning effort. Deploying Cloudflare before web can make
+the new assistant configuration tool temporarily unavailable, but it cannot
+apply a partial preference. The web producer should not expose Luna or
+reasoning selection before the Cloudflare consumer accepts those values.
 
-The feature changes only the Worker-side selection of the existing forwarded
-`HOSTED_ASSISTANT_MODEL`; it does not change the runner invocation shape or
-runner-side model-config parser. Warm pre-feature runner bundles from the
-current Terra fleet therefore consume the same environment and already accept
-the Sol slug.
-The group-chat default is a web-side producer change over that same optional
-override: the existing Cloudflare consumer already accepts Sol, so it requires
-no coordinated Worker or container rollout. A web rollback simply returns
-thread-container runtimes to the fleet model on their next invocation.
+The feature selects per-invocation overrides through the existing forwarded
+`HOSTED_ASSISTANT_MODEL` and `HOSTED_ASSISTANT_REASONING_EFFORT` environment
+keys; it does not add a second runner command or model-config parser. Current
+runner bundles already accept Luna, Terra, Sol, and the common reasoning values.
+The group-chat default is a web-side derivation over the same optional model
+override: it requires no persisted preference or separate consumer behavior,
+and a web rollback returns thread-container runtimes to the fleet model on their
+next invocation.
 The feature is safe under gradual container rollout and adds no requirement for
 `container_rollout=immediate`. Production deploys must still honor the existing
 global rollout preflight in `apps/cloudflare/DEPLOY.md`, which currently requires
 immediate rollout for the GPT-5.6 fleet and selector-scope compatibility.
 
 Feature rollback may restore either the pre-feature web producer or the
-pre-feature Cloudflare consumer; the additive nullable column may remain. Old
-web code emits no model field, and old Cloudflare code ignores one, so either
-rollback independently returns every member to the platform-configured model,
-normally Terra. This feature has no model-specific fallback or rollback path.
+pre-feature Cloudflare consumer; the additive nullable columns may remain. A
+rollback that no longer projects the saved values returns execution to the
+platform-configured model and reasoning defaults without deleting member
+intent. This feature has no model-specific fallback or rollback path.
 
-Focused contract coverage proves old/no-field compatibility, the saved Sol
-choice, the person-member Terra default, and the thread-container Sol default.
-The normal deploy keeps its managed-container fingerprint and live Terra smoke.
-An optional post-deploy canary may select Sol for one eligible Edge member and
-confirm the next new invocation reports Sol.
+Focused contract coverage proves old/no-field compatibility, personal-member
+Luna/Terra/Sol eligibility, the common reasoning values, next-turn projection,
+and the relation-derived thread-container Sol default. The normal deploy keeps
+its managed-container fingerprint and live Terra smoke. An optional post-deploy
+canary may save one non-default target for an eligible personal member and
+confirm the next new invocation reports it while usage retains both
+requested-model and served-model attribution.
 
 ## First-Version Scope
 

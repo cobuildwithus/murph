@@ -393,6 +393,17 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(platform.runtimeLivenessRequired).toBeUndefined();
   });
 
+  it("attaches the hosted assistant configuration port to the Cloudflare platform", () => {
+    const platform = buildTestHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+    });
+
+    expect(platform.assistantConfigurationToolPort).toBeDefined();
+    expect(platform.assistantConfigurationToolPort?.request).toEqual(
+      expect.any(Function),
+    );
+  });
+
   it("rejects oversized workspace snapshot restores before unwrap or fetch", async () => {
     const fetchMock = vi.fn();
     const platform = buildTestHostedExecutionRuntimePlatform({

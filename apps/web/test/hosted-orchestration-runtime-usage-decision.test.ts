@@ -40,17 +40,14 @@ describe("resolveHostedRuntimeAiUsageGate", () => {
     expect(mocks.resolveHostedAiUsageGate).not.toHaveBeenCalled();
   });
 
-  it("maps a denied check decision to denied", async () => {
-    const decision = buildDeniedUsageGateDecision();
+  it("maps monthly usage exhaustion to allowed runtime work", async () => {
+    const decision = buildUsageLimitAdvisoryDecision();
     mocks.checkHostedAiUsageGate.mockResolvedValue(decision);
 
     await expect(resolveHostedRuntimeAiUsageGate({
       mode: "read_first",
       userId: "member_123",
-    })).resolves.toEqual({
-      decision,
-      status: "denied",
-    });
+    })).resolves.toEqual({ status: "allowed" });
   });
 
   it("keeps read_only mode on the pure read gate", async () => {
@@ -66,8 +63,8 @@ describe("resolveHostedRuntimeAiUsageGate", () => {
     expect(mocks.resolveHostedAiUsageGate).not.toHaveBeenCalled();
   });
 
-  it("keeps mutating mode on the authoritative resolve gate", async () => {
-    const decision = buildDeniedUsageGateDecision();
+  it("keeps inactive hosted access denied", async () => {
+    const decision = buildHostedAccessInactiveUsageGateDecision();
     mocks.resolveHostedAiUsageGate.mockResolvedValue(decision);
 
     await expect(resolveHostedRuntimeAiUsageGate({
@@ -81,6 +78,19 @@ describe("resolveHostedRuntimeAiUsageGate", () => {
     expect(mocks.resolveHostedAiUsageGate).toHaveBeenCalledTimes(1);
     expect(mocks.checkHostedAiUsageGate).not.toHaveBeenCalled();
     expect(mocks.readHostedAiUsageGate).not.toHaveBeenCalled();
+  });
+
+  it("keeps trial-expired pending-billing access denied", async () => {
+    const decision = buildTrialExpiredPendingBillingUsageGateDecision();
+    mocks.resolveHostedAiUsageGate.mockResolvedValue(decision);
+
+    await expect(resolveHostedRuntimeAiUsageGate({
+      mode: "mutating",
+      userId: "member_123",
+    })).resolves.toEqual({
+      decision,
+      status: "denied",
+    });
   });
 
   it("maps gate failures to unavailable with a bounded retry time", async () => {
@@ -98,9 +108,9 @@ describe("resolveHostedRuntimeAiUsageGate", () => {
   });
 });
 
-function buildDeniedUsageGateDecision() {
+function buildUsageLimitAdvisoryDecision() {
   return {
-    allowed: false,
+    allowed: true,
     billingPlanCode: "launch_monthly",
     limitUsdMicros: 10_000_000n,
     memberId: "member_123",
@@ -113,6 +123,41 @@ function buildDeniedUsageGateDecision() {
     userNotice: {
       code: "edge_usage_limit_reached",
       message: "You hit your monthly Murph AI limit.",
+    },
+  };
+}
+
+function buildHostedAccessInactiveUsageGateDecision() {
+  return {
+    allowed: false,
+    billingPlanCode: "launch_monthly",
+    limitUsdMicros: 10_000_000n,
+    memberId: "member_123",
+    periodEnd: new Date("2026-07-01T00:00:00.000Z"),
+    periodStart: new Date("2026-06-01T00:00:00.000Z"),
+    reason: "hosted_access_inactive",
+    remainingUsdMicros: 10_000_000n,
+    retryAfter: new Date("2026-06-12T12:05:00.000Z"),
+    spentUsdMicros: 0n,
+    userNotice: null,
+  };
+}
+
+function buildTrialExpiredPendingBillingUsageGateDecision() {
+  return {
+    allowed: false,
+    billingPlanCode: "launch_monthly",
+    limitUsdMicros: 4_500_000n,
+    memberId: "member_123",
+    periodEnd: new Date("2026-06-12T12:15:00.000Z"),
+    periodStart: new Date("2026-06-12T12:00:00.000Z"),
+    reason: "trial_expired_pending_billing",
+    remainingUsdMicros: 0n,
+    retryAfter: new Date("2026-06-12T12:15:00.000Z"),
+    spentUsdMicros: 4_500_000n,
+    userNotice: {
+      code: "trial_conversion_pending",
+      message: "Your Murph trial needs billing before I can keep going.",
     },
   };
 }

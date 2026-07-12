@@ -1,6 +1,6 @@
 # Hosted sensitive-action approvals
 
-Last verified: 2026-06-24
+Last verified: 2026-07-10
 
 ## Purpose
 
@@ -33,6 +33,7 @@ The hosted runtime receives one optional platform capability:
 ```ts
 interface HostedRuntimeActionApprovalPort {
   request(input: HostedActionApprovalRequest): Promise<HostedActionApprovalResult>;
+  consume(input: HostedActionApprovalConsumeRequest): Promise<HostedActionApprovalResult>;
 }
 ```
 
@@ -50,8 +51,9 @@ A request contains:
 3. Reusing the action ID with a changed kind, fingerprint, or presentation fails closed.
 4. Later calls return `approved`, `denied`, or derived `expired`.
 
-The caller owns action execution, retries, and completion. It must recompute the fingerprint and call `request` again at the final effect boundary. Approval has no claimed, executing, completed, or provider-error state.
-When `pending` is returned, the approval URL is handed to the normal assistant reply path; the approval system must not send a separate hard-coded user message.
+The caller owns action execution, retries, and completion. It must recompute the exact request and call `consume` with the approved generation at the final effect boundary. Consumption is one-consumer, generation-bound, and idempotent for the same deterministic consumer ID. Approval has no claimed, executing, completed, or provider-error state.
+
+When `pending` is returned, the approval URL is handed to the normal assistant reply path; the approval system must not send a separate hard-coded user message. The hosted assistant-configuration tool uses this path for model and reasoning changes. It requires accepted user input on the requesting and consuming turns, fingerprints both the explicitly requested fields and the fully resolved next-turn target, and consumes approval in the same web transaction as the matching field-level preference mutation. Configuration reads do not require approval.
 
 ## Browser decision flow
 
@@ -62,7 +64,7 @@ When `pending` is returned, the approval URL is handed to the normal assistant r
 5. Denial requires the authenticated session but not wallet MFA because it cannot release data or execute the action.
 6. The route best-effort signals `runtime_recheck_requested` and redirects using the existing server-resolved Murph contact UX.
 
-The reply text is only a wake/fallback affordance. It is never authorization evidence; the runtime trusts only `actionApprovalPort.request()`.
+The reply text is only a wake/fallback affordance. It is never authorization evidence; the runtime trusts only the immutable request plus its approved generation, and the owning effect boundary must consume that generation before executing.
 
 ## Privacy and retention
 

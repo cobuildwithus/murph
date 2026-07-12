@@ -18,6 +18,20 @@ export const POST = withJsonError(async (request: Request) => {
 function formatHostedAiUsageGateDecision(
   decision: Awaited<ReturnType<typeof resolveHostedAiUsageGate>>,
 ) {
+  if (decision.allowed && "reason" in decision) {
+    return {
+      allowed: true,
+      advisoryReason: decision.reason,
+      ...(decision.userNotice
+        ? {
+            noticeCode: decision.userNotice.code,
+            userNotice: decision.userNotice.message,
+          }
+        : {}),
+      resetAt: decision.retryAfter.toISOString(),
+    };
+  }
+
   return decision.allowed
     ? {
         allowed: true,

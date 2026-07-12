@@ -103,7 +103,7 @@ export async function recordHostedAiUsageRecordsAndSendLimitNotices(input: {
   for (const candidate of dedupeHostedAiUsageLimitNoticeCandidates(
     result.limitNoticeCandidates,
   )) {
-    await sendHostedAiUsageLimitNoticeAtCrossing({
+    await sendHostedAiUsageLimitNoticeCandidate({
       candidate,
       prisma,
     });
@@ -170,7 +170,7 @@ function dedupeHostedAiUsageLimitNoticeCandidates(
   return [...byPeriod.values()];
 }
 
-async function sendHostedAiUsageLimitNoticeAtCrossing(input: {
+async function sendHostedAiUsageLimitNoticeCandidate(input: {
   candidate: HostedAiUsageLimitNoticeCandidate;
   prisma: HostedAiUsageClient;
 }): Promise<void> {
@@ -179,7 +179,7 @@ async function sendHostedAiUsageLimitNoticeAtCrossing(input: {
     sentAt < input.candidate.periodStart
     || sentAt >= input.candidate.periodEnd
   ) {
-    logHostedAiUsageLimitNoticeAtCrossing("period_not_current", input.candidate);
+    logHostedAiUsageLimitNoticeDelivery("period_not_current", input.candidate);
     return;
   }
 
@@ -191,7 +191,7 @@ async function sendHostedAiUsageLimitNoticeAtCrossing(input: {
       }),
     );
     if (!("chatId" in route) || !route.chatId) {
-      logHostedAiUsageLimitNoticeAtCrossing("home_route_missing", input.candidate);
+      logHostedAiUsageLimitNoticeDelivery("home_route_missing", input.candidate);
       return;
     }
 
@@ -209,11 +209,11 @@ async function sendHostedAiUsageLimitNoticeAtCrossing(input: {
       sourceEventId: input.candidate.sourceUsageId,
     });
   } catch (error) {
-    logHostedAiUsageLimitNoticeAtCrossing("send_failed", input.candidate, error);
+    logHostedAiUsageLimitNoticeDelivery("send_failed", input.candidate, error);
   }
 }
 
-function logHostedAiUsageLimitNoticeAtCrossing(
+function logHostedAiUsageLimitNoticeDelivery(
   reason: "home_route_missing" | "period_not_current" | "send_failed",
   candidate: HostedAiUsageLimitNoticeCandidate,
   error?: unknown,
@@ -226,11 +226,11 @@ function logHostedAiUsageLimitNoticeAtCrossing(
   });
 
   if (reason === "home_route_missing") {
-    console.warn("Hosted AI usage-limit notice at crossing skipped.", details);
+    console.warn("Hosted AI usage-limit notice delivery skipped.", details);
     return;
   }
 
-  console.warn("Hosted AI usage-limit notice at crossing failed.", details);
+  console.warn("Hosted AI usage-limit notice delivery failed.", details);
 }
 
 async function persistHostedAiUsageRecordTx(input: {

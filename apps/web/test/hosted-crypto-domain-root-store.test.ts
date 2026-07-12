@@ -688,6 +688,7 @@ function createHostedMemberIdentityServiceTransaction(): HostedCryptoTestTransac
       const now = new Date("2026-05-02T00:00:00.000Z");
       return {
         assistantModelPreference: null,
+        assistantReasoningEffortPreference: null,
         assistantTone: null,
         assistantVoice: null,
         billingStatus: input.data.billingStatus ?? HostedBillingStatus.not_started,

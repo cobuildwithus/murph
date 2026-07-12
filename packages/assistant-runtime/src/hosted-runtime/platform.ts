@@ -22,6 +22,8 @@ import type {
   HostedRuntimeIssueExportResponse,
   HostedRuntimeFamilyPlanToolRequest,
   HostedRuntimeFamilyPlanToolResponse,
+  HostedRuntimeAssistantConfigurationControlRequest,
+  HostedRuntimeAssistantConfigurationToolResponse,
   HostedRuntimeGroupToolRequest,
   HostedRuntimeGroupToolResponse,
   HostedRuntimeNewsletterToolRequest,
@@ -85,6 +87,12 @@ import type {
 
 export interface HostedRuntimeArtifactReader {
   get(sha256: string): Promise<Uint8Array | null>;
+}
+
+export interface HostedRuntimeAssistantConfigurationToolPort {
+  request(
+    request: HostedRuntimeAssistantConfigurationControlRequest,
+  ): Promise<HostedRuntimeAssistantConfigurationToolResponse>;
 }
 
 export interface HostedRuntimeArtifactWriter {
@@ -488,6 +496,7 @@ export interface HostedRuntimeVaultSharePort {
 
 export interface HostedRuntimePlatform {
   actionApprovalPort?: HostedRuntimeActionApprovalPort | null;
+  assistantConfigurationToolPort?: HostedRuntimeAssistantConfigurationToolPort | null;
   artifactStore: HostedRuntimeArtifactStore;
   browserVaultReplicaPort?: HostedRuntimeBrowserVaultReplicaPort | null;
   codexAuthPort?: HostedRuntimeCodexAuthPort | null;

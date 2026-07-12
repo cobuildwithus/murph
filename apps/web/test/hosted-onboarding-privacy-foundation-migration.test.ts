@@ -42,6 +42,7 @@ const HOSTED_MEMBER_SCHEMA_GUARD = {
   HostedMember: [
     "id String @id",
     'assistantModelPreference String? @map("assistant_model_preference")',
+    'assistantReasoningEffortPreference String? @map("assistant_reasoning_effort_preference")',
     'assistantTone String? @map("assistant_tone")',
     'assistantVoice String? @map("assistant_voice")',
     'billingStatus HostedBillingStatus @default(not_started) @map("billing_status")',
@@ -641,6 +642,7 @@ describe("hosted Prisma baseline migration", () => {
       "20260709120000_hosted_ingress_latency_delivery_link",
       "20260709120000_hosted_linq_delivery_retry_after_at",
       "20260709120000_hosted_member_assistant_model_preference",
+      "20260710120000_hosted_member_assistant_reasoning_effort_preference",
       "migration_lock.toml",
     ]);
     expect(hostedThreadRoutesMigrationSql).toContain('CREATE TABLE "hosted_thread_container"');

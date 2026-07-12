@@ -89,7 +89,7 @@ import {
   type MurphDynamicTool,
 } from '../../assistant-codex/dynamic-tools.js'
 import {
-  resolveAssistantPhoneCallAcceptedInputIds,
+  resolveAssistantUserActionAcceptedInputIds,
 } from '../../assistant-codex/dynamic-tools/phone-calls.js'
 import {
   resolveAssistantVoiceMemoDeliveryChannel,
@@ -607,13 +607,13 @@ export async function resolveAssistantRouteTurnPlan(input: {
   })
   const productFeedbackAcceptedInputIds =
     resolveAssistantProductFeedbackAcceptedInputIds(input.acceptedInputItems ?? [])
-  const phoneCallAcceptedInputIds = resolveAssistantPhoneCallAcceptedInputIds({
+  const userActionAcceptedInputIds = resolveAssistantUserActionAcceptedInputIds({
     acceptedInputItems: input.acceptedInputItems ?? [],
     turnTrigger: input.input.turnTrigger ?? null,
   })
   const allowFinishWithoutReply =
     input.allowFinishWithoutReply ?? input.profile.toolProfile === 'provider-turn'
-// Maintenance turns run without a delivery target and must not expose any
+  // Maintenance turns run without a delivery target and must not expose any
   // external-capable or delivery-facing tool surface, so the gate is the
   // resolved tool set itself rather than prompt text.
   const dynamicTools = maintenanceTurn
@@ -621,6 +621,8 @@ export async function resolveAssistantRouteTurnPlan(input: {
     : resolveMurphDynamicTools({
         allowFinishWithoutReply,
         allowMessageReactions: messageReactionsAvailable,
+        assistantConfigurationAvailable:
+          input.hostedToolContext?.assistantConfigurationTool != null,
         computerToolsAvailable:
           input.hostedToolContext?.computerToolsAvailable === true,
         progressUpdatesAvailable: input.progressDelivery != null,
@@ -632,7 +634,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
           productFeedbackAcceptedInputIds.length > 0 &&
           typeof input.executionContext?.hosted?.productFeedbackRecorder?.recordProductFeedback === 'function',
         phoneCallsAvailable:
-          phoneCallAcceptedInputIds.length > 0 &&
+          userActionAcceptedInputIds.length > 0 &&
           input.hostedToolContext?.phoneCalls != null,
         voiceMemoGenerationAvailable: voiceMemoDeliveryChannel !== null,
         vaultFileSendAvailable:

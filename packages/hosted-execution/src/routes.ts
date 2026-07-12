@@ -24,6 +24,8 @@ export const HOSTED_RUNTIME_PRODUCT_FEEDBACK_RECORD_PATH =
   "/api/internal/hosted-execution/product-feedback/record";
 export const HOSTED_RUNTIME_FAMILY_PLAN_TOOL_PATH =
   "/api/internal/hosted-execution/family-plan/tool";
+export const HOSTED_RUNTIME_ASSISTANT_CONFIGURATION_TOOL_PATH =
+  "/api/internal/hosted-execution/assistant-configuration/tool";
 
 export const HOSTED_RUNTIME_GROUP_TOOL_PATH =
   "/api/internal/hosted-execution/groups/tool";

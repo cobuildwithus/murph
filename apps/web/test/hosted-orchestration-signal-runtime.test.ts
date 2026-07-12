@@ -582,6 +582,29 @@ describe("hosted runtime Temporal signaling", () => {
     expectHostedRuntimeActiveAccessRead(mocks.hostedMemberFindUnique, "member_123");
   });
 
+  it("persists and signals manual runs when monthly usage exhaustion is advisory", async () => {
+    mocks.resolveHostedRuntimeAiUsageGate.mockResolvedValueOnce(
+      buildMonthlyUsageAdvisoryGateResult(),
+    );
+
+    await expect(signalHostedManualRunRuntime({
+      client: buildClient(),
+      userId: "member_123",
+    })).resolves.toEqual({
+      signalAccepted: true,
+      workflowId: "hosted-user-runtime:member_123",
+    });
+
+    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledWith({
+      envelope: expect.objectContaining({
+        kind: "runtime.manual-requested",
+        userId: "member_123",
+      }),
+      tx: { kind: "tx" },
+    });
+    expect(mocks.signalWithStart).toHaveBeenCalledOnce();
+  });
+
   it("does not append or signal manual runs when AI usage is denied", async () => {
     mocks.resolveHostedRuntimeAiUsageGate.mockResolvedValueOnce({
       status: "denied",
@@ -927,5 +950,11 @@ function buildHostedWorkspaceRecord(overrides: Partial<{
     userId: "member_123",
     version: "0",
     ...overrides,
+  };
+}
+
+function buildMonthlyUsageAdvisoryGateResult() {
+  return {
+    status: "allowed",
   };
 }

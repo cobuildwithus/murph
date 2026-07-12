@@ -27,9 +27,9 @@ describe("hosted AI usage gate route", () => {
     vi.clearAllMocks();
   });
 
-  it("returns a denied pending-nudge decision without claiming a user notice", async () => {
+  it("returns an advisory pending-nudge decision without blocking runtime access", async () => {
     const decision = {
-      allowed: false,
+      allowed: true,
       billingPlanCode: "launch_monthly",
       limitUsdMicros: 10_000_000n,
       memberId: "member_gate_1",
@@ -62,9 +62,10 @@ describe("hosted AI usage gate route", () => {
     ));
 
     await expect(response.json()).resolves.toMatchObject({
-      allowed: false,
+      advisoryReason: "ai_usage_limit_exceeded",
+      allowed: true,
       noticeCode: "pulse_upgrade_edge",
-      reason: "ai_usage_limit_exceeded",
+      resetAt: "2026-05-01T00:00:00.000Z",
     });
     expect(mocks.requireHostedCloudflareCallbackRequest).toHaveBeenCalledWith(
       expect.any(Request),
@@ -72,10 +73,10 @@ describe("hosted AI usage gate route", () => {
     );
   });
 
-  it("serializes deterministic quota notices from the web gate decision", async () => {
+  it("serializes deterministic quota notices as advisory legacy gate metadata", async () => {
     mocks.requireHostedCloudflareCallbackRequest.mockResolvedValue("member_gate_1");
     mocks.resolveHostedAiUsageGate.mockResolvedValue({
-      allowed: false,
+      allowed: true,
       billingPlanCode: "launch_monthly",
       limitUsdMicros: 10_000_000n,
       memberId: "member_gate_1",
@@ -103,10 +104,10 @@ describe("hosted AI usage gate route", () => {
     ));
 
     await expect(response.json()).resolves.toEqual({
-      allowed: false,
+      advisoryReason: "ai_usage_limit_exceeded",
+      allowed: true,
       noticeCode: "pulse_upgrade_edge",
-      reason: "ai_usage_limit_exceeded",
-      retryAfter: "2026-05-01T00:00:00.000Z",
+      resetAt: "2026-05-01T00:00:00.000Z",
       userNotice:
         "Hey, you've reached your usage limit for the month. Upgrade to Edge: https://withmurph.ai/home",
     });

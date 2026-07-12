@@ -231,6 +231,9 @@ type RuntimeDeviceSyncPort = NonNullable<
 type RuntimeUsageRecordPort = NonNullable<
   HostedWorkspaceRuntimeAssistantPhaseInput["runtime"]["platform"]["usageRecordPort"]
 >;
+type RuntimeAssistantConfigurationToolPort = NonNullable<
+  HostedWorkspaceRuntimeAssistantPhaseInput["runtime"]["platform"]["assistantConfigurationToolPort"]
+>;
 type RuntimeDeviceSyncConnectLinkRequest = Parameters<
   RuntimeDeviceSyncPort["createConnectLink"]
 >[0];
@@ -735,6 +738,25 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
           }),
         }),
       }),
+    );
+  });
+
+  it("passes the hosted assistant configuration port into assistant execution", async () => {
+    const assistantConfigurationToolPort: RuntimeAssistantConfigurationToolPort = {
+      request: vi.fn(),
+    };
+
+    await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      runtimeAssistantConfigurationToolPort: assistantConfigurationToolPort,
+    }));
+
+    expect(mocks.hydrateHostedExecutionDefaultTarget).toHaveBeenCalledWith(
+      {
+        hosted: expect.objectContaining({
+          assistantConfigurationTool: assistantConfigurationToolPort,
+        }),
+      },
+      expect.any(Object),
     );
   });
 
@@ -12177,6 +12199,7 @@ function createPhaseInput(input: {
   runtimeActionApprovalPort?: NonNullable<
     HostedWorkspaceRuntimeAssistantPhaseInput["runtime"]["platform"]["actionApprovalPort"]
   >;
+  runtimeAssistantConfigurationToolPort?: RuntimeAssistantConfigurationToolPort;
   runtimeUsageRecordPort?: RuntimeUsageRecordPort;
   runtimeUserEnv?: Record<string, string>;
   vaultRoot?: string;
@@ -12290,6 +12313,12 @@ function createPhaseInput(input: {
         ...(input.runtimeDeviceSyncPort ? { deviceSyncPort: input.runtimeDeviceSyncPort } : {}),
         ...(input.runtimeActionApprovalPort
           ? { actionApprovalPort: input.runtimeActionApprovalPort }
+          : {}),
+        ...(input.runtimeAssistantConfigurationToolPort
+          ? {
+              assistantConfigurationToolPort:
+                input.runtimeAssistantConfigurationToolPort,
+            }
           : {}),
         ...(input.runtimeUsageRecordPort ? { usageRecordPort: input.runtimeUsageRecordPort } : {}),
         ...(input.runtimeLatencyTraceRequests
