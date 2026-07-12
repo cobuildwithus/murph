@@ -184,7 +184,7 @@ describe('assistant session resolution store integration', () => {
     expect(sessions[0]?.target).toEqual(durableTarget)
   })
 
-  it('rebinds a group conversation-key session when the active speaker and direct/group flag drift as members are added and removed', async () => {
+  it('allows group speaker drift but starts new continuity when the audience changes', async () => {
     const { parentRoot, vaultRoot } = await createTempVaultContext(
       'assistant-session-resolution-group-rebind-',
     )
@@ -202,18 +202,15 @@ describe('assistant session resolution store integration', () => {
     expect(created.session.binding.actorId).toBe('linq-member-a')
     expect(created.session.binding.threadIsDirect).toBe(false)
 
-    // A later message on the SAME group thread arrives from a different member,
-    // and the direct/group flag flips because the roster changed (the assistant
-    // was removed and re-added). The conversation key (channel|identity|thread)
-    // is unchanged, so this must rebind the existing session rather than throw a
-    // routing conflict and strand the inbound message.
+    // A later message on the same group thread may update the active speaker
+    // without changing the audience-scoped continuity boundary.
     const resolved = await resolveAssistantSession({
       actorId: 'linq-member-b',
       channel: 'linq',
       createIfMissing: false,
       identityId: 'linq-line',
       threadId: 'group-thread',
-      threadIsDirect: true,
+      threadIsDirect: false,
       vault: vaultRoot,
     })
 
@@ -224,12 +221,27 @@ describe('assistant session resolution store integration', () => {
       sessionResolutionLookupSource: 'conversation-key',
     })
     expect(resolved.session.binding.actorId).toBe('linq-member-b')
-    expect(resolved.session.binding.threadIsDirect).toBe(true)
+    expect(resolved.session.binding.threadIsDirect).toBe(false)
+
+    // Reclassification to direct starts a separate session so the group
+    // transcript cannot be resumed in a private turn (or vice versa).
+    const direct = await resolveAssistantSession({
+      actorId: 'linq-member-b',
+      channel: 'linq',
+      identityId: 'linq-line',
+      target: createCodexTarget(),
+      threadId: 'group-thread',
+      threadIsDirect: true,
+      vault: vaultRoot,
+    })
+    expect(direct.created).toBe(true)
+    expect(direct.session.sessionId).not.toBe(created.session.sessionId)
 
     const sessions = await listAssistantSessions(vaultRoot)
-    expect(sessions.map((session) => session.sessionId)).toEqual([
+    expect(sessions.map((session) => session.sessionId).sort()).toEqual([
       created.session.sessionId,
-    ])
+      direct.session.sessionId,
+    ].sort())
   })
 
   it('still rejects a session-id resume that retargets a bound audience unless rebind is explicitly allowed', async () => {

@@ -1183,6 +1183,7 @@ async function evaluateAssistantAutoReplyGroup(input: {
     externalThreadRouteAuthorityPresent:
       primaryReplyInput.sourceMetadata?.kind === 'linq' &&
       primaryReplyInput.sourceMetadata.externalThreadRouteAuthorityPresent === true,
+    replyTargetThreadId: primaryReplyInput.replyTarget?.threadId ?? null,
     source: primaryReplyInput.source,
     threadIsDirect: primaryReplyInput.conversation.threadIsDirect,
   }) ?? null
@@ -1992,6 +1993,7 @@ async function listAutoReplyActiveTurnInputs(input: {
       isSameAutoReplyDeliveryRoute({
         candidate,
         expectedChannel,
+        threadIsDirect: input.conversation.threadIsDirect,
         threadId: deliveryTarget,
       }),
     )
@@ -2044,10 +2046,13 @@ function mergeAssistantInputCandidateBatches(
 function isSameAutoReplyDeliveryRoute(input: {
   candidate: AssistantInputCandidate
   expectedChannel: string
+  threadIsDirect: boolean | null
   threadId: string
 }): boolean {
   const replyTarget = input.candidate.event.replyTarget
   return (
+    typeof input.threadIsDirect === 'boolean' &&
+    input.candidate.event.conversation?.threadIsDirect === input.threadIsDirect &&
     normalizeNullableString(replyTarget?.channel) === input.expectedChannel &&
     normalizeNullableString(input.candidate.event.source) === input.expectedChannel &&
     readProviderRouteScalar(replyTarget?.threadId) === input.threadId

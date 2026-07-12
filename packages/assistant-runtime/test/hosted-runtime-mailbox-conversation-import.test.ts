@@ -2727,6 +2727,7 @@ describe("hosted mailbox conversation import adapter", () => {
     assert.equal(listed.events.length, 1);
     const event = listed.events[0]!;
     assert.equal(event.conversation?.source, "email");
+    assert.equal(event.conversation?.threadIsDirect, true);
     assert.match(event.conversation?.accountId ?? "", HASHED_IDENTIFIER_PATTERN);
     assert.match(event.conversation?.threadId ?? "", HASHED_IDENTIFIER_PATTERN);
     const replyTarget = event.replyTarget;
@@ -3543,6 +3544,7 @@ describe("hosted mailbox conversation import adapter", () => {
     });
     assert.equal("afterCheckpoint" in outcome, false);
     assert.equal(listed.events.length, 1);
+    assert.equal(listed.events[0]?.conversation?.threadIsDirect, null);
     assert.equal(
       listed.events[0]?.content.text,
       [
@@ -3642,6 +3644,7 @@ describe("hosted mailbox conversation import adapter", () => {
     });
     assert.equal(JSON.stringify(event).includes("labs.pdf"), true);
     assert.equal(event.replyTarget?.threadId, "hostedmail:opaque-thread-target");
+    assert.equal(event.conversation?.threadIsDirect, null);
   });
 
   test("renders group-routed hosted email input without resurfacing address fields", async () => {
@@ -3700,6 +3703,7 @@ describe("hosted mailbox conversation import adapter", () => {
     });
     assert.equal(listed.events.length, 1);
     const event = listed.events[0]!;
+    assert.equal(event.conversation?.threadIsDirect, false);
     assert.match(
       event.content.text ?? "",
       /Sender summary - Email reply from group participant: Member One/u,

@@ -1345,6 +1345,7 @@ function createHostedConversationAssistantInputConversation(
   if (isHostedEmailConversationMessageWake(wake)) {
     const threadIdentity =
       wake.message.threadKey ?? wake.message.threadTarget ?? wake.message.rawMessageKey;
+    const emailThreadTarget = parseHostedEmailThreadTarget(wake.message.threadTarget);
     return {
       accountId: hashNullableHostedAssistantConversationIdentifier(
         identifierBlind,
@@ -1357,7 +1358,9 @@ function createHostedConversationAssistantInputConversation(
         identifierBlind,
         threadIdentity,
       ),
-      threadIsDirect: true,
+      threadIsDirect: emailThreadTarget
+        ? emailThreadTarget.targetKind === "explicit"
+        : null,
     };
   }
 

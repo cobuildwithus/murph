@@ -8,7 +8,6 @@ import {
   type WearablePreferenceProvider,
   type WearablePreferences,
 } from "@murphai/contracts";
-import type { AssistantPersonalityResult } from "@murphai/operator-config/assistant-style-cli-contracts";
 import { loadRuntimeModule } from "./runtime-import.js"
 
 interface PreferencesDocument {
@@ -16,6 +15,20 @@ interface PreferencesDocument {
   sourcePath: string
   updatedAt: string | null
   wearablePreferences: WearablePreferences
+}
+
+interface AssistantPersonalityResult {
+  vault: string
+  preferencesPath: string
+  updated: boolean
+  recordedAt: string | null
+  settings: Record<
+    AssistantPersonalitySettingId,
+    {
+      value: AssistantPersonalityScore
+      source: "custom" | "default"
+    }
+  >
 }
 
 type AssistantPersonalityScore =

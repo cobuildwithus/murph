@@ -889,9 +889,16 @@ function shouldAllowLinqHomeRouteFallback(input: {
 const EMAIL_CHANNEL_ADAPTER = createAssistantChannelAdapter({
   channel: 'email',
   canAutoReply(eligibility) {
-    return eligibility.threadIsDirect === true
+    const hostedThreadTarget = parseHostedEmailThreadTarget(
+      eligibility.replyTargetThreadId,
+    )
+    return eligibility.threadIsDirect === true ||
+      (
+        eligibility.threadIsDirect === false &&
+        hostedThreadTarget?.targetKind === 'group'
+      )
       ? null
-      : 'Email auto-reply only runs for direct threads'
+      : 'Email auto-reply only runs for direct threads or validated hosted group routes'
   },
   isReadyForSetup(env) {
     return resolveAgentmailApiKey(env) !== null

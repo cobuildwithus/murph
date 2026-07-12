@@ -7166,6 +7166,135 @@ describe('assistant auto-reply runtime', () => {
       )
   })
 
+  it('does not admit delivery-route late input across an audience boundary', async () => {
+    const initialCapture = createCaptureSummary({
+      captureId: 'capture-audience-initial',
+      occurredAt: '2026-04-08T00:03:00.000Z',
+      receivedAt: '2026-04-08T00:03:01.000Z',
+      source: 'linq',
+      text: 'private direct initial text',
+      threadId: 'real_thread_audience',
+      threadIsDirect: true,
+    })
+    const projectedInitialCandidate = assistantInputCandidateFromInboxCapture(
+      initialCapture,
+    )
+    const initialInput: AssistantInputCandidate = {
+      ...projectedInitialCandidate,
+      event: {
+        ...projectedInitialCandidate.event,
+        replyTarget: {
+          channel: 'linq',
+          messageId: 'real_msg_audience_initial',
+          threadId: 'real_thread_audience',
+        },
+      },
+    }
+    const routeCandidates = ([false, null] as const).map((threadIsDirect, index) => {
+      const candidate = createCapturelessAssistantInputCandidate({
+        conversationThreadId: `hid_thread_audience_${index}`,
+        inputId: index === 0
+          ? 'ain_cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd'
+          : 'ain_efefefefefefefefefefefefefefefef',
+        occurredAt: `2026-04-08T00:04:0${index}.000Z`,
+        receivedAt: `2026-04-08T00:04:0${index}.500Z`,
+        replyTarget: {
+          channel: 'linq',
+          messageId: `real_msg_audience_${index}`,
+          threadId: 'real_thread_audience',
+        },
+        source: 'linq',
+        text: `non-direct late input ${index}`,
+      })
+      return {
+        ...candidate,
+        event: {
+          ...candidate.event,
+          conversation: {
+            ...candidate.event.conversation!,
+            threadIsDirect,
+          },
+        },
+      }
+    })
+    const listNewConversationInputs = vi.fn(async () => ({
+      inputs: [],
+      nextCursor: initialInput.event.cursor,
+    }))
+    const listInputCandidates = vi.fn(async () => ({
+      inputs: routeCandidates,
+      nextCursor: routeCandidates[routeCandidates.length - 1]!.event.cursor,
+    }))
+    const checkpointAcceptedInput = vi.fn(async () => undefined)
+    const inputSource = {
+      checkpointAcceptedInput,
+      listInputCandidates,
+      listNewConversationInputs,
+      async refresh() {
+        return {
+          progressed: true,
+          reason: 'ingested_input' as const,
+        }
+      },
+    }
+    replyMocks.sendAssistantMessage.mockImplementation(async (input: {
+      activeTurnInput?: (admission: {
+        sessionId: string
+        turnId: string
+        vault: string
+      }) => Promise<unknown>
+    }) => {
+      await expect(input.activeTurnInput?.({
+        sessionId: 'session-1',
+        turnId: 'turn-1',
+        vault: '/tmp/assistant-automation-vault',
+      })).resolves.toEqual({ kind: 'no-new-input' })
+      return {
+        delivery: {
+          channel: 'linq',
+          target: 'real_thread_audience',
+          sentAt: '2026-04-08T00:10:00.000Z',
+        },
+        deliveryDeferred: false,
+        deliveryError: null,
+        deliveryIntentId: 'intent-1',
+        response: 'response text',
+        session: { sessionId: 'session-1' },
+      }
+    })
+    const reply = await vi.importActual<typeof import('../src/assistant/automation/reply.ts')>(
+      '../src/assistant/automation/reply.ts',
+    )
+    const initialItem = createReplyGroupItem(initialCapture)
+    const context = reply.createAssistantAutoReplyGroupContext([{
+      ...initialItem,
+      inputCandidate: initialInput,
+    }])
+    if (!context) {
+      throw new Error('expected reply context')
+    }
+
+    const result = await reply.processAssistantAutoReplyGroup({
+      allowSelfAuthored: false,
+      context,
+      enabledChannels: ['linq'],
+      inboxServices: createInboxServices({ show: vi.fn() }),
+      inputSource,
+      requestId: null,
+      sessionMaxAgeMs: null,
+      vault: '/tmp/assistant-automation-vault',
+    })
+
+    expect(result.replied).toBe(1)
+    expect(listNewConversationInputs).toHaveBeenCalledTimes(1)
+    expect(listInputCandidates).toHaveBeenCalledTimes(1)
+    expect(checkpointAcceptedInput).not.toHaveBeenCalled()
+    expect(evidenceMocks.writeAssistantAutoReplyReplyIntentEvidence)
+      .toHaveBeenCalledWith(expect.objectContaining({
+        inputIds: [initialInput.event.inputId],
+      }))
+  })
+
   it('ignores captureless assistant input reply targets from another channel', async () => {
     const hostedInput = createCapturelessAssistantInputCandidate({
       conversationThreadId: 'safe_thread_mismatch',
@@ -8057,6 +8186,76 @@ describe('assistant auto-reply runtime', () => {
           outcome: 'result',
         }),
       )
+  })
+
+  it('auto-replies to a validated hosted group email route', async () => {
+    const hostedEmailThreadTarget = serializeHostedEmailThreadTarget({
+      groupId: 'hgrp_AAAAAAAAAAAAAAAA',
+      lastMessageId: '<group-email-message@example.test>',
+      references: ['<group-email-root@example.test>'],
+      subject: 'Group email reply',
+      targetKind: 'group',
+    })
+    const directInput = createCapturelessAssistantInputCandidate({
+      conversationThreadId: 'safe_group_email_thread',
+      inputId: 'ain_89898989898989898989898989898989',
+      occurredAt: '2026-04-08T00:06:00.000Z',
+      receivedAt: '2026-04-08T00:06:01.000Z',
+      replyTarget: {
+        channel: 'email',
+        messageId: '<group-email-message@example.test>',
+        threadId: hostedEmailThreadTarget,
+      },
+      source: 'email',
+      text: 'captureless group email text',
+    })
+    const hostedInput: AssistantInputCandidate = {
+      ...directInput,
+      event: {
+        ...directInput.event,
+        conversation: {
+          ...directInput.event.conversation!,
+          threadIsDirect: false,
+        },
+      },
+    }
+    const reply = await vi.importActual<typeof import('../src/assistant/automation/reply.ts')>(
+      '../src/assistant/automation/reply.ts',
+    )
+    const context = reply.createAssistantAutoReplyGroupContext([
+      createCapturelessReplyGroupItem(hostedInput),
+    ])
+
+    if (!context) {
+      throw new Error('expected reply context')
+    }
+
+    const result = await reply.processAssistantAutoReplyGroup({
+      allowSelfAuthored: false,
+      context,
+      enabledChannels: ['email'],
+      inboxServices: createInboxServices({ show: vi.fn() }),
+      requestId: null,
+      sessionMaxAgeMs: null,
+      vault: '/tmp/assistant-automation-vault',
+    })
+
+    expect(result).toMatchObject({
+      advanceCursor: true,
+      failed: 0,
+      replied: 1,
+      skipped: 0,
+      stopScanning: false,
+    })
+    expect(replyMocks.sendAssistantMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        conversation: expect.objectContaining({
+          directness: 'group',
+        }),
+        deliveryReplyToMessageId: '<group-email-message@example.test>',
+        deliveryTarget: hostedEmailThreadTarget,
+      }),
+    )
   })
 
   it('sends degraded captureless hosted email auto-reply when body text is unavailable', async () => {

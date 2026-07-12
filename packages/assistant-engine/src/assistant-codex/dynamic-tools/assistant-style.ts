@@ -3,7 +3,7 @@ import { z } from 'zod'
 import {
   assistantPersonalityScoreSchema,
   assistantPersonalitySettingSchema,
-} from '@murphai/operator-config/assistant-style-cli-contracts'
+} from '@murphai/contracts'
 import type {
   SafeToolCallValidationDigest,
 } from '../../assistant/tool-validation-digest.js'
