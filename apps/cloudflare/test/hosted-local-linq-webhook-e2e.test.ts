@@ -270,7 +270,6 @@ describe("hosted local Linq webhook e2e", () => {
       userId,
     });
     expect(requireLinqStub().readObservedMessageText(directReply)).toBe(directReplyText);
-    await requireScenario().waitForHostedCompletion(userId);
 
     const baseline = await requireScenario().readHostedLinqWorkspaceIsolationState({
       chatId,
