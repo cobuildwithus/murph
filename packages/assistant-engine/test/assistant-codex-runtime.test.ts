@@ -7467,7 +7467,7 @@ describe('assistant codex runtime', () => {
     )
   })
 
-  it('keeps process-exit precedence when abort follows close and sweeps the child group', async () => {
+  it('keeps process-exit precedence when abort follows exit but precedes close', async () => {
     const codexHome = await createTempDir('assistant-codex-exit-abort-precedence-home-')
     const workingDirectory = await createTempDir('assistant-codex-exit-abort-precedence-work-')
     const controller = new AbortController()
@@ -7547,8 +7547,8 @@ describe('assistant codex runtime', () => {
     await firstTurnStarted.promise
     const exitedChild = requireMockChildProcess(spawnedChildren[0] ?? null)
     exitedChild.emit('exit', 1, null)
-    exitedChild.emit('close', 1, null)
     controller.abort()
+    exitedChild.emit('close', 1, null)
 
     await expect(failedTurn).rejects.toMatchObject({
       context: {

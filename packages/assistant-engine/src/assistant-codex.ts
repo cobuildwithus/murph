@@ -791,6 +791,12 @@ class CodexAppServerProcess {
     this.child.stderr.on('data', (chunk) => {
       this.handleStderrData(String(chunk))
     })
+    this.child.on('exit', () => {
+      // `exit` precedes `close`; claim the cause before inherited streams drain.
+      if (!this.normalShutdown) {
+        this.endReason ??= 'previous-process-exit'
+      }
+    })
     this.child.on('close', (code, signal) => {
       this.handleClose(code, signal)
     })
@@ -3804,7 +3810,9 @@ async function runCodexAppServerTurnOnProcess(
 
       rejectOnce(
         buildCodexProcessExitError({
-          abortRequested,
+          abortRequested:
+            abortRequested &&
+            codexProcess.nextColdStartReason === 'previous-turn-abort',
           code,
           diagnostics: buildProcessExitDiagnostics(),
           errorInfo: lastEventErrorInfo,
