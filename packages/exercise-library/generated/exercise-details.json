@@ -1,5 +1,5 @@
 {
-  "catalogHash": "sha256:639211830a567ee64a816bc20e344685923cf9de3d92e8093b2e5817182f7bc3",
+  "catalogHash": "sha256:d97a030b59a204a28616f92bbeb6a82f4753ed1c7c4228ce84044b26d7151fe1",
   "generatedAt": null,
   "items": [
     {
@@ -6510,7 +6510,18 @@
         "Suspension trainer"
       ],
       "id": "EX895",
-      "images": [],
+      "images": [
+        {
+          "alt": "Athlete leans back with ribs stacked and holds two taut suspension handles in front with straight arms.",
+          "step": "Lean-back arms-front setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/565e7785-51a1-4ecf-23f5-9451a2eae500/public"
+        },
+        {
+          "alt": "Athlete raises both straight arms overhead into a Y while keeping the ribs down and both suspension straps taut.",
+          "step": "Overhead Y-raise endpoint",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/97132820-abbf-4e8f-6058-2aca55884400/public"
+        }
+      ],
       "kind": "exercise",
       "level": "advanced",
       "modality": "Strength",
@@ -6547,7 +6558,18 @@
         "Suspension trainer"
       ],
       "id": "EX896",
-      "images": [],
+      "images": [
+        {
+          "alt": "Athlete leans back in one straight line while holding two taut suspension handles with straight arms and palms facing each other.",
+          "step": "Lean-back arms-front setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/246486b6-a69a-4406-9c7e-0befb3a60700/public"
+        },
+        {
+          "alt": "Athlete opens both straight arms wide at shoulder height while the chest moves forward and two suspension straps remain taut.",
+          "step": "Wide-arm fly endpoint",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/cc84d152-982e-4e0e-c35e-4ff53a279d00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -6584,7 +6606,18 @@
         "Suspension trainer"
       ],
       "id": "EX897",
-      "images": [],
+      "images": [
+        {
+          "alt": "Athlete leans back in one straight line with arms extended, palms up, and two suspension straps taut.",
+          "step": "Palms-up lean-back setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/d35a3c1c-ecc3-405f-1c94-c0fcc8391500/public"
+        },
+        {
+          "alt": "Athlete curls both suspension handles toward the forehead while keeping elbows high and the body rigid.",
+          "step": "Forehead curl endpoint",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/7278c22b-976a-48d0-1960-9240418c2b00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -6671,7 +6704,18 @@
         "Resistance band"
       ],
       "id": "EX899",
-      "images": [],
+      "images": [
+        {
+          "alt": "Athlete stands on the center of one resistance band with straight arms, neutral wrists, and both palms facing down in an overhand grip.",
+          "step": "Pronated standing setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/a950eadb-a525-454b-30f0-15bcbe9e1900/public"
+        },
+        {
+          "alt": "Athlete curls both band ends toward the lower chest with palms down, elbows pinned, and wrists straight.",
+          "step": "Pronated curl endpoint",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/03ffd9cd-14a7-4741-24b6-5439dfeae800/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -6708,7 +6752,18 @@
         "Resistance band"
       ],
       "id": "EX900",
-      "images": [],
+      "images": [
+        {
+          "alt": "Athlete stands tall on one resistance band with straight arms, hands at the thighs, and shoulders relaxed.",
+          "step": "Standing hands-at-thighs setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/577f23fd-9a9c-4105-4e8f-4c6a0c2b9a00/public"
+        },
+        {
+          "alt": "Athlete pulls both band ends to the lower chest with elbows high and wide and wrists below the elbows.",
+          "step": "Elbows-high row endpoint",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/9b82bcc0-858c-465c-8c39-d7584beb7800/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -6745,7 +6800,18 @@
         "Resistance band and anchor"
       ],
       "id": "EX901",
-      "images": [],
+      "images": [
+        {
+          "alt": "Athlete sits tall with feet flat and arms extended toward a resistance band anchored at face height.",
+          "step": "Seated face-height setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/0667a923-7045-466a-747c-d8b29c13fb00/public"
+        },
+        {
+          "alt": "Athlete pulls two band ends to either side of the face with elbows high and wide while sitting tall.",
+          "step": "Face-pull endpoint",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/0e7bfc9e-0e7b-4a04-5df3-531f7810db00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -6782,7 +6848,18 @@
         "Resistance band and anchor"
       ],
       "id": "EX902",
-      "images": [],
+      "images": [
+        {
+          "alt": "Athlete holds a tall-kneeling posture with hips over knees and both arms reaching toward an anchored band.",
+          "step": "Tall-kneeling reach setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/86e140be-79a8-4cf4-ed72-5b558e909900/public"
+        },
+        {
+          "alt": "Athlete pulls both band ends to the lower ribs with elbows driving back while hips stay tall over the knees.",
+          "step": "Tall-kneeling row endpoint",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/de245ee6-5803-45ed-d8de-c873b3b0db00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -6820,7 +6897,18 @@
         "Resistance band and high anchor"
       ],
       "id": "EX903",
-      "images": [],
+      "images": [
+        {
+          "alt": "Athlete holds a tall-kneeling posture with both arms reaching overhead toward a resistance band anchored high in front.",
+          "step": "High-anchor overhead setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/ad4ffd98-e5d5-4850-54d5-d5caac2f6300/public"
+        },
+        {
+          "alt": "Athlete sweeps both long arms from the high band anchor to the thighs while keeping hips tall and ribs down.",
+          "step": "Straight-arm pullover endpoint",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/c32ff8ff-bbbf-42e9-00a5-b9fc3c196d00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -6954,7 +7042,18 @@
         "Towel"
       ],
       "id": "EX906",
-      "images": [],
+      "images": [
+        {
+          "alt": "Athlete lies face down with a long neck and both arms extended overhead while holding one towel wide and taut.",
+          "step": "Prone wide-towel setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/5a0e6323-ac48-4e6a-7c92-bb8c18470d00/public"
+        },
+        {
+          "alt": "Athlete lifts the upper chest slightly and pulls a taut towel toward the collarbone with elbows bent wide and neck long.",
+          "step": "Prone row and lift-off endpoint",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/a8826c04-caba-4b6d-0eea-0bf23eac0b00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -6992,7 +7091,18 @@
         "Dumbbell"
       ],
       "id": "EX907",
-      "images": [],
+      "images": [
+        {
+          "alt": "Athlete lies on the back in tabletop with knees over hips, one dumbbell above the right chest, and the empty left arm resting on the floor.",
+          "step": "Tabletop single-dumbbell setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/1711e366-156e-451f-3869-3f215bd99600/public"
+        },
+        {
+          "alt": "Athlete presses one dumbbell straight up with the right arm while extending the opposite left leg toward the floor and keeping the right leg in tabletop.",
+          "step": "Contralateral press endpoint",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/7d6d170f-20a1-4ba6-f59e-91d3c0efcd00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Core strength",
