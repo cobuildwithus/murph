@@ -4,6 +4,7 @@ import {
   type HostedExecutionDeviceSyncAccountActionResponse,
 } from "@murphai/device-syncd/hosted-runtime";
 
+import { formatHostedExecutionSafeLogErrorDetails } from "../hosted-execution/logging";
 import { createHostedDeviceSyncControlPlane } from "./control-plane";
 import { createHostedDeviceSyncPublicIngressService } from "./public-ingress-service";
 import {
@@ -84,24 +85,33 @@ export async function runHostedDeviceSyncAccountAction(input: {
     });
   }
 
-  const wakeResult = await appendHostedDeviceSyncScheduledReconcileWake({
-    connectionId: dueConnection.connectionId,
-    createdAt: occurredAt,
-    eventId: buildHostedDeviceSyncScheduledReconcileWakeEventId({
+  try {
+    const wakeResult = await appendHostedDeviceSyncScheduledReconcileWake({
       connectionId: dueConnection.connectionId,
+      createdAt: occurredAt,
+      eventId: buildHostedDeviceSyncScheduledReconcileWakeEventId({
+        connectionId: dueConnection.connectionId,
+        nextReconcileAt: dueConnection.nextReconcileAt,
+      }),
       nextReconcileAt: dueConnection.nextReconcileAt,
-    }),
-    nextReconcileAt: dueConnection.nextReconcileAt,
-    provider: dueConnection.provider,
-    userId: dueConnection.userId,
-  });
+      provider: dueConnection.provider,
+      userId: dueConnection.userId,
+    });
 
-  if (!wakeResult.wakeAccepted) {
-    throw deviceSyncError({
-      code: "RECONCILE_WAKE_NOT_ACCEPTED",
-      message: "Hosted device reconcile could not be queued.",
-      retryable: true,
-      httpStatus: 503,
+    if (!wakeResult.wakeAccepted) {
+      console.warn("Hosted device reconcile immediate wake was not accepted.", {
+        connectionId: dueConnection.connectionId,
+        errorCode: "HOSTED_DEVICE_RECONCILE_WAKE_NOT_ACCEPTED",
+        reason: wakeResult.reason ?? null,
+      });
+    }
+  } catch (error) {
+    // nextReconcileAt is already durable; the due-reconcile sweeper owns recovery.
+    console.warn("Hosted device reconcile immediate wake failed after scheduling.", {
+      ...formatHostedExecutionSafeLogErrorDetails(error, {
+        code: "HOSTED_DEVICE_RECONCILE_WAKE_FAILED",
+      }),
+      connectionId: dueConnection.connectionId,
     });
   }
 

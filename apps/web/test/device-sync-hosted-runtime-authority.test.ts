@@ -409,7 +409,7 @@ describe("runHostedDeviceSyncAccountAction", () => {
     );
   });
 
-  it("reuses the durable due timestamp when a post-append signal failure is retried", async () => {
+  it("keeps the queued receipt when the immediate wake fails after durable scheduling", async () => {
     vi.useFakeTimers();
     try {
       vi.setSystemTime(new Date("2026-07-10T12:00:00.000Z"));
@@ -419,10 +419,7 @@ describe("runHostedDeviceSyncAccountAction", () => {
         }),
       });
       mocks.appendHostedDeviceSyncScheduledReconcileWake
-        .mockRejectedValueOnce(new Error("Temporal signal failed after durable mailbox append."))
-        .mockResolvedValueOnce({
-          wakeAccepted: true,
-        });
+        .mockRejectedValueOnce(new Error("Temporal signal failed after durable mailbox append."));
       const { runHostedDeviceSyncAccountAction } = await import(
         "@/src/lib/device-sync/hosted-runtime-account-action"
       );
@@ -437,27 +434,42 @@ describe("runHostedDeviceSyncAccountAction", () => {
       await expect(runHostedDeviceSyncAccountAction({
         request: buildRequest(),
         trustedUserId: "user_123",
-      })).rejects.toThrow("Temporal signal failed after durable mailbox append.");
-
-      vi.setSystemTime(new Date("2026-07-10T12:01:00.000Z"));
-      await expect(runHostedDeviceSyncAccountAction({
-        request: buildRequest(),
-        trustedUserId: "user_123",
       })).resolves.toMatchObject({
         action: "reconcile",
         status: "queued",
       });
 
-      const firstWake = mocks.appendHostedDeviceSyncScheduledReconcileWake.mock.calls[0]![0];
-      const retriedWake = mocks.appendHostedDeviceSyncScheduledReconcileWake.mock.calls[1]![0];
-      expect(firstWake.nextReconcileAt).toBe("2026-07-10T12:00:00.000Z");
-      expect(retriedWake).toMatchObject({
-        eventId: firstWake.eventId,
-        nextReconcileAt: firstWake.nextReconcileAt,
-      });
+      const wake = mocks.appendHostedDeviceSyncScheduledReconcileWake.mock.calls[0]![0];
+      expect(wake.nextReconcileAt).toBe("2026-07-10T12:00:00.000Z");
+      expect(mocks.appendHostedDeviceSyncScheduledReconcileWake).toHaveBeenCalledTimes(1);
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("keeps the queued receipt when the durable wake is not immediately accepted", async () => {
+    createAuthorityHarness();
+    mocks.appendHostedDeviceSyncScheduledReconcileWake.mockResolvedValue({
+      reason: "dedupe_conflict",
+      wakeAccepted: false,
+    });
+    const { runHostedDeviceSyncAccountAction } = await import(
+      "@/src/lib/device-sync/hosted-runtime-account-action"
+    );
+
+    await expect(runHostedDeviceSyncAccountAction({
+      request: new Request("https://example.test/device-sync/account-action", {
+        body: JSON.stringify({
+          action: "reconcile",
+          connectionId: "conn_123",
+        }),
+        method: "POST",
+      }),
+      trustedUserId: "user_123",
+    })).resolves.toMatchObject({
+      action: "reconcile",
+      status: "queued",
+    });
   });
 
   it("requires confirmation and preserves the canonical disconnect warning", async () => {

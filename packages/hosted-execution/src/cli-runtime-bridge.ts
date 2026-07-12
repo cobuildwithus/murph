@@ -13,7 +13,8 @@ export const HOSTED_CLI_BRIDGE_ASSISTANT_CURRENT_ROUTE_PATH = "/assistant/curren
 export const HOSTED_CLI_BRIDGE_DEVICE_CONNECT_LINK_PATH = "/device/connect-link";
 export const HOSTED_CLI_BRIDGE_DEVICE_ACCOUNT_LIST_PATH = "/device/accounts/list";
 export const HOSTED_CLI_BRIDGE_DEVICE_ACCOUNT_ACTION_PATH = "/device/accounts/action";
-export const HOSTED_CLI_BRIDGE_REQUEST_TIMEOUT_MS = 10_000;
+// Keep the loopback transport alive beyond the web owner's default 30-second action budget.
+export const HOSTED_CLI_BRIDGE_REQUEST_TIMEOUT_MS = 35_000;
 
 export const HOSTED_CLI_BRIDGE_ENV_NAMES = [
   HOSTED_RUNTIME_PROCESS_ENV,
