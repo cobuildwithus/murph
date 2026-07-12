@@ -394,6 +394,7 @@ describe("Call Circle notifications", () => {
 
 function createNotificationTx(lineAvailable = true) {
   return {
+    $queryRaw: vi.fn(async () => []),
     hostedCallCircleParticipant: {
       count: vi.fn(async () => 1),
     },

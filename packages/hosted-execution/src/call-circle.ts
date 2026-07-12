@@ -7,6 +7,8 @@ import { z } from "zod";
 import { HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX } from "./runtime-control.ts";
 
 const hostedCallCircleMailboxItemIdSchema = z.string().trim().min(1).max(200);
+const HOSTED_CALL_CIRCLE_NOTIFICATION_EVENT_ID_PREFIX =
+  "assistant.notification.requested:call-circle";
 const hostedCallCircleLocalTimeSchema = z
   .string()
   .trim()
@@ -172,11 +174,27 @@ export const hostedCallCircleRespondControlRequestSchema = z
   })
   .strict();
 
+export const hostedCallCircleNotificationDeliveryClaimRequestSchema = z
+  .object({
+    answeredMailboxItemIds: z.array(hostedCallCircleMailboxItemIdSchema).min(1).max(20),
+    deliveryIdempotencyKey: z.string().trim().min(1).max(500),
+  })
+  .strict();
+
+export function isHostedCallCircleCancelableNotificationEventId(eventId: string): boolean {
+  return eventId.startsWith(`${HOSTED_CALL_CIRCLE_NOTIFICATION_EVENT_ID_PREFIX}:setup:`)
+    || eventId.startsWith(`${HOSTED_CALL_CIRCLE_NOTIFICATION_EVENT_ID_PREFIX}:am:`)
+    || eventId.startsWith(`${HOSTED_CALL_CIRCLE_NOTIFICATION_EVENT_ID_PREFIX}:final:`);
+}
+
 export const HOSTED_CALL_CIRCLE_RESPOND_PATH =
   "/api/internal/call-circle/respond" as const;
 
 export type HostedCallCircleAvailabilityWindow = z.infer<
   typeof hostedCallCircleAvailabilityWindowSchema
+>;
+export type HostedCallCircleNotificationDeliveryClaimRequest = z.infer<
+  typeof hostedCallCircleNotificationDeliveryClaimRequestSchema
 >;
 export type HostedCallCirclePreferences = z.infer<
   typeof hostedCallCirclePreferencesSchema

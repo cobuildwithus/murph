@@ -10,6 +10,9 @@ import type {
 } from "@murphai/hosted-execution";
 
 import { buildMurphSmsHref, normalizeMurphTelegramUsername } from "../murph-contact-routing";
+import {
+  cancelOpenCallCircleMatchesForMembers,
+} from "../call-circle/match-store";
 import { getPrisma } from "../prisma";
 import { renderUserFacingMessage } from "../hosted-messages/user-facing-messages";
 import {
@@ -44,6 +47,7 @@ import {
 import {
   isHostedMemberSuspended,
 } from "./entitlement";
+import { readActiveHostedMemberAccess } from "./member-access";
 import { hostedOnboardingError, isHostedOnboardingError } from "./errors";
 import {
   HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
@@ -54,6 +58,7 @@ import {
   generateHostedMemberId,
   generateHostedInviteCode,
   inviteExpiresAt,
+  lockHostedAccountGroupRow,
   lockHostedMemberRow,
   normalizePhoneNumber,
   normalizeNullableString,
@@ -862,6 +867,7 @@ export async function writeHostedAccountGroupStripeBillingTx(input: {
   stripeSubscriptionId?: string | null;
   tx: Prisma.TransactionClient;
 }): Promise<HostedAccountGroupBillingRefSnapshot | null> {
+  await lockHostedAccountGroupRow(input.tx, input.groupId);
   const group = await input.tx.hostedAccountGroup.findUnique({
     select: hostedAccountGroupAccessSelect,
     where: {
@@ -998,6 +1004,21 @@ export async function writeHostedAccountGroupStripeBillingTx(input: {
       id: input.groupId,
     },
   });
+  if (!hasHostedAccountGroupAccess({
+    billingStatus: input.billingStatus,
+    suspendedAt: group.suspendedAt,
+  })) {
+    const accessRevokedMemberIds: string[] = [];
+    for (const memberId of memberIdsToLock) {
+      if (!await readActiveHostedMemberAccess({ memberId, prisma: input.tx })) {
+        accessRevokedMemberIds.push(memberId);
+      }
+    }
+    await cancelOpenCallCircleMatchesForMembers({
+      memberIds: accessRevokedMemberIds,
+      prisma: input.tx,
+    });
+  }
 
   return projectHostedAccountGroupBillingRefSnapshot(billingRef, input.tx);
 }
@@ -2822,7 +2843,7 @@ export async function acceptHostedFamilyInviteTx(input: {
   tx: Prisma.TransactionClient;
 }): Promise<HostedAccountGroupMembershipAccessSnapshot> {
   const now = input.now ?? new Date();
-  const invite = await input.tx.hostedAccountGroupInvite.findUnique({
+  let invite = await input.tx.hostedAccountGroupInvite.findUnique({
     select: hostedAccountGroupInviteSelect,
     where: {
       inviteCode: input.inviteCode,
@@ -2955,6 +2976,42 @@ export async function acceptHostedFamilyInviteTx(input: {
     });
   }
 
+  await lockHostedAccountGroupRow(input.tx, invite.groupId);
+  invite = await input.tx.hostedAccountGroupInvite.findUnique({
+    select: hostedAccountGroupInviteSelect,
+    where: {
+      id: invite.id,
+    },
+  });
+  if (!invite) {
+    throw hostedOnboardingError({
+      code: "HOSTED_FAMILY_INVITE_NOT_FOUND",
+      httpStatus: 404,
+      message: "That family invite is no longer valid.",
+    });
+  }
+
+  if (!hasHostedAccountGroupAccess(invite.group)) {
+    throw hostedOnboardingError({
+      code: "HOSTED_FAMILY_SEAT_LIMIT_REACHED",
+      httpStatus: 409,
+      message: "This Family plan has no open paid seats. Add a Family seat before inviting another person.",
+    });
+  }
+
+  await lockHostedMemberRow(input.tx, invite.group.ownerMemberId);
+  const owner = await input.tx.hostedMember.findFirst({
+    select: { suspendedAt: true },
+    where: { id: invite.group.ownerMemberId },
+  });
+  if (!owner || isHostedMemberSuspended(owner.suspendedAt)) {
+    throw hostedOnboardingError({
+      code: "HOSTED_FAMILY_INVITE_NOT_ACTIVE",
+      httpStatus: 410,
+      message: "That family invite has expired or was already used.",
+    });
+  }
+
   if (invite.status === "accepted" && invite.acceptedByMemberId === input.acceptedMemberId) {
     const existingMembership = await input.tx.hostedAccountGroupMembership.findFirst({
       select: hostedAccountGroupMembershipAccessSelect,
@@ -2985,7 +3042,6 @@ export async function acceptHostedFamilyInviteTx(input: {
     });
   }
 
-  await lockHostedMemberRow(input.tx, invite.group.ownerMemberId);
   await lockHostedMemberRow(input.tx, input.acceptedMemberId);
   await assertHostedFamilyMemberNotSponsoredElsewhereTx({
     groupId: invite.groupId,
@@ -3134,6 +3190,7 @@ export async function removeHostedFamilyMemberTx(input: {
   tx: Prisma.TransactionClient;
 }): Promise<boolean> {
   const now = input.now ?? new Date();
+  await lockHostedAccountGroupRow(input.tx, input.groupId);
   const group = await input.tx.hostedAccountGroup.findUnique({
     select: hostedAccountGroupAccessSelect,
     where: {
@@ -3169,6 +3226,19 @@ export async function removeHostedFamilyMemberTx(input: {
       status: "active",
     },
   });
+
+  if (result.count > 0) {
+    if (!await readActiveHostedMemberAccess({
+      memberId: input.memberId,
+      prisma: input.tx,
+    })) {
+      await cancelOpenCallCircleMatchesForMembers({
+        memberIds: [input.memberId],
+        now,
+        prisma: input.tx,
+      });
+    }
+  }
 
   return result.count > 0;
 }

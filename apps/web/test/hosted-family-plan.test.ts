@@ -90,6 +90,13 @@ const FAMILY_STRIPE_PERIOD_END = new Date(FAMILY_STRIPE_PERIOD_END_SECONDS * 100
 type MockFn = ReturnType<typeof vi.fn>;
 type FamilyPlanTxMock = Prisma.TransactionClient & {
   $queryRaw: MockFn;
+  hostedCallCircleMatch: Prisma.TransactionClient["hostedCallCircleMatch"] & {
+    findMany: MockFn;
+    updateMany: MockFn;
+  };
+  hostedMailboxItem: Prisma.TransactionClient["hostedMailboxItem"] & {
+    updateMany: MockFn;
+  };
   hostedAccountGroup: Prisma.TransactionClient["hostedAccountGroup"] & {
     create: MockFn;
     findFirst: MockFn;
@@ -114,6 +121,7 @@ type FamilyPlanTxMock = Prisma.TransactionClient & {
   };
   hostedMember: Prisma.TransactionClient["hostedMember"] & {
     create: MockFn;
+    findFirst: MockFn;
     findUnique: MockFn;
     update: MockFn;
   };
@@ -1184,6 +1192,7 @@ describe("hosted Family plan", () => {
     };
     tx.hostedAccountGroupInvite.findUnique
       .mockResolvedValueOnce(acceptedInvite)
+      .mockResolvedValueOnce(acceptedInvite)
       .mockResolvedValueOnce(acceptedInvite);
     tx.hostedAccountGroupMembership.findFirst.mockResolvedValueOnce({
       group: acceptedInvite.group,
@@ -1351,6 +1360,50 @@ describe("hosted Family plan", () => {
     expect(tx.hostedAccountGroupInvite.update).not.toHaveBeenCalled();
   });
 
+  it("revalidates group access after taking the account-group lock", async () => {
+    const tx = createTxMock();
+    const pendingInvite = createPendingInvite();
+    tx.hostedAccountGroupInvite.findUnique
+      .mockResolvedValueOnce(pendingInvite)
+      .mockResolvedValueOnce({
+        ...pendingInvite,
+        group: {
+          ...pendingInvite.group,
+          billingStatus: HostedBillingStatus.unpaid,
+        },
+      });
+
+    await expect(acceptHostedFamilyInviteTx({
+      acceptedMemberId: "member_mom",
+      inviteCode: "invite_phone",
+      tx,
+    })).rejects.toMatchObject({
+      code: "HOSTED_FAMILY_SEAT_LIMIT_REACHED",
+    });
+
+    expect(tx.$queryRaw.mock.calls[0]?.[1]).toBe("hbag_family");
+    expect(tx.hostedAccountGroupMembership.upsert).not.toHaveBeenCalled();
+  });
+
+  it("rejects invite acceptance when owner deletion suspended the owner", async () => {
+    const tx = createTxMock();
+    tx.hostedMember.findFirst.mockResolvedValueOnce({
+      suspendedAt: new Date("2026-07-12T17:00:00.000Z"),
+    });
+
+    await expect(acceptHostedFamilyInviteTx({
+      acceptedMemberId: "member_mom",
+      inviteCode: "invite_phone",
+      tx,
+    })).rejects.toMatchObject({
+      code: "HOSTED_FAMILY_INVITE_NOT_ACTIVE",
+    });
+
+    expect(tx.$queryRaw.mock.calls[0]?.[1]).toBe("hbag_family");
+    expect(tx.$queryRaw.mock.calls[1]?.[1]).toBe("member_owner");
+    expect(tx.hostedAccountGroupMembership.upsert).not.toHaveBeenCalled();
+  });
+
   it("keeps unbound double-claim single-winner when another accept already claimed it", async () => {
     const tx = createTxMock();
     tx.hostedAccountGroupInvite.findUnique.mockResolvedValueOnce(createPendingInvite());
@@ -1378,11 +1431,14 @@ describe("hosted Family plan", () => {
 
   it("treats provider retries after invite acceptance as idempotent success", async () => {
     const tx = createTxMock();
-    tx.hostedAccountGroupInvite.findUnique.mockResolvedValueOnce({
+    const acceptedInvite = {
       ...createPendingInvite(),
       acceptedByMemberId: "member_mom",
       status: "accepted",
-    });
+    };
+    tx.hostedAccountGroupInvite.findUnique
+      .mockResolvedValueOnce(acceptedInvite)
+      .mockResolvedValueOnce(acceptedInvite);
     tx.hostedAccountGroupMembership.findFirst.mockResolvedValueOnce({
       group: createPendingInvite().group,
       groupId: "hbag_family",
@@ -1524,7 +1580,7 @@ describe("hosted Family plan", () => {
         status: "active",
       },
     }));
-    expect(operationOrder).toEqual(["lock-member", "remove-membership"]);
+    expect(operationOrder).toEqual(["lock-member", "lock-member", "remove-membership"]);
   });
 
   it("requires active group billing for membership access", () => {
@@ -2081,6 +2137,7 @@ describe("hosted Family plan", () => {
     });
 
     expect(tx.$queryRaw.mock.calls.map((call) => call[1])).toEqual([
+      "hbag_family",
       "member_mom",
       "member_owner",
     ]);
@@ -2108,6 +2165,7 @@ describe("hosted Family plan", () => {
     });
 
     expect(tx.$queryRaw.mock.calls.map((call) => call[1])).toEqual([
+      "hbag_family",
       "member_mom",
       "member_owner",
     ]);
@@ -2978,6 +3036,13 @@ function createTxMock(input: {
 
   Object.assign(tx, {
     $queryRaw: vi.fn().mockResolvedValue([]),
+    hostedCallCircleMatch: {
+      findMany: vi.fn().mockResolvedValue([]),
+      updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+    },
+    hostedMailboxItem: {
+      updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+    },
     hostedAccountGroup: {
       create: vi.fn().mockResolvedValue(group),
       findFirst: vi.fn().mockResolvedValue(group),
@@ -3048,12 +3113,17 @@ function createTxMock(input: {
         suspendedAt: null,
         updatedAt: new Date("2026-06-18T12:00:00.000Z"),
       })),
+      findFirst: vi.fn().mockResolvedValue({
+        suspendedAt: null,
+      }),
       findUnique: vi.fn().mockResolvedValue({
+        accountGroupMemberships: [],
         billingRef: {
           currentBillingPhase: null,
         },
         billingStatus: HostedBillingStatus.not_started,
         suspendedAt: null,
+        threadContainer: null,
       }),
       update: vi.fn().mockResolvedValue({
         billingStatus: HostedBillingStatus.not_started,

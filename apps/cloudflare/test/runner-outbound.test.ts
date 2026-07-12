@@ -66,6 +66,7 @@ import {
   HOSTED_RUNTIME_ACTION_APPROVAL_CONSUME_PATH,
   HOSTED_RUNTIME_ACTION_APPROVAL_REQUEST_PATH,
   HOSTED_RUNTIME_BROWSER_VAULT_REPLICA_PUBLISH_PATH,
+  HOSTED_RUNTIME_CALL_CIRCLE_NOTIFICATION_CLAIM_PATH,
   HOSTED_RUNTIME_CODEX_AUTH_PATH,
   HOSTED_RUNTIME_CRYPTO_CONTEXT_PATH,
   HOSTED_RUNTIME_CRYPTO_ROOT_PATH,
@@ -158,6 +159,15 @@ const RUNNER_PROXY_TOKEN_HEADER = "x-hosted-execution-runner-proxy-token";
 const MISSING_ARTIFACT_URL = `http://artifacts.worker/objects/${"a".repeat(64)}`;
 const HEARTBEAT_URL = "http://runner-control.worker/internal/active-invocation/heartbeat";
 const ALLOWLISTED_WEB_CONTROL_CASES = [
+  {
+    body: {
+      answeredMailboxItemIds: ["hmi_call_circle"],
+      deliveryIdempotencyKey:
+        "assistant.notification.requested:call-circle:setup:hgrp_123:member_123",
+    },
+    name: "Call Circle notification claim",
+    path: HOSTED_RUNTIME_CALL_CIRCLE_NOTIFICATION_CLAIM_PATH,
+  },
   {
     body: {
       connectionId: "conn_123",
@@ -640,6 +650,7 @@ describe("handleRunnerOutboundRequest", () => {
                     || path === HOSTED_RUNTIME_LATENCY_TRACE_PATH
                     || path === HOSTED_RUNTIME_LINQ_EGRESS_DELIVERY_PATH
                     || path === HOSTED_RUNTIME_LINQ_EGRESS_ENGAGEMENT_PATH
+                    || path === HOSTED_RUNTIME_CALL_CIRCLE_NOTIFICATION_CLAIM_PATH
                     || path === HOSTED_RUNTIME_CODEX_AUTH_PATH
                     || isHostedComputerWebControlRequest({ method: "POST", path })
                     ? {

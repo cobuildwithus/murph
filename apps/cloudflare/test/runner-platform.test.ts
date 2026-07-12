@@ -29,6 +29,7 @@ import {
   HostedRuntimeBridgeCheckpointLeaseError,
 } from "@murphai/assistant-runtime/hosted-checkpoint-bridge";
 import {
+  HOSTED_RUNTIME_CALL_CIRCLE_NOTIFICATION_CLAIM_PATH,
   HOSTED_RUNTIME_GROUP_TOOL_PATH,
   HOSTED_RUNTIME_CODEX_AUTH_PATH,
   HOSTED_RUNTIME_LINQ_EGRESS_DELIVERY_PATH,
@@ -3934,6 +3935,49 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expectDefaultRuntimeWriteFenceHeaders(request);
     expect(request.headers.get("x-hosted-execution-user-id")).toBe("member_123");
     expect(request.headers.get("x-hosted-execution-signature")).toMatch(/^[A-Za-z0-9\-_]+$/u);
+  });
+
+  it("write-fences Call Circle notification claims through direct web-control", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      expect(new URL(request.url).pathname).toBe(
+        HOSTED_RUNTIME_CALL_CIRCLE_NOTIFICATION_CLAIM_PATH,
+      );
+      return new Response(JSON.stringify({ ok: true }), {
+        headers: { "content-type": "application/json; charset=utf-8" },
+        status: 200,
+      });
+    });
+    const environment = readHostedExecutionEnvironment(createHostedExecutionTestEnv({
+      HOSTED_WEB_BASE_URL: "https://web.example.test",
+    }));
+    const platform = buildTestHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: fetchMock as typeof fetch,
+      webCallbackSigning: environment.webCallbackSigning,
+      webControlBaseUrl: "https://web.example.test",
+    });
+    const claim = platform.effectsPort.claimCallCircleNotificationDelivery;
+    if (!claim) {
+      throw new Error("Expected Call Circle notification claim effect.");
+    }
+
+    await claim({
+      answeredMailboxItemIds: ["hmi_call_circle"],
+      deliveryIdempotencyKey:
+        "assistant.notification.requested:call-circle:setup:hgrp_123:member_123",
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const request = requireFetchRequest(
+      fetchMock.mock.calls[0],
+      "Call Circle notification claim request",
+    );
+    expect(request.url).toBe(
+      `https://web.example.test${HOSTED_RUNTIME_CALL_CIRCLE_NOTIFICATION_CLAIM_PATH}`,
+    );
+    expectDefaultRuntimeWriteFenceHeaders(request);
+    expect(request.headers.get("x-hosted-execution-user-id")).toBe("member_123");
   });
 
   it("write-fences Linq delivery outcomes through direct web-control", async () => {

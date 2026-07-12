@@ -21,6 +21,7 @@ import {
   CALL_CIRCLE_MAX_MATCH_LOOKBACK_MS,
   readCallCircleBridgeWindowStartCutoff,
 } from "./time";
+import { supersedeCallCircleNotificationsTx } from "./notifications";
 import type {
   CallCircleMatchOutcome,
   CallCircleMatchRow,
@@ -597,39 +598,104 @@ export async function markCallCircleMatchOutcome(input: {
 export async function cancelOpenCallCircleMatchesForParticipant(input: {
   groupId: string;
   memberId: string;
-  prisma?: CallCirclePrismaClient;
+  now?: Date;
+  prisma: Prisma.TransactionClient;
 }): Promise<number> {
-  const prisma = input.prisma ?? getPrisma();
+  return cancelOpenCallCircleMatches({
+    groupId: input.groupId,
+    memberIds: [input.memberId],
+    now: input.now,
+    prisma: input.prisma,
+  });
+}
+
+export async function cancelOpenCallCircleMatchesForMembers(input: {
+  memberIds: readonly string[];
+  now?: Date;
+  prisma: Prisma.TransactionClient;
+}): Promise<number> {
+  return cancelOpenCallCircleMatches({
+    memberIds: input.memberIds,
+    now: input.now,
+    prisma: input.prisma,
+  });
+}
+
+async function cancelOpenCallCircleMatches(input: {
+  groupId?: string;
+  memberIds?: readonly string[];
+  now?: Date;
+  prisma: Prisma.TransactionClient;
+}): Promise<number> {
+  const prisma = input.prisma;
+  const memberIds = [...new Set(input.memberIds ?? [])].sort();
+  if (!input.groupId && memberIds.length === 0) return 0;
+  const participantWhere = memberIds.length > 0
+    ? {
+        OR: [
+          { memberAId: { in: memberIds } },
+          { memberBId: { in: memberIds } },
+        ],
+      }
+    : null;
+  const openStatusWhere = {
+    OR: [
+      { status: { in: ["proposed", "asking", "both_confirmed"] } },
+      { phoneCallId: null, status: "bridging" },
+      {
+        phoneCall: {
+          is: {
+            providerStartAttemptedAt: null,
+          },
+        },
+        status: "bridging",
+      },
+    ],
+  } satisfies Prisma.HostedCallCircleMatchWhereInput;
+  const openWhere = {
+    ...(input.groupId ? { groupId: input.groupId } : {}),
+    AND: [
+      ...(participantWhere ? [participantWhere] : []),
+      openStatusWhere,
+    ],
+  } satisfies Prisma.HostedCallCircleMatchWhereInput;
+  const candidates = await prisma.hostedCallCircleMatch.findMany({
+    orderBy: { id: "asc" },
+    select: {
+      id: true,
+      memberAId: true,
+      memberBId: true,
+    },
+    where: openWhere,
+  });
   const result = await prisma.hostedCallCircleMatch.updateMany({
     data: {
       outcome: "participant_unavailable",
       status: "canceled",
     },
-    where: {
-      groupId: input.groupId,
-      AND: [
-        {
-          OR: [
-            { memberAId: input.memberId },
-            { memberBId: input.memberId },
-          ],
+    where: openWhere,
+  });
+  const canceledMatches = result.count === 0 || candidates.length === 0
+    ? []
+    : await prisma.hostedCallCircleMatch.findMany({
+        orderBy: { id: "asc" },
+        select: {
+          id: true,
+          memberAId: true,
+          memberBId: true,
         },
-        {
-          OR: [
-            { status: { in: ["proposed", "asking", "both_confirmed"] } },
-            { phoneCallId: null, status: "bridging" },
-            {
-              phoneCall: {
-                is: {
-                  providerStartAttemptedAt: null,
-                },
-              },
-              status: "bridging",
-            },
-          ],
+        where: {
+          id: { in: candidates.map((match) => match.id) },
+          outcome: "participant_unavailable",
+          status: "canceled",
         },
-      ],
-    },
+      });
+  await supersedeCallCircleNotificationsTx({
+    groupId: input.groupId,
+    matches: canceledMatches,
+    now: input.now ?? new Date(),
+    setupMemberIds: memberIds,
+    tx: prisma,
   });
   return result.count;
 }

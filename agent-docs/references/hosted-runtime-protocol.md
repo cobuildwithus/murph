@@ -461,6 +461,23 @@ periodic scheduler input. Historical `runtime.mailbox-lag-observed` and
 `runtime.device-sync-recovery-requested` control rows remain importable for
 deploy-skew and drain compatibility, but there is no active producer for them.
 
+### Call Circle Notification Provider-Entry Claim
+
+Call Circle setup and confirmation outbox effects carry the originating
+mailbox item id and event id. Immediately before Linq, Telegram, WhatsApp, or
+email provider entry, the runtime calls
+`POST /api/internal/hosted-runtime/call-circle/notification-claim` through the
+normal `web-control.worker` transport with the bound user and current runtime
+write fence. Web locks the member, revalidates current access, enrollment, and
+pending-match authority, then atomically claims a still-requested mailbox row
+by stamping `consumedAt`; an idempotent retry may reuse that
+requested-and-consumed row only after the same authority revalidation.
+Pause, group departure, or Family access loss wins the same row lock by
+changing an unconsumed setup/confirmation item to
+`assistant.notification.superseded`, which makes the provider-entry claim fail
+closed. Terminal cancellation, expiry, handoff, and outcome notifications do
+not use this claim. No feature queue or new persisted state is introduced.
+
 ### Hosted Runtime Maintenance Wake
 
 `runtime.maintenance-requested` is the explicit operator wake for one-time

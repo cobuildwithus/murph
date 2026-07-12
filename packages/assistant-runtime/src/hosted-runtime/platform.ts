@@ -62,6 +62,7 @@ import type {
   HostedPhoneCallStartResponse,
 } from "@murphai/hosted-execution/phone-calls";
 import type {
+  HostedCallCircleNotificationDeliveryClaimRequest,
   HostedCallCircleRespondContext,
   HostedCallCircleRespondRequest,
   HostedCallCircleRespondResponse,
@@ -274,6 +275,10 @@ export interface HostedRuntimeLinqDeleteMessagesRequest {
 }
 
 type HostedRuntimeEffectsPortBase = {
+  claimCallCircleNotificationDelivery?(
+    request: HostedCallCircleNotificationDeliveryClaimRequest,
+    context?: { signal?: AbortSignal | null },
+  ): Promise<void>;
   deletePreparedAssistantDelivery?(
     input: Pick<HostedAssistantDeliverySideEffect, "effectId" | "fingerprint">,
   ): Promise<void>;

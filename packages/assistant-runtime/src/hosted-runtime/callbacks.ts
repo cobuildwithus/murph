@@ -65,6 +65,9 @@ import { VaultCliError } from "@murphai/operator-config/vault-cli-errors";
 import {
   createAssistantDeliveryTerminalError,
 } from "@murphai/operator-config/assistant/delivery-failure";
+import {
+  isHostedCallCircleCancelableNotificationEventId,
+} from "@murphai/hosted-execution/call-circle";
 
 import type {
   HostedAssistantDeliveryErrorDetails,
@@ -1500,6 +1503,35 @@ async function assertHostedDeliveryCanEnterProvider(input: {
   assertHostedBackgroundDeliveryNotYielded(input);
 }
 
+async function claimHostedCallCircleNotificationDeliveryAtProviderEntry(input: {
+  answeredMailboxItemIds: readonly string[];
+  deliveryIdempotencyKey: string | null;
+  effectsPort: Pick<HostedRuntimeEffectsPort, "claimCallCircleNotificationDelivery">;
+  signal: AbortSignal | null;
+}): Promise<void> {
+  if (
+    !input.deliveryIdempotencyKey
+    || !isHostedCallCircleCancelableNotificationEventId(input.deliveryIdempotencyKey)
+  ) {
+    return;
+  }
+  if (
+    input.answeredMailboxItemIds.length === 0
+    || !input.effectsPort.claimCallCircleNotificationDelivery
+  ) {
+    throw new VaultCliError(
+      "HOSTED_CALL_CIRCLE_NOTIFICATION_CLAIM_UNAVAILABLE",
+      "Call Circle notification delivery requires a current mailbox claim.",
+    );
+  }
+  await input.effectsPort.claimCallCircleNotificationDelivery({
+    answeredMailboxItemIds: [...input.answeredMailboxItemIds],
+    deliveryIdempotencyKey: input.deliveryIdempotencyKey,
+  }, {
+    signal: input.signal,
+  });
+}
+
 function isHostedAssistantReactionOnlyEffect(
   effect: HostedAssistantDeliveryEffect,
 ): boolean {
@@ -1742,6 +1774,17 @@ async function deliverHostedPreparedAssistantDelivery(input: {
     ? [input.preparedDispatch.linqDeliveryContext, ...input.linqDeliveryContexts]
     : input.linqDeliveryContexts;
   let providerDispatchEntered = false;
+  const assertPreparedDeliveryCanEnterProvider = async (): Promise<void> => {
+    await assertHostedDeliveryCanEnterProvider(input);
+    await claimHostedCallCircleNotificationDeliveryAtProviderEntry({
+      answeredMailboxItemIds:
+        input.assistantDeliveryEffect.payload.answeredMailboxItemIds ?? [],
+      deliveryIdempotencyKey:
+        input.assistantDeliveryEffect.payload.idempotencyKey ?? null,
+      effectsPort: input.effectsPort,
+      signal: input.signal,
+    });
+  };
   try {
     assertHostedDeliveryLiveness(input.signal);
     const mirrorOutcome = await maybeResolveHostedAssistantDeliveryFromMirror({
@@ -1792,7 +1835,7 @@ async function deliverHostedPreparedAssistantDelivery(input: {
             );
           }
 
-          await assertHostedDeliveryCanEnterProvider(input);
+          await assertPreparedDeliveryCanEnterProvider();
           providerDispatchEntered = true;
           // The binding identityId is a privacy-blinded conversation identifier,
           // never a sender address. Hosted email always sends from the
@@ -1809,7 +1852,7 @@ async function deliverHostedPreparedAssistantDelivery(input: {
           return result;
         },
         sendTelegram: async (request) => {
-          await assertHostedDeliveryCanEnterProvider(input);
+          await assertPreparedDeliveryCanEnterProvider();
           const dependencies = requireHostedProviderFetchDependencies({
             env: input.telegramEnv,
             fetchImplementation: input.providerFetch,
@@ -1821,7 +1864,7 @@ async function deliverHostedPreparedAssistantDelivery(input: {
           return result;
         },
         sendTelegramImage: async (request) => {
-          await assertHostedDeliveryCanEnterProvider(input);
+          await assertPreparedDeliveryCanEnterProvider();
           const dependencies = requireHostedProviderFetchDependencies({
             env: input.telegramEnv,
             fetchImplementation: input.providerFetch,
@@ -1841,7 +1884,7 @@ async function deliverHostedPreparedAssistantDelivery(input: {
           return result;
         },
         setTelegramMessageReaction: async (request) => {
-          await assertHostedDeliveryCanEnterProvider(input);
+          await assertPreparedDeliveryCanEnterProvider();
           const dependencies = requireHostedProviderFetchDependencies({
             env: input.telegramEnv,
             fetchImplementation: input.providerFetch,
@@ -1856,7 +1899,7 @@ async function deliverHostedPreparedAssistantDelivery(input: {
           env: input.telegramVoiceMemoEnv,
           fetchImplementation: createHostedProviderFetchBoundary({
             assertLive: () => assertHostedDeliveryLiveNow(input),
-            assertProviderEntryLive: () => assertHostedDeliveryCanEnterProvider(input),
+            assertProviderEntryLive: assertPreparedDeliveryCanEnterProvider,
             onTelegramVoiceMemoDispatchEntered: () => {
               providerDispatchEntered = true;
             },
@@ -1873,6 +1916,7 @@ async function deliverHostedPreparedAssistantDelivery(input: {
           intentId: input.assistantDeliveryEffect.effectId,
           linqEnv: input.linqEnv,
           linqDeliveryContexts,
+          claimNotificationDelivery: assertPreparedDeliveryCanEnterProvider,
           threadIsDirect: input.assistantDeliveryEffect.payload.threadIsDirect ?? null,
           shouldYieldBackgroundDelivery: input.shouldYieldBackgroundDelivery,
           onProviderDispatchEntered: () => {
@@ -1888,6 +1932,7 @@ async function deliverHostedPreparedAssistantDelivery(input: {
           effectsPort: input.effectsPort,
           linqEnv: input.linqEnv,
           linqDeliveryContexts,
+          claimNotificationDelivery: assertPreparedDeliveryCanEnterProvider,
           threadIsDirect: input.assistantDeliveryEffect.payload.threadIsDirect ?? null,
           shouldYieldBackgroundDelivery: input.shouldYieldBackgroundDelivery,
           onProviderDispatchEntered: () => {
@@ -1917,7 +1962,7 @@ async function deliverHostedPreparedAssistantDelivery(input: {
             targetKind: "thread",
           });
           let reactionProviderDispatchEntered = false;
-          await assertHostedDeliveryCanEnterProvider(input);
+          await assertPreparedDeliveryCanEnterProvider();
           const result = await setHostedProviderLinqMessageReaction({
             reaction: request.reaction,
             targetMessageId: request.targetMessageId,
@@ -1949,7 +1994,7 @@ async function deliverHostedPreparedAssistantDelivery(input: {
           };
         },
         sendWhatsApp: async (request) => {
-          await assertHostedDeliveryCanEnterProvider(input);
+          await assertPreparedDeliveryCanEnterProvider();
           const dependencies = requireHostedProviderFetchDependencies({
             env: input.whatsAppEnv,
             fetchImplementation: input.providerFetch,
@@ -2190,6 +2235,7 @@ function resolveHostedAssistantLinqDeliveryContexts(input: {
 function createHostedAssistantLinqSendDependency(input: {
   actionApprovalPort?: HostedRuntimeActionApprovalPort | null;
   assertLiveness?: () => Promise<void>;
+  claimNotificationDelivery?: (() => Promise<void>) | null;
   effectsPort?: Pick<
     HostedRuntimeEffectsPort,
     "assertLinqRecentInboundEngagement" | "recordLinqDeliveryOutcome"
@@ -2250,7 +2296,11 @@ function createHostedAssistantLinqSendDependency(input: {
       media: request.media ?? [],
       vaultRoot: input.vaultRoot ?? null,
     });
-    await assertHostedDeliveryCanEnterProvider(input);
+    if (input.claimNotificationDelivery) {
+      await input.claimNotificationDelivery();
+    } else {
+      await assertHostedDeliveryCanEnterProvider(input);
+    }
     const attemptedAt = new Date();
     input.onProviderDispatchEntered?.();
     let result: HostedRuntimeLinqSendResponse;
@@ -2451,6 +2501,7 @@ function buildHostedVaultFileMediaIdentity(input: {
 
 function createHostedAssistantLinqVoiceMemoSendDependency(input: {
   assertLiveness?: () => Promise<void>;
+  claimNotificationDelivery?: (() => Promise<void>) | null;
   effectsPort?: Pick<
     HostedRuntimeEffectsPort,
     "assertLinqRecentInboundEngagement" | "recordLinqDeliveryOutcome"
@@ -2494,7 +2545,11 @@ function createHostedAssistantLinqVoiceMemoSendDependency(input: {
     });
     const providerTarget =
       engagement.targetOverride?.target ?? deliveryContext?.target ?? request.target;
-    await assertHostedDeliveryCanEnterProvider(input);
+    if (input.claimNotificationDelivery) {
+      await input.claimNotificationDelivery();
+    } else {
+      await assertHostedDeliveryCanEnterProvider(input);
+    }
     const attemptedAt = new Date();
     input.onProviderDispatchEntered?.();
     let result: HostedRuntimeLinqSendResponse;

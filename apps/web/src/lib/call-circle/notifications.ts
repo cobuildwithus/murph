@@ -4,7 +4,9 @@ import { Prisma } from "@prisma/client";
 import type {
   HostedExecutionAssistantNotificationRoute,
 } from "@murphai/hosted-execution";
-import { isHostedCallCircleTimeZone } from "@murphai/hosted-execution/call-circle";
+import {
+  isHostedCallCircleTimeZone,
+} from "@murphai/hosted-execution/call-circle";
 
 import {
   appendHostedAssistantNotificationTx,
@@ -14,6 +16,7 @@ import {
 import {
   hasHostedLinqInboundWithinDays,
 } from "../hosted-onboarding/linq-daily-state";
+import { lockHostedMemberRow } from "../hosted-onboarding/shared";
 import {
   activeCallCircleParticipantWhere,
   canUseActiveCallCircleParticipant,
@@ -25,6 +28,8 @@ import {
 
 const CALL_CIRCLE_NOTIFICATION_EVENT_ID_PREFIX =
   "assistant.notification.requested:call-circle";
+const CALL_CIRCLE_SUPERSEDED_NOTIFICATION_KIND =
+  "assistant.notification.superseded";
 
 type CallCircleNotificationAppendResult =
   | { mailboxItemId: string | null; status: "sent" }
@@ -110,6 +115,7 @@ export async function appendCallCircleSetupNotificationTx(input: {
   timeZone?: string | null;
   tx: Prisma.TransactionClient;
 }): Promise<CallCircleNotificationAppendResult | null> {
+  await lockHostedMemberRow(input.tx, input.memberId);
   const participantCount = await input.tx.hostedCallCircleParticipant.count({
     where: {
       ...activeCallCircleParticipantWhere({
@@ -241,6 +247,53 @@ export function readCallCircleConfirmNotificationAnchor(input: {
     };
   }
   return null;
+}
+
+export async function supersedeCallCircleNotificationsTx(input: {
+  groupId?: string;
+  matches?: readonly {
+    id: string;
+    memberAId: string;
+    memberBId: string;
+  }[];
+  now: Date;
+  setupMemberIds?: readonly string[];
+  tx: Prisma.TransactionClient;
+}): Promise<number> {
+  const groupId = input.groupId;
+  const setupFilters = [...new Set(input.setupMemberIds ?? [])].sort().map((memberId) => ({
+        dedupeKey: {
+          startsWith: groupId
+            ? buildCallCircleSetupNotificationEventIdPrefix({ groupId, memberId })
+            : `${CALL_CIRCLE_NOTIFICATION_EVENT_ID_PREFIX}:setup:`,
+        },
+        userId: memberId,
+      }));
+  const confirmFilters = (input.matches ?? []).flatMap((match) =>
+    [...new Set([match.memberAId, match.memberBId])].sort().flatMap((memberId) =>
+      (["am", "final"] as const).map((stage) => ({
+        dedupeKey: {
+          startsWith: `${CALL_CIRCLE_NOTIFICATION_EVENT_ID_PREFIX}:${stage}:${match.id}:${memberId}:`,
+        },
+        userId: memberId,
+      })),
+    ),
+  );
+  const filters = [...setupFilters, ...confirmFilters];
+  if (filters.length === 0) return 0;
+
+  const result = await input.tx.hostedMailboxItem.updateMany({
+    data: {
+      consumedAt: input.now,
+      kind: CALL_CIRCLE_SUPERSEDED_NOTIFICATION_KIND,
+    },
+    where: {
+      consumedAt: null,
+      kind: "assistant.notification.requested",
+      OR: filters,
+    },
+  });
+  return result.count;
 }
 
 export function buildCallCircleTerminalNotificationEventId(input: {

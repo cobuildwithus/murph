@@ -4301,6 +4301,88 @@ describe("hosted runtime callbacks", () => {
     });
   });
 
+  it("claims a current Call Circle notification immediately before provider entry", async () => {
+    const eventId =
+      "assistant.notification.requested:call-circle:am:hccm_123:member_123:2026-07-12T18:00:00.000Z";
+    const effect = createEffect({
+      answeredMailboxItemIds: ["hmi_call_circle"],
+      idempotencyKey: eventId,
+    });
+    const order: string[] = [];
+    const claimCallCircleNotificationDelivery = vi.fn(async () => {
+      order.push("claim");
+    });
+    mocks.sendTelegramMessage.mockImplementationOnce(async () => {
+      order.push("provider");
+      return {
+        providerMessageId: "telegram_message_123",
+        providerThreadId: "chat_123",
+        target: "chat_123",
+        targetKind: "thread" as const,
+      };
+    });
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
+      await dependencies.sendTelegram({
+        answeredMailboxItemIds: ["hmi_call_circle"],
+        idempotencyKey: eventId,
+        message: "Does the Call Circle time still work?",
+        replyToMessageId: null,
+        target: "chat_123",
+      });
+      return createDispatchResult({ status: "sent" });
+    });
+
+    await drainHostedPreparedAssistantDeliveries({
+      assistantDeliveryEffects: [effect],
+      effectsPort: createHostedRuntimeEffectsPortStub({
+        claimCallCircleNotificationDelivery,
+      }),
+      providerFetch: vi.fn<typeof fetch>(),
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+      wake: HOSTED_WAKE.wake,
+    });
+
+    expect(claimCallCircleNotificationDelivery).toHaveBeenCalledWith({
+      answeredMailboxItemIds: ["hmi_call_circle"],
+      deliveryIdempotencyKey: eventId,
+    }, { signal: null });
+    expect(order).toEqual(["claim", "provider"]);
+  });
+
+  it("blocks an already-selected Call Circle wake when its delivery claim is superseded", async () => {
+    const eventId =
+      "assistant.notification.requested:call-circle:final:hccm_123:member_123:2026-07-12T18:00:00.000Z";
+    const effect = createEffect({
+      answeredMailboxItemIds: ["hmi_call_circle"],
+      idempotencyKey: eventId,
+    });
+    const claimError = new Error("Call Circle notification superseded");
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
+      await dependencies.sendTelegram({
+        answeredMailboxItemIds: ["hmi_call_circle"],
+        idempotencyKey: eventId,
+        message: "Does the Call Circle time still work?",
+        replyToMessageId: null,
+        target: "chat_123",
+      });
+      throw new Error("provider should not be reached");
+    });
+
+    await expect(drainHostedPreparedAssistantDeliveries({
+      assistantDeliveryEffects: [effect],
+      effectsPort: createHostedRuntimeEffectsPortStub({
+        claimCallCircleNotificationDelivery: vi.fn(async () => {
+          throw claimError;
+        }),
+      }),
+      providerFetch: vi.fn<typeof fetch>(),
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+      wake: HOSTED_WAKE.wake,
+    })).rejects.toBe(claimError);
+
+    expect(mocks.sendTelegramMessage).not.toHaveBeenCalled();
+  });
+
   it("leaves unprepared provider-entry foreground yield retryable in the outbox", async () => {
     const effect = buildHostedAssistantDeliveryEffect({
       dedupeKey: "dedupe_unprepared_yield_at_provider_entry",

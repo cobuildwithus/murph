@@ -16,6 +16,13 @@ export async function lockHostedMemberRow(
   await tx.$queryRaw`select 1 from "hosted_member" where "id" = ${memberId} for update`;
 }
 
+export async function lockHostedAccountGroupRow(
+  tx: Pick<Prisma.TransactionClient, "$queryRaw">,
+  groupId: string,
+): Promise<void> {
+  await tx.$queryRaw`select 1 from "hosted_account_group" where "id" = ${groupId} for update`;
+}
+
 export async function lockHostedGroupRow(
   tx: Prisma.TransactionClient,
   groupId: string,

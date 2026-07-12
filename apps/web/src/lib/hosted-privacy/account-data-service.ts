@@ -24,7 +24,12 @@ import { readHostedMemberIdentity } from "../hosted-onboarding/hosted-member-ide
 import { readHostedAccountGroupStripeBillingRef } from "../hosted-onboarding/family-plan";
 import { deleteHostedPrivyUser } from "../hosted-onboarding/privy";
 import { getHostedOnboardingStripe } from "../hosted-onboarding/runtime";
-import { HOSTED_ONBOARDING_TRANSACTION_OPTIONS } from "../hosted-onboarding/shared";
+import { cancelOpenCallCircleMatchesForMembers } from "../call-circle/match-store";
+import { readActiveHostedMemberAccess } from "../hosted-onboarding/member-access";
+import {
+  HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
+  lockHostedAccountGroupRow,
+} from "../hosted-onboarding/shared";
 import {
   deleteHostedRunnerUserDataBestEffort,
   type HostedRunnerUserDataDeletionBestEffortResult,
@@ -601,8 +606,15 @@ export async function deleteHostedAccountData(input: {
         prisma: tx,
       }),
     ]);
-    const familyBeneficiaryMemberIds = await listActiveHostedFamilyBeneficiaryMemberIds({
+    const familyGroupIds = await listOwnedHostedFamilyGroupIds({
       ownerMemberIds: transactionDeletionMemberIds,
+      prisma: tx,
+    });
+    for (const groupId of familyGroupIds) {
+      await lockHostedAccountGroupRow(tx, groupId);
+    }
+    const familyBeneficiaryMemberIds = await listActiveHostedFamilyBeneficiaryMemberIds({
+      groupIds: familyGroupIds,
       prisma: tx,
     });
     const transactionFenceMemberIds = sortedUniqueStrings([
@@ -616,6 +628,11 @@ export async function deleteHostedAccountData(input: {
         prisma: tx,
       });
     }
+    await cancelOpenCallCircleMatchesForMembers({
+      memberIds: transactionDeletionMemberIds,
+      now: deletionStartedAt,
+      prisma: tx,
+    });
     await refreshHostedMembersAccountDeletionFenceTx({
       memberIds: transactionDeletionMemberIds,
       now: deletionStartedAt,
@@ -648,6 +665,17 @@ export async function deleteHostedAccountData(input: {
     const deletedCounts = await deleteHostedAccountPrismaRows({
       connectionIdentities: deviceConnectionIdentities,
       memberIds: transactionDeletionMemberIds,
+      prisma: tx,
+    });
+    const accessRevokedBeneficiaryMemberIds: string[] = [];
+    for (const memberId of familyBeneficiaryMemberIds) {
+      if (!await readActiveHostedMemberAccess({ memberId, prisma: tx })) {
+        accessRevokedBeneficiaryMemberIds.push(memberId);
+      }
+    }
+    await cancelOpenCallCircleMatchesForMembers({
+      memberIds: accessRevokedBeneficiaryMemberIds,
+      now: deletionStartedAt,
       prisma: tx,
     });
 
@@ -788,17 +816,36 @@ async function listOwnedHostedThreadContainerMemberIds(input: {
   return rows.map((row) => row.memberId);
 }
 
-async function listActiveHostedFamilyBeneficiaryMemberIds(input: {
+async function listOwnedHostedFamilyGroupIds(input: {
   ownerMemberIds: readonly string[];
   prisma: HostedAccountDataPrisma;
 }): Promise<string[]> {
+  if (input.ownerMemberIds.length === 0) {
+    return [];
+  }
+  const rows = await input.prisma.hostedAccountGroup.findMany({
+    orderBy: { id: "asc" },
+    select: { id: true },
+    where: {
+      ownerMemberId: buildStringInFilter(input.ownerMemberIds),
+    },
+  });
+
+  return rows.map((row) => row.id);
+}
+
+async function listActiveHostedFamilyBeneficiaryMemberIds(input: {
+  groupIds: readonly string[];
+  prisma: HostedAccountDataPrisma;
+}): Promise<string[]> {
+  if (input.groupIds.length === 0) {
+    return [];
+  }
   const rows = await input.prisma.hostedAccountGroupMembership.findMany({
     orderBy: { memberId: "asc" },
     select: { memberId: true },
     where: {
-      group: {
-        ownerMemberId: buildStringInFilter(input.ownerMemberIds),
-      },
+      groupId: buildStringInFilter(input.groupIds),
       status: "active",
     },
   });

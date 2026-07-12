@@ -6,6 +6,7 @@ import type {
   HostedEmailDeliverySummary,
 } from "@murphai/assistant-runtime/hosted-email";
 import {
+  HOSTED_RUNTIME_CALL_CIRCLE_NOTIFICATION_CLAIM_PATH,
   HOSTED_RUNTIME_LINQ_EGRESS_DELIVERY_PATH,
   HOSTED_RUNTIME_LINQ_EGRESS_ENGAGEMENT_PATH,
 } from "@murphai/hosted-execution/routes";
@@ -128,6 +129,22 @@ export function createCloudflareEffectsPort(input: {
     },
     ...(webControlTransport
       ? {
+          async claimCallCircleNotificationDelivery(request, context) {
+            await fetchHostedWebControlPlaneJson({
+              body: request,
+              boundUserId: input.boundUserId,
+              description: "Hosted Call Circle notification delivery claim",
+              fetchImpl: input.fetchImpl,
+              headers: await requireHostedEffectsRuntimeWriteFenceHeaders({
+                description: "Hosted Call Circle notification delivery claim",
+                workspaceCheckpointBridge: input.workspaceCheckpointBridge ?? null,
+              }),
+              path: HOSTED_RUNTIME_CALL_CIRCLE_NOTIFICATION_CLAIM_PATH,
+              signal: context?.signal ?? null,
+              timeoutMs: input.timeoutMs,
+              transport: webControlTransport,
+            });
+          },
           async assertLinqRecentInboundEngagement(request, context) {
             const payload = await fetchHostedWebControlPlaneJson({
               body: request,

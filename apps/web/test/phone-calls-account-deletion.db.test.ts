@@ -12,7 +12,10 @@ import {
   createHostedPhoneLookupKey,
   readHostedPhoneHint,
 } from "@/src/lib/hosted-onboarding/contact-privacy";
-import { lockHostedMemberRow } from "@/src/lib/hosted-onboarding/shared";
+import {
+  lockHostedAccountGroupRow,
+  lockHostedMemberRow,
+} from "@/src/lib/hosted-onboarding/shared";
 import { removeHostedFamilyMemberTx } from "@/src/lib/hosted-onboarding/family-plan";
 import { activeHostedMemberAccessWithParticipantsWhere } from "@/src/lib/hosted-onboarding/member-access";
 import { createHostedPhoneCall } from "@/src/lib/phone-calls/service";
@@ -698,6 +701,14 @@ async function deleteOwnedFamilySponsorshipTx(input: {
   ownerMemberId: string;
   tx: Prisma.TransactionClient;
 }): Promise<void> {
+  const groups = await input.tx.hostedAccountGroup.findMany({
+    orderBy: { id: "asc" },
+    select: { id: true },
+    where: { ownerMemberId: input.ownerMemberId },
+  });
+  for (const group of groups) {
+    await lockHostedAccountGroupRow(input.tx, group.id);
+  }
   const beneficiaryRows = await input.tx.hostedAccountGroupMembership.findMany({
     orderBy: { memberId: "asc" },
     select: { memberId: true },

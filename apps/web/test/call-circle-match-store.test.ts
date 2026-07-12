@@ -1118,8 +1118,18 @@ describe("Call Circle conditional mutations", () => {
   });
 
   it("cancels open matches for a paused participant in the current group", async () => {
+    const canceledMatch = {
+      id: "hccm_123",
+      memberAId: "member_a",
+      memberBId: "member_b",
+    };
+    const findMany = vi.fn()
+      .mockResolvedValueOnce([canceledMatch])
+      .mockResolvedValueOnce([canceledMatch]);
+    const supersede = vi.fn().mockResolvedValue({ count: 2 });
     const prisma = {
-      hostedCallCircleMatch: { updateMany },
+      hostedCallCircleMatch: { findMany, updateMany },
+      hostedMailboxItem: { updateMany: supersede },
     };
     await expect(cancelOpenCallCircleMatchesForParticipant({
       groupId: "hgrp_123",
@@ -1137,8 +1147,8 @@ describe("Call Circle conditional mutations", () => {
         AND: [
           {
             OR: [
-              { memberAId: "member_a" },
-              { memberBId: "member_a" },
+              { memberAId: { in: ["member_a"] } },
+              { memberBId: { in: ["member_a"] } },
             ],
           },
           {
@@ -1158,6 +1168,15 @@ describe("Call Circle conditional mutations", () => {
         ],
       },
     });
+    expect(supersede).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        kind: "assistant.notification.superseded",
+      }),
+      where: expect.objectContaining({
+        consumedAt: null,
+        kind: "assistant.notification.requested",
+      }),
+    }));
   });
 
   it("refreshes pauses and resumes only paused participants", async () => {

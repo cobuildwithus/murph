@@ -1,6 +1,6 @@
 # Verification And Runtime
 
-Last verified: 2026-07-09
+Last verified: 2026-07-12
 
 ## Verification Matrix
 
@@ -176,6 +176,12 @@ the advisory budget.
 
 ## Runtime Status
 
+- Focused hosted-web database concurrency tests use separate one-connection
+  Prisma clients plus `pg_blocking_pids` to prove both transaction orderings.
+  Family roster acceptance is serialized against owner deletion and billing
+  access revocation on the account-group row; Call Circle notification
+  supersession is serialized against the provider-entry mailbox claim on the
+  notification row.
 - DBHub MCP is read-only production inspection, not a local database debugging
   path. It also serializes PostgreSQL `timestamp without time zone` values
   through a client layer that may apply the MCP process timezone and then emit a

@@ -52,7 +52,15 @@ history and rechecked under stable member locks. The hosted assistant can submit
 only the current member's strict `call_circle_respond` union through the signed
 `web-control.worker` boundary; web derives group, match, and side from durable
 mailbox authority. The Vercel Call Circle cron is only a bounded transition
-driver and owns no product truth or queue. Phone numbers, availability, private
+driver and owns no product truth or queue. Family roster and access-revoking
+billing writes serialize on the owning account-group row before member locks.
+Pause, group departure, and Family access loss atomically supersede unconsumed
+setup and confirmation mailbox rows. Immediately before delivery-provider
+entry, the runner uses the signed web-control boundary to claim that exact
+mailbox row after web locks the member and revalidates current access,
+enrollment, and pending-match authority; a stale or superseded claim fails
+closed, while terminal result notices are not revocable. Phone numbers,
+availability, private
 cadence overrides, and Retell configuration never enter group runtime state.
 
 ## Module Map

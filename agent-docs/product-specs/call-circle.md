@@ -216,6 +216,19 @@ engagement, access, membership, and enrollment checks.
 
 Event ids make every setup, confirm, cancellation, expiry, handoff, and outcome
 append idempotent.
+Setup and confirmation rows remain revocable until provider entry. Pause, group
+departure, and Family access loss update the match/participant authority and
+relabel matching unconsumed mailbox rows as
+`assistant.notification.superseded` in the same transaction. The hosted
+runtime then claims the exact bound-user mailbox row through the signed,
+write-fenced `call-circle/notification-claim` web-control route immediately
+before provider entry. Web first locks the member and revalidates current
+access, group enrollment, and (for confirmations) a still-pending response on
+the same match/window. Whichever row update commits first owns the outcome:
+claim-first delivery may enter the provider, while every retry revalidates the
+same current authority and cancellation-first delivery fails closed.
+Cancellation, expiry, handoff, and
+outcome event ids are terminal notices and are never superseded by this rule.
 Signals are best effort because the mailbox item is durable. The generic hosted
 retention sweep retries a bounded batch of unconsumed assistant notifications
 at most 24 hours old, choosing the oldest eligible item per member. Older rows

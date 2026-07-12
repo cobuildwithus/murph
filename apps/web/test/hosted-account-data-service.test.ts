@@ -989,6 +989,7 @@ describe("deleteHostedAccountData", () => {
   it("locks active Family beneficiaries before deleting an owner's sponsorships", async () => {
     const operationOrder: string[] = [];
     const prisma = createHostedAccountDeletionPrismaForTest({
+      familyGroups: [{ id: "family_group_123" }],
       activeOwnedFamilyBeneficiaryMemberIds: [
         "member_z_beneficiary",
         "member_a_beneficiary",
@@ -1014,6 +1015,9 @@ describe("deleteHostedAccountData", () => {
       "queryRaw:member_a_beneficiary",
       "queryRaw:member_z_beneficiary",
     ]);
+    expect(operationOrder.indexOf("queryRaw:family_group_123", finalTransactionIndex)).toBeLessThan(
+      operationOrder.indexOf("find:hostedAccountGroupMembership", finalTransactionIndex),
+    );
     expect(operationOrder.indexOf("update:hostedMember", finalTransactionIndex)).toBeGreaterThan(
       operationOrder.indexOf("queryRaw:member_z_beneficiary", finalTransactionIndex),
     );
@@ -1843,7 +1847,10 @@ function createHostedAccountDeletionPrismaForTest(input: {
     $queryRaw: async (...args: unknown[]) => {
       input.operationOrder?.push("queryRaw");
       for (const value of args) {
-        if (typeof value === "string" && value.startsWith("member_")) {
+        if (
+          typeof value === "string"
+          && (value.startsWith("member_") || value.startsWith("family_group_"))
+        ) {
           input.operationOrder?.push(`queryRaw:${value}`);
         }
       }
@@ -1869,9 +1876,25 @@ function createHostedAccountDeletionPrismaForTest(input: {
     },
     hostedAccountGroupMembership: {
       ...makeDeleteDelegate("hostedAccountGroupMembership"),
-      findMany: async () => (input.activeOwnedFamilyBeneficiaryMemberIds ?? []).map(
-        (memberId) => ({ memberId }),
-      ),
+      findMany: async () => {
+        input.operationOrder?.push("find:hostedAccountGroupMembership");
+        return (input.activeOwnedFamilyBeneficiaryMemberIds ?? []).map(
+          (memberId) => ({ memberId }),
+        );
+      },
+    },
+    hostedAccountGroup: {
+      ...makeDeleteDelegate("hostedAccountGroup"),
+      findMany: async () => input.familyGroups ?? [],
+    },
+    hostedCallCircleMatch: {
+      ...makeDeleteDelegate("hostedCallCircleMatch"),
+      findMany: async () => [],
+      updateMany: async () => ({ count: 0 }),
+    },
+    hostedMailboxItem: {
+      ...makeDeleteDelegate("hostedMailboxItem"),
+      updateMany: async () => ({ count: 0 }),
     },
     hostedThreadContainer: {
       ...makeDeleteDelegate("hostedThreadContainer"),
@@ -1881,6 +1904,12 @@ function createHostedAccountDeletionPrismaForTest(input: {
     },
     hostedMember: {
       ...makeDeleteDelegate("hostedMember"),
+      findUnique: async () => ({
+        accountGroupMemberships: [],
+        billingStatus: "not_started" as const,
+        suspendedAt: null,
+        threadContainer: null,
+      }),
       updateMany: async () => {
         input.operationOrder?.push("update:hostedMember");
         return { count: 1 };
@@ -2083,10 +2112,30 @@ type HostedAccountDeletionPrismaTransactionFake = {
   hostedAccountGroupMembership: HostedAccountDeletionPrismaDeleteDelegate & {
     findMany: () => Promise<Array<{ memberId: string }>>;
   };
+  hostedAccountGroup: HostedAccountDeletionPrismaDeleteDelegate & {
+    findMany: () => Promise<Array<{ id: string }>>;
+  };
+  hostedCallCircleMatch: HostedAccountDeletionPrismaDeleteDelegate & {
+    findMany: () => Promise<Array<{
+      id: string;
+      memberAId: string;
+      memberBId: string;
+    }>>;
+    updateMany: (args: unknown) => Promise<{ count: number }>;
+  };
+  hostedMailboxItem: HostedAccountDeletionPrismaDeleteDelegate & {
+    updateMany: (args: unknown) => Promise<{ count: number }>;
+  };
   hostedThreadContainer: HostedAccountDeletionPrismaDeleteDelegate & {
     findMany: () => Promise<Array<{ memberId: string }>>;
   };
   hostedMember: HostedAccountDeletionPrismaDeleteDelegate & {
+    findUnique: (args: unknown) => Promise<{
+      accountGroupMemberships: [];
+      billingStatus: "not_started";
+      suspendedAt: null;
+      threadContainer: null;
+    }>;
     updateMany: (args: unknown) => Promise<{ count: number }>;
   };
 };

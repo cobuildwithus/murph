@@ -20,6 +20,7 @@ import {
   HOSTED_RUNTIME_ACTION_APPROVAL_CONSUME_PATH,
   HOSTED_RUNTIME_ACTION_APPROVAL_REQUEST_PATH,
   HOSTED_RUNTIME_BROWSER_VAULT_REPLICA_PUBLISH_PATH,
+  HOSTED_RUNTIME_CALL_CIRCLE_NOTIFICATION_CLAIM_PATH,
   HOSTED_RUNTIME_CODEX_AUTH_PATH,
   HOSTED_RUNTIME_FAMILY_PLAN_TOOL_PATH,
   HOSTED_RUNTIME_GROUP_TOOL_PATH,
@@ -58,6 +59,7 @@ export type HostedRunnerWebControlOperation =
   | "assistant_runtime_issue_export"
   | "browser_vault_replica_publish"
   | "call_circle_respond"
+  | "call_circle_notification_claim"
   | "codex_auth_update"
   | "computer_use"
   | "connected_apps"
@@ -93,6 +95,7 @@ export interface HostedRunnerWebControlPolicy {
 const HOSTED_RUNNER_WEB_CONTROL_POST_POLICY = new Map<string, HostedRunnerWebControlOperation>([
   [HOSTED_RUNTIME_ACTION_APPROVAL_CONSUME_PATH, "action_approval_consume"],
   [HOSTED_RUNTIME_ACTION_APPROVAL_REQUEST_PATH, "action_approval_request"],
+  [HOSTED_RUNTIME_CALL_CIRCLE_NOTIFICATION_CLAIM_PATH, "call_circle_notification_claim"],
   [HOSTED_CONNECTED_APPS_PATH, "connected_apps"],
   [HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_PATH, "device_sync_runtime_apply"],
   [HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_DIRTY_ACK_PATH, "device_sync_dirty_ack"],

@@ -1,6 +1,6 @@
 # Testing And CI Map
 
-Last verified: 2026-07-10
+Last verified: 2026-07-12
 
 ## Current Repo Checks
 
@@ -103,9 +103,11 @@ Last verified: 2026-07-10
 ## Current Gaps
 
 - Call Circle has contract, parser writer-to-reader round-trip, pure matcher,
-  conditional store, scheduler, routing, Retell payload/webhook, and privacy
-  coverage, but its Prisma predicates still run through typed mocks rather than
-  a database-backed integration test. No routine lane executes the live offer
+  conditional store, scheduler, routing, Retell payload/webhook, privacy
+  coverage, and a database-backed two-order proof that queued notification
+  supersession serializes with the provider-entry delivery claim. Its matching
+  and scheduling Prisma predicates still run through typed mocks rather than a
+  database-backed integration test. No routine lane executes the live offer
   → reaction → setup → match → confirm → Retell transfer flow, proves the
   connector agent transfers only to `{{transfer_number}}` without reading it
   aloud, or captures the production Linq `message.sent` echo shape. The
