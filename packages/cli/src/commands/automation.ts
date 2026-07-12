@@ -48,6 +48,7 @@ import {
 } from "@murphai/operator-config/vault-cli-contracts";
 import {
   patchAutomation,
+  resolveAutomationUpsertSlug,
   scaffoldAutomationPayload,
   upsertAutomation,
 } from "@murphai/core";
@@ -323,6 +324,11 @@ function authorizeAutomationRouteForCurrentContext(
       "Hosted automation changes require one verified current conversation.",
     );
   }
+  if (currentRoute.channel === "email" && currentRoute.threadIsDirect === false) {
+    return invalidAutomationOption(
+      "Group-email replies cannot change automations because their sender is not authenticated. Continue from the authenticated group chat instead.",
+    );
+  }
 
   const routeConversationKey = resolveAssistantDeliveryRouteConversationKey(route);
   const currentConversationKey = resolveAssistantDeliveryRouteConversationKey(
@@ -362,14 +368,6 @@ async function authorizeExistingAutomationForUpsert(input: {
       );
     }
   }
-}
-
-function normalizeAutomationSlugLookup(title: string): string {
-  return title
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/gu, "-")
-    .replace(/^-+|-+$/gu, "");
 }
 
 function assertAutomationRouteCanDeliver(
@@ -696,7 +694,10 @@ export function registerAutomationCommands(cli: Cli.Cli) {
         currentRouteContext,
         lookups: [
           context.options.id,
-          context.options.slug ?? normalizeAutomationSlugLookup(context.args.title),
+          resolveAutomationUpsertSlug({
+            slug: context.options.slug,
+            title: context.args.title,
+          }),
         ],
         vaultRoot: context.options.vault,
       });
@@ -999,7 +1000,13 @@ export function registerAutomationCommands(cli: Cli.Cli) {
       );
       await authorizeExistingAutomationForUpsert({
         currentRouteContext,
-        lookups: [input.automationId, input.slug],
+        lookups: [
+          input.automationId,
+          resolveAutomationUpsertSlug({
+            slug: input.slug,
+            title: input.title,
+          }),
+        ],
         vaultRoot: context.options.vault,
       });
       const route = authorizeAutomationRouteForCurrentContext(

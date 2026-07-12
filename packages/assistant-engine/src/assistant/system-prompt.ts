@@ -217,6 +217,17 @@ function buildStaticCacheableCorePrompt(
 
 Answer the current message using only its contents and public, non-account information. Do not use prior conversation, hidden route or member context, private state, account-backed tools, or durable personal operations. Be honest about unavailable context and do not claim an action occurred unless a permitted tool proves it.`;
   }
+  if (conversationScope === "group") {
+    return joinPromptSections(
+      buildAssistantGroupIdentityAndScopeText(),
+      buildAssistantProductPrinciplesText(),
+      buildAssistantBehaviorChangeCollaborationText(),
+      buildAssistantGroupHealthReasoningText(),
+      buildAssistantChronicSupportText(),
+      buildAssistantHealthCommonsCoreGuidanceText(),
+      buildAssistantGroupToolTruthfulnessText()
+    );
+  }
   return joinPromptSections(
     buildAssistantIdentityAndScopeText(),
     buildAssistantProductPrinciplesText(),
@@ -237,19 +248,22 @@ function buildStableRouteCapabilityPrompt(
     return "";
   }
   return joinPromptSections(
-    buildAssistantTurnPriorityText(),
+    buildAssistantTurnPriorityText(conversationScope),
     buildAssistantCapabilityOffersText(),
     buildAssistantMessageReactionGuidanceText(),
     buildAssistantHealthCommonsGuidanceText(),
-    buildAssistantVaultNavigationText({
-      assistantHostedDeviceConnectAvailable:
-        conversationScope === "direct" &&
-        (input.assistantHostedDeviceConnectAvailable ?? false),
-      assistantHostedDeviceConnectProviders:
-        input.assistantHostedDeviceConnectProviders ?? [],
-    }),
-    buildAssistantHealthRecordIngestionInvariantText(),
-    buildAssistantVaultFileSendGuidanceText(),
+    conversationScope === "direct"
+      ? buildAssistantVaultNavigationText({
+          assistantHostedDeviceConnectAvailable:
+            input.assistantHostedDeviceConnectAvailable ?? false,
+          assistantHostedDeviceConnectProviders:
+            input.assistantHostedDeviceConnectProviders ?? [],
+        })
+      : null,
+    conversationScope === "direct"
+      ? buildAssistantHealthRecordIngestionInvariantText()
+      : null,
+    conversationScope === "direct" ? buildAssistantVaultFileSendGuidanceText() : null,
     buildAssistantSkillRouteHintText(),
     buildAssistantExecutionBehaviorText({
       profile: input.modelBehaviorProfile,
@@ -260,17 +274,23 @@ function buildStableRouteCapabilityPrompt(
     buildAssistantProductFeedbackGuidanceText(),
     buildAssistantStyleSettingsGuidanceText(conversationScope),
     buildAssistantFamilyPlanGuidanceText(conversationScope),
-    buildAssistantHabitatGuidanceText(),
-    buildAssistantHostedGroupGuidanceText(),
-    buildAssistantKnowledgeGuidanceText({
-      assistantKnowledgeToolsAvailable:
-        input.assistantKnowledgeToolsAvailable ?? false,
-    }),
+    conversationScope === "direct" ? buildAssistantHabitatGuidanceText() : null,
+    buildAssistantHostedGroupGuidanceText(conversationScope, input.channel),
+    conversationScope === "direct"
+      ? buildAssistantKnowledgeGuidanceText({
+          assistantKnowledgeToolsAvailable:
+            input.assistantKnowledgeToolsAvailable ?? false,
+        })
+      : null,
     buildAssistantCronGuidanceText(
       conversationScope,
-      input.hostedRuntime ?? false
+      input.hostedRuntime ?? false,
+      input.channel,
     ),
     buildAssistantCliGuidanceText(input.cliAccess),
+    conversationScope === "group"
+      ? "In this group, use the CLI only for public reference reads and group-owned state or automations. Never read or write personal health, memory, settings, account, device, or connected-app state from the room container."
+      : null,
     conversationScope === "direct"
       ? buildAssistantCliContractText(input.assistantCliContract)
       : null
@@ -422,7 +442,10 @@ function buildAssistantFamilyPlanGuidanceText(
   ].join("\n");
 }
 
-function buildAssistantHostedGroupGuidanceText(): string {
+function buildAssistantHostedGroupGuidanceText(
+  conversationScope: AssistantConversationScope,
+  channel: string | null,
+): string {
   return [
     "Hosted groups:",
     "- When `murph.group` is available, use `action=\"read_current\"` to read the current hosted group for the connected group-chat runtime, `action=\"update_display_name\"` when the group asks you to rename the current hosted group and iMessage group chat title, `action=\"set_chat_avatar\"` when the group asks you to request a current iMessage group avatar update, `action=\"create_join_link\"` when the user asks for a join link, and `action=\"post_join_offer\"` when the user wants people in the current group chat to join by reacting to a server-owned offer message. For `create_join_link` and `post_join_offer`, pass `displayName` only when it is the name the group chose. For `post_join_offer`, write a short natural `messageTemplate` in your own words, lead with reacting to this message to join, include `{{share_scope}}` exactly once, and include `{{join_url}}` exactly once as the customize link so members can share more or less. Do not use any other URL, and do not promise a link, offer, avatar change, or rename unless the tool returns success; for provider-side iMessage title and avatar updates, phrase success as requested/sent to the provider rather than already confirmed applied.",
@@ -430,7 +453,12 @@ function buildAssistantHostedGroupGuidanceText(): string {
     "- When `murph.newsletter` is available for a hosted group newsletter, use `action=\"read_stats\"` to read setup/delivery stats and `action=\"send\"` only for the scheduled newsletter run after the setup notice and opt-out window. It never returns raw email addresses, and Murph must never send the first edition immediately after setup.",
     "- The newsletter cron automation is created through the normal `vault-cli automation` surface, not by `murph.newsletter`; the tool only reads stats or sends the scheduled edition once automation fires.",
     "- Hosted groups are separate from Murph Family billing/account groups. Joining a hosted group does not grant billing access, private chat access, vault access, health-data access, health sharing, or email sharing unless the join page or exact offer includes the matching projection kinds. Email sharing requires `group-email.v0`. Joining does share the member's memory-backed preferred display name with this group runtime, and `read_current` returns the member roster (member ids, chat handles, granted share kinds) so you can address participants by name and attribute shared records to the right member.",
-    "- In the user's own (non-group) runtime, canonical memory is the home for their preferred display name; groups they join can only introduce them by name once it is saved there. When you know their preferred name from this conversation, save it once with `vault-cli memory set-name`. Never ask the user to repeat a name they already gave.",
+    conversationScope === "direct"
+      ? "- In the user's own (non-group) runtime, canonical memory is the home for their preferred display name; groups they join can only introduce them by name once it is saved there. When you know their preferred name from this conversation, save it once with `vault-cli memory set-name`. Never ask the user to repeat a name they already gave."
+      : "- This room cannot write a participant's preferred name or personal memory. Use only names returned by the server-owned group roster; ask the person to set or change a preferred name in their private Murph conversation.",
+    conversationScope === "group" && channel?.trim().toLowerCase() === "email"
+      ? "- Email replies can converse about this group and read current group context, but the sender is not authenticated strongly enough to rename the group, change its avatar, create or update join links/offers, share a contact card, or change automations. Continue those mutations from the authenticated group chat."
+      : null,
     "- If a private `group-newsletter.email-needed` note appears, treat it as a one-time, private, low-pressure reminder: the named group set up an email newsletter, this user granted email sharing, and they have no verified email. If appropriate, mention once that they can add an email at `/settings?addEmail=true`; never shame them and never infer or expose group data beyond the group name.",
     "- Optional group health permissions are approved only through server-owned join pages or server-owned group offer messages, and are returned through the runtime/vault-share flow. Offer reactions grant only the posted snapshot; changing what people should share requires a new offer or the join page.",
     "- Supported group health permissions are closed projection kinds only: sleep timing, daily active minutes, workout summaries, workout heart-rate zone minutes, steps, observed daily max heart rate, distance, active calories, elevation gain, floors climbed, day strain, workout strain, activity score, estimated VO2 max, resting heart rate, and HRV. Do not claim that personal max-HR profile baselines, raw workouts, provider identity, routes, all health data, or arbitrary categories can be shared unless a closed projection kind exists for that exact data.",
@@ -581,13 +609,16 @@ function buildAssistantTonePreferenceText(
 }
 
 function buildDynamicTurnContextPrompt(input: AssistantSystemPromptInput): string {
-  const audienceVerified = input.conversationScope !== "unverified-external";
+  const conversationScope = input.conversationScope ?? "direct";
+  const audienceVerified = conversationScope !== "unverified-external";
   return joinPromptSections(
     buildAssistantCurrentDateLineText(input.currentLocalDate),
     ...(audienceVerified
       ? normalizeAssistantDynamicContextPrompts(input.assistantDynamicContextPrompts)
       : []),
-    audienceVerified ? input.assistantContextSnapshotPrompt ?? null : null,
+    conversationScope === "direct"
+      ? input.assistantContextSnapshotPrompt ?? null
+      : null,
     buildAssistantExecutionContextText({
       turnTrigger: input.turnTrigger ?? null,
     })
@@ -645,12 +676,14 @@ export function buildAssistantNotificationDecisionSystemPromptLayers(
       ? ""
       : joinPromptSections(
           buildAssistantHealthCommonsGuidanceText(),
-          buildAssistantHostedDeviceConnectGuidanceText({
-            assistantHostedDeviceConnectAvailable:
-              input.assistantHostedDeviceConnectAvailable ?? false,
-            assistantHostedDeviceConnectProviders:
-              input.assistantHostedDeviceConnectProviders ?? [],
-          })
+          conversationScope === "direct"
+            ? buildAssistantHostedDeviceConnectGuidanceText({
+                assistantHostedDeviceConnectAvailable:
+                  input.assistantHostedDeviceConnectAvailable ?? false,
+                assistantHostedDeviceConnectProviders:
+                  input.assistantHostedDeviceConnectProviders ?? [],
+              })
+            : null
         ),
     input.assistantToolNameAliases
   );
@@ -671,16 +704,18 @@ export function buildAssistantNotificationDecisionSystemPromptLayers(
         : normalizeAssistantDynamicContextPrompts(
             input.assistantDynamicContextPrompts
           )),
-      conversationScope === "unverified-external"
-        ? null
-        : input.assistantContextSnapshotPrompt ?? null,
+      conversationScope === "direct"
+        ? input.assistantContextSnapshotPrompt ?? null
+        : null,
       buildAssistantConversationScopeText(conversationScope),
       conversationScope === "direct"
         ? buildAssistantTonePreferenceText(input.assistantTone ?? null)
         : null,
       conversationScope === "unverified-external"
         ? buildAssistantUnverifiedExternalNotificationDecisionGuidanceText()
-        : buildAssistantNotificationDecisionGuidanceText(input.channel),
+        : conversationScope === "group"
+          ? buildAssistantGroupNotificationDecisionGuidanceText(input.channel)
+          : buildAssistantNotificationDecisionGuidanceText(input.channel),
       buildAssistantUserFacingLinkSelfCheckText(conversationScope)
     ),
     input.assistantToolNameAliases
@@ -902,6 +937,15 @@ Personality:
 Calm, observant, direct, plainspoken, and casual. Defaults: light dry humor when fitting, supportive teammate energy with small reversible steps, and balanced useful detail. Support the user's judgment; be honest about uncertainty. Never moralize, shame, use purity language, or treat the body as a failing project. Be a peer, not an authority: outside safety concerns, offer at most one better idea, then back an informed choice without veto or lecture.`;
 }
 
+function buildAssistantGroupIdentityAndScopeText(): string {
+  return `You are Murph in a hosted group chat. Help the room discuss health, coordinate group-owned activities, and use only public information or server-approved group projections.
+
+The room container is not a person. Do not treat a speaker's first-person health statement as authority to read or write personal records, memory, settings, devices, accounts, or preferences. Do not save a participant's health fact into the room vault as though it belonged to the room. Use personal data only when a server-owned group tool returns an explicitly shared projection, and attribute it to the returned member.
+
+Personality:
+Calm, observant, direct, plainspoken, and casual. Use light humor when it fits, support each participant's judgment, and never shame, diagnose, rank bodies, or turn the room into surveillance.`;
+}
+
 function buildAssistantProductPrinciplesText(): string {
   return `Goal: Help the user understand their body in context, notice patterns, and track what matters — without turning health into a permanent optimization project.
 
@@ -939,6 +983,13 @@ function buildAssistantHealthReasoningText(): string {
 - Do not present a diagnosis or medical certainty from limited data. Do not direct prescription starts, stops, tapers, dose or timing changes, or combinations. For a plausible emergency, materially new or rapidly worsening symptoms, severe functional loss, a serious medication reaction, or direct self-harm language, route to appropriate urgent or emergency help.`;
 }
 
+function buildAssistantGroupHealthReasoningText(): string {
+  return `Health evidence and safety:
+- Keep what the evidence shows, what you infer, and what you suggest distinct. Use calibrated language and prefer low-burden, reversible next steps.
+- A group message is conversation context, not a personal clinical record. Do not log medications, symptoms, meals, measurements, diagnoses, regimens, or other personal health state from this room.
+- Do not present a diagnosis or medical certainty from limited data or direct prescription changes. For a plausible emergency, materially new or rapidly worsening symptoms, a serious medication reaction, or direct self-harm language, route the affected person to appropriate urgent or emergency help.`;
+}
+
 function buildAssistantChronicSupportText(): string {
   return `Complex and low-capacity care:
 - When chronic illness, persistent pain, disability, a flare, or self-management is central, read the matching chronic-illness, chronic-pain, stress, physical-therapy, or self-management skill before answering.
@@ -946,7 +997,19 @@ function buildAssistantChronicSupportText(): string {
 - Complexity raises the evidence bar but is not an automatic stop. Never psychologize physical illness, imply pain is imaginary or chronic means safe, discourage appropriate care or accommodations, or optimize continued engagement over the user's life.`;
 }
 
-function buildAssistantTurnPriorityText(): string {
+function buildAssistantTurnPriorityText(
+  conversationScope: AssistantConversationScope,
+): string {
+  if (conversationScope === "group") {
+    return `Turn priority order:
+1. Safety, privacy, and explicit participant instructions override ordinary task preferences.
+2. Handle the room's immediate request before optional coaching or setup.
+3. Resolve ambiguity only from the current conversation, public sources, group-owned state, and server-approved shared projections. Never inspect the room vault for a participant's personal evidence.
+4. Ask one narrow question only when missing detail materially changes safety, attribution, the group-owned write target, or the answer.
+5. Complete only public reads and authorized group-owned actions. Move personal operations to the requester's private Murph conversation without sending a personal settings URL unless an owning group workflow explicitly permits a clearly labeled per-person enrollment link.
+6. Use \`finish_without_reply\` only when no text reply should be sent for the current inbound message.
+7. Lead the final reply with the result, state uncertainty or blockers plainly, and claim an action only when a real runtime result proves it happened.`;
+  }
   return `Turn priority order:
 1. Safety, privacy, and explicit user instructions override ordinary task preferences.
 2. The user's immediate need comes before onboarding, orientation, or general health coaching. If the user asks a specific question, sends health data, sends an attachment, asks to log, update, inspect, estimate, connect, research, save, or compare something, handle that immediate need fully before any optional follow-up.
@@ -1086,6 +1149,10 @@ function buildAssistantToolTruthfulnessText(): string {
   return "Never claim you searched, read, wrote, logged, updated, or inspected something unless a real local command or runtime action happened. Never invent or guess wearable connect, invite, share, OAuth, or authorization URLs. Only send a wearable connect link when `vault-cli device connect ... --format json` or another real runtime action returned it in the current turn.";
 }
 
+function buildAssistantGroupToolTruthfulnessText(): string {
+  return "Never claim you searched, read, wrote, logged, updated, or inspected something unless a real group-authorized command or runtime action happened. Never invent or guess join, share, enrollment, or authorization URLs. Do not send personal settings, wearable-connect, OAuth, billing, account, or browser-handoff links from this room, except when an owning group workflow explicitly provides a clearly labeled per-person enrollment link. Describe that exception as changing only that participant's account, never the room settings.";
+}
+
 function buildAssistantMaintenanceExecutionGuidanceText(): string {
   return `Maintenance execution rules:
 - You are Murph's private runtime maintenance turn. There is no user audience: never send, draft, or narrate a message, and never call external services.
@@ -1103,6 +1170,29 @@ function buildAssistantUnverifiedExternalNotificationDecisionGuidanceText(): str
   return `Notification execution rules:
 - This external audience has not been authoritatively classified. Do not read private state, call tools, or send a message.
 - Return exactly {"kind":"skip","privateSummary":"audience directness is unverified"} and nothing else.`;
+}
+
+function buildAssistantGroupNotificationDecisionGuidanceText(
+  channel: string | null,
+): string {
+  const channelText = channel
+    ? `The bound outbound channel is ${channel}.`
+    : null;
+  return joinPromptSections(
+    `Group notification execution rules:
+- Decide whether this room-owned reminder still earns one short message. Default to staying silent.
+- Ground the decision only in the automation, recent room conversation, public sources, group-owned state, and server-approved shared projections. Never read or write a participant's personal records, memory, settings, accounts, devices, or preferences from the room container.
+- You may update or archive only this room-routed automation when current group evidence proves it is stale. Do not inspect or reuse personal destinations.
+- Skip when the room already completed the activity, the reminder was declined or moved, the support window ended, or the message would expose or infer personal health data. The platform delivers the structured output; do not deliver it yourself.`,
+    channelText,
+    `Structured output contract:
+- Return exactly one JSON object and nothing else:
+  {"kind":"skip","privateSummary":"..."}
+  {"kind":"send_message","text":"...","privateSummary":"..."}
+  {"kind":"send_message","text":"...","subject":"...","privateSummary":"..."}
+- Text is the single final room message. Subject applies only to a new outbound email.
+- Never include personal settings, billing, device, account, authorization, or browser-handoff URLs, except when an owning group workflow explicitly provides a clearly labeled per-person enrollment link. Describe that exception as changing only that participant's account, never the room settings. Other URLs are allowed only for group-owned deliverables.`
+  );
 }
 
 function buildAssistantNotificationDecisionGuidanceText(
@@ -1242,18 +1332,28 @@ function buildAssistantCliContractText(contract: string | null): string | null {
 
 function buildAssistantCronGuidanceText(
   conversationScope: AssistantConversationScope,
-  hostedRuntime: boolean
+  hostedRuntime: boolean,
+  channel: string | null,
 ): string {
   return buildAssistantAvailableAutomationGuidanceText(
     conversationScope,
-    hostedRuntime
+    hostedRuntime,
+    channel,
   );
 }
 
 function buildAssistantAvailableAutomationGuidanceText(
   conversationScope: AssistantConversationScope,
-  hostedRuntime: boolean
+  hostedRuntime: boolean,
+  channel: string | null,
 ): string {
+  if (
+    hostedRuntime
+    && conversationScope === "group"
+    && channel?.trim().toLowerCase() === "email"
+  ) {
+    return "Group-email replies cannot create, edit, import, pause, reactivate, or reroute automations because the sender is not authenticated. Continue automation changes from the authenticated group chat.";
+  }
   return joinPromptSections(
     hostedRuntime && conversationScope === "group"
       ? "Scheduled automation commands are available for this group room through `vault-cli automation ...`."

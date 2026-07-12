@@ -11,6 +11,8 @@ import {
 } from "@murphai/hosted-execution";
 import {
   type HostedRuntimeGroupToolLinqThreadContext,
+  type HostedRuntimeGroupToolRequest,
+  type HostedRuntimeGroupToolResponse,
   type HostedRuntimeGroupToolSelfOptOutContext,
   type HostedRuntimeNewsletterScheduledAuthority,
   type HostedRuntimeNewsletterToolRequest,
@@ -205,6 +207,7 @@ const HOSTED_MEMBER_PREFERENCE_PRE_PLANNING_MAX_ITEMS = 10;
 
 export interface HostedWorkspaceRuntimeAssistantPhaseInput
   extends HostedWorkspaceRunnerAssistantPhaseInput {
+  currentDeliveryRoute?: AssistantCurrentDeliveryRoute | null;
   request: HostedAssistantWorkspaceRuntimeJobInput["request"];
   restored: HostedRestoredExecutionContext;
   runtime: Pick<
@@ -229,12 +232,25 @@ export type HostedWorkspaceRuntimeAssistantPhase = (
  */
 export function createHostedGroupToolWithLinqThreadContext(input: {
   emailDeliveryContexts?: readonly HostedAssistantEmailDeliveryContext[] | null;
+  groupEmailIngress?: boolean;
   groupToolPort: NonNullable<HostedRuntimePlatform["groupToolPort"]>;
   linqDeliveryContexts: readonly HostedAssistantLinqDeliveryContext[];
 }): NonNullable<HostedRuntimePlatform["groupToolPort"]> {
+  const emailIngressPresent = input.groupEmailIngress === true
+    || (input.emailDeliveryContexts?.length ?? 0) > 0;
   return {
     async request(request) {
+      if (
+        emailIngressPresent
+        && request.action !== "read_current"
+        && request.action !== "revoke_own_email_share"
+      ) {
+        return buildHostedGroupEmailMutationUnavailable(request);
+      }
       if (request.action === "revoke_own_email_share") {
+        if (emailIngressPresent) {
+          return await input.groupToolPort.request({ action: request.action });
+        }
         const selfOptOut = resolveHostedGroupToolSelfOptOutContext({
           linqDeliveryContexts: input.linqDeliveryContexts,
         });
@@ -260,6 +276,36 @@ export function createHostedGroupToolWithLinqThreadContext(input: {
       );
     },
   };
+}
+
+function buildHostedGroupEmailMutationUnavailable(
+  request: Exclude<
+    HostedRuntimeGroupToolRequest,
+    { action: "read_current" | "revoke_own_email_share" }
+  >,
+): HostedRuntimeGroupToolResponse {
+  const unavailableReason = "authenticated_sender_required";
+  switch (request.action) {
+    case "create_join_link":
+    case "post_join_offer":
+    case "update_display_name":
+      return {
+        action: request.action,
+        result: { group: null, status: "unavailable", unavailableReason },
+      };
+    case "read_chat_participants":
+      return {
+        action: request.action,
+        result: { participants: null, status: "unavailable", unavailableReason },
+      };
+    case "preflight_set_chat_avatar":
+    case "set_chat_avatar":
+    case "share_contact_card":
+      return {
+        action: request.action,
+        result: { status: "unavailable", unavailableReason },
+      };
+  }
 }
 
 function resolveHostedGroupToolSelfOptOutContext(input: {
@@ -575,6 +621,9 @@ export async function runHostedWorkspaceAssistantPhase(
           ? {
               groupTool: createHostedGroupToolWithLinqThreadContext({
                 emailDeliveryContexts: initialEmailDeliveryContexts,
+                groupEmailIngress:
+                  input.currentDeliveryRoute?.channel === "email"
+                  && input.currentDeliveryRoute.threadIsDirect === false,
                 groupToolPort: input.runtime.platform.groupToolPort,
                 linqDeliveryContexts: initialLinqDeliveryContexts,
               }),

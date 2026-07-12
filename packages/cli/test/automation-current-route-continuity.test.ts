@@ -432,6 +432,9 @@ test("group automation writes are restricted to a canonical snapshot of the curr
       route: {
         channel: "linq",
         deliveryTarget: "linq_group_other",
+        identityId: "hid_group_identity",
+        participantId: "hid_group_participant",
+        threadId: "hid_group_thread",
         threadIsDirect: true,
       },
       instructions: "Send the reminder.",
@@ -450,6 +453,96 @@ test("group automation writes are restricted to a canonical snapshot of the curr
       imported.envelope.ok ? null : imported.envelope.error.code,
       "UNKNOWN",
     );
+
+    const titleDerivedForeignCollisions = [
+      {
+        fileName: "foreign-title-only.json",
+        payload: {
+          title: "Foreign room reminder",
+        },
+      },
+      {
+        fileName: "foreign-title-with-fresh-id.json",
+        payload: {
+          automationId: "automation_fresh_title_collision",
+          title: "Foreign room reminder",
+        },
+      },
+      {
+        fileName: "foreign-formatted-title.json",
+        payload: {
+          title: "Foreign---room reminder",
+        },
+      },
+    ];
+    for (const collision of titleDerivedForeignCollisions) {
+      const collisionPath = path.join(parentRoot, collision.fileName);
+      await writeFile(collisionPath, JSON.stringify({
+        ...collision.payload,
+        status: "active",
+        continuityPolicy: "preserve",
+        schedule: { kind: "at", at: "2026-12-06T12:00:00.000Z" },
+        route: {
+          channel: "linq",
+          deliveryTarget: "linq_group_current",
+          identityId: "hid_group_identity",
+          participantId: "hid_group_participant",
+          threadId: "hid_group_thread",
+          threadIsDirect: false,
+        },
+        instructions: "Must not replace another room's automation.",
+        tags: [],
+      }));
+      const collisionImport = await runInProcessJsonCli(cli, [
+        "automation",
+        "import-json",
+        "--input",
+        `@${collisionPath}`,
+        "--vault",
+        vaultRoot,
+      ]);
+      assert.equal(collisionImport.envelope.ok, false);
+    }
+
+    for (const title of ["Current room reminder", "Unused group reminder"]) {
+      const sameOrUnusedPath = path.join(
+        parentRoot,
+        `${title.toLowerCase().replaceAll(" ", "-")}.json`,
+      );
+      await writeFile(sameOrUnusedPath, JSON.stringify({
+        title,
+        status: "active",
+        continuityPolicy: "preserve",
+        schedule: { kind: "at", at: "2026-12-06T12:00:00.000Z" },
+        route: {
+          channel: "linq",
+          deliveryTarget: "linq_group_current",
+          identityId: "hid_group_identity",
+          participantId: "hid_group_participant",
+          threadId: "hid_group_thread",
+          threadIsDirect: false,
+        },
+        instructions: "Authorized current room automation.",
+        tags: [],
+      }));
+      const sameOrUnusedImport = await runInProcessJsonCli(cli, [
+        "automation",
+        "import-json",
+        "--input",
+        `@${sameOrUnusedPath}`,
+        "--vault",
+        vaultRoot,
+      ]);
+      assert.equal(
+        sameOrUnusedImport.envelope.ok,
+        true,
+        sameOrUnusedImport.envelope.ok
+          ? title
+          : `${title}: ${sameOrUnusedImport.envelope.error.code ?? "unknown"}: ${
+              sameOrUnusedImport.envelope.error.message ?? "unknown error"
+            }`,
+      );
+    }
 
     const collidedSave = await runInProcessJsonCli(cli, [
       "automation",
@@ -567,7 +660,7 @@ test("group automation writes are restricted to a canonical snapshot of the curr
   }
 });
 
-test("hosted email automation writes follow a stable thread across changing reply envelopes", async () => {
+test("hosted direct-email automation writes follow a stable thread across changing reply envelopes", async () => {
   const { parentRoot, vaultRoot } = await createTempVaultContext(
     "murph-automation-email-route-continuity-",
   );
@@ -592,7 +685,7 @@ test("hosted email automation writes follow a stable thread across changing repl
       identityId: "email-sender-identity",
       participantId: null,
       threadId: "stable-email-thread",
-      threadIsDirect: false,
+      threadIsDirect: true,
     },
   };
   const bridge = await startAssistantCurrentRouteBridgeStub({
@@ -633,7 +726,7 @@ test("hosted email automation writes follow a stable thread across changing repl
       identityId: "email-sender-identity",
       participantId: null,
       threadId: "stable-email-thread",
-      threadIsDirect: false,
+      threadIsDirect: true,
     };
 
     const edited = await runInProcessJsonCli(cli, [
@@ -688,7 +781,7 @@ test("hosted email automation writes follow a stable thread across changing repl
         identityId: "email-sender-identity",
         participantId: null,
         threadId: "stable-email-thread",
-        threadIsDirect: false,
+        threadIsDirect: true,
       },
       instructions: "Send the imported reminder.",
       tags: [],
@@ -729,7 +822,7 @@ test("hosted email automation writes follow a stable thread across changing repl
       identityId: "email-sender-identity",
       participantId: null,
       threadId: "different-email-thread",
-      threadIsDirect: false,
+      threadIsDirect: true,
     };
     const differentThreadEdit = await runInProcessJsonCli(cli, [
       "automation",
@@ -741,6 +834,106 @@ test("hosted email automation writes follow a stable thread across changing repl
       vaultRoot,
     ]);
     assert.equal(differentThreadEdit.envelope.ok, false);
+  } finally {
+    await bridge.stop();
+    await rm(parentRoot, { recursive: true, force: true });
+  }
+});
+
+test("hosted group-email replies cannot mutate automations", async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    "murph-automation-group-email-authority-",
+  );
+  const deliveryTarget = serializeHostedEmailThreadTarget({
+    cc: [],
+    lastMessageId: "<group-reply@example.test>",
+    references: [],
+    subject: "Group newsletter reply",
+    to: ["group@example.test"],
+  });
+  const route = {
+    channel: "email" as const,
+    deliverySource: null,
+    deliveryTarget,
+    identityId: "group-email-sender",
+    participantId: null,
+    threadId: "stable-group-email-thread",
+    threadIsDirect: false,
+  };
+  const bridge = await startAssistantCurrentRouteBridgeStub({
+    response: { route },
+    token: "test-bridge-token",
+  });
+
+  try {
+    const cli = Cli.create("vault-cli", {
+      description: "automation group email authority test cli",
+      version: "0.0.0-test",
+    });
+    registerAutomationCommands(cli);
+    vi.stubEnv(HOSTED_RUNTIME_PROCESS_ENV, "1");
+    vi.stubEnv(HOSTED_CLI_BRIDGE_TOKEN_ENV, "test-bridge-token");
+    vi.stubEnv(HOSTED_CLI_BRIDGE_URL_ENV, bridge.url);
+
+    const saved = await runInProcessJsonCli(cli, [
+      "automation",
+      "save",
+      "Spoofable group email reminder",
+      "--instructions",
+      "Send it repeatedly.",
+      "--schedule-kind",
+      "at",
+      "--schedule-at",
+      "2026-12-06T12:00:00.000Z",
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(saved.envelope.ok, false);
+
+    await upsertAutomation({
+      continuityPolicy: "preserve",
+      instructions: "Existing group reminder.",
+      route,
+      schedule: { kind: "at", at: "2026-12-06T12:00:00.000Z" },
+      slug: "existing-group-email-reminder",
+      status: "active",
+      tags: [],
+      title: "Existing group email reminder",
+      vaultRoot,
+    });
+
+    for (const args of [
+      ["automation", "edit", "existing-group-email-reminder", "--summary", "Spoofed edit"],
+      ["automation", "set-status", "existing-group-email-reminder", "--status", "paused"],
+    ]) {
+      const result = await runInProcessJsonCli(cli, [
+        ...args,
+        "--vault",
+        vaultRoot,
+      ]);
+      assert.equal(result.envelope.ok, false);
+    }
+
+    const importPath = path.join(parentRoot, "group-email-import.json");
+    await writeFile(importPath, JSON.stringify({
+      title: "Existing group email reminder",
+      slug: "existing-group-email-reminder",
+      status: "active",
+      continuityPolicy: "preserve",
+      schedule: { kind: "at", at: "2026-12-07T12:00:00.000Z" },
+      route,
+      instructions: "Spoofed import.",
+      tags: [],
+    }));
+    const imported = await runInProcessJsonCli(cli, [
+      "automation",
+      "import-json",
+      "--input",
+      `@${importPath}`,
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(imported.envelope.ok, false);
   } finally {
     await bridge.stop();
     await rm(parentRoot, { recursive: true, force: true });

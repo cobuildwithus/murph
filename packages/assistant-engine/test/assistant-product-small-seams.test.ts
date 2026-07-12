@@ -205,12 +205,40 @@ describe('assistant product small seams', () => {
     expect(messageChannelFallback.audience).toMatchObject({
       channel: 'telegram',
       deliveryPolicy: 'explicit-target-override',
+      effectiveThreadIsDirect: null,
       explicitTarget: 'telegram-thread',
       threadId: 'telegram-thread',
       threadIsDirect: true,
     })
     expect(resolveAssistantConversationScope(messageChannelFallback.audience)).toBe(
-      'direct',
+      'unverified-external',
+    )
+
+    const unboundGroupTarget = resolveAssistantConversationPolicy({
+      message: {
+        channel: 'telegram',
+        deliverResponse: true,
+        deliveryReplyToMessageId: null,
+        deliveryTarget: 'telegram-group',
+        operatorAuthority: 'direct-operator',
+        threadId: 'telegram-group',
+        threadIsDirect: false,
+      },
+      session: {
+        binding: {
+          actorId: null,
+          channel: null,
+          conversationKey: null,
+          delivery: null,
+          identityId: null,
+          threadId: null,
+          threadIsDirect: null,
+        },
+      },
+    })
+    expect(unboundGroupTarget.audience.effectiveThreadIsDirect).toBeNull()
+    expect(resolveAssistantConversationScope(unboundGroupTarget.audience)).toBe(
+      'unverified-external',
     )
 
     const blindedHostedDirectAudience = resolveAssistantConversationPolicy({

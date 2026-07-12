@@ -1592,6 +1592,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       }
     };
     let runtimePassOrdinal = 0;
+    let currentForegroundDeliveryRoute: AssistantCurrentDeliveryRoute | null = null;
     const runWorkspaceForegroundPass = async (passInput: {
       initialAssistantInputBatch?: HostedWorkspaceRunnerAssistantInputBatch | null;
       initialMailboxImport?: HostedWorkspaceRunnerInput["initialMailboxImport"];
@@ -1626,16 +1627,17 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         status: "start",
       });
       try {
-        let currentDeliveryRoute = (
-          await resolveHostedForegroundCurrentDeliveryRoute({
-            initialAssistantInputBatch: passInput.initialAssistantInputBatch ?? null,
-            initialMailboxImport: passInput.initialMailboxImport,
-            vaultRoot: restored.vaultRoot,
-          })
-        ) ?? null;
+        const passDeliveryRoute = await resolveHostedForegroundCurrentDeliveryRoute({
+          initialAssistantInputBatch: passInput.initialAssistantInputBatch ?? null,
+          initialMailboxImport: passInput.initialMailboxImport,
+          vaultRoot: restored.vaultRoot,
+        });
+        if (passDeliveryRoute !== undefined) {
+          currentForegroundDeliveryRoute = passDeliveryRoute;
+        }
         const passResult = await hostedCliBridge.runWithInvocation(
           {
-            currentDeliveryRoute: () => currentDeliveryRoute,
+            currentDeliveryRoute: () => currentForegroundDeliveryRoute,
             deviceSyncPort: guardedRuntime.platform.deviceSyncPort ?? null,
             messagingReturnTarget: () => hostedCliBridgeMessagingReturnTarget,
             signal: passSignal,
@@ -1666,12 +1668,13 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
                 // does carry input ids still replaces the route, including
                 // null when that fresh audience is ambiguous.
                 if (phaseDeliveryRoute !== undefined) {
-                  currentDeliveryRoute = phaseDeliveryRoute;
+                  currentForegroundDeliveryRoute = phaseDeliveryRoute;
                 }
                 return await (
                   options.runAssistantPhase ?? runHostedWorkspaceAssistantPhase
                 )({
                   ...phaseInput,
+                  currentDeliveryRoute: currentForegroundDeliveryRoute,
                   deviceSyncWorkspaceWakeHandled: deviceSyncWorkspaceWakeHandledUntilCheckpoint,
                   request: input.request,
                   restored,

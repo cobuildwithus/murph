@@ -1733,6 +1733,26 @@ describe('assistant experiment onboarding guidance', () => {
 })
 
 describe('assistant notification decision guidance', () => {
+  it('keeps group notification decisions on room-owned context and actions', () => {
+    const prompt = buildAssistantNotificationDecisionSystemPromptWithCacheMetadata(
+      createCommonNotificationPromptInput({
+        assistantContextSnapshotPrompt: 'PRIVATE_GROUP_NOTIFICATION_CONTEXT',
+        assistantHostedDeviceConnectAvailable: true,
+        assistantHostedDeviceConnectProviders: [
+          { label: 'Garmin', provider: 'garmin' },
+        ],
+        conversationScope: 'group',
+      }),
+    ).prompt
+
+    expect(prompt).toContain('Group notification execution rules:')
+    expect(prompt).toContain('only this room-routed automation')
+    expect(prompt).not.toContain('PRIVATE_GROUP_NOTIFICATION_CONTEXT')
+    expect(prompt).not.toContain('same full read and write tools')
+    expect(prompt).not.toContain('Hosted wearable connection links are available')
+    expect(prompt).not.toContain('ground yourself in what the user has actually done today')
+  })
+
   it('renders only a fail-closed skip contract for an unverified external audience', () => {
     const prompt = buildAssistantNotificationDecisionSystemPromptWithCacheMetadata(
       createCommonNotificationPromptInput({
@@ -2006,6 +2026,7 @@ describe('assistant conversation scope', () => {
         'vault-cli device connect <provider> --format json',
         'vault-cli assistant style set humor 10 --format json',
       ].join('\n'),
+      assistantContextSnapshotPrompt: 'PERSONAL_GROUP_CONTEXT_SNAPSHOT',
       conversationScope: 'group',
       hostedRuntime: true,
     }))
@@ -2020,11 +2041,27 @@ describe('assistant conversation scope', () => {
     expect(prompt).not.toContain('/settings?voice=true')
     expect(prompt).not.toContain('vault-cli assistant style set')
     expect(prompt).not.toContain('vault-cli device connect <provider>')
+    expect(prompt).not.toContain('Only send a wearable connect link')
     expect(prompt).not.toContain('Computer-use tools:')
     expect(prompt).not.toContain('Phone calls:')
+    expect(prompt).not.toContain('Vault file sends:')
     expect(prompt).not.toContain('action="start_checkout"')
     expect(prompt).not.toContain('GOOGLECALENDAR_CREATE_EVENT')
     expect(prompt).not.toContain('OUTLOOK_CALENDAR_CREATE_EVENT')
+    expect(prompt).not.toContain('User-provided content and vault writes:')
+    expect(prompt).not.toContain('Health record ingestion invariant:')
+    expect(prompt).not.toContain('Habitat life-context:')
+    expect(prompt).not.toContain('vault-cli habitat save')
+    expect(prompt).not.toContain('save the recoverable health data')
+    expect(prompt).not.toContain('PERSONAL_GROUP_CONTEXT_SNAPSHOT')
+    expect(prompt).not.toContain('keep their vault current')
+    expect(prompt).not.toContain('Relevant personal records are core evidence')
+    expect(prompt).not.toContain('Preserve medication state correctly')
+    expect(prompt).not.toContain("the user's compiled wiki")
+    expect(prompt).not.toContain('vault-cli memory set-name')
+    expect(prompt).toContain('The room container is not a person')
+    expect(prompt).toContain('Do not log medications, symptoms, meals, measurements')
+    expect(prompt).toContain("changing only that participant's account, never the room settings")
 
     // This is a private, explicitly per-person enrollment reminder owned by
     // the group newsletter workflow, not a room-settings destination.
@@ -2046,12 +2083,29 @@ describe('assistant conversation scope', () => {
     expect(prompt).toContain('action="start_checkout"')
     expect(prompt).toContain('GOOGLECALENDAR_CREATE_EVENT')
     expect(prompt).toContain('OUTLOOK_CALENDAR_CREATE_EVENT')
+    expect(prompt).toContain('User-provided content and vault writes:')
+    expect(prompt).toContain('Health record ingestion invariant:')
+    expect(prompt).toContain('Habitat life-context:')
+    expect(prompt).toContain('vault-cli habitat save')
     expect(prompt).toContain('agentApproved: true')
     expect(prompt).toContain('event_duration_minutes')
     expect(prompt).toContain('do not retry the create call')
     expect(prompt).toContain('Pass `--channel` with `--delivery-target`')
     expect(prompt).toContain('inspect saved local self-targets')
     expect(prompt).not.toContain('current-conversation-only')
+  })
+
+  it('keeps unauthenticated group-email replies conversational and non-mutating', () => {
+    const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput({
+      channel: 'email',
+      conversationScope: 'group',
+      hostedRuntime: true,
+    }))
+
+    expect(prompt).toContain('Email replies can converse about this group')
+    expect(prompt).toContain('Group-email replies cannot create, edit, import, pause')
+    expect(prompt).not.toContain('Group automation writes are current-room-only')
+    expect(prompt).not.toContain('Scheduled automation commands are available for this group room')
   })
 
   it('keeps hosted direct automation writes in the current conversation', () => {

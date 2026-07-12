@@ -297,7 +297,9 @@ describe('assistant protocol index planning', () => {
 
   it('soft-fails to an empty assistant protocol index when generated artifacts are unavailable', async () => {
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
-    planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
+    planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(
+      'PERSONAL_GROUP_CONTEXT_SNAPSHOT',
+    )
     planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
       supportsNativeResume: false,
     })
@@ -1055,6 +1057,8 @@ describe('assistant protocol index planning', () => {
 
     expect(plan.developerInstructions).toContain('Conversation scope: hosted group chat.')
     expect(plan.developerInstructions).not.toContain('bootstrap contract')
+    expect(plan.developerInstructions).not.toContain('PERSONAL_GROUP_CONTEXT_SNAPSHOT')
+    expect(planningMocks.readAssistantContextSnapshotPrompt).not.toHaveBeenCalled()
     expect(plan.developerInstructions).not.toContain('/settings?voice=true')
     expect(plan.developerInstructions).not.toContain('Hosted wearable connection links are available')
     expect(plan.developerInstructions).toContain(
@@ -1074,14 +1078,15 @@ describe('assistant protocol index planning', () => {
         'newsletter',
       ]),
     )
-    expect(plan.dynamicTools.map((tool) => tool.name)).not.toEqual(
-      expect.arrayContaining([
-        'computer_open',
-        'connected_apps_manage',
-        'create_phone_call',
-        'family_plan',
-      ]),
-    )
+    for (const personalTool of [
+      'computer_open',
+      'connected_apps_manage',
+      'create_phone_call',
+      'family_plan',
+      'send_vault_file',
+    ]) {
+      expect(plan.dynamicTools.map((tool) => tool.name)).not.toContain(personalTool)
+    }
   })
 
   it('fails closed on personal prompt context and tools for an unverified external audience', async () => {

@@ -190,7 +190,11 @@ function resolveAssistantConversationAudienceDirectness(input: {
     bindingDelivery: input.bindingDelivery,
     target: input.explicitTarget,
     threadId: input.threadId,
-    threadIsDirect: input.threadIsDirect ?? null,
+    // Fresh directness is authoritative for an explicit destination only
+    // when that raw destination matched the binding target above. Fallback
+    // inference may still use independently bound actor/participant identity
+    // or stored directness tied to the same stored thread.
+    threadIsDirect: null,
     storedThreadId: input.sessionThreadId,
     storedThreadIsDirect: input.storedThreadIsDirect,
   })

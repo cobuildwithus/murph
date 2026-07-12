@@ -513,7 +513,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
         )
       : []
   let assistantContextSnapshotElapsedMs: number | null = null
-  const assistantContextSnapshotPrompt = maintenanceTurn
+  const assistantContextSnapshotPrompt = maintenanceTurn || !privateInteractiveAudience
     ? null
     : await measureRoutePlanningAsync(
         routePlanningSpans,
@@ -653,6 +653,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
           input.hostedToolContext?.phoneCalls != null,
         voiceMemoGenerationAvailable: voiceMemoDeliveryChannel !== null,
         vaultFileSendAvailable:
+          privateInteractiveAudience &&
           input.hostedToolContext?.vaultFileSendAvailable === true,
       })
   const reactionDynamicToolAvailable = dynamicTools.some(

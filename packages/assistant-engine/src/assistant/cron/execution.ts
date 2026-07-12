@@ -1563,11 +1563,13 @@ function assistantCronTargetMatchesAutomationRoute(
   route: AutomationQueryRecord['route'],
 ): boolean {
   return target.channel === route.channel &&
+    (target.currentRouteSnapshot === true) === (route.currentRouteSnapshot === true) &&
     JSON.stringify(target.deliverySource) === JSON.stringify(route.deliverySource) &&
     target.deliveryTarget === route.deliveryTarget &&
     target.identityId === route.identityId &&
     target.participantId === route.participantId &&
-    target.threadId === route.threadId
+    target.threadId === route.threadId &&
+    (target.threadIsDirect ?? null) === (route.threadIsDirect ?? null)
 }
 
 function truncateAssistantCronResponse(response: string | null): string | null {
