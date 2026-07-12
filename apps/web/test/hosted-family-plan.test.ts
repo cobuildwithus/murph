@@ -80,6 +80,7 @@ import {
   issueHostedFamilyInviteFromOwnerTx,
   issueHostedFamilyInviteTx,
   readHostedFamilyCheckoutSessionIdFromUrl,
+  resolveHostedFamilyChatNotificationRouteTx,
   resolveHostedFamilyCheckoutRedirectUrl,
   writeHostedAccountGroupStripeBillingTx,
   parseHostedFamilyInviteStartToken,
@@ -1111,6 +1112,60 @@ describe("hosted Family plan", () => {
     expect(JSON.stringify(appendInput?.envelope)).not.toContain(
       "require_send_exact_text",
     );
+  });
+
+  it("does not pair a legacy owner thread with a stale pending identity", async () => {
+    const tx = createTxMock();
+    tx.hostedMemberIdentity.findUnique.mockResolvedValueOnce({
+      maskedPhoneNumberHint: "+1 *** *** 1111",
+      memberId: "member_owner",
+      phoneLookupKey: createHostedPhoneLookupKey("+15550001111"),
+      phoneNumberEncrypted: "encrypted:+15550001111",
+      phoneNumberVerifiedAt: new Date("2026-06-18T12:00:00.000Z"),
+      privyUserIdEncrypted: null,
+      privyUserLookupKey: null,
+      signupPhoneCodeSendAttemptId: null,
+      signupPhoneCodeSendAttemptStartedAt: null,
+      signupPhoneCodeSentAt: null,
+      signupPhoneNumberEncrypted: null,
+      walletAddressEncrypted: null,
+      walletChainType: null,
+      walletCreatedAt: null,
+      walletProvider: null,
+    });
+    tx.hostedMemberRouting.findUnique.mockResolvedValueOnce({
+      linqChatIdEncrypted: "encrypted:legacy_home_chat",
+      linqChatLookupKey: "legacy_home_chat_lookup",
+      linqHomeLineAssignedAt: new Date("2026-06-18T12:00:00.000Z"),
+      linqParticipantContactKind: null,
+      linqParticipantContactLookupKey: null,
+      linqRecipientPhoneEncrypted: "encrypted:+15559990000",
+      linqRecipientPhoneLookupKey: createHostedPhoneLookupKey("+15559990000"),
+      memberId: "member_owner",
+      pendingLinqChatIdEncrypted: "encrypted:pending_chat",
+      pendingLinqChatLookupKey: "pending_chat_lookup",
+      pendingLinqParticipantContactEncrypted: "encrypted:+15550002222",
+      pendingLinqParticipantContactKind: "phone",
+      pendingLinqParticipantContactLookupKey: "stale_pending_lookup",
+      pendingLinqParticipantContactObservedAt: new Date("2026-06-18T12:01:00.000Z"),
+      pendingLinqRecipientPhoneEncrypted: "encrypted:+15559990000",
+      pendingLinqRecipientPhoneLookupKey: createHostedPhoneLookupKey("+15559990000"),
+      replyAliasLookupKey: null,
+      telegramUserIdEncrypted: null,
+      telegramUserLookupKey: null,
+    });
+
+    await expect(resolveHostedFamilyChatNotificationRouteTx({
+      memberId: "member_owner",
+      tx,
+    })).resolves.toMatchObject({
+      channel: "linq",
+      delivery: {
+        kind: "participant",
+        target: "+15550001111",
+      },
+      threadId: null,
+    });
   });
 
   it("rejects web acceptance of a Telegram-only invite", async () => {

@@ -102,8 +102,9 @@ export function resolveHostedMemberAssistantNotificationRoute(input: {
   const memberPhoneNumber = normalizePhoneNumber(input.memberPhoneNumber);
   const linqRecipientPhone = normalizePhoneNumber(input.linqRecipientPhone);
   const linqContactLookupKey =
-    normalizeMessagingIdentity(input.linqContactLookupKey)
-    ?? input.messaging.linqContactLookupKey;
+    input.linqContactLookupKey === undefined
+      ? input.messaging.linqContactLookupKey
+      : normalizeMessagingIdentity(input.linqContactLookupKey);
 
   if (input.linqChatId && linqContactLookupKey) {
     const identifierBlind = createHostedAssistantConversationIdentifierBlind({

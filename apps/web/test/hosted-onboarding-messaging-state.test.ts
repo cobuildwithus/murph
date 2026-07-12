@@ -78,4 +78,56 @@ describe("hosted member messaging authority", () => {
       threadId: null,
     });
   });
+
+  it("does not pair an explicitly unauthorized home thread with a pending identity", () => {
+    const messaging = resolveHostedMemberMessagingState({
+      identity: null,
+      routing: {
+        linqChatId: "chat_legacy",
+        linqParticipantContact: null,
+        pendingLinqChatId: "chat_pending",
+        pendingLinqParticipantContact: {
+          lookupKey: "hbidx:phone:v1:pending",
+        },
+        telegramThreadId: "telegram_private",
+      },
+    });
+
+    expect(resolveHostedMemberAssistantNotificationRoute({
+      linqChatId: "chat_legacy",
+      linqContactLookupKey: null,
+      memberId: "member_legacy",
+      messaging,
+    })).toMatchObject({
+      channel: "telegram",
+      delivery: {
+        kind: "thread",
+        target: "telegram_private",
+      },
+    });
+  });
+
+  it("retains messaging-state fallback when the lookup override is omitted", () => {
+    const messaging = resolveHostedMemberMessagingState({
+      identity: null,
+      routing: {
+        pendingLinqChatId: "chat_pending",
+        pendingLinqParticipantContact: {
+          lookupKey: "hbidx:phone:v1:pending",
+        },
+      },
+    });
+
+    expect(resolveHostedMemberAssistantNotificationRoute({
+      linqChatId: "chat_pending",
+      memberId: "member_pending",
+      messaging,
+    })).toMatchObject({
+      channel: "linq",
+      delivery: {
+        kind: "thread",
+        target: "chat_pending",
+      },
+    });
+  });
 });
