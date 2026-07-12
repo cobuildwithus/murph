@@ -24,6 +24,7 @@ import {
   requireHostedPulseTrialPolicy,
 } from "./billing-plans";
 import { isHostedAccessBlockedBillingStatus } from "./entitlement";
+import { hostedOnboardingError } from "./errors";
 import {
   activateHostedMemberForPositiveSourceTx,
 } from "./member-activation";
@@ -61,6 +62,7 @@ export type HostedStripeActivatedMemberOutcome = {
 
 type HostedStripeActivationOutcome = HostedStripeActivatedMemberOutcome & {
   activatedMembers?: HostedStripeActivatedMemberOutcome[];
+  cleanupPulseTrialStripeSubscriptionId?: string | null;
   welcomeEmailMemberId: string | null;
 };
 
@@ -183,15 +185,34 @@ export async function applyPulseTrialCheckoutCompletedTx(input: {
   }
 
   if (input.member.billingRef?.pulseTrialRedeemedAt) {
+    const billingRefSubscriptionId = input.member.billingRef.stripeSubscriptionId;
+    if (isHostedStripeSamePulseTrialCheckoutSubscription({
+      billingRefSubscriptionId,
+      session: input.session,
+    })) {
+      return {
+        activatedMemberId: null,
+        hostedExecutionEventId: null,
+        welcomeEmailMemberId: input.member.core.id,
+      };
+    }
+
+    const subscription = input.subscription ??
+      await readHostedStripeCheckoutSessionSubscription(input.session);
     return {
       activatedMemberId: null,
+      cleanupPulseTrialStripeSubscriptionId:
+        billingRefSubscriptionId &&
+          subscription &&
+          isValidPulseTrialCheckoutSubscription({
+            eventCreatedAt: input.dispatchContext.eventCreatedAt,
+            session: input.session,
+            subscription,
+          })
+          ? subscription.id
+          : null,
       hostedExecutionEventId: null,
-      welcomeEmailMemberId: isHostedStripeSamePulseTrialCheckoutSubscription({
-        billingRefSubscriptionId: input.member.billingRef.stripeSubscriptionId,
-        session: input.session,
-      })
-        ? input.member.core.id
-        : null,
+      welcomeEmailMemberId: null,
     };
   }
 
@@ -354,6 +375,35 @@ function isHostedStripeSamePulseTrialCheckoutSubscription(input: {
     input.billingRefSubscriptionId &&
     sessionSubscriptionId &&
     input.billingRefSubscriptionId === sessionSubscriptionId,
+  );
+}
+
+export async function cancelHostedPulseTrialCheckoutLoserSubscription(input: {
+  stripe?: Stripe;
+  subscriptionId: string;
+}): Promise<void> {
+  try {
+    await (input.stripe ?? requireHostedStripeApi()).subscriptions.cancel(
+      input.subscriptionId,
+    );
+  } catch (error) {
+    if (isHostedStripeResourceMissingError(error)) {
+      return;
+    }
+    throw hostedOnboardingError({
+      code: "HOSTED_PULSE_TRIAL_CHECKOUT_CLEANUP_FAILED",
+      httpStatus: 502,
+      message: "Murph could not cancel an unused Stripe trial. Contact support to restore billing.",
+      retryable: true,
+    });
+  }
+}
+
+function isHostedStripeResourceMissingError(error: unknown): boolean {
+  return Boolean(
+    error &&
+    typeof error === "object" &&
+    Reflect.get(error, "code") === "resource_missing",
   );
 }
 

@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   lockHostedMemberRow: vi.fn(),
   readHostedMemberBillingSnapshot: vi.fn(),
   requireHostedStripeApi: vi.fn(),
+  cancelStripeSubscription: vi.fn(),
   retrieveStripeSubscription: vi.fn(),
   upsertHostedMemberStripeCheckoutEmailIfFreshTx: vi.fn(),
   writeHostedMemberStripeBillingRef: vi.fn(),
@@ -75,7 +76,10 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
   requireHostedStripeApi: mocks.requireHostedStripeApi,
 }));
 
-import { applyStripeCheckoutCompleted } from "@/src/lib/hosted-onboarding/stripe-billing-events";
+import {
+  applyStripeCheckoutCompleted,
+  cancelHostedPulseTrialCheckoutLoserSubscription,
+} from "@/src/lib/hosted-onboarding/stripe-billing-events";
 
 describe("applyStripeCheckoutCompleted", () => {
   beforeEach(() => {
@@ -86,8 +90,13 @@ describe("applyStripeCheckoutCompleted", () => {
     mocks.readHostedMemberBillingSnapshot.mockResolvedValue(makeMemberSnapshot());
     mocks.requireHostedStripeApi.mockReturnValue({
       subscriptions: {
+        cancel: mocks.cancelStripeSubscription,
         retrieve: mocks.retrieveStripeSubscription,
       },
+    });
+    mocks.cancelStripeSubscription.mockResolvedValue({
+      id: "sub_delayed_checkout",
+      status: "canceled",
     });
     mocks.retrieveStripeSubscription.mockResolvedValue(makePulseTrialSubscription());
     mocks.writeHostedMemberStripeBillingRef.mockResolvedValue({
@@ -496,6 +505,52 @@ describe("applyStripeCheckoutCompleted", () => {
 
     expect(mocks.writeHostedMemberStripeBillingTx).not.toHaveBeenCalled();
     expect(mocks.activateHostedMemberForPositiveSourceTx).not.toHaveBeenCalled();
+  });
+
+  it("returns a valid delayed Pulse Trial checkout subscription for loser cleanup", async () => {
+    mocks.findMemberForStripeCheckoutSession.mockResolvedValueOnce(makeMemberSnapshot({
+      billingRef: {
+        memberId: "member_123",
+        pulseTrialRedeemedAt: new Date("2025-04-12T00:00:00.000Z"),
+        stripeCustomerId: "cus_123",
+        stripeSubscriptionId: "sub_auto_trial",
+      },
+    }));
+    const session = {
+      ...makePulseTrialCheckoutSession(),
+      subscription: "sub_delayed_checkout",
+    };
+    const subscription = {
+      ...makePulseTrialSubscription(),
+      id: "sub_delayed_checkout",
+    };
+
+    await expect(
+      applyStripeCheckoutCompleted(
+        session as never,
+        {} as never,
+        undefined,
+        subscription as never,
+      ),
+    ).resolves.toEqual({
+      activatedMemberId: null,
+      cleanupPulseTrialStripeSubscriptionId: "sub_delayed_checkout",
+      hostedExecutionEventId: null,
+      welcomeEmailMemberId: null,
+    });
+
+    expect(mocks.writeHostedMemberStripeBillingTx).not.toHaveBeenCalled();
+    expect(mocks.activateHostedMemberForPositiveSourceTx).not.toHaveBeenCalled();
+  });
+
+  it("treats an already-absent delayed Pulse Trial subscription as cleaned up", async () => {
+    mocks.cancelStripeSubscription.mockRejectedValueOnce({
+      code: "resource_missing",
+    });
+
+    await expect(cancelHostedPulseTrialCheckoutLoserSubscription({
+      subscriptionId: "sub_delayed_checkout",
+    })).resolves.toBeUndefined();
   });
 
   it("does not let a stale trial checkout overwrite an already paid billing phase", async () => {

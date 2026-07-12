@@ -14,15 +14,18 @@ import { getHostedInviteStatus, requireHostedInviteForAuthentication } from "./i
 import { type PrivyLinkedAccountLike } from "./privy-shared";
 import { requireHostedStripeApi } from "./runtime";
 import {
-  HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
-} from "./shared";
+  withHostedMemberStripeMutationLock,
+} from "./hosted-member-billing-store";
 import {
   sendHostedSignupWelcomeEmailForMemberBestEffort,
 } from "./signup-welcome-email";
 import {
   listHostedStripeCheckoutSessionMemberIds,
 } from "./stripe-billing-lookup";
-import { applyStripeCheckoutCompleted } from "./stripe-billing-events";
+import {
+  applyStripeCheckoutCompleted,
+  cancelHostedPulseTrialCheckoutLoserSubscription,
+} from "./stripe-billing-events";
 
 export async function reconcileHostedBillingCheckoutSuccess(input: {
   inviteCode: string;
@@ -60,6 +63,11 @@ export async function reconcileHostedBillingCheckoutSuccess(input: {
     prisma,
     session,
   });
+  if (activationOutcome.cleanupPulseTrialStripeSubscriptionId) {
+    await cancelHostedPulseTrialCheckoutLoserSubscription({
+      subscriptionId: activationOutcome.cleanupPulseTrialStripeSubscriptionId,
+    });
+  }
   await nudgeHostedCheckoutSuccessActivationRunner({
     ...activationOutcome,
     prisma,
@@ -82,11 +90,13 @@ async function applyHostedCheckoutSessionSuccess(input: {
   session: Stripe.Checkout.Session;
 }): Promise<{
   activatedMemberId: string | null;
+  cleanupPulseTrialStripeSubscriptionId?: string | null;
   hostedExecutionEventId: string | null;
   welcomeEmailMemberId: string | null;
 }> {
   let activationOutcome: {
     activatedMemberId: string | null;
+    cleanupPulseTrialStripeSubscriptionId?: string | null;
     hostedExecutionEventId: string | null;
     welcomeEmailMemberId: string | null;
   } = {
@@ -95,22 +105,26 @@ async function applyHostedCheckoutSessionSuccess(input: {
     welcomeEmailMemberId: null,
   };
 
-  await input.prisma.$transaction(async (tx) => {
-    const memberCore = await readHostedMemberCoreState({
-      memberId: input.memberId,
-      prisma: tx,
-    });
-
-    if (!memberCore) {
-      throw hostedOnboardingError({
-        code: "HOSTED_MEMBER_NOT_FOUND",
-        message: "Finish signup from your latest Murph link before continuing.",
-        httpStatus: 403,
+  activationOutcome = await withHostedMemberStripeMutationLock({
+    memberId: input.memberId,
+    prisma: input.prisma,
+    run: async (tx) => {
+      const memberCore = await readHostedMemberCoreState({
+        memberId: input.memberId,
+        prisma: tx,
       });
-    }
 
-    activationOutcome = await applyStripeCheckoutCompleted(input.session, tx);
-  }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+      if (!memberCore) {
+        throw hostedOnboardingError({
+          code: "HOSTED_MEMBER_NOT_FOUND",
+          message: "Finish signup from your latest Murph link before continuing.",
+          httpStatus: 403,
+        });
+      }
+
+      return applyStripeCheckoutCompleted(input.session, tx);
+    },
+  });
 
   return activationOutcome;
 }

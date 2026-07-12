@@ -41,12 +41,12 @@ export function TrialExtensionClient() {
       </header>
 
       <TrialExtensionSection
-        description="Closes the fixed pre-July 10 trial cohort, recovers unfinished provider trials, cleans up obsolete provider trials without disturbing paid billing, then adds 7 days to eligible Pulse Trials in ordered batches of up to four. A recovered provider trial needs a fresh Preview before extension. After applying every batch, restart at Batch 1 and Preview every batch again. Retire the campaign only when every batch shows zero trials to recover, clean up, extend, or reconcile."
+        description="Closes the fixed pre-July 10 trial cohort, recovers and extends unfinished provider trials in one Apply, and cleans up obsolete provider trials without disturbing paid billing. Process the bounded provider phase and ordered batches of up to four members, then restart at Batch 1 and Preview every batch again. Retire the campaign only when every batch shows zero trials to recover, clean up, extend, or reconcile."
         scope="all"
         title="Fixed campaign cohort"
       />
       <TrialExtensionSection
-        description="Recovers an unfinished provider trial or cleans up an obsolete one when needed, then adds 7 days to one member's active Pulse Trial. A recovered trial needs a fresh Preview before extension."
+        description="Recovers and extends an unfinished provider trial in one Apply, or cleans up an obsolete one while preserving current billing."
         scope="member"
         title="One member"
       />
@@ -340,12 +340,6 @@ function TrialExtensionSection({
               scope={scope}
               summary={applied}
             />
-            {applied.providerTrialsRecovered > 0 ? (
-              <p className="border-t border-border/70 pt-4 text-sm text-muted-foreground">
-                Trial recovered. Preview {scope === "member" ? "this member" : "this batch"}
-                {" "}again to add the 7-day extension.
-              </p>
-            ) : null}
             {applied.providerTrialsCleanedUp > 0 ? (
               <p className="border-t border-border/70 pt-4 text-sm text-muted-foreground">
                 Obsolete provider trial cleaned up. Current billing was left unchanged.

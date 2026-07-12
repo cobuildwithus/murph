@@ -19,7 +19,8 @@ const mocks = vi.hoisted(() => {
 
   const state = {
     activateHostedMemberForPositiveSourceTx: vi.fn(),
-    applyStripeCheckoutCompleted: vi.fn(),
+  applyStripeCheckoutCompleted: vi.fn(),
+  cancelHostedPulseTrialCheckoutLoserSubscription: vi.fn(),
     findMemberForStripeObject: vi.fn(),
     getHostedInviteStatus: vi.fn(),
     listHostedStripeCheckoutSessionMemberIds: vi.fn(),
@@ -89,6 +90,8 @@ vi.mock("@/src/lib/hosted-onboarding/stripe-billing-lookup", async () => {
 
 vi.mock("@/src/lib/hosted-onboarding/stripe-billing-events", () => ({
   applyStripeCheckoutCompleted: mocks.applyStripeCheckoutCompleted,
+  cancelHostedPulseTrialCheckoutLoserSubscription:
+    mocks.cancelHostedPulseTrialCheckoutLoserSubscription,
 }));
 
 import { reconcileHostedBillingCheckoutSuccess } from "@/src/lib/hosted-onboarding/billing-success-service";
@@ -133,6 +136,7 @@ describe("reconcileHostedBillingCheckoutSuccess", () => {
       hostedExecutionEventId: null,
       welcomeEmailMemberId: null,
     });
+    mocks.cancelHostedPulseTrialCheckoutLoserSubscription.mockResolvedValue(undefined);
     mocks.sendHostedSignupWelcomeEmailForMemberBestEffort.mockResolvedValue(undefined);
     mocks.getHostedInviteStatus.mockResolvedValue(createStatus({
       stage: "activating",
@@ -144,6 +148,7 @@ describe("reconcileHostedBillingCheckoutSuccess", () => {
     async (status) => {
       const tx = {
         __tag: "tx",
+        $queryRaw: vi.fn(async () => []),
       };
       const prisma = {
         $transaction: vi.fn(async (callback: (innerTx: typeof tx) => Promise<unknown>) => callback(tx)),
@@ -181,9 +186,13 @@ describe("reconcileHostedBillingCheckoutSuccess", () => {
         expand: ["subscription"],
       });
       expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+      expect(tx.$queryRaw).toHaveBeenCalledOnce();
       expect(prisma.$transaction).toHaveBeenCalledWith(
         expect.any(Function),
-        HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
+        {
+          ...HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
+          timeout: 780_000,
+        },
       );
       expect(mocks.applyStripeCheckoutCompleted).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -205,6 +214,7 @@ describe("reconcileHostedBillingCheckoutSuccess", () => {
   it("does not activate access even when linked accounts are present", async () => {
     const tx = {
       __tag: "tx",
+      $queryRaw: vi.fn(async () => []),
     };
     const prisma = {
       $transaction: vi.fn(async (callback: (innerTx: typeof tx) => Promise<unknown>) => callback(tx)),
@@ -243,6 +253,7 @@ describe("reconcileHostedBillingCheckoutSuccess", () => {
   it("passes checkout welcome candidates through the durable welcome gate without waking runtime", async () => {
     const tx = {
       __tag: "tx",
+      $queryRaw: vi.fn(async () => []),
     };
     const prisma = {
       $transaction: vi.fn(async (callback: (innerTx: typeof tx) => Promise<unknown>) => callback(tx)),
@@ -272,6 +283,7 @@ describe("reconcileHostedBillingCheckoutSuccess", () => {
   it("sends the welcome and signals Temporal when Pulse Trial success reconciliation activates access", async () => {
     const tx = {
       __tag: "tx",
+      $queryRaw: vi.fn(async () => []),
     };
     const prisma = {
       $transaction: vi.fn(async (callback: (innerTx: typeof tx) => Promise<unknown>) => callback(tx)),
@@ -311,6 +323,7 @@ describe("reconcileHostedBillingCheckoutSuccess", () => {
   it("only writes the durable billing reference when the checkout session has no subscription object", async () => {
     const tx = {
       __tag: "tx",
+      $queryRaw: vi.fn(async () => []),
     };
     const prisma = {
       $transaction: vi.fn(async (callback: (innerTx: typeof tx) => Promise<unknown>) => callback(tx)),
@@ -338,7 +351,10 @@ describe("reconcileHostedBillingCheckoutSuccess", () => {
     expect(prisma.$transaction).toHaveBeenCalledTimes(1);
     expect(prisma.$transaction).toHaveBeenCalledWith(
       expect.any(Function),
-      HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
+      {
+        ...HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
+        timeout: 780_000,
+      },
     );
     expect(mocks.applyStripeCheckoutCompleted).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -387,6 +403,7 @@ describe("reconcileHostedBillingCheckoutSuccess", () => {
   it("trusts the explicit checkout member identifiers before any Stripe-object lookup", async () => {
     const tx = {
       __tag: "tx",
+      $queryRaw: vi.fn(async () => []),
     };
     const prisma = {
       $transaction: vi.fn(async (callback: (innerTx: typeof tx) => Promise<unknown>) => callback(tx)),

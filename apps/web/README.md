@@ -882,17 +882,23 @@ Current hosted billing assumptions:
 - The deployed route has an 800-second duration and processes one ordered batch
   of at most four candidates per request. The authoritative finalized cohort is
   every locally redeemed Pulse Trial with `pulseTrialRedeemedAt` before
-  `2026-07-10T00:00:00.000Z`; billing-ref creation time is used only to retain
-  pre-cutoff provider-only reservations whose local finalization may have
-  failed. Preview asks the auto-trial owner to classify those provider-only
-  subscriptions. Apply can recover an exact live pre-cutoff trial, clean up an
+  `2026-07-10T00:00:00.000Z`. Before local keyset traversal, each run performs
+  a bounded, resumable Stripe subscription phase for exact, still-trialing
+  Pulse subscriptions whose provider `trial_start` predates that cutoff. This
+  discovers both missing billing owners and billing rows written after the
+  cutoff; billing-ref creation time otherwise retains only pre-cutoff
+  provider-only reservations whose local finalization may have failed. Preview
+  asks the auto-trial owner to classify those provider-only subscriptions.
+  Apply can extend and recover an exact live pre-cutoff trial in one locked
+  terminal operation, clean up an
   obsolete exact provider trial while preserving current paid billing, or
-  record a paused trial as ended so it cannot block later members. A recovered
-  trial requires a fresh Preview before the normal extension. Trials that
+  record a paused trial as ended so it cannot block later members. Trials that
   actually start after the cutoff remain outside this one-time extension.
   The all-member UI advances with an encrypted, authenticated keyset
-  continuation in member-id order. The continuation does not expose the member
-  id, and deleting an earlier candidate cannot shift or skip later candidates.
+  continuation in Stripe subscription order during provider reconciliation,
+  then member-id order during local traversal. The continuation exposes neither
+  identifier, and deleting an earlier local candidate cannot shift or skip
+  later candidates.
   Each Preview/Apply pair stays on the same batch; the local-batch digest
   prevents a changed batch from reaching Stripe, and each
   opaque target proof is checked under that member's mutation lock before its
@@ -901,7 +907,11 @@ Current hosted billing assumptions:
   as 81 seconds. Apply gives each member lock at most 25 seconds to acquire,
   gives each candidate transaction at most 190 seconds, and stops starting
   candidates once less than 190 seconds remains in the route's 780-second work
-  budget. A lock-busy or route-runway result performs no further Stripe work.
+  budget. A committed recovery then gives its optional immediate activation
+  wake at most five seconds inside the route margin; the durable
+  `member.activated` mailbox item remains the continuation, and wake/email
+  failures cannot relabel committed campaign work. A lock-busy or
+  route-runway result performs no further Stripe work.
   The fixed idempotency key and operator-driven retry preserve safe recovery
   while keeping each page inside the route budget.
   Before the first production Apply, keep a deployment containing the

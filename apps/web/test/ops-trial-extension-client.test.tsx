@@ -54,7 +54,7 @@ const fetchMock = vi.fn<typeof fetch>();
 const CANDIDATE_SNAPSHOT_DIGEST = `pulse-candidates-v4.${"a".repeat(43)}`;
 const CANDIDATE_PREVIEW_TOKEN = `pulse-target-v3.${"b".repeat(43)}`;
 const CONTINUATION_TOKEN =
-  `pulse-cursor-v1.v1.${"a".repeat(16)}.${"b".repeat(8)}.${"c".repeat(22)}`;
+  `pulse-cursor-v2.v1.${"a".repeat(16)}.${"b".repeat(8)}.${"c".repeat(22)}`;
 let cleanupRender: (() => Promise<void>) | null = null;
 
 beforeEach(() => {
@@ -483,22 +483,22 @@ describe("TrialExtensionClient", () => {
     expect(allSection.querySelectorAll("input")).toHaveLength(0);
   });
 
-  test("a targeted provider-only recovery requires a fresh Preview before extension", async () => {
+  test("a targeted provider-only trial is recovered and extended in one Apply", async () => {
     fetchMock
       .mockResolvedValueOnce(jsonResponse(buildSummary("dry-run", {
         wouldRecoverProviderTrial: 1,
+        wouldExtend: 1,
       })))
       .mockResolvedValueOnce(jsonResponse(buildSummary("apply", {
         providerTrialsRecovered: 1,
+        stripeTrialsExtended: 1,
       })));
 
     const rendered = await renderClientComponent(createElement(TrialExtensionClient));
     cleanupRender = rendered.cleanup;
     const memberSection = getSection(rendered.container, 1);
 
-    expect(memberSection.textContent).toContain(
-      "A recovered trial needs a fresh Preview before extension.",
-    );
+    expect(memberSection.textContent).toContain("one Apply");
     await changeInput(rendered.window, getInput(memberSection, 0), "member_one");
     await clickButton(rendered.window, getButton(memberSection, "Preview"));
     expect(memberSection.textContent).toContain("Would recover trial");
@@ -510,9 +510,8 @@ describe("TrialExtensionClient", () => {
     await clickButton(rendered.window, getButton(memberSection, "Apply batch"));
 
     expect(memberSection.textContent).toContain("Provider trials recovered");
-    expect(memberSection.textContent).toContain(
-      "Trial recovered. Preview this member again to add the 7-day extension.",
-    );
+    expect(memberSection.textContent).toContain("Got 7 days");
+    expect(memberSection.textContent).not.toContain("Preview this member again");
     expect(findButton(memberSection, "Apply batch")).toBeUndefined();
     expect(memberSection.querySelectorAll("input")).toHaveLength(1);
   });

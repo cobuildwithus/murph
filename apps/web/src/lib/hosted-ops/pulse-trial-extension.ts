@@ -13,7 +13,12 @@ import {
 } from "@prisma/client";
 import type Stripe from "stripe";
 
-import { HOSTED_PULSE_TRIAL_OFFER } from "../hosted-onboarding/billing-plans";
+import {
+  HOSTED_PULSE_TRIAL_DAYS,
+  HOSTED_PULSE_TRIAL_OFFER,
+  HOSTED_PULSE_TRIAL_POLICY_VERSION,
+  HOSTED_PULSE_TRIAL_USAGE_LIMIT_USD_MICROS,
+} from "../hosted-onboarding/billing-plans";
 import {
   applyHostedAutoPulseTrialCampaignDispositionTx,
   inspectHostedAutoPulseTrialCampaignDisposition,
@@ -49,11 +54,12 @@ const STRIPE_REQUEST_TIMEOUT_MS = 80_000;
 const HOSTED_OPS_ROUTE_WORK_BUDGET_MS = 780_000;
 const HOSTED_OPS_MEMBER_LOCK_ACQUISITION_TIMEOUT_MS = 25_000;
 const HOSTED_OPS_CANDIDATE_TRANSACTION_TIMEOUT_MS = 190_000;
+const HOSTED_OPS_POST_COMMIT_EFFECT_TIMEOUT_MS = 5_000;
 const STRIPE_UPDATE_MINIMUM_RUNWAY_SECONDS =
   Math.ceil(STRIPE_REQUEST_TIMEOUT_MS / 1000) + 1;
-const HOSTED_PULSE_TRIAL_EXTENSION_CURSOR_PREFIX = "pulse-cursor-v1";
+const HOSTED_PULSE_TRIAL_EXTENSION_CURSOR_PREFIX = "pulse-cursor-v2";
 const HOSTED_PULSE_TRIAL_EXTENSION_CURSOR_AAD =
-  "pulse-beta-extension-2026-07:member-id-keyset-v1";
+  "pulse-beta-extension-2026-07:provider-and-member-keyset-v2";
 
 export const HOSTED_PULSE_TRIAL_EXTENSION_CAMPAIGN =
   "pulse-beta-extension-2026-07" as const;
@@ -245,29 +251,20 @@ type HostedPulseTrialExtensionPreviewAction =
       stripeSubscriptionId: string;
     }
   | {
-      kind: "recover-provider-trial";
-      stripeSubscriptionId: string;
-    }
-  | {
       kind: "skipped";
       reason: HostedPulseTrialExtensionSkipReason;
     };
-
-type HostedPulseTrialProviderDispositionAction = Extract<
-  HostedPulseTrialExtensionPreviewAction,
-  {
-    kind: "cleanup-provider-trial" | "recover-provider-trial" | "skipped";
-  }
->;
 
 type HostedPulseTrialLockedApplyResult =
   | {
       kind: "already-marked";
       stripeTrialEnd: number;
+      subscription: HostedPulseTrialExtensionStripeSubscription;
     }
   | {
       kind: "extended";
       stripeTrialEnd: number;
+      subscription: HostedPulseTrialExtensionStripeSubscription;
     }
   | {
       kind: "failure";
@@ -303,7 +300,21 @@ export class HostedPulseTrialExtensionContinuationError extends Error {
   }
 }
 
-function encryptHostedPulseTrialExtensionContinuationToken(memberId: string): string {
+export function isHostedPulseTrialExtensionContinuationTokenShape(
+  value: unknown,
+): value is string {
+  return typeof value === "string" &&
+    /^pulse-cursor-v2\.v[0-9]+\.[A-Za-z0-9_-]{16}\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]{22}$/u
+      .test(value);
+}
+
+type HostedPulseTrialExtensionContinuation =
+  | { afterMemberId: string | null; phase: "members" }
+  | { afterSubscriptionId: string | null; phase: "provider" };
+
+function encryptHostedPulseTrialExtensionContinuationToken(
+  continuation: HostedPulseTrialExtensionContinuation,
+): string {
   const keyring = readHostedContactPrivacyKeyring(process.env);
   const version = keyring.currentVersion;
   const sourceKey = keyring.keysByVersion[version];
@@ -318,7 +329,7 @@ function encryptHostedPulseTrialExtensionContinuationToken(memberId: string): st
   );
   cipher.setAAD(Buffer.from(HOSTED_PULSE_TRIAL_EXTENSION_CURSOR_AAD, "utf8"));
   const ciphertext = Buffer.concat([
-    cipher.update(memberId, "utf8"),
+    cipher.update(JSON.stringify(continuation), "utf8"),
     cipher.final(),
   ]);
   return [
@@ -330,7 +341,9 @@ function encryptHostedPulseTrialExtensionContinuationToken(memberId: string): st
   ].join(".");
 }
 
-function decryptHostedPulseTrialExtensionContinuationToken(token: string): string {
+function decryptHostedPulseTrialExtensionContinuationToken(
+  token: string,
+): HostedPulseTrialExtensionContinuation {
   const parts = token.split(".");
   if (
     parts.length !== 5 ||
@@ -360,14 +373,46 @@ function decryptHostedPulseTrialExtensionContinuationToken(token: string): strin
     );
     decipher.setAAD(Buffer.from(HOSTED_PULSE_TRIAL_EXTENSION_CURSOR_AAD, "utf8"));
     decipher.setAuthTag(authTag);
-    const memberId = Buffer.concat([
+    const plaintext = Buffer.concat([
       decipher.update(ciphertext),
       decipher.final(),
     ]).toString("utf8");
-    if (!memberId) {
+    if (!plaintext) {
       throw new HostedPulseTrialExtensionContinuationError();
     }
-    return memberId;
+    if (!plaintext.startsWith("{")) {
+      throw new HostedPulseTrialExtensionContinuationError();
+    }
+    const parsed: unknown = JSON.parse(plaintext);
+    if (
+      typeof parsed === "object" &&
+      parsed !== null &&
+      Reflect.get(parsed, "phase") === "members" &&
+      (
+        Reflect.get(parsed, "afterMemberId") === null ||
+        typeof Reflect.get(parsed, "afterMemberId") === "string"
+      )
+    ) {
+      return {
+        afterMemberId: Reflect.get(parsed, "afterMemberId") as string | null,
+        phase: "members",
+      };
+    }
+    if (
+      typeof parsed === "object" &&
+      parsed !== null &&
+      Reflect.get(parsed, "phase") === "provider" &&
+      (
+        Reflect.get(parsed, "afterSubscriptionId") === null ||
+        typeof Reflect.get(parsed, "afterSubscriptionId") === "string"
+      )
+    ) {
+      return {
+        afterSubscriptionId: Reflect.get(parsed, "afterSubscriptionId") as string | null,
+        phase: "provider",
+      };
+    }
+    throw new HostedPulseTrialExtensionContinuationError();
   } catch (error) {
     if (error instanceof HostedPulseTrialExtensionContinuationError) {
       throw error;
@@ -474,6 +519,8 @@ export async function extendHostedPulseTrials(
               candidate,
               candidateSource: input.candidateSource,
               now: input.now ?? new Date(),
+              priceId: input.priceId,
+              stripe: input.stripe,
               summary,
             }),
           );
@@ -493,6 +540,8 @@ export async function extendHostedPulseTrials(
           candidateSource: input.candidateSource,
           expectedPreviewToken: input.expectedCandidatePreviewTokens[candidateIndex],
           now: input.now ?? new Date(),
+          priceId: input.priceId,
+          stripe: input.stripe,
           summary,
         });
         if (providerRecoveryResult === "preview-stale") {
@@ -787,38 +836,54 @@ export function createPrismaHostedPulseTrialExtensionCandidateSource(
   const where = buildPrismaHostedPulseTrialExtensionCandidateWhere(options.memberId);
   return {
     async listCandidates(input) {
-      const afterMemberId = input.continuationToken
+      const continuation = input.continuationToken
         ? decryptHostedPulseTrialExtensionContinuationToken(input.continuationToken)
-        : null;
-      const records = await prisma.hostedMemberBillingRef.findMany({
-        include: {
-          member: {
-            select: {
-              billingStatus: true,
-              suspendedAt: true,
-            },
-          },
-        },
-        orderBy: { memberId: "asc" },
-        take: input.limit + 1,
-        where: {
-          ...where,
-          ...(afterMemberId ? { memberId: { gt: afterMemberId } } : {}),
-        },
+        : options.campaignRecovery
+          ? { afterSubscriptionId: null, phase: "provider" } as const
+          : { afterMemberId: null, phase: "members" } as const;
+      if (continuation.phase === "provider") {
+        if (!options.campaignRecovery) {
+          throw new HostedPulseTrialExtensionContinuationError();
+        }
+        const providerPage = await listHostedPulseTrialProviderCandidates({
+          afterSubscriptionId: continuation.afterSubscriptionId,
+          limit: input.limit,
+          memberId: options.memberId,
+          priceId: options.campaignRecovery.priceId,
+          prisma,
+          stripe: options.campaignRecovery.stripe,
+        });
+        if (providerPage.hasMore) {
+          return {
+            candidates: providerPage.candidates,
+            nextContinuationToken: encryptHostedPulseTrialExtensionContinuationToken({
+              afterSubscriptionId: providerPage.lastSubscriptionId,
+              phase: "provider",
+            }),
+          };
+        }
+        if (providerPage.candidates.length > 0) {
+          return {
+            candidates: providerPage.candidates,
+            nextContinuationToken: encryptHostedPulseTrialExtensionContinuationToken({
+              afterMemberId: null,
+              phase: "members",
+            }),
+          };
+        }
+        return listHostedPulseTrialMemberCandidates({
+          afterMemberId: null,
+          limit: input.limit,
+          prisma,
+          where,
+        });
+      }
+      return listHostedPulseTrialMemberCandidates({
+        afterMemberId: continuation.afterMemberId,
+        limit: input.limit,
+        prisma,
+        where,
       });
-
-      const pageRecords = records.slice(0, input.limit);
-      const candidates = await Promise.all(pageRecords.map((record) =>
-        projectHostedPulseTrialExtensionCandidate(record, prisma)
-      ));
-      const lastRecord = pageRecords.at(-1);
-      return {
-        candidates,
-        nextContinuationToken:
-          records.length > input.limit && lastRecord
-            ? encryptHostedPulseTrialExtensionContinuationToken(lastRecord.memberId)
-            : null,
-      };
     },
     async inspectProviderOnlyTrial(input) {
       if (!options.campaignRecovery) {
@@ -871,6 +936,13 @@ export function createPrismaHostedPulseTrialExtensionCandidateSource(
                 throw new Error("Pulse Trial provider recovery member no longer exists.");
               }
               const applied = await applyHostedAutoPulseTrialCampaignDispositionTx({
+                campaignPolicy: {
+                  minimumTrialRunwaySeconds: STRIPE_UPDATE_MINIMUM_RUNWAY_SECONDS,
+                  priceId: options.campaignRecovery.priceId,
+                  trialStartedBefore: new Date(
+                    HOSTED_PULSE_TRIAL_EXTENSION_COHORT_END_EXCLUSIVE_ISO,
+                  ),
+                },
                 currentMember,
                 disposition,
                 now,
@@ -902,10 +974,196 @@ export function createPrismaHostedPulseTrialExtensionCandidateSource(
         await runHostedAutoPulseTrialCampaignPostCommitEffects({
           effects: postCommitEffects,
           prisma,
+          timeoutMs: HOSTED_OPS_POST_COMMIT_EFFECT_TIMEOUT_MS,
         });
       }
       return result;
     },
+  };
+}
+
+async function listHostedPulseTrialMemberCandidates(input: {
+  afterMemberId: string | null;
+  limit: number;
+  prisma: PrismaClient;
+  where: Prisma.HostedMemberBillingRefWhereInput;
+}): Promise<{
+  candidates: readonly HostedPulseTrialExtensionCandidate[];
+  nextContinuationToken: string | null;
+}> {
+  const records = await input.prisma.hostedMemberBillingRef.findMany({
+    include: {
+      member: {
+        select: {
+          billingStatus: true,
+          suspendedAt: true,
+        },
+      },
+    },
+    orderBy: { memberId: "asc" },
+    take: input.limit + 1,
+    where: {
+      ...input.where,
+      ...(input.afterMemberId ? { memberId: { gt: input.afterMemberId } } : {}),
+    },
+  });
+  const pageRecords = records.slice(0, input.limit);
+  const candidates = await Promise.all(pageRecords.map((record) =>
+    projectHostedPulseTrialExtensionCandidate(record, input.prisma)
+  ));
+  const lastRecord = pageRecords.at(-1);
+  return {
+    candidates,
+    nextContinuationToken:
+      records.length > input.limit && lastRecord
+        ? encryptHostedPulseTrialExtensionContinuationToken({
+            afterMemberId: lastRecord.memberId,
+            phase: "members",
+          })
+        : null,
+  };
+}
+
+async function listHostedPulseTrialProviderCandidates(input: {
+  afterSubscriptionId: string | null;
+  limit: number;
+  memberId?: string;
+  priceId: string;
+  prisma: PrismaClient;
+  stripe: Stripe;
+}): Promise<{
+  candidates: readonly HostedPulseTrialExtensionCandidate[];
+  hasMore: boolean;
+  lastSubscriptionId: string;
+}> {
+  const page = await input.stripe.subscriptions.list({
+    limit: input.limit,
+    ...(input.afterSubscriptionId
+      ? { starting_after: input.afterSubscriptionId }
+      : {}),
+    status: "all",
+  }, buildHostedPulseTrialExtensionStripeRequestOptions());
+  const lastSubscription = page.data.at(-1);
+  if (!lastSubscription && page.has_more) {
+    throw new Error("Stripe returned an incomplete Pulse Trial provider page.");
+  }
+  const projected = await Promise.all(page.data.map(async (subscription) => {
+    if (!isHistoricalHostedPulseTrialProviderSubscription({
+      memberId: input.memberId,
+      priceId: input.priceId,
+      subscription,
+    })) {
+      return null;
+    }
+    return projectHistoricalHostedPulseTrialProviderCandidate({
+      prisma: input.prisma,
+      subscription,
+    });
+  }));
+  return {
+    candidates: projected.filter(
+      (candidate): candidate is HostedPulseTrialExtensionCandidate => candidate !== null,
+    ),
+    hasMore: page.has_more,
+    lastSubscriptionId: lastSubscription?.id ?? input.afterSubscriptionId ?? "complete",
+  };
+}
+
+function isHistoricalHostedPulseTrialProviderSubscription(input: {
+  memberId?: string;
+  priceId: string;
+  subscription: Stripe.Subscription;
+}): boolean {
+  const metadata = input.subscription.metadata;
+  const trialStart = input.subscription.trial_start;
+  return input.subscription.status === "trialing" &&
+    typeof metadata.memberId === "string" &&
+    (!input.memberId || metadata.memberId === input.memberId) &&
+    metadata.billingPlanCode === "launch_monthly" &&
+    metadata.checkoutOffer === HOSTED_PULSE_TRIAL_OFFER &&
+    metadata.trialDurationDays === HOSTED_PULSE_TRIAL_DAYS.toString() &&
+    metadata.trialPolicyVersion === HOSTED_PULSE_TRIAL_POLICY_VERSION &&
+    metadata.trialUsageLimitUsdMicros ===
+      HOSTED_PULSE_TRIAL_USAGE_LIMIT_USD_MICROS.toString() &&
+    Number.isSafeInteger(trialStart) &&
+    trialStart !== null &&
+    trialStart < Date.parse(HOSTED_PULSE_TRIAL_EXTENSION_COHORT_END_EXCLUSIVE_ISO) / 1000 &&
+    isHostedPulseTrialExtensionSubscriptionPriceEligible({
+      priceId: input.priceId,
+      subscription: input.subscription,
+    });
+}
+
+async function projectHistoricalHostedPulseTrialProviderCandidate(input: {
+  prisma: PrismaClient;
+  subscription: Stripe.Subscription;
+}): Promise<HostedPulseTrialExtensionCandidate | null> {
+  const memberId = input.subscription.metadata.memberId;
+  const stripeCustomerId = coerceStripeCustomerId(input.subscription.customer);
+  const trialStart = input.subscription.trial_start;
+  if (!memberId || !stripeCustomerId || trialStart === null) {
+    return null;
+  }
+  const record = await input.prisma.hostedMemberBillingRef.findUnique({
+    include: {
+      member: {
+        select: {
+          billingStatus: true,
+          suspendedAt: true,
+        },
+      },
+    },
+    where: { memberId },
+  });
+  const cutoff = new Date(HOSTED_PULSE_TRIAL_EXTENSION_COHORT_END_EXCLUSIVE_ISO);
+  const trialStartedAt = stripeUnixSecondsToDate(trialStart);
+  if (record) {
+    const candidate = await projectHostedPulseTrialExtensionCandidate(record, input.prisma);
+    if (
+      candidate.stripeCustomerId &&
+      candidate.stripeCustomerId !== stripeCustomerId
+    ) {
+      throw new Error(
+        "Pulse Trial provider customer conflicts with the durable billing owner.",
+      );
+    }
+    if (
+      (record.pulseTrialRedeemedAt && record.pulseTrialRedeemedAt < cutoff) ||
+      (!record.pulseTrialRedeemedAt && record.createdAt < cutoff)
+    ) {
+      return null;
+    }
+    return {
+      ...candidate,
+      pulseTrialRedeemedAt: record.pulseTrialRedeemedAt ? trialStartedAt : null,
+      stripeCustomerId,
+      ...(record.pulseTrialRedeemedAt
+        ? { stripeSubscriptionId: input.subscription.id }
+        : {}),
+    };
+  }
+  const member = await readHostedMemberBillingSnapshot({
+    memberId,
+    prisma: input.prisma,
+  });
+  if (!member) {
+    return null;
+  }
+  return {
+    billingRefCreatedAt: trialStartedAt,
+    currentBillingPhase: null,
+    currentBillingPlanCode: null,
+    currentCheckoutOffer: null,
+    currentPeriodEnd: null,
+    currentTrialEndsAt: null,
+    currentTrialStartedAt: null,
+    lastStripeEventCreatedAt: null,
+    memberBillingStatus: member.core.billingStatus,
+    memberId,
+    memberSuspendedAt: member.core.suspendedAt,
+    pulseTrialRedeemedAt: null,
+    stripeCustomerId,
+    stripeSubscriptionId: input.subscription.id,
   };
 }
 
@@ -1132,6 +1390,7 @@ async function applyHostedPulseTrialExtensionUnderLock(input: {
     return {
       kind: "already-marked",
       stripeTrialEnd: action.stripeTrialEnd,
+      subscription,
     };
   }
   if (action.kind !== "extend") {
@@ -1168,6 +1427,7 @@ async function applyHostedPulseTrialExtensionUnderLock(input: {
   return {
     kind: "extended",
     stripeTrialEnd: action.targetTrialEnd,
+    subscription: updatedSubscription,
   };
 }
 
@@ -1253,29 +1513,46 @@ async function previewHostedPulseTrialProviderRecoveryCandidate(input: {
   candidate: HostedPulseTrialExtensionCandidate;
   candidateSource: HostedPulseTrialExtensionCandidateSource;
   now?: Date;
+  priceId: string;
+  stripe: HostedPulseTrialExtensionStripeClient;
   summary: HostedPulseTrialExtensionSummary;
 }): Promise<string | null> {
   let disposition: HostedAutoPulseTrialCampaignDisposition;
+  const now = input.now ?? new Date();
   try {
     disposition = await input.candidateSource.inspectProviderOnlyTrial({
       candidate: input.candidate,
-      now: input.now ?? new Date(),
+      now,
     });
   } catch {
     input.summary.failures.provider_recovery_lookup_failed += 1;
     return null;
   }
-  const action = buildHostedPulseTrialProviderDispositionAction(disposition);
-  if (action.kind === "recover-provider-trial") {
+  const proof = classifyHostedPulseTrialProviderDisposition({
+    candidate: input.candidate,
+    disposition,
+    now,
+    priceId: input.priceId,
+  });
+  if (disposition.kind === "recoverable" && proof.action.kind === "extend") {
     input.summary.wouldRecoverProviderTrial += 1;
-  } else if (action.kind === "cleanup-provider-trial") {
+    input.summary.wouldExtend += 1;
+  } else if (
+    disposition.kind === "recoverable" &&
+    proof.action.kind === "already-marked"
+  ) {
+    input.summary.wouldRecoverProviderTrial += 1;
+    input.summary.wouldReconcile += 1;
+  } else if (proof.action.kind === "cleanup-provider-trial") {
     input.summary.wouldCleanupProviderTrial += 1;
+  } else if (proof.action.kind === "skipped") {
+    input.summary.skipped[proof.action.reason] += 1;
   } else {
-    input.summary.skipped[action.reason] += 1;
+    throw new Error("Provider recovery produced an unsupported Preview action.");
   }
   return buildHostedPulseTrialExtensionCandidatePreviewToken({
-    action,
-    candidate: input.candidate,
+    action: proof.action,
+    candidate: proof.candidate,
     subscription: disposition.subscription,
   });
 }
@@ -1285,6 +1562,8 @@ async function applyHostedPulseTrialProviderRecoveryCandidate(input: {
   candidateSource: HostedPulseTrialExtensionCandidateSource;
   expectedPreviewToken: string;
   now: Date;
+  priceId: string;
+  stripe: HostedPulseTrialExtensionStripeClient;
   summary: HostedPulseTrialExtensionSummary;
 }): Promise<"complete" | "preview-stale"> {
   let inspectionCompleted = false;
@@ -1315,24 +1594,60 @@ async function applyHostedPulseTrialProviderRecoveryCandidate(input: {
           now: input.now,
         });
         inspectionCompleted = true;
-        const action = buildHostedPulseTrialProviderDispositionAction(disposition);
-        const lockedToken = buildHostedPulseTrialExtensionCandidatePreviewToken({
-          action,
+        const proof = classifyHostedPulseTrialProviderDisposition({
           candidate: locked.candidate,
+          disposition,
+          now: input.now,
+          priceId: input.priceId,
+        });
+        const lockedToken = buildHostedPulseTrialExtensionCandidatePreviewToken({
+          action: proof.action,
+          candidate: proof.candidate,
           subscription: disposition.subscription,
         });
         if (lockedToken !== input.expectedPreviewToken) {
           return { kind: "preview-stale" } as const;
         }
-        if (action.kind === "skipped") {
-          return { kind: "skipped", reason: action.reason } as const;
+        if (proof.action.kind === "skipped") {
+          return { kind: "skipped", reason: proof.action.reason } as const;
         }
         if (disposition.kind === "not-applicable") {
           throw new Error("Provider disposition action did not match its source state.");
         }
 
+        if (disposition.kind === "recoverable") {
+          const providerResult = await applyHostedPulseTrialExtensionUnderLock({
+            candidate: proof.candidate,
+            expectedPreviewToken: input.expectedPreviewToken,
+            now: input.now,
+            priceId: input.priceId,
+            stripe: input.stripe,
+          });
+          if (
+            providerResult.kind !== "already-marked" &&
+            providerResult.kind !== "extended"
+          ) {
+            return providerResult;
+          }
+          const finalizedSubscription = {
+            ...disposition.subscription,
+            current_period_end: providerResult.stripeTrialEnd,
+            metadata: providerResult.subscription.metadata,
+            trial_end: providerResult.stripeTrialEnd,
+          };
+          const kind = await locked.applyProviderOnlyDisposition({
+            ...disposition,
+            subscription: finalizedSubscription,
+          }, input.now);
+          return {
+            kind,
+            providerExtended: providerResult.kind === "extended",
+          } as const;
+        }
+
         return {
           kind: await locked.applyProviderOnlyDisposition(disposition, input.now),
+          providerExtended: false,
         } as const;
       },
       transactionTimeoutMs: HOSTED_OPS_CANDIDATE_TRANSACTION_TIMEOUT_MS,
@@ -1340,10 +1655,15 @@ async function applyHostedPulseTrialProviderRecoveryCandidate(input: {
     if (result.kind === "preview-stale") {
       return "preview-stale";
     }
-    if (result.kind === "skipped") {
+    if (result.kind === "failure") {
+      input.summary.failures[result.reason] += 1;
+    } else if (result.kind === "skipped") {
       input.summary.skipped[result.reason] += 1;
     } else if (result.kind === "recovered") {
       input.summary.providerTrialsRecovered += 1;
+      if (result.providerExtended) {
+        input.summary.stripeTrialsExtended += 1;
+      }
     } else {
       input.summary.providerTrialsCleanedUp += 1;
     }
@@ -1361,26 +1681,53 @@ async function applyHostedPulseTrialProviderRecoveryCandidate(input: {
   return "complete";
 }
 
-function buildHostedPulseTrialProviderDispositionAction(
-  disposition: HostedAutoPulseTrialCampaignDisposition,
-): HostedPulseTrialProviderDispositionAction {
+function classifyHostedPulseTrialProviderDisposition(input: {
+  candidate: HostedPulseTrialExtensionCandidate;
+  disposition: HostedAutoPulseTrialCampaignDisposition;
+  now: Date;
+  priceId: string;
+}): {
+  action: HostedPulseTrialExtensionPreviewAction;
+  candidate: HostedPulseTrialExtensionCandidate;
+} {
+  const disposition = input.disposition;
   if (disposition.kind === "recoverable") {
-    return {
-      kind: "recover-provider-trial",
+    const candidate = {
+      ...input.candidate,
       stripeSubscriptionId: disposition.subscription.id,
+    };
+    const nowUnixSeconds = resolveHostedPulseTrialExtensionNowUnixSeconds(input.now);
+    return {
+      action: classifyHostedPulseTrialExtensionPreviewAction({
+        candidate,
+        classification: classifyHostedPulseTrialExtensionSubscription({
+          candidate,
+          nowUnixSeconds,
+          priceId: input.priceId,
+          subscription: disposition.subscription,
+        }),
+        nowUnixSeconds,
+      }),
+      candidate,
     };
   }
   if (disposition.kind === "cleanup-obsolete") {
     return {
-      kind: "cleanup-provider-trial",
-      stripeSubscriptionId: disposition.subscription.id,
+      action: {
+        kind: "cleanup-provider-trial",
+        stripeSubscriptionId: disposition.subscription.id,
+      },
+      candidate: input.candidate,
     };
   }
   return {
-    kind: "skipped",
-    reason: disposition.reason === "provider-trial-ended"
-      ? "provider_trial_ended"
-      : "provider_recovery_not_found",
+    action: {
+      kind: "skipped",
+      reason: disposition.reason === "provider-trial-ended"
+        ? "provider_trial_ended"
+        : "provider_recovery_not_found",
+    },
+    candidate: input.candidate,
   };
 }
 
@@ -1398,7 +1745,7 @@ async function readLockedPrismaHostedPulseTrialExtensionCandidate(input: {
     return null;
   }
 
-  const record = await input.tx.hostedMemberBillingRef.findFirst({
+  let record = await input.tx.hostedMemberBillingRef.findFirst({
     include: {
       member: {
         select: {
@@ -1416,8 +1763,45 @@ async function readLockedPrismaHostedPulseTrialExtensionCandidate(input: {
           : null,
     },
   });
+  if (!record && input.expectedCandidate.pulseTrialRedeemedAt === null) {
+    record = await input.tx.hostedMemberBillingRef.findFirst({
+      include: {
+        member: {
+          select: {
+            billingStatus: true,
+            suspendedAt: true,
+          },
+        },
+      },
+      where: { memberId: input.expectedCandidate.memberId },
+    });
+  }
 
   if (!record) {
+    if (input.expectedCandidate.pulseTrialRedeemedAt !== null) {
+      return null;
+    }
+    const member = await input.tx.hostedMember.findUnique({
+      select: {
+        billingStatus: true,
+        suspendedAt: true,
+      },
+      where: { id: input.expectedCandidate.memberId },
+    });
+    return member
+      ? {
+          ...input.expectedCandidate,
+          memberBillingStatus: member.billingStatus,
+          memberSuspendedAt: member.suspendedAt,
+        }
+      : null;
+  }
+
+  if (
+    input.expectedCandidate.pulseTrialRedeemedAt === null &&
+    record.stripeCustomerLookupKey &&
+    !stripeCustomerLookupKeys.includes(record.stripeCustomerLookupKey)
+  ) {
     return null;
   }
 
@@ -1433,7 +1817,13 @@ async function readLockedPrismaHostedPulseTrialExtensionCandidate(input: {
     memberBillingStatus: record.member.billingStatus,
     memberId: record.memberId,
     memberSuspendedAt: record.member.suspendedAt,
-    pulseTrialRedeemedAt: record.pulseTrialRedeemedAt,
+    pulseTrialRedeemedAt:
+      input.expectedCandidate.pulseTrialRedeemedAt &&
+        record.pulseTrialRedeemedAt &&
+        record.pulseTrialRedeemedAt >=
+          new Date(HOSTED_PULSE_TRIAL_EXTENSION_COHORT_END_EXCLUSIVE_ISO)
+        ? input.expectedCandidate.pulseTrialRedeemedAt
+        : record.pulseTrialRedeemedAt,
     stripeCustomerId: input.expectedCandidate.stripeCustomerId,
     stripeSubscriptionId: input.expectedCandidate.stripeSubscriptionId,
   };

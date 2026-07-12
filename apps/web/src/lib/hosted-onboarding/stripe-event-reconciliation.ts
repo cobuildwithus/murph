@@ -18,12 +18,14 @@ import {
   applyStripeInvoicePaymentFailed,
   applyStripeRefundCreated,
   applyStripeSubscriptionUpdated,
+  cancelHostedPulseTrialCheckoutLoserSubscription,
   type HostedStripeActivatedMemberOutcome,
   type HostedSubscriptionCancellationEmailCandidate,
 } from "./stripe-billing-events";
 import {
   findMemberForStripeInvoice,
   findMemberForStripeSubscription,
+  listHostedStripeCheckoutSessionMemberIds,
   resolveStripeCustomerContext,
 } from "./stripe-billing-lookup";
 import {
@@ -238,6 +240,7 @@ async function processHostedStripeEventRecord(
 ): Promise<{
   activatedMemberId: string | null;
   activatedMembers: HostedStripeActivatedMemberOutcome[];
+  cleanupPulseTrialStripeSubscriptionId: string | null;
   hostedExecutionEventId: string | null;
   subscriptionCancellationEmail: HostedSubscriptionCancellationEmailCandidate | null;
   welcomeEmailMemberId: string | null;
@@ -377,6 +380,18 @@ async function resolveHostedStripeEventDirectBillingMemberId(
   event: Stripe.Event,
   prisma: PrismaClient,
 ): Promise<string | null> {
+  if (
+    event.type === "checkout.session.completed" &&
+    (event.data.object as Stripe.Checkout.Session).metadata?.checkoutOffer ===
+      HOSTED_PULSE_TRIAL_OFFER
+  ) {
+    const memberIds = await listHostedStripeCheckoutSessionMemberIds({
+      prisma,
+      session: event.data.object as Stripe.Checkout.Session,
+    });
+    return memberIds.length === 1 ? memberIds[0] ?? null : null;
+  }
+
   if (isHostedStripeSubscriptionBillingEvent(event.type)) {
     const subscription = event.data.object as Stripe.Subscription;
     const member = await findMemberForStripeSubscription({
@@ -550,12 +565,16 @@ async function processClaimedHostedStripeEvent(
       stripeEvent,
       prisma,
     );
+    const checkoutProcessingContext = stripeEvent.type === "checkout.session.completed"
+      ? await prepareHostedStripeEventProcessingContext(stripeEvent)
+      : null;
     const result = directBillingMemberId
       ? await withHostedMemberStripeMutationLock({
           memberId: directBillingMemberId,
           prisma,
           run: async (transaction) => {
-            const processingContext = await prepareHostedStripeEventProcessingContext(stripeEvent);
+            const processingContext = checkoutProcessingContext ??
+              await prepareHostedStripeEventProcessingContext(stripeEvent);
             return processHostedStripeEventRecord(
               stripeEvent,
               processingContext,
@@ -563,7 +582,16 @@ async function processClaimedHostedStripeEvent(
             );
           },
         })
-      : await processHostedStripeEventWithoutDirectMemberLock(stripeEvent, prisma);
+      : await processHostedStripeEventWithoutDirectMemberLock(
+          stripeEvent,
+          prisma,
+          checkoutProcessingContext,
+        );
+    if (result.cleanupPulseTrialStripeSubscriptionId) {
+      await cancelHostedPulseTrialCheckoutLoserSubscription({
+        subscriptionId: result.cleanupPulseTrialStripeSubscriptionId,
+      });
+    }
     if (result.welcomeEmailMemberId) {
       await sendHostedSignupWelcomeEmailForMemberBestEffort({
         memberId: result.welcomeEmailMemberId,
@@ -672,8 +700,10 @@ async function processClaimedHostedStripeEvent(
 async function processHostedStripeEventWithoutDirectMemberLock(
   stripeEvent: Stripe.Event,
   prisma: PrismaClient,
+  preparedContext: HostedStripeEventProcessingContext | null = null,
 ): Promise<Awaited<ReturnType<typeof processHostedStripeEventRecord>>> {
-  const processingContext = await prepareHostedStripeEventProcessingContext(stripeEvent);
+  const processingContext = preparedContext ??
+    await prepareHostedStripeEventProcessingContext(stripeEvent);
   return prisma.$transaction(
     (transaction) => processHostedStripeEventRecord(
       stripeEvent,
@@ -833,12 +863,14 @@ function mapHostedStripeActivationOutcome(
   outcome: {
     activatedMemberId: string | null;
     activatedMembers?: HostedStripeActivatedMemberOutcome[];
+    cleanupPulseTrialStripeSubscriptionId?: string | null;
     hostedExecutionEventId: string | null;
     welcomeEmailMemberId?: string | null;
   },
 ): {
   activatedMemberId: string | null;
   activatedMembers: HostedStripeActivatedMemberOutcome[];
+  cleanupPulseTrialStripeSubscriptionId: string | null;
   hostedExecutionEventId: string | null;
   subscriptionCancellationEmail: HostedSubscriptionCancellationEmailCandidate | null;
   welcomeEmailMemberId: string | null;
@@ -846,6 +878,8 @@ function mapHostedStripeActivationOutcome(
   return {
     activatedMemberId: outcome.activatedMemberId,
     activatedMembers: outcome.activatedMembers ?? [],
+    cleanupPulseTrialStripeSubscriptionId:
+      outcome.cleanupPulseTrialStripeSubscriptionId ?? null,
     hostedExecutionEventId: outcome.hostedExecutionEventId,
     subscriptionCancellationEmail: null,
     welcomeEmailMemberId: outcome.welcomeEmailMemberId ?? null,
@@ -863,6 +897,7 @@ function mapHostedStripeSubscriptionUpdateOutcome(
 ): {
   activatedMemberId: string | null;
   activatedMembers: HostedStripeActivatedMemberOutcome[];
+  cleanupPulseTrialStripeSubscriptionId: string | null;
   hostedExecutionEventId: string | null;
   subscriptionCancellationEmail: HostedSubscriptionCancellationEmailCandidate | null;
   welcomeEmailMemberId: string | null;
@@ -870,6 +905,7 @@ function mapHostedStripeSubscriptionUpdateOutcome(
   return {
     activatedMemberId: outcome?.activatedMemberId ?? null,
     activatedMembers: outcome?.activatedMembers ?? [],
+    cleanupPulseTrialStripeSubscriptionId: null,
     hostedExecutionEventId: outcome?.hostedExecutionEventId ?? null,
     subscriptionCancellationEmail:
       outcome?.subscriptionCancellationEmail ?? null,
@@ -880,6 +916,7 @@ function mapHostedStripeSubscriptionUpdateOutcome(
 function buildEmptyHostedStripeEventProcessingResult(): {
   activatedMemberId: string | null;
   activatedMembers: HostedStripeActivatedMemberOutcome[];
+  cleanupPulseTrialStripeSubscriptionId: string | null;
   hostedExecutionEventId: string | null;
   subscriptionCancellationEmail: HostedSubscriptionCancellationEmailCandidate | null;
   welcomeEmailMemberId: string | null;
@@ -887,6 +924,7 @@ function buildEmptyHostedStripeEventProcessingResult(): {
   return {
     activatedMemberId: null,
     activatedMembers: [],
+    cleanupPulseTrialStripeSubscriptionId: null,
     hostedExecutionEventId: null,
     subscriptionCancellationEmail: null,
     welcomeEmailMemberId: null,

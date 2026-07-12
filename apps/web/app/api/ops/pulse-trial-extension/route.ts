@@ -4,6 +4,7 @@ import {
   HOSTED_PULSE_TRIAL_EXTENSION_CAMPAIGN,
   HostedPulseTrialExtensionContinuationError,
   HostedPulseTrialExtensionPreviewMismatchError,
+  isHostedPulseTrialExtensionContinuationTokenShape,
   type HostedPulseTrialExtensionMode,
   type HostedPulseTrialExtensionSummary,
 } from "@/src/lib/hosted-ops/pulse-trial-extension";
@@ -185,8 +186,7 @@ function readContinuationToken(
   if (
     !memberId &&
     token &&
-    /^pulse-cursor-v1\.v[0-9]+\.[A-Za-z0-9_-]{16}\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]{22}$/u
-      .test(token)
+    isHostedPulseTrialExtensionContinuationTokenShape(token)
   ) {
     return token;
   }
