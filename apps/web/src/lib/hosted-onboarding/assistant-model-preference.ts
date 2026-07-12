@@ -168,15 +168,17 @@ function resolveHostedMemberAssistantModel(
     };
   }
 
+  const isThreadContainerMember = member.threadContainer !== null;
   const solAvailable = isHostedMemberSolModelEligible({
     billingStatus: member.billingStatus,
     currentBillingPhase: member.billingRef?.currentBillingPhase ?? null,
     currentBillingPlanCode: member.billingRef?.currentBillingPlanCode ?? null,
-    isThreadContainerMember: member.threadContainer !== null,
+    isThreadContainerMember,
     suspendedAt: member.suspendedAt,
   });
-  const usesSol = solAvailable
-    && member.assistantModelPreference === HOSTED_ASSISTANT_SOL_MODEL;
+  const usesSol = isThreadContainerMember
+    || (solAvailable
+      && member.assistantModelPreference === HOSTED_ASSISTANT_SOL_MODEL);
 
   return {
     ...(usesSol

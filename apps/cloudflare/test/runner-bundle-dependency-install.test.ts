@@ -109,12 +109,18 @@ describe("runner bundle pnpm install config", () => {
         "overrides:",
         "  jose: 6.2.2",
         "patchedDependencies:",
+        "  '@cobuild/review-gpt@0.5.103': patches/@cobuild__review-gpt@0.5.103.patch",
         "  incur@0.4.5: patches/incur@0.4.5.patch",
         "",
       ].join("\n"),
       "utf8",
     );
     await mkdir(path.join(repoRoot, "patches"), { recursive: true });
+    await writeFile(
+      path.join(repoRoot, "patches", "@cobuild__review-gpt@0.5.103.patch"),
+      "--- a/src/prepare-chatgpt-draft.js\n+++ b/src/prepare-chatgpt-draft.js\n",
+      "utf8",
+    );
     await writeFile(
       path.join(repoRoot, "patches", "incur@0.4.5.patch"),
       "--- a/dist/Cli.js\n+++ b/dist/Cli.js\n",
@@ -138,8 +144,14 @@ describe("runner bundle pnpm install config", () => {
         "  'jose@6.2.2':",
         "    resolution: {integrity: sha512-root}",
         "",
+        "  'incur@0.4.5':",
+        "    resolution: {integrity: sha512-incur}",
+        "",
         "  'next@16.2.6':",
         "    resolution: {integrity: sha512-web-only}",
+        "",
+        "  'runtime-wrapper@1.0.0':",
+        "    resolution: {integrity: sha512-runtime-wrapper}",
         "",
       ].join("\n"),
       "utf8",
@@ -147,6 +159,9 @@ describe("runner bundle pnpm install config", () => {
     await writeFile(
       path.join(repoRoot, "packages", "assistant-runtime", "package.json"),
       `${JSON.stringify({
+        dependencies: {
+          "runtime-wrapper": "1.0.0",
+        },
         name: "@murphai/assistant-runtime",
         version: "1.2.3",
       })}\n`,
@@ -193,7 +208,7 @@ describe("runner bundle pnpm install config", () => {
         "appendFileSync(logPath, `${command} SHARP_IGNORE_GLOBAL_LIBVIPS=${process.env.SHARP_IGNORE_GLOBAL_LIBVIPS ?? ''}\\n`, 'utf8');",
         "if (command === 'install --prod --lockfile-only') {",
         "  const seedLockfile = readFileSync('pnpm-lock.yaml', 'utf8');",
-        "  if (seedLockfile.includes('importers:') || seedLockfile.includes('apps/web')) {",
+        "  if (seedLockfile.includes('apps/web')) {",
         "    throw new Error('runner seed lockfile still contains workspace importers');",
         "  }",
         "  writeFileSync('pnpm-lock.yaml', [",
@@ -212,8 +227,20 @@ describe("runner bundle pnpm install config", () => {
         "    \"  'jose@6.2.2':\",",
         "    '    resolution: {integrity: sha512-root}',",
         "    '',",
+        "    \"  'incur@0.4.5':\",",
+        "    '    resolution: {integrity: sha512-incur}',",
+        "    '',",
+        "    \"  'runtime-wrapper@1.0.0':\",",
+        "    '    resolution: {integrity: sha512-runtime-wrapper}',",
+        "    '',",
         "    '  file:../tarballs/assistant-runtime.tgz:',",
         "    '    resolution: {integrity: sha512-local-runtime}',",
+        "    '',",
+        "    'snapshots:',",
+        "    '',",
+        "    \"  'runtime-wrapper@1.0.0':\",",
+        "    '    dependencies:',",
+        "    '      incur: 0.4.5',",
         "    '',",
         "  ].join('\\n'), 'utf8');",
         "}",
@@ -253,12 +280,13 @@ describe("runner bundle pnpm install config", () => {
       .split("\n");
     expect(pnpmLogLines.filter((line) => line.startsWith("install "))).toEqual([
       "install --prod --lockfile-only SHARP_IGNORE_GLOBAL_LIBVIPS=1",
+      "install --prod --lockfile-only SHARP_IGNORE_GLOBAL_LIBVIPS=1",
       "install --prod --frozen-lockfile SHARP_IGNORE_GLOBAL_LIBVIPS=1",
     ]);
     const pnpmStorePathLines = pnpmLogLines.filter((line) =>
       line.startsWith("store path "),
     );
-    expect([0, 2]).toContain(pnpmStorePathLines.length);
+    expect([0, 3]).toContain(pnpmStorePathLines.length);
     expect(
       pnpmStorePathLines.every(
         (line) => line === "store path --silent SHARP_IGNORE_GLOBAL_LIBVIPS=",
@@ -328,6 +356,16 @@ describe("runner bundle pnpm install config", () => {
     await expect(
       readFile(path.join(bundleDir, "patches", "incur@0.4.5.patch"), "utf8"),
     ).resolves.toBe("--- a/dist/Cli.js\n+++ b/dist/Cli.js\n");
+    await expect(
+      readFile(
+        path.join(
+          bundleDir,
+          "patches",
+          "@cobuild__review-gpt@0.5.103.patch",
+        ),
+        "utf8",
+      ),
+    ).rejects.toMatchObject({ code: "ENOENT" });
     await expect(
       readFile(path.join(bundleDir, "pnpm-lock.yaml"), "utf8"),
     ).resolves.not.toContain("apps/web");
