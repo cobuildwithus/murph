@@ -4,16 +4,13 @@ const mocks = vi.hoisted(() => ({
   getPrisma: vi.fn(),
   readHostedMemberAssistantModelPreference: vi.fn(),
   readHostedMemberAssistantPreferences: vi.fn(),
-  signalHostedMailboxAppendRuntime: vi.fn(),
+  scheduleMailboxWake: vi.fn(),
   transaction: vi.fn(),
   updateHostedMemberAssistantModelPreferenceTx: vi.fn(),
   upsertHostedMemberAssistantPreferencesTx: vi.fn(),
 }));
 
 vi.mock("@/src/lib/prisma", () => ({ getPrisma: mocks.getPrisma }));
-vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
-  signalHostedMailboxAppendRuntime: mocks.signalHostedMailboxAppendRuntime,
-}));
 vi.mock("@/src/lib/hosted-onboarding/assistant-model-preference", () => ({
   readHostedMemberAssistantModelPreference:
     mocks.readHostedMemberAssistantModelPreference,
@@ -58,7 +55,6 @@ describe("hosted assistant personalization tool owner adapter", () => {
       dispatch: { mailboxItemId: "mailbox_preferences_1" },
       updated: true,
     });
-    mocks.signalHostedMailboxAppendRuntime.mockResolvedValue(undefined);
   });
 
   it("reads the effective hosted snapshot without opening a mutation transaction", async () => {
@@ -141,6 +137,7 @@ describe("hosted assistant personalization tool owner adapter", () => {
         action: "update",
         voice: "warm",
       },
+      scheduleMailboxWake: mocks.scheduleMailboxWake,
     })).resolves.toEqual({
       action: "update",
       result: {
@@ -169,7 +166,7 @@ describe("hosted assistant personalization tool owner adapter", () => {
         sourceType: "assistant.personalization-tool",
       }),
     );
-    expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
+    expect(mocks.scheduleMailboxWake).toHaveBeenCalledWith({
       expectedUserId: "member_personalization_1",
       mailboxItemId: "mailbox_preferences_1",
     });
@@ -183,6 +180,7 @@ describe("hosted assistant personalization tool owner adapter", () => {
         model: "gpt-5.6-sol",
         tone: "casual",
       },
+      scheduleMailboxWake: mocks.scheduleMailboxWake,
     })).resolves.toEqual({
       action: "update",
       result: {
@@ -216,7 +214,7 @@ describe("hosted assistant personalization tool owner adapter", () => {
     ).toBeLessThan(
       mocks.upsertHostedMemberAssistantPreferencesTx.mock.invocationCallOrder[0] ?? 0,
     );
-    expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
+    expect(mocks.scheduleMailboxWake).toHaveBeenCalledWith({
       expectedUserId: "member_personalization_1",
       mailboxItemId: "mailbox_preferences_1",
     });
@@ -242,6 +240,7 @@ describe("hosted assistant personalization tool owner adapter", () => {
         model: "gpt-5.6-terra",
         tone: "formal",
       },
+      scheduleMailboxWake: mocks.scheduleMailboxWake,
     })).resolves.toMatchObject({
       result: {
         model: "gpt-5.6-terra",
@@ -255,7 +254,7 @@ describe("hosted assistant personalization tool owner adapter", () => {
         voice: "warm",
       },
     });
-    expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
+    expect(mocks.scheduleMailboxWake).not.toHaveBeenCalled();
   });
 
   it("rejects ineligible Sol before applying style or appending its mailbox event", async () => {
@@ -274,6 +273,7 @@ describe("hosted assistant personalization tool owner adapter", () => {
         model: "gpt-5.6-sol",
         tone: "casual",
       },
+      scheduleMailboxWake: mocks.scheduleMailboxWake,
     })).resolves.toEqual({
       action: "update",
       result: {
@@ -290,6 +290,6 @@ describe("hosted assistant personalization tool owner adapter", () => {
       },
     });
     expect(mocks.upsertHostedMemberAssistantPreferencesTx).not.toHaveBeenCalled();
-    expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
+    expect(mocks.scheduleMailboxWake).not.toHaveBeenCalled();
   });
 });

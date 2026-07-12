@@ -1,8 +1,15 @@
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
+  after: vi.fn(),
   handleHostedRuntimeAssistantPersonalizationTool: vi.fn(),
   requireHostedCloudflareCallbackRequest: vi.fn(),
+  signalHostedMailboxAppendRuntime: vi.fn(),
+}));
+
+vi.mock("next/server", async (importOriginal) => ({
+  ...await importOriginal<typeof import("next/server")>(),
+  after: mocks.after,
 }));
 
 vi.mock("@/src/lib/hosted-execution/cloudflare-callback-auth", () => ({
@@ -12,6 +19,9 @@ vi.mock("@/src/lib/hosted-execution/cloudflare-callback-auth", () => ({
 vi.mock("@/src/lib/hosted-execution/assistant-personalization-tool", () => ({
   handleHostedRuntimeAssistantPersonalizationTool:
     mocks.handleHostedRuntimeAssistantPersonalizationTool,
+}));
+vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
+  signalHostedMailboxAppendRuntime: mocks.signalHostedMailboxAppendRuntime,
 }));
 
 type RouteModule = typeof import(
@@ -64,6 +74,23 @@ describe("hosted assistant personalization internal route", () => {
     expect(mocks.handleHostedRuntimeAssistantPersonalizationTool).toHaveBeenCalledWith({
       memberId: "member_personalization_route",
       request: { action: "read" },
+      scheduleMailboxWake: expect.any(Function),
+    });
+
+    const scheduleMailboxWake = mocks.handleHostedRuntimeAssistantPersonalizationTool
+      .mock.calls[0]?.[0]?.scheduleMailboxWake;
+    expect(scheduleMailboxWake).toEqual(expect.any(Function));
+    scheduleMailboxWake?.({
+      expectedUserId: "member_personalization_route",
+      mailboxItemId: "mailbox_personalization_route",
+    });
+    expect(mocks.after).toHaveBeenCalledWith(expect.any(Function));
+
+    const task = mocks.after.mock.calls[0]?.[0];
+    await task?.();
+    expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
+      expectedUserId: "member_personalization_route",
+      mailboxItemId: "mailbox_personalization_route",
     });
   });
 });

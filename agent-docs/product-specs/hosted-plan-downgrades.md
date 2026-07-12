@@ -67,13 +67,17 @@ Settings and through the hosted `murph.personalization` operation:
 Deploy this additive path in the following order:
 
 1. Apply the nullable Postgres migration.
-2. Deploy the Cloudflare consumer.
-3. Deploy the web workspace producer and Settings control.
+2. Deploy the web workspace producer, Settings control, and signed
+   personalization callback.
+3. Deploy the Cloudflare/runner consumer that advertises the conversational
+   personalization operation.
 
-An old web response omits the optional override, so the new consumer preserves
-the fleet model. An old Cloudflare consumer ignores the new response field, so
-a web-first deploy is compatible but a saved Sol choice remains temporarily
-ineffective.
+An old Cloudflare consumer ignores the new response field and does not advertise
+the new operation, so web-first deployment is safe but a saved Sol choice can
+remain temporarily ineffective. New Cloudflare/runner code must not run against
+old web code: it advertises personalization but the signed callback endpoint is
+not present, so every invocation would fail instead of reaching the canonical
+owner.
 
 The feature changes only the Worker-side selection of the existing forwarded
 `HOSTED_ASSISTANT_MODEL`; it does not change the runner invocation shape or
@@ -85,16 +89,19 @@ The feature is safe under gradual container rollout and adds no requirement for
 global rollout preflight in `apps/cloudflare/DEPLOY.md`, which currently requires
 immediate rollout for the GPT-5.6 fleet and selector-scope compatibility.
 
-Feature rollback may restore either the pre-feature web producer or the
-pre-feature Cloudflare consumer; the additive nullable column may remain. Old
-web code emits no model field, and old Cloudflare code ignores one, so either
-rollback independently returns every member to the platform-configured model,
-normally Terra. This feature has no model-specific fallback or rollback path.
+Feature rollback removes the Cloudflare/runner consumer before restoring the
+pre-feature web producer; the additive nullable column may remain. Old web code
+emits no model field, and old Cloudflare code ignores one, so after the consumer
+has drained the model safely returns to the platform-configured default,
+normally Terra. Web-first rollback is unsafe while a new runner can still
+advertise the callback-backed operation.
 
 Focused contract coverage proves old/no-field compatibility, the saved Sol
 choice, and the Terra default. The normal deploy keeps its managed-container
-fingerprint and live Terra smoke. An optional post-deploy canary may select Sol
-for one eligible Edge member and confirm the next new invocation reports Sol.
+fingerprint and live Terra smoke. After Cloudflare deploys, a canary must invoke
+the signed personalization read and update path from a new runner; an optional
+eligible Edge canary may also select Sol and confirm the next invocation reports
+Sol.
 
 ## First-Version Scope
 

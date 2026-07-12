@@ -1,6 +1,7 @@
 import {
   parseHostedRuntimeAssistantPersonalizationToolRequest,
 } from "@murphai/hosted-execution/assistant-personalization";
+import { after } from "next/server";
 
 import {
   requireHostedCloudflareCallbackRequest,
@@ -10,6 +11,7 @@ import {
 } from "@/src/lib/hosted-execution/assistant-personalization-tool";
 import { readRawBodyBuffer } from "@/src/lib/http";
 import { jsonOk, withJsonError } from "@/src/lib/hosted-onboarding/http";
+import { signalHostedMailboxAppendRuntime } from "@/src/lib/hosted-orchestration/signal-runtime";
 
 const BODY_LIMIT_BYTES = 2_048;
 
@@ -28,5 +30,25 @@ export const POST = withJsonError(async (request: Request) => {
   return jsonOk(await handleHostedRuntimeAssistantPersonalizationTool({
     memberId,
     request: body,
+    scheduleMailboxWake: scheduleMailboxWakeAfterResponse,
   }));
 });
+
+function scheduleMailboxWakeAfterResponse(input: {
+  expectedUserId: string;
+  mailboxItemId: string;
+}): void {
+  const task = async () => {
+    try {
+      await signalHostedMailboxAppendRuntime(input);
+    } catch {
+      // The durable mailbox item remains reconciliation truth when a wake is unavailable.
+    }
+  };
+
+  try {
+    after(task);
+  } catch {
+    void task();
+  }
+}

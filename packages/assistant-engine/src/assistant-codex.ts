@@ -3822,6 +3822,23 @@ async function runCodexAppServerTurnOnProcess(
     }
 
     const resumeThreadId = codexThreadId
+    if (
+      resumeThreadId
+      && !isReusedWarmProcess
+      && input.dynamicTools.some(
+        (tool) => tool.namespace === 'murph' && tool.name === 'personalization',
+      )
+    ) {
+      throw new VaultCliError(
+        'ASSISTANT_CODEX_RESUME_STALE',
+        'Codex app-server cannot restore personalization on a cold native resume.',
+        {
+          dynamicToolsRequireFreshThread: true,
+          retryable: true,
+          staleResume: true,
+        },
+      )
+    }
     const threadTimingStage = resumeThreadId ? 'thread-resumed' : 'thread-started'
     lifecycleStage = resumeThreadId ? 'thread_resume' : 'thread_start'
     const threadResult = await withCodexRpcTimeout(

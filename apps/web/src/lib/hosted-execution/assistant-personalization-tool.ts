@@ -12,9 +12,6 @@ import {
 
 import { getPrisma } from "@/src/lib/prisma";
 import {
-  signalHostedMailboxAppendRuntime,
-} from "@/src/lib/hosted-orchestration/signal-runtime";
-import {
   readHostedMemberAssistantModelPreference,
   updateHostedMemberAssistantModelPreferenceTx,
 } from "@/src/lib/hosted-onboarding/assistant-model-preference";
@@ -38,6 +35,10 @@ interface HostedRuntimeAssistantPersonalizationTransactionResult {
 export async function handleHostedRuntimeAssistantPersonalizationTool(input: {
   memberId: string;
   request: HostedRuntimeAssistantPersonalizationToolRequest;
+  scheduleMailboxWake?: (input: {
+    expectedUserId: string;
+    mailboxItemId: string;
+  }) => void;
 }): Promise<HostedRuntimeAssistantPersonalizationToolResponse> {
   if (input.request.action === "read") {
     return {
@@ -134,7 +135,7 @@ export async function handleHostedRuntimeAssistantPersonalizationTool(input: {
   }
 
   if (transactionResult.dispatch) {
-    await signalHostedMailboxAppendBestEffort({
+    input.scheduleMailboxWake?.({
       expectedUserId: input.memberId,
       mailboxItemId: transactionResult.dispatch.mailboxItemId,
     });
@@ -158,15 +159,4 @@ async function readHostedAssistantPersonalization(
     tone: preferences.tone ?? defaultAssistantTonePreference,
     voice: preferences.voice ?? defaultAssistantVoiceOptionId,
   };
-}
-
-async function signalHostedMailboxAppendBestEffort(input: {
-  expectedUserId: string;
-  mailboxItemId: string;
-}): Promise<void> {
-  try {
-    await signalHostedMailboxAppendRuntime(input);
-  } catch {
-    // The durable mailbox item remains reconciliation truth when a wake is unavailable.
-  }
 }

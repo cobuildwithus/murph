@@ -104,6 +104,9 @@ const MURPH_DYNAMIC_TOOLS_WITH_COMPUTER_WITHOUT_PROGRESS = resolveMurphDynamicTo
   computerToolsAvailable: true,
   progressUpdatesAvailable: false,
 })
+const MURPH_DYNAMIC_TOOLS_WITH_PERSONALIZATION = resolveMurphDynamicTools({
+  personalizationAvailable: true,
+})
 const CODEX_TRANSPORT_DIAGNOSTICS_TRACE_SCHEMA =
   'murph.assistant-codex-transport-diagnostics.v1'
 
@@ -7655,6 +7658,106 @@ describe('assistant codex runtime', () => {
     })
   })
 
+  it('resumes personalization on the reused warm Codex app-server process', async () => {
+    const hostedCodexHome = await createTempDir('assistant-codex-warm-personalization-home-')
+    const workingDirectory = await createTempDir('assistant-codex-warm-personalization-work-')
+    const spawnedChildren: MockChildProcess[] = []
+
+    codexMocks.spawn.mockImplementation(() => {
+      const child = new MockChildProcess()
+      spawnedChildren.push(child)
+
+      queueMicrotask(() => {
+        void (async () => {
+          const initialize = await waitForRpcMethod(child, 'initialize')
+          child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
+
+          const firstThread = await waitForRpcMethod(child, 'thread/start')
+          child.stdout.write(jsonLine({
+            id: firstThread.id,
+            result: { thread: { id: 'thread-warm-personalization' } },
+          }))
+          const firstTurn = await waitForRpcMethodCount(child, 'turn/start', 1)
+          child.stdout.write(jsonLine({
+            id: firstTurn.id,
+            result: { turn: { id: 'turn-warm-personalization-1' } },
+          }))
+          child.stdout.write(jsonLine({
+            method: 'turn/completed',
+            params: {
+              turn: {
+                id: 'turn-warm-personalization-1',
+                status: 'completed',
+              },
+            },
+          }))
+
+          const resumedThread = await waitForRpcMethod(child, 'thread/resume')
+          const resumedThreadParams = asRecord(resumedThread.params)
+          child.stdout.write(jsonLine({
+            id: resumedThread.id,
+            result: {
+              approvalPolicy: resumedThreadParams.approvalPolicy,
+              cwd: resumedThreadParams.cwd,
+              thread: { id: 'thread-warm-personalization' },
+            },
+          }))
+          const secondTurn = await waitForRpcMethodCount(child, 'turn/start', 2)
+          child.stdout.write(jsonLine({
+            id: secondTurn.id,
+            result: { turn: { id: 'turn-warm-personalization-2' } },
+          }))
+          child.stdout.write(jsonLine({
+            method: 'turn/completed',
+            params: {
+              turn: {
+                id: 'turn-warm-personalization-2',
+                status: 'completed',
+              },
+            },
+          }))
+        })()
+      })
+
+      return child
+    })
+
+    const hostedEnv = {
+      CODEX_HOME: hostedCodexHome,
+      MURPH_HOSTED_RUNTIME_PROCESS: '1',
+      NODE_ENV: 'test',
+      PATH: '/usr/bin',
+    }
+
+    await expect(executeCodexAppServerTurn({
+      dynamicTools: MURPH_DYNAMIC_TOOLS_WITH_PERSONALIZATION,
+      env: hostedEnv,
+      prompt: 'start warm personalization',
+      workingDirectory,
+    })).resolves.toMatchObject({
+      sessionId: 'thread-warm-personalization',
+      turnId: 'turn-warm-personalization-1',
+    })
+
+    await expect(executeCodexAppServerTurn({
+      dynamicTools: MURPH_DYNAMIC_TOOLS_WITH_PERSONALIZATION,
+      env: hostedEnv,
+      prompt: 'resume warm personalization',
+      resumeSessionId: 'thread-warm-personalization',
+      workingDirectory,
+    })).resolves.toMatchObject({
+      sessionId: 'thread-warm-personalization',
+      turnId: 'turn-warm-personalization-2',
+    })
+
+    expect(codexMocks.spawn).toHaveBeenCalledTimes(1)
+    const messages = readWrittenRpcMessages(
+      requireMockChildProcess(spawnedChildren[0] ?? null),
+    )
+    expect(messages.filter((message) => message.method === 'thread/resume'))
+      .toHaveLength(1)
+  })
+
   it('starts a fresh warm Codex app-server when process config overrides change', async () => {
     const hostedCodexHome = await createTempDir('assistant-codex-config-overrides-home-')
     const workingDirectory = await createTempDir('assistant-codex-config-overrides-work-')
@@ -9162,6 +9265,44 @@ describe('assistant codex runtime', () => {
       },
       message: expect.stringContaining('no rollout found for thread id stale-thread'),
     })
+  })
+
+  it('marks cold personalization resumes stale before thread/resume', async () => {
+    const workingDirectory = await createTempDir('assistant-codex-personalization-resume-')
+    let child: MockChildProcess | null = null
+
+    codexMocks.spawn.mockImplementation(() => {
+      const spawnedChild = new MockChildProcess()
+      child = spawnedChild
+      queueMicrotask(() => {
+        void (async () => {
+          const initialize = await waitForRpcMethod(spawnedChild, 'initialize')
+          spawnedChild.stdout.write(jsonLine({ id: initialize.id, result: {} }))
+        })()
+      })
+      return spawnedChild
+    })
+
+    await expect(
+      executeCodexAppServerTurn({
+        dynamicTools: MURPH_DYNAMIC_TOOLS_WITH_PERSONALIZATION,
+        prompt: 'resume personalization',
+        resumeSessionId: 'personalization-thread',
+        workingDirectory,
+      }),
+    ).rejects.toMatchObject({
+      code: 'ASSISTANT_CODEX_RESUME_STALE',
+      context: {
+        dynamicToolsRequireFreshThread: true,
+        retryable: true,
+        staleResume: true,
+      },
+    })
+
+    const spawned = requireMockChildProcess(child)
+    expect(
+      readWrittenRpcMessages(spawned).some((message) => message.method === 'thread/resume'),
+    ).toBe(false)
   })
 
   it('keeps model/profile lookup failures as generic thread/resume RPC errors', async () => {

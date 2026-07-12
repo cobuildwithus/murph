@@ -15,6 +15,7 @@ import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
   executeCodexAssistantTurnAttempt,
 } from '../src/assistant/codex-runtime.ts'
+import { resolveMurphDynamicTools } from '../src/assistant-codex/dynamic-tools.ts'
 import {
   executeCodexAssistantTurnAttempt as executeCodexAssistantTurnAttemptUnchecked,
 } from '../src/assistant/providers/codex-cli.ts'
@@ -156,6 +157,9 @@ describe('Codex thread instructions', () => {
   })
 
   it('starts stale-resume fallback with fresh thread instructions', async () => {
+    const dynamicTools = resolveMurphDynamicTools({
+      personalizationAvailable: true,
+    })
     codexAppServerMocks.executeCodexAppServerTurn
       .mockRejectedValueOnce(
         new VaultCliError(
@@ -199,7 +203,7 @@ describe('Codex thread instructions', () => {
         providerConfig: normalizeAssistantProviderConfig({
           provider: 'codex-cli',
         }),
-        dynamicTools: [],
+        dynamicTools,
         env: {},
         developerInstructions: null,
         resume: {
@@ -218,12 +222,14 @@ describe('Codex thread instructions', () => {
     expect(codexAppServerMocks.executeCodexAppServerTurn.mock.calls[0]?.[0])
       .toMatchObject({
         developerInstructions: null,
+        dynamicTools,
         resumeSessionId: 'stale-thread',
       })
     const fallbackInput = codexAppServerMocks.executeCodexAppServerTurn.mock
       .calls[1]?.[0]
     expect(fallbackInput).toMatchObject({
       developerInstructions: 'Stable Murph instructions.',
+      dynamicTools,
       resumeSessionId: undefined,
     })
     expect(fallbackInput.prompt).toContain('Current Murph runtime context.')
