@@ -17,7 +17,7 @@ Key decisions:
 - Require a meaningful direction, an ongoing support loop, and the six retained foundation checkpoints before answered completion; no experiment, connected device, lab upload, group, or positive health fact is required.
 
 State:
-- Implementation and local prompt verification complete; branch reconciliation and PR review remain.
+- Complete. The implementation, branch reconciliation, scoped verification, and first ReviewGPT round are done; the user explicitly stopped the second review round and requested the current branch be committed and pushed.
 
 Done:
 - Reframed the skill, dynamic onboarding prompt, managed follow-up, durable product docs, and focused regression tests around value-first, foundation-complete onboarding.
@@ -28,12 +28,13 @@ Done:
 - Rebased onto current `main`, preserved the newer evidence-first and group-newsletter guidance, and re-ran focused proof without manual-conflict residue.
 - Accepted and fixed ReviewGPT round 1's ownership finding: proactive follow-through now requires the existing behavior-followthrough plan plus dedicated automation, while the onboarding automation only resumes unfinished onboarding.
 - Re-ran the prompt-review pass after that fix with zero remaining actionable findings; full assistant-engine and focused hosted-runtime suites pass.
+- Pushed the accepted ReviewGPT fix to PR 588. The second ReviewGPT round and remaining CI wait were stopped at the user's explicit direction.
 
 Now:
-- Commit and push the accepted ReviewGPT fix, then run the next ReviewGPT round.
+- Archive this completed execution plan and remove its coordination-ledger row.
 
 Next:
-- Reach zero accepted ReviewGPT findings, prove CI/mergeability, and close this plan.
+- None for this task.
 
 Open questions (UNCONFIRMED if needed):
 - The funding amount for the investor pitch remains intentionally unspecified; it does not block this onboarding revision.
@@ -56,3 +57,6 @@ Working set (files/ids/commands):
 - pnpm test:diff <changed onboarding paths>
 - pnpm docs:gardening
 - pnpm docs:drift
+Status: completed
+Updated: 2026-07-12
+Completed: 2026-07-12
