@@ -12,9 +12,13 @@ import {
 const mocks = vi.hoisted(() => ({
   applyStripeInvoicePaid: vi.fn(),
   getPrisma: vi.fn(),
+  readHostedFamilyAccessForMember: vi.fn(),
   signalHostedRuntimeManualWakeBestEffort: vi.fn(),
   prismaClient: {
     $transaction: vi.fn(),
+    hostedMember: {
+      findUnique: vi.fn(),
+    },
   },
   readHostedMemberCoreState: vi.fn(),
   readHostedMemberStripeBillingRef: vi.fn(),
@@ -45,6 +49,10 @@ vi.mock("@/src/lib/hosted-orchestration/manual-wake", () => ({
 
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", () => ({
   readHostedMemberCoreState: mocks.readHostedMemberCoreState,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/family-plan", () => ({
+  readHostedFamilyAccessForMember: mocks.readHostedFamilyAccessForMember,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-billing-store", () => ({
@@ -79,9 +87,14 @@ describe("startHostedPulseTrialPaidPlan", () => {
       suspendedAt: null,
       updatedAt: new Date("2026-05-01T00:00:00.000Z"),
     });
+    mocks.prismaClient.hostedMember.findUnique.mockResolvedValue({
+      suspendedAt: null,
+    });
+    mocks.readHostedFamilyAccessForMember.mockResolvedValue(null);
     mocks.readHostedMemberStripeBillingRef.mockResolvedValue(makeBillingRef());
     mocks.withHostedMemberStripeMutationLock.mockImplementation(
-      async (input: { run: () => Promise<unknown> }) => input.run(),
+      async (input: { run: (tx: unknown) => Promise<unknown> }) =>
+        input.run(mocks.prismaClient),
     );
     mocks.requireHostedOnboardingPublicBaseUrl.mockReturnValue("https://join.example.test");
     mocks.requireHostedStripeBillingPlanConfig.mockReturnValue({
@@ -139,6 +152,44 @@ describe("startHostedPulseTrialPaidPlan", () => {
     });
     expect(mocks.applyStripeInvoicePaid).not.toHaveBeenCalled();
     expect(mocks.signalHostedRuntimeManualWakeBestEffort).not.toHaveBeenCalled();
+  });
+
+  test("does not end the trial when Family sponsorship wins the member lock", async () => {
+    mocks.readHostedFamilyAccessForMember.mockResolvedValueOnce({
+      groupId: "family_123",
+      memberId: "member_123",
+      status: "active",
+    });
+
+    await expect(startHostedPulseTrialPaidPlan({
+      memberId: "member_123",
+      now: new Date("2026-05-06T00:00:00.000Z"),
+    })).rejects.toMatchObject({
+      code: "HOSTED_BILLING_SPONSORED_MEMBER_UNSUPPORTED",
+      httpStatus: 409,
+    });
+
+    expect(mocks.readHostedFamilyAccessForMember).toHaveBeenCalledWith({
+      memberId: "member_123",
+      prisma: mocks.prismaClient,
+    });
+    expect(mocks.stripe.subscriptions.update).not.toHaveBeenCalled();
+  });
+
+  test("rechecks suspension after acquiring the member mutation lock", async () => {
+    mocks.prismaClient.hostedMember.findUnique.mockResolvedValueOnce({
+      suspendedAt: new Date("2026-05-06T00:00:01.000Z"),
+    });
+
+    await expect(startHostedPulseTrialPaidPlan({
+      memberId: "member_123",
+      now: new Date("2026-05-06T00:00:00.000Z"),
+    })).rejects.toMatchObject({
+      code: "HOSTED_MEMBER_SUSPENDED",
+      httpStatus: 403,
+    });
+
+    expect(mocks.stripe.subscriptions.update).not.toHaveBeenCalled();
   });
 
   test("routes no-card trials through Stripe payment-method setup before ending the trial", async () => {
@@ -277,8 +328,8 @@ describe("startHostedPulseTrialPaidPlan", () => {
       .mockResolvedValueOnce(updatedSubscription);
     mocks.stripe.subscriptions.update.mockResolvedValueOnce(updatedSubscription);
     mocks.withHostedMemberStripeMutationLock.mockImplementationOnce(
-      async (input: { run: () => Promise<unknown> }) => {
-        await input.run();
+      async (input: { run: (tx: unknown) => Promise<unknown> }) => {
+        await input.run(mocks.prismaClient);
         throw new Error("Synthetic transaction completion failure.");
       },
     );
@@ -785,12 +836,14 @@ describe("startHostedPulseTrialPaidPlan", () => {
       trialEnd: null,
     }));
     mocks.withHostedMemberStripeMutationLock
-      .mockImplementationOnce(async (input: { run: () => Promise<unknown> }) => {
+      .mockImplementationOnce(async (input: { run: (tx: unknown) => Promise<unknown> }) => {
         signalFirstLock?.();
         await firstLockRelease;
-        return input.run();
+        return input.run(mocks.prismaClient);
       })
-      .mockImplementationOnce(async (input: { run: () => Promise<unknown> }) => input.run());
+      .mockImplementationOnce(async (input: { run: (tx: unknown) => Promise<unknown> }) =>
+        input.run(mocks.prismaClient)
+      );
 
     const startPromise = startHostedPulseTrialPaidPlan({
       memberId: "member_123",

@@ -25,7 +25,6 @@ import {
   removeHostedFamilyMemberTx,
   revokeHostedFamilyInviteTx,
   updateHostedFamilySeatCount,
-  waitForHostedFamilyBilledSeatCount,
 } from "@/src/lib/hosted-onboarding/family-plan";
 import {
   HOSTED_FAMILY_MAX_SEATS,
@@ -293,22 +292,12 @@ export async function handleHostedRuntimeFamilyPlanTool(input: {
       prisma,
       targetSeatCount: request.seatCount,
     });
-    const applied = await waitForHostedFamilyBilledSeatCount({
-      groupId: snapshot.groupId,
-      prisma,
-      targetSeatCount: request.seatCount,
-    });
-    const refreshed = applied
-      ? await readHostedFamilyOwnerSnapshotForMember({
-          memberId: input.memberId,
-          prisma,
-        })
-      : null;
+    const applied = initial.seats.billed === request.seatCount;
     return {
       action: "change_seat_count",
       result: {
         requestedSeatCount: request.seatCount,
-        seats: (refreshed ?? initial).seats,
+        seats: initial.seats,
         status: applied ? "applied" : "pending",
       },
     };

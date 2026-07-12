@@ -12,7 +12,6 @@ const mocks = vi.hoisted(() => ({
   removeHostedFamilyMemberTx: vi.fn(),
   revokeHostedFamilyInviteTx: vi.fn(),
   updateHostedFamilySeatCount: vi.fn(),
-  waitForHostedFamilyBilledSeatCount: vi.fn(),
 }));
 
 vi.mock("@/src/lib/action-approvals", () => ({
@@ -33,7 +32,6 @@ vi.mock("@/src/lib/hosted-onboarding/family-plan", () => ({
   removeHostedFamilyMemberTx: mocks.removeHostedFamilyMemberTx,
   revokeHostedFamilyInviteTx: mocks.revokeHostedFamilyInviteTx,
   updateHostedFamilySeatCount: mocks.updateHostedFamilySeatCount,
-  waitForHostedFamilyBilledSeatCount: mocks.waitForHostedFamilyBilledSeatCount,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/shared", () => ({
@@ -78,7 +76,6 @@ describe("hosted runtime Family plan tool", () => {
     mocks.readHostedFamilyOwnerSnapshotForMember.mockResolvedValue(null);
     mocks.removeHostedFamilyMemberTx.mockResolvedValue(true);
     mocks.revokeHostedFamilyInviteTx.mockResolvedValue(true);
-    mocks.waitForHostedFamilyBilledSeatCount.mockResolvedValue(true);
     const approved = {
       approvalGeneration: "a".repeat(64),
       approvalId: `haa_${"b".repeat(32)}`,
@@ -704,7 +701,7 @@ describe("hosted runtime Family plan tool", () => {
     });
   });
 
-  it("returns pending until the Family seat webhook reconciles", async () => {
+  it("returns pending immediately from the mutation snapshot without polling webhook state", async () => {
     const initial = {
       billingActive: true,
       billingStatus: "active",
@@ -723,7 +720,6 @@ describe("hosted runtime Family plan tool", () => {
     };
     mocks.readHostedFamilyOwnerSnapshotForMember.mockResolvedValue(initial);
     mocks.updateHostedFamilySeatCount.mockResolvedValue(initial);
-    mocks.waitForHostedFamilyBilledSeatCount.mockResolvedValue(false);
 
     await expect(handleHostedRuntimeFamilyPlanTool({
       memberId: "member_owner",
@@ -744,6 +740,54 @@ describe("hosted runtime Family plan tool", () => {
       expectedCurrentSeatCount: 3,
       targetSeatCount: 4,
     }));
+    expect(mocks.readHostedFamilyOwnerSnapshotForMember).toHaveBeenCalledTimes(1);
+  });
+
+  it("returns applied when the mutation snapshot already contains the target seat count", async () => {
+    const initial = {
+      billingActive: true,
+      billingStatus: "active",
+      groupId: "hbag_family",
+      invites: [],
+      members: [],
+      seats: {
+        active: 2,
+        billed: 3,
+        invited: 0,
+        max: 6,
+        min: 2,
+        remaining: 1,
+        used: 2,
+      },
+    };
+    mocks.readHostedFamilyOwnerSnapshotForMember.mockResolvedValue(initial);
+    mocks.updateHostedFamilySeatCount.mockResolvedValue({
+      ...initial,
+      seats: {
+        ...initial.seats,
+        billed: 4,
+        remaining: 2,
+      },
+    });
+
+    await expect(handleHostedRuntimeFamilyPlanTool({
+      memberId: "member_owner",
+      request: {
+        action: "change_seat_count",
+        confirmed: true,
+        seatCount: 4,
+      },
+    })).resolves.toMatchObject({
+      action: "change_seat_count",
+      result: {
+        requestedSeatCount: 4,
+        seats: {
+          billed: 4,
+        },
+        status: "applied",
+      },
+    });
+    expect(mocks.readHostedFamilyOwnerSnapshotForMember).toHaveBeenCalledTimes(1);
   });
 
   it("requires a fresh exact approval when Family seat state changes", async () => {

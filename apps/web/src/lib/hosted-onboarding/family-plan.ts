@@ -41,6 +41,7 @@ import {
   readHostedPhoneHint,
 } from "./contact-privacy";
 import {
+  assertHostedMemberNotSuspended,
   isHostedMemberSuspended,
 } from "./entitlement";
 import { hostedOnboardingError, isHostedOnboardingError } from "./errors";
@@ -1849,6 +1850,10 @@ export async function updateHostedFamilySeatCount(input: {
     memberId: input.ownerMemberId,
     prisma,
     run: async (tx) => {
+      await assertHostedFamilyOwnerNotSuspendedTx({
+        ownerMemberId: input.ownerMemberId,
+        tx,
+      });
       const group = await tx.hostedAccountGroup.findUnique({
         select: hostedAccountGroupAccessSelect,
         where: {
@@ -3104,7 +3109,7 @@ export async function acceptHostedFamilyInviteTx(input: {
     memberId: input.acceptedMemberId,
     tx: input.tx,
   });
-  await assertHostedFamilyMemberNotDirectPaidTx({
+  await assertHostedFamilyMemberNotDirectPaidOrTransitionTx({
     memberId: input.acceptedMemberId,
     tx: input.tx,
   });
@@ -3246,6 +3251,11 @@ export async function removeHostedFamilyMemberTx(input: {
   tx: Prisma.TransactionClient;
 }): Promise<boolean> {
   const now = input.now ?? new Date();
+  await lockHostedMemberRow(input.tx, input.ownerMemberId);
+  await assertHostedFamilyOwnerNotSuspendedTx({
+    ownerMemberId: input.ownerMemberId,
+    tx: input.tx,
+  });
   const group = await input.tx.hostedAccountGroup.findUnique({
     select: hostedAccountGroupAccessSelect,
     where: {
@@ -3290,6 +3300,11 @@ export async function revokeHostedFamilyInviteTx(input: {
   ownerMemberId: string;
   tx: Prisma.TransactionClient;
 }): Promise<boolean> {
+  await lockHostedMemberRow(input.tx, input.ownerMemberId);
+  await assertHostedFamilyOwnerNotSuspendedTx({
+    ownerMemberId: input.ownerMemberId,
+    tx: input.tx,
+  });
   const group = await input.tx.hostedAccountGroup.findUnique({
     select: hostedAccountGroupAccessSelect,
     where: {
@@ -3723,12 +3738,73 @@ async function assertHostedFamilyMemberNotDirectPaidTx(input: {
     return;
   }
   if (await hasHostedFamilyMemberDirectPaidTx(input)) {
+    throw buildHostedFamilyDirectPaidTransferRequiredError();
+  }
+}
+
+async function assertHostedFamilyMemberNotDirectPaidOrTransitionTx(input: {
+  memberId: string;
+  tx: Prisma.TransactionClient;
+}): Promise<void> {
+  if (await hasHostedFamilyMemberDirectPaidTx(input)) {
+    throw buildHostedFamilyDirectPaidTransferRequiredError();
+  }
+
+  const billingRef = await readHostedMemberStripeBillingRef({
+    memberId: input.memberId,
+    prisma: input.tx,
+  });
+  const stripeSubscriptionId = billingRef?.stripeSubscriptionId ?? null;
+  if (
+    parseHostedBillingPhase(billingRef?.currentBillingPhase) !== "trial" ||
+    !stripeSubscriptionId
+  ) {
+    return;
+  }
+
+  const stripe = requireHostedStripeApi();
+  const subscription = await callHostedFamilyDirectPaidStripeOperation(
+    "subscription.retrieve.family-invite-acceptance",
+    () => stripe.subscriptions.retrieve(stripeSubscriptionId),
+  );
+  if (
+    subscription.status === "active" ||
+    subscription.status === "incomplete" ||
+    subscription.status === "past_due" ||
+    subscription.status === "unpaid"
+  ) {
+    throw buildHostedFamilyDirectPaidTransferRequiredError();
+  }
+}
+
+function buildHostedFamilyDirectPaidTransferRequiredError(): Error {
+  return hostedOnboardingError({
+    code: "HOSTED_FAMILY_DIRECT_PAID_TRANSFER_REQUIRED",
+    httpStatus: 409,
+    message: "You're currently paying for Murph yourself. Switching paid accounts into Family billing is not supported in this release.",
+  });
+}
+
+async function assertHostedFamilyOwnerNotSuspendedTx(input: {
+  ownerMemberId: string;
+  tx: Prisma.TransactionClient;
+}): Promise<void> {
+  const owner = await input.tx.hostedMember.findUnique({
+    select: {
+      suspendedAt: true,
+    },
+    where: {
+      id: input.ownerMemberId,
+    },
+  });
+  if (!owner) {
     throw hostedOnboardingError({
-      code: "HOSTED_FAMILY_DIRECT_PAID_TRANSFER_REQUIRED",
-      httpStatus: 409,
-      message: "You're currently paying for Murph yourself. Switching paid accounts into Family billing is not supported in this release.",
+      code: "HOSTED_FAMILY_OWNER_REQUIRED",
+      httpStatus: 403,
+      message: "Only the family plan owner can manage this family plan.",
     });
   }
+  assertHostedMemberNotSuspended(owner);
 }
 
 async function hasHostedFamilyMemberDirectPaidTx(input: {

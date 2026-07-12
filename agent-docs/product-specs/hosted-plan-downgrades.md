@@ -74,13 +74,15 @@ scheduled, unchanged, pending webhook/payment reconciliation, and the smallest
 Stripe browser handoff. No billing-specific approval state is persisted;
 Stripe webhooks remain the durable reconciliation boundary.
 
-Deploy the additive control plane in this order: Cloudflare/runner consumer,
-then web producer, with the two deploys kept in one short compatibility window.
-The new consumer accepts old Family status responses without optional action
-ids; old runtimes do not expose the new billing operation. After web deploy,
-verify signed `read_status`, one no-op billing request, and Stripe webhook
-convergence before exercising a live plan change. Payment-method and payment
-confirmation work remains in Stripe-hosted browser UI.
+Deploy the additive control plane in this order: signed web producer first,
+then Cloudflare/runner consumer, with the two deploys kept in one short
+compatibility window. Old runtimes do not expose the new billing operation, so
+the web-first window is inert; a new consumer against old web would advertise
+a callback endpoint that does not exist. Roll back the consumer before the web
+producer. After the consumer deploy, verify signed `read_status`, one no-op
+billing request, and Stripe webhook convergence before exercising a live plan
+change. Payment-method and payment confirmation work remains in Stripe-hosted
+browser UI.
 
 ## Edge Assistant Model Choice
 

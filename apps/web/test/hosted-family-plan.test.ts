@@ -1494,6 +1494,40 @@ describe("hosted Family plan", () => {
     expect(tx.hostedAccountGroupInvite.updateMany).not.toHaveBeenCalled();
   });
 
+  it("rejects Family acceptance when Stripe has started paid billing before local reconciliation", async () => {
+    const tx = createTxMock();
+    tx.hostedMember.findUnique.mockResolvedValueOnce({
+      billingRef: {
+        currentBillingPhase: "trial",
+      },
+      billingStatus: HostedBillingStatus.active,
+      suspendedAt: null,
+    });
+    tx.hostedMemberBillingRef.findUnique.mockResolvedValueOnce(
+      createMemberBillingRefMock({ currentBillingPhase: "trial" }),
+    );
+    tx.hostedAccountGroupInvite.findUnique.mockResolvedValueOnce(createPendingInvite());
+    const retrieve = vi.fn().mockResolvedValue({
+      id: "sub_direct",
+      status: "active",
+    });
+    runtimeMocks.requireHostedStripeApi.mockReturnValueOnce({
+      subscriptions: { retrieve },
+    });
+
+    await expect(acceptHostedFamilyInviteTx({
+      acceptedMemberId: "member_mom",
+      inviteCode: "invite_phone",
+      tx,
+    })).rejects.toMatchObject({
+      code: "HOSTED_FAMILY_DIRECT_PAID_TRANSFER_REQUIRED",
+    });
+
+    expect(retrieve).toHaveBeenCalledWith("sub_direct");
+    expect(tx.hostedAccountGroupMembership.upsert).not.toHaveBeenCalled();
+    expect(tx.hostedAccountGroupInvite.updateMany).not.toHaveBeenCalled();
+  });
+
   it("removes sponsored access without deleting the member", async () => {
     const tx = createTxMock();
 
@@ -1514,6 +1548,25 @@ describe("hosted Family plan", () => {
         status: "active",
       },
     }));
+  });
+
+  it("does not remove sponsored access after the owner is suspended", async () => {
+    const tx = createTxMock();
+    tx.hostedMember.findUnique.mockResolvedValueOnce({
+      suspendedAt: new Date("2026-06-18T12:00:00.000Z"),
+    });
+
+    await expect(removeHostedFamilyMemberTx({
+      groupId: "hbag_family",
+      memberId: "member_child",
+      ownerMemberId: "member_owner",
+      tx,
+    })).rejects.toMatchObject({
+      code: "HOSTED_MEMBER_SUSPENDED",
+      httpStatus: 403,
+    });
+
+    expect(tx.hostedAccountGroupMembership.updateMany).not.toHaveBeenCalled();
   });
 
   it("requires active group billing for membership access", () => {
@@ -2734,6 +2787,35 @@ describe("hosted Family plan", () => {
     expect(stripeSubscriptionItemRetrieve).toHaveBeenCalledWith("si_family");
     expect(stripeSubscriptionItemUpdate.mock.calls[0]).toHaveLength(3);
     expect(tx.$queryRaw).toHaveBeenCalledTimes(1);
+    expect(tx.hostedAccountGroupBillingRef.update).not.toHaveBeenCalled();
+  });
+
+  it("does not retrieve or update Stripe seats after the owner is suspended", async () => {
+    const tx = createTxMock({
+      activeMembershipCount: 2,
+      billedSeatCount: 2,
+      pendingInviteCount: 0,
+    });
+    tx.hostedMember.findUnique.mockResolvedValueOnce({
+      suspendedAt: new Date("2026-06-18T12:00:00.000Z"),
+    });
+    const prisma = tx as FamilyPlanTxMock & {
+      $transaction: ReturnType<typeof vi.fn>;
+    };
+    prisma.$transaction = vi.fn((callback) => callback(tx));
+
+    await expect(updateHostedFamilySeatCount({
+      groupId: "hbag_family",
+      now: new Date("2026-06-18T12:00:00.000Z"),
+      ownerMemberId: "member_owner",
+      prisma: prisma as never,
+      targetSeatCount: 3,
+    })).rejects.toMatchObject({
+      code: "HOSTED_MEMBER_SUSPENDED",
+      httpStatus: 403,
+    });
+
+    expect(runtimeMocks.requireHostedStripeApi).not.toHaveBeenCalled();
     expect(tx.hostedAccountGroupBillingRef.update).not.toHaveBeenCalled();
   });
 

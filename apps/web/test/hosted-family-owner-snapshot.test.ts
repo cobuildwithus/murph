@@ -437,11 +437,15 @@ test("phone-bound invite to a full plan is not web-acceptable", async () => {
 
 test("revoke cancels a pending invite for the owner", async () => {
   const tx = {
+    $queryRaw: vi.fn().mockResolvedValue([]),
     hostedAccountGroup: {
       findUnique: vi.fn().mockResolvedValue(GROUP),
     },
     hostedAccountGroupInvite: {
       updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+    },
+    hostedMember: {
+      findUnique: vi.fn().mockResolvedValue({ suspendedAt: null }),
     },
   };
 
@@ -462,11 +466,15 @@ test("revoke cancels a pending invite for the owner", async () => {
 
 test("revoke rejects a non-owner", async () => {
   const tx = {
+    $queryRaw: vi.fn().mockResolvedValue([]),
     hostedAccountGroup: {
       findUnique: vi.fn().mockResolvedValue(GROUP),
     },
     hostedAccountGroupInvite: {
       updateMany: vi.fn(),
+    },
+    hostedMember: {
+      findUnique: vi.fn().mockResolvedValue({ suspendedAt: null }),
     },
   };
 
@@ -484,11 +492,15 @@ test("revoke rejects a non-owner", async () => {
 
 test("revoke returns false when no pending invite matches", async () => {
   const tx = {
+    $queryRaw: vi.fn().mockResolvedValue([]),
     hostedAccountGroup: {
       findUnique: vi.fn().mockResolvedValue(GROUP),
     },
     hostedAccountGroupInvite: {
       updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+    },
+    hostedMember: {
+      findUnique: vi.fn().mockResolvedValue({ suspendedAt: null }),
     },
   };
 
@@ -501,6 +513,34 @@ test("revoke returns false when no pending invite matches", async () => {
   });
 
   expect(revoked).toBe(false);
+});
+
+test("revoke rejects a suspended owner at the mutation boundary", async () => {
+  const tx = {
+    $queryRaw: vi.fn().mockResolvedValue([]),
+    hostedAccountGroup: {
+      findUnique: vi.fn().mockResolvedValue(GROUP),
+    },
+    hostedAccountGroupInvite: {
+      updateMany: vi.fn(),
+    },
+    hostedMember: {
+      findUnique: vi.fn().mockResolvedValue({ suspendedAt: NOW }),
+    },
+  };
+
+  await expect(revokeHostedFamilyInviteTx({
+    groupId: "hbag_1",
+    inviteId: "inv_dad",
+    ownerMemberId: "m_owner",
+    // @ts-expect-error: focused tx double
+    tx,
+  })).rejects.toMatchObject({
+    code: "HOSTED_MEMBER_SUSPENDED",
+    httpStatus: 403,
+  });
+
+  expect(tx.hostedAccountGroupInvite.updateMany).not.toHaveBeenCalled();
 });
 
 function restoreEnv(key: string, value: string | undefined) {

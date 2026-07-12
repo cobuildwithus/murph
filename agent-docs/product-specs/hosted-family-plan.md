@@ -322,17 +322,30 @@ fingerprint. The seat owner holds the existing member Stripe-mutation lock
 while it retrieves and updates the item, verifies the stored subscription and
 canonical Family price, and requires the live quantity to equal the approved
 source count. Proration is derived from that locked live quantity; the webhook
-remains the only local billed-count writer. Replayed cancel/remove requests
+remains the only local billed-count writer. The assistant does not poll that
+webhook-owned read model on the foreground reply path: it reports `applied`
+only when the mutation's immediate owner snapshot already contains the target,
+and otherwise returns `pending` immediately. Replayed cancel/remove requests
 return `unchanged` only when the same owner-scoped row is already revoked/removed;
 unknown ids still return not found. Seat changes report `pending` until the
 existing Stripe webhook reconciles the billed quantity and `applied` only
 after that read model matches. Removal never deletes the member account or
 private data.
 
+Every cancel, removal, and seat mutation locks and rechecks the durable owner
+suspension state at the canonical mutation boundary. Direct paid-start and
+Family invite acceptance also serialize on the accepted member row: paid start
+rechecks active sponsorship before touching Stripe, while acceptance consults
+the live direct subscription when the local trial read model could lag a paid
+transition. Exactly one of sponsorship or direct paid conversion can win.
+
 Optional ids and pricing are additive in the status response so a newer
-consumer can read an older web response. Deploy the consumer before the web
-producer and keep the compatibility window short; cancel/remove must be offered
-only when the corresponding id was actually returned.
+consumer can read an older web response. Deploy the signed web producer before
+the Cloudflare/runner consumer and keep the compatibility window short: old
+runtimes simply do not expose the operation, while a new consumer against old
+web would advertise callbacks whose endpoints do not exist. Roll back the
+consumer before the producer. Cancel/remove must be offered only when the
+corresponding id was actually returned.
 
 ## Implementation Phases
 

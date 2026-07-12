@@ -1,5 +1,6 @@
 import {
   HostedBillingStatus,
+  type Prisma,
   type PrismaClient,
 } from "@prisma/client";
 import type Stripe from "stripe";
@@ -31,6 +32,7 @@ import {
   readHostedMemberStripeBillingRef,
   withHostedMemberStripeMutationLock,
 } from "./hosted-member-billing-store";
+import { readHostedFamilyAccessForMember } from "./family-plan";
 import { readHostedMemberCoreState } from "./hosted-member-store";
 import { isHostedStripeLegacyAiUsageMeteredItem } from "./legacy-usage-price";
 import {
@@ -289,6 +291,40 @@ function buildHostedPulseTrialStartPaidUnsupportedError(): Error {
     httpStatus: 409,
     message: "Start Pulse is only available while your Pulse trial is active.",
   });
+}
+
+async function assertHostedPulseTrialStartPaidMutationAllowedTx(input: {
+  memberId: string;
+  tx: Prisma.TransactionClient;
+}): Promise<void> {
+  const member = await input.tx.hostedMember.findUnique({
+    select: {
+      suspendedAt: true,
+    },
+    where: {
+      id: input.memberId,
+    },
+  });
+  if (!member) {
+    throw hostedOnboardingError({
+      code: "HOSTED_MEMBER_NOT_FOUND",
+      httpStatus: 403,
+      message: "Finish signup from your latest Murph link before continuing.",
+    });
+  }
+  assertHostedMemberNotSuspended(member);
+
+  const sponsorship = await readHostedFamilyAccessForMember({
+    memberId: input.memberId,
+    prisma: input.tx,
+  });
+  if (sponsorship) {
+    throw hostedOnboardingError({
+      code: "HOSTED_BILLING_SPONSORED_MEMBER_UNSUPPORTED",
+      httpStatus: 409,
+      message: "Family-sponsored members cannot start a separate paid plan.",
+    });
+  }
 }
 
 function assertHostedStripeSubscriptionMatchesCustomer(input: {
@@ -663,7 +699,11 @@ async function updateHostedPulseTrialStartPaidSubscription(input: {
     const updatedSubscription = await withHostedMemberStripeMutationLock({
       memberId: input.memberId,
       prisma: input.prisma,
-      run: async () => {
+      run: async (tx) => {
+        await assertHostedPulseTrialStartPaidMutationAllowedTx({
+          memberId: input.memberId,
+          tx,
+        });
         const subscription = await callHostedStripeStartPaidPulseOperation(
           "subscription.update.trial-end-now",
           () => input.stripe.subscriptions.update(input.stripeSubscriptionId, {
@@ -798,7 +838,11 @@ async function resumeHostedPulseTrialStartPaidPausedSubscription(input: {
       const cleanedSubscription = await withHostedMemberStripeMutationLock({
         memberId: input.memberId,
         prisma: input.prisma,
-        run: async () => {
+        run: async (tx) => {
+          await assertHostedPulseTrialStartPaidMutationAllowedTx({
+            memberId: input.memberId,
+            tx,
+          });
           const subscription = await callHostedStripeStartPaidPulseOperation(
             "subscription.update.paused-legacy-metered-cleanup",
             () => input.stripe.subscriptions.update(input.stripeSubscriptionId, {
@@ -842,7 +886,11 @@ async function resumeHostedPulseTrialStartPaidPausedSubscription(input: {
     const resumedSubscription = await withHostedMemberStripeMutationLock({
       memberId: input.memberId,
       prisma: input.prisma,
-      run: async () => {
+      run: async (tx) => {
+        await assertHostedPulseTrialStartPaidMutationAllowedTx({
+          memberId: input.memberId,
+          tx,
+        });
         const subscription = await callHostedStripeStartPaidPulseOperation(
           "subscription.resume.paused-trial",
           () => input.stripe.subscriptions.resume(input.stripeSubscriptionId, {
