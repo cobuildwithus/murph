@@ -36,6 +36,15 @@ const isoDateTimeSchema = z.string().refine(
 );
 const nonNegativeCountSchema = z.number().int().min(0).max(1_000_000);
 
+export const hostedClinicalRecordsSyncRequestedWakeSchema = z.object({
+  eventId: z.string().min(1),
+  generation: z.number().int().min(1).max(Number.MAX_SAFE_INTEGER),
+  kind: z.literal("clinical-records.sync-requested"),
+  occurredAt: z.string().min(1),
+  runId: identifierSchema,
+  userId: z.string().min(1),
+}).strict();
+
 export const hostedClinicalRecordsRetrievalScopeSchema = z.discriminatedUnion("coverage", [
   z.object({
     coverage: z.literal("whole-family"),
@@ -172,6 +181,24 @@ export type HostedClinicalRecordsOutcomeCounts = z.infer<
 export type HostedClinicalRecordsRecordOutcomeRequest = z.infer<
   typeof hostedClinicalRecordsRecordOutcomeRequestSchema
 >;
+export type HostedExecutionClinicalRecordsSyncRequestedWake = z.infer<
+  typeof hostedClinicalRecordsSyncRequestedWakeSchema
+>;
+
+export function buildHostedExecutionClinicalRecordsSyncRequestedWake(
+  input: Omit<HostedExecutionClinicalRecordsSyncRequestedWake, "kind">,
+): HostedExecutionClinicalRecordsSyncRequestedWake {
+  return parseHostedClinicalRecordsSyncRequestedWake({
+    ...input,
+    kind: "clinical-records.sync-requested",
+  });
+}
+
+export function parseHostedClinicalRecordsSyncRequestedWake(
+  value: unknown,
+): HostedExecutionClinicalRecordsSyncRequestedWake {
+  return hostedClinicalRecordsSyncRequestedWakeSchema.parse(value);
+}
 
 export function parseHostedClinicalRecordsRunDescriptor(
   value: unknown,

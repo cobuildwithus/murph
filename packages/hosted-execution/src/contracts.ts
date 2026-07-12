@@ -57,7 +57,6 @@ export const HOSTED_EXECUTION_EVENT_KINDS = [
   "member.channels.updated",
   "member.preferences.updated",
   "assistant.notification.requested",
-  "clinical-records.sync-requested",
   "device-sync.wake",
   "group-newsletter.email-needed",
   ...HOSTED_EXECUTION_RUNTIME_CONTROL_WAKE_KINDS,
@@ -77,7 +76,6 @@ export const HOSTED_EXECUTION_WAKE_KINDS = [
   "member.channels.updated",
   "member.preferences.updated",
   "assistant.notification.requested",
-  "clinical-records.sync-requested",
   "device-sync.wake",
   "group-newsletter.email-needed",
   "vault-share.delivery",
@@ -243,13 +241,6 @@ export interface HostedExecutionDeviceSyncWakeEvent extends HostedExecutionBaseE
     | "reconcile_due";
 }
 
-export interface HostedExecutionClinicalRecordsSyncRequestedEvent
-  extends HostedExecutionBaseEvent {
-  generation: number;
-  kind: "clinical-records.sync-requested";
-  runId: string;
-}
-
 export type HostedExecutionGroupNewsletterEmailNeededDirectRouteChannel =
   | "linq"
   | "telegram";
@@ -287,7 +278,6 @@ export type HostedExecutionEvent =
   | HostedExecutionMemberChannelsUpdatedEvent
   | HostedExecutionMemberPreferencesUpdatedEvent
   | HostedExecutionAssistantNotificationRequestedEvent
-  | HostedExecutionClinicalRecordsSyncRequestedEvent
   | HostedExecutionDeviceSyncWakeEvent
   | HostedExecutionGroupNewsletterEmailNeededEvent
   | HostedExecutionRuntimeControlRequestedEvent;
@@ -497,13 +487,6 @@ export interface HostedExecutionDeviceSyncWake extends HostedExecutionBaseWake {
   reason: HostedExecutionDeviceSyncWakeEvent["reason"];
 }
 
-export interface HostedExecutionClinicalRecordsSyncRequestedWake
-  extends HostedExecutionBaseWake {
-  generation: number;
-  kind: "clinical-records.sync-requested";
-  runId: string;
-}
-
 export interface HostedExecutionGroupNewsletterEmailNeededWake extends HostedExecutionBaseWake {
   directRoute?: HostedExecutionGroupNewsletterEmailNeededDirectRoute | null;
   groupDisplayName: string | null;
@@ -536,7 +519,6 @@ export type HostedExecutionWake =
   | HostedExecutionMemberChannelsUpdatedWake
   | HostedExecutionMemberPreferencesUpdatedWake
   | HostedExecutionAssistantNotificationRequestedWake
-  | HostedExecutionClinicalRecordsSyncRequestedWake
   | HostedExecutionDeviceSyncWake
   | HostedExecutionGroupNewsletterEmailNeededWake
   | HostedExecutionVaultShareDeliveryWake

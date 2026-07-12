@@ -3,7 +3,6 @@ import type {
   HostedExecutionConversationMessageWake,
   HostedExecutionAssistantNotificationRequestedPayload,
   HostedExecutionAssistantNotificationRequestedWake,
-  HostedExecutionClinicalRecordsSyncRequestedWake,
   HostedExecutionDeviceSyncWake,
   HostedExecutionDeviceSyncWakeEvent,
   HostedExecutionGroupNewsletterEmailNeededWake,
@@ -540,23 +539,6 @@ export function buildHostedExecutionDeviceSyncWake(input: {
     occurredAt: input.occurredAt,
     ...(input.provider === undefined ? {} : { provider: input.provider }),
     reason: input.reason,
-    userId: input.userId,
-  };
-}
-
-export function buildHostedExecutionClinicalRecordsSyncRequestedWake(input: {
-  eventId: string;
-  generation: number;
-  occurredAt: string;
-  runId: string;
-  userId: string;
-}): HostedExecutionClinicalRecordsSyncRequestedWake {
-  return {
-    eventId: input.eventId,
-    generation: input.generation,
-    kind: "clinical-records.sync-requested",
-    occurredAt: input.occurredAt,
-    runId: input.runId,
     userId: input.userId,
   };
 }

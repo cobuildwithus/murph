@@ -23,7 +23,6 @@ import type {
   HostedExecutionAssistantNotificationDeliveryDispatchMode,
   HostedExecutionAssistantNotificationDeliverySource,
   HostedExecutionAssistantNotificationFirstContactPolicy,
-  HostedExecutionClinicalRecordsSyncRequestedEvent,
   HostedExecutionAssistantNotificationRequestedPayload,
   HostedExecutionAssistantNotificationResponsePolicy,
   HostedExecutionMemberActivationSignupWelcome,
@@ -55,7 +54,6 @@ import {
 } from "./observability.ts";
 import {
   buildHostedExecutionAssistantNotificationRequestedWake,
-  buildHostedExecutionClinicalRecordsSyncRequestedWake,
   buildHostedExecutionEmailConversationMessageWake,
   buildHostedExecutionLinqConversationMessageWake,
   buildHostedExecutionMemberActivatedWake,
@@ -72,7 +70,6 @@ import {
   rejectLegacyAliases,
   requireArray,
   requireBoolean,
-  requireNumber,
   requireObject,
   requireString,
   readNullableNumber,
@@ -254,25 +251,6 @@ export function parseHostedExecutionWake(value: unknown): HostedExecutionWake {
           "Hosted execution wake assistant.notification.requested notification",
         ),
         occurredAt,
-      });
-    case "clinical-records.sync-requested":
-      assertExactHostedClinicalRecordsKeys(
-        record,
-        ["eventId", "generation", "kind", "occurredAt", "runId", "userId"],
-        "Hosted execution wake clinical-records.sync-requested",
-      );
-      return buildHostedExecutionClinicalRecordsSyncRequestedWake({
-        eventId,
-        generation: parseHostedExecutionPositiveGeneration(
-          record.generation,
-          "Hosted execution wake clinical-records.sync-requested generation",
-        ),
-        occurredAt,
-        runId: requireString(
-          record.runId,
-          "Hosted execution wake clinical-records.sync-requested runId",
-        ),
-        userId: wireUserId,
       });
     case "device-sync.wake":
       return buildHostedExecutionDeviceSyncWake({
@@ -916,24 +894,6 @@ export function parseHostedExecutionEvent(value: unknown): HostedExecutionEvent 
         ),
         userId,
       };
-    case "clinical-records.sync-requested":
-      assertExactHostedClinicalRecordsKeys(
-        record,
-        ["generation", "kind", "runId", "userId"],
-        "Hosted execution clinical-records.sync-requested",
-      );
-      return {
-        generation: parseHostedExecutionPositiveGeneration(
-          record.generation,
-          "Hosted execution clinical-records.sync-requested generation",
-        ),
-        kind,
-        runId: requireString(
-          record.runId,
-          "Hosted execution clinical-records.sync-requested runId",
-        ),
-        userId,
-      } satisfies HostedExecutionClinicalRecordsSyncRequestedEvent;
     case "device-sync.wake":
       return {
         ...(record.connectionId === undefined
@@ -1274,27 +1234,6 @@ function parseHostedExecutionWakeKind(value: unknown, label: string): HostedExec
     throw new TypeError(`${label} is invalid.`);
   }
   return kind;
-}
-
-function parseHostedExecutionPositiveGeneration(value: unknown, label: string): number {
-  const generation = requireNumber(value, label);
-  if (!Number.isSafeInteger(generation) || generation < 1) {
-    throw new TypeError(`${label} must be a positive safe integer.`);
-  }
-  return generation;
-}
-
-function assertExactHostedClinicalRecordsKeys(
-  record: Record<string, unknown>,
-  keys: readonly string[],
-  label: string,
-): void {
-  const allowed = new Set(keys);
-  for (const key of Object.keys(record)) {
-    if (!allowed.has(key)) {
-      throw new TypeError(`${label} contains unsupported field ${JSON.stringify(key)}.`);
-    }
-  }
 }
 
 function parseHostedCodexAuthAction(value: unknown): HostedCodexAuthAction {
