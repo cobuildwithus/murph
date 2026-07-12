@@ -1563,20 +1563,26 @@ describe("executeHostedMailboxEvent", () => {
     expect(seedInput?.instructions).toContain(
       "If completion succeeds, archive this automation, then return skip.",
     );
-    expect(seedInput?.instructions).toContain(
+    expect(seedInput?.instructions).not.toContain(
       "If a promised follow-through or next step in the member's agreed support loop is due, do that first.",
     );
     expect(seedInput?.instructions).toContain(
       "Otherwise use exactly the next unresolved step from the onboarding skill, including its required bridge before foundation questions and its targeted-read rules for omitted, truncated, or errored evidence.",
     );
     expect(seedInput?.instructions).toContain(
-      "If the latest onboarding question is unanswered, do not rotate to another setup question or repeat it through this daily automation; return skip unless a separate agreed support action is due.",
+      "This automation never owns a promised check-in, reminder, or proactive support action.",
     );
     expect(seedInput?.instructions).toContain(
-      "Honor requested timing, and return skip whenever there is no timely, useful continuation.",
+      "Those use the canonical plan and dedicated automation required by `behavior-followthrough`, which owns timing, due evaluation, delivery, retry, and skip behavior.",
     );
     expect(seedInput?.instructions).toContain(
-      "Output: send one brief, natural, low-pressure in-chat continuation only when it advances the member's support or foundation.",
+      "If the latest onboarding question is unanswered, do not rotate to another setup question or repeat it through this daily automation; return skip.",
+    );
+    expect(seedInput?.instructions).toContain(
+      "Honor requested timing, and return skip whenever there is no timely, useful onboarding continuation.",
+    );
+    expect(seedInput?.instructions).toContain(
+      "Output: send one brief, natural, low-pressure in-chat continuation only when it advances unfinished onboarding.",
     );
     expect(seedInput?.instructions).toContain("Ask at most one question.");
     expect(seedInput?.instructions).toContain(
@@ -1584,7 +1590,7 @@ describe("executeHostedMailboxEvent", () => {
     );
     expect(seedInput?.instructions).toContain("available recent user messages");
     expect(seedInput?.instructions).toContain(
-      "one skill-approved support action or question usefully advances the relationship",
+      "one skill-approved onboarding action or question usefully advances the relationship",
     );
     expect(seedInput?.instructions).not.toContain("The six checkpoints are");
     expect(seedInput?.instructions).toContain("return skip");

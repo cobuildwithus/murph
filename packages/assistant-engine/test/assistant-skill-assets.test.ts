@@ -1493,6 +1493,15 @@ describe('assistant skill assets', () => {
       'Agreement to a future review or support loop alone does not count.',
     )
     expect(compact).toContain(
+      'The loop may be quiet and member-initiated: Murph helps when the user returns, with a clear review point but no proactive promise.',
+    )
+    expect(compact).toContain(
+      'If Murph promises a future check-in, reminder, or other proactive support, read `behavior-followthrough` and require its canonical plan and dedicated support automation writes to succeed before treating the loop as established.',
+    )
+    expect(compact).toContain(
+      'The onboarding follow-up automation never owns that support timing, due evaluation, delivery, or retry.',
+    )
+    expect(compact).toContain(
       'An experiment, wearable connection, lab upload, group, or specific positive health fact is not required.',
     )
     expect(compact).toContain(

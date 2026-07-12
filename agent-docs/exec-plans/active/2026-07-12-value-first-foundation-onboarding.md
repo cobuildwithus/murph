@@ -25,12 +25,15 @@ Done:
 - Removed the automation's duplicated conversation state machine and added targeted canonical reads for truncated or omitted resume evidence.
 - Passed the focused assistant-engine and hosted-runtime tests, the full assistant-engine suite, docs gardening/drift, diff hygiene, and privacy scan.
 - Completed the required independent prompt-review loop with zero remaining actionable findings.
+- Rebased onto current `main`, preserved the newer evidence-first and group-newsletter guidance, and re-ran focused proof without manual-conflict residue.
+- Accepted and fixed ReviewGPT round 1's ownership finding: proactive follow-through now requires the existing behavior-followthrough plan plus dedicated automation, while the onboarding automation only resumes unfinished onboarding.
+- Re-ran the prompt-review pass after that fix with zero remaining actionable findings; full assistant-engine and focused hosted-runtime suites pass.
 
 Now:
-- Commit the stable revision and rebase it onto current `origin/main`.
+- Commit and push the accepted ReviewGPT fix, then run the next ReviewGPT round.
 
 Next:
-- Re-run affected proof after reconciliation, close this plan, push, run the ReviewGPT loop to zero accepted findings, and prove CI/mergeability.
+- Reach zero accepted ReviewGPT findings, prove CI/mergeability, and close this plan.
 
 Open questions (UNCONFIRMED if needed):
 - The funding amount for the investor pitch remains intentionally unspecified; it does not block this onboarding revision.

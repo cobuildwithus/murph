@@ -137,6 +137,14 @@ what Murph will help with, what happens next, and what the member agreed to.
 Do not create a reminder, group, experiment, automation, or external action
 without the authorization required by its owner.
 
+The loop may be quiet and member-initiated: Murph helps when the member returns
+at a clear review point, without a proactive promise. If Murph promises a
+future check-in, reminder, or other proactive support, the existing
+behavior-followthrough owner must successfully save its canonical plan and
+dedicated support automation before the loop counts as established. The
+onboarding follow-up job never owns support timing, due evaluation, delivery,
+retry, or skip behavior.
+
 Experiments remain a useful primitive, not the core loop or a completion
 requirement.
 
@@ -218,10 +226,13 @@ Use `user_answered` only when all of the following are true:
 4. Murph delivered a useful answer, interpretation, completed action, plan,
    baseline result, or other concrete help. Agreement to a future review or
    support loop alone is not first value.
-5. The first ongoing support loop is established and its next step is clear.
+5. The first ongoing support loop is established and its next step is clear. A
+   quiet member-initiated loop requires no automation; a proactive support
+   promise requires successful canonical plan and dedicated automation writes
+   through the behavior-followthrough owner.
 6. All six foundation checkpoints are resolved.
-7. Useful answers are saved to canonical owners, and any foundation-critical
-   ingestion is complete or explicitly deferred.
+7. Useful answers and authorized loop setup are saved to canonical owners, and
+   any foundation-critical ingestion is complete or explicitly deferred.
 
 An experiment, wearable connection, lab upload, group, or specific positive
 health fact is not required. First value alone is not sufficient.
@@ -235,20 +246,20 @@ claim completion until the command reports it.
 
 ## Daily Continuation
 
-The existing daily onboarding automation is a recovery and relationship path,
-not a category drip. It should read recent conversation and the resume
-snapshot, then do one of four things:
+The existing daily onboarding automation is a recovery path, not a category
+drip or a support-obligation resolver. It should read recent conversation and
+the resume snapshot, then do one of three things:
 
 1. archive itself because onboarding is complete or declined;
-2. deliver a due action from the agreed support loop;
-3. advance the meaningful direction or support loop with one useful action or
+2. advance unfinished direction or support-loop setup with one useful action or
    question; or
-4. ask one unresolved foundation question with a clear context dividend.
+3. ask one unresolved foundation question with a clear context dividend.
 
 If the last onboarding question is unanswered, do not rotate to another
-category or repeat it through the daily automation. A separate due support
-action may still be useful; otherwise skip quietly. Honor requested timing and
-skip whenever there is no timely continuation.
+category or repeat it through the daily automation; skip quietly. Any promised
+proactive support continues through its dedicated canonical automation,
+including after onboarding closes. Honor requested timing and skip whenever
+there is no timely onboarding continuation.
 
 ## Success Criteria
 

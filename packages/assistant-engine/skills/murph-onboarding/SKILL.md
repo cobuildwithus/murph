@@ -169,6 +169,13 @@ will help with, what happens next, and what the user agreed to. Do not create a
 reminder, automation, group, experiment, or external action without the
 authorization required by its owner.
 
+The loop may be quiet and member-initiated: Murph helps when the user returns,
+with a clear review point but no proactive promise. If Murph promises a future
+check-in, reminder, or other proactive support, read `behavior-followthrough`
+and require its canonical plan and dedicated support automation writes to
+succeed before treating the loop as established. The onboarding follow-up
+automation never owns that support timing, due evaluation, delivery, or retry.
+
 When relevant medical, medication, supplement, pregnancy, allergy, or lab
 context could change safety or selection, pull that foundation checkpoint
 forward before finalizing the loop. Otherwise establish the loop first and
@@ -286,11 +293,14 @@ Onboarding is complete with `user_answered` only when all of these are true:
 4. Murph delivered first value: a useful answer, interpretation, completed
    action, plan, baseline result, or other concrete help. Agreement to a future
    review or support loop alone does not count.
-5. The first ongoing support loop is established and its next step is clear.
+5. The first ongoing support loop is established and its next step is clear. A
+   quiet member-initiated loop needs no automation; a proactive support promise
+   requires successful canonical plan and dedicated automation writes through
+   `behavior-followthrough`.
 6. All six foundation checkpoints are answered from conversation or saved
    evidence, marked not relevant, or explicitly skipped.
-7. Useful answers are saved to canonical owners, and any foundation-critical
-   ingestion is complete or explicitly deferred.
+7. Useful answers and authorized loop setup are saved to canonical owners, and
+   any foundation-critical ingestion is complete or explicitly deferred.
 
 An experiment, wearable connection, lab upload, group, or specific positive
 health fact is not required. The checkpoint is required; the user can answer
