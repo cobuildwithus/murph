@@ -54,12 +54,13 @@ Settings:
   Pulse phase and reconciliation changes the current billing state. After that
   boundary, Terra is effective while the stored Sol intent remains available
   for a later Edge reactivation.
-- The existing signed workspace read projects either an eligible person-member
-  Sol intent or the derived thread-container Sol default to the runner at the
-  next hosted invocation boundary. An already-active invocation can retain its
-  model snapshot through its bounded 180-second idle window. Settings states
-  that an idle run can take up to three minutes to close so a person member does
-  not mistake that bounded delay for a failed save.
+- The single web-owned resolver projects either an eligible person-member Sol
+  intent or the derived thread-container Sol default through the existing signed
+  workspace read at the next hosted invocation boundary. Cloudflare only
+  consumes that resolved optional override. An already-active invocation can
+  retain its model snapshot through its bounded 180-second idle window. Settings
+  states that an idle run can take up to three minutes to close so a person
+  member does not mistake that bounded delay for a failed save.
 - Changing the preference does not create a mailbox item, wake, queue, or a
   second copy in the vault or hosted workspace snapshot.
 

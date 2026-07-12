@@ -1,6 +1,6 @@
 # Group Health Newsletter
 
-Last verified: 2026-07-10
+Last verified: 2026-07-12
 Status: Specified (not yet implemented)
 
 ## Current State
@@ -97,11 +97,16 @@ A cron automation persisted in the **group runtime's** vault (`bank/automations/
 Derived at send time, not persisted:
 
 ```
-participants = group roster ∩ members who granted group-email.v0
-featured      = participants who also granted disclosed health projections (else nothing to feature)
+authorized = group roster ∩ members who granted group-email.v0
+recipients = authorized ∩ members with a resolvable verified email
+featured   = recipients ∩ members with a consented current weekly health stat
 ```
 
-The single shared email is sent to all **participants** (`To`: all participant addresses). Its body features the **featured** members plus a few group superlatives. Roster + granted kinds come from `readHostedGroupMemberRoster` (`group-store.ts`); member id → display name from the auto-granted `profile-name.v0` share.
+The single shared email is sent to all **recipients** (`To`: all recipient
+addresses). Its body uses health data only from the **featured** members plus
+eligible group comparisons. Roster + granted kinds come from
+`readHostedGroupMemberRoster` (`group-store.ts`); member id → display name from
+the auto-granted `profile-name.v0` share.
 
 ## Content and Tone
 
@@ -109,7 +114,34 @@ The single shared email is sent to all **participants** (`To`: all participant a
 
 Whatever the member consented to share with the group, no more. Per-member weekly stats are built from the health projections that land in the group vault as `murph.shared-vault-projections.v1` (`packages/assistant-runtime/src/hosted-runtime/vault-share-import.ts`), aggregated with the existing week-over-week engine `buildOverviewWeeklyStatsFromDailySampleSummaries` (`packages/query/src/overview-weekly-stats.ts`). Projection delivery carries up to seven records per projection kind so a single delivery can refill a full weekly window after a quiet member runtime. One shared body; everyone on the thread sees the same digest.
 
-Default content: per featured member, steps total + Δ, avg sleep + Δ, workout count, one standout (PR or "most improved"), one gentle focus area; plus group superlatives (top mover, best sleeper, biggest improvement).
+Default content is a selective weekly story, not one repeated metric block per
+featured member. Lead with the strongest close race, leader, comeback,
+surprising combination, or group shift; use the returned stats that develop
+that story. Cross-person comparisons may include exercise, movement, steps,
+sleep duration, sleep timing, consistency, and other consented group
+metrics. Personal week-over-week change remains useful alongside absolute
+leaders. Do not rank "healthiest person" or default to raw biomarker
+leaderboards; use HRV, resting heart rate, weight, symptoms, and similar
+context-dependent measures mainly for personal change or group-level patterns
+unless the group explicitly chose that challenge metric.
+
+Express durations in human units. Use "about 30 minutes of exercise a day"
+instead of raw minute totals. The newsletter `activity-minutes`
+`currentWeekAvg` is built from workout minutes per observed day, and the
+current payload has no coverage count or weekly total, so present it as daily
+exercise and never multiply it into a weekly sum. The current `workout-count`
+average omits zero-workout days, so it
+cannot support weekly workout totals or workout-count rankings. The payload
+also cannot support monthly or four-week highs because it exposes only current
+and previous-week averages. Call genuinely broad activity "movement" and
+reserve "exercise" for workout/exercise sources. A normal rich edition may use
+roughly 6–12 useful stats, but every number should establish a leader, race,
+comeback, surprise, or group trend instead of merely proving the field was
+available. Omit missing-data callouts. Build the featured set only from
+participants with a verified email and at least one weekly stat whose current
+average is non-null; do not use any other participant's health data in the
+subject or body. Use week-over-week comparisons only when both current and
+previous averages are non-null.
 
 ### Tone
 
@@ -139,7 +171,14 @@ The participant address list is assembled **web-side at send time** from members
 
 ### No-email-yet member
 
-Grant and address are decoupled: a member grants email permission at join even with **no verified email**. At each run, a participant with no resolvable address is **skipped for now** and Murph posts one in-chat nudge with `…/settings?addEmail=true`. When they add + verify an email (existing Privy → `/api/settings/email/sync` flow), the **next edition includes them automatically**. The `?addEmail=true` deep-link is a small web addition (copy the `home`/`connect` searchParams pattern; the settings dialog already auto-routes headless-vs-Privy-modal).
+Grant and address are decoupled: a member grants email permission at join even
+with **no verified email**. At each run, a participant with no resolvable
+address is **skipped for now** and Murph posts one nudge in that member's own
+private Murph thread with `…/settings?addEmail=true`. When they add + verify an
+email (existing Privy → `/api/settings/email/sync` flow), the **next edition
+includes them automatically**. The `?addEmail=true` deep-link is a small web
+addition (copy the `home`/`connect` searchParams pattern; the settings dialog
+already auto-routes headless-vs-Privy-modal).
 
 ## Opt-out
 
@@ -156,7 +195,15 @@ Individual and self-service. A member says "take me off the newsletter" **in the
 
 ## The Skill
 
-Add a `group-newsletter` entry to `ASSISTANT_SKILLS` (`packages/assistant-engine/src/assistant-skill-assets.ts`) and a `packages/assistant-engine/skills/group-newsletter/SKILL.md`, or extend `group-chat/SKILL.md` "Scheduled updates and automations." The skill teaches Murph to: ask the short setup question set before creating anything, apply the group-chosen name and schedule, route chat delivery to a normal scheduled group-chat update automation, ensure email sharing is requested for email delivery, author/edit/stop the email automation, **announce before the first send and honor the opt-out window**, compose the shared digest in-tone from the shared projections, send the group thread, take part in thread replies, and handle opt-out. It carries no durable state itself; state lives in the automation and the grants.
+The dedicated `group-newsletter` assistant skill owns the editorial story,
+human-readable units, comparison rules, subject, tone, calibrated examples, and
+final email. The `group-chat` skill owns the room-level setup questions,
+group-chosen name and schedule, chat-delivery routing, email-share offer,
+announce-before-first-send behavior, and opt-out handling. Saved automation
+instructions explicitly tell every future scheduled run to read the newsletter
+skill because notification turns may not retain the setup conversation or load
+the group-chat skill. The skill carries no durable state itself; state lives in
+the automation and grants.
 
 ## Net-New Surface (summary)
 

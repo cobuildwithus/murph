@@ -423,6 +423,42 @@ describe("hosted group newsletter participants", () => {
     });
   });
 
+  it("still enqueues the joining-member nudge when Stripe supplied only an unverified email hint", async () => {
+    const prisma = createPrismaMock();
+    mocks.getPrisma.mockReturnValue(prisma);
+    mocks.readHostedMemberEmailAuthorization.mockResolvedValue({
+      directPublicSender: null,
+      memberId: "member_active_missing_email",
+      stripeCheckoutEmail: {
+        address: "checkout-hint@example.test",
+        collectedAt: new Date("2026-07-12T12:00:00.000Z"),
+      },
+      verifiedEmail: null,
+    });
+
+    await enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort({
+      groupId: "hgrp_123",
+      memberId: "member_active_missing_email",
+    });
+
+    expect(mocks.readHostedMemberEmailAuthorization).toHaveBeenCalledWith({
+      memberId: "member_active_missing_email",
+      prisma,
+    });
+    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledWith({
+      envelope: expect.objectContaining({
+        eventId: "group-newsletter.email-needed:member_active_missing_email:hgrp_123",
+        kind: "group-newsletter.email-needed",
+        userId: "member_active_missing_email",
+      }),
+      tx: prisma,
+    });
+    expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
+      expectedUserId: "member_active_missing_email",
+      mailboxItemId: "mailbox_item_email_needed",
+    });
+  });
+
   it("does not enqueue a joining-member nudge without the email grant", async () => {
     const prisma = createPrismaMock({ emailGrant: false });
     mocks.getPrisma.mockReturnValue(prisma);
