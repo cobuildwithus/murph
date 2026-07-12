@@ -1,9 +1,18 @@
+import {
+  CLINICAL_FHIR_RESOURCE_TYPES,
+  clinicalFhirResourceTypeSchema,
+  clinicalFhirRetrievalScopeSchema,
+  clinicalFhirRetrievalScopesSchema,
+  clinicalIsoDateTimeSchema,
+  clinicalSourceSystemSchema,
+} from "@murphai/clinical-records";
 import { z } from "zod";
 
 export const HOSTED_CLINICAL_RECORDS_MAX_PAGE_BODY_CHARS = 5 * 1024 * 1024;
 export const HOSTED_CLINICAL_RECORDS_MAX_TOTAL_BODY_BYTES = 32 * 1024 * 1024;
 export const HOSTED_CLINICAL_RECORDS_MAX_PAGES = 500;
-export const HOSTED_CLINICAL_RECORDS_MAX_RESOURCE_FAMILIES = 14;
+export const HOSTED_CLINICAL_RECORDS_MAX_RESOURCE_FAMILIES =
+  CLINICAL_FHIR_RESOURCE_TYPES.length;
 export const HOSTED_CLINICAL_RECORDS_MAX_CURSOR_CHARS = 2_048;
 export const HOSTED_CLINICAL_RECORDS_AUTHORIZATION_REQUIRED_ERROR_CODE =
   "authorization-required";
@@ -25,15 +34,6 @@ const errorCodeSchema = z
   .min(1)
   .max(80)
   .regex(/^[a-z0-9]+(?:[._-][a-z0-9]+)*$/u);
-const resourceTypeSchema = z
-  .string()
-  .min(1)
-  .max(80)
-  .regex(/^[A-Z][A-Za-z0-9]+$/u);
-const isoDateTimeSchema = z.string().refine(
-  (value) => /^\d{4}-\d{2}-\d{2}T/u.test(value) && Number.isFinite(Date.parse(value)),
-  "Expected an ISO date-time.",
-);
 const nonNegativeCountSchema = z.number().int().min(0).max(1_000_000);
 
 export const hostedClinicalRecordsSyncRequestedWakeSchema = z.object({
@@ -45,50 +45,17 @@ export const hostedClinicalRecordsSyncRequestedWakeSchema = z.object({
   userId: z.string().min(1),
 }).strict();
 
-export const hostedClinicalRecordsRetrievalScopeSchema = z.discriminatedUnion("coverage", [
-  z.object({
-    coverage: z.literal("whole-family"),
-    queryFingerprint: sha256Schema,
-    resourceType: resourceTypeSchema,
-  }).strict(),
-  z.object({
-    coverage: z.literal("bounded-window"),
-    from: isoDateTimeSchema,
-    queryFingerprint: sha256Schema,
-    resourceType: resourceTypeSchema,
-    to: isoDateTimeSchema,
-  }).strict().superRefine((scope, context) => {
-    if (Date.parse(scope.from) >= Date.parse(scope.to)) {
-      context.addIssue({
-        code: "custom",
-        message: "Expected bounded retrieval scope from to precede to.",
-        path: ["from"],
-      });
-    }
-  }),
-]);
+export const hostedClinicalRecordsRetrievalScopeSchema =
+  clinicalFhirRetrievalScopeSchema;
 
 const hostedClinicalRecordsRetrievalScopesSchema = z
   .array(hostedClinicalRecordsRetrievalScopeSchema)
   .min(1)
-  .max(HOSTED_CLINICAL_RECORDS_MAX_RESOURCE_FAMILIES)
-  .superRefine((scopes, context) => {
-    const seen = new Set<string>();
-    scopes.forEach((scope, index) => {
-      if (seen.has(scope.resourceType)) {
-        context.addIssue({
-          code: "custom",
-          message: "Expected one retrieval scope per FHIR resource family.",
-          path: [index, "resourceType"],
-        });
-      }
-      seen.add(scope.resourceType);
-    });
-  });
+  .pipe(clinicalFhirRetrievalScopesSchema);
 
 export const hostedClinicalRecordsRunDescriptorSchema = z.object({
   connectionId: identifierSchema,
-  fetchedAt: isoDateTimeSchema,
+  fetchedAt: clinicalIsoDateTimeSchema,
   fhirBaseUrlHash: sha256Schema,
   generation: z.number().int().min(1),
   grantedScopes: z.array(z.string().min(1).max(200)).max(50),
@@ -98,7 +65,7 @@ export const hostedClinicalRecordsRunDescriptorSchema = z.object({
   retrievalJobId: identifierSchema,
   retrievalScopes: hostedClinicalRecordsRetrievalScopesSchema,
   runId: identifierSchema,
-  sourceSystem: z.string().min(1).max(80).regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/u),
+  sourceSystem: clinicalSourceSystemSchema,
 }).strict();
 
 export const hostedClinicalRecordsReadRunResponseSchema = z.discriminatedUnion("status", [
@@ -117,7 +84,7 @@ export const hostedClinicalRecordsFetchPageRequestSchema = z.object({
   cursor: z.string().min(1).max(HOSTED_CLINICAL_RECORDS_MAX_CURSOR_CHARS).nullable(),
   generation: z.number().int().min(1),
   requestId: identifierSchema,
-  resourceType: resourceTypeSchema,
+  resourceType: clinicalFhirResourceTypeSchema,
   runId: identifierSchema,
 }).strict();
 

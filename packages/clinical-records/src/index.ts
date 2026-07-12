@@ -92,7 +92,7 @@ export const clinicalFhirManifestPathSchema = clinicalRawPathSchema.refine((valu
 
 export const fhirResourceTypeSlugSchema = z.string().regex(SLUG_PATTERN);
 
-const isoDateTimeTextSchema = z.string().refine(
+export const clinicalIsoDateTimeSchema = z.string().refine(
   (value) => isStrictIsoDateTime(value),
   "Invalid ISO date-time string.",
 );
@@ -172,10 +172,10 @@ export const clinicalFhirRetrievalScopeSchema = z.discriminatedUnion("coverage",
   z
     .object({
       coverage: z.literal("bounded-window"),
-      from: isoDateTimeTextSchema,
+      from: clinicalIsoDateTimeSchema,
       queryFingerprint: sha256HexSchema,
       resourceType: clinicalFhirResourceTypeSchema,
-      to: isoDateTimeTextSchema,
+      to: clinicalIsoDateTimeSchema,
     })
     .strict()
     .superRefine((scope, context) => {
@@ -189,7 +189,7 @@ export const clinicalFhirRetrievalScopeSchema = z.discriminatedUnion("coverage",
     }),
 ]);
 
-const clinicalFhirRetrievalScopesSchema = z
+export const clinicalFhirRetrievalScopesSchema = z
   .array(clinicalFhirRetrievalScopeSchema)
   .max(CLINICAL_FHIR_RESOURCE_TYPES.length)
   .superRefine((scopes, context) => {
@@ -224,7 +224,7 @@ export const clinicalRawManifestSchema = z
     sourceSystem: clinicalSourceSystemSchema,
     fhirBaseUrlHash: sha256HexSchema,
     patientIdHash: sha256HexSchema,
-    fetchedAt: isoDateTimeTextSchema,
+    fetchedAt: clinicalIsoDateTimeSchema,
     resourceFiles: clinicalRawManifestResourceFilesSchema,
     retrievalScopes: clinicalFhirRetrievalScopesSchema,
     completedResourceTypes: clinicalRawManifestCompletedResourceTypesSchema,

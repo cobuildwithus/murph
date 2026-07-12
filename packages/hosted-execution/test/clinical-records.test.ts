@@ -1,7 +1,13 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  CLINICAL_FHIR_RESOURCE_TYPES,
+  clinicalFhirRetrievalScopeSchema,
+} from "@murphai/clinical-records";
+import {
+  HOSTED_CLINICAL_RECORDS_MAX_RESOURCE_FAMILIES,
   buildHostedExecutionClinicalRecordsSyncRequestedWake,
+  hostedClinicalRecordsRetrievalScopeSchema,
   parseHostedClinicalRecordsFetchPageResponse,
   parseHostedClinicalRecordsReadRunResponse,
   parseHostedClinicalRecordsRunDescriptor,
@@ -95,6 +101,47 @@ describe("clinical records hosted execution contracts", () => {
       runId: "clinical_run_1",
       sourceSystem: "epic-fhir",
     });
+  });
+
+  it("reuses canonical clinical domain validation at the hosted boundary", () => {
+    expect(hostedClinicalRecordsRetrievalScopeSchema)
+      .toBe(clinicalFhirRetrievalScopeSchema);
+    expect(HOSTED_CLINICAL_RECORDS_MAX_RESOURCE_FAMILIES)
+      .toBe(CLINICAL_FHIR_RESOURCE_TYPES.length);
+
+    const descriptor = {
+      connectionId: "connection_1",
+      fetchedAt: "2026-07-10T12:00:00.000Z",
+      fhirBaseUrlHash: HASH,
+      generation: 1,
+      grantedScopes: ["patient/*.read"],
+      patientIdHash: HASH,
+      requestedScopes: ["patient/*.read"],
+      retrievalJobId: "job_1",
+      retrievalScopes: [{
+        coverage: "whole-family",
+        queryFingerprint: HASH,
+        resourceType: "Observation",
+      }],
+      runId: "clinical_run_1",
+      sourceSystem: "epic-fhir",
+    };
+
+    expect(() => parseHostedClinicalRecordsRunDescriptor({
+      ...descriptor,
+      sourceSystem: "unsupported-fhir",
+    })).toThrow();
+    expect(() => parseHostedClinicalRecordsRunDescriptor({
+      ...descriptor,
+      retrievalScopes: [{
+        ...descriptor.retrievalScopes[0],
+        resourceType: "Medication",
+      }],
+    })).toThrow();
+    expect(() => parseHostedClinicalRecordsRunDescriptor({
+      ...descriptor,
+      fetchedAt: "2026-02-30T12:00:00.000Z",
+    })).toThrow();
   });
 
   it("fails closed on extra run fields and malformed fetch responses", () => {
