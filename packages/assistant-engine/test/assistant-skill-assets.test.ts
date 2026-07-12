@@ -361,12 +361,16 @@ describe('assistant skill assets', () => {
     if (!groupChatSkill) return
 
     const raw = await readSkillFile(groupChatSkill)
+    expect(raw).toContain('$MURPH_ASSISTANT_SKILLS_ROOT/group-newsletter/SKILL.md')
     expect(raw).toContain('do not create it immediately with invented')
     expect(raw).toContain('group wants to call it')
     expect(raw).toContain('default reaction-share scope')
     expect(raw).toContain('sleep timing')
     expect(raw).toContain('workout summaries, resting heart rate, and HRV')
     expect(raw).toContain('Let the group widen')
+    expect(raw).toContain('current group\'s non-blank `displayName`')
+    expect(raw).toContain('before inventing a')
+    expect(raw).toContain('generic default')
     expect(raw).toContain('pass that same chosen name as `displayName`')
     expect(raw).toContain('`murph.group action="post_join_offer"`')
     expect(raw).toContain('`murph.group action="create_join_link"`')
@@ -376,6 +380,8 @@ describe('assistant skill assets', () => {
     expect(raw).toContain('If the group wants the recurring update in the chat instead of email')
     expect(raw).toContain('vault-cli automation save')
     expect(raw).toContain("the group's chosen name as the positional `<title>`")
+    expect(raw).toContain('require every email subject to start with that exact name')
+    expect(raw).toContain('Future notification turns may not read this skill')
     expect(raw).toContain('Use exactly `--slug group-health-newsletter`')
     expect(raw).toContain('Any other slug will not be able to send')
     expect(raw).toContain('vault-cli automation set-status group-health-newsletter --status archived')
@@ -387,8 +393,8 @@ describe('assistant skill assets', () => {
     expect(raw).toContain('next natural cron occurrence')
     expect(raw).toContain('Never create an')
     expect(raw).toContain('never call `murph.newsletter` `send` right after')
-    expect(raw).toContain('/settings?addEmail=true')
-    expect(raw).toContain('nobody has enabled email sharing')
+    expect(raw).toContain('complete read-compose-send and notification')
+    expect(raw).toContain('Do not duplicate or')
     expect(raw).toContain('action="revoke_own_email_share"')
     expect(raw).toContain('group-email.v0')
     expect(raw).not.toContain('nudge them in the group')
@@ -403,6 +409,48 @@ describe('assistant skill assets', () => {
     expect(raw).toContain('share health data that the message did not disclose')
     expect(raw).not.toContain('link-free offer')
     expect(raw).toContain('never repeatedly re-offer')
+  })
+
+  it('registers a dedicated group newsletter editorial skill', async () => {
+    const newsletterSkill = ASSISTANT_SKILLS.find(
+      (skill) => skill.slug === 'group-newsletter',
+    )
+    expect(newsletterSkill).toBeTruthy()
+    if (!newsletterSkill) return
+
+    expect(newsletterSkill.triggerHint).toContain(
+      'every scheduled group-health-newsletter run',
+    )
+    const raw = await readSkillFile(newsletterSkill)
+    expect(raw).toContain('## Compose each edition')
+    expect(raw).toContain('Usually include 6–12 useful stats')
+    expect(raw).toContain('Cross-person comparisons are welcome')
+    expect(raw).toContain('`hasEmail === true`')
+    expect(raw).toContain('`currentWeekAvg !== null`')
+    expect(raw).toContain('both `currentWeekAvg` and')
+    expect(raw).toContain('Never expose dashboard language')
+    expect(raw).toContain('never multiply the average by seven')
+    expect(raw).toContain('Its `currentWeekAvg` is an average per observed day')
+    expect(raw).toContain('about 30 minutes of exercise a day')
+    expect(raw).toMatch(/call it\s+"movement"/u)
+    expect(raw).toContain('Do not use `workout-count` to claim a weekly workout total')
+    expect(raw).toContain('Do not claim a monthly or four-week high')
+    expect(raw).toContain('{"kind":"skip","privateSummary":"..."}')
+    expect(raw).toContain('If `read_stats`')
+    expect(raw).toContain('do not compose or call `send`')
+    expect(raw).toContain('After any `send` result')
+    expect(raw).toContain('do not retry `send` in the same turn')
+    expect(raw).toContain('runtime owns delivery, retry, and')
+    expect(raw).toContain('/settings?addEmail=true')
+    expect(raw).toContain('### Example 1: close race')
+    expect(raw).toContain('### Example 2: broad momentum')
+    expect(raw).toContain('### Example 3: recovery story')
+    expect(raw).toContain('### Example 4: opted-in roast')
+    expect(raw).toContain('<Exact Group Name> — <specific hook>')
+    expect(raw).not.toContain('286 active minutes')
+    expect(raw).not.toContain('17 workouts')
+    expect(raw).not.toContain('completed the most workouts')
+    expect(raw).not.toContain('best total this month')
   })
 
   it('keeps group challenge guidance aligned with selectable scoring projections', async () => {
@@ -1026,6 +1074,19 @@ describe('assistant skill assets', () => {
     )
     expect(raw).toContain(
       'A purchase is not proof that a supplement is effective, safe, medically appropriate, or authorized to start or change dose.',
+    )
+    expect(raw).toContain('vault-cli blood-test list --format json')
+    expect(raw).toContain(
+      'vault-cli blood-test show <id> --format json',
+    )
+    expect(raw).toContain(
+      'When blood-test records exist, cite the latest relevant markers with dates',
+    )
+    expect(raw).toContain(
+      'For supplements outside the list above (for example NAC, curcumin, ginger, berberine)',
+    )
+    expect(raw).toContain(
+      'Name the personal evidence the classification rests on (latest panel date, current regimen, symptoms, goals).',
     )
   })
 

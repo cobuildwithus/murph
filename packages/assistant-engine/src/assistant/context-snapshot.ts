@@ -2,14 +2,14 @@ import { open, readFile } from 'node:fs/promises'
 import path from 'node:path'
 
 import {
-  BLOOD_TEST_CATEGORY,
-  BLOOD_TEST_SPECIMEN_TYPES,
   type AllergyFrontmatter,
   type ContractSchema,
   allergyFrontmatterSchema,
   computeHabitatCoverage,
   conditionFrontmatterSchema,
+  extractIsoDatePrefix,
   isExpectedHabitatAspectRelativePath,
+  isStrictIsoDate,
   type ConditionFrontmatter,
   goalFrontmatterSchema,
   type GoalFrontmatter,
@@ -21,6 +21,7 @@ import {
 } from '@murphai/contracts'
 import {
   parseFrontmatterDocument,
+  readLatestBloodTestHistorySummaryInterruptible,
   resolveVaultPath,
   VAULT_LAYOUT,
   walkVaultFilesInterruptible,
@@ -40,7 +41,7 @@ import { resolveAssistantStatePaths } from './store/paths.js'
 
 export const ASSISTANT_CONTEXT_SNAPSHOT_SCHEMA =
   'murph.assistant-context-snapshot'
-export const ASSISTANT_CONTEXT_SNAPSHOT_SCHEMA_VERSION = 3
+export const ASSISTANT_CONTEXT_SNAPSHOT_SCHEMA_VERSION = 4
 export const ASSISTANT_CONTEXT_SNAPSHOT_FILE_NAME = 'context-snapshot.json'
 
 const ASSISTANT_CONTEXT_SNAPSHOT_SAFETY_STALE_PROMPT = [
@@ -106,7 +107,6 @@ type PromptLookupRecord = Readonly<{
 const ASSISTANT_CONTEXT_SNAPSHOT_ALL_DOMAINS =
   ['experiments', 'blood_tests', 'health_context', 'habitat'] as const
 
-const BLOOD_TEST_SPECIMEN_TYPE_SET = new Set<string>(BLOOD_TEST_SPECIMEN_TYPES)
 const MAX_ASSISTANT_CONTEXT_ACTIVE_SAFETY_RECORDS = 5
 const MAX_ASSISTANT_CONTEXT_ACTIVE_GOALS = 3
 const MAX_ASSISTANT_CONTEXT_ACTIVE_HABIT_REGIMENS = 3
@@ -115,9 +115,6 @@ const MAX_ASSISTANT_CONTEXT_SUPPLEMENT_INGREDIENTS = 3
 const MAX_ASSISTANT_CONTEXT_SNAPSHOT_PROMPT_BYTES = 64 * 1024
 const MAX_ASSISTANT_CONTEXT_PROMPT_FIELD_LENGTH = 120
 const MAX_ASSISTANT_CONTEXT_FRONTMATTER_FILES_PER_DIR = 200
-const MAX_ASSISTANT_CONTEXT_EVENT_LEDGER_FILES = 3
-const MAX_ASSISTANT_CONTEXT_EVENT_LEDGER_BYTES = 256 * 1024
-const MAX_ASSISTANT_CONTEXT_EVENT_LEDGER_LINES = 5000
 
 export function resolveAssistantContextSnapshotPath(vaultRoot: string): string {
   return path.join(
@@ -413,7 +410,7 @@ async function buildAssistantContextSnapshotPrompt(input: {
     promptBlock: normalizeNullableString(promptBlock),
     sectionPresence: {
       activeExperiments: activeExperimentContext !== null,
-      bloodTests: coverage.bloodTestCount > 0,
+      bloodTests: coverage.bloodTestsPresent,
       habitat: coverage.habitatRecordCount > 0,
       healthContext:
         coverage.goalCount > 0
@@ -444,7 +441,7 @@ async function buildAssistantSnapshotCoverage(input: {
   activeSupplementRegimenCount: number
   activeSupplementRegimensLine: string | null
   allergyCount: number
-  bloodTestCount: number
+  bloodTestsPresent: boolean
   bloodTestsLine: string | null
   conditionCount: number
   goalCount: number
@@ -456,9 +453,9 @@ async function buildAssistantSnapshotCoverage(input: {
   safetyComplete: boolean
   supplementCount: number
 }> {
-  const [eventCoverage, goalRead, conditionRead, allergyRead, regimenRead, habitatRead] =
+  const [bloodTestCoverage, goalRead, conditionRead, allergyRead, regimenRead, habitatRead] =
     await Promise.all([
-      collectAssistantSnapshotEventLedgerCoverage(input),
+      collectAssistantSnapshotBloodTestCoverage(input),
       listAssistantSnapshotFrontmatterRecords(
         input,
         VAULT_LAYOUT.goalsDirectory,
@@ -619,9 +616,11 @@ async function buildAssistantSnapshotCoverage(input: {
       totalCount: activeSupplementRegimens.length,
     }),
     allergyCount: allergies.length,
-    bloodTestCount: eventCoverage.bloodTestCount,
-    bloodTestsLine: eventCoverage.bloodTestCount > 0
-      ? '- Blood test records are present.'
+    bloodTestsPresent: bloodTestCoverage.present,
+    bloodTestsLine: bloodTestCoverage.present
+      ? bloodTestCoverage.latestBloodTestDate
+        ? `- Blood test records are present (latest ${bloodTestCoverage.latestBloodTestDate}). Read them with \`vault-cli blood-test list --format json\` before supplement, deficiency, or lab-relevant advice.`
+        : '- Blood test records are present. Read them with `vault-cli blood-test list --format json` before supplement, deficiency, or lab-relevant advice.'
       : null,
     conditionCount: conditions.length,
     goalCount: goals.length,
@@ -695,67 +694,34 @@ async function listAssistantSnapshotFrontmatterRecords<TRecord>(
   return { complete: !truncated && !parseFailed, records }
 }
 
-async function collectAssistantSnapshotEventLedgerCoverage(input: {
+async function collectAssistantSnapshotBloodTestCoverage(input: {
   shouldYield: (() => boolean) | null
   signal: AbortSignal | null
   vaultRoot: string
 }): Promise<{
-  bloodTestCount: number
+  latestBloodTestDate: string | null
+  present: boolean
 }> {
   assertAssistantContextSnapshotCanContinue(input)
-  const { relativePaths } = await walkVaultFilesInterruptible(
-    input.vaultRoot,
-    VAULT_LAYOUT.eventLedgerDirectory,
-    {
-      extension: '.jsonl',
-      maxMatches: MAX_ASSISTANT_CONTEXT_EVENT_LEDGER_FILES,
-      shouldContinue: () => {
-        assertAssistantContextSnapshotCanContinue(input)
-        return true
-      },
-      sortOrder: 'descending',
-    },
-  )
-  let bloodTestCount = 0
-  let lineCount = 0
-
-  for (const relativePath of relativePaths) {
-    assertAssistantContextSnapshotCanContinue(input)
-    const resolved = resolveVaultPath(input.vaultRoot, relativePath)
-    const raw = await readTailTextFile(
-      resolved.absolutePath,
-      MAX_ASSISTANT_CONTEXT_EVENT_LEDGER_BYTES,
+  const summary = await readLatestBloodTestHistorySummaryInterruptible({
+    shouldContinue: () =>
+      !input.signal?.aborted && input.shouldYield?.() !== true,
+    signal: input.signal,
+    vaultRoot: input.vaultRoot,
+  })
+  if (summary.interrupted) {
+    throw new DOMException(
+      'Assistant context snapshot refresh yielded to foreground input.',
+      'AbortError',
     )
-    for (const line of raw.split('\n')) {
-      assertAssistantContextSnapshotCanContinue(input)
-      if (lineCount >= MAX_ASSISTANT_CONTEXT_EVENT_LEDGER_LINES) {
-        break
-      }
-      lineCount += 1
-      const trimmed = line.trim()
-      if (!trimmed) {
-        continue
-      }
-
-      const record = parseJsonRecord(trimmed)
-      if (!record) {
-        continue
-      }
-      if (isBloodTestEventRecord(record)) {
-        bloodTestCount += 1
-        break
-      }
-    }
-    if (
-      bloodTestCount > 0
-      || lineCount >= MAX_ASSISTANT_CONTEXT_EVENT_LEDGER_LINES
-    ) {
-      break
-    }
   }
+  assertAssistantContextSnapshotCanContinue(input)
+  const datePrefix = extractIsoDatePrefix(summary.latestOccurredAt)
 
   return {
-    bloodTestCount,
+    latestBloodTestDate:
+      datePrefix && isStrictIsoDate(datePrefix) ? datePrefix : null,
+    present: summary.present,
   }
 }
 
@@ -1536,27 +1502,6 @@ function isSupplementRegimen(regimen: RegimenFrontmatter): boolean {
   return normalizeToken(regimen.kind) === 'supplement'
 }
 
-function isBloodTestEventRecord(record: Record<string, unknown>): boolean {
-  if (firstString(record, ['kind']) !== 'test') {
-    return false
-  }
-
-  const testCategory = firstString(record, ['testCategory'])
-  const specimenType = firstString(record, ['specimenType'])
-
-  return testCategory === BLOOD_TEST_CATEGORY
-    || (specimenType !== null && BLOOD_TEST_SPECIMEN_TYPE_SET.has(specimenType))
-}
-
-function parseJsonRecord(line: string): Record<string, unknown> | null {
-  try {
-    const value = JSON.parse(line)
-    return isPlainRecord(value) ? value : null
-  } catch {
-    return null
-  }
-}
-
 function firstString(
   record: Record<string, unknown> | null,
   keys: readonly string[],
@@ -1666,20 +1611,6 @@ async function readBoundedTextFile(filePath: string, maxBytes: number): Promise<
     }
     const buffer = Buffer.alloc(stats.size)
     const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0)
-    return buffer.subarray(0, bytesRead).toString('utf8')
-  } finally {
-    await handle.close()
-  }
-}
-
-async function readTailTextFile(filePath: string, maxBytes: number): Promise<string> {
-  const handle = await open(filePath, 'r')
-  try {
-    const stats = await handle.stat()
-    const byteLength = Math.min(stats.size, maxBytes)
-    const buffer = Buffer.alloc(byteLength)
-    const start = Math.max(0, stats.size - byteLength)
-    const { bytesRead } = await handle.read(buffer, 0, byteLength, start)
     return buffer.subarray(0, bytesRead).toString('utf8')
   } finally {
     await handle.close()

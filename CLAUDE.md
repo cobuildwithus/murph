@@ -6,7 +6,7 @@ Always read `AGENTS.md` before starting work — it contains the current agent w
 
 ## Land changes from a new worktree
 
-Always land changes (commits and pushes) from a dedicated git worktree on a task branch: create one with `git worktree add`, commit and push from there, and remove it when done. Never switch the primary checkout (the root worktree) off `main` — leave it on `main` at all times so shared repo state stays stable and other agents working in this checkout are not disrupted. To land on `main`, push the worktree branch (open a PR, or push directly to `main` only when explicitly asked); do not check `main` out in the root worktree to do it.
+Always land changes (commits and pushes) from a dedicated git worktree on a task branch: create one with `git worktree add` outside the primary checkout, then commit and push from there. Do not create new task worktrees under the repo-local `.worktrees/` directory. Preserve the worktree while its PR or follow-up work remains active, and retire it only through the task-worktree gate in `agent-docs/operations/agent-workflow-routing.md` after merge or closure is confirmed. Never switch the primary checkout (the root worktree) off `main` — leave it on `main` at all times so shared repo state stays stable and other agents working in this checkout are not disrupted. To land on `main`, push the worktree branch (open a PR, or push directly to `main` only when explicitly asked); do not check `main` out in the root worktree to do it.
 
 ## Fable supervises, Codex implements
 
