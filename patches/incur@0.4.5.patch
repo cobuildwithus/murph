@@ -1,5 +1,27 @@
+diff --git a/dist/Cli.d.ts b/dist/Cli.d.ts
+index 5c8cfeccb7595a4129d882cb8a1b94776b3d151b..19bc6fa45f8687911430140b32fdbe17f8f9c59c 100644
+--- a/dist/Cli.d.ts
++++ b/dist/Cli.d.ts
+@@ -207,6 +207,8 @@ export declare namespace create {
+             cwd?: string | undefined;
+             /** Default grouping depth for skill files. Overridden by `--depth`. Defaults to `1`. */
+             depth?: number | undefined;
++            /** Canonical full-tree skill hash to use for staleness checks when serving a partial command tree. */
++            expectedHash?: string | undefined;
+             /** Glob patterns for directories containing SKILL.md files to include (e.g. `"skills/*"`, `"my-skill"`). */
+             include?: string[] | undefined;
+             /** Example prompts shown after sync to help users get started. */
+@@ -268,6 +270,8 @@ export declare const toRootDefinition: WeakMap<Root<_args, _options>, CommandDef
+ export declare const toRootOptions: WeakMap<Cli<{}, undefined, undefined>, z.ZodObject<any, z.core.$strip>>;
+ /** @internal Maps CLI instances to whether config file loading is enabled. */
+ export declare const toConfigEnabled: WeakMap<Cli<{}, undefined, undefined>, boolean>;
++/** Computes the deterministic skill-sync hash for a fully registered CLI. */
++export declare function skillHash(cli: Cli): string;
+ /** @internal A CTA block with a description and list of suggested commands. */
+ type CtaBlock<commands extends CommandsMap = Commands> = {
+     /** Commands to suggest. */
 diff --git a/dist/Cli.js b/dist/Cli.js
-index c18290af933acfd770e040d8ded4108bfbf97855..40be9390512bd911d0f67221d9c3e16f47354e18 100644
+index c18290af933acfd770e040d8ded4108bfbf97855..005194b56c1dd995ace34d75bd6c210fffacdc65 100644
 --- a/dist/Cli.js
 +++ b/dist/Cli.js
 @@ -2,7 +2,6 @@ import * as fs from 'node:fs/promises';
@@ -18,7 +40,19 @@ index c18290af933acfd770e040d8ded4108bfbf97855..40be9390512bd911d0f67221d9c3e16f
  import * as Mcp from './Mcp.js';
  import * as Openapi from './Openapi.js';
  import * as Parser from './Parser.js';
-@@ -1151,7 +1151,7 @@ async function fetchImpl(name, commands, req, options = {}) {
+@@ -225,9 +225,8 @@ async function serveImpl(name, commands, argv, options = {}) {
+         if (!isSkillsAdd && !isMcpAdd) {
+             const stored = SyncSkills.readHash(name);
+             if (stored && SyncSkills.hasInstalledSkills(name, { cwd: options.sync?.cwd })) {
+-                const groups = new Map();
+-                const entries = collectSkillCommands(commands, [], groups, options.rootCommand);
+-                if (Skill.hash(entries) !== stored) {
++                const currentHash = options.sync?.expectedHash ?? SyncSkills.commandHash(commands, options.rootCommand);
++                if (currentHash !== stored) {
+                     const command = process.env.npm_config_user_agent || process.env.npm_execpath
+                         ? `${detectRunner()} ${SyncMcp.detectPackageSpecifier(name)} skills add`
+                         : `${displayName} skills add`;
+@@ -1151,7 +1150,7 @@ async function fetchImpl(name, commands, req, options = {}) {
              const files = Skill.split(name, cmds, 1, groups);
              const skills = files.map((f) => {
                  const fmMatch = f.content.match(/^---\n([\s\S]*?)\n---/);
@@ -27,8 +61,23 @@ index c18290af933acfd770e040d8ded4108bfbf97855..40be9390512bd911d0f67221d9c3e16f
                  return {
                      name: f.dir || name,
                      description: meta.description ?? '',
+@@ -1752,6 +1751,14 @@ export const toRootDefinition = new WeakMap();
+ export const toRootOptions = new WeakMap();
+ /** @internal Maps CLI instances to whether config file loading is enabled. */
+ export const toConfigEnabled = new WeakMap();
++/** Computes the deterministic skill-sync hash for a fully registered CLI. */
++export function skillHash(cli) {
++    const commands = toCommands.get(cli);
++    if (!commands)
++        throw new Error('No commands registered on this CLI instance');
++    const rootCommand = toRootDefinition.get(cli);
++    return SyncSkills.commandHash(commands, rootCommand);
++}
+ /** @internal Maps CLI instances to their output policy. */
+ const toOutputPolicy = new WeakMap();
+ /** @internal Maps root CLI instances to their command aliases. */
 diff --git a/dist/Formatter.js b/dist/Formatter.js
-index 82bc6e25713eb8578dd566c5b7bfcc2b956f6092..5286fc1ac5b0cc66105386105662c730da80fcf8 100644
+index 82bc6e25713eb8578dd566c5b7bfcc2b956f6092..ad2b5ac2e589fc8b89748ae998ecde242050ce90 100644
 --- a/dist/Formatter.js
 +++ b/dist/Formatter.js
 @@ -1,5 +1,5 @@
@@ -48,7 +97,7 @@ index 82bc6e25713eb8578dd566c5b7bfcc2b956f6092..5286fc1ac5b0cc66105386105662c730
          return formatMarkdown(value);
      if (fmt === 'jsonl') {
 diff --git a/dist/Mcp.js b/dist/Mcp.js
-index 74f218ddbad2b0febf9a33e5ea29df2a25a0fc99..7a77b2092173438ae7ae228f0c7eda7ba87bcef6 100644
+index 74f218ddbad2b0febf9a33e5ea29df2a25a0fc99..dcc6fdf0f9d3bcd4faa49ac9da2223899287fa48 100644
 --- a/dist/Mcp.js
 +++ b/dist/Mcp.js
 @@ -1,9 +1,10 @@
@@ -64,7 +113,7 @@ index 74f218ddbad2b0febf9a33e5ea29df2a25a0fc99..7a77b2092173438ae7ae228f0c7eda7b
      for (const tool of collectTools(commands, [])) {
          const mergedShape = {
 diff --git a/dist/Skill.js b/dist/Skill.js
-index 8682958e3bc9bab36e8fb53cbb39697d3e970310..2715c313e27ea85e31637a7d13dd16dfd952e0f9 100644
+index 8682958e3bc9bab36e8fb53cbb39697d3e970310..8c5f6ae8bf2d8f6eb747af279077980123e8363e 100644
 --- a/dist/Skill.js
 +++ b/dist/Skill.js
 @@ -1,5 +1,5 @@
@@ -85,11 +134,24 @@ index 8682958e3bc9bab36e8fb53cbb39697d3e970310..2715c313e27ea85e31637a7d13dd16df
      const fmBlock = `---\n${fm}\n---`;
      const body = cmds.map((cmd) => renderCommandBody(cli, cmd)).join('\n\n---\n\n');
      return `${fmBlock}\n\n${body}`;
+diff --git a/dist/SyncSkills.d.ts b/dist/SyncSkills.d.ts
+index 3daf701589a97f047618fdddc3cc831a3b543159..97e83e897ff61b5d1c0e4147261f644b6ebd897f 100644
+--- a/dist/SyncSkills.d.ts
++++ b/dist/SyncSkills.d.ts
+@@ -81,6 +81,8 @@ export declare namespace list {
+         name: string;
+     };
+ }
++/** @internal Computes the exact command-tree hash stored by `sync()`. */
++export declare function commandHash(commands: Map<string, any>, rootCommand?: sync.Options['rootCommand']): string;
+ /** Reads the stored skills hash for a CLI. Returns `undefined` if no hash exists. */
+ export declare function readHash(name: string): string | undefined;
+ //# sourceMappingURL=SyncSkills.d.ts.map
 diff --git a/dist/SyncSkills.js b/dist/SyncSkills.js
-index da674f5f5c9dc32c44be7657069ed421d35a8561..f70761e32275420fe29dad0ee13ee8f6608de0f5 100644
+index da674f5f5c9dc32c44be7657069ed421d35a8561..17477d722fee6d27b85a0394ba25a1018c4d87bb 100644
 --- a/dist/SyncSkills.js
 +++ b/dist/SyncSkills.js
-@@ -2,7 +2,7 @@ import fsSync from 'node:fs';
+@@ -2,9 +2,9 @@ import fsSync from 'node:fs';
  import fs from 'node:fs/promises';
  import os from 'node:os';
  import path from 'node:path';
@@ -98,7 +160,30 @@ index da674f5f5c9dc32c44be7657069ed421d35a8561..f70761e32275420fe29dad0ee13ee8f6
  import * as Agents from './internal/agents.js';
 +import * as Yaml from './internal/yaml.js';
  import * as Skill from './Skill.js';
-@@ -173,7 +173,7 @@ function parseFrontmatter(content) {
+ /** Generates skill files from a command map and installs them natively. */
+ export async function sync(name, commands, options = {}) {
+@@ -58,8 +58,7 @@ export async function sync(name, commands, options = {}) {
+             }
+         }
+         // Write skills hash + names for staleness detection
+-        const hashEntries = collectEntries(commands, [], undefined, options.rootCommand);
+-        writeMeta(name, Skill.hash(hashEntries), [...currentNames], [...paths, ...agents.map((agent) => agent.path)]);
++        writeMeta(name, commandHash(commands, options.rootCommand), [...currentNames], [...paths, ...agents.map((agent) => agent.path)]);
+         return { skills: skills.sort((a, b) => a.name.localeCompare(b.name)), paths, agents };
+     }
+     finally {
+@@ -109,6 +108,10 @@ export async function list(name, commands, options = {}) {
+     }
+     return skills.sort((a, b) => a.name.localeCompare(b.name));
+ }
++/** @internal Computes the exact command-tree hash stored by `sync()`. */
++export function commandHash(commands, rootCommand) {
++    return Skill.hash(collectEntries(commands, [], undefined, rootCommand));
++}
+ /** Returns whether any previously synced skills are still installed on disk. */
+ export function hasInstalledSkills(name, options = {}) {
+     return readInstalledSkills(name, options).size > 0;
+@@ -173,7 +176,7 @@ function parseFrontmatter(content) {
      const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---/);
      if (!match)
          return {};
@@ -109,7 +194,7 @@ index da674f5f5c9dc32c44be7657069ed421d35a8561..f70761e32275420fe29dad0ee13ee8f6
      return meta;
 diff --git a/dist/internal/yaml.js b/dist/internal/yaml.js
 new file mode 100644
-index 0000000000000000000000000000000000000000..aeb14712f61d3121d9a6f2d473c145767b42e1cb
+index 0000000000000000000000000000000000000000..f560943e367c346c5bee654c0a50e4b6f4c75fc2
 --- /dev/null
 +++ b/dist/internal/yaml.js
 @@ -0,0 +1,8 @@
@@ -122,11 +207,17 @@ index 0000000000000000000000000000000000000000..aeb14712f61d3121d9a6f2d473c14576
 +    return cached;
 +}
 diff --git a/src/Cli.ts b/src/Cli.ts
-index 4f5c851900cf26665959fd107f42c2d00fef40e1..f5cddf13a971ac890c88544a1c1c44b3c024518c 100644
+index 4f5c851900cf26665959fd107f42c2d00fef40e1..ab454a22b077d585aabfee43e89f8c99f0b68ed5 100644
 --- a/src/Cli.ts
 +++ b/src/Cli.ts
-@@ -5,1 +5,0 @@ import { estimateTokenCount, sliceByTokens } from 'tokenx'
+@@ -2,7 +2,6 @@ import * as fs from 'node:fs/promises'
+ import * as os from 'node:os'
+ import * as path from 'node:path'
+ import { estimateTokenCount, sliceByTokens } from 'tokenx'
 -import { parse as yamlParse } from 'yaml'
+ import { z } from 'zod'
+
+ import * as Completions from './Completions.js'
 @@ -24,6 +23,7 @@ import * as Command from './internal/command.js'
  import { isRecord, suggest, toKebab } from './internal/helpers.js'
  import { detectRunner } from './internal/pm.js'
@@ -135,7 +226,29 @@ index 4f5c851900cf26665959fd107f42c2d00fef40e1..f5cddf13a971ac890c88544a1c1c44b3
  import * as Mcp from './Mcp.js'
  import type { Context as MiddlewareContext, Handler as MiddlewareHandler } from './middleware.js'
  import * as Openapi from './Openapi.js'
-@@ -1631,7 +1631,7 @@ async function fetchImpl(
+@@ -435,6 +435,8 @@ export declare namespace create {
+           cwd?: string | undefined
+           /** Default grouping depth for skill files. Overridden by `--depth`. Defaults to `1`. */
+           depth?: number | undefined
++          /** Canonical full-tree skill hash to use for staleness checks when serving a partial command tree. */
++          expectedHash?: string | undefined
+           /** Glob patterns for directories containing SKILL.md files to include (e.g. `"skills/*"`, `"my-skill"`). */
+           include?: string[] | undefined
+           /** Example prompts shown after sync to help users get started. */
+@@ -566,9 +568,9 @@ async function serveImpl(
+     if (!isSkillsAdd && !isMcpAdd) {
+       const stored = SyncSkills.readHash(name)
+       if (stored && SyncSkills.hasInstalledSkills(name, { cwd: options.sync?.cwd })) {
+-        const groups = new Map<string, string>()
+-        const entries = collectSkillCommands(commands, [], groups, options.rootCommand)
+-        if (Skill.hash(entries) !== stored) {
++        const currentHash =
++          options.sync?.expectedHash ?? SyncSkills.commandHash(commands, options.rootCommand)
++        if (currentHash !== stored) {
+           const command =
+             process.env.npm_config_user_agent || process.env.npm_execpath
+               ? `${detectRunner()} ${SyncMcp.detectPackageSpecifier(name)} skills add`
+@@ -1631,7 +1633,7 @@ async function fetchImpl(
        const files = Skill.split(name, cmds, 1, groups)
        const skills = files.map((f) => {
          const fmMatch = f.content.match(/^---\n([\s\S]*?)\n---/)
@@ -144,6 +257,29 @@ index 4f5c851900cf26665959fd107f42c2d00fef40e1..f5cddf13a971ac890c88544a1c1c44b3
          return {
            name: f.dir || name,
            description: meta.description ?? '',
+@@ -2047,6 +2049,7 @@ declare namespace serveImpl {
+       | {
+           cwd?: string | undefined
+           depth?: number | undefined
++          expectedHash?: string | undefined
+           include?: string[] | undefined
+           suggestions?: string[] | undefined
+         }
+@@ -2445,6 +2448,14 @@ export const toRootOptions = new WeakMap<Cli, z.ZodObject<any>>()
+ /** @internal Maps CLI instances to whether config file loading is enabled. */
+ export const toConfigEnabled = new WeakMap<Cli, boolean>()
+
++/** Computes the deterministic skill-sync hash for a fully registered CLI. */
++export function skillHash(cli: Cli): string {
++  const commands = toCommands.get(cli)
++  if (!commands) throw new Error('No commands registered on this CLI instance')
++  const rootCommand = toRootDefinition.get(cli)
++  return SyncSkills.commandHash(commands, rootCommand)
++}
++
+ /** @internal Maps CLI instances to their output policy. */
+ const toOutputPolicy = new WeakMap<Cli, OutputPolicy>()
+
 diff --git a/src/Formatter.ts b/src/Formatter.ts
 index 21bfbddd541595b2f87ac37484725f6fee6dee00..6c56694eeedde8dbae70568c80b5f227c0f080d6 100644
 --- a/src/Formatter.ts
@@ -215,7 +351,7 @@ index db12a9fcb8e3f7bae14a7a7a0e23b5e8c409c361..d5e6416d112856887f815c3511359e04
 
    const body = cmds.map((cmd) => renderCommandBody(cli, cmd)).join('\n\n---\n\n')
 diff --git a/src/SyncSkills.ts b/src/SyncSkills.ts
-index ea5c8553d4ab8a872991f918e7ac4e6b6bce149d..15f59d99184291ce4fd9525cb85aa629bc1598f5 100644
+index ea5c8553d4ab8a872991f918e7ac4e6b6bce149d..49983a683b8560a7c75366995518bd3316e2fb91 100644
 --- a/src/SyncSkills.ts
 +++ b/src/SyncSkills.ts
 @@ -2,10 +2,10 @@ import fsSync from 'node:fs'
@@ -230,7 +366,34 @@ index ea5c8553d4ab8a872991f918e7ac4e6b6bce149d..15f59d99184291ce4fd9525cb85aa629
  import * as Skill from './Skill.js'
 
  /** Generates skill files from a command map and installs them natively. */
-@@ -283,7 +283,7 @@ function parseFrontmatter(content: string): { description?: string | undefined;
+@@ -68,10 +68,9 @@ export async function sync(
+     }
+
+     // Write skills hash + names for staleness detection
+-    const hashEntries = collectEntries(commands, [], undefined, options.rootCommand)
+     writeMeta(
+       name,
+-      Skill.hash(hashEntries),
++      commandHash(commands, options.rootCommand),
+       [...currentNames],
+       [...paths, ...agents.map((agent) => agent.path)],
+     )
+@@ -222,6 +221,14 @@ export declare namespace list {
+   }
+ }
+
++/** @internal Computes the exact command-tree hash stored by `sync()`. */
++export function commandHash(
++  commands: Map<string, any>,
++  rootCommand?: sync.Options['rootCommand'],
++): string {
++  return Skill.hash(collectEntries(commands, [], undefined, rootCommand))
++}
++
+ /** Recursively collects leaf commands as `Skill.CommandInfo`. */
+ function collectEntries(
+   commands: Map<string, any>,
+@@ -283,7 +290,7 @@ function parseFrontmatter(content: string): { description?: string | undefined;
    const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---/)
    if (!match) return {}
 
@@ -241,7 +404,7 @@ index ea5c8553d4ab8a872991f918e7ac4e6b6bce149d..15f59d99184291ce4fd9525cb85aa629
  }
 diff --git a/src/internal/yaml.ts b/src/internal/yaml.ts
 new file mode 100644
-index 0000000000000000000000000000000000000000..623f72d834f9ad36d5b50d1c13c46a8ecf22184c
+index 0000000000000000000000000000000000000000..afe7773330bb1f3235ed2d7d019e2eb5f2161050
 --- /dev/null
 +++ b/src/internal/yaml.ts
 @@ -0,0 +1,11 @@
