@@ -15,6 +15,7 @@ import {
   getHostedVaultShareDailyMetricProjectionSpec,
   HOSTED_VAULT_SHARE_DELIVER_MAX_RECORDS,
   HOSTED_VAULT_SHARE_DELIVERY_PAYLOAD_SCHEMA,
+  HOSTED_VAULT_SHARE_PROJECTION_KINDS,
   HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS,
   HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES,
   HOSTED_VAULT_SHARE_REVOKE_PAYLOAD_SCHEMA,
@@ -156,11 +157,10 @@ describe("vault-share contracts", () => {
     expect(HOSTED_MAILBOX_KINDS).toContain("vault-share.revoke");
   });
 
-  it("exposes email and challenge health projections as selectable scopes", () => {
+  it("keeps sleep duration readable while selectable scopes remain writer-disabled", () => {
     expect(HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS).toEqual([
       "group-email.v0",
       "sleep-times.v0",
-      "sleep-duration-days.v0",
       "activity-days.v0",
       "workout-days.v0",
       "heart-rate-zones-days.v0",
@@ -177,6 +177,7 @@ describe("vault-share contracts", () => {
       "resting-heart-rate-days.v0",
       "hrv-days.v0",
     ]);
+    expect(HOSTED_VAULT_SHARE_PROJECTION_KINDS).toContain("sleep-duration-days.v0");
     expect(getHostedVaultShareDailyMetricProjectionSpec("sleep-duration-days.v0")).toEqual({
       maxValue: 1_440,
       metricKey: "total-sleep-minutes",

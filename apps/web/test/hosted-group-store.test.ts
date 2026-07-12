@@ -58,7 +58,6 @@ import {
 const PROFILE_SCOPE = hostedVaultShareProjectionKindToScope("profile-name.v0");
 const GROUP_EMAIL_SCOPE = hostedVaultShareProjectionKindToScope("group-email.v0");
 const SLEEP_SCOPE = hostedVaultShareProjectionKindToScope("sleep-times.v0");
-const SLEEP_DURATION_SCOPE = hostedVaultShareProjectionKindToScope("sleep-duration-days.v0");
 const ACTIVITY_SCOPE = hostedVaultShareProjectionKindToScope("activity-days.v0");
 
 const JOIN_POLICY = {
@@ -512,7 +511,6 @@ describe("acceptHostedGroupJoinCodeTx", () => {
     const tx = buildTx({
       activeGroupGrantCount: 0,
       existingMembershipId: "membership_existing",
-      offerProjectionKinds: ["sleep-duration-days.v0"],
     });
     const now = new Date("2026-07-01T00:00:00.000Z");
 
@@ -524,11 +522,11 @@ describe("acceptHostedGroupJoinCodeTx", () => {
       tx,
     })).resolves.toMatchObject({
       alreadyMember: true,
-      grantedVaultShareProjectionKinds: ["profile-name.v0", "sleep-duration-days.v0"],
+      grantedVaultShareProjectionKinds: ["profile-name.v0", "sleep-times.v0"],
       joinCode: "join_1",
       membershipId: "membership_existing",
       revokedVaultShareProjectionKinds: [],
-      selectedVaultShareProjectionKinds: ["sleep-duration-days.v0"],
+      selectedVaultShareProjectionKinds: ["sleep-times.v0"],
     });
 
     expect(tx.hostedThreadRoute.findFirst).toHaveBeenCalledWith({
@@ -541,12 +539,6 @@ describe("acceptHostedGroupJoinCodeTx", () => {
         },
       },
     });
-    expect(mocks.grantHostedVaultShareTx).toHaveBeenCalledWith(expect.objectContaining({
-      projectionScope: SLEEP_DURATION_SCOPE,
-    }));
-    expect(mocks.grantHostedVaultShareTx).not.toHaveBeenCalledWith(expect.objectContaining({
-      projectionScope: SLEEP_SCOPE,
-    }));
     expect(mocks.revokeHostedVaultSharesWithCleanupTx).not.toHaveBeenCalled();
   });
 

@@ -98,10 +98,6 @@ const HOSTED_VAULT_SHARE_PROJECTION_DISPLAY: Record<HostedVaultShareSelectablePr
     label: "Sleep timing",
     description: "Shares your last 7 days of sleep start and end times.",
   },
-  "sleep-duration-days.v0": {
-    label: "Sleep duration",
-    description: "Shares your last 7 days of total sleep duration.",
-  },
   "steps-days.v0": {
     label: "Steps",
     description: "Shares your last 7 days of steps.",

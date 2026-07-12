@@ -202,7 +202,6 @@ export const HOSTED_VAULT_SHARE_PROJECTION_KINDS = [
 export const HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS = [
   "group-email.v0",
   "sleep-times.v0",
-  "sleep-duration-days.v0",
   "activity-days.v0",
   "workout-days.v0",
   "heart-rate-zones-days.v0",

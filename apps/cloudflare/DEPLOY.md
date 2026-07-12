@@ -198,29 +198,29 @@ containers without the GPT-5.6 catalog. The rollback floor is
 set `live_model_turn=false` on that rollback deploy so the Terra-specific smoke
 does not block restoring the floor.
 
-The `sleep-duration-days.v0` vault-share rollout is web-first. Deploy `apps/web`
-and verify it is serving the new closed projection registry before deploying
-Cloudflare. While the old runner is still active, its exact capability response
-and the frozen omitted-capability fallback both cause the new web deployment to
-withhold the unsupported scope. Deploy Cloudflare immediately afterward with
-`container_rollout=immediate`, then require managed-container smoke to report
-the sleep-duration-capable runner-bundle fingerprint. Cloudflare updates Worker
-code before replacing container instances, and even an immediate container
-rollout still observes the configured active grace period, so the fingerprint
-check is the convergence proof.
+The `sleep-duration-days.v0` vault-share rollout is additive-first and split
+across two production releases. The reader release adds the kind to the closed
+web and runner parsers and preserves it in the shared projection store, but
+deliberately keeps it out of selectable permissions, join offers, and assistant
+skills. No supported product path in that release can create a duration grant
+or enqueue a write of the new kind.
 
-Do not deploy the new runner before web: an old web deployment rejects a join
-offer containing the new closed kind before capability filtering can run. Once
-any `sleep-duration-days.v0` delivery or revoke wake has been issued, the
-sleep-duration-capable runner bundle is the Cloudflare rollback floor. An older
-runner rejects a shared projection store containing that kind and its repair
-path can discard unrelated projections. Before rolling below the floor, stop
-new duration offers, revoke every still-active join offer containing the
-duration scope, and verify those offers can no longer be accepted. Then revoke
-every active duration grant while the current web and runner are still
-deployed, drain the resulting destination mailbox wakes, and verify no
-persisted duration projection remains. The corresponding web deployment is
-also the web rollback floor while duration offers, grants, or wakes exist.
+Fully deploy the reader release to web and Cloudflare before merging or
+deploying writer enablement. Use `container_rollout=immediate` for Cloudflare,
+then require managed-container smoke to report the sleep-duration-capable
+runner-bundle fingerprint. Cloudflare updates Worker code before replacing
+container instances, and even an immediate container rollout still observes
+the configured active grace period, so the fingerprint check is the convergence
+proof. Verify the production join surface still excludes Sleep duration.
+
+Only after both reader planes have converged may a later writer release add the
+kind to selectable permissions, join offers, and group skills. Deploy that
+writer release web-first, followed immediately by Cloudflare if the runner
+bundle changes. Once writer enablement can issue a duration offer, grant,
+delivery, or revoke wake, the fully deployed reader release is the web and
+Cloudflare rollback floor. Never roll either plane back to a pre-reader build:
+its closed parser rejects a shared store containing the new kind, and its repair
+path can discard unrelated projections.
 
 Opt-in runtime integrations:
 

@@ -1600,6 +1600,106 @@ describe("importHostedVaultShareDeliveryWake", () => {
     )).rejects.toMatchObject({ code: "ENOENT" });
   });
 
+  it("preserves a mixed duration store across an unrelated delivery and revoke", async () => {
+    const vaultRoot = await mkdtemp(join(tmpdir(), "vault-share-reader-floor-"));
+    const durationScope = hostedVaultShareProjectionKindToScope("sleep-duration-days.v0");
+    const stepsScope = hostedVaultShareProjectionKindToScope("steps-days.v0");
+    const fixtures = [
+      {
+        projectionKind: "profile-name.v0" as const,
+        projectionScope: PROFILE_SCOPE,
+        record: {
+          data: { displayName: "Alex" },
+          occurredAt: "2026-07-05T00:00:00.000Z",
+          recordKey: "profile-name",
+        },
+        shareId: "share_profile",
+      },
+      {
+        projectionKind: "steps-days.v0" as const,
+        projectionScope: stepsScope,
+        record: {
+          data: {
+            date: "2026-07-05",
+            metricKey: "steps",
+            unit: "count",
+            value: 12_000,
+          },
+          occurredAt: "2026-07-05T00:00:00.000Z",
+          recordKey: "2026-07-05",
+        },
+        shareId: "share_steps",
+      },
+      {
+        projectionKind: "sleep-duration-days.v0" as const,
+        projectionScope: durationScope,
+        record: {
+          data: {
+            date: "2026-07-05",
+            metricKey: "total-sleep-minutes",
+            unit: "minutes",
+            value: 477,
+          },
+          occurredAt: "2026-07-05T00:00:00.000Z",
+          recordKey: "2026-07-05",
+        },
+        shareId: "share_sleep_duration",
+      },
+    ] as const;
+
+    for (const fixture of fixtures) {
+      await expect(importHostedVaultShareDeliveryWake({
+        vaultRoot,
+        wake: {
+          delivery: {
+            grantorMemberId: "member_grantor",
+            ...fixture,
+            schema: "murph.vault-share.delivery.v1",
+          },
+          eventId: `vault-share:${fixture.shareId}:${fixture.record.recordKey}`,
+          kind: "vault-share.delivery",
+          occurredAt: "2026-07-05T01:00:00.000Z",
+          userId: "member_referee",
+        },
+      })).resolves.toEqual({ status: "imported" });
+    }
+
+    await expect(importHostedVaultShareDeliveryWake({ vaultRoot, wake }))
+      .resolves.toEqual({ status: "imported" });
+    await expect(applyHostedVaultShareRevokeWake({
+      vaultRoot,
+      wake: {
+        eventId: "vault-share-revoke:share_1:2026-07-01T00:00:00.000Z",
+        kind: "vault-share.revoke",
+        occurredAt: "2026-07-01T00:00:00.000Z",
+        revoke: {
+          grantorMemberId: "member_grantor",
+          projectionKind: "sleep-times.v0",
+          projectionScope: SLEEP_SCOPE,
+          revokedAt: "2026-07-01T00:00:00.000Z",
+          schema: "murph.vault-share.revoke.v1",
+          shareId: "share_1",
+        },
+        userId: "member_referee",
+      },
+    })).resolves.toEqual({ status: "imported" });
+
+    const stored = JSON.parse(await readFile(storePath(vaultRoot), "utf8"));
+    expect(Object.keys(stored.projections).sort()).toEqual([
+      "profile-name.v0",
+      "sleep-duration-days.v0",
+      "steps-days.v0",
+    ]);
+    expect(
+      stored.projections["sleep-duration-days.v0"]
+        .grantors.member_grantor.records[0].record.data,
+    ).toMatchObject({ metricKey: "total-sleep-minutes", value: 477 });
+    expect(
+      stored.projections["steps-days.v0"]
+        .grantors.member_grantor.records[0].record.data,
+    ).toMatchObject({ metricKey: "steps", value: 12_000 });
+  });
+
   it("skips email delivery authorization imports because they carry no records", async () => {
     const vaultRoot = await mkdtemp(join(tmpdir(), "vault-share-import-"));
 
