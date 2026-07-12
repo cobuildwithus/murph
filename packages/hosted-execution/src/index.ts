@@ -37,6 +37,7 @@ export {
   type HostedWorkspaceSnapshotV2Ref,
 } from "./workspace-snapshot-v2.ts";
 export * from "./contracts.ts";
+export * from "./clinical-records.ts";
 export * from "./browser-vault.ts";
 export * from "./cli-runtime-bridge.ts";
 export * from "./connected-apps.ts";
