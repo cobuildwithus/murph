@@ -7,15 +7,15 @@ export function TogetherSection() {
       <div className="mx-auto max-w-[1200px]">
         <div className="max-w-[720px]">
           <p className="font-mono text-[10px] font-medium uppercase tracking-[0.12em] text-[#736a58]">
-            Private by default
+            Better together
           </p>
           <h2 className="mt-4 font-serif text-[clamp(2rem,4vw,3.25rem)] font-semibold leading-[1.08] tracking-[-0.03em] text-[#2d3436]">
-            Bring in your people when it helps.
+            Do it with your people.
           </h2>
           <p className="mt-5 max-w-[62ch] text-[1rem] leading-[1.7] text-[#3a322a]">
-            Some goals get easier with company. When you want that support,
-            start a challenge with friends or share a weekly family recap on
-            terms everyone chooses.
+            Habits stick when someone else is watching. Start a challenge with
+            friends, or set up a weekly newsletter so the whole family knows
+            how everyone is doing.
           </p>
         </div>
 
@@ -25,7 +25,7 @@ export function TogetherSection() {
             artifactSide="right"
             eyebrow="Group challenges"
             headline="I referee health challenges with your friends."
-            body="Murph sets fair baselines across different devices, keeps the group moving with the tone you choose, and calls the result at the end."
+            body="Murph is the referee. It sets fair baselines across different devices, keeps score, nudges the slackers, and calls the winner at the end."
             bubble="no shot you guys are keeping up with me this week 😤"
             artifact={
               <div className="mx-auto w-full max-w-[340px]">

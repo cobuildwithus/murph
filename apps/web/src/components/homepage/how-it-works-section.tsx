@@ -34,14 +34,13 @@ export function HowItWorksSection() {
     >
       <div className="mx-auto max-w-[1080px]">
         <span className="font-mono text-[10px] font-medium uppercase tracking-[0.12em] text-[#5a6e32]">
-          One way Murph helps
+          How it works
         </span>
         <h2 className="mt-5 max-w-[20ch] font-serif text-[clamp(1.75rem,3.5vw,2.75rem)] font-semibold leading-[1.1] tracking-[-0.03em] text-[#2d3436]">
-          Run a clear experiment when guessing isn’t enough.
+          Improve your health, one experiment at a time.
         </h2>
         <p className="mt-5 max-w-[48ch] text-base leading-[1.7] text-pretty text-[#635a48]">
-          Pick a question worth answering, gather the right evidence, and see
-          whether the change is worth keeping.
+          Sync your biomarkers. Run an experiment. See what changes.
         </p>
 
         <div className="mt-12 grid gap-4 sm:gap-5 lg:mt-14 md:grid-cols-12">

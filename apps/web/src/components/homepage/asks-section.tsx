@@ -495,28 +495,28 @@ export function AsksGridSection() {
   return (
     <section className="bg-[#f5f0e8] px-4 py-20 sm:px-8 lg:px-16 lg:py-28">
       <div className="mx-auto max-w-[1200px]">
-        {/* The private assistant is the default relationship. */}
+        {/* Bridges the group-chat story above back to the 1:1 assistant:
+            everything below happens in a private thread with Murph. */}
         <div className="mb-12 max-w-[720px]">
           <p className="font-mono text-[10px] font-medium uppercase tracking-[0.12em] text-[#736a58]">
-            Your private health assistant
+            Just you and Murph
           </p>
           <h2 className="mt-4 font-serif text-[clamp(2rem,4vw,3.25rem)] font-semibold leading-[1.08] tracking-[-0.03em] text-[#2d3436]">
-            One place for whatever comes up with your health.
+            No group? You’re still not doing this alone.
           </h2>
           <p className="mt-5 max-w-[62ch] text-[1rem] leading-[1.7] text-[#3a322a]">
-            Your personal health assistant learns your body and life over time,
-            then uses that context to answer questions, spot patterns, build
-            habits, run experiments, and handle the health errands that
-            otherwise slip.
+            Outside the group chat, Murph is all yours. Experiments, bloodwork,
+            habits, bookings, and daily readouts, in a private one on one
+            thread.
           </p>
         </div>
         <div className="space-y-5 sm:space-y-6">
           <WideFeature
             tint="gold"
             artifactSide="right"
-            eyebrow="When guessing isn’t enough"
-            headline="I run an experiment with you when the answer needs evidence."
-            body="Choose the question together. Murph sets a credible baseline, supports the active phase, then texts the before-and-after so you can decide what is worth keeping."
+            eyebrow="Self-experiments"
+            headline="I run experiments so you know what actually works for you."
+            body="Pick a protocol. Murph baselines you for a week, runs the active phase, then texts the before-and-after. No more guessing whether anything moved."
             bubble="Did the magnesium actually work?"
             artifact={<ExperimentArtifact />}
           />

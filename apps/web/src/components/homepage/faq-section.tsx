@@ -4,64 +4,52 @@ const launchPricingSummary = formatHostedLandingPricingLongSummary();
 
 const FAQ_ITEMS = [
   [
-    "What can Murph help with?",
-    "Bring Murph a health question, decision, goal, task, record, or data point. It can research and explain, interpret your context, help make a plan, support follow-through, handle supported logistics, involve people you trust, or run an experiment when that is the right tool.",
-  ],
-  [
-    "How does Murph get more personal?",
-    "Murph remembers relevant history, routines, preferences, constraints, actions, and outcomes you share or connect. It uses that context when it improves a later answer or action. You can ask what Murph knows, correct it, or ask Murph to forget a saved memory.",
+    "Where do the experiments come from?",
+    "Murph uses AI-assisted review of published studies, clinical trials, and other research sources to draft protocols, then presents sources so you can check the evidence yourself. Research may be incomplete, mixed, or not applicable to your situation.",
   ],
   [
     "Do I need a computer?",
-    "The web dashboard works on any device with a browser. For daily help, Murph can talk with you through iMessage, Telegram, or email.",
+    "The web dashboard works on any device with a browser. For daily guidance, Murph texts you through iMessage, Telegram, or email.",
   ],
   [
     "Do I need a wearable?",
-    "No. A wearable can add useful signals, but Murph can also work from conversation, notes, labs, symptoms, meals, workouts, records, and manual measurements.",
+    "No. A wearable can add useful signals, but Murph can also work from notes, labs, symptoms, meals, workouts, and manual measurements. The point is the before-and-after experiment loop.",
   ],
   [
     "How is this different from my wearable’s app?",
-    "Wearable apps are useful sources. Murph can interpret their signals alongside the rest of your health and life, remember the context, and help turn it into a decision or action.",
+    "Wearable apps show status. Murph turns whatever evidence you have into a bounded experiment with a baseline and a clear outcome.",
   ],
   [
-    "What if I don’t have a health goal?",
-    "You do not need to invent one. Start with any question or task that comes up, or ask Murph for an optional baseline review to figure out where attention may be useful.",
+    "Can I do challenges with friends and family?",
+    "Yes. Start a group with Murph and invite your people. Murph referees the challenge: fair baselines across different devices, scoring, reminders, and a winner at the end. Scoring is adherence and change against your own baseline, never raw body stats.",
   ],
   [
-    "Can I get support from friends or family?",
-    "Yes, when you want it. Murph can run a challenge, support shared accountability, or send a family newsletter. Your direct relationship remains private, and other people see only the scope each person agrees to share.",
+    "Do I need friends on Murph?",
+    "No. Group challenges are the most fun way to stay motivated, but Murph works solo too: it keeps you honest, watches your data, and calls what’s working. Either way you’re not doing it alone.",
   ],
   [
-    "What does a group actually see?",
-    "Only what each person explicitly agrees to share for that group, challenge, or newsletter. Everything else stays private by default.",
+    "What does the group actually see?",
+    "Only what each person agrees to share when they join a challenge or newsletter. The weekly newsletter is a short recap of how everyone's week went. Everything else stays private by default.",
   ],
   [
     "Can I set it up for a parent?",
-    "Yes. Murph works over plain texting with no app to download. Their conversation and health context stay private, and they can opt into a narrowly scoped family recap when that is useful.",
-  ],
-  [
-    "When would Murph run an experiment?",
-    "When uncertainty about what works is the real problem. Murph can help choose a useful outcome, find or adapt a protocol, establish a baseline, support the run, and review what changed. A simple question, task, plan, or habit does not need to become an experiment.",
-  ],
-  [
-    "Where do experiment protocols come from?",
-    "Murph uses AI-assisted review of published studies, clinical trials, and other research sources to draft protocols, then presents sources so you can check the evidence. Research may be incomplete, mixed, or not applicable to your situation.",
+    "Yes. Murph works over plain texting with no app to download, which makes it a good fit for parents and grandparents. Their answers stay grounded in their own labs and routines, and the weekly newsletter keeps the family in the loop if they opt in.",
   ],
   [
     "Can I run multiple experiments?",
-    "Yes. Murph recommends one meaningful experiment at a time by default so the result stays interpretable, but separate experiments can overlap when they do not confound one another.",
+    "Yes. We recommend one at a time so you know what caused the change, but you can run more if they don’t overlap.",
   ],
   [
-    "What if I can’t follow a protocol perfectly?",
-    "Real life happens. Murph accounts for missed sessions and other context when interpreting a run. A useful experiment should tolerate ordinary noise.",
+    "What if I can’t follow the protocol perfectly?",
+    "Real life happens. Murph accounts for missed sessions in the analysis. A good experiment tolerates some noise.",
   ],
   [
     "What if nothing changes?",
-    "That can still answer the question. Murph helps decide whether to stop, change, extend, or leave the intervention alone instead of treating every run as a success.",
+    "That’s useful too. Each experiment ends with a verdict: what worked, what didn’t, what to try next. Knowing what doesn’t work saves you from doing it forever.",
   ],
   [
     "Is this medical advice?",
-    "Murph helps with health understanding, decisions, organization, and follow-through, but it does not diagnose or replace a clinician or emergency care. It should be clear about uncertainty and point you to appropriate care when the situation calls for it.",
+    "No. Murph helps you run self-experiments using published research. It’s not a substitute for medical care. Talk to your doctor about health concerns.",
   ],
   [
     "What happens to my data?",

@@ -191,34 +191,24 @@ test("HomePage renders the canonical landing page at the root route", async () =
   );
   assert.match(
     markup,
-    /Questions, data, records, routines, plans, and the rest of your life\. Murph remembers the context/,
+    /Wearables, bloodwork, doctor visits, supplements, blood pressure, sleep\. Murph reads it all/,
   );
-  assert.match(markup, /When support would help, start a health challenge with people you trust/);
+  assert.match(markup, /Start a health challenge with your friends/);
   assert.match(markup, /referees the week/);
-  assert.match(markup, /Private by default/);
-  assert.match(markup, /Bring in your people when it helps\./);
+  assert.match(markup, /Better together/);
+  assert.match(markup, /Do it with your people\./);
   assert.match(markup, /Walk challenge · Day 5 of 7/);
   assert.match(markup, /Weekly newsletter · Sunday 8:02 AM/);
-  assert.match(markup, /One place for whatever comes up with your health\./);
-  const privateAssistantSectionIndex = markup.indexOf(
-    "One place for whatever comes up with your health."
-  );
-  const optionalSocialSectionIndex = markup.indexOf("Private by default");
-  assert.ok(privateAssistantSectionIndex >= 0);
-  assert.ok(optionalSocialSectionIndex >= 0);
-  assert.ok(
-    privateAssistantSectionIndex < optionalSocialSectionIndex,
-    "the private assistant should be introduced before optional social support"
-  );
+  assert.match(markup, /No group\? You’re still not doing this alone\./);
   assert.match(markup, /data-root-landing-auth-actions-label="Dashboard"/);
   assert.match(
     markup,
     /data-root-landing-auth-actions-label="Meet Murph"/
   );
-  assert.match(markup, /The more Murph knows, the more useful it gets\./);
-  assert.match(markup, /Whatever comes up with your health, you don’t have to figure it out alone\./);
-  assert.match(markup, /How does Murph get more personal\?/);
-  assert.match(markup, /personal health assistant/);
+  assert.match(markup, /Everyone’s working on something\./);
+  assert.match(markup, /Whatever your goal, you don’t have to hit it alone\./);
+  assert.match(markup, /Do I need friends on Murph\?/);
+  assert.doesNotMatch(markup, /personal health assistant/);
   assert.doesNotMatch(markup, /Discover what actually makes you healthier/);
   assert.match(markup, /data-root-landing-auth-actions-label="Get started"/);
   assert.match(markup, /You can also install it locally\./);
@@ -229,23 +219,17 @@ test("HomePage renders the canonical landing page at the root route", async () =
   assert.match(markup, /murph chat/);
   assert.match(markup, /Do I need a wearable\?/);
   assert.match(markup, /No\. A wearable can add useful signals/);
-  assert.match(markup, /Can I get support from friends or family\?/);
+  assert.match(markup, /Can I do challenges with friends and family\?/);
   assert.match(
     markup,
-    /Your direct relationship remains private/,
+    /Scoring is adherence and change against your own baseline, never raw body stats\./,
   );
-  assert.match(markup, /What does a group actually see\?/);
+  assert.match(markup, /What does the group actually see\?/);
   assert.match(markup, /Everything else stays private by default\./);
   assert.match(markup, /Murph uses AI-assisted review of published studies/);
   assert.match(markup, /Research may be incomplete, mixed, or not applicable to your situation/);
   assert.doesNotMatch(markup, /GPT-5\.5 Pro/);
-  assert.match(markup, /Wearable apps are useful sources/);
-  assert.match(markup, /Run a clear experiment when guessing isn’t enough\./);
-  assert.match(markup, /Context that compounds/);
-  assert.doesNotMatch(markup, /No group\?/);
-  assert.doesNotMatch(markup, /designs an experiment for your body/);
-  assert.doesNotMatch(markup, /Group challenges are the most fun way/);
-  assert.doesNotMatch(markup, /nudges the slackers/);
+  assert.match(markup, /Wearable apps show status/);
   assert.doesNotMatch(markup, /Perplexity Health/);
   assert.doesNotMatch(markup, /Your wearable shows data/);
 });

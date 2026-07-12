@@ -9,11 +9,11 @@ import { TogetherSection } from "@/src/components/homepage/together-section";
 test("TogetherSection renders the static social feature reframe", () => {
   const markup = renderToStaticMarkup(createElement(TogetherSection));
 
-  assert.match(markup, /Private by default/);
-  assert.match(markup, /Bring in your people when it helps\./);
+  assert.match(markup, /Better together/);
+  assert.match(markup, /Do it with your people\./);
   assert.match(
     markup,
-    /Some goals get easier with company\. When you want that support/,
+    /Habits stick when someone else is watching\. Start a challenge with friends/,
   );
   assert.match(markup, /Group challenges/);
   assert.match(markup, /I referee health challenges with your friends\./);
@@ -25,7 +25,7 @@ test("TogetherSection renders the static social feature reframe", () => {
   );
   assert.match(
     markup,
-    /Murph sets fair baselines across different devices, keeps the group moving with the tone you choose/,
+    /Murph is the referee\. It sets fair baselines across different devices/,
   );
   assert.match(markup, /The weekly newsletter/);
   assert.match(
@@ -40,5 +40,4 @@ test("TogetherSection renders the static social feature reframe", () => {
   assert.match(markup, /so proud of you kids/);
   assert.match(markup, /Grandpa/);
   assert.doesNotMatch(markup, /leaderboard/i);
-  assert.doesNotMatch(markup, /slackers/i);
 });

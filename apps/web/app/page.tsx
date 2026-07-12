@@ -122,7 +122,7 @@ export default async function HomePage() {
         ],
         note: null,
         signupLabel: "Get started",
-        title: "Whatever comes up with your health, you don’t have to figure it out alone.",
+        title: "Whatever your goal, you don’t have to hit it alone.",
       };
 
   return (
@@ -139,8 +139,8 @@ export default async function HomePage() {
           messengerChannel={messengerChannel}
           murphHeadshotSrc={murphHeadshotSrc}
         />
-        <AsksGridSection />
         <TogetherSection />
+        <AsksGridSection />
         <TrustSection />
         <PersonasSection murphHeadshotSrc={murphHeadshotSrc} />
         <IntegrationsSection authenticated={authenticated} />
