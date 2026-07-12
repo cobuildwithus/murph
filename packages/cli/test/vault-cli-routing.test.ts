@@ -9,23 +9,31 @@ import {
 
 test('classifier scopes obvious lazy roots without parsing nested command args', () => {
   for (const root of [
+    'allergy',
     'assistant',
     'assertion',
     'automation',
     'blood-test',
+    'capture',
     'chat',
     'clinical-note',
+    'condition',
     'doctor',
     'diagnostic-test',
     'encounter',
+    'event',
+    'food',
     'goal',
     'list',
+    'journal',
+    'knowledge',
     'meal',
     'measurement',
     'memory',
     'protocol',
     'query',
     'regimen',
+    'route',
     'run',
     'search',
     'show',
@@ -36,6 +44,7 @@ test('classifier scopes obvious lazy roots without parsing nested command args',
     'timeline',
     'vitals',
     'wearables',
+    'workout',
   ] as const) {
     assert.deepEqual(classifyVaultCliInvocation([root, '--weird-command-flag']), {
       kind: 'scoped',
@@ -119,11 +128,38 @@ test('classifier falls back to the full graph for ambiguous leading syntax', () 
   )
 })
 
+test('classifier keeps MCP invocations on the full command tree regardless of flag position', () => {
+  for (const argv of [
+    ['--mcp', 'condition'],
+    ['condition', '--mcp'],
+    ['condition', '--', '--mcp'],
+  ]) {
+    assert.deepEqual(classifyVaultCliInvocation(argv), {
+      kind: 'full',
+      reason: 'mcp-invocation',
+    })
+  }
+
+  assert.deepEqual(
+    classifyVaultCliInvocation(['condition', '--config', '--mcp']),
+    {
+      kind: 'scoped',
+      root: 'condition',
+    },
+  )
+})
+
 test('classifier preserves version and setup routing before command imports', () => {
   assert.deepEqual(classifyVaultCliInvocation(['--version']), {
-    kind: 'full',
-    reason: 'unknown-leading-flag',
+    kind: 'version',
   })
+  for (const argv of [
+    ['--version', '--help'],
+    ['--help', '--version'],
+    ['--no-config', '--version'],
+  ]) {
+    assert.equal(classifyVaultCliInvocation(argv).kind, 'full')
+  }
   assert.deepEqual(classifyVaultCliInvocation(['onboard']), {
     kind: 'setup',
   })
@@ -136,7 +172,7 @@ test('classifier preserves version and setup routing before command imports', ()
       reason: 'root-discovery',
     },
   )
-  for (const flag of ['--llms-full', '--schema', '--mcp']) {
+  for (const flag of ['--llms-full', '--schema']) {
     assert.deepEqual(
       classifyVaultCliInvocation([flag], {
         programName: 'murph',
@@ -147,6 +183,15 @@ test('classifier preserves version and setup routing before command imports', ()
       },
     )
   }
+  assert.deepEqual(
+    classifyVaultCliInvocation(['--mcp'], {
+      programName: 'murph',
+    }),
+    {
+      kind: 'full',
+      reason: 'mcp-invocation',
+    },
+  )
   assert.deepEqual(
     classifyVaultCliInvocation([], {
       programName: 'murph',
@@ -177,6 +222,20 @@ test('planner strips only the existing --vault override before classification', 
       plan: {
         kind: 'scoped',
         root: 'device',
+      },
+    },
+  )
+  assert.deepEqual(
+    planVaultCliInvocation(['--vault', './vault', '--version']),
+    {
+      vaultOverride: {
+        argv: ['--version'],
+        explicit: true,
+        vault: './vault',
+      },
+      plan: {
+        kind: 'full',
+        reason: 'version-with-vault-override',
       },
     },
   )
