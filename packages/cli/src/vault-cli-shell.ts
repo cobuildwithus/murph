@@ -15,6 +15,9 @@ const CLI_SYNC_SUGGESTIONS = [
 
 export function createVaultCliShell(
   commandName = 'vault-cli',
+  options: {
+    expectedSkillHash?: string
+  } = {},
 ): Cli.Cli {
   const cli = Cli.create(commandName, {
     description: CLI_DESCRIPTION,
@@ -24,6 +27,9 @@ export function createVaultCliShell(
     },
     sync: {
       depth: 3,
+      ...(options.expectedSkillHash === undefined
+        ? {}
+        : { expectedHash: options.expectedSkillHash }),
       suggestions: CLI_SYNC_SUGGESTIONS,
     },
     version: getVaultCliPackageVersion(),

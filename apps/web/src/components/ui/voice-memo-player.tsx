@@ -1,6 +1,13 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import {
+  forwardRef,
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useRef,
+  useState,
+} from "react";
 import { PauseIcon, PlayIcon } from "lucide-react";
 
 import { cn } from "@/src/lib/utils";
@@ -29,18 +36,14 @@ function barHeightsFor(count: number): ReadonlyArray<string> {
   return built;
 }
 
-export function VoiceMemoPlayer({
-  src,
-  caption,
-  accentClassName = "bg-[#5e5530]",
-  fillClassName = "bg-[#5e5530]",
-  trackClassName = "bg-[#5e5530]/25",
-  containerClassName = "rounded-full bg-[#f5f0e8] px-3 py-2 ring-1 ring-black/[0.05]",
-  bars = DEFAULT_BAR_COUNT,
-  exclusiveGroupId,
-  preload = "metadata",
-  unavailableLabel = "Unavailable",
-}: {
+export interface VoiceMemoPlayerHandle {
+  // Start playback from the current position; the exclusive group pauses any
+  // sibling player. Lets a surrounding surface (e.g. a clickable card) preview
+  // this memo without duplicating the audio wiring.
+  play: () => void;
+}
+
+interface VoiceMemoPlayerProps {
   src: string;
   caption?: string;
   accentClassName?: string;
@@ -54,7 +57,26 @@ export function VoiceMemoPlayer({
   exclusiveGroupId?: string;
   preload?: "none" | "metadata" | "auto";
   unavailableLabel?: string;
-}) {
+}
+
+export const VoiceMemoPlayer = forwardRef<
+  VoiceMemoPlayerHandle,
+  VoiceMemoPlayerProps
+>(function VoiceMemoPlayer(
+  {
+    src,
+    caption,
+    accentClassName = "bg-[#5e5530]",
+    fillClassName = "bg-[#5e5530]",
+    trackClassName = "bg-[#5e5530]/25",
+    containerClassName = "rounded-full bg-[#f5f0e8] px-3 py-2 ring-1 ring-black/[0.05]",
+    bars = DEFAULT_BAR_COUNT,
+    exclusiveGroupId,
+    preload = "metadata",
+    unavailableLabel = "Unavailable",
+  },
+  ref,
+) {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const probedDurationRef = useRef(false);
   const [playing, setPlaying] = useState(false);
@@ -135,6 +157,13 @@ export function VoiceMemoPlayer({
     };
   }, [exclusiveGroupId, src]);
 
+  const start = useCallback(() => {
+    const a = audioRef.current;
+    if (!a || unavailable) return;
+    a.play().catch(() => setPlaying(false));
+    setPlaying(true);
+  }, [unavailable]);
+
   const toggle = () => {
     const a = audioRef.current;
     if (!a || unavailable) return;
@@ -142,10 +171,11 @@ export function VoiceMemoPlayer({
       a.pause();
       setPlaying(false);
     } else {
-      a.play().catch(() => setPlaying(false));
-      setPlaying(true);
+      start();
     }
   };
+
+  useImperativeHandle(ref, () => ({ play: start }), [start]);
 
   const progress = duration > 0 ? Math.min(1, current / duration) : 0;
   // When the duration is still unknown, count up while playing instead of
@@ -166,9 +196,18 @@ export function VoiceMemoPlayer({
           )}
         >
           {playing ? (
-            <PauseIcon className="size-3.5" strokeWidth={3} aria-hidden="true" />
+            <PauseIcon
+              className="size-3.5"
+              strokeWidth={3}
+              aria-hidden="true"
+            />
           ) : (
-            <PlayIcon className="size-3.5 translate-x-[1px]" fill="currentColor" strokeWidth={0} aria-hidden="true" />
+            <PlayIcon
+              className="size-3.5 translate-x-[1px]"
+              fill="currentColor"
+              strokeWidth={0}
+              aria-hidden="true"
+            />
           )}
         </button>
 
@@ -208,18 +247,23 @@ export function VoiceMemoPlayer({
       />
     </div>
   );
-}
+});
 
-function pauseOtherVoiceMemos(groupId: string | undefined, currentAudio: HTMLAudioElement): void {
+function pauseOtherVoiceMemos(
+  groupId: string | undefined,
+  currentAudio: HTMLAudioElement,
+): void {
   if (!groupId || typeof document === "undefined") {
     return;
   }
 
-  document.querySelectorAll<HTMLAudioElement>("audio[data-voice-memo-group]").forEach((audio) => {
-    if (audio !== currentAudio && audio.dataset.voiceMemoGroup === groupId) {
-      audio.pause();
-    }
-  });
+  document
+    .querySelectorAll<HTMLAudioElement>("audio[data-voice-memo-group]")
+    .forEach((audio) => {
+      if (audio !== currentAudio && audio.dataset.voiceMemoGroup === groupId) {
+        audio.pause();
+      }
+    });
 }
 
 function formatTime(seconds: number): string {
