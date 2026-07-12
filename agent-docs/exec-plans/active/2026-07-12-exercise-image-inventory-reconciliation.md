@@ -28,7 +28,7 @@ Updated: 2026-07-12
 - Follow the Murph exercise-image skill for slide count, subject/camera continuity, limb accuracy, annotations, and full-resolution validation.
 - Use the built-in image generator for new raster assets and serialize generation in this lane; do not launch child helpers or a CLI/API fallback.
 - Keep this lane as the sole canonical branch/seed/catalog writer and uploader. Direct generation ranges are 3–99, 125–149, and 250 onward; skip reserved sequences 100–124 and 150–249 unless consuming completed isolated handoffs, and never let preparation lanes edit this worktree or receive Cloudflare credentials.
-- Before consuming an isolated handoff, validate its source head and manifest hash against current movement definitions, re-inspect every original at full resolution, verify checksum/dimensions/order/identity, reuse only already verified public mappings, upload pending originals idempotently in this lane, and stop on any mismatch.
+- Before consuming an isolated handoff, validate its source head and manifest hash against current movement definitions, re-inspect every original at full resolution, verify checksum/dimensions/order/identity, reuse only already verified public mappings, upload pending originals idempotently in this lane, and record and skip any invalid movement while continuing the next valid item.
 - Keep source PNGs, prompts, QA notes, upload mappings, and reconciliation manifests ignored/local. Commit only authoritative seed URLs, generated catalog artifacts, tests if required, and plan/ledger state.
 - Never expose credentials, account identifiers, personal identifiers, local paths, or secret-bearing environment values.
 
@@ -71,14 +71,16 @@ Updated: 2026-07-12
 - Completed manifest sequence 3 (`EX651`, Side Plank Threaded Knee Drive): validated a three-frame fixed-support knee-drive sequence, uploaded three full-resolution accepted images, updated only the owning seed `Images` field, and rebuilt the catalog to 1,338 imaged movements with 4,060 unique images.
 - Completed manifest sequence 4 (`EX652`, Side Plank Top-Leg March): reduced the plan to two nonredundant setup/march frames, uploaded two full-resolution accepted images, updated only the owning seed `Images` field, and rebuilt the catalog to 1,339 imaged movements with 4,062 unique images.
 - Completed manifest sequence 5 (`EX653`, Side Plank Hip Dip from Knees): reduced the plan to two nonredundant lifted/dip frames, uploaded two full-resolution accepted images, updated only the owning seed `Images` field, and rebuilt the catalog to 1,340 imaged movements with 4,064 unique images.
+- Consumed the controller-ready handoff batch for sequences 100–102, 150–155, 175–177, and 200: revalidated 38 hosted or local originals at full resolution, reused 11 exact public mappings, uploaded 27 pending originals with metadata identity preflight, verified hosted original bytes and public variants, and changed only the 13 owning seed `Images` fields. The rebuilt catalog now has 1,353 imaged movements and 4,102 unique images.
+- Rejected handoff sequence 156 (`EX965`, Mini-Band Fast Feet) without uploading it because slide 3 changes the subject and entire outfit from slides 1–2; the exact blocker is persisted in the ignored recovery state and the canonical manifest item remains pending.
 
 ## Now
 
-- At the next safe boundary, validate and consume completed isolated handoffs for sequences 100 and 150; 408 image-less movements remain before handoff consumption.
+- The ready handoff batch is consumed except for rejected sequence 156; 395 image-less movements remain.
 
 ## Next
 
-- After handoff consumption, resume direct generation at manifest sequence 6, preserving all reserved ranges.
+- Resume direct generation at manifest sequence 6, preserving all reserved ranges and consuming later corrected or completed handoffs only at safe boundaries.
 - Keep ReviewGPT blocked until generation is complete, PR #557 is merged, and the controller grants the single patched 0.5.103 exact-head audit.
 
 ## Verification
@@ -86,6 +88,6 @@ Updated: 2026-07-12
 - `pnpm --dir packages/exercise-library generate`: passed after reconciliation and alt correction.
 - `pnpm --dir packages/exercise-library generate:check`: passed.
 - `pnpm --dir packages/exercise-library verify`: passed; 1 test file and 6 tests passed, including exact catalog counts, URL uniqueness, and the 500-character alt bound.
-- Direct catalog proof: 1,748 total; 1,335 with images; 413 without images; 4,052 images; 4,052 unique URLs; zero invalid public URLs; zero alts over 500 characters; zero non-image item drift.
+- Current direct catalog proof: 1,748 total; 1,353 with images; 395 without images; 4,102 images; 4,102 unique URLs.
 - Remaining generation, upload, full repository verification, completion audits, and final-head CI are pending.
-- After sequence 5, `pnpm --dir packages/exercise-library verify` passes before handoff consumption.
+- The controller-ready handoff batch passes `pnpm --dir packages/exercise-library verify`: typecheck, all 6 tests, and deterministic generated-artifact checks are green.

@@ -1,5 +1,5 @@
 {
-  "catalogHash": "sha256:461b2d9ae6cbd081088f64312e8a8acaf4923567edc7f8f2428ce9e3ecbb1fb3",
+  "catalogHash": "sha256:d729fe575944a1c7a76d486fff7990b98230e9dfe732c8b558aa86a52418f9af",
   "generatedAt": null,
   "items": [
     {
@@ -4642,7 +4642,28 @@
         "Chair or couch"
       ],
       "id": "EX858",
-      "images": [],
+      "images": [
+        {
+          "alt": "Athlete holds a straight decline plank with both feet elevated on a stable bench.",
+          "step": "Decline plank setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/aacfe069-7dec-4b8a-5c20-014329b76a00/public"
+        },
+        {
+          "alt": "Athlete lowers into a controlled feet-elevated push-up while keeping hips level.",
+          "step": "Controlled push-up bottom",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/ba628fce-82b2-4429-25f4-44c138d3d000/public"
+        },
+        {
+          "alt": "Athlete holds the decline plank while the right hand taps the opposite left shoulder.",
+          "step": "Right hand to left shoulder",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/15e8a6f0-37e4-400f-1c5a-dd944808fb00/public"
+        },
+        {
+          "alt": "Athlete switches support hands and taps the opposite right shoulder while holding the decline plank.",
+          "step": "Left hand to right shoulder",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/7417720e-ebcf-4a53-6a0b-8b2f0f51ba00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "advanced",
       "modality": "Strength",
@@ -4681,7 +4702,18 @@
         "Two sturdy books or blocks"
       ],
       "id": "EX859",
-      "images": [],
+      "images": [
+        {
+          "alt": "Athlete holds a straight plank with each hand centered on a separate stable stack of books.",
+          "step": "Raised-hand plank setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/984d8a22-d2f7-42be-6bbc-df8c2b9e0b00/public"
+        },
+        {
+          "alt": "Athlete lowers the chest between two stable book stacks while keeping a straight body line.",
+          "step": "Controlled deficit bottom",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/0b535930-b994-48d3-77b3-6cb0f42f1a00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "advanced",
       "modality": "Strength",
@@ -4717,7 +4749,33 @@
       ],
       "equipment": [],
       "id": "EX860",
-      "images": [],
+      "images": [
+        {
+          "alt": "Athlete holds a straight high plank ready to begin a one-and-a-half push-up.",
+          "step": "Top plank setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/a6a33874-13eb-419d-9f3e-977fb7e6b800/public"
+        },
+        {
+          "alt": "Athlete reaches the controlled bottom of the first push-up descent with hips level.",
+          "step": "First full descent",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/d5304d99-7951-4b2f-acc2-bac88b28ea00/public"
+        },
+        {
+          "alt": "Athlete presses halfway up and pauses with elbows still bent and hips level.",
+          "step": "Halfway press",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/e5ff868d-bfd1-4497-f809-4c34f072d600/public"
+        },
+        {
+          "alt": "Athlete lowers from the halfway pause to the same controlled bottom depth.",
+          "step": "Second full descent",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/06849975-3190-4d7c-ea11-5f39f12e5a00/public"
+        },
+        {
+          "alt": "Athlete presses from the second bottom to a straight-arm high plank to finish the rep.",
+          "step": "Full press to top",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/df2c0151-9de2-4765-7f9e-82fa5d2c0400/public"
+        }
+      ],
       "kind": "exercise",
       "level": "advanced",
       "modality": "Strength",
@@ -8540,7 +8598,28 @@
       ],
       "equipment": [],
       "id": "EX949",
-      "images": [],
+      "images": [
+        {
+          "alt": "Pilates Leg Pull Back seated setup with both legs extended and both hands planted behind the hips.",
+          "step": "Seated setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/cab0da26-24cf-4701-fed3-61864a1dc600/public"
+        },
+        {
+          "alt": "Pilates Leg Pull Back reverse plank with hips lifted, legs straight, and both hands planted behind the body.",
+          "step": "Reverse plank",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/ff7e9caf-c577-4d0e-5f86-3381e131ba00/public"
+        },
+        {
+          "alt": "Pilates Leg Pull Back with the right leg lifted straight while the left heel and both hands remain planted.",
+          "step": "Right leg lift",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/be8a5cd2-894d-44f2-331f-36ac82e51800/public"
+        },
+        {
+          "alt": "Pilates Leg Pull Back with the left leg lifted straight while the right heel and both hands remain planted.",
+          "step": "Left leg lift",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/98f3e2af-b2a6-41d8-d40d-e485585c1500/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Core strength",
@@ -8836,7 +8915,28 @@
         "Dumbbell"
       ],
       "id": "EX955",
-      "images": [],
+      "images": [
+        {
+          "alt": "Alternating Dumbbell Snatch setup with the right hand gripping one dumbbell between the feet in a neutral hip hinge.",
+          "step": "Right-hand floor setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/c0d73a9b-8b9c-465e-247d-50e44c1c4400/public"
+        },
+        {
+          "alt": "Alternating Dumbbell Snatch with the right arm straight overhead holding one dumbbell in a stable standing lockout.",
+          "step": "Right overhead lockout",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/3c10665f-e793-40db-7ec4-98536bc86a00/public"
+        },
+        {
+          "alt": "Alternating Dumbbell Snatch floor transition with the left hand gripping one dumbbell between the feet.",
+          "step": "Left-hand floor switch",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/f958551c-3501-44ab-4ea0-4706b75e5000/public"
+        },
+        {
+          "alt": "Alternating Dumbbell Snatch with the left arm straight overhead holding one dumbbell in a stable standing lockout.",
+          "step": "Left overhead lockout",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/87a9cf4a-b990-4152-e715-ec3083185c00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "advanced",
       "modality": "Power conditioning",
@@ -9027,7 +9127,18 @@
         "Kettlebell"
       ],
       "id": "EX959",
-      "images": [],
+      "images": [
+        {
+          "alt": "Kettlebell Clean setup with one bell held close between the feet in a neutral hip hinge.",
+          "step": "Hinge setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/cd23f0b9-d30b-44cd-91cd-6e0c406ab900/public"
+        },
+        {
+          "alt": "Kettlebell Clean finish with the bell softly supported outside the right forearm in a neutral rack position.",
+          "step": "Soft rack catch",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/142e04f1-9b25-4f60-208a-f5732e1a2900/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Power conditioning",
@@ -9119,7 +9230,18 @@
         "Kettlebell"
       ],
       "id": "EX961",
-      "images": [],
+      "images": [
+        {
+          "alt": "Kettlebell High Pull backswing with one arm long, hips hinged, and the bell passing safely behind the thighs.",
+          "step": "One-arm backswing",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/955e9d12-3fa6-4dea-419c-6915fbc03d00/public"
+        },
+        {
+          "alt": "Kettlebell High Pull endpoint with the right elbow leading high and back as the bell stays close at chest height.",
+          "step": "High-pull endpoint",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/10a6762f-8e83-4be2-112b-a2f34d37ba00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Power conditioning",
@@ -9157,7 +9279,18 @@
         "Kettlebell"
       ],
       "id": "EX962",
-      "images": [],
+      "images": [
+        {
+          "alt": "Kettlebell Figure-Eight Pass with both hands guiding one bell behind the right leg in a wide neutral hinge.",
+          "step": "Pass behind right leg",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/1a0dfbbd-685f-4b10-1193-3c79dac64200/public"
+        },
+        {
+          "alt": "Kettlebell Figure-Eight Pass with both hands guiding one bell behind the left leg in a wide neutral hinge.",
+          "step": "Pass behind left leg",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/0868d7b9-d98f-4525-6e30-79748267ee00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Conditioning",
@@ -9244,7 +9377,18 @@
         "Medicine ball"
       ],
       "id": "EX964",
-      "images": [],
+      "images": [
+        {
+          "alt": "Medicine Ball Rotational Slam setup with one ball held high beside the left shoulder and the hips coiled.",
+          "step": "Loaded rotational setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/83cb565c-f265-4106-6676-fee642f08f00/public"
+        },
+        {
+          "alt": "Medicine Ball Rotational Slam endpoint with the feet pivoted and the ball released outside one foot.",
+          "step": "Rotational slam",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/a10bb499-11f8-4f42-2e3b-923491bc3a00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "advanced",
       "modality": "Power conditioning",
@@ -10150,7 +10294,18 @@
         "Dumbbells"
       ],
       "id": "EX987",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult holding two dumbbells at the sides in a narrow heel-to-toe stance on a straight floor line.",
+          "step": "Loaded tandem setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/0471a19f-f89b-4646-a1b7-bb2761b04800/public"
+        },
+        {
+          "alt": "Adult holding two dumbbells while balancing on one foot and lifting the other knee in a slow tandem march.",
+          "step": "Controlled tandem march",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/15b8a321-5e3d-4558-359e-2cf7c5f24500/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Balance strength",
@@ -10243,7 +10398,18 @@
         "Dumbbell or backpack"
       ],
       "id": "EX989",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult standing tall with feet hip-width while holding one dumbbell beside one thigh like a suitcase.",
+          "step": "One-hand suitcase setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/821996f3-c863-4e90-2d92-ce7003c4d000/public"
+        },
+        {
+          "alt": "Adult holding one dumbbell while lifting one knee and slowly turning the head to the unloaded side.",
+          "step": "Controlled march with slow head turn",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/ad404d4f-e246-4124-8704-dfe2626ee300/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Balance strength",
@@ -10281,7 +10447,23 @@
         "Dumbbell"
       ],
       "id": "EX990",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult in a stable half-kneeling lunge holding one dumbbell at shoulder height on the front-leg side.",
+          "step": "Half-kneeling shoulder rack",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/9160283e-79a6-4dd6-d3dd-21694dc23600/public"
+        },
+        {
+          "alt": "Adult maintaining a half-kneeling base while pressing one dumbbell vertically overhead.",
+          "step": "Half-kneeling overhead press",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/b9cb9ffb-7ba4-4e05-0e60-49076e60f000/public"
+        },
+        {
+          "alt": "Adult standing tall with both feet planted and the single dumbbell returned to shoulder height.",
+          "step": "Controlled standing endpoint",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/881d982f-ff34-4cce-3c02-8604b4e92400/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Balance strength",
@@ -88707,7 +88889,28 @@
       ],
       "equipment": [],
       "id": "ST396",
-      "images": [],
+      "images": [
+        {
+          "alt": "Standing Leg Cradle setup with both feet grounded, soft knees, and an upright torso.",
+          "step": "Standing setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/545313bd-1175-497e-fc82-46bb6697da00/public"
+        },
+        {
+          "alt": "Standing Leg Cradle on the right with the right shin held across the torso while the left foot stays grounded.",
+          "step": "Cradle right leg",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/4201b904-6cbd-4687-79ad-2974a5756300/public"
+        },
+        {
+          "alt": "Standing Leg Cradle reset with both feet grounded before switching sides.",
+          "step": "Reset tall",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/1d26aa95-8418-4947-3563-8c536b550900/public"
+        },
+        {
+          "alt": "Standing Leg Cradle on the left with the left shin held across the torso while the right foot stays grounded.",
+          "step": "Cradle left leg",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/ec46b61a-cb49-4611-f0f5-f705b460e400/public"
+        }
+      ],
       "kind": "stretch",
       "level": "intermediate",
       "modality": "Dynamic Stretch",
