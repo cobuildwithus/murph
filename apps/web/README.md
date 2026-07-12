@@ -871,27 +871,30 @@ Current hosted billing assumptions:
   from its existing end and reconciles only the matching local billing and
   usage-period end timestamps under the shared hosted-member Stripe mutation
   lock. Preview is aggregate-only and does not mutate; Apply requires echoing
-  the exact fixed campaign key plus the opaque local-page and per-target
+  the exact fixed campaign key plus the opaque batch and per-target
   provider proof returned by a complete Preview. Apply rejects a changed local
-  page before provider work and refuses to mutate a target whose locked Stripe
+  batch before provider work and refuses to mutate a target whose locked Stripe
   state differs from Preview. A Preview with any provider failure cannot be
   applied. The Stripe metadata marker makes every Apply retry safe: an already
   marked subscription cannot receive a second extension, while a
   Stripe-success/local-failure retry can still repair local reconciliation.
   Foreign campaign markers fail closed.
-- The deployed route has an 800-second duration and processes one ordered page
-  of at most four candidates per request. This fixed campaign traversal cohort
-  is every billing ref created before `2026-07-10T00:00:00.000Z`. That immutable
-  reservation set contains every locally redeemed pre-cutoff Pulse Trial plus
-  any pre-cutoff Stripe trial whose local finalization failed. Preview checks
-  provider authority for those provider-only trials; Apply routes a proved
-  recovery through the existing auto-trial finalization owner, and a fresh
-  Preview then performs the normal extension. Trials that actually start after
-  the cutoff remain outside this one-time extension. The all-member UI advances
-  through numbered pages that select the fixed reservation set directly in
-  member-id order without returning a member identifier or cursor. Each
-  Preview/Apply pair stays on the same page;
-  the local-page digest prevents a changed page from reaching Stripe, and each
+- The deployed route has an 800-second duration and processes one ordered batch
+  of at most four candidates per request. The authoritative finalized cohort is
+  every locally redeemed Pulse Trial with `pulseTrialRedeemedAt` before
+  `2026-07-10T00:00:00.000Z`; billing-ref creation time is used only to retain
+  pre-cutoff provider-only reservations whose local finalization may have
+  failed. Preview asks the auto-trial owner to classify those provider-only
+  subscriptions. Apply can recover an exact live pre-cutoff trial, clean up an
+  obsolete exact provider trial while preserving current paid billing, or
+  record a paused trial as ended so it cannot block later members. A recovered
+  trial requires a fresh Preview before the normal extension. Trials that
+  actually start after the cutoff remain outside this one-time extension.
+  The all-member UI advances with an encrypted, authenticated keyset
+  continuation in member-id order. The continuation does not expose the member
+  id, and deleting an earlier candidate cannot shift or skip later candidates.
+  Each Preview/Apply pair stays on the same batch; the local-batch digest
+  prevents a changed batch from reaching Stripe, and each
   opaque target proof is checked under that member's mutation lock before its
   Stripe update. Trial-extension Stripe reads and writes use one 80-second
   attempt, and the minimum remaining trial runway is derived from that timeout
@@ -906,9 +909,10 @@ Current hosted billing assumptions:
   minutes) so any older unlocked invocation drains; do not roll back below that
   lock-capable version during the campaign. Preview immediately before Apply,
   investigate every unexpected skip/failure, Apply the returned key and proof,
-  and continue through the final page. Then restart at page one, Preview every
-  page again, and require `wouldRecoverProviderTrial = 0`, `wouldExtend = 0`,
-  and `wouldReconcile = 0` throughout before calling the campaign done. This
+  and continue through the final batch. Then restart without a continuation,
+  Preview every batch again, and require `wouldRecoverProviderTrial = 0`,
+  `wouldCleanupProviderTrial = 0`, `wouldExtend = 0`, and
+  `wouldReconcile = 0` throughout before calling the campaign done. This
   final pass is the cohort-closing preflight: do not remove the surface while
   any provider-only pre-cutoff trial remains. The PR owner owns the immediate follow-up
   removal after that production proof: delete the Ops link, page/client, route,

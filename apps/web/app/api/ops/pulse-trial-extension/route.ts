@@ -2,6 +2,7 @@ import { requireHostedOpsRequestAccess } from "@/src/lib/hosted-ops/access";
 import {
   extendHostedPulseTrialsForCampaign,
   HOSTED_PULSE_TRIAL_EXTENSION_CAMPAIGN,
+  HostedPulseTrialExtensionContinuationError,
   HostedPulseTrialExtensionPreviewMismatchError,
   type HostedPulseTrialExtensionMode,
   type HostedPulseTrialExtensionSummary,
@@ -33,7 +34,7 @@ export const POST = withJsonError(async (request: Request) => {
 
   const mode = readMode(body);
   const memberId = readMemberId(body);
-  const page = readPage(body, memberId);
+  const continuationToken = readContinuationToken(body, memberId);
   if (
     mode === "apply" &&
     readOptionalString(body.campaign) !== HOSTED_PULSE_TRIAL_EXTENSION_CAMPAIGN
@@ -58,7 +59,7 @@ export const POST = withJsonError(async (request: Request) => {
     const commonInput = {
       maxCandidates: HOSTED_OPS_PULSE_TRIAL_EXTENSION_MAX_CANDIDATES,
       memberId,
-      page,
+      continuationToken,
     };
     summary = previewProof
       ? await extendHostedPulseTrialsForCampaign({
@@ -80,12 +81,21 @@ export const POST = withJsonError(async (request: Request) => {
         retryable: false,
       });
     }
+    if (error instanceof HostedPulseTrialExtensionContinuationError) {
+      throw hostedOnboardingError({
+        code: "HOSTED_OPS_PULSE_TRIAL_EXTENSION_CONTINUATION_INVALID",
+        httpStatus: 400,
+        message: "Trial extension continuation is invalid. Restart at Batch 1.",
+        retryable: false,
+      });
+    }
     throw error;
   }
   if (mode === "apply") {
     console.info("Hosted ops Pulse Trial extension applied.", {
       campaign: HOSTED_PULSE_TRIAL_EXTENSION_CAMPAIGN,
       localWindowsReconciled: summary.localWindowsReconciled,
+      providerTrialsCleanedUp: summary.providerTrialsCleanedUp,
       providerTrialsRecovered: summary.providerTrialsRecovered,
       scope: memberId ? "member" : "all",
       stripeTrialsExtended: summary.stripeTrialsExtended,
@@ -132,7 +142,7 @@ function readMemberId(body: Record<string, unknown>): string | undefined {
 
 function readRequiredCandidateSnapshotDigest(body: Record<string, unknown>): string {
   const digest = readOptionalString(body.candidateSnapshotDigest);
-  if (digest && /^pulse-candidates-v3\.[A-Za-z0-9_-]{43}$/u.test(digest)) {
+  if (digest && /^pulse-candidates-v4\.[A-Za-z0-9_-]{43}$/u.test(digest)) {
     return digest;
   }
 
@@ -150,7 +160,7 @@ function readRequiredCandidatePreviewTokens(body: Record<string, unknown>): read
     Array.isArray(value) &&
     value.length <= HOSTED_OPS_PULSE_TRIAL_EXTENSION_MAX_CANDIDATES &&
     value.every((token): token is string =>
-      typeof token === "string" && /^pulse-target-v2\.[A-Za-z0-9_-]{43}$/u.test(token)
+      typeof token === "string" && /^pulse-target-v3\.[A-Za-z0-9_-]{43}$/u.test(token)
     )
   ) {
     return value;
@@ -164,22 +174,27 @@ function readRequiredCandidatePreviewTokens(body: Record<string, unknown>): read
   });
 }
 
-function readPage(body: Record<string, unknown>, memberId: string | undefined): number {
-  const value = body.page ?? 0;
+function readContinuationToken(
+  body: Record<string, unknown>,
+  memberId: string | undefined,
+): string | null {
+  if (!Object.hasOwn(body, "continuationToken") || body.continuationToken === null) {
+    return null;
+  }
+  const token = readOptionalString(body.continuationToken);
   if (
-    typeof value === "number" &&
-    Number.isSafeInteger(value) &&
-    value >= 0 &&
-    Number.isSafeInteger(value * HOSTED_OPS_PULSE_TRIAL_EXTENSION_MAX_CANDIDATES) &&
-    (!memberId || value === 0)
+    !memberId &&
+    token &&
+    /^pulse-cursor-v1\.v[0-9]+\.[A-Za-z0-9_-]{16}\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]{22}$/u
+      .test(token)
   ) {
-    return value;
+    return token;
   }
 
   throw hostedOnboardingError({
-    code: "HOSTED_OPS_PULSE_TRIAL_EXTENSION_PAGE_INVALID",
+    code: "HOSTED_OPS_PULSE_TRIAL_EXTENSION_CONTINUATION_INVALID",
     httpStatus: 400,
-    message: "Trial extension page is invalid.",
+    message: "Trial extension continuation is invalid. Restart at Batch 1.",
     retryable: false,
   });
 }

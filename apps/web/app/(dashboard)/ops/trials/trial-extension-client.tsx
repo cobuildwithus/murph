@@ -14,8 +14,9 @@ type TrialExtensionScope = "all" | "member";
 type TrialExtensionPendingAction = "apply" | "preview" | null;
 type TrialExtensionPreview = {
   summary: HostedPulseTrialExtensionSummary;
+  targetBatchIndex: number;
+  targetContinuationToken: string | null;
   targetMemberId: string | null;
-  targetPage: number;
 };
 
 export function TrialExtensionClient() {
@@ -40,12 +41,12 @@ export function TrialExtensionClient() {
       </header>
 
       <TrialExtensionSection
-        description="Closes the fixed pre-July 10 reservation cohort, recovers any provider trial that did not finish local enrollment, then adds 7 days to eligible Pulse Trials in ordered batches of up to four. A recovered provider trial needs a fresh Preview before extension. After applying every batch, restart at Batch 1 and Preview every batch again. Retire the campaign only when every batch shows zero trials to recover, extend, or reconcile."
+        description="Closes the fixed pre-July 10 trial cohort, recovers unfinished provider trials, cleans up obsolete provider trials without disturbing paid billing, then adds 7 days to eligible Pulse Trials in ordered batches of up to four. A recovered provider trial needs a fresh Preview before extension. After applying every batch, restart at Batch 1 and Preview every batch again. Retire the campaign only when every batch shows zero trials to recover, clean up, extend, or reconcile."
         scope="all"
         title="Fixed campaign cohort"
       />
       <TrialExtensionSection
-        description="Recovers an unfinished provider trial when needed, then adds 7 days to one member's active Pulse Trial. A recovered trial needs a fresh Preview before extension."
+        description="Recovers an unfinished provider trial or cleans up an obsolete one when needed, then adds 7 days to one member's active Pulse Trial. A recovered trial needs a fresh Preview before extension."
         scope="member"
         title="One member"
       />
@@ -68,7 +69,10 @@ function TrialExtensionSection({
   const [confirmation, setConfirmation] = useState("");
   const [pending, setPending] = useState<TrialExtensionPendingAction>(null);
   const [error, setError] = useState<string | null>(null);
-  const [page, setPage] = useState(0);
+  const [batchIndex, setBatchIndex] = useState(0);
+  const [continuationHistory, setContinuationHistory] = useState<Array<string | null>>([
+    null,
+  ]);
   const previewResultRef = useRef<HTMLDivElement>(null);
   const appliedResultRef = useRef<HTMLDivElement>(null);
 
@@ -82,6 +86,14 @@ function TrialExtensionSection({
   const sectionId = `trial-extension-${scope}`;
   const displayedSummary = applied ?? preview?.summary ?? null;
 
+  function resetToFirstBatch(): void {
+    setBatchIndex(0);
+    setContinuationHistory([null]);
+    setPreview(null);
+    setApplied(null);
+    setConfirmation("");
+  }
+
   useEffect(() => {
     if (applied) {
       appliedResultRef.current?.focus();
@@ -94,7 +106,10 @@ function TrialExtensionSection({
     }
   }, [preview]);
 
-  async function previewExtension(requestedPage = page): Promise<void> {
+  async function previewExtension(
+    requestedContinuationToken = continuationHistory[batchIndex] ?? null,
+    requestedBatchIndex = batchIndex,
+  ): Promise<void> {
     const requestedMemberId = scope === "member" ? memberId.trim() : null;
     if (scope === "member" && !requestedMemberId) {
       return;
@@ -110,21 +125,28 @@ function TrialExtensionSection({
         campaign: null,
         candidatePreviewTokens: null,
         candidateSnapshotDigest: null,
+        continuationToken:
+          scope === "all" ? requestedContinuationToken : null,
         memberId: requestedMemberId,
         mode: "dry-run",
-        page: scope === "all" ? requestedPage : 0,
       });
       if (!summary.candidateSnapshotDigest) {
         throw new Error("Preview could not be verified. Preview again.");
       }
-      setPage(summary.page);
+      setBatchIndex(requestedBatchIndex);
       setPreview({
         summary,
+        targetBatchIndex: requestedBatchIndex,
+        targetContinuationToken: requestedContinuationToken,
         targetMemberId: requestedMemberId,
-        targetPage: summary.page,
       });
     } catch (requestError) {
-      setError(readRequestErrorMessage(requestError));
+      if (isTrialExtensionContinuationInvalidError(requestError)) {
+        resetToFirstBatch();
+        setError(`${readRequestErrorMessage(requestError)} Batch 1 is ready to Preview.`);
+      } else {
+        setError(readRequestErrorMessage(requestError));
+      }
     } finally {
       setPending(null);
     }
@@ -146,15 +168,16 @@ function TrialExtensionSection({
         campaign: preview.summary.campaign,
         candidatePreviewTokens: preview.summary.candidatePreviewTokens,
         candidateSnapshotDigest: preview.summary.candidateSnapshotDigest,
+        continuationToken: preview.targetContinuationToken,
         memberId: preview.targetMemberId,
         mode: "apply",
-        page: preview.targetPage,
       });
       setApplied(summary);
       if (
         !hasTrialExtensionFailures(summary) ||
         summary.localWindowsReconciled > 0 ||
         summary.failures.preview_state_changed > 0 ||
+        summary.providerTrialsCleanedUp > 0 ||
         summary.providerTrialsRecovered > 0 ||
         summary.stripeTrialsExtended > 0 ||
         summary.skipped.local_candidate_changed > 0
@@ -163,11 +186,16 @@ function TrialExtensionSection({
         setConfirmation("");
       }
     } catch (requestError) {
-      if (isTrialExtensionPreviewStaleError(requestError)) {
-        setPreview(null);
-        setConfirmation("");
+      if (isTrialExtensionContinuationInvalidError(requestError)) {
+        resetToFirstBatch();
+        setError(`${readRequestErrorMessage(requestError)} Batch 1 is ready to Preview.`);
+      } else {
+        if (isTrialExtensionPreviewStaleError(requestError)) {
+          setPreview(null);
+          setConfirmation("");
+        }
+        setError(readRequestErrorMessage(requestError));
       }
-      setError(readRequestErrorMessage(requestError));
     } finally {
       setPending(null);
     }
@@ -214,7 +242,8 @@ function TrialExtensionSection({
                 setApplied(null);
                 setConfirmation("");
                 setError(null);
-                setPage(0);
+                setBatchIndex(0);
+                setContinuationHistory([null]);
               }}
               disabled={pending !== null}
               placeholder="member_..."
@@ -227,7 +256,7 @@ function TrialExtensionSection({
         <div className="flex flex-wrap items-center gap-2">
           <Button
             disabled={pending !== null || missingMemberId}
-            onClick={() => void previewExtension(page)}
+            onClick={() => void previewExtension()}
             size="sm"
             type="button"
             variant="outline"
@@ -244,7 +273,11 @@ function TrialExtensionSection({
             tabIndex={-1}
           >
             <div aria-live="polite" role="status">
-              <TrialExtensionSummaryPanel scope={scope} summary={preview.summary} />
+              <TrialExtensionSummaryPanel
+                batchNumber={preview.targetBatchIndex + 1}
+                scope={scope}
+                summary={preview.summary}
+              />
             </div>
             {!hasCompleteTrialExtensionPreviewProof(preview.summary) ? (
               <p className="border-t border-border/70 pt-4 text-sm text-muted-foreground">
@@ -252,6 +285,7 @@ function TrialExtensionSection({
               </p>
             ) : preview.summary.wouldExtend > 0 ||
               preview.summary.wouldRecoverProviderTrial > 0 ||
+              preview.summary.wouldCleanupProviderTrial > 0 ||
               preview.summary.wouldReconcile > 0 ? (
               <div className="flex flex-col gap-3 border-t border-border/70 pt-4">
                 <div className="flex max-w-sm flex-col gap-2">
@@ -286,7 +320,7 @@ function TrialExtensionSection({
             ) : (
               <p className="border-t border-border/70 pt-4 text-sm text-muted-foreground">
                 {scope === "all"
-                  ? "Nothing to change in this batch. This is complete only after every batch in a fresh pass shows zero provider trials to recover, zero trials to extend, and zero records to reconcile."
+                  ? "Nothing to change in this batch. This is complete only after every batch in a fresh pass shows zero provider trials to recover or clean up, zero trials to extend, and zero records to reconcile."
                   : "Nothing to change right now."}
               </p>
             )}
@@ -301,36 +335,82 @@ function TrialExtensionSection({
             role="status"
             tabIndex={-1}
           >
-            <TrialExtensionSummaryPanel scope={scope} summary={applied} />
+            <TrialExtensionSummaryPanel
+              batchNumber={batchIndex + 1}
+              scope={scope}
+              summary={applied}
+            />
             {applied.providerTrialsRecovered > 0 ? (
               <p className="border-t border-border/70 pt-4 text-sm text-muted-foreground">
                 Trial recovered. Preview {scope === "member" ? "this member" : "this batch"}
                 {" "}again to add the 7-day extension.
               </p>
             ) : null}
+            {applied.providerTrialsCleanedUp > 0 ? (
+              <p className="border-t border-border/70 pt-4 text-sm text-muted-foreground">
+                Obsolete provider trial cleaned up. Current billing was left unchanged.
+              </p>
+            ) : null}
           </div>
         ) : null}
 
-        {scope === "all" && displayedSummary ? (
+        {scope === "all" && (displayedSummary || batchIndex > 0) ? (
           <div className="flex flex-wrap items-center gap-2 border-t border-border/70 pt-4">
+            {batchIndex > 0 ? (
+              <Button
+                disabled={pending !== null}
+                onClick={() => {
+                  resetToFirstBatch();
+                  void previewExtension(null, 0);
+                }}
+                size="sm"
+                type="button"
+                variant="outline"
+              >
+                Restart at Batch 1
+              </Button>
+            ) : null}
             <Button
-              disabled={pending !== null || displayedSummary.page === 0}
-              onClick={() => void previewExtension(displayedSummary.page - 1)}
+              disabled={pending !== null || batchIndex === 0}
+              onClick={() => {
+                const previousBatchIndex = batchIndex - 1;
+                void previewExtension(
+                  continuationHistory[previousBatchIndex] ?? null,
+                  previousBatchIndex,
+                );
+              }}
               size="sm"
               type="button"
               variant="outline"
             >
               Previous batch
             </Button>
-            <Button
-              disabled={pending !== null || !displayedSummary.hasMoreCandidates}
-              onClick={() => void previewExtension(displayedSummary.page + 1)}
-              size="sm"
-              type="button"
-              variant="outline"
-            >
-              Preview next batch
-            </Button>
+            {displayedSummary ? (
+              <Button
+                disabled={
+                  pending !== null ||
+                  !displayedSummary.hasMoreCandidates ||
+                  !displayedSummary.nextContinuationToken
+                }
+                onClick={() => {
+                  const nextContinuationToken = displayedSummary.nextContinuationToken;
+                  if (!nextContinuationToken) {
+                    return;
+                  }
+                  const nextBatchIndex = batchIndex + 1;
+                  setContinuationHistory((current) => [
+                    ...current.slice(0, nextBatchIndex),
+                    nextContinuationToken,
+                  ]);
+                  void previewExtension(nextContinuationToken, nextBatchIndex);
+                }}
+                size="sm"
+                type="button"
+                variant="outline"
+              >
+                Preview next batch
+              </Button>
+            ) : null}
           </div>
         ) : null}
 
@@ -346,9 +426,11 @@ function TrialExtensionSection({
 }
 
 function TrialExtensionSummaryPanel({
+  batchNumber,
   scope,
   summary,
 }: {
+  batchNumber: number;
   scope: TrialExtensionScope;
   summary: HostedPulseTrialExtensionSummary;
 }) {
@@ -371,7 +453,7 @@ function TrialExtensionSummaryPanel({
         </span>
         {scope === "all" ? (
           <span className="font-mono text-[11px] text-muted-foreground">
-            Batch {summary.page + 1}
+            Batch {batchNumber}
             {summary.hasMoreCandidates ? " · more batches" : " · final batch"}
           </span>
         ) : null}
@@ -391,6 +473,10 @@ function TrialExtensionSummaryPanel({
                 label="Would recover trial"
                 value={summary.wouldRecoverProviderTrial}
               />
+              <TrialExtensionMetricTile
+                label="Would clean up trial"
+                value={summary.wouldCleanupProviderTrial}
+              />
               <TrialExtensionMetricTile label="Would fix records" value={summary.wouldReconcile} />
             </>
           ) : (
@@ -406,6 +492,10 @@ function TrialExtensionSummaryPanel({
               <TrialExtensionMetricTile
                 label="Provider trials recovered"
                 value={summary.providerTrialsRecovered}
+              />
+              <TrialExtensionMetricTile
+                label="Provider trials cleaned up"
+                value={summary.providerTrialsCleanedUp}
               />
             </>
           )}
@@ -470,7 +560,7 @@ function TrialExtensionReasonList({
             className="rounded-md border border-border/70 bg-muted/30 px-2 py-1 font-mono text-[11px] text-muted-foreground"
             key={reason}
           >
-            {reason} ({count})
+            {formatTrialExtensionReason(reason)} ({count})
           </span>
         ))}
       </div>
@@ -519,13 +609,26 @@ function isTrialExtensionPreviewStaleError(requestError: unknown): boolean {
   );
 }
 
+function isTrialExtensionContinuationInvalidError(requestError: unknown): boolean {
+  return (
+    requestError instanceof TrialExtensionRequestError &&
+    requestError.code === "HOSTED_OPS_PULSE_TRIAL_EXTENSION_CONTINUATION_INVALID"
+  );
+}
+
+function formatTrialExtensionReason(reason: string): string {
+  return reason === "provider_trial_ended"
+    ? "Provider trial already ended — no action needed"
+    : reason;
+}
+
 async function requestTrialExtension(input: {
   campaign: string | null;
   candidatePreviewTokens: readonly string[] | null;
   candidateSnapshotDigest: string | null;
+  continuationToken: string | null;
   memberId: string | null;
   mode: "apply" | "dry-run";
-  page: number;
 }): Promise<HostedPulseTrialExtensionSummary> {
   const response = await fetch("/api/ops/pulse-trial-extension", {
     body: JSON.stringify({
@@ -536,9 +639,11 @@ async function requestTrialExtension(input: {
       ...(input.candidateSnapshotDigest
         ? { candidateSnapshotDigest: input.candidateSnapshotDigest }
         : {}),
+      ...(input.continuationToken
+        ? { continuationToken: input.continuationToken }
+        : {}),
       ...(input.memberId ? { memberId: input.memberId } : {}),
       mode: input.mode,
-      page: input.page,
     }),
     cache: "no-store",
     headers: {

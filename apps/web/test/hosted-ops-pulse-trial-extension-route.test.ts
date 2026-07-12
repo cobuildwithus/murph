@@ -42,8 +42,10 @@ let route: PulseTrialExtensionRouteModule;
 const originalHostedOpsMemberIds = process.env.HOSTED_OPS_MEMBER_IDS;
 const NOW = new Date("2026-07-10T12:00:00.000Z");
 const OPERATOR_MEMBER_ID = "member_operator";
-const CANDIDATE_SNAPSHOT_DIGEST = `pulse-candidates-v3.${"a".repeat(43)}`;
-const CANDIDATE_PREVIEW_TOKEN = `pulse-target-v2.${"b".repeat(43)}`;
+const CANDIDATE_SNAPSHOT_DIGEST = `pulse-candidates-v4.${"a".repeat(43)}`;
+const CANDIDATE_PREVIEW_TOKEN = `pulse-target-v3.${"b".repeat(43)}`;
+const CONTINUATION_TOKEN =
+  `pulse-cursor-v1.v1.${"a".repeat(16)}.${"b".repeat(8)}.${"c".repeat(22)}`;
 
 let consoleInfoSpy: ReturnType<typeof vi.spyOn>;
 
@@ -94,12 +96,10 @@ describe("hosted ops Pulse Trial extension route", () => {
     assert.equal(route.maxDuration, 800);
     assert.equal(mocks.assertHostedOnboardingMutationOrigin.mock.calls.length, 1);
     expect(mocks.extendHostedPulseTrialsForCampaign).toHaveBeenCalledWith({
-      expectedCandidatePreviewTokens: undefined,
-      expectedCandidateSnapshotDigest: undefined,
+      continuationToken: null,
       maxCandidates: 4,
       memberId: undefined,
       mode: "dry-run",
-      page: 0,
     });
     const payload = await response.json() as HostedPulseTrialExtensionSummary;
     assert.equal(payload.campaign, HOSTED_PULSE_TRIAL_EXTENSION_CAMPAIGN);
@@ -110,12 +110,10 @@ describe("hosted ops Pulse Trial extension route", () => {
     await route.POST(makeRequest({ memberId: "  member_target  " }));
 
     expect(mocks.extendHostedPulseTrialsForCampaign).toHaveBeenCalledWith({
-      expectedCandidatePreviewTokens: undefined,
-      expectedCandidateSnapshotDigest: undefined,
+      continuationToken: null,
       maxCandidates: 4,
       memberId: "member_target",
       mode: "dry-run",
-      page: 0,
     });
   });
 
@@ -159,15 +157,16 @@ describe("hosted ops Pulse Trial extension route", () => {
     expect(mocks.extendHostedPulseTrialsForCampaign).toHaveBeenCalledWith({
       expectedCandidatePreviewTokens: [CANDIDATE_PREVIEW_TOKEN],
       expectedCandidateSnapshotDigest: CANDIDATE_SNAPSHOT_DIGEST,
+      continuationToken: null,
       maxCandidates: 4,
       memberId: "member_target",
       mode: "apply",
-      page: 0,
     });
     assert.equal(consoleInfoSpy.mock.calls.length, 1);
     assert.deepEqual(consoleInfoSpy.mock.calls[0]?.[1], {
       campaign: HOSTED_PULSE_TRIAL_EXTENSION_CAMPAIGN,
       localWindowsReconciled: 0,
+      providerTrialsCleanedUp: 0,
       providerTrialsRecovered: 0,
       scope: "member",
       stripeTrialsExtended: 0,
@@ -217,29 +216,27 @@ describe("hosted ops Pulse Trial extension route", () => {
     assert.equal(consoleInfoSpy.mock.calls.length, 0);
   });
 
-  test("passes every safe all-member page and rejects invalid page scopes", async () => {
-    const pageResponse = await route.POST(makeRequest({ page: 2 }));
-    const pageBeyondFormerCeilingResponse = await route.POST(makeRequest({ page: 101 }));
-    const memberPageResponse = await route.POST(makeRequest({
-      memberId: "member_target",
-      page: 1,
+  test("passes opaque all-member continuation and rejects invalid or member-scoped tokens", async () => {
+    const continuationResponse = await route.POST(makeRequest({
+      continuationToken: CONTINUATION_TOKEN,
     }));
-    const unsafeOffsetResponse = await route.POST(makeRequest({
-      page: Number.MAX_SAFE_INTEGER,
+    const memberContinuationResponse = await route.POST(makeRequest({
+      continuationToken: CONTINUATION_TOKEN,
+      memberId: "member_target",
+    }));
+    const malformedContinuationResponse = await route.POST(makeRequest({
+      continuationToken: "member_secret",
     }));
 
-    assert.equal(pageResponse.status, 200);
+    assert.equal(continuationResponse.status, 200);
     expect(mocks.extendHostedPulseTrialsForCampaign).toHaveBeenCalledWith({
-      expectedCandidatePreviewTokens: undefined,
-      expectedCandidateSnapshotDigest: undefined,
+      continuationToken: CONTINUATION_TOKEN,
       maxCandidates: 4,
       memberId: undefined,
       mode: "dry-run",
-      page: 2,
     });
-    assert.equal(pageBeyondFormerCeilingResponse.status, 200);
-    assert.equal(memberPageResponse.status, 400);
-    assert.equal(unsafeOffsetResponse.status, 400);
+    assert.equal(memberContinuationResponse.status, 400);
+    assert.equal(malformedContinuationResponse.status, 400);
   });
 
   test("rejects unknown modes", async () => {
@@ -284,7 +281,8 @@ function makeSummary(
     hasMoreCandidates: false,
     localWindowsReconciled: 0,
     mode: "dry-run",
-    page: 0,
+    nextContinuationToken: null,
+    providerTrialsCleanedUp: 0,
     providerTrialsRecovered: 0,
     skipped: {
       local_candidate_changed: 0,
@@ -292,6 +290,7 @@ function makeSummary(
       missing_stripe_refs: 0,
       outside_campaign_cohort: 0,
       provider_recovery_not_found: 0,
+      provider_trial_ended: 0,
       stripe_billing_plan_mismatch: 0,
       stripe_campaign_marker_conflict: 0,
       stripe_checkout_offer_mismatch: 0,
@@ -304,6 +303,7 @@ function makeSummary(
     },
     stripeTrialsExtended: 0,
     wouldExtend: 0,
+    wouldCleanupProviderTrial: 0,
     wouldRecoverProviderTrial: 0,
     wouldReconcile: 0,
     ...overrides,

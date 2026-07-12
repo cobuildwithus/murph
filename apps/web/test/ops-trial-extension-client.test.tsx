@@ -51,8 +51,10 @@ import {
 import { renderClientComponent } from "./render-client-component";
 
 const fetchMock = vi.fn<typeof fetch>();
-const CANDIDATE_SNAPSHOT_DIGEST = `pulse-candidates-v3.${"a".repeat(43)}`;
-const CANDIDATE_PREVIEW_TOKEN = `pulse-target-v2.${"b".repeat(43)}`;
+const CANDIDATE_SNAPSHOT_DIGEST = `pulse-candidates-v4.${"a".repeat(43)}`;
+const CANDIDATE_PREVIEW_TOKEN = `pulse-target-v3.${"b".repeat(43)}`;
+const CONTINUATION_TOKEN =
+  `pulse-cursor-v1.v1.${"a".repeat(16)}.${"b".repeat(8)}.${"c".repeat(22)}`;
 let cleanupRender: (() => Promise<void>) | null = null;
 
 beforeEach(() => {
@@ -96,7 +98,6 @@ describe("TrialExtensionClient", () => {
     expect(readRequestBody(0)).toEqual({
       memberId: "member_one",
       mode: "dry-run",
-      page: 0,
     });
 
     // A disabled control cannot change through normal interaction. Force the
@@ -123,7 +124,6 @@ describe("TrialExtensionClient", () => {
       candidateSnapshotDigest: CANDIDATE_SNAPSHOT_DIGEST,
       memberId: "member_one",
       mode: "apply",
-      page: 0,
     });
     expect(memberInput.disabled).toBe(true);
     expect(confirmationInput.disabled).toBe(true);
@@ -226,16 +226,16 @@ describe("TrialExtensionClient", () => {
     expect(findButton(allSection, "Apply batch")).toBeUndefined();
   });
 
-  test("navigates bounded all-member batches without exposing a cursor", async () => {
+  test("navigates bounded all-member batches with opaque continuation", async () => {
     fetchMock
       .mockResolvedValueOnce(jsonResponse(buildSummary("dry-run", {
         hasMoreCandidates: true,
+        nextContinuationToken: CONTINUATION_TOKEN,
       })))
-      .mockResolvedValueOnce(jsonResponse(buildSummary("dry-run", {
-        page: 1,
-      })))
+      .mockResolvedValueOnce(jsonResponse(buildSummary("dry-run")))
       .mockResolvedValueOnce(jsonResponse(buildSummary("dry-run", {
         hasMoreCandidates: true,
+        nextContinuationToken: CONTINUATION_TOKEN,
       })));
 
     const rendered = await renderClientComponent(createElement(TrialExtensionClient));
@@ -252,14 +252,69 @@ describe("TrialExtensionClient", () => {
     expect(focusMock).toHaveBeenCalledTimes(1);
     await clickButton(rendered.window, getButton(allSection, "Preview next batch"));
 
-    expect(readRequestBody(1)).toEqual({ mode: "dry-run", page: 1 });
+    expect(readRequestBody(1)).toEqual({
+      continuationToken: CONTINUATION_TOKEN,
+      mode: "dry-run",
+    });
     expect(allSection.textContent).toContain("Batch 2 · final batch");
     expect(focusMock).toHaveBeenCalledTimes(2);
     await clickButton(rendered.window, getButton(allSection, "Previous batch"));
 
-    expect(readRequestBody(2)).toEqual({ mode: "dry-run", page: 0 });
+    expect(readRequestBody(2)).toEqual({ mode: "dry-run" });
     expect(allSection.textContent).toContain("Batch 1 · more batches");
     expect(focusMock).toHaveBeenCalledTimes(3);
+  });
+
+  test("restarts a later batch at Batch 1 without replaying its continuation", async () => {
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse(buildSummary("dry-run", {
+        hasMoreCandidates: true,
+        nextContinuationToken: CONTINUATION_TOKEN,
+      })))
+      .mockResolvedValueOnce(jsonResponse(buildSummary("dry-run")))
+      .mockResolvedValueOnce(jsonResponse(buildSummary("dry-run", {
+        hasMoreCandidates: true,
+        nextContinuationToken: CONTINUATION_TOKEN,
+      })));
+
+    const rendered = await renderClientComponent(createElement(TrialExtensionClient));
+    cleanupRender = rendered.cleanup;
+    const allSection = getSection(rendered.container, 0);
+
+    await clickButton(rendered.window, getButton(allSection, "Preview"));
+    await clickButton(rendered.window, getButton(allSection, "Preview next batch"));
+    expect(allSection.textContent).toContain("Batch 2 · final batch");
+    await clickButton(rendered.window, getButton(allSection, "Restart at Batch 1"));
+
+    expect(readRequestBody(2)).toEqual({ mode: "dry-run" });
+    expect(allSection.textContent).toContain("Batch 1 · more batches");
+  });
+
+  test("an invalid continuation resets the next Preview to Batch 1", async () => {
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse(buildSummary("dry-run", {
+        hasMoreCandidates: true,
+        nextContinuationToken: CONTINUATION_TOKEN,
+      })))
+      .mockResolvedValueOnce(jsonResponse({
+        error: {
+          code: "HOSTED_OPS_PULSE_TRIAL_EXTENSION_CONTINUATION_INVALID",
+          message: "Trial extension continuation is invalid. Restart at Batch 1.",
+        },
+      }, 400))
+      .mockResolvedValueOnce(jsonResponse(buildSummary("dry-run")));
+
+    const rendered = await renderClientComponent(createElement(TrialExtensionClient));
+    cleanupRender = rendered.cleanup;
+    const allSection = getSection(rendered.container, 0);
+
+    await clickButton(rendered.window, getButton(allSection, "Preview"));
+    await clickButton(rendered.window, getButton(allSection, "Preview next batch"));
+    expect(allSection.textContent).toContain("Batch 1 is ready to Preview.");
+    await clickButton(rendered.window, getButton(allSection, "Preview"));
+
+    expect(readRequestBody(2)).toEqual({ mode: "dry-run" });
+    expect(allSection.textContent).toContain("Batch 1 · final batch");
   });
 
   test("an apply failure retains the matching preview and confirmation for retry", async () => {
@@ -315,6 +370,40 @@ describe("TrialExtensionClient", () => {
     expect(allSection.textContent).toContain("Eligible trials changed since Preview");
     expect(findButton(allSection, "Apply batch")).toBeUndefined();
     expect(allSection.querySelectorAll("input")).toHaveLength(0);
+  });
+
+  test("an invalid continuation during Apply resets the next Preview to Batch 1", async () => {
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse(buildSummary("dry-run", {
+        hasMoreCandidates: true,
+        nextContinuationToken: CONTINUATION_TOKEN,
+      })))
+      .mockResolvedValueOnce(jsonResponse(buildSummary("dry-run", { wouldExtend: 1 })))
+      .mockResolvedValueOnce(jsonResponse({
+        error: {
+          code: "HOSTED_OPS_PULSE_TRIAL_EXTENSION_CONTINUATION_INVALID",
+          message: "Trial extension continuation is invalid. Restart at Batch 1.",
+        },
+      }, 400))
+      .mockResolvedValueOnce(jsonResponse(buildSummary("dry-run")));
+
+    const rendered = await renderClientComponent(createElement(TrialExtensionClient));
+    cleanupRender = rendered.cleanup;
+    const allSection = getSection(rendered.container, 0);
+
+    await clickButton(rendered.window, getButton(allSection, "Preview"));
+    await clickButton(rendered.window, getButton(allSection, "Preview next batch"));
+    await changeInput(
+      rendered.window,
+      getInput(allSection, 0),
+      HOSTED_PULSE_TRIAL_EXTENSION_CAMPAIGN,
+    );
+    await clickButton(rendered.window, getButton(allSection, "Apply batch"));
+
+    expect(allSection.textContent).toContain("Batch 1 is ready to Preview.");
+    expect(findButton(allSection, "Apply batch")).toBeUndefined();
+    await clickButton(rendered.window, getButton(allSection, "Preview"));
+    expect(readRequestBody(3)).toEqual({ mode: "dry-run" });
   });
 
   test("a partial apply result stays confirmed and available for an idempotent retry", async () => {
@@ -428,6 +517,52 @@ describe("TrialExtensionClient", () => {
     expect(memberSection.querySelectorAll("input")).toHaveLength(1);
   });
 
+  test("provider-only cleanup explains that current billing was preserved", async () => {
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse(buildSummary("dry-run", {
+        wouldCleanupProviderTrial: 1,
+      })))
+      .mockResolvedValueOnce(jsonResponse(buildSummary("apply", {
+        providerTrialsCleanedUp: 1,
+      })));
+
+    const rendered = await renderClientComponent(createElement(TrialExtensionClient));
+    cleanupRender = rendered.cleanup;
+    const memberSection = getSection(rendered.container, 1);
+
+    await changeInput(rendered.window, getInput(memberSection, 0), "member_one");
+    await clickButton(rendered.window, getButton(memberSection, "Preview"));
+    expect(memberSection.textContent).toContain("Would clean up trial");
+    await changeInput(
+      rendered.window,
+      getInput(memberSection, 1),
+      HOSTED_PULSE_TRIAL_EXTENSION_CAMPAIGN,
+    );
+    await clickButton(rendered.window, getButton(memberSection, "Apply batch"));
+
+    expect(memberSection.textContent).toContain("Provider trials cleaned up");
+    expect(memberSection.textContent).toContain(
+      "Obsolete provider trial cleaned up. Current billing was left unchanged.",
+    );
+  });
+
+  test("renders an ended provider trial as a stable no-action skip", async () => {
+    const summary = buildSummary("dry-run");
+    summary.skipped.provider_trial_ended = 1;
+    fetchMock.mockResolvedValueOnce(jsonResponse(summary));
+
+    const rendered = await renderClientComponent(createElement(TrialExtensionClient));
+    cleanupRender = rendered.cleanup;
+    const allSection = getSection(rendered.container, 0);
+
+    await clickButton(rendered.window, getButton(allSection, "Preview"));
+
+    expect(allSection.textContent).toContain(
+      "Provider trial already ended — no action needed (1)",
+    );
+    expect(allSection.textContent).not.toContain("provider_trial_ended");
+  });
+
   test("the all-member preview omits memberId and explains bounded batches", async () => {
     fetchMock.mockResolvedValueOnce(jsonResponse(buildSummary("dry-run")));
 
@@ -441,7 +576,7 @@ describe("TrialExtensionClient", () => {
     );
     await clickButton(rendered.window, getButton(allSection, "Preview"));
 
-    expect(readRequestBody(0)).toEqual({ mode: "dry-run", page: 0 });
+    expect(readRequestBody(0)).toEqual({ mode: "dry-run" });
     expect(rendered.container.textContent).toContain(
       "already extended trials are not extended again",
     );
@@ -474,7 +609,8 @@ function buildSummary(
     hasMoreCandidates: false,
     localWindowsReconciled: 0,
     mode,
-    page: 0,
+    nextContinuationToken: null,
+    providerTrialsCleanedUp: 0,
     providerTrialsRecovered: 0,
     skipped: {
       local_candidate_changed: 0,
@@ -482,6 +618,7 @@ function buildSummary(
       missing_stripe_refs: 0,
       outside_campaign_cohort: 0,
       provider_recovery_not_found: 0,
+      provider_trial_ended: 0,
       stripe_billing_plan_mismatch: 0,
       stripe_campaign_marker_conflict: 0,
       stripe_checkout_offer_mismatch: 0,
@@ -494,6 +631,7 @@ function buildSummary(
     },
     stripeTrialsExtended: 0,
     wouldExtend: 0,
+    wouldCleanupProviderTrial: 0,
     wouldRecoverProviderTrial: 0,
     wouldReconcile: 0,
     ...overrides,
