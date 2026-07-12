@@ -1,4 +1,5 @@
 import path from "node:path";
+import { isDeepStrictEqual } from "node:util";
 
 import {
   collectEventRawReferencePaths,
@@ -643,14 +644,20 @@ function resolveJsonlFamilyPostValidator(
     case "inboxCaptures":
       {
         let retentionIndexPromise: Promise<ReadonlySet<string>> | null = null;
+        let currentRecordsPromise: Promise<readonly InboxCaptureRecord[]> | null = null;
         const readRetentionIndex = () => {
           retentionIndexPromise ??= readInboxAttachmentRetentionIndex(vaultRoot);
           return retentionIndexPromise;
+        };
+        const readCurrentRecords = () => {
+          currentRecordsPromise ??= readCurrentInboxCaptureRecords(vaultRoot);
+          return currentRecordsPromise;
         };
         return async (record) => validateInboxCaptureRecordReferences(
           vaultRoot,
           record,
           readRetentionIndex,
+          readCurrentRecords,
         );
       }
     default:
@@ -810,6 +817,7 @@ async function validateInboxCaptureRecordReferences(
   vaultRoot: string,
   record: UnknownRecord,
   readRetentionIndex: () => Promise<ReadonlySet<string>>,
+  readCurrentRecords: () => Promise<readonly InboxCaptureRecord[]>,
 ): Promise<ValidationIssue[]> {
   const result = safeParseContract<InboxCaptureRecord>(inboxCaptureRecordSchema, record);
   if (!result.success) {
@@ -818,6 +826,23 @@ async function validateInboxCaptureRecordReferences(
 
   const capture = result.data;
   const issues: ValidationIssue[] = [];
+  if (capture.schemaVersion === "murph.inbox-capture.v1") {
+    const envelopeIssues = await validateExistingVaultFile(
+      vaultRoot,
+      capture.envelopePath,
+      "RAW_REFERENCE_MISSING",
+      `Legacy inbox capture envelope "${capture.envelopePath}" is missing without an equivalent current inbox-capture record.`,
+    );
+    if (
+      envelopeIssues.length > 0
+      && !(await readCurrentRecords()).some((current) =>
+        isEquivalentMigratedInboxCaptureRecord(capture, current)
+      )
+    ) {
+      issues.push(...envelopeIssues);
+    }
+  }
+
   for (const attachment of capture.attachments) {
     if (!attachment.storedPath) {
       continue;
@@ -845,6 +870,59 @@ async function validateInboxCaptureRecordReferences(
   }
 
   return issues;
+}
+
+async function readCurrentInboxCaptureRecords(
+  vaultRoot: string,
+): Promise<readonly InboxCaptureRecord[]> {
+  const records: InboxCaptureRecord[] = [];
+  const ledgerPaths = await walkVaultFiles(
+    vaultRoot,
+    VAULT_LAYOUT.inboxCaptureLedgerDirectory,
+    { extension: ".jsonl" },
+  );
+  for (const ledgerPath of ledgerPaths) {
+    let values: UnknownRecord[];
+    try {
+      values = await readJsonlRecords({ vaultRoot, relativePath: ledgerPath });
+    } catch {
+      continue;
+    }
+    for (const value of values) {
+      const parsed = safeParseContract<InboxCaptureRecord>(inboxCaptureRecordSchema, value);
+      if (parsed.success && parsed.data.schemaVersion === "murph.inbox-capture.v2") {
+        records.push(parsed.data);
+      }
+    }
+  }
+  return records;
+}
+
+function isEquivalentMigratedInboxCaptureRecord(
+  legacy: Extract<InboxCaptureRecord, { schemaVersion: "murph.inbox-capture.v1" }>,
+  current: InboxCaptureRecord,
+): boolean {
+  if (current.schemaVersion !== "murph.inbox-capture.v2") {
+    return false;
+  }
+  const {
+    envelopePath,
+    rawRefs: legacyRawRefs,
+    schemaVersion: legacySchemaVersion,
+    ...legacyFields
+  } = legacy;
+  const {
+    rawRefs: currentRawRefs,
+    schemaVersion: currentSchemaVersion,
+    ...currentFields
+  } = current;
+  void legacySchemaVersion;
+  void currentSchemaVersion;
+  return isDeepStrictEqual(legacyFields, currentFields)
+    && isDeepStrictEqual(
+      legacyRawRefs.filter((relativePath) => relativePath !== envelopePath),
+      currentRawRefs,
+    );
 }
 
 async function validateAssessmentRecordReferences(
@@ -1055,6 +1133,7 @@ async function validateRawManifestFile(
 
 async function validateRawImportManifests(vaultRoot: string): Promise<ValidationIssue[]> {
   const rawFiles = await walkVaultFiles(vaultRoot, VAULT_LAYOUT.rawDirectory);
+  const ledgerOwnedInboxDirectories = await readLedgerOwnedInboxCaptureDirectories(vaultRoot);
   const artifactDirectories = new Set<string>();
   const inboxCaptureDirectories = new Set<string>();
   const inboxAttachmentManifestFiles = new Set<string>();
@@ -1102,11 +1181,15 @@ async function validateRawImportManifests(vaultRoot: string): Promise<Validation
       resolveVaultPath(vaultRoot, attachmentManifestPath).absolutePath,
     );
 
-    if (!hasEnvelope && !hasAttachmentManifest) {
+    if (
+      !hasEnvelope
+      && !hasAttachmentManifest
+      && !ledgerOwnedInboxDirectories.has(captureDirectory)
+    ) {
       issues.push(
         validationIssue(
           "RAW_REFERENCE_MISSING",
-          `Inbox capture directory "${captureDirectory}" is missing envelope.json and has no attachment recovery manifest.`,
+          `Inbox capture directory "${captureDirectory}" has no current inbox-capture ledger owner, legacy envelope, or attachment recovery manifest.`,
           envelopePath,
         ),
       );
@@ -1134,6 +1217,39 @@ async function validateRawImportManifests(vaultRoot: string): Promise<Validation
   }
 
   return issues;
+}
+
+async function readLedgerOwnedInboxCaptureDirectories(
+  vaultRoot: string,
+): Promise<ReadonlySet<string>> {
+  const directories = new Set<string>();
+  const ledgerPaths = await walkVaultFiles(
+    vaultRoot,
+    VAULT_LAYOUT.inboxCaptureLedgerDirectory,
+    { extension: ".jsonl" },
+  );
+
+  for (const ledgerPath of ledgerPaths) {
+    let records: UnknownRecord[];
+    try {
+      records = await readJsonlRecords({ vaultRoot, relativePath: ledgerPath });
+    } catch {
+      continue;
+    }
+
+    for (const record of records) {
+      const result = safeParseContract<InboxCaptureRecord>(inboxCaptureRecordSchema, record);
+      if (
+        result.success
+        && result.data.schemaVersion === "murph.inbox-capture.v2"
+        && result.data.sourceDirectory.startsWith(`${VAULT_LAYOUT.rawInboxDirectory}/`)
+      ) {
+        directories.add(result.data.sourceDirectory);
+      }
+    }
+  }
+
+  return directories;
 }
 
 async function validateWriteOperations(vaultRoot: string): Promise<ValidationIssue[]> {

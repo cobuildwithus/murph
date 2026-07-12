@@ -139,11 +139,13 @@ export async function registerScopedVaultCliCommand(input: {
       const [
         { registerVaultCommands },
         services,
+        { createDefaultInboxServices },
       ] = await Promise.all([
         import('./commands/vault.js'),
         createScopedVaultServices(),
+        import('./vault-cli-inbox-services.js'),
       ])
-      registerVaultCommands(input.cli, services)
+      registerVaultCommands(input.cli, services, createDefaultInboxServices())
       return
     }
     case 'list':

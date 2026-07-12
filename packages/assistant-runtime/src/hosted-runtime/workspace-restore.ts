@@ -1140,6 +1140,23 @@ function parseHostedCanonicalWriteReceiptActionForRestore(
         ...(raw.allowRaw === true ? { allowRaw: true as const } : {}),
       };
     }
+    case "delete_if_match": {
+      if (
+        typeof raw.existedBefore !== "boolean" ||
+        !isSha256(raw.expectedSha256) ||
+        !isNonNegativeInteger(raw.expectedByteLength)
+      ) {
+        throw new Error("Hosted canonical guarded delete receipt action is invalid.");
+      }
+      return {
+        kind: "delete_if_match",
+        targetRelativePath: raw.targetRelativePath,
+        existedBefore: raw.existedBefore,
+        expectedSha256: raw.expectedSha256,
+        expectedByteLength: raw.expectedByteLength,
+        ...(raw.allowRaw === true ? { allowRaw: true as const } : {}),
+      };
+    }
     default:
       throw new Error("Hosted canonical write receipt action kind is invalid.");
   }

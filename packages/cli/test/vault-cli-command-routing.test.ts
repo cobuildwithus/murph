@@ -429,13 +429,18 @@ for (const root of ['init', 'validate', 'vault'] as const) {
   test(`scoped command routing maps ${root} to the vault command family`, async () => {
     const cli = Cli.create('vault-cli', { description: 'test cli' })
     const services = createTestVaultServices()
+    const inboxServices = { compactParserAttempts: vi.fn(), repairEnvelopes: vi.fn() }
     const registerVaultCommands = vi.fn()
     const createIntegratedVaultServices = vi.fn(() => services)
+    const createDefaultInboxServices = vi.fn(() => inboxServices)
     vi.doMock('../src/commands/vault.js', () => ({
       registerVaultCommands,
     }))
     vi.doMock('@murphai/vault-usecases/vault-services', () => ({
       createIntegratedVaultServices,
+    }))
+    vi.doMock('../src/vault-cli-inbox-services.js', () => ({
+      createDefaultInboxServices,
     }))
 
     const { registerScopedVaultCliCommand } = await import(
@@ -447,7 +452,8 @@ for (const root of ['init', 'validate', 'vault'] as const) {
     })
 
     assert.equal(createIntegratedVaultServices.mock.calls.length, 1)
-    assert.deepEqual(registerVaultCommands.mock.calls, [[cli, services]])
+    assert.equal(createDefaultInboxServices.mock.calls.length, 1)
+    assert.deepEqual(registerVaultCommands.mock.calls, [[cli, services, inboxServices]])
   })
 }
 

@@ -1,5 +1,7 @@
 import { readFile, stat } from 'node:fs/promises'
+import path from 'node:path'
 import { z } from 'zod'
+import { readParserResult, type ParserOutput } from '@murphai/parsers'
 import { resolveAssistantVaultPath } from '@murphai/vault-usecases/assistant-vault-paths'
 import { normalizeNullableString } from '@murphai/operator-config/text/shared'
 import type {
@@ -115,7 +117,7 @@ export async function buildAssistantInputAttachmentPromptBundle(input: {
       attachment: {
         byteSize: input.attachment.byteSize ?? input.attachment.raw?.byteSize ?? null,
         derivedPath: useParserOutput
-          ? input.attachment.derived?.manifestPath ?? null
+          ? getDerivedArtifactPath(input.attachment.derived)
           : null,
         fileName: input.attachment.fileName,
         mime: input.attachment.mime ?? input.attachment.raw?.mediaType ?? null,
@@ -342,7 +344,7 @@ function buildInlineTextSources(
   return attachment.inlineFragments.map((fragment) => ({
     kind: fragment.kind,
     label: fragment.label,
-    path: attachment.derived?.manifestPath ?? attachment.raw?.path ?? null,
+    path: getDerivedArtifactPath(attachment.derived) ?? attachment.raw?.path ?? null,
     text: fragment.text,
   }))
 }
@@ -380,18 +382,42 @@ async function buildDerivedTextSources(input: {
     return []
   }
 
-  const normalizedManifestPath = normalizeAssistantInputDerivedArtifactPath(
-    derived.manifestPath,
+  const normalizedArtifactPath = normalizeAssistantInputDerivedArtifactPath(
+    getDerivedArtifactPath(derived),
     derived.allowedRoot,
   )
-  if (!normalizedManifestPath) {
+  if (!normalizedArtifactPath) {
     return []
   }
 
-  await input.materializeWorkspaceArtifacts?.([normalizedManifestPath])
-  const manifest = await readParserManifest(input.vaultRoot, normalizedManifestPath)
+  if (derived.kind === 'parser-result') {
+    await input.materializeWorkspaceArtifacts?.([normalizedArtifactPath])
+    const result = await readBoundedParserResult({
+      resultPath: normalizedArtifactPath,
+      vaultRoot: input.vaultRoot,
+    })
+    return result ? buildParserResultTextSources(result, normalizedArtifactPath) : []
+  }
+
+  const manifest = await materializeAndReadParserManifest({
+    manifestPath: normalizedArtifactPath,
+    materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts,
+    vaultRoot: input.vaultRoot,
+  })
   if (!manifest) {
-    return []
+    const resultPath = normalizeAssistantInputDerivedArtifactPath(
+      path.posix.join(path.posix.dirname(normalizedArtifactPath), 'result.json'),
+      derived.allowedRoot,
+    )
+    if (!resultPath) {
+      return []
+    }
+    await input.materializeWorkspaceArtifacts?.([resultPath])
+    const result = await readBoundedParserResult({
+      resultPath,
+      vaultRoot: input.vaultRoot,
+    })
+    return result ? buildParserResultTextSources(result, resultPath) : []
   }
 
   const sources: ModelEvidenceSource[] = []
@@ -456,6 +482,62 @@ async function buildDerivedTextSources(input: {
   }
 
   return sources
+}
+
+function buildParserResultTextSources(
+  result: ParserOutput,
+  resultPath: string,
+): ModelEvidenceSource[] {
+  const sources: ModelEvidenceSource[] = []
+  const plainText = normalizeNullableString(result.text)
+  if (plainText) {
+    sources.push({
+      kind: 'derived_plain_text',
+      label: 'derived-plain-text',
+      path: resultPath,
+      text: plainText,
+    })
+  }
+
+  const markdown = normalizeNullableString(result.markdown)
+  if (markdown) {
+    sources.push({
+      kind: 'derived_markdown',
+      label: 'derived-markdown',
+      path: resultPath,
+      text: markdown,
+    })
+  }
+
+  if (result.tables.length > 0) {
+    sources.push({
+      kind: 'derived_tables',
+      label: 'derived-tables',
+      path: resultPath,
+      text: JSON.stringify(result.tables),
+    })
+  }
+  return sources
+}
+
+async function materializeAndReadParserManifest(input: {
+  manifestPath: string
+  materializeWorkspaceArtifacts?: AssistantWorkspaceArtifactMaterializer | null
+  vaultRoot: string
+}): Promise<z.infer<typeof parserManifestSchema> | null> {
+  await input.materializeWorkspaceArtifacts?.([input.manifestPath])
+  return await readParserManifest(input.vaultRoot, input.manifestPath)
+}
+
+async function readBoundedParserResult(input: {
+  resultPath: string
+  vaultRoot: string
+}): Promise<ParserOutput | null> {
+  try {
+    return await readParserResult(input)
+  } catch {
+    return null
+  }
 }
 
 async function readPreparedRoutingEvidence(input: {
@@ -601,6 +683,17 @@ function normalizeAssistantInputDerivedArtifactPath(
       normalizedCandidate.startsWith(`${normalizedRoot}/`)
     ? normalizedCandidate
     : null
+}
+
+function getDerivedArtifactPath(
+  derived: AssistantInputAttachmentEvidenceItem['derived'],
+): string | null {
+  if (!derived) {
+    return null
+  }
+  return derived.kind === 'parser-result'
+    ? derived.resultPath
+    : derived.manifestPath
 }
 
 async function readParserManifest(

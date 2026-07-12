@@ -466,6 +466,70 @@ describe('assistant input attachment evidence model materialization', () => {
     expect(failures).toEqual([])
   })
 
+  it('reads the current versioned parser result bundle', async () => {
+    const vaultRoot = await createTempVaultRoot()
+    const resultPath =
+      'derived/inbox/capture-1/attachments/att-1/attempts/0001/result.json'
+    await writeVaultFile(
+      vaultRoot,
+      resultPath,
+      Buffer.from(JSON.stringify(createParserResult())),
+    )
+
+    const bundle = await buildAssistantInputAttachmentPromptBundle({
+      attachment: {
+        ...createAttachmentEvidence({
+          kind: 'audio',
+          mime: 'audio/mpeg',
+          rawPath: 'raw/inbox/capture-1/attachments/voice-note.mp3',
+        }),
+        parseState: 'succeeded',
+        derived: {
+          allowedRoot:
+            'derived/inbox/capture-1/attachments/att-1/attempts/0001',
+          kind: 'parser-result',
+          resultPath,
+        },
+      },
+      vaultRoot,
+    })
+
+    expect(bundle.combinedText).toContain('Plain parser text.')
+    expect(bundle.combinedText).toContain('Markdown parser text.')
+    expect(bundle.combinedText).toContain('Table cell')
+  })
+
+  it('resolves a compacted sibling result for a persisted legacy manifest reference', async () => {
+    const vaultRoot = await createTempVaultRoot()
+    const attemptRoot =
+      'derived/inbox/capture-1/attachments/att-1/attempts/0001'
+    await writeVaultFile(
+      vaultRoot,
+      `${attemptRoot}/result.json`,
+      Buffer.from(JSON.stringify(createParserResult())),
+    )
+
+    const bundle = await buildAssistantInputAttachmentPromptBundle({
+      attachment: {
+        ...createAttachmentEvidence({
+          kind: 'audio',
+          mime: 'audio/mpeg',
+          rawPath: 'raw/inbox/capture-1/attachments/voice-note.mp3',
+        }),
+        parseState: 'succeeded',
+        derived: {
+          allowedRoot: attemptRoot,
+          kind: 'parser-manifest',
+          manifestPath: `${attemptRoot}/manifest.json`,
+        },
+      },
+      vaultRoot,
+    })
+
+    expect(bundle.combinedText).toContain('Plain parser text.')
+    expect(bundle.combinedText).toContain('Markdown parser text.')
+  })
+
   it('reads derived parser manifest text only from the declared allowed root', async () => {
     const vaultRoot = await createTempVaultRoot()
     const materializeWorkspaceArtifacts = vi.fn(async () => ({
@@ -585,6 +649,30 @@ async function writeVaultFile(vaultRoot: string, relativePath: string, bytes: Bu
   const absolutePath = path.join(vaultRoot, relativePath)
   await mkdir(path.dirname(absolutePath), { recursive: true })
   await writeFile(absolutePath, bytes)
+}
+
+function createParserResult() {
+  return {
+    schema: 'murph.parser-output.v1',
+    providerId: 'test-provider',
+    artifact: {
+      attachmentId: 'att-1',
+      captureId: 'capture-1',
+      fileName: 'voice-note.mp3',
+      kind: 'audio',
+      mime: 'audio/mpeg',
+      storedPath: 'raw/inbox/capture-1/attachments/voice-note.mp3',
+    },
+    text: 'Plain parser text.',
+    markdown: 'Markdown parser text.',
+    blocks: [],
+    tables: [{
+      id: 'table-1',
+      rows: [['Table cell']],
+    }],
+    metadata: {},
+    createdAt: '2026-04-08T00:00:00.000Z',
+  }
 }
 
 function createAttachmentEvidence(input: {

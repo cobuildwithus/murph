@@ -117,6 +117,14 @@ export type HostedCanonicalWriteReceiptAction =
       targetRelativePath: string;
       existedBefore: boolean;
       allowRaw?: true;
+    }
+  | {
+      kind: "delete_if_match";
+      targetRelativePath: string;
+      existedBefore: boolean;
+      expectedSha256: string;
+      expectedByteLength: number;
+      allowRaw?: true;
     };
 
 export interface HostedCanonicalWriteReceipt {
@@ -258,6 +266,7 @@ type StoredWriteAction =
       state: WriteOperationActionState;
       targetRelativePath: string;
       stageRelativePath: string;
+      stagedPayloadReceipt?: CommittedPayloadReceipt;
       effect?: "append";
       existedBefore?: boolean;
       originalSize?: number;
@@ -591,6 +600,17 @@ export async function applyHostedCanonicalWriteReceipt(input: {
           vaultRoot,
         });
         break;
+      case "delete_if_match":
+        await applyHostedCanonicalDeleteReceiptAction({
+          allowRaw: action.allowRaw === true,
+          expectedTargetReceipt: {
+            byteLength: action.expectedByteLength,
+            sha256: action.expectedSha256,
+          },
+          targetRelativePath: action.targetRelativePath,
+          vaultRoot,
+        });
+        break;
     }
   }
 }
@@ -794,6 +814,7 @@ async function applyHostedCanonicalRawReceiptAction(input: {
 
 async function applyHostedCanonicalDeleteReceiptAction(input: {
   allowRaw: boolean;
+  expectedTargetReceipt?: CommittedPayloadReceipt;
   targetRelativePath: string;
   vaultRoot: string;
 }): Promise<void> {
@@ -802,6 +823,24 @@ async function applyHostedCanonicalDeleteReceiptAction(input: {
     allowRaw: input.allowRaw,
     kind: "delete",
   });
+  if (input.expectedTargetReceipt) {
+    let actualReceipt: CommittedPayloadReceipt;
+    try {
+      actualReceipt = await createFileContentReceipt(target.absolutePath);
+    } catch (error) {
+      if (isErrnoException(error) && error.code === "ENOENT") {
+        return;
+      }
+      throw error;
+    }
+    if (!receiptsMatch(actualReceipt, input.expectedTargetReceipt)) {
+      throw new VaultError(
+        "HOSTED_CANONICAL_WRITE_DELETE_CONFLICT",
+        "Hosted canonical guarded delete found conflicting existing bytes.",
+        { relativePath: input.targetRelativePath },
+      );
+    }
+  }
   await fs.rm(target.absolutePath, { force: true });
 }
 
@@ -1240,6 +1279,11 @@ function parseStoredAction(value: unknown): StoredWriteAction | null {
         return null;
       }
 
+      const stagedPayloadReceipt = parseCommittedPayloadReceipt(record.stagedPayloadReceipt);
+      if (stagedPayloadReceipt === null) {
+        return null;
+      }
+
       const baseContentReceipt = parseCommittedPayloadReceipt(record.baseContentReceipt);
       if (baseContentReceipt === null) {
         return null;
@@ -1251,6 +1295,7 @@ function parseStoredAction(value: unknown): StoredWriteAction | null {
         allowArchivedIntegrationIngestAmendment: record.allowArchivedIntegrationIngestAmendment === true,
         baseContentReceipt,
         committedPayloadReceipt,
+        stagedPayloadReceipt,
         effect: record.effect === "append" ? record.effect : undefined,
         originalSize:
           typeof record.originalSize === "number" &&
@@ -1481,6 +1526,46 @@ export async function readStoredWriteOperation(
   }
 
   return operation;
+}
+
+export async function readStoredWriteOperationJsonlAppendPayload(input: {
+  operation: StoredWriteOperation;
+  targetRelativePath: string;
+  vaultRoot: string;
+}): Promise<string | null> {
+  const targetRelativePath = normalizeRelativeVaultPath(input.targetRelativePath);
+  const actions = input.operation.actions.filter(
+    (action): action is Extract<StoredWriteAction, { kind: "jsonl_append" }> =>
+      action.kind === "jsonl_append" && action.targetRelativePath === targetRelativePath,
+  );
+  if (actions.length !== 1) {
+    return null;
+  }
+
+  const action = actions[0];
+  if (action.state !== "staged" || !action.stagedPayloadReceipt) {
+    return null;
+  }
+
+  const expectedStagePrefix = `${stageRootRelativePath(input.operation.operationId)}/payloads/`;
+  if (!action.stageRelativePath.startsWith(expectedStagePrefix)) {
+    return null;
+  }
+
+  let content: string;
+  try {
+    const stagePath = await resolveVaultPathOnDisk(input.vaultRoot, action.stageRelativePath);
+    content = await fs.readFile(stagePath.absolutePath, "utf8");
+  } catch (error) {
+    if (isErrnoException(error) && error.code === "ENOENT") {
+      return null;
+    }
+    throw error;
+  }
+  if (!receiptsMatch(createCommittedPayloadReceipt(content), action.stagedPayloadReceipt)) {
+    return null;
+  }
+  return content;
 }
 
 export async function readRecoverableStoredWriteOperation(
@@ -1834,12 +1919,14 @@ export class WriteBatch {
     const stageAbsolutePath = resolveVaultPath(this.vaultRoot, stageRelativePath).absolutePath;
     await ensureDirectory(path.dirname(stageAbsolutePath));
     await fs.writeFile(stageAbsolutePath, content, "utf8");
+    const stagedPayloadReceipt = createCommittedPayloadReceipt(content);
 
     this.record.actions.push({
       kind: "jsonl_append",
       state: "staged",
       targetRelativePath: normalizedTarget,
       stageRelativePath,
+      stagedPayloadReceipt,
       allowArchivedIntegrationIngestAmendment,
     });
     await this.persist();
@@ -2256,6 +2343,16 @@ export class WriteBatch {
         };
       }
       case "delete":
+        if (action.expectedTargetReceipt) {
+          return {
+            kind: "delete_if_match",
+            targetRelativePath: action.targetRelativePath,
+            existedBefore: action.existedBefore ?? false,
+            expectedSha256: action.expectedTargetReceipt.sha256,
+            expectedByteLength: action.expectedTargetReceipt.byteLength,
+            ...(action.allowRaw ? { allowRaw: true as const } : {}),
+          };
+        }
         return {
           kind: "delete",
           targetRelativePath: action.targetRelativePath,

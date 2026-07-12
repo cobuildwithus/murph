@@ -37,6 +37,7 @@ import {
   GOAL_HORIZONS,
   GOAL_STATUSES,
   ID_PREFIXES,
+  LEGACY_INBOX_CAPTURE_SCHEMA_VERSION,
   OBSERVATION_GRAINS,
   NUTRITION_CONFIDENCE_LEVELS,
   NUTRITION_PROVENANCE_SOURCES,
@@ -1671,10 +1672,7 @@ const inboxCaptureAttachmentSchema = z
   })
   .strict();
 
-export const inboxCaptureRecordSchema = withContractMetadata(
-  z
-    .object({
-      schemaVersion: z.literal(CONTRACT_SCHEMA_VERSION.inboxCapture),
+const inboxCaptureRecordFields = {
       captureId: patternedString(INBOX_CAPTURE_ID_PATTERN),
       identityKey: boundedString(1, 1024),
       eventId: idSchema(ID_PREFIXES.event),
@@ -1690,11 +1688,30 @@ export const inboxCaptureRecordSchema = withContractMetadata(
       text: boundedString(1, INBOX_CAPTURE_TEXT_MAX_LENGTH).nullable().optional(),
       raw: jsonObjectSchema,
       sourceDirectory: patternedString(RELATIVE_PATH_PATTERN),
-      envelopePath: patternedString(RELATIVE_PATH_PATTERN),
       rawRefs: uniqueArray(patternedString(RELATIVE_PATH_PATTERN), { uniqueItems: true }),
       attachments: z.array(inboxCaptureAttachmentSchema),
-    })
-    .strict(),
+} as const;
+
+const legacyInboxCaptureRecordSchema = z
+  .object({
+    schemaVersion: z.literal(LEGACY_INBOX_CAPTURE_SCHEMA_VERSION),
+    ...inboxCaptureRecordFields,
+    envelopePath: patternedString(RELATIVE_PATH_PATTERN),
+  })
+  .strict();
+
+const currentInboxCaptureRecordSchema = z
+  .object({
+    schemaVersion: z.literal(CONTRACT_SCHEMA_VERSION.inboxCapture),
+    ...inboxCaptureRecordFields,
+  })
+  .strict();
+
+export const inboxCaptureRecordSchema = withContractMetadata(
+  z.discriminatedUnion("schemaVersion", [
+    legacyInboxCaptureRecordSchema,
+    currentInboxCaptureRecordSchema,
+  ]),
   "@murphai/contracts/inbox-capture-record.schema.json",
   "Murph Inbox Capture Record",
 );

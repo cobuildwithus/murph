@@ -382,15 +382,19 @@ function renderAttachmentEvidencePromptSection(
 ): string | null {
   const includeParserEvidence = shouldRenderAttachmentParserEvidence(attachment.kind)
   const storedPathLine = renderAttachmentEvidencePromptStoredPath(attachment)
-  const derivedManifestPath = includeParserEvidence
-    ? normalizeNullableString(attachment.derived?.manifestPath ?? null)
+  const derivedArtifactPath = includeParserEvidence
+    ? normalizeNullableString(
+        attachment.derived?.kind === 'parser-result'
+          ? attachment.derived.resultPath
+          : attachment.derived?.manifestPath ?? null,
+      )
     : null
   const metadataLines = [
     attachment.fileName ? `fileName: ${attachment.fileName}` : null,
     attachment.mime ? `mime: ${attachment.mime}` : null,
     typeof attachment.byteSize === 'number' ? `byteSize: ${attachment.byteSize}` : null,
     storedPathLine,
-    derivedManifestPath ? `derivedManifestPath: ${derivedManifestPath}` : null,
+    derivedArtifactPath ? `derivedArtifactPath: ${derivedArtifactPath}` : null,
     includeParserEvidence && attachment.parseState
       ? `parseState: ${attachment.parseState}`
       : null,
@@ -428,12 +432,12 @@ function renderAttachmentEvidencePromptSection(
         chunks.push(PDF_ATTACHMENT_FILE_INSTRUCTION)
       }
     }
-    if (derivedManifestPath !== null) {
+    if (derivedArtifactPath !== null) {
       chunks.push(
-        'Derived attachment evidence is available in the derived manifest path above.',
+        'Derived attachment evidence is available in the derived artifact path above.',
       )
     }
-    if (storedPathLine === null && derivedManifestPath === null) {
+    if (storedPathLine === null && derivedArtifactPath === null) {
       chunks.push(ATTACHMENT_CONTENT_UNAVAILABLE_INSTRUCTION)
     }
   }

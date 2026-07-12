@@ -7,7 +7,14 @@ import { DatabaseSync } from "node:sqlite";
 import { test } from "vitest";
 import { resolveRuntimePaths } from "@murphai/runtime-state/node";
 
-import { initializeVault, isVaultError, readJsonlRecords, validateVault } from "@murphai/core";
+import {
+  initializeVault,
+  isVaultError,
+  readJsonlRecords,
+  validateVault,
+  VAULT_LAYOUT,
+  walkVaultFiles,
+} from "@murphai/core";
 import { INBOX_CAPTURE_TEXT_MAX_LENGTH } from "@murphai/contracts";
 
 import {
@@ -57,7 +64,7 @@ test("toIsoTimestamp rejects invalid values with the inbox-specific TypeError", 
   );
 });
 
-test("processCapture stores redacted raw evidence and one canonical document intake record", async () => {
+test("processCapture stores attachments while the canonical ledger solely owns envelope metadata", async () => {
   const vaultRoot = await makeTempDirectory("murph-inbox-vault");
   const sourceRoot = await makeTempDirectory("murph-inbox-source");
   await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
@@ -175,30 +182,38 @@ test("processCapture stores redacted raw evidence and one canonical document int
   const jobs = runtime.listAttachmentParseJobs({ limit: 10 });
   assert.equal(jobs.length, 0);
 
-  const envelopePath = path.join(vaultRoot, capture.envelopePath);
-  const envelope = JSON.parse(await fs.readFile(envelopePath, "utf8")) as {
+  const captureRecords = await readJsonlRecords({
+    vaultRoot,
+    relativePath: "ledger/inbox-captures/2026/2026-03.jsonl",
+  });
+  assert.equal(captureRecords.length, 1);
+  const canonicalRecord = captureRecords[0] as {
+    attachments: Array<{ attachmentId: string; originalPath: null }>;
+    auditId?: string;
+    captureId: string;
+    envelopePath?: string;
     eventId: string;
-    input: {
-      attachments: Array<{ originalPath: string | null }>;
-      raw: Record<string, unknown>;
-    };
-    stored: {
-      eventId: string;
-      attachments: Array<{ attachmentId: string }>;
-    };
+    raw: Record<string, unknown>;
+    rawRefs: string[];
+    schemaVersion: string;
+    sourceDirectory: string;
   };
-  assert.equal(envelope.eventId, first.eventId);
-  assert.equal(envelope.stored.eventId, first.eventId);
-  assert.equal(envelope.input.attachments[0]?.originalPath, null);
-  assert.equal(envelope.input.raw.localPath, "<REDACTED_PATH>");
-  assert.equal(envelope.input.raw.authorization, "<REDACTED_SECRET>");
-  assert.equal(envelope.input.raw.cookie, "<REDACTED_SECRET>");
-  assert.equal(envelope.input.raw.stringifiedAuth, "<REDACTED_SECRET>");
-  assert.deepEqual(envelope.input.raw.headers, {
+  assert.equal(canonicalRecord.captureId, first.captureId);
+  assert.equal(canonicalRecord.eventId, first.eventId);
+  assert.equal(canonicalRecord.auditId, undefined);
+  assert.equal(canonicalRecord.schemaVersion, "murph.inbox-capture.v2");
+  assert.equal(canonicalRecord.sourceDirectory, capture.sourceDirectory);
+  assert.equal(canonicalRecord.envelopePath, undefined);
+  assert.deepEqual(canonicalRecord.rawRefs, [capture.attachments[0]?.storedPath]);
+  assert.equal(canonicalRecord.raw.localPath, "<REDACTED_PATH>");
+  assert.equal(canonicalRecord.raw.authorization, "<REDACTED_SECRET>");
+  assert.equal(canonicalRecord.raw.cookie, "<REDACTED_SECRET>");
+  assert.equal(canonicalRecord.raw.stringifiedAuth, "<REDACTED_SECRET>");
+  assert.deepEqual(canonicalRecord.raw.headers, {
     Authorization: "<REDACTED_SECRET>",
     "set-cookie": "<REDACTED_SECRET>",
   });
-  assert.deepEqual(envelope.input.raw.nested, {
+  assert.deepEqual(canonicalRecord.raw.nested, {
     attachmentPath: "<REDACTED_PATH>",
     access_token: "<REDACTED_SECRET>",
     refreshToken: "<REDACTED_SECRET>",
@@ -206,21 +221,11 @@ test("processCapture stores redacted raw evidence and one canonical document int
     secret: "<REDACTED_SECRET>",
     session: "<REDACTED_SECRET>",
   });
-  assert.match(envelope.stored.attachments[0]?.attachmentId ?? "", /^att_/u);
-
-  const captureRecords = await readJsonlRecords({
-    vaultRoot,
-    relativePath: "ledger/inbox-captures/2026/2026-03.jsonl",
-  });
-  assert.equal(captureRecords.length, 1);
-  assert.equal(captureRecords[0]?.captureId, first.captureId);
-  assert.equal(captureRecords[0]?.eventId, first.eventId);
-  assert.equal(captureRecords[0]?.auditId, undefined);
-  assert.equal(captureRecords[0]?.envelopePath, capture.envelopePath);
-  assert.equal(
-    Array.isArray(captureRecords[0]?.rawRefs) &&
-      captureRecords[0]?.rawRefs.includes(capture.envelopePath),
-    true,
+  assert.equal(canonicalRecord.attachments[0]?.originalPath, null);
+  assert.match(canonicalRecord.attachments[0]?.attachmentId ?? "", /^att_/u);
+  assert.deepEqual(
+    await walkVaultFiles(vaultRoot, VAULT_LAYOUT.rawInboxDirectory),
+    [capture.attachments[0]?.storedPath],
   );
 
   assert.deepEqual(
@@ -261,10 +266,6 @@ test("processCapture stores redacted raw evidence and one canonical document int
           {
             op: "create",
             path: capture.attachments[0]?.storedPath,
-          },
-          {
-            op: "create",
-            path: capture.envelopePath,
           },
           {
             op: "append",
@@ -365,15 +366,6 @@ test("processCapture caps canonical inbox-capture text while preserving full loc
     assert.ok(runtimeCapture);
     assert.equal(runtimeCapture.text, fullText);
 
-    const envelope = JSON.parse(
-      await fs.readFile(path.join(vaultRoot, runtimeCapture.envelopePath), "utf8"),
-    ) as {
-      input: {
-        text: string | null;
-      };
-    };
-    assert.equal(envelope.input.text, fullText);
-
     const captureRecords = await readJsonlRecords({
       vaultRoot,
       relativePath: "ledger/inbox-captures/2026/2026-03.jsonl",
@@ -437,15 +429,21 @@ test("processCapture stores in-memory attachment bytes without an external sourc
     new Uint8Array([7, 8, 9]),
   );
 
-  const envelope = JSON.parse(
-    await fs.readFile(path.join(vaultRoot, capture.envelopePath), "utf8"),
-  ) as {
-    input: {
-      attachments: Array<Record<string, unknown>>;
-    };
+  const [captureRecordValue] = await readJsonlRecords({
+    vaultRoot,
+    relativePath: "ledger/inbox-captures/2026/2026-03.jsonl",
+  });
+  const captureRecord = captureRecordValue as {
+    attachments: Array<Record<string, unknown>>;
+    sourceDirectory: string;
   };
-  assert.equal(envelope.input.attachments[0]?.originalPath ?? null, null);
-  assert.equal("data" in (envelope.input.attachments[0] ?? {}), false);
+  assert.equal(captureRecord.attachments[0]?.originalPath ?? null, null);
+  assert.equal("data" in (captureRecord.attachments[0] ?? {}), false);
+  assert.equal(captureRecord.sourceDirectory, capture.sourceDirectory);
+  await assert.rejects(
+    fs.access(path.join(vaultRoot, capture.sourceDirectory, "envelope.json")),
+    (error) => (error as NodeJS.ErrnoException).code === "ENOENT",
+  );
 
   pipeline.close();
 });
@@ -1139,7 +1137,7 @@ test("runtime decoding rejects malformed sqlite rows with clear column errors", 
           text_content,
           raw_json,
           vault_event_id,
-          envelope_path,
+          source_directory,
           created_at
         ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `,
@@ -1160,7 +1158,7 @@ test("runtime decoding rejects malformed sqlite rows with clear column errors", 
       "toast",
       "{}",
       "evt-malformed",
-      "raw/inbox/email/self/2026/03/13/cap-malformed.json",
+      "raw/inbox/email/self/2026/03/13/cap-malformed",
       "2026-03-13T10:00:00.000Z",
     );
 

@@ -34,7 +34,6 @@ Status: frozen current contract plus health extension fence
   raw/assessments/YYYY/MM/<assessmentId>/manifest.json
   raw/captures/YYYY/MM/<eventId>/<filename>
   raw/captures/YYYY/MM/<eventId>/manifest.json
-  raw/inbox/<source>/<account>/YYYY/MM/<captureId>/envelope.json
   raw/inbox/<source>/<account>/YYYY/MM/<captureId>/attachments/<filename>
   ledger/inbox-attachment-retention/YYYY/YYYY-MM.jsonl
   raw/measurements/YYYY/MM/<eventId>/<filename>
@@ -46,6 +45,7 @@ Status: frozen current contract plus health extension fence
   raw/workouts/YYYY/MM/<eventId>/<filename>
   raw/workouts/YYYY/MM/<eventId>/manifest.json
   ledger/inbox-captures/YYYY/YYYY-MM.jsonl
+  derived/inbox/<captureId>/attachments/<attachmentId>/attempts/<attempt>/result.json
   ledger/assessments/YYYY/YYYY-MM.jsonl
   ledger/events/YYYY/YYYY-MM.jsonl
   ledger/integration-ingests/YYYY/YYYY-MM.jsonl
@@ -79,8 +79,9 @@ Generated artifact: `packages/contracts/generated/vault-metadata.schema.json`
 - Markdown docs remain human-readable and reviewable in place.
 - Non-device raw imports are copied under stable type-specific folders in `raw/` and remain immutable in place.
 - Each non-device raw import directory also stores an immutable `manifest.json` sidecar with artifact checksums and import provenance.
-- `raw/inbox/**` is the exception: inbox captures store immutable `envelope.json` plus canonical attachment evidence, and the structured canonical capture facts live in `ledger/inbox-captures/YYYY/YYYY-MM.jsonl` instead of the generic raw-import manifest contract. Image attachment bytes are normalized to bounded static WebP before they are written here or left unstored, and canonical raw metadata drops size-like provider fields instead of retaining original byte sizes. Raw inbox image/audio/video bytes may expire after 14 days when `ledger/inbox-attachment-retention/YYYY/YYYY-MM.jsonl` records the deleted path, sha256, purge time, reason, and retained parser derivative.
-- Assistant inbox automation may additionally preserve accepted stored inbox document attachments into canonical document imports under `raw/documents/**`, but `raw/inbox/**` remains the source-capture layer for the original message envelope and canonical attachment metadata. Promotion does not pin the duplicate raw inbox media bytes; explicit durability belongs to the promoted owner path or an active protected reference.
+- `raw/inbox/**` is the exception: `ledger/inbox-captures/YYYY/YYYY-MM.jsonl` is the sole committed metadata owner, while `raw/inbox/**` retains only attachment bytes that need raw storage. Current `murph.inbox-capture.v2` records carry the complete sanitized envelope metadata and attachment references, so new captures do not write a redundant `envelope.json` or a generic raw-import manifest. Image attachment bytes are normalized to bounded static WebP before they are written here or left unstored, and canonical raw metadata drops size-like provider fields instead of retaining original byte sizes. Raw inbox image/audio/video bytes may expire after 14 days when `ledger/inbox-attachment-retention/YYYY/YYYY-MM.jsonl` records the deleted path, sha256, purge time, reason, and retained parser derivative.
+- Legacy `murph.inbox-capture.v1` records and their raw `envelope.json` files remain readable. `vault repair-inbox-envelopes` is the dry-run-first owner migration: apply appends an exactly equivalent v2 record and deletes the inspected legacy envelope in one receipt-guarded canonical batch. A missing v1 envelope is valid only when that equivalent v2 replacement exists; manual deletion, mismatches, duplicate ownership, and active operations fail closed.
+- Assistant inbox automation may additionally preserve accepted stored inbox document attachments into canonical document imports under `raw/documents/**`, but the inbox-capture ledger remains the source-capture metadata owner and `raw/inbox/**` remains the transient attachment-byte layer. Promotion does not pin the duplicate raw inbox media bytes; explicit durability belongs to the promoted owner path or an active protected reference.
 - Assessment source payloads are copied to `raw/assessments/YYYY/MM/<assessmentId>/source.json` and remain immutable in place.
 - `raw/samples/<stream>/YYYY/MM/<transformId>/` uses an import-batch identifier returned from `samples import-csv`; baseline does not write a standalone transform record.
 - Assessment shards use `recordedAt`: `ledger/assessments/YYYY/YYYY-MM.jsonl`.
@@ -115,14 +116,15 @@ Generated artifact: `packages/contracts/generated/vault-metadata.schema.json`
 - Assessment imports use `raw/assessments/YYYY/MM/<assessmentId>/source.json`.
 - Capture imports use `raw/captures/YYYY/MM/<eventId>/<filename>`.
 - `vault repair-experiment-media` is the proof-driven recovery path for supported legacy media under `bank/experiments/**`. A candidate qualifies only when its boundary-safe, byte-exact full vault-relative source path appears in exactly one direct canonical experiment document. Basenames, relative or encoded paths, substrings, case or Unicode normalization variants, residual alternate spellings, or owners in multiple documents do not qualify. The command dry-runs by default. Explicit apply copies through the canonical capture owner, verifies the event, attachment, raw byte, and manifest, replaces only the proved full-path literals with the canonical capture path, then atomically quarantines and verifies the inspected note and legacy source before replacing or deleting either path. A concurrent edit or interruption preserves recoverable bytes rather than overwriting them. Unsupported, unassociated, multiply-associated, ambiguous-reference, symlink, special, or conflicting files block apply.
-- Inbox captures use `raw/inbox/<source>/<account>/YYYY/MM/<captureId>/envelope.json` plus canonical attachments under `raw/inbox/<source>/<account>/YYYY/MM/<captureId>/attachments/`.
+- Inbox captures store metadata in `ledger/inbox-captures/YYYY/YYYY-MM.jsonl` and, when needed, attachment bytes under `raw/inbox/<source>/<account>/YYYY/MM/<captureId>/attachments/`.
 - Body-measurement attachments use `raw/measurements/YYYY/MM/<eventId>/<filename>`.
 - Meal attachments use `raw/meals/YYYY/MM/<mealId>/<slot>-<filename>`.
 - Sample CSV imports use `raw/samples/<stream>/YYYY/MM/<transformId>/<filename>.csv`, where `transformId` is the returned import-batch id.
 - Workout attachments use `raw/workouts/YYYY/MM/<eventId>/<filename>`.
 - Device/provider API snapshot imports use `ledger/integration-ingests/YYYY/YYYY-MM.jsonl` for live months, may read closed months from `.jsonl.gz` or `.jsonl.zip` archives, and do not create `raw/integrations` files or manifest sidecars.
 - Each non-device raw import directory also reserves `manifest.json` for the immutable sidecar describing imported artifacts, checksums, and provenance.
-- `raw/inbox/**` instead reserves `envelope.json` as the immutable capture record and may include canonical attachment bytes without manifest sidecars. Image/audio/video bytes intentionally expired by retention leave the capture record intact and are represented by `ledger/inbox-attachment-retention/**` so readers can surface `retention_expired` instead of corruption.
+- `raw/inbox/**` may contain canonical attachment bytes without manifest sidecars; its owning current inbox-capture ledger record supplies the metadata boundary. Image/audio/video bytes intentionally expired by retention leave the ledger record intact and are represented by `ledger/inbox-attachment-retention/**` so readers can surface `retention_expired` instead of corruption.
+- Each parser attempt is consumed as one versioned `murph.parser-output.v1` bundle at `derived/inbox/<captureId>/attachments/<attachmentId>/attempts/<attempt>/result.json`. `vault compact-inbox-parser-attempts` dry-runs by default and replaces a legacy manifest/plain-text/Markdown/chunks/tables set only after exact path, identity, and semantic-equivalence validation.
 - File names are slug-safe ASCII and preserve the original extension.
 
 ## Schema Version Policy

@@ -221,6 +221,7 @@ export {
   pruneTerminalWriteOperationRecords,
   readRecoverableStoredWriteOperation,
   readStoredWriteOperation,
+  readStoredWriteOperationJsonlAppendPayload,
   resolveHostedCanonicalWritePayloadFilePath,
   runCanonicalWrite,
   withHostedCanonicalWritePort,

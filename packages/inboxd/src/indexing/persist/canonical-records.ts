@@ -28,7 +28,49 @@ export function buildInboxCaptureRecord(input: {
   stored: StoredCapture;
 }): CanonicalInboxCaptureRecord {
   return assertContract<CanonicalInboxCaptureRecord>(inboxCaptureRecordSchema, {
+    schemaVersion: "murph.inbox-capture.v2",
+    ...buildInboxCaptureRecordFields(input),
+    rawRefs: buildInboxCaptureRawRefs(input.stored),
+  }, "inbox capture record");
+}
+
+export function buildLegacyInboxCaptureRecord(input: {
+  auditId?: string;
+  envelopePath: string;
+  eventId: string;
+  inbound: InboundCapture;
+  stored: StoredCapture;
+}): CanonicalInboxCaptureRecord {
+  return assertContract<CanonicalInboxCaptureRecord>(inboxCaptureRecordSchema, {
     schemaVersion: "murph.inbox-capture.v1",
+    ...buildInboxCaptureRecordFields(input),
+    envelopePath: input.envelopePath,
+    rawRefs: [input.envelopePath, ...buildInboxCaptureRawRefs(input.stored)],
+  }, "legacy inbox capture record");
+}
+
+export function migrateLegacyInboxCaptureRecord(
+  record: CanonicalInboxCaptureRecord,
+): CanonicalInboxCaptureRecord {
+  if (record.schemaVersion !== "murph.inbox-capture.v1") {
+    throw new TypeError("Only legacy inbox capture records can be migrated.");
+  }
+
+  const { envelopePath, rawRefs, ...fields } = record;
+  return assertContract<CanonicalInboxCaptureRecord>(inboxCaptureRecordSchema, {
+    ...fields,
+    schemaVersion: "murph.inbox-capture.v2",
+    rawRefs: rawRefs.filter((relativePath) => relativePath !== envelopePath),
+  }, "migrated inbox capture record");
+}
+
+function buildInboxCaptureRecordFields(input: {
+  auditId?: string;
+  eventId: string;
+  inbound: InboundCapture;
+  stored: StoredCapture;
+}) {
+  return {
     captureId: input.stored.captureId,
     identityKey: createInboxCaptureIdentityKey(input.inbound),
     eventId: input.eventId,
@@ -52,8 +94,6 @@ export function buildInboxCaptureRecord(input: {
     text: toInboxCaptureRecordText(input.inbound.text),
     raw: input.inbound.raw,
     sourceDirectory: input.stored.sourceDirectory,
-    envelopePath: input.stored.envelopePath,
-    rawRefs: buildInboxCaptureRawRefs(input.stored),
     attachments: normalizeStoredAttachments(
       input.stored.captureId,
       input.stored.attachments,
@@ -70,7 +110,7 @@ export function buildInboxCaptureRecord(input: {
       storedPath: attachment.storedPath ?? null,
       sha256: attachment.sha256 ?? null,
     })),
-  }, "inbox capture record");
+  };
 }
 
 function toInboxCaptureRecordText(text: string | null | undefined): string | null {
@@ -98,10 +138,7 @@ export function buildInboxCaptureLedgerPath(input: {
 }
 
 function buildInboxCaptureRawRefs(stored: StoredCapture): string[] {
-  return [
-    stored.envelopePath,
-    ...stored.attachments
-      .map((attachment) => attachment.storedPath)
-      .filter((value): value is string => typeof value === "string" && value.length > 0),
-  ];
+  return stored.attachments
+    .map((attachment) => attachment.storedPath)
+    .filter((value): value is string => typeof value === "string" && value.length > 0);
 }

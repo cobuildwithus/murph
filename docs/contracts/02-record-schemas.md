@@ -48,6 +48,8 @@ Memory record metadata uses only canonical `mem_<ULID>` ids.
   `schemaVersion`, `id`, `action`, `status`, `occurredAt`, `actor`, `commandName`, `summary`, `changes`
 - Assessment response records:
   `schemaVersion`, `id`, `assessmentType`, `recordedAt`, `source`, `rawPath`, `responses`
+- Inbox capture records:
+  `murph.inbox-capture.v2` is the current committed metadata owner and stores capture identity, sanitized message fields, `sourceDirectory`, attachment descriptors, and attachment-only `rawRefs`. Immutable `murph.inbox-capture.v1` records additionally name the historical `envelopePath`; an explicit owner migration may append an exactly equivalent v2 replacement before deleting that redundant envelope, but readers never rewrite append-only ledger history in place.
 - Memory document:
   `docType`, `schemaVersion`, `title`, `updatedAt`, plus sectioned memory records under `Identity`, `Preferences`, `Instructions`, and `Context`. Each stored memory bullet carries a hidden `murph-memory` metadata comment with canonical id, creation time, and update time.
 - Preferences singleton:

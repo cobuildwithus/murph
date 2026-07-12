@@ -2,7 +2,7 @@
 
 Workspace-private local-first multimedia parsing for inbox attachments and other vault-backed media.
 
-This package consumes attachment-level parse jobs from the inbox runtime, selects the best available local parser from a deterministic priority stack, and writes normalized derived artifacts under `derived/inbox/...` for later chat/model layers. The default ordering is text/native CLI first, with remote APIs nowhere in the default stack.
+This package consumes attachment-level parse jobs from the inbox runtime, selects the best available local parser from a deterministic priority stack, and writes one normalized, versioned `result.json` bundle per attempt under `derived/inbox/...` for later chat/model layers. The default ordering is text/native CLI first, with remote APIs nowhere in the default stack.
 
 ## Current default stack
 
@@ -18,7 +18,9 @@ This package consumes attachment-level parse jobs from the inbox runtime, select
 - parse outputs are derived files, never canonical vault state
 - provider discovery stays explicit and local-first
 - adapters remain thin wrappers around mature open-source tools
-- all modalities normalize into one parse result shape (`text`, `markdown`, `chunks`, `tables`, metadata)
+- all modalities normalize into one parse result shape (`text`, `markdown`, `blocks`, `tables`, metadata)
+- one attempt is consumed as one `murph.parser-output.v1` bundle; it does not fan that result back out into manifest, chunk, Markdown, text, or table sidecars
+- `compactLegacyParserAttempts(...)` is dry-run-first and removes legacy sidecars only after exact path, identity, and semantic-equivalence validation; apply passes compact at most 100 eligible attempts
 
 ## Integration seams
 

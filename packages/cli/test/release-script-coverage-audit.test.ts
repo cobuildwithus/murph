@@ -2800,6 +2800,7 @@ exit 1
     mkdirSync(path.join(vaultRoot, '.runtime', 'operations', 'assistant', 'sessions'), {
       recursive: true,
     })
+    mkdirSync(path.join(vaultRoot, '.runtime', 'projections'), { recursive: true })
     mkdirSync(path.join(vaultRoot, 'exports', 'packs', 'existing-pack'), { recursive: true })
     writeFileSync(path.join(vaultRoot, 'vault.json'), '{ "id": "vault_test" }\n', 'utf8')
     writeFileSync(path.join(vaultRoot, 'CORE.md'), '# Vault\n', 'utf8')
@@ -2815,6 +2816,11 @@ exit 1
       'utf8',
     )
     writeFileSync(path.join(vaultRoot, '.runtime', 'secret.json'), '{"token":"nope"}\n', 'utf8')
+    writeFileSync(
+      path.join(vaultRoot, '.runtime', 'projections', 'query.sqlite'),
+      'rebuildable projection\n',
+      'utf8',
+    )
     writeFileSync(
       path.join(vaultRoot, 'exports', 'packs', 'existing-pack', 'manifest.json'),
       '{"packId":"existing-pack"}\n',
@@ -2858,6 +2864,7 @@ exit 1
         .split('\n')
         .filter((entry) => entry.length > 0)
 
+      expect(entries.filter((entry) => entry.endsWith('/'))).toEqual([])
       expect(entries).toContain(`${bundleDir}/bundle-manifest.json`)
       expect(entries).toContain(`${bundleDir}/vault/vault.json`)
       expect(entries).toContain(`${bundleDir}/vault/CORE.md`)
@@ -2867,6 +2874,7 @@ exit 1
         `${bundleDir}/vault/.runtime/operations/assistant/sessions/session.json`,
       )
       expect(entries).not.toContain(`${bundleDir}/vault/.runtime/secret.json`)
+      expect(entries).not.toContain(`${bundleDir}/vault/.runtime/projections/query.sqlite`)
       expect(entries).not.toContain(
         `${bundleDir}/vault/exports/packs/existing-pack/manifest.json`,
       )

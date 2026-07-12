@@ -31,10 +31,12 @@ import {
   getParserToolchainPaths,
   parseAttachment,
   prepareAudioInput,
+  PARSER_RESULT_MAX_BYTES,
+  readParserResult,
   readParserToolchainConfig,
   runAttachmentParseJobOnce,
   runAttachmentParseWorker,
-  writeParserArtifacts,
+  writeParserResult,
   writeParserToolchainConfig,
   type AttachmentParseJobClaimFilters,
   type ParserProvider,
@@ -2065,52 +2067,59 @@ test("parseAttachment rejects provider output above the raised text guardrail", 
   assert.deepEqual(await fs.readdir(scratchRoot), []);
 });
 
-test("writeParserArtifacts removes stale optional files on rerun", async () => {
+test("writeParserResult publishes one private validated result per attempt", async () => {
   const vaultRoot = await makeTempDirectory("murph-parser-publish-rerun");
   await initializeVault({
     vaultRoot,
     createdAt: "2026-03-13T12:00:00.000Z",
   });
 
-  const first = await writeParserArtifacts({
+  const firstOutput = {
+    schema: "murph.parser-output.v1" as const,
+    providerId: "fake-provider",
+    artifact: {
+      captureId: "cap_publish_rerun",
+      attachmentId: "att_publish_rerun",
+      kind: "image" as const,
+      fileName: "scan.png",
+      mime: "image/png",
+      storedPath: "raw/inbox/example/scan.png",
+    },
+    text: "first run text",
+    markdown: "first run text",
+    blocks: [],
+    tables: [
+      {
+        id: "tbl_0001",
+        rows: [["Item", "Qty"]],
+      },
+    ],
+    metadata: {},
+    createdAt: "2026-03-13T12:00:00.000Z",
+  };
+  const first = await writeParserResult({
     attempt: 1,
     vaultRoot,
-    output: {
-      schema: "murph.parser-output.v1",
-      providerId: "fake-provider",
-      artifact: {
-        captureId: "cap_publish_rerun",
-        attachmentId: "att_publish_rerun",
-        kind: "image",
-        fileName: "scan.png",
-        mime: "image/png",
-        storedPath: "raw/inbox/example/scan.png",
-      },
-      text: "first run text",
-      markdown: "first run text",
-      blocks: [],
-      tables: [
-        {
-          id: "tbl_0001",
-          rows: [["Item", "Qty"]],
-        },
-      ],
-      metadata: {},
-      createdAt: "2026-03-13T12:00:00.000Z",
-    },
+    output: firstOutput,
   });
-  assert.equal(first.manifestPath, "derived/inbox/cap_publish_rerun/attachments/att_publish_rerun/attempts/0001/manifest.json");
-  assert.equal(first.tablesPath, "derived/inbox/cap_publish_rerun/attachments/att_publish_rerun/attempts/0001/tables.json");
+  assert.equal(first.resultPath, "derived/inbox/cap_publish_rerun/attachments/att_publish_rerun/attempts/0001/result.json");
   assert.equal(
     (await fs.stat(path.join(vaultRoot, first.attemptDirectoryPath))).mode & 0o777,
     0o700,
   );
   assert.equal(
-    (await fs.stat(path.join(vaultRoot, first.plainTextPath))).mode & 0o777,
+    (await fs.stat(path.join(vaultRoot, first.resultPath))).mode & 0o777,
     0o600,
   );
+  assert.deepEqual(
+    await readParserResult({ vaultRoot, resultPath: first.resultPath }),
+    firstOutput,
+  );
+  assert.deepEqual(await fs.readdir(path.join(vaultRoot, first.attemptDirectoryPath)), [
+    "result.json",
+  ]);
 
-  const second = await writeParserArtifacts({
+  const second = await writeParserResult({
     attempt: 2,
     vaultRoot,
     output: {
@@ -2133,13 +2142,80 @@ test("writeParserArtifacts removes stale optional files on rerun", async () => {
     },
   });
 
-  assert.equal(second.tablesPath ?? null, null);
-  assert.equal(second.manifestPath, "derived/inbox/cap_publish_rerun/attachments/att_publish_rerun/attempts/0002/manifest.json");
-  await fs.access(path.join(vaultRoot, first.tablesPath ?? ""));
+  assert.equal(second.resultPath, "derived/inbox/cap_publish_rerun/attachments/att_publish_rerun/attempts/0002/result.json");
+  assert.deepEqual(await fs.readdir(path.join(vaultRoot, second.attemptDirectoryPath)), [
+    "result.json",
+  ]);
   await assert.rejects(fs.access(path.join(vaultRoot, second.attemptDirectoryPath, "tables.json")));
 });
 
-test("writeParserArtifacts rejects unsafe or malformed artifact IDs before publishing outside derived inbox", async () => {
+test("parser result publication and reads enforce one serialized byte limit", async () => {
+  const vaultRoot = await makeTempDirectory("murph-parser-result-size-limit");
+  await initializeVault({
+    vaultRoot,
+    createdAt: "2026-03-13T12:00:00.000Z",
+  });
+
+  const oversizedAttemptPath =
+    "derived/inbox/cap_result_limit/attachments/att_result_limit/attempts/0001";
+  await assert.rejects(
+    () =>
+      writeParserResult({
+        attempt: 1,
+        vaultRoot,
+        output: {
+          schema: "murph.parser-output.v1",
+          providerId: "fake-provider",
+          artifact: {
+            captureId: "cap_result_limit",
+            attachmentId: "att_result_limit",
+            kind: "document",
+            storedPath: "raw/inbox/example/result-limit.txt",
+          },
+          text: "\0".repeat(10 * 1024 * 1024),
+          markdown: "\0".repeat(1024 * 1024),
+          blocks: [],
+          tables: [],
+          metadata: {},
+          createdAt: "2026-03-13T12:00:00.000Z",
+        },
+      }),
+    new RegExp(`Parser result exceeds the ${PARSER_RESULT_MAX_BYTES}-byte limit\\.`),
+  );
+  await assert.rejects(fs.access(path.join(vaultRoot, oversizedAttemptPath)));
+
+  const published = await writeParserResult({
+    attempt: 2,
+    vaultRoot,
+    output: {
+      schema: "murph.parser-output.v1",
+      providerId: "fake-provider",
+      artifact: {
+        captureId: "cap_result_limit",
+        attachmentId: "att_result_limit",
+        kind: "document",
+        storedPath: "raw/inbox/example/result-limit.txt",
+      },
+      text: "bounded",
+      markdown: "bounded",
+      blocks: [],
+      tables: [],
+      metadata: {},
+      createdAt: "2026-03-13T12:00:00.000Z",
+    },
+  });
+  await fs.truncate(
+    path.join(vaultRoot, published.resultPath),
+    PARSER_RESULT_MAX_BYTES + 1,
+  );
+
+  await assert.rejects(
+    () => readParserResult({ vaultRoot, resultPath: published.resultPath }),
+    new RegExp(`Parser result exceeds the ${PARSER_RESULT_MAX_BYTES}-byte limit\\.`),
+  );
+});
+
+test("writeParserResult rejects unsafe or malformed artifact IDs before publishing outside derived inbox", async () => {
   const vaultRoot = await makeTempDirectory("murph-parser-publish-unsafe-ids");
   await initializeVault({
     vaultRoot,
@@ -2148,7 +2224,7 @@ test("writeParserArtifacts rejects unsafe or malformed artifact IDs before publi
 
   await assert.rejects(
     () =>
-      writeParserArtifacts({
+      writeParserResult({
         attempt: 1,
         vaultRoot,
         output: {
@@ -2176,7 +2252,7 @@ test("writeParserArtifacts rejects unsafe or malformed artifact IDs before publi
 
   await assert.rejects(
     () =>
-      writeParserArtifacts({
+      writeParserResult({
         attempt: 1,
         vaultRoot,
         output: {
@@ -2203,7 +2279,7 @@ test("writeParserArtifacts rejects unsafe or malformed artifact IDs before publi
 
   await assert.rejects(
     () =>
-      writeParserArtifacts({
+      writeParserResult({
         attempt: 1,
         vaultRoot,
         output: {
@@ -2233,7 +2309,7 @@ test("writeParserArtifacts rejects unsafe or malformed artifact IDs before publi
 
   await assert.rejects(
     () =>
-      writeParserArtifacts({
+      writeParserResult({
         attempt: 1,
         vaultRoot,
         output: {
@@ -2260,7 +2336,7 @@ test("writeParserArtifacts rejects unsafe or malformed artifact IDs before publi
   );
 });
 
-test("writeParserArtifacts rejects derived attempt paths that traverse symlinks", async () => {
+test("writeParserResult rejects derived attempt paths that traverse symlinks", async () => {
   const vaultRoot = await makeTempDirectory("murph-parser-publish-symlink");
   const outsideRoot = await makeTempDirectory("murph-parser-publish-symlink-outside");
   await initializeVault({
@@ -2282,7 +2358,7 @@ test("writeParserArtifacts rejects derived attempt paths that traverse symlinks"
 
   await assert.rejects(
     () =>
-      writeParserArtifacts({
+      writeParserResult({
         attempt: 1,
         vaultRoot,
         output: {
@@ -2381,7 +2457,7 @@ test("attachment parse worker fails closed on malformed attachment IDs", async (
     receivedAt: "2026-03-13T12:00:01.000Z",
     text: null,
     raw: {},
-    envelopePath: "raw/inbox/captures/cap_worker_malformed_id/envelope.json",
+    sourceDirectory: "raw/inbox/telegram/bot/2026/03/cap_worker_malformed_id",
     eventId: "evt_worker_malformed_id",
     createdAt: "2026-03-13T12:00:01.000Z",
     attachments: [attachment],
@@ -2586,17 +2662,17 @@ test("attachment parse worker consumes inbox jobs, writes derived artifacts, and
   assert.equal(results.length, 1);
   assert.equal(results[0]?.status, "succeeded");
   assert.equal(results[0]?.providerId, "fake-image-parser");
-  assert.ok(results[0]?.manifestPath);
-  assert.match(results[0]?.manifestPath ?? "", /attempts\/0001\/manifest\.json$/u);
+  assert.ok(results[0]?.resultPath);
+  assert.match(results[0]?.resultPath ?? "", /attempts\/0001\/result\.json$/u);
   assert.equal(results[0]?.job.state, "succeeded");
-  assert.equal(results[0]?.job.resultPath, results[0]?.manifestPath);
+  assert.equal(results[0]?.job.resultPath, results[0]?.resultPath);
   assert.equal(results[0]?.job.providerId, "fake-image-parser");
 
   const refreshed = runtime.getCapture(capture.captureId);
   assert.ok(refreshed);
   assert.equal(refreshed.attachments[0]?.parseState, "succeeded");
   assert.equal(refreshed.attachments[0]?.parserProviderId, "fake-image-parser");
-  assert.equal(refreshed.attachments[0]?.derivedPath, results[0]?.manifestPath);
+  assert.equal(refreshed.attachments[0]?.derivedPath, results[0]?.resultPath);
   assert.equal(refreshed.attachments[0]?.transcriptText, "Omelet with spinach and feta");
 
   const hits = runtime.searchCaptures({
@@ -2606,22 +2682,14 @@ test("attachment parse worker consumes inbox jobs, writes derived artifacts, and
   assert.equal(hits.length, 1);
   assert.equal(hits[0]?.captureId, capture.captureId);
 
-  const manifestPath = path.join(vaultRoot, results[0]?.manifestPath ?? "");
-  const manifest = JSON.parse(await fs.readFile(manifestPath, "utf8")) as {
-    providerId: string;
-    paths: {
-      plainTextPath: string;
-      markdownPath: string;
-      chunksPath: string;
-    };
-  };
-  assert.equal(manifest.providerId, "fake-image-parser");
-  const plainText = await fs.readFile(path.join(vaultRoot, manifest.paths.plainTextPath), "utf8");
-  const markdown = await fs.readFile(path.join(vaultRoot, manifest.paths.markdownPath), "utf8");
-  const chunks = await fs.readFile(path.join(vaultRoot, manifest.paths.chunksPath), "utf8");
-  assert.match(plainText, /Omelet with spinach and feta/);
-  assert.match(markdown, /## OCR/);
-  assert.match(chunks, /Omelet with spinach and feta/);
+  const parserResult = await readParserResult({
+    vaultRoot,
+    resultPath: results[0]?.resultPath ?? "",
+  });
+  assert.equal(parserResult.providerId, "fake-image-parser");
+  assert.match(parserResult.text, /Omelet with spinach and feta/);
+  assert.match(parserResult.markdown, /## OCR/);
+  assert.match(JSON.stringify(parserResult.blocks), /Omelet with spinach and feta/);
 
   pipeline.close();
 });
@@ -2659,9 +2727,13 @@ test("stale running parser attempts do not overwrite a requeued rerun", async ()
   });
 
   let runCount = 0;
-  let releaseFirstRun: (() => void) | undefined;
+  let signalFirstRunStarted: (() => void) | undefined;
   const firstRunStarted = new Promise<void>((resolve) => {
-    releaseFirstRun = () => resolve();
+    signalFirstRunStarted = resolve;
+  });
+  let releaseFirstRun: (() => void) | undefined;
+  const firstRunRelease = new Promise<void>((resolve) => {
+    releaseFirstRun = resolve;
   });
 
   const registry = createParserRegistry([
@@ -2683,7 +2755,8 @@ test("stale running parser attempts do not overwrite a requeued rerun", async ()
       async run() {
         runCount += 1;
         if (runCount === 1) {
-          await firstRunStarted;
+          signalFirstRunStarted?.();
+          await firstRunRelease;
           return {
             text: "stale attempt text",
           };
@@ -2703,7 +2776,7 @@ test("stale running parser attempts do not overwrite a requeued rerun", async ()
     ffmpeg: disableFfmpegLookup(),
   });
 
-  await new Promise((resolve) => setTimeout(resolve, 20));
+  await firstRunStarted;
   assert.equal(
     runtime.requeueAttachmentParseJobs({
       captureId: capture.captureId,
@@ -2719,7 +2792,7 @@ test("stale running parser attempts do not overwrite a requeued rerun", async ()
     ffmpeg: disableFfmpegLookup(),
   });
   assert.equal(rerun?.status, "succeeded");
-  assert.match(rerun?.manifestPath ?? "", /attempts\/0002\/manifest\.json$/u);
+  assert.match(rerun?.resultPath ?? "", /attempts\/0002\/result\.json$/u);
 
   releaseFirstRun?.();
   assert.equal(await firstAttempt, null);
@@ -2727,18 +2800,12 @@ test("stale running parser attempts do not overwrite a requeued rerun", async ()
   const refreshed = runtime.getCapture(capture.captureId);
   assert.ok(refreshed);
   assert.equal(refreshed.attachments[0]?.transcriptText, "fresh rerun text");
-  assert.match(refreshed.attachments[0]?.derivedPath ?? "", /attempts\/0002\/manifest\.json$/u);
-  const refreshedManifest = JSON.parse(
-    await fs.readFile(path.join(vaultRoot, refreshed.attachments[0]?.derivedPath ?? ""), "utf8"),
-  ) as {
-    paths: {
-      plainTextPath: string;
-    };
-  };
-  assert.match(
-    await fs.readFile(path.join(vaultRoot, refreshedManifest.paths.plainTextPath), "utf8"),
-    /fresh rerun text/u,
-  );
+  assert.match(refreshed.attachments[0]?.derivedPath ?? "", /attempts\/0002\/result\.json$/u);
+  const refreshedResult = await readParserResult({
+    vaultRoot,
+    resultPath: refreshed.attachments[0]?.derivedPath ?? "",
+  });
+  assert.match(refreshedResult.text, /fresh rerun text/u);
   await assert.rejects(
     fs.access(
       path.join(

@@ -61,7 +61,7 @@ export function summarizeCapture(
     receivedAt: capture.receivedAt ?? null,
     text: capture.text,
     attachmentCount: capture.attachments.length,
-    envelopePath: capture.envelopePath,
+    sourceDirectory: capture.sourceDirectory,
     eventId: capture.eventId,
     createdAt: capture.createdAt,
     promotions,
