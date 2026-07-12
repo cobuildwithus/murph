@@ -185,7 +185,7 @@ export async function handleHostedOnboardingLinqWebhook(input: {
       const joinAccepted = reactionResult.status === "accepted";
       const reactionContextEnabled =
         process.env.HOSTED_LINQ_GROUP_REACTION_CONTEXT_ENABLED === "1";
-      if (!reactionContextEnabled && !joinAccepted) {
+      if (!reactionContextEnabled && reactionResult.status === "ignored") {
         throw hostedOnboardingError({
           code: "HOSTED_LINQ_GROUP_REACTION_CONTEXT_ROLLOUT_PENDING",
           httpStatus: 503,
@@ -194,7 +194,7 @@ export async function handleHostedOnboardingLinqWebhook(input: {
       }
       const contextResult = reactionContextEnabled
         ? await stageHostedLinqGroupReactionContext({
-            allowActionableReply: !joinAccepted,
+            allowActionableReply: reactionResult.status === "ignored",
             event: providerEvent,
             prisma,
             ...(input.signal ? { signal: input.signal } : {}),

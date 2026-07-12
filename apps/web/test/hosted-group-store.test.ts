@@ -48,6 +48,7 @@ import {
   createHostedGroupJoinLinkForOwnedThreadContainerTx,
   HOSTED_GROUP_VAULT_SHARE_DESTINATION_LIMIT_PER_PROJECTION,
   HOSTED_GROUP_VAULT_SHARE_GRANT_LIMIT_PER_GRANTOR_PROJECTION,
+  isHostedGroupJoinOfferTarget,
   readHostedGroupJoinView,
   recordHostedGroupJoinOfferTx,
 } from "@/src/lib/hosted-groups/group-store";
@@ -664,6 +665,25 @@ describe("acceptHostedGroupJoinCodeTx", () => {
     });
 
     expect(tx.hostedGroupMember.create).not.toHaveBeenCalled();
+  });
+
+  it("recognizes revoked join-offer messages as owned targets", async () => {
+    const findFirst = vi.fn().mockResolvedValue({ id: "offer_revoked" });
+    const prisma = createPrismaStub({
+      hostedGroupJoinOffer: { findFirst },
+    });
+
+    await expect(isHostedGroupJoinOfferTarget({
+      messageLookupKeyReadCandidates: ["", "hbidx:linq-message:v1:offer"],
+      prisma,
+    })).resolves.toBe(true);
+
+    expect(findFirst).toHaveBeenCalledWith({
+      where: {
+        messageLookupKey: { in: ["hbidx:linq-message:v1:offer"] },
+      },
+      select: { id: true },
+    });
   });
 
   it("accepts an older visible offer after a newer offer is posted", async () => {

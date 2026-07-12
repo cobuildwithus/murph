@@ -678,6 +678,27 @@ export async function acceptHostedGroupJoinOfferTx(input: {
   };
 }
 
+export async function isHostedGroupJoinOfferTarget(input: {
+  messageLookupKeyReadCandidates: readonly string[];
+  prisma: HostedGroupsReadClient;
+}): Promise<boolean> {
+  const messageLookupKeyReadCandidates = normalizeHostedGroupLookupKeyCandidates(
+    input.messageLookupKeyReadCandidates,
+  );
+  if (messageLookupKeyReadCandidates.length === 0) {
+    return false;
+  }
+  const offer = await input.prisma.hostedGroupJoinOffer.findFirst({
+    where: {
+      messageLookupKey: {
+        in: messageLookupKeyReadCandidates,
+      },
+    },
+    select: { id: true },
+  });
+  return offer !== null;
+}
+
 function normalizeHostedGroupLookupKeyCandidates(
   values: readonly (string | null | undefined)[],
 ): string[] {

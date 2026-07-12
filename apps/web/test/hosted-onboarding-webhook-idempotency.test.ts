@@ -503,6 +503,48 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
     expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
   });
 
+  it("keeps an owned but revoked join-offer reaction out of generic replies", async () => {
+    const prisma = createPrismaStub();
+    mocks.getPrisma.mockReturnValue(prisma);
+    mocks.handleHostedGroupJoinOfferReaction.mockResolvedValueOnce({
+      reason: "offer_revoked",
+      status: "owned",
+    });
+    mocks.stageHostedLinqGroupReactionContext.mockResolvedValueOnce({
+      duplicate: false,
+      laneSeq: "32",
+      mailboxItemId: "mailbox_reaction_revoked_offer_1",
+      status: "staged",
+      userId: "member_group_1",
+      wakeable: false,
+    });
+
+    await handleHostedOnboardingLinqWebhook({
+      rawBody: buildLinqProviderWebhookBody({
+        data: {
+          chat_id: "chat_group_1",
+          from_handle: {
+            handle: "+15551234567",
+            is_me: false,
+            service: "iMessage",
+          },
+          line: { phone_number: "+15550000000" },
+          message_id: "msg_revoked_offer_123",
+          reaction_type: "like",
+        },
+        eventId: "evt_reaction_revoked_offer_123",
+        eventType: "reaction.added",
+      }),
+      signature: null,
+      timestamp: null,
+    });
+
+    expect(mocks.stageHostedLinqGroupReactionContext).toHaveBeenCalledWith(
+      expect.objectContaining({ allowActionableReply: false }),
+    );
+    expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
+  });
+
   it("hands off an affirmative reaction reply to Murph's own group message", async () => {
     const prisma = createPrismaStub();
     mocks.getPrisma.mockReturnValue(prisma);
@@ -557,7 +599,7 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
     });
   });
 
-  it("hands off removal of an affirmative reaction as a wakeable withdrawal", async () => {
+  it("does not hand off removal of an affirmative reaction", async () => {
     const prisma = createPrismaStub();
     mocks.getPrisma.mockReturnValue(prisma);
     mocks.handleHostedGroupJoinOfferReaction.mockResolvedValueOnce({
@@ -567,10 +609,10 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
     mocks.stageHostedLinqGroupReactionContext.mockResolvedValueOnce({
       duplicate: false,
       laneSeq: "33",
-      mailboxItemId: "mailbox_reaction_withdrawal_1",
+      mailboxItemId: "mailbox_reaction_removal_1",
       status: "staged",
       userId: "member_group_1",
-      wakeable: true,
+      wakeable: false,
     });
 
     await expect(handleHostedOnboardingLinqWebhook({
@@ -586,7 +628,7 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
           message_id: "msg_target_123",
           reaction_type: "like",
         },
-        eventId: "evt_reaction_withdrawal_123",
+        eventId: "evt_reaction_removal_123",
         eventType: "reaction.removed",
       }),
       signature: null,
@@ -594,7 +636,7 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
     })).resolves.toMatchObject({
       ignored: false,
       ok: true,
-      reason: "wake-appended-linq-group-reaction-reply",
+      reason: "staged-linq-group-reaction-context",
     });
 
     expect(mocks.stageHostedLinqGroupReactionContext).toHaveBeenCalledWith(
@@ -603,15 +645,7 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
         event: expect.objectContaining({ eventType: "reaction.removed" }),
       }),
     );
-    expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
-      expectedUserId: "member_group_1",
-      knownCheckpoint: {
-        lane: "conversation",
-        laneSeq: "33",
-        userId: "member_group_1",
-      },
-      mailboxItemId: "mailbox_reaction_withdrawal_1",
-    });
+    expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
   });
 
   it("re-hands off a duplicate affirmative reaction without stale checkpoint facts", async () => {

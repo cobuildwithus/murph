@@ -199,7 +199,29 @@ describe("stageHostedLinqGroupReactionContext", () => {
     expect(text).toContain("Otherwise keep it as context only");
   });
 
-  it("makes removal of an affirmative reply wakeable withdrawal", async () => {
+  it("keeps an ordinary affirmative reaction to Murph wakeable for exact interpretation", async () => {
+    const prisma = createPrismaStub();
+    mocks.getHostedLinqReactionTargetMessage.mockResolvedValueOnce({
+      chatId: "chat_group_1",
+      id: "message_target_1",
+      isFromMe: true,
+      parts: [{ type: "text", value: "Nice work today." }],
+      service: "iMessage",
+    });
+
+    await expect(stageHostedLinqGroupReactionContext({
+      event: buildReactionEvent({ eventId: "event_ordinary_affirmative" }),
+      prisma,
+    })).resolves.toMatchObject({ wakeable: true });
+
+    const envelope = mocks.appendHostedMailboxEnvelopeTx.mock.calls[0]?.[0]?.envelope;
+    expect(envelope).toMatchObject({ kind: "conversation.message" });
+    const text = envelope.message.linqMessage.parts[0].value;
+    expect(text).toContain("Nice work today.");
+    expect(text).toContain("Otherwise keep it as context only and do not reply or act");
+  });
+
+  it("keeps removal of an affirmative reply as non-wakeable context", async () => {
     const prisma = createPrismaStub();
     mocks.getHostedLinqReactionTargetMessage.mockResolvedValueOnce({
       chatId: "chat_group_1",
@@ -212,13 +234,14 @@ describe("stageHostedLinqGroupReactionContext", () => {
     await expect(stageHostedLinqGroupReactionContext({
       event: buildReactionEvent({ eventType: "reaction.removed" }),
       prisma,
-    })).resolves.toMatchObject({ wakeable: true });
+    })).resolves.toMatchObject({ wakeable: false });
 
     const envelope = mocks.appendHostedMailboxEnvelopeTx.mock.calls[0]?.[0]?.envelope;
-    expect(envelope.kind).toBe("conversation.message");
-    expect(envelope.message.linqMessage.parts[0].value).toContain(
-      "Stop any pending follow-through that has not become irreversible",
-    );
+    expect(envelope.kind).toBe("conversation.reaction");
+    expect(envelope.message.linqMessage).toMatchObject({
+      reactionOperation: "removed",
+      reactionTargetKey: expect.stringMatching(/^linq-reaction-target\.v1:/u),
+    });
   });
 
   it("keeps non-affirmative and join-acceptance reactions deferred", async () => {
@@ -562,6 +585,49 @@ describe("stageHostedLinqGroupReactionContext", () => {
       status: "staged",
       userId: "member_group_1",
       wakeable: true,
+    });
+    expect(mocks.getHostedLinqReactionTargetMessage).not.toHaveBeenCalled();
+    expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+  });
+
+  it("keeps a duplicate removal non-wakeable without repeating the target read", async () => {
+    const prisma = createPrismaStub();
+    mocks.readHostedMailboxItemByDedupeKey.mockResolvedValueOnce({
+      id: "mailbox_existing_removal",
+      // A row written by the earlier draft could have the old actionable kind.
+      kind: "conversation.message",
+      laneSeq: 24n,
+    });
+
+    await expect(stageHostedLinqGroupReactionContext({
+      event: buildReactionEvent({
+        eventId: "event_duplicate_removal",
+        eventType: "reaction.removed",
+      }),
+      prisma,
+    })).resolves.toMatchObject({
+      duplicate: true,
+      wakeable: false,
+    });
+    expect(mocks.getHostedLinqReactionTargetMessage).not.toHaveBeenCalled();
+    expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+  });
+
+  it("keeps a duplicate owned join-offer row non-wakeable", async () => {
+    const prisma = createPrismaStub();
+    mocks.readHostedMailboxItemByDedupeKey.mockResolvedValueOnce({
+      id: "mailbox_existing_join_offer_reaction",
+      kind: "conversation.message",
+      laneSeq: 25n,
+    });
+
+    await expect(stageHostedLinqGroupReactionContext({
+      allowActionableReply: false,
+      event: buildReactionEvent({ eventId: "event_duplicate_join_offer_reaction" }),
+      prisma,
+    })).resolves.toMatchObject({
+      duplicate: true,
+      wakeable: false,
     });
     expect(mocks.getHostedLinqReactionTargetMessage).not.toHaveBeenCalled();
     expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();

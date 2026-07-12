@@ -37,9 +37,9 @@ the member to send a second text.
   confirms the exact question or offered action, it follows through without
   asking the same confirmation again. Separate authorization, payment, and
   irreversible-effect safeguards not covered by that exact question remain.
-- Represent removal of that same affirmative reply as a wakeable withdrawal so
-  pending follow-through can stop before an irreversible effect. Do not infer
-  any unrelated request from either the add or removal.
+- Keep every removal as non-wakeable context. A removal may retract weak evidence
+  when a later natural message brings that context into a turn, but it does not
+  independently cancel an action or start another turn.
 - Hold context-only observations until the next natural message in the same
   group. That message remains their actionable reply anchor; deferred reaction
   context alone is never eligible for a response. Pair by provider occurrence
@@ -48,15 +48,15 @@ the member to send a second text.
 - Bound deferred context to the newest 32 observations per group and 256 across
   the hosted pending set. Older overflow is terminally suppressed so reaction
   floods cannot create unbounded foreground reads or prompts.
-- A removal retracts the corresponding positive or negative signal. If an add
-  and removal are both pending, Murph must understand the ordered result rather
-  than treating the original reaction as durable evidence. The encrypted wake
-  and imported source metadata retain one opaque target key derived from the
-  canonical message id plus optional part index so identical rendered text
-  cannot merge distinct targets.
+- For deferred context, a removal retracts the corresponding positive or
+  negative signal. If an ordinary add and removal are both pending, Murph must
+  understand the ordered result rather than treating the original reaction as
+  durable evidence. The encrypted wake and imported source metadata retain one
+  opaque target key derived from the canonical message id plus optional part
+  index so identical rendered text cannot merge distinct targets.
 - Keep the existing disclosed react-to-join flow intact and give it priority:
-  its accepted reaction remains context-only for assistant automation so one
-  tap does not both accept membership and create a second assistant turn.
+  every durable offer target remains owned by that flow, including revoked or
+  otherwise rejected offers, so one tap cannot also create an assistant turn.
   Reaction ingestion must not weaken group admission, sharing consent, ordinary
   message replies, or any other product-critical flow.
 
@@ -125,11 +125,9 @@ group-scoped Knowledge Wiki is the sole owner.
 
 - Adding a supported reaction in an active Linq group persists one encrypted
   item containing the reactor, reaction, and correct target content.
-- Ordinary reactions remain non-wakeable deferred context, and removal retracts
-  the earlier weak signal.
-- An affirmative add to Murph's own target becomes one wakeable exact reply; its
-  removal becomes one wakeable withdrawal. Both retain the target message/part
-  anchor and the normal effect safeguards.
+- Ordinary reactions and all removals remain non-wakeable deferred context.
+- An affirmative add to Murph's own target becomes one wakeable exact reply
+  with the target message/part anchor and the normal effect safeguards.
 - The next natural message in that group exposes pending reaction context and
   remains the response target.
 - Invalid targets fail closed, transient provider reads retry, duplicates are
@@ -165,7 +163,6 @@ the same bounded pass without moving retention policy into SQL.
 Before enabling production ingestion, verify the Linq webhook subscription
 includes both `reaction.added` and `reaction.removed`; source configuration or a
 local tunnel is not proof of the production dashboard state. Post-deploy, prove
-that ordinary add/removal events produce no invocation, an affirmative reaction
-to Murph's own question invokes one exact anchored turn, removal can withdraw
-pending follow-through, and existing join-offer behavior does not create a
-second assistant turn.
+that ordinary add/removal events produce no invocation, an affirmative add to
+Murph's own question invokes one exact anchored turn, removals stay deferred,
+and every existing join-offer target remains exclusive to the join flow.

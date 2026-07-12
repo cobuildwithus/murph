@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => ({
   acceptHostedGroupJoinOfferTx: vi.fn(),
   enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort: vi.fn(),
   lookupHostedMemberIdentityByPhoneNumber: vi.fn(),
+  isHostedGroupJoinOfferTarget: vi.fn(),
   readActiveHostedMemberAccess: vi.fn(),
   signalHostedMailboxAppendRuntime: vi.fn(),
   signalHostedRuntimeMaintenanceRuntime: vi.fn(),
@@ -27,6 +28,7 @@ vi.mock("@/src/lib/hosted-groups/group-newsletter", () => ({
 
 vi.mock("@/src/lib/hosted-groups/group-store", () => ({
   acceptHostedGroupJoinOfferTx: mocks.acceptHostedGroupJoinOfferTx,
+  isHostedGroupJoinOfferTarget: mocks.isHostedGroupJoinOfferTarget,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-identity-store", () => ({
@@ -73,6 +75,7 @@ describe("handleHostedGroupJoinOfferReaction", () => {
     mocks.lookupHostedMemberIdentityByPhoneNumber.mockResolvedValue({
       core: { id: "member_reactor", suspendedAt: null },
     });
+    mocks.isHostedGroupJoinOfferTarget.mockResolvedValue(true);
     mocks.enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort.mockResolvedValue(
       undefined,
     );
@@ -297,6 +300,25 @@ describe("handleHostedGroupJoinOfferReaction", () => {
     expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
   });
 
+  it("leaves affirmative reactions on ordinary messages to the generic reply path", async () => {
+    mocks.isHostedGroupJoinOfferTarget.mockResolvedValueOnce(false);
+    const event = parseReactionEvent({
+      reactionType: "like",
+    });
+    const prisma = createPrismaStub();
+
+    await expect(handleHostedGroupJoinOfferReaction({
+      event,
+      prisma,
+    })).resolves.toEqual({
+      reason: "no_offer_match",
+      status: "ignored",
+    });
+
+    expect(mocks.lookupHostedMemberIdentityByPhoneNumber).not.toHaveBeenCalled();
+    expect(mocks.acceptHostedGroupJoinOfferTx).not.toHaveBeenCalled();
+  });
+
   it("records revoked offers as a distinct skip reason", async () => {
     mocks.acceptHostedGroupJoinOfferTx.mockRejectedValue(hostedOnboardingError({
       code: "HOSTED_GROUP_JOIN_OFFER_REVOKED",
@@ -314,13 +336,55 @@ describe("handleHostedGroupJoinOfferReaction", () => {
       prisma,
     })).resolves.toEqual({
       reason: "offer_revoked",
-      status: "ignored",
+      status: "owned",
     });
 
     expect(mocks.acceptHostedGroupJoinOfferTx).toHaveBeenCalled();
     expect(mocks.enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort)
       .not.toHaveBeenCalled();
     expect(mocks.signalHostedRuntimeMaintenanceRuntime).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    {
+      code: "HOSTED_CONSENT_REQUIRED",
+      expectedReason: "launch_consent_missing",
+    },
+    {
+      code: "HOSTED_GROUP_JOIN_OFFER_NOT_FOUND",
+      expectedReason: "no_offer_match",
+    },
+    {
+      code: "HOSTED_GROUP_NOT_ACTIVE",
+      expectedReason: "no_offer_match",
+    },
+    {
+      code: "HOSTED_GROUP_RUNTIME_UNSUPPORTED",
+      expectedReason: "no_offer_match",
+    },
+  ] as const)("keeps a durable offer target owned after $code rejection", async ({
+    code,
+    expectedReason,
+  }) => {
+    mocks.acceptHostedGroupJoinOfferTx.mockRejectedValueOnce(hostedOnboardingError({
+      code,
+      httpStatus: 410,
+      message: "The durable offer cannot be accepted.",
+      retryable: false,
+    }));
+    const event = parseReactionEvent({ reactionType: "like" });
+    const prisma = createPrismaStub();
+
+    await expect(handleHostedGroupJoinOfferReaction({
+      event,
+      prisma,
+    })).resolves.toEqual({
+      reason: expectedReason,
+      status: "owned",
+    });
+
+    expect(mocks.isHostedGroupJoinOfferTarget).toHaveBeenCalled();
+    expect(mocks.acceptHostedGroupJoinOfferTx).toHaveBeenCalled();
   });
 });
 

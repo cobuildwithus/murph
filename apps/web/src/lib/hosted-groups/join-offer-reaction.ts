@@ -20,7 +20,10 @@ import {
 import {
   enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort,
 } from "./group-newsletter";
-import { acceptHostedGroupJoinOfferTx } from "./group-store";
+import {
+  acceptHostedGroupJoinOfferTx,
+  isHostedGroupJoinOfferTarget,
+} from "./group-store";
 
 type HostedGroupJoinOfferReactionSkipReason =
   | "launch_consent_missing"
@@ -34,6 +37,7 @@ type HostedGroupJoinOfferReactionSkipReason =
 
 export type HostedGroupJoinOfferReactionResult =
   | { status: "accepted"; reason: "accepted" }
+  | { status: "owned"; reason: HostedGroupJoinOfferReactionSkipReason }
   | { status: "ignored"; reason: HostedGroupJoinOfferReactionSkipReason };
 
 export async function handleHostedGroupJoinOfferReaction(input: {
@@ -67,12 +71,26 @@ export async function handleHostedGroupJoinOfferReaction(input: {
     });
   }
 
+  const messageLookupKeyReadCandidates = normalizeLookupKeyCandidates(
+    input.event.messageLookupKeyReadCandidates.length > 0
+      ? input.event.messageLookupKeyReadCandidates
+      : [input.event.messageLookupKey],
+  );
+  const targetOwned = await isHostedGroupJoinOfferTarget({
+    messageLookupKeyReadCandidates,
+    prisma: input.prisma,
+  });
+  if (!targetOwned) {
+    return skipHostedGroupJoinOfferReaction({
+      reason: "no_offer_match",
+    });
+  }
   const member = await resolveHostedGroupJoinOfferReactionMember({
     handle: input.event.reactionFromHandle,
     prisma: input.prisma,
   });
   if (!member) {
-    return skipHostedGroupJoinOfferReaction({
+    return ownHostedGroupJoinOfferReaction({
       reason: "not_a_member",
     });
   }
@@ -80,16 +98,11 @@ export async function handleHostedGroupJoinOfferReaction(input: {
     member.suspendedAt
     || !(await readActiveHostedMemberAccess({ memberId: member.id, prisma: input.prisma }))
   ) {
-    return skipHostedGroupJoinOfferReaction({
+    return ownHostedGroupJoinOfferReaction({
       reason: "member_inactive",
     });
   }
 
-  const messageLookupKeyReadCandidates = normalizeLookupKeyCandidates(
-    input.event.messageLookupKeyReadCandidates.length > 0
-      ? input.event.messageLookupKeyReadCandidates
-      : [input.event.messageLookupKey],
-  );
   const threadIdentityLookupKeyReadCandidates = createHostedExternalThreadIdentityLookupKeyReadCandidates({
     channel: "linq",
     threadId: input.event.linqChatId,
@@ -110,7 +123,7 @@ export async function handleHostedGroupJoinOfferReaction(input: {
     if (!reason) {
       throw error;
     }
-    return skipHostedGroupJoinOfferReaction({
+    return ownHostedGroupJoinOfferReaction({
       reason,
     });
   }
@@ -205,4 +218,10 @@ function skipHostedGroupJoinOfferReaction(input: {
   reason: HostedGroupJoinOfferReactionSkipReason;
 }): HostedGroupJoinOfferReactionResult {
   return { status: "ignored", reason: input.reason };
+}
+
+function ownHostedGroupJoinOfferReaction(input: {
+  reason: HostedGroupJoinOfferReactionSkipReason;
+}): HostedGroupJoinOfferReactionResult {
+  return { status: "owned", reason: input.reason };
 }

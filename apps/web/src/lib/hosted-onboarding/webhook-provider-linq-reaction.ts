@@ -79,13 +79,16 @@ export async function stageHostedLinqGroupReactionContext(input: {
     userId: route.route.containerMemberId,
   });
   if (existing) {
+    const wakeable = existing.kind === "conversation.message"
+      && input.allowActionableReply !== false
+      && input.event.eventType === "reaction.added";
     return {
       duplicate: true,
       laneSeq: existing.laneSeq.toString(),
       mailboxItemId: existing.id,
       status: "staged",
       userId: route.route.containerMemberId,
-      wakeable: existing.kind === "conversation.message",
+      wakeable,
     };
   }
 
@@ -147,6 +150,7 @@ export async function stageHostedLinqGroupReactionContext(input: {
     ? "removed"
     : "added";
   const wakeable = input.allowActionableReply !== false
+    && input.event.eventType === "reaction.added"
     && target.isFromMe
     && isHostedLinqAffirmativeReaction({
       customEmoji: input.event.reactionCustomEmoji,
@@ -167,21 +171,20 @@ export async function stageHostedLinqGroupReactionContext(input: {
       isFromMe: false,
       messageId: input.event.eventId,
       parts: [{
-        type: "text",
-        value: wakeable
-          ? buildHostedLinqAffirmativeReactionReplyText({
-            operation: reactionOperation,
-            reactionCustomEmoji: input.event.reactionCustomEmoji,
-            reactionType: input.event.reactionType,
-            targetText,
-          })
-          : buildHostedLinqReactionContextText({
-            operation: reactionOperation,
-            reactionCustomEmoji: input.event.reactionCustomEmoji,
-            reactionType: input.event.reactionType,
-            reactionTargetKey,
-            targetText,
-          }),
+          type: "text",
+          value: wakeable
+              ? buildHostedLinqAffirmativeReactionReplyText({
+                  reactionCustomEmoji: input.event.reactionCustomEmoji,
+                  reactionType: input.event.reactionType,
+                  targetText,
+                })
+              : buildHostedLinqReactionContextText({
+                  operation: reactionOperation,
+                  reactionCustomEmoji: input.event.reactionCustomEmoji,
+                  reactionType: input.event.reactionType,
+                  reactionTargetKey,
+                  targetText,
+                }),
       }],
       reactionEligible: false,
       ...(wakeable
@@ -457,7 +460,6 @@ function buildHostedLinqReactionContextText(input: {
 }
 
 function buildHostedLinqAffirmativeReactionReplyText(input: {
-  operation: "added" | "removed";
   reactionCustomEmoji: string | null;
   reactionType: string | null;
   targetText: string;
@@ -466,13 +468,10 @@ function buildHostedLinqAffirmativeReactionReplyText(input: {
     input.reactionCustomEmoji ?? input.reactionType ?? "reaction",
     HOSTED_LINQ_REACTION_LABEL_MAX_CHARS,
   );
-  const interpretation = input.operation === "added"
-    ? "The member used this as an affirmative reply to your exact message. If that message clearly asked a yes/no question or offered a specific action, treat this as yes or confirmation of that exact action, continue it, and do not ask the same question again. Otherwise keep it as context only and do not reply or act solely because of the reaction. Preserve any separate authorization, payment, or irreversible-effect safeguard not covered by the exact question. Do not infer unrelated intent."
-    : "The member withdrew this reply to your exact message. Stop any pending follow-through that has not become irreversible, and do not infer unrelated intent.";
   return [
     "Group affirmative reaction reply to Murph's own message.",
-    `Action: ${input.operation} reaction ${reaction}`,
-    interpretation,
+    `Action: added reaction ${reaction}`,
+    "The member used this as an affirmative reply to your exact message. If that message clearly asked a yes/no question or offered a specific action, treat this as yes or confirmation of that exact action, continue it, and do not ask the same question again. Otherwise keep it as context only and do not reply or act solely because of the reaction. Preserve any separate authorization, payment, or irreversible-effect safeguard not covered by the exact question. Do not infer unrelated intent.",
     "Reacted-to content:",
     input.targetText,
   ].join("\n");
