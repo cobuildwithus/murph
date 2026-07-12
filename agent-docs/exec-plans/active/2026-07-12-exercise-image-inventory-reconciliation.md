@@ -27,7 +27,8 @@ Updated: 2026-07-12
 - Preserve unrelated worktrees and the dirty abandoned variant-plan worktree; read it only as historical evidence.
 - Follow the Murph exercise-image skill for slide count, subject/camera continuity, limb accuracy, annotations, and full-resolution validation.
 - Use the built-in image generator for new raster assets and serialize generation in this lane; do not launch child helpers or a CLI/API fallback.
-- Keep this lane as the sole canonical branch/seed/catalog writer. Generate sequences 3–99 and 125–149, skip externally reserved sequences 100–124 and 150–174 unless their isolated mappings are completed and validated, then resume at 175; external preparation lanes must not edit this worktree.
+- Keep this lane as the sole canonical branch/seed/catalog writer and uploader. Direct generation ranges are 3–99, 125–149, and 250 onward; skip reserved sequences 100–124 and 150–249 unless consuming completed isolated handoffs, and never let preparation lanes edit this worktree or receive Cloudflare credentials.
+- Before consuming an isolated handoff, validate its source head and manifest hash against current movement definitions, re-inspect every original at full resolution, verify checksum/dimensions/order/identity, reuse only already verified public mappings, upload pending originals idempotently in this lane, and stop on any mismatch.
 - Keep source PNGs, prompts, QA notes, upload mappings, and reconciliation manifests ignored/local. Commit only authoritative seed URLs, generated catalog artifacts, tests if required, and plan/ledger state.
 - Never expose credentials, account identifiers, personal identifiers, local paths, or secret-bearing environment values.
 
@@ -69,14 +70,15 @@ Updated: 2026-07-12
 - Completed manifest sequence 2 (`EX650`, Hollow Body Tuck Rock): validated three distinct tuck/rock positions, rejected three anatomically or stylistically incorrect backward-rock drafts, uploaded three full-resolution accepted images, updated only the owning seed `Images` field, and rebuilt the catalog to 1,337 imaged movements with 4,057 unique images.
 - Completed manifest sequence 3 (`EX651`, Side Plank Threaded Knee Drive): validated a three-frame fixed-support knee-drive sequence, uploaded three full-resolution accepted images, updated only the owning seed `Images` field, and rebuilt the catalog to 1,338 imaged movements with 4,060 unique images.
 - Completed manifest sequence 4 (`EX652`, Side Plank Top-Leg March): reduced the plan to two nonredundant setup/march frames, uploaded two full-resolution accepted images, updated only the owning seed `Images` field, and rebuilt the catalog to 1,339 imaged movements with 4,062 unique images.
+- Completed manifest sequence 5 (`EX653`, Side Plank Hip Dip from Knees): reduced the plan to two nonredundant lifted/dip frames, uploaded two full-resolution accepted images, updated only the owning seed `Images` field, and rebuilt the catalog to 1,340 imaged movements with 4,064 unique images.
 
 ## Now
 
-- Continue serialized built-in generation, visual QA, idempotent upload, and seed reconciliation from manifest sequence 5; 409 image-less movements remain.
+- At the next safe boundary, validate and consume completed isolated handoffs for sequences 100 and 150; 408 image-less movements remain before handoff consumption.
 
 ## Next
 
-- Resume at manifest sequence 5, validate its movement map and slide count, then persist each accepted/uploaded slide before advancing.
+- After handoff consumption, resume direct generation at manifest sequence 6, preserving all reserved ranges.
 - Keep ReviewGPT blocked until generation is complete, PR #557 is merged, and the controller grants the single patched 0.5.103 exact-head audit.
 
 ## Verification
@@ -86,4 +88,4 @@ Updated: 2026-07-12
 - `pnpm --dir packages/exercise-library verify`: passed; 1 test file and 6 tests passed, including exact catalog counts, URL uniqueness, and the 500-character alt bound.
 - Direct catalog proof: 1,748 total; 1,335 with images; 413 without images; 4,052 images; 4,052 unique URLs; zero invalid public URLs; zero alts over 500 characters; zero non-image item drift.
 - Remaining generation, upload, full repository verification, completion audits, and final-head CI are pending.
-- After sequence 4, `pnpm --dir packages/exercise-library verify` passes: typecheck, 6 tests, deterministic generation, and generation drift check.
+- After sequence 5, `pnpm --dir packages/exercise-library verify` passes before handoff consumption.

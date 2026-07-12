@@ -1,5 +1,5 @@
 {
-  "catalogHash": "sha256:f2920ef97884f53a0841d442112b5afe442b373cb4676b0d9409102ae1edbad6",
+  "catalogHash": "sha256:461b2d9ae6cbd081088f64312e8a8acaf4923567edc7f8f2428ce9e3ecbb1fb3",
   "generatedAt": null,
   "items": [
     {
@@ -19396,7 +19396,18 @@
       ],
       "equipment": [],
       "id": "EX653",
-      "images": [],
+      "images": [
+        {
+          "alt": "The exerciser holds a knee-supported side plank with stacked knees and a straight shoulder-to-knee line.",
+          "step": "Set the knee plank",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/6d1eca70-2132-43a6-c715-d099fdce2d00/public"
+        },
+        {
+          "alt": "The exerciser lowers the outer hip slightly above the mat, then presses back to the lifted line.",
+          "step": "Dip and lift",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/482cf440-1a25-4bca-564a-42ccd2b8d000/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
