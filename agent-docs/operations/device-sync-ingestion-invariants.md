@@ -52,16 +52,30 @@ drain/batch service seam in `packages/device-syncd/src/service.ts`.
    resource/source/timestamp for timeseries). Push-then-pull re-imports of
    identical content are skipped, and changed content appends an event-spine
    revision of the same event id (read-side revision collapse keeps one live
-   record). Core also suppresses a repeated integration-ingest row and audit
-   when the same provider account has no new canonical output, receipt state,
-   or evidence identity. The storage check reads the current live ingest shard
-   backward from its append tail and ordinarily stops after 8 MiB or 64
-   complete rows. If the newest row itself crosses 8 MiB, the reader may finish
-   only that row, bounded by the 128 MiB journal-row limit plus its preceding
-   delimiter; it never uses that extension to traverse older history. This lets
-   a large proof just appended at the tail be recognized on replay without
-   broadening ordinary scans. For a closed gzip/ZIP shard that a new row would
-   amend, novelty uses the existing bounded archive reader because the amended
+   record). Before content reconciliation, core recognizes a strictly matching
+   exact delivery by its current id, its metadata-and-importer-receipt-aware
+   legacy id, or a deterministic association-revision id. The stored evidence,
+   receipt, event-role associations, sample ids, and their current physical
+   owners must all match before the delivery can suppress a write. A delayed v1
+   replay is therefore a no-op after a v2 correction, user edit, or tombstone;
+   missing output state is restored, and an equivalent changed canonical owner
+   receives an append-only association revision instead of mutating history.
+   A different or deleted replacement owner is not relinked to stale evidence.
+   The exact-id
+   check reads a live shard backward from its append
+   tail and ordinarily stops after 8 MiB or 64 complete rows. If the newest row
+   itself crosses 8 MiB, the reader may finish only that row, bounded by the 128
+   MiB journal-row limit plus its preceding delimiter. A tail miss may perform
+   one authoritative target-shard scan whose result is reused by append
+   planning; it never performs a second full id scan. Core separately
+   suppresses a repeated row and audit when the same provider account has no
+   new canonical output, receipt state, or evidence identity. Each written
+   device delivery retains its complete received evidence set, so its validity
+   never depends on an older novelty row. An integrity-invalid exact row repairs
+   once under the deterministic association-revision id. A live shard whose
+   final complete row lost only its newline receives exactly one delimiter
+   before the new row; an incomplete final row rejects the append. For a closed gzip/ZIP shard,
+   novelty uses the existing bounded archive reader because the amended
    representation remains archived and cannot create a live-tail proof.
    Missing, corrupt, unmatched oversized, or out-of-budget history fails open
    by retaining one copy. A replay that first crosses a month boundary is

@@ -33,7 +33,11 @@ import {
   assertJsonlAppendTargetCanAppend,
   assertWriteTargetPolicy,
 } from "../src/write-policy.ts";
-import { selectNovelIntegrationIngestEvidence } from "../src/integration-ingests.ts";
+import {
+  buildIntegrationIngestAppendPlanFromInspection,
+  inspectIntegrationIngestIdsForImportedAt,
+  selectNovelIntegrationIngestEvidence,
+} from "../src/integration-ingests.ts";
 
 async function makeTempDirectory(name: string): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), `${name}-`));
@@ -369,6 +373,89 @@ test("integration evidence novelty reads bounded gzip and zip target archives", 
 
     assert.deepEqual(selection, { parts: [], receiptIsNovel: false });
   }
+});
+
+test("full exact-id inspection reuses one complete history for append planning after a bounded tail miss", async () => {
+  const vaultRoot = await makeTempDirectory("murph-integration-ingest-inspection-reuse");
+  await initializeVault({ vaultRoot, createdAt: "2026-06-01T12:00:00.000Z" });
+  const importedAt = "2026-06-03T21:00:00.000Z";
+  const logicalPath = integrationIngestShardPath(importedAt);
+  const requestedRecord = makeIntegrationIngestRecord({
+    id: "xfm_FallbackAppendTarget",
+    eventId: "evt_FallbackAppendTarget",
+    importedAt,
+  });
+  const historicalRecords = Array.from({ length: 65 }, (_, index) =>
+    makeIntegrationIngestRecord({
+      id: `xfm_UnrelatedHistory${index}`,
+      eventId: `evt_UnrelatedHistory${index}`,
+      importedAt,
+    })
+  );
+  await writeIntegrationIngestJsonl(vaultRoot, logicalPath, historicalRecords);
+  const requestedIds = new Set([requestedRecord.id]);
+
+  const boundedInspection = await inspectIntegrationIngestIdsForImportedAt(
+    vaultRoot,
+    importedAt,
+    requestedIds,
+  );
+  assert.equal(boundedInspection.historyComplete, false);
+  assert.equal(boundedInspection.unsafe, false);
+  assert.equal(boundedInspection.entriesById.size, 0);
+
+  const fullInspection = await inspectIntegrationIngestIdsForImportedAt(
+    vaultRoot,
+    importedAt,
+    requestedIds,
+    { fullScan: true },
+  );
+  assert.equal(fullInspection.historyComplete, true);
+  assert.equal(fullInspection.unsafe, false);
+  assert.equal(fullInspection.entriesById.size, 0);
+
+  const appendPlan = buildIntegrationIngestAppendPlanFromInspection(
+    [requestedRecord],
+    fullInspection,
+  );
+  assert.deepEqual(appendPlan.appendedIds, [requestedRecord.id]);
+  assert.deepEqual(appendPlan.targetShardPaths, [logicalPath]);
+});
+
+test("selective ingest reads ignore malformed unrequested rows but validate the requested id", async () => {
+  const vaultRoot = await makeTempDirectory("murph-integration-ingest-selective-read");
+  await initializeVault({ vaultRoot, createdAt: "2026-06-01T12:00:00.000Z" });
+  const importedAt = "2026-06-03T21:00:00.000Z";
+  const logicalPath = integrationIngestShardPath(importedAt);
+  const requestedRecord = makeIntegrationIngestRecord({
+    id: "xfm_SelectiveRequested",
+    eventId: "evt_SelectiveRequested",
+    importedAt,
+  });
+  await fs.mkdir(path.dirname(path.join(vaultRoot, logicalPath)), { recursive: true });
+  await fs.writeFile(
+    path.join(vaultRoot, logicalPath),
+    [null, {}, { id: "xfm_UnrelatedMissingImportedAt" }, requestedRecord]
+      .map((row) => JSON.stringify(row))
+      .join("\n") + "\n",
+    "utf8",
+  );
+
+  const stored = await readIntegrationIngestById(vaultRoot, requestedRecord.id);
+  assert.equal(stored?.record.id, requestedRecord.id);
+
+  const appendCandidate = makeIntegrationIngestRecord({
+    id: "xfm_SelectiveAppend",
+    eventId: "evt_SelectiveAppend",
+    importedAt,
+  });
+  const appendPlan = await buildIntegrationIngestAppendPlan(vaultRoot, [appendCandidate]);
+  assert.deepEqual(appendPlan.appendedIds, [appendCandidate.id]);
+
+  await assert.rejects(
+    readIntegrationIngestById(vaultRoot, "xfm_UnrelatedMissingImportedAt"),
+    (error) => error instanceof VaultError && error.code === "INTEGRATION_INGEST_INVALID",
+  );
 });
 
 test("integration ingest zip archive reader accepts exact stored entries", async () => {

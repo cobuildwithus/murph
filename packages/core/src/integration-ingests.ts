@@ -31,6 +31,7 @@ const INTEGRATION_INGEST_NOVELTY_MAX_SCAN_BYTES = 8 * 1024 * 1024;
 const INTEGRATION_INGEST_NOVELTY_MAX_SCAN_ROWS = 64;
 const INTEGRATION_INGEST_NOVELTY_SCAN_CHUNK_BYTES = 64 * 1024;
 const INTEGRATION_INGEST_APPEND_PLAN_AUTHORITY = Symbol("integration-ingest-append-plan-authority");
+const INTEGRATION_INGEST_ID_INSPECTION_AUTHORITY = Symbol("integration-ingest-id-inspection-authority");
 
 export interface BuildIntegrationEvidencePartInput {
   role: string;
@@ -67,6 +68,17 @@ export interface IntegrationIngestAppendPlan {
 
 export interface BuildIntegrationIngestAppendPlanOptions {
   allowArchivedShardAmendments?: boolean;
+}
+
+export interface IntegrationIngestIdInspection {
+  readonly [INTEGRATION_INGEST_ID_INSPECTION_AUTHORITY]: true;
+  archivedLogicalPaths: ReadonlySet<string>;
+  entriesById: ReadonlyMap<string, IntegrationIngestRecord>;
+  historyComplete: boolean;
+  invalidIds: ReadonlySet<string>;
+  logicalPath: string;
+  requestedIds: ReadonlySet<string>;
+  unsafe: boolean;
 }
 
 export interface ArchivedIntegrationIngestShardText {
@@ -594,6 +606,104 @@ async function scanIntegrationIngestNoveltyTail(
   }
 }
 
+export async function inspectIntegrationIngestIdsForImportedAt(
+  vaultRoot: string,
+  importedAt: string,
+  requestedIds: ReadonlySet<string>,
+  options: { fullScan?: boolean } = {},
+): Promise<IntegrationIngestIdInspection> {
+  const logicalPath = integrationIngestShardPath(importedAt);
+  const sources = await listIntegrationIngestRowSourcesForLogicalPaths(vaultRoot, [logicalPath]);
+  const source = sources.length === 1 ? sources[0] : undefined;
+  const archivedLogicalPaths = new Set(
+    sources.filter((candidate) => candidate.kind !== "jsonl").map((candidate) => candidate.logicalPath),
+  );
+  const entriesById = new Map<string, IntegrationIngestRecord>();
+  const invalidIds = new Set<string>();
+  let unsafe = sources.length > 1;
+
+  const visitRaw = (raw: unknown, sourcePath: string): void => {
+    if (!isRecord(raw) || typeof raw.id !== "string" || !requestedIds.has(raw.id)) {
+      return;
+    }
+    try {
+      const record = parseIntegrationIngestRecord(raw, sourcePath);
+      assertIntegrationIngestShard(record.id, record.importedAt, logicalPath);
+      assertIntegrationIngestRecordIntegrity(record);
+      if (entriesById.has(record.id)) {
+        unsafe = true;
+        return;
+      }
+      entriesById.set(record.id, record);
+    } catch {
+      invalidIds.add(raw.id);
+    }
+  };
+
+  if (!source) {
+    return {
+      [INTEGRATION_INGEST_ID_INSPECTION_AUTHORITY]: true,
+      archivedLogicalPaths,
+      entriesById,
+      historyComplete: !unsafe,
+      invalidIds,
+      logicalPath,
+      requestedIds: new Set(requestedIds),
+      unsafe,
+    };
+  }
+
+  if (options.fullScan || source.kind !== "jsonl") {
+    try {
+      for await (const row of readIntegrationIngestJsonlRows(vaultRoot, [source])) {
+        visitRaw(row.raw, row.sourcePath);
+      }
+    } catch {
+      unsafe = true;
+    }
+    return {
+      [INTEGRATION_INGEST_ID_INSPECTION_AUTHORITY]: true,
+      archivedLogicalPaths,
+      entriesById,
+      historyComplete: !unsafe,
+      invalidIds,
+      logicalPath,
+      requestedIds: new Set(requestedIds),
+      unsafe,
+    };
+  }
+
+  const absolutePath = resolveVaultPath(vaultRoot, source.sourcePath).absolutePath;
+  let scan: IntegrationIngestNoveltyTailScanResult;
+  try {
+    scan = await scanIntegrationIngestNoveltyTail(absolutePath, (line) => {
+      let raw: unknown;
+      try {
+        raw = JSON.parse(line);
+      } catch {
+        return "unsafe";
+      }
+      visitRaw(raw, source.sourcePath);
+      if (unsafe) {
+        return "unsafe";
+      }
+      return entriesById.size > 0 ? "complete" : "continue";
+    });
+  } catch {
+    scan = { historyComplete: false, selectionComplete: false, unsafe: true };
+  }
+  return {
+    [INTEGRATION_INGEST_ID_INSPECTION_AUTHORITY]: true,
+    archivedLogicalPaths,
+    entriesById,
+    historyComplete: scan.historyComplete,
+    invalidIds,
+    logicalPath,
+    requestedIds: new Set(requestedIds),
+    unsafe: scan.unsafe || unsafe,
+  };
+}
+
 /**
  * Selects evidence whose provider/account/role/content identity has not already
  * been retained. This is a storage optimization, so damaged historical rows
@@ -831,11 +941,10 @@ async function readIntegrationIngestEntriesByIdFromSources(
 
   for await (const { raw, relativePath, sourcePath, lineNumber } of readIntegrationIngestJsonlRows(vaultRoot, sources)) {
     if (!isRecord(raw) || typeof raw.id !== "string") {
-      throw new VaultError(
-        "INTEGRATION_INGEST_INVALID",
-        `Integration ingest record in "${sourcePath}" is missing id or importedAt.`,
-        { relativePath: sourcePath, lineNumber },
-      );
+      continue;
+    }
+    if (!ids.has(raw.id)) {
+      continue;
     }
     if (typeof raw.importedAt !== "string") {
       throw new VaultError(
@@ -843,9 +952,6 @@ async function readIntegrationIngestEntriesByIdFromSources(
         `Integration ingest record in "${sourcePath}" is missing id or importedAt.`,
         { relativePath: sourcePath, lineNumber },
       );
-    }
-    if (!ids.has(raw.id)) {
-      continue;
     }
     assertIntegrationIngestShard(raw.id, raw.importedAt, relativePath);
     const record = parseIntegrationIngestRecord(raw, sourcePath);
@@ -882,14 +988,71 @@ export async function buildIntegrationIngestAppendPlan(
       [entry.record.id, entry.record] as const,
     ),
   );
+  return buildIntegrationIngestAppendPlanFromExisting({
+    archivedTargets,
+    existingById,
+    options,
+    records,
+    targetShardPaths,
+  });
+}
+
+export function buildIntegrationIngestAppendPlanFromInspection(
+  records: readonly IntegrationIngestRecord[],
+  inspection: IntegrationIngestIdInspection,
+  options: BuildIntegrationIngestAppendPlanOptions = {},
+): IntegrationIngestAppendPlan {
+  if (inspection[INTEGRATION_INGEST_ID_INSPECTION_AUTHORITY] !== true) {
+    throw new VaultError(
+      "INTEGRATION_INGEST_INVALID",
+      "Integration ingest inspection authority is invalid.",
+    );
+  }
+  const targetShardPaths = [
+    ...new Set(records.map((record) => integrationIngestShardPath(record.importedAt))),
+  ].sort();
+  if (
+    inspection.unsafe
+    || targetShardPaths.length !== 1
+    || targetShardPaths[0] !== inspection.logicalPath
+    || records.some((record) => !inspection.requestedIds.has(record.id))
+    || records.some((record) => inspection.invalidIds.has(record.id))
+    || records.some((record) =>
+      !inspection.historyComplete && !inspection.entriesById.has(record.id)
+    )
+  ) {
+    throw new VaultError(
+      "INTEGRATION_INGEST_INVALID",
+      "Integration ingest inspection does not authorize this append plan.",
+    );
+  }
+  const existingById = new Map(
+    [...inspection.entriesById].filter(([id]) => inspection.requestedIds.has(id)),
+  );
+  return buildIntegrationIngestAppendPlanFromExisting({
+    archivedTargets: new Set(inspection.archivedLogicalPaths),
+    existingById,
+    options,
+    records,
+    targetShardPaths,
+  });
+}
+
+function buildIntegrationIngestAppendPlanFromExisting(input: {
+  archivedTargets: ReadonlySet<string>;
+  existingById: ReadonlyMap<string, IntegrationIngestRecord>;
+  options: BuildIntegrationIngestAppendPlanOptions;
+  records: readonly IntegrationIngestRecord[];
+  targetShardPaths: readonly string[];
+}): IntegrationIngestAppendPlan {
   const pendingById = new Map<string, IntegrationIngestRecord>();
   const archivedAmendmentShardPaths = new Set<string>();
   const payloads = new Map<string, string>();
   const appendedIds: string[] = [];
 
-  for (const record of records) {
+  for (const record of input.records) {
     assertIntegrationIngestRecordIntegrity(record);
-    const existing = existingById.get(record.id) ?? pendingById.get(record.id);
+    const existing = input.existingById.get(record.id) ?? pendingById.get(record.id);
     if (existing) {
       if (stableSerializeIntegrationIngest(existing) !== stableSerializeIntegrationIngest(record)) {
         throw new VaultError(
@@ -904,8 +1067,8 @@ export async function buildIntegrationIngestAppendPlan(
     pendingById.set(record.id, record);
     appendedIds.push(record.id);
     const relativePath = integrationIngestShardPath(record.importedAt);
-    if (archivedTargets.has(relativePath)) {
-      if (!options.allowArchivedShardAmendments) {
+    if (input.archivedTargets.has(relativePath)) {
+      if (!input.options.allowArchivedShardAmendments) {
         throw new VaultError(
           "INTEGRATION_INGEST_SHARD_ARCHIVED",
           `Integration ingest shard "${relativePath}" is archived and cannot be appended.`,
@@ -931,7 +1094,7 @@ export async function buildIntegrationIngestAppendPlan(
     archivedAmendmentShardPaths: [...archivedAmendmentShardPaths].sort(),
     appendedIds,
     payloads,
-    targetShardPaths,
+    targetShardPaths: [...input.targetShardPaths],
   };
 }
 
@@ -981,6 +1144,71 @@ export async function stageIntegrationIngestAppendPlan(
   plan: IntegrationIngestAppendPlan,
 ): Promise<void> {
   await batch.stageIntegrationIngestAppendPlan(plan);
+}
+
+export async function prepareLiveIntegrationIngestAppendPayload(
+  vaultRoot: string,
+  targetRelativePath: string,
+  payload: string,
+): Promise<string> {
+  const target = resolveVaultPath(vaultRoot, targetRelativePath);
+  if (!(await pathExists(target.absolutePath))) {
+    return payload;
+  }
+  const targetStat = await stat(target.absolutePath);
+  if (targetStat.size === 0) {
+    return payload;
+  }
+
+  const handle = await openFile(target.absolutePath, "r");
+  const chunks: Buffer[] = [];
+  let position = targetStat.size;
+  let finalRowByteLength = 0;
+  try {
+    while (position > 0) {
+      const readLength = Math.min(INTEGRATION_INGEST_NOVELTY_SCAN_CHUNK_BYTES, position);
+      position -= readLength;
+      const chunk = Buffer.allocUnsafe(readLength);
+      const { bytesRead } = await handle.read(chunk, 0, readLength, position);
+      const bytes = chunk.subarray(0, bytesRead);
+      const newlineIndex = bytes.lastIndexOf(0x0a);
+      const rowChunk = newlineIndex >= 0 ? bytes.subarray(newlineIndex + 1) : bytes;
+      chunks.push(rowChunk);
+      finalRowByteLength += rowChunk.byteLength;
+      if (finalRowByteLength > MAX_INTEGRATION_INGEST_JOURNAL_ROW_BYTES) {
+        throw new VaultError(
+          "INTEGRATION_INGEST_ROW_TOO_LARGE",
+          `Final integration ingest row in "${targetRelativePath}" exceeds the journal row limit.`,
+          { relativePath: targetRelativePath, rowPayloadBytes: finalRowByteLength },
+        );
+      }
+      if (newlineIndex >= 0) {
+        break;
+      }
+    }
+  } finally {
+    await handle.close();
+  }
+
+  const finalRow = Buffer.concat(chunks.reverse()).toString("utf8");
+  if (finalRow.length === 0) {
+    return payload;
+  }
+  try {
+    const record = parseIntegrationIngestRecord(JSON.parse(finalRow), targetRelativePath);
+    assertIntegrationIngestShard(record.id, record.importedAt, targetRelativePath);
+    assertIntegrationIngestRecordIntegrity(record);
+  } catch (error) {
+    throw new VaultError(
+      "VAULT_INVALID_JSONL",
+      `Integration ingest shard "${targetRelativePath}" has an incomplete final row; append was rejected.`,
+      {
+        relativePath: targetRelativePath,
+        cause: error instanceof Error ? error.message : String(error),
+      },
+    );
+  }
+  return `\n${payload}`;
 }
 
 export async function readArchivedIntegrationIngestShardText(
@@ -1172,20 +1400,6 @@ export async function readIntegrationIngestById(
     await readIntegrationIngestEntriesByIdFromSources(
       vaultRoot,
       await listIntegrationIngestRowSources(vaultRoot),
-      new Set([ingestId]),
-    )
-  )[0] ?? null;
-}
-
-export async function readIntegrationIngestByIdForImportedAt(
-  vaultRoot: string,
-  importedAt: string,
-  ingestId: string,
-): Promise<StoredIntegrationIngestEntry | null> {
-  return (
-    await readIntegrationIngestEntriesByIdFromPaths(
-      vaultRoot,
-      [integrationIngestShardPath(importedAt)],
       new Set([ingestId]),
     )
   )[0] ?? null;
