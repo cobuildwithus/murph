@@ -1,5 +1,5 @@
 {
-  "catalogHash": "sha256:be9367dfaa694df48c60604aa18fc1eb5afcfb7aaa08b6fa11b8ffe98a6b4941",
+  "catalogHash": "sha256:5bda0863873780c8bb2efad0582e9e556b94c356b3f883a98632902d13787e9e",
   "generatedAt": null,
   "items": [
     {
@@ -10686,7 +10686,23 @@
         "Dumbbell"
       ],
       "id": "EX991",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult standing tall with feet hip-width while holding one dumbbell horizontally at chest height with both hands.",
+          "step": "Standing dumbbell setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/e8d27b4d-bd3a-4c27-6b64-eea6ed36e900/public"
+        },
+        {
+          "alt": "Adult in a left-leg forward lunge guiding one dumbbell diagonally from the right upper torso toward the left thigh with both hands.",
+          "step": "Forward lunge across-body pass",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/a3f6cf0d-0870-459f-9c15-ba64b3ebf900/public"
+        },
+        {
+          "alt": "Adult in a left side lunge guiding one dumbbell diagonally from the right upper torso toward the bent left thigh with both hands.",
+          "step": "Side lunge across-body pass",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/94ddee0d-bf2c-49f9-9395-744176d23e00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Balance strength",
@@ -10892,7 +10908,23 @@
         "Dumbbell and book or wedge"
       ],
       "id": "EX996",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult standing narrow with both heels on a wedge and one dumbbell held at the chest.",
+          "step": "Heel-elevated setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/03e9fabf-c3df-4d63-4f42-4215bc327400/public"
+        },
+        {
+          "alt": "Adult descending into a narrow cyclist squat with heels supported and knees tracking forward over the toes.",
+          "step": "Controlled squat descent",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/364557e3-9382-462d-4a16-39879c890100/public"
+        },
+        {
+          "alt": "Adult at the bottom of a narrow heel-elevated squat with an upright torso and one dumbbell held at the chest.",
+          "step": "Deep controlled squat",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/9a3dae84-992c-4049-505e-c054afeed500/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -87007,7 +87039,28 @@
       ],
       "equipment": [],
       "id": "ST356",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult seated upright in a first-side 90/90 shin-box position with both knees bent and feet relaxed.",
+          "step": "First-side shin-box setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/cba7265f-0d89-4a31-2171-d15e96907400/public"
+        },
+        {
+          "alt": "Adult maintaining the first-side shin-box legs while leaning gently backward onto the hands.",
+          "step": "First-side supported lean",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/22c65b96-cdeb-490e-9aaf-24da837e6600/public"
+        },
+        {
+          "alt": "Adult seated upright in the mirrored 90/90 shin-box position.",
+          "step": "Opposite-side shin-box setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/a0f14e24-f590-40b9-11f3-0b5252900d00/public"
+        },
+        {
+          "alt": "Adult maintaining the mirrored shin-box legs while leaning gently backward onto the hands.",
+          "step": "Opposite-side supported lean",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/53c6e66e-ad54-410c-b898-4366ef27b600/public"
+        }
+      ],
       "kind": "stretch",
       "level": "intermediate",
       "modality": "Static Stretch",
@@ -89215,7 +89268,18 @@
       ],
       "equipment": [],
       "id": "ST398",
-      "images": [],
+      "images": [
+        {
+          "alt": "Walking Hamstring Scoop setup with the right heel stepped forward, toes lifted, and torso upright.",
+          "step": "Heel-forward setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/cf3e0038-eac4-473d-5003-b09577f7b100/public"
+        },
+        {
+          "alt": "Walking Hamstring Scoop endpoint with hips hinged back and both hands sweeping toward the lifted toes of the forward leg.",
+          "step": "Hinge and scoop",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/88546e94-424e-415c-e4ef-4b1aa8267900/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Dynamic Stretch",
@@ -89349,7 +89413,18 @@
       ],
       "equipment": [],
       "id": "ST401",
-      "images": [],
+      "images": [
+        {
+          "alt": "Straight-Leg March setup in a short forward stance with both feet grounded and torso tall.",
+          "step": "Forward-step setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/7f6be387-9e6c-4dd3-adba-7e332b7c9f00/public"
+        },
+        {
+          "alt": "Straight-Leg March endpoint balancing on the left foot with the right leg lifted straight forward and toes pulled up.",
+          "step": "Straight-leg lift",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/204ed60e-24c8-478c-c039-b9e29b3b5e00/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Dynamic Stretch",
@@ -89444,7 +89519,28 @@
         "Wall or chair"
       ],
       "id": "ST403",
-      "images": [],
+      "images": [
+        {
+          "alt": "Forward Leg Swing setup in side view with both feet grounded and one hand lightly supporting on a chair.",
+          "step": "Supported side-view setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/d9de489e-d18b-4c16-95b7-675e92599100/public"
+        },
+        {
+          "alt": "Forward Leg Swing forward phase with the working leg lifted ahead while the support foot stays flat and torso tall.",
+          "step": "Swing forward",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/640b55cc-03ca-49dd-4935-3bfa2c397000/public"
+        },
+        {
+          "alt": "Forward Leg Swing backward phase with the same working leg reaching behind without arching the lower back.",
+          "step": "Swing backward",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/c87d7f9a-1e60-41a9-8e15-856d5c652300/public"
+        },
+        {
+          "alt": "Forward Leg Swing reset beside the chair with both feet grounded before switching working legs.",
+          "step": "Switch-side reset",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/b4553157-7f59-45a6-8013-00e43052ec00/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Dynamic Stretch",
@@ -89490,7 +89586,28 @@
       ],
       "equipment": [],
       "id": "ST404",
-      "images": [],
+      "images": [
+        {
+          "alt": "Standing Knee Circles setup with feet together, knees softly bent, and hands resting lightly above the knees.",
+          "step": "Soft-knee setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/6facf83b-9a4d-42f4-660b-6086a95e0000/public"
+        },
+        {
+          "alt": "Standing Knee Circles rightward phase with both knees moving together in a small range while both feet stay flat.",
+          "step": "Circle knees right",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/864f827e-881c-4e39-f33f-21afb2138c00/public"
+        },
+        {
+          "alt": "Standing Knee Circles back phase with both knees tracing a small arc toward center while the feet remain grounded.",
+          "step": "Sweep knees back",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/81e892bc-af99-4b8e-b6a0-a0789157ca00/public"
+        },
+        {
+          "alt": "Standing Knee Circles leftward phase with both knees moving together in a small smooth range while both feet stay flat.",
+          "step": "Circle knees left",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/949e10d7-ce71-42c8-8ee3-48f9b69cff00/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Mobility",
@@ -89538,7 +89655,28 @@
         "Chair"
       ],
       "id": "ST405",
-      "images": [],
+      "images": [
+        {
+          "alt": "Supported Knee CAR setup seated tall with both hands supporting the right thigh and the knee bent.",
+          "step": "Support the thigh",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/01bfa368-2c70-4abd-8738-e996a8a94300/public"
+        },
+        {
+          "alt": "Supported Knee CAR extension phase with the right lower leg reaching forward while the thigh stays supported.",
+          "step": "Straighten the knee",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/835886c4-1325-45f3-71c8-85ea8fbc7000/public"
+        },
+        {
+          "alt": "Supported Knee CAR rotation phase with the extended lower leg turning through a small controlled range.",
+          "step": "Rotate gently",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/d2fefd07-e3c5-481c-f793-25793ddd1a00/public"
+        },
+        {
+          "alt": "Supported Knee CAR return phase with the right knee bending back under the supported thigh.",
+          "step": "Bend and return",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/fd45475b-e521-43bc-06a5-2e5d76b3c700/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Mobility",
@@ -89630,7 +89768,28 @@
       ],
       "equipment": [],
       "id": "ST407",
-      "images": [],
+      "images": [
+        {
+          "alt": "Supine Quad Set Stretch Prep with the right leg straight, heel grounded, and the opposite knee bent.",
+          "step": "Supine straight-leg setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/08940159-1b5a-49c6-bac3-f030de8e7000/public"
+        },
+        {
+          "alt": "Supine Quad Set right-side contraction pressing the back of the straight knee gently toward the mat.",
+          "step": "Tighten the thigh",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/4c403771-cfc5-43fd-bb31-2e83192a9500/public"
+        },
+        {
+          "alt": "Supine Quad Set release phase with the straight leg relaxed and breathing steady.",
+          "step": "Release and breathe",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/5dfb5d80-8343-49a4-d02c-e85a26035c00/public"
+        },
+        {
+          "alt": "Supine Quad Set opposite-side setup with the left leg straight and the right knee bent.",
+          "step": "Switch-side setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/9580eead-584d-484f-2aaa-4271c7a95100/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Mobility",
