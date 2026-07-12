@@ -315,6 +315,13 @@ function createAutomationInputSummary(input: {
   receivedAt?: string | null
 }) {
   return {
+    cursor: {
+      createdAt: input.receivedAt ?? null,
+      inputId: input.inputId,
+      occurredAt: input.occurredAt,
+      sourceKind: 'inbox-capture' as const,
+      sourcePosition: `inbox-capture:telegram:${input.inputId}`,
+    },
     inputId: input.inputId,
     optionalInboxCaptureId: null,
     source: 'telegram',
@@ -988,6 +995,7 @@ function createReplyGroupItem(
   return {
     inputCandidate,
     summary: {
+      cursor: inputCandidate.event.cursor,
       inputId: inputCandidate.event.inputId,
       optionalInboxCaptureId: capture.captureId,
       source: capture.source,
@@ -1027,6 +1035,7 @@ function createCapturelessReplyGroupItem(
         threadId: candidate.event.inputId,
         threadIsDirect: false,
       },
+      cursor: candidate.event.cursor,
       inputId: candidate.event.inputId,
       occurredAt: candidate.event.occurredAt,
       optionalInboxCaptureId: null,

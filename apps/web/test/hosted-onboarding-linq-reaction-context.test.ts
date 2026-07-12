@@ -124,6 +124,33 @@ describe("stageHostedLinqGroupReactionContext", () => {
     expect(text).not.toContain("first target part");
   });
 
+  it("uses the canonical roster when the signed event omits the redundant self flag", async () => {
+    const prisma = createPrismaStub();
+
+    await expect(stageHostedLinqGroupReactionContext({
+      event: buildReactionEvent({ includeIsFromMe: false }),
+      prisma,
+    })).resolves.toMatchObject({ status: "staged" });
+    expect(mocks.getHostedLinqChatSummary).toHaveBeenCalledTimes(1);
+    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledTimes(1);
+
+    mocks.getHostedLinqChatSummary.mockResolvedValueOnce({
+      handles: [
+        { handle: "+15550000000", isMe: true, status: "active" },
+        { handle: "+15557654321", isMe: false, status: "active" },
+      ],
+      isGroup: true,
+    });
+    await expect(stageHostedLinqGroupReactionContext({
+      event: buildReactionEvent({
+        eventId: "event_reaction_missing_self_flag_actor_absent",
+        includeIsFromMe: false,
+      }),
+      prisma,
+    })).resolves.toEqual({ reason: "invalid_actor", status: "ignored" });
+    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledTimes(1);
+  });
+
   it("keeps a stable target key across add/remove while separating parts", async () => {
     const prisma = createPrismaStub();
     await stageHostedLinqGroupReactionContext({
@@ -321,6 +348,23 @@ describe("stageHostedLinqGroupReactionContext", () => {
     expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
   });
 
+  it("retries an invalid canonical chat read", async () => {
+    const prisma = createPrismaStub();
+    mocks.getHostedLinqChatSummary.mockResolvedValueOnce({
+      handles: [],
+      isGroup: null,
+    });
+
+    await expect(stageHostedLinqGroupReactionContext({
+      event: buildReactionEvent({ eventId: "event_reaction_invalid_chat_read" }),
+      prisma,
+    })).rejects.toMatchObject({
+      code: "LINQ_CHAT_READ_INVALID",
+      retryable: true,
+    });
+    expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+  });
+
   it("rejects target identity and part-index mismatches", async () => {
     const prisma = createPrismaStub();
     mocks.getHostedLinqReactionTargetMessage.mockResolvedValueOnce({
@@ -429,6 +473,7 @@ function buildReactionEvent(input: {
   actorHandle?: string;
   eventId?: string;
   eventType?: "reaction.added" | "reaction.removed";
+  includeIsFromMe?: boolean;
   isFromMe?: boolean;
   linePhoneNumber?: string;
   partIndex?: number | null;
@@ -441,7 +486,7 @@ function buildReactionEvent(input: {
         chat_id: "chat_group_1",
         from_handle: {
           handle: input.actorHandle ?? "+15551234567",
-          is_me: input.isFromMe ?? false,
+          ...(input.includeIsFromMe === false ? {} : { is_me: input.isFromMe ?? false }),
           service: "iMessage",
         },
         ...(input.linePhoneNumber

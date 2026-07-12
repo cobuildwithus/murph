@@ -1,10 +1,13 @@
 import type {
   AssistantInputCandidate,
   AssistantInputConversationRef,
+  AssistantInputCursor,
 } from '../input-source.js'
+import { compareAssistantInputCursors } from '../input-store.js'
 import { compareAssistantTimestampsAscending } from '../shared.js'
 
 export interface AssistantAutomationInputSummary {
+  cursor: AssistantInputCursor
   inputId: string
   optionalInboxCaptureId: string | null
   source: string
@@ -41,6 +44,7 @@ export function assistantAutomationInputSummaryFromCandidate(
     sourceMetadata?.kind === 'linq' && sourceMetadata.contextOnly === true
 
   return {
+    cursor: input.event.cursor,
     inputId: input.event.inputId,
     optionalInboxCaptureId: input.projection.captureId,
     source: input.event.source,
@@ -70,7 +74,8 @@ export function compareAssistantInputSummaryOrder(
     ? right.occurredAt
     : right.receivedAt ?? right.occurredAt
 
-  return leftTimestamp === rightTimestamp
-    ? left.inputId.localeCompare(right.inputId)
-    : compareAssistantTimestampsAscending(leftTimestamp, rightTimestamp)
+  if (leftTimestamp !== rightTimestamp) {
+    return compareAssistantTimestampsAscending(leftTimestamp, rightTimestamp)
+  }
+  return compareAssistantInputCursors(left.cursor, right.cursor)
 }

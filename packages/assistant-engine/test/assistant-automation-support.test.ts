@@ -17,7 +17,10 @@ import {
   type InboxShowResult,
 } from '@murphai/operator-config/inbox-cli-contracts'
 import type { AssistantInputCandidate } from '../src/assistant/input-source.ts'
-import type { AssistantAutomationInputSummary } from '../src/assistant/automation/input-summary.ts'
+import {
+  assistantAutomationInputSummaryFromCandidate,
+  type AssistantAutomationInputSummary,
+} from '../src/assistant/automation/input-summary.ts'
 import {
   assistantResultArtifactExists,
   writeAssistantChatErrorArtifacts,
@@ -147,8 +150,16 @@ function createInputSummary(
     Partial<AssistantAutomationInputSummary> = {},
 ): AssistantAutomationInputSummary {
   const capture = createListCapture(overrides)
+  const inputId = overrides.inputId ?? capture.captureId
   return {
-    inputId: overrides.inputId ?? capture.captureId,
+    cursor: overrides.cursor ?? {
+      createdAt: capture.receivedAt,
+      inputId,
+      occurredAt: capture.occurredAt,
+      sourceKind: 'inbox-capture',
+      sourcePosition: `inbox-capture:${capture.source}:${capture.captureId}`,
+    },
+    inputId,
     optionalInboxCaptureId:
       'optionalInboxCaptureId' in overrides
         ? overrides.optionalInboxCaptureId ?? null
@@ -955,6 +966,20 @@ describe('assistant auto-reply grouping', () => {
       messageId: '777',
       replyContext: 'Replying to: earlier assistant input',
     })
+  })
+})
+
+describe('assistant automation input summaries', () => {
+  it('preserves the owner cursor from the input candidate', () => {
+    const candidate = createTelegramAssistantInputCandidate({
+      inputId: 'ain_cursor_summary',
+      mediaGroupId: null,
+      messageId: '777',
+      replyContext: null,
+    })
+
+    expect(assistantAutomationInputSummaryFromCandidate(candidate).cursor)
+      .toEqual(candidate.event.cursor)
   })
 })
 

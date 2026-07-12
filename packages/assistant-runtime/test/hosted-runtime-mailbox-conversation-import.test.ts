@@ -421,7 +421,7 @@ describe("hosted mailbox conversation import adapter", () => {
           return {
             captureId: null,
             metrics: {
-              nextWakeAt: null,
+              nextWakeAt: "2026-07-10T00:00:05.000Z",
               parserProcessed: 0,
             },
           };

@@ -8,8 +8,18 @@ import type { AssistantAutomationInputSummary } from '../src/assistant/automatio
 function createInputSummary(
   overrides: Partial<AssistantAutomationInputSummary> = {},
 ): AssistantAutomationInputSummary {
+  const inputId = overrides.inputId ?? 'ain_1'
+  const occurredAt = overrides.occurredAt ?? '2026-04-22T10:00:00.000Z'
+  const receivedAt = overrides.receivedAt ?? '2026-04-22T10:00:01.000Z'
   return {
-    inputId: overrides.inputId ?? 'ain_1',
+    cursor: overrides.cursor ?? {
+      createdAt: receivedAt,
+      inputId,
+      occurredAt,
+      sourceKind: 'inbox-capture',
+      sourcePosition: `inbox-capture:fixture:${inputId}`,
+    },
+    inputId,
     optionalInboxCaptureId: overrides.optionalInboxCaptureId ?? 'cap_1',
     source: overrides.source ?? 'telegram',
     conversation: overrides.conversation ?? {
@@ -20,8 +30,8 @@ function createInputSummary(
       threadId: 'thread_1',
       threadIsDirect: true,
     },
-    occurredAt: overrides.occurredAt ?? '2026-04-22T10:00:00.000Z',
-    receivedAt: overrides.receivedAt ?? '2026-04-22T10:00:01.000Z',
+    occurredAt,
+    receivedAt,
     text: overrides.text ?? 'hello',
     attachmentCount: overrides.attachmentCount ?? 0,
     actorIsSelf: overrides.actorIsSelf ?? overrides.conversation?.actorIsSelf ?? false,
@@ -187,6 +197,47 @@ describe('orderAssistantAutoReplyInputSummaries', () => {
       conversation: groupConversation({ actorId: 'bob', threadId: 'group-a' }),
       inputId: 'message-bob',
       occurredAt: '2026-04-22T10:03:00.000Z',
+      source: 'linq',
+    })
+
+    expect(orderAssistantAutoReplyInputSummaries([removed, added, message]))
+      .toEqual([added, removed, message])
+  })
+
+  it('uses mailbox cursor order when reaction provider times are equal', () => {
+    const occurredAt = '2026-04-22T10:00:00.000Z'
+    const removed = createInputSummary({
+      contextOnly: true,
+      conversation: groupConversation({ actorId: 'alice', threadId: 'group-a' }),
+      cursor: {
+        createdAt: '2026-04-22T10:00:01.000Z',
+        inputId: 'reaction-a',
+        occurredAt,
+        sourceKind: 'hosted-mailbox',
+        sourcePosition: `hosted-mailbox:conversation:${'2'.padStart(39, '0')}:item-removed`,
+      },
+      inputId: 'reaction-a',
+      occurredAt,
+      source: 'linq',
+    })
+    const added = createInputSummary({
+      contextOnly: true,
+      conversation: groupConversation({ actorId: 'alice', threadId: 'group-a' }),
+      cursor: {
+        createdAt: '2026-04-22T10:00:02.000Z',
+        inputId: 'reaction-z',
+        occurredAt,
+        sourceKind: 'hosted-mailbox',
+        sourcePosition: `hosted-mailbox:conversation:${'1'.padStart(39, '0')}:item-added`,
+      },
+      inputId: 'reaction-z',
+      occurredAt,
+      source: 'linq',
+    })
+    const message = createInputSummary({
+      conversation: groupConversation({ actorId: 'bob', threadId: 'group-a' }),
+      inputId: 'message-bob',
+      occurredAt: '2026-04-22T10:01:00.000Z',
       source: 'linq',
     })
 

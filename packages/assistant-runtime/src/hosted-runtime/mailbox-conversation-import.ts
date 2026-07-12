@@ -421,7 +421,7 @@ export async function importHostedConversationMailboxItem(input: {
     vaultRoot: input.vaultRoot,
     wake: decoded.wake,
   });
-  if (projectionEffect.parserRetry) {
+  if (projectionEffect.parserRetry && decoded.wake.kind !== "conversation.reaction") {
     return {
       reasonCode: CONVERSATION_PARSER_RETRY_REASON,
       retryable: true,

@@ -476,7 +476,7 @@ function compareHostedDeferredContextSemanticOrder(
   ) {
     return leftOccurredAt - rightOccurredAt;
   }
-  return left.inputId.localeCompare(right.inputId);
+  return compareAssistantInputCursors(left.cursor, right.cursor);
 }
 
 async function suppressHostedDeferredContextOverflow(input: {

@@ -4,6 +4,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
+  createAssistantInputEventId,
   updateAssistantInputProjection,
   upsertAssistantInputEvent,
 } from "@murphai/assistant-engine";
@@ -285,6 +286,71 @@ describe("hosted pending assistant input index", () => {
     await expect(hasCompleteAssistantAutoReplyTerminalEvidence({
       captureId: null,
       inputId: removal.inputId,
+      vault: vaultRoot,
+    })).resolves.toBe(false);
+  });
+
+  it("uses mailbox cursor order when equal-time context overflows", async () => {
+    const vaultRoot = await createTempVault();
+    await saveAssistantAutomationState(vaultRoot, {
+      autoReply: [{
+        channel: "linq",
+        eligibleAfter: null,
+        enabledAt: "2026-07-10T00:00:00.000Z",
+      }],
+      updatedAt: "2026-07-10T00:00:00.000Z",
+      version: 1,
+    });
+    const definitions = Array.from({ length: 33 }, (_, index) => {
+      const suffix = String(index).padStart(2, "0");
+      const event = createAssistantInputEvent({
+        contextOnly: true,
+        dedupeKey: `dedupe_equal_time_${suffix}`,
+        eventId: `evt_equal_time_${suffix}`,
+        itemId: `item_equal_time_${suffix}`,
+        laneSeq: "1",
+        messageId: `msg_equal_time_${suffix}`,
+        occurredAt: "2026-07-10T00:00:01.000Z",
+        receivedAt: "2026-07-10T00:00:02.000Z",
+        replyTarget: null,
+        text: `equal-time reaction ${suffix}`,
+      });
+      return {
+        event,
+        inputId: createAssistantInputEventId({ sourceRef: event.sourceRef }),
+      };
+    }).sort((left, right) => right.inputId.localeCompare(left.inputId));
+    const contexts = [];
+
+    for (const [index, definition] of definitions.entries()) {
+      const context = await upsertAssistantInputEvent({
+        vault: vaultRoot,
+        event: {
+          ...definition.event,
+          sourceRef: {
+            ...definition.event.sourceRef,
+            laneSeq: String(index + 1),
+          },
+        },
+      });
+      contexts.push(context);
+      await enqueueHostedPendingAssistantInputId({
+        inputId: context.inputId,
+        vaultRoot,
+      });
+    }
+
+    await expect(readHostedPendingAssistantInputIds({ vaultRoot })).resolves.toEqual(
+      contexts.slice(1).map((context) => context.inputId),
+    );
+    await expect(hasCompleteAssistantAutoReplyTerminalEvidence({
+      captureId: null,
+      inputId: contexts[0]!.inputId,
+      vault: vaultRoot,
+    })).resolves.toBe(true);
+    await expect(hasCompleteAssistantAutoReplyTerminalEvidence({
+      captureId: null,
+      inputId: contexts.at(-1)!.inputId,
       vault: vaultRoot,
     })).resolves.toBe(false);
   });

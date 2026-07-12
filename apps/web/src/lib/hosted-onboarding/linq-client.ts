@@ -244,7 +244,7 @@ export async function getHostedLinqChatSummary(input: {
   if (!response.ok) {
     throw buildHostedLinqRequestFailedError({
       operation: "chat read",
-      retryable: isRetryableHostedLinqStatus(response.status),
+      retryable: isRetryableHostedLinqReadStatus(response.status),
       status: response.status,
     });
   }
@@ -277,7 +277,7 @@ export async function getHostedLinqReactionTargetMessage(input: {
   if (!response.ok) {
     throw buildHostedLinqRequestFailedError({
       operation: "message read",
-      retryable: isRetryableHostedLinqStatus(response.status),
+      retryable: isRetryableHostedLinqReadStatus(response.status),
       status: response.status,
     });
   }
@@ -288,7 +288,7 @@ export async function getHostedLinqReactionTargetMessage(input: {
       code: "LINQ_MESSAGE_READ_INVALID",
       httpStatus: 502,
       message: "Linq message read returned an invalid canonical response.",
-      retryable: false,
+      retryable: true,
     });
   }
   return message;
@@ -767,6 +767,10 @@ function normalizeRequiredStringList(values: readonly string[], label: string): 
 
 function isRetryableHostedLinqStatus(status: number): boolean {
   return status === 429 || status >= 500;
+}
+
+function isRetryableHostedLinqReadStatus(status: number): boolean {
+  return status !== 404 && status !== 410;
 }
 
 function buildHostedLinqTextMessageBody(input: {

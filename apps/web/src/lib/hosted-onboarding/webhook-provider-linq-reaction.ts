@@ -14,7 +14,7 @@ import {
   type HostedThreadRouteSnapshot,
 } from "../hosted-routing/thread-route-store";
 import { createHostedPhoneLookupKey } from "./contact-privacy";
-import { isHostedOnboardingError } from "./errors";
+import { hostedOnboardingError, isHostedOnboardingError } from "./errors";
 import {
   getHostedLinqChatSummary,
   getHostedLinqReactionTargetMessage,
@@ -221,9 +221,9 @@ function readHostedLinqGroupReactionContext(
       reason: HostedLinqGroupReactionContextSkipReason;
       status: "ignored";
     } {
-  if (event.reactionIsFromMe !== false) {
+  if (event.reactionIsFromMe === true) {
     return {
-      reason: event.reactionIsFromMe === true ? "own_reaction" : "missing_context",
+      reason: "own_reaction",
       status: "ignored",
     };
   }
@@ -272,6 +272,14 @@ async function readHostedLinqReactionCanonicalContext(input: {
     chatId: input.chatId,
     ...(input.signal ? { signal: input.signal } : {}),
   });
+  if (chat.isGroup === null) {
+    throw hostedOnboardingError({
+      code: "LINQ_CHAT_READ_INVALID",
+      httpStatus: 502,
+      message: "Linq chat read returned an invalid canonical response.",
+      retryable: true,
+    });
+  }
   if (chat.isGroup !== true) {
     return { reason: "missing_context", status: "ignored" };
   }

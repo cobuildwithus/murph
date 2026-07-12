@@ -167,6 +167,30 @@ describe("getHostedLinqChatSummary", () => {
     });
   });
 
+  it.each([401, 403, 422])("retries an unexpected chat-read HTTP %s", async (status) => {
+    vi.stubGlobal("fetch", vi.fn(async () => createJsonResponse({}, status)));
+
+    await expect(getHostedLinqChatSummary({
+      chatId: "chat_123",
+      timeoutMs: 1_500,
+    })).rejects.toMatchObject({
+      code: "LINQ_SEND_FAILED",
+      retryable: true,
+    });
+  });
+
+  it.each([404, 410])("treats a missing chat-read HTTP %s as permanent", async (status) => {
+    vi.stubGlobal("fetch", vi.fn(async () => createJsonResponse({}, status)));
+
+    await expect(getHostedLinqChatSummary({
+      chatId: "missing_chat",
+      timeoutMs: 1_500,
+    })).rejects.toMatchObject({
+      code: "LINQ_SEND_FAILED",
+      retryable: false,
+    });
+  });
+
   it.each([
     {
       label: "nested webhook-style truth",
@@ -307,14 +331,38 @@ describe("getHostedLinqReactionTargetMessage", () => {
     );
   });
 
-  it("marks a missing target as a permanent provider read failure", async () => {
-    vi.stubGlobal("fetch", vi.fn(async () => createJsonResponse({}, 404)));
+  it.each([404, 410])("marks a missing target HTTP %s as a permanent provider read failure", async (status) => {
+    vi.stubGlobal("fetch", vi.fn(async () => createJsonResponse({}, status)));
 
     await expect(getHostedLinqReactionTargetMessage({
       messageId: "missing_message",
     })).rejects.toMatchObject({
       code: "LINQ_SEND_FAILED",
       retryable: false,
+    });
+  });
+
+  it.each([401, 403, 422])("retries an unexpected message-read HTTP %s", async (status) => {
+    vi.stubGlobal("fetch", vi.fn(async () => createJsonResponse({}, status)));
+
+    await expect(getHostedLinqReactionTargetMessage({
+      messageId: "message_123",
+    })).rejects.toMatchObject({
+      code: "LINQ_SEND_FAILED",
+      retryable: true,
+    });
+  });
+
+  it("retries a malformed successful message read", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => createJsonResponse({
+      id: "message_123",
+    }, 200)));
+
+    await expect(getHostedLinqReactionTargetMessage({
+      messageId: "message_123",
+    })).rejects.toMatchObject({
+      code: "LINQ_MESSAGE_READ_INVALID",
+      retryable: true,
     });
   });
 
