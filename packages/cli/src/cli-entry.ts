@@ -5,8 +5,11 @@ import type { Cli } from 'incur'
 import { installSqliteExperimentalWarningFilterWithOptions } from '@murphai/runtime-state/node/sqlite-warning-filter'
 import { formatStructuredErrorMessage } from '@murphai/operator-config/text/shared'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
+import { getVaultCliPackageVersion } from './vault-cli-package.js'
+import { VAULT_CLI_SKILL_HASH } from './vault-cli-skill-hash.generated.js'
 import {
   detectCliProgramName,
+  hasEffectiveMcpFlag,
   planVaultCliInvocation,
   type CliInvocationPlan,
   type VaultCliProgramName,
@@ -94,6 +97,12 @@ export async function runMurphCliAction(
     programName,
   })
   const serveOptions = createCliServeOptions(options.exit, options.stdout)
+
+  if (plannedInvocation.plan.kind === 'version') {
+    const stdout = options.stdout ?? ((output: string) => process.stdout.write(output))
+    stdout(`${getVaultCliPackageVersion()}\n`)
+    return
+  }
 
   if (plannedInvocation.plan.kind === 'setup') {
     await runSetupInvocation({
@@ -311,10 +320,7 @@ async function servePlannedVaultCliInvocation(input: {
   serveOptions: CliServeOptions
   vaultContext: VaultCliVaultContext
 }): Promise<void> {
-  if (
-    input.plan.kind === 'scoped' &&
-    !(await hasInstalledIncurSkillsForCli(input.programName))
-  ) {
+  if (input.plan.kind === 'scoped') {
     const [
       { createVaultCliShell },
       { registerScopedVaultCliCommand },
@@ -328,7 +334,9 @@ async function servePlannedVaultCliInvocation(input: {
       import('./vault-cli-schema-index.js'),
       import('./vault-cli-vault-context.js'),
     ])
-    const cli = createVaultCliShell(input.programName)
+    const cli = createVaultCliShell(input.programName, {
+      expectedSkillHash: VAULT_CLI_SKILL_HASH,
+    })
 
     await registerScopedVaultCliCommand({
       cli,
@@ -344,31 +352,12 @@ async function servePlannedVaultCliInvocation(input: {
   const { createVaultCliWithOptions } = await import('./vault-cli.js')
   const cli = createVaultCliWithOptions({
     commandName: input.programName,
-    ...(isMcpServerInvocation(input.argv)
+    ...(hasEffectiveMcpFlag(input.argv)
       ? { excludeCommandDescriptorIds: new Set(['batch']) }
       : {}),
     vaultContext: input.vaultContext,
   })
   await cli.serve(input.argv, input.serveOptions)
-}
-
-function isMcpServerInvocation(argv: readonly string[]): boolean {
-  for (const token of argv) {
-    if (token === '--') {
-      return false
-    }
-
-    if (token === '--mcp') {
-      return true
-    }
-  }
-
-  return false
-}
-
-async function hasInstalledIncurSkillsForCli(commandName: string): Promise<boolean> {
-  const { SyncSkills } = await import('incur')
-  return SyncSkills.hasInstalledSkills(commandName)
 }
 
 export function formatMurphCliError(error: unknown): string {
