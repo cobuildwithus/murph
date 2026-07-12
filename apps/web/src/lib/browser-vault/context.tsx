@@ -15,7 +15,6 @@ import { usePathname } from "next/navigation";
 import { type BrowserVaultQueryClient } from "@murphai/query/browser-replica-client";
 import { type HostedBrowserVaultReplicaRef } from "@murphai/hosted-execution/browser-vault";
 
-import { useAuth } from "@/src/components/hosted-onboarding/auth-dialog-provider";
 import { navigateHostedAuthRedirect } from "@/src/components/hosted-onboarding/hosted-auth-navigation";
 
 import { type BrowserVaultFreshness, type BrowserVaultSessionMetadata } from "./loader";
@@ -74,15 +73,17 @@ const anonymousBrowserVaultContext: BrowserVaultContextValue = {
   workspaceVersion: null,
 };
 
-export function BrowserVaultProvider({ children }: { children: ReactNode }) {
-  const { authenticated } = useAuth();
-
-  // Auth loss must clear the shared warm snapshot and abort any in-flight load
-  // so a request started under the previous identity cannot repopulate it.
-  // Anonymous consumers already see empty state immediately from the synchronous
-  // render below; the generation bump inside clearBrowserVaultWarmState guards
-  // the async repopulation path.
-  useEffect(() => {
+export function BrowserVaultProvider({
+  authenticated,
+  children,
+}: {
+  authenticated: boolean;
+  children: ReactNode;
+}) {
+  // The current dashboard server result owns auth for this route transition.
+  // Hide the client synchronously, then clear module memory before paint so a
+  // snapshot warmed under an older root document cannot become authority.
+  useLayoutEffect(() => {
     if (!authenticated) {
       clearBrowserVaultWarmState();
     }

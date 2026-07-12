@@ -74,11 +74,10 @@ import {
 } from "@/src/lib/browser-vault/context";
 import {
   abortBrowserVaultInFlightLoad,
+  clearBrowserVaultWarmState,
   getBrowserVaultReadySnapshot,
   peekBrowserVaultInFlightLoad,
-  resetBrowserVaultWarmStateForTests,
   startBrowserVaultWarmLoad,
-  clearBrowserVaultWarmState,
 } from "@/src/lib/browser-vault/warm-store";
 import { AuthProvider } from "@/src/components/hosted-onboarding/auth-dialog-provider";
 import { requestHostedPrivyCompletionWithRetry } from "@/src/components/hosted-onboarding/hosted-privy-auth-support";
@@ -86,7 +85,7 @@ import { requestHostedPrivyCompletionWithRetry } from "@/src/components/hosted-o
 beforeEach(() => {
   // The warm path lives in module memory; reset it so ready snapshots and
   // in-flight loads never leak between tests.
-  resetBrowserVaultWarmStateForTests();
+  clearBrowserVaultWarmState();
   mocks.sessionInvalidation.listeners.clear();
   mocks.navigateHostedAuthRedirect.mockClear();
   mocks.reloadCurrentHostedAuthDocument.mockClear();
@@ -96,7 +95,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  resetBrowserVaultWarmStateForTests();
+  clearBrowserVaultWarmState();
   vi.useRealTimers();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
@@ -153,7 +152,11 @@ test("browser-vault provider skips the session route when auth context is anonym
   vi.stubGlobal("fetch", fetchMock);
 
   const rendered = await renderClientComponent(
-    createElement(BrowserVaultProvider, null, createElement(BrowserVaultStatusProbe)),
+    createElement(
+      BrowserVaultProvider,
+      { authenticated: false },
+      createElement(BrowserVaultStatusProbe),
+    ),
     { requireButton: false },
   );
 
@@ -170,7 +173,11 @@ test("browser-vault provider refresh skips the session route when auth context i
   vi.stubGlobal("fetch", fetchMock);
 
   const rendered = await renderClientComponent(
-    createElement(BrowserVaultProvider, null, createElement(BrowserVaultStatusProbe)),
+    createElement(
+      BrowserVaultProvider,
+      { authenticated: false },
+      createElement(BrowserVaultStatusProbe),
+    ),
     { requireButton: false },
   );
 
@@ -291,7 +298,7 @@ test("browser-vault provider polls pending refreshes without a global sync indic
   await rendered.cleanup();
 });
 
-test("browser-vault provider hides ready data immediately when auth context becomes anonymous", async () => {
+test("current dashboard authority hides ready data even while root auth remains stale", async () => {
   const ref = createReplicaRef();
   const fetchMock = vi.fn()
     .mockResolvedValueOnce(jsonResponse({
@@ -306,16 +313,16 @@ test("browser-vault provider hides ready data immediately when auth context beco
   vi.stubGlobal("fetch", fetchMock);
 
   function AuthTransitionHarness() {
-    const [authenticated, setAuthenticated] = useState(true);
+    const [dashboardAuthenticated, setDashboardAuthenticated] = useState(true);
 
     return createElement(
       AuthProvider,
-      { authenticated },
+      { authenticated: true },
       createElement(
         BrowserVaultProvider,
-        null,
+        { authenticated: dashboardAuthenticated },
         createElement(BrowserVaultStatusProbe, {
-          onClick: () => setAuthenticated(false),
+          onClick: () => setDashboardAuthenticated(false),
         }),
       ),
     );
@@ -334,6 +341,7 @@ test("browser-vault provider hides ready data immediately when auth context beco
 
   assert.equal(rendered.container.textContent, "empty:none");
   assert.equal(fetchMock.mock.calls.length, 1);
+  assert.equal(getBrowserVaultReadySnapshot(), null);
 
   await rendered.cleanup();
 });
@@ -1048,7 +1056,7 @@ function createAuthenticatedBrowserVaultElement(child: ReactNode) {
   return createElement(
     AuthProvider,
     { authenticated: true },
-    createElement(BrowserVaultProvider, null, child),
+    createElement(BrowserVaultProvider, { authenticated: true }, child),
   );
 }
 

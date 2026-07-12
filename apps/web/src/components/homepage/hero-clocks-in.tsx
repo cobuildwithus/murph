@@ -1759,7 +1759,7 @@ function ContactCard({
       </div>
       <div className="mt-2.5">
         {authenticated ? (
-          <Link href="/home" className={ctaClassName}>
+          <Link href="/home" prefetch={false} className={ctaClassName}>
             Open Murph
             <span
               aria-hidden="true"

@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock("server-only", () => ({}));
 
 vi.mock("next/navigation", () => ({
+  usePathname: () => "/biomarkers",
   useRouter: () => ({
     refresh: vi.fn(),
   }),

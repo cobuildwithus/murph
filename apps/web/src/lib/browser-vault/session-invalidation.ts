@@ -5,6 +5,7 @@ const BROWSER_VAULT_SESSION_INVALIDATION_CHANNEL =
 const BROWSER_VAULT_SESSION_INVALIDATION_EVENT =
   "murph:browser-vault-session-invalidation";
 const BROWSER_VAULT_SESSION_INVALIDATION_MESSAGE = "invalidate";
+let browserVaultSessionInvalidationChannel: BroadcastChannel | null | undefined;
 
 export type BrowserVaultSessionInvalidationSource =
   | "same-document"
@@ -21,9 +22,8 @@ export function publishBrowserVaultSessionInvalidation(): void {
 
   window.dispatchEvent(new Event(BROWSER_VAULT_SESSION_INVALIDATION_EVENT));
 
-  const channel = openBrowserVaultSessionInvalidationChannel();
+  const channel = getBrowserVaultSessionInvalidationChannel();
   channel?.postMessage(BROWSER_VAULT_SESSION_INVALIDATION_MESSAGE);
-  channel?.close();
 }
 
 export function subscribeBrowserVaultSessionInvalidation(
@@ -39,7 +39,7 @@ export function subscribeBrowserVaultSessionInvalidation(
       onInvalidate("cross-document");
     }
   };
-  const channel = openBrowserVaultSessionInvalidationChannel();
+  const channel = getBrowserVaultSessionInvalidationChannel();
 
   window.addEventListener(
     BROWSER_VAULT_SESSION_INVALIDATION_EVENT,
@@ -53,14 +53,15 @@ export function subscribeBrowserVaultSessionInvalidation(
       onDocumentInvalidation,
     );
     channel?.removeEventListener("message", onCrossDocumentInvalidation);
-    channel?.close();
   };
 }
 
-function openBrowserVaultSessionInvalidationChannel(): BroadcastChannel | null {
-  if (typeof BroadcastChannel !== "function") {
-    return null;
+function getBrowserVaultSessionInvalidationChannel(): BroadcastChannel | null {
+  if (browserVaultSessionInvalidationChannel === undefined) {
+    browserVaultSessionInvalidationChannel = typeof BroadcastChannel === "function"
+      ? new BroadcastChannel(BROWSER_VAULT_SESSION_INVALIDATION_CHANNEL)
+      : null;
   }
 
-  return new BroadcastChannel(BROWSER_VAULT_SESSION_INVALIDATION_CHANNEL);
+  return browserVaultSessionInvalidationChannel;
 }

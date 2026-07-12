@@ -183,6 +183,7 @@ export function LandingAuthActions({
       <div className={styles.container}>
         <Link
           href="/home"
+          prefetch={false}
           className={cn(
             styles.settings,
             showArrow ? "group gap-2" : leadingIcon ? "gap-2" : null,

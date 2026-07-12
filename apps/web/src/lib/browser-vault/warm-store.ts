@@ -163,11 +163,6 @@ export function clearBrowserVaultWarmState(): void {
   stopSessionInvalidationListener = null;
 }
 
-/** Test-only: reset module memory between tests. */
-export function resetBrowserVaultWarmStateForTests(): void {
-  clearBrowserVaultWarmState();
-}
-
 function ensureBrowserVaultSessionInvalidationListener(): void {
   if (stopSessionInvalidationListener) {
     return;

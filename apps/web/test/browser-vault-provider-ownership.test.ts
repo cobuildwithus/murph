@@ -12,6 +12,10 @@ function readSource(relativePath: string): string {
 test("the dashboard route-group layout owns the single BrowserVaultProvider", () => {
   const layoutSource = readSource("app/(dashboard)/layout.tsx");
   assert.match(layoutSource, /BrowserVaultProvider/u);
+  assert.match(
+    layoutSource,
+    /BrowserVaultProvider authenticated=\{sidebarAuth\.authenticated\}/u,
+  );
 });
 
 test("dashboard route consumers no longer wrap their own BrowserVaultProvider", () => {
@@ -38,6 +42,14 @@ test("dashboard route consumers no longer wrap their own BrowserVaultProvider", 
 test("the landing page only warms the browser vault for authenticated visitors", () => {
   const landingSource = readSource("app/page.tsx");
   assert.match(landingSource, /authenticated \? <LandingBrowserVaultWarm \/> : null/u);
+});
+
+test("authenticated landing links fetch current dashboard authority on click", () => {
+  const authControlsSource = readSource("app/auth-controls.tsx");
+  const heroSource = readSource("src/components/homepage/hero-clocks-in.tsx");
+
+  assert.match(authControlsSource, /href="\/home"[\s\S]*?prefetch=\{false\}/u);
+  assert.match(heroSource, /href="\/home" prefetch=\{false\}/u);
 });
 
 test("the dashboard loading boundary announces progress and respects reduced motion", async () => {

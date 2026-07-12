@@ -33,13 +33,13 @@ vi.mock("@murphai/runtime-state", async () => {
 import { LandingBrowserVaultWarm } from "@/src/components/homepage/landing-browser-vault-warm";
 import { AuthProvider } from "@/src/components/hosted-onboarding/auth-dialog-provider";
 import {
+  clearBrowserVaultWarmState,
   getBrowserVaultReadySnapshot,
   peekBrowserVaultInFlightLoad,
-  resetBrowserVaultWarmStateForTests,
 } from "@/src/lib/browser-vault/warm-store";
 
 beforeEach(() => {
-  resetBrowserVaultWarmStateForTests();
+  clearBrowserVaultWarmState();
   mocks.navigateHostedAuthRedirect.mockClear();
   mocks.reloadCurrentHostedAuthDocument.mockClear();
   mocks.generateHostedUserRecipientKeyPair.mockResolvedValue({
@@ -49,7 +49,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  resetBrowserVaultWarmStateForTests();
+  clearBrowserVaultWarmState();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
   mocks.decryptHostedStoragePayload.mockReset();

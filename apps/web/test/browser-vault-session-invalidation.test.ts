@@ -1,10 +1,5 @@
 import { afterEach, expect, test, vi } from "vitest";
 
-import {
-  publishBrowserVaultSessionInvalidation,
-  subscribeBrowserVaultSessionInvalidation,
-} from "@/src/lib/browser-vault/session-invalidation";
-
 class FakeBroadcastChannel extends EventTarget {
   static instances = new Set<FakeBroadcastChannel>();
   static postedMessages: unknown[] = [];
@@ -33,12 +28,16 @@ class FakeBroadcastChannel extends EventTarget {
 afterEach(() => {
   FakeBroadcastChannel.instances.clear();
   FakeBroadcastChannel.postedMessages = [];
+  vi.resetModules();
   vi.unstubAllGlobals();
 });
 
-test("cross-tab app-session invalidation reaches the browser-vault subscriber", () => {
+test("cross-tab app-session invalidation reaches the browser-vault subscriber", async () => {
   vi.stubGlobal("window", new EventTarget());
   vi.stubGlobal("BroadcastChannel", FakeBroadcastChannel);
+  const { subscribeBrowserVaultSessionInvalidation } = await import(
+    "@/src/lib/browser-vault/session-invalidation"
+  );
 
   const onInvalidate = vi.fn();
   const unsubscribe = subscribeBrowserVaultSessionInvalidation(onInvalidate);
@@ -54,17 +53,27 @@ test("cross-tab app-session invalidation reaches the browser-vault subscriber", 
   otherTab.close();
 });
 
-test("app-session invalidation publishes only the data-free cross-tab token", () => {
+test("a local publication reaches each subscriber exactly once without a cross-document echo", async () => {
   vi.stubGlobal("window", new EventTarget());
   vi.stubGlobal("BroadcastChannel", FakeBroadcastChannel);
+  const {
+    publishBrowserVaultSessionInvalidation,
+    subscribeBrowserVaultSessionInvalidation,
+  } = await import("@/src/lib/browser-vault/session-invalidation");
 
   const onInvalidate = vi.fn();
+  const secondOnInvalidate = vi.fn();
   const unsubscribe = subscribeBrowserVaultSessionInvalidation(onInvalidate);
+  const secondUnsubscribe = subscribeBrowserVaultSessionInvalidation(
+    secondOnInvalidate,
+  );
 
   publishBrowserVaultSessionInvalidation();
 
   expect(FakeBroadcastChannel.postedMessages).toEqual(["invalidate"]);
-  expect(onInvalidate).toHaveBeenCalledWith("same-document");
+  expect(onInvalidate.mock.calls).toEqual([["same-document"]]);
+  expect(secondOnInvalidate.mock.calls).toEqual([["same-document"]]);
 
   unsubscribe();
+  secondUnsubscribe();
 });

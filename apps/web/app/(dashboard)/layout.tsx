@@ -15,7 +15,7 @@ export default async function DashboardLayout({
   // route, so route-local wrappers are redundant and navigation reuses the
   // in-memory client instead of reloading and re-decrypting per page.
   return (
-    <BrowserVaultProvider>
+    <BrowserVaultProvider authenticated={sidebarAuth.authenticated}>
       <DashboardShell sidebarAuth={sidebarAuth}>{children}</DashboardShell>
     </BrowserVaultProvider>
   );
