@@ -55,7 +55,9 @@ When no earlier outcome matches and there is no active eye symptom or warning fe
 
 ### Arrange a routine eye exam
 
-When no earlier outcome matches and there is no active eye symptom or warning feature, arrange a routine eye and contact-lens-fit exam if the contact prescription or fit has not been checked recently.
+When no earlier outcome matches and there is no active eye symptom or warning feature, choose this outcome for an asymptomatic screening or routine-care question, or when known age, eye or medical risk, last-exam timing, or an established clinician schedule makes routine review relevant. Use those known inputs to state the timing, and use the evidence register only as evidence for this outcome. Do not ask another question when the known inputs already determine the routine guidance. If one missing input would change the timing, use `Ask one decision-changing question` instead. When elevated risk makes the interval individualized and no schedule is known, recommend the next available routine eye exam to establish one rather than inventing an interval.
+
+Add a contact-lens-fit review only when the user currently wears contacts and the fit or prescription is due for review. A past contact prescription by itself does not justify a contact-lens fitting for someone who no longer wears contacts.
 
 ### Ask one decision-changing question
 

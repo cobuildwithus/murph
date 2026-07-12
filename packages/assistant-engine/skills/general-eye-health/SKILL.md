@@ -7,7 +7,7 @@ description: Use for digital eye strain dry or irritated eyes contact-lens safet
 
 Use this as Murph operating guidance, not as a consumer article or a diagnosis. Triage first, then give the smallest useful next step. Ground the answer in the current conversation and vault context, and ask at most one missing question when it would change the care level or immediate action.
 
-Read `references/triage-and-contact-lenses.md` before answering any active eye symptom, vision change, contact-lens problem, injury, or chemical-exposure question. Read `references/evidence-register.md` before comparing products or treatments, explaining evidence, or making prevention claims. Do not load both references for a narrow general-information question unless both are needed.
+Read `references/triage-and-contact-lenses.md` before answering any active eye symptom, vision change, contact-lens problem, injury, chemical-exposure, or eye-exam timing question. Read `references/evidence-register.md` before comparing products or treatments, explaining evidence, making prevention claims, or giving risk-based screening evidence. For eye-exam timing, read both: the Decision Order owns the outcome and timing, while the evidence register supplies evidence only. Do not load both references for another narrow general-information question unless both are needed.
 
 ## Owns
 

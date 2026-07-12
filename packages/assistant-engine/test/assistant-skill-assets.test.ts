@@ -293,6 +293,9 @@ describe('assistant skill assets', () => {
     const eyeSkillText = await readSkillFile(eyeSkill)
     expect(eyeSkillText).toContain('references/triage-and-contact-lenses.md')
     expect(eyeSkillText).toContain('references/evidence-register.md')
+    expect(eyeSkillText).toContain(
+      'For eye-exam timing, read both: the Decision Order owns the outcome and timing, while the evidence register supplies evidence only.',
+    )
     expect(eyeSkillText).toContain('correction information, not an eye-health score')
     expect(eyeSkillText).toContain('optional memory cue, not a proven treatment dose')
     expect(eyeSkillText).toContain('Do not recommend blue-light-filtering glasses')
@@ -403,6 +406,32 @@ describe('assistant skill assets', () => {
     expect(triageText).toContain(
       'This may include a mild headache confined to near work that improves with rest.',
     )
+    const preventionActionRule = triageText.slice(
+      triageText.indexOf('### Prevention action only'),
+      triageText.indexOf('### Arrange a routine eye exam'),
+    )
+    expect(preventionActionRule).toContain(
+      'Do not invent a need for an eye exam.',
+    )
+    const routineExamRule = triageText.slice(
+      triageText.indexOf('### Arrange a routine eye exam'),
+      triageText.indexOf('### Ask one decision-changing question'),
+    )
+    expect(routineExamRule).toContain(
+      'known age, eye or medical risk, last-exam timing, or an established clinician schedule',
+    )
+    expect(routineExamRule).toContain(
+      'Do not ask another question when the known inputs already determine the routine guidance.',
+    )
+    expect(routineExamRule).toContain(
+      'If one missing input would change the timing, use `Ask one decision-changing question` instead.',
+    )
+    expect(routineExamRule).toContain(
+      'Add a contact-lens-fit review only when the user currently wears contacts',
+    )
+    expect(routineExamRule).toContain(
+      'A past contact prescription by itself does not justify a contact-lens fitting for someone who no longer wears contacts.',
+    )
     expect(triageText).toContain('new flashes of light')
     expect(triageText).toContain('a sudden increase in or many new floaters')
     const triageContactLensSameDayRule = triageText
@@ -453,6 +482,9 @@ describe('assistant skill assets', () => {
       'https://www.cdc.gov/contact-lenses/causes/index.html',
     )
     expect(evidenceText).toContain('The exact `20-20-20` formula has limited evidence')
+    expect(evidenceText).toContain(
+      'Do not assign exam timing or type outside that outcome.',
+    )
     expect(evidenceText).toContain(
       'https://www.cochrane.org/evidence/CD013244_blue-light-filtering-spectacle-lenses-visual-performance-macular-back-part-eye-protection-and',
     )
