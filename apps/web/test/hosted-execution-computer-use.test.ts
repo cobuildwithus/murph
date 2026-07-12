@@ -859,14 +859,6 @@ describe("ComputerUseService", () => {
     })).rejects.toMatchObject({
       code: "HOSTED_COMPUTER_MEMBER_SUSPENDED",
     });
-    await expect(service.ensureHandoffViewport({
-      memberId: "member_123",
-      token: "handoff-token",
-      viewport: { height: 1080, refresh_rate: 25, width: 1920 },
-    })).rejects.toMatchObject({
-      code: "HOSTED_COMPUTER_MEMBER_SUSPENDED",
-    });
-    expect(kernel.ensureBrowserViewportInputs).toEqual([]);
     expect(kernel.executePlaywrightCalls).toBe(0);
     expect(kernel.deletedSessionIds).toEqual([]);
     expect(store.handoff).toBeNull();
@@ -1167,6 +1159,102 @@ describe("ComputerUseService", () => {
     });
     expect(store.handoff).toMatchObject({
       status: "open",
+    });
+  });
+
+  it("reclaims an open handoff after hidden user reply proof", async () => {
+    const now = new Date("2026-06-17T12:05:00.000Z");
+    const handoff = createHandoffRecord({
+      purpose: "managed_login",
+      status: "open",
+    });
+    const store = new FakeComputerUseStore({
+      handoff,
+      resumeMailboxItems: [createResumeMailboxItem()],
+      run: createRunRecord({
+        awaitingMessage: "Secure login is open.",
+        awaitingReason: "login_needed",
+        pausedAt: new Date("2026-06-17T12:00:00.000Z"),
+        pendingHandoffId: handoff.id,
+        status: "awaiting_user",
+        updatedAt: new Date("2026-06-17T12:00:00.000Z"),
+      }),
+    });
+    const service = new ComputerUseService({
+      kernel: createFakeKernel({
+        executeResult: {
+          title: "Amazon",
+          url: "https://www.amazon.com/cart",
+          visibleText: "Cart",
+        },
+      }),
+      now: () => now,
+      store,
+    });
+
+    await expect(service.openRun({
+      memberId: "member_123",
+      resumeAfterMailboxItemId: "hmi_user_reply",
+      startUrl: null,
+    })).resolves.toMatchObject({
+      reused: true,
+      runId: "hcr_run123",
+      status: "running",
+      title: "Amazon",
+      url: "https://www.amazon.com/cart",
+    });
+    expect(store.run).toMatchObject({
+      awaitingReason: null,
+      pendingHandoffId: null,
+      status: "running",
+    });
+    expect(store.handoff).toMatchObject({
+      status: "expired",
+    });
+  });
+
+  it("reclaims an expired handoff after hidden user reply proof", async () => {
+    const now = new Date("2026-06-17T12:25:00.000Z");
+    const handoff = createHandoffRecord({
+      expiresAt: new Date("2026-06-17T12:20:00.000Z"),
+      purpose: "manual_browser_help",
+      status: "expired",
+      updatedAt: new Date("2026-06-17T12:20:00.000Z"),
+    });
+    const store = new FakeComputerUseStore({
+      handoff,
+      resumeMailboxItems: [createResumeMailboxItem({
+        occurredAt: new Date("2026-06-17T12:24:00.000Z"),
+      })],
+      run: createRunRecord({
+        awaitingReason: "final_confirmation",
+        pausedAt: new Date("2026-06-17T12:00:00.000Z"),
+        pendingHandoffId: handoff.id,
+        status: "awaiting_user",
+      }),
+    });
+    const service = new ComputerUseService({
+      kernel: createFakeKernel(),
+      now: () => now,
+      store,
+    });
+
+    await expect(service.openRun({
+      memberId: "member_123",
+      resumeAfterMailboxItemId: "hmi_user_reply",
+      startUrl: null,
+    })).resolves.toMatchObject({
+      reused: true,
+      runId: "hcr_run123",
+      status: "running",
+    });
+    expect(store.run).toMatchObject({
+      awaitingReason: null,
+      pendingHandoffId: null,
+      status: "running",
+    });
+    expect(store.handoff).toMatchObject({
+      status: "expired",
     });
   });
 
@@ -3576,72 +3664,6 @@ describe("ComputerUseService", () => {
     });
     expect(store.handoff).toMatchObject({
       status: "open",
-    });
-  });
-
-  it("resizes the browser behind an open member-owned handoff", async () => {
-    const now = new Date("2026-06-17T12:00:00.000Z");
-    const handoff = createHandoffRecord({ purpose: "login" });
-    const store = new FakeComputerUseStore({
-      handoff,
-      run: createRunRecord({
-        awaitingReason: "login_needed",
-        pendingHandoffId: handoff.id,
-        status: "awaiting_user",
-      }),
-    });
-    const kernel = createFakeKernel();
-    const service = new ComputerUseService({
-      kernel,
-      now: () => now,
-      store,
-    });
-
-    await expect(service.ensureHandoffViewport({
-      memberId: "member_123",
-      token: "handoff-token",
-      viewport: { height: 844, refresh_rate: 60, width: 390 },
-    })).resolves.toBeUndefined();
-    expect(kernel.ensureBrowserViewportInputs).toEqual([
-      {
-        sessionId: "kernel-session-1",
-        viewport: { height: 844, refresh_rate: 60, width: 390 },
-      },
-    ]);
-  });
-
-  it("blocks browser resize when the handoff is no longer pending on the run", async () => {
-    const now = new Date("2026-06-17T12:00:00.000Z");
-    const handoff = createHandoffRecord({ purpose: "login" });
-    const store = new FakeComputerUseStore({
-      handoff,
-      run: createRunRecord({
-        awaitingReason: "login_needed",
-        pendingHandoffId: "hch_other_handoff",
-        status: "awaiting_user",
-      }),
-    });
-    const kernel = createFakeKernel();
-    const service = new ComputerUseService({
-      kernel,
-      now: () => now,
-      store,
-    });
-
-    await expect(service.ensureHandoffViewport({
-      memberId: "member_123",
-      token: "handoff-token",
-      viewport: { height: 844, refresh_rate: 60, width: 390 },
-    })).rejects.toMatchObject({
-      code: "HOSTED_COMPUTER_HANDOFF_CLOSED",
-    });
-    expect(kernel.ensureBrowserViewportInputs).toEqual([]);
-    expect(store.handoff).toMatchObject({
-      status: "open",
-    });
-    expect(store.run).toMatchObject({
-      pendingHandoffId: "hch_other_handoff",
-      status: "awaiting_user",
     });
   });
 
@@ -7061,8 +7083,6 @@ function createFakeKernel(input: {
   createdSessionIds: string[];
   deletedProfileNames: string[];
   deletedSessionIds: string[];
-  ensureBrowserViewportInputs:
-    Parameters<ComputerKernelClient["ensureBrowserViewport"]>[0][];
   executePlaywrightCalls: number;
   executePlaywrightInputs: Parameters<ComputerKernelClient["executePlaywright"]>[0][];
 } {
@@ -7075,7 +7095,6 @@ function createFakeKernel(input: {
     createdSessionIds: [],
     deletedProfileNames: [],
     deletedSessionIds: [],
-    ensureBrowserViewportInputs: [],
     executePlaywrightCalls: 0,
     executePlaywrightInputs: [],
     async createBrowser(browserInput) {
@@ -7127,9 +7146,6 @@ function createFakeKernel(input: {
     },
     async deleteProfile(name: string) {
       this.deletedProfileNames.push(name);
-    },
-    async ensureBrowserViewport(viewportInput) {
-      this.ensureBrowserViewportInputs.push(viewportInput);
     },
     async ensureProfile() {},
     async executePlaywright(executeInput) {

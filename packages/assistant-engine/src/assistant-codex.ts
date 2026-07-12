@@ -9,6 +9,10 @@ import type {
 } from '@murphai/hosted-execution/contracts'
 import { normalizeNullableString } from '@murphai/operator-config/text/shared'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
+import {
+  readHostedCanonicalWritePort,
+  withHostedCanonicalWritePort,
+} from '@murphai/core'
 
 import type {
   AssistantResponseMedia,
@@ -558,6 +562,19 @@ export function buildCodexAppServerSteerRequest(
     method: 'turn/steer',
     params: buildCodexTurnSteerParams(input),
   }
+}
+
+function appendRequiredComputerHandoffUrl(
+  message: string,
+  handoffUrl: string,
+): string {
+  const normalizedMessage = normalizeNullableString(message)
+  if (normalizedMessage?.includes(handoffUrl)) {
+    return normalizedMessage
+  }
+  return normalizedMessage
+    ? `${normalizedMessage}\n\nTake over here: ${handoffUrl}`
+    : `Take over here: ${handoffUrl}`
 }
 
 export async function executeCodexAppServerTurn(
@@ -2238,6 +2255,7 @@ async function runCodexAppServerTurnOnProcess(
   codexProcess: CodexAppServerProcess,
   input: CodexAppServerPreparedTurnInput,
 ): Promise<CodexAppServerTurnResult> {
+  const hostedCanonicalWritePort = readHostedCanonicalWritePort()
   let stdout = ''
   let stderr = ''
   let settled = false
@@ -2284,6 +2302,7 @@ async function runCodexAppServerTurnOnProcess(
   const jsonEvents: unknown[] = []
   const runtimeIssueInputs: AssistantRuntimeIssueInput[] = []
   let computerToolsLockedAfterUserPause = false
+  let requiredComputerHandoffUrl: string | null = null
   const actionDiagnostics = input.onTraceEvent
     ? createCodexActionDiagnosticsReducer()
     : null
@@ -3038,6 +3057,25 @@ async function runCodexAppServerTurnOnProcess(
 
     if (
       computerToolsLockedAfterUserPause &&
+      dynamicToolRequest.kind === 'finish-without-reply'
+    ) {
+      void tryWriteRpcMessage({
+        id: requestId,
+        result: {
+          success: false,
+          contentItems: [
+            {
+              type: 'inputText',
+              text: 'finish_without_reply is unavailable after pausing a computer run for the user',
+            },
+          ],
+        },
+      })
+      return
+    }
+
+    if (
+      computerToolsLockedAfterUserPause &&
       isComputerDynamicToolRequest(dynamicToolRequest)
     ) {
       void tryWriteRpcMessage({
@@ -3110,34 +3148,37 @@ async function runCodexAppServerTurnOnProcess(
       closeLiveTurn()
     }
 
-    const runDynamicTool = () => executeMurphDynamicToolRequest({
-      abortSignal: input.abortSignal
-        ? AbortSignal.any([input.abortSignal, dynamicToolAbortController.signal])
-        : dynamicToolAbortController.signal,
-      codexHome: input.codexHome ?? input.env.CODEX_HOME ?? null,
-      env: input.env,
-      fetchImpl: input.fetchImpl,
-      hostedGeneratedImageUploader: input.hostedGeneratedImageUploader,
-      hostedToolContext: resolveCodexAppServerHostedToolContext(input),
-      materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts ?? null,
-      currentResponseMedia: responseMedia,
-      nextUsageOrdinal: () => nextDynamicToolUsageOrdinal++,
-      productFeedbackRecorder: input.productFeedbackRecorder ?? null,
-      progressDelivery:
-        dynamicToolRequest.kind === 'send-progress-update'
-          ? dynamicToolProgressDelivery
-          : null,
-      publicFetchImpl: input.publicInternetFetch ?? null,
-      request: dynamicToolRequest,
-      requireHostedGeneratedImageUploader:
-        input.requireHostedGeneratedImageUploader ?? false,
-      vaultRoot: input.vaultRoot ?? null,
-      voiceMemoRuntime:
-        dynamicToolRequest.kind === 'generate-voice-memo' ||
-        dynamicToolRequest.kind === 'generate-song'
-          ? input.voiceMemoRuntime ?? null
-          : null,
-    }).then(async (result) => {
+    const runDynamicTool = () => withHostedCanonicalWritePort(
+      hostedCanonicalWritePort,
+      async () => await executeMurphDynamicToolRequest({
+        abortSignal: input.abortSignal
+          ? AbortSignal.any([input.abortSignal, dynamicToolAbortController.signal])
+          : dynamicToolAbortController.signal,
+        codexHome: input.codexHome ?? input.env.CODEX_HOME ?? null,
+        env: input.env,
+        fetchImpl: input.fetchImpl,
+        hostedGeneratedImageUploader: input.hostedGeneratedImageUploader,
+        hostedToolContext: resolveCodexAppServerHostedToolContext(input),
+        materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts ?? null,
+        currentResponseMedia: responseMedia,
+        nextUsageOrdinal: () => nextDynamicToolUsageOrdinal++,
+        productFeedbackRecorder: input.productFeedbackRecorder ?? null,
+        progressDelivery:
+          dynamicToolRequest.kind === 'send-progress-update'
+            ? dynamicToolProgressDelivery
+            : null,
+        publicFetchImpl: input.publicInternetFetch ?? null,
+        request: dynamicToolRequest,
+        requireHostedGeneratedImageUploader:
+          input.requireHostedGeneratedImageUploader ?? false,
+        vaultRoot: input.vaultRoot ?? null,
+        voiceMemoRuntime:
+          dynamicToolRequest.kind === 'generate-voice-memo' ||
+          dynamicToolRequest.kind === 'generate-song'
+            ? input.voiceMemoRuntime ?? null
+            : null,
+      }),
+    ).then(async (result) => {
       if (dynamicToolRequest.kind === 'send-progress-update') {
         releaseDynamicProgressPending?.()
       }
@@ -3146,6 +3187,9 @@ async function runCodexAppServerTurnOnProcess(
       }
       if (result.computerRunPausedForUser) {
         computerToolsLockedAfterUserPause = true
+      }
+      if (result.requiredComputerHandoffUrl) {
+        requiredComputerHandoffUrl = result.requiredComputerHandoffUrl
       }
       if (result.responseMediaPatch) {
         try {
@@ -3936,14 +3980,21 @@ async function runCodexAppServerTurnOnProcess(
         : finalTrailingSteerCandidate?.deliveryContextOrdinal ??
           latestDeliveryContextOrdinal
   const finalActionPatch = resolveFinalActionPatch(finalDeliveryContextOrdinal)
-  const noReplySelected = finalActionPatch?.kind === 'none'
+  const noReplySelected =
+    finalActionPatch?.kind === 'none' && !requiredComputerHandoffUrl
   const finalAction: AssistantNoReplyDisposition | null = noReplySelected
     ? { kind: 'none' }
     : null
-  const finalMessage =
+  const modelFinalMessage =
     noReplySelected || suppressTrailingSteerCandidateForEarlierNoReply
       ? ''
       : selectedFinalMessage
+  const finalMessage = requiredComputerHandoffUrl
+    ? appendRequiredComputerHandoffUrl(
+        modelFinalMessage,
+        requiredComputerHandoffUrl,
+      )
+    : modelFinalMessage
   if (
     noReplySelected &&
     normalizeNullableString(extractedFinalMessage) !== null
@@ -3970,10 +4021,11 @@ async function runCodexAppServerTurnOnProcess(
 
   return {
     acceptedNoReplyDeliveryContextOrdinals:
-      listNoReplyFinalActionPatchOrdinals(),
+      requiredComputerHandoffUrl ? [] : listNoReplyFinalActionPatchOrdinals(),
     codexThreadHistoryUnsafe,
     finalAction,
-    finalActionExplicit: finalActionPatch !== null,
+    finalActionExplicit:
+      finalActionPatch !== null && !requiredComputerHandoffUrl,
     finalMessage,
     reactions: reactionPatches.map((entry) => ({
       deliveryContextOrdinal: entry.deliveryContextOrdinal,

@@ -263,9 +263,13 @@ inactive-fence replacement path. An inactive liveness proof must still send the
 identity-checked abort first so any queued exact retention invocation is
 canceled before the fence is cleared; an inactive result or queued matching
 abort is replacement-safe. Missing-pointer abort delivery without inactive
-proof is only an abort request and preserves the fence until a later liveness
-pass proves the old child inactive. Stale or failed status preserves the fence
-and retries.
+proof owns the container lifecycle while it delivers the identity-checked abort.
+A stale result preserves the fence and retries. An accepted or queued result, or
+an ambiguous delivery failure, recycles the old shell fail-closed before the
+container returns `accepted`; only that settled stop allows the controller to
+clear the exact fence and start a replacement. A deploy-skewed request-only
+`requested` result remains non-authoritative without inactive proof and
+preserves the fence for retry.
 
 The foreground-priority rule does not weaken correctness checks. Wrong-user
 authority, invalid auth, undecryptable mailbox payloads, stale leases, and
@@ -697,6 +701,11 @@ untargeted new input remains staged for a normal later assistant turn, while
 strict active-turn-targeted input fails closed instead of falling through; the
 assistant engine does not synthesize another provider request inside the same
 assistant turn.
+When mailbox import produces or reuses a canonical write receipt, the runner
+publishes the receipt-log fingerprint and the advanced imported watermark in
+the same status checkpoint. That progress checkpoint is still required when
+the receipt fingerprint is already durable: receipt durability proves the
+canonical write, not the corresponding mailbox watermark.
 Accepted-input journaling, transcript updates, checkpoint bookkeeping,
 provider-request metadata, and outbox intent creation remain on the normal
 local assistant-service path. The same-reply coalescing window ends when the
@@ -758,11 +767,21 @@ are uploaded. If that checkpoint has an ambiguous transport outcome, the
 Cloudflare workspace port retries the identical expected-version CAS once. It
 accepts a version-conflict response only when the active invocation fence still
 matches and the returned workspace is the exact requested successor, including
-the receipt fingerprint, snapshot ref, wake fields, and retention wake. Cold
-restore replays that log over the prior snapshot and marks
-affected context domains dirty; when the restored log is at the hard entry
-bound, the runtime consolidates it through an idle snapshot before foreground
-mailbox or assistant work. That recovery snapshot publishes an immediate
+the receipt fingerprint, snapshot ref, wake fields, and retention wake.
+Cloudflare forwarding maps an unreadable successful checkpoint response to a
+server error so this bounded ambiguity path remains reachable; verified
+authority and fence rejections remain deterministic `401` failures. Cold
+restore replays that log over the prior snapshot and marks affected context
+domains dirty. The initial mailbox import uses the same canonical mailbox-write
+port as later runner imports, including bootstrap lane selection and
+conversation deferral. When that import performs a canonical write, the runner
+publishes its receipt and imported watermark atomically before later assistant
+or managed-automation writes can add dependent receipts. Restore can therefore
+replay the complete canonical sequence directly over the published snapshot
+without reconstructing unauthenticated local prefixes. When the restored log
+is at the hard entry bound, the runtime consolidates it through an idle
+snapshot before foreground mailbox or assistant work. That recovery snapshot
+publishes an immediate
 mailbox-continuation wake so web accepts it even when foreground conversation
 rows are already pending; immediately after that snapshot, a status-only
 checkpoint durably restores the prior wake projection before foreground work
@@ -784,7 +803,12 @@ reference-safe owner-scoped retention primitive.
 a direct-R2 v2 snapshot from the effective restored state, runs through the
 ordinary invocation lease shortly before container sleep, and checks the lease
 during the broad snapshot walk so stale idle shutdown can abort before direct
-R2 upload. `packages/assistant-runtime` owns the hosted invocation bridge,
+R2 upload. Snapshot planning, archive construction, upload, and publication hold
+the vault's canonical-write lock as one transaction. A canonical mutation may
+therefore complete with its receipt before snapshotting starts or begin after
+the published snapshot boundary, but it cannot change the local canonical base
+between archive collection and publication. `packages/assistant-runtime` owns
+the hosted invocation bridge,
 snapshot planning, diagnostics, and mailbox-import policy; Cloudflare supplies
 only explicit platform capabilities such as mailbox payload decode, direct-R2
 ports, and the local encrypted archive writer.

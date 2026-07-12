@@ -1,6 +1,6 @@
 # iOS Companion App (Health Sync)
 
-Last verified: 2026-06-10
+Last verified: 2026-07-09
 
 ## Why This Exists
 
@@ -16,10 +16,13 @@ single point of failure.
 The WHOOP iOS app writes to Apple Health, verified empirically on a real
 member device (2026-06-10): sleep intervals, resting heart rate, respiratory
 rate, and workouts (duration, active energy, average heart rate) all flow
-through, **including full historical backfill to device purchase**. Not
-available via the relay: HRV, recovery %, and strain scores (WHOOP's
-proprietary layer). Sleep exports as asleep/awake without the 5-stage
-breakdown.
+through, **including full historical backfill to device purchase**. WHOOP's
+recovery and workout-strain scores are not mapped as ordinary Apple Health
+types, but the WHOOP app preserves them as `WHOOP Recovery` and `WHOOP
+Strain` custom metadata on sleep/workout objects. The companion's bounded
+native reader can recover those two fields. Still unavailable: WHOOP HRV and
+the detailed five-stage sleep breakdown; sleep exports as in-bed/asleep/awake
+fragments without WHOOP's stage detail.
 
 A thin iOS companion app that reads Apple Health and feeds the existing
 Junction pipeline removes WHOOP's veto from the critical path, covers every
@@ -30,8 +33,9 @@ WHOOP-app-plus-Bluetooth flow.
 ## Strategic Posture (Hybrid)
 
 1. **Companion app is the backbone.** Baselines and challenge scoring use
-   sleep + RHR (+ workouts), all relay-available. Nothing in the challenge
-   wedge depends on WHOOP-proprietary scores.
+   sleep + RHR (+ workouts), all relay-available. Recovery and workout Strain
+   are optional foreground enrichment from two exact metadata keys, never a
+   prerequisite for the ordinary Apple Health sync path.
 2. **WHOOP API approval is an enrichment, never a dependency.** The Junction
    `whoop_v2` BYOO integration stays; if approval lands it upgrades fidelity
    (HRV, recovery, webhooks, richer sleep stages) for members who connect it.
@@ -88,6 +92,11 @@ from day one. Constraints that keep this safe and maintainable:
 4. The utmost priority remains clean, simple, long-term maintainable and
    composable architecture with minimal complexity. Capture breadth never
    justifies architectural sprawl.
+5. **Custom metadata is closed, not generic.** The app may read only the two
+   approved WHOOP keys, hash source record identity on-device, validate
+   finite ranges, and upload bounded batches. It never uploads whole
+   metadata dictionaries, raw HealthKit identifiers, or an arbitrary metric
+   name/unit/event schema.
 
 ## Sync Behavior and Product Constraints
 
@@ -105,6 +114,10 @@ from day one. Constraints that keep this safe and maintainable:
   HealthKit read-permission status by design — only data receipt proves a
   connection). Opening the app triggers an immediate launch sync; there is
   no manual sync API.
+- The native Recovery/Strain reader runs on launch, foreground return, and
+  explicit refresh. It has no independent background observer in this slice;
+  Junction background delivery remains responsible for ordinary Apple Health
+  categories.
 
 ## MVP Scope (v1, App Store reviewable)
 
@@ -123,8 +136,10 @@ from day one. Constraints that keep this safe and maintainable:
 4. **Sync-status home screen** — connection state, last sync time, per-type
    summary of recently synced data. This is the guideline-4.2 utility
    surface; not a webview.
-5. **Settings** — per-data-type toggles, disconnect, delete-my-data.
-6. **"Sync now"** foreground affordance + periodic-sync expectations copy.
+5. **Narrow metadata enrichment** — Recovery from `.inBed` sleep samples and
+   Strain from workouts, sent through the authenticated device-sync route.
+6. **Settings** — per-data-type toggles, disconnect, delete-my-data.
+7. **"Sync now"** foreground affordance + periodic-sync expectations copy.
 
 Out of scope for v1: chat surfaces, vault UI, BLE, widgets, Live Activities,
 watchOS, Android.
@@ -167,6 +182,6 @@ watchOS, Android.
 
 ## Repo Placement
 
-New top-level `apps/ios` (Xcode project, Swift), outside the pnpm/TypeScript
-workspace graph. No workspace package may depend on it; it consumes the web
-API as an external client. CI for it is deferred until phase 2.
+The native app lives in its own Swift/Xcode repository beside this monorepo.
+No workspace package depends on it; it consumes the web API as an external
+client and carries its own build/test workflow.

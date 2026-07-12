@@ -39,6 +39,11 @@ type JsonRecord = Record<string, unknown>
 
 const canonicalTypedCommands = [
   {
+    label: 'assistant style set',
+    commandNames: ['assistant style set'],
+    fieldHints: ['setting', 'value'],
+  },
+  {
     label: 'experiment checkpoint',
     commandNames: ['experiment checkpoint'],
     fieldHints: ['id', 'lookup', 'occurredAt', 'title', 'note'],

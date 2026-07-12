@@ -10,6 +10,11 @@ import {
   HOSTED_RUNTIME_CODEX_APP_SERVER_COMMAND_ENV,
   HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV,
 } from '@murphai/hosted-execution/cli-runtime-bridge'
+import {
+  initializeVault,
+  withHostedCanonicalWritePort,
+  type HostedCanonicalWritePort,
+} from '@murphai/core'
 import { normalizeAssistantProviderConfig } from '@murphai/operator-config/assistant/provider-config'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -1432,7 +1437,25 @@ describe('assistant codex runtime', () => {
     expect(uploader.uploadGeneratedImage).toHaveBeenCalledOnce()
   })
 
-  it('serializes overlapping computer tools so pause waits for prior navigation completion', async () => {
+  const computerPauseFinalMessageScenarios = [
+    {
+      expectedFinalMessage:
+        'Paused for confirmation.\n\nTake over here: https://web.example.test/computer/handoff/raw-token',
+      modelMessage: 'Paused for confirmation.',
+      name: 'appends an omitted handoff URL',
+    },
+    {
+      expectedFinalMessage:
+        'Paused for confirmation. Take over here: https://web.example.test/computer/handoff/raw-token',
+      modelMessage:
+        'Paused for confirmation. Take over here: https://web.example.test/computer/handoff/raw-token',
+      name: 'preserves a model-supplied handoff URL once',
+    },
+  ] as const
+
+  const runComputerPauseFinalMessageScenario = async (
+    scenario: (typeof computerPauseFinalMessageScenarios)[number],
+  ): Promise<void> => {
     const workingDirectory = await createTempDir('assistant-codex-computer-order-work-')
     const releaseAct = createDeferred<void>()
     const actStarted = createDeferred<void>()
@@ -1561,7 +1584,7 @@ describe('assistant codex runtime', () => {
                 item: {
                   id: 'assistant-computer-order',
                   type: 'assistant_message',
-                  message: 'Paused for confirmation.',
+                  message: scenario.modelMessage,
                 },
               },
             }),
@@ -1592,10 +1615,15 @@ describe('assistant codex runtime', () => {
         workingDirectory,
       }),
     ).resolves.toMatchObject({
-      finalMessage: 'Paused for confirmation.',
+      finalMessage: scenario.expectedFinalMessage,
     })
     expect(fetchOrder).toEqual(['act:start', 'act:end', 'pause'])
-  })
+  }
+
+  it.each(computerPauseFinalMessageScenarios)(
+    'serializes overlapping computer tools and $name',
+    runComputerPauseFinalMessageScenario,
+  )
 
   it('closes live steering before saving a computer pause', async () => {
     const workingDirectory = await createTempDir('assistant-codex-computer-pause-live-turn-work-')
@@ -1753,7 +1781,7 @@ describe('assistant codex runtime', () => {
     expect(liveTurnReleased).toBe(1)
   })
 
-  it('allows finish_without_reply after pausing a computer run for the user', async () => {
+  it('overrides an earlier no-reply and rejects a later one when a handoff URL must be delivered', async () => {
     const workingDirectory = await createTempDir('assistant-codex-computer-pause-no-reply-work-')
     const progressDelivery = createProgressDeliveryMock()
     const hostedToolContext = createHostedToolContext()
@@ -1813,6 +1841,22 @@ describe('assistant codex runtime', () => {
           )
           child.stdout.write(
             jsonLine({
+              id: 60,
+              method: 'item/tool/call',
+              params: {
+                namespace: 'murph',
+                tool: 'finish_without_reply',
+                arguments: {},
+              },
+            }),
+          )
+          await expect(waitForRpcResponse(child, 60)).resolves.toMatchObject({
+            id: 60,
+            result: { success: true },
+          })
+
+          child.stdout.write(
+            jsonLine({
               id: 61,
               method: 'item/tool/call',
               params: {
@@ -1846,11 +1890,11 @@ describe('assistant codex runtime', () => {
           await expect(waitForRpcResponse(child, 62)).resolves.toEqual({
             id: 62,
             result: {
-              success: true,
+              success: false,
               contentItems: [
                 {
                   type: 'inputText',
-                  text: 'finished without reply',
+                  text: 'finish_without_reply is unavailable after pausing a computer run for the user',
                 },
               ],
             },
@@ -1882,9 +1926,9 @@ describe('assistant codex runtime', () => {
         workingDirectory,
       }),
     ).resolves.toMatchObject({
-      acceptedNoReplyDeliveryContextOrdinals: [0],
-      finalAction: { kind: 'none' },
-      finalMessage: '',
+      acceptedNoReplyDeliveryContextOrdinals: [],
+      finalAction: null,
+      finalMessage: 'Take over here: https://web.example.test/computer/handoff/raw-token',
     })
   })
 
@@ -4429,6 +4473,145 @@ describe('assistant codex runtime', () => {
       sessionId: 'thread-local-turn-id-shape-2',
       turnId: 'turn-local-turn-id-shape-2',
     })
+  })
+
+  it('rebinds canonical writes to the current turn on a reused warm process', async () => {
+    const workingDirectory = await createTempDir('assistant-codex-warm-write-work-')
+    const codexHome = await createTempDir('assistant-codex-warm-write-home-')
+    const vaultRoot = await createTempDir('assistant-codex-warm-write-vault-')
+    await initializeVault({ vaultRoot })
+    const firstPersistCanonicalWrite = vi.fn(async () => undefined)
+    const secondPersistCanonicalWrite = vi.fn(async () => undefined)
+    const firstPort: HostedCanonicalWritePort = {
+      persistCanonicalWrite: firstPersistCanonicalWrite,
+    }
+    const secondPort: HostedCanonicalWritePort = {
+      persistCanonicalWrite: secondPersistCanonicalWrite,
+    }
+    const webpBytes = new Uint8Array([
+      0x52, 0x49, 0x46, 0x46,
+      0x00, 0x00, 0x00, 0x00,
+      0x57, 0x45, 0x42, 0x50,
+    ])
+    const fetchImpl = vi.fn(async () =>
+      new Response(JSON.stringify({
+        data: [{ b64_json: Buffer.from(webpBytes).toString('base64') }],
+        usage: { input_tokens: 1, output_tokens: 2, total_tokens: 3 },
+      }), {
+        headers: { 'content-type': 'application/json' },
+        status: 200,
+      }))
+    const uploader = {
+      uploadGeneratedImage: vi.fn(async () => ({
+        alt: 'Generated image',
+        kind: 'image' as const,
+        source: 'gpt-image-2',
+        url: 'https://imagedelivery.net/account/generated/public',
+      })),
+    }
+
+    codexMocks.spawn.mockImplementation(() => {
+      const child = new MockChildProcess()
+
+      queueMicrotask(() => {
+        void (async () => {
+          const initialize = await waitForRpcMethod(child, 'initialize')
+          child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
+          await writeWarmTurnStarted({
+            child,
+            requestCount: 1,
+            threadId: 'thread-warm-write-1',
+            turnId: 'turn-warm-write-1',
+          })
+          writeCodexV2AssistantEventTurn({
+            child,
+            finalMessage: 'First warm turn complete',
+            threadId: 'thread-warm-write-1',
+            turnId: 'turn-warm-write-1',
+          })
+
+          await writeWarmTurnStarted({
+            child,
+            requestCount: 2,
+            threadId: 'thread-warm-write-2',
+            turnId: 'turn-warm-write-2',
+          })
+          child.stdout.write(jsonLine({
+            id: 91,
+            method: 'item/tool/call',
+            params: {
+              namespace: 'murph',
+              tool: 'generate_image',
+              arguments: {
+                prompt: 'Render the current turn.',
+              },
+              threadId: 'thread-warm-write-2',
+              turnId: 'turn-warm-write-2',
+            },
+          }))
+          await expect(waitForRpcResponse(child, 91)).resolves.toMatchObject({
+            id: 91,
+            result: {
+              success: true,
+            },
+          })
+          writeCodexV2AssistantEventTurn({
+            child,
+            finalMessage: 'Second warm turn complete',
+            threadId: 'thread-warm-write-2',
+            turnId: 'turn-warm-write-2',
+          })
+        })()
+      })
+
+      return child
+    })
+
+    await expect(withHostedCanonicalWritePort(
+      firstPort,
+      async () => await executeCodexAppServerTurn({
+        approvalPolicy: 'never',
+        codexHome,
+        env: {
+          OPENAI_API_KEY: 'openai-test-key',
+          PATH: '/custom/bin',
+        },
+        fetchImpl,
+        hostedGeneratedImageUploader: uploader,
+        prompt: 'start the warm process',
+        requireHostedGeneratedImageUploader: true,
+        sandbox: 'workspace-write',
+        vaultRoot,
+        workingDirectory,
+      }),
+    )).resolves.toMatchObject({
+      finalMessage: 'First warm turn complete',
+    })
+
+    await expect(withHostedCanonicalWritePort(
+      secondPort,
+      async () => await executeCodexAppServerTurn({
+        approvalPolicy: 'never',
+        codexHome,
+        env: {
+          OPENAI_API_KEY: 'openai-test-key',
+          PATH: '/custom/bin',
+        },
+        fetchImpl,
+        hostedGeneratedImageUploader: uploader,
+        prompt: 'write from the current warm turn',
+        requireHostedGeneratedImageUploader: true,
+        sandbox: 'workspace-write',
+        vaultRoot,
+        workingDirectory,
+      }),
+    )).resolves.toMatchObject({
+      finalMessage: 'Second warm turn complete',
+    })
+
+    expect(firstPersistCanonicalWrite).not.toHaveBeenCalled()
+    expect(secondPersistCanonicalWrite).toHaveBeenCalled()
+    expect(uploader.uploadGeneratedImage).toHaveBeenCalledOnce()
   })
 
   it('trusts tagged turn/started when the turn/start response omits the turn id', async () => {

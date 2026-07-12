@@ -17,7 +17,11 @@ export {
   readPreferencesDocument,
   resolvePreferencesDocumentPath,
 } from "./preferences.ts";
-export type { AssistantPreferencesUpdate, PreferencesDocumentSnapshot } from "./preferences.ts";
+export type {
+  AssistantPersonalityPreferencesUpdate,
+  AssistantPreferencesUpdate,
+  PreferencesDocumentSnapshot,
+} from "./preferences.ts";
 export {
   assertPathWithinVault,
   assertPathWithinVaultOnDisk,
@@ -220,6 +224,7 @@ export {
   resolveHostedCanonicalWritePayloadFilePath,
   runCanonicalWrite,
   withHostedCanonicalWritePort,
+  readHostedCanonicalWritePort,
 } from "./operations/index.ts";
 export type {
   CanonicalMutationResource,

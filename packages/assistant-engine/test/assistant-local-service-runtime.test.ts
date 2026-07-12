@@ -3764,7 +3764,7 @@ test('sendAssistantMessageLocal keeps hosted progress wired in queue-only auto-r
 })
 
 test('sendAssistantMessageLocal routes hosted Linq model progress through progress delivery dependencies', async () => {
-  const refreshTyping = vi.fn(async () => undefined)
+  const refreshTypingAfterMessage = vi.fn(async () => undefined)
   const progressDeliveryDependencies = {
     sendLinq: vi.fn(async () => ({
       providerMessageId: 'progress-message',
@@ -3779,7 +3779,7 @@ test('sendAssistantMessageLocal routes hosted Linq model progress through progre
   const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
     adapter: {
       startTypingIndicator: vi.fn(async () => ({
-        refreshNow: refreshTyping,
+        refreshAfterMessage: refreshTypingAfterMessage,
         stop: vi.fn(async () => undefined),
       })),
     },
@@ -3851,7 +3851,7 @@ test('sendAssistantMessageLocal routes hosted Linq model progress through progre
     'Checking the iMessage thread.',
   )
   await vi.waitFor(() => {
-    expect(refreshTyping).toHaveBeenCalledTimes(1)
+    expect(refreshTypingAfterMessage).toHaveBeenCalledTimes(1)
   })
 
   releaseProviderTurn.resolve()
@@ -5470,6 +5470,78 @@ test('sendAssistantMessageLocal returns deferred delivery results and keeps typi
   assert.equal(stopTyping.mock.calls.length, 1)
   assert.deepEqual(stopTyping.mock.calls[0], [{ providerStop: false }])
   assert.equal(mocks.refreshAssistantStatusSnapshotLocal.mock.calls.length, 0)
+})
+
+test('sendAssistantMessageLocal anchors hosted reply timing to the queued delivery intent', async () => {
+  vi.useFakeTimers()
+  vi.setSystemTime(new Date('2026-07-09T12:00:00.000Z'))
+  const session = createAssistantSession({ sessionId: 'session-timed-reply' })
+  const traceEvents: unknown[] = []
+  const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
+    deliveryOutcome: {
+      error: {
+        code: 'ASSISTANT_DELIVERY_DEFERRED',
+        message: 'queued for delivery',
+        retryable: true,
+      },
+      intentId: 'intent-timed-reply',
+      kind: 'queued',
+      media: [],
+      session,
+    },
+    session,
+  })
+  mocks.executeCodexTurnWithRecovery.mockImplementationOnce(async (providerInput) => {
+    await providerInput.onProviderRequestPlanned?.({
+      codexContinuation: { kind: 'explicit-structured-history' },
+      providerAttemptId: null,
+    })
+    await providerInput.onProviderRequestStarted?.({
+      providerRequestOrdinal: 0,
+      startedAt: '2026-07-09T12:00:00.000Z',
+    })
+    vi.setSystemTime(new Date('2026-07-09T12:00:01.200Z'))
+    return {
+      kind: 'succeeded',
+      providerTurn: {
+        onboardingGuidanceInjected: false,
+        codexContinuation: { kind: 'explicit-structured-history' },
+        response: 'timed response',
+        session,
+      },
+    }
+  })
+
+  await sendAssistantMessageLocal({
+    deliverResponse: true,
+    executionContext: {
+      hosted: {
+        memberId: 'member-test',
+        userEnvKeys: [],
+      },
+    },
+    onTraceEvent(event) {
+      traceEvents.push(event)
+    },
+    prompt: 'Queue a timed reply',
+    vault: '/vaults/test',
+  })
+
+  const replyTiming = traceEvents.find((event) =>
+    isTraceEventWithRawType(event, 'assistant.turn.timing') &&
+    event.rawEvent.turnTimingStage === 'reply-dispatched',
+  )
+  expect(replyTiming).toBeDefined()
+  expect((replyTiming as { rawEvent: Record<string, unknown> }).rawEvent)
+    .toEqual(expect.objectContaining({
+      deliveryIntentPresent: true,
+      deliveryOutcomeKind: 'queued',
+      finalReplySelected: true,
+      providerRequestOrdinal: 0,
+      turnTimingDeliveryIntentId: 'intent-timed-reply',
+      turnTimingProviderRequestElapsedMs: 1_200,
+      turnTimingSinceProviderResultMs: 0,
+    }))
 })
 
 test('sendAssistantMessageLocal reports failed delivery outcomes after provider success', async () => {

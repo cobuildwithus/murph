@@ -10,6 +10,7 @@ describe("linq typing repro", () => {
   it("reads CLI flags and env without requiring raw identifiers in arguments", () => {
     const options = readLinqTypingReproOptions(
       [
+        "--assert-progress-typing-visible",
         "--send-message",
         "--confirm-live-linq",
         "--interactive-observation",
@@ -24,6 +25,7 @@ describe("linq typing repro", () => {
     );
 
     expect(options.chatId).toBe("chat_secret_123");
+    expect(options.assertProgressTypingVisible).toBe(true);
     expect(options.confirmLiveLinq).toBe(true);
     expect(options.interactiveObservation).toBe(true);
     expect(options.observationMs).toBe(25);
@@ -71,6 +73,15 @@ describe("linq typing repro", () => {
         confirmLiveLinq: false,
       }),
     ).rejects.toThrow(/--confirm-live-linq/u);
+  });
+
+  it("requires live sending and recipient observation for the progress assertion", () => {
+    expect(() =>
+      readLinqTypingReproOptions(["--assert-progress-typing-visible"], {
+        LINQ_API_TOKEN: "token_secret_123",
+        LINQ_REPRO_CHAT_ID: "chat_secret_123",
+      }),
+    ).toThrow(/requires --send-message and --interactive-observation/u);
   });
 
   it("probes typing only when outbound message sending is not requested", async () => {
@@ -121,19 +132,17 @@ describe("linq typing repro", () => {
 
     expect(calls.map((call) => call.method)).toEqual([
       "POST",
-      "DELETE",
       "POST",
       "POST",
       "DELETE",
     ]);
     expect(calls.map((call) => new URL(call.url).pathname)).toEqual([
       "/api/partner/v3/chats/chat_secret_123/typing",
-      "/api/partner/v3/chats/chat_secret_123/typing",
       "/api/partner/v3/chats/chat_secret_123/messages",
       "/api/partner/v3/chats/chat_secret_123/typing",
       "/api/partner/v3/chats/chat_secret_123/typing",
     ]);
-    expect(calls[2]?.body).toMatchObject({
+    expect(calls[1]?.body).toMatchObject({
       message: {
         parts: [
           {
@@ -145,6 +154,8 @@ describe("linq typing repro", () => {
     });
     expect(report.messageSend).toMatchObject({
       attempted: true,
+      providerDeliveryStatus: "queued",
+      providerSentAtPresent: false,
       result: {
         ok: true,
         status: 200,
@@ -158,7 +169,11 @@ describe("linq typing repro", () => {
       false,
       true,
     ]);
-    expect(statuses).toHaveLength(10);
+    expect(report.progressTypingAssertion).toEqual({
+      passed: null,
+      required: false,
+    });
+    expect(statuses).toHaveLength(8);
 
     const serialized = JSON.stringify(report);
     expect(serialized).not.toContain("chat_secret_123");
@@ -169,6 +184,50 @@ describe("linq typing repro", () => {
     expect(JSON.stringify(statuses)).not.toContain("msg_secret_123");
     expect(JSON.stringify(statuses)).not.toContain("probe text secret");
     expect(JSON.stringify(statuses)).not.toContain("token_secret_123");
+  });
+
+  it("passes the live progress assertion only when typing is visible before and after the message", async () => {
+    const calls: ObservedFetchCall[] = [];
+    const passingReport = await runLinqTypingRepro(createOptions({
+      assertProgressTypingVisible: true,
+      interactiveObservation: true,
+      sendMessage: true,
+    }), {
+      askObservation: vi.fn().mockResolvedValue(true),
+      fetchImplementation: createFetchStub(calls),
+      wait: async () => undefined,
+    });
+
+    expect(calls.map((call) => `${call.method} ${new URL(call.url).pathname}`)).toEqual([
+      "POST /api/partner/v3/chats/chat_secret_123/typing",
+      "POST /api/partner/v3/chats/chat_secret_123/messages",
+      "POST /api/partner/v3/chats/chat_secret_123/typing",
+      "DELETE /api/partner/v3/chats/chat_secret_123/typing",
+    ]);
+    expect(passingReport.typing[0]?.stop).toEqual({
+      skippedReason: "continued-through-progress-message",
+    });
+    expect(passingReport.progressTypingAssertion).toEqual({
+      passed: true,
+      required: true,
+    });
+
+    const failingReport = await runLinqTypingRepro(createOptions({
+      assertProgressTypingVisible: true,
+      interactiveObservation: true,
+      sendMessage: true,
+    }), {
+      askObservation: vi.fn()
+        .mockResolvedValueOnce(true)
+        .mockResolvedValueOnce(false),
+      fetchImplementation: createFetchStub([]),
+      wait: async () => undefined,
+    });
+
+    expect(failingReport.progressTypingAssertion).toEqual({
+      passed: false,
+      required: true,
+    });
   });
 
   it("stops typing after a successful start when observation fails", async () => {
@@ -202,6 +261,7 @@ function createOptions(
 ): LinqTypingReproOptions {
   return {
     apiBaseUrl: "https://linq.example.test/api/partner/v3",
+    assertProgressTypingVisible: false,
     chatId: "chat_secret_123",
     confirmLiveLinq: true,
     fingerprintSecret: "fingerprint-secret",
@@ -230,7 +290,9 @@ function createFetchStub(calls: ObservedFetchCall[]): typeof fetch {
     if (init?.method === "POST" && String(input).endsWith("/messages")) {
       return new Response(JSON.stringify({
         message: {
+          delivery_status: "queued",
           id: "msg_secret_123",
+          sent_at: null,
         },
       }), {
         status: 200,
