@@ -1,5 +1,5 @@
 {
-  "catalogHash": "sha256:ae06e84d72ebfd146d5564fa26c365de4628ce48ec2534aa4e6f2bf814e4a489",
+  "catalogHash": "sha256:4ab2d0f46417d95f75f0ddf260545c9390c210a2fa4ee8fd235876468637cb95",
   "generatedAt": null,
   "items": [
     {
@@ -62,7 +62,23 @@
         "Dumbbells"
       ],
       "id": "EX752",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult demonstrating Double-Dumbbell Front Squat at the front-rack setup step: Elbows slightly forward with neutral wrists.",
+          "step": "Front-rack setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/03b1108d-6023-4c49-3be8-19d030876d00/public"
+        },
+        {
+          "alt": "Adult demonstrating Double-Dumbbell Front Squat at the squat bottom step: Thighs approach parallel at controlled depth.",
+          "step": "Squat bottom",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/3f4924f0-9cba-4daf-811a-c27cb02afb00/public"
+        },
+        {
+          "alt": "Adult demonstrating Double-Dumbbell Front Squat at the stand tall step: Tall glute-engaged finish without leaning back.",
+          "step": "Stand tall",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/84c70f49-0181-4cb5-ceac-683449a72a00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -100,7 +116,18 @@
         "Dumbbells"
       ],
       "id": "EX753",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult demonstrating Double-Dumbbell Suitcase Squat at the suitcase setup step: Shoulders down, ribs stacked, knees soft.",
+          "step": "Suitcase setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/4ed972cc-30f8-412e-f1df-82594c4b5100/public"
+        },
+        {
+          "alt": "Adult demonstrating Double-Dumbbell Suitcase Squat at the bottom squat step: Thighs approach parallel, knees track middle toes, spine long.",
+          "step": "Bottom squat",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/8283211c-1685-43b7-6a09-78696c424200/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -138,7 +165,18 @@
         "Dumbbell"
       ],
       "id": "EX754",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult demonstrating Single-Dumbbell Offset Squat at the offset rack setup step: Tall asymmetric rack.",
+          "step": "Offset rack setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/2a1413ff-5f23-4eca-5c38-0387d7254800/public"
+        },
+        {
+          "alt": "Adult demonstrating Single-Dumbbell Offset Squat at the offset squat bottom step: Balanced squat below parallel if mobility allows.",
+          "step": "Offset squat bottom",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/40bee9bd-b933-4b8b-ec08-ee0367ec6900/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -176,7 +214,23 @@
         "Dumbbell"
       ],
       "id": "EX755",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult demonstrating Dumbbell Sumo Squat at the wide-stance setup step: Arms long, knees soft and aligned.",
+          "step": "Wide-stance setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/9b0eb7dd-3b4c-4a2a-9eb1-ad568a418300/public"
+        },
+        {
+          "alt": "Adult demonstrating Dumbbell Sumo Squat at the sumo-squat bottom step: Wide squat with controlled depth.",
+          "step": "Sumo-squat bottom",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/850d6e8d-e3e6-4825-bba4-8c70fd434d00/public"
+        },
+        {
+          "alt": "Adult demonstrating Dumbbell Sumo Squat at the stand wide step: Tall finish without narrowing feet.",
+          "step": "Stand wide",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/d8c274c5-5177-4227-4456-756dad94c500/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -214,7 +268,28 @@
         "Dumbbells"
       ],
       "id": "EX756",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult demonstrating Dumbbell Squat to Press at the rack setup step: Forearms vertical, ribs stacked.",
+          "step": "Rack setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/96cdbdb7-0db1-488b-0793-8a144eee3b00/public"
+        },
+        {
+          "alt": "Adult demonstrating Dumbbell Squat to Press at the bottom squat step: Knees track toes, torso controlled.",
+          "step": "Bottom squat",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/2b1f7c03-4bbc-4d40-b26b-e90d05812800/public"
+        },
+        {
+          "alt": "Adult demonstrating Dumbbell Squat to Press at the overhead press step: Arms straight, no back arch.",
+          "step": "Overhead press",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/9bc7e094-cf71-4c22-96e7-20c804d87f00/public"
+        },
+        {
+          "alt": "Adult demonstrating Dumbbell Squat to Press at the return to rack step: Dumbbells finish at shoulders.",
+          "step": "Return to rack",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/ca668be4-1ca9-43be-3d24-fdf633d92700/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -253,7 +328,18 @@
         "Kettlebell"
       ],
       "id": "EX757",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult demonstrating Kettlebell Goblet Squat at the goblet setup step: Tall braced start.",
+          "step": "Goblet setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/c82b9f24-9d55-4661-a1d1-cd1034595400/public"
+        },
+        {
+          "alt": "Adult demonstrating Kettlebell Goblet Squat at the squat bottom step: Deep controlled goblet squat.",
+          "step": "Squat bottom",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/37b27009-c69a-4551-9761-725279b5b900/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -1861,7 +1947,23 @@
         "Dumbbell and couch"
       ],
       "id": "EX795",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult demonstrating Dumbbell Hip Thrust at the floor setup step: Hips low with shoulder blades securely supported.",
+          "step": "Floor setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/4dc2d1ad-af56-4299-b3ec-dd62252c5700/public"
+        },
+        {
+          "alt": "Adult demonstrating Dumbbell Hip Thrust at the hip thrust top step: Full glute-driven extension without lumbar over-arch.",
+          "step": "Hip thrust top",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/5fea002f-b106-4216-7a33-ed2333078a00/public"
+        },
+        {
+          "alt": "Adult demonstrating Dumbbell Hip Thrust at the controlled lower step: Slow low endpoint without collapsing.",
+          "step": "Controlled lower",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/aaf6e291-0327-4e61-89ae-52f24eb97b00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -1899,7 +2001,18 @@
         "Backpack and couch"
       ],
       "id": "EX796",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult demonstrating Loaded Couch Hip Thrust at the lowered setup step: Hips lowered, load centered, upper back supported.",
+          "step": "Lowered setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/aac09a8d-2010-4425-8e14-a564ffb12800/public"
+        },
+        {
+          "alt": "Adult demonstrating Loaded Couch Hip Thrust at the top position step: Shoulders, hips, and knees form near-straight diagonal; ribs down.",
+          "step": "Top position",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/d9924843-b681-4466-7b57-4429714a5000/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -1936,7 +2049,18 @@
         "Dumbbell"
       ],
       "id": "EX797",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult demonstrating Dumbbell Glute Bridge at the loaded floor setup step: Safe loaded start.",
+          "step": "Loaded floor setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/b9c3300e-7f6d-457b-a721-1bfa4506df00/public"
+        },
+        {
+          "alt": "Adult demonstrating Dumbbell Glute Bridge at the bridge lockout step: Glute bridge top without back arch.",
+          "step": "Bridge lockout",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/f86cd963-047a-43b1-67a0-276461800900/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -1973,7 +2097,28 @@
         "Dumbbell"
       ],
       "id": "EX798",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult demonstrating Single-Dumbbell Glute Bridge March at the loaded setup step: Ribs stacked before lifting.",
+          "step": "Loaded setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/0f263287-1ee3-4343-1729-83bd2daead00/public"
+        },
+        {
+          "alt": "Adult demonstrating Single-Dumbbell Glute Bridge March at the bridge hold step: Stable bridge platform before marching.",
+          "step": "Bridge hold",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/299b8636-3308-40b2-bf2b-39c5df5dc000/public"
+        },
+        {
+          "alt": "Adult demonstrating Single-Dumbbell Glute Bridge March at the right-knee march step: Single-leg march without pelvic drop.",
+          "step": "Right-knee march",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/f88ea857-7f49-43f7-7c0e-fd59cb985800/public"
+        },
+        {
+          "alt": "Adult demonstrating Single-Dumbbell Glute Bridge March at the left-knee march step: Mirrored march without pelvic drop.",
+          "step": "Left-knee march",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/0ca37ab7-b876-4233-ddf1-f42cc33a0100/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -2011,7 +2156,23 @@
         "Mini band"
       ],
       "id": "EX799",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult demonstrating Mini-Band Glute Bridge March at the band setup step: Band flat above knees, pelvis down and level.",
+          "step": "Band setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/e971072f-0837-4fe9-1fee-1ef627db6a00/public"
+        },
+        {
+          "alt": "Adult demonstrating Mini-Band Glute Bridge March at the bridge step: Shoulders-hips-knees form long diagonal.",
+          "step": "Bridge",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/2c61ea3e-1c42-4bc9-5454-930facf62500/public"
+        },
+        {
+          "alt": "Adult demonstrating Mini-Band Glute Bridge March at the controlled march step: Small march with high level hips and continuous band.",
+          "step": "Controlled march",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/d20fb19d-1f6c-45af-fb66-2fa9bc8b0100/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -3214,7 +3375,18 @@
         "Dumbbells"
       ],
       "id": "EX830",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult demonstrating Dumbbell Floor Press at the lowered floor press step: Elbows about 90 degrees, wrists stacked.",
+          "step": "Lowered floor press",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/52dae350-c3b6-4113-2015-9c0906c8cf00/public"
+        },
+        {
+          "alt": "Adult demonstrating Dumbbell Floor Press at the top press step: Arms straight, ribs quiet.",
+          "step": "Top press",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/e7e64e23-ca78-4fd1-c80b-a827d9807b00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -3252,7 +3424,18 @@
         "Dumbbells"
       ],
       "id": "EX831",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult demonstrating Alternating Dumbbell Floor Press at the two-arm press setup step: Balanced locked-out start.",
+          "step": "Two-arm press setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/783b2cb9-6ea7-4104-229a-d58ace5fd100/public"
+        },
+        {
+          "alt": "Adult demonstrating Alternating Dumbbell Floor Press at the one-side lower step: Alternating press bottom on one side.",
+          "step": "One-side lower",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/a84ebc72-aa0f-4a87-e796-c0b635ab3500/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -3290,7 +3473,23 @@
         "Dumbbells"
       ],
       "id": "EX832",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult demonstrating Neutral-Grip Dumbbell Floor Press at the neutral-grip top step: Neutral grip with arms nearly straight.",
+          "step": "Neutral-grip top",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/e7df5555-c073-4134-3be2-a77a11792000/public"
+        },
+        {
+          "alt": "Adult demonstrating Neutral-Grip Dumbbell Floor Press at the elbows to floor step: Safe floor-limited press depth.",
+          "step": "Elbows to floor",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/e5a1e9b8-116c-45c9-9fa2-3533adabf300/public"
+        },
+        {
+          "alt": "Adult demonstrating Neutral-Grip Dumbbell Floor Press at the press to top step: Controlled vertical press finish.",
+          "step": "Press to top",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/d67ba42d-0f5d-448e-fa9d-968e2c7dd300/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -3328,7 +3527,18 @@
         "Dumbbells"
       ],
       "id": "EX833",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult demonstrating Dumbbell Floor Fly at the top setup step: Palms face inward, shoulders down.",
+          "step": "Top setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/8fe28c8e-49b8-406c-0eb7-2cf9931f0300/public"
+        },
+        {
+          "alt": "Adult demonstrating Dumbbell Floor Fly at the open fly step: Upper arms touch floor softly; elbows remain soft.",
+          "step": "Open fly",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/34ff5be0-7d7c-4ef7-7e30-d5db7ccbb300/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -3365,7 +3575,18 @@
         "Dumbbells"
       ],
       "id": "EX834",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult demonstrating Dumbbell Crush Floor Press at the crush setup step: Inward squeeze before pressing.",
+          "step": "Crush setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/20dcd3bd-d1cf-401e-1d7a-2db33a2c7100/public"
+        },
+        {
+          "alt": "Adult demonstrating Dumbbell Crush Floor Press at the crush press top step: Full press while maintaining crush.",
+          "step": "Crush press top",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/31b92c3b-0768-4f58-b9d0-3b3b7cfc3900/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -3402,7 +3623,23 @@
         "Dumbbell"
       ],
       "id": "EX835",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult demonstrating Dumbbell Pullover on Floor at the dumbbell over chest step: Secure two-hand pullover start.",
+          "step": "Dumbbell over chest",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/c6809710-4340-4891-cdf5-5918b565d000/public"
+        },
+        {
+          "alt": "Adult demonstrating Dumbbell Pullover on Floor at the lower behind head step: Comfortable overhead shoulder range.",
+          "step": "Lower behind head",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/2db3c482-8419-4ae4-920d-162fa12aa900/public"
+        },
+        {
+          "alt": "Adult demonstrating Dumbbell Pullover on Floor at the return over chest step: Smooth controlled return.",
+          "step": "Return over chest",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/86b2a804-2bf0-4f2b-6ccf-87f6b3986900/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -3440,7 +3677,18 @@
         "Dumbbells and chair"
       ],
       "id": "EX836",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult demonstrating Dumbbell Seated Shoulder Press at the seated rack step: Forearms vertical, ribs down.",
+          "step": "Seated rack",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/8fb5cea0-289d-4da4-6f00-5a9ab077f200/public"
+        },
+        {
+          "alt": "Adult demonstrating Dumbbell Seated Shoulder Press at the seated overhead step: Arms straight, ribs down.",
+          "step": "Seated overhead",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/a602797d-3470-4e82-97d5-bc90bd96c400/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -4628,7 +4876,18 @@
         "Dumbbells"
       ],
       "id": "EX864",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult demonstrating Dumbbell Bent-Over Row at the arms-long hinge step: Long spine, arms straight.",
+          "step": "Arms-long hinge",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/56ad6d1b-f94b-4921-ce11-22bafc7afd00/public"
+        },
+        {
+          "alt": "Adult demonstrating Dumbbell Bent-Over Row at the row to ribs step: Elbows near torso, shoulder blades together.",
+          "step": "Row to ribs",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/945f007d-77e8-48d7-502b-f9ef194b0d00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -4666,7 +4925,18 @@
         "Dumbbells"
       ],
       "id": "EX865",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult demonstrating Double-Dumbbell Row at the hinged hang step: Stable row start.",
+          "step": "Hinged hang",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/77c2060a-6feb-4323-7e28-e811cab90c00/public"
+        },
+        {
+          "alt": "Adult demonstrating Double-Dumbbell Row at the bilateral row top step: Shoulder blades draw together at top.",
+          "step": "Bilateral row top",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/d53f5fdf-8f22-4071-7111-3abf8d0e2c00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -4704,7 +4974,23 @@
         "Dumbbell and chair"
       ],
       "id": "EX866",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult demonstrating Single-Arm Dumbbell Row at the supported hang step: Neutral hinge before pull.",
+          "step": "Supported hang",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/51bb072d-a28b-45bd-a40a-56ee2721d500/public"
+        },
+        {
+          "alt": "Adult demonstrating Single-Arm Dumbbell Row at the row to hip step: Elbow close with shoulder blade drawn smoothly.",
+          "step": "Row to hip",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/ef2961dc-16e8-45f0-e387-25f802d42f00/public"
+        },
+        {
+          "alt": "Adult demonstrating Single-Arm Dumbbell Row at the controlled lower step: Complete controlled bottom range.",
+          "step": "Controlled lower",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/3cfef7a8-7b17-4497-1694-98861e4c8400/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -4742,7 +5028,18 @@
         "Dumbbells and couch"
       ],
       "id": "EX867",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult demonstrating Chest-Supported Dumbbell Row on Couch at the arms-long supported step: Chest supported, neck neutral, elbows straight.",
+          "step": "Arms-long supported",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/2e89e0ea-8d93-44b8-9ed2-cc227e288400/public"
+        },
+        {
+          "alt": "Adult demonstrating Chest-Supported Dumbbell Row on Couch at the row to ribs step: Elbows about 90 degrees, chest supported.",
+          "step": "Row to ribs",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/d6f68359-f9c2-4994-7849-b50515689a00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -4780,7 +5077,18 @@
         "Dumbbells"
       ],
       "id": "EX868",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult demonstrating Dumbbell Renegade Row from Knees at the kneeling plank setup step: Wide stable knee-supported base.",
+          "step": "Kneeling plank setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/83defb34-39fa-4dbb-1ccd-3112c78ff100/public"
+        },
+        {
+          "alt": "Adult demonstrating Dumbbell Renegade Row from Knees at the one-arm row step: Single-arm row without hip rotation.",
+          "step": "One-arm row",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/f5880d3b-e2ed-444a-d5f4-3f03e3322a00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -4818,7 +5126,28 @@
         "Dumbbells"
       ],
       "id": "EX869",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult demonstrating Dumbbell Renegade Row at the wide-plank setup step: Stable anti-rotation base.",
+          "step": "Wide-plank setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/6d20088b-b8c5-4db2-4b25-764ce0bfb600/public"
+        },
+        {
+          "alt": "Adult demonstrating Dumbbell Renegade Row at the row right step: Single-arm row without rotation.",
+          "step": "Row right",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/04eeeb3c-bd65-4920-a780-ce851c7b3300/public"
+        },
+        {
+          "alt": "Adult demonstrating Dumbbell Renegade Row at the return to plank step: Re-braced symmetric plank.",
+          "step": "Return to plank",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/4439f873-bf27-487a-e7eb-7888d5a62300/public"
+        },
+        {
+          "alt": "Adult demonstrating Dumbbell Renegade Row at the row left step: Mirrored row without rotation.",
+          "step": "Row left",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/aa8d44cb-28fd-48e0-df3b-9d2a1b59db00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "advanced",
       "modality": "Strength",
@@ -10349,7 +10678,23 @@
         "Dumbbell"
       ],
       "id": "EX1000",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult demonstrating Seated Dumbbell Knee Tuck at the seated setup step: Long spine and braced seated base.",
+          "step": "Seated setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/bbd50a12-c1db-4224-14c0-55bbcdf0e400/public"
+        },
+        {
+          "alt": "Adult demonstrating Seated Dumbbell Knee Tuck at the knee tuck step: Compact balanced tuck on sit bones.",
+          "step": "Knee tuck",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/83f889d0-c96a-416f-f34d-4803005ed800/public"
+        },
+        {
+          "alt": "Adult demonstrating Seated Dumbbell Knee Tuck at the controlled extension step: Controlled low extension without losing the trunk brace.",
+          "step": "Controlled extension",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/0dc9a8c1-0de7-4a6e-c6ea-072728aee300/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Core strength",
@@ -17532,7 +17877,23 @@
         "Water bottle"
       ],
       "id": "EX626",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult demonstrating Bottle Pullover on Floor at the above-chest setup step: Secure grip and quiet shoulders.",
+          "step": "Above-chest setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/8872503a-4d86-4b5b-ad7b-dcfc2129fc00/public"
+        },
+        {
+          "alt": "Adult demonstrating Bottle Pullover on Floor at the overhead reach step: Upper arms beside ears at mild range.",
+          "step": "Overhead reach",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/5008286c-95cb-4c8a-46a3-994572e90c00/public"
+        },
+        {
+          "alt": "Adult demonstrating Bottle Pullover on Floor at the return over chest step: Smooth controlled finish.",
+          "step": "Return over chest",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/2a7af6c3-517b-45b4-1abf-f21e2ac91700/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -18485,7 +18846,28 @@
       ],
       "equipment": [],
       "id": "EX643",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult demonstrating Supine Toe Tap at the tabletop setup step: Both shins level, pelvis and ribs quiet.",
+          "step": "Tabletop setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/74ac1ba0-ee91-4939-08bc-c2c358286000/public"
+        },
+        {
+          "alt": "Adult demonstrating Supine Toe Tap at the right toe tap step: Only right toes lightly contact mat while knee remains bent.",
+          "step": "Right toe tap",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/07a9118e-73e9-4e3f-7949-113a1c876100/public"
+        },
+        {
+          "alt": "Adult demonstrating Supine Toe Tap at the controlled reset step: Right shin diagonal on controlled return path.",
+          "step": "Controlled reset",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/50fa37b7-4542-4656-4198-9a00028b7200/public"
+        },
+        {
+          "alt": "Adult demonstrating Supine Toe Tap at the left toe tap step: Only left toes touch with pelvis level.",
+          "step": "Left toe tap",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/eebfc1f2-dbb3-4416-1c72-b632f6c51000/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -18523,7 +18905,18 @@
       ],
       "equipment": [],
       "id": "EX644",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult demonstrating Supine 90/90 Heel Tap Hold at the tabletop setup step: Neutral tabletop before tapping.",
+          "step": "Tabletop setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/39cda99b-fab2-48ea-1bc4-c2c2eb261f00/public"
+        },
+        {
+          "alt": "Adult demonstrating Supine 90/90 Heel Tap Hold at the heel tap hold step: Controlled heel-hover hold.",
+          "step": "Heel tap hold",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/89e6c39d-f2e9-453a-998f-5a15ff7f7700/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -18561,7 +18954,28 @@
       ],
       "equipment": [],
       "id": "EX645",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult demonstrating Tabletop Knee Extension at the tabletop setup step: Parallel shins and level pelvis.",
+          "step": "Tabletop setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/483f938c-ad59-433d-d31d-a79ec2cd3000/public"
+        },
+        {
+          "alt": "Adult demonstrating Tabletop Knee Extension at the right knee extension step: One long leg with opposing thigh fixed over hip.",
+          "step": "Right knee extension",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/54045f97-93c3-4b0e-344a-bcf93f6dab00/public"
+        },
+        {
+          "alt": "Adult demonstrating Tabletop Knee Extension at the return to tabletop step: Symmetric 90-degree reset.",
+          "step": "Return to tabletop",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/9252d99b-d6ec-40cf-16cb-cb46e461c700/public"
+        },
+        {
+          "alt": "Adult demonstrating Tabletop Knee Extension at the left knee extension step: Mirrored single-knee extension.",
+          "step": "Left knee extension",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/5e64e2e6-f677-43cb-b4ce-6ac240aaa800/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -18599,7 +19013,28 @@
       ],
       "equipment": [],
       "id": "EX646",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult demonstrating Tabletop Arm Reach at the tabletop setup step: Arms vertical, shins level, ribs down.",
+          "step": "Tabletop setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/a16b0f93-d255-4817-93e4-81435487f000/public"
+        },
+        {
+          "alt": "Adult demonstrating Tabletop Arm Reach at the right arm reach step: Right biceps near ear, ribs down, legs unchanged.",
+          "step": "Right arm reach",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/5e00ce8b-21d6-4b21-4bfd-a88359299a00/public"
+        },
+        {
+          "alt": "Adult demonstrating Tabletop Arm Reach at the controlled reset step: Right elbow straight on diagonal return path.",
+          "step": "Controlled reset",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/c48605b6-8d24-4501-c454-1e6419deff00/public"
+        },
+        {
+          "alt": "Adult demonstrating Tabletop Arm Reach at the left arm reach step: Left biceps near ear, ribs quiet, legs unchanged.",
+          "step": "Left arm reach",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/e417c848-08a6-4e12-cfe9-2a5acda4ff00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -18637,7 +19072,28 @@
       ],
       "equipment": [],
       "id": "EX647",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult demonstrating Tabletop Opposite Arm-Leg Reach at the dead-bug tabletop step: Balanced dead-bug start.",
+          "step": "Dead-bug tabletop",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/a7ed18ac-b0c9-47b1-609b-c295df3c4e00/public"
+        },
+        {
+          "alt": "Adult demonstrating Tabletop Opposite Arm-Leg Reach at the right arm left leg reach step: Long opposite reach without floor contact.",
+          "step": "Right arm left leg reach",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/9f8b58f8-b863-4094-53a6-5dcf331c6200/public"
+        },
+        {
+          "alt": "Adult demonstrating Tabletop Opposite Arm-Leg Reach at the reset to tabletop step: Balanced tabletop reset before switching sides.",
+          "step": "Reset to tabletop",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/82224abf-e4fb-4ecb-54a0-3bf3584bc500/public"
+        },
+        {
+          "alt": "Adult demonstrating Tabletop Opposite Arm-Leg Reach at the left arm right leg reach step: True opposite-side reach with the right heel hovering.",
+          "step": "Left arm right leg reach",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/11135944-47c7-4628-5a1d-a45f3e0a1900/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -18675,7 +19131,28 @@
       ],
       "equipment": [],
       "id": "EX648",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult demonstrating Hollow Body Flutter at the hollow setup step: Quiet low back with a long shallow body arc.",
+          "step": "Hollow setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/10a9c9d0-2209-4157-bd14-dbd2464ad900/public"
+        },
+        {
+          "alt": "Adult demonstrating Hollow Body Flutter at the flutter a step: Small controlled first flutter.",
+          "step": "Flutter A",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/ee1e1c20-2d69-410a-a755-abc79ba7f500/public"
+        },
+        {
+          "alt": "Adult demonstrating Hollow Body Flutter at the flutter b step: Small controlled second flutter.",
+          "step": "Flutter B",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/1fb5f54a-ebc3-4d42-0b94-3501d0ece900/public"
+        },
+        {
+          "alt": "Adult demonstrating Hollow Body Flutter at the shorter-range option step: Form-preserving regression with shorter lever demand.",
+          "step": "Shorter-range option",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/c3ca65d2-c940-49cc-34a1-eb9c41804c00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "advanced",
       "modality": "Strength",
@@ -19362,7 +19839,7 @@
           "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/2210355b-8eb4-4c15-f125-a9a230582e00/public"
         },
         {
-          "alt": "Adult demonstrating Bear Plank Shoulder Tap with Pause at the right-hand tap pause step: Moving limb: anatomical right near-side/image-lower arm lifts completely from bottom-center, crosses the chest, and right hand touches the opposite anatomical left far/image-upper shoulder. Stable limbs: anatomical left far/image-upper hand remains the only planted hand; both knees stay bent 90 degrees and hover 2–3 inches with toes planted. Camera stays right-front oblique. Must not lift far/left hand, leave near/right hand planted, straighten legs, set knees down, rotate hips, or show malformed limbs.",
+          "alt": "Bear plank with knees hovering while the right hand crosses to touch the left shoulder and the left hand and both toes support the body.",
           "step": "Right-hand tap pause",
           "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/097fddb6-dfb3-4bc8-8eaa-a49c66d4c900/public"
         },
@@ -20178,7 +20655,28 @@
       ],
       "equipment": [],
       "id": "EX682",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult demonstrating Low-Impact Cross-Body Jack at the ready stance step: Quiet no-jump start.",
+          "step": "Ready stance",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/449339b8-cbf2-4feb-9cc1-5fb261ed7c00/public"
+        },
+        {
+          "alt": "Adult demonstrating Low-Impact Cross-Body Jack at the cross-body step a step: Opposing step and reach without jump.",
+          "step": "Cross-body step A",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/914472a1-ceca-4130-3728-d2c9e898d900/public"
+        },
+        {
+          "alt": "Adult demonstrating Low-Impact Cross-Body Jack at the center reset step: Controlled center transition.",
+          "step": "Center reset",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/1e4f7231-c4b9-4324-0b97-4b52fad65f00/public"
+        },
+        {
+          "alt": "Adult demonstrating Low-Impact Cross-Body Jack at the cross-body step b step: Mirrored no-jump cross-body step.",
+          "step": "Cross-body step B",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/e06c7504-2d27-4fd2-75ac-738c20e14f00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Cardio",
@@ -20217,7 +20715,28 @@
       ],
       "equipment": [],
       "id": "EX683",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult demonstrating Alternating Step-Out Jack at the ready stance step: Soft-kneed ready stance.",
+          "step": "Ready stance",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/1b1ab7f4-2944-4a8e-9dd8-58d767681600/public"
+        },
+        {
+          "alt": "Adult demonstrating Alternating Step-Out Jack at the right step-out step: Wide one-sided step with arms near overhead and both feet on the floor.",
+          "step": "Right step-out",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/d5fc29e6-18e6-4bf7-ee53-2895d4544300/public"
+        },
+        {
+          "alt": "Adult demonstrating Alternating Step-Out Jack at the center reset step: Controlled return to the exact ready stance.",
+          "step": "Center reset",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/db75b032-ad0b-4317-0d32-76c331c03600/public"
+        },
+        {
+          "alt": "Adult demonstrating Alternating Step-Out Jack at the left step-out step: Mirrored one-sided step with both feet grounded.",
+          "step": "Left step-out",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/ce43fa7f-81fa-47df-94b5-8b09d64d9500/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Cardio",
@@ -20256,7 +20775,28 @@
       ],
       "equipment": [],
       "id": "EX684",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult demonstrating Fast Step-Touch at the ready stance step: Centered athletic stance.",
+          "step": "Ready stance",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/39734b2f-b174-40b2-ab6f-77e85424e400/public"
+        },
+        {
+          "alt": "Adult demonstrating Fast Step-Touch at the step right step: Wide quiet landing.",
+          "step": "Step right",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/2039fddc-b438-4716-3b0d-2ba9a04d1a00/public"
+        },
+        {
+          "alt": "Adult demonstrating Fast Step-Touch at the touch left in step: Light toe tap without crossing.",
+          "step": "Touch left in",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/378cb28a-2bba-4074-8bb7-808ec3be5d00/public"
+        },
+        {
+          "alt": "Adult demonstrating Fast Step-Touch at the step left step: Mirrored wide quiet landing.",
+          "step": "Step left",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/faac7f45-e912-48cd-bb9f-ed802246d500/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Cardio",
@@ -20295,7 +20835,28 @@
       ],
       "equipment": [],
       "id": "EX685",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult demonstrating Heel Dig Cardio at the ready stance step: Light athletic stance.",
+          "step": "Ready stance",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/b3978a54-b225-4507-3aaa-256b38809a00/public"
+        },
+        {
+          "alt": "Adult demonstrating Heel Dig Cardio at the right heel dig step: Toe lifted and heel lightly touching.",
+          "step": "Right heel dig",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/1494bd2b-5c2a-4da0-f1d5-0b65e093a300/public"
+        },
+        {
+          "alt": "Adult demonstrating Heel Dig Cardio at the rhythmic reset step: Soft center beat before switching.",
+          "step": "Rhythmic reset",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/fcea3955-2f7f-4943-3d1f-a2d6c7a17d00/public"
+        },
+        {
+          "alt": "Adult demonstrating Heel Dig Cardio at the left heel dig step: Mirrored heel dig with toes lifted.",
+          "step": "Left heel dig",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/a7cb2f19-3e10-428d-ed51-a63166564300/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Cardio",
@@ -20334,7 +20895,28 @@
       ],
       "equipment": [],
       "id": "EX686",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult demonstrating Hamstring Curl Step at the ready stance step: Balanced neutral stance with soft knees.",
+          "step": "Ready stance",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/90855d66-adc5-46cd-4afd-51e15c55a800/public"
+        },
+        {
+          "alt": "Adult demonstrating Hamstring Curl Step at the right step, left curl step: Clear opposite-side heel curl with knee pointing down.",
+          "step": "Right step, left curl",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/8e90d523-031c-4b19-f4b0-cc4559fd4200/public"
+        },
+        {
+          "alt": "Adult demonstrating Hamstring Curl Step at the center reset step: Controlled neutral stance between alternating repetitions.",
+          "step": "Center reset",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/e9555d37-e835-4455-6a2a-a826f466ca00/public"
+        },
+        {
+          "alt": "Adult demonstrating Hamstring Curl Step at the left step, right curl step: Mirrored opposite-side heel curl with knee pointing down.",
+          "step": "Left step, right curl",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/4531e375-27ea-4f55-a649-33006cb38e00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Cardio",
@@ -20373,7 +20955,28 @@
       ],
       "equipment": [],
       "id": "EX687",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult demonstrating March with Overhead Reach at the neutral setup step: Ribs over pelvis, ready to march.",
+          "step": "Neutral setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/4fdbcbba-14c1-4e70-a1d7-e6392371e700/public"
+        },
+        {
+          "alt": "Adult demonstrating March with Overhead Reach at the right-knee march step: Controlled march and stacked ribs.",
+          "step": "Right-knee march",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/8f50105d-6325-464f-0dcf-d7cc9a7d2700/public"
+        },
+        {
+          "alt": "Adult demonstrating March with Overhead Reach at the controlled reset step: Right toes just above floor and arms midway.",
+          "step": "Controlled reset",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/f11fc28a-75e4-4666-98bf-cabd36c65500/public"
+        },
+        {
+          "alt": "Adult demonstrating March with Overhead Reach at the left-knee march step: True mirrored controlled march.",
+          "step": "Left-knee march",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/9564c34f-1529-48ee-6b23-0d5bae3c4a00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Cardio",
@@ -20412,7 +21015,28 @@
       ],
       "equipment": [],
       "id": "EX688",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult demonstrating Power March with Punch at the march-ready stance step: Tall ready posture.",
+          "step": "March-ready stance",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/312ba91d-01dd-4043-59fb-1cfe76831c00/public"
+        },
+        {
+          "alt": "Adult demonstrating Power March with Punch at the right knee, left punch step: Opposite knee and arm in rhythm.",
+          "step": "Right knee, left punch",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/fb57d9ae-94dd-40ae-9c14-9905a981bf00/public"
+        },
+        {
+          "alt": "Adult demonstrating Power March with Punch at the center beat step: Controlled reset between sides.",
+          "step": "Center beat",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/e8fce9ea-89fa-4219-203c-d4f699be2300/public"
+        },
+        {
+          "alt": "Adult demonstrating Power March with Punch at the left knee, right punch step: Mirrored opposite knee-and-punch pairing.",
+          "step": "Left knee, right punch",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/b03b3b0e-3daa-4e16-989b-54312445de00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Cardio",
@@ -20453,12 +21077,12 @@
       "id": "EX689",
       "images": [
         {
-          "alt": "Adult demonstrating Knee Drive with Same-Side Pull at the right knee drive step: Moving limbs: anatomical right knee at viewer-left drives to hip height while both hands pull down toward it. Stable limbs: anatomical left leg at viewer-right alone supports with whole foot planted; torso stays tall. Camera: straight-on front view, anatomical right=viewer-left. Viewer-side check: lifted viewer-left knee connects to right hip; support viewer-right foot remains grounded; both arrows/hand leaders target the lifted right knee. Must not show left knee lifted, hands to wrong side, both feet airborne, duplicated limbs.",
+          "alt": "Front view with the right knee driven to hip height as both hands pull toward it, while the left foot stays planted.",
           "step": "Right knee drive",
           "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/a7350279-872d-4e25-1350-2e100394a000/public"
         },
         {
-          "alt": "Adult demonstrating Knee Drive with Same-Side Pull at the left knee drive step: Moving limbs: anatomical left knee at viewer-right drives to hip height while both hands pull down toward it. Stable limbs: anatomical right leg at viewer-left alone supports with whole foot planted; torso stays tall. Camera: straight-on front view, anatomical left=viewer-right. Viewer-side check: lifted viewer-right knee connects to left hip; support viewer-left foot remains grounded; arrows/leaders target correct knee and foot. Must not show right knee lifted, hands to wrong side, both feet airborne, duplicated limbs.",
+          "alt": "Front view with the left knee driven to hip height as both hands pull toward it, while the right foot stays planted.",
           "step": "Left knee drive",
           "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/83621c60-494e-4df2-14c6-461d4e17f800/public"
         }
@@ -20723,7 +21347,7 @@
       "id": "EX695",
       "images": [
         {
-          "alt": "Adult demonstrating Forward-Back Step Touch at the step forward step: Moving limb: near anatomical right foot steps image-right and lands whole-foot. Stable limb: far left foot stays behind and touches lightly; knees stay soft and arms swing naturally. Camera: right-side three-quarter, facing image-right, right leg foreground. Viewer-side check: right hip connects to forward near foot; left hip connects to trailing touch foot. Must not show hop, both feet airborne, side/cross step, duplicated legs.",
+          "alt": "Three-quarter view of the right foot stepping forward as the left foot trails for a light touch, with soft knees and upright posture.",
           "step": "Step forward",
           "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/7cb75543-87d9-4612-257e-59504c3cf500/public"
         },
@@ -21000,12 +21624,12 @@
       "id": "EX701",
       "images": [
         {
-          "alt": "Adult demonstrating Punch and Knee Combo at the punch with opposite knee step: Moving limbs: the near-side arm punches toward image-right while the opposite knee rises to hip height. Stable limbs: the other fist guards the face and the opposite whole foot supports. Camera: eye-level front three-quarter view, subject facing diagonally image-right. Viewer-side check: the punching arm and lifted knee are opposing limbs; one support shoe is fully grounded. Must not show same-side pairing, both feet airborne, extra/merged limbs.",
+          "alt": "Front three-quarter view of one arm punching forward as the opposite knee lifts, with the other fist guarding and one foot grounded.",
           "step": "Punch with opposite knee",
           "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/e192ff1d-d7a1-421a-37eb-f23cb2f0c000/public"
         },
         {
-          "alt": "Adult demonstrating Punch and Knee Combo at the switch punch and knee step: Moving limbs: the raised knee and shoe visibly switch to image-left while the opposite arm punches from the image-right shoulder. Stable limbs: the straight support leg and shoe occupy image-right and the other fist guards the face. Camera: same eye-level front three-quarter view. Viewer-side check: image-left knee is lifted, image-right shoe is grounded, and the punch comes from the opposite side. Must not repeat side A, put knee image-right, or show extra/merged limbs.",
+          "alt": "Second side of the punch-and-knee combo, with the opposite arm punching as the other knee lifts and the support foot grounded.",
           "step": "Switch punch and knee",
           "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/8633faeb-8696-4942-ecaf-fcb011984c00/public"
         }
@@ -21193,7 +21817,7 @@
           "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/6adbefcf-06d9-4b8c-a653-49e9a3869600/public"
         },
         {
-          "alt": "Adult demonstrating Invisible Rope Side Swing at the swing beside right hip step: Moving limbs: both hands have swept across to meet outside the viewer-right hip while the feet switch the light stepping rhythm. Stable limbs: one whole foot remains grounded, knees stay soft, trunk stays upright. Camera: same straight-on front view. Viewer-side check: both hands meet at viewer-right and the swing arc remains beside that hip; both legs are distinct. Must not repeat viewer-left swing, show a rope, airborne feet, or extra limbs.",
+          "alt": "Front view with both hands sweeping beside the right hip during a light side-to-side stepping rhythm.",
           "step": "Swing beside right hip",
           "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/f9e05c3f-5fdd-4c58-5679-eb3883454f00/public"
         }
@@ -21620,7 +22244,7 @@
       "id": "EX714",
       "images": [
         {
-          "alt": "Adult demonstrating Lateral Line Step-Overs at the left-side endpoint step: Moving limbs: none at the endpoint. Stable limbs: both whole shoes are gathered and grounded on image-left of the same floor line; knees stay softly bent and torso tall. Camera: straight-on front view with line dividing image-left/right zones. Viewer-side check: both feet are distinct and the visible line remains entirely image-right of them. Next-direction arrow points image-right. Must not show straddled line, airborne/crossed feet, extra limbs.",
+          "alt": "Front view with both feet together and grounded on the left side of a floor line, knees soft and torso upright.",
           "step": "Left-side endpoint",
           "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/9f182fe7-27a5-4a4e-e1b0-f6cf80e63700/public"
         },
@@ -21764,7 +22388,28 @@
       ],
       "equipment": [],
       "id": "EX717",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult demonstrating Single-Leg Balance with Figure Eight Arms at the setup step: Tall neutral stance, arms raised comfortably below shoulder height.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/92384861-967b-4515-e810-57201b46d400/public"
+        },
+        {
+          "alt": "Adult demonstrating Single-Leg Balance with Figure Eight Arms at the right-leg balance step: Small single-leg balance with lifted foot clear of the floor and level hips.",
+          "step": "Right-leg balance",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/814badb8-90f5-40f3-33ae-78601146de00/public"
+        },
+        {
+          "alt": "Adult demonstrating Single-Leg Balance with Figure Eight Arms at the left-leg balance step: Mirrored small single-leg balance with level hips.",
+          "step": "Left-leg balance",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/174976ae-ef3a-4f41-e416-2f33710ac400/public"
+        },
+        {
+          "alt": "Adult demonstrating Single-Leg Balance with Figure Eight Arms at the supported reset step: Fingertip support only, demonstrating a safe balance regression.",
+          "step": "Supported reset",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/e4483992-41f8-4f2c-b394-856175324200/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Balance",
@@ -21803,7 +22448,28 @@
       ],
       "equipment": [],
       "id": "EX718",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult demonstrating Single-Leg Balance with Reach Across at the neutral setup step: Tall neutral posture, knees soft, ribs over pelvis, gaze fixed.",
+          "step": "Neutral setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/7cd4340d-a328-4333-418e-f334b3af3500/public"
+        },
+        {
+          "alt": "Adult demonstrating Single-Leg Balance with Reach Across at the right reach across step: Clear single-leg balance, opposite-hand reach, level hips, steady gaze.",
+          "step": "Right reach across",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/2317ce9a-538d-40dc-3aa8-671ef9479c00/public"
+        },
+        {
+          "alt": "Adult demonstrating Single-Leg Balance with Reach Across at the controlled reset step: Right toes just touch down; both feet hip-width; posture re-centered.",
+          "step": "Controlled reset",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/9d0455d0-f07a-4e2d-9fda-d3547cbf6600/public"
+        },
+        {
+          "alt": "Adult demonstrating Single-Leg Balance with Reach Across at the left reach across step: True opposite-side mirror, hips level, steady gaze.",
+          "step": "Left reach across",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/ba97e2b7-1beb-455e-5731-d41550d79900/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Balance",
@@ -21844,7 +22510,28 @@
         "Water bottle"
       ],
       "id": "EX719",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult demonstrating Single-Leg Balance with Bottle Pass at the tall setup step: Tall posture before balancing.",
+          "step": "Tall setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/81107d05-c178-412e-deef-4f99f4ac0d00/public"
+        },
+        {
+          "alt": "Adult demonstrating Single-Leg Balance with Bottle Pass at the first-side balance pass step: Bottle begins passing around the right side while balance is held.",
+          "step": "First-side balance pass",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/b73d9aae-cf91-43bc-c6fd-cdbb86b1c100/public"
+        },
+        {
+          "alt": "Adult demonstrating Single-Leg Balance with Bottle Pass at the behind-torso transfer step: Transfer around the back without dropping the lifted leg.",
+          "step": "Behind-torso transfer",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/d58c9ab4-1133-4778-9a60-eeeb4959da00/public"
+        },
+        {
+          "alt": "Adult demonstrating Single-Leg Balance with Bottle Pass at the opposite-side balance step: Mirrored balance and pass on the other support leg.",
+          "step": "Opposite-side balance",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/66535efd-49ea-46da-d85b-fd9da7324800/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Balance",
@@ -21886,7 +22573,28 @@
         "Water bottle"
       ],
       "id": "EX720",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult demonstrating Tandem Stance Bottle Pass at the tandem setup step: Tall balanced stance with bottle centered near the abdomen.",
+          "step": "Tandem setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/32f3b18b-015e-4a3f-5d74-4168d0b36700/public"
+        },
+        {
+          "alt": "Adult demonstrating Tandem Stance Bottle Pass at the right-side pass step: Bottle clearly beside the right hip with controlled reach.",
+          "step": "Right-side pass",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/b0329df7-3179-43fb-235b-38dc8247ec00/public"
+        },
+        {
+          "alt": "Adult demonstrating Tandem Stance Bottle Pass at the behind-back transfer step: Bottle is partially occluded by the lower back while both hands clearly meet it.",
+          "step": "Behind-back transfer",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/2b5ae41b-e3e6-426e-ae6e-34b2b4cae300/public"
+        },
+        {
+          "alt": "Adult demonstrating Tandem Stance Bottle Pass at the complete circle step: Balanced finish with bottle at the abdomen.",
+          "step": "Complete circle",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/d08b2a4d-fd06-442a-f107-4ac82715b500/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Balance",
@@ -21926,7 +22634,23 @@
       ],
       "equipment": [],
       "id": "EX721",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult demonstrating Heel-Toe Rock with Arm Reach at the neutral setup step: Weight centered across whole feet; ribs stacked; gaze level.",
+          "step": "Neutral setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/1a459cad-f39d-40f2-d0e4-b97e4f25d700/public"
+        },
+        {
+          "alt": "Adult demonstrating Heel-Toe Rock with Arm Reach at the rock to heels step: Unmistakable heel-rock endpoint.",
+          "step": "Rock to heels",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/0857a419-271f-4d9c-4a23-af1289eb3e00/public"
+        },
+        {
+          "alt": "Adult demonstrating Heel-Toe Rock with Arm Reach at the rock to toes step: Unmistakable toe-rock endpoint.",
+          "step": "Rock to toes",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/214629c1-07c1-44f7-8714-8733a1a26b00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Balance",
@@ -21967,7 +22691,28 @@
         "Water bottle"
       ],
       "id": "EX722",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult demonstrating Split-Stance Balance Chop at the split-stance setup step: Narrow stable split stance.",
+          "step": "Split-stance setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/a5ff7784-8a39-4350-4873-32e4ca04aa00/public"
+        },
+        {
+          "alt": "Adult demonstrating Split-Stance Balance Chop at the high-diagonal start step: Controlled high start of chop.",
+          "step": "High-diagonal start",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/9302d024-bab2-4754-2aac-8b96c6fb2000/public"
+        },
+        {
+          "alt": "Adult demonstrating Split-Stance Balance Chop at the low-diagonal chop step: Diagonal chop endpoint.",
+          "step": "Low-diagonal chop",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/16d05ecf-be82-4663-7edf-4cd017db9f00/public"
+        },
+        {
+          "alt": "Adult demonstrating Split-Stance Balance Chop at the opposite diagonal step: Mirrored chop endpoint.",
+          "step": "Opposite diagonal",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/c6e019de-ee0d-448b-0b1c-cb2fc075fd00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Balance",
@@ -22009,7 +22754,23 @@
         "Resistance band"
       ],
       "id": "EX723",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult demonstrating Half-Kneeling Pallof Hold at the half-kneeling setup step: Ninety-degree half-kneeling base with ribs over pelvis.",
+          "step": "Half-kneeling setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/c7cb9428-27aa-4811-b3ea-0f88b4991600/public"
+        },
+        {
+          "alt": "Adult demonstrating Half-Kneeling Pallof Hold at the press and hold step: Arms long at sternum height, hands centered, no rotation toward anchor.",
+          "step": "Press and hold",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/6b103ef1-292d-45f2-a1d2-2e675c84d600/public"
+        },
+        {
+          "alt": "Adult demonstrating Half-Kneeling Pallof Hold at the controlled return step: Controlled near-chest endpoint without losing alignment.",
+          "step": "Controlled return",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/79230356-8387-429f-4089-4a8f53428500/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Balance",
@@ -22051,7 +22812,33 @@
         "Water bottle"
       ],
       "id": "EX724",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult demonstrating Tall-Kneeling Chop at the tall-kneeling setup step: Ribs over pelvis, secure two-hand grip.",
+          "step": "Tall-kneeling setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/0d45bc22-0e96-42b3-9055-885d48136b00/public"
+        },
+        {
+          "alt": "Adult demonstrating Tall-Kneeling Chop at the high-right start step: Ribs down and secure grip.",
+          "step": "High-right start",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/9ec4b0db-8aa2-4fde-62bf-13a384d41a00/public"
+        },
+        {
+          "alt": "Adult demonstrating Tall-Kneeling Chop at the low-left finish step: Visible centerline crossing and two-hand grip.",
+          "step": "Low-left finish",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/d7257db9-d8e1-489d-63aa-f4b73b838100/public"
+        },
+        {
+          "alt": "Adult demonstrating Tall-Kneeling Chop at the high-left start step: Mirrored high start with secure grip.",
+          "step": "High-left start",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/b604bb30-7fd3-4272-248f-a06dae5b4d00/public"
+        },
+        {
+          "alt": "Adult demonstrating Tall-Kneeling Chop at the low-right finish step: Mirrored centerline crossing, two-hand grip.",
+          "step": "Low-right finish",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/dfad0e07-fd02-4906-882c-dc85534e7700/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Balance",
@@ -22100,7 +22887,7 @@
           "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/a3d2c4ad-f2b4-43a8-bc98-a6b80196e700/public"
         },
         {
-          "alt": "Adult demonstrating Single-Leg Calf Raise with Chair at the calf raise step: The exact setup roles and foot locations are preserved. Moving limb: only the heel of the image-left working/support foot rises vertically; its forefoot and toes remain planted at the same floor location. Stable limbs: the free foot remains airborne in its setup position nearer image-right; free knee stays bent; chair contact, tall torso, level pelvis, and soft working knee remain unchanged. Viewer check: support heel elevated, support toes down, free foot airborne and uncued. Must not show: leg-role swap, arrow at free foot, free foot touching floor, both heels raised, working toes lifted, ankle rolling, changed foot positions, missing or extra limbs.",
+          "alt": "Single-leg calf raise beside a chair, with the working heel lifted over planted toes while the free foot remains raised.",
           "step": "Calf raise",
           "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/824a93de-2a04-43fc-ac36-2faf6fd1df00/public"
         }
@@ -22148,12 +22935,12 @@
       "id": "EX726",
       "images": [
         {
-          "alt": "Adult demonstrating Seated Calf Raise with Backpack at the feet-flat setup step: Moving limbs: none. Stable limbs: both whole shoes are flat and hip-width, knees about 90 degrees; both hands secure one closed backpack across both lower thighs; torso tall. Camera: elevated front three-quarter view with both heels visible. Viewer-side check: two distinct shoes are fully grounded and one backpack rests evenly across two thighs. Must not show lifted heel, backpack off thighs, multiple bags, extra limbs.",
+          "alt": "Seated setup with both feet flat and hip-width, knees bent, and a closed backpack held across the lower thighs.",
           "step": "Feet-flat setup",
           "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/a75f32cf-d48a-4003-9ac6-9b9963f9ee00/public"
         },
         {
-          "alt": "Adult demonstrating Seated Calf Raise with Backpack at the both heels raised step: Moving limbs: both heels lift equally with clear floor gaps. Stable limbs: balls of both feet/toes remain planted, knees stay hip-width, both hands secure the backpack, torso stays tall. Camera: same elevated front three-quarter view. Viewer-side check: two distinct forefeet contact floor while both heels are raised and marked by upward arrows. Must not show one heel down, toes lifted, standing, extra bag or limbs.",
+          "alt": "Seated calf raise with both heels lifted evenly while toes stay planted and a backpack rests across the thighs.",
           "step": "Both heels raised",
           "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/74193ea8-8870-4b3b-b6bf-d3a45dd17500/public"
         }
@@ -23118,7 +23905,18 @@
         "Low step or book"
       ],
       "id": "EX747",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult demonstrating Front-Foot Elevated Split Squat Pulse at the elevated split setup step: Tall split stance with elevated front foot.",
+          "step": "Elevated split setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/a74cf8de-35de-4a93-5b7e-96ac35560800/public"
+        },
+        {
+          "alt": "Adult demonstrating Front-Foot Elevated Split Squat Pulse at the bottom pulse step: Small pulse at split-squat bottom.",
+          "step": "Bottom pulse",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/588b1181-e018-43fe-a955-3806a867f000/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -23160,7 +23958,28 @@
         "Backpack"
       ],
       "id": "EX748",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult demonstrating Suitcase Backpack Romanian Deadlift at the right-load setup step: Backpack secure, shoulders level, knees soft.",
+          "step": "Right-load setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/b811b1ad-92a8-4103-03da-5debce84d100/public"
+        },
+        {
+          "alt": "Adult demonstrating Suitcase Backpack Romanian Deadlift at the right-load hinge step: Long spine, level shoulders and pelvis, bag close to right shin.",
+          "step": "Right-load hinge",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/023c0b66-4b1e-4035-bed6-04d966f16300/public"
+        },
+        {
+          "alt": "Adult demonstrating Suitcase Backpack Romanian Deadlift at the upright switch step: Stacked posture before changing load side.",
+          "step": "Upright switch",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/b3ba67c2-a7ac-4924-e0ce-2bee43b59000/public"
+        },
+        {
+          "alt": "Adult demonstrating Suitcase Backpack Romanian Deadlift at the left-load hinge step: Bag outside left shin, long spine, shoulders level.",
+          "step": "Left-load hinge",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/b5f4f3a0-1bc0-481f-d59e-3b8bc8c4a700/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -23203,7 +24022,18 @@
         "Resistance band"
       ],
       "id": "EX749",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult demonstrating Band-Resisted Hip Hinge at the band setup step: Tall loaded start.",
+          "step": "Band setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/ba1ad417-b9ff-4140-4c0e-656aa962ee00/public"
+        },
+        {
+          "alt": "Adult demonstrating Band-Resisted Hip Hinge at the resisted hinge step: Hinge endpoint with shins nearly vertical.",
+          "step": "Resisted hinge",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/00b8fd32-a713-462e-a759-71cf4315b300/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -23287,7 +24117,18 @@
         "Towel"
       ],
       "id": "ST501",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult demonstrating Supine Towel Chin Nod at the towel setup step: Neutral supported neck with relaxed jaw.",
+          "step": "Towel setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/2841f89e-8670-4439-d326-beea99bba300/public"
+        },
+        {
+          "alt": "Adult demonstrating Supine Towel Chin Nod at the gentle chin nod step: Subtle yes motion through upper neck.",
+          "step": "Gentle chin nod",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/3473eea9-dfbd-4769-8147-a790c8094c00/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Mobility",
@@ -23329,7 +24170,18 @@
       ],
       "equipment": [],
       "id": "ST502",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult demonstrating Seated Chin Tuck with Side Bend at the seated chin tuck step: Subtle axial retraction.",
+          "step": "Seated chin tuck",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/94089ee0-64fa-40bc-e03a-f659055cdd00/public"
+        },
+        {
+          "alt": "Adult demonstrating Seated Chin Tuck with Side Bend at the tucked side bend step: Gentle side-neck stretch with retraction.",
+          "step": "Tucked side bend",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/b32c72be-0f29-48dc-811d-ef2181732400/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Mobility",
@@ -23370,7 +24222,23 @@
       ],
       "equipment": [],
       "id": "ST503",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult demonstrating Seated Chin Tuck with Rotation at the seated chin tuck step: Centered axial retraction before rotation.",
+          "step": "Seated chin tuck",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/6f0e41c3-ab5f-48ba-c71d-d5242d84b700/public"
+        },
+        {
+          "alt": "Adult demonstrating Seated Chin Tuck with Rotation at the rotate right step: Gentle right cervical rotation.",
+          "step": "Rotate right",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/792268a6-f4a3-4183-8908-0d5a1681fc00/public"
+        },
+        {
+          "alt": "Adult demonstrating Seated Chin Tuck with Rotation at the rotate left step: Gentle left cervical rotation.",
+          "step": "Rotate left",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/f694c163-7675-4ffd-c8f2-5662c0f85400/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Mobility",
@@ -23413,7 +24281,18 @@
         "Wall"
       ],
       "id": "ST504",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult demonstrating Wall Chin Tuck with Arm Slide at the wall tuck setup step: Long neck, light double-chin cue, ribs down.",
+          "step": "Wall tuck setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/2cad9ea3-61c1-453f-7c10-8fd144000300/public"
+        },
+        {
+          "alt": "Adult demonstrating Wall Chin Tuck with Arm Slide at the arm slide up step: Pain-free overhead slide while ribs remain stacked.",
+          "step": "Arm slide up",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/d5158180-450b-486c-00ea-fd43f7682500/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Mobility",
@@ -23457,7 +24336,18 @@
         "Doorframe"
       ],
       "id": "ST505",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult demonstrating Doorway Neck Side Bend Stretch at the doorway anchor setup step: Gentle shoulder depression anchor.",
+          "step": "Doorway anchor setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/60fff429-b631-4889-8d82-655607372300/public"
+        },
+        {
+          "alt": "Adult demonstrating Doorway Neck Side Bend Stretch at the tilt away step: Gentle anchored upper-trap/neck stretch.",
+          "step": "Tilt away",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/f99d0a16-33a3-4f27-3ad2-fcb323763600/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Static stretch",
@@ -23500,7 +24390,18 @@
         "Chair"
       ],
       "id": "ST506",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult demonstrating Shoulder-Blade Anchor Neck Stretch at the chair-edge anchor step: Light shoulder-blade anchor before head tilt.",
+          "step": "Chair-edge anchor",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/526eb251-5c94-461f-6d40-df29e8865200/public"
+        },
+        {
+          "alt": "Adult demonstrating Shoulder-Blade Anchor Neck Stretch at the tilt away step: Gentle anchored side-neck stretch.",
+          "step": "Tilt away",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/4cb0ec0f-3f6b-4e86-4f85-f8e76d196d00/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Static stretch",
@@ -23542,7 +24443,18 @@
       ],
       "equipment": [],
       "id": "ST507",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult demonstrating Collarbone Neck Stretch at the neutral seated step: Long relaxed neck and soft jaw.",
+          "step": "Neutral seated",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/7b060274-6ccc-4f98-c09b-4034accdaa00/public"
+        },
+        {
+          "alt": "Adult demonstrating Collarbone Neck Stretch at the turn-away stretch step: Mild front-side neck stretch without compression.",
+          "step": "Turn-away stretch",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/eadb9c83-3b89-4624-47d7-c85d57a04e00/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Static stretch",
@@ -24416,7 +25328,18 @@
         "Wall"
       ],
       "id": "ST526",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult demonstrating Wall Pec Stretch Low Arm at the low wall-hand setup step: Low-angle pec stretch setup.",
+          "step": "Low wall-hand setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/412e6d45-5bf1-4a85-c4ff-8b5580223400/public"
+        },
+        {
+          "alt": "Adult demonstrating Wall Pec Stretch Low Arm at the turn away pec stretch step: Gentle low-fiber pec stretch.",
+          "step": "Turn away pec stretch",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/9b51b372-b965-4a27-cd8f-7badc16e9700/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Static stretch",
@@ -24460,7 +25383,18 @@
         "Wall"
       ],
       "id": "ST527",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult demonstrating Wall Pec Stretch Mid Arm at the mid-arm wall setup step: Mid-angle pec wall anchor.",
+          "step": "Mid-arm wall setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/809fd807-f554-4029-9933-e136798ec400/public"
+        },
+        {
+          "alt": "Adult demonstrating Wall Pec Stretch Mid Arm at the turn away step: Gentle mid-fiber pec stretch.",
+          "step": "Turn away",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/d8172f86-077b-4961-6c88-d41f1aa50700/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Static stretch",
@@ -24504,7 +25438,18 @@
         "Wall"
       ],
       "id": "ST528",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult demonstrating Wall Pec Stretch High Arm at the high-arm wall setup step: Comfortable high-arm wall contact with shoulder down.",
+          "step": "High-arm wall setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/aef43728-bcdd-4649-fb17-d071e7930c00/public"
+        },
+        {
+          "alt": "Adult demonstrating Wall Pec Stretch High Arm at the turn-away stretch step: Gentle chest stretch with ribs controlled.",
+          "step": "Turn-away stretch",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/2ad05ccb-3391-40cc-727f-87e8f59d3600/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Static stretch",
@@ -24549,7 +25494,18 @@
         "Wall corner"
       ],
       "id": "ST529",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult demonstrating Corner Pec Stretch at the corner forearm setup step: Symmetrical corner anchor before stepping forward.",
+          "step": "Corner forearm setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/eeb4877f-7ea9-467a-be68-5551970a2a00/public"
+        },
+        {
+          "alt": "Adult demonstrating Corner Pec Stretch at the chest forward step: Gentle bilateral pec stretch.",
+          "step": "Chest forward",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/48ec2e65-1c85-485c-8fc5-894f37870100/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Static stretch",
@@ -24593,7 +25549,18 @@
         "Doorway"
       ],
       "id": "ST530",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult demonstrating Doorway Chest Stretch with Step Through at the doorway forearm setup step: Symmetrical doorway anchor before stepping.",
+          "step": "Doorway forearm setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/26d73e5e-6552-4558-f90c-216a03e0b200/public"
+        },
+        {
+          "alt": "Adult demonstrating Doorway Chest Stretch with Step Through at the step through step: Controlled chest opening through doorway.",
+          "step": "Step through",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/c1ff112a-3fa1-443e-d0cd-92c114c96700/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Static stretch",
@@ -24636,7 +25603,18 @@
         "Doorway"
       ],
       "id": "ST531",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult demonstrating One-Arm Doorway Chest Stretch at the doorway setup step: Comfortable elbow height with shoulder relaxed.",
+          "step": "Doorway setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/6cc42a65-b06d-4803-bdd2-69de8cce5800/public"
+        },
+        {
+          "alt": "Adult demonstrating One-Arm Doorway Chest Stretch at the rotate-away stretch step: Gentle chest opening without shrugging.",
+          "step": "Rotate-away stretch",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/69fc875a-3e60-4178-4643-a40fa47e5700/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Static stretch",
@@ -24679,7 +25657,18 @@
         "Doorway"
       ],
       "id": "ST532",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult demonstrating Forearm Doorway Pec Stretch at the vertical forearm setup step: Comfortable single-side doorway anchor.",
+          "step": "Vertical forearm setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/9413dfac-efcc-4f9e-8480-71e81639cf00/public"
+        },
+        {
+          "alt": "Adult demonstrating Forearm Doorway Pec Stretch at the lean through doorway step: Gentle unilateral pec stretch.",
+          "step": "Lean through doorway",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/ee56f0ae-5376-41b0-6129-042b1840ca00/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Static stretch",
@@ -26580,7 +27569,18 @@
         "Wall"
       ],
       "id": "ST571",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult demonstrating Wrist Flexor Stretch with Fingers Down at the fingers-down wall setup step: Exact fingers-down placement.",
+          "step": "Fingers-down wall setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/58ea3206-a475-4576-8b8c-53dca1c68f00/public"
+        },
+        {
+          "alt": "Adult demonstrating Wrist Flexor Stretch with Fingers Down at the gentle turn-away stretch step: Mild wrist-flexor stretch without pain.",
+          "step": "Gentle turn-away stretch",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/408b88a4-e367-46f0-7e03-e5605f17e700/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Static stretch",
@@ -26624,7 +27624,23 @@
         "Wall"
       ],
       "id": "ST572",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult demonstrating Wrist Flexor Stretch with Fingers Out at the wall-hand setup step: Correct fingers-out palm placement.",
+          "step": "Wall-hand setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/aa6795c8-920e-4eac-0337-7ad4203ba600/public"
+        },
+        {
+          "alt": "Adult demonstrating Wrist Flexor Stretch with Fingers Out at the gentle turn away step: Mild wrist-flexor stretch without forcing.",
+          "step": "Gentle turn away",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/21fa183b-9046-424a-73e4-d5a620fd3c00/public"
+        },
+        {
+          "alt": "Adult demonstrating Wrist Flexor Stretch with Fingers Out at the release and switch step: Controlled exit and clear side-change preparation.",
+          "step": "Release and switch",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/0f38387a-1791-4861-0ea1-8b57407f1700/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Static stretch",
@@ -26666,7 +27682,18 @@
       ],
       "equipment": [],
       "id": "ST573",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult demonstrating Wrist Extensor Stretch with Fist at the loose-fist setup step: Right elbow straight, wrist neutral, fist loose.",
+          "step": "Loose-fist setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/a3c0a1d3-bc70-40ab-c204-69d939d35700/public"
+        },
+        {
+          "alt": "Adult demonstrating Wrist Extensor Stretch with Fist at the assisted stretch step: Light pressure into right wrist flexion.",
+          "step": "Assisted stretch",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/4c556871-7e46-4197-ace0-54f8c7c18b00/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Static stretch",
@@ -26707,7 +27734,18 @@
       ],
       "equipment": [],
       "id": "ST574",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult demonstrating Wrist Extensor Stretch with Open Hand at the open-hand setup step: Neutral wrist before flexion.",
+          "step": "Open-hand setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/85b6d8cc-8b0c-4a3f-0e99-2dcb8798b200/public"
+        },
+        {
+          "alt": "Adult demonstrating Wrist Extensor Stretch with Open Hand at the gentle wrist flexion step: Mild extensor stretch along top forearm.",
+          "step": "Gentle wrist flexion",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/e33a2e75-5ec1-40cc-54e0-d6d1c521cb00/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Static stretch",
@@ -26748,7 +27786,23 @@
       ],
       "equipment": [],
       "id": "ST575",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult demonstrating Tabletop Wrist Circles at the tabletop setup step: Centered pressure over neutral wrists.",
+          "step": "Tabletop setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/de1054b7-fc17-4182-7c64-ff01871d5f00/public"
+        },
+        {
+          "alt": "Adult demonstrating Tabletop Wrist Circles at the clockwise circle step: Small controlled clockwise phase.",
+          "step": "Clockwise circle",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/61989b20-9f1d-4277-9f01-6828ac09d900/public"
+        },
+        {
+          "alt": "Adult demonstrating Tabletop Wrist Circles at the counterclockwise circle step: Small controlled reverse-circle phase.",
+          "step": "Counterclockwise circle",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/298b23b9-e734-4b7d-e5cd-dc9da5195e00/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Mobility",
@@ -26789,7 +27843,23 @@
       ],
       "equipment": [],
       "id": "ST576",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult demonstrating Tabletop Wrist Figure Eight at the centered tabletop step: Weight centered; figure-eight preview between hands.",
+          "step": "Centered tabletop",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/b3a068be-969c-4a23-a0e8-92bde43b8c00/public"
+        },
+        {
+          "alt": "Adult demonstrating Tabletop Wrist Figure Eight at the first lobe step: Small first-lobe weight shift.",
+          "step": "First lobe",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/2ff781e0-e30d-4343-b176-f81179ba6500/public"
+        },
+        {
+          "alt": "Adult demonstrating Tabletop Wrist Figure Eight at the second lobe step: Second lobe completes path toward center.",
+          "step": "Second lobe",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/34aa6feb-137d-45cc-aa02-319cda30a300/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Mobility",
@@ -26832,7 +27902,18 @@
         "Table or floor"
       ],
       "id": "ST577",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult demonstrating Palm Heel Lift Mobility at the hand planted step: Full hand contact before lift.",
+          "step": "Hand planted",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/d4e42559-4b2a-4c3e-d8ec-f99f1b2e0000/public"
+        },
+        {
+          "alt": "Adult demonstrating Palm Heel Lift Mobility at the palm heel hover step: Small controlled heel-of-palm lift.",
+          "step": "Palm heel hover",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/f18959a3-a8d9-4fed-8415-fa7ea25b8a00/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Mobility",
@@ -26873,7 +27954,23 @@
       ],
       "equipment": [],
       "id": "ST578",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult demonstrating Knuckle Wrist Rock Sideways at the knuckle setup step: Centered, low-pressure starting position.",
+          "step": "Knuckle setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/af7ad837-c4b1-4444-695f-e2c6b374e300/public"
+        },
+        {
+          "alt": "Adult demonstrating Knuckle Wrist Rock Sideways at the rock left step: Gentle leftward pressure endpoint.",
+          "step": "Rock left",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/ecd420df-89f4-49ce-f810-318dec789c00/public"
+        },
+        {
+          "alt": "Adult demonstrating Knuckle Wrist Rock Sideways at the rock right step: Gentle rightward pressure endpoint.",
+          "step": "Rock right",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/8ad5373d-ff0d-4976-995c-6ae433e81500/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Mobility",
@@ -26962,7 +28059,7 @@
           "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/1390ae06-babb-4a1d-cb17-7f0bd302cb00/public"
         },
         {
-          "alt": "Adult demonstrating Finger Tendon Glide Hook at the hook shape step: Moving limbs: PIP/DIP joints of index, middle, ring and little fingers curl down while the large MCP/base knuckles remain mostly straight; thumb stays relaxed. Stable anatomy: same single right palm and neutral wrist. Camera: same close palm view. Viewer-side check: five digits remain distinct, MCP leader lands at finger-base knuckle, curl leader/arrow land at fingertips. Must not show full fist, fingertips touching palm, extra/fused digits or second hand.",
+          "alt": "Close palm view of a hook tendon glide with the four fingers curled at the middle and end joints, base knuckles long, and thumb relaxed.",
           "step": "Hook shape",
           "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/93a0fb50-b88e-42e8-6a6f-7723a84fbf00/public"
         }
@@ -27934,7 +29031,23 @@
       ],
       "equipment": [],
       "id": "ST601",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult demonstrating Segmental Cat-Cow at the neutral quadruped step: Neutral starting line before spinal articulation.",
+          "step": "Neutral quadruped",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/18d5f392-a48c-49d2-fabb-0ad56c126f00/public"
+        },
+        {
+          "alt": "Adult demonstrating Segmental Cat-Cow at the segmental cat step: Full but gentle cat endpoint.",
+          "step": "Segmental cat",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/871cad3a-c75d-48fe-114f-fce13a154e00/public"
+        },
+        {
+          "alt": "Adult demonstrating Segmental Cat-Cow at the segmental cow step: Full but gentle cow endpoint.",
+          "step": "Segmental cow",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/eb16e827-9ecf-4fa7-4f57-eecfcee13300/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Mobility",
@@ -27975,7 +29088,23 @@
       ],
       "equipment": [],
       "id": "ST602",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult demonstrating Cat-Cow with Lateral Shift at the neutral tabletop step: Centered quadruped with long neutral spine.",
+          "step": "Neutral tabletop",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/e6f13516-1a54-4def-8b46-e78e99c20000/public"
+        },
+        {
+          "alt": "Adult demonstrating Cat-Cow with Lateral Shift at the cow with right shift step: Gentle cow phase with small lateral shift.",
+          "step": "Cow with right shift",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/55a57f91-2c56-41ab-20a3-ffa2dcaf6600/public"
+        },
+        {
+          "alt": "Adult demonstrating Cat-Cow with Lateral Shift at the cat with left shift step: Gentle cat phase with small opposing lateral shift.",
+          "step": "Cat with left shift",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/b554ec5d-02c9-4ac2-0fce-539e75e14a00/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Mobility",
@@ -28017,7 +29146,18 @@
       ],
       "equipment": [],
       "id": "ST603",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult demonstrating Child's Pose with Thread Reach at the child's pose setup step: Long neutral child's pose before threading.",
+          "step": "Child's pose setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/810b247a-d1bd-42c7-87db-fe0a25514700/public"
+        },
+        {
+          "alt": "Adult demonstrating Child's Pose with Thread Reach at the thread reach step: Long sideways thread with shoulder lowering toward mat.",
+          "step": "Thread reach",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/997d0129-1f5f-4d47-81c8-8431d13f1c00/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Static stretch",
@@ -28059,7 +29199,23 @@
       ],
       "equipment": [],
       "id": "ST604",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult demonstrating Thread-the-Needle to Sky Reach at the quadruped setup step: Stable start before rotation.",
+          "step": "Quadruped setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/9854ac97-06be-4667-52da-42ac3354cd00/public"
+        },
+        {
+          "alt": "Adult demonstrating Thread-the-Needle to Sky Reach at the thread underneath step: Deep but controlled under-body thread.",
+          "step": "Thread underneath",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/2c00e3f9-2137-40c4-8d3a-8487934ff400/public"
+        },
+        {
+          "alt": "Adult demonstrating Thread-the-Needle to Sky Reach at the sky reach step: Open thoracic rotation endpoint.",
+          "step": "Sky reach",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/48ad19e0-7e92-4327-811c-a88034bb1600/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Dynamic stretch",
@@ -28100,7 +29256,23 @@
       ],
       "equipment": [],
       "id": "ST605",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult demonstrating Quadruped Rib Circle at the neutral rib-circle setup step: Neutral tabletop with circle route around lower ribs only.",
+          "step": "Neutral rib-circle setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/ddf9c557-311e-4f33-624e-6bebdea04a00/public"
+        },
+        {
+          "alt": "Adult demonstrating Quadruped Rib Circle at the ribs forward-right step: Small controlled rib displacement along first half of circle.",
+          "step": "Ribs forward-right",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/f99f174d-c77d-49e9-4cd2-ed2b4bc59f00/public"
+        },
+        {
+          "alt": "Adult demonstrating Quadruped Rib Circle at the ribs back-left step: Small controlled rib displacement completing the loop.",
+          "step": "Ribs back-left",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/932bb1ab-652a-4f05-b687-cf8534297300/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Mobility",
@@ -28141,7 +29313,18 @@
       ],
       "equipment": [],
       "id": "ST606",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult demonstrating Quadruped T-Spine Circle at the quadruped setup step: Stable all-fours start.",
+          "step": "Quadruped setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/f8f8ca03-b4de-4b63-7b72-6bbeeb2d7700/public"
+        },
+        {
+          "alt": "Adult demonstrating Quadruped T-Spine Circle at the thoracic circle step: Controlled upper-back circle with quiet hips.",
+          "step": "Thoracic circle",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/b0c633b8-71e6-4189-7a70-4a5848b1ca00/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Mobility",
@@ -28184,7 +29367,18 @@
         "Chair"
       ],
       "id": "ST607",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult demonstrating Seated Thoracic Extension with Hands Behind Head at the hands-behind-head setup step: Tall neutral start before thoracic extension.",
+          "step": "Hands-behind-head setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/df28d59d-6566-44bd-1c0d-01eb341aa400/public"
+        },
+        {
+          "alt": "Adult demonstrating Seated Thoracic Extension with Hands Behind Head at the upper-back extension step: Gentle thoracic extension endpoint.",
+          "step": "Upper-back extension",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/30baed0e-0098-473f-1b29-aa69365a8d00/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Mobility",
@@ -29595,7 +30789,23 @@
       ],
       "equipment": [],
       "id": "ST636",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult demonstrating 90/90 Hip Switch with Hands Behind at the first 90/90 side step: Supported first-side 90/90.",
+          "step": "First 90/90 side",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/4fc7c886-d546-430e-bdc5-1192a8b82d00/public"
+        },
+        {
+          "alt": "Adult demonstrating 90/90 Hip Switch with Hands Behind at the center knee sweep step: Controlled switch midpoint.",
+          "step": "Center knee sweep",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/eb0c3375-6a96-47dd-0b8d-ba2e38d41f00/public"
+        },
+        {
+          "alt": "Adult demonstrating 90/90 Hip Switch with Hands Behind at the opposite 90/90 side step: Second-side 90/90.",
+          "step": "Opposite 90/90 side",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/998f1e57-7597-47e5-4035-4372f9a05d00/public"
+        }
+      ],
       "kind": "stretch",
       "level": "intermediate",
       "modality": "Mobility",
@@ -29636,7 +30846,23 @@
       ],
       "equipment": [],
       "id": "ST637",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult demonstrating 90/90 Hip Switch No Hands at the no-hands left 90/90 step: Unsupported first endpoint.",
+          "step": "No-hands left 90/90",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/9162737c-dd44-487a-fbcb-e36c650e3200/public"
+        },
+        {
+          "alt": "Adult demonstrating 90/90 Hip Switch No Hands at the no-hands center step: Unsupported switch midpoint.",
+          "step": "No-hands center",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/79dd3784-99cf-4021-7273-89df85058100/public"
+        },
+        {
+          "alt": "Adult demonstrating 90/90 Hip Switch No Hands at the no-hands right 90/90 step: Unsupported mirrored endpoint.",
+          "step": "No-hands right 90/90",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/42def539-75fb-4ca9-694d-78037276eb00/public"
+        }
+      ],
       "kind": "stretch",
       "level": "advanced",
       "modality": "Mobility",
@@ -29678,7 +30904,18 @@
       ],
       "equipment": [],
       "id": "ST638",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult demonstrating 90/90 Front-Leg Lift-Off at the 90/90 setup step: Tall pelvis over a controlled shin-box base.",
+          "step": "90/90 setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/f3e6082f-fbc4-484f-5f27-f42252bb5500/public"
+        },
+        {
+          "alt": "Adult demonstrating 90/90 Front-Leg Lift-Off at the front ankle lift-off step: Small active external-rotation lift without leaning away.",
+          "step": "Front ankle lift-off",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/2ea18352-2d46-4c55-2ff8-7a892d5b6000/public"
+        }
+      ],
       "kind": "stretch",
       "level": "intermediate",
       "modality": "Mobility",
@@ -29718,7 +30955,18 @@
       ],
       "equipment": [],
       "id": "ST639",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult demonstrating 90/90 Back-Leg Lift-Off at the supported 90/90 setup step: Stable starting 90/90.",
+          "step": "Supported 90/90 setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/e25e6759-9b05-4916-79a7-6cf4eac3ad00/public"
+        },
+        {
+          "alt": "Adult demonstrating 90/90 Back-Leg Lift-Off at the back ankle lift-off step: Hip internal-rotation lift-off.",
+          "step": "Back ankle lift-off",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/a2bebb45-1b53-480e-22f5-2c7f2cfe9400/public"
+        }
+      ],
       "kind": "stretch",
       "level": "intermediate",
       "modality": "Mobility",
@@ -29758,7 +31006,18 @@
       ],
       "equipment": [],
       "id": "ST640",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult demonstrating 90/90 Internal Rotation Hover at the right 90/90 setup step: Stable pre-hover position.",
+          "step": "Right 90/90 setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/e8631fbd-1fd6-4d2f-214d-794b984e0100/public"
+        },
+        {
+          "alt": "Adult demonstrating 90/90 Internal Rotation Hover at the back-foot hover step: Small controlled internal-rotation hover.",
+          "step": "Back-foot hover",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/dcecc799-d1f6-446a-3881-b1e14638b500/public"
+        }
+      ],
       "kind": "stretch",
       "level": "intermediate",
       "modality": "Mobility",
@@ -29798,7 +31057,18 @@
       ],
       "equipment": [],
       "id": "ST641",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult demonstrating Seated Shin Box Forward Fold at the shin-box setup step: Tall shin-box posture with square controlled pelvis.",
+          "step": "Shin-box setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/d493e64f-01dc-4f22-89e2-6d7d70737100/public"
+        },
+        {
+          "alt": "Adult demonstrating Seated Shin Box Forward Fold at the forward fold step: Controlled hip fold with relaxed breathing.",
+          "step": "Forward fold",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/31d67695-3de6-4ad7-5f43-03e46b5a1a00/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Static stretch",
@@ -29839,7 +31109,18 @@
       ],
       "equipment": [],
       "id": "ST642",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult demonstrating Shin Box Hip Flexor Lean at the shin-box setup step: Tall shin-box start.",
+          "step": "Shin-box setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/dc9d1a47-1ead-4f38-4164-645d9dd76900/public"
+        },
+        {
+          "alt": "Adult demonstrating Shin Box Hip Flexor Lean at the hip flexor lean step: Gentle back-leg hip-flexor stretch.",
+          "step": "Hip flexor lean",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/edcbf0f2-3f82-4ee1-6bb8-2fda8d36e500/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Static stretch",
@@ -30024,7 +31305,7 @@
           "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/4d75c527-9c3b-498e-1496-43da90634900/public"
         },
         {
-          "alt": "Adult demonstrating Half-Kneeling Hip Flexor with Side Reach and Tuck at the side reach and tuck step: Moving trunk/limb: pelvis gently tucks, back-leg glute engages, and the arm on the back-knee side reaches overhead and arcs toward image-left. Stable limbs: front foot and knee remain image-left; back knee/shin remain supported image-right; other hand stays on hip. Camera: same front three-quarter view. Viewer-side check: leg stance exactly matches setup and one overhead arm lengthens the back-knee side. Must not mirror legs, switch stance, lift both arms, or show extra limbs.",
+          "alt": "Half-kneeling hip-flexor stretch with pelvis tucked and the arm on the back-knee side reaching overhead into a side bend.",
           "step": "Side reach and tuck",
           "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/93cc4762-0762-4bf3-dbee-ecdfaf7a1600/public"
         }
@@ -84742,7 +86023,23 @@
       ],
       "equipment": [],
       "id": "ST347",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult demonstrating Supine Leg Lowering Stretch at the both legs raised step: Controlled symmetric start.",
+          "step": "Both legs raised",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/a907db65-6f01-4a3a-736a-209247e0ec00/public"
+        },
+        {
+          "alt": "Adult demonstrating Supine Leg Lowering Stretch at the lower right leg step: Controlled right-leg endpoint.",
+          "step": "Lower right leg",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/6b5ae193-3701-465d-cf30-a96b2facdc00/public"
+        },
+        {
+          "alt": "Adult demonstrating Supine Leg Lowering Stretch at the lower left leg step: Controlled left-leg endpoint.",
+          "step": "Lower left leg",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/56aafd6c-9ad3-4576-b769-a1323789c500/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Mobility",
@@ -84795,12 +86092,12 @@
           "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/beb78a3b-79f8-42f1-bcf0-064950765800/public"
         },
         {
-          "alt": "Adult demonstrating Standing Quad Stretch at the right quad hold step: Moving limbs: anatomical right leg on viewer-left bends straight back, right heel approaches right glute, and anatomical right hand holds right ankle/upper foot. Stable limbs: anatomical left leg on viewer-right remains planted; left arm balances. Direct front camera. Bent thigh remains nearly vertical, knees close, pelvis gently tucked. Must not show left leg bent, crossed foot, opposite-hand hold, flared knee, arched back, or malformed limbs.",
+          "alt": "Front view of a standing right quadriceps stretch with the right hand holding the right ankle behind the body and the left foot planted.",
           "step": "Right quad hold",
           "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/19aa2cf5-ae11-4184-e0b3-e6ae3ec18d00/public"
         },
         {
-          "alt": "Adult demonstrating Standing Quad Stretch at the left quad hold step: Moving limbs: anatomical left leg on viewer-right bends straight back, left heel approaches left glute, and anatomical left hand holds left ankle/upper foot. Stable limbs: anatomical right leg on viewer-left remains planted; right arm balances. Direct front camera. Bent thigh remains nearly vertical, knees close, pelvis gently tucked. Must not show right leg bent, crossed foot, opposite-hand hold, flared knee, arched back, or malformed limbs.",
+          "alt": "Front view of a standing left quadriceps stretch with the left hand holding the left ankle behind the body and the right foot planted.",
           "step": "Left quad hold",
           "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/d73ae8ea-b0a0-4735-a659-eda20451f100/public"
         }
@@ -84848,7 +86145,18 @@
       ],
       "equipment": [],
       "id": "ST349",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult demonstrating Side-Lying Quad Stretch at the side-lying setup step: Long neutral side-lying base.",
+          "step": "Side-lying setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/dfeaf319-778b-4100-845d-7b5e738d1700/public"
+        },
+        {
+          "alt": "Adult demonstrating Side-Lying Quad Stretch at the top-leg stretch step: Gentle heel-to-glute quad stretch with stacked hips.",
+          "step": "Top-leg stretch",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/87eb17e4-717b-4305-62de-df8d04fd4100/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Static Stretch",
@@ -84892,7 +86200,18 @@
       ],
       "equipment": [],
       "id": "ST350",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult demonstrating Prone Quad Stretch at the prone setup step: Neutral pelvis before bend.",
+          "step": "Prone setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/2cf98123-506c-4486-09f4-09e4b5dec100/public"
+        },
+        {
+          "alt": "Adult demonstrating Prone Quad Stretch at the same-side quad hold step: Same-side quad stretch without lumbar arch.",
+          "step": "Same-side quad hold",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/b0375a3d-e0e3-4380-8e21-f96c62f5c700/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Static Stretch",
@@ -84936,7 +86255,23 @@
       ],
       "equipment": [],
       "id": "ST351",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult demonstrating Kneeling Quad Stretch at the half-kneeling setup step: Stable pre-stretch base.",
+          "step": "Half-kneeling setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/6a4e8b00-e055-4060-ac6e-ea7885c2d400/public"
+        },
+        {
+          "alt": "Adult demonstrating Kneeling Quad Stretch at the hold rear foot step: Mild left-quadriceps stretch.",
+          "step": "Hold rear foot",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/f2e3ec18-84b7-4f7b-b412-4c7392908f00/public"
+        },
+        {
+          "alt": "Adult demonstrating Kneeling Quad Stretch at the switch sides step: Mild right-quadriceps stretch.",
+          "step": "Switch sides",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/7c6bab20-78b8-4b27-52ff-10639fb36000/public"
+        }
+      ],
       "kind": "stretch",
       "level": "intermediate",
       "modality": "Static Stretch",
@@ -84982,7 +86317,18 @@
         "Couch or wall"
       ],
       "id": "ST352",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult demonstrating Couch Quad Stretch at the couch setup step: Supported half kneel close enough to the wall for control.",
+          "step": "Couch setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/1865e90b-4f6e-484c-1cfb-ed7a5b177500/public"
+        },
+        {
+          "alt": "Adult demonstrating Couch Quad Stretch at the tall couch stretch step: Tall front-of-thigh stretch with small posterior pelvic tilt.",
+          "step": "Tall couch stretch",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/26dd57d3-153d-4552-7ae5-e8c5409adb00/public"
+        }
+      ],
       "kind": "stretch",
       "level": "intermediate",
       "modality": "Static Stretch",
@@ -85027,7 +86373,18 @@
       ],
       "equipment": [],
       "id": "ST353",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult demonstrating Half-Kneeling Quad Stretch at the half-kneeling setup step: Balanced lunge setup.",
+          "step": "Half-kneeling setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/0d789ac2-89f3-499c-3134-ae8e55219600/public"
+        },
+        {
+          "alt": "Adult demonstrating Half-Kneeling Quad Stretch at the back-foot quad hold step: Half-kneeling quad stretch.",
+          "step": "Back-foot quad hold",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/2ff628f6-7790-4edf-2fd2-637aa0cedc00/public"
+        }
+      ],
       "kind": "stretch",
       "level": "intermediate",
       "modality": "Static Stretch",
@@ -85071,7 +86428,23 @@
       ],
       "equipment": [],
       "id": "ST354",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult demonstrating Standing Quad Stretch with Reach at the standing setup step: Balanced neutral start.",
+          "step": "Standing setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/40575404-467b-4e54-7ae0-117ac2706d00/public"
+        },
+        {
+          "alt": "Adult demonstrating Standing Quad Stretch with Reach at the right quad with reach step: Right-quadriceps stretch with opposite reach.",
+          "step": "Right quad with reach",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/28226bf1-e384-44d2-9623-44d5717c6800/public"
+        },
+        {
+          "alt": "Adult demonstrating Standing Quad Stretch with Reach at the left quad with reach step: Left-quadriceps stretch with opposite reach.",
+          "step": "Left quad with reach",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/8c920872-93ef-41fe-0c1f-0baed4ed9c00/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Static Stretch",
@@ -85117,12 +86490,12 @@
       "id": "ST355",
       "images": [
         {
-          "alt": "Adult demonstrating Dynamic Quad Pull Walk at the right quad pull step: Moving limbs: the near right knee bends behind and the right heel rises toward the glute while the right hand holds the same shoe. Stable limbs: the other whole foot supports and the free arm reaches gently for balance. Camera: eye-level rear three-quarter view, subject facing image-right. Viewer-side check: hand, held shoe and bent leg belong to the same side; support leg is straight and distinct. Must not show crossed-side grip, knee flaring wide, extra limbs.",
+          "alt": "Walking quadriceps stretch with the right knee bent behind and the right hand holding the right shoe while the left leg supports.",
           "step": "Right quad pull",
           "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/93a4f050-a052-419e-3c50-e52c69a56300/public"
         },
         {
-          "alt": "Adult demonstrating Dynamic Quad Pull Walk at the left quad pull step: Moving limbs: the bent knee, lifted heel, held shoe and holding hand switch visibly to image-right. Stable limbs: the straight grounded support leg and shoe occupy image-left; the free arm extends for balance. Camera: same eye-level rear three-quarter view. Viewer-side check: hand and held shoe meet on image-right, while one distinct support leg remains grounded image-left. Must not repeat the first-side pose, bend image-left leg, or show extra limbs.",
+          "alt": "Walking quadriceps stretch with the left knee bent behind and the left hand holding the left shoe while the right leg supports.",
           "step": "Left quad pull",
           "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/bd44283f-817f-4f0f-1f32-38a776257000/public"
         }
@@ -86808,12 +88181,12 @@
       "id": "ST386",
       "images": [
         {
-          "alt": "Adult demonstrating Standing Inner Thigh Stretch at the wide stance step: Centered wide stance; both legs straight but not locked; weight centered; hips level; hands at hips. Viewer map: subject's RIGHT leg is IMAGE-LEFT and subject's LEFT leg is IMAGE-RIGHT. Both bare feet are parallel with long axes toward the bottom edge; all toes point forward toward the camera; heels fully planted. Must not show: either foot angled toward a side edge, turned-out toes, heels raised, bent knee, side profile, mirrored/rear view, missing or extra limbs.",
+          "alt": "Front view of a wide standing stance with both feet parallel, legs long, hips level, and hands resting at the hips.",
           "step": "Wide stance",
           "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/f2cedbe5-e952-4c5f-6134-d09a84426200/public"
         },
         {
-          "alt": "Adult demonstrating Standing Inner Thigh Stretch at the lateral shift step: SUBJECT'S RIGHT LEG = IMAGE-LEFT LEG = completely straight stretching leg with toes toward bottom edge. SUBJECT'S LEFT LEG = IMAGE-RIGHT LEG = bent weight-bearing leg with knee tracking toward bottom edge over the same-direction toes. Hips shift toward image-right and slightly back. Both feet parallel and heels planted. Must not show: role swap; bent image-left knee; straight image-right knee; either foot angled toward a side edge; turned-out toes; raised heel; side profile; camera mirror; missing or extra limbs.",
+          "alt": "Front view of a lateral inner-thigh stretch with weight shifted over the bent left knee while the right leg stays straight and both heels stay down.",
           "step": "Lateral shift",
           "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/78f916d2-fef1-4d3c-1cce-323c58132900/public"
         }
@@ -88785,7 +90158,33 @@
       ],
       "equipment": [],
       "id": "ST429",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult demonstrating Sun Salutation A at the overhead reach step: Ribs controlled with arms reaching up.",
+          "step": "Overhead reach",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/67d9f379-1be7-4d8a-93aa-8c347d088100/public"
+        },
+        {
+          "alt": "Adult demonstrating Sun Salutation A at the forward fold step: Relaxed forward fold without locked knees.",
+          "step": "Forward fold",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/184099e9-7189-456e-10b1-229a016a2800/public"
+        },
+        {
+          "alt": "Adult demonstrating Sun Salutation A at the high plank step: Long high plank with hips level.",
+          "step": "High plank",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/8d1f54bb-2441-4d27-82c4-dd882be21700/public"
+        },
+        {
+          "alt": "Adult demonstrating Sun Salutation A at the gentle cobra step: Gentle cobra with shoulders down.",
+          "step": "Gentle cobra",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/acd2aec4-2c42-469f-17d8-9be2e491eb00/public"
+        },
+        {
+          "alt": "Adult demonstrating Sun Salutation A at the downward dog and return step: Downward dog followed by step-forward and rise cue.",
+          "step": "Downward dog and return",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/f0712cfe-8009-4579-2667-eebcd0f16d00/public"
+        }
+      ],
       "kind": "stretch",
       "level": "intermediate",
       "modality": "Mobility Flow",
@@ -88827,7 +90226,28 @@
       ],
       "equipment": [],
       "id": "ST430",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult demonstrating Half Sun Salutation at the overhead reach step: Tall inhale reach.",
+          "step": "Overhead reach",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/c9153cc2-c514-4fa7-d0e5-e5249e79a200/public"
+        },
+        {
+          "alt": "Adult demonstrating Half Sun Salutation at the forward fold step: Exhale fold without forcing range.",
+          "step": "Forward fold",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/11d0ac37-4fae-4e22-1587-a7f0aec8eb00/public"
+        },
+        {
+          "alt": "Adult demonstrating Half Sun Salutation at the half lift step: Flat-back inhale half lift.",
+          "step": "Half lift",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/82da475e-7ce7-49c9-b611-80cc72322500/public"
+        },
+        {
+          "alt": "Adult demonstrating Half Sun Salutation at the return to standing step: Controlled standing return.",
+          "step": "Return to standing",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/3714fa5e-f81a-4ce4-c42d-093944380500/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Mobility Flow",
@@ -88869,7 +90289,28 @@
       ],
       "equipment": [],
       "id": "ST431",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult demonstrating World's Greatest Stretch Flow at the low-lunge setup step: Stable runner's-lunge base.",
+          "step": "Low-lunge setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/11d87fc5-6f3a-43de-3eca-3f9cb907d000/public"
+        },
+        {
+          "alt": "Adult demonstrating World's Greatest Stretch Flow at the elbow to instep step: Mild hip-and-groin stretch.",
+          "step": "Elbow to instep",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/268eea52-1a3a-4f21-9cdd-a974626a8e00/public"
+        },
+        {
+          "alt": "Adult demonstrating World's Greatest Stretch Flow at the thoracic sky reach step: Upper-back rotation over stable hips.",
+          "step": "Thoracic sky reach",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/c42fa4f2-9bfa-4a6f-c989-532568aca700/public"
+        },
+        {
+          "alt": "Adult demonstrating World's Greatest Stretch Flow at the half-split fold step: Gentle front-leg hamstring endpoint.",
+          "step": "Half-split fold",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/c333ea5a-296c-4331-d653-e38030058800/public"
+        }
+      ],
       "kind": "stretch",
       "level": "intermediate",
       "modality": "Mobility Flow",
@@ -88912,7 +90353,23 @@
       ],
       "equipment": [],
       "id": "ST432",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult demonstrating Down Dog to Cobra Flow at the downward dog step: Hips high, long spine, inverted V.",
+          "step": "Downward dog",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/87be3e3b-dbf5-4ac9-34ca-437d5d892300/public"
+        },
+        {
+          "alt": "Adult demonstrating Down Dog to Cobra Flow at the high plank step: Head-to-heels long line.",
+          "step": "High plank",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/b76acb24-948d-45d1-8956-250669a92500/public"
+        },
+        {
+          "alt": "Adult demonstrating Down Dog to Cobra Flow at the gentle cobra and return step: Modest cobra with explicit return-to-dog cue.",
+          "step": "Gentle cobra and return",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/74f08b35-d920-4533-c347-7a226a82bd00/public"
+        }
+      ],
       "kind": "stretch",
       "level": "intermediate",
       "modality": "Mobility Flow",
@@ -88955,7 +90412,23 @@
       ],
       "equipment": [],
       "id": "ST433",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult demonstrating Cat-Cow to Child's Pose Flow at the cow position step: Gentle cow without neck compression.",
+          "step": "Cow position",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/3c9ee472-2f8b-416c-9633-c3ba95d8ce00/public"
+        },
+        {
+          "alt": "Adult demonstrating Cat-Cow to Child's Pose Flow at the cat position step: Full exhale cat shape.",
+          "step": "Cat position",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/fac1a06a-4602-4ebf-7f12-4d0fd4674000/public"
+        },
+        {
+          "alt": "Adult demonstrating Cat-Cow to Child's Pose Flow at the child's pose rock-back step: Slow flow endpoint.",
+          "step": "Child's pose rock-back",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/95747490-79cc-4a7d-cb63-b7f73fcecd00/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Mobility Flow",
@@ -88998,7 +90471,23 @@
       ],
       "equipment": [],
       "id": "ST434",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult demonstrating 90/90 Hip Flow at the left 90/90 step: Supported first hip endpoint.",
+          "step": "Left 90/90",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/d74d174f-cc94-4c8e-91db-7c0fb04dc700/public"
+        },
+        {
+          "alt": "Adult demonstrating 90/90 Hip Flow at the supported center switch step: Slow supported midpoint.",
+          "step": "Supported center switch",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/fbd5ad56-7745-45d9-3ef3-631202f51f00/public"
+        },
+        {
+          "alt": "Adult demonstrating 90/90 Hip Flow at the right 90/90 step: Supported mirrored hip endpoint.",
+          "step": "Right 90/90",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/b9e148f5-2828-4597-055d-cde81fc99200/public"
+        }
+      ],
       "kind": "stretch",
       "level": "intermediate",
       "modality": "Mobility Flow",
@@ -89041,7 +90530,23 @@
       ],
       "equipment": [],
       "id": "ST435",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult demonstrating Hip Flexor to Hamstring Flow at the half-kneeling setup step: Tall half-kneeling lunge.",
+          "step": "Half-kneeling setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/8c577678-c1e5-4d4b-cbce-9c1efeb3b900/public"
+        },
+        {
+          "alt": "Adult demonstrating Hip Flexor to Hamstring Flow at the hip-flexor shift step: Posterior pelvic tuck with gentle front-hip stretch.",
+          "step": "Hip-flexor shift",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/6d9e5852-04e4-4bca-5a8a-9d84276cbd00/public"
+        },
+        {
+          "alt": "Adult demonstrating Hip Flexor to Hamstring Flow at the hamstring shift step: Half-split hamstring endpoint.",
+          "step": "Hamstring shift",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/c61fa838-c131-4c50-c46b-67198be21200/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Mobility Flow",
@@ -89209,7 +90714,7 @@
           "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/a7fc0e8b-361d-4bd1-c7a3-70fa8d903400/public"
         },
         {
-          "alt": "Adult demonstrating Dynamic Lunge Matrix at the reverse lunge step: Moving limb: one foot steps to the upper-right/rear floor plane and rear knee lowers under control. Stable limb: opposite foot stays forward and flat with knee over ankle; both arms reach forward. Camera: same elevated front three-quarter. Viewer-side check: front and rear shoes are distinct, rear heel is lifted, rear knee hovers above floor. Must not show forward/lateral stance, knee resting down, front heel lifted, extra limbs.",
+          "alt": "Elevated three-quarter view of a reverse lunge with the rear knee hovering above the floor and the front foot planted.",
           "step": "Reverse lunge",
           "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/d253b6df-5148-4e5f-e601-a38a2c0cd300/public"
         }
@@ -90756,7 +92261,7 @@
           "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/6a8ef054-32be-4a2e-3108-db2f36eb1800/public"
         },
         {
-          "alt": "Adult demonstrating 90/90 Breathing Reset at the breathing step: Only both arms/hands move into two visible torso contacts. Hand A rests on lower sternum/center chest; Hand B rests on upper abdomen below ribs, with visible gap and distinct forearms. Stable limbs: head/back supported; both thighs vertical; both knees bent 90 degrees; both calves fully supported on chair; feet relaxed. Viewer check: both hands, both supported legs, and chair remain visible. Must not show: one hand only, hands merged or stacked, extra hands, exaggerated belly inflation, feet leaving chair, changed knee angle, head lifted, missing limbs.",
+          "alt": "Supine 90/90 breathing position with calves supported on a chair and separate hands resting on the chest and upper abdomen.",
           "step": "Breathing",
           "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/e5a9a59f-f63f-4c07-e0f6-a41210308300/public"
         }
@@ -90856,7 +92361,7 @@
           "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/bc4a9a5d-ca37-4dcb-240d-8523785c4b00/public"
         },
         {
-          "alt": "Adult demonstrating Legs-Up-the-Wall at the legs supported step: Moving limbs: both legs have swung up and rest separately against image-right wall. Stable limbs: subject lies supine with head/torso image-left, hips near wall, arms relaxed palms up. Camera: same slightly elevated right-side three-quarter view. Viewer-side check: both legs and feet are distinct, anatomically connected, and supported; back/hips remain on mat. Must not show one leg down, crossed/bent legs, feet floating away, extra limbs.",
+          "alt": "Supine legs-up-the-wall position with both legs extended separately against the wall, hips close to the wall, and arms relaxed.",
           "step": "Legs supported",
           "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/9e1d02a7-8b66-41b8-eb3c-264aa5305700/public"
         }
@@ -90998,7 +92503,7 @@
           "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/3c0fe1ce-1732-4edc-d279-dea8d408a300/public"
         },
         {
-          "alt": "Adult demonstrating Corpse Pose at the relaxed hold step: Moving limbs: both legs extend long from the bent-knee setup and settle slightly apart with toes falling outward; both arms open roughly 30–45 degrees from the torso with palms up. Stable position: supine, eyes closed, shoulders heavy, natural breath. Camera: unchanged oblique overhead from the subject's right, head image-left and feet image-right. Must not show palms down, knees bent, feet together, toes forced inward, arms overhead, or malformed limbs.",
+          "alt": "Relaxed corpse pose lying on the back with legs slightly apart, toes falling outward, and arms open with palms up.",
           "step": "Relaxed hold",
           "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/adf344cd-72a3-4dd2-4ea0-e4d737d9bc00/public"
         }
