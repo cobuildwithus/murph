@@ -547,6 +547,26 @@ export async function loadAndPersistResolvedSession(input: {
   }
 }
 
+export async function retireLegacyAssistantConversationKey(
+  paths: AssistantStatePaths,
+  session: AssistantSession,
+): Promise<AssistantSession> {
+  if (session.binding.conversationKey === null) {
+    return session
+  }
+
+  const retired = normalizeAssistantConversationSnapshot({
+    ...session,
+    binding: {
+      ...session.binding,
+      conversationKey: null,
+    },
+  })
+  await writeAssistantSession(paths, retired)
+  await synchronizeAssistantIndexes(paths, retired, session)
+  return retired
+}
+
 export function isAssistantSessionExpired(
   session: AssistantSession,
   maxSessionAgeMs: number | null | undefined,

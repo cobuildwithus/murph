@@ -430,6 +430,7 @@ export interface HostedExecutionEmailConversationMessagePayload {
   subject?: string | null;
   textPreview?: string | null;
   threadKey?: string | null;
+  threadIsDirect?: boolean | null;
   threadTarget?: string | null;
   to?: string[];
 }

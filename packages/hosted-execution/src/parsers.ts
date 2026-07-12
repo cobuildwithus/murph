@@ -428,6 +428,16 @@ export function parseHostedExecutionConversationMessagePayload(
                 "Hosted execution conversation.message wake payload threadKey",
               ),
             }),
+        ...(record.threadIsDirect === undefined
+          ? {}
+          : {
+              threadIsDirect: record.threadIsDirect === null
+                ? null
+                : requireBoolean(
+                    record.threadIsDirect,
+                    "Hosted execution conversation.message wake payload threadIsDirect",
+                  ),
+            }),
         ...(record.threadTarget === undefined
           ? {}
           : {

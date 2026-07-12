@@ -7,10 +7,14 @@ import {
 import { afterEach, describe, expect, it } from 'vitest'
 
 import {
+  appendAssistantTranscriptEntries,
+  getAssistantSession,
+  listAssistantTranscriptEntries,
   listAssistantSessions,
   resolveAssistantSession,
   saveAssistantSession,
 } from '../src/assistant/store.ts'
+import { resolveLegacyAssistantConversationKey } from '../src/assistant/bindings.ts'
 import {
   resolveAssistantSessionForMessage,
 } from '../src/assistant/session-resolution.ts'
@@ -243,6 +247,115 @@ describe('assistant session resolution store integration', () => {
       direct.session.sessionId,
     ].sort())
   })
+
+  it('migrates a provably direct legacy Telegram session to the audience key once', async () => {
+    const { parentRoot, vaultRoot } = await createTempVaultContext(
+      'assistant-session-resolution-legacy-direct-',
+    )
+    cleanupPaths.push(parentRoot)
+    const locator = {
+      actorId: 'telegram-member',
+      channel: 'telegram',
+      identityId: 'telegram-bot',
+      threadId: 'telegram-thread',
+      threadIsDirect: true,
+    } as const
+    const created = await resolveAssistantSession({
+      ...locator,
+      target: createCodexTarget(),
+      vault: vaultRoot,
+    })
+    const legacyKey = resolveLegacyAssistantConversationKey(locator)
+    expect(legacyKey).not.toBeNull()
+    await saveAssistantSession(vaultRoot, {
+      ...created.session,
+      binding: {
+        ...created.session.binding,
+        conversationKey: legacyKey,
+      },
+    })
+
+    const migrated = await resolveAssistantSession({
+      ...locator,
+      createIfMissing: false,
+      vault: vaultRoot,
+    })
+    expect(migrated.created).toBe(false)
+    expect(migrated.session.sessionId).toBe(created.session.sessionId)
+    expect(migrated.session.binding.conversationKey).toContain('|audience:direct|')
+    expect(migrated.resolutionDiagnostics).toMatchObject({
+      legacyAudienceContinuity: 'migrated',
+      sessionResolutionLookupSource: 'conversation-key',
+    })
+
+    const repeated = await resolveAssistantSession({
+      ...locator,
+      createIfMissing: false,
+      vault: vaultRoot,
+    })
+    expect(repeated.session.sessionId).toBe(created.session.sessionId)
+    expect(repeated.resolutionDiagnostics).not.toHaveProperty('legacyAudienceContinuity')
+  })
+
+  it.each([true, false])(
+    'explicitly resets an unprovable legacy Linq audience (direct=%s)',
+    async (threadIsDirect) => {
+      const { parentRoot, vaultRoot } = await createTempVaultContext(
+        `assistant-session-resolution-legacy-linq-${String(threadIsDirect)}-`,
+      )
+      cleanupPaths.push(parentRoot)
+      const locator = {
+        actorId: 'linq-member',
+        channel: 'linq',
+        identityId: 'linq-line',
+        threadId: 'linq-thread',
+        threadIsDirect,
+      } as const
+      const legacy = await resolveAssistantSession({
+        ...locator,
+        target: createCodexTarget(),
+        vault: vaultRoot,
+      })
+      await appendAssistantTranscriptEntries(vaultRoot, legacy.session.sessionId, [
+        {
+          kind: 'assistant',
+          text: 'legacy audience history must not cross the reset',
+        },
+      ])
+      await saveAssistantSession(vaultRoot, {
+        ...legacy.session,
+        binding: {
+          ...legacy.session.binding,
+          conversationKey: resolveLegacyAssistantConversationKey(locator),
+        },
+      })
+
+      const reset = await resolveAssistantSession({
+        ...locator,
+        target: createCodexTarget(),
+        vault: vaultRoot,
+      })
+      expect(reset.created).toBe(true)
+      expect(reset.session.sessionId).not.toBe(legacy.session.sessionId)
+      expect(reset.resolutionDiagnostics).toMatchObject({
+        legacyAudienceContinuity: 'reset',
+        sessionResolutionLookupSource: 'created',
+      })
+      const retired = await getAssistantSession(vaultRoot, legacy.session.sessionId)
+      expect(retired.binding.conversationKey).toBeNull()
+      expect(retired.updatedAt).toBe(legacy.session.updatedAt)
+      expect(
+        await listAssistantTranscriptEntries(vaultRoot, reset.session.sessionId),
+      ).toEqual([])
+
+      const repeated = await resolveAssistantSession({
+        ...locator,
+        createIfMissing: false,
+        vault: vaultRoot,
+      })
+      expect(repeated.session.sessionId).toBe(reset.session.sessionId)
+    },
+  )
 
   it('still rejects a session-id resume that retargets a bound audience unless rebind is explicitly allowed', async () => {
     const { parentRoot, vaultRoot } = await createTempVaultContext(

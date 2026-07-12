@@ -23,6 +23,7 @@ describe("hosted email ingress contract", () => {
       selfAddress: "reply@example.com",
       subject: "Hosted email",
       textPreview: "Please look at this update.",
+      threadIsDirect: false,
       threadKey: "<thread-root@example.test>",
       threadTarget: "hostedmail:opaque-thread-target",
       to: ["reply@example.com"],
@@ -44,6 +45,7 @@ describe("hosted email ingress contract", () => {
       selfAddress: "reply@example.com",
       subject: "Hosted email",
       textPreview: "Please look at this update.",
+      threadIsDirect: false,
       threadKey: "<thread-root@example.test>",
       threadTarget: "hostedmail:opaque-thread-target",
       to: ["reply@example.com"],
@@ -114,6 +116,10 @@ describe("hosted email ingress contract", () => {
       ...base,
       threadKey: "x".repeat(513),
     })).toThrow(/threadKey must be at most 512 characters/u);
+    expect(() => parseHostedEmailIngressWakeAppendRequest({
+      ...base,
+      threadIsDirect: "yes",
+    })).toThrow(/threadIsDirect must be a boolean/u);
     expect(() => parseHostedEmailIngressWakeAppendRequest({
       ...base,
       threadTarget: "x".repeat(HOSTED_EMAIL_THREAD_TARGET_MAX_LENGTH + 1),

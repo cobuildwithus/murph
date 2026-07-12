@@ -40,6 +40,9 @@ export const POST = withJsonError(async (request: Request) => {
     ...(body.subject === undefined ? {} : { subject: body.subject }),
     ...(body.textPreview === undefined ? {} : { textPreview: body.textPreview }),
     ...(body.threadKey === undefined ? {} : { threadKey: body.threadKey }),
+    ...(body.threadIsDirect === undefined
+      ? {}
+      : { threadIsDirect: body.threadIsDirect }),
     ...(body.threadTarget === undefined ? {} : { threadTarget: body.threadTarget }),
     ...(body.to === undefined ? {} : { to: body.to }),
     userId,

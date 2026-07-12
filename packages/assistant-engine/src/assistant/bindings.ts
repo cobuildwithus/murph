@@ -42,6 +42,19 @@ export interface AssistantBindingIsolationConflict {
 export function resolveAssistantConversationKey(
   input: AssistantBindingInput,
 ): string | null {
+  return resolveAssistantConversationKeyWithAudience(input, true)
+}
+
+export function resolveLegacyAssistantConversationKey(
+  input: AssistantBindingInput,
+): string | null {
+  return resolveAssistantConversationKeyWithAudience(input, false)
+}
+
+function resolveAssistantConversationKeyWithAudience(
+  input: AssistantBindingInput,
+  includeAudience: boolean,
+): string | null {
   const channel = normalizeNullableString(input.channel)
   const identityId = normalizeNullableString(input.identityId)
   const actorId = normalizeNullableString(input.actorId)
@@ -64,7 +77,9 @@ export function resolveAssistantConversationKey(
   const entries = [
     ['channel', channel],
     ['identity', identityId],
-    ['audience', resolveAssistantConversationAudience(input.threadIsDirect)],
+    ...(includeAudience
+      ? [['audience', resolveAssistantConversationAudience(input.threadIsDirect)] as [string, string]]
+      : []),
     scope,
   ].filter((entry): entry is [string, string] => entry[1] !== null)
 
@@ -282,7 +297,7 @@ function getAssistantBindingDeliveryContextLine(
     return null
   }
 
-  if (binding.channel === 'linq') {
+  if (binding.channel === 'linq' || binding.channel === 'email') {
     return `delivery: ${binding.delivery.kind} route available`
   }
 

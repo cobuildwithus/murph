@@ -267,6 +267,7 @@ export function buildHostedExecutionEmailConversationMessageWake(input: {
   subject?: string | null;
   textPreview?: string | null;
   threadKey?: string | null;
+  threadIsDirect?: boolean | null;
   threadTarget?: string | null;
   to?: string[];
   userId: string;
@@ -294,6 +295,9 @@ export function buildHostedExecutionEmailConversationMessageWake(input: {
       ...(input.subject === undefined ? {} : { subject: input.subject }),
       ...(input.textPreview === undefined ? {} : { textPreview: input.textPreview }),
       ...(input.threadKey === undefined ? {} : { threadKey: input.threadKey }),
+      ...(input.threadIsDirect === undefined
+        ? {}
+        : { threadIsDirect: input.threadIsDirect }),
       ...(input.threadTarget === undefined ? {} : { threadTarget: input.threadTarget }),
       ...(input.to === undefined ? {} : { to: [...input.to] }),
     },

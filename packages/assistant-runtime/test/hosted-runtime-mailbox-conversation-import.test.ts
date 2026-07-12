@@ -2691,6 +2691,7 @@ describe("hosted mailbox conversation import adapter", () => {
         rawMessageKey: "raw_email_thread_authority",
         selfAddress: "assistant@example.test",
         threadKey: "email_thread_root_synthetic",
+        threadIsDirect: true,
         threadTarget: serializeHostedEmailThreadTarget({
           lastMessageId: "email_message_synthetic_001",
           references: ["email_thread_root_synthetic"],
@@ -3644,7 +3645,7 @@ describe("hosted mailbox conversation import adapter", () => {
     });
     assert.equal(JSON.stringify(event).includes("labs.pdf"), true);
     assert.equal(event.replyTarget?.threadId, "hostedmail:opaque-thread-target");
-    assert.equal(event.conversation?.threadIsDirect, null);
+    assert.equal(event.conversation?.threadIsDirect, false);
   });
 
   test("renders group-routed hosted email input without resurfacing address fields", async () => {
@@ -3733,6 +3734,114 @@ describe("hosted mailbox conversation import adapter", () => {
     assert.doesNotMatch(event.content.text ?? "", /Cc:/u);
     assert.doesNotMatch(event.content.text ?? "", /Reply-To:/u);
     assert.equal(event.replyTarget?.threadId, groupThreadTarget);
+  });
+
+  test("keeps hosted group email conversation identity stable while reply envelopes change", async () => {
+    const parentRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-email-group-thread-"));
+    tempRoots.push(parentRoot);
+    const vaultRoot = path.join(parentRoot, "vault");
+    const groupId = "hgrp_AAAAAAAAAAAAAAAA";
+    const stableThreadKey = "group-thread:1111111111111111111111111111111111111111";
+    const targets = [
+      serializeHostedEmailThreadTarget({
+        groupId,
+        lastMessageId: "<group-message-one@example.test>",
+        references: ["<group-root@example.test>", "<group-message-one@example.test>"],
+        subject: "First subject",
+        targetKind: "group",
+      }),
+      serializeHostedEmailThreadTarget({
+        groupId,
+        lastMessageId: "<group-message-two@example.test>",
+        references: [
+          "<group-root@example.test>",
+          "<group-message-one@example.test>",
+          "<group-message-two@example.test>",
+        ],
+        subject: "Changed subject",
+        targetKind: "group",
+      }),
+      serializeHostedEmailThreadTarget({
+        groupId: "hgrp_BBBBBBBBBBBBBBBB",
+        lastMessageId: "<other-group-message@example.test>",
+        references: ["<group-root@example.test>", "<other-group-message@example.test>"],
+        subject: "Other group",
+        targetKind: "group",
+      }),
+    ];
+
+    const legacyGroupId = "hgrp_CCCCCCCCCCCCCCCC";
+    const legacyTargets = [
+      serializeHostedEmailThreadTarget({
+        groupId: legacyGroupId,
+        lastMessageId: "<legacy-group-one@example.test>",
+        references: ["<legacy-group-root@example.test>", "<legacy-group-one@example.test>"],
+        subject: "Legacy first subject",
+        targetKind: "group",
+      }),
+      serializeHostedEmailThreadTarget({
+        groupId: legacyGroupId,
+        lastMessageId: "<legacy-group-two@example.test>",
+        references: [
+          "<legacy-group-root@example.test>",
+          "<legacy-group-one@example.test>",
+          "<legacy-group-two@example.test>",
+        ],
+        subject: "Legacy changed subject",
+        targetKind: "group",
+      }),
+    ];
+
+    const cases = [
+      ...targets.map((threadTarget) => ({ threadKey: stableThreadKey, threadTarget })),
+      ...legacyTargets.map((threadTarget) => ({ threadKey: undefined, threadTarget })),
+    ];
+    for (const [index, { threadKey, threadTarget }] of cases.entries()) {
+      const eventId = `evt_group_thread_${index}`;
+      const decodedWake = createConversationWake({
+        eventId,
+        message: {
+          channel: "email",
+          from: "Email reply from group participant",
+          identityId: null,
+          rawMessageKey: `raw_group_thread_${index}`,
+          textPreview: `Group reply ${index}`,
+          threadIsDirect: false,
+          threadKey,
+          threadTarget,
+        },
+      });
+      const outcome = await importHostedConversationMailboxItem({
+        decodePayload: createDecodedPayloadDecoder(decodedWake),
+        async importConversationWake() {
+          throw new HostedConversationInboxProjectionError("group projection is intentionally omitted");
+        },
+        async prepareWakeContext() {},
+        item: createResolvedConversationMailboxItem({
+          dedupeKey: eventId,
+          id: `mailbox_group_thread_${index}`,
+          laneSeq: String(index + 1),
+        }),
+        runtime: createRuntime(),
+        vaultRoot,
+      });
+      assert.equal(outcome.status, "imported");
+    }
+
+    const events = (await listAssistantInputEvents({ vault: vaultRoot })).events;
+    const byReplyTarget = new Map(
+      events.map((event) => [event.replyTarget?.threadId, event]),
+    );
+    const first = byReplyTarget.get(targets[0]);
+    const second = byReplyTarget.get(targets[1]);
+    const otherGroup = byReplyTarget.get(targets[2]);
+    assert.ok(first?.conversation?.threadId);
+    assert.equal(second?.conversation?.threadId, first.conversation.threadId);
+    assert.notEqual(otherGroup?.conversation?.threadId, first.conversation.threadId);
+    const legacyFirst = byReplyTarget.get(legacyTargets[0]);
+    const legacySecond = byReplyTarget.get(legacyTargets[1]);
+    assert.ok(legacyFirst?.conversation?.threadId);
+    assert.equal(legacySecond?.conversation?.threadId, legacyFirst.conversation.threadId);
   });
 
   test("omits group-routed hosted email raw inbox projection and redacts attachment descriptors", async () => {

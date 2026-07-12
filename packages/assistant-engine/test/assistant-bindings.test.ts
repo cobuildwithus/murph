@@ -10,6 +10,7 @@ import {
   mergeAssistantBinding,
   resolveAssistantBindingDelivery,
   resolveAssistantConversationKey,
+  resolveLegacyAssistantConversationKey,
 } from '../src/assistant/bindings.ts'
 
 describe('assistant bindings', () => {
@@ -49,6 +50,15 @@ describe('assistant bindings', () => {
         threadIsDirect: false,
       }),
     )
+
+    expect(
+      resolveLegacyAssistantConversationKey({
+        channel: 'email',
+        identityId: 'inbox@example.com',
+        threadId: 'same-thread',
+        threadIsDirect: true,
+      }),
+    ).toBe('channel:email|identity:inbox%40example.com|thread:same-thread')
 
     expect(
       resolveAssistantConversationKey({
@@ -323,7 +333,7 @@ describe('assistant bindings', () => {
       'actor: actor-1',
       'thread: thread-source',
       'thread is direct: false',
-      'delivery: thread -> thread-99',
+      'delivery: thread route available',
     ])
 
     const session = {
@@ -387,5 +397,20 @@ describe('assistant bindings', () => {
     expect(getAssistantBindingContextLines(unknownDirectnessBinding)).toContain(
       'iMessage route note: this is not a confirmed direct iMessage thread, so do not use it as a personal reminder route unless the user explicitly asks to send in this thread; use internal channel "linq" only for route fields.',
     )
+  })
+
+  it('keeps raw email reply targets out of assistant context', () => {
+    const deliveryTarget = 'hostedmail:opaque-envelope-with-private-routing-state'
+    const lines = getAssistantBindingContextLines(createAssistantBinding({
+      channel: 'email',
+      deliveryKind: 'thread',
+      deliveryTarget,
+      identityId: 'hid_email_identity',
+      threadId: 'hid_email_thread',
+      threadIsDirect: false,
+    }))
+
+    expect(lines).toContain('delivery: thread route available')
+    expect(lines.join('\n')).not.toContain(deliveryTarget)
   })
 })

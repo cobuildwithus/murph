@@ -369,6 +369,7 @@ describe("hosted email worker ingress", () => {
     expect(typeof rawMessageKey).toBe("string");
     expect(appendInput?.body?.messageId).toBeNull();
     expect(appendInput?.body?.threadKey).toBe(rawMessageKey);
+    expect(appendInput?.body?.threadIsDirect).toBe(true);
     const threadTarget = parseHostedEmailThreadTarget(
       appendInput?.body?.threadTarget,
     );
@@ -498,6 +499,8 @@ describe("hosted email worker ingress", () => {
     expect(appendInput?.body).not.toHaveProperty("cc");
     expect(appendInput?.body).not.toHaveProperty("selfAddress");
     expect(appendInput?.body?.identityId).toBeNull();
+    expect(appendInput?.body?.threadIsDirect).toBe(false);
+    expect(appendInput?.body?.threadKey).toMatch(/^group-thread:[0-9a-f]{40}$/u);
     expect(appendInput?.body?.subject).toBe("Re: [redacted email] weekly health note");
     expect(appendInput?.body?.attachmentSummaries).toEqual([
       {
@@ -607,7 +610,7 @@ describe("hosted email worker ingress", () => {
     expect(listHostedEmailMessageKeys(bucket)).toEqual([]);
   });
 
-  it("leaves direct signed email body addresses unredacted in prompt projection", async () => {
+  it("keeps signed member email body addresses unredacted while classifying extra recipients as non-direct", async () => {
     const bucket = new MemoryEncryptedR2Bucket();
     mocks.fetchHostedExecutionWebControlPlaneResponse
       .mockResolvedValueOnce(new Response(
@@ -642,6 +645,7 @@ describe("hosted email worker ingress", () => {
       from: "owner@example.com",
       raw: buildRawEmail({
         body: "Please compare this note from teammate@example.test and keep From: Owner <owner@example.com> intact.",
+        extraHeaders: ["Cc: Teammate <teammate@example.test>"],
         from: "Owner <owner@example.com>",
         subject: "Question from owner@example.com",
         to: replyAliasAddress,
@@ -654,6 +658,7 @@ describe("hosted email worker ingress", () => {
     expect(appendInput?.body?.subject).toBe("Question from owner@example.com");
     expect(appendInput?.body?.textPreview).toContain("teammate@example.test");
     expect(appendInput?.body?.textPreview).toContain("owner@example.com");
+    expect(appendInput?.body?.threadIsDirect).toBe(false);
   });
 
   it("preserves long hosted email thread targets without truncation", async () => {

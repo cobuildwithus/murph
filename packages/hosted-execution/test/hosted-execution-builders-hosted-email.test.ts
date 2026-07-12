@@ -428,6 +428,7 @@ describe("hosted execution wake builders", () => {
       rawMessageKey: "raw_123",
       selfAddress: null,
       threadKey: null,
+      threadIsDirect: null,
       threadTarget: null,
       userId: "user_123",
     });
@@ -439,10 +440,12 @@ describe("hosted execution wake builders", () => {
     expect("selfAddress" in omitted.message).toBe(false);
     expect("messageId" in omitted.message).toBe(false);
     expect("threadKey" in omitted.message).toBe(false);
+    expect("threadIsDirect" in omitted.message).toBe(false);
     expect("threadTarget" in omitted.message).toBe(false);
     expect(explicitNull.message.messageId).toBeNull();
     expect(explicitNull.message.selfAddress).toBeNull();
     expect(explicitNull.message.threadKey).toBeNull();
+    expect(explicitNull.message.threadIsDirect).toBeNull();
     expect(explicitNull.message.threadTarget).toBeNull();
   });
 

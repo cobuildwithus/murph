@@ -20,6 +20,9 @@ import {
   buildParsedEmailThreadTarget,
   resolveParsedEmailThreadKey,
 } from "@murphai/inboxd/connectors/email/normalize-parsed";
+import {
+  inferDirectEmailThreadFromParticipants,
+} from "@murphai/inboxd";
 
 import { readHostedExecutionEnvironment } from "../env.ts";
 import type {
@@ -229,11 +232,27 @@ export async function handleHostedEmailIngress(
     message: parsedMessage,
     route,
   });
-  const threadKey = resolveParsedEmailThreadKey({
+  const providerThreadKey = resolveParsedEmailThreadKey({
     message: parsedMessage,
     rawMessageKey,
   });
-  const isGroupRoute = Boolean(route.groupId);
+  const isGroupRoute = route.groupId !== null;
+  const threadKey = route.groupId === null
+    ? providerThreadKey
+    : await deriveHostedEmailGroupThreadKey({
+        groupId: route.groupId,
+        providerThreadKey,
+      });
+  const threadIsDirect = isGroupRoute
+    ? false
+    : inferDirectEmailThreadFromParticipants({
+        accountAddress: route.identityId,
+        bcc: parsedMessage.bcc,
+        cc: parsedMessage.cc,
+        from: parsedMessage.from,
+        selfAddresses: [route.routeAddress],
+        to: parsedMessage.to,
+      });
   const promptProjection = buildHostedEmailPromptProjection({
     message: parsedMessage,
     redactedForGroup: isGroupRoute,
@@ -266,14 +285,11 @@ export async function handleHostedEmailIngress(
               HOSTED_EMAIL_PROMPT_SELF_ADDRESS_MAX_CHARS,
             ),
           }),
-      ...(isGroupRoute
-        ? {}
-        : {
-            threadKey: normalizeHostedEmailPromptMetadataScalar(
-              threadKey,
-              HOSTED_EMAIL_PROMPT_THREAD_KEY_MAX_CHARS,
-            ),
-          }),
+      threadIsDirect,
+      threadKey: normalizeHostedEmailPromptMetadataScalar(
+        threadKey,
+        HOSTED_EMAIL_PROMPT_THREAD_KEY_MAX_CHARS,
+      ),
       // Group wakes keep only the exact threadTarget needed for reply
       // threading. Prompt fields above omit To/Cc/self address, summarize From,
       // and redact Subject/body/attachment names before the wake leaves the
@@ -300,6 +316,26 @@ const HOSTED_EMAIL_PROMPT_MESSAGE_ID_MAX_CHARS = 512;
 const HOSTED_EMAIL_PROMPT_THREAD_KEY_MAX_CHARS = 512;
 const HOSTED_EMAIL_PROMPT_THREAD_TARGET_MAX_CHARS =
   HOSTED_EMAIL_THREAD_TARGET_MAX_LENGTH;
+const HOSTED_EMAIL_GROUP_THREAD_KEY_NAMESPACE =
+  "murph.hosted-email.group-thread.v1";
+
+async function deriveHostedEmailGroupThreadKey(input: {
+  groupId: string;
+  providerThreadKey: string;
+}): Promise<string> {
+  const digest = new Uint8Array(await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode([
+      HOSTED_EMAIL_GROUP_THREAD_KEY_NAMESPACE,
+      input.groupId,
+      input.providerThreadKey,
+    ].join("\0")),
+  ));
+  return `group-thread:${[...digest]
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("")
+    .slice(0, 40)}`;
+}
 
 function buildHostedEmailIngressThreadTarget(input: {
   message: ParsedEmailMessage;

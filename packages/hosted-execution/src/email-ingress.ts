@@ -1,4 +1,5 @@
 import {
+  requireBoolean,
   requireObject,
   requireString,
   readNullableNumber,
@@ -35,6 +36,7 @@ export interface HostedEmailIngressWakeAppendRequest {
   subject?: string | null;
   textPreview?: string | null;
   threadKey?: string | null;
+  threadIsDirect?: boolean | null;
   threadTarget?: string | null;
   to?: string[];
 }
@@ -130,6 +132,16 @@ export function parseHostedEmailIngressWakeAppendRequest(
             "Hosted email ingress wake append request threadKey",
             HOSTED_EMAIL_PROMPT_THREAD_KEY_MAX_CHARS,
           ),
+        }),
+    ...(record.threadIsDirect === undefined
+      ? {}
+      : {
+          threadIsDirect: record.threadIsDirect === null
+            ? null
+            : requireBoolean(
+                record.threadIsDirect,
+                "Hosted email ingress wake append request threadIsDirect",
+              ),
         }),
     ...(record.threadTarget === undefined
       ? {}
