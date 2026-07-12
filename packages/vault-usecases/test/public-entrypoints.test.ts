@@ -6,6 +6,7 @@ import * as helpersModule from "../src/helpers.ts";
 import * as capturesModule from "../src/captures.ts";
 import * as encountersModule from "../src/encounters.ts";
 import * as indexModule from "../src/index.ts";
+import * as preferencesModule from "../src/preferences.ts";
 import * as recordsModule from "../src/records.ts";
 import * as runtimeModule from "../src/runtime.ts";
 import * as testingModule from "../src/testing.ts";
@@ -16,6 +17,15 @@ test("public entrypoints expose the expected symbols", () => {
   assert.equal(typeof indexModule.normalizeInputFileOption, "function");
   assert.equal(typeof indexModule.normalizeRepeatableFlagOption, "function");
   assert.equal(typeof indexModule.inputFileOptionSchema.parse, "function");
+  assert.equal(typeof indexModule.showAssistantPersonality, "function");
+  assert.equal(typeof indexModule.setAssistantPersonalitySetting, "function");
+  assert.equal(typeof indexModule.resetAssistantPersonalitySetting, "function");
+  assert.equal(typeof indexModule.resetAllAssistantPersonalitySettings, "function");
+
+  assert.equal(typeof preferencesModule.showAssistantPersonality, "function");
+  assert.equal(typeof preferencesModule.setAssistantPersonalitySetting, "function");
+  assert.equal(typeof preferencesModule.resetAssistantPersonalitySetting, "function");
+  assert.equal(typeof preferencesModule.resetAllAssistantPersonalitySettings, "function");
 
   assert.equal(typeof helpersModule.resolveVaultRelativePath, "function");
   assert.equal(typeof helpersModule.preparePatchedUpsertPayload, "function");

@@ -561,6 +561,7 @@ export async function handleHostedRunnerOpenAiOutbound(
   request: Request,
   env: RunnerOutboundEnvironmentSource,
   _ctx: HostedRunnerOutboundContext,
+  upstreamFetchImpl: typeof fetch = fetch,
 ): Promise<Response> {
   const url = new URL(request.url);
   return await requireHandledProviderEgress(
@@ -568,6 +569,7 @@ export async function handleHostedRunnerOpenAiOutbound(
       ctx: _ctx,
       env,
       request,
+      upstreamFetchImpl,
       url,
       userId: readHostedRunnerBoundUserId(request),
     }),
@@ -1176,6 +1178,7 @@ async function maybeHandleOpenAiRequest(input: {
   ctx?: HostedRunnerOutboundContext;
   env: RunnerOutboundEnvironmentSource;
   request: Request;
+  upstreamFetchImpl?: typeof fetch;
   url: URL;
   userId: string | null;
 }): Promise<Response | null> {
@@ -1258,6 +1261,7 @@ async function maybeHandleOpenAiRequest(input: {
         request: input.request,
         startedAt,
         upstreamRequest,
+        upstreamFetchImpl: input.upstreamFetchImpl,
         url: input.url,
       });
       await diagnosticPromise;
@@ -1270,6 +1274,7 @@ async function maybeHandleOpenAiRequest(input: {
     request: input.request,
     startedAt,
     upstreamRequest,
+    upstreamFetchImpl: input.upstreamFetchImpl,
     url: input.url,
   });
 }
@@ -3641,11 +3646,12 @@ async function fetchAuthorizedProviderUpstream(input: {
   request: Request;
   startedAt: number;
   upstreamRequest: Request;
+  upstreamFetchImpl?: typeof fetch;
   url: URL;
 }): Promise<Response> {
   const upstreamStartedAt = Date.now();
   try {
-    const response = await fetch(input.upstreamRequest);
+    const response = await (input.upstreamFetchImpl ?? fetch)(input.upstreamRequest);
     emitHostedProviderEgressDiagnostic({
       authorization: input.authorization,
       providerKind: input.providerKind,

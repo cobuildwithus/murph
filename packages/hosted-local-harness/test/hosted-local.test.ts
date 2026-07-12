@@ -93,12 +93,48 @@ describe("hosted-local harness", () => {
     expect(resolveHostedLocalE2eScenarios("linq-delivery")[0]?.name).toBe(
       "linq-first-contact",
     );
+    expect(resolveHostedLocalE2eScenarios("linq-group-route-drift")[0]?.file).toBe(
+      "apps/cloudflare/test/hosted-local-linq-group-route-drift-e2e.test.ts",
+    );
+    expect(
+      resolveHostedLocalE2eScenarios("linq-home-line-reroute-retry")[0]?.file,
+    ).toBe(
+      "apps/cloudflare/test/hosted-local-linq-home-line-reroute-retry-e2e.test.ts",
+    );
+    expect(
+      resolveHostedLocalE2eScenarios("family-sponsored-group-roundtrip")[0]?.file,
+    ).toBe(
+      "apps/cloudflare/test/hosted-local-family-sponsored-group-roundtrip-e2e.test.ts",
+    );
+    expect(
+      resolveHostedLocalE2eScenarios("linq-unknown-first-contact-fallback")[0]?.file,
+    ).toBe(
+      "apps/cloudflare/test/hosted-local-linq-unknown-first-contact-fallback-e2e.test.ts",
+    );
     expect(resolveHostedLocalE2eScenarios("temporal-orchestration")[0]?.file).toBe(
       "apps/cloudflare/test/hosted-local-temporal-orchestration-e2e.test.ts",
     );
     expect(resolveHostedLocalE2eScenarios("timezone-injection")[0]?.file).toBe(
       "apps/cloudflare/test/hosted-local-timezone-injection-e2e.test.ts",
     );
+    expect(resolveHostedLocalE2eScenarios("snapshot-publication-fallback")[0]).toEqual({
+      file: "apps/cloudflare/test/hosted-local-snapshot-publication-fallback-e2e.test.ts",
+      name: "snapshot-publication-fallback",
+      testControls: true,
+    });
+    for (const [name, file] of [
+      ["canonical-receipt-lost-ack-recovery", "hosted-local-canonical-receipt-lost-ack-recovery"],
+      ["computer-handoff-linq-roundtrip", "hosted-local-computer-handoff-linq-roundtrip"],
+      ["retell-call-result-roundtrip", "hosted-local-retell-call-result-roundtrip"],
+      ["retryable-outbox-foreground-restart", "hosted-local-retryable-outbox-foreground-restart"],
+      ["shutdown-checkpoint-conversation-ahead", "hosted-local-shutdown-checkpoint-conversation-ahead"],
+      ["usage-limit-ambiguous-send", "hosted-local-usage-limit-ambiguous-send"],
+      ["vault-file-approval-resume", "hosted-local-vault-file-approval-resume"],
+    ] as const) {
+      expect(resolveHostedLocalE2eScenarios(name)[0]?.file).toBe(
+        `apps/cloudflare/test/${file}-e2e.test.ts`,
+      );
+    }
     expect(resolveHostedLocalE2eScenarios("all").map((scenario) => scenario.name)).toContain(
       "temporal-orchestration",
     );
@@ -116,6 +152,34 @@ describe("hosted-local harness", () => {
       .toThrow("Duplicate hosted-local E2E scenario selection");
     expect(() => resolveHostedLocalE2eScenarios(["all", "telegram"]))
       .toThrow("cannot be combined");
+    expect(resolveHostedLocalE2eScenarios("all").map((scenario) => scenario.name)).toContain(
+      "linq-group-route-drift",
+    );
+    expect(resolveHostedLocalE2eScenarios("all").map((scenario) => scenario.name)).toContain(
+      "linq-home-line-reroute-retry",
+    );
+    expect(resolveHostedLocalE2eScenarios("all").map((scenario) => scenario.name)).toContain(
+      "family-sponsored-group-roundtrip",
+    );
+    expect(resolveHostedLocalE2eScenarios("all").map((scenario) => scenario.name)).toContain(
+      "linq-unknown-first-contact-fallback",
+    );
+    expect(resolveHostedLocalE2eScenarios("all").map((scenario) => scenario.name)).toContain(
+      "snapshot-publication-fallback",
+    );
+    for (const name of [
+      "canonical-receipt-lost-ack-recovery",
+      "computer-handoff-linq-roundtrip",
+      "retell-call-result-roundtrip",
+      "retryable-outbox-foreground-restart",
+      "shutdown-checkpoint-conversation-ahead",
+      "usage-limit-ambiguous-send",
+      "vault-file-approval-resume",
+    ] as const) {
+      expect(resolveHostedLocalE2eScenarios("all").map((scenario) => scenario.name)).toContain(
+        name,
+      );
+    }
   });
 
   test("keeps registered hosted-local E2E scenario files present", () => {
@@ -124,6 +188,47 @@ describe("hosted-local harness", () => {
       .map((scenario) => `${scenario.name}: ${scenario.file}`);
 
     expect(missingScenarios).toEqual([]);
+  });
+
+  test("keeps promoted hosted E2E scenarios on their required registry boundaries", () => {
+    const scenarios = new Map(
+      listHostedLocalE2eScenarios().map((scenario) => [scenario.name, scenario]),
+    );
+
+    expect(scenarios.get("linq-webhook-audio")).toMatchObject({
+      requiresParserToolchain: true,
+      testControls: true,
+    });
+    expect(scenarios.get("linq-lost-active-operation")).toMatchObject({
+      manualOnly: true,
+      testControls: true,
+    });
+    for (const name of [
+      "canonical-receipt-lost-ack-recovery",
+      "codex-image-media-delivery",
+      "retryable-outbox-foreground-restart",
+      "shutdown-checkpoint-conversation-ahead",
+      "snapshot-publication-fallback",
+      "vault-file-approval-resume",
+    ] as const) {
+      expect(scenarios.get(name)).toMatchObject({
+        testControls: true,
+      });
+    }
+    for (const name of [
+      "linq-onboarding-followup",
+      "openai-egress-authority",
+      "provider-egress-token-bridge",
+      "warm-reuse-egress",
+    ] as const) {
+      expect(scenarios.get(name)).toMatchObject({
+        dedicatedVitestProcess: true,
+      });
+    }
+    expect(scenarios.get("timezone-injection")).toEqual({
+      file: "apps/cloudflare/test/hosted-local-timezone-injection-e2e.test.ts",
+      name: "timezone-injection",
+    });
   });
 
   test("keeps the Junction replay scenario on the shared hosted E2E artifact lane", async () => {
@@ -160,7 +265,7 @@ describe("hosted-local harness", () => {
 
     expect(workflow).toContain('pnpm hosted-local e2e "${scenarios[@]}" --no-bundle');
     expect(workflow).toContain([
-      "- name: Linq scheduled reminder E2E",
+      "- name: Linq reminder + onboarding follow-up E2E",
       '            fastGate: "1"',
     ].join("\n"));
     expectCodexCliInstallContract(workflow);

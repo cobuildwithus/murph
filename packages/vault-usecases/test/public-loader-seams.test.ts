@@ -212,6 +212,21 @@ describe("public loader seams", () => {
             desiredProviders: ["oura"],
           },
         }),
+        updateAssistantPreferences: async () => ({
+          updated: true,
+          document: {
+            assistant: {
+              personality: {
+                humor: 0,
+              },
+            },
+            sourcePath: "bank/preferences.json",
+            updatedAt: "2026-07-10T12:00:00Z",
+            wearablePreferences: {
+              desiredProviders: ["oura"],
+            },
+          },
+        }),
         resolveVaultPathOnDisk: async (inputVaultRoot: string, relativePath: string) => ({
           absolutePath: path.join(inputVaultRoot, relativePath),
         }),
@@ -257,6 +272,22 @@ describe("public loader seams", () => {
       },
     });
     expect(loadRuntimeModuleMock).toHaveBeenCalledTimes(4);
+
+    await expect(
+      preferencesModule.setAssistantPersonalitySetting({
+        vault: vaultRoot,
+        setting: "humor",
+        value: 0,
+      }),
+    ).resolves.toMatchObject({
+      updated: true,
+      settings: {
+        humor: { value: 0, source: "custom" },
+        push: { value: 3, source: "default" },
+        detail: { value: 5, source: "default" },
+      },
+    });
+    expect(loadRuntimeModuleMock).toHaveBeenCalledTimes(5);
   });
 
   it("keeps workout subpath exports behind the runtime loader", async () => {

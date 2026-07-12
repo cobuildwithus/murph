@@ -4,6 +4,7 @@ export const CHANGELOG_FEED_SCHEMA = "murph.changelog-feed.v1";
 export const CHANGELOG_CARD_VERSION = "v1";
 export const CHANGELOG_CARD_MAX_ITEMS = 7;
 export const CHANGELOG_PREVIEW_CARD_ITEMS = 5;
+export const CHANGELOG_EDITIONS_PER_PAGE = 1;
 export const CHANGELOG_FEATURE_LIMIT_MAX = 100;
 export const CHANGELOG_IMPROVEMENT_LIMIT_MAX = 25;
 
@@ -54,7 +55,169 @@ export interface ChangelogQuery {
   to: string;
 }
 
+export interface ChangelogPage {
+  currentPage: number;
+  editions: readonly ChangelogEdition[];
+  totalPages: number;
+}
+
 const RAW_CHANGELOG_EDITIONS = [
+  {
+    id: "2026-07-10",
+    publishedOn: "2026-07-10",
+    title: "A Murph that sounds more like you",
+    summary:
+      "Choose how Murph talks, pick a stronger model on Edge, and make group challenges more creative. Conversations also got faster, browser handoffs recover more cleanly, and missing wearable history is less likely to stay missing.",
+    items: [
+      {
+        id: "murph-style-controls",
+        kind: "feature",
+        priority: 5,
+        title: "Make Murph sound more like you",
+        summary:
+          "Choose Murph's texting tone and voice-memo voice during onboarding or from Settings. In a private chat, you can also set Humor, Push, and Detail anywhere from 0 to 10.",
+        details:
+          "The three conversation dials persist across future chats, while safety, privacy, and the facts always take priority over style.",
+        relevanceTags: ["assistant", "personalization", "voice"],
+        sourcePullRequests: [485, 512, 529],
+        tryIt: {
+          href: "/settings",
+          label: "Customize Murph",
+        },
+      },
+      {
+        id: "edge-model-choice",
+        kind: "feature",
+        priority: 4,
+        title: "Edge members can choose GPT-5.6 Sol",
+        summary:
+          "Edge members can switch Murph from the default GPT-5.6 Terra model to GPT-5.6 Sol in Settings, then switch back whenever they want.",
+        details:
+          "Members who are not on Edge can now see the model choice and the upgrade path in the same place.",
+        relevanceTags: ["assistant", "models", "edge"],
+        sourcePullRequests: [515, 539],
+        tryIt: {
+          href: "/settings",
+          label: "Choose a model",
+        },
+      },
+      {
+        id: "group-challenge-comics-and-stakes",
+        kind: "feature",
+        priority: 4,
+        title: "Group challenges got comics, songs, and better stakes",
+        summary:
+          "Murph can turn group photos and running jokes into comic-strip standings, write an intro song, and help the group choose stakes that are playful without becoming reckless.",
+        details:
+          "The group's agreed rules, photos, jokes, and daily dispatches stay attached to the challenge so the bit can keep building over time.",
+        relevanceTags: ["groups", "challenges", "images", "music"],
+        sourcePullRequests: [503, 520],
+      },
+      {
+        id: "whoop-recovery-strain-healthkit",
+        kind: "feature",
+        priority: 4,
+        title: "WHOOP Recovery and Strain arrive through Apple Health",
+        summary:
+          "The iPhone companion now picks up WHOOP Recovery scores and workout Strain values that Apple Health stores but ordinary sync can miss.",
+        details:
+          "The enrichment is bounded to those two values and joins the same private health record as the rest of your wearable data.",
+        relevanceTags: ["whoop", "apple-health", "wearables"],
+        sourcePullRequests: [502],
+      },
+      {
+        id: "browser-handoffs-recover",
+        kind: "improvement",
+        priority: 4,
+        title: "Browser handoffs recover without starting over",
+        summary:
+          "If a private browser handoff expires, your next message can let Murph pick the task back up instead of leaving the browser session stuck.",
+        details:
+          "Fresh handoff links are now guaranteed to reach the reply, and the live page no longer fights the browser over its viewport.",
+        relevanceTags: ["browser", "assistant", "reliability"],
+        sourcePullRequests: [544],
+      },
+      {
+        id: "faster-cleaner-conversations",
+        kind: "improvement",
+        priority: 4,
+        title: "Replies start faster and stay cleaner",
+        summary:
+          "Murph does less unrelated maintenance before answering, keeps the typing indicator alive after a progress note, and keeps internal working commentary out of member messages.",
+        relevanceTags: ["assistant", "performance", "messaging"],
+        sourcePullRequests: [496, 508, 510, 519, 537],
+      },
+      {
+        id: "junction-history-self-heals",
+        kind: "improvement",
+        priority: 4,
+        title: "Missing wearable history keeps trying to recover",
+        summary:
+          "A successful activity import can no longer make Murph assume your missing sleep history is complete. Historical sync now checks each kind of data independently and retries bounded gaps.",
+        details:
+          "The evidence window also stays anchored to the period Murph actually requested, so older records do not create a false picture of recent coverage.",
+        relevanceTags: ["wearables", "junction", "sync"],
+        sourcePullRequests: [516, 545],
+      },
+      {
+        id: "group-chats-stay-grouped",
+        kind: "improvement",
+        priority: 4,
+        title: "Group chats stay in group mode",
+        summary:
+          "Murph now confirms that an iMessage thread is a group before planning a reply, so a group conversation cannot accidentally fall into someone's private onboarding flow.",
+        relevanceTags: ["groups", "imessage", "privacy"],
+        sourcePullRequests: [522],
+      },
+    ],
+  },
+  {
+    id: "2026-07-09",
+    publishedOn: "2026-07-09",
+    title: "Better answers, better instincts",
+    summary:
+      "Murph gained focused playbooks for the health questions people actually ask, learned when to offer a useful next step, and stopped recommending setup you already finished.",
+    items: [
+      {
+        id: "health-topic-playbooks",
+        kind: "feature",
+        priority: 5,
+        title: "Fifteen new health topic playbooks",
+        summary:
+          "Murph now has focused guidance for cardio fitness, body composition, cardiometabolic health, circadian rhythm, focus, hormonal health, daily activity, fatigue, digestion, HRV, supplements, mobility, recovery, sleep, and substance load.",
+        details:
+          "Each playbook starts with your own context and data, names when the evidence is thin, and keeps clinician handoffs clear for questions that should not be improvised in chat.",
+        relevanceTags: ["assistant", "health", "research"],
+        sourcePullRequests: [490],
+        tryIt: {
+          label: "Ask about a health pattern",
+          prompt: "Help me understand why my energy has been low lately.",
+        },
+      },
+      {
+        id: "relevant-capability-offers",
+        kind: "feature",
+        priority: 4,
+        title: "Murph offers a useful next step when it fits",
+        summary:
+          "When a conversation clearly points to something Murph can take off your plate, it can now offer one concrete next step instead of waiting for you to know the feature exists.",
+        details:
+          "Offers stay bounded and situational: one relevant call, browser task, experiment, connection, reminder, or group setup, never a menu or a sales pitch.",
+        relevanceTags: ["assistant", "discovery", "automation"],
+        sourcePullRequests: [487],
+      },
+      {
+        id: "connected-device-aware-product-notes",
+        kind: "improvement",
+        priority: 3,
+        title: "Connected wearables no longer get pitched twice",
+        summary:
+          "Background product notes now know when a wearable is already active, so Murph will not suggest connecting the device you already use.",
+        relevanceTags: ["wearables", "assistant", "onboarding"],
+        sourcePullRequests: [506],
+      },
+    ],
+  },
   {
     id: "2026-07-08",
     publishedOn: "2026-07-08",
@@ -2761,6 +2924,55 @@ export function listChangelogEditions(): readonly ChangelogEdition[] {
   return CHANGELOG_EDITIONS;
 }
 
+export function resolveChangelogEditionPage(
+  value: string | readonly string[] | undefined,
+): number | null {
+  if (value === undefined) {
+    return 1;
+  }
+  if (typeof value !== "string" || !isChangelogDate(value)) {
+    return null;
+  }
+  const editionIndex = CHANGELOG_EDITIONS.findIndex(
+    (edition) => edition.id === value,
+  );
+  return editionIndex === -1
+    ? null
+    : Math.floor(editionIndex / CHANGELOG_EDITIONS_PER_PAGE) + 1;
+}
+
+export function resolveChangelogPage(page: number): ChangelogPage | null {
+  const totalPages = Math.ceil(
+    CHANGELOG_EDITIONS.length / CHANGELOG_EDITIONS_PER_PAGE,
+  );
+  if (!Number.isSafeInteger(page) || page < 1 || page > totalPages) {
+    return null;
+  }
+  const start = (page - 1) * CHANGELOG_EDITIONS_PER_PAGE;
+  return {
+    currentPage: page,
+    editions: CHANGELOG_EDITIONS.slice(
+      start,
+      start + CHANGELOG_EDITIONS_PER_PAGE,
+    ),
+    totalPages,
+  };
+}
+
+export function buildChangelogPagePath(page: number): string {
+  if (!resolveChangelogPage(page)) {
+    throw new TypeError("Changelog page is invalid.");
+  }
+  if (page === 1) {
+    return "/changelog";
+  }
+  const firstEdition = CHANGELOG_EDITIONS[(page - 1) * CHANGELOG_EDITIONS_PER_PAGE];
+  if (!firstEdition) {
+    throw new TypeError("Changelog page has no edition.");
+  }
+  return `/changelog?edition=${firstEdition.id}`;
+}
+
 export function listPublishedChangelogItems(): readonly PublishedChangelogItem[] {
   return CHANGELOG_EDITIONS
     .flatMap((edition) =>
@@ -2839,7 +3051,13 @@ export function buildChangelogItemPath(id: string): string {
   if (!isChangelogId(id)) {
     throw new TypeError("Changelog item id is invalid.");
   }
-  return `/changelog#${id}`;
+  const edition = CHANGELOG_EDITIONS.find((edition) =>
+    edition.items.some((item) => item.id === id),
+  );
+  if (!edition) {
+    throw new TypeError("Changelog item does not exist.");
+  }
+  return `/changelog?edition=${edition.id}#${id}`;
 }
 
 export function buildAbsoluteChangelogUrl(

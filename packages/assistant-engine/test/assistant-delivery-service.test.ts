@@ -367,7 +367,9 @@ test('typing indicators use the current audience route', async () => {
     threadId: 'linq-thread',
     vault: '/vaults/test',
   }
+  const refreshNow = vi.fn(async () => undefined)
   const startLinqTyping = vi.fn(async () => ({
+    refreshNow,
     stop: async () => undefined,
   }))
 
@@ -396,6 +398,8 @@ test('typing indicators use the current audience route', async () => {
       targetKind: 'thread',
     })
   })
+  await indicator?.refreshAfterMessage?.()
+  expect(refreshNow).toHaveBeenCalledTimes(1)
   await indicator?.stop()
 })
 
@@ -424,7 +428,11 @@ test('typing indicators forward explicit Linq targets with reply-to proof', asyn
     threadId: 'linq-thread',
     vault: '/vaults/test',
   }
+  const refreshAfterMessage = vi.fn(async () => undefined)
+  const refreshNow = vi.fn(async () => undefined)
   const startLinqTyping = vi.fn(async () => ({
+    refreshAfterMessage,
+    refreshNow,
     stop: async () => undefined,
   }))
 
@@ -452,6 +460,9 @@ test('typing indicators forward explicit Linq targets with reply-to proof', asyn
       targetKind: 'explicit',
     })
   })
+  await indicator?.refreshAfterMessage?.()
+  expect(refreshAfterMessage).toHaveBeenCalledTimes(1)
+  expect(refreshNow).not.toHaveBeenCalled()
   await indicator?.stop()
 })
 

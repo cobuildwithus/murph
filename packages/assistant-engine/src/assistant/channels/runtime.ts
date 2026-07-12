@@ -71,6 +71,10 @@ const TELEGRAM_SEND_TIMEOUT_MS = 30_000
 const TELEGRAM_MAX_VOICE_MEMO_BYTES = 10 * 1024 * 1024
 const LINQ_TYPING_REFRESH_MS = 45_000
 const LINQ_TYPING_MAX_SESSION_MS = 5 * 60_000
+// Linq accepts message sends asynchronously and clears typing when the message
+// actually sends. Restart after that short provider settle window instead of
+// racing the auto-clear immediately after the HTTP acceptance response.
+const LINQ_TYPING_POST_MESSAGE_REFRESH_MS = 1_000
 
 type TelegramParsedTarget = TelegramThreadTarget
 type TelegramSendOperation = 'sendMessage' | 'sendPhoto' | 'sendVoice'
@@ -706,6 +710,7 @@ export async function startTelegramTypingIndicator(
 }
 
 export async function startAssistantChannelActivitySession(input: {
+  afterMessageRefreshMs?: number | null
   refresh?: ((signal: AbortSignal) => Promise<void>) | null
   refreshMs: number
   maxSessionMs?: number | null
@@ -722,6 +727,9 @@ export async function startAssistantChannelActivitySession(input: {
   }
 
   const refreshMs = Math.max(1, Math.trunc(input.refreshMs))
+  const afterMessageRefreshMs = input.afterMessageRefreshMs == null
+    ? null
+    : Math.max(0, Math.trunc(input.afterMessageRefreshMs))
   const maxSessionMs = normalizeAssistantChannelActivityMaxSessionMs(
     input.maxSessionMs ?? null,
   )
@@ -729,11 +737,12 @@ export async function startAssistantChannelActivitySession(input: {
   let refreshTimer: ReturnType<typeof setTimeout> | null = null
   let maxSessionTimer: ReturnType<typeof setTimeout> | null = null
   let refreshFailure: unknown = null
+  let refreshScheduleVersion = 0
   let refreshTail: Promise<void> = Promise.resolve()
   let stopped = false
   let stopPromise: Promise<void> | null = null
 
-  scheduleNextRefresh()
+  scheduleRefresh(refreshMs)
   if (maxSessionMs !== null) {
     maxSessionTimer = setTimeout(() => {
       void stopActivity({
@@ -744,26 +753,37 @@ export async function startAssistantChannelActivitySession(input: {
   }
 
   return {
+    ...(afterMessageRefreshMs === null
+      ? {}
+      : {
+          refreshAfterMessage: async () => scheduleRefresh(afterMessageRefreshMs),
+        }),
     refreshNow: async () => {
       clearRefreshTimer()
+      const scheduleVersion = ++refreshScheduleVersion
       await enqueueRefresh()
-      scheduleNextRefresh()
+      if (scheduleVersion === refreshScheduleVersion) {
+        scheduleRefresh(refreshMs)
+      }
     },
     stop: stopActivity,
   }
 
-  function scheduleNextRefresh(): void {
+  function scheduleRefresh(delayMs: number): void {
     if (stopped || linkedStopSignal.signal.aborted || refreshFailure) {
       return
     }
 
     clearRefreshTimer()
+    const scheduleVersion = ++refreshScheduleVersion
     refreshTimer = setTimeout(() => {
       refreshTimer = null
       void enqueueRefresh().then(() => {
-        scheduleNextRefresh()
+        if (scheduleVersion === refreshScheduleVersion) {
+          scheduleRefresh(refreshMs)
+        }
       })
-    }, refreshMs)
+    }, delayMs)
     unrefAssistantChannelActivityTimer(refreshTimer)
   }
 
@@ -893,6 +913,7 @@ export async function startLinqTypingIndicator(
   }
 
   return startAssistantChannelActivitySession({
+    afterMessageRefreshMs: LINQ_TYPING_POST_MESSAGE_REFRESH_MS,
     refreshMs: dependencies.refreshMs ?? LINQ_TYPING_REFRESH_MS,
     maxSessionMs: dependencies.maxSessionMs ?? LINQ_TYPING_MAX_SESSION_MS,
     signal: dependencies.signal,
