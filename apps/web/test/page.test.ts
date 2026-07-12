@@ -180,14 +180,14 @@ test("HomePage renders the canonical landing page at the root route", async () =
   assert.match(markup, /data-root-landing-auth-actions-context="footer"/);
   assert.match(
     markup,
-    /font-serif text-\[clamp\(2rem,4vw,3\.25rem\)\][^"]* text-black/,
+    /font-serif text-\[clamp\(2\.5rem,5vw,4rem\)\][^"]* text-black/,
   );
-  assert.match(markup, /<span class="block">Murph figures out what works for you—<\/span>/);
-  assert.match(markup, /and gets your friends in on it\./);
+  assert.match(markup, /<span class="block">Health is hard\.<\/span>/);
+  assert.match(markup, /Don’t do it alone\./);
   assert.equal((markup.match(/<h1\b/g) ?? []).length, 1);
   assert.match(
     markup,
-    /<h1 class="sr-only">Murph figures out what works for you—and gets your friends in on it\.<\/h1>/,
+    /<h1 class="sr-only">Health is hard\. Don’t do it alone\.<\/h1>/,
   );
   assert.match(
     markup,
