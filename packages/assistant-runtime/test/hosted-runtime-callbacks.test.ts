@@ -1551,7 +1551,7 @@ describe("hosted runtime callbacks", () => {
     }
   });
 
-  it("does not apply a refreshed approval cycle to an older due intent", async () => {
+  it("abandons an older approval cycle when its delayed causal wake observes a refresh", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-04-08T00:16:00.000Z"));
     try {
@@ -1608,6 +1608,16 @@ describe("hosted runtime callbacks", () => {
         })),
         request: vi.fn(),
       };
+      const supersededIntent = {
+        ...intent,
+        lastError: {
+          code: "ASSISTANT_VAULT_FILE_APPROVAL_SUPERSEDED",
+          message: "Vault-file delivery approval was superseded by a newer approval cycle.",
+        },
+        nextAttemptAt: null,
+        status: "abandoned" as const,
+        updatedAt: "2026-04-08T00:16:00.000Z",
+      };
       mocks.listAssistantOutboxIntents.mockResolvedValueOnce([intent]);
       mocks.readAssistantVaultFileMedia.mockReturnValue(intent.media[0]);
       mocks.buildAssistantVaultFileSendApprovalRequest.mockReturnValue({
@@ -1622,7 +1632,12 @@ describe("hosted runtime callbacks", () => {
 
       await expect(collectHostedAssistantDeliverySideEffects({
         actionApprovalPort,
-        includeBackgroundDueIntents: true,
+        includeBackgroundDueIntents: false,
+        preferredEffectIds: [buildHostedActionApprovalOutcomeEffectId({
+          approvalGeneration: "d".repeat(64),
+          approvalId,
+          expiresAt: "2026-04-08T00:15:00.000Z",
+        })],
         preferredIntentIds: [],
         vaultRoot: "/tmp/vault",
       })).resolves.toEqual([]);
@@ -1630,7 +1645,155 @@ describe("hosted runtime callbacks", () => {
       expect(actionApprovalPort.read).toHaveBeenCalledOnce();
       expect(mocks.applyAssistantVaultFileSendApprovalResult)
         .not.toHaveBeenCalled();
-      expect(mocks.saveAssistantOutboxIntentIfUnchanged).not.toHaveBeenCalled();
+      expect(mocks.saveAssistantOutboxIntentIfUnchanged).toHaveBeenCalledWith({
+        expectedDedupeKey: intent.dedupeKey,
+        expectedStatus: "awaiting_approval",
+        expectedUpdatedAt: intent.updatedAt,
+        intent: supersededIntent,
+        vault: "/tmp/vault",
+      });
+
+      mocks.listAssistantOutboxIntents.mockResolvedValueOnce([supersededIntent]);
+      await expect(resolveHostedAssistantOutboxNextWakeAt({
+        now: new Date("2026-04-08T00:16:00.000Z"),
+        vaultRoot: "/tmp/vault",
+      })).resolves.toBeNull();
+      expect(actionApprovalPort.read).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("drains four superseded due approval owners before reconciling the current owner", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-08T00:16:00.000Z"));
+    try {
+      const approvalIds = ["b", "c", "d", "e", "f"].map(
+        (character) => `haa_${character.repeat(32)}`,
+      );
+      const vaultFile = {
+        contentType: "application/pdf",
+        filename: "report.pdf",
+        kind: "vault_file" as const,
+        ref: "documents/report.pdf",
+        sha256: "a".repeat(64),
+        sizeBytes: 42,
+      };
+      const storedIntents = approvalIds.map((approvalId, index) => ({
+        actorId: "actor_1",
+        bindingDelivery: { kind: "thread" as const, target: "linq_chat_1" },
+        channel: "linq",
+        createdAt: `2026-04-08T00:0${index}:00.000Z`,
+        dedupeKey: `dedupe_approval_cycle_${index}`,
+        delivery: null,
+        deliveryIdempotencyKey: buildHostedActionApprovalCycleOwnerKey({
+          approvalId,
+          expiresAt: "2026-04-08T00:15:00.000Z",
+        }),
+        deliveryTransportIdempotent: true,
+        explicitTarget: "linq_chat_1",
+        identityId: "identity_1",
+        intentId: `intent_approval_cycle_${index}`,
+        lastAttemptAt: null,
+        lastError: null,
+        media: [vaultFile],
+        message: "Attached.",
+        nextAttemptAt: `2026-04-08T00:10:0${index}.000Z`,
+        replyToMessageId: "linq_message_1",
+        sessionId: "session_1",
+        status: "awaiting_approval" as const,
+        subject: null,
+        threadId: "thread_1",
+        threadIsDirect: true,
+        turnId: `turn_${index}`,
+        updatedAt: `2026-04-08T00:0${index}:00.000Z`,
+      }));
+      const actionApprovalPort = {
+        consume: vi.fn(),
+        read: vi.fn(async (request: { actionId: string }) => {
+          const index = Number(request.actionId.at(-1));
+          const approvalId = approvalIds[index]!;
+          if (index === 4) {
+            return {
+              approvalGeneration: "f".repeat(64),
+              approvalId,
+              cycleOwnerKey: storedIntents[index]!.deliveryIdempotencyKey,
+              status: "approved" as const,
+            };
+          }
+          return {
+            approvalId,
+            approvalUrl: "https://murph.test/approve/refreshed",
+            cycleOwnerKey: buildHostedActionApprovalCycleOwnerKey({
+              approvalId,
+              expiresAt: "2026-04-08T00:30:00.000Z",
+            }),
+            expiresAt: "2026-04-08T00:30:00.000Z",
+            status: "pending" as const,
+          };
+        }),
+        request: vi.fn(),
+      };
+      mocks.readAssistantVaultFileMedia.mockReturnValue(vaultFile);
+      mocks.buildAssistantVaultFileSendApprovalRequest.mockImplementation(
+        (intent: { intentId: string }) => ({
+          actionFingerprint: "a".repeat(64),
+          actionId: `vault-file-send:${intent.intentId}`,
+          actionKind: "vault.file.send.v1",
+          presentation: {
+            body: "Send a vault file.",
+            title: "Send a file?",
+          },
+        }),
+      );
+      mocks.shouldDispatchAssistantOutboxIntent.mockImplementation((intent) =>
+        intent.status === "pending" || intent.status === "retryable",
+      );
+      mocks.listAssistantOutboxIntents.mockResolvedValueOnce(storedIntents);
+
+      await expect(collectHostedAssistantDeliverySideEffects({
+        actionApprovalPort,
+        includeBackgroundDueIntents: true,
+        preferredIntentIds: [],
+        vaultRoot: "/tmp/vault",
+      })).resolves.toEqual([]);
+
+      expect(actionApprovalPort.read).toHaveBeenCalledTimes(4);
+      const supersededIntents = mocks.saveAssistantOutboxIntentIfUnchanged.mock.calls
+        .map(([request]) => request.intent);
+      expect(supersededIntents).toHaveLength(4);
+      expect(supersededIntents).toEqual(expect.arrayContaining(
+        storedIntents.slice(0, 4).map((intent) => expect.objectContaining({
+          intentId: intent.intentId,
+          lastError: expect.objectContaining({
+            code: "ASSISTANT_VAULT_FILE_APPROVAL_SUPERSEDED",
+          }),
+          nextAttemptAt: null,
+          status: "abandoned",
+        })),
+      ));
+
+      mocks.listAssistantOutboxIntents.mockResolvedValueOnce([
+        ...supersededIntents,
+        storedIntents[4]!,
+      ]);
+      await expect(collectHostedAssistantDeliverySideEffects({
+        actionApprovalPort,
+        includeBackgroundDueIntents: true,
+        preferredIntentIds: [],
+        vaultRoot: "/tmp/vault",
+      })).resolves.toEqual([]);
+
+      expect(actionApprovalPort.read).toHaveBeenCalledTimes(5);
+      expect(actionApprovalPort.read).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          actionId: "vault-file-send:intent_approval_cycle_4",
+        }),
+      );
+      expect(mocks.applyAssistantVaultFileSendApprovalResult).toHaveBeenCalledOnce();
+      expect(mocks.applyAssistantVaultFileSendApprovalResult).toHaveBeenCalledWith(
+        expect.objectContaining({ intent: storedIntents[4] }),
+      );
     } finally {
       vi.useRealTimers();
     }

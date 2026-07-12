@@ -486,9 +486,32 @@ async function reconcileHostedAssistantVaultFileApproval(input: {
 
   if (
     input.expectedApprovalCycle
+    && approval.cycleOwnerKey !== input.expectedApprovalCycle.ownerKey
+  ) {
+    const superseded: AssistantOutboxIntent = {
+      ...input.intent,
+      lastError: {
+        code: "ASSISTANT_VAULT_FILE_APPROVAL_SUPERSEDED",
+        message: "Vault-file delivery approval was superseded by a newer approval cycle.",
+      },
+      nextAttemptAt: null,
+      status: "abandoned",
+      updatedAt: input.now.toISOString(),
+    };
+    return {
+      blocked: true,
+      intent: await persistHostedAssistantVaultFileApprovalState({
+        current: input.intent,
+        next: superseded,
+        vaultRoot: input.vaultRoot,
+      }),
+    };
+  }
+
+  if (
+    input.expectedApprovalCycle
     && (
-      approval.cycleOwnerKey !== input.expectedApprovalCycle.ownerKey
-      || approval.approvalId !== input.expectedApprovalCycle.approvalId
+      approval.approvalId !== input.expectedApprovalCycle.approvalId
       || (
         approval.status === "approved"
         && input.expectedApprovalCycle.approvalGeneration !== null
