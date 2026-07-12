@@ -31,6 +31,8 @@ If an eye clinician is unreachable and symptoms are worsening or vision-threaten
 
 An eye and contact-lens-fit exam is appropriate when symptoms are persistent, recurring, worsening, one-sided, function-limiting, associated with double vision or frequent blur or headache, present away from near work, or not improving after lens removal and basic work changes. It is also appropriate when the contact prescription or fit has not been checked recently.
 
+Use a lower threshold for prompt clinician input when the user has diabetes, immune suppression, inflammatory disease, recent eye surgery or injection, or prescription eye medicines, without inventing a diagnosis.
+
 ### Brief self-care trial is reasonable
 
 Self-care is reasonable only for mild, gradual, bilateral tired, dry, burning, gritty, or intermittently blurry symptoms after sustained near work that improve with complete blinking, rest, or lens removal, with no pain, marked redness, light sensitivity, discharge, sudden or persistent vision change, new flashes, a sudden increase in or many new floaters, trauma, or chemical exposure. A contact-lens wearer with redness or a new vision change is not eligible for this pathway even when symptoms improve after blinking, rest, or lens removal. This is eligibility for a trial, not a diagnosis.
@@ -38,7 +40,7 @@ Self-care is reasonable only for mild, gradual, bilateral tired, dry, burning, g
 ## Contact-Lens Action Rules
 
 - At unusual discomfort, redness, or irritation, remove the lens or lenses immediately and use current backup glasses. When the Decision Order assigns prompt same-day eye care, do not reinsert the lenses until an eye clinician says it is safe. Do not discard the lenses or case until asking whether the clinician wants them for evaluation; isolate them so they cannot be reused accidentally.
-- For mild end-of-day dryness that fully resolves after removal and has no warning feature, do not wear the lenses again that day. Follow the prescribed replacement and wear schedule at the next wear window; if symptoms return, stop lens wear and arrange a contact-lens-fit exam.
+- When the Decision Order assigns brief self-care for mild contact-lens dryness, do not wear the lenses again that day. Follow the prescribed replacement and wear schedule at the next wear window; if symptoms return, stop lens wear and arrange a contact-lens-fit exam.
 - Never sleep in lenses unless the prescribing clinician specifically directed it. Remove lenses before showering, swimming, or using a hot tub.
 - If water contacts lenses, remove them as soon as possible. Discard daily disposables; for reusable lenses, follow the lens and solution instructions for cleaning and overnight disinfection. Never rinse or store lenses in any water or saliva.
 - Wash and thoroughly dry hands before handling lenses. Rub and rinse reusable lenses with the recommended disinfecting solution, use fresh solution every time, never top off, clean the case with solution, air-dry it face down with caps off, and replace it at least every three months.

@@ -296,21 +296,13 @@ describe('assistant skill assets', () => {
     expect(eyeSkillText).toContain('correction information, not an eye-health score')
     expect(eyeSkillText).toContain('optional memory cue, not a proven treatment dose')
     expect(eyeSkillText).toContain('Do not recommend blue-light-filtering glasses')
-    expect(eyeSkillText).toContain('new flashes of light')
-    expect(eyeSkillText).toContain('a sudden increase in or many new floaters')
-    const skillContactLensSameDayRule = eyeSkillText
-      .split('\n')
-      .find((line) => line.includes('A contact-lens wearer with pain'))
-    expect(skillContactLensSameDayRule).toContain(
-      'with pain, redness, light sensitivity, any new vision change',
-    )
-    expect(skillContactLensSameDayRule).not.toContain('marked redness')
     expect(eyeSkillText).toContain(
-      'A contact-lens wearer with redness or a new vision change is not eligible for this pathway',
+      'Apply the Decision Order in `references/triage-and-contact-lenses.md` before selecting a care level or immediate action.',
     )
+    expect(eyeSkillText).not.toContain('A contact-lens wearer with pain')
+    expect(eyeSkillText).not.toContain('gradual, mild, in both eyes')
     expect(eyeSkillText).not.toContain('still hurts after removal')
     expect(eyeSkillText).not.toContain('pain that persists or worsens after removal')
-    expect(eyeSkillText).toContain('gradual, mild, in both eyes')
     expect(eyeSkillText).not.toContain('usually in both eyes')
     expect(eyeSkillText).toContain('Stop the trial')
     expect(eyeSkillText).not.toContain('Stop the experiment')
@@ -351,6 +343,12 @@ describe('assistant skill assets', () => {
     )
     expect(triageText).toContain(
       'When the Decision Order assigns prompt same-day eye care, do not reinsert the lenses until an eye clinician says it is safe.',
+    )
+    expect(triageText).toContain(
+      'When the Decision Order assigns brief self-care for mild contact-lens dryness, do not wear the lenses again that day.',
+    )
+    expect(triageText).not.toContain(
+      'For mild end-of-day dryness that fully resolves after removal',
     )
     expect(triageText).not.toContain(
       'or symptoms that persist after removal, do not reinsert',

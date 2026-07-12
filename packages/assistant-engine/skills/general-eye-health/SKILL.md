@@ -28,25 +28,20 @@ Read `references/triage-and-contact-lenses.md` before answering any active eye s
 
 ## Safety Pass
 
-- Do not let questions delay action when an emergency feature is already present.
-- Sudden vision loss or a field defect; a new curtain or shadow; new flashes of light; a sudden increase in or many new floaters; severe eye pain with red eye, blur, or nausea; penetrating or major trauma; corrosive or unknown chemical exposure; or a sudden vision symptom with neurologic signs needs emergency action.
-- A contact-lens wearer with pain, redness, light sensitivity, any new vision change, heavy tearing, or discharge should remove the lenses, not reinsert them, and obtain prompt same-day eye care. Use emergency care for severe pain or meaningful vision loss.
-- Mild screen-linked discomfort is eligible for a brief self-care trial only when it is gradual, mild, in both eyes, improves with blinking, rest, or lens removal, and has no urgent feature. A contact-lens wearer with redness or a new vision change is not eligible for this pathway even when symptoms improve after lens removal.
-- Use the exact care-level rules and injury instructions in `references/triage-and-contact-lenses.md`.
+- Apply the Decision Order in `references/triage-and-contact-lenses.md` before selecting a care level or immediate action. Do not restate, weaken, or bypass its predicates.
+- Do not let follow-up questions delay action after the Decision Order assigns emergency or prompt same-day care.
 
 ## Data First
 
 - Reuse the known onset, one-eye versus both-eyes pattern, pain, redness, light sensitivity, discharge, vision change, flashes or floaters, trauma or chemical exposure, and neurologic symptoms.
 - For contact-lens users, check whether lenses are in now, whether symptoms improve after removal, any sleeping or water exposure, access to current backup glasses, and when fit and prescription were last checked.
 - For non-urgent screen discomfort, check task duration, text size, glare, screen position, direct fan or air-conditioning, symptom timing, and whether the problem also occurs away from screens.
-- If the user has diabetes, immune suppression, inflammatory disease, recent eye surgery or injection, or prescription eye medicines, lower the threshold for clinician input without inventing a diagnosis.
 
 ## Interpretation Rules
 
 - A value such as `-2.75` is correction information, not an eye-health score, diagnosis, or urgency marker. Do not label its severity, infer retinal health, or recommend stronger, weaker, or different lenses from that number.
 - Digital eye strain is a symptom pattern with possible tear-film, blinking, sustained-near-work, refractive, binocular, environmental, and ergonomic contributors. Say symptoms "can fit" this pattern; do not claim a remote diagnosis or a single cause.
 - Ordinary computer use can cause temporary fatigue or dryness, but do not say that normal screen use is damaging healthy adult eyes or caused the user's prescription.
-- Recurrent, persistent, one-sided, worsening, function-limiting, double-vision, or frequent blur or headache symptoms need an eye and contact-lens-fit exam rather than repeated self-treatment.
 
 ## Low-Burden Comfort Plan
 
