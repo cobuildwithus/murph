@@ -618,7 +618,10 @@ test('executeCodexAppServerTurn interrupts the child and records the provider th
       turnId: 'turn-abort-public',
     },
   })
-  assert.deepEqual(child.kill.mock.calls, [['SIGINT']])
+  assert.deepEqual(child.kill.mock.calls, [
+    ['SIGINT'],
+    ['SIGKILL'],
+  ])
 })
 
 test('extractCodexTraceUpdates stays usable through the public assistant-engine codex export', () => {
