@@ -700,7 +700,7 @@ describe('assistant local PDF evidence guidance', () => {
       'For accounts, use `vault-cli device account list --format json`, `vault-cli device account show <account-id> --format json`, or `vault-cli device account reconcile <account-id> --format json`',
     )
     expect(prompt).toContain(
-      'If its provider is `junction`, say the whole shared connection—including all upstream sources on it, not only the sources currently listed—will reset',
+      'If its provider is `junction`, say the whole shared connection—including unlisted upstream sources—will reset',
     )
     expect(prompt).toContain(
       'Only then run `vault-cli device account disconnect <account-id> --confirm --expected-connected-at <shown-connectedAt> --format json`',
