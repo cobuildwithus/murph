@@ -302,6 +302,9 @@ describe('assistant skill assets', () => {
     expect(eyeSkillText).toContain(
       'Only when the Decision Order assigns `Brief self-care trial is reasonable`:',
     )
+    expect(eyeSkillText).toContain('`Arrange a prompt eye exam`')
+    expect(eyeSkillText).toContain('`Arrange a routine eye exam`')
+    expect(eyeSkillText).toContain('`Prevention action only`')
     expect(eyeSkillText).not.toContain('safety pass is negative')
     expect(eyeSkillText).not.toContain('A contact-lens wearer with pain')
     expect(eyeSkillText).not.toContain('gradual, mild, in both eyes')
@@ -334,6 +337,30 @@ describe('assistant skill assets', () => {
     expect(triageText).toContain('### Emergency now')
     expect(triageText).toContain('### Prompt same-day eye care')
     expect(triageText).toContain('## Prerequisite First Aid')
+    expect(triageText.indexOf('## Prerequisite First Aid')).toBeLessThan(
+      triageText.indexOf('## Decision Order'),
+    )
+    expect(triageText).toContain(
+      'Evaluate these outcomes from top to bottom, select exactly one, and stop at the first match.',
+    )
+    expect(triageText).toContain('### Arrange a prompt eye exam')
+    expect(triageText).toContain('### Brief self-care trial is reasonable')
+    expect(triageText).toContain('### Prevention action only')
+    expect(triageText).toContain('### Arrange a routine eye exam')
+    expect(triageText).toContain('### Ask one decision-changing question')
+    expect(triageText).toContain(
+      'If no earlier outcome matches, self-care is reasonable',
+    )
+    const prerequisiteFirstAid = triageText.slice(
+      triageText.indexOf('## Prerequisite First Aid'),
+      triageText.indexOf('## Decision Order'),
+    )
+    expect(prerequisiteFirstAid).toContain(
+      'For a corrosive, industrial, or unknown chemical exposure, start copious gentle irrigation',
+    )
+    expect(prerequisiteFirstAid).toContain(
+      'If water contacts lenses, remove them as soon as possible.',
+    )
     expect(triageText).toContain(
       'For a known mild irritant or loose superficial particle, rinse gently with clean lukewarm water.',
     )
@@ -353,10 +380,10 @@ describe('assistant skill assets', () => {
       'A contact-lens wearer with redness or a new vision change is not eligible for this pathway',
     )
     expect(triageText).toContain(
-      'When the Decision Order assigns prompt same-day eye care, do not reinsert the lenses until an eye clinician says it is safe.',
+      'When the Decision Order assigns `Prompt same-day eye care`, do not reinsert the lenses until an eye clinician says it is safe.',
     )
     expect(triageText).toContain(
-      'When the Decision Order assigns brief self-care for mild contact-lens dryness, do not wear the lenses again that day.',
+      'When the Decision Order assigns `Brief self-care trial is reasonable` for mild contact-lens dryness, do not wear the lenses again that day.',
     )
     expect(triageText).toContain(
       'if symptoms return, stop lens wear and apply the Decision Order again.',
