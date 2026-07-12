@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import {
   HostedBillingStatus,
   type HostedMemberBillingRef,
@@ -140,6 +142,7 @@ export type HostedPulseTrialExtensionSkipReason =
 
 export type HostedPulseTrialExtensionFailureReason =
   | "db_update_failed"
+  | "preview_state_changed"
   | "stripe_retrieve_failed"
   | "stripe_update_failed"
   | "stripe_update_result_invalid";
@@ -147,11 +150,15 @@ export type HostedPulseTrialExtensionFailureReason =
 export interface HostedPulseTrialExtensionSummary {
   alreadyExtended: number;
   campaign: typeof HOSTED_PULSE_TRIAL_EXTENSION_CAMPAIGN;
+  candidatePreviewTokens: readonly string[] | null;
+  candidateSnapshotDigest: string | null;
   candidates: number;
   extensionDays: typeof HOSTED_PULSE_TRIAL_EXTENSION_DAYS;
   failures: Record<HostedPulseTrialExtensionFailureReason, number>;
+  hasMoreCandidates: boolean;
   localWindowsReconciled: number;
   mode: HostedPulseTrialExtensionMode;
+  page: number;
   skipped: Record<HostedPulseTrialExtensionSkipReason, number>;
   stripeTrialsExtended: number;
   wouldExtend: number;
@@ -169,6 +176,22 @@ type HostedPulseTrialExtensionClassification =
       reason: HostedPulseTrialExtensionSkipReason;
     };
 
+type HostedPulseTrialExtensionPreviewAction =
+  | {
+      kind: "already-marked";
+      locallyReconciled: boolean;
+      stripeTrialEnd: number;
+    }
+  | {
+      kind: "extend";
+      stripeTrialEnd: number;
+      targetTrialEnd: number;
+    }
+  | {
+      kind: "skipped";
+      reason: HostedPulseTrialExtensionSkipReason;
+    };
+
 type HostedPulseTrialLockedApplyResult =
   | {
       kind: "already-marked";
@@ -180,7 +203,13 @@ type HostedPulseTrialLockedApplyResult =
     }
   | {
       kind: "failure";
-      reason: Exclude<HostedPulseTrialExtensionFailureReason, "db_update_failed">;
+      reason: Exclude<
+        HostedPulseTrialExtensionFailureReason,
+        "db_update_failed" | "preview_state_changed"
+      >;
+    }
+  | {
+      kind: "preview-stale";
     }
   | {
       kind: "skipped";
@@ -192,48 +221,66 @@ type HostedPulseTrialLockedOutcome = {
   result: HostedPulseTrialLockedApplyResult;
 };
 
-export class HostedPulseTrialExtensionCandidateLimitError extends Error {
-  readonly candidateCount: number;
-  readonly maxCandidates: number;
-
-  constructor(input: { candidateCount: number; maxCandidates: number }) {
-    super(
-      `Pulse Trial extension found at least ${input.candidateCount} candidates; ` +
-        `the request limit is ${input.maxCandidates}.`,
-    );
-    this.name = "HostedPulseTrialExtensionCandidateLimitError";
-    this.candidateCount = input.candidateCount;
-    this.maxCandidates = input.maxCandidates;
+export class HostedPulseTrialExtensionPreviewMismatchError extends Error {
+  constructor() {
+    super("Pulse Trial extension candidates changed since Preview.");
+    this.name = "HostedPulseTrialExtensionPreviewMismatchError";
   }
 }
 
 export async function extendHostedPulseTrials(input: {
   candidateSource: HostedPulseTrialExtensionCandidateSource;
+  expectedCandidatePreviewTokens?: readonly string[];
+  expectedCandidateSnapshotDigest?: string;
   maxCandidates?: number;
   mode?: HostedPulseTrialExtensionMode;
   now?: Date;
+  page?: number;
   priceId: string;
   stripe: HostedPulseTrialExtensionStripeClient;
 }): Promise<HostedPulseTrialExtensionSummary> {
   const mode = input.mode ?? "dry-run";
+  const page = input.page ?? 0;
+  if (!Number.isSafeInteger(page) || page < 0) {
+    throw new Error("Pulse Trial extension page must be a non-negative integer.");
+  }
   let boundedCandidates: readonly HostedPulseTrialExtensionCandidate[] | null = null;
+  let hasMoreCandidates = false;
   if (input.maxCandidates !== undefined) {
     if (!Number.isSafeInteger(input.maxCandidates) || input.maxCandidates < 1) {
       throw new Error("Pulse Trial extension candidate limit must be a positive integer.");
     }
-    boundedCandidates = await input.candidateSource.listCandidates({
-      afterMemberId: null,
-      limit: input.maxCandidates + 1,
+    const candidatePage = await readHostedPulseTrialExtensionCandidatePage({
+      candidateSource: input.candidateSource,
+      maxCandidates: input.maxCandidates,
+      page,
     });
-    if (boundedCandidates.length > input.maxCandidates) {
-      throw new HostedPulseTrialExtensionCandidateLimitError({
-        candidateCount: boundedCandidates.length,
-        maxCandidates: input.maxCandidates,
-      });
-    }
+    boundedCandidates = candidatePage.candidates;
+    hasMoreCandidates = candidatePage.hasMoreCandidates;
   }
 
-  const summary = buildEmptyHostedPulseTrialExtensionSummary(mode);
+  const candidateSnapshotDigest = boundedCandidates
+    ? buildHostedPulseTrialExtensionCandidateSnapshotDigest(boundedCandidates, page)
+    : null;
+  if (
+    input.expectedCandidateSnapshotDigest !== undefined &&
+    input.expectedCandidateSnapshotDigest !== candidateSnapshotDigest
+  ) {
+    throw new HostedPulseTrialExtensionPreviewMismatchError();
+  }
+  if (
+    input.expectedCandidatePreviewTokens !== undefined &&
+    input.expectedCandidatePreviewTokens.length !== boundedCandidates?.length
+  ) {
+    throw new HostedPulseTrialExtensionPreviewMismatchError();
+  }
+
+  const summary = buildEmptyHostedPulseTrialExtensionSummary(
+    mode,
+    mode === "dry-run" ? candidateSnapshotDigest : null,
+    hasMoreCandidates,
+    page,
+  );
   let afterMemberId: string | null = null;
 
   for (;;) {
@@ -248,23 +295,40 @@ export async function extendHostedPulseTrials(input: {
 
     afterMemberId = candidates.at(-1)?.memberId ?? afterMemberId;
 
-    for (const candidate of candidates) {
+    for (const [candidateIndex, candidate] of candidates.entries()) {
       summary.candidates += 1;
 
       const localSkipReason = classifyHostedPulseTrialExtensionCandidate(candidate);
       if (localSkipReason) {
+        const previewToken = buildHostedPulseTrialExtensionCandidatePreviewToken({
+          action: { kind: "skipped", reason: localSkipReason },
+          candidate,
+          subscription: null,
+        });
+        if (mode === "dry-run") {
+          appendHostedPulseTrialExtensionCandidatePreviewToken(summary, previewToken);
+        } else if (
+          input.expectedCandidatePreviewTokens !== undefined &&
+          input.expectedCandidatePreviewTokens[candidateIndex] !== previewToken
+        ) {
+          summary.failures.preview_state_changed += 1;
+          return summary;
+        }
         summary.skipped[localSkipReason] += 1;
         continue;
       }
 
       if (mode === "dry-run") {
-        await previewHostedPulseTrialExtensionCandidate({
-          candidate,
-          now: input.now,
-          priceId: input.priceId,
-          stripe: input.stripe,
+        appendHostedPulseTrialExtensionCandidatePreviewToken(
           summary,
-        });
+          await previewHostedPulseTrialExtensionCandidate({
+            candidate,
+            now: input.now,
+            priceId: input.priceId,
+            stripe: input.stripe,
+            summary,
+          }),
+        );
         continue;
       }
 
@@ -279,7 +343,9 @@ export async function extendHostedPulseTrials(input: {
             if (!locked.candidate) {
               return {
                 localReconciliation: null,
-                result: { kind: "skipped", reason: "local_candidate_changed" },
+                result: input.expectedCandidatePreviewTokens
+                  ? { kind: "preview-stale" }
+                  : { kind: "skipped", reason: "local_candidate_changed" },
               };
             }
 
@@ -289,12 +355,15 @@ export async function extendHostedPulseTrials(input: {
             if (lockedLocalSkipReason) {
               return {
                 localReconciliation: null,
-                result: { kind: "skipped", reason: lockedLocalSkipReason },
+                result: input.expectedCandidatePreviewTokens
+                  ? { kind: "preview-stale" }
+                  : { kind: "skipped", reason: lockedLocalSkipReason },
               };
             }
 
             const providerResult = await applyHostedPulseTrialExtensionUnderLock({
               candidate: locked.candidate,
+              expectedPreviewToken: input.expectedCandidatePreviewTokens?.[candidateIndex],
               now: input.now,
               priceId: input.priceId,
               stripe: input.stripe,
@@ -336,6 +405,10 @@ export async function extendHostedPulseTrials(input: {
         summary.failures[lockedOutcome.result.reason] += 1;
         continue;
       }
+      if (lockedOutcome.result.kind === "preview-stale") {
+        summary.failures.preview_state_changed += 1;
+        return summary;
+      }
       if (lockedOutcome.result.kind === "skipped") {
         summary.skipped[lockedOutcome.result.reason] += 1;
         continue;
@@ -362,10 +435,13 @@ export async function extendHostedPulseTrials(input: {
 }
 
 export async function extendHostedPulseTrialsForCampaign(input: {
+  expectedCandidatePreviewTokens?: readonly string[];
+  expectedCandidateSnapshotDigest?: string;
   maxCandidates?: number;
   memberId?: string;
   mode: HostedPulseTrialExtensionMode;
   now?: Date;
+  page?: number;
   priceId?: string;
   prisma?: PrismaClient;
   stripe?: HostedPulseTrialExtensionStripeClient;
@@ -383,9 +459,12 @@ export async function extendHostedPulseTrialsForCampaign(input: {
     candidateSource: createPrismaHostedPulseTrialExtensionCandidateSource(prisma, {
       memberId: input.memberId,
     }),
+    expectedCandidatePreviewTokens: input.expectedCandidatePreviewTokens,
+    expectedCandidateSnapshotDigest: input.expectedCandidateSnapshotDigest,
     maxCandidates: input.maxCandidates,
     mode: input.mode,
     now: input.now,
+    page: input.page,
     priceId,
     stripe: input.stripe ?? createHostedPulseTrialExtensionStripeClient(billingConfig?.stripe),
   });
@@ -573,20 +652,28 @@ function classifyHostedPulseTrialExtensionCandidate(
 
 function buildEmptyHostedPulseTrialExtensionSummary(
   mode: HostedPulseTrialExtensionMode,
+  candidateSnapshotDigest: string | null,
+  hasMoreCandidates: boolean,
+  page: number,
 ): HostedPulseTrialExtensionSummary {
   return {
     alreadyExtended: 0,
     campaign: HOSTED_PULSE_TRIAL_EXTENSION_CAMPAIGN,
+    candidatePreviewTokens: mode === "dry-run" ? [] : null,
+    candidateSnapshotDigest,
     candidates: 0,
     extensionDays: HOSTED_PULSE_TRIAL_EXTENSION_DAYS,
     failures: {
       db_update_failed: 0,
+      preview_state_changed: 0,
       stripe_retrieve_failed: 0,
       stripe_update_failed: 0,
       stripe_update_result_invalid: 0,
     },
+    hasMoreCandidates,
     localWindowsReconciled: 0,
     mode,
+    page,
     skipped: {
       local_candidate_changed: 0,
       local_trial_window_invalid: 0,
@@ -643,6 +730,7 @@ function isValidHostedPulseTrialExtensionUpdateResult(input: {
 
 async function applyHostedPulseTrialExtensionUnderLock(input: {
   candidate: HostedPulseTrialExtensionCandidate;
+  expectedPreviewToken?: string;
   now?: Date;
   priceId: string;
   stripe: HostedPulseTrialExtensionStripeClient;
@@ -665,31 +753,39 @@ async function applyHostedPulseTrialExtensionUnderLock(input: {
     priceId: input.priceId,
     subscription,
   });
-  if (!classification.ok) {
-    return { kind: "skipped", reason: classification.reason };
-  }
-  if (classification.alreadyMarked) {
-    return {
-      kind: "already-marked",
-      stripeTrialEnd: classification.stripeTrialEnd,
-    };
-  }
+  const action = classifyHostedPulseTrialExtensionPreviewAction({
+    candidate: input.candidate,
+    classification,
+    nowUnixSeconds,
+  });
+  const previewToken = buildHostedPulseTrialExtensionCandidatePreviewToken({
+    action,
+    candidate: input.candidate,
+    subscription,
+  });
   if (
-    classification.stripeTrialEnd <=
-      nowUnixSeconds + STRIPE_UPDATE_MINIMUM_RUNWAY_SECONDS
+    input.expectedPreviewToken !== undefined &&
+    input.expectedPreviewToken !== previewToken
   ) {
-    return { kind: "skipped", reason: "stripe_trial_end_invalid" };
+    return { kind: "preview-stale" };
   }
 
-  const targetTrialEnd = classification.stripeTrialEnd +
-    HOSTED_PULSE_TRIAL_EXTENSION_DAYS * SECONDS_PER_DAY;
+  if (action.kind === "skipped") {
+    return { kind: "skipped", reason: action.reason };
+  }
+  if (action.kind === "already-marked") {
+    return {
+      kind: "already-marked",
+      stripeTrialEnd: action.stripeTrialEnd,
+    };
+  }
   let updatedSubscription: HostedPulseTrialExtensionStripeSubscription;
   try {
     updatedSubscription = await input.stripe.updateSubscription(
       stripeSubscriptionId,
       buildHostedPulseTrialExtensionStripeUpdateParams({
         subscription,
-        targetTrialEnd,
+        targetTrialEnd: action.targetTrialEnd,
       }),
       {
         idempotencyKey: buildHostedPulseTrialExtensionIdempotencyKey(
@@ -706,14 +802,14 @@ async function applyHostedPulseTrialExtensionUnderLock(input: {
     candidate: input.candidate,
     priceId: input.priceId,
     subscription: updatedSubscription,
-    targetTrialEnd,
+    targetTrialEnd: action.targetTrialEnd,
   })) {
     return { kind: "failure", reason: "stripe_update_result_invalid" };
   }
 
   return {
     kind: "extended",
-    stripeTrialEnd: targetTrialEnd,
+    stripeTrialEnd: action.targetTrialEnd,
   };
 }
 
@@ -740,7 +836,7 @@ async function previewHostedPulseTrialExtensionCandidate(input: {
   priceId: string;
   stripe: HostedPulseTrialExtensionStripeClient;
   summary: HostedPulseTrialExtensionSummary;
-}): Promise<void> {
+}): Promise<string | null> {
   let subscription: HostedPulseTrialExtensionStripeSubscription;
   try {
     subscription = await input.stripe.retrieveSubscription(
@@ -749,7 +845,7 @@ async function previewHostedPulseTrialExtensionCandidate(input: {
     );
   } catch {
     input.summary.failures.stripe_retrieve_failed += 1;
-    return;
+    return null;
   }
 
   const nowUnixSeconds = resolveHostedPulseTrialExtensionNowUnixSeconds(input.now);
@@ -759,32 +855,26 @@ async function previewHostedPulseTrialExtensionCandidate(input: {
     priceId: input.priceId,
     subscription,
   });
-  if (!classification.ok) {
-    input.summary.skipped[classification.reason] += 1;
-    return;
-  }
-
-  if (!classification.alreadyMarked) {
-    if (
-      classification.stripeTrialEnd <=
-        nowUnixSeconds + STRIPE_UPDATE_MINIMUM_RUNWAY_SECONDS
-    ) {
-      input.summary.skipped.stripe_trial_end_invalid += 1;
-      return;
-    }
-    input.summary.wouldExtend += 1;
-    return;
-  }
-
-  const trialEndsAt = stripeUnixSecondsToDate(classification.stripeTrialEnd);
-  if (isHostedPulseTrialExtensionLocallyReconciled({
+  const action = classifyHostedPulseTrialExtensionPreviewAction({
     candidate: input.candidate,
-    trialEndsAt,
-  })) {
+    classification,
+    nowUnixSeconds,
+  });
+  if (action.kind === "skipped") {
+    input.summary.skipped[action.reason] += 1;
+  } else if (action.kind === "extend") {
+    input.summary.wouldExtend += 1;
+  } else if (action.locallyReconciled) {
     input.summary.alreadyExtended += 1;
   } else {
     input.summary.wouldReconcile += 1;
   }
+
+  return buildHostedPulseTrialExtensionCandidatePreviewToken({
+    action,
+    candidate: input.candidate,
+    subscription,
+  });
 }
 
 async function readLockedPrismaHostedPulseTrialExtensionCandidate(input: {
@@ -940,10 +1030,170 @@ function resolveHostedPulseTrialExtensionNowUnixSeconds(now?: Date): number {
   return Math.floor((now ?? new Date()).getTime() / 1000);
 }
 
+async function readHostedPulseTrialExtensionCandidatePage(input: {
+  candidateSource: HostedPulseTrialExtensionCandidateSource;
+  maxCandidates: number;
+  page: number;
+}): Promise<{
+  candidates: readonly HostedPulseTrialExtensionCandidate[];
+  hasMoreCandidates: boolean;
+}> {
+  let afterMemberId: string | null = null;
+
+  for (let currentPage = 0; currentPage <= input.page; currentPage += 1) {
+    const isRequestedPage = currentPage === input.page;
+    const candidates = await input.candidateSource.listCandidates({
+      afterMemberId,
+      limit: input.maxCandidates + (isRequestedPage ? 1 : 0),
+    });
+    if (isRequestedPage) {
+      return {
+        candidates: candidates.slice(0, input.maxCandidates),
+        hasMoreCandidates: candidates.length > input.maxCandidates,
+      };
+    }
+    if (candidates.length < input.maxCandidates) {
+      return { candidates: [], hasMoreCandidates: false };
+    }
+    afterMemberId = candidates.at(-1)?.memberId ?? null;
+  }
+
+  return { candidates: [], hasMoreCandidates: false };
+}
+
+function classifyHostedPulseTrialExtensionPreviewAction(input: {
+  candidate: HostedPulseTrialExtensionCandidate;
+  classification: HostedPulseTrialExtensionClassification;
+  nowUnixSeconds: number;
+}): HostedPulseTrialExtensionPreviewAction {
+  if (!input.classification.ok) {
+    return { kind: "skipped", reason: input.classification.reason };
+  }
+  if (input.classification.alreadyMarked) {
+    return {
+      kind: "already-marked",
+      locallyReconciled: isHostedPulseTrialExtensionLocallyReconciled({
+        candidate: input.candidate,
+        trialEndsAt: stripeUnixSecondsToDate(input.classification.stripeTrialEnd),
+      }),
+      stripeTrialEnd: input.classification.stripeTrialEnd,
+    };
+  }
+  if (
+    input.classification.stripeTrialEnd <=
+      input.nowUnixSeconds + STRIPE_UPDATE_MINIMUM_RUNWAY_SECONDS
+  ) {
+    return { kind: "skipped", reason: "stripe_trial_end_invalid" };
+  }
+  return {
+    kind: "extend",
+    stripeTrialEnd: input.classification.stripeTrialEnd,
+    targetTrialEnd: input.classification.stripeTrialEnd +
+      HOSTED_PULSE_TRIAL_EXTENSION_DAYS * SECONDS_PER_DAY,
+  };
+}
+
+function appendHostedPulseTrialExtensionCandidatePreviewToken(
+  summary: HostedPulseTrialExtensionSummary,
+  token: string | null,
+): void {
+  if (summary.candidatePreviewTokens === null) {
+    throw new Error("Pulse Trial extension Apply cannot collect preview proof.");
+  }
+  summary.candidatePreviewTokens = [...summary.candidatePreviewTokens, token ?? ""];
+}
+
 function buildHostedPulseTrialExtensionStripeRequestOptions():
   HostedPulseTrialExtensionStripeRequestOptions {
   return {
     maxNetworkRetries: STRIPE_REQUEST_MAX_NETWORK_RETRIES,
     timeout: STRIPE_REQUEST_TIMEOUT_MS,
   };
+}
+
+function buildHostedPulseTrialExtensionCandidateSnapshotDigest(
+  candidates: readonly HostedPulseTrialExtensionCandidate[],
+  page: number,
+): string {
+  const snapshot = [...candidates]
+    .sort((left, right) => {
+      if (left.memberId < right.memberId) {
+        return -1;
+      }
+      return left.memberId > right.memberId ? 1 : 0;
+    })
+    .map((candidate) => [
+      candidate.memberId,
+      candidate.stripeCustomerId,
+      candidate.stripeSubscriptionId,
+      candidate.currentTrialStartedAt?.toISOString() ?? null,
+      candidate.currentTrialEndsAt?.toISOString() ?? null,
+      candidate.currentPeriodEnd?.toISOString() ?? null,
+      candidate.lastStripeEventCreatedAt?.toISOString() ?? null,
+    ]);
+
+  return `pulse-candidates-v2.${createHash("sha256")
+    .update(HOSTED_PULSE_TRIAL_EXTENSION_CAMPAIGN, "utf8")
+    .update("\0", "utf8")
+    .update(page.toString(), "utf8")
+    .update("\0", "utf8")
+    .update(JSON.stringify(snapshot), "utf8")
+    .digest("base64url")}`;
+}
+
+function buildHostedPulseTrialExtensionCandidatePreviewToken(input: {
+  action: HostedPulseTrialExtensionPreviewAction;
+  candidate: HostedPulseTrialExtensionCandidate;
+  subscription: HostedPulseTrialExtensionStripeSubscription | null;
+}): string {
+  const subscriptionItems = [...(input.subscription?.items?.data ?? [])]
+    .sort((left, right) => left.id.localeCompare(right.id))
+    .map((item) => ({
+      id: item.id,
+      legacyUsagePrice: item.price?.metadata?.[
+        HOSTED_STRIPE_LEGACY_AI_USAGE_PRICE_METADATA_KEY
+      ] ?? null,
+      priceId: item.price?.id ?? null,
+      quantity: item.quantity ?? null,
+      recurringInterval: item.price?.recurring?.interval ?? null,
+      recurringIntervalCount: item.price?.recurring?.interval_count ?? null,
+      recurringUsageType: item.price?.recurring?.usage_type ?? null,
+    }));
+  const snapshot = {
+    action: input.action,
+    candidate: {
+      currentPeriodEnd: input.candidate.currentPeriodEnd?.toISOString() ?? null,
+      currentTrialEndsAt: input.candidate.currentTrialEndsAt?.toISOString() ?? null,
+      currentTrialStartedAt: input.candidate.currentTrialStartedAt?.toISOString() ?? null,
+      lastStripeEventCreatedAt: input.candidate.lastStripeEventCreatedAt?.toISOString() ?? null,
+      memberId: input.candidate.memberId,
+      stripeCustomerId: input.candidate.stripeCustomerId,
+      stripeSubscriptionId: input.candidate.stripeSubscriptionId,
+    },
+    subscription: input.subscription
+      ? {
+          billingPlanCode: input.subscription.metadata?.billingPlanCode ?? null,
+          campaign: input.subscription.metadata?.[
+            HOSTED_PULSE_TRIAL_EXTENSION_CAMPAIGN_METADATA_KEY
+          ] ?? null,
+          campaignDays: input.subscription.metadata?.[
+            HOSTED_PULSE_TRIAL_EXTENSION_DAYS_METADATA_KEY
+          ] ?? null,
+          cancelAt: input.subscription.cancel_at,
+          cancelAtPeriodEnd: input.subscription.cancel_at_period_end,
+          checkoutOffer: input.subscription.metadata?.checkoutOffer ?? null,
+          customerId: coerceStripeCustomerId(input.subscription.customer),
+          id: input.subscription.id,
+          items: subscriptionItems,
+          status: input.subscription.status,
+          trialEnd: input.subscription.trial_end,
+        }
+      : null,
+  };
+
+  return `pulse-target-v1.${createHash("sha256")
+    .update(HOSTED_PULSE_TRIAL_EXTENSION_CAMPAIGN, "utf8")
+    .update("\0", "utf8")
+    .update(JSON.stringify(snapshot), "utf8")
+    .digest("base64url")}`;
 }

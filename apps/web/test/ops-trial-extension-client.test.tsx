@@ -51,6 +51,8 @@ import {
 import { renderClientComponent } from "./render-client-component";
 
 const fetchMock = vi.fn<typeof fetch>();
+const CANDIDATE_SNAPSHOT_DIGEST = `pulse-candidates-v2.${"a".repeat(43)}`;
+const CANDIDATE_PREVIEW_TOKEN = `pulse-target-v1.${"b".repeat(43)}`;
 let cleanupRender: (() => Promise<void>) | null = null;
 
 beforeEach(() => {
@@ -94,6 +96,7 @@ describe("TrialExtensionClient", () => {
     expect(readRequestBody(0)).toEqual({
       memberId: "member_one",
       mode: "dry-run",
+      page: 0,
     });
 
     // A disabled control cannot change through normal interaction. Force the
@@ -116,8 +119,11 @@ describe("TrialExtensionClient", () => {
 
     expect(readRequestBody(1)).toEqual({
       campaign: HOSTED_PULSE_TRIAL_EXTENSION_CAMPAIGN,
+      candidatePreviewTokens: [CANDIDATE_PREVIEW_TOKEN],
+      candidateSnapshotDigest: CANDIDATE_SNAPSHOT_DIGEST,
       memberId: "member_one",
       mode: "apply",
+      page: 0,
     });
     expect(memberInput.disabled).toBe(true);
     expect(confirmationInput.disabled).toBe(true);
@@ -129,7 +135,7 @@ describe("TrialExtensionClient", () => {
 
     const appliedStatus = memberSection.querySelector('[role="status"]');
     expect(appliedStatus?.textContent).toContain("Applied");
-    expect(focusMock).toHaveBeenCalledTimes(1);
+    expect(focusMock).toHaveBeenCalledTimes(2);
   });
 
   test("changing a member after preview removes the confirmation and apply action", async () => {
@@ -183,6 +189,79 @@ describe("TrialExtensionClient", () => {
     expect(memberSection.querySelectorAll("input")).toHaveLength(1);
   });
 
+  test("an unverifiable preview cannot expose an apply action", async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse(buildSummary("dry-run", {
+        candidateSnapshotDigest: null,
+        wouldExtend: 1,
+      })),
+    );
+
+    const rendered = await renderClientComponent(createElement(TrialExtensionClient));
+    cleanupRender = rendered.cleanup;
+    const allSection = getSection(rendered.container, 0);
+
+    await clickButton(rendered.window, getButton(allSection, "Preview"));
+
+    expect(allSection.textContent).toContain("Preview could not be verified");
+    expect(findButton(allSection, "Add 7 days")).toBeUndefined();
+    expect(allSection.textContent).not.toContain("Type pulse-beta-extension");
+  });
+
+  test("an incomplete provider preview cannot expose an apply action", async () => {
+    const incompletePreview = buildSummary("dry-run", { wouldExtend: 1 });
+    incompletePreview.failures.stripe_retrieve_failed = 1;
+    incompletePreview.candidatePreviewTokens = [""];
+    fetchMock.mockResolvedValueOnce(jsonResponse(incompletePreview));
+
+    const rendered = await renderClientComponent(createElement(TrialExtensionClient));
+    cleanupRender = rendered.cleanup;
+    const allSection = getSection(rendered.container, 0);
+
+    await clickButton(rendered.window, getButton(allSection, "Preview"));
+
+    expect(allSection.textContent).toContain("Preview incomplete");
+    expect(allSection.textContent).toContain("stripe_retrieve_failed: 1");
+    expect(allSection.textContent).toContain("Apply is unavailable");
+    expect(findButton(allSection, "Add 7 days")).toBeUndefined();
+  });
+
+  test("navigates bounded all-member batches without exposing a cursor", async () => {
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse(buildSummary("dry-run", {
+        hasMoreCandidates: true,
+      })))
+      .mockResolvedValueOnce(jsonResponse(buildSummary("dry-run", {
+        page: 1,
+      })))
+      .mockResolvedValueOnce(jsonResponse(buildSummary("dry-run", {
+        hasMoreCandidates: true,
+      })));
+
+    const rendered = await renderClientComponent(createElement(TrialExtensionClient));
+    cleanupRender = rendered.cleanup;
+    const focusMock = vi.fn();
+    Object.defineProperty(rendered.window.HTMLElement.prototype, "focus", {
+      configurable: true,
+      value: focusMock,
+    });
+    const allSection = getSection(rendered.container, 0);
+
+    await clickButton(rendered.window, getButton(allSection, "Preview"));
+    expect(allSection.textContent).toContain("Batch 1 · more batches");
+    expect(focusMock).toHaveBeenCalledTimes(1);
+    await clickButton(rendered.window, getButton(allSection, "Preview next batch"));
+
+    expect(readRequestBody(1)).toEqual({ mode: "dry-run", page: 1 });
+    expect(allSection.textContent).toContain("Batch 2 · final batch");
+    expect(focusMock).toHaveBeenCalledTimes(2);
+    await clickButton(rendered.window, getButton(allSection, "Previous batch"));
+
+    expect(readRequestBody(2)).toEqual({ mode: "dry-run", page: 0 });
+    expect(allSection.textContent).toContain("Batch 1 · more batches");
+    expect(focusMock).toHaveBeenCalledTimes(3);
+  });
+
   test("an apply failure retains the matching preview and confirmation for retry", async () => {
     fetchMock
       .mockResolvedValueOnce(jsonResponse(buildSummary("dry-run", { wouldExtend: 1 })))
@@ -207,6 +286,35 @@ describe("TrialExtensionClient", () => {
     expect(memberSection.textContent).toContain("Apply failed safely.");
     expect(getButton(memberSection, "Add 7 days")).toBeDefined();
     expect(confirmationInput.value).toBe(HOSTED_PULSE_TRIAL_EXTENSION_CAMPAIGN);
+  });
+
+  test("a stale apply response clears the obsolete preview", async () => {
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse(buildSummary("dry-run", { wouldExtend: 1 })))
+      .mockResolvedValueOnce(
+        jsonResponse({
+          error: {
+            code: "HOSTED_OPS_PULSE_TRIAL_EXTENSION_PREVIEW_STALE",
+            message: "Eligible trials changed since Preview. Preview again before applying.",
+          },
+        }, 409),
+      );
+
+    const rendered = await renderClientComponent(createElement(TrialExtensionClient));
+    cleanupRender = rendered.cleanup;
+    const allSection = getSection(rendered.container, 0);
+
+    await clickButton(rendered.window, getButton(allSection, "Preview"));
+    await changeInput(
+      rendered.window,
+      getInput(allSection, 0),
+      HOSTED_PULSE_TRIAL_EXTENSION_CAMPAIGN,
+    );
+    await clickButton(rendered.window, getButton(allSection, "Add 7 days"));
+
+    expect(allSection.textContent).toContain("Eligible trials changed since Preview");
+    expect(findButton(allSection, "Add 7 days")).toBeUndefined();
+    expect(allSection.querySelectorAll("input")).toHaveLength(0);
   });
 
   test("a partial apply result stays confirmed and available for an idempotent retry", async () => {
@@ -236,17 +344,70 @@ describe("TrialExtensionClient", () => {
     expect(confirmationInput.value).toBe(HOSTED_PULSE_TRIAL_EXTENSION_CAMPAIGN);
   });
 
-  test("the all-member preview omits memberId and explains its candidate cap", async () => {
+  test("a partial apply that reconciles local state requires a new preview", async () => {
+    const partialApply = buildSummary("apply", { localWindowsReconciled: 1 });
+    partialApply.failures.stripe_update_failed = 1;
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse(buildSummary("dry-run", { wouldExtend: 2 })))
+      .mockResolvedValueOnce(jsonResponse(partialApply));
+
+    const rendered = await renderClientComponent(createElement(TrialExtensionClient));
+    cleanupRender = rendered.cleanup;
+    const allSection = getSection(rendered.container, 0);
+
+    await clickButton(rendered.window, getButton(allSection, "Preview"));
+    await changeInput(
+      rendered.window,
+      getInput(allSection, 0),
+      HOSTED_PULSE_TRIAL_EXTENSION_CAMPAIGN,
+    );
+    await clickButton(rendered.window, getButton(allSection, "Add 7 days"));
+
+    expect(allSection.textContent).toContain("Needs retry");
+    expect(findButton(allSection, "Add 7 days")).toBeUndefined();
+    expect(allSection.querySelectorAll("input")).toHaveLength(0);
+  });
+
+  test("a partial apply with changed local eligibility requires a new preview", async () => {
+    const partialApply = buildSummary("apply");
+    partialApply.failures.stripe_update_failed = 1;
+    partialApply.skipped.local_candidate_changed = 1;
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse(buildSummary("dry-run", { wouldExtend: 2 })))
+      .mockResolvedValueOnce(jsonResponse(partialApply));
+
+    const rendered = await renderClientComponent(createElement(TrialExtensionClient));
+    cleanupRender = rendered.cleanup;
+    const allSection = getSection(rendered.container, 0);
+
+    await clickButton(rendered.window, getButton(allSection, "Preview"));
+    await changeInput(
+      rendered.window,
+      getInput(allSection, 0),
+      HOSTED_PULSE_TRIAL_EXTENSION_CAMPAIGN,
+    );
+    await clickButton(rendered.window, getButton(allSection, "Add 7 days"));
+
+    expect(allSection.textContent).toContain("Needs retry");
+    expect(allSection.textContent).toContain("local_candidate_changed (1)");
+    expect(findButton(allSection, "Add 7 days")).toBeUndefined();
+    expect(allSection.querySelectorAll("input")).toHaveLength(0);
+  });
+
+  test("the all-member preview omits memberId and explains bounded batches", async () => {
     fetchMock.mockResolvedValueOnce(jsonResponse(buildSummary("dry-run")));
 
     const rendered = await renderClientComponent(createElement(TrialExtensionClient));
     cleanupRender = rendered.cleanup;
     const allSection = getSection(rendered.container, 0);
 
-    expect(allSection.textContent).toContain("capped at four candidates");
+    expect(allSection.textContent).toContain("ordered batches of up to four");
+    expect(allSection.textContent).toContain(
+      "restart at Batch 1 and Preview every batch again",
+    );
     await clickButton(rendered.window, getButton(allSection, "Preview"));
 
-    expect(readRequestBody(0)).toEqual({ mode: "dry-run" });
+    expect(readRequestBody(0)).toEqual({ mode: "dry-run", page: 0 });
     expect(rendered.container.textContent).toContain(
       "already extended trials are not extended again",
     );
@@ -261,16 +422,21 @@ function buildSummary(
   return {
     alreadyExtended: 0,
     campaign: HOSTED_PULSE_TRIAL_EXTENSION_CAMPAIGN,
+    candidatePreviewTokens: mode === "dry-run" ? [CANDIDATE_PREVIEW_TOKEN] : null,
+    candidateSnapshotDigest: mode === "dry-run" ? CANDIDATE_SNAPSHOT_DIGEST : null,
     candidates: 1,
     extensionDays: 7,
     failures: {
       db_update_failed: 0,
+      preview_state_changed: 0,
       stripe_retrieve_failed: 0,
       stripe_update_failed: 0,
       stripe_update_result_invalid: 0,
     },
+    hasMoreCandidates: false,
     localWindowsReconciled: 0,
     mode,
+    page: 0,
     skipped: {
       local_candidate_changed: 0,
       local_trial_window_invalid: 0,

@@ -2,7 +2,7 @@ import { requireHostedOpsRequestAccess } from "@/src/lib/hosted-ops/access";
 import {
   extendHostedPulseTrialsForCampaign,
   HOSTED_PULSE_TRIAL_EXTENSION_CAMPAIGN,
-  HostedPulseTrialExtensionCandidateLimitError,
+  HostedPulseTrialExtensionPreviewMismatchError,
   type HostedPulseTrialExtensionMode,
   type HostedPulseTrialExtensionSummary,
 } from "@/src/lib/hosted-ops/pulse-trial-extension";
@@ -20,6 +20,7 @@ export const revalidate = 0;
 
 const HOSTED_OPS_PULSE_TRIAL_EXTENSION_BODY_LIMIT_BYTES = 4 * 1024;
 const HOSTED_OPS_PULSE_TRIAL_EXTENSION_MAX_CANDIDATES = 4;
+const HOSTED_OPS_PULSE_TRIAL_EXTENSION_MAX_PAGE = 100;
 
 export const POST = withJsonError(async (request: Request) => {
   await requireHostedOpsRequestAccess(request, {
@@ -33,6 +34,7 @@ export const POST = withJsonError(async (request: Request) => {
 
   const mode = readMode(body);
   const memberId = readMemberId(body);
+  const page = readPage(body, memberId);
   if (
     mode === "apply" &&
     readOptionalString(body.campaign) !== HOSTED_PULSE_TRIAL_EXTENSION_CAMPAIGN
@@ -45,22 +47,29 @@ export const POST = withJsonError(async (request: Request) => {
       retryable: false,
     });
   }
+  const expectedCandidateSnapshotDigest = mode === "apply"
+    ? readRequiredCandidateSnapshotDigest(body)
+    : undefined;
+  const expectedCandidatePreviewTokens = mode === "apply"
+    ? readRequiredCandidatePreviewTokens(body)
+    : undefined;
 
   let summary: HostedPulseTrialExtensionSummary;
   try {
     summary = await extendHostedPulseTrialsForCampaign({
+      expectedCandidatePreviewTokens,
+      expectedCandidateSnapshotDigest,
       maxCandidates: HOSTED_OPS_PULSE_TRIAL_EXTENSION_MAX_CANDIDATES,
       memberId,
       mode,
+      page,
     });
   } catch (error) {
-    if (error instanceof HostedPulseTrialExtensionCandidateLimitError) {
+    if (error instanceof HostedPulseTrialExtensionPreviewMismatchError) {
       throw hostedOnboardingError({
-        code: "HOSTED_OPS_PULSE_TRIAL_EXTENSION_CANDIDATE_LIMIT_EXCEEDED",
+        code: "HOSTED_OPS_PULSE_TRIAL_EXTENSION_PREVIEW_STALE",
         httpStatus: 409,
-        message:
-          `This run found at least ${error.candidateCount} active trials, above the ` +
-          `${error.maxCandidates}-member safety limit. Use the one-member tool instead.`,
+        message: "Eligible trials changed since Preview. Preview again before applying.",
         retryable: false,
       });
     }
@@ -109,6 +118,60 @@ function readMemberId(body: Record<string, unknown>): string | undefined {
     code: "HOSTED_OPS_PULSE_TRIAL_EXTENSION_MEMBER_ID_INVALID",
     httpStatus: 400,
     message: "Member id must be a non-empty string when provided.",
+    retryable: false,
+  });
+}
+
+function readRequiredCandidateSnapshotDigest(body: Record<string, unknown>): string {
+  const digest = readOptionalString(body.candidateSnapshotDigest);
+  if (digest && /^pulse-candidates-v2\.[A-Za-z0-9_-]{43}$/u.test(digest)) {
+    return digest;
+  }
+
+  throw hostedOnboardingError({
+    code: "HOSTED_OPS_PULSE_TRIAL_EXTENSION_PREVIEW_DIGEST_INVALID",
+    httpStatus: 400,
+    message: "Applying a trial extension requires a candidate snapshot from Preview.",
+    retryable: false,
+  });
+}
+
+function readRequiredCandidatePreviewTokens(body: Record<string, unknown>): readonly string[] {
+  const value = body.candidatePreviewTokens;
+  if (
+    Array.isArray(value) &&
+    value.length <= HOSTED_OPS_PULSE_TRIAL_EXTENSION_MAX_CANDIDATES &&
+    value.every((token): token is string =>
+      typeof token === "string" && /^pulse-target-v1\.[A-Za-z0-9_-]{43}$/u.test(token)
+    )
+  ) {
+    return value;
+  }
+
+  throw hostedOnboardingError({
+    code: "HOSTED_OPS_PULSE_TRIAL_EXTENSION_PREVIEW_PROOF_INVALID",
+    httpStatus: 400,
+    message: "Applying a trial extension requires a complete successful Preview.",
+    retryable: false,
+  });
+}
+
+function readPage(body: Record<string, unknown>, memberId: string | undefined): number {
+  const value = body.page ?? 0;
+  if (
+    typeof value === "number" &&
+    Number.isSafeInteger(value) &&
+    value >= 0 &&
+    value <= HOSTED_OPS_PULSE_TRIAL_EXTENSION_MAX_PAGE &&
+    (!memberId || value === 0)
+  ) {
+    return value;
+  }
+
+  throw hostedOnboardingError({
+    code: "HOSTED_OPS_PULSE_TRIAL_EXTENSION_PAGE_INVALID",
+    httpStatus: 400,
+    message: "Trial extension page is invalid.",
     retryable: false,
   });
 }

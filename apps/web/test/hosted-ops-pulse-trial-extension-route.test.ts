@@ -30,7 +30,7 @@ vi.mock("@/src/lib/hosted-ops/pulse-trial-extension", async () => {
 
 import {
   HOSTED_PULSE_TRIAL_EXTENSION_CAMPAIGN,
-  HostedPulseTrialExtensionCandidateLimitError,
+  HostedPulseTrialExtensionPreviewMismatchError,
   type HostedPulseTrialExtensionSummary,
 } from "@/src/lib/hosted-ops/pulse-trial-extension";
 
@@ -42,6 +42,8 @@ let route: PulseTrialExtensionRouteModule;
 const originalHostedOpsMemberIds = process.env.HOSTED_OPS_MEMBER_IDS;
 const NOW = new Date("2026-07-10T12:00:00.000Z");
 const OPERATOR_MEMBER_ID = "member_operator";
+const CANDIDATE_SNAPSHOT_DIGEST = `pulse-candidates-v2.${"a".repeat(43)}`;
+const CANDIDATE_PREVIEW_TOKEN = `pulse-target-v1.${"b".repeat(43)}`;
 
 let consoleInfoSpy: ReturnType<typeof vi.spyOn>;
 
@@ -92,9 +94,12 @@ describe("hosted ops Pulse Trial extension route", () => {
     assert.equal(route.maxDuration, 800);
     assert.equal(mocks.assertHostedOnboardingMutationOrigin.mock.calls.length, 1);
     expect(mocks.extendHostedPulseTrialsForCampaign).toHaveBeenCalledWith({
+      expectedCandidatePreviewTokens: undefined,
+      expectedCandidateSnapshotDigest: undefined,
       maxCandidates: 4,
       memberId: undefined,
       mode: "dry-run",
+      page: 0,
     });
     const payload = await response.json() as HostedPulseTrialExtensionSummary;
     assert.equal(payload.campaign, HOSTED_PULSE_TRIAL_EXTENSION_CAMPAIGN);
@@ -105,9 +110,12 @@ describe("hosted ops Pulse Trial extension route", () => {
     await route.POST(makeRequest({ memberId: "  member_target  " }));
 
     expect(mocks.extendHostedPulseTrialsForCampaign).toHaveBeenCalledWith({
+      expectedCandidatePreviewTokens: undefined,
+      expectedCandidateSnapshotDigest: undefined,
       maxCandidates: 4,
       memberId: "member_target",
       mode: "dry-run",
+      page: 0,
     });
   });
 
@@ -141,15 +149,20 @@ describe("hosted ops Pulse Trial extension route", () => {
   test("applies with the exact campaign key and logs only aggregate results", async () => {
     const response = await route.POST(makeRequest({
       campaign: HOSTED_PULSE_TRIAL_EXTENSION_CAMPAIGN,
+      candidatePreviewTokens: [CANDIDATE_PREVIEW_TOKEN],
+      candidateSnapshotDigest: CANDIDATE_SNAPSHOT_DIGEST,
       memberId: "member_target",
       mode: "apply",
     }));
 
     assert.equal(response.status, 200);
     expect(mocks.extendHostedPulseTrialsForCampaign).toHaveBeenCalledWith({
+      expectedCandidatePreviewTokens: [CANDIDATE_PREVIEW_TOKEN],
+      expectedCandidateSnapshotDigest: CANDIDATE_SNAPSHOT_DIGEST,
       maxCandidates: 4,
       memberId: "member_target",
       mode: "apply",
+      page: 0,
     });
     assert.equal(consoleInfoSpy.mock.calls.length, 1);
     assert.deepEqual(consoleInfoSpy.mock.calls[0]?.[1], {
@@ -161,26 +174,67 @@ describe("hosted ops Pulse Trial extension route", () => {
     });
   });
 
-  test("returns a bounded conflict before a campaign can exceed the request limit", async () => {
+  test("refuses to apply without a candidate snapshot from Preview", async () => {
+    const response = await route.POST(makeRequest({
+      campaign: HOSTED_PULSE_TRIAL_EXTENSION_CAMPAIGN,
+      mode: "apply",
+    }));
+
+    assert.equal(response.status, 400);
+    assert.equal(mocks.extendHostedPulseTrialsForCampaign.mock.calls.length, 0);
+  });
+
+  test("refuses to apply with a snapshot but without complete provider preview proof", async () => {
+    const response = await route.POST(makeRequest({
+      campaign: HOSTED_PULSE_TRIAL_EXTENSION_CAMPAIGN,
+      candidateSnapshotDigest: CANDIDATE_SNAPSHOT_DIGEST,
+      mode: "apply",
+    }));
+
+    assert.equal(response.status, 400);
+    assert.equal(mocks.extendHostedPulseTrialsForCampaign.mock.calls.length, 0);
+  });
+
+  test("rejects a changed candidate snapshot before applying", async () => {
     mocks.extendHostedPulseTrialsForCampaign.mockRejectedValueOnce(
-      new HostedPulseTrialExtensionCandidateLimitError({
-        candidateCount: 5,
-        maxCandidates: 4,
-      }),
+      new HostedPulseTrialExtensionPreviewMismatchError(),
     );
 
-    const response = await route.POST(makeRequest({}));
+    const response = await route.POST(makeRequest({
+      campaign: HOSTED_PULSE_TRIAL_EXTENSION_CAMPAIGN,
+      candidatePreviewTokens: [CANDIDATE_PREVIEW_TOKEN],
+      candidateSnapshotDigest: CANDIDATE_SNAPSHOT_DIGEST,
+      mode: "apply",
+    }));
     const payload = await response.json() as {
       error?: { code?: string; message?: string };
     };
 
     assert.equal(response.status, 409);
-    assert.equal(
-      payload.error?.code,
-      "HOSTED_OPS_PULSE_TRIAL_EXTENSION_CANDIDATE_LIMIT_EXCEEDED",
-    );
-    assert.match(payload.error?.message ?? "", /Use the one-member tool instead/);
+    assert.equal(payload.error?.code, "HOSTED_OPS_PULSE_TRIAL_EXTENSION_PREVIEW_STALE");
+    assert.match(payload.error?.message ?? "", /Preview again/u);
     assert.equal(consoleInfoSpy.mock.calls.length, 0);
+  });
+
+  test("passes a bounded all-member page and rejects invalid page scopes", async () => {
+    const pageResponse = await route.POST(makeRequest({ page: 2 }));
+    const memberPageResponse = await route.POST(makeRequest({
+      memberId: "member_target",
+      page: 1,
+    }));
+    const oversizedPageResponse = await route.POST(makeRequest({ page: 101 }));
+
+    assert.equal(pageResponse.status, 200);
+    expect(mocks.extendHostedPulseTrialsForCampaign).toHaveBeenCalledWith({
+      expectedCandidatePreviewTokens: undefined,
+      expectedCandidateSnapshotDigest: undefined,
+      maxCandidates: 4,
+      memberId: undefined,
+      mode: "dry-run",
+      page: 2,
+    });
+    assert.equal(memberPageResponse.status, 400);
+    assert.equal(oversizedPageResponse.status, 400);
   });
 
   test("rejects unknown modes", async () => {
@@ -207,16 +261,21 @@ function makeSummary(
   return {
     alreadyExtended: 0,
     campaign: HOSTED_PULSE_TRIAL_EXTENSION_CAMPAIGN,
+    candidatePreviewTokens: [],
+    candidateSnapshotDigest: CANDIDATE_SNAPSHOT_DIGEST,
     candidates: 0,
     extensionDays: 7,
     failures: {
       db_update_failed: 0,
+      preview_state_changed: 0,
       stripe_retrieve_failed: 0,
       stripe_update_failed: 0,
       stripe_update_result_invalid: 0,
     },
+    hasMoreCandidates: false,
     localWindowsReconciled: 0,
     mode: "dry-run",
+    page: 0,
     skipped: {
       local_candidate_changed: 0,
       local_trial_window_invalid: 0,

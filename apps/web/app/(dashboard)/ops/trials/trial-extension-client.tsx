@@ -15,6 +15,7 @@ type TrialExtensionPendingAction = "apply" | "preview" | null;
 type TrialExtensionPreview = {
   summary: HostedPulseTrialExtensionSummary;
   targetMemberId: string | null;
+  targetPage: number;
 };
 
 export function TrialExtensionClient() {
@@ -38,7 +39,7 @@ export function TrialExtensionClient() {
       </header>
 
       <TrialExtensionSection
-        description="Adds 7 days to active Pulse Trials. Each run is capped at four candidates; if more qualify, preview stops before changing anything so you can use one-member runs below."
+        description="Adds 7 days to active Pulse Trials in ordered batches of up to four. After applying every batch, restart at Batch 1 and Preview every batch again. Retire the campaign only when every batch shows zero trials to extend or reconcile."
         scope="all"
         title="Every active trial"
       />
@@ -66,13 +67,19 @@ function TrialExtensionSection({
   const [confirmation, setConfirmation] = useState("");
   const [pending, setPending] = useState<TrialExtensionPendingAction>(null);
   const [error, setError] = useState<string | null>(null);
+  const [page, setPage] = useState(0);
+  const previewResultRef = useRef<HTMLDivElement>(null);
   const appliedResultRef = useRef<HTMLDivElement>(null);
 
   const targetMemberId = scope === "member" ? memberId.trim() : null;
   const missingMemberId = scope === "member" && targetMemberId === "";
   const confirmationMatches =
-    preview !== null && confirmation.trim() === preview.summary.campaign;
+    preview !== null &&
+    preview.summary.candidateSnapshotDigest !== null &&
+    hasCompleteTrialExtensionPreviewProof(preview.summary) &&
+    confirmation.trim() === preview.summary.campaign;
   const sectionId = `trial-extension-${scope}`;
+  const displayedSummary = applied ?? preview?.summary ?? null;
 
   useEffect(() => {
     if (applied) {
@@ -80,7 +87,13 @@ function TrialExtensionSection({
     }
   }, [applied]);
 
-  async function previewExtension(): Promise<void> {
+  useEffect(() => {
+    if (preview) {
+      previewResultRef.current?.focus();
+    }
+  }, [preview]);
+
+  async function previewExtension(requestedPage = page): Promise<void> {
     const requestedMemberId = scope === "member" ? memberId.trim() : null;
     if (scope === "member" && !requestedMemberId) {
       return;
@@ -94,10 +107,21 @@ function TrialExtensionSection({
     try {
       const summary = await requestTrialExtension({
         campaign: null,
+        candidatePreviewTokens: null,
+        candidateSnapshotDigest: null,
         memberId: requestedMemberId,
         mode: "dry-run",
+        page: scope === "all" ? requestedPage : 0,
       });
-      setPreview({ summary, targetMemberId: requestedMemberId });
+      if (!summary.candidateSnapshotDigest) {
+        throw new Error("Preview could not be verified. Preview again.");
+      }
+      setPage(summary.page);
+      setPreview({
+        summary,
+        targetMemberId: requestedMemberId,
+        targetPage: summary.page,
+      });
     } catch (requestError) {
       setError(readRequestErrorMessage(requestError));
     } finally {
@@ -106,7 +130,11 @@ function TrialExtensionSection({
   }
 
   async function applyExtension(): Promise<void> {
-    if (!preview || confirmation.trim() !== preview.summary.campaign) {
+    if (
+      !preview?.summary.candidateSnapshotDigest ||
+      !hasCompleteTrialExtensionPreviewProof(preview.summary) ||
+      confirmation.trim() !== preview.summary.campaign
+    ) {
       return;
     }
 
@@ -115,15 +143,28 @@ function TrialExtensionSection({
     try {
       const summary = await requestTrialExtension({
         campaign: preview.summary.campaign,
+        candidatePreviewTokens: preview.summary.candidatePreviewTokens,
+        candidateSnapshotDigest: preview.summary.candidateSnapshotDigest,
         memberId: preview.targetMemberId,
         mode: "apply",
+        page: preview.targetPage,
       });
       setApplied(summary);
-      if (!hasTrialExtensionFailures(summary)) {
+      if (
+        !hasTrialExtensionFailures(summary) ||
+        summary.localWindowsReconciled > 0 ||
+        summary.failures.preview_state_changed > 0 ||
+        summary.stripeTrialsExtended > 0 ||
+        summary.skipped.local_candidate_changed > 0
+      ) {
         setPreview(null);
         setConfirmation("");
       }
     } catch (requestError) {
+      if (isTrialExtensionPreviewStaleError(requestError)) {
+        setPreview(null);
+        setConfirmation("");
+      }
       setError(readRequestErrorMessage(requestError));
     } finally {
       setPending(null);
@@ -171,6 +212,7 @@ function TrialExtensionSection({
                 setApplied(null);
                 setConfirmation("");
                 setError(null);
+                setPage(0);
               }}
               disabled={pending !== null}
               placeholder="member_..."
@@ -183,7 +225,7 @@ function TrialExtensionSection({
         <div className="flex flex-wrap items-center gap-2">
           <Button
             disabled={pending !== null || missingMemberId}
-            onClick={() => void previewExtension()}
+            onClick={() => void previewExtension(page)}
             size="sm"
             type="button"
             variant="outline"
@@ -194,11 +236,20 @@ function TrialExtensionSection({
         </div>
 
         {preview ? (
-          <div className="flex flex-col gap-3 rounded-lg border border-border/70 bg-muted/20 p-4">
+          <div
+            className="flex flex-col gap-3 rounded-lg border border-border/70 bg-muted/20 p-4"
+            ref={previewResultRef}
+            tabIndex={-1}
+          >
             <div aria-live="polite" role="status">
               <TrialExtensionSummaryPanel scope={scope} summary={preview.summary} />
             </div>
-            {preview.summary.wouldExtend > 0 || preview.summary.wouldReconcile > 0 ? (
+            {!hasCompleteTrialExtensionPreviewProof(preview.summary) ? (
+              <p className="border-t border-border/70 pt-4 text-sm text-muted-foreground">
+                Apply is unavailable until Preview completes without failures.
+              </p>
+            ) : preview.summary.wouldExtend > 0 ||
+              preview.summary.wouldReconcile > 0 ? (
               <div className="flex flex-col gap-3 border-t border-border/70 pt-4">
                 <div className="flex max-w-sm flex-col gap-2">
                   <Label
@@ -231,7 +282,9 @@ function TrialExtensionSection({
               </div>
             ) : (
               <p className="border-t border-border/70 pt-4 text-sm text-muted-foreground">
-                Nothing to change right now.
+                {scope === "all"
+                  ? "Nothing to change in this batch. This is complete only after every batch in a fresh pass shows zero trials to extend or reconcile."
+                  : "Nothing to change right now."}
               </p>
             )}
           </div>
@@ -246,6 +299,29 @@ function TrialExtensionSection({
             tabIndex={-1}
           >
             <TrialExtensionSummaryPanel scope={scope} summary={applied} />
+          </div>
+        ) : null}
+
+        {scope === "all" && displayedSummary ? (
+          <div className="flex flex-wrap items-center gap-2 border-t border-border/70 pt-4">
+            <Button
+              disabled={pending !== null || displayedSummary.page === 0}
+              onClick={() => void previewExtension(displayedSummary.page - 1)}
+              size="sm"
+              type="button"
+              variant="outline"
+            >
+              Previous batch
+            </Button>
+            <Button
+              disabled={pending !== null || !displayedSummary.hasMoreCandidates}
+              onClick={() => void previewExtension(displayedSummary.page + 1)}
+              size="sm"
+              type="button"
+              variant="outline"
+            >
+              Preview next batch
+            </Button>
           </div>
         ) : null}
 
@@ -284,6 +360,12 @@ function TrialExtensionSummaryPanel({
         <span className="font-mono text-[11px] text-muted-foreground">
           Run key {summary.campaign}
         </span>
+        {scope === "all" ? (
+          <span className="font-mono text-[11px] text-muted-foreground">
+            Batch {summary.page + 1}
+            {summary.hasMoreCandidates ? " · more batches" : " · final batch"}
+          </span>
+        ) : null}
       </div>
 
       {scope === "member" && summary.candidates === 0 ? (
@@ -300,8 +382,14 @@ function TrialExtensionSummaryPanel({
             </>
           ) : (
             <>
-              <TrialExtensionMetricTile label="Got 7 days" value={summary.stripeTrialsExtended} />
-              <TrialExtensionMetricTile label="Records updated" value={summary.localWindowsReconciled} />
+              <TrialExtensionMetricTile
+                label="Got 7 days"
+                value={summary.stripeTrialsExtended}
+              />
+              <TrialExtensionMetricTile
+                label="Records updated"
+                value={summary.localWindowsReconciled}
+              />
             </>
           )}
           <TrialExtensionMetricTile
@@ -379,22 +467,61 @@ function hasTrialExtensionFailures(
   return Object.values(summary.failures).some((count) => count > 0);
 }
 
+function hasCompleteTrialExtensionPreviewProof(
+  summary: HostedPulseTrialExtensionSummary,
+): boolean {
+  return (
+    summary.mode === "dry-run" &&
+    summary.candidatePreviewTokens !== null &&
+    summary.candidatePreviewTokens.length === summary.candidates &&
+    summary.candidatePreviewTokens.every((token) => token.length > 0) &&
+    !hasTrialExtensionFailures(summary)
+  );
+}
+
 function readRequestErrorMessage(requestError: unknown): string {
   return requestError instanceof Error
     ? requestError.message
     : "The trial extension request failed.";
 }
 
+class TrialExtensionRequestError extends Error {
+  readonly code: string | null;
+
+  constructor(input: { code: string | null; message: string }) {
+    super(input.message);
+    this.name = "TrialExtensionRequestError";
+    this.code = input.code;
+  }
+}
+
+function isTrialExtensionPreviewStaleError(requestError: unknown): boolean {
+  return (
+    requestError instanceof TrialExtensionRequestError &&
+    requestError.code === "HOSTED_OPS_PULSE_TRIAL_EXTENSION_PREVIEW_STALE"
+  );
+}
+
 async function requestTrialExtension(input: {
   campaign: string | null;
+  candidatePreviewTokens: readonly string[] | null;
+  candidateSnapshotDigest: string | null;
   memberId: string | null;
   mode: "apply" | "dry-run";
+  page: number;
 }): Promise<HostedPulseTrialExtensionSummary> {
   const response = await fetch("/api/ops/pulse-trial-extension", {
     body: JSON.stringify({
       ...(input.campaign ? { campaign: input.campaign } : {}),
+      ...(input.candidatePreviewTokens
+        ? { candidatePreviewTokens: input.candidatePreviewTokens }
+        : {}),
+      ...(input.candidateSnapshotDigest
+        ? { candidateSnapshotDigest: input.candidateSnapshotDigest }
+        : {}),
       ...(input.memberId ? { memberId: input.memberId } : {}),
       mode: input.mode,
+      page: input.page,
     }),
     cache: "no-store",
     headers: {
@@ -404,12 +531,25 @@ async function requestTrialExtension(input: {
   });
   const payload: unknown = await response.json().catch(() => null);
   if (!response.ok) {
-    throw new Error(
-      readJsonErrorMessage(payload) ?? `Request failed with status ${response.status}.`,
-    );
+    throw new TrialExtensionRequestError({
+      code: readJsonErrorCode(payload),
+      message:
+        readJsonErrorMessage(payload) ?? `Request failed with status ${response.status}.`,
+    });
   }
 
   return payload as HostedPulseTrialExtensionSummary;
+}
+
+function readJsonErrorCode(payload: unknown): string | null {
+  if (!payload || typeof payload !== "object" || !("error" in payload)) {
+    return null;
+  }
+  const error = payload.error;
+  if (!error || typeof error !== "object" || !("code" in error)) {
+    return null;
+  }
+  return typeof error.code === "string" ? error.code : null;
 }
 
 function readJsonErrorMessage(payload: unknown): string | null {

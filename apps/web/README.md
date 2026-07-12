@@ -871,22 +871,31 @@ Current hosted billing assumptions:
   from its existing end and reconciles only the matching local billing and
   usage-period end timestamps under the shared hosted-member Stripe mutation
   lock. Preview is aggregate-only and does not mutate; Apply requires echoing
-  the exact fixed campaign key returned by Preview. The Stripe metadata marker
-  makes every Apply retry safe: an already marked subscription cannot receive a
-  second extension, while a Stripe-success/local-failure retry can still repair
-  local reconciliation. Foreign campaign markers fail closed.
-- The deployed route has an 800-second duration and a four-candidate safety
-  limit. A bounded run preflights at most five candidates in one query and then
-  acts only on that captured set, so eligibility changes cannot widen the run
-  after preflight. If an all-member Preview finds more than four active trials,
-  it fails before any Stripe call and the operator must use the one-member tool
-  for each target. Trial-extension Stripe reads and writes use one 80-second
+  the exact fixed campaign key plus the opaque local-page and per-target
+  provider proof returned by a complete Preview. Apply rejects a changed local
+  page before provider work and refuses to mutate a target whose locked Stripe
+  state differs from Preview. A Preview with any provider failure cannot be
+  applied. The Stripe metadata marker makes every Apply retry safe: an already
+  marked subscription cannot receive a second extension, while a
+  Stripe-success/local-failure retry can still repair local reconciliation.
+  Foreign campaign markers fail closed.
+- The deployed route has an 800-second duration and processes one ordered page
+  of at most four candidates per request. The all-member UI advances through
+  numbered pages backed by the existing member-id ordering without returning a
+  member identifier or cursor. Each Preview/Apply pair stays on the same page;
+  the local-page digest prevents a changed page from reaching Stripe, and each
+  opaque target proof is checked under that member's mutation lock before its
+  Stripe update. Trial-extension Stripe reads and writes use one 80-second
   attempt; the fixed idempotency key and operator-driven retry preserve safe
-  recovery while keeping four sequential candidates inside the route budget.
+  recovery while keeping each page inside the route budget.
   Before the first production Apply, keep a deployment containing the
   shared Start-paid-Pulse mutation lock live for at least 1,140 seconds (19
   minutes) so any older unlocked invocation drains; do not roll back below that
   lock-capable version during the campaign. Preview immediately before Apply,
-  investigate every unexpected skip/failure, Apply the returned key, then
-  Preview again and require `wouldExtend = 0` and `wouldReconcile = 0` before
-  calling the campaign done.
+  investigate every unexpected skip/failure, Apply the returned key and proof,
+  and continue through the final page. Then restart at page one, Preview every
+  page again, and require `wouldExtend = 0` and `wouldReconcile = 0` throughout
+  before calling the campaign done. The PR owner owns the immediate follow-up
+  removal after that production proof: delete the Ops link, page/client, route,
+  campaign service, focused tests, and this runbook entry. Do not retain or
+  repurpose this fixed one-time campaign surface for a later occasion.

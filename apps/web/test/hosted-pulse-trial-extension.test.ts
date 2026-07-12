@@ -20,7 +20,7 @@ import {
   HOSTED_PULSE_TRIAL_EXTENSION_CAMPAIGN,
   HOSTED_PULSE_TRIAL_EXTENSION_CAMPAIGN_METADATA_KEY,
   HOSTED_PULSE_TRIAL_EXTENSION_DAYS_METADATA_KEY,
-  HostedPulseTrialExtensionCandidateLimitError,
+  HostedPulseTrialExtensionPreviewMismatchError,
   type HostedPulseTrialExtensionCandidate,
   type HostedPulseTrialExtensionCandidateSource,
   type HostedPulseTrialExtensionStripeClient,
@@ -784,7 +784,7 @@ describe("Pulse Trial beta extension", () => {
     });
   });
 
-  test("candidate safety limit fails before Stripe or local mutation work starts", async () => {
+  test("candidate pages keep every request bounded and reach candidates above four", async () => {
     const source = makeCandidateSource([
       makeCandidate({ memberId: "member_1" }),
       makeCandidate({ memberId: "member_2" }),
@@ -794,28 +794,187 @@ describe("Pulse Trial beta extension", () => {
     ]);
     const stripe = makeStripeClient();
 
+    const firstPage = await extendHostedPulseTrials({
+      candidateSource: source,
+      maxCandidates: 4,
+      mode: "dry-run",
+      now: NOW,
+      page: 0,
+      stripe,
+    });
+    const secondPage = await extendHostedPulseTrials({
+      candidateSource: source,
+      maxCandidates: 4,
+      mode: "dry-run",
+      now: NOW,
+      page: 1,
+      stripe,
+    });
+
+    assert.equal(firstPage.candidates, 4);
+    assert.equal(firstPage.hasMoreCandidates, true);
+    assert.equal(firstPage.page, 0);
+    assert.equal(secondPage.candidates, 1);
+    assert.equal(secondPage.hasMoreCandidates, false);
+    assert.equal(secondPage.page, 1);
+    assert.deepEqual(source.listInputs, [
+      { afterMemberId: null, limit: 5 },
+      { afterMemberId: null, limit: 4 },
+      { afterMemberId: "member_4", limit: 5 },
+    ]);
+    assert.equal(source.lockCalls, 0);
+    assert.equal(stripe.retrieveCalls, 5);
+    assert.equal(stripe.updateCalls.length, 0);
+  });
+
+  test("candidate snapshot digest rejects a changed bounded set before provider work", async () => {
+    const previewSource = makeCandidateSource([makeCandidate()]);
+    const previewStripe = makeStripeClient();
+    const preview = await extendHostedPulseTrials({
+      candidateSource: previewSource,
+      maxCandidates: 4,
+      mode: "dry-run",
+      now: NOW,
+      stripe: previewStripe,
+    });
+
+    assert.match(preview.candidateSnapshotDigest ?? "", /^pulse-candidates-v2\./u);
+    assert.equal(preview.candidatePreviewTokens?.length, 1);
+    assert.match(preview.candidatePreviewTokens?.[0] ?? "", /^pulse-target-v1\./u);
+    assert.doesNotMatch(preview.candidateSnapshotDigest ?? "", /member_test/u);
+
+    const changedSource = makeCandidateSource([
+      makeCandidate(),
+      makeCandidate({ memberId: "member_new" }),
+    ]);
+    const changedStripe = makeStripeClient();
     await assert.rejects(
       extendHostedPulseTrials({
-        candidateSource: source,
+        candidateSource: changedSource,
+        expectedCandidateSnapshotDigest: preview.candidateSnapshotDigest ?? undefined,
         maxCandidates: 4,
         mode: "apply",
         now: NOW,
-        stripe,
+        stripe: changedStripe,
       }),
-      (error: unknown) => {
-        assert.ok(error instanceof HostedPulseTrialExtensionCandidateLimitError);
-        assert.equal(error.candidateCount, 5);
-        assert.equal(error.maxCandidates, 4);
-        return true;
-      },
+      HostedPulseTrialExtensionPreviewMismatchError,
     );
-    assert.deepEqual(source.listInputs, [{
-      afterMemberId: null,
-      limit: 5,
-    }]);
-    assert.equal(source.lockCalls, 0);
-    assert.equal(stripe.retrieveCalls, 0);
-    assert.equal(stripe.updateCalls.length, 0);
+    assert.equal(changedSource.lockCalls, 0);
+    assert.equal(changedStripe.retrieveCalls, 0);
+    assert.equal(changedStripe.updateCalls.length, 0);
+
+    const changedReferenceSource = makeCandidateSource([
+      makeCandidate({ stripeSubscriptionId: "sub_replaced" }),
+    ]);
+    const changedReferenceStripe = makeStripeClient();
+    await assert.rejects(
+      extendHostedPulseTrials({
+        candidateSource: changedReferenceSource,
+        expectedCandidateSnapshotDigest: preview.candidateSnapshotDigest ?? undefined,
+        maxCandidates: 4,
+        mode: "apply",
+        now: NOW,
+        stripe: changedReferenceStripe,
+      }),
+      HostedPulseTrialExtensionPreviewMismatchError,
+    );
+    assert.equal(changedReferenceSource.lockCalls, 0);
+    assert.equal(changedReferenceStripe.retrieveCalls, 0);
+    assert.equal(changedReferenceStripe.updateCalls.length, 0);
+
+    const matchingSource = makeCandidateSource([makeCandidate()]);
+    const matchingStripe = makeStripeClient();
+    const applied = await extendHostedPulseTrials({
+      candidateSource: matchingSource,
+      expectedCandidatePreviewTokens: preview.candidatePreviewTokens ?? undefined,
+      expectedCandidateSnapshotDigest: preview.candidateSnapshotDigest ?? undefined,
+      maxCandidates: 4,
+      mode: "apply",
+      now: NOW,
+      stripe: matchingStripe,
+    });
+    assert.equal(applied.stripeTrialsExtended, 1);
+    assert.equal(applied.candidateSnapshotDigest, null);
+  });
+
+  test("provider state proof blocks a changed target before its Stripe update", async () => {
+    const previewSource = makeCandidateSource([makeCandidate()]);
+    const preview = await extendHostedPulseTrials({
+      candidateSource: previewSource,
+      maxCandidates: 4,
+      mode: "dry-run",
+      now: NOW,
+      stripe: makeStripeClient(),
+    });
+    const changedStripe = makeStripeClient(makeSubscription({
+      trial_end: toUnixSeconds(EXTENDED_TRIAL_END),
+    }));
+
+    const applied = await extendHostedPulseTrials({
+      candidateSource: makeCandidateSource([makeCandidate()]),
+      expectedCandidatePreviewTokens: preview.candidatePreviewTokens ?? undefined,
+      expectedCandidateSnapshotDigest: preview.candidateSnapshotDigest ?? undefined,
+      maxCandidates: 4,
+      mode: "apply",
+      now: NOW,
+      stripe: changedStripe,
+    });
+
+    assert.equal(applied.failures.preview_state_changed, 1);
+    assert.equal(applied.stripeTrialsExtended, 0);
+    assert.equal(changedStripe.retrieveCalls, 1);
+    assert.equal(changedStripe.updateCalls.length, 0);
+  });
+
+  test("rechecks provider preview proof while the member mutation lock is held", async () => {
+    const preview = await extendHostedPulseTrials({
+      candidateSource: makeCandidateSource([makeCandidate()]),
+      maxCandidates: 4,
+      mode: "dry-run",
+      now: NOW,
+      stripe: makeStripeClient(),
+    });
+    const source = makeCandidateSource([makeCandidate()]);
+    const events: string[] = [];
+    source.withStripeMutationLock = async (input) => {
+      events.push("lock-enter");
+      try {
+        return await input.run({
+          candidate: source.candidates[0] ?? null,
+          async updateTrialEnd() {
+            throw new Error("A stale provider target must not be reconciled.");
+          },
+        });
+      } finally {
+        events.push("lock-exit");
+      }
+    };
+    const updateSubscription = vi.fn();
+    const stripe: HostedPulseTrialExtensionStripeClient = {
+      async retrieveSubscription() {
+        events.push("provider-retrieve");
+        return makeSubscription({
+          trial_end: toUnixSeconds(EXTENDED_TRIAL_END),
+        });
+      },
+      updateSubscription,
+    };
+
+    const applied = await extendHostedPulseTrials({
+      candidateSource: source,
+      expectedCandidatePreviewTokens: preview.candidatePreviewTokens ?? undefined,
+      expectedCandidateSnapshotDigest: preview.candidateSnapshotDigest ?? undefined,
+      maxCandidates: 4,
+      mode: "apply",
+      now: NOW,
+      stripe,
+    });
+
+    assert.deepEqual(events, ["lock-enter", "provider-retrieve", "lock-exit"]);
+    assert.equal(applied.failures.preview_state_changed, 1);
+    assert.equal(applied.stripeTrialsExtended, 0);
+    assert.equal(updateSubscription.mock.calls.length, 0);
+    assert.equal(source.updateCalls.length, 0);
   });
 });
 
