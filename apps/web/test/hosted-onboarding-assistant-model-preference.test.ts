@@ -73,6 +73,25 @@ describe("hosted member assistant model preference", () => {
     });
   });
 
+  it("defaults synthetic thread-container runtimes to Sol", async () => {
+    mocks.findUniqueHostedMember.mockResolvedValue(buildMemberState({
+      assistantModelPreference: null,
+      billingStatus: HostedBillingStatus.not_started,
+      currentBillingPhase: null,
+      currentBillingPlanCode: null,
+      threadContainerMemberId: "member_group_chat",
+    }));
+
+    await expect(readHostedMemberAssistantModelPreference({
+      memberId: "member_group_chat",
+      prisma: createReadClient(),
+    })).resolves.toEqual({
+      hostedAssistantModelOverride: "gpt-5.6-sol",
+      model: "gpt-5.6-sol",
+      solAvailable: false,
+    });
+  });
+
   it("falls back to Terra for stale, missing, and ineligible preferences", async () => {
     const prisma = createReadClient();
     mocks.findUniqueHostedMember
