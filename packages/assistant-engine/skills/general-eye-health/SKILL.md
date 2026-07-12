@@ -30,8 +30,8 @@ Read `references/triage-and-contact-lenses.md` before answering any active eye s
 
 - Do not let questions delay action when an emergency feature is already present.
 - Sudden vision loss or a field defect; a new curtain or shadow; new flashes of light; a sudden increase in or many new floaters; severe eye pain with red eye, blur, or nausea; penetrating or major trauma; corrosive or unknown chemical exposure; or a sudden vision symptom with neurologic signs needs emergency action.
-- A contact-lens wearer with pain, marked redness, light sensitivity, sudden or worsening blur, heavy tearing, or discharge should remove the lenses, not reinsert them, and obtain prompt same-day eye care. Use emergency care for severe pain or meaningful vision loss.
-- Mild screen-linked discomfort is eligible for a brief self-care trial only when it is gradual, mild, in both eyes, improves with blinking, rest, or lens removal, and has no urgent feature.
+- A contact-lens wearer with pain, redness, light sensitivity, any new vision change, heavy tearing, or discharge should remove the lenses, not reinsert them, and obtain prompt same-day eye care. Use emergency care for severe pain or meaningful vision loss.
+- Mild screen-linked discomfort is eligible for a brief self-care trial only when it is gradual, mild, in both eyes, improves with blinking, rest, or lens removal, and has no urgent feature. A contact-lens wearer with redness or a new vision change is not eligible for this pathway even when symptoms improve after lens removal.
 - Use the exact care-level rules and injury instructions in `references/triage-and-contact-lenses.md`.
 
 ## Data First

@@ -298,7 +298,16 @@ describe('assistant skill assets', () => {
     expect(eyeSkillText).toContain('Do not recommend blue-light-filtering glasses')
     expect(eyeSkillText).toContain('new flashes of light')
     expect(eyeSkillText).toContain('a sudden increase in or many new floaters')
-    expect(eyeSkillText).toContain('A contact-lens wearer with pain')
+    const skillContactLensSameDayRule = eyeSkillText
+      .split('\n')
+      .find((line) => line.includes('A contact-lens wearer with pain'))
+    expect(skillContactLensSameDayRule).toContain(
+      'with pain, redness, light sensitivity, any new vision change',
+    )
+    expect(skillContactLensSameDayRule).not.toContain('marked redness')
+    expect(eyeSkillText).toContain(
+      'A contact-lens wearer with redness or a new vision change is not eligible for this pathway',
+    )
     expect(eyeSkillText).not.toContain('still hurts after removal')
     expect(eyeSkillText).not.toContain('pain that persists or worsens after removal')
     expect(eyeSkillText).toContain('gradual, mild, in both eyes')
@@ -330,7 +339,19 @@ describe('assistant skill assets', () => {
     expect(triageText).toContain('### Prompt same-day eye care')
     expect(triageText).toContain('new flashes of light')
     expect(triageText).toContain('a sudden increase in or many new floaters')
-    expect(triageText).toContain('A contact-lens wearer has pain;')
+    const triageContactLensSameDayRule = triageText
+      .split('\n')
+      .find((line) => line.includes('A contact-lens wearer has pain;'))
+    expect(triageContactLensSameDayRule).toContain(
+      'has pain; redness; light sensitivity; any new vision change;',
+    )
+    expect(triageContactLensSameDayRule).not.toContain('marked redness')
+    expect(triageText).toContain(
+      'A contact-lens wearer with redness or a new vision change is not eligible for this pathway',
+    )
+    expect(triageText).toContain(
+      'a new vision change, or symptoms that persist after removal, do not reinsert them until an eye clinician says it is safe and obtain prompt same-day eye care',
+    )
     expect(triageText).not.toContain('pain that persists or worsens after removal')
     expect(triageText).toContain('mild, gradual, bilateral')
     expect(triageText).not.toContain('usually bilateral')

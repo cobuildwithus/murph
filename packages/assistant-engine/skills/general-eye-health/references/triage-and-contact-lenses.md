@@ -20,7 +20,7 @@ If vision is affected, tell the user not to drive. Do not make a red-flag user f
 
 Recommend an optometrist or ophthalmologist immediately or the same day when any of these is present; use emergency care if symptoms are severe, vision-threatening, or rapidly worsening:
 
-- A contact-lens wearer has pain; marked redness; light sensitivity; sudden or worsening blur; marked tearing; discharge; or irritation or a foreign-body sensation that persists or worsens after lens removal.
+- A contact-lens wearer has pain; redness; light sensitivity; any new vision change; marked tearing; discharge; or irritation or a foreign-body sensation that persists or worsens after lens removal.
 - A painful red eye, new light sensitivity, intense redness, new distortion, sudden double vision without neurologic signs, or blur that does not clear with blinking or removal of surface discharge.
 - Eye pain or reduced vision after trauma, a foreign body that did not rinse free, or persistent symptoms after a mild irritant was thoroughly rinsed.
 - New eye symptoms after eye surgery, an eye injection, or another recent eye procedure; follow the treating team's urgent instructions.
@@ -33,11 +33,11 @@ An eye and contact-lens-fit exam is appropriate when symptoms are persistent, re
 
 ### Brief self-care trial is reasonable
 
-Self-care is reasonable only for mild, gradual, bilateral tired, dry, burning, gritty, or intermittently blurry symptoms after sustained near work that improve with complete blinking, rest, or lens removal, with no pain, marked redness, light sensitivity, discharge, sudden or persistent vision change, new flashes, a sudden increase in or many new floaters, trauma, or chemical exposure. This is eligibility for a trial, not a diagnosis.
+Self-care is reasonable only for mild, gradual, bilateral tired, dry, burning, gritty, or intermittently blurry symptoms after sustained near work that improve with complete blinking, rest, or lens removal, with no pain, marked redness, light sensitivity, discharge, sudden or persistent vision change, new flashes, a sudden increase in or many new floaters, trauma, or chemical exposure. A contact-lens wearer with redness or a new vision change is not eligible for this pathway even when symptoms improve after blinking, rest, or lens removal. This is eligibility for a trial, not a diagnosis.
 
 ## Contact-Lens Action Rules
 
-- At unusual discomfort, redness, or irritation, remove the lens or lenses immediately and use current backup glasses. With pain, redness, light sensitivity, discharge, persistent blur, or symptoms that persist after removal, do not reinsert them until an eye clinician says it is safe. Do not discard the lenses or case until asking whether the clinician wants them for evaluation; isolate them so they cannot be reused accidentally.
+- At unusual discomfort, redness, or irritation, remove the lens or lenses immediately and use current backup glasses. With pain, redness, light sensitivity, discharge, a new vision change, or symptoms that persist after removal, do not reinsert them until an eye clinician says it is safe and obtain prompt same-day eye care. Do not discard the lenses or case until asking whether the clinician wants them for evaluation; isolate them so they cannot be reused accidentally.
 - For mild end-of-day dryness that fully resolves after removal and has no warning feature, do not wear the lenses again that day. Follow the prescribed replacement and wear schedule at the next wear window; if symptoms return, stop lens wear and arrange a contact-lens-fit exam.
 - Never sleep in lenses unless the prescribing clinician specifically directed it. Remove lenses before showering, swimming, or using a hot tub.
 - If water contacts lenses, remove them as soon as possible. Discard daily disposables; for reusable lenses, follow the lens and solution instructions for cleaning and overnight disinfection. Never rinse or store lenses in any water or saliva.
