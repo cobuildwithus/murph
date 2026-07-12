@@ -424,7 +424,16 @@ describe('assistant skill assets', () => {
       'Do not ask another question when the known inputs already determine the routine guidance.',
     )
     expect(routineExamRule).toContain(
-      'If one missing input would change the timing, use `Ask one decision-changing question` instead.',
+      'If one missing input would change the timing or type, use `Ask one decision-changing question` instead.',
+    )
+    expect(routineExamRule).toContain(
+      'use a medical eye visit for known eye or medical risk that requires risk-based screening or clinician-directed follow-up',
+    )
+    expect(routineExamRule).toContain(
+      'otherwise use a routine comprehensive eye or vision exam for asymptomatic general vision or prevention',
+    )
+    expect(routineExamRule).toContain(
+      'Do not select dilation or another procedure unless it is already directed.',
     )
     expect(routineExamRule).toContain(
       'Add a contact-lens-fit review only when the user currently wears contacts',
