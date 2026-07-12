@@ -1,5 +1,5 @@
 {
-  "catalogHash": "sha256:5bda0863873780c8bb2efad0582e9e556b94c356b3f883a98632902d13787e9e",
+  "catalogHash": "sha256:b12383f0e5577e8f4d27714d58a597b193117588c6cecb620822da78c0b54101",
   "generatedAt": null,
   "items": [
     {
@@ -89880,7 +89880,28 @@
         "Chair optional"
       ],
       "id": "ST409",
-      "images": [],
+      "images": [
+        {
+          "alt": "Standing Hamstring Curl Mobility setup standing tall with both feet grounded and light chair support.",
+          "step": "Supported standing setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/ff450105-7e6f-4563-1964-1f1260417f00/public"
+        },
+        {
+          "alt": "Standing Hamstring Curl right-side phase with one heel moving toward the glute while the opposite foot remains grounded.",
+          "step": "Curl right heel",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/113fd316-a467-4e7f-d181-fcb2c52da300/public"
+        },
+        {
+          "alt": "Standing Hamstring Curl return phase with the working foot lowered smoothly back beside the support foot.",
+          "step": "Lower right foot",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/044e89fb-c92a-48e3-1c64-946de8fa0600/public"
+        },
+        {
+          "alt": "Standing Hamstring Curl opposite-side phase with the other heel moving toward the glute and the support foot grounded.",
+          "step": "Curl left heel",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/d64f2c9d-4680-4446-369c-4929579fe200/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Mobility",
@@ -89926,7 +89947,28 @@
         "Wall"
       ],
       "id": "ST410",
-      "images": [],
+      "images": [
+        {
+          "alt": "Calf Wall Pulse setup in a split stance with both hands on the wall and the back heel grounded.",
+          "step": "Wall split-stance setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/f6979b03-c28c-4e45-1ce3-582fb0451500/public"
+        },
+        {
+          "alt": "Calf Wall Pulse forward phase shifting gently toward the wall while keeping the rear heel down.",
+          "step": "Pulse forward",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/6897326e-330d-43a8-03e8-e7da024c4000/public"
+        },
+        {
+          "alt": "Calf Wall Pulse return phase easing away from the wall without lifting the rear heel.",
+          "step": "Ease back",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/d85b5db1-4438-4246-9314-acd943874400/public"
+        },
+        {
+          "alt": "Calf Wall Pulse reset with both hands on the wall and the rear heel re-grounded before changing sides.",
+          "step": "Reset before switching",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/f8781d69-5a55-4fb6-fb33-e996a2f26600/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Dynamic Stretch",
@@ -89972,7 +90014,23 @@
       ],
       "equipment": [],
       "id": "ST411",
-      "images": [],
+      "images": [
+        {
+          "alt": "Ankle Bounce Warm-Up setup standing with feet hip-width, heels grounded, and knees soft.",
+          "step": "Soft-knee setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/b46aed01-8520-4812-dcd2-69f02f00b300/public"
+        },
+        {
+          "alt": "Ankle Bounce Warm-Up rise phase with both heels lifting slightly while toes stay on the mat.",
+          "step": "Lift heels lightly",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/2d55d274-0d59-44f0-851e-a2a8f8d13000/public"
+        },
+        {
+          "alt": "Ankle Bounce Warm-Up return phase with both heels landing softly and knees absorbing the small motion.",
+          "step": "Lower heels softly",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/6cf852cb-40ba-48b9-c5e1-5b796ff6fb00/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Dynamic Stretch",

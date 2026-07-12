@@ -77,12 +77,13 @@ Updated: 2026-07-12
 - Rejected handoff sequences 157, 159, 161, and 166 without upload because they respectively break full-body camera continuity, fail to depict the labeled alternating foot position, omit the standing endpoint, and fail to show the required hand-to-hand pass. Each exact blocker is persisted in the ignored recovery state and its canonical manifest item remains pending.
 - Consumed nine additional validated handoff movements at sequences 178, 181, 185, 202, 205, 207–209, and 211: uploaded and verified 30 images, updated only the nine owning `Images` fields across the strength-addon and stretch seeds, and preserved stable handoff/snapshot hashes.
 - Rejected ten visually invalid handoff sequences (179, 182–184, 201, 203–204, 206, 210, and 212) for opposite-limb, resistance-direction, arm-switch, equipment-count, laterality, or support-continuity failures. Also persisted the explicit incomplete sequence 180 and wrong-pose sequence 186 blockers; all remain pending without uploads.
+- Consumed the stopped 200-range tail at sequences 213–215: validated, uploaded, and publicly verified 11 images for three movements. Rejected unilateral sequence 216 because it does not depict a bilateral heel-to-toe rock, and persisted sequence 217's unsupported stair-edge heel-drop blocker without uploading either invalid movement.
 - Completed manifest sequence 6 (`EX654`, Side Plank Star Prep): generated and inspected a three-frame setup, transition, and star endpoint with fixed subject/camera/support continuity; uploaded three images through metadata identity preflight; verified hosted bytes and public variants; and updated only the owning seed `Images` field.
 - Completed manifest sequence 7 (`EX655`, Copenhagen Plank Adduction Squeeze): rejected two invalid transition renders before accepting a three-frame knee-supported setup, lifted plank, and bottom-leg adduction squeeze; uploaded the three accepted images with hosted-byte and public-variant proof; and updated only the owning seed `Images` field.
 
 ## Now
 
-- Valid ready handoff work is consumed through sequence 212, with invalid/incomplete movements left pending; direct sequences 6–7 are cataloged and 370 image-less movements remain.
+- Valid ready handoff work is consumed through sequence 215, with invalid/incomplete movements left pending; direct sequences 6–7 are cataloged and 367 image-less movements remain.
 
 ## Next
 
@@ -94,7 +95,7 @@ Updated: 2026-07-12
 - `pnpm --dir packages/exercise-library generate`: passed after reconciliation and alt correction.
 - `pnpm --dir packages/exercise-library generate:check`: passed.
 - `pnpm --dir packages/exercise-library verify`: passed; 1 test file and 6 tests passed, including exact catalog counts, URL uniqueness, and the 500-character alt bound.
-- Current direct catalog proof: 1,748 total; 1,378 with images; 370 without images; 4,172 images; 4,172 unique public URLs.
+- Current direct catalog proof: 1,748 total; 1,381 with images; 367 without images; 4,183 images; 4,183 unique public URLs.
 - The latest handoff batch passes `pnpm --dir packages/exercise-library verify`: typecheck, all 6 tests, and deterministic generated-artifact checks are green; seed drift is limited to the 14 intended `Images` fields.
 - The subsequent 175/200-range batch also passes `pnpm --dir packages/exercise-library verify`; seed drift is limited to nine intended `Images` fields across two owning seed files, and 4,172 public URLs are unique.
 - Remaining generation, upload, full repository verification, completion audits, and final-head CI are pending.
