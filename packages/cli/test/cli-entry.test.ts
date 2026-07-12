@@ -8,6 +8,7 @@ import { afterEach, test, vi } from "vitest";
 
 import { formatStructuredErrorMessage } from "@murphai/operator-config/text/shared";
 import { VaultCliError } from "@murphai/operator-config/vault-cli-errors";
+import { getVaultCliPackageVersion } from "../src/vault-cli-package.ts";
 import {
   formatMurphCliError,
   installSqliteExperimentalWarningFilter,
@@ -250,7 +251,7 @@ test("runMurphCliAction prints --version through the requested stdout without im
   await runMurphCliAction(["--version"], { exit, stdout });
 
   assert.equal(stdout.mock.calls.length, 1);
-  assert.match(stdout.mock.calls[0]?.[0] ?? "", /^\d+\.\d+\.\d+\n$/u);
+  assert.equal(stdout.mock.calls[0]?.[0], `${getVaultCliPackageVersion()}\n`);
   assert.equal(exit.mock.calls.length, 0);
 });
 

@@ -6,6 +6,7 @@ import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { localParallelCliTest as test } from './local-parallel-test.js'
 import { binPath, ensureCliRuntimeArtifacts, repoRoot } from './cli-test-helpers.js'
+import { getVaultCliPackageVersion } from '../src/vault-cli-package.js'
 
 // Import-surface contract for scoped vault-cli invocations.
 //
@@ -460,7 +461,7 @@ test(
 
     const result = await runScopedImportSurfaceProbe(['--version'])
     assert.equal(result.exitCode, 0, `expected --version to succeed, got:\n${result.output}`)
-    assert.match(result.output, /^\d+\.\d+\.\d+\n$/u)
+    assert.equal(result.output, `${getVaultCliPackageVersion()}\n`)
     assertResolvedModuleFilesAbsent(
       result.resolvedModuleUrls,
       [
