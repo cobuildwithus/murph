@@ -156,6 +156,9 @@ BEGIN
 END
 $$;
 
+ALTER TABLE supplements
+  VALIDATE CONSTRAINT supplements_payload_format_check;
+
 SELECT jsonb_pretty(jsonb_build_object(
   'remainingNonStandaloneTargets', (
     SELECT count(*)

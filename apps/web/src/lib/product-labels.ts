@@ -356,7 +356,9 @@ export function createProductLabelsQueries(
     },
 
     async search(input) {
-      const q = normalizeProductLabelSearchInput(input.q);
+      const q = brandScoping
+        ? normalizeProductLabelSearchInput(input.q)
+        : input.q.trim();
       const searchQ = removeWeakProductLabelQueryTokens(q, weakQueryTokens);
       const genericOnly =
         input.genericOnly === true && genericSearchDataOrigins !== null;

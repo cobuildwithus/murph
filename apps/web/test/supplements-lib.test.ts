@@ -140,7 +140,7 @@ describe("supplements query helpers", () => {
       "COALESCE(jsonb_typeof(label) = 'object', false)",
     );
     expect(schemaSql).toContain("upc ~ '^[0-9]+$'");
-    expect(schemaSql).toContain(
+    expect(schemaSql).not.toContain(
       "VALIDATE CONSTRAINT supplements_payload_format_check",
     );
     expect(schemaSql).toContain(
@@ -170,6 +170,9 @@ describe("supplements query helpers", () => {
     expect(repairSql).toContain("FROM supplements AS aliases");
     expect(repairSql).toContain("\\if :supplement_data_repair_apply");
     expect(repairSql).toContain("ROLLBACK;");
+    expect(repairSql).toContain(
+      "VALIDATE CONSTRAINT supplements_payload_format_check",
+    );
     expect(repairSql).not.toMatch(/DELETE FROM supplements\s+WHERE data_origin/iu);
 
     expect(repairScript).toContain("apply=false");

@@ -284,6 +284,21 @@ extensions such as `pg_trgm`, `pgvector`, or vector indexes are required for
 supplement label lookup. Food label lookup additionally applies `pg_trgm` in
 `sql/foods/schema.sql` for name search support.
 
+The supplement payload constraint is additive for existing databases:
+`sql/supplements/schema.sql` adds it `NOT VALID`, so it immediately rejects new
+invalid inserts and updates without blocking a known legacy corpus restore.
+Fresh tables create the constraint as valid. To recover the retained
+pre-repair July 2026 corpus, restore it into its legacy table shape, apply the
+reusable schema, then run
+`sql/supplements/repair-data-quality-2026-07.sh --apply`; that exact guarded
+repair validates the constraint after correcting the known rows. It fails by
+design against an already-repaired or drifted corpus and must not be replayed
+there. For another existing corpus, run the aggregate supplement audit, repair
+any proven violations, then validate `supplements_payload_format_check`
+explicitly. After this constraint is installed, importer rollback must stay at
+or above the first version that bounds and validates the affected payload
+fields; an older importer requires an explicit constraint rollback first.
+
 Provider-owned webhook-admin settings:
 
 - `OURA_WEBHOOK_VERIFICATION_TOKEN` when the shared Oura provider config should answer webhook preflight challenges and maintain Oura webhook subscriptions. This secret should stay on the provider-owned config path rather than the generic hosted env surface.

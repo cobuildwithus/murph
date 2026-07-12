@@ -72,7 +72,6 @@ END
 $$;
 
 ALTER TABLE supplements
-  VALIDATE CONSTRAINT supplements_payload_format_check,
   VALIDATE CONSTRAINT supplements_serving_grams_check;
 
 CREATE INDEX IF NOT EXISTS supplements_search_idx

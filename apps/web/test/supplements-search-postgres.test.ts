@@ -1,6 +1,9 @@
+import { readFile } from "node:fs/promises";
+
 import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
+import { createFoodsQueries } from "../src/lib/foods";
 import {
   createSupplementsQueries,
   type SupplementSearchItem,
@@ -702,7 +705,10 @@ describe.runIf(Boolean(testDatabaseUrl))(
 
     const queryClient = {
       async query<T>(text: string, values: unknown[]) {
-        if (text.includes("JOIN product_tests")) {
+        if (
+          text.includes("FROM product_tests") ||
+          text.includes("JOIN product_tests")
+        ) {
           contaminantQueryCount += 1;
           return { rows: [] as T[] };
         }
@@ -712,6 +718,7 @@ describe.runIf(Boolean(testDatabaseUrl))(
       },
     };
     const queries = createSupplementsQueries(queryClient);
+    const foodQueries = createFoodsQueries(queryClient);
 
     beforeAll(async () => {
       await client.connect();
@@ -805,6 +812,59 @@ describe.runIf(Boolean(testDatabaseUrl))(
         "CREATE INDEX supplements_fixture_name_trgm_idx ON supplements USING GIN (name gin_trgm_ops)",
       );
       await client.query("ANALYZE supplements");
+      await client.query(`
+        CREATE TEMP TABLE foods (
+          id TEXT PRIMARY KEY,
+          canonical_key TEXT NOT NULL,
+          data_origin TEXT NOT NULL,
+          data_origin_id TEXT NOT NULL,
+          data_origin_priority SMALLINT NOT NULL,
+          name TEXT NOT NULL,
+          brand TEXT,
+          upc TEXT,
+          off_market BOOLEAN NOT NULL,
+          search_text TEXT NOT NULL,
+          label JSONB NOT NULL,
+          serving_grams NUMERIC
+        ) ON COMMIT DROP
+      `);
+      await client.query(
+        `
+        INSERT INTO foods (
+          id,
+          canonical_key,
+          data_origin,
+          data_origin_id,
+          data_origin_priority,
+          name,
+          brand,
+          upc,
+          off_market,
+          search_text,
+          label
+        )
+        VALUES (
+          'trader-joes:099032',
+          'trader-joes:099032',
+          'brand_site',
+          'trader-joes:099032',
+          5,
+          'Butter Chicken with Basmati Rice',
+          'Trader Joe''s',
+          NULL,
+          false,
+          'Trader Joe''s Butter Chicken with Basmati Rice 099032 chicken sauce basmati rice milk',
+          '{"fixture":true}'::jsonb
+        )
+        `,
+      );
+      await client.query(
+        "CREATE INDEX foods_fixture_search_idx ON foods USING GIN (to_tsvector('simple', search_text))",
+      );
+      await client.query(
+        "CREATE INDEX foods_fixture_name_trgm_idx ON foods USING GIN (name gin_trgm_ops)",
+      );
+      await client.query("ANALYZE foods");
     });
 
     afterAll(async () => {
@@ -830,9 +890,137 @@ describe.runIf(Boolean(testDatabaseUrl))(
       20_000,
     );
 
+    it.each(["Trader Joe's", "Trader Joe's Butter Chicken"])(
+      "keeps apostrophized food search %j reachable through PostgreSQL",
+      async (q) => {
+        const rows = await foodQueries.searchFoods({
+          includeOffMarket: false,
+          limit: 5,
+          q,
+        });
+
+        expect(rows.map((row) => row.id)).toContain("trader-joes:099032");
+      },
+      20_000,
+    );
+
     it("intercepts every contaminant lookup instead of requiring product-test tables", () => {
       expect(contaminantQueryCount).toBeGreaterThan(0);
     });
+  },
+);
+
+describe.runIf(Boolean(testDatabaseUrl))(
+  "supplement PostgreSQL legacy constraint rollout",
+  () => {
+    it("enforces new payloads before validating repaired legacy rows", async () => {
+      const client = new pg.Client({
+        connectionString: testDatabaseUrl ?? undefined,
+        statement_timeout: 8_000,
+      });
+
+      await client.connect();
+      await client.query("BEGIN");
+
+      try {
+        await client.query(`
+          CREATE TEMP TABLE supplements (
+            id TEXT PRIMARY KEY,
+            canonical_key TEXT NOT NULL,
+            data_origin TEXT NOT NULL,
+            data_origin_id TEXT NOT NULL,
+            data_origin_url TEXT,
+            data_origin_priority SMALLINT NOT NULL DEFAULT 100,
+            name TEXT NOT NULL,
+            brand TEXT,
+            upc TEXT,
+            off_market BOOLEAN NOT NULL DEFAULT FALSE,
+            search_text TEXT NOT NULL,
+            label JSONB NOT NULL,
+            serving_grams NUMERIC,
+            imported_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+            UNIQUE (data_origin, data_origin_id)
+          ) ON COMMIT DROP
+        `);
+        await client.query(`
+          INSERT INTO supplements (
+            id,
+            canonical_key,
+            data_origin,
+            data_origin_id,
+            name,
+            search_text,
+            label
+          )
+          VALUES (
+            'legacy-oversized',
+            'legacy-oversized',
+            'brand_site',
+            'legacy-oversized',
+            'Legacy Oversized',
+            repeat('x', 6001),
+            '{}'::jsonb
+          )
+        `);
+
+        const schemaSql = await readFile(
+          new URL("../sql/supplements/schema.sql", import.meta.url),
+          "utf8",
+        );
+        await client.query(schemaSql);
+
+        await expect(client.query<{ convalidated: boolean }>(`
+          SELECT convalidated
+          FROM pg_constraint
+          WHERE conrelid = 'supplements'::regclass
+            AND conname = 'supplements_payload_format_check'
+        `)).resolves.toMatchObject({ rows: [{ convalidated: false }] });
+
+        await client.query("SAVEPOINT invalid_payload");
+        await expect(client.query(`
+          INSERT INTO supplements (
+            id,
+            canonical_key,
+            data_origin,
+            data_origin_id,
+            name,
+            search_text,
+            label
+          )
+          VALUES (
+            'new-invalid',
+            'new-invalid',
+            'brand_site',
+            'new-invalid',
+            'New Invalid',
+            '',
+            '{}'::jsonb
+          )
+        `)).rejects.toMatchObject({ code: "23514" });
+        await client.query("ROLLBACK TO SAVEPOINT invalid_payload");
+
+        await client.query(`
+          UPDATE supplements
+          SET search_text = 'Legacy Oversized repaired'
+          WHERE id = 'legacy-oversized'
+        `);
+        await client.query(`
+          ALTER TABLE supplements
+          VALIDATE CONSTRAINT supplements_payload_format_check
+        `);
+        await client.query(schemaSql);
+
+        await expect(client.query<{ convalidated: boolean }>(`
+          SELECT convalidated
+          FROM pg_constraint
+          WHERE conrelid = 'supplements'::regclass
+            AND conname = 'supplements_payload_format_check'
+        `)).resolves.toMatchObject({ rows: [{ convalidated: true }] });
+      } finally {
+        await client.query("ROLLBACK");
+        await client.end();
+      }
+    }, 20_000);
   },
 );
 
