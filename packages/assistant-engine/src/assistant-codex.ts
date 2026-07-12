@@ -22,6 +22,7 @@ import type {
   CodexNormalizedEvent,
   CodexProgressEvent,
 } from './assistant-codex-events.js'
+import { registerStopWarmCodexAppServer } from './codex-lifecycle.js'
 import {
   extractAssistantMessageFallback,
   extractCodexErrorInfo,
@@ -1384,6 +1385,8 @@ export async function stopWarmCodexAppServer(
     }
   })
 }
+
+registerStopWarmCodexAppServer(stopWarmCodexAppServer)
 
 export interface CodexManagedAccountDeviceCode {
   userCode: string
