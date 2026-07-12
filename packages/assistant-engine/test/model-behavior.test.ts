@@ -1689,7 +1689,7 @@ describe('assistant experiment onboarding guidance', () => {
     expect(prompt).toContain('Setup/support: murph-onboarding, experiment-onboarding, behavior-followthrough, self-management-experiments.')
     expect(prompt).toContain('Sleep/readiness: sleep-improvement, circadian-rhythm, sleep-recovery-readiness, hrv-resting-heart-rate, energy-fatigue.')
     expect(prompt).toContain('Nutrition/metabolic: food-journal, nutrition-strategy, body-composition, gut-digestion, micronutrients-supplements, cardiometabolic-health, cycle-hormonal-health.')
-    expect(prompt).toContain('Execution/artifacts: computer-use, pdf, music-generation. Groups: group-chat, groupchat-comedy, group-challenge.')
+    expect(prompt).toContain('Execution/artifacts: computer-use, pdf, music-generation. Groups: group-chat, groupchat-comedy, group-challenge, group-newsletter.')
     expect(prompt).toContain('Overlaps: sleep-improvement owns sleep mechanics; circadian-rhythm clock timing;')
     expect(prompt).not.toContain(
       'Before asking any experiment onboarding question, perform a bounded vault-first evidence pass',
