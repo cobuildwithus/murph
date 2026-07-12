@@ -144,7 +144,7 @@ function CompactCard({
   artifact: React.ReactNode;
 }) {
   return (
-    <article className="flex flex-col gap-6 rounded-[1.75rem] bg-[#fffcf6] p-7 ring-1 ring-black/[0.04] shadow-[0_1px_2px_rgba(45,52,54,0.04),0_16px_50px_-30px_rgba(45,52,54,0.1)] sm:p-9">
+    <article className="flex min-w-0 flex-col gap-6 rounded-[1.75rem] bg-[#fffcf6] p-7 ring-1 ring-black/[0.04] shadow-[0_1px_2px_rgba(45,52,54,0.04),0_16px_50px_-30px_rgba(45,52,54,0.1)] sm:p-9">
       <div className="flex flex-col gap-3">
         <span className="font-mono text-[10px] font-semibold uppercase tracking-[0.2em] text-[#736a58]">
           {eyebrow}
@@ -361,7 +361,7 @@ function BloodworkArtifact() {
                   : "bg-[#a04f30]/12 text-[#a04f30]"
               }`}
             >
-              {m.delta} {m.unit}
+              {m.delta}
             </span>
           </li>
         ))}
@@ -482,7 +482,7 @@ function HabitArtifact() {
 
       <div className="mt-4">
         <VoiceMemoPlayer
-          bars={56}
+          bars={32}
           src="/audio/one-foot-two-foot.mp3"
           caption="Murph sent a hype track. Press play."
         />

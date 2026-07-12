@@ -1611,6 +1611,40 @@ test("SourceCard stacks connection-reset content vertically at the base breakpoi
   );
 });
 
+test("SourceCard stacks coming-soon content vertically at the base breakpoint", async () => {
+  const { SourceCard } = await import("../app/(dashboard)/connect/connect-source-card");
+  const logo = { className: "size-11 object-contain", height: 44, src: "/logo.png", width: 44 };
+
+  const comingSoonMarkup = renderToStaticMarkup(createElement(SourceCard, {
+    authenticated: true,
+    errorMessage: null,
+    onDisconnectTargetChange: () => {},
+    onStartConnection: async () => {},
+    pending: false,
+    pendingDisconnect: false,
+    source: {
+      description: "iPhone and Apple Watch activity, sleep, vitals, and workouts.",
+      id: "apple-health",
+      logo,
+      name: "Apple Health",
+      unavailableActionLabel: "Coming soon",
+      unavailableMessage:
+        "Apple Health web setup is coming soon. Connect from the Murph iOS app for now.",
+    },
+  }));
+
+  assert.match(
+    comingSoonMarkup,
+    /Apple Health web setup is coming soon\. Connect from the Murph iOS app for now\./u,
+  );
+  assert.match(comingSoonMarkup, />Coming soon<\/button>/u);
+  // The coming-soon message can be up to 22rem wide, so the card content must
+  // stack at the base breakpoint instead of overlapping the source details in
+  // the shared horizontal row under the card's overflow-hidden.
+  assert.match(comingSoonMarkup, /class="flex flex-1 flex-col items-stretch gap-3 sm:gap-0"/u);
+  assert.doesNotMatch(comingSoonMarkup, /items-center gap-4/u);
+});
+
 test("ConnectPage lets active reconnect rows win over stale reconnectable rows", async () => {
   const { resolveConnectSourceConnectionStates } = await import("../app/(dashboard)/connect/page");
 
