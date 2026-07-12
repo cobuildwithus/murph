@@ -226,13 +226,14 @@ test("model radios stay labeled and the form becomes busy while saving", async (
   );
   const options = [
     {
-      description: "Balanced for everyday work. The Murph default.",
+      description:
+        "For everyday check-ins, questions, planning, and follow-through with Murph.",
       model: HOSTED_ASSISTANT_TERRA_MODEL,
       name: "GPT-5.6 Terra",
     },
     {
       description:
-        "The most capable GPT-5.6 model for harder work. Uses more of your Edge plan’s AI usage.",
+        "When you want Murph to dig deeper on complex questions, research, and demanding tasks. Counts more toward your Edge usage limit.",
       model: HOSTED_ASSISTANT_SOL_MODEL,
       name: "GPT-5.6 Sol",
     },

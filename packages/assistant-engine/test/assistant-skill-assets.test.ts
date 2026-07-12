@@ -370,6 +370,9 @@ describe('assistant skill assets', () => {
     expect(raw).toContain('pass that same chosen name as `displayName`')
     expect(raw).toContain('`murph.group action="post_join_offer"`')
     expect(raw).toContain('`murph.group action="create_join_link"`')
+    expect(raw).toMatch(
+      /`read_current` can return `status="none"`[\s\S]*not that\s+someone must link an external workspace[\s\S]*those\s+actions create the hosted group record/u,
+    )
     expect(raw).toContain('If the group wants the recurring update in the chat instead of email')
     expect(raw).toContain('vault-cli automation save')
     expect(raw).toContain("the group's chosen name as the positional `<title>`")
@@ -378,6 +381,9 @@ describe('assistant skill assets', () => {
     expect(raw).toContain('vault-cli automation set-status group-health-newsletter --status archived')
     expect(raw).toContain('--schedule-cron "0 9 * * 0"')
     expect(raw).toContain('--continuity-policy fresh')
+    expect(raw).toMatch(
+      /until the\s+`vault-cli automation save` command succeeds[\s\S]*never turn a\s+failed command into a confirmation/u,
+    )
     expect(raw).toContain('next natural cron occurrence')
     expect(raw).toContain('Never create an')
     expect(raw).toContain('never call `murph.newsletter` `send` right after')
@@ -1020,6 +1026,19 @@ describe('assistant skill assets', () => {
     )
     expect(raw).toContain(
       'A purchase is not proof that a supplement is effective, safe, medically appropriate, or authorized to start or change dose.',
+    )
+    expect(raw).toContain('vault-cli blood-test list --format json')
+    expect(raw).toContain(
+      'vault-cli blood-test show <id> --format json',
+    )
+    expect(raw).toContain(
+      'When blood-test records exist, cite the latest relevant markers with dates',
+    )
+    expect(raw).toContain(
+      'For supplements outside the list above (for example NAC, curcumin, ginger, berberine)',
+    )
+    expect(raw).toContain(
+      'Name the personal evidence the classification rests on (latest panel date, current regimen, symptoms, goals).',
     )
   })
 

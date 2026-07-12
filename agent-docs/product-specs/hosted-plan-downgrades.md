@@ -28,31 +28,38 @@ scheduled switch:
 The app-owned Edge-to-Pulse path is intentionally narrow; arbitrary plan
 transitions still stay out of scope.
 
-## Edge Assistant Model Choice
+## Hosted Assistant Model Selection
 
 The current paid Edge plan also unlocks an explicit assistant-model choice in
 Settings:
 
-- Terra remains the default for every member, including Edge members who do
-  nothing.
+- Terra remains the default for person members, including Edge members who do
+  nothing. Synthetic thread-container runtimes for group chats use Sol by
+  default so group behavior does not depend on a person member's billing or
+  saved model preference.
 - Settings keeps both Terra and Sol visible to non-Edge members. A paid Pulse
   member who is eligible for the direct upgrade sees Sol locked with the
   existing Edge upgrade action; other ineligible members see the Edge
   requirement without a billing action.
-- Only an active, unsuspended member whose own current billing state is paid
-  Edge can opt into Sol. Sponsored Family access, Pulse, trials, and synthetic
-  thread-container members do not qualify.
-- Postgres stores only the nullable Sol intent. Terra is the normal absence of
-  an override; members who do not opt in use the platform-configured model,
-  normally Terra.
+- Only an active, unsuspended person member whose own current billing state is
+  paid Edge can opt into Sol. Sponsored Family access, Pulse, and trials do not
+  qualify. Synthetic thread-container members cannot mutate a model preference;
+  their runtime resolves directly to Sol.
+- Postgres stores only the nullable Sol intent for person members. Terra is the
+  normal absence of a person-member override; person members who do not opt in
+  use the platform-configured model, normally Terra. Thread-container Sol is
+  derived from the existing thread-container relation and adds no persisted
+  preference.
 - A scheduled switch to Pulse keeps Sol available until Stripe applies the
   Pulse phase and reconciliation changes the current billing state. After that
   boundary, Terra is effective while the stored Sol intent remains available
   for a later Edge reactivation.
-- The existing signed workspace read projects an eligible Sol intent to the
-  runner at the next hosted invocation boundary. An already-active invocation
-  can retain its model snapshot through its bounded 180-second idle window.
-  Settings states that an idle run can take up to three minutes to close so a
+- The single web-owned resolver projects either an eligible person-member Sol
+  intent or the derived thread-container Sol default through the existing signed
+  workspace read at the next hosted invocation boundary. Cloudflare only
+  consumes that resolved optional override. An already-active invocation can
+  retain its model snapshot through its bounded 180-second idle window. Settings
+  states that an idle run can take up to three minutes to close so a person
   member does not mistake that bounded delay for a failed save.
 - Changing the preference does not create a mailbox item, wake, queue, or a
   second copy in the vault or hosted workspace snapshot.
@@ -75,6 +82,10 @@ The feature changes only the Worker-side selection of the existing forwarded
 runner-side model-config parser. Warm pre-feature runner bundles from the
 current Terra fleet therefore consume the same environment and already accept
 the Sol slug.
+The group-chat default is a web-side producer change over that same optional
+override: the existing Cloudflare consumer already accepts Sol, so it requires
+no coordinated Worker or container rollout. A web rollback simply returns
+thread-container runtimes to the fleet model on their next invocation.
 The feature is safe under gradual container rollout and adds no requirement for
 `container_rollout=immediate`. Production deploys must still honor the existing
 global rollout preflight in `apps/cloudflare/DEPLOY.md`, which currently requires
@@ -87,9 +98,10 @@ rollback independently returns every member to the platform-configured model,
 normally Terra. This feature has no model-specific fallback or rollback path.
 
 Focused contract coverage proves old/no-field compatibility, the saved Sol
-choice, and the Terra default. The normal deploy keeps its managed-container
-fingerprint and live Terra smoke. An optional post-deploy canary may select Sol
-for one eligible Edge member and confirm the next new invocation reports Sol.
+choice, the person-member Terra default, and the thread-container Sol default.
+The normal deploy keeps its managed-container fingerprint and live Terra smoke.
+An optional post-deploy canary may select Sol for one eligible Edge member and
+confirm the next new invocation reports Sol.
 
 ## First-Version Scope
 
