@@ -1,5 +1,5 @@
 {
-  "catalogHash": "sha256:d729fe575944a1c7a76d486fff7990b98230e9dfe732c8b558aa86a52418f9af",
+  "catalogHash": "sha256:e25d5a5bcee60111ec2f9f6b7cf2b22e598ade487783c53e05e30d08eac1589d",
   "generatedAt": null,
   "items": [
     {
@@ -19627,7 +19627,23 @@
       ],
       "equipment": [],
       "id": "EX654",
-      "images": [],
+      "images": [
+        {
+          "alt": "The exerciser holds a straight forearm side plank with the elbow under the shoulder and feet stacked.",
+          "step": "Set the side plank",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/4c560867-0bb6-422e-2dc5-f8561132e600/public"
+        },
+        {
+          "alt": "The exerciser opens the top arm and begins lifting the straight top leg from the stable side plank.",
+          "step": "Begin the star",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/de30277f-14f8-44ed-aa46-48f2e0bd6b00/public"
+        },
+        {
+          "alt": "The exerciser holds a controlled side-plank star with the top arm vertical and the straight top leg lifted modestly.",
+          "step": "Hold the star",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/5207ca01-47ca-43b7-a742-c4bc16ed8100/public"
+        }
+      ],
       "kind": "exercise",
       "level": "advanced",
       "modality": "Strength",
