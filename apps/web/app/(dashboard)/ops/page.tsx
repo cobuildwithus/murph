@@ -33,7 +33,8 @@ const OPS_TOOLS = [
     label: "Runtime latency",
   },
   {
-    description: "Preview and add 7 trial days for every active Pulse Trial or one member.",
+    description:
+      "Preview and add 7 trial days for the fixed pre–July 10 UTC cohort or one eligible member.",
     href: "/ops/trials",
     label: "Trials",
   },

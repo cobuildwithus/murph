@@ -20,7 +20,6 @@ export const revalidate = 0;
 
 const HOSTED_OPS_PULSE_TRIAL_EXTENSION_BODY_LIMIT_BYTES = 4 * 1024;
 const HOSTED_OPS_PULSE_TRIAL_EXTENSION_MAX_CANDIDATES = 4;
-const HOSTED_OPS_PULSE_TRIAL_EXTENSION_MAX_PAGE = 100;
 
 export const POST = withJsonError(async (request: Request) => {
   await requireHostedOpsRequestAccess(request, {
@@ -162,7 +161,7 @@ function readPage(body: Record<string, unknown>, memberId: string | undefined): 
     typeof value === "number" &&
     Number.isSafeInteger(value) &&
     value >= 0 &&
-    value <= HOSTED_OPS_PULSE_TRIAL_EXTENSION_MAX_PAGE &&
+    Number.isSafeInteger(value * HOSTED_OPS_PULSE_TRIAL_EXTENSION_MAX_CANDIDATES) &&
     (!memberId || value === 0)
   ) {
     return value;

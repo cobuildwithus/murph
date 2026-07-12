@@ -39,9 +39,9 @@ export function TrialExtensionClient() {
       </header>
 
       <TrialExtensionSection
-        description="Adds 7 days to active Pulse Trials in ordered batches of up to four. After applying every batch, restart at Batch 1 and Preview every batch again. Retire the campaign only when every batch shows zero trials to extend or reconcile."
+        description="Adds 7 days to the fixed campaign cohort—Pulse Trials redeemed before July 10 UTC—in ordered batches of up to four. After applying every batch, restart at Batch 1 and Preview every batch again. Retire the campaign only when every batch shows zero trials to extend or reconcile."
         scope="all"
-        title="Every active trial"
+        title="Fixed campaign cohort"
       />
       <TrialExtensionSection
         description="Adds 7 days to one member's active Pulse Trial."
@@ -370,7 +370,7 @@ function TrialExtensionSummaryPanel({
 
       {scope === "member" && summary.candidates === 0 ? (
         <p className="text-sm text-muted-foreground">
-          No active Pulse Trial found for that member id.
+          No eligible campaign trial found for that member id.
         </p>
       ) : (
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">

@@ -880,14 +880,18 @@ Current hosted billing assumptions:
   Stripe-success/local-failure retry can still repair local reconciliation.
   Foreign campaign markers fail closed.
 - The deployed route has an 800-second duration and processes one ordered page
-  of at most four candidates per request. The all-member UI advances through
-  numbered pages backed by the existing member-id ordering without returning a
+  of at most four candidates per request. This fixed campaign cohort is every
+  billing ref whose immutable Pulse Trial redemption time is before
+  `2026-07-10T00:00:00.000Z`; later enrollments are deliberately outside this
+  one-time extension. The all-member UI advances through numbered pages that
+  select this stable cohort directly in member-id order without returning a
   member identifier or cursor. Each Preview/Apply pair stays on the same page;
   the local-page digest prevents a changed page from reaching Stripe, and each
   opaque target proof is checked under that member's mutation lock before its
   Stripe update. Trial-extension Stripe reads and writes use one 80-second
-  attempt; the fixed idempotency key and operator-driven retry preserve safe
-  recovery while keeping each page inside the route budget.
+  attempt, and the minimum remaining trial runway is derived from that timeout
+  as 81 seconds. The fixed idempotency key and operator-driven retry preserve
+  safe recovery while keeping each page inside the route budget.
   Before the first production Apply, keep a deployment containing the
   shared Start-paid-Pulse mutation lock live for at least 1,140 seconds (19
   minutes) so any older unlocked invocation drains; do not roll back below that

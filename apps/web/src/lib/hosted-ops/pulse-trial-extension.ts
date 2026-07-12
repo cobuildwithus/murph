@@ -34,11 +34,14 @@ const DEFAULT_BATCH_SIZE = 100;
 const SECONDS_PER_DAY = 24 * 60 * 60;
 const STRIPE_REQUEST_MAX_NETWORK_RETRIES = 0;
 const STRIPE_REQUEST_TIMEOUT_MS = 80_000;
-const STRIPE_UPDATE_MINIMUM_RUNWAY_SECONDS = 361;
+const STRIPE_UPDATE_MINIMUM_RUNWAY_SECONDS =
+  Math.ceil(STRIPE_REQUEST_TIMEOUT_MS / 1000) + 1;
 
 export const HOSTED_PULSE_TRIAL_EXTENSION_CAMPAIGN =
   "pulse-beta-extension-2026-07" as const;
 export const HOSTED_PULSE_TRIAL_EXTENSION_DAYS = 7;
+export const HOSTED_PULSE_TRIAL_EXTENSION_COHORT_END_EXCLUSIVE_ISO =
+  "2026-07-10T00:00:00.000Z" as const;
 export const HOSTED_PULSE_TRIAL_EXTENSION_CAMPAIGN_METADATA_KEY =
   "murphTrialExtensionCampaign" as const;
 export const HOSTED_PULSE_TRIAL_EXTENSION_DAYS_METADATA_KEY =
@@ -63,8 +66,8 @@ export interface HostedPulseTrialExtensionLockedCandidate {
 
 export interface HostedPulseTrialExtensionCandidateSource {
   listCandidates(input: {
-    afterMemberId: string | null;
     limit: number;
+    offset: number;
   }): Promise<readonly HostedPulseTrialExtensionCandidate[]>;
   withStripeMutationLock<TResult>(input: {
     candidate: HostedPulseTrialExtensionCandidate;
@@ -281,19 +284,19 @@ export async function extendHostedPulseTrials(input: {
     hasMoreCandidates,
     page,
   );
-  let afterMemberId: string | null = null;
+  let candidateOffset = 0;
 
   for (;;) {
     const candidates: readonly HostedPulseTrialExtensionCandidate[] = boundedCandidates ??
       await input.candidateSource.listCandidates({
-        afterMemberId,
         limit: DEFAULT_BATCH_SIZE,
+        offset: candidateOffset,
       });
     if (candidates.length === 0) {
       return summary;
     }
 
-    afterMemberId = candidates.at(-1)?.memberId ?? afterMemberId;
+    candidateOffset += candidates.length;
 
     for (const [candidateIndex, candidate] of candidates.entries()) {
       summary.candidates += 1;
@@ -558,13 +561,8 @@ export function createPrismaHostedPulseTrialExtensionCandidateSource(
   return {
     async listCandidates(input) {
       const records = await prisma.hostedMemberBillingRef.findMany({
-        ...(input.afterMemberId
-          ? {
-              cursor: { memberId: input.afterMemberId },
-              skip: 1,
-            }
-          : {}),
         orderBy: { memberId: "asc" },
+        skip: input.offset,
         take: input.limit,
         where,
       });
@@ -606,12 +604,8 @@ function buildPrismaHostedPulseTrialExtensionCandidateWhere(
   memberId?: string,
 ): Prisma.HostedMemberBillingRefWhereInput {
   return {
-    currentBillingPhase: "trial",
-    currentBillingPlanCode: "launch_monthly",
-    currentCheckoutOffer: HOSTED_PULSE_TRIAL_OFFER,
-    member: {
-      billingStatus: HostedBillingStatus.active,
-      suspendedAt: null,
+    pulseTrialRedeemedAt: {
+      lt: new Date(HOSTED_PULSE_TRIAL_EXTENSION_COHORT_END_EXCLUSIVE_ISO),
     },
     ...(memberId ? { memberId } : {}),
   };
@@ -1038,27 +1032,19 @@ async function readHostedPulseTrialExtensionCandidatePage(input: {
   candidates: readonly HostedPulseTrialExtensionCandidate[];
   hasMoreCandidates: boolean;
 }> {
-  let afterMemberId: string | null = null;
-
-  for (let currentPage = 0; currentPage <= input.page; currentPage += 1) {
-    const isRequestedPage = currentPage === input.page;
-    const candidates = await input.candidateSource.listCandidates({
-      afterMemberId,
-      limit: input.maxCandidates + (isRequestedPage ? 1 : 0),
-    });
-    if (isRequestedPage) {
-      return {
-        candidates: candidates.slice(0, input.maxCandidates),
-        hasMoreCandidates: candidates.length > input.maxCandidates,
-      };
-    }
-    if (candidates.length < input.maxCandidates) {
-      return { candidates: [], hasMoreCandidates: false };
-    }
-    afterMemberId = candidates.at(-1)?.memberId ?? null;
+  const offset = input.page * input.maxCandidates;
+  if (!Number.isSafeInteger(offset)) {
+    throw new Error("Pulse Trial extension page offset must be a safe integer.");
   }
+  const candidates = await input.candidateSource.listCandidates({
+    limit: input.maxCandidates + 1,
+    offset,
+  });
 
-  return { candidates: [], hasMoreCandidates: false };
+  return {
+    candidates: candidates.slice(0, input.maxCandidates),
+    hasMoreCandidates: candidates.length > input.maxCandidates,
+  };
 }
 
 function classifyHostedPulseTrialExtensionPreviewAction(input: {

@@ -19,6 +19,7 @@ import {
   extendHostedPulseTrials as extendHostedPulseTrialsWithPrice,
   HOSTED_PULSE_TRIAL_EXTENSION_CAMPAIGN,
   HOSTED_PULSE_TRIAL_EXTENSION_CAMPAIGN_METADATA_KEY,
+  HOSTED_PULSE_TRIAL_EXTENSION_COHORT_END_EXCLUSIVE_ISO,
   HOSTED_PULSE_TRIAL_EXTENSION_DAYS_METADATA_KEY,
   HostedPulseTrialExtensionPreviewMismatchError,
   type HostedPulseTrialExtensionCandidate,
@@ -417,11 +418,11 @@ describe("Pulse Trial beta extension", () => {
     assert.equal(updateSubscription.mock.calls.length, 0);
   });
 
-  test("does not update a trial without the full post-retrieve provider runway", async () => {
+  test("does not update a trial without the derived one-attempt provider runway", async () => {
     vi.useFakeTimers();
     try {
-      const safeClock = new Date("2026-07-09T12:05:00.000Z");
-      const nearTrialEnd = new Date(safeClock.getTime() + 361_000);
+      const safeClock = new Date("2026-07-09T12:01:20.000Z");
+      const nearTrialEnd = new Date(safeClock.getTime() + 81_000);
       vi.setSystemTime(new Date("2026-07-09T12:00:00.000Z"));
       const source = makeCandidateSource([makeCandidate({
         currentPeriodEnd: nearTrialEnd,
@@ -452,11 +453,11 @@ describe("Pulse Trial beta extension", () => {
     }
   });
 
-  test("dry-run does not report an extension without the full post-retrieve runway", async () => {
+  test("dry-run does not report an extension at the derived runway boundary", async () => {
     vi.useFakeTimers();
     try {
-      const safeClock = new Date("2026-07-09T12:05:00.000Z");
-      const nearTrialEnd = new Date(safeClock.getTime() + 361_000);
+      const safeClock = new Date("2026-07-09T12:01:20.000Z");
+      const nearTrialEnd = new Date(safeClock.getTime() + 81_000);
       vi.setSystemTime(new Date("2026-07-09T12:00:00.000Z"));
       const source = makeCandidateSource([makeCandidate({
         currentPeriodEnd: nearTrialEnd,
@@ -486,11 +487,11 @@ describe("Pulse Trial beta extension", () => {
     }
   });
 
-  test("dry-run reports an extension above the post-retrieve runway boundary", async () => {
+  test("dry-run reports an extension above the derived runway boundary", async () => {
     vi.useFakeTimers();
     try {
-      const safeClock = new Date("2026-07-09T12:05:00.000Z");
-      const safeTrialEnd = new Date(safeClock.getTime() + 362_000);
+      const safeClock = new Date("2026-07-09T12:01:20.000Z");
+      const safeTrialEnd = new Date(safeClock.getTime() + 82_000);
       vi.setSystemTime(new Date("2026-07-09T12:00:00.000Z"));
       const source = makeCandidateSource([makeCandidate({
         currentPeriodEnd: safeTrialEnd,
@@ -520,11 +521,11 @@ describe("Pulse Trial beta extension", () => {
     }
   });
 
-  test("updates a trial with more than the full post-retrieve provider runway", async () => {
+  test("updates a trial with five minutes left using one bounded provider attempt", async () => {
     vi.useFakeTimers();
     try {
-      const safeClock = new Date("2026-07-09T12:05:00.000Z");
-      const safeTrialEnd = new Date(safeClock.getTime() + 362_000);
+      const safeClock = new Date("2026-07-09T12:01:20.000Z");
+      const safeTrialEnd = new Date(safeClock.getTime() + 300_000);
       vi.setSystemTime(new Date("2026-07-09T12:00:00.000Z"));
       const source = makeCandidateSource([makeCandidate({
         currentPeriodEnd: safeTrialEnd,
@@ -719,7 +720,11 @@ describe("Pulse Trial beta extension", () => {
     });
   });
 
-  test("Prisma candidate scan selects active unsuspended trial refs without trusting a local end cutoff", async () => {
+  test("Prisma candidate scan owns a fixed redemption cohort independent of mutable billing state", async () => {
+    assert.equal(
+      HOSTED_PULSE_TRIAL_EXTENSION_COHORT_END_EXCLUSIVE_ISO,
+      "2026-07-10T00:00:00.000Z",
+    );
     const findMany = vi.fn(async (input: unknown) => {
       void input;
       return [];
@@ -731,20 +736,17 @@ describe("Pulse Trial beta extension", () => {
     await createPrismaHostedPulseTrialExtensionCandidateSource(
       prisma as never,
     ).listCandidates({
-      afterMemberId: null,
       limit: 100,
+      offset: 0,
     });
 
     assert.deepEqual(findMany.mock.calls[0]?.[0], {
       orderBy: { memberId: "asc" },
+      skip: 0,
       take: 100,
       where: {
-        currentBillingPhase: "trial",
-        currentBillingPlanCode: "launch_monthly",
-        currentCheckoutOffer: "pulse_trial_7d",
-        member: {
-          billingStatus: "active",
-          suspendedAt: null,
+        pulseTrialRedeemedAt: {
+          lt: new Date(HOSTED_PULSE_TRIAL_EXTENSION_COHORT_END_EXCLUSIVE_ISO),
         },
       },
     });
@@ -764,22 +766,19 @@ describe("Pulse Trial beta extension", () => {
       { memberId: "member_only" },
     );
     await source.listCandidates({
-      afterMemberId: null,
       limit: 100,
+      offset: 0,
     });
 
     assert.deepEqual(findMany.mock.calls[0]?.[0], {
       orderBy: { memberId: "asc" },
+      skip: 0,
       take: 100,
       where: {
-        currentBillingPhase: "trial",
-        currentBillingPlanCode: "launch_monthly",
-        currentCheckoutOffer: "pulse_trial_7d",
-        member: {
-          billingStatus: "active",
-          suspendedAt: null,
-        },
         memberId: "member_only",
+        pulseTrialRedeemedAt: {
+          lt: new Date(HOSTED_PULSE_TRIAL_EXTENSION_COHORT_END_EXCLUSIVE_ISO),
+        },
       },
     });
   });
@@ -818,13 +817,36 @@ describe("Pulse Trial beta extension", () => {
     assert.equal(secondPage.hasMoreCandidates, false);
     assert.equal(secondPage.page, 1);
     assert.deepEqual(source.listInputs, [
-      { afterMemberId: null, limit: 5 },
-      { afterMemberId: null, limit: 4 },
-      { afterMemberId: "member_4", limit: 5 },
+      { limit: 5, offset: 0 },
+      { limit: 5, offset: 4 },
     ]);
     assert.equal(source.lockCalls, 0);
     assert.equal(stripe.retrieveCalls, 5);
     assert.equal(stripe.updateCalls.length, 0);
+  });
+
+  test("a direct page reaches candidate 405 without replay or an arbitrary ceiling", async () => {
+    const source = makeCandidateSource(
+      Array.from({ length: 405 }, (_value, index) =>
+        makeCandidate({ memberId: `member_${index.toString().padStart(3, "0")}` })
+      ),
+    );
+    const stripe = makeStripeClient();
+
+    const terminalPage = await extendHostedPulseTrials({
+      candidateSource: source,
+      maxCandidates: 4,
+      mode: "dry-run",
+      now: NOW,
+      page: 101,
+      stripe,
+    });
+
+    assert.equal(terminalPage.candidates, 1);
+    assert.equal(terminalPage.hasMoreCandidates, false);
+    assert.equal(terminalPage.page, 101);
+    assert.deepEqual(source.listInputs, [{ limit: 5, offset: 404 }]);
+    assert.equal(stripe.retrieveCalls, 1);
   });
 
   test("candidate snapshot digest rejects a changed bounded set before provider work", async () => {
@@ -1061,8 +1083,8 @@ function makeCandidateSource(
 ): HostedPulseTrialExtensionCandidateSource & {
   candidates: HostedPulseTrialExtensionCandidate[];
   listInputs: Array<{
-    afterMemberId: string | null;
     limit: number;
+    offset: number;
   }>;
   readonly lockCalls: number;
   updateCalls: Array<{
@@ -1076,8 +1098,8 @@ function makeCandidateSource(
     trialEndsAt: Date;
   }> = [];
   const listInputs: Array<{
-    afterMemberId: string | null;
     limit: number;
+    offset: number;
   }> = [];
   let lockCalls = 0;
   let remainingFailures = options.failUpdates ?? 0;
@@ -1090,10 +1112,7 @@ function makeCandidateSource(
     listInputs,
     async listCandidates(input) {
       listInputs.push(input);
-      const startIndex = input.afterMemberId
-        ? candidates.findIndex((candidate) => candidate.memberId === input.afterMemberId) + 1
-        : 0;
-      return candidates.slice(startIndex, startIndex + input.limit);
+      return candidates.slice(input.offset, input.offset + input.limit);
     },
     updateCalls,
     async withStripeMutationLock(input) {

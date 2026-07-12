@@ -216,13 +216,16 @@ describe("hosted ops Pulse Trial extension route", () => {
     assert.equal(consoleInfoSpy.mock.calls.length, 0);
   });
 
-  test("passes a bounded all-member page and rejects invalid page scopes", async () => {
+  test("passes every safe all-member page and rejects invalid page scopes", async () => {
     const pageResponse = await route.POST(makeRequest({ page: 2 }));
+    const pageBeyondFormerCeilingResponse = await route.POST(makeRequest({ page: 101 }));
     const memberPageResponse = await route.POST(makeRequest({
       memberId: "member_target",
       page: 1,
     }));
-    const oversizedPageResponse = await route.POST(makeRequest({ page: 101 }));
+    const unsafeOffsetResponse = await route.POST(makeRequest({
+      page: Number.MAX_SAFE_INTEGER,
+    }));
 
     assert.equal(pageResponse.status, 200);
     expect(mocks.extendHostedPulseTrialsForCampaign).toHaveBeenCalledWith({
@@ -233,8 +236,9 @@ describe("hosted ops Pulse Trial extension route", () => {
       mode: "dry-run",
       page: 2,
     });
+    assert.equal(pageBeyondFormerCeilingResponse.status, 200);
     assert.equal(memberPageResponse.status, 400);
-    assert.equal(oversizedPageResponse.status, 400);
+    assert.equal(unsafeOffsetResponse.status, 400);
   });
 
   test("rejects unknown modes", async () => {
