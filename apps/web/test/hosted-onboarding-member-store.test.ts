@@ -1380,12 +1380,7 @@ describe("hosted-member-store", () => {
       linqChatId: "chat_group",
       mailboxDedupeKey: "evt_group",
       prisma,
-    })).resolves.toEqual({
-      homeBindingCount: 1,
-      mailboxItemCount: 1,
-      memberIds: ["member_home", "member_pending"],
-      pendingBindingCount: 1,
-    });
+    })).resolves.toBeUndefined();
 
     const lookupKeys = createHostedLinqChatLookupKeyReadCandidates("chat_group");
     expect(lookupKeys).toHaveLength(2);
@@ -1430,14 +1425,16 @@ describe("hosted-member-store", () => {
   });
 
   it("keeps canonical group bindings while a provider dispatch is in flight", async () => {
+    const findMany = vi.fn();
+    const updateMany = vi.fn();
     const prisma = {
       $executeRaw: vi.fn().mockResolvedValue(0),
       hostedLinqDelivery: {
         findFirst: vi.fn().mockResolvedValue({ id: "delivery_in_flight" }),
       },
       hostedMemberRouting: {
-        findMany: vi.fn(),
-        updateMany: vi.fn(),
+        findMany,
+        updateMany,
       },
     } as never;
 
@@ -1449,8 +1446,8 @@ describe("hosted-member-store", () => {
       retryable: true,
     });
 
-    expect(prisma.hostedMemberRouting.findMany).not.toHaveBeenCalled();
-    expect(prisma.hostedMemberRouting.updateMany).not.toHaveBeenCalled();
+    expect(findMany).not.toHaveBeenCalled();
+    expect(updateMany).not.toHaveBeenCalled();
   });
 
   it("keeps canonical group bindings while a personal runtime is in flight", async () => {
@@ -1458,6 +1455,7 @@ describe("hosted-member-store", () => {
       inFlight: { kind: "message" },
       userId: "member_home",
     });
+    const updateMany = vi.fn();
     const prisma = {
       $executeRaw: vi.fn().mockResolvedValue(0),
       hostedLinqDelivery: {
@@ -1465,7 +1463,7 @@ describe("hosted-member-store", () => {
       },
       hostedMemberRouting: {
         findMany: vi.fn().mockResolvedValue([{ memberId: "member_home" }]),
-        updateMany: vi.fn(),
+        updateMany,
       },
     } as never;
 
@@ -1477,8 +1475,51 @@ describe("hosted-member-store", () => {
       retryable: true,
     });
 
-    expect(prisma.hostedMemberRouting.updateMany).not.toHaveBeenCalled();
+    expect(updateMany).not.toHaveBeenCalled();
   });
+
+  it.each(["missing", "mismatched"] as const)(
+    "keeps canonical group bindings when personal runtime authority is %s",
+    async (runtimeAuthority) => {
+      if (runtimeAuthority === "missing") {
+        hostedExecutionControlMocks.readHostedExecutionControlClientIfConfigured
+          .mockReturnValueOnce(null);
+      } else {
+        hostedExecutionControlMocks.getRunnerStatus.mockResolvedValueOnce({
+          inFlight: null,
+          userId: "member_other",
+        });
+      }
+      const deleteMany = vi.fn();
+      const updateMany = vi.fn();
+      const prisma = {
+        $executeRaw: vi.fn().mockResolvedValue(0),
+        hostedLinqDelivery: {
+          findFirst: vi.fn().mockResolvedValue(null),
+        },
+        hostedMailboxItem: {
+          deleteMany,
+        },
+        hostedMemberRouting: {
+          findMany: vi.fn().mockResolvedValue([{ memberId: "member_home" }]),
+          updateMany,
+        },
+      } as never;
+
+      await expect(demoteHostedMemberLinqGroupChatBindingsTx({
+        linqChatId: "chat_group",
+        mailboxDedupeKey: "evt_group",
+        prisma,
+      })).rejects.toMatchObject({
+        code: "HOSTED_LINQ_GROUP_RUNTIME_STATUS_UNAVAILABLE",
+        httpStatus: 503,
+        retryable: true,
+      });
+
+      expect(deleteMany).not.toHaveBeenCalled();
+      expect(updateMany).not.toHaveBeenCalled();
+    },
+  );
 
   it.each([
     {

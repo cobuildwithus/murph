@@ -28,7 +28,7 @@ Make group-thread workspace isolation a fail-closed invariant: a live Linq/iMess
 3. Atomically demote stale personal home/pending bindings for canonical groups, preserve the assigned home line as phone-only authority, and reject later personal binds whenever a Linq thread route owns that chat.
 4. Add narrow invariant checks at the group-route-to-mailbox boundary so non-direct external thread traffic cannot target a personal member ID.
 5. Project signed group-email thread targets as non-direct and cover onboarding suppression in runtime tests.
-6. Run focused tests, full required typechecks/tests, completion audits, exact-head review, and update PR 522.
+6. Run focused tests, full required typechecks/tests, completion audits, and publish a follow-up draft PR for exact-head review.
 
 ## Verification
 
@@ -40,4 +40,7 @@ Make group-thread workspace isolation a fail-closed invariant: a live Linq/iMess
 
 ## State
 
-Active. Production root cause and the remove/re-add timeline are proven. The cross-table race and group-email directness gap are verified; regression construction is in progress.
+Complete pending publication. Production root cause and the remove/re-add timeline are proven. The cross-table race and group-email directness gap are fixed, and the production-faithful group-isolation regression is implemented. Security/privacy, coverage-write, simplify, task-finish, and parent final reviews completed with no outstanding findings. On the reconciled base, repository guards, ten affected package typechecks and test suites, web typecheck plus 4,283 tests, zero-error lint, production build, and Cloudflare typecheck plus 1,737 tests are green. The process-backed hosted-local e2e and web dev-smoke remain unrun because their teardown sends process signals, which the recovery controller explicitly forbids. Exact-head ReviewGPT awaits the post-CI controller slot.
+Status: completed
+Updated: 2026-07-12
+Completed: 2026-07-12

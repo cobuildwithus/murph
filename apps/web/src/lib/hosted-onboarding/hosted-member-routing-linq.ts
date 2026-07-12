@@ -34,12 +34,7 @@ export async function demoteHostedMemberLinqGroupChatBindingsTx(input: {
   linqChatId: string;
   mailboxDedupeKey?: string | null;
   prisma: Prisma.TransactionClient;
-}): Promise<{
-  homeBindingCount: number;
-  mailboxItemCount: number;
-  memberIds: string[];
-  pendingBindingCount: number;
-}> {
+}): Promise<void> {
   const linqChatLookupKeys = createHostedLinqChatLookupKeyReadCandidates(
     input.linqChatId,
   );
@@ -88,18 +83,18 @@ export async function demoteHostedMemberLinqGroupChatBindingsTx(input: {
   await assertHostedLinqPersonalRuntimesIdle(memberIds);
 
   const mailboxDedupeKey = input.mailboxDedupeKey?.trim() ?? "";
-  const mailboxItems = mailboxDedupeKey && memberIds.length > 0
-    ? await input.prisma.hostedMailboxItem.deleteMany({
-        where: {
-          dedupeKey: mailboxDedupeKey,
-          userId: {
-            in: memberIds,
-          },
+  if (mailboxDedupeKey && memberIds.length > 0) {
+    await input.prisma.hostedMailboxItem.deleteMany({
+      where: {
+        dedupeKey: mailboxDedupeKey,
+        userId: {
+          in: memberIds,
         },
-      })
-    : { count: 0 };
+      },
+    });
+  }
 
-  const homeBindings = await input.prisma.hostedMemberRouting.updateMany({
+  await input.prisma.hostedMemberRouting.updateMany({
     where: {
       linqChatLookupKey: {
         in: linqChatLookupKeys,
@@ -110,7 +105,7 @@ export async function demoteHostedMemberLinqGroupChatBindingsTx(input: {
       linqChatLookupKey: null,
     },
   });
-  const pendingBindings = await input.prisma.hostedMemberRouting.updateMany({
+  await input.prisma.hostedMemberRouting.updateMany({
     where: {
       pendingLinqChatLookupKey: {
         in: linqChatLookupKeys,
@@ -127,13 +122,6 @@ export async function demoteHostedMemberLinqGroupChatBindingsTx(input: {
       pendingLinqRecipientPhoneLookupKey: null,
     },
   });
-
-  return {
-    homeBindingCount: homeBindings.count,
-    mailboxItemCount: mailboxItems.count,
-    memberIds,
-    pendingBindingCount: pendingBindings.count,
-  };
 }
 
 export async function upsertHostedMemberPendingLinqBindingTx(input: {

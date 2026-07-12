@@ -152,12 +152,7 @@ beforeEach(() => {
   vi.mocked(linqClient.getHostedLinqChatHandles).mockReset();
   vi.mocked(linqClient.getHostedLinqChatSummary).mockReset();
   vi.mocked(memberRoutingStore.demoteHostedMemberLinqGroupChatBindingsTx).mockReset();
-  vi.mocked(memberRoutingStore.demoteHostedMemberLinqGroupChatBindingsTx).mockResolvedValue({
-    homeBindingCount: 0,
-    mailboxItemCount: 0,
-    memberIds: [],
-    pendingBindingCount: 0,
-  });
+  vi.mocked(memberRoutingStore.demoteHostedMemberLinqGroupChatBindingsTx).mockResolvedValue(undefined);
   vi.mocked(linqClient.getHostedLinqChatSummary).mockResolvedValue({
     handles: [],
     isGroup: null,
