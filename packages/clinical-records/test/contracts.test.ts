@@ -55,7 +55,7 @@ describe("clinical records contracts", () => {
       sha256: SHA256,
     };
     const manifest = clinicalRawManifestSchema.parse({
-      schemaVersion: "murph.clinical-raw-manifest.v1",
+      schemaVersion: "murph.clinical-raw-manifest.v2",
       kind: "clinical_fhir_retrieval",
       connectionId: "clinical-connection-1",
       retrievalJobId: "retrieval-job-1",
@@ -64,6 +64,11 @@ describe("clinical records contracts", () => {
       patientIdHash: PATIENT_ID_HASH,
       fetchedAt: "2026-07-01T12:00:00.000Z",
       resourceFiles: [resourceFile],
+      retrievalScopes: [{
+        coverage: "whole-family",
+        queryFingerprint: SHA256,
+        resourceType: "Observation",
+      }],
       completedResourceTypes: ["Observation"],
       requestedScopes: ["patient/Observation.read"],
       grantedScopes: ["patient/Observation.read"],
@@ -96,7 +101,7 @@ describe("clinical records contracts", () => {
 
   it("bounds raw manifests and raw file paths", () => {
     expect(() => clinicalRawManifestSchema.parse({
-      schemaVersion: "murph.clinical-raw-manifest.v1",
+      schemaVersion: "murph.clinical-raw-manifest.v2",
       kind: "clinical_fhir_retrieval",
       connectionId: "clinical-connection-1",
       retrievalJobId: "retrieval-job-1",
@@ -110,6 +115,11 @@ describe("clinical records contracts", () => {
         count: CLINICAL_RAW_MANIFEST_MAX_TOTAL_RESOURCES + 1,
         sha256: SHA256,
       }],
+      retrievalScopes: [{
+        coverage: "whole-family",
+        queryFingerprint: SHA256,
+        resourceType: "Observation",
+      }],
       completedResourceTypes: ["Observation"],
       requestedScopes: [],
       grantedScopes: [],
@@ -117,7 +127,7 @@ describe("clinical records contracts", () => {
 
     for (const relativePath of ["../Observation/page-1.json", "misc/page-1.json", "page-1.json"]) {
       expect(() => clinicalRawManifestSchema.parse({
-        schemaVersion: "murph.clinical-raw-manifest.v1",
+        schemaVersion: "murph.clinical-raw-manifest.v2",
         kind: "clinical_fhir_retrieval",
         connectionId: "clinical-connection-1",
         retrievalJobId: "retrieval-job-1",
@@ -126,6 +136,11 @@ describe("clinical records contracts", () => {
         patientIdHash: PATIENT_ID_HASH,
         fetchedAt: "2026-07-01T12:00:00.000Z",
         resourceFiles: [{ resourceType: "Observation", relativePath, count: 1, sha256: SHA256 }],
+        retrievalScopes: [{
+          coverage: "whole-family",
+          queryFingerprint: SHA256,
+          resourceType: "Observation",
+        }],
         completedResourceTypes: ["Observation"],
         requestedScopes: [],
         grantedScopes: [],
@@ -135,7 +150,7 @@ describe("clinical records contracts", () => {
 
   it("rejects duplicate raw manifest resource file paths", () => {
     expect(() => clinicalRawManifestSchema.parse({
-      schemaVersion: "murph.clinical-raw-manifest.v1",
+      schemaVersion: "murph.clinical-raw-manifest.v2",
       kind: "clinical_fhir_retrieval",
       connectionId: "clinical-connection-1",
       retrievalJobId: "retrieval-job-1",
@@ -157,6 +172,11 @@ describe("clinical records contracts", () => {
           sha256: SHA256,
         },
       ],
+      retrievalScopes: [{
+        coverage: "whole-family",
+        queryFingerprint: SHA256,
+        resourceType: "Observation",
+      }],
       completedResourceTypes: ["Observation"],
       requestedScopes: [],
       grantedScopes: [],

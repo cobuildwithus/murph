@@ -484,9 +484,6 @@ importers:
       '@murphai/assistantd':
         specifier: workspace:*
         version: link:../assistantd
-      '@murphai/clinical-records':
-        specifier: workspace:*
-        version: link:../clinical-records
       '@murphai/contracts':
         specifier: workspace:*
         version: link:../contracts
@@ -681,6 +678,9 @@ importers:
       '@junction-api/sdk':
         specifier: 1.2.0
         version: 1.2.0
+      '@murphai/clinical-records':
+        specifier: workspace:*
+        version: link:../clinical-records
       '@murphai/clinical-records':
         specifier: workspace:*
         version: link:../clinical-records
@@ -915,6 +915,9 @@ importers:
 
   packages/vault-usecases:
     dependencies:
+      '@murphai/clinical-records':
+        specifier: workspace:*
+        version: link:../clinical-records
       '@murphai/contracts':
         specifier: workspace:*
         version: link:../contracts

@@ -108,6 +108,7 @@ export const hostedClinicalRecordsFetchPageResponseSchema = z.discriminatedUnion
   z.object({
     body: z.string().max(HOSTED_CLINICAL_RECORDS_MAX_PAGE_BODY_CHARS),
     nextCursor: z.string().min(1).max(HOSTED_CLINICAL_RECORDS_MAX_CURSOR_CHARS).nullable(),
+    nextPageUrlHash: sha256Schema.optional(),
     pageUrlHash: sha256Schema.optional(),
     status: z.literal("page"),
   }).strict(),

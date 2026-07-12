@@ -30,6 +30,7 @@ import {
   externalRefForFhir,
   hashClinicalFhirPageUrl,
   hashClinicalFhirPatientId,
+  hasWholeFamilyClinicalFhirRetrievalScope,
   isClinicalFhirUrlWithinBase,
   normalizeClinicalFhirPatientReference,
   rawRefForClinicalManifestFile,
@@ -359,6 +360,7 @@ function hasCompleteAllergyEvidence(manifest: ClinicalRawManifest): boolean {
   const completedResourceTypes = new Set<string>(manifest.completedResourceTypes);
   return [...ALLERGY_CONFLICT_RESOURCE_TYPES].every((resourceType) =>
     completedResourceTypes.has(resourceType)
+    && hasWholeFamilyClinicalFhirRetrievalScope(manifest, resourceType)
     && hasGrantedFhirReadScope(manifest, resourceType)
     && manifest.errors?.some((error) =>
       error.resourceType === undefined || error.resourceType === resourceType
@@ -437,6 +439,7 @@ async function readClinicalResourcePage(input: {
     fhirBaseUrlHash: input.manifest.fhirBaseUrlHash,
     page,
     rawRef,
+    resourceFile: input.resourceFile,
   });
   return {
     ...(nextPageUrlHash ? { nextPageUrlHash } : {}),
@@ -520,40 +523,50 @@ function readFhirNextPageUrlHash(input: {
   fhirBaseUrlHash: string;
   page: unknown;
   rawRef: string;
+  resourceFile: ClinicalRawManifestResourceFile;
 }): string | undefined {
-  if (!isFhirBundle(input.page) || input.page.link === undefined) {
-    return undefined;
-  }
-  if (!Array.isArray(input.page.link)) {
-    throw new Error(`Clinical FHIR raw Bundle pagination links are invalid for ${input.rawRef}.`);
+  let rawNextPageUrlHash: string | undefined;
+  if (isFhirBundle(input.page) && input.page.link !== undefined) {
+    if (!Array.isArray(input.page.link)) {
+      throw new Error(`Clinical FHIR raw Bundle pagination links are invalid for ${input.rawRef}.`);
+    }
+
+    const nextUrls = new Set<string>();
+    for (const link of input.page.link) {
+      if (readString(link?.relation)?.toLowerCase() !== "next") {
+        continue;
+      }
+      const nextUrl = readString(link.url);
+      if (!nextUrl) {
+        throw new Error(`Clinical FHIR raw Bundle next link is invalid for ${input.rawRef}.`);
+      }
+      nextUrls.add(nextUrl);
+    }
+    if (nextUrls.size > 1) {
+      throw new Error(`Clinical FHIR raw Bundle has ambiguous next links for ${input.rawRef}.`);
+    }
+
+    const nextUrl = nextUrls.values().next().value;
+    if (nextUrl !== undefined) {
+      if (!isClinicalFhirUrlWithinBase({
+        fhirBaseUrlHash: input.fhirBaseUrlHash,
+        url: nextUrl,
+      })) {
+        throw new Error(`Clinical FHIR raw Bundle next link is outside the manifest FHIR base for ${input.rawRef}.`);
+      }
+      rawNextPageUrlHash = hashClinicalFhirPageUrl(nextUrl);
+    }
   }
 
-  const nextUrls = new Set<string>();
-  for (const link of input.page.link) {
-    if (readString(link?.relation)?.toLowerCase() !== "next") {
-      continue;
-    }
-    const nextUrl = readString(link.url);
-    if (!nextUrl) {
-      throw new Error(`Clinical FHIR raw Bundle next link is invalid for ${input.rawRef}.`);
-    }
-    nextUrls.add(nextUrl);
+  const declaredNextPageUrlHash = input.resourceFile.nextPageUrlHash;
+  if (
+    rawNextPageUrlHash
+    && declaredNextPageUrlHash
+    && rawNextPageUrlHash !== declaredNextPageUrlHash
+  ) {
+    throw new Error(`Clinical FHIR raw Bundle next link does not match its manifest hash for ${input.rawRef}.`);
   }
-  if (nextUrls.size > 1) {
-    throw new Error(`Clinical FHIR raw Bundle has ambiguous next links for ${input.rawRef}.`);
-  }
-
-  const nextUrl = nextUrls.values().next().value;
-  if (nextUrl === undefined) {
-    return undefined;
-  }
-  if (!isClinicalFhirUrlWithinBase({
-    fhirBaseUrlHash: input.fhirBaseUrlHash,
-    url: nextUrl,
-  })) {
-    throw new Error(`Clinical FHIR raw Bundle next link is outside the manifest FHIR base for ${input.rawRef}.`);
-  }
-  return hashClinicalFhirPageUrl(nextUrl);
+  return declaredNextPageUrlHash ?? rawNextPageUrlHash;
 }
 
 function assertResolvedFhirPagination(resourcePages: readonly FhirResourcePage[]): void {
