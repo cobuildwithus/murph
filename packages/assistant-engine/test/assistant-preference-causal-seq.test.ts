@@ -54,6 +54,26 @@ test('advances the live-turn preference sequence before a steered command can ru
   )
 })
 
+test('removes a stale preference sequence when the turn has no causal input', async () => {
+  const vault = await mkdtemp(path.join(os.tmpdir(), 'assistant-preference-causal-'))
+  createdVaultRoots.push(vault)
+  const initial = await createMailboxInput(vault, '7', 1)
+
+  await initializeAssistantPreferenceCausalSeq({
+    acceptedInputItems: [initial],
+    vault,
+  })
+  await initializeAssistantPreferenceCausalSeq({
+    acceptedInputItems: [],
+    vault,
+  })
+
+  await assert.rejects(
+    readFile(resolveAssistantPreferenceCausalSeqPath(vault), 'utf8'),
+    { code: 'ENOENT' },
+  )
+})
+
 async function createMailboxInput(vault: string, causalSeq: string, index: number) {
   const event = await upsertAssistantInputEvent({
     event: {

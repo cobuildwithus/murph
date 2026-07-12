@@ -1,4 +1,4 @@
-import { readFile } from 'node:fs/promises'
+import { readFile, rm } from 'node:fs/promises'
 import path from 'node:path'
 
 import { assistantPreferenceCausalSeqSchema } from '@murphai/contracts'
@@ -48,7 +48,11 @@ export async function initializeAssistantPreferenceCausalSeq(input: {
   vault: string
 }): Promise<void> {
   const causalSeq = await resolveAssistantPreferenceCausalSeq(input)
-  await writeAssistantPreferenceCausalSeq(input.vault, causalSeq ?? '')
+  if (causalSeq === null) {
+    await rm(resolveAssistantPreferenceCausalSeqPath(input.vault), { force: true })
+    return
+  }
+  await writeAssistantPreferenceCausalSeq(input.vault, causalSeq)
 }
 
 export async function advanceAssistantPreferenceCausalSeq(input: {
