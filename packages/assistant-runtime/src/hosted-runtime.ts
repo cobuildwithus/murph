@@ -1626,11 +1626,13 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         status: "start",
       });
       try {
-        let currentDeliveryRoute = await resolveHostedForegroundCurrentDeliveryRoute({
-          initialAssistantInputBatch: passInput.initialAssistantInputBatch ?? null,
-          initialMailboxImport: passInput.initialMailboxImport,
-          vaultRoot: restored.vaultRoot,
-        });
+        let currentDeliveryRoute = (
+          await resolveHostedForegroundCurrentDeliveryRoute({
+            initialAssistantInputBatch: passInput.initialAssistantInputBatch ?? null,
+            initialMailboxImport: passInput.initialMailboxImport,
+            vaultRoot: restored.vaultRoot,
+          })
+        ) ?? null;
         const passResult = await hostedCliBridge.runWithInvocation(
           {
             currentDeliveryRoute: () => currentDeliveryRoute,
@@ -1652,11 +1654,20 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
                 startedAtEpochMs: passStartedAtEpochMs,
               },
               runAssistantPhase: async (phaseInput) => {
-                currentDeliveryRoute = await resolveHostedForegroundCurrentDeliveryRoute({
+                const phaseDeliveryRoute = await resolveHostedForegroundCurrentDeliveryRoute({
                   initialAssistantInputBatch: phaseInput.initialAssistantInputBatch ?? null,
                   initialMailboxImport: phaseInput.initialMailboxImport,
                   vaultRoot: restored.vaultRoot,
                 });
+                // Provider/tool continuation phases carry no new assistant
+                // input ids. Keep the foreground conversation authority from
+                // the phase that admitted the input instead of erasing it
+                // before a later CLI tool call reads the bridge. A phase that
+                // does carry input ids still replaces the route, including
+                // null when that fresh audience is ambiguous.
+                if (phaseDeliveryRoute !== undefined) {
+                  currentDeliveryRoute = phaseDeliveryRoute;
+                }
                 return await (
                   options.runAssistantPhase ?? runHostedWorkspaceAssistantPhase
                 )({
@@ -4437,11 +4448,14 @@ async function resolveHostedForegroundCurrentDeliveryRoute(input: {
   initialAssistantInputBatch?: HostedWorkspaceRunnerAssistantInputBatch | null;
   initialMailboxImport: HostedWorkspaceRunnerInput["initialMailboxImport"] | undefined;
   vaultRoot: string;
-}): Promise<AssistantCurrentDeliveryRoute | null> {
+}): Promise<AssistantCurrentDeliveryRoute | null | undefined> {
   const assistantInputIds =
     input.initialAssistantInputBatch?.assistantInputIds
     ?? input.initialMailboxImport?.importResult.assistantInputIds
     ?? [];
+  if (assistantInputIds.length === 0) {
+    return undefined;
+  }
   const routes: AssistantCurrentDeliveryRoute[] = [];
   for (const inputId of assistantInputIds) {
     if (!inputId) {
