@@ -26,8 +26,9 @@ import {
   applyMurphManagedAutomations,
   getAssistantCronStatus,
   recordHostedMailboxAssistantInputItem,
-  readAssistantOutboxIntent,
+  repairLegacyPersonalHomeAutomationRoutesFromInputs,
   readAssistantInputEvent,
+  readAssistantOutboxIntent,
   refreshAssistantContextSnapshotBestEffort,
   scheduleDeviceActivityTriggeredAutomations,
   upsertAssistantInputEvent,
@@ -36,9 +37,7 @@ import {
   type AssistantInputEventRecord,
   type HostedAssistantTurnTimingStage,
 } from "@murphai/assistant-engine";
-import type {
-  AutomationRoute,
-} from "@murphai/contracts";
+import type { AutomationRoute } from "@murphai/contracts";
 import {
   findAssistantAutoReplyDeliveryIntentIds,
 } from "@murphai/assistant-engine/assistant-automation";
@@ -794,7 +793,7 @@ export async function runHostedWorkspaceAssistantPhase(
           : undefined;
       const assistantMetrics = await (async () => {
         try {
-          return await runHostedAssistantAutomationLane({
+          const metrics = await runHostedAssistantAutomationLane({
             assistantRuntimeState,
             ...(buildBackgroundDynamicContextPrompt
               ? { buildBackgroundDynamicContextPrompt }
@@ -825,6 +824,18 @@ export async function runHostedWorkspaceAssistantPhase(
             vaultRoot: input.restored.vaultRoot,
             wake,
           });
+          const legacyRoutesRepaired =
+            await repairLegacyPersonalHomeAutomationRoutesFromInputs({
+              inputIds: metrics.assistantAutomationSelectedInputIds ?? [],
+              now: new Date(resolveHostedAssistantPhaseNowMs(input)),
+              vaultRoot: input.restored.vaultRoot,
+            });
+          return legacyRoutesRepaired > 0
+            ? {
+                ...metrics,
+                assistantAutomationProgressed: true,
+              }
+            : metrics;
         } catch (error) {
           const failureLogEntries =
             readHostedAssistantAutomationFailureRedactedLogEntries(error);

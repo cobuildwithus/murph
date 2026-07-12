@@ -10057,6 +10057,7 @@ describe('assistant automation run loop', () => {
     expect(stagedInputs[0]?.event.sourceMetadata).toEqual({
       kind: 'linq',
       partCount: 1,
+      previousHomeThreadId: null,
       reactionEligible: true,
       replyToMessageId: null,
       service: 'iMessage',

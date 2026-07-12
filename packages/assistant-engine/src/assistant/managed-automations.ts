@@ -29,7 +29,7 @@ import {
   type AssistantCronDeliveryRouteValidationProfile,
 } from './cron/targets.js'
 import { buildExperimentFinalResultsSeeds } from './experiment-support-automations.js'
-import { listAssistantInputEvents } from './input-store.js'
+import { readAssistantInputEvent } from './input-store.js'
 import { MURPH_ONBOARDING_FOLLOWUP_AUTOMATION } from './onboarding-followup-automation.js'
 
 export { MURPH_ONBOARDING_FOLLOWUP_AUTOMATION }
@@ -744,68 +744,59 @@ export async function applyMurphManagedAutomations(
     result.updated += 1
   }
 
-  result.updated += await reconcileLegacyPersonalHomeAutomationRoutes({
-    input,
-    now,
-  })
-
   return result
 }
 
-async function reconcileLegacyPersonalHomeAutomationRoutes(input: {
-  input: ApplyMurphManagedAutomationsInput
-  now: Date
+export async function repairLegacyPersonalHomeAutomationRoutesFromInputs(input: {
+  inputIds: readonly string[]
+  now?: Date
+  vaultRoot: string
 }): Promise<number> {
-  if (
-    input.input.seeds !== undefined ||
-    !isCurrentDirectLinqHomeRoute(input.input.defaultRoute)
-  ) {
-    return 0
-  }
+  const currentTargets = new Set<string>()
+  const confirmedDirectDeliveryTargets = new Set<string>()
 
-  const currentTarget = input.input.defaultRoute?.deliveryTarget
-  if (!currentTarget) {
-    return 0
-  }
-  const confirmedDirectDeliveryTargets = new Set([currentTarget])
-  const { events } = await listAssistantInputEvents({
-    limit: 100,
-    skipInvalidRecords: true,
-    vault: input.input.vaultRoot,
-  })
-  for (const event of events) {
+  for (const inputId of new Set(input.inputIds)) {
+    const event = await readAssistantInputEvent({
+      inputId,
+      vault: input.vaultRoot,
+    })
+    if (!event) {
+      continue
+    }
+
     const conversation = event.conversation
     const replyTarget = event.replyTarget
-    const eventTarget = replyTarget?.threadId
+    const currentTarget = replyTarget?.threadId?.trim() ?? ''
     if (
-      event.sourceMetadata?.kind === 'linq' &&
-      conversation?.actorIsSelf === false &&
-      conversation.source === 'linq' &&
-      conversation.threadIsDirect === true &&
-      typeof eventTarget === 'string' &&
-      eventTarget.length > 0 &&
-      replyTarget?.channel === 'linq'
+      event.sourceMetadata?.kind !== 'linq' ||
+      conversation?.actorIsSelf !== false ||
+      conversation.source !== 'linq' ||
+      conversation.threadIsDirect !== true ||
+      replyTarget?.channel !== 'linq' ||
+      currentTarget.length === 0
     ) {
-      confirmedDirectDeliveryTargets.add(eventTarget)
+      continue
     }
+
+    currentTargets.add(currentTarget)
+    confirmedDirectDeliveryTargets.add(currentTarget)
+    const previousTarget = event.sourceMetadata.previousHomeThreadId?.trim() ?? ''
+    if (previousTarget.length > 0) {
+      confirmedDirectDeliveryTargets.add(previousTarget)
+    }
+  }
+
+  if (currentTargets.size !== 1) {
+    return 0
   }
 
   const result = await repairLegacyPersonalHomeAutomationRoutes({
     confirmedDirectDeliveryTargets: [...confirmedDirectDeliveryTargets],
-    now: input.now,
-    vaultRoot: input.input.vaultRoot,
+    now: input.now ?? new Date(),
+    vaultRoot: input.vaultRoot,
   })
 
   return result.updated
-}
-
-function isCurrentDirectLinqHomeRoute(
-  route: AutomationRoute | null | undefined,
-): boolean {
-  return route?.channel === 'linq' &&
-    route.currentRouteSnapshot === true &&
-    route.threadIsDirect === true &&
-    Boolean(route.deliveryTarget)
 }
 
 function markPersonalMurphManagedAutomationSeeds(

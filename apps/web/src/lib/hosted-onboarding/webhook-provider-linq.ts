@@ -597,6 +597,9 @@ export async function planHostedOnboardingLinqWebhook(input: {
         from: participantContact.value,
         isFromMe: summary.isFromMe,
         messageId: summary.messageId,
+        ...(bindingResult.previousHomeChatId
+          ? { previousHomeChatId: bindingResult.previousHomeChatId }
+          : {}),
         reactionEligible: isHostedLinqMessageReactionEligible({
           parts: messageEvent.data.message.parts,
           service: messageEvent.data.service ?? null,

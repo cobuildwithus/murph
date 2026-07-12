@@ -56,6 +56,7 @@ const mocks = vi.hoisted(() => ({
   readAssistantAutomationState: vi.fn(),
   readAssistantInputEvent: vi.fn(),
   readAssistantOutboxIntent: vi.fn(),
+  repairLegacyPersonalHomeAutomationRoutesFromInputs: vi.fn(),
   recordHostedDeviceSyncDirtyPostCheckpointRecord: vi.fn(),
   recordHostedProviderCleanupAfterDelivery: vi.fn(),
   recordHostedProviderCleanupBeforeCommit: vi.fn(),
@@ -109,6 +110,8 @@ vi.mock("@murphai/assistant-engine", async (importOriginal) => {
     getAssistantCronStatus: mocks.getAssistantCronStatus,
     readAssistantInputEvent: mocks.readAssistantInputEvent,
     readAssistantOutboxIntent: mocks.readAssistantOutboxIntent,
+    repairLegacyPersonalHomeAutomationRoutesFromInputs:
+      mocks.repairLegacyPersonalHomeAutomationRoutesFromInputs,
     recordHostedMailboxAssistantInputItem:
       automation.recordHostedMailboxAssistantInputItem,
     scheduleDeviceActivityTriggeredAutomations:
@@ -495,6 +498,7 @@ beforeEach(() => {
     schemaVersion: 1,
   });
   mocks.readAssistantInputEvent.mockResolvedValue(null);
+  mocks.repairLegacyPersonalHomeAutomationRoutesFromInputs.mockResolvedValue(0);
   mocks.recordHostedDeviceSyncDirtyPostCheckpointRecord.mockResolvedValue({
     nextWakeAt: null,
     recorded: 1,
@@ -10496,8 +10500,9 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }));
   });
 
-  it("consumes persisted assistant input before deferring managed automation reconciliation to idle", async () => {
+  it("repairs legacy routes from persisted assistant input before deferring managed seeds to idle", async () => {
     const callOrder: string[] = [];
+    const pendingInputId = "ain_00000000000000000000000000000009";
     mocks.resolveHostedPendingAssistantInputWakeAt
       .mockResolvedValueOnce("2026-04-27T00:10:00.000Z")
       .mockResolvedValueOnce(null);
@@ -10509,12 +10514,19 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         updated: 1,
       };
     });
+    mocks.repairLegacyPersonalHomeAutomationRoutesFromInputs.mockImplementationOnce(
+      async () => {
+        callOrder.push("route-repair");
+        return 1;
+      },
+    );
     mocks.runHostedAssistantAutomationLane.mockImplementationOnce(async (input) => {
       callOrder.push("assistant");
       expect(input.freshAssistantInputIds).toEqual([]);
       return {
         assistantAutomationCurrentTurnDeliveryIntentIds: [],
         assistantAutomationProgressed: true,
+        assistantAutomationSelectedInputIds: [pendingInputId],
         nextWakeAt: null,
         redactedLogEntries: [],
       };
@@ -10525,7 +10537,12 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       now: () => "2026-04-27T00:10:00.000Z",
     }));
 
-    expect(callOrder).toEqual(["assistant"]);
+    expect(callOrder).toEqual(["assistant", "route-repair"]);
+    expect(mocks.repairLegacyPersonalHomeAutomationRoutesFromInputs).toHaveBeenCalledWith({
+      inputIds: [pendingInputId],
+      now: new Date("2026-04-27T00:10:00.000Z"),
+      vaultRoot: "/tmp/murph-vault",
+    });
     expect(mocks.applyMurphManagedAutomations).not.toHaveBeenCalled();
     expect(mocks.prepareHostedSystemMailboxItemForCheckpoint).not.toHaveBeenCalled();
     expect(mocks.prepareHostedAssistantAutomationForWake).toHaveBeenCalledTimes(1);
@@ -10539,8 +10556,48 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       now: () => "2026-04-27T00:11:00.000Z",
     }));
 
-    expect(callOrder).toEqual(["assistant", "managed-automations"]);
+    expect(callOrder).toEqual(["assistant", "route-repair", "managed-automations"]);
     expect(mocks.applyMurphManagedAutomations).toHaveBeenCalledTimes(1);
+  });
+
+  it("leaves persisted input retryable when pre-checkpoint route repair fails", async () => {
+    const pendingInputId = "ain_0000000000000000000000000000000a";
+    mocks.resolveHostedPendingAssistantInputWakeAt
+      .mockResolvedValueOnce("2026-04-27T00:10:00.000Z")
+      .mockResolvedValueOnce("2026-04-27T00:10:30.000Z");
+    mocks.runHostedAssistantAutomationLane
+      .mockResolvedValueOnce({
+        assistantAutomationCurrentTurnDeliveryIntentIds: [],
+        assistantAutomationProgressed: true,
+        assistantAutomationSelectedInputIds: [pendingInputId],
+        nextWakeAt: null,
+        redactedLogEntries: [],
+      })
+      .mockResolvedValueOnce({
+        assistantAutomationCurrentTurnDeliveryIntentIds: [],
+        assistantAutomationProgressed: true,
+        assistantAutomationSelectedInputIds: [pendingInputId],
+        nextWakeAt: null,
+        redactedLogEntries: [],
+      });
+    mocks.repairLegacyPersonalHomeAutomationRoutesFromInputs
+      .mockRejectedValueOnce(new Error("synthetic canonical write failure"))
+      .mockResolvedValueOnce(1);
+
+    await expect(runHostedWorkspaceAssistantPhase(createPhaseInput({
+      importedCount: 0,
+      now: () => "2026-04-27T00:10:00.000Z",
+    }))).rejects.toThrow("synthetic canonical write failure");
+
+    const retried = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      importedCount: 0,
+      now: () => "2026-04-27T00:10:30.000Z",
+    }));
+
+    expect(mocks.repairLegacyPersonalHomeAutomationRoutesFromInputs).toHaveBeenCalledTimes(2);
+    expect(retried).toEqual(expect.objectContaining({
+      progressed: true,
+    }));
   });
 
   it("processes persisted assistant input before due device-sync work", async () => {

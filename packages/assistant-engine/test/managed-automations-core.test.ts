@@ -22,6 +22,7 @@ import {
   MURPH_WEEKLY_HEALTH_RESEARCH_SCOUT_AUTOMATION_ID,
   MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID,
   applyMurphManagedAutomations,
+  repairLegacyPersonalHomeAutomationRoutesFromInputs,
 } from '../src/assistant/managed-automations.ts'
 import { upsertAssistantInputEvent } from '../src/assistant/automation.ts'
 import { ASSISTANT_REQUIRE_SEND_AUTOMATION_TAG } from '../src/assistant/automation-tags.ts'
@@ -80,12 +81,13 @@ async function createVaultRoot(): Promise<string> {
 
 async function stageDirectLinqRouteEvidence(input: {
   deliveryTarget: string
+  previousHomeThreadId?: string | null
   threadIsDirect?: boolean
   vaultRoot: string
-}): Promise<void> {
+}): Promise<string> {
   directRouteEvidenceOrdinal += 1
   const ordinal = String(directRouteEvidenceOrdinal)
-  await upsertAssistantInputEvent({
+  const event = await upsertAssistantInputEvent({
     vault: input.vaultRoot,
     event: {
       content: { text: 'Stored route authority evidence.' },
@@ -106,6 +108,7 @@ async function stageDirectLinqRouteEvidence(input: {
       sourceMetadata: {
         kind: 'linq',
         partCount: 1,
+        previousHomeThreadId: input.previousHomeThreadId ?? null,
         reactionEligible: false,
         replyToMessageId: null,
         senderHandle: null,
@@ -125,6 +128,7 @@ async function stageDirectLinqRouteEvidence(input: {
       },
     },
   })
+  return event.inputId
 }
 
 describe('applyMurphManagedAutomations core integration', () => {
@@ -470,26 +474,17 @@ describe('applyMurphManagedAutomations core integration', () => {
       title: 'Group reminder',
       vaultRoot,
     })
-    await stageDirectLinqRouteEvidence({
-      deliveryTarget: 'legacy-home-chat',
+    const routeProofInputId = await stageDirectLinqRouteEvidence({
+      deliveryTarget: 'current-home-chat',
+      previousHomeThreadId: 'legacy-home-chat',
       vaultRoot,
     })
 
-    const currentHomeRoute = {
-      ...legacyHomeRoute,
-      currentRouteSnapshot: true,
-      deliveryTarget: 'current-home-chat',
-      threadIsDirect: true,
-    }
-    await expect(applyMurphManagedAutomations({
-      defaultRoute: currentHomeRoute,
+    await expect(repairLegacyPersonalHomeAutomationRoutesFromInputs({
+      inputIds: [routeProofInputId],
       now: new Date('2026-07-10T12:05:00.000Z'),
       vaultRoot,
-    })).resolves.toEqual({
-      created: 3,
-      skipped: 2,
-      updated: 4,
-    })
+    })).resolves.toBe(4)
 
     for (const lookup of [
       MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID,
@@ -521,15 +516,111 @@ describe('applyMurphManagedAutomations core integration', () => {
     })
     expect(groupRecord?.route).not.toHaveProperty('currentRouteSnapshot')
 
-    await expect(applyMurphManagedAutomations({
-      defaultRoute: currentHomeRoute,
+    await expect(repairLegacyPersonalHomeAutomationRoutesFromInputs({
+      inputIds: [routeProofInputId],
       now: new Date('2026-07-10T12:10:00.000Z'),
       vaultRoot,
-    })).resolves.toEqual({
-      created: 0,
-      skipped: 5,
-      updated: 0,
+    })).resolves.toBe(0)
+  })
+
+  it('ignores unrelated inputs while applying one unambiguous direct-home transition proof', async () => {
+    const vaultRoot = await createVaultRoot()
+    const legacyRoute = {
+      channel: 'linq',
+      deliverySource: null,
+      deliveryTarget: 'legacy-home-chat',
+      identityId: null,
+      participantId: null,
+      threadId: null,
+    }
+    await upsertAutomation({
+      automationId: 'automation_01KZ0000000000000000000040',
+      continuityPolicy: 'fresh',
+      instructions: 'Send the saved reminder.',
+      now: new Date('2026-07-10T12:00:00.000Z'),
+      route: legacyRoute,
+      schedule: { kind: 'dailyLocal', localTime: '09:00' },
+      slug: 'mixed-input-reminder',
+      status: 'active',
+      summary: null,
+      tags: ['assistant', 'scheduled'],
+      title: 'Mixed input reminder',
+      vaultRoot,
     })
+    const routeProofInputId = await stageDirectLinqRouteEvidence({
+      deliveryTarget: 'current-home-chat',
+      previousHomeThreadId: 'legacy-home-chat',
+      vaultRoot,
+    })
+    const unrelated = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: {
+        content: { text: 'Unrelated email input.' },
+        conversation: {
+          accountId: 'email-account',
+          actorId: 'email-sender',
+          actorIsSelf: false,
+          source: 'email',
+          threadId: 'email-thread',
+          threadIsDirect: true,
+        },
+        occurredAt: '2026-07-10T12:01:00.000Z',
+        replyTarget: null,
+        sourceMetadata: {
+          kind: 'email',
+          promptReady: true,
+          promptUnavailableReason: null,
+        },
+        sourceRef: {
+          dedupeKey: 'unrelated-email',
+          eventId: 'unrelated-email-event',
+          itemId: 'unrelated-email-item',
+          kind: 'hosted-mailbox',
+          lane: 'conversation',
+          laneSeq: '1000',
+          payloadSchema: 'hosted-mailbox-item-v1',
+          payloadSource: 'inline',
+          source: 'hosted-mailbox',
+          wakeSchema: 'hosted-workspace-wake-v1',
+        },
+      },
+    })
+
+    await expect(repairLegacyPersonalHomeAutomationRoutesFromInputs({
+      inputIds: [unrelated.inputId, routeProofInputId],
+      now: new Date('2026-07-10T12:05:00.000Z'),
+      vaultRoot,
+    })).resolves.toBe(1)
+    await expect(showAutomation({
+      automationId: 'automation_01KZ0000000000000000000040',
+      vaultRoot,
+    })).resolves.toMatchObject({
+      route: {
+        currentRouteSnapshot: true,
+        deliveryTarget: 'legacy-home-chat',
+        threadIsDirect: true,
+      },
+    })
+  })
+
+  it('fails closed when selected direct Linq inputs disagree on the current home route', async () => {
+    const vaultRoot = await createVaultRoot()
+    const first = await stageDirectLinqRouteEvidence({
+      deliveryTarget: 'current-home-chat-a',
+      previousHomeThreadId: 'legacy-home-chat',
+      vaultRoot,
+    })
+    const second = await stageDirectLinqRouteEvidence({
+      deliveryTarget: 'current-home-chat-b',
+      previousHomeThreadId: 'legacy-home-chat',
+      vaultRoot,
+    })
+
+    await expect(repairLegacyPersonalHomeAutomationRoutesFromInputs({
+      inputIds: [first, second],
+      now: new Date('2026-07-10T12:05:00.000Z'),
+      vaultRoot,
+    })).resolves.toBe(0)
   })
 
   it('does not infer personal authority from managed rows or stored group evidence', async () => {
@@ -582,24 +673,23 @@ describe('applyMurphManagedAutomations core integration', () => {
       title: 'Ambiguous user reminder',
       vaultRoot,
     })
-    await stageDirectLinqRouteEvidence({
+    const groupEvidenceInputId = await stageDirectLinqRouteEvidence({
       deliveryTarget: 'first-legacy-chat',
       threadIsDirect: false,
       vaultRoot,
     })
+    const currentRouteInputId = await stageDirectLinqRouteEvidence({
+      deliveryTarget: 'current-home-chat',
+      vaultRoot,
+    })
 
-    const result = await applyMurphManagedAutomations({
-      defaultRoute: {
-        ...firstLegacyRoute,
-        currentRouteSnapshot: true,
-        deliveryTarget: 'current-home-chat',
-        threadIsDirect: true,
-      },
+    const result = await repairLegacyPersonalHomeAutomationRoutesFromInputs({
+      inputIds: [groupEvidenceInputId, currentRouteInputId],
       now: new Date('2026-07-10T12:05:00.000Z'),
       vaultRoot,
     })
 
-    expect(result.updated).toBe(0)
+    expect(result).toBe(0)
     for (const [automationId, route] of [
       [MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID, firstLegacyRoute],
       [MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID, secondLegacyRoute],

@@ -7038,6 +7038,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
             linqMessage: expect.objectContaining({
               chatId: "chat_current_inbound",
               messageId: "msg_123",
+              previousHomeChatId: "chat_stale_home",
             }),
           }),
           userId: "member_123",

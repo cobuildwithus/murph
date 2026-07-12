@@ -203,6 +203,7 @@ export async function runHostedAssistantAutomationLane(input: {
         progressed: false,
         redactedLogEntries: [],
         replyFailed: 0,
+        selectedInputIds: [],
         terminalLinqCleanup: null,
         timings: undefined,
       };
@@ -226,6 +227,7 @@ export async function runHostedAssistantAutomationLane(input: {
     assistantAutomationProgressed: assistantResult.progressed,
     assistantAutomationReplyFailed: assistantResult.replyFailed,
     assistantAutomationScanElapsedMs: assistantResult.timings?.scanElapsedMs ?? null,
+    assistantAutomationSelectedInputIds: assistantResult.selectedInputIds,
     assistantAutomationTerminalLinqCleanup: assistantResult.terminalLinqCleanup,
     assistantAutomationTotalElapsedMs: assistantResult.timings?.totalElapsedMs ?? null,
     assistantInputCandidateListed:
@@ -261,6 +263,7 @@ export async function runHostedAssistantAutomation(
   progressed: boolean;
   redactedLogEntries: HostedExecutionRedactedLogEntry[];
   replyFailed: number;
+  selectedInputIds: string[];
   terminalLinqCleanup: string[] | null;
   timings?: {
     activeTurnInputIngested?: boolean | null;
@@ -577,6 +580,7 @@ export async function runHostedAssistantAutomation(
       progressed: result.progressed,
       redactedLogEntries,
       replyFailed: replies.failed,
+      selectedInputIds: [...selectedInputIds.inputIds],
       terminalLinqCleanup: replies.terminalLinqCleanup ?? null,
       timings: {
         activeTurnInputIngested,
@@ -615,6 +619,7 @@ export async function runHostedAssistantAutomation(
         progressed: true,
         redactedLogEntries,
         replyFailed: 0,
+        selectedInputIds: [...selectedInputIds.inputIds],
         terminalLinqCleanup: null,
       };
     }

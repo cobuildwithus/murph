@@ -319,6 +319,7 @@ export interface HostedExecutionLinqConversationMessage {
   isFromMe: boolean;
   messageId: string;
   parts: HostedExecutionLinqConversationMessagePart[];
+  previousHomeChatId?: string | null;
   reactionEligible?: boolean | null;
   replyToMessageId?: string | null;
   replyToPartIndex?: number | null;
