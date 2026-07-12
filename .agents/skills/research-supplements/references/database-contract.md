@@ -28,6 +28,7 @@ The hosted supplement lookup database uses one `supplements` table for DSLD, Dai
 - `off_market boolean not null default false`
 - `search_text text not null`
 - `label jsonb not null`
+- `serving_grams numeric`
 - `imported_at timestamptz not null default now()`
 
 Constraints and indexes:
@@ -35,6 +36,10 @@ Constraints and indexes:
 - Unique `(data_origin, data_origin_id)`.
 - `data_origin` must match `^[a-z][a-z0-9_]*$`.
 - `id`, `canonical_key`, and `data_origin_id` must be non-empty.
+- `name` and `search_text` must be non-empty; `search_text` is limited to 6,000 characters.
+- `label` must be a JSON object. Nullable brand and URL fields must be either null or non-empty.
+- UPC/SKU values must contain digits only when present. Preserve observed source values rather than inventing a GS1 width requirement; DSLD's field includes source SKU values as well as UPCs.
+- `serving_grams` must be positive when present.
 - Full-text GIN search index over `search_text`.
 - Trigram GIN index over `name`.
 - Partial btree index over non-empty `brand`.
