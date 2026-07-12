@@ -512,11 +512,13 @@ function loadReviewGptOpenTargetHarness(
       snapshot: ReviewGptAssistantSnapshot,
       includeEvidence = false,
       committedUserTurnSignature = '',
+      generationElapsedMs = 0,
     ) => Reflect.apply(modelAttestationForSnapshot, undefined, [
       targetModel,
       snapshot,
       includeEvidence,
       committedUserTurnSignature,
+      generationElapsedMs,
     ]) as ModelAttestationResult,
     modelConfirmationFailure: (
       targetModel: string,
@@ -969,13 +971,16 @@ describe('monorepo release flow coverage audit', () => {
     expect(reviewGptDriver).toContain("'Timed out opening page CDP socket'")
     expect(reviewGptDriver).toContain('`CDP socket command timed out: ${method}`')
     expect(reviewGptDriver).toContain('`Nested CDP socket command timed out: ${method}`')
-    expect(reviewGptDriver).not.toContain('MODEL_CONFIRMATION_UNKNOWN_FALLBACK_MS')
-    expect(reviewGptDriver).not.toContain('acceptsTimedUnknown')
+    expect(reviewGptDriver).toContain(
+      'const MODEL_CONFIRMATION_UNKNOWN_FALLBACK_MS = 10 * 60 * 1000;',
+    )
+    expect(reviewGptDriver).toContain('acceptsTimedUnknown')
     expect(reviewGptReadme).toContain(
       'require exactly one unfenced, unquoted `MODEL_CONFIRMATION` line',
     )
     expect(reviewGptReadme).toContain('the exact turn committed by this run')
     expect(reviewGptReadme).toContain('An ephemeral per-run nonce')
+    expect(reviewGptReadme).toContain('after at least 10 minutes of observed generation')
     expect(reviewGptDriver).toContain('REVIEW_GPT_TURN_NONCE:')
     expect(reviewGptDriver).toContain('precedingUserMessageSignature')
     expect(reviewGptDriver).toContain('sendResult.committedUserTurnSignature')
@@ -1344,6 +1349,30 @@ describe('monorepo release flow coverage audit', () => {
         46 * 60 * 1000,
       ),
     ).toBe('')
+    expect(
+      modelClassifier.modelConfirmationFailure(
+        'gpt-5.6-sol',
+        extractedConfirmation,
+        '',
+        10 * 60 * 1000 - 1,
+      ),
+    ).toContain('confirmed model UNKNOWN, expected gpt-5.6-sol')
+    expect(
+      modelClassifier.modelConfirmationFailure(
+        'gpt-5.6-sol',
+        extractedConfirmation,
+        '',
+        10 * 60 * 1000,
+      ),
+    ).toBe('')
+    expect(
+      modelClassifier.modelConfirmationFailure(
+        'gpt-5.6-sol',
+        extractedConfirmation,
+        'gpt-5-5-pro',
+        10 * 60 * 1000,
+      ),
+    ).toContain('DOM reported model gpt-5-5-pro, expected gpt-5.6-sol')
 
     const excludedContainers = reviewGptDomElement('DIV', [
       reviewGptDomElement('BLOCKQUOTE', [
@@ -1522,6 +1551,29 @@ describe('monorepo release flow coverage audit', () => {
         validSnapshot,
         false,
         committedUserTurnSignature,
+      ),
+    ).toEqual({ evidence: null, failure: '' })
+
+    const elapsedFallbackSnapshot = {
+      ...validSnapshot,
+      modelSlug: '',
+    }
+    expect(
+      harness.modelAttestationForSnapshot(
+        'gpt-5.6-sol',
+        elapsedFallbackSnapshot,
+        true,
+        committedUserTurnSignature,
+        10 * 60 * 1000 - 1,
+      ),
+    ).toMatchObject({ evidence: null, failure: expect.stringContaining('confirmed model UNKNOWN') })
+    expect(
+      harness.modelAttestationForSnapshot(
+        'gpt-5.6-sol',
+        elapsedFallbackSnapshot,
+        true,
+        committedUserTurnSignature,
+        10 * 60 * 1000,
       ),
     ).toEqual({ evidence: null, failure: '' })
 
