@@ -53,6 +53,16 @@ export interface LoadBrowserVaultReplicaInput {
   signal?: AbortSignal;
 }
 
+export class BrowserVaultUnauthorizedError extends Error {
+  readonly status: 401 | 403;
+
+  constructor(status: 401 | 403, message: string) {
+    super(`Browser vault session failed with HTTP ${status}: ${message}`);
+    this.name = "BrowserVaultUnauthorizedError";
+    this.status = status;
+  }
+}
+
 const textDecoder = new TextDecoder();
 
 export async function loadBrowserVaultReplica({
@@ -88,7 +98,11 @@ export async function loadBrowserVaultReplica({
       return createEmptyLoadResult();
     }
 
-    throw new Error(`Browser vault session failed with HTTP ${response.status}: ${await readJsonErrorMessage(response)}`);
+    const status = response.status === 401 ? 401 : 403;
+    throw new BrowserVaultUnauthorizedError(
+      status,
+      await readJsonErrorMessage(response),
+    );
   }
 
   if (!response.ok) {
@@ -204,6 +218,12 @@ export function isBrowserVaultAbortError(error: unknown): boolean {
   }
 
   return Reflect.get(error, "name") === "AbortError";
+}
+
+export function isBrowserVaultUnauthorizedError(
+  error: unknown,
+): error is BrowserVaultUnauthorizedError {
+  return error instanceof BrowserVaultUnauthorizedError;
 }
 
 export type BrowserVaultSessionResponse =

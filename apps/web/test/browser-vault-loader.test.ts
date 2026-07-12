@@ -4,6 +4,7 @@ import { test, vi } from "vitest";
 
 import {
   isBrowserVaultAbortError,
+  isBrowserVaultUnauthorizedError,
   loadBrowserVaultReplica,
   parseBrowserVaultSessionResponse,
 } from "@/src/lib/browser-vault/loader";
@@ -181,7 +182,14 @@ test("browser vault loader can surface unauthorized responses for privacy export
       })),
       knownReplicaRef: null,
     }),
-    /HTTP 403: Accept the current Murph legal consent before continuing\./u,
+    (error: unknown) => {
+      assert.equal(isBrowserVaultUnauthorizedError(error), true);
+      assert.match(
+        error instanceof Error ? error.message : "",
+        /HTTP 403: Accept the current Murph legal consent before continuing\./u,
+      );
+      return true;
+    },
   );
 });
 

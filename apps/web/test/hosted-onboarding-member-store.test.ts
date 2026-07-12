@@ -30,6 +30,7 @@ import {
   bindHostedMemberStripeCustomerIdIfMissingTx,
   lookupHostedMemberStripeBillingRefByStripeCustomerId,
   lookupHostedMemberStripeBillingRefByStripeSubscriptionId,
+  readHostedMemberHomeTrialBillingState,
   readHostedMemberStripeBillingRef,
   type HostedMemberStripeBillingRefSnapshot,
   writeHostedMemberStripeBillingRefTx,
@@ -2397,6 +2398,46 @@ describe("hosted-member-store", () => {
       memberId: "member_123",
       stripeCustomerId: "cus_123",
       stripeSubscriptionId: "sub_123",
+    });
+  });
+
+  it("reads the home trial billing decision without loading private Stripe identifiers", async () => {
+    const findUnique = vi.fn().mockResolvedValue({
+      currentBillingPhase: "pulse_trial",
+      currentBillingPlanCode: "launch_monthly",
+      currentCheckoutOffer: "pulse_trial",
+      stripeCustomerLookupKey: "hbidx:stripe-customer:v1:abc123",
+      stripeSubscriptionLookupKey: "hbidx:stripe-subscription:v1:def456",
+    });
+    const prisma = {
+      hostedMemberBillingRef: {
+        findUnique,
+      },
+    } as never;
+
+    await expect(
+      readHostedMemberHomeTrialBillingState({
+        memberId: "member_123",
+        prisma,
+      }),
+    ).resolves.toEqual({
+      currentBillingPhase: "pulse_trial",
+      currentBillingPlanCode: "launch_monthly",
+      currentCheckoutOffer: "pulse_trial",
+      hasStripeCustomerId: true,
+      hasStripeSubscriptionId: true,
+    });
+    expect(findUnique).toHaveBeenCalledWith({
+      where: {
+        memberId: "member_123",
+      },
+      select: {
+        currentBillingPhase: true,
+        currentBillingPlanCode: true,
+        currentCheckoutOffer: true,
+        stripeCustomerLookupKey: true,
+        stripeSubscriptionLookupKey: true,
+      },
     });
   });
 

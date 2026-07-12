@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import {
   useEffect,
   useLayoutEffect,
@@ -1758,7 +1759,7 @@ function ContactCard({
       </div>
       <div className="mt-2.5">
         {authenticated ? (
-          <a href="/home" className={ctaClassName}>
+          <Link href="/home" className={ctaClassName}>
             Open Murph
             <span
               aria-hidden="true"
@@ -1766,7 +1767,7 @@ function ContactCard({
             >
               →
             </span>
-          </a>
+          </Link>
         ) : (
           <LandingAuthDialogButton
             buttonClassName={ctaClassName}

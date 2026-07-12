@@ -9,6 +9,7 @@ import {
   type HeroMessengerChannel,
 } from "@/src/components/homepage/hero-clocks-in";
 import { HowItWorksSection } from "@/src/components/homepage/how-it-works-section";
+import { LandingBrowserVaultWarm } from "@/src/components/homepage/landing-browser-vault-warm";
 import { IntegrationsSection } from "@/src/components/homepage/integrations-section";
 import { LocalRunSection } from "@/src/components/homepage/local-run-section";
 import { pickRandomMurphHeadshotSrc } from "@/src/components/homepage/murph-headshot-avatar";
@@ -128,6 +129,7 @@ export default async function HomePage() {
   return (
     <>
       <main className="min-h-screen bg-[#f5f0e8] antialiased">
+        {authenticated ? <LandingBrowserVaultWarm /> : null}
         <StickyNav
           authenticated={authenticated}
           githubStarCount={githubStarCount}

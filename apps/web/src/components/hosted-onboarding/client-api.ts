@@ -64,6 +64,7 @@ export async function requestHostedOnboardingJson<T>(input: {
   headers?: Record<string, string>;
   keepalive?: boolean;
   method?: "DELETE" | "GET" | "PATCH" | "POST";
+  onSuccessfulResponseHeaders?: () => void;
   payload?: Record<string, unknown>;
   url: string;
 }): Promise<T> {
@@ -85,6 +86,10 @@ export async function requestHostedOnboardingJson<T>(input: {
     keepalive: input.keepalive ?? false,
     body,
   });
+
+  if (response.ok) {
+    input.onSuccessfulResponseHeaders?.();
+  }
 
   const data = await readOptionalJsonValue(response);
   const errorPayload = readApiErrorPayload(data);

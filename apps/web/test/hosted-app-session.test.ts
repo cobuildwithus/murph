@@ -12,6 +12,13 @@ vi.mock("@/src/lib/prisma", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", () => ({
+  hostedMemberCoreStateSelect: {
+    billingStatus: true,
+    createdAt: true,
+    id: true,
+    suspendedAt: true,
+    updatedAt: true,
+  },
   readHostedMemberCoreState: mocks.readHostedMemberCoreState,
 }));
 
@@ -60,7 +67,19 @@ interface HostedWebSessionFindManyInput {
 }
 
 interface HostedWebSessionFindUniqueInput {
+  select: {
+    expiresAt: true;
+    id: true;
+    member: {
+      select: Record<string, true>;
+    };
+    privyUserId: true;
+  };
   where: {
+    expiresAt: {
+      gt: Date;
+    };
+    revokedAt: null;
     tokenHash: string;
   };
 }
@@ -194,9 +213,29 @@ describe("hosted app session", () => {
 
     const session = await getHostedAppSessionFromRequest(requestWithCookie(result.cookie));
 
-    expect(mocks.readHostedMemberCoreState).toHaveBeenCalledWith({
-      memberId: "member_123",
-      prisma: harness.prismaClient,
+    expect(mocks.readHostedMemberCoreState).not.toHaveBeenCalled();
+    expect(harness.rootHostedWebSession.findUnique).toHaveBeenCalledWith({
+      select: {
+        expiresAt: true,
+        id: true,
+        member: {
+          select: {
+            billingStatus: true,
+            createdAt: true,
+            id: true,
+            suspendedAt: true,
+            updatedAt: true,
+          },
+        },
+        privyUserId: true,
+      },
+      where: {
+        expiresAt: {
+          gt: expect.any(Date),
+        },
+        revokedAt: null,
+        tokenHash: expect.stringMatching(/^[a-f0-9]{64}$/u),
+      },
     });
     expect(session).toEqual({
       expiresAt: new Date("2099-01-31T00:00:00.000Z"),
@@ -311,9 +350,23 @@ function createHostedWebSessionDelegate(records: StoredHostedWebSession[]) {
     }
     return { count };
   });
-  const findUnique = vi.fn(async (input: HostedWebSessionFindUniqueInput): Promise<StoredHostedWebSession | null> =>
-    records.find((record) => record.tokenHash === input.where.tokenHash) ?? null,
-  );
+  const findUnique = vi.fn(async (input: HostedWebSessionFindUniqueInput) => {
+    const record = records.find((candidate) => candidate.tokenHash === input.where.tokenHash);
+    if (
+      !record
+      || record.revokedAt !== input.where.revokedAt
+      || record.expiresAt <= input.where.expiresAt.gt
+    ) {
+      return null;
+    }
+
+    return {
+      expiresAt: record.expiresAt,
+      id: record.id,
+      member: createHostedMember(),
+      privyUserId: record.privyUserId,
+    };
+  });
   const updateMany = vi.fn(async (input: HostedWebSessionUpdateManyInput): Promise<{ count: number }> => {
     let count = 0;
     for (const record of records) {

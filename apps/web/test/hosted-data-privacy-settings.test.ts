@@ -27,6 +27,7 @@ const mocks = vi.hoisted(() => ({
     }),
   ),
   authorize: vi.fn(),
+  publishBrowserVaultSessionInvalidation: vi.fn(),
   requestHostedOnboardingJson: vi.fn(),
   loadBrowserVaultReplica: vi.fn(),
   useStateValues: [] as unknown[],
@@ -47,8 +48,20 @@ vi.mock("react", async () => {
   };
 });
 
-vi.mock("@/src/components/hosted-onboarding/client-api", () => ({
-  requestHostedOnboardingJson: mocks.requestHostedOnboardingJson,
+vi.mock("@/src/components/hosted-onboarding/client-api", async (importOriginal) => {
+  const actual = await importOriginal<
+    typeof import("@/src/components/hosted-onboarding/client-api")
+  >();
+
+  return {
+    ...actual,
+    requestHostedOnboardingJson: mocks.requestHostedOnboardingJson,
+  };
+});
+
+vi.mock("@/src/lib/browser-vault/session-invalidation", () => ({
+  publishBrowserVaultSessionInvalidation:
+    mocks.publishBrowserVaultSessionInvalidation,
 }));
 
 vi.mock("@/src/components/sensitive-actions/use-sensitive-action-authorization", () => ({
@@ -339,6 +352,7 @@ describe("HostedDataPrivacySettings", () => {
     expect(mocks.authorize).toHaveBeenCalledWith("account.delete");
     expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledWith({
       method: "POST",
+      onSuccessfulResponseHeaders: mocks.publishBrowserVaultSessionInvalidation,
       payload: {
         authorization: {
           signature: `0x${"11".repeat(65)}`,
@@ -348,6 +362,38 @@ describe("HostedDataPrivacySettings", () => {
       },
       url: "/api/settings/privacy/delete",
     });
+  });
+
+  test("publishes deletion invalidation before a successful response body can fail", async () => {
+    mockHostedDataPrivacyDeleteFlowState();
+    mocks.requestHostedOnboardingJson.mockImplementationOnce(async (input: {
+      onSuccessfulResponseHeaders?: () => void;
+    }) => {
+      input.onSuccessfulResponseHeaders?.();
+      throw new Error("response body unavailable");
+    });
+
+    const { document, window } = loadLinkedom().parseHTML(
+      "<html><body><div id='root'></div></body></html>",
+    );
+    installGlobals(window, document);
+    const container = document.getElementById("root");
+    assert.ok(container);
+
+    const root: Root = createRoot(container);
+    cleanupRender = async () => {
+      await act(async () => {
+        root.unmount();
+      });
+    };
+
+    await act(async () => {
+      root.render(createElement(HostedDataPrivacySettings, { authenticated: true }));
+    });
+
+    await clickButton(container, "Delete account", window);
+
+    expect(mocks.publishBrowserVaultSessionInvalidation).toHaveBeenCalledTimes(1);
   });
 
   test("does not submit deletion until the exact confirmation phrase is typed", async () => {

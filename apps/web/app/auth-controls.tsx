@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { type ReactNode, useState } from "react";
 
 import {
@@ -180,7 +181,7 @@ export function LandingAuthActions({
     const showArrow = context !== "nav";
     return (
       <div className={styles.container}>
-        <a
+        <Link
           href="/home"
           className={cn(
             styles.settings,
@@ -201,7 +202,7 @@ export function LandingAuthActions({
               &rarr;
             </span>
           ) : null}
-        </a>
+        </Link>
       </div>
     );
   }

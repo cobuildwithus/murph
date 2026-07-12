@@ -12,7 +12,7 @@ import {
 } from "./member-access";
 import { hostedOnboardingError } from "./errors";
 import {
-  readHostedMemberCoreState,
+  hostedMemberCoreStateSelect,
   type HostedMemberCoreState,
 } from "./hosted-member-store";
 import {
@@ -176,26 +176,29 @@ async function resolveHostedAppSessionFromToken(value: string | null | undefined
   const now = new Date();
   const record = await getPrisma().hostedWebSession.findUnique({
     where: {
+      expiresAt: {
+        gt: now,
+      },
+      revokedAt: null,
       tokenHash: hashHostedAppSessionToken(token),
+    },
+    select: {
+      expiresAt: true,
+      id: true,
+      member: {
+        select: hostedMemberCoreStateSelect,
+      },
+      privyUserId: true,
     },
   });
 
-  if (!record || record.revokedAt || record.expiresAt <= now) {
-    return null;
-  }
-
-  const member = await readHostedMemberCoreState({
-    memberId: record.memberId,
-    prisma: getPrisma(),
-  });
-
-  if (!member) {
+  if (!record) {
     return null;
   }
 
   return {
     expiresAt: record.expiresAt,
-    member,
+    member: record.member,
     privyUserId: record.privyUserId,
     sessionId: record.id,
   };
