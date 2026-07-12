@@ -339,6 +339,20 @@ describe('assistant skill assets', () => {
     ])
     expect(triageText).toContain('### Emergency now')
     expect(triageText).toContain('### Prompt same-day eye care')
+    const emergencyRule = triageText.slice(
+      triageText.indexOf('### Emergency now'),
+      triageText.indexOf('### Prompt same-day eye care'),
+    )
+    expect(emergencyRule).toContain(
+      'Sudden severe or intense eye pain, even before another feature is known, including with a red eye, blurred vision, halos, nausea, or vomiting.',
+    )
+    const sameDayRule = triageText.slice(
+      triageText.indexOf('### Prompt same-day eye care'),
+      triageText.indexOf('### Arrange a prompt eye exam'),
+    )
+    expect(sameDayRule).toContain(
+      'A significant direct blow or blunt impact to the eye, even when initial pain and vision seem normal',
+    )
     expect(triageText).toContain('## Prerequisite First Aid')
     expect(triageText.indexOf('## Prerequisite First Aid')).toBeLessThan(
       triageText.indexOf('## Decision Order'),
@@ -395,6 +409,15 @@ describe('assistant skill assets', () => {
     expect(promptExamRule).toContain(
       'when a headache is persistent, recurring, worsening, function-limiting, or present away from near work',
     )
+    expect(promptExamRule).toContain(
+      'unless every condition in `Brief self-care trial is reasonable` is known to be met',
+    )
+    expect(promptExamRule).toContain(
+      'missing eligibility facts do not default to self-care',
+    )
+    expect(promptExamRule).not.toContain(
+      'Use a lower threshold for prompt clinician input',
+    )
     expect(promptExamRule).not.toContain(' or medical eye visit')
     expect(triageText).toContain(
       'This may include a mild headache confined to near work that improves with rest.',
@@ -440,8 +463,12 @@ describe('assistant skill assets', () => {
       'For asymptomatic general vision or prevention without that risk or direction, use a routine comprehensive eye or vision exam.',
     )
     expect(examTypeResolver).toContain(
-      'Add a contact-lens-fit review when the user currently wears contacts.',
+      'For an active-symptom medical eye visit, mention current contact-lens wear in the booking reason but do not append a separate fit-review type.',
     )
+    expect(examTypeResolver).toContain(
+      'current contact-lens wear resolves to a routine comprehensive eye or vision exam with contact-lens evaluation as the single requested service.',
+    )
+    expect(examTypeResolver).not.toContain('Add a contact-lens-fit review')
     expect(examTypeResolver).not.toContain('fit or prescription is due')
     expect(examTypeResolver).toContain(
       'A past contact prescription by itself does not justify a contact-lens fitting for someone who no longer wears contacts.',

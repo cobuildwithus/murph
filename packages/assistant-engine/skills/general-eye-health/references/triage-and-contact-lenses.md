@@ -21,7 +21,7 @@ Evaluate these outcomes from top to bottom, select exactly one, and stop at the 
 Recommend emergency eye care or an emergency department now when any of these is present:
 
 - Sudden partial or complete vision loss, even if transient; a new field defect, dark curtain, or shadow; new flashes of light; or a sudden increase in or many new floaters. Stable, longstanding occasional floaters do not meet this rule by themselves.
-- Sudden intense eye pain with a red eye and blurred vision, halos, nausea, or vomiting.
+- Sudden severe or intense eye pain, even before another feature is known, including with a red eye, blurred vision, halos, nausea, or vomiting.
 - A vision symptom with sudden facial droop, one-sided weakness or numbness, trouble speaking or understanding, severe unexplained headache, marked dizziness, or loss of balance. Call local emergency services and do not drive.
 - Penetrating or high-velocity injury, a visibly embedded object, a cut or puncture, uncontrolled bleeding, major blunt trauma with reduced vision, or an irregular pupil. Do not rub, press, rinse, or remove an embedded object. Loosely protect the eye from pressure and go now.
 - Corrosive, industrial, or unknown chemical exposure after prerequisite irrigation starts.
@@ -34,7 +34,7 @@ Recommend an optometrist or ophthalmologist immediately or the same day when any
 
 - A contact-lens wearer has pain; redness; light sensitivity; any new vision change; marked tearing; discharge; or irritation or a foreign-body sensation that persists or worsens after lens removal.
 - A painful red eye, new light sensitivity, intense redness, new distortion, sudden double vision without neurologic signs, or blur that does not clear with blinking or removal of surface discharge.
-- Eye pain or reduced vision after trauma, a foreign body that did not rinse free, or persistent symptoms after a mild irritant was thoroughly rinsed.
+- A significant direct blow or blunt impact to the eye, even when initial pain and vision seem normal; eye pain or reduced vision after any trauma; a foreign body that did not rinse free; or persistent symptoms after a mild irritant was thoroughly rinsed.
 - New eye symptoms after eye surgery, an eye injection, or another recent eye procedure; follow the treating team's urgent instructions.
 
 If an eye clinician is unreachable and symptoms are worsening or vision-threatening, use an urgent or emergency service with eye capability.
@@ -43,7 +43,7 @@ If an eye clinician is unreachable and symptoms are worsening or vision-threaten
 
 Arrange the next available eye-care visit when symptoms are persistent, recurring, worsening, one-sided, function-limiting, present away from near work, or not improving after lens removal and basic work changes; when double vision or frequent blur is present; or when a headache is persistent, recurring, worsening, function-limiting, or present away from near work.
 
-Use a lower threshold for prompt clinician input when the user has diabetes, immune suppression, inflammatory disease, recent eye surgery or injection, or prescription eye medicines, without inventing a diagnosis.
+After emergency and same-day outcomes are excluded, choose this prompt-exam outcome for active symptoms in a user with diabetes, immune suppression, inflammatory disease, recent eye surgery or injection, or prescription eye medicines unless every condition in `Brief self-care trial is reasonable` is known to be met. A risk factor alone does not override that fully matched self-care pattern, but missing eligibility facts do not default to self-care.
 
 ### Brief self-care trial is reasonable
 
@@ -70,7 +70,7 @@ As part of selecting `Arrange a prompt eye exam` or `Arrange a routine eye exam`
 3. For asymptomatic general vision or prevention without that risk or direction, use a routine comprehensive eye or vision exam.
 4. If the known facts do not establish one type, do not select an exam outcome yet; use `Ask one decision-changing question`.
 
-Add a contact-lens-fit review when the user currently wears contacts. A past contact prescription by itself does not justify a contact-lens fitting for someone who no longer wears contacts. Do not select dilation or another procedure unless it is already directed.
+For an active-symptom medical eye visit, mention current contact-lens wear in the booking reason but do not append a separate fit-review type. For the asymptomatic routine pathway, current contact-lens wear resolves to a routine comprehensive eye or vision exam with contact-lens evaluation as the single requested service. A past contact prescription by itself does not justify a contact-lens fitting for someone who no longer wears contacts. Do not select dilation or another procedure unless it is already directed.
 
 ## Contact-Lens Action Rules
 
@@ -99,4 +99,5 @@ Add a contact-lens-fit review when the user currently wears contacts. A past con
 - [National Eye Institute — Types of Glaucoma](https://www.nei.nih.gov/eye-health-information/eye-conditions-and-diseases/glaucoma/types-glaucoma)
 - [CDC — Signs and Symptoms of Stroke](https://www.cdc.gov/stroke/signs-symptoms/index.html)
 - [MedlinePlus — Eye Emergencies](https://medlineplus.gov/ency/article/000054.htm)
+- [MedlinePlus — Eye Pain](https://medlineplus.gov/ency/article/003032.htm)
 - [FDA — What You Should Know about Eye Drops](https://www.fda.gov/drugs/buying-using-medicine-safely/what-you-should-know-about-eye-drops)
