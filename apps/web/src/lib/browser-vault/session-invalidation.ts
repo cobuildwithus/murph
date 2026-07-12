@@ -6,6 +6,10 @@ const BROWSER_VAULT_SESSION_INVALIDATION_EVENT =
   "murph:browser-vault-session-invalidation";
 const BROWSER_VAULT_SESSION_INVALIDATION_MESSAGE = "invalidate";
 
+export type BrowserVaultSessionInvalidationSource =
+  | "same-document"
+  | "cross-document";
+
 /**
  * Tell this document and other same-origin tabs that the app-session cookie was
  * revoked or replaced. The signal carries no member, session, or health data.
@@ -23,16 +27,16 @@ export function publishBrowserVaultSessionInvalidation(): void {
 }
 
 export function subscribeBrowserVaultSessionInvalidation(
-  onInvalidate: () => void,
+  onInvalidate: (source: BrowserVaultSessionInvalidationSource) => void,
 ): () => void {
   if (typeof window === "undefined") {
     return () => undefined;
   }
 
-  const onDocumentInvalidation = () => onInvalidate();
+  const onDocumentInvalidation = () => onInvalidate("same-document");
   const onCrossDocumentInvalidation = (event: MessageEvent<unknown>) => {
     if (event.data === BROWSER_VAULT_SESSION_INVALIDATION_MESSAGE) {
-      onInvalidate();
+      onInvalidate("cross-document");
     }
   };
   const channel = openBrowserVaultSessionInvalidationChannel();

@@ -45,7 +45,11 @@ export function LandingBrowserVaultWarm() {
         return;
       }
       void warmStore.startBrowserVaultWarmLoad().then((outcome) => {
-        if (!cancelled && outcome.status === "unauthorized") {
+        if (
+          !cancelled
+          && outcome.status === "unauthorized"
+          && outcome.httpStatus === 401
+        ) {
           navigateHostedAuthRedirect("/");
         }
       });

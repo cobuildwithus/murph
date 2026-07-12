@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   publishBrowserVaultSessionInvalidation: vi.fn(),
+  reloadCurrentHostedAuthDocument: vi.fn(),
   requestHostedOnboardingJson: vi.fn(),
   waitForRetryDelay: vi.fn(),
 }));
@@ -9,6 +10,10 @@ const mocks = vi.hoisted(() => ({
 vi.mock("@/src/lib/browser-vault/session-invalidation", () => ({
   publishBrowserVaultSessionInvalidation:
     mocks.publishBrowserVaultSessionInvalidation,
+}));
+
+vi.mock("@/src/components/hosted-onboarding/hosted-auth-navigation", () => ({
+  reloadCurrentHostedAuthDocument: mocks.reloadCurrentHostedAuthDocument,
 }));
 
 vi.mock("@/src/components/hosted-onboarding/client-api", () => ({
@@ -108,6 +113,7 @@ describe("hosted phone auth support", () => {
 
     expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledTimes(2);
     expect(mocks.requestHostedOnboardingJson).toHaveBeenNthCalledWith(1, {
+      onSuccessfulResponseError: mocks.reloadCurrentHostedAuthDocument,
       onSuccessfulResponseHeaders: mocks.publishBrowserVaultSessionInvalidation,
       payload: {
         authIntent: {
@@ -118,6 +124,7 @@ describe("hosted phone auth support", () => {
       url: "/api/hosted-onboarding/privy/complete",
     });
     expect(mocks.requestHostedOnboardingJson).toHaveBeenNthCalledWith(2, {
+      onSuccessfulResponseError: mocks.reloadCurrentHostedAuthDocument,
       onSuccessfulResponseHeaders: mocks.publishBrowserVaultSessionInvalidation,
       payload: {
         authIntent: {

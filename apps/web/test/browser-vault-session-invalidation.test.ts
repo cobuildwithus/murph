@@ -48,7 +48,7 @@ test("cross-tab app-session invalidation reaches the browser-vault subscriber", 
   const otherTab = new FakeBroadcastChannel(subscriber?.name ?? "missing");
   otherTab.postMessage("invalidate");
 
-  expect(onInvalidate).toHaveBeenCalledTimes(1);
+  expect(onInvalidate).toHaveBeenCalledWith("cross-document");
 
   unsubscribe();
   otherTab.close();
@@ -64,7 +64,7 @@ test("app-session invalidation publishes only the data-free cross-tab token", ()
   publishBrowserVaultSessionInvalidation();
 
   expect(FakeBroadcastChannel.postedMessages).toEqual(["invalidate"]);
-  expect(onInvalidate).toHaveBeenCalled();
+  expect(onInvalidate).toHaveBeenCalledWith("same-document");
 
   unsubscribe();
 });

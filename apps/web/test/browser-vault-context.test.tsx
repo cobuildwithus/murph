@@ -14,16 +14,17 @@ import { renderClientComponent } from "./render-client-component";
 
 const mocks = vi.hoisted(() => {
   const sessionInvalidation = {
-    listeners: new Set<() => void>(),
+    listeners: new Set<(source?: "same-document" | "cross-document") => void>(),
   };
 
   return {
     decryptHostedStoragePayload: vi.fn(),
     generateHostedUserRecipientKeyPair: vi.fn(),
     navigateHostedAuthRedirect: vi.fn(),
+    reloadCurrentHostedAuthDocument: vi.fn(),
     publishBrowserVaultSessionInvalidation: vi.fn(() => {
       for (const listener of [...sessionInvalidation.listeners]) {
-        listener();
+        listener("same-document");
       }
     }),
     sessionInvalidation,
@@ -44,6 +45,7 @@ vi.mock("next/navigation", () => ({
 
 vi.mock("@/src/components/hosted-onboarding/hosted-auth-navigation", () => ({
   navigateHostedAuthRedirect: mocks.navigateHostedAuthRedirect,
+  reloadCurrentHostedAuthDocument: mocks.reloadCurrentHostedAuthDocument,
 }));
 
 vi.mock("@murphai/runtime-state", async () => {
@@ -87,6 +89,7 @@ beforeEach(() => {
   resetBrowserVaultWarmStateForTests();
   mocks.sessionInvalidation.listeners.clear();
   mocks.navigateHostedAuthRedirect.mockClear();
+  mocks.reloadCurrentHostedAuthDocument.mockClear();
   mocks.publishBrowserVaultSessionInvalidation.mockClear();
   mocks.usePathname.mockReset();
   mocks.usePathname.mockReturnValue("/home");
@@ -433,7 +436,7 @@ test("browser-vault provider clears a fresh ready client when window focus finds
     .mockResolvedValueOnce({
       json: async () => ({ error: "Unauthorized" }),
       ok: false,
-      status: 403,
+      status: 401,
     } as Response);
 
   installBrowserVaultCryptoMocks();
@@ -453,6 +456,45 @@ test("browser-vault provider clears a fresh ready client when window focus finds
   assert.equal(fetchMock.mock.calls.length, 2);
   assert.equal(getBrowserVaultReadySnapshot(), null);
   assert.deepEqual(mocks.navigateHostedAuthRedirect.mock.calls, [["/"]]);
+
+  await rendered.cleanup();
+});
+
+test("browser-vault provider keeps access-denied recovery pages mounted without redirecting", async () => {
+  const ref = createReplicaRef();
+  const fetchMock = vi.fn()
+    .mockResolvedValueOnce(jsonResponse({
+      encryptedReplica: createReplicaEnvelope(),
+      replicaAad: createReplicaAad(),
+      replicaKeyEnvelope: createReplicaKeyEnvelope(),
+      replicaRef: ref,
+      state: "ready",
+    }))
+    .mockResolvedValueOnce(new Response(JSON.stringify({
+      error: {
+        message: "Restore account access to continue.",
+      },
+    }), { status: 403 }));
+
+  installBrowserVaultCryptoMocks();
+  vi.stubGlobal("fetch", fetchMock);
+
+  const rendered = await renderClientComponent(
+    createAuthenticatedBrowserVaultElement(createElement(BrowserVaultStatusProbe)),
+    { requireButton: false },
+  );
+
+  await waitForText(rendered.container, `ready:${ref.dataVersion}`);
+  await act(async () => {
+    rendered.window.dispatchEvent(new rendered.window.Event("focus"));
+  });
+  await waitForText(
+    rendered.container,
+    "error:Your dashboard session expired. Refresh and try again.",
+  );
+
+  assert.equal(getBrowserVaultReadySnapshot(), null);
+  assert.equal(mocks.navigateHostedAuthRedirect.mock.calls.length, 0);
 
   await rendered.cleanup();
 });
@@ -529,6 +571,41 @@ test("render-to-subscription invalidation cannot preserve member A after revalid
   await rendered.cleanup();
 });
 
+test("an invalidation before provider adoption makes an already-resolved ready outcome uncommittable", async () => {
+  const response = createDeferred<Response>();
+  const fetchMock = vi.fn(() => response.promise);
+
+  installBrowserVaultCryptoMocks();
+  vi.stubGlobal("fetch", fetchMock);
+
+  const landingLoad = startBrowserVaultWarmLoad();
+  void landingLoad.then(() => {
+    mocks.publishBrowserVaultSessionInvalidation();
+  });
+
+  const rendered = await renderClientComponent(
+    createAuthenticatedBrowserVaultElement(createElement(BrowserVaultStatusProbe)),
+    { requireButton: false },
+  );
+
+  response.resolve(jsonResponse({
+    encryptedReplica: createReplicaEnvelope(),
+    replicaAad: createReplicaAad(),
+    replicaKeyEnvelope: createReplicaKeyEnvelope(),
+    replicaRef: createReplicaRef(),
+    state: "ready",
+  }));
+
+  await landingLoad;
+  await waitForText(rendered.container, "empty:none");
+
+  assert.equal(mocks.publishBrowserVaultSessionInvalidation.mock.calls.length, 1);
+  assert.equal(getBrowserVaultReadySnapshot(), null);
+  assert.equal(rendered.container.textContent?.startsWith("ready:"), false);
+
+  await rendered.cleanup();
+});
+
 test("malformed completion JSON after replacement headers clears the cached and live member A client", async () => {
   const ref = createReplicaRef();
   const fetchMock = vi.fn()
@@ -560,6 +637,7 @@ test("malformed completion JSON after replacement headers clears the cached and 
   });
 
   assert.equal(mocks.publishBrowserVaultSessionInvalidation.mock.calls.length, 1);
+  assert.equal(mocks.reloadCurrentHostedAuthDocument.mock.calls.length, 1);
   assert.equal(rendered.container.textContent, "empty:none");
   assert.equal(getBrowserVaultReadySnapshot(), null);
 
@@ -603,6 +681,7 @@ test("a completion body-read failure after replacement headers clears the cached
   });
 
   assert.equal(mocks.publishBrowserVaultSessionInvalidation.mock.calls.length, 1);
+  assert.equal(mocks.reloadCurrentHostedAuthDocument.mock.calls.length, 1);
   assert.equal(rendered.container.textContent, "empty:none");
   assert.equal(getBrowserVaultReadySnapshot(), null);
 
@@ -641,6 +720,7 @@ test("a nonreplacement completion failure preserves the cached and live member A
   });
 
   assert.equal(mocks.publishBrowserVaultSessionInvalidation.mock.calls.length, 0);
+  assert.equal(mocks.reloadCurrentHostedAuthDocument.mock.calls.length, 0);
   assert.equal(rendered.container.textContent, `ready:${ref.dataVersion}`);
   assert.equal(getBrowserVaultReadySnapshot(), cachedSnapshot);
 

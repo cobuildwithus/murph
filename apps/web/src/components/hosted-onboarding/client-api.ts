@@ -64,6 +64,7 @@ export async function requestHostedOnboardingJson<T>(input: {
   headers?: Record<string, string>;
   keepalive?: boolean;
   method?: "DELETE" | "GET" | "PATCH" | "POST";
+  onSuccessfulResponseError?: () => void;
   onSuccessfulResponseHeaders?: () => void;
   payload?: Record<string, unknown>;
   url: string;
@@ -91,26 +92,33 @@ export async function requestHostedOnboardingJson<T>(input: {
     input.onSuccessfulResponseHeaders?.();
   }
 
-  const data = await readOptionalJsonValue(response);
-  const errorPayload = readApiErrorPayload(data);
+  try {
+    const data = await readOptionalJsonValue(response);
+    const errorPayload = readApiErrorPayload(data);
 
-  if (!response.ok || errorPayload) {
-    throw new HostedOnboardingApiError({
-      code: errorPayload?.code ?? null,
-      details: errorPayload?.details ?? null,
-      message: errorPayload?.message ?? "Something went wrong. Try again.",
-      retryable: errorPayload?.retryable === true,
-    });
+    if (!response.ok || errorPayload) {
+      throw new HostedOnboardingApiError({
+        code: errorPayload?.code ?? null,
+        details: errorPayload?.details ?? null,
+        message: errorPayload?.message ?? "Something went wrong. Try again.",
+        retryable: errorPayload?.retryable === true,
+      });
+    }
+
+    if (data === null || hasApiErrorKey(data)) {
+      throw new HostedOnboardingApiError({
+        code: null,
+        message: "Request returned an unexpected response.",
+      });
+    }
+
+    return data as T;
+  } catch (error) {
+    if (response.ok) {
+      input.onSuccessfulResponseError?.();
+    }
+    throw error;
   }
-
-  if (data === null || hasApiErrorKey(data)) {
-    throw new HostedOnboardingApiError({
-      code: null,
-      message: "Request returned an unexpected response.",
-    });
-  }
-
-  return data as T;
 }
 
 export async function requestHostedBillingCheckout(input: {

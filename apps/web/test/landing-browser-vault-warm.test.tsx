@@ -9,11 +9,13 @@ const mocks = vi.hoisted(() => ({
   decryptHostedStoragePayload: vi.fn(),
   generateHostedUserRecipientKeyPair: vi.fn(),
   navigateHostedAuthRedirect: vi.fn(),
+  reloadCurrentHostedAuthDocument: vi.fn(),
   unwrapHostedBrowserSessionKey: vi.fn(),
 }));
 
 vi.mock("@/src/components/hosted-onboarding/hosted-auth-navigation", () => ({
   navigateHostedAuthRedirect: mocks.navigateHostedAuthRedirect,
+  reloadCurrentHostedAuthDocument: mocks.reloadCurrentHostedAuthDocument,
 }));
 
 vi.mock("@murphai/runtime-state", async () => {
@@ -31,6 +33,7 @@ vi.mock("@murphai/runtime-state", async () => {
 import { LandingBrowserVaultWarm } from "@/src/components/homepage/landing-browser-vault-warm";
 import { AuthProvider } from "@/src/components/hosted-onboarding/auth-dialog-provider";
 import {
+  getBrowserVaultReadySnapshot,
   peekBrowserVaultInFlightLoad,
   resetBrowserVaultWarmStateForTests,
 } from "@/src/lib/browser-vault/warm-store";
@@ -38,6 +41,7 @@ import {
 beforeEach(() => {
   resetBrowserVaultWarmStateForTests();
   mocks.navigateHostedAuthRedirect.mockClear();
+  mocks.reloadCurrentHostedAuthDocument.mockClear();
   mocks.generateHostedUserRecipientKeyPair.mockResolvedValue({
     privateKeyJwk: { kty: "EC" },
     publicKeyJwk: { kty: "EC" },
@@ -114,6 +118,27 @@ test("an authenticated landing visitor reloads auth when the warm session is una
   );
 
   assert.deepEqual(mocks.navigateHostedAuthRedirect.mock.calls, [["/"]]);
+
+  await rendered.cleanup();
+});
+
+test("an authenticated landing visitor does not reload for consent or access denial", async () => {
+  const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+    error: { message: "Restore account access to continue." },
+  }), { status: 403 }));
+  vi.stubGlobal("fetch", fetchMock);
+
+  const rendered = await renderClientComponent(
+    createElement(AuthProvider, { authenticated: true }, createElement(LandingBrowserVaultWarm)),
+    { requireButton: false },
+  );
+
+  await waitForCondition(() => fetchMock.mock.calls.length === 1, "landing denied fetch");
+  await flush();
+
+  assert.equal(mocks.navigateHostedAuthRedirect.mock.calls.length, 0);
+  assert.equal(mocks.reloadCurrentHostedAuthDocument.mock.calls.length, 0);
+  assert.equal(getBrowserVaultReadySnapshot(), null);
 
   await rendered.cleanup();
 });

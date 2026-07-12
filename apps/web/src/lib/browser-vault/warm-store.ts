@@ -30,7 +30,7 @@ export interface BrowserVaultReadySnapshot {
 export type BrowserVaultWarmLoadOutcome =
   | { status: "ready"; snapshot: BrowserVaultReadySnapshot }
   | { status: "empty"; metadata: BrowserVaultSessionMetadata }
-  | { status: "unauthorized" }
+  | { status: "unauthorized"; httpStatus: 401 | 403; message: string }
   | { status: "error"; message: string }
   | { status: "superseded" };
 
@@ -115,7 +115,11 @@ export function startBrowserVaultWarmLoad(): Promise<BrowserVaultWarmLoadOutcome
       }
       if (isBrowserVaultUnauthorizedError(loadError)) {
         readySnapshot = null;
-        return { status: "unauthorized" };
+        return {
+          status: "unauthorized",
+          httpStatus: loadError.status,
+          message: normalizeBrowserVaultError(loadError),
+        };
       }
       // A failed load never discards the existing ready snapshot; callers keep
       // stale data instead of dropping to an error-only screen.

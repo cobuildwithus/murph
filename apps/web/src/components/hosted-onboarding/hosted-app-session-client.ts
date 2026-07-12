@@ -4,15 +4,16 @@ import { clearBrowserVaultWarmState } from "@/src/lib/browser-vault/warm-store";
 import { publishBrowserVaultSessionInvalidation } from "@/src/lib/browser-vault/session-invalidation";
 
 import { requestHostedOnboardingJson } from "./client-api";
+import { reloadCurrentHostedAuthDocument } from "./hosted-auth-navigation";
 
 export async function logoutHostedAppSession(input: {
   logoutPrivy?: () => Promise<void> | void;
 } = {}): Promise<void> {
   clearBrowserVaultWarmState();
-  publishBrowserVaultSessionInvalidation();
 
   await requestHostedOnboardingJson<{ ok: true }>({
     method: "POST",
+    onSuccessfulResponseError: reloadCurrentHostedAuthDocument,
     onSuccessfulResponseHeaders: publishBrowserVaultSessionInvalidation,
     url: "/api/hosted-onboarding/session/logout",
   });

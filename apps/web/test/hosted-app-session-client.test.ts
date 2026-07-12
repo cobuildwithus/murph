@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   clearBrowserVaultWarmState: vi.fn(),
   publishBrowserVaultSessionInvalidation: vi.fn(),
+  reloadCurrentHostedAuthDocument: vi.fn(),
   requestHostedOnboardingJson: vi.fn(),
 }));
 
@@ -17,6 +18,10 @@ vi.mock("@/src/lib/browser-vault/session-invalidation", () => ({
 
 vi.mock("@/src/components/hosted-onboarding/client-api", () => ({
   requestHostedOnboardingJson: mocks.requestHostedOnboardingJson,
+}));
+
+vi.mock("@/src/components/hosted-onboarding/hosted-auth-navigation", () => ({
+  reloadCurrentHostedAuthDocument: mocks.reloadCurrentHostedAuthDocument,
 }));
 
 describe("logoutHostedAppSession", () => {
@@ -46,9 +51,10 @@ describe("logoutHostedAppSession", () => {
 
     await logoutHostedAppSession();
 
-    expect(events).toEqual(["clear", "publish", "logout", "publish"]);
+    expect(events).toEqual(["clear", "logout", "publish"]);
     expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledWith({
       method: "POST",
+      onSuccessfulResponseError: mocks.reloadCurrentHostedAuthDocument,
       onSuccessfulResponseHeaders: mocks.publishBrowserVaultSessionInvalidation,
       url: "/api/hosted-onboarding/session/logout",
     });
@@ -56,9 +62,11 @@ describe("logoutHostedAppSession", () => {
 
   it("publishes again when successful logout headers precede a body-read failure", async () => {
     mocks.requestHostedOnboardingJson.mockImplementationOnce(async (input: {
+      onSuccessfulResponseError?: () => void;
       onSuccessfulResponseHeaders?: () => void;
     }) => {
       input.onSuccessfulResponseHeaders?.();
+      input.onSuccessfulResponseError?.();
       throw new Error("response body unavailable");
     });
 
@@ -68,6 +76,7 @@ describe("logoutHostedAppSession", () => {
 
     await expect(logoutHostedAppSession()).rejects.toThrow("response body unavailable");
     expect(mocks.clearBrowserVaultWarmState).toHaveBeenCalledTimes(1);
-    expect(mocks.publishBrowserVaultSessionInvalidation).toHaveBeenCalledTimes(2);
+    expect(mocks.publishBrowserVaultSessionInvalidation).toHaveBeenCalledTimes(1);
+    expect(mocks.reloadCurrentHostedAuthDocument).toHaveBeenCalledTimes(1);
   });
 });

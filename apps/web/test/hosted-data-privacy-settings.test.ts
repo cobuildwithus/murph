@@ -28,6 +28,7 @@ const mocks = vi.hoisted(() => ({
   ),
   authorize: vi.fn(),
   publishBrowserVaultSessionInvalidation: vi.fn(),
+  reloadCurrentHostedAuthDocument: vi.fn(),
   requestHostedOnboardingJson: vi.fn(),
   loadBrowserVaultReplica: vi.fn(),
   useStateValues: [] as unknown[],
@@ -62,6 +63,10 @@ vi.mock("@/src/components/hosted-onboarding/client-api", async (importOriginal) 
 vi.mock("@/src/lib/browser-vault/session-invalidation", () => ({
   publishBrowserVaultSessionInvalidation:
     mocks.publishBrowserVaultSessionInvalidation,
+}));
+
+vi.mock("@/src/components/hosted-onboarding/hosted-auth-navigation", () => ({
+  reloadCurrentHostedAuthDocument: mocks.reloadCurrentHostedAuthDocument,
 }));
 
 vi.mock("@/src/components/sensitive-actions/use-sensitive-action-authorization", () => ({
@@ -352,6 +357,7 @@ describe("HostedDataPrivacySettings", () => {
     expect(mocks.authorize).toHaveBeenCalledWith("account.delete");
     expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledWith({
       method: "POST",
+      onSuccessfulResponseError: mocks.reloadCurrentHostedAuthDocument,
       onSuccessfulResponseHeaders: mocks.publishBrowserVaultSessionInvalidation,
       payload: {
         authorization: {
@@ -367,9 +373,11 @@ describe("HostedDataPrivacySettings", () => {
   test("publishes deletion invalidation before a successful response body can fail", async () => {
     mockHostedDataPrivacyDeleteFlowState();
     mocks.requestHostedOnboardingJson.mockImplementationOnce(async (input: {
+      onSuccessfulResponseError?: () => void;
       onSuccessfulResponseHeaders?: () => void;
     }) => {
       input.onSuccessfulResponseHeaders?.();
+      input.onSuccessfulResponseError?.();
       throw new Error("response body unavailable");
     });
 
@@ -394,6 +402,7 @@ describe("HostedDataPrivacySettings", () => {
     await clickButton(container, "Delete account", window);
 
     expect(mocks.publishBrowserVaultSessionInvalidation).toHaveBeenCalledTimes(1);
+    expect(mocks.reloadCurrentHostedAuthDocument).toHaveBeenCalledTimes(1);
   });
 
   test("does not submit deletion until the exact confirmation phrase is typed", async () => {

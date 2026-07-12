@@ -125,6 +125,7 @@ function AuthenticatedBrowserVaultProvider({ children }: { children: ReactNode }
     initialSnapshot?.ref ?? null,
   );
   const clientRef = useRef<BrowserVaultQueryClient | null>(initialSnapshot?.client ?? null);
+  const authorityGenerationRef = useRef(0);
   const mountedRef = useRef(false);
   const providerStartedLoadRef = useRef(false);
   const lastRevalidatedPathnameRef = useRef(pathname);
@@ -154,6 +155,7 @@ function AuthenticatedBrowserVaultProvider({ children }: { children: ReactNode }
   }, []);
 
   const clearDecryptedClient = useCallback(() => {
+    authorityGenerationRef.current += 1;
     clearBrowserVaultWarmState();
     providerStartedLoadRef.current = false;
     commitEmpty(EMPTY_BROWSER_VAULT_SESSION_METADATA);
@@ -170,7 +172,12 @@ function AuthenticatedBrowserVaultProvider({ children }: { children: ReactNode }
       }
       if (outcome.status === "unauthorized") {
         clearDecryptedClient();
-        navigateHostedAuthRedirect("/");
+        if (outcome.httpStatus === 401) {
+          navigateHostedAuthRedirect("/");
+          return;
+        }
+        setStatus("error");
+        setError(outcome.message);
         return;
       }
       if (outcome.status === "empty") {
@@ -192,6 +199,7 @@ function AuthenticatedBrowserVaultProvider({ children }: { children: ReactNode }
   const runProviderLoad = useCallback(
     async (options: { background?: boolean } = {}) => {
       const background = options.background ?? false;
+      const authorityGeneration = authorityGenerationRef.current;
       const existing = peekBrowserVaultInFlightLoad();
       if (!existing) {
         // This provider originated the load, so it owns aborting it on unmount.
@@ -203,7 +211,10 @@ function AuthenticatedBrowserVaultProvider({ children }: { children: ReactNode }
       }
 
       const outcome = await (existing ?? startBrowserVaultWarmLoad());
-      if (!mountedRef.current) {
+      if (
+        !mountedRef.current
+        || authorityGeneration !== authorityGenerationRef.current
+      ) {
         return;
       }
 
