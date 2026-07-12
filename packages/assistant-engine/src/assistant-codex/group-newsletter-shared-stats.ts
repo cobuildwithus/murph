@@ -8,6 +8,7 @@ import {
   type HostedVaultShareDailyMetricData,
   type HostedVaultShareDeliveryRecord,
   type HostedVaultShareHeartRateZoneDayData,
+  type HostedVaultShareSleepTimesData,
   type HostedVaultShareWorkoutDayData,
   type SharedGroupMemberView,
 } from '@murphai/hosted-execution/vault-share'
@@ -135,6 +136,18 @@ function appendDailySampleSummaries(
     )
     return
   }
+  if (isSleepTimesData(data)) {
+    const durationMinutes = diffMinutes(data.sleepStartAt, data.sleepEndAt)
+    if (durationMinutes !== null) {
+      summaries.push(dailySummary({
+        date: data.date,
+        stream: 'sleep-duration-minutes',
+        sumValue: durationMinutes,
+        unit: 'minutes',
+      }))
+    }
+    return
+  }
   if (isHeartRateZoneDayData(data)) {
     for (const zone of data.zones) {
       const stream = typeof zone.zone === 'number'
@@ -171,6 +184,15 @@ function dailySummary(input: {
   }
 }
 
+function diffMinutes(start: string, end: string): number | null {
+  const startMs = Date.parse(start)
+  const endMs = Date.parse(end)
+  if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs <= startMs) {
+    return null
+  }
+  return (endMs - startMs) / 60_000
+}
+
 function compareDailySampleSummaries(
   left: OverviewWeeklySampleSummary,
   right: OverviewWeeklySampleSummary,
@@ -190,6 +212,12 @@ function isHeartRateZoneDayData(
   data: HostedVaultShareDeliveryRecord['data'],
 ): data is HostedVaultShareHeartRateZoneDayData {
   return 'zones' in data
+}
+
+function isSleepTimesData(
+  data: HostedVaultShareDeliveryRecord['data'],
+): data is HostedVaultShareSleepTimesData {
+  return 'sleepStartAt' in data
 }
 
 function isWorkoutDayData(

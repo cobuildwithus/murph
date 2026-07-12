@@ -37,22 +37,8 @@ describe('group newsletter shared stats', () => {
                 deliveryEntry({
                   data: {
                     date: '2026-07-06',
-                    sleepEndAt: '2026-07-07T07:51:00.000Z',
+                    sleepEndAt: '2026-07-07T06:00:00.000Z',
                     sleepStartAt: '2026-07-06T22:00:00.000Z',
-                  },
-                  occurredAt: '2026-07-06T00:00:00.000Z',
-                  recordKey: '2026-07-06',
-                }),
-              ],
-            }),
-            'sleep-duration-days.v0': projection('sleep-duration-days.v0', {
-              member_a: [
-                deliveryEntry({
-                  data: {
-                    date: '2026-07-06',
-                    metricKey: 'total-sleep-minutes',
-                    unit: 'minutes',
-                    value: 477,
                   },
                   occurredAt: '2026-07-06T00:00:00.000Z',
                   recordKey: '2026-07-06',
@@ -99,8 +85,8 @@ describe('group newsletter shared stats', () => {
       expect(members[0]?.dailySampleSummaries).toEqual(expect.arrayContaining([
         expect.objectContaining({
           date: '2026-07-06',
-          stream: 'total-sleep-minutes',
-          sumValue: 477,
+          stream: 'sleep-duration-minutes',
+          sumValue: 480,
           unit: 'minutes',
         }),
         expect.objectContaining({
@@ -110,25 +96,12 @@ describe('group newsletter shared stats', () => {
           unit: 'count',
         }),
       ]))
-      expect(
-        members[0]?.dailySampleSummaries.some(
-          (summary) => summary.stream === 'sleep-duration-minutes',
-        ),
-      ).toBe(false)
-
       const stats = buildGroupNewsletterSharedWeeklyStats({
         dailySampleSummaries: members[0]?.dailySampleSummaries ?? [],
         referenceDate: '2026-07-06T12:00:00.000Z',
         timeZone: 'UTC',
       })
       expect(stats).toEqual(expect.arrayContaining([
-        {
-          currentWeekAvg: 477,
-          deltaPercent: null,
-          previousWeekAvg: null,
-          stream: 'total-sleep-minutes',
-          unit: 'minutes',
-        },
         {
           currentWeekAvg: 12_000,
           deltaPercent: 50,
