@@ -7467,7 +7467,10 @@ describe('assistant codex runtime', () => {
     )
   })
 
-  it('keeps process-exit precedence when abort follows exit but precedes close', async () => {
+  it.each([
+    { settlement: 'stdin EPIPE' },
+    { settlement: 'interrupt cleanup timeout' },
+  ])('keeps process-exit precedence through $settlement when abort follows exit', async ({ settlement }) => {
     const codexHome = await createTempDir('assistant-codex-exit-abort-precedence-home-')
     const workingDirectory = await createTempDir('assistant-codex-exit-abort-precedence-work-')
     const controller = new AbortController()
@@ -7546,16 +7549,34 @@ describe('assistant codex runtime', () => {
 
     await firstTurnStarted.promise
     const exitedChild = requireMockChildProcess(spawnedChildren[0] ?? null)
-    exitedChild.emit('exit', 1, null)
-    controller.abort()
-    exitedChild.emit('close', 1, null)
+    const usesFakeTimers = settlement === 'interrupt cleanup timeout'
+    if (usesFakeTimers) {
+      vi.useFakeTimers()
+    }
+    try {
+      exitedChild.emit('exit', 1, null)
+      controller.abort()
+      if (settlement === 'stdin EPIPE') {
+        exitedChild.stdin.emit(
+          'error',
+          createErrnoException('EPIPE', 'write EPIPE'),
+        )
+      } else {
+        await vi.advanceTimersByTimeAsync(15_000)
+      }
+      exitedChild.emit('close', 1, null)
 
-    await expect(failedTurn).rejects.toMatchObject({
-      context: {
-        codexExitCode: 1,
-        codexFailureStage: 'process_exit',
-      },
-    })
+      await expect(failedTurn).rejects.toMatchObject({
+        context: {
+          codexExitCode: 1,
+          codexFailureStage: 'process_exit',
+        },
+      })
+    } finally {
+      if (usesFakeTimers) {
+        vi.useRealTimers()
+      }
+    }
     if (process.platform === 'win32') {
       expect(exitedChild.kill).toHaveBeenCalledWith('SIGKILL')
     } else {

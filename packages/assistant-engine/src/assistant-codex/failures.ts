@@ -307,7 +307,7 @@ export function buildCodexFailure(input: {
 }
 
 export function buildCodexProcessExitError(input: {
-  abortRequested: boolean
+  abortOwnsTermination: boolean
   code: number | null
   diagnostics?: CodexProcessExitDiagnostics
   errorInfo: CodexStructuredErrorInfo | null
@@ -317,25 +317,16 @@ export function buildCodexProcessExitError(input: {
   signal: NodeJS.Signals | null
   stderr: string
 }): VaultCliError {
-  if (input.abortRequested || input.signal === 'SIGINT') {
+  if (input.abortOwnsTermination) {
     return buildCodexInterruptedError({
       providerActionCount: input.providerActionCount,
       codexThreadId: input.codexThreadId,
-      diagnostics: {
-        ...input.diagnostics,
-        abortRequested: input.abortRequested,
-      },
+      diagnostics: input.diagnostics,
       signal: input.signal,
     })
   }
 
-  return buildCodexFailure({
-    ...input,
-    diagnostics: {
-      ...input.diagnostics,
-      abortRequested: input.abortRequested,
-    },
-  })
+  return buildCodexFailure(input)
 }
 
 export function buildCodexStdinFailureFallback(input: {

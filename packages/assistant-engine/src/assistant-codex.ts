@@ -814,8 +814,9 @@ class CodexAppServerProcess {
     return this.endReason ?? 'previous-process-unhealthy'
   }
 
-  noteTurnAbort(): void {
+  noteTurnAbort(): boolean {
     this.endReason ??= 'previous-turn-abort'
+    return this.endReason === 'previous-turn-abort'
   }
 
   get hasInFlightTurn(): boolean {
@@ -1083,7 +1084,7 @@ class CodexAppServerProcess {
       this.stdinFailure ??
       this.activeTurn?.onStdinError(error) ??
       buildCodexProcessExitError({
-        abortRequested: false,
+        abortOwnsTermination: false,
         code: this.child.exitCode,
         diagnostics: this.buildStartupProcessDiagnostics(),
         errorInfo: null,
@@ -1272,7 +1273,7 @@ class CodexAppServerProcess {
     }
 
     const failure = buildCodexProcessExitError({
-      abortRequested: false,
+      abortOwnsTermination: false,
       code,
       diagnostics: this.buildStartupProcessDiagnostics(),
       errorInfo: null,
@@ -1317,7 +1318,7 @@ class CodexAppServerProcess {
       (this.child.exitCode !== null || this.child.signalCode !== null)
     ) {
       return buildCodexProcessExitError({
-        abortRequested: false,
+        abortOwnsTermination: false,
         code: this.child.exitCode,
         diagnostics: this.buildStartupProcessDiagnostics(),
         errorInfo: null,
@@ -2306,6 +2307,7 @@ async function runCodexAppServerTurnOnProcess(
   let settled = false
   let normalShutdown = false
   let abortRequested = false
+  let abortOwnsTermination = false
   let lifecycleStage = 'spawn_start'
   let terminationSignalSent: NodeJS.Signals | null = null
   let codexThreadId = normalizeNullableString(input.resumeSessionId) ?? null
@@ -2485,6 +2487,22 @@ async function runCodexAppServerTurnOnProcess(
     interruptCleanupTimer = setTimeout(() => {
       interruptCleanupTimer = null
       lifecycleStage = 'interrupt_timeout_cleanup'
+      if (abortRequested && !abortOwnsTermination) {
+        rejectOnce(
+          buildCodexProcessExitError({
+            abortOwnsTermination,
+            code: codexProcess.child.exitCode,
+            diagnostics: buildProcessExitDiagnostics(),
+            errorInfo: lastEventErrorInfo,
+            fallback: lastEventError,
+            providerActionCount,
+            codexThreadId,
+            signal: codexProcess.child.signalCode ?? null,
+            stderr,
+          }),
+        )
+        return
+      }
       normalShutdown = true
       rejectOnce(buildInterruptCleanupTimeoutError())
     }, CODEX_APP_SERVER_INTERRUPT_CLEANUP_TIMEOUT_MS)
@@ -2588,7 +2606,7 @@ async function runCodexAppServerTurnOnProcess(
     const failure =
       stdinFailure ??
       buildCodexProcessExitError({
-        abortRequested,
+        abortOwnsTermination,
         code: codexProcess.child.exitCode,
         diagnostics: buildProcessExitDiagnostics(),
         errorInfo: lastEventErrorInfo,
@@ -2625,7 +2643,7 @@ async function runCodexAppServerTurnOnProcess(
     abortSignal: input.abortSignal,
     onAbort: () => {
       abortRequested = true
-      codexProcess.noteTurnAbort()
+      abortOwnsTermination = codexProcess.noteTurnAbort()
       if (codexThreadId && turnId) {
         codexProcess.sendUntrackedRequest(
           'turn/interrupt',
@@ -3810,9 +3828,7 @@ async function runCodexAppServerTurnOnProcess(
 
       rejectOnce(
         buildCodexProcessExitError({
-          abortRequested:
-            abortRequested &&
-            codexProcess.nextColdStartReason === 'previous-turn-abort',
+          abortOwnsTermination,
           code,
           diagnostics: buildProcessExitDiagnostics(),
           errorInfo: lastEventErrorInfo,
