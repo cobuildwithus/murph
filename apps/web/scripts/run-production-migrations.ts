@@ -1,6 +1,7 @@
 import { spawn, type SpawnOptions } from "node:child_process";
 
 import { verifyVercelProductionDeploymentProtection } from "./resolve-vercel-production-alias-sha";
+import { readHostedAppSessionHmacKey } from "../src/lib/hosted-onboarding/app-session-config";
 
 export const hostedWebProductionMigrationCommand = {
   command: resolvePnpmCommand(),
@@ -50,6 +51,7 @@ export async function runHostedWebProductionMigrationsIfNeeded(
     return "skipped";
   }
 
+  readHostedAppSessionHmacKey(environment);
   console.log("Verifying Vercel deployment protection before strict production cutover.");
   await verifyDeploymentProtection(environment);
   const commandEnvironment = { ...environment };

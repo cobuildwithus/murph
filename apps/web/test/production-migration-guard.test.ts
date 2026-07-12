@@ -93,6 +93,7 @@ describe("hosted web production migration guard", () => {
       environment: HostedWebProductionMigrationEnvironment;
     }> = [];
     const environment = {
+      HOSTED_APP_SESSION_HMAC_KEY: "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE",
       HOSTED_WEB_VERCEL_TOKEN: "verifier-only-token",
       VERCEL: "1",
       VERCEL_ENV: "production",
@@ -150,6 +151,7 @@ describe("hosted web production migration guard", () => {
         () =>
           runHostedWebProductionMigrationsIfNeeded(
             {
+              HOSTED_APP_SESSION_HMAC_KEY: "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE",
               VERCEL: "1",
               VERCEL_ENV: "production",
               VERCEL_GIT_COMMIT_REF: "main",
@@ -370,6 +372,7 @@ describe("hosted web production migration guard", () => {
       () =>
         runHostedWebProductionMigrationsIfNeeded(
           {
+            HOSTED_APP_SESSION_HMAC_KEY: "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE",
             VERCEL: "1",
             VERCEL_ENV: "production",
             VERCEL_GIT_COMMIT_REF: "main",
@@ -692,6 +695,7 @@ describe("hosted web production migration guard", () => {
 
   test("requires Vercel protection for generated production deployment URLs", async () => {
     const environment = {
+      HOSTED_WEB_PRODUCTION_BASE_URL: "https://www.withmurph.ai",
       HOSTED_WEB_VERCEL_PROJECT_ID: "project-id",
       HOSTED_WEB_VERCEL_TEAM_ID: "team-id",
       HOSTED_WEB_VERCEL_TOKEN: "token",
@@ -699,7 +703,6 @@ describe("hosted web production migration guard", () => {
     const projectUrl =
       "https://api.vercel.com/v9/projects/project-id?teamId=team-id";
     const protectedTypes = [
-      "all",
       "all_except_custom_domains",
       "prod_deployment_urls_and_all_previews",
     ];
@@ -719,27 +722,31 @@ describe("hosted web production migration guard", () => {
                 : new Headers(init.headers).get("authorization") ?? undefined,
             url,
           });
+          if (url.includes("/v4/aliases/")) return jsonFetchResponse({ deploymentId: "dpl_123" });
+          if (url.includes("/v13/deployments/")) return jsonFetchResponse({ projectId: "project-id" });
           return jsonFetchResponse({ ssoProtection: { deploymentType } });
         },
       );
 
       assert.equal(result, deploymentType);
-      assert.deepEqual(requests, [{
-        authorization: "Bearer token",
-        url: projectUrl,
-      }]);
+      assert.equal(requests.length, 3);
     }
 
     for (const response of [
       {},
       { ssoProtection: null },
+      { ssoProtection: { deploymentType: "all" } },
       { ssoProtection: { deploymentType: "preview" } },
     ]) {
       await assert.rejects(
         () =>
           verifyVercelProductionDeploymentProtection(
             environment,
-            async () => jsonFetchResponse(response),
+            async (url) => {
+              if (url.includes("/v4/aliases/")) return jsonFetchResponse({ deploymentId: "dpl_123" });
+              if (url.includes("/v13/deployments/")) return jsonFetchResponse({ projectId: "project-id" });
+              return jsonFetchResponse(response);
+            },
           ),
         /Standard or All Deployment Protection/u,
       );

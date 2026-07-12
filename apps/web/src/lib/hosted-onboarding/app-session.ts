@@ -19,6 +19,7 @@ import {
   HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
   lockHostedMemberRow,
 } from "./shared";
+import { readHostedAppSessionHmacKey } from "./app-session-config";
 
 export interface HostedAppSession {
   expiresAt: Date;
@@ -35,7 +36,6 @@ const HOSTED_APP_SESSION_AUTHENTICATOR_VERSION = 2;
 const HOSTED_APP_SESSION_ID_PREFIX = "hws_";
 const HOSTED_APP_SESSION_BEARER_BYTES = 32;
 const HOSTED_APP_SESSION_ID_BYTES = 16;
-const HOSTED_APP_SESSION_HMAC_KEY_BYTES = 32;
 const HOSTED_APP_SESSION_MAX_AGE_SECONDS = 60 * 60 * 24 * 30;
 const HOSTED_APP_SESSION_ROW_LIMIT = 20;
 const SHA256_HEX_PATTERN = /^[0-9a-f]{64}$/u;
@@ -307,27 +307,6 @@ function verifyHostedAppSessionAuthenticator(
     Buffer.from(record.tokenHash, "hex"),
     Buffer.from(expected, "hex"),
   );
-}
-
-function readHostedAppSessionHmacKey(): Buffer {
-  const encoded = process.env.HOSTED_APP_SESSION_HMAC_KEY;
-  if (typeof encoded !== "string" || encoded.length === 0 || encoded !== encoded.trim()) {
-    throw new TypeError(
-      "HOSTED_APP_SESSION_HMAC_KEY must be configured as a canonical 32-byte base64url key.",
-    );
-  }
-
-  const decoded = Buffer.from(encoded, "base64url");
-  if (
-    decoded.byteLength !== HOSTED_APP_SESSION_HMAC_KEY_BYTES
-    || decoded.toString("base64url") !== encoded
-  ) {
-    throw new TypeError(
-      "HOSTED_APP_SESSION_HMAC_KEY must be configured as a canonical 32-byte base64url key.",
-    );
-  }
-
-  return decoded;
 }
 
 async function deleteHostedAppSessionOverflowTx(input: {

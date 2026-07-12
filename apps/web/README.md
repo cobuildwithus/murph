@@ -531,8 +531,9 @@ malformed key fails session issuance, resolution, and revocation closed. Keep
 the key out of Cloudflare Worker and runner environments; no Cloudflare deploy
 is required for this cutover.
 
-Before deploying, enable Vercel Authentication with Standard Protection (or a
-stricter All Deployments scope) for the project. This keeps the custom
+Before deploying, enable Vercel Authentication with Standard Protection (or
+`All Except Custom Domains`) for the project. Do not use `All Deployments`,
+which would make the custom
 production domain public while protecting every generated production URL,
 including URLs for historical deployments that still accept legacy sessions.
 With the secure `HOSTED_WEB_VERCEL_*` operator environment loaded, require this
