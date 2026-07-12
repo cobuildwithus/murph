@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 import {
   buildHostedActionApprovalCycleOwnerKey,
   buildHostedActionApprovalOutcomeEffectId,
+  parseHostedActionApprovalCycleOwnerKey,
+  parseHostedActionApprovalObservation,
   parseHostedActionApprovalRequest,
   parseHostedActionApprovalOutcomeEffectId,
   serializeHostedActionApprovalRequest,
@@ -71,5 +73,38 @@ describe("hosted action approval contracts", () => {
       ownerKey: buildHostedActionApprovalCycleOwnerKey({ approvalId, expiresAt }),
     });
     expect(parseHostedActionApprovalOutcomeEffectId(`${effectId}x`)).toBeNull();
+  });
+
+  it("parses an approval observation only for its exact cycle owner", () => {
+    const approvalId = `haa_${"a".repeat(32)}`;
+    const cycleOwnerKey = buildHostedActionApprovalCycleOwnerKey({
+      approvalId,
+      expiresAt: "2026-06-25T16:15:00.000Z",
+    });
+    expect(parseHostedActionApprovalCycleOwnerKey(cycleOwnerKey)).toEqual({
+      approvalId,
+      expiresAt: "2026-06-25T16:15:00.000Z",
+      ownerKey: cycleOwnerKey,
+    });
+    expect(parseHostedActionApprovalObservation({
+      cycleOwnerKey,
+      result: {
+        approvalGeneration: "b".repeat(64),
+        approvalId,
+        status: "approved",
+      },
+    })).toEqual({
+      approvalGeneration: "b".repeat(64),
+      approvalId,
+      cycleOwnerKey,
+      status: "approved",
+    });
+    expect(() => parseHostedActionApprovalObservation({
+      cycleOwnerKey,
+      result: {
+        approvalId: `haa_${"c".repeat(32)}`,
+        status: "denied",
+      },
+    })).toThrow(/does not match approvalId/u);
   });
 });

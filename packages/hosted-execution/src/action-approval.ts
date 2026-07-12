@@ -64,6 +64,15 @@ export type HostedActionApprovalResult =
       status: "denied" | "expired";
     };
 
+export type HostedActionApprovalObservation = HostedActionApprovalResult & {
+  cycleOwnerKey: string;
+};
+
+export interface HostedActionApprovalObservationEnvelope {
+  cycleOwnerKey: string;
+  result: HostedActionApprovalResult;
+}
+
 export interface HostedActionApprovalConsumeRequest {
   approvalGeneration: string;
   consumerId: string;
@@ -96,6 +105,42 @@ export function buildHostedActionApprovalOutcomeEffectId(input: {
   return `${ownerKey}${ACTION_APPROVAL_OUTCOME_GENERATION_MARKER}${approvalGeneration}`;
 }
 
+export function parseHostedActionApprovalCycleOwnerKey(value: unknown): {
+  approvalId: string;
+  expiresAt: string;
+  ownerKey: string;
+} | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+  if (!value.startsWith(ACTION_APPROVAL_CYCLE_OWNER_PREFIX)) {
+    return null;
+  }
+  const approvalIdStart = ACTION_APPROVAL_CYCLE_OWNER_PREFIX.length;
+  const approvalIdEnd = value.indexOf(":", approvalIdStart);
+  if (approvalIdEnd < 0) {
+    return null;
+  }
+  const approvalId = value.slice(approvalIdStart, approvalIdEnd);
+  const expiresAt = value.slice(approvalIdEnd + 1);
+  if (!isHostedActionApprovalId(approvalId)) {
+    return null;
+  }
+  try {
+    requireIsoDateTime(expiresAt);
+  } catch {
+    return null;
+  }
+  if (buildHostedActionApprovalCycleOwnerKey({ approvalId, expiresAt }) !== value) {
+    return null;
+  }
+  return {
+    approvalId,
+    expiresAt,
+    ownerKey: value,
+  };
+}
+
 export function parseHostedActionApprovalOutcomeEffectId(value: unknown): {
   approvalGeneration: string;
   approvalId: string;
@@ -118,32 +163,13 @@ export function parseHostedActionApprovalOutcomeEffectId(value: unknown): {
   if (!SHA256_HEX_PATTERN.test(approvalGeneration)) {
     return null;
   }
-  if (!ownerKey.startsWith(ACTION_APPROVAL_CYCLE_OWNER_PREFIX)) {
-    return null;
-  }
-  const approvalIdStart = ACTION_APPROVAL_CYCLE_OWNER_PREFIX.length;
-  const approvalIdEnd = ownerKey.indexOf(":", approvalIdStart);
-  if (approvalIdEnd < 0) {
-    return null;
-  }
-  const approvalId = ownerKey.slice(approvalIdStart, approvalIdEnd);
-  const expiresAt = ownerKey.slice(approvalIdEnd + 1);
-  if (!isHostedActionApprovalId(approvalId)) {
-    return null;
-  }
-  try {
-    requireIsoDateTime(expiresAt);
-  } catch {
-    return null;
-  }
-  if (buildHostedActionApprovalCycleOwnerKey({ approvalId, expiresAt }) !== ownerKey) {
+  const cycle = parseHostedActionApprovalCycleOwnerKey(ownerKey);
+  if (!cycle) {
     return null;
   }
   return {
     approvalGeneration,
-    approvalId,
-    expiresAt,
-    ownerKey,
+    ...cycle,
   };
 }
 
@@ -300,6 +326,30 @@ export function parseHostedActionApprovalResult(
         "Hosted action approval result status must be pending, approved, denied, or expired.",
       );
   }
+}
+
+export function parseHostedActionApprovalObservation(
+  value: unknown,
+): HostedActionApprovalObservation {
+  const envelope = requireExactObject(
+    value,
+    "Hosted action approval observation",
+    ["cycleOwnerKey", "result"],
+  );
+  const cycle = parseHostedActionApprovalCycleOwnerKey(envelope.cycleOwnerKey);
+  if (!cycle) {
+    throw new TypeError("Hosted action approval observation cycleOwnerKey is invalid.");
+  }
+  const result = parseHostedActionApprovalResult(envelope.result);
+  if (result.approvalId !== cycle.approvalId) {
+    throw new TypeError(
+      "Hosted action approval observation cycle owner does not match approvalId.",
+    );
+  }
+  return {
+    ...result,
+    cycleOwnerKey: cycle.ownerKey,
+  };
 }
 
 export function parseHostedActionApprovalConsumeRequest(

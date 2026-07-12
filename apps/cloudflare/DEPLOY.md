@@ -404,7 +404,11 @@ During gradual rollout, Worker code and runner container state may disagree for 
 
 Approval-outcome mailbox wakes have a permanent runtime rollback floor after
 `MURPH_HOSTED_ACTION_APPROVAL_OUTCOME_WAKE_ENABLED` is first enabled in
-production. Disable the web gate and redeploy web before any rollback, but do
+production. Before the first compatible Cloudflare deployment, deploy and verify
+the gate-disabled web bundle that serves the action-approval read route. That
+bundle is the matching permanent web rollback floor. Disable the web gate and
+redeploy web before any rollback, but keep web at the read-route floor or newer
+while compatible runtime or pending approval work can depend on it, and do
 not roll Cloudflare/runner below the first bundle that parses
 `runtime.pending-effects-reconcile-requested`. System-lane lag records import
 progress only: the imported wake may remain pending in
@@ -412,7 +416,8 @@ progress only: the imported wake may remain pending in
 reaches zero. Roll back to that compatible bundle or newer, or forward-fix. A
 below-floor rollback needs a separate migration and proof covering server rows,
 imported local pending items, committed snapshots, and in-flight producers;
-gate-off plus zero lag is not sufficient.
+gate-off plus zero lag is not sufficient. Removing the web floor also requires a
+separate migration or forward runtime that removes the read-route dependency.
 
 Archived integration-ingest amendment receipts are a runner-bundle restore format change. The first production deploy that can emit `allowArchivedIntegrationIngestAmendment` hosted canonical write receipts must deploy Cloudflare/runner with `container_rollout=immediate`; Vercel/web has no ordering dependency for that change. Gradual container rollout is unsafe for the first deploy because warm old runner bundles can still restore a workspace checkpoint that carries a legacy or interrupted receipt-log ref without preserving the archived-amendment flag. New idle checkpoints snapshot the canonical vault state and omit pending receipt-log refs from committed workspace status, so the rollback floor only applies if a production workspace already has a committed archived-amendment receipt-log ref. After deployed managed-container smoke reports the new runner-bundle fingerprint, later ordinary deploys may return to gradual rollout. Post-deploy checks: run managed-container smoke and inspect hosted runtime restore logs for archived-ingest append-base mismatch or `INTEGRATION_INGEST_SHARD_ARCHIVED` errors.
 

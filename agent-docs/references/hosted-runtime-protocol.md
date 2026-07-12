@@ -505,9 +505,10 @@ results, continue to use `assistant.notification.requested` instead.
 Deploy consumers before the producer for this kind. Web emission is fail-closed
 unless `MURPH_HOSTED_ACTION_APPROVAL_OUTCOME_WAKE_ENABLED=1`; while disabled,
 web retains the legacy runtime recheck and confirmation-message fallback and
-does not append the new mailbox kind. Merge with the gate disabled, deploy
-Cloudflare with `container_rollout=immediate`, and wait for the managed-container
-smoke to prove the new parser/runtime bundle is active. Keep the gate disabled
+does not append the new mailbox kind. Merge with the gate disabled, first deploy
+and verify the web bundle that serves the observation-only action-approval read
+route, then deploy Cloudflare with `container_rollout=immediate` and wait for the
+managed-container smoke to prove the new parser/runtime bundle is active. Keep the gate disabled
 for a full 30-minute drain after the last old runtime bundle can serve an
 approval request; restart the drain window if an old bundle can still serve
 later. The drain covers the 15-minute pending approval lifetime plus the fresh
@@ -520,7 +521,12 @@ runtime is not safe because the old parser quarantines the new system row and
 blocks system-lane progress. Roll back in the reverse order: set the gate to `0`
 and redeploy web first so no new rows can be produced. Once the gate has ever
 been enabled in production, the first compatible Cloudflare/runner bundle is a
-permanent runtime rollback floor. System-lane lag measures import progress, not
+permanent runtime rollback floor, and the first web bundle that serves its
+action-approval read route is the matching permanent web rollback floor. Keep
+web at that floor or newer while the compatible runtime or any parked local
+item, committed snapshot, approved row, or in-flight reconciliation can depend
+on the route. Removing either floor requires a separate migration or forward
+runtime that removes the dependency. System-lane lag measures import progress, not
 handling progress: an imported approval wake may still be pending in
 `hosted-system-mailbox.json` and preserved in the hot workspace snapshot after
 lag reaches zero. Roll Cloudflare back only to that compatible bundle or newer,

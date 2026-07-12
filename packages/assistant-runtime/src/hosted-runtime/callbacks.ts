@@ -18,9 +18,11 @@ import {
   type HostedAssistantDeliveryPhase,
 } from "@murphai/hosted-execution/side-effects";
 import type {
+  HostedActionApprovalObservation,
   HostedActionApprovalResult,
 } from "@murphai/hosted-execution/action-approval";
 import {
+  parseHostedActionApprovalCycleOwnerKey,
   parseHostedActionApprovalOutcomeEffectId,
 } from "@murphai/hosted-execution/action-approval";
 import {
@@ -88,6 +90,7 @@ import {
   buildHostedWhatsAppChannelEnv,
 } from "./channel-activity.ts";
 import {
+  looksLikeHostedProviderRedactedLinqTarget,
   sendHostedProviderLinqMessage,
   sendHostedProviderLinqVoiceMemo,
   sendHostedProviderLinqChatAction,
@@ -304,9 +307,10 @@ export async function collectHostedAssistantDeliverySideEffects(
  * effect's durable fallback wake before it is due.
  */
 interface HostedAssistantApprovalCycleIdentity {
-  approvalGeneration: string;
+  approvalGeneration: string | null;
   approvalId: string;
   expiresAt: string;
+  ownerKey: string;
 }
 
 function selectHostedAssistantApprovalReconcileTargets(input: {
@@ -314,8 +318,8 @@ function selectHostedAssistantApprovalReconcileTargets(input: {
   now: Date;
   preferredEffectIds: readonly string[];
   storedIntents: readonly AssistantOutboxIntent[];
-}): Map<string, HostedAssistantApprovalCycleIdentity | null> {
-  const targets = new Map<string, HostedAssistantApprovalCycleIdentity | null>();
+}): Map<string, HostedAssistantApprovalCycleIdentity> {
+  const targets = new Map<string, HostedAssistantApprovalCycleIdentity>();
   if (input.preferredEffectIds.length > 0) {
     for (const effectId of input.preferredEffectIds) {
       const cycle = parseHostedActionApprovalOutcomeEffectId(effectId);
@@ -331,6 +335,7 @@ function selectHostedAssistantApprovalReconcileTargets(input: {
           approvalGeneration: cycle.approvalGeneration,
           approvalId: cycle.approvalId,
           expiresAt: cycle.expiresAt,
+          ownerKey: cycle.ownerKey,
         });
         return targets;
       }
@@ -357,7 +362,15 @@ function selectHostedAssistantApprovalReconcileTargets(input: {
     )
     .slice(0, HOSTED_MAX_DUE_APPROVAL_RECONCILE);
   for (const intent of due) {
-    targets.set(intent.intentId, null);
+    const cycle = parseHostedActionApprovalCycleOwnerKey(
+      intent.deliveryIdempotencyKey,
+    );
+    if (cycle) {
+      targets.set(intent.intentId, {
+        approvalGeneration: null,
+        ...cycle,
+      });
+    }
   }
   return targets;
 }
@@ -426,6 +439,13 @@ async function reconcileHostedAssistantVaultFileApproval(input: {
     return { blocked: false, intent: input.intent };
   }
 
+  if (
+    input.intent.status === "awaiting_approval"
+    && !input.expectedApprovalCycle
+  ) {
+    return { blocked: true, intent: input.intent };
+  }
+
   let approvalRequest: ReturnType<typeof buildAssistantVaultFileSendApprovalRequest>;
   try {
     approvalRequest = buildAssistantVaultFileSendApprovalRequest(input.intent);
@@ -446,7 +466,7 @@ async function reconcileHostedAssistantVaultFileApproval(input: {
     };
   }
 
-  let approval: HostedActionApprovalResult;
+  let approval: HostedActionApprovalObservation;
   try {
     approval = await input.actionApprovalPort.read(approvalRequest);
   } catch {
@@ -467,15 +487,13 @@ async function reconcileHostedAssistantVaultFileApproval(input: {
   if (
     input.expectedApprovalCycle
     && (
-      approval.approvalId !== input.expectedApprovalCycle.approvalId
+      approval.cycleOwnerKey !== input.expectedApprovalCycle.ownerKey
+      || approval.approvalId !== input.expectedApprovalCycle.approvalId
       || (
         approval.status === "approved"
+        && input.expectedApprovalCycle.approvalGeneration !== null
         && approval.approvalGeneration
           !== input.expectedApprovalCycle.approvalGeneration
-      )
-      || (
-        approval.status === "pending"
-        && approval.expiresAt !== input.expectedApprovalCycle.expiresAt
       )
     )
   ) {
@@ -508,7 +526,7 @@ async function preflightHostedAssistantVaultFileDispatch(input: {
 }): Promise<AssistantOutboxDispatchPreflightResult> {
   const reconciled = await reconcileHostedAssistantVaultFileApproval({
     actionApprovalPort: input.actionApprovalPort,
-    expectedApprovalCycle: null,
+    expectedApprovalCycle: readHostedAssistantApprovalCycleIdentity(input.intent),
     intent: input.intent,
     missingApprovalPort: "block",
     now: input.now,
@@ -522,6 +540,20 @@ async function preflightHostedAssistantVaultFileDispatch(input: {
     action: reconciled.intent.status === "awaiting_approval" ? "defer" : "stop",
     intent: reconciled.intent,
   };
+}
+
+function readHostedAssistantApprovalCycleIdentity(
+  intent: AssistantOutboxIntent,
+): HostedAssistantApprovalCycleIdentity | null {
+  const cycle = parseHostedActionApprovalCycleOwnerKey(
+    intent.deliveryIdempotencyKey,
+  );
+  return cycle
+    ? {
+        approvalGeneration: null,
+        ...cycle,
+      }
+    : null;
 }
 
 async function persistHostedAssistantVaultFileApprovalState(input: {
@@ -2328,11 +2360,17 @@ function createHostedAssistantLinqSendDependency(input: {
       engagement.targetOverride?.target ?? deliveryContext?.target ?? request.target;
     const providerTargetKind =
       engagement.targetOverride?.targetKind ?? request.targetKind ?? null;
+    const includesVaultFile =
+      request.media?.some((media) => media.kind === "vault_file") === true;
     if (
-      request.media?.some((media) => media.kind === "vault_file")
+      includesVaultFile
       && (
         providerTarget !== request.target
         || providerTargetKind !== (request.targetKind ?? null)
+        || (
+          (providerTargetKind === "thread" || providerTargetKind === "explicit")
+          && looksLikeHostedProviderRedactedLinqTarget(providerTarget)
+        )
       )
     ) {
       throw createAssistantDeliveryTerminalError(
@@ -2360,6 +2398,8 @@ function createHostedAssistantLinqSendDependency(input: {
       result = await sendHostedProviderLinqMessage({
         directRecipientPhoneNumber,
         fromPhoneNumber,
+        homeRouteFallbackAllowed:
+          request.homeRouteFallbackAllowed === true && !includesVaultFile,
         idempotencyKey: request.idempotencyKey ?? null,
         media: request.media ?? null,
         message: request.message,

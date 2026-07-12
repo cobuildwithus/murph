@@ -13,6 +13,7 @@ import {
 import {
   HOSTED_ACTION_APPROVAL_ID_PREFIX,
   HOSTED_ACTION_APPROVAL_RETURN_CONTACT_KINDS,
+  buildHostedActionApprovalCycleOwnerKey,
   buildHostedActionApprovalOutcomeEffectId,
   isHostedActionApprovalId,
   parseHostedActionApprovalConsumeRequest,
@@ -20,6 +21,7 @@ import {
   parseHostedActionApprovalRequest,
   serializeHostedActionApprovalRequest,
   type HostedActionApprovalConsumeRequest,
+  type HostedActionApprovalObservationEnvelope,
   type HostedActionApprovalRequest,
   type HostedActionApprovalResult,
   type HostedActionApprovalReturnContactKind,
@@ -144,12 +146,12 @@ export async function requestHostedActionApproval(input: {
   );
 }
 
-export async function readHostedActionApprovalResult(input: {
+export async function readHostedActionApprovalObservation(input: {
   memberId: string;
   now?: Date;
   prisma: HostedActionApprovalReadStore;
   request: HostedActionApprovalRequest | unknown;
-}): Promise<HostedActionApprovalResult> {
+}): Promise<HostedActionApprovalObservationEnvelope> {
   const prepared = prepareHostedActionApprovalRequest({
     memberId: input.memberId,
     now: input.now,
@@ -161,7 +163,16 @@ export async function readHostedActionApprovalResult(input: {
   });
 
   assertHostedActionApprovalMatchesRequest(approval, prepared);
-  return buildHostedActionApprovalResult(approval, prepared.now);
+  const result = buildHostedActionApprovalResult(approval, prepared.now);
+  return {
+    cycleOwnerKey: buildHostedActionApprovalCycleOwnerKey({
+      approvalId: result.approvalId,
+      expiresAt: new Date(
+        approval.createdAt.getTime() + ACTION_APPROVAL_TTL_MS,
+      ).toISOString(),
+    }),
+    result,
+  };
 }
 
 export async function consumeHostedActionApproval(input: {

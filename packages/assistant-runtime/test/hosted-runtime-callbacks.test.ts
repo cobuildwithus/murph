@@ -1102,6 +1102,7 @@ describe("hosted runtime callbacks", () => {
         consume: vi.fn(),
         read: vi.fn(async () => ({
           approvalId: vaultFile.approvalId,
+          cycleOwnerKey: storedIntent.deliveryIdempotencyKey,
           status: "denied" as const,
         })),
         request: vi.fn(),
@@ -1152,6 +1153,7 @@ describe("hosted runtime callbacks", () => {
       expect(mocks.applyAssistantVaultFileSendApprovalResult).toHaveBeenCalledWith({
         approval: {
           approvalId: vaultFile.approvalId,
+          cycleOwnerKey: storedIntent.deliveryIdempotencyKey,
           status: "denied",
         },
         intent: storedIntent,
@@ -1252,11 +1254,19 @@ describe("hosted runtime callbacks", () => {
           ? {
               approvalGeneration: "b".repeat(64),
               approvalId,
+              cycleOwnerKey: buildHostedActionApprovalCycleOwnerKey({
+                approvalId,
+                expiresAt: "2026-04-08T00:30:00.000Z",
+              }),
               status: "approved" as const,
             }
           : {
               approvalId: `haa_${"c".repeat(32)}`,
               approvalUrl: "https://murph.test/approve/pending",
+              cycleOwnerKey: buildHostedActionApprovalCycleOwnerKey({
+                approvalId: `haa_${"c".repeat(32)}`,
+                expiresAt: "2026-04-08T00:15:00.000Z",
+              }),
               expiresAt: "2026-04-08T00:15:00.000Z",
               status: "pending" as const,
             }),
@@ -1459,6 +1469,9 @@ describe("hosted runtime callbacks", () => {
         sha256: "a".repeat(64),
         sizeBytes: 42,
       };
+      const approvalIds = ["b", "c", "d", "e", "f"].map(
+        (character) => `haa_${character.repeat(32)}`,
+      );
       const storedIntents = Array.from({ length: 5 }, (_, index) => ({
         actorId: "actor_1",
         bindingDelivery: { kind: "thread" as const, target: "linq_chat_1" },
@@ -1466,7 +1479,10 @@ describe("hosted runtime callbacks", () => {
         createdAt: `2026-04-08T00:0${index}:00.000Z`,
         dedupeKey: `dedupe_vault_file_${index}`,
         delivery: null,
-        deliveryIdempotencyKey: `assistant-outbox:intent_vault_file_${index}`,
+        deliveryIdempotencyKey: buildHostedActionApprovalCycleOwnerKey({
+          approvalId: approvalIds[index]!,
+          expiresAt: "2026-04-08T00:15:00.000Z",
+        }),
         deliveryTransportIdempotent: true,
         explicitTarget: "linq_chat_1",
         identityId: "identity_1",
@@ -1489,12 +1505,20 @@ describe("hosted runtime callbacks", () => {
       }));
       const actionApprovalPort = {
         consume: vi.fn(),
-        read: vi.fn(async () => ({
-          approvalId: `haa_${"b".repeat(32)}`,
-          approvalUrl: "https://murph.test/approve/pending",
-          expiresAt: "2026-04-08T00:15:00.000Z",
-          status: "pending" as const,
-        })),
+        read: vi.fn(async (request: { actionId: string }) => {
+          const index = Number(request.actionId.at(-1));
+          const approvalId = approvalIds[index]!;
+          return {
+            approvalId,
+            approvalUrl: "https://murph.test/approve/pending",
+            cycleOwnerKey: buildHostedActionApprovalCycleOwnerKey({
+              approvalId,
+              expiresAt: "2026-04-08T00:15:00.000Z",
+            }),
+            expiresAt: "2026-04-08T00:15:00.000Z",
+            status: "pending" as const,
+          };
+        }),
         request: vi.fn(),
       };
       mocks.listAssistantOutboxIntents.mockResolvedValueOnce(storedIntents);
@@ -1522,6 +1546,91 @@ describe("hosted runtime callbacks", () => {
       expect(actionApprovalPort.read).toHaveBeenCalledWith(
         expect.objectContaining({ actionId: "vault-file-send:intent_vault_file_0" }),
       );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not apply a refreshed approval cycle to an older due intent", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-08T00:16:00.000Z"));
+    try {
+      const approvalId = `haa_${"b".repeat(32)}`;
+      const oldCycleOwnerKey = buildHostedActionApprovalCycleOwnerKey({
+        approvalId,
+        expiresAt: "2026-04-08T00:15:00.000Z",
+      });
+      const intent = {
+        actorId: "actor_1",
+        bindingDelivery: { kind: "thread" as const, target: "linq_chat_1" },
+        channel: "linq",
+        createdAt: "2026-04-08T00:00:00.000Z",
+        dedupeKey: "dedupe_old_approval_cycle",
+        delivery: null,
+        deliveryIdempotencyKey: oldCycleOwnerKey,
+        deliveryTransportIdempotent: true,
+        explicitTarget: "linq_chat_1",
+        identityId: "identity_1",
+        intentId: "intent_old_approval_cycle",
+        lastAttemptAt: null,
+        lastError: null,
+        media: [
+          {
+            contentType: "application/pdf",
+            filename: "report.pdf",
+            kind: "vault_file" as const,
+            ref: "documents/report.pdf",
+            sha256: "a".repeat(64),
+            sizeBytes: 42,
+          },
+        ],
+        message: "Attached.",
+        nextAttemptAt: "2026-04-08T00:15:00.000Z",
+        replyToMessageId: "linq_message_1",
+        sessionId: "session_1",
+        status: "awaiting_approval" as const,
+        subject: null,
+        threadId: "thread_1",
+        threadIsDirect: true,
+        turnId: "turn_1",
+        updatedAt: "2026-04-08T00:01:00.000Z",
+      };
+      const actionApprovalPort = {
+        consume: vi.fn(),
+        read: vi.fn(async () => ({
+          approvalGeneration: "c".repeat(64),
+          approvalId,
+          cycleOwnerKey: buildHostedActionApprovalCycleOwnerKey({
+            approvalId,
+            expiresAt: "2026-04-08T00:30:00.000Z",
+          }),
+          status: "approved" as const,
+        })),
+        request: vi.fn(),
+      };
+      mocks.listAssistantOutboxIntents.mockResolvedValueOnce([intent]);
+      mocks.readAssistantVaultFileMedia.mockReturnValue(intent.media[0]);
+      mocks.buildAssistantVaultFileSendApprovalRequest.mockReturnValue({
+        actionFingerprint: "a".repeat(64),
+        actionId: "vault-file-send:old-approval-cycle",
+        actionKind: "vault.file.send.v1",
+        presentation: {
+          body: "Send a vault file.",
+          title: "Send a file?",
+        },
+      });
+
+      await expect(collectHostedAssistantDeliverySideEffects({
+        actionApprovalPort,
+        includeBackgroundDueIntents: true,
+        preferredIntentIds: [],
+        vaultRoot: "/tmp/vault",
+      })).resolves.toEqual([]);
+
+      expect(actionApprovalPort.read).toHaveBeenCalledOnce();
+      expect(mocks.applyAssistantVaultFileSendApprovalResult)
+        .not.toHaveBeenCalled();
+      expect(mocks.saveAssistantOutboxIntentIfUnchanged).not.toHaveBeenCalled();
     } finally {
       vi.useRealTimers();
     }
@@ -2480,6 +2589,10 @@ describe("hosted runtime callbacks", () => {
       read: vi.fn(async () => ({
         approvalId: `haa_${"a".repeat(32)}`,
         approvalUrl: "https://withmurph.test/approve/haa_test",
+        cycleOwnerKey: buildHostedActionApprovalCycleOwnerKey({
+          approvalId: `haa_${"a".repeat(32)}`,
+          expiresAt: "2026-04-08T00:16:00.000Z",
+        }),
         expiresAt: "2026-04-08T00:16:00.000Z",
         status: "pending" as const,
       })),
@@ -8585,6 +8698,64 @@ describe("hosted runtime callbacks", () => {
     });
 
     expect(assertRecentInbound).toHaveBeenCalled();
+    expect(actionApprovalPort.consume).not.toHaveBeenCalled();
+    expect(mocks.readAssistantOutboxIntent).not.toHaveBeenCalled();
+    expect(mocks.readVerifiedAssistantVaultFileBytes).not.toHaveBeenCalled();
+    expect(mocks.sendLinqMessage).not.toHaveBeenCalled();
+  });
+
+  it("does not consume vault-file approval for a redacted Linq target", async () => {
+    const vaultFile = {
+      approvalGeneration: "b".repeat(64),
+      approvalId: `haa_${"a".repeat(32)}`,
+      contentType: "application/pdf",
+      filename: "report.pdf",
+      kind: "vault_file" as const,
+      ref: "documents/report.pdf",
+      sha256: "a".repeat(64),
+      sizeBytes: 42,
+    };
+    const redactedTarget = "h1_111111111111111111111111";
+    const effect = createEffect({
+      bindingDeliveryKind: "thread",
+      bindingDeliveryTarget: redactedTarget,
+      channel: "linq",
+      explicitTarget: redactedTarget,
+      media: [vaultFile],
+      transportIdempotent: true,
+    });
+    const actionApprovalPort = {
+      consume: vi.fn(),
+      read: vi.fn(),
+      request: vi.fn(),
+    };
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(
+      async ({ dependencies }) => {
+        await dependencies.sendLinq({
+          homeRouteFallbackAllowed: true,
+          idempotencyKey: "assistant-outbox:intent_123",
+          media: [vaultFile],
+          message: "Attached.",
+          replyToMessageId: null,
+          target: redactedTarget,
+          targetKind: "thread",
+        });
+        throw new Error("Provider dispatch unexpectedly remained reachable.");
+      },
+    );
+
+    await expect(drainHostedPreparedAssistantDeliveries({
+      actionApprovalPort,
+      assistantDeliveryEffects: [effect],
+      effectsPort: createHostedRuntimeEffectsPortStub(),
+      providerFetch: vi.fn<typeof fetch>(),
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+      wake: HOSTED_WAKE.wake,
+    })).rejects.toMatchObject({
+      code: "ASSISTANT_VAULT_FILE_IDENTITY_CONFLICT",
+      retryable: false,
+    });
+
     expect(actionApprovalPort.consume).not.toHaveBeenCalled();
     expect(mocks.readAssistantOutboxIntent).not.toHaveBeenCalled();
     expect(mocks.readVerifiedAssistantVaultFileBytes).not.toHaveBeenCalled();

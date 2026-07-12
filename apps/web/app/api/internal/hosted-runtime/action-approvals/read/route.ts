@@ -4,7 +4,7 @@ import {
 import { jsonOk, withJsonError } from "@/src/lib/hosted-onboarding/http";
 import { readOptionalJsonObject } from "@/src/lib/http";
 import { getPrisma } from "@/src/lib/prisma";
-import { readHostedActionApprovalResult } from "@/src/lib/action-approvals";
+import { readHostedActionApprovalObservation } from "@/src/lib/action-approvals";
 
 const ACTION_APPROVAL_READ_BODY_LIMIT_BYTES = 8 * 1024;
 
@@ -13,7 +13,7 @@ export const POST = withJsonError(async (request: Request) => {
     maxBodyBytes: ACTION_APPROVAL_READ_BODY_LIMIT_BYTES,
   });
 
-  return jsonOk(await readHostedActionApprovalResult({
+  return jsonOk(await readHostedActionApprovalObservation({
     memberId,
     prisma: getPrisma(),
     request: await readOptionalJsonObject(request),

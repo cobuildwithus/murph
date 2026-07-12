@@ -30,7 +30,7 @@ import {
   consumeHostedActionApproval,
   decideHostedActionApprovalTx,
   readHostedActionApproval,
-  readHostedActionApprovalResult,
+  readHostedActionApprovalObservation,
   requirePendingHostedActionApproval,
   requestHostedActionApproval,
 } from "@/src/lib/action-approvals";
@@ -366,14 +366,20 @@ describe("hosted action approvals", () => {
       approvalId: requested.approvalId,
       status: "approved",
     });
-    await expect(readHostedActionApprovalResult({
+    await expect(readHostedActionApprovalObservation({
       memberId,
       now: new Date("2026-06-25T16:02:30.000Z"),
       prisma: deps.prisma,
       request: REQUEST,
     })).resolves.toEqual({
-      approvalId: requested.approvalId,
-      status: "expired",
+      cycleOwnerKey: buildHostedActionApprovalCycleOwnerKey({
+        approvalId: requested.approvalId,
+        expiresAt: "2026-06-25T16:15:00.000Z",
+      }),
+      result: {
+        approvalId: requested.approvalId,
+        status: "expired",
+      },
     });
 
     await expect(consumeHostedActionApproval({
@@ -475,14 +481,20 @@ describe("hosted action approvals", () => {
       where: { approvalKey: requested.approvalId },
     });
 
-    await expect(readHostedActionApprovalResult({
+    await expect(readHostedActionApprovalObservation({
       memberId,
       now: new Date("2026-06-25T16:12:30.000Z"),
       prisma: deps.prisma,
       request: REQUEST,
     })).resolves.toEqual({
-      approvalId: requested.approvalId,
-      status: "denied",
+      cycleOwnerKey: buildHostedActionApprovalCycleOwnerKey({
+        approvalId: requested.approvalId,
+        expiresAt: "2026-06-25T16:26:00.000Z",
+      }),
+      result: {
+        approvalId: requested.approvalId,
+        status: "denied",
+      },
     });
     expect((await requireApprovalRow(deps, requested.approvalId))).toMatchObject({
       approvalStatus: "denied",

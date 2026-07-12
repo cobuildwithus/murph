@@ -71,7 +71,7 @@ The runtime keeps the exact file-and-destination delivery intent in its own outb
 8. The runtime records the control receipt, uses the observation-only approval read to recheck bounded pending delivery effects, and either resumes the approved delivery or terminalizes the denied one without running assistant automation.
 9. The decision response returns the browser to the originating Murph conversation without pre-filling an approval-confirmation message.
 
-The mailbox row is a durable shoulder tap, not authorization evidence or outcome payload. The runtime observes the outcome through `actionApprovalPort.read()` and consumes the matching approved generation again at the final delivery boundary.
+The mailbox row is a durable shoulder tap, not authorization evidence or outcome payload. The runtime observes the outcome through `actionApprovalPort.read()`, whose read-only result includes the current opaque approval-cycle owner for every status. The runtime refuses to apply an observation to a different parked owner, then consumes the matching approved generation again at the final delivery boundary.
 
 Consumption closes the authorization generation against replay but does not rewrite the member's historical decision. Runtime approval reads and later consume attempts therefore report the consumed generation as expired, while the member-facing approval page continues to present that row as approved. A genuinely elapsed, unconsumed approval still presents as expired.
 

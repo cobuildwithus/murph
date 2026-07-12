@@ -1,5 +1,8 @@
 import type { HostedRuntimePlatform } from "@murphai/assistant-runtime/hosted-runtime-contracts";
-import { parseHostedActionApprovalResult } from "@murphai/hosted-execution/action-approval";
+import {
+  parseHostedActionApprovalObservation,
+  parseHostedActionApprovalResult,
+} from "@murphai/hosted-execution/action-approval";
 import {
   HOSTED_RUNTIME_ACTION_APPROVAL_CONSUME_PATH,
   HOSTED_RUNTIME_ACTION_APPROVAL_READ_PATH,
@@ -51,7 +54,7 @@ export function createHostedWebActionApprovalPort(input: {
         transport: input.transport,
       });
 
-      return parseHostedActionApprovalResult(payload);
+      return parseHostedActionApprovalObservation(payload);
     },
 
     async request(
