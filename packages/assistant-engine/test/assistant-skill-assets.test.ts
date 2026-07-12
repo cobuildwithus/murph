@@ -356,16 +356,52 @@ describe('assistant skill assets', () => {
       triageText.indexOf('## Decision Order'),
     )
     expect(prerequisiteFirstAid).toContain(
+      'apply the first applicable rule below from top to bottom',
+    )
+    expect(prerequisiteFirstAid.indexOf('For a suspected penetrating')).toBeLessThan(
+      prerequisiteFirstAid.indexOf(
+        'For a corrosive, industrial, or unknown chemical exposure',
+      ),
+    )
+    expect(prerequisiteFirstAid).toContain(
       'For a corrosive, industrial, or unknown chemical exposure, start copious gentle irrigation',
     )
     expect(prerequisiteFirstAid).toContain(
-      'If water contacts lenses, remove them as soon as possible.',
+      'Remove contacts only if easy and without pausing or delaying irrigation.',
+    )
+    expect(prerequisiteFirstAid).toContain(
+      'Do not manipulate or remove a contact lens.',
+    )
+    expect(prerequisiteFirstAid).toContain(
+      'any new vision change, marked tearing, discharge, irritation, or a foreign-body sensation, remove the lens or lenses immediately',
+    )
+    expect(prerequisiteFirstAid).toContain(
+      'Otherwise, if water contacts lenses, remove them as soon as possible.',
     )
     expect(triageText).toContain(
-      'For a known mild irritant or loose superficial particle, rinse gently with clean lukewarm water.',
+      'Otherwise, for a known mild irritant or loose superficial particle, rinse gently with clean lukewarm water.',
     )
     expect(triageText).toContain(
       'known mild irritant or loose superficial particle that fully resolves after thorough rinsing',
+    )
+    const promptExamRule = triageText.slice(
+      triageText.indexOf('### Arrange a prompt eye exam'),
+      triageText.indexOf('### Brief self-care trial is reasonable'),
+    )
+    expect(promptExamRule).toContain(
+      'Arrange the next available eye exam or medical eye visit',
+    )
+    expect(promptExamRule).toContain(
+      'when a headache is persistent, recurring, worsening, function-limiting, or present away from near work',
+    )
+    expect(promptExamRule).toContain(
+      'Add a contact-lens-fit review only when the user currently wears contacts and fit review is relevant.',
+    )
+    expect(promptExamRule).not.toContain(
+      'Arrange the next available eye and contact-lens-fit exam',
+    )
+    expect(triageText).toContain(
+      'This may include a mild headache confined to near work that improves with rest.',
     )
     expect(triageText).toContain('new flashes of light')
     expect(triageText).toContain('a sudden increase in or many new floaters')
@@ -380,7 +416,7 @@ describe('assistant skill assets', () => {
       'A contact-lens wearer with redness or a new vision change is not eligible for this pathway',
     )
     expect(triageText).toContain(
-      'When the Decision Order assigns `Prompt same-day eye care`, do not reinsert the lenses until an eye clinician says it is safe.',
+      'When a contact-lens wearer is assigned `Prompt same-day eye care`, the matching prerequisite removes the lenses;',
     )
     expect(triageText).toContain(
       'When the Decision Order assigns `Brief self-care trial is reasonable` for mild contact-lens dryness, do not wear the lenses again that day.',
@@ -397,6 +433,7 @@ describe('assistant skill assets', () => {
     expect(triageText).not.toContain(
       'or symptoms that persist after removal, do not reinsert',
     )
+    expect(triageText).not.toContain('attend at least yearly contact-lens exams')
     expect(triageText).toContain(
       'mild, gradual, bilateral tired, dry, burning, gritty, or intermittently blurry symptoms',
     )

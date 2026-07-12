@@ -4,12 +4,13 @@ Use this reference for active symptoms, vision changes, contact-lens problems, i
 
 ## Prerequisite First Aid
 
-Before assigning a care level:
+Before assigning a care level, apply the first applicable rule below from top to bottom. The chemical and penetrating-injury rules override every later instruction.
 
-- For a corrosive, industrial, or unknown chemical exposure, start copious gentle irrigation with clean lukewarm water immediately, remove contacts only if easy, and continue while emergency help is arranged. Do not delay to identify the chemical or try to neutralize it. Do not irrigate a suspected penetrating injury.
-- For unusual contact-lens discomfort, redness, or irritation, remove the lens or lenses immediately and use current backup glasses.
-- If water contacts lenses, remove them as soon as possible. Discard daily disposables; for reusable lenses, follow the lens and solution instructions for cleaning and overnight disinfection. Never rinse or store lenses in any water or saliva.
-- For a known mild irritant or loose superficial particle, rinse gently with clean lukewarm water. Do not rinse, rub, press, or remove anything when a penetrating or high-velocity injury, embedded object, cut, or puncture is possible.
+- For a suspected penetrating or high-velocity injury, embedded object, cut, or puncture, do not rinse, rub, press, or remove anything. Do not manipulate or remove a contact lens. Loosely protect the eye from pressure while emergency care is arranged.
+- For a corrosive, industrial, or unknown chemical exposure, start copious gentle irrigation with clean lukewarm water immediately and continue while emergency help is arranged. Remove contacts only if easy and without pausing or delaying irrigation. Do not delay to identify the chemical or try to neutralize it.
+- Otherwise, when a contact-lens wearer has unusual discomfort, pain, redness, light sensitivity, any new vision change, marked tearing, discharge, irritation, or a foreign-body sensation, remove the lens or lenses immediately and use current backup glasses.
+- Otherwise, if water contacts lenses, remove them as soon as possible. Discard daily disposables; for reusable lenses, follow the lens and solution instructions for cleaning and overnight disinfection. Never rinse or store lenses in any water or saliva.
+- Otherwise, for a known mild irritant or loose superficial particle, rinse gently with clean lukewarm water.
 
 ## Decision Order
 
@@ -40,13 +41,13 @@ If an eye clinician is unreachable and symptoms are worsening or vision-threaten
 
 ### Arrange a prompt eye exam
 
-Arrange the next available eye and contact-lens-fit exam when symptoms are persistent, recurring, worsening, one-sided, function-limiting, associated with double vision or frequent blur or headache, present away from near work, or not improving after lens removal and basic work changes.
+Arrange the next available eye exam or medical eye visit when symptoms are persistent, recurring, worsening, one-sided, function-limiting, present away from near work, or not improving after lens removal and basic work changes; when double vision or frequent blur is present; or when a headache is persistent, recurring, worsening, function-limiting, or present away from near work. Add a contact-lens-fit review only when the user currently wears contacts and fit review is relevant.
 
 Use a lower threshold for prompt clinician input when the user has diabetes, immune suppression, inflammatory disease, recent eye surgery or injection, or prescription eye medicines, without inventing a diagnosis.
 
 ### Brief self-care trial is reasonable
 
-If no earlier outcome matches, self-care is reasonable for mild, gradual, bilateral tired, dry, burning, gritty, or intermittently blurry symptoms after sustained near work that improve with complete blinking, rest, or lens removal, with no pain, marked redness, light sensitivity, discharge, sudden or persistent vision change, new flashes, a sudden increase in or many new floaters, trauma, or chemical exposure. It is also reasonable for a known mild irritant or loose superficial particle that fully resolves after thorough rinsing, with normal vision and no pain or other warning feature. A contact-lens wearer with redness or a new vision change is not eligible for this pathway even when symptoms improve after blinking, rest, or lens removal. This is eligibility for a trial, not a diagnosis.
+If no earlier outcome matches, self-care is reasonable for mild, gradual, bilateral tired, dry, burning, gritty, or intermittently blurry symptoms after sustained near work that improve with complete blinking, rest, or lens removal, with no pain, marked redness, light sensitivity, discharge, sudden or persistent vision change, new flashes, a sudden increase in or many new floaters, trauma, or chemical exposure. This may include a mild headache confined to near work that improves with rest. It is also reasonable for a known mild irritant or loose superficial particle that fully resolves after thorough rinsing, with normal vision and no pain or other warning feature. A contact-lens wearer with redness or a new vision change is not eligible for this pathway even when symptoms improve after blinking, rest, or lens removal. This is eligibility for a trial, not a diagnosis.
 
 ### Prevention action only
 
@@ -62,13 +63,12 @@ When the available facts do not support any earlier outcome, ask at most one que
 
 ## Contact-Lens Action Rules
 
-- After prerequisite lens removal, use current backup glasses. When the Decision Order assigns `Prompt same-day eye care`, do not reinsert the lenses until an eye clinician says it is safe. Do not discard the lenses or case until asking whether the clinician wants them for evaluation; isolate them so they cannot be reused accidentally.
+- When a contact-lens wearer is assigned `Prompt same-day eye care`, the matching prerequisite removes the lenses; use current backup glasses and do not reinsert the lenses until an eye clinician says it is safe. Do not discard the lenses or case until asking whether the clinician wants them for evaluation; isolate them so they cannot be reused accidentally.
 - When the Decision Order assigns `Brief self-care trial is reasonable` for mild contact-lens dryness, do not wear the lenses again that day. Follow the prescribed replacement and wear schedule at the next wear window; if symptoms return, stop lens wear and apply the Decision Order again.
 - Never sleep in lenses unless the prescribing clinician specifically directed it. Remove lenses before showering, swimming, or using a hot tub.
 - Wash and thoroughly dry hands before handling lenses. Rub and rinse reusable lenses with the recommended disinfecting solution, use fresh solution every time, never top off, clean the case with solution, air-dry it face down with caps off, and replace it at least every three months.
 - Follow the prescribed lens brand, type, wear time, and replacement schedule. Never reuse daily disposables or substitute a brand, power, base curve, or diameter.
 - Use only drops specifically labeled or recommended for the current contacts. Pain, redness, discharge, light sensitivity, or vision change is not a "try more drops" situation.
-- Keep usable backup glasses and attend at least yearly contact-lens exams, or the interval the eye clinician sets.
 
 ## Do Not Advise
 
