@@ -1978,6 +1978,51 @@ describe('assistant Murph onboarding guidance', () => {
   })
 })
 
+describe('assistant conversation scope', () => {
+  it('keeps personal settings and authorization surfaces out of group prompts', () => {
+    const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput({
+      assistantCliContract: [
+        'vault-cli device connect <provider> --format json',
+        'vault-cli assistant style set humor 10 --format json',
+      ].join('\n'),
+      conversationScope: 'group',
+    }))
+
+    expect(prompt).toContain('Conversation scope: hosted group chat.')
+    expect(prompt).toContain('synthetic room container, not the human speaker')
+    expect(prompt).toContain('This room has no group-scoped voice, tone, Humor, Push, or Detail setting.')
+    expect(prompt).toContain('Use only accountless built-in service tools')
+    expect(prompt).toContain('A group container cannot own a Family plan')
+    expect(prompt).not.toContain('Assistant tone preference:')
+    expect(prompt).not.toContain('Murph onboarding:')
+    expect(prompt).not.toContain('/settings?voice=true')
+    expect(prompt).not.toContain('vault-cli assistant style set')
+    expect(prompt).not.toContain('vault-cli device connect <provider>')
+    expect(prompt).not.toContain('Computer-use tools:')
+    expect(prompt).not.toContain('Phone calls:')
+    expect(prompt).not.toContain('action="start_checkout"')
+
+    // This is a private, explicitly per-person enrollment reminder owned by
+    // the group newsletter workflow, not a room-settings destination.
+    expect(prompt).toContain('/settings?addEmail=true')
+  })
+
+  it('preserves personal capabilities in a direct conversation', () => {
+    const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput({
+      conversationScope: 'direct',
+    }))
+
+    expect(prompt).toContain('Conversation scope: private Murph conversation.')
+    expect(prompt).toContain('Assistant tone preference:')
+    expect(prompt).toContain('/settings?voice=true')
+    expect(prompt).toContain('vault-cli assistant style set')
+    expect(prompt).toContain('vault-cli device connect')
+    expect(prompt).toContain('Computer-use tools:')
+    expect(prompt).toContain('Phone calls:')
+    expect(prompt).toContain('action="start_checkout"')
+  })
+})
+
 function createCommonCodexPromptInput(
   overrides: Partial<AssistantSystemPromptInput> = {},
 ): AssistantSystemPromptInput {

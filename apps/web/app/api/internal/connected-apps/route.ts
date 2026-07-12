@@ -1,13 +1,18 @@
 import {
   hostedConnectedAppsRequestSchema,
   hostedConnectedAppsResponseSchema,
+  type HostedConnectedAppsRequest,
 } from "@murphai/hosted-execution/connected-apps";
 
 import {
   requireHostedCloudflareCallbackRequest,
 } from "@/src/lib/hosted-execution/cloudflare-callback-auth";
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
-import { readActiveHostedMemberAccess } from "@/src/lib/hosted-onboarding/member-access";
+import {
+  isHostedThreadContainerMember,
+  readActiveHostedMemberAccess,
+} from "@/src/lib/hosted-onboarding/member-access";
+import { isHostedConnectedAppsServiceTool } from "@/src/lib/connected-apps/config";
 import { jsonOk, withJsonError } from "@/src/lib/hosted-onboarding/http";
 import { executeHostedConnectedAppsRequest } from "@/src/lib/connected-apps/service";
 import { getPrisma } from "@/src/lib/prisma";
@@ -44,6 +49,16 @@ export const POST = withJsonError(async (request: Request) => {
       message: "The connected-app request is invalid.",
     });
   }
+  if (
+    await isHostedThreadContainerMember({ memberId, prisma: getPrisma() })
+    && !isGroupSafeConnectedAppsRequest(parsed.data)
+  ) {
+    throw hostedOnboardingError({
+      code: "CONNECTED_APPS_PERSONAL_MEMBER_REQUIRED",
+      httpStatus: 403,
+      message: "Personal connected apps are unavailable in a group chat.",
+    });
+  }
 
   const result = await executeHostedConnectedAppsRequest({
     memberId,
@@ -51,6 +66,18 @@ export const POST = withJsonError(async (request: Request) => {
   });
   return jsonOk(hostedConnectedAppsResponseSchema.parse({ result }));
 });
+
+function isGroupSafeConnectedAppsRequest(
+  request: HostedConnectedAppsRequest,
+): boolean {
+  if (request.operation === "search") {
+    return true;
+  }
+  return request.operation === "execute"
+    && request.input.account === undefined
+    && request.input.agentApproved === undefined
+    && isHostedConnectedAppsServiceTool(request.input.toolSlug);
+}
 
 async function requireConnectedAppsActiveMember(memberId: string): Promise<void> {
   if (await readActiveHostedMemberAccess({ memberId, prisma: getPrisma() })) {

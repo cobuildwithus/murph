@@ -984,6 +984,77 @@ describe('assistant protocol index planning', () => {
     )
   })
 
+  it('derives a group-scoped prompt and tool surface from the audience', async () => {
+    planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
+    planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
+    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
+      supportsNativeResume: false,
+    })
+    const hostedToolContext: AssistantHostedToolContext = {
+      ...createHostedToolContext(),
+      connectedApps: { request: vi.fn() },
+      familyPlanTool: { request: vi.fn() },
+      groupTool: { request: vi.fn() },
+      newsletterTool: { request: vi.fn() },
+      phoneCalls: { start: vi.fn() },
+    }
+    const plan = await resolveAssistantRouteTurnPlan({
+      acceptedInputItems: [{ id: 'group-phone-request', source: 'manual' }],
+      executionContext: {
+        hosted: {
+          memberId: 'member-group-container',
+          progressDeliveryDependencies: {},
+          providerFetch: null,
+          userEnvKeys: [],
+        },
+      },
+      hostedToolContext,
+      input: {
+        ...createMessageInput(),
+        channel: 'linq',
+        deliverResponse: true,
+      },
+      profile: {
+        promptProfile: 'conversation',
+        threadScope: 'session-thread',
+        toolProfile: 'provider-turn',
+      },
+      promptTimeContext: {
+        currentLocalDate: '2026-07-12',
+        currentTimeZone: 'America/New_York',
+      },
+      route: createRoute(),
+      session: createSession(),
+      sharedPlan: createSharedPlan({}, {
+        channel: 'linq',
+        effectiveThreadIsDirect: false,
+        threadId: 'group-thread',
+        threadIsDirect: false,
+      }),
+    })
+
+    expect(plan.developerInstructions).toContain('Conversation scope: hosted group chat.')
+    expect(plan.developerInstructions).not.toContain('bootstrap contract')
+    expect(plan.developerInstructions).not.toContain('/settings?voice=true')
+    expect(plan.developerInstructions).not.toContain('Hosted wearable connection links are available')
+    expect(plan.dynamicTools.map((tool) => tool.name)).toEqual(
+      expect.arrayContaining([
+        'connected_apps_search',
+        'connected_apps_execute',
+        'group',
+        'newsletter',
+      ]),
+    )
+    expect(plan.dynamicTools.map((tool) => tool.name)).not.toEqual(
+      expect.arrayContaining([
+        'computer_open',
+        'connected_apps_manage',
+        'create_phone_call',
+        'family_plan',
+      ]),
+    )
+  })
+
   it('resumes Codex threads when only the per-turn date changes', async () => {
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
     planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)

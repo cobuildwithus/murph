@@ -462,6 +462,9 @@ export async function resolveAssistantRouteTurnPlan(input: {
       audience.channel === null &&
       audience.explicitTarget === null &&
       audience.threadId === null)
+  const conversationScope = audience.effectiveThreadIsDirect === false
+    ? 'group'
+    : 'direct'
   const diagnosticsPolicy = resolveAssistantDiagnosticsPolicy({
     channel: resolvedChannel,
     executionContext: input.input.executionContext,
@@ -538,6 +541,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
             assistantDynamicContextPrompts: hostedDynamicContextPrompts,
             maintenanceTurn,
             assistantHostedDeviceConnectAvailable:
+              privateInteractiveAudience &&
               promptCapabilityAvailability.assistantHostedDeviceConnectAvailable,
             assistantHostedDeviceConnectProviders:
               promptCapabilityAvailability.assistantHostedDeviceConnectProviders,
@@ -546,6 +550,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
             channel: resolvedChannel,
             currentLocalDate: input.promptTimeContext.currentLocalDate,
             currentTimeZone: input.promptTimeContext.currentTimeZone,
+            conversationScope,
           }, {
             toolSchemaHash,
           })
@@ -554,6 +559,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
             assistantContextSnapshotPrompt,
             assistantDynamicContextPrompts: hostedDynamicContextPrompts,
             assistantHostedDeviceConnectAvailable:
+              privateInteractiveAudience &&
               promptCapabilityAvailability.assistantHostedDeviceConnectAvailable,
             assistantHostedDeviceConnectProviders:
               promptCapabilityAvailability.assistantHostedDeviceConnectProviders,
@@ -571,6 +577,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
             channel: resolvedChannel,
             currentLocalDate: input.promptTimeContext.currentLocalDate,
             currentTimeZone: input.promptTimeContext.currentTimeZone,
+            conversationScope,
             murphProductBaseUrl: resolveAssistantMurphProductBaseUrl(
               input.sharedPlan.cliAccess.env,
             ),
@@ -625,16 +632,21 @@ export async function resolveAssistantRouteTurnPlan(input: {
         allowFinishWithoutReply,
         allowMessageReactions: messageReactionsAvailable,
         computerToolsAvailable:
+          privateInteractiveAudience &&
           input.hostedToolContext?.computerToolsAvailable === true,
         progressUpdatesAvailable: input.progressDelivery != null,
         connectedAppsAvailable: input.hostedToolContext?.connectedApps != null,
-        familyPlanAvailable: input.hostedToolContext?.familyPlanTool != null,
+        connectedAppsManageAvailable: privateInteractiveAudience,
+        familyPlanAvailable:
+          privateInteractiveAudience &&
+          input.hostedToolContext?.familyPlanTool != null,
         groupAvailable: input.hostedToolContext?.groupTool != null,
         newsletterAvailable: input.hostedToolContext?.newsletterTool != null,
         productFeedbackAvailable:
           productFeedbackAcceptedInputIds.length > 0 &&
           typeof input.executionContext?.hosted?.productFeedbackRecorder?.recordProductFeedback === 'function',
         phoneCallsAvailable:
+          privateInteractiveAudience &&
           phoneCallAcceptedInputIds.length > 0 &&
           input.hostedToolContext?.phoneCalls != null,
         voiceMemoGenerationAvailable: voiceMemoDeliveryChannel !== null,

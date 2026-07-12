@@ -114,6 +114,107 @@ describe("internal connected-apps route", () => {
     });
     expect(mocks.executeHostedConnectedAppsRequest).not.toHaveBeenCalled();
   });
+
+  it("allows accountless service lookup from a synthetic group container", async () => {
+    mocks.requireHostedCloudflareCallbackRequest.mockResolvedValue("member_group");
+    const prisma = createPrisma({
+      accountGroupMemberships: [],
+      billingStatus: "active",
+      id: "member_group",
+      suspendedAt: null,
+      threadContainer: true,
+    });
+    mocks.getPrisma.mockReturnValue(prisma);
+    mocks.executeHostedConnectedAppsRequest.mockResolvedValue({
+      operation: "execute",
+      output: { temperature: 72 },
+    });
+
+    const response = await route.POST(new Request(
+      "https://join.example.test/api/internal/connected-apps",
+      {
+        body: JSON.stringify({
+          input: {
+            arguments: { lat: 40.7, lon: -74 },
+            toolSlug: "OPENWEATHER_API_GET_CURRENT_WEATHER",
+          },
+          operation: "execute",
+        }),
+        method: "POST",
+      },
+    ));
+
+    expect(response.status).toBe(200);
+    expect(mocks.executeHostedConnectedAppsRequest).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects personal connected-account operations from a synthetic group container", async () => {
+    mocks.requireHostedCloudflareCallbackRequest.mockResolvedValue("member_group");
+    const prisma = createPrisma({
+      accountGroupMemberships: [],
+      billingStatus: "active",
+      id: "member_group",
+      suspendedAt: null,
+      threadContainer: true,
+    });
+    mocks.getPrisma.mockReturnValue(prisma);
+
+    const response = await route.POST(new Request(
+      "https://join.example.test/api/internal/connected-apps",
+      {
+        body: JSON.stringify({
+          input: {
+            action: "list",
+          },
+          operation: "manage",
+        }),
+        method: "POST",
+      },
+    ));
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toMatchObject({
+      error: {
+        code: "CONNECTED_APPS_PERSONAL_MEMBER_REQUIRED",
+      },
+    });
+    expect(mocks.executeHostedConnectedAppsRequest).not.toHaveBeenCalled();
+  });
+
+  it("rejects account-backed execution from a synthetic group container before provider work", async () => {
+    mocks.requireHostedCloudflareCallbackRequest.mockResolvedValue("member_group");
+    const prisma = createPrisma({
+      accountGroupMemberships: [],
+      billingStatus: "active",
+      id: "member_group",
+      suspendedAt: null,
+      threadContainer: true,
+    });
+    mocks.getPrisma.mockReturnValue(prisma);
+
+    const response = await route.POST(new Request(
+      "https://join.example.test/api/internal/connected-apps",
+      {
+        body: JSON.stringify({
+          input: {
+            account: "work",
+            arguments: { query: "newer_than:7d" },
+            toolSlug: "GMAIL_FETCH_EMAILS",
+          },
+          operation: "execute",
+        }),
+        method: "POST",
+      },
+    ));
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toMatchObject({
+      error: {
+        code: "CONNECTED_APPS_PERSONAL_MEMBER_REQUIRED",
+      },
+    });
+    expect(mocks.executeHostedConnectedAppsRequest).not.toHaveBeenCalled();
+  });
 });
 
 function createPrisma(member: {
@@ -124,6 +225,7 @@ function createPrisma(member: {
   billingStatus: string;
   id: string;
   suspendedAt: Date | null;
+  threadContainer?: boolean;
 }) {
   return {
     hostedMember: {
@@ -133,7 +235,16 @@ function createPrisma(member: {
               accountGroupMemberships: member.accountGroupMemberships,
               billingStatus: member.billingStatus,
               suspendedAt: member.suspendedAt,
-              threadContainer: null,
+              threadContainer: member.threadContainer
+                ? {
+                    memberId: member.id,
+                    owner: {
+                      accountGroupMemberships: [],
+                      billingStatus: "active",
+                      suspendedAt: null,
+                    },
+                  }
+                : null,
             }
           : null
       ),
