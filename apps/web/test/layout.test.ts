@@ -124,7 +124,7 @@ test("RootLayout provides default title, description, and preview image metadata
   assert.equal(metadata.title, "Murph — Health is hard. Don’t do it alone.");
   assert.equal(
     metadata.description,
-    "Murph figures out what works for you—and gets your friends in on it. A personal health AI that runs experiments with you and challenges with your friends.",
+    "Murph is a private personal health assistant for questions, decisions, data, tasks, and goals. It remembers useful context so later help gets more personal.",
   );
   assert.deepEqual(metadata.openGraph?.images, [
     {

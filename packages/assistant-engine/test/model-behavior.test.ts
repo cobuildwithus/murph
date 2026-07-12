@@ -1397,19 +1397,19 @@ Execution context:
       'no broad vault resume check is needed, and the next step is the name plus optional age/gender question unless the visible thread already answers it.',
     )
     expect(prompt).toContain(
-      'When onboarding is open but the visible thread does not show the welcome or prior onboarding steps, make the bounded resume check defined by the onboarding skill before sending the onboarding welcome or asking the next onboarding question',
+      'When onboarding is open but the visible thread does not show prior onboarding, make the bounded resume check defined by the onboarding skill before sending the welcome or asking a question',
     )
     expect(prompt).toContain(
       'run `vault-cli assistant onboarding resume-context --format json`',
     )
     expect(prompt).toContain(
-      'Treat saved facts from that snapshot as already-answered onboarding steps and continue from the first genuinely unresolved step.',
+      'Treat saved facts as known evidence, not required fields.',
     )
     expect(prompt).toContain(
-      'Do not fan this resume check out into separate setup-surface commands unless the resume-context command is unavailable or returns an error for the specific surface you still need.',
+      'Do not fan the check out into separate setup-surface commands unless it failed for the specific surface needed now.',
     )
     expect(prompt).toContain(
-      'If saved context already satisfies the completion criteria, including a resolved first experiment setup, mark onboarding complete instead of asking again.',
+      'If visible and saved evidence already satisfies the relationship-and-first-value criteria, mark onboarding complete instead of asking again.',
     )
 
     const closedPrompt = buildAssistantSystemPrompt(createCommonCodexPromptInput({
@@ -1552,7 +1552,7 @@ describe('assistant experiment onboarding guidance', () => {
       'Keep the first setup small, reversible, and easy to stop.',
     )
     expect(prompt).toContain(
-      'For a chosen health intervention, use its domain owner plus experiment-onboarding for setup, and add behavior-followthrough only when recurring support matters.',
+      'For a chosen health intervention, use its domain owner. Add experiment-onboarding only when the user wants to test or compare the intervention, and add behavior-followthrough only when recurring support matters.',
     )
     expect(prompt).not.toContain('Behavior-change collaboration:')
     expect(prompt).not.toContain(
@@ -1584,9 +1584,6 @@ describe('assistant experiment onboarding guidance', () => {
       'Continue only as a bounded discovery loop, one question per message, until the picture supports personal advice.',
     )
     expect(prompt).toContain(
-      'A grounded discovery question is a complete turn.',
-    )
-    expect(prompt).toContain(
       'If answers get short or the user pushes back, recommend from what is known and name the uncertainty instead of continuing an intake.',
     )
 
@@ -1598,26 +1595,32 @@ describe('assistant experiment onboarding guidance', () => {
       'Do not run a motivation interview or re-ask what the user already said.',
     )
 
-    // Durable discoveries compound on canonical surfaces without saving inference.
+    // Context questions earn their place and durable discoveries remain controllable.
     expect(prompt).toContain(
-      'Save durable, user-provided discoveries to the matching canonical vault surface or memory in the same turn so context compounds and the user is not asked twice.',
+      'Every proactive context question must improve current help, unlock an action, resolve relevant safety, or personalize a likely near-term follow-up.',
     )
     expect(prompt).toContain(
-      'Do not persist transient task detail, inferred psychological interpretations, or anything the user asked not to retain.',
+      'Use known context first, explain any non-obvious context dividend, and never collect a generic profile category by category.',
+    )
+    expect(prompt).toContain(
+      'Save durable user context to its canonical vault owner in the same turn so it compounds and is not asked twice.',
+    )
+    expect(prompt).toContain(
+      'Let the user inspect or correct it, decline collection, and forget freeform memory with `vault-cli memory forget`.',
+    )
+    expect(prompt).toContain(
+      'Do not retain transient detail, psychological inference, or rejected context.',
     )
 
-    // Recommendations stay evidence-tied and close the loop with one bounded setup.
+    // Help uses the lightest primitive instead of forcing every need into a test.
     expect(prompt).toContain(
-      'tie one or two candidates to that evidence and say which lever is uncertain.',
+      'Choose the lightest useful primitive: answer or interpretation, action, plan or habit, private follow-through, optional social support, monitoring, or a bounded experiment when uncertainty is the bottleneck.',
     )
     expect(prompt).toContain(
-      'Then close the loop with one concrete, low-burden default for a bounded test or habit, reminders/check-ins, and a review point that the user can accept with a simple yes',
+      'Add ongoing support only when useful and authorized',
     )
     expect(prompt).toContain(
-      'Do not leave a useful recommendation as a one-off message with no path to follow-through.',
-    )
-    expect(prompt).toContain(
-      'Do not call it an experiment unless the user does.',
+      'do not force a simple need into a heavier workflow.',
     )
     expect(prompt).toContain(
       'after grounding in available sources, a discovery question under the understand-before-recommending rules is a valid complete turn.',
@@ -1846,7 +1849,7 @@ describe('assistant notification decision guidance', () => {
 })
 
 describe('assistant Murph onboarding guidance', () => {
-  it('injects the Murph onboarding skill activation without inlining the full workflow', () => {
+  it('injects a thin context-first Murph onboarding router', () => {
     const prompt = buildAssistantSystemPrompt({
       assistantCliContract: null,
       assistantHostedDeviceConnectAvailable: true,
@@ -1872,47 +1875,32 @@ describe('assistant Murph onboarding guidance', () => {
       '$MURPH_ASSISTANT_SKILLS_ROOT/murph-onboarding/SKILL.md',
     )
     expect(prompt).toContain(
-      'First-run Murph onboarding is open until its completion criteria are met',
+      'Direct first-run Murph onboarding is open until its completion criteria are met.',
     )
     expect(prompt).toContain(
-      "The user's immediate need comes first",
+      'a broad private personal-health-assistant relationship and one useful starting thread',
     )
     expect(prompt).toContain(
-      'Before ending a normal reply while onboarding is open, keep onboarding moving unless a skip condition applies',
+      'it is not a profile checklist or an experiment funnel',
+    )
+    expect(prompt).toContain("The user's immediate need comes first")
+    expect(prompt).toContain(
+      'advance the chosen change, understand, handle, or explore thread with one useful action or question',
     )
     expect(prompt).toContain(
-      'For a meal photo, symptom report, or other health-data immediate request, the skip condition applies to visible onboarding questions in that turn',
+      "Completion flag guard: once the onboarding skill's criteria are met",
     )
     expect(prompt).toContain(
-      'Completion flag guard: once onboarding completion criteria are met, updating the onboarding flag is part of completing onboarding, not optional cleanup',
+      'Do not leave onboarding open merely because more context could be useful later.',
     )
     expect(prompt).toContain(
-      'run `vault-cli assistant onboarding complete` with the correct reason, and verify the command output shows completed before treating onboarding as done',
+      'Run `vault-cli assistant onboarding complete` with the correct reason and verify the command output shows completed',
     )
     expect(prompt).toContain(
-      'User-provided context can satisfy onboarding steps',
-    )
-    expect(prompt).toContain(
-      'Files, images, PDFs, labs, supplement labels, wearable data, medications, meals, workouts, symptoms, and setup answers may be both',
+      'User-provided context can establish the starting thread and satisfy first value.',
     )
     expect(prompt).toContain(
       'If this turn was a meal photo, symptom report, or other health-data immediate request, do not append an onboarding question in the same turn',
-    )
-    expect(prompt).toContain(
-      'For slow, non-reply-critical onboarding ingestion such as lab PDFs or supplement-label lookup',
-    )
-    expect(prompt).toContain('collaboration.spawn_agent')
-    expect(prompt).toContain(
-      'Spawn it as a fresh thread with `fork_turns: "none"`',
-    )
-    expect(prompt).toContain(
-      'make the spawn message self-contained with durable source evidence, needed user/vault context, duplicate-avoidance instructions, and the expected completion format',
-    )
-    expect(prompt).toContain(
-      'The child must call the relevant `vault-cli` save/import commands, avoid duplicates, and return saved record ids or blockers',
-    )
-    expect(prompt).toContain(
-      'The parent may continue the visible onboarding flow and incorporate the result on the next turn',
     )
     expect(prompt).toContain(
       'If the user clearly declines or skips onboarding',
@@ -1921,44 +1909,21 @@ describe('assistant Murph onboarding guidance', () => {
       'only to mark onboarding complete with the declined reason',
     )
     expect(prompt).toContain(
-      'Skip onboarding advancement when the user explicitly asked for no follow-up',
+      'Do not recap the whole flow or ask more than one onboarding question.',
     )
     expect(prompt).toContain(
-      'the current turn is a meal photo, symptom report, or other health-data immediate request that should be handled alone',
-    )
-    expect(prompt).toContain(
-      'These skip conditions suppress visible onboarding questions or follow-up; they do not cancel the internal completion command once completion criteria are already satisfied, but urgent or safety-sensitive response handling comes first.',
-    )
-    expect(prompt).toContain(
-      'Read and follow `$MURPH_ASSISTANT_SKILLS_ROOT/murph-onboarding/SKILL.md` when onboarding is open and you need the next unresolved onboarding step, need to handle a clear onboarding decline, or need to verify and mark onboarding completion',
-    )
-    expect(prompt).toContain(
-      'Use the current prompt\'s date, timezone, channel, delivery route, and hosted wearable connection guidance as runtime context whenever the onboarding skill is used',
+      "Use the current prompt's date, timezone, channel, delivery route, and available tool guidance as runtime context whenever the onboarding skill is used",
     )
     expect(prompt).not.toContain(
-      'Before replying, read `$MURPH_ASSISTANT_SKILLS_ROOT/murph-onboarding/SKILL.md`',
+      'including a resolved first experiment setup',
     )
-    expect(prompt).toContain(
-      'Hosted wearable connection links are available for WHOOP (`whoop`)',
-    )
-    expect(prompt).toContain(
-      'When offering examples, mention about six supported choices from this list, not the full provider list',
-    )
-    expect(prompt).not.toContain('roughly 3-4 short assistant messages')
     expect(prompt).not.toContain(
-      'Do not compress the whole orientation into one "send me things" reply',
+      'For slow, non-reply-critical onboarding ingestion',
     )
     expect(prompt).not.toContain('Natural first-run flow')
     expect(prompt).not.toContain('vault-cli device account list --format json')
-    for (const unsupportedSource of [
-      'Apple Health',
-      'HealthKit',
-      'Health Connect',
-    ]) {
-      expect(prompt).not.toContain(unsupportedSource)
-    }
-    expect(prompt).not.toContain(
-      'say they can start by texting notes and connect wearables later',
+    expect(prompt).toContain(
+      'Hosted wearable connection links are available for WHOOP (`whoop`)',
     )
   })
 

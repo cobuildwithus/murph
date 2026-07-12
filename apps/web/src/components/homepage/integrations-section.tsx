@@ -36,15 +36,15 @@ export function IntegrationsSection({
       <div className="mx-auto max-w-[960px]">
         <div className="text-center">
           <span className="font-mono text-[10px] font-medium uppercase tracking-[0.18em] text-[#c4a882]">
-            Connected data
+            Context that compounds
           </span>
           <h2 className="mx-auto mt-5 max-w-[22ch] font-serif text-[clamp(2rem,4vw,3.25rem)] font-semibold leading-[1.05] tracking-[-0.03em] text-[#2d3436]">
-            Plugs into everything that knows your body.
+            Connect the pieces that complete the picture.
           </h2>
           <p className="mx-auto mt-5 max-w-[56ch] text-base leading-[1.7] text-pretty text-[#736a58]">
-            Your wearables, your labs, your inbox, your calendar. Murph reads
-            it all and helps you build the habits that actually make you
-            healthier.
+            Wearables, labs, records, inbox, calendar, and conversation give
+            Murph the context to make later answers, plans, and actions more
+            personal.
           </p>
         </div>
 

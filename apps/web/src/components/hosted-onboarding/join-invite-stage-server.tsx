@@ -49,11 +49,11 @@ const PULSE_TRIAL_FEATURES = [
 ];
 
 const PULSE_FEATURES = [
-  "Run experiments, see what changed",
+  "Private personal health assistant",
+  "Questions, decisions, plans, and follow-through",
   "Sync your health data",
-  "Private before/after outcomes",
   "Chat via iMessage, Telegram, or email",
-  "Guided experiment setup",
+  "Experiments when you need a clear answer",
   "Access to the most capable AI models",
 ];
 
@@ -61,9 +61,9 @@ const EDGE_FEATURES = [
   "Everything in Pulse and:",
   "More usage on the most capable AI models",
   "Murph remembers more of your history",
-  "Deeper outcome analysis",
+  "Deeper analysis across your context",
   "Detailed biomarker changes",
-  "Richer protocol recommendations",
+  "Richer plans and protocol recommendations",
   "Early access to new features",
 ];
 
@@ -300,7 +300,7 @@ function JoinInviteCheckoutPanel({
         <PricingTierCard
           tier="go"
           name="Pulse"
-          description="Run experiments. See what worked."
+          description="Your private personal health assistant."
           price={pulsePlan ? `$${Math.round(pulsePlan.recurringAmountUsdCents / 100)}` : "$8"}
           priceUnit="/ month"
           features={PULSE_FEATURES}

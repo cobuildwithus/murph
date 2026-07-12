@@ -347,7 +347,7 @@ describe('assistant protocol index planning', () => {
       `Read and follow \`${skillRef}\` when onboarding is open and you need the next unresolved onboarding step`,
     )
     expect(plan.developerInstructions).toContain(
-      'Before ending a normal reply while onboarding is open, keep onboarding moving unless a skip condition applies',
+      'Before ending a normal reply while onboarding is open, follow the onboarding skill unless a skip condition applies',
     )
     expect(plan.developerInstructions).not.toContain(
       'roughly 5-6 short assistant messages',
@@ -390,7 +390,7 @@ describe('assistant protocol index planning', () => {
     expect(plan.systemPrompt).not.toContain(skillRef)
     expect(plan.developerInstructions).not.toContain('Murph onboarding:')
     expect(plan.developerInstructions).not.toContain(
-      'Before ending a normal reply while onboarding is open, keep onboarding moving unless a skip condition applies',
+      'Before ending a normal reply while onboarding is open, follow the onboarding skill unless a skip condition applies',
     )
   })
 

@@ -90,13 +90,13 @@ describe('assistant food journal skill', () => {
     )
     expect(skill).toContain('Private is the default.')
     expect(onboarding).toContain(
-      'A bounded observation run is a structured deferral, not a fourth experiment state.',
+      'Experiments are one optional primitive.',
     )
     expect(onboarding).toContain(
-      'Treat a meal photo, symptom report, or other health data as an immediate request',
+      'If the user arrives with a health question, decision, symptom, file, image,\nlab, meal, workout, data point, connection request, logging request, task, or\nsafety-sensitive need, handle it first.',
     )
     expect(onboarding).toContain(
-      'do not append an onboarding question in the same turn',
+      'Do not append an onboarding question to a reply about a meal photo, symptom,\nurgent concern, or other health-data request that should stand alone.',
     )
   })
 })

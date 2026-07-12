@@ -14,9 +14,9 @@ export const MURPH_TAGLINE =
 export const MURPH_DEFAULT_METADATA_TITLE =
   "Murph — Health is hard. Don’t do it alone.";
 export const MURPH_DEFAULT_METADATA_DESCRIPTION =
-  "Murph figures out what works for you—and gets your friends in on it. A personal health AI that runs experiments with you and challenges with your friends.";
+  "Murph is a private personal health assistant for questions, decisions, data, tasks, and goals. It remembers useful context so later help gets more personal.";
 export const MURPH_DEFAULT_OPEN_GRAPH_DESCRIPTION =
-  "Murph figures out what works for you—and gets your friends in on it. A personal health AI that runs experiments with you and challenges with your friends.";
+  "Murph is a private personal health assistant for questions, decisions, data, tasks, and goals. It remembers useful context so later help gets more personal.";
 
 export const MURPH_DEFAULT_OPEN_GRAPH_IMAGE = {
   alt: MURPH_TAGLINE,

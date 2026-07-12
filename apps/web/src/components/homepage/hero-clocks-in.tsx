@@ -339,11 +339,11 @@ const HERO_HEADLINE = {
 const HERO_COPY = {
   act1: {
     paragraph:
-      "Wearables, bloodwork, doctor visits, supplements, blood pressure, sleep. Murph reads it all, figures out what actually works, and helps you build habits that stick.",
+      "Questions, data, records, routines, plans, and the rest of your life. Murph remembers the context, helps you decide what matters, and handles the next step with you.",
   },
   act2: {
     paragraph:
-      "Start a health challenge with your friends, right in your group chat. Murph sets fair baselines, referees the week, calls the winner, and keeps everyone in the loop.",
+      "When support would help, start a health challenge with people you trust. Murph sets fair baselines, referees the week, and keeps everyone in the loop.",
   },
 } as const;
 

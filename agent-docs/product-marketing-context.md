@@ -1,259 +1,289 @@
 # Product Marketing Context
 
-*Last updated: 2026-06-10*
+*Last updated: 2026-07-12*
 
-This doc separates **facts** (what is true today), **hypotheses** (what we
-believe but have not tested), and **target state** (what we are building
-toward). Earlier revisions blurred these; do not re-blur them.
+This doc separates **facts** (true today), **strategy decisions** (chosen
+product direction), **hypotheses** (beliefs still to validate), and **target
+state** (what Murph is building toward). Do not turn a hypothesis or target
+state into a public proof point.
 
 ## Product Overview
 
-**One-liner (current wedge):** Murph is the AI referee for group health
-challenges. Start a challenge in the group chat you already have, and Murph
-runs it: baselines, consent, scoring, reminders, and results.
+**One-liner:** Murph is a personal health assistant that works where you
+already talk. It helps you understand, decide, act, and follow through across
+your health while remembering the context that would otherwise get lost.
 
-**Substrate:** Under every challenge is the personal experiment loop — connect
-a wearable, set a baseline, run a bounded protocol, get a structured outcome.
-The challenge is the social front end; the experiment loop is what makes the
-referee smart.
+**Emotional promise:** Health is hard. You do not have to figure it out alone.
 
-**Consumer shorthand:** Do a health challenge with your people, and let Murph
-keep score — then see what actually changed for you.
+**Product category:** Personal health assistant.
 
-**Product category:** Group health challenges / personal health
-experimentation.
+**Product type:** Conversation-first assistance through existing messaging
+channels, with a web vault for records, plans, data, and results. No dedicated
+mobile app is required for the main relationship.
 
-**Product type:** Works through existing messaging channels (group chat on the
-phone is the primary surface) plus a web vault for results. No dedicated
-mobile app.
+**Current product fact:** Murph supports private conversation, durable health
+context, connected health data, research and interpretation, plans and
+actions, follow-through support, experiments, and group conversations.
 
-### What is shipped vs. not (as of 2026-06-10)
+**Strategy decision:** Direct signups begin privately. Onboarding finds one
+useful first thread without narrowing Murph to that thread. Friend or group
+support is suggested only when it fits and the member chooses it.
 
-- **Shipped:** personal experiment loop (wearable/lab connections, baselines,
-  protocols, adherence, confounders, outcomes), 1:1 assistant chat, web vault.
-- **In flight:** first real group challenges (family sleep-consistency and
-  family-walk challenges launching now); group referee behavior is designed
-  but has never run with real participants.
-- **Target state, not shipped:** v1 group-channel routing, selected-friend
-  sharing, anonymous contribution records, public cohort summaries, Health
-  Commons surfaces.
+**Differentiation hypothesis:** Persistent, well-retrieved personal context
+will make Murph materially more useful than a general-purpose model and create
+compounding value over time.
 
-## Traction (honest version)
+**Target state:** Murph develops a deep enough longitudinal understanding to
+function like a personal health superintelligence for the member. “Ten
+thousand data points” is shorthand for intended depth, not an onboarding
+quota, completion score, public proof point, or permission to collect
+irrelevant data.
 
-- 8 paid users since the private beta opened 2026-05-04.
-- **All 8 know the founder personally. Zero organic signups.** They were told
-  "Murph is a health assistant that helps you run health experiments" and paid
-  largely on trust in the founder, not proven product pull.
-- Demand for the product itself is **unproven**. The first real demand test is
-  whether non-founder challenge participants engage because the challenge is
-  fun — starting with the family challenges launching 2026-06-10.
-- Do not present the 8 paid users as demand evidence in any external material
-  without this context.
+## What Murph Helps With
 
-## Pricing (actual)
+Murph should be marketed as one relationship with composable capabilities,
+not as a collection of disconnected features:
 
-- Most paying users: **$8/mo** (Plus).
-- One user pays **$20/mo** (Edge) — a family member of a founder. The Edge
-  tier has no validated buyer.
-- The older $15/mo / $150/yr launch pricing is obsolete; remove it wherever it
-  still appears.
-- **Open question — challenge monetization.** Leading candidate (unvalidated):
-  challenges are free, the private assistant/vault is what's paid. Who pays in
-  a group (organizer, every participant, sponsor) is undecided. Do not state a
-  model as fact until one has been tested.
+- answer health questions and research decisions
+- interpret wearables, labs, records, photos, and other health data
+- remember relevant history, routines, preferences, constraints, and outcomes
+- build plans and habits that fit the member's life
+- handle permitted health logistics and tasks
+- provide private accountability and follow-through
+- bring in friends or groups for consensual social support
+- run bounded experiments when uncertainty about what works is the problem
+
+All of these are real reasons to use Murph. Experiments are one primitive, not
+the core loop or required first action.
 
 ## Positioning
 
-The wedge is the group challenge:
+### Primary frame
 
-- group-chat-native: lives where the group already talks
-- the referee does the annoying parts — rules, mixed devices, baselines,
-  reminders, scoring, results
-- consent-at-join for data sharing (hypothesis: consent collected in-chat at
-  kickoff)
+Murph is the health relationship that remembers the whole picture. A member
+can start with whatever matters today—a question, a task, data, a decision, a
+goal, or uncertainty about where to focus—and Murph becomes more personal as
+relevant context accumulates.
 
-The substrate is chat-first personal experimentation: private before/after
-learning tied to wearable data.
+The first useful thread makes the value concrete. It does not turn Murph into
+a single-goal coach, and onboarding should not make a member complete a health
+profile before receiving help.
 
-The long-term moat is still the protocol outcome graph (exact protocol version
-+ user context + adherence + biomarker deltas + confounders + cohort learning),
-but it is **explicitly demoted to later**. Nothing about the current wedge
-should be justified by the Commons; the wedge has to work on its own as a fun,
-accountable group challenge.
+### Context advantage
 
-Useful internal analogies (long-term): GitHub for protocol versions, Strava
-for lightweight sharing attached to real activity, Wikipedia for the eventual
-Commons. None of these describe the current product.
+General models are already capable. Murph's durable advantage must come from
+knowing the member across time and using that knowledge well:
 
-## Voice: two registers (hypothesis — untested in groups)
+1. learn a useful fact through conversation or an authorized source
+2. save it in the canonical member record with appropriate provenance
+3. retrieve it when it changes the answer, action, safety, or timing
+4. let the member inspect saved context, decline new collection, correct
+   structured records through their owners, or forget freeform memories
+5. reduce repeated questions as the relationship gets smarter
 
-- **In the group chat, Murph is the referee.** It makes the challenge fun and
-  keeps people accountable: kickoffs, score updates, nudges, humor. The
-  referee-humor loop (do daily dispatches make the group laugh and reply?) is
-  an explicit hypothesis under test in the first family challenges.
-- **In private (1:1), Murph is a helpful assistant.** Calm, careful, research-
-  grounded — the voice of someone writing up your results.
+Collection alone is not value. The proof is a better later decision or action.
 
-These are two registers of one personality, not two products. If group-chat
-behavior starts feeling like the private assistant (dry, careful) the referee
-is failing; if private analysis starts performing for an audience, the
-assistant is failing.
+### Private first, social when useful
 
-## Product Philosophy
+The default direct-signup relationship is private. Group challenges, shared
+accountability, and friend support remain strong capabilities. They should be
+introduced when another person would make the member's chosen thread easier,
+more fun, or more likely to happen—not as an obligatory funnel.
 
-Unchanged and still binding:
+### Experiments when uncertainty is the bottleneck
 
-- **Curiosity beats compliance.** The right feeling is "huh, interesting."
-- **Silence is a feature.** A good health product knows when not to speak.
-- **Compare interventions, not bodies — by default.** Challenges score
-  adherence and change-vs-your-own-baseline; Murph never proposes body
-  ranking or a "best body" prize. The line is what Murph originates and how
-  it speaks, not what consenting friends choose: a private group that
-  explicitly and individually opts into a physique frame gets it run without
-  a lecture.
-- **Protocols are temporary tools, not identities.**
-- **Numbers are clues, not verdicts.**
-- **Private by default, sharing by consent.** In groups this means
-  consent-at-join: joining a challenge is the explicit, visible act that
-  shares specific data with that group, nothing more.
-- **Status from useful contribution, not elite biomarkers.**
+Experiments remain valuable when the member needs to learn whether an
+intervention works for them. Murph can define a baseline, run a bounded
+protocol, support follow-through, and review what changed. A direct answer,
+plan, task, or habit should not be converted into an experiment merely because
+the machinery exists.
 
-What we refuse to become: a whispering earring, a protocol machine, a shame
-engine, an anxiety business, a health-status network that ranks bodies.
+## Honest Product State
 
-## Target Audience
+### Shipped capabilities
 
-**Wedge ICP:** someone who already wants to run a health challenge with
-specific people — family, friends, coworkers — and doesn't want to manage
-rules, mixed devices, reminders, scoring, and results by hand.
+- 1:1 assistant conversation and durable private context
+- wearable and lab connections, protocols, experiment runs, adherence,
+  confounders, and outcomes
+- plans, reminders, and action-oriented assistant support
+- group conversations and challenge behavior
+- a private web vault and Health Commons surfaces
 
-**Actual current users:** the founders' family and friends. First challenge
-participants are family members (sleep consistency; daily walks). This is the
-real ICP today; everything broader is projection.
+Do not imply that every integration, action, or health need is supported
+without checking its actual product path. “Broad assistant” means broad entry
+points and composable help, not unlimited provider access or clinical scope.
 
-**Substrate ICP (for the private assistant):** the data-curious wearable owner
-who wants more from health data than passive scores — screenshots graphs,
-texts friends, asks AI what numbers mean.
+### Traction
 
-"Wearable owners" is a market, not a customer. Keep naming actual humans.
+- 8 paid users since the private beta opened 2026-05-04.
+- All 8 know a founder personally. There were zero organic signups as of the
+  last evidence captured in this doc.
+- They were told Murph helps run health experiments and paid largely on trust,
+  not proven product pull.
+- Demand for the new private-assistant/context positioning is unproven. Do not
+  present the 8 paid users as validation without this context.
 
-## Problems & Pain Points
+### Pricing
 
-**Challenge organizer's problem:** group challenges die because someone has to
-be the referee — chase people, track mixed devices, keep score, declare
-results — and that person burns out by week two.
+- Most paying users: **$8/month** on Pulse.
+- One family member of a founder pays **$20/month** on Edge. The Edge buyer is
+  not validated.
+- The older $15/month or $150/year launch pricing is obsolete.
+- Group monetization remains an open question. Do not state who pays for a
+  group as fact until it has been tested.
 
-**Individual's problem (substrate):** wearables create awareness without an
-experiment loop. Scores accumulate; behavior doesn't change; nobody knows what
-actually worked.
+## Product Loops
 
-**Why alternatives fall short:**
-- Group chats already host challenges informally — with no baselines, no
-  scoring, no memory, and no referee.
-- Wearable apps run branded challenges inside their own walled garden, only
-  for their own device owners, with leaderboard mechanics.
-- Wearable dashboards show status, not before/after learning.
-- Generic AI chat can analyze, but holds no persistent runs, baselines, or
-  group state.
+### Immediate-value loop
 
-## Product Loop (challenge wedge)
+1. The member brings a health question, decision, task, data point, desired
+   change, or request for direction.
+2. Murph reads relevant known context and resolves the need or asks the one
+   question that most improves the help.
+3. Murph uses the lightest useful primitive: answer, interpretation, action,
+   plan, habit, private support, social support, monitoring, or experiment.
+4. The member gets a useful result now.
 
-1. Someone starts or joins a challenge in the group chat.
-2. Members consent at join; wearables they already own get connected.
-3. Murph sets each person's baseline.
-4. Murph runs the challenge: reminders, scoring, referee dispatches.
-5. Results land in each member's private vault as a structured outcome.
-6. The group sees the challenge result; each person sees what changed for
-   *them*.
+### Context-compounding loop
 
-The first-class social object is the challenge and its outcome — not a
-biomarker, not a feed.
+1. A normal interaction or authorized source reveals useful context.
+2. Murph saves it in the existing canonical owner.
+3. A later interaction retrieves it at the moment it matters.
+4. Better, more personal help earns trust and more useful context.
+
+Do not optimize this loop for facts collected, questionnaire completion, or
+messages sent. Leading product evidence is first personalized value and the
+first later moment when remembered context materially improves the help.
+
+### Experiment loop
+
+When an experiment is the selected primitive: choose a user-valued outcome,
+select a credible intervention and evidence plan, run a bounded protocol,
+review what changed, and decide whether to keep, change, extend, or stop it.
+
+### Social-support loop
+
+When the member chooses social support: define what is shared and with whom,
+invite the selected people, provide the agreed accountability or challenge
+support, and keep everything else private.
+
+## Audience
+
+The product should welcome several starting states rather than forcing one
+ideal customer script:
+
+- someone with a health outcome they want but have struggled to reach
+- someone facing a health question, decision, task, or confusing data
+- someone who wants help following through on an existing plan
+- someone who would benefit from accountability with a friend or group
+- someone who feels generally healthy and wants an optional baseline review or
+  a more useful relationship with their data
+
+The near-term audience hypothesis is people comfortable texting an assistant
+about health and willing to let relevant context compound over time. This is
+not yet a validated ICP. “Wearable owners” is a market, not a customer.
+
+## Problems And Alternatives
+
+**Health is fragmented.** Questions, records, wearable signals, goals,
+routines, appointments, and advice live in different places. The member must
+reconstruct the story for every tool or person.
+
+**Knowing is not doing.** Information is abundant, but follow-through is hard
+when plans do not fit ordinary life or nobody helps at the moment of friction.
+
+**Generic AI starts over.** It can reason well in one conversation but usually
+lacks the canonical, longitudinal context and product actions needed to carry
+the relationship forward.
+
+**Single-purpose health apps narrow the problem.** Wearable dashboards,
+trackers, experiment tools, and challenge apps can each be useful, but the
+member still has to decide which tool owns the moment and connect the context.
 
 ## Objections
 
 | Objection | Response |
 | --- | --- |
-| "I already have Oura or WHOOP." | Murph doesn't replace the wearable — it referees challenges across mixed devices and gives the data an experiment loop. |
-| "We already do challenges in the group chat." | Right — with no baselines, no fair scoring, no memory, and one exhausted person playing referee. That's the job Murph takes. |
-| "I can do this in ChatGPT." | Not persistently, not across a group, not with device data, baselines, and consent handled. |
-| "This sounds like a leaderboard." | Scoring is adherence and change-vs-your-own-baseline, not body ranking. The winner did the thing most, not had the best HRV. |
-| "I don't want another app." | There isn't one. The challenge lives in your existing chat; results live in a private vault you can visit when you care. |
-| "I don't want my health data in a group chat." | Consent-at-join, scoped to the specific challenge. Private is still the default for everything else. |
+| “I can ask a general AI.” | General AI is capable. Murph is designed to remember relevant health context, connect authorized data, act through health-specific tools, and use the history again later. The context advantage remains a hypothesis to prove. |
+| “I already have Oura, WHOOP, or another health app.” | Murph does not replace the source. It helps interpret the data alongside the rest of the member's life and turn it into a useful decision or action. |
+| “I do not have a health goal.” | A member does not need to invent one. Murph can help with whatever comes up or offer one optional baseline review. |
+| “I do not want another app.” | The main relationship works through existing messaging. The web vault is available when a richer review surface is useful. |
+| “I do not want my health data shared.” | Direct signup is private by default. Any friend, group, or public sharing is explicit and scoped. |
+| “I do not want constant nudges.” | Murph should get quieter as it learns, and reminders or accountability remain easy to decline, change, or stop. |
+| “Is this medical advice?” | Murph supports understanding, decisions, and follow-through; it does not diagnose or replace clinicians. It should identify uncertainty and escalate when appropriate. |
 
-**Anti-persona:** people who want a passive dashboard, public health-status
-leaderboards, diagnosis, or a daily boss telling them what to do forever.
+**Anti-persona:** people seeking diagnosis, emergency care, public body
+rankings, a passive dashboard with no conversation, or a daily boss they must
+obey.
 
 ## Customer Language
 
-> Provenance note: the lists below came from interviews about the *assistant*
-> positioning (pre-2026-06). Challenge-specific language is thin — capture
-> verbatims from the first family challenges and replace this section's gaps.
+The current language evidence came from earlier assistant and experiment
+interviews. Capture verbatims for the new positioning before treating any new
+phrase as validated.
 
-Problem language (assistant-era, still useful): "I have all this data and I'm
-still not changing anything." / "It's too much information without a clear
-experiment." / "Don't make this into a gross leaderboard." / "I don't want
-another app."
+Useful existing phrases include: “I have all this data and I'm still not
+changing anything,” “don't make this into a gross leaderboard,” and “I don't
+want another app.”
 
-**Words to use:** challenge, referee, baseline, what changed, experiment,
-protocol, outcome, evidence, consent, worth trying, private by default
+**Words to use:** personal health assistant, help, understand, decide, handle,
+remember, context, private by default, worth trying, what changed, experiment,
+support, together
 
-**Words to avoid:** optimize, biohack, leaderboard, top percentile, elite,
-compliance, crush it, level up, hack, stack
+**Words to avoid:** optimize, biohack, compliance, crush it, level up, hack,
+stack, perfect, complete your profile, collect data points
 
-**Glossary:**
-| Term | Meaning |
+## Proof To Seek
+
+No external metric currently proves the strategy. The next useful evidence is:
+
+| Question | Status |
 | --- | --- |
-| Challenge | A bounded group health experiment with a referee, baselines, scoring, and an end |
-| Referee | Murph's group-chat register: runs the challenge, keeps it fun and accountable |
-| Experiment / run | One person's bounded execution of a protocol |
-| Protocol | The exact instructions for an experiment version |
-| Outcome card | The concise result of a completed run: what changed, how trustworthy it looks |
-| Consent-at-join | Joining a challenge is the explicit act that shares scoped data with that group |
-| Health Commons | Long-term public protocol/outcome layer — target state, not current product |
+| Do new members understand Murph's broad role after the first conversation? | Unproven |
+| Does a focused first thread create useful value without narrowing the product? | Unproven |
+| Does Murph reuse prior context in a way members notice and value? | Unproven |
+| Do members trust the current surface-specific context controls? | Unproven |
+| Do members need universal structured-record deletion beyond correction and status changes? | Unproven and not currently shipped |
+| Does contextual private accountability improve follow-through? | Unproven |
+| When social support fits, do members choose and value it? | Unproven |
+| When uncertainty is the problem, do experiments change a decision? | Unproven |
 
-## Proof Points
+## Voice
 
-**Metrics:** none yet worth citing. 8 friends-and-family payers, 0 organic.
-The first honest proof points will be challenge participation and reaction
-verbatims from non-founder participants.
+In private, Murph is a calm, capable health partner: curious, direct,
+research-grounded, and able to act. It should not sound like a clinician, guru,
+intake form, or motivational drill sergeant.
 
-**Value themes to validate in challenges:**
-| Theme | Status |
-| --- | --- |
-| Groups want a referee, not another app | Hypothesis |
-| Challenges need automatic data (manual logging kills them) | Early learning — banked 2026-06 |
-| Referee humor drives group engagement | Hypothesis under test |
-| Consent-at-join feels right, not creepy | Hypothesis under test |
-| The result-for-*me* is what makes a challenge more than a game | Hypothesis |
+In a group, Murph can be more playful and referee-like while respecting the
+group's tone. These are two registers of one assistant, not two products. The
+private relationship must never perform for an audience, and group energy must
+never weaken consent or health-data boundaries.
 
-## Goals
+## Product Philosophy
 
-**Business goal:** validate the group challenge wedge with real non-founder
-participants, then figure out monetization (open question above). The private
-experiment loop is validated only when someone who doesn't know the founder
-pays for it.
+- Curiosity beats compliance.
+- Silence is a feature.
+- Context should compound into fewer, better questions.
+- Compare interventions, not bodies.
+- Protocols are temporary tools, not identities.
+- Numbers are clues, not verdicts.
+- Private by default; sharing by explicit consent.
+- Life fit beats marginal gain.
 
-**Primary conversion action (current):** join a challenge → connect wearable.
+What Murph refuses to become: a whispering earring, a protocol machine, a
+questionnaire, a shame engine, an anxiety business, or a health-status network
+that ranks bodies.
 
-## Protocol Outcome Graph (long-term, demoted)
+## Design And Tech
 
-The graph — missions → domains → goal templates → experiment families →
-protocol variants → biomarkers → runs → outcome cards → contribution records →
-cohort summaries — remains the long-term compounding asset. It is not the
-pitch, not the wedge, and must not be used to justify near-term work. Build
-toward it only through what challenges and runs naturally produce.
+**Stack:** Next.js and Tailwind, Postgres, hosted execution, local vault
+surfaces, wearable integrations, and AI providers.
 
-## Design & Tech
+**Surface hierarchy:**
 
-**Stack:** Next.js + Tailwind, Postgres, hosted execution, local vault
-surfaces, wearable integrations, AI providers.
+1. private conversation in the member's existing messaging channel
+2. the web vault for richer review, records, connections, and results
+3. group conversation when the member explicitly chooses social support
 
-**Surface hierarchy (inverted 2026-06-10):**
-1. **Group chat on the phone** — where Murph lives day to day.
-2. **1:1 chat** — the private assistant.
-3. **Web vault (desktop)** — the review surface: results, baselines, planning
-   the next run. Nobody visits it daily, and that's fine.
-
-**Design rule:** if a surface makes the body feel like a public scoreboard, it
-is pointed in the wrong direction. In groups: score the challenge, never the
-body.
+**Design rule:** make the next useful action easy without making health feel
+like a profile to finish, a feed to refresh, or a public score to defend.

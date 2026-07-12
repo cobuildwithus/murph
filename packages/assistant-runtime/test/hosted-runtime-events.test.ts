@@ -1531,7 +1531,7 @@ describe("executeHostedMailboxEvent", () => {
         localTime: "13:30",
       },
       slug: "finish-onboarding-followup",
-      summary: "Daily setup continuation check until Murph onboarding is complete.",
+      summary: "Daily first-thread continuation check until Murph onboarding is complete.",
       tags: [
         "assistant",
         "scheduled",
@@ -1547,46 +1547,50 @@ describe("executeHostedMailboxEvent", () => {
       "vault-cli automation set-status finish-onboarding-followup --status archived",
     );
     expect(seedInput?.instructions).toContain(
-      "Goal: close or gently advance Murph onboarding after hosted signup without re-asking setup context the vault already knows.",
+      "Goal: close or gently advance Murph onboarding after hosted signup without turning it into a drip questionnaire.",
     );
     expect(seedInput?.instructions).toContain("Success criteria:");
     expect(seedInput?.instructions).toContain("If `onboarding.status` is `completed`");
     expect(seedInput?.instructions).toContain(
-      "If `onboarding.status` is `open` but resume-context or the available recent user messages show the onboarding completion criteria are already satisfied through answers, saved setup facts, skipped individual fields, or deferrals, run `vault-cli assistant onboarding complete --reason user_answered`.",
+      "If `onboarding.status` is `open` but the relationship promise, minimal identity or decline, starting mode, and first useful result or defer are already established, run `vault-cli assistant onboarding complete --reason user_answered`.",
     );
     expect(seedInput?.instructions).toContain(
-      "If recent user messages show a clear overall onboarding opt-out, run `vault-cli assistant onboarding complete --reason user_declined` instead.",
+      "If recent messages show a clear overall onboarding opt-out, use `--reason user_declined`.",
     );
     expect(seedInput?.instructions).toContain(
       "If the output shows completed, archive this automation, then return skip.",
     );
     expect(seedInput?.instructions).toContain(
-      "Open status alone is not evidence that setup facts are missing.",
+      "treat resume-context as evidence rather than required fields",
     );
     expect(seedInput?.instructions).toContain(
-      "If most setup context is already present, ask about the next meaningful first-experiment setup or deferral decision instead of more intake.",
+      "Continue the current goal, question, task, or accepted baseline review with the smallest useful action or one high-value question.",
     );
     expect(seedInput?.instructions).toContain(
-      "Treat saved, skipped, declined individual fields, not-relevant, or clearly answered-in-chat setup context as resolved",
+      "Never rotate through missing profile categories.",
     );
     expect(seedInput?.instructions).toContain(
-      "Before sending, triple-check resume-context and the available recent user messages for an answer to the question you would ask.",
+      "gently offer the one-time baseline review only when it has not already been offered; honor any defer or decline without asking again.",
     );
     expect(seedInput?.instructions).toContain(
-      "The last thing we want is to bug the user after they already answered onboarding.",
+      "Before sending, triple-check the snapshot and recent messages for an answer or decline.",
+    );
+    expect(seedInput?.instructions).toContain(
+      "If there is no timely, useful continuation",
     );
     expect(seedInput?.instructions).toContain(
       "return skip rather than sending a generic setup nudge",
     );
     expect(seedInput?.instructions).toContain(
-      "Output: send one brief, natural, low-pressure in-chat question only when a real unresolved step remains.",
+      "Output: send one brief, natural, low-pressure in-chat continuation only when it advances the member's current thread.",
     );
+    expect(seedInput?.instructions).toContain("Ask at most one question.");
     expect(seedInput?.instructions).toContain(
-      "The user's answer will be handled by the next normal Murph onboarding turn",
+      "The user's reply will be handled by the next normal Murph onboarding turn",
     );
     expect(seedInput?.instructions).toContain("available recent user messages");
     expect(seedInput?.instructions).toContain(
-      "smallest genuinely unresolved onboarding step",
+      "one useful action or question advances the member's chosen change, understand, handle, or explore thread",
     );
     expect(seedInput?.instructions).toContain("return skip");
     expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenNthCalledWith(
