@@ -23,6 +23,7 @@ export async function createAuthenticatedTarSnapshotFixture(input: {
   dataKey: Uint8Array;
   entries: readonly TestTarEntry[];
   fileCount?: number;
+  maxCompressedArchiveBytes?: number;
   snapshotId: string;
   totalPlainBytes?: number;
 }): Promise<{
@@ -35,7 +36,7 @@ export async function createAuthenticatedTarSnapshotFixture(input: {
   try {
     compressedArchive = execFileSync("zstd", ["-1", "--stdout"], {
       input: tarArchive,
-      maxBuffer: 64 * 1024 * 1024,
+      maxBuffer: input.maxCompressedArchiveBytes ?? 64 * 1024 * 1024,
     });
   } finally {
     tarArchive.fill(0);

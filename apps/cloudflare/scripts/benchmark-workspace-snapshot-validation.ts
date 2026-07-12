@@ -1,4 +1,5 @@
 import { spawn, type ChildProcess } from "node:child_process";
+import { createCipheriv } from "node:crypto";
 import { access, mkdir, mkdtemp, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -8,6 +9,7 @@ import { pipeline } from "node:stream/promises";
 
 import {
   encodeHostedWorkspaceSnapshotV2DataKey,
+  HOSTED_WORKSPACE_SNAPSHOT_MAX_SINGLE_PART_BYTES,
   HOSTED_WORKSPACE_SNAPSHOT_MAX_TOTAL_PLAIN_BYTES,
   HOSTED_WORKSPACE_SNAPSHOT_WARN_BYTES,
   type HostedWorkspaceSnapshotV2Ref,
@@ -33,8 +35,8 @@ type BenchmarkPayload =
   }
   | {
     fileCount: 1;
-    kind: "large-plain-bytes";
-    name: "large-plain-bytes-warning-threshold";
+    kind: "encrypted-warning-threshold";
+    name: "encrypted-archive-warning-threshold";
     totalPlainBytes: typeof HOSTED_WORKSPACE_SNAPSHOT_WARN_BYTES;
   };
 
@@ -62,8 +64,8 @@ const payloads: readonly BenchmarkPayload[] = [
   },
   {
     fileCount: 1,
-    kind: "large-plain-bytes",
-    name: "large-plain-bytes-warning-threshold",
+    kind: "encrypted-warning-threshold",
+    name: "encrypted-archive-warning-threshold",
     totalPlainBytes: HOSTED_WORKSPACE_SNAPSHOT_WARN_BYTES,
   },
 ];
@@ -86,8 +88,9 @@ process.stdout.write(`${JSON.stringify({
     warmupPairs: WARMUP_PAIR_COUNT,
   },
   payloadEnvelope: {
+    encryptedArchiveWarningBytes: HOSTED_WORKSPACE_SNAPSHOT_WARN_BYTES,
     entryCeiling: ENTRY_CEILING,
-    largePlainBytes: HOSTED_WORKSPACE_SNAPSHOT_WARN_BYTES,
+    maxSinglePartEncryptedBytes: HOSTED_WORKSPACE_SNAPSHOT_MAX_SINGLE_PART_BYTES,
     maxPlainBytes: HOSTED_WORKSPACE_SNAPSHOT_MAX_TOTAL_PLAIN_BYTES,
   },
   report,
@@ -306,31 +309,76 @@ async function createAuthenticatedBenchmarkFixture(
     { length: 32 },
     (_, index) => dataKeyOffset + index,
   );
-  let largeContent: Buffer | null = null;
+  let warningThresholdContent: Buffer | null = null;
   const entries: TestTarEntry[] = payload.kind === "entry-ceiling"
     ? Array.from({ length: payload.fileCount }, (_, index) => ({
       path: `vault/entry-${String(index).padStart(5, "0")}.txt`,
       type: "0" as const,
     }))
     : [{
-      content: largeContent = Buffer.alloc(payload.totalPlainBytes),
+      content: warningThresholdContent = createDeterministicLowCompressibilityBuffer(
+        payload.totalPlainBytes,
+      ),
       path: "vault/large-payload.bin",
       type: "0",
     }];
-  const fixture = await createAuthenticatedTarSnapshotFixture({
-    dataKey,
-    entries,
-    fileCount: payload.fileCount,
-    snapshotId,
-    totalPlainBytes: payload.totalPlainBytes,
-  });
-  largeContent?.fill(0);
+  try {
+    const fixture = await createAuthenticatedTarSnapshotFixture({
+      dataKey,
+      entries,
+      fileCount: payload.fileCount,
+      maxCompressedArchiveBytes: payload.kind === "encrypted-warning-threshold"
+        ? HOSTED_WORKSPACE_SNAPSHOT_MAX_SINGLE_PART_BYTES
+        : undefined,
+      snapshotId,
+      totalPlainBytes: payload.totalPlainBytes,
+    });
+    if (
+      payload.kind === "encrypted-warning-threshold"
+      && fixture.encryptedBytes.byteLength < HOSTED_WORKSPACE_SNAPSHOT_WARN_BYTES
+    ) {
+      throw new Error(
+        "Workspace snapshot validation benchmark encrypted fixture did not reach the warning threshold.",
+      );
+    }
+    if (fixture.encryptedBytes.byteLength >= HOSTED_WORKSPACE_SNAPSHOT_MAX_SINGLE_PART_BYTES) {
+      throw new Error(
+        "Workspace snapshot validation benchmark encrypted fixture reached the single-part maximum.",
+      );
+    }
 
-  return {
-    dataKey,
-    ...fixture,
-    payload,
-  };
+    return {
+      dataKey,
+      ...fixture,
+      payload,
+    };
+  } finally {
+    warningThresholdContent?.fill(0);
+  }
+}
+
+function createDeterministicLowCompressibilityBuffer(byteLength: number): Buffer {
+  const target = Buffer.alloc(byteLength);
+  const zeroChunk = Buffer.alloc(Math.min(byteLength, 1024 * 1024));
+  const cipher = createCipheriv(
+    "aes-256-ctr",
+    Buffer.alloc(32, 0x5a),
+    Buffer.alloc(16, 0xa5),
+  );
+  let offset = 0;
+  while (offset < target.byteLength) {
+    const chunkLength = Math.min(zeroChunk.byteLength, target.byteLength - offset);
+    const generated = cipher.update(zeroChunk.subarray(0, chunkLength));
+    generated.copy(target, offset);
+    generated.fill(0);
+    offset += chunkLength;
+  }
+  zeroChunk.fill(0);
+  if (cipher.final().byteLength !== 0) {
+    target.fill(0);
+    throw new Error("Workspace snapshot validation benchmark generator emitted trailing bytes.");
+  }
+  return target;
 }
 
 async function* streamBuffer(buffer: Buffer): AsyncIterable<Uint8Array> {
