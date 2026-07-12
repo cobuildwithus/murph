@@ -110,7 +110,7 @@ test("Edge members can explicitly save Sol as their default model", async () => 
   );
   assert.match(
     view.container.textContent ?? "",
-    /An idle run can take up to three minutes to close\./,
+    /Changes apply to new work and can take a few minutes\./,
   );
   const terraInput = view.container.querySelector<HTMLInputElement>(
     `input[value="${HOSTED_ASSISTANT_TERRA_MODEL}"]`,
@@ -226,14 +226,12 @@ test("model radios stay labeled and the form becomes busy while saving", async (
   );
   const options = [
     {
-      description:
-        "For everyday check-ins, questions, planning, and follow-through with Murph.",
+      description: "Everyday check-ins, questions, and planning.",
       model: HOSTED_ASSISTANT_TERRA_MODEL,
       name: "GPT-5.6 Terra",
     },
     {
-      description:
-        "When you want Murph to dig deeper on complex questions, research, and demanding tasks. Counts more toward your Edge usage limit.",
+      description: "Deeper research and harder tasks. Uses more of your Edge limit.",
       model: HOSTED_ASSISTANT_SOL_MODEL,
       name: "GPT-5.6 Sol",
     },
