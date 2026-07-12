@@ -114,7 +114,10 @@ test("Junction companion health metadata exact replay reuses one integration ing
     const replay = await importSnapshot();
     const ingests = await coreRuntime.readIntegrationIngestEntries(vaultRoot);
 
-    assert.equal(replay.ingestId, first.ingestId);
+    assert.equal(replay.applied, false);
+    assert.equal(replay.ingestId, null);
+    assert.equal(replay.auditPath, null);
+    assert.equal(replay.persistedEvidencePartCount, 0);
     assert.equal(ingests.length, 1);
     assert.equal(ingests[0]?.record.id, first.ingestId);
     assert.equal(ingests[0]?.record.importedAt, "2026-04-02T12:00:00.000Z");

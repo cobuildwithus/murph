@@ -90,6 +90,7 @@ import {
   buildIntegrationIngestRecord,
   stageIntegrationIngestAppendPlan,
   compactIntegrationIngestReceipt,
+  readIntegrationIngestByIdForImportedAt,
   selectNovelIntegrationIngestEvidence,
   type IntegrationIngestAppendPlan,
 } from "./integration-ingests.ts";
@@ -3024,6 +3025,7 @@ function prepareDeviceBatchPlan({
       fileName: part.fileName,
       mediaType: part.mediaType ?? null,
       sha256: part.sha256,
+      ...(part.metadata === undefined ? {} : { metadata: part.metadata }),
     })),
     ...buildLegacyReceiptFingerprint(normalizedInputs.ingestReceipt, normalizedInputs.provider),
   ];
@@ -3578,6 +3580,39 @@ export async function importDeviceBatch({
     ...new Set(deviceBatchPlan.preparedEvents.map((entry) => entry.relativePath)),
   ].sort();
   const sampleRecords = deviceBatchPlan.preparedSamples.map((entry) => entry.record);
+  const buildNoopResult = (): NoopDeviceBatchImportResult => ({
+    applied: false,
+    ingestId: null,
+    ingestShardPath: null,
+    provider: deviceBatchPlan.provider,
+    accountId: deviceBatchPlan.accountId,
+    importedAt: deviceBatchPlan.importedAt,
+    events: eventRecords,
+    samples: sampleRecords,
+    eventShardPaths: eventTargetShardPaths,
+    sampleShardPaths: sampleAppendPlan.targetShardPaths,
+    evidencePartCount: deviceBatchPlan.preparedEvidenceParts.length,
+    persistedEvidencePartCount: 0,
+    auditPath: null,
+  });
+  const existingExactIngest = await readIntegrationIngestByIdForImportedAt(
+    vaultRoot,
+    deviceBatchPlan.importedAt,
+    deviceBatchPlan.importId,
+  );
+  if (existingExactIngest) {
+    if (
+      eventAppendPlan.appendedRecordIds.length > 0
+      || sampleAppendPlan.appendedRecordIds.length > 0
+    ) {
+      throw new VaultError(
+        "INTEGRATION_INGEST_ID_OUTPUT_CONFLICT",
+        `Integration ingest id "${deviceBatchPlan.importId}" already exists but its canonical outputs are incomplete.`,
+        { ingestId: deviceBatchPlan.importId },
+      );
+    }
+    return buildNoopResult();
+  }
   const canonicalIdByPreparedId = mapPreparedDeviceEventsToCanonicalIds(
     deviceBatchPlan.preparedEvents,
     eventRecords,
@@ -3667,21 +3702,7 @@ export async function importDeviceBatch({
     && retainedEvidenceParts.length === 0
     && !novelty.receiptIsNovel
   ) {
-    return {
-      applied: false,
-      ingestId: null,
-      ingestShardPath: null,
-      provider: deviceBatchPlan.provider,
-      accountId: deviceBatchPlan.accountId,
-      importedAt: deviceBatchPlan.importedAt,
-      events: eventRecords,
-      samples: sampleRecords,
-      eventShardPaths: eventTargetShardPaths,
-      sampleShardPaths: sampleAppendPlan.targetShardPaths,
-      evidencePartCount: deviceBatchPlan.preparedEvidenceParts.length,
-      persistedEvidencePartCount: 0,
-      auditPath: null,
-    };
+    return buildNoopResult();
   }
 
   const ingestRecord = buildIntegrationIngestRecord({
@@ -3703,6 +3724,19 @@ export async function importDeviceBatch({
   const ingestAppendPlan = await buildIntegrationIngestAppendPlan(vaultRoot, [ingestRecord], {
     allowArchivedShardAmendments: true,
   });
+  if (ingestAppendPlan.appendedIds.length === 0) {
+    if (
+      eventAppendPlan.appendedRecordIds.length > 0
+      || sampleAppendPlan.appendedRecordIds.length > 0
+    ) {
+      throw new VaultError(
+        "INTEGRATION_INGEST_ID_OUTPUT_CONFLICT",
+        `Integration ingest id "${deviceBatchPlan.importId}" already exists but its canonical outputs are incomplete.`,
+        { ingestId: deviceBatchPlan.importId },
+      );
+    }
+    return buildNoopResult();
+  }
   const [ingestShardPath] = ingestAppendPlan.targetShardPaths;
   if (!ingestShardPath) {
     throw new VaultError(

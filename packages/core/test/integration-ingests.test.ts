@@ -17,6 +17,7 @@ import {
   buildIntegrationIngestRecord,
   HOSTED_CANONICAL_WRITE_RECEIPT_SCHEMA_VERSION,
   initializeVault,
+  integrationIngestShardPath,
   listIntegrationIngestsForEvent,
   MAX_INTEGRATION_INGEST_ZIP_ARCHIVE_BYTES,
   MAX_INTEGRATION_INGEST_ZIP_ENTRY_BYTES,
@@ -32,6 +33,7 @@ import {
   assertJsonlAppendTargetCanAppend,
   assertWriteTargetPolicy,
 } from "../src/write-policy.ts";
+import { selectNovelIntegrationIngestEvidence } from "../src/integration-ingests.ts";
 
 async function makeTempDirectory(name: string): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), `${name}-`));
@@ -321,6 +323,52 @@ test("integration ingest readers load closed-month gzip and zip archives", async
 
   const eventEntries = await listIntegrationIngestsForEvent(vaultRoot, "evt_ArchivedZip1");
   assert.deepEqual(eventEntries.map((entry) => entry.record.id), ["xfm_ArchivedZip1"]);
+});
+
+test("integration evidence novelty reads bounded gzip and zip target archives", async () => {
+  for (const archiveKind of ["gzip", "zip"] as const) {
+    const vaultRoot = await makeTempDirectory(`murph-integration-ingest-novelty-${archiveKind}`);
+    await initializeVault({ vaultRoot, createdAt: "2026-06-01T12:00:00.000Z" });
+    const importedAt = "2026-06-03T21:00:00.000Z";
+    const logicalPath = integrationIngestShardPath(importedAt);
+    const part = buildIntegrationEvidencePart({
+      role: "junction-summary-sleep-cycle",
+      fileName: "junction-summary-sleep-cycle.json",
+      mediaType: "application/json",
+      content: JSON.stringify({ revision: 1, stages: [] }),
+    });
+    const record = buildIntegrationIngestRecord({
+      id: archiveKind === "gzip"
+        ? "xfm_11111111111111111111111111"
+        : "xfm_22222222222222222222222222",
+      provider: "junction",
+      accountId: "account-a",
+      source: "device",
+      importedAt,
+      parts: [part],
+      eventOutputs: [],
+      eventIdsComplete: true,
+      sampleIds: [],
+      sampleIdsComplete: true,
+      eventCount: 0,
+      sampleCount: 0,
+    });
+    if (archiveKind === "gzip") {
+      await writeIntegrationIngestGzipArchive(vaultRoot, logicalPath, [record]);
+    } else {
+      await writeIntegrationIngestZipArchive(vaultRoot, logicalPath, [record]);
+    }
+
+    const selection = await selectNovelIntegrationIngestEvidence({
+      vaultRoot,
+      provider: "junction",
+      accountId: "account-a",
+      importedAt,
+      parts: [part],
+    });
+
+    assert.deepEqual(selection, { parts: [], receiptIsNovel: false });
+  }
 });
 
 test("integration ingest zip archive reader accepts exact stored entries", async () => {

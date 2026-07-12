@@ -2139,6 +2139,132 @@ test("importDeviceBatch fails open beyond the novelty row budget, then dedupes t
   assert.equal(tailReplay.persistedEvidencePartCount, 0);
 });
 
+test("importDeviceBatch makes an exact retry a no-op beyond the novelty row budget", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-import-exact-retry-row-budget");
+  await initializeVault({ vaultRoot, createdAt: "2026-06-01T12:00:00.000Z" });
+  const input = {
+    vaultRoot,
+    provider: "junction",
+    accountId: "account-a",
+    importedAt: "2026-06-03T21:00:00.000Z",
+    evidenceParts: [{
+      role: "junction-summary-sleep-cycle",
+      fileName: "junction-summary-sleep-cycle.json",
+      content: { revision: 1, stages: [] },
+    }],
+  } as const;
+
+  const first = await importDeviceBatch(input);
+  assert.ok(first.applied);
+  const firstRecord = await readRequiredIntegrationIngest(vaultRoot, first.ingestId);
+  const unrelatedRow = `${JSON.stringify({
+    ...firstRecord,
+    id: "xfm_00000000000000000000000000",
+    provider: "unrelated-provider",
+    accountId: "unrelated-account",
+  })}\n`;
+  await fs.appendFile(path.join(vaultRoot, first.ingestShardPath), unrelatedRow.repeat(65), "utf8");
+  const persistedPaths = [first.ingestShardPath, first.auditPath];
+  const beforeReplay = await Promise.all(
+    persistedPaths.map((relativePath) => fs.readFile(path.join(vaultRoot, relativePath))),
+  );
+
+  const replay = await importDeviceBatch(input);
+  const afterReplay = await Promise.all(
+    persistedPaths.map((relativePath) => fs.readFile(path.join(vaultRoot, relativePath))),
+  );
+
+  assert.equal(replay.applied, false);
+  assert.equal(replay.ingestId, null);
+  assert.equal(replay.auditPath, null);
+  assert.deepEqual(afterReplay, beforeReplay);
+});
+
+test("importDeviceBatch rejects an exact retry when a canonical output is missing", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-import-exact-retry-missing-output");
+  await initializeVault({ vaultRoot, createdAt: "2026-06-01T12:00:00.000Z" });
+  const input = {
+    vaultRoot,
+    provider: "junction",
+    accountId: "account-a",
+    importedAt: "2026-06-03T21:00:00.000Z",
+    events: [buildJunctionStyleWorkoutEvent()],
+  } as const;
+
+  const first = await importDeviceBatch(input);
+  assert.ok(first.applied);
+  const eventShardPath = first.eventShardPaths[0];
+  assert.ok(eventShardPath);
+  await fs.rm(path.join(vaultRoot, eventShardPath));
+  const persistedPaths = [first.ingestShardPath, first.auditPath];
+  const beforeReplay = await Promise.all(
+    persistedPaths.map((relativePath) => fs.readFile(path.join(vaultRoot, relativePath))),
+  );
+
+  await assert.rejects(
+    () => importDeviceBatch(input),
+    (error) =>
+      error instanceof VaultError
+      && error.code === "INTEGRATION_INGEST_ID_OUTPUT_CONFLICT",
+  );
+
+  const afterReplay = await Promise.all(
+    persistedPaths.map((relativePath) => fs.readFile(path.join(vaultRoot, relativePath))),
+  );
+  assert.deepEqual(afterReplay, beforeReplay);
+});
+
+test("importDeviceBatch exact retry preserves a novelty-filtered ingest beyond the row budget", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-import-partial-retention-retry");
+  await initializeVault({ vaultRoot, createdAt: "2026-06-01T12:00:00.000Z" });
+  const partA = {
+    role: "junction-summary-sleep-cycle",
+    fileName: "junction-summary-sleep-cycle.json",
+    content: { revision: 1, stages: [] },
+  } as const;
+  const partB = {
+    role: "junction-summary-workouts",
+    fileName: "junction-summary-workouts.json",
+    content: { revision: 1, workouts: [] },
+  } as const;
+  await importDeviceBatch({
+    vaultRoot,
+    provider: "junction",
+    accountId: "account-a",
+    importedAt: "2026-06-03T21:00:00.000Z",
+    evidenceParts: [partA],
+  });
+  const input = {
+    vaultRoot,
+    provider: "junction",
+    accountId: "account-a",
+    importedAt: "2026-06-04T21:00:00.000Z",
+    evidenceParts: [partA, partB],
+  } as const;
+  const filtered = await importDeviceBatch(input);
+  assert.ok(filtered.applied);
+  assert.equal(filtered.persistedEvidencePartCount, 1);
+  const filteredRecord = await readRequiredIntegrationIngest(vaultRoot, filtered.ingestId);
+  assert.deepEqual(filteredRecord.parts.map((part) => part.role), [partB.role]);
+  const unrelatedRow = `${JSON.stringify({
+    ...filteredRecord,
+    id: "xfm_00000000000000000000000000",
+    provider: "unrelated-provider",
+    accountId: "unrelated-account",
+  })}\n`;
+  await fs.appendFile(path.join(vaultRoot, filtered.ingestShardPath), unrelatedRow.repeat(65), "utf8");
+  const beforeReplay = await fs.readFile(path.join(vaultRoot, filtered.ingestShardPath));
+
+  const replay = await importDeviceBatch(input);
+
+  assert.equal(replay.applied, false);
+  assert.equal(replay.ingestId, null);
+  assert.deepEqual(
+    await fs.readFile(path.join(vaultRoot, filtered.ingestShardPath)),
+    beforeReplay,
+  );
+});
+
 test("importDeviceBatch dedupes replayed evidence larger than the ordinary novelty byte budget", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-import-large-novelty-proof");
   await initializeVault({ vaultRoot, createdAt: "2026-06-01T12:00:00.000Z" });
@@ -2162,6 +2288,42 @@ test("importDeviceBatch dedupes replayed evidence larger than the ordinary novel
 
   assert.ok(first.applied);
   assert.equal(first.persistedEvidencePartCount, 1);
+  assert.equal(replay.applied, false);
+  assert.equal(replay.persistedEvidencePartCount, 0);
+});
+
+test("importDeviceBatch dedupes replay when JSON escaping expands the tail row past the novelty byte budget", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-import-escaped-novelty-proof");
+  await initializeVault({ vaultRoot, createdAt: "2026-06-01T12:00:00.000Z" });
+  const noveltyScanBytes = 8 * 1024 * 1024;
+  const escapedContent = "\\".repeat((noveltyScanBytes / 2) + 1024);
+  const buildInput = (importedAt: string) => ({
+    vaultRoot,
+    provider: "junction",
+    accountId: "account-a",
+    importedAt,
+    evidenceParts: [
+      {
+        role: "junction-summary-sleep-cycle",
+        fileName: "junction-summary-sleep-cycle.json",
+        content: escapedContent,
+      },
+    ],
+  });
+
+  const first = await importDeviceBatch(buildInput("2026-06-03T21:00:00.000Z"));
+  assert.ok(first.applied);
+  const firstRecord = await readRequiredIntegrationIngest(vaultRoot, first.ingestId);
+  const [persistedPart] = firstRecord.parts;
+  assert.ok(persistedPart);
+  assert.ok(persistedPart.byteSize <= noveltyScanBytes);
+  assert.ok(
+    (await fs.stat(path.join(vaultRoot, first.ingestShardPath))).size > noveltyScanBytes,
+    "expected JSON escaping to expand the persisted row past the ordinary scan budget",
+  );
+
+  const replay = await importDeviceBatch(buildInput("2026-06-04T21:00:00.000Z"));
+
   assert.equal(replay.applied, false);
   assert.equal(replay.persistedEvidencePartCount, 0);
 });
@@ -2203,14 +2365,14 @@ test("importDeviceBatch retains evidence when the newest complete row exceeds th
   assert.equal(replay.persistedEvidencePartCount, 1);
 });
 
-test("integration evidence novelty ignores archived target shards", async () => {
-  const vaultRoot = await makeTempDirectory("murph-device-import-novelty-live-only");
+test("importDeviceBatch dedupes evidence retained in an archived target shard", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-import-novelty-archive");
   await initializeVault({ vaultRoot, createdAt: "2026-06-01T12:00:00.000Z" });
-  const first = await importDeviceBatch({
+  const buildInput = (importedAt: string) => ({
     vaultRoot,
     provider: "junction",
     accountId: "account-a",
-    importedAt: "2026-06-03T21:00:00.000Z",
+    importedAt,
     evidenceParts: [
       {
         role: "junction-summary-sleep-cycle",
@@ -2219,6 +2381,7 @@ test("integration evidence novelty ignores archived target shards", async () => 
       },
     ],
   });
+  const first = await importDeviceBatch(buildInput("2026-06-03T21:00:00.000Z"));
   assert.ok(first.applied);
   const firstRecord = await readRequiredIntegrationIngest(vaultRoot, first.ingestId);
   const evidencePart = firstRecord.parts[0];
@@ -2228,6 +2391,9 @@ test("integration evidence novelty ignores archived target shards", async () => 
   await fs.writeFile(`${absoluteShardPath}.gz`, gzipSync(liveShard));
   await fs.rm(absoluteShardPath);
 
+  const archivePath = `${absoluteShardPath}.gz`;
+  const beforeReplay = await fs.readFile(archivePath);
+  const replay = await importDeviceBatch(buildInput("2026-06-04T21:00:00.000Z"));
   const selection = await selectNovelIntegrationIngestEvidence({
     vaultRoot,
     provider: "junction",
@@ -2236,8 +2402,40 @@ test("integration evidence novelty ignores archived target shards", async () => 
     parts: [evidencePart],
   });
 
-  assert.deepEqual(selection.parts, [evidencePart]);
+  assert.equal(replay.applied, false);
+  assert.equal(replay.ingestId, null);
+  assert.equal(replay.auditPath, null);
+  assert.deepEqual(await fs.readFile(archivePath), beforeReplay);
+  assert.deepEqual(selection.parts, []);
   assert.equal(selection.receiptIsNovel, false);
+});
+
+test("importDeviceBatch treats evidence metadata as part of deterministic import identity", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-import-evidence-metadata-identity");
+  await initializeVault({ vaultRoot, createdAt: "2026-06-01T12:00:00.000Z" });
+  const importRevision = (revision: number) => importDeviceBatch({
+    vaultRoot,
+    provider: "junction",
+    accountId: "account-a",
+    importedAt: "2026-06-03T21:00:00.000Z",
+    evidenceParts: [{
+      role: "junction-summary-sleep-cycle",
+      fileName: "junction-summary-sleep-cycle.json",
+      content: { stages: [] },
+      metadata: { revision },
+    }],
+  });
+
+  const first = await importRevision(1);
+  const changedMetadata = await importRevision(2);
+
+  assert.ok(first.applied);
+  assert.ok(changedMetadata.applied);
+  assert.notEqual(changedMetadata.ingestId, first.ingestId);
+  assert.equal(
+    (await readJsonlRecords({ vaultRoot, relativePath: first.ingestShardPath })).length,
+    2,
+  );
 });
 
 test("importDeviceBatch retains raw-only evidence when no stable account scope is available", async () => {

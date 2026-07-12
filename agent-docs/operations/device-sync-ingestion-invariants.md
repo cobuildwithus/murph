@@ -56,14 +56,17 @@ drain/batch service seam in `packages/device-syncd/src/service.ts`.
    when the same provider account has no new canonical output, receipt state,
    or evidence identity. The storage check reads the current live ingest shard
    backward from its append tail and ordinarily stops after 8 MiB or 64
-   complete rows. When the requested evidence itself exceeds 8 MiB, the byte
-   budget expands only as far as the 128 MiB journal-row limit so a valid proof
-   just appended at the tail can be recognized on replay. Novelty never opens a
-   closed gzip/ZIP shard. Missing, archived, corrupt, oversized, or
-   out-of-budget history fails open by retaining one copy, which becomes the
-   next tail proof. A replay that first crosses a month boundary is likewise
-   retained once and then dedupes in that new month. Changed and raw-only
-   evidence remains durable. Thus
+   complete rows. If the newest row itself crosses 8 MiB, the reader may finish
+   only that row, bounded by the 128 MiB journal-row limit plus its preceding
+   delimiter; it never uses that extension to traverse older history. This lets
+   a large proof just appended at the tail be recognized on replay without
+   broadening ordinary scans. For a closed gzip/ZIP shard that a new row would
+   amend, novelty uses the existing bounded archive reader because the amended
+   representation remains archived and cannot create a live-tail proof.
+   Missing, corrupt, unmatched oversized, or out-of-budget history fails open
+   by retaining one copy. A replay that first crosses a month boundary is
+   likewise retained once and then
+   dedupes in that new month. Changed and raw-only evidence remains durable. Thus
    importing a record more than once — or via a different path — is overlap-free
    without making polling responsible for deciding what to discard. This is
    what makes invariants 2 and 3 safe, and it is why an import-vs-skip
