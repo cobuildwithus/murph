@@ -210,18 +210,30 @@ The hosted system mailbox applies every preference item in mailbox order. An
 older retry blocks newer preference deltas until it succeeds; preference items
 must not be latest-wins coalesced or superseded.
 
-The canonical preference owner also keeps bounded per-setting mutation
-revisions in `bank/preferences.json`. Importing a hosted preference item
-idempotently reserves one revision for its exact fields and event id before the
-item may wait or retry. Conversational writes advance the same field revisions.
-On retry, the owner terminally ignores only fields whose reserved revision is
-older than the field's applied revision, still applies non-stale siblings, and
-marks the record handled in the same canonical write. That bounded handled
-receipt makes replay idempotent if the process stops before the mailbox removes
-its pending item. Ordering never uses the web projection or wall-clock
-comparison. Pending and recent handled records share a 128-record cap; new
-events evict only the oldest handled receipt, never a pending reservation, and
-retrying the same event id reuses its existing record.
+Every newly appended mailbox row receives one immutable per-member causal
+sequence serialized across conversation and system lanes. The sequence is
+assigned by the mailbox owner at durable acceptance, carried through the local
+system pending item or conversation input record, and passed into the canonical
+preference mutation. `bank/preferences.json` retains only each sparse field's
+last-applied sequence. An older or equal Settings event terminally ignores only
+stale fields, still applies a newer sibling, and advances `updatedAt` whenever
+a sibling value really changes. Conversational commands from one accepted turn
+may apply at the same sequence in command order. Replaying a Settings event
+after the canonical commit is therefore an idempotent no-op without an event
+receipt, reservation lifecycle, cap, or mailbox-removal acknowledgment.
+Ordering never uses the web projection or wall-clock comparison.
+
+While a hosted provider turn is live, one atomically replaced assistant runtime
+state file mirrors that turn's newest accepted mailbox sequence.
+The runtime advances it before sending `turn/steer`, and hosted style commands
+read it at execution time. This file is transport for the mailbox sequence,
+not another ordering authority; it is overwritten when the next turn starts.
+
+Tokenless pending items restored from the legacy v1 local mailbox state are
+treated as sequence zero. They drain through the same terminal path. A legacy
+field applies only if no legacy conversational or sequenced mutation has
+already established that field's watermark, which is the bounded compatibility
+policy for history whose original cross-lane order cannot be reconstructed.
 
 Tone is read from the canonical vault during turn planning. An absent saved tone resolves to the shared `formal` default, and prompt assembly adds one persistent user-facing writing contract (casual lowercases all Murph-authored prose except casing-sensitive literals; formal keeps standard capitalization and no slang, staying warm and direct). Voice memo defaults resolve in this order:
 
@@ -237,18 +249,21 @@ Explicit `classic` and unknown stale vault voice ids fall through to the environ
 The personality field and optional assistant mutation state are additive but
 existing preferences readers are strict. Deploy readers that accept and
 preserve both fields before any command can write them. After the first
-personality override or hosted mutation reservation is stored, a binary that
+personality override or hosted causal watermark is stored, a binary that
 predates this support may reject that preferences document.
 
 The rollback floor is therefore the first deployed runtime and CLI version that understands the optional personality field. Rollback below that floor requires removing the new field with a current compatible binary or forward-deploying a compatible reader. Do not hand-edit canonical preferences files.
 
 The conversational controls first require the compatible contracts, core
 mutation, CLI command, and assistant prompt from the parent runtime release.
-For Settings, deploy the Cloudflare worker and runner bundle that understand
-the personality mailbox delta before deploying the Vercel writer/UI. Use the
-normal immediate runner-bundle rollout so old warm containers cannot execute
-the previous parser. The additive nullable web migration is safe to apply
-earlier, but it does not make an old runtime consumer compatible.
+For Settings, apply the additive nullable mailbox `causal_seq` migration, then
+deploy Vercel so all new conversation and system appends allocate and expose
+the shared sequence. Old runtime consumers ignore the additive field. After
+that producer/read surface is live, deploy the Cloudflare worker and runner
+bundle and use the normal immediate runner-bundle rollout so old warm
+containers converge. The new consumer accepts tokenless restored v1 pending
+items through the explicit sequence-zero compatibility path; it never retries
+forever for missing reservation state.
 
 The web route rejects mixed style/personality requests, and the UI emits
 personality-only deltas. If Vercel briefly reaches production first, an old

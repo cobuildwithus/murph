@@ -78,7 +78,6 @@ import {
   repairExperimentMediaInternal,
 } from "./experiment-media-repair.ts";
 import {
-  reserveAssistantPreferenceMutation as reserveAssistantPreferenceMutationInternal,
   updateAssistantPreferences as updateAssistantPreferencesInternal,
   updateWearablePreferences as updateWearablePreferencesInternal,
   updateWorkoutUnitPreferences as updateWorkoutUnitPreferencesInternal,
@@ -627,12 +626,6 @@ export async function updateWorkoutUnitPreferences(
   input: Parameters<typeof updateWorkoutUnitPreferencesInternal>[0],
 ): ReturnType<typeof updateWorkoutUnitPreferencesInternal> {
   return updateWorkoutUnitPreferencesInternal(input);
-}
-
-export async function reserveAssistantPreferenceMutation(
-  input: Parameters<typeof reserveAssistantPreferenceMutationInternal>[0],
-): ReturnType<typeof reserveAssistantPreferenceMutationInternal> {
-  return reserveAssistantPreferenceMutationInternal(input);
 }
 
 export async function updateWearablePreferences(

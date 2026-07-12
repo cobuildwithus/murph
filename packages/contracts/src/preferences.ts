@@ -38,37 +38,22 @@ export const assistantPreferenceFieldIds = [
   ...assistantPersonalitySettingIds,
 ] as const;
 export const assistantPreferenceFieldIdSchema = z.enum(assistantPreferenceFieldIds);
-export const assistantPreferenceRevisionSchema = z
+export const assistantPreferenceCausalSeqSchema = z
   .string()
-  .regex(/^[1-9][0-9]{0,38}$/u);
+  .regex(/^(?:0|[1-9][0-9]{0,38})$/u);
+export const MURPH_ASSISTANT_PREFERENCE_CAUSAL_SEQ_PATH_ENV =
+  "MURPH_ASSISTANT_PREFERENCE_CAUSAL_SEQ_PATH";
 export const assistantPreferenceMutationStateSchema = z
   .object({
-    nextRevision: assistantPreferenceRevisionSchema,
     applied: z
       .object({
-        tone: assistantPreferenceRevisionSchema.optional(),
-        voice: assistantPreferenceRevisionSchema.optional(),
-        humor: assistantPreferenceRevisionSchema.optional(),
-        push: assistantPreferenceRevisionSchema.optional(),
-        detail: assistantPreferenceRevisionSchema.optional(),
+        tone: assistantPreferenceCausalSeqSchema.optional(),
+        voice: assistantPreferenceCausalSeqSchema.optional(),
+        humor: assistantPreferenceCausalSeqSchema.optional(),
+        push: assistantPreferenceCausalSeqSchema.optional(),
+        detail: assistantPreferenceCausalSeqSchema.optional(),
       })
       .strict(),
-    reservations: z
-      .array(
-        z
-          .object({
-            eventId: z.string().min(1).max(512),
-            fields: z
-              .array(assistantPreferenceFieldIdSchema)
-              .min(1)
-              .max(5)
-              .refine((fields) => new Set(fields).size === fields.length),
-            revision: assistantPreferenceRevisionSchema,
-            status: z.enum(["pending", "handled"]),
-          })
-          .strict(),
-      )
-      .max(128),
   })
   .strict();
 

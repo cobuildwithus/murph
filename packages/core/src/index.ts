@@ -127,7 +127,6 @@ export {
   linkJournalStreams,
   promoteInboxExperimentNote,
   promoteInboxJournal,
-  reserveAssistantPreferenceMutation,
   repairJunctionWorkoutHeartRateZones,
   repairExperimentMedia,
   repairVault,

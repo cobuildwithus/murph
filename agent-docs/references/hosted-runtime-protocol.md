@@ -470,6 +470,21 @@ preference items during enqueue or checkpoint preparation. This ordering is
 what preserves two adjacent changes to different personality dials without a
 merge queue or second state owner.
 
+Mailbox append also allocates one immutable per-member causal sequence under a
+user-scoped transaction lock, shared by the conversation and system lanes.
+That acceptance sequence, not lane import order or wall-clock time, orders
+Settings deltas against conversational preference commands. System pending
+items and durable conversation input records carry it to the canonical
+preference owner, which stores only a per-field applied watermark. An older or
+equal event is terminal for stale fields, while a fresh sibling still applies.
+Tokenless v1 pending items map to sequence zero and drain; they cannot overwrite
+a field whose zero-or-newer watermark is already established.
+Live turns mirror the newest accepted sequence in one atomic assistant runtime
+state file before `turn/steer` is sent so later conversational commands do not
+retain the initial request's older process environment. The file is
+non-canonical, single-turn transport and never replaces the mailbox sequence as
+authority.
+
 ### Hosted Runtime Maintenance Wake
 
 `runtime.maintenance-requested` is the explicit operator wake for one-time

@@ -62,6 +62,7 @@ export interface HostedSystemMailboxPendingItem {
   nextAttemptAt: string | null;
   occurredAt: string;
   postCheckpointRecord: HostedSystemMailboxPostCheckpointRecord | null;
+  preferenceCausalSeq?: string | null;
   requestId: string | null;
   routeAction: HostedSystemMailboxRouteAction;
   status: "pending" | "recording" | "sending";
@@ -189,6 +190,7 @@ export async function setHostedDeviceSyncDenseRawRetentionMailboxWakeAt(input: {
     nextAttemptAt: input.nextWakeAt,
     occurredAt,
     postCheckpointRecord: null,
+    preferenceCausalSeq: null,
     requestId: null,
     routeAction: "run-device-sync-wake",
     status: "pending",
@@ -395,6 +397,10 @@ function parseHostedSystemMailboxPendingItem(value: unknown): HostedSystemMailbo
       || record.postCheckpointRecord === undefined
       ? null
       : parseHostedSystemMailboxRecordRequest(record.postCheckpointRecord),
+    preferenceCausalSeq: readOptionalPositiveIntegerString(
+      record.preferenceCausalSeq,
+      "hosted system mailbox preferenceCausalSeq",
+    ),
     requestId: record.requestId === null || record.requestId === undefined
       ? null
       : readRequiredString(record.requestId, "hosted system mailbox requestId"),
@@ -618,6 +624,7 @@ function hostedSystemMailboxPendingItemsMatch(
     && left.lastAttemptAt === right.lastAttemptAt
     && left.mailboxDedupeKey === right.mailboxDedupeKey
     && left.mailboxLaneSeq === right.mailboxLaneSeq
+    && left.preferenceCausalSeq === right.preferenceCausalSeq
     && left.nextAttemptAt === right.nextAttemptAt
     && left.occurredAt === right.occurredAt
     && left.requestId === right.requestId

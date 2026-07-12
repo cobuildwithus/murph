@@ -51,88 +51,35 @@
     "assistantMutationState": {
       "type": "object",
       "properties": {
-        "nextRevision": {
-          "type": "string",
-          "pattern": "^[1-9][0-9]{0,38}$"
-        },
         "applied": {
           "type": "object",
           "properties": {
             "tone": {
               "type": "string",
-              "pattern": "^[1-9][0-9]{0,38}$"
+              "pattern": "^(?:0|[1-9][0-9]{0,38})$"
             },
             "voice": {
               "type": "string",
-              "pattern": "^[1-9][0-9]{0,38}$"
+              "pattern": "^(?:0|[1-9][0-9]{0,38})$"
             },
             "humor": {
               "type": "string",
-              "pattern": "^[1-9][0-9]{0,38}$"
+              "pattern": "^(?:0|[1-9][0-9]{0,38})$"
             },
             "push": {
               "type": "string",
-              "pattern": "^[1-9][0-9]{0,38}$"
+              "pattern": "^(?:0|[1-9][0-9]{0,38})$"
             },
             "detail": {
               "type": "string",
-              "pattern": "^[1-9][0-9]{0,38}$"
+              "pattern": "^(?:0|[1-9][0-9]{0,38})$"
             }
           },
           "additionalProperties": false
-        },
-        "reservations": {
-          "maxItems": 128,
-          "type": "array",
-          "items": {
-            "type": "object",
-            "properties": {
-              "eventId": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 512
-              },
-              "fields": {
-                "minItems": 1,
-                "maxItems": 5,
-                "type": "array",
-                "items": {
-                  "type": "string",
-                  "enum": [
-                    "tone",
-                    "voice",
-                    "humor",
-                    "push",
-                    "detail"
-                  ]
-                }
-              },
-              "revision": {
-                "type": "string",
-                "pattern": "^[1-9][0-9]{0,38}$"
-              },
-              "status": {
-                "type": "string",
-                "enum": [
-                  "pending",
-                  "handled"
-                ]
-              }
-            },
-            "required": [
-              "eventId",
-              "fields",
-              "revision",
-              "status"
-            ],
-            "additionalProperties": false
-          }
         }
       },
       "required": [
-        "nextRevision",
-        "applied",
-        "reservations"
+        "applied"
       ],
       "additionalProperties": false
     },

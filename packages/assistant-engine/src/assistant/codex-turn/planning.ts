@@ -3,6 +3,7 @@ import type {
   AssistantTurnTrigger,
 } from '@murphai/operator-config/assistant-cli-contracts'
 import {
+  MURPH_ASSISTANT_PREFERENCE_CAUSAL_SEQ_PATH_ENV,
   resolveAssistantVoiceOptionElevenLabsVoiceId,
   type AssistantPersonalityPreferences,
   type AssistantTonePreference,
@@ -77,6 +78,9 @@ import type {
   AssistantAcceptedTurnInputItemInput,
   AssistantCodexContinuation,
 } from '../active-turn-input-journal.js'
+import {
+  resolveAssistantPreferenceCausalSeqPath,
+} from '../preference-causal-seq.js'
 import type {
   AssistantProviderConversationMessage,
 } from '../providers/types.js'
@@ -423,6 +427,9 @@ export async function resolveAssistantRouteTurnPlan(input: {
   hostedToolContext?: AssistantHostedToolContext | null
 }): Promise<AssistantRouteTurnPlan> {
   const routePlanningStartedAt = Date.now()
+  const preferenceCausalSeqPath = input.executionContext?.hosted
+    ? resolveAssistantPreferenceCausalSeqPath(input.input.vault)
+    : null
   const preferenceContext =
     input.preferenceContext ?? DEFAULT_ASSISTANT_TURN_PREFERENCE_CONTEXT
   const routePlanningSpans: AssistantRoutePlanningSpanMetrics = {}
@@ -727,7 +734,15 @@ export async function resolveAssistantRouteTurnPlan(input: {
   return {
     assistantContractFingerprint,
     assistantCliContract: actualAssistantCliContract,
-    cliEnv: input.sharedPlan.cliAccess.env,
+    cliEnv: {
+      ...input.sharedPlan.cliAccess.env,
+      ...(preferenceCausalSeqPath === null
+        ? {}
+        : {
+            [MURPH_ASSISTANT_PREFERENCE_CAUSAL_SEQ_PATH_ENV]:
+              preferenceCausalSeqPath,
+          }),
+    },
     developerInstructions: normalizeNullableString(developerInstructions),
     dynamicTools,
     conversationHistoryMessages:

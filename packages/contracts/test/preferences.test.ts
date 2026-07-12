@@ -147,23 +147,15 @@ describe("assistant personality preference contracts", () => {
     ).toBe(false);
   });
 
-  it("accepts bounded per-setting assistant mutation state and rejects duplicate fields", () => {
+  it("accepts one bounded per-setting causal watermark map", () => {
     const document = {
       schemaVersion: 1,
       updatedAt: "2026-07-12T01:00:00.000Z",
       assistantMutationState: {
         applied: {
+          detail: "0",
           humor: "2",
         },
-        nextRevision: "3",
-        reservations: [
-          {
-            eventId: "member.preferences.updated:older",
-            fields: ["humor", "detail"],
-            revision: "1",
-            status: "pending",
-          },
-        ],
       },
       workoutUnitPreferences: {},
       wearablePreferences: {
@@ -176,15 +168,7 @@ describe("assistant personality preference contracts", () => {
       preferencesDocumentSchema.safeParse({
         ...document,
         assistantMutationState: {
-          ...document.assistantMutationState,
-          reservations: [
-            {
-              eventId: "member.preferences.updated:duplicate-field",
-              fields: ["humor", "humor"],
-              revision: "1",
-              status: "pending",
-            },
-          ],
+          applied: { humor: "01" },
         },
       }).success,
     ).toBe(false);

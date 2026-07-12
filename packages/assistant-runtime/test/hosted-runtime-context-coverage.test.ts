@@ -81,7 +81,6 @@ vi.mock("@murphai/operator-config/operator-config", async () => {
 import {
   applyHostedMemberPreferences,
   prepareHostedWakeContext,
-  reserveHostedMemberPreferences,
   prepareHostedInboxProjectionRuntime,
   readHostedAssistantRuntimeState,
   reconcileHostedAssistantChannelState,
@@ -745,6 +744,7 @@ describe("hosted runtime context coverage", () => {
               voice: "warm",
             },
           }),
+          "1",
         ),
       ).rejects.toThrow(/member\.activated bootstrap/u);
 
@@ -774,8 +774,7 @@ describe("hosted runtime context coverage", () => {
         },
       });
 
-      await reserveHostedMemberPreferences(vaultRoot, wake);
-      await applyHostedMemberPreferences(vaultRoot, wake);
+      await applyHostedMemberPreferences(vaultRoot, wake, "1");
       const first = await readPreferencesDocument(vaultRoot);
       assert.equal(first.exists, true);
       assert.equal(first.updatedAt, "2026-04-08T00:25:00.000Z");
@@ -797,8 +796,7 @@ describe("hosted runtime context coverage", () => {
           },
         },
       });
-      await reserveHostedMemberPreferences(vaultRoot, siblingDelta);
-      await applyHostedMemberPreferences(vaultRoot, siblingDelta);
+      await applyHostedMemberPreferences(vaultRoot, siblingDelta, "2");
       const second = await readPreferencesDocument(vaultRoot);
       assert.equal(second.updatedAt, "2026-04-08T00:26:00.000Z");
       assert.deepEqual(second.assistant, {
@@ -832,9 +830,9 @@ describe("hosted runtime context coverage", () => {
         },
       });
 
-      await reserveHostedMemberPreferences(vaultRoot, olderWake);
-
       await updateAssistantPreferences({
+        causalOrigin: "turn",
+        causalSeq: "2",
         preferences: {
           personality: {
             humor: 9,
@@ -844,7 +842,7 @@ describe("hosted runtime context coverage", () => {
         vaultRoot,
       });
 
-      await applyHostedMemberPreferences(vaultRoot, olderWake);
+      await applyHostedMemberPreferences(vaultRoot, olderWake, "1");
 
       assert.deepEqual((await readPreferencesDocument(vaultRoot)).assistant?.personality, {
         detail: 7,

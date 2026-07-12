@@ -1,11 +1,14 @@
 import assert from "node:assert/strict";
 import os from "node:os";
 import path from "node:path";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 
 import { afterEach, test } from "vitest";
 
-import { initializeVault } from "@murphai/core";
+import {
+  MURPH_ASSISTANT_PREFERENCE_CAUSAL_SEQ_PATH_ENV,
+} from "@murphai/contracts";
+import { initializeVault, readPreferencesDocument } from "@murphai/core";
 import {
   resetAllAssistantPersonalitySettings,
   resetAssistantPersonalitySetting,
@@ -219,3 +222,40 @@ test("resetting absent assistant personality settings does not create preference
   assert.equal(all.updated, false);
   assert.equal(all.recordedAt, null);
 });
+
+test("hosted personality commands read a live-steer causal sequence atomically", async () => {
+  const vaultRoot = await createTempVault();
+  const causalSeqPath = path.join(vaultRoot, "preference-causal-seq");
+  await writeFile(causalSeqPath, "12\n", "utf8");
+  const previous = {
+    hosted: process.env.MURPH_HOSTED_RUNTIME_PROCESS,
+    path: process.env[MURPH_ASSISTANT_PREFERENCE_CAUSAL_SEQ_PATH_ENV],
+  };
+
+  try {
+    process.env.MURPH_HOSTED_RUNTIME_PROCESS = "1";
+    process.env[MURPH_ASSISTANT_PREFERENCE_CAUSAL_SEQ_PATH_ENV] = causalSeqPath;
+    await setAssistantPersonalitySetting({
+      setting: "humor",
+      value: 9,
+      vault: vaultRoot,
+    });
+
+    assert.equal(
+      (await readPreferencesDocument(vaultRoot))
+        .assistantMutationState?.applied.humor,
+      "12",
+    );
+  } finally {
+    restoreEnv("MURPH_HOSTED_RUNTIME_PROCESS", previous.hosted);
+    restoreEnv(MURPH_ASSISTANT_PREFERENCE_CAUSAL_SEQ_PATH_ENV, previous.path);
+  }
+});
+
+function restoreEnv(name: string, value: string | undefined): void {
+  if (value === undefined) {
+    delete process.env[name];
+  } else {
+    process.env[name] = value;
+  }
+}

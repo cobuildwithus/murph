@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import {
   defaultAssistantVoiceOptionId,
+  MURPH_ASSISTANT_PREFERENCE_CAUSAL_SEQ_PATH_ENV,
   preferencesDocumentRelativePath,
   resolveAssistantVoiceOptionElevenLabsVoiceId,
 } from '@murphai/contracts'
@@ -66,6 +67,7 @@ import {
   buildAssistantSkillFileRef,
 } from '../src/assistant-skill-assets.js'
 import { appendAssistantTranscriptEntries } from '../src/assistant/store.js'
+import { resolveAssistantPreferenceCausalSeqPath } from '../src/assistant/preference-causal-seq.js'
 import {
   ASSISTANT_NO_REPLY_TRANSCRIPT_HISTORY_TEXT,
   ASSISTANT_NO_REPLY_TRANSCRIPT_MARKER_PREFIX,
@@ -294,6 +296,39 @@ describe('assistant protocol index planning', () => {
     expect(plan.assistantCliContract).toBe('bootstrap contract')
     expect(plan.systemPrompt).toContain('Execution and stop rules:')
     expect(plan.systemPrompt).not.toContain('Supported experiment protocols:')
+  })
+
+  it('provides hosted style commands the live mailbox causal sequence path', async () => {
+    const vault = await mkdtemp(path.join(os.tmpdir(), 'assistant-route-plan-causal-'))
+    try {
+      const plan = await resolveAssistantRouteTurnPlan({
+        executionContext: {
+          hosted: {
+            memberId: 'member-causal-seq',
+            userEnvKeys: [],
+          },
+        },
+        input: { ...createMessageInput(), vault },
+        profile: {
+          promptProfile: 'conversation',
+          threadScope: 'session-thread',
+          toolProfile: 'provider-turn',
+        },
+        promptTimeContext: {
+          currentLocalDate: '2026-05-04',
+          currentTimeZone: 'UTC',
+        },
+        route: createRoute(),
+        session: createSession(),
+        sharedPlan: createSharedPlan(),
+      })
+
+      expect(plan.cliEnv[MURPH_ASSISTANT_PREFERENCE_CAUSAL_SEQ_PATH_ENV]).toBe(
+        resolveAssistantPreferenceCausalSeqPath(vault),
+      )
+    } finally {
+      await rm(vault, { force: true, recursive: true })
+    }
   })
 
   it.each([

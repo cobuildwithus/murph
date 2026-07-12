@@ -13,7 +13,6 @@ import {
 } from "./channel-activity.ts";
 import {
   bootstrapHostedMemberContext,
-  reserveHostedMemberPreferences,
 } from "./context.ts";
 import {
   executeHostedMailboxEvent,
@@ -110,13 +109,6 @@ export async function enqueueHostedSystemMailboxItem(input: {
   if (routeAction === "apply-member-activation" && input.wake.kind === "member.activated") {
     await bootstrapHostedMemberContext(input.vaultRoot, input.wake);
   }
-  if (
-    routeAction === "apply-member-preferences"
-    && input.wake.kind === "member.preferences.updated"
-  ) {
-    await reserveHostedMemberPreferences(input.vaultRoot, input.wake);
-  }
-
   const nextItem: HostedSystemMailboxPendingItem = {
     attemptCount: 0,
     itemId: input.item.item.id,
@@ -128,6 +120,9 @@ export async function enqueueHostedSystemMailboxItem(input: {
     nextAttemptAt: null,
     occurredAt: input.item.item.occurredAt,
     postCheckpointRecord: null,
+    preferenceCausalSeq: routeAction === "apply-member-preferences"
+      ? (input.item.item.causalSeq ?? null)
+      : null,
     requestId: input.item.payload.requestId ?? null,
     routeAction,
     status: "pending",
@@ -402,6 +397,7 @@ async function executePendingHostedSystemMailboxItem(input: {
     forceQueueOnlyAssistantNotification: true,
     operatorHomeRoot: input.operatorHomeRoot ?? undefined,
     preferenceAppliedAt: input.pendingItem.lastAttemptAt ?? undefined,
+    preferenceCausalSeq: input.pendingItem.preferenceCausalSeq ?? "0",
     runtime: input.runtime,
     runtimeEnv: input.runtimeEnv,
     ...(input.shouldYieldBackgroundMaintenance

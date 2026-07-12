@@ -1,6 +1,7 @@
 import {
   assistantPersonalityScoreSchema,
   assistantPersonalitySettingIds,
+  assistantPreferenceCausalSeqSchema,
   assistantPreferenceMutationStateSchema,
   assistantPreferencesSchema,
   assistantTonePreferenceSchema,
@@ -63,8 +64,6 @@ export interface PreferencesDocumentSnapshot extends Omit<PreferencesDocument, "
   sourcePath: string;
   updatedAt: string | null;
 }
-
-const MAX_ASSISTANT_PREFERENCE_RESERVATIONS = 128;
 
 export function resolvePreferencesDocumentPath(vaultRoot: string): string {
   return resolveVaultPath(vaultRoot, preferencesDocumentRelativePath).absolutePath;
@@ -196,20 +195,7 @@ function resolveAssistantPreferenceFieldIds(
 function createAssistantPreferenceMutationState(): AssistantPreferenceMutationState {
   return {
     applied: {},
-    nextRevision: "1",
-    reservations: [],
   };
-}
-
-function advanceAssistantPreferenceRevision(
-  state: AssistantPreferenceMutationState,
-): { nextStateRevision: string; revision: string } {
-  const revision = state.nextRevision;
-  const nextStateRevision = (BigInt(revision) + 1n).toString();
-  if (nextStateRevision.length > 39) {
-    throw new RangeError("Assistant preference revision limit reached.");
-  }
-  return { nextStateRevision, revision };
 }
 
 function filterAssistantPreferencesByFields(
@@ -232,13 +218,6 @@ function filterAssistantPreferencesByFields(
       : {}),
     ...(Object.keys(personality).length > 0 ? { personality } : {}),
   };
-}
-
-function equalAssistantPreferenceFields(
-  left: readonly AssistantPreferenceFieldId[],
-  right: readonly AssistantPreferenceFieldId[],
-): boolean {
-  return left.length === right.length && left.every((field, index) => field === right[index]);
 }
 
 function buildPreferencesDocument(input: {
@@ -444,105 +423,11 @@ export async function updateWearablePreferences(input: {
   });
 }
 
-export async function reserveAssistantPreferenceMutation(input: {
-  eventId: string;
-  vaultRoot: string;
-  preferences: AssistantPreferencesUpdate;
-  updatedAt?: string;
-}): Promise<{
-  fields: AssistantPreferenceFieldId[];
-  revision: string;
-}> {
-  return await withLockedPreferencesDocument(input.vaultRoot, async () => {
-    const eventId = input.eventId.trim();
-    if (eventId.length === 0 || eventId.length > 512) {
-      throw new TypeError("Assistant preference reservation event id is invalid.");
-    }
-    const requestedPreferences = normalizeAssistantPreferencesForWrite(input.preferences);
-    const fields = resolveAssistantPreferenceFieldIds(requestedPreferences);
-    if (fields.length === 0) {
-      throw new TypeError("At least one assistant preference is required.");
-    }
-
-    const current = await readPreferencesDocument(input.vaultRoot);
-    const state = current.assistantMutationState ?? createAssistantPreferenceMutationState();
-    const existing = state.reservations.find((reservation) => reservation.eventId === eventId);
-    if (existing) {
-      if (!equalAssistantPreferenceFields(existing.fields, fields)) {
-        throw new TypeError("Assistant preference reservation event id was reused.");
-      }
-      return {
-        fields: [...existing.fields],
-        revision: existing.revision,
-      };
-    }
-    let retainedReservations = state.reservations;
-    if (retainedReservations.length >= MAX_ASSISTANT_PREFERENCE_RESERVATIONS) {
-      const oldestHandledIndex = retainedReservations.findIndex(
-        (reservation) => reservation.status === "handled",
-      );
-      if (oldestHandledIndex < 0) {
-        throw new RangeError("Assistant preference reservation limit reached.");
-      }
-      retainedReservations = retainedReservations.filter(
-        (_, index) => index !== oldestHandledIndex,
-      );
-    }
-
-    const { nextStateRevision, revision } = advanceAssistantPreferenceRevision(state);
-    const nextState = assistantPreferenceMutationStateSchema.parse({
-      ...state,
-      nextRevision: nextStateRevision,
-      reservations: [
-        ...retainedReservations,
-        { eventId, fields, revision, status: "pending" },
-      ],
-    });
-    const operationAt = input.updatedAt ?? new Date().toISOString();
-    const validatedDocument = buildPreferencesDocument({
-      ...(current.assistant ? { assistant: current.assistant } : {}),
-      assistantMutationState: nextState,
-      updatedAt: current.updatedAt ?? operationAt,
-      workoutUnitPreferences: current.workoutUnitPreferences,
-      wearablePreferences: current.wearablePreferences,
-    });
-
-    await commitAuditedCanonicalWrite({
-      vaultRoot: input.vaultRoot,
-      operationType: "preferences_update",
-      summary: "Reserve canonical assistant preference ordering",
-      occurredAt: operationAt,
-      audit: {
-        action: "preferences_update",
-        commandName: "core.reserveAssistantPreferenceMutation",
-        summary: "Reserved canonical assistant preference ordering.",
-      },
-      mutate: async ({ batch }) => {
-        await batch.stageTextWrite(
-          preferencesDocumentRelativePath,
-          `${JSON.stringify(validatedDocument, null, 2)}\n`,
-          { overwrite: true },
-        );
-        return {
-          result: null,
-          changes: [
-            {
-              path: preferencesDocumentRelativePath,
-              op: current.exists ? "update" : "create",
-            },
-          ],
-        };
-      },
-    });
-
-    return { fields, revision };
-  });
-}
-
 export async function updateAssistantPreferences(input: {
+  causalOrigin?: "event" | "turn";
+  causalSeq?: string;
   vaultRoot: string;
   preferences: AssistantPreferencesUpdate;
-  reservationEventId?: string;
   updatedAt?: string;
 }): Promise<{
   created: boolean;
@@ -558,72 +443,38 @@ export async function updateAssistantPreferences(input: {
 
     const current = await readPreferencesDocument(input.vaultRoot);
     const state = current.assistantMutationState ?? createAssistantPreferenceMutationState();
-    const unguardedNextPreferences = mergeAssistantPreferences(
-      current.assistant,
-      requestedPreferences,
-    );
-    const requestedHasChanges =
-      JSON.stringify(current.assistant ?? {})
-      !== JSON.stringify(unguardedNextPreferences ?? {});
+    const causalSeq = input.causalSeq === undefined
+      ? null
+      : assistantPreferenceCausalSeqSchema.parse(input.causalSeq);
     let nextState: AssistantPreferenceMutationState;
     let applicableFields: AssistantPreferenceFieldId[];
-    if (input.reservationEventId !== undefined) {
-      const reservation = state.reservations.find(
-        (candidate) => candidate.eventId === input.reservationEventId,
-      );
-      if (!reservation) {
-        throw new TypeError("Assistant preference reservation is missing.");
-      }
-      if (!equalAssistantPreferenceFields(reservation.fields, requestedFields)) {
-        throw new TypeError("Assistant preference reservation fields do not match.");
-      }
-      if (reservation.status === "handled") {
-        return {
-          created: false,
-          updated: false,
-          document: current,
-        };
-      }
+    if (causalSeq !== null) {
+      const causalOrder = BigInt(causalSeq);
       applicableFields = requestedFields.filter((field) => {
-        const appliedRevision = state.applied[field];
-        return appliedRevision === undefined
-          || BigInt(reservation.revision) >= BigInt(appliedRevision);
+        const appliedCausalSeq = state.applied[field];
+        return appliedCausalSeq === undefined
+          || causalOrder > BigInt(appliedCausalSeq)
+          || (
+            input.causalOrigin === "turn"
+            && causalOrder === BigInt(appliedCausalSeq)
+          );
       });
       nextState = assistantPreferenceMutationStateSchema.parse({
-        ...state,
         applied: {
           ...state.applied,
           ...Object.fromEntries(
-            applicableFields.map((field) => [field, reservation.revision]),
+            applicableFields.map((field) => [field, causalSeq]),
           ),
         },
-        reservations: state.reservations.map(
-          (candidate) => candidate.eventId === input.reservationEventId
-            ? { ...candidate, status: "handled" as const }
-            : candidate,
-        ),
       });
     } else {
-      const overlapsPendingReservation = state.reservations.some(
-        (reservation) => reservation.status === "pending"
-          && reservation.fields.some((field) => requestedFields.includes(field)),
-      );
-      if (!requestedHasChanges && !overlapsPendingReservation) {
-        return {
-          created: false,
-          updated: false,
-          document: current,
-        };
-      }
-      const { nextStateRevision, revision } = advanceAssistantPreferenceRevision(state);
       applicableFields = requestedFields;
       nextState = assistantPreferenceMutationStateSchema.parse({
-        ...state,
-        applied: {
-          ...state.applied,
-          ...Object.fromEntries(requestedFields.map((field) => [field, revision])),
-        },
-        nextRevision: nextStateRevision,
+        applied: Object.fromEntries(
+          Object.entries(state.applied).filter(([field]) =>
+            !requestedFields.includes(field as AssistantPreferenceFieldId)
+          ),
+        ),
       });
     }
     const applicablePreferences = filterAssistantPreferencesByFields(
@@ -636,6 +487,16 @@ export async function updateAssistantPreferences(input: {
     );
     const hasChanges =
       JSON.stringify(current.assistant ?? {}) !== JSON.stringify(nextPreferences ?? {});
+    const hasMutationStateChanges =
+      JSON.stringify(state) !== JSON.stringify(nextState);
+
+    if (!hasChanges && !hasMutationStateChanges) {
+      return {
+        created: false,
+        updated: false,
+        document: current,
+      };
+    }
 
     const operationAt = input.updatedAt ?? new Date().toISOString();
     const validatedDocument = buildPreferencesDocument({

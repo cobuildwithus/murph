@@ -130,9 +130,10 @@ The hosted Prisma schema keeps ownership sharp and nested:
   authenticated Settings display/write projection; canonical assistant
   preferences remain in `bank/preferences.json`. Settings writes strict sparse
   deltas through the hosted mailbox instead of treating these columns as a
-  canonical snapshot. The canonical owner reserves bounded per-setting
-  revisions for those events and conversational writes, so retries never use
-  this projection or timestamps as conflict authority.
+  canonical snapshot. The mailbox owner assigns one immutable causal sequence
+  across conversation and system lanes, and the canonical owner retains only
+  per-setting applied watermarks, so retries never use this projection or
+  timestamps as conflict authority.
 - `HostedMemberIdentity` owns recoverable member identity facts
 - `HostedMemberRouting` owns hosted channel routing facts
 - `HostedMemberBillingRef` owns Stripe/customer subscription references
@@ -140,7 +141,8 @@ The hosted Prisma schema keeps ownership sharp and nested:
 - `HostedConsentEvent` and `HostedConsentGrant` own append-only legal consent
   history plus current launch-required and optional feature-consent state
 - `HostedMailboxItem`, `HostedMailboxPayload`, and `HostedMailboxLaneCounter`
-  own append-only encrypted execution inputs and per-lane sequence allocation
+  own append-only encrypted execution inputs, per-lane progress sequences, and
+  the serialized per-member causal sequence carried across lanes
 - `HostedWorkspace` owns the latest encrypted checkpoint pointer and redacted
   status projection
 - `HostedRuntimeLog` owns bounded redacted observability events

@@ -9,7 +9,6 @@ import {
   initializeVault,
   readJsonlRecords,
   readPreferencesDocument,
-  reserveAssistantPreferenceMutation,
   resolvePreferencesDocumentPath,
   updateAssistantPreferences,
   updateWearablePreferences,
@@ -478,35 +477,10 @@ test("stores sparse personality overrides while preserving every unrelated prefe
   });
 });
 
-test("uses one per-setting revision owner for hosted reservations and conversational writes", async () => {
+test("uses mailbox causal order per field across delayed Settings and conversation writes", async () => {
   const vaultRoot = await createTempVault();
-  const eventId = "member.preferences.updated:older-retry";
-  const preferences = {
-    personality: {
-      detail: 7 as const,
-      humor: 2 as const,
-    },
-  };
-
-  const firstReservation = await reserveAssistantPreferenceMutation({
-    eventId,
-    preferences,
-    updatedAt: "2026-07-12T01:00:00.000Z",
-    vaultRoot,
-  });
-  const repeatedReservation = await reserveAssistantPreferenceMutation({
-    eventId,
-    preferences,
-    updatedAt: "2026-07-12T01:00:01.000Z",
-    vaultRoot,
-  });
-  assert.deepEqual(repeatedReservation, firstReservation);
-  assert.equal(
-    (await readPreferencesDocument(vaultRoot)).assistantMutationState?.reservations.length,
-    1,
-  );
-
   await updateAssistantPreferences({
+    causalSeq: "2",
     preferences: {
       personality: {
         humor: 9,
@@ -516,8 +490,13 @@ test("uses one per-setting revision owner for hosted reservations and conversati
     vaultRoot,
   });
   const retried = await updateAssistantPreferences({
-    preferences,
-    reservationEventId: eventId,
+    causalSeq: "1",
+    preferences: {
+      personality: {
+        detail: 7,
+        humor: 2,
+      },
+    },
     updatedAt: "2026-07-12T01:02:00.000Z",
     vaultRoot,
   });
@@ -528,26 +507,19 @@ test("uses one per-setting revision owner for hosted reservations and conversati
     humor: 9,
   });
   assert.equal(retried.document.updatedAt, "2026-07-12T01:02:00.000Z");
-  assert.deepEqual(retried.document.assistantMutationState?.reservations, [
-    {
-      eventId,
-      fields: ["humor", "detail"],
-      revision: firstReservation.revision,
-      status: "handled",
-    },
-  ]);
-  assert.equal(
-    retried.document.assistantMutationState?.applied.detail,
-    firstReservation.revision,
-  );
-  assert.notEqual(
-    retried.document.assistantMutationState?.applied.humor,
-    firstReservation.revision,
-  );
+  assert.deepEqual(retried.document.assistantMutationState?.applied, {
+    detail: "1",
+    humor: "2",
+  });
 
   const replayed = await updateAssistantPreferences({
-    preferences,
-    reservationEventId: eventId,
+    causalSeq: "1",
+    preferences: {
+      personality: {
+        detail: 7,
+        humor: 2,
+      },
+    },
     updatedAt: "2026-07-12T01:03:00.000Z",
     vaultRoot,
   });
@@ -557,60 +529,61 @@ test("uses one per-setting revision owner for hosted reservations and conversati
     detail: 7,
     humor: 9,
   });
-});
 
-test("bounds assistant preference receipts while retaining pending reservations", async () => {
-  const vaultRoot = await createTempVault();
-  const reservations = Array.from({ length: 128 }, (_, index) => ({
-    eventId: `member.preferences.updated:${index}`,
-    fields: ["humor"] as const,
-    revision: String(index + 1),
-    status: index === 0 ? "handled" as const : "pending" as const,
-  }));
-  await writeFile(
-    resolvePreferencesDocumentPath(vaultRoot),
-    `${JSON.stringify({
-      schemaVersion: 1,
-      updatedAt: "2026-07-12T02:00:00.000Z",
-      assistantMutationState: {
-        applied: {},
-        nextRevision: "129",
-        reservations,
-      },
-      workoutUnitPreferences: {},
-      wearablePreferences: {
-        desiredProviders: [],
-      },
-    }, null, 2)}\n`,
-    "utf8",
-  );
-
-  await reserveAssistantPreferenceMutation({
-    eventId: "member.preferences.updated:replacement",
+  const newerSettings = await updateAssistantPreferences({
+    causalSeq: "3",
     preferences: { personality: { humor: 4 } },
+    updatedAt: "2026-07-12T01:04:00.000Z",
     vaultRoot,
   });
-  const afterReplacement = await readPreferencesDocument(vaultRoot);
-  assert.equal(afterReplacement.assistantMutationState?.reservations.length, 128);
-  assert.equal(
-    afterReplacement.assistantMutationState?.reservations.some(
-      (reservation) => reservation.eventId === "member.preferences.updated:0",
-    ),
-    false,
-  );
-  assert.equal(
-    afterReplacement.assistantMutationState?.reservations.at(-1)?.status,
-    "pending",
-  );
+  assert.equal(newerSettings.updated, true);
+  assert.equal(newerSettings.document.assistant?.personality?.humor, 4);
+  assert.equal(newerSettings.document.assistantMutationState?.applied.humor, "3");
 
-  await assert.rejects(
-    reserveAssistantPreferenceMutation({
-      eventId: "member.preferences.updated:over-limit",
-      preferences: { personality: { humor: 5 } },
-      vaultRoot,
-    }),
-    /reservation limit reached/u,
+  const sameTurnFollowUp = await updateAssistantPreferences({
+    causalOrigin: "turn",
+    causalSeq: "3",
+    preferences: { personality: { humor: 8 } },
+    updatedAt: "2026-07-12T01:05:00.000Z",
+    vaultRoot,
+  });
+  assert.equal(sameTurnFollowUp.updated, true);
+  assert.equal(sameTurnFollowUp.document.assistant?.personality?.humor, 8);
+
+  const sameSequenceEventReplay = await updateAssistantPreferences({
+    causalSeq: "3",
+    preferences: { personality: { humor: 4 } },
+    updatedAt: "2026-07-12T01:06:00.000Z",
+    vaultRoot,
+  });
+  assert.equal(sameSequenceEventReplay.updated, false);
+  assert.equal(sameSequenceEventReplay.document.assistant?.personality?.humor, 8);
+  assert.equal(
+    sameSequenceEventReplay.document.updatedAt,
+    "2026-07-12T01:05:00.000Z",
   );
+});
+
+test("replays old causal tokens after more than the former receipt cap without retained events", async () => {
+  const vaultRoot = await createTempVault();
+  for (let causalSeq = 1; causalSeq <= 256; causalSeq += 1) {
+    await updateAssistantPreferences({
+      causalSeq: String(causalSeq),
+      preferences: { personality: { humor: causalSeq % 11 } },
+      vaultRoot,
+    });
+  }
+
+  const replayed = await updateAssistantPreferences({
+    causalSeq: "1",
+    preferences: { personality: { humor: 1 } },
+    vaultRoot,
+  });
+  assert.equal(replayed.updated, false);
+  assert.equal(replayed.document.assistantMutationState?.applied.humor, "256");
+  assert.deepEqual(replayed.document.assistantMutationState, {
+    applied: { humor: "256" },
+  });
 });
 
 test("clears individual personality overrides and removes the empty personality object", async () => {

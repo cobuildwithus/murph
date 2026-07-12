@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { access, mkdir, writeFile } from "node:fs/promises";
+import { access, mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import {
@@ -20,6 +20,7 @@ import {
 import type {
   AssistantExecutionContext,
 } from "@murphai/assistant-engine";
+import { resolveAssistantStatePaths } from "@murphai/runtime-state/node/assistant-state-fs";
 import {
   readPreferencesDocument,
   updateAssistantPreferences,
@@ -1693,6 +1694,7 @@ describe("hosted system mailbox notification execution context", () => {
       assert.equal(failed?.status, "retryable_failed");
 
       await updateAssistantPreferences({
+        causalSeq: "2",
         preferences: {
           personality: {
             humor: 9,
@@ -1709,6 +1711,7 @@ describe("hosted system mailbox notification execution context", () => {
         await applyHostedMemberPreferences(
           input.vaultRoot,
           olderWake,
+          input.preferenceCausalSeq ?? "0",
           input.preferenceAppliedAt,
         );
         throw Object.assign(new Error("crash after canonical preference commit"), {
@@ -1744,6 +1747,7 @@ describe("hosted system mailbox notification execution context", () => {
         await applyHostedMemberPreferences(
           input.vaultRoot,
           olderWake,
+          input.preferenceCausalSeq ?? "0",
           input.preferenceAppliedAt,
         );
         return {
@@ -1775,6 +1779,81 @@ describe("hosted system mailbox notification execution context", () => {
         },
       );
       assert.equal(preferences.updatedAt, "2026-04-27T00:01:00.000Z");
+      assert.deepEqual(
+        (await readHostedSystemMailboxState(workspace.vaultRoot)).pending,
+        [],
+      );
+    } finally {
+      await workspace.cleanup();
+    }
+  });
+
+  it("drains a restored legacy preference item without a causal token", async () => {
+    const workspace = await createHostedRuntimeWorkspace("murph-hosted-system-mailbox-");
+    const wake = buildHostedExecutionMemberPreferencesUpdatedWake({
+      eventId: "member.preferences.updated:legacy-v1",
+      memberId: "member_123",
+      occurredAt: FIXED_NOW,
+      preferences: { personality: { humor: 2 } },
+    });
+
+    try {
+      await mkdir(workspace.vaultRoot, { recursive: true });
+      await writeFile(path.join(workspace.vaultRoot, VAULT_LAYOUT.metadata), "{}", "utf8");
+      await updateAssistantPreferences({
+        causalOrigin: "turn",
+        causalSeq: "0",
+        preferences: { personality: { humor: 9 } },
+        vaultRoot: workspace.vaultRoot,
+      });
+      await enqueueHostedSystemMailboxItem({
+        item: createResolvedMemberPreferencesItem({ causalSeq: null }),
+        vaultRoot: workspace.vaultRoot,
+        wake,
+      });
+      const statePath = path.join(
+        resolveAssistantStatePaths(workspace.vaultRoot).assistantStateRoot,
+        "hosted-system-mailbox.json",
+      );
+      const restoredState: {
+        value: { pending: Array<Record<string, unknown>> };
+      } = JSON.parse(await readFile(statePath, "utf8"));
+      delete restoredState.value.pending[0]?.preferenceCausalSeq;
+      await writeFile(statePath, `${JSON.stringify(restoredState, null, 2)}\n`, "utf8");
+      mocks.executeHostedMailboxEvent.mockImplementationOnce(async (input) => {
+        const { applyHostedMemberPreferences } = await import(
+          "../src/hosted-runtime/context.ts"
+        );
+        await applyHostedMemberPreferences(
+          input.vaultRoot,
+          wake,
+          input.preferenceCausalSeq ?? "0",
+          input.preferenceAppliedAt,
+        );
+        return {
+          bootstrapResult: null,
+          conversationMetrics: null,
+          mailboxLane: "member-preferences-updated",
+          nextWakeAt: null,
+          postCheckpointRecord: null,
+          redactedLogEntries: [],
+        };
+      });
+
+      const result = await prepareHostedSystemMailboxItemForCheckpoint({
+        allowedRouteActions: ["apply-member-preferences"],
+        executionContext: null,
+        now: () => FIXED_NOW,
+        runtime: createRuntime({}),
+        runtimeEnv: {},
+        vaultRoot: workspace.vaultRoot,
+      });
+      assert.equal(result?.status, "processed");
+      assert.equal(
+        (await readPreferencesDocument(workspace.vaultRoot))
+          .assistant?.personality?.humor,
+        9,
+      );
       assert.deepEqual(
         (await readHostedSystemMailboxState(workspace.vaultRoot)).pending,
         [],
@@ -1859,10 +1938,14 @@ function createResolvedNotificationItem(overrides: Partial<{
 }
 
 function createResolvedMemberPreferencesItem(overrides: Partial<{
+  causalSeq: string | null;
   id: string;
   laneSeq: string;
 }> = {}): HostedMailboxResolvedImportItem {
   const item: HostedMailboxItem = {
+    causalSeq: overrides.causalSeq === undefined
+      ? (overrides.laneSeq ?? "1")
+      : overrides.causalSeq,
     createdAt: FIXED_NOW,
     dedupeKey: "member.preferences.updated:member_123",
     expiresAt: null,

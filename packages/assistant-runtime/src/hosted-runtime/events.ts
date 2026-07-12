@@ -51,6 +51,7 @@ export async function executeHostedMailboxEvent(input: {
   forceQueueOnlyAssistantNotification?: boolean;
   operatorHomeRoot?: string | null;
   preferenceAppliedAt?: string;
+  preferenceCausalSeq?: string;
   shouldYieldDeviceSync?: (() => boolean) | null;
   sourceMailboxItemId?: string | null;
   runtime: Pick<
@@ -86,6 +87,7 @@ export async function executeHostedMailboxEvent(input: {
     forceQueueOnlyAssistantNotification: input.forceQueueOnlyAssistantNotification === true,
     operatorHomeRoot: input.operatorHomeRoot ?? null,
     preferenceAppliedAt: input.preferenceAppliedAt,
+    preferenceCausalSeq: input.preferenceCausalSeq,
     runtime: input.runtime,
     runtimeEnv: input.runtimeEnv,
     ...(input.shouldYieldDeviceSync
@@ -114,6 +116,7 @@ async function handleHostedMailboxEvent(input: {
   forceQueueOnlyAssistantNotification: boolean;
   operatorHomeRoot: string | null;
   preferenceAppliedAt?: string;
+  preferenceCausalSeq?: string;
   runtime: Pick<
     NormalizedHostedAssistantRuntimeConfig,
     "commitTimeoutMs" | "forwardedEnv" | "platform" | "platformEnv" | "resolvedConfig" | "userEnv"
@@ -133,6 +136,7 @@ async function handleHostedMailboxEvent(input: {
     forceQueueOnlyAssistantNotification: input.forceQueueOnlyAssistantNotification,
     operatorHomeRoot: input.operatorHomeRoot,
     preferenceAppliedAt: input.preferenceAppliedAt,
+    preferenceCausalSeq: input.preferenceCausalSeq,
     runtime: input.runtime,
     runtimeEnv: input.runtimeEnv,
     ...(input.shouldYieldDeviceSync
@@ -149,6 +153,7 @@ async function executeHostedSystemWake(input: {
   forceQueueOnlyAssistantNotification: boolean;
   operatorHomeRoot: string | null;
   preferenceAppliedAt?: string;
+  preferenceCausalSeq?: string;
   runtime: Pick<
     NormalizedHostedAssistantRuntimeConfig,
     "commitTimeoutMs" | "platform" | "platformEnv" | "resolvedConfig"
@@ -180,6 +185,7 @@ async function executeHostedSystemWake(input: {
       await applyHostedMemberPreferences(
         input.vaultRoot,
         input.wake,
+        input.preferenceCausalSeq ?? "0",
         input.preferenceAppliedAt,
       );
       return createNoopMailboxEffect({

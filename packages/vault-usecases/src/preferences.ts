@@ -1,5 +1,9 @@
+import { readFile } from "node:fs/promises";
+
 import {
+  assistantPreferenceCausalSeqSchema,
   assistantPersonalitySettingIds,
+  MURPH_ASSISTANT_PREFERENCE_CAUSAL_SEQ_PATH_ENV,
   resolveAssistantPersonalityScores,
   type AssistantPersonalityPreferences,
   type AssistantPersonalityScores,
@@ -28,6 +32,8 @@ type AssistantPersonalityPreferencesUpdate = Partial<
 interface PreferencesCoreRuntime {
   readPreferencesDocument(vaultRoot: string): Promise<PreferencesDocument>
   updateAssistantPreferences(input: {
+    causalOrigin?: "event" | "turn"
+    causalSeq?: string
     vaultRoot: string
     updatedAt?: string
     preferences: {
@@ -100,6 +106,7 @@ export async function showAssistantPersonality(vault: string) {
 }
 
 export async function setAssistantPersonalitySetting(input: {
+  causalSeq?: string
   vault: string
   setting: AssistantPersonalitySettingId
   value: AssistantPersonalityScore
@@ -107,6 +114,7 @@ export async function setAssistantPersonalitySetting(input: {
 }) {
   const { updateAssistantPreferences } = await loadPreferencesCoreRuntime()
   const updated = await updateAssistantPreferences({
+    ...(await withAssistantPreferenceCausalSeq(input.causalSeq)),
     vaultRoot: input.vault,
     updatedAt: input.recordedAt,
     preferences: {
@@ -124,12 +132,14 @@ export async function setAssistantPersonalitySetting(input: {
 }
 
 export async function resetAssistantPersonalitySetting(input: {
+  causalSeq?: string
   vault: string
   setting: AssistantPersonalitySettingId
   recordedAt?: string
 }) {
   const { updateAssistantPreferences } = await loadPreferencesCoreRuntime()
   const updated = await updateAssistantPreferences({
+    ...(await withAssistantPreferenceCausalSeq(input.causalSeq)),
     vaultRoot: input.vault,
     updatedAt: input.recordedAt,
     preferences: {
@@ -147,6 +157,7 @@ export async function resetAssistantPersonalitySetting(input: {
 }
 
 export async function resetAllAssistantPersonalitySettings(input: {
+  causalSeq?: string
   vault: string
   recordedAt?: string
 }) {
@@ -156,6 +167,7 @@ export async function resetAllAssistantPersonalitySettings(input: {
     personality[setting] = null
   }
   const updated = await updateAssistantPreferences({
+    ...(await withAssistantPreferenceCausalSeq(input.causalSeq)),
     vaultRoot: input.vault,
     updatedAt: input.recordedAt,
     preferences: { personality },
@@ -166,6 +178,47 @@ export async function resetAllAssistantPersonalitySettings(input: {
     updated.document,
     updated.updated,
   )
+}
+
+async function withAssistantPreferenceCausalSeq(
+  explicit: string | undefined,
+): Promise<{ causalOrigin: "turn"; causalSeq: string } | Record<string, never>> {
+  const raw = explicit
+    ?? await readAssistantPreferenceCausalSeqPath()
+  if (raw !== undefined) {
+    return {
+      causalOrigin: "turn",
+      causalSeq: assistantPreferenceCausalSeqSchema.parse(raw),
+    }
+  }
+  if (process.env.MURPH_HOSTED_RUNTIME_PROCESS?.trim() === "1") {
+    throw new TypeError(
+      "Hosted assistant preference mutation requires mailbox causal order.",
+    )
+  }
+  return {}
+}
+
+async function readAssistantPreferenceCausalSeqPath(): Promise<string | undefined> {
+  const filePath = process.env[MURPH_ASSISTANT_PREFERENCE_CAUSAL_SEQ_PATH_ENV]
+  if (filePath === undefined) {
+    return undefined
+  }
+  try {
+    const value = (await readFile(filePath, "utf8")).trim()
+    return value.length > 0 ? value : undefined
+  } catch (error) {
+    if (isNodeFileNotFoundError(error)) {
+      return undefined
+    }
+    throw error
+  }
+}
+
+function isNodeFileNotFoundError(error: unknown): boolean {
+  return error instanceof Error
+    && "code" in error
+    && error.code === "ENOENT"
 }
 
 export async function showWearablePreferences(vault: string) {

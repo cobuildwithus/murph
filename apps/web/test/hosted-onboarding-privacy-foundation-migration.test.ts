@@ -563,6 +563,13 @@ describe("hosted Prisma baseline migration", () => {
       ),
       "utf8",
     );
+    const hostedMailboxCausalSeqMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/20260712180000_hosted_mailbox_causal_seq/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
     expect(migrationEntries).toEqual([
       "2026040600_init",
       "20260425000000_drop_legacy_linq_control_plane",
@@ -652,6 +659,7 @@ describe("hosted Prisma baseline migration", () => {
       "20260709120000_hosted_linq_delivery_retry_after_at",
       "20260709120000_hosted_member_assistant_model_preference",
       "20260710130000_hosted_member_assistant_personality",
+      "20260712180000_hosted_mailbox_causal_seq",
       "migration_lock.toml",
     ]);
     for (const setting of ["humor", "push", "detail"]) {
@@ -1230,6 +1238,15 @@ describe("hosted Prisma baseline migration", () => {
     );
     expect(hostedMailboxItemConsumedAtMigrationSql).not.toContain("CREATE TABLE");
     expect(hostedMailboxItemConsumedAtMigrationSql).not.toContain("CREATE INDEX");
+    expect(schema).toMatch(
+      /model HostedMailboxItem \{[\s\S]*causalSeq\s+BigInt\?\s+@map\("causal_seq"\)/u,
+    );
+    expect(hostedMailboxCausalSeqMigrationSql).toContain(
+      'ADD COLUMN "causal_seq" BIGINT',
+    );
+    expect(hostedMailboxCausalSeqMigrationSql).toContain(
+      'CREATE UNIQUE INDEX "hosted_mailbox_item_user_id_causal_seq_key"',
+    );
     expect(linqPendingParticipantContactMigrationSql).toContain(
       'ALTER TABLE "hosted_member_routing"',
     );
