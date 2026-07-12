@@ -528,7 +528,6 @@ describe("appendHostedMailboxEnvelopeTx", () => {
     expect(hostedThreadRoute.findFirst).toHaveBeenCalledWith(expect.objectContaining({
       where: expect.objectContaining({
         channel: "linq",
-        containerMemberId: "member_personal_123",
         threadIdentityLookupKey: {
           in: expect.arrayContaining([
             expect.stringMatching(/^hbidx:external-thread-identity:v\d+:/u),
@@ -536,6 +535,45 @@ describe("appendHostedMailboxEnvelopeTx", () => {
         },
       }),
     }));
+    expect(tx.hostedWorkspace.upsert).not.toHaveBeenCalled();
+    expect(hostedMailboxItem.create).not.toHaveBeenCalled();
+  });
+
+  it("rejects a reported-direct Linq envelope when a persisted route owns another workspace", async () => {
+    const hostedMailboxItem = createHostedMailboxItemDelegate();
+    const hostedMailboxPayload = createHostedMailboxPayloadDelegate();
+    const hostedThreadRoute = {
+      findFirst: vi.fn(async () => ({
+        containerMemberId: "member_thread_container_123",
+      })),
+    };
+    const tx = createHostedMailboxTx({
+      hostedMailboxItem,
+      hostedMailboxPayload,
+      hostedThreadRoute,
+    });
+    const envelope = buildHostedGroupLinqEnvelope("member_personal_123");
+    const reportedDirectEnvelope = {
+      ...envelope,
+      message: {
+        ...envelope.message,
+        linqMessage: {
+          ...envelope.message.linqMessage,
+          threadIsDirect: true,
+        },
+        routeAuthority: undefined,
+      },
+    };
+
+    await expect(appendHostedMailboxEnvelopeTx({
+      envelope: reportedDirectEnvelope,
+      tx,
+    })).rejects.toMatchObject({
+      code: "HOSTED_GROUP_WORKSPACE_TARGET_MISMATCH",
+      retryable: true,
+    });
+
+    expect(hostedThreadRoute.findFirst).toHaveBeenCalledTimes(1);
     expect(tx.hostedWorkspace.upsert).not.toHaveBeenCalled();
     expect(hostedMailboxItem.create).not.toHaveBeenCalled();
   });
@@ -1660,7 +1698,7 @@ describe("fetchHostedRuntimeMailboxProjection", () => {
     ]);
   });
 
-  it("rehomes a projected personal Linq item when the durable route now owns the chat", async () => {
+  it("keeps runtime mailbox projection read-only when a Linq route changed", async () => {
     restoreDefaultHostedSecureBoxTestCodec();
     const sourceUserId = "member_personal";
     const containerUserId = "member_container";
@@ -1846,45 +1884,18 @@ describe("fetchHostedRuntimeMailboxProjection", () => {
     });
 
     expect(transaction).toHaveBeenCalledTimes(1);
-    expect(queryRaw).toHaveBeenCalledTimes(4);
-    expect(result.items).toEqual([]);
-    expect(JSON.stringify(result)).not.toContain(sourceCiphertext);
-    expect(deleteMany).toHaveBeenCalledWith({
-      where: {
-        id: sourceRow.itemId,
-        userId: sourceUserId,
-      },
-    });
-    expect(updateMany).toHaveBeenCalledWith({
-      data: {
-        consumedAt: sourceRow.itemConsumedAt,
-      },
-      where: {
-        consumedAt: null,
-        id: expect.any(String),
-        userId: containerUserId,
-      },
-    });
-    const insertValues = queryRaw.mock.calls[2]?.slice(1) ?? [];
-    expect(insertValues[1]).toBe(containerUserId);
-    const rehomedCiphertext = String(insertValues[8]);
-    const secureBox = parseHostedSecureBoxDefaultTestPayload(rehomedCiphertext);
-    expect(secureBox.userId).toBe(containerUserId);
-    expect(JSON.parse(String(secureBox.value))).toMatchObject({
-      eventId: sourceWake.eventId,
-      message: {
-        linqMessage: {
-          chatId: "chat_group_transition",
-          threadIsDirect: false,
-        },
-        routeAuthority: {
-          channel: "linq",
-          containerMemberId: containerUserId,
-          threadId: "chat_group_transition",
-        },
-      },
-      userId: containerUserId,
-    });
+    expect(queryRaw).toHaveBeenCalledTimes(1);
+    expect(result.items).toMatchObject([{
+      consumedAt: sourceRow.itemConsumedAt.toISOString(),
+      id: sourceRow.itemId,
+      payloadInlineCiphertext: sourceCiphertext,
+      userId: sourceUserId,
+    }]);
+    expect(deleteMany).not.toHaveBeenCalled();
+    expect(updateMany).not.toHaveBeenCalled();
+    expect(tx.hostedMailboxPayload.findUnique).not.toHaveBeenCalled();
+    expect(tx.hostedThreadRoute.findFirst).not.toHaveBeenCalled();
+    expect(tx.hostedThreadRoute.findMany).not.toHaveBeenCalled();
   });
 
   it("returns lane sentinels and rejects duplicate lane projections before querying", async () => {

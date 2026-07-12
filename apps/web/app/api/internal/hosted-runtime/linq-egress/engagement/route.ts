@@ -41,10 +41,15 @@ export const POST = withJsonError(async (request: Request) => {
   );
   const fromPhoneNumber = readOptionalBodyString(body.fromPhoneNumber);
   const idempotencyKey = readOptionalBodyString(body.idempotencyKey);
+  const authorityCheckOnly = body.authorityCheckOnly === true;
   const intentId = readOptionalBodyString(body.intentId);
   const replyToMessageId = readOptionalBodyString(body.replyToMessageId);
   const target = readOptionalBodyString(body.target);
   const targetKind = readOptionalBodyString(body.targetKind);
+  const providerDispatchIdempotencyKey = idempotencyKey
+    ?? (currentInbound
+      ? `legacy-current-inbound:${currentInbound.dedupeKey}`
+      : null);
   const prisma = getPrisma();
 
   const assertion = await prisma.$transaction(async (tx) => {
@@ -94,14 +99,32 @@ export const POST = withJsonError(async (request: Request) => {
       });
     }
 
-    await recordHostedLinqRuntimeProviderDispatchFenceTx({
-      idempotencyKey,
-      linqChatId: providerTargetKind === "participant" ? null : providerTarget,
-      phoneNumber: fromPhoneNumber,
-      prisma: tx,
-      sourceRef: intentId ?? idempotencyKey,
-      targetKind: providerTargetKind,
-    });
+    if (!authorityCheckOnly) {
+      if (!providerDispatchIdempotencyKey) {
+        throw hostedOnboardingError({
+          code: "HOSTED_LINQ_PROVIDER_DISPATCH_IDEMPOTENCY_REQUIRED",
+          httpStatus: 400,
+          message: "Hosted Linq provider dispatch requires an idempotency key.",
+          retryable: false,
+        });
+      }
+      const claim = await recordHostedLinqRuntimeProviderDispatchFenceTx({
+        idempotencyKey: providerDispatchIdempotencyKey,
+        linqChatId: providerTargetKind === "participant" ? null : providerTarget,
+        phoneNumber: fromPhoneNumber,
+        prisma: tx,
+        sourceRef: intentId ?? providerDispatchIdempotencyKey,
+        targetKind: providerTargetKind,
+      });
+      if (!claim.claimed) {
+        throw hostedOnboardingError({
+          code: "HOSTED_LINQ_PROVIDER_DISPATCH_NOT_CLAIMED",
+          httpStatus: 409,
+          message: "Hosted Linq provider dispatch is already claimed.",
+          retryable: false,
+        });
+      }
+    }
     return asserted;
   });
 

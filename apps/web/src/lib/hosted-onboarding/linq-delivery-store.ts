@@ -361,29 +361,15 @@ export async function claimHostedLinqDeliveryProviderDispatchTx(input: {
 
 export async function recordHostedLinqRuntimeProviderDispatchFenceTx(input: {
   attemptedAt?: Date;
-  idempotencyKey?: string | null;
+  idempotencyKey: string;
   linqChatId?: string | null;
   phoneNumber?: string | null;
   prisma: HostedLinqDeliveryClient;
   sourceRef?: string | null;
   targetKind?: string | null;
-}): Promise<void> {
+}): Promise<{ claimed: boolean; id: string | null; retryAt?: Date }> {
   const attemptedAt = input.attemptedAt ?? new Date();
-  if (!normalizeNullable(input.idempotencyKey)) {
-    await recordHostedLinqDeliveryAttemptTx({
-      attemptedAt,
-      idempotencyKey: null,
-      linqChatId: input.linqChatId,
-      phoneNumber: input.phoneNumber,
-      prisma: input.prisma,
-      source: "hosted_runtime_linq_delivery",
-      sourceRef: input.sourceRef,
-      targetKind: input.targetKind,
-    });
-    return;
-  }
-
-  await claimHostedLinqDeliveryProviderDispatchTx({
+  return await claimHostedLinqDeliveryProviderDispatchTx({
     attemptedAt,
     idempotencyKey: input.idempotencyKey,
     linqChatId: input.linqChatId,
@@ -426,13 +412,8 @@ export async function hasRecentHostedLinqProviderDispatchForChatTx(input: {
       },
       messageLookupKey: null,
       skippedAt: null,
-      status: {
-        in: [
-          "attempted",
-          "failed",
-          HOSTED_LINQ_DELIVERY_PROVIDER_DISPATCH_STARTED_STATUS,
-        ],
-      },
+      failedAt: null,
+      status: HOSTED_LINQ_DELIVERY_PROVIDER_DISPATCH_STARTED_STATUS,
     },
   });
 

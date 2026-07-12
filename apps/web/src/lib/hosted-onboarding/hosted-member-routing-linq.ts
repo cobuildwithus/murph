@@ -24,17 +24,15 @@ import {
   acquireHostedLinqChatOwnershipLockTx,
 } from "../hosted-routing/linq-chat-ownership-lock";
 import {
-  assertHostedLinqPersonalRuntimesIdle,
-} from "../hosted-routing/linq-group-transition-fence";
-import {
   hasRecentHostedLinqProviderDispatchForChatTx,
 } from "./linq-delivery-store";
 
 export async function demoteHostedMemberLinqGroupChatBindingsTx(input: {
+  enforceProviderDispatchFence?: boolean;
   linqChatId: string;
   mailboxDedupeKey?: string | null;
   prisma: Prisma.TransactionClient;
-}): Promise<void> {
+}): Promise<{ mailboxConsumedAt: Date | null }> {
   const linqChatLookupKeys = createHostedLinqChatLookupKeyReadCandidates(
     input.linqChatId,
   );
@@ -48,10 +46,13 @@ export async function demoteHostedMemberLinqGroupChatBindingsTx(input: {
     tx: input.prisma,
   });
 
-  if (await hasRecentHostedLinqProviderDispatchForChatTx({
-    linqChatId: input.linqChatId,
-    prisma: input.prisma,
-  })) {
+  if (
+    input.enforceProviderDispatchFence === true
+    && await hasRecentHostedLinqProviderDispatchForChatTx({
+      linqChatId: input.linqChatId,
+      prisma: input.prisma,
+    })
+  ) {
     throw hostedOnboardingError({
       code: "HOSTED_LINQ_GROUP_PROVIDER_DISPATCH_IN_FLIGHT",
       httpStatus: 409,
@@ -80,10 +81,28 @@ export async function demoteHostedMemberLinqGroupChatBindingsTx(input: {
     },
   });
   const memberIds = [...new Set(bindings.map((binding) => binding.memberId))];
-  await assertHostedLinqPersonalRuntimesIdle(memberIds);
 
   const mailboxDedupeKey = input.mailboxDedupeKey?.trim() ?? "";
+  let mailboxConsumedAt: Date | null = null;
   if (mailboxDedupeKey && memberIds.length > 0) {
+    const consumedMailboxItem = await input.prisma.hostedMailboxItem.findFirst({
+      orderBy: {
+        consumedAt: "asc",
+      },
+      select: {
+        consumedAt: true,
+      },
+      where: {
+        consumedAt: {
+          not: null,
+        },
+        dedupeKey: mailboxDedupeKey,
+        userId: {
+          in: memberIds,
+        },
+      },
+    });
+    mailboxConsumedAt = consumedMailboxItem?.consumedAt ?? null;
     await input.prisma.hostedMailboxItem.deleteMany({
       where: {
         dedupeKey: mailboxDedupeKey,
@@ -122,6 +141,8 @@ export async function demoteHostedMemberLinqGroupChatBindingsTx(input: {
       pendingLinqRecipientPhoneLookupKey: null,
     },
   });
+
+  return { mailboxConsumedAt };
 }
 
 export async function upsertHostedMemberPendingLinqBindingTx(input: {

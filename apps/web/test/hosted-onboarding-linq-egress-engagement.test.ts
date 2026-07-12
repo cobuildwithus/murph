@@ -395,15 +395,86 @@ describe("hosted Linq egress authority", () => {
     expect(response.status).toBe(200);
     expect(mocks.requireHostedCloudflareCallbackRequest).toHaveBeenCalled();
     expect(prisma.hostedMemberRouting.findUnique).not.toHaveBeenCalled();
-    expect(prisma.hostedLinqDelivery.create).toHaveBeenCalledWith({
-      data: expect.objectContaining({
+    expect(prisma.hostedLinqDelivery.createMany).toHaveBeenCalledWith({
+      data: [expect.objectContaining({
         linqChatLookupKey: createRequiredLinqChatLookupKey("chat-external"),
         source: "hosted_runtime_linq_delivery",
-        status: "attempted",
+        status: "provider_dispatch_started",
         targetKind: "thread",
-      }),
-      select: { id: true },
+      })],
+      skipDuplicates: true,
     });
+  });
+
+  it("checks route authority without claiming provider dispatch", async () => {
+    const prisma = createPrismaStub({
+      homeChatId: "chat-home",
+    });
+    mocks.getPrisma.mockReturnValue(prisma);
+
+    const response = await postHostedLinqEgressEngagement(
+      new Request("https://internal.example.test/engagement", {
+        body: JSON.stringify({
+          authorityCheckOnly: true,
+          target: "chat-home",
+          targetKind: "thread",
+        }),
+        headers: {
+          "content-type": "application/json",
+        },
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(prisma.hostedLinqDelivery.create).not.toHaveBeenCalled();
+    expect(prisma.hostedLinqDelivery.createMany).not.toHaveBeenCalled();
+    expect(prisma.hostedLinqDelivery.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("rejects provider entry when its idempotency claim is already active", async () => {
+    const attemptedAt = new Date("2026-06-01T12:00:00.000Z");
+    const prisma = createPrismaStub({
+      homeChatId: "chat-home",
+    });
+    prisma.hostedLinqDelivery.findUnique.mockResolvedValueOnce({
+      acceptedAt: null,
+      attemptedAt,
+      deliveredAt: null,
+      failedAt: null,
+      id: "delivery-active",
+      lastReceiptAt: null,
+      messageLookupKey: null,
+      phoneNumberLookupKey: null,
+      retryAfterAt: null,
+      skippedAt: null,
+      source: "hosted_runtime_linq_delivery",
+      status: "provider_dispatch_started",
+    });
+    prisma.hostedLinqDelivery.updateMany.mockResolvedValueOnce({ count: 0 });
+    mocks.getPrisma.mockReturnValue(prisma);
+
+    const response = await postHostedLinqEgressEngagement(
+      new Request("https://internal.example.test/engagement", {
+        body: JSON.stringify({
+          idempotencyKey: "assistant-outbox:intent-active",
+          target: "chat-home",
+          targetKind: "thread",
+        }),
+        headers: {
+          "content-type": "application/json",
+        },
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toMatchObject({
+      error: {
+        code: "HOSTED_LINQ_PROVIDER_DISPATCH_NOT_CLAIMED",
+      },
+    });
+    expect(prisma.hostedLinqDelivery.createMany).not.toHaveBeenCalled();
   });
 
   it("rejects a home-route override when that resolved chat became a group route", async () => {
@@ -497,6 +568,7 @@ function createPrismaStub(input: {
       create: vi.fn().mockResolvedValue({ id: "delivery-1" }),
       createMany: vi.fn().mockResolvedValue({ count: 1 }),
       findUnique: vi.fn().mockResolvedValue(null),
+      updateMany: vi.fn().mockResolvedValue({ count: 0 }),
     },
   };
   const transaction = vi.fn(async (

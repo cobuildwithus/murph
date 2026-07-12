@@ -22,11 +22,6 @@ import type {
 import type {
   HostedExecutionWake,
 } from "@murphai/hosted-execution/contracts";
-import {
-  buildHostedExecutionLinqConversationMessageWake,
-  readHostedLinqConversationMessageContact,
-} from "@murphai/hosted-execution";
-import { parseHostedExecutionWake } from "@murphai/hosted-execution/parsers";
 import { parseHostedEmailThreadTarget } from "@murphai/runtime-state";
 import { Prisma, type PrismaClient } from "@prisma/client";
 
@@ -40,9 +35,6 @@ import { hostedOnboardingError } from "../hosted-onboarding/errors";
 import {
   acquireHostedLinqChatOwnershipLockTx,
 } from "../hosted-routing/linq-chat-ownership-lock";
-import {
-  readHostedThreadRouteByThreadIdentity,
-} from "../hosted-routing/thread-route-store";
 import {
   HOSTED_MAILBOX_SYSTEM_AI_USAGE_GATED_KINDS,
 } from "./ai-usage-gate";
@@ -474,17 +466,24 @@ async function assertHostedMailboxEnvelopeWorkspaceTargetTx(input: {
   }
 
   const message = input.envelope.message;
-  if (message.channel === "linq" && message.linqMessage.threadIsDirect === false) {
+  if (message.channel === "linq") {
     const authority = message.routeAuthority;
     if (
-      !authority
-      || authority.channel !== "linq"
-      || authority.containerMemberId !== input.envelope.userId
-      || authority.threadId !== message.linqMessage.chatId
+      message.linqMessage.threadIsDirect === false
+      && (
+        !authority
+        || authority.channel !== "linq"
+        || authority.containerMemberId !== input.envelope.userId
+        || authority.threadId !== message.linqMessage.chatId
+      )
     ) {
       throwHostedMailboxGroupWorkspaceTargetMismatch();
     }
 
+    await acquireHostedLinqChatOwnershipLockTx({
+      chatId: message.linqMessage.chatId,
+      tx: input.tx,
+    });
     const threadIdentityLookupKeys =
       createHostedExternalThreadIdentityLookupKeyReadCandidates({
         channel: "linq",
@@ -496,13 +495,24 @@ async function assertHostedMailboxEnvelopeWorkspaceTargetTx(input: {
       },
       where: {
         channel: "linq",
-        containerMemberId: input.envelope.userId,
         threadIdentityLookupKey: {
           in: threadIdentityLookupKeys,
         },
       },
     });
-    if (!route) {
+    if (
+      route
+      && (
+        !authority
+        || authority.channel !== "linq"
+        || authority.containerMemberId !== route.containerMemberId
+        || authority.containerMemberId !== input.envelope.userId
+        || authority.threadId !== message.linqMessage.chatId
+      )
+    ) {
+      throwHostedMailboxGroupWorkspaceTargetMismatch();
+    }
+    if (!route && (message.linqMessage.threadIsDirect === false || authority)) {
       throwHostedMailboxGroupWorkspaceTargetMismatch();
     }
     return;
@@ -753,13 +763,6 @@ async function fetchHostedRuntimeMailboxProjectionTx(input: {
     ORDER BY lane_projection.ordinal ASC, mailbox_item.lane_seq ASC NULLS LAST
   `);
 
-  if (await repairHostedRuntimeMailboxProjectionLinqOwnershipTx({
-    rows,
-    tx: input.tx,
-  })) {
-    return fetchHostedRuntimeMailboxProjectionTx(input);
-  }
-
   const laneProjection = new Map<HostedMailboxLane, {
     consumedSeq: bigint;
     maxSeq: bigint;
@@ -800,127 +803,6 @@ async function fetchHostedRuntimeMailboxProjectionTx(input: {
       };
     }),
   };
-}
-
-async function repairHostedRuntimeMailboxProjectionLinqOwnershipTx(input: {
-  rows: readonly HostedRuntimeMailboxProjectionRow[];
-  tx: HostedMailboxMutationTx;
-}): Promise<boolean> {
-  let repaired = false;
-
-  for (const row of input.rows) {
-    if (
-      row.itemId === null
-      || row.itemKind !== "conversation.message"
-      || row.itemLane !== "conversation"
-      || row.itemUserId === null
-    ) {
-      continue;
-    }
-
-    const payload = row.itemPayloadRef
-      ? await input.tx.hostedMailboxPayload.findUnique({
-          where: {
-            mailboxItemId: row.itemId,
-          },
-        })
-      : null;
-    const decoded = await decodeHostedMailboxStoredPayload({
-      dedupeKey: requireHostedRuntimeMailboxProjectionValue(
-        row.itemDedupeKey,
-        "Hosted mailbox projected item dedupeKey",
-      ),
-      kind: row.itemKind,
-      lane: row.itemLane,
-      laneSeq: requireHostedRuntimeMailboxProjectionValue(
-        row.itemLaneSeq,
-        "Hosted mailbox projected item laneSeq",
-      ),
-      mailboxItemId: row.itemId,
-      occurredAt: requireHostedRuntimeMailboxProjectionValue(
-        row.itemOccurredAt,
-        "Hosted mailbox projected item occurredAt",
-      ).toISOString(),
-      payloadCiphertext: payload?.payloadCiphertext ?? null,
-      payloadInlineCiphertext: row.itemPayloadInlineCiphertext,
-      payloadSchema: row.itemPayloadSchema,
-      prisma: input.tx,
-      userId: row.itemUserId,
-    });
-    if (!decoded) {
-      throw new Error("Hosted conversation mailbox item is missing its encrypted payload.");
-    }
-
-    const wake = parseHostedExecutionWake(decoded);
-    if (wake.kind !== "conversation.message" || wake.message.channel !== "linq") {
-      continue;
-    }
-    if (wake.userId !== row.itemUserId) {
-      throw new Error("Hosted conversation mailbox payload owner does not match its item.");
-    }
-
-    const chatId = wake.message.linqMessage.chatId;
-    await acquireHostedLinqChatOwnershipLockTx({
-      chatId,
-      tx: input.tx,
-    });
-    const route = await readHostedThreadRouteByThreadIdentity({
-      channel: "linq",
-      prisma: input.tx,
-      threadId: chatId,
-    });
-    if (!route || route.containerMemberId === row.itemUserId) {
-      continue;
-    }
-
-    const contact = readHostedLinqConversationMessageContact(wake.message);
-    const accountLookupKey = normalizeNullableString(wake.message.accountLookupKey);
-    const rehomed = await appendHostedMailboxEnvelopeTx({
-      envelope: buildHostedExecutionLinqConversationMessageWake({
-        ...(accountLookupKey ? { accountLookupKey } : {}),
-        contactKind: contact.kind,
-        contactLookupKey: contact.lookupKey,
-        eventId: wake.eventId,
-        linqMessage: {
-          ...wake.message.linqMessage,
-          threadIsDirect: false,
-        },
-        occurredAt: wake.occurredAt,
-        ...(wake.message.phoneLookupKey === undefined
-          ? {}
-          : { phoneLookupKey: wake.message.phoneLookupKey }),
-        routeAuthority: {
-          ...(accountLookupKey ? { accountLookupKey } : {}),
-          channel: "linq",
-          containerMemberId: route.containerMemberId,
-          threadId: chatId,
-        },
-        userId: route.containerMemberId,
-      }),
-      tx: input.tx,
-    });
-    if (rehomed.inserted && row.itemConsumedAt) {
-      await input.tx.hostedMailboxItem.updateMany({
-        data: {
-          consumedAt: row.itemConsumedAt,
-        },
-        where: {
-          consumedAt: null,
-          id: rehomed.item.id,
-          userId: route.containerMemberId,
-        },
-      });
-    }
-    await input.tx.hostedMailboxItem.deleteMany({
-      where: {
-        id: row.itemId,
-        userId: row.itemUserId,
-      },
-    });
-    repaired = true;
-  }
-
-  return repaired;
 }
 
 function isHostedMailboxRootClient(

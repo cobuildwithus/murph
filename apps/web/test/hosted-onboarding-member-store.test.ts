@@ -68,16 +68,6 @@ vi.mock("@/src/lib/hosted-crypto/domain-root-store", async (importOriginal) => {
   };
 });
 
-const hostedExecutionControlMocks = vi.hoisted(() => ({
-  getRunnerStatus: vi.fn(),
-  readHostedExecutionControlClientIfConfigured: vi.fn(),
-}));
-
-vi.mock("@/src/lib/hosted-execution/control", () => ({
-  readHostedExecutionControlClientIfConfigured:
-    hostedExecutionControlMocks.readHostedExecutionControlClientIfConfigured,
-}));
-
 const TEST_CONTACT_PRIVACY_KEY = "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=";
 const TEST_CONTACT_PRIVACY_ROTATED_KEY = Buffer.alloc(32, 1).toString("base64");
 const LEGACY_TELEGRAM_PRIVATE_STATE_SCHEMA = "murph.hosted-member-routing.telegram.v1";
@@ -95,16 +85,6 @@ describe("hosted-member-store", () => {
       },
     });
     vi.clearAllMocks();
-    hostedExecutionControlMocks.getRunnerStatus.mockImplementation(
-      async (memberId: string) => ({
-        inFlight: null,
-        userId: memberId,
-      }),
-    );
-    hostedExecutionControlMocks.readHostedExecutionControlClientIfConfigured
-      .mockReturnValue({
-        getRunnerStatus: hostedExecutionControlMocks.getRunnerStatus,
-      });
   });
 
   afterEach(() => {
@@ -1358,6 +1338,8 @@ describe("hosted-member-store", () => {
       .mockResolvedValueOnce({ count: 1 })
       .mockResolvedValueOnce({ count: 1 });
     const deleteMany = vi.fn().mockResolvedValue({ count: 1 });
+    const consumedAt = new Date("2026-07-12T12:00:00.000Z");
+    const findFirstMailboxItem = vi.fn().mockResolvedValue({ consumedAt });
     const findMany = vi.fn().mockResolvedValue([
       { memberId: "member_home" },
       { memberId: "member_pending" },
@@ -1369,6 +1351,7 @@ describe("hosted-member-store", () => {
       },
       hostedMailboxItem: {
         deleteMany,
+        findFirst: findFirstMailboxItem,
       },
       hostedMemberRouting: {
         findMany,
@@ -1380,7 +1363,7 @@ describe("hosted-member-store", () => {
       linqChatId: "chat_group",
       mailboxDedupeKey: "evt_group",
       prisma,
-    })).resolves.toBeUndefined();
+    })).resolves.toEqual({ mailboxConsumedAt: consumedAt });
 
     const lookupKeys = createHostedLinqChatLookupKeyReadCandidates("chat_group");
     expect(lookupKeys).toHaveLength(2);
@@ -1393,7 +1376,23 @@ describe("hosted-member-store", () => {
         },
       },
     });
-    expect(hostedExecutionControlMocks.getRunnerStatus).toHaveBeenCalledTimes(2);
+    expect(findFirstMailboxItem).toHaveBeenCalledWith({
+      orderBy: {
+        consumedAt: "asc",
+      },
+      select: {
+        consumedAt: true,
+      },
+      where: {
+        consumedAt: {
+          not: null,
+        },
+        dedupeKey: "evt_group",
+        userId: {
+          in: ["member_home", "member_pending"],
+        },
+      },
+    });
     expect(updateMany).toHaveBeenNthCalledWith(1, {
       where: {
         linqChatLookupKey: {
@@ -1439,6 +1438,7 @@ describe("hosted-member-store", () => {
     } as never;
 
     await expect(demoteHostedMemberLinqGroupChatBindingsTx({
+      enforceProviderDispatchFence: true,
       linqChatId: "chat_group",
       prisma,
     })).rejects.toMatchObject({
@@ -1449,77 +1449,6 @@ describe("hosted-member-store", () => {
     expect(findMany).not.toHaveBeenCalled();
     expect(updateMany).not.toHaveBeenCalled();
   });
-
-  it("keeps canonical group bindings while a personal runtime is in flight", async () => {
-    hostedExecutionControlMocks.getRunnerStatus.mockResolvedValue({
-      inFlight: { kind: "message" },
-      userId: "member_home",
-    });
-    const updateMany = vi.fn();
-    const prisma = {
-      $executeRaw: vi.fn().mockResolvedValue(0),
-      hostedLinqDelivery: {
-        findFirst: vi.fn().mockResolvedValue(null),
-      },
-      hostedMemberRouting: {
-        findMany: vi.fn().mockResolvedValue([{ memberId: "member_home" }]),
-        updateMany,
-      },
-    } as never;
-
-    await expect(demoteHostedMemberLinqGroupChatBindingsTx({
-      linqChatId: "chat_group",
-      prisma,
-    })).rejects.toMatchObject({
-      code: "HOSTED_LINQ_GROUP_PERSONAL_RUNTIME_IN_FLIGHT",
-      retryable: true,
-    });
-
-    expect(updateMany).not.toHaveBeenCalled();
-  });
-
-  it.each(["missing", "mismatched"] as const)(
-    "keeps canonical group bindings when personal runtime authority is %s",
-    async (runtimeAuthority) => {
-      if (runtimeAuthority === "missing") {
-        hostedExecutionControlMocks.readHostedExecutionControlClientIfConfigured
-          .mockReturnValueOnce(null);
-      } else {
-        hostedExecutionControlMocks.getRunnerStatus.mockResolvedValueOnce({
-          inFlight: null,
-          userId: "member_other",
-        });
-      }
-      const deleteMany = vi.fn();
-      const updateMany = vi.fn();
-      const prisma = {
-        $executeRaw: vi.fn().mockResolvedValue(0),
-        hostedLinqDelivery: {
-          findFirst: vi.fn().mockResolvedValue(null),
-        },
-        hostedMailboxItem: {
-          deleteMany,
-        },
-        hostedMemberRouting: {
-          findMany: vi.fn().mockResolvedValue([{ memberId: "member_home" }]),
-          updateMany,
-        },
-      } as never;
-
-      await expect(demoteHostedMemberLinqGroupChatBindingsTx({
-        linqChatId: "chat_group",
-        mailboxDedupeKey: "evt_group",
-        prisma,
-      })).rejects.toMatchObject({
-        code: "HOSTED_LINQ_GROUP_RUNTIME_STATUS_UNAVAILABLE",
-        httpStatus: 503,
-        retryable: true,
-      });
-
-      expect(deleteMany).not.toHaveBeenCalled();
-      expect(updateMany).not.toHaveBeenCalled();
-    },
-  );
 
   it.each([
     {

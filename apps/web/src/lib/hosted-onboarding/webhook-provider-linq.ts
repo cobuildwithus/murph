@@ -151,14 +151,6 @@ export async function planHostedOnboardingLinqWebhook(input: {
     summary,
   } = context;
 
-  if (isHostedLinqGroupChat(messageEvent)) {
-    await demoteHostedMemberLinqGroupChatBindingsTx({
-      linqChatId: summary.chatId,
-      mailboxDedupeKey: input.event.event_id,
-      prisma: input.prisma,
-    });
-  }
-
   const threadRouteAccountLookupKeys = createHostedPhoneLookupKeyReadCandidates(
     recipientPhoneNumber,
   );
@@ -168,11 +160,19 @@ export async function planHostedOnboardingLinqWebhook(input: {
     threadId: summary.chatId,
   });
   if (explicitThreadRoute) {
+    const demotion = isHostedLinqGroupChat(messageEvent)
+      ? await demoteHostedMemberLinqGroupChatBindingsTx({
+          linqChatId: summary.chatId,
+          mailboxDedupeKey: input.event.event_id,
+          prisma: input.prisma,
+        })
+      : { mailboxConsumedAt: null };
     return planHostedLinqExplicitThreadRouteWebhook({
       context,
       event: input.event,
       prisma: input.prisma,
       route: explicitThreadRoute,
+      sourceMailboxConsumedAt: demotion.mailboxConsumedAt,
     });
   }
 
@@ -985,6 +985,7 @@ async function planHostedLinqExplicitThreadRouteWebhook(input: {
   event: HostedLinqWebhookEvent;
   prisma: Prisma.TransactionClient;
   route: HostedThreadRouteSnapshot;
+  sourceMailboxConsumedAt?: Date | null;
 }): Promise<HostedOnboardingLinqDirectPlan> {
   const {
     messageEvent,
@@ -1072,12 +1073,75 @@ async function planHostedLinqExplicitThreadRouteWebhook(input: {
     route: input.route,
     threadId: summary.chatId,
   });
+  const mailboxWake = buildHostedLinqConversationWakeForMailbox({
+    ...(currentLineAccountLookupKey ? { accountLookupKey: currentLineAccountLookupKey } : {}),
+    eventId: input.event.event_id,
+    linqMessage: {
+      chatId: summary.chatId,
+      from: participantContact.value,
+      isFromMe: summary.isFromMe,
+      messageId: summary.messageId,
+      reactionEligible: isHostedLinqMessageReactionEligible({
+        parts: messageEvent.data.message.parts,
+        service: messageEvent.data.service ?? null,
+      }),
+      threadIsDirect: false,
+      ...(messageEvent.data.message.reply_to?.message_id === undefined
+        ? {}
+        : { replyToMessageId: messageEvent.data.message.reply_to.message_id }),
+      ...(messageEvent.data.message.reply_to?.part_index === undefined
+        ? {}
+        : { replyToPartIndex: messageEvent.data.message.reply_to.part_index }),
+      ...(messageEvent.data.service === undefined ? {} : { service: messageEvent.data.service }),
+    },
+    occurredAt,
+    participantContact,
+    rawParts: messageEvent.data.message.parts,
+    routeAuthority,
+    userId: input.route.containerMemberId,
+  });
 
   const existingMailboxItem = await readHostedMailboxItemByDedupeKey({
     dedupeKey: input.event.event_id,
     prisma: input.prisma,
     userId: input.route.containerMemberId,
   });
+
+  if (input.sourceMailboxConsumedAt) {
+    const mailboxItem = existingMailboxItem ?? (await appendHostedMailboxEnvelopeTx({
+      envelope: mailboxWake,
+      tx: input.prisma,
+    })).item;
+    await input.prisma.hostedMailboxItem.updateMany({
+      data: {
+        consumedAt: input.sourceMailboxConsumedAt,
+      },
+      where: {
+        consumedAt: null,
+        id: mailboxItem.id,
+        userId: input.route.containerMemberId,
+      },
+    });
+    return logHostedLinqWebhookPlannerDecisionAndReturn(
+      buildActiveMemberDirectPlan({
+        desiredSideEffects: [],
+        response: {
+          ...(existingMailboxItem ? { duplicate: true } : {}),
+          ignored: true,
+          ok: true,
+          reason: "already-consumed-before-thread-route",
+        },
+      }),
+      buildHostedLinqWebhookPlannerDetails(input.event, input.context, {
+        duplicate: existingMailboxItem !== null,
+        existingMemberActive: true,
+        existingMemberMatch: "none",
+        mailboxAppendPresent: existingMailboxItem === null,
+        reason: "already-consumed-before-thread-route",
+        routeStage: "thread-route-already-consumed",
+      }),
+    );
+  }
 
   if (existingMailboxItem) {
     return logHostedLinqWebhookPlannerDecisionAndReturn(
@@ -1133,34 +1197,6 @@ async function planHostedLinqExplicitThreadRouteWebhook(input: {
   if (admissionPlan) {
     return admissionPlan;
   }
-
-  const mailboxWake = buildHostedLinqConversationWakeForMailbox({
-    ...(currentLineAccountLookupKey ? { accountLookupKey: currentLineAccountLookupKey } : {}),
-    eventId: input.event.event_id,
-    linqMessage: {
-      chatId: summary.chatId,
-      from: participantContact.value,
-      isFromMe: summary.isFromMe,
-      messageId: summary.messageId,
-      reactionEligible: isHostedLinqMessageReactionEligible({
-        parts: messageEvent.data.message.parts,
-        service: messageEvent.data.service ?? null,
-      }),
-      threadIsDirect: false,
-      ...(messageEvent.data.message.reply_to?.message_id === undefined
-        ? {}
-        : { replyToMessageId: messageEvent.data.message.reply_to.message_id }),
-      ...(messageEvent.data.message.reply_to?.part_index === undefined
-        ? {}
-        : { replyToPartIndex: messageEvent.data.message.reply_to.part_index }),
-      ...(messageEvent.data.service === undefined ? {} : { service: messageEvent.data.service }),
-    },
-    occurredAt,
-    participantContact,
-    rawParts: messageEvent.data.message.parts,
-    routeAuthority,
-    userId: input.route.containerMemberId,
-  });
 
   const mailboxAppend = await appendHostedMailboxEnvelopeTx({
     envelope: mailboxWake,
@@ -1294,11 +1330,13 @@ async function planHostedLinqGroupChatWebhook(input: {
   }
 
   let createdContainerMemberId: string | null = null;
+  let demotedMailboxConsumedAt: Date | null = null;
   try {
     const ensureResult = await ensureHostedThreadContainerRouteTx({
       accountLookupKey,
       accountLookupKeys: input.threadRouteAccountLookupKeys,
       channel: "linq",
+      mailboxDedupeKey: input.event.event_id,
       occurredAt: new Date(occurredAt),
       ownerMemberId: sender.id,
       prisma: input.prisma,
@@ -1307,6 +1345,7 @@ async function planHostedLinqGroupChatWebhook(input: {
     createdContainerMemberId = ensureResult.created
       ? ensureResult.containerMemberId
       : null;
+    demotedMailboxConsumedAt = ensureResult.demotedMailboxConsumedAt;
   } catch (error) {
     if (
       !isHostedOnboardingError(error)
@@ -1334,6 +1373,7 @@ async function planHostedLinqGroupChatWebhook(input: {
     event: input.event,
     prisma: input.prisma,
     route,
+    sourceMailboxConsumedAt: demotedMailboxConsumedAt,
   });
   if (createdContainerMemberId && route.containerMemberId === createdContainerMemberId) {
     return {

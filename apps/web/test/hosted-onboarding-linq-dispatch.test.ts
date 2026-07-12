@@ -1222,10 +1222,10 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       ok: true,
       reason: "group-chat",
     });
-    // Sender identity and stale personal routing reads are expected, but a
-    // non-member group message must produce no onboarding or runtime side effects.
+    // Sender identity is checked before admission, but an unbound non-member
+    // group message must not inspect or mutate personal routing state.
     expect(prisma.hostedMemberIdentity.findMany).toHaveBeenCalledTimes(1);
-    expect(prisma.hostedMemberRouting.findFirst).toHaveBeenCalledTimes(1);
+    expect(prisma.hostedMemberRouting.findFirst).not.toHaveBeenCalled();
     expect(prisma.hostedMemberRouting.findUnique).not.toHaveBeenCalled();
     expect(prisma.hostedMemberRouting.upsert).not.toHaveBeenCalled();
     expect(prisma.hostedMember.create).not.toHaveBeenCalled();

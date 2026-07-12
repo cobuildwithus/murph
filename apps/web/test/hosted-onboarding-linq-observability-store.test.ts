@@ -1158,7 +1158,10 @@ describe("hosted Linq observability stores", () => {
       prisma: fixture.prisma as never,
       sourceRef: "intent-123",
       targetKind: "thread",
-    })).resolves.toBeUndefined();
+    })).resolves.toEqual({
+      claimed: true,
+      id: expect.stringMatching(/^hld_[a-f0-9]{32}$/u),
+    });
 
     expect(fixture.hostedLinqDeliveryCreateMany).toHaveBeenCalledWith({
       data: [expect.objectContaining({
@@ -1194,9 +1197,8 @@ describe("hosted Linq observability stores", () => {
         linqChatLookupKey: {
           in: createHostedLinqChatLookupKeyReadCandidates("chat_123"),
         },
-        status: {
-          in: ["attempted", "failed", "provider_dispatch_started"],
-        },
+        failedAt: null,
+        status: "provider_dispatch_started",
       }),
     });
   });
