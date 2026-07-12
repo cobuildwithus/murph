@@ -77,10 +77,18 @@ describe.runIf(Boolean(databaseUrl))("supplements live search corpus", () => {
     expect(optimumNutrition[0]?.name).toMatch(/gold standard/iu);
   }, 120_000);
 
-  it("matches possessive brands typed without apostrophes", async () => {
-    const doctorsBest = await search("Doctors Best Magnesium");
-    expect(doctorsBest[0]?.brand).toBe("Doctor's Best");
-    expect(doctorsBest[0]?.name).toMatch(/magnesium/iu);
+  it("matches possessive brands across apostrophe variants", async () => {
+    const variants = [
+      await search("Doctors Best Magnesium"),
+      await search("Doctor’s Best Magnesium"),
+      await search("Doctorʼs Best Magnesium"),
+    ];
+
+    for (const doctorsBest of variants) {
+      expect(doctorsBest[0]?.brand).toBe("Doctor's Best");
+      expect(doctorsBest[0]?.name).toMatch(/magnesium/iu);
+    }
+    expect(new Set(variants.map((rows) => rows[0]?.id)).size).toBe(1);
   }, 120_000);
 
   it("keeps Blueprint in scope when Essentials also looks like a brand", async () => {
@@ -94,6 +102,12 @@ describe.runIf(Boolean(databaseUrl))("supplements live search corpus", () => {
     expect(nacGinger[0]?.brand).toMatch(/blueprint/iu);
     expect(nacGinger[0]?.name).toMatch(/nac/iu);
     expect(nacGinger[0]?.name).toMatch(/ginger/iu);
+  }, 120_000);
+
+  it("returns no catalog-wide fallback for weak-only queries", async () => {
+    await expect(search("supplement")).resolves.toEqual([]);
+    await expect(search("supplements")).resolves.toEqual([]);
+    await expect(search("SUPPLEMENT supplements")).resolves.toEqual([]);
   }, 120_000);
 
   it("keeps finding products when the sub-brand line is typed exactly", async () => {
@@ -147,14 +161,19 @@ describe.runIf(Boolean(databaseUrl))("supplements live search corpus", () => {
     expect(branded[0]?.name).toBe("Advanced Antioxidants");
   }, 120_000);
 
-  it("returns results for known ranking quirks without asserting order", async () => {
-    // These currently rank an off-brand or adjacent product first; tracked as
-    // candidates for future ranking work. Assert coverage only so this test
-    // flags silent emptiness, not ranking churn.
-    expect((await search("NOW Omega-3")).length).toBeGreaterThan(0);
-    expect((await search("Solgar Vitamin D3")).length).toBeGreaterThan(0);
-    expect((await search("Ritual Essential for Women")).length).toBeGreaterThan(
-      0,
+  it("keeps short and exact brands ahead of off-brand matches", async () => {
+    const now = await search("NOW Omega-3");
+    expect(now[0]?.name).toMatch(/omega/iu);
+    expect(now.map((row) => row.brand?.toLowerCase())).toEqual(
+      now.map(() => "now"),
     );
+
+    const solgar = await search("Solgar Vitamin D3");
+    expect(solgar[0]?.brand).toBe("Solgar");
+    expect(solgar[0]?.name).toMatch(/vitamin d3/iu);
+
+    const ritual = await search("Ritual Essential for Women");
+    expect(ritual[0]?.brand).toBe("Ritual");
+    expect(ritual[0]?.name).toMatch(/women/iu);
   }, 120_000);
 });
