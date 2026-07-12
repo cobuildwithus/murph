@@ -1,5 +1,5 @@
 diff --git a/README.md b/README.md
-index 7895f2f6b13bcfcb2e22a5eaca8b0c794445e90a..ad95e263911ac1becf3cde8ec87fef91053053da 100644
+index 7895f2f6b13bcfcb2e22a5eaca8b0c794445e90a..c3bb263460a472243616b3e066597d85f8fc6a68 100644
 --- a/README.md
 +++ b/README.md
 @@ -212,7 +212,7 @@ In addition to the review workflow, the incur runtime also exposes:
@@ -7,22 +7,214 @@ index 7895f2f6b13bcfcb2e22a5eaca8b0c794445e90a..ad95e263911ac1becf3cde8ec87fef91
  - When `--wait` is enabled, `review-gpt` stays attached until the assistant finishes or the wait timeout is hit. Deep Research runs can stay quiet for a long time before the final report arrives.
  - A response is only captured after it stays unchanged across consecutive quiet polls (no busy status, no stop control) for several seconds, so interim assistant status messages emitted before long tool/connector work are not mistaken for the final reply.
 -- Waited runs that request a concrete model require an explicit `MODEL_CONFIRMATION` line. Matching confirmation passes normally; `UNKNOWN` is also accepted after at least 10 minutes of observed generation because reviewers cannot always inspect their own model identity. Missing confirmation and named model mismatches still fail closed. When ChatGPT model metadata is available, capture also validates it, including the UI-only GPT-5.6 Sol name's `gpt-5-6-pro` backend slug, and a known metadata mismatch always fails.
-+- Waited runs that request a concrete model require exactly one unfenced, unquoted, matching `MODEL_CONFIRMATION` line. `UNKNOWN`, missing or multiple confirmation lines, and named model mismatches fail closed. For concrete GPT model names, capture also validates available ChatGPT model metadata, including the UI-only GPT-5.6 Sol name's `gpt-5-6-pro` backend slug; a known metadata mismatch for those targets fails.
++- Waited runs that request a concrete model require exactly one unfenced, unquoted `MODEL_CONFIRMATION` line outside rendered quote and code containers in an assistant turn whose immediately preceding user turn is the exact turn committed by this run. An ephemeral per-run nonce at the start of the sent prompt disambiguates concurrent lanes and is used only for DOM turn binding; it is never written to attestation evidence. Concrete GPT targets also require a nonempty, matching ChatGPT response-model slug from that same assistant turn, including the UI-only GPT-5.6 Sol name's `gpt-5-6-pro` backend slug. A matching textual name or `UNKNOWN` is accepted only with that exact platform-owned response metadata; missing or multiple confirmation lines, pre-prompt or concurrently authored turns, absent or mismatched GPT metadata, and named model mismatches fail closed. A completed concrete-GPT capture emits a versioned `REVIEW_GPT_MODEL_VERIFICATION` JSON record with `requestedModel`, `responseModelSlug`, and `responseSha256`; the digest covers the exact normalized UTF-8 response-file bytes. With `--response-file`, the response and `<response-file>.model-verification.json` are written atomically with owner-only permissions before the success record is emitted. A new waited response-file attempt removes only that derived sidecar before browser work, and partial or failed captures never create attestation evidence.
  - `--response-marker <text>` makes capture contract-based instead of heuristic: the wait only accepts a response containing that exact text, so prompts that instruct the assistant to end its final message with the marker are immune to interim status messages even across minutes-long quiet gaps. If the marker never appears, capture fails after writing the best snapshot to `--response-file` when one was configured.
  - Browsers throttle background-tab rendering, which can freeze the DOM the capture reads mid-stream. The managed browser launches with backgrounding disabled and the capture session pins focus emulation and an active page lifecycle over CDP, so polling works with the tab fully in the background and never steals OS focus.
  - Deep Research auto-send gives the product up to 60 seconds to auto-start, then only falls back to the approval-card `Start` action if that gate is still present.
+diff --git a/src/chatgpt-dom-snapshot-shared.js b/src/chatgpt-dom-snapshot-shared.js
+index e250e4af0f971354c8013f182c3f35eb82335f14..c3c88b117ac5627b4f1bd80721889e5777e1710e 100644
+--- a/src/chatgpt-dom-snapshot-shared.js
++++ b/src/chatgpt-dom-snapshot-shared.js
+@@ -94,6 +94,95 @@ function chatGptTextIndicatesRateLimit(value) {
+   );
+ }
+
++function extractModelConfirmationText(node, getComputedStyleValue) {
++  const excludedTags = new Set(['BLOCKQUOTE', 'CODE', 'PRE']);
++  const blockTags = new Set([
++    'ARTICLE',
++    'DIV',
++    'H1',
++    'H2',
++    'H3',
++    'H4',
++    'H5',
++    'H6',
++    'LI',
++    'OL',
++    'P',
++    'SECTION',
++    'TABLE',
++    'TBODY',
++    'TD',
++    'TH',
++    'THEAD',
++    'TR',
++    'UL',
++  ]);
++  const chunks = [];
++  const appendBreak = () => {
++    const lastChunk = chunks.at(-1) || '';
++    if (!lastChunk.endsWith('\n')) chunks.push('\n');
++  };
++  const displayCreatesBoundary = (display) => {
++    const normalized = String(display || '').toLowerCase();
++    return (
++      normalized === 'block' ||
++      normalized === 'flex' ||
++      normalized === 'grid' ||
++      normalized === 'list-item' ||
++      normalized === 'table' ||
++      normalized.startsWith('table-')
++    );
++  };
++  const visit = (current) => {
++    if (!current) return;
++    if (current.nodeType === 3) {
++      chunks.push(String(current.nodeValue || ''));
++      return;
++    }
++
++    const tagName = String(current.tagName || '').toUpperCase();
++    let computedStyle = null;
++    try {
++      computedStyle = typeof getComputedStyleValue === 'function'
++        ? getComputedStyleValue(current)
++        : null;
++    } catch {}
++    const hidden = Boolean(
++      current.hidden ||
++      String(current.getAttribute?.('aria-hidden') || '').toLowerCase() === 'true' ||
++      computedStyle?.display === 'none' ||
++      computedStyle?.visibility === 'hidden'
++    );
++    if (hidden) return;
++    const computedDisplay = String(computedStyle?.display || '').trim();
++    const createsBoundary = computedDisplay
++      ? displayCreatesBoundary(computedDisplay)
++      : blockTags.has(tagName) || tagName === 'BLOCKQUOTE' || tagName === 'PRE';
++    if (excludedTags.has(tagName)) {
++      if (createsBoundary) appendBreak();
++      return;
++    }
++    if (tagName === 'BR') {
++      appendBreak();
++      return;
++    }
++
++    const isBlock = createsBoundary;
++    if (isBlock) appendBreak();
++    for (const child of Array.from(current.childNodes || [])) visit(child);
++    if (isBlock) appendBreak();
++  };
++
++  visit(node);
++  return chunks
++    .join('')
++    .replace(/\u00a0/gu, ' ')
++    .replace(/[ \t]+\n/gu, '\n')
++    .replace(/\n[ \t]+/gu, '\n')
++    .replace(/\n{2,}/gu, '\n')
++    .trim();
++}
++
+ function buildChatGptCaptureStateExpression({
+   desiredChatId = '',
+   desiredOrigin = '',
+@@ -108,6 +197,7 @@ function buildChatGptCaptureStateExpression({
+   const assistantFailureButtonTextsLiteral = JSON.stringify(Array.from(CHATGPT_ASSISTANT_FAILURE_BUTTON_TEXTS));
+   const normalizeComparableTextSource = normalizeComparableText.toString();
+   const threadStatusTextIndicatesBusySource = threadStatusTextIndicatesBusy.toString();
++  const extractModelConfirmationTextSource = extractModelConfirmationText.toString();
+
+   return `(() => {
+     const root = document.querySelector('main') ?? document.body;
+@@ -122,6 +212,7 @@ function buildChatGptCaptureStateExpression({
+     const desiredChatId = ${desiredChatIdLiteral};
+     const normalizeComparableText = ${normalizeComparableTextSource};
+     const threadStatusTextIndicatesBusy = ${threadStatusTextIndicatesBusySource};
++    const extractModelConfirmationText = ${extractModelConfirmationTextSource};
+     const visible = (node) => {
+       if (!node || typeof node.getBoundingClientRect !== 'function') return false;
+       const rect = node.getBoundingClientRect();
+@@ -172,7 +263,22 @@ function buildChatGptCaptureStateExpression({
+       const text = String(node?.innerText || node?.textContent || '').trim();
+       const signature = normalizeComparableText(text).slice(0, 320);
+       if (!text || !signature) continue;
++      const precedingUserNode = userNodes
++        .filter((userNode) => (
++          userNode &&
++          userNode !== node &&
++          typeof userNode.compareDocumentPosition === 'function' &&
++          Boolean(userNode.compareDocumentPosition(node) & Node.DOCUMENT_POSITION_FOLLOWING)
++        ))
++        .at(-1) || null;
++      const precedingUserMessageSignature = normalizeComparableText(
++        precedingUserNode?.innerText || precedingUserNode?.textContent || '',
++      ).slice(0, 320);
+       const modelSlug = String(node.getAttribute?.('data-message-model-slug') || '').trim();
++      const modelConfirmationText = extractModelConfirmationText(
++        node,
++        (element) => window.getComputedStyle(element),
++      );
+       let hasCopyButton = false;
+       for (const selector of copySelectors) {
+         const copyNode = node.querySelector(selector) || node.parentElement?.querySelector?.(selector) || null;
+@@ -184,7 +290,9 @@ function buildChatGptCaptureStateExpression({
+       assistantSnapshots.push({
+         afterLastUserMessage: assistantNodesAfterLastUserSet.has(node),
+         hasCopyButton,
++        modelConfirmationText,
+         modelSlug,
++        precedingUserMessageSignature,
+         signature,
+         text,
+       });
+@@ -294,5 +402,6 @@ module.exports = {
+   CHATGPT_USER_TURN_SELECTOR,
+   buildChatGptCaptureStateExpression,
+   chatGptTextIndicatesRateLimit,
++  extractModelConfirmationText,
+   threadStatusTextIndicatesBusy,
+ };
+diff --git a/src/chatgpt-thread-snapshot-lib.mts b/src/chatgpt-thread-snapshot-lib.mts
+index f8852beb36388b1a24218121a4876194383e02ac..d0e46ef82a91d6277ee81314335b8b3bcaad9fa9 100644
+--- a/src/chatgpt-thread-snapshot-lib.mts
++++ b/src/chatgpt-thread-snapshot-lib.mts
+@@ -28,7 +28,9 @@ export type ThreadAssistantDownloadButton = ThreadAttachmentButton & {
+ export type ThreadAssistantSnapshot = {
+   afterLastUserMessage?: boolean;
+   hasCopyButton: boolean;
++  modelConfirmationText?: string;
+   modelSlug?: string;
++  precedingUserMessageSignature?: string;
+   signature: string;
+   text: string;
+ };
 diff --git a/src/prepare-chatgpt-draft.js b/src/prepare-chatgpt-draft.js
-index 77ac533f5ecd7f53278ba06130b868402795b08a..416935cdd21732e31295eb967bb20506977ac2b2 100644
+index 77ac533f5ecd7f53278ba06130b868402795b08a..f8352a26e69edac199440830e89bd25bf8ca0467 100644
 --- a/src/prepare-chatgpt-draft.js
 +++ b/src/prepare-chatgpt-draft.js
 @@ -1,5 +1,6 @@
  const fs = require('fs');
  const path = require('path');
-+const { randomUUID } = require('crypto');
++const { createHash, randomUUID } = require('crypto');
  const { URL } = require('url');
  const {
    CHATGPT_ASSISTANT_TURN_SELECTOR,
-@@ -103,7 +104,6 @@ const DEEP_RESEARCH_AUTO_START_GRACE_MS = 60_000;
+@@ -33,12 +34,21 @@ const responseFile = String(process.env.ORACLE_DRAFT_RESPONSE_FILE || '').trim()
+ const responseMarker = String(process.env.ORACLE_DRAFT_RESPONSE_MARKER || '').trim();
+ const shouldSend = /^(1|true|yes|on)$/i.test(String(process.env.ORACLE_DRAFT_SEND || '0'));
+ const baseDraftPrompt = process.env.ORACLE_DRAFT_PROMPT || '';
++const modelAttestationTurnNonce = modelConfirmationRequired({
++  isDeepResearchMode,
++  shouldSend,
++  shouldWaitForResponse,
++  targetModel: modelTargetRaw,
++})
++  ? randomUUID()
++  : '';
+ const draftPrompt = appendModelConfirmationPrompt(baseDraftPrompt, {
+   isDeepResearchMode,
+   responseMarker,
+   shouldSend,
+   shouldWaitForResponse,
+   targetModel: modelTargetRaw,
++  turnNonce: modelAttestationTurnNonce,
+ });
+ const filesToAttach = (process.env.ORACLE_DRAFT_FILES || '')
+   .split('\n')
+@@ -103,7 +113,6 @@ const DEEP_RESEARCH_AUTO_START_GRACE_MS = 60_000;
  const DEEP_RESEARCH_AUTO_START_POLL_MS = 1000;
  const DEEP_RESEARCH_START_RETRY_DELAY_MS = 2000;
  const DEEP_RESEARCH_START_ATTEMPTS = 3;
@@ -30,7 +222,7 @@ index 77ac533f5ecd7f53278ba06130b868402795b08a..416935cdd21732e31295eb967bb20506
  const SAFE_RETRY_STAGES = new Set([
    'connect',
    'initial-ready',
-@@ -125,6 +125,31 @@ const {
+@@ -125,6 +134,31 @@ const {
  } = require('./prepare-chatgpt-draft-helpers.js');
 
  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -62,7 +254,7 @@ index 77ac533f5ecd7f53278ba06130b868402795b08a..416935cdd21732e31295eb967bb20506
 
  let confirmedAttachmentCleanupFinished = false;
  function cleanupConfirmedDraftAttachments(reason) {
-@@ -138,12 +163,24 @@ function cleanupConfirmedDraftAttachments(reason) {
+@@ -138,12 +172,24 @@ function cleanupConfirmedDraftAttachments(reason) {
    }
  }
 
@@ -90,10 +282,56 @@ index 77ac533f5ecd7f53278ba06130b868402795b08a..416935cdd21732e31295eb967bb20506
  }
 
  function safeUrl(value) {
-@@ -790,27 +827,53 @@ function appendModelConfirmationPrompt(prompt, input) {
-   return `${modelConfirmationPromptBlock(input.targetModel, input.responseMarker)}\n\n${value}`;
+@@ -766,16 +812,20 @@ function modelConfirmationRequired(input) {
+   );
  }
 
+-function modelConfirmationPromptBlock(targetModel, responseMarkerValue = '') {
++function modelConfirmationPromptBlock(targetModel, responseMarkerValue = '', turnNonce = '') {
+   const target = String(targetModel || '').trim();
+-  const lines = [
++  const normalizedTurnNonce = String(turnNonce || '').trim();
++  const lines = normalizedTurnNonce
++    ? [`REVIEW_GPT_TURN_NONCE: ${normalizedTurnNonce}`]
++    : [];
++  lines.push(
+     `Complete the requested work even if you cannot independently identify the active model.`,
+     `If you can confirm the active model is ${target}, include this exact line in your final response:`,
+     `MODEL_CONFIRMATION: ${target}`,
+     `If you cannot confirm the active model is ${target}, include this exact line in your final response instead:`,
+     `MODEL_CONFIRMATION: UNKNOWN`,
+     `Do not stop or shorten the requested work because model confirmation is unknown.`,
+-  ];
++  );
+   if (responseMarkerValue) {
+     lines.push(`Include ${responseMarkerValue} only after the requested work is complete.`);
+   }
+@@ -784,44 +834,192 @@ function modelConfirmationPromptBlock(targetModel, responseMarkerValue = '') {
+
+ function appendModelConfirmationPrompt(prompt, input) {
+   const value = String(prompt || '');
+-  if (!modelConfirmationRequired(input) || value.includes('MODEL_CONFIRMATION:')) {
++  if (!modelConfirmationRequired(input)) {
+     return value;
+   }
+-  return `${modelConfirmationPromptBlock(input.targetModel, input.responseMarker)}\n\n${value}`;
++  const normalizedTurnNonce = String(input?.turnNonce || '').trim();
++  const turnNonceLine = normalizedTurnNonce
++    ? `REVIEW_GPT_TURN_NONCE: ${normalizedTurnNonce}`
++    : '';
++  if (turnNonceLine && value.includes(turnNonceLine)) {
++    return value;
++  }
++  if (value.includes('MODEL_CONFIRMATION:')) {
++    return turnNonceLine ? `${turnNonceLine}\n\n${value}` : value;
++  }
++  return `${modelConfirmationPromptBlock(
++    input.targetModel,
++    input.responseMarker,
++    normalizedTurnNonce,
++  )}\n\n${value}`;
++}
++
 +function extractModelConfirmationValues(responseText) {
 +  const values = [];
 +  let fenceCharacter = '';
@@ -119,8 +357,8 @@ index 77ac533f5ecd7f53278ba06130b868402795b08a..416935cdd21732e31295eb967bb20506
 +    if (value) values.push(value);
 +  }
 +  return values;
-+}
-+
+ }
+
  function extractModelConfirmationValue(responseText) {
 -  const match = String(responseText || '').match(/^\s*MODEL_CONFIRMATION\s*:\s*(.+?)\s*$/imu);
 -  return String(match?.[1] || '').trim();
@@ -128,7 +366,7 @@ index 77ac533f5ecd7f53278ba06130b868402795b08a..416935cdd21732e31295eb967bb20506
  }
 
 -function modelConfirmationFailure(targetModel, responseText, responseModelSlug = '', generationElapsedMs = 0) {
-+function modelConfirmationFailure(targetModel, responseText, responseModelSlug = '') {
++function modelConfirmationFailure(targetModel, modelConfirmationText, responseModelSlug = '') {
    if (isCurrentSelectionTarget(targetModel)) {
      return '';
    }
@@ -136,7 +374,7 @@ index 77ac533f5ecd7f53278ba06130b868402795b08a..416935cdd21732e31295eb967bb20506
    const expected = normalizeModelConfirmationName(targetModel);
 -  const actual = extractModelConfirmationValue(responseText);
 -  if (!actual) {
-+  const confirmations = extractModelConfirmationValues(responseText);
++  const confirmations = extractModelConfirmationValues(modelConfirmationText);
 +  if (confirmations.length === 0) {
      return `Assistant response did not include MODEL_CONFIRMATION for requested model ${targetModel}.`;
    }
@@ -150,11 +388,155 @@ index 77ac533f5ecd7f53278ba06130b868402795b08a..416935cdd21732e31295eb967bb20506
 -    Number.isFinite(Number(generationElapsedMs)) &&
 -    Number(generationElapsedMs) >= MODEL_CONFIRMATION_UNKNOWN_FALLBACK_MS;
 -  if (actualNormalized !== expected && !acceptsTimedUnknown) {
-+  if (actualNormalized !== expected) {
++  if (actualNormalized !== expected && !(actualNormalized === 'unknown' && expected.startsWith('gpt'))) {
      return `Assistant response confirmed model ${actual}, expected ${targetModel}.`;
    }
 
-@@ -936,22 +999,87 @@ async function openNewTarget(desiredUrl) {
+   const reportedSlug = normalizeModelConfirmationName(responseModelSlug);
+-  if (expected.startsWith('gpt') && reportedSlug && reportedSlug !== expected) {
++  if (expected.startsWith('gpt') && reportedSlug !== expected) {
+     return `Assistant response DOM reported model ${responseModelSlug}, expected ${targetModel}.`;
+   }
+   return '';
+ }
+
+-function selectAssistantResponseCandidate(state, baselineAssistantSignatures, promptCandidates) {
++function capturedResponseFileText(responseText) {
++  return `${normalizeResponseText(responseText)}\n`;
++}
++
++function modelAttestationForSnapshot(
++  targetModel,
++  snapshot,
++  includeEvidence = false,
++  committedUserTurnSignature = '',
++) {
++  if (!isCurrentSelectionTarget(targetModel)) {
++    const expectedUserTurnSignature = String(committedUserTurnSignature || '').trim();
++    if (
++      expectedUserTurnSignature &&
++      snapshot?.precedingUserMessageSignature !== expectedUserTurnSignature
++    ) {
++      return {
++        evidence: null,
++        failure: `Assistant response was not bound to the committed user turn for requested model ${targetModel}.`,
++      };
++    }
++    if (!expectedUserTurnSignature && snapshot?.afterLastUserMessage !== true) {
++      return {
++        evidence: null,
++        failure: `Assistant response was not captured from the new assistant turn for requested model ${targetModel}.`,
++      };
++    }
++  }
++
++  const failure = modelConfirmationFailure(
++    targetModel,
++    snapshot?.modelConfirmationText,
++    snapshot?.modelSlug,
++  );
++  if (failure || !includeEvidence) {
++    return { evidence: null, failure };
++  }
++
++  const requestedModel = String(targetModel || '').trim();
++  const responseModelSlug = String(snapshot?.modelSlug || '').trim();
++  if (
++    isCurrentSelectionTarget(requestedModel) ||
++    !normalizeModelConfirmationName(requestedModel).startsWith('gpt') ||
++    !responseModelSlug
++  ) {
++    return { evidence: null, failure: '' };
++  }
++  const responseBytes = capturedResponseFileText(snapshot?.text);
++  return {
++    evidence: {
++      schemaVersion: 1,
++      requestedModel,
++      responseModelSlug,
++      responseSha256: createHash('sha256').update(responseBytes, 'utf8').digest('hex'),
++    },
++    failure: '',
++  };
++}
++
++function writePrivateFileAtomically(filePath, contents) {
++  const directory = path.dirname(filePath);
++  const temporaryPath = path.join(
++    directory,
++    `.${path.basename(filePath)}.${process.pid}.${randomUUID()}.tmp`,
++  );
++  fs.mkdirSync(directory, { recursive: true });
++  try {
++    fs.writeFileSync(temporaryPath, contents, {
++      encoding: 'utf8',
++      flag: 'wx',
++      mode: 0o600,
++    });
++    fs.renameSync(temporaryPath, filePath);
++  } finally {
++    fs.rmSync(temporaryPath, { force: true });
++  }
++}
++
++function writeCompletedResponseArtifacts(responseFilePath, responseText, evidence) {
++  if (!responseFilePath) return { evidencePath: '', responseFilePath: '' };
++  const responseBytes = capturedResponseFileText(responseText);
++  const responseSha256 = createHash('sha256').update(responseBytes, 'utf8').digest('hex');
++  if (evidence && evidence.responseSha256 !== responseSha256) {
++    throw new Error('Model verification digest did not match the captured response bytes');
++  }
++
++  writePrivateFileAtomically(responseFilePath, responseBytes);
++  let evidencePath = '';
++  if (evidence) {
++    evidencePath = `${responseFilePath}.model-verification.json`;
++    writePrivateFileAtomically(evidencePath, `${JSON.stringify(evidence)}\n`);
++  }
++  return { evidencePath, responseFilePath };
++}
++
++function removeModelVerificationEvidenceFile(responseFilePath) {
++  if (!responseFilePath) return '';
++  const evidencePath = `${responseFilePath}.model-verification.json`;
++  fs.rmSync(evidencePath, { force: true });
++  return evidencePath;
++}
++
++function selectAssistantResponseCandidate(
++  state,
++  baselineAssistantSignatures,
++  promptCandidates,
++  requireAfterLastUserMessage = false,
++  requiredPrecedingUserMessageSignature = '',
++) {
+   const assistantSnapshots = Array.isArray(state?.assistantSnapshots)
+     ? state.assistantSnapshots
+         .filter((snapshot) => snapshot && typeof snapshot.signature === 'string')
+@@ -836,8 +1034,20 @@ function selectAssistantResponseCandidate(state, baselineAssistantSignatures, pr
+       ? baselineAssistantSignatures.filter((value) => typeof value === 'string' && value.length > 0)
+       : []
+   );
+-  const freshSnapshots = assistantSnapshots.filter((snapshot) => !baselineSet.has(snapshot.signature));
+-  const ordered = freshSnapshots.length > 0 ? freshSnapshots : assistantSnapshots;
++  const requiredUserTurnSignature = String(requiredPrecedingUserMessageSignature || '').trim();
++  const scopedSnapshots = requiredUserTurnSignature
++    ? assistantSnapshots.filter(
++        (snapshot) => snapshot.precedingUserMessageSignature === requiredUserTurnSignature,
++      )
++    : requireAfterLastUserMessage
++      ? assistantSnapshots.filter((snapshot) => snapshot.afterLastUserMessage === true)
++      : assistantSnapshots;
++  const freshSnapshots = scopedSnapshots.filter((snapshot) => !baselineSet.has(snapshot.signature));
++  const ordered = requiredUserTurnSignature
++    ? freshSnapshots
++    : freshSnapshots.length > 0
++      ? freshSnapshots
++      : scopedSnapshots;
+   let promptEchoSnapshot = null;
+
+   for (let index = ordered.length - 1; index >= 0; index -= 1) {
+@@ -936,22 +1146,87 @@ async function openNewTarget(desiredUrl) {
    if (!browserWsUrl) {
      throw new Error('Browser debugging endpoint did not expose a browser websocket URL');
    }
@@ -185,13 +567,13 @@ index 77ac533f5ecd7f53278ba06130b868402795b08a..416935cdd21732e31295eb967bb20506
 +      const listed = await fetchJson(
 +        '/json/list',
 +        Math.max(1, discoveryDeadline - Date.now())
-       );
++      );
 +      if (!Array.isArray(listed)) {
 +        throw new Error('Browser target list was not an array');
 +      }
 +      const markerTargets = listed.filter(
 +        (entry) => entry.type === 'page' && entry.url === ownershipUrl
-+      );
+       );
 +      for (const markerTarget of markerTargets) {
 +        const markerTargetId = String(markerTarget?.id || '').trim();
 +        if (markerTargetId) recoveredTargetIds.add(markerTargetId);
@@ -212,9 +594,9 @@ index 77ac533f5ecd7f53278ba06130b868402795b08a..416935cdd21732e31295eb967bb20506
 +    } catch (error) {
 +      lastListConfirmedNoMarker = false;
 +      discoveryError = error;
-+    }
+     }
 +    if (Date.now() < discoveryDeadline) await sleep(200);
-+  }
+   }
 +
 +  if (createdTargetId) recoveredTargetIds.add(createdTargetId);
 +  let cleanupError = null;
@@ -233,10 +615,10 @@ index 77ac533f5ecd7f53278ba06130b868402795b08a..416935cdd21732e31295eb967bb20506
 +  if (creationError) {
 +    if (recoveredTargetIds.size > 0) {
 +      throw creationError.cause || creationError;
-     }
++    }
 +    if (lastListConfirmedNoMarker && !discoveryError) throw creationError;
 +    throw createTargetOwnershipFailure(discoveryError || creationError);
-   }
++  }
 +  if (discoveryError) throw discoveryError;
    throw new Error(`Created ChatGPT target did not expose a debuggable page for ${desiredUrl}`);
  }
@@ -251,7 +633,7 @@ index 77ac533f5ecd7f53278ba06130b868402795b08a..416935cdd21732e31295eb967bb20506
    const ws = new WebSocket(browserWsUrl);
    const pending = new Map();
    let nextId = 0;
-@@ -959,6 +1087,7 @@ async function createBackgroundTarget(browserWsUrl, desiredUrl) {
+@@ -959,6 +1234,7 @@ async function createBackgroundTarget(browserWsUrl, desiredUrl) {
      ws.addEventListener('close', () => reject(new Error('Browser CDP socket closed unexpectedly')));
      ws.addEventListener('error', (event) => reject(event.error || new Error('Browser CDP socket error')));
    });
@@ -259,7 +641,7 @@ index 77ac533f5ecd7f53278ba06130b868402795b08a..416935cdd21732e31295eb967bb20506
 
    ws.addEventListener('message', (event) => {
      let message;
-@@ -974,31 +1103,63 @@ async function createBackgroundTarget(browserWsUrl, desiredUrl) {
+@@ -974,31 +1250,63 @@ async function createBackgroundTarget(browserWsUrl, desiredUrl) {
      if (!slot) return;
      pending.delete(message.id);
      if (message.error) {
@@ -337,7 +719,7 @@ index 77ac533f5ecd7f53278ba06130b868402795b08a..416935cdd21732e31295eb967bb20506
    } finally {
      try {
        ws.close();
-@@ -1006,6 +1167,128 @@ async function createBackgroundTarget(browserWsUrl, desiredUrl) {
+@@ -1006,6 +1314,128 @@ async function createBackgroundTarget(browserWsUrl, desiredUrl) {
    }
  }
 
@@ -466,7 +848,7 @@ index 77ac533f5ecd7f53278ba06130b868402795b08a..416935cdd21732e31295eb967bb20506
  async function ensureTarget(desiredUrl) {
    const deadline = Date.now() + timeoutMs;
    let lastError = null;
-@@ -1013,6 +1296,12 @@ async function ensureTarget(desiredUrl) {
+@@ -1013,6 +1443,12 @@ async function ensureTarget(desiredUrl) {
      try {
        return await openNewTarget(desiredUrl);
      } catch (error) {
@@ -479,7 +861,7 @@ index 77ac533f5ecd7f53278ba06130b868402795b08a..416935cdd21732e31295eb967bb20506
        lastError = error;
      }
      await sleep(300);
-@@ -1024,15 +1313,32 @@ async function connectTargetWebSocket(desiredUrl) {
+@@ -1024,15 +1460,32 @@ async function connectTargetWebSocket(desiredUrl) {
    let lastError = null;
    for (let attempt = 0; attempt < 6; attempt += 1) {
      const target = await ensureTarget(desiredUrl);
@@ -518,7 +900,7 @@ index 77ac533f5ecd7f53278ba06130b868402795b08a..416935cdd21732e31295eb967bb20506
        lastError = error;
        await sleep(250);
      }
-@@ -1055,6 +1361,7 @@ function isRetryableSocketError(error) {
+@@ -1055,6 +1508,7 @@ function isRetryableSocketError(error) {
    return (
      message.includes('cdp socket closed unexpectedly') ||
      message.includes('cdp socket error') ||
@@ -526,7 +908,7 @@ index 77ac533f5ecd7f53278ba06130b868402795b08a..416935cdd21732e31295eb967bb20506
      message.includes('websocket') ||
      message.includes('target closed') ||
      message.includes('promise was collected')
-@@ -1073,8 +1380,10 @@ async function main() {
+@@ -1073,8 +1527,10 @@ async function main() {
    const { ws, target } = await connectTargetWebSocket(chatgptUrl).catch((error) => {
      throw tagStageError(error);
    });
@@ -538,7 +920,7 @@ index 77ac533f5ecd7f53278ba06130b868402795b08a..416935cdd21732e31295eb967bb20506
 
    const pending = new Map();
    let nextId = 0;
-@@ -1083,6 +1392,7 @@ async function main() {
+@@ -1083,6 +1539,7 @@ async function main() {
      ws.addEventListener('close', () => reject(new Error('CDP socket closed unexpectedly')));
      ws.addEventListener('error', (event) => reject(event.error || new Error('CDP socket error')));
    });
@@ -546,7 +928,7 @@ index 77ac533f5ecd7f53278ba06130b868402795b08a..416935cdd21732e31295eb967bb20506
 
    ws.addEventListener('message', (event) => {
      let message;
-@@ -1111,7 +1421,11 @@ async function main() {
+@@ -1111,7 +1568,11 @@ async function main() {
        pending.set(id, { resolve, reject });
      });
      ws.send(payload);
@@ -559,7 +941,7 @@ index 77ac533f5ecd7f53278ba06130b868402795b08a..416935cdd21732e31295eb967bb20506
    };
 
    const evaluate = async (expression) => {
-@@ -1164,7 +1478,6 @@ async function main() {
+@@ -1164,7 +1625,6 @@ async function main() {
    const desiredTargetChatId = extractChatId(desiredTargetUrl?.pathname || '').toLowerCase();
    const desiredTargetOriginLiteral = JSON.stringify(desiredTargetOrigin);
    const desiredTargetChatIdLiteral = JSON.stringify(desiredTargetChatId);
@@ -567,7 +949,38 @@ index 77ac533f5ecd7f53278ba06130b868402795b08a..416935cdd21732e31295eb967bb20506
    const activateCurrentPageForNativeInput = async () => {
      try {
        await cdp('Page.bringToFront');
-@@ -3565,7 +3878,6 @@ async function main() {
+@@ -3550,22 +4010,36 @@ async function main() {
+     };
+   };
+
+-  const waitForAssistantResponse = async (baselineSnapshot) => {
++  const waitForAssistantResponse = async (baselineSnapshot, committedUserTurnSignature) => {
+     const baselineAssistantSignatures = Array.isArray(baselineSnapshot?.assistantTurnSignatures)
+       ? baselineSnapshot.assistantTurnSignatures
+       : [];
++    const committedTurnSignature = String(committedUserTurnSignature || '').trim();
+     const deadline = Date.now() + Math.max(15_000, responseTimeoutMs);
+     // Stability now counts consecutive quiet polls only (see
+     // nextResponseStabilityCount), so the standard window is wider to ride out
+     // brief busy-indicator gaps between an interim message and continued work.
+     const stablePollsRequired = isDeepResearchMode ? 4 : 12;
++    const requiresNewTurnModelAttestation = modelConfirmationRequired({
++      isDeepResearchMode,
++      shouldSend,
++      shouldWaitForResponse,
++      targetModel: modelTargetRaw,
++    });
++    if (requiresNewTurnModelAttestation && !committedTurnSignature) {
++      return {
++        status: 'model-confirmation-failed',
++        modelConfirmationFailure: `Could not bind the assistant response to the committed user turn for requested model ${modelTargetRaw}.`,
++        responseText: '',
++        href: '',
++      };
++    }
+     let lastState = null;
+     let bestSnapshot = null;
+     let stableSignature = '';
      let stableText = '';
      let stableCount = 0;
      let sawGenerationActive = false;
@@ -575,7 +988,22 @@ index 77ac533f5ecd7f53278ba06130b868402795b08a..416935cdd21732e31295eb967bb20506
 
      // Re-assert before the wait: a navigation since session setup can reset
      // the renderer's lifecycle/focus emulation state.
-@@ -3584,7 +3896,6 @@ async function main() {
+@@ -3576,7 +4050,13 @@ async function main() {
+       const deepResearchState = isDeepResearchMode ? await readDeepResearchResponseCaptureState() : null;
+       const state = mergeResponseCaptureStates(pageState, deepResearchState);
+       lastState = state;
+-      const candidate = selectAssistantResponseCandidate(state, baselineAssistantSignatures, promptMatchCandidates).snapshot;
++      const candidate = selectAssistantResponseCandidate(
++        state,
++        baselineAssistantSignatures,
++        promptMatchCandidates,
++        requiresNewTurnModelAttestation,
++        committedTurnSignature,
++      ).snapshot;
+       if (candidate?.text) {
+         bestSnapshot = candidate;
+       }
+@@ -3584,7 +4064,6 @@ async function main() {
        const generationActive = Boolean(state?.stopVisible || state?.statusBusy);
        if (generationActive) {
          sawGenerationActive = true;
@@ -583,23 +1011,61 @@ index 77ac533f5ecd7f53278ba06130b868402795b08a..416935cdd21732e31295eb967bb20506
        }
        const assistantFailureText = responseStateAssistantFailureText(state);
        if (assistantFailureText && !generationActive) {
-@@ -3624,7 +3935,6 @@ async function main() {
+@@ -3620,16 +4099,16 @@ async function main() {
+           responseMarker,
+         })
+       ) {
+-        const confirmationFailure = modelConfirmationFailure(
++        const modelAttestation = modelAttestationForSnapshot(
            modelTargetRaw,
-           candidate.text,
-           candidate.modelSlug,
+-          candidate.text,
+-          candidate.modelSlug,
 -          generationStartedAt ? Date.now() - generationStartedAt : 0,
++          candidate,
++          true,
++          committedTurnSignature,
          );
-         if (confirmationFailure) {
+-        if (confirmationFailure) {
++        if (modelAttestation.failure) {
            return {
-@@ -3649,7 +3959,6 @@ async function main() {
+             status: 'model-confirmation-failed',
+-            modelConfirmationFailure: confirmationFailure,
++            modelConfirmationFailure: modelAttestation.failure,
+             responseText: candidate.text,
+             href: state?.href || '',
+           };
+@@ -3638,6 +4117,7 @@ async function main() {
+           status: 'completed',
+           responseText: candidate.text,
+           href: state?.href || '',
++          modelVerification: modelAttestation.evidence,
+         };
+       }
+
+@@ -3645,16 +4125,16 @@ async function main() {
+     }
+
+     if (bestSnapshot?.text) {
+-      const confirmationFailure = modelConfirmationFailure(
++      const modelAttestation = modelAttestationForSnapshot(
          modelTargetRaw,
-         bestSnapshot.text,
-         bestSnapshot.modelSlug,
+-        bestSnapshot.text,
+-        bestSnapshot.modelSlug,
 -        generationStartedAt ? Date.now() - generationStartedAt : 0,
++        bestSnapshot,
++        false,
++        committedTurnSignature,
        );
-       if (confirmationFailure) {
+-      if (confirmationFailure) {
++      if (modelAttestation.failure) {
          return {
-@@ -4079,45 +4388,58 @@ async function main() {
+           status: 'model-confirmation-failed',
+-          modelConfirmationFailure: confirmationFailure,
++          modelConfirmationFailure: modelAttestation.failure,
+           responseText: bestSnapshot.text,
+           href: lastState?.href || '',
+           partial: true,
+@@ -4079,45 +4559,58 @@ async function main() {
    const evaluateInTargetWebSocket = async (webSocketUrl, expression) => {
      if (!webSocketUrl) return null;
      const targetWs = new WebSocket(webSocketUrl);
@@ -696,7 +1162,7 @@ index 77ac533f5ecd7f53278ba06130b868402795b08a..416935cdd21732e31295eb967bb20506
        await targetCdp('Runtime.enable');
        const result = await targetCdp('Runtime.evaluate', {
          expression,
-@@ -4668,6 +4990,10 @@ async function main() {
+@@ -4668,6 +5161,10 @@ async function main() {
    };
 
    await cdp('Page.enable');
@@ -707,7 +1173,7 @@ index 77ac533f5ecd7f53278ba06130b868402795b08a..416935cdd21732e31295eb967bb20506
    await cdp('Runtime.enable');
    await cdp('DOM.enable');
    await keepPageRenderingWhileBackgrounded();
-@@ -4833,13 +5159,17 @@ async function main() {
+@@ -4833,13 +5330,17 @@ async function main() {
      console.log(
        `Draft prepared in ChatGPT tab: attachments confirmed (${formatAttachmentVerificationSummary(verification.summary)}).`
      );
@@ -728,7 +1194,42 @@ index 77ac533f5ecd7f53278ba06130b868402795b08a..416935cdd21732e31295eb967bb20506
    if (shouldSend) {
      currentStage = 'send';
      const sendResult = await autoSendDraftMessage();
-@@ -4892,18 +5222,30 @@ async function main() {
+@@ -4865,12 +5366,30 @@ async function main() {
+           console.log(`Assistant wait in progress: staying attached until the response completes or the wait timeout is hit (${responseTimeoutMs}ms).`);
+         }
+         currentStage = 'wait-response';
+-        const responseResult = await waitForAssistantResponse(sendResult.responseBaseline);
+-        if (responseResult?.status === 'completed' || responseResult?.status === 'timeout-partial') {
+-          emitCapturedResponse(responseResult.responseText, responseResult.href, Boolean(responseResult.partial));
++        const responseResult = await waitForAssistantResponse(
++          sendResult.responseBaseline,
++          sendResult.committedUserTurnSignature,
++        );
++        if (responseResult?.status === 'completed') {
++          emitCapturedResponse(responseResult.responseText, responseResult.href, false);
+           if (responseFile) {
+-            writeCapturedResponseFile(responseFile, responseResult.responseText);
++            const artifacts = writeCompletedResponseArtifacts(
++              responseFile,
++              responseResult.responseText,
++              responseResult.modelVerification,
++            );
+             console.log(`Assistant response written to ${responseFile}`);
++            if (artifacts.evidencePath) {
++              console.log('Assistant model verification written beside the response file.');
++            }
++          }
++          if (responseResult.modelVerification) {
++            console.log(`REVIEW_GPT_MODEL_VERIFICATION ${JSON.stringify(responseResult.modelVerification)}`);
++          }
++        } else if (responseResult?.status === 'timeout-partial') {
++          emitCapturedResponse(responseResult.responseText, responseResult.href, true);
++          if (responseFile) {
++            writeCapturedResponseFile(responseFile, responseResult.responseText);
+           }
+         } else if (responseResult?.status === 'timeout-missing-marker') {
+           if (responseFile) {
+@@ -4892,18 +5411,30 @@ async function main() {
            throw new Error(`Assistant response capture failed: ${JSON.stringify(responseResult || { status: 'unknown' })}`);
          }
        }
@@ -764,7 +1265,7 @@ index 77ac533f5ecd7f53278ba06130b868402795b08a..416935cdd21732e31295eb967bb20506
  }
 
  async function mainWithRetry() {
-@@ -4920,6 +5262,8 @@ async function mainWithRetry() {
+@@ -4920,6 +5451,8 @@ async function mainWithRetry() {
      } catch (error) {
        lastError = error;
        if (
@@ -773,3 +1274,20 @@ index 77ac533f5ecd7f53278ba06130b868402795b08a..416935cdd21732e31295eb967bb20506
          !isRetryableSocketError(error) ||
          attempt === maxAttempts ||
          !SAFE_RETRY_STAGES.has(String(error?.reviewGptStage || ''))
+@@ -4949,8 +5482,15 @@ function validateRuntimeConfig() {
+   }
+ }
+
+-if (require.main === module) {
++function prepareRuntimeConfig() {
++  if (shouldWaitForResponse && responseFile) {
++    removeModelVerificationEvidenceFile(responseFile);
++  }
+   validateRuntimeConfig();
++}
++
++if (require.main === module) {
++  prepareRuntimeConfig();
+   mainWithRetry().catch((error) => {
+     console.error(`Draft staging failed: ${error instanceof Error ? error.message : String(error)}`);
+     process.exit(1);

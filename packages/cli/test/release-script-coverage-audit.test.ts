@@ -1,4 +1,5 @@
 import { execFileSync, spawnSync } from 'node:child_process'
+import { createHash } from 'node:crypto'
 import {
   chmodSync,
   existsSync,
@@ -7,6 +8,7 @@ import {
   readdirSync,
   readFileSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from 'node:fs'
 import { createRequire } from 'node:module'
@@ -74,10 +76,34 @@ type ReviewGptHarnessOptions = {
   hangListAfterClose?: boolean
   hangPageSocketOpenAttempts?: number
   hangVersionAtCall?: number
+  remotePort?: string
+  responseFile?: string
   shouldSend?: boolean
   shouldWaitForResponse?: boolean
   targetPresentAfterClose?: boolean
   throwCreateSendSynchronouslyOnce?: boolean
+}
+
+type ReviewGptAssistantSnapshot = {
+  afterLastUserMessage?: boolean
+  hasCopyButton?: boolean
+  modelConfirmationText?: string
+  modelSlug?: string
+  precedingUserMessageSignature?: string
+  signature: string
+  text: string
+}
+
+type ModelVerificationEvidence = {
+  schemaVersion: number
+  requestedModel: string
+  responseModelSlug: string
+  responseSha256: string
+}
+
+type ModelAttestationResult = {
+  evidence: ModelVerificationEvidence | null
+  failure: string
 }
 
 type MockSocketEvent = {
@@ -106,9 +132,15 @@ function loadReviewGptOpenTargetHarness(
     'module.exports.__pageCommandTimeoutMsTest = pageCommandTimeoutMs;',
     'module.exports.__openTargetTest = openNewTarget;',
     'module.exports.__connectTargetTest = connectTargetWebSocket;',
+    'module.exports.__draftPromptTest = draftPrompt;',
     'module.exports.__isRetryableSocketErrorTest = isRetryableSocketError;',
     'module.exports.__mainTest = main;',
     'module.exports.__mainWithRetryTest = mainWithRetry;',
+    'module.exports.__modelAttestationTurnNonceTest = modelAttestationTurnNonce;',
+    'module.exports.__modelAttestationForSnapshotTest = modelAttestationForSnapshot;',
+    'module.exports.__prepareRuntimeConfigTest = prepareRuntimeConfig;',
+    'module.exports.__removeModelVerificationEvidenceFileTest = removeModelVerificationEvidenceFile;',
+    'module.exports.__writeCompletedResponseArtifactsTest = writeCompletedResponseArtifacts;',
     'module.exports.__withTimeoutTest = withTimeout;',
   ].join('\n')
   const commands: BrowserCommand[] = []
@@ -382,7 +414,11 @@ function loadReviewGptOpenTargetHarness(
   Object.defineProperty(processForDriver, 'env', {
     value: {
       ...process.env,
-      ORACLE_DRAFT_REMOTE_PORT: '9999',
+      ORACLE_DRAFT_FILES: '',
+      ORACLE_DRAFT_MODEL: 'gpt-5.6-sol',
+      ORACLE_DRAFT_PROMPT: 'Review the requested changes.',
+      ORACLE_DRAFT_REMOTE_PORT: options.remotePort ?? '9999',
+      ORACLE_DRAFT_RESPONSE_FILE: options.responseFile ?? '',
       ORACLE_DRAFT_SEND: options.shouldSend ? '1' : '0',
       ORACLE_DRAFT_TIMEOUT_MS: String(options.draftTimeoutMs ?? 10000),
       ORACLE_DRAFT_URL: 'https://chatgpt.com/',
@@ -415,21 +451,35 @@ function loadReviewGptOpenTargetHarness(
   const pageCommandTimeoutMs = moduleRecord.exports.__pageCommandTimeoutMsTest
   const openNewTarget = moduleRecord.exports.__openTargetTest
   const connectTarget = moduleRecord.exports.__connectTargetTest
+  const draftPrompt = moduleRecord.exports.__draftPromptTest
   const isRetryableSocketError = moduleRecord.exports.__isRetryableSocketErrorTest
   const main = moduleRecord.exports.__mainTest
   const mainWithRetry = moduleRecord.exports.__mainWithRetryTest
+  const modelAttestationTurnNonce = moduleRecord.exports.__modelAttestationTurnNonceTest
+  const modelAttestationForSnapshot = moduleRecord.exports.__modelAttestationForSnapshotTest
   const modelConfirmationFailure = moduleRecord.exports.modelConfirmationFailure
+  const prepareRuntimeConfig = moduleRecord.exports.__prepareRuntimeConfigTest
+  const removeModelVerificationEvidenceFile = moduleRecord.exports.__removeModelVerificationEvidenceFileTest
+  const selectAssistantResponseCandidate = moduleRecord.exports.selectAssistantResponseCandidate
   const withTimeout = moduleRecord.exports.__withTimeoutTest
+  const writeCompletedResponseArtifacts = moduleRecord.exports.__writeCompletedResponseArtifactsTest
   if (
     typeof browserTransportTimeoutMs !== 'number' ||
     typeof pageCommandTimeoutMs !== 'number' ||
     typeof openNewTarget !== 'function' ||
     typeof connectTarget !== 'function' ||
+    typeof draftPrompt !== 'string' ||
     typeof isRetryableSocketError !== 'function' ||
     typeof main !== 'function' ||
     typeof mainWithRetry !== 'function' ||
+    typeof modelAttestationTurnNonce !== 'string' ||
+    typeof modelAttestationForSnapshot !== 'function' ||
     typeof modelConfirmationFailure !== 'function' ||
-    typeof withTimeout !== 'function'
+    typeof prepareRuntimeConfig !== 'function' ||
+    typeof removeModelVerificationEvidenceFile !== 'function' ||
+    typeof selectAssistantResponseCandidate !== 'function' ||
+    typeof withTimeout !== 'function' ||
+    typeof writeCompletedResponseArtifacts !== 'function'
   ) {
     throw new Error('ReviewGPT lifecycle functions were not available to the test harness')
   }
@@ -441,9 +491,11 @@ function loadReviewGptOpenTargetHarness(
     },
     getCloseCommandAttemptCount: () => closeCommandAttemptCount,
     getCreateSendAttemptCount: () => createSendAttemptCount,
+    getDraftPrompt: () => draftPrompt,
     getListPollCount: () => listPollCount,
     getLatestTargetUrl: () => latestTargetUrl,
     getNow: () => now,
+    getModelAttestationTurnNonce: () => modelAttestationTurnNonce,
     getBrowserTransportTimeoutMs: () => browserTransportTimeoutMs,
     getPageCommandTimeoutMs: () => pageCommandTimeoutMs,
     isRetryableSocketError: (error: Error) => {
@@ -455,6 +507,17 @@ function loadReviewGptOpenTargetHarness(
     mainWithRetry: async () => {
       await Reflect.apply(mainWithRetry, undefined, [])
     },
+    modelAttestationForSnapshot: (
+      targetModel: string,
+      snapshot: ReviewGptAssistantSnapshot,
+      includeEvidence = false,
+      committedUserTurnSignature = '',
+    ) => Reflect.apply(modelAttestationForSnapshot, undefined, [
+      targetModel,
+      snapshot,
+      includeEvidence,
+      committedUserTurnSignature,
+    ]) as ModelAttestationResult,
     modelConfirmationFailure: (
       targetModel: string,
       responseText: string,
@@ -466,6 +529,27 @@ function loadReviewGptOpenTargetHarness(
       responseModelSlug,
       generationElapsedMs,
     ])),
+    prepareRuntimeConfig: () => {
+      Reflect.apply(prepareRuntimeConfig, undefined, [])
+    },
+    removeModelVerificationEvidenceFile: (responseFilePath: string) => String(
+      Reflect.apply(removeModelVerificationEvidenceFile, undefined, [responseFilePath]),
+    ),
+    selectAssistantResponseCandidate: (
+      snapshots: ReviewGptAssistantSnapshot[],
+      baselineAssistantSignatures: string[],
+      requireAfterLastUserMessage = false,
+      requiredPrecedingUserMessageSignature = '',
+    ) => Reflect.apply(selectAssistantResponseCandidate, undefined, [
+      { assistantSnapshots: snapshots },
+      baselineAssistantSignatures,
+      [],
+      requireAfterLastUserMessage,
+      requiredPrecedingUserMessageSignature,
+    ]) as {
+      freshSnapshots: ReviewGptAssistantSnapshot[]
+      snapshot: ReviewGptAssistantSnapshot | null
+    },
     openNewTarget: async (desiredUrl: string) => {
       const target: unknown = await Reflect.apply(openNewTarget, undefined, [desiredUrl])
       if (
@@ -498,7 +582,87 @@ function loadReviewGptOpenTargetHarness(
         'Injected page command timeout',
       ])
     },
+    writeCompletedResponseArtifacts: (
+      responseFilePath: string,
+      responseText: string,
+      evidence: ModelVerificationEvidence | null,
+    ) => Reflect.apply(writeCompletedResponseArtifacts, undefined, [
+      responseFilePath,
+      responseText,
+      evidence,
+    ]) as { evidencePath: string; responseFilePath: string },
   }
+}
+
+type ReviewGptDomTestNode = {
+  childNodes: ReviewGptDomTestNode[]
+  computedStyle?: { display?: string; visibility?: string }
+  getAttribute?: (name: string) => string | null
+  hidden?: boolean
+  nodeType: number
+  nodeValue?: string
+  tagName?: string
+}
+
+const reviewGptDomSnapshotModule = createRequire(import.meta.url)(
+  path.join(
+    repoRoot,
+    'node_modules',
+    '@cobuild',
+    'review-gpt',
+    'src',
+    'chatgpt-dom-snapshot-shared.js',
+  ),
+) as {
+  buildChatGptCaptureStateExpression: (input?: {
+    desiredChatId?: string
+    desiredOrigin?: string
+  }) => string
+  extractModelConfirmationText: (
+    node: ReviewGptDomTestNode,
+    getComputedStyleValue?: (
+      node: ReviewGptDomTestNode,
+    ) => { display?: string; visibility?: string } | undefined,
+  ) => string
+}
+
+function reviewGptDomText(value: string): ReviewGptDomTestNode {
+  return {
+    childNodes: [],
+    nodeType: 3,
+    nodeValue: value,
+  }
+}
+
+function reviewGptDomElement(
+  tagName: string,
+  childNodes: ReviewGptDomTestNode[],
+  options: {
+    attributes?: Record<string, string>
+    display?: string
+    hidden?: boolean
+    visibility?: string
+  } = {},
+): ReviewGptDomTestNode {
+  const attributes = options.attributes ?? {}
+  return {
+    childNodes,
+    computedStyle: {
+      display: options.display ?? 'inline',
+      visibility: options.visibility ?? 'visible',
+    },
+    getAttribute: (name) => attributes[name] ?? null,
+    hidden: options.hidden,
+    nodeType: 1,
+    tagName,
+  }
+}
+
+function extractReviewGptModelConfirmationText(node: ReviewGptDomTestNode) {
+  return reviewGptDomSnapshotModule.extractModelConfirmationText(
+    node,
+    (current) => current.computedStyle,
+  )
 }
 
 function runNodeScript(...args: string[]) {
@@ -760,7 +924,7 @@ describe('monorepo release flow coverage audit', () => {
     expect(
       existsSync(path.join(repoRoot, 'patches', '@cobuild__review-gpt@0.5.103.patch')),
     ).toBe(true)
-    expect(reviewGptDriver).toContain("const { randomUUID } = require('crypto');")
+    expect(reviewGptDriver).toContain("const { createHash, randomUUID } = require('crypto');")
     expect(reviewGptDriver).toContain(
       "const targetOwnershipUrlPrefix = 'about:blank#review-gpt-owned-';",
     )
@@ -808,7 +972,33 @@ describe('monorepo release flow coverage audit', () => {
     expect(reviewGptDriver).not.toContain('MODEL_CONFIRMATION_UNKNOWN_FALLBACK_MS')
     expect(reviewGptDriver).not.toContain('acceptsTimedUnknown')
     expect(reviewGptReadme).toContain(
-      'require exactly one unfenced, unquoted, matching `MODEL_CONFIRMATION` line',
+      'require exactly one unfenced, unquoted `MODEL_CONFIRMATION` line',
+    )
+    expect(reviewGptReadme).toContain('the exact turn committed by this run')
+    expect(reviewGptReadme).toContain('An ephemeral per-run nonce')
+    expect(reviewGptDriver).toContain('REVIEW_GPT_TURN_NONCE:')
+    expect(reviewGptDriver).toContain('precedingUserMessageSignature')
+    expect(reviewGptDriver).toContain('sendResult.committedUserTurnSignature')
+    expect(reviewGptDriver).toContain('schemaVersion: 1')
+    expect(reviewGptDriver).toContain("createHash('sha256')")
+    expect(reviewGptDriver).toContain('mode: 0o600')
+    expect(reviewGptDriver).toContain("`${responseFilePath}.model-verification.json`")
+    expect(reviewGptDriver).toContain(
+      [
+        'if (require.main === module) {',
+        '  prepareRuntimeConfig();',
+        '  mainWithRetry().catch((error) => {',
+      ].join('\n'),
+    )
+    expect(
+      reviewGptDriver.indexOf('const artifacts = writeCompletedResponseArtifacts('),
+    ).toBeLessThan(
+      reviewGptDriver.indexOf('REVIEW_GPT_MODEL_VERIFICATION ${JSON.stringify'),
+    )
+    const timeoutPartialStart = reviewGptDriver.indexOf("status: 'timeout-partial'")
+    expect(timeoutPartialStart).toBeGreaterThan(-1)
+    expect(reviewGptDriver.slice(timeoutPartialStart, timeoutPartialStart + 300)).not.toContain(
+      'modelVerification',
     )
     expect(reviewGptDriver).toContain(
       [
@@ -1135,70 +1325,94 @@ describe('monorepo release flow coverage audit', () => {
     ).rejects.toThrow('Browser CDP socket closed unexpectedly')
   })
 
-  it('requires exact model confirmation even after a long generation', () => {
+  it('extracts model confirmation only from visible standalone rendered lines', () => {
     const modelClassifier = loadReviewGptOpenTargetHarness(1)
+    const validConfirmation = reviewGptDomElement('DIV', [
+      reviewGptDomElement('P', [reviewGptDomText('Report ready')], { display: 'block' }),
+      reviewGptDomElement('P', [
+        reviewGptDomElement('STRONG', [reviewGptDomText('MODEL_CONFIRMATION:')]),
+        reviewGptDomElement('EM', [reviewGptDomText(' UNKNOWN')]),
+      ], { display: 'block' }),
+    ], { display: 'block' })
+    const extractedConfirmation = extractReviewGptModelConfirmationText(validConfirmation)
+    expect(extractedConfirmation).toBe('Report ready\nMODEL_CONFIRMATION: UNKNOWN')
     expect(
       modelClassifier.modelConfirmationFailure(
         'gpt-5.6-sol',
-        'MODEL_CONFIRMATION: UNKNOWN',
+        extractedConfirmation,
         'gpt-5-6-pro',
         46 * 60 * 1000,
       ),
-    ).toContain('confirmed model UNKNOWN, expected gpt-5.6-sol')
+    ).toBe('')
+
+    const excludedContainers = reviewGptDomElement('DIV', [
+      reviewGptDomElement('BLOCKQUOTE', [
+        reviewGptDomText('MODEL_CONFIRMATION: gpt-5.6-sol'),
+      ], { display: 'block' }),
+      reviewGptDomElement('PRE', [
+        reviewGptDomText('MODEL_CONFIRMATION: gpt-5.6-sol'),
+      ], { display: 'block' }),
+      reviewGptDomElement('CODE', [
+        reviewGptDomText('MODEL_CONFIRMATION: gpt-5.6-sol'),
+      ]),
+    ], { display: 'block' })
+    expect(extractReviewGptModelConfirmationText(excludedContainers)).toBe('')
+
+    const inlineCodeDecoy = reviewGptDomElement('SPAN', [
+      reviewGptDomText('prefix'),
+      reviewGptDomElement('CODE', [reviewGptDomText('ignored')]),
+      reviewGptDomText('MODEL_CONFIRMATION: UNKNOWN'),
+    ])
+    const hiddenInlineDecoy = reviewGptDomElement('SPAN', [
+      reviewGptDomText('prefix'),
+      reviewGptDomElement('SPAN', [reviewGptDomText('ignored')], { hidden: true }),
+      reviewGptDomText('MODEL_CONFIRMATION: UNKNOWN'),
+    ])
+    const hiddenBlockDecoy = reviewGptDomElement('SPAN', [
+      reviewGptDomText('prefix'),
+      reviewGptDomElement('DIV', [reviewGptDomText('ignored')], {
+        display: 'block',
+        hidden: true,
+      }),
+      reviewGptDomText('MODEL_CONFIRMATION: UNKNOWN'),
+    ])
+    const displayContentsDecoy = reviewGptDomElement('SPAN', [
+      reviewGptDomText('prefix'),
+      reviewGptDomElement('DIV', [reviewGptDomText('ignored')], {
+        display: 'contents',
+      }),
+      reviewGptDomText('MODEL_CONFIRMATION: UNKNOWN'),
+    ])
+    for (const decoy of [
+      inlineCodeDecoy,
+      hiddenInlineDecoy,
+      hiddenBlockDecoy,
+      displayContentsDecoy,
+    ]) {
+      expect(
+        modelClassifier.modelConfirmationFailure(
+          'gpt-5.6-sol',
+          extractReviewGptModelConfirmationText(decoy),
+          'gpt-5-6-pro',
+        ),
+      ).toContain('did not include MODEL_CONFIRMATION')
+    }
+
+    const multipleConfirmations = reviewGptDomElement('DIV', [
+      reviewGptDomElement('P', [reviewGptDomText('MODEL_CONFIRMATION: UNKNOWN')], {
+        display: 'block',
+      }),
+      reviewGptDomElement('P', [reviewGptDomText('MODEL_CONFIRMATION: gpt-5.6-sol')], {
+        display: 'block',
+      }),
+    ], { display: 'block' })
     expect(
       modelClassifier.modelConfirmationFailure(
         'gpt-5.6-sol',
-        [
-          '```bad`',
-          'MODEL_CONFIRMATION: UNKNOWN',
-          '```',
-          'MODEL_CONFIRMATION: gpt-5.6-sol',
-        ].join('\n'),
-        'gpt-5-6-pro',
-      ),
-    ).toContain('confirmed model UNKNOWN, expected gpt-5.6-sol')
-    expect(
-      modelClassifier.modelConfirmationFailure(
-        'gpt-5.6-sol',
-        [
-          '```text',
-          '```js',
-          'MODEL_CONFIRMATION: gpt-5.6-sol',
-          '```',
-          'MODEL_CONFIRMATION: UNKNOWN',
-        ].join('\n'),
-        'gpt-5-6-pro',
-      ),
-    ).toContain('confirmed model UNKNOWN, expected gpt-5.6-sol')
-    expect(
-      modelClassifier.modelConfirmationFailure(
-        'gpt-5.6-sol',
-        [
-          'MODEL_CONFIRMATION: gpt-5.6-sol',
-          'MODEL_CONFIRMATION: UNKNOWN',
-        ].join('\n'),
+        extractReviewGptModelConfirmationText(multipleConfirmations),
         'gpt-5-6-pro',
       ),
     ).toContain('multiple MODEL_CONFIRMATION lines')
-    expect(
-      modelClassifier.modelConfirmationFailure(
-        'gpt-5.6-sol',
-        [
-          '```text',
-          'MODEL_CONFIRMATION: gpt-5.6-sol',
-          '```',
-          'MODEL_CONFIRMATION: UNKNOWN',
-        ].join('\n'),
-        'gpt-5-6-pro',
-      ),
-    ).toContain('confirmed model UNKNOWN, expected gpt-5.6-sol')
-    expect(
-      modelClassifier.modelConfirmationFailure(
-        'gpt-5.6-sol',
-        'MODEL_CONFIRMATION: GPT-5.6 Sol',
-        'gpt-5-6-pro',
-      ),
-    ).toBe('')
     expect(
       modelClassifier.modelConfirmationFailure(
         'gpt-5.6-sol',
@@ -1206,6 +1420,200 @@ describe('monorepo release flow coverage audit', () => {
         'gpt-5-5-pro',
       ),
     ).toContain('DOM reported model gpt-5-5-pro, expected gpt-5.6-sol')
+
+    const captureExpression = reviewGptDomSnapshotModule.buildChatGptCaptureStateExpression({
+      desiredChatId: 'test-chat',
+      desiredOrigin: 'https://chatgpt.com',
+    })
+    expect(() => new Script(captureExpression)).not.toThrow()
+    expect(captureExpression).toContain('precedingUserMessageSignature')
+  })
+
+  it('attests one fresh assistant snapshot bound to the committed user turn', () => {
+    const harness = loadReviewGptOpenTargetHarness(1, undefined, {
+      shouldSend: true,
+      shouldWaitForResponse: true,
+    })
+    const concurrentHarness = loadReviewGptOpenTargetHarness(1, undefined, {
+      shouldSend: true,
+      shouldWaitForResponse: true,
+    })
+    const normalizePromptSignature = (value: string) => value
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/gu, ' ')
+      .replace(/\s+/gu, ' ')
+      .trim()
+      .slice(0, 320)
+    const committedPrompt = harness.getDraftPrompt()
+    const concurrentPrompt = concurrentHarness.getDraftPrompt()
+    const committedUserTurnSignature = normalizePromptSignature(committedPrompt)
+    const concurrentUserTurnSignature = normalizePromptSignature(concurrentPrompt)
+    expect(harness.getModelAttestationTurnNonce()).toMatch(/^[0-9a-f-]{36}$/u)
+    expect(concurrentHarness.getModelAttestationTurnNonce()).not.toBe(
+      harness.getModelAttestationTurnNonce(),
+    )
+    expect(committedPrompt).toMatch(/^REVIEW_GPT_TURN_NONCE: [0-9a-f-]{36}\n/u)
+    expect(concurrentPrompt.split('\n').slice(1)).toEqual(
+      committedPrompt.split('\n').slice(1),
+    )
+    expect(concurrentUserTurnSignature).not.toBe(committedUserTurnSignature)
+    const responseText = 'Report\r\nDone\u00a0'
+    const exactResponseBytes = 'Report\nDone\n'
+    const validSnapshot: ReviewGptAssistantSnapshot = {
+      afterLastUserMessage: false,
+      modelConfirmationText: 'MODEL_CONFIRMATION: UNKNOWN',
+      modelSlug: 'gpt-5-6-pro',
+      precedingUserMessageSignature: committedUserTurnSignature,
+      signature: 'fresh-response',
+      text: responseText,
+    }
+    const concurrentSnapshot: ReviewGptAssistantSnapshot = {
+      afterLastUserMessage: true,
+      modelConfirmationText: 'MODEL_CONFIRMATION: UNKNOWN',
+      modelSlug: 'gpt-5-6-pro',
+      precedingUserMessageSignature: concurrentUserTurnSignature,
+      signature: 'concurrent-response',
+      text: 'Concurrent response',
+    }
+
+    expect(
+      harness.selectAssistantResponseCandidate(
+        [validSnapshot, concurrentSnapshot],
+        [],
+        true,
+        committedUserTurnSignature,
+      ).snapshot,
+    ).toMatchObject({ signature: 'fresh-response' })
+    expect(
+      harness.selectAssistantResponseCandidate(
+        [concurrentSnapshot],
+        [],
+        true,
+        committedUserTurnSignature,
+      ).snapshot,
+    ).toBeNull()
+    expect(
+      harness.selectAssistantResponseCandidate(
+        [validSnapshot],
+        ['fresh-response'],
+        true,
+        committedUserTurnSignature,
+      ).snapshot,
+    ).toBeNull()
+
+    const attestation = harness.modelAttestationForSnapshot(
+      'gpt-5.6-sol',
+      validSnapshot,
+      true,
+      committedUserTurnSignature,
+    )
+    expect(attestation).toEqual({
+      evidence: {
+        schemaVersion: 1,
+        requestedModel: 'gpt-5.6-sol',
+        responseModelSlug: 'gpt-5-6-pro',
+        responseSha256: createHash('sha256').update(exactResponseBytes).digest('hex'),
+      },
+      failure: '',
+    })
+    expect(
+      harness.modelAttestationForSnapshot(
+        'gpt-5.6-sol',
+        validSnapshot,
+        false,
+        committedUserTurnSignature,
+      ),
+    ).toEqual({ evidence: null, failure: '' })
+
+    for (const invalidSnapshot of [
+      concurrentSnapshot,
+      { ...validSnapshot, modelConfirmationText: '' },
+      { ...validSnapshot, modelSlug: 'gpt-5-5-pro' },
+      {
+        ...validSnapshot,
+        modelConfirmationText: 'MODEL_CONFIRMATION: gpt-5.6-sol',
+        modelSlug: 'gpt-5-5-pro',
+      },
+    ]) {
+      const invalidAttestation = harness.modelAttestationForSnapshot(
+        'gpt-5.6-sol',
+        invalidSnapshot,
+        true,
+        committedUserTurnSignature,
+      )
+      expect(invalidAttestation.failure).not.toBe('')
+      expect(invalidAttestation.evidence).toBeNull()
+    }
+
+    const prePromptSnapshot = {
+      ...validSnapshot,
+      afterLastUserMessage: false,
+      precedingUserMessageSignature: undefined,
+    }
+    expect(
+      harness.modelAttestationForSnapshot('gpt-5.6-sol', prePromptSnapshot, true),
+    ).toMatchObject({ evidence: null })
+  })
+
+  it('writes private model evidence atomically and invalidates it before validation', () => {
+    const outputDirectory = mkdtempSync(path.join(os.tmpdir(), 'review-gpt-attestation-'))
+    try {
+      const responseFile = path.join(outputDirectory, 'response.md')
+      const evidenceFile = `${responseFile}.model-verification.json`
+      const unrelatedFile = path.join(outputDirectory, 'unrelated.txt')
+      const responseText = 'Report\r\nDone\u00a0'
+      const exactResponseBytes = 'Report\nDone\n'
+      const evidence: ModelVerificationEvidence = {
+        schemaVersion: 1,
+        requestedModel: 'gpt-5.6-sol',
+        responseModelSlug: 'gpt-5-6-pro',
+        responseSha256: createHash('sha256').update(exactResponseBytes).digest('hex'),
+      }
+      const harness = loadReviewGptOpenTargetHarness(1)
+
+      writeFileSync(unrelatedFile, 'keep', 'utf8')
+      expect(
+        harness.writeCompletedResponseArtifacts(responseFile, responseText, evidence),
+      ).toEqual({ evidencePath: evidenceFile, responseFilePath: responseFile })
+      expect(readFileSync(responseFile, 'utf8')).toBe(exactResponseBytes)
+      expect(JSON.parse(readFileSync(evidenceFile, 'utf8'))).toEqual(evidence)
+      expect(statSync(responseFile).mode & 0o777).toBe(0o600)
+      expect(statSync(evidenceFile).mode & 0o777).toBe(0o600)
+
+      expect(harness.removeModelVerificationEvidenceFile(responseFile)).toBe(evidenceFile)
+      expect(existsSync(evidenceFile)).toBe(false)
+      expect(readFileSync(responseFile, 'utf8')).toBe(exactResponseBytes)
+      expect(readFileSync(unrelatedFile, 'utf8')).toBe('keep')
+
+      const failedResponseFile = path.join(outputDirectory, 'failed-response.md')
+      const failedEvidenceFile = `${failedResponseFile}.model-verification.json`
+      mkdirSync(failedEvidenceFile)
+      expect(() => {
+        harness.writeCompletedResponseArtifacts(failedResponseFile, responseText, evidence)
+      }).toThrow()
+      expect(readFileSync(failedResponseFile, 'utf8')).toBe(exactResponseBytes)
+      expect(existsSync(failedEvidenceFile)).toBe(true)
+      expect(readdirSync(outputDirectory).filter((entry) => entry.endsWith('.tmp'))).toEqual([])
+
+      const staleResponseFile = path.join(outputDirectory, 'stale-response.md')
+      const staleEvidenceFile = `${staleResponseFile}.model-verification.json`
+      writeFileSync(staleResponseFile, 'prior response', 'utf8')
+      writeFileSync(staleEvidenceFile, 'prior evidence', 'utf8')
+      const invalidConfigHarness = loadReviewGptOpenTargetHarness(1, undefined, {
+        remotePort: '',
+        responseFile: staleResponseFile,
+        shouldSend: true,
+        shouldWaitForResponse: true,
+      })
+      expect(() => invalidConfigHarness.prepareRuntimeConfig()).toThrow(
+        'Missing ORACLE_DRAFT_REMOTE_PORT',
+      )
+      expect(existsSync(staleEvidenceFile)).toBe(false)
+      expect(readFileSync(staleResponseFile, 'utf8')).toBe('prior response')
+      expect(readFileSync(unrelatedFile, 'utf8')).toBe('keep')
+    } finally {
+      rmSync(outputDirectory, { force: true, recursive: true })
+    }
   })
 
   it('releases failed non-wait runs and stops retries after unconfirmed cleanup', async () => {
