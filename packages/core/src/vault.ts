@@ -4,6 +4,7 @@ import { isDeepStrictEqual } from "node:util";
 import {
   collectEventRawReferencePaths,
   experimentDocumentRelativePath,
+  LEGACY_INBOX_CAPTURE_TEXT_MAX_LENGTH,
   isExperimentDocumentRelativePath,
   rawImportManifestSchema,
   safeParseContract,
@@ -918,7 +919,13 @@ function isEquivalentMigratedInboxCaptureRecord(
   } = current;
   void legacySchemaVersion;
   void currentSchemaVersion;
-  return isDeepStrictEqual(legacyFields, currentFields)
+  const currentFieldsAsLegacy = {
+    ...currentFields,
+    text: currentFields.text == null
+      ? null
+      : currentFields.text.slice(0, LEGACY_INBOX_CAPTURE_TEXT_MAX_LENGTH),
+  };
+  return isDeepStrictEqual(legacyFields, currentFieldsAsLegacy)
     && isDeepStrictEqual(
       legacyRawRefs.filter((relativePath) => relativePath !== envelopePath),
       currentRawRefs,

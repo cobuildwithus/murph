@@ -254,6 +254,7 @@ test("inbox envelope migration preserves text beyond the legacy projection cap",
   assert.equal(applied.mutated, true);
   const after = await readJsonlRecords({ vaultRoot, relativePath: LEDGER_PATH });
   assert.equal(after[1]?.text, fullText);
+  assert.equal((await validateVault({ vaultRoot })).valid, true);
 
   const runtime = await openInboxRuntime({ vaultRoot });
   try {
@@ -261,6 +262,40 @@ test("inbox envelope migration preserves text beyond the legacy projection cap",
     assert.equal(runtime.getCapture(fixture.captureId)?.text, fullText);
   } finally {
     runtime.close();
+  }
+});
+
+test("inbox envelope migration rejects non-equivalent long-text replacements", async () => {
+  const fullText = "a".repeat(LEGACY_INBOX_CAPTURE_TEXT_MAX_LENGTH + 512);
+  for (const mismatch of ["legacy-text-prefix", "identity-key"] as const) {
+    const vaultRoot = await makeTempDirectory(`murph-inbox-envelope-migration-${mismatch}`);
+    await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
+    const fixture = await createLegacyFixture({
+      externalId: `msg-envelope-migration-${mismatch}`,
+      text: fullText,
+      vaultRoot,
+    });
+
+    const applied = await runInboxEnvelopeMigration({ apply: true, vaultRoot });
+    assert.equal(applied.mutated, true);
+    const records = await readJsonlRecords({ vaultRoot, relativePath: LEDGER_PATH });
+    const current = records[1];
+    assert.ok(current);
+    records[1] = mismatch === "legacy-text-prefix"
+      ? { ...current, text: `b${fullText.slice(1)}` }
+      : { ...current, identityKey: `${String(current.identityKey)}-mismatch` };
+    await fs.writeFile(
+      path.join(vaultRoot, LEDGER_PATH),
+      `${records.map((record) => JSON.stringify(record)).join("\n")}\n`,
+      "utf8",
+    );
+
+    const validation = await validateVault({ vaultRoot });
+    assert.equal(validation.valid, false);
+    assert.ok(validation.issues.some((issue) =>
+      issue.code === "RAW_REFERENCE_MISSING"
+      && issue.message.includes(fixture.envelopePath)
+    ));
   }
 });
 
