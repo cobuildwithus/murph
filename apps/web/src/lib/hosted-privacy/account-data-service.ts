@@ -601,8 +601,16 @@ export async function deleteHostedAccountData(input: {
         prisma: tx,
       }),
     ]);
+    const familyBeneficiaryMemberIds = await listActiveHostedFamilyBeneficiaryMemberIds({
+      ownerMemberIds: transactionDeletionMemberIds,
+      prisma: tx,
+    });
+    const transactionFenceMemberIds = sortedUniqueStrings([
+      ...transactionDeletionMemberIds,
+      ...familyBeneficiaryMemberIds,
+    ]);
 
-    for (const memberId of transactionDeletionMemberIds) {
+    for (const memberId of transactionFenceMemberIds) {
       await lockHostedMemberForAccountDeletionTx({
         memberId,
         prisma: tx,
@@ -775,6 +783,24 @@ async function listOwnedHostedThreadContainerMemberIds(input: {
     orderBy: { memberId: "asc" },
     select: { memberId: true },
     where: { ownerMemberId: input.ownerMemberId },
+  });
+
+  return rows.map((row) => row.memberId);
+}
+
+async function listActiveHostedFamilyBeneficiaryMemberIds(input: {
+  ownerMemberIds: readonly string[];
+  prisma: HostedAccountDataPrisma;
+}): Promise<string[]> {
+  const rows = await input.prisma.hostedAccountGroupMembership.findMany({
+    orderBy: { memberId: "asc" },
+    select: { memberId: true },
+    where: {
+      group: {
+        ownerMemberId: buildStringInFilter(input.ownerMemberIds),
+      },
+      status: "active",
+    },
   });
 
   return rows.map((row) => row.memberId);

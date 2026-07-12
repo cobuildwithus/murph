@@ -13,6 +13,8 @@ import {
   readHostedPhoneHint,
 } from "@/src/lib/hosted-onboarding/contact-privacy";
 import { lockHostedMemberRow } from "@/src/lib/hosted-onboarding/shared";
+import { removeHostedFamilyMemberTx } from "@/src/lib/hosted-onboarding/family-plan";
+import { activeHostedMemberAccessWithParticipantsWhere } from "@/src/lib/hosted-onboarding/member-access";
 import { createHostedPhoneCall } from "@/src/lib/phone-calls/service";
 import { resolveVerifiedMemberTransferNumber } from "@/src/lib/phone-calls/transfer";
 import type { PhoneCallRuntime } from "@/src/lib/phone-calls/types";
@@ -33,6 +35,7 @@ const BRIEF: HostedPhoneCallBrief = {
 
 describe("hosted phone-call account-deletion fence", () => {
   const clients: PrismaClient[] = [];
+  const accountGroupIds: string[] = [];
   const groupIds: string[] = [];
   const memberIds: string[] = [];
   let memberId: string;
@@ -54,12 +57,207 @@ describe("hosted phone-call account-deletion fence", () => {
   });
 
   afterEach(async () => {
+    await clients[0]?.hostedAccountGroup.deleteMany({
+      where: { id: { in: accountGroupIds } },
+    });
     await clients[0]?.hostedGroup.deleteMany({ where: { id: { in: groupIds } } });
     await clients[0]?.hostedMember.deleteMany({ where: { id: { in: memberIds } } });
     groupIds.length = 0;
+    accountGroupIds.length = 0;
     memberIds.length = 0;
     await Promise.all(clients.splice(0).map((client) => client.$disconnect()));
   });
+
+  it.each(["direct-removal", "owner-deletion"] as const)(
+    "rejects the provider marker after %s revocation wins the beneficiary lock",
+    async (revocationKind) => {
+      const revocationPrisma = clients[0]!;
+      const providerPrisma = clients[1]!;
+      const observerPrisma = clients[2]!;
+      const beneficiaryMemberId = `member_family_a_${randomUUID().replaceAll("-", "")}`;
+      const ownerMemberId = `member_family_z_${randomUUID().replaceAll("-", "")}`;
+      const accountGroupId = `hbag_revocation_wins_${randomUUID().replaceAll("-", "")}`;
+      const phoneCallId = `hpc_revocation_wins_${randomUUID().replaceAll("-", "")}`;
+      memberIds.push(beneficiaryMemberId, ownerMemberId);
+      accountGroupIds.push(accountGroupId);
+      await seedActiveFamilySponsorship({
+        beneficiaryMemberId,
+        groupId: accountGroupId,
+        ownerMemberId,
+        prisma: revocationPrisma,
+      });
+      await revocationPrisma.hostedPhoneCall.create({
+        data: {
+          briefJson: BRIEF,
+          id: phoneCallId,
+          memberId: beneficiaryMemberId,
+          provider: "retell",
+          requestKey: `revocation-wins-${revocationKind}`,
+          status: "starting",
+        },
+      });
+
+      const revocationReady = createDeferred<void>();
+      const releaseRevocation = createDeferred<void>();
+      const revocation = revocationPrisma.$transaction(async (tx) => {
+        if (revocationKind === "direct-removal") {
+          const removed = await removeHostedFamilyMemberTx({
+            groupId: accountGroupId,
+            memberId: beneficiaryMemberId,
+            ownerMemberId,
+            tx,
+          });
+          if (!removed) throw new Error("Expected active Family membership removal.");
+        } else {
+          await deleteOwnedFamilySponsorshipTx({ ownerMemberId, tx });
+        }
+        revocationReady.resolve();
+        await releaseRevocation.promise;
+      });
+      await revocationReady.promise;
+
+      const providerBackendPid = createDeferred<number>();
+      const providerMarker = providerPrisma.$transaction(async (tx) => {
+        const [backend] = await tx.$queryRaw<Array<{ pid: number }>>`
+          select pg_backend_pid()::int as pid
+        `;
+        if (!backend) throw new Error("Missing PostgreSQL backend pid.");
+        providerBackendPid.resolve(backend.pid);
+        await lockHostedMemberRow(tx, beneficiaryMemberId);
+        return tx.hostedPhoneCall.updateMany({
+          data: { providerStartAttemptedAt: new Date() },
+          where: {
+            AND: [
+              {
+                id: phoneCallId,
+                providerCallId: null,
+                providerStartAttemptedAt: null,
+                status: "starting",
+              },
+              {
+                member: {
+                  is: activeHostedMemberAccessWithParticipantsWhere(),
+                },
+              },
+            ],
+          },
+        });
+      });
+
+      expect(await waitForPostgresBlock({
+        backendPid: await providerBackendPid.promise,
+        prisma: observerPrisma,
+      })).toBe(true);
+      releaseRevocation.resolve();
+      await expect(revocation).resolves.toBeUndefined();
+      await expect(providerMarker).resolves.toEqual({ count: 0 });
+      await expect(providerPrisma.hostedPhoneCall.findUniqueOrThrow({
+        select: { providerStartAttemptedAt: true },
+        where: { id: phoneCallId },
+      })).resolves.toEqual({ providerStartAttemptedAt: null });
+    },
+  );
+
+  it.each(["direct-removal", "owner-deletion"] as const)(
+    "makes %s wait when provider start wins the beneficiary lock",
+    async (revocationKind) => {
+      const providerPrisma = clients[0]!;
+      const revocationPrisma = clients[1]!;
+      const observerPrisma = clients[2]!;
+      const beneficiaryMemberId = `member_family_a_${randomUUID().replaceAll("-", "")}`;
+      const ownerMemberId = `member_family_z_${randomUUID().replaceAll("-", "")}`;
+      const accountGroupId = `hbag_provider_wins_${randomUUID().replaceAll("-", "")}`;
+      memberIds.push(beneficiaryMemberId, ownerMemberId);
+      accountGroupIds.push(accountGroupId);
+      await seedActiveFamilySponsorship({
+        beneficiaryMemberId,
+        groupId: accountGroupId,
+        ownerMemberId,
+        prisma: providerPrisma,
+      });
+
+      const preflightEntered = createDeferred<void>();
+      const releasePreflight = createDeferred<void>();
+      const providerStartEntered = createDeferred<void>();
+      const releaseProviderStart = createDeferred<void>();
+      const runtimeStartCalls: string[] = [];
+      const runtime: PhoneCallRuntime = {
+        start: async (call) => {
+          runtimeStartCalls.push(call.id);
+          providerStartEntered.resolve();
+          await releaseProviderStart.promise;
+          return { providerCallId: `provider_${call.id}` };
+        },
+        stop: async () => {},
+        validateStart: async () => {},
+      };
+      const startup = createHostedPhoneCall({
+        beforeStart: async () => {
+          preflightEntered.resolve();
+          await releasePreflight.promise;
+          return true;
+        },
+        brief: BRIEF,
+        memberId: beneficiaryMemberId,
+        prisma: providerPrisma,
+        providerStartMemberIds: [beneficiaryMemberId],
+        requestKey: `provider-wins-${revocationKind}`,
+        resultNotificationRouteResolver: async () => {},
+        runtime,
+      });
+      await preflightEntered.promise;
+
+      const revocationBackendPid = createDeferred<number>();
+      const revocation = revocationPrisma.$transaction(async (tx) => {
+        const [backend] = await tx.$queryRaw<Array<{ pid: number }>>`
+          select pg_backend_pid()::int as pid
+        `;
+        if (!backend) throw new Error("Missing PostgreSQL backend pid.");
+        revocationBackendPid.resolve(backend.pid);
+        if (revocationKind === "direct-removal") {
+          const removed = await removeHostedFamilyMemberTx({
+            groupId: accountGroupId,
+            memberId: beneficiaryMemberId,
+            ownerMemberId,
+            tx,
+          });
+          if (!removed) throw new Error("Expected active Family membership removal.");
+        } else {
+          await deleteOwnedFamilySponsorshipTx({ ownerMemberId, tx });
+        }
+      });
+
+      expect(await waitForPostgresBlock({
+        backendPid: await revocationBackendPid.promise,
+        prisma: observerPrisma,
+      })).toBe(true);
+      expect(runtimeStartCalls).toEqual([]);
+
+      releasePreflight.resolve();
+      await providerStartEntered.promise;
+      await expect(revocation).resolves.toBeUndefined();
+      if (revocationKind === "direct-removal") {
+        await expect(revocationPrisma.hostedAccountGroupMembership.findUniqueOrThrow({
+          select: { status: true },
+          where: {
+            groupId_memberId: {
+              groupId: accountGroupId,
+              memberId: beneficiaryMemberId,
+            },
+          },
+        })).resolves.toEqual({ status: "removed" });
+      } else {
+        await expect(revocationPrisma.hostedAccountGroup.findUnique({
+          where: { id: accountGroupId },
+        })).resolves.toBeNull();
+        await expect(revocationPrisma.hostedMember.findUnique({
+          where: { id: beneficiaryMemberId },
+        })).resolves.not.toBeNull();
+      }
+      releaseProviderStart.resolve();
+      await expect(startup).resolves.toMatchObject({ status: "calling" });
+    },
+  );
 
   it("makes distinct group-owner deletion wait for the provider marker transaction", async () => {
     const startupPrisma = clients[0]!;
@@ -446,6 +644,82 @@ async function writeVerifiedPhoneTx(input: {
       phoneNumberVerifiedAt: new Date("2026-07-06T14:00:00.000Z"),
     },
     where: { memberId: input.memberId },
+  });
+}
+
+async function seedActiveFamilySponsorship(input: {
+  beneficiaryMemberId: string;
+  groupId: string;
+  ownerMemberId: string;
+  prisma: PrismaClient;
+}): Promise<void> {
+  await input.prisma.hostedMember.createMany({
+    data: [
+      {
+        billingStatus: "not_started",
+        id: input.beneficiaryMemberId,
+      },
+      {
+        billingStatus: "active",
+        id: input.ownerMemberId,
+      },
+    ],
+  });
+  await input.prisma.hostedAccountGroup.create({
+    data: {
+      billingStatus: "active",
+      id: input.groupId,
+      ownerMemberId: input.ownerMemberId,
+    },
+  });
+  await input.prisma.hostedAccountGroupMembership.createMany({
+    data: [
+      {
+        groupId: input.groupId,
+        id: `hbagm_owner_${randomUUID().replaceAll("-", "")}`,
+        joinedAt: new Date(),
+        memberId: input.ownerMemberId,
+        role: "owner",
+        status: "active",
+      },
+      {
+        groupId: input.groupId,
+        id: `hbagm_beneficiary_${randomUUID().replaceAll("-", "")}`,
+        joinedAt: new Date(),
+        memberId: input.beneficiaryMemberId,
+        role: "member",
+        status: "active",
+      },
+    ],
+  });
+}
+
+async function deleteOwnedFamilySponsorshipTx(input: {
+  ownerMemberId: string;
+  tx: Prisma.TransactionClient;
+}): Promise<void> {
+  const beneficiaryRows = await input.tx.hostedAccountGroupMembership.findMany({
+    orderBy: { memberId: "asc" },
+    select: { memberId: true },
+    where: {
+      group: { ownerMemberId: input.ownerMemberId },
+      status: "active",
+    },
+  });
+  const fenceMemberIds = [
+    ...new Set([
+      input.ownerMemberId,
+      ...beneficiaryRows.map((row) => row.memberId),
+    ]),
+  ].sort();
+  for (const currentMemberId of fenceMemberIds) {
+    await lockHostedMemberRow(input.tx, currentMemberId);
+  }
+  await input.tx.hostedAccountGroupMembership.deleteMany({
+    where: { group: { ownerMemberId: input.ownerMemberId } },
+  });
+  await input.tx.hostedAccountGroup.deleteMany({
+    where: { ownerMemberId: input.ownerMemberId },
   });
 }
 

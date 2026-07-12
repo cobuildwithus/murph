@@ -1497,6 +1497,15 @@ describe("hosted Family plan", () => {
 
   it("removes sponsored access without deleting the member", async () => {
     const tx = createTxMock();
+    const operationOrder: string[] = [];
+    tx.$queryRaw.mockImplementation(async () => {
+      operationOrder.push("lock-member");
+      return [];
+    });
+    tx.hostedAccountGroupMembership.updateMany.mockImplementation(async () => {
+      operationOrder.push("remove-membership");
+      return { count: 1 };
+    });
 
     await expect(removeHostedFamilyMemberTx({
       groupId: "hbag_family",
@@ -1515,6 +1524,7 @@ describe("hosted Family plan", () => {
         status: "active",
       },
     }));
+    expect(operationOrder).toEqual(["lock-member", "remove-membership"]);
   });
 
   it("requires active group billing for membership access", () => {

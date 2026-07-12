@@ -986,6 +986,42 @@ describe("deleteHostedAccountData", () => {
     expect(runDeleteIndex).toBeGreaterThan(finalLockIndex);
   });
 
+  it("locks active Family beneficiaries before deleting an owner's sponsorships", async () => {
+    const operationOrder: string[] = [];
+    const prisma = createHostedAccountDeletionPrismaForTest({
+      activeOwnedFamilyBeneficiaryMemberIds: [
+        "member_z_beneficiary",
+        "member_a_beneficiary",
+        "member_a_beneficiary",
+        "member_123",
+      ],
+      onTransaction: () => operationOrder.push("transaction"),
+      operationOrder,
+    });
+
+    await deleteHostedAccountData({
+      memberId: "member_123",
+      prisma,
+      request: new Request("https://join.example.test/settings"),
+    });
+
+    const finalTransactionIndex = operationOrder.lastIndexOf("transaction");
+    const finalTransactionMemberLocks = operationOrder
+      .slice(finalTransactionIndex + 1)
+      .filter((entry) => entry.startsWith("queryRaw:member_"));
+    expect(finalTransactionMemberLocks.slice(0, 3)).toEqual([
+      "queryRaw:member_123",
+      "queryRaw:member_a_beneficiary",
+      "queryRaw:member_z_beneficiary",
+    ]);
+    expect(operationOrder.indexOf("update:hostedMember", finalTransactionIndex)).toBeGreaterThan(
+      operationOrder.indexOf("queryRaw:member_z_beneficiary", finalTransactionIndex),
+    );
+    expect(operationOrder.indexOf("delete:hostedAccountGroupMembership")).toBeGreaterThan(
+      operationOrder.indexOf("queryRaw:member_z_beneficiary", finalTransactionIndex),
+    );
+  });
+
   it("aborts before local deletion while computer-use browser provisioning is in flight", async () => {
     const deleteCalls: HostedAccountDeletionPrismaDeleteCall[] = [];
     const onTransaction = vi.fn();
@@ -1765,6 +1801,7 @@ function createHostedAccountDeletionPrismaForTest(input: {
   hostedComputerRunRows?: Record<string, unknown>[];
   familyBillingRefRecords?: Record<string, unknown>[];
   familyGroups?: Array<{ id: string }>;
+  activeOwnedFamilyBeneficiaryMemberIds?: string[];
   ownedThreadContainerMemberIds?: string[];
   phoneCalls?: Array<{
     providerCallId: string | null;
@@ -1803,8 +1840,13 @@ function createHostedAccountDeletionPrismaForTest(input: {
       }
       return 1;
     },
-    $queryRaw: async () => {
+    $queryRaw: async (...args: unknown[]) => {
       input.operationOrder?.push("queryRaw");
+      for (const value of args) {
+        if (typeof value === "string" && value.startsWith("member_")) {
+          input.operationOrder?.push(`queryRaw:${value}`);
+        }
+      }
       return [{ id: "member_123" }];
     },
     deviceConnection: {
@@ -1824,6 +1866,12 @@ function createHostedAccountDeletionPrismaForTest(input: {
     hostedConnectedAppConnectIntent: {
       ...makeDeleteDelegate("hostedConnectedAppConnectIntent"),
       findMany: async () => input.transactionConnectedAppConnectIntentRows ?? [],
+    },
+    hostedAccountGroupMembership: {
+      ...makeDeleteDelegate("hostedAccountGroupMembership"),
+      findMany: async () => (input.activeOwnedFamilyBeneficiaryMemberIds ?? []).map(
+        (memberId) => ({ memberId }),
+      ),
     },
     hostedThreadContainer: {
       ...makeDeleteDelegate("hostedThreadContainer"),
@@ -2031,6 +2079,9 @@ type HostedAccountDeletionPrismaTransactionFake = {
   };
   hostedConnectedAppConnectIntent: HostedAccountDeletionPrismaDeleteDelegate & {
     findMany: () => Promise<unknown[]>;
+  };
+  hostedAccountGroupMembership: HostedAccountDeletionPrismaDeleteDelegate & {
+    findMany: () => Promise<Array<{ memberId: string }>>;
   };
   hostedThreadContainer: HostedAccountDeletionPrismaDeleteDelegate & {
     findMany: () => Promise<Array<{ memberId: string }>>;

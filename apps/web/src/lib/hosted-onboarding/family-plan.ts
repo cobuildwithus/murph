@@ -3157,6 +3157,7 @@ export async function removeHostedFamilyMemberTx(input: {
     });
   }
 
+  await lockHostedMemberRow(input.tx, input.memberId);
   const result = await input.tx.hostedAccountGroupMembership.updateMany({
     data: {
       removedAt: now,
