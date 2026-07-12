@@ -6,6 +6,7 @@ import {
 } from "@murphai/contracts";
 import { deviceSyncError } from "@murphai/device-syncd/errors";
 import { normalizeJunctionProviderSlug } from "@murphai/device-syncd/connect-config";
+import { isEstablishedDeviceSyncConnection } from "@murphai/device-syncd/public-account";
 import {
   JUNCTION_COMPANION_HEALTH_METADATA_EVENT_TYPE,
   JUNCTION_COMPANION_HEALTH_METADATA_MAX_BATCH_BYTES,
@@ -220,7 +221,7 @@ export async function resolveCompanionHrvRmssdConnection(input: {
   const activeConnections = (await input.store.listConnectionsForUser(input.memberId)).filter(
     (connection) =>
       connection.provider === COMPANION_DEVICE_SYNC_PROVIDER
-      && connection.status === "active",
+      && isEstablishedDeviceSyncConnection(connection),
   );
 
   if (activeConnections.length === 0) {

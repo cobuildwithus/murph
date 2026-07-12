@@ -125,6 +125,33 @@ function createHostedEnv(overrides: Partial<{
   };
 }
 
+function buildCompanionHrvRmssdObservation() {
+  return {
+    schema: "murph.companion.hrv-rmssd.v1" as const,
+    captureId: "123e4567-e89b-42d3-a456-426614174000",
+    observedAt: "2026-07-10T13:45:00.000Z",
+    durationMs: 60_000,
+    rmssdMs: 48.25,
+    intervalCount: 72,
+    acceptedIntervalCount: 68,
+    successivePairCount: 63,
+    quality: "good" as const,
+    methodVersion: "rmssd-pulse-interval-v1" as const,
+  };
+}
+
+function acceptTestCompanionHrvRmssdObservation() {
+  const ingress = createHostedDeviceSyncPublicIngressService(
+    new Request("https://control.example.test/api/device-sync/companion/hrv-rmssd"),
+  );
+
+  return ingress.acceptCompanionHrvRmssdObservation({
+    acceptedAt: "2026-07-10T13:46:00.000Z",
+    observation: buildCompanionHrvRmssdObservation(),
+    userId: "user-123",
+  });
+}
+
 function buildHostedConnection(
   overrides: Partial<{
     accessTokenExpiresAt: string | null;
@@ -664,6 +691,7 @@ describe("hosted device-sync wakes", () => {
     const connection = buildHostedConnection({
       displayName: "Apple Health",
       provider: "junction",
+      setupPhase: "source_confirmed",
     });
     const dirty = buildDirtyConnectionRecord({
       provider: "junction",
@@ -752,7 +780,10 @@ describe("hosted device-sync wakes", () => {
   });
 
   it("does not append a second wake while companion dirty work is already pending", async () => {
-    const connection = buildHostedConnection({ provider: "junction" });
+    const connection = buildHostedConnection({
+      provider: "junction",
+      setupPhase: "source_confirmed",
+    });
     mocks.getConnectionForUser.mockResolvedValue(connection);
     mocks.listConnectionSources.mockResolvedValue([{
       sourceProviderSlug: "apple_health_kit",
@@ -788,7 +819,10 @@ describe("hosted device-sync wakes", () => {
   });
 
   it("rejects companion metadata while the connection backlog is full", async () => {
-    const connection = buildHostedConnection({ provider: "junction" });
+    const connection = buildHostedConnection({
+      provider: "junction",
+      setupPhase: "source_confirmed",
+    });
     mocks.getConnectionForUser.mockResolvedValue(connection);
     mocks.listConnectionSources.mockResolvedValue([{
       sourceProviderSlug: "apple_health_kit",
@@ -825,7 +859,10 @@ describe("hosted device-sync wakes", () => {
   });
 
   it("accepts an exact replay at the backlog cap after the store no-ops it", async () => {
-    const connection = buildHostedConnection({ provider: "junction" });
+    const connection = buildHostedConnection({
+      provider: "junction",
+      setupPhase: "source_confirmed",
+    });
     mocks.getConnectionForUser.mockResolvedValue(connection);
     mocks.listConnectionSources.mockResolvedValue([{
       sourceProviderSlug: "apple_health_kit",
@@ -870,8 +907,31 @@ describe("hosted device-sync wakes", () => {
 
   it.each([
     ["missing", null],
-    ["inactive", buildHostedConnection({ provider: "junction", status: "disconnected" })],
-    ["non-Junction", buildHostedConnection({ provider: "oura" })],
+    ["inactive", buildHostedConnection({
+      provider: "junction",
+      setupPhase: "source_confirmed",
+      status: "disconnected",
+    })],
+    ["pending setup", buildHostedConnection({
+      provider: "junction",
+      setupPhase: "pending_link",
+    })],
+    ["returned setup", buildHostedConnection({
+      provider: "junction",
+      setupPhase: "link_returned",
+    })],
+    ["failed setup", buildHostedConnection({
+      provider: "junction",
+      setupPhase: "failed",
+    })],
+    ["missing setup", buildHostedConnection({
+      provider: "junction",
+      setupPhase: null,
+    })],
+    ["non-Junction", buildHostedConnection({
+      provider: "oura",
+      setupPhase: "source_confirmed",
+    })],
   ])("rejects companion metadata when the selected runtime lane is %s", async (_case, connection) => {
     mocks.getConnectionForUser.mockResolvedValue(connection);
     const connectionId = connection?.id ?? "dsc_missing";
@@ -2350,29 +2410,12 @@ describe("hosted device-sync wakes", () => {
     const connection = buildHostedConnection({
       id: "dsc_junction_123",
       provider: "junction",
+      setupPhase: "source_confirmed",
     });
     mocks.listConnectionsForUser.mockResolvedValue([connection]);
     mocks.getConnectionForUser.mockResolvedValue(connection);
-    const ingress = createHostedDeviceSyncPublicIngressService(
-      new Request("https://control.example.test/api/device-sync/companion/hrv-rmssd"),
-    );
 
-    await ingress.acceptCompanionHrvRmssdObservation({
-      acceptedAt: "2026-07-10T13:46:00.000Z",
-      observation: {
-        schema: "murph.companion.hrv-rmssd.v1",
-        captureId: "123e4567-e89b-42d3-a456-426614174000",
-        observedAt: "2026-07-10T13:45:00.000Z",
-        durationMs: 60_000,
-        rmssdMs: 48.25,
-        intervalCount: 72,
-        acceptedIntervalCount: 68,
-        successivePairCount: 63,
-        quality: "good",
-        methodVersion: "rmssd-pulse-interval-v1",
-      },
-      userId: "user-123",
-    });
+    await acceptTestCompanionHrvRmssdObservation();
 
     expect(mocks.listConnectionsForUser).toHaveBeenCalledWith("user-123");
     expect(mocks.ensureSdkConnection).not.toHaveBeenCalled();
@@ -2442,26 +2485,8 @@ describe("hosted device-sync wakes", () => {
     })],
   ])("does not establish or stage HRV over %s", async (_label, connection) => {
     mocks.listConnectionsForUser.mockResolvedValue([connection]);
-    const ingress = createHostedDeviceSyncPublicIngressService(
-      new Request("https://control.example.test/api/device-sync/companion/hrv-rmssd"),
-    );
 
-    await expect(ingress.acceptCompanionHrvRmssdObservation({
-      acceptedAt: "2026-07-10T13:46:00.000Z",
-      observation: {
-        schema: "murph.companion.hrv-rmssd.v1",
-        captureId: "123e4567-e89b-42d3-a456-426614174000",
-        observedAt: "2026-07-10T13:45:00.000Z",
-        durationMs: 60_000,
-        rmssdMs: 48.25,
-        intervalCount: 72,
-        acceptedIntervalCount: 68,
-        successivePairCount: 63,
-        quality: "good",
-        methodVersion: "rmssd-pulse-interval-v1",
-      },
-      userId: "user-123",
-    })).rejects.toMatchObject({
+    await expect(acceptTestCompanionHrvRmssdObservation()).rejects.toMatchObject({
       code: "COMPANION_HRV_CONNECTION_REQUIRED",
       httpStatus: 409,
       retryable: false,
@@ -2474,31 +2499,92 @@ describe("hosted device-sync wakes", () => {
     expect(mocks.signalHostedDeviceSyncMailboxRuntime).not.toHaveBeenCalled();
   });
 
-  it("rejects ambiguous active Junction lanes without staging HRV", async () => {
+  it.each([
+    ["pending Link", "pending_link"],
+    ["returned Link", "link_returned"],
+    ["failed", "failed"],
+    ["missing", null],
+  ] as const)("does not stage HRV over an active Junction lane with %s setup", async (_label, setupPhase) => {
     mocks.listConnectionsForUser.mockResolvedValue([
-      buildHostedConnection({ id: "dsc_junction_1", provider: "junction" }),
-      buildHostedConnection({ id: "dsc_junction_2", provider: "junction" }),
+      buildHostedConnection({
+        id: "dsc_junction_unconfirmed",
+        provider: "junction",
+        setupPhase,
+      }),
     ]);
-    const ingress = createHostedDeviceSyncPublicIngressService(
-      new Request("https://control.example.test/api/device-sync/companion/hrv-rmssd"),
-    );
 
-    await expect(ingress.acceptCompanionHrvRmssdObservation({
-      acceptedAt: "2026-07-10T13:46:00.000Z",
-      observation: {
-        schema: "murph.companion.hrv-rmssd.v1",
-        captureId: "123e4567-e89b-42d3-a456-426614174000",
-        observedAt: "2026-07-10T13:45:00.000Z",
-        durationMs: 60_000,
-        rmssdMs: 48.25,
-        intervalCount: 72,
-        acceptedIntervalCount: 68,
-        successivePairCount: 63,
-        quality: "good",
-        methodVersion: "rmssd-pulse-interval-v1",
-      },
-      userId: "user-123",
-    })).rejects.toMatchObject({
+    await expect(acceptTestCompanionHrvRmssdObservation()).rejects.toMatchObject({
+      code: "COMPANION_HRV_CONNECTION_REQUIRED",
+      httpStatus: 409,
+      retryable: false,
+    });
+
+    expect(mocks.getConnectionForUser).not.toHaveBeenCalled();
+    expect(mocks.upsertDirtyConnection).not.toHaveBeenCalled();
+    expect(mocks.appendHostedMailboxEnvelope).not.toHaveBeenCalled();
+  });
+
+  it("selects one established Junction lane while ignoring pending setup", async () => {
+    const establishedConnection = buildHostedConnection({
+      id: "dsc_junction_established",
+      provider: "junction",
+      setupPhase: "source_confirmed",
+    });
+    mocks.listConnectionsForUser.mockResolvedValue([
+      buildHostedConnection({
+        id: "dsc_junction_pending",
+        provider: "junction",
+        setupPhase: "pending_link",
+      }),
+      establishedConnection,
+    ]);
+    mocks.getConnectionForUser.mockResolvedValue(establishedConnection);
+
+    await acceptTestCompanionHrvRmssdObservation();
+
+    expect(mocks.upsertDirtyConnection).toHaveBeenCalledWith(expect.objectContaining({
+      connectionId: "dsc_junction_established",
+    }));
+  });
+
+  it("rejects a Junction lane that loses establishment before locked HRV persistence", async () => {
+    const establishedConnection = buildHostedConnection({
+      id: "dsc_junction_123",
+      provider: "junction",
+      setupPhase: "source_confirmed",
+    });
+    mocks.listConnectionsForUser.mockResolvedValue([establishedConnection]);
+    mocks.getConnectionForUser.mockResolvedValue(buildHostedConnection({
+      id: "dsc_junction_123",
+      provider: "junction",
+      setupPhase: "pending_link",
+    }));
+
+    await expect(acceptTestCompanionHrvRmssdObservation()).rejects.toMatchObject({
+      code: "COMPANION_HEALTH_CONNECTION_REQUIRED",
+      httpStatus: 409,
+      retryable: false,
+    });
+
+    expect(mocks.upsertDirtyConnection).not.toHaveBeenCalled();
+    expect(mocks.appendHostedMailboxEnvelope).not.toHaveBeenCalled();
+  });
+
+  it("rejects ambiguous established Junction lanes without staging HRV", async () => {
+    mocks.listConnectionsForUser.mockResolvedValue([
+      buildHostedConnection({
+        id: "dsc_junction_1",
+        provider: "junction",
+        setupPhase: "source_confirmed",
+      }),
+      buildHostedConnection({
+        id: "dsc_junction_2",
+        provider: "junction",
+        setupPhase: "source_confirmed",
+      }),
+    ]);
+
+    await expect(acceptTestCompanionHrvRmssdObservation()).rejects.toMatchObject({
       code: "COMPANION_HRV_CONNECTION_AMBIGUOUS",
       httpStatus: 409,
       retryable: false,

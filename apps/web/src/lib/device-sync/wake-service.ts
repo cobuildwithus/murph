@@ -19,6 +19,7 @@ import {
 } from "@murphai/device-syncd/hosted-hints";
 import {
   DEVICE_SYNC_HISTORICAL_RESET_REVOKE_FAILED_ERROR_CODE,
+  isEstablishedDeviceSyncConnection,
   isHistoricalResetIncompleteDeviceSyncAccount,
   requiresHistoricalResetDeviceSyncSource,
 } from "@murphai/device-syncd/public-account";
@@ -633,7 +634,11 @@ async function persistHostedDeviceSyncCompanionResource(input: {
         input.connectionId,
         tx,
       );
-      if (!connection || connection.provider !== "junction" || connection.status !== "active") {
+      if (
+        !connection
+        || connection.provider !== "junction"
+        || !isEstablishedDeviceSyncConnection(connection)
+      ) {
         throw deviceSyncError({
           code: "COMPANION_HEALTH_CONNECTION_REQUIRED",
           message: "Finish companion health setup before syncing health data.",
