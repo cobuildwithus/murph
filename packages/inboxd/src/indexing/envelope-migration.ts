@@ -17,10 +17,11 @@ import {
 
 import {
   buildInboxCaptureLedgerPathForOccurredAt,
+  buildInboxCaptureRecord,
+  buildLegacyInboxCaptureRecord,
   INBOX_CAPTURE_LEDGER_DIRECTORY,
-  migrateLegacyInboxCaptureRecord,
 } from "./persist/canonical-records.js";
-import { readLegacyInboxCaptureRecord } from "./persist.js";
+import { readLegacyInboxCaptureSnapshot } from "./persist.js";
 
 const DEFAULT_MAX_FILES = 250;
 
@@ -149,9 +150,9 @@ async function detectInboxEnvelopeMigration(vaultRoot: string): Promise<Migratio
       continue;
     }
 
-    let reconstructed: InboxCaptureRecord | null = null;
+    let snapshot: Awaited<ReturnType<typeof readLegacyInboxCaptureSnapshot>> = null;
     try {
-      reconstructed = await readLegacyInboxCaptureRecord({
+      snapshot = await readLegacyInboxCaptureSnapshot({
         relativePath,
         vaultRoot,
       });
@@ -159,7 +160,17 @@ async function detectInboxEnvelopeMigration(vaultRoot: string): Promise<Migratio
       mismatchCount += 1;
       continue;
     }
-    if (!reconstructed || !isDeepStrictEqual(reconstructed, records[0])) {
+    if (!snapshot) {
+      mismatchCount += 1;
+      continue;
+    }
+    const reconstructed = buildLegacyInboxCaptureRecord({
+      envelopePath: relativePath,
+      eventId: snapshot.eventId,
+      inbound: snapshot.input,
+      stored: snapshot.stored,
+    });
+    if (!isDeepStrictEqual(reconstructed, records[0])) {
       mismatchCount += 1;
       continue;
     }
@@ -167,7 +178,11 @@ async function detectInboxEnvelopeMigration(vaultRoot: string): Promise<Migratio
     candidates.push({
       byteLength: integrity.integrity.byteSize,
       ledgerPath: buildInboxCaptureLedgerPathForOccurredAt(records[0].occurredAt),
-      migratedRecord: migrateLegacyInboxCaptureRecord(records[0]),
+      migratedRecord: buildInboxCaptureRecord({
+        eventId: snapshot.eventId,
+        inbound: snapshot.input,
+        stored: snapshot.stored,
+      }),
       relativePath,
       sha256: integrity.integrity.sha256,
     });

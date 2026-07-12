@@ -399,25 +399,28 @@ async function buildDerivedTextSources(input: {
     return result ? buildParserResultTextSources(result, normalizedArtifactPath) : []
   }
 
+  const resultPath = normalizeAssistantInputDerivedArtifactPath(
+    path.posix.join(path.posix.dirname(normalizedArtifactPath), 'result.json'),
+    derived.allowedRoot,
+  )
+  if (resultPath) {
+    await input.materializeWorkspaceArtifacts?.([resultPath])
+    const result = await readBoundedParserResult({
+      resultPath,
+      vaultRoot: input.vaultRoot,
+    })
+    if (result) {
+      return buildParserResultTextSources(result, resultPath)
+    }
+  }
+
   const manifest = await materializeAndReadParserManifest({
     manifestPath: normalizedArtifactPath,
     materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts,
     vaultRoot: input.vaultRoot,
   })
   if (!manifest) {
-    const resultPath = normalizeAssistantInputDerivedArtifactPath(
-      path.posix.join(path.posix.dirname(normalizedArtifactPath), 'result.json'),
-      derived.allowedRoot,
-    )
-    if (!resultPath) {
-      return []
-    }
-    await input.materializeWorkspaceArtifacts?.([resultPath])
-    const result = await readBoundedParserResult({
-      resultPath,
-      vaultRoot: input.vaultRoot,
-    })
-    return result ? buildParserResultTextSources(result, resultPath) : []
+    return []
   }
 
   const sources: ModelEvidenceSource[] = []

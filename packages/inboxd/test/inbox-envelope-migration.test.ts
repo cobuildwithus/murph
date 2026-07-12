@@ -5,6 +5,8 @@ import path from "node:path";
 import { promises as fs } from "node:fs";
 import { test } from "vitest";
 
+import { LEGACY_INBOX_CAPTURE_TEXT_MAX_LENGTH } from "@murphai/contracts";
+
 import {
   applyCanonicalWriteBatch,
   initializeVault,
@@ -72,6 +74,7 @@ function createLegacyInbound(externalId: string): InboundCapture {
 
 async function createLegacyFixture(input: {
   externalId: string;
+  text?: string;
   vaultRoot: string;
 }): Promise<{
   captureId: string;
@@ -83,6 +86,7 @@ async function createLegacyFixture(input: {
   storedPath: string;
 }> {
   const inbound = createLegacyInbound(input.externalId);
+  inbound.text = input.text ?? inbound.text;
   const captureId = createDeterministicInboxCaptureId(inbound);
   const sourceDirectory = buildInboxCaptureDirectory(inbound, captureId);
   const envelopePath = buildInboxEnvelopePath(inbound, captureId);
@@ -231,6 +235,33 @@ test("inbox envelope migration appends v2 and deletes v1 metadata atomically", a
   assert.equal(rerun.hasWork, false);
   assert.equal(rerun.mutated, false);
   assert.equal((await readJsonlRecords({ vaultRoot, relativePath: LEDGER_PATH })).length, 2);
+});
+
+test("inbox envelope migration preserves text beyond the legacy projection cap", async () => {
+  const vaultRoot = await makeTempDirectory("murph-inbox-envelope-migration-long-text");
+  await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
+  const fullText = "a".repeat(LEGACY_INBOX_CAPTURE_TEXT_MAX_LENGTH + 512);
+  const fixture = await createLegacyFixture({
+    externalId: "msg-envelope-migration-long-text",
+    text: fullText,
+    vaultRoot,
+  });
+
+  const before = await readJsonlRecords({ vaultRoot, relativePath: LEDGER_PATH });
+  assert.equal(before[0]?.text, fullText.slice(0, LEGACY_INBOX_CAPTURE_TEXT_MAX_LENGTH));
+
+  const applied = await runInboxEnvelopeMigration({ apply: true, vaultRoot });
+  assert.equal(applied.mutated, true);
+  const after = await readJsonlRecords({ vaultRoot, relativePath: LEDGER_PATH });
+  assert.equal(after[1]?.text, fullText);
+
+  const runtime = await openInboxRuntime({ vaultRoot });
+  try {
+    await rebuildRuntimeFromVault({ enqueueParserJobs: false, vaultRoot, runtime });
+    assert.equal(runtime.getCapture(fixture.captureId)?.text, fullText);
+  } finally {
+    runtime.close();
+  }
 });
 
 test("inbox envelope migration bounds each destructive apply pass", async () => {

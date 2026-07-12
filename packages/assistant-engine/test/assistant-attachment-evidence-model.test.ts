@@ -505,6 +505,18 @@ describe('assistant input attachment evidence model materialization', () => {
       'derived/inbox/capture-1/attachments/att-1/attempts/0001'
     await writeVaultFile(
       vaultRoot,
+      `${attemptRoot}/manifest.json`,
+      Buffer.from(JSON.stringify({
+        schema: 'murph.parser-manifest.v1',
+        paths: {
+          plainTextPath: `${attemptRoot}/missing.txt`,
+          markdownPath: `${attemptRoot}/missing.md`,
+          tablesPath: null,
+        },
+      })),
+    )
+    await writeVaultFile(
+      vaultRoot,
       `${attemptRoot}/result.json`,
       Buffer.from(JSON.stringify(createParserResult())),
     )

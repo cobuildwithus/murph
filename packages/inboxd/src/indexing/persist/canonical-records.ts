@@ -1,6 +1,6 @@
 import {
   assertContract,
-  INBOX_CAPTURE_TEXT_MAX_LENGTH,
+  LEGACY_INBOX_CAPTURE_TEXT_MAX_LENGTH,
   inboxCaptureRecordSchema,
   type InboxCaptureRecord as CanonicalInboxCaptureRecord,
 } from "@murphai/contracts";
@@ -30,6 +30,7 @@ export function buildInboxCaptureRecord(input: {
   return assertContract<CanonicalInboxCaptureRecord>(inboxCaptureRecordSchema, {
     schemaVersion: "murph.inbox-capture.v2",
     ...buildInboxCaptureRecordFields(input),
+    text: input.inbound.text,
     rawRefs: buildInboxCaptureRawRefs(input.stored),
   }, "inbox capture record");
 }
@@ -44,24 +45,10 @@ export function buildLegacyInboxCaptureRecord(input: {
   return assertContract<CanonicalInboxCaptureRecord>(inboxCaptureRecordSchema, {
     schemaVersion: "murph.inbox-capture.v1",
     ...buildInboxCaptureRecordFields(input),
+    text: toLegacyInboxCaptureRecordText(input.inbound.text),
     envelopePath: input.envelopePath,
     rawRefs: [input.envelopePath, ...buildInboxCaptureRawRefs(input.stored)],
   }, "legacy inbox capture record");
-}
-
-export function migrateLegacyInboxCaptureRecord(
-  record: CanonicalInboxCaptureRecord,
-): CanonicalInboxCaptureRecord {
-  if (record.schemaVersion !== "murph.inbox-capture.v1") {
-    throw new TypeError("Only legacy inbox capture records can be migrated.");
-  }
-
-  const { envelopePath, rawRefs, ...fields } = record;
-  return assertContract<CanonicalInboxCaptureRecord>(inboxCaptureRecordSchema, {
-    ...fields,
-    schemaVersion: "murph.inbox-capture.v2",
-    rawRefs: rawRefs.filter((relativePath) => relativePath !== envelopePath),
-  }, "migrated inbox capture record");
 }
 
 function buildInboxCaptureRecordFields(input: {
@@ -91,7 +78,6 @@ function buildInboxCaptureRecordFields(input: {
     occurredAt: input.inbound.occurredAt,
     recordedAt: input.stored.storedAt,
     receivedAt: input.inbound.receivedAt ?? null,
-    text: toInboxCaptureRecordText(input.inbound.text),
     raw: input.inbound.raw,
     sourceDirectory: input.stored.sourceDirectory,
     attachments: normalizeStoredAttachments(
@@ -113,13 +99,13 @@ function buildInboxCaptureRecordFields(input: {
   };
 }
 
-function toInboxCaptureRecordText(text: string | null | undefined): string | null {
+function toLegacyInboxCaptureRecordText(text: string | null | undefined): string | null {
   if (text === null || text === undefined) {
     return null;
   }
 
-  return text.length > INBOX_CAPTURE_TEXT_MAX_LENGTH
-    ? text.slice(0, INBOX_CAPTURE_TEXT_MAX_LENGTH)
+  return text.length > LEGACY_INBOX_CAPTURE_TEXT_MAX_LENGTH
+    ? text.slice(0, LEGACY_INBOX_CAPTURE_TEXT_MAX_LENGTH)
     : text;
 }
 

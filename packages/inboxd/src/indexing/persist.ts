@@ -839,11 +839,9 @@ async function readStoredCaptureSnapshot(input: {
   const absolutePath = await resolveVaultPath(input.vaultRoot, input.relativePath);
 
   try {
-    return inboxCaptureRecordToStoredCaptureSnapshot(
-      normalizeLegacyInboxCaptureRecord(
-        JSON.parse(await readFile(absolutePath, "utf8")),
-        input.relativePath,
-      ),
+    return normalizeLegacyInboxCaptureSnapshot(
+      JSON.parse(await readFile(absolutePath, "utf8")),
+      input.relativePath,
     );
   } catch (error) {
     if (isMissingFileError(error)) {
@@ -872,10 +870,41 @@ export async function readLegacyInboxCaptureRecord(input: {
   }
 }
 
+export async function readLegacyInboxCaptureSnapshot(input: {
+  vaultRoot: string;
+  relativePath: string;
+}): Promise<StoredCaptureSnapshot | null> {
+  const absolutePath = await resolveVaultPath(input.vaultRoot, input.relativePath);
+  try {
+    return normalizeLegacyInboxCaptureSnapshot(
+      JSON.parse(await readFile(absolutePath, "utf8")),
+      input.relativePath,
+    );
+  } catch (error) {
+    if (isMissingFileError(error)) {
+      return null;
+    }
+    throw error;
+  }
+}
+
 function normalizeLegacyInboxCaptureRecord(
   value: unknown,
   relativePath: string,
 ): CanonicalInboxCaptureRecord {
+  const snapshot = normalizeLegacyInboxCaptureSnapshot(value, relativePath);
+  return buildLegacyInboxCaptureRecord({
+    envelopePath: buildInboxEnvelopePath(snapshot.input, snapshot.captureId),
+    eventId: snapshot.eventId,
+    inbound: snapshot.input,
+    stored: snapshot.stored,
+  });
+}
+
+function normalizeLegacyInboxCaptureSnapshot(
+  value: unknown,
+  relativePath: string,
+): StoredCaptureSnapshot {
   const context = `stored inbox envelope at ${relativePath}`;
   const envelope = expectRecord(value, context);
 
@@ -945,10 +974,10 @@ function normalizeLegacyInboxCaptureRecord(
     };
   });
 
-  return buildLegacyInboxCaptureRecord({
-    envelopePath,
+  return {
+    captureId,
     eventId,
-    inbound,
+    input: inbound,
     stored: {
       captureId,
       eventId,
@@ -956,7 +985,7 @@ function normalizeLegacyInboxCaptureRecord(
       sourceDirectory,
       attachments,
     },
-  });
+  };
 }
 
 async function readJsonlRecordsIfPresent(input: {
