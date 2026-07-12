@@ -544,6 +544,8 @@ describe("hosted execution coverage gaps", () => {
       await import("@murphai/hosted-execution/assistant-usage") as Record<string, unknown>;
     const browserVaultModule =
       await import("@murphai/hosted-execution/browser-vault") as Record<string, unknown>;
+    const clinicalRecordsModule =
+      await import("@murphai/hosted-execution/clinical-records") as Record<string, unknown>;
     const legacyDashboardReplicaModule =
       await import("@murphai/hosted-execution/legacy-dashboard-replica");
     const legacyDashboardReplicaCompatibilityModule =
@@ -567,6 +569,8 @@ describe("hosted execution coverage gaps", () => {
     expect("parseHostedWakeEmailMessageReceivedPayload" in rootModule).toBe(false);
     expect("HOSTED_ASSISTANT_CAPABILITY_IDS" in rootModule).toBe(false);
     expect("HOSTED_ASSISTANT_CAPABILITY_IDS" in assistantCapabilitiesModule).toBe(false);
+    expect("parseHostedClinicalRecordsRunDescriptor" in rootModule).toBe(false);
+    expect(clinicalRecordsModule.parseHostedClinicalRecordsRunDescriptor).toBeTypeOf("function");
     expect(assistantCapabilitiesModule.HOSTED_ELEVENLABS_ENV_NAMES).toEqual([
       "ELEVENLABS_API_KEY",
       "MURPH_ELEVENLABS_MODEL_ID",
