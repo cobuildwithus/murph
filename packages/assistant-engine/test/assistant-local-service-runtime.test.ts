@@ -1819,6 +1819,114 @@ test('sendAssistantMessageLocal live-steers same-conversation input without prov
   assert.equal(steeredResult.response, 'final after late input')
 })
 
+test('sendAssistantMessageLocal admits a live-steered sender before an immediate group leave tool call', async () => {
+  const session = createAssistantSession({
+    binding: {
+      actorId: null,
+      channel: 'telegram',
+      conversationKey: 'channel:telegram|identity:identity-1|thread:thread-1',
+      delivery: {
+        kind: 'thread',
+        target: 'thread-1',
+      },
+      identityId: 'identity-1',
+      threadId: 'thread-1',
+      threadIsDirect: false,
+    },
+  })
+  const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
+    session,
+  })
+  const providerStarted = createDeferred<void>()
+  const invokeLeaveTool = createDeferred<void>()
+  const liveSteeredPrompts: string[] = []
+  const groupRequest = vi.fn(async () => ({
+    action: 'leave_current' as const,
+    result: { status: 'already_left' as const },
+  }))
+  const executionContext = {
+    hosted: {
+      groupTool: { request: groupRequest },
+      memberId: 'member-hosted',
+      userEnvKeys: [],
+    },
+  }
+
+  mocks.executeCodexTurnWithRecovery.mockImplementationOnce(async (providerInput) => {
+    const releaseLiveTurn = providerInput.activeTurnSteering?.registerLiveProviderTurn({
+      interrupt: async () => undefined,
+      codexThreadId: 'provider-thread-group-leave',
+      providerTurnId: 'provider-turn-group-leave',
+      sessionId: session.sessionId,
+      steer: async (input) => {
+        liveSteeredPrompts.push(input.prompt)
+      },
+      turnId: 'turn-1',
+    })
+    providerStarted.resolve()
+    await invokeLeaveTool.promise
+    await providerInput.hostedToolContext?.groupTool?.request(
+      { action: 'leave_current' },
+      { deliveryContextOrdinal: 1 },
+    )
+    releaseLiveTurn?.()
+    return {
+      kind: 'succeeded',
+      providerTurn: {
+        onboardingGuidanceInjected: true,
+        codexContinuation: {
+          kind: 'explicit-structured-history',
+        },
+        codexThreadId: 'provider-thread-group-leave',
+        response: 'You have left the group.',
+        session,
+      },
+    }
+  })
+
+  const initialResultPromise = sendAssistantMessageLocal({
+    executionContext,
+    hostedDeliveryIdempotency: {
+      assistantTurnOrdinal: 'assistant-reply:1',
+      conversationId: 'conversation-group',
+      inboundMailboxItemIds: ['mailbox-alice'],
+      recipientKey: 'recipient-group',
+    },
+    prompt: 'Alice starts the turn.',
+    vault: '/vaults/test',
+  })
+  await providerStarted.promise
+
+  const steeredResultPromise = sendAssistantMessageLocal({
+    conversation: {
+      channel: 'telegram',
+      identityId: 'identity-1',
+      threadId: 'thread-1',
+    },
+    executionContext,
+    expectedActiveTurnId: 'turn-1',
+    hostedDeliveryIdempotency: {
+      assistantTurnOrdinal: 'assistant-reply:2',
+      conversationId: 'conversation-group',
+      inboundMailboxItemIds: ['mailbox-bob'],
+      recipientKey: 'recipient-group',
+    },
+    prompt: 'Leave this group.',
+    vault: '/vaults/test',
+  })
+  await vi.waitFor(() => {
+    expect(liveSteeredPrompts).toEqual(['Leave this group.'])
+  })
+  invokeLeaveTool.resolve()
+
+  await Promise.all([initialResultPromise, steeredResultPromise])
+
+  expect(groupRequest).toHaveBeenCalledWith(
+    { action: 'leave_current' },
+    { currentHostedMailboxItemIds: ['mailbox-bob'] },
+  )
+})
+
 test('sendAssistantMessageLocal finalizes one provider request when no live input arrives', async () => {
   const session = createAssistantSession({
     resumeState: {

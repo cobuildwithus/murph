@@ -87,7 +87,7 @@ export function createAssistantHostedToolContext(input: {
   getDeliveryContext?: () => AssistantHostedToolDeliveryContext
   getGroupToolMailboxItemIdsForDeliveryContextOrdinal?: (
     deliveryContextOrdinal: number,
-  ) => readonly string[] | null
+  ) => Promise<readonly string[] | null> | readonly string[] | null
   getPhoneCallAcceptedInputIds?: () => readonly string[]
   messageInput: AssistantMessageInput
   phoneCalls?: AssistantPhoneCallPort | null
@@ -107,7 +107,7 @@ export function createAssistantHostedToolContext(input: {
         async request(request, requestContext) {
           const deliveryContextOrdinal = requestContext?.deliveryContextOrdinal
           const currentHostedMailboxItemIds = typeof deliveryContextOrdinal === 'number'
-            ? input.getGroupToolMailboxItemIdsForDeliveryContextOrdinal?.(
+            ? await input.getGroupToolMailboxItemIdsForDeliveryContextOrdinal?.(
                 deliveryContextOrdinal,
               ) ?? []
             : readDeliveryContext().messageInput.hostedDeliveryIdempotency

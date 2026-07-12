@@ -8,7 +8,10 @@ import {
   buildHostedVaultShareProjectionScopeKey,
   buildHostedVaultShareRevokeDedupeKey,
   HOSTED_VAULT_SHARE_REVOKE_PAYLOAD_SCHEMA,
+  hostedVaultShareProjectionKindToScope,
+  isHostedVaultShareFixedProjectionKind,
   parseHostedVaultShareProjectionScope,
+  parseHostedVaultShareProjectionScopeKey,
   type HostedVaultShareProjectionScope,
 } from "@murphai/hosted-execution/vault-share";
 
@@ -238,12 +241,7 @@ async function revokeHostedVaultShareRowsTx(input: {
   }
 
   const rows = await input.tx.$queryRaw<Array<{
-    destinationMemberId: string;
-    grantorMemberId: string;
     id: string;
-    projectionKind: string;
-    projectionScopeJson: unknown;
-    projectionScopeKey: string;
     revokedAt: Date;
   }>>`
     UPDATE hosted_vault_share
@@ -254,18 +252,30 @@ async function revokeHostedVaultShareRowsTx(input: {
     WHERE id IN (${Prisma.join(input.shares.map((share) => share.id))})
       AND status = 'granted'
     RETURNING
-      destination_member_id AS "destinationMemberId",
-      grantor_member_id AS "grantorMemberId",
       id,
-      projection_kind AS "projectionKind",
-      projection_scope_json AS "projectionScopeJson",
-      projection_scope_key AS "projectionScopeKey",
       revoked_at AS "revokedAt"
   `;
-  const revokedShares = normalizeRevokedHostedVaultShareRows(rows);
-  if (revokedShares.length === 0) {
-    return { cleanupSignals: [], revokedCount: 0 };
+  if (rows.length !== input.shares.length) {
+    throw hostedOnboardingError({
+      code: "HOSTED_VAULT_SHARE_REVOKE_INCOMPLETE",
+      httpStatus: 409,
+      message: "The active vault shares changed before revocation completed.",
+      retryable: true,
+    });
   }
+  const sharesById = new Map(input.shares.map((share) => [share.id, share]));
+  const revokedShares = rows.map((row): RevokedHostedVaultShare => {
+    const share = sharesById.get(row.id);
+    if (!share) {
+      throw hostedOnboardingError({
+        code: "HOSTED_VAULT_SHARE_REVOKE_INTEGRITY_INVALID",
+        httpStatus: 500,
+        message: "Vault-share revocation returned an unexpected row.",
+        retryable: false,
+      });
+    }
+    return { ...share, revokedAt: row.revokedAt };
+  });
 
   const cleanupSignals: HostedVaultShareCleanupSignal[] = [];
   for (const share of revokedShares) {
@@ -311,49 +321,61 @@ function normalizeRevocableHostedVaultShareRows(rows: readonly {
   projectionScopeJson: unknown;
   projectionScopeKey: string;
 }[]): RevocableHostedVaultShare[] {
-  return rows.flatMap((row) => {
-    const projectionScope = parseHostedVaultShareRowProjectionScope(row);
-    if (!projectionScope) {
-      return [];
-    }
+  return rows.map((row) => {
+    const projectionScope = resolveRevocableHostedVaultShareProjectionScope(row);
     const projectionScopeKey = buildHostedVaultShareProjectionScopeKey(projectionScope);
 
-    return [{
+    return {
       destinationMemberId: row.destinationMemberId,
       grantorMemberId: row.grantorMemberId,
       id: row.id,
       projectionKind: projectionScope.projectionKind,
       projectionScope,
       projectionScopeKey,
-    }];
+    };
   });
 }
 
-function normalizeRevokedHostedVaultShareRows(rows: readonly {
-  destinationMemberId: string;
-  grantorMemberId: string;
+function resolveRevocableHostedVaultShareProjectionScope(row: {
   id: string;
   projectionKind: string;
   projectionScopeJson: unknown;
   projectionScopeKey: string;
-  revokedAt: Date;
-}[]): RevokedHostedVaultShare[] {
-  return rows.flatMap((row) => {
-    const projectionScope = parseHostedVaultShareRowProjectionScope(row);
-    if (!projectionScope) {
-      return [];
+}): HostedVaultShareProjectionScope {
+  try {
+    const scope = parseHostedVaultShareProjectionScope(
+      row.projectionScopeJson,
+      "Hosted vault-share row projection scope",
+    );
+    if (scope.projectionKind === row.projectionKind) {
+      return scope;
     }
-    const projectionScopeKey = buildHostedVaultShareProjectionScopeKey(projectionScope);
+  } catch {
+    // Recover from another authoritative scope field below.
+  }
 
-    return [{
-      destinationMemberId: row.destinationMemberId,
-      grantorMemberId: row.grantorMemberId,
-      id: row.id,
-      projectionKind: projectionScope.projectionKind,
-      projectionScope,
-      projectionScopeKey,
-      revokedAt: row.revokedAt,
-    }];
+  try {
+    const scope = parseHostedVaultShareProjectionScopeKey(
+      row.projectionScopeKey,
+      "Hosted vault-share row projection scope key",
+    );
+    if (scope.projectionKind === row.projectionKind) {
+      return scope;
+    }
+  } catch {
+    // Fixed projection kinds remain recoverable from the kind alone.
+  }
+
+  if (isHostedVaultShareFixedProjectionKind(row.projectionKind)) {
+    return hostedVaultShareProjectionKindToScope(row.projectionKind);
+  }
+
+  throw hostedOnboardingError({
+    code: "HOSTED_VAULT_SHARE_PROJECTION_INTEGRITY_INVALID",
+    details: { shareId: row.id },
+    httpStatus: 500,
+    message: "An active vault share has invalid projection metadata.",
+    retryable: false,
   });
 }
 

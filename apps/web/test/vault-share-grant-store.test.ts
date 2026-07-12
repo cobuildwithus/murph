@@ -21,6 +21,8 @@ import {
 
 const SLEEP_SCOPE = hostedVaultShareProjectionKindToScope("sleep-times.v0");
 const SLEEP_SCOPE_KEY = buildHostedVaultShareProjectionScopeKey(SLEEP_SCOPE);
+const GROUP_EMAIL_SCOPE = hostedVaultShareProjectionKindToScope("group-email.v0");
+const GROUP_EMAIL_SCOPE_KEY = buildHostedVaultShareProjectionScopeKey(GROUP_EMAIL_SCOPE);
 
 function buildTx(): Prisma.TransactionClient & {
   $queryRaw: ReturnType<typeof vi.fn>;
@@ -110,7 +112,7 @@ describe("revokeHostedVaultSharesTx", () => {
     });
   });
 
-  it("does not append cleanup when a concurrent transaction already revoked the row", async () => {
+  it("fails closed when not every selected active grant is revoked", async () => {
     const tx = buildTx();
     tx.$queryRaw.mockResolvedValue([]);
 
@@ -120,9 +122,72 @@ describe("revokeHostedVaultSharesTx", () => {
       now: new Date("2026-07-01T00:00:01.000Z"),
       projectionScopes: [SLEEP_SCOPE],
       tx,
-    })).resolves.toBe(0);
+    })).rejects.toMatchObject({
+      code: "HOSTED_VAULT_SHARE_REVOKE_INCOMPLETE",
+      retryable: true,
+    });
 
     expect(tx.$queryRaw).toHaveBeenCalledTimes(1);
+    expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+  });
+
+  it("canonicalizes a recoverable granted row before revocation cleanup", async () => {
+    const tx = buildTx();
+    tx.hostedVaultShare.findMany.mockResolvedValue([{
+      destinationMemberId: "member_referee",
+      grantorMemberId: "member_grantor",
+      id: "share_group_email",
+      projectionKind: "group-email.v0",
+      projectionScopeJson: SLEEP_SCOPE,
+      projectionScopeKey: GROUP_EMAIL_SCOPE_KEY,
+    }]);
+    tx.$queryRaw.mockResolvedValue([{
+      id: "share_group_email",
+      revokedAt: new Date("2026-07-01T00:00:00.000Z"),
+    }]);
+
+    await expect(revokeHostedVaultSharesTx({
+      destinationMemberId: "member_referee",
+      grantorMemberId: "member_grantor",
+      now: new Date("2026-07-01T00:00:00.000Z"),
+      tx,
+    })).resolves.toBe(1);
+
+    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledWith({
+      envelope: expect.objectContaining({
+        kind: "vault-share.revoke",
+        revoke: expect.objectContaining({
+          projectionKind: "group-email.v0",
+          projectionScope: GROUP_EMAIL_SCOPE,
+          shareId: "share_group_email",
+        }),
+      }),
+      tx,
+    });
+  });
+
+  it("fails closed before revocation when a granted row cannot be canonicalized", async () => {
+    const tx = buildTx();
+    tx.hostedVaultShare.findMany.mockResolvedValue([{
+      destinationMemberId: "member_referee",
+      grantorMemberId: "member_grantor",
+      id: "share_unknown",
+      projectionKind: "unknown.v0",
+      projectionScopeJson: { projectionKind: "unknown.v0" },
+      projectionScopeKey: "unknown.v0",
+    }]);
+
+    await expect(revokeHostedVaultSharesTx({
+      destinationMemberId: "member_referee",
+      grantorMemberId: "member_grantor",
+      now: new Date("2026-07-01T00:00:00.000Z"),
+      tx,
+    })).rejects.toMatchObject({
+      code: "HOSTED_VAULT_SHARE_PROJECTION_INTEGRITY_INVALID",
+      retryable: false,
+    });
+
+    expect(tx.$queryRaw).not.toHaveBeenCalled();
     expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
   });
 

@@ -564,6 +564,9 @@ export async function sendAssistantMessageLocal(
           sharedPlan,
         })
         const replyDeliveryContexts: AssistantReplyDeliveryContext[] = []
+        let admitLiveSteeredDeliveryContextThrough = async (
+          _deliveryContextOrdinal: number,
+        ): Promise<void> => undefined
         const vaultFileSendTargetFingerprint =
           resolveAssistantVaultFileSendTargetFingerprint(currentDeliveryFields)
         // Captured once so the narrowing survives into the sendVaultFile
@@ -588,12 +591,17 @@ export async function sendAssistantMessageLocal(
                 messageInput: currentInput,
                 session: currentSession,
               }),
-              getGroupToolMailboxItemIdsForDeliveryContextOrdinal: (
+              getGroupToolMailboxItemIdsForDeliveryContextOrdinal: async (
                 deliveryContextOrdinal,
-              ) => resolveAssistantGroupToolMailboxItemIdsForDeliveryContextOrdinal({
-                contexts: replyDeliveryContexts,
-                deliveryContextOrdinal,
-              }),
+              ) => {
+                await admitLiveSteeredDeliveryContextThrough(
+                  deliveryContextOrdinal,
+                )
+                return resolveAssistantGroupToolMailboxItemIdsForDeliveryContextOrdinal({
+                  contexts: replyDeliveryContexts,
+                  deliveryContextOrdinal,
+                })
+              },
               getPhoneCallAcceptedInputIds: () =>
                 resolveAssistantPhoneCallAcceptedInputIds({
                   acceptedInputItems: acceptedInputItemsForProviderRequest,
@@ -895,6 +903,15 @@ export async function sendAssistantMessageLocal(
             acceptedInputIdsForProviderRequest = providerRequestAcceptedInputIds
             acceptedInputItemsForProviderRequest = providerRequestAcceptedInputItems
           }
+        }
+        admitLiveSteeredDeliveryContextThrough = async (
+          deliveryContextOrdinal,
+        ) => {
+          await drainLiveSteeredActiveTurnInputs({
+            continuation: providerRequestContinuation,
+            sessionId: currentSession.sessionId,
+            throughDeliveryContextOrdinal: deliveryContextOrdinal,
+          })
         }
         const providerOutcome = await executeCodexTurnWithRecovery({
           acceptedInputItems: providerRequestAcceptedInputItems,

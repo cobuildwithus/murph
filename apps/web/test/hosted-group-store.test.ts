@@ -1047,6 +1047,22 @@ describe("leaveHostedGroupMemberTx", () => {
 
     expect(mocks.revokeHostedVaultSharesWithCleanupTx).toHaveBeenCalled();
   });
+
+  it("does not write the leave fence when active-share revocation fails closed", async () => {
+    const tx = buildTx({ existingMembershipId: "membership_existing" });
+    mocks.revokeHostedVaultSharesWithCleanupTx.mockRejectedValueOnce(
+      new Error("active share projection metadata is invalid"),
+    );
+
+    await expect(leaveHostedGroupMemberTx({
+      clock: () => new Date("2026-07-10T00:00:00.000Z"),
+      groupRuntimeMemberId: "member_group_runtime",
+      memberId: "member_grantor",
+      tx,
+    })).rejects.toThrow("active share projection metadata is invalid");
+
+    expect(tx.hostedGroupMember.update).not.toHaveBeenCalled();
+  });
 });
 
 describe("createHostedGroupJoinLinkForOwnedThreadContainerTx", () => {
