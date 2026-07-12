@@ -814,9 +814,12 @@ class CodexAppServerProcess {
     return this.endReason ?? 'previous-process-unhealthy'
   }
 
-  noteTurnAbort(): boolean {
+  get recordedEndReason(): CodexAppServerColdStartReason | null {
+    return this.endReason
+  }
+
+  noteTurnAbort(): void {
     this.endReason ??= 'previous-turn-abort'
-    return this.endReason === 'previous-turn-abort'
   }
 
   get hasInFlightTurn(): boolean {
@@ -2307,7 +2310,6 @@ async function runCodexAppServerTurnOnProcess(
   let settled = false
   let normalShutdown = false
   let abortRequested = false
-  let abortOwnsTermination = false
   let lifecycleStage = 'spawn_start'
   let terminationSignalSent: NodeJS.Signals | null = null
   let codexThreadId = normalizeNullableString(input.resumeSessionId) ?? null
@@ -2403,6 +2405,30 @@ async function runCodexAppServerTurnOnProcess(
     terminationSignalSent,
   })
 
+  const buildRecordedTerminationError = (
+    fallback: string | null,
+  ): VaultCliError | null => {
+    const recordedEndReason = codexProcess.recordedEndReason
+    if (
+      recordedEndReason !== 'previous-process-exit' &&
+      recordedEndReason !== 'previous-turn-abort'
+    ) {
+      return null
+    }
+
+    return buildCodexProcessExitError({
+      abortOwnsTermination: recordedEndReason === 'previous-turn-abort',
+      code: codexProcess.child.exitCode,
+      diagnostics: buildProcessExitDiagnostics(),
+      errorInfo: lastEventErrorInfo,
+      fallback,
+      providerActionCount,
+      codexThreadId,
+      signal: codexProcess.child.signalCode ?? null,
+      stderr,
+    })
+  }
+
   // Subagent usage drafts are derived lazily from the buffered per-thread
   // samples so both the success result and the failure context can include
   // whatever child usage was observed before the turn settled.
@@ -2487,20 +2513,12 @@ async function runCodexAppServerTurnOnProcess(
     interruptCleanupTimer = setTimeout(() => {
       interruptCleanupTimer = null
       lifecycleStage = 'interrupt_timeout_cleanup'
-      if (abortRequested && !abortOwnsTermination) {
-        rejectOnce(
-          buildCodexProcessExitError({
-            abortOwnsTermination,
-            code: codexProcess.child.exitCode,
-            diagnostics: buildProcessExitDiagnostics(),
-            errorInfo: lastEventErrorInfo,
-            fallback: lastEventError,
-            providerActionCount,
-            codexThreadId,
-            signal: codexProcess.child.signalCode ?? null,
-            stderr,
-          }),
-        )
+      const recordedTerminationError = buildRecordedTerminationError(lastEventError)
+      if (
+        codexProcess.recordedEndReason === 'previous-process-exit' &&
+        recordedTerminationError
+      ) {
+        rejectOnce(recordedTerminationError)
         return
       }
       normalShutdown = true
@@ -2603,18 +2621,20 @@ async function runCodexAppServerTurnOnProcess(
       return null
     }
 
+    const fallback = buildCodexStdinFailureFallback({
+      error,
+      lastEventError,
+      stderr,
+    })
     const failure =
       stdinFailure ??
+      buildRecordedTerminationError(fallback) ??
       buildCodexProcessExitError({
-        abortOwnsTermination,
+        abortOwnsTermination: false,
         code: codexProcess.child.exitCode,
         diagnostics: buildProcessExitDiagnostics(),
         errorInfo: lastEventErrorInfo,
-        fallback: buildCodexStdinFailureFallback({
-          error,
-          lastEventError,
-          stderr,
-        }),
+        fallback,
         providerActionCount,
         codexThreadId,
         signal: codexProcess.child.signalCode ?? null,
@@ -2643,7 +2663,7 @@ async function runCodexAppServerTurnOnProcess(
     abortSignal: input.abortSignal,
     onAbort: () => {
       abortRequested = true
-      abortOwnsTermination = codexProcess.noteTurnAbort()
+      codexProcess.noteTurnAbort()
       if (codexThreadId && turnId) {
         codexProcess.sendUntrackedRequest(
           'turn/interrupt',
@@ -3827,36 +3847,39 @@ async function runCodexAppServerTurnOnProcess(
       }
 
       rejectOnce(
-        buildCodexProcessExitError({
-          abortOwnsTermination,
-          code,
-          diagnostics: buildProcessExitDiagnostics(),
-          errorInfo: lastEventErrorInfo,
-          fallback: lastEventError,
-          providerActionCount,
-          codexThreadId,
-          signal,
-          stderr,
-        }),
+        buildRecordedTerminationError(lastEventError) ??
+          buildCodexProcessExitError({
+            abortOwnsTermination: false,
+            code,
+            diagnostics: buildProcessExitDiagnostics(),
+            errorInfo: lastEventErrorInfo,
+            fallback: lastEventError,
+            providerActionCount,
+            codexThreadId,
+            signal,
+            stderr,
+          }),
       )
     },
     onError(error) {
       rejectOnce(
-        normalizeCodexStartupFailure({
-          codexCommand: input.codexCommand,
-          error,
-        }),
+        buildRecordedTerminationError(error.message) ??
+          normalizeCodexStartupFailure({
+            codexCommand: input.codexCommand,
+            error,
+          }),
       )
     },
     onFramingError() {
       rejectOnce(
-        new VaultCliError(
-          'ASSISTANT_CODEX_APP_SERVER_FRAMING_ERROR',
-          'Codex app-server emitted malformed JSON on stdout.',
-          {
-            retryable: false,
-          },
-        ),
+        buildRecordedTerminationError(lastEventError) ??
+          new VaultCliError(
+            'ASSISTANT_CODEX_APP_SERVER_FRAMING_ERROR',
+            'Codex app-server emitted malformed JSON on stdout.',
+            {
+              retryable: false,
+            },
+          ),
       )
     },
     onParsedMessage: handleParsedMessage,

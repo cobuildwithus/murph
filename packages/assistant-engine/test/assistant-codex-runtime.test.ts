@@ -7470,6 +7470,8 @@ describe('assistant codex runtime', () => {
   it.each([
     { settlement: 'stdin EPIPE' },
     { settlement: 'interrupt cleanup timeout' },
+    { settlement: 'truncated stdout' },
+    { settlement: 'child error' },
   ])('keeps process-exit precedence through $settlement when abort follows exit', async ({ settlement }) => {
     const codexHome = await createTempDir('assistant-codex-exit-abort-precedence-home-')
     const workingDirectory = await createTempDir('assistant-codex-exit-abort-precedence-work-')
@@ -7561,8 +7563,12 @@ describe('assistant codex runtime', () => {
           'error',
           createErrnoException('EPIPE', 'write EPIPE'),
         )
-      } else {
+      } else if (settlement === 'interrupt cleanup timeout') {
         await vi.advanceTimersByTimeAsync(15_000)
+      } else if (settlement === 'truncated stdout') {
+        exitedChild.stdout.write('{')
+      } else {
+        exitedChild.emit('error', new Error('child error after exit'))
       }
       exitedChild.emit('close', 1, null)
 
@@ -12047,7 +12053,11 @@ describe('assistant codex runtime', () => {
     expect(process.kill).toHaveBeenCalledWith(-spawnedChild.pid, 'SIGKILL')
   })
 
-  it('treats abort-race stdin EPIPE as interrupted, sends turn/interrupt, and signals the child group', async () => {
+  it.each([
+    { settlement: 'stdin EPIPE' },
+    { settlement: 'truncated stdout' },
+    { settlement: 'child error' },
+  ])('treats abort-race $settlement as interrupted, sends turn/interrupt, and signals the child group', async ({ settlement }) => {
     const workingDirectory = await createTempDir('assistant-codex-abort-')
     const controller = new AbortController()
     const spawnedChildren: MockChildProcess[] = []
@@ -12063,6 +12073,11 @@ describe('assistant codex runtime', () => {
           pid === -spawnedChild.pid &&
           signal === 'SIGINT'
         ) {
+          if (settlement === 'truncated stdout') {
+            spawnedChild.stdout.write('{')
+          } else if (settlement === 'child error') {
+            spawnedChild.emit('error', new Error('child error after abort'))
+          }
           queueMicrotask(() => {
             spawnedChild.emit('exit', null, signal)
             spawnedChild.emit('close', null, signal)
@@ -12070,7 +12085,7 @@ describe('assistant codex runtime', () => {
         }
         return true
       })
-      if (processNumber === 1) {
+      if (processNumber === 1 && settlement === 'stdin EPIPE') {
         spawnedChild.stdin.onWrite = (write) => {
           const message = asRecord(JSON.parse(write))
           if (message.method !== 'turn/interrupt') {
