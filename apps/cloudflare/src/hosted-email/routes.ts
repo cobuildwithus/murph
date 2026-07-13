@@ -266,6 +266,7 @@ async function resolveHostedEmailRouteUserId(input: {
 }): Promise<string | null> {
   if (
     input.aliasKey === null
+    && input.groupId === null
     && !isHostedEmailAuthenticatedSenderVerdictAccepted(input.context.authenticatedSender)
   ) {
     return null;
@@ -288,7 +289,6 @@ async function resolveHostedEmailRouteUserId(input: {
         ? { aliasKey: input.aliasKey }
         : input.groupId
           ? {
-            authenticatedSender: input.context.authenticatedSender ?? null,
             envelopeFrom: input.context.envelopeFrom ?? null,
             groupId: input.groupId,
             hasRepeatedHeaderFrom: input.context.hasRepeatedHeaderFrom === true,

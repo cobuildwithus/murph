@@ -26,6 +26,22 @@ Docker runner smoke derives a separate `.deploy/runner-smoke-bundle/` from the v
 Runner bundle assembly esbuild-bundles two boot-critical surfaces with byte budgets and assembly-time probes: the in-container `vault-cli` binary (`scripts/runner-bundle/bundle-cli.ts`) and the container entrypoint itself (`scripts/runner-bundle/bundle-entrypoint.ts`, output `dist-bundled/`, run by the image CMD). The bundled entrypoint cuts cold-boot module loading from ~960 file reads to ~27 chunk reads on lazily pulled image layers; package resolvers that derive asset paths from their own module location are pinned to the installed package copies via Dockerfile ENV (`MURPH_ASSISTANT_SKILLS_ROOT`, `MURPH_ASSISTANT_CLI_SURFACE_PREBUILT_ARTIFACT_PATH`, `MURPH_HEALTH_COMMONS_PACKAGE_ROOT`). Health Commons stays installed in the runner bundle for its generated catalog payload, while its JS is inlined and assembly probes set the same package-root pin for bundled and unbundled parity.
 Hosted assistant delivery recovery now relies on committed side-effect state inside the encrypted workspace and the web-owned hosted workspace checkpoint.
 
+## Audience-Key Rollout
+
+The first production deploy that can write assistant conversation keys with an
+`audience:` segment must use `container_rollout=immediate`. Require the normal
+managed-container smoke to report the new runner-bundle fingerprint before
+processing user turns. New code can read and retire the legacy key format, but
+an old runner cannot read audience-scoped keys and can recreate one shared
+legacy session for direct and group traffic.
+
+After the first audience-scoped key is written, the fingerprinted runner bundle
+is a hard rollback floor: do not deploy or restore an older runner. The safe
+rollback is a forward fix on that bundle or newer. Keep immediate rollout until
+the fleet has converged, then remove the compatibility reader only after every
+assistant index contains zero live conversation keys without an `audience:`
+segment.
+
 ## Shutdown Checkpoint Handoff Rollout
 
 Roll out the single-snapshot shutdown handoff in this order:

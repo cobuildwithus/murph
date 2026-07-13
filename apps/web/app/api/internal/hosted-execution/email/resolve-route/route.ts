@@ -5,6 +5,7 @@ import {
 import {
   isHostedEmailAuthenticatedSenderVerdictAccepted,
   resolveHostedEmailDirectSenderLookupAddress,
+  resolveHostedEmailInboundSenderAddress,
 } from "@murphai/runtime-state";
 
 import {
@@ -66,12 +67,7 @@ export const POST = withJsonError(async (request: Request) => {
   }
 
   if (groupId) {
-    if (!isHostedEmailAuthenticatedSenderVerdictAccepted(body.authenticatedSender)) {
-      return jsonOk({ userId: null });
-    }
-
-    const senderAddress = resolveHostedEmailDirectSenderLookupAddress({
-      authenticatedSender: body.authenticatedSender,
+    const senderAddress = resolveHostedEmailInboundSenderAddress({
       envelopeFrom: body.envelopeFrom,
       hasRepeatedHeaderFrom: body.hasRepeatedHeaderFrom,
       headerFrom: body.headerFrom,
