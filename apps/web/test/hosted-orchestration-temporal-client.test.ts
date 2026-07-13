@@ -19,7 +19,7 @@ const mocks = vi.hoisted(() => {
     ) {
       this.options = options;
     }),
-    connect: vi.fn(async () => connection),
+    lazy: vi.fn(() => connection),
     connection,
   };
 });
@@ -27,7 +27,7 @@ const mocks = vi.hoisted(() => {
 vi.mock("@temporalio/client", () => ({
   Client: mocks.clientConstructor,
   Connection: {
-    connect: mocks.connect,
+    lazy: mocks.lazy,
   },
 }));
 
@@ -35,7 +35,7 @@ describe("hosted web Temporal signal client", () => {
   beforeEach(() => {
     vi.unstubAllEnvs();
     vi.resetModules();
-    mocks.connect.mockClear();
+    mocks.lazy.mockClear();
     mocks.clientConstructor.mockClear();
   });
 
@@ -53,7 +53,7 @@ describe("hosted web Temporal signal client", () => {
     await expect(
       temporalClient.readHostedRuntimeTemporalSignalClientIfConfigured(),
     ).resolves.toBeNull();
-    expect(mocks.connect).not.toHaveBeenCalled();
+    expect(mocks.lazy).not.toHaveBeenCalled();
   });
 
   it("prefers hosted Temporal env names and enables TLS for API-key auth", async () => {
@@ -77,7 +77,7 @@ describe("hosted web Temporal signal client", () => {
 
     const client = await temporalClient.readHostedRuntimeTemporalSignalClientIfConfigured();
 
-    expect(mocks.connect).toHaveBeenCalledWith({
+    expect(mocks.lazy).toHaveBeenCalledWith({
       address: "hosted-temporal.example.test:7233",
       apiKey: "hosted-temporal-api-key",
       tls: true,
@@ -120,7 +120,7 @@ describe("hosted web Temporal signal client", () => {
 
     await temporalClient.readHostedRuntimeTemporalSignalClientIfConfigured();
 
-    expect(mocks.connect).toHaveBeenCalledWith({
+    expect(mocks.lazy).toHaveBeenCalledWith({
       address: "hosted-temporal.example.test:7233",
       tls: {
         clientCertPair: {
@@ -160,8 +160,8 @@ describe("hosted web Temporal signal client", () => {
     const cachedClient = await temporalClient.readHostedRuntimeTemporalSignalClientIfConfigured();
 
     expect(cachedClient).toBe(firstClient);
-    expect(mocks.connect).toHaveBeenCalledTimes(1);
-    expect(mocks.connect).toHaveBeenCalledWith({
+    expect(mocks.lazy).toHaveBeenCalledTimes(1);
+    expect(mocks.lazy).toHaveBeenCalledWith({
       address: "hosted-temporal.example.test:7233",
       tls: false,
     });
@@ -178,7 +178,7 @@ describe("hosted web Temporal signal client", () => {
     const secondClient = await temporalClient.createHostedRuntimeTemporalSignalClient(environment);
 
     expect(secondClient).not.toBe(firstClient);
-    expect(mocks.connect).toHaveBeenCalledTimes(2);
+    expect(mocks.lazy).toHaveBeenCalledTimes(2);
   });
 
   it("rejects API-key credentials when TLS is explicitly disabled", async () => {

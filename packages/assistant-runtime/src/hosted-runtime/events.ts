@@ -291,6 +291,12 @@ async function executeHostedSystemWake(input: {
       throw new TypeError(
         'Hosted group newsletter email-needed wakes are staged at mailbox import and must never reach system wake execution.',
       );
+    case "meal-photo.captured":
+      // Meal photos become canonical meal records at mailbox import so their
+      // staged object can be cleaned up only after the workspace checkpoint.
+      throw new TypeError(
+        "Hosted meal-photo wakes are landed at mailbox import and must never reach system wake execution.",
+      );
   }
 
   const exhaustiveWake: never = input.wake;

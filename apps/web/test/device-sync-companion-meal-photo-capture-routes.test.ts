@@ -1,0 +1,320 @@
+import { Buffer } from "node:buffer";
+
+import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+
+vi.mock("server-only", () => ({}));
+
+const mocks = vi.hoisted(() => ({
+  appendHostedMailboxEnvelopeTx: vi.fn(),
+  assertHostedLaunchRequiredConsentGranted: vi.fn(),
+  assertMealPhotoCaptureRequestHasNoBody: vi.fn(),
+  buildHostedExecutionMealPhotoCapturedWake: vi.fn(),
+  getPrisma: vi.fn(),
+  isMealPhotoCaptureScopedAuthorization: vi.fn(),
+  issueMealPhotoCaptureEnrollment: vi.fn(),
+  parseMealPhotoCaptureEnrollmentRequest: vi.fn(),
+  parseMealPhotoCaptureRevocationRequest: vi.fn(),
+  readAndValidateMealPhotoUpload: vi.fn(),
+  readHostedExecutionControlClientIfConfigured: vi.fn(),
+  requireActiveMealPhotoCaptureEnrollment: vi.fn(),
+  requireActivePrivyMemberAuthFromBearerToken: vi.fn(),
+  requireMealPhotoCaptureScopedToken: vi.fn(),
+  requirePrivyMemberAuthFromBearerToken: vi.fn(),
+  revokeMealPhotoCaptureEnrollmentForMember: vi.fn(),
+  revokeMealPhotoCaptureEnrollmentForScopedToken: vi.fn(),
+  signalHostedMailboxAppendRuntime: vi.fn(),
+  stageMealPhoto: vi.fn(),
+  transaction: vi.fn(),
+}));
+
+vi.mock("@murphai/hosted-execution", () => ({
+  buildHostedExecutionMealPhotoCapturedWake:
+    mocks.buildHostedExecutionMealPhotoCapturedWake,
+}));
+
+vi.mock("@/src/lib/device-sync/meal-photo-capture", () => ({
+  assertMealPhotoCaptureRequestHasNoBody: mocks.assertMealPhotoCaptureRequestHasNoBody,
+  isMealPhotoCaptureScopedAuthorization: mocks.isMealPhotoCaptureScopedAuthorization,
+  issueMealPhotoCaptureEnrollment: mocks.issueMealPhotoCaptureEnrollment,
+  parseMealPhotoCaptureEnrollmentRequest: mocks.parseMealPhotoCaptureEnrollmentRequest,
+  parseMealPhotoCaptureRevocationRequest: mocks.parseMealPhotoCaptureRevocationRequest,
+  readAndValidateMealPhotoUpload: mocks.readAndValidateMealPhotoUpload,
+  requireActiveMealPhotoCaptureEnrollment: mocks.requireActiveMealPhotoCaptureEnrollment,
+  requireMealPhotoCaptureScopedToken: mocks.requireMealPhotoCaptureScopedToken,
+  revokeMealPhotoCaptureEnrollmentForMember:
+    mocks.revokeMealPhotoCaptureEnrollmentForMember,
+  revokeMealPhotoCaptureEnrollmentForScopedToken:
+    mocks.revokeMealPhotoCaptureEnrollmentForScopedToken,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/request-auth", () => ({
+  requireActivePrivyMemberAuthFromBearerToken:
+    mocks.requireActivePrivyMemberAuthFromBearerToken,
+  requirePrivyMemberAuthFromBearerToken: mocks.requirePrivyMemberAuthFromBearerToken,
+}));
+
+vi.mock("@/src/lib/legal/consent", () => ({
+  assertHostedLaunchRequiredConsentGranted: mocks.assertHostedLaunchRequiredConsentGranted,
+}));
+
+vi.mock("@/src/lib/hosted-execution/control", () => ({
+  readHostedExecutionControlClientIfConfigured:
+    mocks.readHostedExecutionControlClientIfConfigured,
+}));
+
+vi.mock("@/src/lib/hosted-mailbox/store", () => ({
+  appendHostedMailboxEnvelopeTx: mocks.appendHostedMailboxEnvelopeTx,
+}));
+
+vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
+  signalHostedMailboxAppendRuntime: mocks.signalHostedMailboxAppendRuntime,
+}));
+
+vi.mock("@/src/lib/prisma", () => ({
+  getPrisma: mocks.getPrisma,
+}));
+
+type EnrollmentRoute =
+  typeof import("../app/api/device-sync/companion/meal-photo-capture/enrollment/route");
+type PhotosRoute =
+  typeof import("../app/api/device-sync/companion/meal-photo-capture/photos/route");
+
+let enrollmentRoute: EnrollmentRoute;
+let photosRoute: PhotosRoute;
+
+const MEMBER_ID = "member_1";
+const ENROLLMENT_ID = "hmp_enrollment";
+const CAPTURE_ID = "a".repeat(64);
+const JPEG = Buffer.from([0xff, 0xd8, 0xff, 0xd9]);
+const ENROLLMENT_REQUEST = {
+  appInstallationId: "f47ac10b-58cc-4372-a567-0e02b2c3d479",
+  appVersion: "1.2.3",
+  schemaVersion: 1 as const,
+};
+
+describe("meal photo companion routes", () => {
+  beforeAll(async () => {
+    enrollmentRoute = await import(
+      "../app/api/device-sync/companion/meal-photo-capture/enrollment/route"
+    );
+    photosRoute = await import(
+      "../app/api/device-sync/companion/meal-photo-capture/photos/route"
+    );
+  });
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.getPrisma.mockReturnValue({ $transaction: mocks.transaction });
+    mocks.transaction.mockImplementation(
+      async (operation: (tx: { label: string }) => unknown) => operation({ label: "tx" }),
+    );
+    mocks.requireActivePrivyMemberAuthFromBearerToken.mockResolvedValue({
+      member: { id: MEMBER_ID },
+    });
+    mocks.requirePrivyMemberAuthFromBearerToken.mockResolvedValue({
+      member: { id: MEMBER_ID },
+    });
+    mocks.assertHostedLaunchRequiredConsentGranted.mockResolvedValue(undefined);
+    mocks.parseMealPhotoCaptureEnrollmentRequest.mockReturnValue(ENROLLMENT_REQUEST);
+    mocks.parseMealPhotoCaptureRevocationRequest.mockReturnValue({
+      appInstallationId: ENROLLMENT_REQUEST.appInstallationId,
+      schemaVersion: 1,
+    });
+    mocks.issueMealPhotoCaptureEnrollment.mockResolvedValue({
+      expiresAt: new Date("2026-08-11T12:00:00.000Z"),
+      idempotencySecret: "idempotency-secret",
+      uploadToken: "scoped-upload-token",
+    });
+    mocks.revokeMealPhotoCaptureEnrollmentForMember.mockResolvedValue({ revoked: true });
+    mocks.revokeMealPhotoCaptureEnrollmentForScopedToken.mockResolvedValue({ revoked: true });
+    mocks.requireMealPhotoCaptureScopedToken.mockReturnValue("scoped-upload-token");
+    mocks.requireActiveMealPhotoCaptureEnrollment.mockResolvedValue({
+      enrollmentId: ENROLLMENT_ID,
+      memberId: MEMBER_ID,
+    });
+    mocks.readAndValidateMealPhotoUpload.mockResolvedValue({
+      bytes: JPEG,
+      captureId: CAPTURE_ID,
+      capturedAt: "2026-07-12T16:30:45.000Z",
+      height: 2,
+      sha256: "b".repeat(64),
+      width: 3,
+    });
+    mocks.stageMealPhoto.mockResolvedValue({
+      byteLength: JPEG.byteLength,
+      mealPhotoKey: "meal-photo-key",
+      sha256: "b".repeat(64),
+    });
+    mocks.readHostedExecutionControlClientIfConfigured.mockReturnValue({
+      stageMealPhoto: mocks.stageMealPhoto,
+    });
+    mocks.buildHostedExecutionMealPhotoCapturedWake.mockReturnValue({
+      kind: "meal-photo.captured",
+    });
+    mocks.appendHostedMailboxEnvelopeTx.mockResolvedValue({
+      dedupeConflict: false,
+      duplicate: false,
+      item: { id: "mailbox_1" },
+    });
+    mocks.signalHostedMailboxAppendRuntime.mockResolvedValue(undefined);
+  });
+
+  it("enrolls only after active Privy auth and launch consent", async () => {
+    const request = jsonRequest("https://app.example.test/enrollment", ENROLLMENT_REQUEST);
+    const response = await enrollmentRoute.POST(request);
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      expiresAt: "2026-08-11T12:00:00.000Z",
+      idempotencySecret: "idempotency-secret",
+      uploadToken: "scoped-upload-token",
+    });
+    expect(mocks.requireActivePrivyMemberAuthFromBearerToken).toHaveBeenCalledWith(
+      request,
+      expect.anything(),
+    );
+    expect(mocks.assertHostedLaunchRequiredConsentGranted).toHaveBeenCalledWith({
+      memberId: MEMBER_ID,
+      prisma: expect.anything(),
+    });
+    expect(mocks.issueMealPhotoCaptureEnrollment).toHaveBeenCalledWith({
+      memberId: MEMBER_ID,
+      prisma: expect.anything(),
+      request: ENROLLMENT_REQUEST,
+    });
+  });
+
+  it("lets the narrow scoped credential revoke only itself without a body", async () => {
+    mocks.isMealPhotoCaptureScopedAuthorization.mockReturnValue(true);
+    const request = new Request("https://app.example.test/enrollment", {
+      headers: { authorization: "Bearer scoped-upload-token" },
+      method: "DELETE",
+    });
+    const response = await enrollmentRoute.DELETE(request);
+
+    expect(response.status).toBe(200);
+    expect(mocks.assertMealPhotoCaptureRequestHasNoBody).toHaveBeenCalledWith(request);
+    expect(mocks.revokeMealPhotoCaptureEnrollmentForScopedToken).toHaveBeenCalledWith({
+      prisma: expect.anything(),
+      token: "scoped-upload-token",
+    });
+    expect(mocks.requirePrivyMemberAuthFromBearerToken).not.toHaveBeenCalled();
+  });
+
+  it("keeps identity-authenticated revocation available without active billing", async () => {
+    mocks.isMealPhotoCaptureScopedAuthorization.mockReturnValue(false);
+    const request = jsonRequest(
+      "https://app.example.test/enrollment",
+      { appInstallationId: ENROLLMENT_REQUEST.appInstallationId, schemaVersion: 1 },
+      "DELETE",
+    );
+    const response = await enrollmentRoute.DELETE(request);
+
+    expect(response.status).toBe(200);
+    expect(mocks.requirePrivyMemberAuthFromBearerToken).toHaveBeenCalledWith(
+      request,
+      expect.anything(),
+    );
+    expect(mocks.requireActivePrivyMemberAuthFromBearerToken).not.toHaveBeenCalled();
+    expect(mocks.revokeMealPhotoCaptureEnrollmentForMember).toHaveBeenCalledWith({
+      memberId: MEMBER_ID,
+      prisma: expect.anything(),
+      request: {
+        appInstallationId: ENROLLMENT_REQUEST.appInstallationId,
+        schemaVersion: 1,
+      },
+    });
+  });
+
+  it("stages raw bytes privately and appends only the metadata wake", async () => {
+    const request = new Request("https://app.example.test/photos", {
+      body: requestBody(JPEG),
+      method: "POST",
+    });
+    const response = await photosRoute.POST(request);
+
+    expect(response.status).toBe(202);
+    await expect(response.json()).resolves.toEqual({ accepted: true, duplicate: false });
+    expect(mocks.stageMealPhoto).toHaveBeenCalledWith({
+      bytes: JPEG,
+      captureId: CAPTURE_ID,
+      sha256: "b".repeat(64),
+      userId: MEMBER_ID,
+    });
+    expect(mocks.buildHostedExecutionMealPhotoCapturedWake).toHaveBeenCalledWith({
+      byteLength: JPEG.byteLength,
+      captureId: CAPTURE_ID,
+      capturedAt: "2026-07-12T16:30:45.000Z",
+      eventId: `meal-photo:${ENROLLMENT_ID}:${CAPTURE_ID}`,
+      mealPhotoKey: "meal-photo-key",
+      memberId: MEMBER_ID,
+      occurredAt: "2026-07-12T16:30:45.000Z",
+      sha256: "b".repeat(64),
+    });
+    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledWith({
+      envelope: { kind: "meal-photo.captured" },
+      tx: { label: "tx" },
+    });
+    expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
+      expectedUserId: MEMBER_ID,
+      mailboxItemId: "mailbox_1",
+    });
+  });
+
+  it("re-signals exact duplicates and rejects conflicting capture reuse", async () => {
+    mocks.appendHostedMailboxEnvelopeTx.mockResolvedValueOnce({
+      dedupeConflict: false,
+      duplicate: true,
+      item: { id: "mailbox_existing" },
+    });
+    const duplicateResponse = await photosRoute.POST(new Request(
+      "https://app.example.test/photos",
+      { body: requestBody(JPEG), method: "POST" },
+    ));
+    expect(duplicateResponse.status).toBe(202);
+    await expect(duplicateResponse.json()).resolves.toEqual({
+      accepted: true,
+      duplicate: true,
+    });
+    expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenLastCalledWith({
+      expectedUserId: MEMBER_ID,
+      mailboxItemId: "mailbox_existing",
+    });
+
+    mocks.appendHostedMailboxEnvelopeTx.mockResolvedValueOnce({
+      dedupeConflict: true,
+      duplicate: true,
+      item: { id: "mailbox_existing" },
+    });
+    const conflictResponse = await photosRoute.POST(new Request(
+      "https://app.example.test/photos",
+      { body: requestBody(JPEG), method: "POST" },
+    ));
+    expect(conflictResponse.status).toBe(422);
+    expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledTimes(1);
+  });
+
+  it("fails closed before mailbox append when private storage is unavailable", async () => {
+    mocks.readHostedExecutionControlClientIfConfigured.mockReturnValue(null);
+    const response = await photosRoute.POST(new Request(
+      "https://app.example.test/photos",
+      { body: requestBody(JPEG), method: "POST" },
+    ));
+
+    expect(response.status).toBe(503);
+    expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+    expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
+  });
+});
+
+function jsonRequest(url: string, body: unknown, method = "POST"): Request {
+  return new Request(url, {
+    body: JSON.stringify(body),
+    headers: { "content-type": "application/json" },
+    method,
+  });
+}
+
+function requestBody(body: Buffer): ArrayBuffer {
+  return Uint8Array.from(body).buffer;
+}

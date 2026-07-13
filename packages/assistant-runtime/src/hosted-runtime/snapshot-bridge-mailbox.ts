@@ -18,6 +18,9 @@ import {
 import {
   importHostedGroupNewsletterEmailNeededMailboxItem,
 } from "./mailbox-group-newsletter-email-needed.ts";
+import {
+  importHostedMealPhotoCapturedMailboxItem,
+} from "./meal-photo-import.ts";
 import type {
   HostedRuntimeDeviceSyncMessagingReturnTarget,
 } from "./platform.ts";
@@ -256,6 +259,29 @@ async function importHostedWorkspaceBridgeMailboxItem(input: {
   if (
     input.item.route.action === "import-group-newsletter-email-needed"
     || wake.kind === "group-newsletter.email-needed"
+  ) {
+    return {
+      reasonCode: "payload.decode_mismatch",
+      retryable: false,
+      status: "blocked",
+    };
+  }
+
+  if (
+    input.item.route.action === "import-meal-photo"
+    && wake.kind === "meal-photo.captured"
+  ) {
+    return await importHostedMealPhotoCapturedMailboxItem({
+      effectsPort: input.runtime.platform.effectsPort,
+      item: input.item,
+      vaultRoot: input.vaultRoot,
+      wake,
+    });
+  }
+
+  if (
+    input.item.route.action === "import-meal-photo"
+    || wake.kind === "meal-photo.captured"
   ) {
     return {
       reasonCode: "payload.decode_mismatch",

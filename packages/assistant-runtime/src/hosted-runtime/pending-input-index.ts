@@ -16,7 +16,7 @@ import {
   readAssistantAutomationState,
   withAssistantRuntimeWriteLock,
 } from "@murphai/assistant-engine/assistant-state";
-import { INBOX_MEDIA_RETENTION_WINDOW_MS } from "@murphai/inboxd/runtime";
+import { INBOX_MEDIA_RETENTION_WINDOW_MS } from "@murphai/inboxd/retention";
 import {
   HOSTED_DEFERRED_GROUP_CONTEXT_MAX_PER_GROUP,
   HOSTED_DEFERRED_GROUP_CONTEXT_MAX_TOTAL,

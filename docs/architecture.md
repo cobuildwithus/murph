@@ -73,9 +73,9 @@ repo/
 - `packages/importers` parses external inputs, hosts provider-adapter normalization for direct API connectors, and delegates all canonical writes to core.
 - `packages/device-syncd` owns local provider OAuth state, reconnect/disconnect control, scheduled wearable imports, and optional webhook intake while keeping provider credentials in durable local operational state under `.runtime/operations/device-sync/**` and outside the canonical vault.
 - `packages/messaging-ingress` owns stateless Telegram/Linq webhook parsing, verification, target grammar, summaries, and sparse minimization without taking on polling, hosted policy, or runtime persistence.
-- `packages/inboxd` owns source-agnostic inbox capture, raw evidence persistence, the append-only `ledger/inbox-captures` canonical capture log, inbox-local runtime cursors/source-specific checkpoints/capture indexes, and attachment-level derived-job orchestration, with its rebuildable SQLite projection under `.runtime/projections/inboxd.sqlite` and daemon/config JSON state under `.runtime/operations/inbox/**`.
+- `packages/inboxd` owns source-agnostic inbox capture, raw attachment persistence, the append-only `ledger/inbox-captures` canonical metadata log, explicit legacy-envelope migration, inbox-local runtime cursors/source-specific checkpoints/capture indexes, and attachment-level derived-job orchestration, with its rebuildable SQLite projection under `.runtime/projections/inboxd.sqlite` and daemon/config JSON state under `.runtime/operations/inbox/**`.
 - `packages/inbox-services` owns lower-level inbox runtime, read, and promotion service composition used by CLI/assistant flows without becoming the canonical inbox-capture owner.
-- `packages/parsers` owns local-first multimedia parsing for inbox attachments and writes only derived artifacts under `derived/inbox/**`.
+- `packages/parsers` owns local-first multimedia parsing for inbox attachments, writes one versioned derived result bundle per attempt under `derived/inbox/**`, and owns the strict reader plus legacy-attempt compactor.
 - `packages/health-metrics` owns neutral MetricPoint contracts, health metric definitions, source metadata, unit normalization, display formatting, and selection policy reused by query projections and browser-vault exports.
 - `packages/query` reads canonical vault state, builds derived export packs, owns the rebuildable local query projection under `.runtime/projections/query.sqlite` that powers both canonical reads and lexical search, exposes the stable health reference graph under `bank/library/**`, exposes read helpers for the non-canonical compiled knowledge wiki under `derived/knowledge/**`, and adapts canonical/wearable evidence through `@murphai/health-metrics` MetricPoints.
 - `packages/vault-usecases` owns CLI/headless vault usecase orchestration over core, importers, and query. It exposes the neutral service surface, lazy runtime loaders, command-shaped input normalization, and assistant-safe vault path helpers used by CLI and headless runtimes. It is not a canonical write owner, query-model owner, inbox/device runtime owner, assistant/session owner, or broad re-export layer.
@@ -113,8 +113,9 @@ repo/
   - `raw/**`
   - stored under owner-scoped directories derived from the owning canonical record or import session (`kind` + `id`, with a partition only for batch families such as device/sample/workout imports)
   - each raw import directory keeps a `manifest.json` sidecar that records the same explicit owner metadata used to resolve the path
+  - `raw/inbox/**` is the exception: its current inbox-capture ledger record owns metadata and the raw directory retains only stored attachment bytes
 - Rebuildable parser artifacts:
-  - `derived/inbox/**`
+  - `derived/inbox/<captureId>/attachments/<attachmentId>/attempts/<attempt>/result.json`
 - Rebuildable model-authored knowledge wiki:
   - `bank/library/**/*.md` as the stable reference layer for durable health concepts and entities
   - `derived/knowledge/index.md`

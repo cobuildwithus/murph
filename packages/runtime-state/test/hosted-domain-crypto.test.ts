@@ -166,6 +166,28 @@ test("hosted domain crypto helpers fail closed for wrong lanes, private public k
   ).rejects.toThrow();
 });
 
+test("hosted meal-photo crypto is owned by the ingress domain", () => {
+  expect(() =>
+    buildHostedSecureBoxAad({
+      domain: "runtime",
+      lane: "meal-photo",
+      purpose: "meal-photo",
+      scope: "meal-photo:item-1",
+      userId: "user-1",
+    }),
+  ).toThrow(/meal-photo belongs to ingress, not runtime/u);
+
+  expect(
+    buildHostedSecureBoxAad({
+      domain: "ingress",
+      lane: "meal-photo",
+      purpose: "meal-photo",
+      scope: "meal-photo:item-1",
+      userId: "user-1",
+    }),
+  ).toBeInstanceOf(Uint8Array);
+});
+
 async function generateP256EcdhKeyPair(): Promise<{
   privateJwk: JsonWebKey;
   publicJwk: JsonWebKey;

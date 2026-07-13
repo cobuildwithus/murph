@@ -980,6 +980,7 @@ function countAssistantRuntimeResiduePrunedFiles(
     result.acceptedTurnInputJournalsPruned +
     result.autoReplyEvidenceFilesPruned +
     result.autoReplyIntentProvenancePruned +
+    result.hostedMailboxInputItemMappingsPruned +
     result.inputEventsPruned +
     result.receiptsPruned
   );
@@ -1000,6 +1001,8 @@ function createAssistantRuntimeResiduePruneLogDetails(
       result.autoReplyEvidenceGroupsPruned,
     prunedAssistantRuntimeAutoReplyIntentProvenanceCount:
       result.autoReplyIntentProvenancePruned,
+    prunedAssistantRuntimeHostedMailboxInputItemMappingCount:
+      result.hostedMailboxInputItemMappingsPruned,
     prunedAssistantRuntimeInputEventCount: result.inputEventsPruned,
     prunedAssistantRuntimeReceiptCount: result.receiptsPruned,
     prunedAssistantRuntimeResidueFileCount:

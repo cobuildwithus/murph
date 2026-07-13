@@ -58,6 +58,7 @@ export const HOSTED_MAILBOX_KINDS = [
   "assistant.notification.requested",
   "device-sync.wake",
   "group-newsletter.email-needed",
+  "meal-photo.captured",
   "vault-share.delivery",
   "vault-share.revoke",
   ...HOSTED_EXECUTION_RUNTIME_CONTROL_WAKE_KINDS,
