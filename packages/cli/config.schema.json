@@ -1202,6 +1202,78 @@
             }
           }
         },
+        "personalization": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "commands": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "show": {
+                  "type": "object",
+                  "additionalProperties": false
+                },
+                "set": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "options": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "model": {
+                          "description": "Hosted model id: gpt-5.6-terra or gpt-5.6-sol.",
+                          "type": "string",
+                          "enum": [
+                            "gpt-5.6-terra",
+                            "gpt-5.6-sol"
+                          ]
+                        },
+                        "tone": {
+                          "description": "Saved assistant writing tone.",
+                          "type": "string",
+                          "enum": [
+                            "casual",
+                            "formal"
+                          ]
+                        },
+                        "voice": {
+                          "description": "Saved voice id. Display-label mapping: Classic Murph=upbeat, New York=classic, Drill sergeant=drill-sergeant, Grandpa=grandpa, Country=country, Jamaican, deep=jamaican, Radio host=radio-host, Deep and calming=deep-calm, Warm and friendly=warm, Husky and bold=husky, British storyteller=storyteller, British, warm=british-warm, Late night radio=late-night, Easygoing=easygoing, Eccentric northerner=northern, Football announcer=football-announcer, Sweet and natural=sweet, Mysterious=mysterious, Audiobook narrator=narrator, Warm and expressive=expressive, Bubbly=bubbly, Smooth and sweet=smooth.",
+                          "type": "string",
+                          "enum": [
+                            "classic",
+                            "drill-sergeant",
+                            "grandpa",
+                            "country",
+                            "jamaican",
+                            "radio-host",
+                            "deep-calm",
+                            "warm",
+                            "husky",
+                            "storyteller",
+                            "british-warm",
+                            "late-night",
+                            "easygoing",
+                            "northern",
+                            "football-announcer",
+                            "sweet",
+                            "mysterious",
+                            "upbeat",
+                            "narrator",
+                            "expressive",
+                            "bubbly",
+                            "smooth"
+                          ]
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
         "automation": {
           "type": "object",
           "additionalProperties": false,

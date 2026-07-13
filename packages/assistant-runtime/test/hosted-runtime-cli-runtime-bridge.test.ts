@@ -3,12 +3,14 @@ import { createConnection } from "node:net";
 
 import {
   HOSTED_CLI_BRIDGE_ASSISTANT_CURRENT_ROUTE_PATH,
+  HOSTED_CLI_BRIDGE_ASSISTANT_PERSONALIZATION_PATH,
   HOSTED_CLI_BRIDGE_DEVICE_ACCOUNT_LIST_PATH,
   HOSTED_CLI_BRIDGE_REQUEST_TIMEOUT_MS,
   HOSTED_CLI_BRIDGE_TOKEN_ENV,
   HOSTED_CLI_BRIDGE_URL_ENV,
   HOSTED_CLI_BRIDGE_DEVICE_CONNECT_LINK_PATH,
   requestHostedCliAssistantCurrentRoute,
+  requestHostedCliAssistantPersonalization,
   requestHostedCliDeviceAccountList,
   requestHostedCliDeviceConnectLink,
 } from "@murphai/hosted-execution/cli-runtime-bridge";
@@ -60,6 +62,56 @@ function createDeviceSyncPortStub(): HostedRuntimeDeviceSyncPort {
     },
   };
 }
+
+test("hosted CLI runtime bridge forwards assistant personalization only during the active invocation", async () => {
+  const assistantPersonalizationToolPort = {
+    request: vi.fn(async () => ({
+      action: "read" as const,
+      result: {
+        model: "gpt-5.6-terra" as const,
+        solAvailable: false,
+        tone: "formal" as const,
+        voice: "upbeat" as const,
+      },
+    })),
+  };
+
+  await withHostedCliBridgeInvocation({
+    assistantPersonalizationToolPort,
+  }, async (bridge) => {
+    await expect(requestHostedCliAssistantPersonalization({
+      bridge: {
+        token: bridge.env[HOSTED_CLI_BRIDGE_TOKEN_ENV],
+        url: bridge.env[HOSTED_CLI_BRIDGE_URL_ENV],
+      },
+      request: { action: "read" },
+    })).resolves.toMatchObject({
+      action: "read",
+      result: { model: "gpt-5.6-terra" },
+    });
+    expect(assistantPersonalizationToolPort.request).toHaveBeenCalledWith({
+      action: "read",
+    });
+  });
+
+  const bridge = await getOrCreateHostedCliRuntimeBridge();
+  try {
+    const response = await fetch(
+      new URL(HOSTED_CLI_BRIDGE_ASSISTANT_PERSONALIZATION_PATH, bridge.env[HOSTED_CLI_BRIDGE_URL_ENV]),
+      {
+        body: JSON.stringify({ action: "read" }),
+        headers: {
+          authorization: `Bearer ${bridge.env[HOSTED_CLI_BRIDGE_TOKEN_ENV]}`,
+          "content-type": "application/json",
+        },
+        method: "POST",
+      },
+    );
+    assert.equal(response.status, 503);
+  } finally {
+    await bridge.stop();
+  }
+});
 
 async function importCliRuntimeBridgeWithOneFailedListen(): Promise<{
   bridgeModule: HostedCliRuntimeBridgeModule;

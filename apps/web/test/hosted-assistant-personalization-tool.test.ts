@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
+  assertHostedMemberAssistantPersonalizationEligible: vi.fn(),
   getPrisma: vi.fn(),
   readHostedMemberAssistantModelPreference: vi.fn(),
   readHostedMemberAssistantPreferences: vi.fn(),
@@ -12,6 +13,8 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("@/src/lib/prisma", () => ({ getPrisma: mocks.getPrisma }));
 vi.mock("@/src/lib/hosted-onboarding/assistant-model-preference", () => ({
+  assertHostedMemberAssistantPersonalizationEligible:
+    mocks.assertHostedMemberAssistantPersonalizationEligible,
   readHostedMemberAssistantModelPreference:
     mocks.readHostedMemberAssistantModelPreference,
   updateHostedMemberAssistantModelPreferenceTx:
@@ -35,6 +38,7 @@ describe("hosted assistant personalization tool owner adapter", () => {
       async (callback: (tx: unknown) => Promise<unknown>) => callback({ tx: true }),
     );
     mocks.getPrisma.mockReturnValue({ $transaction: mocks.transaction });
+    mocks.assertHostedMemberAssistantPersonalizationEligible.mockResolvedValue(undefined);
     mocks.readHostedMemberAssistantPreferences.mockResolvedValue({
       tone: "formal",
       voice: "warm",
@@ -47,6 +51,7 @@ describe("hosted assistant personalization tool owner adapter", () => {
       hostedAssistantModelOverride: "gpt-5.6-sol",
       model: "gpt-5.6-sol",
       solAvailable: true,
+      effectiveModelUpdated: true,
       updated: true,
     });
     mocks.upsertHostedMemberAssistantPreferencesTx.mockResolvedValue({
@@ -71,6 +76,10 @@ describe("hosted assistant personalization tool owner adapter", () => {
       },
     });
     expect(mocks.transaction).not.toHaveBeenCalled();
+    expect(mocks.assertHostedMemberAssistantPersonalizationEligible).toHaveBeenCalledWith({
+      memberId: "member_personalization_1",
+      prisma: { $transaction: mocks.transaction },
+    });
   });
 
   it("projects canonical defaults without persisting unset style storage", async () => {
@@ -103,6 +112,7 @@ describe("hosted assistant personalization tool owner adapter", () => {
     mocks.updateHostedMemberAssistantModelPreferenceTx.mockResolvedValue({
       model: "gpt-5.6-terra",
       solAvailable: false,
+      effectiveModelUpdated: false,
       updated: false,
     });
 
@@ -172,6 +182,31 @@ describe("hosted assistant personalization tool owner adapter", () => {
     });
   });
 
+  it("saves a dormant preference clear without claiming an effective model transition", async () => {
+    mocks.updateHostedMemberAssistantModelPreferenceTx.mockResolvedValue({
+      model: "gpt-5.6-terra",
+      solAvailable: false,
+      effectiveModelUpdated: false,
+      updated: true,
+    });
+
+    await expect(handleHostedRuntimeAssistantPersonalizationTool({
+      memberId: "member_personalization_1",
+      request: {
+        action: "update",
+        model: "gpt-5.6-terra",
+      },
+    })).resolves.toMatchObject({
+      result: {
+        model: "gpt-5.6-terra",
+        modelChangeAppliesNextRun: false,
+        modelUpdated: false,
+        status: "saved",
+        updated: true,
+      },
+    });
+  });
+
   it("atomically saves combined changes and reports next-run model semantics", async () => {
     await expect(handleHostedRuntimeAssistantPersonalizationTool({
       memberId: "member_personalization_1",
@@ -224,6 +259,7 @@ describe("hosted assistant personalization tool owner adapter", () => {
     mocks.updateHostedMemberAssistantModelPreferenceTx.mockResolvedValue({
       model: "gpt-5.6-terra",
       solAvailable: true,
+      effectiveModelUpdated: false,
       updated: false,
     });
     mocks.upsertHostedMemberAssistantPreferencesTx.mockResolvedValue({

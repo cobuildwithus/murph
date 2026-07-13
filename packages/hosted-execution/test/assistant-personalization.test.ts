@@ -41,6 +41,27 @@ describe("hosted assistant personalization contract", () => {
     expect(parseHostedRuntimeAssistantPersonalizationToolResponse({
       action: "update",
       result: {
+        model: "gpt-5.6-terra",
+        modelChangeAppliesNextRun: false,
+        modelUpdated: false,
+        rejectionReason: null,
+        solAvailable: false,
+        status: "saved",
+        styleUpdated: false,
+        tone: "formal",
+        updated: true,
+        voice: "warm",
+      },
+    })).toMatchObject({
+      result: {
+        modelUpdated: false,
+        status: "saved",
+        updated: true,
+      },
+    });
+    expect(parseHostedRuntimeAssistantPersonalizationToolResponse({
+      action: "update",
+      result: {
         model: "gpt-5.6-sol",
         modelChangeAppliesNextRun: true,
         modelUpdated: true,

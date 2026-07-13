@@ -6,6 +6,7 @@ import { describe, it } from "vitest";
 
 import {
   HostedCliBridgeRequestError,
+  requestHostedCliAssistantPersonalization,
   requestHostedCliAssistantCurrentRoute,
   requestHostedCliDeviceAccountList,
   requestHostedCliDeviceConnectLink,
@@ -163,6 +164,40 @@ describe("hosted CLI runtime bridge client", () => {
         deliveryTarget: "linq_chat_real",
       },
     });
+  });
+
+  it("requests hosted assistant personalization through the bridge", async () => {
+    let requestedPath = "";
+    let requestBody: unknown = null;
+    const fetchImpl: typeof fetch = async (url, init) => {
+      requestedPath = new URL(String(url)).pathname;
+      requestBody = JSON.parse(String(init?.body));
+      return new Response(JSON.stringify({
+        action: "read",
+        result: {
+          model: "gpt-5.6-terra",
+          solAvailable: false,
+          tone: "formal",
+          voice: "upbeat",
+        },
+      }), {
+        headers: { "content-type": "application/json" },
+        status: 200,
+      });
+    };
+
+    const result = await requestHostedCliAssistantPersonalization({
+      bridge: {
+        token: "bridge-token",
+        url: "http://127.0.0.1:8787/",
+      },
+      fetchImpl,
+      request: { action: "read" },
+    });
+
+    assert.equal(requestedPath, "/assistant/personalization");
+    assert.deepEqual(requestBody, { action: "read" });
+    assert.equal(result.action, "read");
   });
 
   it("preserves assistant current route continuity locator fields", async () => {

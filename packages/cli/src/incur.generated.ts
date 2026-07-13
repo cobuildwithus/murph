@@ -221,6 +221,8 @@ declare module 'incur' {
       'memory update': { args: { memoryId: string; text: string }; options: { section?: "Identity" | "Preferences" | "Instructions" | "Context" } }
       'memory upsert': { args: { text: string }; options: { section: "Identity" | "Preferences" | "Instructions" | "Context" } }
       'model': { args: {}; options: { show?: boolean; preset?: "codex"; model?: string; modelProvider?: string; codexCommand?: string; profile?: string; codexHome?: string; reasoningEffort?: "low" | "medium" | "high" | "xhigh"; oss?: boolean } }
+      'personalization set': { args: {}; options: { model?: "gpt-5.6-terra" | "gpt-5.6-sol"; tone?: "casual" | "formal"; voice?: "classic" | "drill-sergeant" | "grandpa" | "country" | "jamaican" | "radio-host" | "deep-calm" | "warm" | "husky" | "storyteller" | "british-warm" | "late-night" | "easygoing" | "northern" | "football-announcer" | "sweet" | "mysterious" | "upbeat" | "narrator" | "expressive" | "bubbly" | "smooth" } }
+      'personalization show': { args: {}; options: {} }
       'protocol import-json': { args: {}; options: { requestId?: string; input: string } }
       'protocol list': { args: {}; options: { requestId?: string; status?: string; commonsProtocol?: string; limit: number } }
       'protocol show': { args: { id: string }; options: { requestId?: string } }

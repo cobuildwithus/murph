@@ -157,9 +157,7 @@ describe('Codex thread instructions', () => {
   })
 
   it('starts stale-resume fallback with fresh thread instructions', async () => {
-    const dynamicTools = resolveMurphDynamicTools({
-      personalizationAvailable: true,
-    })
+    const dynamicTools = resolveMurphDynamicTools({})
     codexAppServerMocks.executeCodexAppServerTurn
       .mockRejectedValueOnce(
         new VaultCliError(

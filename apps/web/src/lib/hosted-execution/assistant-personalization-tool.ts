@@ -12,6 +12,7 @@ import {
 
 import { getPrisma } from "@/src/lib/prisma";
 import {
+  assertHostedMemberAssistantPersonalizationEligible,
   readHostedMemberAssistantModelPreference,
   updateHostedMemberAssistantModelPreferenceTx,
 } from "@/src/lib/hosted-onboarding/assistant-model-preference";
@@ -41,6 +42,10 @@ export async function handleHostedRuntimeAssistantPersonalizationTool(input: {
   }) => void;
 }): Promise<HostedRuntimeAssistantPersonalizationToolResponse> {
   if (input.request.action === "read") {
+    await assertHostedMemberAssistantPersonalizationEligible({
+      memberId: input.memberId,
+      prisma: getPrisma(),
+    });
     return {
       action: "read",
       result: await readHostedAssistantPersonalization(input.memberId),
@@ -52,6 +57,10 @@ export async function handleHostedRuntimeAssistantPersonalizationTool(input: {
   let transactionResult: HostedRuntimeAssistantPersonalizationTransactionResult;
   try {
     transactionResult = await prisma.$transaction(async (tx) => {
+      await assertHostedMemberAssistantPersonalizationEligible({
+        memberId: input.memberId,
+        prisma: tx,
+      });
       // Check and persist the billing-gated model choice before any style write.
       // An ineligible Sol request therefore cannot append a style mailbox event;
       // the transaction also rolls back the model if a later style write fails.
@@ -90,9 +99,10 @@ export async function handleHostedRuntimeAssistantPersonalizationTool(input: {
           });
       const effectiveTone = preferences.tone ?? defaultAssistantTonePreference;
       const effectiveVoice = preferences.voice ?? defaultAssistantVoiceOptionId;
-      const modelUpdated = modelUpdateResult?.updated ?? false;
+      const modelPreferenceUpdated = modelUpdateResult?.updated ?? false;
+      const modelUpdated = modelUpdateResult?.effectiveModelUpdated ?? false;
       const styleUpdated = styleResult?.updated ?? false;
-      const updated = modelUpdated || styleUpdated;
+      const updated = modelPreferenceUpdated || styleUpdated;
 
       return {
         dispatch: styleResult?.dispatch ?? null,

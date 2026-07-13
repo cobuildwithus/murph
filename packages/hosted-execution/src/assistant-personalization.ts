@@ -81,7 +81,7 @@ const hostedRuntimeAssistantPersonalizationSnapshotSchema = z.object({
   voice: z.enum(assistantVoiceOptionIdValues),
 }).strict();
 
-const hostedRuntimeAssistantPersonalizationToolResponseSchema =
+export const hostedRuntimeAssistantPersonalizationToolResponseSchema =
   z.discriminatedUnion("action", [
     z.object({
       action: z.literal("read"),
@@ -104,11 +104,11 @@ const hostedRuntimeAssistantPersonalizationToolResponseSchema =
     }
 
     const result = response.result;
-    const updated = result.modelUpdated || result.styleUpdated;
-    if (result.updated !== updated) {
+    const effectiveFieldUpdated = result.modelUpdated || result.styleUpdated;
+    if (effectiveFieldUpdated && !result.updated) {
       context.addIssue({
         code: z.ZodIssueCode.custom,
-        message: "Assistant personalization updated state must match its field changes.",
+        message: "Assistant personalization field changes require a saved update.",
         path: ["result", "updated"],
       });
     }

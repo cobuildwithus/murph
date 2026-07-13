@@ -2,6 +2,13 @@ import type { DeviceSyncAccountRecord } from "@murphai/device-syncd/client";
 import { parseHostedExecutionDeviceSyncConnectLinkResponse } from "@murphai/device-syncd/hosted-runtime";
 import { z } from "zod";
 
+import {
+  parseHostedRuntimeAssistantPersonalizationToolRequest,
+  parseHostedRuntimeAssistantPersonalizationToolResponse,
+  type HostedRuntimeAssistantPersonalizationToolRequest,
+  type HostedRuntimeAssistantPersonalizationToolResponse,
+} from "./assistant-personalization.ts";
+
 export const HOSTED_RUNTIME_PROCESS_ENV = "MURPH_HOSTED_RUNTIME_PROCESS";
 export const HOSTED_CLI_BRIDGE_URL_ENV = "MURPH_HOSTED_CLI_BRIDGE_URL";
 export const HOSTED_CLI_BRIDGE_TOKEN_ENV = "MURPH_HOSTED_CLI_BRIDGE_TOKEN";
@@ -10,6 +17,8 @@ export const HOSTED_RUNTIME_CODEX_APP_SERVER_COMMAND_ENV =
 export const HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV =
   "MURPH_HOSTED_CODEX_MODEL_CATALOG_JSON";
 export const HOSTED_CLI_BRIDGE_ASSISTANT_CURRENT_ROUTE_PATH = "/assistant/current-route";
+export const HOSTED_CLI_BRIDGE_ASSISTANT_PERSONALIZATION_PATH =
+  "/assistant/personalization";
 export const HOSTED_CLI_BRIDGE_DEVICE_CONNECT_LINK_PATH = "/device/connect-link";
 export const HOSTED_CLI_BRIDGE_DEVICE_ACCOUNT_LIST_PATH = "/device/accounts/list";
 export const HOSTED_CLI_BRIDGE_REQUEST_TIMEOUT_MS = 10_000;
@@ -220,6 +229,18 @@ export function parseHostedCliAssistantCurrentRouteResponse(
   return hostedCliAssistantCurrentRouteResponseSchema.parse(value);
 }
 
+export function parseHostedCliAssistantPersonalizationRequest(
+  value: unknown,
+): HostedRuntimeAssistantPersonalizationToolRequest {
+  return parseHostedRuntimeAssistantPersonalizationToolRequest(value);
+}
+
+export function parseHostedCliAssistantPersonalizationResponse(
+  value: unknown,
+): HostedRuntimeAssistantPersonalizationToolResponse {
+  return parseHostedRuntimeAssistantPersonalizationToolResponse(value);
+}
+
 export async function requestHostedCliAssistantCurrentRoute(input: {
   bridge: HostedCliBridgeClientConfig;
   fetchImpl?: typeof fetch;
@@ -234,6 +255,23 @@ export async function requestHostedCliAssistantCurrentRoute(input: {
   });
 
   return parseHostedCliAssistantCurrentRouteResponse(payload);
+}
+
+export async function requestHostedCliAssistantPersonalization(input: {
+  bridge: HostedCliBridgeClientConfig;
+  fetchImpl?: typeof fetch;
+  request: HostedRuntimeAssistantPersonalizationToolRequest;
+  timeoutMs?: number;
+}): Promise<HostedRuntimeAssistantPersonalizationToolResponse> {
+  const payload = await requestHostedCliBridgeJson({
+    body: parseHostedCliAssistantPersonalizationRequest(input.request),
+    bridge: input.bridge,
+    fetchImpl: input.fetchImpl,
+    path: HOSTED_CLI_BRIDGE_ASSISTANT_PERSONALIZATION_PATH,
+    timeoutMs: input.timeoutMs,
+  });
+
+  return parseHostedCliAssistantPersonalizationResponse(payload);
 }
 
 export async function requestHostedCliDeviceConnectLink(input: {

@@ -107,6 +107,7 @@ import { registerHabitatCommands } from './commands/habitat.js'
 import { registerIntakeCommands } from './commands/intake.js'
 import { registerJournalCommands } from './commands/journal.js'
 import { registerMemoryCommands } from './commands/memory.js'
+import { registerPersonalizationCommands } from './commands/personalization.js'
 import {
   medicationHistoryResultSchema,
   registerMedicationCommands,
@@ -532,6 +533,14 @@ export const vaultCliCommandDescriptors = [
     rootCommandNames: ['assistant', 'chat', 'run', 'status', 'doctor', 'stop'],
     register({ cli, services, inboxServices }) {
       registerAssistantCommands(cli, inboxServices, services)
+    },
+  },
+  {
+    id: 'personalization',
+    bindingMode: 'none',
+    rootCommandNames: ['personalization'],
+    register({ cli }) {
+      registerPersonalizationCommands(cli)
     },
   },
   {

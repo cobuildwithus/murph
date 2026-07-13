@@ -4,12 +4,14 @@ import type { Socket } from "node:net";
 
 import {
   HOSTED_CLI_BRIDGE_ASSISTANT_CURRENT_ROUTE_PATH,
+  HOSTED_CLI_BRIDGE_ASSISTANT_PERSONALIZATION_PATH,
   HOSTED_CLI_BRIDGE_DEVICE_ACCOUNT_LIST_PATH,
   HOSTED_CLI_BRIDGE_DEVICE_CONNECT_LINK_PATH,
   HOSTED_CLI_BRIDGE_REQUEST_TIMEOUT_MS,
   HOSTED_CLI_BRIDGE_TOKEN_ENV,
   HOSTED_CLI_BRIDGE_URL_ENV,
   parseHostedCliAssistantCurrentRouteRequest,
+  parseHostedCliAssistantPersonalizationRequest,
   parseHostedCliDeviceAccountListRequest,
   parseHostedCliDeviceConnectLinkRequest,
   type HostedCliAssistantCurrentRoute,
@@ -19,6 +21,7 @@ import { normalizeAssistantRouteString } from "@murphai/operator-config/assistan
 import type {
   HostedRuntimeDeviceSyncMessagingReturnTarget,
   HostedRuntimeDeviceSyncPort,
+  HostedRuntimeAssistantPersonalizationToolPort,
 } from "./platform.ts";
 
 const HOSTED_CLI_BRIDGE_BODY_LIMIT_BYTES = 8192;
@@ -48,6 +51,7 @@ export interface HostedCliRuntimeBridge {
 }
 
 export interface HostedCliRuntimeBridgeInvocationInput {
+  assistantPersonalizationToolPort?: HostedRuntimeAssistantPersonalizationToolPort | null;
   currentDeliveryRoute?: HostedCliRuntimeBridgeCurrentDeliveryRouteSource;
   deviceSyncPort?: HostedRuntimeDeviceSyncPort | null;
   messagingReturnTarget?: HostedCliRuntimeBridgeMessagingReturnTargetSource;
@@ -55,6 +59,7 @@ export interface HostedCliRuntimeBridgeInvocationInput {
 }
 
 interface HostedCliRuntimeBridgeActiveInvocation {
+  assistantPersonalizationToolPort: HostedRuntimeAssistantPersonalizationToolPort | null;
   closing: boolean;
   currentDeliveryRoute: HostedCliRuntimeBridgeCurrentDeliveryRouteSource;
   deviceSyncPort: HostedRuntimeDeviceSyncPort | null;
@@ -172,6 +177,7 @@ async function startHostedCliRuntimeBridgeServer(): Promise<HostedCliRuntimeBrid
         );
       }
       const invocation: HostedCliRuntimeBridgeActiveInvocation = {
+        assistantPersonalizationToolPort: input.assistantPersonalizationToolPort ?? null,
         closing: false,
         currentDeliveryRoute: input.currentDeliveryRoute ?? null,
         deviceSyncPort: input.deviceSyncPort ?? null,
@@ -241,6 +247,7 @@ async function handleHostedCliBridgeRequest(input: {
     const path = input.request.url ?? "";
     if (
       path !== HOSTED_CLI_BRIDGE_ASSISTANT_CURRENT_ROUTE_PATH
+      && path !== HOSTED_CLI_BRIDGE_ASSISTANT_PERSONALIZATION_PATH
       && path !== HOSTED_CLI_BRIDGE_DEVICE_CONNECT_LINK_PATH
       && path !== HOSTED_CLI_BRIDGE_DEVICE_ACCOUNT_LIST_PATH
     ) {
@@ -315,6 +322,32 @@ async function handleActiveHostedCliBridgeRequest(input: {
         input.active.currentDeliveryRoute,
       ),
     });
+    return;
+  }
+
+  if (input.path === HOSTED_CLI_BRIDGE_ASSISTANT_PERSONALIZATION_PATH) {
+    if (!input.active.assistantPersonalizationToolPort) {
+      writeHostedCliBridgeError(
+        input.response,
+        503,
+        "HOSTED_CLI_BRIDGE_ASSISTANT_PERSONALIZATION_UNAVAILABLE",
+        "Hosted assistant personalization is unavailable.",
+      );
+      return;
+    }
+
+    const request = parseHostedCliAssistantPersonalizationRequest(body);
+    try {
+      const result = await input.active.assistantPersonalizationToolPort.request(request);
+      writeHostedCliBridgeJson(input.response, 200, result);
+    } catch {
+      writeHostedCliBridgeError(
+        input.response,
+        502,
+        "HOSTED_ASSISTANT_PERSONALIZATION_FAILED",
+        "Hosted assistant personalization failed.",
+      );
+    }
     return;
   }
 
