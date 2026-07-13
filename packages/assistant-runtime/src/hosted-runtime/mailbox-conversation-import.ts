@@ -5,6 +5,7 @@ import type {
 } from "@murphai/hosted-execution";
 import {
   isHostedEmailConversationMessageWake,
+  isHostedLinqConversationMessageWake,
   isHostedLinqConversationWake,
   isHostedTelegramConversationMessageWake,
   isHostedWhatsAppConversationMessageWake,
@@ -450,7 +451,7 @@ export async function importHostedConversationMailboxItem(input: {
 }
 
 function buildHostedRuntimeUsageNoticeDeliveryTargetFromWake(
-  wake: HostedExecutionConversationMessageWake,
+  wake: HostedExecutionConversationWake,
 ): HostedRuntimeUsageNoticeDeliveryTarget | null {
   if (isHostedLinqConversationMessageWake(wake)) {
     return {
