@@ -2597,6 +2597,7 @@ function createHostedAssistantLinqSendDependency(input: {
       result = await sendHostedProviderLinqMessage({
         directRecipientPhoneNumber,
         fromPhoneNumber,
+        homeRouteFallbackAllowed: request.homeRouteFallbackAllowed === true,
         idempotencyKey,
         media: request.media ?? null,
         message: request.message,
