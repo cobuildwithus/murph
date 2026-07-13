@@ -856,30 +856,14 @@ export function createPrismaHostedPulseTrialExtensionCandidateSource(
   const where = buildPrismaHostedPulseTrialExtensionCandidateWhere(options.memberId);
   return {
     async listCandidates(input) {
-      if (
-        options.memberId &&
-        options.campaignRecovery &&
-        !input.continuationToken
-      ) {
-        const memberPage = await listHostedPulseTrialMemberCandidates({
-          afterMemberId: null,
-          limit: input.limit,
-          prisma,
-          where,
-        });
-        return {
-          candidates: memberPage.candidates,
-          nextContinuationToken: encryptHostedPulseTrialExtensionContinuationToken({
-            afterSubscriptionId: null,
-            memberId: options.memberId,
-            phase: "provider",
-          }),
-        };
-      }
       const continuation = input.continuationToken
         ? decryptHostedPulseTrialExtensionContinuationToken(input.continuationToken)
         : options.campaignRecovery
-          ? { afterSubscriptionId: null, memberId: null, phase: "provider" } as const
+          ? {
+              afterSubscriptionId: null,
+              memberId: options.memberId ?? null,
+              phase: "provider",
+            } as const
           : {
               afterMemberId: null,
               memberId: options.memberId ?? null,
@@ -913,24 +897,17 @@ export function createPrismaHostedPulseTrialExtensionCandidateSource(
         if (providerPage.candidates.length > 0) {
           return {
             candidates: providerPage.candidates,
-            nextContinuationToken: options.memberId
-              ? null
-              : encryptHostedPulseTrialExtensionContinuationToken({
-                  afterMemberId: null,
-                  memberId: null,
-                  phase: "members",
-                }),
-          };
-        }
-        if (options.memberId) {
-          return {
-            candidates: [],
-            nextContinuationToken: null,
+            nextContinuationToken: encryptHostedPulseTrialExtensionContinuationToken({
+              afterMemberId: null,
+              memberId: options.memberId ?? null,
+              phase: "members",
+            }),
           };
         }
         return listHostedPulseTrialMemberCandidates({
           afterMemberId: null,
           limit: input.limit,
+          memberId: options.memberId ?? null,
           prisma,
           where,
         });
@@ -938,6 +915,7 @@ export function createPrismaHostedPulseTrialExtensionCandidateSource(
       return listHostedPulseTrialMemberCandidates({
         afterMemberId: continuation.afterMemberId,
         limit: input.limit,
+        memberId: options.memberId ?? null,
         prisma,
         where,
       });
@@ -1048,6 +1026,7 @@ export function createPrismaHostedPulseTrialExtensionCandidateSource(
 async function listHostedPulseTrialMemberCandidates(input: {
   afterMemberId: string | null;
   limit: number;
+  memberId: string | null;
   prisma: PrismaClient;
   where: Prisma.HostedMemberBillingRefWhereInput;
 }): Promise<{
@@ -1081,7 +1060,7 @@ async function listHostedPulseTrialMemberCandidates(input: {
       records.length > input.limit && lastRecord
         ? encryptHostedPulseTrialExtensionContinuationToken({
             afterMemberId: lastRecord.memberId,
-            memberId: null,
+            memberId: input.memberId,
             phase: "members",
           })
         : null,
@@ -1307,8 +1286,10 @@ function buildHostedAutoPulseTrialCampaignCandidateState(
 ) {
   return {
     billingStatus: candidate.memberBillingStatus,
+    currentBillingPhase: candidate.currentBillingPhase,
     currentStripeSubscriptionId: candidate.stripeSubscriptionId,
     memberId: candidate.memberId,
+    pulseTrialRedeemedAt: candidate.pulseTrialRedeemedAt,
   };
 }
 

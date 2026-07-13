@@ -895,6 +895,7 @@ function mapHostedStripeSubscriptionUpdateOutcome(
   outcome: {
     activatedMemberId?: string | null;
     activatedMembers?: HostedStripeActivatedMemberOutcome[];
+    cleanupPulseTrialStripeSubscriptionId?: string | null;
     hostedExecutionEventId?: string | null;
     subscriptionCancellationEmail?: HostedSubscriptionCancellationEmailCandidate | null;
     welcomeEmailMemberId?: string | null;
@@ -910,7 +911,8 @@ function mapHostedStripeSubscriptionUpdateOutcome(
   return {
     activatedMemberId: outcome?.activatedMemberId ?? null,
     activatedMembers: outcome?.activatedMembers ?? [],
-    cleanupPulseTrialStripeSubscriptionId: null,
+    cleanupPulseTrialStripeSubscriptionId:
+      outcome?.cleanupPulseTrialStripeSubscriptionId ?? null,
     hostedExecutionEventId: outcome?.hostedExecutionEventId ?? null,
     subscriptionCancellationEmail:
       outcome?.subscriptionCancellationEmail ?? null,

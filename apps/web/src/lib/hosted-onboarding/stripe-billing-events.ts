@@ -48,9 +48,14 @@ import {
 import {
   type HostedStripeDispatchContext,
 } from "./stripe-dispatch";
-import { requireHostedStripeApi } from "./runtime";
 import {
+  requireHostedStripeApi,
+  requireHostedStripeBillingPlanConfig,
+} from "./runtime";
+import {
+  classifyHostedPulseTrialCandidateDisposition,
   cancelHostedPulseTrialLoserSubscriptionsForMember,
+  isHostedPulseTrialSubscriptionForKnownPolicy,
 } from "./pulse-trial-subscription-cleanup";
 import {
   applyHostedFamilyStripeCheckoutCompletedTx,
@@ -200,38 +205,6 @@ export async function applyPulseTrialCheckoutCompletedTx(input: {
     };
   }
 
-  if (
-    billingRefSubscriptionId &&
-    !isCurrentPulseTrialSubscription &&
-    (
-      input.member.billingRef?.pulseTrialRedeemedAt ||
-      input.member.core.billingStatus === HostedBillingStatus.active
-    )
-  ) {
-    const subscription = input.subscription ??
-      await readHostedStripeCheckoutSessionSubscription(input.session);
-    if (
-      subscription &&
-      isValidPulseTrialCheckoutSubscription({
-        eventCreatedAt: input.dispatchContext.eventCreatedAt,
-        session: input.session,
-        subscription,
-      })
-    ) {
-      return {
-        activatedMemberId: null,
-        cleanupPulseTrialStripeSubscriptionId: subscription.id,
-        hostedExecutionEventId: null,
-        welcomeEmailMemberId: null,
-      };
-    }
-    return {
-      activatedMemberId: null,
-      hostedExecutionEventId: null,
-      welcomeEmailMemberId: null,
-    };
-  }
-
   const subscription = input.subscription ??
     await readHostedStripeCheckoutSessionSubscription(input.session);
   if (!subscription || !isValidPulseTrialCheckoutSubscription({
@@ -241,6 +214,40 @@ export async function applyPulseTrialCheckoutCompletedTx(input: {
   })) {
     return {
       activatedMemberId: null,
+      hostedExecutionEventId: null,
+      welcomeEmailMemberId: null,
+    };
+  }
+  const pulseTrialPriceId = process.env[
+    getHostedBillingPlanDefinition("launch_monthly").priceIdEnvKey
+  ];
+  if (
+    !pulseTrialPriceId ||
+    !isHostedPulseTrialSubscriptionForKnownPolicy({
+      memberId: input.member.core.id,
+      priceId: pulseTrialPriceId,
+      subscription,
+    })
+  ) {
+    return {
+      activatedMemberId: null,
+      hostedExecutionEventId: null,
+      welcomeEmailMemberId: null,
+    };
+  }
+  if (
+    classifyHostedPulseTrialCandidateDisposition({
+      billingStatus: input.member.core.billingStatus,
+      currentBillingPhase: input.member.billingRef?.currentBillingPhase ?? null,
+      currentStripeSubscriptionId:
+        input.member.billingRef?.stripeSubscriptionId ?? null,
+      pulseTrialRedeemedAt: input.member.billingRef?.pulseTrialRedeemedAt ?? null,
+      subscriptionId: subscription.id,
+    }) === "loser"
+  ) {
+    return {
+      activatedMemberId: null,
+      cleanupPulseTrialStripeSubscriptionId: subscription.id,
       hostedExecutionEventId: null,
       welcomeEmailMemberId: null,
     };
@@ -400,10 +407,14 @@ export function cancelHostedPulseTrialCheckoutLoserSubscription(input: {
   stripe?: Stripe;
   subscriptionId: string;
 }): Promise<void> {
+  const billingConfig = requireHostedStripeBillingPlanConfig({
+    billingPlanCode: "launch_monthly",
+  });
   return cancelHostedPulseTrialLoserSubscriptionsForMember({
     memberId: input.memberId,
+    priceId: billingConfig.priceId,
     prisma: input.prisma,
-    stripe: input.stripe ?? requireHostedStripeApi(),
+    stripe: input.stripe ?? billingConfig.stripe,
     subscriptionIds: [input.subscriptionId],
   });
 }
@@ -441,6 +452,34 @@ export async function applyStripeSubscriptionUpdated(
   if (!member) {
     return {
       ...buildEmptyHostedStripeActivationOutcome(),
+      subscriptionCancellationEmail: null,
+    };
+  }
+
+  const pulseTrialPriceId = process.env[
+    getHostedBillingPlanDefinition("launch_monthly").priceIdEnvKey
+  ];
+  if (
+    pulseTrialPriceId &&
+    isHostedPulseTrialSubscriptionForKnownPolicy({
+      memberId: member.core.id,
+      priceId: pulseTrialPriceId,
+      subscription,
+    }) &&
+    classifyHostedPulseTrialCandidateDisposition({
+      billingStatus: member.core.billingStatus,
+      currentBillingPhase: member.billingRef?.currentBillingPhase ?? null,
+      currentStripeSubscriptionId: member.billingRef?.stripeSubscriptionId ?? null,
+      pulseTrialRedeemedAt: member.billingRef?.pulseTrialRedeemedAt ?? null,
+      subscriptionId: subscription.id,
+    }) === "loser"
+  ) {
+    return {
+      ...buildEmptyHostedStripeActivationOutcome(),
+      cleanupPulseTrialStripeSubscriptionId:
+        subscription.status === "canceled" || subscription.status === "incomplete_expired"
+          ? null
+          : subscription.id,
       subscriptionCancellationEmail: null,
     };
   }

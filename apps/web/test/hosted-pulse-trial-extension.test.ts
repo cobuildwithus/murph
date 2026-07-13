@@ -1007,6 +1007,221 @@ describe("Pulse Trial beta extension", () => {
     assert.equal(finalize.mock.calls.length, 2);
   });
 
+  test("member-scoped service recovers one exact provider trial and retries its failed sibling as cleanup", async () => {
+    const buildProviderCandidate = (subscriptionId: string) => makeCandidate({
+      currentBillingPhase: null,
+      currentBillingPlanCode: null,
+      currentCheckoutOffer: null,
+      currentPeriodEnd: null,
+      currentTrialEndsAt: null,
+      currentTrialStartedAt: null,
+      memberBillingStatus: "not_started",
+      memberId: "member_target",
+      providerCustomerId: "cus_target",
+      providerSubscriptionId: subscriptionId,
+      pulseTrialRedeemedAt: null,
+      stripeCustomerId: "cus_target",
+      stripeSubscriptionId: null,
+    });
+    const providerCandidates = [
+      buildProviderCandidate("sub_provider_a"),
+      buildProviderCandidate("sub_provider_b"),
+    ];
+    const subscriptions = new Map(providerCandidates.map((candidate) => [
+      candidate.providerSubscriptionId!,
+      makeSubscription({
+        customer: "cus_target",
+        id: candidate.providerSubscriptionId!,
+        metadata: {
+          billingPlanCode: "launch_monthly",
+          checkoutOffer: "pulse_trial_7d",
+          memberId: "member_target",
+          trialDurationDays: "10",
+          trialPolicyVersion: "pulse-trial-2026-06-30-v2",
+          trialUsageLimitUsdMicros: "4500000",
+        },
+      }),
+    ]));
+    let currentSubscriptionId: string | null = null;
+    let firstCandidateFailed = false;
+    const cleanedSubscriptionIds: string[] = [];
+    const buildLockedCandidate = (
+      candidate: HostedPulseTrialExtensionCandidate,
+    ): HostedPulseTrialExtensionCandidate => currentSubscriptionId
+      ? makeCandidate({
+          currentBillingPhase: "trial",
+          currentBillingPlanCode: "launch_monthly",
+          currentCheckoutOffer: "pulse_trial_7d",
+          currentPeriodEnd: EXTENDED_TRIAL_END,
+          currentTrialEndsAt: EXTENDED_TRIAL_END,
+          currentTrialStartedAt: new Date("2026-07-02T12:00:00.000Z"),
+          memberId: "member_target",
+          providerCustomerId: candidate.providerCustomerId,
+          providerSubscriptionId: candidate.providerSubscriptionId,
+          pulseTrialRedeemedAt: new Date("2026-07-02T12:00:00.000Z"),
+          stripeCustomerId: "cus_target",
+          stripeSubscriptionId: currentSubscriptionId,
+        })
+      : candidate;
+    const source: HostedPulseTrialExtensionCandidateSource = {
+      async listCandidates() {
+        if (!currentSubscriptionId) {
+          return {
+            candidates: providerCandidates,
+            nextContinuationToken: "member-provider-page",
+          };
+        }
+        const remainingProviderCandidates = providerCandidates
+          .filter((candidate) =>
+            candidate.providerSubscriptionId !== currentSubscriptionId &&
+            !cleanedSubscriptionIds.includes(candidate.providerSubscriptionId!)
+          )
+          .map(buildLockedCandidate);
+        if (remainingProviderCandidates.length > 0) {
+          return {
+            candidates: remainingProviderCandidates,
+            nextContinuationToken: "member-provider-page",
+          };
+        }
+        return {
+          candidates: [makeCandidate({
+            currentBillingPhase: "trial",
+            currentBillingPlanCode: "launch_monthly",
+            currentCheckoutOffer: "pulse_trial_7d",
+            currentPeriodEnd: EXTENDED_TRIAL_END,
+            currentTrialEndsAt: EXTENDED_TRIAL_END,
+            currentTrialStartedAt: new Date("2026-07-02T12:00:00.000Z"),
+            memberId: "member_target",
+            providerCustomerId: null,
+            providerSubscriptionId: null,
+            pulseTrialRedeemedAt: new Date("2026-07-02T12:00:00.000Z"),
+            stripeCustomerId: "cus_target",
+            stripeSubscriptionId: currentSubscriptionId,
+          })],
+          nextContinuationToken: null,
+        };
+      },
+      async inspectProviderOnlyTrial({ candidate }) {
+        const subscription = subscriptions.get(candidate.providerSubscriptionId!);
+        if (!subscription) {
+          return {
+            kind: "not-applicable",
+            reason: "provider-trial-not-found",
+            subscription: null,
+          };
+        }
+        return currentSubscriptionId && currentSubscriptionId !== subscription.id
+          ? { kind: "cleanup-obsolete", subscription }
+          : { kind: "recoverable", subscription };
+      },
+      async withStripeMutationLock(input) {
+        const lockedCandidate = buildLockedCandidate(input.candidate);
+        return input.run({
+          async applyProviderOnlyDisposition(disposition) {
+            if (
+              disposition.kind === "recoverable" &&
+              disposition.subscription.id === "sub_provider_a" &&
+              !firstCandidateFailed
+            ) {
+              firstCandidateFailed = true;
+              throw new Error("synthetic local finalization failure");
+            }
+            if (disposition.kind === "recoverable") {
+              currentSubscriptionId = disposition.subscription.id;
+              return "recovered";
+            }
+            cleanedSubscriptionIds.push(disposition.subscription.id);
+            return "cleaned-up";
+          },
+          candidate: lockedCandidate,
+          async updateTrialEnd() {
+            throw new Error("Provider-only candidates must not use local trial updates.");
+          },
+        });
+      },
+    };
+    const stripe: HostedPulseTrialExtensionStripeClient = {
+      async retrieveSubscription(subscriptionId) {
+        const subscription = subscriptions.get(subscriptionId);
+        if (!subscription) {
+          throw new Error("Synthetic subscription was not found.");
+        }
+        return subscription;
+      },
+      async updateSubscription(subscriptionId, params) {
+        const subscription = subscriptions.get(subscriptionId);
+        if (!subscription) {
+          throw new Error("Synthetic subscription was not found.");
+        }
+        const updated = {
+          ...subscription,
+          metadata: { ...params.metadata },
+          trial_end: params.trial_end,
+        };
+        subscriptions.set(subscriptionId, updated);
+        return updated;
+      },
+    };
+
+    const firstPreview = await extendHostedPulseTrialsWithPrice({
+      candidateSource: source,
+      maxCandidates: 4,
+      mode: "dry-run",
+      now: NOW,
+      priceId: PRICE_ID,
+      stripe,
+    });
+    assert.equal(firstPreview.wouldRecoverProviderTrial, 2);
+    const firstApply = await extendHostedPulseTrialsWithPrice({
+      candidateSource: source,
+      expectedCandidatePreviewTokens: firstPreview.candidatePreviewTokens ?? [],
+      expectedCandidateSnapshotDigest: firstPreview.candidateSnapshotDigest ?? "",
+      maxCandidates: 4,
+      mode: "apply",
+      now: NOW,
+      priceId: PRICE_ID,
+      stripe,
+    });
+    assert.equal(firstApply.failures.provider_recovery_failed, 1);
+    assert.equal(firstApply.providerTrialsRecovered, 1);
+    assert.equal(firstApply.nextContinuationToken, null);
+    assert.equal(currentSubscriptionId, "sub_provider_b");
+
+    const cleanupPreview = await extendHostedPulseTrialsWithPrice({
+      candidateSource: source,
+      maxCandidates: 4,
+      mode: "dry-run",
+      now: NOW,
+      priceId: PRICE_ID,
+      stripe,
+    });
+    assert.equal(cleanupPreview.wouldCleanupProviderTrial, 1);
+    const cleanupApply = await extendHostedPulseTrialsWithPrice({
+      candidateSource: source,
+      expectedCandidatePreviewTokens: cleanupPreview.candidatePreviewTokens ?? [],
+      expectedCandidateSnapshotDigest: cleanupPreview.candidateSnapshotDigest ?? "",
+      maxCandidates: 4,
+      mode: "apply",
+      now: NOW,
+      priceId: PRICE_ID,
+      stripe,
+    });
+    assert.equal(cleanupApply.providerTrialsCleanedUp, 1);
+    expect(cleanedSubscriptionIds).toEqual(["sub_provider_a"]);
+
+    const localClosure = await extendHostedPulseTrialsWithPrice({
+      candidateSource: source,
+      maxCandidates: 4,
+      mode: "dry-run",
+      now: NOW,
+      priceId: PRICE_ID,
+      stripe,
+    });
+    assert.equal(localClosure.alreadyExtended, 1);
+    assert.equal(localClosure.wouldCleanupProviderTrial, 0);
+    assert.equal(localClosure.wouldRecoverProviderTrial, 0);
+  });
+
   test.each([
     [81, 0, 1],
     [82, 1, 0],
@@ -1824,7 +2039,7 @@ describe("Pulse Trial beta extension", () => {
     Date,
     Date | null,
     "active" | "not_started",
-    "stripe_customer_mismatch" | "local_candidate_changed",
+    "cleanup" | "stripe_customer_mismatch" | "local_candidate_changed",
   ]>([
     [
       "post-cutoff local row",
@@ -1838,7 +2053,7 @@ describe("Pulse Trial beta extension", () => {
       new Date("2026-07-02T12:00:00.000Z"),
       new Date("2026-07-02T12:00:00.000Z"),
       "not_started",
-      "local_candidate_changed",
+      "cleanup",
     ],
     [
       "active row with no durable subscription winner",
@@ -1912,9 +2127,11 @@ describe("Pulse Trial beta extension", () => {
       stripe,
     });
 
-    expect(preview.skipped).toMatchObject({ [expectedSkipReason]: 1 });
+    if (expectedSkipReason !== "cleanup") {
+      expect(preview.skipped).toMatchObject({ [expectedSkipReason]: 1 });
+    }
     assert.equal(preview.wouldRecoverProviderTrial, 0);
-    assert.equal(preview.wouldCleanupProviderTrial, 0);
+    assert.equal(preview.wouldCleanupProviderTrial, expectedSkipReason === "cleanup" ? 1 : 0);
     assert.equal(stripe.updateCalls.length, 0);
     assert.equal(findMany.mock.calls.length, 0);
     expect(list).toHaveBeenCalledTimes(3);
@@ -2301,6 +2518,10 @@ describe("Pulse Trial beta extension", () => {
       obsoleteStatus = "canceled";
       return buildObsoleteSubscription();
     });
+    const retrieve = vi.fn(async (subscriptionId: string) => {
+      assert.equal(subscriptionId, "sub_obsolete");
+      return buildObsoleteSubscription();
+    });
     const findMany = vi.fn(async () => [record]);
     const tx = {
       $queryRaw: vi.fn(async () => []),
@@ -2326,7 +2547,7 @@ describe("Pulse Trial beta extension", () => {
         campaignRecovery: {
           priceId: PRICE_ID,
           stripe: {
-            subscriptions: { cancel, list },
+            subscriptions: { cancel, list, retrieve },
           } as never,
         },
       },
@@ -2359,6 +2580,14 @@ describe("Pulse Trial beta extension", () => {
     });
     assert.equal(applied.providerTrialsCleanedUp, 1);
     assert.equal(cancel.mock.calls.length, 1);
+    expect(retrieve).toHaveBeenCalledWith(
+      "sub_obsolete",
+      {},
+      {
+        maxNetworkRetries: 0,
+        timeout: 80_000,
+      },
+    );
     expect(cancel).toHaveBeenCalledWith(
       "sub_obsolete",
       {},
@@ -2530,7 +2759,7 @@ describe("Pulse Trial beta extension", () => {
     });
     assert.equal(memberPage.candidates.length, 0);
     assert.ok(memberPage.nextContinuationToken);
-    assert.equal(findMany.mock.calls.length, 1);
+    assert.equal(findMany.mock.calls.length, 0);
 
     const allMembersSource = createPrismaHostedPulseTrialExtensionCandidateSource({
       hostedMemberBillingRef: { findMany },
@@ -2545,15 +2774,8 @@ describe("Pulse Trial beta extension", () => {
       limit: 1,
     })).rejects.toBeInstanceOf(HostedPulseTrialExtensionContinuationError);
 
-    const unrelatedProviderPage = await source.listCandidates({
-      continuationToken: memberPage.nextContinuationToken,
-      limit: 1,
-    });
-    assert.equal(unrelatedProviderPage.candidates.length, 0);
-    assert.ok(unrelatedProviderPage.nextContinuationToken);
-
     const targetProviderPage = await source.listCandidates({
-      continuationToken: unrelatedProviderPage.nextContinuationToken,
+      continuationToken: memberPage.nextContinuationToken,
       limit: 1,
     });
     expect(targetProviderPage.candidates).toHaveLength(1);
@@ -2561,7 +2783,7 @@ describe("Pulse Trial beta extension", () => {
       memberId: "member_target",
       providerSubscriptionId: "sub_target",
     });
-    assert.equal(targetProviderPage.nextContinuationToken, null);
+    assert.ok(targetProviderPage.nextContinuationToken);
     expect(list).toHaveBeenNthCalledWith(2, {
       limit: 1,
       starting_after: "sub_unrelated",
@@ -2570,6 +2792,156 @@ describe("Pulse Trial beta extension", () => {
       maxNetworkRetries: 0,
       timeout: 80_000,
     });
+
+    const localPage = await source.listCandidates({
+      continuationToken: targetProviderPage.nextContinuationToken,
+      limit: 1,
+    });
+    expect(localPage.candidates).toHaveLength(0);
+    expect(localPage.nextContinuationToken).toBeNull();
+    expect(findMany).toHaveBeenCalledOnce();
+  });
+
+  test("member-scoped traversal returns every exact provider obligation before its local candidate", async () => {
+    const firstProviderSubscription = makeSubscription({
+      id: "sub_provider_a",
+      metadata: {
+        billingPlanCode: "launch_monthly",
+        checkoutOffer: "pulse_trial_7d",
+        memberId: "member_target",
+        trialDurationDays: "10",
+        trialPolicyVersion: "pulse-trial-2026-06-30-v2",
+        trialUsageLimitUsdMicros: "4500000",
+      },
+    });
+    const secondProviderSubscription = {
+      ...firstProviderSubscription,
+      id: "sub_provider_b",
+    };
+    const localRecord = makePrismaCandidateRecord("member_target");
+    const findMany = vi.fn(async () => [localRecord]);
+    const source = createPrismaHostedPulseTrialExtensionCandidateSource({
+      hostedMemberBillingRef: {
+        findMany,
+        findUnique: vi.fn(async () => localRecord),
+      },
+    } as never, {
+      campaignRecovery: {
+        priceId: PRICE_ID,
+        stripe: {
+          subscriptions: {
+            list: vi.fn(async () => ({
+              data: [firstProviderSubscription, secondProviderSubscription],
+              has_more: false,
+            })),
+          },
+        } as never,
+      },
+      memberId: "member_target",
+    });
+
+    const providerPage = await source.listCandidates({
+      continuationToken: null,
+      limit: 10,
+    });
+    expect(providerPage.candidates.map((candidate) => candidate.providerSubscriptionId))
+      .toEqual(["sub_provider_a", "sub_provider_b"]);
+    expect(findMany).not.toHaveBeenCalled();
+    expect(providerPage.nextContinuationToken).not.toBeNull();
+
+    const localPage = await source.listCandidates({
+      continuationToken: providerPage.nextContinuationToken,
+      limit: 10,
+    });
+    expect(localPage.candidates).toHaveLength(1);
+    expect(localPage.candidates[0]?.memberId).toBe("member_target");
+    expect(findMany).toHaveBeenCalledOnce();
+  });
+
+  test("member-scoped provider traversal retries the same first page after a provider failure", async () => {
+    const providerSubscription = makeSubscription({
+      id: "sub_provider_retry",
+      metadata: {
+        billingPlanCode: "launch_monthly",
+        checkoutOffer: "pulse_trial_7d",
+        memberId: "member_target",
+        trialDurationDays: "10",
+        trialPolicyVersion: "pulse-trial-2026-06-30-v2",
+        trialUsageLimitUsdMicros: "4500000",
+      },
+    });
+    const list = vi.fn()
+      .mockRejectedValueOnce(new Error("temporary provider failure"))
+      .mockResolvedValueOnce({ data: [providerSubscription], has_more: false });
+    const source = createPrismaHostedPulseTrialExtensionCandidateSource({
+      hostedMemberBillingRef: {
+        findMany: vi.fn(async () => []),
+        findUnique: vi.fn(async () => null),
+      },
+      hostedMember: {
+        findUnique: vi.fn(async () => ({
+          billingRef: null,
+          billingStatus: "not_started",
+          createdAt: new Date("2026-07-01T12:00:00.000Z"),
+          id: "member_target",
+          suspendedAt: null,
+          updatedAt: new Date("2026-07-01T12:00:00.000Z"),
+        })),
+      },
+    } as never, {
+      campaignRecovery: {
+        priceId: PRICE_ID,
+        stripe: { subscriptions: { list } } as never,
+      },
+      memberId: "member_target",
+    });
+
+    await expect(source.listCandidates({ continuationToken: null, limit: 10 }))
+      .rejects.toThrow("temporary provider failure");
+    await expect(source.listCandidates({ continuationToken: null, limit: 10 }))
+      .resolves.toMatchObject({
+        candidates: [expect.objectContaining({
+          providerSubscriptionId: "sub_provider_retry",
+        })],
+      });
+    expect(list).toHaveBeenNthCalledWith(1, {
+      limit: 10,
+      status: "all",
+    }, expect.anything());
+    expect(list).toHaveBeenNthCalledWith(2, {
+      limit: 10,
+      status: "all",
+    }, expect.anything());
+  });
+
+  test("member-scoped traversal moves from an empty provider phase to its finalized local trial", async () => {
+    const localRecord = makePrismaCandidateRecord("member_target");
+    const findMany = vi.fn(async () => [localRecord]);
+    const source = createPrismaHostedPulseTrialExtensionCandidateSource({
+      hostedMemberBillingRef: {
+        findMany,
+      },
+    } as never, {
+      campaignRecovery: {
+        priceId: PRICE_ID,
+        stripe: {
+          subscriptions: {
+            list: vi.fn(async () => ({ data: [], has_more: false })),
+          },
+        } as never,
+      },
+      memberId: "member_target",
+    });
+
+    const page = await source.listCandidates({
+      continuationToken: null,
+      limit: 10,
+    });
+
+    expect(page.candidates).toHaveLength(1);
+    expect(page.candidates[0]?.memberId).toBe("member_target");
+    expect(page.candidates[0]?.providerSubscriptionId).toBeNull();
+    expect(findMany).toHaveBeenCalledOnce();
   });
 
   test("continuations cannot cross all-member or member-specific scopes", async () => {
@@ -2610,7 +2982,14 @@ describe("Pulse Trial beta extension", () => {
       {
         campaignRecovery: {
           priceId: PRICE_ID,
-          stripe: { subscriptions: { list: vi.fn() } } as never,
+          stripe: {
+            subscriptions: {
+              list: vi.fn(async () => ({
+                data: [unrelatedSubscription],
+                has_more: true,
+              })),
+            },
+          } as never,
         },
         memberId: "member_a",
       },
@@ -2630,7 +3009,14 @@ describe("Pulse Trial beta extension", () => {
       {
         campaignRecovery: {
           priceId: PRICE_ID,
-          stripe: { subscriptions: { list: vi.fn() } } as never,
+          stripe: {
+            subscriptions: {
+              list: vi.fn(async () => ({
+                data: [unrelatedSubscription],
+                has_more: true,
+              })),
+            },
+          } as never,
         },
         memberId: "member_b",
       },
@@ -3093,6 +3479,7 @@ function makeSubscription(
     id: "sub_test",
     items: {
       data: [makeSubscriptionItem()],
+      has_more: false,
     },
     metadata: {
       billingPlanCode: "launch_monthly",

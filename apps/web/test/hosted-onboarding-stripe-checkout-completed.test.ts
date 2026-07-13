@@ -1,11 +1,12 @@
 import { HostedBillingStatus } from "@prisma/client";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { HostedMemberBillingSnapshot } from "@/src/lib/hosted-onboarding/hosted-member-store";
 
 const mocks = vi.hoisted(() => ({
   activateHostedMemberForPositiveSourceTx: vi.fn(),
   findMemberForStripeCheckoutSession: vi.fn(),
+  findMemberForStripeSubscription: vi.fn(),
   listHostedStripeCheckoutSessionMemberIds: vi.fn(),
   lockHostedMemberRow: vi.fn(),
   readHostedMemberBillingSnapshot: vi.fn(),
@@ -64,6 +65,7 @@ vi.mock("@/src/lib/hosted-onboarding/stripe-billing-lookup", async () => {
   return {
     ...actual,
     findMemberForStripeCheckoutSession: mocks.findMemberForStripeCheckoutSession,
+    findMemberForStripeSubscription: mocks.findMemberForStripeSubscription,
     listHostedStripeCheckoutSessionMemberIds: mocks.listHostedStripeCheckoutSessionMemberIds,
   };
 });
@@ -80,19 +82,30 @@ vi.mock("@/src/lib/hosted-onboarding/stripe-billing-policy", async () => {
 });
 
 vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
+  requireHostedStripeBillingPlanConfig: () => ({
+    billingPlanCode: "launch_monthly",
+    priceId: "price_pulse_monthly_123",
+    stripe: mocks.requireHostedStripeApi(),
+  }),
   requireHostedStripeApi: mocks.requireHostedStripeApi,
 }));
 
 import {
   applyStripeCheckoutCompleted,
+  applyStripeSubscriptionUpdated,
   cancelHostedPulseTrialCheckoutLoserSubscription,
 } from "@/src/lib/hosted-onboarding/stripe-billing-events";
 
 describe("applyStripeCheckoutCompleted", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.stubEnv(
+      "HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_MONTHLY",
+      "price_pulse_monthly_123",
+    );
     mocks.lockHostedMemberRow.mockResolvedValue(undefined);
     mocks.findMemberForStripeCheckoutSession.mockResolvedValue(makeMemberSnapshot());
+    mocks.findMemberForStripeSubscription.mockResolvedValue(null);
     mocks.listHostedStripeCheckoutSessionMemberIds.mockResolvedValue(["member_123"]);
     mocks.readHostedMemberBillingSnapshot.mockResolvedValue(makeMemberSnapshot());
     mocks.requireHostedStripeApi.mockReturnValue({
@@ -105,7 +118,10 @@ describe("applyStripeCheckoutCompleted", () => {
       id: "sub_delayed_checkout",
       status: "canceled",
     });
-    mocks.retrieveStripeSubscription.mockResolvedValue(makePulseTrialSubscription());
+    mocks.retrieveStripeSubscription.mockImplementation(async (subscriptionId: string) => ({
+      ...makePulseTrialSubscription(),
+      id: subscriptionId,
+    }));
     mocks.writeHostedMemberStripeBillingRef.mockResolvedValue({
       lastStripeEventCreatedAt: new Date("2025-04-12T00:00:00.000Z"),
       memberId: "member_123",
@@ -142,6 +158,10 @@ describe("applyStripeCheckoutCompleted", () => {
       hostedExecutionEventId: "wake_123",
       memberId: "member_123",
     });
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
   });
 
   it("writes checkout-session refs with a session-derived freshness watermark", async () => {
@@ -550,7 +570,112 @@ describe("applyStripeCheckoutCompleted", () => {
     expect(mocks.activateHostedMemberForPositiveSourceTx).not.toHaveBeenCalled();
   });
 
+  it("returns an exact Pulse Trial checkout for cleanup when active non-trial access has no subscription", async () => {
+    mocks.findMemberForStripeCheckoutSession.mockResolvedValueOnce(makeMemberSnapshot({
+      billingRef: {
+        currentBillingPhase: null,
+        memberId: "member_123",
+        stripeCustomerId: "cus_123",
+        stripeSubscriptionId: null,
+      },
+      billingStatus: HostedBillingStatus.active,
+    }));
+    const session = {
+      ...makePulseTrialCheckoutSession(),
+      subscription: "sub_delayed_checkout",
+    };
+    const subscription = {
+      ...makePulseTrialSubscription(),
+      id: "sub_delayed_checkout",
+    };
+
+    await expect(applyStripeCheckoutCompleted(
+      session as never,
+      {} as never,
+      undefined,
+      subscription as never,
+    )).resolves.toMatchObject({
+      cleanupPulseTrialStripeSubscriptionId: "sub_delayed_checkout",
+    });
+
+    expect(mocks.writeHostedMemberStripeBillingTx).not.toHaveBeenCalled();
+  });
+
+  it("allows an incomplete member to replace a stale incomplete subscription with a new Pulse Trial", async () => {
+    mocks.findMemberForStripeCheckoutSession.mockResolvedValueOnce(makeMemberSnapshot({
+      billingRef: {
+        currentBillingPhase: null,
+        memberId: "member_123",
+        pulseTrialRedeemedAt: null,
+        stripeCustomerId: "cus_123",
+        stripeSubscriptionId: "sub_incomplete_old",
+      },
+      billingStatus: HostedBillingStatus.incomplete,
+    }));
+    const session = {
+      ...makePulseTrialCheckoutSession(),
+      subscription: "sub_trial_replacement",
+    };
+    const subscription = {
+      ...makePulseTrialSubscription(),
+      id: "sub_trial_replacement",
+    };
+
+    const outcome = await applyStripeCheckoutCompleted(
+      session as never,
+      {} as never,
+      undefined,
+      subscription as never,
+    );
+
+    expect(outcome).not.toHaveProperty("cleanupPulseTrialStripeSubscriptionId");
+    expect(mocks.writeHostedMemberStripeBillingTx).toHaveBeenCalledWith(
+      expect.objectContaining({
+        stripeSubscriptionId: "sub_trial_replacement",
+      }),
+    );
+  });
+
+  it("ignores and returns a subscription-created Pulse Trial loser for cleanup", async () => {
+    mocks.findMemberForStripeSubscription.mockResolvedValueOnce(makeMemberSnapshot({
+      billingRef: {
+        currentBillingPhase: null,
+        memberId: "member_123",
+        stripeCustomerId: "cus_123",
+        stripeSubscriptionId: null,
+      },
+      billingStatus: HostedBillingStatus.active,
+    }));
+    const subscription = {
+      ...makePulseTrialSubscription(),
+    };
+
+    await expect(applyStripeSubscriptionUpdated(
+      subscription as never,
+      {
+        eventCreatedAt: new Date("2025-04-12T00:00:01.000Z"),
+        occurredAt: "2025-04-12T00:00:01.000Z",
+        sourceEventId: "evt_subscription_created_123",
+        sourceType: "stripe.customer.subscription.created",
+      },
+      {} as never,
+    )).resolves.toMatchObject({
+      cleanupPulseTrialStripeSubscriptionId: "sub_123",
+    });
+
+    expect(mocks.writeHostedMemberStripeBillingTx).not.toHaveBeenCalled();
+  });
+
   it("treats an already-absent delayed Pulse Trial subscription as cleaned up", async () => {
+    mocks.readHostedMemberBillingSnapshot.mockResolvedValueOnce(makeMemberSnapshot({
+      billingRef: {
+        currentBillingPhase: "paid",
+        memberId: "member_123",
+        stripeCustomerId: "cus_123",
+        stripeSubscriptionId: "sub_paid_123",
+      },
+      billingStatus: HostedBillingStatus.active,
+    }));
     mocks.cancelStripeSubscription.mockRejectedValueOnce({
       code: "resource_missing",
     });
@@ -584,6 +709,139 @@ describe("applyStripeCheckoutCompleted", () => {
       subscriptionId: "sub_delayed_checkout",
     })).rejects.toMatchObject({
       code: "HOSTED_PULSE_TRIAL_CLEANUP_OWNER_CHANGED",
+      retryable: true,
+    });
+
+    expect(mocks.cancelStripeSubscription).not.toHaveBeenCalled();
+  });
+
+  it("cancels a loser when the locked reread confirms active non-trial access without a subscription", async () => {
+    mocks.readHostedMemberBillingSnapshot.mockResolvedValueOnce(makeMemberSnapshot({
+      billingRef: {
+        currentBillingPhase: null,
+        memberId: "member_123",
+        stripeCustomerId: "cus_123",
+        stripeSubscriptionId: null,
+      },
+      billingStatus: HostedBillingStatus.active,
+    }));
+
+    await expect(cancelHostedPulseTrialCheckoutLoserSubscription({
+      memberId: "member_123",
+      prisma: {
+        $transaction: async (run: (tx: object) => Promise<unknown>) => run({}),
+      } as never,
+      subscriptionId: "sub_delayed_checkout",
+    })).resolves.toBeUndefined();
+
+    expect(mocks.cancelStripeSubscription).toHaveBeenCalledWith("sub_delayed_checkout");
+  });
+
+  it.each([
+    [
+      "the base quantity changes",
+      () => {
+        const subscription = makePulseTrialSubscription();
+        return {
+          ...subscription,
+          items: {
+            data: [{
+              ...(subscription.items as { data: Array<Record<string, unknown>> }).data[0],
+              quantity: 2,
+            }],
+            has_more: false,
+          },
+        };
+      },
+    ],
+    [
+      "the base billing interval changes",
+      () => {
+        const subscription = makePulseTrialSubscription();
+        const baseItem = (subscription.items as {
+          data: Array<Record<string, unknown>>;
+        }).data[0]!;
+        return {
+          ...subscription,
+          items: {
+            data: [{
+              ...baseItem,
+              price: {
+                ...(baseItem.price as Record<string, unknown>),
+                recurring: {
+                  interval: "month",
+                  interval_count: 12,
+                  usage_type: "licensed",
+                },
+              },
+            }],
+            has_more: false,
+          },
+        };
+      },
+    ],
+    [
+      "an unrelated recurring item is added",
+      () => {
+        const subscription = makePulseTrialSubscription();
+        return {
+          ...subscription,
+          items: {
+            data: [
+              ...(subscription.items as { data: Array<Record<string, unknown>> }).data,
+              {
+                id: "si_unrelated_123",
+                price: {
+                  id: "price_unrelated_123",
+                  recurring: {
+                    interval: "month",
+                    usage_type: "licensed",
+                  },
+                },
+                quantity: 1,
+              },
+            ],
+            has_more: false,
+          },
+        };
+      },
+    ],
+    [
+      "the provider item list is incomplete",
+      () => {
+        const subscription = makePulseTrialSubscription();
+        return {
+          ...subscription,
+          items: {
+            ...(subscription.items as Record<string, unknown>),
+            has_more: true,
+          },
+        };
+      },
+    ],
+  ])("refuses cleanup when %s before the final provider reread", async (_case, mutate) => {
+    mocks.readHostedMemberBillingSnapshot.mockResolvedValueOnce(makeMemberSnapshot({
+      billingRef: {
+        currentBillingPhase: null,
+        memberId: "member_123",
+        stripeCustomerId: "cus_123",
+        stripeSubscriptionId: null,
+      },
+      billingStatus: HostedBillingStatus.active,
+    }));
+    mocks.retrieveStripeSubscription.mockResolvedValueOnce({
+      ...mutate(),
+      id: "sub_delayed_checkout",
+    });
+
+    await expect(cancelHostedPulseTrialCheckoutLoserSubscription({
+      memberId: "member_123",
+      prisma: {
+        $transaction: async (run: (tx: object) => Promise<unknown>) => run({}),
+      } as never,
+      subscriptionId: "sub_delayed_checkout",
+    })).rejects.toMatchObject({
+      code: "HOSTED_PULSE_TRIAL_CLEANUP_TARGET_CHANGED",
       retryable: true,
     });
 
@@ -632,6 +890,7 @@ describe("applyStripeCheckoutCompleted", () => {
 });
 
 function makePulseTrialCheckoutSession(): Record<string, unknown> {
+  const metadata = makePulseTrialMetadata();
   return {
     client_reference_id: "member_123",
     created: 1_744_416_000,
@@ -640,37 +899,48 @@ function makePulseTrialCheckoutSession(): Record<string, unknown> {
       email: " payer@example.com ",
     },
     id: "cs_trial_123",
-    metadata: {
-      billingPlanCode: "launch_monthly",
-      checkoutOffer: "pulse_trial_7d",
-      memberId: "member_123",
-      trialDurationDays: "10",
-      trialPolicyVersion: "pulse-trial-2026-06-30-v2",
-      trialUsageLimitUsdMicros: "4500000",
-    },
+    metadata,
     mode: "subscription",
     status: "complete",
-    subscription: {
-      id: "sub_123",
-      customer: "cus_123",
-      current_period_end: 1_745_020_800,
-      current_period_start: 1_744_416_000,
-      status: "trialing",
-      trial_end: 1_745_020_800,
-      trial_start: 1_744_416_000,
-    },
+    subscription: makePulseTrialSubscription(),
   };
 }
 
 function makePulseTrialSubscription(): Record<string, unknown> {
   return {
     id: "sub_123",
+    items: {
+      data: [{
+        id: "si_pulse_123",
+        price: {
+          id: "price_pulse_monthly_123",
+          recurring: {
+            interval: "month",
+            usage_type: "licensed",
+          },
+        },
+        quantity: 1,
+      }],
+      has_more: false,
+    },
+    metadata: makePulseTrialMetadata(),
     customer: "cus_123",
     current_period_end: 1_745_020_800,
     current_period_start: 1_744_416_000,
     status: "trialing",
     trial_end: 1_745_020_800,
     trial_start: 1_744_416_000,
+  };
+}
+
+function makePulseTrialMetadata(): Record<string, string> {
+  return {
+    billingPlanCode: "launch_monthly",
+    checkoutOffer: "pulse_trial_7d",
+    memberId: "member_123",
+    trialDurationDays: "10",
+    trialPolicyVersion: "pulse-trial-2026-06-30-v2",
+    trialUsageLimitUsdMicros: "4500000",
   };
 }
 
