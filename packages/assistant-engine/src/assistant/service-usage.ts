@@ -34,6 +34,7 @@ export interface AssistantUsageProviderResult {
 
 export async function recordAssistantUsageEvent(input: {
   executionContext: AssistantExecutionContext
+  providerRequestAcceptedInputIds?: readonly string[]
   providerRequestOutcome?: AssistantProviderRequestOutcome
   providerRequestOrdinal?: number
   providerResult: AssistantUsageProviderResult
@@ -98,7 +99,10 @@ export async function recordAssistantUsageEvent(input: {
       turnProfileJson: usage.turnProfileJson ?? null,
     }
 
-    void usageRecorder.recordUsage(record).catch((error: unknown) => {
+    const recording = input.providerRequestAcceptedInputIds === undefined
+      ? usageRecorder.recordUsage(record)
+      : usageRecorder.recordUsage(record, input.providerRequestAcceptedInputIds)
+    void recording.catch((error: unknown) => {
       warnAssistantUsageRecordingFailure(error)
     })
   } catch (error) {
@@ -110,6 +114,7 @@ export async function recordAdditionalAssistantUsageEvents(input: {
   additionalUsages: readonly AssistantProviderUsageDraft[] | null | undefined
   effectiveEnv: Readonly<Record<string, string | undefined>>
   executionContext: AssistantExecutionContext
+  providerRequestAcceptedInputIds?: readonly string[]
   providerResult: AssistantUsageProviderResult
   turnId: string
 }): Promise<void> {
@@ -134,6 +139,12 @@ export async function recordAdditionalAssistantUsageEvents(input: {
       : null
     await recordAssistantUsageEvent({
       executionContext: input.executionContext,
+      ...(input.providerRequestAcceptedInputIds === undefined
+        ? {}
+        : {
+            providerRequestAcceptedInputIds:
+              input.providerRequestAcceptedInputIds,
+          }),
       providerRequestOrdinal: usageDraft.providerRequestOrdinal,
       providerRequestOutcome: usageDraft.providerRequestOutcome,
       providerResult: {

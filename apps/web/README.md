@@ -784,6 +784,16 @@ writes that dropped shape. Rolling back below that floor requires restoring or
 re-expanding the database shape first, or deploying a forward fix. Cloudflare
 `container_rollout=immediate` is not applicable to this Vercel-only lane; the
 bounded Vercel drain wait plus final alias check owns the old-function window.
+The group-join confirmation expansion migrations install two temporary
+legacy-facing triggers: one stamps eligibility on new join-code member rows
+inserted by warm old functions, and one clears Linq participant authority when
+those functions clear a home chat. The membership expansion also adds the
+nullable join-origin field used to keep web and group-chat-reaction copy stable
+across retries. Rows written by warm old functions leave that field null and
+use the neutral confirmation. The
+`20260711230000_drop_group_join_compatibility_bridges` contract migration
+removes both only after the consumer-capable production deployment is live and
+the guarded prior-function drain and alias proof have completed.
 The first assistant-personality causal rollout follows that same split. Apply
 the nullable sequence expansion and deploy the sequence-producing web build
 with personality writes gated off. The automatic post-deploy contract lane

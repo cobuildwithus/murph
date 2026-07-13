@@ -99,12 +99,12 @@ export function createPhoneCallRequestKey(input: {
   return `phone_call_${digest}`
 }
 
-export function resolveAssistantPhoneCallAcceptedInputIds(input: {
+export function resolveAssistantUserActionAcceptedInputIds(input: {
   acceptedInputItems: readonly AssistantAcceptedTurnInputItemInput[]
   turnTrigger?: string | null
 }): readonly string[] {
   return input.acceptedInputItems
-    .filter((item) => isAssistantPhoneCallAcceptedInputEligible({
+    .filter((item) => isAssistantUserActionAcceptedInputEligible({
       id: item.id,
       source: item.source,
       turnTrigger: input.turnTrigger ?? null,
@@ -112,12 +112,12 @@ export function resolveAssistantPhoneCallAcceptedInputIds(input: {
     .map((item) => item.id)
 }
 
-function isAssistantPhoneCallAcceptedInputEligible(input: {
+function isAssistantUserActionAcceptedInputEligible(input: {
   id: string
   source: AssistantAcceptedTurnInputSource
   turnTrigger: string | null
 }): boolean {
-  if (!isPhoneCallTurnTriggerEligibleForUserInput(input.turnTrigger)) {
+  if (!isUserActionTurnTriggerEligibleForUserInput(input.turnTrigger)) {
     return false
   }
   if (input.id === SYNTHETIC_INITIAL_ACCEPTED_INPUT_ID) {
@@ -135,7 +135,7 @@ function isAssistantPhoneCallAcceptedInputEligible(input: {
   }
 }
 
-function isPhoneCallTurnTriggerEligibleForUserInput(turnTrigger: string | null): boolean {
+function isUserActionTurnTriggerEligibleForUserInput(turnTrigger: string | null): boolean {
   return turnTrigger === null ||
     turnTrigger === 'manual-ask' ||
     turnTrigger === 'manual-deliver' ||

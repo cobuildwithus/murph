@@ -523,8 +523,8 @@ export const vaultCliCommandDescriptors = [
       ],
       query: ['showVault', 'showVaultStats'],
     },
-    register({ cli, services }) {
-      registerVaultCommands(cli, services)
+    register({ cli, services, inboxServices }) {
+      registerVaultCommands(cli, services, inboxServices)
     },
   },
   {

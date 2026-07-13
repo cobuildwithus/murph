@@ -18,6 +18,9 @@ import {
   hostedOnboardingError,
 } from "@/src/lib/hosted-onboarding/errors";
 import {
+  acquireHostedMemberHomeLinqRouteLockTx,
+} from "@/src/lib/hosted-onboarding/hosted-member-routing-store";
+import {
   jsonOk,
   withJsonError,
 } from "@/src/lib/hosted-onboarding/http";
@@ -53,6 +56,12 @@ export const POST = withJsonError(async (request: Request) => {
   const prisma = getPrisma();
 
   const assertion = await prisma.$transaction(async (tx) => {
+    if (targetKind !== "participant" && !routeAuthority && !currentInbound) {
+      await acquireHostedMemberHomeLinqRouteLockTx({
+        memberId: userId,
+        prisma: tx,
+      });
+    }
     if (targetKind !== "participant" && target) {
       await acquireHostedLinqChatOwnershipLockTx({
         chatId: target,

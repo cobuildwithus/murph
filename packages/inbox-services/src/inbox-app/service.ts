@@ -4,6 +4,7 @@ import { createInboxPromotionOps } from './promotions.js'
 import { createInboxReadOps } from './reads.js'
 import { createInboxRuntimeOps } from './runtime.js'
 import { createInboxSourceOps } from './sources.js'
+import { createInboxStorageRepairOps } from './storage-repair.js'
 
 import type {
   InboxServices,
@@ -18,6 +19,7 @@ export function createIntegratedInboxServices(
   return {
     ...createInboxBootstrapDoctorOps(env),
     ...createInboxSourceOps(env),
+    ...createInboxStorageRepairOps(env),
     ...createInboxRuntimeOps(env),
     ...createInboxReadOps(env),
     ...createInboxPromotionOps(env),

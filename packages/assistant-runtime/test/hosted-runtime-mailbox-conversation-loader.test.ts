@@ -51,7 +51,7 @@ test("lazy conversation events import retries after rejection while preserving p
           captureId: "capture_after_retry",
           createdAt: TEST_NOW,
           deduped: false,
-          envelopePath: "raw/inbox/linq/capture_after_retry/envelope.json",
+          sourceDirectory: "raw/inbox/linq/capture_after_retry",
           eventId: "evt_capture_after_retry",
         },
         metrics: {

@@ -3424,7 +3424,7 @@ test("validateVault accepts expired raw inbox media for the matching inbox captu
     vaultRoot,
     relativePath: "ledger/inbox-captures/2026/2026-06.jsonl",
     record: {
-      schemaVersion: "murph.inbox-capture.v1",
+      schemaVersion: "murph.inbox-capture.v2",
       captureId: "cap_retention_expired",
       identityKey: "telegram:self:msg-expired",
       eventId: "evt_01JQ8PWXP5A68SQM1W0GYM40V6",
@@ -3447,7 +3447,6 @@ test("validateVault accepts expired raw inbox media for the matching inbox captu
       text: "expired media",
       raw: {},
       sourceDirectory: "raw/inbox/cap_retention_expired",
-      envelopePath: "raw/inbox/cap_retention_expired/envelope.json",
       rawRefs: [],
       attachments: [
         {

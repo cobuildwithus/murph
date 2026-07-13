@@ -1874,9 +1874,15 @@ test('sendAssistantMessageLocal live-steers same-conversation input without prov
   ).toBe(true)
   assert.deepEqual(
     mocks.recordAssistantUsageEvent.mock.calls.map(
-      (call) => call[0]?.providerRequestOrdinal,
+      (call) => ({
+        inputIds: call[0]?.providerRequestAcceptedInputIds,
+        ordinal: call[0]?.providerRequestOrdinal,
+      }),
     ),
-    [0],
+    [{
+      inputIds: ['initial', 'manual-1'],
+      ordinal: 0,
+    }],
   )
   assert.equal(
     mocks.runtimeState.turns.acceptedInputs.updateAdmissionState.mock.calls[0]?.[0]
@@ -2858,8 +2864,12 @@ test('sendAssistantMessageLocal live-steers same-conversation input without a se
         input.ordinal === 0 &&
         input.turnId === 'turn-1' &&
         input.acceptedInputIds?.join(',') === 'initial,manual-1'
-      ),
+    ),
   ).toBe(true)
+  expect(
+    mocks.recordAssistantUsageEvent.mock.calls[0]?.[0]
+      ?.providerRequestAcceptedInputIds,
+  ).toEqual(['initial', 'manual-1'])
 })
 
 test('sendAssistantMessageLocal keeps provider success when live steer misses provider close', async () => {
@@ -3456,6 +3466,10 @@ test('sendAssistantMessageLocal journals live-steered input before terminal prov
         input.acceptedInputIds?.join(',') === 'initial,manual-1'
       ),
   ).toBe(true)
+  expect(
+    mocks.recordAssistantUsageEvent.mock.calls[0]?.[0]
+      ?.providerRequestAcceptedInputIds,
+  ).toEqual(['initial', 'manual-1'])
 })
 
 test('sendAssistantMessageLocal registers manual steering before prompt persistence completes', async () => {
@@ -4759,6 +4773,7 @@ test('sendAssistantMessageLocal runs best-effort failure cleanup and rethrows te
     mocks.recordAssistantUsageEvent.mock.calls[0]?.[0],
     {
       executionContext: null,
+      providerRequestAcceptedInputIds: ['initial'],
       providerRequestOrdinal: 0,
       providerRequestOutcome: 'failed',
       providerResult: {
@@ -7357,10 +7372,16 @@ async function loadLocalServiceModule(input?: {
       ) => undefined,
     ),
     recordAdditionalAssistantUsageEvents: vi.fn(
-      async (_input: { providerRequestOrdinal?: number }) => undefined,
+      async (_input: {
+        providerRequestAcceptedInputIds?: readonly string[]
+        providerRequestOrdinal?: number
+      }) => undefined,
     ),
     recordAssistantUsageEvent: vi.fn(
-      async (_input: { providerRequestOrdinal?: number }) => undefined,
+      async (_input: {
+        providerRequestAcceptedInputIds?: readonly string[]
+        providerRequestOrdinal?: number
+      }) => undefined,
     ),
     runtimeState: {
       turns: {
