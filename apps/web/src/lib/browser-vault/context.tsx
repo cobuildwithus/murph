@@ -74,22 +74,24 @@ const anonymousBrowserVaultContext: BrowserVaultContextValue = {
 };
 
 export function BrowserVaultProvider({
-  authenticated,
+  authorized,
   children,
+  memberId,
 }: {
-  authenticated: boolean;
+  authorized: boolean;
   children: ReactNode;
+  memberId: string | null;
 }) {
-  // The current dashboard server result owns auth for this route transition.
-  // Hide the client synchronously, then clear module memory before paint so a
-  // snapshot warmed under an older root document cannot become authority.
+  // The route template's current server result owns vault authority. Hide the
+  // client synchronously and clear denied or mismatched memory before paint.
   useLayoutEffect(() => {
-    if (!authenticated) {
+    const snapshot = getBrowserVaultReadySnapshot();
+    if (!authorized || !memberId || (snapshot && snapshot.memberId !== memberId)) {
       clearBrowserVaultWarmState();
     }
-  }, [authenticated]);
+  }, [authorized, memberId]);
 
-  if (!authenticated) {
+  if (!authorized || !memberId) {
     return (
       <BrowserVaultContext.Provider value={anonymousBrowserVaultContext}>
         {children}
@@ -97,14 +99,25 @@ export function BrowserVaultProvider({
     );
   }
 
-  return <AuthenticatedBrowserVaultProvider>{children}</AuthenticatedBrowserVaultProvider>;
+  return (
+    <AuthenticatedBrowserVaultProvider key={memberId} memberId={memberId}>
+      {children}
+    </AuthenticatedBrowserVaultProvider>
+  );
 }
 
-function AuthenticatedBrowserVaultProvider({ children }: { children: ReactNode }) {
+function AuthenticatedBrowserVaultProvider({
+  children,
+  memberId,
+}: {
+  children: ReactNode;
+  memberId: string;
+}) {
   const pathname = usePathname();
   // Seed lazily from the module-memory ready snapshot so a warmed landing page
   // shows decrypted data on the first paint and revalidates in the background.
-  const initialSnapshot = getBrowserVaultReadySnapshot();
+  const warmSnapshot = getBrowserVaultReadySnapshot();
+  const initialSnapshot = warmSnapshot?.memberId === memberId ? warmSnapshot : null;
   const [status, setStatus] = useState<BrowserVaultStatus>(initialSnapshot ? "ready" : "loading");
   const [error, setError] = useState<string | null>(null);
   const [freshness, setFreshness] = useState<BrowserVaultFreshness>(
@@ -168,6 +181,10 @@ function AuthenticatedBrowserVaultProvider({ children }: { children: ReactNode }
         return;
       }
       if (outcome.status === "ready") {
+        if (outcome.snapshot.memberId !== memberId) {
+          clearDecryptedClient();
+          return;
+        }
         commitReady(outcome.snapshot);
         return;
       }
@@ -194,7 +211,7 @@ function AuthenticatedBrowserVaultProvider({ children }: { children: ReactNode }
       setStatus("error");
       setError(outcome.message);
     },
-    [clearDecryptedClient, commitEmpty, commitReady],
+    [clearDecryptedClient, commitEmpty, commitReady, memberId],
   );
 
   const runProviderLoad = useCallback(
@@ -240,12 +257,18 @@ function AuthenticatedBrowserVaultProvider({ children }: { children: ReactNode }
     // Subscribing before the recheck closes both sides of the render-to-effect
     // gap: an earlier invalidation already cleared the store, while a later one
     // reaches this listener. A different client is a different decrypted owner.
-    if (clientRef.current && currentSnapshot?.client !== clientRef.current) {
+    if (
+      clientRef.current
+      && (
+        currentSnapshot?.client !== clientRef.current
+        || currentSnapshot.memberId !== memberId
+      )
+    ) {
       clearDecryptedClient();
     }
 
     return unsubscribe;
-  }, [clearDecryptedClient]);
+  }, [clearDecryptedClient, memberId]);
 
   useEffect(() => {
     mountedRef.current = true;

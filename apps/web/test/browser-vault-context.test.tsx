@@ -160,7 +160,7 @@ test("browser-vault provider skips the session route when auth context is anonym
   vi.stubGlobal("fetch", fetchMock);
 
   const rendered = await renderClientComponent(
-    <BrowserVaultProvider authenticated={false}>
+    <BrowserVaultProvider authorized={false} memberId={null}>
       <BrowserVaultStatusProbe />
     </BrowserVaultProvider>,
     { requireButton: false },
@@ -179,7 +179,7 @@ test("browser-vault provider refresh skips the session route when auth context i
   vi.stubGlobal("fetch", fetchMock);
 
   const rendered = await renderClientComponent(
-    <BrowserVaultProvider authenticated={false}>
+    <BrowserVaultProvider authorized={false} memberId={null}>
       <BrowserVaultStatusProbe />
     </BrowserVaultProvider>,
     { requireButton: false },
@@ -302,7 +302,7 @@ test("browser-vault provider polls pending refreshes without a global sync indic
   await rendered.cleanup();
 });
 
-test("current dashboard authority hides ready data even while root auth remains stale", async () => {
+test("current dashboard vault authority hides ready data even while root auth remains stale", async () => {
   const ref = createReplicaRef();
   const fetchMock = vi.fn()
     .mockResolvedValueOnce(jsonResponse({
@@ -317,13 +317,16 @@ test("current dashboard authority hides ready data even while root auth remains 
   vi.stubGlobal("fetch", fetchMock);
 
   function AuthTransitionHarness() {
-    const [dashboardAuthenticated, setDashboardAuthenticated] = useState(true);
+    const [vaultAuthorized, setVaultAuthorized] = useState(true);
 
     return (
       <AuthProvider authenticated>
-        <BrowserVaultProvider authenticated={dashboardAuthenticated}>
+        <BrowserVaultProvider
+          authorized={vaultAuthorized}
+          memberId="member_123"
+        >
           <BrowserVaultStatusProbe
-            onClick={() => setDashboardAuthenticated(false)}
+            onClick={() => setVaultAuthorized(false)}
           />
         </BrowserVaultProvider>
       </AuthProvider>
@@ -344,6 +347,71 @@ test("current dashboard authority hides ready data even while root auth remains 
   assert.equal(rendered.container.textContent, "empty:none");
   assert.equal(fetchMock.mock.calls.length, 1);
   assert.equal(getBrowserVaultReadySnapshot(), null);
+
+  await rendered.cleanup();
+});
+
+test("denied server vault authority never adopts a matching warm snapshot", async () => {
+  const ref = createReplicaRef();
+  const fetchMock = vi.fn().mockResolvedValueOnce(jsonResponse({
+    encryptedReplica: createReplicaEnvelope(),
+    replicaAad: createReplicaAad(),
+    replicaKeyEnvelope: createReplicaKeyEnvelope(),
+    replicaRef: ref,
+    state: "ready",
+  }));
+
+  installBrowserVaultCryptoMocks();
+  vi.stubGlobal("fetch", fetchMock);
+
+  await startBrowserVaultWarmLoad();
+  assert.ok(getBrowserVaultReadySnapshot());
+
+  const rendered = await renderClientComponent(
+    <BrowserVaultProvider authorized={false} memberId="member_123">
+      <BrowserVaultStatusProbe />
+    </BrowserVaultProvider>,
+    { requireButton: false },
+  );
+
+  await waitForText(rendered.container, "empty:none");
+  assert.equal(rendered.container.textContent?.includes(ref.dataVersion), false);
+  assert.equal(getBrowserVaultReadySnapshot(), null);
+  assert.equal(fetchMock.mock.calls.length, 1);
+
+  await rendered.cleanup();
+});
+
+test("authorized member B never adopts member A's warm snapshot", async () => {
+  const ref = createReplicaRef();
+  const memberBResponse = createDeferred<Response>();
+  const fetchMock = vi.fn()
+    .mockResolvedValueOnce(jsonResponse({
+      encryptedReplica: createReplicaEnvelope(),
+      replicaAad: createReplicaAad(),
+      replicaKeyEnvelope: createReplicaKeyEnvelope(),
+      replicaRef: ref,
+      state: "ready",
+    }))
+    .mockImplementationOnce(() => memberBResponse.promise);
+
+  installBrowserVaultCryptoMocks();
+  vi.stubGlobal("fetch", fetchMock);
+
+  await startBrowserVaultWarmLoad();
+  assert.equal(getBrowserVaultReadySnapshot()?.memberId, "member_123");
+
+  const rendered = await renderClientComponent(
+    <BrowserVaultProvider authorized memberId="member_456">
+      <BrowserVaultStatusProbe />
+    </BrowserVaultProvider>,
+    { requireButton: false },
+  );
+
+  await waitForText(rendered.container, "loading:none");
+  assert.equal(rendered.container.textContent?.includes(ref.dataVersion), false);
+  assert.equal(getBrowserVaultReadySnapshot(), null);
+  assert.equal(fetchMock.mock.calls.length, 2);
 
   await rendered.cleanup();
 });
@@ -1103,7 +1171,9 @@ test("aborting an older load cannot clobber a newer in-flight load", async () =>
 function createAuthenticatedBrowserVaultElement(child: ReactNode) {
   return (
     <AuthProvider authenticated>
-      <BrowserVaultProvider authenticated>{child}</BrowserVaultProvider>
+      <BrowserVaultProvider authorized memberId="member_123">
+        {child}
+      </BrowserVaultProvider>
     </AuthProvider>
   );
 }

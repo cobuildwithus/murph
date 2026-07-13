@@ -9,13 +9,18 @@ function readSource(relativePath: string): string {
   return readFileSync(new URL(`../${relativePath}`, import.meta.url), "utf8");
 }
 
-test("the dashboard route-group layout owns the single BrowserVaultProvider", () => {
+test("the dashboard route-group template refreshes the single BrowserVaultProvider authority", () => {
   const layoutSource = readSource("app/(dashboard)/layout.tsx");
-  assert.match(layoutSource, /BrowserVaultProvider/u);
+  const templateSource = readSource("app/(dashboard)/template.tsx");
+
+  assert.doesNotMatch(layoutSource, /BrowserVaultProvider/u);
+  assert.match(templateSource, /getHostedBrowserVaultPageAuthority/u);
+  assert.match(templateSource, /BrowserVaultProvider/u);
   assert.match(
-    layoutSource,
-    /BrowserVaultProvider authenticated=\{sidebarAuth\.authenticated\}/u,
+    templateSource,
+    /authorized=\{authority\.authorized\}/u,
   );
+  assert.match(templateSource, /memberId=\{authority\.memberId\}/u);
 });
 
 test("dashboard route consumers no longer wrap their own BrowserVaultProvider", () => {
@@ -34,7 +39,7 @@ test("dashboard route consumers no longer wrap their own BrowserVaultProvider", 
     assert.doesNotMatch(
       readSource(relativePath),
       /BrowserVaultProvider/u,
-      `${relativePath} should rely on the persistent dashboard-layout provider`,
+      `${relativePath} should rely on the dashboard route-group template provider`,
     );
   }
 });

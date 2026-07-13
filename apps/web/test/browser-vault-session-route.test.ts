@@ -12,6 +12,7 @@ import { createJsonPostRequest } from "./route-test-helpers";
 vi.mock("server-only", () => ({}));
 
 const mocks = vi.hoisted(() => ({
+  assertBrowserVaultMemberAuthority: vi.fn(),
   afterResponse: vi.fn((callback: () => void | Promise<void>) => {
     void callback();
   }),
@@ -44,6 +45,11 @@ vi.mock("next/server", async (importOriginal) => {
 vi.mock("@/src/lib/hosted-execution/control", () => ({
   readHostedExecutionControlClientIfConfigured:
     mocks.readHostedExecutionControlClientIfConfigured,
+}));
+
+vi.mock("@/src/lib/browser-vault/authority", () => ({
+  assertBrowserVaultMemberAuthority:
+    mocks.assertBrowserVaultMemberAuthority,
 }));
 
 vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
@@ -114,6 +120,7 @@ describe("browser vault session route", () => {
     mocks.getPrisma.mockReturnValue(mocks.prismaClient);
     mocks.hasPendingDirtyConnectionForUser.mockResolvedValue(false);
     mocks.assertHostedLaunchRequiredConsentGranted.mockResolvedValue(undefined);
+    mocks.assertBrowserVaultMemberAuthority.mockResolvedValue(undefined);
     mocks.requireActivePrivyMemberAuth.mockResolvedValue({
       member: {
         id: "member_123",
@@ -167,8 +174,8 @@ describe("browser vault session route", () => {
 
     expect(response.status).toBe(200);
     expect(mocks.assertHostedOnboardingMutationOrigin).toHaveBeenCalledWith(expect.any(Request));
-    expect(mocks.requireActivePrivyMemberAuth).toHaveBeenCalledWith(expect.any(Request));
-    expect(mocks.assertHostedLaunchRequiredConsentGranted).toHaveBeenCalledWith({
+    expect(mocks.requireHostedAppSessionFromRequest).toHaveBeenCalledWith(expect.any(Request));
+    expect(mocks.assertBrowserVaultMemberAuthority).toHaveBeenCalledWith({
       memberId: "member_123",
       prisma: mocks.prismaClient,
     });
@@ -411,6 +418,7 @@ describe("browser vault session route", () => {
 
     expect(response.status).toBe(403);
     expect(mocks.requireActivePrivyMemberAuth).not.toHaveBeenCalled();
+    expect(mocks.assertBrowserVaultMemberAuthority).not.toHaveBeenCalled();
     expect(mocks.assertHostedLaunchRequiredConsentGranted).not.toHaveBeenCalled();
     expect(mocks.readHostedWorkspace).not.toHaveBeenCalled();
     await expect(response.json()).resolves.toMatchObject({
@@ -422,9 +430,9 @@ describe("browser vault session route", () => {
     });
   });
 
-  it("requires launch legal consent before reading browser vault state", async () => {
+  it("requires current member authority before reading browser vault state", async () => {
     const browser = await generateHostedUserRecipientKeyPair();
-    mocks.assertHostedLaunchRequiredConsentGranted.mockRejectedValue(hostedOnboardingError({
+    mocks.assertBrowserVaultMemberAuthority.mockRejectedValue(hostedOnboardingError({
       code: "HOSTED_CONSENT_REQUIRED",
       httpStatus: 403,
       message: "Accept the current Murph legal consent before continuing.",

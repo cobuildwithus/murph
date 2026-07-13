@@ -15,7 +15,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("server-only", () => ({}));
 
-// The persistent dashboard-layout provider owns the browser vault, so the home
+// The dashboard route-group template owns the browser vault, so the home
 // page body reads it through context. Stub it here since these tests render the
 // page in isolation without the layout.
 vi.mock("@/src/lib/browser-vault/context", () => ({

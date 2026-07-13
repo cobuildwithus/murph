@@ -40,6 +40,7 @@ export type BrowserVaultSessionLoadResult =
     })
   | (BrowserVaultSessionMetadata & {
       client: BrowserVaultQueryClient;
+      memberId: string;
       replicaRef: HostedBrowserVaultReplicaRef;
       state: "ready";
     });
@@ -187,6 +188,7 @@ export async function loadBrowserVaultReplica({
     client: createBrowserVaultQueryClient(replica),
     deviceSyncImportPending: session.deviceSyncImportPending,
     freshness: session.freshness,
+    memberId: session.replicaAad.userId,
     replicaRef: session.replicaRef,
     refreshPending: session.refreshPending,
     state: "ready",

@@ -2,7 +2,12 @@ import { HostedBillingStatus, type HostedMember } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
+  assertBrowserVaultMemberAuthority: vi.fn(),
   getHostedAppSession: vi.fn(),
+  getPrisma: vi.fn(),
+  prismaClient: {
+    label: "test-prisma",
+  },
   readActiveHostedMemberAccess: vi.fn(),
   redirect: vi.fn((path: string) => {
     throw new Error(`NEXT_REDIRECT:${path}`);
@@ -19,6 +24,15 @@ vi.mock("@/src/lib/hosted-onboarding/app-session", () => ({
   getHostedAppSession: mocks.getHostedAppSession,
 }));
 
+vi.mock("@/src/lib/browser-vault/authority", () => ({
+  assertBrowserVaultMemberAuthority:
+    mocks.assertBrowserVaultMemberAuthority,
+}));
+
+vi.mock("@/src/lib/prisma", () => ({
+  getPrisma: mocks.getPrisma,
+}));
+
 vi.mock("@/src/lib/hosted-onboarding/member-access", () => ({
   readActiveHostedMemberAccess: mocks.readActiveHostedMemberAccess,
 }));
@@ -28,6 +42,8 @@ describe("hosted page auth", () => {
     vi.resetModules();
     vi.clearAllMocks();
     mocks.getHostedAppSession.mockResolvedValue(null);
+    mocks.getPrisma.mockReturnValue(mocks.prismaClient);
+    mocks.assertBrowserVaultMemberAuthority.mockResolvedValue(undefined);
     mocks.readActiveHostedMemberAccess.mockResolvedValue(false);
   });
 
@@ -113,6 +129,8 @@ describe("hosted sidebar auth", () => {
     vi.resetModules();
     vi.clearAllMocks();
     mocks.getHostedAppSession.mockResolvedValue(null);
+    mocks.getPrisma.mockReturnValue(mocks.prismaClient);
+    mocks.assertBrowserVaultMemberAuthority.mockResolvedValue(undefined);
     mocks.readActiveHostedMemberAccess.mockResolvedValue(false);
   });
 
@@ -187,6 +205,8 @@ describe("hosted dashboard page auth", () => {
     vi.resetModules();
     vi.clearAllMocks();
     mocks.getHostedAppSession.mockResolvedValue(null);
+    mocks.getPrisma.mockReturnValue(mocks.prismaClient);
+    mocks.assertBrowserVaultMemberAuthority.mockResolvedValue(undefined);
     mocks.readActiveHostedMemberAccess.mockResolvedValue(false);
   });
 
@@ -270,6 +290,92 @@ describe("hosted dashboard page auth", () => {
     });
     expect(mocks.redirect).not.toHaveBeenCalled();
     expect(mocks.readActiveHostedMemberAccess).not.toHaveBeenCalled();
+  });
+});
+
+describe("hosted browser-vault page authority", () => {
+  beforeEach(() => {
+    vi.resetModules();
+    vi.clearAllMocks();
+    mocks.getHostedAppSession.mockResolvedValue(null);
+    mocks.getPrisma.mockReturnValue(mocks.prismaClient);
+    mocks.assertBrowserVaultMemberAuthority.mockResolvedValue(undefined);
+  });
+
+  it("denies vault authority without changing anonymous shell auth", async () => {
+    const { getHostedBrowserVaultPageAuthority } = await import(
+      "@/src/lib/hosted-onboarding/page-auth"
+    );
+
+    await expect(getHostedBrowserVaultPageAuthority()).resolves.toEqual({
+      authorized: false,
+      memberId: null,
+    });
+    expect(mocks.assertBrowserVaultMemberAuthority).not.toHaveBeenCalled();
+  });
+
+  it("returns a member-bound proof only after the exact vault gate passes", async () => {
+    mocks.getHostedAppSession.mockResolvedValue({
+      expiresAt: new Date("2026-04-26T00:00:00.000Z"),
+      member: createHostedMember(),
+      privyUserId: "did:privy:user_123",
+      sessionId: "hws_123",
+    });
+    const { getHostedBrowserVaultPageAuthority } = await import(
+      "@/src/lib/hosted-onboarding/page-auth"
+    );
+
+    await expect(getHostedBrowserVaultPageAuthority()).resolves.toEqual({
+      authorized: true,
+      memberId: "member_123",
+    });
+    expect(mocks.assertBrowserVaultMemberAuthority).toHaveBeenCalledWith({
+      memberId: "member_123",
+      prisma: mocks.prismaClient,
+    });
+  });
+
+  it("keeps the recovery shell mounted when active access or consent is denied", async () => {
+    mocks.getHostedAppSession.mockResolvedValue({
+      expiresAt: new Date("2026-04-26T00:00:00.000Z"),
+      member: createHostedMember(),
+      privyUserId: "did:privy:user_123",
+      sessionId: "hws_123",
+    });
+    const { hostedOnboardingError } = await import(
+      "@/src/lib/hosted-onboarding/errors"
+    );
+    mocks.assertBrowserVaultMemberAuthority.mockRejectedValueOnce(
+      hostedOnboardingError({
+        code: "HOSTED_ACCESS_REQUIRED",
+        httpStatus: 403,
+        message: "Active access is required.",
+      }),
+    );
+    const { getHostedBrowserVaultPageAuthority } = await import(
+      "@/src/lib/hosted-onboarding/page-auth"
+    );
+
+    await expect(getHostedBrowserVaultPageAuthority()).resolves.toEqual({
+      authorized: false,
+      memberId: "member_123",
+    });
+  });
+
+  it("fails closed on an unexpected authority resolver failure", async () => {
+    mocks.getHostedAppSession.mockResolvedValue({
+      expiresAt: new Date("2026-04-26T00:00:00.000Z"),
+      member: createHostedMember(),
+      privyUserId: "did:privy:user_123",
+      sessionId: "hws_123",
+    });
+    const error = new Error("authority store unavailable");
+    mocks.assertBrowserVaultMemberAuthority.mockRejectedValueOnce(error);
+    const { getHostedBrowserVaultPageAuthority } = await import(
+      "@/src/lib/hosted-onboarding/page-auth"
+    );
+
+    await expect(getHostedBrowserVaultPageAuthority()).rejects.toBe(error);
   });
 });
 

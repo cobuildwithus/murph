@@ -23,6 +23,7 @@ import { subscribeBrowserVaultSessionInvalidation } from "./session-invalidation
 
 export interface BrowserVaultReadySnapshot {
   client: BrowserVaultQueryClient;
+  memberId: string;
   metadata: BrowserVaultSessionMetadata;
   ref: HostedBrowserVaultReplicaRef;
 }
@@ -97,6 +98,7 @@ export function startBrowserVaultWarmLoad(): Promise<BrowserVaultWarmLoadOutcome
         }
         readySnapshot = {
           client: readySnapshot.client,
+          memberId: readySnapshot.memberId,
           metadata,
           ref: result.replicaRef,
         };
@@ -105,6 +107,7 @@ export function startBrowserVaultWarmLoad(): Promise<BrowserVaultWarmLoadOutcome
 
       readySnapshot = {
         client: result.client,
+        memberId: result.memberId,
         metadata,
         ref: result.replicaRef,
       };
