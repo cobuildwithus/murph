@@ -35,6 +35,7 @@ import {
 } from "../shared";
 import type { HostedLocalHeartbeatStateUpdate } from "../local-heartbeat";
 import type {
+  HostedConnectionDisconnectLeaseClaimResult,
   HostedDeviceSyncDueReconcileConnectionRecord,
   HostedConnectionRefreshLeaseClaimResult,
   HostedPrismaTransactionClient,
@@ -186,6 +187,8 @@ export class PrismaHostedConnectionStore {
           });
         }
 
+        assertNoActiveHostedConnectionDisconnectLease(existing, connectedAt);
+
         if (
           input.reuseEstablishedConnection === true
           && ownerId
@@ -244,6 +247,8 @@ export class PrismaHostedConnectionStore {
             lastSyncErrorAt: null,
             metadataJson: toPrismaJsonObject(metadata),
             nextReconcileAt: maybeDate(input.nextReconcileAt),
+            disconnectLeaseExpiresAt: null,
+            disconnectLeaseOwner: null,
             refreshLeaseExpiresAt: null,
             refreshLeaseOwner: null,
             refreshLeaseTokenVersion: null,
@@ -346,13 +351,8 @@ export class PrismaHostedConnectionStore {
       });
     }
 
-    if (input.reuseEstablishedConnection === true && isEstablishedDeviceSyncConnection(existing)) {
-      return {
-        account: existing,
-        previousAccount: existing,
-      };
-    }
-
+    // Re-enter the locked owner path even for established-connection reuse so
+    // refresh and disconnect leases cannot be bypassed after a unique race.
     return this.upsertConnectionWithPreviousOnce(input);
   }
 
@@ -596,6 +596,109 @@ export class PrismaHostedConnectionStore {
     }
 
     return { status: "stale" };
+  }
+
+  async claimConnectionDisconnectLease(input: {
+    connectionId: string;
+    expectedConnectedAt: string;
+    leaseExpiresAt: string;
+    leaseOwner: string;
+    now: string;
+    tx?: HostedPrismaTransactionClient;
+    userId: string;
+  }): Promise<HostedConnectionDisconnectLeaseClaimResult> {
+    const prisma = input.tx ?? this.prisma;
+    const now = new Date(input.now);
+    const claim = await prisma.deviceConnection.updateMany({
+      where: {
+        connectedAt: new Date(input.expectedConnectedAt),
+        id: input.connectionId,
+        userId: input.userId,
+        OR: [
+          {
+            disconnectLeaseExpiresAt: null,
+            disconnectLeaseOwner: null,
+          },
+          {
+            disconnectLeaseExpiresAt: { lte: now },
+          },
+        ],
+      },
+      data: {
+        disconnectLeaseExpiresAt: new Date(input.leaseExpiresAt),
+        disconnectLeaseOwner: input.leaseOwner,
+      },
+    });
+    if (claim.count > 0) {
+      return { status: "claimed" };
+    }
+
+    const record = await prisma.deviceConnection.findFirst({
+      where: {
+        id: input.connectionId,
+        userId: input.userId,
+      },
+      select: {
+        connectedAt: true,
+        disconnectLeaseExpiresAt: true,
+        disconnectLeaseOwner: true,
+      },
+    });
+    if (
+      record?.connectedAt.toISOString() !== input.expectedConnectedAt
+    ) {
+      return { status: "state_changed" };
+    }
+    if (
+      normalizeNullableString(record.disconnectLeaseOwner)
+      && record.disconnectLeaseExpiresAt
+      && record.disconnectLeaseExpiresAt.getTime() > now.getTime()
+    ) {
+      return {
+        leaseExpiresAt: record.disconnectLeaseExpiresAt.toISOString(),
+        status: "in_progress",
+      };
+    }
+    return { status: "state_changed" };
+  }
+
+  async ownsConnectionDisconnectLease(input: {
+    connectionId: string;
+    expectedConnectedAt: string;
+    leaseOwner: string;
+    tx?: HostedPrismaTransactionClient;
+    userId: string;
+  }): Promise<boolean> {
+    const prisma = input.tx ?? this.prisma;
+    const record = await prisma.deviceConnection.findFirst({
+      where: {
+        connectedAt: new Date(input.expectedConnectedAt),
+        disconnectLeaseOwner: input.leaseOwner,
+        id: input.connectionId,
+        userId: input.userId,
+      },
+      select: { id: true },
+    });
+    return record !== null;
+  }
+
+  async clearConnectionDisconnectLease(input: {
+    connectionId: string;
+    leaseOwner: string;
+    tx?: HostedPrismaTransactionClient;
+  }): Promise<boolean> {
+    const prisma = input.tx ?? this.prisma;
+    const result = await prisma.deviceConnection.updateMany({
+      where: {
+        disconnectLeaseOwner: input.leaseOwner,
+        id: input.connectionId,
+      },
+      data: {
+        disconnectLeaseExpiresAt: null,
+        disconnectLeaseOwner: null,
+      },
+    });
+    return result.count > 0;
   }
 
   async clearConnectionRefreshLease(input: {
@@ -1159,6 +1262,27 @@ function assertNoActiveHostedConnectionRefreshLease(
   throw deviceSyncError({
     code: "TOKEN_REFRESH_IN_PROGRESS",
     message: "A hosted device-sync token refresh is already in progress for this connection.",
+    retryable: true,
+    httpStatus: 409,
+  });
+}
+
+function assertNoActiveHostedConnectionDisconnectLease(
+  record: HostedConnectionRecord,
+  now: Date,
+): void {
+  const leaseOwner = normalizeNullableString(record.disconnectLeaseOwner);
+  if (
+    !leaseOwner
+    || !record.disconnectLeaseExpiresAt
+    || record.disconnectLeaseExpiresAt.getTime() <= now.getTime()
+  ) {
+    return;
+  }
+
+  throw deviceSyncError({
+    code: "CONNECTION_DISCONNECT_IN_PROGRESS",
+    message: "This device connection is currently being disconnected. Try reconnecting shortly.",
     retryable: true,
     httpStatus: 409,
   });

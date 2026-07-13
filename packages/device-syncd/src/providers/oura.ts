@@ -42,6 +42,7 @@ import {
   extractProviderQueryParameterNames,
   resolveOAuthTokenRequestAccountStatus,
 } from "./provider-diagnostics.ts";
+import { createProviderRequestAbortSignal } from "./request-abort.ts";
 
 import type {
   OuraDeviceSyncProviderConfig,
@@ -677,38 +678,45 @@ export function createOuraDeviceSyncProvider(config: OuraDeviceSyncProviderConfi
     });
   }
 
-  async function revokeOuraAccessToken(accessToken: string): Promise<void> {
+  async function revokeOuraAccessToken(
+    accessToken: string,
+    signal?: AbortSignal | null,
+  ): Promise<void> {
     const revokeUrl = new URL(`${apiBaseUrl}${OURA_REVOKE_PATH}`);
     revokeUrl.searchParams.set("access_token", accessToken);
+    const requestAbort = createProviderRequestAbortSignal({ signal, timeoutMs });
+    try {
+      const response = await fetchImpl(revokeUrl, {
+        signal: requestAbort.signal,
+      });
 
-    const response = await fetchImpl(revokeUrl, {
-      signal: AbortSignal.timeout(timeoutMs),
-    });
+      if (response.status === 401 || response.status === 404 || response.status === 204) {
+        return;
+      }
 
-    if (response.status === 401 || response.status === 404 || response.status === 204) {
-      return;
-    }
-
-    if (!response.ok) {
-      throw buildOuraApiError(
-        "OURA_REVOKE_FAILED",
-        "Oura revoke access request failed.",
-        response,
-        await parseResponseBody(response),
-        {
-          retryable: response.status === 429 || response.status >= 500,
-          diagnostics: buildProviderRequestDiagnostics({
-            method: "GET",
-            endpointKind: "oura_oauth_revoke",
-            authKind: "bearer_access_token_query",
-            authPlacement: "query_parameters",
-            credentialPresent: Boolean(accessToken),
-            contentType: "none",
-            bodyKind: "none",
-            queryParameterNames: ["access_token"],
-          }),
-        },
-      );
+      if (!response.ok) {
+        throw buildOuraApiError(
+          "OURA_REVOKE_FAILED",
+          "Oura revoke access request failed.",
+          response,
+          await parseResponseBody(response),
+          {
+            retryable: response.status === 429 || response.status >= 500,
+            diagnostics: buildProviderRequestDiagnostics({
+              method: "GET",
+              endpointKind: "oura_oauth_revoke",
+              authKind: "bearer_access_token_query",
+              authPlacement: "query_parameters",
+              credentialPresent: Boolean(accessToken),
+              contentType: "none",
+              bodyKind: "none",
+              queryParameterNames: ["access_token"],
+            }),
+          },
+        );
+      }
+    } finally {
+      requestAbort.cleanup();
     }
   }
 
@@ -1172,13 +1180,16 @@ export function createOuraDeviceSyncProvider(config: OuraDeviceSyncProviderConfi
           ),
       });
     },
-    async revokeAccess(account: DeviceSyncAccount): Promise<void> {
+    async revokeAccess(
+      account: DeviceSyncAccount,
+      options: { signal?: AbortSignal | null } = {},
+    ): Promise<void> {
       const tokens = getDeviceSyncAccountOAuthTokens(account);
       if (!tokens?.accessToken) {
         return;
       }
 
-      await revokeOuraAccessToken(tokens.accessToken);
+      await revokeOuraAccessToken(tokens.accessToken, options.signal);
     },
     async verifyAndParseWebhook(context: ProviderWebhookContext): Promise<ProviderWebhookResult> {
       const signature = normalizeString(context.headers.get("x-oura-signature"));

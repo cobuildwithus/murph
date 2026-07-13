@@ -952,6 +952,31 @@ test("WHOOP provider revokes with the persisted access token even when it is nea
   ]);
 });
 
+test("WHOOP revoke stops when its caller aborts", async () => {
+  const provider = createWhoopDeviceSyncProvider({
+    clientId: "whoop-client-id",
+    clientSecret: "whoop-client-secret",
+    fetchImpl: async (_input, init) => await new Promise<Response>((_resolve, reject) => {
+      const signal = init?.signal;
+      if (!signal) {
+        throw new TypeError("Expected WHOOP revoke to carry an abort signal.");
+      }
+      signal.addEventListener("abort", () => reject(signal.reason), {
+        once: true,
+      });
+    }),
+  });
+  const revokeAccess = requireRevokeAccess(provider);
+  const controller = new AbortController();
+  const pending = revokeAccess(createAccount(["offline"]), {
+    signal: controller.signal,
+  });
+
+  controller.abort(new Error("stop WHOOP revoke"));
+
+  await assert.rejects(pending, /stop WHOOP revoke/u);
+});
+
 test("WHOOP provider backfills snapshot windows and refreshes once after a 401", async () => {
   const requests: Array<{ url: string; authorization: string | null }> = [];
   const importedSnapshots: unknown[] = [];

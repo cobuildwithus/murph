@@ -20,6 +20,8 @@ export const hostedConnectionRecordArgs = {
     createdAt: true,
     credentialKind: true,
     credentialMetadataJson: true,
+    disconnectLeaseExpiresAt: true,
+    disconnectLeaseOwner: true,
     displayName: true,
     externalAccountIdEncrypted: true,
     id: true,

@@ -416,6 +416,31 @@ test("Oura provider revokes access tokens through the OAuth revoke endpoint", as
   ]);
 });
 
+test("Oura revoke stops when its caller aborts", async () => {
+  const provider = createOuraDeviceSyncProvider({
+    clientId: "oura-client-id",
+    clientSecret: "oura-client-secret",
+    fetchImpl: async (_input, init) => await new Promise<Response>((_resolve, reject) => {
+      const signal = init?.signal;
+      if (!signal) {
+        throw new TypeError("Expected Oura revoke to carry an abort signal.");
+      }
+      signal.addEventListener("abort", () => reject(signal.reason), {
+        once: true,
+      });
+    }),
+  });
+  const revokeAccess = requireValue(provider.connectionHandler.revokeAccess);
+  const controller = new AbortController();
+  const pending = revokeAccess(createAccount(["personal"]), {
+    signal: controller.signal,
+  });
+
+  controller.abort(new Error("stop Oura revoke"));
+
+  await assert.rejects(pending, /stop Oura revoke/u);
+});
+
 test("Oura provider rejects auth exchanges without a refresh token and personal-info ids", async () => {
   const missingRefreshRequests: string[] = [];
   const missingRefreshProvider = createOuraDeviceSyncProvider({

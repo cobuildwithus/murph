@@ -522,7 +522,6 @@ describe("runHostedDeviceSyncAccountAction", () => {
       "conn_123",
       "2026-07-10T11:00:00.000Z",
       {
-        providerRevokeTimeoutMs: 20_000,
         signal: expect.any(AbortSignal),
       },
     );

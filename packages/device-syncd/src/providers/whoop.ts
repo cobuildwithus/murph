@@ -42,6 +42,7 @@ import {
   extractProviderQueryParameterNames,
   resolveOAuthTokenRequestAccountStatus,
 } from "./provider-diagnostics.ts";
+import { createProviderRequestAbortSignal } from "./request-abort.ts";
 
 import type {
   WhoopDeviceSyncProviderConfig,
@@ -482,38 +483,46 @@ export function createWhoopDeviceSyncProvider(config: WhoopDeviceSyncProviderCon
     });
   }
 
-  async function revokeWhoopAccessToken(accessToken: string): Promise<void> {
-    const response = await fetchImpl(`${baseUrl}${WHOOP_API_PREFIX}/v2/user/access`, {
-      method: "DELETE",
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-      },
-      signal: AbortSignal.timeout(timeoutMs),
-    });
-
-    if (response.status === 401 || response.status === 404 || response.status === 204) {
-      return;
-    }
-
-    if (!response.ok) {
-      throw buildWhoopApiError(
-        "WHOOP_REVOKE_FAILED",
-        "WHOOP revoke access request failed.",
-        response,
-        await parseResponseBody(response),
-        {
-          retryable: response.status === 429 || response.status >= 500,
-          diagnostics: buildProviderRequestDiagnostics({
-            method: "DELETE",
-            endpointKind: "whoop_revoke_access",
-            authKind: "bearer_access_token",
-            authPlacement: "headers",
-            credentialPresent: Boolean(accessToken),
-            contentType: "none",
-            bodyKind: "none",
-          }),
+  async function revokeWhoopAccessToken(
+    accessToken: string,
+    signal?: AbortSignal | null,
+  ): Promise<void> {
+    const requestAbort = createProviderRequestAbortSignal({ signal, timeoutMs });
+    try {
+      const response = await fetchImpl(`${baseUrl}${WHOOP_API_PREFIX}/v2/user/access`, {
+        method: "DELETE",
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
         },
-      );
+        signal: requestAbort.signal,
+      });
+
+      if (response.status === 401 || response.status === 404 || response.status === 204) {
+        return;
+      }
+
+      if (!response.ok) {
+        throw buildWhoopApiError(
+          "WHOOP_REVOKE_FAILED",
+          "WHOOP revoke access request failed.",
+          response,
+          await parseResponseBody(response),
+          {
+            retryable: response.status === 429 || response.status >= 500,
+            diagnostics: buildProviderRequestDiagnostics({
+              method: "DELETE",
+              endpointKind: "whoop_revoke_access",
+              authKind: "bearer_access_token",
+              authPlacement: "headers",
+              credentialPresent: Boolean(accessToken),
+              contentType: "none",
+              bodyKind: "none",
+            }),
+          },
+        );
+      }
+    } finally {
+      requestAbort.cleanup();
     }
   }
 
@@ -888,13 +897,16 @@ export function createWhoopDeviceSyncProvider(config: WhoopDeviceSyncProviderCon
         },
       });
     },
-    async revokeAccess(account: DeviceSyncAccount): Promise<void> {
+    async revokeAccess(
+      account: DeviceSyncAccount,
+      options: { signal?: AbortSignal | null } = {},
+    ): Promise<void> {
       const tokens = getDeviceSyncAccountOAuthTokens(account);
       if (!tokens?.accessToken) {
         return;
       }
 
-      await revokeWhoopAccessToken(tokens.accessToken);
+      await revokeWhoopAccessToken(tokens.accessToken, options.signal);
     },
     createScheduledJobs(account: StoredDeviceSyncAccount, now: string): ProviderScheduleResult {
       return buildScheduledReconcileJobs({

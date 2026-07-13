@@ -7,6 +7,8 @@ const mocks = vi.hoisted(() => {
     completeWebhookTrace: vi.fn(),
     createDeviceSyncPublicIngress: vi.fn(),
     createSignal: vi.fn(),
+    claimConnectionDisconnectLease: vi.fn(),
+    clearConnectionDisconnectLease: vi.fn(),
     ensureWebhookSubscriptions: vi.fn(),
     appendHostedMailboxEnvelope: vi.fn(),
     getConnectionForUser: vi.fn(),
@@ -19,6 +21,7 @@ const mocks = vi.hoisted(() => {
     markConnectionSourcesDisconnected: vi.fn(),
     markDirtyConnectionProcessed: vi.fn(),
     persistStoredConnectionTokenBundle: vi.fn(),
+    ownsConnectionDisconnectLease: vi.fn(),
     readHostedDeviceSyncEnvironment: vi.fn(),
     registryGet: vi.fn(),
     registryList: vi.fn(),
@@ -258,6 +261,8 @@ vi.mock("@/src/lib/device-sync/prisma-store", () => ({
   PrismaDeviceSyncControlPlaneStore: class PrismaDeviceSyncControlPlaneStore {
     completeWebhookTrace = mocks.completeWebhookTrace;
     createSignal = mocks.createSignal;
+    claimConnectionDisconnectLease = mocks.claimConnectionDisconnectLease;
+    clearConnectionDisconnectLease = mocks.clearConnectionDisconnectLease;
     getConnectionForUser = mocks.getConnectionForUser;
     getConnectionOwnerId = mocks.getConnectionOwnerId;
     hasPendingDirtyConnection = mocks.hasPendingDirtyConnection;
@@ -269,6 +274,7 @@ vi.mock("@/src/lib/device-sync/prisma-store", () => ({
     markConnectionSourcesDisconnected = mocks.markConnectionSourcesDisconnected;
     markDirtyConnectionProcessed = mocks.markDirtyConnectionProcessed;
     persistStoredConnectionTokenBundle = mocks.persistStoredConnectionTokenBundle;
+    ownsConnectionDisconnectLease = mocks.ownsConnectionDisconnectLease;
     syncDurableConnectionState = mocks.syncDurableConnectionState;
     upsertDirtyConnection = mocks.upsertDirtyConnection;
     upsertConnectionSource = mocks.upsertConnectionSource;
@@ -414,6 +420,9 @@ describe("hosted device-sync wakes", () => {
       startConnection: vi.fn(),
     }));
     mocks.createSignal.mockResolvedValue({ id: 8 });
+    mocks.claimConnectionDisconnectLease.mockResolvedValue({ status: "claimed" });
+    mocks.clearConnectionDisconnectLease.mockResolvedValue(true);
+    mocks.ownsConnectionDisconnectLease.mockResolvedValue(true);
     mocks.prismaTx.deviceSyncSignal.create.mockResolvedValue({ id: 8 });
     mocks.completeWebhookTrace.mockResolvedValue(true);
     mocks.nudgeHostedRunnerUserBestEffortResult.mockResolvedValue({
@@ -1636,6 +1645,40 @@ describe("hosted device-sync wakes", () => {
       }),
     );
     expect(mocks.appendHostedMailboxEnvelope).toHaveBeenCalled();
+  });
+
+  it("returns the durable disconnect receipt without waiting for Temporal", async () => {
+    const controlPlane = createHostedDeviceSyncPublicIngressService(
+      new Request("https://control.example.test/api/settings/device-sync/connections/dsc_123/disconnect"),
+    );
+    const activeConnection = buildHostedConnection();
+    mocks.getConnectionForUser.mockResolvedValue(activeConnection);
+    mocks.getStoredConnectionAccountForUser.mockResolvedValue(buildStoredConnection());
+    mocks.signalHostedDeviceSyncMailboxRuntime.mockImplementationOnce(
+      async () => await new Promise<never>(() => undefined),
+    );
+
+    await expect(controlPlane.disconnectTrustedConnection(
+      "user-123",
+      buildPublicConnectionId("dsc_123"),
+    )).resolves.toMatchObject({
+      connection: {
+        id: "dsc_123",
+        status: "disconnected",
+      },
+    });
+
+    expect(mocks.appendHostedMailboxEnvelope).toHaveBeenCalled();
+    expect(mocks.signalHostedDeviceSyncMailboxRuntime).toHaveBeenCalled();
+    const disconnectLeaseClaim = mocks.claimConnectionDisconnectLease.mock.calls[0]?.[0];
+    expect(disconnectLeaseClaim).toMatchObject({
+      expectedConnectedAt: activeConnection.connectedAt,
+      userId: "user-123",
+    });
+    expect(mocks.clearConnectionDisconnectLease).toHaveBeenCalledWith(expect.objectContaining({
+      connectionId: disconnectLeaseClaim?.connectionId,
+      leaseOwner: disconnectLeaseClaim?.leaseOwner,
+    }));
   });
 
   it("uses a historical-reset marker that appears during provider revoke from the locked source snapshot", async () => {

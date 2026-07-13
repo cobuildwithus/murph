@@ -96,6 +96,11 @@ export type HostedConnectionRefreshLeaseClaimResult =
   | { status: "stale" }
   | { status: "version_changed" };
 
+export type HostedConnectionDisconnectLeaseClaimResult =
+  | { status: "claimed" }
+  | { status: "in_progress"; leaseExpiresAt: string }
+  | { status: "state_changed" };
+
 export interface UpsertHostedDeviceSyncDirtyConnectionInput {
   connectionId: string;
   userId: string;

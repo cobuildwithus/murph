@@ -35,6 +35,7 @@ import type {
   HostedDeviceSyncDirtyConnectionAckRecord,
   HostedDeviceSyncDirtyConnectionRecord,
   HostedDeviceSyncDueReconcileConnectionRecord,
+  HostedConnectionDisconnectLeaseClaimResult,
   HostedConnectionRefreshLeaseClaimResult,
   HostedAgentSessionAuthResult,
   HostedAgentSessionRecord,
@@ -263,6 +264,36 @@ export class PrismaDeviceSyncControlPlaneStore
     tx?: HostedPrismaTransactionClient;
   }): Promise<HostedConnectionRefreshLeaseClaimResult> {
     return this.connections.claimConnectionRefreshLease(input);
+  }
+
+  async claimConnectionDisconnectLease(input: {
+    connectionId: string;
+    expectedConnectedAt: string;
+    leaseExpiresAt: string;
+    leaseOwner: string;
+    now: string;
+    tx?: HostedPrismaTransactionClient;
+    userId: string;
+  }): Promise<HostedConnectionDisconnectLeaseClaimResult> {
+    return this.connections.claimConnectionDisconnectLease(input);
+  }
+
+  async ownsConnectionDisconnectLease(input: {
+    connectionId: string;
+    expectedConnectedAt: string;
+    leaseOwner: string;
+    tx?: HostedPrismaTransactionClient;
+    userId: string;
+  }): Promise<boolean> {
+    return this.connections.ownsConnectionDisconnectLease(input);
+  }
+
+  async clearConnectionDisconnectLease(input: {
+    connectionId: string;
+    leaseOwner: string;
+    tx?: HostedPrismaTransactionClient;
+  }): Promise<boolean> {
+    return this.connections.clearConnectionDisconnectLease(input);
   }
 
   async clearConnectionRefreshLease(input: {

@@ -819,6 +819,59 @@ describe("handleRunnerOutboundRequest", () => {
     expect(fetchMock.mock.calls[0]?.[1]?.body).toBe(JSON.stringify(body));
   });
 
+  it("propagates account-action cancellation through the runner web-control hop", async () => {
+    const controller = new AbortController();
+    let observedAbort = false;
+    const fetchMock = vi.fn<typeof fetch>(async (_input, init) => {
+      const signal = init?.signal;
+      if (!signal) {
+        throw new Error("Expected forwarded web-control abort signal.");
+      }
+      signal.addEventListener("abort", () => {
+        observedAbort = true;
+      }, { once: true });
+      controller.abort(new DOMException("Invocation stopped", "AbortError"));
+      await Promise.resolve();
+      return new Response(JSON.stringify({
+        action: "disconnect",
+        connectionId: "conn_123",
+        occurredAt: "2026-07-10T12:00:00.000Z",
+        status: "disconnected",
+      }), { status: 200 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await handleRunnerOutboundRequest(
+      new Request(`http://web-control.worker${HOSTED_EXECUTION_DEVICE_SYNC_ACCOUNT_ACTION_PATH}`, {
+        body: JSON.stringify({
+          action: "disconnect",
+          confirmed: true,
+          connectionId: "conn_123",
+          expectedConnectedAt: "2026-07-10T11:00:00.000Z",
+        }),
+        headers: createRunnerProxyHeaders({
+          "content-type": "application/json; charset=utf-8",
+          "x-hosted-runtime-attempt-id": "attempt_1",
+          "x-hosted-runtime-lease-generation": "9",
+        }),
+        method: "POST",
+        signal: controller.signal,
+      }),
+      createRunnerOutboundEnv({
+        HOSTED_WEB_BASE_URL: "https://web.example.test",
+        USER_RUNNER: {
+          getByName() {
+            return { validateRuntimeWriteFence: vi.fn(async () => true) };
+          },
+        },
+      }),
+      "member_123",
+    );
+
+    expect(response.status).toBe(200);
+    expect(observedAbort).toBe(true);
+  });
+
   it("rejects runtime latency traces without the active runtime fence", async () => {
     const validateRuntimeWriteFence = vi.fn(async () => true);
     const fetchMock = vi.fn();

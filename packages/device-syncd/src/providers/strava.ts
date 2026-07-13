@@ -44,6 +44,7 @@ import {
   extractProviderQueryParameterNames,
   resolveOAuthTokenRequestAccountStatus,
 } from "./provider-diagnostics.ts";
+import { createProviderRequestAbortSignal } from "./request-abort.ts";
 
 import type {
   StravaDeviceSyncProviderConfig,
@@ -704,43 +705,50 @@ export function createStravaDeviceSyncProvider(
     return payload ? coerceRecord(payload) : null;
   }
 
-  async function deauthorize(accessToken: string): Promise<void> {
+  async function deauthorize(
+    accessToken: string,
+    signal?: AbortSignal | null,
+  ): Promise<void> {
     const url = new URL(`${authBaseUrl}${STRAVA_DEAUTHORIZE_PATH}`);
     url.searchParams.set("access_token", accessToken);
-
-    const response = await fetchImpl(url.toString(), {
-      method: "POST",
-      headers: {
-        Accept: "application/json",
-      },
-      signal: AbortSignal.timeout(timeoutMs),
-    });
-
-    if (response.status === 401 || response.status === 404) {
-      return;
-    }
-
-    if (!response.ok) {
-      throw buildStravaApiError(
-        "STRAVA_DEAUTHORIZE_FAILED",
-        "Strava deauthorization failed.",
-        response,
-        await parseResponseBody(response),
-        {
-          retryable: response.status === 429 || response.status >= 500,
-          accountStatus: response.status === 401 ? "disconnected" : null,
-          diagnostics: buildProviderRequestDiagnostics({
-            method: "POST",
-            endpointKind: "strava_oauth_deauthorize",
-            authKind: "bearer_access_token_query",
-            authPlacement: "query_parameters",
-            credentialPresent: Boolean(accessToken),
-            contentType: "none",
-            bodyKind: "none",
-            queryParameterNames: ["access_token"],
-          }),
+    const requestAbort = createProviderRequestAbortSignal({ signal, timeoutMs });
+    try {
+      const response = await fetchImpl(url.toString(), {
+        method: "POST",
+        headers: {
+          Accept: "application/json",
         },
-      );
+        signal: requestAbort.signal,
+      });
+
+      if (response.status === 401 || response.status === 404) {
+        return;
+      }
+
+      if (!response.ok) {
+        throw buildStravaApiError(
+          "STRAVA_DEAUTHORIZE_FAILED",
+          "Strava deauthorization failed.",
+          response,
+          await parseResponseBody(response),
+          {
+            retryable: response.status === 429 || response.status >= 500,
+            accountStatus: response.status === 401 ? "disconnected" : null,
+            diagnostics: buildProviderRequestDiagnostics({
+              method: "POST",
+              endpointKind: "strava_oauth_deauthorize",
+              authKind: "bearer_access_token_query",
+              authPlacement: "query_parameters",
+              credentialPresent: Boolean(accessToken),
+              contentType: "none",
+              bodyKind: "none",
+              queryParameterNames: ["access_token"],
+            }),
+          },
+        );
+      }
+    } finally {
+      requestAbort.cleanup();
     }
   }
 
@@ -1031,13 +1039,16 @@ export function createStravaDeviceSyncProvider(
           ),
       });
     },
-    async revokeAccess(account: DeviceSyncAccount): Promise<void> {
+    async revokeAccess(
+      account: DeviceSyncAccount,
+      options: { signal?: AbortSignal | null } = {},
+    ): Promise<void> {
       const tokens = getDeviceSyncAccountOAuthTokens(account);
       if (!tokens?.accessToken) {
         return;
       }
 
-      await deauthorize(tokens.accessToken);
+      await deauthorize(tokens.accessToken, options.signal);
     },
     createScheduledJobs(account: StoredDeviceSyncAccount, now: string): ProviderScheduleResult {
       return buildScheduledReconcileJobs({

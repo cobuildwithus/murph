@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+
 import {
   buildJunctionProviderSourceInstanceKey,
   normalizeJunctionProviderSlug,
@@ -57,6 +59,7 @@ import {
 const HOSTED_DEVICE_SYNC_WAKE_EVENT_SCHEMA = "v1";
 const COMPANION_HEALTH_METADATA_MAX_PENDING_PAYLOADS = 16;
 export const HOSTED_DEVICE_SYNC_PROVIDER_REVOKE_TIMEOUT_MS = 20_000;
+const HOSTED_DEVICE_SYNC_DISCONNECT_LEASE_TTL_MS = 2 * 60_000;
 
 const HISTORICAL_RESET_REVOKE_WARNING_MESSAGE =
   "Provider revoke did not complete while a historical data reset is pending. "
@@ -74,6 +77,8 @@ export async function disconnectHostedDeviceSyncConnection(input: {
   connection: PublicDeviceSyncAccount;
   warning?: { code: string; message: string };
 }> {
+  const disconnectStartedAt = new Date();
+  const disconnectLeaseOwner = `device-disconnect:${randomUUID()}`;
   const target = await input.store.withConnectionMutationLock(input.connectionId, async (tx) => {
     const connection = await input.store.getConnectionForUser(input.userId, input.connectionId, tx);
     if (!connection) {
@@ -96,7 +101,34 @@ export async function disconnectHostedDeviceSyncConnection(input: {
       input.connectionId,
       tx,
     );
-    return { connection, storedAccount };
+    if (connection.status === "disconnected" && !storedAccount) {
+      return { connection, disconnectLeaseOwner: null, storedAccount };
+    }
+
+    const lease = await input.store.claimConnectionDisconnectLease({
+      connectionId: input.connectionId,
+      expectedConnectedAt: connection.connectedAt,
+      leaseExpiresAt: new Date(
+        disconnectStartedAt.getTime() + HOSTED_DEVICE_SYNC_DISCONNECT_LEASE_TTL_MS,
+      ).toISOString(),
+      leaseOwner: disconnectLeaseOwner,
+      now: disconnectStartedAt.toISOString(),
+      tx,
+      userId: input.userId,
+    });
+    if (lease.status === "in_progress") {
+      throw deviceSyncError({
+        code: "CONNECTION_DISCONNECT_IN_PROGRESS",
+        message: "This device connection is already being disconnected.",
+        retryable: true,
+        httpStatus: 409,
+      });
+    }
+    if (lease.status !== "claimed") {
+      connectionChangedDuringDisconnectError();
+    }
+
+    return { connection, disconnectLeaseOwner, storedAccount };
   });
   const existing = target.connection;
   const storedAccount = target.storedAccount;
@@ -166,6 +198,19 @@ export async function disconnectHostedDeviceSyncConnection(input: {
     );
 
     if (
+      !target.disconnectLeaseOwner
+      || !(await input.store.ownsConnectionDisconnectLease({
+        connectionId: input.connectionId,
+        expectedConnectedAt: existing.connectedAt,
+        leaseOwner: target.disconnectLeaseOwner,
+        tx,
+        userId: input.userId,
+      }))
+    ) {
+      connectionChangedDuringDisconnectError();
+    }
+
+    if (
       !publicAccountMatchesDisconnectTarget(existing, freshExisting)
       || !storedAccountMatchesDisconnectTarget(storedAccount, freshStoredAccount)
     ) {
@@ -215,6 +260,12 @@ export async function disconnectHostedDeviceSyncConnection(input: {
       if (clearedConnection !== freshExisting) {
         await input.store.syncDurableConnectionState(clearedConnection, tx);
       }
+      await clearHostedDeviceSyncDisconnectLeaseOrThrow({
+        connectionId: input.connectionId,
+        leaseOwner: target.disconnectLeaseOwner,
+        store: input.store,
+        tx,
+      });
 
       return {
         connection: clearedConnection,
@@ -227,6 +278,12 @@ export async function disconnectHostedDeviceSyncConnection(input: {
       freshExisting.status === "disconnected"
       && freshStoredAccount?.credential.kind !== "oauth_tokens"
     ) {
+      await clearHostedDeviceSyncDisconnectLeaseOrThrow({
+        connectionId: input.connectionId,
+        leaseOwner: target.disconnectLeaseOwner,
+        store: input.store,
+        tx,
+      });
       return {
         connection: freshExisting,
         mailboxItemId: null,
@@ -301,6 +358,12 @@ export async function disconnectHostedDeviceSyncConnection(input: {
       envelope: wake,
       tx,
     });
+    await clearHostedDeviceSyncDisconnectLeaseOrThrow({
+      connectionId: input.connectionId,
+      leaseOwner: target.disconnectLeaseOwner,
+      store: input.store,
+      tx,
+    });
 
     return {
       connection: disconnectedConnection,
@@ -310,13 +373,31 @@ export async function disconnectHostedDeviceSyncConnection(input: {
   });
 
   if (disconnectResult.mailboxItemId) {
-    await startHostedDeviceSyncWakeWorkflow(disconnectResult.mailboxItemId);
+    // The durable mailbox item and device-sync signal own recovery. Temporal is
+    // an optional latency optimization and must not delay the committed response.
+    void startHostedDeviceSyncWakeWorkflow(disconnectResult.mailboxItemId);
   }
 
   return {
     connection: disconnectResult.connection,
     ...(disconnectResult.warning ? { warning: disconnectResult.warning } : {}),
   };
+}
+
+async function clearHostedDeviceSyncDisconnectLeaseOrThrow(input: {
+  connectionId: string;
+  leaseOwner: string;
+  store: PrismaDeviceSyncControlPlaneStore;
+  tx: HostedPrismaTransactionClient;
+}): Promise<void> {
+  const cleared = await input.store.clearConnectionDisconnectLease({
+    connectionId: input.connectionId,
+    leaseOwner: input.leaseOwner,
+    tx: input.tx,
+  });
+  if (!cleared) {
+    connectionChangedDuringDisconnectError();
+  }
 }
 
 function resolveProviderRevokeSignal(input: {

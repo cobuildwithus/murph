@@ -1276,6 +1276,34 @@ describe("Strava device-sync provider", () => {
     ).resolves.toBeUndefined();
   });
 
+  it("stops deauthorization when its caller aborts", async () => {
+    const provider = createStravaDeviceSyncProvider({
+      clientId: "12345",
+      clientSecret: "secret",
+      fetchImpl: vi.fn(async (_input, init) => await new Promise<Response>((_resolve, reject) => {
+        const signal = init?.signal;
+        if (!signal) {
+          throw new TypeError("Expected Strava deauthorization to carry an abort signal.");
+        }
+        signal.addEventListener("abort", () => reject(signal.reason), {
+          once: true,
+        });
+      })),
+    });
+    const revokeAccess = provider.connectionHandler.revokeAccess;
+    if (!revokeAccess) {
+      throw new TypeError("Strava provider must define revokeAccess.");
+    }
+    const controller = new AbortController();
+    const pending = revokeAccess(buildStravaAccount(), {
+      signal: controller.signal,
+    });
+
+    controller.abort(new Error("stop Strava revoke"));
+
+    await expect(pending).rejects.toThrow("stop Strava revoke");
+  });
+
   it("imports delete jobs, validates malformed jobs and webhook payloads, and handles deauthorize edge cases", async () => {
     const provider = createStravaDeviceSyncProvider({
       clientId: "12345",

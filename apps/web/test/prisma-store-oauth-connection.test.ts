@@ -35,6 +35,8 @@ type MutableConnectionRecord = {
   providerAccountBlindIndex: string;
   credentialKind: "oauth_tokens" | "provider_config" | "none";
   credentialMetadataJson: Record<string, unknown> | null;
+  disconnectLeaseExpiresAt: Date | null;
+  disconnectLeaseOwner: string | null;
   providerConfigKey: string | null;
   displayName: string | null;
   externalAccountIdEncrypted: string | null;
@@ -885,6 +887,112 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
       code: "TOKEN_REFRESH_IN_PROGRESS",
       retryable: true,
     });
+    expect(updateConnection).not.toHaveBeenCalled();
+  });
+
+  it("rejects reconnect while the approved connection epoch is being disconnected", async () => {
+    const existing = createConnection({
+      disconnectLeaseExpiresAt: new Date("2026-03-26T03:05:00.000Z"),
+      disconnectLeaseOwner: "device-disconnect:active",
+      id: "dsc_123",
+      provider: "junction",
+      status: "active",
+      userId: "user-123",
+    });
+    const updateConnection = vi.fn(async () => {
+      throw new Error("active disconnect lease should block reconnect writes");
+    });
+    const tx = {
+      $executeRaw: vi.fn(async () => 0),
+      deviceConnection: {
+        findUnique: vi.fn(async () => cloneConnection(existing)),
+        update: updateConnection,
+      },
+    };
+    const store = new PrismaDeviceSyncControlPlaneStore({
+      codec: TEST_CODEC,
+      prisma: {
+        $transaction: async <TResult>(callback: (transaction: typeof tx) => Promise<TResult>) => callback(tx),
+      } as never,
+      providerAccountBlindIndexKey: BLIND_INDEX_KEY,
+    });
+
+    await expect(store.upsertConnection({
+      connectedAt: "2026-03-26T03:00:00.000Z",
+      credential: {
+        kind: "provider_config",
+        providerConfigKey: "junction",
+      },
+      externalAccountId: "junction-user-123",
+      metadata: {},
+      ownerId: "user-123",
+      provider: "junction",
+      reuseEstablishedConnection: true,
+      scopes: [],
+      status: "active",
+    })).rejects.toMatchObject({
+      code: "CONNECTION_DISCONNECT_IN_PROGRESS",
+      retryable: true,
+    });
+    expect(updateConnection).not.toHaveBeenCalled();
+  });
+
+  it("does not bypass an active disconnect lease while resolving an upsert race", async () => {
+    const existing = createConnection({
+      disconnectLeaseExpiresAt: new Date("2026-03-26T03:05:00.000Z"),
+      disconnectLeaseOwner: "device-disconnect:active",
+      id: "dsc_123",
+      provider: "junction",
+      status: "active",
+      userId: "user-123",
+    });
+    const updateConnection = vi.fn(async () => {
+      throw new Error("active disconnect lease should block raced reconnect writes");
+    });
+    const tx = {
+      $executeRaw: vi.fn(async () => 0),
+      deviceConnection: {
+        findUnique: vi.fn(async () => cloneConnection(existing)),
+        update: updateConnection,
+      },
+    };
+    let transactionCount = 0;
+    const findUnique = vi.fn()
+      .mockResolvedValueOnce(cloneConnection(existing))
+      .mockResolvedValueOnce({ userId: "user-123" });
+    const store = new PrismaDeviceSyncControlPlaneStore({
+      codec: TEST_CODEC,
+      prisma: {
+        $transaction: async <TResult>(callback: (transaction: typeof tx) => Promise<TResult>) => {
+          transactionCount += 1;
+          if (transactionCount === 1) {
+            throw Object.assign(new Error("unique race"), { code: "P2002" });
+          }
+          return callback(tx);
+        },
+        deviceConnection: { findUnique },
+      } as never,
+      providerAccountBlindIndexKey: BLIND_INDEX_KEY,
+    });
+
+    await expect(store.upsertConnection({
+      connectedAt: "2026-03-26T03:00:00.000Z",
+      credential: {
+        kind: "provider_config",
+        providerConfigKey: "junction",
+      },
+      externalAccountId: "acct_456",
+      metadata: {},
+      ownerId: "user-123",
+      provider: "junction",
+      reuseEstablishedConnection: true,
+      scopes: [],
+      status: "active",
+    })).rejects.toMatchObject({
+      code: "CONNECTION_DISCONNECT_IN_PROGRESS",
+      retryable: true,
+    });
+    expect(transactionCount).toBe(2);
     expect(updateConnection).not.toHaveBeenCalled();
   });
 
@@ -2049,6 +2157,9 @@ function cloneConnection(record: MutableConnectionRecord | null): MutableConnect
         ...record,
         accessTokenExpiresAt: record.accessTokenExpiresAt ? new Date(record.accessTokenExpiresAt) : null,
         connectedAt: new Date(record.connectedAt),
+        disconnectLeaseExpiresAt: record.disconnectLeaseExpiresAt
+          ? new Date(record.disconnectLeaseExpiresAt)
+          : null,
         lastWebhookAt: record.lastWebhookAt ? new Date(record.lastWebhookAt) : null,
         lastSyncStartedAt: record.lastSyncStartedAt ? new Date(record.lastSyncStartedAt) : null,
         lastSyncCompletedAt: record.lastSyncCompletedAt ? new Date(record.lastSyncCompletedAt) : null,
@@ -2076,6 +2187,8 @@ function createConnection(overrides: Partial<MutableConnectionRecord>): MutableC
       }),
     credentialKind: overrides.credentialKind ?? "oauth_tokens",
     credentialMetadataJson: overrides.credentialMetadataJson ?? {},
+    disconnectLeaseExpiresAt: overrides.disconnectLeaseExpiresAt ?? null,
+    disconnectLeaseOwner: overrides.disconnectLeaseOwner ?? null,
     providerConfigKey: overrides.providerConfigKey ?? null,
     displayName: overrides.displayName ?? "Oura ring",
     externalAccountIdEncrypted: overrides.externalAccountIdEncrypted ?? "enc:acct_456",
@@ -2111,6 +2224,12 @@ function normalizeCreatedConnection(data: Record<string, unknown>): MutableConne
     providerAccountBlindIndex: String(data.providerAccountBlindIndex),
     credentialKind: (data.credentialKind as MutableConnectionRecord["credentialKind"]) ?? "oauth_tokens",
     credentialMetadataJson: (data.credentialMetadataJson as Record<string, unknown> | null) ?? {},
+    disconnectLeaseExpiresAt: data.disconnectLeaseExpiresAt instanceof Date
+      ? data.disconnectLeaseExpiresAt
+      : null,
+    disconnectLeaseOwner: typeof data.disconnectLeaseOwner === "string"
+      ? data.disconnectLeaseOwner
+      : null,
     externalAccountIdEncrypted: typeof data.externalAccountIdEncrypted === "string"
       ? data.externalAccountIdEncrypted
       : null,

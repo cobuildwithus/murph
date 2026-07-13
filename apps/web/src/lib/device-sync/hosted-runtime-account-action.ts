@@ -17,6 +17,10 @@ export async function runHostedDeviceSyncAccountAction(input: {
   request: Request;
   trustedUserId: string;
 }): Promise<HostedExecutionDeviceSyncAccountActionResponse> {
+  const disconnectPreFinalizationSignal = AbortSignal.any([
+    input.request.signal,
+    AbortSignal.timeout(HOSTED_DEVICE_SYNC_PROVIDER_REVOKE_TIMEOUT_MS),
+  ]);
   const parsed = parseHostedExecutionDeviceSyncAccountActionRequest(
     await input.request.json(),
   );
@@ -28,8 +32,7 @@ export async function runHostedDeviceSyncAccountAction(input: {
       parsed.connectionId,
       parsed.expectedConnectedAt,
       {
-        providerRevokeTimeoutMs: HOSTED_DEVICE_SYNC_PROVIDER_REVOKE_TIMEOUT_MS,
-        signal: input.request.signal,
+        signal: disconnectPreFinalizationSignal,
       },
     );
     const occurredAt = disconnected.connection.updatedAt;

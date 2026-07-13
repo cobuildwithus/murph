@@ -28,6 +28,8 @@ model DeviceConnection {
   refreshLeaseOwner          String?                  @map("refresh_lease_owner")
   refreshLeaseExpiresAt      DateTime?                @map("refresh_lease_expires_at")
   refreshLeaseTokenVersion   Int?                     @map("refresh_lease_token_version")
+  disconnectLeaseOwner       String?                  @map("disconnect_lease_owner")
+  disconnectLeaseExpiresAt   DateTime?                @map("disconnect_lease_expires_at")
   keyVersion                 String?                  @map("key_version")
   connectedAt                DateTime                 @map("connected_at")
   lastWebhookAt              DateTime?                @map("last_webhook_at")
