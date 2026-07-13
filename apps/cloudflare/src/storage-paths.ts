@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import type { HostedExecutionBundleKind } from "@murphai/runtime-state/node/hosted-bundle-codec";
 
 const HOSTED_STORAGE_NAMESPACE_PATTERN = /^[a-z0-9][a-z0-9_-]{3,63}$/u;
+const HOSTED_MEAL_PHOTO_KEY_PATTERN = /^[a-f0-9]{40}$/u;
 const HOSTED_WORKSPACE_SNAPSHOT_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u;
 const HOSTED_STORAGE_NAMESPACE_SALT = "murph.hosted.storage-namespace.v1";
 const HOSTED_STORAGE_PATH_SALT = "murph.hosted.storage-path.v1";
@@ -108,6 +109,29 @@ export async function hostedEmailRawMessageUserPrefix(input: {
   return `hosted-email/messages/${resolveHostedStorageNamespaceId(input)}/`;
 }
 
+export async function hostedMealPhotoObjectKey(input: {
+  mealPhotoKey: string;
+  storageNamespaceId?: string | null;
+  userId: string;
+}): Promise<string> {
+  const userSegment = resolveHostedStorageNamespaceId(input);
+  const mealPhotoKey = requireHostedMealPhotoKey(input.mealPhotoKey);
+  const photoSegment = deriveHostedStoragePathId({
+    length: 48,
+    scope: "meal-photo-path",
+    value: `meal-photo:${userSegment}:${mealPhotoKey}`,
+  });
+
+  return `hosted-meal-photos/images/${userSegment}/${photoSegment}.jpg.enc`;
+}
+
+export async function hostedMealPhotoUserPrefix(input: {
+  storageNamespaceId?: string | null;
+  userId: string;
+}): Promise<string> {
+  return `hosted-meal-photos/images/${resolveHostedStorageNamespaceId(input)}/`;
+}
+
 export async function hostedBrowserVaultReplicaObjectKey(input: {
   dataVersion: string;
   storageNamespaceId?: string | null;
@@ -193,6 +217,14 @@ function requireHostedWorkspaceSnapshotId(value: string): string {
   const normalized = requireStoragePathString(value, "Hosted workspace snapshot id");
   if (!HOSTED_WORKSPACE_SNAPSHOT_ID_PATTERN.test(normalized)) {
     throw new TypeError("Hosted workspace snapshot id is invalid.");
+  }
+  return normalized;
+}
+
+function requireHostedMealPhotoKey(value: string): string {
+  const normalized = requireStoragePathString(value, "Hosted meal photo key");
+  if (!HOSTED_MEAL_PHOTO_KEY_PATTERN.test(normalized)) {
+    throw new TypeError("Hosted meal photo key is invalid.");
   }
   return normalized;
 }
