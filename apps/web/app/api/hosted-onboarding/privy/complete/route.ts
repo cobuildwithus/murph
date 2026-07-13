@@ -1,6 +1,9 @@
 import { withJsonError } from "@/src/lib/hosted-onboarding/http";
 import { completeHostedPrivyRoute } from "@/src/lib/hosted-onboarding/privy-completion-route";
-import { verifyHostedPrivyLegacyAuthIntent } from "@/src/lib/hosted-onboarding/privy-auth-intent";
+import {
+  verifyHostedPrivyLegacyAuthContext,
+  verifyHostedPrivyLegacyAuthenticationProof,
+} from "@/src/lib/hosted-onboarding/privy-auth-intent";
 
 /**
  * Temporary compatibility floor for browser bundles loaded before the strict
@@ -10,10 +13,16 @@ import { verifyHostedPrivyLegacyAuthIntent } from "@/src/lib/hosted-onboarding/p
  */
 export const POST = withJsonError(async (request: Request) => completeHostedPrivyRoute({
   request,
-  resolveAuthIntent: ({ auth, body }) => verifyHostedPrivyLegacyAuthIntent({
+  resolveAuthContext: ({ auth, body }) => verifyHostedPrivyLegacyAuthContext({
     identityTokenIssuedAt: auth.identityTokenIssuedAt,
     method: readLegacyHostedPrivyAuthMethod(body),
   }),
+  resolveAuthProof: ({ authContext, verifiedPrivyUser }) => (
+    verifyHostedPrivyLegacyAuthenticationProof({
+      authContext,
+      verifiedPrivyUser,
+    })
+  ),
   timingStep: "hosted-onboarding.route.privy-complete-legacy",
 }));
 

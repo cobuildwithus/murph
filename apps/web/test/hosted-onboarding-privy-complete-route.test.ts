@@ -16,7 +16,8 @@ const mocks = vi.hoisted(() => ({
   readHostedConsentStatus: vi.fn(),
   verifyHostedPrivyAuthIntent: vi.fn(),
   verifyHostedPrivyAuthenticationProof: vi.fn(),
-  verifyHostedPrivyLegacyAuthIntent: vi.fn(),
+  verifyHostedPrivyLegacyAuthContext: vi.fn(),
+  verifyHostedPrivyLegacyAuthenticationProof: vi.fn(),
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/csrf", () => ({
@@ -45,8 +46,10 @@ vi.mock("@/src/lib/hosted-onboarding/privy-auth-intent", () => ({
     mocks.verifyHostedPrivyAuthIntent,
   verifyHostedPrivyAuthenticationProof:
     mocks.verifyHostedPrivyAuthenticationProof,
-  verifyHostedPrivyLegacyAuthIntent:
-    mocks.verifyHostedPrivyLegacyAuthIntent,
+  verifyHostedPrivyLegacyAuthContext:
+    mocks.verifyHostedPrivyLegacyAuthContext,
+  verifyHostedPrivyLegacyAuthenticationProof:
+    mocks.verifyHostedPrivyLegacyAuthenticationProof,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/privy", () => ({
@@ -114,9 +117,8 @@ describe("hosted onboarding Privy completion route", () => {
       issuedAt: 1742990400,
       method: "phone",
     });
-    mocks.verifyHostedPrivyLegacyAuthIntent.mockReturnValue({
-      expiresAt: 1742991000,
-      issuedAt: 1742990400,
+    mocks.verifyHostedPrivyLegacyAuthContext.mockReturnValue({
+      identityTokenIssuedAt: 1742990400,
       method: "phone",
     });
     mocks.remapHostedPrivyCompletionLagError.mockImplementation((error: unknown) => {
@@ -135,6 +137,9 @@ describe("hosted onboarding Privy completion route", () => {
       return error;
     });
     mocks.verifyHostedPrivyAuthenticationProof.mockReturnValue(createAuthenticationProof("phone"));
+    mocks.verifyHostedPrivyLegacyAuthenticationProof.mockReturnValue(
+      createAuthenticationProof("phone"),
+    );
     mocks.requirePrivyCompletionSession.mockResolvedValue({
       identityTokenIssuedAt: 1742990400,
       privyUserId: "did:privy:user_123",
@@ -228,15 +233,15 @@ describe("hosted onboarding Privy completion route", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(mocks.verifyHostedPrivyLegacyAuthIntent).toHaveBeenCalledWith({
+    expect(mocks.verifyHostedPrivyLegacyAuthContext).toHaveBeenCalledWith({
       identityTokenIssuedAt: 1742990400,
       method: "phone",
     });
     expect(mocks.verifyHostedPrivyAuthIntent).not.toHaveBeenCalled();
-    expect(mocks.verifyHostedPrivyAuthenticationProof).toHaveBeenCalledWith({
-      intent: {
-        expiresAt: 1742991000,
-        issuedAt: 1742990400,
+    expect(mocks.verifyHostedPrivyAuthenticationProof).not.toHaveBeenCalled();
+    expect(mocks.verifyHostedPrivyLegacyAuthenticationProof).toHaveBeenCalledWith({
+      authContext: {
+        identityTokenIssuedAt: 1742990400,
         method: "phone",
       },
       verifiedPrivyUser: {
@@ -244,10 +249,16 @@ describe("hosted onboarding Privy completion route", () => {
         linkedAccounts: [],
       },
     });
+    expect(mocks.verifyHostedPrivyLegacyAuthContext.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.readHostedPrivyUserById.mock.invocationCallOrder[0],
+    );
+    expect(mocks.readHostedPrivyUserById.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.verifyHostedPrivyLegacyAuthenticationProof.mock.invocationCallOrder[0],
+    );
   });
 
   it("rejects an ineligible legacy bundle before reading provider state", async () => {
-    mocks.verifyHostedPrivyLegacyAuthIntent.mockImplementationOnce(() => {
+    mocks.verifyHostedPrivyLegacyAuthContext.mockImplementationOnce(() => {
       throw hostedOnboardingError({
         code: "HOSTED_CLIENT_UPDATE_REQUIRED",
         message: "Reload this page and verify again to finish signing in.",
@@ -270,6 +281,7 @@ describe("hosted onboarding Privy completion route", () => {
     expect(response.status).toBe(409);
     expect(mocks.readHostedPrivyUserById).not.toHaveBeenCalled();
     expect(mocks.verifyHostedPrivyAuthenticationProof).not.toHaveBeenCalled();
+    expect(mocks.verifyHostedPrivyLegacyAuthenticationProof).not.toHaveBeenCalled();
     expect(mocks.completeHostedPrivyVerification).not.toHaveBeenCalled();
   });
 

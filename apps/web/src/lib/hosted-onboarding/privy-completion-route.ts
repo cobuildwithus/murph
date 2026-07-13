@@ -10,12 +10,12 @@ import {
 } from "./logging";
 import {
   buildHostedPrivyAuthIntentClearCookie,
-  verifyHostedPrivyAuthenticationProof,
-  type VerifiedHostedPrivyAuthIntent,
+  type HostedPrivyAuthenticationProof,
 } from "./privy-auth-intent";
 import {
   readHostedPrivyUserById,
   remapHostedPrivyCompletionLagError,
+  type HostedPrivyUser,
 } from "./privy";
 import {
   requirePrivyCompletionSession,
@@ -25,18 +25,22 @@ import { resolveHostedSignupTimeZone } from "./time-zone-hint";
 import { readHostedConsentStatus } from "../legal/consent";
 import { getPrisma } from "../prisma";
 
-export interface HostedPrivyCompletionIntentInput {
+export interface HostedPrivyCompletionAuthInput {
   auth: PrivyCompletionSessionContext;
   body: Record<string, unknown>;
   inviteCode: string | null;
   request: Request;
 }
 
-export async function completeHostedPrivyRoute(input: {
+export async function completeHostedPrivyRoute<TAuthContext>(input: {
   request: Request;
-  resolveAuthIntent: (
-    input: HostedPrivyCompletionIntentInput,
-  ) => VerifiedHostedPrivyAuthIntent;
+  resolveAuthContext: (
+    input: HostedPrivyCompletionAuthInput,
+  ) => TAuthContext;
+  resolveAuthProof: (input: {
+    authContext: TAuthContext;
+    verifiedPrivyUser: HostedPrivyUser;
+  }) => HostedPrivyAuthenticationProof;
   timingStep: string;
 }): Promise<Response> {
   const timing = startHostedOnboardingTiming(input.timingStep);
@@ -46,7 +50,7 @@ export async function completeHostedPrivyRoute(input: {
     const auth = await requirePrivyCompletionSession(input.request);
     const body = await readOptionalJsonObject(input.request);
     const inviteCode = typeof body.inviteCode === "string" ? body.inviteCode : null;
-    const verifiedAuthIntent = input.resolveAuthIntent({
+    const verifiedAuthContext = input.resolveAuthContext({
       auth,
       body,
       inviteCode,
@@ -55,8 +59,8 @@ export async function completeHostedPrivyRoute(input: {
     const verifiedPrivyUser = await readHostedPrivyUserById(auth.privyUserId);
     const authProof = (() => {
       try {
-        return verifyHostedPrivyAuthenticationProof({
-          intent: verifiedAuthIntent,
+        return input.resolveAuthProof({
+          authContext: verifiedAuthContext,
           verifiedPrivyUser,
         });
       } catch (error) {

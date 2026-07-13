@@ -23,6 +23,9 @@ const HOSTED_PRIVY_AUTH_INTENT_PREFIX = "hpai1";
 const HOSTED_PRIVY_AUTH_INTENT_TTL_SECONDS = 60 * 10;
 const HOSTED_PRIVY_AUTH_INTENT_DOMAIN = "murph.hosted-privy-auth-intent.v1";
 const HOSTED_PRIVY_AUTH_INTENT_CLOCK_SKEW_SECONDS = 5;
+// Legacy bundles authenticate with Privy before posting completion, so their
+// credential timestamp legitimately precedes the resulting identity token.
+const HOSTED_PRIVY_LEGACY_CREDENTIAL_PRE_TOKEN_WINDOW_SECONDS = 60;
 const HOSTED_PRIVY_AUTH_INTENT_COOKIE_NAME = process.env.NODE_ENV === "production"
   ? "__Host-murph-privy-auth-intent"
   : "murph-privy-auth-intent";
@@ -55,6 +58,11 @@ export type HostedPrivyAuthenticationProof =
 export interface VerifiedHostedPrivyAuthIntent {
   expiresAt: number;
   issuedAt: number;
+  method: HostedPrivyAuthMethod;
+}
+
+export interface VerifiedHostedPrivyLegacyAuthContext {
+  identityTokenIssuedAt: number;
   method: HostedPrivyAuthMethod;
 }
 
@@ -173,22 +181,17 @@ export function verifyHostedPrivyAuthenticationProof(input: {
     || verifiedAt > nowSeconds + HOSTED_PRIVY_AUTH_INTENT_CLOCK_SKEW_SECONDS
     || proof?.method !== input.intent.method
   ) {
-    throw hostedOnboardingError({
-      code: hostedPrivyMethodNotReadyCode(input.intent.method),
-      message: `Your verified ${hostedPrivyMethodLabel(input.intent.method)} has not reached the server-side Privy session yet. Wait a moment and try again.`,
-      httpStatus: 409,
-      retryable: true,
-    });
+    throw hostedPrivyMethodNotReady(input.intent.method);
   }
 
   return proof;
 }
 
-export function verifyHostedPrivyLegacyAuthIntent(input: {
+export function verifyHostedPrivyLegacyAuthContext(input: {
   identityTokenIssuedAt: number | null;
   method: unknown;
   now?: Date;
-}): VerifiedHostedPrivyAuthIntent {
+}): VerifiedHostedPrivyLegacyAuthContext {
   const nowSeconds = Math.floor((input.now ?? new Date()).getTime() / 1000);
   const issuedAt = normalizeTimestamp(input.identityTokenIssuedAt);
 
@@ -202,10 +205,38 @@ export function verifyHostedPrivyLegacyAuthIntent(input: {
   }
 
   return {
-    expiresAt: issuedAt + HOSTED_PRIVY_AUTH_INTENT_TTL_SECONDS,
-    issuedAt,
+    identityTokenIssuedAt: issuedAt,
     method: input.method,
   };
+}
+
+export function verifyHostedPrivyLegacyAuthenticationProof(input: {
+  authContext: VerifiedHostedPrivyLegacyAuthContext;
+  now?: Date;
+  verifiedPrivyUser: HostedPrivyUser;
+}): HostedPrivyAuthenticationProof {
+  const nowSeconds = Math.floor((input.now ?? new Date()).getTime() / 1000);
+  const { identityTokenIssuedAt, method } = input.authContext;
+
+  if (
+    identityTokenIssuedAt > nowSeconds + HOSTED_PRIVY_AUTH_INTENT_CLOCK_SKEW_SECONDS
+    || identityTokenIssuedAt + HOSTED_PRIVY_AUTH_INTENT_TTL_SECONDS < nowSeconds
+  ) {
+    throw hostedPrivyClientUpdateRequired();
+  }
+
+  const proof = resolveUniqueNewestHostedPrivyAuthenticationProof(input.verifiedPrivyUser);
+  const verifiedAt = proof?.credential.verifiedAt ?? null;
+  if (
+    verifiedAt === null
+    || verifiedAt < identityTokenIssuedAt - HOSTED_PRIVY_LEGACY_CREDENTIAL_PRE_TOKEN_WINDOW_SECONDS
+    || verifiedAt > nowSeconds + HOSTED_PRIVY_AUTH_INTENT_CLOCK_SKEW_SECONDS
+    || proof?.method !== method
+  ) {
+    throw hostedPrivyMethodNotReady(method);
+  }
+
+  return proof;
 }
 
 interface HostedPrivyAuthenticationCandidate {
@@ -480,6 +511,15 @@ function hostedPrivyMethodLabel(method: HostedPrivyAuthMethod): string {
   if (method === "phone") return "phone number";
   if (method === "email") return "email address";
   return "Telegram account";
+}
+
+function hostedPrivyMethodNotReady(method: HostedPrivyAuthMethod) {
+  return hostedOnboardingError({
+    code: hostedPrivyMethodNotReadyCode(method),
+    message: `Your verified ${hostedPrivyMethodLabel(method)} has not reached the server-side Privy session yet. Wait a moment and try again.`,
+    httpStatus: 409,
+    retryable: true,
+  });
 }
 
 function invalidHostedPrivyAuthProof() {

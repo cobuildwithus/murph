@@ -7,7 +7,8 @@ import {
   readHostedPrivyAuthIntentFromRequest,
   verifyHostedPrivyAuthenticationProof as verifyHostedPrivyProviderProof,
   verifyHostedPrivyAuthIntent,
-  verifyHostedPrivyLegacyAuthIntent,
+  verifyHostedPrivyLegacyAuthContext,
+  verifyHostedPrivyLegacyAuthenticationProof,
 } from "@/src/lib/hosted-onboarding/privy-auth-intent";
 import type {
   HostedPrivyIdentity,
@@ -521,40 +522,149 @@ describe("hosted Privy authentication intents", () => {
   });
 
   it("constrains the temporary legacy path to a freshly issued verified identity token", () => {
-    expect(verifyHostedPrivyLegacyAuthIntent({
+    expect(verifyHostedPrivyLegacyAuthContext({
       identityTokenIssuedAt: NOW_SECONDS,
       method: "phone",
       now: NOW,
     })).toEqual({
-      expiresAt: NOW_SECONDS + 600,
-      issuedAt: NOW_SECONDS,
+      identityTokenIssuedAt: NOW_SECONDS,
+      method: "phone",
+    });
+    expect(verifyHostedPrivyLegacyAuthContext({
+      identityTokenIssuedAt: NOW_SECONDS - 600,
+      method: "phone",
+      now: NOW,
+    })).toEqual({
+      identityTokenIssuedAt: NOW_SECONDS - 600,
+      method: "phone",
+    });
+    expect(verifyHostedPrivyLegacyAuthContext({
+      identityTokenIssuedAt: NOW_SECONDS + 5,
+      method: "phone",
+      now: NOW,
+    })).toEqual({
+      identityTokenIssuedAt: NOW_SECONDS + 5,
       method: "phone",
     });
 
-    expect(() => verifyHostedPrivyLegacyAuthIntent({
+    expect(() => verifyHostedPrivyLegacyAuthContext({
       identityTokenIssuedAt: NOW_SECONDS - 601,
       method: "phone",
       now: NOW,
     })).toThrow(expect.objectContaining({ code: "HOSTED_CLIENT_UPDATE_REQUIRED" }));
-    expect(() => verifyHostedPrivyLegacyAuthIntent({
+    expect(() => verifyHostedPrivyLegacyAuthContext({
+      identityTokenIssuedAt: NOW_SECONDS + 6,
+      method: "phone",
+      now: NOW,
+    })).toThrow(expect.objectContaining({ code: "HOSTED_CLIENT_UPDATE_REQUIRED" }));
+    expect(() => verifyHostedPrivyLegacyAuthContext({
+      identityTokenIssuedAt: null,
+      method: "phone",
+      now: NOW,
+    })).toThrow(expect.objectContaining({ code: "HOSTED_CLIENT_UPDATE_REQUIRED" }));
+    expect(() => verifyHostedPrivyLegacyAuthContext({
       identityTokenIssuedAt: NOW_SECONDS,
       method: "wallet",
       now: NOW,
     })).toThrow(expect.objectContaining({ code: "HOSTED_CLIENT_UPDATE_REQUIRED" }));
   });
 
+  it.each([6, 60])(
+    "accepts a legacy credential verified %s seconds before token issuance",
+    (secondsBeforeToken) => {
+      const authContext = verifyHostedPrivyLegacyAuthContext({
+        identityTokenIssuedAt: NOW_SECONDS,
+        method: "email",
+        now: NOW,
+      });
+
+      expect(verifyHostedPrivyLegacyAuthenticationProof({
+        authContext,
+        now: NOW,
+        verifiedPrivyUser: makeVerifiedPrivyUser({
+          linkedAccounts: [emailAccount(NOW_SECONDS - secondsBeforeToken)],
+        }),
+      })).toEqual(expectedAuthenticationProof("email", NOW_SECONDS - secondsBeforeToken));
+    },
+  );
+
   it("does not treat a fresh token refresh as fresh legacy credential verification", () => {
-    const intent = verifyHostedPrivyLegacyAuthIntent({
+    const authContext = verifyHostedPrivyLegacyAuthContext({
       identityTokenIssuedAt: NOW_SECONDS,
       method: "email",
       now: NOW,
     });
 
-    expect(() => verifyHostedPrivyProviderProof({
-      intent,
+    expect(() => verifyHostedPrivyLegacyAuthenticationProof({
+      authContext,
       now: NOW,
       verifiedPrivyUser: makeVerifiedPrivyUser({
-        linkedAccounts: [emailAccount(NOW_SECONDS - 30)],
+        linkedAccounts: [emailAccount(NOW_SECONDS - 61)],
+      }),
+    })).toThrow(expect.objectContaining({ code: "PRIVY_EMAIL_REQUIRED" }));
+  });
+
+  it.each([
+    {
+      label: "wrong-method newest evidence",
+      linkedAccounts: [phoneAccount(NOW_SECONDS)],
+    },
+    {
+      label: "distinct tied-newest evidence",
+      linkedAccounts: [emailAccount(NOW_SECONDS), phoneAccount(NOW_SECONDS)],
+    },
+    {
+      label: "malformed newest evidence",
+      linkedAccounts: [
+        emailAccount(NOW_SECONDS - 1),
+        { latest_verified_at: NOW_SECONDS, type: "email" },
+      ],
+    },
+    {
+      label: "unsupported newest evidence",
+      linkedAccounts: [
+        emailAccount(NOW_SECONDS - 1),
+        {
+          credential_id: "passkey-credential",
+          latest_verified_at: NOW_SECONDS,
+          type: "passkey",
+        },
+      ],
+    },
+  ])("rejects legacy $label", ({ linkedAccounts }) => {
+    const authContext = verifyHostedPrivyLegacyAuthContext({
+      identityTokenIssuedAt: NOW_SECONDS,
+      method: "email",
+      now: NOW,
+    });
+
+    expect(() => verifyHostedPrivyLegacyAuthenticationProof({
+      authContext,
+      now: NOW,
+      verifiedPrivyUser: makeVerifiedPrivyUser({ linkedAccounts }),
+    })).toThrow(expect.objectContaining({ code: "PRIVY_EMAIL_REQUIRED" }));
+  });
+
+  it("accepts future legacy credential evidence within clock skew and rejects beyond it", () => {
+    const authContext = verifyHostedPrivyLegacyAuthContext({
+      identityTokenIssuedAt: NOW_SECONDS,
+      method: "email",
+      now: NOW,
+    });
+
+    expect(verifyHostedPrivyLegacyAuthenticationProof({
+      authContext,
+      now: NOW,
+      verifiedPrivyUser: makeVerifiedPrivyUser({
+        linkedAccounts: [emailAccount(NOW_SECONDS + 5)],
+      }),
+    })).toEqual(expectedAuthenticationProof("email", NOW_SECONDS + 5));
+
+    expect(() => verifyHostedPrivyLegacyAuthenticationProof({
+      authContext,
+      now: NOW,
+      verifiedPrivyUser: makeVerifiedPrivyUser({
+        linkedAccounts: [emailAccount(NOW_SECONDS + 6)],
       }),
     })).toThrow(expect.objectContaining({ code: "PRIVY_EMAIL_REQUIRED" }));
   });

@@ -364,6 +364,182 @@ test("HostedAuthPanel requires fresh verification after a resumable auth proof e
   expect(logout).toHaveBeenCalledTimes(1);
 });
 
+test("HostedAuthPanel clears stale restart state after fresh email verification reaches provider lag", async () => {
+  let authenticated = true;
+  let user: { linkedAccounts: Array<Record<string, unknown>> } | null = {
+    linkedAccounts: [
+      {
+        address: "login@example.com",
+        latest_verified_at: 1741194420,
+        type: "email",
+      },
+    ],
+  };
+  const logout = vi.fn(async () => {
+    authenticated = false;
+    user = null;
+  });
+  mocks.usePrivy.mockImplementation(() => ({ authenticated, logout, ready: true }));
+  mocks.useUser.mockImplementation(() => ({ user }));
+  mocks.loginWithCode.mockImplementationOnce(async () => {
+    authenticated = true;
+    user = {
+      linkedAccounts: [
+        {
+          address: "login@example.com",
+          latest_verified_at: 1741194480,
+          type: "email",
+        },
+      ],
+    };
+  });
+  mocks.completeHostedPrivyAuth
+    .mockRejectedValueOnce(new HostedOnboardingApiError({
+      code: "HOSTED_AUTH_PROOF_EXPIRED",
+      message: "Request a fresh verification code and try again.",
+    }))
+    .mockRejectedValueOnce(new HostedOnboardingApiError({
+      code: "PRIVY_EMAIL_NOT_READY",
+      message: "Email is still syncing.",
+      retryable: true,
+    }));
+
+  const { cleanup, container, window } = await renderClientComponent(
+    createElement(HostedAuthPanel, {
+      methods: ["phone", "telegram", "email"],
+    }),
+  );
+  cleanupRender = cleanup;
+
+  await act(async () => {
+    findButton(container, "Continue")?.dispatchEvent(
+      new window.Event("click", { bubbles: true }),
+    );
+  });
+  await act(async () => {
+    findButton(container, "Sign out to verify")?.dispatchEvent(
+      new window.Event("click", { bubbles: true }),
+    );
+  });
+
+  const emailInput = container.querySelector(
+    'input[id="homepage-email-address"]',
+  ) as HTMLInputElement | null;
+  await act(async () => {
+    if (emailInput) {
+      setInputValue(window, emailInput, "login@example.com");
+    }
+    container.querySelector("form")?.dispatchEvent(
+      new window.Event("submit", { bubbles: true, cancelable: true }),
+    );
+  });
+  await act(async () => {
+    findButton(container, "Enter code")?.dispatchEvent(
+      new window.Event("click", { bubbles: true }),
+    );
+  });
+  await act(async () => {
+    findButton(container, "Verify email")?.dispatchEvent(
+      new window.Event("click", { bubbles: true }),
+    );
+  });
+
+  expect(container.textContent).toContain("Email is still syncing.");
+  expect(findButton(container, "Continue")).toBeTruthy();
+  expect(findButton(container, "Sign out to verify")).toBeUndefined();
+
+  await act(async () => {
+    findButton(container, "Continue")?.dispatchEvent(
+      new window.Event("click", { bubbles: true }),
+    );
+  });
+
+  expect(mocks.completeHostedPrivyAuth).toHaveBeenCalledTimes(3);
+});
+
+test("HostedAuthPanel clears stale restart state after fresh Telegram verification reaches provider lag", async () => {
+  let authenticated = true;
+  let user: { linkedAccounts: Array<Record<string, unknown>> } | null = {
+    linkedAccounts: [
+      {
+        id: "telegram-user-123",
+        latest_verified_at: 1741194420,
+        type: "telegram",
+        username: "telegram_user",
+      },
+    ],
+  };
+  const logout = vi.fn(async () => {
+    authenticated = false;
+    user = null;
+  });
+  mocks.usePrivy.mockImplementation(() => ({ authenticated, logout, ready: true }));
+  mocks.useUser.mockImplementation(() => ({ user }));
+  mocks.loginWithTelegram.mockImplementationOnce(async () => {
+    authenticated = true;
+    user = {
+      linkedAccounts: [
+        {
+          id: "telegram-user-123",
+          latest_verified_at: 1741194480,
+          type: "telegram",
+          username: "telegram_user",
+        },
+      ],
+    };
+  });
+  mocks.completeHostedPrivyAuth
+    .mockRejectedValueOnce(new HostedOnboardingApiError({
+      code: "HOSTED_AUTH_PROOF_EXPIRED",
+      message: "Request a fresh verification code and try again.",
+    }))
+    .mockRejectedValueOnce(new HostedOnboardingApiError({
+      code: "PRIVY_TELEGRAM_NOT_READY",
+      message: "Telegram is still syncing.",
+      retryable: true,
+    }));
+
+  const { cleanup, container, window } = await renderClientComponent(
+    createElement(HostedAuthPanel, {
+      methods: ["phone", "telegram", "email"],
+    }),
+  );
+  cleanupRender = cleanup;
+
+  await act(async () => {
+    findButton(container, "Continue")?.dispatchEvent(
+      new window.Event("click", { bubbles: true }),
+    );
+  });
+  await act(async () => {
+    findButton(container, "Sign out to verify")?.dispatchEvent(
+      new window.Event("click", { bubbles: true }),
+    );
+  });
+  await act(async () => {
+    findButton(container, "Telegram")?.dispatchEvent(
+      new window.Event("click", { bubbles: true }),
+    );
+  });
+  await act(async () => {
+    findButton(container, "Continue with Telegram")?.dispatchEvent(
+      new window.Event("click", { bubbles: true }),
+    );
+  });
+
+  expect(container.textContent).toContain("Telegram is still syncing.");
+  expect(findButton(container, "Continue")).toBeTruthy();
+  expect(findButton(container, "Sign out to verify")).toBeUndefined();
+
+  await act(async () => {
+    findButton(container, "Continue")?.dispatchEvent(
+      new window.Event("click", { bubbles: true }),
+    );
+  });
+
+  expect(mocks.completeHostedPrivyAuth).toHaveBeenCalledTimes(3);
+});
+
 test("HostedAuthPanel keeps only one alternate auth method active at a time", async () => {
   mocks.loginWithTelegram.mockRejectedValue(new Error("Telegram popup closed"));
 
@@ -390,6 +566,9 @@ test("HostedAuthPanel keeps only one alternate auth method active at a time", as
   await act(async () => {
     telegramButton?.dispatchEvent(new Event("click", { bubbles: true }));
   });
+  await act(async () => {
+    telegramButton?.dispatchEvent(new Event("click", { bubbles: true }));
+  });
 
   expect(container.querySelector('[data-hosted-phone-auth-suppressed="yes"]')).toBeTruthy();
   const telegramNotice = container.querySelector('[role="status"]');
@@ -403,14 +582,18 @@ test("HostedAuthPanel keeps only one alternate auth method active at a time", as
   expect(container.querySelector('[role="status"]')).toBeNull();
   expect(container.querySelector('input[id="homepage-email-address"]')).toBeTruthy();
 
+  mocks.requestHostedPrivyAuthIntent.mockRejectedValueOnce(
+    new Error("Unable to prepare Telegram sign-in"),
+  );
   await act(async () => {
     telegramButton?.dispatchEvent(new Event("click", { bubbles: true }));
   });
 
   expect(container.querySelector('input[id="homepage-email-address"]')).toBeNull();
+  expect(telegramButton?.textContent).not.toContain("Continue with Telegram");
 });
 
-test("HostedAuthPanel locks sibling auth methods while a Telegram attempt begins", async () => {
+test("HostedAuthPanel locks sibling auth methods while preparing a Telegram attempt", async () => {
   const authIntent = createDeferred();
   mocks.requestHostedPrivyAuthIntent.mockReturnValueOnce(authIntent.promise);
   mocks.loginWithTelegram.mockRejectedValueOnce(new Error("Telegram popup closed"));
@@ -447,11 +630,17 @@ test("HostedAuthPanel locks sibling auth methods while a Telegram attempt begins
     await Promise.resolve();
   });
 
-  expect(mocks.loginWithTelegram).toHaveBeenCalledTimes(1);
+  expect(mocks.loginWithTelegram).not.toHaveBeenCalled();
+  expect(telegramButton?.textContent).toContain("Continue with Telegram");
   expect(emailButton?.disabled).toBe(false);
   expect(
     container.querySelector('[data-hosted-phone-auth-send-code-gated="no"]'),
   ).toBeTruthy();
+
+  await act(async () => {
+    telegramButton?.dispatchEvent(new window.Event("click", { bubbles: true }));
+    expect(mocks.loginWithTelegram).toHaveBeenCalledTimes(1);
+  });
 });
 
 test("HostedAuthPanel keeps split CTA presentation out of Privy auth behavior", async () => {
@@ -493,6 +682,9 @@ test("HostedAuthPanel keeps split CTA presentation out of Privy auth behavior", 
   await act(async () => {
     telegramButton?.dispatchEvent(new window.Event("click", { bubbles: true }));
   });
+  await act(async () => {
+    telegramButton?.dispatchEvent(new window.Event("click", { bubbles: true }));
+  });
 
   expect(mocks.loginWithTelegram).toHaveBeenCalledWith(undefined);
   expect(mocks.requestHostedPrivyAuthIntent).toHaveBeenCalledWith({
@@ -521,6 +713,9 @@ test("HostedAuthPanel swaps to the shared finishing notice while completion runs
   await act(async () => {
     telegramButton?.dispatchEvent(new window.Event("click", { bubbles: true }));
   });
+  await act(async () => {
+    telegramButton?.dispatchEvent(new window.Event("click", { bubbles: true }));
+  });
 
   expect(container.textContent).toContain("Setting things up");
   expect(container.textContent).toContain("Keep this tab open");
@@ -543,6 +738,9 @@ test("HostedAuthPanel surfaces shared completion failures and restores the auth 
     (candidate) => candidate.textContent?.includes("Telegram"),
   ) as HTMLButtonElement | undefined;
 
+  await act(async () => {
+    telegramButton?.dispatchEvent(new window.Event("click", { bubbles: true }));
+  });
   await act(async () => {
     telegramButton?.dispatchEvent(new window.Event("click", { bubbles: true }));
   });
@@ -592,6 +790,9 @@ test("HostedAuthPanel exposes retry after Telegram authenticates but completion 
   const telegramButton = Array.from(container.querySelectorAll("button")).find(
     (candidate) => candidate.textContent === "Telegram",
   ) as HTMLButtonElement | undefined;
+  await act(async () => {
+    telegramButton?.dispatchEvent(new window.Event("click", { bubbles: true }));
+  });
   await act(async () => {
     telegramButton?.dispatchEvent(new window.Event("click", { bubbles: true }));
   });
@@ -710,6 +911,9 @@ test("HostedAuthPanel can require launch consent after homepage login completion
   await act(async () => {
     telegramButton?.dispatchEvent(new window.Event("click", { bubbles: true }));
   });
+  await act(async () => {
+    telegramButton?.dispatchEvent(new window.Event("click", { bubbles: true }));
+  });
 
   expect(mocks.loginWithTelegram).toHaveBeenCalledWith(undefined);
   expect(assign).not.toHaveBeenCalled();
@@ -757,6 +961,9 @@ test("HostedAuthPanel skips launch consent handoff when completion says launch c
   await act(async () => {
     telegramButton?.dispatchEvent(new window.Event("click", { bubbles: true }));
   });
+  await act(async () => {
+    telegramButton?.dispatchEvent(new window.Event("click", { bubbles: true }));
+  });
 
   expect(reload).toHaveBeenCalledTimes(1);
   expect(assign).not.toHaveBeenCalled();
@@ -778,6 +985,9 @@ test("HostedAuthPanel shows launch consent after homepage signup auth before red
   ) as HTMLButtonElement | undefined;
   expect(telegramButton).toBeTruthy();
 
+  await act(async () => {
+    telegramButton?.dispatchEvent(new window.Event("click", { bubbles: true }));
+  });
   await act(async () => {
     telegramButton?.dispatchEvent(new window.Event("click", { bubbles: true }));
   });
@@ -870,6 +1080,12 @@ function setInputValue(
   const descriptor = Object.getOwnPropertyDescriptor(prototype, "value");
   descriptor?.set?.call(input, value);
   input.dispatchEvent(new window.Event("input", { bubbles: true }));
+}
+
+function findButton(container: HTMLElement, label: string): HTMLButtonElement | undefined {
+  return Array.from(container.querySelectorAll("button")).find(
+    (candidate) => candidate.textContent === label,
+  );
 }
 
 function createDeferred() {

@@ -69,7 +69,7 @@ function HomepageTelegramAuthButtonHarness() {
   );
 }
 
-test("HomepageTelegramAuthButton logs in with Telegram and reports the authenticated session", async () => {
+test("HomepageTelegramAuthButton prepares the intent before an activated Telegram login gesture", async () => {
   const { button, cleanup } = await renderClientComponent(
     createElement(HomepageTelegramAuthButtonHarness),
   );
@@ -79,14 +79,19 @@ test("HomepageTelegramAuthButton logs in with Telegram and reports the authentic
     button.dispatchEvent(new Event("click", { bubbles: true }));
   });
 
-  expect(mocks.login).toHaveBeenCalledTimes(1);
   expect(mocks.requestHostedPrivyAuthIntent).toHaveBeenCalledWith({
     inviteCode: null,
     method: "telegram",
   });
-  expect(
-    mocks.requestHostedPrivyAuthIntent.mock.invocationCallOrder[0],
-  ).toBeLessThan(mocks.login.mock.invocationCallOrder[0] ?? 0);
+  expect(mocks.login).not.toHaveBeenCalled();
+  expect(button.textContent).toContain("Continue with Telegram");
+
+  await act(async () => {
+    button.dispatchEvent(new Event("click", { bubbles: true }));
+    expect(mocks.login).toHaveBeenCalledTimes(1);
+  });
+
+  expect(mocks.requestHostedPrivyAuthIntent).toHaveBeenCalledTimes(1);
   expect(mocks.onAuthenticated).toHaveBeenCalledWith();
 });
 
@@ -116,9 +121,29 @@ test("HomepageTelegramAuthButton locks duplicate clicks while the auth intent is
     await Promise.resolve();
   });
 
-  expect(mocks.login).toHaveBeenCalledTimes(1);
-  expect(mocks.onAuthenticated).toHaveBeenCalledTimes(1);
+  expect(mocks.login).not.toHaveBeenCalled();
+  expect(mocks.onAuthenticated).not.toHaveBeenCalled();
   expect(button.disabled).toBe(false);
+  expect(button.textContent).toContain("Continue with Telegram");
+});
+
+test("HomepageTelegramAuthButton does not expose Telegram login when intent preparation fails", async () => {
+  mocks.requestHostedPrivyAuthIntent.mockRejectedValueOnce(
+    new Error("Unable to prepare Telegram sign-in"),
+  );
+
+  const { button, cleanup } = await renderClientComponent(
+    createElement(HomepageTelegramAuthButtonHarness),
+  );
+  cleanupRender = cleanup;
+
+  await act(async () => {
+    button.dispatchEvent(new Event("click", { bubbles: true }));
+  });
+
+  expect(mocks.login).not.toHaveBeenCalled();
+  expect(button.textContent).toContain("Telegram");
+  expect(button.textContent).not.toContain("Continue with Telegram");
 });
 
 test("HomepageTelegramAuthButton keeps the CTA disabled until Privy is ready", async () => {
@@ -145,13 +170,25 @@ test("HomepageTelegramAuthButton softens cancellation messages without alarming 
   await act(async () => {
     button.dispatchEvent(new Event("click", { bubbles: true }));
   });
+  await act(async () => {
+    button.dispatchEvent(new Event("click", { bubbles: true }));
+  });
 
   expect(mocks.onNoticeChange).toHaveBeenLastCalledWith({
     message: "Telegram sign-in was canceled. Try again or use another option.",
     tone: "cancel",
   });
   expect(button.disabled).toBe(false);
+  expect(button.textContent).toContain("Continue with Telegram");
   expect(mocks.onAuthenticated).not.toHaveBeenCalled();
+
+  await act(async () => {
+    button.dispatchEvent(new Event("click", { bubbles: true }));
+  });
+
+  expect(mocks.requestHostedPrivyAuthIntent).toHaveBeenCalledTimes(1);
+  expect(mocks.login).toHaveBeenCalledTimes(2);
+  expect(mocks.onAuthenticated).toHaveBeenCalledTimes(1);
 });
 
 test("HomepageTelegramAuthButton surfaces unexpected Telegram failures as a destructive notice", async () => {
@@ -162,6 +199,9 @@ test("HomepageTelegramAuthButton surfaces unexpected Telegram failures as a dest
   );
   cleanupRender = cleanup;
 
+  await act(async () => {
+    button.dispatchEvent(new Event("click", { bubbles: true }));
+  });
   await act(async () => {
     button.dispatchEvent(new Event("click", { bubbles: true }));
   });

@@ -70,9 +70,9 @@ export function HostedAuthPanel({
   const completion = useHostedAuthCompletion({
     onCompleted: handleAuthCompleted,
     onError(error) {
-      if (isHostedPrivyAuthRestartRequiredError(error)) {
-        setResumableAuthRestartRequired(true);
-      }
+      setResumableAuthRestartRequired(
+        isHostedPrivyAuthRestartRequiredError(error),
+      );
     },
   });
   const includesPhone = methods.includes("phone");
@@ -140,6 +140,7 @@ export function HostedAuthPanel({
 
     const method = resumableAuth.method;
     await logout();
+    setResumableAuthRestartRequired(false);
 
     if (method === "email") {
       setPrimaryMethod("email");

@@ -34,9 +34,11 @@ export function HostedTelegramAuthButton({
   const { login, state } = useLoginWithTelegram();
   const { ready } = usePrivy();
   const [authAttemptPending, setAuthAttemptPending] = useState(false);
+  const [authIntentReady, setAuthIntentReady] = useState(false);
   const authAttemptInFlightRef = useRef(false);
 
   const loading = authAttemptPending || state.status === "loading";
+  const hasPreparedAuthIntent = active && authIntentReady;
 
   async function handleClick() {
     if (authAttemptInFlightRef.current || externallyDisabled) {
@@ -50,11 +52,18 @@ export function HostedTelegramAuthButton({
 
     try {
       onAuthAttemptPendingChange?.(true);
-      await requestHostedPrivyAuthIntent({
-        inviteCode,
-        method: "telegram",
-      });
-      await login(disableSignup ? { disableSignup: true } : undefined);
+      if (!hasPreparedAuthIntent) {
+        setAuthIntentReady(false);
+        await requestHostedPrivyAuthIntent({
+          inviteCode,
+          method: "telegram",
+        });
+        setAuthIntentReady(true);
+        return;
+      }
+
+      const telegramLogin = login(disableSignup ? { disableSignup: true } : undefined);
+      await telegramLogin;
       await onAuthenticated();
     } catch (error) {
       onNoticeChange?.(describeTelegramAuthError(error));
@@ -72,7 +81,11 @@ export function HostedTelegramAuthButton({
       icon={<TelegramIcon className="h-5 w-5" />}
       onClick={handleClick}
     >
-      {loading ? "Connecting..." : "Telegram"}
+      {loading
+        ? "Connecting..."
+        : hasPreparedAuthIntent
+          ? "Continue with Telegram"
+          : "Telegram"}
     </HostedInlineAuthButton>
   );
 }
