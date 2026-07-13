@@ -965,11 +965,13 @@ Current hosted billing assumptions:
   opaque target proof is checked under that member's mutation lock before its
   Stripe update. Trial-extension Stripe reads and writes use one 80-second
   attempt, and the minimum remaining trial runway is derived from that timeout
-  as 81 seconds. Apply gives each member lock at most 25 seconds to acquire,
-  gives each candidate transaction at most 190 seconds, and stops starting
-  candidates once less than 190 seconds remains in the route's 780-second work
-  budget. A committed recovery then gives its optional immediate activation
-  wake at most five seconds inside the route margin; the durable
+  as 81 seconds. Obsolete-provider cleanup carries its final in-lock read
+  directly into one cancellation, keeping the two 80-second provider attempts
+  inside the candidate budget. Apply gives each member lock at most 25 seconds
+  to acquire and each candidate transaction at most 190 seconds. It stops
+  starting candidates once less than 190 seconds remains in the route's
+  780-second work budget. A committed recovery then gives its optional
+  immediate activation wake at most five seconds inside the route margin; the durable
   `member.activated` mailbox item remains the continuation, and wake/email
   failures cannot relabel committed campaign work. A lock-busy or
   route-runway result performs no further Stripe work.

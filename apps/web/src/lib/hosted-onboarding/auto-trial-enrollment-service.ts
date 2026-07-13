@@ -29,7 +29,6 @@ import {
   cancelHostedPulseTrialLoserSubscription,
   cancelHostedPulseTrialLoserSubscriptionsForMember,
   isHostedPulseTrialSubscriptionForKnownPolicy,
-  retrieveHostedPulseTrialCleanupTarget,
 } from "./pulse-trial-subscription-cleanup";
 import {
   activateHostedMemberForPositiveSourceTx,
@@ -342,6 +341,7 @@ export async function inspectHostedAutoPulseTrialCampaignDisposition(input: {
     .filter((subscription) => isHostedAutoPulseTrialStripeSubscriptionForMember({
       memberId: input.candidate.memberId,
       priceId: input.priceId,
+      stripeCustomerId: input.stripeCustomerId,
       subscription,
       trialStartedBefore: input.trialStartedBefore,
     }))
@@ -429,20 +429,6 @@ export async function applyHostedAutoPulseTrialCampaignDispositionTx(input: {
         httpStatus: 409,
         message: "Murph found an unfinished trial setup. Contact support to restore access.",
       });
-    }
-    const cleanupSubscription = await retrieveHostedPulseTrialCleanupTarget({
-      expectedCustomerId: input.stripeCustomerId,
-      memberId: input.currentMember.core.id,
-      priceId: input.campaignPolicy.priceId,
-      requestOptions: input.requestOptions,
-      stripe: input.stripe,
-      subscriptionId: cleanupSubscriptionId,
-    });
-    if (!cleanupSubscription) {
-      return {
-        kind: "cleaned-up",
-        postCommitEffects: EMPTY_AUTO_TRIAL_POST_COMMIT_EFFECTS,
-      };
     }
     await cancelHostedAutoPulseTrialStripeSubscriptionIfNeeded({
       requestOptions: input.requestOptions,
@@ -1107,11 +1093,19 @@ async function listHostedAutoPulseTrialStripeSubscriptionsForRecovery(input: {
 function isHostedAutoPulseTrialStripeSubscriptionForMember(input: {
   memberId: string;
   priceId: string;
+  stripeCustomerId?: string;
   subscription: HostedAutoPulseTrialCampaignSubscription;
   trialStartedBefore?: Date;
 }): boolean {
   const trialStart = readHostedStripeObjectDate(input.subscription, "trial_start");
+  const subscriptionCustomerId = typeof input.subscription.customer === "string"
+    ? input.subscription.customer
+    : input.subscription.customer?.id;
   return input.subscription.metadata?.memberId === input.memberId &&
+    (
+      input.stripeCustomerId === undefined ||
+      subscriptionCustomerId === input.stripeCustomerId
+    ) &&
     input.subscription.metadata.checkoutOffer === HOSTED_PULSE_TRIAL_OFFER &&
     (
       !input.trialStartedBefore ||

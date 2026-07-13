@@ -2588,10 +2588,6 @@ describe("Pulse Trial beta extension", () => {
       obsoleteStatus = "canceled";
       return buildObsoleteSubscription();
     });
-    const retrieve = vi.fn(async (subscriptionId: string) => {
-      assert.equal(subscriptionId, "sub_obsolete");
-      return buildObsoleteSubscription();
-    });
     const findMany = vi.fn(async () => [record]);
     const tx = {
       $queryRaw: vi.fn(async () => []),
@@ -2617,7 +2613,7 @@ describe("Pulse Trial beta extension", () => {
         campaignRecovery: {
           priceId: PRICE_ID,
           stripe: {
-            subscriptions: { cancel, list, retrieve },
+            subscriptions: { cancel, list },
           } as never,
         },
       },
@@ -2650,13 +2646,8 @@ describe("Pulse Trial beta extension", () => {
     });
     assert.equal(applied.providerTrialsCleanedUp, 1);
     assert.equal(cancel.mock.calls.length, 1);
-    expect(retrieve).toHaveBeenCalledWith(
-      "sub_obsolete",
-      {},
-      {
-        maxNetworkRetries: 0,
-        timeout: 80_000,
-      },
+    expect(list.mock.invocationCallOrder.at(-1) ?? 0).toBeLessThan(
+      cancel.mock.invocationCallOrder[0] ?? 0,
     );
     expect(cancel).toHaveBeenCalledWith(
       "sub_obsolete",

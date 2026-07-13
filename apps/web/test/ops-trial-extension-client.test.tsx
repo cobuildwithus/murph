@@ -52,7 +52,7 @@ import { renderClientComponent } from "./render-client-component";
 
 const fetchMock = vi.fn<typeof fetch>();
 const CANDIDATE_SNAPSHOT_DIGEST = `pulse-candidates-v4.${"a".repeat(43)}`;
-const CANDIDATE_PREVIEW_TOKEN = `pulse-target-v3.${"b".repeat(43)}`;
+const CANDIDATE_PREVIEW_TOKEN = `pulse-target-v4.${"b".repeat(43)}`;
 const CONTINUATION_TOKEN =
   `pulse-cursor-v3.v1.${"a".repeat(16)}.${"b".repeat(8)}.${"c".repeat(22)}`;
 const TRIAL_EXTENSION_FAILURE_TYPES = [

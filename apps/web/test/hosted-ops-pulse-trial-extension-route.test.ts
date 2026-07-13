@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { HostedBillingStatus } from "@prisma/client";
 import { afterEach, beforeAll, beforeEach, describe, expect, test, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
@@ -29,8 +30,11 @@ vi.mock("@/src/lib/hosted-ops/pulse-trial-extension", async () => {
 });
 
 import {
+  extendHostedPulseTrials,
   HOSTED_PULSE_TRIAL_EXTENSION_CAMPAIGN,
   HostedPulseTrialExtensionPreviewMismatchError,
+  type HostedPulseTrialExtensionCandidateSource,
+  type HostedPulseTrialExtensionStripeClient,
   type HostedPulseTrialExtensionSummary,
 } from "@/src/lib/hosted-ops/pulse-trial-extension";
 
@@ -43,7 +47,7 @@ const originalHostedOpsMemberIds = process.env.HOSTED_OPS_MEMBER_IDS;
 const NOW = new Date("2026-07-10T12:00:00.000Z");
 const OPERATOR_MEMBER_ID = "member_operator";
 const CANDIDATE_SNAPSHOT_DIGEST = `pulse-candidates-v4.${"a".repeat(43)}`;
-const CANDIDATE_PREVIEW_TOKEN = `pulse-target-v3.${"b".repeat(43)}`;
+const CANDIDATE_PREVIEW_TOKEN = `pulse-target-v4.${"b".repeat(43)}`;
 const CONTINUATION_TOKEN =
   `pulse-cursor-v3.v1.${"a".repeat(16)}.${"b".repeat(8)}.${"c".repeat(22)}`;
 
@@ -174,6 +178,72 @@ describe("hosted ops Pulse Trial extension route", () => {
     });
   });
 
+  test("passes a production Preview v4 proof unchanged into Apply", async () => {
+    const preview = await buildProductionPreviewProof();
+    const candidatePreviewToken = preview.candidatePreviewTokens?.[0];
+    const candidateSnapshotDigest = preview.candidateSnapshotDigest;
+    assert.ok(candidatePreviewToken);
+    assert.ok(candidateSnapshotDigest);
+    assert.match(candidatePreviewToken, /^pulse-target-v4\./u);
+
+    const response = await route.POST(makeRequest({
+      campaign: HOSTED_PULSE_TRIAL_EXTENSION_CAMPAIGN,
+      candidatePreviewTokens: [candidatePreviewToken],
+      candidateSnapshotDigest,
+      mode: "apply",
+    }));
+
+    assert.equal(response.status, 200);
+    expect(mocks.extendHostedPulseTrialsForCampaign).toHaveBeenCalledWith({
+      expectedCandidatePreviewTokens: [candidatePreviewToken],
+      expectedCandidateSnapshotDigest: candidateSnapshotDigest,
+      continuationToken: null,
+      maxCandidates: 4,
+      memberId: undefined,
+      mode: "apply",
+    });
+  });
+
+  test("passes an opaque snapshot digest unchanged to its semantic owner", async () => {
+    const opaqueSnapshotDigest = "pulse-candidates-future.opaque-proof";
+    const response = await route.POST(makeRequest({
+      campaign: HOSTED_PULSE_TRIAL_EXTENSION_CAMPAIGN,
+      candidatePreviewTokens: [CANDIDATE_PREVIEW_TOKEN],
+      candidateSnapshotDigest: opaqueSnapshotDigest,
+      mode: "apply",
+    }));
+
+    assert.equal(response.status, 200);
+    expect(mocks.extendHostedPulseTrialsForCampaign).toHaveBeenCalledWith({
+      expectedCandidatePreviewTokens: [CANDIDATE_PREVIEW_TOKEN],
+      expectedCandidateSnapshotDigest: opaqueSnapshotDigest,
+      continuationToken: null,
+      maxCandidates: 4,
+      memberId: undefined,
+      mode: "apply",
+    });
+  });
+
+  test.each([
+    ["non-array", CANDIDATE_PREVIEW_TOKEN],
+    ["blank", ["   "]],
+    ["non-string", [42]],
+    ["too many", Array.from({ length: 5 }, () => CANDIDATE_PREVIEW_TOKEN)],
+  ])("rejects %s candidate Preview proof input at the body boundary", async (
+    _label,
+    candidatePreviewTokens,
+  ) => {
+    const response = await route.POST(makeRequest({
+      campaign: HOSTED_PULSE_TRIAL_EXTENSION_CAMPAIGN,
+      candidatePreviewTokens,
+      candidateSnapshotDigest: CANDIDATE_SNAPSHOT_DIGEST,
+      mode: "apply",
+    }));
+
+    assert.equal(response.status, 400);
+    expect(mocks.extendHostedPulseTrialsForCampaign).not.toHaveBeenCalled();
+  });
+
   test("refuses to apply without a candidate snapshot from Preview", async () => {
     const response = await route.POST(makeRequest({
       campaign: HOSTED_PULSE_TRIAL_EXTENSION_CAMPAIGN,
@@ -260,6 +330,57 @@ function makeRequest(body: Record<string, unknown>): Request {
       "Content-Type": "application/json",
     },
     method: "POST",
+  });
+}
+
+async function buildProductionPreviewProof(): Promise<HostedPulseTrialExtensionSummary> {
+  const candidateSource: HostedPulseTrialExtensionCandidateSource = {
+    async inspectProviderOnlyTrial() {
+      throw new Error("A suspended local candidate must not inspect Stripe.");
+    },
+    async listCandidates() {
+      return {
+        candidates: [{
+          billingRefCreatedAt: new Date("2026-07-01T12:00:00.000Z"),
+          currentBillingPhase: "trial",
+          currentBillingPlanCode: "launch_monthly",
+          currentCheckoutOffer: "pulse_trial_7d",
+          currentPeriodEnd: new Date("2026-07-09T12:00:00.000Z"),
+          currentTrialEndsAt: new Date("2026-07-09T12:00:00.000Z"),
+          currentTrialStartedAt: new Date("2026-07-02T12:00:00.000Z"),
+          lastStripeEventCreatedAt: null,
+          memberBillingStatus: HostedBillingStatus.active,
+          memberId: "member_preview_contract",
+          memberSuspendedAt: new Date("2026-07-08T12:00:00.000Z"),
+          providerCustomerId: null,
+          providerSubscriptionId: null,
+          pulseTrialRedeemedAt: new Date("2026-07-02T12:00:00.000Z"),
+          stripeCustomerId: "cus_preview_contract",
+          stripeSubscriptionId: "sub_preview_contract",
+        }],
+        nextContinuationToken: null,
+      };
+    },
+    async withStripeMutationLock<TResult>(): Promise<TResult> {
+      throw new Error("Preview must not acquire the member mutation lock.");
+    },
+  };
+  const stripe: HostedPulseTrialExtensionStripeClient = {
+    async retrieveSubscription() {
+      throw new Error("A suspended local candidate must not retrieve Stripe.");
+    },
+    async updateSubscription() {
+      throw new Error("Preview must not update Stripe.");
+    },
+  };
+
+  return extendHostedPulseTrials({
+    candidateSource,
+    maxCandidates: 4,
+    mode: "dry-run",
+    now: NOW,
+    priceId: "price_pulse_monthly_123",
+    stripe,
   });
 }
 

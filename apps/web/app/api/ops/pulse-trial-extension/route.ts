@@ -142,9 +142,9 @@ function readMemberId(body: Record<string, unknown>): string | undefined {
 }
 
 function readRequiredCandidateSnapshotDigest(body: Record<string, unknown>): string {
-  const digest = readOptionalString(body.candidateSnapshotDigest);
-  if (digest && /^pulse-candidates-v4\.[A-Za-z0-9_-]{43}$/u.test(digest)) {
-    return digest;
+  const value = body.candidateSnapshotDigest;
+  if (typeof value === "string" && value.trim().length > 0) {
+    return value;
   }
 
   throw hostedOnboardingError({
@@ -161,7 +161,7 @@ function readRequiredCandidatePreviewTokens(body: Record<string, unknown>): read
     Array.isArray(value) &&
     value.length <= HOSTED_OPS_PULSE_TRIAL_EXTENSION_MAX_CANDIDATES &&
     value.every((token): token is string =>
-      typeof token === "string" && /^pulse-target-v3\.[A-Za-z0-9_-]{43}$/u.test(token)
+      typeof token === "string" && token.trim().length > 0
     )
   ) {
     return value;
