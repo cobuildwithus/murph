@@ -347,6 +347,7 @@ model HostedMember {
   id                             String                          @id
   billingStatus                  HostedBillingStatus             @default(not_started) @map("billing_status")
   assistantModelPreference       String?                         @map("assistant_model_preference")
+  assistantReasoningEffortPreference String?                     @map("assistant_reasoning_effort_preference")
   assistantTone                  String?                         @map("assistant_tone")
   assistantVoice                 String?                         @map("assistant_voice")
   assistantHumor                 Int?                            @map("assistant_humor")

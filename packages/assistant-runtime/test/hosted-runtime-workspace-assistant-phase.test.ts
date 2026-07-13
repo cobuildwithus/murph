@@ -237,6 +237,9 @@ type RuntimeDeviceSyncPort = NonNullable<
 type RuntimeUsageRecordPort = NonNullable<
   HostedWorkspaceRuntimeAssistantPhaseInput["runtime"]["platform"]["usageRecordPort"]
 >;
+type RuntimeAssistantConfigurationToolPort = NonNullable<
+  HostedWorkspaceRuntimeAssistantPhaseInput["runtime"]["platform"]["assistantConfigurationToolPort"]
+>;
 type RuntimeDeviceSyncConnectLinkRequest = Parameters<
   RuntimeDeviceSyncPort["createConnectLink"]
 >[0];
@@ -744,6 +747,25 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     );
   });
 
+  it("passes the hosted assistant configuration port into assistant execution", async () => {
+    const assistantConfigurationToolPort: RuntimeAssistantConfigurationToolPort = {
+      request: vi.fn(),
+    };
+
+    await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      runtimeAssistantConfigurationToolPort: assistantConfigurationToolPort,
+    }));
+
+    expect(mocks.hydrateHostedExecutionDefaultTarget).toHaveBeenCalledWith(
+      {
+        hosted: expect.objectContaining({
+          assistantConfigurationTool: assistantConfigurationToolPort,
+        }),
+      },
+      expect.any(Object),
+    );
+  });
+
   it("prepares hosted assistant automation state before running scheduled automation", async () => {
     const runtimeEnv = {};
     const runtimeForwardedEnv = {
@@ -926,6 +948,190 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       "assistant",
       "checkpoint",
       "record:turn_direct_usage.attempt-1",
+    ]);
+  });
+
+  it("associates deferred usage with exact accepted-input targets", async () => {
+    const deferredTargets: unknown[] = [];
+    mocks.runHostedAssistantAutomationLane.mockImplementationOnce(async (laneInput) => {
+      await laneInput.executionContext.hosted?.usageRecorder?.recordUsage(
+        createAssistantUsageRecord(),
+        ["assistant_input_a"],
+      );
+      await laneInput.executionContext.hosted?.usageRecorder?.recordUsage(
+        createAssistantUsageRecord(),
+        ["assistant_input_b"],
+      );
+      await laneInput.executionContext.hosted?.usageRecorder?.recordUsage(
+        createAssistantUsageRecord(),
+        ["assistant_input_a", "assistant_input_b"],
+      );
+      await laneInput.executionContext.hosted?.usageRecorder?.recordUsage(
+        createAssistantUsageRecord(),
+        ["assistant_input_telegram_a", "assistant_input_telegram_b"],
+      );
+      await laneInput.executionContext.hosted?.usageRecorder?.recordUsage(
+        createAssistantUsageRecord(),
+        ["assistant_input_personal_linq_a", "assistant_input_personal_linq_b"],
+      );
+      await laneInput.executionContext.hosted?.usageRecorder?.recordUsage(
+        createAssistantUsageRecord(),
+        ["assistant_input_external_linq_a", "assistant_input_external_linq_b"],
+      );
+      await laneInput.executionContext.hosted?.usageRecorder?.recordUsage(
+        createAssistantUsageRecord(),
+        ["assistant_input_late"],
+      );
+      await laneInput.executionContext.hosted?.usageRecorder?.recordUsage(
+        createAssistantUsageRecord(),
+        ["assistant_input_unknown"],
+      );
+      await laneInput.executionContext.hosted?.usageRecorder?.recordUsage(
+        createAssistantUsageRecord(),
+      );
+      return {
+        assistantAutomationCurrentTurnDeliveryIntentIds: [],
+        assistantAutomationProgressed: true,
+        nextWakeAt: null,
+        redactedLogEntries: [],
+      };
+    });
+
+    await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      initialAssistantInputBatch: {
+        assistantInputIds: [
+          "assistant_input_a",
+          "assistant_input_b",
+          "assistant_input_telegram_a",
+          "assistant_input_telegram_b",
+          "assistant_input_personal_linq_a",
+          "assistant_input_personal_linq_b",
+          "assistant_input_external_linq_a",
+          "assistant_input_external_linq_b",
+        ],
+        emailDeliveryContexts: [],
+        linqDeliveryContexts: [],
+        usageNoticeDeliveryTargets: [
+          {
+            channel: "telegram",
+            replyToMessageId: "telegram_message_a",
+            target: "telegram_thread_a",
+          },
+          {
+            channel: "telegram",
+            replyToMessageId: "telegram_message_b",
+            target: "telegram_thread_b",
+          },
+          {
+            channel: "telegram",
+            replyToMessageId: "telegram_same_thread_message_a",
+            target: "telegram_same_thread",
+          },
+          {
+            channel: "telegram",
+            replyToMessageId: "telegram_same_thread_message_b",
+            target: "telegram_same_thread",
+          },
+          {
+            channel: "linq",
+            replyToMessageId: "personal_linq_message_a",
+            routeAuthority: null,
+            target: "personal_linq_chat",
+          },
+          {
+            channel: "linq",
+            replyToMessageId: "personal_linq_message_b",
+            routeAuthority: null,
+            target: "personal_linq_chat",
+          },
+          {
+            channel: "linq",
+            replyToMessageId: "external_linq_message_a",
+            routeAuthority: {
+              accountLookupKey: "account_lookup",
+              channel: "linq",
+              containerMemberId: "container_member",
+              threadId: "external_thread",
+            },
+            target: "external_linq_chat",
+          },
+          {
+            channel: "linq",
+            replyToMessageId: "external_linq_message_b",
+            routeAuthority: {
+              accountLookupKey: "account_lookup",
+              channel: "linq",
+              containerMemberId: "container_member",
+              threadId: "external_thread",
+            },
+            target: "external_linq_chat",
+          },
+        ],
+      },
+      latestAssistantInputBatch: () => ({
+        assistantInputIds: ["assistant_input_late"],
+        emailDeliveryContexts: [],
+        linqDeliveryContexts: [],
+        usageNoticeDeliveryTargets: [{
+          channel: "telegram",
+          replyToMessageId: "telegram_message_late",
+          target: "telegram_thread_late",
+        }],
+      }),
+      recordDeferredUsage: (_record, noticeDeliveryTarget) => {
+        deferredTargets.push(noticeDeliveryTarget);
+      },
+      runtimeUsageRecordPort: {
+        async recordUsage(record) {
+          return {
+            recorded: true,
+            usageId: record.usageId,
+          };
+        },
+      },
+    }));
+
+    expect(deferredTargets).toEqual([
+      {
+        channel: "telegram",
+        replyToMessageId: "telegram_message_a",
+        target: "telegram_thread_a",
+      },
+      {
+        channel: "telegram",
+        replyToMessageId: "telegram_message_b",
+        target: "telegram_thread_b",
+      },
+      null,
+      {
+        channel: "telegram",
+        replyToMessageId: "telegram_same_thread_message_b",
+        target: "telegram_same_thread",
+      },
+      {
+        channel: "linq",
+        replyToMessageId: "personal_linq_message_b",
+        routeAuthority: null,
+        target: "personal_linq_chat",
+      },
+      {
+        channel: "linq",
+        replyToMessageId: "external_linq_message_b",
+        routeAuthority: {
+          accountLookupKey: "account_lookup",
+          channel: "linq",
+          containerMemberId: "container_member",
+          threadId: "external_thread",
+        },
+        target: "external_linq_chat",
+      },
+      {
+        channel: "telegram",
+        replyToMessageId: "telegram_message_late",
+        target: "telegram_thread_late",
+      },
+      null,
+      undefined,
     ]);
   });
 
@@ -12478,6 +12684,8 @@ function createPhaseInput(input: {
   currentDeliveryRouteScope?: HostedWorkspaceRuntimeAssistantPhaseInput["currentDeliveryRouteScope"];
   deviceSyncWorkspaceWakeHandled?: HostedWorkspaceRuntimeAssistantPhaseInput["deviceSyncWorkspaceWakeHandled"];
   importedCount?: number;
+  initialAssistantInputBatch?: HostedWorkspaceRuntimeAssistantPhaseInput["initialAssistantInputBatch"];
+  latestAssistantInputBatch?: HostedWorkspaceRuntimeAssistantPhaseInput["latestAssistantInputBatch"];
   linqDeliveryContext?: {
     directRecipientPhoneNumber: string | null;
     fromPhoneNumber: string | null;
@@ -12504,6 +12712,7 @@ function createPhaseInput(input: {
   runtimeActionApprovalPort?: NonNullable<
     HostedWorkspaceRuntimeAssistantPhaseInput["runtime"]["platform"]["actionApprovalPort"]
   >;
+  runtimeAssistantConfigurationToolPort?: RuntimeAssistantConfigurationToolPort;
   runtimeUsageRecordPort?: RuntimeUsageRecordPort;
   runtimeUserEnv?: Record<string, string>;
   vaultRoot?: string;
@@ -12513,6 +12722,8 @@ function createPhaseInput(input: {
     ?? (input.importedCount ? ["ain_00000000000000000000000000000001"] : []);
   return {
     deviceSyncWorkspaceWakeHandled: input.deviceSyncWorkspaceWakeHandled,
+    initialAssistantInputBatch: input.initialAssistantInputBatch,
+    latestAssistantInputBatch: input.latestAssistantInputBatch,
     initialMailboxImport: {
       afterCheckpointEffects: [],
       checkpoint: null,
@@ -12622,6 +12833,12 @@ function createPhaseInput(input: {
         ...(input.runtimeDeviceSyncPort ? { deviceSyncPort: input.runtimeDeviceSyncPort } : {}),
         ...(input.runtimeActionApprovalPort
           ? { actionApprovalPort: input.runtimeActionApprovalPort }
+          : {}),
+        ...(input.runtimeAssistantConfigurationToolPort
+          ? {
+              assistantConfigurationToolPort:
+                input.runtimeAssistantConfigurationToolPort,
+            }
           : {}),
         ...(input.runtimeUsageRecordPort ? { usageRecordPort: input.runtimeUsageRecordPort } : {}),
         ...(input.runtimeLatencyTraceRequests
