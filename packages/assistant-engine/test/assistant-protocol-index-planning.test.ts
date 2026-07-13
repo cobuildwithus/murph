@@ -328,6 +328,36 @@ describe('assistant protocol index planning', () => {
     expect(plan.systemPrompt).not.toContain('Supported experiment protocols:')
   })
 
+  it('provides hosted style commands the live mailbox causal sequence path', async () => {
+    const vault = await mkdtemp(path.join(os.tmpdir(), 'assistant-route-plan-causal-'))
+    try {
+      const plan = await resolveAssistantRouteTurnPlan({
+        executionContext: {
+          hosted: {
+            memberId: 'member-causal-seq',
+            userEnvKeys: [],
+          },
+        },
+        input: { ...createMessageInput(), vault },
+        profile: {
+          promptProfile: 'conversation',
+          threadScope: 'session-thread',
+          toolProfile: 'provider-turn',
+        },
+        promptTimeContext: {
+          currentLocalDate: '2026-05-04',
+          currentTimeZone: 'UTC',
+        },
+        route: createRoute(),
+        session: createSession(),
+        sharedPlan: createSharedPlan(),
+      })
+
+    } finally {
+      await rm(vault, { force: true, recursive: true })
+    }
+  })
+
   it.each([{
     effectiveThreadIsDirect: true,
     label: 'direct',

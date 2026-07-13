@@ -739,7 +739,9 @@ export async function resolveAssistantRouteTurnPlan(input: {
   return {
     assistantContractFingerprint,
     assistantCliContract: actualAssistantCliContract,
-    cliEnv: input.sharedPlan.cliAccess.env,
+    cliEnv: {
+      ...input.sharedPlan.cliAccess.env,
+    },
     developerInstructions: normalizeNullableString(developerInstructions),
     dynamicTools,
     conversationHistoryMessages:

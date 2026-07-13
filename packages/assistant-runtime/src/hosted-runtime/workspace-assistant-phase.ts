@@ -37,6 +37,7 @@ import {
   scheduleDeviceActivityTriggeredAutomations,
   upsertAssistantInputEvent,
   type AssistantCronStatusOptions,
+  type AssistantBeforeProviderAcceptedInputsHook,
   type AssistantAutomationOperationScope,
   type AssistantExecutionContext,
   type AssistantInputEventRecord,
@@ -224,6 +225,7 @@ export interface HostedWorkspaceRuntimeAssistantPhaseInput
     "commitTimeoutMs" | "forwardedEnv" | "platform" | "platformEnv" | "resolvedConfig" | "userEnv"
   >;
   runtimeEnv: Readonly<Record<string, string>>;
+  beforeProviderAcceptedInputs?: AssistantBeforeProviderAcceptedInputsHook | null;
   stagedDirtyAcks?: readonly HostedDeviceSyncDirtyProcessedPostCheckpointRecord[] | null;
   suppressDirtyPendingFetch?: boolean;
   signal?: AbortSignal | null;
@@ -872,6 +874,8 @@ export async function runHostedWorkspaceAssistantPhase(
       input,
     });
     const shouldRunPendingAssistantInputFirst = pendingAssistantInputWakeAt !== null;
+    const hasAssistantInputAtPassStart =
+      hasFreshConversationInput || shouldRunPendingAssistantInputFirst;
     const systemMailboxMaintenanceStartedAt = Date.now();
     const systemMailboxMaintenance = shouldRunPendingAssistantInputFirst
       ? emptyHostedSystemMailboxMaintenanceResult({
@@ -885,7 +889,7 @@ export async function runHostedWorkspaceAssistantPhase(
       });
     const systemMailboxMaintenanceMs = elapsedSince(systemMailboxMaintenanceStartedAt);
     const preManagedAutomationWakeAt = await resolvePreAutomationLaneAssistantWakeAt({
-      hasFreshConversationInput,
+      hasAssistantInputAtPassStart,
       input,
       pendingAssistantInputWakeAt: systemMailboxMaintenance.pendingAssistantInputWakeAt,
     });
@@ -1070,6 +1074,9 @@ export async function runHostedWorkspaceAssistantPhase(
             },
             runtimeAttemptId: input.request.attemptId,
             runtimeEnv: input.runtimeEnv,
+            ...(input.beforeProviderAcceptedInputs
+              ? { beforeProviderAcceptedInputs: input.beforeProviderAcceptedInputs }
+              : {}),
             shouldYieldBackgroundMaintenance:
               input.shouldYieldBackgroundMaintenance ?? null,
             signal: input.signal ?? undefined,
@@ -1113,7 +1120,7 @@ export async function runHostedWorkspaceAssistantPhase(
       };
     };
     const preAutomationLaneWakeAt = await resolvePreAutomationLaneAssistantWakeAt({
-      hasFreshConversationInput,
+      hasAssistantInputAtPassStart,
       input,
       pendingAssistantInputWakeAt: systemMailboxMaintenance.pendingAssistantInputWakeAt,
     });
@@ -1173,7 +1180,7 @@ export async function runHostedWorkspaceAssistantPhase(
     if (deferredPendingSystemMailboxMaintenance?.continueAssistantLane === true) {
       const deferredPreAutomationLaneWakeAt =
         await resolvePreAutomationLaneAssistantWakeAt({
-          hasFreshConversationInput,
+          hasAssistantInputAtPassStart: hasFreshConversationInput,
           input,
           pendingAssistantInputWakeAt:
             deferredPendingSystemMailboxMaintenance.pendingAssistantInputWakeAt,
@@ -3077,12 +3084,12 @@ function buildDeferredPendingAssistantInputWakeResult(input: {
 
 async function resolvePreAutomationLaneAssistantWakeAt(
   input: {
-    hasFreshConversationInput: boolean;
+    hasAssistantInputAtPassStart: boolean;
     input: HostedWorkspaceRuntimeAssistantPhaseInput;
     pendingAssistantInputWakeAt?: string | null;
   },
 ): Promise<string | null> {
-  if (input.hasFreshConversationInput) {
+  if (input.hasAssistantInputAtPassStart) {
     return null;
   }
 
@@ -4514,9 +4521,8 @@ async function drainHostedPostCheckpointDelivery(input: {
       outcomes,
       vaultRoot: input.input.restored.vaultRoot,
     });
-  const postFailurePendingAssistantInputWakeAt = stagedTerminalFailureInputCount > 0
-    ? await resolvePendingAssistantInputWakeAt(input.input)
-    : null;
+  const postDeliveryPendingAssistantInputWakeAt =
+    await resolvePendingAssistantInputWakeAt(input.input);
   const postOutboxWakeAt = await resolveHostedAssistantOutboxNextWakeAt({
     vaultRoot: input.input.restored.vaultRoot,
   });
@@ -4562,7 +4568,7 @@ async function drainHostedPostCheckpointDelivery(input: {
     createHostedRuntimeWakeCandidate(postOutboxWakeAt, "assistant"),
     createHostedRuntimeWakeCandidate(postSystemMailboxWakeAt, "assistant"),
     createHostedRuntimeWakeCandidate(
-      postFailurePendingAssistantInputWakeAt,
+      postDeliveryPendingAssistantInputWakeAt,
       "assistant",
     ),
     providerCleanup.wake,

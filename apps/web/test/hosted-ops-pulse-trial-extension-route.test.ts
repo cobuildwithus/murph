@@ -49,6 +49,8 @@ const OPERATOR_MEMBER_ID = "member_operator";
 const CANDIDATE_SNAPSHOT_DIGEST = `pulse-candidates-v4.${"a".repeat(43)}`;
 const CANDIDATE_PREVIEW_TOKEN = `pulse-target-v4.${"b".repeat(43)}`;
 const CONTINUATION_TOKEN =
+  `pulse-cursor-v4.v1.${"a".repeat(16)}.${"b".repeat(8)}.${"c".repeat(22)}`;
+const PRE_EXPANSION_CONTINUATION_TOKEN =
   `pulse-cursor-v3.v1.${"a".repeat(16)}.${"b".repeat(8)}.${"c".repeat(22)}`;
 
 let consoleInfoSpy: ReturnType<typeof vi.spyOn>;
@@ -297,6 +299,9 @@ describe("hosted ops Pulse Trial extension route", () => {
     const malformedContinuationResponse = await route.POST(makeRequest({
       continuationToken: "member_secret",
     }));
+    const preExpansionContinuationResponse = await route.POST(makeRequest({
+      continuationToken: PRE_EXPANSION_CONTINUATION_TOKEN,
+    }));
 
     assert.equal(continuationResponse.status, 200);
     expect(mocks.extendHostedPulseTrialsForCampaign).toHaveBeenCalledWith({
@@ -313,6 +318,7 @@ describe("hosted ops Pulse Trial extension route", () => {
       mode: "dry-run",
     });
     assert.equal(malformedContinuationResponse.status, 400);
+    assert.equal(preExpansionContinuationResponse.status, 400);
   });
 
   test("rejects unknown modes", async () => {

@@ -21,7 +21,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/src/components/ui/table";
-import { BrowserVaultProvider, useBrowserVault } from "@/src/lib/browser-vault/context";
+import { useBrowserVault } from "@/src/lib/browser-vault/context";
 import {
   formatConfidenceLabel,
   formatIsoDate,
@@ -30,14 +30,6 @@ import {
 } from "@/src/lib/browser-vault/display";
 
 export default function HistoryPage() {
-  return (
-    <BrowserVaultProvider>
-      <HistoryPageContent />
-    </BrowserVaultProvider>
-  );
-}
-
-function HistoryPageContent() {
   const { client, error, refresh, refreshPending, status } = useBrowserVault();
   const history = useMemo(() => client ? selectBrowserVaultHistory(client) : null, [client]);
   const timeline = history?.timeline ?? [];

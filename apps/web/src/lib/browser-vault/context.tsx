@@ -5,28 +5,40 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
   type ReactNode,
 } from "react";
+import { usePathname } from "next/navigation";
 import { type BrowserVaultQueryClient } from "@murphai/query/browser-replica-client";
 import { type HostedBrowserVaultReplicaRef } from "@murphai/hosted-execution/browser-vault";
 
-import { useAuth } from "@/src/components/hosted-onboarding/auth-dialog-provider";
+import { reloadCurrentHostedAuthDocument } from "@/src/components/hosted-onboarding/hosted-auth-navigation";
 
+import { type BrowserVaultFreshness, type BrowserVaultSessionMetadata } from "./loader";
+import { subscribeBrowserVaultSessionInvalidation } from "./session-invalidation";
 import {
-  isBrowserVaultAbortError,
-  loadBrowserVaultReplica,
-  normalizeBrowserVaultError,
-  type BrowserVaultFreshness,
-  type BrowserVaultSessionLoadResult,
-} from "./loader";
+  abortBrowserVaultInFlightLoad,
+  clearBrowserVaultWarmState,
+  getBrowserVaultReadySnapshot,
+  peekBrowserVaultInFlightLoad,
+  startBrowserVaultWarmLoad,
+  type BrowserVaultReadySnapshot,
+  type BrowserVaultWarmLoadOutcome,
+} from "./warm-store";
 
 export type BrowserVaultStatus = "loading" | "ready" | "empty" | "error";
 
 const BROWSER_VAULT_STALE_POLL_INTERVAL_MS = 1_500;
 const BROWSER_VAULT_STALE_POLL_WINDOW_MS = 20_000;
+const EMPTY_BROWSER_VAULT_SESSION_METADATA: BrowserVaultSessionMetadata = {
+  deviceSyncImportPending: false,
+  freshness: "stale",
+  refreshPending: false,
+  workspaceVersion: null,
+};
 
 export interface BrowserVaultContextValue {
   /**
@@ -48,34 +60,14 @@ export interface BrowserVaultContextValue {
 
 const BrowserVaultContext = createContext<BrowserVaultContextValue | null>(null);
 
-const anonymousBrowserVaultContext: BrowserVaultContextValue = {
-  client: null,
-  dataVersion: null,
-  deviceSyncImportPending: false,
-  error: null,
-  freshness: "stale",
-  ref: null,
-  refreshPending: false,
-  refresh: async () => undefined,
-  status: "empty",
-  workspaceVersion: null,
-};
-
-export function BrowserVaultProvider({ children }: { children: ReactNode }) {
-  const { authenticated } = useAuth();
-
-  if (!authenticated) {
-    return (
-      <BrowserVaultContext.Provider value={anonymousBrowserVaultContext}>
-        {children}
-      </BrowserVaultContext.Provider>
-    );
-  }
-
-  return <AuthenticatedBrowserVaultProvider>{children}</AuthenticatedBrowserVaultProvider>;
-}
-
-function AuthenticatedBrowserVaultProvider({ children }: { children: ReactNode }) {
+export function BrowserVaultProvider({ children, initialMemberId }: {
+  children: ReactNode;
+  initialMemberId: string | null;
+}) {
+  const pathname = usePathname();
+  // Router payloads can be reused after server authority changes. Keep the
+  // decrypted module snapshot hidden until a post-mount session response
+  // revalidates current authority and member ownership.
   const [status, setStatus] = useState<BrowserVaultStatus>("loading");
   const [error, setError] = useState<string | null>(null);
   const [freshness, setFreshness] = useState<BrowserVaultFreshness>("stale");
@@ -84,126 +76,214 @@ function AuthenticatedBrowserVaultProvider({ children }: { children: ReactNode }
   const [client, setClient] = useState<BrowserVaultQueryClient | null>(null);
   const [deviceSyncImportPending, setDeviceSyncImportPending] = useState(false);
   const [ref, setRef] = useState<HostedBrowserVaultReplicaRef | null>(null);
+  const [admittedPathname, setAdmittedPathname] = useState<string | null>(null);
   const clientRef = useRef<BrowserVaultQueryClient | null>(null);
-  const refRef = useRef<HostedBrowserVaultReplicaRef | null>(null);
-  const inFlightLoadRef = useRef<Promise<void> | null>(null);
-  const activeLoadIdRef = useRef(0);
-  const activeAbortControllerRef = useRef<AbortController | null>(null);
+  const authorityGenerationRef = useRef(0);
   const mountedRef = useRef(false);
+  const providerStartedLoadRef = useRef(false);
 
-  const commitClientAndRef = useCallback((nextClient: BrowserVaultQueryClient | null, nextRef: HostedBrowserVaultReplicaRef | null) => {
-    clientRef.current = nextClient;
-    refRef.current = nextRef;
-    setClient(nextClient);
-    setRef(nextRef);
-  }, []);
-
-  const cancelActiveLoad = useCallback(() => {
-    activeLoadIdRef.current += 1;
-    activeAbortControllerRef.current?.abort();
-    activeAbortControllerRef.current = null;
-    inFlightLoadRef.current = null;
-  }, []);
-
-  const commitLoadResult = useCallback((result: BrowserVaultSessionLoadResult) => {
-    setDeviceSyncImportPending(result.deviceSyncImportPending);
-    setFreshness(result.freshness);
-    setRefreshPending(result.refreshPending);
-    setWorkspaceVersion(result.workspaceVersion);
-
-    if (result.state === "not_modified") {
-      if (!clientRef.current) {
-        throw new Error("Browser vault replica was unchanged but no decrypted client was available.");
-      }
-
-      commitClientAndRef(clientRef.current, result.replicaRef);
-      setStatus("ready");
-      setError(null);
-      return;
-    }
-
-    if (result.state === "empty") {
-      commitClientAndRef(null, null);
-      setStatus("empty");
-      setError(null);
-      return;
-    }
-
-    commitClientAndRef(result.client, result.replicaRef);
+  const commitReady = useCallback((snapshot: BrowserVaultReadySnapshot) => {
+    clientRef.current = snapshot.client;
+    setClient(snapshot.client);
+    setRef(snapshot.ref);
     setStatus("ready");
     setError(null);
-  }, [commitClientAndRef]);
+    setDeviceSyncImportPending(snapshot.metadata.deviceSyncImportPending);
+    setFreshness(snapshot.metadata.freshness);
+    setRefreshPending(snapshot.metadata.refreshPending);
+    setWorkspaceVersion(snapshot.metadata.workspaceVersion);
+  }, []);
 
-  const startBrowserVaultReplicaLoad = useCallback(async () => {
-    if (inFlightLoadRef.current) {
-      return inFlightLoadRef.current;
-    }
+  const commitEmpty = useCallback((metadata: BrowserVaultSessionMetadata) => {
+    clientRef.current = null;
+    setClient(null);
+    setRef(null);
+    setStatus("empty");
+    setError(null);
+    setDeviceSyncImportPending(metadata.deviceSyncImportPending);
+    setFreshness(metadata.freshness);
+    setRefreshPending(metadata.refreshPending);
+    setWorkspaceVersion(metadata.workspaceVersion);
+  }, []);
 
-    const loadId = activeLoadIdRef.current + 1;
-    activeLoadIdRef.current = loadId;
-    const abortController = new AbortController();
-    activeAbortControllerRef.current = abortController;
+  const clearDecryptedClient = useCallback(() => {
+    authorityGenerationRef.current += 1;
+    clearBrowserVaultWarmState();
+    providerStartedLoadRef.current = false;
+    commitEmpty(EMPTY_BROWSER_VAULT_SESSION_METADATA);
+    setAdmittedPathname(null);
+  }, [commitEmpty]);
 
-    const loadPromise = (async () => {
-      try {
-        const result = await loadBrowserVaultReplica({
-          knownReplicaRef: refRef.current,
-          signal: abortController.signal,
-        });
-
-        if (!mountedRef.current || loadId !== activeLoadIdRef.current) {
+  const applyOutcome = useCallback(
+    (outcome: BrowserVaultWarmLoadOutcome, options: {
+      authorityPathname?: string;
+      background: boolean;
+    }) => {
+      const { authorityPathname, background } = options;
+      if (outcome.status === "superseded") {
+        return;
+      }
+      if (outcome.status === "session_ending") {
+        commitEmpty(EMPTY_BROWSER_VAULT_SESSION_METADATA);
+        if (authorityPathname !== undefined) {
+          setAdmittedPathname(authorityPathname);
+        }
+        return;
+      }
+      if (outcome.status === "identity_changed") {
+        clearDecryptedClient();
+        reloadCurrentHostedAuthDocument();
+        return;
+      }
+      if (outcome.status === "ready") {
+        commitReady(outcome.snapshot);
+        if (authorityPathname !== undefined) {
+          setAdmittedPathname(authorityPathname);
+        }
+        return;
+      }
+      if (outcome.status === "unauthorized") {
+        clearDecryptedClient();
+        if (outcome.httpStatus === 401) {
+          if (initialMemberId !== null) {
+            reloadCurrentHostedAuthDocument();
+          }
           return;
         }
-
-        commitLoadResult(result);
-      } catch (loadError) {
-        if (!mountedRef.current || loadId !== activeLoadIdRef.current || isBrowserVaultAbortError(loadError)) {
-          return;
-        }
-
         setStatus("error");
-        setError(normalizeBrowserVaultError(loadError));
-      } finally {
-        if (activeLoadIdRef.current === loadId) {
-          activeAbortControllerRef.current = null;
-        }
-
-        if (activeLoadIdRef.current === loadId) {
-          inFlightLoadRef.current = null;
-        }
+        setError(outcome.message);
+        return;
       }
-    })();
+      if (outcome.status === "empty") {
+        commitEmpty(outcome.metadata);
+        if (authorityPathname !== undefined) {
+          setAdmittedPathname(authorityPathname);
+        }
+        return;
+      }
+      // A failed background revalidation keeps the ready stale data visible
+      // instead of replacing it with an error-only screen. Foreground loads and
+      // cold mounts with no client still surface the error.
+      if (background && clientRef.current) {
+        return;
+      }
+      setStatus("error");
+      setError(outcome.message);
+    },
+    [clearDecryptedClient, commitEmpty, commitReady, initialMemberId],
+  );
 
-    inFlightLoadRef.current = loadPromise;
-    return loadPromise;
-  }, [commitLoadResult]);
-
-  const loadReplica = useCallback(async (options: { background?: boolean } = {}) => {
-    if (!inFlightLoadRef.current) {
-      if (!options.background) {
+  const runProviderLoad = useCallback(
+    async (options: {
+      authorityPathname?: string;
+      background?: boolean;
+    } = {}) => {
+      const background = options.background ?? false;
+      const { authorityPathname } = options;
+      const authorityGeneration = authorityPathname === undefined
+        ? authorityGenerationRef.current
+        : authorityGenerationRef.current + 1;
+      if (authorityPathname !== undefined) {
+        authorityGenerationRef.current = authorityGeneration;
+        setAdmittedPathname(null);
         setStatus("loading");
+        setError(null);
       }
-      setError(null);
+
+      const existing = peekBrowserVaultInFlightLoad();
+      if (authorityPathname !== undefined && existing) {
+        // Preserve the landing warm request. Its result stays private module
+        // state until a second, post-boundary request proves current authority
+        // using the resulting known replica ref.
+        await existing;
+        if (
+          !mountedRef.current
+          || authorityGeneration !== authorityGenerationRef.current
+        ) {
+          return;
+        }
+      }
+
+      const sharedLoad = peekBrowserVaultInFlightLoad();
+      const startedLoad = !sharedLoad;
+      if (startedLoad) {
+        // This provider originated the load, so it owns aborting it on unmount.
+        providerStartedLoadRef.current = true;
+        if (!background && authorityPathname === undefined) {
+          setStatus("loading");
+          setError(null);
+        }
+      }
+
+      const outcome = await startBrowserVaultWarmLoad({
+        expectedMemberId: initialMemberId,
+      });
+      if (startedLoad) {
+        providerStartedLoadRef.current = false;
+      }
+      if (
+        !mountedRef.current
+        || authorityGeneration !== authorityGenerationRef.current
+      ) {
+        return;
+      }
+
+      applyOutcome(outcome, { authorityPathname, background });
+    },
+    [applyOutcome, initialMemberId],
+  );
+
+  const refresh = useCallback(async () => {
+    await runProviderLoad({ authorityPathname: pathname });
+  }, [pathname, runProviderLoad]);
+
+  const pollStaleReplica = useCallback(async () => {
+    await runProviderLoad({ background: true });
+  }, [runProviderLoad]);
+
+  const revalidateAuthority = useCallback(async (authorityPathname: string) => {
+    await runProviderLoad({ authorityPathname });
+  }, [runProviderLoad]);
+
+  useLayoutEffect(() => {
+    const unsubscribe = subscribeBrowserVaultSessionInvalidation(clearDecryptedClient);
+    const currentSnapshot = getBrowserVaultReadySnapshot();
+
+    // Subscribing before the recheck closes both sides of the render-to-effect
+    // gap: an earlier invalidation already cleared the store, while a later one
+    // reaches this listener. A different client is a different decrypted owner.
+    if (
+      clientRef.current
+      && (
+        currentSnapshot?.client !== clientRef.current
+      )
+    ) {
+      clearDecryptedClient();
     }
 
-    return startBrowserVaultReplicaLoad();
-  }, [startBrowserVaultReplicaLoad]);
-
-  const load = useCallback(async () => loadReplica(), [loadReplica]);
-  const pollStaleReplica = useCallback(
-    async () => loadReplica({ background: true }),
-    [loadReplica],
-  );
+    return unsubscribe;
+  }, [clearDecryptedClient]);
 
   useEffect(() => {
     mountedRef.current = true;
-    void startBrowserVaultReplicaLoad();
-
     return () => {
       mountedRef.current = false;
-      cancelActiveLoad();
+      if (providerStartedLoadRef.current) {
+        abortBrowserVaultInFlightLoad();
+        providerStartedLoadRef.current = false;
+      }
     };
-  }, [cancelActiveLoad, startBrowserVaultReplicaLoad]);
+  }, []);
+
+  useEffect(() => {
+    // The persistent route-group provider admits module memory only after a
+    // current-session response reauthorizes this exact pathname and member.
+    void Promise.resolve().then(() => {
+      if (mountedRef.current) {
+        return revalidateAuthority(pathname);
+      }
+    });
+  }, [pathname, revalidateAuthority]);
 
   useEffect(() => {
     if (status === "error" || !refreshPending) {
@@ -238,27 +318,30 @@ function AuthenticatedBrowserVaultProvider({ children }: { children: ReactNode }
 
   useEffect(() => {
     const onFocus = () => {
-      if (refreshPending) {
-        void pollStaleReplica();
-      }
+      void revalidateAuthority(pathname);
     };
 
     window.addEventListener("focus", onFocus);
     return () => window.removeEventListener("focus", onFocus);
-  }, [freshness, pollStaleReplica, refreshPending]);
+  }, [pathname, revalidateAuthority]);
 
+  const authorityAdmitted = admittedPathname === pathname;
   const value = useMemo<BrowserVaultContextValue>(() => ({
-    client,
-    dataVersion: ref?.dataVersion ?? null,
-    deviceSyncImportPending,
-    error,
-    freshness,
-    ref,
-    refreshPending,
-    refresh: load,
-    status,
-    workspaceVersion,
-  }), [client, deviceSyncImportPending, error, freshness, load, ref, refreshPending, status, workspaceVersion]);
+    client: authorityAdmitted ? client : null,
+    dataVersion: authorityAdmitted ? ref?.dataVersion ?? null : null,
+    deviceSyncImportPending: authorityAdmitted
+      ? deviceSyncImportPending
+      : false,
+    error: authorityAdmitted || status === "error" ? error : null,
+    freshness: authorityAdmitted ? freshness : "stale",
+    ref: authorityAdmitted ? ref : null,
+    refreshPending: authorityAdmitted ? refreshPending : false,
+    refresh,
+    status: authorityAdmitted || status === "empty" || status === "error"
+      ? status
+      : "loading",
+    workspaceVersion: authorityAdmitted ? workspaceVersion : null,
+  }), [authorityAdmitted, client, deviceSyncImportPending, error, freshness, ref, refresh, refreshPending, status, workspaceVersion]);
 
   return (
     <BrowserVaultContext.Provider value={value}>

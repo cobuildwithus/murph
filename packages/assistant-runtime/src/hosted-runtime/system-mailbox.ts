@@ -25,7 +25,6 @@ import type {
   HostedMailboxResolvedImportItem,
 } from "./mailbox-import.ts";
 import {
-  compareHostedSystemMailboxPendingItemMailboxSequence,
   findNextHostedSystemMailboxQueueItem,
   mergeHostedSystemMailboxRollbackItems,
   readHostedSystemMailboxState,
@@ -110,7 +109,6 @@ export async function enqueueHostedSystemMailboxItem(input: {
   if (routeAction === "apply-member-activation" && input.wake.kind === "member.activated") {
     await bootstrapHostedMemberContext(input.vaultRoot, input.wake);
   }
-
   const nextItem: HostedSystemMailboxPendingItem = {
     attemptCount: 0,
     itemId: input.item.item.id,
@@ -122,6 +120,9 @@ export async function enqueueHostedSystemMailboxItem(input: {
     nextAttemptAt: null,
     occurredAt: input.item.item.occurredAt,
     postCheckpointRecord: null,
+    preferenceCausalSeq: routeAction === "apply-member-preferences"
+      ? (input.item.item.causalSeq ?? null)
+      : null,
     requestId: input.item.payload.requestId ?? null,
     routeAction,
     status: "pending",
@@ -175,19 +176,9 @@ export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
       return {
         result: nextItem,
         state: {
-          pending: state.pending.flatMap((item) => {
-            if (item.itemId === pending.itemId) {
-              return [nextItem];
-            }
-            if (
-              pending.routeAction === "apply-member-preferences"
-              && item.status === "pending"
-              && item.routeAction === "apply-member-preferences"
-            ) {
-              return [];
-            }
-            return [item];
-          }),
+          pending: state.pending.map((item) =>
+            item.itemId === pending.itemId ? nextItem : item
+          ),
         },
       };
     },
@@ -288,11 +279,8 @@ function upsertHostedSystemMailboxPendingItem(
   pending: readonly HostedSystemMailboxPendingItem[],
   nextItem: HostedSystemMailboxPendingItem,
 ): HostedSystemMailboxPendingItem[] {
-  const supersedesPendingMemberPreferences =
-    nextItem.routeAction === "apply-member-preferences";
   const next: HostedSystemMailboxPendingItem[] = [];
   let inserted = false;
-  let shouldInsertNext = true;
 
   for (const item of pending) {
     if (item.itemId === nextItem.itemId) {
@@ -300,23 +288,10 @@ function upsertHostedSystemMailboxPendingItem(
       inserted = true;
       continue;
     }
-    if (
-      supersedesPendingMemberPreferences
-      && item.status === "pending"
-      && item.routeAction === "apply-member-preferences"
-    ) {
-      const order = compareHostedSystemMailboxPendingItemMailboxSequence(nextItem, item);
-      if (order >= 0) {
-        continue;
-      }
-      shouldInsertNext = false;
-      next.push(item);
-      continue;
-    }
     next.push(item);
   }
 
-  if (!inserted && shouldInsertNext) {
+  if (!inserted) {
     next.push(nextItem);
   }
   return next;
@@ -439,6 +414,8 @@ async function executePendingHostedSystemMailboxItem(input: {
     executionContext,
     forceQueueOnlyAssistantNotification: true,
     operatorHomeRoot: input.operatorHomeRoot ?? undefined,
+    preferenceAppliedAt: input.pendingItem.lastAttemptAt ?? undefined,
+    preferenceCausalSeq: input.pendingItem.preferenceCausalSeq ?? "0",
     runtime: input.runtime,
     runtimeEnv: input.runtimeEnv,
     ...(input.shouldYieldBackgroundMaintenance

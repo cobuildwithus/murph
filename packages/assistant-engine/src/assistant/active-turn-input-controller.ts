@@ -93,6 +93,9 @@ class AssistantActiveTurnInputController {
       acceptedInputValidator?: (input: {
         acceptedInputs: readonly AssistantAcceptedTurnInputItemInput[]
       }) => Promise<void>
+      beforeProviderSteer?: (input: {
+        acceptedInputs: readonly AssistantAcceptedTurnInputItemInput[]
+      }) => Promise<void>
       eventAdmissionEnabled?: boolean
       sessionId: string
       turnId: string
@@ -483,10 +486,15 @@ class AssistantActiveTurnInputController {
       }
 
       item.providerInputAckTurnKey = liveProviderTurnKey
-      item.providerInputAck = liveProviderTurn
-        .steer({
-          prompt: normalizeNullableString(item.admission.prompt) ?? '',
-          userMessageContent: item.admission.userMessageContent ?? null,
+      item.providerInputAck = Promise.resolve()
+        .then(async () => {
+          await this.input.beforeProviderSteer?.({
+            acceptedInputs: item.admission.acceptedInputs,
+          })
+          await liveProviderTurn.steer({
+            prompt: normalizeNullableString(item.admission.prompt) ?? '',
+            userMessageContent: item.admission.userMessageContent ?? null,
+          })
         })
         .then(() => {
           if (
@@ -574,6 +582,9 @@ export function createAssistantActiveTurnInputController(input: {
   acceptedInputValidator?: (validatorInput: {
     acceptedInputs: readonly AssistantAcceptedTurnInputItemInput[]
   }) => Promise<void>
+  beforeProviderSteer?: (steerInput: {
+    acceptedInputs: readonly AssistantAcceptedTurnInputItemInput[]
+  }) => Promise<void>
   admissionHook?: AssistantActiveTurnInputAdmissionHook | null
   conversationKeys?: readonly string[] | null
   eventAdmissionEnabled?: boolean
@@ -597,6 +608,7 @@ export function createAssistantActiveTurnInputController(input: {
   const keys = resolveAssistantActiveTurnInputControllerKeys(input)
   const controller = new AssistantActiveTurnInputController({
     acceptedInputValidator: input.acceptedInputValidator,
+    beforeProviderSteer: input.beforeProviderSteer,
     admissionHook: input.admissionHook,
     eventAdmissionEnabled: input.eventAdmissionEnabled,
     sessionId: input.sessionId,
