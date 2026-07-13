@@ -229,6 +229,12 @@ can upload companion metadata.
    encrypted compact dirty job, and wake the existing hosted device-sync
    runtime. Missing, terminal, or ambiguous connection state fails closed;
    data upload never establishes or reconnects a Junction account. The
+   established-lane requirement is rechecked under the connection mutation
+   lock. Disconnect commits a durable fail-closed intent before provider
+   revocation, so companion uploads and reconnect writes cannot enter the lane
+   until disconnect finalizes or a retry completes the interrupted operation.
+   Ordinary companion metadata continues to require the active member-owned
+   lane described above; it does not inherit HRV's source-confirmation gate. The
    contract has no field for raw R-R
    intervals, BLE packets, device identity, heart-rate samples, or Apple
    Health values; unknown fields are rejected. Runtime import is idempotent by

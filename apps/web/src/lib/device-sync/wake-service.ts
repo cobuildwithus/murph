@@ -18,8 +18,10 @@ import {
   shapeHostedDeviceSyncJobHintPayload,
 } from "@murphai/device-syncd/hosted-hints";
 import {
+  DEVICE_SYNC_DISCONNECT_IN_PROGRESS_ERROR_CODE,
   DEVICE_SYNC_HISTORICAL_RESET_REVOKE_FAILED_ERROR_CODE,
   isEstablishedDeviceSyncConnection,
+  isDeviceSyncDisconnectInProgress,
   isHistoricalResetIncompleteDeviceSyncAccount,
   requiresHistoricalResetDeviceSyncSource,
 } from "@murphai/device-syncd/public-account";
@@ -76,6 +78,7 @@ export async function disconnectHostedDeviceSyncConnection(input: {
   connection: PublicDeviceSyncAccount;
   warning?: { code: string; message: string };
 }> {
+  const disconnectStartedAt = toIsoTimestamp(new Date());
   const target = await input.store.withConnectionMutationLock(input.connectionId, async (tx) => {
     const connection = await input.store.getConnectionForUser(input.userId, input.connectionId, tx);
     if (!connection) {
@@ -92,12 +95,30 @@ export async function disconnectHostedDeviceSyncConnection(input: {
       input.connectionId,
       tx,
     );
-    return { connection, storedAccount };
+
+    if (connection.status === "disconnected" && !storedAccount) {
+      return { alreadyDisconnected: true, connection, storedAccount };
+    }
+
+    if (!isDeviceSyncDisconnectInProgress(connection)) {
+      await input.store.syncDurableConnectionState({
+        ...connection,
+        lastErrorCode: DEVICE_SYNC_DISCONNECT_IN_PROGRESS_ERROR_CODE,
+        lastErrorMessage: null,
+        nextReconcileAt: null,
+        setupExpiresAt: null,
+        setupPhase: null,
+        status: "reauthorization_required",
+        updatedAt: disconnectStartedAt,
+      }, tx);
+    }
+
+    return { alreadyDisconnected: false, connection, storedAccount };
   });
   const existing = target.connection;
   const storedAccount = target.storedAccount;
 
-  if (existing.status === "disconnected" && !storedAccount) {
+  if (target.alreadyDisconnected) {
     return {
       connection: existing,
     };
@@ -152,7 +173,8 @@ export async function disconnectHostedDeviceSyncConnection(input: {
     );
 
     if (
-      !publicAccountMatchesDisconnectTarget(existing, freshExisting)
+      !isDeviceSyncDisconnectInProgress(freshExisting)
+      || !publicAccountMatchesDisconnectTarget(existing, freshExisting)
       || !storedAccountMatchesDisconnectTarget(storedAccount, freshStoredAccount)
     ) {
       connectionChangedDuringDisconnectError();
@@ -160,7 +182,8 @@ export async function disconnectHostedDeviceSyncConnection(input: {
 
     const warning = revokeFailure
       ? (
-          isHistoricalResetIncompleteDeviceSyncAccount(freshExisting)
+          isHistoricalResetIncompleteDeviceSyncAccount(existing)
+          || isHistoricalResetIncompleteDeviceSyncAccount(freshExisting)
           || (await input.store.listConnectionSources(input.connectionId, tx))
             .some(requiresHistoricalResetDeviceSyncSource)
         )
@@ -172,7 +195,7 @@ export async function disconnectHostedDeviceSyncConnection(input: {
       : undefined;
 
     if (
-      freshExisting.status === "disconnected"
+      existing.status === "disconnected"
       && freshStoredAccount?.credential.kind === "provider_config"
       && providerConfigRevokeSucceeded
     ) {
@@ -188,19 +211,14 @@ export async function disconnectHostedDeviceSyncConnection(input: {
         throw connectionChangedDuringDisconnectError();
       }
 
-      const clearedConnection: PublicDeviceSyncAccount = (
-        freshExisting.lastErrorCode !== null || freshExisting.lastErrorMessage !== null
-      )
-        ? {
-            ...freshExisting,
-            lastErrorCode: null,
-            lastErrorMessage: null,
-            updatedAt: now,
-          }
-        : freshExisting;
-      if (clearedConnection !== freshExisting) {
-        await input.store.syncDurableConnectionState(clearedConnection, tx);
-      }
+      const clearedConnection: PublicDeviceSyncAccount = {
+        ...freshExisting,
+        lastErrorCode: null,
+        lastErrorMessage: null,
+        status: "disconnected",
+        updatedAt: now,
+      };
+      await input.store.syncDurableConnectionState(clearedConnection, tx);
 
       return {
         connection: clearedConnection,
@@ -210,11 +228,19 @@ export async function disconnectHostedDeviceSyncConnection(input: {
     }
 
     if (
-      freshExisting.status === "disconnected"
+      existing.status === "disconnected"
       && freshStoredAccount?.credential.kind !== "oauth_tokens"
     ) {
+      const repeatedDisconnectedConnection: PublicDeviceSyncAccount = {
+        ...freshExisting,
+        lastErrorCode: warning?.code ?? existing.lastErrorCode,
+        lastErrorMessage: warning?.message ?? existing.lastErrorMessage,
+        status: "disconnected",
+        updatedAt: now,
+      };
+      await input.store.syncDurableConnectionState(repeatedDisconnectedConnection, tx);
       return {
-        connection: freshExisting,
+        connection: repeatedDisconnectedConnection,
         mailboxItemId: null,
         warning,
       };
@@ -560,6 +586,7 @@ export async function persistHostedDeviceSyncCompanionMetadata(input: {
     ...input,
     eventType: JUNCTION_COMPANION_HEALTH_METADATA_EVENT_TYPE,
     resourceCategory: "summary",
+    setupRequirement: "active",
     wakeReason: "companion_health_metadata",
   });
 }
@@ -611,6 +638,7 @@ export async function acceptHostedCompanionHrvRmssdObservation(input: {
     occurredAt: input.acceptedAt,
     resource,
     resourceCategory: "derived",
+    setupRequirement: "established",
     store: input.store,
     userId: input.userId,
     wakeReason: "companion_hrv_rmssd",
@@ -623,6 +651,7 @@ async function persistHostedDeviceSyncCompanionResource(input: {
   occurredAt: string;
   resource: HostedDeviceSyncDirtyResource;
   resourceCategory: string;
+  setupRequirement: "active" | "established";
   store: PrismaDeviceSyncControlPlaneStore;
   userId: string;
   wakeReason: string;
@@ -637,7 +666,11 @@ async function persistHostedDeviceSyncCompanionResource(input: {
       if (
         !connection
         || connection.provider !== "junction"
-        || !isEstablishedDeviceSyncConnection(connection)
+        || connection.status !== "active"
+        || (
+          input.setupRequirement === "established"
+          && !isEstablishedDeviceSyncConnection(connection)
+        )
       ) {
         throw deviceSyncError({
           code: "COMPANION_HEALTH_CONNECTION_REQUIRED",

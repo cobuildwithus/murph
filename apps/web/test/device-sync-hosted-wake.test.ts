@@ -1,4 +1,7 @@
-import { DEVICE_SYNC_HISTORICAL_DATA_RECONNECT_REQUIRED_ERROR_CODE } from "@murphai/device-syncd/public-account";
+import {
+  DEVICE_SYNC_DISCONNECT_IN_PROGRESS_ERROR_CODE,
+  DEVICE_SYNC_HISTORICAL_DATA_RECONNECT_REQUIRED_ERROR_CODE,
+} from "@murphai/device-syncd/public-account";
 import { DEFAULT_DEVICE_SYNC_HTTP_BODY_LIMIT_BYTES } from "@murphai/device-syncd/public-ingress";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -198,6 +201,20 @@ function buildHostedConnection(
     status: "active" as const,
     updatedAt: "2026-03-26T12:00:00.000Z",
     ...overrides,
+  };
+}
+
+function buildDisconnectingConnection(
+  connection: ReturnType<typeof buildHostedConnection>,
+) {
+  return {
+    ...connection,
+    lastErrorCode: DEVICE_SYNC_DISCONNECT_IN_PROGRESS_ERROR_CODE,
+    lastErrorMessage: null,
+    nextReconcileAt: null,
+    setupExpiresAt: null,
+    setupPhase: null,
+    status: "reauthorization_required" as const,
   };
 }
 
@@ -691,7 +708,6 @@ describe("hosted device-sync wakes", () => {
     const connection = buildHostedConnection({
       displayName: "Apple Health",
       provider: "junction",
-      setupPhase: "source_confirmed",
     });
     const dirty = buildDirtyConnectionRecord({
       provider: "junction",
@@ -780,10 +796,7 @@ describe("hosted device-sync wakes", () => {
   });
 
   it("does not append a second wake while companion dirty work is already pending", async () => {
-    const connection = buildHostedConnection({
-      provider: "junction",
-      setupPhase: "source_confirmed",
-    });
+    const connection = buildHostedConnection({ provider: "junction" });
     mocks.getConnectionForUser.mockResolvedValue(connection);
     mocks.listConnectionSources.mockResolvedValue([{
       sourceProviderSlug: "apple_health_kit",
@@ -819,10 +832,7 @@ describe("hosted device-sync wakes", () => {
   });
 
   it("rejects companion metadata while the connection backlog is full", async () => {
-    const connection = buildHostedConnection({
-      provider: "junction",
-      setupPhase: "source_confirmed",
-    });
+    const connection = buildHostedConnection({ provider: "junction" });
     mocks.getConnectionForUser.mockResolvedValue(connection);
     mocks.listConnectionSources.mockResolvedValue([{
       sourceProviderSlug: "apple_health_kit",
@@ -859,10 +869,7 @@ describe("hosted device-sync wakes", () => {
   });
 
   it("accepts an exact replay at the backlog cap after the store no-ops it", async () => {
-    const connection = buildHostedConnection({
-      provider: "junction",
-      setupPhase: "source_confirmed",
-    });
+    const connection = buildHostedConnection({ provider: "junction" });
     mocks.getConnectionForUser.mockResolvedValue(connection);
     mocks.listConnectionSources.mockResolvedValue([{
       sourceProviderSlug: "apple_health_kit",
@@ -911,22 +918,6 @@ describe("hosted device-sync wakes", () => {
       provider: "junction",
       setupPhase: "source_confirmed",
       status: "disconnected",
-    })],
-    ["pending setup", buildHostedConnection({
-      provider: "junction",
-      setupPhase: "pending_link",
-    })],
-    ["returned setup", buildHostedConnection({
-      provider: "junction",
-      setupPhase: "link_returned",
-    })],
-    ["failed setup", buildHostedConnection({
-      provider: "junction",
-      setupPhase: "failed",
-    })],
-    ["missing setup", buildHostedConnection({
-      provider: "junction",
-      setupPhase: null,
     })],
     ["non-Junction", buildHostedConnection({
       provider: "oura",
@@ -1015,13 +1006,10 @@ describe("hosted device-sync wakes", () => {
       setupExpiresAt: "2026-03-26T12:30:00.000Z",
       setupPhase: "pending_link",
     });
-    const disconnectedConnection = buildHostedConnection({
-      status: "disconnected",
-    });
     mocks.listConnectionsForUser.mockResolvedValue([activeConnection]);
     mocks.getConnectionForUser
       .mockResolvedValueOnce(activeConnection)
-      .mockResolvedValueOnce(disconnectedConnection);
+      .mockResolvedValueOnce(buildDisconnectingConnection(activeConnection));
     const publicConnectionId = buildPublicConnectionId("dsc_123");
 
     await expect(controlPlane.disconnectConnection("user-123", publicConnectionId)).resolves.toMatchObject({
@@ -1113,7 +1101,7 @@ describe("hosted device-sync wakes", () => {
     mocks.listConnectionsForUser.mockResolvedValue([beforeRefresh]);
     mocks.getConnectionForUser
       .mockResolvedValueOnce(beforeRefresh)
-      .mockResolvedValueOnce(afterRefresh);
+      .mockResolvedValueOnce(buildDisconnectingConnection(afterRefresh));
     mocks.getStoredConnectionAccountForUser
       .mockResolvedValueOnce(beforeRefreshStored)
       .mockResolvedValueOnce(afterRefreshStored);
@@ -1207,7 +1195,11 @@ describe("hosted device-sync wakes", () => {
       retryable: true,
     });
     expect(revokeAccess).toHaveBeenCalledWith(beforeRefreshStored);
-    expect(mocks.syncDurableConnectionState).not.toHaveBeenCalled();
+    expect(mocks.syncDurableConnectionState).toHaveBeenCalledTimes(1);
+    expect(mocks.syncDurableConnectionState).toHaveBeenCalledWith(
+      buildDisconnectingConnection(beforeRefresh),
+      mocks.prismaTx,
+    );
     expect(mocks.markConnectionSourcesDisconnected).not.toHaveBeenCalled();
     expect(mocks.persistStoredConnectionTokenBundle).not.toHaveBeenCalled();
     expect(mocks.clearStoredProviderConfigCredential).not.toHaveBeenCalled();
@@ -1335,7 +1327,11 @@ describe("hosted device-sync wakes", () => {
       retryable: true,
     });
     expect(revokeAccess).toHaveBeenCalledWith(beforeReconnectStored);
-    expect(mocks.syncDurableConnectionState).not.toHaveBeenCalled();
+    expect(mocks.syncDurableConnectionState).toHaveBeenCalledTimes(1);
+    expect(mocks.syncDurableConnectionState).toHaveBeenCalledWith(
+      buildDisconnectingConnection(beforeReconnect),
+      mocks.prismaTx,
+    );
     expect(mocks.markConnectionSourcesDisconnected).not.toHaveBeenCalled();
     expect(mocks.persistStoredConnectionTokenBundle).not.toHaveBeenCalled();
     expect(mocks.clearStoredProviderConfigCredential).not.toHaveBeenCalled();
@@ -1343,6 +1339,134 @@ describe("hosted device-sync wakes", () => {
     expect(mocks.appendHostedMailboxEnvelope).not.toHaveBeenCalled();
     expect(mocks.signalHostedDeviceSyncMailboxRuntime).not.toHaveBeenCalled();
     expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
+  });
+
+  it("rejects companion HRV after disconnect intent commits and while provider revoke is pending", async () => {
+    const controlPlane = createHostedDeviceSyncPublicIngressService(
+      new Request("https://control.example.test/api/settings/device-sync/connections/dsc_123/disconnect"),
+    );
+    let currentConnection = buildHostedConnection({
+      displayName: "Junction",
+      externalAccountId: "junction-user-123",
+      provider: "junction",
+      scopes: [],
+      setupPhase: "source_confirmed",
+    });
+    const storedConnection = buildProviderConfigStoredConnection({
+      displayName: "Junction",
+      externalAccountId: "junction-user-123",
+      provider: "junction",
+      scopes: [],
+      setupPhase: "source_confirmed",
+    });
+    let releaseRevoke: (() => void) | undefined;
+    let markRevokeStarted: (() => void) | undefined;
+    const revokeStarted = new Promise<void>((resolve) => {
+      markRevokeStarted = resolve;
+    });
+    const revokeBlocked = new Promise<void>((resolve) => {
+      releaseRevoke = resolve;
+    });
+    const revokeAccess = vi.fn(async () => {
+      markRevokeStarted?.();
+      await revokeBlocked;
+    });
+    mocks.registryGet.mockReturnValue({
+      connectionHandler: {
+        revokeAccess,
+      },
+    });
+    mocks.listConnectionsForUser.mockImplementation(async () => [currentConnection]);
+    mocks.getConnectionForUser.mockImplementation(async () => currentConnection);
+    mocks.getStoredConnectionAccountForUser.mockResolvedValue(storedConnection);
+    mocks.syncDurableConnectionState.mockImplementation(async (connection) => {
+      currentConnection = connection;
+    });
+
+    const disconnect = controlPlane.disconnectConnection(
+      "user-123",
+      buildPublicConnectionId("dsc_123"),
+    );
+    await revokeStarted;
+
+    expect(currentConnection).toEqual(expect.objectContaining({
+      lastErrorCode: DEVICE_SYNC_DISCONNECT_IN_PROGRESS_ERROR_CODE,
+      status: "reauthorization_required",
+    }));
+    expect(mocks.withConnectionMutationLock).toHaveBeenNthCalledWith(
+      1,
+      "dsc_123",
+      expect.any(Function),
+    );
+    expect(mocks.syncDurableConnectionState).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        lastErrorCode: DEVICE_SYNC_DISCONNECT_IN_PROGRESS_ERROR_CODE,
+        status: "reauthorization_required",
+      }),
+      mocks.prismaTx,
+    );
+    expect(mocks.syncDurableConnectionState.mock.invocationCallOrder[0]).toBeLessThan(
+      revokeAccess.mock.invocationCallOrder[0],
+    );
+    await expect(acceptTestCompanionHrvRmssdObservation()).rejects.toMatchObject({
+      code: "COMPANION_HRV_CONNECTION_REQUIRED",
+      httpStatus: 409,
+    });
+    expect(mocks.upsertDirtyConnection).not.toHaveBeenCalled();
+
+    releaseRevoke?.();
+    await expect(disconnect).resolves.toMatchObject({
+      connection: {
+        status: "disconnected",
+      },
+    });
+  });
+
+  it("retries an interrupted disconnect from its durable intent", async () => {
+    const controlPlane = createHostedDeviceSyncPublicIngressService(
+      new Request("https://control.example.test/api/settings/device-sync/connections/dsc_123/disconnect"),
+    );
+    const disconnectingConnection = buildDisconnectingConnection(buildHostedConnection({
+      displayName: "Junction",
+      externalAccountId: "junction-user-123",
+      provider: "junction",
+      scopes: [],
+      setupPhase: "source_confirmed",
+    }));
+    const storedConnection = buildProviderConfigStoredConnection({
+      displayName: "Junction",
+      externalAccountId: "junction-user-123",
+      provider: "junction",
+      scopes: [],
+      setupPhase: "source_confirmed",
+    });
+    const revokeAccess = vi.fn(async () => {});
+    mocks.registryGet.mockReturnValue({
+      connectionHandler: { revokeAccess },
+    });
+    mocks.listConnectionsForUser.mockResolvedValue([disconnectingConnection]);
+    mocks.getConnectionForUser.mockResolvedValue(disconnectingConnection);
+    mocks.getStoredConnectionAccountForUser.mockResolvedValue(storedConnection);
+
+    await expect(controlPlane.disconnectConnection(
+      "user-123",
+      buildPublicConnectionId("dsc_123"),
+    )).resolves.toMatchObject({
+      connection: {
+        status: "disconnected",
+      },
+    });
+
+    expect(revokeAccess).toHaveBeenCalledWith(storedConnection);
+    expect(mocks.syncDurableConnectionState).toHaveBeenCalledTimes(1);
+    expect(mocks.syncDurableConnectionState).toHaveBeenCalledWith(
+      expect.objectContaining({
+        lastErrorCode: null,
+        status: "disconnected",
+      }),
+      mocks.prismaTx,
+    );
   });
 
   it("revokes active provider-config connections during hosted disconnect", async () => {
@@ -1370,7 +1494,7 @@ describe("hosted device-sync wakes", () => {
     mocks.listConnectionsForUser.mockResolvedValue([activeConnection]);
     mocks.getConnectionForUser
       .mockResolvedValueOnce(activeConnection)
-      .mockResolvedValueOnce(activeConnection);
+      .mockResolvedValueOnce(buildDisconnectingConnection(activeConnection));
     mocks.getStoredConnectionAccountForUser
       .mockResolvedValueOnce(storedConnection)
       .mockResolvedValueOnce(storedConnection);
@@ -1429,7 +1553,7 @@ describe("hosted device-sync wakes", () => {
     mocks.listConnectionsForUser.mockResolvedValue([activeConnection]);
     mocks.getConnectionForUser
       .mockResolvedValueOnce(activeConnection)
-      .mockResolvedValueOnce(activeConnection);
+      .mockResolvedValueOnce(buildDisconnectingConnection(activeConnection));
     mocks.getStoredConnectionAccountForUser
       .mockResolvedValueOnce(storedConnection)
       .mockResolvedValueOnce(storedConnection);
@@ -1454,7 +1578,9 @@ describe("hosted device-sync wakes", () => {
       status: "disconnected",
     });
     mocks.listConnectionsForUser.mockResolvedValue([disconnectedConnection]);
-    mocks.getConnectionForUser.mockResolvedValue(disconnectedConnection);
+    mocks.getConnectionForUser
+      .mockResolvedValueOnce(disconnectedConnection)
+      .mockResolvedValueOnce(buildDisconnectingConnection(disconnectedConnection));
     mocks.getStoredConnectionAccountForUser.mockResolvedValue(buildProviderConfigStoredConnection({
       status: "disconnected",
     }));
@@ -1468,7 +1594,7 @@ describe("hosted device-sync wakes", () => {
     });
 
     expect(mocks.withConnectionMutationLock).toHaveBeenCalledWith("dsc_123", expect.any(Function));
-    expect(mocks.syncDurableConnectionState).not.toHaveBeenCalled();
+    expect(mocks.syncDurableConnectionState).toHaveBeenCalledTimes(2);
     expect(mocks.markConnectionSourcesDisconnected).not.toHaveBeenCalled();
     expect(mocks.persistStoredConnectionTokenBundle).not.toHaveBeenCalled();
     expect(mocks.createSignal).not.toHaveBeenCalled();
@@ -1496,7 +1622,9 @@ describe("hosted device-sync wakes", () => {
       },
     });
     mocks.listConnectionsForUser.mockResolvedValue([disconnectedConnection]);
-    mocks.getConnectionForUser.mockResolvedValue(disconnectedConnection);
+    mocks.getConnectionForUser
+      .mockResolvedValueOnce(disconnectedConnection)
+      .mockResolvedValueOnce(buildDisconnectingConnection(disconnectedConnection));
     mocks.getStoredConnectionAccountForUser.mockResolvedValue(storedConnection);
     const publicConnectionId = buildPublicConnectionId("dsc_123");
 
@@ -1523,7 +1651,7 @@ describe("hosted device-sync wakes", () => {
       providerConfigKey: "hosted-provider-config",
       userId: "user-123",
     });
-    expect(mocks.syncDurableConnectionState).not.toHaveBeenCalled();
+    expect(mocks.syncDurableConnectionState).toHaveBeenCalledTimes(2);
     expect(mocks.createSignal).not.toHaveBeenCalled();
     expect(mocks.appendHostedMailboxEnvelope).not.toHaveBeenCalled();
     expect(mocks.signalHostedDeviceSyncMailboxRuntime).not.toHaveBeenCalled();
@@ -1534,11 +1662,6 @@ describe("hosted device-sync wakes", () => {
       new Request("https://control.example.test/api/settings/device-sync/connections/dsc_123/disconnect"),
     );
     const activeConnection = buildHostedConnection();
-    const disconnectedConnection = buildHostedConnection({
-      lastErrorCode: "PROVIDER_REVOKE_FAILED",
-      lastErrorMessage: "authorization=[redacted] refresh_token=[redacted]",
-      status: "disconnected",
-    });
     let currentSources = [{
       lastErrorCode: DEVICE_SYNC_HISTORICAL_DATA_RECONNECT_REQUIRED_ERROR_CODE,
       status: "error",
@@ -1555,7 +1678,7 @@ describe("hosted device-sync wakes", () => {
     mocks.listConnectionsForUser.mockResolvedValue([activeConnection]);
     mocks.getConnectionForUser
       .mockResolvedValueOnce(activeConnection)
-      .mockResolvedValueOnce(disconnectedConnection);
+      .mockResolvedValueOnce(buildDisconnectingConnection(activeConnection));
     mocks.listConnectionSources.mockImplementation(async () => currentSources);
     const publicConnectionId = buildPublicConnectionId("dsc_123");
 
@@ -1618,7 +1741,9 @@ describe("hosted device-sync wakes", () => {
       },
     });
     mocks.listConnectionsForUser.mockResolvedValue([activeConnection]);
-    mocks.getConnectionForUser.mockResolvedValue(activeConnection);
+    mocks.getConnectionForUser
+      .mockResolvedValueOnce(activeConnection)
+      .mockResolvedValueOnce(buildDisconnectingConnection(activeConnection));
     mocks.listConnectionSources.mockImplementation(async () => currentSources);
     const publicConnectionId = buildPublicConnectionId("dsc_123");
 
@@ -1667,7 +1792,9 @@ describe("hosted device-sync wakes", () => {
       },
     });
     mocks.listConnectionsForUser.mockResolvedValue([disconnectedConnection]);
-    mocks.getConnectionForUser.mockResolvedValue(disconnectedConnection);
+    mocks.getConnectionForUser
+      .mockResolvedValueOnce(disconnectedConnection)
+      .mockResolvedValueOnce(buildDisconnectingConnection(disconnectedConnection));
     mocks.getStoredConnectionAccountForUser.mockResolvedValue(buildProviderConfigStoredConnection({
       externalAccountId: "junction-user-123",
       lastErrorCode: "HISTORICAL_RESET_REVOKE_FAILED",
@@ -1692,7 +1819,7 @@ describe("hosted device-sync wakes", () => {
       message: "Provider revoke did not complete while a historical data reset is pending. "
         + "Remove the connection in the provider account before reconnecting.",
     });
-    expect(mocks.syncDurableConnectionState).not.toHaveBeenCalled();
+    expect(mocks.syncDurableConnectionState).toHaveBeenCalledTimes(2);
     expect(JSON.stringify(result)).not.toContain("deregistration failed upstream");
     expect(JSON.stringify(result)).not.toContain("PROVIDER_REVOKE_FAILED");
   });
@@ -1720,7 +1847,9 @@ describe("hosted device-sync wakes", () => {
       },
     });
     mocks.listConnectionsForUser.mockResolvedValue([disconnectedConnection]);
-    mocks.getConnectionForUser.mockResolvedValue(disconnectedConnection);
+    mocks.getConnectionForUser
+      .mockResolvedValueOnce(disconnectedConnection)
+      .mockResolvedValueOnce(buildDisconnectingConnection(disconnectedConnection));
     mocks.getStoredConnectionAccountForUser.mockResolvedValue(storedConnection);
     const publicConnectionId = buildPublicConnectionId("dsc_123");
 
@@ -1756,7 +1885,9 @@ describe("hosted device-sync wakes", () => {
     );
     const activeConnection = buildHostedConnection();
     mocks.listConnectionsForUser.mockResolvedValue([activeConnection]);
-    mocks.getConnectionForUser.mockResolvedValue(activeConnection);
+    mocks.getConnectionForUser
+      .mockResolvedValueOnce(activeConnection)
+      .mockResolvedValueOnce(buildDisconnectingConnection(activeConnection));
     const publicConnectionId = buildPublicConnectionId("dsc_123");
 
     mocks.getStoredConnectionAccountForUser.mockResolvedValue(null);
@@ -2566,6 +2697,15 @@ describe("hosted device-sync wakes", () => {
       retryable: false,
     });
 
+    expect(mocks.withConnectionMutationLock).toHaveBeenCalledWith(
+      establishedConnection.id,
+      expect.any(Function),
+    );
+    expect(mocks.getConnectionForUser).toHaveBeenCalledWith(
+      "user-123",
+      establishedConnection.id,
+      mocks.prismaTx,
+    );
     expect(mocks.upsertDirtyConnection).not.toHaveBeenCalled();
     expect(mocks.appendHostedMailboxEnvelope).not.toHaveBeenCalled();
   });
