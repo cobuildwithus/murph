@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => ({
   requirePrivyMemberAuth: vi.fn(),
   signalHostedMailboxAppendRuntime: vi.fn(),
   upsertHostedMemberTelegramRoutingBindingTx: vi.fn(),
+  verifyHostedTelegramDirectAuthorization: vi.fn(),
 }));
 
 vi.mock("@/src/lib/prisma", () => ({
@@ -36,6 +37,10 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-routing-store", () => ({
 vi.mock("@/src/lib/hosted-onboarding/member-channel-sync", () => ({
   enqueueHostedMemberChannelsUpdatedForActiveMemberTx:
     mocks.enqueueHostedMemberChannelsUpdatedForActiveMemberTx,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/telegram-direct-authorization", () => ({
+  verifyHostedTelegramDirectAuthorization: mocks.verifyHostedTelegramDirectAuthorization,
 }));
 
 vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
@@ -67,6 +72,10 @@ describe("settings telegram sync route", () => {
       callback(mocks.prismaClient)
     );
     mocks.upsertHostedMemberTelegramRoutingBindingTx.mockResolvedValue(undefined);
+    mocks.verifyHostedTelegramDirectAuthorization.mockResolvedValue({
+      telegramThreadId: "456:bot:123456",
+      telegramUserId: "456",
+    });
     mocks.enqueueHostedMemberChannelsUpdatedForActiveMemberTx.mockResolvedValue({
       mailboxItemId: "mailbox_item_channels_telegram_123",
     });
@@ -127,9 +136,14 @@ describe("settings telegram sync route", () => {
     expect(response.headers.get("Cache-Control")).toBe("no-store");
     expect(mocks.requireFreshPrivyMemberAuthForHostedAppSession).toHaveBeenCalledWith(expect.any(Request));
     expect(mocks.requirePrivyMemberAuth).toHaveBeenCalledWith(expect.any(Request));
+    expect(mocks.verifyHostedTelegramDirectAuthorization).toHaveBeenCalledWith({
+      authorizationUserId: "member_123",
+      telegramUserId: "456",
+    });
     expect(mocks.upsertHostedMemberTelegramRoutingBindingTx).toHaveBeenCalledWith({
       memberId: "member_123",
       prisma: mocks.prismaClient,
+      telegramThreadId: "456:bot:123456",
       telegramUserId: "456",
     });
     expect(mocks.enqueueHostedMemberChannelsUpdatedForActiveMemberTx).toHaveBeenCalledWith({
@@ -150,6 +164,29 @@ describe("settings telegram sync route", () => {
       runTriggered: true,
       telegramUserId: "456",
       telegramUsername: "alice",
+    });
+  });
+
+  it("keeps Telegram identity linked without a direct route when the bot write is rejected", async () => {
+    mocks.verifyHostedTelegramDirectAuthorization.mockResolvedValueOnce(null);
+
+    const response = await settingsTelegramSyncRoute.POST(
+      new Request("https://join.example.test/api/settings/telegram/sync", {
+        body: JSON.stringify({ expectedTelegramUserId: "456" }),
+        headers: {
+          "content-type": "application/json",
+          origin: SAME_ORIGIN_HEADERS.origin,
+        },
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.upsertHostedMemberTelegramRoutingBindingTx).toHaveBeenCalledWith({
+      memberId: "member_123",
+      prisma: mocks.prismaClient,
+      telegramThreadId: null,
+      telegramUserId: "456",
     });
   });
 
@@ -280,7 +317,7 @@ describe("settings telegram sync route", () => {
     expect(mocks.upsertHostedMemberTelegramRoutingBindingTx).toHaveBeenCalledWith({
       memberId: "member_123",
       prisma: mocks.prismaClient,
-      telegramThreadId: undefined,
+      telegramThreadId: "456:bot:123456",
       telegramUserId: "456",
     });
     expect(response.status).toBe(200);

@@ -8,7 +8,8 @@ Cloudflare-hosted execution plane for the hosted Murph path.
 
 - ensure-processing requests (callback-signed from the Temporal orchestrator or
   Vercel OIDC-authenticated direct Linq ingress wakes from `apps/web`) plus Vercel
-  OIDC-authenticated browser/session/status/deletion control requests from
+  OIDC-authenticated browser/session/status/deletion and Telegram direct-write
+  authorization control requests from
   `apps/web`
 - per-user execution coordination in `USER_RUNNER`
 - native runner-container lifecycle in `RUNNER_CONTAINER`
@@ -38,6 +39,8 @@ Internal control routes:
   the bound user's runtime, returning after that start/wake intent is accepted,
   not after the runtime reaches idle
 - `POST /internal/users/:userId/browser-vault/session` creates an encrypted browser-vault read session for the latest web-owned replica ref
+- `POST /internal/users/:userId/telegram/direct-authorization` asks the Worker-owned bot to prove direct write access and returns only its public bot id on success
+- `POST /internal/users/:userId/telegram/usage-limit-notice` sends the exact web-owned claimed notice through the Worker-owned bot credential
 - `GET /internal/users/:userId/status`
 - `POST /internal/deploy/container-smoke` is a signed deploy-verification callback, not a product control API
 

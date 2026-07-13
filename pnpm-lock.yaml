@@ -126,6 +126,9 @@ importers:
       '@murphai/inboxd':
         specifier: workspace:*
         version: link:../../packages/inboxd
+      '@murphai/messaging-ingress':
+        specifier: workspace:*
+        version: link:../../packages/messaging-ingress
       '@murphai/parsers':
         specifier: workspace:*
         version: link:../../packages/parsers

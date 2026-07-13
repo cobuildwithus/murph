@@ -9,7 +9,8 @@ owner-scoped.
 
 The greenfield control concept is signed Temporal processing/status, not hosted
 run acquire/commit/finalize or web-to-Cloudflare runner nudges. The package
-surface is limited to browser-vault session creation plus processing/status, and
+surface is limited to browser-vault session creation, Telegram direct-write
+authorization and claimed notice delivery, plus processing/status, and
 the runner contracts intentionally do not expose `runId`, committed sequence,
 target sequence, or web-owned turn adoption state.
 

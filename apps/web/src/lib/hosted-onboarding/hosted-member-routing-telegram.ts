@@ -51,7 +51,7 @@ export async function upsertHostedMemberTelegramRoutingBindingTx(input: {
     existingTelegramRouting?.telegramUserId === input.telegramUserId
       ? choosePreferredTelegramThreadTarget({
         existingTelegramThreadId: existingTelegramRouting.telegramThreadId,
-        incomingTelegramThreadId: input.telegramThreadId ?? null,
+        incomingTelegramThreadId: input.telegramThreadId,
       })
       : null;
 
@@ -166,13 +166,31 @@ function buildHostedTelegramIdentityConflictError() {
 
 function choosePreferredTelegramThreadTarget(input: {
   existingTelegramThreadId: string | null;
-  incomingTelegramThreadId: string | null;
+  incomingTelegramThreadId: string | null | undefined;
 }): string | null {
-  if (!input.incomingTelegramThreadId) {
+  if (input.incomingTelegramThreadId === undefined) {
     return input.existingTelegramThreadId;
   }
 
+  if (input.incomingTelegramThreadId === null) {
+    const existingTarget = input.existingTelegramThreadId
+      ? parseTelegramThreadTarget(input.existingTelegramThreadId)
+      : null;
+    return existingTarget?.botId ? null : input.existingTelegramThreadId;
+  }
+
   if (!input.existingTelegramThreadId) {
+    return input.incomingTelegramThreadId;
+  }
+
+  const existingTarget = parseTelegramThreadTarget(input.existingTelegramThreadId);
+  const incomingTarget = parseTelegramThreadTarget(input.incomingTelegramThreadId);
+
+  if (existingTarget?.botId == null && incomingTarget?.botId != null) {
+    return input.existingTelegramThreadId;
+  }
+
+  if (existingTarget?.botId != null && incomingTarget?.botId == null) {
     return input.incomingTelegramThreadId;
   }
 

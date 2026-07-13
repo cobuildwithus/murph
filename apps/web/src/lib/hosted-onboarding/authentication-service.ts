@@ -57,6 +57,7 @@ import {
   hostedOnboardingError,
   isHostedOnboardingError,
 } from "./errors";
+import type { HostedTelegramDirectAuthorization } from "./telegram-direct-authorization";
 
 type HostedPrivyCompletionMemberResolution = {
   bindingAuthMethod: HostedPrivyAuthMethod;
@@ -71,6 +72,7 @@ export async function completeHostedPrivyVerification(input: {
   inviteCode?: string | null;
   now?: Date;
   prisma?: PrismaClient;
+  telegramDirectAuthorization?: HostedTelegramDirectAuthorization | null;
   timeZone?: string | null;
   verifiedPrivyUser?: HostedPrivyUser | null;
 }): Promise<{
@@ -143,6 +145,7 @@ export async function completeHostedPrivyVerification(input: {
               identity: input.identity,
               memberId: reconciledMember.id,
               prisma: tx,
+              telegramDirectAuthorization: input.telegramDirectAuthorization ?? null,
             });
             await syncHostedMemberPendingActivationTimeZoneTx({
               memberId: reconciledMember.id,
@@ -174,6 +177,7 @@ export async function completeHostedPrivyVerification(input: {
               identity: input.identity,
               memberId: memberResolution.member.id,
               prisma: tx,
+              telegramDirectAuthorization: input.telegramDirectAuthorization ?? null,
             });
             await syncHostedMemberPendingActivationTimeZoneTx({
               memberId: memberResolution.member.id,
@@ -396,6 +400,7 @@ async function syncHostedPrivyPrimaryBindingTx(input: {
   identity: HostedPrivyIdentity;
   memberId: string;
   prisma: Prisma.TransactionClient;
+  telegramDirectAuthorization: HostedTelegramDirectAuthorization | null;
 }): Promise<void> {
   if (input.authMethod === "email" && input.identity.email?.verifiedAt) {
     const replyAlias = await createHostedMemberReplyAliasRoute({
@@ -412,9 +417,16 @@ async function syncHostedPrivyPrimaryBindingTx(input: {
   }
 
   if (input.authMethod === "telegram" && input.identity.telegram?.telegramUserId) {
+    const telegramThreadId =
+      input.telegramDirectAuthorization?.telegramUserId
+        === input.identity.telegram.telegramUserId
+        ? input.telegramDirectAuthorization.telegramThreadId
+        : null;
+
     await upsertHostedMemberTelegramRoutingBindingTx({
       memberId: input.memberId,
       prisma: input.prisma,
+      telegramThreadId,
       telegramUserId: input.identity.telegram.telegramUserId,
     });
   }

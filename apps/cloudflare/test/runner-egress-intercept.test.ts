@@ -2,6 +2,7 @@ import { describe, expect, it, vi, afterEach } from "vitest";
 import {
   buildExaResearchScoutOutputSchema,
   buildExaResearchScoutRequest,
+  HOSTED_TELEGRAM_BOT_ID_HEADER,
   MAX_RESEARCH_SCOUT_CANDIDATES,
 } from "@murphai/contracts";
 
@@ -5678,6 +5679,58 @@ describe("hostedRunnerIntercept", () => {
     expect(forwarded.headers.has("cookie")).toBe(false);
     expect(forwarded.headers.has("proxy-authorization")).toBe(false);
     expect(forwarded.headers.has("x-api-key")).toBe(false);
+  });
+
+  it("forwards bot-bound Telegram egress only when the Worker token matches", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response("ok"));
+    vi.stubGlobal("fetch", fetchMock);
+    const validateRuntimeWriteFence = vi.fn(async () => true);
+
+    const response = await hostedRunnerIntercept(
+      new Request("https://api.telegram.org/bot__cloudflare_injected__/sendMessage", {
+        headers: {
+          ...BOUND_USER_WRITE_FENCE_HEADERS,
+          [HOSTED_TELEGRAM_BOT_ID_HEADER]: "123456",
+        },
+        method: "POST",
+      }),
+      createInterceptEnv({
+        TELEGRAM_BOT_TOKEN: "123456:test-token",
+        validateRuntimeWriteFence,
+      }),
+      { containerId: "opaque-container-id" },
+    );
+
+    expect(response.status).toBe(200);
+    const forwarded = readForwardedRequest(fetchMock);
+    expect(forwarded.url).toBe(
+      "https://api.telegram.org/bot123456:test-token/sendMessage",
+    );
+    expect(forwarded.headers.has(HOSTED_TELEGRAM_BOT_ID_HEADER)).toBe(false);
+  });
+
+  it("rejects bot-bound Telegram egress when the Worker token belongs to another bot", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response("unexpected"));
+    vi.stubGlobal("fetch", fetchMock);
+    const validateRuntimeWriteFence = vi.fn(async () => true);
+
+    const response = await hostedRunnerIntercept(
+      new Request("https://api.telegram.org/bot__cloudflare_injected__/sendMessage", {
+        headers: {
+          ...BOUND_USER_WRITE_FENCE_HEADERS,
+          [HOSTED_TELEGRAM_BOT_ID_HEADER]: "654321",
+        },
+        method: "POST",
+      }),
+      createInterceptEnv({
+        TELEGRAM_BOT_TOKEN: "123456:test-token",
+        validateRuntimeWriteFence,
+      }),
+      { containerId: "opaque-container-id" },
+    );
+
+    expect(response.status).toBe(403);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("rewrites Telegram sentinel tokens from a provider egress token without authority headers", async () => {

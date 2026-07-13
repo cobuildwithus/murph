@@ -16,6 +16,10 @@ export const CLOUDFLARE_HOSTED_CONTROL_USER_ROUTE_SPECS = {
     method: "POST",
     suffix: "telegram/usage-limit-notice",
   },
+  telegramDirectAuthorization: {
+    method: "POST",
+    suffix: "telegram/direct-authorization",
+  },
   userDataDelete: {
     method: "POST",
     suffix: "account-data/delete",
@@ -41,6 +45,12 @@ export function buildCloudflareHostedControlRuntimeEnsureProcessingPath(userId: 
 
 export function buildCloudflareHostedControlTelegramUsageLimitNoticePath(userId: string): string {
   return buildCloudflareHostedControlUserRoutePath("telegramUsageLimitNotice", userId);
+}
+
+export function buildCloudflareHostedControlTelegramDirectAuthorizationPath(
+  userId: string,
+): string {
+  return buildCloudflareHostedControlUserRoutePath("telegramDirectAuthorization", userId);
 }
 
 export function buildCloudflareHostedControlUserDataDeletionPath(userId: string): string {

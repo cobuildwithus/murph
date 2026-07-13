@@ -482,6 +482,7 @@ describe("deleteHostedRunnerUserDataBestEffort", () => {
       userId: "user-123",
     });
     vi.mocked(readHostedExecutionControlClientIfConfigured).mockReturnValue({
+      authorizeTelegramDirectMessage: vi.fn(),
       createBrowserVaultSession: vi.fn(),
       deleteUserData,
       ensureRuntimeProcessing: vi.fn(),
@@ -513,6 +514,7 @@ describe("deleteHostedRunnerUserDataBestEffort", () => {
       { name: "CloudflareDeletionError" },
     ));
     vi.mocked(readHostedExecutionControlClientIfConfigured).mockReturnValue({
+      authorizeTelegramDirectMessage: vi.fn(),
       createBrowserVaultSession: vi.fn(),
       deleteUserData,
       ensureRuntimeProcessing: vi.fn(),

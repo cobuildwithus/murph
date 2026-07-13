@@ -39,6 +39,12 @@ export const CURRENT_VAULT_FORMAT_VERSION = 2 as const;
  */
 export const MURPH_PRODUCT_ORIGIN = "https://www.withmurph.ai" as const;
 
+/**
+ * Internal provider-egress constraint carried by bot-bound Telegram requests.
+ * The Cloudflare Worker strips it before forwarding the request to Telegram.
+ */
+export const HOSTED_TELEGRAM_BOT_ID_HEADER = "x-hosted-telegram-bot-id" as const;
+
 export const CONTRACT_ID_FORMAT = "prefix_ulid" as const;
 
 export const ID_PREFIXES = Object.freeze({

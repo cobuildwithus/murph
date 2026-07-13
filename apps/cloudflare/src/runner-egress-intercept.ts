@@ -5,10 +5,15 @@ import {
   clampExaResearchScoutPublishedWindow,
   EXA_RESEARCH_SCOUT_METHOD,
   EXA_RESEARCH_SCOUT_PATH,
+  HOSTED_TELEGRAM_BOT_ID_HEADER,
   parseExaResearchScoutRequestBody,
   type ExaResearchScoutRequestBody,
   type ExaResearchScoutParsedRequest,
 } from "@murphai/contracts";
+import {
+  normalizeTelegramBotId,
+  resolveTelegramBotIdFromToken,
+} from "@murphai/messaging-ingress/telegram-webhook";
 import {
   buildHostedExecutionSafeErrorDetails,
   deriveHostedExecutionErrorCode,
@@ -2864,6 +2869,9 @@ async function handleTelegramTokenRewrite(
     });
   }
   const token = readRequiredInterceptSecret(input.env.TELEGRAM_BOT_TOKEN, "TELEGRAM_BOT_TOKEN");
+  if (!isTelegramBotBindingAuthorized(input.request.headers, token)) {
+    return disallowedProviderEgress();
+  }
   const upstreamUrl = createProviderUpstreamUrl(input.url, pathMatch);
   const prefix = normalizedProviderBasePath(pathMatch.upstreamBaseUrl);
   upstreamUrl.pathname = `${prefix}${createPathnameSuffix(token)}`;
@@ -3772,7 +3780,19 @@ function stripHostedProviderUpstreamHeaders(headers: Headers): Headers {
   stripped.delete("x-murph-data-api-key");
   stripped.delete("openai-organization");
   stripped.delete("openai-project");
+  stripped.delete(HOSTED_TELEGRAM_BOT_ID_HEADER);
   return stripped;
+}
+
+function isTelegramBotBindingAuthorized(headers: Headers, token: string): boolean {
+  const requestedBotId = headers.get(HOSTED_TELEGRAM_BOT_ID_HEADER);
+  if (requestedBotId === null) {
+    return true;
+  }
+
+  const normalizedRequestedBotId = normalizeTelegramBotId(requestedBotId);
+  return normalizedRequestedBotId !== null
+    && normalizedRequestedBotId === resolveTelegramBotIdFromToken(token);
 }
 
 function createHostedRunnerInternalRequest(source: Request): Request {

@@ -2,10 +2,12 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   emitHostedExecutionStructuredLog: vi.fn(),
+  sendHostedProviderTelegramChatAction: vi.fn(),
   sendHostedProviderTelegramMessage: vi.fn(),
 }));
 
 vi.mock("@murphai/assistant-runtime/hosted-provider-effects", () => ({
+  sendHostedProviderTelegramChatAction: mocks.sendHostedProviderTelegramChatAction,
   sendHostedProviderTelegramMessage: mocks.sendHostedProviderTelegramMessage,
 }));
 
@@ -21,6 +23,7 @@ vi.mock("@murphai/hosted-execution", async () => {
 });
 
 import {
+  telegramDirectAuthorizationRoutes,
   telegramUsageLimitNoticeRoutes,
 } from "../src/worker/route-handlers/telegram-send.ts";
 
@@ -39,7 +42,7 @@ function createRouteContext(
   );
   return {
     env: {
-      TELEGRAM_BOT_TOKEN: "telegram-token",
+      TELEGRAM_BOT_TOKEN: "123456:<REDACTED_TOKEN>",
     },
     request,
     url: new URL(request.url),
@@ -57,9 +60,21 @@ function handleTelegramUsageLimitNoticeRoute(
   return route.handle(context, { userId: encodedUserId });
 }
 
+function handleTelegramDirectAuthorizationRoute(
+  context: Parameters<(typeof telegramDirectAuthorizationRoutes)[number]["handle"]>[0],
+  encodedUserId: string,
+) {
+  const route = telegramDirectAuthorizationRoutes[0];
+  if (!route) {
+    throw new TypeError("Expected the Telegram direct-authorization route.");
+  }
+  return route.handle(context, { userId: encodedUserId });
+}
+
 describe("worker Telegram send route", () => {
   beforeEach(() => {
     mocks.emitHostedExecutionStructuredLog.mockReset();
+    mocks.sendHostedProviderTelegramChatAction.mockReset();
     mocks.sendHostedProviderTelegramMessage.mockReset();
   });
 
@@ -103,7 +118,7 @@ describe("worker Telegram send route", () => {
       },
       expect.objectContaining({
         env: expect.objectContaining({
-          TELEGRAM_BOT_TOKEN: "telegram-token",
+          TELEGRAM_BOT_TOKEN: "123456:<REDACTED_TOKEN>",
         }),
         fetchImplementation: expect.any(Function),
         telegramMaxDeliveryAttempts: 1,
@@ -226,6 +241,82 @@ describe("worker Telegram send route", () => {
     expect(mocks.sendHostedProviderTelegramMessage).not.toHaveBeenCalled();
   });
 
+});
+
+describe("worker Telegram direct authorization route", () => {
+  beforeEach(() => {
+    mocks.emitHostedExecutionStructuredLog.mockReset();
+    mocks.sendHostedProviderTelegramChatAction.mockReset();
+    mocks.sendHostedProviderTelegramMessage.mockReset();
+  });
+
+  it("requires Vercel OIDC and a bound user before the handler", async () => {
+    const route = telegramDirectAuthorizationRoutes[0];
+    if (!route?.beforeMethod) {
+      throw new TypeError("Expected the Telegram direct-authorization auth guard.");
+    }
+
+    expect(route.authorization).toBe("vercel-oidc");
+    expect(route.authorizeBeforeMethod).toBe(true);
+    const response = await route.beforeMethod(
+      createRouteContext({ telegramUserId: "987654" }),
+      { userId: "member_123" },
+    );
+    expect(response?.status).toBe(401);
+    expect(mocks.sendHostedProviderTelegramChatAction).not.toHaveBeenCalled();
+  });
+
+  it("returns bot authority only after the Worker-owned provider probe succeeds", async () => {
+    mocks.sendHostedProviderTelegramChatAction.mockResolvedValueOnce(undefined);
+
+    const response = await handleTelegramDirectAuthorizationRoute(
+      createRouteContext({ telegramUserId: "987654" }),
+      "member_123",
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      botId: "123456",
+      status: "authorized",
+    });
+    expect(mocks.sendHostedProviderTelegramChatAction).toHaveBeenCalledWith(
+      { action: "typing", target: "987654" },
+      expect.objectContaining({
+        env: expect.objectContaining({
+          TELEGRAM_BOT_TOKEN: "123456:<REDACTED_TOKEN>",
+        }),
+        fetchImplementation: expect.any(Function),
+      }),
+    );
+  });
+
+  it("fails closed when Telegram rejects the write probe", async () => {
+    mocks.sendHostedProviderTelegramChatAction.mockRejectedValueOnce(
+      new Error("Telegram rejected the write"),
+    );
+
+    const response = await handleTelegramDirectAuthorizationRoute(
+      createRouteContext({ telegramUserId: "987654" }),
+      "member_123",
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ status: "unavailable" });
+  });
+
+  it("rejects malformed direct-authorization bodies", async () => {
+    const response = await handleTelegramDirectAuthorizationRoute(
+      createRouteContext({ telegramUserId: "not-numeric" }),
+      "member_123",
+    );
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      code: "invalid_request",
+      error: "Malformed Telegram direct-authorization request.",
+    });
+    expect(mocks.sendHostedProviderTelegramChatAction).not.toHaveBeenCalled();
+  });
 });
 
 function createTelegramUsageLimitNoticeRequest() {

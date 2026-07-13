@@ -2362,6 +2362,71 @@ describe("hosted-member-store", () => {
     });
   });
 
+  it.each([
+    {
+      expectedTelegramThreadId: null,
+      existingTelegramThreadId: "456:bot:123456",
+      incomingTelegramThreadId: null,
+      scenario: "clears a rejected bot-authorized direct target",
+    },
+    {
+      expectedTelegramThreadId: "456:business:biz-42:dm-topic:9",
+      existingTelegramThreadId: "456:business:biz-42:dm-topic:9",
+      incomingTelegramThreadId: null,
+      scenario: "preserves an inbound-observed target",
+    },
+    {
+      expectedTelegramThreadId: "456",
+      existingTelegramThreadId: "456",
+      incomingTelegramThreadId: "456:bot:123456",
+      scenario: "does not replace an inbound-observed target with direct authority",
+    },
+  ])("$scenario", async ({
+    expectedTelegramThreadId,
+    existingTelegramThreadId,
+    incomingTelegramThreadId,
+  }) => {
+    const existingTelegramPrivateColumns = await buildHostedMemberRoutingPrivateColumns({
+      linqChatId: null,
+      linqRecipientPhone: null,
+      memberId: "member_123",
+      pendingLinqChatId: null,
+      pendingLinqRecipientPhone: null,
+      telegramThreadId: existingTelegramThreadId,
+      telegramUserId: "456",
+    });
+    const upsert = vi.fn().mockResolvedValue({});
+    const prisma = {
+      $executeRaw: vi.fn().mockResolvedValue(0),
+      hostedMemberRouting: {
+        findMany: vi.fn().mockResolvedValue([{ memberId: "member_123" }]),
+        findUnique: vi.fn().mockResolvedValue({
+          memberId: "member_123",
+          telegramUserIdEncrypted: existingTelegramPrivateColumns.telegramUserIdEncrypted,
+        }),
+        upsert,
+      },
+    } as never;
+
+    await upsertHostedMemberTelegramRoutingBindingTx({
+      memberId: "member_123",
+      prisma,
+      telegramThreadId: incomingTelegramThreadId,
+      telegramUserId: "456",
+    });
+
+    const upsertCall = upsert.mock.calls[0]?.[0] as {
+      update: { telegramUserIdEncrypted: string };
+    };
+    await expect(readHostedMemberRoutingTelegramPrivateState({
+      memberId: "member_123",
+      telegramUserIdEncrypted: upsertCall.update.telegramUserIdEncrypted,
+    })).resolves.toEqual({
+      telegramThreadId: expectedTelegramThreadId,
+      telegramUserId: "456",
+    });
+  });
+
   it("clears a legacy same-user Telegram thread target during a user-id-only resync", async () => {
     const legacyTelegramUserIdEncrypted = await encryptHostedWebNullableString({
       field: "hosted-member-routing.telegram-user-id",

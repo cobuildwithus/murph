@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { HOSTED_TELEGRAM_BOT_ID_HEADER } from '@murphai/contracts'
 
 import type {
   AgentmailApiClient,
@@ -980,6 +981,77 @@ describe('assistant channels runtime seam', () => {
     ).rejects.toMatchObject({
       code: 'ASSISTANT_TELEGRAM_TARGET_INVALID',
     })
+
+    const fetchImplementation = vi.fn()
+    await expect(
+      sendTelegramMessage(
+        {
+          message: 'hello',
+          target: '123:bot:654321',
+        },
+        {
+          env: {
+            TELEGRAM_BOT_TOKEN: '123456:<REDACTED_TOKEN>',
+          },
+          fetchImplementation,
+        },
+      ),
+    ).rejects.toMatchObject({
+      code: 'ASSISTANT_TELEGRAM_BOT_MISMATCH',
+    })
+    expect(fetchImplementation).not.toHaveBeenCalled()
+  })
+
+  it('defers bot-bound Telegram validation to hosted egress when the runtime token is injected', async () => {
+    const fetchImplementation = createQueuedFetch([
+      createTelegramResponse(200, {
+        ok: true,
+        result: { message_id: 7001 },
+      }),
+    ])
+
+    await sendTelegramMessage(
+      {
+        message: 'hello',
+        target: '123:bot:654321',
+      },
+      {
+        env: { TELEGRAM_BOT_TOKEN: '__cloudflare_injected__' },
+        fetchImplementation,
+      },
+    )
+
+    expect(fetchImplementation).toHaveBeenCalledWith(
+      'https://api.telegram.org/bot__cloudflare_injected__/sendMessage',
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          [HOSTED_TELEGRAM_BOT_ID_HEADER]: '654321',
+        }),
+      }),
+    )
+  })
+
+  it('does not forward the internal bot constraint when the runtime owns the real token', async () => {
+    const fetchImplementation = createQueuedFetch([
+      createTelegramResponse(200, {
+        ok: true,
+        result: { message_id: 7001 },
+      }),
+    ])
+
+    await sendTelegramMessage(
+      {
+        message: 'hello',
+        target: '123:bot:123456',
+      },
+      {
+        env: { TELEGRAM_BOT_TOKEN: '123456:test-token' },
+        fetchImplementation,
+      },
+    )
+
+    const headers = fetchImplementation.mock.calls[0]?.[1]?.headers
+    expect(headers).not.toHaveProperty(HOSTED_TELEGRAM_BOT_ID_HEADER)
   })
 
   it('keeps the Telegram typing indicator alive and surfaces background failures on stop', async () => {

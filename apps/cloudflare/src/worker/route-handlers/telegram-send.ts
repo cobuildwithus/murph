@@ -1,6 +1,10 @@
 import {
+  sendHostedProviderTelegramChatAction,
   sendHostedProviderTelegramMessage,
 } from "@murphai/assistant-runtime/hosted-provider-effects";
+import {
+  resolveTelegramBotIdFromToken,
+} from "@murphai/messaging-ingress/telegram-webhook";
 import {
   emitHostedExecutionStructuredLog,
   readHostedExecutionSafeErrorName,
@@ -10,6 +14,7 @@ import {
   matchCloudflareHostedControlUserRoutePath,
 } from "@murphai/cloudflare-hosted-control/routes";
 import {
+  parseCloudflareHostedControlTelegramDirectAuthorizationRequest,
   parseCloudflareHostedControlTelegramUsageLimitNoticeRequest,
   type CloudflareHostedControlTelegramUsageLimitNoticeRequest,
 } from "@murphai/cloudflare-hosted-control/client";
@@ -61,6 +66,90 @@ export const telegramUsageLimitNoticeRoutes: readonly DeclarativeRoute<WorkerRou
     wrongMethodResponse: "method-not-allowed",
   },
 ];
+
+export const telegramDirectAuthorizationRoutes: readonly DeclarativeRoute<WorkerRouteContext>[] = [
+  {
+    authorizeBeforeMethod: true,
+    authorization: "vercel-oidc",
+    beforeMethod(context, params) {
+      return requireBoundInternalRouteUser(context, params, "telegram-direct-authorization");
+    },
+    async handle(context, params) {
+      return handleTelegramDirectAuthorizationRoute(context, params.userId);
+    },
+    match: (pathname) =>
+      matchCloudflareHostedControlUserRoutePath("telegramDirectAuthorization", pathname),
+    methods: [
+      CLOUDFLARE_HOSTED_CONTROL_USER_ROUTE_SPECS.telegramDirectAuthorization.method,
+    ],
+    name: "telegram-direct-authorization",
+    wrongMethodResponse: "method-not-allowed",
+  },
+];
+
+async function handleTelegramDirectAuthorizationRoute(
+  context: WorkerRouteContext,
+  encodedUserId: string,
+): Promise<Response> {
+  const userId = decodeRouteParam(encodedUserId);
+  let telegramUserId: string;
+  try {
+    telegramUserId = parseCloudflareHostedControlTelegramDirectAuthorizationRequest(
+      parseJsonValue(await readCachedRequestText(context, {
+        limitBytes: INTERNAL_CONTROL_JSON_BODY_LIMIT_BYTES,
+      })),
+    ).telegramUserId;
+  } catch (error) {
+    emitHostedExecutionStructuredLog({
+      component: "worker",
+      details: buildWorkerRouteLogDetails({
+        reason: "telegram-direct-authorization-request-invalid",
+        routeName: "telegram-direct-authorization",
+      }, context.request, userId),
+      error,
+      level: "warn",
+      message: "Hosted worker Telegram direct-authorization route rejected an invalid request body.",
+      phase: "failed",
+      userId,
+    });
+    return json({
+      code: "invalid_request",
+      error: "Malformed Telegram direct-authorization request.",
+    }, 400);
+  }
+
+  const workerEnv = asWorkerStringEnvironment(context.env);
+  const botId = resolveTelegramBotIdFromToken(workerEnv.TELEGRAM_BOT_TOKEN);
+  if (!botId) {
+    return json({ status: "unavailable" });
+  }
+
+  try {
+    await sendHostedProviderTelegramChatAction({
+      action: "typing",
+      target: telegramUserId,
+    }, {
+      env: workerEnv as NodeJS.ProcessEnv,
+      fetchImplementation: normalizeCloudflareWorkerFetch(),
+      signal: context.request.signal,
+    });
+    return json({ botId, status: "authorized" });
+  } catch (error) {
+    emitHostedExecutionStructuredLog({
+      component: "worker",
+      details: buildWorkerRouteLogDetails({
+        reason: "telegram-direct-authorization-provider-failed",
+        routeName: "telegram-direct-authorization",
+      }, context.request, userId),
+      error,
+      level: "warn",
+      message: "Hosted worker Telegram direct-authorization probe failed closed.",
+      phase: "failed",
+      userId,
+    });
+    return json({ status: "unavailable" });
+  }
+}
 
 async function handleTelegramUsageLimitNoticeRoute(
   context: WorkerRouteContext,

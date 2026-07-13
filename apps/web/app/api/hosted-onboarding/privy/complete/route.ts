@@ -25,6 +25,7 @@ import {
   remapHostedPrivyCompletionLagError,
   type HostedPrivyIdentity,
 } from "@/src/lib/hosted-onboarding/privy";
+import { verifyHostedTelegramDirectAuthorization } from "@/src/lib/hosted-onboarding/telegram-direct-authorization";
 
 export const POST = withJsonError(async (request: Request) => {
   const timing = startHostedOnboardingTiming("hosted-onboarding.route.privy-complete");
@@ -41,10 +42,18 @@ export const POST = withJsonError(async (request: Request) => {
       clientTimeZone: body.timeZone,
       headers: request.headers,
     });
+    const telegramDirectAuthorization =
+      authMethod === "telegram" && auth.identity.telegram?.telegramUserId
+        ? await verifyHostedTelegramDirectAuthorization({
+            authorizationUserId: auth.identity.userId,
+            telegramUserId: auth.identity.telegram.telegramUserId,
+          })
+        : null;
     const result = await completeHostedPrivyVerification({
       authMethod,
       identity: auth.identity,
       inviteCode: typeof body.inviteCode === "string" ? body.inviteCode : null,
+      ...(telegramDirectAuthorization ? { telegramDirectAuthorization } : {}),
       ...(timeZone ? { timeZone } : {}),
       verifiedPrivyUser: auth.verifiedPrivyUser,
     }).catch((error: unknown) => {

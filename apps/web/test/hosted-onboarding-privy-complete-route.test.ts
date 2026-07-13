@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   issueHostedAppSession: vi.fn(),
   requirePrivyCompletionSession: vi.fn(),
   readHostedConsentStatus: vi.fn(),
+  verifyHostedTelegramDirectAuthorization: vi.fn(),
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/csrf", () => ({
@@ -31,6 +32,10 @@ vi.mock("@/src/lib/hosted-onboarding/request-auth", () => ({
 
 vi.mock("@/src/lib/hosted-onboarding/app-session", () => ({
   issueHostedAppSession: mocks.issueHostedAppSession,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/telegram-direct-authorization", () => ({
+  verifyHostedTelegramDirectAuthorization: mocks.verifyHostedTelegramDirectAuthorization,
 }));
 
 vi.mock("@/src/lib/legal/consent", () => ({
@@ -73,6 +78,7 @@ describe("hosted onboarding Privy completion route", () => {
     mocks.readHostedConsentStatus.mockResolvedValue({
       launchGranted: false,
     });
+    mocks.verifyHostedTelegramDirectAuthorization.mockResolvedValue(null);
     mocks.requirePrivyCompletionSession.mockResolvedValue({
       identity: {
         phone: {
@@ -279,6 +285,10 @@ describe("hosted onboarding Privy completion route", () => {
   });
 
   it("passes the selected Telegram auth method and identity to completion", async () => {
+    mocks.verifyHostedTelegramDirectAuthorization.mockResolvedValueOnce({
+      telegramThreadId: "456:bot:123456",
+      telegramUserId: "456",
+    });
     mocks.requirePrivyCompletionSession.mockResolvedValueOnce({
       identity: {
         phone: null,
@@ -319,7 +329,46 @@ describe("hosted onboarding Privy completion route", () => {
         }),
         userId: "did:privy:user_telegram",
       }),
+      telegramDirectAuthorization: {
+        telegramThreadId: "456:bot:123456",
+        telegramUserId: "456",
+      },
     }));
+    expect(mocks.verifyHostedTelegramDirectAuthorization).toHaveBeenCalledWith({
+      authorizationUserId: "did:privy:user_telegram",
+      telegramUserId: "456",
+    });
+  });
+
+  it("does not promote Telegram identity when the configured bot cannot write", async () => {
+    mocks.requirePrivyCompletionSession.mockResolvedValueOnce({
+      identity: {
+        phone: null,
+        telegram: {
+          firstName: "Alice",
+          lastName: null,
+          photoUrl: null,
+          telegramUserId: "456",
+          username: "alice",
+        },
+        userId: "did:privy:user_telegram",
+        wallet: null,
+      },
+      verifiedPrivyUser: { id: "did:privy:user_telegram" },
+    });
+
+    await privyCompleteRoute.POST(new Request(
+      "https://join.example.test/api/hosted-onboarding/privy/complete",
+      {
+        body: JSON.stringify({ authIntent: { method: "telegram" } }),
+        headers: { origin: "https://join.example.test" },
+        method: "POST",
+      },
+    ));
+
+    expect(mocks.completeHostedPrivyVerification).toHaveBeenCalledWith(
+      expect.not.objectContaining({ telegramDirectAuthorization: expect.anything() }),
+    );
   });
 
   it("requires an explicit auth intent when legacy clients present multiple verified methods", async () => {

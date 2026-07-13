@@ -12,6 +12,7 @@ import {
   userDataDeleteRoutes,
 } from "./route-handlers/user-data-delete.ts";
 import {
+  telegramDirectAuthorizationRoutes,
   telegramUsageLimitNoticeRoutes,
 } from "./route-handlers/telegram-send.ts";
 
@@ -19,6 +20,7 @@ export const workerInternalRoutes = [
   ...deploySmokeRoutes,
   ...runtimeProcessingRoutes,
   ...userDataDeleteRoutes,
+  ...telegramDirectAuthorizationRoutes,
   ...telegramUsageLimitNoticeRoutes,
   ...browserVaultRoutes,
   ...userStatusRoutes,

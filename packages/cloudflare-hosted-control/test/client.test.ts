@@ -26,6 +26,7 @@ describe("createCloudflareHostedControlClient", () => {
     });
 
     expect(Object.keys(client).sort()).toEqual([
+      "authorizeTelegramDirectMessage",
       "createBrowserVaultSession",
       "deleteUserData",
       "ensureRuntimeProcessing",
@@ -203,6 +204,12 @@ describe("createCloudflareHostedControlClient", () => {
       "Cloudflare hosted control userId must not be blank.",
     );
     expect(() =>
+      client.authorizeTelegramDirectMessage({
+        request: { telegramUserId: "987654" },
+        userId: "",
+      })
+    ).toThrow("Cloudflare hosted control userId must not be blank.");
+    expect(() =>
       client.sendTelegramUsageLimitNotice({
         request: createTelegramUsageLimitNoticeRequest(),
         userId: "",
@@ -220,6 +227,51 @@ describe("createCloudflareHostedControlClient", () => {
         userId: "\n",
       })
     ).toThrow("Cloudflare hosted control userId must not be blank.");
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("posts Telegram direct-authorization probes to the bound user route", async () => {
+    let observedRequest: ObservedRequest | null = null;
+    const client = createCloudflareHostedControlClient({
+      baseUrl: "https://runner.example.test/root/",
+      fetchImpl: vi.fn(async (url, init) => {
+        observedRequest = { init, url: String(url) };
+        return createJsonResponse({ botId: "123456", status: "authorized" });
+      }) as typeof fetch,
+      getBearerToken: async () => "token-123",
+    });
+
+    await expect(client.authorizeTelegramDirectMessage({
+      request: { telegramUserId: "987654" },
+      userId: "did:privy:user_123",
+    })).resolves.toEqual({ botId: "123456", status: "authorized" });
+
+    const request = requireObservedRequest(observedRequest);
+    expect(request.url).toBe(
+      "https://runner.example.test/root/internal/users/did%3Aprivy%3Auser_123/telegram/direct-authorization",
+    );
+    expect(request.init?.method).toBe("POST");
+    expect(new Headers(request.init?.headers).get("authorization")).toBe("Bearer token-123");
+    expect(new Headers(request.init?.headers).get(HOSTED_EXECUTION_USER_ID_HEADER)).toBe(
+      "did:privy:user_123",
+    );
+    expect(request.init?.body).toBe(JSON.stringify({ telegramUserId: "987654" }));
+  });
+
+  it("rejects malformed Telegram direct-authorization identities before fetch", () => {
+    const fetchImpl = vi.fn<typeof fetch>();
+    const client = createCloudflareHostedControlClient({
+      baseUrl: "https://runner.example.test",
+      fetchImpl,
+      getBearerToken: async () => "token-123",
+    });
+
+    expect(() => client.authorizeTelegramDirectMessage({
+      request: { telegramUserId: "not-numeric" },
+      userId: "member_123",
+    })).toThrow(
+      "Telegram direct authorization request telegramUserId must be a positive integer string.",
+    );
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 

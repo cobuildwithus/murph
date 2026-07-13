@@ -1,5 +1,10 @@
 import {
+  HOSTED_TELEGRAM_BOT_ID_HEADER,
+} from '@murphai/contracts'
+import {
+  isTelegramThreadTargetAuthorizedForBotToken,
   parseTelegramThreadTarget,
+  resolveTelegramBotIdFromToken,
   serializeTelegramThreadTarget,
   type TelegramThreadTarget,
 } from '@murphai/messaging-ingress/telegram-webhook'
@@ -108,6 +113,7 @@ export async function setTelegramMessageReaction(
     typeof input.target === 'string'
       ? parseTelegramTargetOrThrow(input.target)
       : input.target
+  assertTelegramTargetBotAuthorized(target, token)
   assertTelegramReactionTargetSupported(target)
   const targetMessageId = normalizeTelegramReactionMessageId(input.targetMessageId)
   const baseUrl = (resolveTelegramApiBaseUrl(env) ?? 'https://api.telegram.org').replace(
@@ -117,6 +123,7 @@ export async function setTelegramMessageReaction(
   const sendReaction = async () =>
     await sendTelegramBotApiRequest({
       baseUrl,
+      botId: target.botId,
       fetchImplementation,
       method: 'POST',
       operation: 'setMessageReaction',
@@ -244,6 +251,7 @@ export async function startTelegramTypingSession(
     typeof input.target === 'string'
       ? parseTelegramTargetOrThrow(input.target)
       : input.target
+  assertTelegramTargetBotAuthorized(target, token)
   const linkedStopSignal = createLinkedAbortSignal(dependencies.signal)
 
   try {
@@ -319,6 +327,7 @@ export async function deleteTelegramMessages(
     typeof input.target === 'string'
       ? parseTelegramTargetOrThrow(input.target)
       : input.target
+  assertTelegramTargetBotAuthorized(target, token)
   const messageIds = normalizeTelegramMessageIds(input.messageIds)
   const baseUrl = (resolveTelegramApiBaseUrl(env) ?? 'https://api.telegram.org').replace(
     /\/$/u,
@@ -330,6 +339,7 @@ export async function deleteTelegramMessages(
     const request = buildTelegramDeleteRequest(target, batch)
     const response = await sendTelegramBotApiRequest({
       baseUrl,
+      botId: target.botId,
       fetchImplementation,
       method: 'POST',
       operation: request.operation,
@@ -377,10 +387,28 @@ function parseTelegramTargetOrThrow(target: string): TelegramThreadTarget {
 
   throw new VaultCliError(
     'ASSISTANT_TELEGRAM_TARGET_INVALID',
-    'Telegram targets must use "<chatId>", "<chatId>:topic:<messageThreadId>", "<chatId>:dm-topic:<directMessagesTopicId>", and optional ":business:<businessConnectionId>" routing segments.',
+    'Telegram targets must use "<chatId>" with optional ":bot:<botId>", ":topic:<messageThreadId>", ":dm-topic:<directMessagesTopicId>", and ":business:<businessConnectionId>" routing segments.',
     {
       target: redactTelegramTargetForDiagnostics(normalizedTarget),
     },
+  )
+}
+
+function assertTelegramTargetBotAuthorized(
+  target: TelegramThreadTarget,
+  token: string,
+): void {
+  if (
+    target.botId == null
+    || isTelegramThreadTargetAuthorizedForBotToken(target, token)
+    || !resolveTelegramBotIdFromToken(token)
+  ) {
+    return
+  }
+
+  throw new VaultCliError(
+    'ASSISTANT_TELEGRAM_BOT_MISMATCH',
+    'Telegram delivery target is authorized for a different bot.',
   )
 }
 
@@ -435,6 +463,7 @@ async function sendTelegramTypingIndicatorOnce(input: {
   try {
     response = await sendTelegramBotApiRequest({
       baseUrl: input.baseUrl,
+      botId: input.target.botId,
       fetchImplementation: input.fetchImplementation,
       method: 'POST',
       operation: 'sendChatAction',
@@ -583,6 +612,7 @@ function buildTelegramDeleteRequest(
 
 async function sendTelegramBotApiRequest(input: {
   baseUrl: string
+  botId?: string | null
   fetchImplementation: TelegramFetchImplementation
   method: 'POST'
   operation:
@@ -606,6 +636,9 @@ async function sendTelegramBotApiRequest(input: {
         method: input.method,
         headers: {
           'content-type': 'application/json',
+          ...(input.botId && !resolveTelegramBotIdFromToken(input.token)
+            ? { [HOSTED_TELEGRAM_BOT_ID_HEADER]: input.botId }
+            : {}),
         },
         body: JSON.stringify(input.payload),
         signal: timeout.signal,

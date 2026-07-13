@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 
 import { afterEach, expect, test, vi } from 'vitest'
+import { HOSTED_TELEGRAM_BOT_ID_HEADER } from '@murphai/contracts'
 
 import {
   resolveDeviceSyncBaseUrl,
@@ -888,6 +889,73 @@ test('startTelegramTypingSession validates Telegram runtime prerequisites and ta
       error.message.includes('Telegram targets must use') &&
       error.context?.target === '[redacted-telegram-target:invalid]',
   )
+
+  const fetchImplementation = vi.fn()
+  await assert.rejects(
+    () =>
+      startTelegramTypingSession(
+        {
+          target: '123:bot:654321',
+        },
+        {
+          env: {
+            TELEGRAM_BOT_TOKEN: '123456:<REDACTED_TOKEN>',
+          },
+          fetchImplementation,
+        },
+      ),
+    (error) =>
+      error instanceof VaultCliError &&
+      error.code === 'ASSISTANT_TELEGRAM_BOT_MISMATCH' &&
+      error.message === 'Telegram delivery target is authorized for a different bot.',
+  )
+  expect(fetchImplementation).not.toHaveBeenCalled()
+})
+
+test('startTelegramTypingSession defers bot validation for injected hosted credentials', async () => {
+  const fetchImplementation = vi.fn(async () => createTelegramResponse({ ok: true }))
+  const handle = await startTelegramTypingSession(
+    { target: '123:bot:654321' },
+    {
+      env: { TELEGRAM_BOT_TOKEN: '__cloudflare_injected__' },
+      fetchImplementation,
+    },
+  )
+  await handle.stop()
+
+  expect(fetchImplementation).toHaveBeenCalledWith(
+    'https://api.telegram.org/bot__cloudflare_injected__/sendChatAction',
+    expect.objectContaining({
+      headers: expect.objectContaining({
+        [HOSTED_TELEGRAM_BOT_ID_HEADER]: '654321',
+      }),
+    }),
+  )
+})
+
+test('startTelegramTypingSession keeps the internal bot constraint off direct provider requests', async () => {
+  const fetchImplementation = vi.fn(
+    async (
+      _input: string,
+      _init: {
+        body?: string | Blob | FormData
+        headers?: Record<string, string>
+        method: string
+        signal?: AbortSignal
+      },
+    ) => createTelegramResponse({ ok: true }),
+  )
+  const handle = await startTelegramTypingSession(
+    { target: '123:bot:123456' },
+    {
+      env: { TELEGRAM_BOT_TOKEN: '123456:test-token' },
+      fetchImplementation,
+    },
+  )
+  await handle.stop()
+
+  const headers = fetchImplementation.mock.calls[0]?.[1]?.headers
+  expect(headers).not.toHaveProperty(HOSTED_TELEGRAM_BOT_ID_HEADER)
 })
 
 test('startTelegramTypingSession aborts instead of resolving a handle when the initial Telegram request is cancelled', async () => {

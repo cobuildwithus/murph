@@ -1223,6 +1223,10 @@ describe("completeHostedPrivyVerification", () => {
         }),
         now: NOW,
         prisma,
+        telegramDirectAuthorization: {
+          telegramThreadId: "456:bot:123456",
+          telegramUserId: "456",
+        },
       }),
     ).resolves.toMatchObject({
       inviteCode: "public-telegram-invite",
@@ -1300,6 +1304,10 @@ describe("completeHostedPrivyVerification", () => {
         inviteCode: "invite-code",
         now: NOW,
         prisma,
+        telegramDirectAuthorization: {
+          telegramThreadId: "456:bot:123456",
+          telegramUserId: "456",
+        },
       }),
     ).resolves.toMatchObject({
       inviteCode: "invite-code",

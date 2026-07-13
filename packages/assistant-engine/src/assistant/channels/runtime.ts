@@ -1,5 +1,10 @@
 import {
+  HOSTED_TELEGRAM_BOT_ID_HEADER,
+} from '@murphai/contracts'
+import {
+  isTelegramThreadTargetAuthorizedForBotToken,
   parseTelegramThreadTarget,
+  resolveTelegramBotIdFromToken,
   serializeTelegramThreadTarget,
   type TelegramThreadTarget,
 } from '@murphai/messaging-ingress/telegram-webhook'
@@ -211,7 +216,7 @@ export async function sendTelegramImageMessage(
     /\/$/u,
     '',
   )
-  let target = parseTelegramTargetOrThrow(input.target)
+  let target = parseTelegramTargetOrThrow(input.target, token)
   let targetLabel = serializeTelegramThreadTarget(target)
   let replyToMessageId = normalizeTelegramReplyToMessageId(input.replyToMessageId)
   const cleanupMessages: TelegramCleanupMessage[] = []
@@ -242,7 +247,7 @@ export async function sendTelegramImageMessage(
       providerMessageIds.push(deliveredText.providerMessageId)
     }
     lastProviderMessageId = deliveredText.providerMessageId
-    target = parseTelegramTargetOrThrow(deliveredText.target)
+    target = parseTelegramTargetOrThrow(deliveredText.target, token)
     targetLabel = deliveredText.target
     replyToMessageId = null
   }
@@ -385,7 +390,7 @@ export async function prepareTelegramVoiceMemoMessage(
     /\/$/u,
     '',
   )
-  const target = parseTelegramTargetOrThrow(input.target)
+  const target = parseTelegramTargetOrThrow(input.target, token)
   const audio = await generateElevenLabsVoiceMemoAudio({
     apiKey,
     fetchImplementation: createTelegramElevenLabsFetchAdapter(fetchImplementation),
@@ -429,8 +434,9 @@ export async function sendPreparedTelegramVoiceMemoMessage(
   target: string
 }> {
   const target = input.targetOverride
-    ? parseTelegramTargetOrThrow(input.targetOverride)
+    ? parseTelegramTargetOrThrow(input.targetOverride, input.token)
     : input.target
+  assertTelegramTargetBotAuthorized(target, input.token)
   const targetLabel = input.targetOverride
     ? serializeTelegramThreadTarget(target)
     : input.targetLabel
@@ -1113,7 +1119,7 @@ async function sendTelegramMessageDetailed(
     /\/$/u,
     '',
   )
-  let target = parseTelegramTargetOrThrow(input.target)
+  let target = parseTelegramTargetOrThrow(input.target, token)
   let targetLabel = serializeTelegramThreadTarget(target)
   let lastProviderMessageId: string | null = null
   const cleanupMessages: TelegramCleanupMessage[] = []
@@ -1617,6 +1623,7 @@ function extractTelegramErrorContext(value: unknown): {
 
 async function sendTelegramBotApiRequest(input: {
   baseUrl: string
+  botId?: string | null
   body?: string | Blob | FormData
   fetchImplementation: TelegramFetchImplementation
   operation: TelegramSendOperation
@@ -1637,11 +1644,12 @@ async function sendTelegramBotApiRequest(input: {
       `${input.baseUrl}/bot${input.token}/${input.operation}`,
       {
         method: 'POST',
-        headers: input.payload
-          ? {
-              'content-type': 'application/json',
-            }
-          : undefined,
+        headers: {
+          ...(input.payload ? { 'content-type': 'application/json' } : {}),
+          ...(input.botId && !resolveTelegramBotIdFromToken(input.token)
+            ? { [HOSTED_TELEGRAM_BOT_ID_HEADER]: input.botId }
+            : {}),
+        },
         body: input.body ?? (input.payload ? JSON.stringify(input.payload) : undefined),
         signal: timeout.signal,
       },
@@ -1836,9 +1844,10 @@ async function waitForTelegramRetryDelay(
   await new Promise((resolve) => setTimeout(resolve, retryAfterMs))
 }
 
-function parseTelegramTargetOrThrow(target: string): TelegramParsedTarget {
+function parseTelegramTargetOrThrow(target: string, token: string): TelegramParsedTarget {
   const parsed = parseTelegramThreadTarget(target)
   if (parsed) {
+    assertTelegramTargetBotAuthorized(parsed, token)
     return parsed
   }
 
@@ -1852,10 +1861,28 @@ function parseTelegramTargetOrThrow(target: string): TelegramParsedTarget {
 
   throw new VaultCliError(
     'ASSISTANT_TELEGRAM_TARGET_INVALID',
-    'Telegram targets must use "<chatId>", "<chatId>:topic:<messageThreadId>", "<chatId>:dm-topic:<directMessagesTopicId>", and optional ":business:<businessConnectionId>" routing segments.',
+    'Telegram targets must use "<chatId>" with optional ":bot:<botId>", ":topic:<messageThreadId>", ":dm-topic:<directMessagesTopicId>", and ":business:<businessConnectionId>" routing segments.',
     {
       target: normalizedTarget,
     },
+  )
+}
+
+function assertTelegramTargetBotAuthorized(
+  target: TelegramParsedTarget,
+  token: string,
+): void {
+  if (
+    target.botId == null
+    || isTelegramThreadTargetAuthorizedForBotToken(target, token)
+    || !resolveTelegramBotIdFromToken(token)
+  ) {
+    return
+  }
+
+  throw new VaultCliError(
+    'ASSISTANT_TELEGRAM_BOT_MISMATCH',
+    'Telegram delivery target is authorized for a different bot.',
   )
 }
 
@@ -1873,6 +1900,7 @@ async function sendTelegramTextChunkOnce(input: {
   try {
     const result = await sendTelegramBotApiRequest({
       baseUrl: input.baseUrl,
+      botId: input.target.botId,
       fetchImplementation: input.fetchImplementation,
       operation: 'sendMessage',
       payload: {
@@ -1962,6 +1990,7 @@ async function sendTelegramPhotoOnce(input: {
   try {
     const result = await sendTelegramBotApiRequest({
       baseUrl: input.baseUrl,
+      botId: input.target.botId,
       fetchImplementation: input.fetchImplementation,
       operation: 'sendPhoto',
       payload: {
@@ -2025,6 +2054,7 @@ async function sendTelegramVoiceMemoOnce(input: {
   try {
     const result = await sendTelegramBotApiRequest({
       baseUrl: input.baseUrl,
+      botId: input.target.botId,
       body: buildTelegramVoiceMemoFormData({
         bytes: input.bytes,
         contentType: input.contentType,

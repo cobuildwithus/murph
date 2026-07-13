@@ -39,6 +39,7 @@ export type {
 } from "./telegram-types.ts";
 
 export interface TelegramThreadTarget {
+  botId?: string | null;
   chatId: string;
   messageThreadId?: number | null;
   businessConnectionId?: string | null;
@@ -97,6 +98,15 @@ export function parseTelegramThreadTarget(target: string): TelegramThreadTarget 
       continue;
     }
 
+    if (key === "bot") {
+      const botId = normalizeTelegramBotId(value);
+      if (!botId || parsed.botId != null) {
+        return null;
+      }
+      parsed.botId = botId;
+      continue;
+    }
+
     if (key === "business") {
       const businessConnectionId = safeDecodeURIComponent(value);
       if (!businessConnectionId || parsed.businessConnectionId != null) {
@@ -129,6 +139,10 @@ export function serializeTelegramThreadTarget(input: TelegramThreadTarget): stri
   const normalized = normalizeTelegramThreadTarget(input);
   const segments = [normalized.chatId];
 
+  if (normalized.botId) {
+    segments.push("bot", normalized.botId);
+  }
+
   if (normalized.businessConnectionId) {
     segments.push("business", encodeURIComponent(normalized.businessConnectionId));
   }
@@ -153,6 +167,27 @@ export function buildTelegramThreadTarget(message: TelegramMessageLike): Telegra
     ),
     messageThreadId: normalizeTelegramPositiveInteger(message.message_thread_id),
   });
+}
+
+export function resolveTelegramBotIdFromToken(token: string | null | undefined): string | null {
+  const normalized = normalizeTextValue(token ?? null);
+  if (!normalized) {
+    return null;
+  }
+
+  const separatorIndex = normalized.indexOf(":");
+  if (separatorIndex <= 0 || separatorIndex === normalized.length - 1) {
+    return null;
+  }
+
+  return normalizeTelegramBotId(normalized.slice(0, separatorIndex));
+}
+
+export function isTelegramThreadTargetAuthorizedForBotToken(
+  target: TelegramThreadTarget,
+  token: string | null | undefined,
+): boolean {
+  return target.botId == null || target.botId === resolveTelegramBotIdFromToken(token);
 }
 
 export function buildTelegramThreadId(message: TelegramMessageLike): string {
@@ -440,8 +475,10 @@ function normalizeTelegramPositiveInteger(value: number | null | undefined): num
 
 function normalizeTelegramThreadTarget(input: TelegramThreadTarget): TelegramThreadTarget {
   const directMessagesTopicId = normalizeTelegramPositiveInteger(input.directMessagesTopicId);
+  const botId = normalizeTelegramBotId(input.botId);
 
   return {
+    ...(botId ? { botId } : {}),
     businessConnectionId: normalizeTextValue(input.businessConnectionId ?? null),
     chatId: input.chatId,
     directMessagesTopicId,
@@ -450,6 +487,11 @@ function normalizeTelegramThreadTarget(input: TelegramThreadTarget): TelegramThr
         ? normalizeTelegramPositiveInteger(input.messageThreadId)
         : null,
   };
+}
+
+export function normalizeTelegramBotId(value: string | null | undefined): string | null {
+  const normalized = normalizeTextValue(value ?? null);
+  return normalized && /^[1-9]\d*$/u.test(normalized) ? normalized : null;
 }
 
 function parseTelegramPositiveInteger(value: string): number | null {

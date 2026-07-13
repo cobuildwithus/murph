@@ -30,6 +30,7 @@ import {
   CLOUDFLARE_HOSTED_CONTROL_BROWSER_VAULT_REPLICA_NOT_FOUND_CODE,
   buildCloudflareHostedControlBrowserVaultSessionPath,
   buildCloudflareHostedControlRuntimeEnsureProcessingPath,
+  buildCloudflareHostedControlTelegramDirectAuthorizationPath,
   buildCloudflareHostedControlTelegramUsageLimitNoticePath,
   buildCloudflareHostedControlUserDataDeletionPath,
   buildCloudflareHostedControlUserStatusPath,
@@ -78,6 +79,19 @@ export interface CloudflareHostedControlTelegramUsageLimitNoticeRequest {
   target: string;
 }
 
+export interface CloudflareHostedControlTelegramDirectAuthorizationRequest {
+  telegramUserId: string;
+}
+
+export type CloudflareHostedControlTelegramDirectAuthorizationResponse =
+  | {
+    botId: string;
+    status: "authorized";
+  }
+  | {
+    status: "unavailable";
+  };
+
 export type CloudflareHostedControlTelegramUsageLimitNoticeResponse =
   | {
     status: "sent";
@@ -90,6 +104,10 @@ export type CloudflareHostedControlTelegramUsageLimitNoticeResponse =
   };
 
 export interface CloudflareHostedControlClient {
+  authorizeTelegramDirectMessage(input: {
+    request: CloudflareHostedControlTelegramDirectAuthorizationRequest;
+    userId: string;
+  }): Promise<CloudflareHostedControlTelegramDirectAuthorizationResponse>;
   createBrowserVaultSession(input: {
     browserPublicKeyJwk: HostedUserRecipientPublicKeyJwk;
     replicaRef: HostedBrowserVaultReplicaRef;
@@ -149,6 +167,18 @@ export function parseCloudflareHostedControlTelegramUsageLimitNoticeRequest(
   };
 }
 
+export function parseCloudflareHostedControlTelegramDirectAuthorizationRequest(
+  value: unknown,
+): CloudflareHostedControlTelegramDirectAuthorizationRequest {
+  const record = requireRecord(value, "Telegram direct authorization request");
+  return {
+    telegramUserId: requirePositiveIntegerString(
+      record.telegramUserId,
+      "Telegram direct authorization request telegramUserId",
+    ),
+  };
+}
+
 export function createCloudflareHostedControlClient(
   options: CloudflareHostedControlClientOptions,
 ): CloudflareHostedControlClient {
@@ -159,6 +189,30 @@ export function createCloudflareHostedControlClient(
   );
 
   return {
+    authorizeTelegramDirectMessage(input) {
+      const request = parseCloudflareHostedControlTelegramDirectAuthorizationRequest(
+        input.request,
+      );
+      const userId = requireCloudflareHostedControlUserId(input.userId);
+
+      return requestHostedExecutionAuthorizedJson({
+        baseUrl,
+        boundUserId: userId,
+        fetchImpl,
+        getAuthorizationHeader,
+        label: "Telegram direct authorization",
+        parse: parseCloudflareHostedControlTelegramDirectAuthorizationResponse,
+        path: buildCloudflareHostedControlTelegramDirectAuthorizationPath(userId),
+        request: {
+          body: JSON.stringify(request),
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          method: "POST",
+        },
+        timeoutMs: options.timeoutMs,
+      });
+    },
     createBrowserVaultSession(input) {
       const userId = requireCloudflareHostedControlUserId(input.userId);
       const browserPublicKeyJwk = parseHostedUserRecipientPublicKeyJwk(input.browserPublicKeyJwk);
@@ -633,6 +687,33 @@ function parseCloudflareHostedControlTelegramUsageLimitNoticeResponse(
   return { status };
 }
 
+function parseCloudflareHostedControlTelegramDirectAuthorizationResponse(
+  value: unknown,
+): CloudflareHostedControlTelegramDirectAuthorizationResponse {
+  const record = requireRecord(value, "Cloudflare Telegram direct authorization response");
+  const status = requireString(
+    record.status,
+    "Cloudflare Telegram direct authorization response status",
+  );
+
+  if (status === "unavailable") {
+    return { status };
+  }
+  if (status !== "authorized") {
+    throw new TypeError(
+      "Cloudflare Telegram direct authorization response status must be authorized or unavailable.",
+    );
+  }
+
+  return {
+    botId: requirePositiveIntegerString(
+      record.botId,
+      "Cloudflare Telegram direct authorization response botId",
+    ),
+    status,
+  };
+}
+
 function readOptionalPositiveIntegerField<Key extends string>(
   value: unknown,
   key: Key,
@@ -958,6 +1039,15 @@ function requireString(value: unknown, label: string): string {
   }
 
   return value;
+}
+
+function requirePositiveIntegerString(value: unknown, label: string): string {
+  const normalized = requireString(value, label).trim();
+  if (!/^[1-9]\d*$/u.test(normalized)) {
+    throw new TypeError(`${label} must be a positive integer string.`);
+  }
+
+  return normalized;
 }
 
 function normalizeOptionalString(value: string | null | undefined): string | null {
