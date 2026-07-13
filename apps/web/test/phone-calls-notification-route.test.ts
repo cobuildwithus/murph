@@ -1,4 +1,8 @@
 import { describe, expect, it } from "vitest";
+import {
+  createHostedAssistantConversationIdentifierBlind,
+  hashHostedAssistantConversationIdentifier,
+} from "@murphai/hosted-execution/assistant-identifiers";
 
 import type { HostedMemberSnapshot } from "@/src/lib/hosted-onboarding/hosted-member-store";
 import {
@@ -7,6 +11,7 @@ import {
 
 describe("hosted phone-call notification routing", () => {
   it("preserves credential-compatible thread delivery for a legacy home route", () => {
+    const lookupKey = "stale_pending_lookup";
     const member = buildMember({
       linqChatId: "legacy_home_chat",
       linqHomeLineAssignedAt: new Date("2026-06-18T12:00:00.000Z"),
@@ -15,26 +20,34 @@ describe("hosted phone-call notification routing", () => {
       pendingLinqChatId: "pending_chat",
       pendingLinqParticipantContact: {
         kind: "phone",
-        lookupKey: "stale_pending_lookup",
+        lookupKey,
         observedAt: new Date("2026-06-18T12:01:00.000Z"),
         value: "+15550002222",
       },
       pendingLinqRecipientPhone: "+15559990000",
     });
 
-    expect(resolveHostedPhoneCallResultNotificationRoute({
+    const route = resolveHostedPhoneCallResultNotificationRoute({
       member,
       memberId: member.core.id,
-    })).toMatchObject({
+    });
+    const identifierBlind = createHostedAssistantConversationIdentifierBlind({
+      secret: lookupKey,
+      userId: member.core.id,
+    });
+
+    expect(route).toMatchObject({
       channel: "linq",
       delivery: {
         kind: "thread",
         target: "legacy_home_chat",
       },
+      identityId: hashHostedAssistantConversationIdentifier(identifierBlind, lookupKey),
     });
   });
 
-  it("keeps a home thread with persisted participant authority", () => {
+  it("does not rekey a home thread to persisted participant authority", () => {
+    const lookupKey = "owner_phone_lookup";
     const member = buildMember({
       linqChatId: "authorized_home_chat",
       linqHomeLineAssignedAt: new Date("2026-06-18T12:00:00.000Z"),
@@ -45,15 +58,22 @@ describe("hosted phone-call notification routing", () => {
       linqRecipientPhone: "+15559990000",
     });
 
-    expect(resolveHostedPhoneCallResultNotificationRoute({
+    const route = resolveHostedPhoneCallResultNotificationRoute({
       member,
       memberId: member.core.id,
-    })).toMatchObject({
+    });
+    const identifierBlind = createHostedAssistantConversationIdentifierBlind({
+      secret: lookupKey,
+      userId: member.core.id,
+    });
+
+    expect(route).toMatchObject({
       channel: "linq",
       delivery: {
         kind: "thread",
         target: "authorized_home_chat",
       },
+      identityId: hashHostedAssistantConversationIdentifier(identifierBlind, lookupKey),
     });
   });
 });

@@ -127,8 +127,10 @@ back. A stable membership-derived event ID makes mailbox replay idempotent.
 The additive migrations add nullable eligibility and origin columns. The
 eligibility migration temporarily stamps new join-code member rows inserted by
 a warm prior deployment. Those warm-old rows have no origin and therefore use
-the neutral form. The migrations do not backfill historical memberships or
-owner rows. A second temporary database bridge clears home participant
+the neutral form. A partial `(created_at, id)` index covers only eligible member
+rows so the ordered rollout drain does not scan the full membership table. The
+migrations do not backfill historical memberships or owner rows. A second
+temporary database bridge clears home participant
 authority whenever a warm prior deployment clears the corresponding Linq home
 chat, preventing a later chat from being paired with stale authority. The
 post-drain contract migration removes both bridges after old production

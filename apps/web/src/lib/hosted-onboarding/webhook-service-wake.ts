@@ -99,7 +99,8 @@ export async function maybeHandoffHostedExecutionWebhookWake(input: {
   try {
     signal = await waitForHostedPostCommitOperation({
       deadlineMs: createHostedPostCommitDeadline(input.timeoutMs),
-      operation: () => signalHostedMailboxAppendRuntime({
+      operation: (abortSignal) => signalHostedMailboxAppendRuntime({
+        abortSignal,
         expectedUserId: userId,
         ...(knownCheckpoint ? { knownCheckpoint } : {}),
         mailboxItemId,

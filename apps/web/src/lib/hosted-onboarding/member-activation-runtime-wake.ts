@@ -83,7 +83,8 @@ export async function signalHostedMemberActivationRuntimeWakeBestEffortResult(
 
     const signal = await waitForHostedPostCommitOperation({
       deadlineMs,
-      operation: () => signalHostedMailboxAppendRuntime({
+      operation: (abortSignal) => signalHostedMailboxAppendRuntime({
+        abortSignal,
         expectedUserId: activationMailboxItem.userId,
         mailboxItemId: activationMailboxItem.id,
         prisma,

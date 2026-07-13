@@ -132,6 +132,7 @@ describe("maybeHandoffHostedExecutionWebhookWake direct ensure fast path", () =>
       userId: "member_123",
     });
     expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
+      abortSignal: expect.any(AbortSignal),
       expectedUserId: "member_123",
       knownCheckpoint: {
         lane: "conversation",
@@ -307,6 +308,7 @@ describe("maybeHandoffHostedExecutionWebhookWake direct ensure fast path", () =>
     expect(mocks.readHostedExecutionControlClientIfConfigured).not.toHaveBeenCalled();
     expect(mocks.ensureRuntimeProcessing).not.toHaveBeenCalled();
     expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
+      abortSignal: expect.any(AbortSignal),
       expectedUserId: "member_123",
       mailboxItemId: "mailbox_123",
     });
@@ -325,6 +327,7 @@ describe("maybeHandoffHostedExecutionWebhookWake direct ensure fast path", () =>
 
     expect(mocks.ensureRuntimeProcessing).not.toHaveBeenCalled();
     expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
+      abortSignal: expect.any(AbortSignal),
       expectedUserId: "member_123",
       mailboxItemId: "mailbox_123",
     });

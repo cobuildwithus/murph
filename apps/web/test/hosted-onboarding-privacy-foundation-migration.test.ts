@@ -593,6 +593,13 @@ describe("hosted Prisma baseline migration", () => {
       ),
       "utf8",
     );
+    const hostedGroupJoinConfirmationDrainIndexMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/20260713190000_hosted_group_join_confirmation_drain_index/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
     const hostedMailboxCausalSeqMigrationSql = readFileSync(
       new URL(
         "../prisma/migrations/20260712180000_hosted_mailbox_causal_seq/migration.sql",
@@ -701,6 +708,7 @@ describe("hosted Prisma baseline migration", () => {
       "20260711210000_hosted_group_join_confirmation_eligibility",
       "20260711220000_hosted_group_join_confirmation_origin",
       "20260712180000_hosted_mailbox_causal_seq",
+      "20260713190000_hosted_group_join_confirmation_drain_index",
       "migration_lock.toml",
     ]);
     expect(hostedGroupJoinConfirmationEligibilityMigrationSql).toContain(
@@ -715,6 +723,19 @@ describe("hosted Prisma baseline migration", () => {
     expect(hostedGroupJoinConfirmationOriginMigrationSql).toContain(
       'ADD COLUMN "join_confirmation_origin" TEXT',
     );
+    expect(hostedGroupJoinConfirmationDrainIndexMigrationSql).toContain(
+      'CREATE INDEX CONCURRENTLY "hosted_group_member_join_confirmation_drain_idx"',
+    );
+    expect(hostedGroupJoinConfirmationDrainIndexMigrationSql).toContain(
+      'ON "hosted_group_member"("created_at", "id")',
+    );
+    expect(hostedGroupJoinConfirmationDrainIndexMigrationSql).toContain(
+      'WHERE "join_confirmation_eligible_at" IS NOT NULL',
+    );
+    expect(hostedGroupJoinConfirmationDrainIndexMigrationSql).toContain(
+      'AND "role" = \'member\'',
+    );
+    expect(hostedGroupJoinConfirmationDrainIndexMigrationSql).not.toContain("ALTER TABLE");
     expect(hostedGroupJoinConfirmationEligibilityMigrationSql).toContain(
       'CREATE TRIGGER "hosted_group_join_confirmation_eligibility_bridge"',
     );

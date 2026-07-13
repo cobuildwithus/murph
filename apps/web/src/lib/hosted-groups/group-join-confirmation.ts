@@ -218,7 +218,8 @@ export async function signalHostedGroupJoinConfirmationRuntimeBestEffort(input: 
   try {
     await waitForHostedPostCommitOperation({
       deadlineMs,
-      operation: () => signalHostedMailboxAppendRuntime({
+      operation: (abortSignal) => signalHostedMailboxAppendRuntime({
+        abortSignal,
         expectedUserId: input.memberId,
         mailboxItemId: input.mailboxItemId,
         ...(input.prisma ? { prisma: input.prisma } : {}),

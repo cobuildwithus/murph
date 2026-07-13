@@ -110,7 +110,6 @@ import {
   resolveHostedMemberAssistantNotificationRoute,
   resolveHostedMemberMessagingState,
 } from "./messaging-state";
-import { readHostedLinqHomeLineAuthority } from "./linq-home-routing";
 
 export { HOSTED_FAMILY_MAX_SEATS, HOSTED_FAMILY_MIN_SEATS } from "./billing-plans";
 
@@ -2547,18 +2546,13 @@ export async function resolveHostedFamilyChatNotificationRouteTx(input: {
       prisma: input.tx,
     }),
   ]);
-  const linqAuthority = readHostedLinqHomeLineAuthority(routing);
-  const linqThreadAuthority = linqAuthority.kind === "home" || linqAuthority.kind === "pending"
-    ? linqAuthority
-    : null;
-
   return resolveHostedMemberAssistantNotificationRoute({
-    linqChatId: linqThreadAuthority?.chatId ?? null,
+    linqChatId: routing?.linqChatId ?? routing?.pendingLinqChatId ?? null,
     linqContactLookupKey:
-      linqThreadAuthority?.participantContact?.lookupKey
+      routing?.pendingLinqParticipantContact?.lookupKey
       ?? identity?.phoneLookupKey
       ?? null,
-    linqRecipientPhone: linqAuthority.kind === "none" ? null : linqAuthority.recipientPhone,
+    linqRecipientPhone: routing?.linqRecipientPhone ?? null,
     memberId: input.memberId,
     memberPhoneNumber: identity?.phoneNumber ?? null,
     messaging: resolveHostedMemberMessagingState({
@@ -2567,7 +2561,6 @@ export async function resolveHostedFamilyChatNotificationRouteTx(input: {
       },
       routing: {
         linqChatId: routing?.linqChatId ?? null,
-        linqParticipantContact: routing?.linqParticipantContact ?? null,
         pendingLinqChatId: routing?.pendingLinqChatId ?? null,
         pendingLinqParticipantContact: routing?.pendingLinqParticipantContact ?? null,
         telegramThreadId:

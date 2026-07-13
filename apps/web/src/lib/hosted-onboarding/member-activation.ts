@@ -39,7 +39,7 @@ import { readHostedMemberIdentity } from "./hosted-member-identity-store";
 import { readHostedMemberRoutingState } from "./hosted-member-routing-store";
 import { resolveHostedMemberActivationLinqRoute } from "./linq-home-routing";
 import {
-  resolveHostedMemberActivationWelcomeNotificationRoute,
+  resolveHostedMemberAssistantNotificationRoute,
   resolveHostedMemberChannels,
   resolveHostedMemberMessagingState,
 } from "./messaging-state";
@@ -272,7 +272,7 @@ export function buildHostedMemberActivationWelcomeRoute(input: {
   telegramThreadId: string | null;
   telegramUserId: string | null;
 }): HostedExecutionAssistantNotificationRoute | null {
-  return resolveHostedMemberActivationWelcomeNotificationRoute({
+  return resolveHostedMemberAssistantNotificationRoute({
     linqChatId: input.linqChatId,
     linqContactLookupKey: input.linqContactLookupKey,
     linqRecipientPhone: input.linqRecipientPhone ?? null,

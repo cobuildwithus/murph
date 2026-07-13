@@ -147,7 +147,10 @@ export async function handleHostedGroupJoinOfferReaction(input: {
   if (result.grantedVaultShareProjectionKinds.length > 0) {
     await runHostedGroupJoinPostCommitBestEffort({
       deadlineMs: postCommitDeadlineMs,
-      operation: () => signalHostedRuntimeMaintenanceRuntime({ userId: member.id }),
+      operation: (abortSignal) => signalHostedRuntimeMaintenanceRuntime({
+        abortSignal,
+        userId: member.id,
+      }),
       signal: input.signal,
     });
   }
@@ -180,7 +183,8 @@ async function signalMailboxAppendRuntimesBestEffort(input: {
   await Promise.all(input.signals.map((mailboxSignal) =>
     runHostedGroupJoinPostCommitBestEffort({
       deadlineMs: input.deadlineMs,
-      operation: () => signalHostedMailboxAppendRuntime({
+      operation: (abortSignal) => signalHostedMailboxAppendRuntime({
+        abortSignal,
         expectedUserId: mailboxSignal.memberId,
         mailboxItemId: mailboxSignal.mailboxItemId,
       }),
@@ -191,7 +195,7 @@ async function signalMailboxAppendRuntimesBestEffort(input: {
 
 async function runHostedGroupJoinPostCommitBestEffort(input: {
   deadlineMs: number;
-  operation: () => Promise<unknown>;
+  operation: (signal: AbortSignal) => Promise<unknown>;
   signal?: AbortSignal;
 }): Promise<void> {
   try {

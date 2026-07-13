@@ -4,6 +4,10 @@ import {
 } from "@prisma/client";
 import type Stripe from "stripe";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  createHostedAssistantConversationIdentifierBlind,
+  hashHostedAssistantConversationIdentifier,
+} from "@murphai/hosted-execution/assistant-identifiers";
 
 const encryptionMocks = vi.hoisted(() => ({
   decryptHostedWebNullableString: vi.fn(),
@@ -1311,10 +1315,11 @@ describe("hosted Family plan", () => {
 
   it("preserves credential-compatible thread delivery for a legacy owner route", async () => {
     const tx = createTxMock();
+    const ownerPhoneLookupKey = createHostedPhoneLookupKey("+15550001111");
     tx.hostedMemberIdentity.findUnique.mockResolvedValueOnce({
       maskedPhoneNumberHint: "+1 *** *** 1111",
       memberId: "member_owner",
-      phoneLookupKey: createHostedPhoneLookupKey("+15550001111"),
+      phoneLookupKey: ownerPhoneLookupKey,
       phoneNumberEncrypted: "encrypted:+15550001111",
       phoneNumberVerifiedAt: new Date("2026-06-18T12:00:00.000Z"),
       privyUserIdEncrypted: null,
@@ -1350,15 +1355,25 @@ describe("hosted Family plan", () => {
       telegramUserLookupKey: null,
     });
 
-    await expect(resolveHostedFamilyChatNotificationRouteTx({
+    const route = await resolveHostedFamilyChatNotificationRouteTx({
       memberId: "member_owner",
       tx,
-    })).resolves.toMatchObject({
+    });
+    const identifierBlind = createHostedAssistantConversationIdentifierBlind({
+      secret: "stale_pending_lookup",
+      userId: "member_owner",
+    });
+
+    expect(route).toMatchObject({
       channel: "linq",
       delivery: {
         kind: "thread",
         target: "legacy_home_chat",
       },
+      identityId: hashHostedAssistantConversationIdentifier(
+        identifierBlind,
+        "stale_pending_lookup",
+      ),
     });
   });
 

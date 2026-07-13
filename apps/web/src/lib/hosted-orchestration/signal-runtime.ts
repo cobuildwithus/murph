@@ -51,6 +51,7 @@ export interface HostedRuntimeSignalResult {
 }
 
 export interface SignalHostedUserRuntimeWorkflowInput {
+  abortSignal?: AbortSignal;
   client?: HostedRuntimeTemporalSignalClient | null;
   environment?: NodeJS.ProcessEnv;
   ensureWorkspace?: boolean;
@@ -61,6 +62,7 @@ export interface SignalHostedUserRuntimeWorkflowInput {
 }
 
 export interface SignalHostedMailboxAppendInput {
+  abortSignal?: AbortSignal;
   client?: HostedRuntimeTemporalSignalClient | null;
   environment?: NodeJS.ProcessEnv;
   expectedUserId?: string | null;
@@ -87,6 +89,7 @@ export interface SignalHostedBrowserVaultRefreshInput {
 }
 
 export interface SignalHostedRuntimeMaintenanceInput {
+  abortSignal?: AbortSignal;
   client?: HostedRuntimeTemporalSignalClient | null;
   environment?: NodeJS.ProcessEnv;
   prisma?: PrismaClient;
@@ -147,6 +150,7 @@ export async function signalHostedMailboxAppendRuntime(
   }
 
   return signalHostedUserRuntimeWorkflow({
+    abortSignal: input.abortSignal,
     client: input.client,
     environment: input.environment,
     ensureWorkspace: input.knownCheckpoint === undefined,
@@ -193,6 +197,7 @@ export async function signalHostedRuntimeMaintenanceRuntime(
   });
 
   return signalHostedRuntimeControlMailboxRequest({
+    abortSignal: input.abortSignal,
     client: input.client,
     environment: input.environment,
     eventId: control.eventId,
@@ -304,6 +309,7 @@ async function assertHostedManualRunAiUsageAllowed(input: {
 }
 
 async function signalHostedRuntimeControlMailboxRequest(input: {
+  abortSignal?: AbortSignal;
   client?: HostedRuntimeTemporalSignalClient | null;
   environment?: NodeJS.ProcessEnv;
   eventId?: string | null;
@@ -331,6 +337,7 @@ async function signalHostedRuntimeControlMailboxRequest(input: {
   )).item;
 
   return signalHostedUserRuntimeWorkflow({
+    abortSignal: input.abortSignal,
     client: input.client,
     environment: input.environment,
     ensureWorkspace: false,
@@ -446,16 +453,24 @@ export async function signalHostedUserRuntimeWorkflow(
     || HOSTED_USER_RUNTIME_TASK_QUEUE;
   const signal = parseHostedRuntimeSignal(input.signal);
 
-  await client.workflow.signalWithStart(HOSTED_USER_RUNTIME_WORKFLOW_TYPE, {
-    args: [{
-      options: readHostedRuntimeTemporalWorkflowOptions(environment),
-      userId: input.userId,
-    }],
-    signal: HOSTED_USER_RUNTIME_SIGNAL_NAME,
-    signalArgs: [signal],
-    taskQueue,
-    workflowId,
-  });
+  const signalWithStart = () => client.workflow.signalWithStart(
+    HOSTED_USER_RUNTIME_WORKFLOW_TYPE,
+    {
+      args: [{
+        options: readHostedRuntimeTemporalWorkflowOptions(environment),
+        userId: input.userId,
+      }],
+      signal: HOSTED_USER_RUNTIME_SIGNAL_NAME,
+      signalArgs: [signal],
+      taskQueue,
+      workflowId,
+    },
+  );
+  if (input.abortSignal) {
+    await client.withAbortSignal(input.abortSignal, signalWithStart);
+  } else {
+    await signalWithStart();
+  }
 
   return {
     signalAccepted: true,

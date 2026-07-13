@@ -313,7 +313,7 @@ describe("resolveHostedMemberActivationLinqRoute", () => {
     });
   });
 
-  it("keeps persisted home participant authority after member credentials change", async () => {
+  it("keeps activation on credential-compatible identity after participant authority changes", async () => {
     const participantLookupKey = "hbidx:phone:v1:observed";
     const member = buildMember({
       linqChatId: "chat_observed",
@@ -335,14 +335,20 @@ describe("resolveHostedMemberActivationLinqRoute", () => {
       }),
     ).resolves.toEqual({
       welcomeRoute: {
-        actorId: hashHostedLinqRouteIdentifier("+15551230002", participantLookupKey),
+        actorId: hashHostedLinqRouteIdentifier("+15551230002", "hbidx:phone:v1:current"),
         channel: "linq",
         delivery: {
           kind: "thread",
           target: "chat_observed",
         },
-        identityId: hashHostedLinqRouteIdentifier(participantLookupKey, participantLookupKey),
-        threadId: hashHostedLinqRouteIdentifier("chat_observed", participantLookupKey),
+        identityId: hashHostedLinqRouteIdentifier(
+          "hbidx:phone:v1:current",
+          "hbidx:phone:v1:current",
+        ),
+        threadId: hashHostedLinqRouteIdentifier(
+          "chat_observed",
+          "hbidx:phone:v1:current",
+        ),
         threadIsDirect: true,
       },
     });
@@ -434,7 +440,7 @@ describe("resolveHostedMemberActivationLinqRoute", () => {
     });
   });
 
-  it("keeps a phone-backed pending thread on its observed identity after the member phone changes", async () => {
+  it("keeps a phone-backed pending thread on the credential-compatible identity", async () => {
     const pendingPhoneLookupKey = "hbidx:phone:v1:pending-a";
     const member = buildMember({
       pendingLinqChatId: "chat_pending",
@@ -458,14 +464,20 @@ describe("resolveHostedMemberActivationLinqRoute", () => {
       }),
     ).resolves.toEqual({
       welcomeRoute: {
-        actorId: hashHostedLinqRouteIdentifier("+15551230002", pendingPhoneLookupKey),
+        actorId: hashHostedLinqRouteIdentifier("+15551230002", "hbidx:phone:v1:member-b"),
         channel: "linq",
         delivery: {
           kind: "thread",
           target: "chat_pending",
         },
-        identityId: hashHostedLinqRouteIdentifier(pendingPhoneLookupKey, pendingPhoneLookupKey),
-        threadId: hashHostedLinqRouteIdentifier("chat_pending", pendingPhoneLookupKey),
+        identityId: hashHostedLinqRouteIdentifier(
+          "hbidx:phone:v1:member-b",
+          "hbidx:phone:v1:member-b",
+        ),
+        threadId: hashHostedLinqRouteIdentifier(
+          "chat_pending",
+          "hbidx:phone:v1:member-b",
+        ),
         threadIsDirect: true,
       },
     });

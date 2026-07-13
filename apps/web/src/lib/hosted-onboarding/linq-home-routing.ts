@@ -17,7 +17,7 @@ import {
 } from "./linq-routing-policy";
 import {
   type HostedMemberAssistantNotificationRoute,
-  resolveHostedMemberActivationWelcomeNotificationRoute,
+  resolveHostedMemberAssistantNotificationRoute,
   resolveHostedMemberMessagingState,
 } from "./messaging-state";
 import {
@@ -314,14 +314,11 @@ async function resolveHostedMemberActivationLinqRouteAttempt(input: {
   });
   const memberPhoneNumber = input.member.identity?.phoneNumber ?? null;
   const authority = readHostedLinqHomeLineAuthority(routing);
-  const activationLinqContactLookupKey = authority.kind === "home"
-    || authority.kind === "pending"
-    ? authority.participantContact?.lookupKey
-      ?? input.member.identity?.phoneLookupKey
-      ?? routing?.pendingLinqParticipantContact?.lookupKey
-      ?? input.member.emailAuthorization?.verifiedEmail?.lookupKey
-      ?? null
-    : null;
+  const linqContactLookupKey =
+    input.member.identity?.phoneLookupKey
+    ?? routing?.pendingLinqParticipantContact?.lookupKey
+    ?? input.member.emailAuthorization?.verifiedEmail?.lookupKey
+    ?? null;
 
   if (authority.kind === "home") {
     if (routing?.pendingLinqChatId) {
@@ -336,10 +333,9 @@ async function resolveHostedMemberActivationLinqRouteAttempt(input: {
     }
 
     return {
-      welcomeRoute: resolveHostedMemberActivationWelcomeNotificationRoute({
+      welcomeRoute: resolveHostedMemberAssistantNotificationRoute({
         linqChatId: authority.chatId,
-        linqContactLookupKey: activationLinqContactLookupKey,
-        linqRecipientPhone: authority.recipientPhone,
+        linqContactLookupKey,
         memberId: input.member.core.id,
         memberPhoneNumber,
         messaging,
@@ -351,7 +347,7 @@ async function resolveHostedMemberActivationLinqRouteAttempt(input: {
   // depend on the line still being in the assignable pool.
   if (
     authority.kind === "pending"
-    && activationLinqContactLookupKey
+    && linqContactLookupKey
     && (
       memberPhoneNumber
         ? authority.recipientPhone !== null
@@ -368,9 +364,9 @@ async function resolveHostedMemberActivationLinqRouteAttempt(input: {
     });
 
     return {
-      welcomeRoute: resolveHostedMemberActivationWelcomeNotificationRoute({
+      welcomeRoute: resolveHostedMemberAssistantNotificationRoute({
         linqChatId: authority.chatId,
-        linqContactLookupKey: activationLinqContactLookupKey,
+        linqContactLookupKey,
         memberId: input.member.core.id,
         memberPhoneNumber,
         messaging,
@@ -414,7 +410,7 @@ async function resolveHostedMemberActivationLinqRouteAttempt(input: {
   });
 
   return {
-    welcomeRoute: resolveHostedMemberActivationWelcomeNotificationRoute({
+    welcomeRoute: resolveHostedMemberAssistantNotificationRoute({
       linqChatId: null,
       linqRecipientPhone: targetRecipientPhone,
       memberId: input.member.core.id,

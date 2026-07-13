@@ -12,7 +12,7 @@ export function readHostedPostCommitRemainingMs(deadlineMs: number): number {
 
 export async function waitForHostedPostCommitOperation<T>(input: {
   deadlineMs: number;
-  operation: () => Promise<T>;
+  operation: (signal: AbortSignal) => Promise<T>;
   signal?: AbortSignal;
 }): Promise<T> {
   throwIfHostedPostCommitAborted(input.signal);
@@ -21,8 +21,6 @@ export async function waitForHostedPostCommitOperation<T>(input: {
   if (input.deadlineMs <= Date.now()) {
     throw createHostedPostCommitTimeoutError(remainingMs);
   }
-  const operation = input.operation();
-  operation.catch(() => undefined);
   const timeoutController = new AbortController();
   const timeout = setTimeout(() => {
     timeoutController.abort(createHostedPostCommitTimeoutError(remainingMs));
@@ -30,6 +28,8 @@ export async function waitForHostedPostCommitOperation<T>(input: {
   const waitSignal = input.signal
     ? AbortSignal.any([input.signal, timeoutController.signal])
     : timeoutController.signal;
+  const operation = input.operation(waitSignal);
+  operation.catch(() => undefined);
   const aborted = new Promise<never>((_, reject) => {
     const rejectFromSignal = () => reject(createHostedPostCommitAbortError(waitSignal));
     if (waitSignal.aborted) {

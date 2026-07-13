@@ -5,13 +5,12 @@ import {
 import { describe, expect, it } from "vitest";
 
 import {
-  resolveHostedMemberActivationWelcomeNotificationRoute,
   resolveHostedMemberAssistantNotificationRoute,
   resolveHostedMemberMessagingState,
 } from "@/src/lib/hosted-onboarding/messaging-state";
 
 describe("hosted member messaging authority", () => {
-  it("keeps an established Linq participant when a newer phone credential exists", () => {
+  it("uses explicit participant authority only when the caller supplies it", () => {
     const memberId = "member_123";
     const establishedLookupKey = "hbidx:email:v1:established";
     const identifierBlind = createHostedAssistantConversationIdentifierBlind({
@@ -24,9 +23,6 @@ describe("hosted member messaging authority", () => {
       },
       routing: {
         linqChatId: "chat_home",
-        linqParticipantContact: {
-          lookupKey: establishedLookupKey,
-        },
       },
     });
 
@@ -52,14 +48,19 @@ describe("hosted member messaging authority", () => {
     });
   });
 
-  it("preserves existing participant delivery for a legacy route without observed authority", () => {
+  it("preserves credential-compatible thread identity for a legacy route", () => {
+    const memberId = "member_legacy";
+    const phoneLookupKey = "hbidx:phone:v1:newer";
+    const identifierBlind = createHostedAssistantConversationIdentifierBlind({
+      secret: phoneLookupKey,
+      userId: memberId,
+    });
     const messaging = resolveHostedMemberMessagingState({
       identity: {
-        phoneLookupKey: "hbidx:phone:v1:newer",
+        phoneLookupKey,
       },
       routing: {
         linqChatId: "chat_legacy",
-        linqParticipantContact: null,
       },
     });
 
@@ -67,7 +68,7 @@ describe("hosted member messaging authority", () => {
       linqChatId: "chat_legacy",
       linqContactLookupKey: null,
       linqRecipientPhone: "+15550100099",
-      memberId: "member_legacy",
+      memberId,
       memberPhoneNumber: "+15550100001",
       messaging,
     };
@@ -75,32 +76,25 @@ describe("hosted member messaging authority", () => {
     expect(resolveHostedMemberAssistantNotificationRoute(routeInput)).toMatchObject({
       channel: "linq",
       delivery: {
-        kind: "participant",
-        target: "+15550100001",
+        kind: "thread",
+        target: "chat_legacy",
       },
-      threadId: null,
-    });
-    expect(resolveHostedMemberActivationWelcomeNotificationRoute(routeInput)).toMatchObject({
-      channel: "linq",
-      delivery: {
-        kind: "participant",
-        target: "+15550100001",
-      },
-      threadId: null,
+      identityId: hashHostedAssistantConversationIdentifier(
+        identifierBlind,
+        phoneLookupKey,
+      ),
     });
   });
 
-  it("does not pair an explicitly unauthorized home thread with a pending identity", () => {
+  it("retains the legacy pending-identity fallback when no phone credential exists", () => {
     const messaging = resolveHostedMemberMessagingState({
       identity: null,
       routing: {
         linqChatId: "chat_legacy",
-        linqParticipantContact: null,
         pendingLinqChatId: "chat_pending",
         pendingLinqParticipantContact: {
           lookupKey: "hbidx:phone:v1:pending",
         },
-        telegramThreadId: "telegram_private",
       },
     });
 
@@ -110,10 +104,10 @@ describe("hosted member messaging authority", () => {
       memberId: "member_legacy",
       messaging,
     })).toMatchObject({
-      channel: "telegram",
+      channel: "linq",
       delivery: {
         kind: "thread",
-        target: "telegram_private",
+        target: "chat_legacy",
       },
     });
   });

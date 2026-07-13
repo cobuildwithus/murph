@@ -43,6 +43,7 @@ const mocks = vi.hoisted(() => {
     resolveHostedAiUsageGate: vi.fn(),
     resolveHostedRuntimeAiUsageGate: vi.fn(),
     signalWithStart: vi.fn(),
+    withAbortSignal: vi.fn(),
   };
 });
 
@@ -155,6 +156,22 @@ describe("hosted runtime Temporal signaling", () => {
       "mailboxItemId",
     ]);
     expect(JSON.stringify(signal)).not.toMatch(/Please look|providerHeaders|messageText/u);
+  });
+
+  it("runs a bounded workflow signal inside the Temporal abort boundary", async () => {
+    const abortSignal = new AbortController().signal;
+
+    await signalHostedMailboxAppendRuntime({
+      abortSignal,
+      client: buildClient(),
+      mailboxItemId: "mailbox_123",
+    });
+
+    expect(mocks.withAbortSignal).toHaveBeenCalledWith(
+      abortSignal,
+      expect.any(Function),
+    );
+    expect(mocks.signalWithStart).toHaveBeenCalledTimes(1);
   });
 
   it("skips the checkpoint re-read and workspace ensure but still requires active access when the caller supplies planner lane facts", async () => {
@@ -834,6 +851,13 @@ describe("hosted runtime Temporal signaling", () => {
 
 function buildClient() {
   return {
+    async withAbortSignal<R>(
+      signal: AbortSignal,
+      operation: () => Promise<R>,
+    ): Promise<R> {
+      mocks.withAbortSignal(signal, operation);
+      return await operation();
+    },
     workflow: {
       signalWithStart: mocks.signalWithStart,
     },

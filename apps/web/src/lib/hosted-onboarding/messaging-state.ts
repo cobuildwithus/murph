@@ -16,9 +16,6 @@ interface HostedMemberMessagingIdentitySlice {
 
 interface HostedMemberMessagingRoutingSlice {
   linqChatId?: string | null;
-  linqParticipantContact?: {
-    lookupKey?: string | null;
-  } | null;
   pendingLinqChatId?: string | null;
   pendingLinqParticipantContact?: {
     lookupKey?: string | null;
@@ -60,8 +57,7 @@ export function resolveHostedMemberMessagingState(input: {
     normalizeMessagingIdentity(input.routing?.linqChatId)
     ?? normalizeMessagingIdentity(input.routing?.pendingLinqChatId);
   const linqContactLookupKey =
-    normalizeMessagingIdentity(input.routing?.linqParticipantContact?.lookupKey)
-    ?? phoneLookupKey
+    phoneLookupKey
     ?? normalizeMessagingIdentity(input.routing?.pendingLinqParticipantContact?.lookupKey);
   const telegramThreadId = normalizeMessagingIdentity(input.routing?.telegramThreadId);
   const hasPhone = phoneLookupKey !== null;
@@ -104,24 +100,12 @@ export function resolveHostedMemberChannels(input: {
 export function resolveHostedMemberAssistantNotificationRoute(
   input: HostedMemberAssistantNotificationRouteInput,
 ): HostedMemberAssistantNotificationRoute {
-  return resolveHostedMemberNotificationRoute(input);
-}
-
-export function resolveHostedMemberActivationWelcomeNotificationRoute(
-  input: HostedMemberAssistantNotificationRouteInput,
-): HostedMemberAssistantNotificationRoute {
-  return resolveHostedMemberNotificationRoute(input);
-}
-
-function resolveHostedMemberNotificationRoute(
-  input: HostedMemberAssistantNotificationRouteInput,
-): HostedMemberAssistantNotificationRoute {
   const memberPhoneNumber = normalizePhoneNumber(input.memberPhoneNumber);
   const linqRecipientPhone = normalizePhoneNumber(input.linqRecipientPhone);
   const linqContactLookupKey =
-    input.linqContactLookupKey === undefined
-      ? input.messaging.linqContactLookupKey
-      : normalizeMessagingIdentity(input.linqContactLookupKey);
+    normalizeMessagingIdentity(input.linqContactLookupKey)
+    ?? input.messaging.linqContactLookupKey
+    ?? input.messaging.phoneLookupKey;
 
   if (input.linqChatId && linqContactLookupKey) {
     const identifierBlind = createHostedAssistantConversationIdentifierBlind({

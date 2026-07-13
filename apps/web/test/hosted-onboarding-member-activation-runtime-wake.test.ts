@@ -60,6 +60,7 @@ describe("signalHostedMemberActivationRuntimeWakeBestEffortResult", () => {
     });
 
     expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
+      abortSignal: expect.any(AbortSignal),
       expectedUserId: "member_123",
       mailboxItemId: "mailbox_123",
       prisma,
