@@ -169,14 +169,18 @@ first.
 
 `computer_act` is the browser execution primitive. Pass Playwright
 TypeScript/JavaScript in `code`; `page`, `context`, and `browser` are available
-in scope. Keep each call focused on one small browser step or one small
-inspection, and return concise JSON-serializable data when the result matters.
+in scope. Make each call one decision-bounded macro-step: combine every
+deterministic operation, bounded wait, and final verification until the next
+operation requires new model judgment. Split only at ambiguous intent, missing
+data, sensitive input or handoff, an irreversible confirmation, an unknown
+transition, or a timeout. Return concise JSON-serializable
+state from the completed macro-step.
 
 ```json
 {
   "runId": "hcr_...",
   "timeoutMs": 15000,
-  "code": "await page.getByRole('button', { name: 'Add to cart', exact: true }).click(); return { clicked: true };"
+  "code": "await page.getByRole('button', { name: 'Add to cart', exact: true }).click(); const cart = page.getByRole('link', { name: /cart/i }); await cart.waitFor({ state: 'visible' }); return { cart: await cart.innerText() };"
 }
 ```
 
@@ -187,7 +191,7 @@ For the checkout case with two identical submit buttons, choose explicitly:
 {
   "runId": "hcr_...",
   "timeoutMs": 25000,
-  "code": "const submit = page.locator('[data-testid=\"SPC_selectPlaceOrder\"]'); if (await submit.count() < 1) throw new Error('Place order button not found'); await submit.last().click(); return { submitButtons: await submit.count() };"
+  "code": "const submit = page.locator('[data-testid=\"SPC_selectPlaceOrder\"]'); if (await submit.count() < 1) throw new Error('Place order button not found'); await submit.last().click(); const confirmation = page.getByText(/order (confirmed|placed)/i); await confirmation.waitFor({ state: 'visible' }); return { confirmation: await confirmation.innerText(), submitButtons: await submit.count() };"
 }
 ```
 
@@ -207,10 +211,12 @@ navigation policy. Pause for handoff when sensitive user input is needed.
 ## Browser control loop
 
 Open or reuse the run, and inspect current state — domain, page purpose, login
-state, selected account, cart or appointment state — before acting. Take one
-bounded action at a time and re-read page state whenever the result affects the
-next step. Verify the requested result on the site; a click is not completion.
-Finish the run with the correct outcome.
+state, selected account, cart or appointment state — before acting. Then execute
+one decision-bounded macro-step at a time: keep deterministic actions, waits,
+and verification in the same call, and return the resulting state. Re-read or
+start another macro-step only when that state changes the next choice. Verify
+the requested result on the site; a click is not completion. Finish the run
+with the correct outcome.
 
 Treat browser capability as something to test, not guess. For an authorized
 task, try the normal Playwright interaction and one safe locator or keyboard
@@ -230,11 +236,12 @@ double-book, double-submit, or add duplicate cart items.
 If a control remains unresponsive after a specific wait/current-state check and one safe
 alternate locator or keyboard path, or the site appears wedged, refresh the
 current page as a last resort. Do this only when no booking, purchase,
-submission, or other side effect is in an unknown state. After refreshing,
-call `computer_open` again and re-check cart, form, account, appointment, or confirmation
-state before continuing. If refreshing would risk duplicate submission or losing
-important user-entered data, pause for user takeover or finish failed with the
-blocker instead.
+submission, or other side effect is in an unknown state. Refresh and re-check
+cart, form, account, appointment, or confirmation state within the same
+`computer_act` call when possible. If the refresh or transport leaves the
+outcome genuinely unknown, call `computer_open` before retrying. If refreshing
+would risk duplicate submission or losing important user-entered data, pause
+for user takeover or finish failed with the blocker instead.
 
 ## Playwright control tactics
 
@@ -520,9 +527,10 @@ skill or reference update, not in one user's memory.
 
 ## Verify and stop
 
-After actions that might have navigated, submitted, or changed state, have the
-action return current state or call `computer_open` before continuing. Completion evidence
-should match the task:
+After actions that might have navigated, submitted, or changed state, return the
+resulting state from the same `computer_act` call. Use `computer_open` for an
+initial or resumed run, after OS-control, or when an act or transport leaves the
+outcome genuinely unknown. Completion evidence should match the task:
 
 - appointment: provider/service, date/time/timezone, location, and confirmed
   status
