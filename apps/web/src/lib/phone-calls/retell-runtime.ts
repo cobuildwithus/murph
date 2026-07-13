@@ -14,6 +14,7 @@ import type {
 import type {
   HostedPhoneCallRuntimeRecord,
   PhoneCallRuntime,
+  PhoneCallRuntimeReconciliationResult,
   PhoneCallRuntimeStartResult,
 } from "./types";
 import { markPhoneCallRuntimeNoActiveEffect } from "./types";
@@ -33,6 +34,10 @@ export function createRetellPhoneCallRuntime(input: {
 }
 
 export interface RetellPhoneCallAccountDeletionRuntime {
+  resolveProviderCall(
+    murphPhoneCallId: string,
+    options?: { signal?: AbortSignal },
+  ): Promise<PhoneCallRuntimeReconciliationResult>;
   stopIfActive(providerCallId: string): Promise<void>;
 }
 
@@ -91,10 +96,71 @@ class RetellPhoneCallRuntime implements PhoneCallRuntime, RetellPhoneCallAccount
         storageSetting,
         stopFailure,
       });
-      throw stopFailure ? error : markPhoneCallRuntimeNoActiveEffect(error);
+      if (stopFailure) {
+        return {
+          cleanupRequired: true,
+          error,
+          providerCallId,
+        };
+      }
+      throw markPhoneCallRuntimeNoActiveEffect(error);
     }
 
     return { providerCallId };
+  }
+
+  async resolveProviderCall(
+    murphPhoneCallId: string,
+    options: { signal?: AbortSignal } = {},
+  ): Promise<PhoneCallRuntimeReconciliationResult> {
+    options.signal?.throwIfAborted();
+    const client = this.buildClient();
+    const response = await client.call.list({
+      filter_criteria: {
+        metadata: [{
+          key: "murph_phone_call_id",
+          op: "eq",
+          type: "string",
+          value: murphPhoneCallId,
+        }],
+      },
+      limit: 2,
+      sort_order: "descending",
+    }, {
+      signal: options.signal,
+    });
+    const calls = response.items ?? [];
+    if (
+      response.has_more === true
+      || calls.length > 1
+      || calls.some((call) => readRetellMurphPhoneCallId(call.metadata) !== murphPhoneCallId)
+    ) {
+      throw new Error("Retell provider reconciliation returned ambiguous call authority.");
+    }
+    const call = calls[0];
+    if (!call) {
+      return { state: "not_found" };
+    }
+
+    const providerCallId = readRetellProviderCallId(call.call_id);
+    if (!providerCallId) {
+      throw new TypeError("Retell provider reconciliation returned no call_id.");
+    }
+    const storageSetting = readRetellDataStorageSetting(call.data_storage_setting);
+    if (storageSetting === RETELL_BASIC_ATTRIBUTES_ONLY_STORAGE_SETTING) {
+      return {
+        providerCallId,
+        state: "found",
+      };
+    }
+
+    const stopFailure = await this.stopCallBestEffort(client, providerCallId);
+    return stopFailure
+      ? {
+          providerCallId,
+          state: "cleanup_required",
+        }
+      : { state: "not_found" };
   }
 
   async stopIfActive(providerCallId: string): Promise<void> {
@@ -236,6 +302,14 @@ function readRetellPublicBaseOrigin(): string | null {
   }
 
   return parsed.origin;
+}
+
+function readRetellMurphPhoneCallId(metadata: unknown): string | null {
+  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) {
+    return null;
+  }
+  const value = Reflect.get(metadata, "murph_phone_call_id");
+  return typeof value === "string" && value.trim() ? value.trim() : null;
 }
 
 function buildRetellCallbackUrl(publicBaseOrigin: string, pathname: string): string {

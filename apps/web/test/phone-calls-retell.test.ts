@@ -292,22 +292,95 @@ describe("Retell phone-call runtime", () => {
       });
     };
 
-    await expect(createRetellPhoneCallRuntime({ fetchImpl }).start({
+    const result = await createRetellPhoneCallRuntime({ fetchImpl }).start({
       brief: VALID_BRIEF,
       id: "hpc_123",
       memberId: "member_123",
       transferNumber: null,
-    })).rejects.toMatchObject({
-      code: "RETELL_STORAGE_MODE_MISMATCH",
-      details: {
-        code: "retell_storage_mode_mismatch",
-        operationName: "retell.create_phone_call",
-        statusCode: 500,
-        storageMode: "everything",
-        type: "retell_storage_mismatch_stop_http_failed",
+    });
+
+    expect(result).toMatchObject({
+      cleanupRequired: true,
+      error: {
+        code: "RETELL_STORAGE_MODE_MISMATCH",
+        details: {
+          code: "retell_storage_mode_mismatch",
+          operationName: "retell.create_phone_call",
+          statusCode: 500,
+          storageMode: "everything",
+          type: "retell_storage_mismatch_stop_http_failed",
+        },
+        httpStatus: 502,
+        retryable: false,
       },
-      httpStatus: 502,
-      retryable: false,
+      providerCallId: "retell_call_unsafe",
+    });
+    if (result.cleanupRequired !== true) {
+      throw new Error("Expected Retell cleanup authority.");
+    }
+    expect(JSON.stringify(result.error)).not.toContain("retell_call_unsafe");
+  });
+
+  it("resolves a safe provider call by the stable Murph metadata id", async () => {
+    vi.stubEnv("RETELL_API_KEY", "retell-api-key");
+    const fetchImpl = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({
+      has_more: false,
+      items: [{
+        call_id: "retell_call_123",
+        data_storage_setting: "basic_attributes_only",
+        metadata: { murph_phone_call_id: "hpc_123" },
+      }],
+    }), {
+      headers: { "content-type": "application/json" },
+      status: 200,
+    }));
+
+    await expect(createRetellPhoneCallRuntime({ fetchImpl }).resolveProviderCall(
+      "hpc_123",
+    )).resolves.toEqual({
+      providerCallId: "retell_call_123",
+      state: "found",
+    });
+
+    const [url, init] = fetchImpl.mock.calls[0]!;
+    expect(url).toBe("https://api.retellai.com/v3/list-calls");
+    expect(JSON.parse(String(init?.body))).toMatchObject({
+      filter_criteria: {
+        metadata: [{
+          key: "murph_phone_call_id",
+          op: "eq",
+          type: "string",
+          value: "hpc_123",
+        }],
+      },
+      limit: 2,
+    });
+  });
+
+  it("returns cleanup authority when a reconciled unsafe call cannot be stopped", async () => {
+    vi.stubEnv("RETELL_API_KEY", "retell-api-key");
+    const fetchImpl: typeof fetch = async (url) => {
+      if (String(url).includes("/stop-call/")) {
+        return new Response(null, { status: 500 });
+      }
+      return new Response(JSON.stringify({
+        has_more: false,
+        items: [{
+          call_id: "retell_call_unsafe",
+          data_storage_setting: "everything",
+          metadata: { murph_phone_call_id: "hpc_123" },
+        }],
+      }), {
+        headers: { "content-type": "application/json" },
+        status: 200,
+      });
+    };
+
+    await expect(createRetellPhoneCallRuntime({ fetchImpl }).resolveProviderCall(
+      "hpc_123",
+    )).resolves.toEqual({
+      providerCallId: "retell_call_unsafe",
+      state: "cleanup_required",
     });
   });
 
@@ -493,6 +566,7 @@ describe("Retell phone-call result handling", () => {
     await handleRetellCallEnded({
       call: {
         call_id: "retell_call_123",
+        data_storage_setting: "basic_attributes_only",
         disconnection_reason: "dial_busy",
         end_timestamp: 1_782_345_600,
       },
@@ -529,6 +603,7 @@ describe("Retell phone-call result handling", () => {
     await handleRetellCallEnded({
       call: {
         call_id: "retell_call_123",
+        data_storage_setting: "basic_attributes_only",
         end_timestamp: "2026-06-25T12:34:56.000Z",
       },
       prisma: store.prisma,
@@ -546,6 +621,43 @@ describe("Retell phone-call result handling", () => {
         providerCallId: "retell_call_123",
         status: {
           in: ["starting", "calling", "ended"],
+        },
+      },
+    }]);
+  });
+
+  it("closes unsafe-storage cleanup authority without converting it to success", async () => {
+    const store = createWebhookStore({
+      call: buildHostedPhoneCall({
+        analyzedAt: null,
+        endedAt: null,
+        id: "hpc_123",
+        providerCallId: "retell_call_unsafe",
+        status: "failed",
+      }),
+    });
+
+    await handleRetellCallEnded({
+      call: {
+        call_id: "retell_call_unsafe",
+        data_storage_setting: "everything",
+        end_timestamp: "2026-06-25T12:34:56.000Z",
+      },
+      prisma: store.prisma,
+    });
+
+    expect(store.updateManyCalls).toEqual([{
+      data: {
+        endedAt: new Date("2026-06-25T12:34:56.000Z"),
+        status: "failed",
+      },
+      where: {
+        endedAt: null,
+        id: "hpc_123",
+        provider: "retell",
+        providerCallId: "retell_call_unsafe",
+        status: {
+          in: ["starting", "calling", "ended", "failed"],
         },
       },
     }]);

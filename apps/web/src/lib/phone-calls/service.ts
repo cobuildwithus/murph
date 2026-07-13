@@ -1,12 +1,10 @@
 import { randomUUID } from "node:crypto";
 
 import {
-  Prisma,
   type HostedPhoneCall,
 } from "@prisma/client";
 import type {
   HostedPhoneCallBrief,
-  HostedPhoneCallResult,
   HostedPhoneCallStartResponse,
 } from "@murphai/hosted-execution/phone-calls";
 import {
@@ -26,6 +24,7 @@ import {
   readHostedPhoneCallBrief,
   type HostedPhoneCallCrypto,
 } from "./crypto";
+import { isHostedPhoneCallReadyForProviderReconciliation } from "./authority";
 import {
   requireHostedPhoneCallResultNotificationRoute,
 } from "./notification-route";
@@ -67,8 +66,6 @@ interface HostedPhoneCallStore {
     updateMany(input: {
       data: {
         providerCallId?: string;
-        resultEncrypted?: string;
-        resultJson?: Prisma.NullTypes.DbNull;
         status: HostedPhoneCall["status"];
       };
       where: {
@@ -171,6 +168,14 @@ async function createHostedPhoneCallWithinDeadline(input: Parameters<
         status: toStartResponseStatus(existing.status),
       };
     }
+    if (isHostedPhoneCallReadyForProviderReconciliation(existing)) {
+      return await reconcileHostedPhoneCallProviderAuthority({
+        call: existing,
+        runtime,
+        signal: input.signal,
+        store,
+      });
+    }
     return {
       phoneCallId: existing.id,
       status: "starting",
@@ -199,18 +204,8 @@ async function createHostedPhoneCallWithinDeadline(input: Parameters<
         status: "starting",
       };
     }
-    const failedResult: HostedPhoneCallResult = {
-      outcome: "not_completed",
-      summary: "Murph could not start the phone call.",
-    };
     const updated = await store.hostedPhoneCall.updateMany({
       data: {
-        resultEncrypted: await crypto.encryptResult({
-          callId: call.id,
-          memberId: call.memberId,
-          value: failedResult,
-        }),
-        resultJson: Prisma.DbNull,
         status: "failed",
       },
       where: {
@@ -235,6 +230,34 @@ async function createHostedPhoneCallWithinDeadline(input: Parameters<
     }
 
     throw error;
+  }
+
+  if (started.cleanupRequired === true) {
+    const updated = await store.hostedPhoneCall.updateMany({
+      data: {
+        providerCallId: started.providerCallId,
+        status: "failed",
+      },
+      where: {
+        analyzedAt: null,
+        id: call.id,
+        provider: "retell",
+        providerCallId: null,
+        status: "starting",
+      },
+    });
+    if (updated.count === 0) {
+      const current = await store.hostedPhoneCall.findUniqueOrThrow({
+        where: { id: call.id },
+      });
+      if (hasPhoneCallAdvancedBeyondStart(current)) {
+        return {
+          phoneCallId: current.id,
+          status: toStartResponseStatus(current.status),
+        };
+      }
+    }
+    throw started.error;
   }
 
   const updated = await store.hostedPhoneCall.updateMany({
@@ -264,6 +287,56 @@ async function createHostedPhoneCallWithinDeadline(input: Parameters<
   return {
     phoneCallId: call.id,
     status: "calling",
+  };
+}
+
+async function reconcileHostedPhoneCallProviderAuthority(input: {
+  call: HostedPhoneCall;
+  runtime: PhoneCallRuntime;
+  signal: AbortSignal;
+  store: HostedPhoneCallStore;
+}): Promise<HostedPhoneCallStartResponse> {
+  let resolution: Awaited<ReturnType<PhoneCallRuntime["resolveProviderCall"]>>;
+  try {
+    resolution = await input.runtime.resolveProviderCall(input.call.id, {
+      signal: input.signal,
+    });
+  } catch {
+    input.signal.throwIfAborted();
+    return {
+      phoneCallId: input.call.id,
+      status: "starting",
+    };
+  }
+
+  const updated = await input.store.hostedPhoneCall.updateMany({
+    data: resolution.state === "not_found"
+      ? { status: "failed" }
+      : {
+          providerCallId: resolution.providerCallId,
+          status: resolution.state === "found" ? "calling" : "failed",
+        },
+    where: {
+      analyzedAt: null,
+      id: input.call.id,
+      provider: "retell",
+      providerCallId: null,
+      status: "starting",
+    },
+  });
+  if (updated.count > 0) {
+    return {
+      phoneCallId: input.call.id,
+      status: resolution.state === "found" ? "calling" : "failed",
+    };
+  }
+
+  const current = await input.store.hostedPhoneCall.findUniqueOrThrow({
+    where: { id: input.call.id },
+  });
+  return {
+    phoneCallId: current.id,
+    status: toStartResponseStatus(current.status),
   };
 }
 

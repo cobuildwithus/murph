@@ -153,11 +153,17 @@ The hosted Prisma schema keeps ownership sharp and nested:
   Murph. The web owner bounds the aggregate start path at 40 seconds. Because
   Retell create-call has no documented idempotency contract, a connection or
   timeout ambiguity preserves the durable row as `starting`; the same request
-  key returns that reservation without blindly creating another provider call,
-  and a signed webhook may still bind the provider call id through Murph metadata.
+  key never blindly creates another provider call. After the 40-second start
+  owner expires, duplicate starts and account deletion reconcile the stable
+  Murph metadata id through Retell: a unique safe call binds once, an
+  authoritative no-match fails the reservation, and provider unavailability
+  leaves it pending. An unsafe-storage call whose compensating stop is ambiguous
+  retains its provider id as failed cleanup authority; consultation rejects it,
+  and deletion retries the stop before local authority can be removed.
   Account deletion first suspends the member under the same row lock used by
-  call reservation, then proves every active provider call stopped before
-  deleting local call authority or user crypto material.
+  call reservation, stops known calls even when another reservation remains
+  unresolved, then proves every active or cleanup-pending provider call stopped
+  before deleting local call authority or user crypto material.
 
 The 40-second web-owned phone-call start deadline requires the Cloudflare
 caller's 45-second protocol floor. Roll out or restore the 45-second Cloudflare

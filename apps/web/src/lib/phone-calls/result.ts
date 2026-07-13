@@ -29,9 +29,11 @@ import {
   requireHostedPhoneCallResultNotificationRoute,
 } from "./notification-route";
 import {
+  hasRetellBasicAttributesOnlyStorage,
   readRetellMurphPhoneCallId,
   type RetellCallPayload,
 } from "./retell-payloads";
+import { isHostedPhoneCallProviderCleanupPending } from "./authority";
 
 interface HostedPhoneCallWebhookTx {
   appendResultNotification(
@@ -135,12 +137,16 @@ export async function handleRetellCallEnded(input: {
     if (!target) {
       return;
     }
+    const preserveFailedStatus = isHostedPhoneCallProviderCleanupPending(target.call)
+      || !hasRetellBasicAttributesOnlyStorage(input.call);
 
     await tx.hostedPhoneCall.updateMany({
       data: {
         ...target.providerCallIdData,
         endedAt: readRetellEndedAt(input.call) ?? new Date(),
-        status: classifyEndedStatus(input.call.disconnection_reason),
+        status: preserveFailedStatus
+          ? "failed"
+          : classifyEndedStatus(input.call.disconnection_reason),
       },
       where: {
         endedAt: null,
@@ -148,7 +154,9 @@ export async function handleRetellCallEnded(input: {
         provider: "retell",
         ...(target.call.providerCallId ? { providerCallId: input.call.call_id } : {}),
         status: {
-          in: ["starting", "calling", "ended"],
+          in: preserveFailedStatus
+            ? ["starting", "calling", "ended", "failed"]
+            : ["starting", "calling", "ended"],
         },
       },
     });
@@ -569,7 +577,7 @@ function readRecord(value: unknown): Record<string, unknown> | null {
 
 function assertRetellStorageMode(call: RetellCallPayload): void {
   const storageMode = call.data_storage_setting?.trim().toLowerCase();
-  if (storageMode === "basic_attributes_only") {
+  if (hasRetellBasicAttributesOnlyStorage(call)) {
     return;
   }
 

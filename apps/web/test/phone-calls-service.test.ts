@@ -1,7 +1,4 @@
-import {
-  Prisma,
-  type HostedPhoneCall,
-} from "@prisma/client";
+import type { HostedPhoneCall } from "@prisma/client";
 import type {
   HostedPhoneCallBrief,
 } from "@murphai/hosted-execution/phone-calls";
@@ -159,7 +156,7 @@ describe("createHostedPhoneCall", () => {
     expect(store.updateManyCalls).toEqual([]);
   });
 
-  it("preserves stale unstarted reservations instead of releasing an ambiguous claim", async () => {
+  it("fails a stale unstarted reservation after the provider proves no matching effect", async () => {
     const existing = buildHostedPhoneCall({
       id: "hpc_existing",
       providerCallId: null,
@@ -181,15 +178,97 @@ describe("createHostedPhoneCall", () => {
 
     expect(response).toEqual({
       phoneCallId: "hpc_existing",
-      status: "starting",
+      status: "failed",
     });
     expect(runtime.startCalls).toEqual([]);
-    expect(store.updateManyCalls).toEqual([]);
+    expect(runtime.resolveCalls).toEqual(["hpc_existing"]);
+    expect(store.updateManyCalls).toEqual([{
+      data: { status: "failed" },
+      where: {
+        analyzedAt: null,
+        id: "hpc_existing",
+        provider: "retell",
+        providerCallId: null,
+        status: "starting",
+      },
+    }]);
     expect(store.currentCall()).toMatchObject({
       providerCallId: null,
       resultJson: null,
+      status: "failed",
+    });
+  });
+
+  it("binds a stale reservation to the single provider call recovered by metadata", async () => {
+    const existing = buildHostedPhoneCall({
+      id: "hpc_existing",
+      providerCallId: null,
+      status: "starting",
+      updatedAt: new Date(0),
+    });
+    const store = createPhoneCallStore({ existing });
+    const runtime = createPhoneCallRuntime({
+      providerCallId: "retell_unused",
+      reconciliationResult: {
+        providerCallId: "retell_recovered",
+        state: "found",
+      },
+    });
+
+    await expect(createHostedPhoneCall({
+      brief: VALID_BRIEF,
+      memberId: existing.memberId,
+      prisma: store.prisma,
+      requestKey: existing.requestKey,
+      runtime: runtime.runtime,
+    })).resolves.toEqual({
+      phoneCallId: "hpc_existing",
+      status: "calling",
+    });
+
+    expect(runtime.startCalls).toEqual([]);
+    expect(runtime.resolveCalls).toEqual(["hpc_existing"]);
+    expect(store.updateManyCalls).toEqual([{
+      data: {
+        providerCallId: "retell_recovered",
+        status: "calling",
+      },
+      where: {
+        analyzedAt: null,
+        id: "hpc_existing",
+        provider: "retell",
+        providerCallId: null,
+        status: "starting",
+      },
+    }]);
+  });
+
+  it("keeps a stale reservation pending when provider reconciliation is unavailable", async () => {
+    const existing = buildHostedPhoneCall({
+      id: "hpc_existing",
+      providerCallId: null,
+      status: "starting",
+      updatedAt: new Date(0),
+    });
+    const store = createPhoneCallStore({ existing });
+    const runtime = createPhoneCallRuntime({
+      providerCallId: "retell_unused",
+      reconciliationError: new Error("provider unavailable"),
+    });
+
+    await expect(createHostedPhoneCall({
+      brief: VALID_BRIEF,
+      memberId: existing.memberId,
+      prisma: store.prisma,
+      requestKey: existing.requestKey,
+      runtime: runtime.runtime,
+    })).resolves.toEqual({
+      phoneCallId: "hpc_existing",
       status: "starting",
     });
+    expect(runtime.startCalls).toEqual([]);
+    expect(runtime.resolveCalls).toEqual(["hpc_existing"]);
+    expect(store.updateManyCalls).toEqual([]);
   });
 
   it("fails closed when a duplicate request key carries a different brief", async () => {
@@ -265,13 +344,43 @@ describe("createHostedPhoneCall", () => {
     const createdCallId = store.createCalls[0]!.data.id;
     expect(store.updateManyCalls).toEqual([{
       data: {
-        resultEncrypted: expect.stringMatching(/^hsb-test:/u),
-        resultJson: Prisma.DbNull,
         status: "failed",
       },
       where: {
         analyzedAt: null,
         id: createdCallId,
+        provider: "retell",
+        providerCallId: null,
+        status: "starting",
+      },
+    }]);
+  });
+
+  it("persists provider authority when unsafe storage cleanup remains pending", async () => {
+    const created = buildHostedPhoneCall();
+    const store = createPhoneCallStore({ created });
+    const cleanupError = new Error("unsafe provider storage");
+    const runtime = createPhoneCallRuntime({
+      cleanupRequiredError: cleanupError,
+      providerCallId: "retell_cleanup_pending",
+    });
+
+    await expect(createHostedPhoneCall({
+      brief: VALID_BRIEF,
+      memberId: created.memberId,
+      prisma: store.prisma,
+      requestKey: created.requestKey,
+      runtime: runtime.runtime,
+    })).rejects.toBe(cleanupError);
+
+    expect(store.updateManyCalls).toEqual([{
+      data: {
+        providerCallId: "retell_cleanup_pending",
+        status: "failed",
+      },
+      where: {
+        analyzedAt: null,
+        id: store.createCalls[0]!.data.id,
         provider: "retell",
         providerCallId: null,
         status: "starting",
@@ -349,8 +458,6 @@ describe("createHostedPhoneCall", () => {
     expect(store.createCalls).toHaveLength(1);
     expect(store.updateManyCalls).toEqual([{
       data: {
-        resultEncrypted: expect.stringMatching(/^hsb-test:/u),
-        resultJson: Prisma.DbNull,
         status: "failed",
       },
       where: {
@@ -629,8 +736,6 @@ function createPhoneCallStore(input: {
         current = {
           ...current,
           providerCallId: args.data.providerCallId ?? current.providerCallId,
-          resultEncrypted: args.data.resultEncrypted ?? current.resultEncrypted,
-          resultJson: args.data.resultJson === Prisma.DbNull ? null : current.resultJson,
           status: args.data.status,
         };
         return { count: 1 };
@@ -654,17 +759,35 @@ function createPhoneCallStore(input: {
 }
 
 function createPhoneCallRuntime(input: {
+  cleanupRequiredError?: Error;
   error?: Error;
   onStart?: (call: Parameters<PhoneCallRuntime["start"]>[0]) => Promise<void> | void;
   providerCallId: string;
+  reconciliationError?: Error;
+  reconciliationResult?: Awaited<ReturnType<PhoneCallRuntime["resolveProviderCall"]>>;
 }) {
+  const resolveCalls: string[] = [];
   const startCalls: Array<Parameters<PhoneCallRuntime["start"]>[0]> = [];
   const runtime: PhoneCallRuntime = {
+    resolveProviderCall: async (callId) => {
+      resolveCalls.push(callId);
+      if (input.reconciliationError) {
+        throw input.reconciliationError;
+      }
+      return input.reconciliationResult ?? { state: "not_found" };
+    },
     start: async (call) => {
       startCalls.push(call);
       await input.onStart?.(call);
       if (input.error) {
         throw input.error;
+      }
+      if (input.cleanupRequiredError) {
+        return {
+          cleanupRequired: true,
+          error: input.cleanupRequiredError,
+          providerCallId: input.providerCallId,
+        };
       }
       return { providerCallId: input.providerCallId };
     },
@@ -672,6 +795,7 @@ function createPhoneCallRuntime(input: {
 
   return {
     runtime,
+    resolveCalls,
     startCalls,
   };
 }

@@ -9,9 +9,25 @@ export interface HostedPhoneCallRuntimeRecord {
   transferNumber: string | null;
 }
 
-export interface PhoneCallRuntimeStartResult {
-  providerCallId: string;
-}
+export type PhoneCallRuntimeStartResult =
+  | {
+      cleanupRequired?: false;
+      providerCallId: string;
+    }
+  | {
+      cleanupRequired: true;
+      error: unknown;
+      providerCallId: string;
+    };
+
+export type PhoneCallRuntimeReconciliationResult =
+  | {
+      providerCallId: string;
+      state: "found" | "cleanup_required";
+    }
+  | {
+      state: "not_found";
+    };
 
 const phoneCallRuntimeNoActiveEffectErrors = new WeakSet<object>();
 
@@ -28,6 +44,10 @@ export function hasPhoneCallRuntimeNoActiveEffect(error: unknown): boolean {
 }
 
 export interface PhoneCallRuntime {
+  resolveProviderCall(
+    murphPhoneCallId: string,
+    options?: { signal?: AbortSignal },
+  ): Promise<PhoneCallRuntimeReconciliationResult>;
   start(
     call: HostedPhoneCallRuntimeRecord,
     options?: { signal?: AbortSignal },
