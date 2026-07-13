@@ -28,10 +28,17 @@ Use `@murphai/hosted-execution/assistant-usage` for the hosted assistant usage
 record contract, parser, id helper, and credential-source helper.
 Use `@murphai/hosted-execution/plan-usage` for the strict empty request and
 member plan-usage status codec.
+Use `@murphai/hosted-execution/clinical-records` for the pointer-only clinical
+sync wake, bounded run/page/outcome contracts, and stable signed runtime route
+paths. Those contracts carry hashes, opaque cursors, sanitized FHIR page JSON,
+and bounded counts; they never carry OAuth credentials or raw provider URLs in
+mailbox or Temporal state.
 
-Run/cursor/drain contracts and parsers are not part of the active package
-surface. Historical completed plans and migration notes may still mention them
-as deleted state.
+Legacy generic hosted run/cursor/drain contracts and parsers are not part of the
+active package surface. The bounded clinical retrieval descriptor and opaque
+page cursor on the explicit clinical-records subpath are a separate active
+domain contract. Historical completed plans and migration notes may still
+mention the deleted generic state.
 
 ## Contract
 

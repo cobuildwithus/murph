@@ -29,6 +29,9 @@ import {
   isHostedDeviceSyncMaintenanceModuleLoadError,
   loadHostedDeviceSyncMaintenanceModule,
 } from "./device-sync-maintenance-import.ts";
+import {
+  loadHostedClinicalRecordsMaintenanceModule,
+} from "./clinical-records-maintenance-import.ts";
 import type {
   HostedMailboxExecutionMetrics,
   NormalizedHostedAssistantRuntimeConfig,
@@ -52,6 +55,7 @@ export async function executeHostedMailboxEvent(input: {
   operatorHomeRoot?: string | null;
   preferenceAppliedAt?: string;
   preferenceCausalSeq?: string;
+  shouldYieldClinicalRecords?: (() => boolean) | null;
   shouldYieldDeviceSync?: (() => boolean) | null;
   sourceMailboxItemId?: string | null;
   runtime: Pick<
@@ -90,6 +94,9 @@ export async function executeHostedMailboxEvent(input: {
     preferenceCausalSeq: input.preferenceCausalSeq,
     runtime: input.runtime,
     runtimeEnv: input.runtimeEnv,
+    ...(input.shouldYieldClinicalRecords
+      ? { shouldYieldClinicalRecords: input.shouldYieldClinicalRecords }
+      : {}),
     ...(input.shouldYieldDeviceSync
       ? { shouldYieldDeviceSync: input.shouldYieldDeviceSync }
       : {}),
@@ -122,6 +129,7 @@ async function handleHostedMailboxEvent(input: {
     "commitTimeoutMs" | "forwardedEnv" | "platform" | "platformEnv" | "resolvedConfig" | "userEnv"
   >;
   runtimeEnv: Readonly<Record<string, string>>;
+  shouldYieldClinicalRecords?: (() => boolean) | null;
   shouldYieldDeviceSync?: (() => boolean) | null;
   sourceMailboxItemId: string | null;
   vaultRoot: string;
@@ -139,6 +147,9 @@ async function handleHostedMailboxEvent(input: {
     preferenceCausalSeq: input.preferenceCausalSeq,
     runtime: input.runtime,
     runtimeEnv: input.runtimeEnv,
+    ...(input.shouldYieldClinicalRecords
+      ? { shouldYieldClinicalRecords: input.shouldYieldClinicalRecords }
+      : {}),
     ...(input.shouldYieldDeviceSync
       ? { shouldYieldDeviceSync: input.shouldYieldDeviceSync }
       : {}),
@@ -159,6 +170,7 @@ async function executeHostedSystemWake(input: {
     "commitTimeoutMs" | "platform" | "platformEnv" | "resolvedConfig"
   >;
   runtimeEnv: Readonly<Record<string, string>>;
+  shouldYieldClinicalRecords?: (() => boolean) | null;
   shouldYieldDeviceSync?: (() => boolean) | null;
   sourceMailboxItemId: string | null;
   vaultRoot: string;
@@ -205,6 +217,23 @@ async function executeHostedSystemWake(input: {
         }),
         vaultRoot: input.vaultRoot,
       });
+    case "clinical-records.sync-requested": {
+      const {
+        runHostedClinicalRecordsSyncWakeLane,
+      } = await loadHostedClinicalRecordsMaintenanceModule();
+      await runHostedClinicalRecordsSyncWakeLane({
+        clinicalRecordsPort: input.runtime.platform.clinicalRecordsPort ?? null,
+        ...(input.shouldYieldClinicalRecords
+          ? { shouldYieldClinicalRecords: input.shouldYieldClinicalRecords }
+          : {}),
+        vaultRoot: input.vaultRoot,
+        wake: input.wake,
+      });
+      return createNoopMailboxEffect({
+        conversationMetrics: null,
+        mailboxLane: "clinical-records",
+      });
+    }
     case "device-sync.wake":
       const {
         runHostedDeviceSyncWakeLane,

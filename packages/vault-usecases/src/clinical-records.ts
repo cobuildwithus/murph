@@ -8,6 +8,7 @@ import {
   clinicalFhirResourceTypeSchema,
   clinicalRawManifestSchema,
   clinicalRawPathSchema,
+  countClinicalFhirPageResources,
   type ClinicalFhirRetrievalScope,
   type ClinicalImportPlan,
   type ClinicalRawManifest,
@@ -236,34 +237,4 @@ function prepareClinicalFhirSnapshot(input: ClinicalFhirSnapshotImportInput): {
     manifestPath,
     pages,
   };
-}
-
-function countClinicalFhirPageResources(content: string): number {
-  let value: unknown;
-  try {
-    value = JSON.parse(content);
-  } catch {
-    throw new TypeError("Clinical FHIR raw page must be valid JSON.");
-  }
-
-  if (Array.isArray(value)) {
-    return value.length;
-  }
-  if (!isRecord(value) || typeof value.resourceType !== "string") {
-    throw new TypeError("Clinical FHIR raw page must contain a FHIR resource or Bundle.");
-  }
-  if (value.resourceType !== "Bundle") {
-    return 1;
-  }
-  if (value.entry === undefined) {
-    return 0;
-  }
-  if (!Array.isArray(value.entry)) {
-    throw new TypeError("Clinical FHIR Bundle entry must be an array.");
-  }
-  return value.entry.length;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }

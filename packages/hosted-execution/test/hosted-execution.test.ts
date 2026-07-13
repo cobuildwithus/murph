@@ -467,6 +467,7 @@ describe("hosted execution coverage gaps", () => {
       "member.channels.updated",
       "member.preferences.updated",
       "assistant.notification.requested",
+      "clinical-records.sync-requested",
       "device-sync.wake",
       "group-newsletter.email-needed",
       "runtime.manual-requested",

@@ -5,6 +5,7 @@ import path from "node:path";
 import {
   type ClinicalFhirRetrievalScope,
   hashClinicalFhirBaseUrl,
+  hashClinicalFhirPageUrl,
   hashClinicalFhirPatientId,
 } from "@murphai/clinical-records";
 import {
@@ -65,6 +66,42 @@ describe("importClinicalFhirSnapshot", () => {
       resourceId: "heart-rate-1",
     });
     expect(event?.kind).toBe("measurement");
+  });
+
+  it("persists and resolves a two-page FHIR continuation chain", async () => {
+    const nextPageUrl = `${FHIR_BASE_URL}/Observation?page=2`;
+    const nextPageUrlHash = hashClinicalFhirPageUrl(nextPageUrl);
+    const input = await createSnapshotInput({
+      pages: [
+        {
+          content: fhirBundle(
+            [heartRateObservation("page-1-heart-rate", 70)],
+            [{ relation: "next", url: nextPageUrl }],
+          ),
+          nextPageUrlHash,
+          resourceType: "Observation",
+        },
+        {
+          content: fhirBundle([heartRateObservation("page-2-heart-rate", 72)]),
+          pageUrlHash: nextPageUrlHash,
+          resourceType: "Observation",
+        },
+      ],
+      resourceTypes: ["Observation"],
+    });
+
+    const result = await importClinicalFhirSnapshot(input);
+    const manifest = JSON.parse(await readFile(
+      path.join(input.vaultRoot, result.manifestPath),
+      "utf8",
+    )) as { resourceFiles: Array<Record<string, unknown>> };
+
+    expect(result.canonical.createdCount).toBe(2);
+    expect(manifest.resourceFiles).toEqual([
+      expect.objectContaining({ nextPageUrlHash }),
+      expect.objectContaining({ pageUrlHash: nextPageUrlHash }),
+    ]);
+    expect(manifest.resourceFiles[0]).not.toHaveProperty("pageUrlHash");
   });
 
   it("rejects conflicting raw replay at the stable retrieval identity", async () => {
@@ -297,6 +334,76 @@ describe("importClinicalFhirSnapshot", () => {
     expect(result.executableDecisionCount).toBe(0);
     expect(result.reviewDecisionCount).toBe(1);
   });
+
+  it("uses a newer review hold to block a delayed older executable revision", async () => {
+    const first = await createSnapshotInput({
+      pages: [{
+        content: fhirBundle([heartRateObservation(
+          "review-held-heart-rate",
+          70,
+          `Patient/${PATIENT_ID}`,
+          "2026-07-10T12:01:00.000Z",
+        )]),
+        resourceType: "Observation",
+      }],
+      resourceTypes: ["Observation"],
+    });
+    const review = {
+      ...first,
+      fetchedAt: "2026-07-10T12:03:00.000Z",
+      pages: [{
+        content: fhirBundle([{
+          ...heartRateObservation(
+            "review-held-heart-rate",
+            73,
+            `Patient/${PATIENT_ID}`,
+            "2026-07-10T12:03:00.000Z",
+          ),
+          modifierExtension: [{
+            url: "https://ehr.example.test/fhir/StructureDefinition/negated",
+            valueBoolean: true,
+          }],
+        }]),
+        resourceType: "Observation",
+      }],
+      retrievalJobId: "retrieval-job-3",
+    } satisfies ClinicalFhirSnapshotImportInput;
+    const delayed = {
+      ...first,
+      fetchedAt: "2026-07-10T12:02:00.000Z",
+      pages: [{
+        content: fhirBundle([heartRateObservation(
+          "review-held-heart-rate",
+          72,
+          `Patient/${PATIENT_ID}`,
+          "2026-07-10T12:02:00.000Z",
+        )]),
+        resourceType: "Observation",
+      }],
+      retrievalJobId: "retrieval-job-2",
+    } satisfies ClinicalFhirSnapshotImportInput;
+
+    const firstResult = await importClinicalFhirSnapshot(first);
+    const reviewResult = await importClinicalFhirSnapshot(review);
+    const delayedResult = await importClinicalFhirSnapshot(delayed);
+
+    expect(firstResult.canonical.createdCount).toBe(1);
+    expect(reviewResult).toEqual(expect.objectContaining({
+      executableDecisionCount: 1,
+      reviewDecisionCount: 1,
+      canonical: expect.objectContaining({ retractedCount: 1 }),
+    }));
+    expect(delayedResult.canonical).toEqual(expect.objectContaining({
+      applied: false,
+      skippedExistingCount: 1,
+    }));
+    expect(await findEventByExternalRef({
+      vaultRoot: first.vaultRoot,
+      system: `epic-fhir-${FHIR_BASE_URL_HASH}-${PATIENT_ID_HASH}`,
+      resourceType: "observation",
+      resourceId: "review-held-heart-rate",
+    })).toBeNull();
+  });
 });
 
 async function createSnapshotInput(input: {
@@ -365,10 +472,14 @@ async function expectClinicalRawSnapshotAbsent(
   }
 }
 
-function fhirBundle(resources: unknown[]): string {
+function fhirBundle(
+  resources: unknown[],
+  links?: Array<{ relation: string; url: string }>,
+): string {
   return `${JSON.stringify({
     resourceType: "Bundle",
     type: "searchset",
+    ...(links ? { link: links } : {}),
     entry: resources.map((resource) => ({ resource })),
   })}\n`;
 }
@@ -377,11 +488,12 @@ function heartRateObservation(
   resourceId: string,
   value = 70,
   patientReference = `Patient/${PATIENT_ID}`,
+  lastUpdated = "2026-07-10T12:00:00.000Z",
 ) {
   return {
     resourceType: "Observation",
     id: resourceId,
-    meta: { lastUpdated: "2026-07-10T12:00:00.000Z" },
+    meta: { lastUpdated },
     status: "final",
     subject: { reference: patientReference },
     effectiveDateTime: "2026-07-10T11:59:00.000Z",

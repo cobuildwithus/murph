@@ -28,6 +28,22 @@ must bind to the manifest patient. `completedResourceTypes` records only
 families whose pagination finished without a matching manifest error; even an
 empty completed family has a declared zero-count raw file.
 
+`murph.clinical-raw-manifest.v2` requires exactly one `retrievalScopes` entry
+per requested resource family. A `whole-family` scope proves a complete family;
+a `bounded-window` scope records its exact `from` and `to` bounds and must never
+be interpreted as global absence evidence. Every scoped family must have raw
+page evidence or a typed terminal error. The first page of a pagination chain
+has no `pageUrlHash`; each continuation page carries the hash targeted by the
+preceding page's `next` link and `nextPageUrlHash`. Raw Bundle navigation links
+remain immutable evidence, while hashes give the manifest a URL-free chain
+identity.
+
+Raw snapshot limits are part of the retrieval contract: at most 1,000
+resources may appear in one page and at most 5,000 across the manifest. Runtime
+producers must use the package-owned page counter and stop before import when a
+provider page would cross either limit, rather than relying on manifest
+validation to fail after retrieval.
+
 The clinical importer reads each raw page once, then validates its hash, count,
 resource family, patient binding, and pagination links before mapping any
 decision. Pagination links must remain under the manifest FHIR base, resolve

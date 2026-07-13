@@ -48,6 +48,7 @@ export type HostedSystemMailboxRouteAction =
   | "apply-member-channels-update"
   | "apply-member-preferences"
   | "dispatch-assistant-notification"
+  | "run-clinical-records-sync"
   | "run-device-sync-wake"
   | "apply-runtime-control-request";
 
@@ -464,6 +465,7 @@ function parseHostedSystemMailboxRouteAction(value: unknown): HostedSystemMailbo
     || value === "apply-member-channels-update"
     || value === "apply-member-preferences"
     || value === "dispatch-assistant-notification"
+    || value === "run-clinical-records-sync"
     || value === "run-device-sync-wake"
     || value === "apply-runtime-control-request"
   ) {

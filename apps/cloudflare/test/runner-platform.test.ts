@@ -254,6 +254,9 @@ function expectDefaultRuntimeWriteFenceHeaders(request: Request): void {
 async function fetchDirectHostedWorkspaceReadWithHeaders(input: {
   fetchImpl: typeof fetch;
   headers: Headers;
+  sensitiveResponseBody?: {
+    maxBytes: number;
+  };
 }): Promise<unknown> {
   const environment = readHostedExecutionEnvironment(createHostedExecutionTestEnv({
     HOSTED_WEB_BASE_URL: "https://web.example.test",
@@ -265,6 +268,9 @@ async function fetchDirectHostedWorkspaceReadWithHeaders(input: {
     headers: input.headers,
     method: "GET",
     path: "/api/internal/hosted-workspace",
+    ...(input.sensitiveResponseBody
+      ? { sensitiveResponseBody: input.sensitiveResponseBody }
+      : {}),
     timeoutMs: 1_000,
     transport: {
       callbackSigning: environment.webCallbackSigning,
@@ -2568,6 +2574,68 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       expect(error instanceof Error ? error.message : String(error))
         .not.toContain("\"retryable\":false");
     }
+  });
+
+  it("stops buffering sensitive chunked web-control responses at the byte limit", async () => {
+    const encoder = new TextEncoder();
+    const fetchMock = vi.fn(async () => new Response(new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(encoder.encode("12345"));
+        controller.enqueue(encoder.encode("private-clinical-detail"));
+        controller.close();
+      },
+    }), {
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+      },
+      status: 200,
+    }));
+
+    await expect(fetchDirectHostedWorkspaceReadWithHeaders({
+      fetchImpl: fetchMock as typeof fetch,
+      headers: new Headers(),
+      sensitiveResponseBody: { maxBytes: 8 },
+    })).rejects.toThrow("response exceeded the 8 byte safety limit");
+
+    expect(JSON.stringify(mocks.emitHostedExecutionStructuredLog.mock.calls))
+      .not.toContain("private-clinical-detail");
+  });
+
+  it("omits sensitive web-control error detail from errors and logs", async () => {
+    const sensitiveDetail = "Patient diagnosis should never enter diagnostics.";
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      error: {
+        code: "provider_error",
+        message: sensitiveDetail,
+        retryable: false,
+      },
+    }), {
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+      },
+      status: 403,
+    }));
+
+    try {
+      await fetchDirectHostedWorkspaceReadWithHeaders({
+        fetchImpl: fetchMock as typeof fetch,
+        headers: new Headers(),
+        sensitiveResponseBody: { maxBytes: 1_024 },
+      });
+      throw new Error("Expected sensitive web-control read to fail.");
+    } catch (error) {
+      expect(error).toBeInstanceOf(HostedWebControlPlaneResponseError);
+      expect(error).toMatchObject({
+        code: undefined,
+        retryable: undefined,
+        status: 403,
+      });
+      expect(error instanceof Error ? error.message : String(error))
+        .toBe("Hosted workspace read failed with HTTP 403.");
+    }
+
+    expect(JSON.stringify(mocks.emitHostedExecutionStructuredLog.mock.calls))
+      .not.toContain(sensitiveDetail);
   });
 
   it("logs direct control-plane fetch failures with raw redacted error detail", async () => {

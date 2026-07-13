@@ -170,6 +170,7 @@ export interface HostedConversationWakeMetrics {
 export type HostedMailboxLane =
   | "assistant-notification"
   | "conversation-message"
+  | "clinical-records"
   | "device-sync"
   | "member-activated"
   | "member-channels-updated"

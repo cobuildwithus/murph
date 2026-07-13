@@ -28,7 +28,7 @@ import {
 const HASH = "a".repeat(64);
 
 describe("clinical records hosted execution contracts", () => {
-  it("keeps the pointer-only wake contract outside active runtime routing", () => {
+  it("round-trips the pointer-only system wake through active runtime routing", () => {
     const wake = buildHostedExecutionClinicalRecordsSyncRequestedWake({
       eventId: "clinical-sync-1",
       generation: 2,
@@ -37,28 +37,26 @@ describe("clinical records hosted execution contracts", () => {
       userId: "member_1",
     });
 
-    expect(parseHostedClinicalRecordsSyncRequestedWake(wake)).toEqual({
-      eventId: "clinical-sync-1",
+    expect(parseHostedClinicalRecordsSyncRequestedWake(wake)).toEqual(wake);
+    expect(parseHostedExecutionWake(wake)).toEqual(wake);
+    expect(parseHostedExecutionEvent({
       generation: 2,
       kind: "clinical-records.sync-requested",
-      occurredAt: "2026-07-10T12:00:00.000Z",
+      runId: "clinical_run_1",
+      userId: "member_1",
+    })).toEqual({
+      generation: 2,
+      kind: "clinical-records.sync-requested",
       runId: "clinical_run_1",
       userId: "member_1",
     });
-    expect(() => parseHostedExecutionWake(wake)).toThrow(/wake kind is invalid/u);
-    expect(() => parseHostedExecutionEvent({
-      generation: 2,
-      kind: "clinical-records.sync-requested",
-      runId: "clinical_run_1",
-      userId: "member_1",
-    })).toThrow(/unsupported hosted execution event kind/iu);
-    expect(HOSTED_EXECUTION_EVENT_KINDS).not.toContain("clinical-records.sync-requested");
-    expect(HOSTED_EXECUTION_WAKE_KINDS).not.toContain("clinical-records.sync-requested");
-    expect(HOSTED_MAILBOX_KINDS).not.toContain("clinical-records.sync-requested");
+    expect(HOSTED_EXECUTION_EVENT_KINDS).toContain("clinical-records.sync-requested");
+    expect(HOSTED_EXECUTION_WAKE_KINDS).toContain("clinical-records.sync-requested");
+    expect(HOSTED_MAILBOX_KINDS).toContain("clinical-records.sync-requested");
   });
 
   it("rejects credential and raw-record fields from the wake envelope", () => {
-    expect(() => parseHostedClinicalRecordsSyncRequestedWake({
+    expect(() => parseHostedExecutionWake({
       accessToken: "not-allowed",
       eventId: "clinical-sync-1",
       generation: 1,
@@ -67,18 +65,22 @@ describe("clinical records hosted execution contracts", () => {
       runId: "clinical_run_1",
       userId: "member_1",
     })).toThrow();
-    expect(() => parseHostedClinicalRecordsSyncRequestedWake({
-      eventId: "clinical-sync-1",
+    expect(() => parseHostedExecutionEvent({
       generation: 0,
       kind: "clinical-records.sync-requested",
-      occurredAt: "2026-07-10T12:00:00.000Z",
       runId: "clinical_run_1",
+      userId: "member_1",
+    })).toThrow(/positive safe integer/u);
+    expect(() => parseHostedExecutionEvent({
+      generation: 1,
+      kind: "clinical-records.sync-requested",
+      runId: "https://ehr.example.test/fhir/Patient/1",
       userId: "member_1",
     })).toThrow();
   });
 
   it("parses a bounded retrieval descriptor without provider credentials or URLs", () => {
-    expect(parseHostedClinicalRecordsRunDescriptor({
+    const descriptor = {
       connectionId: "connection_1",
       fetchedAt: "2026-07-10T12:00:00.000Z",
       fhirBaseUrlHash: HASH,
@@ -96,11 +98,25 @@ describe("clinical records hosted execution contracts", () => {
       }],
       runId: "clinical_run_1",
       sourceSystem: "epic-fhir",
-    })).toMatchObject({
+    };
+
+    expect(parseHostedClinicalRecordsRunDescriptor(descriptor)).toMatchObject({
       generation: 1,
       runId: "clinical_run_1",
       sourceSystem: "epic-fhir",
     });
+    expect(() => parseHostedClinicalRecordsRunDescriptor({
+      ...descriptor,
+      retrievalScopes: [{
+        coverage: "whole-family",
+        queryFingerprint: HASH,
+        resourceType: "UnsupportedResource",
+      }],
+    })).toThrow();
+    expect(() => parseHostedClinicalRecordsRunDescriptor({
+      ...descriptor,
+      sourceSystem: "unsupported-fhir",
+    })).toThrow();
   });
 
   it("reuses canonical clinical domain validation at the hosted boundary", () => {

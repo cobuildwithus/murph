@@ -419,7 +419,10 @@ async function executePendingHostedSystemMailboxItem(input: {
     runtime: input.runtime,
     runtimeEnv: input.runtimeEnv,
     ...(input.shouldYieldBackgroundMaintenance
-      ? { shouldYieldDeviceSync: input.shouldYieldBackgroundMaintenance }
+      ? {
+          shouldYieldClinicalRecords: input.shouldYieldBackgroundMaintenance,
+          shouldYieldDeviceSync: input.shouldYieldBackgroundMaintenance,
+        }
       : {}),
     sourceMailboxItemId: input.pendingItem.itemId,
     vaultRoot: input.vaultRoot,
@@ -453,6 +456,7 @@ function readHostedSystemMailboxRouteAction(
     || item.route.action === "apply-member-channels-update"
     || item.route.action === "apply-member-preferences"
     || item.route.action === "dispatch-assistant-notification"
+    || item.route.action === "run-clinical-records-sync"
     || item.route.action === "run-device-sync-wake"
     || item.route.action === "apply-runtime-control-request"
   ) {

@@ -1,0 +1,923 @@
+import { createHash } from "node:crypto";
+import { readFile } from "node:fs/promises";
+
+import {
+  CLINICAL_RAW_MANIFEST_MAX_RESOURCES_PER_FILE,
+  CLINICAL_RAW_MANIFEST_MAX_TOTAL_RESOURCES,
+  CLINICAL_RAW_RESOURCE_FILE_MAX_BYTES,
+} from "@murphai/clinical-records";
+import type {
+  HostedClinicalRecordsRunDescriptor,
+} from "@murphai/hosted-execution/clinical-records";
+import {
+  HOSTED_CLINICAL_RECORDS_AUTHORIZATION_REQUIRED_ERROR_CODE,
+  HOSTED_CLINICAL_RECORDS_MAX_PAGES,
+  HOSTED_CLINICAL_RECORDS_MAX_TOTAL_BODY_BYTES,
+} from "@murphai/hosted-execution/clinical-records";
+import { describe, expect, it, vi } from "vitest";
+
+import {
+  runHostedClinicalRecordsSyncWakeLane,
+} from "../src/hosted-runtime/clinical-records-maintenance.ts";
+import type {
+  HostedRuntimeClinicalRecordsPort,
+} from "../src/hosted-runtime/platform.ts";
+
+const HASH = "a".repeat(64);
+const RUN: HostedClinicalRecordsRunDescriptor = {
+  connectionId: "connection_1",
+  fetchedAt: "2026-07-10T12:00:00.000Z",
+  fhirBaseUrlHash: HASH,
+  generation: 1,
+  grantedScopes: ["patient/Observation.read"],
+  patientIdHash: HASH,
+  requestedScopes: ["patient/Observation.read"],
+  retrievalJobId: "clinical_run_1",
+  retrievalScopes: [{
+    coverage: "whole-family",
+    queryFingerprint: HASH,
+    resourceType: "Observation",
+  }],
+  runId: "clinical_run_1",
+  sourceSystem: "epic-fhir",
+};
+const WAKE = {
+  eventId: "clinical-sync-1",
+  generation: 1,
+  kind: "clinical-records.sync-requested" as const,
+  occurredAt: "2026-07-10T12:00:00.000Z",
+  runId: "clinical_run_1",
+  userId: "member_1",
+};
+
+describe("hosted clinical records maintenance", () => {
+  it("fetches finite opaque-cursor pages, imports once, and records bounded counts", async () => {
+    const nextPageUrl = "https://ehr.example.test/fhir/Observation?page=2";
+    const nextPageUrlHash = createHash("sha256").update(nextPageUrl).digest("hex");
+    const fetchPage = vi.fn()
+      .mockResolvedValueOnce({
+        body: JSON.stringify({
+          entry: [],
+          link: [{ relation: "next", url: nextPageUrl }],
+          resourceType: "Bundle",
+        }),
+        nextCursor: "opaque-cursor-2",
+        nextPageUrlHash,
+        status: "page",
+      })
+      .mockResolvedValueOnce({
+        body: "{\"resourceType\":\"Bundle\",\"entry\":[]}",
+        nextCursor: null,
+        pageUrlHash: nextPageUrlHash,
+        status: "page",
+      });
+    const port = createPort({ fetchPage });
+    const importSnapshot = vi.fn().mockResolvedValue({
+      canonical: {
+        applied: true,
+        createdCount: 2,
+        retractedCount: 0,
+        skippedExistingCount: 0,
+        supersededCount: 0,
+      },
+      executableDecisionCount: 2,
+      manifestPath: "raw/clinical/fhir/connection_1/clinical_run_1/manifest.json",
+      rawFileCount: 3,
+      reviewDecisionCount: 0,
+    });
+
+    const result = await runHostedClinicalRecordsSyncWakeLane({
+      clinicalRecordsPort: port,
+      importSnapshot,
+      vaultRoot: "/tmp/clinical-vault",
+      wake: WAKE,
+    });
+
+    expect(fetchPage).toHaveBeenNthCalledWith(1, expect.objectContaining({
+      cursor: null,
+      generation: 1,
+      resourceType: "Observation",
+      runId: "clinical_run_1",
+    }));
+    expect(fetchPage).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      cursor: "opaque-cursor-2",
+    }));
+    expect(importSnapshot).toHaveBeenCalledWith(expect.objectContaining({
+      completedResourceTypes: ["Observation"],
+      pages: [
+        expect.objectContaining({ nextPageUrlHash, resourceType: "Observation" }),
+        expect.objectContaining({ pageUrlHash: nextPageUrlHash, resourceType: "Observation" }),
+      ],
+    }));
+    expect(port.recordOutcome).toHaveBeenCalledWith(expect.objectContaining({
+      counts: expect.objectContaining({
+        createdCount: 2,
+        fetchedPageCount: 2,
+        fetchedResourceFamilyCount: 1,
+        rawFileCount: 3,
+      }),
+      status: "completed",
+    }));
+    expect(result.status).toBe("completed");
+  });
+
+  it("persists typed evidence and a partial outcome for a terminal family error", async () => {
+    const port = createPort({
+      fetchPage: vi.fn().mockResolvedValue({
+        errorCode: "provider_denied",
+        retryable: false,
+        status: "unavailable",
+      }),
+    });
+    const importSnapshot = vi.fn().mockResolvedValue({
+      canonical: {
+        applied: false,
+        createdCount: 0,
+        retractedCount: 0,
+        skippedExistingCount: 0,
+        supersededCount: 0,
+      },
+      executableDecisionCount: 0,
+      manifestPath: "raw/clinical/fhir/connection_1/clinical_run_1/manifest.json",
+      rawFileCount: 1,
+      reviewDecisionCount: 0,
+    });
+
+    const result = await runHostedClinicalRecordsSyncWakeLane({
+      clinicalRecordsPort: port,
+      importSnapshot,
+      vaultRoot: "/tmp/clinical-vault",
+      wake: WAKE,
+    });
+
+    expect(importSnapshot).toHaveBeenCalledWith(expect.objectContaining({
+      completedResourceTypes: [],
+      errors: [{
+        code: "provider_denied",
+        message: "Provider did not return this FHIR resource family.",
+        resourceType: "Observation",
+      }],
+      pages: [],
+    }));
+    expect(port.recordOutcome).toHaveBeenCalledWith(expect.objectContaining({
+      errorCode: "provider_denied",
+      status: "partial",
+    }));
+    expect(result.status).toBe("partial");
+  });
+
+  it("persists partial evidence but leaves a web-terminalized reauthorization run untouched", async () => {
+    const port = createPort({
+      fetchPage: vi.fn()
+        .mockResolvedValueOnce({
+          body: "{\"resourceType\":\"Bundle\",\"entry\":[]}",
+          nextCursor: "opaque-cursor-2",
+          nextPageUrlHash: "b".repeat(64),
+          status: "page",
+        })
+        .mockResolvedValueOnce({
+          errorCode: HOSTED_CLINICAL_RECORDS_AUTHORIZATION_REQUIRED_ERROR_CODE,
+          retryable: false,
+          status: "unavailable",
+        }),
+    });
+    const importSnapshot = vi.fn().mockResolvedValue({
+      canonical: {
+        applied: false,
+        createdCount: 0,
+        retractedCount: 0,
+        skippedExistingCount: 0,
+        supersededCount: 0,
+      },
+      executableDecisionCount: 0,
+      manifestPath: "raw/clinical/fhir/connection_1/clinical_run_1/manifest.json",
+      rawFileCount: 1,
+      reviewDecisionCount: 0,
+    });
+
+    const result = await runHostedClinicalRecordsSyncWakeLane({
+      clinicalRecordsPort: port,
+      importSnapshot,
+      vaultRoot: "/tmp/clinical-vault",
+      wake: WAKE,
+    });
+
+    expect(importSnapshot).toHaveBeenCalledWith(expect.objectContaining({
+      errors: [expect.objectContaining({
+        code: HOSTED_CLINICAL_RECORDS_AUTHORIZATION_REQUIRED_ERROR_CODE,
+      })],
+      pages: [],
+    }));
+    expect(port.recordOutcome).not.toHaveBeenCalled();
+    expect(result.status).toBe("partial");
+  });
+
+  it("records unattempted families when authorization ends during a multi-family run", async () => {
+    const multiFamilyRun: HostedClinicalRecordsRunDescriptor = {
+      ...RUN,
+      retrievalScopes: [
+        RUN.retrievalScopes[0]!,
+        {
+          coverage: "whole-family",
+          queryFingerprint: "b".repeat(64),
+          resourceType: "Condition",
+        },
+        {
+          coverage: "whole-family",
+          queryFingerprint: "c".repeat(64),
+          resourceType: "MedicationRequest",
+        },
+      ],
+    };
+    const fetchPage = vi.fn()
+      .mockResolvedValueOnce({
+        body: "{\"resourceType\":\"Bundle\",\"entry\":[]}",
+        nextCursor: null,
+        status: "page",
+      })
+      .mockResolvedValueOnce({
+        errorCode: HOSTED_CLINICAL_RECORDS_AUTHORIZATION_REQUIRED_ERROR_CODE,
+        retryable: false,
+        status: "unavailable",
+      });
+    const port = createPort({
+      fetchPage,
+      readRun: vi.fn().mockResolvedValue({ run: multiFamilyRun, status: "ready" }),
+    });
+    const importSnapshot = vi.fn().mockResolvedValue({
+      canonical: {
+        applied: false,
+        createdCount: 0,
+        retractedCount: 0,
+        skippedExistingCount: 0,
+        supersededCount: 0,
+      },
+      executableDecisionCount: 0,
+      manifestPath: "raw/clinical/fhir/connection_1/clinical_run_1/manifest.json",
+      rawFileCount: 3,
+      reviewDecisionCount: 0,
+    });
+
+    const result = await runHostedClinicalRecordsSyncWakeLane({
+      clinicalRecordsPort: port,
+      importSnapshot,
+      vaultRoot: "/tmp/clinical-vault",
+      wake: WAKE,
+    });
+
+    expect(fetchPage).toHaveBeenCalledTimes(2);
+    expect(importSnapshot).toHaveBeenCalledWith(expect.objectContaining({
+      completedResourceTypes: ["Observation"],
+      errors: [
+        {
+          code: HOSTED_CLINICAL_RECORDS_AUTHORIZATION_REQUIRED_ERROR_CODE,
+          message: "Provider did not return this FHIR resource family.",
+          resourceType: "Condition",
+        },
+        {
+          code: "not-attempted",
+          message: "Retrieval was not attempted after provider authorization ended.",
+          resourceType: "MedicationRequest",
+        },
+      ],
+      pages: [expect.objectContaining({ resourceType: "Observation" })],
+      retrievalScopes: multiFamilyRun.retrievalScopes,
+    }));
+    expect(port.recordOutcome).not.toHaveBeenCalled();
+    expect(result.status).toBe("partial");
+  });
+
+  it("retries transient control-plane misses without recording a terminal outcome", async () => {
+    const port = createPort({
+      readRun: vi.fn().mockResolvedValue({
+        errorCode: "temporarily_unavailable",
+        retryable: true,
+        status: "unavailable",
+      }),
+    });
+
+    await expect(runHostedClinicalRecordsSyncWakeLane({
+      clinicalRecordsPort: port,
+      importSnapshot: vi.fn(),
+      vaultRoot: "/tmp/clinical-vault",
+      wake: WAKE,
+    })).rejects.toMatchObject({ code: "CLINICAL_RECORDS_RUN_RETRYABLE" });
+    expect(port.fetchPage).not.toHaveBeenCalled();
+    expect(port.recordOutcome).not.toHaveBeenCalled();
+  });
+
+  it("rejects a run descriptor that does not match its mailbox pointer", async () => {
+    const port = createPort({
+      readRun: vi.fn().mockResolvedValue({
+        run: { ...RUN, generation: RUN.generation + 1 },
+        status: "ready",
+      }),
+    });
+    const importSnapshot = vi.fn();
+
+    await expect(runHostedClinicalRecordsSyncWakeLane({
+      clinicalRecordsPort: port,
+      importSnapshot,
+      vaultRoot: "/tmp/clinical-vault",
+      wake: WAKE,
+    })).rejects.toMatchObject({ code: "CLINICAL_RECORDS_RUN_POINTER_MISMATCH" });
+
+    expect(port.fetchPage).not.toHaveBeenCalled();
+    expect(importSnapshot).not.toHaveBeenCalled();
+    expect(port.recordOutcome).not.toHaveBeenCalled();
+  });
+
+  it("retries a transient page miss without importing or recording a terminal outcome", async () => {
+    const port = createPort({
+      fetchPage: vi.fn().mockResolvedValue({
+        errorCode: "temporarily_unavailable",
+        retryable: true,
+        status: "unavailable",
+      }),
+    });
+    const importSnapshot = vi.fn();
+
+    await expect(runHostedClinicalRecordsSyncWakeLane({
+      clinicalRecordsPort: port,
+      importSnapshot,
+      vaultRoot: "/tmp/clinical-vault",
+      wake: WAKE,
+    })).rejects.toMatchObject({ code: "CLINICAL_RECORDS_PAGE_RETRYABLE" });
+
+    expect(importSnapshot).not.toHaveBeenCalled();
+    expect(port.recordOutcome).not.toHaveBeenCalled();
+  });
+
+  it("fails a repeated opaque cursor before fetching the same page a third time", async () => {
+    const fetchPage = vi.fn().mockResolvedValue({
+      body: "{\"resourceType\":\"Bundle\",\"entry\":[]}",
+      nextCursor: "repeated-cursor",
+      status: "page",
+    });
+    const port = createPort({ fetchPage });
+    const importSnapshot = vi.fn();
+
+    const result = await runHostedClinicalRecordsSyncWakeLane({
+      clinicalRecordsPort: port,
+      importSnapshot,
+      vaultRoot: "/tmp/clinical-vault",
+      wake: WAKE,
+    });
+
+    expect(fetchPage).toHaveBeenCalledTimes(2);
+    expect(importSnapshot).not.toHaveBeenCalled();
+    expect(port.recordOutcome).toHaveBeenCalledWith(expect.objectContaining({
+      counts: expect.objectContaining({ fetchedPageCount: 2 }),
+      errorCode: "cursor_cycle",
+      status: "failed",
+    }));
+    expect(result.status).toBe("failed");
+  });
+
+  it("fails a multibyte page whose encoded bytes exceed the raw-file cap", async () => {
+    const port = createPort({
+      fetchPage: vi.fn().mockResolvedValue({
+        body: "é".repeat(Math.floor(CLINICAL_RAW_RESOURCE_FILE_MAX_BYTES / 2) + 1),
+        nextCursor: null,
+        status: "page",
+      }),
+    });
+    const importSnapshot = vi.fn();
+
+    const result = await runHostedClinicalRecordsSyncWakeLane({
+      clinicalRecordsPort: port,
+      importSnapshot,
+      vaultRoot: "/tmp/clinical-vault",
+      wake: WAKE,
+    });
+
+    expect(result.status).toBe("failed");
+    expect(importSnapshot).not.toHaveBeenCalled();
+    expect(port.recordOutcome).toHaveBeenCalledWith(expect.objectContaining({
+      errorCode: "page_size_exceeded",
+      status: "failed",
+    }));
+  });
+
+  it("fails before import when individually bounded pages exceed the snapshot byte cap", async () => {
+    const body = JSON.stringify({
+      entry: [],
+      padding: "x".repeat(CLINICAL_RAW_RESOURCE_FILE_MAX_BYTES - 100),
+      resourceType: "Bundle",
+    });
+    const pageBodyBytes = Buffer.byteLength(body, "utf8");
+    const pageCount = Math.floor(
+      HOSTED_CLINICAL_RECORDS_MAX_TOTAL_BODY_BYTES / pageBodyBytes,
+    ) + 1;
+    let fetchedPageCount = 0;
+    const fetchPage = vi.fn(async () => {
+      fetchedPageCount += 1;
+      return {
+        body,
+        nextCursor: fetchedPageCount < pageCount
+          ? `opaque-cursor-${fetchedPageCount + 1}`
+          : null,
+        status: "page" as const,
+      };
+    });
+    const port = createPort({ fetchPage });
+    const importSnapshot = vi.fn();
+
+    expect(pageBodyBytes).toBeLessThanOrEqual(CLINICAL_RAW_RESOURCE_FILE_MAX_BYTES);
+
+    const result = await runHostedClinicalRecordsSyncWakeLane({
+      clinicalRecordsPort: port,
+      importSnapshot,
+      vaultRoot: "/tmp/clinical-vault",
+      wake: WAKE,
+    });
+
+    expect(fetchPage).toHaveBeenCalledTimes(pageCount);
+    expect(importSnapshot).not.toHaveBeenCalled();
+    expect(port.recordOutcome).toHaveBeenCalledWith(expect.objectContaining({
+      counts: expect.objectContaining({ fetchedPageCount: pageCount }),
+      errorCode: "snapshot_size_exceeded",
+      status: "failed",
+    }));
+    expect(result.status).toBe("failed");
+  });
+
+  it.each([
+    {
+      body: "not-json",
+      errorCode: "invalid_fhir_page",
+      label: "malformed FHIR JSON",
+    },
+    {
+      body: createFhirBundleBody(CLINICAL_RAW_MANIFEST_MAX_RESOURCES_PER_FILE + 1),
+      errorCode: "page_resource_limit_exceeded",
+      label: "a page above the resource cap",
+    },
+  ])("rejects $label before import", async ({ body, errorCode }) => {
+    const port = createPort({
+      fetchPage: vi.fn().mockResolvedValue({
+        body,
+        nextCursor: null,
+        status: "page",
+      }),
+    });
+    const importSnapshot = vi.fn();
+
+    const result = await runHostedClinicalRecordsSyncWakeLane({
+      clinicalRecordsPort: port,
+      importSnapshot,
+      vaultRoot: "/tmp/clinical-vault",
+      wake: WAKE,
+    });
+
+    expect(importSnapshot).not.toHaveBeenCalled();
+    expect(port.recordOutcome).toHaveBeenCalledWith(expect.objectContaining({
+      counts: expect.objectContaining({ fetchedPageCount: 1 }),
+      errorCode,
+      status: "failed",
+    }));
+    expect(result.status).toBe("failed");
+  });
+
+  it("accepts exactly the snapshot resource cap across pages and imports it once", async () => {
+    const fullPageBody = createFhirBundleBody(
+      CLINICAL_RAW_MANIFEST_MAX_RESOURCES_PER_FILE,
+    );
+    const pageCount = Math.floor(
+      CLINICAL_RAW_MANIFEST_MAX_TOTAL_RESOURCES
+        / CLINICAL_RAW_MANIFEST_MAX_RESOURCES_PER_FILE,
+    );
+    const fetchPage = vi.fn();
+    for (let pageIndex = 0; pageIndex < pageCount; pageIndex += 1) {
+      fetchPage.mockResolvedValueOnce({
+        body: fullPageBody,
+        nextCursor: pageIndex + 1 < pageCount
+          ? `opaque-cursor-${pageIndex + 2}`
+          : null,
+        status: "page",
+      });
+    }
+    const port = createPort({ fetchPage });
+    const importSnapshot = vi.fn().mockResolvedValue({
+      canonical: {
+        applied: false,
+        createdCount: 0,
+        retractedCount: 0,
+        skippedExistingCount: 0,
+        supersededCount: 0,
+      },
+      executableDecisionCount: 0,
+      manifestPath: "raw/clinical/fhir/connection_1/clinical_run_1/manifest.json",
+      rawFileCount: pageCount + 1,
+      reviewDecisionCount: 0,
+    });
+
+    const result = await runHostedClinicalRecordsSyncWakeLane({
+      clinicalRecordsPort: port,
+      importSnapshot,
+      vaultRoot: "/tmp/clinical-vault",
+      wake: WAKE,
+    });
+
+    expect(fetchPage).toHaveBeenCalledTimes(pageCount);
+    expect(importSnapshot).toHaveBeenCalledOnce();
+    expect(importSnapshot).toHaveBeenCalledWith(expect.objectContaining({
+      pages: Array.from({ length: pageCount }, () =>
+        expect.objectContaining({ resourceType: "Observation" })
+      ),
+    }));
+    expect(port.recordOutcome).toHaveBeenCalledWith(expect.objectContaining({
+      counts: expect.objectContaining({ fetchedPageCount: pageCount }),
+      status: "completed",
+    }));
+    expect(result.status).toBe("completed");
+  });
+
+  it("fails before import when the next page would exceed the snapshot resource cap", async () => {
+    const fullPageBody = createFhirBundleBody(
+      CLINICAL_RAW_MANIFEST_MAX_RESOURCES_PER_FILE,
+    );
+    const pageCountAtLimit = Math.floor(
+      CLINICAL_RAW_MANIFEST_MAX_TOTAL_RESOURCES
+        / CLINICAL_RAW_MANIFEST_MAX_RESOURCES_PER_FILE,
+    );
+    const fetchPage = vi.fn();
+    for (let pageIndex = 0; pageIndex < pageCountAtLimit; pageIndex += 1) {
+      fetchPage.mockResolvedValueOnce({
+        body: fullPageBody,
+        nextCursor: `opaque-cursor-${pageIndex + 2}`,
+        status: "page",
+      });
+    }
+    fetchPage.mockResolvedValueOnce({
+      body: createFhirBundleBody(1),
+      nextCursor: null,
+      status: "page",
+    });
+    const port = createPort({ fetchPage });
+    const importSnapshot = vi.fn();
+
+    const result = await runHostedClinicalRecordsSyncWakeLane({
+      clinicalRecordsPort: port,
+      importSnapshot,
+      vaultRoot: "/tmp/clinical-vault",
+      wake: WAKE,
+    });
+
+    expect(fetchPage).toHaveBeenCalledTimes(pageCountAtLimit + 1);
+    expect(importSnapshot).not.toHaveBeenCalled();
+    expect(port.recordOutcome).toHaveBeenCalledWith(expect.objectContaining({
+      counts: expect.objectContaining({ fetchedPageCount: pageCountAtLimit + 1 }),
+      errorCode: "snapshot_resource_limit_exceeded",
+      status: "failed",
+    }));
+    expect(result.status).toBe("failed");
+  });
+
+  it("reclaims discarded family resources while preserving successful-page reconciliation counts", async () => {
+    const conditionScope = {
+      coverage: "whole-family",
+      queryFingerprint: "b".repeat(64),
+      resourceType: "Condition",
+    } satisfies HostedClinicalRecordsRunDescriptor["retrievalScopes"][number];
+    const multiFamilyRun: HostedClinicalRecordsRunDescriptor = {
+      ...RUN,
+      retrievalScopes: [RUN.retrievalScopes[0]!, conditionScope],
+    };
+    const fullObservationPage = createFhirBundleBody(
+      CLINICAL_RAW_MANIFEST_MAX_RESOURCES_PER_FILE,
+    );
+    const fullConditionPage = createFhirBundleBody(
+      CLINICAL_RAW_MANIFEST_MAX_RESOURCES_PER_FILE,
+      "Condition",
+    );
+    const conditionPageCount = Math.floor(
+      CLINICAL_RAW_MANIFEST_MAX_TOTAL_RESOURCES
+        / CLINICAL_RAW_MANIFEST_MAX_RESOURCES_PER_FILE,
+    );
+    const fetchPage = vi.fn()
+      .mockResolvedValueOnce({
+        body: fullObservationPage,
+        nextCursor: "observation-cursor-2",
+        status: "page",
+      })
+      .mockResolvedValueOnce({
+        body: fullObservationPage,
+        nextCursor: "observation-cursor-3",
+        status: "page",
+      })
+      .mockResolvedValueOnce({
+        errorCode: "provider_denied",
+        retryable: false,
+        status: "unavailable",
+      });
+    for (let pageIndex = 0; pageIndex < conditionPageCount; pageIndex += 1) {
+      fetchPage.mockResolvedValueOnce({
+        body: fullConditionPage,
+        nextCursor: pageIndex + 1 < conditionPageCount
+          ? `condition-cursor-${pageIndex + 2}`
+          : null,
+        status: "page",
+      });
+    }
+    const port = createPort({
+      fetchPage,
+      readRun: vi.fn().mockResolvedValue({ run: multiFamilyRun, status: "ready" }),
+    });
+    const importSnapshot = vi.fn().mockResolvedValue({
+      canonical: {
+        applied: false,
+        createdCount: 0,
+        retractedCount: 0,
+        skippedExistingCount: 0,
+        supersededCount: 0,
+      },
+      executableDecisionCount: 0,
+      manifestPath: "raw/clinical/fhir/connection_1/clinical_run_1/manifest.json",
+      rawFileCount: conditionPageCount + 1,
+      reviewDecisionCount: 0,
+    });
+
+    const result = await runHostedClinicalRecordsSyncWakeLane({
+      clinicalRecordsPort: port,
+      importSnapshot,
+      vaultRoot: "/tmp/clinical-vault",
+      wake: WAKE,
+    });
+
+    expect(importSnapshot).toHaveBeenCalledOnce();
+    expect(importSnapshot).toHaveBeenCalledWith(expect.objectContaining({
+      completedResourceTypes: ["Condition"],
+      errors: [expect.objectContaining({
+        code: "provider_denied",
+        resourceType: "Observation",
+      })],
+      pages: Array.from({ length: conditionPageCount }, () =>
+        expect.objectContaining({ resourceType: "Condition" })
+      ),
+    }));
+    expect(port.recordOutcome).toHaveBeenCalledWith(expect.objectContaining({
+      counts: expect.objectContaining({
+        fetchedPageCount: conditionPageCount + 2,
+      }),
+      errorCode: "provider_denied",
+      status: "partial",
+    }));
+    expect(result.status).toBe("partial");
+  });
+
+  it("does not reset the absolute page-fetch cap when a partial family is discarded", async () => {
+    const conditionScope = {
+      coverage: "whole-family",
+      queryFingerprint: "b".repeat(64),
+      resourceType: "Condition",
+    } satisfies HostedClinicalRecordsRunDescriptor["retrievalScopes"][number];
+    const multiFamilyRun: HostedClinicalRecordsRunDescriptor = {
+      ...RUN,
+      retrievalScopes: [RUN.retrievalScopes[0]!, conditionScope],
+    };
+    let fetchCallCount = 0;
+    const fetchPage = vi.fn(async () => {
+      fetchCallCount += 1;
+      if (fetchCallCount === 1) {
+        return {
+          body: createFhirBundleBody(0),
+          nextCursor: "observation-cursor-2",
+          status: "page" as const,
+        };
+      }
+      if (fetchCallCount === 2) {
+        return {
+          errorCode: "provider_denied",
+          retryable: false,
+          status: "unavailable" as const,
+        };
+      }
+      return {
+        body: createFhirBundleBody(0, "Condition"),
+        nextCursor: `condition-cursor-${fetchCallCount}`,
+        status: "page" as const,
+      };
+    });
+    const port = createPort({
+      fetchPage,
+      readRun: vi.fn().mockResolvedValue({ run: multiFamilyRun, status: "ready" }),
+    });
+    const importSnapshot = vi.fn();
+
+    const result = await runHostedClinicalRecordsSyncWakeLane({
+      clinicalRecordsPort: port,
+      importSnapshot,
+      vaultRoot: "/tmp/clinical-vault",
+      wake: WAKE,
+    });
+
+    expect(fetchPage).toHaveBeenCalledTimes(HOSTED_CLINICAL_RECORDS_MAX_PAGES);
+    expect(importSnapshot).not.toHaveBeenCalled();
+    expect(port.recordOutcome).toHaveBeenCalledWith(expect.objectContaining({
+      counts: expect.objectContaining({
+        fetchedPageCount: HOSTED_CLINICAL_RECORDS_MAX_PAGES - 1,
+      }),
+      errorCode: "page_limit_exceeded",
+      status: "failed",
+    }));
+    expect(result.status).toBe("failed");
+  });
+
+  it("consumes stale terminal pointers without fetching or rewriting outcomes", async () => {
+    const port = createPort({
+      readRun: vi.fn().mockResolvedValue({
+        errorCode: "stale_generation",
+        retryable: false,
+        status: "unavailable",
+      }),
+    });
+
+    const result = await runHostedClinicalRecordsSyncWakeLane({
+      clinicalRecordsPort: port,
+      importSnapshot: vi.fn(),
+      vaultRoot: "/tmp/clinical-vault",
+      wake: WAKE,
+    });
+
+    expect(result.status).toBe("unavailable");
+    expect(port.fetchPage).not.toHaveBeenCalled();
+    expect(port.recordOutcome).not.toHaveBeenCalled();
+  });
+
+  it("does not overwrite a web-terminalized authorization-required read", async () => {
+    const port = createPort({
+      readRun: vi.fn().mockResolvedValue({
+        errorCode: HOSTED_CLINICAL_RECORDS_AUTHORIZATION_REQUIRED_ERROR_CODE,
+        retryable: false,
+        status: "unavailable",
+      }),
+    });
+
+    const result = await runHostedClinicalRecordsSyncWakeLane({
+      clinicalRecordsPort: port,
+      importSnapshot: vi.fn(),
+      vaultRoot: "/tmp/clinical-vault",
+      wake: WAKE,
+    });
+
+    expect(result.status).toBe("unavailable");
+    expect(port.fetchPage).not.toHaveBeenCalled();
+    expect(port.recordOutcome).not.toHaveBeenCalled();
+  });
+
+  it("records foreground preemption and throws so the durable mailbox retries", async () => {
+    const port = createPort();
+
+    await expect(runHostedClinicalRecordsSyncWakeLane({
+      clinicalRecordsPort: port,
+      importSnapshot: vi.fn(),
+      shouldYieldClinicalRecords: () => true,
+      vaultRoot: "/tmp/clinical-vault",
+      wake: WAKE,
+    })).rejects.toMatchObject({ code: "CLINICAL_RECORDS_FOREGROUND_PREEMPTED" });
+    expect(port.readRun).toHaveBeenCalledWith({ generation: 1, runId: "clinical_run_1" });
+    expect(port.recordOutcome).toHaveBeenCalledWith(expect.objectContaining({
+      errorCode: "foreground_preempted",
+      status: "preempted",
+    }));
+  });
+
+  it("reuses the same generation after preemption and then completes", async () => {
+    const fetchPage = vi.fn()
+      .mockResolvedValueOnce({
+        body: "{\"resourceType\":\"Bundle\",\"entry\":[]}",
+        nextCursor: "opaque-cursor-2",
+        status: "page",
+      })
+      .mockResolvedValueOnce({
+        body: "{\"resourceType\":\"Bundle\",\"entry\":[]}",
+        nextCursor: "opaque-cursor-2",
+        status: "page",
+      })
+      .mockResolvedValueOnce({
+        body: "{\"resourceType\":\"Bundle\",\"entry\":[]}",
+        nextCursor: null,
+        status: "page",
+      });
+    const port = createPort({ fetchPage });
+    const importSnapshot = vi.fn().mockResolvedValue({
+      canonical: {
+        applied: false,
+        createdCount: 0,
+        retractedCount: 0,
+        skippedExistingCount: 0,
+        supersededCount: 0,
+      },
+      executableDecisionCount: 0,
+      manifestPath: "raw/clinical/fhir/connection_1/clinical_run_1/manifest.json",
+      rawFileCount: 2,
+      reviewDecisionCount: 0,
+    });
+
+    let preemptionChecks = 0;
+    await expect(runHostedClinicalRecordsSyncWakeLane({
+      clinicalRecordsPort: port,
+      importSnapshot,
+      shouldYieldClinicalRecords: () => {
+        preemptionChecks += 1;
+        return preemptionChecks === 4;
+      },
+      vaultRoot: "/tmp/clinical-vault",
+      wake: WAKE,
+    })).rejects.toMatchObject({ code: "CLINICAL_RECORDS_FOREGROUND_PREEMPTED" });
+    await expect(runHostedClinicalRecordsSyncWakeLane({
+      clinicalRecordsPort: port,
+      importSnapshot,
+      shouldYieldClinicalRecords: () => false,
+      vaultRoot: "/tmp/clinical-vault",
+      wake: WAKE,
+    })).resolves.toMatchObject({ status: "completed" });
+
+    expect(port.readRun).toHaveBeenCalledWith({ generation: 1, runId: "clinical_run_1" });
+    expect(port.recordOutcome).toHaveBeenNthCalledWith(1, expect.objectContaining({
+      counts: expect.objectContaining({ fetchedPageCount: 1 }),
+      generation: 1,
+      status: "preempted",
+    }));
+    expect(port.recordOutcome).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      generation: 1,
+      status: "completed",
+    }));
+    expect(fetchPage).toHaveBeenNthCalledWith(1, expect.objectContaining({
+      cursor: null,
+      requestId: "cr-1-1-1",
+    }));
+    expect(fetchPage).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      cursor: null,
+      requestId: "cr-1-1-1",
+    }));
+    expect(fetchPage).toHaveBeenNthCalledWith(3, expect.objectContaining({
+      cursor: "opaque-cursor-2",
+      requestId: "cr-1-1-2",
+    }));
+  });
+
+  it("keeps raw FHIR and the clinical importer out of the static mailbox path", async () => {
+    const [eventsSource, importerRootSource, maintenanceImportSource] = await Promise.all([
+      readFile(new URL("../src/hosted-runtime/events.ts", import.meta.url), "utf8"),
+      readFile(new URL("../../importers/src/index.ts", import.meta.url), "utf8"),
+      readFile(
+        new URL("../src/hosted-runtime/clinical-records-maintenance-import.ts", import.meta.url),
+        "utf8",
+      ),
+    ]);
+
+    expect(eventsSource).not.toContain("@murphai/vault-usecases/clinical-records");
+    expect(eventsSource).not.toContain("@murphai/importers/clinical-records");
+    expect(importerRootSource).not.toContain('export * from "./clinical-records/index.js"');
+    expect(maintenanceImportSource).toContain('import("./clinical-records-maintenance.ts")');
+  });
+});
+
+type HostedRuntimeClinicalRecordsPortMocks = {
+  fetchPage: ReturnType<typeof vi.fn<HostedRuntimeClinicalRecordsPort["fetchPage"]>>;
+  readRun: ReturnType<typeof vi.fn<HostedRuntimeClinicalRecordsPort["readRun"]>>;
+  recordOutcome: ReturnType<typeof vi.fn<HostedRuntimeClinicalRecordsPort["recordOutcome"]>>;
+};
+
+function createPort(
+  overrides: Partial<HostedRuntimeClinicalRecordsPort> = {},
+): HostedRuntimeClinicalRecordsPortMocks {
+  const defaultFetchPage: HostedRuntimeClinicalRecordsPort["fetchPage"] = async () => ({
+    body: "{\"resourceType\":\"Bundle\",\"entry\":[]}",
+    nextCursor: null,
+    status: "page",
+  });
+  const defaultReadRun: HostedRuntimeClinicalRecordsPort["readRun"] = async () => ({
+    run: RUN,
+    status: "ready",
+  });
+  const defaultRecordOutcome: HostedRuntimeClinicalRecordsPort["recordOutcome"] = async () => {
+    return undefined;
+  };
+
+  return {
+    fetchPage: vi.fn<HostedRuntimeClinicalRecordsPort["fetchPage"]>(
+      overrides.fetchPage ?? defaultFetchPage,
+    ),
+    readRun: vi.fn<HostedRuntimeClinicalRecordsPort["readRun"]>(
+      overrides.readRun ?? defaultReadRun,
+    ),
+    recordOutcome: vi.fn<HostedRuntimeClinicalRecordsPort["recordOutcome"]>(
+      overrides.recordOutcome ?? defaultRecordOutcome,
+    ),
+  };
+}
+
+function createFhirBundleBody(
+  resourceCount: number,
+  resourceType = "Observation",
+): string {
+  return JSON.stringify({
+    entry: Array.from({ length: resourceCount }, () => ({
+      resource: { resourceType },
+    })),
+    resourceType: "Bundle",
+  });
+}

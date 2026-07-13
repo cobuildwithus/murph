@@ -173,6 +173,10 @@ export function parseHostedClinicalRecordsRunDescriptor(
   return hostedClinicalRecordsRunDescriptorSchema.parse(value);
 }
 
+export function parseHostedClinicalRecordsIdentifier(value: unknown): string {
+  return identifierSchema.parse(value);
+}
+
 export function parseHostedClinicalRecordsReadRunResponse(
   value: unknown,
 ): HostedClinicalRecordsReadRunResponse {

@@ -1,0 +1,242 @@
+import {
+  HOSTED_CLINICAL_RECORDS_MAX_PAGE_BODY_CHARS,
+  HOSTED_CLINICAL_RECORDS_RUNTIME_FETCH_PAGE_PATH,
+  HOSTED_CLINICAL_RECORDS_RUNTIME_READ_RUN_PATH,
+  HOSTED_CLINICAL_RECORDS_RUNTIME_RECORD_OUTCOME_PATH,
+} from "@murphai/hosted-execution/clinical-records";
+import { describe, expect, it, vi } from "vitest";
+
+import {
+  createHostedWebClinicalRecordsPort,
+  HOSTED_CLINICAL_RECORDS_FETCH_PAGE_RESPONSE_MAX_BYTES,
+} from "../src/runtime-platform/clinical-records-port.ts";
+import {
+  readHostedRunnerWebControlOperation,
+} from "../src/runner-outbound/shared-web-control-policy.ts";
+import {
+  TEST_HOSTED_WEB_CALLBACK_PRIVATE_JWK_JSON,
+} from "./hosted-execution-fixtures.ts";
+
+const HASH = "a".repeat(64);
+
+function createQuoteDenseClinicalBundleBody(): string {
+  const prefix =
+    '{"resourceType":"Bundle","entry":[{"resource":{"resourceType":"Observation","valueString":"';
+  const suffix = '"}}]}';
+  const escapedQuote = '\\"';
+  const escapedQuoteCount = Math.floor(
+    (HOSTED_CLINICAL_RECORDS_MAX_PAGE_BODY_CHARS - prefix.length - suffix.length)
+      / escapedQuote.length,
+  );
+  return `${prefix}${escapedQuote.repeat(escapedQuoteCount)}${suffix}`;
+}
+
+describe("hosted clinical records runtime port", () => {
+  it("rejects direct callback transport without active write-fence authority", () => {
+    expect(() => createHostedWebClinicalRecordsPort({
+      boundUserId: "member_1",
+      fetchImpl: fetch,
+      timeoutMs: 5_000,
+      transport: {
+        callbackSigning: {
+          keyId: "v1",
+          privateKeyJwkJson: TEST_HOSTED_WEB_CALLBACK_PRIVATE_JWK_JSON,
+        },
+        mode: "direct",
+        webControlBaseUrl: "https://web.example.test",
+        workspaceCheckpointBridge: null,
+      },
+    })).toThrow("active write-fence authority");
+  });
+
+  it("allows and forwards only bounded execution contracts through the web-control proxy", async () => {
+    const received: Array<{ body: unknown; path: string }> = [];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      const path = new URL(request.url).pathname;
+      received.push({ body: await request.json(), path });
+
+      if (path === HOSTED_CLINICAL_RECORDS_RUNTIME_READ_RUN_PATH) {
+        return Response.json({
+          run: {
+            connectionId: "connection_1",
+            fetchedAt: "2026-07-10T12:00:00.000Z",
+            fhirBaseUrlHash: HASH,
+            generation: 1,
+            grantedScopes: ["patient/Observation.read"],
+            patientIdHash: HASH,
+            requestedScopes: ["patient/Observation.read"],
+            retrievalJobId: "run_1",
+            retrievalScopes: [{
+              coverage: "whole-family",
+              queryFingerprint: HASH,
+              resourceType: "Observation",
+            }],
+            runId: "run_1",
+            sourceSystem: "epic-fhir",
+          },
+          status: "ready",
+        });
+      }
+      if (path === HOSTED_CLINICAL_RECORDS_RUNTIME_FETCH_PAGE_PATH) {
+        return Response.json({
+          body: "{\"resourceType\":\"Bundle\",\"entry\":[]}",
+          nextCursor: null,
+          status: "page",
+        });
+      }
+      if (path === HOSTED_CLINICAL_RECORDS_RUNTIME_RECORD_OUTCOME_PATH) {
+        return Response.json({ ok: true });
+      }
+      return new Response(null, { status: 404 });
+    });
+    const port = createHostedWebClinicalRecordsPort({
+      boundUserId: "member_1",
+      fetchImpl: fetchMock as typeof fetch,
+      timeoutMs: 5_000,
+      transport: { mode: "proxy" },
+    });
+
+    await expect(port.readRun({ generation: 1, runId: "run_1" }))
+      .resolves.toMatchObject({ status: "ready" });
+    await expect(port.fetchPage({
+      cursor: null,
+      generation: 1,
+      requestId: "request_1",
+      resourceType: "Observation",
+      runId: "run_1",
+    })).resolves.toMatchObject({ nextCursor: null, status: "page" });
+    await expect(port.recordOutcome({
+      counts: {
+        createdCount: 0,
+        executableDecisionCount: 0,
+        fetchedPageCount: 1,
+        fetchedResourceFamilyCount: 1,
+        rawFileCount: 2,
+        retractedCount: 0,
+        reviewDecisionCount: 0,
+        skippedExistingCount: 0,
+        supersededCount: 0,
+      },
+      generation: 1,
+      runId: "run_1",
+      status: "completed",
+    })).resolves.toBeUndefined();
+
+    expect(received).toEqual([
+      {
+        body: { generation: 1, runId: "run_1" },
+        path: HOSTED_CLINICAL_RECORDS_RUNTIME_READ_RUN_PATH,
+      },
+      {
+        body: {
+          cursor: null,
+          generation: 1,
+          requestId: "request_1",
+          resourceType: "Observation",
+          runId: "run_1",
+        },
+        path: HOSTED_CLINICAL_RECORDS_RUNTIME_FETCH_PAGE_PATH,
+      },
+      {
+        body: expect.objectContaining({
+          generation: 1,
+          runId: "run_1",
+          status: "completed",
+        }),
+        path: HOSTED_CLINICAL_RECORDS_RUNTIME_RECORD_OUTCOME_PATH,
+      },
+    ]);
+    expect(JSON.stringify(received)).not.toContain("member_1");
+  });
+
+  it("accepts a quote-dense valid page within the bounded response envelope", async () => {
+    const body = createQuoteDenseClinicalBundleBody();
+    const responseText = JSON.stringify({
+      body,
+      nextCursor: null,
+      status: "page",
+    });
+    expect(body.length).toBeLessThanOrEqual(HOSTED_CLINICAL_RECORDS_MAX_PAGE_BODY_CHARS);
+    expect(new TextEncoder().encode(responseText).byteLength)
+      .toBeLessThanOrEqual(HOSTED_CLINICAL_RECORDS_FETCH_PAGE_RESPONSE_MAX_BYTES);
+    expect(JSON.parse(body)).toMatchObject({ resourceType: "Bundle" });
+
+    const fetchMock = vi.fn(async () => new Response(responseText, {
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+      },
+      status: 200,
+    }));
+    const port = createHostedWebClinicalRecordsPort({
+      boundUserId: "member_1",
+      fetchImpl: fetchMock as typeof fetch,
+      timeoutMs: 5_000,
+      transport: { mode: "proxy" },
+    });
+
+    await expect(port.fetchPage({
+      cursor: null,
+      generation: 1,
+      requestId: "request_1",
+      resourceType: "Observation",
+      runId: "run_1",
+    })).resolves.toMatchObject({ body, status: "page" });
+  });
+
+  it("cancels a fetch-page response at exactly one byte beyond its envelope limit", async () => {
+    let cancelled = false;
+    const fetchMock = vi.fn(async () => new Response(new ReadableStream<Uint8Array>({
+      cancel() {
+        cancelled = true;
+      },
+      start(controller) {
+        controller.enqueue(
+          new Uint8Array(HOSTED_CLINICAL_RECORDS_FETCH_PAGE_RESPONSE_MAX_BYTES),
+        );
+        controller.enqueue(new Uint8Array(1));
+      },
+    }), {
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+      },
+      status: 200,
+    }));
+    const port = createHostedWebClinicalRecordsPort({
+      boundUserId: "member_1",
+      fetchImpl: fetchMock as typeof fetch,
+      timeoutMs: 5_000,
+      transport: { mode: "proxy" },
+    });
+
+    await expect(port.fetchPage({
+      cursor: null,
+      generation: 1,
+      requestId: "request_1",
+      resourceType: "Observation",
+      runId: "run_1",
+    })).rejects.toThrow(
+      `response exceeded the ${HOSTED_CLINICAL_RECORDS_FETCH_PAGE_RESPONSE_MAX_BYTES} byte safety limit`,
+    );
+    expect(cancelled).toBe(true);
+  });
+
+  it("classifies each clinical records route as an explicit POST-only operation", () => {
+    expect(readHostedRunnerWebControlOperation({
+      method: "POST",
+      path: HOSTED_CLINICAL_RECORDS_RUNTIME_READ_RUN_PATH,
+    })).toBe("clinical_records_read_run");
+    expect(readHostedRunnerWebControlOperation({
+      method: "POST",
+      path: HOSTED_CLINICAL_RECORDS_RUNTIME_FETCH_PAGE_PATH,
+    })).toBe("clinical_records_fetch_page");
+    expect(readHostedRunnerWebControlOperation({
+      method: "POST",
+      path: HOSTED_CLINICAL_RECORDS_RUNTIME_RECORD_OUTCOME_PATH,
+    })).toBe("clinical_records_record_outcome");
+    expect(readHostedRunnerWebControlOperation({
+      method: "GET",
+      path: HOSTED_CLINICAL_RECORDS_RUNTIME_READ_RUN_PATH,
+    })).toBe("web_control_blocked");
+  });
+});
