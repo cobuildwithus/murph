@@ -100,15 +100,18 @@ beforeEach(async () => {
   mocks.revokeHostedFamilyInviteTx.mockResolvedValue(true);
   mocks.removeHostedFamilyMemberTx.mockResolvedValue(true);
   mocks.updateHostedFamilySeatCount.mockResolvedValue({
-    seats: {
-      active: 1,
-      billed: 3,
-      invited: 1,
-      max: 6,
-      min: 2,
-      remaining: 1,
-      used: 2,
+    snapshot: {
+      seats: {
+        active: 1,
+        billed: 3,
+        invited: 1,
+        max: 6,
+        min: 2,
+        remaining: 1,
+        used: 2,
+      },
     },
+    status: "applied",
   });
   mocks.readHostedFamilyOwnerSnapshotForMember.mockResolvedValue({
     billingActive: true,

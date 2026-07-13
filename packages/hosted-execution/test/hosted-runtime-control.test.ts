@@ -132,6 +132,35 @@ describe("hosted runtime control contracts", () => {
     })).toThrow(/contractVersion is not supported/u);
   });
 
+  it("parses a Family seat payment-confirmation browser handoff", () => {
+    const response = {
+      action: "change_seat_count" as const,
+      result: {
+        requestedSeatCount: 3,
+        seats: {
+          active: 2,
+          billed: 2,
+          invited: 0,
+          max: 6,
+          min: 2,
+          remaining: 0,
+          used: 2,
+        },
+        status: "browser_handoff" as const,
+        url: "https://stripe.example.test/family-portal",
+      },
+    };
+
+    expect(parseHostedRuntimeFamilyPlanToolResponse(response)).toEqual(response);
+    expect(() => parseHostedRuntimeFamilyPlanToolResponse({
+      ...response,
+      result: {
+        ...response.result,
+        status: "pending",
+      },
+    })).toThrow(/url/u);
+  });
+
   it("keeps Family invite contact validation aligned at the runtime boundary", () => {
     expect(parseHostedRuntimeFamilyPlanToolRequest({
       action: "create_invite",

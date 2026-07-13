@@ -181,6 +181,9 @@ describe("hosted Family plan", () => {
     });
     runtimeMocks.requireHostedStripeApi.mockReturnValue({
       subscriptionItems: {
+        retrieve: vi.fn().mockResolvedValue(
+          makeFamilyStripeSubscriptionItem({ quantity: 4 }),
+        ),
         update: vi.fn().mockResolvedValue({
           id: "si_family",
           quantity: 3,
@@ -718,6 +721,56 @@ describe("hosted Family plan", () => {
     });
   });
 
+  it("rejects an invite against a completed Stripe decrease before the webhook arrives", async () => {
+    const tx = createTxMock({
+      activeMembershipCount: 2,
+      billedSeatCount: 4,
+      pendingInviteCount: 0,
+    });
+    runtimeMocks.requireHostedStripeApi.mockReturnValueOnce({
+      subscriptionItems: {
+        retrieve: vi.fn().mockResolvedValue(
+          makeFamilyStripeSubscriptionItem({ quantity: 2 }),
+        ),
+      },
+    });
+
+    await expect(issueHostedFamilyInviteTx({
+      groupId: "hbag_family",
+      invitedByMemberId: "member_owner",
+      targetPhoneNumber: "+48 600 000 000",
+      tx,
+    })).rejects.toMatchObject({
+      code: "HOSTED_FAMILY_SEAT_LIMIT_REACHED",
+    });
+
+    expect(tx.hostedAccountGroupInvite.create).not.toHaveBeenCalled();
+  });
+
+  it("uses a completed Stripe increase before the webhook projection catches up", async () => {
+    const tx = createTxMock({
+      activeMembershipCount: 2,
+      billedSeatCount: 2,
+      pendingInviteCount: 0,
+    });
+    runtimeMocks.requireHostedStripeApi.mockReturnValueOnce({
+      subscriptionItems: {
+        retrieve: vi.fn().mockResolvedValue(
+          makeFamilyStripeSubscriptionItem({ quantity: 3 }),
+        ),
+      },
+    });
+
+    await expect(issueHostedFamilyInviteTx({
+      groupId: "hbag_family",
+      invitedByMemberId: "member_owner",
+      targetPhoneNumber: "+48 600 000 000",
+      tx,
+    })).resolves.toMatchObject({ status: "pending" });
+
+    expect(tx.hostedAccountGroupInvite.create).toHaveBeenCalledTimes(1);
+  });
+
   it("does not issue invites before paid billed seats are confirmed", async () => {
     const tx = createTxMock({
       activeMembershipCount: 1,
@@ -777,6 +830,32 @@ describe("hosted Family plan", () => {
         prisma: tx,
       }),
     );
+  });
+
+  it("rejects invite acceptance against a completed Stripe decrease before reconciliation", async () => {
+    const tx = createTxMock({
+      activeMembershipCount: 2,
+      billedSeatCount: 4,
+      pendingInviteCountExcludingCurrent: 0,
+    });
+    runtimeMocks.requireHostedStripeApi.mockReturnValueOnce({
+      subscriptionItems: {
+        retrieve: vi.fn().mockResolvedValue(
+          makeFamilyStripeSubscriptionItem({ quantity: 2 }),
+        ),
+      },
+    });
+
+    await expect(acceptHostedFamilyInviteTx({
+      acceptedMemberId: "member_mom",
+      inviteCode: "invite_phone",
+      tx,
+    })).rejects.toMatchObject({
+      code: "HOSTED_FAMILY_SEAT_LIMIT_REACHED",
+    });
+
+    expect(tx.hostedAccountGroupInvite.updateMany).not.toHaveBeenCalled();
+    expect(tx.hostedAccountGroupMembership.upsert).not.toHaveBeenCalled();
   });
 
   it("lets a phone-verified invitee accept when the invite also carries a Telegram hint", async () => {
@@ -2801,7 +2880,10 @@ describe("hosted Family plan", () => {
       prisma: prisma as never,
       targetSeatCount: 3,
     })).resolves.toMatchObject({
-      groupId: "hbag_family",
+      snapshot: {
+        groupId: "hbag_family",
+      },
+      status: "applied",
     });
 
     expect(stripeSubscriptionItemUpdate).toHaveBeenCalledWith(
@@ -2810,7 +2892,7 @@ describe("hosted Family plan", () => {
         metadata: {
           murphFamilySeatMutationRevision: "1",
         },
-        payment_behavior: "error_if_incomplete",
+        payment_behavior: "pending_if_incomplete",
         proration_behavior: "always_invoice",
         quantity: 3,
       },
@@ -2823,6 +2905,103 @@ describe("hosted Family plan", () => {
     expect(stripeSubscriptionItemRetrieve).toHaveBeenCalledWith("si_family");
     expect(stripeSubscriptionItemUpdate.mock.calls[0]).toHaveLength(3);
     expect(tx.$queryRaw).toHaveBeenCalledTimes(1);
+    expect(tx.hostedAccountGroupBillingRef.update).not.toHaveBeenCalled();
+  });
+
+  it("reuses the same Stripe identity while a seat increase awaits payment", async () => {
+    const tx = createTxMock({
+      activeMembershipCount: 2,
+      billedSeatCount: 2,
+      pendingInviteCount: 0,
+    });
+    const prisma = tx as FamilyPlanTxMock & {
+      $transaction: ReturnType<typeof vi.fn>;
+    };
+    prisma.$transaction = vi.fn((callback) => callback(tx));
+    const update = vi.fn().mockResolvedValue(
+      makeFamilyStripeSubscriptionItem({ quantity: 2 }),
+    );
+    runtimeMocks.requireHostedStripeApi.mockReturnValue({
+      subscriptions: {
+        retrieve: vi.fn().mockResolvedValue(
+          makeFamilyStripeSubscription({ pendingItemQuantity: 3 }),
+        ),
+      },
+      subscriptionItems: {
+        retrieve: vi.fn().mockResolvedValue(
+          makeFamilyStripeSubscriptionItem({ quantity: 2 }),
+        ),
+        update,
+      },
+    });
+
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      await expect(updateHostedFamilySeatCount({
+        expectedCurrentSeatCount: 2,
+        groupId: "hbag_family",
+        now: new Date("2026-06-18T12:00:00.000Z"),
+        ownerMemberId: "member_owner",
+        prisma: prisma as never,
+        targetSeatCount: 3,
+      })).resolves.toMatchObject({ status: "pending_payment" });
+    }
+
+    const firstKey = update.mock.calls[0]?.[2]?.idempotencyKey;
+    const secondKey = update.mock.calls[1]?.[2]?.idempotencyKey;
+    expect(firstKey).toMatch(/^hosted-family-seat-count:[a-f0-9]{64}$/u);
+    expect(secondKey).toBe(firstKey);
+  });
+
+  it("returns pending payment when Stripe leaves an increased quantity unapplied", async () => {
+    const tx = createTxMock({
+      activeMembershipCount: 2,
+      billedSeatCount: 2,
+      pendingInviteCount: 0,
+    });
+    const prisma = tx as FamilyPlanTxMock & {
+      $transaction: ReturnType<typeof vi.fn>;
+    };
+    prisma.$transaction = vi.fn((callback) => callback(tx));
+    const update = vi.fn().mockResolvedValue(
+      makeFamilyStripeSubscriptionItem({ quantity: 2 }),
+    );
+    runtimeMocks.requireHostedStripeApi.mockReturnValueOnce({
+      subscriptions: {
+        retrieve: vi.fn().mockResolvedValue(
+          makeFamilyStripeSubscription({ pendingItemQuantity: 3 }),
+        ),
+      },
+      subscriptionItems: {
+        retrieve: vi.fn().mockResolvedValue(
+          makeFamilyStripeSubscriptionItem({ quantity: 2 }),
+        ),
+        update,
+      },
+    });
+
+    await expect(updateHostedFamilySeatCount({
+      expectedCurrentSeatCount: 2,
+      groupId: "hbag_family",
+      now: new Date("2026-06-18T12:00:00.000Z"),
+      ownerMemberId: "member_owner",
+      prisma: prisma as never,
+      targetSeatCount: 3,
+    })).resolves.toMatchObject({
+      snapshot: {
+        groupId: "hbag_family",
+        seats: { billed: 2 },
+      },
+      status: "pending_payment",
+    });
+
+    expect(update).toHaveBeenCalledWith(
+      "si_family",
+      expect.objectContaining({
+        payment_behavior: "pending_if_incomplete",
+        quantity: 3,
+      }),
+      expect.any(Object),
+    );
     expect(tx.hostedAccountGroupBillingRef.update).not.toHaveBeenCalled();
   });
 
@@ -3625,6 +3804,7 @@ function makeFamilyStripeSubscription(input: {
   duplicateFamilyItems?: boolean;
   itemQuantity?: number;
   metadata?: Stripe.Metadata;
+  pendingItemQuantity?: number;
   periodLocation?: "subscription" | "subscription_item";
   priceId?: string;
   subscriptionId?: string;
@@ -3720,7 +3900,18 @@ function makeFamilyStripeSubscription(input: {
     payment_settings: null,
     pending_invoice_item_interval: null,
     pending_setup_intent: null,
-    pending_update: null,
+    pending_update: input.pendingItemQuantity === undefined
+      ? null
+      : {
+          billing_cycle_anchor: null,
+          expires_at: FAMILY_STRIPE_PERIOD_END_SECONDS,
+          subscription_items: [{
+            ...familyItem,
+            quantity: input.pendingItemQuantity,
+          }],
+          trial_end: null,
+          trial_from_plan: null,
+        },
     schedule: null,
     start_date: 1_771_948_800,
     status: "active",

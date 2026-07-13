@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   consumeHostedActionApproval: vi.fn(),
+  createHostedBillingPortalSession: vi.fn(),
   createHostedFamilyBillingCheckout: vi.fn(),
   ensureHostedAccountGroupForOwnerTx: vi.fn(),
   getPrisma: vi.fn(),
@@ -13,6 +14,14 @@ const mocks = vi.hoisted(() => ({
   removeHostedFamilyMemberTx: vi.fn(),
   revokeHostedFamilyInviteTx: vi.fn(),
   updateHostedFamilySeatCount: vi.fn(),
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/billing-portal-service", () => ({
+  createHostedBillingPortalSession: mocks.createHostedBillingPortalSession,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
+  requireHostedOnboardingPublicBaseUrl: vi.fn(() => "https://app.example.test"),
 }));
 
 vi.mock("@/src/lib/action-approvals", () => ({
@@ -61,6 +70,9 @@ describe("hosted runtime Family plan tool", () => {
     mocks.createHostedFamilyBillingCheckout.mockResolvedValue({
       alreadyActive: false,
       url: "https://checkout.stripe.test/family",
+    });
+    mocks.createHostedBillingPortalSession.mockResolvedValue({
+      url: "https://stripe.example.test/family-portal",
     });
     mocks.readHostedFamilyAccessForMember.mockResolvedValue(null);
     mocks.prepareHostedFamilySeatCountChange.mockResolvedValue({
@@ -725,7 +737,10 @@ describe("hosted runtime Family plan tool", () => {
       },
     };
     mocks.readHostedFamilyOwnerSnapshotForMember.mockResolvedValue(initial);
-    mocks.updateHostedFamilySeatCount.mockResolvedValue(initial);
+    mocks.updateHostedFamilySeatCount.mockResolvedValue({
+      snapshot: initial,
+      status: "applied",
+    });
 
     await expect(handleHostedRuntimeFamilyPlanTool({
       memberId: "member_owner",
@@ -749,6 +764,55 @@ describe("hosted runtime Family plan tool", () => {
     expect(mocks.readHostedFamilyOwnerSnapshotForMember).toHaveBeenCalledTimes(1);
   });
 
+  it("returns a Family billing handoff when an increased seat needs payment confirmation", async () => {
+    const snapshot = {
+      billingActive: true,
+      billingStatus: "active",
+      groupId: "hbag_family",
+      invites: [],
+      members: [],
+      seats: {
+        active: 2,
+        billed: 2,
+        invited: 0,
+        max: 6,
+        min: 2,
+        remaining: 0,
+        used: 2,
+      },
+    };
+    mocks.readHostedFamilyOwnerSnapshotForMember.mockResolvedValue(snapshot);
+    mocks.prepareHostedFamilySeatCountChange.mockResolvedValue({ currentSeatCount: 2 });
+    mocks.updateHostedFamilySeatCount.mockResolvedValue({
+      snapshot,
+      status: "pending_payment",
+    });
+
+    await expect(handleHostedRuntimeFamilyPlanTool({
+      memberId: "member_owner",
+      request: {
+        action: "change_seat_count",
+        confirmed: true,
+        seatCount: 3,
+      },
+    })).resolves.toEqual({
+      action: "change_seat_count",
+      result: {
+        requestedSeatCount: 3,
+        seats: snapshot.seats,
+        status: "browser_handoff",
+        url: "https://stripe.example.test/family-portal",
+      },
+    });
+
+    expect(mocks.createHostedBillingPortalSession).toHaveBeenCalledWith({
+      billingScope: "family",
+      memberId: "member_owner",
+      prisma: expect.any(Object),
+      returnUrl: "https://app.example.test/settings",
+    });
+  });
+
   it("returns applied when the mutation snapshot already contains the target seat count", async () => {
     const initial = {
       billingActive: true,
@@ -768,12 +832,15 @@ describe("hosted runtime Family plan tool", () => {
     };
     mocks.readHostedFamilyOwnerSnapshotForMember.mockResolvedValue(initial);
     mocks.updateHostedFamilySeatCount.mockResolvedValue({
-      ...initial,
-      seats: {
-        ...initial.seats,
-        billed: 4,
-        remaining: 2,
+      snapshot: {
+        ...initial,
+        seats: {
+          ...initial.seats,
+          billed: 4,
+          remaining: 2,
+        },
       },
+      status: "applied",
     });
 
     await expect(handleHostedRuntimeFamilyPlanTool({
@@ -913,7 +980,10 @@ describe("hosted runtime Family plan tool", () => {
     mocks.prepareHostedFamilySeatCountChange.mockResolvedValueOnce({
       currentSeatCount: 3,
     });
-    mocks.updateHostedFamilySeatCount.mockResolvedValueOnce(snapshot);
+    mocks.updateHostedFamilySeatCount.mockResolvedValueOnce({
+      snapshot,
+      status: "applied",
+    });
 
     await expect(handleHostedRuntimeFamilyPlanTool({
       memberId: "member_owner",

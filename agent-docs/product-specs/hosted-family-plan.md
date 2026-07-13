@@ -62,6 +62,10 @@ Stripe owns the subscription, invoices, payment method, renewal state, and seat
 quantity. Murph stores only the hosted read model needed for entitlement,
 settings display, and reconciliation: customer id, subscription id,
 subscription item id, current billing phase/period, and billed seat count.
+While that read model is awaiting a webhook, invite issuance and acceptance
+hold the owner mutation lock and validate capacity against the live Stripe item.
+They fail closed when the item cannot be read or does not match the stored
+subscription and canonical Family price.
 
 The first version should not introduce generic plan-transition machinery or
 invite-side billing mutation. Family checkout and explicit seat-count changes
@@ -325,7 +329,10 @@ source count. Proration is derived from that locked live quantity; the webhook
 remains the only local billed-count writer. The assistant does not poll that
 webhook-owned read model on the foreground reply path: it reports `applied`
 only when the mutation's immediate owner snapshot already contains the target,
-and otherwise returns `pending` immediately. Replayed cancel/remove requests
+and otherwise returns `pending` immediately. If Stripe stages an increased
+quantity behind payment confirmation, the mutation instead returns a
+Family-scoped `browser_handoff`; it does not claim the new seat is applied or
+pending reconciliation until Stripe applies it. Replayed cancel/remove requests
 return `unchanged` only when the same owner-scoped row is already revoked/removed;
 unknown ids still return not found. Seat changes report `pending` until the
 existing Stripe webhook reconciles the billed quantity and `applied` only

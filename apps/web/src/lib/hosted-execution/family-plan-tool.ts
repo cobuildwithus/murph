@@ -17,6 +17,7 @@ import {
   buildHostedRuntimeFamilyActionApprovalRequest,
   requestHostedRuntimeSensitiveActionApproval,
 } from "./billing-family-action-approval";
+import { createHostedBillingPortalSession } from "../hosted-onboarding/billing-portal-service";
 
 import {
   createHostedFamilyBillingCheckout,
@@ -39,6 +40,7 @@ import {
   HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
 } from "@/src/lib/hosted-onboarding/shared";
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
+import { requireHostedOnboardingPublicBaseUrl } from "@/src/lib/hosted-onboarding/runtime";
 import { getPrisma } from "@/src/lib/prisma";
 
 export async function handleHostedRuntimeFamilyPlanTool(input: {
@@ -299,19 +301,39 @@ export async function handleHostedRuntimeFamilyPlanTool(input: {
     if (approval.status !== "approved") {
       return { action: "change_seat_count", result: approval };
     }
-    const initial = await updateHostedFamilySeatCount({
+    const update = await updateHostedFamilySeatCount({
       expectedCurrentSeatCount: preparation.currentSeatCount,
       groupId: snapshot.groupId,
       ownerMemberId: input.memberId,
       prisma,
       targetSeatCount: request.seatCount,
     });
-    const applied = initial.seats.billed === request.seatCount;
+    if (update.status === "pending_payment") {
+      const portal = await createHostedBillingPortalSession({
+        billingScope: "family",
+        memberId: input.memberId,
+        prisma,
+        returnUrl: new URL(
+          "/settings",
+          requireHostedOnboardingPublicBaseUrl(),
+        ).toString(),
+      });
+      return {
+        action: "change_seat_count",
+        result: {
+          requestedSeatCount: request.seatCount,
+          seats: update.snapshot.seats,
+          status: "browser_handoff",
+          url: portal.url,
+        },
+      };
+    }
+    const applied = update.snapshot.seats.billed === request.seatCount;
     return {
       action: "change_seat_count",
       result: {
         requestedSeatCount: request.seatCount,
-        seats: initial.seats,
+        seats: update.snapshot.seats,
         status: applied ? "applied" : "pending",
       },
     };

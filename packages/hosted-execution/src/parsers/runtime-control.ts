@@ -2097,28 +2097,50 @@ export function parseHostedRuntimeFamilyPlanToolResponse(
     if (gate) {
       return { action, result: gate };
     }
-    assertAllowedObjectKeys(
-      result,
-      new Set(["requestedSeatCount", "seats", "status"]),
-      "Hosted runtime family plan tool change_seat_count response result",
-    );
     const status = requireString(
       result.status,
       "Hosted runtime family plan tool change_seat_count response status",
     );
-    if (status !== "applied" && status !== "pending" && status !== "unchanged") {
+    if (
+      status !== "applied" &&
+      status !== "browser_handoff" &&
+      status !== "pending" &&
+      status !== "unchanged"
+    ) {
       throw new TypeError(
         "Hosted runtime family plan tool change_seat_count response status is not supported.",
       );
     }
+    assertAllowedObjectKeys(
+      result,
+      new Set([
+        "requestedSeatCount",
+        "seats",
+        "status",
+        ...(status === "browser_handoff" ? ["url"] : []),
+      ]),
+      "Hosted runtime family plan tool change_seat_count response result",
+    );
+    const baseResult = {
+      requestedSeatCount: requireNumber(
+        result.requestedSeatCount,
+        "Hosted runtime family plan tool change_seat_count response requestedSeatCount",
+      ),
+      seats: parseHostedRuntimeFamilyPlanSeatStatus(result.seats),
+    };
+    if (status === "browser_handoff") {
+      return {
+        action,
+        result: {
+          ...baseResult,
+          ...parseHostedRuntimeBrowserHandoff(result),
+        },
+      };
+    }
     return {
       action,
       result: {
-        requestedSeatCount: requireNumber(
-          result.requestedSeatCount,
-          "Hosted runtime family plan tool change_seat_count response requestedSeatCount",
-        ),
-        seats: parseHostedRuntimeFamilyPlanSeatStatus(result.seats),
+        ...baseResult,
         status,
       },
     };
@@ -2258,7 +2280,7 @@ export function parseHostedRuntimeBillingPlanToolResponse(
     );
     return {
       action,
-      result: parseHostedRuntimeBillingBrowserHandoff(result),
+      result: parseHostedRuntimeBrowserHandoff(result),
     };
   }
   if (action === "start_paid_pulse") {
@@ -2292,7 +2314,7 @@ export function parseHostedRuntimeBillingPlanToolResponse(
         action,
         result: {
           billingPlanCode,
-          ...parseHostedRuntimeBillingBrowserHandoff(result),
+          ...parseHostedRuntimeBrowserHandoff(result),
         },
       };
     }
@@ -2395,7 +2417,7 @@ export function parseHostedRuntimeBillingPlanToolResponse(
         action,
         result: {
           currentBillingPlanCode,
-          ...parseHostedRuntimeBillingBrowserHandoff(result),
+          ...parseHostedRuntimeBrowserHandoff(result),
           targetBillingPlanCode,
         },
       };
@@ -2428,18 +2450,18 @@ export function parseHostedRuntimeBillingPlanToolResponse(
   throw new TypeError("Hosted runtime billing plan tool response action is not supported.");
 }
 
-function parseHostedRuntimeBillingBrowserHandoff(
+function parseHostedRuntimeBrowserHandoff(
   result: Record<string, unknown>,
 ): { status: "browser_handoff"; url: string } {
   if (
-    requireString(result.status, "Hosted runtime billing plan browser handoff status") !==
+    requireString(result.status, "Hosted runtime browser handoff status") !==
       "browser_handoff"
   ) {
-    throw new TypeError("Hosted runtime billing plan browser handoff status is not supported.");
+    throw new TypeError("Hosted runtime browser handoff status is not supported.");
   }
   return {
     status: "browser_handoff",
-    url: requireString(result.url, "Hosted runtime billing plan browser handoff url"),
+    url: requireString(result.url, "Hosted runtime browser handoff url"),
   };
 }
 

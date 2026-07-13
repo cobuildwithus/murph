@@ -35,7 +35,7 @@ export const PATCH = withJsonError(async (request: Request) => {
     });
   }
 
-  const snapshot = await updateHostedFamilySeatCount({
+  const update = await updateHostedFamilySeatCount({
     groupId: group.id,
     ownerMemberId: auth.member.id,
     prisma,
@@ -54,6 +54,6 @@ export const PATCH = withJsonError(async (request: Request) => {
     : null;
 
   return jsonOk({
-    seats: (confirmed ?? snapshot).seats,
+    seats: (confirmed ?? update.snapshot).seats,
   });
 });

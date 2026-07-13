@@ -1236,6 +1236,11 @@ export type HostedRuntimeFamilyPlanToolResponse =
         requestedSeatCount: number;
         seats: HostedRuntimeFamilyPlanToolSeatStatus;
         status: "applied" | "pending" | "unchanged";
+      } | {
+        requestedSeatCount: number;
+        seats: HostedRuntimeFamilyPlanToolSeatStatus;
+        status: "browser_handoff";
+        url: string;
       } | HostedRuntimeSensitiveActionConfirmationResult
         | HostedRuntimeSensitiveActionApprovalResult;
     }

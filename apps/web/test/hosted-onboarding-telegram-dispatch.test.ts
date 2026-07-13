@@ -128,6 +128,21 @@ vi.mock("@/src/lib/hosted-mailbox/store", async () => {
   };
 });
 
+vi.mock("@/src/lib/hosted-web/encryption", async () => {
+  const actual = await vi.importActual<typeof import("@/src/lib/hosted-web/encryption")>(
+    "@/src/lib/hosted-web/encryption",
+  );
+
+  return {
+    ...actual,
+    decryptHostedWebNullableString: vi.fn(async (input) =>
+      typeof input.value === "string" && input.value.startsWith("test-encrypted:")
+        ? input.value.slice("test-encrypted:".length)
+        : actual.decryptHostedWebNullableString(input)
+    ),
+  };
+});
+
 vi.mock("@/src/lib/hosted-onboarding/runtime", async () => {
   const actual = await vi.importActual<typeof import("@/src/lib/hosted-onboarding/runtime")>(
     "@/src/lib/hosted-onboarding/runtime",
@@ -136,6 +151,16 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", async () => {
   return {
     ...actual,
     getHostedOnboardingEnvironment: () => mocks.runtimeEnv,
+    requireHostedStripeApi: () => ({
+      subscriptionItems: {
+        retrieve: vi.fn().mockResolvedValue({
+          id: "si_family",
+          price: { id: "price_family_seat_monthly" },
+          quantity: 2,
+          subscription: "sub_family",
+        }),
+      },
+    }),
   };
 });
 
@@ -210,6 +235,9 @@ type TelegramWebhookPrismaHarness = {
 };
 
 describe("handleHostedOnboardingTelegramWebhook", () => {
+  const previousHostedFamilyStripePriceId =
+    process.env.HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_FAMILY_SEAT_MONTHLY;
+
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.drainHostedExecutionOutboxBestEffort.mockResolvedValue(undefined);
@@ -243,10 +271,18 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
       userId: "member_telegram_123",
     }));
     mocks.runtimeEnv.telegramWebhookSecret = null;
+    process.env.HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_FAMILY_SEAT_MONTHLY =
+      "price_family_seat_monthly";
   });
 
   afterEach(() => {
     vi.useRealTimers();
+    if (previousHostedFamilyStripePriceId === undefined) {
+      delete process.env.HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_FAMILY_SEAT_MONTHLY;
+    } else {
+      process.env.HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_FAMILY_SEAT_MONTHLY =
+        previousHostedFamilyStripePriceId;
+    }
   });
 
   it("reuses an existing transaction when dispatching linked active-member Telegram messages", async () => {
@@ -456,6 +492,10 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
       hostedAccountGroupBillingRef: {
         findUnique: vi.fn().mockResolvedValue({
           billedSeatCount: 2,
+          group: invite.group,
+          groupId: invite.groupId,
+          stripeSubscriptionIdEncrypted: "test-encrypted:sub_family",
+          stripeSubscriptionItemIdEncrypted: "test-encrypted:si_family",
         }),
       },
       hostedAccountGroupInvite: {
