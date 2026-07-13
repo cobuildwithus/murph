@@ -1,6 +1,6 @@
 # PR 603 Telegram Write Authority
 
-Status: active
+Status: completed
 Created: 2026-07-13
 Updated: 2026-07-13
 
@@ -64,7 +64,12 @@ Updated: 2026-07-13
 - Focused web onboarding/routing: 96 tests passed.
 - `packages/assistant-engine` Telegram runtime: 43 tests passed.
 - `packages/operator-config` runtime helpers: 30 tests passed; typecheck passed.
+- `packages/operator-config` follow-up after the strict mock typing correction: 31 tests passed; typecheck passed.
 - `apps/cloudflare` typecheck passed; focused Worker route test: 12 tests passed.
 - `packages/messaging-ingress` typecheck passed.
+- Full `pnpm verify:acceptance` completed every product, typecheck, guard, build, app, and owner-coverage lane successfully. The aggregate command reported only three CLI timeout-budget failures on the contended host: both assistant CLI cases passed together in isolation, while the release tarball audit completed its assertions after 339 seconds but exceeded its fixed 120-second budget. This patch does not touch the release or CLI behavior under test.
+- After merging current `origin/main`, `packages/cloudflare-hosted-control` typecheck passed and its client/routes suite passed 45 tests, proving the combined Telegram authorization and meal-photo control surfaces.
 - Required security/privacy audit: no actionable Medium-or-higher findings after the Worker-boundary correction; a delta rerun after internal-header tightening and defensive bot-id normalization was also clean.
 - Required frontend review: zero evidence-backed findings; 193 focused UI/server tests passed. Live Privy plus Worker-owned Telegram replay remains the explicit provider/browser verification gap.
+- Required coverage-write audit: no edits and no unresolved coverage finding. Existing tests cover identity-only rejection, Worker-owned proof success/failure, legacy-row fail-closed behavior, inbound-route precedence, proof-backed persistence, runtime propagation, and final Worker bot matching before provider fetch. The remaining gap is the same live Privy-to-real-Telegram-provider replay; deterministic provider boundaries are mocked.
+Completed: 2026-07-13
