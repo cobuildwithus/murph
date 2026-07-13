@@ -6,6 +6,7 @@ import { renderClientComponent } from "./render-client-component";
 const mocks = vi.hoisted(() => ({
   loginWithCode: vi.fn(),
   onAuthenticated: vi.fn(),
+  requestHostedPrivyAuthIntent: vi.fn(),
   sendCode: vi.fn(),
   usePrivy: vi.fn(),
 }));
@@ -21,6 +22,20 @@ vi.mock("@privy-io/react-auth", () => ({
   usePrivy: mocks.usePrivy,
 }));
 
+vi.mock(
+  "@/src/components/hosted-onboarding/hosted-privy-auth-support",
+  async (importOriginal) => {
+    const actual = await importOriginal<
+      typeof import("@/src/components/hosted-onboarding/hosted-privy-auth-support")
+    >();
+
+    return {
+      ...actual,
+      requestHostedPrivyAuthIntent: mocks.requestHostedPrivyAuthIntent,
+    };
+  },
+);
+
 import { HostedEmailAuthButton } from "@/src/components/hosted-onboarding/hosted-email-auth-button";
 
 let cleanupRender: (() => Promise<void>) | null = null;
@@ -34,6 +49,7 @@ beforeEach(() => {
   mocks.sendCode.mockResolvedValue(undefined);
   mocks.loginWithCode.mockResolvedValue(undefined);
   mocks.onAuthenticated.mockResolvedValue(undefined);
+  mocks.requestHostedPrivyAuthIntent.mockResolvedValue(undefined);
 });
 
 afterEach(async () => {
@@ -142,9 +158,71 @@ test("HomepageEmailAuthButton expands, sends a code, verifies it, and reports th
   expect(mocks.loginWithCode).toHaveBeenCalledWith({
     code: "654321",
   });
+  expect(mocks.requestHostedPrivyAuthIntent).toHaveBeenCalledWith({
+    inviteCode: null,
+    method: "email",
+  });
+  expect(
+    mocks.requestHostedPrivyAuthIntent.mock.invocationCallOrder[0],
+  ).toBeLessThan(mocks.loginWithCode.mock.invocationCallOrder[0] ?? 0);
   expect(mocks.onAuthenticated).toHaveBeenCalledWith({
     authMethod: "email",
   });
+});
+
+test("HomepageEmailAuthButton locks duplicate verification while the auth intent is pending", async () => {
+  const authIntent = createDeferred();
+  mocks.requestHostedPrivyAuthIntent.mockReturnValueOnce(authIntent.promise);
+
+  const { button, cleanup, container, window } = await renderClientComponent(
+    createElement(HomepageEmailAuthButtonHarness),
+  );
+  cleanupRender = cleanup;
+
+  await act(async () => {
+    button.dispatchEvent(new Event("click", { bubbles: true }));
+  });
+
+  const emailInput = container.querySelector(
+    'input[id="homepage-email-address"]',
+  ) as HTMLInputElement | null;
+  const emailForm = container.querySelector("form");
+  await act(async () => {
+    if (emailInput) {
+      setInputValue(window, emailInput, "user@example.com");
+    }
+    emailForm?.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+  });
+
+  const codeInput = container.querySelector(
+    "input[data-input-otp]",
+  ) as HTMLInputElement | null;
+  const verifyButton = Array.from(container.querySelectorAll("button")).find(
+    (candidate) => candidate.textContent?.includes("Verify email"),
+  ) as HTMLButtonElement | undefined;
+  await act(async () => {
+    if (codeInput) {
+      setInputValue(window, codeInput, "654321");
+    }
+    verifyButton?.dispatchEvent(new Event("click", { bubbles: true }));
+    verifyButton?.dispatchEvent(new Event("click", { bubbles: true }));
+    await Promise.resolve();
+  });
+
+  expect(mocks.requestHostedPrivyAuthIntent).toHaveBeenCalledTimes(1);
+  expect(mocks.loginWithCode).not.toHaveBeenCalled();
+  expect(verifyButton?.disabled).toBe(true);
+  expect(verifyButton?.textContent).toContain("Verifying...");
+
+  await act(async () => {
+    authIntent.resolve();
+    await authIntent.promise;
+    await Promise.resolve();
+  });
+
+  expect(mocks.loginWithCode).toHaveBeenCalledTimes(1);
+  expect(mocks.onAuthenticated).toHaveBeenCalledTimes(1);
+  expect(verifyButton?.disabled).toBe(false);
 });
 
 test("HomepageEmailAuthButton uses no-signup mode for login code sends and resends", async () => {
@@ -359,4 +437,12 @@ function setInputValue(
   const descriptor = Object.getOwnPropertyDescriptor(prototype, "value");
   descriptor?.set?.call(input, value);
   input.dispatchEvent(new window.Event("input", { bubbles: true }));
+}
+
+function createDeferred() {
+  let resolve: () => void = () => undefined;
+  const promise = new Promise<void>((resolvePromise) => {
+    resolve = () => resolvePromise();
+  });
+  return { promise, resolve };
 }

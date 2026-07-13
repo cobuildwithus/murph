@@ -24,7 +24,6 @@ export async function completeHostedPrivyAuth(
   input: HostedAuthCompletionInput,
 ): Promise<HostedAuthCompletionResult> {
   const payload = await requestHostedPrivyCompletionWithRetry({
-    authMethod: input.authMethod,
     inviteCode: input.inviteCode,
   });
   const redirectUrl = await resolveHostedAuthRedirectUrl({

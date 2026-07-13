@@ -32,7 +32,6 @@ test("completeHostedPrivyAuth sends active members to home", async () => {
   });
 
   expect(mocks.requestHostedPrivyCompletionWithRetry).toHaveBeenCalledWith({
-    authMethod: "email",
     inviteCode: undefined,
   });
 });
@@ -135,7 +134,7 @@ test("completeHostedPrivyAuth falls back to the invite join flow for blocked use
   });
 });
 
-test("completeHostedPrivyAuth passes phone completion to the server", async () => {
+test("completeHostedPrivyAuth keeps the browser-selected method out of the server request", async () => {
   const { completeHostedPrivyAuth } = await import(
     "@/src/components/hosted-onboarding/hosted-auth-completion"
   );
@@ -149,7 +148,6 @@ test("completeHostedPrivyAuth passes phone completion to the server", async () =
   });
 
   expect(mocks.requestHostedPrivyCompletionWithRetry).toHaveBeenCalledWith({
-    authMethod: "phone",
     inviteCode: undefined,
   });
 });

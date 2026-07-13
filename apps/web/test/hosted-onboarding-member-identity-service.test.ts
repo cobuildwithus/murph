@@ -267,6 +267,7 @@ describe("hosted-onboarding member-identity-service", () => {
           photoUrl: null,
           telegramUserId: "456",
           username: "alice",
+          verifiedAt: Math.floor(NOW.getTime() / 1000),
         },
       }),
       member: makeMember(),

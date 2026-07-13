@@ -16,13 +16,36 @@ const mocks = vi.hoisted(() => ({
   requireHostedAppSessionFromRequest: vi.fn(),
   prepareHostedInvitePhoneCode: vi.fn(),
   readHostedConsentStatus: vi.fn(),
+  readHostedPrivyUserById: vi.fn(),
   requirePrivyCompletionSession: vi.fn(),
   requireHostedInviteCodeFromRequest: vi.fn(),
   requirePrivyMemberAuth: vi.fn(),
+  resolveHostedPrivyIdentityFromVerifiedUser: vi.fn(),
   runtimeEnv: {
     hostedOnboardingPublicBaseUrl: "https://join.example.test" as string | null,
   },
+  verifyHostedPrivyAuthenticationProof: vi.fn(),
 }));
+
+vi.mock("@/src/lib/hosted-onboarding/privy-auth-intent", () => ({
+  buildHostedPrivyAuthIntentClearCookie: () =>
+    "murph-privy-auth-intent=; Path=/; Max-Age=0; HttpOnly; SameSite=Strict",
+  readHostedPrivyAuthIntentFromRequest: () => "signed-intent",
+  verifyHostedPrivyAuthenticationProof: mocks.verifyHostedPrivyAuthenticationProof,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/privy", async () => {
+  const actual = await vi.importActual<typeof import("@/src/lib/hosted-onboarding/privy")>(
+    "@/src/lib/hosted-onboarding/privy",
+  );
+
+  return {
+    ...actual,
+    readHostedPrivyUserById: mocks.readHostedPrivyUserById,
+    resolveHostedPrivyIdentityFromVerifiedUser:
+      mocks.resolveHostedPrivyIdentityFromVerifiedUser,
+  };
+});
 
 vi.mock("@/src/lib/hosted-onboarding/runtime", async () => {
   const actual = await vi.importActual<typeof import("@/src/lib/hosted-onboarding/runtime")>(
@@ -143,6 +166,23 @@ describe("hosted onboarding routes", () => {
         id: "did:privy:user_123",
       },
     });
+    mocks.readHostedPrivyUserById.mockResolvedValue({
+      id: "did:privy:user_123",
+    });
+    mocks.resolveHostedPrivyIdentityFromVerifiedUser.mockReturnValue({
+      phone: {
+        number: "+15551234567",
+        verifiedAt: 1742990400,
+      },
+      userId: "did:privy:user_123",
+      wallet: {
+        address: "0xD8dA6BF26964aF9D7eEd9e03E53415D37aA96045",
+        chainType: "ethereum",
+        id: "wallet_123",
+        type: "wallet",
+      },
+    });
+    mocks.verifyHostedPrivyAuthenticationProof.mockReturnValue({ method: "phone" });
     mocks.completeHostedPrivyVerification.mockResolvedValue({
       activationPending: false,
       inviteCode: "invite-code",
@@ -240,11 +280,11 @@ describe("hosted onboarding routes", () => {
 
     expect(response.status).toBe(200);
     expect(response.headers.get("Cache-Control")).toBe("no-store");
-    expect(response.headers.get("Set-Cookie")).toBe(
+    expect(response.headers.get("Set-Cookie")).toContain(
       "murph-session=session-token; Path=/; HttpOnly; SameSite=Lax; Max-Age=2592000",
     );
     expect(mocks.completeHostedPrivyVerification).toHaveBeenCalledWith({
-      authMethod: "phone",
+      authProof: { method: "phone" },
       identity: {
         phone: {
           number: "+15551234567",
@@ -297,7 +337,7 @@ describe("hosted onboarding routes", () => {
     expect(response.status).toBe(200);
     expect(response.headers.get("Cache-Control")).toBe("no-store");
     expect(mocks.completeHostedPrivyVerification).toHaveBeenCalledWith({
-      authMethod: "phone",
+      authProof: { method: "phone" },
       identity: {
         phone: {
           number: "+15551234567",
@@ -336,7 +376,7 @@ describe("hosted onboarding routes", () => {
 
     expect(response.status).toBe(200);
     expect(mocks.completeHostedPrivyVerification).toHaveBeenCalledWith({
-      authMethod: "phone",
+      authProof: { method: "phone" },
       identity: {
         phone: {
           number: "+15551234567",

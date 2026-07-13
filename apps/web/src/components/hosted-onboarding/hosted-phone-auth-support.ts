@@ -19,12 +19,16 @@ import type {
   HostedResolvedPhoneSubmission,
 } from "./hosted-phone-auth-types";
 import {
+  isHostedPrivyAuthRestartRequiredError,
+  requestHostedPrivyAuthIntent,
   requestHostedPrivyCompletionWithRetry,
   runHostedPrivyFinalizationAttempt,
 } from "./hosted-privy-auth-support";
 import { waitForRetryDelay } from "./hosted-retry-support";
 
 export {
+  isHostedPrivyAuthRestartRequiredError,
+  requestHostedPrivyAuthIntent,
   requestHostedPrivyCompletionWithRetry,
   runHostedPrivyFinalizationAttempt,
 };
@@ -78,10 +82,12 @@ export function isHostedPrivyAccountConflictError(error: unknown): boolean {
   );
 }
 
-export function createHostedPhoneVerificationAttempt(phoneNumber: string): HostedPhoneVerificationAttempt {
+export function createHostedPhoneVerificationAttempt(input: {
+  phoneNumber: string;
+}): HostedPhoneVerificationAttempt {
   return {
-    maskedPhoneNumber: maskPhoneNumber(phoneNumber),
-    phoneNumber,
+    maskedPhoneNumber: maskPhoneNumber(input.phoneNumber),
+    phoneNumber: input.phoneNumber,
   };
 }
 

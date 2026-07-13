@@ -26,6 +26,7 @@ import {
   finalizeHostedPhoneLink,
   finalizeHostedPrivyVerification,
   isHostedPhoneVerificationCodeComplete,
+  isHostedPrivyAuthRestartRequiredError,
   normalizeHostedPhoneVerificationCode,
   readSubmittedPhoneNumber,
   resolveHostedPhoneResendTarget,
@@ -33,6 +34,7 @@ import {
   runHostedPhonePendingAction,
   runHostedPrivyFinalizationAttempt,
   isHostedPrivyAccountConflictError,
+  requestHostedPrivyAuthIntent,
   toErrorMessage,
 } from "./hosted-phone-auth-support";
 import {
@@ -61,6 +63,10 @@ interface HostedPhoneAuthControllerInput {
 }
 
 const DEFAULT_HOSTED_PHONE_COUNTRY_CODE = "US";
+type HostedAuthenticatedSessionRestartReason =
+  | "account-conflict"
+  | "fresh-verification"
+  | null;
 
 export function useHostedPhoneAuthController({
   disableSignup = false,
@@ -78,8 +84,8 @@ export function useHostedPhoneAuthController({
   const { user } = useUser();
   const [code, setCode] = useState("");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [requiresAuthenticatedSessionRestart, setRequiresAuthenticatedSessionRestart] =
-    useState(false);
+  const [authenticatedSessionRestartReason, setAuthenticatedSessionRestartReason] =
+    useState<HostedAuthenticatedSessionRestartReason>(null);
   const [finalizationState, setFinalizationState] =
     useState<HostedPrivyFinalizationState>("idle");
   const [pendingAction, setPendingAction] =
@@ -133,7 +139,7 @@ export function useHostedPhoneAuthController({
     ? "idle"
     : finalizationState;
   const effectiveRequiresAuthenticatedSessionRestart =
-    requiresAuthenticatedSessionRestart;
+    authenticatedSessionRestartReason !== null;
   const effectivePendingAction = staleAuthenticatedFinalizationState
     ? null
     : pendingAction;
@@ -207,7 +213,7 @@ export function useHostedPhoneAuthController({
 
   function resetPhoneAuthFlow() {
     setErrorMessage(null);
-    setRequiresAuthenticatedSessionRestart(false);
+    setAuthenticatedSessionRestartReason(null);
     updateFinalizationState("idle");
     setCode("");
     setPhoneVerificationAttempt(null);
@@ -285,7 +291,7 @@ export function useHostedPhoneAuthController({
 
     if (!ready) {
       setErrorMessage(null);
-      setRequiresAuthenticatedSessionRestart(false);
+      setAuthenticatedSessionRestartReason(null);
       setQueuedPhoneCodeSend(nextPhoneNumber);
       return;
     }
@@ -319,7 +325,7 @@ export function useHostedPhoneAuthController({
           }
           setErrorMessage(null);
           if (resetAuthenticatedSessionRestart) {
-            setRequiresAuthenticatedSessionRestart(false);
+            setAuthenticatedSessionRestartReason(null);
           }
         },
         onError: (error) => {
@@ -349,7 +355,9 @@ export function useHostedPhoneAuthController({
 
     setCode("");
     setPhoneVerificationAttempt(
-      createHostedPhoneVerificationAttempt(nextPhoneNumber),
+      createHostedPhoneVerificationAttempt({
+        phoneNumber: nextPhoneNumber,
+      }),
     );
     onCodeSent?.();
   }
@@ -391,6 +399,12 @@ export function useHostedPhoneAuthController({
     setPendingAction("verify-code");
 
     try {
+      if (intent === "auth") {
+        await requestHostedPrivyAuthIntent({
+          inviteCode,
+          method: "phone",
+        });
+      }
       await loginWithCode({ code: submittedCode });
       await runHostedPrivyFinalization(intent === "link" ? "continue" : "verify-code");
     } catch (error) {
@@ -400,7 +414,7 @@ export function useHostedPhoneAuthController({
       }
 
       if (isHostedPrivyAccountConflictError(error)) {
-        transitionToAuthenticatedSessionRestart();
+        transitionToAuthenticatedSessionRestart("account-conflict");
         setCode("");
         setPhoneVerificationAttempt(null);
         return;
@@ -421,7 +435,12 @@ export function useHostedPhoneAuthController({
       await runHostedPrivyFinalization("continue");
     } catch (error) {
       if (isHostedPrivyAccountConflictError(error)) {
-        transitionToAuthenticatedSessionRestart();
+        transitionToAuthenticatedSessionRestart("account-conflict");
+        return;
+      }
+
+      if (isHostedPrivyAuthRestartRequiredError(error)) {
+        transitionToAuthenticatedSessionRestart("fresh-verification");
         return;
       }
 
@@ -463,9 +482,11 @@ export function useHostedPhoneAuthController({
     resetPhoneAuthFlow();
   }
 
-  function transitionToAuthenticatedSessionRestart() {
+  function transitionToAuthenticatedSessionRestart(
+    reason: Exclude<HostedAuthenticatedSessionRestartReason, null>,
+  ) {
     setErrorMessage(null);
-    setRequiresAuthenticatedSessionRestart(true);
+    setAuthenticatedSessionRestartReason(reason);
   }
 
   async function runHostedPrivyFinalization(
@@ -496,8 +517,10 @@ export function useHostedPhoneAuthController({
   return {
     authenticatedLoadingBody,
     authenticatedLoadingTitle,
-    authenticatedSessionDescription: effectiveRequiresAuthenticatedSessionRestart
+    authenticatedSessionDescription: authenticatedSessionRestartReason === "account-conflict"
       ? "This browser is signed into a different Murph account. Sign out, then verify the phone number you want to use."
+      : authenticatedSessionRestartReason === "fresh-verification"
+        ? "Sign out, then request a fresh code to verify this phone number again."
       : authenticatedSessionMissingPhone
         ? "Your sign-in doesn't have a verified phone number yet. Sign out, then verify your number by text."
         : "Sign out and request a fresh code to continue.",

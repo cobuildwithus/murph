@@ -2,20 +2,22 @@ import { SendIcon } from "lucide-react";
 
 import { AuthButton } from "@/src/components/ui/auth-button";
 import { Button } from "@/src/components/ui/button";
-import type { HostedPrivyTelegramAccount } from "@/src/lib/hosted-onboarding/privy-shared";
 import {
   MURPH_TELEGRAM_BOT_USERNAME,
   MURPH_TELEGRAM_URL,
 } from "@/src/lib/murph-contact-routing";
 
 import { SettingsContactLink } from "./connected-account-card";
-import { formatHostedTelegramDisplayValue } from "./hosted-telegram-settings-helpers";
+import {
+  formatHostedTelegramDisplayValue,
+  type HostedTelegramDisplayAccount,
+} from "./hosted-telegram-settings-helpers";
 
 export function HostedTelegramSettingsContent(props: {
   botLink: string | null;
   clientAuthenticated: boolean;
   clientReady: boolean;
-  currentTelegram: HostedPrivyTelegramAccount | null;
+  currentTelegram: HostedTelegramDisplayAccount | null;
   isBusy: boolean;
   isLinkingTelegram: boolean;
   onLinkTelegram: () => Promise<void>;

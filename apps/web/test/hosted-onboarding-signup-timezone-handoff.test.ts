@@ -135,6 +135,7 @@ describe("hosted signup timezone handoff", () => {
 
     await expect(
       completeHostedPrivyVerification({
+        authProof: { method: "phone" },
         identity: {
           email: null,
           phone: {

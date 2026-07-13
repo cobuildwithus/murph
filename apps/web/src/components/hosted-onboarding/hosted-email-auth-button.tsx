@@ -17,21 +17,28 @@ import {
 import { HostedInlineAuthButton } from "./hosted-inline-auth-button";
 import { HostedVerificationCodeStep } from "./hosted-verification-code-step";
 import type { HostedPrivyAuthenticatedInput } from "./use-hosted-auth-completion";
+import { requestHostedPrivyAuthIntent } from "./hosted-privy-auth-support";
 
 export function HostedEmailAuthButton({
   active = false,
+  disabled: externallyDisabled = false,
   disableSignup = false,
   inline = false,
   initialEmailAddress = null,
+  inviteCode = null,
   onActivate = () => undefined,
   onAuthenticated,
+  onAuthAttemptPendingChange,
 }: {
   active?: boolean;
+  disabled?: boolean;
   disableSignup?: boolean;
   inline?: boolean;
   initialEmailAddress?: string | null;
+  inviteCode?: string | null;
   onActivate?: () => void;
   onAuthenticated: (input: HostedPrivyAuthenticatedInput) => Promise<void> | void;
+  onAuthAttemptPendingChange?: (pending: boolean) => void;
 }) {
   const { loginWithCode, sendCode, state } = useLoginWithEmail();
   const { ready } = usePrivy();
@@ -40,15 +47,19 @@ export function HostedEmailAuthButton({
     () => normalizeEmailAddress(initialEmailAddress) ?? "",
   );
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [authAttemptPending, setAuthAttemptPending] = useState(false);
   const [pendingEmailAddress, setPendingEmailAddress] = useState<string | null>(
     null,
   );
+  const authAttemptInFlightRef = useRef(false);
   const emailInputRef = useRef<HTMLInputElement | null>(null);
   const codeInputRef = useRef<HTMLInputElement | null>(null);
 
   const loading =
-    state.status === "sending-code" || state.status === "submitting-code";
-  const disabled = !ready || loading;
+    authAttemptPending
+    || state.status === "sending-code"
+    || state.status === "submitting-code";
+  const disabled = externallyDisabled || !ready || loading;
   const showCodeEntry = pendingEmailAddress !== null;
 
   function clearCode() {
@@ -129,6 +140,10 @@ export function HostedEmailAuthButton({
   }
 
   async function handleVerifyCode() {
+    if (authAttemptInFlightRef.current || externallyDisabled) {
+      return;
+    }
+
     if (!pendingEmailAddress) {
       setErrorMessage("Request a fresh verification code before entering one.");
       return;
@@ -146,9 +161,19 @@ export function HostedEmailAuthButton({
     }
 
     setErrorMessage(null);
+    authAttemptInFlightRef.current = true;
+    setAuthAttemptPending(true);
 
     try {
+      onAuthAttemptPendingChange?.(true);
+      await requestHostedPrivyAuthIntent({
+        inviteCode,
+        method: "email",
+      });
       await loginWithCode({ code: submittedCode });
+      await onAuthenticated({
+        authMethod: "email",
+      });
     } catch (error) {
       setErrorMessage(
         disableSignup
@@ -158,12 +183,11 @@ export function HostedEmailAuthButton({
               "We could not verify that code.",
             ),
       );
-      return;
+    } finally {
+      authAttemptInFlightRef.current = false;
+      setAuthAttemptPending(false);
+      onAuthAttemptPendingChange?.(false);
     }
-
-    await onAuthenticated({
-      authMethod: "email",
-    });
   }
 
   function handleUseAnotherEmail() {

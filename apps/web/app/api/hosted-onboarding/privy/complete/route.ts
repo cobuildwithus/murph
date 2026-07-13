@@ -1,5 +1,4 @@
 import { jsonOk, withJsonError, readOptionalJsonObject } from "@/src/lib/hosted-onboarding/http";
-import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import {
   deriveHostedOnboardingTimingErrorName,
   finishHostedOnboardingTiming,
@@ -7,13 +6,11 @@ import {
 } from "@/src/lib/hosted-onboarding/logging";
 import { completeHostedPrivyVerification } from "@/src/lib/hosted-onboarding/authentication-service";
 import {
-  isHostedPrivyAuthMethod,
-  type HostedPrivyAuthMethod,
-} from "@/src/lib/hosted-onboarding/types";
-import {
-  readHostedPrivyVerifiedAuthMethods,
-  resolveHostedPrivyAuthMethodFromIdentity,
-} from "@/src/lib/hosted-onboarding/privy-auth-method";
+  buildHostedPrivyAuthIntentClearCookie,
+  readHostedPrivyAuthIntentFromRequest,
+  verifyHostedPrivyAuthenticationProof,
+} from "@/src/lib/hosted-onboarding/privy-auth-intent";
+import { resolveHostedPrivyLinkedAccounts } from "@/src/lib/hosted-onboarding/privy-shared";
 import { assertHostedOnboardingMutationOrigin } from "@/src/lib/hosted-onboarding/csrf";
 import { getHostedInviteStatus } from "@/src/lib/hosted-onboarding/invite-service";
 import { requirePrivyCompletionSession } from "@/src/lib/hosted-onboarding/request-auth";
@@ -22,8 +19,9 @@ import { resolveHostedSignupTimeZone } from "@/src/lib/hosted-onboarding/time-zo
 import { readHostedConsentStatus } from "@/src/lib/legal/consent";
 import { getPrisma } from "@/src/lib/prisma";
 import {
+  readHostedPrivyUserById,
   remapHostedPrivyCompletionLagError,
-  type HostedPrivyIdentity,
+  resolveHostedPrivyIdentityFromVerifiedUser,
 } from "@/src/lib/hosted-onboarding/privy";
 
 export const POST = withJsonError(async (request: Request) => {
@@ -33,20 +31,31 @@ export const POST = withJsonError(async (request: Request) => {
     assertHostedOnboardingMutationOrigin(request);
     const auth = await requirePrivyCompletionSession(request);
     const body = await readOptionalJsonObject(request);
-    const authMethod = resolveHostedPrivyCompletionAuthMethod({
-      body,
-      identity: auth.identity,
-    });
+    const inviteCode = typeof body.inviteCode === "string" ? body.inviteCode : null;
+    const verifiedPrivyUser = await readHostedPrivyUserById(auth.identity.userId);
+    const identity = resolveHostedPrivyIdentityFromVerifiedUser(verifiedPrivyUser);
+    const authProof = (() => {
+      try {
+        return verifyHostedPrivyAuthenticationProof({
+          identity,
+          intent: readHostedPrivyAuthIntentFromRequest(request),
+          inviteCode,
+          linkedAccounts: resolveHostedPrivyLinkedAccounts(verifiedPrivyUser),
+        });
+      } catch (error) {
+        throw remapHostedPrivyCompletionLagError(error);
+      }
+    })();
     const timeZone = resolveHostedSignupTimeZone({
       clientTimeZone: body.timeZone,
       headers: request.headers,
     });
     const result = await completeHostedPrivyVerification({
-      authMethod,
-      identity: auth.identity,
-      inviteCode: typeof body.inviteCode === "string" ? body.inviteCode : null,
+      authProof,
+      identity,
+      inviteCode,
       ...(timeZone ? { timeZone } : {}),
-      verifiedPrivyUser: auth.verifiedPrivyUser,
+      verifiedPrivyUser,
     }).catch((error: unknown) => {
       throw remapHostedPrivyCompletionLagError(error);
     });
@@ -78,6 +87,7 @@ export const POST = withJsonError(async (request: Request) => {
       status,
     });
     response.headers.append("Set-Cookie", appSession.cookie);
+    response.headers.append("Set-Cookie", buildHostedPrivyAuthIntentClearCookie());
     return response;
   } catch (error) {
     finishHostedOnboardingTiming(timing, "failed", {
@@ -97,46 +107,4 @@ async function readHostedCompletionLaunchConsentGranted(memberId: string): Promi
   } catch {
     return false;
   }
-}
-
-function resolveHostedPrivyCompletionAuthMethod(input: {
-  body: Record<string, unknown>;
-  identity: HostedPrivyIdentity;
-}): HostedPrivyAuthMethod {
-  if ("authIntent" in input.body) {
-    const authIntent = input.body.authIntent;
-    const method = isRecord(authIntent) ? authIntent.method : undefined;
-
-    if (isHostedPrivyAuthMethod(method)) {
-      return method;
-    }
-
-    throw hostedOnboardingError({
-      code: "HOSTED_AUTH_INTENT_INVALID",
-      message: "Choose phone, email, or Telegram before continuing.",
-      httpStatus: 400,
-    });
-  }
-
-  const availableMethods = readHostedPrivyVerifiedAuthMethods(input.identity);
-
-  if (availableMethods.length === 1) {
-    return availableMethods[0];
-  }
-
-  if (availableMethods.length > 1) {
-    throw hostedOnboardingError({
-      code: "HOSTED_AUTH_INTENT_REQUIRED",
-      message: "Choose phone, email, or Telegram before continuing.",
-      httpStatus: 400,
-    });
-  }
-
-  return resolveHostedPrivyAuthMethodFromIdentity({
-    identity: input.identity,
-  });
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }

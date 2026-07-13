@@ -15,6 +15,19 @@ import type {
 
 import { waitForRetryDelay } from "./hosted-retry-support";
 
+const HOSTED_PRIVY_AUTH_RESTART_REQUIRED_CODES = new Set([
+  "HOSTED_AUTH_PROOF_EXPIRED",
+  "HOSTED_AUTH_PROOF_INVALID",
+]);
+
+export function isHostedPrivyAuthRestartRequiredError(error: unknown): boolean {
+  return (
+    error instanceof HostedOnboardingApiError
+    && error.code !== null
+    && HOSTED_PRIVY_AUTH_RESTART_REQUIRED_CODES.has(error.code)
+  );
+}
+
 interface HostedPrivyFinalizationAttemptInput {
   action: "continue" | "verify-code";
   finalize: () => Promise<void>;
@@ -51,22 +64,17 @@ export async function runHostedPrivyFinalizationAttempt({
 }
 
 export function buildHostedPrivyCompletionRequestPayload(input: {
-  authMethod: HostedPrivyAuthMethod;
   inviteCode?: string | null;
 }): Record<string, unknown> {
   const timeZone = resolveHostedBrowserTimeZone();
 
   return {
-    authIntent: {
-      method: input.authMethod,
-    },
     ...(input.inviteCode ? { inviteCode: input.inviteCode } : {}),
     ...(timeZone ? { timeZone } : {}),
   };
 }
 
 export async function requestHostedPrivyCompletionWithRetry(input: {
-  authMethod: HostedPrivyAuthMethod;
   inviteCode?: string | null;
 }): Promise<HostedPrivyCompletionPayload> {
   let lastError: unknown = null;
@@ -95,6 +103,19 @@ export async function requestHostedPrivyCompletionWithRetry(input: {
     : new Error("We couldn't verify your sign-in. Try again.");
 }
 
+export async function requestHostedPrivyAuthIntent(input: {
+  inviteCode?: string | null;
+  method: HostedPrivyAuthMethod;
+}): Promise<void> {
+  await requestHostedOnboardingJson<{ ok: true }>({
+    payload: {
+      method: input.method,
+      ...(input.inviteCode ? { inviteCode: input.inviteCode } : {}),
+    },
+    url: "/api/hosted-onboarding/privy/begin",
+  });
+}
+
 function isRetryableHostedPrivyCompletionError(error: unknown): boolean {
   if (!(error instanceof HostedOnboardingApiError)) {
     return false;
@@ -109,7 +130,8 @@ function isRetryableHostedPrivyCompletionError(error: unknown): boolean {
     (error.code === "PRIVY_ACCOUNT_NOT_READY" ||
       error.code === "PRIVY_EMAIL_NOT_READY" ||
       error.code === "PRIVY_TELEGRAM_NOT_READY" ||
-      error.code === "PRIVY_PHONE_NOT_READY")
+      error.code === "PRIVY_PHONE_NOT_READY" ||
+      error.code === "PRIVY_USER_LOOKUP_FAILED")
   );
 }
 

@@ -8,8 +8,15 @@ const mocks = vi.hoisted(() => ({
   getPrisma: vi.fn(),
   getHostedInviteStatus: vi.fn(),
   issueHostedAppSession: vi.fn(),
+  buildHostedPrivyAuthIntentClearCookie: vi.fn(),
+  readHostedPrivyAuthIntentFromRequest: vi.fn(),
+  readHostedPrivyUserById: vi.fn(),
+  remapHostedPrivyCompletionLagError: vi.fn(),
   requirePrivyCompletionSession: vi.fn(),
   readHostedConsentStatus: vi.fn(),
+  resolveHostedPrivyIdentityFromVerifiedUser: vi.fn(),
+  resolveHostedPrivyLinkedAccounts: vi.fn(),
+  verifyHostedPrivyAuthenticationProof: vi.fn(),
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/csrf", () => ({
@@ -27,6 +34,26 @@ vi.mock("@/src/lib/hosted-onboarding/invite-service", () => ({
 vi.mock("@/src/lib/hosted-onboarding/request-auth", () => ({
   requirePrivyCompletionSession:
     mocks.requirePrivyCompletionSession,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/privy-auth-intent", () => ({
+  buildHostedPrivyAuthIntentClearCookie:
+    mocks.buildHostedPrivyAuthIntentClearCookie,
+  readHostedPrivyAuthIntentFromRequest:
+    mocks.readHostedPrivyAuthIntentFromRequest,
+  verifyHostedPrivyAuthenticationProof:
+    mocks.verifyHostedPrivyAuthenticationProof,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/privy-shared", () => ({
+  resolveHostedPrivyLinkedAccounts: mocks.resolveHostedPrivyLinkedAccounts,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/privy", () => ({
+  readHostedPrivyUserById: mocks.readHostedPrivyUserById,
+  remapHostedPrivyCompletionLagError: mocks.remapHostedPrivyCompletionLagError,
+  resolveHostedPrivyIdentityFromVerifiedUser:
+    mocks.resolveHostedPrivyIdentityFromVerifiedUser,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/app-session", () => ({
@@ -73,14 +100,48 @@ describe("hosted onboarding Privy completion route", () => {
     mocks.readHostedConsentStatus.mockResolvedValue({
       launchGranted: false,
     });
+    mocks.buildHostedPrivyAuthIntentClearCookie.mockReturnValue(
+      "murph-privy-auth-intent=; Path=/; Max-Age=0; HttpOnly; SameSite=Strict",
+    );
+    mocks.readHostedPrivyAuthIntentFromRequest.mockReturnValue("signed-phone-intent");
+    mocks.readHostedPrivyUserById.mockResolvedValue({
+      id: "did:privy:user_123",
+      linkedAccounts: [],
+    });
+    mocks.resolveHostedPrivyIdentityFromVerifiedUser.mockReturnValue({
+      phone: {
+        number: "+15550000000",
+        verifiedAt: 1742990400,
+      },
+      userId: "did:privy:user_123",
+      wallet: null,
+    });
+    mocks.resolveHostedPrivyLinkedAccounts.mockReturnValue([
+      {
+        latest_verified_at: 1742990400,
+        phoneNumber: "+15550000000",
+        type: "phone",
+      },
+    ]);
+    mocks.remapHostedPrivyCompletionLagError.mockImplementation((error: unknown) => {
+      if (
+        error
+        && typeof error === "object"
+        && Reflect.get(error, "code") === "PRIVY_TELEGRAM_REQUIRED"
+      ) {
+        return hostedOnboardingError({
+          code: "PRIVY_TELEGRAM_NOT_READY",
+          message: "Your verified Telegram account is not ready yet.",
+          httpStatus: 409,
+          retryable: true,
+        });
+      }
+      return error;
+    });
+    mocks.verifyHostedPrivyAuthenticationProof.mockReturnValue({ method: "phone" });
     mocks.requirePrivyCompletionSession.mockResolvedValue({
       identity: {
-        phone: {
-          number: "+15550000000",
-          verifiedAt: 1742990400,
-        },
         userId: "did:privy:user_123",
-        wallet: null,
       },
       verifiedPrivyUser: {
         id: "did:privy:user_123",
@@ -102,8 +163,11 @@ describe("hosted onboarding Privy completion route", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(response.headers.get("Set-Cookie")).toBe(
+    expect(response.headers.get("Set-Cookie")).toContain(
       "murph-session=session-token; Path=/; HttpOnly; SameSite=Lax; Max-Age=2592000",
+    );
+    expect(response.headers.get("Set-Cookie")).toContain(
+      "murph-privy-auth-intent=; Path=/; Max-Age=0; HttpOnly; SameSite=Strict",
     );
     await expect(response.json()).resolves.toEqual({
       inviteCode: "invite_123",
@@ -115,7 +179,7 @@ describe("hosted onboarding Privy completion route", () => {
       status: createInviteStatus("checkout"),
     });
     expect(mocks.completeHostedPrivyVerification).toHaveBeenCalledWith({
-      authMethod: "phone",
+      authProof: { method: "phone" },
       identity: {
         phone: {
           number: "+15550000000",
@@ -127,8 +191,33 @@ describe("hosted onboarding Privy completion route", () => {
       inviteCode: "invite_123",
       verifiedPrivyUser: {
         id: "did:privy:user_123",
+        linkedAccounts: [],
       },
     });
+    expect(mocks.verifyHostedPrivyAuthenticationProof).toHaveBeenCalledWith({
+      identity: {
+        phone: {
+          number: "+15550000000",
+          verifiedAt: 1742990400,
+        },
+        userId: "did:privy:user_123",
+        wallet: null,
+      },
+      intent: "signed-phone-intent",
+      inviteCode: "invite_123",
+      linkedAccounts: [
+        {
+          latest_verified_at: 1742990400,
+          phoneNumber: "+15550000000",
+          type: "phone",
+        },
+      ],
+    });
+    expect(mocks.readHostedPrivyUserById).toHaveBeenCalledWith(
+      "did:privy:user_123",
+    );
+    expect(mocks.requirePrivyCompletionSession).toHaveBeenCalled();
+    expect(mocks.buildHostedPrivyAuthIntentClearCookie).toHaveBeenCalledTimes(1);
     expect(mocks.issueHostedAppSession).toHaveBeenCalledWith({
       memberId: "member_123",
       privyUserId: "did:privy:user_123",
@@ -137,6 +226,28 @@ describe("hosted onboarding Privy completion route", () => {
       authenticatedMember: createHostedMember(),
       inviteCode: "invite_123",
     });
+  });
+
+  it("uses the authoritative Privy user instead of the completion-session snapshot", async () => {
+    mocks.requirePrivyCompletionSession.mockResolvedValueOnce({
+      identity: {
+        userId: "did:privy:user_123",
+      },
+      verifiedPrivyUser: {
+        id: "did:privy:stale_snapshot",
+      },
+    });
+
+    await privyCompleteRoute.POST(createCompletionRequest());
+
+    expect(mocks.completeHostedPrivyVerification).toHaveBeenCalledWith(
+      expect.objectContaining({
+        verifiedPrivyUser: {
+          id: "did:privy:user_123",
+          linkedAccounts: [],
+        },
+      }),
+    );
   });
 
   it("returns the active stage when the member is already active", async () => {
@@ -278,90 +389,121 @@ describe("hosted onboarding Privy completion route", () => {
     }));
   });
 
-  it("passes the selected Telegram auth method and identity to completion", async () => {
-    mocks.requirePrivyCompletionSession.mockResolvedValueOnce({
-      identity: {
-        phone: null,
-        telegram: {
-          firstName: "Alice",
-          lastName: null,
-          photoUrl: null,
-          telegramUserId: "456",
-          username: "alice",
-        },
-        userId: "did:privy:user_telegram",
-        wallet: null,
-      },
-      verifiedPrivyUser: {
-        id: "did:privy:user_telegram",
-      },
-    });
-
-    await privyCompleteRoute.POST(
-      new Request("https://join.example.test/api/hosted-onboarding/privy/complete", {
-        body: JSON.stringify({
-          authIntent: {
-            method: "telegram",
-          },
-        }),
-        headers: {
-          origin: "https://join.example.test",
-        },
-        method: "POST",
-      }),
-    );
-
-    expect(mocks.completeHostedPrivyVerification).toHaveBeenCalledWith(expect.objectContaining({
-      authMethod: "telegram",
-      identity: expect.objectContaining({
-        telegram: expect.objectContaining({
-          telegramUserId: "456",
-        }),
-        userId: "did:privy:user_telegram",
-      }),
-    }));
-  });
-
-  it("requires an explicit auth intent when legacy clients present multiple verified methods", async () => {
-    mocks.requirePrivyCompletionSession.mockResolvedValueOnce({
+  it.each([
+    {
       identity: {
         email: {
-          address: "user@example.test",
+          address: "person@example.test",
           verifiedAt: 1742990400,
         },
+        userId: "did:privy:user_email",
+        wallet: null,
+      },
+      intent: "signed-email-intent",
+      method: "email" as const,
+    },
+    {
+      identity: {
         phone: {
           number: "+15550000000",
           verifiedAt: 1742990400,
         },
-        userId: "did:privy:user_multi",
+        userId: "did:privy:user_phone",
         wallet: null,
       },
-      verifiedPrivyUser: {
-        id: "did:privy:user_multi",
-      },
-    });
-
-    const response = await privyCompleteRoute.POST(
-      new Request("https://join.example.test/api/hosted-onboarding/privy/complete", {
-        headers: {
-          origin: "https://join.example.test",
+      intent: "signed-phone-intent",
+      method: "phone" as const,
+    },
+    {
+      identity: {
+        telegram: {
+          firstName: "Example",
+          lastName: null,
+          photoUrl: null,
+          telegramUserId: "456",
+          username: "example",
+          verifiedAt: 1742990400,
         },
-        method: "POST",
+        userId: "did:privy:user_telegram",
+        wallet: null,
+      },
+      intent: "signed-telegram-intent",
+      method: "telegram" as const,
+    },
+  ])("passes a fresh $method proof to completion", async ({ identity, intent, method }) => {
+    mocks.readHostedPrivyAuthIntentFromRequest.mockReturnValueOnce(intent);
+    mocks.resolveHostedPrivyIdentityFromVerifiedUser.mockReturnValueOnce(identity);
+    mocks.verifyHostedPrivyAuthenticationProof.mockReturnValueOnce({ method });
+
+    const response = await privyCompleteRoute.POST(createCompletionRequest({
+      cookie: `murph-privy-auth-intent=${intent}`,
+    }));
+
+    expect(response.status).toBe(200);
+    expect(mocks.verifyHostedPrivyAuthenticationProof).toHaveBeenCalledWith(
+      expect.objectContaining({
+        identity,
+        intent,
       }),
     );
+    expect(mocks.completeHostedPrivyVerification).toHaveBeenCalledWith(
+      expect.objectContaining({
+        authProof: { method },
+        identity,
+      }),
+    );
+  });
 
-    expect(response.status).toBe(400);
+  it.each([
+    {
+      code: "HOSTED_AUTH_PROOF_INVALID",
+      httpStatus: 401,
+      intent: null,
+      label: "missing",
+    },
+    {
+      code: "HOSTED_AUTH_PROOF_EXPIRED",
+      httpStatus: 401,
+      intent: "stale-signed-intent",
+      label: "stale",
+    },
+    {
+      code: "HOSTED_AUTH_PROOF_INVALID",
+      httpStatus: 401,
+      intent: "forged-signed-intent",
+      label: "forged",
+    },
+  ])("rejects a $label method proof before completion", async ({
+    code,
+    httpStatus,
+    intent,
+  }) => {
+    mocks.readHostedPrivyAuthIntentFromRequest.mockReturnValueOnce(intent);
+    mocks.verifyHostedPrivyAuthenticationProof.mockImplementationOnce(() => {
+      throw hostedOnboardingError({
+        code,
+        message: "Request a fresh verification code and try again.",
+        httpStatus,
+      });
+    });
+
+    const response = await privyCompleteRoute.POST(createCompletionRequest({
+      ...(intent ? { cookie: `murph-privy-auth-intent=${intent}` } : {}),
+    }));
+
+    expect(response.status).toBe(httpStatus);
     await expect(response.json()).resolves.toMatchObject({
       error: {
-        code: "HOSTED_AUTH_INTENT_REQUIRED",
-        retryable: false,
+        code,
       },
     });
     expect(mocks.completeHostedPrivyVerification).not.toHaveBeenCalled();
     expect(mocks.issueHostedAppSession).not.toHaveBeenCalled();
+    expect(mocks.buildHostedPrivyAuthIntentClearCookie).not.toHaveBeenCalled();
   });
 
   it("maps missing Telegram state from completion to a retryable session-lag response", async () => {
+    mocks.verifyHostedPrivyAuthenticationProof.mockReturnValueOnce({ method: "telegram" });
     mocks.completeHostedPrivyVerification.mockRejectedValueOnce(hostedOnboardingError({
       code: "PRIVY_TELEGRAM_REQUIRED",
       message: "Finish Telegram verification before continuing.",
@@ -407,7 +549,7 @@ describe("hosted onboarding Privy completion route", () => {
     );
 
     expect(mocks.completeHostedPrivyVerification).toHaveBeenCalledWith(expect.objectContaining({
-      authMethod: "phone",
+      authProof: { method: "phone" },
       timeZone: "America/Los_Angeles",
     }));
   });
@@ -427,7 +569,7 @@ describe("hosted onboarding Privy completion route", () => {
     );
 
     expect(mocks.completeHostedPrivyVerification).toHaveBeenCalledWith(expect.objectContaining({
-      authMethod: "phone",
+      authProof: { method: "phone" },
       timeZone: "America/New_York",
     }));
   });
@@ -449,6 +591,22 @@ describe("hosted onboarding Privy completion route", () => {
     expect(mocks.completeHostedPrivyVerification.mock.calls[0]?.[0]).not.toHaveProperty("timeZone");
   });
 });
+
+function createCompletionRequest(input: {
+  cookie?: string;
+  inviteCode?: string;
+} = {}): Request {
+  return new Request("https://join.example.test/api/hosted-onboarding/privy/complete", {
+    body: JSON.stringify({
+      ...(input.inviteCode ? { inviteCode: input.inviteCode } : {}),
+    }),
+    headers: {
+      ...(input.cookie ? { cookie: input.cookie } : {}),
+      origin: "https://join.example.test",
+    },
+    method: "POST",
+  });
+}
 
 function createHostedMember() {
   return {

@@ -200,6 +200,66 @@ function makeInvite(member: ReturnType<typeof makeMember>, overrides: Record<str
   };
 }
 
+async function makeLinqEmailInviteFixture() {
+  const pendingEmailAddress = "linq-handle@example.com";
+  const pendingEmailLookupKey = createHostedEmailLookupKey(pendingEmailAddress)!;
+  const inviteMember = makeMember({
+    id: "member_linq_email_invite",
+    maskedPhoneNumberHint: null,
+    phoneLookupKey: null,
+    phoneNumberVerifiedAt: null,
+    privyUserId: null,
+    walletAddress: null,
+    walletChainType: null,
+    walletCreatedAt: null,
+    walletProvider: null,
+  });
+  const inviteMemberWithRouting = {
+    ...inviteMember,
+    identity: {
+      createdAt: NOW,
+      maskedPhoneNumberHint: null,
+      memberId: inviteMember.id,
+      phoneLookupKey: null,
+      phoneNumberVerifiedAt: null,
+      privyUserId: null,
+      updatedAt: NOW,
+      walletAddress: null,
+      walletChainType: null,
+      walletCreatedAt: null,
+      walletProvider: null,
+    },
+    routing: {
+      linqChatIdEncrypted: null,
+      linqRecipientPhoneEncrypted: null,
+      memberId: inviteMember.id,
+      pendingLinqChatIdEncrypted: await encryptHostedWebNullableString({
+        field: "hosted-member-routing.pending-linq-chat-id",
+        memberId: inviteMember.id,
+        value: "linq_chat_email_123",
+      }),
+      pendingLinqParticipantContactEncrypted: await encryptHostedWebNullableString({
+        field: "hosted-member-routing.pending-linq-participant-contact",
+        memberId: inviteMember.id,
+        value: pendingEmailAddress,
+      }),
+      pendingLinqParticipantContactKind: "email",
+      pendingLinqParticipantContactLookupKey: pendingEmailLookupKey,
+      pendingLinqParticipantContactObservedAt: NOW,
+      pendingLinqRecipientPhoneEncrypted: null,
+      telegramUserIdEncrypted: null,
+      telegramUserLookupKey: null,
+    },
+  };
+
+  return {
+    invite: makeInvite(inviteMemberWithRouting),
+    inviteMember,
+    pendingEmailAddress,
+    pendingEmailLookupKey,
+  };
+}
+
 describe("completeHostedPrivyVerification", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -244,6 +304,7 @@ describe("completeHostedPrivyVerification", () => {
     });
 
     const result = await completeHostedPrivyVerification({
+      authProof: { method: "phone" },
       identity: makeIdentity(),
       inviteCode: "invite-code",
       now: NOW,
@@ -261,60 +322,59 @@ describe("completeHostedPrivyVerification", () => {
     });
   });
 
-  it("binds a verified email identity onto an invite-bound Linq email contact despite stale client method", async () => {
-    const pendingEmailAddress = "linq-handle@example.com";
-    const pendingEmailLookupKey = createHostedEmailLookupKey(pendingEmailAddress)!;
+  it("rejects phone authentication proof for an invite-bound Linq email contact", async () => {
+    const {
+      invite,
+      inviteMember,
+      pendingEmailAddress,
+    } = await makeLinqEmailInviteFixture();
+    const prisma = asCompleteHostedPrivyVerificationPrisma({
+      hostedInvite: {
+        findUnique: vi.fn().mockResolvedValue(invite),
+        update: vi.fn().mockResolvedValue({}),
+      },
+      hostedMember: {
+        update: vi.fn().mockImplementation(async ({ data }: { data: Record<string, unknown> }) => ({
+          ...inviteMember,
+          ...data,
+        })),
+      },
+    });
+
+    await expect(
+      completeHostedPrivyVerification({
+        authProof: { method: "phone" },
+        identity: makeIdentity({
+          email: {
+            address: pendingEmailAddress,
+            verifiedAt: 1742990400,
+          },
+          wallet: null,
+        }),
+        inviteCode: "invite-code",
+        now: NOW,
+        prisma,
+      }),
+    ).rejects.toMatchObject({
+      code: "HOSTED_INVITE_AUTH_METHOD_MISMATCH",
+      httpStatus: 403,
+    });
+
+    expect(prisma.hostedMember.update).not.toHaveBeenCalled();
+    expect(prisma.hostedInvite.update).not.toHaveBeenCalled();
+    expect(prisma.hostedMemberIdentity.upsert).not.toHaveBeenCalled();
+    expect(prisma.hostedMemberEmailAuthorization.upsert).not.toHaveBeenCalled();
+  });
+
+  it("binds email authentication proof onto an invite-bound Linq email contact", async () => {
+    const {
+      invite,
+      inviteMember,
+      pendingEmailAddress,
+      pendingEmailLookupKey,
+    } = await makeLinqEmailInviteFixture();
     const privyEmailVerifiedAtSeconds = 1742990400;
     const verifiedEmailVerifiedAt = new Date(privyEmailVerifiedAtSeconds * 1000);
-    const inviteMember = makeMember({
-      id: "member_linq_email_invite",
-      maskedPhoneNumberHint: null,
-      phoneLookupKey: null,
-      phoneNumberVerifiedAt: null,
-      privyUserId: null,
-      walletAddress: null,
-      walletChainType: null,
-      walletCreatedAt: null,
-      walletProvider: null,
-    });
-    const inviteMemberWithRouting = {
-      ...inviteMember,
-      identity: {
-        createdAt: NOW,
-        maskedPhoneNumberHint: null,
-        memberId: inviteMember.id,
-        phoneLookupKey: null,
-        phoneNumberVerifiedAt: null,
-        privyUserId: null,
-        updatedAt: NOW,
-        walletAddress: null,
-        walletChainType: null,
-        walletCreatedAt: null,
-        walletProvider: null,
-      },
-      routing: {
-        linqChatIdEncrypted: null,
-        linqRecipientPhoneEncrypted: null,
-        memberId: inviteMember.id,
-        pendingLinqChatIdEncrypted: await encryptHostedWebNullableString({
-          field: "hosted-member-routing.pending-linq-chat-id",
-          memberId: inviteMember.id,
-          value: "linq_chat_email_123",
-        }),
-        pendingLinqParticipantContactEncrypted: await encryptHostedWebNullableString({
-          field: "hosted-member-routing.pending-linq-participant-contact",
-          memberId: inviteMember.id,
-          value: pendingEmailAddress,
-        }),
-        pendingLinqParticipantContactKind: "email",
-        pendingLinqParticipantContactLookupKey: pendingEmailLookupKey,
-        pendingLinqParticipantContactObservedAt: NOW,
-        pendingLinqRecipientPhoneEncrypted: null,
-        telegramUserIdEncrypted: null,
-        telegramUserLookupKey: null,
-      },
-    };
-    const invite = makeInvite(inviteMemberWithRouting);
     const prisma = asCompleteHostedPrivyVerificationPrisma({
       hostedInvite: {
         findUnique: vi.fn().mockResolvedValue(invite),
@@ -329,10 +389,10 @@ describe("completeHostedPrivyVerification", () => {
     });
 
     const result = await completeHostedPrivyVerification({
-      authMethod: "phone",
+      authProof: { method: "email" },
       identity: makeIdentity({
         email: {
-          address: "Linq-Handle@example.com",
+          address: pendingEmailAddress,
           verifiedAt: privyEmailVerifiedAtSeconds,
         },
         phone: null,
@@ -454,7 +514,7 @@ describe("completeHostedPrivyVerification", () => {
 
     await expect(
       completeHostedPrivyVerification({
-        authMethod: "email",
+        authProof: { method: "email" },
         identity: makeIdentity({
           email: {
             address: pendingEmailAddress,
@@ -513,6 +573,7 @@ describe("completeHostedPrivyVerification", () => {
 
     await expect(
       completeHostedPrivyVerification({
+        authProof: { method: "phone" },
         identity: makeIdentity({
           wallet: {
             address: SYNTHETIC_TEST_WALLET_ADDRESS_ALT,
@@ -574,6 +635,7 @@ describe("completeHostedPrivyVerification", () => {
     });
 
     const result = await completeHostedPrivyVerification({
+      authProof: { method: "phone" },
       identity: makeIdentity(),
       now: NOW,
       prisma,
@@ -709,7 +771,7 @@ describe("completeHostedPrivyVerification", () => {
 
     await expect(
       completeHostedPrivyVerification({
-        authMethod: "email",
+        authProof: { method: "email" },
         identity: makeIdentity({
           email: {
             address: "public-conflict@example.com",
@@ -766,6 +828,7 @@ describe("completeHostedPrivyVerification", () => {
 
     await expect(
       completeHostedPrivyVerification({
+        authProof: { method: "phone" },
         identity: makeIdentity(),
         now: NOW,
         prisma,
@@ -858,6 +921,7 @@ describe("completeHostedPrivyVerification", () => {
 
     await expect(
       completeHostedPrivyVerification({
+        authProof: { method: "email" },
         identity: makeIdentity({
           email: {
             address: "user@example.com",
@@ -923,6 +987,7 @@ describe("completeHostedPrivyVerification", () => {
 
     await expect(
       completeHostedPrivyVerification({
+        authProof: { method: "phone" },
         identity: makeIdentity(),
         now: NOW,
         prisma,
@@ -1015,6 +1080,7 @@ describe("completeHostedPrivyVerification", () => {
 
     await expect(
       completeHostedPrivyVerification({
+        authProof: { method: "telegram" },
         identity: makeIdentity({
           phone: null,
           telegram: {
@@ -1023,6 +1089,7 @@ describe("completeHostedPrivyVerification", () => {
             photoUrl: null,
             telegramUserId: "456",
             username: "alice",
+            verifiedAt: 1742990400,
           },
           wallet: null,
         }),
@@ -1085,6 +1152,7 @@ describe("completeHostedPrivyVerification", () => {
 
     await expect(
       completeHostedPrivyVerification({
+        authProof: { method: "telegram" },
         identity: makeIdentity({
           phone: null,
           telegram: {
@@ -1093,6 +1161,7 @@ describe("completeHostedPrivyVerification", () => {
             photoUrl: null,
             telegramUserId: "456",
             username: "alice",
+            verifiedAt: 1742990400,
           },
           wallet: null,
         }),
@@ -1145,6 +1214,7 @@ describe("completeHostedPrivyVerification", () => {
 
     await expect(
       completeHostedPrivyVerification({
+        authProof: { method: "phone" },
         identity: makeIdentity({
           wallet: null,
         }),
@@ -1210,6 +1280,7 @@ describe("completeHostedPrivyVerification", () => {
 
     await expect(
       completeHostedPrivyVerification({
+        authProof: { method: "telegram" },
         identity: makeIdentity({
           phone: null,
           telegram: {
@@ -1218,6 +1289,7 @@ describe("completeHostedPrivyVerification", () => {
             photoUrl: null,
             telegramUserId: "456",
             username: "alice",
+            verifiedAt: 1742990400,
           },
           wallet: null,
         }),
@@ -1286,6 +1358,7 @@ describe("completeHostedPrivyVerification", () => {
 
     await expect(
       completeHostedPrivyVerification({
+        authProof: { method: "telegram" },
         identity: makeIdentity({
           phone: null,
           telegram: {
@@ -1294,6 +1367,7 @@ describe("completeHostedPrivyVerification", () => {
             photoUrl: null,
             telegramUserId: "456",
             username: "alice",
+            verifiedAt: 1742990400,
           },
           wallet: null,
         }),
@@ -1350,7 +1424,7 @@ describe("completeHostedPrivyVerification", () => {
 
     await expect(
       completeHostedPrivyVerification({
-        authMethod: "telegram",
+        authProof: { method: "telegram" },
         identity: makeIdentity({
           phone: null,
           telegram: null,
@@ -1396,6 +1470,7 @@ describe("completeHostedPrivyVerification", () => {
     });
 
     const result = await completeHostedPrivyVerification({
+      authProof: { method: "phone" },
       identity: makeIdentity(),
       inviteCode: "invite-code",
       now: NOW,
@@ -1440,6 +1515,7 @@ describe("completeHostedPrivyVerification", () => {
     });
 
     const result = await completeHostedPrivyVerification({
+      authProof: { method: "phone" },
       identity: makeIdentity(),
       inviteCode: "invite-code",
       now: NOW,
@@ -1476,6 +1552,7 @@ describe("completeHostedPrivyVerification", () => {
 
     await expect(
       completeHostedPrivyVerification({
+        authProof: { method: "phone" },
         identity: makeIdentity({
           email: {
             address: "suspended@example.test",
@@ -1487,6 +1564,7 @@ describe("completeHostedPrivyVerification", () => {
             photoUrl: null,
             telegramUserId: "456",
             username: "alice",
+            verifiedAt: 1742990400,
           },
         }),
         inviteCode: "invite-code",
@@ -1540,6 +1618,7 @@ describe("completeHostedPrivyVerification", () => {
 
     await expect(
       completeHostedPrivyVerification({
+        authProof: { method: "phone" },
         identity: makeIdentity({
           email: {
             address: "suspended@example.test",
@@ -1551,6 +1630,7 @@ describe("completeHostedPrivyVerification", () => {
             photoUrl: null,
             telegramUserId: "456",
             username: "alice",
+            verifiedAt: 1742990400,
           },
         }),
         now: NOW,
@@ -1618,7 +1698,7 @@ describe("completeHostedPrivyVerification", () => {
 
     await expect(
       completeHostedPrivyVerification({
-        authMethod: "phone",
+        authProof: { method: "phone" },
         identity: makeIdentity(),
         now: NOW,
         prisma,
@@ -1743,7 +1823,7 @@ describe("completeHostedPrivyVerification", () => {
 
     await expect(
       completeHostedPrivyVerification({
-        authMethod: "phone",
+        authProof: { method: "phone" },
         identity: makeIdentity(),
         now: NOW,
         prisma,
@@ -1803,7 +1883,7 @@ describe("completeHostedPrivyVerification", () => {
     try {
       await expect(
         completeHostedPrivyVerification({
-          authMethod: "phone",
+          authProof: { method: "phone" },
           identity: makeIdentity({
             telegram: {
               firstName: "Alice",
@@ -1811,6 +1891,7 @@ describe("completeHostedPrivyVerification", () => {
               photoUrl: null,
               telegramUserId: "456",
               username: "alice",
+              verifiedAt: 1742990400,
             },
           }),
           now: NOW,
@@ -1860,7 +1941,7 @@ describe("completeHostedPrivyVerification", () => {
 
     await expect(
       completeHostedPrivyVerification({
-        authMethod: "phone",
+        authProof: { method: "phone" },
         identity: makeIdentity({
           email: {
             address: "secondary@example.com",
@@ -1897,6 +1978,7 @@ describe("completeHostedPrivyVerification", () => {
 
     await expect(
       completeHostedPrivyVerification({
+        authProof: { method: "phone" },
         identity: makeIdentity({
           phone: {
             number: "+15550000000",
@@ -1938,6 +2020,7 @@ describe("completeHostedPrivyVerification", () => {
 
     await expect(
       completeHostedPrivyVerification({
+        authProof: { method: "phone" },
         identity: makeIdentity({
           wallet: {
             address: SYNTHETIC_TEST_WALLET_ADDRESS_ALT,
@@ -2005,6 +2088,7 @@ describe("completeHostedPrivyVerification", () => {
 
     await expect(
       completeHostedPrivyVerification({
+        authProof: { method: "phone" },
         identity: makeIdentity({
           wallet: null,
         }),

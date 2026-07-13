@@ -278,6 +278,43 @@ describe("hosted Privy identity helpers", () => {
       telegram: {
         first_name: "Alice",
         id: 456,
+        latest_verified_at: 1741194420,
+        username: "alice",
+      },
+    })).toEqual({
+      firstName: "Alice",
+      lastName: null,
+      photoUrl: null,
+      telegramUserId: "456",
+      username: "alice",
+      verifiedAt: 1741194420,
+    });
+
+    expect(extractHostedPrivyTelegramAccount({
+      linked_accounts: [
+        {
+          first_name: "Alice",
+          id: "456",
+          latest_verified_at: 1741194480,
+          type: "telegram",
+          username: "alice",
+        },
+      ],
+    })).toEqual({
+      firstName: "Alice",
+      lastName: null,
+      photoUrl: null,
+      telegramUserId: "456",
+      username: "alice",
+      verifiedAt: 1741194480,
+    });
+  });
+
+  it("preserves Telegram presentation without verification evidence and keeps the newest timestamp while merging", () => {
+    expect(extractHostedPrivyTelegramAccount({
+      telegram: {
+        first_name: "Alice",
+        id: 456,
         username: "alice",
       },
     })).toEqual({
@@ -288,21 +325,32 @@ describe("hosted Privy identity helpers", () => {
       username: "alice",
     });
 
-    expect(extractHostedPrivyTelegramAccount({
+    expect(resolveHostedPrivyTelegramAccountSelection({
       linked_accounts: [
         {
           first_name: "Alice",
           id: "456",
+          latest_verified_at: 1741194480,
           type: "telegram",
-          username: "alice",
+          username: "alice_example",
         },
       ],
+      telegram: {
+        first_name: "Alice",
+        id: 456,
+        latest_verified_at: 1741194420,
+        username: "alice",
+      },
     })).toEqual({
-      firstName: "Alice",
-      lastName: null,
-      photoUrl: null,
-      telegramUserId: "456",
-      username: "alice",
+      account: {
+        firstName: "Alice",
+        lastName: null,
+        photoUrl: null,
+        telegramUserId: "456",
+        username: "alice_example",
+        verifiedAt: 1741194480,
+      },
+      ambiguous: false,
     });
   });
 
@@ -312,6 +360,7 @@ describe("hosted Privy identity helpers", () => {
         {
           first_name: "Alice",
           id: "456",
+          latest_verified_at: 1741194420,
           type: "telegram",
           username: "alice",
         },
@@ -319,6 +368,7 @@ describe("hosted Privy identity helpers", () => {
       telegram: {
         first_name: "Bob",
         id: 789,
+        latest_verified_at: 1741194420,
         username: "bob",
       },
     })).toEqual({
@@ -330,6 +380,7 @@ describe("hosted Privy identity helpers", () => {
         {
           first_name: "Alice",
           id: "456",
+          latest_verified_at: 1741194420,
           type: "telegram",
           username: "alice",
         },
@@ -337,6 +388,7 @@ describe("hosted Privy identity helpers", () => {
       telegram: {
         first_name: "Bob",
         id: 789,
+        latest_verified_at: 1741194420,
         username: "bob",
       },
     })).toBeNull();

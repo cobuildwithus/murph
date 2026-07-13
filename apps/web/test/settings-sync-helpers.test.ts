@@ -73,6 +73,7 @@ describe("hosted settings sync helpers", () => {
     );
     mocks.requestHostedOnboardingJson.mockResolvedValue({
       emailAddress: "verified@example.com",
+      ok: true,
       runTriggered: true,
       verifiedAt: "2026-03-28T12:00:00.000Z",
     });
@@ -95,6 +96,23 @@ describe("hosted settings sync helpers", () => {
         expectedEmailAddress: "verified@example.com",
       },
       url: "/api/settings/email/sync",
+    });
+  });
+
+  it("does not report terminal email sync success for a malformed default-helper response", async () => {
+    const { syncHostedVerifiedEmailAddress } = await import(
+      "@/src/components/settings/hosted-email-settings-helpers"
+    );
+    mocks.requestHostedOnboardingJson.mockResolvedValue({});
+
+    await expect(syncHostedVerifiedEmailAddress({
+      expectedEmailAddress: "verified@example.com",
+      mode: "verify",
+    })).resolves.toEqual({
+      errorMessage:
+        "Your email is verified, but we couldn't confirm the connection. Refresh and try again.",
+      successMessage: null,
+      syncResult: null,
     });
   });
 

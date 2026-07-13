@@ -34,7 +34,13 @@ Last verified: 2026-07-10
   are not automatic Murph person identity: phone or Telegram authentication
   must not promote a linked secondary email into canonical member email
   authorization. Canonical email writes require selected email authentication
-  or the explicit fresh-session `/api/settings/email/sync` boundary.
+  or the explicit fresh-session `/api/settings/email/sync` boundary. Hosted
+  onboarding must issue a short-lived, invite-bound HttpOnly authentication
+  intent immediately before Privy verification, re-read the authoritative
+  Privy user at completion, and require the intended phone, email, or Telegram
+  credential to be both fresh and the uniquely newest login-capable account.
+  Browser-declared methods and invite contact metadata are constraints only,
+  never authentication proof.
 - Rebuildable inbox-derived artifacts can still contain sensitive health data and must be treated as high-sensitivity runtime material. Never persist provider secrets alongside those artifacts.
 - `vault-cli route estimate` is an env-gated external egress surface backed by `MAPBOX_ACCESS_TOKEN`. Keep the token in env only, treat any Mapbox geocoding or Search Box lookup as temporary/non-persistent, do not persist route inputs or outputs in Murph state, and only return route geometry when the caller explicitly asks for it. Hosted execution may expose that same CLI path only when the Worker secret is intentionally configured for Cloudflare's runner egress intercept; the raw token must not be copied into the hosted runtime env.
 - `vault-cli research scout` is an env-gated external egress surface backed by `EXA_API_KEY`. It may send only a compact, non-identifying tag profile to Exa Search, never raw lab values, names, dates of birth, full notes, medical records, or precise private identifiers. The tool must not persist Exa output or profile payloads; assistant flows may append only curated, deduplicated, non-diagnostic research-scout summaries through the normal knowledge surface.

@@ -73,7 +73,49 @@ describe("hosted phone auth support", () => {
     });
   });
 
-  it("retries Telegram completion lag with the Telegram auth intent", async () => {
+  it("writes the selected auth method and invite before provider authentication", async () => {
+    const { requestHostedPrivyAuthIntent } = await import(
+      "@/src/components/hosted-onboarding/hosted-phone-auth-support"
+    );
+    mocks.requestHostedOnboardingJson.mockResolvedValue({ ok: true });
+
+    await requestHostedPrivyAuthIntent({
+      inviteCode: "invite-code",
+      method: "telegram",
+    });
+
+    expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledWith({
+      payload: {
+        inviteCode: "invite-code",
+        method: "telegram",
+      },
+      url: "/api/hosted-onboarding/privy/begin",
+    });
+  });
+
+  it("requires a fresh provider verification only when the auth proof is unusable", async () => {
+    const { HostedOnboardingApiError } = await import(
+      "@/src/components/hosted-onboarding/client-api"
+    );
+    const { isHostedPrivyAuthRestartRequiredError } = await import(
+      "@/src/components/hosted-onboarding/hosted-phone-auth-support"
+    );
+
+    for (const code of ["HOSTED_AUTH_PROOF_INVALID", "HOSTED_AUTH_PROOF_EXPIRED"]) {
+      expect(isHostedPrivyAuthRestartRequiredError(new HostedOnboardingApiError({
+        code,
+        message: "Verify again.",
+      }))).toBe(true);
+    }
+
+    expect(isHostedPrivyAuthRestartRequiredError(new HostedOnboardingApiError({
+      code: "PRIVY_PHONE_NOT_READY",
+      message: "Try again shortly.",
+      retryable: true,
+    }))).toBe(false);
+  });
+
+  it("retries Telegram completion lag without accepting a browser auth intent", async () => {
     const { HostedOnboardingApiError } = await import(
       "@/src/components/hosted-onboarding/client-api"
     );
@@ -96,29 +138,52 @@ describe("hosted phone auth support", () => {
       .mockResolvedValueOnce(completionPayload);
 
     await expect(requestHostedPrivyCompletionWithRetry({
-      authMethod: "telegram",
       inviteCode: "invite-code",
     })).resolves.toEqual(completionPayload);
 
     expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledTimes(2);
     expect(mocks.requestHostedOnboardingJson).toHaveBeenNthCalledWith(1, {
       payload: {
-        authIntent: {
-          method: "telegram",
-        },
         inviteCode: "invite-code",
       },
       url: "/api/hosted-onboarding/privy/complete",
     });
     expect(mocks.requestHostedOnboardingJson).toHaveBeenNthCalledWith(2, {
       payload: {
-        authIntent: {
-          method: "telegram",
-        },
         inviteCode: "invite-code",
       },
       url: "/api/hosted-onboarding/privy/complete",
     });
+    expect(mocks.waitForRetryDelay).toHaveBeenCalledWith(500);
+  });
+
+  it("retries a transient authoritative Privy user lookup failure", async () => {
+    const { HostedOnboardingApiError } = await import(
+      "@/src/components/hosted-onboarding/client-api"
+    );
+    const { requestHostedPrivyCompletionWithRetry } = await import(
+      "@/src/components/hosted-onboarding/hosted-phone-auth-support"
+    );
+    const completionPayload = {
+      inviteCode: "invite-code",
+      joinUrl: "/join/invite-code",
+      messagingSetupRequired: false,
+      ok: true,
+      stage: "checkout",
+    };
+    mocks.requestHostedOnboardingJson
+      .mockRejectedValueOnce(new HostedOnboardingApiError({
+        code: "PRIVY_USER_LOOKUP_FAILED",
+        message: "Privy user lookup is temporarily unavailable.",
+        retryable: true,
+      }))
+      .mockResolvedValueOnce(completionPayload);
+
+    await expect(requestHostedPrivyCompletionWithRetry({
+      inviteCode: "invite-code",
+    })).resolves.toEqual(completionPayload);
+
+    expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledTimes(2);
     expect(mocks.waitForRetryDelay).toHaveBeenCalledWith(500);
   });
 });

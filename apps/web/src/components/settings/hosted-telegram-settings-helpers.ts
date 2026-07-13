@@ -24,11 +24,12 @@ export interface HostedTelegramSyncResult {
 }
 
 export interface HostedTelegramSettingsDisplayState {
-  currentTelegram: HostedPrivyTelegramAccount | null;
+  currentTelegram: HostedTelegramDisplayAccount | null;
 }
 
 export type HostedTelegramSyncMode = "link" | "resync";
 export type HostedTelegramSyncOverride = Pick<HostedPrivyTelegramAccount, "telegramUserId" | "username">;
+export type HostedTelegramDisplayAccount = Omit<HostedPrivyTelegramAccount, "verifiedAt">;
 
 export interface HostedTelegramSyncPresentation {
   errorMessage: string | null;
@@ -74,7 +75,7 @@ export function formatHostedTelegramDisplayValue(
 
 function toHostedTelegramDisplayAccount(
   account: HostedTelegramSyncOverride,
-): HostedPrivyTelegramAccount {
+): HostedTelegramDisplayAccount {
   return {
     firstName: null,
     lastName: null,

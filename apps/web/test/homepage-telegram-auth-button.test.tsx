@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   login: vi.fn(),
   onAuthenticated: vi.fn(),
   onNoticeChange: vi.fn(),
+  requestHostedPrivyAuthIntent: vi.fn(),
   usePrivy: vi.fn(),
 }));
 
@@ -20,6 +21,20 @@ vi.mock("@privy-io/react-auth", () => ({
   usePrivy: mocks.usePrivy,
 }));
 
+vi.mock(
+  "@/src/components/hosted-onboarding/hosted-privy-auth-support",
+  async (importOriginal) => {
+    const actual = await importOriginal<
+      typeof import("@/src/components/hosted-onboarding/hosted-privy-auth-support")
+    >();
+
+    return {
+      ...actual,
+      requestHostedPrivyAuthIntent: mocks.requestHostedPrivyAuthIntent,
+    };
+  },
+);
+
 import { HostedTelegramAuthButton } from "@/src/components/hosted-onboarding/hosted-telegram-auth-button";
 
 let cleanupRender: (() => Promise<void>) | null = null;
@@ -31,6 +46,7 @@ beforeEach(() => {
   });
   mocks.login.mockResolvedValue(undefined);
   mocks.onAuthenticated.mockResolvedValue(undefined);
+  mocks.requestHostedPrivyAuthIntent.mockResolvedValue(undefined);
 });
 
 afterEach(async () => {
@@ -64,9 +80,47 @@ test("HomepageTelegramAuthButton logs in with Telegram and reports the authentic
   });
 
   expect(mocks.login).toHaveBeenCalledTimes(1);
+  expect(mocks.requestHostedPrivyAuthIntent).toHaveBeenCalledWith({
+    inviteCode: null,
+    method: "telegram",
+  });
+  expect(
+    mocks.requestHostedPrivyAuthIntent.mock.invocationCallOrder[0],
+  ).toBeLessThan(mocks.login.mock.invocationCallOrder[0] ?? 0);
   expect(mocks.onAuthenticated).toHaveBeenCalledWith({
     authMethod: "telegram",
   });
+});
+
+test("HomepageTelegramAuthButton locks duplicate clicks while the auth intent is pending", async () => {
+  const authIntent = createDeferred();
+  mocks.requestHostedPrivyAuthIntent.mockReturnValueOnce(authIntent.promise);
+
+  const { button, cleanup } = await renderClientComponent(
+    createElement(HomepageTelegramAuthButtonHarness),
+  );
+  cleanupRender = cleanup;
+
+  await act(async () => {
+    button.dispatchEvent(new Event("click", { bubbles: true }));
+    button.dispatchEvent(new Event("click", { bubbles: true }));
+    await Promise.resolve();
+  });
+
+  expect(mocks.requestHostedPrivyAuthIntent).toHaveBeenCalledTimes(1);
+  expect(mocks.login).not.toHaveBeenCalled();
+  expect(button.disabled).toBe(true);
+  expect(button.textContent).toContain("Connecting...");
+
+  await act(async () => {
+    authIntent.resolve();
+    await authIntent.promise;
+    await Promise.resolve();
+  });
+
+  expect(mocks.login).toHaveBeenCalledTimes(1);
+  expect(mocks.onAuthenticated).toHaveBeenCalledTimes(1);
+  expect(button.disabled).toBe(false);
 });
 
 test("HomepageTelegramAuthButton keeps the CTA disabled until Privy is ready", async () => {
@@ -134,3 +188,11 @@ test("HomepageTelegramAuthButton clears the notice before retrying", async () =>
 
   expect(mocks.onNoticeChange).toHaveBeenCalledWith(null);
 });
+
+function createDeferred() {
+  let resolve: () => void = () => undefined;
+  const promise = new Promise<void>((resolvePromise) => {
+    resolve = () => resolvePromise();
+  });
+  return { promise, resolve };
+}

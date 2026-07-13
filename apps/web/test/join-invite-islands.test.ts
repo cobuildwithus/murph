@@ -24,8 +24,10 @@ import type { HostedConsentStatus } from "@/src/lib/legal/consent";
 import { buildJoinInviteStatusRefreshSnapshot } from "@/src/components/hosted-onboarding/join-invite-state";
 
 const mocks = vi.hoisted(() => ({
+  authenticated: false,
   refresh: vi.fn(),
   replace: vi.fn(),
+  logout: vi.fn(),
   requestHostedAutoPulseTrialEnrollment: vi.fn(),
   requestHostedBillingCheckout: vi.fn(),
   requestHostedOnboardingJson: vi.fn(),
@@ -43,7 +45,8 @@ vi.mock("next/navigation", () => ({
 
 vi.mock("@privy-io/react-auth", () => ({
   usePrivy: () => ({
-    logout: vi.fn(),
+    authenticated: mocks.authenticated,
+    logout: mocks.logout,
   }),
   useUser: () => ({
     refreshUser: vi.fn(),
@@ -135,6 +138,7 @@ vi.mock("@/src/components/hosted-onboarding/invite-status-client", () => ({
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.authenticated = false;
   mocks.hostedEmailAuthProps = null;
   mocks.hostedPhoneAuthProps = null;
 });
@@ -599,9 +603,47 @@ test("JoinInvitePhoneVerificationIsland uses email auth for invite email verific
     active: true,
     initialEmailAddress: "buddy@example.com",
     inline: true,
+    inviteCode: "invite-code",
     onAuthenticated: expect.any(Function),
   });
   expect(mocks.hostedPhoneAuthProps).toBeNull();
+  await cleanup();
+});
+
+test("JoinInvitePhoneVerificationIsland cannot start invite email auth from an authenticated session", async () => {
+  mocks.authenticated = true;
+
+  const { cleanup, container } = await renderClientComponent(
+    createElement(JoinInvitePhoneVerificationIsland, {
+      emailAuthTarget: {
+        emailAddress: "buddy@example.com",
+        kind: "saved",
+      },
+      inviteCode: "invite-code",
+      phoneAuthTarget: {
+        kind: "manual",
+      },
+      phoneHint: null,
+      verificationMode: "invite_email",
+    }),
+    { requireButton: false },
+  );
+
+  expect(container.querySelector('[data-hosted-email-auth="true"]')).toBeNull();
+  expect(mocks.hostedEmailAuthProps).toBeNull();
+  expect(container.textContent).toContain("Verify this invite with a fresh sign-in");
+
+  const signOutButton = [...container.querySelectorAll("button")].find(
+    (candidate) => candidate.textContent === "Use this invite instead",
+  );
+  expect(signOutButton).toBeTruthy();
+
+  await act(async () => {
+    signOutButton?.click();
+  });
+
+  expect(mocks.logout).toHaveBeenCalledTimes(1);
+  expect(mocks.refresh).toHaveBeenCalledTimes(1);
   await cleanup();
 });
 

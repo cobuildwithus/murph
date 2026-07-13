@@ -111,7 +111,7 @@ export function JoinInvitePhoneVerificationIsland({
   verificationMode: HostedInviteVerificationMode;
 }) {
   const router = useRouter();
-  const { logout } = usePrivy();
+  const { authenticated, logout } = usePrivy();
   const emailAuthCompletion = useHostedAuthCompletion({
     inviteCode,
     onCompleted: () => {
@@ -120,6 +120,20 @@ export function JoinInvitePhoneVerificationIsland({
   });
 
   if (verificationMode === "invite_email") {
+    if (authenticated) {
+      return (
+        <Alert>
+          <AlertTitle>Verify this invite with a fresh sign-in</AlertTitle>
+          <AlertDescription>
+            Sign out first, then verify the email address for this invite with a fresh code.
+          </AlertDescription>
+          <div className="mt-3">
+            <JoinInviteSignOutButtonIsland />
+          </div>
+        </Alert>
+      );
+    }
+
     if (emailAuthCompletion.completingMethod) {
       return (
         <div aria-busy="true" aria-live="polite" role="status">
@@ -133,6 +147,7 @@ export function JoinInvitePhoneVerificationIsland({
         <HostedEmailAuthButton
           active
           inline
+          inviteCode={inviteCode}
           initialEmailAddress={
             emailAuthTarget?.kind === "saved" ? emailAuthTarget.emailAddress : null
           }
@@ -362,4 +377,3 @@ export function JoinInviteCheckoutPlanButtonIsland({
     </div>
   );
 }
-

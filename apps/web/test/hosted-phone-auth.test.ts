@@ -10,6 +10,7 @@ import { renderClientComponent } from "./render-client-component";
 const mocks = vi.hoisted(() => ({
   loginWithCode: vi.fn(),
   logout: vi.fn(),
+  requestHostedPrivyAuthIntent: vi.fn(),
   sendCode: vi.fn(),
   usePrivy: vi.fn(),
   useUser: vi.fn(),
@@ -29,9 +30,24 @@ vi.mock("@privy-io/react-auth", () => ({
   useUser: mocks.useUser,
 }));
 
+vi.mock(
+  "@/src/components/hosted-onboarding/hosted-phone-auth-support",
+  async (importOriginal) => {
+    const actual = await importOriginal<
+      typeof import("@/src/components/hosted-onboarding/hosted-phone-auth-support")
+    >();
+
+    return {
+      ...actual,
+      requestHostedPrivyAuthIntent: mocks.requestHostedPrivyAuthIntent,
+    };
+  },
+);
+
 describe("HostedPhoneAuth", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.requestHostedPrivyAuthIntent.mockResolvedValue(undefined);
     mocks.usePrivy.mockReturnValue({
       authenticated: false,
       logout: mocks.logout,
@@ -398,6 +414,13 @@ describe("HostedPhoneAuth", () => {
       expect(mocks.loginWithCode).toHaveBeenCalledWith({
         code: "123456",
       });
+      expect(mocks.requestHostedPrivyAuthIntent).toHaveBeenCalledWith({
+        inviteCode: undefined,
+        method: "phone",
+      });
+      expect(
+        mocks.requestHostedPrivyAuthIntent.mock.invocationCallOrder[0],
+      ).toBeLessThan(mocks.loginWithCode.mock.invocationCallOrder[0] ?? 0);
       assert.match(container.textContent ?? "", /We could not verify that code\./);
       assert.doesNotMatch(
         container.textContent ?? "",
@@ -1070,12 +1093,30 @@ describe("HostedPhoneAuth", () => {
   it("requests a code for the stored invite phone without showing the raw number", async () => {
     vi.resetModules();
     vi.doMock("@/src/components/hosted-onboarding/hosted-verification-code-step", () => ({
-      HostedVerificationCodeStep({ description }: { description: string }) {
+      HostedVerificationCodeStep({
+        description,
+        onCodeChange,
+        onSubmit,
+      }: {
+        description: string;
+        onCodeChange: (value: string) => void;
+        onSubmit: () => void;
+      }) {
         return React.createElement(
           "div",
           null,
           React.createElement("p", null, "Verification code"),
           React.createElement("p", null, description),
+          React.createElement("button", {
+            "data-enter-invite-code": "true",
+            onClick: () => onCodeChange("123456"),
+            type: "button",
+          }, "Enter code"),
+          React.createElement("button", {
+            "data-verify-invite-code": "true",
+            onClick: onSubmit,
+            type: "button",
+          }, "Verify code"),
         );
       },
     }));
@@ -1108,6 +1149,7 @@ describe("HostedPhoneAuth", () => {
     });
     vi.stubGlobal("fetch", fetch);
     mocks.sendCode.mockResolvedValue(undefined);
+    mocks.loginWithCode.mockRejectedValueOnce(new Error("Stop after authentication intent."));
 
     const { HostedInvitePhoneAuth } = await import("@/src/components/hosted-onboarding/hosted-invite-phone-auth");
     const { cleanup, container } = await renderClientComponent(
@@ -1143,6 +1185,31 @@ describe("HostedPhoneAuth", () => {
       assert.match(container.textContent ?? "", /Verification code/);
       assert.match(container.textContent ?? "", /\*\*\* 0123/);
       assert.doesNotMatch(container.textContent ?? "", /\+12025550123/);
+
+      const enterCodeButton = container.querySelector(
+        "[data-enter-invite-code]",
+      ) as HTMLButtonElement | null;
+      const verifyCodeButton = container.querySelector(
+        "[data-verify-invite-code]",
+      ) as HTMLButtonElement | null;
+      assert.ok(enterCodeButton);
+      assert.ok(verifyCodeButton);
+
+      await act(async () => {
+        enterCodeButton.dispatchEvent(new Event("click", { bubbles: true }));
+      });
+      await act(async () => {
+        verifyCodeButton.dispatchEvent(new Event("click", { bubbles: true }));
+        await Promise.resolve();
+      });
+
+      expect(mocks.requestHostedPrivyAuthIntent).toHaveBeenCalledWith({
+        inviteCode: "invite-code",
+        method: "phone",
+      });
+      expect(
+        mocks.requestHostedPrivyAuthIntent.mock.invocationCallOrder[0],
+      ).toBeLessThan(mocks.loginWithCode.mock.invocationCallOrder[0] ?? 0);
     } finally {
       await cleanup();
       vi.doUnmock("@/src/components/hosted-onboarding/hosted-verification-code-step");
@@ -1735,7 +1802,7 @@ describe("HostedPhoneAuth", () => {
     assert.doesNotMatch(markup, /Use a different number/);
   });
 
-  it("switches from manual resume to sign-out recovery when the Privy account conflicts", async () => {
+  it("requires fresh verification when resumable phone auth has no valid proof", async () => {
     mocks.usePrivy.mockReturnValue({
       authenticated: true,
       logout: mocks.logout,
@@ -1762,12 +1829,12 @@ describe("HostedPhoneAuth", () => {
     const fetch = vi.fn(async () =>
       new Response(JSON.stringify({
         error: {
-          code: "PRIVY_USER_MISMATCH",
-          message: "This phone number is already linked to a different Privy account.",
+          code: "HOSTED_AUTH_PROOF_INVALID",
+          message: "Request a fresh verification code and try again.",
         },
       }), {
         headers: { "content-type": "application/json" },
-        status: 409,
+        status: 401,
       }),
     );
     vi.stubGlobal("fetch", fetch);
@@ -1794,108 +1861,26 @@ describe("HostedPhoneAuth", () => {
         await Promise.resolve();
       });
 
+      expect(fetch).toHaveBeenCalledTimes(1);
+      expect(mocks.requestHostedPrivyAuthIntent).not.toHaveBeenCalled();
       assert.doesNotMatch(container.textContent ?? "", /Unable to continue/);
-      assert.doesNotMatch(container.textContent ?? "", /different Privy account/);
       assert.doesNotMatch(container.textContent ?? "", /Continue/);
       assert.match(container.textContent ?? "", /Sign in with this phone again/);
-      assert.match(container.textContent ?? "", /signed into a different Murph account/);
+      assert.match(container.textContent ?? "", /fresh code/);
 
-      const resetButton = [...container.querySelectorAll("button")]
+      const signOutButton = [...container.querySelectorAll("button")]
         .find((button) => button.textContent === "Sign out") as
           | HTMLButtonElement
           | undefined;
-      assert.ok(resetButton);
+      assert.ok(signOutButton);
 
       await act(async () => {
-        resetButton.dispatchEvent(new Event("click", { bubbles: true }));
+        signOutButton.dispatchEvent(new Event("click", { bubbles: true }));
         await Promise.resolve();
       });
 
       expect(mocks.logout).toHaveBeenCalledTimes(1);
-    } finally {
-      await cleanup();
-      vi.unstubAllGlobals();
-      vi.resetModules();
-    }
-  });
-
-  it("switches from manual resume to sign-out recovery when the verified identity conflicts", async () => {
-    mocks.usePrivy.mockReturnValue({
-      authenticated: true,
-      logout: mocks.logout,
-      ready: true,
-    });
-    mocks.useUser.mockReturnValue({
-      user: {
-        linkedAccounts: [
-          {
-            latest_verified_at: 1741194420,
-            phone_number: "+14155552671",
-            type: "phone",
-          },
-          {
-            address: "0x0000000000000000000000000000000000000001",
-            chain_type: "ethereum",
-            connector_type: "embedded",
-            wallet_client: "privy",
-            type: "wallet",
-          },
-        ],
-      },
-    });
-    const fetch = vi.fn(async () =>
-      new Response(JSON.stringify({
-        error: {
-          code: "PRIVY_IDENTITY_CONFLICT",
-          message: "This phone number is already linked to a different Privy account.",
-        },
-      }), {
-        headers: { "content-type": "application/json" },
-        status: 409,
-      }),
-    );
-    vi.stubGlobal("fetch", fetch);
-
-    const { HostedPhoneAuth } = await import("@/src/components/hosted-onboarding/hosted-phone-auth");
-    const { cleanup, container } = await renderClientComponent(
-      React.createElement(HostedPhoneAuth, {
-        intent: "auth",
-      }),
-    );
-
-    try {
-      assert.match(container.textContent ?? "", /You already started logging in or signing up\./);
-
-      const continueButton = [...container.querySelectorAll("button")]
-        .find((button) => button.textContent === "Continue") as
-          | HTMLButtonElement
-          | undefined;
-      assert.ok(continueButton);
-
-      await act(async () => {
-        continueButton.dispatchEvent(new Event("click", { bubbles: true }));
-        await Promise.resolve();
-        await Promise.resolve();
-      });
-
-      assert.doesNotMatch(container.textContent ?? "", /Unable to continue/);
-      assert.doesNotMatch(container.textContent ?? "", /different Privy account/);
-      assert.doesNotMatch(container.textContent ?? "", /Continue/);
-      assert.match(container.textContent ?? "", /Sign in with this phone again/);
-      assert.match(container.textContent ?? "", /signed into a different Murph account/);
-
-      const resetButton = [...container.querySelectorAll("button")]
-        .find((button) => button.textContent === "Sign out") as
-          | HTMLButtonElement
-          | undefined;
-      assert.ok(resetButton);
-
-      await act(async () => {
-        resetButton.dispatchEvent(new Event("click", { bubbles: true }));
-        await Promise.resolve();
-      });
-
-      expect(mocks.logout).toHaveBeenCalledTimes(1);
+      expect(mocks.requestHostedPrivyAuthIntent).not.toHaveBeenCalled();
     } finally {
       await cleanup();
       vi.unstubAllGlobals();
@@ -2056,6 +2041,7 @@ describe("HostedPhoneAuth", () => {
       return {
         ...actual,
         finalizeHostedPrivyVerification,
+        requestHostedPrivyAuthIntent: mocks.requestHostedPrivyAuthIntent,
       };
     });
     vi.doMock("@/src/components/hosted-onboarding/hosted-phone-auth-views", () => ({
@@ -2211,6 +2197,7 @@ describe("HostedPhoneAuth", () => {
       return {
         ...actual,
         finalizeHostedPrivyVerification,
+        requestHostedPrivyAuthIntent: mocks.requestHostedPrivyAuthIntent,
       };
     });
     vi.doMock("@/src/components/hosted-onboarding/hosted-phone-auth-views", async () => {
@@ -2472,7 +2459,9 @@ describe("HostedPhoneAuth", () => {
     const { createHostedPhoneVerificationAttempt } = await import("@/src/components/hosted-onboarding/hosted-phone-auth-support");
 
     assert.deepEqual(
-      createHostedPhoneVerificationAttempt("+14155552671"),
+      createHostedPhoneVerificationAttempt({
+        phoneNumber: "+14155552671",
+      }),
       {
         maskedPhoneNumber: "*** 2671",
         phoneNumber: "+14155552671",
@@ -2717,28 +2706,19 @@ describe("HostedPhoneAuth", () => {
     );
   });
 
-  it("includes the selected auth intent in hosted Privy completion requests", async () => {
+  it("keeps browser-authored methods out of hosted Privy completion requests", async () => {
     const { buildHostedPrivyCompletionRequestPayload } = await import("@/src/components/hosted-onboarding/hosted-privy-auth-support");
 
     assert.deepEqual(
       buildHostedPrivyCompletionRequestPayload({
-        authMethod: "phone",
       }),
-      {
-        authIntent: {
-          method: "phone",
-        },
-      },
+      {},
     );
     assert.deepEqual(
       buildHostedPrivyCompletionRequestPayload({
-        authMethod: "telegram",
         inviteCode: "invite-code",
       }),
       {
-        authIntent: {
-          method: "telegram",
-        },
         inviteCode: "invite-code",
       },
     );
@@ -2760,12 +2740,8 @@ describe("HostedPhoneAuth", () => {
     try {
       assert.deepEqual(
         buildHostedPrivyCompletionRequestPayload({
-          authMethod: "email",
         }),
         {
-          authIntent: {
-            method: "email",
-          },
           timeZone: "America/Los_Angeles",
         },
       );
@@ -2817,11 +2793,7 @@ describe("HostedPhoneAuth", () => {
 
     assert.equal(requestHostedOnboardingJson.mock.calls.length, 1);
     assert.equal(requestHostedOnboardingJson.mock.calls[0]?.[0]?.url, "/api/hosted-onboarding/privy/complete");
-    assert.deepEqual(requestHostedOnboardingJson.mock.calls[0]?.[0]?.payload, {
-      authIntent: {
-        method: "phone",
-      },
-    });
+    assert.deepEqual(requestHostedOnboardingJson.mock.calls[0]?.[0]?.payload, {});
     assert.equal(assign.mock.calls.length, 1);
     assert.equal(assign.mock.calls[0]?.[0], "/join/invite-code");
   });
@@ -2881,16 +2853,8 @@ describe("HostedPhoneAuth", () => {
     }
 
     assert.equal(requestHostedOnboardingJson.mock.calls.length, 2);
-    assert.deepEqual(requestHostedOnboardingJson.mock.calls[0]?.[0]?.payload, {
-      authIntent: {
-        method: "phone",
-      },
-    });
-    assert.deepEqual(requestHostedOnboardingJson.mock.calls[1]?.[0]?.payload, {
-      authIntent: {
-        method: "phone",
-      },
-    });
+    assert.deepEqual(requestHostedOnboardingJson.mock.calls[0]?.[0]?.payload, {});
+    assert.deepEqual(requestHostedOnboardingJson.mock.calls[1]?.[0]?.payload, {});
     assert.equal(assign.mock.calls.length, 1);
     assert.equal(assign.mock.calls[0]?.[0], "/join/invite-code");
   });
@@ -2948,16 +2912,8 @@ describe("HostedPhoneAuth", () => {
     }
 
     assert.equal(requestHostedOnboardingJson.mock.calls.length, 2);
-    assert.deepEqual(requestHostedOnboardingJson.mock.calls[0]?.[0]?.payload, {
-      authIntent: {
-        method: "phone",
-      },
-    });
-    assert.deepEqual(requestHostedOnboardingJson.mock.calls[1]?.[0]?.payload, {
-      authIntent: {
-        method: "phone",
-      },
-    });
+    assert.deepEqual(requestHostedOnboardingJson.mock.calls[0]?.[0]?.payload, {});
+    assert.deepEqual(requestHostedOnboardingJson.mock.calls[1]?.[0]?.payload, {});
     assert.equal(assign.mock.calls.length, 1);
     assert.equal(assign.mock.calls[0]?.[0], "/join/invite-code");
   });

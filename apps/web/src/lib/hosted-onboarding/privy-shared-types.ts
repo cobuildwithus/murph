@@ -19,6 +19,7 @@ export interface HostedPrivyTelegramAccount {
   photoUrl: string | null;
   telegramUserId: string;
   username: string | null;
+  verifiedAt?: number;
 }
 
 export interface HostedPrivyTelegramAccountSelection {

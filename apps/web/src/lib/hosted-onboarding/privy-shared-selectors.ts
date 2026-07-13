@@ -28,6 +28,12 @@ const PRIVY_VERIFIED_AT_KEYS = [
   "lv",
 ] as const;
 
+export function readHostedPrivyLinkedAccountVerifiedAt(
+  account: PrivyLinkedAccountLike,
+): number | null {
+  return firstTimestamp(account, PRIVY_VERIFIED_AT_KEYS);
+}
+
 export function resolveHostedPrivyLinkedAccounts(
   input: HostedPrivyLinkedAccountContainer | null | undefined,
 ): PrivyLinkedAccountLike[] {
@@ -200,12 +206,15 @@ function mergeHostedPrivyTelegramAccounts(
     return next;
   }
 
+  const verifiedAt = readNewestTimestamp(current.verifiedAt, next.verifiedAt);
+
   return {
     firstName: preferLongerString(current.firstName, next.firstName),
     lastName: preferLongerString(current.lastName, next.lastName),
     photoUrl: preferLongerString(current.photoUrl, next.photoUrl),
     telegramUserId: current.telegramUserId,
     username: preferLongerString(current.username, next.username),
+    ...(verifiedAt === null ? {} : { verifiedAt }),
   };
 }
 
@@ -219,11 +228,24 @@ function coerceHostedPrivyTelegramAccount(
     return null;
   }
 
+  const verifiedAt = firstTimestamp(record, PRIVY_VERIFIED_AT_KEYS);
+
   return {
     firstName: firstString(record, ["first_name", "firstName"]),
     lastName: firstString(record, ["last_name", "lastName"]),
     photoUrl: firstString(record, ["photo_url", "photoUrl"]),
     telegramUserId,
     username: firstString(record, ["username"]),
+    ...(verifiedAt === null ? {} : { verifiedAt }),
   };
+}
+
+function readNewestTimestamp(
+  first: number | null | undefined,
+  second: number | null | undefined,
+): number | null {
+  const timestamps = [first, second].filter(
+    (value): value is number => typeof value === "number" && Number.isFinite(value),
+  );
+  return timestamps.length > 0 ? Math.max(...timestamps) : null;
 }

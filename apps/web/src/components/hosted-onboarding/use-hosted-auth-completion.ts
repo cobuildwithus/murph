@@ -24,6 +24,7 @@ export interface HostedPrivyAuthenticatedInput {
 export function useHostedAuthCompletion(input: {
   inviteCode?: string | null;
   onCompleted?: (result: HostedAuthCompletionResult) => Promise<void> | void;
+  onError?: (error: unknown) => void;
 }) {
   const [completingMethod, setCompletingMethod] =
     useState<HostedPrivyAuthMethod | null>(null);
@@ -48,6 +49,7 @@ export function useHostedAuthCompletion(input: {
         toErrorMessage(error, "We could not finish signing you in."),
       );
       setCompletingMethod(null);
+      input.onError?.(error);
     }
   }
 

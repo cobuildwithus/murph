@@ -29,6 +29,7 @@ import { HostedInlineAuthButton } from "./hosted-inline-auth-button";
 import { HostedPhoneAuth } from "./hosted-phone-auth";
 import { HostedPrivyCaptcha } from "./hosted-privy-captcha";
 import { HostedTelegramAuthButton } from "./hosted-telegram-auth-button";
+import { isHostedPrivyAuthRestartRequiredError } from "./hosted-privy-auth-support";
 import { useHostedAuthCompletion } from "./use-hosted-auth-completion";
 
 type HostedAuthMethod = "phone" | "telegram" | "email";
@@ -56,14 +57,24 @@ export function HostedAuthPanel({
 }) {
   const [primaryMethod, setPrimaryMethod] = useState<HostedPrimaryMethod>("phone");
   const [codeSent, setCodeSent] = useState(false);
+  const [authAttemptPending, setAuthAttemptPending] = useState(false);
   const [telegramActive, setTelegramActive] = useState(false);
   const [telegramNotice, setTelegramNotice] = useState<TelegramAuthNotice | null>(null);
+  const [resumableAuthRestartRequired, setResumableAuthRestartRequired] =
+    useState(false);
   const [pendingAuthCompletion, setPendingAuthCompletion] =
     useState<HostedAuthCompletionResult | null>(null);
   const pendingAuthCompletionRef = useRef<HostedAuthCompletionResult | null>(null);
   const { authenticated, logout } = usePrivy();
   const { user } = useUser();
-  const completion = useHostedAuthCompletion({ onCompleted: handleAuthCompleted });
+  const completion = useHostedAuthCompletion({
+    onCompleted: handleAuthCompleted,
+    onError(error) {
+      if (isHostedPrivyAuthRestartRequiredError(error)) {
+        setResumableAuthRestartRequired(true);
+      }
+    },
+  });
   const includesPhone = methods.includes("phone");
   const includesTelegram = methods.includes("telegram");
   const includesEmail = methods.includes("email");
@@ -121,8 +132,29 @@ export function HostedAuthPanel({
     });
   }
 
-  async function handleSignOutResumableAuth() {
+  async function handleRestartResumableAuth() {
+    if (!resumableAuth) return;
+
+    const method = resumableAuth.method;
     await logout();
+
+    if (method === "email") {
+      setPrimaryMethod("email");
+      setTelegramActive(false);
+    } else {
+      setPrimaryMethod("phone");
+      setTelegramActive(true);
+    }
+
+    setTelegramNotice(null);
+    await onSignOut?.();
+  }
+
+  async function handleUsePhoneAfterResumableAuth() {
+    await logout();
+    setPrimaryMethod("phone");
+    setTelegramActive(false);
+    setTelegramNotice(null);
     await onSignOut?.();
   }
 
@@ -154,11 +186,14 @@ export function HostedAuthPanel({
         <HostedResumableAuthState
           auth={resumableAuth}
           disabled={completion.completingMethod !== null}
+          restartRequired={resumableAuthRestartRequired}
           onContinue={handleContinueResumableAuth}
-          onSignOut={handleSignOutResumableAuth}
+          onRestart={handleRestartResumableAuth}
+          onUsePhone={handleUsePhoneAfterResumableAuth}
         />
       ) : primaryMethod === "phone" && includesPhone ? (
         <HostedPhoneAuth
+          sendCodeGated={authAttemptPending}
           onAuthCompleted={handleAuthCompleted}
           onCodeSent={() => setCodeSent(true)}
           onSignOut={onSignOut}
@@ -172,8 +207,10 @@ export function HostedAuthPanel({
       {primaryMethod === "email" && includesEmail ? (
         <HostedEmailAuthButton
           active
+          disabled={authAttemptPending}
           onAuthenticated={completion.completeAuth}
           onActivate={() => {}}
+          onAuthAttemptPendingChange={setAuthAttemptPending}
           inline
         />
       ) : null}
@@ -189,7 +226,9 @@ export function HostedAuthPanel({
             {includesTelegram ? (
               <HostedTelegramAuthButton
                 active={telegramActive}
+                disabled={authAttemptPending}
                 onAuthenticated={completion.completeAuth}
+                onAuthAttemptPendingChange={setAuthAttemptPending}
                 onActivate={() => {
                   setPrimaryMethod("phone");
                   setTelegramActive(true);
@@ -201,7 +240,9 @@ export function HostedAuthPanel({
               primaryMethod === "phone" ? (
                 <HostedEmailAuthButton
                   active={false}
+                  disabled={authAttemptPending}
                   onAuthenticated={completion.completeAuth}
+                  onAuthAttemptPendingChange={setAuthAttemptPending}
                   onActivate={() => {
                     setPrimaryMethod("email");
                     setTelegramActive(false);
@@ -211,7 +252,7 @@ export function HostedAuthPanel({
               ) : (
                 <HostedInlineAuthButton
                   active={false}
-                  disabled={false}
+                  disabled={authAttemptPending}
                   icon={<PhoneIcon className="h-5 w-5" />}
                   onClick={() => {
                     setPrimaryMethod("phone");
@@ -255,36 +296,46 @@ export function HostedAuthPanel({
 function HostedResumableAuthState({
   auth,
   disabled,
+  restartRequired,
   onContinue,
-  onSignOut,
+  onRestart,
+  onUsePhone,
 }: {
   auth: HostedResumableAuth;
   disabled: boolean;
+  restartRequired: boolean;
   onContinue: () => Promise<void> | void;
-  onSignOut: () => Promise<void> | void;
+  onRestart: () => Promise<void> | void;
+  onUsePhone: () => Promise<void> | void;
 }) {
   const methodLabel = auth.method === "telegram" ? "Telegram" : "email";
-  const description = auth.identityLabel
-    ? `You're signed in as ${auth.identityLabel}.`
-    : `You're already signed in with ${methodLabel}.`;
+  const description = restartRequired
+    ? auth.identityLabel
+      ? `You're signed in as ${auth.identityLabel}. Sign out to verify this account again.`
+      : `Sign out to verify with ${methodLabel} again.`
+    : auth.identityLabel
+      ? `You're signed in as ${auth.identityLabel}.`
+      : `You're already signed in with ${methodLabel}.`;
 
   return (
     <Alert className="rounded-[2rem] border-stone-200 bg-stone-50">
-      <AlertTitle>Continue with {methodLabel}</AlertTitle>
+      <AlertTitle>
+        {restartRequired ? `Verify with ${methodLabel} again` : `Continue with ${methodLabel}`}
+      </AlertTitle>
       <AlertDescription>{description}</AlertDescription>
       <div className="mt-3 flex flex-wrap gap-3">
         <Button
           type="button"
-          onClick={onContinue}
+          onClick={restartRequired ? onRestart : onContinue}
           disabled={disabled}
           size="lg"
           className="min-w-32 flex-1"
         >
-          Continue
+          {restartRequired ? "Sign out to verify" : "Continue"}
         </Button>
         <Button
           type="button"
-          onClick={onSignOut}
+          onClick={onUsePhone}
           disabled={disabled}
           variant="outline"
           size="lg"

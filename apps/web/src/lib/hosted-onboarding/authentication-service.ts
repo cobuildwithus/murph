@@ -34,7 +34,7 @@ import {
   type HostedPrivyIdentity,
   type HostedPrivyUser,
 } from "./privy";
-import { resolveHostedPrivyAuthMethodFromIdentity } from "./privy-auth-method";
+import type { HostedPrivyAuthenticationProof } from "./privy-auth-intent";
 import type { HostedPrivyAuthMethod } from "./types";
 import { normalizeHostedSignupTimeZone } from "./time-zone-hint";
 import {
@@ -66,7 +66,7 @@ type HostedPrivyCompletionMemberResolution = {
 };
 
 export async function completeHostedPrivyVerification(input: {
-  authMethod?: HostedPrivyAuthMethod;
+  authProof: HostedPrivyAuthenticationProof;
   identity: HostedPrivyIdentity;
   inviteCode?: string | null;
   now?: Date;
@@ -95,10 +95,7 @@ export async function completeHostedPrivyVerification(input: {
       ? await requireHostedInviteForAuthentication(input.inviteCode, prisma, now)
       : null;
     usedInvite = invite !== null;
-    const authMethod = resolveHostedPrivyAuthMethodFromIdentity({
-      authMethod: input.authMethod,
-      identity: input.identity,
-    });
+    const authMethod = input.authProof.method;
 
     if (invite) {
       assertHostedMemberNotSuspended(invite.member);
@@ -114,18 +111,18 @@ export async function completeHostedPrivyVerification(input: {
             inviteRouting?.pendingLinqParticipantContact?.kind === "email"
               ? inviteRouting.pendingLinqParticipantContact
               : null;
-          const inviteAuthMethod = resolveHostedInvitePrivyAuthMethod({
+          assertHostedInvitePrivyAuthMethod({
             authMethod,
             hasExpectedEmail: Boolean(pendingEmailContact?.lookupKey),
             hasExpectedPhone: Boolean(inviteIdentity.phoneLookupKey),
           });
           assertHostedPrivyAuthMethodSatisfied({
-            authMethod: inviteAuthMethod,
+            authMethod,
             identity: input.identity,
           });
           const member = await prisma.$transaction(async (tx) => {
             const reconciledMember = await reconcileHostedPrivyIdentityOnMemberTx({
-              authMethod: inviteAuthMethod,
+              authMethod,
               expectedEmailLookupKey: pendingEmailContact?.lookupKey,
               expectedPhoneHint: pendingEmailContact
                 ? undefined
@@ -139,7 +136,7 @@ export async function completeHostedPrivyVerification(input: {
               now,
             });
             await syncHostedPrivyPrimaryBindingTx({
-              authMethod: inviteAuthMethod,
+              authMethod,
               identity: input.identity,
               memberId: reconciledMember.id,
               prisma: tx,
@@ -153,11 +150,11 @@ export async function completeHostedPrivyVerification(input: {
           }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
 
           return {
-            bindingAuthMethod: inviteAuthMethod,
+            bindingAuthMethod: authMethod,
             initialVisitEligible: true,
             member,
             primaryBindingSynced:
-              inviteAuthMethod === "email" || inviteAuthMethod === "telegram",
+              authMethod === "email" || authMethod === "telegram",
           };
         })()
       : {
@@ -343,20 +340,21 @@ async function syncHostedPrivySecondaryBindingBestEffort(
   }
 }
 
-function resolveHostedInvitePrivyAuthMethod(input: {
+function assertHostedInvitePrivyAuthMethod(input: {
   authMethod: HostedPrivyAuthMethod;
   hasExpectedEmail: boolean;
   hasExpectedPhone: boolean;
-}): HostedPrivyAuthMethod {
-  if (input.hasExpectedEmail) {
-    return "email";
+}): void {
+  if (
+    (input.hasExpectedEmail && input.authMethod !== "email")
+    || (input.hasExpectedPhone && input.authMethod !== "phone")
+  ) {
+    throw hostedOnboardingError({
+      code: "HOSTED_INVITE_AUTH_METHOD_MISMATCH",
+      message: "Use the sign-in method requested by this invite.",
+      httpStatus: 403,
+    });
   }
-
-  if (input.hasExpectedPhone) {
-    return "phone";
-  }
-
-  return input.authMethod;
 }
 
 function assertHostedPrivyAuthMethodSatisfied(input: {

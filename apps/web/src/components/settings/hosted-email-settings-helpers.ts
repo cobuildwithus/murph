@@ -148,20 +148,17 @@ async function syncHostedEmailConnection(
 
   if (fetchImpl === fetch) {
     try {
-      const responsePayload = await requestHostedOnboardingJson<{
-        emailAddress: string;
-        runTriggered?: boolean;
-        verifiedAt: string;
-      }>({
+      const responsePayload = await requestHostedOnboardingJson<unknown>({
         payload: requestPayload,
         url: "/api/settings/email/sync",
       });
+      const syncResult = readHostedEmailSyncResult(responsePayload);
 
-      return {
-        emailAddress: responsePayload.emailAddress,
-        runTriggered: responsePayload.runTriggered !== false,
-        verifiedAt: responsePayload.verifiedAt,
-      };
+      if (!syncResult) {
+        throw unexpectedHostedEmailSyncResponseError();
+      }
+
+      return syncResult;
     } catch (error) {
       if (error instanceof HostedOnboardingApiError) {
         throw new HostedEmailSyncError(
@@ -191,16 +188,22 @@ async function syncHostedEmailConnection(
     );
   }
 
+  const syncResult = readHostedEmailSyncResult(payload);
+  if (!syncResult) {
+    throw unexpectedHostedEmailSyncResponseError();
+  }
+
+  return syncResult;
+}
+
+function readHostedEmailSyncResult(payload: unknown): HostedEmailSyncResult | null {
   if (
     !isRecord(payload)
     || payload.ok !== true
     || typeof payload.emailAddress !== "string"
     || typeof payload.verifiedAt !== "string"
   ) {
-    throw new HostedEmailSyncError(
-      null,
-      "Your email is verified, but we couldn't confirm the connection. Refresh and try again.",
-    );
+    return null;
   }
 
   return {
@@ -208,6 +211,13 @@ async function syncHostedEmailConnection(
     runTriggered: payload.runTriggered !== false,
     verifiedAt: payload.verifiedAt,
   };
+}
+
+function unexpectedHostedEmailSyncResponseError(): HostedEmailSyncError {
+  return new HostedEmailSyncError(
+    null,
+    "Your email is verified, but we couldn't confirm the connection. Refresh and try again.",
+  );
 }
 
 function toHostedEmailSyncErrorMessage(error: unknown): string {
