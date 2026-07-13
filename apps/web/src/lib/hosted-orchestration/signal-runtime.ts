@@ -289,18 +289,6 @@ async function assertHostedManualRunAiUsageAllowed(input: {
     return;
   }
 
-  if (gate.status === "unavailable") {
-    throw hostedOnboardingError({
-      code: "HOSTED_RUNTIME_MANUAL_WAKE_AI_USAGE_GATE_UNAVAILABLE",
-      details: {
-        retryAt: gate.retryAt,
-      },
-      httpStatus: 503,
-      message: "Hosted runtime manual wake AI usage gate is unavailable.",
-      retryable: true,
-    });
-  }
-
   throw hostedOnboardingError({
     code: "HOSTED_RUNTIME_MANUAL_WAKE_AI_USAGE_DENIED",
     httpStatus: 403,

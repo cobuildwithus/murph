@@ -17,7 +17,9 @@ import type {
   AssistantConnectedAppsPort,
 } from './connected-apps-port.js'
 import type {
+  AssistantHostedActionApprovalPort,
   AssistantHostedFamilyPlanTool,
+  AssistantHostedAssistantConfigurationTool,
   AssistantHostedGroupTool,
   AssistantHostedNewsletterTool,
   AssistantPhoneCallPort,
@@ -39,6 +41,10 @@ export interface AssistantHostedToolRequestKeyScope {
   recipientKey: string | null
 }
 
+export interface AssistantHostedAssistantConfigurationApprovalScope {
+  returnContactKind: HostedReturnContactKind | null
+}
+
 export type AssistantHostedVaultFileSendResult =
   | {
       approvalUrl: string
@@ -56,12 +62,20 @@ export type AssistantHostedVaultFileSendResult =
     }
 
 export interface AssistantHostedToolContext {
+  readonly actionApprovalPort?: AssistantHostedActionApprovalPort | null
+  readonly assistantConfigurationTool?: AssistantHostedAssistantConfigurationTool | null
   readonly connectedApps?: AssistantConnectedAppsPort | null
   readonly familyPlanTool?: AssistantHostedFamilyPlanTool | null
   readonly groupTool?: AssistantHostedGroupTool | null
   readonly newsletterTool?: AssistantHostedNewsletterTool | null
   readonly phoneCalls?: AssistantPhoneCallPort | null
   currentHostedDeliveryContext(): AssistantHostedDeliveryContext | null
+  currentAssistantTarget?(): {
+    model: string | null
+    reasoningEffort: string | null
+  }
+  currentAssistantConfigurationApprovalScope?():
+    AssistantHostedAssistantConfigurationApprovalScope | null
   currentHostedMailboxItemIds(): readonly string[]
   currentScheduledAutomationAuthority?(): HostedRuntimeNewsletterScheduledAuthority | null
   recordNewsletterSendResult?(
@@ -79,13 +93,15 @@ type AssistantHostedToolDeliveryContext = {
 }
 
 export function createAssistantHostedToolContext(input: {
+  actionApprovalPort?: AssistantHostedActionApprovalPort | null
+  assistantConfigurationTool?: AssistantHostedAssistantConfigurationTool | null
   connectedApps?: AssistantConnectedAppsPort | null
   familyPlanTool?: AssistantHostedFamilyPlanTool | null
   groupTool?: AssistantHostedGroupTool | null
   newsletterTool?: AssistantHostedNewsletterTool | null
   computerToolsAvailable?: boolean
   getDeliveryContext?: () => AssistantHostedToolDeliveryContext
-  getPhoneCallAcceptedInputIds?: () => readonly string[]
+  getUserActionAcceptedInputIds?: () => readonly string[]
   messageInput: AssistantMessageInput
   phoneCalls?: AssistantPhoneCallPort | null
   recordNewsletterSendResult?: (
@@ -112,12 +128,33 @@ export function createAssistantHostedToolContext(input: {
   }
 
   return {
+    actionApprovalPort: input.actionApprovalPort ?? null,
+    assistantConfigurationTool: input.assistantConfigurationTool ?? null,
     connectedApps: input.connectedApps ?? null,
     familyPlanTool: input.familyPlanTool ?? null,
     groupTool: input.groupTool ?? null,
     newsletterTool: input.newsletterTool ?? null,
     phoneCalls: input.phoneCalls ?? null,
     computerToolsAvailable: input.computerToolsAvailable === true,
+    currentAssistantTarget: () => {
+      const session = readDeliveryContext().session
+      return {
+        model: session.providerOptions.model ?? null,
+        reasoningEffort: session.providerOptions.reasoningEffort ?? null,
+      }
+    },
+    currentAssistantConfigurationApprovalScope: () => {
+      const acceptedInputIds = input.getUserActionAcceptedInputIds?.() ?? []
+      if (acceptedInputIds.length === 0) {
+        return null
+      }
+      const deliveryContext = readDeliveryContext()
+      return {
+        returnContactKind: resolveAssistantHostedReturnContactKind(
+          deliveryContext.messageInput.channel,
+        ),
+      }
+    },
     currentHostedDeliveryContext: () => {
       const deliveryContext = readDeliveryContext()
       const context = deliveryContext.messageInput.hostedDeliveryIdempotency
@@ -151,7 +188,7 @@ export function createAssistantHostedToolContext(input: {
     },
     recordNewsletterSendResult: input.recordNewsletterSendResult,
     currentPhoneCallToolRequestKeyScope: () => {
-      const acceptedInputIds = input.getPhoneCallAcceptedInputIds?.() ?? []
+      const acceptedInputIds = input.getUserActionAcceptedInputIds?.() ?? []
       return acceptedInputIds.length > 0
         ? buildRequestKeyScope(acceptedInputIds)
         : null
