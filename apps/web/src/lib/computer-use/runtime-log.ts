@@ -2,6 +2,7 @@ import type {
   HostedComputerActRequest,
   HostedComputerOsControlRequest,
 } from "@murphai/hosted-execution/computer-use";
+import { after } from "next/server";
 import {
   buildHostedExecutionSafeErrorDetails,
   normalizeHostedExecutionOperatorMessage,
@@ -17,6 +18,7 @@ import { shortHash } from "./ids";
 type HostedComputerToolOperation =
   | "act"
   | "finish"
+  | "managed-login"
   | "open"
   | "os-control"
   | "pause-for-user";
@@ -36,13 +38,29 @@ export async function withHostedComputerToolFailureRuntimeLog<Result>(input: {
   try {
     return await input.run();
   } catch (error) {
-    await recordHostedComputerToolFailureBestEffort({
+    scheduleHostedComputerToolFailureRuntimeLog({
       action: input.action ?? null,
       error,
       memberId: input.memberId,
       operation: input.operation,
     });
     throw error;
+  }
+}
+
+function scheduleHostedComputerToolFailureRuntimeLog(input: {
+  action: HostedComputerToolAction | null;
+  error: unknown;
+  memberId: string;
+  operation: HostedComputerToolOperation;
+}): void {
+  const task = async () => {
+    await recordHostedComputerToolFailureBestEffort(input);
+  };
+  try {
+    after(task);
+  } catch {
+    void task();
   }
 }
 
@@ -98,6 +116,8 @@ function buildHostedComputerToolFailureRedactedJson(input: {
     }),
     ...(domainError ? { httpStatus: domainError.httpStatus } : {}),
     ...(domainError ? { retryable: domainError.retryable } : {}),
+    ...readHostedComputerManagedLoginDetail(details),
+    ...readHostedComputerLiveViewValidationDetail(details),
     ...readHostedComputerToolFailureCategory(details, domainError?.message ?? null),
     kernelErrorPresent: details.kernelErrorPresent === true,
     kernelStderrPresent: details.kernelStderrPresent === true,
@@ -108,6 +128,39 @@ function buildHostedComputerToolFailureRedactedJson(input: {
       httpStatus: domainError?.httpStatus ?? null,
     }),
   };
+}
+
+function readHostedComputerManagedLoginDetail(
+  details: Record<string, unknown>,
+): HostedRuntimeRedactedJson {
+  const causeCode = details.managedLoginCauseCode;
+  const stage = details.managedLoginStage;
+  return {
+    ...(typeof causeCode === "string"
+        && /^HOSTED_COMPUTER_[A-Z0-9_]+$/u.test(causeCode)
+      ? { managedLoginCauseCode: causeCode }
+      : {}),
+    ...(stage === "live_view_fallback" || stage === "managed_auth_start"
+      ? { managedLoginStage: stage }
+      : {}),
+  };
+}
+
+function readHostedComputerLiveViewValidationDetail(
+  details: Record<string, unknown>,
+): HostedRuntimeRedactedJson {
+  const output: HostedRuntimeRedactedJson = {};
+  for (const key of [
+    "liveViewHostnameAllowed",
+    "liveViewParsed",
+    "liveViewPortAllowed",
+    "liveViewProtocolAllowed",
+  ] as const) {
+    if (typeof details[key] === "boolean") {
+      output[key] = details[key];
+    }
+  }
+  return output;
 }
 
 function readSafeComputerErrorSummary(error: unknown): HostedRuntimeRedactedJson {

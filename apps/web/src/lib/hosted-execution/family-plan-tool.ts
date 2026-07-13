@@ -25,12 +25,22 @@ import {
 import {
   HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
 } from "@/src/lib/hosted-onboarding/shared";
+import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
+import { isHostedThreadContainerMember } from "@/src/lib/hosted-onboarding/member-access";
 import { getPrisma } from "@/src/lib/prisma";
 
 export async function handleHostedRuntimeFamilyPlanTool(input: {
   memberId: string;
   request: HostedRuntimeFamilyPlanToolRequest;
 }): Promise<HostedRuntimeFamilyPlanToolResponse> {
+  if (await isHostedThreadContainerMember({ memberId: input.memberId })) {
+    throw hostedOnboardingError({
+      code: "HOSTED_FAMILY_PERSONAL_MEMBER_REQUIRED",
+      httpStatus: 403,
+      message: "Murph Family is available only in a private Murph account.",
+    });
+  }
+
   if (input.request.action === "read_status") {
     return {
       action: "read_status",

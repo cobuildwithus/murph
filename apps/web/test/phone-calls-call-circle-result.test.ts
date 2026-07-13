@@ -1,4 +1,4 @@
-import type { HostedPhoneCall } from "@prisma/client";
+import { Prisma, type HostedPhoneCall } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
@@ -189,8 +189,11 @@ describe("Retell call analysis for Call Circle connector calls", () => {
         transferOutcome: "cancelled",
       }),
       where: expect.objectContaining({
+        AND: [{
+          resultEncrypted: null,
+          resultJson: { equals: Prisma.DbNull },
+        }],
         analyzedAt: null,
-        resultJson: { equals: expect.anything() },
       }),
     });
     expect(mocks.markCallCircleMatchOutcome).not.toHaveBeenCalled();
@@ -375,6 +378,7 @@ function buildCallCirclePhoneCall(): HostedPhoneCall {
   const now = new Date("2026-07-06T15:00:00.000Z");
   return {
     analyzedAt: null,
+    briefEncrypted: null,
     briefJson: {
       allowTransferToUser: true,
       goal: "Connect two group members for a short Call Circle call.",
@@ -395,6 +399,7 @@ function buildCallCirclePhoneCall(): HostedPhoneCall {
     providerCallId: "retell_call_123",
     providerStartAttemptedAt: null,
     requestKey: "opaque-idempotency-key",
+    resultEncrypted: null,
     resultJson: null,
     status: "ended",
     transferOutcome: "bridged",

@@ -185,13 +185,14 @@ describe("hosted phone-call account-deletion fence", () => {
       const releaseProviderStart = createDeferred<void>();
       const runtimeStartCalls: string[] = [];
       const runtime: PhoneCallRuntime = {
+        resolveProviderCall: async () => ({ state: "not_found" }),
         start: async (call) => {
           runtimeStartCalls.push(call.id);
           providerStartEntered.resolve();
           await releaseProviderStart.promise;
           return { providerCallId: `provider_${call.id}` };
         },
-        stop: async () => {},
+        stopIfActive: async () => {},
         validateStart: async () => {},
       };
       const startup = createHostedPhoneCall({
@@ -287,13 +288,14 @@ describe("hosted phone-call account-deletion fence", () => {
     }>();
     const runtimeStartCalls: string[] = [];
     const runtime: PhoneCallRuntime = {
+      resolveProviderCall: async () => ({ state: "not_found" }),
       start: async (call) => {
         runtimeStartCalls.push(call.id);
         providerStartEntered.resolve();
         await releaseProviderStart.promise;
         return { providerCallId: `provider_${call.id}` };
       },
-      stop: async () => {},
+      stopIfActive: async () => {},
       validateStart: async () => {},
     };
 

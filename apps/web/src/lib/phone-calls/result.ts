@@ -7,7 +7,6 @@ import {
 } from "@prisma/client";
 import {
   buildHostedExecutionAssistantNotificationRequestedWake,
-  hostedPhoneCallBriefSchema,
   hostedPhoneCallResultSchema,
   type HostedPhoneCallBrief,
   type HostedPhoneCallResult,
@@ -19,38 +18,55 @@ import {
 import type {
   HostedAssistantNotificationSignal,
 } from "../hosted-execution/assistant-notifications";
+import { runWithHostedDomainRootUnwrapCache } from "../hosted-crypto/domain-root-unwrap-cache";
 import {
   hostedOnboardingError,
 } from "../hosted-onboarding/errors";
 import { getPrisma } from "../prisma";
 import { runWithConcurrency } from "../primitives";
-import {
-  requireHostedPhoneCallResultNotificationRoute,
-} from "./notification-route";
+import { HOSTED_GCP_KMS_OPERATION_TIMEOUT_MS } from "../hosted-crypto/gcp-kms";
 import {
   markCallCircleMatchOutcome,
 } from "../call-circle/match-store";
-import {
-  CALL_CIRCLE_PHONE_CALL_REQUEST_KEY_PREFIX,
-} from "../call-circle/phone-call-state";
 import {
   appendCallCircleTerminalNotificationsTx,
   buildCallCircleTerminalNotificationEventId,
   readExistingCallCircleNotificationSignalTx,
 } from "../call-circle/notifications";
 import {
+  CALL_CIRCLE_PHONE_CALL_REQUEST_KEY_PREFIX,
+} from "../call-circle/phone-call-state";
+import {
+  hostedPhoneCallCrypto,
+  readHostedPhoneCallBrief,
+  readHostedPhoneCallResult,
+  type HostedPhoneCallCrypto,
+} from "./crypto";
+import {
+  requireHostedPhoneCallResultNotificationRoute,
+} from "./notification-route";
+import {
+  hasRetellBasicAttributesOnlyStorage,
   readRetellMurphPhoneCallId,
   type RetellCallPayload,
   type RetellTransferWebhookEvent,
 } from "./retell-payloads";
-import { stopRetellPhoneCall } from "./retell-runtime";
-import {
-  terminalizeUnstartedHostedPhoneCall,
-} from "./service";
+import { isHostedPhoneCallProviderCleanupPending } from "./authority";
+import { createRetellPhoneCallAccountDeletionRuntime } from "./retell-runtime";
 
 interface HostedPhoneCallWebhookTx {
-  appendResultNotification(call: HostedPhoneCall): Promise<RetellWebhookHandlingResult | null>;
-  findCallCircleMatchByPhoneCallId(phoneCallId: string): Promise<{ id: string } | null>;
+  appendResultNotification(
+    call: HostedPhoneCall,
+    result?: HostedPhoneCallResult,
+  ): Promise<RetellWebhookHandlingResult | null>;
+  encryptResult(input: {
+    callId: string;
+    memberId: string;
+    value: HostedPhoneCallResult;
+  }): Promise<string>;
+  findCallCircleMatchByPhoneCallId(
+    phoneCallId: string,
+  ): Promise<{ id: string } | null>;
   hostedPhoneCall: {
     findUnique(input: {
       where:
@@ -67,7 +83,8 @@ interface HostedPhoneCallWebhookTx {
         analyzedAt?: Date;
         endedAt?: Date;
         providerCallId?: string;
-        resultJson?: HostedPhoneCallResult;
+        resultEncrypted?: string;
+        resultJson?: Prisma.NullTypes.DbNull;
         status?: HostedPhoneCallStatus;
         transferOutcome?: HostedPhoneCallTransferOutcome;
         updatedAt?: Date;
@@ -89,10 +106,7 @@ interface HostedPhoneCallResultSweepStore {
   ): Promise<T>;
   hostedPhoneCall: {
     findMany(input: {
-      orderBy: Array<
-        | { id: "asc" }
-        | { updatedAt: "asc" }
-      >;
+      orderBy: Array<{ id: "asc" } | { updatedAt: "asc" }>;
       take: number;
       where: Prisma.HostedPhoneCallWhereInput;
     }): Promise<HostedPhoneCall[]>;
@@ -116,8 +130,7 @@ const HOSTED_PHONE_CALL_RESULT_TRUNCATION_MARKER = " [truncated]";
 const HOSTED_PHONE_CALL_RESULT_CAS_ATTEMPTS = 3;
 export const HOSTED_PHONE_CALL_ACTIVE_SWEEP_LIMIT = 100;
 const HOSTED_PHONE_CALL_ACTIVE_STOP_CONCURRENCY = 10;
-export const HOSTED_PHONE_CALL_ACTIVE_WEBHOOK_GRACE_MS =
-  2 * 60 * 60 * 1_000;
+export const HOSTED_PHONE_CALL_ACTIVE_WEBHOOK_GRACE_MS = 2 * 60 * 60 * 1_000;
 export const HOSTED_PHONE_CALL_ANALYSIS_WEBHOOK_GRACE_MS =
   HOSTED_PHONE_CALL_ACTIVE_WEBHOOK_GRACE_MS;
 const HOSTED_PHONE_CALL_ACTIVE_TIMEOUT_RESULT: HostedPhoneCallResult = {
@@ -144,6 +157,16 @@ const RETELL_CALL_ANALYZED_LIVE_STATUSES: HostedPhoneCallStatus[] = [
 const RETELL_CALL_ANALYZED_ENDED_FAILED_STATUSES: HostedPhoneCallStatus[] = [
   "failed",
 ];
+// call_analyzed can sequentially unwrap the active control root, a historical
+// brief/route root, and the ingress mailbox root. Each provider operation has
+// its own deadline, so the owning transaction must cover all of them plus
+// database work instead of inheriting Prisma's 15-second default.
+export const HOSTED_PHONE_CALL_WEBHOOK_TRANSACTION_TIMEOUT_MS =
+  (4 * HOSTED_GCP_KMS_OPERATION_TIMEOUT_MS) + 10_000;
+const HOSTED_PHONE_CALL_WEBHOOK_TRANSACTION_OPTIONS = {
+  maxWait: 10_000,
+  timeout: HOSTED_PHONE_CALL_WEBHOOK_TRANSACTION_TIMEOUT_MS,
+} as const;
 
 export async function handleRetellTransferOutcome(input: {
   call: RetellCallPayload;
@@ -182,12 +205,16 @@ export async function handleRetellCallEnded(input: {
     if (!target) {
       return emptyRetellWebhookHandlingResult();
     }
+    const preserveFailedStatus = isHostedPhoneCallProviderCleanupPending(target.call)
+      || !hasRetellBasicAttributesOnlyStorage(input.call);
 
     await tx.hostedPhoneCall.updateMany({
       data: {
         ...target.providerCallIdData,
         endedAt: readRetellEndedAt(input.call) ?? new Date(),
-        status: classifyEndedStatus(input.call.disconnection_reason),
+        status: preserveFailedStatus
+          ? "failed"
+          : classifyEndedStatus(input.call.disconnection_reason),
       },
       where: {
         endedAt: null,
@@ -198,7 +225,9 @@ export async function handleRetellCallEnded(input: {
           providerCallId: input.call.call_id,
         }),
         status: {
-          in: ["starting", "calling", "ended"],
+          in: preserveFailedStatus
+            ? ["starting", "calling", "ended", "failed"]
+            : ["starting", "calling", "ended"],
         },
       },
     });
@@ -206,31 +235,32 @@ export async function handleRetellCallEnded(input: {
     const transferOutcome = readRetellTransferOutcome(
       input.call.disconnection_reason,
     );
-    if (transferOutcome) {
-      const currentTarget = await readRetellWebhookCallTarget({
-        call: input.call,
-        prisma: tx,
-      });
-      if (!currentTarget) return emptyRetellWebhookHandlingResult();
-      return toRetellWebhookHandlingResult(
-        await applyRetellTransferOutcomeTx({
-          outcome: transferOutcome,
-          providerCallId: input.call.call_id,
-          target: currentTarget,
-          tx,
-        }),
-      );
-    }
-    return emptyRetellWebhookHandlingResult();
+    if (!transferOutcome) return emptyRetellWebhookHandlingResult();
+
+    const currentTarget = await readRetellWebhookCallTarget({
+      call: input.call,
+      prisma: tx,
+    });
+    if (!currentTarget) return emptyRetellWebhookHandlingResult();
+    return toRetellWebhookHandlingResult(
+      await applyRetellTransferOutcomeTx({
+        outcome: transferOutcome,
+        providerCallId: input.call.call_id,
+        target: currentTarget,
+        tx,
+      }),
+    );
   });
 }
 
 export async function handleRetellCallAnalyzed(input: {
   call: RetellCallPayload;
+  crypto?: HostedPhoneCallCrypto;
   prisma?: HostedPhoneCallWebhookStore;
 }): Promise<RetellWebhookHandlingResult> {
   assertRetellStorageMode(input.call);
-  const prisma = resolveHostedPhoneCallWebhookStore(input.prisma);
+  const crypto = input.crypto ?? hostedPhoneCallCrypto;
+  const prisma = resolveHostedPhoneCallWebhookStore(input.prisma, crypto);
 
   return await prisma.$transaction(async (tx) => {
     const target = await readRetellWebhookCallTarget({
@@ -244,7 +274,7 @@ export async function handleRetellCallAnalyzed(input: {
     const receivedTransferOutcome = readRetellTransferOutcome(
       input.call.disconnection_reason,
     );
-    if (target.call.resultJson) {
+    if (hasStoredHostedPhoneCallResult(target.call)) {
       const correction = receivedTransferOutcome
         ? await applyRetellTransferOutcomeTx({
             outcome: receivedTransferOutcome,
@@ -299,11 +329,11 @@ export async function handleRetellCallAnalyzed(input: {
             ...(transferOutcome ? { transferOutcome } : {}),
           },
           where: {
-            analyzedAt: null,
+            AND: [withoutStoredHostedPhoneCallResultWhere()],
+            analyzedAt: currentCall.analyzedAt,
             id: currentCall.id,
             provider: "retell",
             ...authorityWhere,
-            resultJson: { equals: Prisma.DbNull },
             transferOutcome: currentCall.transferOutcome,
           },
         });
@@ -313,7 +343,7 @@ export async function handleRetellCallAnalyzed(input: {
         currentCall = await tx.hostedPhoneCall.findUniqueOrThrow({
           where: { id: currentCall.id },
         });
-        if (currentCall.resultJson) {
+        if (hasStoredHostedPhoneCallResult(currentCall)) {
           return shouldReplayStoredResultNotification(currentCall)
             ? toRetellWebhookHandlingResult(
                 await tx.appendResultNotification(currentCall),
@@ -334,7 +364,7 @@ export async function handleRetellCallAnalyzed(input: {
         result,
         tx,
         where: {
-          analyzedAt: null,
+          analyzedAt: currentCall.analyzedAt,
           id: currentCall.id,
           provider: "retell",
           ...authorityWhere,
@@ -343,13 +373,22 @@ export async function handleRetellCallAnalyzed(input: {
             : {}),
         },
       });
-      if (finalized.finalized || finalized.storedCall.resultJson || !callCircleMatch) {
+      if (
+        finalized.finalized
+        || hasStoredHostedPhoneCallResult(finalized.storedCall)
+      ) {
         return toRetellWebhookHandlingResult(finalized.append);
       }
+      if (!callCircleMatch) break;
       currentCall = finalized.storedCall;
     }
 
-    return emptyRetellWebhookHandlingResult();
+    throw hostedOnboardingError({
+      code: "HOSTED_PHONE_CALL_ANALYSIS_RETRY_REQUIRED",
+      httpStatus: 503,
+      message: "Hosted phone call analysis lost authority and must be retried.",
+      retryable: true,
+    });
   });
 }
 
@@ -360,8 +399,7 @@ export async function terminalizeStaleActiveHostedPhoneCalls(input: {
   stopProviderCall?: (providerCallId: string) => Promise<void>;
   store?: HostedPhoneCallResultSweepStore;
 } = {}): Promise<{ failedPhoneCalls: number }> {
-  const store = input.store
-    ?? resolveHostedPhoneCallSweepStore(input.prisma);
+  const store = input.store ?? resolveHostedPhoneCallSweepStore(input.prisma);
   const now = normalizePhoneCallSweepDate(input.now ?? new Date());
   const cutoff = new Date(
     now.getTime() - HOSTED_PHONE_CALL_ACTIVE_WEBHOOK_GRACE_MS,
@@ -373,6 +411,7 @@ export async function terminalizeStaleActiveHostedPhoneCalls(input: {
     ],
     take: input.limit ?? HOSTED_PHONE_CALL_ACTIVE_SWEEP_LIMIT,
     where: {
+      AND: [withoutStoredHostedPhoneCallResultWhere()],
       analyzedAt: null,
       endedAt: null,
       OR: [
@@ -394,10 +433,16 @@ export async function terminalizeStaleActiveHostedPhoneCalls(input: {
         },
       ],
       provider: "retell",
-      resultJson: { equals: Prisma.DbNull },
       updatedAt: { lt: cutoff },
     },
   });
+  const defaultRuntime = input.stopProviderCall
+    ? null
+    : createRetellPhoneCallAccountDeletionRuntime();
+  const stopProviderCall = input.stopProviderCall
+    ?? (async (providerCallId: string) => {
+      await defaultRuntime!.stopIfActive(providerCallId);
+    });
 
   let failedPhoneCalls = 0;
   await runWithConcurrency(
@@ -416,7 +461,7 @@ export async function terminalizeStaleActiveHostedPhoneCalls(input: {
           }));
         if (claimed.count === 0) return;
         try {
-          await (input.stopProviderCall ?? stopRetellPhoneCall)(call.providerCallId);
+          await stopProviderCall(call.providerCallId);
         } catch {
           return;
         }
@@ -426,10 +471,20 @@ export async function terminalizeStaleActiveHostedPhoneCalls(input: {
           call.providerCallId === null
           && call.providerStartAttemptedAt === null
         ) {
-          return await terminalizeUnstartedHostedPhoneCall({
-            phoneCallId: call.id,
-            prisma: tx,
+          const terminalized = await tx.hostedPhoneCall.updateMany({
+            data: { status: "failed" },
+            where: {
+              AND: [withoutStoredHostedPhoneCallResultWhere()],
+              analyzedAt: null,
+              endedAt: null,
+              id: call.id,
+              provider: "retell",
+              providerCallId: null,
+              providerStartAttemptedAt: null,
+              status: "starting",
+            },
           });
+          return terminalized.count > 0;
         }
         let currentCall = await tx.hostedPhoneCall.findUniqueOrThrow({
           where: { id: call.id },
@@ -452,16 +507,17 @@ export async function terminalizeStaleActiveHostedPhoneCalls(input: {
             tx,
             where: activeHostedPhoneCallSnapshotWhere(currentCall),
           });
-          if (finalized.finalized || finalized.storedCall.resultJson) {
+          if (
+            finalized.finalized
+            || hasStoredHostedPhoneCallResult(finalized.storedCall)
+          ) {
             return finalized.finalized && result.outcome !== "completed";
           }
           currentCall = finalized.storedCall;
         }
         return false;
       });
-      if (failed) {
-        failedPhoneCalls += 1;
-      }
+      if (failed) failedPhoneCalls += 1;
     },
   );
 
@@ -482,13 +538,13 @@ function activeHostedPhoneCallSnapshotWhere(
   call: HostedPhoneCall,
 ): Prisma.HostedPhoneCallWhereInput {
   return {
+    AND: [withoutStoredHostedPhoneCallResultWhere()],
     analyzedAt: null,
     endedAt: null,
     id: call.id,
     provider: "retell",
     providerCallId: call.providerCallId,
     providerStartAttemptedAt: call.providerStartAttemptedAt,
-    resultJson: { equals: Prisma.DbNull },
     status: call.status,
     transferOutcome: call.transferOutcome,
     updatedAt: call.updatedAt,
@@ -503,7 +559,7 @@ function isSameActiveHostedPhoneCall(
     && current.providerCallId === claimed.providerCallId
     && current.analyzedAt === null
     && current.endedAt === null
-    && current.resultJson === null
+    && !hasStoredHostedPhoneCallResult(current)
     && (current.status === "starting" || current.status === "calling");
 }
 
@@ -513,8 +569,7 @@ export async function terminalizeStaleHostedPhoneCallAnalyses(input: {
   prisma?: PrismaClient;
   store?: HostedPhoneCallResultSweepStore;
 } = {}): Promise<{ terminalizedPhoneCalls: number }> {
-  const store = input.store
-    ?? resolveHostedPhoneCallSweepStore(input.prisma);
+  const store = input.store ?? resolveHostedPhoneCallSweepStore(input.prisma);
   const now = normalizePhoneCallSweepDate(input.now ?? new Date());
   const cutoff = new Date(
     now.getTime() - HOSTED_PHONE_CALL_ANALYSIS_WEBHOOK_GRACE_MS,
@@ -526,9 +581,9 @@ export async function terminalizeStaleHostedPhoneCallAnalyses(input: {
     ],
     take: input.limit ?? HOSTED_PHONE_CALL_ACTIVE_SWEEP_LIMIT,
     where: {
+      AND: [withoutStoredHostedPhoneCallResultWhere()],
       endedAt: { lt: cutoff },
       provider: "retell",
-      resultJson: { equals: Prisma.DbNull },
       status: { in: ["ended", "failed"] },
     },
   });
@@ -548,19 +603,17 @@ export async function terminalizeStaleHostedPhoneCallAnalyses(input: {
         result,
         tx,
         where: {
+          AND: [withoutStoredHostedPhoneCallResultWhere()],
           endedAt: { lt: cutoff },
           id: call.id,
           provider: "retell",
-          resultJson: { equals: Prisma.DbNull },
           status: { in: ["ended", "failed"] },
           transferOutcome: call.transferOutcome,
         },
       });
       return finalized.finalized;
     });
-    if (terminalized) {
-      terminalizedPhoneCalls += 1;
-    }
+    if (terminalized) terminalizedPhoneCalls += 1;
   }
 
   return { terminalizedPhoneCalls };
@@ -569,20 +622,27 @@ export async function terminalizeStaleHostedPhoneCallAnalyses(input: {
 async function appendPhoneCallResultNotificationTx(input: {
   call: HostedPhoneCall;
   prisma: Prisma.TransactionClient;
+  result?: HostedPhoneCallResult;
 }): Promise<RetellWebhookHandlingResult | null> {
   const call = input.call;
-  if (!call?.resultJson) {
+  let result: HostedPhoneCallResult | null = input.result ?? null;
+  if (!result) {
+    try {
+      result = await readHostedPhoneCallResult({
+        call,
+        prisma: input.prisma,
+      });
+    } catch {
+      throw hostedPhoneCallResultNotificationError(
+        "HOSTED_PHONE_CALL_RESULT_INVALID",
+        "Hosted phone call result notification requires a valid stored result.",
+      );
+    }
+  }
+  if (!result) {
     throw hostedPhoneCallResultNotificationError(
       "HOSTED_PHONE_CALL_RESULT_REQUIRED",
       "Hosted phone call result notification requires a stored result.",
-    );
-  }
-
-  const result = hostedPhoneCallResultSchema.safeParse(call.resultJson);
-  if (!result.success) {
-    throw hostedPhoneCallResultNotificationError(
-      "HOSTED_PHONE_CALL_RESULT_INVALID",
-      "Hosted phone call result notification requires a valid stored result.",
     );
   }
 
@@ -597,7 +657,7 @@ async function appendPhoneCallResultNotificationTx(input: {
   });
   if (callCircleMatch) {
     const outcomeAt = new Date();
-    const completed = result.data.outcome === "completed";
+    const completed = result.outcome === "completed";
     let updatedMatch = await markCallCircleMatchOutcome({
       matchId: callCircleMatch.id,
       outcome: completed ? "completed" : "text_handoff",
@@ -636,8 +696,13 @@ async function appendPhoneCallResultNotificationTx(input: {
     };
   }
 
-  const brief = hostedPhoneCallBriefSchema.safeParse(call.briefJson);
-  if (!brief.success) {
+  let brief: HostedPhoneCallBrief;
+  try {
+    brief = await readHostedPhoneCallBrief({
+      call,
+      prisma: input.prisma,
+    });
+  } catch {
     throw hostedPhoneCallResultNotificationError(
       "HOSTED_PHONE_CALL_BRIEF_INVALID",
       "Hosted phone call result notification requires a valid stored brief.",
@@ -650,8 +715,8 @@ async function appendPhoneCallResultNotificationTx(input: {
   });
 
   const instructions = buildPhoneCallResultNotificationInstructions({
-    brief: brief.data,
-    result: result.data,
+    brief,
+    result,
   });
   const notificationKey = `phone-call-result:${call.id}`;
   const appended = await appendHostedMailboxEnvelopeTx({
@@ -677,6 +742,17 @@ async function appendPhoneCallResultNotificationTx(input: {
       mailboxItemId: appended.item.id,
       memberId: appended.item.userId,
     }],
+  };
+}
+
+function hasStoredHostedPhoneCallResult(call: HostedPhoneCall): boolean {
+  return call.resultEncrypted !== null || call.resultJson !== null;
+}
+
+function withoutStoredHostedPhoneCallResultWhere(): Prisma.HostedPhoneCallWhereInput {
+  return {
+    resultEncrypted: null,
+    resultJson: { equals: Prisma.DbNull },
   };
 }
 
@@ -729,12 +805,7 @@ async function readExistingCallCircleResultNotificationSignalsTx(input: {
 function toRetellWebhookHandlingResult(
   append: RetellWebhookHandlingResult | null,
 ): RetellWebhookHandlingResult {
-  if (!append) {
-    return emptyRetellWebhookHandlingResult();
-  }
-  return {
-    notificationSignals: append.notificationSignals,
-  };
+  return append ?? emptyRetellWebhookHandlingResult();
 }
 
 function hostedPhoneCallResultNotificationError(
@@ -803,12 +874,12 @@ async function persistRetellTransferOutcomeTx(input: {
               ],
             }
           : { transferOutcome: null },
+        ...(input.allowCallCircleResultUpgrade
+          ? []
+          : [withoutStoredHostedPhoneCallResultWhere()]),
       ],
       id: input.target.call.id,
       provider: "retell",
-      ...(input.allowCallCircleResultUpgrade
-        ? {}
-        : { resultJson: { equals: Prisma.DbNull } }),
     },
   });
 }
@@ -829,51 +900,68 @@ async function applyRetellTransferOutcomeTx(input: {
     target: input.target,
     tx: input.tx,
   });
-  if (!callCircleMatch) {
-    return null;
-  }
+  if (!callCircleMatch) return null;
 
-  return await upgradeCallCircleTransferResultTx(input);
+  return await upgradeCallCircleTransferResultTx({
+    callCircleMatchId: callCircleMatch.id,
+    providerCallId: input.providerCallId,
+    target: input.target,
+    tx: input.tx,
+  });
 }
 
 async function upgradeCallCircleTransferResultTx(input: {
+  callCircleMatchId: string;
   providerCallId: string;
   target: RetellWebhookCallTarget;
   tx: HostedPhoneCallWebhookTx;
 }): Promise<RetellWebhookHandlingResult | null> {
-  const updated = await input.tx.hostedPhoneCall.updateMany({
-    data: {
-      resultJson: CALL_CIRCLE_TRANSFER_BRIDGED_RESULT,
-      status: "completed",
-    },
-    where: {
-      id: input.target.call.id,
-      provider: "retell",
-      providerCallId: input.providerCallId,
-      OR: [
-        {
-          resultJson: { equals: Prisma.DbNull },
-          status: { in: ["ended", "failed"] },
-        },
-        {
-          resultJson: {
-            equals: "not_completed",
-            path: ["outcome"],
-          },
-          status: "failed",
-        },
-      ],
-      transferOutcome: "bridged",
-    },
+  const current = await input.tx.hostedPhoneCall.findUniqueOrThrow({
+    where: { id: input.target.call.id },
   });
-  if (updated.count === 0) {
+  if (
+    current.providerCallId !== input.providerCallId
+    || current.transferOutcome !== "bridged"
+    || (current.status !== "ended" && current.status !== "failed")
+  ) {
     return null;
   }
 
-  const stored = await input.tx.hostedPhoneCall.findUniqueOrThrow({
-    where: { id: input.target.call.id },
+  const resultEncrypted = await input.tx.encryptResult({
+    callId: current.id,
+    memberId: current.memberId,
+    value: CALL_CIRCLE_TRANSFER_BRIDGED_RESULT,
   });
-  return await input.tx.appendResultNotification(stored);
+  const updated = await input.tx.hostedPhoneCall.updateMany({
+    data: {
+      resultEncrypted,
+      resultJson: Prisma.DbNull,
+      status: "completed",
+    },
+    where: {
+      callCircleMatch: {
+        is: {
+          id: input.callCircleMatchId,
+          status: { in: ["bridging", "dropped"] },
+        },
+      },
+      id: current.id,
+      provider: "retell",
+      providerCallId: input.providerCallId,
+      status: current.status,
+      transferOutcome: "bridged",
+      updatedAt: current.updatedAt,
+    },
+  });
+  if (updated.count === 0) return null;
+
+  const stored = await input.tx.hostedPhoneCall.findUniqueOrThrow({
+    where: { id: current.id },
+  });
+  return await input.tx.appendResultNotification(
+    stored,
+    CALL_CIRCLE_TRANSFER_BRIDGED_RESULT,
+  );
 }
 
 async function finalizeHostedPhoneCallResultTx(input: {
@@ -892,15 +980,26 @@ async function finalizeHostedPhoneCallResultTx(input: {
   finalized: boolean;
   storedCall: HostedPhoneCall;
 }> {
+  const current = await input.tx.hostedPhoneCall.findUniqueOrThrow({
+    where: { id: input.callId },
+  });
+  const resultEncrypted = await input.tx.encryptResult({
+    callId: input.callId,
+    memberId: current.memberId,
+    value: input.result,
+  });
   const updated = await input.tx.hostedPhoneCall.updateMany({
     data: {
       ...input.data,
-      resultJson: input.result,
+      resultEncrypted,
+      resultJson: Prisma.DbNull,
       status: mapPhoneCallStatus(input.result.outcome),
     },
     where: {
-      ...input.where,
-      resultJson: { equals: Prisma.DbNull },
+      AND: [
+        input.where,
+        withoutStoredHostedPhoneCallResultWhere(),
+      ],
     },
   });
   const stored = await input.tx.hostedPhoneCall.findUniqueOrThrow({
@@ -908,7 +1007,8 @@ async function finalizeHostedPhoneCallResultTx(input: {
   });
   if (updated.count === 0) {
     return {
-      append: stored.resultJson && shouldReplayStoredResultNotification(stored)
+      append: hasStoredHostedPhoneCallResult(stored)
+          && shouldReplayStoredResultNotification(stored)
         ? await input.tx.appendResultNotification(stored)
         : null,
       finalized: false,
@@ -916,7 +1016,7 @@ async function finalizeHostedPhoneCallResultTx(input: {
     };
   }
   return {
-    append: await input.tx.appendResultNotification(stored),
+    append: await input.tx.appendResultNotification(stored, input.result),
     finalized: true,
     storedCall: stored,
   };
@@ -924,10 +1024,17 @@ async function finalizeHostedPhoneCallResultTx(input: {
 
 function buildHostedPhoneCallWebhookTx(
   tx: Prisma.TransactionClient,
+  crypto: HostedPhoneCallCrypto,
 ): HostedPhoneCallWebhookTx {
   return {
-    appendResultNotification: async (call) => appendPhoneCallResultNotificationTx({
-      call,
+    appendResultNotification: async (call, result) =>
+      appendPhoneCallResultNotificationTx({
+        call,
+        prisma: tx,
+        result,
+      }),
+    encryptResult: async (input) => crypto.encryptResult({
+      ...input,
       prisma: tx,
     }),
     findCallCircleMatchByPhoneCallId: async (phoneCallId) =>
@@ -939,33 +1046,24 @@ function buildHostedPhoneCallWebhookTx(
       findUnique: async (args) => {
         if ("id" in args.where) {
           return tx.hostedPhoneCall.findUnique({
-            where: {
-              id: args.where.id,
-            },
+            where: { id: args.where.id },
           });
         }
-
         return tx.hostedPhoneCall.findUnique({
-          where: {
-            providerCallId: args.where.providerCallId,
-          },
+          where: { providerCallId: args.where.providerCallId },
         });
       },
       findUniqueOrThrow: async (args) => tx.hostedPhoneCall.findUniqueOrThrow({
-        where: {
-          id: args.where.id,
-        },
+        where: { id: args.where.id },
       }),
-      updateMany: async (args) => tx.hostedPhoneCall.updateMany({
-        data: args.data,
-        where: args.where,
-      }),
+      updateMany: async (args) => tx.hostedPhoneCall.updateMany(args),
     },
   };
 }
 
 function resolveHostedPhoneCallWebhookStore(
   store: HostedPhoneCallWebhookStore | undefined,
+  crypto: HostedPhoneCallCrypto = hostedPhoneCallCrypto,
 ): HostedPhoneCallWebhookStore {
   if (store) {
     return store;
@@ -973,9 +1071,11 @@ function resolveHostedPhoneCallWebhookStore(
 
   const prisma = getPrisma();
   return {
-    $transaction: async (callback) => prisma.$transaction(async (tx) =>
-      callback(buildHostedPhoneCallWebhookTx(tx))
-    ),
+    $transaction: async (callback) => runWithHostedDomainRootUnwrapCache(() =>
+      prisma.$transaction(
+        async (tx) => callback(buildHostedPhoneCallWebhookTx(tx, crypto)),
+        HOSTED_PHONE_CALL_WEBHOOK_TRANSACTION_OPTIONS,
+      )),
   };
 }
 
@@ -984,9 +1084,11 @@ function resolveHostedPhoneCallSweepStore(
 ): HostedPhoneCallResultSweepStore {
   const client = prisma ?? getPrisma();
   return {
-    $transaction: async (callback) => client.$transaction(async (tx) =>
-      callback(buildHostedPhoneCallWebhookTx(tx))
-    ),
+    $transaction: async (callback) => runWithHostedDomainRootUnwrapCache(() =>
+      client.$transaction(
+        async (tx) => callback(buildHostedPhoneCallWebhookTx(tx, hostedPhoneCallCrypto)),
+        HOSTED_PHONE_CALL_WEBHOOK_TRANSACTION_OPTIONS,
+      )),
     hostedPhoneCall: {
       findMany: async (args) => client.hostedPhoneCall.findMany(args),
     },
@@ -1218,7 +1320,7 @@ function readRecord(value: unknown): Record<string, unknown> | null {
 
 function assertRetellStorageMode(call: RetellCallPayload): void {
   const storageMode = call.data_storage_setting?.trim().toLowerCase();
-  if (storageMode === "basic_attributes_only") {
+  if (hasRetellBasicAttributesOnlyStorage(call)) {
     return;
   }
 

@@ -95,6 +95,7 @@ The Settings vault export does not include:
 | `prisma.hosted_mailbox_payload` | Live delete | Not exported secret | Deletes encrypted mailbox payload ciphertext. Export reports payload presence and bytes while omitting ciphertext and arbitrary decoded payload JSON. |
 | `prisma.hosted_mailbox_lane_counter` | Live delete | Metadata/counts | Deletes per-lane counters so deleted users cannot resume old lanes. |
 | `prisma.hosted_workspace` | Live delete | Metadata/counts | Deletes workspace checkpoint refs, browser vault replica refs, wake state, and redacted status. |
+| `prisma.hosted_phone_call` | Live delete | Metadata/counts | Deletes phone-call rows and encrypted private briefs/results explicitly. Export reports counts only and omits private content and ciphertext. |
 | `prisma.hosted_runtime_log` | Live delete | Documented only | Deletes member-scoped runtime logs and redacted runtime JSON. Export omits runtime log rows and counts. |
 | `prisma.hosted_user_crypto_envelope` | Live delete | Metadata/counts | Deletes signed domain root envelopes. Export reports counts only. |
 | `prisma.hosted_user_crypto_audit` | Live delete | Metadata/counts | Deletes hosted crypto provisioning audit rows. Export reports counts only. |

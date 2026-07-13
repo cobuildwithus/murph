@@ -8,6 +8,8 @@ import {
   buildHostedExecutionLinqConversationMessageWake,
   buildHostedExecutionMemberActivatedWake,
   buildHostedExecutionMemberChannelsUpdatedWake,
+  buildHostedExecutionPendingEffectsReconcileRequestedWake,
+  buildHostedExecutionRuntimeControlWake,
 } from "@murphai/hosted-execution";
 import {
   createHostedRuntimeEffectsPortStub,
@@ -748,10 +750,11 @@ describe("executeHostedMailboxEvent", () => {
         rawEvent: {
           schema: "murph.assistant-codex-app-server-timing.v1",
           type: "assistant.codex.app_server_timing",
+          codexTimingColdStartReason: "node-process-first-use",
           codexTimingElapsedMs: 8123,
           codexTimingProviderActionCount: 1,
           codexTimingThreadIdPresent: true,
-          codexTimingStage: "turn-completed",
+          codexTimingStage: "initialized",
           codexTimingTotalElapsedMs: 11042,
           codexTimingTurnIdPresent: true,
           cwd: "/tmp/raw-path",
@@ -768,10 +771,11 @@ describe("executeHostedMailboxEvent", () => {
       message: "Hosted assistant Codex app-server timing captured.",
       phase: "wake.running",
       redacted: expect.objectContaining({
+        codexTimingColdStartReason: "node-process-first-use",
         codexTimingElapsedMs: 8123,
         codexTimingProviderActionCount: 1,
         codexTimingThreadIdPresent: true,
-        codexTimingStage: "turn-completed",
+        codexTimingStage: "initialized",
         codexTimingTotalElapsedMs: 11042,
         codexTimingTraceType: "app-server",
         codexTimingTurnIdPresent: true,
@@ -783,6 +787,27 @@ describe("executeHostedMailboxEvent", () => {
     expect(JSON.stringify(entry?.redacted)).not.toContain("raw-provider-session-id");
     expect(JSON.stringify(entry?.redacted)).not.toContain("raw-thread-id");
     expect(JSON.stringify(entry?.redacted)).not.toContain("/tmp/raw-path");
+
+    const invalidReasonEntry = emitHostedAssistantProviderTraceLog({
+      details: { requestId: "req_123" },
+      event: {
+        rawEvent: {
+          schema: "murph.assistant-codex-app-server-timing.v1",
+          type: "assistant.codex.app_server_timing",
+          codexTimingColdStartReason: "raw-unbounded-reason",
+          codexTimingElapsedMs: 1,
+          codexTimingStage: "initialized",
+        },
+      },
+      wake,
+    });
+    expect(invalidReasonEntry).not.toBeNull();
+    expect(invalidReasonEntry?.redacted).not.toHaveProperty(
+      "codexTimingColdStartReason",
+    );
+    expect(JSON.stringify(invalidReasonEntry)).not.toContain(
+      "raw-unbounded-reason",
+    );
   });
 
   it("captures hosted Codex transport diagnostics without raw payloads", () => {
@@ -1525,6 +1550,7 @@ describe("executeHostedMailboxEvent", () => {
         identityId: "hid_linq_identity_123",
         participantId: null,
         threadId: null,
+        threadIsDirect: true,
       },
       schedule: {
         kind: "dailyLocal",
@@ -1831,6 +1857,7 @@ describe("executeHostedMailboxEvent", () => {
           identityId: "hid_linq_identity_123",
           participantId: null,
           threadId: null,
+          threadIsDirect: true,
         },
         slug: "finish-onboarding-followup",
       }),
@@ -2061,6 +2088,7 @@ describe("executeHostedMailboxEvent", () => {
           identityId: null,
           participantId: null,
           threadId: "telegram_thread_123",
+          threadIsDirect: true,
         },
         slug: "finish-onboarding-followup",
       }),
@@ -2601,6 +2629,7 @@ describe("executeHostedMailboxEvent", () => {
           identityId: "hid_linq_identity_participant",
           participantId: "+15550002222",
           threadId: null,
+          threadIsDirect: true,
         },
         slug: "finish-onboarding-followup",
       }),
@@ -2764,6 +2793,33 @@ describe("executeHostedMailboxEvent", () => {
       bootstrapResult: null,
       conversationMetrics: null,
       mailboxLane: "member-channels-updated",
+      nextWakeAt: null,
+      postCheckpointRecord: null,
+      redactedLogEntries: [],
+    });
+  });
+
+  it("receives pending-effects reconciliation requests without running assistant work", async () => {
+    const wake = buildHostedExecutionPendingEffectsReconcileRequestedWake({
+      effectId: "vault-file-send:effect_123",
+      eventId: "evt_pending_effects_reconcile",
+      occurredAt: "2026-04-08T00:03:00.000Z",
+      userId: "member_123",
+    });
+
+    const result = await executeHostedMailboxEvent({
+      wake,
+      executionContext,
+      runtime: createRuntime(),
+      runtimeEnv: {},
+      vaultRoot: "/tmp/assistant-runtime-events",
+    });
+
+    expect(mocks.sendAssistantNotification).not.toHaveBeenCalled();
+    assert.deepEqual(result, {
+      bootstrapResult: null,
+      conversationMetrics: null,
+      mailboxLane: "runtime-control",
       nextWakeAt: null,
       postCheckpointRecord: null,
       redactedLogEntries: [],

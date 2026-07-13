@@ -5,6 +5,7 @@ const mocks = vi.hoisted(() => ({
   ensureHostedAccountGroupForOwnerTx: vi.fn(),
   getPrisma: vi.fn(),
   issueHostedFamilyInviteFromOwner: vi.fn(),
+  isHostedThreadContainerMember: vi.fn(),
   readHostedFamilyAccessForMember: vi.fn(),
   readHostedFamilyOwnerSnapshotForMember: vi.fn(),
 }));
@@ -23,6 +24,10 @@ vi.mock("@/src/lib/hosted-onboarding/family-plan", () => ({
 
 vi.mock("@/src/lib/hosted-onboarding/shared", () => ({
   HOSTED_ONBOARDING_TRANSACTION_OPTIONS: {},
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/member-access", () => ({
+  isHostedThreadContainerMember: mocks.isHostedThreadContainerMember,
 }));
 
 import {
@@ -59,6 +64,25 @@ describe("hosted runtime Family plan tool", () => {
       replyText: "Done. I prepared a Murph Family invite for Adam.",
     });
     mocks.readHostedFamilyOwnerSnapshotForMember.mockResolvedValue(null);
+    mocks.isHostedThreadContainerMember.mockResolvedValue(false);
+  });
+
+  it("rejects Family account operations for a synthetic group container", async () => {
+    mocks.isHostedThreadContainerMember.mockResolvedValue(true);
+
+    await expect(handleHostedRuntimeFamilyPlanTool({
+      memberId: "member_group_container",
+      request: {
+        action: "start_checkout",
+      },
+    })).rejects.toMatchObject({
+      code: "HOSTED_FAMILY_PERSONAL_MEMBER_REQUIRED",
+      httpStatus: 403,
+    });
+
+    expect(mocks.createHostedFamilyBillingCheckout).not.toHaveBeenCalled();
+    expect(mocks.ensureHostedAccountGroupForOwnerTx).not.toHaveBeenCalled();
+    expect(mocks.readHostedFamilyOwnerSnapshotForMember).not.toHaveBeenCalled();
   });
 
   it("starts checkout for an owner without an active Family plan", async () => {

@@ -1,6 +1,7 @@
 import { Prisma, type PrismaClient } from "@prisma/client";
 
 import { sanitizeHostedRuntimeErrorCode } from "@murphai/device-syncd/hosted-runtime";
+import { formatDeviceSyncProviderLabel } from "@murphai/device-syncd/provider-label";
 import { isDeviceSyncError } from "@murphai/device-syncd/errors";
 
 import { createHostedDeviceSyncControlPlane } from "../device-sync/control-plane";
@@ -16,9 +17,16 @@ import {
   formatHostedConnectedAppToolkitLabel,
   readHostedConnectedAppsConfig,
 } from "../connected-apps/config";
-import { resolveHostedDeviceSyncBrowserProviderLabel } from "../device-sync/provider-label";
+import {
+  formatHostedDeviceSyncProviderLabel,
+  resolveHostedDeviceSyncBrowserProviderLabel,
+} from "../device-sync/provider-label";
 import { acquireHostedWebhookTraceOwnerLockTx } from "../device-sync/webhook-trace-owner-lock";
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
+import {
+  readHostedMemberSnapshot,
+  type HostedMemberSnapshot,
+} from "../hosted-onboarding/hosted-member-store";
 import { readHostedMemberStripeBillingRef } from "../hosted-onboarding/hosted-member-billing-store";
 import { readHostedMemberIdentity } from "../hosted-onboarding/hosted-member-identity-store";
 import { readHostedAccountGroupStripeBillingRef } from "../hosted-onboarding/family-plan";
@@ -38,9 +46,12 @@ import {
   terminateHostedUserRuntimeWorkflowBestEffort,
 } from "../hosted-orchestration/workflow-termination";
 import {
-  signalHostedMailboxAppendsBestEffort,
+  signalHostedMailboxAppendRuntime,
 } from "../hosted-orchestration/signal-runtime";
-import { stopRetellPhoneCall } from "../phone-calls/retell-runtime";
+import {
+  assertHostedPhoneCallsReadyForAccountDeletionTx,
+  stopHostedPhoneCallsForAccountDeletion,
+} from "../phone-calls/account-deletion";
 import {
   revokeOutgoingHostedVaultSharesForMemberDeletionTx,
   type HostedVaultShareCleanupSignal,
@@ -155,12 +166,6 @@ export const HOSTED_ACCOUNT_DATA_STORE_COVERAGE = [
     note: "Deletes matches involving the member or a deleted group after attached phone calls are removed and before relation cascades run.",
   },
   {
-    slug: "prisma.hosted_phone_call",
-    label: "Hosted phone calls",
-    deletion: "live-delete",
-    note: "Deletes member-owned phone-call records and Call Circle calls attached through either participant or a deleted group before relation cascades can detach them.",
-  },
-  {
     slug: "prisma.hosted_mailbox_item",
     label: "Hosted mailbox envelopes",
     deletion: "live-delete",
@@ -201,6 +206,12 @@ export const HOSTED_ACCOUNT_DATA_STORE_COVERAGE = [
     label: "Hosted computer-use handoffs",
     deletion: "live-delete",
     note: "Deletes short-lived handoff rows and token hashes. Export includes handoff status metadata and omits token hashes.",
+  },
+  {
+    slug: "prisma.hosted_phone_call",
+    label: "Hosted phone calls",
+    deletion: "live-delete",
+    note: "Deletes member-owned phone-call rows and Call Circle calls attached through either participant or a deleted group, including encrypted private briefs/results. Export reports counts only and omits private content and ciphertext.",
   },
   {
     slug: "prisma.hosted_runtime_log",
@@ -554,16 +565,17 @@ export async function deleteHostedAccountData(input: {
     now: deletionStartedAt,
     prisma: input.prisma,
   });
+  await stopHostedPhoneCallsForAccountDeletion({
+    memberIds: deletionMemberIds,
+    prisma: input.prisma,
+    signal: input.request.signal,
+  });
   await Promise.all(deletionMemberIds.map((memberId) =>
     terminateHostedUserRuntimeWorkflowBestEffort({
       reason: "account-deleted",
       userId: memberId,
     }),
   ));
-  await stopHostedAccountPhoneCalls({
-    memberIds: deletionMemberIds,
-    prisma: input.prisma,
-  });
   const providerRevocationConnectionIdentities = await listDeviceConnectionIdentities({
     memberId: input.memberId,
     prisma: input.prisma,
@@ -638,6 +650,10 @@ export async function deleteHostedAccountData(input: {
       now: deletionStartedAt,
       prisma: tx,
     });
+    await assertHostedPhoneCallsReadyForAccountDeletionTx({
+      memberIds: transactionDeletionMemberIds,
+      prisma: tx,
+    });
     await assertNoConnectedAppWritesAfterProviderCleanupTx({
       memberId: input.memberId,
       providerCleanupStartedAt: connectedAppProviderCleanupStartedAt,
@@ -689,7 +705,7 @@ export async function deleteHostedAccountData(input: {
   const deletedRuntimeMemberIds = databaseDeletion.deletedRuntimeMemberIds.length > 0
     ? databaseDeletion.deletedRuntimeMemberIds
     : deletionMemberIds;
-  await signalHostedMailboxAppendsBestEffort(
+  await signalHostedVaultShareCleanupRuntimesBestEffort(
     databaseDeletion.vaultShareCleanupSignals,
   );
   await Promise.all(deletedRuntimeMemberIds.map((memberId) =>
@@ -734,50 +750,6 @@ export async function deleteHostedAccountData(input: {
   };
 }
 
-async function stopHostedAccountPhoneCalls(input: {
-  memberIds: readonly string[];
-  prisma: PrismaClient;
-}): Promise<void> {
-  const calls = await input.prisma.hostedPhoneCall.findMany({
-    select: {
-      providerCallId: true,
-      providerStartAttemptedAt: true,
-    },
-    where: {
-      AND: [
-        buildHostedAccountPhoneCallWhere(input.memberIds),
-        { status: { in: ["starting", "calling"] } },
-      ],
-    },
-  });
-  if (calls.some((call) =>
-    call.providerStartAttemptedAt !== null && call.providerCallId === null
-  )) {
-    throw hostedOnboardingError({
-      code: "ACCOUNT_DELETION_PHONE_CALL_START_IN_PROGRESS",
-      httpStatus: 503,
-      message: "A phone call is still starting. Retry account deletion after it settles.",
-      retryable: true,
-    });
-  }
-
-  try {
-    for (const providerCallId of dedupeNullableStrings(
-      calls.map((call) => call.providerCallId),
-    )) {
-      await stopRetellPhoneCall(providerCallId);
-    }
-  } catch (error) {
-    throw hostedOnboardingError({
-      cause: error,
-      code: "ACCOUNT_DELETION_PHONE_CALL_STOP_FAILED",
-      httpStatus: 502,
-      message: "We could not stop an active phone call. Retry account deletion, or contact support if it keeps failing.",
-      retryable: true,
-    });
-  }
-}
-
 async function deleteHostedComputerUseExternalStateForAccountDeletion(input: {
   memberId: string;
   prisma: PrismaClient;
@@ -820,9 +792,7 @@ async function listOwnedHostedFamilyGroupIds(input: {
   ownerMemberIds: readonly string[];
   prisma: HostedAccountDataPrisma;
 }): Promise<string[]> {
-  if (input.ownerMemberIds.length === 0) {
-    return [];
-  }
+  if (input.ownerMemberIds.length === 0) return [];
   const rows = await input.prisma.hostedAccountGroup.findMany({
     orderBy: { id: "asc" },
     select: { id: true },
@@ -830,7 +800,6 @@ async function listOwnedHostedFamilyGroupIds(input: {
       ownerMemberId: buildStringInFilter(input.ownerMemberIds),
     },
   });
-
   return rows.map((row) => row.id);
 }
 
@@ -838,9 +807,7 @@ async function listActiveHostedFamilyBeneficiaryMemberIds(input: {
   groupIds: readonly string[];
   prisma: HostedAccountDataPrisma;
 }): Promise<string[]> {
-  if (input.groupIds.length === 0) {
-    return [];
-  }
+  if (input.groupIds.length === 0) return [];
   const rows = await input.prisma.hostedAccountGroupMembership.findMany({
     orderBy: { memberId: "asc" },
     select: { memberId: true },
@@ -849,7 +816,6 @@ async function listActiveHostedFamilyBeneficiaryMemberIds(input: {
       status: "active",
     },
   });
-
   return rows.map((row) => row.memberId);
 }
 
@@ -1199,6 +1165,216 @@ function isStripeResourceMissingError(error: unknown): boolean {
     && type.startsWith("Stripe");
 }
 
+async function countHostedAccountData(input: {
+  memberId: string;
+  prisma: HostedAccountDataPrisma;
+}): Promise<HostedAccountDataCounts> {
+  const memberId = input.memberId;
+  const memberIds = uniqueStrings([
+    memberId,
+    ...await listOwnedHostedThreadContainerMemberIds({
+      ownerMemberId: memberId,
+      prisma: input.prisma,
+    }),
+  ]);
+  const memberIdFilter = buildStringInFilter(memberIds);
+  const [
+    hostedMember,
+    hostedWebSession,
+    hostedMemberIdentity,
+    hostedMemberRouting,
+    hostedMemberBillingRef,
+    hostedAccountGroup,
+    hostedAccountGroupMembership,
+    hostedAccountGroupInvite,
+    hostedAccountGroupBillingRef,
+    hostedGroup,
+    hostedGroupMember,
+    hostedMemberEmailAuthorization,
+    hostedConnectedAppsSession,
+    hostedConnectedAppConnectIntent,
+    hostedMailboxItem,
+    hostedMailboxPayload,
+    hostedMailboxLaneCounter,
+    hostedIngressLatencyTrace,
+    hostedWorkspace,
+    hostedComputerRun,
+    hostedComputerHandoff,
+    hostedPhoneCall,
+    hostedUserCryptoEnvelope,
+    hostedUserCryptoAudit,
+    hostedInvite,
+    hostedConsentEvent,
+    hostedConsentGrant,
+    hostedVaultShare,
+    hostedThreadContainer,
+    hostedThreadRoute,
+    hostedAiUsage,
+    hostedAiUsagePeriod,
+    hostedProductFeedback,
+    hostedLinqDailyState,
+    deviceConnection,
+    deviceSyncDirtyConnection,
+    deviceSyncDirtyPayload,
+    deviceTokenAudit,
+    deviceOauthSession,
+    deviceConnectIntent,
+    deviceSyncSignal,
+    deviceAgentSession,
+    deviceBrowserAssertionNonce,
+    hostedWebInternalRequestNonce,
+  ] = await Promise.all([
+    input.prisma.hostedMember.count({ where: { id: memberIdFilter } }),
+    input.prisma.hostedWebSession.count({ where: { memberId: memberIdFilter } }),
+    input.prisma.hostedMemberIdentity.count({ where: { memberId: memberIdFilter } }),
+    input.prisma.hostedMemberRouting.count({ where: { memberId: memberIdFilter } }),
+    input.prisma.hostedMemberBillingRef.count({ where: { memberId: memberIdFilter } }),
+    input.prisma.hostedAccountGroup.count({ where: { ownerMemberId: memberIdFilter } }),
+    input.prisma.hostedAccountGroupMembership.count({
+      where: {
+        OR: [
+          { memberId: memberIdFilter },
+          { group: { ownerMemberId: memberIdFilter } },
+        ],
+      },
+    }),
+    input.prisma.hostedAccountGroupInvite.count({
+      where: {
+        OR: [
+          { acceptedByMemberId: memberIdFilter },
+          { group: { ownerMemberId: memberIdFilter } },
+          { invitedByMemberId: memberIdFilter },
+        ],
+      },
+    }),
+    input.prisma.hostedAccountGroupBillingRef.count({
+      where: {
+        group: {
+          ownerMemberId: memberIdFilter,
+        },
+      },
+    }),
+    input.prisma.hostedGroup.count({
+      where: {
+        OR: [
+          { ownerMemberId: memberIdFilter },
+          { runtimeMemberId: memberIdFilter },
+        ],
+      },
+    }),
+    input.prisma.hostedGroupMember.count({
+      where: {
+        OR: [
+          { memberId: memberIdFilter },
+          { group: { ownerMemberId: memberIdFilter } },
+          { group: { runtimeMemberId: memberIdFilter } },
+        ],
+      },
+    }),
+    input.prisma.hostedMemberEmailAuthorization.count({ where: { memberId: memberIdFilter } }),
+    input.prisma.hostedConnectedAppsSession.count({ where: { memberId: memberIdFilter } }),
+    input.prisma.hostedConnectedAppConnectIntent.count({ where: { memberId: memberIdFilter } }),
+    input.prisma.hostedMailboxItem.count({ where: { userId: memberIdFilter } }),
+    input.prisma.hostedMailboxPayload.count({ where: { userId: memberIdFilter } }),
+    input.prisma.hostedMailboxLaneCounter.count({ where: { userId: memberIdFilter } }),
+    input.prisma.hostedIngressLatencyTrace.count({ where: { userId: memberIdFilter } }),
+    input.prisma.hostedWorkspace.count({ where: { userId: memberIdFilter } }),
+    input.prisma.hostedComputerRun.count({ where: { memberId: memberIdFilter } }),
+    input.prisma.hostedComputerHandoff.count({ where: { memberId: memberIdFilter } }),
+    input.prisma.hostedPhoneCall.count({ where: { memberId: memberIdFilter } }),
+    countHostedUserCryptoEnvelopeRows(input.prisma, memberIds),
+    countHostedUserCryptoAuditRows(input.prisma, memberIds),
+    input.prisma.hostedInvite.count({ where: { memberId: memberIdFilter } }),
+    input.prisma.hostedConsentEvent.count({ where: { memberId: memberIdFilter } }),
+    input.prisma.hostedConsentGrant.count({ where: { memberId: memberIdFilter } }),
+    input.prisma.hostedVaultShare.count({
+      where: {
+        OR: [
+          { grantorMemberId: memberIdFilter },
+          { destinationMemberId: memberIdFilter },
+        ],
+      },
+    }),
+    input.prisma.hostedThreadContainer.count({
+      where: {
+        OR: [
+          { memberId: memberIdFilter },
+          { ownerMemberId: memberIdFilter },
+        ],
+      },
+    }),
+    input.prisma.hostedThreadRoute.count({
+      where: {
+        OR: [
+          { containerMemberId: memberIdFilter },
+          { container: { ownerMemberId: memberIdFilter } },
+        ],
+      },
+    }),
+    input.prisma.hostedAiUsage.count({ where: { memberId: memberIdFilter } }),
+    input.prisma.hostedAiUsagePeriod.count({ where: { memberId: memberIdFilter } }),
+    input.prisma.hostedProductFeedback.count({ where: { memberId: memberIdFilter } }),
+    input.prisma.hostedLinqDailyState.count({ where: { memberId: memberIdFilter } }),
+    input.prisma.deviceConnection.count({ where: { userId: memberIdFilter } }),
+    input.prisma.deviceSyncDirtyConnection.count({ where: { userId: memberIdFilter } }),
+    input.prisma.deviceSyncDirtyPayload.count({ where: { userId: memberIdFilter } }),
+    input.prisma.deviceTokenAudit.count({ where: { userId: memberIdFilter } }),
+    input.prisma.deviceOauthSession.count({ where: { userId: memberIdFilter } }),
+    input.prisma.deviceConnectIntent.count({ where: { memberId: memberIdFilter } }),
+    input.prisma.deviceSyncSignal.count({ where: { userId: memberIdFilter } }),
+    input.prisma.deviceAgentSession.count({ where: { userId: memberIdFilter } }),
+    input.prisma.deviceBrowserAssertionNonce.count({ where: { userId: memberIdFilter } }),
+    input.prisma.hostedWebInternalRequestNonce.count({ where: { userId: memberIdFilter } }),
+  ]);
+
+  return {
+    "prisma.device_agent_session": deviceAgentSession,
+    "prisma.device_browser_assertion_nonce": deviceBrowserAssertionNonce,
+    "prisma.device_connection": deviceConnection,
+    "prisma.device_connect_intent": deviceConnectIntent,
+    "prisma.device_oauth_session": deviceOauthSession,
+    "prisma.device_sync_dirty_connection": deviceSyncDirtyConnection,
+    "prisma.device_sync_dirty_payload": deviceSyncDirtyPayload,
+    "prisma.device_sync_signal": deviceSyncSignal,
+    "prisma.device_token_audit": deviceTokenAudit,
+    "prisma.hosted_ai_usage": hostedAiUsage,
+    "prisma.hosted_ai_usage_period": hostedAiUsagePeriod,
+    "prisma.hosted_product_feedback": hostedProductFeedback,
+    "prisma.hosted_consent_event": hostedConsentEvent,
+    "prisma.hosted_consent_grant": hostedConsentGrant,
+    "prisma.hosted_connected_app_connect_intent": hostedConnectedAppConnectIntent,
+    "prisma.hosted_connected_apps_session": hostedConnectedAppsSession,
+    "prisma.hosted_computer_handoff": hostedComputerHandoff,
+    "prisma.hosted_computer_run": hostedComputerRun,
+    "prisma.hosted_phone_call": hostedPhoneCall,
+    "prisma.hosted_invite": hostedInvite,
+    "prisma.hosted_ingress_latency_trace": hostedIngressLatencyTrace,
+    "prisma.hosted_linq_daily_state": hostedLinqDailyState,
+    "prisma.hosted_mailbox_item": hostedMailboxItem,
+    "prisma.hosted_mailbox_lane_counter": hostedMailboxLaneCounter,
+    "prisma.hosted_mailbox_payload": hostedMailboxPayload,
+    "prisma.hosted_member": hostedMember,
+    "prisma.hosted_web_session": hostedWebSession,
+    "prisma.hosted_account_group": hostedAccountGroup,
+    "prisma.hosted_account_group_billing_ref": hostedAccountGroupBillingRef,
+    "prisma.hosted_account_group_invite": hostedAccountGroupInvite,
+    "prisma.hosted_account_group_membership": hostedAccountGroupMembership,
+    "prisma.hosted_group": hostedGroup,
+    "prisma.hosted_group_member": hostedGroupMember,
+    "prisma.hosted_member_billing_ref": hostedMemberBillingRef,
+    "prisma.hosted_member_email_authorization": hostedMemberEmailAuthorization,
+    "prisma.hosted_member_identity": hostedMemberIdentity,
+    "prisma.hosted_member_routing": hostedMemberRouting,
+    "prisma.hosted_thread_container": hostedThreadContainer,
+    "prisma.hosted_thread_route": hostedThreadRoute,
+    "prisma.hosted_user_crypto_audit": hostedUserCryptoAudit,
+    "prisma.hosted_user_crypto_envelope": hostedUserCryptoEnvelope,
+    "prisma.hosted_vault_share": hostedVaultShare,
+    "prisma.hosted_web_internal_request_nonce": hostedWebInternalRequestNonce,
+    "prisma.hosted_workspace": hostedWorkspace,
+  };
+}
+
 async function deleteHostedAccountPrismaRows(input: {
   connectionIdentities: readonly DeviceConnectionIdentity[];
   memberIds: readonly string[];
@@ -1239,6 +1415,15 @@ async function deleteHostedAccountPrismaRows(input: {
   record("prisma.hosted_workspace", await input.prisma.hostedWorkspace.deleteMany({ where: { userId: memberIdFilter } }));
   record("prisma.hosted_computer_handoff", await input.prisma.hostedComputerHandoff.deleteMany({ where: { memberId: memberIdFilter } }));
   record("prisma.hosted_computer_run", await input.prisma.hostedComputerRun.deleteMany({ where: { memberId: memberIdFilter } }));
+  record("prisma.hosted_phone_call", await input.prisma.hostedPhoneCall.deleteMany({
+    where: buildHostedAccountPhoneCallWhere(input.memberIds),
+  }));
+  record("prisma.hosted_call_circle_match", await input.prisma.hostedCallCircleMatch.deleteMany({
+    where: buildHostedAccountCallCircleMatchWhere(input.memberIds),
+  }));
+  record("prisma.hosted_call_circle_participant", await input.prisma.hostedCallCircleParticipant.deleteMany({
+    where: buildHostedAccountCallCircleParticipantWhere(input.memberIds),
+  }));
   record("prisma.hosted_member_email_authorization", await input.prisma.hostedMemberEmailAuthorization.deleteMany({ where: { memberId: memberIdFilter } }));
   record("prisma.hosted_member_billing_ref", await input.prisma.hostedMemberBillingRef.deleteMany({ where: { memberId: memberIdFilter } }));
   record("prisma.hosted_account_group_invite", await input.prisma.hostedAccountGroupInvite.deleteMany({
@@ -1266,25 +1451,22 @@ async function deleteHostedAccountPrismaRows(input: {
     },
   }));
   record("prisma.hosted_account_group", await input.prisma.hostedAccountGroup.deleteMany({ where: { ownerMemberId: memberIdFilter } }));
-  record("prisma.hosted_phone_call", await input.prisma.hostedPhoneCall.deleteMany({
-    where: buildHostedAccountPhoneCallWhere(input.memberIds),
-  }));
-  record("prisma.hosted_call_circle_match", await input.prisma.hostedCallCircleMatch.deleteMany({
-    where: buildHostedAccountCallCircleMatchWhere(input.memberIds),
-  }));
-  record("prisma.hosted_call_circle_participant", await input.prisma.hostedCallCircleParticipant.deleteMany({
-    where: buildHostedAccountCallCircleParticipantWhere(input.memberIds),
-  }));
   record("prisma.hosted_group_member", await input.prisma.hostedGroupMember.deleteMany({
     where: {
       OR: [
         { memberId: memberIdFilter },
-        { group: buildHostedAccountGroupWhere(input.memberIds) },
+        { group: { ownerMemberId: memberIdFilter } },
+        { group: { runtimeMemberId: memberIdFilter } },
       ],
     },
   }));
   record("prisma.hosted_group", await input.prisma.hostedGroup.deleteMany({
-    where: buildHostedAccountGroupWhere(input.memberIds),
+    where: {
+      OR: [
+        { ownerMemberId: memberIdFilter },
+        { runtimeMemberId: memberIdFilter },
+      ],
+    },
   }));
   record("prisma.hosted_member_routing", await input.prisma.hostedMemberRouting.deleteMany({ where: { memberId: memberIdFilter } }));
   record("prisma.hosted_sensitive_action_challenge", await input.prisma.hostedSensitiveActionChallenge.deleteMany({ where: { memberId: memberIdFilter } }));
@@ -1380,6 +1562,46 @@ function buildHostedAccountGroupWhere(
   };
 }
 
+async function signalHostedVaultShareCleanupRuntimesBestEffort(
+  signals: readonly HostedVaultShareCleanupSignal[],
+): Promise<void> {
+  await Promise.all(signals.map(async (signal) => {
+    try {
+      await signalHostedMailboxAppendRuntime({
+        expectedUserId: signal.memberId,
+        mailboxItemId: signal.mailboxItemId,
+      });
+    } catch {
+      // The revoke mailbox item is durable; the destination runtime will observe it on
+      // its next mailbox poll if this best-effort wake signal fails.
+    }
+  }));
+}
+
+async function countHostedUserCryptoEnvelopeRows(
+  prisma: HostedAccountDataPrisma,
+  memberIds: readonly string[],
+): Promise<number> {
+  const rows = await prisma.$queryRaw<RawCountRow[]>`
+    SELECT COUNT(*)::bigint AS count
+    FROM hosted_user_crypto_envelope
+    WHERE user_id IN (${Prisma.join(memberIds)})
+  `;
+  return normalizeRawCount(rows[0]?.count);
+}
+
+async function countHostedUserCryptoAuditRows(
+  prisma: HostedAccountDataPrisma,
+  memberIds: readonly string[],
+): Promise<number> {
+  const rows = await prisma.$queryRaw<RawCountRow[]>`
+    SELECT COUNT(*)::bigint AS count
+    FROM hosted_user_crypto_audit
+    WHERE user_id IN (${Prisma.join(memberIds)})
+  `;
+  return normalizeRawCount(rows[0]?.count);
+}
+
 async function deleteHostedUserCryptoEnvelopeRows(
   prisma: Prisma.TransactionClient,
   memberIds: readonly string[],
@@ -1400,6 +1622,23 @@ async function deleteHostedUserCryptoAuditRows(
     WHERE user_id IN (${Prisma.join(memberIds)})
   `;
   return { count };
+}
+
+type RawCountRow = {
+  count: bigint | number | string | null;
+};
+
+function normalizeRawCount(value: RawCountRow["count"] | undefined): number {
+  if (typeof value === "bigint") {
+    return Number(value);
+  }
+  if (typeof value === "number") {
+    return value;
+  }
+  if (typeof value === "string" && value.length > 0) {
+    return Number(value);
+  }
+  return 0;
 }
 
 async function listDeviceConnectionIdentities(input: {

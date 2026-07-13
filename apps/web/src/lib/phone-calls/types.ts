@@ -12,31 +12,52 @@ export interface HostedPhoneCallRuntimeRecord {
   transferNumber: string | null;
 }
 
-export interface PhoneCallRuntimeStartResult {
-  providerCallId: string;
+export type PhoneCallRuntimeStartResult =
+  | {
+      cleanupRequired?: false;
+      providerCallId: string;
+    }
+  | {
+      cleanupRequired: true;
+      error: unknown;
+      providerCallId: string;
+    };
+
+export type PhoneCallRuntimeReconciliationResult =
+  | {
+      providerCallId: string;
+      state: "found" | "cleanup_required";
+    }
+  | {
+      state: "not_found";
+    };
+
+const phoneCallRuntimeNoActiveEffectErrors = new WeakSet<object>();
+
+export function markPhoneCallRuntimeNoActiveEffect<TError>(error: TError): TError {
+  if ((typeof error === "object" && error !== null) || typeof error === "function") {
+    phoneCallRuntimeNoActiveEffectErrors.add(error);
+  }
+  return error;
+}
+
+export function hasPhoneCallRuntimeNoActiveEffect(error: unknown): boolean {
+  return ((typeof error === "object" && error !== null) || typeof error === "function")
+    && phoneCallRuntimeNoActiveEffectErrors.has(error);
 }
 
 export interface PhoneCallRuntime {
   validateStart?(call: HostedPhoneCallRuntimeRecord): Promise<void> | void;
-  start(call: HostedPhoneCallRuntimeRecord): Promise<PhoneCallRuntimeStartResult>;
-  stop(providerCallId: string): Promise<void>;
-}
-
-export class PhoneCallRuntimeStartRejectedError extends Error {
-  readonly providerCallId: string | null;
-
-  constructor(
-    message: string,
-    options?: ErrorOptions & { providerCallId?: string },
-  ) {
-    super(message, options);
-    this.name = "PhoneCallRuntimeStartRejectedError";
-    this.providerCallId = options?.providerCallId ?? null;
-  }
-}
-
-export function isPhoneCallRuntimeStartRejectedError(
-  error: unknown,
-): error is PhoneCallRuntimeStartRejectedError {
-  return error instanceof PhoneCallRuntimeStartRejectedError;
+  resolveProviderCall(
+    murphPhoneCallId: string,
+    options?: { signal?: AbortSignal },
+  ): Promise<PhoneCallRuntimeReconciliationResult>;
+  start(
+    call: HostedPhoneCallRuntimeRecord,
+    options?: { signal?: AbortSignal },
+  ): Promise<PhoneCallRuntimeStartResult>;
+  stopIfActive(
+    providerCallId: string,
+    options?: { signal?: AbortSignal },
+  ): Promise<void>;
 }

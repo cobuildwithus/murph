@@ -247,6 +247,26 @@ export async function readActiveHostedMemberAccess(input: {
   return hasActiveHostedMemberAccess(member);
 }
 
+export async function isHostedThreadContainerMember(input: {
+  memberId: string;
+  prisma?: HostedOnboardingReadClient;
+}): Promise<boolean> {
+  const member = await (input.prisma ?? getPrisma()).hostedMember.findUnique({
+    select: {
+      threadContainer: {
+        select: {
+          memberId: true,
+        },
+      },
+    },
+    where: {
+      id: input.memberId,
+    },
+  });
+
+  return member?.threadContainer != null;
+}
+
 export async function hasAnyActiveHostedThreadContainerParticipant(input: {
   containerMemberId: string;
   prisma?: HostedOnboardingReadClient;

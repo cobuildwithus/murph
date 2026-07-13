@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
@@ -41,7 +42,6 @@ import {
 import {
   flushPendingAssistantRuntimeIssueWrites,
   findAssistantSessionIdByCodexThreadId,
-  readAssistantInputEvent,
 } from "@murphai/assistant-engine";
 import {
   type AssistantCurrentDeliveryRoute,
@@ -69,10 +69,6 @@ import {
 import {
   getOrCreateHostedCliRuntimeBridge,
 } from "./hosted-runtime/cli-runtime-bridge.ts";
-import {
-  readHostedAssistantInputCurrentDeliveryRoute,
-  resolveUnambiguousCurrentDeliveryRoute,
-} from "./hosted-runtime/current-delivery-route.ts";
 import {
   executeHostedMailboxEvent,
 } from "./hosted-runtime/events.ts";
@@ -152,6 +148,7 @@ import {
 } from "./hosted-runtime/browser-vault-replica.ts";
 import {
   runHostedWorkspaceAssistantPhase,
+  type HostedAssistantCurrentDeliveryRouteScope,
   type HostedWorkspaceRuntimeAssistantPhase,
 } from "./hosted-runtime/workspace-assistant-phase.ts";
 import {
@@ -1592,6 +1589,31 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       }
     };
     let runtimePassOrdinal = 0;
+    // Bind route authority to the current provider operation. A shell process
+    // that outlives its turn keeps only a revoked grant, never a later route.
+    let currentOperationDeliveryRoute: AssistantCurrentDeliveryRoute | null = null;
+    let currentOperationRouteGrant: string | null = null;
+    let currentOperationDeliveryRouteScopeActive = false;
+    const currentDeliveryRouteScope: HostedAssistantCurrentDeliveryRouteScope = {
+      async run<T>(
+        route: AssistantCurrentDeliveryRoute | null,
+        operation: (routeGrant: string) => Promise<T>,
+      ): Promise<T> {
+        if (currentOperationDeliveryRouteScopeActive) {
+          throw new TypeError("Hosted assistant delivery-route scopes cannot be nested.");
+        }
+        currentOperationDeliveryRouteScopeActive = true;
+        currentOperationDeliveryRoute = route;
+        currentOperationRouteGrant = randomBytes(32).toString("base64url");
+        try {
+          return await operation(currentOperationRouteGrant);
+        } finally {
+          currentOperationDeliveryRoute = null;
+          currentOperationRouteGrant = null;
+          currentOperationDeliveryRouteScopeActive = false;
+        }
+      },
+    };
     const runWorkspaceForegroundPass = async (passInput: {
       initialAssistantInputBatch?: HostedWorkspaceRunnerAssistantInputBatch | null;
       initialMailboxImport?: HostedWorkspaceRunnerInput["initialMailboxImport"];
@@ -1626,14 +1648,10 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         status: "start",
       });
       try {
-        let currentDeliveryRoute = await resolveHostedForegroundCurrentDeliveryRoute({
-          initialAssistantInputBatch: passInput.initialAssistantInputBatch ?? null,
-          initialMailboxImport: passInput.initialMailboxImport,
-          vaultRoot: restored.vaultRoot,
-        });
         const passResult = await hostedCliBridge.runWithInvocation(
           {
-            currentDeliveryRoute: () => currentDeliveryRoute,
+            currentDeliveryRoute: () => currentOperationDeliveryRoute,
+            currentRouteGrant: () => currentOperationRouteGrant,
             deviceSyncPort: guardedRuntime.platform.deviceSyncPort ?? null,
             messagingReturnTarget: () => hostedCliBridgeMessagingReturnTarget,
             signal: passSignal,
@@ -1652,15 +1670,11 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
                 startedAtEpochMs: passStartedAtEpochMs,
               },
               runAssistantPhase: async (phaseInput) => {
-                currentDeliveryRoute = await resolveHostedForegroundCurrentDeliveryRoute({
-                  initialAssistantInputBatch: phaseInput.initialAssistantInputBatch ?? null,
-                  initialMailboxImport: phaseInput.initialMailboxImport,
-                  vaultRoot: restored.vaultRoot,
-                });
                 return await (
                   options.runAssistantPhase ?? runHostedWorkspaceAssistantPhase
                 )({
                   ...phaseInput,
+                  currentDeliveryRouteScope,
                   deviceSyncWorkspaceWakeHandled: deviceSyncWorkspaceWakeHandledUntilCheckpoint,
                   request: input.request,
                   restored,
@@ -4431,40 +4445,6 @@ function resolveHostedWorkspaceRunMailboxLimit(value: number | null | undefined)
 
 function resolveHostedWorkspaceRunMailboxFetchLimit(importLimit: number): number {
   return importLimit >= Number.MAX_SAFE_INTEGER ? importLimit : importLimit + 1;
-}
-
-async function resolveHostedForegroundCurrentDeliveryRoute(input: {
-  initialAssistantInputBatch?: HostedWorkspaceRunnerAssistantInputBatch | null;
-  initialMailboxImport: HostedWorkspaceRunnerInput["initialMailboxImport"] | undefined;
-  vaultRoot: string;
-}): Promise<AssistantCurrentDeliveryRoute | null> {
-  const assistantInputIds =
-    input.initialAssistantInputBatch?.assistantInputIds
-    ?? input.initialMailboxImport?.importResult.assistantInputIds
-    ?? [];
-  const routes: AssistantCurrentDeliveryRoute[] = [];
-  for (const inputId of assistantInputIds) {
-    if (!inputId) {
-      continue;
-    }
-    try {
-      const event = await readAssistantInputEvent({
-        inputId,
-        vault: input.vaultRoot,
-      });
-      const route = readHostedAssistantInputCurrentDeliveryRoute({
-        conversation: event?.conversation ?? null,
-        replyTarget: event?.replyTarget ?? null,
-      });
-      if (route) {
-        routes.push(route);
-      }
-    } catch {
-      return null;
-    }
-  }
-
-  return resolveUnambiguousCurrentDeliveryRoute(routes);
 }
 
 function resolveHostedWorkspaceInvocationStatus(input: {

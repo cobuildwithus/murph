@@ -61,6 +61,7 @@ export async function sealHostedUserSecureBoxString(input: {
   lane: HostedCryptoLane;
   prisma?: HostedSecureBoxPrismaClient;
   scope: string;
+  signal?: AbortSignal;
   userId: string;
   value: string | null | undefined;
 }): Promise<string | null> {
@@ -85,6 +86,7 @@ export async function sealHostedUserSecureBoxString(input: {
   const { envelope, rootKey } = await unwrapHostedDomainRootForWeb({
     domain,
     prisma: input.prisma,
+    signal: input.signal,
     userId: input.userId,
   });
   try {
@@ -117,6 +119,7 @@ export async function openHostedUserSecureBoxString(input: {
   lane: HostedCryptoLane;
   prisma?: HostedSecureBoxPrismaClient;
   scope: string;
+  signal?: AbortSignal;
   userId: string;
   value: string | null | undefined;
 }): Promise<string | null> {
@@ -146,6 +149,7 @@ export async function openHostedUserSecureBoxString(input: {
     domain,
     prisma: input.prisma,
     rootKeyId: serializedEnvelope.rootKeyId,
+    signal: input.signal,
     userId: input.userId,
   });
   try {

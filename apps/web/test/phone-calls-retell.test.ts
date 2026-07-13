@@ -3,6 +3,7 @@ import { createHmac } from "node:crypto";
 import { Prisma, type HostedPhoneCall } from "@prisma/client";
 import type {
   HostedPhoneCallBrief,
+  HostedPhoneCallResult,
 } from "@murphai/hosted-execution/phone-calls";
 import {
   hostedPhoneCallBriefSchema,
@@ -11,14 +12,21 @@ import {
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
+  readHostedPhoneCallResult,
+  type HostedPhoneCallCrypto,
+} from "@/src/lib/phone-calls/crypto";
+import {
+  createRetellPhoneCallAccountDeletionRuntime,
   createRetellPhoneCallRuntime,
-  stopRetellPhoneCall,
 } from "@/src/lib/phone-calls/retell-runtime";
 import { retellCallPayloadSchema } from "@/src/lib/phone-calls/retell-payloads";
 import {
-  isPhoneCallRuntimeStartRejectedError,
+  hasPhoneCallRuntimeNoActiveEffect,
 } from "@/src/lib/phone-calls/types";
-import { consultPhoneCall } from "@/src/lib/phone-calls/consult";
+import {
+  consultPhoneCall,
+  getHostedPhoneCallForConsultation,
+} from "@/src/lib/phone-calls/consult";
 import {
   buildPhoneCallResultNotificationInstructions,
   HOSTED_PHONE_CALL_ANALYSIS_WEBHOOK_GRACE_MS,
@@ -26,6 +34,7 @@ import {
   handleRetellCallAnalyzed,
   handleRetellCallEnded,
   handleRetellTransferOutcome,
+  HOSTED_PHONE_CALL_WEBHOOK_TRANSACTION_TIMEOUT_MS,
   mapRetellCallAnalysis,
   terminalizeStaleHostedPhoneCallAnalyses,
   terminalizeStaleActiveHostedPhoneCalls,
@@ -50,6 +59,9 @@ type ActiveCallSweepTx = Parameters<ActiveCallSweepStore["$transaction"]>[0] ext
   : never;
 type AnalysisSweepStore =
   NonNullable<NonNullable<Parameters<typeof terminalizeStaleHostedPhoneCallAnalyses>[0]>["store"]>;
+type ConsultationStore = NonNullable<
+  Parameters<typeof getHostedPhoneCallForConsultation>[0]["prisma"]
+>;
 
 const VALID_BRIEF: HostedPhoneCallBrief = {
   allowTransferToUser: true,
@@ -100,9 +112,8 @@ describe("Retell phone-call runtime", () => {
       status: 422,
     });
 
-    await expect(stopRetellPhoneCall("retell_missing", { fetchImpl })).rejects.toMatchObject({
-      status: 422,
-    });
+    await expect(createRetellPhoneCallAccountDeletionRuntime({ fetchImpl })
+      .stopIfActive("retell_missing")).rejects.toMatchObject({ status: 422 });
   });
 
   it("creates calls with the current Retell override shape and server-owned transfer number", async () => {
@@ -213,35 +224,6 @@ describe("Retell phone-call runtime", () => {
     });
   });
 
-  it("classifies definite Retell create-call rejections as provider start rejection", async () => {
-    vi.stubEnv("RETELL_API_KEY", "retell-api-key");
-    vi.stubEnv("RETELL_FROM_NUMBER", "+12125559999");
-    vi.stubEnv("RETELL_AGENT_ID", "agent_123");
-    vi.stubEnv("RETELL_AGENT_VERSION", "prod");
-    vi.stubEnv("RETELL_AGENT_DATA_STORAGE_SETTING", "basic_attributes_only");
-    const fetchImpl: typeof fetch = async () =>
-      new Response(JSON.stringify({ message: "Invalid phone number." }), {
-        headers: {
-          "content-type": "application/json",
-        },
-        status: 422,
-      });
-
-    let thrown: unknown;
-    try {
-      await createRetellPhoneCallRuntime({ fetchImpl }).start({
-        brief: VALID_BRIEF,
-        id: "hpc_123",
-        memberId: "member_123",
-        transferNumber: "+12125550000",
-      });
-    } catch (error) {
-      thrown = error;
-    }
-
-    expect(isPhoneCallRuntimeStartRejectedError(thrown)).toBe(true);
-  });
-
   it("keeps a successful Retell response without call_id recoverable", async () => {
     vi.stubEnv("RETELL_API_KEY", "retell-api-key");
     vi.stubEnv("RETELL_FROM_NUMBER", "+12125559999");
@@ -271,7 +253,11 @@ describe("Retell phone-call runtime", () => {
     }
 
     expect(thrown).toBeInstanceOf(Error);
-    expect(isPhoneCallRuntimeStartRejectedError(thrown)).toBe(false);
+    expect(hasPhoneCallRuntimeNoActiveEffect(thrown)).toBe(false);
+  });
+
+  it("budgets the analyzed transaction for every sequential KMS lane", () => {
+    expect(HOSTED_PHONE_CALL_WEBHOOK_TRANSACTION_TIMEOUT_MS).toBe(50_000);
   });
 
   it("passes a configured Retell webhook public base as a per-call agent override", async () => {
@@ -380,7 +366,7 @@ describe("Retell phone-call runtime", () => {
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 
-  it("stops the Retell call and fails when the returned storage mode is not basic attributes only", async () => {
+  it("returns unsafe provider authority before any compensating stop", async () => {
     vi.stubEnv("RETELL_API_KEY", "retell-api-key");
     vi.stubEnv("RETELL_FROM_NUMBER", "+12125559999");
     vi.stubEnv("RETELL_AGENT_ID", "agent_123");
@@ -392,9 +378,6 @@ describe("Retell phone-call runtime", () => {
     }> = [];
     const fetchImpl: typeof fetch = async (url, init) => {
       fetchCalls.push({ init, url });
-      if (String(url).includes("/stop-call/")) {
-        return new Response(null, { status: 204 });
-      }
       return new Response(JSON.stringify({
         call_id: "retell_call_unsafe",
         data_storage_setting: "everything",
@@ -406,85 +389,123 @@ describe("Retell phone-call runtime", () => {
       });
     };
 
-    let thrown: unknown;
-    try {
-      await createRetellPhoneCallRuntime({ fetchImpl }).start({
-        brief: VALID_BRIEF,
-        id: "hpc_123",
-        memberId: "member_123",
-        transferNumber: null,
-      });
-    } catch (error) {
-      thrown = error;
-    }
-
-    expect(thrown).toMatchObject({
-      message: expect.stringContaining("data_storage_setting everything"),
-      providerCallId: null,
+    await expect(createRetellPhoneCallRuntime({ fetchImpl }).start({
+      brief: VALID_BRIEF,
+      id: "hpc_123",
+      memberId: "member_123",
+      transferNumber: null,
+    })).resolves.toMatchObject({
+      cleanupRequired: true,
+      providerCallId: "retell_call_unsafe",
     });
-    expect(isPhoneCallRuntimeStartRejectedError(thrown)).toBe(true);
 
-    expect(fetchCalls).toHaveLength(2);
+    expect(fetchCalls).toHaveLength(1);
     expect(fetchCalls[0]!.url).toBe("https://api.retellai.com/v2/create-phone-call");
-    expect(fetchCalls[1]!.url).toBe("https://api.retellai.com/v2/stop-call/retell_call_unsafe");
-    expect(fetchCalls[1]!.init?.method).toBe("POST");
-    const stopHeaders = new Headers(fetchCalls[1]!.init?.headers);
-    expect(stopHeaders.get("authorization")).toBe(["Bearer", process.env.RETELL_API_KEY].join(" "));
   });
 
-  it.each([422, 500])(
-    "retains cleanup authority when storage mismatch stop fails with HTTP %s",
-    async (stopStatus) => {
-      vi.stubEnv("RETELL_API_KEY", "retell-api-key");
-      vi.stubEnv("RETELL_FROM_NUMBER", "+12125559999");
-      vi.stubEnv("RETELL_AGENT_ID", "agent_123");
-      vi.stubEnv("RETELL_AGENT_VERSION", "prod");
-      vi.stubEnv("RETELL_AGENT_DATA_STORAGE_SETTING", "basic_attributes_only");
-      const fetchImpl: typeof fetch = async (url) => {
-        if (String(url).includes("/stop-call/")) {
-          return new Response(null, { status: stopStatus });
-        }
-        return new Response(JSON.stringify({
-          call_id: "retell_call_unsafe",
-          data_storage_setting: "everything",
-        }), {
-          headers: {
-            "content-type": "application/json",
-          },
-          status: 200,
-        });
-      };
+  it("returns secret-safe structured diagnostics for unsafe provider storage", async () => {
+    vi.stubEnv("RETELL_API_KEY", "retell-api-key");
+    vi.stubEnv("RETELL_FROM_NUMBER", "+12125559999");
+    vi.stubEnv("RETELL_AGENT_ID", "agent_123");
+    vi.stubEnv("RETELL_AGENT_VERSION", "prod");
+    vi.stubEnv("RETELL_AGENT_DATA_STORAGE_SETTING", "basic_attributes_only");
+    const fetchImpl = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({
+      call_id: "retell_call_unsafe",
+      data_storage_setting: "everything",
+    }), {
+      headers: {
+        "content-type": "application/json",
+      },
+      status: 200,
+    }));
 
-      let thrown: unknown;
-      try {
-        await createRetellPhoneCallRuntime({ fetchImpl }).start({
-          brief: VALID_BRIEF,
-          id: "hpc_123",
-          memberId: "member_123",
-          transferNumber: null,
-        });
-      } catch (error) {
-        thrown = error;
-      }
+    const result = await createRetellPhoneCallRuntime({ fetchImpl }).start({
+      brief: VALID_BRIEF,
+      id: "hpc_123",
+      memberId: "member_123",
+      transferNumber: null,
+    });
 
-      expect(thrown).toMatchObject({
-        providerCallId: "retell_call_unsafe",
-      });
-      expect(isPhoneCallRuntimeStartRejectedError(thrown)).toBe(true);
-      expect((thrown as Error).cause).toMatchObject({
+    expect(result).toMatchObject({
+      cleanupRequired: true,
+      error: {
         code: "RETELL_STORAGE_MODE_MISMATCH",
         details: {
           code: "retell_storage_mode_mismatch",
           operationName: "retell.create_phone_call",
-          statusCode: stopStatus,
           storageMode: "everything",
-          type: "retell_storage_mismatch_stop_http_failed",
+          type: "everything",
         },
         httpStatus: 502,
         retryable: false,
-      });
-    },
-  );
+      },
+      providerCallId: "retell_call_unsafe",
+    });
+    if (result.cleanupRequired !== true) {
+      throw new Error("Expected Retell cleanup authority.");
+    }
+    expect(JSON.stringify(result.error)).not.toContain("retell_call_unsafe");
+    expect(fetchImpl).toHaveBeenCalledOnce();
+  });
+
+  it("resolves a safe provider call by the stable Murph metadata id", async () => {
+    vi.stubEnv("RETELL_API_KEY", "retell-api-key");
+    const fetchImpl = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({
+      has_more: false,
+      items: [{
+        call_id: "retell_call_123",
+        data_storage_setting: "basic_attributes_only",
+        metadata: { murph_phone_call_id: "hpc_123" },
+      }],
+    }), {
+      headers: { "content-type": "application/json" },
+      status: 200,
+    }));
+
+    await expect(createRetellPhoneCallRuntime({ fetchImpl }).resolveProviderCall(
+      "hpc_123",
+    )).resolves.toEqual({
+      providerCallId: "retell_call_123",
+      state: "found",
+    });
+
+    const [url, init] = fetchImpl.mock.calls[0]!;
+    expect(url).toBe("https://api.retellai.com/v3/list-calls");
+    expect(JSON.parse(String(init?.body))).toMatchObject({
+      filter_criteria: {
+        metadata: [{
+          key: "murph_phone_call_id",
+          op: "eq",
+          type: "string",
+          value: "hpc_123",
+        }],
+      },
+      limit: 2,
+    });
+  });
+
+  it("returns reconciled unsafe authority before any compensating stop", async () => {
+    vi.stubEnv("RETELL_API_KEY", "retell-api-key");
+    const fetchImpl = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({
+      has_more: false,
+      items: [{
+        call_id: "retell_call_unsafe",
+        data_storage_setting: "everything",
+        metadata: { murph_phone_call_id: "hpc_123" },
+      }],
+    }), {
+      headers: { "content-type": "application/json" },
+      status: 200,
+    }));
+
+    await expect(createRetellPhoneCallRuntime({ fetchImpl }).resolveProviderCall(
+      "hpc_123",
+    )).resolves.toEqual({
+      providerCallId: "retell_call_unsafe",
+      state: "cleanup_required",
+    });
+    expect(fetchImpl).toHaveBeenCalledOnce();
+  });
 
   it("fails closed before Retell start when the agent storage mode is not configured as basic attributes only", async () => {
     const fetchImpl: typeof fetch = async () => {
@@ -499,6 +520,84 @@ describe("Retell phone-call runtime", () => {
     })).rejects.toThrow(
       "RETELL_AGENT_DATA_STORAGE_SETTING must be basic_attributes_only",
     );
+  });
+
+  it("classifies an abort before provider dispatch as having no active effect", async () => {
+    vi.stubEnv("RETELL_API_KEY", "retell-api-key");
+    vi.stubEnv("RETELL_FROM_NUMBER", "+12125559999");
+    vi.stubEnv("RETELL_AGENT_ID", "agent_123");
+    vi.stubEnv("RETELL_AGENT_DATA_STORAGE_SETTING", "basic_attributes_only");
+    const fetchImpl = vi.fn<typeof fetch>();
+    const controller = new AbortController();
+    controller.abort();
+
+    const error = await createRetellPhoneCallRuntime({ fetchImpl }).start({
+      brief: VALID_BRIEF,
+      id: "hpc_123",
+      memberId: "member_123",
+      transferNumber: null,
+    }, { signal: controller.signal }).catch((caught: unknown) => caught);
+
+    expect(error).toMatchObject({ name: "AbortError" });
+    expect(hasPhoneCallRuntimeNoActiveEffect(error)).toBe(true);
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("keeps authority pending when Retell returns a post-dispatch 408", async () => {
+    vi.stubEnv("RETELL_API_KEY", "retell-api-key");
+    vi.stubEnv("RETELL_FROM_NUMBER", "+12125559999");
+    vi.stubEnv("RETELL_AGENT_ID", "agent_123");
+    vi.stubEnv("RETELL_AGENT_DATA_STORAGE_SETTING", "basic_attributes_only");
+    const fetchImpl = vi.fn<typeof fetch>(async () => new Response(null, {
+      status: 408,
+    }));
+
+    const error = await createRetellPhoneCallRuntime({ fetchImpl }).start({
+      brief: VALID_BRIEF,
+      id: "hpc_123",
+      memberId: "member_123",
+      transferNumber: null,
+    }).catch((caught: unknown) => caught);
+
+    expect(hasPhoneCallRuntimeNoActiveEffect(error)).toBe(false);
+    expect(fetchImpl).toHaveBeenCalledOnce();
+  });
+
+  it("stops registered or ongoing calls during account deletion", async () => {
+    vi.stubEnv("RETELL_API_KEY", "retell-api-key");
+    const fetchImpl = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        call_id: "retell_call_123",
+        call_status: "ongoing",
+      }), {
+        headers: { "content-type": "application/json" },
+        status: 200,
+      }))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }));
+
+    await createRetellPhoneCallAccountDeletionRuntime({ fetchImpl })
+      .stopIfActive("retell_call_123");
+
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    expect(String(fetchImpl.mock.calls[0]![0])).toContain("/v2/get-call/retell_call_123");
+    expect(String(fetchImpl.mock.calls[1]![0])).toContain("/v2/stop-call/retell_call_123");
+    expect(fetchImpl.mock.calls[1]![1]?.method).toBe("POST");
+  });
+
+  it("does not stop calls Retell already reports as terminal", async () => {
+    vi.stubEnv("RETELL_API_KEY", "retell-api-key");
+    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({
+      call_id: "retell_call_123",
+      call_status: "ended",
+    }), {
+      headers: { "content-type": "application/json" },
+      status: 200,
+    }));
+
+    await createRetellPhoneCallAccountDeletionRuntime({ fetchImpl })
+      .stopIfActive("retell_call_123");
+
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -609,6 +708,7 @@ describe("Retell phone-call result handling", () => {
     await handleRetellCallEnded({
       call: {
         call_id: "retell_call_123",
+        data_storage_setting: "basic_attributes_only",
         disconnection_reason: "dial_busy",
         end_timestamp: 1_782_345_600,
       },
@@ -645,6 +745,7 @@ describe("Retell phone-call result handling", () => {
     await handleRetellCallEnded({
       call: {
         call_id: "retell_call_123",
+        data_storage_setting: "basic_attributes_only",
         end_timestamp: "2026-06-25T12:34:56.000Z",
       },
       prisma: store.prisma,
@@ -811,7 +912,11 @@ describe("Retell phone-call result handling", () => {
     let bridged = false;
     const store = createWebhookStore({
       beforeUpdateMany: (call, update) => {
-        if (!bridged && update.data.analyzedAt && !update.data.resultJson) {
+        if (
+          !bridged
+          && update.data.analyzedAt
+          && update.data.resultEncrypted === undefined
+        ) {
           bridged = true;
           return { ...call, transferOutcome: "bridged" };
         }
@@ -838,12 +943,12 @@ describe("Retell phone-call result handling", () => {
 
     expect(store.updateManyCalls).toHaveLength(2);
     expect(store.currentCall()).toMatchObject({
-      resultJson: {
-        outcome: "completed",
-        summary: "Retell confirmed that the Call Circle transfer connected.",
-      },
       status: "completed",
       transferOutcome: "bridged",
+    });
+    await expectStoredPhoneCallResult(store.currentCall(), {
+      outcome: "completed",
+      summary: "Retell confirmed that the Call Circle transfer connected.",
     });
   });
 
@@ -851,7 +956,12 @@ describe("Retell phone-call result handling", () => {
     let transition = 0;
     const store = createWebhookStore({
       beforeUpdateMany: (call, update) => {
-        if (!update.data.analyzedAt || update.data.resultJson) return call;
+        if (
+          update.data.analyzedAt === undefined
+          || update.data.resultEncrypted !== undefined
+        ) {
+          return call;
+        }
         if (transition === 0) {
           transition += 1;
           return { ...call, transferOutcome: "cancelled" };
@@ -876,12 +986,12 @@ describe("Retell phone-call result handling", () => {
 
     expect(store.updateManyCalls).toHaveLength(3);
     expect(store.currentCall()).toMatchObject({
-      resultJson: {
-        outcome: "completed",
-        summary: "Retell confirmed that the Call Circle transfer connected.",
-      },
       status: "completed",
       transferOutcome: "bridged",
+    });
+    await expectStoredPhoneCallResult(store.currentCall(), {
+      outcome: "completed",
+      summary: "Retell confirmed that the Call Circle transfer connected.",
     });
   });
 
@@ -914,16 +1024,15 @@ describe("Retell phone-call result handling", () => {
     });
 
     expect(store.currentCall()).toMatchObject({
-      resultJson: {
-        outcome: "completed",
-        summary: "Retell confirmed that the Call Circle transfer connected.",
-      },
       status: "completed",
       transferOutcome: "bridged",
     });
-    expect(store.appendResultNotificationCalls.map((stored) =>
-      hostedPhoneCallResultSchema.parse(stored.resultJson).outcome
-    )).toEqual(["completed"]);
+    await expectStoredPhoneCallResult(store.currentCall(), {
+      outcome: "completed",
+      summary: "Retell confirmed that the Call Circle transfer connected.",
+    });
+    expect(store.appendResultNotificationResults.map((result) => result?.outcome))
+      .toEqual(["completed"]);
   });
 
   it("upgrades a Call Circle active-call timeout when bridge evidence arrives later", async () => {
@@ -957,12 +1066,12 @@ describe("Retell phone-call result handling", () => {
 
     expect(store.currentCall()).toMatchObject({
       providerCallId: "retell_call_123",
-      resultJson: {
-        outcome: "completed",
-        summary: "Retell confirmed that the Call Circle transfer connected.",
-      },
       status: "completed",
       transferOutcome: "bridged",
+    });
+    await expectStoredPhoneCallResult(store.currentCall(), {
+      outcome: "completed",
+      summary: "Retell confirmed that the Call Circle transfer connected.",
     });
   });
 
@@ -997,12 +1106,12 @@ describe("Retell phone-call result handling", () => {
     });
 
     expect(store.currentCall()).toMatchObject({
-      resultJson: {
-        outcome: "completed",
-        summary: "Retell confirmed that the Call Circle transfer connected.",
-      },
       status: "completed",
       transferOutcome: "bridged",
+    });
+    await expectStoredPhoneCallResult(store.currentCall(), {
+      outcome: "completed",
+      summary: "Retell confirmed that the Call Circle transfer connected.",
     });
     expect(store.appendResultNotificationCalls).toHaveLength(1);
   });
@@ -1033,14 +1142,51 @@ describe("Retell phone-call result handling", () => {
     });
 
     expect(store.currentCall()).toMatchObject({
-      resultJson: {
-        outcome: "completed",
-        summary: "Retell confirmed that the Call Circle transfer connected.",
-      },
       status: "completed",
       transferOutcome: "bridged",
     });
+    await expectStoredPhoneCallResult(store.currentCall(), {
+      outcome: "completed",
+      summary: "Retell confirmed that the Call Circle transfer connected.",
+    });
     expect(store.appendResultNotificationCalls).toHaveLength(1);
+  });
+
+  it("closes unsafe-storage cleanup authority without converting it to success", async () => {
+    const store = createWebhookStore({
+      call: buildHostedPhoneCall({
+        analyzedAt: null,
+        endedAt: null,
+        id: "hpc_123",
+        providerCallId: "retell_call_unsafe",
+        status: "failed",
+      }),
+    });
+
+    await handleRetellCallEnded({
+      call: {
+        call_id: "retell_call_unsafe",
+        data_storage_setting: "everything",
+        end_timestamp: "2026-06-25T12:34:56.000Z",
+      },
+      prisma: store.prisma,
+    });
+
+    expect(store.updateManyCalls).toEqual([{
+      data: {
+        endedAt: new Date("2026-06-25T12:34:56.000Z"),
+        status: "failed",
+      },
+      where: {
+        endedAt: null,
+        id: "hpc_123",
+        provider: "retell",
+        providerCallId: "retell_call_unsafe",
+        status: {
+          in: ["starting", "calling", "ended", "failed"],
+        },
+      },
+    }]);
   });
 
   it("handles call_analyzed idempotently and retries the deduped notification append", async () => {
@@ -1082,34 +1228,50 @@ describe("Retell phone-call result handling", () => {
     expect(store.updateManyCalls).toHaveLength(1);
     expect(store.updateManyCalls[0]).toMatchObject({
       data: {
-        resultJson: {
-          outcome: "completed",
-          summary: "The appointment is booked for Friday at 3:45 PM.",
-        },
+        resultEncrypted: expect.stringMatching(/^hsb-test:/u),
+        resultJson: Prisma.DbNull,
         status: "completed",
       },
       where: {
-        analyzedAt: null,
-        id: "hpc_123",
-        provider: "retell",
-        providerCallId: "retell_call_123",
-        resultJson: { equals: Prisma.DbNull },
-        status: {
-          in: ["starting", "calling", "ended"],
-        },
+        AND: expect.arrayContaining([
+          expect.objectContaining({
+            analyzedAt: null,
+            id: "hpc_123",
+            provider: "retell",
+            providerCallId: "retell_call_123",
+            status: {
+              in: ["starting", "calling", "ended"],
+            },
+          }),
+          {
+            resultEncrypted: null,
+            resultJson: { equals: Prisma.DbNull },
+          },
+        ]),
       },
     });
     expect(store.findUniqueOrThrowCalls).toEqual([
-      {
-        where: {
-          id: "hpc_123",
-        },
-      },
+      { where: { id: "hpc_123" } },
+      { where: { id: "hpc_123" } },
     ]);
     expect(store.appendResultNotificationCalls.map((callRecord) => callRecord.id)).toEqual([
       "hpc_123",
       "hpc_123",
     ]);
+    expect(store.appendResultNotificationResults).toEqual([
+      {
+        outcome: "completed",
+        summary: "The appointment is booked for Friday at 3:45 PM.",
+      },
+      undefined,
+    ]);
+    expect(JSON.stringify(store.updateManyCalls[0]!.data)).not.toContain(
+      "The appointment is booked for Friday at 3:45 PM.",
+    );
+    await expect(readHostedPhoneCallResult({ call: store.currentCall()! })).resolves.toEqual({
+      outcome: "completed",
+      summary: "The appointment is booked for Friday at 3:45 PM.",
+    });
   });
 
   it("bounds oversized Retell analysis text before finalizing the call", async () => {
@@ -1132,11 +1294,10 @@ describe("Retell phone-call result handling", () => {
       prisma: store.prisma,
     });
 
-    const result = store.currentCall()?.resultJson as {
-      followUp?: string;
-      outcome: string;
-      summary: string;
-    } | null;
+    const currentCall = store.currentCall();
+    const result = currentCall
+      ? await readHostedPhoneCallResult({ call: currentCall })
+      : null;
     expect(result).toMatchObject({
       outcome: "needs_user",
     });
@@ -1253,13 +1414,21 @@ describe("Retell phone-call result handling", () => {
         status: "completed",
       },
       where: {
-        analyzedAt: null,
-        id: "hpc_123",
-        OR: [
-          { providerCallId: null },
-          { providerCallId: "retell_started" },
-        ],
-        provider: "retell",
+        AND: expect.arrayContaining([
+          expect.objectContaining({
+            analyzedAt: null,
+            id: "hpc_123",
+            OR: [
+              { providerCallId: null },
+              { providerCallId: "retell_started" },
+            ],
+            provider: "retell",
+          }),
+          {
+            resultEncrypted: null,
+            resultJson: { equals: Prisma.DbNull },
+          },
+        ]),
       },
     });
     expect(store.appendResultNotificationCalls.map((callRecord) => callRecord.id)).toEqual([
@@ -1271,7 +1440,7 @@ describe("Retell phone-call result handling", () => {
     let bound = false;
     const store = createWebhookStore({
       beforeUpdateMany: (call, update) => {
-        if (!bound && update.data.resultJson) {
+        if (!bound && update.data.resultEncrypted) {
           bound = true;
           return { ...call, providerCallId: "retell_started" };
         }
@@ -1302,11 +1471,11 @@ describe("Retell phone-call result handling", () => {
 
     expect(store.currentCall()).toMatchObject({
       providerCallId: "retell_started",
-      resultJson: {
-        outcome: "completed",
-        summary: "Booked.",
-      },
       status: "completed",
+    });
+    await expectStoredPhoneCallResult(store.currentCall(), {
+      outcome: "completed",
+      summary: "Booked.",
     });
     expect(store.appendResultNotificationCalls).toHaveLength(1);
   });
@@ -1329,7 +1498,7 @@ describe("Retell phone-call result handling", () => {
       }),
     });
 
-    await handleRetellCallAnalyzed({
+    await expect(handleRetellCallAnalyzed({
       call: {
         call_id: "retell_started",
         data_storage_setting: "basic_attributes_only",
@@ -1338,6 +1507,10 @@ describe("Retell phone-call result handling", () => {
         },
       },
       prisma: store.prisma,
+    })).rejects.toMatchObject({
+      code: "HOSTED_PHONE_CALL_ANALYSIS_RETRY_REQUIRED",
+      httpStatus: 503,
+      retryable: true,
     });
 
     expect(store.currentCall()).toMatchObject({
@@ -1491,38 +1664,107 @@ describe("Retell phone-call result handling", () => {
 
     expect(store.updateManyCalls[0]).toMatchObject({
       data: {
-        resultJson: {
-          outcome: "not_completed",
-          summary: "The office line was busy.",
-        },
+        resultEncrypted: expect.stringMatching(/^hsb-test:/u),
+        resultJson: Prisma.DbNull,
         status: "failed",
       },
       where: {
-        analyzedAt: null,
-        endedAt: {
-          not: null,
-        },
-        id: "hpc_123",
-        provider: "retell",
-        providerCallId: "retell_busy",
-        status: {
-          in: ["failed"],
-        },
+        AND: expect.arrayContaining([
+          expect.objectContaining({
+            analyzedAt: null,
+            endedAt: {
+              not: null,
+            },
+            id: "hpc_123",
+            provider: "retell",
+            providerCallId: "retell_busy",
+            status: {
+              in: ["failed"],
+            },
+          }),
+          {
+            resultEncrypted: null,
+            resultJson: { equals: Prisma.DbNull },
+          },
+        ]),
       },
     });
     expect(store.currentCall()).toMatchObject({
       analyzedAt: expect.any(Date),
       endedAt,
       providerCallId: "retell_busy",
-      resultJson: {
-        outcome: "not_completed",
-        summary: "The office line was busy.",
-      },
+      resultEncrypted: expect.stringMatching(/^hsb-test:/u),
+      resultJson: null,
       status: "failed",
     });
     expect(store.appendResultNotificationCalls.map((callRecord) => callRecord.id)).toEqual([
       "hpc_123",
     ]);
+  });
+
+  it("requires retry when call_ended changes authority during result encryption", async () => {
+    const endedAt = new Date("2026-06-25T12:34:56.000Z");
+    const onEncryptResult = vi
+      .fn<(call: HostedPhoneCall) => Promise<HostedPhoneCall | null>>()
+      .mockImplementationOnce(async (call) => ({
+        ...call,
+        endedAt,
+        status: "failed",
+      }))
+      .mockResolvedValue(null);
+    const store = createWebhookStore({
+      call: buildHostedPhoneCall({
+        id: "hpc_123",
+        status: "calling",
+      }),
+      onEncryptResult,
+    });
+    const call = {
+      call_analysis: {
+        custom_analysis_data: {
+          outcome: "not_completed",
+          result: "The line was busy.",
+        },
+      },
+      call_id: "retell_call_123",
+      data_storage_setting: "basic_attributes_only",
+    };
+
+    await expect(handleRetellCallAnalyzed({
+      call,
+      prisma: store.prisma,
+    })).rejects.toMatchObject({
+      code: "HOSTED_PHONE_CALL_ANALYSIS_RETRY_REQUIRED",
+      httpStatus: 503,
+      retryable: true,
+    });
+    expect(store.currentCall()).toMatchObject({
+      analyzedAt: null,
+      endedAt,
+      resultEncrypted: null,
+      resultJson: null,
+      status: "failed",
+    });
+    expect(store.appendResultNotificationCalls).toEqual([]);
+
+    await expect(handleRetellCallAnalyzed({
+      call,
+      prisma: store.prisma,
+    })).resolves.toEqual({
+      notificationSignals: [{
+        mailboxItemId: "mailbox_hpc_123",
+        memberId: "member_123",
+      }],
+    });
+    expect(store.currentCall()).toMatchObject({
+      analyzedAt: expect.any(Date),
+      endedAt,
+      resultEncrypted: expect.stringMatching(/^hsb-test:/u),
+      resultJson: null,
+      status: "failed",
+    });
+    expect(store.appendResultNotificationCalls).toHaveLength(1);
+    expect(onEncryptResult).toHaveBeenCalledTimes(2);
   });
 
   it("rolls call_analyzed back when notification enqueue fails so Retell replay can notify", async () => {
@@ -1624,6 +1866,8 @@ describe("Retell phone-call result handling", () => {
             }],
           };
         },
+        encryptResult: async ({ memberId, value }) =>
+          encryptTestPhoneCallResult({ memberId, value }),
         findCallCircleMatchByPhoneCallId: async () => null,
         hostedPhoneCall: {
           findUnique: async () => currentCall,
@@ -1635,37 +1879,16 @@ describe("Retell phone-call result handling", () => {
           },
           updateMany: async (args) => {
             updateManyCalls.push(args);
-            const expectedProviderStartAttemptedAt =
-              args.where.providerStartAttemptedAt instanceof Date
-                ? args.where.providerStartAttemptedAt
-                : null;
-            const updatedAtCutoff = readLessThanDateFilter(args.where.updatedAt);
-            const updatedAtEquals = args.where.updatedAt instanceof Date
-              ? args.where.updatedAt
-              : null;
-            if (
-              !currentCall
-              || currentCall.id !== args.where.id
-              || currentCall.provider !== args.where.provider
-              || currentCall.status !== args.where.status
-              || currentCall.providerCallId !== args.where.providerCallId
-              || currentCall.analyzedAt !== args.where.analyzedAt
-              || currentCall.endedAt !== args.where.endedAt
-              || !currentCall.providerStartAttemptedAt
-              || !expectedProviderStartAttemptedAt
-              || currentCall.providerStartAttemptedAt.getTime()
-                !== expectedProviderStartAttemptedAt.getTime()
-              || (updatedAtCutoff !== null && currentCall.updatedAt >= updatedAtCutoff)
-              || (updatedAtEquals !== null
-                && currentCall.updatedAt.getTime() !== updatedAtEquals.getTime())
-            ) {
+            if (!currentCall || !matchesWebhookUpdateWhere(currentCall, args.where)) {
               return { count: 0 };
             }
             currentCall = {
               ...currentCall,
-              resultJson: args.data.resultJson === undefined
-                ? currentCall.resultJson
-                : hostedPhoneCallResultSchema.parse(args.data.resultJson),
+              resultEncrypted: args.data.resultEncrypted
+                ?? currentCall.resultEncrypted,
+              resultJson: args.data.resultJson === Prisma.DbNull
+                ? null
+                : currentCall.resultJson,
               status: args.data.status ?? currentCall.status,
               updatedAt: args.data.updatedAt ?? now,
             };
@@ -1701,6 +1924,10 @@ describe("Retell phone-call result handling", () => {
         ],
         take: 100,
         where: {
+          AND: [{
+            resultEncrypted: null,
+            resultJson: { equals: Prisma.DbNull },
+          }],
           analyzedAt: null,
           endedAt: null,
           OR: [
@@ -1720,7 +1947,6 @@ describe("Retell phone-call result handling", () => {
             },
           ],
           provider: "retell",
-          resultJson: { equals: Prisma.DbNull },
           updatedAt: { lt: cutoff },
         },
       }]);
@@ -1733,26 +1959,32 @@ describe("Retell phone-call result handling", () => {
       }
       expect(updateManyCalls.at(-1)).toMatchObject({
         data: {
-          resultJson: {
-            outcome: "not_completed",
-            summary: "Retell did not return a final result for the phone call.",
-          },
+          resultEncrypted: expect.stringMatching(/^hsb-test:/u),
+          resultJson: Prisma.DbNull,
           status: "failed",
         },
         where: {
-          id: "hpc_stale",
-          providerStartAttemptedAt: staleAt,
-          resultJson: { equals: Prisma.DbNull },
-          status: "starting",
-          transferOutcome: null,
-          updatedAt: providerCallId ? now : staleAt,
+          AND: expect.arrayContaining([
+            expect.objectContaining({
+              id: "hpc_stale",
+              providerStartAttemptedAt: staleAt,
+              status: "starting",
+              transferOutcome: null,
+              updatedAt: providerCallId ? now : staleAt,
+            }),
+            {
+              resultEncrypted: null,
+              resultJson: { equals: Prisma.DbNull },
+            },
+          ]),
         },
       });
       expect(currentCall).toMatchObject({
-        resultJson: {
-          outcome: "not_completed",
-        },
         status: "failed",
+      });
+      await expectStoredPhoneCallResult(currentCall, {
+        outcome: "not_completed",
+        summary: "Retell did not return a final result for the phone call.",
       });
       expect(appendResultNotificationCalls).toHaveLength(1);
       expect(appendResultNotificationCalls[0]).toMatchObject({
@@ -1778,6 +2010,8 @@ describe("Retell phone-call result handling", () => {
     const touchStaleCall = vi.fn(async () => ({ count: 1 }));
     const tx: ActiveCallSweepTx = {
       appendResultNotification: async () => null,
+      encryptResult: async ({ memberId, value }) =>
+        encryptTestPhoneCallResult({ memberId, value }),
       findCallCircleMatchByPhoneCallId: async () => null,
       hostedPhoneCall: {
         findUnique: async () => call,
@@ -1809,13 +2043,16 @@ describe("Retell phone-call result handling", () => {
     expect(touchStaleCall).toHaveBeenCalledWith({
       data: { updatedAt: now },
       where: {
+        AND: [{
+          resultEncrypted: null,
+          resultJson: { equals: Prisma.DbNull },
+        }],
         analyzedAt: null,
         endedAt: null,
         id: "hpc_test",
         provider: "retell",
         providerCallId: "retell_cleanup",
         providerStartAttemptedAt: null,
-        resultJson: { equals: Prisma.DbNull },
         status: "calling",
         transferOutcome: null,
         updatedAt: {
@@ -1843,6 +2080,8 @@ describe("Retell phone-call result handling", () => {
     });
     const tx: ActiveCallSweepTx = {
       appendResultNotification: async () => null,
+      encryptResult: async ({ memberId, value }) =>
+        encryptTestPhoneCallResult({ memberId, value }),
       findCallCircleMatchByPhoneCallId: async () => null,
       hostedPhoneCall: {
         findUnique: async () => call,
@@ -1898,6 +2137,8 @@ describe("Retell phone-call result handling", () => {
     }));
     const tx: ActiveCallSweepTx = {
       appendResultNotification: async () => null,
+      encryptResult: async ({ memberId, value }) =>
+        encryptTestPhoneCallResult({ memberId, value }),
       findCallCircleMatchByPhoneCallId: async () => null,
       hostedPhoneCall: {
         findUnique: async () => calls[0] ?? null,
@@ -1962,6 +2203,8 @@ describe("Retell phone-call result handling", () => {
     const appendResultNotification = vi.fn(async () => null);
     const tx: ActiveCallSweepTx = {
       appendResultNotification,
+      encryptResult: async ({ memberId, value }) =>
+        encryptTestPhoneCallResult({ memberId, value }),
       findCallCircleMatchByPhoneCallId: async () => null,
       hostedPhoneCall: {
         findUnique: async () => currentCall,
@@ -1976,7 +2219,11 @@ describe("Retell phone-call result handling", () => {
           }
           currentCall = {
             ...currentCall,
-            resultJson: hostedPhoneCallResultSchema.parse(args.data.resultJson),
+            resultEncrypted: args.data.resultEncrypted
+              ?? currentCall.resultEncrypted,
+            resultJson: args.data.resultJson === Prisma.DbNull
+              ? null
+              : currentCall.resultJson,
             status: args.data.status ?? currentCall.status,
             updatedAt: now,
           };
@@ -1997,7 +2244,8 @@ describe("Retell phone-call result handling", () => {
     })).resolves.toEqual({ failedPhoneCalls: 1 });
 
     expect(currentCall).toMatchObject({
-      resultJson: { outcome: "not_completed" },
+      resultEncrypted: null,
+      resultJson: null,
       status: "failed",
     });
     expect(appendResultNotification).not.toHaveBeenCalled();
@@ -2039,9 +2287,14 @@ describe("Retell phone-call result handling", () => {
       })).resolves.toEqual({ failedPhoneCalls: 0 });
 
       expect(sweep.currentCall()).toMatchObject({
-        resultJson: { outcome: expectedOutcome },
         status: expectedStatus,
         transferOutcome,
+      });
+      await expectStoredPhoneCallResult(sweep.currentCall(), {
+        outcome: expectedOutcome,
+        summary: transferOutcome === "bridged"
+          ? "Retell confirmed that the Call Circle transfer connected."
+          : "Retell did not confirm that the Call Circle transfer connected.",
       });
       expect(stopProviderCall).toHaveBeenCalledOnce();
       expect(sweep.appendResultNotificationCalls).toHaveLength(1);
@@ -2081,9 +2334,12 @@ describe("Retell phone-call result handling", () => {
       })).resolves.toEqual({ failedPhoneCalls: 0 });
 
       expect(sweep.currentCall()).toMatchObject({
-        resultJson: { outcome: "completed" },
         status: "completed",
         transferOutcome: "bridged",
+      });
+      await expectStoredPhoneCallResult(sweep.currentCall(), {
+        outcome: "completed",
+        summary: "Retell confirmed that the Call Circle transfer connected.",
       });
       expect(stopProviderCall).toHaveBeenCalledOnce();
       expect(sweep.appendResultNotificationCalls).toHaveLength(1);
@@ -2124,9 +2380,12 @@ describe("Retell phone-call result handling", () => {
     });
 
     expect(sweep.currentCall()).toMatchObject({
-      resultJson: { outcome: "completed" },
       status: "completed",
       transferOutcome: "bridged",
+    });
+    await expectStoredPhoneCallResult(sweep.currentCall(), {
+      outcome: "completed",
+      summary: "Retell confirmed that the Call Circle transfer connected.",
     });
     expect(sweep.appendResultNotificationCalls).toHaveLength(2);
   });
@@ -2164,20 +2423,23 @@ describe("Retell phone-call result handling", () => {
       ],
       take: 100,
       where: {
+        AND: [{
+          resultEncrypted: null,
+          resultJson: { equals: Prisma.DbNull },
+        }],
         endedAt: { lt: cutoff },
         provider: "retell",
-        resultJson: { equals: Prisma.DbNull },
         status: { in: ["ended", "failed"] },
       },
     }]);
     expect(sweep.currentCall()).toMatchObject({
       analyzedAt: null,
-      resultJson: {
-        outcome: "completed",
-        summary: "Retell confirmed that the Call Circle transfer connected.",
-      },
       status: "completed",
       transferOutcome: "bridged",
+    });
+    await expectStoredPhoneCallResult(sweep.currentCall(), {
+      outcome: "completed",
+      summary: "Retell confirmed that the Call Circle transfer connected.",
     });
   });
 
@@ -2214,12 +2476,12 @@ describe("Retell phone-call result handling", () => {
 
     expect(sweep.currentCall()).toMatchObject({
       analyzedAt,
-      resultJson: {
-        outcome: "not_completed",
-        summary: "Retell did not confirm that the Call Circle transfer connected.",
-      },
       status: "failed",
       transferOutcome: "cancelled",
+    });
+    await expectStoredPhoneCallResult(sweep.currentCall(), {
+      outcome: "not_completed",
+      summary: "Retell did not confirm that the Call Circle transfer connected.",
     });
     expect(sweep.appendResultNotificationCalls).toHaveLength(1);
   });
@@ -2243,11 +2505,11 @@ describe("Retell phone-call result handling", () => {
 
     expect(sweep.currentCall()).toMatchObject({
       analyzedAt: null,
-      resultJson: {
-        outcome: "not_completed",
-        summary: "The phone call ended, but Retell did not return its final analysis.",
-      },
       status: "failed",
+    });
+    await expectStoredPhoneCallResult(sweep.currentCall(), {
+      outcome: "not_completed",
+      summary: "The phone call ended, but Retell did not return its final analysis.",
     });
   });
 });
@@ -2359,6 +2621,41 @@ describe("consultPhoneCall", () => {
   });
 });
 
+describe("getHostedPhoneCallForConsultation", () => {
+  it("threads the caller abort signal into ciphertext decryption", async () => {
+    const signal = new AbortController().signal;
+    const decryptBrief = vi.fn<HostedPhoneCallCrypto["decryptBrief"]>(async () => VALID_BRIEF);
+    const crypto: HostedPhoneCallCrypto = {
+      decryptBrief,
+      decryptResult: async () => ({
+        outcome: "completed",
+        summary: "Completed.",
+      }),
+      encryptBrief: async () => "encrypted-brief",
+      encryptResult: async () => "encrypted-result",
+    };
+    const prisma: ConsultationStore = {
+      hostedPhoneCall: {
+        findUnique: async () => buildHostedPhoneCall({
+          briefEncrypted: "encrypted-brief",
+          briefJson: null,
+          status: "calling",
+        }),
+        updateMany: async () => ({ count: 0 }),
+      },
+    };
+
+    await expect(getHostedPhoneCallForConsultation({
+      callId: "hpc_123",
+      crypto,
+      prisma,
+      providerCallId: "retell_call_123",
+      signal,
+    })).resolves.toMatchObject({ brief: VALID_BRIEF });
+    expect(decryptBrief).toHaveBeenCalledWith(expect.objectContaining({ signal }));
+  });
+});
+
 function signRetellBody(input: {
   apiKey: string;
   now: Date;
@@ -2375,6 +2672,7 @@ function buildHostedPhoneCall(overrides: Partial<HostedPhoneCall> = {}): HostedP
   const now = new Date("2026-06-25T00:00:00.000Z");
   return {
     analyzedAt: null,
+    briefEncrypted: null,
     briefJson: VALID_BRIEF,
     createdAt: now,
     endedAt: null,
@@ -2384,6 +2682,7 @@ function buildHostedPhoneCall(overrides: Partial<HostedPhoneCall> = {}): HostedP
     providerCallId: "retell_call_123",
     providerStartAttemptedAt: null,
     requestKey: "phone_call_request_1",
+    resultEncrypted: null,
     resultJson: null,
     status: "starting",
     transferOutcome: null,
@@ -2392,25 +2691,61 @@ function buildHostedPhoneCall(overrides: Partial<HostedPhoneCall> = {}): HostedP
   };
 }
 
+function encryptTestPhoneCallResult(input: {
+  memberId: string;
+  value: HostedPhoneCallResult;
+}): string {
+  return `hsb-test:${Buffer.from(
+    JSON.stringify({
+      lane: "hosted-member-private-field",
+      scope: "hosted-phone-call:result",
+      userId: input.memberId,
+      value: JSON.stringify(input.value),
+    }),
+    "utf8",
+  ).toString("base64url")}`;
+}
+
+async function expectStoredPhoneCallResult(
+  call: HostedPhoneCall | null,
+  expected: HostedPhoneCallResult,
+): Promise<void> {
+  expect(call).toMatchObject({
+    resultEncrypted: expect.stringMatching(/^hsb-test:/u),
+    resultJson: null,
+  });
+  if (!call) {
+    throw new Error("Expected a stored hosted phone call.");
+  }
+  await expect(readHostedPhoneCallResult({ call })).resolves.toEqual(expected);
+}
+
 function createWebhookStore(input: {
-  appendResultNotification?: (call: HostedPhoneCall) => Promise<void>;
   beforeUpdateMany?: (
     call: HostedPhoneCall,
     update: RetellWebhookUpdateManyInput,
   ) => HostedPhoneCall;
-  call: HostedPhoneCall;
   callCircleMatchId?: string | null;
+  appendResultNotification?: (
+    call: HostedPhoneCall,
+    result?: HostedPhoneCallResult,
+  ) => Promise<void>;
+  call: HostedPhoneCall;
+  onEncryptResult?: (call: HostedPhoneCall) => Promise<HostedPhoneCall | null>;
 }) {
   let currentCall: HostedPhoneCall | null = input.call;
+  let externallyCommittedCall: HostedPhoneCall | null = null;
   const appendResultNotificationCalls: HostedPhoneCall[] = [];
+  const appendResultNotificationResults: Array<HostedPhoneCallResult | undefined> = [];
   const findUniqueCalls: RetellWebhookFindUniqueInput[] = [];
   const findUniqueOrThrowCalls: RetellWebhookFindUniqueOrThrowInput[] = [];
   const updateManyCalls: RetellWebhookUpdateManyInput[] = [];
 
   const tx: RetellWebhookTx = {
-    appendResultNotification: async (call) => {
+    appendResultNotification: async (call, result) => {
       appendResultNotificationCalls.push(call);
-      await input.appendResultNotification?.(call);
+      appendResultNotificationResults.push(result);
+      await input.appendResultNotification?.(call, result);
       return {
         notificationSignals: [{
           mailboxItemId: `mailbox_${call.id}`,
@@ -2422,6 +2757,13 @@ function createWebhookStore(input: {
       input.callCircleMatchId && currentCall?.id === phoneCallId
         ? { id: input.callCircleMatchId }
         : null,
+    encryptResult: async ({ memberId, value }) => {
+      if (currentCall && input.onEncryptResult) {
+        externallyCommittedCall = await input.onEncryptResult(currentCall);
+        currentCall = externallyCommittedCall ?? currentCall;
+      }
+      return encryptTestPhoneCallResult({ memberId, value });
+    },
     hostedPhoneCall: {
       findUnique: async (args) => {
         findUniqueCalls.push(args);
@@ -2438,7 +2780,11 @@ function createWebhookStore(input: {
       updateMany: async (args) => {
         updateManyCalls.push(args);
         if (currentCall && input.beforeUpdateMany) {
-          currentCall = input.beforeUpdateMany(currentCall, args);
+          const concurrentCall = input.beforeUpdateMany(currentCall, args);
+          if (concurrentCall !== currentCall) {
+            externallyCommittedCall = concurrentCall;
+          }
+          currentCall = concurrentCall;
         }
         if (!currentCall || !matchesWebhookUpdateWhere(currentCall, args.where)) {
           return { count: 0 };
@@ -2455,8 +2801,11 @@ function createWebhookStore(input: {
           providerCallId: "providerCallId" in args.data
             ? args.data.providerCallId ?? currentCall.providerCallId
             : currentCall.providerCallId,
+          resultEncrypted: "resultEncrypted" in args.data
+            ? args.data.resultEncrypted ?? currentCall.resultEncrypted
+            : currentCall.resultEncrypted,
           resultJson: "resultJson" in args.data
-            ? args.data.resultJson ?? currentCall.resultJson
+            ? args.data.resultJson === Prisma.DbNull ? null : currentCall.resultJson
             : currentCall.resultJson,
           status: args.data.status ?? currentCall.status,
           transferOutcome: "transferOutcome" in args.data
@@ -2470,17 +2819,21 @@ function createWebhookStore(input: {
   const prisma: RetellWebhookStore = {
     $transaction: async (callback) => {
       const before = currentCall;
+      externallyCommittedCall = null;
       try {
         return await callback(tx);
       } catch (error) {
-        currentCall = before;
+        currentCall = externallyCommittedCall ?? before;
         throw error;
+      } finally {
+        externallyCommittedCall = null;
       }
     },
   };
 
   return {
     appendResultNotificationCalls,
+    appendResultNotificationResults,
     currentCall: () => currentCall,
     findUniqueCalls,
     findUniqueOrThrowCalls,
@@ -2506,6 +2859,8 @@ function createAnalysisSweepStore(input: {
         }],
       };
     },
+    encryptResult: async ({ memberId, value }) =>
+      encryptTestPhoneCallResult({ memberId, value }),
     findCallCircleMatchByPhoneCallId: async (phoneCallId) =>
       input.matchId && currentCall.id === phoneCallId
         ? { id: input.matchId }
@@ -2520,6 +2875,12 @@ function createAnalysisSweepStore(input: {
         currentCall = {
           ...currentCall,
           ...args.data,
+          resultEncrypted: "resultEncrypted" in args.data
+            ? args.data.resultEncrypted ?? currentCall.resultEncrypted
+            : currentCall.resultEncrypted,
+          resultJson: "resultJson" in args.data
+            ? args.data.resultJson === Prisma.DbNull ? null : currentCall.resultJson
+            : currentCall.resultJson,
           status: args.data.status ?? currentCall.status,
         };
         return { count: 1 };
@@ -2586,6 +2947,19 @@ function matchesWebhookUpdateWhere(
   ) {
     return false;
   }
+  if (
+    where.providerStartAttemptedAt === null
+    && call.providerStartAttemptedAt !== null
+  ) {
+    return false;
+  }
+  if (
+    where.providerStartAttemptedAt instanceof Date
+    && call.providerStartAttemptedAt?.getTime()
+      !== where.providerStartAttemptedAt.getTime()
+  ) {
+    return false;
+  }
   if (where.analyzedAt === null && call.analyzedAt !== null) {
     return false;
   }
@@ -2629,10 +3003,23 @@ function matchesWebhookUpdateWhere(
       return false;
     }
   }
+  if (where.resultEncrypted === null && call.resultEncrypted !== null) {
+    return false;
+  }
   if (
     (typeof where.transferOutcome === "string" || where.transferOutcome === null)
     && call.transferOutcome !== where.transferOutcome
   ) {
+    return false;
+  }
+  if (
+    where.updatedAt instanceof Date
+    && call.updatedAt.getTime() !== where.updatedAt.getTime()
+  ) {
+    return false;
+  }
+  const updatedAtCutoff = readLessThanDateFilter(where.updatedAt);
+  if (updatedAtCutoff && call.updatedAt >= updatedAtCutoff) {
     return false;
   }
   return true;

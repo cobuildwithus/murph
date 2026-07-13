@@ -14,8 +14,10 @@ const serviceMocks = vi.hoisted(() => ({
   getHostedOnboardingStripe: vi.fn(),
   readHostedConnectedAppsConfig: vi.fn(),
   revokeOutgoingHostedVaultSharesForMemberDeletionTx: vi.fn(),
+  signalHostedMailboxAppendRuntime: vi.fn(),
   signalHostedMailboxAppendsBestEffort: vi.fn(),
-  stopRetellPhoneCall: vi.fn(),
+  assertHostedPhoneCallsReadyForAccountDeletionTx: vi.fn(),
+  stopHostedPhoneCallsForAccountDeletion: vi.fn(),
   terminateHostedUserRuntimeWorkflowBestEffort: vi.fn(),
 }));
 
@@ -57,11 +59,15 @@ vi.mock("@/src/lib/hosted-orchestration/workflow-termination", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
+  signalHostedMailboxAppendRuntime: serviceMocks.signalHostedMailboxAppendRuntime,
   signalHostedMailboxAppendsBestEffort: serviceMocks.signalHostedMailboxAppendsBestEffort,
 }));
 
-vi.mock("@/src/lib/phone-calls/retell-runtime", () => ({
-  stopRetellPhoneCall: serviceMocks.stopRetellPhoneCall,
+vi.mock("@/src/lib/phone-calls/account-deletion", () => ({
+  assertHostedPhoneCallsReadyForAccountDeletionTx:
+    serviceMocks.assertHostedPhoneCallsReadyForAccountDeletionTx,
+  stopHostedPhoneCallsForAccountDeletion:
+    serviceMocks.stopHostedPhoneCallsForAccountDeletion,
 }));
 
 vi.mock("@/src/lib/hosted-vault-share/share-grant-store", () => ({
@@ -110,6 +116,7 @@ const REQUIRED_STORE_SLUGS = [
   "prisma.hosted_workspace",
   "prisma.hosted_computer_run",
   "prisma.hosted_computer_handoff",
+  "prisma.hosted_phone_call",
   "prisma.hosted_runtime_log",
   "prisma.hosted_user_crypto_envelope",
   "prisma.hosted_user_crypto_audit",
@@ -181,10 +188,14 @@ beforeEach(() => {
     cleanupSignals: [],
     revokedCount: 0,
   });
+  serviceMocks.signalHostedMailboxAppendRuntime.mockReset();
+  serviceMocks.signalHostedMailboxAppendRuntime.mockResolvedValue(undefined);
   serviceMocks.signalHostedMailboxAppendsBestEffort.mockReset();
   serviceMocks.signalHostedMailboxAppendsBestEffort.mockResolvedValue(undefined);
-  serviceMocks.stopRetellPhoneCall.mockReset();
-  serviceMocks.stopRetellPhoneCall.mockResolvedValue(undefined);
+  serviceMocks.assertHostedPhoneCallsReadyForAccountDeletionTx.mockReset();
+  serviceMocks.assertHostedPhoneCallsReadyForAccountDeletionTx.mockResolvedValue(undefined);
+  serviceMocks.stopHostedPhoneCallsForAccountDeletion.mockReset();
+  serviceMocks.stopHostedPhoneCallsForAccountDeletion.mockResolvedValue(undefined);
   serviceMocks.terminateHostedUserRuntimeWorkflowBestEffort.mockReset();
   serviceMocks.terminateHostedUserRuntimeWorkflowBestEffort.mockResolvedValue({
     configured: true,
@@ -497,7 +508,7 @@ describe("deleteHostedAccountData", () => {
 
   it("stops live Retell calls before deleting their local authority", async () => {
     const operationOrder: string[] = [];
-    serviceMocks.stopRetellPhoneCall.mockImplementation(async () => {
+    serviceMocks.stopHostedPhoneCallsForAccountDeletion.mockImplementation(async () => {
       operationOrder.push("retell:stop");
     });
     const prisma = createHostedAccountDeletionPrismaForTest({
@@ -515,7 +526,11 @@ describe("deleteHostedAccountData", () => {
       request: new Request("https://join.example.test/settings"),
     })).resolves.toMatchObject({ memberId: "member_123" });
 
-    expect(serviceMocks.stopRetellPhoneCall).toHaveBeenCalledWith("retell_call_live");
+    expect(serviceMocks.stopHostedPhoneCallsForAccountDeletion).toHaveBeenCalledWith({
+      memberIds: ["member_123"],
+      prisma,
+      signal: expect.any(AbortSignal),
+    });
     expect(operationOrder.indexOf("retell:stop")).toBeLessThan(
       operationOrder.indexOf("delete:hostedPhoneCall"),
     );
@@ -531,6 +546,10 @@ describe("deleteHostedAccountData", () => {
         providerStartAttemptedAt: new Date("2026-07-09T12:00:00.000Z"),
       }],
     });
+    serviceMocks.stopHostedPhoneCallsForAccountDeletion.mockRejectedValueOnce({
+      code: "ACCOUNT_DELETION_PHONE_CALL_START_IN_PROGRESS",
+      retryable: true,
+    });
 
     await expect(deleteHostedAccountData({
       memberId: "member_123",
@@ -541,7 +560,7 @@ describe("deleteHostedAccountData", () => {
       retryable: true,
     });
 
-    expect(serviceMocks.stopRetellPhoneCall).not.toHaveBeenCalled();
+    expect(serviceMocks.stopHostedPhoneCallsForAccountDeletion).toHaveBeenCalledOnce();
     expect(operationOrder).not.toContain("delete:hostedPhoneCall");
   });
 
@@ -584,7 +603,7 @@ describe("deleteHostedAccountData", () => {
         };
       },
     );
-    serviceMocks.signalHostedMailboxAppendsBestEffort.mockImplementation(async () => {
+    serviceMocks.signalHostedMailboxAppendRuntime.mockImplementation(async () => {
       operationOrder.push("vault-share:signal");
     });
     const prisma = createHostedAccountDeletionPrismaForTest({
@@ -605,10 +624,10 @@ describe("deleteHostedAccountData", () => {
         now: expect.any(Date),
         tx: expect.any(Object),
       });
-    expect(serviceMocks.signalHostedMailboxAppendsBestEffort).toHaveBeenCalledWith([{
+    expect(serviceMocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
+      expectedUserId: "member_surviving_destination",
       mailboxItemId: "mailbox_item_revoke_1",
-      memberId: "member_surviving_destination",
-    }]);
+    });
     expect(result.deletedCounts["prisma.hosted_vault_share"]).toBe(1);
     expect(operationOrder.indexOf("vault-share:revoke")).toBeLessThan(
       operationOrder.indexOf("count:hostedVaultShare"),
@@ -942,6 +961,48 @@ describe("deleteHostedAccountData", () => {
     });
   });
 
+  it("deletes hosted phone-call rows explicitly with account data", async () => {
+    const deleteCalls: HostedAccountDeletionPrismaDeleteCall[] = [];
+    const prisma = createHostedAccountDeletionPrismaForTest({
+      deleteCalls,
+      onTransaction: () => undefined,
+    });
+
+    const result = await deleteHostedAccountData({
+      memberId: "member_123",
+      prisma,
+      request: new Request("https://join.example.test/settings"),
+    });
+
+    expect(result.deletedCounts["prisma.hosted_phone_call"]).toBe(1);
+    expect(deleteCalls).toContainEqual({
+      model: "hostedPhoneCall",
+      where: {
+        OR: [
+          { memberId: "member_123" },
+          {
+            callCircleMatch: {
+              is: {
+                OR: [
+                  { memberAId: "member_123" },
+                  { memberBId: "member_123" },
+                  {
+                    group: {
+                      OR: [
+                        { ownerMemberId: "member_123" },
+                        { runtimeMemberId: "member_123" },
+                      ],
+                    },
+                  },
+                ],
+              },
+            },
+          },
+        ],
+      },
+    });
+  });
+
   it("deletes computer-use handoffs before runs", async () => {
     const deleteCalls: HostedAccountDeletionPrismaDeleteCall[] = [];
     const prisma = createHostedAccountDeletionPrismaForTest({
@@ -959,6 +1020,59 @@ describe("deleteHostedAccountData", () => {
     expect(deletedModels.indexOf("hostedComputerHandoff")).toBeLessThan(
       deletedModels.indexOf("hostedComputerRun"),
     );
+  });
+
+  it("suspends call creation, ends provider calls, and rechecks authority before local deletion", async () => {
+    const operationOrder: string[] = [];
+    serviceMocks.stopHostedPhoneCallsForAccountDeletion.mockImplementation(async () => {
+      operationOrder.push("phone-call:stop");
+    });
+    serviceMocks.assertHostedPhoneCallsReadyForAccountDeletionTx.mockImplementation(async () => {
+      operationOrder.push("phone-call:assert-ready");
+    });
+    const prisma = createHostedAccountDeletionPrismaForTest({
+      onTransaction: () => operationOrder.push("transaction"),
+      operationOrder,
+    });
+
+    await deleteHostedAccountData({
+      memberId: "member_123",
+      prisma,
+      request: new Request("https://join.example.test/settings"),
+    });
+
+    expect(operationOrder.indexOf("phone-call:stop")).toBeGreaterThan(
+      operationOrder.indexOf("update:hostedMember"),
+    );
+    expect(operationOrder.indexOf("phone-call:assert-ready")).toBeGreaterThan(
+      operationOrder.indexOf("transaction"),
+    );
+    expect(operationOrder.indexOf("phone-call:assert-ready")).toBeLessThan(
+      operationOrder.indexOf("delete:hostedPhoneCall"),
+    );
+  });
+
+  it("preserves local rows when active provider calls cannot be ended", async () => {
+    const onTransaction = vi.fn();
+    serviceMocks.stopHostedPhoneCallsForAccountDeletion.mockRejectedValue(
+      new HostedOnboardingError({
+        code: "ACCOUNT_DELETION_PHONE_CALL_CLEANUP_FAILED",
+        httpStatus: 502,
+        message: "Retry account deletion.",
+        retryable: true,
+      }),
+    );
+    const prisma = createHostedAccountDeletionPrismaForTest({ onTransaction });
+
+    await expect(deleteHostedAccountData({
+      memberId: "member_123",
+      prisma,
+      request: new Request("https://join.example.test/settings"),
+    })).rejects.toMatchObject({
+      code: "ACCOUNT_DELETION_PHONE_CALL_CLEANUP_FAILED",
+      retryable: true,
+    });
+    expect(onTransaction).toHaveBeenCalledTimes(1);
   });
 
   it("fences computer-use creation before external cleanup and deletes rows in a short transaction", async () => {
