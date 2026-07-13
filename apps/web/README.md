@@ -770,7 +770,16 @@ It requires
 `HOSTED_WEB_VERCEL_TOKEN`, `HOSTED_WEB_VERCEL_PROJECT_ID`,
 `HOSTED_WEB_PRODUCTION_BASE_URL`, and `HOSTED_WEB_DIRECT_DATABASE_URL` in
 GitHub Actions; `HOSTED_WEB_CONTRACT_MIGRATION_DRAIN_SECONDS` defaults to
-`300` and is capped at `600` unless the workflow timeout is raised. The workflow
+`300` and is capped at `600` unless the workflow timeout is raised. After the
+contract migration succeeds, the workflow also completes the group-join
+confirmation transition: it derives a rollout credential in memory from the
+existing Vercel credential, upserts that sensitive value and the production
+producer flag, re-proves the alias, redeploys the exact proven commit, verifies
+the new production deployment, and drains eligible rows through a private
+server endpoint until pagination completes. It refreshes the credential by the
+same exact-deployment path if the Vercel credential later changes. No secret or
+group content is printed or sent to a model, and alias drift, provider failure,
+invalid responses, or incomplete pagination fail closed. The workflow
 does not use GitHub Actions concurrency for this lane; the final alias check and
 the contract migration advisory lock make stale or duplicate runs skip safely
 without letting stale events replace valid pending runs. After those gates, it calls
@@ -793,7 +802,9 @@ across retries. Rows written by warm old functions leave that field null and
 use the neutral confirmation. The
 `20260711230000_drop_group_join_compatibility_bridges` contract migration
 removes both only after the consumer-capable production deployment is live and
-the guarded prior-function drain and alias proof have completed.
+the guarded prior-function drain and alias proof have completed. That same
+workflow then owns producer enablement, exact redeployment, and the bounded
+rollout drain; it is not an operator-only prose step.
 The first assistant-personality causal rollout follows that same split. Apply
 the nullable sequence expansion and deploy the sequence-producing web build
 with personality writes gated off. The automatic post-deploy contract lane

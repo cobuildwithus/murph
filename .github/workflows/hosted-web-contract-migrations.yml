@@ -18,7 +18,7 @@ jobs:
     if: ${{ github.event_name == 'workflow_dispatch' || (github.event.deployment_status.state == 'success' && github.event.deployment_status.description == 'Deployment has completed' && contains(fromJSON('["Production","production"]'), github.event.deployment.environment) && (github.event.deployment_status.creator.login == 'vercel[bot]' || github.event.deployment.creator.login == 'vercel[bot]')) }}
     runs-on: ubuntu-24.04
     environment: production
-    timeout-minutes: 20
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
         with:
@@ -149,3 +149,17 @@ jobs:
           fi
 
           pnpm --dir apps/web release:production:contract-migrate
+
+      - name: Complete group join confirmation rollout
+        if: ${{ steps.production-branch.outputs.should_run == 'true' && steps.current-production.outputs.should_apply == 'true' }}
+        shell: bash
+        env:
+          DEPLOYED_SHA: ${{ github.event.deployment.sha || inputs.deployed_sha }}
+          HOSTED_WEB_PRODUCTION_BASE_URL: ${{ vars.HOSTED_WEB_PRODUCTION_BASE_URL }}
+          HOSTED_WEB_VERCEL_PROJECT_ID: ${{ vars.HOSTED_WEB_VERCEL_PROJECT_ID }}
+          HOSTED_WEB_VERCEL_TEAM_ID: ${{ vars.HOSTED_WEB_VERCEL_TEAM_ID }}
+          HOSTED_WEB_VERCEL_TOKEN: ${{ secrets.HOSTED_WEB_VERCEL_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          pnpm --dir apps/web exec tsx scripts/complete-group-join-confirmation-rollout.ts

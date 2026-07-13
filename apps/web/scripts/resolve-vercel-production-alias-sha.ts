@@ -5,6 +5,12 @@ interface VercelAliasShaEnvironment {
   HOSTED_WEB_VERCEL_TOKEN?: string;
 }
 
+export interface VercelProductionDeployment {
+  id: string;
+  name: string;
+  sha: string;
+}
+
 interface FetchResponse {
   ok: boolean;
   status: number;
@@ -63,6 +69,13 @@ export async function resolveVercelProductionAliasSha(
   environment: VercelAliasShaEnvironment = readProcessVercelAliasShaEnvironment(),
   fetchImpl: FetchLike = fetch,
 ): Promise<string> {
+  return (await resolveVercelProductionDeployment(environment, fetchImpl)).sha;
+}
+
+export async function resolveVercelProductionDeployment(
+  environment: VercelAliasShaEnvironment = readProcessVercelAliasShaEnvironment(),
+  fetchImpl: FetchLike = fetch,
+): Promise<VercelProductionDeployment> {
   const token = readRequiredEnvironment(
     environment,
     "HOSTED_WEB_VERCEL_TOKEN",
@@ -87,7 +100,25 @@ export async function resolveVercelProductionAliasSha(
     throw new Error("Vercel deployment response did not include gitSource.sha.");
   }
 
-  return gitSha;
+  if (!isRecord(deploymentResponse)) {
+    throw new Error("Vercel deployment response was not an object.");
+  }
+  const id = readString(deploymentResponse.id);
+  const name = readString(deploymentResponse.name);
+  if (id === undefined || name === undefined) {
+    throw new Error("Vercel deployment response did not include id and name.");
+  }
+  const configuredProjectId = readRequiredEnvironment(
+    environment,
+    "HOSTED_WEB_VERCEL_PROJECT_ID",
+  );
+  if (extractVercelDeploymentProjectId(deploymentResponse) !== configuredProjectId) {
+    throw new Error(
+      "Vercel production alias resolves to a different project than HOSTED_WEB_VERCEL_PROJECT_ID.",
+    );
+  }
+
+  return { id, name, sha: gitSha };
 }
 
 export async function verifyVercelProductionDeploymentProtection(

@@ -96,6 +96,15 @@ Last verified: 2026-07-13
   `HOSTED_WEB_DIRECT_DATABASE_URL`. The shared production migration URL resolver
   removes Prisma-style `sslcert=system`, `sslkey=system`, and
   `sslrootcert=system` markers before handing Postgres URLs to raw `pg` clients.
+  After contract cleanup succeeds, the same workflow invokes the checked-in
+  group-join-confirmation rollout helper. That helper re-proves the exact
+  production deployment, updates the project-bound sensitive rollout bearer
+  and producer flag through Vercel, re-proves the alias before redeploying the
+  same commit, waits for that exact production deployment, and drains the
+  authenticated server-side cursor route to completion. Focused hosted-web
+  coverage proves route authorization, enablement probing, configuration
+  refresh, alias drift, exact redeploy, provider response parsing, and drain
+  pagination without calling live Vercel or production Postgres.
   After contract cleanup applies, the rollback floor is the first deployed Vercel
   commit that no longer reads or writes the dropped schema shape; rollback below
   that floor requires DB restore/re-expand or a forward deploy. Cloudflare

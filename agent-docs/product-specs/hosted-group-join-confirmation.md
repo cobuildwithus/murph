@@ -142,10 +142,13 @@ participant authority required to address their existing private thread
 safely. The durable obligation remains eligible while either prerequisite is
 missing. After the current join, activation, or private inbound transaction
 commits, one bounded post-commit sequence attempts its current runtime wake
-first and then retries one eligible membership with only the remaining time.
-This keeps historical
-catch-up out of the foreground transaction so it cannot roll back a current
-join, activation, route update, or inbound message.
+first. A current join then retries only its targeted membership. Activation and
+private inbound recovery consume up to ten of the member's eligible
+memberships in stable creation order, stopping at the first deferred item and
+using only the sequence's remaining time. A later trigger resumes any
+remainder. This keeps historical catch-up out of the foreground transaction so
+it cannot roll back a current join, activation, route update, or inbound
+message.
 
 Each foreground post-commit sequence has a five-second default total deadline
 across the current wake, reconciliation transaction, and mailbox-pointer
@@ -191,13 +194,21 @@ recorded eligibility without also running the materializer:
    targets that consumer-capable commit. Let the guarded Hosted Web Contract
    Migrations lane remove both compatibility bridges only after that same
    alias proof and drain.
-3. Set `HOSTED_GROUP_JOIN_CONFIRMATION_PRODUCER_ENABLED=1` and redeploy the
-   same commit or a descendant that preserves the consumer contract.
-4. Call the authenticated
-   `POST /api/ops/group-join-confirmations` drain in bounded pages, following
-   each returned `nextCursor` until it is `null`. Rows that still lack crypto
-   roots or a safe private route remain eligible for a later activation,
-   private inbound, join retry, or another deliberate bounded drain.
+3. After contract migration succeeds, the same repository workflow derives a
+   rollout credential in memory from its existing Vercel credential, upserts
+   the producer flag plus the sensitive credential in Vercel production, and
+   re-proves the production alias before redeploying that exact commit.
+4. The workflow waits for that redeploy to become the production alias,
+   verifies both enablement and credential authority, then calls the private
+   internal drain in bounded pages until `nextCursor` is `null`. If the
+   credential changes later, the same status proof refreshes it and redeploys
+   the exact proven production commit before draining. Rows that still lack
+   crypto roots or a safe private route remain eligible for a later activation,
+   private inbound, join retry, or another workflow drain.
+
+Environment update, alias drift, redeploy, authority, response-validation, and
+incomplete-pagination failures all stop the workflow. Secret values are never
+downloaded or printed, and group content never crosses this control path.
 
 The first consumer-capable commit is the rollback floor while the producer is
 enabled. To roll back below it, disable the producer and redeploy, wait the

@@ -46,10 +46,12 @@ vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
 }));
 
 import {
+  HOSTED_GROUP_JOIN_CONFIRMATION_RECOVERY_MAX_ITEMS,
   appendHostedGroupJoinConfirmationTx,
   drainPendingHostedGroupJoinConfirmations,
   isHostedGroupJoinConfirmationProducerEnabled,
   materializePendingHostedGroupJoinConfirmations,
+  materializePendingHostedGroupJoinConfirmationsBestEffort,
   materializePendingHostedGroupJoinConfirmationsTx,
 } from "@/src/lib/hosted-groups/group-join-confirmation";
 
@@ -933,6 +935,174 @@ describe("appendHostedGroupJoinConfirmationTx", () => {
       mailboxItemId: "mailbox_item_join_confirmation_1",
       prisma,
     });
+  });
+
+  it("materializes every currently eligible membership in one bounded untargeted recovery", async () => {
+    vi.stubEnv("HOSTED_GROUP_JOIN_CONFIRMATION_PRODUCER_ENABLED", "1");
+    const memberships = [
+      {
+        createdAt: new Date("2026-07-10T14:00:00.000Z"),
+        group: { displayName: "Group A", joinCode: "JOIN1" },
+        id: "membership_1",
+        joinConfirmationOrigin: "web",
+        joinedAt: null,
+      },
+      {
+        createdAt: new Date("2026-07-10T15:00:00.000Z"),
+        group: { displayName: "Group B", joinCode: "JOIN2" },
+        id: "membership_2",
+        joinConfirmationOrigin: "group_chat_reaction",
+        joinedAt: null,
+      },
+      null,
+    ];
+    const findFirst = vi.fn().mockImplementation(() =>
+      Promise.resolve(memberships.shift()));
+    const update = vi.fn().mockResolvedValue({});
+    const tx = {
+      hostedGroupMember: { findFirst, update },
+    };
+    const prisma = {
+      $transaction: vi.fn(async (callback: (input: typeof tx) => Promise<unknown>) =>
+        callback(tx)),
+    } as never;
+
+    await materializePendingHostedGroupJoinConfirmationsBestEffort({
+      memberId: "member_joiner",
+      prisma,
+    });
+
+    expect(findFirst).toHaveBeenCalledTimes(3);
+    expect(update).toHaveBeenCalledTimes(2);
+    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledTimes(2);
+    expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledTimes(2);
+  });
+
+  it("stops untargeted recovery on a deferred membership without spinning", async () => {
+    vi.stubEnv("HOSTED_GROUP_JOIN_CONFIRMATION_PRODUCER_ENABLED", "1");
+    mocks.hasActiveHostedCryptoDomainRootsForUserTx.mockResolvedValueOnce(false);
+    const findFirst = vi.fn().mockResolvedValue({
+      createdAt: new Date("2026-07-10T14:00:00.000Z"),
+      group: { displayName: "Group A", joinCode: "JOIN1" },
+      id: "membership_1",
+      joinConfirmationOrigin: "web",
+      joinedAt: null,
+    });
+    const update = vi.fn().mockResolvedValue({});
+    const tx = {
+      hostedGroupMember: { findFirst, update },
+    };
+    const prisma = {
+      $transaction: vi.fn(async (callback: (input: typeof tx) => Promise<unknown>) =>
+        callback(tx)),
+    } as never;
+
+    await materializePendingHostedGroupJoinConfirmationsBestEffort({
+      memberId: "member_joiner",
+      prisma,
+    });
+
+    expect(findFirst).toHaveBeenCalledTimes(1);
+    expect(update).not.toHaveBeenCalled();
+    expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
+  });
+
+  it("caps untargeted recovery and deterministically resumes the remainder", async () => {
+    vi.stubEnv("HOSTED_GROUP_JOIN_CONFIRMATION_PRODUCER_ENABLED", "1");
+    const memberships = Array.from(
+      { length: HOSTED_GROUP_JOIN_CONFIRMATION_RECOVERY_MAX_ITEMS + 1 },
+      (_, index) => ({
+        createdAt: new Date(`2026-07-10T${String(index).padStart(2, "0")}:00:00.000Z`),
+        group: { displayName: `Group ${index + 1}`, joinCode: `JOIN${index + 1}` },
+        id: `membership_${index + 1}`,
+        joinConfirmationOrigin: "web",
+        joinedAt: null,
+      }),
+    );
+    const findFirst = vi.fn().mockImplementation(() =>
+      Promise.resolve(memberships.shift() ?? null));
+    const update = vi.fn().mockResolvedValue({});
+    const tx = {
+      hostedGroupMember: { findFirst, update },
+    };
+    const prisma = {
+      $transaction: vi.fn(async (callback: (input: typeof tx) => Promise<unknown>) =>
+        callback(tx)),
+    } as never;
+
+    await materializePendingHostedGroupJoinConfirmationsBestEffort({
+      memberId: "member_joiner",
+      prisma,
+    });
+
+    expect(update).toHaveBeenCalledTimes(HOSTED_GROUP_JOIN_CONFIRMATION_RECOVERY_MAX_ITEMS);
+    expect(memberships).toHaveLength(1);
+
+    await materializePendingHostedGroupJoinConfirmationsBestEffort({
+      memberId: "member_joiner",
+      prisma,
+    });
+
+    expect(update).toHaveBeenCalledTimes(HOSTED_GROUP_JOIN_CONFIRMATION_RECOVERY_MAX_ITEMS + 1);
+    expect(memberships).toHaveLength(0);
+  });
+
+  it("shares one deadline across every untargeted recovery item", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.stubEnv("HOSTED_GROUP_JOIN_CONFIRMATION_PRODUCER_ENABLED", "1");
+      const memberships = [
+        {
+          createdAt: new Date("2026-07-10T14:00:00.000Z"),
+          group: { displayName: "Group A", joinCode: "JOIN1" },
+          id: "membership_1",
+          joinConfirmationOrigin: "web",
+          joinedAt: null,
+        },
+        {
+          createdAt: new Date("2026-07-10T15:00:00.000Z"),
+          group: { displayName: "Group B", joinCode: "JOIN2" },
+          id: "membership_2",
+          joinConfirmationOrigin: "web",
+          joinedAt: null,
+        },
+        null,
+      ];
+      const tx = {
+        hostedGroupMember: {
+          findFirst: vi.fn().mockImplementation(() =>
+            Promise.resolve(memberships.shift())),
+          update: vi.fn().mockResolvedValue({}),
+        },
+      };
+      const transactionTimeouts: number[] = [];
+      const prisma = {
+        $transaction: vi.fn(async (
+          callback: (input: typeof tx) => Promise<unknown>,
+          options: { timeout: number },
+        ) => {
+          transactionTimeouts.push(options.timeout);
+          return callback(tx);
+        }),
+      } as never;
+      mocks.signalHostedMailboxAppendRuntime.mockImplementationOnce(() =>
+        new Promise<void>((resolve) => setTimeout(resolve, 60)));
+
+      const recovery = materializePendingHostedGroupJoinConfirmationsBestEffort({
+        memberId: "member_joiner",
+        prisma,
+        timeoutMs: 100,
+      });
+      await vi.advanceTimersByTimeAsync(60);
+      await recovery;
+
+      expect(transactionTimeouts).toHaveLength(3);
+      expect(transactionTimeouts[0]).toBeLessThanOrEqual(100);
+      expect(transactionTimeouts[1]).toBeLessThanOrEqual(40);
+      expect(transactionTimeouts[2]).toBeLessThanOrEqual(40);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("bounds a materializer signal that never settles", async () => {

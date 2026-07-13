@@ -71,6 +71,7 @@ export interface HostedGroupJoinConfirmationDrainResult {
 
 export const HOSTED_GROUP_JOIN_CONFIRMATION_DRAIN_DEFAULT_LIMIT = 10;
 export const HOSTED_GROUP_JOIN_CONFIRMATION_DRAIN_MAX_LIMIT = 25;
+export const HOSTED_GROUP_JOIN_CONFIRMATION_RECOVERY_MAX_ITEMS = 10;
 export const HOSTED_GROUP_JOIN_CONFIRMATION_HANDOFF_TIMEOUT_MS =
   HOSTED_POST_COMMIT_TIMEOUT_MS;
 
@@ -192,14 +193,26 @@ export async function materializePendingHostedGroupJoinConfirmationsBestEffort(i
   signal?: AbortSignal;
   timeoutMs?: number;
 }): Promise<void> {
+  const deadlineMs = createHostedPostCommitDeadline(input.timeoutMs);
+  const maxItems = input.membershipId
+    ? 1
+    : HOSTED_GROUP_JOIN_CONFIRMATION_RECOVERY_MAX_ITEMS;
   try {
-    await materializePendingHostedGroupJoinConfirmations({
-      memberId: input.memberId,
-      ...(input.membershipId ? { membershipId: input.membershipId } : {}),
-      ...(input.prisma ? { prisma: input.prisma } : {}),
-      ...(input.signal ? { signal: input.signal } : {}),
-      ...(input.timeoutMs === undefined ? {} : { timeoutMs: input.timeoutMs }),
-    });
+    for (let index = 0; index < maxItems; index += 1) {
+      const result = await materializePendingHostedGroupJoinConfirmations({
+        memberId: input.memberId,
+        ...(input.membershipId ? { membershipId: input.membershipId } : {}),
+        ...(input.prisma ? { prisma: input.prisma } : {}),
+        ...(input.signal ? { signal: input.signal } : {}),
+        timeoutMs: readHostedPostCommitRemainingMs(deadlineMs),
+      });
+      if (
+        input.membershipId
+        || (result.kind !== "appended" && result.kind !== "terminal-skip")
+      ) {
+        return;
+      }
+    }
   } catch (error) {
     console.warn("Hosted group join confirmation reconciliation failed.", {
       errorName: error instanceof Error ? error.name : typeof error,

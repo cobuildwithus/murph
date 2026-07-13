@@ -7,6 +7,9 @@ import { fileURLToPath } from "node:url";
 import { describe, test, vi } from "vitest";
 
 import {
+  completeHostedGroupJoinConfirmationRollout,
+} from "../scripts/complete-group-join-confirmation-rollout";
+import {
   applyHostedWebContractMigrations,
   listHostedWebContractMigrations,
   runHostedWebProductionContractMigrationsIfNeeded,
@@ -650,7 +653,10 @@ describe("hosted web production migration guard", () => {
           if (url.includes("/v13/deployments/")) {
             return jsonFetchResponse({
               gitSource: { sha: "sha-from-git-source" },
+              id: "dpl_resolved",
               meta: { githubCommitSha: "spoofed-meta-sha" },
+              name: "hosted-web",
+              projectId: "project-id",
             });
           }
 
@@ -786,6 +792,255 @@ describe("hosted web production migration guard", () => {
     }
   });
 
+  test("drains the enabled group confirmation rollout without redeploying", async () => {
+    const environment = {
+      DEPLOYED_SHA: "deployed-sha",
+      HOSTED_WEB_PRODUCTION_BASE_URL: "https://www.withmurph.ai",
+      HOSTED_WEB_VERCEL_PROJECT_ID: "project-id",
+      HOSTED_WEB_VERCEL_TEAM_ID: "team-id",
+      HOSTED_WEB_VERCEL_TOKEN: "vercel-token",
+    };
+    const drainBodies: unknown[] = [];
+
+    const result = await completeHostedGroupJoinConfirmationRollout(
+      environment,
+      {
+        fetchImpl: async (url, init) => {
+          const method = init?.method ?? "GET";
+          if (url.includes("/v4/aliases/")) {
+            return webJsonResponse({ deploymentId: "dpl_current" });
+          }
+          if (url.includes("/v13/deployments/dpl_current")) {
+            return webJsonResponse({
+              gitSource: { sha: "deployed-sha" },
+              id: "dpl_current",
+              name: "hosted-web",
+              projectId: "project-id",
+            });
+          }
+          if (url.includes("/api/internal/hosted-groups/join-confirmations/rollout")) {
+            const authorization = new Headers(init?.headers).get("authorization");
+            assert.match(authorization ?? "", /^Bearer [A-Za-z0-9_-]+$/u);
+            if (method === "GET") {
+              return webJsonResponse({ authorized: true, enabled: true });
+            }
+            drainBodies.push(JSON.parse(init?.body as string) as unknown);
+            return drainBodies.length === 1
+              ? webJsonResponse({
+                  appended: 2,
+                  deferred: 1,
+                  nextCursor: "membership_2",
+                  scanned: 3,
+                  terminalSkipped: 0,
+                })
+              : webJsonResponse({
+                  appended: 1,
+                  deferred: 0,
+                  nextCursor: null,
+                  scanned: 1,
+                  terminalSkipped: 0,
+                });
+          }
+          throw new Error(`Unexpected rollout URL: ${url}`);
+        },
+      },
+    );
+
+    assert.deepEqual(result, {
+      appended: 3,
+      deferred: 1,
+      redeployed: false,
+      scanned: 4,
+      terminalSkipped: 0,
+    });
+    assert.deepEqual(drainBodies, [
+      { cursor: null, limit: 25 },
+      { cursor: "membership_2", limit: 25 },
+    ]);
+  });
+
+  test("fails closed on an invalid group confirmation rollout response", async () => {
+    const environment = {
+      DEPLOYED_SHA: "deployed-sha",
+      HOSTED_WEB_PRODUCTION_BASE_URL: "https://www.withmurph.ai",
+      HOSTED_WEB_VERCEL_PROJECT_ID: "project-id",
+      HOSTED_WEB_VERCEL_TOKEN: "vercel-token",
+    };
+
+    await assert.rejects(
+      () => completeHostedGroupJoinConfirmationRollout(environment, {
+        fetchImpl: async (url) => {
+          if (url.includes("/v4/aliases/")) {
+            return webJsonResponse({ deploymentId: "dpl_current" });
+          }
+          if (url.includes("/v13/deployments/dpl_current")) {
+            return webJsonResponse({
+              gitSource: { sha: "deployed-sha" },
+              id: "dpl_current",
+              name: "hosted-web",
+              projectId: "project-id",
+            });
+          }
+          if (url.includes("/api/internal/hosted-groups/join-confirmations/rollout")) {
+            return webJsonResponse({ authorized: true, enabled: "yes" });
+          }
+          throw new Error(`Unexpected rollout URL: ${url}`);
+        },
+      }),
+      /rollout status response was invalid/u,
+    );
+  });
+
+  test("refreshes rollout configuration on the exact proven deployment before draining", async () => {
+    const environment = {
+      DEPLOYED_SHA: "deployed-sha",
+      HOSTED_WEB_PRODUCTION_BASE_URL: "https://www.withmurph.ai",
+      HOSTED_WEB_VERCEL_PROJECT_ID: "project-id",
+      HOSTED_WEB_VERCEL_TEAM_ID: "team-id",
+      HOSTED_WEB_VERCEL_TOKEN: "vercel-token",
+    };
+    let aliasDeploymentId = "dpl_current";
+    let rolloutStatusReads = 0;
+    const environmentUpdates: Array<Record<string, unknown>> = [];
+    let redeployBody: Record<string, unknown> | null = null;
+
+    const result = await completeHostedGroupJoinConfirmationRollout(
+      environment,
+      {
+        fetchImpl: async (url, init) => {
+          const method = init?.method ?? "GET";
+          if (url.includes("/v4/aliases/")) {
+            return webJsonResponse({ deploymentId: aliasDeploymentId });
+          }
+          if (url.includes("/v13/deployments/dpl_current?")) {
+            return webJsonResponse({
+              gitSource: { sha: "deployed-sha" },
+              id: "dpl_current",
+              name: "hosted-web",
+              projectId: "project-id",
+            });
+          }
+          if (
+            url.includes("/v13/deployments/dpl_rollout?")
+            && url.includes("withGitRepoInfo=true")
+          ) {
+            return webJsonResponse({
+              gitSource: { sha: "deployed-sha" },
+              id: "dpl_rollout",
+              name: "hosted-web",
+              projectId: "project-id",
+            });
+          }
+          if (url.includes("/v13/deployments/dpl_rollout") && method === "GET") {
+            aliasDeploymentId = "dpl_rollout";
+            return webJsonResponse({ readyState: "READY" });
+          }
+          if (url.includes("/v10/projects/project-id/env") && method === "POST") {
+            environmentUpdates.push(JSON.parse(init?.body as string) as Record<string, unknown>);
+            return webJsonResponse({ created: true });
+          }
+          if (url.includes("/v13/deployments?forceNew=1") && method === "POST") {
+            redeployBody = JSON.parse(init?.body as string) as Record<string, unknown>;
+            return webJsonResponse({ id: "dpl_rollout" });
+          }
+          if (url.includes("/api/internal/hosted-groups/join-confirmations/rollout")) {
+            if (method === "GET") {
+              rolloutStatusReads += 1;
+              return rolloutStatusReads === 1
+                ? webJsonResponse({ authorized: false, enabled: true })
+                : webJsonResponse({ authorized: true, enabled: true });
+            }
+            return webJsonResponse({
+              appended: 1,
+              deferred: 0,
+              nextCursor: null,
+              scanned: 1,
+              terminalSkipped: 0,
+            });
+          }
+          throw new Error(`Unexpected rollout URL: ${url}`);
+        },
+        sleep: async () => undefined,
+      },
+    );
+
+    assert.equal(result.redeployed, true);
+    assert.deepEqual(redeployBody, {
+      deploymentId: "dpl_current",
+      name: "hosted-web",
+      target: "production",
+    });
+    assert.deepEqual(
+      environmentUpdates.map(({ key, target, type, value }) => ({
+        key,
+        target,
+        type,
+        value: key === "HOSTED_GROUP_JOIN_CONFIRMATION_ROLLOUT_TOKEN"
+          ? typeof value
+          : value,
+      })),
+      [
+        {
+          key: "HOSTED_GROUP_JOIN_CONFIRMATION_PRODUCER_ENABLED",
+          target: ["production"],
+          type: "plain",
+          value: "1",
+        },
+        {
+          key: "HOSTED_GROUP_JOIN_CONFIRMATION_ROLLOUT_TOKEN",
+          target: ["production"],
+          type: "sensitive",
+          value: "string",
+        },
+      ],
+    );
+  });
+
+  test("stops before redeploying if the production alias changes during rollout setup", async () => {
+    const environment = {
+      DEPLOYED_SHA: "deployed-sha",
+      HOSTED_WEB_PRODUCTION_BASE_URL: "https://www.withmurph.ai",
+      HOSTED_WEB_VERCEL_PROJECT_ID: "project-id",
+      HOSTED_WEB_VERCEL_TOKEN: "vercel-token",
+    };
+    let aliasReads = 0;
+    let redeployRequested = false;
+
+    await assert.rejects(
+      () => completeHostedGroupJoinConfirmationRollout(environment, {
+        fetchImpl: async (url, init) => {
+          if (url.includes("/v4/aliases/")) {
+            aliasReads += 1;
+            return webJsonResponse({
+              deploymentId: aliasReads === 1 ? "dpl_current" : "dpl_changed",
+            });
+          }
+          if (url.includes("/v13/deployments/dpl_")) {
+            const id = url.includes("dpl_changed") ? "dpl_changed" : "dpl_current";
+            return webJsonResponse({
+              gitSource: { sha: "deployed-sha" },
+              id,
+              name: "hosted-web",
+              projectId: "project-id",
+            });
+          }
+          if (url.includes("/api/internal/hosted-groups/join-confirmations/rollout")) {
+            return webJsonResponse({ authorized: false, enabled: false });
+          }
+          if (url.includes("/v10/projects/project-id/env")) {
+            return webJsonResponse({ created: true });
+          }
+          if (url.includes("/v13/deployments") && init?.method === "POST") {
+            redeployRequested = true;
+          }
+          throw new Error(`Unexpected rollout URL: ${url}`);
+        },
+      }),
+      /production alias changed/u,
+    );
+    assert.equal(redeployRequested, false);
+  });
+
   test("keeps package build non-mutating and keeps Vercel deploy migrations automatic", async () => {
     const packageJson = JSON.parse(
       await readFile(path.join(appRoot, "package.json"), "utf8"),
@@ -866,7 +1121,7 @@ describe("hosted web production migration guard", () => {
     assert.match(workflow, /deployment_status\.creator\.login == 'vercel\[bot\]'/u);
     assert.match(workflow, /deployment\.creator\.login == 'vercel\[bot\]'/u);
     assert.match(workflow, /environment: production/u);
-    assert.match(workflow, /timeout-minutes: 20/u);
+    assert.match(workflow, /timeout-minutes: 45/u);
     assert.doesNotMatch(workflow, /concurrency:/u);
     assert.doesNotMatch(workflow, /cancel-in-progress/u);
     assert.doesNotMatch(workflow, /hosted-web-contract-migrations-production/u);
@@ -908,6 +1163,10 @@ describe("hosted web production migration guard", () => {
       workflow,
       "Apply contract migrations",
     );
+    const groupJoinRolloutStep = extractWorkflowStep(
+      workflow,
+      "Complete group join confirmation rollout",
+    );
     assert.match(productionProofStep, /id: current-production/u);
     assert.match(productionProofStep, /HOSTED_WEB_VERCEL_TOKEN/u);
     assert.match(productionProofStep, /resolve-vercel-production-alias-sha\.ts/u);
@@ -943,6 +1202,17 @@ describe("hosted web production migration guard", () => {
       /MURPH_RUN_HOSTED_WEB_CONTRACT_MIGRATIONS: "1"/u,
     );
     assert.match(contractMigrationStep, /release:production:contract-migrate/u);
+    assert.match(
+      groupJoinRolloutStep,
+      /steps\.current-production\.outputs\.should_apply == 'true'/u,
+    );
+    assert.match(
+      groupJoinRolloutStep,
+      /complete-group-join-confirmation-rollout\.ts/u,
+    );
+    assert.match(groupJoinRolloutStep, /HOSTED_WEB_VERCEL_TOKEN/u);
+    assert.doesNotMatch(groupJoinRolloutStep, /HOSTED_WEB_DIRECT_DATABASE_URL/u);
+    assert.doesNotMatch(groupJoinRolloutStep, /DIRECT_DATABASE_URL/u);
     assert.ok(
       productionProofStep.indexOf('sleep "${HOSTED_WEB_CONTRACT_MIGRATION_DRAIN_SECONDS}"')
         < productionProofStep.indexOf('current_sha="$('),
@@ -967,6 +1237,11 @@ describe("hosted web production migration guard", () => {
       workflow.indexOf('echo "should_apply=true" >> "${GITHUB_OUTPUT}"')
         < workflow.indexOf("release:production:contract-migrate"),
       "contract migrations must expose the database secret only after the alias proof output is set",
+    );
+    assert.ok(
+      workflow.indexOf("release:production:contract-migrate")
+        < workflow.indexOf("complete-group-join-confirmation-rollout.ts"),
+      "group join rollout must start only after contract migrations succeed",
     );
 
     const nodeVersion = workflow.match(/node-version:\s*([^\s#]+)/u)?.[1] ?? "";
@@ -1073,6 +1348,13 @@ function jsonFetchResponse(data: unknown): {
       return JSON.stringify(data);
     },
   };
+}
+
+function webJsonResponse(data: unknown, status = 200): Response {
+  return new Response(JSON.stringify(data), {
+    headers: { "content-type": "application/json" },
+    status,
+  });
 }
 
 class FakeContractMigrationDatabase implements HostedWebContractMigrationDatabase {
