@@ -40,7 +40,11 @@ enter runner env, prompts, diagnostics, or workspace state. Transfer numbers are
 resolved server-side from verified hosted member identity when the brief allows a
 live transfer. `apps/web` stores one member-bound `HostedPhoneCall` row per real
 call for request-key idempotency, provider call id, status, bounded call brief,
-and final analysis. Retell reaches `apps/web` only through signed raw-body
+and final analysis. Briefs and results are encrypted before persistence with the
+control-domain hosted secure-box lane and AAD bound to the member, table, row,
+field, and scope; only provider/status/timestamp identifiers remain operational
+metadata. Nullable legacy JSON columns are read only when ciphertext is absent
+and exist solely for the bounded migration scrub. Retell reaches `apps/web` only through signed raw-body
 function/webhook routes for `ask_murph`, `call_ended`, and `call_analyzed`;
 Murph does not persist raw Retell transcripts, request bodies, recordings, or
 call audio.
