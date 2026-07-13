@@ -23,6 +23,7 @@ import type {
 import { hasHostedRuntimeActiveAccess } from "../hosted-mailbox/runtime-access";
 import {
   createHostedExternalThreadIdentityLookupKey,
+  createHostedExternalThreadIdentityLookupKeyReadCandidates,
   createHostedLinqMessageLookupKey,
 } from "../hosted-onboarding/contact-privacy";
 import {
@@ -550,6 +551,11 @@ async function handleHostedRuntimeGroupPostJoinOffer(input: {
     channel: "linq",
     threadId: authorized.chatId,
   });
+  const threadIdentityLookupKeyReadCandidates =
+    createHostedExternalThreadIdentityLookupKeyReadCandidates({
+      channel: "linq",
+      threadId: authorized.chatId,
+    });
   if (!threadIdentityLookupKey) {
     return unavailable("linq_thread_unavailable");
   }
@@ -563,6 +569,7 @@ async function handleHostedRuntimeGroupPostJoinOffer(input: {
         postedAt: now,
         projectionScopes,
         threadIdentityLookupKey,
+        threadIdentityLookupKeyReadCandidates,
         tx,
       }), HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
   } catch {

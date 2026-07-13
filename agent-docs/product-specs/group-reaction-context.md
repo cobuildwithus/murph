@@ -62,8 +62,11 @@ the member to send a second text.
   with its stable tool-call effect, exact thread, rendered-message digest, and
   permission snapshot. Under the existing group lock, a later effect with the
   same unbound visible intent reuses that canonical owner and provider
-  idempotency key; mismatched permission snapshots fail closed. Once the owner
-  binds or is revoked, a later intentional offer remains distinct. Before the
+  idempotency key; its own durable row points to the canonical owner so replay
+  after response loss remains idempotent and changed intent conflicts. Pending
+  matching uses every current/prior thread blind-index candidate; mismatched
+  permission snapshots fail closed. Once the owner binds or is revoked, a
+  later intentional offer remains distinct. Before the
   provider message id is bound, only the exact reacted-to part matching that
   durable pending intent may complete the binding. Compute that digest from
   the full provider part before bounding its prompt projection, and use the

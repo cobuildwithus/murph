@@ -498,6 +498,7 @@ export async function prepareHostedGroupJoinOfferTx(input: {
   postedAt: Date;
   projectionScopes: readonly HostedVaultShareProjectionScope[];
   threadIdentityLookupKey: string;
+  threadIdentityLookupKeyReadCandidates: readonly string[];
   tx: Prisma.TransactionClient;
 }): Promise<HostedGroupJoinOfferPreparation> {
   const offerId = requireHostedGroupJoinOfferId(input.effectId);
@@ -505,6 +506,10 @@ export async function prepareHostedGroupJoinOfferTx(input: {
   const threadIdentityLookupKey = requireHostedGroupJoinOfferThreadLookupKey(
     input.threadIdentityLookupKey,
   );
+  const threadIdentityLookupKeyReadCandidates = normalizeHostedGroupLookupKeyCandidates([
+    threadIdentityLookupKey,
+    ...input.threadIdentityLookupKeyReadCandidates,
+  ]);
   const projectionScopes = normalizeHostedVaultShareProjectionScopes(input.projectionScopes);
   await lockHostedGroupRow(input.tx, input.groupId);
   const group = await input.tx.hostedGroup.findUnique({
@@ -523,6 +528,7 @@ export async function prepareHostedGroupJoinOfferTx(input: {
   const existing = await input.tx.hostedGroupJoinOffer.findUnique({
     where: { id: offerId },
     select: {
+      canonicalOfferId: true,
       groupId: true,
       messageDigest: true,
       messageLookupKey: true,
@@ -538,7 +544,9 @@ export async function prepareHostedGroupJoinOfferTx(input: {
     if (
       existing.groupId !== input.groupId
       || existing.messageDigest !== messageDigest
-      || existing.threadIdentityLookupKey !== threadIdentityLookupKey
+      || !threadIdentityLookupKeyReadCandidates.includes(
+        existing.threadIdentityLookupKey ?? "",
+      )
       || JSON.stringify(existingProjectionScopes) !== JSON.stringify(projectionScopes)
     ) {
       throw hostedOnboardingError({
@@ -548,19 +556,40 @@ export async function prepareHostedGroupJoinOfferTx(input: {
         retryable: false,
       });
     }
+    if (!existing.canonicalOfferId) {
+      return {
+        offerId,
+        ...projectHostedGroupJoinOfferDispatchState(existing),
+      };
+    }
+    const canonical = await input.tx.hostedGroupJoinOffer.findUnique({
+      where: { id: existing.canonicalOfferId },
+      select: { messageLookupKey: true, revokedAt: true },
+    });
+    if (!canonical) {
+      throw hostedOnboardingError({
+        code: "HOSTED_GROUP_JOIN_OFFER_NOT_FOUND",
+        httpStatus: 404,
+        message: "This group offer is no longer active.",
+        retryable: false,
+      });
+    }
     return {
-      offerId,
-      ...projectHostedGroupJoinOfferDispatchState(existing),
+      offerId: existing.canonicalOfferId,
+      ...projectHostedGroupJoinOfferDispatchState(canonical),
     };
   }
 
   const pending = await input.tx.hostedGroupJoinOffer.findFirst({
     where: {
+      canonicalOfferId: null,
       groupId: input.groupId,
       messageDigest,
       messageLookupKey: null,
       revokedAt: null,
-      threadIdentityLookupKey,
+      threadIdentityLookupKey: {
+        in: threadIdentityLookupKeyReadCandidates,
+      },
     },
     select: {
       id: true,
@@ -579,10 +608,32 @@ export async function prepareHostedGroupJoinOfferTx(input: {
         retryable: false,
       });
     }
+    await input.tx.hostedGroupJoinOffer.create({
+      data: {
+        canonicalOfferId: pending.id,
+        groupId: input.groupId,
+        id: offerId,
+        messageDigest,
+        postedAt: input.postedAt,
+        projectionKindsJson: toHostedGroupJoinOfferProjectionScopesJson(projectionScopes),
+        threadIdentityLookupKey,
+      },
+    });
+    const canonical = await input.tx.hostedGroupJoinOffer.findUnique({
+      where: { id: pending.id },
+      select: { messageLookupKey: true, revokedAt: true },
+    });
+    if (!canonical) {
+      throw hostedOnboardingError({
+        code: "HOSTED_GROUP_JOIN_OFFER_NOT_FOUND",
+        httpStatus: 404,
+        message: "This group offer is no longer active.",
+        retryable: false,
+      });
+    }
     return {
-      messageLookupKey: null,
       offerId: pending.id,
-      status: "pending",
+      ...projectHostedGroupJoinOfferDispatchState(canonical),
     };
   }
 
@@ -726,6 +777,7 @@ export async function bindPendingHostedGroupJoinOfferTargetTx(input: {
   }
   const pending = await input.tx.hostedGroupJoinOffer.findFirst({
     where: {
+      canonicalOfferId: null,
       messageDigest,
       messageLookupKey: null,
       revokedAt: null,

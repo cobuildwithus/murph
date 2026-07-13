@@ -1074,6 +1074,7 @@ model HostedGroup {
 
 model HostedGroupJoinOffer {
   id                      String      @id
+  canonicalOfferId        String?     @map("canonical_offer_id")
   groupId                 String      @map("group_id")
   threadIdentityLookupKey String?     @map("thread_identity_lookup_key")
   messageDigest           String?     @map("message_digest")
@@ -1085,7 +1086,7 @@ model HostedGroupJoinOffer {
   group                   HostedGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
 
   @@index([groupId, revokedAt, postedAt])
-  @@index([threadIdentityLookupKey, messageDigest, revokedAt], map: "hosted_group_join_offer_pending_match_idx")
+  @@index([threadIdentityLookupKey, messageDigest, revokedAt, canonicalOfferId], map: "hosted_group_join_offer_pending_match_idx")
   @@map("hosted_group_join_offer")
 }
 

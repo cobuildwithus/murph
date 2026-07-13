@@ -495,6 +495,9 @@ describe("acceptHostedGroupJoinCodeTx", () => {
       postedAt,
       projectionScopes: [SLEEP_SCOPE],
       threadIdentityLookupKey: "hbidx:external-thread-identity:v1:thread",
+      threadIdentityLookupKeyReadCandidates: [
+        "hbidx:external-thread-identity:v1:thread",
+      ],
       tx,
     })).resolves.toEqual({
       messageLookupKey: null,
@@ -514,7 +517,7 @@ describe("acceptHostedGroupJoinCodeTx", () => {
     });
   });
 
-  it("reuses one pending owner for distinct effects with identical intent", async () => {
+  it("records a distinct effect while reusing one pending owner", async () => {
     const offers: StatefulJoinOfferRow[] = [];
     const tx = buildStatefulJoinOfferTx(offers);
     const input = {
@@ -523,6 +526,9 @@ describe("acceptHostedGroupJoinCodeTx", () => {
       postedAt: new Date("2026-07-01T00:00:00.000Z"),
       projectionScopes: [SLEEP_SCOPE],
       threadIdentityLookupKey: "hbidx:external-thread-identity:v1:thread",
+      threadIdentityLookupKeyReadCandidates: [
+        "hbidx:external-thread-identity:v1:thread",
+      ],
       tx,
     };
 
@@ -536,8 +542,87 @@ describe("acceptHostedGroupJoinCodeTx", () => {
     });
 
     expect(second).toEqual(first);
-    expect(offers).toHaveLength(1);
-    expect(tx.hostedGroupJoinOffer.create).toHaveBeenCalledTimes(1);
+    expect(offers).toHaveLength(2);
+    expect(offers).toEqual(expect.arrayContaining([
+      expect.objectContaining({ canonicalOfferId: null, id: first.offerId }),
+      expect.objectContaining({
+        canonicalOfferId: first.offerId,
+        id: expect.not.stringMatching(first.offerId),
+      }),
+    ]));
+    await bindHostedGroupJoinOfferTx({
+      messageId: "msg_offer_first",
+      offerId: first.offerId,
+      tx,
+    });
+
+    await expect(prepareHostedGroupJoinOfferTx({
+      ...input,
+      effectId: "tool_call_offer_second",
+    })).resolves.toMatchObject({
+      messageLookupKey: createHostedLinqMessageLookupKey("msg_offer_first"),
+      offerId: first.offerId,
+      status: "bound",
+    });
+    await expect(prepareHostedGroupJoinOfferTx({
+      ...input,
+      effectId: "tool_call_offer_second",
+      projectionScopes: [ACTIVITY_SCOPE],
+    })).rejects.toMatchObject({
+      code: "HOSTED_GROUP_JOIN_OFFER_EFFECT_CONFLICT",
+      retryable: false,
+    });
+  });
+
+  it("reuses a prior-version pending owner after thread-key rotation", async () => {
+    restoreKeyring = configureHostedContactPrivacyKeyringForTest({
+      currentVersion: "v1",
+      entries: { ...TEST_KEYRING_ENTRIES },
+    });
+    const offers: StatefulJoinOfferRow[] = [];
+    const tx = buildStatefulJoinOfferTx(offers);
+    const rawThread = { channel: "linq", threadId: "chat_group_1" } as const;
+    const priorThreadIdentityLookupKey = createHostedExternalThreadIdentityLookupKey(rawThread);
+    if (!priorThreadIdentityLookupKey) {
+      throw new Error("Expected a prior-version thread lookup key.");
+    }
+    const common = {
+      groupId: "group_1",
+      messageDigest: createHostedLinqTextPartDigest("React here to join."),
+      postedAt: new Date("2026-07-01T00:00:00.000Z"),
+      projectionScopes: [SLEEP_SCOPE],
+      tx,
+    };
+    const first = await prepareHostedGroupJoinOfferTx({
+      ...common,
+      effectId: "tool_call_offer_first",
+      threadIdentityLookupKey: priorThreadIdentityLookupKey,
+      threadIdentityLookupKeyReadCandidates:
+        createHostedExternalThreadIdentityLookupKeyReadCandidates(rawThread),
+    });
+
+    process.env.HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION = "v2";
+    clearHostedOnboardingEnvCache();
+    const currentThreadIdentityLookupKey = createHostedExternalThreadIdentityLookupKey(rawThread);
+    if (!currentThreadIdentityLookupKey) {
+      throw new Error("Expected a current-version thread lookup key.");
+    }
+    const second = await prepareHostedGroupJoinOfferTx({
+      ...common,
+      effectId: "tool_call_offer_second",
+      threadIdentityLookupKey: currentThreadIdentityLookupKey,
+      threadIdentityLookupKeyReadCandidates:
+        createHostedExternalThreadIdentityLookupKeyReadCandidates(rawThread),
+    });
+
+    expect(second.offerId).toBe(first.offerId);
+    expect(offers.filter((offer) => offer.canonicalOfferId === null)).toHaveLength(1);
+    expect(offers).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        canonicalOfferId: first.offerId,
+        threadIdentityLookupKey: currentThreadIdentityLookupKey,
+      }),
+    ]));
   });
 
   it("rejects different authority for the same pending visible offer", async () => {
@@ -547,6 +632,9 @@ describe("acceptHostedGroupJoinCodeTx", () => {
       messageDigest: createHostedLinqTextPartDigest("React here to join."),
       postedAt: new Date("2026-07-01T00:00:00.000Z"),
       threadIdentityLookupKey: "hbidx:external-thread-identity:v1:thread",
+      threadIdentityLookupKeyReadCandidates: [
+        "hbidx:external-thread-identity:v1:thread",
+      ],
       tx,
     };
     await prepareHostedGroupJoinOfferTx({
@@ -574,6 +662,9 @@ describe("acceptHostedGroupJoinCodeTx", () => {
       postedAt: new Date("2026-07-01T00:00:00.000Z"),
       projectionScopes: [SLEEP_SCOPE],
       threadIdentityLookupKey: "hbidx:external-thread-identity:v1:thread",
+      threadIdentityLookupKeyReadCandidates: [
+        "hbidx:external-thread-identity:v1:thread",
+      ],
       tx,
     };
     const first = await prepareHostedGroupJoinOfferTx({
@@ -794,6 +885,7 @@ describe("acceptHostedGroupJoinCodeTx", () => {
     expect(findFirst).toHaveBeenCalledWith({
       select: { id: true },
       where: {
+        canonicalOfferId: null,
         messageDigest,
         messageLookupKey: null,
         revokedAt: null,
@@ -852,6 +944,9 @@ describe("acceptHostedGroupJoinCodeTx", () => {
       postedAt: new Date("2026-07-01T00:00:00.000Z"),
       projectionScopes: [SLEEP_SCOPE],
       threadIdentityLookupKey: "hbidx:external-thread-identity:v1:thread",
+      threadIdentityLookupKeyReadCandidates: [
+        "hbidx:external-thread-identity:v1:thread",
+      ],
       tx: senderTx,
     });
     reactionTx.hostedGroupJoinOffer.findFirst.mockImplementationOnce(async () => {
@@ -890,6 +985,9 @@ describe("acceptHostedGroupJoinCodeTx", () => {
       postedAt: firstPostedAt,
       projectionScopes: [SLEEP_SCOPE],
       threadIdentityLookupKey: "hbidx:external-thread-identity:v1:thread",
+      threadIdentityLookupKeyReadCandidates: [
+        "hbidx:external-thread-identity:v1:thread",
+      ],
       tx,
     });
     await bindHostedGroupJoinOfferTx({
@@ -904,6 +1002,9 @@ describe("acceptHostedGroupJoinCodeTx", () => {
       postedAt: secondPostedAt,
       projectionScopes: [ACTIVITY_SCOPE],
       threadIdentityLookupKey: "hbidx:external-thread-identity:v1:thread",
+      threadIdentityLookupKeyReadCandidates: [
+        "hbidx:external-thread-identity:v1:thread",
+      ],
       tx,
     });
     await bindHostedGroupJoinOfferTx({
@@ -1371,6 +1472,7 @@ function buildHostedVaultShareRow(
 }
 
 type StatefulJoinOfferRow = {
+  canonicalOfferId: string | null;
   groupId: string;
   id: string;
   messageDigest: string;
@@ -1422,6 +1524,7 @@ function buildStatefulJoinOfferTx(offers: StatefulJoinOfferRow[] = []): PrismaCl
     hostedGroupJoinOffer: {
       create: vi.fn(async (args: {
         data: {
+          canonicalOfferId?: string;
           groupId: string;
           id: string;
           messageDigest: string;
@@ -1430,6 +1533,7 @@ function buildStatefulJoinOfferTx(offers: StatefulJoinOfferRow[] = []): PrismaCl
         };
       }) => {
         offers.push({
+          canonicalOfferId: args.data.canonicalOfferId ?? null,
           groupId: args.data.groupId,
           id: args.data.id,
           messageDigest: args.data.messageDigest,
@@ -1450,6 +1554,7 @@ function buildStatefulJoinOfferTx(offers: StatefulJoinOfferRow[] = []): PrismaCl
         return offer
           ? {
               id: offer.id,
+              canonicalOfferId: offer.canonicalOfferId,
               groupId: offer.groupId,
               messageDigest: offer.messageDigest,
               messageLookupKey: offer.messageLookupKey,
@@ -1462,6 +1567,7 @@ function buildStatefulJoinOfferTx(offers: StatefulJoinOfferRow[] = []): PrismaCl
       }),
       findFirst: vi.fn(async (args: {
         where: {
+          canonicalOfferId?: null;
           groupId?: string;
           messageDigest?: string;
           messageLookupKey?: string | null | { in?: string[] };
@@ -1486,6 +1592,8 @@ function buildStatefulJoinOfferTx(offers: StatefulJoinOfferRow[] = []): PrismaCl
               : threadLookup.in?.includes(entry.threadIdentityLookupKey);
           return messageMatches
             && threadMatches
+            && (args.where.canonicalOfferId === undefined
+              || entry.canonicalOfferId === args.where.canonicalOfferId)
             && (args.where.groupId === undefined || entry.groupId === args.where.groupId)
             && (args.where.messageDigest === undefined
               || entry.messageDigest === args.where.messageDigest);

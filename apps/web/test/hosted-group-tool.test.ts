@@ -1161,6 +1161,9 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
       postedAt: expect.any(Date),
       projectionScopes: NEWSLETTER_DEFAULT_SCOPES,
       threadIdentityLookupKey: expect.stringMatching(/^hbidx:external-thread-identity:/u),
+      threadIdentityLookupKeyReadCandidates: expect.arrayContaining([
+        expect.stringMatching(/^hbidx:external-thread-identity:/u),
+      ]),
       tx: fakeTx,
     });
     expect(mocks.bindHostedGroupJoinOfferTx).toHaveBeenCalledWith({
@@ -1210,6 +1213,9 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
       postedAt: expect.any(Date),
       projectionScopes: expect.any(Array),
       threadIdentityLookupKey: expect.stringMatching(/^hbidx:external-thread-identity:/u),
+      threadIdentityLookupKeyReadCandidates: expect.arrayContaining([
+        expect.stringMatching(/^hbidx:external-thread-identity:/u),
+      ]),
       tx: fakeTx,
     });
     expect(mocks.bindHostedGroupJoinOfferTx).toHaveBeenCalledWith({
@@ -1455,6 +1461,18 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
         effectId: "tool_call_join_offer_2",
       },
     })).resolves.toMatchObject({ result: { status: "sent" } });
+    mocks.prepareHostedGroupJoinOfferTx.mockResolvedValueOnce({
+      messageLookupKey: "hbidx:linq-message:v1:offer",
+      offerId: JOIN_OFFER_ID,
+      status: "bound",
+    });
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_container",
+      request: {
+        ...request,
+        effectId: "tool_call_join_offer_2",
+      },
+    })).resolves.toMatchObject({ result: { status: "sent" } });
 
     const providerKeys = mocks.sendHostedLinqChatMessage.mock.calls.map(
       ([input]) => input.idempotencyKey,
@@ -1462,7 +1480,11 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     expect(providerKeys).toHaveLength(2);
     expect(providerKeys[0]).toBe(providerKeys[1]);
     expect(mocks.prepareHostedGroupJoinOfferTx.mock.calls.map(([input]) => input.effectId))
-      .toEqual([JOIN_OFFER_EFFECT_ID, "tool_call_join_offer_2"]);
+      .toEqual([
+        JOIN_OFFER_EFFECT_ID,
+        "tool_call_join_offer_2",
+        "tool_call_join_offer_2",
+      ]);
     expect(mocks.bindHostedGroupJoinOfferTx).toHaveBeenCalledTimes(1);
   });
 
