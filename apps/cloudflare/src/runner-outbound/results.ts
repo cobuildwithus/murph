@@ -157,6 +157,7 @@ async function handleRunnerEmailSendRequest(input: {
 
     return json({
       delivery: payload.delivery ?? null,
+      fanoutRecipientMemberIds: payload.fanoutRecipientMemberIds ?? null,
       ok: true,
       target: payload.target,
     });

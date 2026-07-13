@@ -6463,6 +6463,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       }
 
       return new Response(JSON.stringify({
+        fanoutRecipientMemberIds: ["member_one", "member_two"],
         ok: true,
         target: "assistant@example.com",
       }), {
@@ -6493,6 +6494,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(readResult).toEqual(rawMessage);
     expect(sendResult).toEqual({
       delivery: null,
+      fanoutRecipientMemberIds: ["member_one", "member_two"],
       target: "assistant@example.com",
     });
     expect(fetchMock).toHaveBeenCalledTimes(2);

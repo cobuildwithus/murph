@@ -267,6 +267,11 @@ export async function updateAssistantOutboxAfterDispatchFailure(input: {
       error: input.error,
       sending: input.sending,
     })
+  const abandonedDelivery = abandonedAmbiguousDelivery ||
+    isEmailGroupRecipientAuthoritySuperseded({
+      error: input.error,
+      sending: input.sending,
+    })
   const deliveryError = abandonedAmbiguousDelivery
     ? sanitizeAssistantDeliveryErrorForPersistence(
         createAssistantDeliveryAmbiguousError(input.error),
@@ -278,7 +283,7 @@ export async function updateAssistantOutboxAfterDispatchFailure(input: {
       : sanitizeAssistantDeliveryErrorForPersistence(
           normalizeAssistantDeliveryError(input.error),
         )!
-  const retryable = abandonedAmbiguousDelivery
+  const retryable = abandonedDelivery
     ? false
     : input.deliveryMayHaveSucceeded || isAssistantOutboxRetryableError(input.error)
 
@@ -304,12 +309,12 @@ export async function updateAssistantOutboxAfterDispatchFailure(input: {
       sanitizeAssistantOutboxIntentForPersistence({
         ...(current ?? input.sending),
         delivery: ambiguousDelivery ?? current?.delivery ?? input.sending.delivery,
-        deliveryConfirmationPending: input.deliveryMayHaveSucceeded
-          ? abandonedAmbiguousDelivery
-            ? false
-            : input.deliveryTransportIdempotent
-          : false,
-        deliveryTransportIdempotent: abandonedAmbiguousDelivery
+        deliveryConfirmationPending: abandonedDelivery
+          ? false
+          : input.deliveryMayHaveSucceeded
+            ? input.deliveryTransportIdempotent
+            : false,
+        deliveryTransportIdempotent: abandonedDelivery
           ? false
           : input.deliveryMayHaveSucceeded
             ? input.deliveryTransportIdempotent
@@ -317,7 +322,7 @@ export async function updateAssistantOutboxAfterDispatchFailure(input: {
                 input.sending.deliveryTransportIdempotent),
         updatedAt: failedAt,
         nextAttemptAt,
-        status: abandonedAmbiguousDelivery ? 'abandoned' : retryable ? 'retryable' : 'failed',
+        status: abandonedDelivery ? 'abandoned' : retryable ? 'retryable' : 'failed',
         lastError: deliveryError,
       }),
     )
@@ -394,6 +399,24 @@ function isEmailGroupFanoutAmbiguityWithoutProviderIds(input: {
     null
 
   return code === 'ASSISTANT_EMAIL_GROUP_FANOUT_INCOMPLETE'
+}
+
+function isEmailGroupRecipientAuthoritySuperseded(input: {
+  error: unknown
+  sending: AssistantOutboxIntent
+}): boolean {
+  if (input.sending.channel !== 'email') {
+    return false
+  }
+
+  const errorRecord = readRecord(input.error)
+  const context = readRecord(errorRecord?.context)
+  const code =
+    readNonEmptyString(errorRecord?.code) ??
+    readNonEmptyString(context?.code) ??
+    null
+
+  return code === 'ASSISTANT_EMAIL_GROUP_RECIPIENT_AUTHORITY_SUPERSEDED'
 }
 
 function isTelegramAmbiguousDeliveryWithoutProviderIds(input: {

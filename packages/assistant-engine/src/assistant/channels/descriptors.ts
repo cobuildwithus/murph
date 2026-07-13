@@ -934,6 +934,13 @@ const EMAIL_CHANNEL_ADAPTER = createAssistantChannelAdapter({
         ? delivered.delivery
         : null
     if (deliverySummary && deliverySummary.status !== 'sent') {
+      if (
+        deliverySummary.sentCount === 0 &&
+        deliverySummary.failedCount === 0 &&
+        deliverySummary.skippedCount > 0
+      ) {
+        throw createEmailGroupRecipientAuthoritySupersededError(deliverySummary)
+      }
       throw createEmailGroupFanoutIncompleteError(deliverySummary)
     }
     const deliveredTarget =
@@ -947,6 +954,26 @@ const EMAIL_CHANNEL_ADAPTER = createAssistantChannelAdapter({
     }
   },
 })
+
+function createEmailGroupRecipientAuthoritySupersededError(
+  delivery: AssistantEmailDeliverySummary,
+): VaultCliError & { deliveryMayHaveSucceeded: false; retryable: false } {
+  const error = new VaultCliError(
+    'ASSISTANT_EMAIL_GROUP_RECIPIENT_AUTHORITY_SUPERSEDED',
+    'Group email recipient authority changed before delivery began; the recipient-scoped delivery was superseded before the provider call.',
+    {
+      failedCount: delivery.failedCount,
+      sentCount: delivery.sentCount,
+      skippedCount: delivery.skippedCount,
+      status: delivery.status,
+    },
+  )
+
+  return Object.assign(error, {
+    deliveryMayHaveSucceeded: false as const,
+    retryable: false as const,
+  })
+}
 
 function createEmailGroupFanoutIncompleteError(
   delivery: AssistantEmailDeliverySummary,

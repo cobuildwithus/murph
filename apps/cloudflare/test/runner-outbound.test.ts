@@ -2392,6 +2392,56 @@ describe("handleRunnerOutboundRequest", () => {
     });
   });
 
+  it("preserves planned group recipient ids across the runner send response", async () => {
+    const runner = createWorkspaceVersionAwareUserRunner();
+    const emailSendMock = vi.fn(async (_message: unknown) => undefined);
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      recipients: [
+        { address: "one@example.test", memberId: "member_one" },
+        { address: "two@example.test", memberId: "member_two" },
+      ],
+    }), {
+      headers: { "content-type": "application/json; charset=utf-8" },
+      status: 200,
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await handleRunnerOutboundRequest(
+      new Request("http://results.worker/send", {
+        body: JSON.stringify({
+          message: "group reply",
+          planGroupFanout: true,
+          subject: "Group subject",
+          target: "group_123",
+          targetKind: "group",
+        }),
+        headers: createMailboxPayloadDecodeHeaders(),
+        method: "POST",
+      }),
+      createRunnerOutboundEnv({
+        HOSTED_EMAIL: {
+          send: emailSendMock,
+        },
+        HOSTED_EMAIL_DOMAIN: "mail.example.test",
+        HOSTED_EMAIL_FROM_ADDRESS: "assistant@mail.example.test",
+        HOSTED_EMAIL_SIGNING_SECRET: "fixture-signing-key",
+        USER_RUNNER: {
+          getByName: runner.getByName,
+        },
+      }),
+      "member_123",
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      delivery: null,
+      fanoutRecipientMemberIds: ["member_one", "member_two"],
+      ok: true,
+    });
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(emailSendMock).not.toHaveBeenCalled();
+  });
+
   it("authorizes thread reply email sends that carry legacy identityId and timeoutMs fields", async () => {
     // Incident regression: hosted email replies (targetKind "thread") from
     // older runner bundles carried the privacy-blinded binding identity as

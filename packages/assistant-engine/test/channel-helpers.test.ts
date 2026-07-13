@@ -836,6 +836,41 @@ describe('channel helper seams', () => {
     })
   })
 
+  it('classifies a skipped group recipient as a pre-provider authority supersession', async () => {
+    await expect(
+      ASSISTANT_CHANNEL_ADAPTERS.email.send(
+        {
+          actorId: null,
+          bindingDelivery: createAssistantBindingDelivery('thread', 'hosted-group-child'),
+          explicitTarget: null,
+          identityId: 'identity-email',
+          message: 'group reply',
+        },
+        {
+          sendEmail: vi.fn().mockResolvedValue({
+            delivery: {
+              failedCount: 0,
+              sentCount: 0,
+              skippedCount: 1,
+              status: 'failed',
+            },
+            target: 'hosted-group-child',
+          }),
+        },
+      ),
+    ).rejects.toMatchObject({
+      code: 'ASSISTANT_EMAIL_GROUP_RECIPIENT_AUTHORITY_SUPERSEDED',
+      context: {
+        failedCount: 0,
+        sentCount: 0,
+        skippedCount: 1,
+        status: 'failed',
+      },
+      deliveryMayHaveSucceeded: false,
+      retryable: false,
+    })
+  })
+
   it('routes Telegram image media through the dedicated image sender', async () => {
     const sendTelegram = vi.fn()
     const sendTelegramImage = vi.fn().mockResolvedValue({
