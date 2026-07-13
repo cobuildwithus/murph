@@ -12,7 +12,13 @@ export const HOSTED_ONBOARDING_TRANSACTION_OPTIONS = { maxWait: 5_000 } as const
 export async function lockHostedMemberRow(
   tx: Pick<Prisma.TransactionClient, "$queryRaw">,
   memberId: string,
+  options: {
+    timeoutMs?: number;
+  } = {},
 ): Promise<void> {
+  if (options.timeoutMs !== undefined) {
+    await tx.$queryRaw`select set_config('lock_timeout', ${`${options.timeoutMs}ms`}, true)`;
+  }
   await tx.$queryRaw`select 1 from "hosted_member" where "id" = ${memberId} for update`;
 }
 

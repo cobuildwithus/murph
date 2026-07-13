@@ -87,6 +87,13 @@ const HOSTED_MEMBER_STRIPE_MUTATION_TRANSACTION_OPTIONS = {
   timeout: 780_000,
 } as const;
 
+export class HostedMemberStripeMutationLockBusyError extends Error {
+  constructor() {
+    super("Hosted member Stripe mutation lock is busy.");
+    this.name = "HostedMemberStripeMutationLockBusyError";
+  }
+}
+
 export async function withHostedMemberStripeMutationLock<TResult>(input: {
   memberId: string;
   prisma: PrismaClient;
@@ -96,6 +103,37 @@ export async function withHostedMemberStripeMutationLock<TResult>(input: {
     await lockHostedMemberRow(tx, input.memberId);
     return input.run(tx);
   }, HOSTED_MEMBER_STRIPE_MUTATION_TRANSACTION_OPTIONS);
+}
+
+export async function withHostedMemberStripeMutationLockForOps<TResult>(input: {
+  acquisitionTimeoutMs: number;
+  memberId: string;
+  prisma: PrismaClient;
+  run: (tx: Prisma.TransactionClient) => Promise<TResult>;
+  transactionTimeoutMs: number;
+}): Promise<TResult> {
+  try {
+    return await input.prisma.$transaction(async (tx) => {
+      await lockHostedMemberRow(tx, input.memberId, {
+        timeoutMs: input.acquisitionTimeoutMs,
+      });
+      return input.run(tx);
+    }, {
+      ...HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
+      timeout: input.transactionTimeoutMs,
+    });
+  } catch (error) {
+    if (isHostedMemberStripeMutationLockTimeout(error)) {
+      throw new HostedMemberStripeMutationLockBusyError();
+    }
+    throw error;
+  }
+}
+
+function isHostedMemberStripeMutationLockTimeout(error: unknown): boolean {
+  return error instanceof Prisma.PrismaClientKnownRequestError &&
+    error.code === "P2010" &&
+    error.meta?.code === "55P03";
 }
 
 export async function lookupHostedMemberStripeBillingRefByStripeCustomerId(input: {
