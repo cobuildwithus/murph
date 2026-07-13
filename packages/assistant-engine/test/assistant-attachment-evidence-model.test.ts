@@ -499,6 +499,85 @@ describe('assistant input attachment evidence model materialization', () => {
     expect(bundle.combinedText).toContain('Table cell')
   })
 
+  it('loads parser results sequentially within one per-turn derived evidence budget', async () => {
+    const vaultRoot = await createTempVaultRoot()
+    const text = 'x'.repeat(8 * 1024 * 1024)
+    const markdown = 'm'.repeat(4 * 1024 * 1024)
+    const attachments: AssistantInputAttachmentEvidenceItem[] = []
+    for (let ordinal = 1; ordinal <= 3; ordinal += 1) {
+      const captureId = `capture-${ordinal}`
+      const attachmentId = `att-${ordinal}`
+      const attemptRoot =
+        `derived/inbox/${captureId}/attachments/${attachmentId}/attempts/0001`
+      const resultPath = `${attemptRoot}/result.json`
+      await writeVaultFile(
+        vaultRoot,
+        resultPath,
+        Buffer.from(JSON.stringify(createParserResult({
+          attachmentId,
+          captureId,
+          markdown,
+          text,
+        }))),
+      )
+      attachments.push({
+        ...createAttachmentEvidence({
+          kind: 'audio',
+          mime: 'audio/mpeg',
+          ordinal,
+          rawPath: `raw/inbox/${captureId}/attachments/voice-note.mp3`,
+        }),
+        parseState: 'succeeded',
+        derived: {
+          allowedRoot: attemptRoot,
+          kind: 'parser-result',
+          resultPath,
+        },
+      })
+    }
+
+    let activeMaterializations = 0
+    let maxActiveMaterializations = 0
+    const materializeWorkspaceArtifacts = vi.fn(async (
+      _paths: readonly string[],
+      _options?: { maxFileBytes?: number },
+    ) => {
+      activeMaterializations += 1
+      maxActiveMaterializations = Math.max(maxActiveMaterializations, activeMaterializations)
+      await new Promise((resolve) => setTimeout(resolve, 5))
+      activeMaterializations -= 1
+      return {
+        materializedArtifactPaths: new Set<string>(),
+        missingArtifactPaths: new Set<string>(),
+      }
+    })
+
+    const bundles = await buildAssistantInputAttachmentPromptBundles({
+      attachments,
+      materializeWorkspaceArtifacts,
+      vaultRoot,
+    })
+
+    expect(bundles).toHaveLength(3)
+    expect(maxActiveMaterializations).toBe(1)
+    expect(bundles.map((bundle) =>
+      bundle.fragments.map((fragment) => fragment.kind)
+    )).toEqual([
+      ['attachment_metadata', 'attachment_json_summary'],
+      ['attachment_metadata', 'attachment_json_summary'],
+      ['attachment_metadata'],
+    ])
+    const materializationLimits = materializeWorkspaceArtifacts.mock.calls.map(
+      (call) => call[1]?.maxFileBytes,
+    ).filter((limit): limit is number => typeof limit === 'number')
+    expect(materializationLimits.slice(0, 2)).toEqual([
+      16 * 1024 * 1024,
+      16 * 1024 * 1024,
+    ])
+    expect(materializationLimits[2]).toBeGreaterThan(0)
+    expect(materializationLimits[2]).toBeLessThan(16 * 1024 * 1024)
+  })
+
   it('resolves a compacted sibling result for a persisted legacy manifest reference', async () => {
     const vaultRoot = await createTempVaultRoot()
     const attemptRoot =
@@ -593,13 +672,13 @@ describe('assistant input attachment evidence model materialization', () => {
     expect(bundle.combinedText).toContain('Markdown parser text.')
     expect(materializeWorkspaceArtifacts).toHaveBeenCalledWith([
       'derived/inbox/capture-1/attachments/att-1/manifest.json',
-    ])
+    ], { maxFileBytes: 1024 * 1024 })
     expect(materializeWorkspaceArtifacts).toHaveBeenCalledWith([
       'derived/inbox/capture-1/attachments/att-1/plain.txt',
-    ])
+    ], { maxFileBytes: 16 * 1024 * 1024 })
     expect(materializeWorkspaceArtifacts).toHaveBeenCalledWith([
       'derived/inbox/capture-1/attachments/att-1/plain.md',
-    ])
+    ], { maxFileBytes: 16 * 1024 * 1024 })
   })
 
   it('ignores derived parser manifest output paths outside the declared allowed root', async () => {
@@ -663,20 +742,27 @@ async function writeVaultFile(vaultRoot: string, relativePath: string, bytes: Bu
   await writeFile(absolutePath, bytes)
 }
 
-function createParserResult() {
+function createParserResult(input: {
+  attachmentId?: string
+  captureId?: string
+  markdown?: string
+  text?: string
+} = {}) {
+  const attachmentId = input.attachmentId ?? 'att-1'
+  const captureId = input.captureId ?? 'capture-1'
   return {
     schema: 'murph.parser-output.v1',
     providerId: 'test-provider',
     artifact: {
-      attachmentId: 'att-1',
-      captureId: 'capture-1',
+      attachmentId,
+      captureId,
       fileName: 'voice-note.mp3',
       kind: 'audio',
       mime: 'audio/mpeg',
-      storedPath: 'raw/inbox/capture-1/attachments/voice-note.mp3',
+      storedPath: `raw/inbox/${captureId}/attachments/voice-note.mp3`,
     },
-    text: 'Plain parser text.',
-    markdown: 'Markdown parser text.',
+    text: input.text ?? 'Plain parser text.',
+    markdown: input.markdown ?? 'Markdown parser text.',
     blocks: [],
     tables: [{
       id: 'table-1',

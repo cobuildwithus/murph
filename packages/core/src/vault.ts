@@ -862,7 +862,13 @@ async function validateInboxCaptureRecordReferences(
       ));
     } else {
       const actual = await safeStatAndHashVaultFile(vaultRoot, capture.textContent.storedPath);
-      if (actual.kind === "invalid") {
+      if (actual.kind === "missing") {
+        issues.push(validationIssue(
+          "RAW_REFERENCE_MISSING",
+          `Inbox capture text content "${capture.textContent.storedPath}" is missing.`,
+          capture.textContent.storedPath,
+        ));
+      } else if (actual.kind === "invalid") {
         issues.push(validationIssue(
           actual.code,
           actual.message,
@@ -889,13 +895,24 @@ async function validateInboxCaptureRecordReferences(
       continue;
     }
 
-    const referenceIssues = await validateExistingVaultFile(
-      vaultRoot,
-      attachment.storedPath,
-      "RAW_REFERENCE_MISSING",
-      `Inbox capture attachment "${attachment.storedPath}" is missing.`,
-    );
-    if (referenceIssues.length === 0) {
+    const actual = await safeStatAndHashVaultFile(vaultRoot, attachment.storedPath);
+    if (actual.kind === "ok") {
+      if (
+        (typeof attachment.byteSize === "number"
+          && actual.integrity.byteSize !== attachment.byteSize)
+        || (typeof attachment.sha256 === "string"
+          && actual.integrity.sha256 !== attachment.sha256)
+      ) {
+        issues.push(validationIssue(
+          "RAW_REFERENCE_INVALID",
+          `Inbox capture attachment bytes do not match "${attachment.storedPath}".`,
+          attachment.storedPath,
+        ));
+      }
+      continue;
+    }
+    if (actual.kind === "invalid") {
+      issues.push(validationIssue(actual.code, actual.message, attachment.storedPath));
       continue;
     }
     const retentionKey = buildInboxAttachmentRetentionIndexKey({
@@ -907,7 +924,11 @@ async function validateInboxCaptureRecordReferences(
       continue;
     }
 
-    issues.push(...referenceIssues);
+    issues.push(validationIssue(
+      "RAW_REFERENCE_MISSING",
+      `Inbox capture attachment "${attachment.storedPath}" is missing.`,
+      attachment.storedPath,
+    ));
   }
 
   return issues;
@@ -944,6 +965,12 @@ function isEquivalentMigratedInboxCaptureRecord(
   current: InboxCaptureRecord,
 ): boolean {
   if (current.schemaVersion !== "murph.inbox-capture.v2") {
+    return false;
+  }
+  if (
+    legacy.text?.length === INBOX_CAPTURE_TEXT_MAX_LENGTH
+    && current.textContent === undefined
+  ) {
     return false;
   }
   const {

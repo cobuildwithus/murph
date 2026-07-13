@@ -280,11 +280,41 @@ test("inbox envelope migration preserves text beyond the legacy projection cap",
     issue.code === "RAW_REFERENCE_INVALID"
     && issue.path === textContent.storedPath
   ));
+
+  await fs.rm(path.join(vaultRoot, textContent.storedPath));
+  const missing = await validateVault({ vaultRoot });
+  assert.equal(missing.valid, false);
+  assert.ok(missing.issues.some((issue) =>
+    issue.code === "RAW_REFERENCE_MISSING"
+    && issue.path === textContent.storedPath
+  ));
+});
+
+test("inbox envelope migration preserves proof at the legacy text projection boundary", async () => {
+  const vaultRoot = await makeTempDirectory("murph-inbox-envelope-migration-boundary-text");
+  await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
+  const fullText = "a".repeat(INBOX_CAPTURE_TEXT_MAX_LENGTH);
+  await createLegacyFixture({
+    externalId: "msg-envelope-migration-boundary-text",
+    text: fullText,
+    vaultRoot,
+  });
+
+  const applied = await runInboxEnvelopeMigration({ apply: true, vaultRoot });
+  assert.equal(applied.mutated, true);
+  const records = await readJsonlRecords({ vaultRoot, relativePath: LEDGER_PATH });
+  const textContent = records[1]?.textContent as { storedPath?: unknown } | undefined;
+  assert.equal(typeof textContent?.storedPath, "string");
+  if (typeof textContent?.storedPath !== "string") {
+    throw new TypeError("Expected boundary migration text content path.");
+  }
+  assert.equal(await fs.readFile(path.join(vaultRoot, textContent.storedPath), "utf8"), fullText);
+  assert.equal((await validateVault({ vaultRoot })).valid, true);
 });
 
 test("inbox envelope migration rejects non-equivalent long-text replacements", async () => {
   const fullText = "a".repeat(INBOX_CAPTURE_TEXT_MAX_LENGTH + 512);
-  for (const mismatch of ["legacy-text-prefix", "identity-key"] as const) {
+  for (const mismatch of ["legacy-text-prefix", "identity-key", "missing-text-content"] as const) {
     const vaultRoot = await makeTempDirectory(`murph-inbox-envelope-migration-${mismatch}`);
     await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
     const fixture = await createLegacyFixture({
@@ -298,9 +328,15 @@ test("inbox envelope migration rejects non-equivalent long-text replacements", a
     const records = await readJsonlRecords({ vaultRoot, relativePath: LEDGER_PATH });
     const current = records[1];
     assert.ok(current);
-    records[1] = mismatch === "legacy-text-prefix"
-      ? { ...current, text: `b${fullText.slice(1, INBOX_CAPTURE_TEXT_MAX_LENGTH)}` }
-      : { ...current, identityKey: `${String(current.identityKey)}-mismatch` };
+    if (mismatch === "legacy-text-prefix") {
+      records[1] = { ...current, text: `b${fullText.slice(1, INBOX_CAPTURE_TEXT_MAX_LENGTH)}` };
+    } else if (mismatch === "identity-key") {
+      records[1] = { ...current, identityKey: `${String(current.identityKey)}-mismatch` };
+    } else {
+      const { textContent: _textContent, ...withoutTextContent } = current;
+      void _textContent;
+      records[1] = withoutTextContent;
+    }
     await fs.writeFile(
       path.join(vaultRoot, LEDGER_PATH),
       `${records.map((record) => JSON.stringify(record)).join("\n")}\n`,
@@ -383,6 +419,27 @@ test("current v2 attachment directories validate while unowned attachment direct
   });
   assert.equal((await validateVault({ vaultRoot })).valid, true);
 
+  const [currentRecord] = await readJsonlRecords({ vaultRoot, relativePath: LEDGER_PATH });
+  const currentAttachments = currentRecord?.attachments;
+  const currentAttachment = Array.isArray(currentAttachments) ? currentAttachments[0] : null;
+  const currentStoredPath = currentAttachment
+    && typeof currentAttachment === "object"
+    && "storedPath" in currentAttachment
+    ? currentAttachment.storedPath
+    : null;
+  assert.equal(typeof currentStoredPath, "string");
+  if (typeof currentStoredPath !== "string") {
+    throw new TypeError("Expected current attachment stored path.");
+  }
+  await fs.writeFile(path.join(vaultRoot, currentStoredPath), "corrupt", "utf8");
+  const corrupted = await validateVault({ vaultRoot });
+  assert.equal(corrupted.valid, false);
+  assert.ok(corrupted.issues.some((issue) =>
+    issue.code === "RAW_REFERENCE_INVALID" && issue.path === currentStoredPath
+  ));
+  await fs.writeFile(path.join(vaultRoot, currentStoredPath), "current attachment evidence", "utf8");
+  assert.equal((await validateVault({ vaultRoot })).valid, true);
+
   const orphanPath =
     "raw/inbox/email/self/2026/03/cap_orphan/attachments/01__orphan.txt";
   await fs.mkdir(path.dirname(path.join(vaultRoot, orphanPath)), { recursive: true });
@@ -453,6 +510,74 @@ test("inbox envelope migration blocks a mismatched envelope without mutating it"
   assert.equal(result.mutated, false);
   await fs.access(path.join(vaultRoot, fixture.envelopePath));
   assert.equal((await readJsonlRecords({ vaultRoot, relativePath: LEDGER_PATH })).length, 1);
+});
+
+test("inbox envelope migration blocks attachment corruption before dry-run and apply", async () => {
+  const vaultRoot = await makeTempDirectory("murph-inbox-envelope-attachment-mismatch");
+  await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
+  const fixture = await createLegacyFixture({
+    externalId: "msg-envelope-attachment-mismatch",
+    vaultRoot,
+  });
+  await fs.writeFile(path.join(vaultRoot, fixture.storedPath), "corrupt", "utf8");
+
+  for (const apply of [false, true]) {
+    const result = await runInboxEnvelopeMigration({ apply, vaultRoot });
+    assert.equal(result.blockerCount, 1);
+    assert.equal(result.candidateCount, 0);
+    assert.equal(result.mismatchCount, 1);
+    assert.equal(result.deletedCount, 0);
+    assert.equal(result.mutated, false);
+  }
+  await fs.access(path.join(vaultRoot, fixture.envelopePath));
+  assert.equal((await readJsonlRecords({ vaultRoot, relativePath: LEDGER_PATH })).length, 1);
+});
+
+test("inbox envelope migration blocks an existing current capture owner", async () => {
+  const vaultRoot = await makeTempDirectory("murph-inbox-envelope-duplicate-owner");
+  await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
+  const fixture = await createLegacyFixture({
+    externalId: "msg-envelope-duplicate-owner",
+    vaultRoot,
+  });
+  const [legacy] = await readJsonlRecords({ vaultRoot, relativePath: LEDGER_PATH });
+  assert.ok(legacy);
+  const {
+    envelopePath: _envelopePath,
+    rawRefs,
+    schemaVersion: _schemaVersion,
+    ...sharedFields
+  } = legacy;
+  void _envelopePath;
+  void _schemaVersion;
+  await applyCanonicalWriteBatch({
+    vaultRoot,
+    operationType: "test_current_inbox_owner",
+    summary: "Create a current inbox capture owner fixture.",
+    audit: {
+      action: "jsonl_append",
+      commandName: "test.createCurrentInboxOwner",
+      summary: "Created a current inbox capture owner fixture.",
+    },
+    jsonlAppends: [{
+      relativePath: LEDGER_PATH,
+      record: {
+        ...sharedFields,
+        schemaVersion: "murph.inbox-capture.v2",
+        rawRefs: Array.isArray(rawRefs)
+          ? rawRefs.filter((entry) => entry !== fixture.envelopePath)
+          : [],
+      },
+    }],
+  });
+
+  const result = await runInboxEnvelopeMigration({ apply: true, vaultRoot });
+  assert.equal(result.blockerCount, 1);
+  assert.equal(result.candidateCount, 0);
+  assert.equal(result.mismatchCount, 1);
+  assert.equal(result.deletedCount, 0);
+  await fs.access(path.join(vaultRoot, fixture.envelopePath));
+  assert.equal((await readJsonlRecords({ vaultRoot, relativePath: LEDGER_PATH })).length, 2);
 });
 
 test("inbox envelope migration blocks a nonterminal envelope-delete operation", async () => {

@@ -14,10 +14,12 @@ import type {
 import type { AssistantRunEvent } from './shared.js'
 import {
   buildAssistantInputAttachmentPromptBundles,
+  createAssistantDerivedEvidenceReadBudget,
   hasAssistantInputAttachmentEvidenceCandidate,
   prepareAssistantInputMultimodalUserMessageContent,
   type AssistantInputAttachmentPromptBundle,
   type AssistantInputAttachmentPromptBundleSource,
+  type AssistantDerivedEvidenceReadBudget,
 } from '../attachment-evidence-model.js'
 import { normalizeAssistantRawAttachmentArtifactPath } from '../attachment-artifact-paths.js'
 import { normalizeNullableString } from '../shared.js'
@@ -147,17 +149,20 @@ export async function prepareAssistantAutoReplyInput(
     onEvent?: (event: AssistantRunEvent) => void
   } = {},
 ): Promise<AssistantAutoReplyPreparedInput> {
-  const preparedInputs = await Promise.all(
-    inputs.map(async (entry) => ({
+  const derivedEvidenceReadBudget = createAssistantDerivedEvidenceReadBudget()
+  const preparedInputs: AssistantAutoReplyPromptInputWithBundles[] = []
+  for (const entry of inputs) {
+    preparedInputs.push({
       ...entry,
       attachmentBundles: await buildPromptAttachmentBundlesBestEffort({
+        derivedEvidenceReadBudget,
         entry,
         materializeWorkspaceArtifacts: options.materializeWorkspaceArtifacts,
         onEvent: options.onEvent,
         vaultRoot,
       }),
-    })),
-  )
+    })
+  }
   const textualSections = preparedInputs
     .map((entry, index) => {
       const attachmentSections = buildAssistantAutoReplyAttachmentSections({
@@ -635,6 +640,7 @@ function buildPreparedAttachmentSources(
 }
 
 async function buildPromptAttachmentBundlesBestEffort(input: {
+  derivedEvidenceReadBudget: AssistantDerivedEvidenceReadBudget
   entry: AssistantAutoReplyPromptInput
   materializeWorkspaceArtifacts?: AssistantWorkspaceArtifactMaterializer | null
   onEvent?: (event: AssistantRunEvent) => void
@@ -653,6 +659,7 @@ async function buildPromptAttachmentBundlesBestEffort(input: {
   try {
     return await buildAssistantInputAttachmentPromptBundles({
       attachments: input.entry.attachmentEvidence.attachments,
+      derivedEvidenceReadBudget: input.derivedEvidenceReadBudget,
       materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts,
       onEvidenceReadFailure(failure) {
         input.onEvent?.({

@@ -252,7 +252,11 @@ test("runInboxMediaRetention expires old raw inbox media and preserves descripto
   // carrying the canonical hash and unlinked the divergent bytes, erasing
   // that signal entirely.
   assert.equal(await fileExists(vaultRoot, tamperedPath), true);
-  assert.equal((await validateVault({ vaultRoot })).valid, true);
+  const validation = await validateVault({ vaultRoot });
+  assert.equal(validation.valid, false);
+  assert.ok(validation.issues.some((issue) =>
+    issue.code === "RAW_REFERENCE_INVALID" && issue.path === tamperedPath
+  ));
 
   const runtime = await openInboxRuntime({ vaultRoot });
   try {

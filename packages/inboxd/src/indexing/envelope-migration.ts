@@ -23,6 +23,7 @@ import {
   prepareInboxCaptureRecord,
 } from "./persist/canonical-records.js";
 import { readLegacyInboxCaptureSnapshot } from "./persist.js";
+import { listInboxAttachmentRetentionRecords } from "./retention.js";
 
 const DEFAULT_MAX_FILES = 250;
 
@@ -129,7 +130,8 @@ export async function runInboxEnvelopeMigration(input: {
 }
 
 async function detectInboxEnvelopeMigration(vaultRoot: string): Promise<MigrationDetection> {
-  const recordsByEnvelopePath = await readLegacyRecordsByEnvelopePath(vaultRoot);
+  const ownership = await readInboxCaptureOwnership(vaultRoot);
+  const retainedAttachments = await listInboxAttachmentRetentionRecords(vaultRoot);
   const activeEnvelopePaths = await readActiveEnvelopePaths(vaultRoot);
   const envelopePaths = (await walkVaultFiles(vaultRoot, VAULT_LAYOUT.rawInboxDirectory))
     .filter((relativePath) => relativePath.endsWith("/envelope.json"))
@@ -145,7 +147,7 @@ async function detectInboxEnvelopeMigration(vaultRoot: string): Promise<Migratio
       continue;
     }
 
-    const records = recordsByEnvelopePath.get(relativePath) ?? [];
+    const records = ownership.legacyRecordsByEnvelopePath.get(relativePath) ?? [];
     if (records.length !== 1) {
       missingLedgerCount += 1;
       continue;
@@ -185,8 +187,20 @@ async function detectInboxEnvelopeMigration(vaultRoot: string): Promise<Migratio
     const preparedRecord = prepareInboxCaptureRecord({
       eventId: snapshot.eventId,
       inbound: snapshot.input,
+      preserveFullTextAtProjectionBoundary: true,
       stored: snapshot.stored,
     });
+    if (
+      ownership.currentCaptureIds.has(preparedRecord.record.captureId)
+      || !(await hasValidMigrationEvidence({
+        record: preparedRecord.record,
+        retainedAttachments,
+        vaultRoot,
+      }))
+    ) {
+      mismatchCount += 1;
+      continue;
+    }
     candidates.push({
       byteLength: integrity.integrity.byteSize,
       ledgerPath: buildInboxCaptureLedgerPathForOccurredAt(records[0].occurredAt),
@@ -211,8 +225,15 @@ async function prepareSelectedMigrationRawContents(
   vaultRoot: string,
   selected: readonly MigrationCandidate[],
 ): Promise<CanonicalRawContentInput[]> {
+  const ownership = await readInboxCaptureOwnership(vaultRoot);
+  const retainedAttachments = await listInboxAttachmentRetentionRecords(vaultRoot);
   const rawContents: CanonicalRawContentInput[] = [];
   for (const candidate of selected) {
+    if (ownership.currentCaptureIds.has(candidate.migratedRecord.captureId)) {
+      throw new TypeError(
+        `Inbox capture "${candidate.migratedRecord.captureId}" gained a current owner before apply.`,
+      );
+    }
     const snapshot = await readLegacyInboxCaptureSnapshot({
       relativePath: candidate.relativePath,
       vaultRoot,
@@ -223,20 +244,34 @@ async function prepareSelectedMigrationRawContents(
     const prepared = prepareInboxCaptureRecord({
       eventId: snapshot.eventId,
       inbound: snapshot.input,
+      preserveFullTextAtProjectionBoundary: true,
       stored: snapshot.stored,
     });
     if (!isDeepStrictEqual(prepared.record, candidate.migratedRecord)) {
       throw new TypeError(`Legacy inbox envelope "${candidate.relativePath}" changed before apply.`);
+    }
+    if (!(await hasValidMigrationEvidence({
+      record: prepared.record,
+      retainedAttachments,
+      vaultRoot,
+    }))) {
+      throw new TypeError(
+        `Legacy inbox envelope "${candidate.relativePath}" lost referenced evidence before apply.`,
+      );
     }
     rawContents.push(...prepared.rawContents);
   }
   return rawContents;
 }
 
-async function readLegacyRecordsByEnvelopePath(
+async function readInboxCaptureOwnership(
   vaultRoot: string,
-): Promise<Map<string, InboxCaptureRecord[]>> {
-  const recordsByPath = new Map<string, InboxCaptureRecord[]>();
+): Promise<{
+  currentCaptureIds: Set<string>;
+  legacyRecordsByEnvelopePath: Map<string, InboxCaptureRecord[]>;
+}> {
+  const currentCaptureIds = new Set<string>();
+  const legacyRecordsByEnvelopePath = new Map<string, InboxCaptureRecord[]>();
   const ledgerPaths = await walkVaultFiles(vaultRoot, INBOX_CAPTURE_LEDGER_DIRECTORY, {
     extension: ".jsonl",
   });
@@ -249,15 +284,50 @@ async function readLegacyRecordsByEnvelopePath(
         value,
         `inbox capture record at ${ledgerPath}#${index + 1}`,
       );
-      if (record.schemaVersion !== "murph.inbox-capture.v1") {
+      if (record.schemaVersion === "murph.inbox-capture.v2") {
+        currentCaptureIds.add(record.captureId);
         continue;
       }
-      const existing = recordsByPath.get(record.envelopePath) ?? [];
+      const existing = legacyRecordsByEnvelopePath.get(record.envelopePath) ?? [];
       existing.push(record);
-      recordsByPath.set(record.envelopePath, existing);
+      legacyRecordsByEnvelopePath.set(record.envelopePath, existing);
     }
   }
-  return recordsByPath;
+  return { currentCaptureIds, legacyRecordsByEnvelopePath };
+}
+
+async function hasValidMigrationEvidence(input: {
+  record: InboxCaptureRecord;
+  retainedAttachments: Awaited<ReturnType<typeof listInboxAttachmentRetentionRecords>>;
+  vaultRoot: string;
+}): Promise<boolean> {
+  for (const attachment of input.record.attachments) {
+    if (!attachment.storedPath) {
+      continue;
+    }
+    const actual = await safeStatAndHashVaultFile(input.vaultRoot, attachment.storedPath);
+    if (actual.kind === "missing") {
+      if (input.retainedAttachments.some((retained) =>
+        retained.reason === "inbox_media_retention"
+        && retained.captureId === input.record.captureId
+        && retained.attachmentId === attachment.attachmentId
+        && retained.storedPath === attachment.storedPath
+      )) {
+        continue;
+      }
+      return false;
+    }
+    if (
+      actual.kind !== "ok"
+      || typeof attachment.byteSize !== "number"
+      || typeof attachment.sha256 !== "string"
+      || actual.integrity.byteSize !== attachment.byteSize
+      || actual.integrity.sha256 !== attachment.sha256
+    ) {
+      return false;
+    }
+  }
+  return true;
 }
 
 async function readActiveEnvelopePaths(vaultRoot: string): Promise<Set<string>> {

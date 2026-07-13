@@ -101,18 +101,20 @@ export async function writeParserResult(input: {
 }
 
 export async function readParserResult(input: {
+  maxBytes?: number;
   vaultRoot: string;
   resultPath: string;
 }): Promise<ParserOutput> {
+  const maxBytes = normalizeParserResultReadMaxBytes(input.maxBytes);
   const identity = parseParserResultPath(input.resultPath);
   const absoluteResultPath = await resolveVaultRelativePath(input.vaultRoot, identity.resultPath);
   const stats = await fs.lstat(absoluteResultPath);
   if (!stats.isFile() || stats.isSymbolicLink()) {
     throw new TypeError("Parser result must be a regular file.");
   }
-  if (stats.size > PARSER_RESULT_MAX_BYTES) {
+  if (stats.size > maxBytes) {
     throw new RangeError(
-      `Parser result exceeds the ${PARSER_RESULT_MAX_BYTES}-byte limit.`,
+      `Parser result exceeds the ${maxBytes}-byte limit.`,
     );
   }
 
@@ -270,6 +272,16 @@ function normalizeAttempt(value: number): number {
     throw new TypeError("Parser attempt must be a positive integer.");
   }
   return value;
+}
+
+function normalizeParserResultReadMaxBytes(value: number | undefined): number {
+  if (value === undefined) {
+    return PARSER_RESULT_MAX_BYTES;
+  }
+  if (!Number.isSafeInteger(value) || value < 1) {
+    throw new TypeError("Parser result read limit must be a positive integer.");
+  }
+  return Math.min(value, PARSER_RESULT_MAX_BYTES);
 }
 
 function normalizePublishedParserPath(relativePath: string): string {

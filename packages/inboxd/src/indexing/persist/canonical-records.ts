@@ -30,12 +30,14 @@ export function prepareInboxCaptureRecord(input: {
   auditId?: string;
   eventId: string;
   inbound: InboundCapture;
+  preserveFullTextAtProjectionBoundary?: boolean;
   stored: StoredCapture;
 }): {
   rawContents: CanonicalRawContentInput[];
   record: CanonicalInboxCaptureRecord;
 } {
   const preparedText = prepareInboxCaptureText({
+    preserveFullTextAtProjectionBoundary: input.preserveFullTextAtProjectionBoundary,
     sourceDirectory: input.stored.sourceDirectory,
     text: input.inbound.text,
   });
@@ -127,6 +129,7 @@ function toLegacyInboxCaptureRecordText(text: string | null | undefined): string
 }
 
 function prepareInboxCaptureText(input: {
+  preserveFullTextAtProjectionBoundary?: boolean;
   sourceDirectory: string;
   text: string | null | undefined;
 }): {
@@ -148,7 +151,13 @@ function prepareInboxCaptureText(input: {
   }
 
   const text = input.text.slice(0, INBOX_CAPTURE_TEXT_MAX_LENGTH);
-  if (input.text.length <= INBOX_CAPTURE_TEXT_MAX_LENGTH) {
+  if (
+    input.text.length < INBOX_CAPTURE_TEXT_MAX_LENGTH
+    || (
+      input.text.length === INBOX_CAPTURE_TEXT_MAX_LENGTH
+      && input.preserveFullTextAtProjectionBoundary !== true
+    )
+  ) {
     return { rawContent: null, text, textContent: null };
   }
 
