@@ -199,7 +199,7 @@ defaults. First send one short setup message that gets the essentials: what the
 group wants to call it, when it should go out (Sunday morning is the suggested
 default), whether it should arrive by email or right here in the group chat,
 and any tone preference if they care. For an email health newsletter, also
-propose the default reaction-share scope: name, email, sleep timing, activity
+propose the default reaction-share scope: name, email, sleep duration, activity
 minutes, workout summaries, resting heart rate, and HRV. Let the group widen
 or narrow that set. If they already gave some of that, or say "just set it up,"
 do not re-interrogate them. Use the current group's non-blank `displayName` from
@@ -253,7 +253,7 @@ improvise a second run sequence from this setup section.
 
 If a member never granted email sharing and expresses interest, or the group
 asks how someone can join the newsletter, post a join offer scoped to
-`group-email.v0`, `sleep-times.v0`, `activity-days.v0`, `workout-days.v0`,
+`group-email.v0`, `sleep-duration-days.v0`, `activity-days.v0`, `workout-days.v0`,
 `resting-heart-rate-days.v0`, and `hrv-days.v0` unless the group chose a
 different set. Every join offer must lead with "react to this message to join,"
 plainly say what reacting shares, include `{{share_scope}}` exactly once, and
